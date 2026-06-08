@@ -29,7 +29,6 @@
    bundle) AND agent-defined fns (written by `cljs.js/eval-str` at the
    same munged paths). Single path, no boot-time wire-up needed."
   (:require
-    [clojure.string :as str]
     [datahike.api :as d]
     [seon.db :as db]
     [seon.eval :as eval]
@@ -323,21 +322,6 @@
   [rows]
   (sort-by :last-tx rows))
 
-(defn- render-one
-  "Resolve the row's render-ai symbol (entity override or schema-level
-   default — pre-computed in `renderable-entities`) and call it with
-   the system-input shape. Falls back to pretty-ai when the symbol
-   misses. Returns the rendered string."
-  [{:seon.db/keys [db] :seon.agent/keys [id]} row]
-  (let [entity (:entity row)
-        sym    (or (:render/ai row) (:seon.render/ai entity))
-        f      (or (eval/lookup-value sym) default/pretty-ai)
-        input  {:seon.db/db    db
-                :seon.agent/id id
-                :seon.render/entity entity}
-        out    (try (f input) (catch :default _ nil))]
-    (or (:seon.render/text out) (str out))))
-
 (defn- entity-html-sym
   "Resolve the HTML render symbol for `entity`: per-entity override wins,
    else datalog lookup against the entity's primary `:seon.schema`
@@ -391,20 +375,22 @@
         (:seon.render/text (ai-render sym input))
         (catch :default _ nil)))))
 
-(schema/register! :seon.render/assemble-ai-request
+(schema/register! :seon.render/visible-request
   [:map
-   [:seon.agent/id        :string]
-   [:seon.db/db           {:optional true} :any]
+   [:seon.agent/id          :string]
+   [:seon.db/db             {:optional true} :any]
    [:seon.agent/window-size {:optional true} :seon.agent/window-size]])
 
-(schema/register! :seon.render/assemble-ai-response
-  [:map
-   [:seon.render/text     :string]
-   [:seon.render/entities [:vector :any]]
-   [:seon.render/token-estimate :int]])
+(schema/register! :seon.render/visible-response
+  [:map [:seon.render/entities [:vector :any]]])
 
-(defn assemble-ai-context
-  "Tx-log-as-context assembly.
+(defn visible-entities
+  "The ordered set of program-graph / message / eval entities visible to
+   `agent-id`, in render order — the entities BEHIND the agent's context
+   (the inspector's right-pane html cards drill into these). This is the
+   tx-log entity-selection machinery; it does NOT produce the agent's
+   prompt text. Prompt text is `seon.agent/assemble-context` (the ONE
+   composer; the inspector left pane and the agent both call it).
 
    1. Query all entities carrying `:seon.render/ai` visible to the agent
       (substrate or own tx).
@@ -412,25 +398,22 @@
    3. Sort prefix by `:seon.sticky/order` then tx-time; window by tx-time
       (oldest first).
    4. Take last N of window where N = `:seon.agent/window-size` (default 64).
-   5. Render each via its symbol; concatenate with blank-line separator.
+   5. Subsumed kinds (:seon.fn/:seon.schema/:seon.ns) drop from the window
+      (shown inside their :seon.eval card instead).
 
-   Returns
-     `{:seon.render/text \"...\"
-       :seon.render/entities [<entity-map> ...]   ; render order
-       :seon.render/token-estimate <int>}`        ; char-count / 4 v0 heuristic"
-  {:malli/schema [:=> [:cat :seon.render/assemble-ai-request]
-                       :seon.render/assemble-ai-response]}
+   Returns `{:seon.render/entities [<entity-map> ...]}` in render order."
+  {:malli/schema [:=> [:cat :seon.render/visible-request]
+                       :seon.render/visible-response]}
   [{:seon.agent/keys [id window-size] :seon.db/keys [db]}]
   (let [db    (or db @db/*conn*)
         n     (or window-size default-window-size)
         rows  (renderable-entities db id)
         ;; Subsumption rule (Phase 1c): entities whose primary kind is
-        ;; :seon.fn / :seon.schema / :seon.ns are NOT rendered in the
+        ;; :seon.fn / :seon.schema / :seon.ns are NOT shown in the
         ;; chronological window — they're subsumed by the :seon.eval
         ;; that created them (the (defn …) / (schema/register! …) /
         ;; (ns …) source is already shown in the eval card). They DO
-        ;; render when sticky (substrate-shipped at the front) and on
-        ;; agent-side drill-in.
+        ;; appear when sticky (substrate-shipped at the front).
         subsumed-kinds #{:seon.fn :seon.schema :seon.ns}
         {sticks true window false} (group-by sticky? rows)
         window (remove #(contains? subsumed-kinds (:kind %)) window)
@@ -438,12 +421,5 @@
         window-sorted (->> (or window []) sort-window vec)
         window-tail   (vec (take-last n window-sorted))
         ordered       (concat sticky-sorted window-tail)
-        ents          (mapv :entity ordered)
-        parts         (->> ordered
-                           (map #(render-one {:seon.db/db db :seon.agent/id id} %))
-                           (remove str/blank?))
-        text          (str/join "\n\n" parts)
-        token-est     (quot (count text) 4)]
-    {:seon.render/text  text
-     :seon.render/entities ents
-     :seon.render/token-estimate token-est}))
+        ents          (mapv :entity ordered)]
+    {:seon.render/entities ents}))

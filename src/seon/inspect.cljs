@@ -13,6 +13,7 @@
    `(seon.db/current-agent-id)` so REPL calls from inside an agent
    scope work with no argument."
   (:require
+    [seon.agent :as agent]
     [seon.agent-view :as agent-view]
     [seon.db :as db]
     [seon.handler :as handler]
@@ -43,14 +44,24 @@
                {:seon.inspect/error :no-agent-id}))))
 
 (defn ctx-preview
-  "Return the assembled AI-context string the agent would see on its
-   next render. Reads from the agent's filtered view so cross-agent tx
-   are hidden."
+  "Return the assembled AI-context the agent would see on its next render
+   — the EXACT bytes the LLM receives, via the ONE composer
+   `seon.agent/assemble-context` (the same fn the agent prompt path
+   calls; divergence is impossible). `:seon.render/entities` is the
+   ordered set of entities BEHIND that context (for drill-in), via
+   `seon.render/visible-entities`. Reads from the agent's filtered view
+   so cross-agent tx are hidden."
   {:malli/schema [:=> [:cat :seon.inspect/request] :seon.inspect/ctx-response]}
   [{:seon.agent/keys [id]}]
   (let [id (resolve-id id)
-        {:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id id})]
-    (render/assemble-ai-context {:seon.agent/id id :seon.db/db db})))
+        {:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id id})
+        {:seon.render/keys [text token-estimate]}
+        (agent/assemble-context {:seon.agent/id id :seon.db/db db})
+        {:seon.render/keys [entities]}
+        (render/visible-entities {:seon.agent/id id :seon.db/db db})]
+    {:seon.render/text            text
+     :seon.render/entities        entities
+     :seon.render/token-estimate  token-estimate}))
 
 (defn visible-entities
   "Return the entities the agent currently sees in its AI context, in

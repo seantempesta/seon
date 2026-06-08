@@ -110,8 +110,12 @@
       :agent <pulled entity or nil>}"
   [agent-id]
   (let [{:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id agent-id})
+        ;; ONE composer for the left-pane text (`seon.agent/assemble-context`,
+        ;; the exact bytes the agent receives) + the entity list behind it —
+        ;; both via `inspect/ctx-preview`, so the webview can NEVER diverge
+        ;; from what the LLM sees.
         {:seon.render/keys [text entities token-estimate]}
-        (render/assemble-ai-context {:seon.agent/id agent-id :seon.db/db db})
+        (inspect/ctx-preview {:seon.agent/id agent-id})
         cards (->> entities
                    (keep (fn [e]
                            (when-let [h (render-entity-hiccup db agent-id e)]

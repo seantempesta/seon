@@ -6,11 +6,12 @@
      :seon.render/ai   'seon.handlers.eval/render-ai
      :seon.render/html 'seon.handlers.eval/render-html
 
-   The inspector's `seon.render/assemble-ai-context` walks every entity
-   carrying `:seon.render/ai` and calls the symbol via
+   The inspector's `seon.render/visible-entities` walks every entity
+   carrying `:seon.render/ai` and the inspector calls each symbol via
    `seon.eval/lookup-value`. Both panes derive from the SAME entity
    set — there's no separate 'what the LLM sees' vs 'what the human
-   sees' store. Identical query, two render shapes.
+   sees' store. Identical query, two render shapes. (The agent's prompt
+   TEXT comes from the one composer `seon.agent/assemble-context`.)
 
    ## Display order
 

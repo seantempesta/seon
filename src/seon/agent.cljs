@@ -32,9 +32,9 @@
                               and `:seon.agent/eval-count` for the
                               loop's stop policy
      - `render-prompt`      — sync; resolve `:seon.render/ai` slot
-                              (defaults to `seon.agent/assemble-ctx`)
+                              (defaults to `seon.agent/assemble-context`)
                               and call the composer
-     - `assemble-ctx` + 6 default section fns — v1.md §5.2/§5.3
+     - `assemble-context` + 6 default section fns — v1.md §5.2/§5.3
      - `run-agentic-loop!`  — multi-turn driver, stop policies (v1 §6.2)
      - `install-user-trigger!` — register the tx-listener that wakes
                               `run-agentic-loop!` on a new :user message
@@ -76,12 +76,13 @@
 
      agent entity → :seon.render/ai slot → eval/lookup-value → call → text
 
-   Default symbol: `'seon.agent/assemble-ctx`, which reads the
-   agent's `:seon.agent/ctx` vector (a cardinality-many component
-   ref to `:seon.ctx` entities), sorts by `:seon.ctx/priority`,
-   resolves each entity's `:seon.ctx/fn` symbol via
-   `seon.eval/lookup-value`, calls it with the system-input map
-   `{:seon.db/db :seon.agent/id :seon.agent/ctx-entity}`, and joins
+   Default symbol: `'seon.agent/assemble-context`, whose section
+   LAYOUT is CODE (`substrate-default-ctx`). A stored `:seon.agent/ctx`
+   vector (a cardinality-many component ref to `:seon.ctx` entities),
+   when present, OVERRIDES the default. Either way the composer sorts
+   by `:seon.ctx/priority`, resolves each entity's `:seon.ctx/fn`
+   symbol via `seon.eval/lookup-value`, calls it with the system-input
+   map `{:seon.db/db :seon.agent/id :seon.agent/ctx-entity}`, and joins
    the non-blank string results.
 
    Substrate defaults (`substrate-default-ctx`): six sections —
@@ -389,7 +390,7 @@
 ;; user-message-handler calls them. (Reorganizing the file is a separate
 ;; pass.)
 (declare run-turn! run-agentic-loop! current-session start-session! turn-index
-         turns-since-user current-ns)
+         turns-since-user current-ns substrate-default-ctx pretty-ai)
 
 (defn- per-agent-shape?
   "True when `sym` is in the agent's own home namespace (per spec-05
@@ -627,11 +628,11 @@
 
 (defn render-prompt
   "Sync — resolve the agent's `:seon.render/ai` symbol (default
-   `seon.agent/assemble-ctx`) and call it. Returns the prompt string
+   `seon.agent/assemble-context`) and call it. Returns the prompt string
    (empty when the symbol can't be resolved)."
   [agent-id]
   (let [ent   (db/entity {:seon.db/ref [:seon.agent/id agent-id]})
-        sym   (:seon.render/ai ent 'seon.agent/assemble-ctx)
+        sym   (:seon.render/ai ent 'seon.agent/assemble-context)
         input (ai-render-input sym @db/*conn* agent-id ent)]
     (or (:seon.render/text (render/ai-render sym input)) "")))
 
@@ -837,7 +838,7 @@
 ;; reset-ctx! / update-ctx! (which the agent invokes explicitly).
 ;;
 ;; Wire-up to run-turn! (replace render/ai-render call with
-;; assemble-ctx) is task #6 and lands after Platform's Patch 1/2
+;; assemble-context) is task #6 and lands after Platform's Patch 1/2
 ;; for eval-batch! so the work doesn't conflict.
 ;; ============================================================
 
@@ -876,9 +877,35 @@
     (try (edn/read-string s)
          (catch :default _ nil))))
 
+(def eval-render-cap
+  "Per-eval rendered-result char cap for the recent-evals context
+   section. Context-SAFETY invariant: no single eval's result may
+   dominate the agent's whole context. One 9.7M-char `pull` result
+   used to blow render-prompt to ~9.8M chars; capping each rendered
+   result here keeps `recent-evals-section` bounded regardless of how
+   large any individual `:seon.eval/result-edn` blob is."
+  1500)
+
+(defn cap-result
+  "Truncate a rendered eval-result string to `eval-render-cap`,
+   appending an elision marker reporting how many chars were dropped.
+   Operates on the ALREADY-stringified result (`:seon.eval/result-edn`
+   is a pr-str string), so no re-quoting. Nil-safe."
+  ([s] (cap-result s eval-render-cap))
+  ([s limit]
+   (let [s (str s)
+         n (count s)]
+     (if (> n limit)
+       (str (subs s 0 limit) " …⟨" (- n limit) " chars elided⟩")
+       s))))
+
 (defn- format-eval-row
   "Multi-line render for the recent-evals tile — narration, source,
    result/error, and the timing footer (`; # eval-id  Nms`).
+
+   The rendered result/error body is capped at `eval-render-cap` chars
+   (`cap-result`) so one huge eval result can't dominate the agent's
+   context (context-SAFETY invariant).
 
    Error rendering branches: if `:seon.eval/error-data` decodes to a
    Malli instrumentation envelope, use `render-malli-error` (the
@@ -896,18 +923,18 @@
   (let [envelope (read-error-envelope err-data)
         body (cond
                ok?
-               (or res "nil")
+               (cap-result (or res "nil"))
 
                (einstrument/instrument-error? envelope)
-               (einstrument/render-malli-error envelope)
+               (cap-result (einstrument/render-malli-error envelope))
 
                (and (string? err) (not (str/blank? err)))
-               (str ";; ERROR " err)
+               (cap-result (str ";; ERROR " err))
 
                :else ";; <no result>")
         footer (str "  ; # " eid (when dur (str "  " dur "ms")))]
     (str (when (and narr (not (str/blank? narr))) (str narr "\n"))
-         "> " src "\n"
+         "> " (cap-result src) "\n"
          body footer)))
 
 ;; ------------------------------------------------------------
@@ -1110,9 +1137,10 @@
 (defn current-ns-section
   "Every entity owned by the agent's current ns — ns source + every
    :seon.fn / :seon.schema whose :ns is this ns — via one reverse-ref
-   pull. Empty string today because eval-batch!'s detect-and-tee step
-   (Platform's Patch 2) hasn't shipped, so no program-graph entities
-   exist. Auto-populates once Patch 2 lands."
+   pull. Empty until the agent successfully evals a `(ns …)` /
+   `(defn …)` / `(schema/register! …)` form in this ns; eval-batch!'s
+   detect-and-tee step (which HAS shipped — `seon.eval/build-tee-entities`)
+   then records the program-graph entities this pull reads."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (let [ns    (current-ns {:seon.agent/id id})
@@ -1295,29 +1323,61 @@
        (pr-str (dissoc section-entity :db/id))
        "</unresolved-section>"))
 
-(defn assemble-ctx
-  "Compose the LLM ctx from :seon.agent/ctx entities. Returns
-   {:seon.render/text 'composed-text'} matching :seon.render/ai-response."
-  {:malli/schema [:=> [:cat :map] :map]}
+;; Context-assembly shapes. The section LAYOUT is CODE
+;; (substrate-default-ctx); a stored :seon.agent/ctx, when present, is an
+;; OPTIONAL override. :seon.render/sections is the list of section names
+;; in render order (provenance, not a content source).
+(schema/register! :seon.render/sections [:vector :seon.ctx/name])
+
+(schema/register! :seon.render/assemble-request
+  [:map
+   [:seon.db/db    :seon.db/db]
+   [:seon.agent/id :string]])
+
+(schema/register! :seon.render/assemble-response
+  [:map
+   [:seon.render/text            :string]
+   [:seon.render/sections        :seon.render/sections]
+   [:seon.render/token-estimate  :int]])
+
+(defn assemble-context
+  "Compose the LLM context. The section LAYOUT is CODE
+   (`substrate-default-ctx`) by default; a stored `:seon.agent/ctx`, when
+   present, OVERRIDES it. Pure function of the DB — stores nothing; the
+   absence of stored ctx falls back to the code default, never empty.
+
+   ONE composer, called by BOTH the agent prompt path (`render-prompt`)
+   and the inspector — divergence is impossible.
+
+   Returns
+     `{:seon.render/text \"…\"
+       :seon.render/sections [<section-name> ...]   ; render order
+       :seon.render/token-estimate <int>}`          ; char-count / 4 v0 heuristic"
+  {:malli/schema [:=> [:cat :seon.render/assemble-request]
+                       :seon.render/assemble-response]}
   [{:seon.db/keys [db] :seon.agent/keys [id] :as input}]
-  (let [agent    (db/pull {:seon.db/db db
-                           :seon.db/pull-pattern
-                           '[:seon.agent/id
-                             {:seon.agent/ctx
-                              [:seon.ctx/name :seon.ctx/priority :seon.ctx/fn]}]
-                           :seon.db/ref [:seon.agent/id id]})
-        sections (sort-by :seon.ctx/priority (:seon.agent/ctx agent))
+  (let [stored   (sort-by :seon.ctx/priority
+                          (:seon.agent/ctx
+                            (db/pull {:seon.db/db db
+                                      :seon.db/pull-pattern
+                                      '[{:seon.agent/ctx
+                                         [:seon.ctx/name :seon.ctx/priority
+                                          :seon.ctx/fn]}]
+                                      :seon.db/ref [:seon.agent/id id]})))
+        sections (if (seq stored) stored (substrate-default-ctx))
         ctx-in   (assoc input :seon.agent/ctx-entity nil)
-        text     (->> sections
+        rendered (->> sections
                       (map (fn [section]
                              (let [f  (seval/lookup-value (:seon.ctx/fn section))
                                    in (assoc ctx-in :seon.agent/ctx-entity section)]
                                (if f
                                  (f in)
                                  (pretty-ai section)))))
-                      (remove str/blank?)
-                      (str/join "\n\n"))]
-    {:seon.render/text text}))
+                      (remove str/blank?))
+        text     (str/join "\n\n" rendered)]
+    {:seon.render/text           text
+     :seon.render/sections       (mapv :seon.ctx/name sections)
+     :seon.render/token-estimate (quot (count text) 4)}))
 
 ;; ------------------------------------------------------------
 ;; Layout verbs — reset-ctx! restores substrate defaults; update-ctx!

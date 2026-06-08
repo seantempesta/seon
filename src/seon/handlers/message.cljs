@@ -7,8 +7,9 @@
      :seon.render/ai   'seon.handlers.message/render-ai
      :seon.render/html 'seon.handlers.message/render-html
 
-   `seon.render/assemble-ai-context` walks every `:seon.render/ai` entity
-   in the agent's filtered view and calls these via symbol-lookup."
+   `seon.render/visible-entities` walks every `:seon.render/ai` entity
+   in the agent's filtered view and the inspector calls these via
+   symbol-lookup."
   (:require
     [clojure.string :as str]
     [seon.schema :as schema]))
