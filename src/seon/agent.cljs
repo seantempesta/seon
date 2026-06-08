@@ -100,6 +100,7 @@
     [seon.handlers.fn :as h-fn]
     [seon.handlers.ns :as h-ns]
     [seon.handlers.schema :as h-schema]
+    [seon.handlers.test :as h-test]
     [seon.log :as seon-log]
     [seon.render :as render]
     [seon.repl :as repl]
@@ -1316,8 +1317,8 @@
    every `:seon.fn` / `:seon.schema` / `:seon.test` whose `:ns` points at
    it. Returns nil when no `:seon.ns` entity exists for `ns-kw` (the
    caller renders a one-line 'not in db' note instead). `:seon.test` is a
-   deferred entity kind — the pull simply yields nil for it until it
-   ships, and the render skips cleanly.
+   real entity kind (Step 3); its rows are pulled and rendered under the
+   ns alongside fns and schemas.
 
    Guarded by an `entity` existence check first: `db/pull` throws on an
    unresolved lookup-ref, so we confirm presence before pulling."
@@ -1332,15 +1333,20 @@
                                               :seon.fn/private? :seon.fn/spec
                                               :seon.fn/schema-error]
                             :seon.schema/_ns [:seon.schema/key :seon.schema/source]}]})
-          ;; :seon.test is a deferred entity kind (T9). Pull it in a
-          ;; SEPARATE guarded call: a reverse-ref pull on `:seon.test/_ns`
-          ;; throws when `:seon.test/ns` isn't in the conn's schema (which
-          ;; it isn't yet). Skip cleanly when absent; merge in when present.
+          ;; :seon.test is now a real entity kind (Step 3): `:seon.test/ns`
+          ;; IS registered, so this reverse-ref pull resolves. Kept as a
+          ;; SEPARATE guarded call (vs. inlining into the `core` pull) for
+          ;; cleanliness: a conn that has no `:seon.test` rows for this ns
+          ;; yields nil and the merge below is a no-op.
           tests (try
                   (-> (db/pull {:seon.db/db db
                                 :seon.db/ref [:seon.ns/name ns-kw]
                                 :seon.db/pull-pattern
-                                '[{:seon.test/_ns [:seon.test/sym :seon.test/source]}]})
+                                '[{:seon.test/_ns
+                                   [:seon.test/sym :seon.test/source
+                                    :seon.test/last-passed-at
+                                    :seon.test/last-failed-at
+                                    :seon.test/last-failure-summary]}]})
                       :seon.test/_ns)
                   (catch :default _ nil))]
       (cond-> core
@@ -1387,10 +1393,14 @@
     (str "[schema " (pr-str key) "]  " form)))
 
 (defn- test-block-ai
-  "One test rendered for the :ai form. The `:seon.test` kind is deferred
-   (T9); this renders gracefully if rows ever appear."
-  [{:seon.test/keys [sym source]}]
+  "One test rendered for the :ai form — `[test sym]` header, the
+   pass/fail status line (✓/✗/•), and clipped source. The status glyph
+   is derived via the shared `seon.handlers.test/status-line` — the
+   SINGLE source of the ✓/✗/• logic — so this whole-ns block and the
+   per-kind `seon.handlers.test/render-ai` never diverge."
+  [{:seon.test/keys [sym source] :as test}]
   (str "[test " sym "]"
+       "\n" (h-test/status-line test)
        (when (and source (not (str/blank? source)))
          (str "\n" (clip (str/trim source) fn-source-inline-threshold)))))
 
@@ -1427,6 +1437,7 @@
      (str "requires: " (name ns-kw) " (not in db)")]
     (let [fns     (->> (:seon.fn/_ns data)     (sort-by :seon.fn/sym))
           schemas (->> (:seon.schema/_ns data) (sort-by (comp str :seon.schema/key)))
+          tests   (->> (:seon.test/_ns data)   (sort-by :seon.test/sym))
           ns-ent  {:seon.ns/name ns-kw}]
       (into
         [:section {:class "py-1 border-l-2 border-base-700 pl-2"}
@@ -1437,7 +1448,12 @@
               (h-fn/render-html {:seon.db/db db :seon.render/entity f})))
           (for [s schemas]
             (:seon.render/hiccup
-              (h-schema/render-html {:seon.db/db db :seon.render/entity s}))))))))
+              (h-schema/render-html {:seon.db/db db :seon.render/entity s})))
+          ;; Tests rendered via the per-kind handler — same `test-status`
+          ;; source as the AI path, so the pass/fail pill never diverges.
+          (for [t tests]
+            (:seon.render/hiccup
+              (h-test/render-html {:seon.db/db db :seon.render/entity t}))))))))
 
 (defn- collect-ns-order
   "Compute the ordered, deduped list of namespace keywords to render —
