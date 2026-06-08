@@ -278,7 +278,7 @@ The Chassis HTML library HTML-escapes script content. Use static JS files in `re
 ## Code Conventions
 
 Follow patterns in `docs/conventions.md`:
-- Map-in, map-out public APIs with namespaced keys
+- Public fns fully spec + validate every arg and return: map-in/map-out (preferred for APIs) OR named positional via `:catn`; namespaced keys everywhere
 - Malli schemas for contracts
 - One file per namespace (don't split prematurely)
 

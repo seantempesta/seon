@@ -161,7 +161,7 @@
 
 (def ^:const conventions-path
   "Path to project conventions file."
-  "CONVENTIONS.md")
+  "docs/conventions.md")
 
 ;;; ---------------------------------------------------------------------------
 ;;; Private Helpers

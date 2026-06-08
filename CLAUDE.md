@@ -275,7 +275,7 @@ As of 2026-05-16, for spec-01 `seon.*` API surfaces the V0 substrate uses **`.cl
 - **JVM seat** (Phase M / R / T datahike-migration work) — owns all existing `.clj` files under `src/seon/`. Don't author `.cljc` for namespaces that have a `.clj` sibling; the `.cljc` migration is a deliberate Stage 2/3 step in the convergence plan.
 - **V0 CLJS pod seat** — owns the new `.cljs` siblings (`seon.client.cljs`, the pending `seon.db.cljs`, `seon.trigger.cljs`, etc.) and the genuinely-shared `.cljc` files under `src/seon/agent/`. Doesn't touch the existing `.clj` files.
 
-`seon.schema` is the one exception — promoted to `.cljc` 2026-05-16 because the file was 100% platform-portable. Other promotions wait until both sides converge on the spec §3 map-in/map-out + `*conn*` shape.
+`seon.schema` is the one exception — promoted to `.cljc` 2026-05-16 because the file was 100% platform-portable. Other promotions wait until both sides converge on the spec §3 map-in/map-out + `*conn*` shape (positional-with-`:catn` is also permitted per the 2026-06-08 rule change).
 
 
 ---
@@ -286,7 +286,7 @@ All data flowing through Seon must be safe at every boundary: Malli validation, 
 
 **Maps with namespaced keywords. Every key. No exceptions.** This is the load-bearing rule the rest of the system depends on:
 
-- **Every public function** takes one map and returns one map. Every key in both maps is fully namespaced (`:seon.runtime/status`, never `:status`). Both the request and response map are themselves named Malli schemas (`::foo-request`, `::foo-response`) registered via `seon.schema/register!`. The `:malli/schema` metadata on the fn points at them.
+- **Every public function** fully specs and validates ALL its arguments and its return value via `:malli/schema`. Two argument shapes are allowed: (1) **map-in / map-out** — one namespaced-keyword map in, one out, where the request and response are named Malli schemas (`::foo-request`, `::foo-response`) registered via `seon.schema/register!` — **preferred for API-like surfaces** (discoverable, extensible); or (2) **named positional** — each argument is a fully-namespaced-keyword-spec'd slot via Malli `:catn` (named positional) inside a `:=>`/`:function` schema — fine for ordinary data-processing fns and for mimicking a well-known API (e.g. datahike). The invariant: every argument is NAMED, SPECCED, and VALIDATED, whether it sits in a map or a positional slot. The violation is an UNSPECCED or BARE-keyword argument, not a positional one. Every key in any map is fully namespaced (`:seon.runtime/status`, never `:status`).
 - **Every datom persisted to the DB** uses a fully-namespaced attribute keyword whose Malli schema is registered. `seon.db/transact!` enforces this at the boundary — unregistered or unspec'd attrs throw before the tx reaches the DB.
 - **Every map handed to a callback** (tx-listener handlers, trigger handlers, flow step-fns, async channel envelopes) — fully namespaced. The reason: a single Datalog query should be able to join function specs to the data those functions operate on. `:tx-data` carries no information about which fn owns it; `:seon.db/tx-data` does.
 - **Specificity, not single keywords.** Bare keywords (`:status`, `:ok`, `:tx-data`, `:e`, `:a`, `:v`) are banned in any seon-authored map. If a key feels too generic to namespace, namespace it anyway — that's a signal the schema isn't precise enough yet.
@@ -423,7 +423,7 @@ All public functions with `:malli/schema` metadata are **instrumented at runtime
 
 **Every public function you write or modify MUST have a correct `:malli/schema`.** Wrong schemas are bugs — instrumentation will throw at runtime. When you see an instrumentation error, **read it and fix the root cause**: either you called the function wrong, or the schema doesn't match reality.
 
-Public functions follow **map in, map out**. One map argument, one map return. No multi-arity on public functions.
+Public functions fully spec and validate every argument and the return. Two shapes are allowed: **map-in / map-out** (one namespaced-keyword map in, one out — preferred for API-like surfaces) OR **named positional** (each slot specced via Malli `:catn` inside a `:=>`/`:function` schema — fine for ordinary data-processing fns and for mimicking a well-known API). Multi-arity is allowed when every arity is fully specced (use a `:function` schema). The invariant is completeness of specs, not map-wrapping; an unspecced or bare-keyword argument is the violation, not a positional one.
 
 ```clojure
 (schema/register! ::do-thing-request

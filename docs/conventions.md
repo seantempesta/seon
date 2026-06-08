@@ -14,7 +14,7 @@ When every function has:
 
 - **Namespaced keys** → Agents can query "what accepts `:seon.trading/position`?" instead of guessing
 - **Malli schemas** → Contracts are machine-readable. Property tests validate automatically.
-- **Map-in/map-out** → Extensible APIs. Adding a field doesn't break callers.
+- **Map-in/map-out (preferred for APIs)** → Extensible APIs. Adding a field doesn't break callers. Positional public fns are allowed too, when every slot is named and specced via `:catn`.
 - **Registered schemas** → A queryable database of all data shapes in the system
 
 The result: agents can discover, compose, and validate code without hallucinating interfaces.
@@ -94,11 +94,23 @@ Define separate schemas for requests and responses with namespaced keys:
 
 ### Public Function Pattern
 
-Public functions are **map in, map out** with:
+Every public function must **fully spec and validate ALL its arguments and its
+return value** via `:malli/schema`. Two argument shapes are sanctioned:
 
-- Single map argument using `::keys` destructuring
-- Namespaced keys in return value
-- `:malli/schema` metadata referencing request/response schemas
+1. **Map-in / map-out** — one namespaced-keyword map in, one out.
+   **Preferred for API-like functions** (discoverable, extensible,
+   self-documenting). Adding an optional field never breaks callers.
+2. **Named positional** — each argument is a fully-namespaced-keyword-spec'd
+   slot via Malli `:catn` (named positional), inside a `:=>`/`:function`
+   schema. Fine for ordinary data-processing functions and for mimicking a
+   well-known API (e.g. datahike).
+
+The invariant: every argument is **named, specced, and validated** — whether it
+sits in a map or in a positional slot. The violation is an *unspecced* or
+*bare-keyword* argument, NOT a positional one. The contract is completeness of
+specs, not map-wrapping.
+
+#### Shape (a): map-in / map-out — preferred for APIs
 
 ```clojure
 (defn analyze
@@ -124,9 +136,38 @@ Public functions are **map in, map out** with:
 
 ```
 
+#### Shape (b): named positional via `:catn`
+
+Each positional slot gets its own fully-namespaced spec. Use this for natural
+data-processing fns or to mirror a well-known API. The slot names in the
+`:catn` document the positions; the return is still fully specced.
+
+```clojure
+(schema/register! ::ticker [:string {:min 1 :max 10}])
+(schema/register! ::timeframe [:enum :day :week :month])
+(schema/register! ::confidence [:double {:min 0.0 :max 1.0}])
+
+(defn score
+  "Score a ticker over a timeframe. Returns a confidence."
+  {:malli/schema [:=> [:catn
+                       [::ticker ::ticker]
+                       [::timeframe ::timeframe]]
+                  ::confidence]}
+  [ticker timeframe]
+  (score* ticker timeframe))
+
+```
+
+Multi-arity is allowed when **every** arity is fully specced — use a
+`:function` schema wrapping one `:=>` per arity. Prefer map-in/map-out for API
+surfaces you expect to extend.
+
 ### Private Helper Pattern
 
-Private functions use positional args for internal convenience:
+Private functions use positional args for internal convenience and may stay
+unspecced. (Note: positional is now also a sanctioned *public* shape — see
+shape (b) above — but public positional fns must spec every slot via `:catn`,
+whereas privates need no specs.)
 
 ```clojure
 (defn- analyze* [ticker model timeout]
@@ -413,7 +454,7 @@ Some types cannot be generated for property testing. Omit `:malli/schema` metada
 Test namespaces (`*_test.clj`) are exempt from most conventions:
 
 - **No `:malli/schema`** on `deftest` or test helper functions
-- **No map-in/map-out** — test helpers can use positional args for brevity
+- **No required arg shape** — test helpers can use positional args for brevity and need no specs at all
 - **No namespace docstrings** — tests are self-documenting via test names
 - **Non-namespaced keys are fine** in test data literals (e.g. `{:name "test"}`)
 
@@ -446,16 +487,21 @@ When converting external data (like SDK messages) to internal entities, use the 
 
 ```
 
-**Why map-in?** Even converter functions benefit from the pattern:
+**Why prefer map-in for converters?** Converters you expect to extend benefit
+from the map-in pattern:
 
 - Extensible: Add optional context (session-id, metadata) without changing signature
-- Consistent: Same API style as all other public functions
+- Consistent: Same API style as other API surfaces
 - Traceable: Can add logging/debugging keys later
+
+Positional is fine when each slot is specced via `:catn`; prefer map-in for
+converters you expect to grow new optional inputs.
 
 **Anti-pattern:**
 
 ```clojure
-;; BAD: positional args limit extensibility
+;; BAD: *unspecced* positional args. Positional is fine WITH a :catn per-slot
+;; spec; the violation is the missing spec, not the positions.
 (defn sdk-message->entity [sdk-message session-id]
   ...)
 
@@ -558,7 +604,8 @@ Provider namespaces implement the multimethods:
   {:pre [(m/validate ::input x)]}
   ...)
 
-;; BAD: positional args in public API - harder to extend
+;; BAD: *unspecced* positional args in public API. Positional is fine WITH a
+;; :catn per-slot spec on :malli/schema; bare/unspecced args are the violation.
 (defn process [ticker timeframe confidence]
   ...)
 

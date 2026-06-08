@@ -1,10 +1,24 @@
 (ns seon.dev.compliance
   "Convention compliance checking for Clojure namespaces.
 
-   Analyzes namespaces for adherence to CONVENTIONS.md patterns:
+   Analyzes namespaces for adherence to docs/conventions.md patterns:
    - Missing :malli/schema metadata on public functions
-   - Positional arguments instead of map-in pattern
+   - Incomplete arg/return specs (bare keywords, :any, or missing input/output)
    - Missing docstrings
+   - Unregistered schema refs / naming-convention drift
+
+   The compliance bar (rule relaxed 2026-06-08): every public fn must FULLY
+   SPEC + VALIDATE all args and its return via :malli/schema. TWO shapes are
+   sanctioned, both compliant:
+     1. map-in / map-out — one namespaced-keyword map in, one out
+        ([:=> [:cat ::foo-request] ::foo-response]). Preferred for API surfaces.
+     2. named positional — each slot fully specced via :catn inside a :=> or
+        :function schema ([:=> [:catn [::a ::a] [::b ::b]] ::resp]). Fine for
+        data-processing fns / mimicking a well-known API. Multi-arity is allowed
+        when every arity is fully specced (a :function schema).
+   The VIOLATION is an unspecced or bare-keyword argument (or :any anywhere, or
+   a missing input/output) — NOT a positional one. A positional fn with a
+   complete :catn/:cat schema is fully compliant.
 
    This enables the development hook to detect convention violations
    in real-time and provide feedback to developers.
@@ -15,22 +29,23 @@
      ;; Analyze a namespace
      (compliance/analyze-namespace {::compliance/namespace 'seon.dev.context})
      ;; => {::compliant? false
-     ;;     ::violations [{::fn-name \"record-edit!\" ::violation-type :no-map-in ...}]
+     ;;     ::violations [{::fn-name \"record-edit!\" ::violation-type :incomplete-spec ...}]
      ;;     ::public-fns 13
      ;;     ::with-schema 0
-     ;;     ::with-map-in 0}
+     ;;     ::with-complete-specs 0}
 
      ;; Check a single function
      (compliance/check-function {::compliance/var #'seon.dev.context/record-edit!})
      ;; => {::fn-name \"record-edit!\"
      ;;     ::has-schema? false
      ;;     ::has-docstring? true
-     ;;     ::uses-map-in? false
+     ;;     ::complete-spec? false
      ;;     ::violations [...]}
 
      ;; Format violations for display
      (compliance/format-violations {::compliance/violations [...] ::compliance/max-length 500})"
   (:require [clojure.string :as str]
+            [malli.core :as m]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -54,7 +69,7 @@
 (schema/register! ::violation-type
                   [:enum
                    :no-malli-schema      ; Missing :malli/schema metadata
-                   :no-map-in            ; Not using map-in pattern
+                   :incomplete-spec      ; Args/return not fully specced (bare kw, :any, or missing input/output)
                    :no-docstring         ; Missing docstring
                    :unregistered-schema  ; Schema ref in metadata not in registry
                    :wrong-naming])       ; Schema doesn't follow fn-name-request/response convention
@@ -63,7 +78,12 @@
                   [:map
                    [::fn-name ::fn-name]
                    [::violation-type ::violation-type]
-                   [::message {:optional true} :string]])
+                   [::message {:optional true} :string]
+                   ;; Carried for fix generation / detailed reporting (optional).
+                   [::arglists {:optional true} [:sequential :any]]
+                   [::ns-str {:optional true} :string]
+                   [::unregistered-refs {:optional true} [:sequential :keyword]]
+                   [::schema-refs {:optional true} [:sequential :keyword]]])
 
 (schema/register! ::violations
                   [:vector ::violation])
@@ -84,7 +104,7 @@
                    [::violations ::violations]
                    [::public-fns :int]
                    [::with-schema :int]
-                   [::with-map-in :int]])
+                   [::with-complete-specs :int]])
 
 (schema/register! ::check-function-request
                   [:map
@@ -95,7 +115,7 @@
                    [::fn-name ::fn-name]
                    [::has-schema? :boolean]
                    [::has-docstring? :boolean]
-                   [::uses-map-in? :boolean]
+                   [::complete-spec? :boolean]
                    [::violations ::violations]])
 
 (schema/register! ::format-violations-request
@@ -136,22 +156,73 @@
        (fn? (var-get v))
        (not (:macro (meta v)))))
 
-(defn- uses-map-in?
-  "Check if arglists indicate map-in pattern.
+(def ^:private malli-base-types
+  "The set of Malli base-type keywords from the default registry. A leaf
+   keyword in a schema form is a concrete type iff it is one of these (and not
+   :any) — otherwise it must be a registered seon schema."
+  (set (keys (m/default-schemas))))
 
-   Map-in pattern: single argument that is a map destructuring form.
-   Examples that match:
-     ([{::keys [foo bar]}])         - namespaced keys destructuring
-     ([{:keys [foo bar]}])          - regular keys destructuring
-     ([{:as opts}])                 - just :as binding
+(def ^:private literal-ops
+  "Schema ops whose remaining children are literal values, not sub-schemas.
+   Their presence alone marks the element complete (e.g. [:enum :a :b]).
+   NOTE: :ref / :schema are deliberately EXCLUDED — their child IS a schema
+   reference and must be validated (e.g. [:ref ::foo] requires ::foo registered)."
+  #{:enum :=})
 
-   Note: Multi-arity is allowed if ALL arities use map-in."
-  [arglists]
-  (when (seq arglists)
-    (every? (fn [arglist]
-              (and (= 1 (count arglist))
-                   (map? (first arglist))))
-            arglists)))
+(defn- schema-element-complete?
+  "Recursively check that a Malli schema form element is fully specced.
+
+   Complete means: NO :any, NO bare/unregistered keyword, every nested
+   sub-schema also complete.
+     - qualified keyword  -> must be schema/registered?
+     - simple keyword     -> a Malli base type AND not :any
+     - vector [op & args] -> :enum/:= and friends are literal-bearing (complete);
+                             otherwise every child sub-schema must be complete
+     - anything else      -> a literal value (enum member, count, etc.) -> complete"
+  [form]
+  (cond
+    (qualified-keyword? form) (schema/registered? form)
+    (keyword? form)           (and (not= :any form)
+                                   (contains? malli-base-types form))
+    (vector? form)            (if (contains? literal-ops (first form))
+                                true
+                                (every? (fn [child]
+                                          (cond
+                                            (map? child)     true ; properties map
+                                            (keyword? child) (schema-element-complete? child)
+                                            (vector? child)  (schema-element-complete? child)
+                                            :else            true)) ; literal label/value
+                                        (rest form)))
+    :else                     true))
+
+(defn- arrow-complete?
+  "Check that a single :=> arrow [:=> input output] (props optional) fully
+   specs both its input and its output."
+  [arrow]
+  (let [parts (rest arrow)
+        parts (if (map? (first parts)) (rest parts) parts)
+        [input output] parts]
+    (and (some? input)
+         (some? output)
+         (schema-element-complete? input)
+         (schema-element-complete? output))))
+
+(defn- complete-spec?
+  "Check whether a :malli/schema form fully specs all args and the return.
+
+   Accepts the two sanctioned function-schema shapes:
+     - :=>       single arity (map-in/map-out OR positional :cat/:catn)
+     - :function multi-arity; every arity must be fully specced
+   Returns false for nil, non-function-schema forms, or any incomplete arity."
+  [schema-form]
+  (boolean
+   (when (vector? schema-form)
+     (case (first schema-form)
+       :=>       (arrow-complete? schema-form)
+       :function (let [arrows (filter #(and (vector? %) (= :=> (first %)))
+                                      (rest schema-form))]
+                   (and (seq arrows) (every? arrow-complete? arrows)))
+       false))))
 
 (defn- has-malli-schema?
   "Check if function has :malli/schema metadata."
@@ -191,6 +262,23 @@
   (let [refs (extract-schema-refs schema-form)]
     (filterv (complement schema/registered?) refs)))
 
+(defn- map-in-schema?
+  "True iff the :malli/schema is map-in/map-out shaped: a single :=> arity
+   whose input is [:cat <ref>] with exactly one schema reference. The
+   fn-name-request/fn-name-response naming convention only applies to this
+   shape — positional :cat/:catn fns name their slots, not a request/response
+   pair, so the naming check must NOT run for them."
+  [schema-form]
+  (boolean
+   (when (and (vector? schema-form) (= :=> (first schema-form)))
+     (let [parts (rest schema-form)
+           parts (if (map? (first parts)) (rest parts) parts)
+           input (first parts)]
+       (and (vector? input)
+            (= :cat (first input))
+            (= 1 (count (rest input)))
+            (qualified-keyword? (second input)))))))
+
 (defn- check-naming-convention
   "Check if schema refs follow fn-name-request/fn-name-response pattern.
 
@@ -227,13 +315,20 @@
         arglists (:arglists m)
         has-schema (has-malli-schema? m)
         has-doc (has-docstring? m)
-        uses-map (uses-map-in? arglists)
         schema-form (:malli/schema m)
+        ;; Compliant iff the :malli/schema fully specs all args + the return
+        ;; (map-in/map-out OR positional :cat/:catn; no bare kw, no :any, no
+        ;; missing input/output). Only meaningful when a schema is present.
+        complete (and has-schema (complete-spec? schema-form))
 
         ;; Deep checks (only if schema exists)
         unregistered-refs (when has-schema
                            (check-schema-refs-registered schema-form))
-        wrong-naming-refs (when (and has-schema (empty? unregistered-refs))
+        ;; Naming convention only applies to map-in/map-out schemas — positional
+        ;; :cat/:catn fns name slots, not a request/response pair.
+        wrong-naming-refs (when (and has-schema
+                                     (empty? unregistered-refs)
+                                     (map-in-schema? schema-form))
                            (check-naming-convention fn-name ns-str schema-form))
 
         violations (cond-> []
@@ -242,10 +337,13 @@
                             ::violation-type :no-malli-schema
                             ::message (str fn-name " is missing :malli/schema metadata")})
 
-                     (not uses-map)
+                     ;; Schema present but does not fully spec args/return.
+                     (and has-schema (not complete))
                      (conj {::fn-name fn-name
-                            ::violation-type :no-map-in
-                            ::message (str fn-name " does not use map-in pattern (single map argument)")})
+                            ::violation-type :incomplete-spec
+                            ::message (str fn-name " has an incomplete :malli/schema — every arg and the"
+                                          " return must be fully specced (no bare keyword, no :any, no"
+                                          " missing input/output) via map-in/map-out or positional :cat/:catn")})
 
                      (not has-doc)
                      (conj {::fn-name fn-name
@@ -273,7 +371,7 @@
     {::fn-name fn-name
      ::has-schema? has-schema
      ::has-docstring? has-doc
-     ::uses-map-in? uses-map
+     ::complete-spec? complete
      ::violations (mapv #(assoc % ::arglists arglists ::ns-str ns-str) violations)}))
 
 (defn- truncate
@@ -308,39 +406,55 @@
         (str/ends-with? s "config")
         (= s "opts"))))
 
-(defn- generate-schema-key
-  "Generate schema key for a param in the function's namespace."
-  [ns-str fn-name param-name]
-  (keyword ns-str (str fn-name "-" (str param-name))))
-
 (defn- generate-request-schema
-  "Generate a request schema registration from params.
+  "Generate a request-schema registration skeleton from params.
+
+   Emits a concrete-type placeholder (:string) per slot — NOT :any (which is a
+   convention violation). The dev replaces each placeholder with a registered
+   schema or concrete type.
 
    Example output:
      (schema/register! ::foo-request
-       [:map [::input :any] [::opts {:optional true} :map]])"
+       [:map [::input :string] [::opts {:optional true} :string]]) ; replace :string with real specs"
   [ns-str fn-name params]
   (let [schema-key (keyword ns-str (str fn-name "-request"))
         map-entries (for [param params]
                       (let [key (keyword ns-str (str param))
                             optional? (param-optional? param)]
                         (if optional?
-                          (str "[" key " {:optional true} :any]")
-                          (str "[" key " :any]"))))]
+                          (str "[" key " {:optional true} :string]")
+                          (str "[" key " :string]"))))]
     (str "(schema/register! " schema-key "\n"
-         "  [:map " (str/join "\n        " map-entries) "])")))
+         "  [:map " (str/join "\n        " map-entries) "]) ; replace :string with real specs")))
+
+(defn- generate-positional-schema
+  "Generate a positional :catn function-schema skeleton from params.
+
+   Each slot is a fully-namespaced named slot; the dev replaces the :string
+   placeholder with a registered schema or concrete type.
+
+   Example output:
+     {:malli/schema [:=> [:catn [::a :string] [::b :string]] ::foo-response]}"
+  [ns-str fn-name params]
+  (let [resp-key (keyword ns-str (str fn-name "-response"))
+        slots (for [param params]
+                (str "[" (keyword ns-str (str param)) " :string]"))]
+    (str "{:malli/schema [:=> [:catn " (str/join " " slots) "] " resp-key "]}"
+         " ; replace :string with real specs")))
 
 (defn- generate-response-schema
-  "Generate a response schema registration.
+  "Generate a response-schema registration skeleton.
+
+   Emits a concrete-type placeholder (:string), NOT :any.
 
    Example output:
      (schema/register! ::foo-response
-       [:map [::result :any]])"
+       [:map [::result :string]]) ; replace :string with a real spec"
   [ns-str fn-name]
   (let [schema-key (keyword ns-str (str fn-name "-response"))
         result-key (keyword ns-str "result")]
     (str "(schema/register! " schema-key "\n"
-         "  [:map [" result-key " :any]])")))
+         "  [:map [" result-key " :string]]) ; replace :string with a real spec")))
 
 (defn- generate-metadata-form
   "Generate the :malli/schema metadata form.
@@ -352,51 +466,38 @@
         resp-key (keyword ns-str (str fn-name "-response"))]
     (str "{:malli/schema [:=> [:cat " req-key "] " resp-key "]}")))
 
-(defn- generate-map-in-signature
-  "Generate the map-in signature from params.
-
-   Example output:
-     [{::keys [input opts]}]"
-  [ns-str params]
-  (let [keys-str (str/join " " (map #(keyword ns-str (str %)) params))]
-    (str "[{::keys [" (str/join " " (map str params)) "]}]")))
+(defn- generate-spec-suggestion
+  "Suggest a complete :malli/schema for a fn, offering BOTH sanctioned shapes:
+   map-in/map-out (preferred for API surfaces) and positional :catn (fine for
+   data-processing fns). The dev picks one and replaces :string placeholders."
+  [fn-name ns-str params]
+  (let [params (or (seq params) ['input])]
+    (str "Add a complete :malli/schema. Pick ONE shape:\n\n"
+         "  (A) map-in / map-out (preferred for API surfaces):\n"
+         "    " (generate-request-schema ns-str fn-name params) "\n"
+         "    " (generate-response-schema ns-str fn-name) "\n"
+         "    " (generate-metadata-form ns-str fn-name) "\n\n"
+         "  (B) named positional :catn (fine for data-processing fns):\n"
+         "    " (generate-response-schema ns-str fn-name) "\n"
+         "    " (generate-positional-schema ns-str fn-name params))))
 
 (defn- generate-fix-suggestion
-  "Generate a complete fix suggestion for a non-compliant function.
+  "Generate a fix suggestion for a non-compliant function.
 
-   Returns a string with:
-   1. Schema registrations to add
-   2. Metadata to add to function
-   3. New signature to use"
+   Returns a string suggesting how to make the fn compliant. For missing or
+   incomplete specs, suggests adding a complete :malli/schema (either sanctioned
+   shape). For unregistered refs, lists the schemas to register. Never suggests
+   forcing a positional fn into map-in shape — positional-with-:catn is fine."
   [fn-name ns-str arglists violations]
   (let [params (extract-param-names arglists)
         has-no-schema? (some #(= :no-malli-schema (::violation-type %)) violations)
-        has-no-map-in? (some #(= :no-map-in (::violation-type %)) violations)
+        has-incomplete? (some #(= :incomplete-spec (::violation-type %)) violations)
         has-unregistered? (some #(= :unregistered-schema (::violation-type %)) violations)]
     (cond
-      ;; Missing everything - generate full fix
-      (and has-no-schema? has-no-map-in? params)
-      (str fn-name " needs:\n\n"
-           "Schema registrations:\n"
-           "  " (generate-request-schema ns-str fn-name params) "\n"
-           "  " (generate-response-schema ns-str fn-name) "\n\n"
-           "Function metadata:\n"
-           "  " (generate-metadata-form ns-str fn-name) "\n"
-           "  " (generate-map-in-signature ns-str params))
-
-      ;; Has schema but not map-in
-      (and has-no-map-in? params (not has-no-schema?))
-      (str fn-name " needs map-in pattern:\n"
-           "  " (generate-map-in-signature ns-str params))
-
-      ;; Missing schema only
-      has-no-schema?
-      (str fn-name " needs:\n\n"
-           "Schema registrations:\n"
-           "  " (generate-request-schema ns-str fn-name (or params ['input])) "\n"
-           "  " (generate-response-schema ns-str fn-name) "\n\n"
-           "Function metadata:\n"
-           "  " (generate-metadata-form ns-str fn-name))
+      ;; Missing schema entirely, or present but incomplete — suggest a full spec.
+      (or has-no-schema? has-incomplete?)
+      (str fn-name " needs a complete spec:\n\n"
+           (generate-spec-suggestion fn-name ns-str params))
 
       ;; Has unregistered refs - show what to register
       has-unregistered?
@@ -436,18 +537,19 @@
 
    Checks all public functions in the namespace for:
    - :malli/schema metadata
-   - map-in pattern (single map argument with destructuring)
+   - complete arg/return specs (map-in/map-out OR positional :cat/:catn; no
+     bare keyword, no :any, no missing input/output)
    - docstrings
 
    Request keys:
      ::namespace - Symbol or namespace object to analyze
 
    Response keys:
-     ::compliant?   - Boolean, true if ALL public functions are compliant
-     ::violations   - Vector of violation maps
-     ::public-fns   - Count of public functions analyzed
-     ::with-schema  - Count of functions with :malli/schema
-     ::with-map-in  - Count of functions using map-in pattern
+     ::compliant?           - Boolean, true if ALL public functions are compliant
+     ::violations           - Vector of violation maps
+     ::public-fns           - Count of public functions analyzed
+     ::with-schema          - Count of functions with :malli/schema
+     ::with-complete-specs  - Count of functions whose args + return are fully specced
 
    Example:
      (analyze-namespace {::namespace 'seon.dev.context})
@@ -455,7 +557,7 @@
      ;;     ::violations [{::fn-name \"record-edit!\" ...}]
      ;;     ::public-fns 13
      ;;     ::with-schema 0
-     ;;     ::with-map-in 0}"
+     ;;     ::with-complete-specs 0}"
   {:malli/schema [:=> [:cat ::analyze-namespace-request] ::analyze-namespace-response]}
   [{::keys [namespace]}]
   (let [ns-sym (if (instance? clojure.lang.Namespace namespace)
@@ -470,14 +572,14 @@
      ::violations all-violations
      ::public-fns (count fn-vars)
      ::with-schema (count (filter ::has-schema? results))
-     ::with-map-in (count (filter ::uses-map-in? results))}))
+     ::with-complete-specs (count (filter ::complete-spec? results))}))
 
 (defn check-function
   "Check a single function for convention compliance.
 
    Examines the var's metadata for:
    - :malli/schema metadata
-   - map-in argument pattern
+   - complete arg/return specs (map-in/map-out OR positional :cat/:catn)
    - docstring
 
    Request keys:
@@ -487,7 +589,7 @@
      ::fn-name        - Function name as string
      ::has-schema?    - Has :malli/schema metadata
      ::has-docstring? - Has docstring
-     ::uses-map-in?   - Uses [{::keys [...]}] pattern
+     ::complete-spec? - All args + return fully specced (no bare kw, no :any)
      ::violations     - Vector of specific violations
 
    Example:
@@ -495,9 +597,8 @@
      ;; => {::fn-name \"record-edit!\"
      ;;     ::has-schema? false
      ;;     ::has-docstring? true
-     ;;     ::uses-map-in? false
-     ;;     ::violations [{::violation-type :no-malli-schema ...}
-     ;;                   {::violation-type :no-map-in ...}]}"
+     ;;     ::complete-spec? false
+     ;;     ::violations [{::violation-type :no-malli-schema ...}]}"
   {:malli/schema [:=> [:cat ::check-function-request] ::check-function-response]}
   [{::keys [var]}]
   (if (function-var? var)
@@ -505,7 +606,7 @@
     {::fn-name (str (:name (meta var)))
      ::has-schema? false
      ::has-docstring? false
-     ::uses-map-in? false
+     ::complete-spec? false
      ::violations [{::fn-name (str (:name (meta var)))
                     ::violation-type :no-malli-schema
                     ::message (str (meta var) " is not a function var")}]}))
@@ -547,7 +648,7 @@
                       (let [format-violation (fn [v]
                                                (case (::violation-type v)
                                                  :no-malli-schema "missing :malli/schema"
-                                                 :no-map-in "not using map-in"
+                                                 :incomplete-spec "incomplete arg/return spec"
                                                  :no-docstring "missing docstring"
                                                  :unregistered-schema
                                                  (str "unregistered schemas: "
@@ -625,16 +726,16 @@
 
    Example:
      (compliance-summary {::namespace 'seon.ai.gemini})
-     ;; => {::summary \"5/5 compliant (5 with schema, 5 with map-in)\"
+     ;; => {::summary \"5/5 compliant (5 with schema, 5 fully specced)\"
      ;;     ::compliant-count 5
      ;;     ::total-count 5}"
   {:malli/schema [:=> [:cat ::compliance-summary-request] ::compliance-summary-response]}
   [{::keys [namespace]}]
   (let [result (analyze-namespace {::namespace namespace})
-        {::keys [public-fns with-schema with-map-in violations]} result
+        {::keys [public-fns with-schema with-complete-specs violations]} result
         compliant (- public-fns (count (distinct (map ::fn-name violations))))]
-    {::summary (format "%d/%d compliant (%d with schema, %d with map-in)"
-                       compliant public-fns with-schema with-map-in)
+    {::summary (format "%d/%d compliant (%d with schema, %d fully specced)"
+                       compliant public-fns with-schema with-complete-specs)
      ::compliant-count compliant
      ::total-count public-fns}))
 
@@ -666,7 +767,7 @@
   (compliance/compliance-summary {::namespace 'seon.dev.context})
   (compliance/compliance-summary {::namespace 'seon.ai.gemini})
 
-  ;; Check uses-map-in? detection
+  ;; Inspect a var's :malli/schema to see what complete-spec? evaluates
   (meta #'seon.ai.gemini/ask)
   ;; => {...:arglists ([{::keys [prompt model timeout thinking-level system-instruction api-key]}])...}
 

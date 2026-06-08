@@ -153,7 +153,7 @@ Each db-name has one conn-process that owns the embedded Datahike connection and
 
 **Embedded Datahike.** The database lives in the Seon JVM. There is no separate database process and no database TCP port. LMDB files live under `data/datahike/<db-name>/`. Bringing the JVM down brings the database down with it; bringing it back up reopens cleanly.
 
-**Positional arguments on `seon.db`.** This is the one namespace where map-in/map-out does not apply. The API mirrors `datahike.api` for drop-in familiarity: `(query :seon '[:find ?e ...])`.
+**Positional arguments on `seon.db`.** Under the 2026-06-08 rule, positional public fns are a sanctioned first-class shape (named, specced `:catn` slots), so `seon.db` is no longer an *exception* — it is the canonical example of the positional shape. The API mirrors `datahike.api` for drop-in familiarity: `(query :seon '[:find ?e ...])`. Each positional slot still gets its own fully-namespaced spec (see `docs/prds/agent-runtime/research/positional-db-ops-spec-2026-06-08.md`).
 
 **Requiring-resolve for circular deps.** `seon.db` needs `seon.flow.topology` (to inject into the flow) and `seon.runtime` (to find the flow), but those namespaces depend on `seon.db`. The circular dep is broken with `requiring-resolve` at call time, not load time.
 

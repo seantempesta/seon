@@ -608,10 +608,15 @@
    `docs/conventions.md` and the agent can ask for them."
   "Conventions for the substrate:
 
-- Every public fn takes ONE map and returns ONE map. All keys are fully
-  namespaced (`:seon.db/query`, never `:query`).
-- Use `:malli/schema` metadata. Request + response are registered Malli
-  schemas (`::foo-request` + `::foo-response`).
+- Every public fn fully specs + validates ALL its args and its return via
+  `:malli/schema`. Two shapes: (1) map-in/map-out — one namespaced-keyword
+  map in, one out (PREFERRED for API-like fns; request + response are
+  registered Malli schemas `::foo-request` + `::foo-response`); or (2) named
+  positional — each arg a fully-namespaced-spec'd slot via Malli `:catn`
+  inside a `:=>`/`:function` schema (fine for ordinary data-processing fns and
+  for mimicking a well-known API). Every arg must be named + specced; an
+  unspecced/bare arg is the violation, not a positional one. All keys in any
+  map are fully namespaced (`:seon.db/query`, never `:query`).
 - Concrete types only. No `:any`. Use `{:optional true}` for absent
   fields — never store nil.
 - Retraction is explicit: `[:db/retract eid :attr]`.
