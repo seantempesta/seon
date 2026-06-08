@@ -60,8 +60,8 @@
    `:seon.ns`/`:seon.fn` for that ns (drives current-ns). `extra-evals`
    lets a test append big-result evals to turn 2.
 
-   The curated core-fn `:seon.ns`/`:seon.fn` rows
-   (`seon.client/seed-core-fns!`) are appended INTO the same tx-vector —
+   The introspection-indexed core-fn `:seon.ns`/`:seon.fn` rows
+   (`seon.client/index-substrate!`) are appended INTO the same tx-vector —
    the SAME data the pod seeds at boot — so `capabilities-section` has
    the persisted entities it derives the `## What you can do` block from
    (no parallel hardcoded fixture)."
@@ -116,8 +116,9 @@
        {:seon.fn/sym "seon.agent.ctxtest/greet"
         :seon.fn/ns [:seon.ns/name :seon.agent.ctxtest]
         :seon.fn/source "(defn greet [] :hi)"}]
-      ;; the curated core-fn :seon.ns + :seon.fn rows (drives capabilities)
-      (client/seed-core-fns! nil))))
+      ;; the introspection-indexed core-fn :seon.ns + :seon.fn rows
+      ;; (drives capabilities) — the SAME data the pod seeds at boot
+      (client/index-substrate!))))
 
 (defn- with-seeded-conn
   "Open a fresh conn, seed it (optionally with `extra-evals` on turn 2),
@@ -285,10 +286,17 @@
               (is (str/includes? full "(seon.db/current-agent-id)")
                   "current-agent-id shown — no seon.agent/current-agent-id guess")
               ;; DERIVED from persisted :seon.fn arglists, not hardcoded:
-              ;; the rendered text must contain the real arglist string from
-              ;; the seeded entity (the map-in destructure).
-              (is (str/includes? cap "[tx-data opts conn]")
-                  "transact! arglist comes from the persisted :seon.fn entity")
+              ;; the rendered text must contain the REAL arglist string from
+              ;; the seeded entity. index-substrate! reads arglists from the
+              ;; actual source, so transact! renders its genuine `[arg]` (it
+              ;; destructures tx-data/opts/conn in the BODY, not the arg vector)
+              ;; and query renders its real map-in destructure — proving the
+              ;; rendered shapes are derived from real source, not a curated
+              ;; fiction.
+              (is (str/includes? cap "(seon.db/transact! ([arg]))")
+                  "transact! arglist is the REAL ([arg]) from introspected source")
+              (is (str/includes? cap "::keys [query args")
+                  "query arglist is the REAL map-in destructure from source")
               ;; bounded — the section is the curated core API only, not a dump.
               (is (< (count cap) 4000)
                   (str "capabilities-section bounded — got " (count cap))))))

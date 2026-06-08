@@ -33,8 +33,8 @@
     ;; namespaces doesn't drag instrumentation init into the hot path.
     [malli.instrument :as mi]
     ;; malli.core/form round-trips a fn's `:malli/schema` to the stable
-    ;; `:seon.fn/spec` string in seed-core-fns! (interim — Step 2 of
-    ;; coherent-bootstrap-indexing replaces this with index-substrate!).
+    ;; `:seon.fn/spec` string in index-substrate! (the runtime-introspection
+    ;; substrate indexer — coherent-bootstrap-indexing Step 2).
     [malli.core :as m]
     ;; Phase A item 7 — seon-native collector that walks the analyzer
     ;; at compile time for :malli/schema metadata and registers with
@@ -546,15 +546,16 @@
 ;; Per docs/prds/agent-runtime/mvp-completion-plan-2026-05-27.md §Phase 2
 ;; + research/repl-session-context-template-2026-05-26.md §5: the substrate
 ;; transacts a deterministic sticky preamble (system-prompt + conventions)
-;; plus a curated set of core fns at boot, BEFORE any agent turn. This
-;; gives the chronological renderer a stable cacheable prefix and means
-;; replay-from-tx-0 starts on a fully-seeded substrate, not mid-air.
+;; plus an introspection-indexed set of core fns at boot, BEFORE any agent
+;; turn. This gives the chronological renderer a stable cacheable prefix and
+;; means replay-from-tx-0 starts on a fully-seeded substrate, not mid-air.
 ;;
 ;; Tx-ordering at boot (in start-agent!):
 ;;   1. Entity-schema decomposition (schema/all-entity-schemas-tx-data)
 ;;      — already shipped, Item 4 commit 35035d8.
-;;   2. seed-substrate!   — sticky preamble (system-prompt + conventions)
-;;   3. seed-core-fns!    — curated :seon.ns + :seon.fn rows for core API
+;;   2. seed-substrate!    — sticky preamble (system-prompt + conventions)
+;;   3. index-substrate!   — :seon.ns + :seon.fn rows from REAL runtime
+;;                           introspection (var meta + source file-read)
 ;;
 ;; Each transact carries `:seon.db/origin :substrate-seed` in tx-meta so
 ;; audit queries can isolate seed datoms from agent-produced ones.
@@ -600,125 +601,176 @@
     :seon.sticky/position     :prefix
     :seon.sticky/order        1}])
 
-;; Curated table of substrate fns the agent should see at boot.
-;; Each entry: {:sym FQ-symbol :arglists "[(...) ...]" :doc "..."}
-;; The source is synthesized as a faithful `(defn …)` shell with a
-;; placeholder `,,,` body — substrate fns ship pre-compiled in
-;; `out/client/main.js`, so the source string isn't replayable.
-;; Downstream tools (inspector pills, drill-in) read the arglists +
-;; doc directly off the entity. Analyzer-cache lookup is preferred
-;; when available (only `seon.schema` is in `out/bootstrap` today);
-;; otherwise we fall back to this curated table.
+;; ---------------------------------------------------------------------------
+;; index-substrate! — runtime introspection of compiled substrate fns
+;; (Step 2 of docs/prds/agent-runtime/coherent-bootstrap-indexing-2026-06-08.md)
 ;;
-;; Start tiny per the orchestrator's MVP scope reduction; agents add
-;; more by transacting their own.
-(def ^:private core-fn-curated
-  [{:sym 'seon.db/transact!
-    :arglists "([{:seon.db/keys [tx-data opts conn] :as arg}])"
-    :doc "Datalog transact against the agent's conn. Map-in, map-out.
-Validates tx-data attrs against the registered Malli schemas BEFORE
-reaching datahike. Returns `{:seon.db/ok? true :seon.db/tx-report _}`
-on success or `{:seon.db/ok? false :seon.db/error _}` on failure —
-never throws into agent eval."}
-   {:sym 'seon.db/query
-    :arglists "([{:seon.db/keys [query args] :as arg}])"
-    :doc "Datalog `:find` query against `@*conn*`. Map-in, map-out.
-Returns `{:seon.db/ok? true :seon.db/rows <set>}` or an error envelope."}
-   {:sym 'seon.db/pull
-    :arglists "([{:seon.db/keys [pull-pattern ref] :as arg}])"
-    :doc "Datahike pull by ref using the given pull pattern. Map-in, map-out.
-Returns the pulled entity map, or nil if `:seon.db/ref` doesn't resolve."}
-   {:sym 'seon.db/entity
-    :arglists "([{:seon.db/keys [ref] :as arg}])"
-    :doc "Look up an entity by eid or lookup-ref. Map-in. Returns a
-datahike entity (lazy map-like), or nil if `:seon.db/ref` doesn't resolve."}
-   {:sym 'seon.db/current-agent-id
-    :arglists "([])"
-    :doc "Return the active agent-id (string) for the current turn. Zero-arg.
-The substrate binds it for the duration of your turn."}
-   {:sym 'seon.schema/register!
-    :arglists "([k v])"
-    :doc "Register a Malli schema in the global registry. Returns the
-schema keyword. Use `::name` for auto-namespacing."}
-   {:sym 'seon.test.runner/run!
-    :arglists "([{:seon.test/keys [syms] :as arg}])"
-    :doc "Run the named `cljs.test/deftest` vars and record results as
-`:seon.test` entities. Map-in, map-out."}])
+;; Replaces the old `core-fn-curated` / `synthesize-fn-source` / `seed-core-fns!`
+;; hand-written table. Drives off a compile-time `#'`-LITERAL var-list (NOT
+;; runtime symbols — in self-host CLJS `resolve` is a compile-time macro that
+;; fails on runtime syms). For each var we read REAL data:
+;;
+;;   :seon.fn/spec      ← (some-> (:malli/schema (meta v)) m/schema m/form pr-str)
+;;                        OMITTED when absent (honestly unspecced).
+;;   :seon.fn/doc       ← (:doc (meta v))
+;;   :seon.fn/source    ← READ the source FILE at the var's :file/:line and
+;;                        paren-balance one form (cljs.repl/source-fn's
+;;                        mechanism). :file/:line survive instrumentation.
+;;   :seon.fn/arglists  ← parsed FROM that real source (the var-meta arglists
+;;                        are mangled to ([arg]) for instrumented fns; the
+;;                        source text carries the genuine arg vectors).
+;;
+;; This produces a `:seon.fn` row IDENTICAL in shape to a detect-and-tee row
+;; (eval.cljs/build-tee-entities) — downstream readers never branch on origin.
+;; The agent extends the indexed surface by transacting its own fns; grow
+;; `substrate-vars` to widen the seeded set.
+;; ---------------------------------------------------------------------------
 
-(defn- synthesize-fn-source
-  "Build a `(defn …)` source-string shell from arglists + doc. The body
-   is `,,,` (a no-op placeholder) — substrate fns ship pre-compiled,
-   so the source isn't replayable. What IS faithful: the sym, arglists,
-   docstring. The agent reads the entity via `(seon.db/pull …)` to see
-   the full set of attrs."
-  [fq-sym arglists-str doc]
-  (let [doc-line (when (seq doc)
-                   (str "  \"" (str/replace doc "\"" "\\\"") "\""))
-        body     (str "  " arglists-str " ,,,")]
-    (str/join "\n"
-              (cond-> [(str "(defn " (name fq-sym))]
-                doc-line (conj doc-line)
-                :always  (conj body)
-                :always  (conj ")")))))
+(def ^:private substrate-vars
+  "Compile-time `#'`-literal vars indexed into the corpus at boot. MUST be
+   `#'`-literals (self-host `resolve` is a compile-time macro). Grow this list
+   to widen the seeded substrate surface — the indexing mechanism is uniform."
+  [#'db/transact!
+   #'db/query
+   #'db/pull
+   #'db/entity
+   #'db/current-agent-id
+   #'schema/register!
+   #'seon.test.runner/run!])
 
-(defn- core-fn-spec
-  "The `:seon.fn/spec` string for a curated substrate fn, derived from
-   the fn's REAL `:malli/schema` metadata via `#'`-literal var refs.
+(defn- read-src-file
+  "Read a substrate source file given a var-meta `:file` (project-relative,
+   e.g. \"seon/db.cljs\"). The pod is Node; cwd is the repo root; sources live
+   under <cwd>/src. Returns the file text, or nil if it can't be read."
+  [file]
+  (try
+    (let [fs   (js/require "fs")
+          path (str (.cwd js/process) "/src/" file)]
+      (.readFileSync fs path "utf8"))
+    (catch :default _ nil)))
 
-   We use `#'`-LITERAL refs (not `(resolve sym)`): in self-host CLJS
-   `resolve` is a compile-time macro that fails on runtime symbols, so
-   the var must be named literally at compile time. `m/form` round-trips
-   the schema to a stable string; absent metadata ⇒ nil ⇒ unspecced.
+(defn- extract-form-at-line
+  "Return the exact text of the top-level form beginning at `line-1based` in
+   `txt` by paren-balancing (reader-free, so `::kw` / `#js` / reader-
+   conditionals pass through verbatim). Tracks string + escape state so
+   docstring parens don't unbalance. Returns nil if no `(` opens before EOF."
+  [txt line-1based]
+  (let [lines (vec (str/split-lines txt))
+        start (str/join "\n" (subvec lines (dec line-1based)))
+        n     (count start)]
+    (loop [i 0 depth 0 in-str? false esc? false started? false]
+      (if (>= i n)
+        (when started? start)
+        (let [c (nth start i)]
+          (cond
+            esc?                   (recur (inc i) depth in-str? false started?)
+            (and in-str? (= c \\)) (recur (inc i) depth in-str? true  started?)
+            in-str?                (recur (inc i) depth (not (= c \")) false started?)
+            (= c \")               (recur (inc i) depth true false started?)
+            (= c \()               (recur (inc i) (inc depth) in-str? false true)
+            (= c \))               (let [d (dec depth)]
+                                     (if (and started? (zero? d))
+                                       (subs start 0 (inc i))
+                                       (recur (inc i) d in-str? false started?)))
+            :else                  (recur (inc i) depth in-str? false started?)))))))
 
-   INTERIM: Step 2 of coherent-bootstrap-indexing replaces this whole
-   curated path with `index-substrate!` (file-read + var meta over a
-   `#'`-literal var-list). This map only swaps the attr for now."
-  [sym]
-  (let [schema (case sym
-                 seon.db/transact!        (:malli/schema (meta #'db/transact!))
-                 seon.db/query            (:malli/schema (meta #'db/query))
-                 seon.db/pull             (:malli/schema (meta #'db/pull))
-                 seon.db/entity           (:malli/schema (meta #'db/entity))
-                 seon.db/current-agent-id (:malli/schema (meta #'db/current-agent-id))
-                 seon.schema/register!    (:malli/schema (meta #'schema/register!))
-                 seon.test.runner/run!    (:malli/schema (meta #'seon.test.runner/run!))
-                 nil)]
-    (some-> schema m/schema m/form pr-str)))
+(defn- arglists-from-source
+  "Parse the pr-str-style arglists string (e.g. \"([{::keys [a b]}])\") from a
+   `(defn …)` source text. Reader-free: an arg-vector is a `[..]` sitting
+   directly inside the defn list — paren-depth 1, brace-depth 0. This skips
+   `{:malli/schema [...]}` metadata maps (brace-depth > 0). Collects every
+   arg-vector (single + multi-arity), wraps in parens. Tracks string, escape,
+   `\\(` char-literal, and `;`-to-EOL comment state. Returns \"()\" if none
+   found (caller treats that as no arglists)."
+  [src]
+  (let [n (count src)]
+    (loop [i 0 pdepth 0 bdepth 0 in-str? false esc? false vecs []]
+      (if (>= i n)
+        (str "(" (str/join " " vecs) ")")
+        (let [c (nth src i)]
+          (cond
+            esc?                   (recur (inc i) pdepth bdepth in-str? false vecs)
+            (and in-str? (= c \\)) (recur (inc i) pdepth bdepth in-str? true vecs)
+            in-str?                (recur (inc i) pdepth bdepth (not (= c \")) false vecs)
+            (= c \")               (recur (inc i) pdepth bdepth true false vecs)
+            (= c \\)               (recur (+ i 2) pdepth bdepth in-str? false vecs)
+            (= c \;)               (let [eol (loop [j i]
+                                               (if (or (>= j n) (= (nth src j) \newline))
+                                                 j (recur (inc j))))]
+                                     (recur eol pdepth bdepth in-str? false vecs))
+            (= c \()               (recur (inc i) (inc pdepth) bdepth in-str? false vecs)
+            (= c \))               (recur (inc i) (dec pdepth) bdepth in-str? false vecs)
+            (= c \{)               (recur (inc i) pdepth (inc bdepth) in-str? false vecs)
+            (= c \})               (recur (inc i) pdepth (dec bdepth) in-str? false vecs)
+            (and (= c \[) (= pdepth 1) (zero? bdepth))
+            (let [vend (loop [j (inc i) vd 1 vs? false ve? false]
+                         (if (>= j n) (dec j)
+                             (let [vc (nth src j)]
+                               (cond
+                                 ve?                 (recur (inc j) vd vs? false)
+                                 (and vs? (= vc \\)) (recur (inc j) vd vs? true)
+                                 vs?                 (recur (inc j) vd (not (= vc \")) false)
+                                 (= vc \")           (recur (inc j) vd true false)
+                                 (= vc \\)           (recur (+ j 2) vd vs? false)
+                                 (= vc \[)           (recur (inc j) (inc vd) vs? false)
+                                 (= vc \])           (if (= vd 1) j (recur (inc j) (dec vd) vs? false))
+                                 :else               (recur (inc j) vd vs? false)))))]
+              (recur (inc vend) pdepth bdepth in-str? false (conj vecs (subs src i (inc vend)))))
+            :else (recur (inc i) pdepth bdepth in-str? false vecs)))))))
 
-(defn seed-core-fns!
-  "Tx-data for substrate `:seon.ns` + `:seon.fn` rows. For each fn in
-   `core-fn-curated`, emit a `:seon.fn` entity with synthesized source
-   + arglists + doc, and the REAL `:seon.fn/spec` (the fn's `:malli/schema`
-   `m/form`'d) when present. Also emit a `:seon.ns/name` row per owning
-   ns so the `[:seon.ns/name <kw>]` lookup-ref on `:seon.fn/ns` resolves.
+(defn- var->fn-row
+  "Build a `:seon.fn` row for a `#'`-literal substrate var from runtime
+   introspection. Returns nil (and logs) when the source file can't be read or
+   the form can't be extracted — NO `,,,` stub is ever persisted. `now` is the
+   shared `:seon.fn/created-at` instant."
+  [v now]
+  (let [m       (meta v)
+        sym     (str (:ns m) "/" (:name m))
+        ns-kw   (keyword (str (:ns m)))
+        spec    (some-> (:malli/schema m) m/schema m/form pr-str)
+        txt     (read-src-file (:file m))
+        src     (when txt (extract-form-at-line txt (:line m)))]
+    (if (nil? src)
+      (do (log/error-console!
+            "seon.client/var->fn-row"
+            (str "could not read real source for " sym
+                 " (file " (pr-str (:file m)) " line " (:line m) ") — OMITTING"))
+          nil)
+      (cond-> {:seon.fn/sym        sym
+               :seon.fn/ns         [:seon.ns/name ns-kw]
+               :seon.fn/source     src
+               :seon.fn/fn-var?    true
+               :seon.fn/arglists   (arglists-from-source src)
+               :seon.fn/doc        (or (:doc m) "")
+               :seon.fn/private?   (boolean (:private m))
+               :seon.fn/created-at now}
+        ;; PRESENT ⇒ specced (exact contract in corpus); ABSENT ⇒ unspecced.
+        (some? spec) (assoc :seon.fn/spec spec)))))
 
-   `compile-state` is accepted for future use (when more substrate
-   nses land in `out/bootstrap` we'll prefer the analyzer projection
-   over the curated table) but unused today — only `seon.schema` is
-   currently in the bootstrap analyzer cache, the others live only in
-   the pre-compiled pod JS at `out/client/main.js`.
+(defn index-substrate!
+  "Tx-data for substrate `:seon.ns` + `:seon.fn` rows, built by REAL runtime
+   introspection over `substrate-vars` (file-read at var-meta `:file`/`:line`
+   + var meta for spec/doc). Replaces the old curated `seed-core-fns!`.
 
-   Returns the tx-data vector. Caller transacts."
-  [_compile-state]
+   Per owning ns, emits a `:seon.ns/name` + `:seon.ns/source` row so the
+   `[:seon.ns/name <kw>]` lookup-ref on `:seon.fn/ns` resolves. The ns source
+   is a MINIMAL `(ns x)` stub, NOT the file's real ns form: the replay path
+   (replay-program-graph!) still re-evals `:seon.ns/source` today, and a bare
+   `(ns seon.db)` is safe + cheap to replay whereas the real `(ns seon.db
+   (:require …))` form would attempt requires in bootstrap CLJS. (Step 4 of the
+   PRD makes substrate rows no-replay; when that lands this can carry real ns
+   source.)
+
+   Fns whose source can't be read are OMITTED, not stubbed — the corpus stays
+   honest. Returns the tx-data vector; caller transacts under
+   `:seon.db/origin :substrate-seed`."
+  []
   (let [now     (js/Date.)
-        ns-syms (into #{} (map (fn [{:keys [sym]}] (symbol (namespace sym))))
-                      core-fn-curated)
+        fn-rows (keep #(var->fn-row % now) substrate-vars)
+        ns-syms (into #{} (map #(first (str/split (:seon.fn/sym %) #"/" 2)) fn-rows))
         ns-rows (for [ns-sym ns-syms]
-                  {:seon.ns/name   (keyword (str ns-sym))
-                   :seon.ns/source (str "(ns " ns-sym ")")})
-        fn-rows (for [{:keys [sym arglists doc]} core-fn-curated
-                      :let [ns-sym (symbol (namespace sym))
-                            spec   (core-fn-spec sym)]]
-                  (cond-> {:seon.fn/sym        (str sym)
-                           :seon.fn/ns         [:seon.ns/name (keyword (str ns-sym))]
-                           :seon.fn/source     (synthesize-fn-source sym arglists doc)
-                           :seon.fn/fn-var?    true
-                           :seon.fn/arglists   arglists
-                           :seon.fn/doc        doc
-                           :seon.fn/private?   false
-                           :seon.fn/created-at now}
-                    ;; PRESENT ⇒ specced; ABSENT ⇒ unspecced.
-                    (some? spec) (assoc :seon.fn/spec spec)))]
+                  {:seon.ns/name   (keyword ns-sym)
+                   :seon.ns/source (str "(ns " ns-sym ")")})]
     (vec (concat ns-rows fn-rows))))
 
 (defn- stub-llm
@@ -849,9 +901,9 @@ schema keyword. Use `::name` for auto-namespacing."}
                 ;;   2. sticky preamble (system-prompt + conventions)
                 ;;      — pinned to context-front via
                 ;;      `:seon.sticky/position :prefix`.
-                ;;   3. curated core-fn entities — `:seon.ns` +
-                ;;      `:seon.fn` rows synthesized from the analyzer's
-                ;;      compile-state.
+                ;;   3. substrate index — `:seon.ns` + `:seon.fn` rows
+                ;;      built by `index-substrate!` from REAL runtime
+                ;;      introspection (var meta + source file-read).
                 ;; Each transact is its own tx so the substrate prefix
                 ;; remains a stable cacheable sequence of tx-times.
                 _ (await
@@ -865,7 +917,7 @@ schema keyword. Use `::name` for auto-namespacing."}
                                  {:seon.db/tx-data (seed-substrate!)}))
                         (await (db/transact!
                                  {:seon.db/tx-data
-                                  (seed-core-fns! compile-state)})))))
+                                  (index-substrate!)})))))
                 ;; Install the per-agent inspector tx-listener. Pushes
                 ;; morphs for the agent-view inspector page (/agent/<id>).
                 _ (seon.web.inspector/install!)]

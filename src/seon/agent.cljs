@@ -1137,7 +1137,7 @@
 ;; capabilities-section — the "## What you can do" worked-examples
 ;; block the system-prompt sticky promises. DERIVED, never hardcoded:
 ;; the core seon.db API fns are persisted as :seon.fn entities
-;; (seeded by seon.client/seed-core-fns!), each carrying the real
+;; (seeded by seon.client/index-substrate!), each carrying the real
 ;; :seon.fn/sym + :seon.fn/arglists + :seon.fn/doc. We render those
 ;; rows so the agent sees the exact MAP-IN call shape — the mistake
 ;; we observed (calling transact!/query positionally, hallucinating
@@ -1147,7 +1147,7 @@
 ;; ------------------------------------------------------------
 
 ;; Render order + which core fns appear. These are exactly the syms
-;; seon.client/seed-core-fns! persists; we pull them by identity so
+;; seon.client/index-substrate! persists; we pull them by identity so
 ;; the rendered shape is the SAME data the agent reads via
 ;; (seon.db/pull [:seon.fn/sym …]) — one source, no divergence.
 (def ^:private capability-syms
