@@ -426,25 +426,57 @@
 ;;     no eval entities are written.
 ;; ---------------------------------------------------------------------------
 
+(declare substrate-ns-kws)
+
+(defn- entry-ns-kw
+  "The owning-namespace keyword for a program-graph entry. Used as the
+   substrate-vs-agent replay discriminator (Step 4): an entry whose
+   `entry-ns-kw` is in `substrate-ns-kws` is a substrate row (re-indexed
+   by index-substrate! every boot) and is skipped on replay.
+
+     :ns     → ident IS the ns keyword.
+     :fn     → ident is \"<ns>/<name>\"; ns is the prefix.
+     :test   → ident is \"<ns>/<name>\"; ns is the prefix.
+     :schema → ident is a keyword; ns is its keyword namespace."
+  [{:keys [kind ident]}]
+  (case kind
+    :ns     ident
+    :fn     (keyword (-> ident (str/split #"/" 2) first))
+    :test   (keyword (-> ident (str/split #"/" 2) first))
+    :schema (keyword (namespace ident))))
+
 (defn- target-ns-for-entry
   "Per-entity target ns symbol for `(seval/eval … {:ns _})`.
 
    For :ns entries the source itself is a (ns …) form which switches
-   the ns on its own; we eval from 'cljs.user. For :fn / :schema the
-   source is a bare (defn …) / (schema/register! …) — we must be IN
-   the owning ns before eval so the def lands in the right slot."
+   the ns on its own; we eval from 'cljs.user. For :fn / :test / :schema
+   the source is a bare (defn …) / (deftest …) / (schema/register! …) —
+   we must be IN the owning ns before eval so the def lands in the right
+   slot."
   [{:keys [kind ident]}]
   (case kind
     :ns     'cljs.user
     :fn     (-> ident (str/split #"/" 2) first symbol)
+    :test   (-> ident (str/split #"/" 2) first symbol)
     :schema (-> ident namespace symbol)))
 
 (defn ^:async ^:private query-program-graph-entries
-  "Returns a vector of {:kind <:ns|:fn|:schema> :ident <id-value>
-   :source <string> :tx <long>} sorted by tx-id ascending. Reads
-   against the CURRENT db so only currently-asserted sources land
-   in the replay set; retracted / superseded source values stay in
-   history and are not replayed."
+  "Returns a vector of {:kind <:ns|:fn|:test|:schema> :ident <id-value>
+   :source <string> :tx <long>} sorted by tx-id ascending, EXCLUDING
+   substrate rows (Step 4). Reads against the CURRENT db so only
+   currently-asserted sources land in the replay set; retracted /
+   superseded source values stay in history and are not replayed.
+
+   Substrate rows (those whose owning ns is in `substrate-ns-kws`) are
+   filtered out: the compiled substrate fns are re-indexed from var meta
+   + file-read by `index-substrate!` on every boot, so re-evaling their
+   `:source` would shadow the real compiled fn. Only agent-authored
+   corpus (`:seon.fn` / `:seon.test` / `:seon.schema` / `:seon.ns` rows
+   in `seon.agent.<id>` nses) replays.
+
+   `:seon.test` rows replay their `:seon.test/source` (the agent's
+   deftest form) alongside fns/schemas. Result rows (`last-passed-at`
+   etc.) carry no `:seon.test/source` and so are never selected."
   [conn]
   (let [rows (d/q '[:find ?ident ?source ?tx ?kind
                     :where
@@ -455,6 +487,9 @@
                       (and [?e :seon.fn/sym    ?ident ?tx]
                            [?e :seon.fn/source ?source]
                            [(ground :fn) ?kind])
+                      (and [?e :seon.test/sym    ?ident ?tx]
+                           [?e :seon.test/source ?source]
+                           [(ground :test) ?kind])
                       (and [?e :seon.schema/key    ?ident ?tx]
                            [?e :seon.schema/source ?source]
                            [(ground :schema) ?kind]))]
@@ -462,6 +497,7 @@
     (->> rows
          (map (fn [[ident source tx kind]]
                 {:kind kind :ident ident :source source :tx tx}))
+         (remove #(contains? substrate-ns-kws (entry-ns-kw %)))
          (sort-by :tx)
          vec)))
 
@@ -506,10 +542,14 @@
       :seon.client/replay-n-ok    <int>
       :seon.client/replay-n-fail  <int>}.
 
+   Substrate rows are NOT replayed (Step 4) — `query-program-graph-entries`
+   excludes any entry whose owning ns is in `substrate-ns-kws`. The
+   compiled substrate fns are rebuilt from var meta + file-read by
+   `index-substrate!` on every boot, so only agent-authored corpus
+   (fns / tests / schemas / nses under `seon.agent.<id>`) replays here.
+
    Call sites:
-     - Boot path in start-agent! between assert-preconditions! and
-       setup-agent-ns! so substrate atoms (last to run) win the
-       last-write race against any agent code that redefines them.
+     - Boot path in start-agent!, before setup-agent-ns!.
      - REPL probe via the same-pod-session test pattern — see
        research/resume-findings-2026-05-23.md §'Same-pod-session test'."
   [{:keys [conn compile-state agent-id]}]
@@ -637,6 +677,22 @@
    #'db/current-agent-id
    #'schema/register!
    #'seon.test.runner/run!])
+
+(def ^:private substrate-ns-kws
+  "The set of namespace keywords owned by the COMPILED substrate, derived
+   from `substrate-vars` — the SAME source of truth `index-substrate!` writes
+   from, so the two can never drift. Used by `query-program-graph-entries`
+   (Step 4) as the replay discriminator: any program-graph entry whose owning
+   ns is in this set is a SUBSTRATE row (re-indexed from var meta + file-read
+   on every boot by `index-substrate!`) and is SKIPPED on replay. Re-evaling a
+   substrate row's source — e.g. `(defn ^:async transact! …)` — would shadow
+   the real compiled fn, so substrate is never replayed; only agent-authored
+   corpus (in `seon.agent.<id>` nses) replays.
+
+   Robust by construction: it's NOT tx-meta (`:seon.db/origin :substrate-seed`
+   can be absent on a re-asserted/older row, and history-dependent) and NOT a
+   hand-typed ns list — it's the live var-meta `:ns` of the indexed vars."
+  (into #{} (map #(keyword (str (:ns (meta %)))) substrate-vars)))
 
 (defn- read-src-file
   "Read a substrate source file given a var-meta `:file` (project-relative,
@@ -842,13 +898,15 @@
     (await
       (db/with-agent agent-id
         (fn ^:async boot-with-agent! []
-          (let [;; v1.md §7.4. Re-eval every persisted :seon.ns / :seon.fn /
-                ;; :seon.schema entity's :source in tx-id order. Idempotent
-                ;; against an empty conn (the :memory case until the SQLite
-                ;; flip lands) — returns {…replay-n-total 0 …}. Runs BEFORE
-                ;; setup-agent-ns! so substrate atoms (last to run) win the
-                ;; last-write race against any agent code that touches the
-                ;; home-ns atoms.
+          (let [;; v1.md §7.4. Re-eval every persisted AGENT-authored
+                ;; :seon.ns / :seon.fn / :seon.test / :seon.schema entity's
+                ;; :source in tx-id order. Substrate rows are excluded by
+                ;; query-program-graph-entries (Step 4) — they're rebuilt by
+                ;; index-substrate! later in this fn — so replay no longer
+                ;; needs to be ordered ahead of substrate setup to avoid
+                ;; shadowing the compiled substrate fns. Idempotent against an
+                ;; empty conn (the :memory case until the SQLite flip lands) —
+                ;; returns {…replay-n-total 0 …}.
                 replay-stats  (await (replay-program-graph!
                                        {:conn          conn
                                         :compile-state compile-state
