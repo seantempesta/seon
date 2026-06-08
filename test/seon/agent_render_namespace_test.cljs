@@ -49,8 +49,7 @@
     :seon.fn/arglists "([x])"
     :seon.fn/doc "Greets x with a friendly prefix."
     :seon.fn/source "(defn greet [x] (str \"hi \" x))"
-    :seon.fn/private? false
-    :seon.fn/specced? false}
+    :seon.fn/private? false}
    {:seon.schema/key :test.parent/name
     :seon.schema/ns [:seon.ns/name :test.parent]
     :seon.schema/source "(seon.schema/register! :test.parent/name :string)"}

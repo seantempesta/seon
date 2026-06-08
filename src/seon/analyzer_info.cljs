@@ -22,6 +22,7 @@
    `(:cljs.analyzer/namespaces @compile-state)` directly. The
    research note's reference impl is wrong on that point."
   (:require [clojure.set :as set]
+            [malli.core :as m]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -54,7 +55,10 @@
                    [:arglists :string]
                    [:doc :string]
                    [:private? :boolean]
-                   [:specced? :boolean]])
+                   ;; `:spec` = `(pr-str (m/form <:malli/schema>))` when
+                   ;; present and parseable; ABSENT = unspecced (or the
+                   ;; schema failed to parse — caller stamps schema-error).
+                   [:spec {:optional true} :string]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Internals
@@ -154,7 +158,7 @@
    Maps analyzer keys (`:fn-var`, `:arglists`, `:meta {:doc ...}`,
    `:meta {:private ...}`, `:meta {:malli/schema ...}`) to the v1.md
    §2.2 `:seon.fn/*` attr shapes (`:fn-var?`, `:arglists` pr-str'd,
-   `:doc`, `:private?`, `:specced?`).
+   `:doc`, `:private?`, `:spec`).
 
    Arglists normalization (A6): single-arity defs land in the analyzer
    wrapped in a `(quote …)` form (e.g. `(quote ([x]))`); multi-arity
@@ -167,10 +171,19 @@
   {:pre [(map? var-map)]}
   (let [al (if (and (seq? arglists) (= 'quote (first arglists)))
              (second arglists)
-             arglists)]
-    {:sym       (str name)
-     :fn-var?   (boolean fn-var)
-     :arglists  (pr-str al)
-     :doc       (or (:doc meta) "")
-     :private?  (boolean (:private meta))
-     :specced?  (some? (:malli/schema meta))}))
+             arglists)
+        ;; `:spec` = the fn's contract as `(pr-str (m/form schema))`.
+        ;; Present (and the exact form in the corpus) when `:malli/schema`
+        ;; metadata is present AND parses; absent when the metadata is
+        ;; missing OR fails to parse (the tee caller stamps schema-error
+        ;; in the latter case).
+        schema-meta (:malli/schema meta)
+        spec        (when (some? schema-meta)
+                      (try (-> schema-meta m/schema m/form pr-str)
+                           (catch :default _ nil)))]
+    (cond-> {:sym       (str name)
+             :fn-var?   (boolean fn-var)
+             :arglists  (pr-str al)
+             :doc       (or (:doc meta) "")
+             :private?  (boolean (:private meta))}
+      (some? spec) (assoc :spec spec))))

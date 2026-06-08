@@ -10,8 +10,9 @@
      Lead glyph: ✗ schema error, ⚠ specced+no-tests / unspecced, ✓ all
      good. Docstring on the next line if present.
    - HTML pane: amber `fn` badge, fully-qualified symbol, status pills
-     (specced?/private?/tested?/test-passing?), schema-error badge when
-     present, monospace signature, docstring, collapsible source."
+     (specced/private/tested/test-passing — `specced` derived from the
+     presence of `:seon.fn/spec`), schema-error badge when present,
+     monospace signature, docstring, collapsible source."
   (:require
     [clojure.string :as str]
     [datahike.api :as d]))
@@ -105,7 +106,8 @@
         arglists  (:seon.fn/arglists entity)
         doc       (:seon.fn/doc entity)
         priv      (boolean (:seon.fn/private? entity))
-        specced   (boolean (:seon.fn/specced? entity))
+        spec      (:seon.fn/spec entity)
+        specced   (some? spec)
         schema-err (:seon.fn/schema-error entity)
         sig       (arglists-str sym arglists)
         {:keys [tested? test-passing? failure-summary]} (test-status db sym)
@@ -126,7 +128,9 @@
                        (when sig (str "  " sig))
                        (when priv "  :private? true"))
         doc-line  (when-let [d (short-doc doc)] (str ";; " d))
+        spec-line (when specced (str ";; spec: " spec))
         lines     (cond-> [header status-line]
+                    spec-line (conj spec-line)
                     doc-line (conj doc-line))]
     {:seon.render/text (str/join "\n" lines)}))
 
@@ -163,7 +167,8 @@
         arglists (:seon.fn/arglists entity)
         doc      (:seon.fn/doc entity)
         priv     (boolean (:seon.fn/private? entity))
-        specced  (boolean (:seon.fn/specced? entity))
+        spec     (:seon.fn/spec entity)
+        specced  (some? spec)
         schema-err (:seon.fn/schema-error entity)
         src      (or (:seon.fn/source entity) "")
         sig      (arglists-str sym arglists)

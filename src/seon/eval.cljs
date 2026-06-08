@@ -640,7 +640,7 @@
 (defn- instrument-tee-fns!
   "Phase 3 (mvp-completion-plan 2026-05-27): auto-instrument every
    newly-tee'd fn whose `:malli/schema` parsed cleanly (i.e. the entity
-   has `:seon.fn/specced? true` and NO `:seon.fn/schema-error`).
+   has a `:seon.fn/spec` and NO `:seon.fn/schema-error`).
 
    For each, register the function schema in
    `malli.core/-function-schemas*` (the atom `mi/instrument!` reads),
@@ -728,22 +728,27 @@
   (let [new-defs    (analyzer-info/defs-since defs-before compile-state)
         new-schemas (set/difference (schema/current-keys) schemas-before)
         fn-entities (for [{:keys [ns var-map]} new-defs
-                          :let [{:keys [sym fn-var? arglists doc private? specced?]}
+                          :let [{:keys [sym fn-var? arglists doc private? spec]}
                                 (analyzer-info/var-projection var-map)
                                 ;; Phase 3 (mvp-completion-plan 2026-05-27): if
                                 ;; `:malli/schema` metadata is present, validate
                                 ;; it parses via `m/schema`. Unparseable schemas
-                                ;; downgrade `:specced?` to false and stamp
-                                ;; `:seon.fn/schema-error` with the failure
-                                ;; reason. This prevents instrumenting a fn with
-                                ;; a garbage schema (would either throw at
-                                ;; instrument! time or silently no-op).
-                                schema-meta (:malli/schema (:meta var-map))
-                                schema-error (when (and specced? (some? schema-meta))
+                                ;; yield NO `:spec` (var-projection already
+                                ;; omitted it) and stamp `:seon.fn/schema-error`
+                                ;; with the failure reason. This prevents
+                                ;; instrumenting a fn with a garbage schema
+                                ;; (would either throw at instrument! time or
+                                ;; silently no-op).
+                                schema-meta  (:malli/schema (:meta var-map))
+                                schema-error (when (some? schema-meta)
                                                (try (m/schema schema-meta) nil
                                                     (catch :default e
                                                       (or (.-message e) (str e)))))
-                                effective-specced? (and specced? (nil? schema-error))]]
+                                ;; A parseable schema yields `spec`; an
+                                ;; unparseable one yields schema-error and no
+                                ;; spec. Belt-and-suspenders: drop spec if an
+                                ;; error somehow co-occurs.
+                                effective-spec (when (nil? schema-error) spec)]]
                       ;; var-projection's `:sym` is already the FQ string
                       ;; (`pr-str` of analyzer's `:name` which carries the
                       ;; ns). v1.md §7 pseudocode shows
@@ -758,8 +763,10 @@
                                :seon.fn/arglists   arglists
                                :seon.fn/doc        doc
                                :seon.fn/private?   private?
-                               :seon.fn/specced?   effective-specced?
                                :seon.fn/created-at at}
+                        ;; PRESENT ⇒ specced; ABSENT ⇒ unspecced. Omit
+                        ;; entirely when the schema is missing or errored.
+                        (some? effective-spec) (assoc :seon.fn/spec effective-spec)
                         schema-error (assoc :seon.fn/schema-error schema-error)
                         ;; Renderer dispatch comes from the entity-schema's
                         ;; `:seon.render/ai` / `:seon.render/html` props

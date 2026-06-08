@@ -32,6 +32,10 @@
     ;; entry) rather than seon.repl/seon.eval so reload churn in those
     ;; namespaces doesn't drag instrumentation init into the hot path.
     [malli.instrument :as mi]
+    ;; malli.core/form round-trips a fn's `:malli/schema` to the stable
+    ;; `:seon.fn/spec` string in seed-core-fns! (interim — Step 2 of
+    ;; coherent-bootstrap-indexing replaces this with index-substrate!).
+    [malli.core :as m]
     ;; Phase A item 7 — seon-native collector that walks the analyzer
     ;; at compile time for :malli/schema metadata and registers with
     ;; malli.core/-function-schemas*. Bridges the JVM/CLJS gap where
@@ -316,7 +320,7 @@
    :seon.fn/arglists
    :seon.fn/doc
    :seon.fn/private?
-   :seon.fn/specced?
+   :seon.fn/spec
    :seon.fn/schema-error
    :seon.fn/created-at
    :seon.schema/key
@@ -657,11 +661,36 @@ schema keyword. Use `::name` for auto-namespacing."}
                 :always  (conj body)
                 :always  (conj ")")))))
 
+(defn- core-fn-spec
+  "The `:seon.fn/spec` string for a curated substrate fn, derived from
+   the fn's REAL `:malli/schema` metadata via `#'`-literal var refs.
+
+   We use `#'`-LITERAL refs (not `(resolve sym)`): in self-host CLJS
+   `resolve` is a compile-time macro that fails on runtime symbols, so
+   the var must be named literally at compile time. `m/form` round-trips
+   the schema to a stable string; absent metadata ⇒ nil ⇒ unspecced.
+
+   INTERIM: Step 2 of coherent-bootstrap-indexing replaces this whole
+   curated path with `index-substrate!` (file-read + var meta over a
+   `#'`-literal var-list). This map only swaps the attr for now."
+  [sym]
+  (let [schema (case sym
+                 seon.db/transact!        (:malli/schema (meta #'db/transact!))
+                 seon.db/query            (:malli/schema (meta #'db/query))
+                 seon.db/pull             (:malli/schema (meta #'db/pull))
+                 seon.db/entity           (:malli/schema (meta #'db/entity))
+                 seon.db/current-agent-id (:malli/schema (meta #'db/current-agent-id))
+                 seon.schema/register!    (:malli/schema (meta #'schema/register!))
+                 seon.test.runner/run!    (:malli/schema (meta #'seon.test.runner/run!))
+                 nil)]
+    (some-> schema m/schema m/form pr-str)))
+
 (defn seed-core-fns!
   "Tx-data for substrate `:seon.ns` + `:seon.fn` rows. For each fn in
    `core-fn-curated`, emit a `:seon.fn` entity with synthesized source
-   + arglists + doc. Also emit a `:seon.ns/name` row per owning ns so
-   the `[:seon.ns/name <kw>]` lookup-ref on `:seon.fn/ns` resolves.
+   + arglists + doc, and the REAL `:seon.fn/spec` (the fn's `:malli/schema`
+   `m/form`'d) when present. Also emit a `:seon.ns/name` row per owning
+   ns so the `[:seon.ns/name <kw>]` lookup-ref on `:seon.fn/ns` resolves.
 
    `compile-state` is accepted for future use (when more substrate
    nses land in `out/bootstrap` we'll prefer the analyzer projection
@@ -678,16 +707,18 @@ schema keyword. Use `::name` for auto-namespacing."}
                   {:seon.ns/name   (keyword (str ns-sym))
                    :seon.ns/source (str "(ns " ns-sym ")")})
         fn-rows (for [{:keys [sym arglists doc]} core-fn-curated
-                      :let [ns-sym (symbol (namespace sym))]]
-                  {:seon.fn/sym        (str sym)
-                   :seon.fn/ns         [:seon.ns/name (keyword (str ns-sym))]
-                   :seon.fn/source     (synthesize-fn-source sym arglists doc)
-                   :seon.fn/fn-var?    true
-                   :seon.fn/arglists   arglists
-                   :seon.fn/doc        doc
-                   :seon.fn/private?   false
-                   :seon.fn/specced?   false
-                   :seon.fn/created-at now})]
+                      :let [ns-sym (symbol (namespace sym))
+                            spec   (core-fn-spec sym)]]
+                  (cond-> {:seon.fn/sym        (str sym)
+                           :seon.fn/ns         [:seon.ns/name (keyword (str ns-sym))]
+                           :seon.fn/source     (synthesize-fn-source sym arglists doc)
+                           :seon.fn/fn-var?    true
+                           :seon.fn/arglists   arglists
+                           :seon.fn/doc        doc
+                           :seon.fn/private?   false
+                           :seon.fn/created-at now}
+                    ;; PRESENT ⇒ specced; ABSENT ⇒ unspecced.
+                    (some? spec) (assoc :seon.fn/spec spec)))]
     (vec (concat ns-rows fn-rows))))
 
 (defn- stub-llm

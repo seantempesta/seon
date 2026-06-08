@@ -261,11 +261,16 @@
 (schema/register! :seon.fn/arglists   :string)
 (schema/register! :seon.fn/doc        :string)
 (schema/register! :seon.fn/private?   :boolean)
-(schema/register! :seon.fn/specced?   :boolean)
+;; The fn's contract: `(pr-str (m/form <the fn's :malli/schema>))`.
+;; PRESENT ⇒ specced (the exact contract is in the corpus); ABSENT ⇒
+;; unspecced. Replaces the old boolean specced flag — the form carries
+;; strictly more information than a bare flag.
+(schema/register! :seon.fn/spec       :string)
 ;; Set when `:malli/schema` metadata is present but the value fails to
-;; parse via `malli.core/schema`. Companion of `:seon.fn/specced?` —
-;; when this is set, `:specced?` is forced to false (we will not
-;; instrument an unparseable schema). Phase 3 of mvp-completion-plan.
+;; parse via `malli.core/schema`. Orthogonal to `:seon.fn/spec` — when
+;; this is set, the schema is present but unparseable, so we omit
+;; `:seon.fn/spec` and will not instrument the fn. Phase 3 of
+;; mvp-completion-plan.
 (schema/register! :seon.fn/schema-error :string)
 (schema/register! :seon.fn/created-at :inst)
 
@@ -345,7 +350,7 @@
    [:seon.fn/arglists   {:optional true} :seon.fn/arglists]
    [:seon.fn/doc        {:optional true} :seon.fn/doc]
    [:seon.fn/private?   {:optional true} :seon.fn/private?]
-   [:seon.fn/specced?   {:optional true} :seon.fn/specced?]
+   [:seon.fn/spec       {:optional true} :seon.fn/spec]
    [:seon.fn/schema-error {:optional true} :seon.fn/schema-error]
    [:seon.fn/created-at {:optional true} :seon.fn/created-at]])
 
@@ -1324,7 +1329,7 @@
                          '[:seon.ns/source
                            {:seon.fn/_ns     [:seon.fn/sym :seon.fn/arglists
                                               :seon.fn/doc :seon.fn/source
-                                              :seon.fn/private? :seon.fn/specced?
+                                              :seon.fn/private? :seon.fn/spec
                                               :seon.fn/schema-error]
                             :seon.schema/_ns [:seon.schema/key :seon.schema/source]}]})
           ;; :seon.test is a deferred entity kind (T9). Pull it in a
@@ -1346,7 +1351,7 @@
    doc, and full source only when small. Reuses the conventional
    signature shape via `seon.handlers.fn/render-ai` is overkill here
    (that fn also runs test-status queries); we render flat + bounded."
-  [{:seon.fn/keys [sym arglists doc source private? specced? schema-error]}]
+  [{:seon.fn/keys [sym arglists doc source private? spec schema-error]}]
   (let [sig    (when (and arglists (not (str/blank? arglists)))
                  (let [a (str/trim arglists)]
                    (if (and (str/starts-with? a "(") (str/ends-with? a ")"))
@@ -1354,7 +1359,8 @@
                      (str "(" sym " " a ")"))))
         flags  (cond-> []
                  private?      (conj ":private")
-                 (not specced?) (conj ":unspecced")
+                 (some? spec)  (conj (str ":spec " (clip spec 80)))
+                 (nil? spec)   (conj ":unspecced")
                  schema-error  (conj (str ":schema-error " (clip schema-error 80))))
         header (str "[fn " sym "]"
                     (when sig (str "  " sig))
