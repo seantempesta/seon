@@ -1,9 +1,17 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, agent, flow]
 severity: architectural
 ---
+
+> **RESOLVED 2026-06-08 (commit `5f2a564`).** `assemble-ctx`→`assemble-context`,
+> code-default section layout (no stored-`:seon.agent/ctx` dependency), agent
+> path + inspector both call the one composer (byte-identical, verified live),
+> prompt-text persists real bytes, eval-result rendering capped. Guards:
+> `test/seon/agent_context_test.cljs` (5 tests/18 assertions). A whole-DB query
+> over old bloated data OOM'd the pod mid-fix → see
+> [[eval-memory-safety]] for the follow-up (store-time caps).
 
 # Context depends on stored `:seon.agent/ctx` → silent empty context + path divergence
 
