@@ -433,16 +433,24 @@
 ;; queue work.
 ;; ============================================================
 
-(defn- user-msg-eid? [db eid]
-  (= :user (:seon.message/role
-             (db/entity {:seon.db/db db :seon.db/ref eid}))))
+(defn- user-msg-for-agent?
+  "True iff `eid` is a `:user` message addressed to `agent-id`. The
+   agent check is load-bearing: every agent installs this listener, so
+   without it ONE user message wakes EVERY agent's loop — each stray
+   wake is a wasted LLM call (observed live 2026-06-09: a /chat to rEp
+   flipped OOi to :running too)."
+  [db eid agent-id]
+  (let [ent (db/entity {:seon.db/db db :seon.db/ref eid})]
+    (and (= :user (:seon.message/role ent))
+         (= agent-id (get-in ent [:seon.message/agent :seon.agent/id])))))
 
 (defn- user-message-handler
   [{:seon.agent/keys [id] :as input}]
   (fn [{:seon.db/keys [db attr-index]}]
     (let [added-roles (->> (:seon.message/role attr-index)
                            (filter :seon.db/added?))
-          new-user    (filter #(user-msg-eid? db (:seon.db/e %)) added-roles)]
+          new-user    (filter #(user-msg-for-agent? db (:seon.db/e %) id)
+                              added-roles)]
       (when (seq new-user)
         (let [ae    (db/entity {:seon.db/db db
                                 :seon.db/ref [:seon.agent/id id]})
