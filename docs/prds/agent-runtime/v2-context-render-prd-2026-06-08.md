@@ -264,10 +264,12 @@ value; drill with normal Clojure). NO `root-pull`, NO `probe`.
   `:seon.kb.*` 15-schema model from ~10 real docs). BUT Phase 1 stored NO facts and
   Phase 2 never ran, due to three substrate bugs (T11/T12/T13 below). Re-run after
   those land.
-- **T11** TURN-KILLER fix — DEMO-CRITICAL, BLOCKS ALL TURNS, IN PROGRESS.
-  `seon.analyzer-info/snapshot-defs` output `[:map-of :symbol …]` vs a live `nil`
-  ns key in the cljs.js analyzer-state → `:malli.core/invalid-output` aborts every
-  turn. Fix the schema/snapshot to match reality (not instrumentation globally).
+- **T11** TURN-KILLER fix — DEMO-CRITICAL, BLOCKS ALL TURNS — SHIPPED (7ed87ef).
+  `seon.analyzer-info/snapshot-defs` emitted a `nil` ns key (cljs.js
+  `register-constant!` writes the keyword-constants table under a nil ns when a
+  bare keyword is analyzed with no enclosing ns) → `:malli.core/invalid-output`
+  aborted every turn. Fix: `:when (symbol? ns-sym)` drops the def-less nil entry.
+  Live: 53 post-fix turns `:done`, 0 errors.
 - **T12** SURFACE EVAL ERRORS to the agent — DEMO-CRITICAL. On a failed eval,
   `:seon.eval/result-edn` is empty so the agent can't see WHY and can't
   self-correct (root cause of Phase 1's hallucinated success). Render the failure
@@ -277,9 +279,25 @@ value; drill with normal Clojure). NO `root-pull`, NO `probe`.
   "register the schema" → every fact transact! was rejected. Teach the
   register-schema → transact-data flow with a worked example (it's the core of the
   "agent defines hard schemas" demo).
+- **T14** PHANTOM EMPTY-NS DEFS lose eval records — DEMO-CRITICAL, NEXT. Surfaced
+  during T12/T13 (sibling of T11): `seon.analyzer-info/defs-since` returns stale
+  defs from a `nil`/`""`-keyed ns bucket (leftovers from prior agents' evals) →
+  `build-tee-entities` builds `:seon.fn/ns [:seon.ns/name :]` (empty-string ns →
+  `(keyword "")` → `:`) → `record-eval!`'s atomic tx fails ("Nothing found for
+  entity id [:seon.ns/name :]") → the eval record itself is LOST. T11 fixed
+  `snapshot-defs`'s nil-KEY exposure; `defs-since`/the detect-tee path still
+  surface phantom defs. This is why a clean register→store didn't fully complete
+  live. Fix in `seon.analyzer-info` (filter non-symbol/blank ns in defs-since +
+  guard build-tee-entities).
+- **T16** SCOPE `<warnings>` to the agent — surfaced during T12/T13. The
+  substrate-wide "N failed evals across agents" warning leaks OTHER (and prior
+  demo) agents' failures into a FRESH agent's context, derailing it onto
+  "investigate the failures" instead of the user's task. Scope the warnings
+  section per-agent (or to the current agent's recent evals).
 - **T9** `:seon.test` entity kind + render; (later) per-agent context override — DEFERRED
 
-Each step: implement (`seon-agent`) → verify live → commit.
+Each step: implement (`seon-agent`) → verify live → commit. (T15 = positional db
+ops, already shipped on the db track — distinct numbering; see git log.)
 
 ### Demo definition (2026-06-12)
 
