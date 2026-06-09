@@ -301,6 +301,36 @@
    [::db   {:optional true} :any]
    [::conn {:optional true} ::conn]])
 
+;; ---------------------------------------------------------------------------
+;; Positional read-op slot schemas (T15 — agent-facing positional db ops).
+;;
+;; The agent-facing read ops (`query`/`pull`/`entity`) keep their map-in
+;; arity (the 179 internal callers route through it unchanged) AND gain a
+;; datahike-shaped POSITIONAL arity. The positional form makes the db/conn
+;; an EXPLICIT, required slot — no ambient `*conn*` fallback — so nothing
+;; depends on the mutable root of `*conn*` (the smell this cures).
+;;
+;; `::db-val` is the ONE canonical "a datahike db value" shape (a record
+;; that satisfies the map protocol). Every positional `:db` slot references
+;; it — never inline `[:fn map?]` per op (shared-shape rule). Dispatch is
+;; uniform across the ops: map-in iff the first arg is a map carrying that
+;; op's request key (`::query`/`::pull-pattern`/`::ref`); a db value is
+;; `map?`-true but carries NONE of those keys, so it never masquerades as a
+;; request map. (Verified live 2026-06-08: `@conn` is `map?`-true with
+;; `(contains? db :seon.db/query)` => false, etc.)
+;; ---------------------------------------------------------------------------
+
+;; NOTE on instrumentation: `m/-instrument` requires each `:=>` arity's
+;; INPUT to be an inline `:cat`/`:catn` — it inspects the input schema's
+;; type directly and does NOT deref a registered keyword reference (a
+;; bare `[:=> ::query-positional …]` throws `:malli.core/invalid-input-schema`,
+;; verified live 2026-06-08). So the positional `:catn` is authored INLINE
+;; in each fn's `:function` schema below. The shared-shape rule still holds
+;; via `::db-val`: the repeated "datahike db value" shape is registered ONCE
+;; here and referenced (by keyword) in every positional `:db` slot — never
+;; inlined as `[:fn map?]` per op.
+(schema/register! ::db-val [:fn map?])
+
 (schema/register!
   ::datom
   [:map
@@ -1228,38 +1258,103 @@
 ;; Public read path — synchronous over a db value (datahike-cljs is sync
 ;; once you have a db value; `@conn` is the cheap deref). When V1's kabel
 ;; replica lands, reads still resolve against the local replica and stay
-;; synchronous; the API doesn't change.
+;; synchronous; the API doesn't change. Each op exposes a map-in arity AND
+;; a datahike-shaped positional arity (T15).
 ;; ---------------------------------------------------------------------------
 
+;; Dispatch note: the map-in vs positional split is by ARITY. The 1-arg
+;; arity is map-in (a request map); the 2+/3+ arities are the datahike-shaped
+;; positional forms (a positional query/pull/entity always needs at least a
+;; query/db + db/eid, so it never collapses to 1 arg). This is the same
+;; "map-in iff first arg is a request map" guarantee the spec describes,
+;; realized via Clojure's own multi-arity dispatch rather than a runtime
+;; first-arg check — and it lets Malli instrument each arity independently
+;; (named-slot errors on the positional `:catn`).
+
 (defn query
-  "Run a Datalog query. Caller may pass `::db/db` (a db value) directly;
-   otherwise reads `@conn` from the resolved `*conn*`. Returns the query
-   result set.
+  "Run a Datalog query. Two call shapes:
 
-   Example:
+   - map-in (preferred for internal callers):
+       (db/query {::db/query '[:find ?n :where [?e ::name ?n]]
+                  ::db/db <db> | ::db/conn <conn>
+                  ::db/args [...]})
+   - positional, mirroring datahike `(d/q query db & inputs)` — query
+     FIRST, the db is the first `:in $` input, extra `:in` bindings follow:
+       (db/query '[:find ?n :where [?e ::name ?n]] <db>)
+       (db/query '[:find ?n :in $ ?t :where …] <db> \"Alice\")
 
-     (db/query
-       {::db/query '[:find ?n :where [?e ::name ?n]]})"
-  {:malli/schema [:=> [:cat ::query-request] :any]}
-  [{::keys [query args db conn] :or {conn *conn* args []}}]
-  (let [db (or db @(resolve-conn conn))]
-    (apply d/q query db args)))
+   The positional form's db slot is REQUIRED and explicit (no ambient
+   `*conn*`). Both shapes return the same query result set."
+  ;; PURE-VARIADIC body (verified against reference-code/malli): CLJS
+  ;; `malli.instrument` replaces fn arities per CLJS-compiled accessor.
+  ;; A MIXED fixed+variadic defn (`([req] [q db & inputs])`) compiles to a
+  ;; fixed arity-2 accessor that malli's `-arity->schema` never maps, so a
+  ;; 2-arg call slips past Malli (see instrument.cljs L62-75, L29-39 — the
+  ;; `-replace-multi-arity` path). A single `[& args]` body is
+  ;; `-pure-variadic?` (maxFixedArity 0, only the `…$variadic` accessor),
+  ;; so it takes the clean `-replace-variadic-fn` path; the `:function`
+  ;; schema's per-arity dispatch (core.cljc L2288) then validates by
+  ;; arg-count: 1 -> map-in, 2 -> `(q db)`, 3+ -> `(q db & inputs)` — each
+  ;; with named-slot errors. The body dispatches the same way.
+  {:malli/schema
+   [:function
+    [:=> [:cat ::query-request] :any]
+    [:=> [:catn [::query [:or [:vector :any] :map :string]]
+                [::db    ::db-val]] :any]
+    [:=> [:catn [::query [:or [:vector :any] :map :string]]
+                [::db    ::db-val]
+                [::inputs [:+ :any]]] :any]]}
+  [& args]
+  (if (= 1 (count args))
+    ;; map-in: one request map
+    (let [{::keys [query args db conn] :or {conn *conn* args []}} (first args)
+          db (or db @(resolve-conn conn))]
+      (apply d/q query db args))
+    ;; positional: (query q db & inputs) — query first, db binds $
+    (let [[q db & inputs] args]
+      (apply d/q q db inputs))))
 
 (defn pull
-  "Pull an entity by ref using the given pull pattern. Sync. Returns the
-   pulled map (or nil if `ref` doesn't resolve)."
-  {:malli/schema [:=> [:cat ::pull-request] :any]}
-  [{::keys [pull-pattern ref db conn] :or {conn *conn*}}]
-  (let [db (or db @(resolve-conn conn))]
-    (d/pull db pull-pattern ref)))
+  "Pull an entity by ref using the given pull pattern. Sync. Two call
+   shapes:
+
+   - map-in:    (db/pull {::db/pull-pattern selector ::db/ref eid
+                          ::db/db <db> | ::db/conn <conn>})
+   - positional, mirroring datahike `(d/pull db selector eid)` — DB-first:
+                (db/pull <db> selector eid)
+
+   The positional db slot is REQUIRED and explicit. Returns the pulled map
+   (or nil if `eid`/`ref` doesn't resolve)."
+  {:malli/schema
+   [:function
+    [:=> [:cat ::pull-request] :any]
+    [:=> [:catn [::db ::db-val] [::selector [:vector :any]] [::eid :any]] :any]]}
+  ([req]
+   (let [{::keys [pull-pattern ref db conn] :or {conn *conn*}} req
+         db (or db @(resolve-conn conn))]
+     (d/pull db pull-pattern ref)))
+  ([db selector eid]
+   (d/pull db selector eid)))
 
 (defn entity
-  "Look up an entity by eid or lookup-ref. Sync. Returns a datahike entity
-   (lazy map-like)."
-  {:malli/schema [:=> [:cat ::entity-request] :any]}
-  [{::keys [ref db conn] :or {conn *conn*}}]
-  (let [db (or db @(resolve-conn conn))]
-    (d/entity db ref)))
+  "Look up an entity by eid or lookup-ref. Sync. Two call shapes:
+
+   - map-in:    (db/entity {::db/ref eid ::db/db <db> | ::db/conn <conn>})
+   - positional, mirroring datahike `(d/entity db eid)` — DB-first:
+                (db/entity <db> eid)
+
+   The positional db slot is REQUIRED and explicit. Returns a datahike
+   entity (lazy map-like)."
+  {:malli/schema
+   [:function
+    [:=> [:cat ::entity-request] :any]
+    [:=> [:catn [::db ::db-val] [::eid :any]] :any]]}
+  ([req]
+   (let [{::keys [ref db conn] :or {conn *conn*}} req
+         db (or db @(resolve-conn conn))]
+     (d/entity db ref)))
+  ([db eid]
+   (d/entity db eid)))
 
 ;; ---------------------------------------------------------------------------
 ;; Listener machinery

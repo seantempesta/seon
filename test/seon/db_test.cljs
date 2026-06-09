@@ -355,6 +355,128 @@
       done)))
 
 ;; ---------------------------------------------------------------------------
+;; Positional read arities (T15) — every read op gains a datahike-shaped
+;; positional form ALONGSIDE its map-in arity. The positional db/conn slot
+;; is REQUIRED and explicit (no ambient *conn*). Dispatch is by arity:
+;; 1 arg = map-in request; 2+/3+ args = positional. These tests prove both
+;; shapes work, agree, and that a bad positional slot is rejected with a
+;; named-slot Malli error (sync reads are instrumented).
+;; ---------------------------------------------------------------------------
+
+(deftest query-positional-mirrors-datahike
+  ;; (db/query q db & inputs) — query FIRST, db binds $, agrees with map-in.
+  (async done
+    (with-conn
+      (fn [conn]
+        (go
+          (a/<! (db/transact! {::db/tx-data [{::name "Alpha" ::rank 1}
+                                             {::name "Seon" ::rank 2}]
+                               ::db/conn    conn}))
+          (let [q       '[:find ?n ?r
+                          :where
+                          [?e :seon.db-test/name ?n]
+                          [?e :seon.db-test/rank ?r]]
+                map-in  (db/query {::db/query q ::db/conn conn})
+                pos     (db/query q @conn)]
+            (is (= #{["Alpha" 1] ["Seon" 2]} pos) "positional db binds $")
+            (is (= map-in pos) "positional agrees with map-in"))
+          (testing "extra :in input binds positionally after db (3+ arity)"
+            (let [q '[:find ?n :in $ ?target
+                      :where [?e :seon.db-test/name ?n] [(= ?n ?target)]]]
+              (is (= #{["Seon"]} (db/query q @conn "Seon")))
+              (is (= (db/query {::db/query q ::db/args ["Seon"] ::db/conn conn})
+                     (db/query q @conn "Seon")))))
+          (testing "a positional query MAP routes positional (not map-in)"
+            ;; '{:find …} is map? but lacks ::db/query, so 2-arg => positional
+            (is (= #{["Alpha" 1] ["Seon" 2]}
+                   (db/query '{:find [?n ?r]
+                               :where [[?e :seon.db-test/name ?n]
+                                       [?e :seon.db-test/rank ?r]]}
+                             @conn))))))
+      done)))
+
+(deftest query-positional-bad-db-slot-named-error
+  ;; Wrong slot-1 (db not a db value) → instrumented invalid-input at ::db.
+  (async done
+    (with-conn
+      (fn [conn]
+        (go
+          (let [ex (try (db/query '[:find ?e :where [?e :seon.db-test/name _]]
+                                  :not-a-db)
+                        nil
+                        (catch :default e e))]
+            (is (some? ex) "bad positional db must throw (instrumented)")
+            (is (= [::db/db] (:seon.error.malli/explain-path (ex-data ex)))
+                "named slot ::db/db, not a positional index"))
+          ;; 3-arity bad db too
+          (let [ex (try (db/query '[:find ?e :in $ ?t :where [?e :seon.db-test/name ?t]]
+                                  :not-a-db "x")
+                        nil
+                        (catch :default e e))]
+            (is (= [::db/db] (:seon.error.malli/explain-path (ex-data ex)))))))
+      done)))
+
+(deftest pull-positional-mirrors-datahike
+  ;; (db/pull db selector eid) — DB-first, agrees with map-in.
+  (async done
+    (with-conn
+      (fn [conn]
+        (go
+          (a/<! (db/transact! {::db/tx-data [{::name "Alpha" ::rank 1}]
+                               ::db/conn    conn}))
+          (let [sel    [::name ::rank]
+                eid    [::name "Alpha"]
+                map-in (db/pull {::db/pull-pattern sel ::db/ref eid ::db/conn conn})
+                pos    (db/pull @conn sel eid)]
+            (is (= "Alpha" (::name pos)))
+            (is (= 1 (::rank pos)))
+            (is (= map-in pos) "positional agrees with map-in"))))
+      done)))
+
+(deftest pull-positional-bad-selector-named-error
+  ;; Wrong slot-1 (selector not a vector) → invalid-input at ::selector.
+  ;; Transact first (same proven pattern as pull-positional-mirrors) so we
+  ;; assert against a live db value; the bad slot is the SELECTOR, not the db.
+  (async done
+    (with-conn
+      (fn [conn]
+        (go
+          (a/<! (db/transact! {::db/tx-data [{::name "Alpha"}]
+                               ::db/conn    conn}))
+          (let [ex (try (db/pull @conn :not-a-vector [::name "Alpha"]) nil
+                        (catch :default e e))]
+            (is (some? ex) "bad selector must throw (instrumented)")
+            (is (= [::db/selector] (:seon.error.malli/explain-path (ex-data ex)))))))
+      done)))
+
+(deftest entity-positional-mirrors-datahike
+  ;; (db/entity db eid) — DB-first, agrees with map-in.
+  (async done
+    (with-conn
+      (fn [conn]
+        (go
+          (a/<! (db/transact! {::db/tx-data [{::name "Alpha" ::rank 1}]
+                               ::db/conn    conn}))
+          (let [eid    [::name "Alpha"]
+                map-in (db/entity {::db/ref eid ::db/conn conn})
+                pos    (db/entity @conn eid)]
+            (is (= "Alpha" (::name pos)))
+            (is (= (:db/id map-in) (:db/id pos)) "same entity both shapes"))))
+      done)))
+
+(deftest entity-positional-bad-db-slot-named-error
+  ;; Wrong slot-0 (db not a db value) → invalid-input at ::db.
+  (async done
+    (with-conn
+      (fn [conn]
+        (go
+          (let [ex (try (db/entity :not-a-db 1) nil
+                        (catch :default e e))]
+            (is (some? ex) "bad positional db must throw (instrumented)")
+            (is (= [::db/db] (:seon.error.malli/explain-path (ex-data ex)))))))
+      done)))
+
+;; ---------------------------------------------------------------------------
 ;; Listener — handler input shape, multi-key independence, replacement
 ;; semantics, unlisten
 ;; ---------------------------------------------------------------------------

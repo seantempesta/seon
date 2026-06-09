@@ -1,6 +1,6 @@
 (ns seon.instrument
   "Phase A item 7 — collect + install Malli instrumentation for every
-   seon.* fn with `:malli/schema` metadata.
+   seon.* fn with `:malli/schema` metadata. (T15 positional read ops.)
 
    Why this exists: `malli.instrument/collect!` is JVM-only — it reads
    source files at JVM build time. CLJS has no built-in equivalent;
@@ -28,7 +28,8 @@
    path is JVM-only; we ship the CLJS path that achieves the same end."
   #?(:cljs (:require-macros [seon.instrument :refer [collect!]]))
   (:require
-    #?@(:clj  [[cljs.analyzer.api :as ana]]
+    #?@(:clj  [[cljs.analyzer.api :as ana]
+               [clojure.string :as str]]
         :cljs [[malli.core :as m]
                [malli.instrument :as mi]
                [seon.error.instrument :as ei]])))
@@ -53,7 +54,7 @@
      (vec
        (for [ns-sym  (ana/all-ns)
              :let    [ns-str (str ns-sym)]
-             :when   (clojure.string/starts-with? ns-str ns-pattern)
+             :when   (str/starts-with? ns-str ns-pattern)
              [fn-sym ana-info] (ana/ns-publics ns-sym)
              :let    [meta-map (:meta ana-info)
                       schema   (:malli/schema meta-map)
