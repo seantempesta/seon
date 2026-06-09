@@ -223,7 +223,14 @@
   []
   (reset! !on-ensure-db-hooks []))
 
-(defn- run-on-ensure-db-hooks! [conn db-name]
+(defn run-on-ensure-db-hooks!
+  "Fire every registered on-ensure-db hook for `conn`/`db-name`. `ensure-db!`
+   calls this once per newly-opened registry conn. The wire-server also calls it
+   for its AMBIENT conn (created directly by `wire/ensure-db!`, outside the
+   registry) so that conn ALSO gets the `::reactive` listener + subscription
+   schema the hooks install — not just the `::raw-broadcast` it wires itself.
+   Hook exceptions are swallowed so one bad hook can't wedge the caller."
+  [conn db-name]
   (doseq [f @!on-ensure-db-hooks]
     (try (f conn db-name) (catch Throwable _))))
 

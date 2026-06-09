@@ -97,6 +97,25 @@
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
 
+  ;; Plain-Node UDS transport to the JVM wire-server, as a REPL-addressable
+  ;; shadow runtime (the CLJ-pivot's missing transport piece). Built OUTSIDE
+  ;; :client — its own :node-script build, its own :main. `:devtools {:enabled
+  ;; true}` so the process registers as a shadow runtime addressable over MCP
+  ;; (`mcp__seon_cljs__eval` agent_id "wire"). Reuses the SAME Transit codec
+  ;; (seon.client-runtime.transit) the WASM guest uses; CBOR framing in
+  ;; seon.dev.cbor.
+  ;;
+  ;; Build:  clj -M:cljs watch wire-node
+  ;; Run:    node out/wire-node/main.js --agent-id wire
+  ;; REPL:   mcp__seon_cljs__eval agent_id="wire"
+  :wire-node
+  {:target           :node-script
+   :output-to        "out/wire-node/main.js"
+   :main             seon.dev.wire-node/-main
+   :devtools         {:enabled true}
+   :compiler-options {:warnings-as-errors false
+                      :externs           ["externs/node_fs.js"]}}
+
   ;; Milestone-1 WASM smoke build. Minimal CLJS bundle that exposes
   ;; `datahike-smoke-test!` (inlined) on globalThis.seonSmoke for the
   ;; wasm-rquickjs ESM shim. Deliberately doesn't require seon.client

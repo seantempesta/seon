@@ -28,6 +28,15 @@
   []
   @!agent-id)
 
+(defn set-agent-id!
+  "Set this runtime's agent-id. Lets sibling node-script runtimes (e.g.
+   `seon.dev.wire-node`) be addressable by the SAME MCP probe
+   (`bin/mcp-server-cljs` evals `(seon.dev.node-agent/agent-id)` to resolve
+   agent-id -> shadow client-id) without re-implementing the resolver."
+  [id]
+  (reset! !agent-id id)
+  id)
+
 (defn- parse-agent-id
   "Pull the agent-id from `--agent-id <id>` argv, falling back to the
    SEON_AGENT_ID env var. Returns nil if neither is present."

@@ -350,3 +350,151 @@ the loopback HTTP+SSE webview.
   NOT the central store — see M7).
 - `wire-server.log`: `[writer] datahike ready; basis-t= 536870912`, backend
   `:file`, path `data/clusters/default/store`.
+
+## Track 2 wiring progress 2026-06-09
+
+> Implemented + verified the three Track 2 pieces: (1) re-verified the
+> wire-server op surface + multi-DB routing, (2) built the missing plain-Node
+> UDS transport as a REPL-addressable shadow-cljs runtime (NOT a hand-rolled
+> standalone script — see decision below), (3) wired BOTH database-sync
+> mechanisms (raw tx feed + reactive query subscriptions) into the wire-server.
+> All proven end-to-end against the live wire-server + via MCP into the CLJS
+> Node runtime. Wire-server restarted from current source (file-backed; data
+> persisted). The pod's `:client` build was NOT touched.
+
+### Key finding: the running wire-server was STALE
+
+The wire-server pid 51224 (booted Jun 3) predated `ensure-db` / multi-DB
+routing / the registry `resolve-conn` path — its `handle-op` multimethod had
+NO `ensure-db` method and silently fell db-name-routed requests through to the
+ambient conn (no isolation). The on-disk SOURCE had all of it; the PROCESS did
+not. Fixed by restarting via `bin/seon restart wire-server` (now pid 40527,
+basis-t persisted across the restart — file-backed konserve at
+`data/clusters/default/store`). Lesson: verify the live PROCESS, not just the
+source, before trusting "BUILT, working".
+
+### 1. Wire-server op/message contract (re-verified, file:line)
+
+- Transport: UDS req/reply (`tmp/seon-cluster-default-req.sock`) + pub
+  (`...-pub.sock`). Framing: 4-byte BE length + CBOR (`seon.server.codec`).
+  Control envelope = CBOR map, STRING keys. VALUES (query/args/tx-data/
+  selectors/eids/results/tempids/tx-meta/datom a,v) = Transit-JSON STRINGS
+  (`seon.server.transit`). Datom wire shape `[e a-transit v-transit t op]`
+  (`wire.clj:134-144`).
+- Op surface (all `handle-op` defmethods): `ping`, `ensure-db` (`wire.clj:224`),
+  `q` (`:243`), `transact` (`:353`), `transact-batch` (`:394`), `pull` (`:457`),
+  `entity-pull` (`:476`), `pull-many` (`:493`), `schema` (`:501`),
+  `reverse-schema` (`:506`), `db-filter`/`q-filtered`/`filter-release`
+  (`:511-539`) — PLUS the four NEW ops added this task in `seon.server.boot`:
+  `subscribe-tx`, `next-tx-event`, `unsubscribe-tx`, `register-subscription`,
+  `unregister-subscription`.
+- Multi-DB routing (`resolve-conn-for-req`, `wire.clj:541-559`): a request's
+  optional `agent-id` / `db-name` → `registry/resolve-conn`. Verified live:
+  `ensure-db {"db-name" "seon.track2/scratch3" "backend" "memory"}` →
+  scoped transact+query returns the row, ambient query returns `#{}`
+  (isolation), unknown db-name → typed `{"error-kind" "not-found"}`.
+
+### 2. Node transport — DECISION: a shadow-cljs `:node-script` runtime, NOT a standalone JS script
+
+First built a dependency-free standalone Node script (hand-rolled CBOR +
+transit-js) and proved the roundtrip. Per user direction (2026-06-09), REPLACED
+it with the project's shadow-cljs node setup so the transport is a live runtime
+you REPL into over MCP. The standalone JS proto was deleted.
+
+- New shadow build `:wire-node` (`shadow-cljs.edn`): `:target :node-script`,
+  `:main seon.dev.wire-node/-main`, `:devtools {:enabled true}` so the Node
+  process registers as a shadow runtime. OUTSIDE `:client` (own build, own
+  main).
+- `src/seon/dev/wire_node.cljs` — the transport. `node:net` UDS socket; values
+  via `cognitect.transit` (transit-cljs, already on the `:cljs` classpath;
+  byte-identical to `seon.server.transit` / `seon.client-runtime.transit`);
+  CBOR framing via `src/seon/dev/cbor.cljs` (a CLJS port of the JS codec,
+  byte-verified against `seon.server.codec/encode`). Exposes async fns: `ping`,
+  `ensure-db`, `transact`, `q`, `pull`, `schema`, `subscribe-tx`,
+  `next-tx-event`, `unsubscribe-tx`, plus generic `rpc`.
+- `src/seon/dev/cbor.cljs` — minimal CBOR encode/decode for the envelope
+  subset (indefinite map like Jackson; def + indef strings/arrays/maps on
+  decode). 0 warnings.
+- Build + run:
+  - add to the running watcher: `(shadow.cljs.devtools.api/watch :wire-node)`
+    via the shadow nREPL (7889), or `clj -M:cljs watch wire-node`.
+  - run: `node out/wire-node/main.js --agent-id wire`
+  - REPL in: `mcp__seon_cljs__create_session build=":wire-node"` → eval in that
+    sid (the `agent_id "wire"` probe path also works once `node_agent` is in
+    the build; the create_session path is the reliable one).
+- VERIFIED via MCP into the CLJS runtime: ping → `{"pong" true}`; register
+  `:track2.cljs/marker` (identity) → transact → q → pull
+  (`{:db/id 12 :track2.cljs/marker "from-cljs-node-..."}`); the transact
+  `payload` decodes to native Clojure (`:datoms-added 2`, `:tx-meta` with
+  `#inst`/`#uuid`). Multi-DB routing works from the Node client too.
+- ORACLE (cross-process): the marker written by the CLJS Node runtime is
+  readable from the wire-server's own JVM REPL (127.0.0.1:7891) against the
+  on-disk store: `#{["from-cljs-node-1781020468025"]}`.
+
+### 3. BOTH db-sync mechanisms wired into the wire-server (`seon.server.boot`)
+
+The guest's `seon.client-runtime.db/listen!` loop polls `subscribe-tx` /
+`next-tx-event` (the RAW tx feed). `seon.server.reactive` is the richer QUERY
+subscription engine (changed query rows). Both are now reachable over the wire:
+
+- RAW TX FEED — `subscribe-tx` opens a bounded per-handle queue + a
+  `broadcast/subscribe!` callback on the target db-name; `next-tx-event` drains
+  one event with a ~50ms bounded wait (typed `no-event` on timeout — the guest
+  swallows it); `unsubscribe-tx` tears down. Queue bounded at 1024, O(1) size
+  via an `AtomicInteger` (ConcurrentLinkedQueue.size() is O(n)).
+- REACTIVE QUERY SUBS — `register-subscription` / `unregister-subscription`
+  delegate to `seon.server.reactive`; a `::reactive` on-ensure-db hook installs
+  the engine `d/listen` on every conn, seeds the `:seon.subscription/*` schema,
+  and rebuilds the engine cache from persisted sub datoms. A changed query
+  result emits a `changed-summaries` event on the SAME pub fanout (db-name
+  tagged, body as Transit payload).
+- The AMBIENT conn (created by `wire/ensure-db!`, OUTSIDE the registry) now
+  also runs the on-ensure-db hooks: `wire/-main` calls
+  `registry/run-on-ensure-db-hooks!` on it (and stores `:ambient-db-name` in
+  wire state so `subscribe-tx` with no routing targets the right pub bucket).
+- VERIFIED end-to-end (cold wire-server boot, zero manual steps, via the CLJS
+  runtime): `subscribe-tx` → handle + correct db-name; a commit delivers a raw
+  `"tx"` event (`basis-t`, `datoms-added 2`, full `tx-data`); `register-
+  subscription` returns initial rows; a matching commit then delivers BOTH a
+  `"tx"` and a `"changed-summaries"` event carrying the canonical
+  `:seon.server.reactive/changed` shape with updated rows.
+- Tests: `test/seon/server/boot_test.clj` (6 tests / 17 assertions, green in a
+  fresh kaocha JVM) covers both feeds + typed errors + unsubscribe.
+
+### Files changed (NOT committed — orchestrator commits after review)
+
+- `src/seon/server/boot.clj` — the 5 new `handle-op`s + the `::reactive`
+  on-ensure-db hook + `seed-subscription-schema!` + per-db engine registry.
+- `src/seon/server/wire.clj` — `ambient-db-name` getter; `-main` stores it +
+  runs the registry hooks on the ambient conn.
+- `src/seon/server/registry.clj` — `run-on-ensure-db-hooks!` made public.
+- `src/seon/dev/wire_node.cljs`, `src/seon/dev/cbor.cljs` — the Node transport.
+- `src/seon/dev/node_agent.cljs` — added public `set-agent-id!` (MCP probe).
+- `shadow-cljs.edn` — `:wire-node` build.
+- `test/seon/server/boot_test.clj` — new.
+
+### Remaining for the `:client` (pod) integration handoff
+
+1. The pod's db path (`src/seon/db.cljs` / `seon.client` use of datahike-cljs
+   in-process) is UNCHANGED — that integration is the later coordinated `:client`
+   change. The route: make the pod's `seon.db` conn drive the wire over the same
+   transport `seon.dev.wire-node` proves (or hook `seon.client-runtime.wit`'s
+   `js/require` fallback to it). The pod's `listen!` loop already targets
+   `subscribe-tx`/`next-tx-event`, which now EXIST server-side.
+2. The live shadow watcher hosting the pod did NOT have `guest-cljs/src` on its
+   classpath, so `wire-node` uses `cognitect.transit` directly rather than the
+   guest's `seon.client-runtime.transit` wrapper (same two calls). The handoff
+   consolidates onto the guest wrapper once the pod build wires the transport.
+3. `:sqlite` backend still throws (`store.clj:32-42`); `:file` is the working
+   on-disk backend.
+
+### Smell flagged (out of scope)
+
+- The wire `handle-op` boundary uses STRING-keyed CBOR envelopes (the wire
+  contract — consistent across all 18 ops; values are registered Transit
+  schemas). Gemini repeatedly flags this as a namespaced-keyword-convention
+  violation. It is the deliberate wire-protocol boundary, not seon-internal
+  data — a defmethod dispatching on a string `"op"` can't carry `:malli/schema`
+  instrumentation anyway. If we want machine-discoverable wire ops, that's a
+  larger design (register per-op request/response schemas + a coercion layer at
+  `handle-req`), worth a focused decision rather than a drive-by change.

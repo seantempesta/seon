@@ -637,11 +637,28 @@
 
 ;; ---------- Main ----------
 
+(defn ambient-db-name
+  "The db-name string the ambient conn broadcasts under (the same value
+   `ensure-db!` passed to its `::raw-broadcast` listener). The raw tx-feed
+   subscribe ops (`seon.server.boot`) use this to route a `subscribe-tx` with
+   no agent-id/db-name to the ambient conn's pub events. Defaults to
+   \"default\" when not yet booted (matches `ensure-db!`'s fallback)."
+  []
+  (or (:ambient-db-name @state) "default"))
+
 (defn -main [& args]
   (let [opts (parse-args args)
         cfg  (store/config-for (opts->config-for-request opts))
         _    (println "[writer] starting with" opts)
         conn (ensure-db! cfg)
+        db-name (or (:name cfg) "default")
+        ;; The ambient conn is created directly by ensure-db! (outside the
+        ;; registry), so the registry's on-ensure-db hooks never fired for it.
+        ;; Run them now so the ambient conn ALSO gets the reactive engine's
+        ;; ::reactive listener + subscription schema (boot.clj registers that
+        ;; hook). ::raw-broadcast is re-installed under the same key (datahike
+        ;; replaces, not duplicates) — idempotent.
+        _    (registry/run-on-ensure-db-hooks! conn db-name)
         _    (println "[writer] datahike ready; basis-t=" (basis-t-of (d/db conn)))
         pub-server (bcast/start-pub-server! (:pub-sock opts))
         _    (println "[writer] pub socket:" (:pub-sock opts))
@@ -652,6 +669,9 @@
                         (println "[writer] dev REPL (127.0.0.1):" p)
                         s))]
     (reset! state {:conn conn :req-server req-server :pub-server pub-server
-                   :repl-server repl-server})
+                   :repl-server repl-server
+                   ;; same db-name ensure-db! gave the ambient ::raw-broadcast
+                   ;; listener — the raw tx-feed subscribe ops route to it.
+                   :ambient-db-name (or (:name cfg) "default")})
     (println "[writer] ready. PID=" (.pid (java.lang.ProcessHandle/current)))
     (.. (Thread/currentThread) join)))
