@@ -113,6 +113,11 @@
     ;; can call (seon.fs/read-file ...) + (seon.platform/host) from
     ;; bootstrap-CLJS eval.
     [seon.fs]
+    ;; Content search over allowed files — the exemplar npm-package
+    ;; wrapper (@vscode/ripgrep). Required so the agent can call
+    ;; (seon.search/grep ...) from bootstrap-CLJS eval and so the
+    ;; substrate-vars seed below can index it.
+    [seon.search]
     [seon.platform]
     ;; Phase B item 9 — shared read-side wrapper over the analyzer
     ;; state. Required here so the build includes it; item 10's
@@ -795,8 +800,17 @@
    #'db/query
    #'db/pull
    #'db/entity
+   #'db/listen!
    #'db/current-agent-id
    #'schema/register!
+   ;; Read surface on the user's machine (allowlist-gated, see seon.fs).
+   ;; Indexed so the functions catalog teaches the SEARCH→READ recipe.
+   #'seon.fs/read-file
+   #'seon.fs/list-dir
+   #'seon.fs/stat
+   #'seon.fs/walk-dir
+   #'seon.fs/home-dir
+   #'seon.search/grep
    #'seon.test.runner/run!])
 
 (def ^:private substrate-ns-kws

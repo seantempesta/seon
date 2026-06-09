@@ -113,7 +113,9 @@
   ;; keyword — the malformed value the Run-3 findings traced to the second boot.
   (let [tx  (client/index-substrate!)
         fns (filter :seon.fn/sym tx)]
-    (is (= 7 (count fns)) "emits all 7 substrate fn rows")
+    ;; 8 = the seeded set in client.cljs `substrate-vars` (7 + seon.search/grep
+    ;; added 2026-06-09). Bump when growing the seed list.
+    (is (= 8 (count fns)) "emits all 8 substrate fn rows")
     (is (every? #(let [r (:seon.fn/ns %)]
                    (and (vector? r) (= 2 (count r)) (= :seon.ns/name (first r))
                         (keyword? (second r))))
@@ -141,8 +143,8 @@
                 (.then
                   (fn [first-tx]
                     ;; FIRST boot of the fresh conn: full set.
-                    (is (= 7 (count (filter :seon.fn/sym first-tx)))
-                        "first boot emits all 7 substrate fn rows")
+                    (is (= 8 (count (filter :seon.fn/sym first-tx)))
+                        "first boot emits all 8 substrate fn rows")
                     (db/transact! {:seon.db/conn conn :seon.db/tx-data first-tx})))
                 (.then (fn [_] (client/substrate-index-tx conn)))
                 (.then
