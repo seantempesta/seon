@@ -256,7 +256,10 @@
 ;; Order doesn't matter for forward refs — datahike's `:db.type/ref`
 ;; is loosely typed (no target-entity check); the Malli registry is
 ;; populated at ns-load time before this vector resolves.
-(def ^:private agent-bootstrap-attrs
+(def agent-bootstrap-attrs
+  "The full set of registered seon attr keywords whose datahike schema the
+   agent conn needs. Public so tests can build an isolated `:memory` conn with
+   the same schema the pod boots against (see index-substrate-test)."
   [;; --- Agent ---
    ;; :seon.agent/current-ns deleted 2026-05-23 — derived from the
    ;; latest successful eval's :seon.eval/ns. See
@@ -912,6 +915,19 @@
    PRD makes substrate rows no-replay; when that lands this can carry real ns
    source.)
 
+   Always emits the FULL substrate row set — a PURE function of `substrate-vars`
+   + the on-disk source, independent of any conn. Re-seeding the same rows on a
+   later boot is idempotent at the DB layer: every row upserts on its identity
+   attr (`:seon.ns/name` / `:seon.fn/sym`). The lookup-ref `[:seon.ns/name <kw>]`
+   is the only ref shape ever emitted for `:seon.fn/ns` (a single
+   `:seon.db/ref`); it is never a bare keyword.
+
+   Boot-time DEDUP (the \"fresh agent, same conn\" guard) is applied by the
+   caller via [[substrate-index-tx]], which drops rows already present on the
+   conn so a second/Nth `start-agent!` on the shared `*conn*` re-seeds nothing.
+   Keeping THIS fn conn-free preserves its role as a pure tx-data builder (the
+   shape the index-substrate-test guards rely on).
+
    Fns whose source can't be read are OMITTED, not stubbed — the corpus stays
    honest. Returns the tx-data vector; caller transacts under
    `:seon.db/origin :substrate-seed`."
@@ -923,6 +939,29 @@
                   {:seon.ns/name   (keyword ns-sym)
                    :seon.ns/source (str "(ns " ns-sym ")")})]
     (vec (concat ns-rows fn-rows))))
+
+(defn ^:async substrate-index-tx
+  "Boot-time substrate index tx-data: [[index-substrate!]] filtered to the rows
+   not yet present on `conn`. This is the idempotency guard for the
+   \"fresh agent, same conn\" path — on the FIRST boot of a conn it returns the
+   full set; on the SECOND and Nth boot (a second `start-agent!` on the shared
+   `*conn*`, or a reconnect to a persistent store that already holds the
+   substrate index) it returns ONLY rows whose `:seon.fn/sym` / `:seon.ns/name`
+   identity is absent — typically `[]`.
+
+   Querying the conn's CURRENT identity set and emitting only the gap means a
+   re-index never re-transacts a substrate row against the populated store —
+   removing the re-seed interaction that the Run-3 findings traced to a
+   malformed `:seon.fn/ns` value. Returns a Promise of the tx-data vector."
+  [conn]
+  (let [all       (index-substrate!)
+        db        (await (d/db conn))
+        have-fns  (into #{} (map first) (d/q '[:find ?sym :where [?f :seon.fn/sym ?sym]] db))
+        have-nses (into #{} (map first) (d/q '[:find ?nm :where [?n :seon.ns/name ?nm]] db))]
+    (vec (remove (fn [row]
+                   (or (contains? have-fns (:seon.fn/sym row))
+                       (contains? have-nses (:seon.ns/name row))))
+                 all))))
 
 (defn- stub-llm
   "A fake LLM that demonstrates the REPL-as-harness response shape: a
@@ -1056,9 +1095,13 @@
                 ;;      `:seon.sticky/position :prefix`.
                 ;;   3. substrate index — `:seon.ns` + `:seon.fn` rows
                 ;;      built by `index-substrate!` from REAL runtime
-                ;;      introspection (var meta + source file-read).
+                ;;      introspection (var meta + source file-read), DEDUPED
+                ;;      against the conn by `substrate-index-tx` so a second
+                ;;      agent's boot on the shared conn re-seeds nothing
+                ;;      (returns `[]`) — the "fresh agent, same conn" guard.
                 ;; Each transact is its own tx so the substrate prefix
                 ;; remains a stable cacheable sequence of tx-times.
+                index-tx (await (substrate-index-tx conn))
                 _ (await
                     (db/with-tx-context
                       {:seon.db/origin :substrate-seed}
@@ -1069,8 +1112,7 @@
                         (await (db/transact!
                                  {:seon.db/tx-data (seed-substrate!)}))
                         (await (db/transact!
-                                 {:seon.db/tx-data
-                                  (index-substrate!)})))))
+                                 {:seon.db/tx-data index-tx})))))
                 ;; Install the per-agent inspector tx-listener. Pushes
                 ;; morphs for the agent-view inspector page (/agent/<id>).
                 _ (seon.web.inspector/install!)]

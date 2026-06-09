@@ -23,8 +23,9 @@
      (cljs.test/run-tests 'seon.index-substrate-test)"
   (:require
     [clojure.string :as str]
-    [cljs.test :as t :refer [deftest is]]
-    [seon.client :as client]))
+    [cljs.test :as t :refer [deftest is async]]
+    [seon.client :as client]
+    [seon.db :as db]))
 
 (defn- by-sym [tx sym]
   (first (filter #(= sym (:seon.fn/sym %)) tx)))
@@ -40,11 +41,16 @@
         "source is the REAL (defn …) text read from the file")
     (is (not (str/includes? (:seon.fn/source t) ",,,"))
         "NO `,,,` placeholder stub in the source")
-    (is (= "[:=> [:cat :seon.db/transact-request] :seon.db/transact-response]"
-           (:seon.fn/spec t))
-        "spec is the exact m/form string of the fn's :malli/schema")
-    (is (str/includes? (:seon.fn/arglists t) "arg")
-        "arglists parsed from real source (transact! destructures in body)")))
+    ;; transact! became a multi-arity `:function` schema in T15 (map-in +
+    ;; two datahike-positional arities). The spec is the m/form of that
+    ;; :function schema, carrying the map-in `:=>` head and the positional
+    ;; conn/tx-data slots.
+    (is (str/starts-with? (:seon.fn/spec t) "[:function ")
+        "spec is the m/form of transact!'s multi-arity :function schema")
+    (is (str/includes? (:seon.fn/spec t) ":seon.db/transact-request")
+        "spec still carries the map-in request slot")
+    (is (str/includes? (:seon.fn/arglists t) "call-args")
+        "arglists parsed from real source (T15 transact! is [& call-args])")))
 
 (deftest specced-vs-unspecced-matches-reality
   (let [tx       (client/index-substrate!)
@@ -64,14 +70,16 @@
         "register! still gets REAL source despite being unspecced")))
 
 (deftest real-arglists-not-mangled
-  ;; query/pull/entity have real map-destructure arglists in their source;
-  ;; the parser must recover them (NOT the instrumentation-mangled `([arg])`).
+  ;; The parser recovers arglists from the REAL source, not the
+  ;; instrumentation-mangled `([arg])` var-meta. query is the T15 pure-variadic
+  ;; `[& args]` form (see db.cljs docstring) — its arglist is `([& args])`,
+  ;; recovered verbatim from source.
   (let [tx    (client/index-substrate!)
         query (by-sym tx "seon.db/query")]
-    (is (str/includes? (:seon.fn/arglists query) "::keys")
-        "query's real map-in arglists are recovered from source")
+    (is (= "([& args])" (:seon.fn/arglists query))
+        "query's real [& args] arglist is recovered from source")
     (is (not= "([arg])" (:seon.fn/arglists query))
-        "query arglists are the real destructure, not the mangled var-meta")))
+        "query arglists are the real source form, not the mangled var-meta")))
 
 (deftest no-stub-source-anywhere
   ;; Permissive + honest: every indexed fn has REAL source (or is OMITTED),
@@ -98,3 +106,65 @@
     (is (= "(ns seon.db)"
            (:seon.ns/source (first (filter #(= :seon.db (:seon.ns/name %)) ns-rows))))
         "ns source is the minimal (ns x) stub (replay-safe)")))
+
+(deftest pure-index-emits-valid-refs
+  ;; index-substrate! is a PURE builder: every :seon.fn/ns it emits is a
+  ;; [:seon.ns/name <kw>] lookup-ref (a single :seon.db/ref), NEVER a bare
+  ;; keyword — the malformed value the Run-3 findings traced to the second boot.
+  (let [tx  (client/index-substrate!)
+        fns (filter :seon.fn/sym tx)]
+    (is (= 7 (count fns)) "emits all 7 substrate fn rows")
+    (is (every? #(let [r (:seon.fn/ns %)]
+                   (and (vector? r) (= 2 (count r)) (= :seon.ns/name (first r))
+                        (keyword? (second r))))
+                fns)
+        "every :seon.fn/ns is a valid [:seon.ns/name kw] lookup-ref")))
+
+(deftest substrate-index-tx-idempotent-across-boots
+  ;; The "fresh agent, same conn" guard: substrate-index-tx drops rows already
+  ;; present on the conn, so a SECOND start-agent! on the shared conn re-seeds
+  ;; nothing ([]). This is what makes a second agent boot clean instead of
+  ;; aborting on a re-seed against the populated store.
+  ;;
+  ;; Uses a guaranteed-fresh `:memory` conn (per-test random store id) with the
+  ;; same agent + tx-meta datahike schema the pod boots against, bound as
+  ;; start-agent! binds it so transact lookup-refs resolve.
+  (async done
+    (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
+                             (db/tx-meta-datahike-schema)))
+        (.then
+          (fn [conn]
+            ;; Pass :seon.db/conn explicitly — a `binding` of the dynamic
+            ;; *conn* does NOT survive across Promise `.then` boundaries in
+            ;; cljs (the binding frame pops when the sync callback returns).
+            (-> (client/substrate-index-tx conn)
+                (.then
+                  (fn [first-tx]
+                    ;; FIRST boot of the fresh conn: full set.
+                    (is (= 7 (count (filter :seon.fn/sym first-tx)))
+                        "first boot emits all 7 substrate fn rows")
+                    (db/transact! {:seon.db/conn conn :seon.db/tx-data first-tx})))
+                (.then (fn [_] (client/substrate-index-tx conn)))
+                (.then
+                  (fn [second-tx]
+                    ;; SECOND boot of the now-populated conn: clean no-op.
+                    (is (= [] second-tx)
+                        "second boot of an already-indexed conn is a no-op ([])")
+                    (db/transact!
+                      {:seon.db/conn conn
+                       :seon.db/tx-data
+                       [[:db/retractEntity [:seon.fn/sym "seon.schema/register!"]]]})))
+                (.then (fn [_] (client/substrate-index-tx conn)))
+                (.then
+                  (fn [gap-tx]
+                    ;; After dropping one fn, the re-index emits ONLY the gap,
+                    ;; with a valid lookup-ref (never a bare keyword).
+                    (let [gap-fns (filter :seon.fn/sym gap-tx)]
+                      (is (= ["seon.schema/register!"] (map :seon.fn/sym gap-fns))
+                          "partial re-index emits only the missing fn")
+                      (is (= [:seon.ns/name :seon.schema] (:seon.fn/ns (first gap-fns)))
+                          "the re-emitted ref is a valid [:seon.ns/name kw] tuple"))
+                    (done))))))
+        (.catch (fn [e]
+                  (is false (str "idempotency test threw: " (or (.-message e) e)))
+                  (done))))))
