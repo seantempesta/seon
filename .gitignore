@@ -7,6 +7,10 @@ pom.xml.asc
 
 # XTDB data (large, local only)
 data/
+# V0 CLJS pod per-run datahike file stores (data/seon-pod/<run-id>/).
+# Covered by data/ above; listed explicitly so the pod-store intent is
+# discoverable and survives any narrowing of the data/ rule.
+data/seon-pod/
 
 # Editor/IDE
 .nrepl-port

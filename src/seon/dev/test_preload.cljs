@@ -33,4 +33,6 @@
     ;; T7 clip guardrail: store-cap + row-count guard (memory-safety) and
     ;; the display-surface guiding-message tests (agent-context).
     [seon.eval.memory-safety-test]
-    [seon.agent-context-test]))
+    [seon.agent-context-test]
+    ;; A1 (2026-06-09): persistent on-disk pod conn create-vs-connect.
+    [seon.pod-disk-conn-test]))

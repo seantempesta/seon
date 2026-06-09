@@ -27,6 +27,12 @@
   (:require
     [clojure.string :as str]
     [datahike.api :as d]
+    ;; konserve.node-filestore registers datahike's :file store backend
+    ;; for Node (the agent conn persists to disk — see open-agent-conn!).
+    ;; datahike.api conditionally js/requires it, but require it
+    ;; explicitly so the :file backend is guaranteed registered in the
+    ;; :client bundle regardless of that conditional's timing.
+    [konserve.node-filestore]
     ;; Phase A item 6 — bundle malli.instrument so Phase A item 7's
     ;; install! call resolves at runtime. Pulled in here (the :client
     ;; entry) rather than seon.repl/seon.eval so reload churn in those
@@ -370,17 +376,101 @@
    :seon.test/ns
    :seon.test/created-at])
 
+;; ---------------------------------------------------------------------------
+;; Persistent on-disk agent conn (Track A1, 2026-06-09).
+;;
+;; The agent conn moved off `:backend :memory` (wiped every restart —
+;; only one run was ever reviewable) onto datahike's konserve :file
+;; backend. Each pod-run gets its own gitignored "session directory"
+;; under `data/seon-pod/<run-id>/`, PERSISTED (never auto-deleted) so
+;; past runs stay reviewable.
+;;
+;; run-id is a human-readable UTC timestamp (NOT a bare uuid) so the
+;; dirs sort chronologically and a human can tell runs apart at a
+;; glance. The store `:id` is derived deterministically from the
+;; run-id (stable per dir) so a reconnect to the same dir uses the same
+;; store identity.
+;;
+;; Konserve's node-filestore quirks (verified live, 2026-06-09):
+;;   - it does NOT mkdir -p the parent — `data/seon-pod/` must exist
+;;     before create-database (ENOENT otherwise);
+;;   - `create-database` THROWS if the store dir already exists, and
+;;     `connect` THROWS if it doesn't — so we branch on
+;;     `database-exists?` (create+connect when absent, connect-only
+;;     when present). This makes the helper idempotent across restarts
+;;     pointed at the same dir.
+;; ---------------------------------------------------------------------------
+
+(def ^:private node-fs (js/require "fs"))
+(def ^:private node-path (js/require "path"))
+(def ^:private node-crypto (js/require "crypto"))
+
+(defn- path->uuid
+  "Deterministic, well-formed UUID derived from a store path via md5.
+   Datahike's :file backend REQUIRES a UUID-typed :id and normalizes a
+   malformed one (e.g. `(uuid path)` wraps the raw string, which the
+   built fork re-hashes to a DIFFERENT id at create time → connect
+   then fails with :store-identity-mismatch). A proper RFC-shaped UUID
+   is preserved as-is through create→connect, so the same dir always
+   re-derives the same id and reconnect succeeds (verified live,
+   2026-06-09)."
+  [s]
+  (let [hex (-> (.createHash node-crypto "md5") (.update s) (.digest "hex"))]
+    (uuid (str (subs hex 0 8) "-" (subs hex 8 12) "-" (subs hex 12 16) "-"
+               (subs hex 16 20) "-" (subs hex 20 32)))))
+
+(def pod-store-base
+  "Gitignored base holding one session directory per pod-run."
+  "data/seon-pod")
+
+(defn- run-id
+  "Human-readable, filesystem-safe UTC timestamp run-id, e.g.
+   \"2026-06-09T14-55-02-123Z\". Colons/dots in the ISO form are
+   replaced with dashes so it's a valid directory name on every OS."
+  []
+  (-> (.toISOString (js/Date.))
+      (str/replace #"[:.]" "-")))
+
+(defn- disk-store-cfg
+  "datahike config for a pod session directory under pod-store-base.
+   `:keep-history? true` is REQUIRED (assert-preconditions! re-asserts
+   it; tx-meta-as-history is a silent no-op without it).
+
+   `:id` is a deterministic, well-formed UUID derived from the store
+   path (see `path->uuid`). The store layer requires :id present (the
+   config default isn't applied on the database-exists?/connect path),
+   and it must be a properly-shaped UUID or the built datahike fork
+   re-normalizes it and connect fails with :store-identity-mismatch."
+  [rid]
+  (let [path (.join node-path pod-store-base rid)]
+    {:store              {:backend :file
+                          :path    path
+                          :id      (path->uuid path)}
+     :schema-flexibility :write
+     :keep-history?      true}))
+
+(defn ^:async open-disk-conn!
+  "Open a persistent file-backed datahike conn for the given run-id,
+   creating the database the first time and connecting on subsequent
+   opens of the same dir. Ensures the gitignored base dir exists first
+   (konserve does not mkdir -p). Returns a Promise of the conn."
+  [rid]
+  (let [cfg (disk-store-cfg rid)]
+    ;; konserve does not create parent dirs; the base must exist before
+    ;; create-database (ENOENT otherwise). recursive = mkdir -p, no-op
+    ;; if already present.
+    (.mkdirSync node-fs pod-store-base #js {:recursive true})
+    (let [exists? (await (d/database-exists? cfg))]
+      (when-not exists?
+        (await (d/create-database cfg)))
+      (await (d/connect cfg)))))
+
 (defn ^:async open-agent-conn! []
-  (let [cfg {:store {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             ;; v1.md §7.1 precondition. The tx-meta-as-history mechanic
-             ;; (every tx carries the seon.db/* causality bundle as
-             ;; persisted datoms on the tx entity) is silent-no-op unless
-             ;; history is on. `seon.db/assert-preconditions!` (called
-             ;; from `start-agent!` below) re-asserts this at runtime.
-             :keep-history? true}]
-    (await (d/create-database cfg))
-    (let [conn (await (d/connect cfg))
+  (let [rid (run-id)
+        conn (await (open-disk-conn! rid))]
+    (log/info-console! "seon.client/open-agent-conn!"
+                       (str "pod store: " (.join node-path pod-store-base rid)))
+    (let [
           ;; Phase 2.6 (2026-05-23) — the agent schema AND the tx-meta
           ;; schema both flow through `seon.db/malli->datahike-schema`,
           ;; reading the shared `seon.schema` Malli registry. Adding a
