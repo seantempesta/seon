@@ -915,6 +915,35 @@
        (str (subs s 0 limit) " …⟨" (- n limit) " chars elided⟩")
        s))))
 
+(defn cap-result-body
+  "Like `cap-result`, but for an eval RESULT body specifically: when the
+   value is clipped by size, append a GUIDING clip message that teaches
+   the agent how to get less/narrower output, instead of a bare elision
+   marker. A clip is feedback, not a failure (errors are values the agent
+   reads).
+
+   Only the SIZE clip (a huge scalar/string that overflows the display
+   cap) gets this guide. Large COLLECTIONS are already bounded upstream
+   with their own row-count guide in `:seon.eval/result-edn`
+   (`seon.eval/render-result-edn`), so their preview fits under the cap
+   and no second guide fires here — no double-noising.
+
+   The full value is always available via `(result <id>)` (the live
+   globalThis stash); the clip is display-only."
+  ([s] (cap-result-body s eval-render-cap nil))
+  ([s limit] (cap-result-body s limit nil))
+  ([s limit eid]
+   (let [s (str s)
+         n (count s)]
+     (if (> n limit)
+       (let [ref (if eid (str "(result :" eid ")") "(result :<id>)")]
+         (str (subs s 0 limit)
+              " …⟨" (- n limit) " chars clipped at " limit "⟩"
+              "\n;; Narrow it: add a :find aggregate or limit, a tighter "
+              ":where, or pull fewer attrs; " ref " holds the full value "
+              "to drill with get-in/filter."))
+       s))))
+
 (defn- format-eval-row
   "Multi-line render for the recent-evals tile — narration, source,
    result/error, and the timing footer (`; # eval-id  Nms`).
@@ -939,13 +968,14 @@
   (let [envelope (read-error-envelope err-data)
         body (cond
                ok?
-               (cap-result (or res "nil"))
+               (cap-result-body (or res "nil") eval-render-cap eid)
 
                (einstrument/instrument-error? envelope)
-               (cap-result (einstrument/render-malli-error envelope))
+               (cap-result-body (einstrument/render-malli-error envelope)
+                                eval-render-cap eid)
 
                (and (string? err) (not (str/blank? err)))
-               (cap-result (str ";; ERROR " err))
+               (cap-result-body (str ";; ERROR " err) eval-render-cap eid)
 
                :else ";; <no result>")
         footer (str "  ; # " eid (when dur (str "  " dur "ms")))]

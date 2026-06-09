@@ -19,6 +19,7 @@
      (cljs.test/run-tests 'seon.eval.memory-safety-test)"
   (:require
     [cljs.test :as t :refer [deftest is testing]]
+    [clojure.string :as str]
     [seon.eval :as seval]))
 
 ;; ---------------------------------------------------------------------------
@@ -92,6 +93,59 @@
       (finally
         (js/Reflect.deleteProperty
           js/globalThis (str "__seon_results_" eval-id))))))
+
+;; ---------------------------------------------------------------------------
+;; render-result-edn — T7 row-count guard. A broad query returning thousands
+;; of tuples is row-bounded into a readable preview with a PREPENDED guiding
+;; clip message, instead of a char-clipped giant set.
+;; ---------------------------------------------------------------------------
+
+(deftest result-row-cap-is-a-sane-positive-bound
+  (is (= 50 seval/result-row-cap))
+  (is (pos? seval/result-row-cap)))
+
+(deftest small-collection-renders-fully-with-no-row-guide
+  (let [edn (seval/render-result-edn "ev00000001" (vec (range 5)))]
+    (is (= "[0 1 2 3 4]" edn) "small coll = ordinary pr-str")
+    (is (not (re-find #"more clipped" edn)) "no false-positive guide")))
+
+(deftest scalar-result-renders-verbatim-no-row-guide
+  ;; only COUNTED collections trip the row guard; a map is small here, a big
+  ;; scalar string is left to the char-based caps (cap-edn / cap-result-body).
+  (let [edn (seval/render-result-edn "ev00000002" {:seon.demo/x 1 :seon.demo/y 2})]
+    (is (not (re-find #"more clipped" edn)))
+    (is (re-find #":seon.demo/x" edn))))
+
+(deftest many-row-result-is-row-bounded-with-a-guiding-message
+  (let [eval-id "ev00000003"
+        total   5000
+        edn     (seval/render-result-edn eval-id (vec (range total)))]
+    (testing "row-count guide is PRESENT and reports totals"
+      (is (re-find (re-pattern (str total " rows")) edn))
+      (is (re-find (re-pattern (str "\\+" (- total seval/result-row-cap)
+                                    " more clipped"))
+                   edn)))
+    (testing "guide teaches narrowing and points at the live full value"
+      (is (re-find #"Narrow your query" edn))
+      (is (re-find (re-pattern (str "\\(result :" eval-id "\\)")) edn)))
+    (testing "guide is PREPENDED so it survives the smaller display cap"
+      (is (str/starts-with? edn ";; …")))
+    (testing "only the first result-row-cap rows are previewed"
+      ;; Preview renders one element per line as "\n N"; row 49 is the last
+      ;; (followed by the closing paren), row 50 is excluded. Match the DATA
+      ;; lines, NOT a bare number — the guide text says "showing first 50".
+      (is (re-find #"\n 49\)" edn))
+      (is (not (re-find #"\n 50\b" edn))))
+    (testing "preview is BOUNDED — not a stringified 5000-element set"
+      (is (< (count edn) 2000)))))
+
+(deftest many-row-guide-survives-the-store-cap
+  ;; render-result-edn output still flows through cap-edn at the write site;
+  ;; the prepended guide must survive that too.
+  (let [edn    (seval/render-result-edn "ev00000004" (vec (range 9000)))
+        capped (seval/cap-edn edn)]
+    (is (str/starts-with? capped ";; …"))
+    (is (re-find #"9000 rows" capped))))
 
 ;; ---------------------------------------------------------------------------
 ;; prompt-text path — with-turn! now passes prompt-text through cap-edn.

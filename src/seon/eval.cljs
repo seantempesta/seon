@@ -830,6 +830,50 @@
        (str (subs s 0 limit) " …⟨" (- n limit) " chars elided⟩")
        s))))
 
+(def result-row-cap
+  "Row bound for a COLLECTION eval result rendered into
+   `:seon.eval/result-edn`. A broad `seon.db/query`/`pull` (or any eval
+   returning a large seq) can yield thousands of tuples; pr-str'ing the
+   whole set and then char-clipping it mid-token produces an ugly,
+   unhelpful blob. Instead we preview the first `result-row-cap` rows and
+   prepend a one-line GUIDING message teaching the agent to narrow.
+
+   The guide is PREPENDED (not appended) so it survives the smaller
+   downstream display cap (`seon.agent/eval-render-cap`, 1500) — the
+   agent reads the clip-feedback even when the preview itself is later
+   trimmed. The FULL value is untouched in the globalThis live-result
+   stash (`(result <id>)`); the row cap is a render concern only."
+  50)
+
+(defn render-result-edn
+  "Stringify an eval's success VALUE for `:seon.eval/result-edn`.
+
+   Collection guard: when `value` is a counted collection with more than
+   `result-row-cap` rows, render a bounded preview (first `result-row-cap`
+   rows) and PREPEND a guiding clip message — a broad query result becomes
+   actionable feedback instead of a char-clipped giant set. Otherwise
+   pr-str normally (the size cap `cap-edn` still backstops huge scalars).
+
+   Operates on the RAW value (pre-pr-str) — this is the only point in the
+   pipeline where the original row count is known. Pure: stores nothing,
+   does not touch the live-result stash. Never throws."
+  [eval-id value]
+  (try
+    (if (and (coll? value)
+             (counted? value)
+             (> (count value) result-row-cap))
+      (let [total   (count value)
+            preview (take result-row-cap value)
+            dropped (- total result-row-cap)
+            body    (str/join "\n " (map pr-str preview))]
+        (str ";; … " total " rows; showing first " result-row-cap
+             ", +" dropped " more clipped. Narrow your query: a tighter "
+             ":where, a :find aggregate, or take fewer; (result :" eval-id
+             ") holds the full value to drill with get-in/filter.\n"
+             "(" body ")"))
+      (pr-str value))
+    (catch :default _ (str value))))
+
 (defn ^:async record-eval!
   "Transact one :seon.eval entity as a component child of its owning
    turn (per v1.md §2.1 — `:seon.turn/evals` is component-many). The
@@ -876,8 +920,7 @@
                    (:ok result)
                    (assoc :seon.eval/result-edn
                           (cap-edn
-                            (try (pr-str (:value result))
-                                 (catch :default _ (str (:value result))))))
+                            (render-result-edn eval-id (:value result))))
 
                    (not (:ok result))
                    (assoc :seon.eval/error

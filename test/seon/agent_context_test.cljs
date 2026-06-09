@@ -41,6 +41,7 @@
     [seon.agent :as agent]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.eval :as seval]
     [seon.inspect :as inspect]))
 
 ;; ---------------------------------------------------------------------------
@@ -380,7 +381,82 @@
                          "-char result — got " (count ts)))
                 (is (< (count full) ceil)
                     (str "render-prompt bounded — got " (count full)))
-                (is (str/includes? ts "chars elided⟩")
-                    "the big result was elided with the marker"))))
+                ;; T7: the size clip now carries a GUIDING message in
+                ;; place of a bare marker — a clip is feedback, not a
+                ;; failure. The agent is taught how to narrow.
+                (is (str/includes? ts "chars clipped at")
+                    "the big result was clipped with the size marker")
+                (is (str/includes? ts "Narrow it")
+                    "the size clip carries a guiding narrow-it message")
+                (is (str/includes? ts "(result :")
+                    "guide points the agent at the live full value"))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ---------------------------------------------------------------------------
+;; (g) T7 display-surface guiding messages — pure unit tests on the render
+;; helpers. A clip is FEEDBACK (errors are values the agent reads), so when
+;; output is clipped the rendered row carries an ACTIONABLE guide, not a bare
+;; marker. Small results render fully with NO guide (no false-positive noise).
+;; ---------------------------------------------------------------------------
+
+(deftest cap-result-body-leaves-a-small-result-clean
+  (let [small "[0 1 2 3 4]"]
+    (is (= small (agent/cap-result-body small))
+        "under the cap → verbatim, no marker")
+    (is (not (str/includes? (agent/cap-result-body small) "Narrow it"))
+        "no guide on a small result — no false positive")))
+
+(deftest cap-result-body-clips-a-huge-scalar-with-a-guiding-message
+  (let [huge (apply str (repeat 5000 "z"))
+        out  (agent/cap-result-body huge agent/eval-render-cap "hg0000abcd")]
+    (testing "bounded to the display cap (+ the appended guide)"
+      (is (< (count out) (+ agent/eval-render-cap 300))))
+    (testing "carries the size marker AND a guiding narrow-it message"
+      (is (str/includes? out "chars clipped at 1500"))
+      (is (str/includes? out "Narrow it")))
+    (testing "guide points at the live full value via (result :<eid>)"
+      (is (str/includes? out "(result :hg0000abcd)")))))
+
+(deftest cap-result-body-uses-placeholder-when-no-eid
+  (let [huge (apply str (repeat 5000 "z"))
+        out  (agent/cap-result-body huge)]
+    (is (str/includes? out "(result :<id>)")
+        "no eid → generic placeholder, still actionable")))
+
+(deftest format-eval-row-small-result-is-clean
+  (let [row (#'agent/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "sm0000001a"
+               :seon.eval/duration-ms 1})]
+    (is (str/includes? row "3"))
+    (is (not (str/includes? row "Narrow it")) "no guide on a small row")
+    (is (not (str/includes? row "clipped")) "no clip marker on a small row")))
+
+(deftest format-eval-row-huge-result-is-bounded-and-guided
+  (let [huge-edn (pr-str (apply str (repeat 5000 "z")))
+        row      (#'agent/format-eval-row
+                   {:seon.eval/source "(big-string)" :seon.eval/ok? true
+                    :seon.eval/result-edn huge-edn :seon.eval/id "hg0000002b"
+                    :seon.eval/duration-ms 7})]
+    (testing "row is bounded regardless of how large the result is"
+      (is (< (count row) (+ agent/eval-render-cap 400))))
+    (testing "guiding message present, anchored to the row's own eid"
+      (is (str/includes? row "chars clipped at 1500"))
+      (is (str/includes? row "Narrow it"))
+      (is (str/includes? row "(result :hg0000002b)")))))
+
+(deftest format-eval-row-row-bounded-collection-preview-keeps-its-guide
+  ;; A large collection is bounded UPSTREAM (render-result-edn) into a preview
+  ;; whose row-guide is prepended; that guide must survive format-eval-row's
+  ;; display cap, and NOT trigger a second (size) guide — no double-noising.
+  (let [edn (seval/render-result-edn "cc0000003c" (vec (range 5000)))
+        row (#'agent/format-eval-row
+              {:seon.eval/source "(seon.db/query {…})" :seon.eval/ok? true
+               :seon.eval/result-edn edn :seon.eval/id "cc0000003c"
+               :seon.eval/duration-ms 12})]
+    (is (str/includes? row "more clipped") "row-count guide survives")
+    (is (str/includes? row "5000 rows"))
+    (is (not (str/includes? row "Narrow it"))
+        "no SECOND size guide — preview is already small (no double-noise)")
+    (is (< (count row) 1000) "preview row is bounded")))

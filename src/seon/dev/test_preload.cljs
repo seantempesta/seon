@@ -29,4 +29,8 @@
     [seon.agents-test]
     [seon.db-test]
     [seon.render-test]
-    [seon.boot.preconditions-test]))
+    [seon.boot.preconditions-test]
+    ;; T7 clip guardrail: store-cap + row-count guard (memory-safety) and
+    ;; the display-surface guiding-message tests (agent-context).
+    [seon.eval.memory-safety-test]
+    [seon.agent-context-test]))
