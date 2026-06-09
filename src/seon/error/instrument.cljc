@@ -56,7 +56,7 @@
 ;; Per the research caveat (Q4): `{:optional true}` is only meaningful
 ;; inside a parent `:map`. These registrations are scalar shapes;
 ;; optionality is enforced at the consumer (the renderer treats absent
-;; keys as "skip that row"). Same pattern as :seon.message/agent.
+;; keys as "skip that row"). Same pattern as :seon.message/hops.
 ;; ============================================================
 
 (schema/register! :seon.error/kind             :keyword)

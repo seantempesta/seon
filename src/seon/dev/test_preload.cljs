@@ -42,4 +42,7 @@
     ;; Run-5 / A4 (2026-06-09): transact! envelope contract — never
     ;; rejects, :double bridges, cryptic errors translated, register!
     ;; type gate.
-    [seon.db.envelope-test]))
+    [seon.db.envelope-test]
+    ;; Unit 1.5 (2026-06-09): messaging codified — message!/reply!,
+    ;; from/to refs, hops, blank-content guard, derived conversation.
+    [seon.message-test]))

@@ -94,86 +94,70 @@
    You query the exact post-commit state of the tx that fired you — no
    stale-read races even when the listener queue is backed up.
 
-   ## The canonical reaction: kick your own agent loop on a user message
+   ## The canonical reaction: kick your own agent loop on an inbound message
 
    The default agent boot wires this listener. Read it as your own
-   self-description — this is how you start running when the user
-   addresses you, and how you stop running when you have nothing left
-   to say:
+   self-description — this is how you start running when someone (the
+   user OR another agent) addresses you, and how you stop running when
+   you have nothing left to say:
 
      (require '[seon.db :as db] '[seon.schema :as schema])
 
      ;; ---- schemas: registered once at boot ----
-     (schema/register! :seon.message/role
-                       [:enum :user :assistant :system])
-     (schema/register! :seon.message/content   :string)
-     (schema/register! :seon.message/agent     :seon.db/ref)
+     ;; Every message is FULLY FORMED: from (ref to the sender — a
+     ;; :seon.user/id or :seon.agent/id entity), to (vector of refs,
+     ;; fan-out), content, at, id, hops.
+     (schema/register! :seon.message/from    :seon.db/ref)
+     (schema/register! :seon.message/to      [:vector :seon.db/ref])
+     (schema/register! :seon.message/content :string)
      (schema/register! :seon.agent/state
                        [:enum :idle :running])
 
      ;; ---- the kick-the-loop reaction ----
-     (defn kick-on-user-message
+     (defn kick-on-inbound-message
        \"Trigger handler. Fires on every tx. For each newly-added
-        :seon.message/role datom whose value is :user, look at the
-        agent that owns the message and decide whether to spawn a
-        turn.\"
+        :seon.message/to datom targeting ME (and whose from ≠ me),
+        decide whether to spawn a turn.\"
        [{::db/keys [db attr-index]}]
-       (doseq [{::db/keys [e added?]} (:seon.message/role attr-index)
+       (doseq [{::db/keys [e v added?]} (:seon.message/to attr-index)
                :when added?
+               :when (= v my-eid)
                :let [msg (db/entity {::db/db db ::db/ref e})]
-               :when (= :user (:seon.message/role msg))
-               :let [agent (:seon.message/agent msg)
-                     state (:seon.agent/state agent)]]
+               :when (not= my-eid (:db/id (:seon.message/from msg)))
+               :let [state (:seon.agent/state
+                             (db/entity {::db/db db ::db/ref my-eid}))]]
          (case state
            ;; Loop already running — it will see the new message on its
            ;; next ctx-build and respond to it. Doing nothing here is
-           ;; the idempotency guarantee: you can paste 10 user messages
-           ;; in a row and exactly one loop runs, processing all of them.
+           ;; the idempotency guarantee: you can paste 10 messages in a
+           ;; row and exactly one loop runs, processing all of them.
            :running nil
            ;; Idle (or nil for a fresh agent). Flip the state and run
-           ;; one turn. The loop owns its own continuation — once it
+           ;; the loop. The loop owns its own continuation — once it
            ;; has the `:running` flag it'll keep ticking until it
            ;; decides to stop.
-           (do
-             (db/transact!
-               {::db/tx-data [{:db/id (:db/id agent)
-                               :seon.agent/state :running}]})
-             (seon.agent/run-turn-once!
-               (:seon.agent/id agent) (seon.agent/home-ns (:seon.agent/id agent))
-               llm-fn compile-state))))
+           (run-the-loop!))))
 
      (db/listen! {::db/key     ::user-message-trigger
-                  ::db/handler kick-on-user-message})
+                  ::db/handler kick-on-inbound-message})
 
    ### How the loop stops itself
 
-   Each turn of `seon.agent/run-turn-once!` does:
+   Each turn the loop builds ctx from the agent's derived conversation
+   (from = me OR to ∋ me), calls the LLM, and evals the forms. The
+   agent speaks via `seon.agent/reply!` / `message!`; its own writes
+   carry from = me, and the listener above requires from ≠ me — the
+   agent's own messages never re-trigger its loop. So:
 
-     1. build ctx from the agent's messages (user + prior assistant
-        + tool-call results),
-     2. call the LLM,
-     3. parse the response:
-        - if it has tool calls → execute them, transact their results
-          as `:seon.tool-call/*` entities, recurse for another turn
-          (the tool-call results re-trigger ctx-build; the LLM gets
-          its own outputs back),
-        - if it's plain text with no tool calls → transact an
-          `:seon.message/role :assistant` entity carrying the text,
-          set `:seon.agent/state :idle`, return.
-
-   The exit condition is what LLMs do most of the time anyway: when
-   they have nothing useful left to do, they return prose. That prose
-   becomes an `:assistant`-role message; the listener above ONLY fires
-   on `:user`-role additions; the assistant's own message doesn't
-   re-trigger the loop. So:
-
-   - User types something → loop kicks → runs until LLM is done →
+   - Someone messages you → loop kicks → runs until the LLM is done →
      halts. Idle.
-   - User types again → loop kicks again. Idempotency means even if
+   - They message again → loop kicks again. Idempotency means even if
      they paste fast, only one loop runs at a time.
    - The loop NEVER kicks itself by writing its own messages — that
-     would be infinite recursion. The asymmetric trigger
-     (`:user`-only) is the load-bearing piece.
+     would be infinite recursion. The asymmetric trigger (from ≠ me)
+     is the load-bearing piece. Agent↔agent chains are additionally
+     bounded by `:seon.message/hops` (the wake refuses past
+     `seon.warn/hop-cap`).
 
    ### What if the LLM never stops calling tools?
 

@@ -11,7 +11,7 @@
      GET  /css/output.css    → resources/public/css/output.css
      GET  /js/datastar.js    → resources/public/js/datastar.js
      GET  /sse               → SSE stream (A-6 wires broadcast)
-     POST /chat              → A-8 (user message → :seon.message/role :user tx)
+     POST /chat              → A-8 (user message → message! with from = the user ref)
 
    ## Port discovery
 
@@ -243,14 +243,19 @@
       (throw (js/Error. "handle-clear!: no agent-id resolved")))
     (log/info-console! "seon.web.serve" "/clear ENTER" {:agent agent-id})
     (try
-      (let [msg-eids (->> (db/query
-                            {:seon.db/query
-                             '[:find ?m
-                               :in $ ?aid
-                               :where
-                               [?m :seon.message/agent ?aid]]
-                             :seon.db/args [[:seon.agent/id agent-id]]})
-                          (map first))
+      (let [my-eid   (:db/id (db/entity {:seon.db/ref [:seon.agent/id agent-id]}))
+            ;; "My conversation" is DERIVED: from = me OR to ∋ me.
+            msg-eids (when my-eid
+                       (->> (db/query
+                              {:seon.db/query
+                               '[:find ?m
+                                 :in $ ?me
+                                 :where
+                                 (or-join [?m ?me]
+                                   [?m :seon.message/from ?me]
+                                   [?m :seon.message/to ?me])]
+                               :seon.db/args [my-eid]})
+                            (map first)))
             eval-eids (->> (db/query
                              {:seon.db/query
                               '[:find ?e
@@ -315,13 +320,29 @@
                    (if (or (nil? text) (str/blank? text))
                      (write-status! res 400 "text/plain; charset=utf-8"
                                     "missing 'text' param")
-                     (-> (agent/chat agent-id text)
-                         (.then (fn [_mid]
-                                  (log/info-console! "seon.web.serve" "POST /chat"
-                                                     {:agent agent-id :text-len (count text)})
-                                  (write-status! res 204 "text/plain; charset=utf-8" "")))
+                     ;; The HTTP adapter is the USER's hands — stamp
+                     ;; from = the user ref explicitly (no ALS agent
+                     ;; scope at the event-loop root). message! is the
+                     ;; single entry point; the envelope is checked,
+                     ;; never assumed.
+                     (-> (agent/message!
+                           {:seon.message/from    agent/user-ref
+                            :seon.message/to      [[:seon.agent/id agent-id]]
+                            :seon.message/content text})
+                         (.then (fn [{ok? :seon.db/ok? error :seon.db/error}]
+                                  (if ok?
+                                    (do
+                                      (log/info-console! "seon.web.serve" "POST /chat"
+                                                         {:agent agent-id :text-len (count text)})
+                                      (write-status! res 204 "text/plain; charset=utf-8" ""))
+                                    (do
+                                      (log/error-console! "seon.web.serve" "/chat message! refused"
+                                                          (:seon.error/message error))
+                                      (write-status! res 422 "text/plain; charset=utf-8"
+                                                     (str "chat refused: "
+                                                          (:seon.error/message error)))))))
                          (.catch (fn [err]
-                                   (log/error-console! "seon.web.serve" "/chat agent/chat threw" err)
+                                   (log/error-console! "seon.web.serve" "/chat message! threw" err)
                                    (write-status! res 500 "text/plain; charset=utf-8"
                                                   (str "chat failed: " err)))))))))
         (.catch (fn [err]

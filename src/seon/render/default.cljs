@@ -67,25 +67,52 @@
       entity)))
 
 (defn ^:no-doc recent-messages
-  "Return the most-recent `n` messages for `id`, oldest-first. Each
-   row is `[at role content]`."
+  "Return the most-recent `n` messages of agent `id`'s conversation
+   (DERIVED: from = me OR to ∋ me — nothing stored per-agent),
+   oldest-first. Each row is `[at label content]`; the label resolves
+   by from-ref kind: `user` / `assistant` (the agent itself) /
+   `agent-<id>` (another agent)."
   ([db id] (recent-messages db id 20))
   ([db id n]
-   (let [args  [[:seon.agent/id id]]
-         query '[:find ?at ?role ?content
-                 :in $ ?aid
-                 :where
-                 [?m :seon.message/agent ?aid]
-                 [?m :seon.message/at ?at]
-                 [?m :seon.message/role ?role]
-                 [?m :seon.message/content ?content]]
-         rows  (if db
-                 (db/query {:seon.db/db db
-                            :seon.db/query query
-                            :seon.db/args args})
-                 (db/query {:seon.db/query query
-                            :seon.db/args args}))]
-     (->> rows (sort-by first) (take-last n)))))
+   (let [;; eid via QUERY, not d/entity — the inspector hands `view` a
+         ;; FilteredDB, and datahike-cljs FilteredDB doesn't implement
+         ;; -lookup (entity-by-lookup-ref throws); queries work fine.
+         eid-q  '[:find ?e :in $ ?id :where [?e :seon.agent/id ?id]]
+         my-eid (ffirst (if db
+                          (db/query {:seon.db/db db
+                                     :seon.db/query eid-q
+                                     :seon.db/args [id]})
+                          (db/query {:seon.db/query eid-q
+                                     :seon.db/args [id]})))
+         query  '[:find ?at ?uid ?aid ?content
+                  :in $ ?me
+                  :where
+                  (or-join [?m ?me]
+                    [?m :seon.message/from ?me]
+                    [?m :seon.message/to ?me])
+                  [?m :seon.message/at ?at]
+                  [?m :seon.message/from ?f]
+                  [(get-else $ ?f :seon.user/id "") ?uid]
+                  [(get-else $ ?f :seon.agent/id "") ?aid]
+                  [?m :seon.message/content ?content]]
+         rows   (when my-eid
+                  (if db
+                    (db/query {:seon.db/db db
+                               :seon.db/query query
+                               :seon.db/args [my-eid]})
+                    (db/query {:seon.db/query query
+                               :seon.db/args [my-eid]})))]
+     (->> rows
+          (map (fn [[at uid aid content]]
+                 [at
+                  (cond
+                    (seq uid)  "user"
+                    (= aid id) "assistant"
+                    (seq aid)  (str "agent-" aid)
+                    :else      "unknown")
+                  content]))
+          (sort-by first)
+          (take-last n)))))
 
 (defn ^:no-doc recent-errors
   "Return the most-recent `n` `:seon.log/level :error` entries for
@@ -159,8 +186,8 @@
              (str (:seon.log/message e))]])])
       [:section {:class "flex-1 overflow-auto text-xs font-mono"}
        (if (seq msgs)
-         (for [[_at role content] msgs]
+         (for [[_at label content] msgs]
            [:div {:class "py-0.5"}
-            [:span {:class "text-text-400"} (str (name role) ": ")]
+            [:span {:class "text-text-400"} (str label ": ")]
             [:span {:class "text-text-100"} content]])
          [:div {:class "text-text-500 italic"} "no messages yet"])]]}))

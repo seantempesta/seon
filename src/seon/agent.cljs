@@ -37,20 +37,21 @@
      - `assemble-context` + 6 default section fns — v1.md §5.2/§5.3
      - `run-agentic-loop!`  — multi-turn driver, stop policies (v1 §6.2)
      - `install-user-trigger!` — register the tx-listener that wakes
-                              `run-agentic-loop!` on a new :user message
+                              `run-agentic-loop!` on a new INBOUND
+                              message (to ∋ me AND from ≠ me)
      - `turns-cap`          — read :seon.agent/turns-cap or fallback
                               to `default-turns-cap`
      - `current-session` / `ensure-session!` / `start-session!`
      - `create!`            — allocate an agent entity, init state
-     - `chat`               — inject a :user message
+     - `message!` / `reply!` — THE message write entry points (from/to
+                              refs, hops guard, blank-content guard)
      - `boot!`              — wire everything: create entity + install
-                              user-message trigger + install substrate
+                              inbound-message trigger + install substrate
                               default `:seon.ctx` layout
      - `reset-ctx!` / `update-ctx!` / `ctx-entities` — agent's ctx-layout
        editing surface
      - `warnings-section`   — clustered warnings via the `seon.warn`
        check registry (compositional; ns-scoped by default)
-     - `replies-after`      — poll-style read of :assistant messages
 
    Agent-id resolution: every read API takes `:seon.agent/id` and falls
    back to `(seon.db/current-agent-id)` when unset. Callers running
@@ -118,9 +119,9 @@
 
 (schema/register! :seon.agent/id            [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.agent/state         [:enum :idle :running])
-;; v0 :seon.agent/turn-count, :seon.agent/turns-since-user,
+;; v0 :seon.agent/turn-count, :seon.agent/turns-since-inbound,
 ;; :seon.agent/interrupted? attrs deleted 2026-05-22. turn-count
-;; was a holdover that always read 0; turns-since-user moved to
+;; was a holdover that always read 0; turns-since-inbound moved to
 ;; :seon.session; interrupted? was registered but never written.
 
 ;; Cap on consecutive agentic turns per user message. Lives on the
@@ -141,17 +142,31 @@
         (db/entity {:seon.db/ref [:seon.agent/id agent-id]}))
       default-turns-cap))
 
+;; Messaging codified (unit 1.5, 2026-06-09): every stored message is
+;; FULLY FORMED — from + to + content + at + id + hops. Identity is the
+;; ref (`:seon.message/from` points at the sender entity — a
+;; `:seon.user/id` or `:seon.agent/id` entity); `role` and `agent` are
+;; RETIRED. "My conversation" is DERIVED: from = me OR to ∋ me.
 (schema/register! :seon.message/id      [:and {:seon.db/identity true} :seon.db/id])
-(schema/register! :seon.message/role    [:enum :user :assistant :system])
 (schema/register! :seon.message/content :string)
-;; :seon.message/agent — present on user-originated messages
-;; (`chat` writes it so user-message-handler can find the target agent),
-;; absent on assistant/system messages that live as turn components
-;; and reach the agent via the component chain. The validation gate
-;; only fires when the key IS in tx-data, so absence is naturally
-;; OK (no `:optional` wrapper needed on a standalone schema reg).
-(schema/register! :seon.message/agent   :seon.db/ref)
+(schema/register! :seon.message/from    :seon.db/ref)
+(schema/register! :seon.message/to      [:vector :seon.db/ref])
 (schema/register! :seon.message/at      :inst)
+;; Ping-pong guard: 0 when from = the user; agent-originated sends
+;; carry waking-message-hops + 1. The wake trigger REFUSES messages
+;; whose hops reached `seon.warn/hop-cap` so two agents can't auto-bill
+;; an infinite reply chain.
+(schema/register! :seon.message/hops    :int)
+
+;; The user is a REAL entity — ONE `:seon.user/id` row seeded at boot
+;; (identity upsert, idempotent — same pattern as agent entities). All
+;; message refs are uniform; later home for user prefs/memory.
+(schema/register! :seon.user/id         [:string {:seon.db/identity true}])
+
+(def user-ref
+  "Lookup ref of THE user entity (one human for now). Seeded at boot by
+   seon.client; the default `:seon.message/to` target."
+  [:seon.user/id "user"])
 
 (schema/register! :seon.eval/id          [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.eval/at          :inst)
@@ -199,9 +214,10 @@
 ;;
 ;; - turn-count = (count (:seon.session/turns session)) — read time.
 ;; - turn-index = (count …) at write time.
-;; - turns-since-user = count of :seon.turn entities with :seon.turn/at
-;;   strictly greater than the latest :seon.message/role :user's :at.
-;;   See `seon.agent/turns-since-user` helper. Derived; no storage.
+;; - turns-since-inbound = count of :seon.turn entities with
+;;   :seon.turn/at strictly greater than the latest INBOUND message's
+;;   :at (to ∋ me, from ≠ me). See `seon.agent/turns-since-inbound`
+;;   helper. Derived; no storage.
 ;; - current-ns = the latest successful eval's :seon.eval/ns attr (or
 ;;   the agent's home-ns if no evals yet). See `seon.agent/current-ns`
 ;;   helper. Derived; no storage.
@@ -222,6 +238,11 @@
 (schema/register! :seon.turn/id           [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.turn/at           :inst)
 (schema/register! :seon.turn/status       [:enum :running :done :error])
+;; The message whose wake opened this turn (optional — boot/manual turns
+;; have none). `reply!` reads the CURRENT turn's woken-by → its
+;; `:seon.message/from` = the reply target. Derived + deterministic; no
+;; reply-target atom anywhere.
+(schema/register! :seon.turn/woken-by     :seon.db/ref)
 (schema/register! :seon.turn/prompt-text  :string)
 (schema/register! :seon.turn/messages     [:vector {:seon.db/component true} :seon.db/ref])
 (schema/register! :seon.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
@@ -300,7 +321,7 @@
 ;; Required attrs reflect what every writer of the kind populates
 ;; unconditionally — derived empirically from the write sites:
 ;;   :seon.eval   — `record-eval!` (eval.cljs)
-;;   :seon.message — `chat` + assistant-msg writer (agent.cljs)
+;;   :seon.message — `message!` (the single write entry point, agent.cljs)
 ;;   :seon.fn     — `build-tee-entities` (eval.cljs)
 ;;   :seon.schema — `build-tee-entities` (eval.cljs)
 ;;   :seon.ns     — `build-tee-entities` (eval.cljs)
@@ -333,12 +354,11 @@
   [:map {:seon.render/ai   'seon.handlers.message/render-ai
          :seon.render/html 'seon.handlers.message/render-html}
    [:seon.message/id      :seon.message/id]
-   [:seon.message/role    :seon.message/role]
+   [:seon.message/from    :seon.message/from]
+   [:seon.message/to      :seon.message/to]
    [:seon.message/content :seon.message/content]
    [:seon.message/at      :seon.message/at]
-   [:seon.message/agent {:optional true} :seon.message/agent]
-   [:seon.message/from  {:optional true} :seon.message/from]
-   [:seon.message/to    {:optional true} :seon.message/to]])
+   [:seon.message/hops    :seon.message/hops]])
 
 (schema/register! :seon.fn
   [:map {:seon.render/ai   'seon.handlers.fn/render-ai
@@ -417,10 +437,10 @@
 
 ;; Forward refs — run-turn!, run-agentic-loop!, current-session,
 ;; start-session!, turn-index live in the v1 scaffold block below;
-;; user-message-handler calls them. (Reorganizing the file is a separate
+;; inbound-message-handler calls them. (Reorganizing the file is a separate
 ;; pass.)
 (declare run-turn! run-agentic-loop! current-session start-session! turn-index
-         turns-since-user current-ns substrate-default-ctx pretty-ai)
+         turns-since-inbound current-ns substrate-default-ctx pretty-ai)
 
 (defn- per-agent-shape?
   "True when `sym` is in the agent's own home namespace (per spec-05
@@ -444,57 +464,102 @@
 
 ;; ============================================================
 ;; Kick handler — datahike tx-listener fires on every transact; we
-;; filter for new :user messages on the matching agent and schedule
-;; run-agentic-loop! via setTimeout so we return to the listener
-;; immediately (no blocking the transactor).
+;; filter for new INBOUND messages (to ∋ me AND from ≠ me — sender-
+;; agnostic: the user and other agents wake the loop the same way) and
+;; schedule run-agentic-loop! via setTimeout so we return to the
+;; listener immediately (no blocking the transactor).
 ;;
-;; State-machine guard: if the agent is already :running, do
-;; nothing. The loop's next render reads accumulated user messages
-;; via the chain; the listener's job is to wake the loop, not to
-;; queue work.
+;; State-machine guard: if the agent is already :running, do nothing —
+;; the loop's next render reads accumulated messages via the derived
+;; conversation. A per-agent SCHEDULED LATCH closes the read-state-
+;; then-schedule window (multi-agent-state-isolation Q2 #4: two quick
+;; txs could both read non-:running before either loop's open-tx
+;; landed → two concurrent loops for ONE agent). The latch is set
+;; SYNCHRONOUSLY in the handler and cleared when the loop exits — a
+;; legitimate runtime artifact, not derivable state.
+;;
+;; Hop guard lives HERE (at wake): a message whose :seon.message/hops
+;; reached `warn/hop-cap` wakes nothing — loud console.error + the
+;; clustered `check-hop-exhausted` warning surface the refusal.
 ;; ============================================================
 
-(defn- user-msg-for-agent?
-  "True iff `eid` is a `:user` message addressed to `agent-id`. The
-   agent check is load-bearing: every agent installs this listener, so
-   without it ONE user message wakes EVERY agent's loop — each stray
-   wake is a wasted LLM call (observed live 2026-06-09: a /chat to rEp
-   flipped OOi to :running too)."
-  [db eid agent-id]
-  (let [ent (db/entity {:seon.db/db db :seon.db/ref eid})]
-    (and (= :user (:seon.message/role ent))
-         (= agent-id (get-in ent [:seon.message/agent :seon.agent/id])))))
+(defonce ^:private !kick-scheduled
+  ;; agent-ids with a loop scheduled-or-running via the kick path.
+  (atom #{}))
 
-(defn- user-message-handler
+(defn- inbound-msg-datom?
+  "True iff this added `:seon.message/to` datom targets `my-eid` from a
+   DIFFERENT sender. The to-check is load-bearing: every agent installs
+   this listener, so without it ONE message wakes EVERY agent's loop —
+   each stray wake is a wasted LLM call (observed live 2026-06-09).
+   The from-check (`from ≠ me`) is what stops an agent's own writes —
+   including its per-turn assistant message — from re-kicking itself."
+  [db {eid :seon.db/e target :seon.db/v} my-eid]
+  (and (= target my-eid)
+       (let [msg (db/entity {:seon.db/db db :seon.db/ref eid})]
+         (not= my-eid (:db/id (:seon.message/from msg))))))
+
+(defn- inbound-message-handler
   [{:seon.agent/keys [id] :as input}]
   (fn [{:seon.db/keys [db attr-index]}]
-    (let [added-roles (->> (:seon.message/role attr-index)
-                           (filter :seon.db/added?))
-          new-user    (filter #(user-msg-for-agent? db (:seon.db/e %) id)
-                              added-roles)]
-      (when (seq new-user)
-        (let [ae    (db/entity {:seon.db/db db
-                                :seon.db/ref [:seon.agent/id id]})
-              state (:seon.agent/state ae)]
-          (when-not (= :running state)
-            ;; Fresh user message ⇒ schedule the loop. No counter to
-            ;; reset: turns-since-user is derived from the message log
-            ;; (count of turns whose :at is after the latest user msg's
-            ;; :at), so the just-landed user message naturally resets
-            ;; the window. See docs/seon/concepts/reactive-context.
-            ;;
+    (let [my-eid  (:db/id (db/entity {:seon.db/db db
+                                      :seon.db/ref [:seon.agent/id id]}))
+          inbound (when my-eid
+                    (->> (:seon.message/to attr-index)
+                         (filter :seon.db/added?)
+                         (filter #(inbound-msg-datom? db % my-eid))))
+          {waking false exhausted true}
+          (group-by (fn [{eid :seon.db/e}]
+                      (>= (or (:seon.message/hops
+                                (db/entity {:seon.db/db db :seon.db/ref eid}))
+                              0)
+                          warn/hop-cap))
+                    inbound)]
+      ;; Hop guard AT wake — refuse, loudly. The message stays in the
+      ;; DB (check-hop-exhausted renders it in <warnings>); the loop
+      ;; does NOT start for it, so an A↔B auto-reply chain dies here.
+      (doseq [{eid :seon.db/e} exhausted]
+        (let [msg (db/entity {:seon.db/db db :seon.db/ref eid})]
+          (js/console.error
+            (str "seon.agent: WAKE REFUSED for agent " id
+                 " — message " (:seon.message/id msg)
+                 " hops=" (:seon.message/hops msg)
+                 " reached hop-cap " warn/hop-cap
+                 " (agent↔agent ping-pong guard). A human message"
+                 " resets the chain (hops 0)."))))
+      (when (seq waking)
+        (let [state (:seon.agent/state
+                      (db/entity {:seon.db/db db
+                                  :seon.db/ref [:seon.agent/id id]}))
+              ;; The waking message — recorded on every turn this loop
+              ;; run opens (:seon.turn/woken-by) so reply! can derive
+              ;; its target with no atom.
+              mid   (:seon.message/id
+                      (db/entity {:seon.db/db db
+                                  :seon.db/ref (:seon.db/e (first waking))}))]
+          (when (and (not= :running state)
+                     (not (contains? @!kick-scheduled id)))
+            (swap! !kick-scheduled conj id)
             ;; setTimeout breaks the ALS scope — re-enter `with-agent`
             ;; so the loop's downstream calls (run-turn!, eval-batch!,
             ;; section fns, web handlers) see (db/current-agent-id).
             (js/setTimeout
-              (fn [] (db/with-agent id #(run-agentic-loop! input)))
+              (fn []
+                (-> (js/Promise.resolve
+                      (db/with-agent id
+                        #(run-agentic-loop!
+                           (assoc input :seon.turn/woken-by
+                                  [:seon.message/id mid]))))
+                    (.finally (fn [] (swap! !kick-scheduled disj id)))))
               0)))))))
 
 (defn install-user-trigger!
-  "Register the user-message-trigger listener for this agent. Idempotent:
-   unlistens any prior handler for the same agent-id first so
-   hot-reload of agent.cljs doesn't leave stale closures wired to
-   the tx bus.
+  "Register the inbound-message trigger listener for this agent — wakes
+   `run-agentic-loop!` when a message lands with to ∋ me AND from ≠ me.
+   Idempotent: unlistens any prior handler for the same agent-id first
+   so hot-reload of agent.cljs doesn't leave stale closures wired to
+   the tx bus. (Fn + listener key keep their historical names so re-arm
+   replaces listeners installed before the from/to migration.)
 
    Input map:
      :seon.agent/id              the agent's id string
@@ -505,7 +570,7 @@
     (try (db/unlisten! {:seon.db/key k}) (catch :default _ nil))
     (db/listen!
       {:seon.db/key     k
-       :seon.db/handler (user-message-handler input)})))
+       :seon.db/handler (inbound-message-handler input)})))
 
 ;; ============================================================
 ;; Agent creation. Allocates an id, transacts the entity.
@@ -555,56 +620,135 @@
      :seon.agent/ns agent-ns}))
 
 ;; ============================================================
-;; chat — inject a :user message, return a Promise that resolves
-;; after the transact lands. The kick listener will fire on the
-;; transact and run-turn-once! on the next event-loop tick.
+;; message! / reply! — the SINGLE write entry point for messages.
+;; Presence of attributes IS the intent; the DB holds only FULLY-
+;; FORMED messages (from + to + content + at + id + hops). All
+;; defaulting is a message!-boundary liberty, never a storage shape.
 ;; ============================================================
 
-(defn ^:async chat
-  "Inject a :user message for an agent. Returns the message-id after
-   the transact lands. The agent's reply arrives asynchronously —
-   poll via `replies-after` or watch the message log.
+(declare current-turn)
 
-   Wraps the transact in `(db/with-agent agent-id …)` so the tx-meta
-   `:seon.db/agent-id` is set — required for the inspector's per-agent
-   filtered view to surface this message to the right pane.
+(schema/register! ::message-request
+  [:map
+   [:seon.message/content :seon.message/content]
+   ;; from defaults to the calling agent's ref via the ALS scope
+   ;; ((seon.db/current-agent-id)); the HTTP adapter passes the user
+   ;; ref explicitly.
+   [:seon.message/from {:optional true} :seon.message/from]
+   ;; to accepts ONE ref or a vector of refs (fan-out); defaults to
+   ;; THE user. Storage is always the normalized vector.
+   [:seon.message/to {:optional true}
+    [:or :seon.db/ref [:vector :seon.db/ref]]]])
 
-   Stamps the message with the substrate-default `:seon.render/ai` +
-   `:seon.render/html` symbols so it appears in the inspector's two
-   panes immediately."
-  [agent-id text]
-  (let [mid (db/new-id!)]
-    (await (db/with-agent agent-id
-             (fn ^:async chat-tx! []
-               (db/transact!
-                 {:seon.db/tx-data
-                  [{:seon.message/id      mid
-                    :seon.message/role    :user
-                    :seon.message/content text
-                    :seon.message/agent   [:seon.agent/id agent-id]
-                    :seon.message/at      (js/Date.)}]}))))
-    mid))
+(schema/register! ::message-response :seon.db/transact-response)
 
-(defn replies-after
-  "Return :assistant messages for `agent-id` whose :at is strictly
-   after `since-inst`, oldest-first. Sync (reads are sync)."
-  [agent-id since-inst]
-  (->> (db/query
-         {:seon.db/query
-          '[:find ?at ?content
-            :in $ ?aid ?->ms ?since-ms
-            :where
-            [?m :seon.message/agent ?aid]
-            [?m :seon.message/role :assistant]
-            [?m :seon.message/at ?at]
-            [?m :seon.message/content ?content]
-            [(?->ms ?at) ?ms]
-            [(> ?ms ?since-ms)]]
-          :seon.db/args [[:seon.agent/id agent-id]
-                         (fn [^js d] (.getTime d))
-                         (.getTime since-inst)]})
-       (sort-by first)
-       (mapv second)))
+(defn- user-entity?
+  "Does `ref` resolve to THE user entity?"
+  [ref]
+  (boolean (:seon.user/id (db/entity {:seon.db/ref ref}))))
+
+(defn- waking-hops
+  "Hops of the NEWEST inbound message (to ∋ me, from ≠ me), or 0 when
+   none. This — not the turn's woken-by — is the hops base for
+   agent-originated sends: a long-running loop keeps replying while new
+   inbound messages arrive, and deriving from the loop's ORIGINAL
+   waking message would pin hops constant forever (observed live
+   2026-06-09: two stub agents ping-ponged at hops 2↔3 indefinitely,
+   the cap never reached). The latest inbound climbs with the chain, so
+   replies carry climbing hops and the guard actually bites."
+  [agent-id]
+  (let [my-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id agent-id]}))]
+    (or (when my-eid
+          (->> (db/query
+                 {:seon.db/query
+                  '[:find ?at ?h
+                    :in $ ?me
+                    :where
+                    [?m :seon.message/to ?me]
+                    [?m :seon.message/from ?f]
+                    [(not= ?f ?me)]
+                    [?m :seon.message/at ?at]
+                    [(get-else $ ?m :seon.message/hops 0) ?h]]
+                  :seon.db/args [my-eid]})
+               (sort-by #(.getTime ^js (first %)))
+               last
+               second))
+        0)))
+
+(defn ^:async message!
+  "Send a message — THE single entry point for `:seon.message` writes.
+   Map-in / map-out; returns the transact envelope
+   (`{:seon.db/ok? true …}` / `{:seon.db/ok? false :seon.db/error …}`).
+
+   Defaulting (boundary liberties — the STORED row is always full):
+     :seon.message/from — defaults to [:seon.agent/id (current-agent-id)]
+                          from the ALS turn scope. No scope + no explicit
+                          from → error envelope.
+     :seon.message/to   — single ref or vector; defaults to the user.
+     hops               — 0 when from = the user; otherwise the waking
+                          message's hops + 1 (ping-pong guard — the wake
+                          trigger refuses past `seon.warn/hop-cap`).
+
+   Blank content is REJECTED with an error envelope — empty assistant
+   messages were a recurring live defect (runs 3 + 6); since every
+   message write routes through here, the guard kills the class."
+  {:malli/schema [:=> [:cat ::message-request] ::message-response]}
+  [{:seon.message/keys [content from to]}]
+  (let [agent-id (db/current-agent-id)
+        from     (or from (when agent-id [:seon.agent/id agent-id]))
+        to       (cond
+                   (nil? to)             [user-ref]
+                   (and (vector? to)
+                        (vector? (first to))) to        ; vector of lookup refs
+                   (and (vector? to)
+                        (keyword? (first to))) [to]     ; single lookup ref
+                   (vector? to)          to             ; vector of eids
+                   :else                 [to])]         ; single eid
+    (cond
+      (or (nil? content) (str/blank? content))
+      {:seon.db/ok? false
+       :seon.db/error
+       {:seon.error/message
+        (str "message!: blank :seon.message/content refused — a message "
+             "with nothing to say must not be stored. Compose the text "
+             "first, then send.")}}
+
+      (nil? from)
+      {:seon.db/ok? false
+       :seon.db/error
+       {:seon.error/message
+        (str "message!: no :seon.message/from and no agent-id in scope — "
+             "pass from explicitly or call inside (seon.db/with-agent …).")}}
+
+      :else
+      (let [hops (if (user-entity? from)
+                   0
+                   (inc (waking-hops agent-id)))]
+        (await
+          (db/transact!
+            {:seon.db/tx-data
+             [{:seon.message/id      (db/new-id!)
+               :seon.message/from    from
+               :seon.message/to      to
+               :seon.message/content content
+               :seon.message/at      (js/Date.)
+               :seon.message/hops    hops}]}))))))
+
+(defn ^:async reply!
+  "Reply to whoever woke the current turn: `message!` with `to` := the
+   `:seon.message/from` of the current turn's `:seon.turn/woken-by`
+   message (derived — the substrate knows who's talking to you; no
+   target atom). Falls back to the user when the turn wasn't woken by a
+   message. The one-liner for both user- and agent-conversations:
+
+     (seon.agent/reply! {:seon.message/content \"done — stored 2 rows\"})"
+  {:malli/schema [:=> [:cat ::message-request] ::message-response]}
+  [{:seon.message/keys [content]}]
+  (let [agent-id (db/current-agent-id)
+        woke-from (get-in (current-turn {:seon.agent/id agent-id})
+                          [:seon.turn/woken-by :seon.message/from :db/id])]
+    (await (message! {:seon.message/content content
+                      :seon.message/to      (if woke-from [woke-from] [user-ref])}))))
 
 ;; ============================================================
 ;; v1 §6 — turn lifecycle.
@@ -689,7 +833,7 @@
    `:seon.agent/eval-count` for stop-policy decisions."
   [{:seon.agent/keys [id]
     :seon.session/keys [id-of-session]
-    :seon.turn/keys [id-of-turn prompt-text]}
+    :seon.turn/keys [id-of-turn prompt-text woken-by]}
    body-fn]
   ;; Short-circuit on open-turn failure (task 9b finding 3). If the
   ;; open-tx returns `{::ok? false}`, there is NO turn entity in the
@@ -703,14 +847,17 @@
             {:seon.db/tx-data
              [{:seon.session/id id-of-session
                :seon.session/turns
-               [{:seon.turn/id          id-of-turn
-                 :seon.turn/at          (js/Date.)
-                 :seon.turn/status      :running
-                 ;; Cap the PERSISTED prompt (MEMORY-SAFETY) so a huge
-                 ;; prompt can't bloat the datom and OOM a later whole-DB
-                 ;; scan. The render cap bounds what's normally IN
-                 ;; prompt-text; this is the defensive store-time bound.
-                 :seon.turn/prompt-text (seval/cap-edn prompt-text)}]}
+               [(cond->
+                  {:seon.turn/id          id-of-turn
+                   :seon.turn/at          (js/Date.)
+                   :seon.turn/status      :running
+                   ;; Cap the PERSISTED prompt (MEMORY-SAFETY) so a huge
+                   ;; prompt can't bloat the datom and OOM a later whole-DB
+                   ;; scan. The render cap bounds what's normally IN
+                   ;; prompt-text; this is the defensive store-time bound.
+                   :seon.turn/prompt-text (seval/cap-edn prompt-text)}
+                  ;; The waking message — reply!'s derivation source.
+                  woken-by (assoc :seon.turn/woken-by woken-by))]}
               {:seon.agent/id id :seon.agent/state :running}]}))]
     (if (false? (:seon.db/ok? open-result))
       open-result
@@ -753,13 +900,22 @@
         parsed     (repl/parse-forms reply-text)
         batch      (await (seval/eval-batch! compile-state parsed
                                              (home-ns id) id id-of-turn))]
-    {:seon.turn/messages
-     [{:seon.message/id      (db/new-id!)
-       :seon.message/role    :assistant
-       :seon.message/content reply-text
-       :seon.message/agent   [:seon.agent/id id]
-       :seon.message/at      (js/Date.)}]
-     :seon.agent/eval-count (:seon.eval/n-ok batch)}))
+    (cond->
+      {:seon.agent/eval-count (:seon.eval/n-ok batch)}
+      ;; The turn-log record of the raw LLM output: a fully-formed
+      ;; self→self message (from = to = this agent — appears in the
+      ;; agent's own derived conversation, wakes nothing since the
+      ;; trigger requires from ≠ me, and never reads as user-directed).
+      ;; Blank output stores NOTHING — the empty-assistant-message
+      ;; defect (runs 3 + 6) ends at this boundary too.
+      (not (str/blank? reply-text))
+      (assoc :seon.turn/messages
+             [{:seon.message/id      (db/new-id!)
+               :seon.message/from    [:seon.agent/id id]
+               :seon.message/to      [[:seon.agent/id id]]
+               :seon.message/content reply-text
+               :seon.message/at      (js/Date.)
+               :seon.message/hops    0}]))))
 
 (defn ^:async run-turn!
   "v1.md §6.1 — one full turn end-to-end. Map-in / map-out.
@@ -778,7 +934,8 @@
    11), plus `:seon.agent/eval-count`. On catastrophic error (LLM
    throw, eval engine crash) returns
    `{:seon.turn/status :error :seon.error/data <str>}`."
-  [{:seon.agent/keys [id llm-fn compile-state]}]
+  [{:seon.agent/keys [id llm-fn compile-state]
+    :seon.turn/keys  [woken-by]}]
   (let [session    (await (ensure-session! id))
         session-id (:seon.session/id session)
         turn-id    (db/new-id!)
@@ -801,10 +958,13 @@
                             :seon.db/origin     :system}
                            (fn []
                              (with-turn!
-                               {:seon.agent/id           id
-                                :seon.session/id-of-session session-id
-                                :seon.turn/id-of-turn    turn-id
-                                :seon.turn/prompt-text   prompt}
+                               (cond->
+                                 {:seon.agent/id           id
+                                  :seon.session/id-of-session session-id
+                                  :seon.turn/id-of-turn    turn-id
+                                  :seon.turn/prompt-text   prompt}
+                                 woken-by
+                                 (assoc :seon.turn/woken-by woken-by))
                                #(ask-and-eval! {:seon.agent/id            id
                                                 :seon.agent/llm-fn        llm-fn
                                                 :seon.agent/compile-state compile-state
@@ -834,17 +994,16 @@
    Default stop policies:
      - Last turn errored.
      - Last turn produced zero forms (agent emitted prose only).
-     - `turns-since-user` exceeded `(turns-cap id)` — derived
+     - `turns-since-inbound` exceeded `(turns-cap id)` — derived
        from the message + turn log; see docs/seon/concepts/reactive-context.
 
-   The user-message-arrival stop policy is handled externally:
-   the kick handler runs in `:running` state-machine guards so a
-   fresh user message can't stack new loops on top of an in-flight
-   one."
+   The message-arrival stop policy is handled externally: the kick
+   handler's state-machine guard + scheduled-latch ensure a fresh
+   inbound message can't stack new loops on top of an in-flight one."
   [{:seon.agent/keys [id] :as input}]
   (loop []
     (let [result   (await (run-turn! input))
-          since-u  (turns-since-user {:seon.agent/id id})
+          since-in (turns-since-inbound {:seon.agent/id id})
           status   (:seon.turn/status result)
           n-forms  (or (:seon.agent/eval-count result) 0)]
       (cond
@@ -854,19 +1013,19 @@
         (zero? n-forms)
         result
 
-        (>= since-u (turns-cap id))
+        (>= since-in (turns-cap id))
         (do (await
-              (db/transact!
-                {:seon.db/tx-data
-                 [{:seon.message/id (db/new-id!)
-                   :seon.message/role :system
-                   :seon.message/agent [:seon.agent/id id]
-                   :seon.message/at (js/Date.)
-                   :seon.message/content
-                   (str "[turn cap hit — " (turns-cap id)
-                        " agentic turns since your last message"
-                        " without a final reply. Ask again or"
-                        " narrow the question.]")}]}))
+              ;; Self→self note (from = to = me): lands in the agent's
+              ;; own derived conversation, wakes nothing (from ≠ me
+              ;; fails at the trigger).
+              (message!
+                {:seon.message/from    [:seon.agent/id id]
+                 :seon.message/to      [[:seon.agent/id id]]
+                 :seon.message/content
+                 (str "[turn cap hit — " (turns-cap id)
+                      " agentic turns since the last inbound message"
+                      " without a final reply. Ask again or"
+                      " narrow the question.]")}))
             (assoc result :seon.agent/halt :cap-hit))
 
         :else
@@ -906,13 +1065,25 @@
        (str (subs s 0 (max 0 (- limit 4))) " ...")
        s))))
 
+(defn message-label
+  "Transcript label for a message's `:seon.message/from` ref (a pulled
+   map carrying `:seon.user/id` / `:seon.agent/id`), resolved by REF
+   KIND: the user → `user`, this agent itself → `assistant`, any other
+   agent → `agent-<id>`."
+  [from own-id]
+  (cond
+    (:seon.user/id from)             "user"
+    (= own-id (:seon.agent/id from)) "assistant"
+    (:seon.agent/id from)            (str "agent-" (:seon.agent/id from))
+    :else                            "unknown"))
+
 (defn- format-message-row
   "Render one message as a REPL event for the interleaved transcript:
-   `user> …` / `assistant> …` / `system> …`. The `<role>>` prefix lines
-   it up visually with eval `> form` lines so the merged stream reads as
-   one coherent REPL session."
-  [{role :seon.message/role content :seon.message/content}]
-  (str (name role) "> " content))
+   `user> …` / `assistant> …` / `agent-<id>> …`. The `<label>>` prefix
+   lines it up visually with eval `> form` lines so the merged stream
+   reads as one coherent REPL session."
+  [{from :seon.message/from content :seon.message/content} own-id]
+  (str (message-label from own-id) "> " content))
 
 (defn- read-error-envelope
   "Best-effort EDN decode of a `:seon.eval/error-data` instrument-envelope
@@ -1047,30 +1218,35 @@
                {::error :seon.agent/no-agent-id}))))
 
 (defn messages
-  "Last N user/assistant/system messages addressed to the agent,
-   oldest-first. Queries by `:seon.message/agent` DIRECTLY — not by
-   walking :seon.session/turns → :seon.turn/messages. The turn-walk
-   was the run-3 demo killer (2026-06-09): /chat transacts user
-   messages standalone (agent ref only, never attached to a turn), so
-   the walk returned ZERO user messages and the agent never saw the
-   question in its transcript. Derived-by-default: the message log IS
-   the source; turn attachment is bookkeeping, not visibility.
-   Default {:seon.agent/n 50}."
+  "Last N messages of MY conversation, oldest-first. The conversation
+   is DERIVED — `from = me OR to ∋ me` — never stored as a membership
+   attr (the retired per-message agent back-ref). Queries the
+   message log DIRECTLY, not via :seon.session/turns → :seon.turn/
+   messages (the turn-walk was the run-3 demo killer: standalone
+   inbound messages never attach to a turn). The from/to refs are
+   pulled with their id attrs so transcript labeling resolves by ref
+   kind. Default {:seon.agent/n 50}."
   ([] (messages {}))
   ([{:seon.agent/keys [n id] :or {n 50}}]
-   (let [id   (resolve-id id)
-         rows (db/query
-                {:seon.db/query
-                 '[:find (pull ?m [*])
-                   :in $ ?aid
-                   :where
-                   [?m :seon.message/agent ?a]
-                   [?a :seon.agent/id ?aid]
-                   [?m :seon.message/at _]]
-                 :seon.db/args [id]})
-         msgs (->> rows
-                   (map first)
-                   (sort-by #(.getTime ^js (:seon.message/at %))))]
+   (let [id     (resolve-id id)
+         my-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))
+         rows   (when my-eid
+                  (db/query
+                    {:seon.db/query
+                     '[:find (pull ?m [* {:seon.message/from
+                                          [:db/id :seon.user/id :seon.agent/id]
+                                          :seon.message/to
+                                          [:db/id :seon.user/id :seon.agent/id]}])
+                       :in $ ?me
+                       :where
+                       (or-join [?m ?me]
+                         [?m :seon.message/from ?me]
+                         [?m :seon.message/to ?me])
+                       [?m :seon.message/at _]]
+                     :seon.db/args [my-eid]}))
+         msgs   (->> rows
+                     (map first)
+                     (sort-by #(.getTime ^js (:seon.message/at %))))]
      (vec (take-last n msgs)))))
 
 (defn current-turn
@@ -1115,32 +1291,44 @@
          latest (last (sort-by :seon.eval/at all-evals))]
      (or (:seon.eval/ns latest) (home-ns id)))))
 
-(defn turns-since-user
+(defn turns-since-inbound
   "Count of :seon.turn entities in the agent's current session whose
-   :seon.turn/at is strictly after the latest :seon.message/role :user
-   message's :at. Drives `run-agentic-loop!`'s cap policy. Derived from
-   the message + turn log; nothing stored. See
-   docs/seon/concepts/reactive-context."
-  ([] (turns-since-user {}))
+   :seon.turn/at is strictly after the latest INBOUND message's :at —
+   a message with to ∋ me AND from ≠ me (sender-agnostic: the user and
+   other agents both reset the window). Drives `run-agentic-loop!`'s
+   cap policy. Derived from the message + turn log; nothing stored.
+   See docs/seon/concepts/reactive-context."
+  ([] (turns-since-inbound {}))
   ([{:seon.agent/keys [id]}]
    (let [id      (resolve-id id)
          session (current-session id)
          turns   (:seon.session/turns session)
-         latest-user-at
-         (->> (db/query
-                {:seon.db/query
-                 '[:find (max ?at)
-                   :in $ ?aid
-                   :where
-                   [?m :seon.message/agent ?aid]
-                   [?m :seon.message/role :user]
-                   [?m :seon.message/at ?at]]
-                 :seon.db/args [[:seon.agent/id id]]})
-              ffirst)]
+         ;; lookup refs are NOT auto-resolved in query args — bind the
+         ;; eid explicitly so the ref-valued ?me joins work.
+         my-eid  (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))
+         latest-inbound-at
+         (when my-eid
+           (->> (db/query
+                  {:seon.db/query
+                   '[:find (max ?at)
+                     :in $ ?me ?cap
+                     :where
+                     [?m :seon.message/to ?me]
+                     [?m :seon.message/from ?f]
+                     [(not= ?f ?me)]
+                     ;; hop-exhausted messages must NOT extend the loop:
+                     ;; without this filter two live agent loops reset
+                     ;; each other's window forever (the wake guard only
+                     ;; gates loop STARTS, not in-flight loops).
+                     [(get-else $ ?m :seon.message/hops 0) ?h]
+                     [(< ?h ?cap)]
+                     [?m :seon.message/at ?at]]
+                   :seon.db/args [my-eid warn/hop-cap]})
+                ffirst))]
      (count
-       (if latest-user-at
+       (if latest-inbound-at
          (filter #(> (.getTime ^js (:seon.turn/at %))
-                     (.getTime ^js latest-user-at))
+                     (.getTime ^js latest-inbound-at))
                  turns)
          turns)))))
 
@@ -1295,20 +1483,24 @@
            "(sum ?v), (count ?e), (max ?v) — never by hand from your own turn:\n"
            "  (seon.db/query {:seon.db/query\n"
            "                  '[:find (sum ?secs)\n"
+           "                    ;; :with ?e is REQUIRED for a row total —\n"
+           "                    ;; datalog is set-semantics, so without it\n"
+           "                    ;; two entities with the SAME value dedupe\n"
+           "                    ;; to one and the sum comes out short.\n"
+           "                    :with ?e\n"
            "                    :where [?e :my.domain/duration-seconds ?secs]]})\n\n"
            "When a query comes back EMPTY (#{}), suspect a misspelled attribute\n"
            "before you conclude there's no data. The usual cause is a shortened\n"
            "namespace: copy the attribute keyword EXACTLY as the schema-catalog\n"
            "shows it (if the catalog lists :seon.kb.doc/path, query that — not\n"
            ":kb.doc/path). Fix the keyword and re-run.\n\n"
-           "### Replying + saving in one tx (:seon.db/tx-data is a VECTOR):\n\n"
-           "  (seon.db/transact!\n"
-           "    {:seon.db/tx-data\n"
-           "     [{:seon.message/id      (seon.db/new-id!)\n"
-           "       :seon.message/role    :assistant\n"
-           "       :seon.message/content \"on it — here's what I found\"\n"
-           "       :seon.message/agent   [:seon.agent/id (seon.db/current-agent-id)]\n"
-           "       :seon.message/at      (js/Date.)}]})\n\n"
+           "### Replying — one line, the substrate knows who asked:\n\n"
+           "  (seon.agent/reply! {:seon.message/content \"on it — here's what I found\"})\n\n"
+           "Messaging another agent (or an explicit target) — :seon.message/to\n"
+           "takes a ref or a vector of refs:\n\n"
+           "  (seon.agent/message!\n"
+           "    {:seon.message/to      [:seon.agent/id \"<other-agent-id>\"]\n"
+           "     :seon.message/content \"can you check the workout totals?\"})\n\n"
            "### Your live tile (your one HTML surface in the inspector)\n\n"
            "You own ONE always-visible tile, rendered above the entity cards.\n"
            "Default renderer: seon.render.default/view. Repoint it: define a fn\n"
@@ -1961,11 +2153,12 @@
 
 (defn- format-transcript-item
   "Render one transcript item — a `:seon.message` as a REPL event
-   (`user>`/`assistant>` line) or a `:seon.eval` via `format-eval-row`
-   (`> form\\n result`). Dispatch on which kind-keyed `:at` is present."
-  [item]
+   (`user>`/`assistant>`/`agent-<id>>` line, labeled by from-ref kind)
+   or a `:seon.eval` via `format-eval-row` (`> form\\n result`).
+   Dispatch on which kind-keyed `:at` is present."
+  [item own-id]
   (if (:seon.message/at item)
-    (format-message-row item)
+    (format-message-row item own-id)
     (format-eval-row item)))
 
 (defn transcript-section
@@ -1990,7 +2183,7 @@
                    (sort-by transcript-item-at))]
     (if (seq items)
       (str "<transcript>\n"
-           (str/join "\n\n" (map format-transcript-item items))
+           (str/join "\n\n" (map #(format-transcript-item % id) items))
            "\n</transcript>")
       "")))
 
@@ -2002,7 +2195,7 @@
    present (never blank).
 
    Surfaces TURN PRESSURE when the agentic loop runs long: derived from
-   the live `turns-since-user` count vs the agent's `turns-cap` (never
+   the live `turns-since-inbound` count vs the agent's `turns-cap` (never
    stored), escalating nudges precede the prompt line — wrap up at
    halfway, FINAL WARNING three turns before `run-agentic-loop!` cuts
    the loop off."
@@ -2015,7 +2208,7 @@
         ns-str   (if (keyword? ns) (name ns) (str ns))
         sess     (current-session id)
         n-turns  (count (:seon.session/turns sess))
-        since-u  (turns-since-user {:seon.agent/id id})
+        since-u  (turns-since-inbound {:seon.agent/id id})
         cap      (turns-cap id)
         pressure
         (cond

@@ -149,17 +149,18 @@ turn), and (result <id>) returns the live value a prior form produced
 (pass its eval id, e.g. (result :abc123)). Drill into a returned value
 with ordinary Clojure — get-in, filter, and friends.
 
-Speaking to your human IS a normal write — transact an :assistant
-message. There is no say! and no done!:
+Speaking to whoever messaged you is ONE line — the substrate knows who
+woke you. There is no say! and no done!:
 
-    ;; Tell my human what I found.
-    (seon.db/transact!
-      {:seon.db/tx-data
-       [{:seon.message/id      (seon.db/new-id!)
-         :seon.message/role    :assistant
-         :seon.message/content \"on it — here's what I found\"
-         :seon.message/agent   [:seon.agent/id (seon.db/current-agent-id)]
-         :seon.message/at      (js/Date.)}]})
+    ;; Tell them what I found.
+    (seon.agent/reply! {:seon.message/content \"on it — here's what I found\"})
+
+To message a SPECIFIC target (another agent, or your human explicitly),
+use message! with :seon.message/to — a ref or vector of refs:
+
+    (seon.agent/message!
+      {:seon.message/to      [:seon.agent/id \"<other-agent-id>\"]
+       :seon.message/content \"can you verify the totals?\"})
 
 Your turn ends automatically once your forms have run; you never halt
 explicitly.

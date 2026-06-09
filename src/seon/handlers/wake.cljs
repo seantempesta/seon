@@ -13,33 +13,22 @@
    matters — handler fn takes the dispatcher's input map and returns
    `{:effects [...]}`."
   (:require
+    [datahike.api]
     [seon.db :as db]
     [seon.schema :as schema]))
 
 ;; ============================================================
-;; Schemas — the message-to attr the wake handler matches on, plus
-;; the related `:seon.message/from` projection. Vector of refs so
-;; one user message can fan out to N agents (the spec's mental model).
-;;
-;; `:seon.message/to` lives in this file (not seon.agent.cljs) because
-;; it's the *trigger* attribute for the wake handler — the handler
-;; OWNS the schema for the attr it depends on. The existing
-;; `:seon.message/agent` (single ref, set by `chat` for user msgs) is
-;; preserved unchanged so existing flows keep working.
+;; Schemas — `:seon.message/from` / `:seon.message/to` are owned by
+;; `seon.agent` (the `:seon.message` kind owner) since the from/to
+;; migration (unit 1.5, 2026-06-09): from is a single ref (the sender
+;; entity — user or agent), to is a vector of refs so one message can
+;; fan out to N agents. This handler only CONSUMES `:seon.message/to`.
 ;; ============================================================
-
-(schema/register! :seon.message/to
-  [:vector :seon.db/ref])
-
-(schema/register! :seon.message/from
-  [:or :keyword :seon.db/ref])
 
 (defn ^:async bootstrap-schema!
   "Declare the datahike schema for the message-trigger attrs the wake
    handler depends on. Idempotent — datahike upserts on `:db/ident`.
-   `:seon.message/from` is stored as keyword for v0 (the spec allows
-   `:keyword | :seon.db/ref` but v0 only flows the keyword form
-   `:user`)."
+   Both attrs are refs (from/to migration — identity is the ref)."
   []
   (await (datahike.api/transact! seon.db/*conn*
            {:tx-data
@@ -47,7 +36,7 @@
               :db/valueType :db.type/ref
               :db/cardinality :db.cardinality/many}
              {:db/ident :seon.message/from
-              :db/valueType :db.type/keyword
+              :db/valueType :db.type/ref
               :db/cardinality :db.cardinality/one}]}))
   {:seon.handlers.wake/bootstrapped? true})
 

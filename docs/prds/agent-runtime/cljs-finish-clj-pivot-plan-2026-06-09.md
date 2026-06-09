@@ -306,8 +306,33 @@ the pod casually (live agents mid-session).
   rewrites its OWN single tile (user goal: not just last-eval cards).
   Inspector right pane shows it above the per-entity cards. DONE: an agent
   transacts its own tile renderer/content and the inspector reflects it live.
-- **1.5 Messaging codified — from/to refs, message!/reply!, sender-agnostic
-  wake (USER-APPROVED DESIGN 2026-06-09 ~22:00Z; launch after run 6).**
+- **1.5 Messaging codified — DONE 2026-06-09 (uncommitted; all 4 oracles
+  demonstrated live).** Shipped: `:seon.message` = from(ref, REQ) + to(vec-of-
+  refs, REQ) + content + at + id + hops; role/agent retired (ZERO refs in
+  src/, grep-proven); `:seon.user/id "user"` seeded in `seed-substrate!`;
+  `seon.agent/message!`/`reply!` (map-in/map-out, registered req/resp
+  schemas, blank-content guard → error envelope — the run-3/6 empty-message
+  class is dead); `:seon.turn/woken-by` recorded at wake-open, reply! derives
+  its target from it; wake = `to ∋ me AND from ≠ me` on the
+  `:seon.message/to` attr-index + per-agent scheduled-latch (Q2 #4
+  double-schedule fix) + hop guard AT wake (`seon.warn/hop-cap` 4, loud
+  console.error + clustered `check-hop-exhausted`); labels by ref kind
+  (`user`/`assistant`/`agent-<id>`) in transcript + handlers.message +
+  render.default; `/chat` calls message! with explicit user-ref from;
+  deepseek prompt + stub-llm teach reply!; turns-since-user →
+  turns-since-inbound; capabilities `(sum …)` example carries `:with ?e` +
+  why-comment (run-6). **Two fixes found live:** (a) hops derive from the
+  LATEST INBOUND message, not the loop's original woken-by (stub A↔B
+  ping-ponged at hops 2↔3 forever otherwise), and hop-exhausted messages
+  don't reset turns-since-inbound (two LIVE loops sustained each other — the
+  wake guard only gates loop starts); (b) `warn/domain-attrs` threw `-lookup
+  not supported on FilteredDB` (pre-existing 1.2-reuse bug, killed
+  ctx-preview entirely) — read through `.-unfiltered-db`. Tests:
+  message_test.cljs new (8 tests/29 assertions); warn-test 15/38
+  (+hop-exhausted); agent-context 22/93 all green via run-block; targeted
+  7-ns run 85 tests/272 assertions/0 fail; 0 build warnings. Live: chain
+  stopped exactly at hops 4 (`WAKE REFUSED … dKe-2606091744 hops=4`).
+  Original spec (USER-APPROVED DESIGN 2026-06-09 ~22:00Z):
   The design conversation (user): presence of attributes IS the intent; the
   DB holds only FULLY-FORMED messages; defaulting is a `message!`-boundary
   liberty; ditch `role`; identity = the ref; UI stays purely reactive off

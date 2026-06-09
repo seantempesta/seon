@@ -107,10 +107,23 @@
       :seon.fn/fn-var? true
       :seon.fn/private? false}
      ;; ── runtime rows: a user msg + failed evals after it ─────────
+     ;; from/to refs (unit 1.5): nested-map upserts create the user +
+     ;; a stub agent entity in the same tx. Fully formed message:
+     ;; from + to + content + at + id + hops.
      {:seon.message/id "MSGwarntest001"
-      :seon.message/role :user
+      :seon.message/from {:seon.user/id "user"}
+      :seon.message/to [{:seon.agent/id "warntest-agent"}]
       :seon.message/content "hello"
-      :seon.message/at (t 100)}
+      :seon.message/at (t 100)
+      :seon.message/hops 0}
+     ;; a hop-exhausted message AFTER the user msg — wake was refused;
+     ;; check-hop-exhausted must surface exactly this one
+     {:seon.message/id "MSGwarntestHOP"
+      :seon.message/from {:seon.agent/id "warntest-agent"}
+      :seon.message/to [{:seon.agent/id "warntest-agnt2"}]
+      :seon.message/content "ping"
+      :seon.message/at (t 400)
+      :seon.message/hops 4}
      {:seon.eval/id "EVLwarnFAIL001"
       :seon.eval/at (t 200)
       :seon.eval/source "(boom)"
@@ -300,6 +313,21 @@
                   "failures BEFORE the latest user msg don't surface")
               (is (not (contains? (affected-syms r) "EVLwarnREF0001"))
                   "lookup-ref failures belong to check-bad-ref"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest hop-exhausted-surfaces-only-post-user-cap-messages
+  (async done
+    (-> (with-seeded-db
+          (fn [db]
+            (let [r     (warn/check-hop-exhausted {:seon.db/db db})
+                  entry (first (:seon.warn/affected r))]
+              (is (= :hop-exhausted (:seon.warn/kind r)))
+              (is (= #{"MSGwarntestHOP"} (affected-syms r))
+                  "only the hops>=cap message after the user msg")
+              (is (= "hops 4/4 — wake refused" (:seon.warn/where entry)))
+              (is (str/includes? (:seon.warn/explain r) "hop cap")
+                  "explains the ping-pong guard"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

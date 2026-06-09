@@ -22,8 +22,12 @@
      (cljs.core.async/go
        (cljs.core.async/<! (seon.client/start-agent-with-stub!)))
 
-     ;; Then chat with it:
-     (seon.agent/chat \"seon\" \"hello\")"
+     ;; Then message it (from defaults to the calling scope; the
+     ;; HTTP /chat adapter stamps from = the user ref explicitly):
+     (seon.agent/message!
+       {:seon.message/from    seon.agent/user-ref
+        :seon.message/to      [[:seon.agent/id \"<agent-id>\"]]
+        :seon.message/content \"hello\"})"
   (:require
     [clojure.string :as str]
     [datahike.api :as d]
@@ -288,9 +292,9 @@
    :seon.ctx/fn
 
    ;; --- Session (v1.md §2.1) ---
-   ;; :seon.session/turns-since-user deleted 2026-05-23 — derived from
-   ;; the count of :seon.turn entities with :seon.turn/at > the latest
-   ;; :seon.message/role :user's :at. See seon.agent/turns-since-user.
+   ;; turns-since-inbound is DERIVED from the count of :seon.turn
+   ;; entities with :seon.turn/at > the latest inbound message's :at.
+   ;; See seon.agent/turns-since-inbound.
    :seon.session/id
    :seon.session/at
    :seon.session/turns
@@ -300,15 +304,20 @@
    :seon.turn/at
    :seon.turn/status
    :seon.turn/prompt-text
+   :seon.turn/woken-by
    :seon.turn/messages
    :seon.turn/evals
 
-   ;; --- Message ---
+   ;; --- Message (from/to refs since unit 1.5 — role/agent retired) ---
    :seon.message/id
-   :seon.message/role
+   :seon.message/from
+   :seon.message/to
    :seon.message/content
-   :seon.message/agent
    :seon.message/at
+   :seon.message/hops
+
+   ;; --- User (ONE human entity, seeded at boot) ---
+   :seon.user/id
 
    ;; --- Eval ---
    ;; Evals are component-many on :seon.turn/evals — no standalone
@@ -728,17 +737,23 @@
   derivable from datoms.")
 
 (defn seed-substrate!
-  "Tx-data for the sticky preamble: system-prompt + conventions.
+  "Tx-data for the sticky preamble (system-prompt + conventions) plus
+   THE user entity.
 
-   Both carry `:seon.sticky/position :prefix` so the chronological
-   renderer pins them to the front regardless of tx-time ordering.
-   Identity upsert on `:seon.system-prompt/id` and `:seon.conventions/id`
-   — re-running is cheap.
+   The preamble rows carry `:seon.sticky/position :prefix` so the
+   chronological renderer pins them to the front regardless of tx-time
+   ordering. Identity upsert on `:seon.system-prompt/id` and
+   `:seon.conventions/id` — re-running is cheap.
+
+   The user row is the ONE `:seon.user/id` entity every
+   `:seon.message/from`/`to` user-ref resolves to (identity upsert,
+   idempotent — same pattern as agent entities; one human for now).
 
    Pure fn. Caller transacts via `db/transact!` with
    `:seon.db/origin :substrate-seed`."
   []
-  [{:seon.system-prompt/id      "default"
+  [{:seon.user/id "user"}
+   {:seon.system-prompt/id      "default"
     :seon.system-prompt/content deepseek/default-system-prompt
     :seon.sticky/position       :prefix
     :seon.sticky/order          0}
@@ -980,17 +995,12 @@
   [ctx]
   (let [text (str
                ";; stub LLM here — the real one needs DEEPSEEK_API_KEY\n"
-               ";; reply to the user\n"
-               "(seon.db/transact!\n"
-               "  {:seon.db/tx-data\n"
-               "   [{:seon.message/id      (seon.db/new-id!)\n"
-               "     :seon.message/role    :assistant\n"
-               "     :seon.message/content "
+               ";; reply to whoever woke this turn\n"
+               "(seon.agent/reply!\n"
+               "  {:seon.message/content "
                (pr-str (str "hello from the stub LLM — saw "
                             (count ctx) " chars of ctx"))
-               "\n"
-               "     :seon.message/agent   [:seon.agent/id (seon.db/current-agent-id)]\n"
-               "     :seon.message/at      (js/Date.)}]})\n\n"
+               "})\n\n"
                ";; halt the loop\n"
                "(seon.db/transact!\n"
                "  {:seon.db/tx-data\n"
@@ -1083,8 +1093,8 @@
 
    Returns a Promise resolving to
      {:seon.agent/id _ :seon.agent/ns _}.
-   Subsequent (seon.agent/chat ...) calls drive the loop via the
-   kick listener."
+   Subsequent (seon.agent/message! …) calls (or POST /chat) drive the
+   loop via the kick listener."
   [& [{:keys [llm-fn] :or {llm-fn stub-llm}}]]
   (let [conn          (or @!agent-conn (await (open-agent-conn!)))
         _             (reset! !agent-conn conn)

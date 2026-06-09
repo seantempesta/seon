@@ -307,13 +307,21 @@
    installation via the first transact!) has landed."
   {:malli/schema [:=> [:cat ::check-request] [:vector :keyword]]}
   [{:seon.db/keys [db]}]
-  (->> (keys (:schema db))
-       (filter keyword?)
-       (filter namespace)
-       (remove #(internal-attr-ns? (namespace %)))
-       distinct
-       (sort-by str)
-       vec))
+  (let [schema (try (:schema db)
+                    (catch :default _
+                      ;; FilteredDB (the inspector's per-agent view)
+                      ;; doesn't implement ILookup — `(:schema db)`
+                      ;; THROWS, which took down the whole ctx-preview.
+                      ;; The schema is conn-level (the filter can't
+                      ;; change it), so read through to the wrapped db.
+                      (:schema (.-unfiltered-db ^js db))))]
+    (->> (keys schema)
+         (filter keyword?)
+         (filter namespace)
+         (remove #(internal-attr-ns? (namespace %)))
+         distinct
+         (sort-by str)
+         vec)))
 
 (def ^:private unit-suffixes
   "Unit-ish final name-tokens. Two attrs in one namespace sharing a
@@ -432,16 +440,27 @@
 
 (def slow-eval-threshold-ms 500)
 
+(def hop-cap
+  "Max `:seon.message/hops` before the wake trigger refuses a message
+   (agent↔agent ping-pong guard). Lives here (not seon.agent) so both
+   the trigger (seon.agent) and `check-hop-exhausted` read ONE value
+   without a require cycle. hops = 0 when from = the user; each
+   agent-originated send carries waking-message-hops + 1."
+  4)
+
 (defn- latest-user-at
-  "Wall-clock of the latest :user message anywhere, or nil."
+  "Wall-clock of the latest message FROM the user anywhere, or nil.
+   Identity is the ref: a user message is one whose
+   `:seon.message/from` resolves to a `:seon.user/id` entity."
   [db]
   (ffirst (db/query
             {:seon.db/db db
              :seon.db/query
              '[:find (max ?at)
                :where
-               [?u :seon.message/role :user]
-               [?u :seon.message/at ?at]]})))
+               [?m :seon.message/from ?u]
+               [?u :seon.user/id _]
+               [?m :seon.message/at ?at]]})))
 
 (defn- failed-eval-rows
   "[eval-id error-string] rows for failed evals since the latest user
@@ -524,6 +543,46 @@
    :seon.warn/example
    "(seon.schema/register! :kb.doc/path [:string {:seon.db/identity true}])"})
 
+(defn check-hop-exhausted
+  "Messages whose `:seon.message/hops` reached [[hop-cap]] SINCE the
+   latest user message — each one is a wake the trigger REFUSED (an
+   agent↔agent reply chain hit the ping-pong guard and was dropped on
+   the floor). A fresh human message resets the chain (hops 0) and
+   scopes these out of the surface."
+  {:malli/schema [:=> [:cat ::check-request] ::check-response]}
+  [{:seon.db/keys [db]}]
+  (let [cutoff (latest-user-at db)
+        rows   (db/query
+                 {:seon.db/db db
+                  :seon.db/query
+                  '[:find ?mid ?hops ?at
+                    :in $ ?cap
+                    :where
+                    [?m :seon.message/hops ?hops]
+                    [(>= ?hops ?cap)]
+                    [?m :seon.message/id ?mid]
+                    [?m :seon.message/at ?at]]
+                  :seon.db/args [hop-cap]})]
+    {:seon.warn/kind :hop-exhausted
+     :seon.warn/affected
+     (->> rows
+          (filter (fn [[_ _ at]]
+                    (or (nil? cutoff) (> (.getTime ^js at)
+                                         (.getTime ^js cutoff)))))
+          (sort-by first)
+          (mapv (fn [[mid hops _]]
+                  {:seon.warn/sym   (str mid)
+                   :seon.warn/where (str "hops " hops "/" hop-cap
+                                         " — wake refused")})))
+     :seon.warn/explain
+     (str "An agent↔agent reply chain hit the hop cap (" hop-cap "): the "
+          "wake trigger REFUSED these messages, so their recipients never "
+          "ran. Two agents must not auto-bill an infinite conversation — "
+          "stop replying to replies; involve the human (message the user) "
+          "to continue the thread, which resets hops to 0.")
+     :seon.warn/example
+     "(seon.agent/message! {:seon.message/content \"summary for you — …\"})  ; to defaults to the user"}))
+
 (defn check-slow-evals
   "Evals over the slow threshold in the last hour, anywhere. Stops
    surfacing when new evals are fast and the offenders age out."
@@ -601,6 +660,7 @@
    check-parallel-attr
    check-bad-ref
    check-failed-evals
+   check-hop-exhausted
    check-slow-evals
    check-failing-tests])
 
