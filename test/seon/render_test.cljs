@@ -15,10 +15,13 @@
      (require 'seon.render-test :reload)
      (cljs.test/run-tests 'seon.render-test)"
   (:require
-    [cljs.test :as t :refer [deftest is testing]]
+    [cljs.test :as t :refer [deftest is testing async]]
+    [seon.client :as client]
+    [seon.db :as db]
     [seon.eval :as eval]
     [seon.render :as render]
-    [seon.render.default :as default]))
+    [seon.render.default :as default]
+    [seon.schema :as schema]))
 
 ;; ============================================================
 ;; html-render — literal hiccup short-circuits, missing symbol
@@ -130,3 +133,86 @@
     (let [h (:seon.render/hiccup out)]
       (is (vector? h))
       (is (= :pre (first h))))))
+
+;; ============================================================
+;; render-agent-tile (unit 1.4) — the agent's ONE live tile.
+;;   • default: kind-lookup (or the hardcoded floor) resolves
+;;     seon.render.default/view → the "agent-<id>" tile div.
+;;   • override: a per-entity :seon.render/html symbol on the agent
+;;     entity WINS over the default.
+;;   • missing agent → {:seon.render/hiccup nil}, never a throw.
+;; Fresh isolated conn per test (client/open-agent-conn!) — NEVER the
+;; live pod conn.
+;; ============================================================
+
+(defn tile-override
+  "Test tile renderer — the per-entity override target. Resolved by
+   `seon.eval/lookup-value` via its munged globalThis path."
+  {:malli/schema [:=> [:cat :map] :seon.render/html-response]}
+  [_input]
+  {:seon.render/hiccup [:h1 "custom-tile"]})
+
+(defn- with-tile-conn
+  "Open a fresh conn, seed the :seon.agent kind schema entity + one
+   agent row, call `body` with the conn bound. Returns a Promise."
+  [agent-id body]
+  (-> (client/open-agent-conn!)
+      (.then (fn [conn]
+               (binding [db/*conn* conn]
+                 (-> (db/transact!
+                       {:seon.db/tx-data
+                        (into (vec (schema/entity-schema-tx-data :seon.agent))
+                              [{:seon.agent/id    agent-id
+                                :seon.agent/state :idle}])})
+                     (.then (fn [_]
+                              (binding [db/*conn* conn]
+                                (body conn))))))))))
+
+(deftest render-agent-tile-default-renders-view
+  (async done
+    (-> (with-tile-conn "tiletest-00001"
+          (fn [conn]
+            (let [{:seon.render/keys [hiccup]}
+                  (render/render-agent-tile {:seon.db/db @conn
+                                             :seon.agent/id "tiletest-00001"})]
+              (is (vector? hiccup) "default tile renders hiccup")
+              (is (= :div (first hiccup)))
+              (is (= "agent-tiletest-00001" (:id (second hiccup)))
+                  "it is seon.render.default/view's tile div")
+              (testing "tile shows the DERIVED turn count (turn-count attr retired)"
+                (is (= "turn 0"
+                       (->> (flatten hiccup)
+                            (filter #(and (string? %) (re-find #"^turn " (str %))))
+                            first)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest render-agent-tile-per-entity-override-wins
+  (async done
+    (-> (with-tile-conn "tileovr-000001"
+          (fn [conn]
+            (-> (db/transact!
+                  {:seon.db/tx-data
+                   [{:seon.agent/id    "tileovr-000001"
+                     :seon.render/html 'seon.render-test/tile-override}]})
+                (.then (fn [_]
+                         (binding [db/*conn* conn]
+                           (let [{:seon.render/keys [hiccup]}
+                                 (render/render-agent-tile
+                                   {:seon.db/db @conn
+                                    :seon.agent/id "tileovr-000001"})]
+                             (is (= [:h1 "custom-tile"] hiccup)
+                                 "per-entity :seon.render/html override wins over the kind default"))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest render-agent-tile-missing-agent-renders-nothing
+  (async done
+    (-> (with-tile-conn "tilesome-00001"
+          (fn [conn]
+            (let [out (render/render-agent-tile {:seon.db/db @conn
+                                                 :seon.agent/id "no-such-agent0"})]
+              (is (= {:seon.render/hiccup nil} out)
+                  "missing agent → nil hiccup, no throw"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

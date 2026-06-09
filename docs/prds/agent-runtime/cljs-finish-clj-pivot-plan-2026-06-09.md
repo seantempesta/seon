@@ -258,12 +258,28 @@ the pod casually (live agents mid-session).
   `recent-messages`, `recent-errors`, `pulled-agent` (inspector/`view` deps), and
   `view`. DONE: checks unit-tested; warnings render clustered in a live agent's
   context; dead composer gone; 0 build warnings.
-- **1.4 Agent-controlled live tile** — wire `view` as the per-agent tile: add a
-  `:seon.render/html` slot the agent can repoint (default
-  `'seon.render.default/view`), so the agent dynamically rewrites its OWN single
-  tile (user goal: not just last-eval cards). Inspector right pane shows it above
-  the per-entity cards. DONE: an agent transacts its own tile renderer/content and
-  the inspector reflects it live.
+- **1.4 Agent-controlled live tile — DONE 2026-06-09.** Shipped: `:seon.agent`
+  entity-kind schema (agent.cljs) carrying `:seon.render/html
+  'seon.render.default/view` so the agent tile resolves through the same
+  kind-lookup as every other kind; `seon.render/render-agent-tile` (map-in /
+  map-out; per-entity `:seon.render/html` override → kind default → hardcoded
+  `default-agent-tile-sym` floor for conns booted before the kind schema
+  existed; never throws); inspector renders the tile ABOVE the per-entity
+  cards inside the morphed html-pane fragment (live-updates via the existing
+  per-tx SSE push); `view`'s retired `:seon.agent/turn-count` read fixed
+  (derived `seon.render.default/agent-turn-count` = count of latest session's
+  turns; also fixed in inspector header + /agents list); latent nil-kind
+  TypeError in `entity-html-sym`/`entity-ai-sym` fixed; one "### Your live
+  tile" teaching block appended to `capabilities-section`. 3 new tests in
+  test/seon/render_test.cljs (ns: 17 tests / 35 assertions green via REPL
+  run-block; bin/test-cljs still blocked by the pre-existing seon.db-test
+  crash). Verified live: default tile renders on /agent/rLC-2606091459 (curl +
+  REPL); override demonstrated on a fresh isolated disk conn. Original spec:
+  wire `view` as the per-agent tile: add a `:seon.render/html` slot the agent
+  can repoint (default `'seon.render.default/view`), so the agent dynamically
+  rewrites its OWN single tile (user goal: not just last-eval cards).
+  Inspector right pane shows it above the per-entity cards. DONE: an agent
+  transacts its own tile renderer/content and the inspector reflects it live.
 
 #### Track 2 — CLJ central store + multiagent (robustness)
 

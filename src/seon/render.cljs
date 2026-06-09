@@ -331,7 +331,10 @@
       (let [kinds-by-kw (into {} (map (juxt :kind identity)
                                       (renderable-kinds db)))
             kind        (entity-primary-kind db entity)]
-        (some-> kinds-by-kw kind :html))))
+        ;; NOTE: `(get kinds-by-kw kind)`, NOT `(some-> kinds-by-kw kind …)`
+        ;; — the latter invokes `kind` as a fn and throws a TypeError
+        ;; when entity-primary-kind returns nil (no kind matched).
+        (some-> (get kinds-by-kw kind) :html))))
 
 (defn- entity-ai-sym
   "Resolve the AI render symbol for `entity`: per-entity override wins,
@@ -342,7 +345,8 @@
       (let [kinds-by-kw (into {} (map (juxt :kind identity)
                                       (renderable-kinds db)))
             kind        (entity-primary-kind db entity)]
-        (some-> kinds-by-kw kind :ai))))
+        ;; Same nil-kind guard as entity-html-sym.
+        (some-> (get kinds-by-kw kind) :ai))))
 
 (defn render-entity-html
   "Render `entity` to hiccup via its resolved `:seon.render/html` symbol.
@@ -361,6 +365,50 @@
       (try
         (:seon.render/hiccup (html-render sym input))
         (catch :default _ nil)))))
+
+;; ============================================================
+;; Agent tile (unit 1.4) — the agent's ONE always-visible HTML
+;; surface. Resolution order: per-entity `:seon.render/html` override
+;; on the agent entity → `:seon.agent` kind default (the schema-map
+;; property, seeded as a `:seon.schema` entity at boot) → the
+;; hardcoded `default-agent-tile-sym` floor so the tile renders even
+;; on conns booted BEFORE the `:seon.agent` kind schema existed.
+;; ============================================================
+
+(def default-agent-tile-sym
+  "Fallback tile renderer symbol — `seon.render.default/view`. Used
+   when neither a per-entity override nor the `:seon.agent` kind
+   schema entity yields a symbol."
+  'seon.render.default/view)
+
+(schema/register! :seon.render/tile-request
+  [:map
+   [:seon.agent/id :string]
+   [:seon.db/db    {:optional true} :seon.db/db]])
+
+(defn render-agent-tile
+  "Render the agent's OWN tile — the one HTML surface the agent
+   dynamically rewrites (by transacting `:seon.render/html '<fn-sym>`
+   onto its own agent entity; the override wins over the kind
+   default `seon.render.default/view`).
+
+   Returns `{:seon.render/hiccup <vec-or-nil>}` — nil hiccup when the
+   agent entity doesn't exist or the renderer throws (the tile must
+   never crash its caller)."
+  {:malli/schema [:=> [:cat :seon.render/tile-request] :seon.render/html-response]}
+  [{:seon.agent/keys [id] :seon.db/keys [db]}]
+  (let [db  (or db @db/*conn*)
+        ent (try (d/pull db '[*] [:seon.agent/id id])
+                 (catch :default _ nil))]
+    (if (nil? (:seon.agent/id ent))
+      {:seon.render/hiccup nil}
+      (let [slot  (or (entity-html-sym db ent) default-agent-tile-sym)
+            input {:seon.db/db         db
+                   :seon.agent/id      id
+                   :seon.render/entity ent}]
+        (try
+          (html-render slot input)
+          (catch :default _ {:seon.render/hiccup nil}))))))
 
 (defn render-entity-ai
   "Render `entity` to text via its resolved `:seon.render/ai` symbol.

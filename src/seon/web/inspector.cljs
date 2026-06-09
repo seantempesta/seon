@@ -70,17 +70,19 @@
         rows (db/query
                {:seon.db/db db
                 :seon.db/query
-                '[:find ?id ?state ?turns
-                  :where
-                  [?a :seon.agent/id ?id]
-                  [(get-else $ ?a :seon.agent/state :unknown) ?state]
-                  [(get-else $ ?a :seon.agent/turn-count 0) ?turns]]})]
+                '[:find ?id
+                  :where [?a :seon.agent/id ?id]]})]
     (->> rows
-         (sort-by first)
-         (mapv (fn [[id state turns]]
-                 {:seon.agent/id         id
-                  :seon.agent/state      state
-                  :seon.agent/turn-count turns})))))
+         (map first)
+         sort
+         (mapv (fn [id]
+                 (let [ent (db/entity {:seon.db/db db
+                                       :seon.db/ref [:seon.agent/id id]})]
+                   {:seon.agent/id         id
+                    :seon.agent/state      (or (:seon.agent/state ent) :unknown)
+                    ;; :seon.agent/turn-count the ATTR was retired
+                    ;; 2026-05-22 — derived from the session log now.
+                    :seon.agent/turn-count (default/agent-turn-count ent)}))))))
 
 (defn- render-entity-hiccup
   "Render `entity` to hiccup. Resolves the render symbol via
@@ -123,12 +125,20 @@
                                                 "pl-2 py-1 mb-1")}
                               h])))
                    vec)
+        ;; The agent's OWN tile (unit 1.4) — rendered explicitly (the
+        ;; agent entity is not part of `visible-entities`). Per-entity
+        ;; `:seon.render/html` override wins; default is
+        ;; `seon.render.default/view`.
+        tile  (:seon.render/hiccup
+                (render/render-agent-tile {:seon.db/db db
+                                           :seon.agent/id agent-id}))
         ent   (default/all-running-agents db)
         agent (some #(when (= agent-id (:seon.agent/id %)) %) ent)]
     {:ai-text   (or text "")
      :char-count (count (or text ""))
      :token-est  (or token-estimate 0)
      :html-cards cards
+     :agent-tile tile
      :agent      agent
      :handler-count
      (count (try (:seon.handler/list (inspect/handlers {:seon.agent/id agent-id}))
@@ -150,7 +160,8 @@
 (defn- header-fragment
   [agent-id {:keys [agent char-count token-est handler-count]}]
   (let [state (or (:seon.agent/state agent) :unknown)
-        turns (or (:seon.agent/turn-count agent) 0)]
+        ;; Derived — the :seon.agent/turn-count attr was retired.
+        turns (default/agent-turn-count agent)]
     [:header {:id (header-id agent-id)
               :class "flex items-center gap-3 p-2 border-b border-base-800 bg-base-900"}
      [:span {:class "text-xs font-mono text-text-200"} "agent " agent-id]
@@ -173,12 +184,20 @@
     (if (str/blank? ai-text) "(empty context)" ai-text)]])
 
 (defn- html-pane-fragment
-  [agent-id {:keys [html-cards]}]
+  [agent-id {:keys [html-cards agent-tile]}]
   [:div {:id (html-pane-id agent-id)
          :class "flex flex-col h-full overflow-hidden"}
    [:div {:class "px-2 py-1 text-xs font-mono text-text-400 bg-base-900 border-b border-base-800"}
     ":seon.render/html  (rendered view)"]
    [:div {:class "flex-1 overflow-auto p-2 text-xs bg-base-950"}
+    ;; The agent's OWN tile — always ABOVE the per-entity cards. It
+    ;; lives inside this morphed fragment, so every SSE push
+    ;; re-renders it: the agent repoints `:seon.render/html` on its
+    ;; entity and the tile updates live.
+    (when agent-tile
+      [:div {:class (str "border border-amber-700/60 rounded p-1 mb-2 "
+                         "bg-base-900/60")}
+       agent-tile])
     (if (seq html-cards)
       (into [:div {:class "flex flex-col"}] html-cards)
       [:div {:class "text-text-500 italic p-2"} "no renderable entities"])]])

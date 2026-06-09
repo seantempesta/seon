@@ -98,6 +98,17 @@
               :seon.log/level :error
               :seon.log/agent id})))
 
+(defn ^:no-doc agent-turn-count
+  "Derived turn count for an agent ENTITY: the number of
+   `:seon.session/turns` in its most-recent session (by
+   `:seon.session/at`). The stored `:seon.agent/turn-count` attr was
+   retired 2026-05-22 — this mirrors how `seon.agent/prompt-section`
+   derives `turn N` (count of current-session turns), without
+   requiring `seon.agent` (would close the dependency cycle)."
+  [ent]
+  (let [session (last (sort-by :seon.session/at (:seon.agent/sessions ent)))]
+    (count (:seon.session/turns session))))
+
 (defn ^:no-doc all-running-agents
   "Return every agent entity whose `:seon.agent/state` is `:idle` or
    `:running`. Used by the inspector to iterate live agents. Pure
@@ -130,7 +141,7 @@
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (let [ent   (pulled-agent db id)
         state (or (:seon.agent/state ent) :unknown)
-        turns (or (:seon.agent/turn-count ent) 0)
+        turns (agent-turn-count ent)
         msgs  (recent-messages db id 5)
         errs  (recent-errors db id 5)]
     {:seon.render/hiccup

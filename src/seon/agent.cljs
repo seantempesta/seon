@@ -371,6 +371,25 @@
    [:seon.ns/name   :seon.ns/name]
    [:seon.ns/source :seon.ns/source]])
 
+;; :seon.agent — the agent's OWN entity-kind (unit 1.4). The
+;; `:seon.render/html` property makes `seon.render.default/view` the
+;; DEFAULT tile renderer via the same kind-lookup every other kind
+;; uses; an agent OVERRIDES by transacting `:seon.render/html
+;; '<its-own-fn-sym>` onto its own entity (per-entity override wins in
+;; `seon.render/entity-html-sym`). No `:seon.render/ai` property —
+;; the agent entity must NOT enter the chronological ai window.
+;; Required attrs (id + state) mirror `create!`, the one writer that
+;; runs unconditionally; everything else arrives lazily.
+(schema/register! :seon.agent
+  [:map {:seon.render/html 'seon.render.default/view}
+   [:seon.agent/id    :seon.agent/id]
+   [:seon.agent/state :seon.agent/state]
+   [:seon.agent/sessions  {:optional true} :seon.agent/sessions]
+   [:seon.agent/turns-cap {:optional true} :seon.agent/turns-cap]
+   [:seon.agent/ctx       {:optional true} :seon.agent/ctx]
+   [:seon.render/ai   {:optional true} :seon.render/ai]
+   [:seon.render/html {:optional true} :seon.render/html]])
+
 ;; ============================================================
 ;; Home-ns derivation. Per spec-05 §22.5 the agent's home ns is a
 ;; deterministic function of the agent's id — no need to store it
@@ -1284,7 +1303,17 @@
            "       :seon.message/role    :assistant\n"
            "       :seon.message/content \"on it — here's what I found\"\n"
            "       :seon.message/agent   [:seon.agent/id (seon.db/current-agent-id)]\n"
-           "       :seon.message/at      (js/Date.)}]})")
+           "       :seon.message/at      (js/Date.)}]})\n\n"
+           "### Your live tile (your one HTML surface in the inspector)\n\n"
+           "You own ONE always-visible tile, rendered above the entity cards.\n"
+           "Default renderer: seon.render.default/view. Repoint it: define a fn\n"
+           "returning {:seon.render/hiccup [...]}, then transact its symbol:\n\n"
+           "  (defn my-tile [_input]\n"
+           "    {:seon.render/hiccup [:div [:h2 \"status\"] [:p \"all green\"]]})\n\n"
+           "  (seon.db/transact!\n"
+           "    {:seon.db/tx-data\n"
+           "     [{:seon.agent/id    (seon.db/current-agent-id)\n"
+           "       :seon.render/html 'YOUR-CURRENT-NS/my-tile}]})  ; fully qualified")
       "")))
 
 ;; ============================================================
