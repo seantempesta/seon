@@ -886,8 +886,11 @@
   (str (name role) "> " content))
 
 (defn- read-error-envelope
-  "Best-effort EDN decode of a `:seon.eval/error-data` string. Returns
-   the envelope map, or nil when blank/unreadable. Never throws."
+  "Best-effort EDN decode of a `:seon.eval/error-data` instrument-envelope
+   string. Returns the envelope map, or nil when blank/unreadable. Never
+   throws. (The plain `:seon.eval/error` string is now stored pre-rendered
+   and legible by `seon.eval/render-error-string`, so it is NOT decoded
+   here — `format-eval-row` surfaces it as-is.)"
   [s]
   (when (and (string? s) (not (str/blank? s)))
     (try (edn/read-string s)
@@ -975,7 +978,13 @@
                                 eval-render-cap eid)
 
                (and (string? err) (not (str/blank? err)))
-               (cap-result-body (str ";; ERROR " err) eval-render-cap eid)
+               ;; `:seon.eval/error` is now stored pre-rendered + legible
+               ;; (deepest real message + structured `:seon.error/data`,
+               ;; no opaque raw/stack) by `seon.eval/render-error-string`,
+               ;; so it's already short — just prefix + plain-clip. NOT
+               ;; `cap-result-body`, whose "narrow your query" guide is for
+               ;; oversized RESULTS and is nonsensical on an error.
+               (cap-result (str ";; ERROR " err))
 
                :else ";; <no result>")
         footer (str "  ; # " eid (when dur (str "  " dur "ms")))]
@@ -1162,7 +1171,8 @@
 ;; the rendered shape is the SAME data the agent reads via
 ;; (seon.db/pull [:seon.fn/sym …]) — one source, no divergence.
 (def ^:private capability-syms
-  ["seon.db/transact!"
+  ["seon.schema/register!"
+   "seon.db/transact!"
    "seon.db/query"
    "seon.db/pull"
    "seon.db/entity"
@@ -1200,24 +1210,45 @@
     (if (seq rows)
       (str "## What you can do\n\n"
            "These are the core APIs. Map-in is the preferred shape: you pass\n"
-           "ONE map with fully-namespaced keys (see the worked example below).\n"
+           "ONE map with fully-namespaced keys (see the worked examples below).\n"
            "The db ops (query/pull/entity/transact!) ALSO accept a natural\n"
            "datahike-style positional form.\n\n"
            (str/join "\n" lines)
            "\n\n"
-           "Worked example — reply to the user AND save a fact in one tx\n"
-           "(note :seon.db/tx-data is a VECTOR of entity maps):\n\n"
+           "### Storing a NEW KIND of data: register the schema FIRST\n\n"
+           "To store a NEW kind of fact you must REGISTER each attribute with\n"
+           "`seon.schema/register!` BEFORE you transact it. Storing a schema's\n"
+           "source as data is NOT registration — an unregistered attr is\n"
+           "REJECTED by transact!. register! is the single source of truth:\n"
+           "register the TYPE and the system derives datahike storage.\n\n"
+           "Use DEEP, namespaced attrs (`:my.domain.thing/attr`, never bare\n"
+           "`:title`). Common shapes:\n"
+           "  - natural-key identity (upsert): [:string {:seon.db/identity true}]\n"
+           "  - a reference to another entity: :seon.db/ref\n"
+           "  - many references:               [:vector :seon.db/ref]\n\n"
+           "  ;; 1. register the attrs (do this ONCE per attr)\n"
+           "  (seon.schema/register! :kb.doc/path  [:string {:seon.db/identity true}])\n"
+           "  (seon.schema/register! :kb.doc/title :string)\n"
+           "  (seon.schema/register! :kb.doc/tags  [:vector :keyword])\n\n"
+           "  ;; 2. NOW transact data using those attrs — upserts by :kb.doc/path\n"
+           "  (seon.db/transact!\n"
+           "    {:seon.db/tx-data\n"
+           "     [{:kb.doc/path  \"docs/seon/_dashboard.md\"\n"
+           "       :kb.doc/title \"Dashboard\"\n"
+           "       :kb.doc/tags  [:index :dashboard]}]})\n\n"
+           "  ;; 3. read it back\n"
+           "  (seon.db/query {:seon.db/query\n"
+           "                  '[:find ?path ?title\n"
+           "                    :where [?e :kb.doc/path ?path]\n"
+           "                           [?e :kb.doc/title ?title]]})\n\n"
+           "### Replying + saving in one tx (:seon.db/tx-data is a VECTOR):\n\n"
            "  (seon.db/transact!\n"
            "    {:seon.db/tx-data\n"
            "     [{:seon.message/id      (seon.db/new-id!)\n"
            "       :seon.message/role    :assistant\n"
            "       :seon.message/content \"on it — here's what I found\"\n"
            "       :seon.message/agent   [:seon.agent/id (seon.db/current-agent-id)]\n"
-           "       :seon.message/at      (js/Date.)}]})\n\n"
-           "  (seon.db/query {:seon.db/query\n"
-           "                  '[:find ?content\n"
-           "                    :where [?m :seon.message/role :user]\n"
-           "                           [?m :seon.message/content ?content]]})")
+           "       :seon.message/at      (js/Date.)}]})")
       "")))
 
 ;; ============================================================

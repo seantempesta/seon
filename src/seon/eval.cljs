@@ -830,6 +830,47 @@
        (str (subs s 0 limit) " …⟨" (- n limit) " chars elided⟩")
        s))))
 
+(defn- deepest-error-message
+  "Walk a `seon.error/->map` map's `:seon.error/cause` chain and return
+   the deepest non-blank, non-generic `:seon.error/message`. cljs.js wraps
+   an agent throw so the TOP message is a useless wrapper (`\"ERROR\"`,
+   `\"Could not eval …\"`); the real message (the malli/db failure string,
+   the agent's `(throw (js/Error. \"boom\"))` text) lives a level or two
+   down. Falls back to the top message. Bounded depth 6."
+  [err]
+  (loop [e err depth 0 best nil]
+    (let [msg     (:seon.error/message e)
+          useful? (and (string? msg)
+                       (not (str/blank? msg))
+                       (not (#{"ERROR" "Could not eval"} (str/trim msg))))
+          best'   (if useful? msg best)]
+      (if (or (nil? (:seon.error/cause e)) (>= depth 6))
+        (or best' (:seon.error/message err) "")
+        (recur (:seon.error/cause e) (inc depth) best')))))
+
+(defn render-error-string
+  "Produce the LEGIBLE, edn-SAFE string persisted as `:seon.eval/error`
+   for a failed eval. The raw `seon.error/->map` carries an opaque
+   `#error` instance under `:seon.error/raw`, a redundant
+   `:seon.error/ex-data`, and a multi-KB JS `:seon.error/stack`. pr-str'ing
+   the whole map (the old behavior) (a) buried the one useful line under
+   noise and (b) produced a string the agent-side reader couldn't decode
+   (the `#error` literal breaks `read-string`), so the renderer fell back
+   to dumping the noisy blob.
+
+   Instead we keep ONLY the legible parts at the persistence boundary: the
+   deepest real message + the structured `:seon.error/data` map (failing
+   attr, expected schema, db error kind, the registration hint). Both are
+   readable EDN. Stack + raw are dropped — the full value is still in the
+   live globalThis result stash via `(result :<id>)`. The structured
+   instrument envelope, when present, still lands separately in
+   `:seon.eval/error-data`."
+  [err]
+  (let [msg  (deepest-error-message err)
+        data (:seon.error/data err)]
+    (str msg
+         (when (seq data) (str "\n;;   detail: " (pr-str data))))))
+
 (def result-row-cap
   "Row bound for a COLLECTION eval result rendered into
    `:seon.eval/result-edn`. A broad `seon.db/query`/`pull` (or any eval
@@ -922,10 +963,16 @@
                           (cap-edn
                             (render-result-edn eval-id (:value result))))
 
+                   ;; Store the LEGIBLE, edn-safe error string (deepest
+                   ;; real message + structured `:seon.error/data`), NOT
+                   ;; the raw `pr-str` of the whole `->map` — that buried
+                   ;; the useful line under the opaque `#error` + stack and
+                   ;; was unreadable by the agent-side renderer. The full
+                   ;; value remains in the live result stash.
                    (not (:ok result))
                    (assoc :seon.eval/error
                           (cap-edn
-                            (try (pr-str (:error result))
+                            (try (render-error-string (:error result))
                                  (catch :default _ (str (:error result))))))
 
                    ;; Phase A item 8 — when the error carries a Malli

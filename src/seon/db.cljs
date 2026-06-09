@@ -673,6 +673,7 @@
 (declare ^:private resolve-malli-form)
 (declare ^:private form-head)
 (declare ^:private form-children)
+(declare ^:private ensure-datahike-attrs!)
 
 (defn- ref-attr-arity
   "If the attr's resolved Malli schema describes a ref slot, returns
@@ -1007,6 +1008,11 @@
         merged-opts (merge-tx-context-into-opts opts)]
     (validate-attrs! attrs)
     (validate-values! tx-data)
+    ;; Install datahike schema for any registered attr not yet in the
+    ;; conn (e.g. one the agent just `seon.schema/register!`'d at runtime).
+    ;; Schema-before-data in its own tx; skips attrs already present. See
+    ;; `ensure-datahike-attrs!` for the why.
+    (await (ensure-datahike-attrs! c attrs))
     (try
       ;; Datahike-cljs `d/transact!` takes one arg-map combining
       ;; `:tx-data` + `:tx-meta` (see datahike.api.impl/transact! L29-41).
@@ -1336,6 +1342,56 @@
    from Malli, never hand-written."
   []
   (malli->datahike-schema (sort tx-meta-attrs)))
+
+(defn- ^:async ensure-datahike-attrs!
+  "Install the datahike attribute-declaration (`:db/valueType` +
+   `:db/cardinality` + identity/component flags) for any attr in `attrs`
+   that is registered in `seon.schema` but NOT yet present in the conn's
+   live datahike schema.
+
+   WHY this exists: datahike runs `:schema-flexibility :write`, so every
+   attr must have a datahike schema datom BEFORE its first transact —
+   otherwise `d/transact!` throws \"Bad entity attribute … not defined in
+   current schema\". At boot, `seon.client/open-agent-conn!` installs the
+   substrate's attrs from a fixed list. But when an AGENT registers a NEW
+   attr at runtime via `seon.schema/register!`, only the Malli registry
+   learns about it — the datahike conn does not. Without this step the
+   agent's register→transact flow ALWAYS failed at the datahike layer,
+   even after a correct `register!` (the second half of the Phase-1 demo
+   gap). This closes the loop so `register!` truly is 'register the type,
+   the system derives datahike storage' (CLAUDE.md).
+
+   Reads the conn's current schema map (`(:schema @conn)` — keyed by both
+   ident keywords and eids) to find which idents are missing, derives the
+   datahike entries via the Malli→datahike bridge, and transacts them in
+   their OWN tx (schema before data, like boot). `:db/*` system attrs and
+   `:seon.db/ref` (no standalone valueType — refs are declared via the
+   attrs that USE them) are skipped. Best-effort per attr: a bridge
+   failure on one attr is logged and skipped rather than aborting, so the
+   caller still gets datahike's own clear error if the attr truly can't be
+   stored."
+  [conn attrs]
+  (let [installed  (:schema @conn)
+        candidates (->> attrs
+                        (remove system-attr?)
+                        (remove #(= :seon.db/ref %))
+                        (filter schema/registered?)
+                        (remove #(contains? installed %))
+                        distinct)
+        entries    (reduce
+                     (fn [acc attr]
+                       (try
+                         (conj acc (malli->datahike-attr attr))
+                         (catch :default e
+                           (js/console.warn
+                             "[seon.db/ensure-datahike-attrs!] could not derive"
+                             "datahike schema for" (pr-str attr) "—"
+                             (or (.-message e) (str e)))
+                           acc)))
+                     []
+                     candidates)]
+    (when (seq entries)
+      (await (d/transact! conn (vec entries))))))
 
 (defn assert-preconditions!
   "Validate v1.md §7.1 boot preconditions. Throws ex-info on failure.
