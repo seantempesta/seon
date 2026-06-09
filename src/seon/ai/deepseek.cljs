@@ -139,7 +139,22 @@ shows the source, fns, schemas and tests of your namespace and what it
 requires; the <transcript> is your running REPL session — what the user
 said and what your forms returned, oldest first; <warnings> surfaces
 current problems across agents. Be concise: narrate the intent in a
-short comment, then run the form.")
+short comment, then run the form.
+
+Your context already carries what you need each turn: the schema-catalog
+(every kind of data the whole system holds), your capabilities, and your
+namespace's fns, schemas and tests. So lean toward ACTING. When the user
+hands you a task, read only the few things the task actually needs from
+those sections, then DO it — register the schema, transact the data,
+define the fn or test, query the answer back. A turn that re-reads what
+is already in front of you is a turn that didn't move the task; one
+well-aimed read plus the real write beats ten more reads.
+
+One more reader detail: datalog logic variables — anything written ?like
+?this, e.g. ?e ?at ?title — only stay symbols when they live INSIDE the
+quoted query vector, the '[:find … :where …] form. That quote is what
+tells the reader to leave them alone; a ?at written loose in your code
+gets read as an undefined var instead.")
 
 ;; ============================================================
 ;; HTTP — js/fetch + ^:async/await. Errors return as values on the
