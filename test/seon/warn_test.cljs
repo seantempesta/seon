@@ -17,7 +17,18 @@
     [cljs.test :refer [deftest is testing async]]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.schema :as schema]
     [seon.warn :as warn]))
+
+;; Domain attrs for the parallel-attr check — registered at load so the
+;; seed transact installs them into the test conn's datahike schema.
+;; duration-seconds vs duration-minutes share the stem 'duration' with
+;; unit suffixes (the run-4 ham defect, :workout/duration-minutes);
+;; date/type have no unit suffix and must never collide.
+(schema/register! :warntest.dom/duration-seconds :int)
+(schema/register! :warntest.dom/duration-minutes :int)
+(schema/register! :warntest.dom/date :inst)
+(schema/register! :warntest.dom/type :keyword)
 
 ;; ---------------------------------------------------------------------------
 ;; Fixture — fresh conn + a corpus of defective and clean rows.
@@ -123,6 +134,16 @@
       :seon.eval/duration-ms 1500
       :seon.eval/source "(slow)"
       :seon.eval/ok? true}
+     ;; ── domain data: the parallel-attr fork ──────────────────────
+     ;; 2 entities on the ESTABLISHED attr (duration-seconds), 1 on the
+     ;; fork (duration-minutes) — mirrors run 4's live :workout data.
+     {:warntest.dom/date (t 0)
+      :warntest.dom/type :run
+      :warntest.dom/duration-seconds 1470}
+     {:warntest.dom/date (t 1)
+      :warntest.dom/type :strength
+      :warntest.dom/duration-seconds 3600}
+     {:warntest.dom/duration-minutes 35}
      ;; failing test (failed, never passed)
      {:seon.test/sym "warntest.main/broken-test"
       :seon.test/ns [:seon.ns/name :warntest.main]
@@ -229,6 +250,39 @@
               (is (contains? (affected-syms unscoped-r)
                              "warntest.other/also-unspecced")
                   "unscoped = whole-substrate overview"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Domain-attr check — parallel-attr (run-4 ham defect).
+;; ---------------------------------------------------------------------------
+
+(deftest parallel-attr-flags-the-forked-unit-attr
+  (async done
+    (-> (with-seeded-db
+          (fn [db]
+            (let [r     (warn/check-parallel-attr {:seon.db/db db})
+                  entry (first (:seon.warn/affected r))]
+              (is (= :parallel-attr (:seon.warn/kind r)))
+              (is (= #{":warntest.dom/duration-minutes"} (affected-syms r))
+                  "the fork is flagged, not the established attr")
+              (is (= "vs established :warntest.dom/duration-seconds (2 entities)"
+                     (:seon.warn/where entry))
+                  "names the established attr + its instance count")
+              (is (not (contains? (affected-syms r) ":warntest.dom/date"))
+                  "no unit suffix → never collides (date/type are safe)")
+              (is (str/includes? (:seon.warn/example r) "convert at write time")
+                  "the fix example teaches conversion, not a new attr"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest parallel-attr-is-global-ignores-ns-scope
+  (async done
+    (-> (with-seeded-db
+          (fn [db]
+            (let [r (warn/check-parallel-attr (scoped db))]
+              (is (= #{":warntest.dom/duration-minutes"} (affected-syms r))
+                  "keyword namespaces are data domains — ns-scope is ignored"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

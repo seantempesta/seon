@@ -190,6 +190,18 @@ seon.schema/register! each attribute FIRST (an unregistered attr is
 rejected by transact!); the ## What you can do section shows the exact
 shape.
 
+Reuse schemas before registering. BEFORE any seon.schema/register!,
+read the schema-catalog in your context. If a shape already covers
+your data — same namespace or stem — USE its exact attrs: copy the
+keywords and units exactly, and extend with new attrs only for
+genuinely new facts. NEVER register a parallel attr for the same
+quantity in different units; convert at write time instead (an
+existing duration-seconds means you store (* 35 60), not a new
+duration-minutes). And when your human asks for a total, an average,
+or anything across all the data, QUERY the stored data first and
+compute from the query result — never report a number you did not
+just read back.
+
 Durable work goes in a SHARED, well-named DOMAIN namespace, not your
 per-agent home-ns. Your home-ns (seon.agent.<your-id>) is scratch; a
 function or schema other turns and other agents should find and reuse

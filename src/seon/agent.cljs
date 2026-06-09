@@ -1291,6 +1291,11 @@
            "                  '[:find ?path ?title\n"
            "                    :where [?e :kb.doc/path ?path]\n"
            "                           [?e :kb.doc/title ?title]]})\n\n"
+           "Totals and aggregates: compute IN the query over the STORED data —\n"
+           "(sum ?v), (count ?e), (max ?v) — never by hand from your own turn:\n"
+           "  (seon.db/query {:seon.db/query\n"
+           "                  '[:find (sum ?secs)\n"
+           "                    :where [?e :my.domain/duration-seconds ?secs]]})\n\n"
            "When a query comes back EMPTY (#{}), suspect a misspelled attribute\n"
            "before you conclude there's no data. The usual cause is a shortened\n"
            "namespace: copy the attribute keyword EXACTLY as the schema-catalog\n"
@@ -1407,6 +1412,41 @@
     (str "[" kind "]  " n " instance" (when (not= 1 n) "s") "\n"
          (str/join "\n" lines))))
 
+(defn- domain-attr-line
+  "One catalog line for a DOMAIN attr: keyword, compact type (live
+   registry when present, installed datahike valueType otherwise) and
+   the live instance count — `duration-seconds (2 entities)` is what
+   makes an existing attr hard to miss."
+  [db attr]
+  (let [t (if-let [form (schema/schema-definition attr)]
+            (catalog-type-str form)
+            (str (get-in (:schema db) [attr :db/valueType])))
+        n (catalog-kind-count db attr)]
+    (str "  " attr " : " t " — " n " entit" (if (= 1 n) "y" "ies"))))
+
+(defn- domain-attrs-block
+  "The `domain data attrs` portion of the catalog: every agent-
+   registered attr installed on the db (via [[seon.warn/domain-attrs]]
+   — substrate internals excluded), grouped by keyword namespace, each
+   with type + live instance count. Empty string when no domain attrs
+   exist yet. This is the REUSE surface: run 4 proved an agent forks a
+   parallel attr when the existing shape isn't in front of it."
+  [db]
+  (let [attrs  (warn/domain-attrs {:seon.db/db db})
+        groups (->> attrs (group-by namespace) (sort-by first))]
+    (if (seq attrs)
+      (str "\n\n=== domain data attrs — REUSE these exact keywords ===\n"
+           ";; Attrs already holding your human's data. Before you register!\n"
+           ";; a new attr, check here: same kind of fact → use the EXISTING\n"
+           ";; attr (exact keyword, exact unit). Extend with new attrs only\n"
+           ";; for genuinely new facts; never fork the same quantity into\n"
+           ";; different units.\n"
+           (str/join "\n"
+             (for [[ns-str ks] groups]
+               (str "[" ns-str "]\n"
+                    (str/join "\n" (map #(domain-attr-line db %) ks))))))
+      "")))
+
 (defn schema-catalog-section
   "GLOBAL schema catalog — EVERY registered entity KIND in the system,
    grouped by owning namespace, REGARDLESS of the agent's current ns.
@@ -1418,7 +1458,10 @@
    `seon.schema/all-entity-schemas-tx-data`) — a kind is a `:seon.schema`
    entity carrying a `:seon.schema/render-fn` (a renderable `:map`
    entity-shape, not a request/response map). Per-attr shapes come from
-   the live registry; counts from an AEVT scan on each id-attr. Stores
+   the live registry; counts from an AEVT scan on each id-attr. A
+   trailing `domain data attrs` block lists every agent-registered attr
+   installed on the db (with type + instance count) and states the
+   reuse contract — the run-4 fix for forked parallel attrs. Stores
    nothing; register a new entity kind and it appears here next render."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db]}]
@@ -1438,8 +1481,10 @@
     (if (seq kinds)
       (str "<schema-catalog>\n"
            ";; Every kind of entity stored in the system, grouped by namespace.\n"
-           ";; This is the WHOLE substrate — not just your current ns. Query any\n"
-           ";; kind by its id-attr, e.g. (seon.db/query {:seon.db/query\n"
+           ";; This is the WHOLE substrate — not just your current ns. These\n"
+           ";; shapes EXIST: REUSE their exact attrs (copy keywords + units\n"
+           ";; exactly); register! only what's missing. Query any kind by its\n"
+           ";; id-attr, e.g. (seon.db/query {:seon.db/query\n"
            ";;   '[:find ?id :where [?e :seon.fn/sym ?id]]}).\n\n"
            (str/join "\n\n"
              (for [[ns ks] groups]
@@ -1447,6 +1492,7 @@
                     (str/join "\n\n"
                       (map #(catalog-kind-block db %)
                            (sort-by (comp str :kind) ks))))))
+           (domain-attrs-block db)
            "\n</schema-catalog>")
       "")))
 

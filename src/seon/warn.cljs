@@ -23,8 +23,10 @@
    the caller (seon.agent/warnings-section) defaults it to the agent's
    CURRENT ns so an agent isn't confused by other namespaces' defects.
    Omit it for the whole-substrate overview. The RUNTIME checks
-   (failed-evals / slow-evals / failing-tests / bad-ref) stay global —
-   cross-agent visibility is their point.
+   (failed-evals / slow-evals / failing-tests / bad-ref) and the
+   DOMAIN-attr check (parallel-attr — keyword namespaces are data
+   domains, not code nses) stay global — cross-agent visibility is
+   their point.
 
    Everything here is derived from the DB at render time — no warning
    datoms are stored, so warnings self-heal the moment the underlying
@@ -285,6 +287,105 @@
                                  (#{:cat :catn} (first input)))))]
         {:seon.warn/sym sym :seon.warn/where "input"}))))
 
+;; ============================================================
+;; Domain attrs — the agent-created reuse surface.
+;; ============================================================
+
+(defn- internal-attr-ns?
+  "True for substrate/datahike-internal keyword namespaces (`seon`,
+   `seon.*`, `db`, `db.*`) — never agent-forkable data domains."
+  [ns-str]
+  (boolean (re-matches #"(db|seon)(\..*)?" ns-str)))
+
+(defn domain-attrs
+  "Every DOMAIN attr installed on `db` — the db's datahike schema attrs
+   minus substrate/datahike internals. These are the attrs agents
+   registered for the human's data: the reuse surface the
+   schema-catalog renders and [[check-parallel-attr]] guards. Derived
+   from the db value itself (NOT the live registry), so it survives pod
+   restarts and stays per-conn. An attr appears once data (or schema
+   installation via the first transact!) has landed."
+  {:malli/schema [:=> [:cat ::check-request] [:vector :keyword]]}
+  [{:seon.db/keys [db]}]
+  (->> (keys (:schema db))
+       (filter keyword?)
+       (filter namespace)
+       (remove #(internal-attr-ns? (namespace %)))
+       distinct
+       (sort-by str)
+       vec))
+
+(def ^:private unit-suffixes
+  "Unit-ish final name-tokens. Two attrs in one namespace sharing a
+   stem but differing in a suffix from this set are the same quantity
+   forked into different units — the parallel-attr defect."
+  #{"ms" "millis" "milliseconds" "seconds" "secs" "minutes" "mins"
+    "hours" "days" "meters" "km" "miles" "kg" "lbs" "grams"})
+
+(defn- unit-split
+  "Split an attr's NAME into [stem unit-suffix] when its final
+   dash-token is unit-ish; nil otherwise (:workout/date → nil, so
+   date/type-style attrs can never collide)."
+  [attr]
+  (let [tokens (str/split (name attr) #"-")]
+    (when (and (> (count tokens) 1)
+               (contains? unit-suffixes (last tokens)))
+      [(str/join "-" (butlast tokens)) (last tokens)])))
+
+(defn- attr-instance-count
+  "Count of entities carrying `attr` — one AEVT count."
+  [db attr]
+  (count (db/query {:seon.db/db db
+                    :seon.db/query [:find '?e :where ['?e attr '_]]})))
+
+(defn check-parallel-attr
+  "DOMAIN attrs in the SAME keyword namespace naming the SAME quantity
+   in DIFFERENT units — e.g. a registered :workout/duration-minutes
+   beside the existing :workout/duration-seconds (same ns, shared stem
+   'duration', both unit-ish suffixes). GLOBAL — keyword namespaces are
+   data domains, not code nses, so :seon.warn/ns is ignored. Within a
+   collision group, the attr with the MOST stored instances is the
+   established one; every other member is flagged against it."
+  {:malli/schema [:=> [:cat ::check-request] ::check-response]}
+  [{:seon.db/keys [db] :as req}]
+  (let [groups (->> (domain-attrs req)
+                    (keep (fn [attr]
+                            (when-let [[stem _] (unit-split attr)]
+                              {:attr attr
+                               :group [(namespace attr) stem]})))
+                    (group-by :group)
+                    vals
+                    (filter #(> (count %) 1)))]
+    {:seon.warn/kind :parallel-attr
+     :seon.warn/affected
+     (->> groups
+          (mapcat
+            (fn [members]
+              (let [ranked (->> members
+                                (map (fn [{:keys [attr]}]
+                                       {:attr attr
+                                        :n    (attr-instance-count db attr)}))
+                                (sort-by (fn [{:keys [attr n]}]
+                                           [(- n) (str attr)])))
+                    {established :attr est-n :n} (first ranked)]
+                (for [{:keys [attr]} (rest ranked)]
+                  {:seon.warn/sym   (str attr)
+                   :seon.warn/where (str "vs established " established
+                                         " (" est-n " entit"
+                                         (if (= 1 est-n) "y" "ies") ")")}))))
+          (sort-by :seon.warn/sym)
+          vec)
+     :seon.warn/explain
+     (str "Two attrs in the same namespace store the SAME quantity in "
+          "DIFFERENT units (shared name-stem, unit suffixes). This forks "
+          "the data model — one aggregate query can no longer see all the "
+          "data. Use the EXISTING attr everywhere, converting units at "
+          "write time, and rewrite any rows already stored under the "
+          "forked attr.")
+     :seon.warn/example
+     (str ";; use the existing :workout/duration-seconds; convert at write time:\n"
+          "{:workout/duration-seconds (* 35 60)}  ; NOT :workout/duration-minutes 35")}))
+
 (defn- test-index
   "[set-of-test-syms, concatenated-test-source] for the ns scope —
    the two ways a fn counts as tested (a `<sym>-test` deftest, or any
@@ -497,6 +598,7 @@
    check-no-return-spec
    check-no-input-spec
    check-missing-test
+   check-parallel-attr
    check-bad-ref
    check-failed-evals
    check-slow-evals
