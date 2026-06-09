@@ -114,10 +114,12 @@
   ;;        clj -M:dev:run prod  (prod profile)
   :run {:main-opts ["-m" "seon.runner"]
         :jvm-opts ["-Xms512m"
-                   "-Xmx2g"
+                   "-Xmx4g"
                    "-XX:+UseG1GC"
                    "-XX:MaxGCPauseMillis=200"
-                   "-XX:TieredStopAtLevel=1"]}
+                   "-XX:TieredStopAtLevel=1"
+                   "-XX:+HeapDumpOnOutOfMemoryError"
+                   "-XX:HeapDumpPath=logs/"]}
 
   ;; Platform-track (V2) JVM wire-server / datahike writer.
   ;; Launched by the Rust host (client-runtime/host/src/main.rs) as:
@@ -253,7 +255,9 @@
          :main-opts     ["-m" "shadow.cljs.devtools.cli"]}
 
   :nrepl {:jvm-opts ["-Xms512m"
-                     "-Xmx2g"
+                     "-Xmx4g"
                      "-XX:+UseG1GC"
-                     "-XX:MaxGCPauseMillis=200"]
+                     "-XX:MaxGCPauseMillis=200"
+                     "-XX:+HeapDumpOnOutOfMemoryError"
+                     "-XX:HeapDumpPath=logs/"]
           :main-opts ["-m" "nrepl"]}}}
