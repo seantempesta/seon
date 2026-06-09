@@ -140,14 +140,12 @@ the base, branch on `database-exists?` (no create-or-connect), stable RFC-UUID `
 
 ## Sequence
 
-A1 (persist) **SHIPPED (eb7a500)** → A2 (warnings framework + specific CLJS-doable
-checks) → A3/A4 (emissions + feedback). The B pivot is now scoped + tractable: its
-high-leverage first slice (Node UDS transport → route one pod op to the running
-wire-server) can run in PARALLEL with A2/A3/A4 once the live-validation run frees
-the pod, since most of B already exists.
-Each step: implement (`seon-agent`) → seon-verifier → commit. The live pod is the
-oracle. PRD `v2-context-render-prd-2026-06-08.md` remains the demo source of truth;
-this doc owns the finish-CLJS/pivot-CLJ plan.
+Current ordered plan lives in **"RESUME HERE → Next steps"** below (it supersedes
+this section as work lands). Track B's first slice (Node UDS transport) parallelizes
+with Track A since most of B already exists. Methodology: implement (`seon-agent`) →
+seon-verifier → commit; the live pod is the oracle.
+`v2-context-render-prd-2026-06-08.md` is the demo source of truth; this doc owns the
+finish-CLJS/pivot-CLJ plan.
 
 ---
 
