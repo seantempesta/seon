@@ -676,6 +676,54 @@ only per-op READS retire from the pod's path (kept server-side).
   JVM-side wakes the pod trigger (cross-process reactivity); S1-style
   stub scenario lands data visible from the wire-server REPL.
 
+### REPL-PARITY CONTRACT (user, 2026-06-10) — reflexive REPL actions must work
+
+**Principle: the agent's context mimics a real Clojure REPL, so its
+REFLEXIVE actions (trained on decades of REPL transcripts) work as
+expected — or fail with a translation that teaches the substrate
+equivalent.** A real REPL = eval + a bindings conveyor
+(`clojure.main/repl` carries `*ns*`/`*1`/`*e` between forms); we replicate
+the LOOP semantics and map the session vars to substrate equivalents.
+
+Parity table (status 2026-06-10; gaps → unit #23 + successors):
+
+- `(ns foo)` switches ns, prompt follows — WORKS (eval-str ending-ns
+  threaded call-to-call; verified live).
+- `(in-ns 'foo)` — NOT bootstrapped (cljs.js). Cover: teach `(ns …)` +
+  legible error translation on in-ns.
+- `*ns*` — evals to nil (CLJS namespaces aren't runtime objects; verified
+  live via seon.eval). Cover: teach "the prompt line IS your ns truth;
+  `(seon.agent/current-ns)` for it as data"; consider error-translating.
+- `*1 *2 *3` — NOT maintained, NOT needed: `(result :<eval-id>)` is the
+  substrate's richer replacement (every value durable + addressable).
+  Cover: error-translate `*1` → "use (result :<id>) — ids in transcript".
+- `*e` — errors are VALUES in the transcript (by design; A4 envelope).
+- `(doc x)` / `(source x)` / `dir` / `apropos` — clojure.repl macros are
+  NOT in the bootstrap. Cover (the substrate answer): shim them to read
+  the PROGRAM-GRAPH — doc → `:seon.fn/doc`, source → `:seon.fn/source`,
+  apropos/dir → fn-row queries. Code-as-data makes these BETTER than JVM
+  versions (they see agent-authored fns too). Successor unit.
+- defn/def persistence across turns — WORKS (taught, incl. bare-def-read
+  gotcha → atoms).
+- print output (`println`/`prn`) during eval — VERIFY where stdout lands;
+  a REPL shows it next to the result. Base to cover in #23 verification.
+- Partial failure (form N+1 runs after N fails) — WORKS.
+
+**Prompt redesign (user direction): terminal feel — metadata ABOVE as a
+status block, prompt line CLEAN** (no trailing `; turn N` comment):
+
+```
+;; ── turn 6 · 3 since-user (cap 20) · 2026-06-09T22:14Z ──
+my.domain.thing=>
+```
+
+The status block carries turn, since-user/cap (+ pressure nudges when
+escalating), timestamp (already moved to the tail for cache stability),
+and any other per-turn metadata; the final line is EXACTLY a REPL prompt
+(`<current-ns>=> `) — the agent completes "the next REPL input". One
+preceding line states the contract: you are at a ClojureScript REPL;
+reply ONLY with forms + `;;` comments.
+
 ### USER DECISIONS 2026-06-09 (late) — clusters, isolation, kabel, Friday demo
 
 1. **Cluster model (settles 2.3):** the JVM datahike server hosts MANY
