@@ -93,14 +93,40 @@ transition, don't keep bending CLJS to do what it wasn't designed for.
 - Keep per-form step emissions. Tighten the legible `:seon.eval/error` (T12) so each
   is short + unambiguous. Preserve REPL-style per-eval result display in the transcript.
 
-### A4. Clear ref/schema feedback + envelope contract
+### A4. Clear ref/schema feedback + envelope contract — DONE 2026-06-09
 
-- Translate the cryptic datahike ref error ("Lookup ref attribute should be marked
-  as :db/unique") into a guiding one (target needs `:seon.db/identity`; or the
-  referenced entity doesn't exist — transact it first / use a tempid).
-- Validation failures return the `{:seon.db/ok? false :seon.db/error …}` envelope
-  consistently (currently they REJECT the promise past transact!'s sync try).
-- Teach "errors are values — `(result :id)` holds the full error data; inspect + adapt."
+Shipped (Run-5 fix unit; scratch-conn verified live + 7 tests/33 assertions in
+`test/seon/db/envelope_test.cljs`; JVM lane 57 tests/236 green with the shared
+`schema.cljc` gate active):
+
+- **Root cause closed:** `transact!`'s outer try was sync-only — a throw inside
+  `^:async transact!*` (validate-attrs!/values!, ensure-datahike-attrs!) became a
+  REJECTION that sailed past the catch (live: pod.log:3660). Fix: `(await
+  (transact!* arg))` inside the try; EVERY failure path now RESOLVES to the
+  `{:seon.db/ok? false :seon.db/error …}` envelope. Success shape unchanged
+  (`{::ok? true ::tx-report …}`).
+- **`:double`/`:float` bridge** (`:db.type/double`/`float`) — the Run-5 trigger
+  type now installs + round-trips. `ensure-datahike-attrs!` no longer warn+skips
+  unbridgeable attrs: it fails the transact with a `:user-input` error naming the
+  attrs + the supported-type list (register! success ⇒ attr is transactable).
+- **register! type gate** (`seon.schema/assert-compilable-schema!`, cljc): invalid
+  Malli forms (`:number`) fail AT register! with the storable-type list.
+- **Cryptic-error translation** in the envelope: "not defined in current schema" →
+  "register it with (seon.schema/register! :x <type>) BEFORE transacting…";
+  "Lookup ref attribute should be marked as :db/unique" → "add
+  {:seon.db/identity true} to its register! call / transact the target first".
+  Raw message preserved at `:seon.db/raw-error`; both retagged `:user-input`.
+- **Eval semantics decision:** an eval whose form returns the ok?-false envelope
+  records `:seon.eval/ok? true` — the FORM succeeded, returning an error VALUE
+  ("errors are values"); visibility comes from `:seon.eval/result-edn` carrying
+  the guiding envelope (run-5 log already shows this shape end-to-end).
+- Callers converted off rejection-based control flow: `/clear` (serve.cljs)
+  branches on the envelope; boot seed (client.cljs `seed!`) checks each envelope
+  and throws so boot stays fail-loud.
+
+Original spec: translate the cryptic datahike ref error; validation failures
+return the envelope consistently (they used to REJECT past transact!'s sync
+try); teach "errors are values."
 
 ## Track B — the CLJ pivot (mostly ALREADY BUILT — see scoping)
 
@@ -280,6 +306,57 @@ the pod casually (live agents mid-session).
   rewrites its OWN single tile (user goal: not just last-eval cards).
   Inspector right pane shows it above the per-entity cards. DONE: an agent
   transacts its own tile renderer/content and the inspector reflects it live.
+- **1.5 Messaging codified — from/to refs, message!/reply!, sender-agnostic
+  wake (USER-APPROVED DESIGN 2026-06-09 ~22:00Z; launch after run 6).**
+  The design conversation (user): presence of attributes IS the intent; the
+  DB holds only FULLY-FORMED messages; defaulting is a `message!`-boundary
+  liberty; ditch `role`; identity = the ref; UI stays purely reactive off
+  the DB.
+  - **Schema**: every `:seon.message` stores `:seon.message/from` (ref,
+    REQUIRED), `:seon.message/to` (vector of refs, REQUIRED — fan-out),
+    `:seon.message/content`, `:seon.message/at`, `:seon.message/id`.
+    RETIRE `:seon.message/role` and `:seon.message/agent` (no-legacy):
+    "my conversation" is DERIVED — `from = me OR to ∋ me`. Retire the
+    `[:or :keyword :seon.db/ref]` shape on `from` — refs only.
+  - **The user is a real entity**: seed ONE `:seon.user/id` entity at boot
+    (identity upsert, idempotent — same pattern as agent entities). All
+    refs uniform; later home for user prefs/memory. UI/HTTP stamps
+    `from = [:seon.user/id …]`.
+  - **`seon.agent/message!`** (bang-fn liberties, map-in/map-out, specced):
+    `from` defaults to `(seon.db/current-agent-id)` from the ALS turn scope
+    (the HTTP adapter passes the user explicitly); `to` defaults to THE
+    user when unspecified. Stored message is always fully formed and passes
+    the transact spec.
+  - **`seon.agent/reply!`**: sugar — `to` = the `from` of the message that
+    woke the current turn (substrate knows it). One-liner for the LLM in
+    both user- and agent-conversations.
+  - **Wake generalized + sender-agnostic**: trigger predicate becomes
+    `to ∋ me AND from ≠ me` (replaces role=:user + agent=me). The LOOP is
+    already sender-agnostic; only the wake predicate + transcript labels
+    change. Agent→user messages wake no loop — the inspector's existing
+    per-tx SSE listener re-renders (DB = single source of truth for UI).
+  - **Transcript labels by ref kind**: resolve `from` — `:seon.user/id` →
+    `user>`, own agent id → self/assistant line, other `:seon.agent/id` →
+    `agent-<id>>`. Agents know other agents purely by id; own id is in the
+    REPL-state header.
+  - **Ping-pong guard**: `:seon.message/hops` (int) — 0 when from = user;
+    agent-originated replies carry inbound-hops+1; wake REFUSES past N
+    (default ~4) with a loud warnings-section surface, so two agents can't
+    auto-bill an infinite chain. turns-since-user derivations generalize to
+    turns-since-inbound.
+  - **Adapters**: `/chat` handler parses the form and calls `message!` —
+    the inline tx shape in web/serve.cljs dies. The system-prompt's
+    "Speaking to your human" worked example becomes `reply!`/`message!`.
+  - **Migration**: trigger (`user-msg-for-agent?`), `seon.agent/messages`,
+    transcript labels, inspector/UI queries, prompt examples move to
+    from/to. Old role/agent-keyed rows exist only in dead run-dirs — no
+    data migration (fresh stores).
+  - DONE-oracle: (1) UI → agent → `reply!` lands a fully-formed from/to
+    message the inspector renders reactively; (2) agent A `message!`s agent
+    B → B's loop wakes, B `reply!`s → A sees it in its next context, all
+    labels correct; (3) hop guard stops a forced A↔B loop at the cap;
+    (4) zero `:seon.message/role` / `:seon.message/agent` references left
+    in src/.
 
 #### Track 2 — CLJ central store + multiagent (robustness)
 
