@@ -252,3 +252,50 @@ DIS-replica stands. The single blocker for the pod cutover (slice 2,
 migration story — fix the fork, then re-run `clj -M:replica-probe-jvm` and
 expect phase 0 to flip to CONFIRMED (the probe is the regression harness for
 exactly that).
+
+### After konserve fix (2.2d Stage A, 2026-06-09)
+
+Fix shipped in the konserve fork checkout `/Users/sean/src/konserve`, commit
+`32e3c598` on branch `sync-only` (`konserve/impl/storage_layout.cljc`):
+
+- CLJS `create-header` now writes meta-size as 4-byte big-endian at bytes
+  4-7, matching CLJ's `.putInt`.
+- New shared `read-meta-size` used by BOTH platforms' `parse-header`, with
+  the legacy sniff exactly as designed: `byte4 ≠ 0 ∧ bytes5-7 = 0` ⇒ legacy
+  CLJS 1-byte encoding (no collision — that pattern as BE32 means meta ≥
+  16 MiB). meta-size was the ONLY multi-byte header field; all other fields
+  are single bytes on both platforms and were already compatible.
+- Byte-level cljc tests added (`test/konserve/storage_layout_test.cljc`):
+  BE32 write shape, roundtrip incl. meta ≥ 256, legacy-blob parse,
+  cross-platform header parse, sniff boundaries. Konserve suites: CLJ
+  `clj -M:test` **62 tests / 1119 assertions, 0 failures**; CLJS
+  `node-tests` **39 tests / 303 assertions, 0 failures**.
+
+**Probe: phase 0 FLIPPED REFUTED → CONFIRMED; all 10 claims PASS**
+(`ALL CLAIMS CONFIRMED`, no shim). Downstream numbers unchanged (lazy tiny
+lookup still 14 blob reads / ~31.8 KB of 372 blobs / 1.74 MB).
+
+**Legacy-store proof:** a copy of the CLJS-pod-written store
+`data/seon-pod/2026-06-09T15-00-47-077Z` (legacy 1-byte headers) opened from
+a throwaway JVM on the fixed konserve: `:max-tx 536870921`, 454 datoms,
+seon idents and a `d/entity` pull all read correctly — the sniff works on
+real pod data.
+
+**Wiring:** seon resolves konserve transitively as mvn
+`org.replikativ/konserve 0.9.346` (clojars artifact deployed from the fork;
+the fork repo has NO pushable remote), so the fix is wired as
+`:local/root "/Users/sean/src/konserve"` overrides in BOTH `:cljs`
+(`:override-deps`) and `:replica-probe-jvm` (`:replace-deps`).
+
+**Gotcha found en route:** datahike's connector `version-check` resolves the
+konserve version from `META-INF/maven/org.replikativ/konserve/pom.properties`
+on the classpath — with `:local/root` (no jar) it reads **nil**, and any
+store stamped `0.9.346` then refuses to open ("written with newer konserve").
+Fixed with `dev-resources/konserve-shim/` (a pom.properties claiming
+`0.9.347`) on the classpath of both aliases; the CLJS side bakes the version
+at macroexpansion, so the shadow build needed a cache clear
+(`rm -rf .shadow-cljs/builds/replica-probe`) to pick it up. Delete the shim
+when the fix ships as a real mvn artifact. The live pod + wire-server keep
+running the OLD konserve until their next build/boot (deliberately not
+restarted); the `:writer` alias (mvn datahike 0.8.1671) is untouched — its
+sha alignment is the Stage B item.

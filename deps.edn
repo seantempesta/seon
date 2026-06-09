@@ -157,8 +157,17 @@
   {:replace-deps  {org.clojure/clojure {:mvn/version "1.12.0"}
                    org.replikativ/datahike
                    {:git/url "https://github.com/seantempesta/datahike"
-                    :git/sha "01ba3f18bf08da2c093eb0972ec1f272b817f23d"}}
-   :replace-paths ["probe"]
+                    :git/sha "01ba3f18bf08da2c093eb0972ec1f272b817f23d"}
+                   ;; konserve header fix (2.2d Stage A): CLJS meta-size
+                   ;; BE32 + legacy 1-byte sniff. The fork repo has no
+                   ;; pushable remote (mvn 0.9.346 was deployed from it),
+                   ;; so :local/root until the fix ships as a new mvn
+                   ;; version. Konserve repo commit: 32e3c598.
+                   org.replikativ/konserve
+                   {:local/root "/Users/sean/src/konserve"}}
+   ;; konserve-shim: pom.properties so datahike's version-check sees a
+   ;; konserve version (nil with :local/root) — see the file's comments.
+   :replace-paths ["probe" "dev-resources/konserve-shim"]
    :main-opts     ["-m" "seon.probe.replica-jvm"]}
 
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
@@ -231,7 +240,11 @@
          ;; "not available" even though the .cljs files exist on disk.
          ;; The `seon.dev.test-preload` namespace requires the platform
          ;; CLJS tests so they're reachable from the live `:client` pod.
-         :extra-paths   ["guest-cljs/src" "test"]
+         ;; dev-resources/konserve-shim: META-INF pom.properties so
+         ;; datahike's version-check (macro-baked into CLJS at compile
+         ;; time) sees a konserve version for the :local/root fork —
+         ;; without it old 0.9.346-stamped stores refuse to open.
+         :extra-paths   ["guest-cljs/src" "test" "dev-resources/konserve-shim"]
          :extra-deps    {org.clojure/clojurescript            {:mvn/version "1.12.145"}
                          org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}
                          thheller/shadow-cljs                 {:mvn/version "3.4.10"}
@@ -250,6 +263,15 @@
          :override-deps {org.replikativ/datahike
                          {:git/url "https://github.com/seantempesta/datahike"
                           :git/sha "01ba3f18bf08da2c093eb0972ec1f272b817f23d"}
+                         ;; konserve header fix (2.2d Stage A): CLJS
+                         ;; meta-size BE32 at bytes 4-7 + legacy 1-byte
+                         ;; sniff in parse-header, so JVM- and Node-written
+                         ;; stores are mutually readable. Fork repo has no
+                         ;; pushable remote (mvn 0.9.346 deployed from it)
+                         ;; => :local/root until a new mvn deploy.
+                         ;; Konserve repo commit: 32e3c598 (sync-only).
+                         org.replikativ/konserve
+                         {:local/root "/Users/sean/src/konserve"}
                          org.replikativ/superv.async
                          ;; Patched simple-supervisor's stale-pending
                          ;; watchdog to be LAZY: instead of starting a
