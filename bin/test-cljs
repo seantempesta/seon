@@ -35,8 +35,15 @@ TMPOUT="tmp/test-cljs-$(date +%Y%m%d-%H%M%S)-$$.log"
 START=$(date +%s)
 
 if [ "$BUILD" = "1" ]; then
-  echo "== Compiling :test build (shadow-cljs) =="
-  if ! clojure -M:cljs release test 2>&1 | tee "$TMPOUT"; then
+  # DEV compile (not `release`): the substrate resolves fns by walking
+  # goog.global at munged paths (seon.eval/lookup-value, malli.instrument's
+  # -get-ns). Closure :simple/:advanced flatten namespaces into the bundle's
+  # local scope, so a release :test build renders every context section as
+  # <unresolved-section> and makes instrumentation a no-op. The pod itself
+  # runs dev-compiled (`clj -M:cljs compile client`) — dev compile keeps
+  # the test env faithful to the live substrate. (2026-06-09)
+  echo "== Compiling :test build (shadow-cljs, dev) =="
+  if ! clojure -M:cljs compile test 2>&1 | tee "$TMPOUT"; then
     echo ""
     echo "========================================"
     echo "COMPILE FAIL"

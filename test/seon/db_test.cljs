@@ -9,19 +9,23 @@
    namespaced under `:seon.db/*` — the `::db/keys` destructure idiom +
    `::db/foo` key forms are what you see throughout.
 
+   Async tests use the standard `(async done …)` + Promise-chain
+   envelope (same pattern as `seon.db.envelope-test`): `db/transact!`
+   ALWAYS resolves to the `{::db/ok? …}` envelope — never rejects,
+   never throws into the caller (A4, 2026-06-09).
+
    Run interactively via MCP eval:
 
      (require 'seon.db-test :reload)
      (cljs.test/run-tests 'seon.db-test)"
   (:require
-    [cljs.core.async :as a :refer [chan close! put! take!]]
     [cljs.test :as t :refer [deftest is testing async use-fixtures]]
     [datahike.api :as d]
-    [malli.core :as m]
+    [malli.instrument :as mi]
     [seon.db :as db]
-    [seon.schema :as schema])
-  (:require-macros
-    [cljs.core.async :refer [go]]))
+    [seon.error.instrument :as ei]
+    [seon.instrument :as si]
+    [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
 ;; Test schemas. Registered once per test run, isolated under a test namespace
@@ -34,10 +38,23 @@
   (schema/register! ::tags [:vector :keyword]))
 
 (use-fixtures :once
-  {:before (fn [] (register-test-schemas!))})
+  {:before (fn []
+             (register-test-schemas!)
+             ;; The positional-arity tests assert INSTRUMENTED named-slot
+             ;; errors (`[:seon.db/db]` explain paths). The pod installs
+             ;; instrumentation at boot (`seon.client/-main` →
+             ;; `seon.instrument/install!`); the node-test runner has no
+             ;; -main, so install the same wrappers here — scoped to
+             ;; `seon.db` so other suites' environment is unchanged.
+             ;; Requires a DEV-compiled test build: malli's CLJS
+             ;; instrument walks goog.global munged paths, which Closure
+             ;; :simple/:advanced flatten away (see bin/test-cljs).
+             (si/collect!)
+             (mi/instrument! {:report  ei/report-fn
+                              :filters [(mi/-filter-ns 'seon.db)]}))})
 
 ;; ---------------------------------------------------------------------------
-;; Helpers: open a fresh :memory DB per test. Returns a channel resolving to
+;; Helpers: open a fresh :memory DB per test. Returns a Promise resolving to
 ;; the conn. Each test gets its own datahike instance so they don't see
 ;; each other's data.
 ;; ---------------------------------------------------------------------------
@@ -56,25 +73,32 @@
 
 (defn- fresh-conn
   "Open a fresh :memory datahike conn with the test schema transacted.
-   Returns a channel resolving to the conn."
+   Returns a Promise resolving to the conn."
   []
   (let [cfg {:store              {:backend :memory :id (random-uuid)}
              :schema-flexibility :write
              :keep-history?      false}]
-    (go
-      (a/<! (d/create-database cfg))
-      (let [conn (a/<! (d/connect cfg {:sync? false}))]
-        (a/<! (d/transact! conn smoke-schema))
-        conn))))
+    (-> (d/create-database cfg)
+        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [conn]
+                 (.then (d/transact! conn smoke-schema)
+                        (fn [_] conn)))))))
 
 (defn- with-conn
-  "Run `f` against a fresh conn. `f` returns a channel; we wait for it
-   and call `done` from cljs.test/async when it closes."
+  "Run `f` (1-arg conn → value or Promise) against a fresh conn, then
+   call `done` from cljs.test/async. A rejection anywhere in the chain
+   FAILS the test instead of hanging the runner."
   [f done]
-  (go
-    (let [conn (a/<! (fresh-conn))]
-      (a/<! (f conn))
-      (done))))
+  (-> (fresh-conn)
+      (.then f)
+      (.catch (fn [e] (is false (str "test chain threw/rejected — " e))))
+      (.then (fn [_] (done)))))
+
+(defn- tx!
+  "Map-in transact! against an explicit conn — the shape used all over
+   these tests. Returns the envelope Promise."
+  [conn tx-data]
+  (db/transact! {::db/tx-data tx-data ::db/conn conn}))
 
 ;; ---------------------------------------------------------------------------
 ;; Schema gate — the private validation helpers. We exercise them directly
@@ -153,13 +177,11 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [{::db/keys [ok? tx-report]}
-                (a/<! (db/transact! {::db/tx-data [{::name "Alpha" ::rank 1}]
-                                     ::db/conn    conn}))]
-            (is ok?)
-            (is (some? tx-report))
-            (is (pos? (count (:tx-data tx-report)))))))
+        (.then (tx! conn [{::name "Alpha" ::rank 1}])
+               (fn [{::db/keys [ok? tx-report]}]
+                 (is ok?)
+                 (is (some? tx-report))
+                 (is (pos? (count (:tx-data tx-report)))))))
       done)))
 
 (deftest transact!-returns-envelope-on-unregistered-attr
@@ -169,34 +191,30 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [{::db/keys [ok? error tx-report]}
-                (a/<! (db/transact! {::db/tx-data [{:seon.nope/x 1}]
-                                     ::db/conn    conn}))]
-            (is (false? ok?) "validation failure → ok? false envelope")
-            (is (nil? tx-report) "no tx-report on failure")
-            (is (some? error))
-            (is (string? (:seon.error/message error)))
-            (is (= :user-input (:seon.error/kind (:seon.error/data error)))
-                "unregistered attr is a :user-input class error")
-            (is (= :seon.db/unregistered-attrs
-                   (:seon.db/error (:seon.error/data error)))))))
+        (.then (tx! conn [{:seon.nope/x 1}])
+               (fn [{::db/keys [ok? error tx-report]}]
+                 (is (false? ok?) "validation failure → ok? false envelope")
+                 (is (nil? tx-report) "no tx-report on failure")
+                 (is (some? error))
+                 (is (string? (:seon.error/message error)))
+                 (is (= :user-input (:seon.error/kind (:seon.error/data error)))
+                     "unregistered attr is a :user-input class error")
+                 (is (= :seon.db/unregistered-attrs
+                        (:seon.db/error (:seon.error/data error)))))))
       done)))
 
 (deftest transact!-returns-envelope-on-bad-value
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [{::db/keys [ok? error]}
-                (a/<! (db/transact! {::db/tx-data [{::name 42}]
-                                     ::db/conn    conn}))]
-            (is (false? ok?) "string schema, int value → envelope")
-            (is (some? error))
-            (is (= :user-input (:seon.error/kind (:seon.error/data error))))
-            (is (= :seon.db/invalid-value
-                   (:seon.db/error (:seon.error/data error))))
-            (is (= ::name (:seon.db/attr (:seon.error/data error)))))))
+        (.then (tx! conn [{::name 42}])
+               (fn [{::db/keys [ok? error]}]
+                 (is (false? ok?) "string schema, int value → envelope")
+                 (is (some? error))
+                 (is (= :user-input (:seon.error/kind (:seon.error/data error))))
+                 (is (= :seon.db/invalid-value
+                        (:seon.db/error (:seon.error/data error))))
+                 (is (= ::name (:seon.db/attr (:seon.error/data error)))))))
       done)))
 
 (deftest transact!-returns-envelope-on-bad-invocation-shape
@@ -205,21 +223,21 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [{::db/keys [ok? error]}
-                (a/<! (db/transact! "not-a-map"))]
-            (is (false? ok?))
-            (is (= :user-input (:seon.error/kind (:seon.error/data error))))
-            (is (= :seon.db/invalid-invocation-shape
-                   (:seon.db/error (:seon.error/data error)))))
-          ;; Missing required key
-          (let [{::db/keys [ok? error]}
-                (a/<! (db/transact! {:tx-data [{::name "Bob"}]
-                                     ::db/conn conn}))]
-            (is (false? ok?))
-            (is (= :user-input (:seon.error/kind (:seon.error/data error))))
-            (is (= :seon.db/invalid-invocation-shape
-                   (:seon.db/error (:seon.error/data error)))))))
+        (-> (db/transact! "not-a-map")
+            (.then (fn [{::db/keys [ok? error]}]
+                     (is (false? ok?))
+                     (is (= :user-input (:seon.error/kind (:seon.error/data error))))
+                     (is (= :seon.db/invalid-invocation-shape
+                            (:seon.db/error (:seon.error/data error))))))
+            ;; Missing required key
+            (.then (fn [_]
+                     (db/transact! {:tx-data [{::name "Bob"}]
+                                    ::db/conn conn})))
+            (.then (fn [{::db/keys [ok? error]}]
+                     (is (false? ok?))
+                     (is (= :user-input (:seon.error/kind (:seon.error/data error))))
+                     (is (= :seon.db/invalid-invocation-shape
+                            (:seon.db/error (:seon.error/data error))))))))
       done)))
 
 (deftest transact!-envelopes-non-sequential-tx-data
@@ -232,33 +250,27 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          ;; string
-          (let [{::db/keys [ok? error]}
-                (a/<! (db/transact! {::db/tx-data "not-a-list"
-                                     ::db/conn    conn}))]
-            (is (false? ok?))
-            (is (= :user-input (:seon.error/kind (:seon.error/data error)))
-                "string tx-data → :user-input, not :substrate-bug")
-            (is (= :seon.db/invalid-invocation-shape
-                   (:seon.db/error (:seon.error/data error)))))
-          ;; integer
-          (let [{::db/keys [ok? error]}
-                (a/<! (db/transact! {::db/tx-data 42 ::db/conn conn}))]
-            (is (false? ok?))
-            (is (= :user-input (:seon.error/kind (:seon.error/data error)))))
-          ;; nil
-          (let [{::db/keys [ok? error]}
-                (a/<! (db/transact! {::db/tx-data nil ::db/conn conn}))]
-            (is (false? ok?))
-            (is (= :user-input (:seon.error/kind (:seon.error/data error)))))
-          ;; JS exotic object (parses through js-obj literal)
-          (let [{::db/keys [ok? error]}
-                (a/<! (db/transact! {::db/tx-data #js {:foo 1}
-                                     ::db/conn    conn}))]
-            (is (false? ok?))
-            (is (= :user-input (:seon.error/kind (:seon.error/data error)))
-                "JS object tx-data → :user-input"))))
+        (-> (tx! conn "not-a-list")
+            (.then (fn [{::db/keys [ok? error]}]
+                     (is (false? ok?))
+                     (is (= :user-input (:seon.error/kind (:seon.error/data error)))
+                         "string tx-data → :user-input, not :substrate-bug")
+                     (is (= :seon.db/invalid-invocation-shape
+                            (:seon.db/error (:seon.error/data error))))))
+            (.then (fn [_] (tx! conn 42)))
+            (.then (fn [{::db/keys [ok? error]}]
+                     (is (false? ok?))
+                     (is (= :user-input (:seon.error/kind (:seon.error/data error))))))
+            (.then (fn [_] (tx! conn nil)))
+            (.then (fn [{::db/keys [ok? error]}]
+                     (is (false? ok?))
+                     (is (= :user-input (:seon.error/kind (:seon.error/data error))))))
+            ;; JS exotic object (parses through js-obj literal)
+            (.then (fn [_] (tx! conn #js {:foo 1})))
+            (.then (fn [{::db/keys [ok? error]}]
+                     (is (false? ok?))
+                     (is (= :user-input (:seon.error/kind (:seon.error/data error)))
+                         "JS object tx-data → :user-input")))))
       done)))
 
 (deftest transact!-pod-stays-alive-after-bad-input
@@ -267,29 +279,26 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [bad (a/<! (db/transact! {::db/tx-data [{::name 42}]
-                                         ::db/conn    conn}))]
-            (is (false? (::db/ok? bad))))
-          (let [good (a/<! (db/transact! {::db/tx-data [{::name "Alpha"}]
-                                          ::db/conn    conn}))]
-            (is (true? (::db/ok? good)) "conn still alive after rejection"))))
+        (-> (tx! conn [{::name 42}])
+            (.then (fn [bad]
+                     (is (false? (::db/ok? bad)))
+                     (tx! conn [{::name "Alpha"}])))
+            (.then (fn [good]
+                     (is (true? (::db/ok? good)) "conn still alive after rejection")))))
       done)))
 
 (deftest transact!-allows-system-attrs-for-schema-definitions
   (async done
     (with-conn
       (fn [conn]
-        (go
-          ;; Transacting more schema entities should never trip the gate
-          ;; even though :db/* attrs aren't in seon.schema's registry.
-          (let [extra-schema [{:db/ident       ::extra
-                               :db/cardinality :db.cardinality/one
-                               :db/valueType   :db.type/string}]
-                {::db/keys [ok?]} (a/<! (db/transact!
-                                          {::db/tx-data extra-schema
-                                           ::db/conn    conn}))]
-            (is ok?))))
+        ;; Transacting more schema entities should never trip the gate
+        ;; even though :db/* attrs aren't in seon.schema's registry.
+        (let [extra-schema [{:db/ident       ::extra
+                             :db/cardinality :db.cardinality/one
+                             :db/valueType   :db.type/string}]]
+          (.then (tx! conn extra-schema)
+                 (fn [{::db/keys [ok?]}]
+                   (is ok?)))))
       done)))
 
 ;; ---------------------------------------------------------------------------
@@ -302,16 +311,15 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [{::db/keys [ok? tx-report]}
-                (a/<! (db/transact! conn [{::name "PosAlpha" ::rank 7}]))]
-            (is (true? ok?) "positional (conn tx-data) → ok? true envelope")
-            (is (some? tx-report))
-            (is (pos? (count (:tx-data tx-report))))
-            ;; committed datom is queryable
-            (let [rows (db/query {::db/query '[:find ?n :where [?e ::name ?n]]
-                                  ::db/conn  conn})]
-              (is (= #{["PosAlpha"]} rows) "positional write is visible")))))
+        (.then (db/transact! conn [{::name "PosAlpha" ::rank 7}])
+               (fn [{::db/keys [ok? tx-report]}]
+                 (is (true? ok?) "positional (conn tx-data) → ok? true envelope")
+                 (is (some? tx-report))
+                 (is (pos? (count (:tx-data tx-report))))
+                 ;; committed datom is queryable
+                 (let [rows (db/query {::db/query '[:find ?n :where [?e ::name ?n]]
+                                       ::db/conn  conn})]
+                   (is (= #{["PosAlpha"]} rows) "positional write is visible")))))
       done)))
 
 (deftest transact!-positional-and-map-in-agree
@@ -321,20 +329,20 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [via-map (a/<! (db/transact! {::db/tx-data [{::name "Same" ::rank 1}]
-                                             ::db/conn    conn}))]
-            (is (true? (::db/ok? via-map))))
-          ;; retract then re-commit the same entity positionally
-          (a/<! (db/transact! conn [[:db/retractEntity [::name "Same"]]]))
-          (let [via-pos (a/<! (db/transact! conn [{::name "Same" ::rank 1}]))]
-            (is (true? (::db/ok? via-pos)) "positional commit of same shape")
-            (let [m (db/pull {::db/pull-pattern [::name ::rank]
-                              ::db/ref          [::name "Same"]
-                              ::db/conn         conn})]
-              (is (= "Same" (::name m)))
-              (is (= 1 (::rank m))
-                  "queried-back value identical regardless of call shape")))))
+        (-> (tx! conn [{::name "Same" ::rank 1}])
+            (.then (fn [via-map]
+                     (is (true? (::db/ok? via-map)))
+                     ;; retract then re-commit the same entity positionally
+                     (db/transact! conn [[:db/retractEntity [::name "Same"]]])))
+            (.then (fn [_] (db/transact! conn [{::name "Same" ::rank 1}])))
+            (.then (fn [via-pos]
+                     (is (true? (::db/ok? via-pos)) "positional commit of same shape")
+                     (let [m (db/pull {::db/pull-pattern [::name ::rank]
+                                       ::db/ref          [::name "Same"]
+                                       ::db/conn         conn})]
+                       (is (= "Same" (::name m)))
+                       (is (= 1 (::rank m))
+                           "queried-back value identical regardless of call shape"))))))
       done)))
 
 (deftest transact!-positional-3-arity-attaches-tx-meta
@@ -343,14 +351,13 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [{::db/keys [ok? tx-report]}
-                (a/<! (db/transact! conn
-                                    [{::name "Metaed" ::rank 3}]
-                                    {:seon.db-test/source :import}))]
-            (is (true? ok?))
-            (is (= :import (:seon.db-test/source (:tx-meta tx-report)))
-                "tx-meta from the 3rd positional arg lands in the report"))))
+        (.then (db/transact! conn
+                             [{::name "Metaed" ::rank 3}]
+                             {:seon.db-test/source :import})
+               (fn [{::db/keys [ok? tx-report]}]
+                 (is (true? ok?))
+                 (is (= :import (:seon.db-test/source (:tx-meta tx-report)))
+                     "tx-meta from the 3rd positional arg lands in the report"))))
       done)))
 
 (deftest transact!-positional-bad-conn-returns-envelope
@@ -359,23 +366,22 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [{::db/keys [ok? error]}
-                (a/<! (db/transact! "not-a-conn" [{::name "Nope"}]))]
-            (is (false? ok?) "non-conn positional first arg → ok? false")
-            (is (some? error))
-            (is (= :user-input (:seon.error/kind (:seon.error/data error))))
-            (is (= :seon.db/invalid-invocation-shape
-                   (:seon.db/error (:seon.error/data error)))))
-          ;; non-map tx-meta (3rd arg) → also an envelope, not a throw
-          (let [{::db/keys [ok? error]}
-                (a/<! (db/transact! conn [{::name "Nope"}] "not-a-map"))]
-            (is (false? ok?) "non-map tx-meta → ok? false")
-            (is (= :user-input (:seon.error/kind (:seon.error/data error)))))
-          ;; pod stays alive — a real positional write still works after
-          (let [{::db/keys [ok?]}
-                (a/<! (db/transact! conn [{::name "AliveAfter"}]))]
-            (is (true? ok?) "conn still usable after bad positional input"))))
+        (-> (db/transact! "not-a-conn" [{::name "Nope"}])
+            (.then (fn [{::db/keys [ok? error]}]
+                     (is (false? ok?) "non-conn positional first arg → ok? false")
+                     (is (some? error))
+                     (is (= :user-input (:seon.error/kind (:seon.error/data error))))
+                     (is (= :seon.db/invalid-invocation-shape
+                            (:seon.db/error (:seon.error/data error))))
+                     ;; non-map tx-meta (3rd arg) → also an envelope, not a throw
+                     (db/transact! conn [{::name "Nope"}] "not-a-map")))
+            (.then (fn [{::db/keys [ok? error]}]
+                     (is (false? ok?) "non-map tx-meta → ok? false")
+                     (is (= :user-input (:seon.error/kind (:seon.error/data error))))
+                     ;; pod stays alive — a real positional write still works after
+                     (db/transact! conn [{::name "AliveAfter"}])))
+            (.then (fn [{::db/keys [ok?]}]
+                     (is (true? ok?) "conn still usable after bad positional input")))))
       done)))
 
 ;; ---------------------------------------------------------------------------
@@ -386,41 +392,38 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (a/<! (db/transact! {::db/tx-data [{::name "Alpha" ::rank 1}
-                                             {::name "Seon" ::rank 2}]
-                               ::db/conn    conn}))
-          (let [rows (db/query {::db/query '[:find ?n ?r
-                                             :where
-                                             [?e :seon.db-test/name ?n]
-                                             [?e :seon.db-test/rank ?r]]
-                                ::db/conn  conn})]
-            (is (= #{["Alpha" 1] ["Seon" 2]} rows)))))
+        (.then (tx! conn [{::name "Alpha" ::rank 1}
+                          {::name "Seon" ::rank 2}])
+               (fn [_]
+                 (let [rows (db/query {::db/query '[:find ?n ?r
+                                                    :where
+                                                    [?e :seon.db-test/name ?n]
+                                                    [?e :seon.db-test/rank ?r]]
+                                       ::db/conn  conn})]
+                   (is (= #{["Alpha" 1] ["Seon" 2]} rows))))))
       done)))
 
 (deftest pull-by-lookup-ref
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (a/<! (db/transact! {::db/tx-data [{::name "Alpha" ::rank 1}]
-                               ::db/conn    conn}))
-          (let [m (db/pull {::db/pull-pattern [::name ::rank]
-                            ::db/ref          [::name "Alpha"]
-                            ::db/conn         conn})]
-            (is (= "Alpha" (::name m)))
-            (is (= 1 (::rank m))))))
+        (.then (tx! conn [{::name "Alpha" ::rank 1}])
+               (fn [_]
+                 (let [m (db/pull {::db/pull-pattern [::name ::rank]
+                                   ::db/ref          [::name "Alpha"]
+                                   ::db/conn         conn})]
+                   (is (= "Alpha" (::name m)))
+                   (is (= 1 (::rank m)))))))
       done)))
 
 (deftest entity-lookup
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (a/<! (db/transact! {::db/tx-data [{::name "Alpha" ::rank 1}]
-                               ::db/conn    conn}))
-          (let [e (db/entity {::db/ref [::name "Alpha"] ::db/conn conn})]
-            (is (= "Alpha" (::name e))))))
+        (.then (tx! conn [{::name "Alpha" ::rank 1}])
+               (fn [_]
+                 (let [e (db/entity {::db/ref [::name "Alpha"] ::db/conn conn})]
+                   (is (= "Alpha" (::name e)))))))
       done)))
 
 (deftest query-accepts-explicit-db
@@ -429,15 +432,13 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [{::db/keys [tx-report]}
-                (a/<! (db/transact! {::db/tx-data [{::name "Alpha"}]
-                                     ::db/conn    conn}))
-                db-after (:db-after tx-report)]
-            (is (= #{["Alpha"]}
-                   (db/query {::db/query '[:find ?n
-                                           :where [_ :seon.db-test/name ?n]]
-                              ::db/db    db-after}))))))
+        (.then (tx! conn [{::name "Alpha"}])
+               (fn [{::db/keys [tx-report]}]
+                 (let [db-after (:db-after tx-report)]
+                   (is (= #{["Alpha"]}
+                          (db/query {::db/query '[:find ?n
+                                                  :where [_ :seon.db-test/name ?n]]
+                                     ::db/db    db-after})))))))
       done)))
 
 ;; ---------------------------------------------------------------------------
@@ -446,7 +447,8 @@
 ;; is REQUIRED and explicit (no ambient *conn*). Dispatch is by arity:
 ;; 1 arg = map-in request; 2+/3+ args = positional. These tests prove both
 ;; shapes work, agree, and that a bad positional slot is rejected with a
-;; named-slot Malli error (sync reads are instrumented).
+;; named-slot Malli error (sync reads are instrumented — see the :once
+;; fixture, which installs the same instrumentation the pod boots with).
 ;; ---------------------------------------------------------------------------
 
 (deftest query-positional-mirrors-datahike
@@ -454,52 +456,50 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (a/<! (db/transact! {::db/tx-data [{::name "Alpha" ::rank 1}
-                                             {::name "Seon" ::rank 2}]
-                               ::db/conn    conn}))
-          (let [q       '[:find ?n ?r
-                          :where
-                          [?e :seon.db-test/name ?n]
-                          [?e :seon.db-test/rank ?r]]
-                map-in  (db/query {::db/query q ::db/conn conn})
-                pos     (db/query q @conn)]
-            (is (= #{["Alpha" 1] ["Seon" 2]} pos) "positional db binds $")
-            (is (= map-in pos) "positional agrees with map-in"))
-          (testing "extra :in input binds positionally after db (3+ arity)"
-            (let [q '[:find ?n :in $ ?target
-                      :where [?e :seon.db-test/name ?n] [(= ?n ?target)]]]
-              (is (= #{["Seon"]} (db/query q @conn "Seon")))
-              (is (= (db/query {::db/query q ::db/args ["Seon"] ::db/conn conn})
-                     (db/query q @conn "Seon")))))
-          (testing "a positional query MAP routes positional (not map-in)"
-            ;; '{:find …} is map? but lacks ::db/query, so 2-arg => positional
-            (is (= #{["Alpha" 1] ["Seon" 2]}
-                   (db/query '{:find [?n ?r]
-                               :where [[?e :seon.db-test/name ?n]
-                                       [?e :seon.db-test/rank ?r]]}
-                             @conn))))))
+        (.then (tx! conn [{::name "Alpha" ::rank 1}
+                          {::name "Seon" ::rank 2}])
+               (fn [_]
+                 (let [q       '[:find ?n ?r
+                                 :where
+                                 [?e :seon.db-test/name ?n]
+                                 [?e :seon.db-test/rank ?r]]
+                       map-in  (db/query {::db/query q ::db/conn conn})
+                       pos     (db/query q @conn)]
+                   (is (= #{["Alpha" 1] ["Seon" 2]} pos) "positional db binds $")
+                   (is (= map-in pos) "positional agrees with map-in"))
+                 (testing "extra :in input binds positionally after db (3+ arity)"
+                   (let [q '[:find ?n :in $ ?target
+                             :where [?e :seon.db-test/name ?n] [(= ?n ?target)]]]
+                     (is (= #{["Seon"]} (db/query q @conn "Seon")))
+                     (is (= (db/query {::db/query q ::db/args ["Seon"] ::db/conn conn})
+                            (db/query q @conn "Seon")))))
+                 (testing "a positional query MAP routes positional (not map-in)"
+                   ;; '{:find …} is map? but lacks ::db/query, so 2-arg => positional
+                   (is (= #{["Alpha" 1] ["Seon" 2]}
+                          (db/query '{:find [?n ?r]
+                                      :where [[?e :seon.db-test/name ?n]
+                                              [?e :seon.db-test/rank ?r]]}
+                                    @conn)))))))
       done)))
 
 (deftest query-positional-bad-db-slot-named-error
   ;; Wrong slot-1 (db not a db value) → instrumented invalid-input at ::db.
   (async done
     (with-conn
-      (fn [conn]
-        (go
-          (let [ex (try (db/query '[:find ?e :where [?e :seon.db-test/name _]]
-                                  :not-a-db)
-                        nil
-                        (catch :default e e))]
-            (is (some? ex) "bad positional db must throw (instrumented)")
-            (is (= [::db/db] (:seon.error.malli/explain-path (ex-data ex)))
-                "named slot ::db/db, not a positional index"))
-          ;; 3-arity bad db too
-          (let [ex (try (db/query '[:find ?e :in $ ?t :where [?e :seon.db-test/name ?t]]
-                                  :not-a-db "x")
-                        nil
-                        (catch :default e e))]
-            (is (= [::db/db] (:seon.error.malli/explain-path (ex-data ex)))))))
+      (fn [_conn]
+        (let [ex (try (db/query '[:find ?e :where [?e :seon.db-test/name _]]
+                                :not-a-db)
+                      nil
+                      (catch :default e e))]
+          (is (some? ex) "bad positional db must throw (instrumented)")
+          (is (= [::db/db] (:seon.error.malli/explain-path (ex-data ex)))
+              "named slot ::db/db, not a positional index"))
+        ;; 3-arity bad db too
+        (let [ex (try (db/query '[:find ?e :in $ ?t :where [?e :seon.db-test/name ?t]]
+                                :not-a-db "x")
+                      nil
+                      (catch :default e e))]
+          (is (= [::db/db] (:seon.error.malli/explain-path (ex-data ex))))))
       done)))
 
 (deftest pull-positional-mirrors-datahike
@@ -507,16 +507,15 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (a/<! (db/transact! {::db/tx-data [{::name "Alpha" ::rank 1}]
-                               ::db/conn    conn}))
-          (let [sel    [::name ::rank]
-                eid    [::name "Alpha"]
-                map-in (db/pull {::db/pull-pattern sel ::db/ref eid ::db/conn conn})
-                pos    (db/pull @conn sel eid)]
-            (is (= "Alpha" (::name pos)))
-            (is (= 1 (::rank pos)))
-            (is (= map-in pos) "positional agrees with map-in"))))
+        (.then (tx! conn [{::name "Alpha" ::rank 1}])
+               (fn [_]
+                 (let [sel    [::name ::rank]
+                       eid    [::name "Alpha"]
+                       map-in (db/pull {::db/pull-pattern sel ::db/ref eid ::db/conn conn})
+                       pos    (db/pull @conn sel eid)]
+                   (is (= "Alpha" (::name pos)))
+                   (is (= 1 (::rank pos)))
+                   (is (= map-in pos) "positional agrees with map-in")))))
       done)))
 
 (deftest pull-positional-bad-selector-named-error
@@ -526,13 +525,13 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (a/<! (db/transact! {::db/tx-data [{::name "Alpha"}]
-                               ::db/conn    conn}))
-          (let [ex (try (db/pull @conn :not-a-vector [::name "Alpha"]) nil
-                        (catch :default e e))]
-            (is (some? ex) "bad selector must throw (instrumented)")
-            (is (= [::db/selector] (:seon.error.malli/explain-path (ex-data ex)))))))
+        (.then (tx! conn [{::name "Alpha"}])
+               (fn [_]
+                 (let [ex (try (db/pull @conn :not-a-vector [::name "Alpha"]) nil
+                               (catch :default e e))]
+                   (is (some? ex) "bad selector must throw (instrumented)")
+                   (is (= [::db/selector]
+                          (:seon.error.malli/explain-path (ex-data ex))))))))
       done)))
 
 (deftest entity-positional-mirrors-datahike
@@ -540,26 +539,24 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (a/<! (db/transact! {::db/tx-data [{::name "Alpha" ::rank 1}]
-                               ::db/conn    conn}))
-          (let [eid    [::name "Alpha"]
-                map-in (db/entity {::db/ref eid ::db/conn conn})
-                pos    (db/entity @conn eid)]
-            (is (= "Alpha" (::name pos)))
-            (is (= (:db/id map-in) (:db/id pos)) "same entity both shapes"))))
+        (.then (tx! conn [{::name "Alpha" ::rank 1}])
+               (fn [_]
+                 (let [eid    [::name "Alpha"]
+                       map-in (db/entity {::db/ref eid ::db/conn conn})
+                       pos    (db/entity @conn eid)]
+                   (is (= "Alpha" (::name pos)))
+                   (is (= (:db/id map-in) (:db/id pos)) "same entity both shapes")))))
       done)))
 
 (deftest entity-positional-bad-db-slot-named-error
   ;; Wrong slot-0 (db not a db value) → invalid-input at ::db.
   (async done
     (with-conn
-      (fn [conn]
-        (go
-          (let [ex (try (db/entity :not-a-db 1) nil
-                        (catch :default e e))]
-            (is (some? ex) "bad positional db must throw (instrumented)")
-            (is (= [::db/db] (:seon.error.malli/explain-path (ex-data ex)))))))
+      (fn [_conn]
+        (let [ex (try (db/entity :not-a-db 1) nil
+                      (catch :default e e))]
+          (is (some? ex) "bad positional db must throw (instrumented)")
+          (is (= [::db/db] (:seon.error.malli/explain-path (ex-data ex))))))
       done)))
 
 ;; ---------------------------------------------------------------------------
@@ -571,99 +568,94 @@
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [captured (atom nil)]
-            (db/listen! {::db/key     ::capture
-                         ::db/handler (fn [input] (reset! captured input))
-                         ::db/conn    conn})
-            (a/<! (db/transact! {::db/tx-data [{::name "Alpha" ::rank 1}]
-                                 ::db/conn    conn}))
-            (let [input @captured]
-              (is (some? input))
-              (testing "all spec'd keys present + fully namespaced"
-                (is (some? (::db/tx-report input)))
-                (is (some? (::db/db input)))
-                (is (some? (::db/db-before input)))
-                (is (vector? (::db/datoms input)))
-                (is (map? (::db/attr-index input))))
-              (testing "decoded datoms use seon.db-namespaced keys"
-                (let [d (first (::db/datoms input))]
-                  (is (every? d [::db/e ::db/a ::db/v ::db/tx ::db/added?]))))
-              (testing "attr-index grouped by attribute (user-domain keys)"
-                (is (contains? (::db/attr-index input) ::name))
-                (is (every? #(= ::name (::db/a %))
-                            (get (::db/attr-index input) ::name))))
-              (testing "::db/db is queryable in-place (no *conn* reach)"
-                (is (= #{["Alpha"]}
-                       (d/q '[:find ?n
-                              :where [_ :seon.db-test/name ?n]]
-                            (::db/db input)))))))))
+        (let [captured (atom nil)]
+          (db/listen! {::db/key     ::capture
+                       ::db/handler (fn [input] (reset! captured input))
+                       ::db/conn    conn})
+          (.then (tx! conn [{::name "Alpha" ::rank 1}])
+                 (fn [_]
+                   (let [input @captured]
+                     (is (some? input))
+                     (testing "all spec'd keys present + fully namespaced"
+                       (is (some? (::db/tx-report input)))
+                       (is (some? (::db/db input)))
+                       (is (some? (::db/db-before input)))
+                       (is (vector? (::db/datoms input)))
+                       (is (map? (::db/attr-index input))))
+                     (testing "decoded datoms use seon.db-namespaced keys"
+                       (let [d (first (::db/datoms input))]
+                         (is (every? d [::db/e ::db/a ::db/v ::db/tx ::db/added?]))))
+                     (testing "attr-index grouped by attribute (user-domain keys)"
+                       (is (contains? (::db/attr-index input) ::name))
+                       (is (every? #(= ::name (::db/a %))
+                                   (get (::db/attr-index input) ::name))))
+                     (testing "::db/db is queryable in-place (no *conn* reach)"
+                       (is (= #{["Alpha"]}
+                              (d/q '[:find ?n
+                                     :where [_ :seon.db-test/name ?n]]
+                                   (::db/db input))))))))))
       done)))
 
 (deftest listen!-multi-keys-fire-independently
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [hits-a (atom 0)
-                hits-b (atom 0)]
-            (db/listen! {::db/key ::a ::db/conn conn
-                         ::db/handler (fn [_] (swap! hits-a inc))})
-            (db/listen! {::db/key ::b ::db/conn conn
-                         ::db/handler (fn [_] (swap! hits-b inc))})
-            (a/<! (db/transact! {::db/tx-data [{::name "Alpha"}]
-                                 ::db/conn    conn}))
-            (is (= 1 @hits-a))
-            (is (= 1 @hits-b))
-            (a/<! (db/transact! {::db/tx-data [{::name "Seon"}]
-                                 ::db/conn    conn}))
-            (is (= 2 @hits-a))
-            (is (= 2 @hits-b)))))
+        (let [hits-a (atom 0)
+              hits-b (atom 0)]
+          (db/listen! {::db/key ::a ::db/conn conn
+                       ::db/handler (fn [_] (swap! hits-a inc))})
+          (db/listen! {::db/key ::b ::db/conn conn
+                       ::db/handler (fn [_] (swap! hits-b inc))})
+          (-> (tx! conn [{::name "Alpha"}])
+              (.then (fn [_]
+                       (is (= 1 @hits-a))
+                       (is (= 1 @hits-b))
+                       (tx! conn [{::name "Seon"}])))
+              (.then (fn [_]
+                       (is (= 2 @hits-a))
+                       (is (= 2 @hits-b)))))))
       done)))
 
 (deftest listen!-same-key-replaces
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [first-hits  (atom 0)
-                second-hits (atom 0)]
-            (db/listen! {::db/key ::same ::db/conn conn
-                         ::db/handler (fn [_] (swap! first-hits inc))})
-            (db/listen! {::db/key ::same ::db/conn conn
-                         ::db/handler (fn [_] (swap! second-hits inc))})
-            (a/<! (db/transact! {::db/tx-data [{::name "Alpha"}]
-                                 ::db/conn    conn}))
-            (is (zero? @first-hits) "old handler replaced — should not fire")
-            (is (= 1 @second-hits) "new handler fires"))))
+        (let [first-hits  (atom 0)
+              second-hits (atom 0)]
+          (db/listen! {::db/key ::same ::db/conn conn
+                       ::db/handler (fn [_] (swap! first-hits inc))})
+          (db/listen! {::db/key ::same ::db/conn conn
+                       ::db/handler (fn [_] (swap! second-hits inc))})
+          (.then (tx! conn [{::name "Alpha"}])
+                 (fn [_]
+                   (is (zero? @first-hits) "old handler replaced — should not fire")
+                   (is (= 1 @second-hits) "new handler fires")))))
       done)))
 
 (deftest listen!-returns-key-for-unlisten
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [{::db/keys [key]} (db/listen!
-                                    {::db/handler (fn [_])
-                                     ::db/conn    conn})]
-            (is (some? key) "auto-generated key when not supplied"))))
+        (let [{::db/keys [key]} (db/listen!
+                                  {::db/handler (fn [_])
+                                   ::db/conn    conn})]
+          (is (some? key) "auto-generated key when not supplied")))
       done)))
 
 (deftest unlisten!-stops-the-callback
   (async done
     (with-conn
       (fn [conn]
-        (go
-          (let [hits (atom 0)]
-            (db/listen! {::db/key ::stoppable ::db/conn conn
-                         ::db/handler (fn [_] (swap! hits inc))})
-            (a/<! (db/transact! {::db/tx-data [{::name "Alpha"}]
-                                 ::db/conn    conn}))
-            (is (= 1 @hits))
-            (db/unlisten! {::db/key ::stoppable ::db/conn conn})
-            (a/<! (db/transact! {::db/tx-data [{::name "Seon"}]
-                                 ::db/conn    conn}))
-            (is (= 1 @hits) "handler retracted — no further fires"))))
+        (let [hits (atom 0)]
+          (db/listen! {::db/key ::stoppable ::db/conn conn
+                       ::db/handler (fn [_] (swap! hits inc))})
+          (-> (tx! conn [{::name "Alpha"}])
+              (.then (fn [_]
+                       (is (= 1 @hits))
+                       (db/unlisten! {::db/key ::stoppable ::db/conn conn})
+                       (tx! conn [{::name "Seon"}])))
+              (.then (fn [_]
+                       (is (= 1 @hits) "handler retracted — no further fires"))))))
       done)))
 
 ;; ---------------------------------------------------------------------------

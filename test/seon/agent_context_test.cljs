@@ -82,15 +82,17 @@
             :seon.turn/status :done
             :seon.turn/messages
             [{:seon.message/id "MSGctxtest0001"
-              :seon.message/role :user
+              :seon.message/from {:seon.user/id "user"}
+              :seon.message/to [{:seon.agent/id agent-id}]
               :seon.message/content "build me a thing"
-              :seon.message/agent [:seon.agent/id agent-id]
-              :seon.message/at (t 11)}
+              :seon.message/at (t 11)
+              :seon.message/hops 0}
              {:seon.message/id "MSGctxtest0002"
-              :seon.message/role :assistant
+              :seon.message/from {:seon.agent/id agent-id}
+              :seon.message/to [{:seon.user/id "user"}]
               :seon.message/content "on it"
-              :seon.message/agent [:seon.agent/id agent-id]
-              :seon.message/at (t 12)}]
+              :seon.message/at (t 12)
+              :seon.message/hops 1}]
             :seon.turn/evals
             [{:seon.eval/id "EVLctxtestF001"
               :seon.eval/at (t 13)
@@ -556,8 +558,12 @@
                      :seon.fn/doc      "A throwaway helper for the derivation test."
                      :seon.fn/source   "(defn helper [x] (inc x))"}]})
                 (.then (fn [_]
-                         (let [after (agent/functions-catalog-section
-                                       {:seon.db/db @conn :seon.agent/id agent-id})]
+                         ;; rebind: the fixture's binding does not survive
+                         ;; the .then boundary, and functions-catalog-section
+                         ;; reaches @db/*conn* for cross-ns fn rows.
+                         (let [after (binding [db/*conn* conn]
+                                       (agent/functions-catalog-section
+                                         {:seon.db/db @conn :seon.agent/id agent-id}))]
                            (is (str/includes? after "=== seon.zzcat ===")
                                "newly-defined fn's ns APPEARS — derived, not hardcoded")
                            (is (str/includes? after "(seon.zzcat/helper [x])")

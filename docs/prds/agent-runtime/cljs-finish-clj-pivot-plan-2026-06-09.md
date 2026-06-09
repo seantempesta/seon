@@ -579,6 +579,27 @@ js/require branch). wire-server runs via `bin/seon` (store:
   crashes in seon.db-test (core.async TypeError) before later suites run;
   boot.preconditions-test 4 fails; agent-context-test 13 fails in `:test` build.
   Worth a dedicated cleanup unit.
+  - CLEANUP UNIT DONE (2026-06-09): `bin/test-cljs` now runs END-TO-END
+    (267 tests / 968 assertions). Root causes + fixes: (1) `:test` build
+    moved `release` → dev `compile` — Closure `:simple` flattens namespaces
+    off `goog.global`, breaking BOTH `seon.eval/lookup-value` section
+    resolution (the `<unresolved-section>` agent-context failures) and
+    malli's CLJS instrument; (2) db_test ported core.async → Promise
+    envelopes + a `seon.db`-scoped instrumentation fixture (the
+    `[:seon.db/db]` explain-path assertions were CORRECT — the runner env
+    just never installed instrumentation); (3) preconditions_test rewritten
+    to `(async done …)` (its sync spin-loop on a Promise can never resolve
+    in Node — failed since birth); (4) `seon.test.*-probes` intentional
+    failures gated behind `armed?` (shadow registers every deftest ns in
+    the build; unarmed direct runs pass vacuously, runner-driven runs arm
+    them); (5) runner-test record tests bootstrap a conn (`*conn*` unbound
+    in node-test killed the whole Node process via unhandled rejection).
+    REMAINING REAL BUG (substrate, not tests):
+    `seon.agents/substrate-ctx-als` is write-only — `.run` is called but
+    nothing reads `.getStore`, so `*ctx*` does NOT survive `await`;
+    `cross-await-binding-survives` and
+    `multi-agent-interleaving-keeps-atoms-distinct` fail honestly until a
+    getStore-backed read path lands in `seon.agents`.
 
 ### UNIT 2.2d — DIS same-box cutover (USER-APPROVED 2026-06-09 ~23:30Z)
 

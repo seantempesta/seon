@@ -13,6 +13,16 @@
   (:require
     [cljs.test :as t :refer [deftest is async]]))
 
+(def armed?
+  "shadow's node-test runner registers EVERY ns with deftest vars in
+   the build (shadow.test.env/get-test-data ignores :ns-regexp for
+   required namespaces), so these probes ALSO run directly in
+   `bin/test-cljs` — where an intentional failure would pollute the
+   real suite totals. The driving test (`seon.test.runner-test`) arms
+   the failure before invoking `r/run!` and disarms after; the outer
+   direct run sees `false` and the failing probe passes vacuously."
+  (atom false))
+
 (def async-evidence
   "Mutated by `probe-async-test` from inside a `js/setTimeout` callback
    so the runner self-test can verify the driver awaited the body. The
@@ -25,9 +35,12 @@
   (is (= 4 (+ 2 2))))
 
 (deftest probe-failing-test
-  ;; Intentionally false. Only invoked by `r/run!` driven from a real
-  ;; test that EXPECTS to see a fail event in the returned data.
-  (is (= :expected :actual-mismatch)))
+  ;; Intentionally false WHEN ARMED. Only meaningful via `r/run!`
+  ;; driven from a real test that EXPECTS to see a fail event in the
+  ;; returned data; the outer direct run (unarmed) passes vacuously.
+  (if @armed?
+    (is (= :expected :actual-mismatch))
+    (is true "unarmed — direct (outer-runner) invocation is a no-op")))
 
 (deftest probe-async-test
   (async done

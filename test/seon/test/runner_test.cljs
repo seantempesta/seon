@@ -23,10 +23,33 @@
    event tells you immediately which capability broke."
   (:require
     [cljs.test :as t :refer [deftest is async]]
+    [datahike.api :as d]
+    [seon.db :as db]
     [seon.test.runner :as r]
     [seon.test.runner-probes :as probes]))
 
 (def ^:private probes-ns 'seon.test.runner-probes)
+
+(defn- ensure-conn!
+  "The runner's record path (`run-ns!` with `::record? true`,
+   `last-result`) reads/writes through the ambient `db/*conn*`. The
+   pod binds that at boot; the node-test runner has no boot, so
+   without this the record tests throw `*conn* is unbound` — an
+   UNHANDLED rejection that kills the whole Node process (observed
+   2026-06-09). Opens one fresh :memory conn for this suite and
+   root-`set!`s `db/*conn*` (a `binding` would not survive the
+   Promise boundaries). Returns a Promise of the conn."
+  []
+  (if db/*conn*
+    (js/Promise.resolve db/*conn*)
+    (let [cfg {:store              {:backend :memory :id (random-uuid)}
+               :schema-flexibility :write
+               :keep-history?      true}]
+      (-> (d/create-database cfg)
+          (.then (fn [_] (d/connect cfg {:sync? false})))
+          (.then (fn [conn]
+                   (set! db/*conn* conn)
+                   conn))))))
 
 ;; ============================================================
 ;; vars-in-ns
@@ -76,6 +99,9 @@
 
 (deftest run!-with-ns-selector-discovers-and-runs-all-probes
   (async done
+    ;; Arm the intentionally-failing probe — only the runner-driven
+    ;; invocation should see it fail (see probes/armed? docstring).
+    (reset! probes/armed? true)
     (-> (r/run! {:seon.test.runner/ns probes-ns})
         (.then
           (fn [result]
@@ -93,7 +119,12 @@
               (is (pos? (:fail summary))
                   (str "expected at least 1 fail from probe-failing-test; "
                        "summary=" (pr-str summary))))
-            (done))))))
+            (reset! probes/armed? false)
+            (done)))
+        (.catch (fn [e]
+                  (reset! probes/armed? false)
+                  (is false (str "threw — " e))
+                  (done))))))
 
 ;; ============================================================
 ;; run-ns! — sugar wrapper, default ::record? true
@@ -101,8 +132,10 @@
 
 (deftest run-ns!-records-and-returns-run-id
   (async done
-    (-> (r/run-ns! {:seon.test.runner/ns probes-ns
-                    :seon.test.runner/record? true})
+    (-> (ensure-conn!)
+        (.then (fn [_]
+                 (r/run-ns! {:seon.test.runner/ns probes-ns
+                             :seon.test.runner/record? true})))
         (.then
           (fn [result]
             (is (string? (:seon.test.runner/run-id result))
@@ -114,7 +147,10 @@
                 "::recorded-syms should be a vector")
             (is (pos? (count (:seon.test.runner/recorded-syms result)))
                 "::recorded-syms should be non-empty after recording")
-            (done))))))
+            (done)))
+        (.catch (fn [e]
+                  (is false (str "threw — " e))
+                  (done))))))
 
 ;; ============================================================
 ;; last-result — DB lookup + globalThis stash round-trip
@@ -122,8 +158,10 @@
 
 (deftest last-result-roundtrips-most-recent-run
   (async done
-    (-> (r/run-ns! {:seon.test.runner/ns probes-ns
-                    :seon.test.runner/record? true})
+    (-> (ensure-conn!)
+        (.then (fn [_]
+                 (r/run-ns! {:seon.test.runner/ns probes-ns
+                             :seon.test.runner/record? true})))
         (.then
           (fn [first-result]
             (let [run-id  (:seon.test.runner/run-id first-result)
@@ -141,7 +179,10 @@
                     "hydrated run-result must carry ::events vector")
                 (is (map? (:seon.test.runner/summary hydrated))
                     "hydrated run-result must carry ::summary map")))
-            (done))))))
+            (done)))
+        (.catch (fn [e]
+                  (is false (str "threw — " e))
+                  (done))))))
 
 ;; ============================================================
 ;; Async driver — the body's `(is true)` assertion fires inside a

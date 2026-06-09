@@ -215,7 +215,7 @@
     (is (= (str "<div class=\"p-3 bg-base-900\" id=\"agent-seon\">"
                 "<header class=\"flex gap-2\">"
                 "<span class=\"h-2 w-2 rounded-full bg-signal animate-pulse\"></span>"
-                "<span class=\"font-mono\">alice</span>"
+                "<span class=\"font-mono\">seon</span>"
                 "</header>"
                 "<section>"
                 "<div><span>user: </span><span>hi</span></div>"

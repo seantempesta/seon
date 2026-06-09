@@ -7,6 +7,7 @@
 (deftest async-fixture-before-and-after-are-awaited
   (async done
     (reset! probes/lifecycle [])
+    (reset! probes/armed? true)
     (-> (r/run! {:seon.test.runner/ns 'seon.test.async-fixture-probes})
         (.then
           (fn [result]
@@ -25,4 +26,9 @@
                       :once-after]
                      seq)
                   (str "exact lifecycle order wrong; got=" (pr-str seq))))
-            (done))))))
+            (reset! probes/armed? false)
+            (done)))
+        (.catch (fn [e]
+                  (reset! probes/armed? false)
+                  (is false (str "threw — " e))
+                  (done))))))
