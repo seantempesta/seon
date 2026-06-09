@@ -95,10 +95,10 @@
   ;; The :client bundle ships seon.render.default — lookup-value
   ;; should walk globalThis and return the callable.
   (let [view-fn   (eval/lookup-value 'seon.render.default/view)
-        ctx-fn    (eval/lookup-value 'seon.render.default/ctx)
+        ai-fn     (eval/lookup-value 'seon.agent/assemble-context)
         pretty-fn (eval/lookup-value 'seon.render.default/pretty-html)]
     (is (fn? view-fn))
-    (is (fn? ctx-fn))
+    (is (fn? ai-fn))
     (is (fn? pretty-fn))))
 
 (deftest lookup-value-returns-nil-for-nonexistent-ns

@@ -338,7 +338,7 @@
 
 ;; ============================================================
 ;; Conveniences for the agent prompt — short helpers that match the
-;; worked-example shapes in seon.render.default/what-you-can-do.
+;; worked-example shapes in seon.agent/capabilities-section.
 ;; ============================================================
 
 (defn file-exists?

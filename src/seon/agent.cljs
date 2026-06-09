@@ -48,8 +48,8 @@
                               default `:seon.ctx` layout
      - `reset-ctx!` / `update-ctx!` / `ctx-entities` — agent's ctx-layout
        editing surface
-     - `register-warning!` / `unregister-warning!` — warning predicate
-       registry (atom-backed; v1.md §5.2)
+     - `warnings-section`   — clustered warnings via the `seon.warn`
+       check registry (compositional; ns-scoped by default)
      - `replies-after`      — poll-style read of :assistant messages
 
    Agent-id resolution: every read API takes `:seon.agent/id` and falls
@@ -85,9 +85,10 @@
    map `{:seon.db/db :seon.agent/id :seon.agent/ctx-entity}`, and joins
    the non-blank string results.
 
-   Substrate defaults (`substrate-default-ctx`): six sections —
-   `system`, `messages`, `current-ns`, `warnings`, `recent-evals`,
-   `prompt`. The agent customizes by transacting different
+   Substrate defaults (`substrate-default-ctx`): eight sections —
+   `system`, `capabilities`, `schema-catalog`, `functions-catalog`,
+   `namespace-context`, `warnings`, `transcript`, `prompt`.
+   The agent customizes by transacting different
    `:seon.ctx` entities into `:seon.agent/ctx` (use `update-ctx!`)
    or by transacting a completely different symbol onto the agent's
    `:seon.render/ai` slot."
@@ -104,7 +105,8 @@
     [seon.log :as seon-log]
     [seon.render :as render]
     [seon.repl :as repl]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.warn :as warn]))
 
 ;; ============================================================
 ;; Schemas — every shape the agent reads or writes.
@@ -1026,17 +1028,30 @@
                {::error :seon.agent/no-agent-id}))))
 
 (defn messages
-  "Last N user/assistant/system messages on the agent's current
-   session, oldest-first.  Walks :seon.session/turns →
-   :seon.turn/messages (component refs), so the values are inlined
-   without an extra query. Default {:seon.agent/n 50}."
+  "Last N user/assistant/system messages addressed to the agent,
+   oldest-first. Queries by `:seon.message/agent` DIRECTLY — not by
+   walking :seon.session/turns → :seon.turn/messages. The turn-walk
+   was the run-3 demo killer (2026-06-09): /chat transacts user
+   messages standalone (agent ref only, never attached to a turn), so
+   the walk returned ZERO user messages and the agent never saw the
+   question in its transcript. Derived-by-default: the message log IS
+   the source; turn attachment is bookkeeping, not visibility.
+   Default {:seon.agent/n 50}."
   ([] (messages {}))
   ([{:seon.agent/keys [n id] :or {n 50}}]
-   (let [id      (resolve-id id)
-         session (current-session id)
-         msgs    (for [t (sort-by :seon.turn/at (:seon.session/turns session))
-                       m (sort-by :seon.message/at (:seon.turn/messages t))]
-                   m)]
+   (let [id   (resolve-id id)
+         rows (db/query
+                {:seon.db/query
+                 '[:find (pull ?m [*])
+                   :in $ ?aid
+                   :where
+                   [?m :seon.message/agent ?a]
+                   [?a :seon.agent/id ?aid]
+                   [?m :seon.message/at _]]
+                 :seon.db/args [id]})
+         msgs (->> rows
+                   (map first)
+                   (sort-by #(.getTime ^js (:seon.message/at %))))]
      (vec (take-last n msgs)))))
 
 (defn current-turn
@@ -1126,12 +1141,6 @@
           vec))))
 
 ;; ------------------------------------------------------------
-;; Tunables for `warnings-section`. Predicate values; not stored.
-;; ------------------------------------------------------------
-
-(def slow-eval-threshold-ms 500)
-
-;; ------------------------------------------------------------
 ;; Section fns (v1.md §5.2). Each takes :seon.render/system-input
 ;; {:seon.db/db :seon.agent/id} optionally with :seon.agent/ctx-entity
 ;; (the :seon.ctx entity that named this section, so the fn can read
@@ -1140,13 +1149,27 @@
 ;; ------------------------------------------------------------
 
 (defn system-section
-  "REPL header: who-am-I, what's-now, discovery cheat-sheet."
+  "REPL header: who-am-I, what's-now, the strict response-format
+   contract, and the discovery cheat-sheet."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.agent/keys [id]}]
   (let [ns  (current-ns {:seon.agent/id id})
         now (.toISOString (js/Date.))]
     (str "<system agent=\"" id "\" ns=\"" ns "\">\n"
          "  Now: " now "  (pod tz: " (host-timezone) ")\n"
+         "\n"
+         "  FORMAT IS STRICT. Everything you emit is either\n"
+         "    (a) a Clojure form — (...), [...], {...}, @!atom\n"
+         "    (b) a comment line starting with ;;\n"
+         "  Anything else is a bug. Bare prose HAS eaten responses before\n"
+         "  (\"Let me read the file\" once became four bogus eval entries).\n"
+         "  If you write a sentence, put ;; in front of every line of it.\n"
+         "\n"
+         "  Correct shape:                 Wrong shape (don't do this):\n"
+         "    ;; first, look around          Let me look around first.\n"
+         "    (seon.db/query ...)            (seon.db/query ...)\n"
+         "    ;; then, write a reply         Now I'll write the reply.\n"
+         "    (seon.db/transact! ...)        (seon.db/transact! ...)\n"
          "\n"
          "  Walk your own state:\n"
          "    (seon.agent/messages)        ; current session's messages — default {:seon.agent/n 50}\n"
@@ -1824,109 +1847,35 @@
       "")))
 
 (defn warnings-section
-  "Survey the DB for current problems and render them as a single
-   section. Cross-agent visibility by default — queries are not
-   filtered by :seon.agent/id, so agent A's failed eval surfaces in
-   agent B's render. Empty section when nothing's wrong; warnings
-   vanish the moment the underlying state goes away (no stored
-   warning datoms; nothing to clear).
+  "Render current problems as ONE clustered `<warnings>` block via the
+   `seon.warn` check registry: one complete explanation + one targeted
+   fix example per kind, then the affected list with specific locations.
+   Empty string when everything is clean; warnings vanish the moment the
+   underlying state goes away (derived, never stored — see
+   docs/seon/concepts/reactive-context).
 
-   Sections are derived, not stored. To add a warning kind, add a
-   query here OR write a new section function. See
-   docs/seon/concepts/reactive-context."
+   The CORPUS checks (no-malli-schema, return-is-any, arg-is-any,
+   uses-maybe, no-return-spec, no-input-spec, missing-test) default to
+   the agent's CURRENT ns so an agent isn't confused by other
+   namespaces' defects. Override per-section via the `:seon.ctx` entity:
+   `:seon.warn/ns <ns-kw>` scopes to that ns; `:seon.warn/ns
+   :seon.warn/all` is the whole-substrate overview. The RUNTIME checks
+   (failed-evals, bad-ref, slow-evals, failing-tests) are always global
+   — cross-agent visibility is their point.
+
+   To add a warning kind, add a check fn to `seon.warn/checks`."
   {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.db/keys [db]}]
-  (let [;; Pre-compute latest user message timestamp so the "since
-        ;; latest user msg" window is unambiguous. Without this, a
-        ;; bare datalog join over `?u :seon.message/at ?u-at` joins
-        ;; on EVERY user msg (one row per msg), surfacing stale
-        ;; failures even after the user moved on.
-        latest-user-at
-        (ffirst (db/query
-                  {:seon.db/db db
-                   :seon.db/query
-                   '[:find (max ?at)
-                     :where
-                     [?u :seon.message/role :user]
-                     [?u :seon.message/at ?at]]}))
-        ;; Failed evals since the latest user message — anywhere in
-        ;; the system. Vanishes when the next user msg lands AND
-        ;; subsequent evals succeed.
-        failed-evals
-        (if latest-user-at
-          (db/query
-            {:seon.db/db db
-             :seon.db/query
-             '[:find ?eid
-               :in $ ?cutoff
-               :where
-               [?e :seon.eval/ok? false]
-               [?e :seon.eval/at ?e-at]
-               [(> ?e-at ?cutoff)]
-               [?e :seon.eval/id ?eid]]
-             :seon.db/args [latest-user-at]})
-          ;; No user msgs yet — every failed eval is "current".
-          (db/query
-            {:seon.db/db db
-             :seon.db/query
-             '[:find ?eid
-               :where
-               [?e :seon.eval/ok? false]
-               [?e :seon.eval/id ?eid]]}))
-        ;; Slow evals in the last hour anywhere in the system. Stops
-        ;; surfacing when the bad code is fixed (new evals are fast)
-        ;; and the offending eval ages out.
-        cutoff-at  (js/Date. (- (js/Date.now) (* 60 60 1000)))
-        slow-evals
-        (db/query
-          {:seon.db/db db
-           :seon.db/query
-           '[:find ?eid ?dur
-             :in $ ?threshold ?cutoff
-             :where
-             [?e :seon.eval/duration-ms ?dur]
-             [(>= ?dur ?threshold)]
-             [?e :seon.eval/at ?at]
-             [(> ?at ?cutoff)]
-             [?e :seon.eval/id ?eid]]
-           :seon.db/args [slow-eval-threshold-ms cutoff-at]})
-        ;; Failing tests — Platform Phase 2 test entities. Filters on
-        ;; last-failed > last-passed; vanishes when the test passes.
-        failing-tests
-        (db/query
-          {:seon.db/db db
-           :seon.db/query
-           '[:find ?sym
-             :where
-             [?t :seon.test/sym ?sym]
-             [?t :seon.test/last-failed-at ?f-at]
-             (or-join [?t ?f-at]
-                      (and (not [?t :seon.test/last-passed-at _])
-                           [(identity ?f-at) _])
-                      (and [?t :seon.test/last-passed-at ?p-at]
-                           [(> ?f-at ?p-at)]))]})
-        lines (cond-> []
-                (seq failed-evals)
-                (conj (str (count failed-evals)
-                           " failed eval"
-                           (when (> (count failed-evals) 1) "s")
-                           " across agents since latest user message"))
-                (seq slow-evals)
-                (conj (str (count slow-evals)
-                           " slow eval"
-                           (when (> (count slow-evals) 1) "s")
-                           " (≥" slow-eval-threshold-ms "ms) in the last hour"))
-                (seq failing-tests)
-                (conj (str (count failing-tests)
-                           " failing test"
-                           (when (> (count failing-tests) 1) "s")
-                           ": "
-                           (str/join ", " (map first failing-tests)))))]
-    (if (seq lines)
-      (str "<warnings>\n"
-           (str/join "\n" lines)
-           "\n</warnings>")
-      "")))
+  [{:seon.db/keys [db] :seon.agent/keys [id] :as input}]
+  (let [override (:seon.warn/ns (:seon.agent/ctx-entity input))
+        scope    (cond
+                   (= override :seon.warn/all) nil
+                   (some? override)            override
+                   :else
+                   (let [ns (current-ns {:seon.agent/id id})]
+                     (if (keyword? ns) ns (keyword (str ns)))))]
+    (warn/render-warnings
+      (cond-> {:seon.db/db db}
+        (some? scope) (assoc :seon.warn/ns scope)))))
 
 (defn- transcript-item-at
   "Wall-clock `:at` of a transcript item (a message or an eval), as
@@ -1952,8 +1901,9 @@
    `:seon.agent/n` from the ctx-entity if present (caps EACH stream
    before the merge), else defaults to 50 messages + 50 evals.
 
-   Pure render: walks the session's `:seon.turn/messages` +
-   `:seon.turn/evals`, merges by `:at`, stores nothing. Each eval row is
+   Pure render: messages via `seon.agent/messages` (direct agent-ref query,
+   Change B 2026-06-09); evals via `seon.agent/evals` (turn-walk). Merges
+   by `:at`, stores nothing. Each eval row is
    `cap-result`-bounded (`format-eval-row`) so one huge result can't
    dominate the transcript (context-SAFETY invariant)."
   {:malli/schema [:=> [:cat :map] :string]}
@@ -1974,13 +1924,42 @@
    the agent's current namespace and `turn N` the current-session turn
    count — a REPL already shows your ns, so `current-turn`/
    `current-session` collapse into this one always-present line. Always
-   present (never blank)."
+   present (never blank).
+
+   Surfaces TURN PRESSURE when the agentic loop runs long: derived from
+   the live `turns-since-user` count vs the agent's `turns-cap` (never
+   stored), escalating nudges precede the prompt line — wrap up at
+   halfway, FINAL WARNING three turns before `run-agentic-loop!` cuts
+   the loop off."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.agent/keys [id]}]
-  (let [ns      (current-ns {:seon.agent/id id})
-        sess    (current-session id)
-        n-turns (count (:seon.session/turns sess))]
-    (str ns "=>  ; turn " n-turns)))
+  (let [ns       (current-ns {:seon.agent/id id})
+        ;; current-ns returns a keyword (latest eval's :seon.eval/ns) or a
+        ;; symbol (home-ns fallback) — render without the keyword colon,
+        ;; like a real REPL prompt.
+        ns-str   (if (keyword? ns) (name ns) (str ns))
+        sess     (current-session id)
+        n-turns  (count (:seon.session/turns sess))
+        since-u  (turns-since-user {:seon.agent/id id})
+        cap      (turns-cap id)
+        pressure
+        (cond
+          (>= since-u (max 1 (- cap 3)))
+          (str ";; ⚠⚠⚠ FINAL WARNING — turn " since-u "/" cap " since your\n"
+               ";; human last spoke. You WILL hit the cap in a turn or two.\n"
+               ";; STOP researching. TRANSACT THE :assistant MESSAGE NOW with\n"
+               ";; whatever you have — even partial. Your human gets NOTHING\n"
+               ";; if you don't reply.\n")
+          (>= since-u (quot cap 2))
+          (str ";; ⚠ Turn " since-u "/" cap " since your human last spoke —\n"
+               ";; past halfway. You probably have enough. Stop reading new\n"
+               ";; things; compose the :assistant reply with what you found.\n")
+          (>= since-u 5)
+          (str ";; Turn " since-u "/" cap " since your human last spoke —\n"
+               ";; most questions need 2–4 turns. If you have the answer,\n"
+               ";; reply now.\n")
+          :else "")]
+    (str pressure ns-str "=>  ; turn " n-turns)))
 
 ;; ------------------------------------------------------------
 ;; Composer (v1.md §5.3).

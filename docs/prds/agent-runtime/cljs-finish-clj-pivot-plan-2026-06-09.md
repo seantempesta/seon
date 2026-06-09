@@ -230,7 +230,18 @@ the pod casually (live agents mid-session).
   transact!'s sync try; teach "errors are values"). Scope per agent = the specific
   defects 1.1 logs, spec'd here before launch.
   DONE per defect: targeted fix + REPL-verified against the live pod.
-- **1.3 A2 warnings + ctx-composer collapse** — compositional clustered checks per
+- **1.3 A2 warnings + ctx-composer collapse — DONE 2026-06-09.** Shipped:
+  `src/seon/warn.cljs` (11 checks: the 7 corpus checks + bad-ref/failed-evals/
+  slow-evals/failing-tests folded into the same clustered renderer; registry =
+  `seon.warn/checks`); `warnings-section` delegates to `seon.warn/render-warnings`,
+  ns-scoped to the agent's current ns by default (`:seon.warn/ns :seon.warn/all` on
+  the ctx entity = whole-substrate); strict-format block + war-story folded into
+  `system-section`; derived turn-pressure (since-user vs live `turns-cap`) folded
+  into `prompt-section`; `default/ctx` + its 11 dead helpers deleted (pretty-ai/
+  pretty-html/view/read-helpers kept). 12 tests/28 assertions in
+  `test/seon/warn_test.cljs`; live REPL-verified clustered render against the
+  running pod; 0 build warnings. Original spec follows:
+  compositional clustered checks per
   Track A §A2 (each check a separate unit-tested fn; `warnings-section` composes a
   registry; clustered render = ONE explanation + fix example + affected list;
   ns-scope optional, default current agent's ns; checks: `no-malli-schema`,
@@ -270,6 +281,21 @@ js/require branch). wire-server runs via `bin/seon` (store:
   DONE (oracle): an entity transacted FROM THE POD is readable from the
   wire-server REPL AND back from the pod. The ONLY genuinely new code is the
   thin plumbing from pod `seon.db` into the existing transport.
+  **STATUS: DONE 2026-06-09 (oracle demonstrated both ways).** The UNCHANGED
+  guest client (`seon.client-runtime.db` → `wit`) now runs on plain Node via a
+  sync UDS bridge: `src/seon/dev/wire_sync.cljs` (synckit pattern — worker
+  thread does async UDS I/O, main thread blocks on `Atomics.wait`; CBOR/Transit
+  protocol stays in CLJS on the main thread; installs the WIT surface on
+  `globalThis.__seon_client_runtime_db`) + `src/seon/dev/wire_sync_worker.js`
+  (dumb byte-exchanger) + `:wire-sync-probe` build. Probe: connect →
+  schema-guarded transact! marker → q back (exercises basis-t/as-of); marker
+  cross-read from the wire-server JVM REPL (`#{[30 "pod-client-2.1-…"]}`); a
+  second fresh client process sees the first run's entity. `:client` untouched;
+  no process restarts. 2.2 NOTE: the pod's `seon.db` is `^:async`/promise-based,
+  so the pod integration can route through the ASYNC transport
+  (`seon.dev.wire-node/rpc`) under its existing awaits — the sync bridge exists
+  for the unchanged sync guest-client surface (and matches WASM-host blocking
+  semantics); pick deliberately in 2.2.
 - **2.2 Route ALL ops** — `pull`, `entity`, schema register, batch; pod `seon.db`
   becomes a thin wire client (in-process datahike-cljs path retired on the pod —
   no dual-backend shims; per persistent-backend gotchas: mkdir base, branch on
