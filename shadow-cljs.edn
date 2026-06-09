@@ -116,6 +116,24 @@
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
 
+  ;; Track 2 unit 2.1 — sync UDS bridge probe. Drives the UNCHANGED guest
+  ;; client (seon.client-runtime.db → wit) over the plain-Node sync bridge
+  ;; (seon.dev.wire-sync + wire_sync_worker.js) against the running
+  ;; wire-server's ambient conn. Requires guest-cljs/src on the classpath, so
+  ;; build in a FRESH JVM (`clj -M:cljs compile wire-sync-probe`) — the
+  ;; long-running watcher predates the guest-cljs/ move and can't see it.
+  ;; :devtools disabled — it's a run-to-exit probe, not a live runtime.
+  ;;
+  ;; Build:  clj -M:cljs compile wire-sync-probe
+  ;; Run:    node out/wire-sync-probe/main.js   (from the project root)
+  :wire-sync-probe
+  {:target           :node-script
+   :output-to        "out/wire-sync-probe/main.js"
+   :main             seon.dev.wire-sync/-main
+   :devtools         {:enabled false}
+   :compiler-options {:warnings-as-errors false
+                      :externs           ["externs/node_fs.js"]}}
+
   ;; Milestone-1 WASM smoke build. Minimal CLJS bundle that exposes
   ;; `datahike-smoke-test!` (inlined) on globalThis.seonSmoke for the
   ;; wasm-rquickjs ESM shim. Deliberately doesn't require seon.client
