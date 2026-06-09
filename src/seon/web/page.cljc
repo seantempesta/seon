@@ -40,8 +40,12 @@
         ;; the server's stdout via POST /log so we can tail /tmp/seon-node.log
         ;; and see what the browser is doing. Tauri WebView has no
         ;; visible devtools by default; this is how we debug.
+        ;; Wrapped in (html/raw …): the body is JS, not text — without raw,
+        ;; ->string escapes `&`/`'`/`<` (e.g. `&&` → `&amp;&amp;`) and the
+        ;; browser throws "Unexpected token '&'".
         [:script {:type "text/javascript"}
-         (str
+         (html/raw
+          (str
            "(function(){"
            "  function send(level, args){"
            "    try{"
@@ -65,7 +69,7 @@
            "    send('error','[unhandledrejection] '+ (e.reason && e.reason.stack || e.reason));"
            "  });"
            "  console.log('[client] console-forwarder armed');"
-           "})();")]]
+           "})();"))]]
        [:body {:class "h-screen bg-base-950 text-text-50 font-sans antialiased"}
         [:noscript {:class "block p-4 bg-amber-100 text-amber-800 rounded mb-4"}
          "Seon requires JavaScript."]
