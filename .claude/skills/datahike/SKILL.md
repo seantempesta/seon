@@ -242,6 +242,10 @@ For `[:vector X]` / `[:set X]` attributes, transacting a new value **adds** to t
 
 In a source file, `register!` calls must appear **before** entity schema defs that reference them. The bridge throws a clear error if a schema reference cannot be resolved.
 
+### Data Modeling
+
+Modeling a fact database (entities, natural-key identity/upsert, refs + cardinality, reified relationships, reified transactions, intra-tx tempids vs lookup-refs)? Read `references/data-modeling.md` -- Datomic best practices mapped to `register!` wiring, with the deep-namespace + `::` convention and a verified worked example.
+
 ## Testing
 
 Bind `db/*direct-mode*` to bypass the infrastructure flow in tests:
@@ -273,5 +277,6 @@ See `test/seon/test_utils.clj` for `with-temp-conn` and `with-test-db` helpers. 
 
 ## When to Read References
 
+- `references/data-modeling.md` -- fact-database modeling: natural-key identity/upsert, refs + cardinality, reified relationships and transactions, intra-tx tempids vs lookup-refs, the deep-namespace + `::` convention, and a verified worked example
 - `references/querying.md` -- aggregates, rules, predicates, nested pull, performance tips
 - `references/datahike-internals.md` -- raw Datahike API, EAV model, schema format, connection model, debugging
