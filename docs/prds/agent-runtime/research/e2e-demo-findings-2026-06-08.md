@@ -617,3 +617,29 @@ rows so the EVAL row always survives (surface-errors-loudly).
 The 1.2-reuse salience fixes remain valid (immune — catalog now derives from
 `(:schema db)` directly) and `check-parallel-attr` fires on the real run-4
 duplicate. But S2 re-run is BLOCKED on the tee fix.
+
+## Run 5 — 2026-06-09 ~20:16Z, S1 re-run (agent Mmp-2606091543): FAIL — the A4 envelope bug, live
+
+Mmp behaved BETTER (registered :user.workout/* with duration-SECONDS — the
+reuse-contract prompt is visibly shaping schema design) but ZERO data landed
+while every transact eval showed :ok true and the agent told the user
+"Your workouts are stored." Three claimed-success replies, no data.
+
+Root cause chain (pod.log:32619+):
+1. `:user.workout/distance-km` registered as `:double` — register! accepts it
+   but the datahike bridge does NOT install it → transact rejects with
+   "Bad entity attribute … not defined in current schema".
+2. The rejection is ASYNC — past the eval's result capture. Eval records
+   :ok true; the error only lands in the unhandledRejection safety net.
+   The agent CANNOT see the failure → it reports success. This is exactly
+   Track A §A4: transact! must RESOLVE to the
+   `{:seon.db/ok? false :seon.db/error …}` envelope, never reject past the
+   sync try. Run 5 is the live proof of why A4 is MVP-critical: the agent
+   isn't lying by character — it is blind by construction.
+3. Secondary: register!-accepted-but-bridge-uninstallable types (`:double`)
+   must either install or be rejected AT register! time with the valid-type
+   list (rLC got that list for `:number` — `:double` slipped through).
+
+Positive signals: duration-seconds chosen unprompted (run-4 prompt fix
+working); agent self-diagnosed "save failed due to a schema registration
+race" and retried — right instinct, wrong information.
