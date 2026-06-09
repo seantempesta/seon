@@ -6,7 +6,8 @@
    prod) can reach the agent UI without intermediate infrastructure.
 
    Routes (V0.5):
-     GET  /                  → seon.web.page/root-html (the shell)
+     GET  /                  → 302 redirect to /agents (the inspector
+                               picker; the A-6 broadcast shell is unfinished)
      GET  /css/output.css    → resources/public/css/output.css
      GET  /js/datastar.js    → resources/public/js/datastar.js
      GET  /sse               → SSE stream (A-6 wires broadcast)
@@ -46,8 +47,7 @@
     [seon.agent :as agent]
     [seon.db :as db]
     [seon.log :as log]
-    [seon.web.inspector :as inspector]
-    [seon.web.page :as page]))
+    [seon.web.inspector :as inspector]))
 
 ;; ============================================================
 ;; Process-lifetime state
@@ -124,8 +124,16 @@
 ;; Route handlers
 ;; ============================================================
 
-(defn- serve-root! [res]
-  (write-status! res 200 "text/html; charset=utf-8" (page/root-html)))
+(defn- serve-root! [^js res]
+  ;; The root `/` shell (`page/root-html`) is an unfinished A-6 stub: it
+  ;; opens `/sse` but nothing ever pushes a tile patch, so it sits on
+  ;; "loading…" forever (and its placeholder `#agent-seon` id doesn't even
+  ;; match live agent ids). Until A-6's broadcast lands, land the user on
+  ;; the working inspector picker (`/agents`) via a 302 redirect — that
+  ;; route lists live agents and links into the two-pane live view.
+  (.writeHead res 302 #js {"Location"      "/agents"
+                           "Cache-Control" "no-store, no-cache, must-revalidate"})
+  (.end res ""))
 
 (defn- open-sse! [^js req ^js res]
   (.writeHead res 200 #js {"Content-Type"      "text/event-stream"

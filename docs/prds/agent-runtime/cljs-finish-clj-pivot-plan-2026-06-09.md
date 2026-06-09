@@ -192,25 +192,131 @@ the oracle; commit working code incrementally. Relevant memories:
   `:seon.dev/instrumentation` + `:seon.db.schema/consistency-check` + `:seon.web/caddy`
   (Phase 2 had been aborting on the flow error, so these were OFF). Turned on with NO
   surfaced schema errors — existing fn schemas are consistent.
-- **SOUL-pull correction DONE** (done the SIMPLE way — compile-time bake, NOT runtime
-  pull): `src/seon/soul.clj` `(defmacro soul-md [] (slurp "SOUL.md"))`;
-  `deepseek/default-system-prompt` = `(str (soul-md) "\n\n" <operational layer>)`.
-  `SOUL.md` is the single source; the inline copied prose is gone. Caveat: editing
-  `SOUL.md` needs a forced recompile (shadow doesn't track it as a dep).
+- **SOUL — REVERTED + RESOLVED 2026-06-09 (user decision).** The compile-time
+  `soul.clj`/`soul-md` bake was REMOVED (deleted `src/seon/soul.clj` + the
+  `:require-macros` in `deepseek.cljs` — both uncommitted scaffolding). Decision: KEEP
+  the identity HARDCODED inline in `deepseek/default-system-prompt` as the SINGLE
+  runtime source — it IS the live system message (`agent-adapter` passes no
+  `:seon.ai/system-prompt`, so `body-json` falls back to it). `SOUL.md` stays as the
+  human-readable doc; no macro, no seed, no pull. MVP-focused: no further SOUL work.
 
-### Next steps (ordered)
+### WORK PLAN — two tracks, agent-runnable (2026-06-09, user-confirmed)
 
-1. **Drive the two-scenario test** (same persistent DB, fresh-context agents,
-   back-to-back): (1) first work question → WORK-DIRECTED schema design + store (no
-   index step); (2) similar question → fresh agent SEES + reuses stored schemas + fns
-   (schema-catalog + functions-catalog). Observe COMPACTLY; append to
-   `research/e2e-demo-findings-2026-06-08.md`.
-2. Track 2 `:client` integration handoff (route the pod db path through the Node UDS
-   transport); then A2 warnings (specific/clustered/compositional/ns-scoped).
+Each unit below is sized for ONE agent (≤7 files), has explicit done-criteria, and
+names its lane. Methodology per unit: implement (`seon-agent`) → `seon-verifier` →
+orchestrator reviews diff → commit (`git add <specific files>`). The live pod /
+wire-server is the oracle for every unit — REPL-verify, don't just pass tests.
+Parallelism rule: Track 1 units and Track 2 units run CONCURRENTLY (different
+builds), EXCEPT anything touching the pod's `seon.db` — that seam serializes with
+units 2.1/2.2 (they own `seon.db.cljs` while in flight).
+
+#### Track 1 — CLJS pod + live DeepSeek (the MVP demo)
+
+Goal: a fresh-context agent answers a real work question by DESIGNING schemas +
+storing/computing; a second fresh agent REUSES the first's schemas + fns. Lane:
+pod `:client` build (`src/seon/*.cljs`). Hot-reload via cljs-watch; never restart
+the pod casually (live agents mid-session).
+
+- **1.1 Drive the two-scenario test** — ORCHESTRATOR drives (live DeepSeek budget,
+  bounded/observed; NOT delegated). Same persistent DB, back-to-back fresh agents:
+  (1) work question → work-directed schema design + store (no index step);
+  (2) similar question → fresh agent SEES + reuses stored schemas (schema-catalog)
+  and fns (functions-catalog) instead of re-deriving.
+  DONE: both scenarios observed; findings appended to
+  `research/e2e-demo-findings-2026-06-08.md`. Output: the defect list that becomes 1.2.
+- **1.2 Fix defects 1.1 surfaces** — A3 (concise per-form emissions, REPL-style
+  per-eval results), A4 (cryptic ref error → guiding message; validation failures
+  return the `{:seon.db/ok? false :seon.db/error …}` envelope, never reject past
+  transact!'s sync try; teach "errors are values"). Scope per agent = the specific
+  defects 1.1 logs, spec'd here before launch.
+  DONE per defect: targeted fix + REPL-verified against the live pod.
+- **1.3 A2 warnings + ctx-composer collapse** — compositional clustered checks per
+  Track A §A2 (each check a separate unit-tested fn; `warnings-section` composes a
+  registry; clustered render = ONE explanation + fix example + affected list;
+  ns-scope optional, default current agent's ns; checks: `no-malli-schema`,
+  `return-is-any`, `arg-is-any`, `uses-maybe`, `no-return-spec`/`no-input-spec`,
+  `missing-test`, `bad-ref`; NO missing-identity). In the SAME unit: salvage from
+  the dead `seon.render.default/ctx` composer (a) `how-you-respond`'s strict-format
+  block + war-story → fold into live `system-section`, (b) `repl-state-header`'s
+  turn-pressure escalation (5/10/17-turn nudges) → fold into live `prompt-section`
+  (live path has NONE today); THEN delete `default/ctx` + its 8 dead helpers
+  (`repl-state-header how-you-respond what-you-can-do conventions
+  recent-conversation recent-evals-block recent-errors-block schema-reference` +
+  orphaned `recent-evals`/`try-read-edn`/`all-entities`). KEEP `pretty-ai`,
+  `pretty-html` (live fallbacks in `seon.render`), `all-running-agents`,
+  `recent-messages`, `recent-errors`, `pulled-agent` (inspector/`view` deps), and
+  `view`. DONE: checks unit-tested; warnings render clustered in a live agent's
+  context; dead composer gone; 0 build warnings.
+- **1.4 Agent-controlled live tile** — wire `view` as the per-agent tile: add a
+  `:seon.render/html` slot the agent can repoint (default
+  `'seon.render.default/view`), so the agent dynamically rewrites its OWN single
+  tile (user goal: not just last-eval cards). Inspector right pane shows it above
+  the per-entity cards. DONE: an agent transacts its own tile renderer/content and
+  the inspector reflects it live.
+
+#### Track 2 — CLJ central store + multiagent (robustness)
+
+Goal: pod routes its DB path over the Node UDS transport to the central
+wire-server; multiple agents share the robust central store; reactive pushes work.
+Lane: JVM `seon.server.*` + `:wire-node` build + (for 2.1/2.2 only) the pod's
+`seon.db` seam. Ground every unit in `reference-code/datahike` + the existing
+wire/transport code (`seon.client-runtime.db`, wire-server handlers, `wit.cljs`
+js/require branch). wire-server runs via `bin/seon` (store:
+`data/clusters/default/store`).
+
+- **2.1 First slice: ONE op over the wire** — route pod `transact!` then `q`
+  through the Node UDS transport to the running wire-server; single ambient conn
+  (the back-compat path that already works guest-side).
+  DONE (oracle): an entity transacted FROM THE POD is readable from the
+  wire-server REPL AND back from the pod. The ONLY genuinely new code is the
+  thin plumbing from pod `seon.db` into the existing transport.
+- **2.2 Route ALL ops** — `pull`, `entity`, schema register, batch; pod `seon.db`
+  becomes a thin wire client (in-process datahike-cljs path retired on the pod —
+  no dual-backend shims; per persistent-backend gotchas: mkdir base, branch on
+  `database-exists?`, stable RFC-UUID `:id`).
+  DONE: full pod agent loop (boot → index-substrate! → turn → transact/query)
+  runs against the central store; the two-scenario test passes on it.
+- **2.3 Multi-agent on the central store** — per-agent db-name via the existing
+  multi-DB registry (agent-id→db-name); per-conn datahike serialization (NO
+  core.async in guest paths). DONE: two pod agents run concurrently, writes
+  interleave without corruption, each sees the shared substrate.
+- **2.4 Reactive subscriptions** — wire the guest `listen!` loop to the
+  wire-server's query-subscription layer (both sync layers already verified at
+  the transport level). DONE: a tx on the central store pushes a live update to
+  a subscribed pod agent/inspector pane.
+- **2.5 (after 2.2) B3 checks as a wire op** — the 1.3 checks re-homed as a
+  location-aware enhancement of `seon.dev.compliance`'s Malli-walk (one fn, not a
+  v2), exposed as a `handle-op` returning the clustered-warning shape the pod
+  renders. 1.3's CLJS impl is the stopgap until this lands.
+
+#### Sequencing + steering
+
+- NOW: 1.1 (orchestrator) ∥ 2.1 (agent). Then: 1.2 (from 1.1's defects) ∥ 2.2.
+  Then 1.3, 1.4 ∥ 2.3, 2.4, 2.5.
+- Orchestrator verifies each unit against its DONE-oracle before commit; PRD
+  status updated as units land (this section is the dispatch board).
+
+### Web UI status (2026-06-09 — FIXED + browser-verified)
+
+- **page.cljc escaping bug FIXED:** root `/` console-forwarder `<script>` wasn't
+  wrapped in `(seon.ui.html/raw …)` → `->string` escaped `&&` →
+  `Uncaught SyntaxError: Unexpected token '&'`. Wrapped in `html/raw`. Chrome
+  console confirms clean (`[client] console-forwarder armed`).
+- **Root `/` redirect FIXED:** `/` was a dead stub ("loading…" — A-6 broadcast never
+  built, no `broadcast.cljs`; placeholder `#agent-seon` ≠ live ids). `serve-root!`
+  now 302-redirects to `/agents`. Browser-verified end-to-end: `/` → `/agents`
+  picker → `/agent/<id>` two-pane inspector renders, console clean. `page.cljc`
+  `root-html` is now dead on the pod path — retained as the future A-6 shell.
+- **WORKING UI = the inspector:** `/agents` → `/agent/<id>` (left =
+  `assemble-context` "what the LLM sees"; right = per-entity HTML cards via
+  `handlers/*/render-html`) + `/agent/<id>/sse`.
+- Sticky preamble (`:seon.system-prompt`/`:seon.conventions`/`:seon.sticky/*`) +
+  the JVM web path (`src/seon/web/*.clj`) are PLANNED/destination — LEAVE ALONE.
 
 ### Standing principles (don't relearn)
 
-- **SOUL.md = the agent's identity, PULLED not copied** (single source).
+- **SOUL = identity, HARDCODED inline in `deepseek/default-system-prompt`** (the single
+  runtime source + live system message). `SOUL.md` is the human-readable doc only.
 - **Work-directed**: model from the human's question, no "store whatever" index step.
 - **Identity is OPTIONAL** on entities — never force/warn a natural key.
 - **Feedback is SPECIFIC** (exact defect + location + concise example; cluster by kind).
