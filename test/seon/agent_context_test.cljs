@@ -42,7 +42,8 @@
     [seon.client :as client]
     [seon.db :as db]
     [seon.eval :as seval]
-    [seon.inspect :as inspect]))
+    [seon.inspect :as inspect]
+    [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fixture — a fresh conn seeded with one agent + session + turns. Returns a
@@ -119,7 +120,11 @@
         :seon.fn/source "(defn greet [] :hi)"}]
       ;; the introspection-indexed core-fn :seon.ns + :seon.fn rows
       ;; (drives capabilities) — the SAME data the pod seeds at boot
-      (client/index-substrate!))))
+      (concat
+        (client/index-substrate!)
+        ;; the :seon.schema entities for every entity kind — the SAME data
+        ;; the pod seeds at boot; drives schema-catalog-section.
+        (schema/all-entity-schemas-tx-data)))))
 
 (defn- with-seeded-conn
   "Open a fresh conn, seed it (optionally with `extra-evals` on turn 2),
@@ -165,12 +170,12 @@
                   (agent/assemble-context {:seon.db/db db :seon.agent/id agent-id})]
               (is (pos? (count text))
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
-              (is (= [:system :capabilities :namespace-context
+              (is (= [:system :capabilities :schema-catalog :namespace-context
                       :warnings :transcript :prompt]
                      sections)
                   "the substrate-default section names, in order
-                   (static→dynamic): system, capabilities, namespace-context,
-                   warnings, transcript, prompt"))))
+                   (static→dynamic): system, capabilities, schema-catalog,
+                   namespace-context, warnings, transcript, prompt"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -221,6 +226,8 @@
               (is (not (str/blank? (agent/system-section input))) "system")
               (is (not (str/blank? (agent/capabilities-section input)))
                   "capabilities — non-blank because core :seon.fn rows are seeded")
+              (is (not (str/blank? (agent/schema-catalog-section input)))
+                  "schema-catalog — non-blank because :seon.schema entities are seeded")
               (is (not (str/blank? (agent/namespace-context-section input)))
                   "namespace-context — non-blank because a :seon.ns + :seon.fn exist")
               (is (not (str/blank? (agent/warnings-section input)))
@@ -244,6 +251,7 @@
                          (agent/assemble-context
                            {:seon.db/db db :seon.agent/id agent-id}))]
               (is (str/includes? text "<system") "system marker present")
+              (is (str/includes? text "<schema-catalog>") "schema-catalog marker present")
               (is (str/includes? text "<transcript>") "transcript marker present")
               (is (str/includes? text "<namespace-context>")
                   "namespace-context marker present")
@@ -358,6 +366,113 @@
                   (str "capabilities-section bounded — got " (count cap))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; (h) schema-catalog-section — the GLOBAL cross-namespace catalog of every
+;;     entity KIND in the system. This is HOW a fresh agent knows what data
+;;     exists (user, 2026-06-08 night). Guards: every entity kind listed,
+;;     grouped by namespace, with attrs + identity flag + live instance
+;;     counts; DERIVED from the seeded :seon.schema entities (a new kind
+;;     appears, a retracted one vanishes); in the default ctx after
+;;     capabilities and before namespace-context.
+;; ---------------------------------------------------------------------------
+
+(deftest substrate-default-ctx-has-schema-catalog-between-caps-and-ns
+  (let [names (mapv :seon.ctx/name (agent/substrate-default-ctx))]
+    (is (some #{:schema-catalog} names)
+        "substrate-default-ctx contains the :schema-catalog section")
+    (is (= [:system :capabilities :schema-catalog :namespace-context]
+           (vec (take 4 names)))
+        ":schema-catalog sits between :capabilities (static) and
+         :namespace-context (the deep per-ns view)")))
+
+(deftest schema-catalog-lists-all-entity-kinds
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db  @conn
+                  txt (agent/schema-catalog-section
+                        {:seon.db/db db :seon.agent/id agent-id})]
+              (is (not (str/blank? txt)) "catalog non-blank with seeded schemas")
+              (is (str/includes? txt "<schema-catalog>") "wrapper marker present")
+              ;; Every substrate entity kind must be listed.
+              (doseq [k [:seon.fn :seon.ns :seon.schema :seon.eval
+                         :seon.message :seon.test]]
+                (is (str/includes? txt (str "[" k "]"))
+                    (str k " kind listed in the catalog")))
+              ;; Attributes surfaced, with the identity flag.
+              (is (str/includes? txt "id :seon.fn/sym")
+                  ":seon.fn/sym shown as the identity attr")
+              (is (str/includes? txt ":seon.eval/source")
+                  "non-identity attrs are listed too")
+              (is (str/includes? txt "=== seon.fn ===")
+                  "kinds grouped by owning namespace"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest schema-catalog-instance-counts-match-seeded-data
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db  @conn
+                  txt (agent/schema-catalog-section
+                        {:seon.db/db db :seon.agent/id agent-id})]
+              ;; Seed has exactly two evals (failed t13 + ok t21).
+              (is (str/includes? txt "[:seon.eval]  2 instances")
+                  "eval count matches the two seeded evals")
+              ;; ns count present with correct singular/plural grammar.
+              (is (re-find #"\[:seon.ns\]  \d+ instances?" txt)
+                  ":seon.ns count present")
+              ;; A kind still LISTS even with a count (defined kinds always show).
+              (is (re-find #"\[:seon.message\]  \d+ instances?" txt)
+                  ":seon.message kind present with a count"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(defn- catalog-text [conn]
+  (agent/schema-catalog-section {:seon.db/db @conn :seon.agent/id agent-id}))
+
+(deftest schema-catalog-is-derived-new-kind-appears-retracted-vanishes
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (is (not (str/includes? (catalog-text conn) "seon.zzcatalog"))
+                "throwaway kind absent before registration")
+            ;; Register a throwaway entity kind + seed its :seon.schema entity
+            ;; (the same mechanism boot uses) — NOT hardcoded anywhere.
+            (schema/register! :seon.zzcatalog/id [:string {:seon.db/identity true}])
+            (schema/register! :seon.zzcatalog/label :string)
+            (schema/register! :seon.zzcatalog
+              [:map {:seon.render/ai 'seon.handlers.fn/render-ai}
+               [:seon.zzcatalog/id :seon.zzcatalog/id]
+               [:seon.zzcatalog/label :seon.zzcatalog/label]])
+            ;; NOTE: db/*conn* binding does NOT survive `.then` boundaries
+            ;; (see with-seeded-conn docstring), so pass :seon.db/conn
+            ;; explicitly inside the promise chain.
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data (schema/entity-schema-tx-data :seon.zzcatalog)})
+                (.then (fn [_]
+                         (let [after (catalog-text conn)]
+                           (is (str/includes? after "[:seon.zzcatalog]")
+                               "newly-registered kind APPEARS — derived, not hardcoded")
+                           (is (str/includes? after "=== seon.zzcatalog ===")
+                               "new kind grouped under its owning namespace"))
+                         (db/transact!
+                           {:seon.db/conn conn
+                            :seon.db/tx-data
+                            [[:db/retractEntity [:seon.schema/key :seon.zzcatalog]]]})))
+                (.then (fn [_]
+                         (is (not (str/includes? (catalog-text conn) "seon.zzcatalog"))
+                             "retract :seon.schema entity → kind vanishes (self-healing)"))))))
+        (.then (fn [_]
+                 (swap! schema/*schemas dissoc
+                        :seon.zzcatalog :seon.zzcatalog/id :seon.zzcatalog/label)
+                 (done)))
+        (.catch (fn [e]
+                  (swap! schema/*schemas dissoc
+                         :seon.zzcatalog :seon.zzcatalog/id :seon.zzcatalog/label)
+                  (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
 ;; (e) Bounded-context guard — one huge eval result does NOT blow context.

@@ -1221,6 +1221,140 @@
       "")))
 
 ;; ============================================================
+;; schema-catalog-section — the GLOBAL cross-namespace catalog of every
+;; ENTITY kind stored in the system. Layered ON TOP of the per-ns
+;; `namespace-context` (T5): namespace-context is the DEEP current-ns
+;; view (this ns's fns/tests/source); the catalog is the BROAD view —
+;; ALL the kinds of things that exist in the substrate, REGARDLESS of
+;; the agent's current ns. This is HOW the agent knows what data the
+;; system holds (user, 2026-06-08 night).
+;;
+;; DERIVED, never hardcoded: the catalog reads the `:seon.schema`
+;; entities seeded at boot (`all-entity-schemas-tx-data`). An entity
+;; KIND is a `:seon.schema` entity that carries a `:seon.schema/render-fn`
+;; — i.e. a renderable `:map` entity-shape schema (`:seon.fn`, `:seon.ns`,
+;; `:seon.eval`, `:seon.message`, `:seon.schema`, `:seon.test`, …) — as
+;; opposed to a request/response `:map` (which has no render symbol). The
+;; `:seon.schema` entity stores the kind's `:seon.schema/id-attr`; the
+;; per-attr SHAPE (type + which attrs are optional) is pulled from the
+;; live registry via `seon.schema/schema-definition`, the source the
+;; `:seon.schema` entity doesn't itself carry. Instance counts come from
+;; one AEVT count on each kind's id-attr — defined-but-empty kinds still
+;; list (count 0 is informative).
+;;
+;; Pure render of the DB + registry — stores nothing.
+;; ============================================================
+
+(defn- catalog-type-str
+  "Render an attr's registered Malli form as a COMPACT type label for the
+   catalog: a bare keyword as-is; `[:and {…} inner]` (the identity-wrap)
+   as its inner ref; `[:vector/:set {…} elem]` as `vector<elem>`;
+   `[:enum …]` as `enum (…)`; any other `[:type {props}]` as just `:type`.
+   Keeps each attr line to one short token so a whole-system catalog of
+   ~10 kinds stays a few KB."
+  [t]
+  (cond
+    (keyword? t) (str t)
+    (vector? t)
+    (let [head (first t)
+          rst  (rest t)]
+      (case head
+        :and (let [inner (remove map? rst)]
+               (if (= 1 (count inner))
+                 (catalog-type-str (first inner))
+                 (str "(" (str/join " & " (map catalog-type-str inner)) ")")))
+        :or  (str "(" (str/join " | " (map catalog-type-str (remove map? rst))) ")")
+        (:vector :set) (str (name head) "<" (catalog-type-str (last (remove map? rst))) ">")
+        :enum (str "enum " (pr-str (vec rst)))
+        (str head)))
+    :else (pr-str t)))
+
+(defn- catalog-attr-rows
+  "Attribute rows for an entity KIND, pulled from the live registry
+   (`seon.schema/schema-definition`). Each row:
+   `{:attr <kw> :type <compact-str> :optional <bool> :id? <bool>}`.
+   Returns nil when `kind` isn't a registered `:map` schema. The id-attr
+   is read from the schema's derived `:seon.entity/id-attr` prop."
+  [kind]
+  (let [form (schema/schema-definition kind)]
+    (when (and (vector? form) (= :map (first form)))
+      (let [props   (when (map? (second form)) (second form))
+            id-attr (:seon.entity/id-attr props)
+            body    (let [b (rest form)]
+                      (if (and (seq b) (map? (first b))) (rest b) b))]
+        (for [entry body :when (and (vector? entry) (keyword? (first entry)))]
+          (let [k     (first entry)
+                eprops (let [p (second entry)] (when (map? p) p))]
+            {:attr     k
+             :type     (catalog-type-str (schema/schema-definition k))
+             :optional (boolean (:optional eprops))
+             :id?      (= k id-attr)}))))))
+
+(defn- catalog-kind-count
+  "Count instances of `kind` by counting datoms on its `id-attr`
+   (one AEVT scan). Bounded: one count query per kind."
+  [db id-attr]
+  (count (db/query {:seon.db/db db
+                    :seon.db/query [:find '?e :where ['?e id-attr '_]]})))
+
+(defn- catalog-kind-block
+  "Render one entity kind: a `[kind  N instances]` header then one line
+   per attribute (`id`/`opt` flags + compact type). The id-attr line is
+   marked `id`; optional attrs are marked `?`."
+  [db {:keys [kind id-attr]}]
+  (let [n     (catalog-kind-count db id-attr)
+        rows  (sort-by (fn [{:keys [id? attr]}] [(if id? 0 1) (str attr)])
+                       (catalog-attr-rows kind))
+        lines (for [{:keys [attr type optional id?]} rows]
+                (str "  " (cond id? "id " optional "?  " :else "   ")
+                     attr " : " type))]
+    (str "[" kind "]  " n " instance" (when (not= 1 n) "s") "\n"
+         (str/join "\n" lines))))
+
+(defn schema-catalog-section
+  "GLOBAL schema catalog — EVERY registered entity KIND in the system,
+   grouped by owning namespace, REGARDLESS of the agent's current ns.
+   This is how the agent knows what data the substrate holds: each kind's
+   key, its attributes (name + compact type, identity attr flagged), and
+   a live instance count.
+
+   DERIVED from the `:seon.schema` entities (seeded at boot via
+   `seon.schema/all-entity-schemas-tx-data`) — a kind is a `:seon.schema`
+   entity carrying a `:seon.schema/render-fn` (a renderable `:map`
+   entity-shape, not a request/response map). Per-attr shapes come from
+   the live registry; counts from an AEVT scan on each id-attr. Stores
+   nothing; register a new entity kind and it appears here next render."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.db/keys [db]}]
+  (let [kinds (->> (db/query
+                     {:seon.db/db db
+                      :seon.db/query
+                      '[:find ?k ?ida
+                        :where
+                        [?e :seon.schema/key ?k]
+                        [?e :seon.schema/id-attr ?ida]
+                        [?e :seon.schema/render-fn _]]})
+                   (map (fn [[k ida]]
+                          {:kind k :id-attr ida :owner-ns (namespace ida)})))
+        groups (->> kinds
+                    (group-by :owner-ns)
+                    (sort-by first))]
+    (if (seq kinds)
+      (str "<schema-catalog>\n"
+           ";; Every kind of entity stored in the system, grouped by namespace.\n"
+           ";; This is the WHOLE substrate — not just your current ns. Query any\n"
+           ";; kind by its id-attr, e.g. (seon.db/query {:seon.db/query\n"
+           ";;   '[:find ?id :where [?e :seon.fn/sym ?id]]}).\n\n"
+           (str/join "\n\n"
+             (for [[ns ks] groups]
+               (str "=== " ns " ===\n"
+                    (str/join "\n\n"
+                      (map #(catalog-kind-block db %)
+                           (sort-by (comp str :kind) ks))))))
+           "\n</schema-catalog>")
+      "")))
+
+;; ============================================================
 ;; render-namespace — the foundational whole-namespace render.
 ;;
 ;; Renders ONE namespace (ns source + its fns + schemas + tests) in
@@ -1794,12 +1928,22 @@
 
      1. :system            — CLJS-in-Node + conventions + REPL contract (static)
      2. :capabilities      — core API worked examples (static)
-     3. :namespace-context — `render-namespace` of required nses + own ns
+     3. :schema-catalog    — GLOBAL catalog of every entity KIND in the
+                             system (cross-ns; what data exists), grouped by
+                             namespace with attrs + instance counts;
+                             semi-static (busts only on schema register)
+     4. :namespace-context — `render-namespace` of required nses + own ns
                              (mostly static; busts on ns edit)
-     4. :warnings          — current cross-agent problems (failed/slow evals,
+     5. :warnings          — current cross-agent problems (failed/slow evals,
                              failing tests); reactive, vanishes when fixed (dynamic)
-     5. :transcript        — messages + evals interleaved chronologically (dynamic)
-     6. :prompt            — `seon.agent.<id>=>  ; turn N` (always changing)
+     6. :transcript        — messages + evals interleaved chronologically (dynamic)
+     7. :prompt            — `seon.agent.<id>=>  ; turn N` (always changing)
+
+   The catalog sits between capabilities (static) and namespace-context:
+   it is the BROAD cross-ns 'what kinds of things exist' view; the per-ns
+   `namespace-context` that follows is the DEEP current-ns view. Both are
+   semi-static, the catalog more so (it only changes when a schema is
+   registered, vs. on any ns edit), so it renders first.
 
    Smallest priority first. `root-pull` is DELETED (was the
    `[*]`-everywhere amplifier that flooded context); `current-turn`/
@@ -1809,6 +1953,8 @@
     :seon.ctx/fn   'seon.agent/system-section}
    {:seon.ctx/name :capabilities      :seon.ctx/priority 20
     :seon.ctx/fn   'seon.agent/capabilities-section}
+   {:seon.ctx/name :schema-catalog    :seon.ctx/priority 25
+    :seon.ctx/fn   'seon.agent/schema-catalog-section}
    {:seon.ctx/name :namespace-context :seon.ctx/priority 30
     :seon.ctx/fn   'seon.agent/namespace-context-section}
    {:seon.ctx/name :warnings          :seon.ctx/priority 40

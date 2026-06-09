@@ -228,13 +228,25 @@ value; drill with normal Clojure). NO `root-pull`, NO `probe`.
 - **T6** system-prompt rewrite (CLJS-in-Node + motivated examples, no "DO NOT" blocks) — DEMO-CRITICAL — SHIPPED (cafca26). Positive/motivated framing, CLJS-in-Node platform reality (js/ interop, no java.*), REPL-channel mechanism explained (not scolded), re-synced to the T5 section names. Plus capabilities-section prose fixed to acknowledge T15 positional db ops (1ef6b1c).
 - **T7** clip guardrail on `query`/`pull`/eval output (guiding messages) — DEMO-CRITICAL (stability) — SHIPPED (2026-06-08). Two surfaces, no double-noising: (1) STORE boundary `seon.eval/render-result-edn` row-count guards a large COLLECTION result (`result-row-cap` = 50) into a bounded preview with a PREPENDED guiding "+N more clipped, narrow your query" message (survives the downstream display cap); (2) DISPLAY surface `seon.agent/cap-result-body` (used by `format-eval-row`) appends a guiding "narrow it: aggregate/limit/tighter :where/fewer attrs; (result :<eid>) holds the full value" message when a huge SCALAR clips at `eval-render-cap` (1500). Collections are bounded upstream so their small preview never re-trips the size guide — exactly one guide fires. Pure render: stores nothing new; the full value stays in the globalThis `(result <id>)` stash and the 16K `cap-edn` blob. Live-verified through the real `record-eval!` pipeline (4000-row result → 390-char stored preview + row guide; full 4000-elem value intact via stash). Tests: `memory-safety-test` 7/20, `agent-context-test` 15/55.
 - **T10** GLOBAL schema-catalog context section — DEMO-CRITICAL (user 2026-06-08
-  night). Every agent sees ALL registered entity schemas across EVERY namespace,
-  not just its own ns — this is HOW it knows what data exists in the system. A
-  cross-namespace catalog (key + shape, grouped by ns) layered on top of T5's
-  per-ns `namespace-context`. On a namespace change, the per-ns fns/tests context
-  follows (render-namespace already does this for the current ns/requires). If the
-  agent lacks the info, the catalog + raw `seon.db/query` over datoms is the
-  natural mining fallback. Blocks the fresh-agent-Q&A half of the e2e demo.
+  night) — SHIPPED (2026-06-08). `schema-catalog-section` (`seon.agent`) renders
+  EVERY entity KIND in the system, grouped by owning namespace, REGARDLESS of the
+  agent's current ns — the agent's answer to "what data exists." DERIVED from the
+  `:seon.schema` entities seeded at boot (`all-entity-schemas-tx-data`): a kind is
+  a `:seon.schema` entity carrying a `:seon.schema/render-fn` (a renderable `:map`
+  entity-shape, NOT a req/resp map). Per-attr SHAPE (type + optional flag) pulled
+  from the live registry (`schema/schema-definition`); identity attr flagged; one
+  AEVT count per kind gives live instance counts (defined-but-empty kinds still
+  list). Inserted at priority 25 in `substrate-default-ctx` — between `:capabilities`
+  (static) and `:namespace-context` (the deep per-ns view): the BROAD cross-ns view
+  precedes the DEEP current-ns view, and is more static (busts only on schema
+  register). Pure derived render — stores nothing. Live-verified on fresh boot
+  (agent `tOx-2606082135`, near-empty home ns): all 8 substrate kinds
+  (`:seon.conventions :seon.eval :seon.fn :seon.message :seon.ns :seon.schema
+  :seon.system-prompt :seon.test`) listed with attrs + counts, 2.3K chars;
+  derived-not-hardcoded proven (register throwaway kind → appears; retract → vanishes);
+  agent-path ≡ inspector-path holds. Tests: `agent-context-test` 77/77 (added 4
+  catalog tests + extended 4 existing); `agent-render-namespace-test` 25/25,
+  `render-test` 29/29. Blocks the fresh-agent-Q&A half of the e2e demo.
 - **T8** demo loop: fs → shared read-only folder, drive a fresh agent end-to-end —
   DEMO-CRITICAL. Refined to the full E2E test (user 2026-06-08 night): (1) a live
   DeepSeek agent READS + INDEXES seon's own docs (not in DeepSeek's training data →
