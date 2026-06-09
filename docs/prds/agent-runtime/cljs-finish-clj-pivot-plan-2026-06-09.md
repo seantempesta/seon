@@ -322,6 +322,37 @@ js/require branch). wire-server runs via `bin/seon` (store:
 - Orchestrator verifies each unit against its DONE-oracle before commit; PRD
   status updated as units land (this section is the dispatch board).
 
+#### Board status (2026-06-09 ~19:30Z)
+
+- **1.1 DONE** — two-scenario test complete (run 4): **S1 PASS** (rLC: saw the
+  question in 23s, work-directed `:workout/*` schemas, error-as-value recovery,
+  correct data, proper reply). **S2 FAIL on reuse** (ham: catalog WAS in context
+  but unconsulted — parallel `duration-minutes` attr, fragmented swim entity,
+  confidently-wrong "35 min" total). Findings:
+  `research/e2e-demo-findings-2026-06-08.md` runs 3+4.
+- **1.2 partials DONE:** trigger scoping (a0bdde9); hot-reload re-arm (e581908,
+  verified 8/8); **transcript fix** — `messages` queries `:seon.message/agent`
+  directly, THE run-3 blocker (in ac8cde3). NEW unit **1.2-reuse** (from run 4):
+  (a) prompt reuse-contract for SCHEMAS ("check schema-catalog before register!,
+  extend never fork"); (b) catalog salience (instance counts/units); (c)
+  `parallel-attr` check in the warn registry; (d) answer-after-verify nudge.
+  Then re-run S2 fresh.
+- **1.3 DONE** (ac8cde3, verified) — warn.cljs 11-check registry, clustered
+  render, ns-scoped; system-section strict-format; prompt-section turn-pressure;
+  dead composer deleted (render/default 470→159).
+- **1.4 IN FLIGHT** (agent) — wire `view` as the agent-controlled tile.
+- **2.1 DONE** (6b0a254, verified 10/10) — sync UDS bridge; unchanged guest
+  client on plain Node; oracle proven both ways. 2.2 next: pick ONE path for the
+  pod seam (async `wire-node/rpc` under the pod's awaits vs the sync bridge);
+  needs `bin/seon restart cljs-watch` (stale classpath lacks guest-cljs) —
+  coordinate with Track-1 hot-reload before restarting.
+- SOUL reconciled (1baedc2): hardcoded prose restored, soul.clj deleted (the
+  16b9f20 bake from another session was reverted per user decision).
+- Pre-existing breakage logged by verifiers (NOT regressions): `bin/test-cljs`
+  crashes in seon.db-test (core.async TypeError) before later suites run;
+  boot.preconditions-test 4 fails; agent-context-test 13 fails in `:test` build.
+  Worth a dedicated cleanup unit.
+
 ### Web UI status (2026-06-09 — FIXED + browser-verified)
 
 - **page.cljc escaping bug FIXED:** root `/` console-forwarder `<script>` wasn't
