@@ -177,11 +177,30 @@ they are testable against the live agent — then port. Files:
 | 1 | System prompt | CLJS-in-Node + conventions + REPL contract | static |
 | 2 | Capabilities | core API worked examples (call → result → recovery) | static |
 | 3 | Namespace context | `render-namespace` of required nses (depth 1, prepended) + own ns | mostly static (busts on ns edit) |
-| 4 | Transcript | messages+evals interleaved; user input as REPL events | dynamic |
-| 5 | Prompt line | `seon.agent.<id>=> ; turn N` | always changing |
+| 4 | Warnings | current cross-agent problems (failed/slow evals, failing tests); reactive | dynamic |
+| 5 | Transcript | messages+evals interleaved; user input as REPL events | dynamic |
+| 6 | Prompt line | `seon.agent.<id>=> ; turn N` | always changing |
 
 `root-pull` DELETED. `current-turn`/`current-session` sections folded into the
-prompt line (a REPL already shows your ns; only the turn count changes).
+prompt line (a REPL already shows your ns; only the turn count changes). The
+`:warnings` section is RETAINED (user, 2026-06-08): a reactive cross-agent
+surface that queries the DB for current problems (failed/slow evals, failing
+tests) and vanishes when the underlying state is fixed — nothing stored,
+self-healing. It sits between namespace-context and transcript (dynamic, but the
+specific problems change less often than the transcript).
+
+**T5 SHIPPED (2026-06-08).** `substrate-default-ctx` is the 6-section
+static→dynamic layout above. `root-pull` (fn + system-section advertisement)
+DELETED; superseded `messages-section`/`recent-evals-section`/`current-ns-section`
+DELETED (replaced by `transcript-section` + `namespace-context-section`).
+`namespace-context-section` calls the shipped `render-namespace` (depth 1).
+`transcript-section` merges `:seon.turn/messages` + `:seon.turn/evals` by `:at`
+into one chronological REPL stream (messages as `<role>>` events, evals via
+`format-eval-row`). Prompt line extended to `seon.agent.<id>=>  ; turn N`.
+Verified live (fresh agent `zqc-2606082040`): sections in order, root-pull gone,
+transcript interleaved, agent-path ≡ inspector-path, `:seon.turn/prompt-text`
+persisted non-empty (16K-capped). Tests: `agent-context-test` 35/35,
+`agent-render-namespace-test` 25/25, `render-test` 29/29.
 
 ### `render-namespace` — the foundational fn (`seon.agent`)
 
@@ -204,8 +223,8 @@ value; drill with normal Clojure). NO `root-pull`, NO `probe`.
 
 ### Work cycle (toward 2026-06-12) — serialize (all touch `agent.cljs`)
 
-- **T4** `render-namespace` (AI+HTML, recursive requires) — DEMO-CRITICAL, foundation
-- **T5** context reorg + transcript + prompt line + DELETE `root-pull` — DEMO-CRITICAL
+- **T4** `render-namespace` (AI+HTML, recursive requires) — DEMO-CRITICAL, foundation — SHIPPED (b3c06b8)
+- **T5** context reorg + transcript + prompt line + DELETE `root-pull` — DEMO-CRITICAL — SHIPPED (2026-06-08)
 - **T6** system-prompt rewrite (CLJS-in-Node + motivated examples, no "DO NOT" blocks) — DEMO-CRITICAL
 - **T7** clip guardrail on `query`/`pull`/eval output (guiding messages) — DEMO-CRITICAL (stability)
 - **T8** demo loop: fs → shared read-only folder, drive a fresh agent from the webview end-to-end — DEMO-CRITICAL

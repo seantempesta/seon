@@ -878,9 +878,12 @@
        s))))
 
 (defn- format-message-row
-  "Single-line render for the messages tile."
+  "Render one message as a REPL event for the interleaved transcript:
+   `user> …` / `assistant> …` / `system> …`. The `<role>>` prefix lines
+   it up visually with eval `> form` lines so the merged stream reads as
+   one coherent REPL session."
   [{role :seon.message/role content :seon.message/content}]
-  (str (name role) ": " content))
+  (str (name role) "> " content))
 
 (defn- read-error-envelope
   "Best-effort EDN decode of a `:seon.eval/error-data` string. Returns
@@ -891,12 +894,12 @@
          (catch :default _ nil))))
 
 (def eval-render-cap
-  "Per-eval rendered-result char cap for the recent-evals context
-   section. Context-SAFETY invariant: no single eval's result may
-   dominate the agent's whole context. One 9.7M-char `pull` result
-   used to blow render-prompt to ~9.8M chars; capping each rendered
-   result here keeps `recent-evals-section` bounded regardless of how
-   large any individual `:seon.eval/result-edn` blob is."
+  "Per-eval rendered-result char cap for the transcript context section.
+   Context-SAFETY invariant: no single eval's result may dominate the
+   agent's whole context. One 9.7M-char `pull` result used to blow
+   render-prompt to ~9.8M chars; capping each rendered result here keeps
+   `transcript-section` bounded regardless of how large any individual
+   `:seon.eval/result-edn` blob is."
   1500)
 
 (defn cap-result
@@ -974,22 +977,6 @@
                     ":seon.agent/id explicitly or call inside "
                     "(seon.db/with-agent id …).")
                {::error :seon.agent/no-agent-id}))))
-
-(defn root-pull
-  "One nested pull walks the agent's whole causality graph: sessions
-   → turns → (messages + evals) + ctx. Components inline, so a single
-   call returns the full tree.  v1.md §2.4 idiom #1."
-  ([] (root-pull {}))
-  ([{:seon.agent/keys [id]}]
-   (let [id (resolve-id id)]
-     (db/pull
-       {:seon.db/pull-pattern
-        '[* {:seon.agent/sessions
-             [* {:seon.session/turns
-                 [* {:seon.turn/messages [*]
-                     :seon.turn/evals    [*]}]}]
-            :seon.agent/ctx [*]}]
-        :seon.db/ref [:seon.agent/id id]}))))
 
 (defn messages
   "Last N user/assistant/system messages on the agent's current
@@ -1115,10 +1102,8 @@
          "  Now: " now "  (pod tz: " (host-timezone) ")\n"
          "\n"
          "  Walk your own state:\n"
-         "    (seon.agent/root-pull)       ; you + sessions + turns + messages + evals + ctx\n"
          "    (seon.agent/messages)        ; current session's messages — default {:seon.agent/n 50}\n"
          "    (seon.agent/evals)           ; current session's evals — default {:seon.agent/n 20}\n"
-         "    (seon.agent/current-turn)    ; this turn's entity\n"
          "    (seon.agent/current-ns)      ; derived from your latest successful eval\n"
          "    (result <eval-id>)           ; full live result of a prior eval (this session)\n"
          "\n"
@@ -1127,11 +1112,6 @@
          "                    '[:seon.ns/source\n"
          "                       {:seon.fn/_ns [*] :seon.schema/_ns [*]}]\n"
          "                    :seon.db/ref [:seon.ns/name (seon.agent/current-ns)]})\n"
-         "\n"
-         "  Tune your context:\n"
-         "    (seon.agent/ctx-entities)    ; your section layout\n"
-         "    (seon.agent/update-ctx! id f) ; reshape (swap fn, change priority, etc.)\n"
-         "    (seon.agent/reset-ctx! id)   ; restore substrate defaults\n"
          "</system>")))
 
 ;; ------------------------------------------------------------
@@ -1206,52 +1186,6 @@
            "                  '[:find ?content\n"
            "                    :where [?m :seon.message/role :user]\n"
            "                           [?m :seon.message/content ?content]]})")
-      "")))
-
-(defn messages-section
-  "Recent user/assistant conversation. Reads :seon.agent/n from the
-   ctx-entity if present, else defaults to 50."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.agent/keys [id] :as input}]
-  (let [n    (or (:seon.agent/n (:seon.agent/ctx-entity input)) 50)
-        msgs (messages {:seon.agent/n n :seon.agent/id id})]
-    (if (seq msgs)
-      (str "<messages>\n"
-           (str/join "\n" (map format-message-row msgs))
-           "\n</messages>")
-      "")))
-
-(defn current-ns-section
-  "Every entity owned by the agent's current ns — ns source + every
-   :seon.fn / :seon.schema whose :ns is this ns — via one reverse-ref
-   pull. Empty until the agent successfully evals a `(ns …)` /
-   `(defn …)` / `(schema/register! …)` form in this ns; eval-batch!'s
-   detect-and-tee step (which HAS shipped — `seon.eval/build-tee-entities`)
-   then records the program-graph entities this pull reads."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [ns    (current-ns {:seon.agent/id id})
-        ns-kw (if (keyword? ns) ns (keyword (str ns)))
-        ;; db/pull throws on unresolved lookup-refs; guard with entity
-        ;; (returns nil for missing) so the section renders blank
-        ;; rather than crashing when no :seon.ns entity exists yet
-        ;; (e.g. before the agent has eval'd a `(ns …)` form that
-        ;; detect-and-tee in eval-batch! would record).
-        owned (when (db/entity {:seon.db/db db :seon.db/ref [:seon.ns/name ns-kw]})
-                (db/pull {:seon.db/db db
-                          :seon.db/pull-pattern
-                          '[:seon.ns/source
-                            {:seon.schema/_ns [:seon.schema/source]
-                             :seon.fn/_ns     [:seon.fn/source]}]
-                          :seon.db/ref [:seon.ns/name ns-kw]}))
-        parts (concat
-                (when-let [src (:seon.ns/source owned)] [src])
-                (map :seon.schema/source (:seon.schema/_ns owned))
-                (map :seon.fn/source     (:seon.fn/_ns owned)))]
-    (if (seq parts)
-      (str "<current-namespace name=\"" ns "\">\n"
-           (str/join "\n\n" parts)
-           "\n</current-namespace>")
       "")))
 
 ;; ============================================================
@@ -1543,6 +1477,32 @@
        (str/join "\n\n" (for [k order]
                           (render-one-ns-ai k (data-by-kw k))))})))
 
+(defn namespace-context-section
+  "The agent's NAMESPACE context — `render-namespace` of the agent's
+   current namespace at depth 1, so its direct `(:require …)`s render
+   FIRST (prepended), then the ns itself. Drop a fresh agent into a
+   near-empty home-ns that requires a parent agent ns and depth-1 brings
+   the parent's fns/schemas/tests into view.
+
+   Pure render of the DB: `render-namespace` reads the persisted
+   `:seon.ns`/`:seon.fn`/`:seon.schema`/`:seon.test` corpus and stores
+   nothing. Renders blank only when the ns has no recorded entities and
+   no requires (a brand-new home-ns before any `(ns …)`/`(defn …)`)."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [ns    (current-ns {:seon.agent/id id})
+        ;; current-ns returns a SYMBOL (the home-ns / latest eval's ns);
+        ;; render-namespace's input schema requires a keyword :seon.ns/name.
+        ns-kw (if (keyword? ns) ns (keyword (str ns)))
+        text  (-> (render-namespace {:seon.ns/name ns-kw
+                                     :seon.render/depth 1
+                                     :seon.render/format :ai
+                                     :seon.db/db db})
+                  :seon.render/text)]
+    (if (str/blank? text)
+      ""
+      (str "<namespace-context>\n" text "\n</namespace-context>"))))
+
 (defn warnings-section
   "Survey the DB for current problems and render them as a single
    section. Cross-agent visibility by default — queries are not
@@ -1648,21 +1608,53 @@
            "\n</warnings>")
       "")))
 
-(defn recent-evals-section
-  "Last N evals in the current session, oldest-first. Reads
-   :seon.agent/n from the ctx-entity if present, else defaults to 20."
+(defn- transcript-item-at
+  "Wall-clock `:at` of a transcript item (a message or an eval), as
+   epoch-ms. Used to interleave the two streams chronologically."
+  [item]
+  (let [d (or (:seon.message/at item) (:seon.eval/at item))]
+    (if d (.getTime ^js d) 0)))
+
+(defn- format-transcript-item
+  "Render one transcript item — a `:seon.message` as a REPL event
+   (`user>`/`assistant>` line) or a `:seon.eval` via `format-eval-row`
+   (`> form\\n result`). Dispatch on which kind-keyed `:at` is present."
+  [item]
+  (if (:seon.message/at item)
+    (format-message-row item)
+    (format-eval-row item)))
+
+(defn transcript-section
+  "The chronological TRANSCRIPT — the agent's messages and evals
+   INTERLEAVED into a single oldest-first stream, so the agent reads one
+   coherent REPL session (user input as `user>`/`assistant>` events,
+   evals as `> form` + result) rather than two divorced blocks. Reads
+   `:seon.agent/n` from the ctx-entity if present (caps EACH stream
+   before the merge), else defaults to 50 messages + 50 evals.
+
+   Pure render: walks the session's `:seon.turn/messages` +
+   `:seon.turn/evals`, merges by `:at`, stores nothing. Each eval row is
+   `cap-result`-bounded (`format-eval-row`) so one huge result can't
+   dominate the transcript (context-SAFETY invariant)."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.agent/keys [id] :as input}]
-  (let [n  (or (:seon.agent/n (:seon.agent/ctx-entity input)) 20)
-        es (evals {:seon.agent/n n :seon.agent/id id})]
-    (if (seq es)
-      (str "<recent-evals>\n"
-           (str/join "\n\n" (map format-eval-row es))
-           "\n</recent-evals>")
+  (let [n     (or (:seon.agent/n (:seon.agent/ctx-entity input)) 50)
+        msgs  (messages {:seon.agent/n n :seon.agent/id id})
+        es    (evals    {:seon.agent/n n :seon.agent/id id})
+        items (->> (concat msgs es)
+                   (sort-by transcript-item-at))]
+    (if (seq items)
+      (str "<transcript>\n"
+           (str/join "\n\n" (map format-transcript-item items))
+           "\n</transcript>")
       "")))
 
 (defn prompt-section
-  "Trailing `:current.ns=> ; turn N` line. Always present."
+  "Trailing REPL prompt line: `seon.agent.<id>=>  ; turn N`. The ns shows
+   the agent's current namespace and `turn N` the current-session turn
+   count — a REPL already shows your ns, so `current-turn`/
+   `current-session` collapse into this one always-present line. Always
+   present (never blank)."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.agent/keys [id]}]
   (let [ns      (current-ns {:seon.agent/id id})
@@ -1764,24 +1756,34 @@
 ;; ------------------------------------------------------------
 
 (defn substrate-default-ctx
-  "The default :seon.ctx maps that ship with every fresh agent
-   (v1.md §5.2). Smallest priority first. `:capabilities` (the
-   `## What you can do` worked-examples block) renders right after
-   `:system` so the agent sees the core map-in call shapes up front."
+  "The default :seon.ctx section layout that ships with every fresh
+   agent — ordered MOST-STATIC → MOST-DYNAMIC (prompt-cache friendly),
+   per the context-render PRD (Phase 2) table:
+
+     1. :system            — CLJS-in-Node + conventions + REPL contract (static)
+     2. :capabilities      — core API worked examples (static)
+     3. :namespace-context — `render-namespace` of required nses + own ns
+                             (mostly static; busts on ns edit)
+     4. :warnings          — current cross-agent problems (failed/slow evals,
+                             failing tests); reactive, vanishes when fixed (dynamic)
+     5. :transcript        — messages + evals interleaved chronologically (dynamic)
+     6. :prompt            — `seon.agent.<id>=>  ; turn N` (always changing)
+
+   Smallest priority first. `root-pull` is DELETED (was the
+   `[*]`-everywhere amplifier that flooded context); `current-turn`/
+   `current-session` fold into the prompt line."
   []
-  [{:seon.ctx/name :system       :seon.ctx/priority 10
+  [{:seon.ctx/name :system            :seon.ctx/priority 10
     :seon.ctx/fn   'seon.agent/system-section}
-   {:seon.ctx/name :capabilities :seon.ctx/priority 15
+   {:seon.ctx/name :capabilities      :seon.ctx/priority 20
     :seon.ctx/fn   'seon.agent/capabilities-section}
-   {:seon.ctx/name :messages     :seon.ctx/priority 20
-    :seon.ctx/fn   'seon.agent/messages-section}
-   {:seon.ctx/name :current-ns   :seon.ctx/priority 30
-    :seon.ctx/fn   'seon.agent/current-ns-section}
-   {:seon.ctx/name :warnings     :seon.ctx/priority 40
+   {:seon.ctx/name :namespace-context :seon.ctx/priority 30
+    :seon.ctx/fn   'seon.agent/namespace-context-section}
+   {:seon.ctx/name :warnings          :seon.ctx/priority 40
     :seon.ctx/fn   'seon.agent/warnings-section}
-   {:seon.ctx/name :recent-evals :seon.ctx/priority 50
-    :seon.ctx/fn   'seon.agent/recent-evals-section}
-   {:seon.ctx/name :prompt       :seon.ctx/priority 99
+   {:seon.ctx/name :transcript        :seon.ctx/priority 50
+    :seon.ctx/fn   'seon.agent/transcript-section}
+   {:seon.ctx/name :prompt            :seon.ctx/priority 99
     :seon.ctx/fn   'seon.agent/prompt-section}])
 
 (defn ^:async reset-ctx!

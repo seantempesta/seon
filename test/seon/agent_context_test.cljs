@@ -12,12 +12,12 @@
          `:seon.turn/prompt-text` for the same (db,id) — ONE composer,
          divergence impossible.
      (c) each section fn renders non-blank given seeded data (would have
-         caught `current-ns-section` silently returning \"\" when data
-         IS present).
+         caught a section silently returning \"\" when data IS present).
      (d) the composed context contains the section markers when the
-         underlying sections have content.
+         underlying sections have content; the transcript interleaves
+         messages + evals chronologically (not block-after-block).
      (e) bounded-context guard — a single eval with a multi-MB result
-         does NOT blow the agent's context; `recent-evals-section`
+         does NOT blow the agent's context; `transcript-section`
          (and therefore `render-prompt`) stays under a sane bound. This
          is the context-SAFETY invariant: no single entity may dominate
          the context.
@@ -110,7 +110,7 @@
                     :seon.eval/ns :seon.agent.ctxtest}]
                   extra-evals)}]}]}
        ;; Program-graph entities for the agent's current ns so
-       ;; current-ns-section has source to render.
+       ;; namespace-context-section has source to render.
        {:seon.ns/name :seon.agent.ctxtest
         :seon.ns/source "(ns seon.agent.ctxtest)"}
        {:seon.fn/sym "seon.agent.ctxtest/greet"
@@ -164,11 +164,12 @@
                   (agent/assemble-context {:seon.db/db db :seon.agent/id agent-id})]
               (is (pos? (count text))
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
-              (is (= [:system :capabilities :messages :current-ns
-                      :warnings :recent-evals :prompt]
+              (is (= [:system :capabilities :namespace-context
+                      :warnings :transcript :prompt]
                      sections)
-                  "the substrate-default section names, in order — :capabilities
-                   slots right after :system"))))
+                  "the substrate-default section names, in order
+                   (static→dynamic): system, capabilities, namespace-context,
+                   warnings, transcript, prompt"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -219,12 +220,12 @@
               (is (not (str/blank? (agent/system-section input))) "system")
               (is (not (str/blank? (agent/capabilities-section input)))
                   "capabilities — non-blank because core :seon.fn rows are seeded")
-              (is (not (str/blank? (agent/messages-section input))) "messages")
-              (is (not (str/blank? (agent/current-ns-section input)))
-                  "current-ns — non-blank because a :seon.ns + :seon.fn exist")
+              (is (not (str/blank? (agent/namespace-context-section input)))
+                  "namespace-context — non-blank because a :seon.ns + :seon.fn exist")
               (is (not (str/blank? (agent/warnings-section input)))
                   "warnings — the seeded failed eval surfaces")
-              (is (not (str/blank? (agent/recent-evals-section input))) "recent-evals")
+              (is (not (str/blank? (agent/transcript-section input)))
+                  "transcript — seeded messages + evals")
               (is (not (str/blank? (agent/prompt-section input))) "prompt"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -242,9 +243,44 @@
                          (agent/assemble-context
                            {:seon.db/db db :seon.agent/id agent-id}))]
               (is (str/includes? text "<system") "system marker present")
-              (is (str/includes? text "<messages>") "messages marker present")
-              (is (str/includes? text "<recent-evals>") "recent-evals marker present")
+              (is (str/includes? text "<transcript>") "transcript marker present")
+              (is (str/includes? text "<namespace-context>")
+                  "namespace-context marker present")
               (is (str/includes? text "<warnings>") "warnings marker present"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; (d2) transcript-section interleaves messages + evals chronologically.
+;;      Seed time order: user msg (t11) → assistant msg (t12) → failed eval
+;;      (t13) → successful eval (t21). The merged stream must preserve that
+;;      order — a user message BEFORE its eval, an eval AFTER the message
+;;      that prompted it — proving the two streams are merged by :at, not
+;;      concatenated block-after-block.
+;; ---------------------------------------------------------------------------
+
+(deftest transcript-interleaves-messages-and-evals-chronologically
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  ts   (agent/transcript-section
+                         {:seon.db/db db :seon.agent/id agent-id})
+                  i-user      (str/index-of ts "user> build me a thing")
+                  i-assistant (str/index-of ts "assistant> on it")
+                  i-failed    (str/index-of ts "boom — bad query")
+                  i-success   (str/index-of ts "seon.agent.ctxtest/greet")]
+              (is (str/includes? ts "<transcript>") "transcript marker present")
+              (is (and i-user i-assistant i-failed i-success)
+                  "all four transcript items present (2 msgs + 2 evals)")
+              ;; chronological: user msg < assistant msg < failed eval < success eval
+              (is (< i-user i-assistant)
+                  "user message before assistant message")
+              (is (< i-assistant i-failed)
+                  "messages interleaved BEFORE the eval that followed them
+                   (proves merge by :at, not message-block-then-eval-block)")
+              (is (< i-failed i-success)
+                  "failed eval (t13) before successful eval (t21)"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -261,7 +297,26 @@
         "substrate-default-ctx contains the :capabilities section")
     (is (= [:system :capabilities]
            (vec (take 2 names)))
-        ":capabilities renders right after :system (priority 15)")))
+        ":capabilities renders right after :system")
+    (is (not (contains? (set names) :root-pull))
+        "no :root-pull section in the default layout — the amplifier is gone")))
+
+;; ---------------------------------------------------------------------------
+;; root-pull is DELETED — no fn, no advertisement, no default section.
+;; ---------------------------------------------------------------------------
+
+(deftest root-pull-is-deleted
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         (agent/assemble-context
+                           {:seon.db/db db :seon.agent/id agent-id}))]
+              (is (not (str/includes? text "root-pull"))
+                  "no system-section advertisement of root-pull in context"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 (deftest capabilities-section-renders-worked-call-shapes
   (async done
@@ -288,15 +343,15 @@
               ;; DERIVED from persisted :seon.fn arglists, not hardcoded:
               ;; the rendered text must contain the REAL arglist string from
               ;; the seeded entity. index-substrate! reads arglists from the
-              ;; actual source, so transact! renders its genuine `[arg]` (it
-              ;; destructures tx-data/opts/conn in the BODY, not the arg vector)
-              ;; and query renders its real map-in destructure — proving the
-              ;; rendered shapes are derived from real source, not a curated
-              ;; fiction.
-              (is (str/includes? cap "(seon.db/transact! ([arg]))")
-                  "transact! arglist is the REAL ([arg]) from introspected source")
-              (is (str/includes? cap "::keys [query args")
-                  "query arglist is the REAL map-in destructure from source")
+              ;; actual source; since T15 gave `transact!`/`query` two call
+              ;; shapes (map-in + datahike-positional) they introspect as the
+              ;; variadic `([& call-args])` / `([& args])` dispatchers —
+              ;; proving the rendered shapes are derived from real source, not
+              ;; a curated fiction.
+              (is (str/includes? cap "(seon.db/transact! ([& call-args]))")
+                  "transact! arglist is the REAL ([& call-args]) from introspected source")
+              (is (str/includes? cap "(seon.db/query ([& args]))")
+                  "query arglist is the REAL ([& args]) from introspected source")
               ;; bounded — the section is the curated core API only, not a dump.
               (is (< (count cap) 4000)
                   (str "capabilities-section bounded — got " (count cap))))))
@@ -314,18 +369,18 @@
             [(big-eval big-n)]
             (fn [conn]
               (let [db    @conn
-                    re    (agent/recent-evals-section
+                    ts    (agent/transcript-section
                             {:seon.db/db db :seon.agent/id agent-id})
                     full  (agent/render-prompt agent-id)
                     ;; Comfortable ceiling: a handful of capped rows +
                     ;; the other sections. Far below the 5 MB blob.
                     ceil  50000]
-                (is (< (count re) ceil)
-                    (str "recent-evals bounded despite " big-n
-                         "-char result — got " (count re)))
+                (is (< (count ts) ceil)
+                    (str "transcript bounded despite " big-n
+                         "-char result — got " (count ts)))
                 (is (< (count full) ceil)
                     (str "render-prompt bounded — got " (count full)))
-                (is (str/includes? re "chars elided⟩")
+                (is (str/includes? ts "chars elided⟩")
                     "the big result was elided with the marker"))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
