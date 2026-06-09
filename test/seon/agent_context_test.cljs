@@ -126,7 +126,11 @@
         (client/index-substrate!)
         ;; the :seon.schema entities for every entity kind — the SAME data
         ;; the pod seeds at boot; drives schema-catalog-section.
-        (schema/all-entity-schemas-tx-data)))))
+        (schema/all-entity-schemas-tx-data)
+        ;; the whole-registry :seon.schema rows (unit #23 fix b) — drives
+        ;; the schema-catalog's per-ns summary block. Deduped by key
+        ;; against the entity rows above via identity upsert.
+        (client/index-schemas)))))
 
 (defn- with-seeded-conn
   "Open a fresh conn, seed it (optionally with `extra-evals` on turn 2),
@@ -187,13 +191,13 @@
 ;; ---------------------------------------------------------------------------
 
 ;; The prompt section (context TAIL — cache-prefix fix 2026-06-09; the
-;; line used to live in <system> at char 35 and busted the provider
-;; cache every turn) embeds `(js/Date.)` as a `;; Now:` line, so two
-;; renders microseconds apart differ ONLY on that wall-clock line.
+;; timestamp used to live in <system> at char 35 and busted the provider
+;; cache every turn) embeds `(js/Date.)` in the `;; ── turn …` status
+;; line, so two renders microseconds apart differ ONLY on that line.
 ;; Normalize it away before comparing — everything else is a pure
 ;; function of the DB and must be byte-identical across the three paths.
 (defn- strip-now [s]
-  (str/replace s #"(?m)^;; Now: [^\n]*$" ";; Now: <NORMALIZED>"))
+  (str/replace s #"(?m)^;; ── turn [^\n]*$" ";; ── <STATUS NORMALIZED> ──"))
 
 (deftest agent-inspector-and-prompt-text-agree
   (async done
@@ -531,14 +535,19 @@
               ;; OWN-ns fn renders WITH full source.
               (is (str/includes? txt "(defn greet [] :hi)")
                   "own-ns fn (greet) shows its full source body")
-              ;; OTHER-ns fns (the seeded core API) render as a signature line,
-              ;; NOT full source — the brief shape.
+              ;; OTHER-ns rendering scales with the widened corpus (unit #23
+              ;; fix b): SMALL nses render one callable line per fn; LARGE
+              ;; nses (seon.db with the whole package indexed) collapse to a
+              ;; count line — the DB carries everything, context shows the
+              ;; index.
               (is (str/includes? txt "=== seon.db ===")
                   "other namespaces (seon.db) are listed")
-              (is (str/includes? txt "(seon.db/transact!")
-                  "other-ns fn shows its signature")
-              ;; transact!'s real source is long + multiline; the brief block
-              ;; must NOT inline it. Its docstring first-line is the giveaway.
+              (is (re-find #"=== seon\.db ===  \d+ fns" txt)
+                  "large other-ns group collapses to a count line")
+              (is (str/includes? txt "(seon.schema/register! k v)")
+                  "small other-ns group renders one callable line per fn")
+              ;; transact!'s real source is long + multiline; the catalog
+              ;; must NOT inline another ns's full source.
               (let [db-section (subs txt (str/index-of txt "=== seon.db ==="))]
                 (is (not (str/includes? db-section "(defn transact!"))
                     "other-ns fn does NOT inline its full (defn …) source")))))
@@ -580,9 +589,8 @@
                            ;; arglists "([x])" renders as `(sym x)`, not the
                            ;; old bracket-wrapped `(sym [x])`.
                            (is (str/includes? after "(seon.zzcat/helper x)")
-                               "the new fn's signature renders as a CALLABLE shape")
-                           (is (str/includes? after "throwaway helper")
-                               "the new fn's one-line doc is rendered (brief, other-ns)")))))))
+                               "the new fn's signature renders as a CALLABLE shape
+                                (small other-ns group → one line per fn)")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -687,3 +695,54 @@
     (is (not (str/includes? row "Narrow it"))
         "no SECOND size guide — preview is already small (no double-noise)")
     (is (< (count row) 1000) "preview row is bounded")))
+
+;; ---------------------------------------------------------------------------
+;; (j) Unit #23 fix e — TERMINAL prompt redesign. Status block above (turn ·
+;; since-user (cap N) · timestamp, plus pressure nudges when escalating),
+;; contract line first, final line EXACTLY `<current-ns>=> ` — clean, no
+;; trailing `; turn N`.
+;; ---------------------------------------------------------------------------
+
+(deftest prompt-section-is-a-clean-terminal-prompt
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db     @conn
+                  prompt (agent/prompt-section
+                           {:seon.db/db db :seon.agent/id agent-id})
+                  lines  (str/split-lines prompt)]
+              (is (= ";; You are at a ClojureScript REPL — reply ONLY with forms + ;; comments."
+                     (first lines))
+                  "contract line first")
+              (is (re-find #"(?m)^;; ── turn \d+ · \d+ since-user \(cap \d+\) · \d{4}-\d{2}-\d{2}T[^\n]*──$"
+                           prompt)
+                  "status block: turn · since-user (cap N) · ISO timestamp")
+              ;; the final line is EXACTLY the REPL prompt — ns + `=> `,
+              ;; nothing after (the old `; turn N` tail is gone).
+              (is (re-find #"(?m)^seon\.agent\.ctxtest=> $" prompt)
+                  "final line is exactly `<current-ns>=> ` (clean)")
+              (is (not (str/includes? prompt "; turn "))
+                  "no trailing `; turn N` metadata on the prompt line")
+              (is (str/ends-with? prompt "=> ")
+                  "prompt string ends at the clean REPL prompt"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; (k) Unit #23 fix f — captured println/prn output renders in the eval row
+;; (a REPL shows print output next to the result).
+;; ---------------------------------------------------------------------------
+
+(deftest format-eval-row-shows-captured-print-output
+  (let [row (#'agent/format-eval-row
+              {:seon.eval/source "(println \"hi\")" :seon.eval/ok? true
+               :seon.eval/result-edn "nil" :seon.eval/output "hi\n"
+               :seon.eval/id "pr0000001a" :seon.eval/duration-ms 1})]
+    (is (str/includes? row "hi\nnil")
+        "captured output renders above the result, REPL-style"))
+  (let [row (#'agent/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3"
+               :seon.eval/id "pr0000002b" :seon.eval/duration-ms 1})]
+    (is (str/includes? row "> (+ 1 2)\n3")
+        "no output attr → row unchanged (no blank line injected)")))

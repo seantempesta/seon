@@ -974,7 +974,7 @@
    `(seon.db/current-tx-context)` (eval-batch! opens the per-eval
    scope with `:seon.db/agent-id` + `:seon.db/eval-id` + `:seon.db/
    origin :agent`, plus whatever the caller layered above)."
-  [{:keys [eval-id turn-id at narration source result duration-ms ns tee]}]
+  [{:keys [eval-id turn-id at narration source result duration-ms ns tee output]}]
   (let [conn     db/*conn*
         eval-map (cond-> {:seon.eval/id          eval-id
                           :seon.eval/at          at
@@ -1005,6 +1005,12 @@
                    (assoc :seon.eval/result-edn
                           (cap-edn
                             (render-result-edn eval-id (:value result))))
+
+                   ;; (fix f) print output captured during the eval span —
+                   ;; persisted so the transcript can show it next to the
+                   ;; result, like a real REPL. Absent when nothing printed.
+                   (and (string? output) (not (str/blank? output)))
+                   (assoc :seon.eval/output (cap-edn output))
 
                    ;; Store the LEGIBLE, edn-safe error string (deepest
                    ;; real message + structured `:seon.error/data`), NOT
@@ -1073,6 +1079,57 @@
         (js/console.error
           "[seon.eval/record-eval!] DATA LOSS — bare eval row" eval-id
           "failed with no tee rows to drop — source:" source)))))
+
+;; ============================================================
+;; REPL-parity intercepts (unit #23 fix d, per the plan's REPL-PARITY
+;; CONTRACT). The agent's context mimics a real Clojure REPL, so its
+;; reflexive moves must work — or fail with a translation that teaches
+;; the substrate equivalent. Three forms get a form-level pre-check
+;; BEFORE eval (probed live 2026-06-09: `(in-ns 'foo)` fails with an
+;; opaque undeclared-var error; bare `*ns*` and `*1` both SILENTLY
+;; eval to nil — silent wrong answers, the worst kind):
+;;
+;;   (in-ns 'foo) → legible ERROR teaching (ns foo) — same effect.
+;;   *ns*         → INTERCEPTED VALUE: the current ns symbol (honest —
+;;                  it IS the ns this form runs in; teaching-only would
+;;                  leave the silent nil in place).
+;;   *1 *2 *3     → legible ERROR teaching (result :<eval-id>) — the
+;;                  substrate's richer replacement (every value durable
+;;                  + addressable).
+;; ============================================================
+
+(defn parity-intercept
+  "Form-level REPL-parity pre-check. Given a form's source string and the
+   current ns symbol, returns nil (no intercept — eval normally) or one of
+
+     {:seon.eval/parity :error :seon.error/message <teaching string>}
+     {:seon.eval/parity :value :seon.eval/value    <substituted value>}
+
+   Pure string check on the TRIMMED whole form — embedded uses (e.g.
+   `*1` inside a larger form) are not intercepted; they fail or nil out
+   on their own and the taught replacement covers them too."
+  [source current-ns]
+  (let [s (str/trim (or source ""))]
+    (cond
+      (re-find #"^\(in-ns[\s)]" s)
+      (let [target (second (re-find #"^\(in-ns\s+'?([^\s\)]+)" s))]
+        {:seon.eval/parity :error
+         :seon.error/message
+         (str "in-ns is not available in this runtime — use (ns "
+              (or target "the.target.ns") "), same effect: it switches "
+              "your namespace and your prompt follows.")})
+
+      (= s "*ns*")
+      {:seon.eval/parity :value
+       :seon.eval/value  current-ns}
+
+      (contains? #{"*1" "*2" "*3"} s)
+      {:seon.eval/parity :error
+       :seon.error/message
+       (str s " is not maintained here — every eval's value is durable "
+            "and addressable instead: call (result :<eval-id>); the ids "
+            "are in your transcript on each eval's footer line "
+            "(; # <eval-id>).")})))
 
 (defn ^:async eval-batch!
   "Execute a sequence of parsed entries as a REPL batch. Partial-
@@ -1173,6 +1230,31 @@
                                                   :seon.error/message (:error entry)}}}))
                   (vswap! n-fail inc))
 
+                ;; REPL-parity intercept (fix d) — in-ns / *ns* / *1 *2 *3
+                ;; get a legible translation INSTEAD of an opaque error or
+                ;; a silent nil. No eval runs; the record is the teaching.
+                (some? (parity-intercept (:source entry) @current-ns))
+                (let [{:keys [narration source]} entry
+                      pc     (parity-intercept source @current-ns)
+                      result (if (= :error (:seon.eval/parity pc))
+                               {:ok false
+                                :error {:seon.error/kind    :seon.eval/repl-parity
+                                        :seon.error/message (:seon.error/message pc)}}
+                               {:ok true :value (:seon.eval/value pc)})]
+                  (when (:ok result)
+                    (stash-result-raw! eval-id (:value result)))
+                  (await (record-eval! {:eval-id     eval-id
+                                        :turn-id     turn-id
+                                        :at          (js/Date.)
+                                        :duration-ms 0
+                                        :narration   narration
+                                        :source      source
+                                        :ns          @current-ns
+                                        :result      result}))
+                  (if (:ok result)
+                    (vswap! n-ok   inc)
+                    (vswap! n-fail inc)))
+
                 ;; Normal eval path.
                 :else
                 (let [{:keys [narration source]} entry
@@ -1183,6 +1265,20 @@
                       ;; can diff after. Cheap reads — keyset extraction.
                       defs-before    (analyzer-info/snapshot-defs compile-state)
                       schemas-before (schema/current-keys)
+                      ;; (fix f) println/prn capture — a REPL shows print
+                      ;; output next to the result; *print-fn* routes to the
+                      ;; pod's stdout (logs/pod.log), invisible to the agent.
+                      ;; Capture for the span of eval + auto-await, persist
+                      ;; as :seon.eval/output. KNOWN LIMIT: prints from other
+                      ;; interleaved async work during this form's awaits land
+                      ;; here too (single-agent: non-issue; multi-agent needs
+                      ;; per-agent ALS print routing).
+                      !out               (volatile! "")
+                      prev-print-fn      *print-fn*
+                      prev-print-err-fn  *print-err-fn*
+                      _ (let [cap (fn [& xs] (vswap! !out str (apply str xs)))]
+                          (set! *print-fn* cap)
+                          (set! *print-err-fn* cap))
                       raw-result  (await (eval compile-state source
                                                {:ns @current-ns
                                                 :analyze-deps? false}))
@@ -1193,6 +1289,13 @@
                                 (if (:ok r2)
                                   {:ok true :value (:value r2) :ns (:ns raw-result)}
                                   r2)))
+                      ;; Restore BEFORE any further awaits — record/tee/
+                      ;; auto-test prints belong to the pod log, not this
+                      ;; eval's record. (`eval`/`maybe-await-value` never
+                      ;; throw — A4 envelope — so this line always runs.)
+                      _ (do (set! *print-fn* prev-print-fn)
+                            (set! *print-err-fn* prev-print-err-fn))
+                      output      @!out
                       duration-ms (- (.now js/Date) start-ms)]
                   ;; Advance the accumulator on successful ns switch.
                   ;; Failed evals leave the accumulator untouched —
@@ -1228,6 +1331,7 @@
                                           :source      source
                                           :ns          @current-ns
                                           :result      result
+                                          :output      output
                                           :tee         tee}))
                     ;; Phase 3 (mvp-completion-plan 2026-05-27) —
                     ;; auto-instrument any newly-defined fn whose

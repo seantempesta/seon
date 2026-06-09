@@ -131,8 +131,9 @@ How the REPL treats your turn:
 
   - Each contiguous block of ; comments attaches to the form that
     follows it.
-  - Every form evaluates in your personal namespace. The trailing
-    prompt line shows it, like seon.agent.<your-id>=>  ; turn N.
+  - Every form evaluates in your personal namespace. The final line of
+    your context is a clean REPL prompt showing it (my.ns=>), with a
+    status line above carrying turn counts and the wall-clock time.
   - Form N+1 runs even if form N failed — exactly like pasting a block
     into a fresh REPL. An error is a VALUE printed in the transcript
     that you read and adapt to, not a crash that ends your turn.

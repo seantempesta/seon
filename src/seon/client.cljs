@@ -122,7 +122,12 @@
     ;; Phase B item 9 — shared read-side wrapper over the analyzer
     ;; state. Required here so the build includes it; item 10's
     ;; detect-and-tee in seon.eval/eval-batch! consumes it.
-    [seon.analyzer-info]))
+    [seon.analyzer-info])
+  ;; Compile-time enumeration of the build's specced public fns —
+  ;; `substrate-vars` below = curated unspecced base + this macro's
+  ;; whole-closure roster (unit #23 fix b: index the WHOLE package
+  ;; surface, never hand-list hundreds of vars).
+  (:require-macros [seon.indexing :refer [specced-fn-vars]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -340,6 +345,8 @@
    :seon.eval/source
    :seon.eval/ok?
    :seon.eval/result-edn
+   ;; Captured println/prn output during the eval span (unit #23 fix f).
+   :seon.eval/output
    :seon.eval/error
    :seon.eval/error-data
    ;; :seon.eval/ns — ending ns from cljs.js/eval-str's :ns, or
@@ -546,12 +553,12 @@
 ;;     no eval entities are written.
 ;; ---------------------------------------------------------------------------
 
-(declare substrate-ns-kws)
+(declare substrate-ns-set)
 
 (defn- entry-ns-kw
   "The owning-namespace keyword for a program-graph entry. Used as the
    substrate-vs-agent replay discriminator (Step 4): an entry whose
-   `entry-ns-kw` is in `substrate-ns-kws` is a substrate row (re-indexed
+   `entry-ns-kw` is in `(substrate-ns-set)` is a substrate row (re-indexed
    by index-substrate! every boot) and is skipped on replay.
 
      :ns     → ident IS the ns keyword.
@@ -587,7 +594,7 @@
    currently-asserted sources land in the replay set; retracted /
    superseded source values stay in history and are not replayed.
 
-   Substrate rows (those whose owning ns is in `substrate-ns-kws`) are
+   Substrate rows (those whose owning ns is in `(substrate-ns-set)`) are
    filtered out: the compiled substrate fns are re-indexed from var meta
    + file-read by `index-substrate!` on every boot, so re-evaling their
    `:source` would shadow the real compiled fn. Only agent-authored
@@ -617,7 +624,14 @@
     (->> rows
          (map (fn [[ident source tx kind]]
                 {:kind kind :ident ident :source source :tx tx}))
-         (remove #(contains? substrate-ns-kws (entry-ns-kw %)))
+         (remove #(contains? (substrate-ns-set) (entry-ns-kw %)))
+         ;; Boot-indexed `:seon.schema` rows store the registered SHAPE
+         ;; (`[:string {...}]`, `:keyword`) as :source — an index row, not
+         ;; an eval-able registration call. Only a `(…)` form (an agent's
+         ;; `(seon.schema/register! …)` tee) is replayable; shape literals
+         ;; are rebuilt from the live registry by `index-schemas` each boot.
+         (remove #(and (= :schema (:kind %))
+                       (not (str/starts-with? (str/trim (str (:source %))) "("))))
          (sort-by :tx)
          vec)))
 
@@ -663,7 +677,7 @@
       :seon.client/replay-n-fail  <int>}.
 
    Substrate rows are NOT replayed (Step 4) — `query-program-graph-entries`
-   excludes any entry whose owning ns is in `substrate-ns-kws`. The
+   excludes any entry whose owning ns is in `(substrate-ns-set)`. The
    compiled substrate fns are rebuilt from var meta + file-read by
    `index-substrate!` on every boot, so only agent-authored corpus
    (fns / tests / schemas / nses under `seon.agent.<id>`) replays here.
@@ -797,10 +811,11 @@
 ;; `substrate-vars` to widen the seeded set.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private substrate-vars
-  "Compile-time `#'`-literal vars indexed into the corpus at boot. MUST be
-   `#'`-literals (self-host `resolve` is a compile-time macro). Grow this list
-   to widen the seeded substrate surface — the indexing mechanism is uniform."
+(def ^:private curated-substrate-vars
+  "Hand-curated `#'`-literal vars indexed REGARDLESS of `:malli/schema` —
+   the honestly-unspecced core surface (`register!`, `current-agent-id`,
+   the fs read fns) that the auto roster below can't see. MUST be
+   `#'`-literals (self-host `resolve` is a compile-time macro)."
   [#'db/transact!
    #'db/query
    #'db/pull
@@ -818,32 +833,63 @@
    #'seon.search/grep
    #'seon.test.runner/run!])
 
-(def ^:private substrate-ns-kws
-  "The set of namespace keywords owned by the COMPILED substrate, derived
-   from `substrate-vars` — the SAME source of truth `index-substrate!` writes
-   from, so the two can never drift. Used by `query-program-graph-entries`
-   (Step 4) as the replay discriminator: any program-graph entry whose owning
-   ns is in this set is a SUBSTRATE row (re-indexed from var meta + file-read
-   on every boot by `index-substrate!`) and is SKIPPED on replay. Re-evaling a
-   substrate row's source — e.g. `(defn ^:async transact! …)` — would shadow
-   the real compiled fn, so substrate is never replayed; only agent-authored
-   corpus (in `seon.agent.<id>` nses) replays.
+(def ^:private substrate-vars
+  "Every var indexed into the corpus at boot: the curated unspecced base
+   PLUS the compile-time roster of every PUBLIC `:malli/schema`-carrying fn
+   across the build's whole `seon.*` require closure
+   (`seon.indexing/specced-fn-vars` — unit #23 fix b: 'all of the schemas,
+   functions and tests in the cljs package should be present in the
+   database'). Deduped by fully-qualified sym, curated entries first."
+  (->> (into curated-substrate-vars (specced-fn-vars))
+       (reduce (fn [[seen out] v]
+                 (let [k (str (:ns (meta v)) "/" (:name (meta v)))]
+                   (if (contains? seen k)
+                     [seen out]
+                     [(conj seen k) (conj out v)])))
+               [#{} []])
+       second))
 
-   Robust by construction: it's NOT tx-meta (`:seon.db/origin :substrate-seed`
-   can be absent on a re-asserted/older row, and history-dependent) and NOT a
-   hand-typed ns list — it's the live var-meta `:ns` of the indexed vars."
-  (into #{} (map #(keyword (str (:ns (meta %)))) substrate-vars)))
+;; Deftest vars the pod build loads, populated at load time by
+;; `seon.dev.test-preload` (the ONE ns whose require closure contains the
+;; test roster — a macro expanded HERE can't see nses compiled after this
+;; file). Empty in builds without the preload (e.g. :node-test), where
+;; tests index themselves via the runner's run-and-record path instead.
+(defonce !indexed-test-vars (atom []))
+
+(defn- substrate-ns-set
+  "The set of namespace keywords owned by the COMPILED substrate, derived
+   from `substrate-vars` + the preload's deftest vars — the SAME sources of
+   truth the boot indexers write from, so they can never drift. Used by
+   `query-program-graph-entries` (Step 4) as the replay discriminator: any
+   program-graph entry whose owning ns is in this set is a SUBSTRATE row
+   (re-indexed from var meta + file-read on every boot) and is SKIPPED on
+   replay. Re-evaling a substrate row's source — e.g. `(defn ^:async
+   transact! …)` — would shadow the real compiled fn, so substrate is never
+   replayed; only agent-authored corpus (in `seon.agent.<id>` / agent domain
+   nses) replays.
+
+   A fn (not a def) because `!indexed-test-vars` is populated by the
+   preload AFTER this ns loads; robust by construction either way — it's
+   NOT tx-meta and NOT a hand-typed ns list, it's the live var-meta `:ns`
+   of the indexed vars."
+  []
+  (into #{}
+        (map #(keyword (str (:ns (meta %)))))
+        (concat substrate-vars @!indexed-test-vars)))
 
 (defn- read-src-file
-  "Read a substrate source file given a var-meta `:file` (project-relative,
-   e.g. \"seon/db.cljs\"). The pod is Node; cwd is the repo root; sources live
-   under <cwd>/src. Returns the file text, or nil if it can't be read."
+  "Read a substrate source file given a var-meta `:file` (classpath-relative,
+   e.g. \"seon/db.cljs\" or \"seon/agent_context_test.cljs\"). The pod is
+   Node; cwd is the repo root; sources live under the deps.edn `:cljs` source
+   roots (src, test, guest-cljs/src — probed in that order). Returns the file
+   text, or nil if it can't be read."
   [file]
-  (try
-    (let [fs   (js/require "fs")
-          path (str (.cwd js/process) "/src/" file)]
-      (.readFileSync fs path "utf8"))
-    (catch :default _ nil)))
+  (let [fs (js/require "fs")]
+    (some (fn [root]
+            (try
+              (.readFileSync fs (str (.cwd js/process) "/" root "/" file) "utf8")
+              (catch :default _ nil)))
+          ["src" "test" "guest-cljs/src"])))
 
 (defn- extract-form-at-line
   "Return the exact text of the top-level form beginning at `line-1based` in
@@ -994,9 +1040,85 @@
                    :seon.ns/source (str "(ns " ns-sym ")")})]
     (vec (concat ns-rows fn-rows))))
 
+(def ^:private schema-source-cap
+  "Char cap for the pr-str'd shape persisted as a boot-indexed
+   `:seon.schema/source`. Registered forms are small (a type keyword or a
+   short vector); the cap is a backstop against a pathological entity :map."
+  1000)
+
+(defn index-schemas
+  "Tx-data for a `:seon.schema` row per REGISTERED schema — every key in
+   `seon.schema/registered-schemas`, attr-level and request/response shapes
+   included, not just the entity `:map` kinds (`all-entity-schemas-tx-data`
+   covers those separately with id-attr/required-attrs; identity upsert on
+   `:seon.schema/key` merges the two). `:seon.schema/source` is the
+   registered Malli FORM (pr-str), so the full shape of every attr is one
+   entity-read away for the agent.
+
+   Pure tx-data builder; the boot dedup in [[substrate-index-tx]] drops
+   keys already present on the conn, so an agent's own
+   `(seon.schema/register! …)` tee row (whose :source is the replayable
+   call form) is NEVER overwritten by the boot index."
+  []
+  (let [now (js/Date.)]
+    (into []
+          (keep (fn [[k v]]
+                  (when (keyword? k)
+                    (let [form (try (if (m/schema? v) (m/form v) v)
+                                    (catch :default _ v))
+                          s    (pr-str form)
+                          src  (if (> (count s) schema-source-cap)
+                                 (str (subs s 0 schema-source-cap) " …")
+                                 s)]
+                      (cond-> {:seon.schema/key        k
+                               :seon.schema/source     src
+                               :seon.schema/created-at now}
+                        (namespace k)
+                        (assoc :seon.schema/ns
+                               {:seon.ns/name (keyword (namespace k))}))))))
+          (schema/registered-schemas))))
+
+(defn- var->test-row
+  "Build a `:seon.test` row for a deftest `#'`-literal from runtime
+   introspection (same mechanism as [[var->fn-row]]: real source file-read
+   at the var's `:file`/`:line`). Returns nil (and logs) when the source
+   can't be read — no stub is ever persisted."
+  [v now]
+  (let [m   (meta v)
+        sym (str (:ns m) "/" (:name m))
+        txt (read-src-file (:file m))
+        src (when txt (extract-form-at-line txt (:line m)))]
+    (if (nil? src)
+      (do (log/error-console!
+            "seon.client/var->test-row"
+            (str "could not read real source for " sym
+                 " (file " (pr-str (:file m)) " line " (:line m) ") — OMITTING"))
+          nil)
+      {:seon.test/sym        sym
+       :seon.test/ns         [:seon.ns/name (keyword (str (:ns m)))]
+       :seon.test/source     src
+       :seon.test/created-at now})))
+
+(defn index-tests
+  "Tx-data for `:seon.test` + owning `:seon.ns` rows from deftest
+   `#'`-literal vars (default: the preload-populated `!indexed-test-vars` —
+   every deftest the pod build loads). Same shape the detect-and-tee path
+   writes, so downstream readers never branch on origin. Pure tx-data
+   builder; [[substrate-index-tx]] dedups against the conn."
+  ([] (index-tests @!indexed-test-vars))
+  ([vars]
+   (let [now     (js/Date.)
+         rows    (keep #(var->test-row % now) vars)
+         ns-syms (into #{} (map #(first (str/split (:seon.test/sym %) #"/" 2)) rows))
+         ns-rows (for [ns-sym ns-syms]
+                   {:seon.ns/name   (keyword ns-sym)
+                    :seon.ns/source (str "(ns " ns-sym ")")})]
+     (vec (concat ns-rows rows)))))
+
 (defn ^:async substrate-index-tx
-  "Boot-time substrate index tx-data: [[index-substrate!]] filtered to the rows
-   not yet present on `conn`. This is the idempotency guard for the
+  "Boot-time substrate index tx-data: [[index-substrate!]] + [[index-schemas]]
+   + [[index-tests]] filtered to the rows not yet present on `conn`. This is
+   the idempotency guard for the
    \"fresh agent, same conn\" path — on the FIRST boot of a conn it returns the
    full set; on the SECOND and Nth boot (a second `start-agent!` on the shared
    `*conn*`, or a reconnect to a persistent store that already holds the
@@ -1008,13 +1130,19 @@
    removing the re-seed interaction that the Run-3 findings traced to a
    malformed `:seon.fn/ns` value. Returns a Promise of the tx-data vector."
   [conn]
-  (let [all       (index-substrate!)
+  (let [all       (concat (index-substrate!)
+                          (index-schemas)
+                          (index-tests))
         db        (await (d/db conn))
         have-fns  (into #{} (map first) (d/q '[:find ?sym :where [?f :seon.fn/sym ?sym]] db))
-        have-nses (into #{} (map first) (d/q '[:find ?nm :where [?n :seon.ns/name ?nm]] db))]
+        have-nses (into #{} (map first) (d/q '[:find ?nm :where [?n :seon.ns/name ?nm]] db))
+        have-schs (into #{} (map first) (d/q '[:find ?k :where [?s :seon.schema/key ?k]] db))
+        have-tsts (into #{} (map first) (d/q '[:find ?t :where [?e :seon.test/sym ?t]] db))]
     (vec (remove (fn [row]
-                   (or (contains? have-fns (:seon.fn/sym row))
-                       (contains? have-nses (:seon.ns/name row))))
+                   (or (contains? have-fns  (:seon.fn/sym row))
+                       (contains? have-nses (:seon.ns/name row))
+                       (contains? have-schs (:seon.schema/key row))
+                       (contains? have-tsts (:seon.test/sym row))))
                  all))))
 
 (defn- stub-llm

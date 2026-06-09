@@ -25,7 +25,8 @@
     [clojure.string :as str]
     [cljs.test :as t :refer [deftest is async]]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.schema :as schema]))
 
 (defn- by-sym [tx sym]
   (first (filter #(= sym (:seon.fn/sym %)) tx)))
@@ -124,18 +125,66 @@
   ;; index-substrate! is a PURE builder: every :seon.fn/ns it emits is a
   ;; [:seon.ns/name <kw>] lookup-ref (a single :seon.db/ref), NEVER a bare
   ;; keyword — the malformed value the Run-3 findings traced to the second boot.
-  (let [tx  (client/index-substrate!)
-        fns (filter :seon.fn/sym tx)]
-    ;; 14 = the seeded set in client.cljs `substrate-vars` (core db 6 incl.
-    ;; listen!, register!, the seon.fs read surface ×5, seon.search/grep,
-    ;; test.runner/run! — demo-context fixes 2026-06-09). Bump when growing
-    ;; the seed list.
-    (is (= 14 (count fns)) "emits all 14 substrate fn rows")
+  ;;
+  ;; DERIVED expectations (unit #23): the roster is now the curated base +
+  ;; the compile-time `seon.indexing/specced-fn-vars` macro over the WHOLE
+  ;; build closure — never assert a hardcoded count (the old `= 14` broke
+  ;; on every roster change). Instead: the curated core surface must be
+  ;; present, the set must be substantially wider than the old curated 14,
+  ;; and every row must be structurally valid + unique.
+  (let [tx   (client/index-substrate!)
+        fns  (filter :seon.fn/sym tx)
+        syms (map :seon.fn/sym fns)]
+    (is (>= (count fns) 14)
+        "the widened roster is at least as big as the old curated set")
+    (is (> (count fns) 50)
+        "the whole-package surface is indexed, not a curated sliver")
+    (is (= (count syms) (count (distinct syms)))
+        "no duplicate :seon.fn/sym rows (curated + macro roster deduped)")
+    (doseq [sym ["seon.db/transact!" "seon.db/query" "seon.db/pull"
+                 "seon.db/entity" "seon.db/listen!" "seon.db/current-agent-id"
+                 "seon.schema/register!" "seon.fs/read-file" "seon.fs/walk-dir"
+                 "seon.search/grep" "seon.test.runner/run!"]]
+      (is (some #{sym} syms) (str sym " present in the indexed roster")))
     (is (every? #(let [r (:seon.fn/ns %)]
                    (and (vector? r) (= 2 (count r)) (= :seon.ns/name (first r))
                         (keyword? (second r))))
                 fns)
         "every :seon.fn/ns is a valid [:seon.ns/name kw] lookup-ref")))
+
+(deftest index-schemas-covers-the-whole-registry
+  ;; Fix b: ALL registered schemas — attr-level included — become
+  ;; :seon.schema rows. Derived expectation: one row per registered key.
+  (let [rows (client/index-schemas)
+        ks   (set (map :seon.schema/key rows))]
+    (is (= (count rows) (count (schema/registered-schemas)))
+        "one :seon.schema row per registered schema key")
+    (is (contains? ks :seon.db/id) "attr-level shape (:seon.db/id) indexed")
+    (is (contains? ks :seon.eval) "entity kind (:seon.eval) indexed")
+    (is (= "[:string {:min 14, :max 14}]"
+           (:seon.schema/source (first (filter #(= :seon.db/id (:seon.schema/key %)) rows))))
+        ":seon.schema/source is the registered Malli form (pr-str)")
+    (is (every? (fn [{k :seon.schema/key ns-ref :seon.schema/ns}]
+                  (if (namespace k)
+                    (= {:seon.ns/name (keyword (namespace k))} ns-ref)
+                    (nil? ns-ref)))
+                rows)
+        "namespaced keys carry the owning-ns nested ref; bare kinds don't")))
+
+(deftest index-tests-builds-rows-from-deftest-vars
+  ;; Fix b: deftest vars → :seon.test rows via the same file-read
+  ;; introspection. Driven here with an explicit var (the preload-populated
+  ;; default roster is empty in the :node-test build).
+  (let [rows (client/index-tests [#'pure-index-emits-valid-refs])
+        row  (first (filter :seon.test/sym rows))]
+    (is (= "seon.index-substrate-test/pure-index-emits-valid-refs"
+           (:seon.test/sym row)))
+    (is (= [:seon.ns/name :seon.index-substrate-test] (:seon.test/ns row))
+        "owning ns as a lookup-ref")
+    (is (str/starts-with? (:seon.test/source row) "(deftest pure-index-emits-valid-refs")
+        "source is the REAL (deftest …) text read from the test file")
+    (is (some #(= :seon.index-substrate-test (:seon.ns/name %)) rows)
+        "an owning :seon.ns row is emitted alongside")))
 
 (deftest substrate-index-tx-idempotent-across-boots
   ;; The "fresh agent, same conn" guard: substrate-index-tx drops rows already
@@ -157,10 +206,14 @@
             (-> (client/substrate-index-tx conn)
                 (.then
                   (fn [first-tx]
-                    ;; FIRST boot of the fresh conn: full set (14 — see
-                    ;; pure-index-emits-valid-refs for the roster).
-                    (is (= 14 (count (filter :seon.fn/sym first-tx)))
-                        "first boot emits all 14 substrate fn rows")
+                    ;; FIRST boot of the fresh conn: the full set — DERIVED
+                    ;; from the pure builders, never a hardcoded count.
+                    (is (= (count (filter :seon.fn/sym (client/index-substrate!)))
+                           (count (filter :seon.fn/sym first-tx)))
+                        "first boot emits every substrate fn row")
+                    (is (= (count (client/index-schemas))
+                           (count (filter :seon.schema/key first-tx)))
+                        "first boot emits a :seon.schema row per registered schema")
                     (db/transact! {:seon.db/conn conn :seon.db/tx-data first-tx})))
                 (.then (fn [_] (client/substrate-index-tx conn)))
                 (.then

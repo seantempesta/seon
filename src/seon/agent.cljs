@@ -181,6 +181,11 @@
 (schema/register! :seon.eval/source      :string)
 (schema/register! :seon.eval/ok?         :boolean)
 (schema/register! :seon.eval/result-edn  :string)
+;; println/prn output captured during the eval span (unit #23 fix f —
+;; *print-fn* otherwise routes to the pod's stdout, invisible to the
+;; agent; a REPL shows print output next to the result). Written by
+;; record-eval! only when something printed; absent = no output.
+(schema/register! :seon.eval/output      :string)
 (schema/register! :seon.eval/error       :string)
 ;; Phase A item 8 — structured envelope alongside the rendered string.
 ;; Populated by record-eval! when the failure carries an instrumentation
@@ -361,6 +366,7 @@
    [:seon.eval/narration   {:optional true} :seon.eval/narration]
    [:seon.eval/ns          {:optional true} :seon.eval/ns]
    [:seon.eval/result-edn  {:optional true} :seon.eval/result-edn]
+   [:seon.eval/output      {:optional true} :seon.eval/output]
    [:seon.eval/error       {:optional true} :seon.eval/error]
    [:seon.eval/error-data  {:optional true} :seon.eval/error-data]])
 
@@ -1204,6 +1210,7 @@
   [{src      :seon.eval/source
     ok?      :seon.eval/ok?
     res      :seon.eval/result-edn
+    out      :seon.eval/output
     err      :seon.eval/error
     err-data :seon.eval/error-data
     eid      :seon.eval/id
@@ -1228,9 +1235,15 @@
                (cap-result (str ";; ERROR " err))
 
                :else ";; <no result>")
-        footer (str "  ; # " eid (when dur (str "  " dur "ms")))]
+        footer (str "  ; # " eid (when dur (str "  " dur "ms")))
+        ;; Captured println/prn output (fix f) — shown above the result
+        ;; like a real REPL prints before returning. Bounded by the same
+        ;; per-eval render cap.
+        out-ln (when (and (string? out) (not (str/blank? out)))
+                 (str (cap-result (str/trimr out)) "\n"))]
     (str (when (and narr (not (str/blank? narr))) (str narr "\n"))
          "> " (cap-result src) "\n"
+         out-ln
          body footer)))
 
 ;; ------------------------------------------------------------
@@ -1409,8 +1422,10 @@
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.agent/keys [id]}]
   (str "<system agent=\"" id "\">\n"
-       "  Your current namespace and the wall-clock time are on the\n"
-       "  final prompt line at the END of this context.\n"
+       "  Your current namespace, the turn counts and the wall-clock time\n"
+       "  are in the status block at the very END of this context; the\n"
+       "  final line is a clean REPL prompt (<your-ns>=>) — your reply is\n"
+       "  the next REPL input.\n"
        "\n"
        "  FORMAT IS STRICT. Everything you emit is either\n"
        "    (a) a Clojure form — (...), [...], {...}, @!atom\n"
@@ -1428,8 +1443,13 @@
        "  Walk your own state:\n"
        "    (seon.agent/messages)        ; current session's messages — default {:seon.agent/n 50}\n"
        "    (seon.agent/evals)           ; current session's evals — default {:seon.agent/n 20}\n"
-       "    (seon.agent/current-ns)      ; derived from your latest successful eval\n"
+       "    (seon.agent/current-ns)      ; your ns as data (the prompt line shows it too)\n"
        "    (result <eval-id>)           ; full live result of a prior eval (this session)\n"
+       "\n"
+       "  Namespaces are workspaces: (ns my.domain.thing) moves you there\n"
+       "  and your CONTEXT FOLLOWS YOUR NAMESPACE — build where the work\n"
+       "  lives. println/prn output is captured onto the eval's record\n"
+       "  (shown above the result), but prefer returning values.\n"
        "\n"
        "  See your code in the current ns:\n"
        "    (seon.db/pull {:seon.db/pull-pattern\n"
@@ -1620,6 +1640,9 @@
              (str "No filesystem roots are granted right now (default-deny) —\n"
                   "every seon.fs call returns an error envelope that explains\n"
                   "how access is configured.\n\n"))
+           "Paths are ABSOLUTE, real machine paths — there is no virtual\n"
+           "root or chroot. When your human asks where something is,\n"
+           "answer with the real path exactly as the substrate returns it.\n\n"
            "The recipe is SEARCH → READ PRECISELY (never walk + guess):\n\n"
            "  ;; 1. grep for a term (regex). Call it as the WHOLE form — the\n"
            "  ;;    result is auto-awaited; inside a let you'd get a Promise.\n"
@@ -1822,6 +1845,32 @@
                     (str/join "\n" (map #(domain-attr-line db %) ks))))))
       "")))
 
+(defn- schema-ns-summary-block
+  "Compact index of EVERY registered schema in the system, as per-ns
+   count lines (unit #23 fix b: all ~276 registered schemas are now
+   `:seon.schema` rows; rendering each would blow the context budget, so
+   the catalog shows the index and teaches the entity-read). Namespaced
+   keys only — the un-namespaced entity KINDS already render as full
+   blocks above. Counts are bucketed (`fuzzy-count`) for cache-prefix
+   stability."
+  [db]
+  (let [ks     (->> (db/query {:seon.db/db db
+                               :seon.db/query
+                               '[:find ?k :where [?e :seon.schema/key ?k]]})
+                    (map first)
+                    (filter namespace))
+        groups (->> ks (group-by namespace) (sort-by first))]
+    (if (seq groups)
+      (str "\n\n=== all registered schemas, by namespace ===\n"
+           ";; Every registered schema is a :seon.schema row; read a shape:\n"
+           ";; (:seon.schema/source (seon.db/entity\n"
+           ";;    {:seon.db/ref [:seon.schema/key :seon.db/ref]}))\n"
+           (str/join "\n"
+             (for [[ns-str ns-ks] groups]
+               (str "  " ns-str " — " (fuzzy-count (count ns-ks))
+                    " schema" (when (not= 1 (count ns-ks)) "s")))))
+      "")))
+
 (defn schema-catalog-section
   "GLOBAL schema catalog — EVERY registered entity KIND in the system,
    grouped by owning namespace, REGARDLESS of the agent's current ns.
@@ -1867,6 +1916,7 @@
                     (str/join "\n\n"
                       (map #(catalog-kind-block db %)
                            (sort-by (comp str :kind) ks))))))
+           (schema-ns-summary-block db)
            (domain-attrs-block db)
            "\n</schema-catalog>")
       "")))
@@ -2181,10 +2231,37 @@
                                      :seon.render/depth 1
                                      :seon.render/format :ai
                                      :seon.db/db db})
-                  :seon.render/text)]
-    (if (str/blank? text)
-      ""
-      (str "<namespace-context>\n" text "\n</namespace-context>"))))
+                  :seon.render/text)
+        ;; Empty-ns nudge (unit #23 fix c): when the CURRENT ns owns no
+        ;; fns/schemas/tests, say so and teach the move — context follows
+        ;; the namespace, so an agent sitting in an empty ns should either
+        ;; define here or (ns …) to where the code is.
+        data  (pull-ns-data db ns-kw)
+        empty-ns? (and (empty? (:seon.fn/_ns data))
+                       (empty? (:seon.schema/_ns data))
+                       (empty? (:seon.test/_ns data)))
+        ;; A fresh agent's own not-yet-in-db home-ns used to render as
+        ;; ';; requires: <own-ns> (not in db)' — a mislabel (it's not a
+        ;; require; context-audit item 11). Drop that lone line; the
+        ;; empty-ns nudge below says it properly.
+        text  (if (and (nil? data)
+                       (= (str/trim text)
+                          (str ";; requires: " (name ns-kw) " (not in db)")))
+                ""
+                text)
+        nudge (when empty-ns?
+                (str ";; Your current namespace (" (name ns-kw) ") is EMPTY —\n"
+                     ";; no fns, schemas or tests yet. Define here, or switch\n"
+                     ";; with (ns other.ns) to move where the code is: your\n"
+                     ";; context follows your namespace."))]
+    (cond
+      (and (str/blank? text) (nil? nudge)) ""
+      (str/blank? text)
+      (str "<namespace-context>\n" nudge "\n</namespace-context>")
+      :else
+      (str "<namespace-context>\n" text
+           (when nudge (str "\n\n" nudge))
+           "\n</namespace-context>"))))
 
 ;; ============================================================
 ;; functions-catalog-section — the GLOBAL cross-namespace catalog of
@@ -2219,12 +2296,28 @@
   (str/join "\n  " (callable-sigs sym arglists)))
 
 (defn- fn-catalog-block-brief
-  "One OTHER-ns fn for the catalog: signature + one-line doc. Compact —
-   the agent only needs to know it exists and how to call it."
-  [{:keys [sym arglists doc]}]
-  (str "  " (fn-catalog-sig sym arglists)
-       (when-let [d (first-doc-line doc)]
-         (str "\n    ; " (clip d member-doc-clip)))))
+  "One OTHER-ns fn for the catalog: ONE LINE — the first-arity callable
+   signature only. Compact — the agent only needs to know it exists and
+   how to call it; doc + body are one `:seon.fn` pull away (the header
+   teaches the query)."
+  [{:keys [sym arglists]}]
+  (str "  " (first (callable-sigs sym arglists))))
+
+(def ^:private fn-catalog-brief-max
+  "Other-ns groups with at most this many fns render one line per fn;
+   larger groups (the big substrate nses — seon.db, seon.agent, …)
+   collapse to a single count line. With the whole package surface
+   indexed (unit #23 fix b: ~100+ fns) per-fn lines for every ns would
+   blow the turn-0 context budget; the DB carries everything either
+   way — the catalog shows the index, the header teaches the query."
+  8)
+
+(defn- fn-catalog-summary-line
+  "Single count line for a LARGE other-ns group — the fns are all
+   `:seon.fn` rows; the catalog header teaches how to list them."
+  [ns-name ns-fns]
+  (str "=== " ns-name " ===  " (count ns-fns)
+       " fns (indexed — query :seon.fn rows, see header)"))
 
 (defn- fn-catalog-block-full
   "One OWN-ns fn for the catalog: signature + one-line doc + full source.
@@ -2274,17 +2367,32 @@
         groups (->> fns (group-by :ns) (sort-by first))]
     (if (seq fns)
       (str "<functions>\n"
-           ";; Every fn defined across the WHOLE substrate, grouped by namespace.\n"
-           ";; Your own ns shows full source; other namespaces show signature +\n"
-           ";; one-line doc (pull :seon.fn/source for the body). Check here BEFORE\n"
-           ";; writing a helper — it may already exist.\n\n"
+           ";; Every fn defined across the WHOLE substrate is a :seon.fn row,\n"
+           ";; grouped here by namespace. Your own ns shows full source; small\n"
+           ";; namespaces show one callable line per fn; large namespaces show a\n"
+           ";; count only. List any namespace's fns from the db, e.g.:\n"
+           ";;   (seon.db/query {:seon.db/query\n"
+           ";;     '[:find ?sym ?arglists :where [?f :seon.fn/ns ?n]\n"
+           ";;       [?n :seon.ns/name :seon.db] [?f :seon.fn/sym ?sym]\n"
+           ";;       [(get-else $ ?f :seon.fn/arglists \"\") ?arglists]]})\n"
+           ";; and pull :seon.fn/source / :seon.fn/doc by [:seon.fn/sym \"…\"].\n"
+           ";; Check here BEFORE writing a helper — it may already exist.\n\n"
            (str/join "\n\n"
              (for [[ns-name ns-fns] groups
                    :let [own? (= ns-name own-ns)]]
-               (str "=== " ns-name (when own? "  (your ns)") " ===\n"
-                    (str/join "\n\n"
-                      (map (if own? fn-catalog-block-full fn-catalog-block-brief)
-                           (sort-by :sym ns-fns))))))
+               (cond
+                 own?
+                 (str "=== " ns-name "  (your ns) ===\n"
+                      (str/join "\n\n"
+                        (map fn-catalog-block-full (sort-by :sym ns-fns))))
+
+                 (<= (count ns-fns) fn-catalog-brief-max)
+                 (str "=== " ns-name " ===\n"
+                      (str/join "\n"
+                        (map fn-catalog-block-brief (sort-by :sym ns-fns))))
+
+                 :else
+                 (fn-catalog-summary-line ns-name ns-fns))))
            "\n</functions>")
       "")))
 
@@ -2393,23 +2501,23 @@
       "")))
 
 (defn prompt-section
-  "Trailing REPL prompt line: `seon.agent.<id>=>  ; turn N`. The ns shows
-   the agent's current namespace and `turn N` the current-session turn
-   count — a REPL already shows your ns, so `current-turn`/
-   `current-session` collapse into this one always-present line. Always
-   present (never blank).
+  "TERMINAL-style trailing prompt (unit #23 fix e, per the plan's
+   REPL-PARITY CONTRACT prompt redesign): a per-turn STATUS BLOCK above,
+   then a CLEAN REPL prompt as the very last line —
 
-   Surfaces TURN PRESSURE when the agentic loop runs long: derived from
-   the live `turns-since-inbound` count vs the agent's `turns-cap` (never
-   stored), escalating nudges precede the prompt line — wrap up at
-   halfway, FINAL WARNING three turns before `run-agentic-loop!` cuts
-   the loop off.
+     ;; You are at a ClojureScript REPL — reply ONLY with forms + ;; comments.
+     ;; ── turn 6 · 3 since-user (cap 20) · 2026-06-09T22:14:00.000Z ──
+     my.domain.thing=>
 
-   ALSO carries the wall-clock `Now:` line — every per-turn-volatile
-   byte lives HERE at the context tail, so the static sections above
-   stay a stable provider-cacheable prefix (context-audit 2026-06-09
-   §4: the timestamp used to sit at char 35 of <system> and busted the
-   whole cache every turn)."
+   The status block carries the session turn count, the since-inbound
+   count vs the agent's turns-cap, and the wall-clock timestamp (+ pod
+   tz) — every per-turn-volatile byte lives HERE at the context tail so
+   the static sections above stay a stable provider-cacheable prefix
+   (context-audit 2026-06-09 §4). Turn-pressure nudges render inside
+   this block when escalating (wrap up at halfway, FINAL WARNING three
+   turns before `run-agentic-loop!` cuts the loop off). The final line
+   is EXACTLY `<current-ns>=> ` — no trailing metadata; the agent
+   completes the next REPL input. Always present (never blank)."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.agent/keys [id]}]
   (let [now      (.toISOString (js/Date.))
@@ -2439,8 +2547,11 @@
                ";; most questions need 2–4 turns. If you have the answer,\n"
                ";; reply now.\n")
           :else "")]
-    (str ";; Now: " now "  (pod tz: " (host-timezone) ")\n"
-         pressure ns-str "=>  ; turn " n-turns)))
+    (str ";; You are at a ClojureScript REPL — reply ONLY with forms + ;; comments.\n"
+         ";; ── turn " n-turns " · " since-u " since-user (cap " cap ") · "
+         now " (pod tz: " (host-timezone) ") ──\n"
+         pressure
+         ns-str "=> ")))
 
 ;; ------------------------------------------------------------
 ;; Composer (v1.md §5.3).
