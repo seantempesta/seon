@@ -48,7 +48,7 @@
 ;; Config — pinned model + endpoint.
 ;; ============================================================
 
-(def ^:private default-model       "deepseek-chat")
+(def ^:private default-model       "deepseek-v4-pro")
 (def ^:private default-endpoint    "https://api.deepseek.com/chat/completions")
 (def ^:private default-temperature 0.7)
 (def ^:private default-max-tokens  4096)
