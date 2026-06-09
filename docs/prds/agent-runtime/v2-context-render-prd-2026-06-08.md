@@ -270,15 +270,20 @@ value; drill with normal Clojure). NO `root-pull`, NO `probe`.
   bare keyword is analyzed with no enclosing ns) → `:malli.core/invalid-output`
   aborted every turn. Fix: `:when (symbol? ns-sym)` drops the def-less nil entry.
   Live: 53 post-fix turns `:done`, 0 errors.
-- **T12** SURFACE EVAL ERRORS to the agent — DEMO-CRITICAL. On a failed eval,
-  `:seon.eval/result-edn` is empty so the agent can't see WHY and can't
-  self-correct (root cause of Phase 1's hallucinated success). Render the failure
-  reason into the agent's transcript so errors are values it can read + adapt to.
-- **T13** ADD `seon.schema/register!` to the "## What you can do" capabilities —
-  DEMO-CRITICAL. The agent conflated "store schema source as an entity" with
-  "register the schema" → every fact transact! was rejected. Teach the
-  register-schema → transact-data flow with a worked example (it's the core of the
-  "agent defines hard schemas" demo).
+- **T12** SURFACE EVAL ERRORS to the agent — DEMO-CRITICAL — SHIPPED (751ec4e).
+  record-eval! stored the whole seon.error/->map (~2271 chars, #error broke the
+  agent-side read-string). New render-error-string persists a legible
+  :seon.eval/error (deepest message via :seon.error/cause + structured data, ~227
+  chars); format-eval-row renders `;; ERROR <msg>` (plain elision, not the
+  narrow-guide). The agent now sees + reacts to its failures.
+- **T13** ADD `seon.schema/register!` to "## What you can do" — DEMO-CRITICAL —
+  SHIPPED (751ec4e). Added register! to the capability syms + a "Storing a NEW
+  KIND of data: register FIRST" register→transact→query worked example. PLUS the
+  root-cause fix `seon.db/ensure-datahike-attrs!` (in transact!*): register! only
+  updates the Malli registry, but the datahike conn (:schema-flexibility :write)
+  still rejected new attrs — transact!* now auto-derives + transacts the datahike
+  declaration for newly-registered attrs (schema before data), so register!→
+  transact! actually works. Verified register→store→read end-to-end.
 - **T14** PHANTOM EMPTY-NS DEFS lose eval records — DEMO-CRITICAL, NEXT. Surfaced
   during T12/T13 (sibling of T11): `seon.analyzer-info/defs-since` returns stale
   defs from a `nil`/`""`-keyed ns bucket (leftovers from prior agents' evals) →
