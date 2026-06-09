@@ -148,3 +148,80 @@ the pod, since most of B already exists.
 Each step: implement (`seon-agent`) → seon-verifier → commit. The live pod is the
 oracle. PRD `v2-context-render-prd-2026-06-08.md` remains the demo source of truth;
 this doc owns the finish-CLJS/pivot-CLJ plan.
+
+---
+
+## RESUME HERE — fresh-context handoff (2026-06-09)
+
+**THIS doc is the source of truth.** Methodology: implement-agent → seon-verifier →
+commit only when verified (`git add <specific files>`, never `-A`); the live pod is
+the oracle; commit working code incrementally. Relevant memories:
+`project_soul_and_two_track`, `feedback_prds_are_source_of_truth`,
+`feedback_specific_actionable_feedback`, `feedback_agents_read_core_source`.
+
+### Live system state
+
+- **Pod** (`:client`, Node) PERSISTS to disk now (A1): konserve `:file`,
+  `data/seon-pod/<run-id>/`. Restart via `bin/seon restart pod`.
+- **Dev JVM** raised to `-Xmx4g` + heap-dump-on-OOM (was OOMing the in-process
+  clj-kondo lint at 2g/99.9%). `bin/seon restart jvm`. Healthy (244/4096 used).
+- **wire-server** (separate process, pid was 51224) = the CLJ central store
+  (file-backed datahike over UDS/Transit at `data/clusters/default/store`) — Track 2's
+  target. Verified working in scoping.
+- **deepseek model** = `deepseek-v4-pro` (per user; if API rejects, a live call surfaces it).
+
+### Gotchas (cost real time)
+
+- MCP isolated JVM sessions are BROKEN (`mcp__seon__eval` clone fails) — the code
+  references the retired `seon.orchestrator.session`. Use session `"orchestrator"`.
+- The CLJS MCP `"default"` session wedges (`Compiler.currentNS()` null) and survives
+  pod restart — use `mcp__seon_cljs__create_session` for a fresh sid.
+- Dev-JVM Integrant logs `No such namespace: seon.flow` / `:seon.flow/pool` at boot
+  (dangling retired-ns refs; system starts anyway) — see the surgical-fix doc below.
+
+### IN-FLIGHT agents at handoff (check status + their `tasks/<id>.output`; verify → commit/revert)
+
+- **second-boot fix** (`aa03679d77ff3d214`, pod `:client`): fixes the `:seon.fn/ns`
+  index-substrate! bug that breaks a SECOND `start-agent!` on the same conn (blocks
+  scenario 2). Uncommitted: `src/seon/client.cljs`, `test/seon/index_substrate_test.cljs`.
+- **Track 2 — thin Node UDS transport** (`a45ae1296441240c7`, JVM + new pod transport):
+  uncommitted: `src/seon/server/{boot,wire}.clj`, `src/seon/dev/node_agent.cljs`,
+  new `src/seon/dev/cbor.cljs` + `src/seon/dev/wire_node.cljs`, `shadow-cljs.edn`.
+  Goal: route a pod op to the wire-server over `node:net` UDS (no WASM). NOTE: these
+  `dev/*.cljs` are in the `:client` source path — confirm they didn't collide with the
+  second-boot fix's `client.cljs` edits.
+- **flow/pool surgical investigation** (`a9ae0ff45c57a8642`, JVM): writes
+  `docs/seon/orchestrator/issues/flow-pool-integrant-surgical-2026-06-09.md` — the
+  SURGICAL plan to disable the dead flow+pool Integrant components (a prior agent
+  wrongly "removed half the system" — do NOT). Apply from that doc; minimal only.
+
+### IMMEDIATE NEXT STEPS (ordered)
+
+1. Resolve the 3 in-flight agents: verify each (seon-verifier where code), commit the
+   good ones (scoped), revert anything broken. Confirm the second-boot fix actually
+   lets a 2nd `start-agent-with-deepseek!` boot clean.
+2. **SOUL-PULL CORRECTION (pending, important).** Commit `960a094` (Track 1) wrongly
+   COPIED SOUL prose INTO `deepseek.cljs`. The user wants `SOUL.md` PULLED at boot
+   (read via `node:fs` when seeding `:seon.system-prompt`) as the SINGLE SOURCE — strip
+   the copied prose; `deepseek.cljs` keeps only the operational HOW-layer. Pod `:client`.
+3. **Drive the TWO-SCENARIO test** (same persistent DB, separate fresh-context agents,
+   back-to-back): (1) a user's FIRST work question → agent does WORK-DIRECTED schema
+   design + stores (NO explicit index step); (2) a similar question → a fresh agent
+   SEES the stored schemas + functions (via schema-catalog + the new functions-catalog)
+   and reuses them. Needs step 1 (second-boot fix) done. Observe COMPACTLY (eval
+   source+ok?+clipped result, not the full prompt). Append findings to
+   `research/e2e-demo-findings-2026-06-08.md`.
+4. **Track 2 integration handoff:** route the pod's db path through the Node UDS
+   transport to the wire-server (the one `:client` change, after the pod is free).
+5. Apply the flow/pool surgical fix (from its doc). A2 warnings (specific, clustered,
+   compositional, ns-scoped) when ready.
+
+### Standing principles (don't relearn)
+
+- **SOUL.md = the agent's identity, PULLED not copied** (single source).
+- **Work-directed**: model from the human's question, no "store whatever" index step.
+- **Identity is OPTIONAL** on entities — never force/warn a natural key.
+- **Feedback is SPECIFIC** (exact defect + location + concise example; cluster by kind).
+- **Thin Node wrapper, NOT WASM** (swappable later).
+- Two tracks by build: Track 1 = pod `:client`; Track 2 = JVM `seon.server.*` +
+  guest/transport — keep concurrent edits on DIFFERENT builds.
