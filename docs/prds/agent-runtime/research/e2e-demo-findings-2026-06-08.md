@@ -590,3 +590,30 @@ Question: add a 1500m/35min swim + total training time across all workouts.
 - fresh-agent-same-conn: PROVEN (3rd + 4th boots clean)
 - work-directed schema design: PROVEN (rLC)
 - cross-agent REUSE: NOT YET — salience, not plumbing (ham)
+
+## Run 4 CORRECTION (2026-06-09 ~20:15Z, found by 1.2-reuse agent)
+
+**The run-4 root cause above is WRONG.** "Catalog WAS in context (prompt-text
+contains 'workout')" matched the word "workout" in the USER'S QUESTION text —
+not the catalog. Reading ham's stored `:seon.turn/prompt-text` properly: the
+`:workout/*` schemas were NEVER in ham's context. S2's failure was (mostly)
+plumbing, not salience.
+
+**Actual root cause — silent data loss in `record-eval!` (eval.cljs):**
+`build-tee-entities` gives `:seon.schema` tee rows
+`:seon.schema/ns [:seon.ns/name <keyword-ns>]`. For DATA namespaces
+(`:workout`) no `:seon.ns` entity exists → datahike throws "Nothing found for
+entity id [:seon.ns/name :workout]" → the ENTIRE record-eval! tx fails with
+only a console.warn — losing BOTH the `:seon.schema` row AND the `:seon.eval`
+row. Reproduced live on a scratch conn. This is why the run-4 db has ZERO
+:seon.schema entities for :workout/* despite 8 successful-looking register
+evals, and why first-registration evals are missing from transcripts.
+
+Fix unit (eval.cljs): (a) upsert the `:seon.ns` entity in the same tx (or make
+`:seon.schema/ns` optional for data namespaces), AND (b) record-eval! must
+never silently lose rows — on tx failure, fail loud + retry without the tee
+rows so the EVAL row always survives (surface-errors-loudly).
+
+The 1.2-reuse salience fixes remain valid (immune — catalog now derives from
+`(:schema db)` directly) and `check-parallel-attr` fires on the real run-4
+duplicate. But S2 re-run is BLOCKED on the tee fix.
