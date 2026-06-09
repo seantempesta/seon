@@ -449,6 +449,20 @@ Some types cannot be generated for property testing. Omit `:malli/schema` metada
 
 **Rule:** If a function takes connection managers, spawns processes, or returns channels/atoms, skip `:malli/schema`. Document the expected types in docstrings.
 
+### `:any` at third-party interface boundaries
+
+The no-`:any` rule is the default **for seon-authored data** — it nudges agents toward precise specs. But at a **third-party interface boundary** — where the value is whatever an external library (datahike, a JS API, etc.) hands back and we do not control its shape — `:any` is acceptable, because there is no honest tighter type.
+
+```clojure
+;; datahike returns a result set of arbitrary-arity tuples, a pulled map of
+;; arbitrary attribute values, or an opaque Entity record. :any is honest here.
+(defn query
+  {:malli/schema [:=> [:cat ::query-request] :any]}   ; <- sanctioned: datahike's value
+  [...])
+```
+
+**Rule:** `:any` is allowed only where the value crosses a boundary we don't own (a library's return, an opaque foreign object). For any seon-authored value, use a concrete type — `:any` there is a smell. The compliance checker (`seon.dev.compliance`) flags **all** `:any`/`:some`/`:maybe` as a non-blocking nudge; at a genuine boundary, that warning is an accepted judgment call, not a defect.
+
 ### Test Code Exemptions
 
 Test namespaces (`*_test.clj`) are exempt from most conventions:

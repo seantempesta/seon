@@ -1,10 +1,25 @@
 ---
 type: issue
-status: open
+status: completed
 tags: [issue, database, schema]
 ---
 
-# `seon.db` query/pull/entity declare `:any` returns (real smell, deferred)
+# `seon.db` query/pull/entity declare `:any` returns (RESOLVED — sanctioned boundary)
+
+## Resolution (user, 2026-06-08)
+
+`:any` is **acceptable at third-party interface boundaries** — we don't control
+what datahike (or any external library) returns, so there's no honest tighter
+type. The `query`/`pull`/`entity`/`transact!` `:any` returns are this sanctioned
+case and STAY. The no-`:any` rule remains the default nudge for seon-authored
+data. The compliance checker flags `:any` as a non-blocking nudge (not a defect);
+at a genuine boundary the warning is an accepted judgment call. Convention written
+to `docs/conventions.md` ("`:any` at third-party interface boundaries"). No
+opaque-return marker was added (don't over-engineer). Original analysis kept below.
+
+---
+
+## Original analysis (flagged as a real smell, before resolution)
 
 ## What
 
