@@ -266,12 +266,11 @@
                            {:agent agent-id
                             :msg-count (count msg-eids)
                             :eval-count (count eval-eids)})
-        (-> (db/transact!
-              {:seon.db/tx-data
-               (into [{:seon.agent/id               agent-id
-                       :seon.agent/turns-since-user 0
-                       :seon.agent/turn-count       0}]
-                     retractions)})
+        ;; Retractions only — turn counts are DERIVED from the message/
+        ;; session log (the retired :seon.agent/turn-count /
+        ;; :turns-since-user attrs are unregistered; transacting them
+        ;; threw :seon.db/unregistered-attrs and broke /clear).
+        (-> (db/transact! {:seon.db/tx-data (vec retractions)})
             (.then (fn [_]
                      (log/info-console! "seon.web.serve" "/clear TRANSACT OK"
                                         {:agent agent-id
