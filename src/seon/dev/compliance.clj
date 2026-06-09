@@ -156,73 +156,62 @@
        (fn? (var-get v))
        (not (:macro (meta v)))))
 
-(def ^:private malli-base-types
-  "The set of Malli base-type keywords from the default registry. A leaf
-   keyword in a schema form is a concrete type iff it is one of these (and not
-   :any) — otherwise it must be a registered seon schema."
-  (set (keys (m/default-schemas))))
+(def ^:private banned-spec-types
+  "Schema node types that violate the seon spec-completeness conventions
+   wherever they appear in a function schema (input, output, or nested):
 
-(def ^:private literal-ops
-  "Schema ops whose remaining children are literal values, not sub-schemas.
-   Their presence alone marks the element complete (e.g. [:enum :a :b]).
-   NOTE: :ref / :schema are deliberately EXCLUDED — their child IS a schema
-   reference and must be validated (e.g. [:ref ::foo] requires ::foo registered)."
-  #{:enum :=})
+     :any   — an unspecced value (the load-bearing ban).
+     :some  — \"any non-nil\"; still unspecced.
+     :maybe — nilable values; seon models absence as a missing key
+              ({:optional true}), never a stored nil.
 
-(defn- schema-element-complete?
-  "Recursively check that a Malli schema form element is fully specced.
+   Detected by walking the PARSED schema (so the check sees the resolved
+   node type, not the surface syntax) — this catches them at any depth and
+   inside any combinator (:catn slots, :map values, :* / :+ children, …),
+   which a surface vector-walk does not."
+  #{:any :some :maybe})
 
-   Complete means: NO :any, NO bare/unregistered keyword, every nested
-   sub-schema also complete.
-     - qualified keyword  -> must be schema/registered?
-     - simple keyword     -> a Malli base type AND not :any
-     - vector [op & args] -> :enum/:= and friends are literal-bearing (complete);
-                             otherwise every child sub-schema must be complete
-     - anything else      -> a literal value (enum member, count, etc.) -> complete"
-  [form]
-  (cond
-    (qualified-keyword? form) (schema/registered? form)
-    (keyword? form)           (and (not= :any form)
-                                   (contains? malli-base-types form))
-    (vector? form)            (if (contains? literal-ops (first form))
-                                true
-                                (every? (fn [child]
-                                          (cond
-                                            (map? child)     true ; properties map
-                                            (keyword? child) (schema-element-complete? child)
-                                            (vector? child)  (schema-element-complete? child)
-                                            :else            true)) ; literal label/value
-                                        (rest form)))
-    :else                     true))
+(defn- function-schema?
+  "True iff `schema` (a parsed malli Schema) is one of the two sanctioned
+   function-schema shapes: a single-arity :=> or a multi-arity :function."
+  [schema]
+  (contains? #{:=> :function} (m/type schema)))
 
-(defn- arrow-complete?
-  "Check that a single :=> arrow [:=> input output] (props optional) fully
-   specs both its input and its output."
-  [arrow]
-  (let [parts (rest arrow)
-        parts (if (map? (first parts)) (rest parts) parts)
-        [input output] parts]
-    (and (some? input)
-         (some? output)
-         (schema-element-complete? input)
-         (schema-element-complete? output))))
+(defn- banned-node-types
+  "Walk a parsed malli Schema and return the set of `banned-spec-types`
+   present anywhere in it. Empty set = no banned nodes."
+  [schema]
+  (let [found (atom #{})]
+    (m/walk schema
+            (fn [s _path _children _opts]
+              (let [t (m/type s)]
+                (when (contains? banned-spec-types t)
+                  (swap! found conj t)))
+              s))
+    @found))
 
 (defn- complete-spec?
   "Check whether a :malli/schema form fully specs all args and the return.
 
-   Accepts the two sanctioned function-schema shapes:
-     - :=>       single arity (map-in/map-out OR positional :cat/:catn)
-     - :function multi-arity; every arity must be fully specced
-   Returns false for nil, non-function-schema forms, or any incomplete arity."
+   Delegates well-formedness + reference resolution to malli itself —
+   `(m/schema form)` parses the form against the seon registry and THROWS
+   on a malformed function schema (e.g. an input that isn't :cat/:catn, a
+   missing output) or an unresolvable schema reference. The only
+   seon-specific policy layered on top is the ban on weak value types
+   (`banned-spec-types`: :any / :some / :maybe), detected by walking the
+   parsed schema.
+
+   Returns true iff: the form parses, is a :=> or :function schema, and
+   contains no banned node anywhere. Returns false (never throws) for a
+   form that fails to parse, isn't a function schema, or carries a banned
+   node."
   [schema-form]
   (boolean
-   (when (vector? schema-form)
-     (case (first schema-form)
-       :=>       (arrow-complete? schema-form)
-       :function (let [arrows (filter #(and (vector? %) (= :=> (first %)))
-                                      (rest schema-form))]
-                   (and (seq arrows) (every? arrow-complete? arrows)))
-       false))))
+   (try
+     (let [schema (m/schema schema-form)]
+       (and (function-schema? schema)
+            (empty? (banned-node-types schema))))
+     (catch Exception _ false))))
 
 (defn- has-malli-schema?
   "Check if function has :malli/schema metadata."
