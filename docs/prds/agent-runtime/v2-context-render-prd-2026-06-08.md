@@ -225,9 +225,26 @@ value; drill with normal Clojure). NO `root-pull`, NO `probe`.
 
 - **T4** `render-namespace` (AI+HTML, recursive requires) — DEMO-CRITICAL, foundation — SHIPPED (b3c06b8)
 - **T5** context reorg + transcript + prompt line + DELETE `root-pull` — DEMO-CRITICAL — SHIPPED (2026-06-08)
-- **T6** system-prompt rewrite (CLJS-in-Node + motivated examples, no "DO NOT" blocks) — DEMO-CRITICAL
-- **T7** clip guardrail on `query`/`pull`/eval output (guiding messages) — DEMO-CRITICAL (stability)
-- **T8** demo loop: fs → shared read-only folder, drive a fresh agent from the webview end-to-end — DEMO-CRITICAL
+- **T6** system-prompt rewrite (CLJS-in-Node + motivated examples, no "DO NOT" blocks) — DEMO-CRITICAL — SHIPPED (cafca26). Positive/motivated framing, CLJS-in-Node platform reality (js/ interop, no java.*), REPL-channel mechanism explained (not scolded), re-synced to the T5 section names. Plus capabilities-section prose fixed to acknowledge T15 positional db ops (1ef6b1c).
+- **T7** clip guardrail on `query`/`pull`/eval output (guiding messages) — DEMO-CRITICAL (stability) — SHIPPED (2026-06-08). Two surfaces, no double-noising: (1) STORE boundary `seon.eval/render-result-edn` row-count guards a large COLLECTION result (`result-row-cap` = 50) into a bounded preview with a PREPENDED guiding "+N more clipped, narrow your query" message (survives the downstream display cap); (2) DISPLAY surface `seon.agent/cap-result-body` (used by `format-eval-row`) appends a guiding "narrow it: aggregate/limit/tighter :where/fewer attrs; (result :<eid>) holds the full value" message when a huge SCALAR clips at `eval-render-cap` (1500). Collections are bounded upstream so their small preview never re-trips the size guide — exactly one guide fires. Pure render: stores nothing new; the full value stays in the globalThis `(result <id>)` stash and the 16K `cap-edn` blob. Live-verified through the real `record-eval!` pipeline (4000-row result → 390-char stored preview + row guide; full 4000-elem value intact via stash). Tests: `memory-safety-test` 7/20, `agent-context-test` 15/55.
+- **T10** GLOBAL schema-catalog context section — DEMO-CRITICAL (user 2026-06-08
+  night). Every agent sees ALL registered entity schemas across EVERY namespace,
+  not just its own ns — this is HOW it knows what data exists in the system. A
+  cross-namespace catalog (key + shape, grouped by ns) layered on top of T5's
+  per-ns `namespace-context`. On a namespace change, the per-ns fns/tests context
+  follows (render-namespace already does this for the current ns/requires). If the
+  agent lacks the info, the catalog + raw `seon.db/query` over datoms is the
+  natural mining fallback. Blocks the fresh-agent-Q&A half of the e2e demo.
+- **T8** demo loop: fs → shared read-only folder, drive a fresh agent end-to-end —
+  DEMO-CRITICAL. Refined to the full E2E test (user 2026-06-08 night): (1) a live
+  DeepSeek agent READS + INDEXES seon's own docs (not in DeepSeek's training data →
+  real read/digest/learn signal), defining hard SCHEMAS + FUNCTIONS + TESTS and
+  STORING the learned data; (2) a FRESH agent on the SAME conn (DB is `:memory`, so
+  same pod process — new agent identity + clean context, shared substrate DB) is
+  asked NON-TRIVIAL questions that require digging through the stored
+  schemas/fns/datoms to answer. Needs `DEEPSEEK_API_KEY` (present) + `seon.fs`
+  read-allowlist on `docs/`. T7 clip guardrail protects against flood/OOM. Run
+  BOUNDED + observe COMPACTLY.
 - **T9** `:seon.test` entity kind + render; (later) per-agent context override — DEFERRED
 
 Each step: implement (`seon-agent`) → verify live → commit.
