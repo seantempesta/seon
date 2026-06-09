@@ -179,42 +179,41 @@ the oracle; commit working code incrementally. Relevant memories:
 - Dev-JVM Integrant logs `No such namespace: seon.flow` / `:seon.flow/pool` at boot
   (dangling retired-ns refs; system starts anyway) — see the surgical-fix doc below.
 
-### IN-FLIGHT agents at handoff (check status + their `tasks/<id>.output`; verify → commit/revert)
+### Status (live)
 
-- **second-boot fix** (`aa03679d77ff3d214`, pod `:client`): fixes the `:seon.fn/ns`
-  index-substrate! bug that breaks a SECOND `start-agent!` on the same conn (blocks
-  scenario 2). Uncommitted: `src/seon/client.cljs`, `test/seon/index_substrate_test.cljs`.
-- **Track 2 — thin Node UDS transport** (`a45ae1296441240c7`, JVM + new pod transport):
-  uncommitted: `src/seon/server/{boot,wire}.clj`, `src/seon/dev/node_agent.cljs`,
-  new `src/seon/dev/cbor.cljs` + `src/seon/dev/wire_node.cljs`, `shadow-cljs.edn`.
-  Goal: route a pod op to the wire-server over `node:net` UDS (no WASM). NOTE: these
-  `dev/*.cljs` are in the `:client` source path — confirm they didn't collide with the
-  second-boot fix's `client.cljs` edits.
-- **flow/pool surgical investigation** (`a9ae0ff45c57a8642`, JVM): writes
-  `docs/seon/orchestrator/issues/flow-pool-integrant-surgical-2026-06-09.md` — the
-  SURGICAL plan to disable the dead flow+pool Integrant components (a prior agent
-  wrongly "removed half the system" — do NOT). Apply from that doc; minimal only.
+- **DONE + committed:** (a) **second-boot fix** — `index-substrate!` is idempotent
+  across boots (pure builder + conn-aware `substrate-index-tx` emits only missing
+  rows); a 2nd `start-agent-with-deepseek!` boots clean → **fresh-agent-same-conn
+  works, two-scenario test UNBLOCKED**; live in the pod. (b) **flow/pool fix** —
+  `system.edn` 4 dead keys removed; **committed but NOT yet active** (needs a dev-JVM
+  restart). (c) `-Xmx` 2g→4g; runaway old JVM (pid 41468) killed.
+- **Instrumentation is OFF right now.** The running JVM has only 5 Phase-1 keys; the
+  flow error aborted Phase 2, so `:seon.dev/instrumentation`, `:seon.db.schema/
+  consistency-check`, and `:seon.web/caddy` never started. `bin/seon restart jvm`
+  activates the flow/pool fix → Phase 2 completes → those 3 come online. Expect
+  turning instrumentation on may SURFACE latent schema mismatches (it's been off).
+- **IN-FLIGHT: Track 2 only** (`a45ae1296441240c7`) — thin Node UDS transport (route
+  a pod op to the wire-server, no WASM). Uncommitted: `src/seon/server/{boot,wire}.clj`,
+  `src/seon/dev/{node_agent,cbor,wire_node}.cljs`, `shadow-cljs.edn`. On resume: check
+  its `tasks/<id>.output` + `git status`, verify, commit/revert.
 
-### IMMEDIATE NEXT STEPS (ordered)
+### Next steps (ordered)
 
-1. Resolve the 3 in-flight agents: verify each (seon-verifier where code), commit the
-   good ones (scoped), revert anything broken. Confirm the second-boot fix actually
-   lets a 2nd `start-agent-with-deepseek!` boot clean.
-2. **SOUL-PULL CORRECTION (pending, important).** Commit `960a094` (Track 1) wrongly
-   COPIED SOUL prose INTO `deepseek.cljs`. The user wants `SOUL.md` PULLED at boot
-   (read via `node:fs` when seeding `:seon.system-prompt`) as the SINGLE SOURCE — strip
-   the copied prose; `deepseek.cljs` keeps only the operational HOW-layer. Pod `:client`.
-3. **Drive the TWO-SCENARIO test** (same persistent DB, separate fresh-context agents,
-   back-to-back): (1) a user's FIRST work question → agent does WORK-DIRECTED schema
-   design + stores (NO explicit index step); (2) a similar question → a fresh agent
-   SEES the stored schemas + functions (via schema-catalog + the new functions-catalog)
-   and reuses them. Needs step 1 (second-boot fix) done. Observe COMPACTLY (eval
-   source+ok?+clipped result, not the full prompt). Append findings to
+1. **`bin/seon restart jvm`** → activate the flow/pool fix + instrumentation; verify
+   the 3 keepers appear in `integrant.repl.state/system` and the `seon.flow` boot
+   error is gone. (No live agents depend on the JVM after a fresh-context restart.)
+2. Resolve **Track 2** (verify → commit/revert).
+3. **SOUL-pull correction** — commit `960a094` wrongly COPIED SOUL prose into
+   `deepseek.cljs`; instead PULL `SOUL.md` at boot (read via `node:fs` when seeding
+   `:seon.system-prompt`) as the SINGLE source — strip the copied prose; keep only the
+   operational HOW-layer in code. Pod `:client`.
+4. **Drive the two-scenario test** (same persistent DB, fresh-context agents,
+   back-to-back): (1) first work question → WORK-DIRECTED schema design + store (no
+   index step); (2) similar question → fresh agent SEES + reuses stored schemas + fns
+   (schema-catalog + functions-catalog). Observe COMPACTLY; append to
    `research/e2e-demo-findings-2026-06-08.md`.
-4. **Track 2 integration handoff:** route the pod's db path through the Node UDS
-   transport to the wire-server (the one `:client` change, after the pod is free).
-5. Apply the flow/pool surgical fix (from its doc). A2 warnings (specific, clustered,
-   compositional, ns-scoped) when ready.
+5. Track 2 `:client` integration handoff (route the pod db path through the Node UDS
+   transport); then A2 warnings (specific/clustered/compositional/ns-scoped).
 
 ### Standing principles (don't relearn)
 
