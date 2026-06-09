@@ -170,12 +170,13 @@
                   (agent/assemble-context {:seon.db/db db :seon.agent/id agent-id})]
               (is (pos? (count text))
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
-              (is (= [:system :capabilities :schema-catalog :namespace-context
-                      :warnings :transcript :prompt]
+              (is (= [:system :capabilities :schema-catalog :functions-catalog
+                      :namespace-context :warnings :transcript :prompt]
                      sections)
                   "the substrate-default section names, in order
                    (static→dynamic): system, capabilities, schema-catalog,
-                   namespace-context, warnings, transcript, prompt"))))
+                   functions-catalog, namespace-context, warnings, transcript,
+                   prompt"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -228,6 +229,8 @@
                   "capabilities — non-blank because core :seon.fn rows are seeded")
               (is (not (str/blank? (agent/schema-catalog-section input)))
                   "schema-catalog — non-blank because :seon.schema entities are seeded")
+              (is (not (str/blank? (agent/functions-catalog-section input)))
+                  "functions-catalog — non-blank because :seon.fn entities are seeded")
               (is (not (str/blank? (agent/namespace-context-section input)))
                   "namespace-context — non-blank because a :seon.ns + :seon.fn exist")
               (is (not (str/blank? (agent/warnings-section input)))
@@ -252,6 +255,7 @@
                            {:seon.db/db db :seon.agent/id agent-id}))]
               (is (str/includes? text "<system") "system marker present")
               (is (str/includes? text "<schema-catalog>") "schema-catalog marker present")
+              (is (str/includes? text "<functions>") "functions-catalog marker present")
               (is (str/includes? text "<transcript>") "transcript marker present")
               (is (str/includes? text "<namespace-context>")
                   "namespace-context marker present")
@@ -381,10 +385,10 @@
   (let [names (mapv :seon.ctx/name (agent/substrate-default-ctx))]
     (is (some #{:schema-catalog} names)
         "substrate-default-ctx contains the :schema-catalog section")
-    (is (= [:system :capabilities :schema-catalog :namespace-context]
+    (is (= [:system :capabilities :schema-catalog :functions-catalog]
            (vec (take 4 names)))
-        ":schema-catalog sits between :capabilities (static) and
-         :namespace-context (the deep per-ns view)")))
+        ":schema-catalog and :functions-catalog sit between :capabilities
+         (static) and :namespace-context (the deep per-ns view)")))
 
 (deftest schema-catalog-lists-all-entity-kinds
   (async done
@@ -473,6 +477,95 @@
                   (swap! schema/*schemas dissoc
                          :seon.zzcatalog :seon.zzcatalog/id :seon.zzcatalog/label)
                   (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; (i) functions-catalog-section — the GLOBAL cross-namespace catalog of every
+;;     fn defined in the substrate. Sibling of schema-catalog: it answers "what
+;;     CODE already exists" so a later agent reuses an earlier one's work
+;;     instead of re-deriving it. Guards: in the default ctx (after
+;;     schema-catalog, before namespace-context); own-ns fns render with full
+;;     source; other-ns fns render as signature + one-line doc; DERIVED from
+;;     the :seon.fn corpus (a newly-registered fn in another ns appears).
+;; ---------------------------------------------------------------------------
+
+(deftest substrate-default-ctx-has-functions-catalog-after-schema-catalog
+  (let [names (mapv :seon.ctx/name (agent/substrate-default-ctx))]
+    (is (some #{:functions-catalog} names)
+        "substrate-default-ctx contains the :functions-catalog section")
+    (is (= [:system :capabilities :schema-catalog :functions-catalog
+            :namespace-context]
+           (vec (take 5 names)))
+        ":functions-catalog sits right after :schema-catalog and before
+         :namespace-context")))
+
+(deftest functions-catalog-own-ns-full-other-ns-brief
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db    @conn
+                  input {:seon.db/db db :seon.agent/id agent-id}
+                  txt   (agent/functions-catalog-section input)
+                  full  (:seon.render/text
+                          (agent/assemble-context
+                            {:seon.db/db db :seon.agent/id agent-id}))]
+              (is (not (str/blank? txt)) "functions-catalog non-blank with seeded fns")
+              (is (str/includes? txt "<functions>") "wrapper marker present")
+              (is (str/includes? full "<functions>")
+                  "section reaches the assembled context")
+              ;; current-ns derives to :seon.agent.ctxtest (the latest ok eval);
+              ;; the seeded greet fn lives there, so it is the agent's OWN ns.
+              (is (str/includes? txt "=== seon.agent.ctxtest  (your ns) ===")
+                  "the agent's own ns is flagged (your ns)")
+              ;; OWN-ns fn renders WITH full source.
+              (is (str/includes? txt "(defn greet [] :hi)")
+                  "own-ns fn (greet) shows its full source body")
+              ;; OTHER-ns fns (the seeded core API) render as a signature line,
+              ;; NOT full source — the brief shape.
+              (is (str/includes? txt "=== seon.db ===")
+                  "other namespaces (seon.db) are listed")
+              (is (str/includes? txt "(seon.db/transact!")
+                  "other-ns fn shows its signature")
+              ;; transact!'s real source is long + multiline; the brief block
+              ;; must NOT inline it. Its docstring first-line is the giveaway.
+              (let [db-section (subs txt (str/index-of txt "=== seon.db ==="))]
+                (is (not (str/includes? db-section "(defn transact!"))
+                    "other-ns fn does NOT inline its full (defn …) source")))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest functions-catalog-is-derived-new-fn-appears
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (is (not (str/includes?
+                       (agent/functions-catalog-section
+                         {:seon.db/db @conn :seon.agent/id agent-id})
+                       "zzcat/helper"))
+                "throwaway fn absent before it's transacted")
+            ;; Transact a :seon.ns + :seon.fn in a brand-new namespace — the
+            ;; same shape detect-and-tee writes. (Pass :seon.db/conn explicitly:
+            ;; the db/*conn* binding does not survive .then — see fixture.)
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data
+                   [{:seon.ns/name :seon.zzcat
+                     :seon.ns/source "(ns seon.zzcat)"}
+                    {:seon.fn/sym      "seon.zzcat/helper"
+                     :seon.fn/ns       [:seon.ns/name :seon.zzcat]
+                     :seon.fn/arglists "([x])"
+                     :seon.fn/doc      "A throwaway helper for the derivation test."
+                     :seon.fn/source   "(defn helper [x] (inc x))"}]})
+                (.then (fn [_]
+                         (let [after (agent/functions-catalog-section
+                                       {:seon.db/db @conn :seon.agent/id agent-id})]
+                           (is (str/includes? after "=== seon.zzcat ===")
+                               "newly-defined fn's ns APPEARS — derived, not hardcoded")
+                           (is (str/includes? after "(seon.zzcat/helper [x])")
+                               "the new fn's signature is rendered")
+                           (is (str/includes? after "throwaway helper")
+                               "the new fn's one-line doc is rendered (brief, other-ns)")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
 ;; (e) Bounded-context guard — one huge eval result does NOT blow context.

@@ -1705,6 +1705,116 @@
       ""
       (str "<namespace-context>\n" text "\n</namespace-context>"))))
 
+;; ============================================================
+;; functions-catalog-section — the GLOBAL cross-namespace catalog of
+;; every fn the agents have defined, ANYWHERE in the substrate. The
+;; sibling of `schema-catalog-section`: the catalog answers "what KINDS
+;; of data exist"; this answers "what CODE already exists". This is how
+;; a later agent (or a later turn) discovers and reuses an earlier
+;; agent's work instead of re-deriving it (user, 2026-06-09 — kill the
+;; over-orientation / re-implementation loop).
+;;
+;; Two render depths, keyed off the agent's CURRENT ns so each agent
+;; sees its own code in full and everyone else's as a directory:
+;;   - fns IN the agent's own ns   — signature + one-line doc + full
+;;     source (the agent's working code; it should see what it wrote).
+;;   - fns in EVERY OTHER ns        — signature + one-line doc only
+;;     (enough to know it exists + how to call it; the body is one
+;;     `:seon.fn/source` pull away when actually needed).
+;;
+;; DERIVED, never hardcoded: one datalog join over the `:seon.fn` corpus
+;; (the same entities `index-substrate!` seeds and detect-and-tee
+;; appends). Define a fn → it appears here next render; stores nothing.
+;; Per-fn bounded by the same doc/source clips the namespace render uses,
+;; so a whole-substrate catalog stays a few KB.
+;; ============================================================
+
+(defn- fn-catalog-sig
+  "Render a fn's `(sym arglists)` signature line from its stored
+   `:seon.fn/arglists` string, defensively (arglists may be blank or
+   already paren-wrapped). Falls back to `(sym …)` when no arglists."
+  [sym arglists]
+  (let [a (some-> arglists str/trim)
+        inner (when (and a (str/starts-with? a "(") (str/ends-with? a ")"))
+                (str/trim (subs a 1 (dec (count a)))))]
+    (cond
+      ;; "()" / "" — a variadic dispatcher or unknown arity: render a
+      ;; placeholder rather than an empty `(sym )`.
+      (or (str/blank? a) (and inner (str/blank? inner)))
+      (str "(" sym " …)")
+      inner (str "(" sym " " inner ")")
+      :else (str "(" sym " " a ")"))))
+
+(defn- fn-catalog-block-brief
+  "One OTHER-ns fn for the catalog: signature + one-line doc. Compact —
+   the agent only needs to know it exists and how to call it."
+  [{:keys [sym arglists doc]}]
+  (str "  " (fn-catalog-sig sym arglists)
+       (when-let [d (first-doc-line doc)]
+         (str "\n    ; " (clip d member-doc-clip)))))
+
+(defn- fn-catalog-block-full
+  "One OWN-ns fn for the catalog: signature + one-line doc + full source.
+   This is the agent's own code; it should see what it wrote, not a
+   one-liner. Source clipped only by a generous backstop."
+  [{:keys [sym arglists doc src priv]}]
+  (let [header (str "  " (fn-catalog-sig sym arglists)
+                    (when priv "  :private? true"))
+        doc-ln (when-let [d (first-doc-line doc)]
+                 (str "    ; " (clip d member-doc-clip)))
+        src-ln (when (and src (not (str/blank? src)))
+                 (clip (str/trim src) 1200))]
+    (str/join "\n" (remove nil? [header doc-ln src-ln]))))
+
+(defn functions-catalog-section
+  "GLOBAL catalog of every fn defined in the substrate, grouped by
+   owning namespace — the sibling of `schema-catalog-section`. The
+   agent's OWN ns renders each fn with full source; every OTHER ns
+   renders signature + one-line doc only. This is how a later agent
+   discovers + reuses an earlier agent's work rather than re-writing it.
+
+   DERIVED from the `:seon.fn` corpus (one datalog join `:seon.fn` →
+   `:seon.fn/ns` → `:seon.ns/name`); stores nothing. Define a fn and it
+   appears here next render."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  ;; current-ns returns a keyword (latest eval's :seon.eval/ns) OR a symbol
+  ;; (the home-ns fallback). `name` strips the leading colon either way so it
+  ;; compares against the (name :seon.ns/name) ns labels below.
+  (let [own-ns (name (current-ns {:seon.agent/id id}))
+        rows   (db/query
+                 {:seon.db/db db
+                  :seon.db/query
+                  '[:find ?sym ?nm ?arglists ?doc ?src ?priv
+                    :where
+                    [?f :seon.fn/sym ?sym]
+                    [?f :seon.fn/ns ?ns]
+                    [?ns :seon.ns/name ?nm]
+                    [(get-else $ ?f :seon.fn/arglists "") ?arglists]
+                    [(get-else $ ?f :seon.fn/doc "") ?doc]
+                    [(get-else $ ?f :seon.fn/source "") ?src]
+                    [(get-else $ ?f :seon.fn/private? false) ?priv]]})
+        fns    (map (fn [[sym nm arglists doc src priv]]
+                      {:sym sym :ns (name nm) :arglists arglists
+                       :doc doc :src src :priv priv})
+                    rows)
+        groups (->> fns (group-by :ns) (sort-by first))]
+    (if (seq fns)
+      (str "<functions>\n"
+           ";; Every fn defined across the WHOLE substrate, grouped by namespace.\n"
+           ";; Your own ns shows full source; other namespaces show signature +\n"
+           ";; one-line doc (pull :seon.fn/source for the body). Check here BEFORE\n"
+           ";; writing a helper — it may already exist.\n\n"
+           (str/join "\n\n"
+             (for [[ns-name ns-fns] groups
+                   :let [own? (= ns-name own-ns)]]
+               (str "=== " ns-name (when own? "  (your ns)") " ===\n"
+                    (str/join "\n\n"
+                      (map (if own? fn-catalog-block-full fn-catalog-block-brief)
+                           (sort-by :sym ns-fns))))))
+           "\n</functions>")
+      "")))
+
 (defn warnings-section
   "Survey the DB for current problems and render them as a single
    section. Cross-agent visibility by default — queries are not
@@ -1962,24 +2072,30 @@
    agent — ordered MOST-STATIC → MOST-DYNAMIC (prompt-cache friendly),
    per the context-render PRD (Phase 2) table:
 
-     1. :system            — CLJS-in-Node + conventions + REPL contract (static)
+     1. :system            — Seon identity + CLJS-in-Node + REPL contract (static)
      2. :capabilities      — core API worked examples (static)
      3. :schema-catalog    — GLOBAL catalog of every entity KIND in the
-                             system (cross-ns; what data exists), grouped by
+                             system (cross-ns; what DATA exists), grouped by
                              namespace with attrs + instance counts;
                              semi-static (busts only on schema register)
-     4. :namespace-context — `render-namespace` of required nses + own ns
+     4. :functions-catalog — GLOBAL catalog of every fn defined in the
+                             system (cross-ns; what CODE exists), own-ns in
+                             full + other nses as signature+doc; semi-static
+                             (busts when a fn is (re)defined)
+     5. :namespace-context — `render-namespace` of required nses + own ns
                              (mostly static; busts on ns edit)
-     5. :warnings          — current cross-agent problems (failed/slow evals,
+     6. :warnings          — current cross-agent problems (failed/slow evals,
                              failing tests); reactive, vanishes when fixed (dynamic)
-     6. :transcript        — messages + evals interleaved chronologically (dynamic)
-     7. :prompt            — `seon.agent.<id>=>  ; turn N` (always changing)
+     7. :transcript        — messages + evals interleaved chronologically (dynamic)
+     8. :prompt            — `seon.agent.<id>=>  ; turn N` (always changing)
 
-   The catalog sits between capabilities (static) and namespace-context:
-   it is the BROAD cross-ns 'what kinds of things exist' view; the per-ns
-   `namespace-context` that follows is the DEEP current-ns view. Both are
-   semi-static, the catalog more so (it only changes when a schema is
-   registered, vs. on any ns edit), so it renders first.
+   The two catalogs sit between capabilities (static) and namespace-context:
+   they are the BROAD cross-ns view — schema-catalog is 'what kinds of data
+   exist', functions-catalog is 'what code already exists' (so a later agent
+   reuses an earlier one's work instead of re-deriving it). The per-ns
+   `namespace-context` that follows is the DEEP current-ns view. The catalogs
+   are semi-static (bust only on schema register / fn redefine, vs. any ns
+   edit), so they render first.
 
    Smallest priority first. `root-pull` is DELETED (was the
    `[*]`-everywhere amplifier that flooded context); `current-turn`/
@@ -1991,6 +2107,8 @@
     :seon.ctx/fn   'seon.agent/capabilities-section}
    {:seon.ctx/name :schema-catalog    :seon.ctx/priority 25
     :seon.ctx/fn   'seon.agent/schema-catalog-section}
+   {:seon.ctx/name :functions-catalog :seon.ctx/priority 27
+    :seon.ctx/fn   'seon.agent/functions-catalog-section}
    {:seon.ctx/name :namespace-context :seon.ctx/priority 30
     :seon.ctx/fn   'seon.agent/namespace-context-section}
    {:seon.ctx/name :warnings          :seon.ctx/priority 40
