@@ -719,11 +719,13 @@
    taken before the eval ran. `ns-kw` is the form's ending ns
    (`(:seon.eval/ns eval-entity)`, per STATUS.md heads-up (b)).
 
-   Tee-entities reference their owning ns via lookup-ref
-   `[:seon.ns/name <kw>]`. The `:seon.ns` entity for that ns must
-   either already exist (substrate seeded at boot, or prior agent eval)
-   or be in the same tx (the `(ns …)`-form case below). Identity-attr
-   upsert on `:seon.ns/name` keeps the lookup-ref stable."
+   Tee-entities reference their owning ns via NESTED-MAP upsert
+   `{:seon.ns/name <kw>}` (identity-attr upsert: merges onto an
+   existing `:seon.ns` entity or creates a minimal one). NOT a
+   lookup-ref — a lookup-ref to a not-yet-existing `:seon.ns` entity
+   throws and sinks the WHOLE record-eval! tx (the run-4 silent
+   data-loss bug; data namespaces like `:workout` have no `:seon.ns`
+   row)."
   [{:keys [compile-state defs-before schemas-before source at]}]
   (let [new-defs    (analyzer-info/defs-since defs-before compile-state)
         new-schemas (set/difference (schema/current-keys) schemas-before)
@@ -757,7 +759,11 @@
                       ;; spec language is the dumbass-trap; var-projection
                       ;; is canonical.
                       (cond-> {:seon.fn/sym        sym
-                               :seon.fn/ns         [:seon.ns/name (keyword (str ns))]
+                               ;; nested-map upsert, NOT a lookup-ref — same
+                               ;; data-loss class as the :seon.schema/ns run-4
+                               ;; bug: a lookup-ref to a missing :seon.ns
+                               ;; entity throws and sinks the whole tx.
+                               :seon.fn/ns         {:seon.ns/name (keyword (str ns))}
                                :seon.fn/source     source
                                :seon.fn/fn-var?    fn-var?
                                :seon.fn/arglists   arglists
@@ -774,10 +780,27 @@
                         ;; renderer's discovery walks AEVT for `:seon.fn/sym`
                         ;; and resolves through the schema; no per-row stamp.
                         ))
+        ;; :seon.schema/ns uses the NESTED-MAP upsert form, NOT a
+        ;; lookup-ref. Schemas are routinely registered for DATA
+        ;; namespaces (e.g. `:workout/duration-seconds` → keyword-ns
+        ;; `:workout`) that have no `(ns …)` form and therefore no
+        ;; pre-existing `:seon.ns` entity. A lookup-ref
+        ;; `[:seon.ns/name :workout]` made datahike throw "Nothing
+        ;; found for entity id …", failing the WHOLE record-eval! tx
+        ;; and silently dropping both the schema row AND the eval row
+        ;; (run-4 root cause, e2e-demo-findings-2026-06-08 §Run 4
+        ;; CORRECTION). The nested map `{:seon.ns/name <kw>}` upserts:
+        ;; identity-attr resolution links to the existing `:seon.ns`
+        ;; entity when one exists (substrate or `(ns …)`-created) and
+        ;; creates a minimal one otherwise — so handlers.ns's
+        ;; `[?s :seon.schema/ns ?n]` join stays coherent for data
+        ;; namespaces too. REPL-verified on a scratch conn 2026-06-09:
+        ;; create+link for a fresh ns, no-dup upsert for an existing
+        ;; one.
         schema-entities (for [k new-schemas]
                           {:seon.schema/key        k
-                           :seon.schema/ns         [:seon.ns/name
-                                                    (keyword (namespace k))]
+                           :seon.schema/ns         {:seon.ns/name
+                                                    (keyword (namespace k))}
                            :seon.schema/source     source
                            :seon.schema/created-at at})
         ;; Phase 4 (mvp-completion-plan 2026-05-27): deftest defs carry
@@ -789,7 +812,8 @@
                             :let [{:keys [sym]} (analyzer-info/var-projection var-map)]
                             :when (some? (:test (:meta var-map)))]
                         {:seon.test/sym        sym
-                         :seon.test/ns         [:seon.ns/name (keyword (str ns))]
+                         ;; nested-map upsert — see :seon.fn/ns note above.
+                         :seon.test/ns         {:seon.ns/name (keyword (str ns))}
                          :seon.test/source     source
                          :seon.test/created-at at})
         ns-sym      (ns-form-name source)
@@ -927,13 +951,29 @@
    B item 10) land in the SAME tx as the eval entity. Identity-attr
    upserts handle redefinition.
 
-   Soft-fails — a DB write failure is logged but doesn't abort the
-   batch. The tx auto-tags with whatever causality bundle is in
+   NEVER silently loses the eval row (run-4 root cause,
+   e2e-demo-findings-2026-06-08 §Run 4 CORRECTION). A DB write failure
+   doesn't abort the batch, but it is handled in two LOUD stages:
+
+   1. Full tx (eval + tee) fails → `console.error` with the message +
+      source, then RETRY without the tee rows. The transcript is the
+      agent's memory — a dropped tee row is recoverable (re-derivable
+      from source), a dropped eval row is not.
+   2. Even the bare eval-row retry fails → `console.error` marked
+      DATA LOSS. Nothing softer than error for either stage.
+
+   The conn is captured from `seon.db/*conn*` at (synchronous) entry
+   and passed explicitly to BOTH transacts — the retry runs after an
+   await, where a CLJS `binding` of `*conn*` (test fixtures) has
+   already unwound.
+
+   The tx auto-tags with whatever causality bundle is in
    `(seon.db/current-tx-context)` (eval-batch! opens the per-eval
    scope with `:seon.db/agent-id` + `:seon.db/eval-id` + `:seon.db/
    origin :agent`, plus whatever the caller layered above)."
   [{:keys [eval-id turn-id at narration source result duration-ms ns tee]}]
-  (let [eval-map (cond-> {:seon.eval/id          eval-id
+  (let [conn     db/*conn*
+        eval-map (cond-> {:seon.eval/id          eval-id
                           :seon.eval/at          at
                           :seon.eval/duration-ms (or duration-ms 0)
                           :seon.eval/narration   (or narration "")
@@ -999,14 +1039,37 @@
         ;; detect-and-tee, v1.md §2.2 / Phase B item 10) ride in the same
         ;; tx so they share `:seon.db/eval-id` tx-meta and either all
         ;; land or none do.
-        tx-data  (into [{:seon.turn/id    turn-id
-                         :seon.turn/evals [eval-map]}]
-                       tee)
-        r (await (db/transact! {:seon.db/tx-data tx-data}))]
+        eval-tx  [{:seon.turn/id    turn-id
+                   :seon.turn/evals [eval-map]}]
+        tx-data  (into eval-tx tee)
+        ;; Explicit conn on both transacts — see docstring (retry runs
+        ;; after an await, outside any CLJS `binding` of *conn*).
+        request  (cond-> {:seon.db/tx-data tx-data}
+                   conn (assoc :seon.db/conn conn))
+        r (await (db/transact! request))]
     (when-not (:seon.db/ok? r)
-      (js/console.warn "[seon.eval/eval-batch!] record-eval! tx failed:"
-                       (-> r :seon.db/error :seon.error/message)
-                       "— source:" source))))
+      (js/console.error "[seon.eval/record-eval!] tx FAILED:"
+                        (-> r :seon.db/error :seon.error/message)
+                        "— source:" source)
+      (if (seq tee)
+        ;; Stage 2: the eval row is the agent's memory — retry WITHOUT
+        ;; the tee rows so the transcript survives a bad tee entity.
+        (let [retry (cond-> {:seon.db/tx-data eval-tx}
+                      conn (assoc :seon.db/conn conn))
+              r2    (await (db/transact! retry))]
+          (if (:seon.db/ok? r2)
+            (js/console.error
+              "[seon.eval/record-eval!] eval row RECOVERED without tee —"
+              (count tee) "program-graph tee row(s) DROPPED for eval"
+              eval-id)
+            (js/console.error
+              "[seon.eval/record-eval!] DATA LOSS — eval row" eval-id
+              "could not be persisted even without tee:"
+              (-> r2 :seon.db/error :seon.error/message)
+              "— source:" source)))
+        (js/console.error
+          "[seon.eval/record-eval!] DATA LOSS — bare eval row" eval-id
+          "failed with no tee rows to drop — source:" source)))))
 
 (defn ^:async eval-batch!
   "Execute a sequence of parsed entries as a REPL batch. Partial-

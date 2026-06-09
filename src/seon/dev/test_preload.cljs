@@ -35,4 +35,7 @@
     [seon.eval.memory-safety-test]
     [seon.agent-context-test]
     ;; A1 (2026-06-09): persistent on-disk pod conn create-vs-connect.
-    [seon.pod-disk-conn-test]))
+    [seon.pod-disk-conn-test]
+    ;; Run-4 root-cause fix (2026-06-09): data-ns schema tee upsert +
+    ;; record-eval! never silently loses the eval row.
+    [seon.eval.record-eval-tee-test]))

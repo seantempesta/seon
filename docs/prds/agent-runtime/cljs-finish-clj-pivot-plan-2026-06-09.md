@@ -348,11 +348,38 @@ js/require branch). wire-server runs via `bin/seon` (store:
   `research/e2e-demo-findings-2026-06-08.md` runs 3+4.
 - **1.2 partials DONE:** trigger scoping (a0bdde9); hot-reload re-arm (e581908,
   verified 8/8); **transcript fix** — `messages` queries `:seon.message/agent`
-  directly, THE run-3 blocker (in ac8cde3). NEW unit **1.2-reuse** (from run 4):
-  (a) prompt reuse-contract for SCHEMAS ("check schema-catalog before register!,
-  extend never fork"); (b) catalog salience (instance counts/units); (c)
-  `parallel-attr` check in the warn registry; (d) answer-after-verify nudge.
-  Then re-run S2 fresh.
+  directly, THE run-3 blocker (in ac8cde3). **1.2-reuse DONE** (2026-06-09
+  ~21:30Z, uncommitted): (a) prompt reuse-contract + verify-before-answer
+  paragraph in `deepseek/default-system-prompt` (+673 chars, now 8,086 — verifier-corrected);
+  (b) catalog salience — reuse-contract lead-in + new `domain data attrs`
+  block (every agent-registered attr installed on the db, type + instance
+  count, derived from `(:schema db)`); (c) `check-parallel-attr` in the warn
+  registry (same ns + shared stem + unit-ish suffixes; flags the fork against
+  the most-instantiated established attr) — verified firing on the REAL run-4
+  store (`data/seon-pod/2026-06-09T16-03-27-405Z`: `:workout/duration-minutes`
+  vs established `:workout/duration-seconds (2 entities)`); (d) worked
+  `(sum ?v)` aggregate example in capabilities. warn-test 14/34 green via
+  run-block. **DEEPER FINDING (corrects the run-4 analysis):** ham's context
+  NEVER contained `:workout/*` — "contains workout" was the user's question
+  text. Root cause: detect-and-tee `:seon.schema` entities lookup-ref
+  `[:seon.ns/name <data-ns>]`, which doesn't exist for DATA namespaces like
+  `:workout` → the whole record-eval! tx fails SILENTLY (console.warn only),
+  losing the eval row AND the schema row (reproduced live). The catalog/warn
+  fixes sidestep this by deriving from the installed datahike schema, but the
+  eval.cljs tee bug needs its own unit. Then re-run S2 fresh.
+- **tee/record-eval! fix DONE (2026-06-09 ~16:15Z, uncommitted)** — the run-4
+  silent-data-loss unit. (a) `build-tee-entities` `:seon.schema/ns` is now the
+  NESTED-MAP upsert `{:seon.ns/name <kw>}` (not a lookup-ref): creates a
+  minimal `:seon.ns` entity for data namespaces (`:workout`), identity-upserts
+  onto the existing one for substrate/`(ns …)` nses (no dup, source intact) —
+  `handlers.ns`'s `[?s :seon.schema/ns ?n]` join stays coherent. (b)
+  `record-eval!` NEVER silently loses the eval row: tx failure → console.error
+  then RETRY without tee (eval row survives); bare-row failure → console.error
+  DATA LOSS; conn captured at sync entry and passed explicitly to both
+  transacts. New tests `test/seon/eval/record_eval_tee_test.cljs` (3 tests /
+  8 assertions green via runner; in test-preload); memory-safety 12/36 green;
+  scratch-conn REPL repro confirmed before/after; all three loud-log paths
+  observed in `logs/pod.log`. **S2 re-run UNBLOCKED.**
 - **1.3 DONE** (ac8cde3, verified) — warn.cljs 11-check registry, clustered
   render, ns-scoped; system-section strict-format; prompt-section turn-pressure;
   dead composer deleted (render/default 470→159).
