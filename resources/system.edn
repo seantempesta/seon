@@ -8,9 +8,6 @@
  ;;   :seon.db.datalevin/connections
  ;;   :seon/runtime-db
  ;;   :seon.graph/scanner    (depends on runtime-db)
- ;; Code that calls seon.db with a datalevin-only db-name will fail with a
- ;; "Infrastructure flow not running" error rather than time out — the data-
- ;; hike path still works for namespaces declared under :seon.db/flow below.
  ;; -----------------------------------------------------------------------
 
  ;; Malli Schema Registry
@@ -19,7 +16,7 @@
 
  ;; Schema Consistency Check
  ;; Validates all persisted entity schemas at boot.
- ;; Catches :any, :some, [:maybe X], mixed enums before they reach Datalevin.
+ ;; Catches :any, :some, [:maybe X], mixed enums before they reach the store.
  :seon.db.schema/consistency-check
  {:registry #ig/ref :seon.schema/registry}
 
@@ -48,38 +45,19 @@
   :input "resources/public/css/input.css"
   :output "resources/public/css/output.css"}
 
- ;; Infrastructure Flow (reply-router + REPL eval + sinks)
- ;; M-3a note (2026-05-15): `seon.flow/infrastructure`'s init body calls
- ;; `runtime/register!` which writes to `:seon.runtime` via `seon.db`.
- ;; Adding `:db-flow #ig/ref :seon.db/flow` here would enforce ordering
- ;; but broke `(user/reset)`'s halt-then-resume cycle (the halt fired
- ;; while the new flow was being built). Single one-shot race warn
- ;; during reset only — not the per-test warn-spam smell #17. Defer
- ;; the proper dep-ordering refactor (likely a fixup in halt-key!) to
- ;; M-3b or its own cleanup chunk.
- :seon.flow/infrastructure
- {}
-
- ;; Agent JVM Pool
- ;; Pre-warmed JVM pool for instant agent startup.
- ;; Each agent gets an isolated JVM with its own nREPL and Malli registry.
- ;; Datalevin reference removed; agents no longer auto-connect to a
- ;; Datalevin server. Cross-JVM data access goes through the flow harness
- ;; (Phase 3 work).
- :seon.flow/pool
- {:size #or [#env AGENT_POOL_SIZE 3]
-  :base-port #or [#env AGENT_BASE_PORT 7900]
-  ;; Unit tests build their own pool fixtures; live pool stays out of :test.
-  :enabled? #profile {:dev true
-                      :test false
-                      :prod true}}
-
- ;; Orchestrator Sessions
- ;; Initializes orchestrator session storage. Datalevin connection-manager
- ;; reference removed; the init! fn already ignores it (was kept for
- ;; backward compatibility).
- :seon.orchestrator/sessions
- {:pool #ig/ref :seon.flow/pool}
+ ;; DISABLED-AND-REMOVED 2026-06-09 — the flow/pool/sessions Integrant keys
+ ;; (:seon.flow/infrastructure, :seon.flow/pool, :seon.orchestrator/sessions,
+ ;; :seon.db/flow) had their init-key/halt-key! defmethods #_-discarded on
+ ;; 2026-06-03. A declared key with no method falls through to Integrant's
+ ;; :default init-key, which resolves the key's namespace and throws
+ ;; "No such namespace: seon.flow" for :seon.flow/pool, aborting Phase 2.
+ ;; Removing the keys from this config (not just the defmethods) is the fix.
+ ;; Source namespaces (seon.flow.*, seon.db.datahike.*) stay; only the dead
+ ;; config keys are gone. The :seon.db/flow :namespace-schemas block also
+ ;; lived here — restore from git history (pre-2026-06-09) when the datahike
+ ;; conn-process flow is re-wired. seon.db resolves the flow lazily and
+ ;; returns a "not registered" error per call when it is absent.
+ ;; See docs/seon/orchestrator/issues/flow-pool-integrant-surgical-2026-06-09.md.
 
  ;; Caddy Reverse Proxy (HTTP/2 + TLS)
  ;; Dev: Enabled - serves https://localhost:3030 -> http://localhost:8080
@@ -98,116 +76,4 @@
 
  ;; Claude Code SDK Configuration
  :seon.ai.claude/sdk
- {:cli-path #or [#env CLAUDE_CLI_PATH "/Users/sean/.local/bin/claude"]}
-
- ;; Datahike Flow (Phase 2 of datahike-migration)
- ;; Single Integrant key that owns every per-namespace datahike conn-process
- ;; and the tx-bus. `seon.db` routes ops for registered namespaces through
- ;; this flow via `seon.db.datahike.flow/request!`.
- ;;
- ;; Phase 2 carries a single fixture namespace (:seon.phase2.demo) so the
- ;; dispatch layer has something real to route to. New domain namespaces
- ;; are added here as they migrate.
- :seon.db/flow
- ;; M-3a (2026-05-15): `:seon.runtime` joins the flow. Source already routes
- ;; `seon.runtime/register!` + `start-agent-run!` + `snapshot-topology!`
- ;; through `seon.db/transact! :seon.runtime`; this entry registers the
- ;; namespace + its schema with the conn-process. Eliminates remaining.md
- ;; smell #17 (the "Connection manager not available" warn-spam from
- ;; `seon.runtime/register!`). The legacy datalevin runtime DB the prior
- ;; comment referenced was deleted in M-2 — no test regressions.
- ;;
- ;; The schema below unions `:seon.runtime/*` (instance registry),
- ;; `:seon.agent.run/*` (agent run lifecycle), and `:seon.flow.snap/*`
- ;; (topology snapshots) — all three sets of attrs currently write to
- ;; this db-name in production (see runtime.clj l.366, 512, 568, 713,
- ;; 745, 843).
- ;;
- ;; `:seon.ai` is the M-3b deliverable; see deferred.md §"seon.ai.claude
- ;; + seon.ai requiring-resolve stubs".
- {:namespaces [:seon.session
-               :seon.repl
-               :seon.flow
-               :seon.orchestrator
-               :seon.runtime
-               :seon.phase2.demo]
-  :backend #profile {:dev :memory
-                     :test :memory
-                     :prod :memory}
-  ;; Each value is the entity :map schema that the conn-process installs at
-  ;; init via the Malli -> datahike bridge. Attribute keys reference Malli
-  ;; schemas that must be registered before the flow boots; the namespaces
-  ;; below are required from `seon.system` so their `schema/register!` calls
-  ;; have run by then.
-  :namespace-schemas
-  {:seon.runtime      [:map
-                       ;; Runtime instance registry (seon.runtime/register!, unregister!)
-                       [:seon.runtime/namespace :seon.runtime/namespace]
-                       [:seon.runtime/status [:enum :running :stopped :crashed :paused]]
-                       [:seon.runtime/location [:enum :in-process :external]]
-                       [:seon.runtime/session-id {:optional true} :string]
-                       [:seon.runtime/nrepl-port {:optional true} :int]
-                       [:seon.runtime/started-at {:optional true} :inst]
-                       [:seon.runtime/stopped-at {:optional true} :inst]
-                       [:seon.runtime/component-key {:optional true} :keyword]
-                       ;; Agent run lifecycle (seon.runtime/start-agent-run!,
-                       ;; complete-agent-run!)
-                       [:seon.agent.run/id :seon.agent.run/id]
-                       [:seon.agent.run/runtime {:optional true} :seon.db/ref]
-                       [:seon.agent.run/provider {:optional true} :keyword]
-                       [:seon.agent.run/status {:optional true} :keyword]
-                       [:seon.agent.run/started-at {:optional true} :inst]
-                       [:seon.agent.run/stopped-at {:optional true} :inst]
-                       [:seon.agent.run/cost-usd {:optional true} :double]
-                       [:seon.agent.run/num-turns {:optional true} :int]
-                       [:seon.agent.run/duration-ms {:optional true} :int]
-                       [:seon.agent.run/namespace {:optional true} :string]
-                       ;; Topology snapshots (seon.runtime/snapshot-topology!)
-                       [:seon.flow.snap/id :seon.flow.snap/id]
-                       [:seon.flow.snap/label {:optional true} :string]
-                       [:seon.flow.snap/created-at {:optional true} :inst]
-                       [:seon.flow.snap/reason {:optional true} :keyword]
-                       [:seon.flow.snap/data {:optional true} :string]]
-   :seon.session      [:map
-                       [:seon.session/agent :seon.session/agent]
-                       [:seon.session/namespace :seon.session/namespace]
-                       [:seon.session/port {:optional true} :seon.session/port]
-                       [:seon.session/pid {:optional true} :seon.session/pid]
-                       [:seon.session/started-at :seon.session/started-at]
-                       [:seon.session/stopped-at {:optional true} :seon.session/stopped-at]
-                       [:seon.session/status :seon.session/status]
-                       [:seon.session/ctx {:optional true} :seon.session/ctx]]
-   :seon.repl         [:map
-                       [:form/id :form/id]
-                       [:form/namespace :string]
-                       [:form/type :keyword]
-                       [:form/name {:optional true} :string]
-                       [:form/source :string]
-                       [:form/agent-id :string]
-                       [:form/version :int]
-                       [:form/created-at :inst]]
-   :seon.flow         [:map
-                       [:seon.flow.trace/trace-id :uuid]
-                       [:seon.flow.trace/session-id {:optional true} [:string {:min 1}]]
-                       [:seon.flow.trace/event [:enum :start :end :error :overload :forward :timeout]]
-                       [:seon.flow.trace/timestamp :inst]
-                       [:seon.flow.trace/fn {:optional true} [:string {:min 1}]]
-                       [:seon.flow.trace/ns {:optional true} [:string {:min 1}]]
-                       [:seon.flow.trace/elapsed-ms {:optional true} [:int {:min 0}]]
-                       [:seon.flow.trace/status {:optional true} [:enum :ok :error :timeout :overload]]
-                       [:seon.flow.trace/error-message {:optional true} :string]
-                       [:seon.flow.trace/entity-type :keyword]]
-   :seon.orchestrator [:map
-                       [:seon.orchestrator.session/id :seon.orchestrator.session/id]
-                       [:seon.orchestrator.session/namespace :seon.orchestrator.session/namespace]
-                       [:seon.orchestrator.session/status :seon.orchestrator.session/status]
-                       [:seon.orchestrator.session/nrepl-port {:optional true} :seon.orchestrator.session/nrepl-port]
-                       [:seon.orchestrator.session/started-at {:optional true} :seon.orchestrator.session/started-at]
-                       [:seon.orchestrator.session/stopped-at {:optional true} :seon.orchestrator.session/stopped-at]
-                       [:seon.orchestrator.session/db-name {:optional true} :seon.orchestrator.session/db-name]
-                       [:seon.orchestrator.session/nrepl-session-id {:optional true} :seon.orchestrator.session/nrepl-session-id]
-                       [:seon.orchestrator.session/last-activity-at {:optional true} :seon.orchestrator.session/last-activity-at]
-                       [:seon.orchestrator.session/eval-count {:optional true} :seon.orchestrator.session/eval-count]]
-   :seon.phase2.demo  [:map
-                       [:seon.phase2.demo/id :seon.phase2.demo/id]
-                       [:seon.phase2.demo/name :seon.phase2.demo/name]]}}}
+ {:cli-path #or [#env CLAUDE_CLI_PATH "/Users/sean/.local/bin/claude"]}}
