@@ -537,3 +537,56 @@ Downstream behavior (all 43s–3min after the /chat):
 
 Scenario 2 NOT run (premise requires scenario 1's stored schemas). Re-run both
 after defect 1 lands.
+
+## Run 4 — 2026-06-09 ~19:00Z, two-scenario test COMPLETE (post transcript-fix)
+
+### Scenario 1 (fresh agent rLC-2606091459): PASS
+
+With the `messages` direct-query fix live, rLC saw the question in 23s,
+registered work-directed schemas (`:workout/date :workout/type
+:workout/distance-meters :workout/duration-seconds`), hit a schema-type error
+(`:number` invalid), READ THE ERROR AS A VALUE and recovered (switched to
+seconds), stored both workouts CORRECTLY (5000m/1470s run; 3600s strength),
+and replied "All set…" — ~2.5 min, 3 turns. The whole loop the demo needs.
+
+### Scenario 2 (fresh agent ham-2606091509): FAIL on reuse
+
+Question: add a 1500m/35min swim + total training time across all workouts.
+
+- The existing `:workout/*` schemas WERE in ham's first-turn context
+  (prompt-text 16,405 chars, contains "workout") — the catalog plumbing works.
+- ham did NOT consult it: registered a PARALLEL `:workout/duration-minutes`
+  (existing data uses `duration-seconds`), stored the swim as
+  `{:workout/distance-meters 1500 :workout/duration-minutes 35}` — no
+  `:workout/type`, no date → data model forked, aggregate now unanswerable
+  by one query.
+- Total reported: "35 minutes" — it summed ONLY its own attr
+  (`(sum ?d)` over `duration-minutes`), ignoring the 2 existing workouts
+  (real total ≈ 2h). Confidently wrong reply, sent BEFORE the verify step.
+- Turn 2: `Maximum call stack size exceeded` (`:cljs/analysis-error`) on a
+  large `let` form — cljs.js analyzer limit; agent recovered by stopping.
+
+### Defects → next quality iteration (Track 1, 1.2 family)
+
+1. **Reuse contract + catalog salience** — the system prompt says "check
+   <functions> before writing a helper" but has NO equivalent for SCHEMAS.
+   Add: "BEFORE seon.schema/register!, check the schema-catalog for an
+   existing shape — extend it, never fork a parallel attr." Consider catalog
+   render: instance counts + units make `duration-seconds (2 entities)`
+   harder to miss.
+2. **parallel-attr warning check** (A2 registry candidate): flag a register!
+   whose name-stem collides with an existing attr in the same ns
+   (`duration-minutes` vs `duration-seconds`) — reactive net for defect 1.
+3. **Answer-after-verify nudge**: ham replied the total before querying
+   existing data; prompt should bind "totals/aggregates ⇒ query the data you
+   just cataloged" — possibly a worked example in capabilities.
+4. **analyzer stack-overflow** on big let forms — guidance (smaller forms) or
+   eval-side mitigation; recovered gracefully this time.
+
+### Scoreboard
+
+- transcript fix: PROVEN (S1 turnaround 23s vs run-3's never-saw-it)
+- error-as-value recovery: PROVEN (rLC schema-type error)
+- fresh-agent-same-conn: PROVEN (3rd + 4th boots clean)
+- work-directed schema design: PROVEN (rLC)
+- cross-agent REUSE: NOT YET — salience, not plumbing (ham)
