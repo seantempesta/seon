@@ -362,6 +362,72 @@ js/require branch). wire-server runs via `bin/seon` (store:
   pod seam (async `wire-node/rpc` under the pod's awaits vs the sync bridge);
   needs `bin/seon restart cljs-watch` (stale classpath lacks guest-cljs) —
   coordinate with Track-1 hot-reload before restarting.
+- **2.2 STOPPED at the design seam (2026-06-09 ~19:50Z) — blocker cleared,
+  cutover NOT landed; needs an orchestrator decision before code.**
+  - **Blocker CLEARED:** cljs-watch restarted (pid 44902, fresh classpath now
+    has `guest-cljs/src` — `seon.client-runtime.*` compiles); `:client` build
+    green (365 files, 0 warnings); pod restarted (was required: the old loaded
+    JS hit shadow's "Stale Output!" wall against the new watcher instance) and
+    is healthy — `/agents` responds, fresh agent booted on a fresh
+    `data/seon-pod/<run-id>` store, hot-reload re-verified live (reload #2 +
+    trigger re-arm after a touch). The overlay landmine is DEAD CONFIG: shadow
+    runs in deps mode, so `shadow-cljs.edn :source-paths` is ignored — proven
+    by this very build (it listed the overlay first yet `:client` compiled the
+    real `src/seon/db.cljs`). `shadow-cljs.edn` corrected to match reality
+    (overlay removed from the inert vector; guest-agent build doc now says
+    `clj -M:cljs:cljs-guest`).
+  - **Transport decision (the 2.1 handoff question):** NEITHER per-op transport
+    fits the pod seam as a drop-in. The 2.1 note's premise ("pod `seon.db` is
+    promise-based") holds ONLY for `transact!`; `query`/`pull`/`entity` are
+    SYNC over `@*conn*` and are called from sync contexts pod-wide, so the
+    async `wire-node/rpc` cannot serve reads without an async-read rewrite of
+    every consumer. The sync bridge CAN serve per-op reads, but per-op reads
+    don't fix the real mismatch (next bullet). Latency is NOT a blocker:
+    the 2.1 probe (connect + schema + transact + 2 q) completes in 0.27s
+    INCLUDING node boot against the live wire-server.
+  - **The real seam — the pod's READ MODEL is db-VALUES, not ops.** Consumers
+    outside `seon.db` operate on immutable local datahike db values handed
+    through listener inputs / `@*conn*`: `render.cljs` (`d/datoms :eavt/:aevt`,
+    `d/q`, `d/pull`, `d/entity` on tx eids — context assembly itself),
+    `agent_view.cljs` (`d/filter` with a CLJS CLOSURE predicate —
+    unserializable over any wire), `web/inspector.cljs` (`d/entity` on tx
+    eids), plus `handlers/{ns,fn}.cljs`, `handler.cljs`, `wake.cljs` (these
+    last four are migratable to the `seon.db` surface; the first three are
+    verifier-owned this cycle AND `d/filter`-closures have no wire
+    equivalent). A "thin wire client" `seon.db` therefore breaks the agent
+    loop at context assembly no matter which transport is picked.
+  - **Recommended resolution (needs sign-off — it amends this unit's
+    "datahike-cljs retired" framing):** the replica shape `seon.db`'s own
+    docstring already promises ("writes route through this conn's writer …
+    reads still resolve against the local replica and stay synchronous").
+    Writes + control ops go over the ASYNC transport under `transact!`'s
+    existing `^:async`; reads stay LOCAL + SYNC against a DERIVED db value
+    materialized from wire tx events (`datahike.db/init-db` is cljc and takes
+    raw datoms with explicit e/tx — datoms from the tx feed apply with eids +
+    tx-ids preserved; `db`/`db-before` for listener inputs are consecutive
+    materialized values); `listen!` rides the async tx-feed poll
+    (subscribe-tx/next-tx-event, live since 46c6d3c). datahike-cljs then
+    remains in the bundle as a QUERY ENGINE over wire-fed datoms — the
+    STORE/writer is fully central. Needs one new wire op (initial full-datom
+    snapshot at connect). Alternative (rejected): migrate every db-value
+    consumer to wire-able ops — blocked on render*/inspector ownership and
+    impossible for `d/filter` closures.
+  - **Migration note:** existing `data/seon-pod/<run-id>` stores are NOT
+    migrated (per unit scope) — fresh runs target the central store once the
+    cutover lands.
+  - **ORCHESTRATOR SIGN-OFF (2026-06-09 ~20:00Z): replica design APPROVED as
+    re-scoped unit 2.2b** — it is the Datomic peer model (local immutable read
+    values + central transactor), preserves the robustness goal (store/writer
+    fully central, JVM datahike on disk), keeps `d/filter`/db-value consumers
+    working, and matches `seon.db`'s own documented contract. Amends the
+    "datahike-cljs retired on pod" framing: it stays as a LOCAL QUERY ENGINE
+    over wire-fed datoms only. FLAGGED for user review (architecture note).
+    2.2b scope = the agent's "What remains": snapshot wire op; remote-conn
+    atom materializing the replica via `datahike.db/init-db`; transact!→async
+    rpc; listen!→tx-feed; schema propagation; boot `ensure-db` against the
+    central store; migrate the 4 direct-`datahike.api` callers
+    (handler/wake/ns/fn) onto the `seon.db` surface; re-audit `entity` depth
+    assumptions (kick-on-user-message navigates 2 levels).
 - SOUL reconciled (1baedc2): hardcoded prose restored, soul.clj deleted (the
   16b9f20 bake from another session was reverted per user decision).
 - Pre-existing breakage logged by verifiers (NOT regressions): `bin/test-cljs`

@@ -16,31 +16,20 @@
  ;; Per worker/impl.clj:787-788 in /Users/sean/src/shadow-cljs.
  :repl  {:runtime-select :latest}
 
- ;; Top-level :source-paths is the only place shadow-cljs accepts
- ;; the directive (per-build :source-paths errors with "only valid
- ;; globally"). `test/` is included so platform-track CLJS tests
- ;; (`.cljs` / `.cljc` files under `test/seon/...`) are discoverable
- ;; from the shadow nREPL. Tests run via
- ;; `(seon.test.runner/run-vars {::vars [...]})` over MCP. Each
- ;; build only compiles what's transitively required from its
- ;; `:main` — test namespaces are unreachable from `:client`,
- ;; `:smoke`, and `:eval-smoke`, so they don't bloat release output
- ;; or break smoke targets.
- ;; Adds the guest-cljs tree so the :guest-agent build below
- ;; can compile `seon.client-runtime.agent` + `seon.client-runtime.db` +
- ;; `seon.client-runtime.wit` without those files needing to move into src/.
- ;; The overlay path is listed FIRST so the guest-agent build picks up
- ;; `guest-cljs/src-overlay/seon/db.cljs` (the
- ;; wire-client shim) AHEAD of the real V0 `src/seon/db.cljs`.
- ;; CAVEAT: other CLJS builds in this file (:client, :smoke, :eval-smoke)
- ;; will ALSO see the overlay if they transitively require `seon.db`.
- ;; :client / :smoke / :eval-smoke do NOT touch seon.db today
- ;; (smoke=datahike-cljs inlined; client=V0 pod which has its own seon.db
- ;; via direct datahike.api use — but client.cljs requires seon.client
- ;; which transitively requires seon.db). DO NOT build :client with the
- ;; overlay path present; revert this change first.
- :source-paths ["guest-cljs/src-overlay"
-                "src" "test" "guest-cljs/src"]
+ ;; NOTE on :source-paths (corrected 2026-06-09, unit 2.2): this file runs
+ ;; in DEPS MODE (`:deps {:aliases [:cljs]}` above), and in deps mode
+ ;; shadow-cljs takes the classpath ENTIRELY from deps.edn — this
+ ;; :source-paths vector is IGNORED. Proven live: the 2026-06-09 watcher
+ ;; restart built :client green (0 warnings) with the real
+ ;; `src/seon/db.cljs`, even though an earlier revision listed
+ ;; `guest-cljs/src-overlay` (whose `seon/db.cljs` shim would have broken
+ ;; the pod) first here. The REAL path set is deps.edn's `:cljs` alias
+ ;; (`src` + `test` + `guest-cljs/src` + `resources`); the overlay rides
+ ;; ONLY the opt-in `:cljs-guest` alias
+ ;; (`clj -M:cljs:cljs-guest release guest-agent` / `v0-probe`).
+ ;; Kept in sync with deps.edn for documentation value only — never list
+ ;; the overlay here.
+ :source-paths ["src" "test" "guest-cljs/src"]
 
  :builds
  {;; The V0 pod entry. One long-running Node process; stays alive via
@@ -225,7 +214,10 @@
   ;; wasm32-wasip2 component via wasm-rquickjs, and instantiated 3x by the
   ;; Rust host for the multi-agent smoke.
   ;;
-  ;; Build: `clj -M:cljs release guest-agent`
+  ;; Build: `clj -M:cljs:cljs-guest release guest-agent`
+  ;;        (cljs-guest alias adds guest-cljs/src-overlay so the overlay
+  ;;        seon.db wire shim shadows src/seon/db.cljs — deps-mode
+  ;;        classpath, NOT the ignored :source-paths above)
   ;; Output: out/guest-agent/main.js (CJS, :node-script target)
   :guest-agent
   {:target           :node-script
