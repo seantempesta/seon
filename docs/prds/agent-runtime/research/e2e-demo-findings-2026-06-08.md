@@ -379,3 +379,108 @@ over-explored and mis-typed the attribute namespace.
   its job; the agent over-explores and mis-types. Prompt/guardrail work (or a
   reflexive "empty result ⇒ re-check attr names" hint) is the next lever, not more
   runtime fixes.
+
+## Run 3 — guidance validation 2026-06-09 (persistent store)
+
+Goal: validate the guidance committed 2026-06-09 (bias-to-act, register! primer,
+empty-result-=-typo reflex, datalog-vars-in-quoted-vector, legible errors) against
+a freshly-booted pod on the new on-disk store. Orchestrator/observer drove DeepSeek
+via the pod; no substrate edits, no commit, no restart.
+
+- **Store path:** `data/seon-pod/2026-06-09T15-02-00-351Z` (file backend, conn id
+  `dedd556c-cc5f-2e74-779c-024bee378764`). Reviewable after the run.
+- **Phase 1 agent:** `NUQ-2606091108` (40 evals, all on the single task message).
+- **Phase 2 agent:** `ccK-2606091110` (8 evals). Also present from failed boots:
+  `QIg-2606091110` (entity created, boot promise rejected). Pre-existing: `kgQ-2606091102`.
+
+### Step 0 — guidance is LIVE (confirmed)
+
+All five live in the seeded prompt/capabilities:
+- Bias-to-act: system prompt carries "A turn that re-reads what is already in front
+  of you is a turn that didn't move the task; one well-aimed read plus the real write
+  beats ten more reads."
+- register! primer: capabilities `## What you can do` has a "Storing a NEW KIND of
+  data: register the schema FIRST" block with the `:kb.doc/*` worked example.
+- Empty-result reflex: "When a query comes back EMPTY (#{}), suspect a misspelled
+  attribute before you conclude there's no data ... if the catalog lists
+  :seon.kb.doc/path, query that — not :kb.doc/path."
+- Datalog-vars-in-quoted-vector: system prompt "datalog logic variables ... only stay
+  symbols when they live INSIDE the quoted query vector."
+
+### VALIDATION FOCUS — did the guidance move the needle? (honest)
+
+- **Bias to act: NO — regressed vs Run 2.** Phase 1 (`NUQ`) ran 40 evals and NEVER
+  executed the task. It never called `seon.fs/list-dir`/`read-file` (0 fs calls),
+  never registered a kb schema, never wrote a fn or test, never transacted kb data.
+  It spun in a bootstrap-introspection + status-message loop: querying its own
+  messages/evals, pulling its own ns, re-reading the system prompt and conventions,
+  and posting "Agent NUQ ... bootstrapped and ready. Awaiting instructions." It even
+  emitted, verbatim, ";; I'm stuck in a loop of posting status messages" (eval 221) —
+  recognized the loop and STILL did not pivot to the task. The bias-to-act paragraph
+  did not overcome the pull toward self-orientation. Worse than Run 2, where Phase 1
+  at least completed the task after one corrective message.
+- **register!: NOT EXERCISED.** Because neither agent reached the storage step, the
+  register! primer was never put to the test this run. (Run 2 verified register!
+  works; this run neither confirms nor refutes.)
+- **Full-namespaced query attrs / empty-result recovery: PARTIAL (Phase 2).** `ccK`
+  did the *precursor* correctly: it queried the schema-catalog (`:seon.schema/key`)
+  to look for the kb attribute before assuming data shape — exactly what the reflex
+  asks for. But it found no kb attrs (correct — Phase 1 stored none), then did NOT
+  run a kb-doc query, did NOT explicitly report "no kb data was stored," and instead
+  transacted its own ns source and went idle. So the catalog-first instinct landed,
+  but the agent did not close the loop with a clear empty-result answer to the user.
+- **Legible errors → self-correct: YES (clear win, consistent with Run 2/T12).**
+  - `NUQ` passed `:seon.db/args {:limit 10}` (a map); got
+    `:malli.core/invalid-input ... :schema [:vector :any], :value {:limit 10}` and on
+    the next turn re-ran with a vector arg (eval 174/175 succeeded). Legible error,
+    correct self-fix.
+  - `[:seon.ns/name :seon.agent.NUQ...]` lookup → "Nothing found for entity id
+    [:seon.ns/name :seon.agent.NUQ-2606091108] :error :entity-id/missing" — clear.
+  - reader fragments (prose read as forms): `undeclared-var: .../new`,
+    "Instance literal expects a string for its timestamp" (a bad `#inst`) — all legible.
+- **Phase 1 stored data + fn + test? NO.** Final DB has zero `kb`/`doc`/`fact`/`learn`
+  schema attrs; zero fns defined in `NUQ`'s ns; zero kb entities.
+- **Phase 2 answered from the DB? NO.** Never queried kb attrs; gave no
+  empty-result answer.
+
+### NEW substrate rough edge (blocker) — second agent boot fails on shared persistent conn
+
+After Phase 1, EVERY subsequent `start-agent-with-deepseek!` boot promise REJECTS with:
+
+    Malli validation failed for :seon.fn/ns child: expected map or :seon.db/ref,
+    got :seon.ns/name
+    {:seon.db/error :seon.db/invalid-ref-child, :seon.db/attr :seon.fn/ns,
+     :seon.db/actual-value :seon.ns/name}
+
+Deterministic (reproduced twice). The agent ENTITY is still created (hence `QIg`,
+`ccK` exist with 0 evals), but the boot promise rejects during substrate (re)indexing.
+Diagnosis (no fix applied — substrate is out of scope): `:seon.fn/ns` is registered as
+`[:vector :seon.db/ref]` and all PERSISTED values are valid int-ref vectors
+(`#{[108 105] [113 106] ...}`) — so the bad keyword `:seon.ns/name` is NOT in the
+store; it is produced at boot-time indexing, where something assigns the bare keyword
+`:seon.ns/name` to `:seon.fn/ns` instead of a ref. Because the entity is created before
+the reject, `chat` still works against the half-booted agent (that is how Phase 2 ran
+against `ccK`). The first boot of the session succeeds; the failure is state-dependent
+on the shared persistent conn already holding indexed fn/ns entities. This blocks the
+intended "fresh agent, same conn" Phase 2 protocol and should be fixed before the next
+e2e run.
+
+### Honest assessment (Run 3)
+
+- **The guidance did NOT move the needle on bias-to-act for this run — it regressed.**
+  Both agents spent their turns on self-orientation; Phase 1 never touched the task
+  despite a single, explicit, example-laden instruction and an in-prompt paragraph
+  telling it not to re-read. This is the opposite of the intended effect. One run is
+  not conclusive (DeepSeek variance is high), but it is a clear miss, not a win.
+- **Legible-errors keeps paying off** — the one capability that visibly works turn
+  over turn. Agents read the malli/reader messages and fix the next form.
+- **The empty-result reflex half-fired:** catalog-first lookup happened (good), but
+  the agent didn't produce the user-facing "no data" conclusion the reflex implies.
+- **The bottleneck is unchanged from Run 2's diagnosis and now sharper:** the runtime
+  is fine; the agent's task-execution discipline is the lever. The new prompt text did
+  not produce act-sooner behavior here. Candidate next levers: (a) make the FIRST
+  turn's context foreground the pending user task above the bootstrap/introspection
+  affordances; (b) cap or de-emphasize self-status messaging; (c) a turn-0 nudge that
+  the namespace is ALREADY bootstrapped so the agent stops "getting its bearings."
+- **NEW: fix the `:seon.fn/ns` boot-indexing ref bug** before the next run — it
+  silently breaks the "second agent on the same conn" pattern.
