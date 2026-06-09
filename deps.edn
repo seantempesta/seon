@@ -145,6 +145,22 @@
                         {:mvn/version "2.17.0"}}
            :main-opts ["-m" "seon.server.boot"]}
 
+  ;; 2.2c DIS-replica probe — JVM writer side. Self-contained on purpose
+  ;; (`:replace-deps`/`:replace-paths`): runs the SAME datahike fork sha the
+  ;; pod's :cljs alias overrides to (seantempesta/datahike@01ba3f18), so the
+  ;; probe falsifies fressian/store compat WITHOUT version skew and WITHOUT
+  ;; touching the main JVM deps the dev JVM / wire-server resolve
+  ;; (:writer stays pinned to mvn 0.8.1671 — converging it is a follow-up).
+  ;; Usage: clj -M:replica-probe-jvm   (after `clj -M:cljs compile replica-probe`)
+  ;; Store: tmp/replica-probe/store (throwaway, wiped each run).
+  :replica-probe-jvm
+  {:replace-deps  {org.clojure/clojure {:mvn/version "1.12.0"}
+                   org.replikativ/datahike
+                   {:git/url "https://github.com/seantempesta/datahike"
+                    :git/sha "01ba3f18bf08da2c093eb0972ec1f272b817f23d"}}
+   :replace-paths ["probe"]
+   :main-opts     ["-m" "seon.probe.replica-jvm"]}
+
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
           :ns-default build}
 

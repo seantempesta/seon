@@ -163,3 +163,92 @@ Pod connects with `{:store {:backend :file :path "data/clusters/default/store" :
 
 - `deps.edn` pins JVM `:writer` alias datahike at mvn `0.8.1671` while the pod runs the fork past `0.8.1681` — works only because reader-newer is the permitted skew direction; should converge on the fork sha regardless of this design.
 - `ensure-stored-config-consistency`'s remote-writer allowance condition reads `(if-not (= dc/self-writer config) ...)` (`connector.cljc:135`) — comparing the WHOLE config to the writer default looks like an upstream bug (probably meant `(:writer config)`); harmless for us via `:allow-unsafe-config`, but worth an upstream note if the probe trips on it.
+
+## Probe results 2026-06-09 (unit 2.2c)
+
+Two-process probe: JVM writer on the SAME fork sha as the pod
+(`seantempesta/datahike@01ba3f18`, self-contained `:replica-probe-jvm` alias —
+main JVM deps untouched) against a throwaway `:file` store at
+`tmp/replica-probe/store`; Node reader = the pod's datahike-cljs fork with a
+stub non-streaming `PWriter` (`:probe-stub`, mirrors `http/writer.clj`'s
+shape). Harness kept as the cutover regression suite:
+`probe/seon/probe/replica_jvm.clj` (run `clj -M:replica-probe-jvm`) +
+`src/seon/dev/replica_probe.cljs` (`clj -M:cljs compile replica-probe`, fresh
+JVM, not cljs-watch) + the `:replica-probe` shadow build.
+
+### Headline: ONE claim refuted as-shipped — a konserve header bug, not fressian
+
+**"Node filestore implements the SAME on-disk blob layout as the JVM
+filestore" is REFUTED for konserve 0.9.346 as resolved on both classpaths**
+(`org.replikativ/konserve` 0.9.346 — Sean's fork, source checkout
+`/Users/sean/src/konserve`). The divergence is the header's meta-size field
+(`konserve/impl/storage_layout.cljc`):
+
+- CLJ `create-header` writes meta-size as a **4-byte big-endian int at bytes
+  4-7** (`.putInt return-buffer 4 meta`, line 29) and `parse-header` reads it
+  with `.getInt bb 4`.
+- CLJS `create-header` writes **ONE byte at offset 4** (`aset return-buffer 4
+  meta`, line 40; silently wraps for meta ≥ 256) and `parse-header` reads one
+  byte (`aget header-bytes 4`, line 118).
+
+Effect observed: a JVM-written root blob (meta-size 32 → bytes `[0 0 0 32]`)
+parses as meta-size 0 on Node, so CLJS deserializes the META section
+(`{:key :type :last-write}`) as the VALUE — datahike then fails with
+`:unknown-index-type` (stored `:config :index` reads nil). The reverse
+direction is also broken and WORSE: existing CLJS-written stores
+(`data/seon-pod/*`) put `m` at byte 4, which a JVM `.getInt` reads as
+`m × 2^24`.
+
+**This does NOT kill the architecture.** It is upstream of fressian, in a
+fork we own, and a safe discriminating fix exists: write 4-byte BE from CLJS;
+on parse, treat `byte4 ≠ 0 ∧ bytes5-7 = 0` as legacy 1-byte encoding (no
+collision — the 4-byte interpretation of that pattern means meta ≥ 16 MiB,
+which never occurs). The probe carries a clearly-flagged diagnostic shim
+(`REPLICA_HEADER_SHIM=1` re-parses meta-size as BE32, reader-side only) used
+ONLY to falsify the claims downstream of the header. The production fix
+belongs in the konserve fork + a migration note for 1-byte-encoded pod
+stores; the shim is not it.
+
+### Every claim downstream of the header: CONFIRMED (with numbers)
+
+With the header shim active (probe store is purely JVM-written):
+
+1. **Fressian byte compat JVM→Node — CONFIRMED.** All blobs (root map,
+   schema-meta, PersistentSortedSet Branch/Leaf nodes, Datoms) deserialized
+   correctly on Node; `d/q` returned exact rows
+   (`[[1 "alpha"] … [5 "epsilon"]]`), `d/entity` lookup-ref resolved, datom
+   fields intact. No read errors across 372 blobs / 1.74 MB.
+2. **Sync lazy node fetch — CONFIRMED.** Whole read path is synchronous (no
+   awaits past `d/connect`): `@conn` deref 2.0–2.5 ms (2 blob reads ≈ 2.6 KB:
+   branch root + schema-meta), full 5-row `d/q` 7.5 ms (4 blob reads),
+   `d/datoms :eavt` walk sync.
+3. **Lazy-vs-full — CONFIRMED.** After bulk-loading 5006 entities (store:
+   **372 `.ksv` blobs, 1,735,922 bytes**), a single-entity lookup from a cold
+   Node process performed **14 blob reads, 31,832 bytes total** (connect 4 +
+   deref 2 + query 8) = 3.8 % of blobs, 1.8 % of bytes. Counted by wrapping
+   `fs.openSync` (konserve's sync FileChannel opens each blob once,
+   `node_filestore.cljs:118`). A tiny query does NOT read the store.
+4. **Root-follow — CONFIRMED.** JVM transacted again; a fresh Node `@conn`
+   saw the new datom and the new `:max-tx` (536870914 → 536870915) with no
+   notification channel — pure store re-read.
+5. **RYOW flush-before-ack — CONFIRMED, twice.** Immediately after
+   `d/transact` RETURNS on the JVM, a direct konserve `k/get` of the `:db`
+   branch root (bypassing the conn atom) already carries the ack's
+   `:max-tx` (phase 1 and phase 2 both `=`). The commit loop flushes before
+   delivering the callback, as `writer.cljc:108-134` promised.
+6. **Version skew — eliminated for the probe** by running the JVM on the
+   fork sha. Note: the fork's stored `:meta` versions read back fine on Node
+   (`version-check` passed silently). The main `:writer` alias still pins
+   mvn 0.8.1671 — convergence remains the follow-up the smell report names.
+
+Timings context: Node process wall time ≈ 360–400 ms including Node boot and
+`d/connect` (~21 ms); per-operation costs are the ms-scale numbers above, so
+deref-per-render on the pod is comfortably cheap.
+
+### Verdict
+
+DIS-replica stands. The single blocker for the pod cutover (slice 2,
+`:seon-wire` writer) is the konserve CLJS header fix + legacy-store
+migration story — fix the fork, then re-run `clj -M:replica-probe-jvm` and
+expect phase 0 to flip to CONFIRMED (the probe is the regression harness for
+exactly that).

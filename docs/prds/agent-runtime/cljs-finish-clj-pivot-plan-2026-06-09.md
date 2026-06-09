@@ -542,6 +542,23 @@ js/require branch). wire-server runs via `bin/seon` (store:
     PWriter (~40 lines) forwards transact over the existing UDS op,
     `subscribe-tx` = change notification. Probe (two-process falsification)
     in flight; results appended to the research file.
+  - **2.2c PROBE DONE (2026-06-09, uncommitted).** Harness:
+    `probe/seon/probe/replica_jvm.clj` (`clj -M:replica-probe-jvm`, fork-sha
+    alias, throwaway `tmp/replica-probe/store`) +
+    `src/seon/dev/replica_probe.cljs` (`:replica-probe` build, stub
+    non-streaming writer, counted `fs.openSync` blob reads). **One claim
+    REFUTED as-shipped:** konserve 0.9.346 header meta-size encoding diverges
+    — CLJ 4-byte BE int at bytes 4-7 vs CLJS ONE byte at offset 4
+    (`storage_layout.cljc:29` vs `:40/:118`) → JVM blobs misparse on Node
+    (meta read as value) and CLJS-written stores (`data/seon-pod/*`) are
+    JVM-unreadable. NOT fressian, NOT architecture-killing: behind a
+    probe-only header shim everything downstream CONFIRMED — fressian
+    datom/PSS compat, sync lazy fetch (tiny lookup on a 5006-entity store =
+    14/372 blobs, 1.8% of bytes; deref ~2.3 ms, q 7-13 ms), root-follow,
+    RYOW flush-before-ack. Cutover prereq: fix the konserve fork
+    (`/Users/sean/src/konserve` — CLJS writes BE32, parse sniffs the legacy
+    1-byte pattern) then re-run the probe (phase 0 flips to CONFIRMED).
+    Numbers: research file "Probe results 2026-06-09".
   - **DESIGN CONSTRAINT (user, 2026-06-09 ~22:45Z): agents are OPTIONALLY
     REMOTE — internet-reachable is the design; same-box is only the fast
     path.** DIS requires reaching the STORE, not the machine: the reader's

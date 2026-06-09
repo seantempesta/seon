@@ -123,6 +123,23 @@
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
 
+  ;; 2.2c DIS-replica probe — Node READER side. Opens a JVM-written :file
+  ;; store with a stub non-streaming writer (deref-conn follow-the-store
+  ;; mode) and reports max-tx / query results / timings / counted blob
+  ;; reads as one PROBE-EDN line. Driven by `clj -M:replica-probe-jvm`.
+  ;; Run-to-exit probe — :devtools disabled; build in a FRESH JVM
+  ;; (`clj -M:cljs compile replica-probe`), NOT in cljs-watch.
+  ;;
+  ;; Build:  clj -M:cljs compile replica-probe
+  ;; Run:    node out/replica-probe/main.js   (env: REPLICA_STORE_PATH/_ID/_MODE)
+  :replica-probe
+  {:target           :node-script
+   :output-to        "out/replica-probe/main.js"
+   :main             seon.dev.replica-probe/-main
+   :devtools         {:enabled false}
+   :compiler-options {:warnings-as-errors false
+                      :externs           ["externs/node_fs.js"]}}
+
   ;; Milestone-1 WASM smoke build. Minimal CLJS bundle that exposes
   ;; `datahike-smoke-test!` (inlined) on globalThis.seonSmoke for the
   ;; wasm-rquickjs ESM shim. Deliberately doesn't require seon.client
