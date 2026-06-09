@@ -643,3 +643,26 @@ Root cause chain (pod.log:32619+):
 Positive signals: duration-seconds chosen unprompted (run-4 prompt fix
 working); agent self-diagnosed "save failed due to a schema registration
 race" and retried — right instinct, wrong information.
+
+## Run 6 — 2026-06-09 ~20:56Z, S1+S2 with tee+envelope+salience all live: BOTH PASS
+
+- **S1 (DbV-2606091656): PASS in ONE turn (~23s).** Stored both workouts
+  correctly AND REUSED the pre-existing `:user.workout/*` attrs (incl.
+  established `duration-seconds`) — no fork, no drama. (Mmp's run-5 rows had
+  also landed post-fix, so the store now held duplicates of the two workouts.)
+- **S2 (dwr-2606091657): PASS on the thesis.** Fresh agent REUSED the schemas
+  exactly (complete `:swim` entity: type/date/id/duration-seconds 2100/
+  distance-str), queried stored data, computed the total IN the query,
+  replied — ~1 min. Cross-agent reuse: PROVEN.
+- **New finding — the Datalog `:with` gotcha:** dwr's total (119 min = 7170s)
+  deduped VALUES because `(sum ?d)` lacked `:with ?e` (true row total
+  12,240s given the duplicate rows). The ORCHESTRATOR'S verification query
+  made the SAME mistake. Teach it: the capabilities `(sum …)` worked example
+  must include `:with ?e`; candidate warn check later.
+- Still open (minor, recurring): trailing EMPTY assistant message ("",
+  20:59:09) — message-content hygiene at the transact boundary (run-3
+  defect #4).
+
+### MVP loop status: work-directed design → store → cross-agent reuse →
+in-query aggregate ALL DEMONSTRATED LIVE. Remaining for the demo: messaging
+codified (1.5), `:with` teaching, empty-message hygiene, file-corpus scenario.
