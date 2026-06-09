@@ -532,6 +532,30 @@ js/require branch). wire-server runs via `bin/seon` (store:
     central store; migrate the 4 direct-`datahike.api` callers
     (handler/wake/ns/fn) onto the `seon.db` surface; re-audit `entity` depth
     assumptions (kick-on-user-message navigates 2 levels).
+  - **2.2b SUPERSEDED (user, 2026-06-09 ~22:30Z): NO snapshot shipping.**
+    Research (`research/datahike-native-replica-2026-06-09.md`) found the
+    fork NATIVELY supports the writer/reader split (Distributed Index Space:
+    deref re-reads the branch root; index nodes lazily fetched + LRU-cached —
+    memory ∝ working set; fressian-compatible JVM↔Node; Node lazy reads are
+    SYNC; RYOW free because the JVM flushes the root before the transact
+    ack). New plan = **2.2c**: pod reads the SAME store, thin `:seon-wire`
+    PWriter (~40 lines) forwards transact over the existing UDS op,
+    `subscribe-tx` = change notification. Probe (two-process falsification)
+    in flight; results appended to the research file.
+  - **DESIGN CONSTRAINT (user, 2026-06-09 ~22:45Z): agents are OPTIONALLY
+    REMOTE — internet-reachable is the design; same-box is only the fast
+    path.** DIS requires reaching the STORE, not the machine: the reader's
+    only store dependency is konserve's fetch-blob-by-key. Remote path
+    (unit 2.2d, after the 2.2c cutover): the wire-server grows a `get-blob`
+    op (JVM = single store owner + single auth surface; NO external S3/Redis
+    infra required), readers route konserve `restore` through the EXISTING
+    2.1 synckit sync-bridge (Atomics.wait worker) so lazy reads stay sync
+    over the network; UDS → TCP+TLS is a transport swap, zero replica-
+    mechanics changes; LRU node cache keeps cache-miss RTTs ∝ working set.
+    Isolation falls out: a remote agent's ONLY capability surface is the
+    wire protocol (the hard-isolation goal, by process/machine boundary).
+    NO unit may bake in same-filesystem assumptions outside the explicitly
+    same-box fast path.
 - SOUL reconciled (1baedc2): hardcoded prose restored, soul.clj deleted (the
   16b9f20 bake from another session was reverted per user decision).
 - Pre-existing breakage logged by verifiers (NOT regressions): `bin/test-cljs`
