@@ -1183,17 +1183,35 @@
                 ;; Each transact is its own tx so the substrate prefix
                 ;; remains a stable cacheable sequence of tx-times.
                 index-tx (await (substrate-index-tx conn))
+                ;; ENVELOPE CONTRACT (A4): db/transact! never rejects —
+                ;; failures resolve as {:seon.db/ok? false …}. Boot seed
+                ;; MUST stay fail-loud, so each step checks the envelope
+                ;; and throws (surface-errors-loudly): a silent partial
+                ;; seed would be far worse than a crashed boot.
                 _ (await
                     (db/with-tx-context
                       {:seon.db/origin :substrate-seed}
                       (fn ^:async seed! []
-                        (await (db/transact!
-                                 {:seon.db/tx-data
-                                  (schema/all-entity-schemas-tx-data)}))
-                        (await (db/transact!
-                                 {:seon.db/tx-data (seed-substrate!)}))
-                        (await (db/transact!
-                                 {:seon.db/tx-data index-tx})))))
+                        (let [check!
+                              (fn [step {ok?   :seon.db/ok?
+                                         error :seon.db/error}]
+                                (when-not ok?
+                                  (throw (ex-info
+                                           (str "boot seed transact failed at "
+                                                step ": "
+                                                (:seon.error/message error))
+                                           {:seon.client/seed-step step
+                                            :seon.db/error error}))))]
+                          (check! :entity-schemas
+                                  (await (db/transact!
+                                           {:seon.db/tx-data
+                                            (schema/all-entity-schemas-tx-data)})))
+                          (check! :substrate-seed
+                                  (await (db/transact!
+                                           {:seon.db/tx-data (seed-substrate!)})))
+                          (check! :substrate-index
+                                  (await (db/transact!
+                                           {:seon.db/tx-data index-tx})))))))
                 ;; Install the per-agent inspector tx-listener. Pushes
                 ;; morphs for the agent-view inspector page (/agent/<id>).
                 _ (seon.web.inspector/install!)]

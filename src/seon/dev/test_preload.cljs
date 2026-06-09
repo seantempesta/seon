@@ -38,4 +38,8 @@
     [seon.pod-disk-conn-test]
     ;; Run-4 root-cause fix (2026-06-09): data-ns schema tee upsert +
     ;; record-eval! never silently loses the eval row.
-    [seon.eval.record-eval-tee-test]))
+    [seon.eval.record-eval-tee-test]
+    ;; Run-5 / A4 (2026-06-09): transact! envelope contract — never
+    ;; rejects, :double bridges, cryptic errors translated, register!
+    ;; type gate.
+    [seon.db.envelope-test]))

@@ -270,16 +270,29 @@
         ;; session log (the retired :seon.agent/turn-count /
         ;; :turns-since-user attrs are unregistered; transacting them
         ;; threw :seon.db/unregistered-attrs and broke /clear).
+        ;; ENVELOPE CONTRACT (A4): db/transact! ALWAYS resolves —
+        ;; failures arrive as `{:seon.db/ok? false :seon.db/error …}`,
+        ;; never as a rejection. Branch on the envelope; the .catch
+        ;; below only guards non-transact throws in the .then body.
         (-> (db/transact! {:seon.db/tx-data (vec retractions)})
-            (.then (fn [_]
-                     (log/info-console! "seon.web.serve" "/clear TRANSACT OK"
-                                        {:agent agent-id
-                                         :messages-retracted (count msg-eids)
-                                         :evals-retracted    (count eval-eids)})
-                     (write-status! res 204 "text/plain; charset=utf-8" "")
-                     (log/info-console! "seon.web.serve" "/clear RESPONSE SENT" {})))
+            (.then (fn [{ok?   :seon.db/ok?
+                         error :seon.db/error}]
+                     (if ok?
+                       (do
+                         (log/info-console! "seon.web.serve" "/clear TRANSACT OK"
+                                            {:agent agent-id
+                                             :messages-retracted (count msg-eids)
+                                             :evals-retracted    (count eval-eids)})
+                         (write-status! res 204 "text/plain; charset=utf-8" "")
+                         (log/info-console! "seon.web.serve" "/clear RESPONSE SENT" {}))
+                       (do
+                         (log/error-console! "seon.web.serve" "/clear transact failed"
+                                             (:seon.error/message error))
+                         (write-status! res 500 "text/plain; charset=utf-8"
+                                        (str "clear failed: "
+                                             (:seon.error/message error)))))))
             (.catch (fn [err]
-                      (log/error-console! "seon.web.serve" "/clear transact failed" err)
+                      (log/error-console! "seon.web.serve" "/clear handler threw" err)
                       (write-status! res 500 "text/plain; charset=utf-8"
                                      (str "clear failed: " err))))))
       (catch :default e

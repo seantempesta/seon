@@ -281,8 +281,11 @@
     [::ok?       [:= true]]
     [::tx-report :any]]
    [:map
-    [::ok?   [:= false]]
-    [::error ::error]]])
+    [::ok?       [:= false]]
+    [::error     ::error]
+    ;; When the substrate translated a cryptic datahike message into a
+    ;; guiding one, the ORIGINAL message is preserved here verbatim.
+    [::raw-error {:optional true} :string]]])
 
 (schema/register!
   ::query-request
@@ -994,6 +997,56 @@
         emap (assoc emap :seon.error/data (assoc data :seon.error/kind kind))]
     {::ok? false ::error emap}))
 
+(defn- translate-cryptic-error
+  "A4: rewrite the two known cryptic datahike commit errors inside a
+   failure envelope into guiding, agent-actionable messages. The raw
+   message is preserved verbatim under `:seon.db/raw-error`. Both are
+   caller-fixable, so `:seon.error/kind` is retagged `:user-input`
+   (datahike throws them from its internals, which the generic
+   classifier would mislabel `:substrate-bug`). Non-matching envelopes
+   pass through unchanged."
+  [{::keys [error] :as envelope}]
+  (let [msg  (:seon.error/message error)
+        exd  (:seon.error/ex-data error)
+        rewrite (fn [guiding]
+                  (-> envelope
+                      (assoc ::raw-error msg)
+                      (assoc-in [::error :seon.error/message] guiding)
+                      (assoc-in [::error :seon.error/data :seon.error/kind]
+                                :user-input)))]
+    (cond
+      (not (string? msg))
+      envelope
+
+      ;; "Bad entity attribute :x at {...}, not defined in current schema"
+      (re-find #"not defined in current schema" msg)
+      (let [attr (:attribute exd)]
+        (rewrite
+          (str "attr " (pr-str attr) " is not installed in the database "
+               "schema — register it with (seon.schema/register! "
+               (pr-str attr) " <type>) BEFORE transacting. If you "
+               "registered it earlier this turn and still see this "
+               "error, report a substrate bug.")))
+
+      ;; "Lookup ref attribute should be marked as :db/unique"
+      (re-find #"Lookup ref attribute should be marked as :db/unique" msg)
+      (rewrite
+        (str "lookup-ref failed: the lookup-ref's target attr must be an "
+             "identity attr — add {:seon.db/identity true} to its "
+             "register! call, e.g. (seon.schema/register! :my.ns/id "
+             "[:string {:seon.db/identity true}]). Alternatively the "
+             "referenced entity doesn't exist yet — transact it first "
+             "(or use a tempid in the same tx)."))
+
+      :else envelope)))
+
+(defn- commit-error-envelope
+  "Failure envelope + cryptic-message translation. Every catch in the
+   transact path routes through this so the agent always sees the
+   guiding message (with the raw one preserved)."
+  [e]
+  (translate-cryptic-error (error-envelope e)))
+
 (defn- ^:async transact!*
   "The map-in commit body. `transact!` normalizes its variadic args
    (map-in OR positional) into the canonical request map first, runs the
@@ -1024,10 +1077,10 @@
             report  (await (d/transact! c arg-map))]
         {::ok? true ::tx-report report})
       (catch :default e
-        ;; Datahike-side / async commit failure. Default kind is
-        ;; :substrate-bug; anything past the gate that explodes is a
-        ;; substrate concern.
-        (error-envelope e)))))
+        ;; Datahike-side / async commit failure. Translation rewrites
+        ;; the two known cryptic messages and retags them :user-input;
+        ;; anything else past the gate stays :substrate-bug.
+        (commit-error-envelope e)))))
 
 (defn ^:async transact!
   "Commit tx-data to the agent's conn. Two call shapes (T15):
@@ -1073,6 +1126,8 @@
 
      {:seon.db/ok? true  :seon.db/tx-report <datahike report>}      ; ok
      {:seon.db/ok? false :seon.db/error <seon.error/->map e>}       ; fail
+     ;; + :seon.db/raw-error <original message string> when the
+     ;; substrate translated a cryptic datahike error into a guiding one
 
    The error envelope's `:seon.error/data` map carries
    `:seon.error/kind`:
@@ -1113,13 +1168,21 @@
   (try
     (let [arg (normalize-transact-args call-args)]
       (assert-invocation-shape! arg)
-      (transact!* arg))
+      ;; AWAIT is load-bearing (Run-5 / A4): `transact!*` is ^:async, so
+      ;; a throw inside it (validate-attrs!, validate-values!,
+      ;; ensure-datahike-attrs!) surfaces as a REJECTED Promise, not a
+      ;; sync throw. Returning the un-awaited Promise let those
+      ;; rejections sail past this catch and escape to the caller /
+      ;; unhandledRejection net (live: pod.log:3660) — the agent's eval
+      ;; captured nothing and the agent reported success on lost data.
+      ;; With the await, EVERY failure path resolves to the envelope.
+      (await (transact!* arg)))
     (catch :default e
       ;; Pre-commit failures (positional/invocation shape, unregistered
-      ;; attr, bad value, unbound *conn*). The throwing helpers tagged
-      ;; their ex-data with `:seon.error/kind`; `error-envelope`
-      ;; preserves it.
-      (error-envelope e))))
+      ;; attr, bad value, unbound *conn*) + any rejection out of
+      ;; transact!*. The throwing helpers tagged their ex-data with
+      ;; `:seon.error/kind`; the envelope preserves it.
+      (commit-error-envelope e))))
 
 ;; ---------------------------------------------------------------------------
 ;; Malli → datahike schema bridge.
@@ -1203,11 +1266,21 @@
    itself when it's a bare keyword)."
   {:string  :db.type/string
    :int     :db.type/long
+   :double  :db.type/double
+   :float   :db.type/float
    :keyword :db.type/keyword
    :boolean :db.type/boolean
    :inst    :db.type/instant
    :uuid    :db.type/uuid
    :symbol  :db.type/symbol})
+
+(def ^:private bridge-supported-types
+  "Human-readable list of the attr types the Malli→datahike bridge can
+   store. Surfaced in the ensure-datahike-attrs! error so an agent that
+   registered an unstorable type sees exactly what IS storable."
+  (str ":string :int :double :float :boolean :keyword :inst :uuid "
+       ":symbol :seon.db/ref, [:enum :a :b], or a container "
+       "[:vector|:set|:sequential <one of those>]"))
 
 (defn- form-head
   "The head of a Malli form. For `[:string {:min 1}]` returns `:string`;
@@ -1366,10 +1439,16 @@
    datahike entries via the Malli→datahike bridge, and transacts them in
    their OWN tx (schema before data, like boot). `:db/*` system attrs and
    `:seon.db/ref` (no standalone valueType — refs are declared via the
-   attrs that USE them) are skipped. Best-effort per attr: a bridge
-   failure on one attr is logged and skipped rather than aborting, so the
-   caller still gets datahike's own clear error if the attr truly can't be
-   stored."
+   attrs that USE them) are skipped.
+
+   FAIL-LOUD (Run-5 / A4): a bridge failure here means the attr was
+   `register!`'d with a type datahike can't store. The old behavior
+   (console.warn + skip) silently dropped the install, and the data tx
+   then died on datahike's cryptic \"Bad entity attribute … not defined
+   in current schema\". Now the whole transact fails with a legible
+   `:user-input` error naming the attrs, their registered forms, and the
+   supported type list — which `transact!`'s catch turns into the
+   `{::ok? false}` envelope the agent can SEE and act on."
   [conn attrs]
   (let [installed  (:schema @conn)
         candidates (->> attrs
@@ -1378,18 +1457,31 @@
                         (filter schema/registered?)
                         (remove #(contains? installed %))
                         distinct)
-        entries    (reduce
-                     (fn [acc attr]
-                       (try
-                         (conj acc (malli->datahike-attr attr))
-                         (catch :default e
-                           (js/console.warn
-                             "[seon.db/ensure-datahike-attrs!] could not derive"
-                             "datahike schema for" (pr-str attr) "—"
-                             (or (.-message e) (str e)))
-                           acc)))
-                     []
-                     candidates)]
+        {:keys [entries failures]}
+        (reduce
+          (fn [acc attr]
+            (try
+              (update acc :entries conj (malli->datahike-attr attr))
+              (catch :default e
+                (update acc :failures conj
+                        {::attr   attr
+                         ::schema (schema/schema-definition attr)
+                         ::reason (or (.-message e) (str e))}))))
+          {:entries [] :failures []}
+          candidates)]
+    (when (seq failures)
+      (throw (ex-info
+               (str "These attrs are registered in seon.schema but their "
+                    "types cannot be stored in datahike: "
+                    (pr-str (mapv (juxt ::attr ::schema) failures))
+                    ". Supported attr types: " bridge-supported-types
+                    ". Re-register each with a storable type (e.g. "
+                    "(seon.schema/register! "
+                    (pr-str (::attr (first failures)))
+                    " :double)) and transact again.")
+               {::error          :seon.db/unbridgeable-attrs
+                ::failures       failures
+                :seon.error/kind :user-input})))
     (when (seq entries)
       (await (d/transact! conn (vec entries))))))
 

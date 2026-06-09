@@ -231,6 +231,40 @@
       (into [head props'] body))
     v))
 
+(defn- assert-compilable-schema!
+  "Gate (Run-5 / A4): reject invalid Malli forms AT register! time so an
+   agent never 'successfully' registers something the system can't use.
+   `:number` (not a Malli type) used to slip into the registry and only
+   explode later; `:double` IS valid but lacked datahike-bridge support
+   (now added — seon.db's bridge supplies the transact-side half of the
+   invariant: register! success ⇒ the attr is transactable).
+
+   Compiles `v` against the live registry (`m/schema`); a failure throws
+   a legible `:user-input` ex-info naming the key, the bad form, and the
+   common storable types. NOTE: this requires any registered schema a
+   form references to already be registered — which is the existing
+   load-order convention (CLAUDE.md 'Schema load ordering matters')."
+  [k v]
+  (try
+    (m/schema v)
+    nil
+    (catch #?(:clj Exception :cljs :default) e
+      (throw (ex-info
+               (str "schema/register! " k ": " (pr-str v)
+                    " is not a valid Malli schema (" (ex-message e) "). "
+                    "Common storable attr types: :string :int :double "
+                    ":float :boolean :keyword :inst :uuid :symbol "
+                    ":seon.db/ref, [:enum :a :b], or a container "
+                    "[:vector <type>] / [:set <type>]. (:number is NOT "
+                    "a type — use :int or :double.) If the form "
+                    "references another schema keyword, register that "
+                    "keyword first.")
+               {:seon.schema/error :seon.schema/invalid-schema
+                :seon.schema/key   k
+                :seon.schema/form  v
+                :seon.error/kind   :user-input}
+               e)))))
+
 (defn register!
   "Register a single schema in the global registry.
 
@@ -256,6 +290,7 @@
        ;; stored with props {:seon.render/ai 'foo
        ;;                    :seon.entity/id-attr :seon.eval/id}"
   [k v]
+  (assert-compilable-schema! k v)
   (swap! *schemas assoc k (with-entity-id-attr v))
   k)
 
