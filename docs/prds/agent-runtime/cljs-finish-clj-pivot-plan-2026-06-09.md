@@ -580,6 +580,53 @@ js/require branch). wire-server runs via `bin/seon` (store:
   boot.preconditions-test 4 fails; agent-context-test 13 fails in `:test` build.
   Worth a dedicated cleanup unit.
 
+### USER DECISIONS 2026-06-09 (late) — clusters, isolation, kabel, Friday demo
+
+1. **Cluster model (settles 2.3):** the JVM datahike server hosts MANY
+   databases. A **cluster** = one orchestrator agent + N task agents sharing
+   ONE database (swarm: orchestrator launches agents to probe files/db and
+   write findings or return answers; experiments build per-goal function
+   libraries). From any CLJS agent's POV there is exactly ONE database. The
+   wire layer's multi-DB registry (agent-id→db-name) is the mapping. NOT
+   per-agent DBs; NOT one global DB — per-CLUSTER DBs, full visibility within.
+2. **Isolation model:** TARGET = separate Node environment (process) per
+   agent; ALL communication flows through the cluster's database. The current
+   pod's multi-agent-in-one-process is TRANSITIONAL/demo-only — the
+   state-isolation interleaving risks list applies to it, but the target
+   architecture dissolves most of them (one agent per process; ALS
+   near-trivial). 1.5's from/to message model is unchanged by this (messages
+   live in the DB either way).
+3. **Atom kills:** approved — do the risky ones / launch agents to migrate to
+   ALS properly (queued after 1.5 lands).
+4. **Replica direction — kabel PREFERRED for next week, NOT Friday:** user
+   prefers upstream's proven KabelWriter/konserve-sync/TieredStore over a
+   custom wire protocol ("fork" is a non-issue — it IS upstream main + 3
+   commits; kabel stack already in-tree under src-kabel, :test-gated).
+   **Security model**: with kabel, agents NEVER touch the disk store — the
+   store lives entirely behind the JVM; agents speak websocket (localhost/UDS
+   now; TLS + per-cluster token for remote — kabel ships NO auth, that layer
+   is ours under any architecture). Per-cluster DBs soften kabel's
+   full-replica-per-client memory cost (cluster DBs are small). GATES before
+   adoption: (a) the konserve header bug (1-byte vs BE32 meta-size, found by
+   the 2.2c probe) is on the critical path under EITHER architecture —
+   konserve-sync copies JVM-written blobs the CLJS side parses — fix it
+   first (/Users/sean/src/konserve, CLJS create-header/parse-header BE32 +
+   legacy sniff); (b) kabel-on-Node smoke test (upstream tests are
+   browser-only; needs `websocket` npm pkg). DIS findings + the probe harness
+   remain the fallback + validation tooling.
+5. **MVP DEMO (Friday 2026-06-12) — spec:** runs on the CURRENT pod (one
+   process = one cluster; no central-store cutover needed). Agents get
+   READ-ONLY `seon.fs` access to the seon repo. Users ask arbitrary
+   codebase questions. SUCCESS = the answer **plus** a well-schema'd finding
+   PERSISTED to the cluster DB such that the NEXT agent asked a related
+   question provably REUSES it instead of redoing the search (S2's reuse
+   mechanics, applied to code/docs findings). Priority for Wed/Thu (user):
+   **nail the harness + dynamic context** — competent agents, schema reuse,
+   adaptation — over infra plumbing. Demo-scenario iteration runs = the
+   1.1-style orchestrator-driven loop, on codebase questions.
+6. **Test cleanup:** agent launched (bin/test-cljs end-to-end + the three
+   known-broken suites + stale-pattern sweep).
+
 ### Web UI status (2026-06-09 — FIXED + browser-verified)
 
 - **page.cljc escaping bug FIXED:** root `/` console-forwarder `<script>` wasn't
