@@ -257,6 +257,26 @@ value; drill with normal Clojure). NO `root-pull`, NO `probe`.
   schemas/fns/datoms to answer. Needs `DEEPSEEK_API_KEY` (present) + `seon.fs`
   read-allowlist on `docs/`. T7 clip guardrail protects against flood/OOM. Run
   BOUNDED + observe COMPACTLY.
+  **FIRST LIVE RUN (2026-06-08, agents rxH-2606082150 / KUK-2606082153) — findings
+  in `research/e2e-demo-findings-2026-06-08.md`.** Result: the loop WORKS (a smoke
+  agent read derived context incl. the schema-catalog and correctly eval'd +
+  answered). DeepSeek READ + DIGESTED docs well (designed a coherent deeply-nested
+  `:seon.kb.*` 15-schema model from ~10 real docs). BUT Phase 1 stored NO facts and
+  Phase 2 never ran, due to three substrate bugs (T11/T12/T13 below). Re-run after
+  those land.
+- **T11** TURN-KILLER fix — DEMO-CRITICAL, BLOCKS ALL TURNS, IN PROGRESS.
+  `seon.analyzer-info/snapshot-defs` output `[:map-of :symbol …]` vs a live `nil`
+  ns key in the cljs.js analyzer-state → `:malli.core/invalid-output` aborts every
+  turn. Fix the schema/snapshot to match reality (not instrumentation globally).
+- **T12** SURFACE EVAL ERRORS to the agent — DEMO-CRITICAL. On a failed eval,
+  `:seon.eval/result-edn` is empty so the agent can't see WHY and can't
+  self-correct (root cause of Phase 1's hallucinated success). Render the failure
+  reason into the agent's transcript so errors are values it can read + adapt to.
+- **T13** ADD `seon.schema/register!` to the "## What you can do" capabilities —
+  DEMO-CRITICAL. The agent conflated "store schema source as an entity" with
+  "register the schema" → every fact transact! was rejected. Teach the
+  register-schema → transact-data flow with a worked example (it's the core of the
+  "agent defines hard schemas" demo).
 - **T9** `:seon.test` entity kind + render; (later) per-agent context override — DEFERRED
 
 Each step: implement (`seon-agent`) → verify live → commit.
