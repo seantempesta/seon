@@ -177,17 +177,26 @@
       [:header {:class "flex items-center gap-2"}
        (comp/status-dot state id)
        [:span {:class "text-xs text-text-400 ml-auto"} (str "turn " turns)]]
+      ;; NOTE: children are built with `into` (vectors), NOT bare
+      ;; `(for …)` lazy seqs — `seon.render/valid-hiccup?` (the
+      ;; `:seon.render/html-response` validator) accepts only
+      ;; string/int/nil/vector children, so a lazy-seq child makes
+      ;; instrumentation reject the whole tile (2026-06-09 inspector
+      ;; tile-missing bug).
       (when (seq errs)
-        [:section {:class "flex flex-col gap-1 border border-error/40 bg-error/10 rounded p-2"}
-         (for [e errs]
-           [:div {:class "flex items-start gap-2 text-xs"}
-            [:span {:class "text-error font-bold"} "⚠"]
-            [:span {:class "flex-1 text-error font-mono"}
-             (str (:seon.log/message e))]])])
-      [:section {:class "flex-1 overflow-auto text-xs font-mono"}
-       (if (seq msgs)
-         (for [[_at label content] msgs]
-           [:div {:class "py-0.5"}
-            [:span {:class "text-text-400"} (str label ": ")]
-            [:span {:class "text-text-100"} content]])
-         [:div {:class "text-text-500 italic"} "no messages yet"])]]}))
+        (into [:section {:class "flex flex-col gap-1 border border-error/40 bg-error/10 rounded p-2"}]
+              (map (fn [e]
+                     [:div {:class "flex items-start gap-2 text-xs"}
+                      [:span {:class "text-error font-bold"} "⚠"]
+                      [:span {:class "flex-1 text-error font-mono"}
+                       (str (:seon.log/message e))]]))
+              errs))
+      (if (seq msgs)
+        (into [:section {:class "flex-1 overflow-auto text-xs font-mono"}]
+              (map (fn [[_at label content]]
+                     [:div {:class "py-0.5"}
+                      [:span {:class "text-text-400"} (str label ": ")]
+                      [:span {:class "text-text-100"} content]]))
+              msgs)
+        [:section {:class "flex-1 overflow-auto text-xs font-mono"}
+         [:div {:class "text-text-500 italic"} "no messages yet"]])]}))

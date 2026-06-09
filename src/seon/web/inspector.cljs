@@ -84,12 +84,52 @@
                     ;; 2026-05-22 — derived from the session log now.
                     :seon.agent/turn-count (default/agent-turn-count ent)}))))))
 
+(defn- entity-kind-label
+  "Best-effort kind label for an entity with no resolved renderer: the
+   most common keyword NAMESPACE among its attrs (`seon.eval`,
+   `seon.sticky`, …). Returns a string, `\"entity\"` when nothing
+   namespaced is present."
+  [entity]
+  (or (->> (keys entity)
+           (keep #(when (keyword? %) (namespace %)))
+           (remove #(= "db" %))
+           frequencies
+           (sort-by (comp - val))
+           ffirst)
+      "entity"))
+
+(defn- truncate-val [v n]
+  (let [s (pr-str v)]
+    (if (> (count s) n) (str (subs s 0 n) " …") s)))
+
+(defn- unknown-entity-card
+  "Styled fallback for entities whose kind has no `:seon.render/html`
+   handler — a kind header + key/value table instead of a raw pr-str
+   blob. The right pane never shows XML-ish EDN dumps."
+  [entity]
+  (let [kind (entity-kind-label entity)
+        rows (->> (dissoc entity :db/id)
+                  (filter (fn [[k _]] (keyword? k)))
+                  (sort-by (comp str first)))]
+    [:div {:class "py-1"}
+     [:div {:class "flex items-baseline gap-2"}
+      [:span {:class "text-xs font-mono font-semibold text-text-300"} kind]
+      [:span {:class "text-xs text-text-500"} "(no renderer for this kind)"]]
+     (into [:table {:class "mt-0.5 text-xs font-mono"}]
+           (map (fn [[k v]]
+                  [:tr
+                   [:td {:class "pr-3 align-top text-text-400 whitespace-nowrap"}
+                    (pr-str k)]
+                   [:td {:class "text-text-100 break-all"}
+                    (truncate-val v 160)]]))
+           rows)]))
+
 (defn- render-entity-hiccup
   "Render `entity` to hiccup. Resolves the render symbol via
    `seon.render/render-entity-html` (per-entity override OR entity-kind
-   schema property — Phase 1 pattern, commit d7e3185). Falls back to
-   `render-entity-ai` text in a <pre> when html resolution yields nil.
-   Returns nil if neither path renders (caller filters)."
+   schema property — Phase 1 pattern, commit d7e3185). Falls back to a
+   styled key/value card (`unknown-entity-card`) when html resolution
+   yields nil — never a raw pr-str/EDN dump."
   [db agent-id entity]
   (let [input {:seon.db/db db
                :seon.agent/id agent-id
@@ -100,8 +140,7 @@
         (catch :default e
           [:div {:class "text-error text-xs font-mono"}
            "render error: " (or (.-message e) (str e))]))
-      (when-let [text (render/render-entity-ai input)]
-        [:pre {:class "text-xs font-mono whitespace-pre-wrap text-text-200"} text]))))
+      (unknown-entity-card entity))))
 
 (defn- snapshot
   "Compute one render snapshot for `agent-id`:
@@ -200,7 +239,10 @@
        agent-tile])
     (if (seq html-cards)
       (into [:div {:class "flex flex-col"}] html-cards)
-      [:div {:class "text-text-500 italic p-2"} "no renderable entities"])]])
+      [:div {:class "text-text-500 italic p-2"}
+       (str "nothing here yet — every entity this agent sees (messages, "
+            "evals, fns, schemas) renders here as a card the moment it "
+            "is created")])]])
 
 (defn- chat-bar-fragment
   "Sticky bottom bar spanning both panes. Submits as a regular
@@ -304,25 +346,57 @@
         ;; node anywhere in the document and call hljs.highlightElement
         ;; on it (cheaper than highlightAll on every mutation).
         [:script (html/raw
+                   ;; Settle guard (__hlSrc property): highlightElement
+                   ;; mutates childList, which re-fires the observer below —
+                   ;; skipping nodes whose text hasn't changed since their
+                   ;; last highlight makes the pass a no-op the second time
+                   ;; around instead of looping. textContent is stable
+                   ;; across highlighting (spans wrap, text unchanged).
                    (str "function seonHighlightAll(){"
                         "if(!window.hljs)return;"
                         "document.querySelectorAll('pre code.language-clojure').forEach(function(el){"
+                        "var t=el.textContent;"
+                        "if(el.__hlSrc===t)return;"
                         "el.removeAttribute('data-highlighted');"
-                        "window.hljs.highlightElement(el);});}"
+                        "window.hljs.highlightElement(el);"
+                        "el.__hlSrc=t;});}"
                         ;; marked.js: walk every [data-markdown] container,
                         ;; render its raw text into innerHTML once (then mark
                         ;; it done so re-runs on subsequent mutations skip).
+                        ;; XSS: getAttribute returns the UNescaped original
+                        ;; text and marked passes inline HTML through, so we
+                        ;; escape &/</> BEFORE parsing — agent-authored
+                        ;; <script>/<img onerror> renders as visible text,
+                        ;; while markdown (bold/code/lists/headings) still
+                        ;; formats normally.
+                        ;;
+                        ;; Re-render guard: keyed on the JS property __mdSrc
+                        ;; (NOT a data- attribute — Datastar's idiomorph can
+                        ;; carry old attributes across a morph while CLEARING
+                        ;; the rendered children, which left every message
+                        ;; body empty after the first SSE push). A node
+                        ;; re-renders when its source changed OR its children
+                        ;; were wiped; otherwise it's skipped, so the
+                        ;; MutationObserver below can't loop.
                         "function seonMarkdownAll(){"
                         "if(!window.marked)return;"
-                        "document.querySelectorAll('[data-markdown]:not([data-md-done])').forEach(function(el){"
+                        "document.querySelectorAll('[data-markdown]').forEach(function(el){"
                         "var src=el.getAttribute('data-markdown')||'';"
-                        "el.innerHTML=window.marked.parse(src);"
-                        "el.setAttribute('data-md-done','1');});}"
+                        "if(el.__mdSrc===src&&el.childNodes.length>0)return;"
+                        "var esc=src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');"
+                        "el.innerHTML=window.marked.parse(esc);"
+                        "el.__mdSrc=src;});}"
                         "document.addEventListener('DOMContentLoaded',function(){"
                         "seonHighlightAll();seonMarkdownAll();});"
+                        ;; ANY childList mutation re-runs the passes — a
+                        ;; Datastar morph can be removal-only (it clears the
+                        ;; markdown container's rendered children), so
+                        ;; gating on addedNodes misses it. Both passes are
+                        ;; no-ops on already-rendered nodes, so the observer
+                        ;; settles instead of looping.
                         "new MutationObserver(function(muts){"
                         "var any=false;for(var i=0;i<muts.length;i++){"
-                        "if(muts[i].addedNodes && muts[i].addedNodes.length){any=true;break;}}"
+                        "if(muts[i].type==='childList'){any=true;break;}}"
                         "if(any){seonHighlightAll();seonMarkdownAll();}"
                         "}).observe(document.body,{subtree:true,childList:true});"
                         ;; Cmd/Ctrl+Enter submits the chat form from anywhere.

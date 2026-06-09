@@ -17,16 +17,30 @@
     [datahike.api :as d]
     [seon.db :as db]))
 
-(defn- tx-agent-id
-  "Resolve the `:seon.db/agent-id` of a tx eid against the given db.
-   Returns the agent-id string, or nil for substrate tx (no agent-id
-   stamped). `:seon.db/agent-id` is a string scalar, not a ref, so a
-   simple datom lookup suffices."
-  [db tx-eid]
-  ;; entity-attr lookup respects history-augmented dbs; bare attr read
-  ;; against the tx-as-entity (datahike materializes tx-meta on the tx
-  ;; eid).
-  (:seon.db/agent-id (d/entity db tx-eid)))
+(defn- substrate-or-mine?
+  "True when the tx at `tx-eid` should be visible to `agent-id`:
+   - no `:seon.db/agent-id` stamped (substrate tx), OR
+   - stamped with this agent's id, OR
+   - `:seon.db/origin :substrate-seed` — boot-seed tx (entity-kind
+     `:seon.schema` rows, sticky preamble, substrate `:seon.ns`/
+     `:seon.fn` index). These are SUBSTRATE data by definition, but
+     `seon.client/start-agent!` runs the seed inside the booting
+     agent's `with-agent` scope, so they arrive agent-stamped. Without
+     this clause every OTHER agent's filtered view loses the kind
+     schemas and `seon.render/visible-entities` returns nothing
+     (2026-06-09 'no renderable entities' inspector bug — the seed
+     datoms were fragmented across txs owned by DIFFERENT booting
+     agents, so even the stamping agents saw only partial slices).
+
+   entity-attr lookup respects history-augmented dbs; bare attr read
+   against the tx-as-entity (datahike materializes tx-meta on the tx
+   eid)."
+  [db tx-eid agent-id]
+  (let [tx-ent (d/entity db tx-eid)
+        tx-aid (:seon.db/agent-id tx-ent)]
+    (or (nil? tx-aid)
+        (= tx-aid agent-id)
+        (= :substrate-seed (:seon.db/origin tx-ent)))))
 
 (defn agent-view
   "Return a filtered db value that scopes reads to `agent-id` plus
@@ -40,10 +54,24 @@
   [{:seon.agent/keys [id] :seon.db/keys [conn]}]
   (let [c    (or conn db/*conn*)
         base @c
+        ;; The agent's OWN entity eid — datoms ON it are always visible
+        ;; regardless of which tx asserted them. Without this, an agent
+        ;; whose entity was CREATED by another agent (agent A `message!`s
+        ;; a not-yet-existing agent B, stub boots, …) cannot see its own
+        ;; `:seon.agent/id` datom and every `[:seon.agent/id <me>]`
+        ;; lookup (ctx-preview, assemble-context) throws.
+        own-eid (try (:db/id (d/pull base '[:db/id] [:seon.agent/id id]))
+                     (catch :default _ nil))
         pred (fn [db datom]
-               (let [^js datom datom
-                     tx     (.-tx datom)
-                     tx-aid (tx-agent-id db tx)]
-                 (or (nil? tx-aid) (= tx-aid id))))
+               (let [^js datom datom]
+                 (or ;; Identity attrs are PUBLIC substrate facts —
+                     ;; "agents know other agents purely by id"
+                     ;; (messaging 1.5). Without this an agent can't
+                     ;; label `agent-<id>` on messages from/to peers
+                     ;; whose identity datom landed in the peer's own
+                     ;; tx scope.
+                     (contains? #{:seon.agent/id :seon.user/id} (.-a datom))
+                     (substrate-or-mine? db (.-tx datom) id)
+                     (and (some? own-eid) (= own-eid (.-e datom))))))
         filtered (d/filter base pred)]
     {:seon.db/db filtered}))
