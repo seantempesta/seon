@@ -1169,8 +1169,10 @@
                      (when (seq doc) (str "\n      ; " doc))))]
     (if (seq rows)
       (str "## What you can do\n\n"
-           "These are the core APIs. EVERY one is MAP-IN: you pass ONE\n"
-           "map with fully-namespaced keys, never positional args.\n\n"
+           "These are the core APIs. Map-in is the preferred shape: you pass\n"
+           "ONE map with fully-namespaced keys (see the worked example below).\n"
+           "The db ops (query/pull/entity/transact!) ALSO accept a natural\n"
+           "datahike-style positional form.\n\n"
            (str/join "\n" lines)
            "\n\n"
            "Worked example — reply to the user AND save a fact in one tx\n"
