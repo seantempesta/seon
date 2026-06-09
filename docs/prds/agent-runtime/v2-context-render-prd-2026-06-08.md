@@ -304,6 +304,41 @@ value; drill with normal Clojure). NO `root-pull`, NO `probe`.
 Each step: implement (`seon-agent`) → verify live → commit. (T15 = positional db
 ops, already shipped on the db track — distinct numbering; see git log.)
 
+### STATUS + next steps (end of 2026-06-08 night autonomous session)
+
+**ACHIEVED — the core goal works.** A live DeepSeek agent (not trained on this
+codebase) reads a seon doc via `seon.fs`, REGISTERS nested fully-namespaced
+`:seon.kb.doc/*` schemas (natural-key identity + enum/vector types), and TRANSACTS
+real structured entities — verified live end-to-end. The runtime completes turns
+(T11), errors are legible values the agent reacts to (T12), and `register!`→store
+works (T13 + `ensure-datahike-attrs!`). Every agent sees the global schema-catalog
+(T10) regardless of namespace. ~24 commits, all seon-verifier'd + revertable.
+
+**REMAINING, classified (the bottleneck moved from substrate → agent discipline):**
+
+- *Substrate, UNVERIFIED:* **T14** (phantom empty-ns defs lose eval records). NOT
+  reproduced live because no agent ran a literal `(defn …)` — they stored fns/tests
+  as `:seon.test/source` STRINGS. To verify: a run that forces a real `(defn …)`
+  and checks the eval record persists. Fix is ready-to-apply if it bites (filter
+  non-symbol/blank ns in `defs-since` + guard `build-tee-entities`, mirroring T11).
+- *Agent discipline (prompt, T6/T13 extension — IN PROGRESS):* over-exploration
+  (agents re-introspect instead of acting — both phases needed a "stop reading, DO
+  it" nudge), empty-result-as-typo reflex, fully-namespaced query attrs
+  (`:seon.kb.doc/path` not `:kb.doc/path`), datalog vars inside the quoted vector
+  (the `?at` "collision" is agent query-construction — substrate quoted queries
+  verified fine). Targeted motivated guidance being added; NEEDS live validation in
+  the next run.
+- *Infra/UX:* no agent-STOP verb (agents over-run; an auto-booted agent contaminates
+  shared-conn observation runs); **T16** scope `<warnings>` per-agent (cross-agent
+  failures derail fresh agents); fns/tests-as-strings vs real defns (decide whether
+  the demo wants live `(defn …)` — which exercises T14 — or source-as-data is fine).
+
+**NEXT (morning):** (1) validate the agent-efficiency guidance in a bounded live
+run; (2) force a real `(defn …)` to verify/fix T14; (3) close Phase 2 (fresh agent
+answers a non-trivial question by digging) — the prefix-drift + empty-result reflex
+guidance should unblock it; (4) T16 warnings scoping. Findings + evidence:
+`research/e2e-demo-findings-2026-06-08.md`.
+
 ### Demo definition (2026-06-12)
 
 A fresh single agent boots into its namespace, receives rich default context
