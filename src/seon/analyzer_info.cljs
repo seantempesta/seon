@@ -102,7 +102,16 @@
   [compile-state]
   {:pre [(some? compile-state)]}
   (into {}
-        (for [[ns-sym ns-info] (get @compile-state :cljs.analyzer/namespaces)]
+        ;; The cljs self-host analyzer carries a `nil` ns-key holding only
+        ;; the keyword-constants table (`:cljs.analyzer/constants`) — see
+        ;; `cljs.analyzer/register-constant!`, which writes into
+        ;; `[::namespaces (-> env :ns :name) ::constants]` and lands on a
+        ;; `nil` name when a bare keyword constant is analyzed with no
+        ;; enclosing ns (common under `cljs.js` eval-str). It holds NO
+        ;; defs, so dropping it loses nothing — and keeps the output a
+        ;; genuine `{symbol → …}` map (the schema's contract).
+        (for [[ns-sym ns-info] (get @compile-state :cljs.analyzer/namespaces)
+              :when (symbol? ns-sym)]
           [ns-sym (into {} (for [[sym var-map] (:defs ns-info)
                                  :when (simple-symbol? sym)]
                              [sym (var-digest var-map)]))])))
