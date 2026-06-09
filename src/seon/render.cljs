@@ -8,8 +8,8 @@
    unqualified, or points at an unresolvable symbol, falls through to
    `seon.render.default/pretty-*` so the surface never crashes.
 
-   See [[../prds/agent-runtime/v1.md]] §5 for the AI surface (six-section
-   composer producing `:seon.turn/prompt-text`) and
+   See [[../prds/agent-runtime/v1.md]] §5 for the AI surface (the
+   section composer producing the turn's prompt text) and
    [[../prds/agent-runtime/v2.md]] 'Per-section HTML composer' for the
    HTML mirror (section fns grow `:seon.render/hiccup` in their
    return map alongside `:seon.render/text`).

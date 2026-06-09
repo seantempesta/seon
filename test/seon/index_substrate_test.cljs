@@ -79,7 +79,20 @@
     (is (= "([& args])" (:seon.fn/arglists query))
         "query's real [& args] arglist is recovered from source")
     (is (not= "([arg])" (:seon.fn/arglists query))
-        "query arglists are the real source form, not the mangled var-meta")))
+        "query arglists are the real source form, not the mangled var-meta"))
+  ;; MULTI-ARITY recovery (2026-06-09 fix): pull/entity define each arity as
+  ;; `([args] body)` at paren-depth 2 — the old depth-1-only scan returned
+  ;; "()" for them, which rendered the uncallable `(seon.db/pull ())` in
+  ;; capabilities (context-audit §2). Both arities must now be recovered.
+  (let [tx     (client/index-substrate!)
+        pull   (by-sym tx "seon.db/pull")
+        entity (by-sym tx "seon.db/entity")]
+    (is (= "([req] [db selector eid])" (:seon.fn/arglists pull))
+        "pull's two real arities recovered from multi-arity source")
+    (is (= "([req] [db eid])" (:seon.fn/arglists entity))
+        "entity's two real arities recovered from multi-arity source")
+    (is (not= "()" (:seon.fn/arglists pull))
+        "multi-arity fns no longer collapse to empty arglists")))
 
 (deftest no-stub-source-anywhere
   ;; Permissive + honest: every indexed fn has REAL source (or is OMITTED),
@@ -113,9 +126,11 @@
   ;; keyword — the malformed value the Run-3 findings traced to the second boot.
   (let [tx  (client/index-substrate!)
         fns (filter :seon.fn/sym tx)]
-    ;; 8 = the seeded set in client.cljs `substrate-vars` (7 + seon.search/grep
-    ;; added 2026-06-09). Bump when growing the seed list.
-    (is (= 8 (count fns)) "emits all 8 substrate fn rows")
+    ;; 14 = the seeded set in client.cljs `substrate-vars` (core db 6 incl.
+    ;; listen!, register!, the seon.fs read surface ×5, seon.search/grep,
+    ;; test.runner/run! — demo-context fixes 2026-06-09). Bump when growing
+    ;; the seed list.
+    (is (= 14 (count fns)) "emits all 14 substrate fn rows")
     (is (every? #(let [r (:seon.fn/ns %)]
                    (and (vector? r) (= 2 (count r)) (= :seon.ns/name (first r))
                         (keyword? (second r))))
@@ -142,9 +157,10 @@
             (-> (client/substrate-index-tx conn)
                 (.then
                   (fn [first-tx]
-                    ;; FIRST boot of the fresh conn: full set.
-                    (is (= 8 (count (filter :seon.fn/sym first-tx)))
-                        "first boot emits all 8 substrate fn rows")
+                    ;; FIRST boot of the fresh conn: full set (14 — see
+                    ;; pure-index-emits-valid-refs for the roster).
+                    (is (= 14 (count (filter :seon.fn/sym first-tx)))
+                        "first boot emits all 14 substrate fn rows")
                     (db/transact! {:seon.db/conn conn :seon.db/tx-data first-tx})))
                 (.then (fn [_] (client/substrate-index-tx conn)))
                 (.then

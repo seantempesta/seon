@@ -308,7 +308,12 @@
    :seon.turn/id
    :seon.turn/at
    :seon.turn/status
-   :seon.turn/prompt-text
+   ;; The full prompt is a logs/prompts/<agent>/<turn>.txt BLOB (three-
+   ;; tier storage); the datoms are the char-count projection + the
+   ;; file pointer. :seon.turn/prompt-text RETIRED 2026-06-09 (was
+   ;; silently cap-edn-truncated at 16,406 chars — useless evidence).
+   :seon.turn/prompt-chars
+   :seon.turn/prompt-file
    :seon.turn/woken-by
    :seon.turn/messages
    :seon.turn/evals
@@ -868,32 +873,41 @@
 (defn- arglists-from-source
   "Parse the pr-str-style arglists string (e.g. \"([{::keys [a b]}])\") from a
    `(defn …)` source text. Reader-free: an arg-vector is a `[..]` sitting
-   directly inside the defn list — paren-depth 1, brace-depth 0. This skips
-   `{:malli/schema [...]}` metadata maps (brace-depth > 0). Collects every
-   arg-vector (single + multi-arity), wraps in parens. Tracks string, escape,
+   either directly inside the defn list (paren-depth 1, brace-depth 0 —
+   single-arity) or as the FIRST element of a list directly inside the defn
+   (paren-depth 2 — each `([args] body)` arity of a multi-arity defn; the
+   `fresh?` flag tracks \"just entered a depth-2 list, nothing but whitespace
+   since\", so vectors elsewhere in arity bodies are never captured). This
+   skips `{:malli/schema [...]}` metadata maps (brace-depth > 0). Collects
+   every arg-vector across arities, wraps in parens. Tracks string, escape,
    `\\(` char-literal, and `;`-to-EOL comment state. Returns \"()\" if none
    found (caller treats that as no arglists)."
   [src]
   (let [n (count src)]
-    (loop [i 0 pdepth 0 bdepth 0 in-str? false esc? false vecs []]
+    (loop [i 0 pdepth 0 bdepth 0 in-str? false esc? false fresh? false vecs []]
       (if (>= i n)
         (str "(" (str/join " " vecs) ")")
         (let [c (nth src i)]
           (cond
-            esc?                   (recur (inc i) pdepth bdepth in-str? false vecs)
-            (and in-str? (= c \\)) (recur (inc i) pdepth bdepth in-str? true vecs)
-            in-str?                (recur (inc i) pdepth bdepth (not (= c \")) false vecs)
-            (= c \")               (recur (inc i) pdepth bdepth true false vecs)
-            (= c \\)               (recur (+ i 2) pdepth bdepth in-str? false vecs)
+            esc?                   (recur (inc i) pdepth bdepth in-str? false fresh? vecs)
+            (and in-str? (= c \\)) (recur (inc i) pdepth bdepth in-str? true fresh? vecs)
+            in-str?                (recur (inc i) pdepth bdepth (not (= c \")) false fresh? vecs)
+            (= c \")               (recur (inc i) pdepth bdepth true false false vecs)
+            (= c \\)               (recur (+ i 2) pdepth bdepth in-str? false false vecs)
             (= c \;)               (let [eol (loop [j i]
                                                (if (or (>= j n) (= (nth src j) \newline))
                                                  j (recur (inc j))))]
-                                     (recur eol pdepth bdepth in-str? false vecs))
-            (= c \()               (recur (inc i) (inc pdepth) bdepth in-str? false vecs)
-            (= c \))               (recur (inc i) (dec pdepth) bdepth in-str? false vecs)
-            (= c \{)               (recur (inc i) pdepth (inc bdepth) in-str? false vecs)
-            (= c \})               (recur (inc i) pdepth (dec bdepth) in-str? false vecs)
-            (and (= c \[) (= pdepth 1) (zero? bdepth))
+                                     (recur eol pdepth bdepth in-str? false fresh? vecs))
+            (= c \()               (recur (inc i) (inc pdepth) bdepth in-str? false
+                                          ;; entering a list DIRECTLY inside the
+                                          ;; defn → candidate multi-arity body.
+                                          (= (inc pdepth) 2) vecs)
+            (= c \))               (recur (inc i) (dec pdepth) bdepth in-str? false false vecs)
+            (= c \{)               (recur (inc i) pdepth (inc bdepth) in-str? false false vecs)
+            (= c \})               (recur (inc i) pdepth (dec bdepth) in-str? false false vecs)
+            (and (= c \[) (zero? bdepth)
+                 (or (= pdepth 1)
+                     (and (= pdepth 2) fresh?)))
             (let [vend (loop [j (inc i) vd 1 vs? false ve? false]
                          (if (>= j n) (dec j)
                              (let [vc (nth src j)]
@@ -906,8 +920,11 @@
                                  (= vc \[)           (recur (inc j) (inc vd) vs? false)
                                  (= vc \])           (if (= vd 1) j (recur (inc j) (dec vd) vs? false))
                                  :else               (recur (inc j) vd vs? false)))))]
-              (recur (inc vend) pdepth bdepth in-str? false (conj vecs (subs src i (inc vend)))))
-            :else (recur (inc i) pdepth bdepth in-str? false vecs)))))))
+              (recur (inc vend) pdepth bdepth in-str? false false
+                     (conj vecs (subs src i (inc vend)))))
+            (or (= c \space) (= c \newline) (= c \tab) (= c \,) (= c \return))
+            (recur (inc i) pdepth bdepth in-str? false fresh? vecs)
+            :else (recur (inc i) pdepth bdepth in-str? false false vecs)))))))
 
 (defn- var->fn-row
   "Build a `:seon.fn` row for a `#'`-literal substrate var from runtime

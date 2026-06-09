@@ -824,7 +824,10 @@
 
 (def store-edn-cap
   "Store-time char cap for any pr-str'd string persisted as a datom
-   (`:seon.eval/result-edn`, `:seon.eval/error`, `:seon.turn/prompt-text`).
+   (`:seon.eval/result-edn`, `:seon.eval/error`). (The turn prompt no
+   longer flows through here — it persists whole as a
+   logs/prompts/<agent>/<turn>.txt blob with `:seon.turn/prompt-chars`
+   + `:seon.turn/prompt-file` datom projections, 2026-06-09.)
 
    MEMORY-SAFETY invariant: the DB must never hold a multi-MB blob in a
    single datom. A 9.7M-char `pull [*]` result once landed verbatim as

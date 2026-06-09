@@ -8,7 +8,10 @@
    pin the store-time complement to the render cap:
 
    - `cap-edn` bounds any pr-str'd string persisted as a datom
-     (`:seon.eval/result-edn`, `:seon.eval/error`, `:seon.turn/prompt-text`).
+     (`:seon.eval/result-edn`, `:seon.eval/error`). (The turn prompt no
+     longer flows through cap-edn — it persists WHOLE as a
+     logs/prompts/<agent>/<turn>.txt blob with chars/file datom
+     projections, 2026-06-09.)
    - the FULL value still lives in the globalThis live-result stash, so
      `(result <id>)` keeps returning the un-capped value in-session.
    - normal small results are stored verbatim (no spurious truncation).
@@ -23,9 +26,9 @@
     [seon.eval :as seval]))
 
 ;; ---------------------------------------------------------------------------
-;; cap-edn — the single store-time chokepoint both write sites call
-;; (record-eval! for :seon.eval/result-edn + :seon.eval/error,
-;;  with-turn! for :seon.turn/prompt-text).
+;; cap-edn — the store-time chokepoint for eval datoms (record-eval!'s
+;; :seon.eval/result-edn + :seon.eval/error). Turn prompts no longer
+;; route through it (blob file + projection datoms since 2026-06-09).
 ;; ---------------------------------------------------------------------------
 
 (deftest store-edn-cap-is-a-sane-positive-bound
@@ -147,13 +150,7 @@
     (is (str/starts-with? capped ";; …"))
     (is (re-find #"9000 rows" capped))))
 
-;; ---------------------------------------------------------------------------
-;; prompt-text path — with-turn! now passes prompt-text through cap-edn.
-;; ---------------------------------------------------------------------------
-
-(deftest huge-prompt-is-stored-capped
-  (let [huge-prompt (apply str (repeat (* 2 1024 1024) "p")) ; 2 MB prompt
-        stored      (seval/cap-edn huge-prompt)]
-    (is (<= (count stored) (+ seval/store-edn-cap 64)))
-    (is (re-find #"chars elided" stored))
-    (is (< (count stored) (count huge-prompt)))))
+;; (The old `huge-prompt-is-stored-capped` test is RETIRED with the
+;; :seon.turn/prompt-text datom itself — prompts now persist whole as
+;; logs/prompts blobs; only the int char-count + file path are datoms,
+;; so there is nothing to cap on that path anymore.)

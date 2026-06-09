@@ -169,8 +169,13 @@
   (let [host (platform/host)]
     {:seon.fs/allowed-roots
      (case host
+       ;; SEON_FS_ROOT supports MULTIPLE roots split on the platform
+       ;; path-list delimiter (":" on POSIX, ";" on Windows) — same
+       ;; convention as $PATH. One root stays a one-element vector.
        :node (when-let [r (some-> js/process .-env .-SEON_FS_ROOT)]
-               [r])
+               (->> (str/split r (re-pattern (str "\\" np/delimiter)))
+                    (remove str/blank?)
+                    vec))
        :wasi nil)
      :seon.fs/read-only?
      (case host

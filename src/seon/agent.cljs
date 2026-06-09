@@ -99,6 +99,9 @@
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
+    ;; Read-only fs capability — capabilities-section surfaces the LIVE
+    ;; allowed-roots so the agent knows exactly what it may read.
+    [seon.fs :as sfs]
     [seon.handlers.fn :as h-fn]
     [seon.handlers.ns :as h-ns]
     [seon.handlers.schema :as h-schema]
@@ -243,7 +246,18 @@
 ;; `:seon.message/from` = the reply target. Derived + deterministic; no
 ;; reply-target atom anywhere.
 (schema/register! :seon.turn/woken-by     :seon.db/ref)
+;; The assembled prompt is NOT persisted as a datom (three-tier storage
+;; rule: datoms hold projections, blobs hold full content). run-turn!
+;; writes the full prompt to logs/prompts/<agent-id>/<turn-id>.txt and
+;; the turn entity carries the char count + file pointer. The old
+;; `:seon.turn/prompt-text` datom (silently capped at 16,406 chars by
+;; cap-edn — truncated evidence for any long run) is RETIRED 2026-06-09.
+;; `:seon.turn/prompt-text` stays registered ONLY as the in-memory
+;; plumbing key between run-turn!/with-turn!/ask-and-eval! — it is not
+;; in `agent-bootstrap-attrs` and never reaches the DB.
 (schema/register! :seon.turn/prompt-text  :string)
+(schema/register! :seon.turn/prompt-chars :int)
+(schema/register! :seon.turn/prompt-file  :string)
 (schema/register! :seon.turn/messages     [:vector {:seon.db/component true} :seon.db/ref])
 (schema/register! :seon.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
 
@@ -833,7 +847,7 @@
    `:seon.agent/eval-count` for stop-policy decisions."
   [{:seon.agent/keys [id]
     :seon.session/keys [id-of-session]
-    :seon.turn/keys [id-of-turn prompt-text woken-by]}
+    :seon.turn/keys [id-of-turn prompt-text prompt-file woken-by]}
    body-fn]
   ;; Short-circuit on open-turn failure (task 9b finding 3). If the
   ;; open-tx returns `{::ok? false}`, there is NO turn entity in the
@@ -848,14 +862,16 @@
              [{:seon.session/id id-of-session
                :seon.session/turns
                [(cond->
-                  {:seon.turn/id          id-of-turn
-                   :seon.turn/at          (js/Date.)
-                   :seon.turn/status      :running
-                   ;; Cap the PERSISTED prompt (MEMORY-SAFETY) so a huge
-                   ;; prompt can't bloat the datom and OOM a later whole-DB
-                   ;; scan. The render cap bounds what's normally IN
-                   ;; prompt-text; this is the defensive store-time bound.
-                   :seon.turn/prompt-text (seval/cap-edn prompt-text)}
+                  {:seon.turn/id           id-of-turn
+                   :seon.turn/at           (js/Date.)
+                   :seon.turn/status       :running
+                   ;; Three-tier storage: the datom is a PROJECTION (char
+                   ;; count); the full prompt lives in the blob file run-turn!
+                   ;; wrote (`:seon.turn/prompt-file`). No truncation anywhere
+                   ;; — the file is the complete evidence.
+                   :seon.turn/prompt-chars (count (str prompt-text))}
+                  ;; nil when the file write failed (logged) — chars survive.
+                  prompt-file (assoc :seon.turn/prompt-file prompt-file)
                   ;; The waking message — reply!'s derivation source.
                   woken-by (assoc :seon.turn/woken-by woken-by))]}
               {:seon.agent/id id :seon.agent/state :running}]}))]
@@ -917,6 +933,26 @@
                :seon.message/at      (js/Date.)
                :seon.message/hops    0}]))))
 
+(defn- persist-prompt!
+  "Write the turn's full assembled prompt to
+   `logs/prompts/<agent-id>/<turn-id>.txt` (gitignored — `logs/` blob
+   tier; the DB datom is only the char-count projection +  this path).
+   Returns the relative path string, or nil on write failure (logged,
+   never throws — losing the prompt blob must not abort the turn)."
+  [agent-id turn-id text]
+  (try
+    (let [fs   (js/require "node:fs")
+          dir  (str "logs/prompts/" agent-id)
+          path (str dir "/" turn-id ".txt")]
+      (.mkdirSync fs dir #js {:recursive true})
+      (.writeFileSync fs path (str text) "utf8")
+      path)
+    (catch :default e
+      (js/console.warn
+        (str "seon.agent/persist-prompt!: could not write prompt blob for "
+             agent-id "/" turn-id " — " (or (.-message e) e)))
+      nil)))
+
 (defn ^:async run-turn!
   "v1.md §6.1 — one full turn end-to-end. Map-in / map-out.
 
@@ -940,7 +976,10 @@
         session-id (:seon.session/id session)
         turn-id    (db/new-id!)
         turn-idx   (turn-index session-id)
-        prompt     (render-prompt id)]
+        prompt     (render-prompt id)
+        ;; Blob tier — full prompt to disk; the turn datom carries only
+        ;; chars + this pointer (see :seon.turn/prompt-chars note above).
+        prompt-file (persist-prompt! id turn-id prompt)]
     (log id turn-idx "open" turn-id "+" (count prompt) "ctx-chars")
     (try
       (let [result (await
@@ -963,6 +1002,8 @@
                                   :seon.session/id-of-session session-id
                                   :seon.turn/id-of-turn    turn-id
                                   :seon.turn/prompt-text   prompt}
+                                 prompt-file
+                                 (assoc :seon.turn/prompt-file prompt-file)
                                  woken-by
                                  (assoc :seon.turn/woken-by woken-by))
                                #(ask-and-eval! {:seon.agent/id            id
@@ -1356,40 +1397,46 @@
 ;; ------------------------------------------------------------
 
 (defn system-section
-  "REPL header: who-am-I, what's-now, the strict response-format
-   contract, and the discovery cheat-sheet."
+  "REPL header: who-am-I, the strict response-format contract, and the
+   discovery cheat-sheet.
+
+   CACHE-PREFIX invariant: this section is the FIRST bytes of every
+   turn's user message and must be BYTE-STABLE across turns. No
+   timestamps, no current-ns, no counts — anything per-turn volatile
+   lives in `prompt-section` (the always-changing tail). The old
+   `Now: <ISO>` line here busted the provider prompt-cache at char 35
+   every single turn (context-audit-2026-06-09 §4)."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.agent/keys [id]}]
-  (let [ns  (current-ns {:seon.agent/id id})
-        now (.toISOString (js/Date.))]
-    (str "<system agent=\"" id "\" ns=\"" ns "\">\n"
-         "  Now: " now "  (pod tz: " (host-timezone) ")\n"
-         "\n"
-         "  FORMAT IS STRICT. Everything you emit is either\n"
-         "    (a) a Clojure form — (...), [...], {...}, @!atom\n"
-         "    (b) a comment line starting with ;;\n"
-         "  Anything else is a bug. Bare prose HAS eaten responses before\n"
-         "  (\"Let me read the file\" once became four bogus eval entries).\n"
-         "  If you write a sentence, put ;; in front of every line of it.\n"
-         "\n"
-         "  Correct shape:                 Wrong shape (don't do this):\n"
-         "    ;; first, look around          Let me look around first.\n"
-         "    (seon.db/query ...)            (seon.db/query ...)\n"
-         "    ;; then, write a reply         Now I'll write the reply.\n"
-         "    (seon.db/transact! ...)        (seon.db/transact! ...)\n"
-         "\n"
-         "  Walk your own state:\n"
-         "    (seon.agent/messages)        ; current session's messages — default {:seon.agent/n 50}\n"
-         "    (seon.agent/evals)           ; current session's evals — default {:seon.agent/n 20}\n"
-         "    (seon.agent/current-ns)      ; derived from your latest successful eval\n"
-         "    (result <eval-id>)           ; full live result of a prior eval (this session)\n"
-         "\n"
-         "  See your code in the current ns:\n"
-         "    (seon.db/pull {:seon.db/pull-pattern\n"
-         "                    '[:seon.ns/source\n"
-         "                       {:seon.fn/_ns [*] :seon.schema/_ns [*]}]\n"
-         "                    :seon.db/ref [:seon.ns/name (seon.agent/current-ns)]})\n"
-         "</system>")))
+  (str "<system agent=\"" id "\">\n"
+       "  Your current namespace and the wall-clock time are on the\n"
+       "  final prompt line at the END of this context.\n"
+       "\n"
+       "  FORMAT IS STRICT. Everything you emit is either\n"
+       "    (a) a Clojure form — (...), [...], {...}, @!atom\n"
+       "    (b) a comment line starting with ;;\n"
+       "  Anything else is a bug. Bare prose HAS eaten responses before\n"
+       "  (\"Let me read the file\" once became four bogus eval entries).\n"
+       "  If you write a sentence, put ;; in front of every line of it.\n"
+       "\n"
+       "  Correct shape:                 Wrong shape (don't do this):\n"
+       "    ;; first, look around          Let me look around first.\n"
+       "    (seon.db/query ...)            (seon.db/query ...)\n"
+       "    ;; then, write a reply         Now I'll write the reply.\n"
+       "    (seon.db/transact! ...)        (seon.db/transact! ...)\n"
+       "\n"
+       "  Walk your own state:\n"
+       "    (seon.agent/messages)        ; current session's messages — default {:seon.agent/n 50}\n"
+       "    (seon.agent/evals)           ; current session's evals — default {:seon.agent/n 20}\n"
+       "    (seon.agent/current-ns)      ; derived from your latest successful eval\n"
+       "    (result <eval-id>)           ; full live result of a prior eval (this session)\n"
+       "\n"
+       "  See your code in the current ns:\n"
+       "    (seon.db/pull {:seon.db/pull-pattern\n"
+       "                    '[:seon.ns/source\n"
+       "                       {:seon.fn/_ns [*] :seon.schema/_ns [*]}]\n"
+       "                    :seon.db/ref [:seon.ns/name (seon.agent/current-ns)]})\n"
+       "</system>"))
 
 ;; ------------------------------------------------------------
 ;; capabilities-section — the "## What you can do" worked-examples
@@ -1414,16 +1461,66 @@
    "seon.db/query"
    "seon.db/pull"
    "seon.db/entity"
+   "seon.db/listen!"
    "seon.db/current-agent-id"])
 
 (defn- first-doc-line
-  "First non-blank line of a docstring — the one-liner for the
-   capabilities cheat-sheet. Full doc stays on the :seon.fn entity."
+  "First SENTENCE of a docstring (joined across the first few lines, cut
+   at the first \". \") — the one-liner for the catalogs. The old
+   first-LINE version dangled mid-sentence (\"Two call shapes:\") when a
+   docstring's opening sentence wrapped. Full doc stays on the
+   :seon.fn entity."
   [doc]
-  (->> (str/split-lines (or doc ""))
-       (map str/trim)
-       (remove str/blank?)
-       first))
+  (let [flat (->> (str/split-lines (or doc ""))
+                  (map str/trim)
+                  (remove str/blank?)
+                  (take 3)
+                  (str/join " "))
+        idx  (str/index-of flat ". ")]
+    (cond
+      (str/blank? flat) nil
+      (some? idx)       (subs flat 0 (inc idx))
+      (> (count flat) 140) (str (subs flat 0 140) " …")
+      :else             flat)))
+
+(defn- arglist-vectors
+  "Split a stored `:seon.fn/arglists` string — \"([k v])\",
+   \"([req] [db selector eid])\" — into its top-level arg-vector strings
+   ([\"[k v]\"] / [\"[req]\" \"[db selector eid]\"]). Returns [] for
+   blank or \"()\" (unknown arity)."
+  [arglists]
+  (let [s (str/trim (or arglists ""))
+        n (count s)]
+    (loop [i 0 depth 0 start nil out []]
+      (if (>= i n)
+        out
+        (let [c (nth s i)]
+          (cond
+            (= c \[) (recur (inc i) (inc depth)
+                            (if (zero? depth) i start) out)
+            (= c \]) (let [d (dec depth)]
+                       (if (and (zero? d) (some? start))
+                         (recur (inc i) d nil (conj out (subs s start (inc i))))
+                         (recur (inc i) d start out)))
+            :else    (recur (inc i) depth start out)))))))
+
+(defn- callable-sigs
+  "One CALLABLE shape per arity from a fn sym + stored arglists string:
+   \"([k v])\" → [\"(sym k v)\"]; \"([req] [db eid])\" → [\"(sym req)\"
+   \"(sym db eid)\"]. The old render glued the raw arglists string after
+   the sym — `(seon.db/pull ())` / `(register! ([k v]))` — which taught
+   an UNCALLABLE shape (context-audit 2026-06-09 §2). Unknown arity →
+   [\"(sym …)\"]."
+  [sym arglists]
+  (let [vs (arglist-vectors arglists)]
+    (if (seq vs)
+      (mapv (fn [v]
+              (let [inner (str/trim (subs v 1 (dec (count v))))]
+                (if (str/blank? inner)
+                  (str "(" sym ")")
+                  (str "(" sym " " inner ")"))))
+            vs)
+      [(str "(" sym " …)")])))
 
 (defn capabilities-section
   "Render the `## What you can do` block the system-prompt sticky
@@ -1443,8 +1540,10 @@
                                 :arglists (:seon.fn/arglists e)
                                 :doc      (first-doc-line (:seon.fn/doc e))})))))
         lines (for [{:keys [sym arglists doc]} rows]
-                (str "  (" sym " " arglists ")"
-                     (when (seq doc) (str "\n      ; " doc))))]
+                (str (str/join "\n"
+                       (map #(str "  " %) (callable-sigs sym arglists)))
+                     (when (seq doc) (str "\n      ; " doc))))
+        roots (seq (:seon.fs/allowed-roots @sfs/!config))]
     (if (seq rows)
       (str "## What you can do\n\n"
            "These are the core APIs. Map-in is the preferred shape: you pass\n"
@@ -1463,7 +1562,9 @@
            "`:title`). Common shapes:\n"
            "  - natural-key identity (upsert): [:string {:seon.db/identity true}]\n"
            "  - a reference to another entity: :seon.db/ref\n"
-           "  - many references:               [:vector :seon.db/ref]\n\n"
+           "  - many references:               [:vector :seon.db/ref]\n"
+           "  - numbers: :int for counts/ids, :double for measures —\n"
+           "    :number is NOT a type (the transact! gate will tell you).\n\n"
            "  ;; 1. register the attrs (do this ONCE per attr)\n"
            "  (seon.schema/register! :kb.doc/path  [:string {:seon.db/identity true}])\n"
            "  (seon.schema/register! :kb.doc/title :string)\n"
@@ -1494,6 +1595,63 @@
            "namespace: copy the attribute keyword EXACTLY as the schema-catalog\n"
            "shows it (if the catalog lists :seon.kb.doc/path, query that — not\n"
            ":kb.doc/path). Fix the keyword and re-run.\n\n"
+           "### Reading one entity: pull and entity\n\n"
+           "The db ops are datahike-compatible — map-in (shown) and positional\n"
+           "(db-first, e.g. (seon.db/pull <db> selector eid)) both work.\n\n"
+           "  ;; pull — one entity as a plain map, by lookup-ref or eid\n"
+           "  (seon.db/pull {:seon.db/pull-pattern '[:seon.fn/sym :seon.fn/doc]\n"
+           "                 :seon.db/ref          [:seon.fn/sym \"seon.db/query\"]})\n\n"
+           "  ;; entity — lazy map-like view; read attrs like a map\n"
+           "  (:seon.fn/doc (seon.db/entity {:seon.db/ref [:seon.fn/sym \"seon.db/query\"]}))\n\n"
+           "### Reacting to writes: listen!\n\n"
+           "  (seon.db/listen!\n"
+           "    {:seon.db/key     :my-ns/watch\n"
+           "     :seon.db/handler (fn [{:seon.db/keys [db attr-index]}]\n"
+           "                        ;; runs after EVERY transact; attr-index\n"
+           "                        ;; groups the tx's datoms by attribute\n"
+           "                        (when (:kb.doc/path attr-index)\n"
+           "                          (js/console.log \"new doc stored\")))})\n"
+           "  ;; same :seon.db/key replaces; remove with\n"
+           "  ;; (seon.db/unlisten! {:seon.db/key :my-ns/watch})\n\n"
+           "### Reading the repo (files on this machine)\n\n"
+           (if roots
+             (str "You can READ files under: " (str/join ", " roots) "\n"
+                  "(read-only; everything outside these roots is denied)\n\n")
+             (str "No filesystem roots are granted right now (default-deny) —\n"
+                  "every seon.fs call returns an error envelope that explains\n"
+                  "how access is configured.\n\n"))
+           "The recipe is SEARCH → READ PRECISELY (never walk + guess):\n\n"
+           "  ;; 1. grep for a term (regex). Call it as the WHOLE form — the\n"
+           "  ;;    result is auto-awaited; inside a let you'd get a Promise.\n"
+           "  (seon.search/grep {:seon.search/pattern \"validate-entity-values!\"\n"
+           "                     :seon.search/glob    \"*.cljs\"})\n"
+           "  ;; => {:seon.search/ok? true, :seon.search/matches\n"
+           "  ;;     [{:seon.search/path \"…/src/seon/db.cljs\"\n"
+           "  ;;       :seon.search/line-number 803, …}], …}\n\n"
+           "  ;; 2. read the exact hit (sync; match paths are absolute)\n"
+           "  (seon.fs/read-file {:seon.fs/path \"<absolute path from the match>\"})\n\n"
+           "A denial is a VALUE, not a crash — {:seon.fs/ok? false\n"
+           ":seon.fs/error \"…\"} tells you whether the path is out of scope\n"
+           "or the fs is read-only. Read the error; it says what to do.\n\n"
+           "### Storing what you learn — the canonical finding shape\n\n"
+           "When research yields a durable answer, store it with these EXACT\n"
+           "attrs (check the schema-catalog first: if finding/* attrs already\n"
+           "exist, REUSE them — NEVER invent a parallel shape):\n\n"
+           "  (seon.schema/register! :finding/question    :string)\n"
+           "  (seon.schema/register! :finding/claim       :string)\n"
+           "  (seon.schema/register! :finding/source-file :string)\n"
+           "  (seon.schema/register! :finding/line        :int)\n"
+           "  (seon.schema/register! :finding/confidence  [:enum :verified :inferred])\n\n"
+           "  (seon.db/transact!\n"
+           "    {:seon.db/tx-data\n"
+           "     [{:finding/question    \"how does transact! validate schemas?\"\n"
+           "       :finding/claim       \"seon.db/transact! Malli-validates every entity before the tx reaches datahike\"\n"
+           "       :finding/source-file \"src/seon/db.cljs\"\n"
+           "       :finding/line        803\n"
+           "       :finding/confidence  :verified}]})  ; :verified = you read that line\n\n"
+           "WHY one shape: the next agent discovers your attrs in the\n"
+           "schema-catalog and reuses them — findings compound only when\n"
+           "everyone writes the same kind.\n\n"
            "### Replying — one line, the substrate knows who asked:\n\n"
            "  (seon.agent/reply! {:seon.message/content \"on it — here's what I found\"})\n\n"
            "Messaging another agent (or an explicit target) — :seon.message/to\n"
@@ -1590,18 +1748,43 @@
   (count (db/query {:seon.db/db db
                     :seon.db/query [:find '?e :where ['?e id-attr '_]]})))
 
+(def ^:private uncounted-kind-id-attrs
+  "Id-attrs of HIGH-CHURN substrate kinds whose live instance count
+   changes EVERY turn (each eval + message is an instance) — rendering
+   an exact count here would bust the prompt-cache prefix on every
+   render (context-audit 2026-06-09 §4). The kind + attrs still list;
+   the instances themselves are already in the transcript."
+  #{:seon.eval/id :seon.message/id})
+
+(defn- fuzzy-count
+  "Bucketed live-count label for catalog blocks: exact below 20, then
+   rounded DOWN to a bucket (\"40+\", \"300+\", \"2000+\") so slow corpus
+   growth doesn't bust the semi-static catalog prefix per increment."
+  [n]
+  (cond
+    (< n 20)   (str n)
+    (< n 200)  (str (* 10 (quot n 10)) "+")
+    (< n 2000) (str (* 100 (quot n 100)) "+")
+    :else      (str (* 1000 (quot n 1000)) "+")))
+
 (defn- catalog-kind-block
   "Render one entity kind: a `[kind  N instances]` header then one line
    per attribute (`id`/`opt` flags + compact type). The id-attr line is
-   marked `id`; optional attrs are marked `?`."
+   marked `id`; optional attrs are marked `?`. High-churn substrate
+   kinds (`uncounted-kind-id-attrs`) render without a count; other
+   kinds use the bucketed `fuzzy-count` label — both are cache-prefix
+   stability measures."
   [db {:keys [kind id-attr]}]
-  (let [n     (catalog-kind-count db id-attr)
-        rows  (sort-by (fn [{:keys [id? attr]}] [(if id? 0 1) (str attr)])
+  (let [rows  (sort-by (fn [{:keys [id? attr]}] [(if id? 0 1) (str attr)])
                        (catalog-attr-rows kind))
         lines (for [{:keys [attr type optional id?]} rows]
                 (str "  " (cond id? "id " optional "?  " :else "   ")
-                     attr " : " type))]
-    (str "[" kind "]  " n " instance" (when (not= 1 n) "s") "\n"
+                     attr " : " type))
+        label (if (contains? uncounted-kind-id-attrs id-attr)
+                "(per-turn data — uncounted)"
+                (let [n (fuzzy-count (catalog-kind-count db id-attr))]
+                  (str n " instance" (when (not= "1" n) "s"))))]
+    (str "[" kind "]  " label "\n"
          (str/join "\n" lines))))
 
 (defn- domain-attr-line
@@ -1613,8 +1796,8 @@
   (let [t (if-let [form (schema/schema-definition attr)]
             (catalog-type-str form)
             (str (get-in (:schema db) [attr :db/valueType])))
-        n (catalog-kind-count db attr)]
-    (str "  " attr " : " t " — " n " entit" (if (= 1 n) "y" "ies"))))
+        n (fuzzy-count (catalog-kind-count db attr))]
+    (str "  " attr " : " t " — " n " entit" (if (= "1" n) "y" "ies"))))
 
 (defn- domain-attrs-block
   "The `domain data attrs` portion of the catalog: every agent-
@@ -2028,20 +2211,12 @@
 ;; ============================================================
 
 (defn- fn-catalog-sig
-  "Render a fn's `(sym arglists)` signature line from its stored
-   `:seon.fn/arglists` string, defensively (arglists may be blank or
-   already paren-wrapped). Falls back to `(sym …)` when no arglists."
+  "Render a fn's signature for the catalog: one CALLABLE shape per
+   arity (via `callable-sigs`), newline-joined and aligned under the
+   block's two-space indent. Falls back to `(sym …)` when arglists are
+   blank/\"()\" (unknown arity)."
   [sym arglists]
-  (let [a (some-> arglists str/trim)
-        inner (when (and a (str/starts-with? a "(") (str/ends-with? a ")"))
-                (str/trim (subs a 1 (dec (count a)))))]
-    (cond
-      ;; "()" / "" — a variadic dispatcher or unknown arity: render a
-      ;; placeholder rather than an empty `(sym )`.
-      (or (str/blank? a) (and inner (str/blank? inner)))
-      (str "(" sym " …)")
-      inner (str "(" sym " " inner ")")
-      :else (str "(" sym " " a ")"))))
+  (str/join "\n  " (callable-sigs sym arglists)))
 
 (defn- fn-catalog-block-brief
   "One OTHER-ns fn for the catalog: signature + one-line doc. Compact —
@@ -2144,6 +2319,18 @@
       (cond-> {:seon.db/db db}
         (some? scope) (assoc :seon.warn/ns scope)))))
 
+(def transcript-char-budget
+  "Total rendered-chars cap for the transcript section (~6k tokens at
+   chars/4). Why 24,000: the audit measured an UNBOUNDED transcript at
+   90,468 chars by turn 58 — 83% of a 27k-token context, dominating
+   both spend and the model's attention. 24k keeps the newest ~15
+   worst-case eval rows (≤1.6KB each via `eval-render-cap`) or several
+   dozen typical items whole — comfortably more than the 2–4 turns most
+   questions need — while bounding context ≈ static sections + 6k tok.
+   Retention is NEWEST-FIRST: oldest items drop beyond the budget and
+   an elision note replaces them at the top."
+  24000)
+
 (defn- transcript-item-at
   "Wall-clock `:at` of a transcript item (a message or an eval), as
    epoch-ms. Used to interleave the two streams chronologically."
@@ -2182,9 +2369,27 @@
         items (->> (concat msgs es)
                    (sort-by transcript-item-at))]
     (if (seq items)
-      (str "<transcript>\n"
-           (str/join "\n\n" (map #(format-transcript-item % id) items))
-           "\n</transcript>")
+      (let [rendered (mapv #(format-transcript-item % id) items)
+            ;; NEWEST-FIRST retention under the total budget: walk from
+            ;; the end accumulating rendered chars; keep the newest
+            ;; items WHOLE (always at least one), drop everything older.
+            kept-n   (loop [i (dec (count rendered)) acc 0 kept 0]
+                       (if (neg? i)
+                         kept
+                         (let [acc' (+ acc (count (rendered i)) 2)]
+                           (if (and (pos? kept) (> acc' transcript-char-budget))
+                             kept
+                             (recur (dec i) acc' (inc kept))))))
+            elided   (- (count rendered) kept-n)
+            kept     (subvec rendered elided)]
+        (str "<transcript>\n"
+             (when (pos? elided)
+               (str ";; … " elided " older item" (when (not= 1 elided) "s")
+                    " elided (transcript capped at " transcript-char-budget
+                    " chars; the full log is in the db — "
+                    "(seon.agent/messages) / (seon.agent/evals))\n\n"))
+             (str/join "\n\n" kept)
+             "\n</transcript>"))
       "")))
 
 (defn prompt-section
@@ -2198,10 +2403,17 @@
    the live `turns-since-inbound` count vs the agent's `turns-cap` (never
    stored), escalating nudges precede the prompt line — wrap up at
    halfway, FINAL WARNING three turns before `run-agentic-loop!` cuts
-   the loop off."
+   the loop off.
+
+   ALSO carries the wall-clock `Now:` line — every per-turn-volatile
+   byte lives HERE at the context tail, so the static sections above
+   stay a stable provider-cacheable prefix (context-audit 2026-06-09
+   §4: the timestamp used to sit at char 35 of <system> and busted the
+   whole cache every turn)."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.agent/keys [id]}]
-  (let [ns       (current-ns {:seon.agent/id id})
+  (let [now      (.toISOString (js/Date.))
+        ns       (current-ns {:seon.agent/id id})
         ;; current-ns returns a keyword (latest eval's :seon.eval/ns) or a
         ;; symbol (home-ns fallback) — render without the keyword colon,
         ;; like a real REPL prompt.
@@ -2227,7 +2439,8 @@
                ";; most questions need 2–4 turns. If you have the answer,\n"
                ";; reply now.\n")
           :else "")]
-    (str pressure ns-str "=>  ; turn " n-turns)))
+    (str ";; Now: " now "  (pod tz: " (host-timezone) ")\n"
+         pressure ns-str "=>  ; turn " n-turns)))
 
 ;; ------------------------------------------------------------
 ;; Composer (v1.md §5.3).
@@ -2238,9 +2451,10 @@
 ;; non-blank results.
 ;;
 ;; Return shape per MVP decision Q1 (2026-05-23): just
-;; {:seon.render/text "..."}. :seon.turn/prompt-text is run-turn!'s
-;; responsibility to persist (v1.md §6.1 step 3) — composer does not
-;; double-write.
+;; {:seon.render/text "..."}. Persisting the prompt evidence (the
+;; logs/prompts/<agent>/<turn>.txt blob + :seon.turn/prompt-chars /
+;; :seon.turn/prompt-file projection) is run-turn!'s responsibility —
+;; composer does not double-write.
 ;;
 ;; v2 will extend section-fn return maps with :seon.render/hiccup
 ;; alongside :seon.render/text; the composer joins both surfaces

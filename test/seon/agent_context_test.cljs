@@ -186,12 +186,14 @@
 ;; (b) agent-path ≡ inspector-path ≡ would-be persisted prompt-text.
 ;; ---------------------------------------------------------------------------
 
-;; The system section embeds `(js/Date.)` as a `Now:` line, so two
+;; The prompt section (context TAIL — cache-prefix fix 2026-06-09; the
+;; line used to live in <system> at char 35 and busted the provider
+;; cache every turn) embeds `(js/Date.)` as a `;; Now:` line, so two
 ;; renders microseconds apart differ ONLY on that wall-clock line.
 ;; Normalize it away before comparing — everything else is a pure
 ;; function of the DB and must be byte-identical across the three paths.
 (defn- strip-now [s]
-  (str/replace s #"\n  Now: [^\n]*\n" "\n  Now: <NORMALIZED>\n"))
+  (str/replace s #"(?m)^;; Now: [^\n]*$" ";; Now: <NORMALIZED>"))
 
 (deftest agent-inspector-and-prompt-text-agree
   (async done
@@ -356,19 +358,25 @@
               (is (str/includes? full "(seon.db/current-agent-id)")
                   "current-agent-id shown — no seon.agent/current-agent-id guess")
               ;; DERIVED from persisted :seon.fn arglists, not hardcoded:
-              ;; the rendered text must contain the REAL arglist string from
-              ;; the seeded entity. index-substrate! reads arglists from the
-              ;; actual source; since T15 gave `transact!`/`query` two call
-              ;; shapes (map-in + datahike-positional) they introspect as the
-              ;; variadic `([& call-args])` / `([& args])` dispatchers —
-              ;; proving the rendered shapes are derived from real source, not
-              ;; a curated fiction.
-              (is (str/includes? cap "(seon.db/transact! ([& call-args]))")
-                  "transact! arglist is the REAL ([& call-args]) from introspected source")
-              (is (str/includes? cap "(seon.db/query ([& args]))")
-                  "query arglist is the REAL ([& args]) from introspected source")
-              ;; bounded — the section is the curated core API only, not a dump.
-              (is (< (count cap) 4000)
+              ;; the rendered shape must be the CALLABLE per-arity form built
+              ;; from the seeded entity's real arglists. T15 gave `transact!`/
+              ;; `query` variadic dispatchers (`[& call-args]` / `[& args]`),
+              ;; so the callable render is `(sym & args)` — derived from real
+              ;; source, not a curated fiction. The OLD garbled renders
+              ;; (`(seon.db/transact! ([& call-args]))`, `(seon.db/pull ())`)
+              ;; must never come back (context-audit 2026-06-09 §2).
+              (is (str/includes? cap "(seon.db/transact! & call-args)")
+                  "transact! renders the CALLABLE shape from real arglists")
+              (is (str/includes? cap "(seon.db/query & args)")
+                  "query renders the CALLABLE shape from real arglists")
+              (is (not (str/includes? cap "(seon.db/transact! ([& call-args]))"))
+                  "no double-wrapped arglists render")
+              (is (not (re-find #"\(seon\.db/(pull|entity) \(\)\)" cap))
+                  "no empty-arglists `(sym ())` render for pull/entity")
+              ;; bounded — curated core API + worked examples, not a dump.
+              ;; (raised from 4000 when the fs/search recipe, finding shape,
+              ;; pull/entity/listen! examples landed — demo-context fixes.)
+              (is (< (count cap) 11000)
                   (str "capabilities-section bounded — got " (count cap))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -423,15 +431,17 @@
             (let [db  @conn
                   txt (agent/schema-catalog-section
                         {:seon.db/db db :seon.agent/id agent-id})]
-              ;; Seed has exactly two evals (failed t13 + ok t21).
-              (is (str/includes? txt "[:seon.eval]  2 instances")
-                  "eval count matches the two seeded evals")
-              ;; ns count present with correct singular/plural grammar.
-              (is (re-find #"\[:seon.ns\]  \d+ instances?" txt)
-                  ":seon.ns count present")
-              ;; A kind still LISTS even with a count (defined kinds always show).
-              (is (re-find #"\[:seon.message\]  \d+ instances?" txt)
-                  ":seon.message kind present with a count"))))
+              ;; HIGH-CHURN substrate kinds (eval/message — every turn adds
+              ;; instances) render WITHOUT a live count so the semi-static
+              ;; catalog stays a stable cache prefix (2026-06-09 fix; an
+              ;; exact per-turn count busted the prompt cache every render).
+              (is (str/includes? txt "[:seon.eval]  (per-turn data — uncounted)")
+                  "eval kind listed, count omitted (cache-prefix stability)")
+              (is (str/includes? txt "[:seon.message]  (per-turn data — uncounted)")
+                  "message kind listed, count omitted")
+              ;; Low-churn kinds keep a (bucketed) count.
+              (is (re-find #"\[:seon.ns\]  \d+\+? instances?" txt)
+                  ":seon.ns count present"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -566,8 +576,11 @@
                                          {:seon.db/db @conn :seon.agent/id agent-id}))]
                            (is (str/includes? after "=== seon.zzcat ===")
                                "newly-defined fn's ns APPEARS — derived, not hardcoded")
-                           (is (str/includes? after "(seon.zzcat/helper [x])")
-                               "the new fn's signature is rendered")
+                           ;; CALLABLE per-arity shape (2026-06-09 fix):
+                           ;; arglists "([x])" renders as `(sym x)`, not the
+                           ;; old bracket-wrapped `(sym [x])`.
+                           (is (str/includes? after "(seon.zzcat/helper x)")
+                               "the new fn's signature renders as a CALLABLE shape")
                            (is (str/includes? after "throwaway helper")
                                "the new fn's one-line doc is rendered (brief, other-ns)")))))))
         (.then (fn [_] (done)))
