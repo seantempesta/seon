@@ -102,23 +102,49 @@ transition, don't keep bending CLJS to do what it wasn't designed for.
   consistently (currently they REJECT the promise past transact!'s sync try).
 - Teach "errors are values — `(result :id)` holds the full error data; inspect + adapt."
 
-## Track B — PINNED for the CLJ pivot (after A)
+## Track B — the CLJ pivot (mostly ALREADY BUILT — see scoping)
 
-- **B1. Central datahike store** (JVM, on-disk LMDB + flow) independent of any CLJS
-  session; the pod talks to it over a wire. Supersedes the per-pod store; enables
-  multi-session, cross-run history, per-session logical partitioning.
-- **B2. Heavy code analysis/indexing on the JVM** — reuse `graph/ingest`,
-  `graph/query`, `seon.dev.compliance` (the full Malli-walk checker), instrumentation.
-  Offload compute off single-process Node.
-- **B3. Deeper checks** CLJS can't do well: full Malli-walk compliance,
-  cross-namespace ref integrity, richer spec analysis, test-association rigor.
+**Scoping 2026-06-09 (`clj-pivot-scoping-2026-06-09.md`) found Track B is far closer
+than this section assumed — most of it EXISTS and WORKS:**
+
+- **B1. Central store + wire — DONE + RUNNING.** The `wire-server` process (pid
+  51224) is a file-backed on-disk JVM datahike conn answering
+  ping/q/transact/pull/schema/entity-pull/batch over a Unix-domain socket
+  (Transit-JSON), verified live (register→transact→query roundtrip vs
+  `data/clusters/default/store`). The CLJS guest client mirroring `datahike.api`
+  (`seon.client-runtime.db`) + Transit codec + multi-DB registry (agent-id→db-name)
+  are all written. THIS is the pivot's central store; the main JVM `:seon.db/flow`
+  is `:memory`/empty and is NOT it.
+- **B2. Heavy analysis — DONE, JVM-resident.** `graph/analyzer`+`scanner`+`ingest`+
+  `query` and `dev/compliance` (Malli-walk) work in-process; expose over the wire.
+- **THE ONE MISSING PIECE — a plain-Node UDS transport.** The guest client routes
+  through WASM-host (WIT) imports; there is no `node:net` UDS client, and the V0 pod
+  is plain Node embedding datahike-cljs in-process. `wit.cljs` has a `js/require`
+  fallback branch to hook.
+- **B-FIRST-SLICE:** route ONE pod op (`transact!` then `q`) to the running
+  wire-server over a Node UDS socket, single ambient conn (the back-compat path that
+  already works). Oracle: same entity readable from the pod AND the wire-server REPL.
+  This is the highest-leverage next step and the ONLY genuinely new code.
+- **B3. Specific checks as a wire op.** The A2 checks (return-is-any/arg-is-any/
+  uses-maybe/…) are a location-aware enhancement of `compliance.clj`'s existing
+  parsed-schema walk (one fn, NOT a v2), exposed as a `handle-op` returning the
+  clustered-warning shape the pod renders. So A2 (CLJS) is the stopgap; this is the
+  real home.
 - **B4. Session-browser UI** reading the central store (sessions → turns →
-  prompt-text + messages + evals/errors).
+  prompt-text + messages + evals/errors). Blocked by: reactive engine is built but
+  UNWIRED into the wire-server (no subscribe ops / `::reactive` hook), which the
+  guest `listen!` loop already targets — wire it up.
+
+Persistent-backend gotchas (from A1 + scoping) the central store must honor: mkdir
+the base, branch on `database-exists?` (no create-or-connect), stable RFC-UUID `:id`.
 
 ## Sequence
 
-A1 (persist) → A2 (warnings framework + the specific CLJS-doable checks) → A3/A4
-(emissions + feedback). Then scope + execute the B pivot.
+A1 (persist) **SHIPPED (eb7a500)** → A2 (warnings framework + specific CLJS-doable
+checks) → A3/A4 (emissions + feedback). The B pivot is now scoped + tractable: its
+high-leverage first slice (Node UDS transport → route one pod op to the running
+wire-server) can run in PARALLEL with A2/A3/A4 once the live-validation run frees
+the pod, since most of B already exists.
 Each step: implement (`seon-agent`) → seon-verifier → commit. The live pod is the
 oracle. PRD `v2-context-render-prd-2026-06-08.md` remains the demo source of truth;
 this doc owns the finish-CLJS/pivot-CLJ plan.
