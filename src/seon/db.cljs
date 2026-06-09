@@ -225,6 +225,12 @@
 (schema/register! ::tx-data [:vector :any])
 (schema/register! ::opts :map)
 (schema/register! ::conn :any)
+;; `::tx-meta` — the positional 3-arity convenience slot. datahike has NO
+;; positional tx-meta arg (it rides inside the arg-map under `:tx-meta` —
+;; see research/datahike-api-forms-2026-06-08.md §2); seon exposes a
+;; 3-arity `(transact! conn tx-data tx-meta)` since seon already nests
+;; tx-meta under `::opts {:tx-meta …}`. The slot is a plain map.
+(schema/register! ::tx-meta :map)
 
 (schema/register!
   ::transact-request
@@ -812,12 +818,94 @@
 ;; Public write path
 ;; ---------------------------------------------------------------------------
 
+(defn- conn?
+  "A datahike conn is an `IDeref` that is NOT a map (verified live
+   2026-06-08: `(map? conn)` => false, `(satisfies? IDeref conn)` =>
+   true; a db VALUE is `map?`-true). Used by `normalize-transact-args` to
+   tell a positional conn slot apart from a stray request map / db value."
+  [x]
+  (and (satisfies? IDeref x) (not (map? x))))
+
+(defn- normalize-transact-args
+  "Normalize `transact!`'s variadic args into the canonical map-in
+   request map `{::tx-data … ::opts … ::conn …}` that the rest of the
+   body and `assert-invocation-shape!` already understand. T15: the
+   public surface accepts BOTH shapes.
+
+   Dispatch (the chunk-1 finding — a db/conn value must never be mistaken
+   for a request map): the FIRST arg decides.
+     - a map containing `::tx-data`  -> map-in (passed through verbatim).
+     - otherwise                     -> positional, first arg is the conn.
+   A conn is `map?`-false and tx-data is a vector, so a positional first
+   arg never collides with a `::tx-data`-bearing request map.
+
+   Positional forms (mirror datahike `(d/transact! conn tx-data)`; seon
+   adds a 3-arity tx-meta convenience since it nests tx-meta under
+   `::opts {:tx-meta …}`):
+     (transact! conn tx-data)          ==> {::conn c ::tx-data td}
+     (transact! conn tx-data tx-meta)  ==> {::conn c ::tx-data td
+                                            ::opts {:tx-meta tm}}
+
+   Throws `:user-input` ex-info (caught upstream into an envelope, never
+   into agent eval) for a malformed positional call — non-conn first arg,
+   missing tx-data, or non-map tx-meta. A malformed map-in call is left
+   to `assert-invocation-shape!`, which already produces a clear message."
+  [args]
+  (let [a0 (first args)]
+    (cond
+      ;; map-in: one request map carrying `::tx-data`. Pass through; the
+      ;; existing guard validates the rest.
+      (and (map? a0) (contains? a0 ::tx-data))
+      a0
+
+      ;; A lone map WITHOUT `::tx-data` is a malformed map-in call — let
+      ;; the guard name the missing key / unqualified-key hint.
+      (and (= 1 (count args)) (map? a0))
+      a0
+
+      ;; Positional: first arg must be a conn.
+      (not (conn? a0))
+      (throw (ex-info
+               (str "seon.db/transact!: positional call expects a datahike "
+                    "CONN as the first argument (an IDeref, not a map). Got: "
+                    (truncate-value a0)
+                    " — call `(transact! conn tx-data)` or `(transact! conn "
+                    "tx-data tx-meta)`, or use the map-in shape "
+                    "`{::db/tx-data […] ::db/conn conn}`.")
+               {::error          :seon.db/invalid-invocation-shape
+                ::actual-shape   (type a0)
+                ::actual-value   a0
+                :seon.error/kind :user-input}))
+
+      :else
+      (let [[conn tx-data tx-meta & extra] args]
+        (when (seq extra)
+          (throw (ex-info
+                   (str "seon.db/transact!: positional call takes 2 or 3 "
+                        "arguments `(conn tx-data [tx-meta])`. Got "
+                        (count args) " arguments.")
+                   {::error          :seon.db/invalid-invocation-shape
+                    ::actual-value   (vec args)
+                    :seon.error/kind :user-input})))
+        (when (and (some? tx-meta) (not (map? tx-meta)))
+          (throw (ex-info
+                   (str "seon.db/transact!: positional tx-meta (3rd arg) "
+                        "must be a map. Got: " (truncate-value tx-meta))
+                   {::error          :seon.db/invalid-invocation-shape
+                    ::actual-value   tx-meta
+                    ::actual-shape   (type tx-meta)
+                    :seon.error/kind :user-input})))
+        (cond-> {::conn conn ::tx-data tx-data}
+          (some? tx-meta) (assoc ::opts {:tx-meta tx-meta}))))))
+
 (defn- assert-invocation-shape!
   "KI-1 guard. `transact!` is map-in / map-out — every key namespaced
-   under `:seon.db/*`. Positional invocations (`(transact! conn tx-data)`)
-   or unqualified-key maps (`{:tx-data […]}`) silently destructure to
-   nil/empty and used to crash deep inside datahike with cryptic errors.
-   This precondition catches both at the boundary with a clear message.
+   under `:seon.db/*`. Positional invocations are normalized to this map
+   shape by `normalize-transact-args` BEFORE this guard runs; an
+   unqualified-key map (`{:tx-data […]}`) or a map missing `::tx-data`
+   silently destructured to nil/empty and used to crash deep inside
+   datahike with cryptic errors. This precondition catches that at the
+   boundary with a clear message.
 
    Run BEFORE destructuring so the error message can name the actual
    shape received."
@@ -905,8 +993,53 @@
         emap (assoc emap :seon.error/data (assoc data :seon.error/kind kind))]
     {::ok? false ::error emap}))
 
+(defn- ^:async transact!*
+  "The map-in commit body. `transact!` normalizes its variadic args
+   (map-in OR positional) into the canonical request map first, runs the
+   invocation-shape guard, then delegates here. `arg` is the canonical
+   `{::tx-data … ::opts … ::conn …}` map. Returns the `{::ok? …}`
+   envelope; the datahike commit failure path is caught here, the
+   pre-normalization failures are caught by `transact!`."
+  [arg]
+  (let [{::keys [tx-data opts conn] :or {conn *conn*}} arg
+        c           (resolve-conn conn)
+        attrs       (extract-tx-attrs tx-data)
+        merged-opts (merge-tx-context-into-opts opts)]
+    (validate-attrs! attrs)
+    (validate-values! tx-data)
+    (try
+      ;; Datahike-cljs `d/transact!` takes one arg-map combining
+      ;; `:tx-data` + `:tx-meta` (see datahike.api.impl/transact! L29-41).
+      ;; The previous shape `(d/transact! c tx-data opts)` passed opts
+      ;; as a third arg that datahike silently ignored — so user tx-meta
+      ;; NEVER reached the db before this fix. The single arg-map shape
+      ;; is the only supported call path.
+      (let [arg-map (merge {:tx-data tx-data} merged-opts)
+            report  (await (d/transact! c arg-map))]
+        {::ok? true ::tx-report report})
+      (catch :default e
+        ;; Datahike-side / async commit failure. Default kind is
+        ;; :substrate-bug; anything past the gate that explodes is a
+        ;; substrate concern.
+        (error-envelope e)))))
+
 (defn ^:async transact!
-  "Commit tx-data to the agent's conn. Map-in / map-out.
+  "Commit tx-data to the agent's conn. Two call shapes (T15):
+
+   - map-in / map-out (preferred for internal callers):
+       (db/transact! {::db/tx-data [{::name \"A\"}]
+                      ::db/opts {:tx-meta {…}}   ; optional
+                      ::db/conn <conn>})          ; optional, defaults *conn*
+   - positional, mirroring datahike `(d/transact! conn tx-data)` — conn
+     FIRST and explicit (no ambient `*conn*`); seon adds a 3-arity tx-meta
+     convenience:
+       (db/transact! <conn> [{::name \"A\"}])
+       (db/transact! <conn> [{::name \"A\"}] {:source :import})
+
+   Both shapes return the SAME envelope (see below) and are `^:async`
+   (await the returned Promise). Dispatch is unambiguous: a conn is
+   `map?`-false, so a positional first arg never collides with a
+   `::db/tx-data`-bearing request map.
 
    ## Safe-by-default — never throws into agent eval
 
@@ -956,37 +1089,30 @@
        (if ok?
          (process tx-report)
          (handle error)))"
-  {:malli/schema [:=> [:cat ::transact-request] ::transact-response]}
-  [arg]
+  ;; The `:function` schema documents BOTH arities as the discoverable
+  ;; contract. NOTE (the T15 caveat): `^:async` fns are SKIPPED by
+  ;; `seon.instrument/collect-registrations` (instrument! can't await a
+  ;; Promise before output validation), so this schema is NOT runtime-
+  ;; enforced by Malli today — the hand-rolled `normalize-transact-args`
+  ;; + `assert-invocation-shape!` + envelope do the guarding. When the
+  ;; async-aware instrument wrapper lands, this schema enforces with no
+  ;; further change.
+  {:malli/schema
+   [:function
+    [:=> [:cat ::transact-request] ::transact-response]
+    [:=> [:catn [::conn ::conn] [::tx-data ::tx-data]] ::transact-response]
+    [:=> [:catn [::conn ::conn] [::tx-data ::tx-data] [::tx-meta ::tx-meta]]
+         ::transact-response]]}
+  [& call-args]
   (try
-    (assert-invocation-shape! arg)
-    (let [{::keys [tx-data opts conn] :or {conn *conn*}} arg
-          c           (resolve-conn conn)
-          attrs       (extract-tx-attrs tx-data)
-          merged-opts (merge-tx-context-into-opts opts)]
-      (validate-attrs! attrs)
-      (validate-values! tx-data)
-      (try
-        ;; Datahike-cljs `d/transact!` takes one arg-map combining
-        ;; `:tx-data` + `:tx-meta` (see datahike.api.impl/transact! L29-41).
-        ;; The previous shape `(d/transact! c tx-data opts)` passed opts
-        ;; as a third arg that datahike silently ignored — so user
-        ;; tx-meta NEVER reached the db before this fix. The single
-        ;; arg-map shape is the only supported call path.
-        (let [arg-map (merge {:tx-data tx-data} merged-opts)
-              report  (await (d/transact! c arg-map))]
-          {::ok? true ::tx-report report})
-        (catch :default e
-          ;; Datahike-side / async commit failure. Default kind is
-          ;; :substrate-bug; specific schema-rejection throws from
-          ;; datahike's internals may want a more nuanced classification
-          ;; in the future, but for now anything past the gate that
-          ;; explodes is a substrate concern.
-          (error-envelope e))))
+    (let [arg (normalize-transact-args call-args)]
+      (assert-invocation-shape! arg)
+      (transact!* arg))
     (catch :default e
-      ;; Pre-commit failures (invocation shape, unregistered attr, bad
-      ;; value, unbound *conn*). The throwing helpers tagged their
-      ;; ex-data with `:seon.error/kind`; `error-envelope` preserves it.
+      ;; Pre-commit failures (positional/invocation shape, unregistered
+      ;; attr, bad value, unbound *conn*). The throwing helpers tagged
+      ;; their ex-data with `:seon.error/kind`; `error-envelope`
+      ;; preserves it.
       (error-envelope e))))
 
 ;; ---------------------------------------------------------------------------

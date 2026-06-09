@@ -293,6 +293,92 @@
       done)))
 
 ;; ---------------------------------------------------------------------------
+;; transact! — positional arity (T15). Mirrors datahike `(d/transact! conn
+;; tx-data)`, conn-first + explicit; seon adds a 3-arity tx-meta convenience.
+;; Same envelope contract as the map-in arity — NEVER throws into eval.
+;; ---------------------------------------------------------------------------
+
+(deftest transact!-positional-commits-an-entity
+  (async done
+    (with-conn
+      (fn [conn]
+        (go
+          (let [{::db/keys [ok? tx-report]}
+                (a/<! (db/transact! conn [{::name "PosAlpha" ::rank 7}]))]
+            (is (true? ok?) "positional (conn tx-data) → ok? true envelope")
+            (is (some? tx-report))
+            (is (pos? (count (:tx-data tx-report))))
+            ;; committed datom is queryable
+            (let [rows (db/query {::db/query '[:find ?n :where [?e ::name ?n]]
+                                  ::db/conn  conn})]
+              (is (= #{["PosAlpha"]} rows) "positional write is visible")))))
+      done)))
+
+(deftest transact!-positional-and-map-in-agree
+  ;; Both front doors funnel to one back door — committing the same shape
+  ;; of entity through each yields an equal envelope (modulo tx id) and the
+  ;; same queried-back value.
+  (async done
+    (with-conn
+      (fn [conn]
+        (go
+          (let [via-map (a/<! (db/transact! {::db/tx-data [{::name "Same" ::rank 1}]
+                                             ::db/conn    conn}))]
+            (is (true? (::db/ok? via-map))))
+          ;; retract then re-commit the same entity positionally
+          (a/<! (db/transact! conn [[:db/retractEntity [::name "Same"]]]))
+          (let [via-pos (a/<! (db/transact! conn [{::name "Same" ::rank 1}]))]
+            (is (true? (::db/ok? via-pos)) "positional commit of same shape")
+            (let [m (db/pull {::db/pull-pattern [::name ::rank]
+                              ::db/ref          [::name "Same"]
+                              ::db/conn         conn})]
+              (is (= "Same" (::name m)))
+              (is (= 1 (::rank m))
+                  "queried-back value identical regardless of call shape")))))
+      done)))
+
+(deftest transact!-positional-3-arity-attaches-tx-meta
+  ;; (transact! conn tx-data tx-meta) → tx-meta rides into the arg-map under
+  ;; :tx-meta and is reflected in the returned tx-report.
+  (async done
+    (with-conn
+      (fn [conn]
+        (go
+          (let [{::db/keys [ok? tx-report]}
+                (a/<! (db/transact! conn
+                                    [{::name "Metaed" ::rank 3}]
+                                    {:seon.db-test/source :import}))]
+            (is (true? ok?))
+            (is (= :import (:seon.db-test/source (:tx-meta tx-report)))
+                "tx-meta from the 3rd positional arg lands in the report"))))
+      done)))
+
+(deftest transact!-positional-bad-conn-returns-envelope
+  ;; ENVELOPE CONTRACT for the positional path: a non-conn first arg must
+  ;; come back as a :user-input envelope, NOT a thrown exception.
+  (async done
+    (with-conn
+      (fn [conn]
+        (go
+          (let [{::db/keys [ok? error]}
+                (a/<! (db/transact! "not-a-conn" [{::name "Nope"}]))]
+            (is (false? ok?) "non-conn positional first arg → ok? false")
+            (is (some? error))
+            (is (= :user-input (:seon.error/kind (:seon.error/data error))))
+            (is (= :seon.db/invalid-invocation-shape
+                   (:seon.db/error (:seon.error/data error)))))
+          ;; non-map tx-meta (3rd arg) → also an envelope, not a throw
+          (let [{::db/keys [ok? error]}
+                (a/<! (db/transact! conn [{::name "Nope"}] "not-a-map"))]
+            (is (false? ok?) "non-map tx-meta → ok? false")
+            (is (= :user-input (:seon.error/kind (:seon.error/data error)))))
+          ;; pod stays alive — a real positional write still works after
+          (let [{::db/keys [ok?]}
+                (a/<! (db/transact! conn [{::name "AliveAfter"}]))]
+            (is (true? ok?) "conn still usable after bad positional input"))))
+      done)))
+
+;; ---------------------------------------------------------------------------
 ;; Reads
 ;; ---------------------------------------------------------------------------
 
