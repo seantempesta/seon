@@ -217,3 +217,165 @@ Not fixed here (observation-only run). Flagged for a focused follow-up.
 The most valuable signal is the turn-killer bug: it is a single instrumentation
 mismatch that silently takes down the entire agent runtime mid-session, and it
 should be the next thing fixed before any further e2e runs.
+
+## Re-run 2026-06-08 (post T11/T12/T13)
+
+Re-run after tonight's three blocking fixes. Observer-only; no substrate edits,
+no commits. Driven via `mcp__seon_cljs__eval` against the `:client` runtime.
+
+Agent ids:
+
+- Phase 1 (index): `nuX-2606082242` (DeepSeek).
+- Phase 2 (Q&A): `SgL-2606082246` (DeepSeek).
+- Confound: the pod auto-boots an agent on restart (`CDv-2606082241`). It
+  self-drove ~79 evals on the shared `@seon.client/!agent-conn` with NO directive
+  from me — registered 2 attrs, did 4 transacts, 0 defns. There is no clean
+  "stop an agent loop" verb (`seon.client`/`seon.agent` expose only
+  `stop-heartbeat!`). I filtered all observations by `:seon.eval/ns` to separate
+  agents. **Rough edge: auto-booted agent contaminates the shared DB during an
+  observed run; provide an agent-stop verb or a no-auto-boot flag for demos.**
+
+### Phase 1 — REGISTER + STORE: SUCCESS (the key improvement)
+
+Unlike the prior run (register! never called), `nuX` registered real
+`:seon.kb.doc/*` schemas and transacted real entities. Took TWO messages: msg 1
+it spent the entire turn reading docs + introspecting (32 evals, 0 register, 0
+transact, 0 defn) then went idle without storing — the over-explore pattern.
+Msg 2 ("STOP reading, do the four steps NOW") pushed it over the last mile.
+
+Schemas it registered (T13 confirmed working — attrs land in `(:schema @conn)`):
+
+```clojure
+(seon.schema/register! :seon.test/sym [:string {:seon.db/identity true}])
+(seon.schema/register! :seon.test/source :string)
+(seon.schema/register! :seon.test/ns [:seon.db/ref])
+;; and the kb.doc family (path = identity upsert key):
+;; :seon.kb.doc/path :seon.kb.doc/title :seon.kb.doc/type
+;; :seon.kb.doc/tags :seon.kb.doc/summary :seon.kb.doc/content
+```
+
+`:seon.kb.doc/*` attrs were ABSENT at baseline (0) and PRESENT after the run (6).
+T13 register! + auto-derive-datahike-schema works end to end.
+
+Real data it transacted (3 `:seon.kb.doc` entities, queried back from DB):
+
+```clojure
+{:seon.kb.doc/title "Seon Dashboard"
+ :seon.kb.doc/path "docs/seon/_dashboard.md"
+ :seon.kb.doc/type :concept
+ :seon.kb.doc/tags [:concept :dashboard :index]
+ :seon.kb.doc/summary "The Seon Dashboard is the main entry point ..."}
+{:seon.kb.doc/title "Agent Concepts" :seon.kb.doc/path "docs/seon/concepts/agents.md"
+ :seon.kb.doc/type :concept :seon.kb.doc/tags [:agent :concept :lifecycle] ...}
+{:seon.kb.doc/title "Agent System Component"
+ :seon.kb.doc/path "docs/seon/components/agent-system.md"
+ :seon.kb.doc/type :component :seon.kb.doc/tags [:agent :component :provider :system]
+ :seon.kb.doc/summary "Provider-agnostic AI agent lifecycle — launch, observe, persist, interrupt ..."}
+```
+
+Deeply-typed, fully-namespaced, natural-key identity (`path`), keyword enum
+(`type`), vector-of-keyword tags. This is exactly the target shape.
+
+### fn-writing / T14: NOT EXERCISED (cannot confirm fixed)
+
+Neither agent ever evaluated a real `(defn ...)`. `nuX`: 0 defns. `CDv`: 0 defns.
+Both stored functions/tests as STRINGS inside `:seon.test/source` (the corpus
+"test as data" path) rather than def-ing them. So:
+
+- The T14 phantom-ns symptom ("Nothing found for entity id [:seon.ns/name :]" /
+  lost eval after a defn) did NOT appear — searched all failed evals across both
+  agents for that signature: **0 hits**. But this is because no defn ran, not
+  because the path was exercised and passed. **T14 remains unverified by this run.**
+- The one place `nuX` tried to materialize a function-as-data, the transact FAILED
+  with a legible parse error (it embedded an unbalanced `(deftest ...)` string):
+  `"Unmatched delimiter: ) [at line 5, column 68]"`.
+
+### T12 error-surfacing: CONFIRMED WORKING
+
+Failed evals carry specific, actionable messages the agent can read. Real samples:
+
+- `Nothing found for entity id [:seon.ns/name :seon.agent.nuX-2606082242] ... :error :entity-id/missing`
+- `Query for unknown vars: [?error] ... :error :parser/query`
+- `ENOENT: no such file or directory, open '.../architecture/README.md'`
+- `undeclared-var: seon.agent.nuX-2606082242/?at ... :seon.error/kind :compile`
+- Full malli instrument-input explain on a bad `:seon.db/args` shape (humanized +
+  path + got-type/expected), e.g. passing `{:limit 5}` where `[:vector :any]` is
+  expected.
+
+Errors are no longer silent/empty — a clear improvement over the prior run.
+
+### T11 turn-killer: CONFIRMED WORKING
+
+Turns terminate cleanly (`:seon.turn/status :done`, agent returns to `:idle`)
+across many turns; no mid-session runtime death. Both agents idled normally after
+each turn. The prior run's "turn-killer takes down the runtime" did not recur.
+
+### Phase 2 — ANSWER FROM DB: FAILED
+
+Fresh agent `SgL-2606082246`, same conn. Across TWO messages (≤4 budget) it never
+produced a DB-grounded answer:
+
+- Msg 1: it got distracted investigating a "1 failed eval" warning, explored the
+  schema catalog + eval logs (12 evals), **0 queries against `:seon.kb.doc/*`**,
+  went idle without answering.
+- Msg 2 (handed the EXACT attrs and three queries to run): it STILL did not run a
+  correct query. The one data query it attempted dropped the `seon.` prefix:
+
+  ```clojure
+  ;; SgL's query — WRONG namespace (:kb.doc/path instead of :seon.kb.doc/path)
+  (seon.db/query {:seon.db/query '[:find ?path ?title
+                                   :where [?e :kb.doc/path ?path]
+                                          [?e :kb.doc/title ?title]]})
+  ;; => #{}   (empty; never noticed the typo, never recovered)
+  ```
+
+  Count of correct `:seon.kb.doc/`-namespaced queries by SgL: **0**. It produced no
+  prose answer to the three questions; final turn ended still re-reading the user
+  message and the schema catalog.
+
+So the cross-agent "second agent answers from the first agent's stored data" loop
+was demonstrated to be POSSIBLE (the data is there, well-typed, queryable — I
+verified `[:find ?title ?path :where [?e :seon.kb.doc/title ?title]...]` returns
+all 3 docs from the observer session) but the agent itself did NOT close it: it
+over-explored and mis-typed the attribute namespace.
+
+### Remaining rough edges (this run)
+
+1. **Over-exploration / under-delivery is the dominant failure mode now.** With
+   T11/T12/T13 fixed, the runtime is healthy but the AGENT burns a whole turn
+   reading/introspecting and stops before doing the requested storage/answer. Both
+   phases needed a second, blunt "STOP exploring, DO it now" message. A single
+   intent is not enough; the agent treats "learn" as "read forever."
+2. **Namespace-prefix drift in queries.** `SgL` queried `:kb.doc/*` instead of
+   `:seon.kb.doc/*` even after being given the exact keys, got `#{}`, and never
+   suspected the typo. An empty result should prompt a "did I name the attr right?"
+   check — the agent has no reflex for that.
+3. **`?at`/`?time`-as-datalog-var collides with ns-qualified symbol resolution.**
+   Recurring across all three agents: using `?at` in a `:find`/`:where` yields
+   `undeclared-var: seon.agent.<id>/?at`. The agents work around it inconsistently.
+   Worth a note in the capability docs or a query preprocessor.
+4. **Agents conflate "store a test as data" (`:seon.test/*` corpus) with the
+   requested task.** `nuX` registered `:seon.test/*` AND `:seon.kb.doc/*`; the
+   `:seon.test/*` transact (a `deftest` string) failed on unbalanced parens. The
+   "test as data" corpus path competes for attention with plain knowledge storage.
+5. **Auto-booted agent on pod restart** (see Agent ids) — contaminates a shared-conn
+   observation run; no stop verb.
+6. **Turn counter in logs is per-step, not per-message** (`turn 8 ▸ done`,
+   `turn 9 ▸ done` within one chat) — fine, but don't read it as message count.
+
+### Honest assessment (re-run)
+
+- **The three fixes hold.** T11 (turns terminate, runtime survives) and T12
+  (legible errors) are clearly working. T13 (register! → schema → datoms) is
+  working: an agent registered nested namespaced schemas and stored real,
+  well-typed knowledge entities — the single biggest improvement over the prior
+  run, where register! was never called.
+- **T14 is unverified** — no agent wrote a real `(defn ...)` this run, so the
+  phantom-ns path was not exercised. To confirm T14, a future run must force a
+  literal `(defn ...)` eval and check the eval record persists.
+- **The bottleneck moved from the runtime to the agent's task-execution
+  discipline.** Phase 1 succeeded only after a corrective second message; Phase 2
+  failed outright (agent never queried the right attrs). The substrate now does
+  its job; the agent over-explores and mis-types. Prompt/guardrail work (or a
+  reflexive "empty result ⇒ re-check attr names" hint) is the next lever, not more
+  runtime fixes.
