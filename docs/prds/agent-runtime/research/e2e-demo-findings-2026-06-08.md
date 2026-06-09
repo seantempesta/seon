@@ -484,3 +484,56 @@ e2e run.
   the namespace is ALREADY bootstrapped so the agent stops "getting its bearings."
 - **NEW: fix the `:seon.fn/ns` boot-indexing ref bug** before the next run — it
   silently breaks the "second agent on the same conn" pattern.
+
+## Run 3 — 2026-06-09 ~18:33Z, scenario 1 of the two-scenario test (agent rEp-2606091203)
+
+Question sent via POST /chat: "Track my workouts for me. Today I ran 5k in 24:30.
+Yesterday a 60-minute strength session. Store these…" — a work-directed
+schema-design + store task.
+
+**Outcome: FAILED the core objective.** Zero workout schemas registered, zero
+entities stored. The agent never saw the question.
+
+### Root cause (verified in the live DB)
+
+**User messages never reach the agent's context.** `seon.agent/messages` (feeding
+`transcript-section`) walks `:seon.session/turns → :seon.turn/messages` — but the
+`/chat` handler transacts the user `:seon.message` STANDALONE (agent ref only,
+never attached to any turn). Verified: 0 of 2 user messages are in any turn's
+`:seon.turn/messages`; turn 147's persisted `:seon.turn/prompt-text` (9486 chars)
+does NOT contain "Track my workouts". 6 of 20 assistant messages are orphaned the
+same way.
+
+Downstream behavior (all 43s–3min after the /chat):
+
+1. Agent (correctly, per its prompt) looked for "the most recent user> line in the
+   transcript" — found none.
+2. Fell back to QUERYING for the latest user message; failed TWICE with the same
+   compile error (`undeclared var ?at` — `:seon.db/order-by [[?at :desc]]` outside
+   the quoted query) and once with "Cannot parse clause".
+3. Concluded no message existed, transacted "waiting for next task"-type replies,
+   one EMPTY assistant message (content ""), went idle.
+
+### Defect list (ordered, MVP-critical first)
+
+1. **transcript-misses-user-messages** — fix `seon.agent/messages` to query by
+   `:seon.message/agent` directly (derived-by-default; turn-walking is an
+   unnecessary indirection for the transcript), or attach incoming user msgs to
+   the opening turn. THE blocker; re-run scenario 1 after.
+2. **`?at`-in-order-by compile error is repeat-trap** — agent hit the identical
+   error twice; the error text didn't teach the fix (A3/A4). The order-by gotcha
+   deserves a targeted error translation (it's the documented loose-`?var` trap).
+3. **`:seon.eval` rows carry NO agent ref** — only `:seon.eval/ns` (a keyword like
+   `:seon.agent.rEp-…`). Anything querying evals by agent silently returns ∅.
+4. **Empty assistant message** (content "") transacted + a message whose content
+   was raw code text — message-content hygiene at transact boundary.
+5. **Turn-count stayed 0** on the agent entity through 5 turns (sessions/turns
+   exist — entity counter not updated; inspector header reads it).
+6. (Fixed during run) **unscoped user-trigger** woke every agent per user message
+   (commit a0bdde9); **hot-reload didn't re-arm triggers** (1.2-infra agent landed
+   auto re-arm in client.cljs).
+
+### Status
+
+Scenario 2 NOT run (premise requires scenario 1's stored schemas). Re-run both
+after defect 1 lands.
