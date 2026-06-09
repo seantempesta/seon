@@ -144,11 +144,19 @@
   (log/info-console! "seon.client" "reloading…")
   (stop-heartbeat!))
 
+(declare rearm-user-triggers!)
+
 (defn ^:dev/after-load after-reload []
   (swap! !state update :reload-count inc)
   (log/info-console! "seon.client"
                      (str "reload #" (:reload-count @!state)
                           " — booted " (:boot-at @!state)))
+  ;; Hot-reload hygiene: re-install the per-agent user-message
+  ;; triggers so tx-listener closures run the just-reloaded code.
+  ;; Async fire-and-forget — logs the re-armed ids / errors.
+  ;; (seon.web.inspector re-arms its own ::inspector listener via its
+  ;; own ^:dev/after-load — not duplicated here.)
+  (rearm-user-triggers!)
   (start-heartbeat!))
 
 ;; ---------------------------------------------------------------------------
@@ -990,6 +998,79 @@
                "     :seon.agent/state  :idle}]})\n")]
     (.then (.resolve js/Promise nil) (fn [_] {:text text}))))
 
+(defn- current-llm-fn
+  "The llm-fn for this pod process: the DeepSeek adapter when
+   DEEPSEEK_API_KEY is set, else the stub. Single selection point —
+   `-main` and the hot-reload re-arm both call it. Rebuilt FRESH at
+   each call (not cached) so a hot reload of seon.ai.deepseek takes
+   effect on re-armed listeners; a registry of boot-time llm-fn
+   closures would pin agents to pre-reload adapter code, defeating
+   the re-arm."
+  []
+  (if (.. js/process -env -DEEPSEEK_API_KEY)
+    (deepseek/agent-adapter)
+    stub-llm))
+
+(defn- live-agent-ids
+  "Agent ids whose `:seon.agent/state` is `:idle` or `:running` — the
+   agents whose user-message triggers must exist. Derived from the DB
+   at call time (reactive-context: no stored agent registry)."
+  [db]
+  (->> (db/query {:seon.db/query '[:find ?aid
+                                   :where
+                                   [?a :seon.agent/id ?aid]
+                                   [?a :seon.agent/state ?state]
+                                   [(contains? #{:idle :running} ?state)]]
+                  :seon.db/db db})
+       (mapv first)))
+
+(defn- rearm-user-triggers!
+  "Hot-reload hygiene (work-plan 1.2): re-install the per-agent
+   user-message trigger for every live agent so handler fixes take
+   effect on hot reload. Without this, the registered tx-listener
+   closures keep running pre-reload code (observed live 2026-06-09:
+   the trigger-scoping fix in seon.agent/user-msg-for-agent? did not
+   reach live agents until a manual install-user-trigger! per agent).
+
+   Everything is derived, nothing stored: agent ids from the DB
+   (`live-agent-ids`), compile-state from the idempotent
+   `repl/ensure-bootstrap!`, llm-fn rebuilt via `current-llm-fn`.
+   `agent/install-user-trigger!` is itself idempotent (unlistens the
+   prior key), so re-running per reload is safe.
+
+   Fire-and-forget from `after-reload` (which is sync): returns a
+   Promise resolving to the re-armed id vector; errors are logged
+   loudly, never swallowed. No-op (resolves []) before the first
+   `start-agent!` (no conn yet)."
+  []
+  (if-let [conn @!agent-conn]
+    (do
+      ;; Re-assert the root *conn*. set! at boot survives a client.cljs
+      ;; reload, but a reload that touches seon.db re-evaluates the
+      ;; dynamic def and wipes the root — re-arming is the natural
+      ;; place to restore it.
+      (set! db/*conn* conn)
+      (-> (repl/ensure-bootstrap!)
+          (.then
+            (fn [compile-state]
+              (let [ids    (live-agent-ids @conn)
+                    llm-fn (current-llm-fn)]
+                (doseq [id ids]
+                  (agent/install-user-trigger!
+                    {:seon.agent/id            id
+                     :seon.agent/llm-fn        llm-fn
+                     :seon.agent/compile-state compile-state}))
+                (log/info-console! "seon.client"
+                                   "reload: user-message triggers re-armed"
+                                   {:seon.client/reinstalled ids})
+                ids)))
+          (.catch
+            (fn [err]
+              (log/error-console! "seon.client"
+                                  "reload: user-message trigger re-arm FAILED"
+                                  err)))))
+    (js/Promise.resolve [])))
+
 (defn ^:async start-agent!
   "Bring up the V0 agent: open conn, init bootstrap-CLJS, prime the
    agent's home namespace with the (result <eval-id>) accessor, then
@@ -1191,12 +1272,12 @@
   ;; Cheap default for dev iteration — browser hits the loopback port,
   ;; no REPL needed. Disable when running the bare smoke test alone.
   (when-not (.. js/process -env -SEON_NO_AUTO_BOOT)
-    (let [llm-fn (if (.. js/process -env -DEEPSEEK_API_KEY)
-                   (do (log/info-console! "seon.client" "using DeepSeek LLM (DEEPSEEK_API_KEY set)")
-                       (deepseek/agent-adapter))
-                   (do (log/info-console! "seon.client" "using stub LLM (DEEPSEEK_API_KEY unset)")
-                       nil))]
-      (-> (start-agent! {:llm-fn (or llm-fn stub-llm)})
+    (let [llm-fn (current-llm-fn)]
+      (log/info-console! "seon.client"
+                         (if (.. js/process -env -DEEPSEEK_API_KEY)
+                           "using DeepSeek LLM (DEEPSEEK_API_KEY set)"
+                           "using stub LLM (DEEPSEEK_API_KEY unset)"))
+      (-> (start-agent! {:llm-fn llm-fn})
           (.then (fn [{:seon.agent/keys [id ns]
                        :seon.web/keys [port port-file]}]
                    (log/info-console! "seon.client" "auto-boot ready"
