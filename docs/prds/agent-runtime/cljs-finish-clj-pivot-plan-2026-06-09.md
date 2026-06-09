@@ -580,6 +580,56 @@ js/require branch). wire-server runs via `bin/seon` (store:
   boot.preconditions-test 4 fails; agent-context-test 13 fails in `:test` build.
   Worth a dedicated cleanup unit.
 
+### UNIT 2.2d — DIS same-box cutover (USER-APPROVED 2026-06-09 ~23:30Z)
+
+User: same-box is fine for now; spec + implement. Architecture per
+`research/datahike-native-replica-2026-06-09.md` (+ its "Probe results"
+section — every claim CONFIRMED except the konserve header bug). The wire
+work is NOT abandoned: `transact` op = the PWriter's transport;
+`subscribe-tx` = change notification; reactive query-subs = UI/remote;
+only per-op READS retire from the pod's path (kept server-side).
+
+**Stage A — konserve header fix (GATES everything; cross-repo):**
+
+- Repo: `/Users/sean/src/konserve` (the fork both classpaths resolve).
+  `konserve/impl/storage_layout.cljc`: CLJS `create-header` writes meta-size
+  as ONE byte at offset 4 (line ~40) vs CLJ 4-byte BE (line ~29). Fix CLJS
+  to BE32 (write + parse); parse-side LEGACY SNIFF for old CLJS-written
+  blobs: `byte4≠0 ∧ bytes5-7=0` ⇒ legacy 1-byte (no collision — that bit
+  pattern as BE32 means meta ≥ 16MiB, never occurs). Same sniff on the CLJ
+  parse side so the JVM can read existing `data/seon-pod/*` stores.
+- Unit tests in the konserve repo for: new-format roundtrip both platforms,
+  legacy-sniff reads, cross-platform JVM-write/CLJS-read + reverse.
+- Discover how seon resolves the fork (deps.edn / package.json / gitlibs —
+  sha-pinned git dep ⇒ commit + sha bump in seon; :local/root ⇒ simpler) and
+  wire the fixed version into BOTH the pod build and the probe aliases.
+- ORACLE: `clj -M:replica-probe-jvm` phase 0 flips CONFIRMED (the probe is
+  the regression harness); existing pod stores still open (legacy sniff).
+
+**Stage B — pod cutover (AFTER Stage A verified + 1.5 committed; pod lane):**
+
+- `:seon-wire` PWriter (~40 lines CLJS, mirror `http/writer.clj`,
+  `-streaming? false`): pod `transact!` forwards over the EXISTING UDS
+  `transact` op to the wire-server. Reads stay local sync db-values via
+  deref→root-re-read→lazy LRU fetch (zero changes to context assembly /
+  agent-view / d/filter).
+- Pod boot connects to the CLUSTER store (the wire-server's
+  `data/clusters/default/store`) as reader; new runs stop minting
+  `data/seon-pod/<run-id>` stores (legacy dirs stay readable via sniff).
+- **JVM writer sha alignment**: wire-server moves off mvn 0.8.1671 onto the
+  fork sha (fork IS upstream+3; kabel research confirmed upstream opens the
+  existing store) — kills the version-skew flag.
+- `listen!` adapter: `subscribe-tx` events → re-deref → fire registered
+  handlers with the SAME handler contract (db/db-before as consecutive
+  materialized values, attr-index from event tx-data) — triggers + inspector
+  keep working unchanged.
+- RYOW: transact ack carries basis-t; the PWriter resolves only after a
+  deref shows ≥ that basis-t (flush-before-ack makes this immediate).
+- ORACLE: full agent loop (boot → index-substrate! → stub-llm turn →
+  transact/query) against the cluster store; a :user message transacted
+  JVM-side wakes the pod trigger (cross-process reactivity); S1-style
+  stub scenario lands data visible from the wire-server REPL.
+
 ### USER DECISIONS 2026-06-09 (late) — clusters, isolation, kabel, Friday demo
 
 1. **Cluster model (settles 2.3):** the JVM datahike server hosts MANY
