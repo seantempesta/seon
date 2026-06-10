@@ -138,15 +138,17 @@
         "non-exemplar ns source is the minimal (ns x) stub")))
 
 (deftest exemplar-ns-rows-carry-full-file-source
-  ;; Context-focus-redesign E1: the exemplar root set (seon.search, seon.fs)
-  ;; persists the REAL FULL FILE TEXT on :seon.ns/source — the :exemplars
-  ;; context section renders this attr from the graph, never re-reading
-  ;; files at render time. Safe to upgrade from the old stub because
-  ;; substrate rows are replay-skipped (Step 4).
+  ;; Context-focus-redesign E1 (roots swapped fs→todo, context-v3 unit 2):
+  ;; the exemplar root set (seon.search, seon.agent.todo) persists the REAL FULL
+  ;; FILE TEXT on :seon.ns/source — the :exemplars context section renders
+  ;; this attr from the graph, never re-reading files at render time. Safe
+  ;; to upgrade from the old stub because substrate rows are replay-skipped
+  ;; (Step 4).
   (let [tx      (client/index-substrate!)
         ns-rows (filter :seon.ns/name tx)
         row-for (fn [k] (first (filter #(= k (:seon.ns/name %)) ns-rows)))
         search  (:seon.ns/source (row-for :seon.search))
+        todo    (:seon.ns/source (row-for :seon.agent.todo))
         fs      (:seon.ns/source (row-for :seon.fs))]
     (is (str/starts-with? search "(ns seon.search")
         "seon.search source starts with the real ns form")
@@ -156,10 +158,14 @@
         "the full file carries grep's real defn")
     (is (str/includes? search "schema/register!")
         "the full file carries the register! exemplar shapes")
-    (is (str/starts-with? fs "(ns seon.fs")
-        "seon.fs source starts with the real ns form")
-    (is (> (count fs) 10000)
-        "seon.fs source is the full file text, not the stub")))
+    (is (str/starts-with? todo "(ns seon.agent.todo")
+        "seon.agent.todo source starts with the real ns form")
+    (is (> (count todo) 7000)
+        "seon.agent.todo source is the full file text, not the stub")
+    (is (str/includes? todo "(defn ^:async add!")
+        "the full file carries add!'s real defn")
+    (is (= "(ns seon.fs)" fs)
+        "seon.fs rotated OUT of the exemplar set — back to the minimal stub")))
 
 (deftest exemplar-test-sibling-carries-full-file-source
   ;; The TEST SIBLING rule: seon.search-test is not a name-child of

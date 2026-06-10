@@ -1816,15 +1816,19 @@
    starts with `<root>.` (children ride along by default), or is the
    TEST SIBLING (`…-test`) of an included ns — see [[exemplar-ns?]].
 
-   Why these two (context-focus-redesign §1): `seon.search` is THE
-   exemplar npm-package wrapper (wrapper doctrine, 17 register! calls,
+   Why these two (context-v3 unit 2): `seon.search` is THE exemplar
+   npm-package wrapper (wrapper doctrine, 17 register! calls,
    map-in/map-out request/response schemas, error envelopes);
-   `seon.fs` is the agent's most-used API (config-map pattern,
-   allowlist/default-deny envelopes, sync + async fns). Their test
-   sibling (`seon.search-test`) is the model test ns. Lives in code as
-   a def (same lifecycle as the build that contains the source); a
-   DB-resident override is deliberately NOT v1 (spec open question 3)."
-  #{"seon.fs" "seon.search"})
+   `seon.agent.todo` is THE store/retrieve + resume arc (register! attrs,
+   error-as-value envelopes, a pure derived context view, everything
+   re-derived from the conn so a resuming agent sees its open work).
+   Their test siblings (`seon.search-test`, `seon.agent.todo-test`) are the
+   model test nses. `seon.fs` rotated out 2026-06-10 (it stays a core
+   taught API via the capabilities section; full-depth return is
+   V3-D/E). Lives in code as a def (same lifecycle as the build that
+   contains the source); a DB-resident override is deliberately NOT v1
+   (spec open question 3)."
+  #{"seon.search" "seon.agent.todo"})
 
 (defn- exemplar-base-name
   "The ns name with a trailing `-test` stripped — the SUBJECT ns a test
@@ -1854,10 +1858,9 @@
 (defn- exemplar-sort-key
   "Deterministic render order for exemplar nses: alphabetical by the
    base (subject) name, test sibling AFTER its subject. For the current
-   set that yields seon.fs → seon.search → seon.search-test — which is
-   also dependency order (search requires fs) and is byte-stable across
-   renders (LLM cache-prefix invariant: no timestamps, no map-order
-   nondeterminism)."
+   set that yields seon.search → seon.search-test → seon.agent.todo →
+   seon.agent.todo-test — byte-stable across renders (LLM cache-prefix
+   invariant: no timestamps, no map-order nondeterminism)."
   [ns-str]
   [(exemplar-base-name ns-str) (if (str/ends-with? ns-str "-test") 1 0)])
 
@@ -2921,9 +2924,9 @@
      1. :system            — Seon identity + CLJS-in-Node + REPL contract (static)
      2. :capabilities      — core API worked examples (static)
      3. :exemplars         — FULL source of the exemplar namespaces
-                             (seon.fs, seon.search + test sibling), queried
-                             from :seon.ns/source; byte-stable for the pod's
-                             life (static — inside the cache prefix)
+                             (seon.search, seon.agent.todo + test siblings),
+                             queried from :seon.ns/source; byte-stable for
+                             the pod's life (static — inside the cache prefix)
      4. :schema-catalog    — GLOBAL catalog of every entity KIND in the
                              system (cross-ns; what DATA exists), grouped by
                              namespace with attrs + instance counts;
@@ -2935,8 +2938,11 @@
                              (mostly static; busts on ns edit)
      7. :warnings          — current cross-agent problems (failed/slow evals,
                              failing tests); reactive, vanishes when fixed (dynamic)
-     8. :transcript        — messages + evals interleaved chronologically (dynamic)
-     9. :prompt            — `seon.agent.<id>=>  ; turn N` (always changing)
+     8. :open-todos        — the CALLING agent's open work items
+                             (seon.agent.todo/open-todos-section); derived from the
+                             db, vanishes when the work is done (dynamic)
+     9. :transcript        — messages + evals interleaved chronologically (dynamic)
+    10. :prompt            — `seon.agent.<id>=>  ; turn N` (always changing)
 
    :exemplars sits at 22, between :capabilities (20) and :schema-catalog
    (25): system + capabilities + exemplars are all fully byte-stable while
@@ -2966,6 +2972,8 @@
     :seon.ctx/fn   'seon.agent/namespace-context-section}
    {:seon.ctx/name :warnings          :seon.ctx/priority 40
     :seon.ctx/fn   'seon.agent/warnings-section}
+   {:seon.ctx/name :open-todos        :seon.ctx/priority 45
+    :seon.ctx/fn   'seon.agent.todo/open-todos-section}
    {:seon.ctx/name :transcript        :seon.ctx/priority 50
     :seon.ctx/fn   'seon.agent/transcript-section}
    {:seon.ctx/name :prompt            :seon.ctx/priority 99

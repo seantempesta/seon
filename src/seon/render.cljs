@@ -205,38 +205,43 @@
   100)
 
 (defn- renderable-kinds
-  "Datalog-driven enumeration of every entity-shape `:seon.schema` row
-   in the DB. Returns a seq of `{:kind <kw> :id-attr <kw> :ai <sym>
-   :html <sym>}`. Each schema entity is materialized at agent boot
-   from `seon.schema/all-entity-schemas-tx-data` (and on every
+  "Datalog-driven enumeration of every RENDERABLE entity-shape
+   `:seon.schema` row in the DB — rows carrying BOTH an id-attr and a
+   `:seon.schema/render-fn`. Returns a seq of `{:kind <kw> :id-attr <kw>
+   :ai <sym> :html <sym>}`. Each schema entity is materialized at agent
+   boot from `seon.schema/all-entity-schemas-tx-data` (and on every
    subsequent `register!`), so the renderer reads schemas from
    substrate state instead of walking the in-memory
    `seon.schema/*schemas` atom.
 
-   `:seon.schema/render-fn` and `:seon.schema/render-html-fn` are
-   optional — split into two side queries and merge in Clojure rather
-   than relying on datahike-cljs's `get-else` (avoids per-backend
-   quirks)."
+   The render-fn clause is load-bearing, not cosmetic: rows WITHOUT a
+   renderer were already dropped post-pull (`:when ai-sym` in
+   [[visible-entities]]), but their id-attrs still fed the
+   [[renderable-entities]] `d/datoms` scan — and `d/datoms` THROWS
+   (\"Bad entity attribute … not defined in current schema\") for any
+   registered-but-never-transacted id-attr, e.g. the request/response
+   envelopes the registry's id-attr derivation over-matches (context-v3
+   unit 2; same gate as `seon.agent/schema-catalog-section`).
+
+   `:seon.schema/render-html-fn` stays optional — a side query merged
+   in Clojure rather than datahike-cljs's `get-else` (avoids
+   per-backend quirks)."
   [db]
-  (let [base  (d/q '[:find ?key ?id-attr
+  (let [base  (d/q '[:find ?key ?id-attr ?ai
                      :where
                      [?s :seon.schema/key ?key]
-                     [?s :seon.schema/id-attr ?id-attr]]
+                     [?s :seon.schema/id-attr ?id-attr]
+                     [?s :seon.schema/render-fn ?ai]]
                    db)
-        ais   (into {} (d/q '[:find ?key ?ai
-                              :where
-                              [?s :seon.schema/key ?key]
-                              [?s :seon.schema/render-fn ?ai]]
-                            db))
         htmls (into {} (d/q '[:find ?key ?html
                               :where
                               [?s :seon.schema/key ?key]
                               [?s :seon.schema/render-html-fn ?html]]
                             db))]
-    (map (fn [[k id-attr]]
+    (map (fn [[k id-attr ai]]
            {:kind    k
             :id-attr id-attr
-            :ai      (get ais k)
+            :ai      ai
             :html    (get htmls k)})
          base)))
 
@@ -303,6 +308,17 @@
    `:seon.eval` card that created them (visible-entities step 5)."
   #{:seon.fn :seon.schema :seon.ns})
 
+(defn- db-schema
+  "The datahike schema map of `db`, FilteredDB-safe. FilteredDB (the
+   inspector's per-agent view) doesn't implement ILookup — `(:schema db)`
+   THROWS. The schema is conn-level (the filter can't change it), so read
+   through to the wrapped db. Same guard as `seon.agent/db-schema` and
+   `seon.warn/domain-attrs`."
+  [db]
+  (try (:schema db)
+       (catch :default _
+         (:schema (.-unfiltered-db ^js db)))))
+
 (defn- renderable-entities
   "Enumerate the renderable entities visible to `agent-id`, bounded.
 
@@ -332,6 +348,14 @@
    `:seon.render/ai`, that wins over the kind's default."
   [db agent-id]
   (let [{:keys [kinds kinds-by-kw]} (kind-tables db)
+        ;; Belt + suspenders to the renderable-kinds render-fn gate:
+        ;; `d/datoms` THROWS on an attr the conn has never installed
+        ;; (registered-but-never-transacted), so only id-attrs present
+        ;; in the INSTALLED schema may reach the :aevt scan. The kind
+        ;; is simply absent until its first transact installs the attr
+        ;; — fail-soft, no error swallowed.
+        installed   (db-schema db)
+        kinds       (filter #(contains? installed (:id-attr %)) kinds)
         ;; 1. eid → set of discovery kinds (an entity could carry
         ;; id-attrs for multiple kinds — Phase 1c).
         eid->kinds  (reduce (fn [m {:keys [kind id-attr]}]

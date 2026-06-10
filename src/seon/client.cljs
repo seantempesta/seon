@@ -118,6 +118,9 @@
     ;; (seon.search/grep ...) from bootstrap-CLJS eval and so the
     ;; substrate-vars seed below can index it.
     [seon.search]
+    ;; Work items (user→agent asks + agent notes-to-self) — required so
+    ;; its register! calls run before the boot install of :seon.agent.todo/*.
+    [seon.agent.todo]
     [seon.platform]
     ;; Phase B item 9 — shared read-side wrapper over the analyzer
     ;; state. Required here so the build includes it; item 10's
@@ -337,6 +340,18 @@
 
    ;; --- User (ONE human entity, seeded at boot) ---
    :seon.user/id
+
+   ;; --- Todo (work items — user→agent asks + agent notes-to-self;
+   ;; --- installed at boot so a RESUMING agent can list-open before
+   ;; --- any todo tx has lazily installed the attrs) ---
+   :seon.agent.todo/id
+   :seon.agent.todo/title
+   :seon.agent.todo/description
+   :seon.agent.todo/status
+   :seon.agent.todo/created-at
+   :seon.agent.todo/completed-at
+   :seon.agent.todo/owner
+   :seon.agent.todo/from
 
    ;; --- Eval ---
    ;; Evals are component-many on :seon.turn/evals — no standalone

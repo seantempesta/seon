@@ -44,10 +44,11 @@
     [seon.eval :as seval]
     [seon.inspect :as inspect]
     [seon.schema :as schema]
-    ;; The exemplar TEST SIBLING — required so the fixture can seed its
-    ;; :seon.ns row (full file text) via client/index-tests, the same
+    ;; The exemplar TEST SIBLINGS — required so the fixture can seed their
+    ;; :seon.ns rows (full file text) via client/index-tests, the same
     ;; mechanism the pod's preload-driven boot uses.
-    [seon.search-test]))
+    [seon.search-test]
+    [seon.agent.todo-test]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fixture — a fresh conn seeded with one agent + session + turns. Returns a
@@ -66,11 +67,9 @@
    `:seon.ns`/`:seon.fn` for that ns (drives current-ns). `extra-evals`
    lets a test append big-result evals to turn 2.
 
-   The introspection-indexed core-fn `:seon.ns`/`:seon.fn` rows
-   (`seon.client/index-substrate!`) are appended INTO the same tx-vector —
-   the SAME data the pod seeds at boot — so `capabilities-section` has
-   the persisted entities it derives the `## What you can do` block from
-   (no parallel hardcoded fixture)."
+   Boot-equivalent rows (capabilities/catalog data) live in
+   [[boot-seed-tx]] — transacted separately under the
+   `:substrate-seed` tx-context, exactly like a real pod boot."
   [extra-evals]
   (let [now (js/Date.)
         t   (fn [ms] (js/Date. (+ (.getTime now) ms)))]
@@ -123,25 +122,39 @@
         :seon.ns/source "(ns seon.agent.ctxtest)"}
        {:seon.fn/sym "seon.agent.ctxtest/greet"
         :seon.fn/ns [:seon.ns/name :seon.agent.ctxtest]
-        :seon.fn/source "(defn greet [] :hi)"}]
+        :seon.fn/source "(defn greet [] :hi)"}])))
+
+(defn- boot-seed-tx
+  "The pod's boot-seed rows — the SAME data `seon.client/start-agent!`
+   transacts. Transacted SEPARATELY from [[seed-tx]], inside the
+   `{:seon.db/origin :substrate-seed}` tx-context, because provenance
+   is load-bearing since the S-21 fix (2026-06-10):
+   `seon.warn/domain-attrs` treats any `:seon.schema/key` row asserted
+   OUTSIDE the seed context as an AGENT-registered domain attr — these
+   ~300 registry rows in a non-seed tx made every installed substrate
+   attr render in the catalog's domain-attrs block (and blew the
+   turn-0 budget)."
+  []
+  (vec
+    (concat
       ;; the introspection-indexed core-fn :seon.ns + :seon.fn rows
-      ;; (drives capabilities) — the SAME data the pod seeds at boot
-      (concat
-        (client/index-substrate!)
-        ;; the :seon.schema entities for every entity kind — the SAME data
-        ;; the pod seeds at boot; drives schema-catalog-section.
-        (schema/all-entity-schemas-tx-data)
-        ;; the whole-registry :seon.schema rows (unit #23 fix b) — drives
-        ;; the schema-catalog's per-ns summary block. Deduped by key
-        ;; against the entity rows above via identity upsert.
-        (client/index-schemas)
-        ;; the exemplar TEST SIBLING's :seon.ns + :seon.test rows — the
-        ;; preload-populated default roster is empty in the :node-test
-        ;; build, so seed one search-test deftest explicitly (the SAME
-        ;; builder the pod boot uses). Drives the :exemplars section's
-        ;; test-sibling block.
-        (client/index-tests
-          [#'seon.search-test/match-found-with-path-line-text])))))
+      ;; (drives capabilities)
+      (client/index-substrate!)
+      ;; the :seon.schema entities for every entity kind — drives
+      ;; schema-catalog-section.
+      (schema/all-entity-schemas-tx-data)
+      ;; the whole-registry :seon.schema rows (unit #23 fix b) — drives
+      ;; the schema-catalog's per-ns summary block. Deduped by key
+      ;; against the entity rows above via identity upsert.
+      (client/index-schemas)
+      ;; the exemplar TEST SIBLINGS' :seon.ns + :seon.test rows — the
+      ;; preload-populated default roster is empty in the :node-test
+      ;; build, so seed one deftest per sibling explicitly (the SAME
+      ;; builder the pod boot uses). Drives the :exemplars section's
+      ;; test-sibling blocks.
+      (client/index-tests
+        [#'seon.search-test/match-found-with-path-line-text
+         #'seon.agent.todo-test/the-store-retrieve-arc-with-resume]))))
 
 (defn- with-seeded-conn
   "Open a fresh conn, seed it (optionally with `extra-evals` on turn 2),
@@ -149,7 +162,10 @@
    extent of `body`. `body`'s assertions must be synchronous: a plain
    `binding` does NOT survive Promise `.then` boundaries in CLJS (unlike
    the ALS-backed `db/with-agent`), so we rebind `db/*conn*` right
-   around the synchronous `body` call. Returns a Promise."
+   around the synchronous `body` call. Two transacts, matching a real
+   pod boot's provenance: [[boot-seed-tx]] under
+   `{:seon.db/origin :substrate-seed}`, then the runtime fixture
+   [[seed-tx]] in an ordinary tx. Returns a Promise."
   ([body] (with-seeded-conn [] body))
   ([extra-evals body]
    (-> (client/open-agent-conn!)
@@ -157,7 +173,14 @@
                 ;; transact under the binding so tx-context defaults resolve,
                 ;; then re-establish it around the synchronous body call.
                 (binding [db/*conn* conn]
-                  (-> (db/transact! {:seon.db/tx-data (seed-tx extra-evals)})
+                  (-> (db/with-tx-context {:seon.db/origin :substrate-seed}
+                        (fn []
+                          (db/transact! {:seon.db/conn conn
+                                         :seon.db/tx-data (boot-seed-tx)})))
+                      (.then (fn [_]
+                               (db/transact!
+                                 {:seon.db/conn conn
+                                  :seon.db/tx-data (seed-tx extra-evals)})))
                       (.then (fn [_]
                                (binding [db/*conn* conn]
                                  (body conn)))))))))))
@@ -189,12 +212,12 @@
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
               (is (= [:system :capabilities :exemplars :schema-catalog
                       :functions-catalog :namespace-context :warnings
-                      :transcript :prompt]
+                      :open-todos :transcript :prompt]
                      sections)
                   "the substrate-default section names, in order
                    (static→dynamic): system, capabilities, exemplars,
                    schema-catalog, functions-catalog, namespace-context,
-                   warnings, transcript, prompt"))))
+                   warnings, open-todos, transcript, prompt"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -534,10 +557,18 @@
             (is (not (str/includes? (catalog-text conn) "stored findings"))
                 "no findings block before any claims exist")
             (schema/register! :kbtest.finding/claim :string)
+            ;; the tee-shaped :seon.schema row a real register! eval
+            ;; always writes (seon.eval/build-tee-entities) — domain
+            ;; attrs (and therefore the findings block) discriminate by
+            ;; that agent-provenance row since the S-21 fix (2026-06-10)
             (-> (db/transact!
                   {:seon.db/conn conn
                    :seon.db/tx-data
-                   [{:kbtest.finding/claim
+                   [{:seon.schema/key :kbtest.finding/claim
+                     :seon.schema/source
+                     "(seon.schema/register! :kbtest.finding/claim :string)"
+                     :seon.schema/created-at (js/Date.)}
+                    {:kbtest.finding/claim
                      (str "transact! Malli-validates every entity "
                           "before the tx reaches datahike")}]})
                 (.then
@@ -605,8 +636,13 @@
               ;; EXEMPLAR nses cross-reference the full source above.
               (is (re-find #"seon\.search — \d+ fns? \(full source above\)" txt)
                   "exemplar ns count line carries the full-source cross-reference")
-              (is (re-find #"seon\.fs — \d+ fns? \(full source above\)" txt)
-                  "seon.fs cross-references too")
+              (is (re-find #"seon\.agent\.todo — \d+ fns? \(full source above\)" txt)
+                  "seon.agent.todo cross-references too")
+              (is (and (re-find #"seon\.fs — \d+ fns?" txt)
+                       (not (re-find #"seon\.fs — \d+ fns? \(full source above\)"
+                                     txt)))
+                  "seon.fs (rotated out) is a PLAIN count line — no
+                   full-source cross-reference")
               ;; The OWN-ns full-source special case is DEAD.
               (is (not (str/includes? txt "(your ns)"))
                   "no own-ns special case in the catalog")
@@ -669,9 +705,10 @@
 
 ;; ---------------------------------------------------------------------------
 ;; (l) exemplars-section — FULL exemplar source from the program graph
-;;     (context-focus-redesign 2026-06-10, units E1+E2). Guards: full
-;;     seon.search/seon.fs/seon.search-test source renders, in deterministic
-;;     dependency order; byte-stable across renders (cache-prefix invariant);
+;;     (context-focus-redesign 2026-06-10, units E1+E2; roots swapped
+;;     fs→todo in context-v3 unit 2). Guards: full seon.search/seon.agent.todo
+;;     + test-sibling source renders, in deterministic
+;;     order; byte-stable across renders (cache-prefix invariant);
 ;;     a stubbed root renders nothing (fail-loud, no stub padding); the whole
 ;;     turn-0 context respects the spec's budget ceiling.
 ;; ---------------------------------------------------------------------------
@@ -694,18 +731,27 @@
                   "seon.search's real ns form renders")
               (is (str/includes? txt "(defn ^:async grep")
                   "grep's full defn body renders (not a 240-char clip)")
-              (is (str/includes? txt "(ns seon.fs")
-                  "seon.fs renders too")
+              (is (str/includes? txt "(ns seon.agent.todo")
+                  "seon.agent.todo renders too")
+              (is (str/includes? txt "(defn ^:async add!")
+                  "add!'s full defn body renders")
               (is (str/includes? txt "(deftest match-found-with-path-line-text")
-                  "the test sibling renders at least one full deftest body")
-              ;; Deterministic dependency order: fs → search → search-test.
-              (let [i-fs     (str/index-of txt "<exemplar ns=\"seon.fs\">")
-                    i-search (str/index-of txt "<exemplar ns=\"seon.search\">")
-                    i-test   (str/index-of txt "<exemplar ns=\"seon.search-test\">")]
-                (is (and i-fs i-search i-test) "all three exemplar blocks present")
-                (is (< i-fs i-search i-test)
-                    "render order is fs → search → search-test (deps first,
-                     tests after their subject)")))))
+                  "search's test sibling renders a full deftest body")
+              (is (str/includes? txt "(deftest the-store-retrieve-arc-with-resume")
+                  "todo's test sibling renders a full deftest body")
+              (is (not (str/includes? txt "<exemplar ns=\"seon.fs\">"))
+                  "seon.fs rotated OUT of the exemplar set (context-v3 unit 2)")
+              ;; Deterministic order: search → search-test → todo → todo-test
+              ;; (alphabetical by subject, test sibling after its subject).
+              (let [i-search (str/index-of txt "<exemplar ns=\"seon.search\">")
+                    i-stest  (str/index-of txt "<exemplar ns=\"seon.search-test\">")
+                    i-todo   (str/index-of txt "<exemplar ns=\"seon.agent.todo\">")
+                    i-ttest  (str/index-of txt "<exemplar ns=\"seon.agent.todo-test\">")]
+                (is (and i-search i-stest i-todo i-ttest)
+                    "all four exemplar blocks present")
+                (is (< i-todo i-ttest i-search i-stest)
+                    "render order is todo → todo-test → search → search-test
+                     (roots sort by name; subjects first, tests after their subject)")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -746,7 +792,7 @@
                                      {:seon.db/db @conn :seon.agent/id agent-id})]
                            (is (not (str/includes? txt "<exemplar ns=\"seon.search\">"))
                                "stubbed root omitted — no stub padding")
-                           (is (str/includes? txt "<exemplar ns=\"seon.fs\">")
+                           (is (str/includes? txt "<exemplar ns=\"seon.agent.todo\">")
                                "the other exemplars still render")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

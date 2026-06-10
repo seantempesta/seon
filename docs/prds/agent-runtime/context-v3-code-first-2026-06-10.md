@@ -214,6 +214,22 @@ n-ok>0 and substrate rows still skipped. Gym oracle: S-01 stub smoke
 
 ### Unit 2 — todo wiring + exemplar swap + visible-entities hardening
 
+**STATUS: SHIPPED 2026-06-10 (uncommitted).** Roots = `#{"seon.search"
+"seon.todo"}` (one def, both sites); `seon.todo/open-todos-section`
+wired at priority 45 (`:open-todos`, between warnings and transcript);
+`renderable-kinds` gated on `:seon.schema/render-fn` + installed-schema
+filter before the `d/datoms` scan in `renderable-entities` (belt +
+suspenders; `catalog-kind-count` verified safe, unchanged). Tests
+updated: `agent_context_test` (section order, exemplar set, catalog
+cross-ref) + `index_substrate_test` (fs back to stub, todo full).
+Live proofs on the fresh pod boot (NLc-2606101409): todo `:seon.ns/source`
+= 8731 chars full text, todo-test 10266, fs stub; turn-0 = 63,027 chars
+(≤65k); add!→section renders→complete!→section gone; synthesized
+uninstalled id-attr+render-fn row — `d/datoms` throws, `visible-entities`
+survives; inspector pages 200. bin/test-cljs 330/1277/0 exit 0. NOT done
+here: `todo-resume.edn` gym scenario (gym tree fenced to the S-21
+verifier lane at ship time — encode it when the lane frees).
+
 Goal: commit the parked `seon.todo` exemplar, swap it into the exemplar
 roots (fs→todo), surface open todos as a context section, and stop the
 renderer crashing on registered-but-uninstalled id-attrs.
