@@ -508,6 +508,17 @@ client.cljs todo wiring remain intentionally uncommitted.
   verifier frees schema.cljc, before V3-C (which then deletes the
   inference path). Domain-attrs reuse surface is independent of this —
   no invisibility risk for agents who forget the marker.
+  **DONE 2026-06-10:** deriver gated on the marker (inference path
+  deleted), 10 genuine kinds swept (`:seon.agent` `:seon.eval`
+  `:seon.message` `:seon.fn` `:seon.ns` `:seon.schema`
+  `:seon.agent.todo/todo` `:seon.test` `:seon.system-prompt`
+  `:seon.conventions`), warn-only nudge in `register!`, suite
+  303/1205/0. Known consequence: the 8 substrate envelope schemas
+  match the warn predicate and emit the nudge at every process load
+  (pod.log noise; suffix-based suppression is an open follow-up).
+  Live-store note: a store seeded by a pre-change boot keeps its 8
+  phantom `:seon.schema` rows (identity upsert never retracts) —
+  gone at the next fresh-store boot.
 - **TOOLBELT = `seon.agent.*` (user-confirmed 2026-06-10):** root
   `seon.*` = the language layer ONLY (`seon.db`, `seon.schema`,
   `seon.repl`); everything an agent USES lives under `seon.agent.*` —
