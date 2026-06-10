@@ -509,9 +509,11 @@
 ;;
 ;;   - Query against `@conn`, NOT `(d/history db)`. Single-card identity
 ;;     attrs are last-write-wins; the current db gives us the latest
-;;     :source per entity. Tx-id bound is the LATEST upsert tx — that's
-;;     the correct order (replaying the current code shape, not the
-;;     original creation order). Live-probe Q2 in the findings file.
+;;     :source per entity. Tx-id bound is the LATEST upsert tx.
+;;     NB (2026-06-10): latest-upsert-tx is NOT a safe total order — the
+;;     tee's nested `:seon.fn/ns` upsert bumps the owning ns row's tx on
+;;     every define, so replay puts :ns entries FIRST, then def-shaped
+;;     entries, each group tx-ordered (see query-program-graph-entries).
 ;;   - Bypass `eval-batch!`. Replay goes straight to `seval/eval`.
 ;;     - No `:seon.eval` entry written per replay (there's no turn
 ;;       to attach to, and the schema doesn't make :seon.eval/turn
@@ -610,7 +612,18 @@
          ;; are rebuilt from the live registry by `index-schemas` each boot.
          (remove #(and (= :schema (:kind %))
                        (not (str/starts-with? (str/trim (str (:source %))) "("))))
-         (sort-by :tx)
+         ;; Replay order: ALL :ns entries FIRST (tx-ordered among
+         ;; themselves), then the def-shaped entries (tx-ordered).
+         ;; Plain tx order is WRONG here: the tee re-asserts
+         ;; `:seon.fn/ns {:seon.ns/name <kw>}` on every define, and the
+         ;; nested-map upsert bumps the owning ns row's identity-datom
+         ;; tx — a later redefine drags the ns row PAST entries that
+         ;; depend on its requires (live 2026-06-10: a deftest replayed
+         ;; before its `(ns … (:require [cljs.test]))` row and failed
+         ;; with `undeclared cljs.test/deftest`). The stored ns source
+         ;; is always the agent's LATEST ns form, so ns-first is safe;
+         ;; ensure-target-ns! covers nses with no stored row at all.
+         (sort-by (juxt #(if (= :ns (:kind %)) 0 1) :tx))
          vec)))
 
 (defn- error-chain-message
@@ -697,8 +710,11 @@
 
 (defn ^:async replay-program-graph!
   "Re-eval every :seon.ns / :seon.fn / :seon.schema entity's persisted
-   :source in tx-id order. Failures land as :seon.log :warn entries
-   and do NOT abort replay — every entity gets its own try/catch.
+   :source — :ns entries first, then def-shaped entries, each group in
+   tx-id order, with one retry pass over pass-1 failures (redefines bump
+   row txs, so stored tx order is not a reliable dependency order).
+   Persistent failures land as :seon.log :warn entries and do NOT abort
+   replay — every entity gets its own try/catch.
 
    Returns a Promise of
      {:seon.client/replay-n-total <int>
@@ -722,25 +738,38 @@
      :seon.db/agent-id agent-id}
     (fn ^:async run-replay! []
       (let [entries (await (query-program-graph-entries conn))
-            !n-ok   (volatile! 0)
+            ;; Pass 1. Def-shaped entries can mis-order WITHIN the
+            ;; def group: every redefine bumps the redefined row's
+            ;; tx (and, via the tee's nested :seon.fn/ns upsert, its
+            ;; ns row's tx), so an entry referencing a LATER-redefined
+            ;; var replays before it and dies with undeclared-var
+            ;; (live 2026-06-10: my.workout/add-workout-test before
+            ;; the twice-redefined add-workout!). Editor fixpoint-load
+            ;; semantics: collect pass-1 failures, retry them ONCE
+            ;; after everything else has landed. Only pass-2 failures
+            ;; are real.
+            !failed (volatile! [])
             !n-fail (volatile! 0)]
         (doseq [entry entries]
           (let [r (await (replay-one! compile-state entry))]
-            (if (:ok? r)
-              (vswap! !n-ok inc)
-              (do
-                (vswap! !n-fail inc)
-                ;; Best-effort log; swallow log-write failure (would
-                ;; be a double-fault and we want the rest of replay
-                ;; to continue).
-                (try
-                  (await (log-replay-failure! agent-id entry r))
-                  (catch :default e
-                    (log/error-console!
-                      "seon.client/replay-program-graph!"
-                      (str "log-replay-failure failed: " (.-message e)))))))))
+            (when-not (:ok? r)
+              (vswap! !failed conj entry))))
+        ;; Pass 2 — retry pass-1 failures now that later defs exist.
+        (doseq [entry @!failed]
+          (let [r (await (replay-one! compile-state entry))]
+            (when-not (:ok? r)
+              (vswap! !n-fail inc)
+              ;; Best-effort log; swallow log-write failure (would
+              ;; be a double-fault and we want the rest of replay
+              ;; to continue).
+              (try
+                (await (log-replay-failure! agent-id entry r))
+                (catch :default e
+                  (log/error-console!
+                    "seon.client/replay-program-graph!"
+                    (str "log-replay-failure failed: " (.-message e))))))))
         {:seon.client/replay-n-total (count entries)
-         :seon.client/replay-n-ok    @!n-ok
+         :seon.client/replay-n-ok    (- (count entries) @!n-fail)
          :seon.client/replay-n-fail  @!n-fail}))))
 
 ;; ---------------------------------------------------------------------------

@@ -228,6 +228,90 @@
 ;; failed: Assert failed: (ana/ast? sym)` on every boot (2026-06-10).
 ;; ---------------------------------------------------------------------------
 
+;; ---------------------------------------------------------------------------
+;; Reordered-ns-row replay — the live resume bug (P7, 2026-06-10).
+;; The tee re-asserts `:seon.fn/ns {:seon.ns/name <kw>}` on EVERY define;
+;; the nested-map upsert bumps the owning ns row's :seon.ns/name datom tx.
+;; Sequence: define fn in ns A → author a deftest (requires cljs.test)
+;; → redefine the fn twice (each redefine drags A's ns-row tx PAST the
+;; deftest's tx). Plain tx-order replay then evals the deftest BEFORE the
+;; `(ns A (:require [cljs.test]))` row — ensure-target-ns! only creates a
+;; BARE ns, so the deftest dies with `undeclared cljs.test/deftest`
+;; (live: deftest tx …937 replayed before its ns row tx …939). The fix:
+;; replay ALL :ns entries first, then def-shaped entries, each tx-ordered.
+;; ---------------------------------------------------------------------------
+
+(deftest replay-ns-rows-first-despite-upsert-bumped-tx
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (client/open-agent-conn!)
+                (.then
+                  (fn [conn]
+                    (let [tx!    (fn [data]
+                                   (binding [db/*conn* conn]
+                                     (db/transact! {:seon.db/tx-data data})))
+                          fn-row (fn [src]
+                                   [{:seon.fn/sym "seon.replay.reorder/f1"
+                                     :seon.fn/ns {:seon.ns/name :seon.replay.reorder}
+                                     :seon.fn/source src
+                                     :seon.fn/arglists "([n])"
+                                     :seon.fn/doc ""
+                                     :seon.fn/private? false}])]
+                      ;; Each step in its OWN tx — the tx spread is the bug.
+                      (-> (tx! [{:seon.ns/name :seon.replay.reorder
+                                 :seon.ns/source "(ns seon.replay.reorder (:require [cljs.test]))"}])
+                          (.then (fn [_] (tx! (fn-row "(defn f1 [n] (* n 2))"))))
+                          ;; deftest authored BETWEEN the defines.
+                          (.then (fn [_]
+                                   (tx! [{:seon.test/sym "seon.replay.reorder/reorder-test"
+                                          :seon.test/ns {:seon.ns/name :seon.replay.reorder}
+                                          ;; Body references f1 — the SECOND live failure shape:
+                                          ;; the redefines bump f1's OWN row tx past the deftest's,
+                                          ;; so the deftest replays first and compiles against an
+                                          ;; undeclared f1. The replay retry pass heals it (live
+                                          ;; 2026-06-10: my.workout/add-workout-test vs the
+                                          ;; twice-redefined add-workout!).
+                                          :seon.test/source "(cljs.test/deftest reorder-test (cljs.test/is (= 8 (f1 2))))"}])))
+                          ;; Two redefines — each nested :seon.fn/ns upsert
+                          ;; bumps the ns row's tx past the deftest's.
+                          (.then (fn [_] (tx! (fn-row "(defn f1 [n] (* n 3))"))))
+                          (.then (fn [_] (tx! (fn-row "(defn f1 [n] (* n 4))"))))
+                          ;; The precondition that makes this test honest: the
+                          ;; ns row's tx must now sort AFTER the deftest's tx.
+                          (.then (fn [_] (query-entries conn)))
+                          (.then
+                            (fn [entries]
+                              (let [tx-of (fn [k i]
+                                            (some #(when (and (= k (:kind %))
+                                                              (= i (:ident %)))
+                                                     (:tx %))
+                                                  entries))]
+                                (is (> (tx-of :ns :seon.replay.reorder)
+                                       (tx-of :test "seon.replay.reorder/reorder-test"))
+                                    "PRECONDITION: redefines bumped the ns row's tx past the deftest's")
+                                (is (= :ns (:kind (first entries)))
+                                    "ns entries replay FIRST despite their later tx"))
+                              (client/replay-program-graph!
+                                {:conn conn :compile-state cs
+                                 :agent-id "resume-replay-test"})))
+                          (.then
+                            (fn [stats]
+                              (is (= 3 (:seon.client/replay-n-total stats))
+                                  "ns + fn + deftest are the replay set")
+                              (is (= 0 (:seon.client/replay-n-fail stats))
+                                  "deftest replays AFTER its requiring ns form — no undeclared cljs.test/deftest")
+                              (seval/eval cs "[(seon.replay.reorder/f1 10) (some? seon.replay.reorder/reorder-test)]"
+                                          {:ns 'cljs.user :analyze-deps? false})))
+                          (.then
+                            (fn [r]
+                              (is (:ok r) "replayed corpus is live")
+                              (is (= [40 true] (:value r))
+                                  "latest f1 redefine won; deftest var reconstituted"))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest replay-fn-without-ns-row-creates-its-namespace
   (async done
     (-> (repl/ensure-bootstrap!)
