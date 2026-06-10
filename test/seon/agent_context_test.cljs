@@ -377,10 +377,27 @@
                   "no double-wrapped arglists render")
               (is (not (re-find #"\(seon\.db/(pull|entity) \(\)\)" cap))
                   "no empty-arglists `(sym ())` render for pull/entity")
+              ;; #26 — consult-before-research is the taught FIRST MOVE,
+              ;; modeled as a copyable worked query, not prose.
+              (is (str/includes? cap "CONSULT FINDINGS → SEARCH → READ")
+                  "recipe leads with consulting stored findings")
+              (is (str/includes? cap ":kb.finding/claim")
+                  "consult query + finding shape use multi-segment ns attrs")
+              (is (str/includes? cap ":kb.finding/source-path")
+                  "storage example models the multi-segment namespace")
+              (is (str/includes? cap "single-segment namespace")
+                  "the multi-segment rule is EXPLAINED, not just modeled")
+              (is (str/includes? cap "STORE PROACTIVELY")
+                  "store-proactively nudge present — persist by default")
+              ;; #26 — concise message!/reply! return modeled in the example.
+              (is (str/includes? cap ":seon.message/ok? true")
+                  "reply! example shows the concise return shape")
               ;; bounded — curated core API + worked examples, not a dump.
               ;; (raised from 4000 when the fs/search recipe, finding shape,
-              ;; pull/entity/listen! examples landed — demo-context fixes.)
-              (is (< (count cap) 11000)
+              ;; pull/entity/listen! examples landed; raised again to 13000
+              ;; for the #26 consult-first recipe + multi-segment rule +
+              ;; store-proactively nudge.)
+              (is (< (count cap) 13000)
                   (str "capabilities-section bounded — got " (count cap))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -492,6 +509,38 @@
         (.catch (fn [e]
                   (swap! schema/*schemas dissoc
                          :seon.zzcatalog :seon.zzcatalog/id :seon.zzcatalog/label)
+                  (is false (str "threw — " e)) (done))))))
+
+(deftest schema-catalog-surfaces-stored-finding-claims
+  ;; #26 finding-salience: attr names alone proved discoverable but not
+  ;; CONSULTED (run 7 re-derived a stored answer). The catalog must
+  ;; surface the claim CONTENT as one-liners.
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (is (not (str/includes? (catalog-text conn) "stored findings"))
+                "no findings block before any claims exist")
+            (schema/register! :kbtest.finding/claim :string)
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data
+                   [{:kbtest.finding/claim
+                     (str "transact! Malli-validates every entity "
+                          "before the tx reaches datahike")}]})
+                (.then
+                  (fn [_]
+                    (let [txt (catalog-text conn)]
+                      (is (str/includes?
+                            txt "=== stored findings — CONSULT these before re-deriving ===")
+                          "claims block appears once a claim is stored")
+                      (is (str/includes?
+                            txt "transact! Malli-validates every entity")
+                          "claim CONTENT renders as a one-liner, not just the attr name")))))))
+        (.then (fn [_]
+                 (swap! schema/*schemas dissoc :kbtest.finding/claim)
+                 (done)))
+        (.catch (fn [e]
+                  (swap! schema/*schemas dissoc :kbtest.finding/claim)
                   (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------

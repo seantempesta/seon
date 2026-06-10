@@ -95,11 +95,19 @@
                    :seon.message/to      [:seon.agent/id a-id]
                    :seon.message/content "hello agent A"})
                 (.then
-                  (fn [{ok? :seon.db/ok?}]
-                    (is (true? ok?) "envelope ok")
+                  (fn [{ok?  :seon.message/ok?
+                        mid  :seon.message/id
+                        hops :seon.message/hops
+                        :as  env}]
+                    (is (true? ok?) "concise success envelope")
+                    (is (string? mid) "response carries the message id")
+                    (is (= 0 hops) "response carries the hops")
+                    (is (not (contains? env :seon.db/tx-report))
+                        "raw tx-report is OFF the agent surface")
                     (let [[m] (pulled-msgs conn)]
                       (testing "stored message is FULLY formed"
-                        (is (string? (:seon.message/id m)))
+                        (is (= mid (:seon.message/id m))
+                            "response id = the stored row's id")
                         (is (= "user" (:seon.user/id (:seon.message/from m))))
                         (is (= [a-id]
                                (mapv :seon.agent/id (:seon.message/to m)))
@@ -120,8 +128,9 @@
                     (agent/message!
                       {:seon.message/content "report for my human"})))
                 (.then
-                  (fn [{ok? :seon.db/ok?}]
+                  (fn [{ok? :seon.message/ok? hops :seon.message/hops}]
                     (is (true? ok?))
+                    (is (= 1 hops) "response hops = stored hops")
                     (let [[m] (pulled-msgs conn)]
                       (is (= a-id (:seon.agent/id (:seon.message/from m)))
                           "from defaulted to the ALS agent")
@@ -200,8 +209,9 @@
                              (agent/reply!
                                {:seon.message/content "yes — here"})))))
                 (.then
-                  (fn [{ok? :seon.db/ok?}]
+                  (fn [{ok? :seon.message/ok? hops :seon.message/hops}]
                     (is (true? ok?))
+                    (is (= 1 hops) "concise response carries hops 0 + 1")
                     (let [m (->> (pulled-msgs conn)
                                  (remove #(= "MSGmsgtestWAKE"
                                              (:seon.message/id %)))
@@ -226,8 +236,9 @@
                              (agent/reply!
                                {:seon.message/content "checked — totals ok"})))))
                 (.then
-                  (fn [{ok? :seon.db/ok?}]
+                  (fn [{ok? :seon.message/ok? hops :seon.message/hops}]
                     (is (true? ok?))
+                    (is (= 3 hops) "concise response carries the climbing hops")
                     (let [m (->> (pulled-msgs conn)
                                  (remove #(= "MSGmsgtestWAKE"
                                              (:seon.message/id %)))

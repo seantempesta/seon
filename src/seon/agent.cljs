@@ -660,7 +660,21 @@
    [:seon.message/to {:optional true}
     [:or :seon.db/ref [:vector :seon.db/ref]]]])
 
-(schema/register! ::message-response :seon.db/transact-response)
+;; Concise success / standard error envelope (#26, A3 applied): the raw
+;; transact tx-report is OFF the agent surface — ~1.5k transcript chars
+;; per reply taught nothing and carried a misdirected "narrow your
+;; query" hint. Success answers the three things a sender can act on:
+;; did it store, which message, at what hop depth. Failure stays the
+;; substrate-standard error envelope (errors are values).
+(schema/register! ::message-response
+  [:or
+   [:map
+    [:seon.message/ok?  [:= true]]
+    [:seon.message/id   :seon.message/id]
+    [:seon.message/hops :seon.message/hops]]
+   [:map
+    [:seon.db/ok?   [:= false]]
+    [:seon.db/error :seon.db/error]]])
 
 (defn- user-entity?
   "Does `ref` resolve to THE user entity?"
@@ -697,8 +711,10 @@
 
 (defn ^:async message!
   "Send a message — THE single entry point for `:seon.message` writes.
-   Map-in / map-out; returns the transact envelope
-   (`{:seon.db/ok? true …}` / `{:seon.db/ok? false :seon.db/error …}`).
+   Map-in / map-out; returns a CONCISE envelope, never the raw
+   tx-report:
+     {:seon.message/ok? true :seon.message/id _ :seon.message/hops _}
+     {:seon.db/ok? false :seon.db/error …}   ; failure (errors are values)
 
    Defaulting (boundary liberties — the STORED row is always full):
      :seon.message/from — defaults to [:seon.agent/id (current-agent-id)]
@@ -741,25 +757,34 @@
              "pass from explicitly or call inside (seon.db/with-agent …).")}}
 
       :else
-      (let [hops (if (user-entity? from)
-                   0
-                   (inc (waking-hops agent-id)))]
-        (await
-          (db/transact!
-            {:seon.db/tx-data
-             [{:seon.message/id      (db/new-id!)
-               :seon.message/from    from
-               :seon.message/to      to
-               :seon.message/content content
-               :seon.message/at      (js/Date.)
-               :seon.message/hops    hops}]}))))))
+      (let [hops   (if (user-entity? from)
+                     0
+                     (inc (waking-hops agent-id)))
+            msg-id (db/new-id!)
+            env    (await
+                     (db/transact!
+                       {:seon.db/tx-data
+                        [{:seon.message/id      msg-id
+                          :seon.message/from    from
+                          :seon.message/to      to
+                          :seon.message/content content
+                          :seon.message/at      (js/Date.)
+                          :seon.message/hops    hops}]}))]
+        (if (:seon.db/ok? env)
+          ;; concise success — the tx-report stays off the agent surface;
+          ;; the id is the durable handle ([:seon.message/id msg-id]).
+          {:seon.message/ok?  true
+           :seon.message/id   msg-id
+           :seon.message/hops hops}
+          env)))))
 
 (defn ^:async reply!
   "Reply to whoever woke the current turn: `message!` with `to` := the
    `:seon.message/from` of the current turn's `:seon.turn/woken-by`
    message (derived — the substrate knows who's talking to you; no
    target atom). Falls back to the user when the turn wasn't woken by a
-   message. The one-liner for both user- and agent-conversations:
+   message. Returns `message!`'s concise envelope. The one-liner for
+   both user- and agent-conversations:
 
      (seon.agent/reply! {:seon.message/content \"done — stored 2 rows\"})"
   {:malli/schema [:=> [:cat ::message-request] ::message-response]}
@@ -897,7 +922,7 @@
         (db/transact!
           {:seon.db/tx-data
            [(merge {:seon.turn/id id-of-turn :seon.turn/status :done}
-                   (select-keys result [:seon.turn/messages]))
+                   (select-keys result [:seon.turn/messages :seon.turn/status]))
             {:seon.agent/id id :seon.agent/state :idle}]}))
       result)
     (catch :default e
@@ -909,16 +934,11 @@
         (catch :default _ nil))
       (throw e))))
 
-(defn ^:async ask-and-eval!
-  "Body of `with-turn!`. Calls the LLM with `prompt-text`, parses the
-   reply, eval-batches the forms (each as a `:seon.turn/evals`
-   component via Platform's eval-batch!), and returns
-   `{:seon.turn/messages [<assistant>] :seon.agent/eval-count n-ok}`
-   for `with-turn!` to fold into the close-tx."
-  [{:seon.agent/keys [id llm-fn compile-state]
-    :seon.turn/keys  [id-of-turn prompt-text]}]
-  (let [resp       (await (llm-fn prompt-text))
-        reply-text (or (:text resp) "")
+(defn ^:async ^:private ask-and-eval-reply!
+  "Internal — the successful-LLM-reply half of `ask-and-eval!`: parse
+   the reply, eval-batch the forms, fold the assistant self-message."
+  [resp id id-of-turn compile-state]
+  (let [reply-text (or (:text resp) "")
         parsed     (repl/parse-forms reply-text)
         batch      (await (seval/eval-batch! compile-state parsed
                                              (home-ns id) id id-of-turn))]
@@ -938,6 +958,29 @@
                :seon.message/content reply-text
                :seon.message/at      (js/Date.)
                :seon.message/hops    0}]))))
+
+(defn ^:async ask-and-eval!
+  "Body of `with-turn!`. Calls the LLM with `prompt-text`, parses the
+   reply, eval-batches the forms (each as a `:seon.turn/evals`
+   component via Platform's eval-batch!), and returns
+   `{:seon.turn/messages [<assistant>] :seon.agent/eval-count n-ok}`
+   for `with-turn!` to fold into the close-tx. An LLM-call failure
+   (`:seon.ai/error` on the response) NEVER closes `done [0 ok]` — it
+   stores a visible error self-message and closes the turn :error."
+  [{:seon.agent/keys [id llm-fn compile-state]
+    :seon.turn/keys  [id-of-turn prompt-text]}]
+  (let [resp (await (llm-fn prompt-text))]
+    (if-let [err (:seon.ai/error resp)]
+      {:seon.agent/eval-count 0
+       :seon.turn/status      :error
+       :seon.turn/messages
+       [{:seon.message/id      (db/new-id!)
+         :seon.message/from    [:seon.agent/id id]
+         :seon.message/to      [[:seon.agent/id id]]
+         :seon.message/content (str "⚠ LLM call failed — " (:seon.ai/msg err))
+         :seon.message/at      (js/Date.)
+         :seon.message/hops    0}]}
+      (await (ask-and-eval-reply! resp id id-of-turn compile-state)))))
 
 (defn- persist-prompt!
   "Write the turn's full assembled prompt to
@@ -1018,7 +1061,8 @@
                                                 :seon.turn/id-of-turn     turn-id
                                                 :seon.turn/prompt-text    prompt})))))))
             n-ok (or (:seon.agent/eval-count result) 0)]
-        (log id turn-idx "done" n-ok "ok")
+        (log id turn-idx (name (or (:seon.turn/status result) :done)) n-ok
+             (if (:seon.turn/status result) "llm-error" "ok"))
         (assoc (db/pull {:seon.db/pull-pattern
                          '[* {:seon.turn/messages [*]
                               :seon.turn/evals    [*]}]
@@ -1578,8 +1622,13 @@
            "source as data is NOT registration — an unregistered attr is\n"
            "REJECTED by transact!. register! is the single source of truth:\n"
            "register the TYPE and the system derives datahike storage.\n\n"
-           "Use DEEP, namespaced attrs (`:my.domain.thing/attr`, never bare\n"
-           "`:title`). Common shapes:\n"
+           "Use DEEP, namespaced attrs — the keyword namespace must have at\n"
+           "least TWO dot-separated segments, like a real code namespace:\n"
+           "  :kb.finding/claim   YES — multi-segment namespace\n"
+           "  :finding/claim      NO  — single-segment namespace, same\n"
+           "                            violation as a bare key\n"
+           "  :title              NO  — bare key\n"
+           "Common shapes:\n"
            "  - natural-key identity (upsert): [:string {:seon.db/identity true}]\n"
            "  - a reference to another entity: :seon.db/ref\n"
            "  - many references:               [:vector :seon.db/ref]\n"
@@ -1643,7 +1692,22 @@
            "Paths are ABSOLUTE, real machine paths — there is no virtual\n"
            "root or chroot. When your human asks where something is,\n"
            "answer with the real path exactly as the substrate returns it.\n\n"
-           "The recipe is SEARCH → READ PRECISELY (never walk + guess):\n\n"
+           "The recipe is CONSULT FINDINGS → SEARCH → READ PRECISELY (never\n"
+           "walk + guess). Your FIRST move on ANY repo question is step 0 —\n"
+           "prior agents already answered many questions and stored the\n"
+           "answers; re-deriving one is wasted turns:\n\n"
+           "  ;; 0. FIRST: query stored findings on the topic. The\n"
+           "  ;;    schema-catalog's domain-attrs block shows the EXACT\n"
+           "  ;;    finding attrs that exist — query those keywords.\n"
+           "  (seon.db/query {:seon.db/query\n"
+           "                  '[:find ?q ?claim ?path ?line\n"
+           "                    :where [?f :kb.finding/question    ?q]\n"
+           "                           [?f :kb.finding/claim       ?claim]\n"
+           "                           [?f :kb.finding/source-path ?path]\n"
+           "                           [?f :kb.finding/line        ?line]]})\n"
+           "  ;; A hit IS the answer, with provenance — cite it (re-read the\n"
+           "  ;; source line only if you must verify). Search the repo ONLY\n"
+           "  ;; when no stored finding covers the question.\n\n"
            "  ;; 1. grep for a term (regex). Call it as the WHOLE form — the\n"
            "  ;;    result is auto-awaited; inside a let you'd get a Promise.\n"
            "  (seon.search/grep {:seon.search/pattern \"validate-entity-values!\"\n"
@@ -1657,26 +1721,33 @@
            ":seon.fs/error \"…\"} tells you whether the path is out of scope\n"
            "or the fs is read-only. Read the error; it says what to do.\n\n"
            "### Storing what you learn — the canonical finding shape\n\n"
-           "When research yields a durable answer, store it with these EXACT\n"
-           "attrs (check the schema-catalog first: if finding/* attrs already\n"
-           "exist, REUSE them — NEVER invent a parallel shape):\n\n"
-           "  (seon.schema/register! :finding/question    :string)\n"
-           "  (seon.schema/register! :finding/claim       :string)\n"
-           "  (seon.schema/register! :finding/source-file :string)\n"
-           "  (seon.schema/register! :finding/line        :int)\n"
-           "  (seon.schema/register! :finding/confidence  [:enum :verified :inferred])\n\n"
+           "STORE PROACTIVELY: whenever you VERIFY a non-trivial result —\n"
+           "an answer dug out of the repo, a computed fact, a confirmed\n"
+           "behavior — store it as a finding by default, without being\n"
+           "asked. A finding nobody stored is research the next agent (or\n"
+           "you, next session) pays for again.\n\n"
+           "Use these EXACT attrs (check the schema-catalog first: if\n"
+           "finding attrs already exist there, REUSE those exact keywords —\n"
+           "NEVER invent a parallel shape):\n\n"
+           "  (seon.schema/register! :kb.finding/question    :string)\n"
+           "  (seon.schema/register! :kb.finding/claim       :string)\n"
+           "  (seon.schema/register! :kb.finding/source-path :string)\n"
+           "  (seon.schema/register! :kb.finding/line        :int)\n"
+           "  (seon.schema/register! :kb.finding/confidence  [:enum :verified :inferred])\n\n"
            "  (seon.db/transact!\n"
            "    {:seon.db/tx-data\n"
-           "     [{:finding/question    \"how does transact! validate schemas?\"\n"
-           "       :finding/claim       \"seon.db/transact! Malli-validates every entity before the tx reaches datahike\"\n"
-           "       :finding/source-file \"src/seon/db.cljs\"\n"
-           "       :finding/line        803\n"
-           "       :finding/confidence  :verified}]})  ; :verified = you read that line\n\n"
+           "     [{:kb.finding/question    \"how does transact! validate schemas?\"\n"
+           "       :kb.finding/claim       \"seon.db/transact! Malli-validates every entity before the tx reaches datahike\"\n"
+           "       :kb.finding/source-path \"src/seon/db.cljs\"\n"
+           "       :kb.finding/line        803\n"
+           "       :kb.finding/confidence  :verified}]})  ; :verified = you read that line\n\n"
            "WHY one shape: the next agent discovers your attrs in the\n"
-           "schema-catalog and reuses them — findings compound only when\n"
-           "everyone writes the same kind.\n\n"
+           "schema-catalog, CONSULTS your claims (recipe step 0) and reuses\n"
+           "them — findings compound only when everyone writes the same kind.\n\n"
            "### Replying — one line, the substrate knows who asked:\n\n"
-           "  (seon.agent/reply! {:seon.message/content \"on it — here's what I found\"})\n\n"
+           "  (seon.agent/reply! {:seon.message/content \"on it — here's what I found\"})\n"
+           "  ;; => {:seon.message/ok? true, :seon.message/id \"MSG…\",\n"
+           "  ;;     :seon.message/hops 1}   ; failure → {:seon.db/ok? false …}\n\n"
            "Messaging another agent (or an explicit target) — :seon.message/to\n"
            "takes a ref or a vector of refs:\n\n"
            "  (seon.agent/message!\n"
@@ -1859,6 +1930,44 @@
                     (str/join "\n" (map #(domain-attr-line db %) ks))))))
       "")))
 
+(defn- squash-one-line
+  "Whitespace-squash + cap a stored string for a one-line catalog row."
+  [s]
+  (let [flat (str/replace (str s) #"\s+" " ")]
+    (if (> (count flat) 140) (str (subs flat 0 140) " …") flat)))
+
+(defn- finding-claims-block
+  "One-liner CONTENT of stored findings — the claim strings themselves,
+   not just attr names (#26 finding-salience: run 7 proved attr names in
+   the catalog are discoverable but not CONSULTED — agent #2 re-derived
+   a stored answer). Renders the values of every domain attr NAMED
+   `claim` (any namespace — the taught shape is :kb.finding/claim, but
+   earlier corpora used other namespaces), capped at 12 rows of ≤140
+   chars. Empty string when no claims exist. Pure render of the db —
+   stores nothing."
+  [db]
+  (let [claim-attrs (->> (warn/domain-attrs {:seon.db/db db})
+                         (filter #(= "claim" (name %))))
+        rows (->> claim-attrs
+                  (mapcat (fn [a]
+                            (->> (db/query {:seon.db/db db
+                                            :seon.db/query
+                                            [:find '?v :where ['_ a '?v]]})
+                                 (map first)
+                                 sort
+                                 (map (fn [v] [a v])))))
+                  (take 12))]
+    (if (seq rows)
+      (str "\n\n=== stored findings — CONSULT these before re-deriving ===\n"
+           ";; Claims prior agents verified and stored. If one answers the\n"
+           ";; question at hand, pull its full row (sibling attrs in the\n"
+           ";; same namespace: question, source path, line, confidence)\n"
+           ";; instead of re-searching the repo.\n"
+           (str/join "\n"
+             (for [[a v] rows]
+               (str "  " a " — \"" (squash-one-line v) "\""))))
+      "")))
+
 (defn- schema-ns-summary-block
   "Compact index of EVERY registered schema in the system, as per-ns
    count lines (unit #23 fix b: all ~276 registered schemas are now
@@ -1899,8 +2008,10 @@
    the live registry; counts from an AEVT scan on each id-attr. A
    trailing `domain data attrs` block lists every agent-registered attr
    installed on the db (with type + instance count) and states the
-   reuse contract — the run-4 fix for forked parallel attrs. Stores
-   nothing; register a new entity kind and it appears here next render."
+   reuse contract — the run-4 fix for forked parallel attrs; a trailing
+   `stored findings` block surfaces finding CONTENT one-liners (the #26
+   consult-before-research salience fix). Stores nothing; register a
+   new entity kind and it appears here next render."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db]}]
   (let [kinds (->> (db/query
@@ -1932,6 +2043,7 @@
                            (sort-by (comp str :kind) ks))))))
            (schema-ns-summary-block db)
            (domain-attrs-block db)
+           (finding-claims-block db)
            "\n</schema-catalog>")
       "")))
 

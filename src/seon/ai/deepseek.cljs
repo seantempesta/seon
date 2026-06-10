@@ -14,7 +14,9 @@
    No tool-calling envelope, no streaming — the agent's responses are
    parsed as Clojure forms by `seon.repl/parse-forms`, evaluated as
    a REPL batch by `seon.eval/eval-batch!`."
-  (:require [seon.error :as error]
+  (:require [seon.db :as db]
+            [seon.error :as error]
+            [seon.log :as log]
             [seon.schema :as schema]))
 
 ;; ============================================================
@@ -28,6 +30,22 @@
 (schema/register! :seon.ai/system-prompt :string)
 (schema/register! :seon.ai/ctx :string)
 (schema/register! :seon.ai/usage :map)
+(schema/register! :seon.ai/msg :string)
+(schema/register! :seon.ai/status :int)
+(schema/register! :seon.ai/timeout? :boolean)
+(schema/register! :seon.ai/raw-body :string)
+
+;; The errors-are-values envelope for LLM calls. Every failure mode
+;; (timeout, fetch throw, HTTP non-2xx, unparseable body) resolves to
+;; a response map carrying this under :seon.ai/error — never a
+;; rejected Promise. Callers (seon.agent's turn loop) MUST surface it.
+(schema/register!
+  :seon.ai/error
+  [:map
+   [:seon.ai/msg      :seon.ai/msg]
+   [:seon.ai/status   {:optional true} :seon.ai/status]
+   [:seon.ai/timeout? {:optional true} :seon.ai/timeout?]
+   [:seon.ai/raw-body {:optional true} :seon.ai/raw-body]])
 
 (schema/register!
   :seon.ai.deepseek/complete-request
@@ -42,6 +60,7 @@
   :seon.ai.deepseek/complete-response
   [:map
    [:seon.ai/text                    :string]
+   [:seon.ai/error                   {:optional true} :seon.ai/error]
    [:seon.ai.deepseek/finish-reason  {:optional true} :string]
    [:seon.ai/usage                   {:optional true} :map]])
 
@@ -62,8 +81,28 @@
 (defn set-timeout-ms!
   "Replace the per-call wall-clock timeout (default 60000ms). Returns
    the new value."
+  {:malli/schema [:=> [:cat :int] :int]}
   [ms]
   (reset! !timeout-ms ms))
+
+;; Thinking mode (deepseek-v4-pro). The API DEFAULTS TO ENABLED, which
+;; is slow — a long-ctx thinking call can blow past the 60s wall-clock
+;; timeout (observed 2026-06-10: turn 4 aborted at exactly 60.8s with
+;; no reply). We send {"thinking": {"type": "disabled"}} by default for
+;; fast iteration; re-enable per-run via [[set-thinking!]].
+;;
+;; Value: false (disabled — default), true (enabled), or a
+;; reasoning-effort string "high"/"max" (enabled + "reasoning_effort").
+(defonce !thinking (atom false))
+
+(defn set-thinking!
+  "Set DeepSeek thinking mode for subsequent calls. `mode` is `false`
+   (disabled — the default), `true` (enabled), or \"high\"/\"max\"
+   (enabled with that reasoning_effort). Returns the new value."
+  {:malli/schema [:=> [:cat [:or :boolean [:enum "high" "max"]]]
+                  [:or :boolean [:enum "high" "max"]]]}
+  [mode]
+  (reset! !thinking mode))
 
 (def default-system-prompt
   "You are Seon — the bonded companion of one specific human, the person
@@ -232,15 +271,30 @@ schema-catalog shows it.")
                "DEEPSEEK_API_KEY not set in process.env"
                {:seon.ai.deepseek/error :missing-api-key}))))
 
-(defn- body-json [{:keys [system-prompt ctx model temperature max-tokens]}]
-  (.stringify js/JSON
-    (clj->js
+(defn request-body
+  "Build the DeepSeek JSON request body as a CLJ map. The bare keys
+   (:model, :messages, :thinking, …) are the DeepSeek API's wire
+   format — a third-party boundary, deliberately un-namespaced.
+
+   Public so tests and live debugging can inspect exactly what goes
+   over the wire — in particular the thinking toggle ([[!thinking]]):
+   disabled by default, {:thinking {:type \"enabled\"}} (+ optional
+   :reasoning_effort) when [[set-thinking!]] turned it on."
+  {:malli/schema [:=> [:cat :seon.ai.deepseek/complete-request] :map]}
+  [{:seon.ai/keys [ctx system-prompt model temperature max-tokens]}]
+  (let [thinking @!thinking]
+    (cond->
       {:model       (or model default-model)
        :messages    [{:role "system" :content (or system-prompt default-system-prompt)}
                      {:role "user"   :content ctx}]
        :temperature (or temperature default-temperature)
        :max_tokens  (or max-tokens default-max-tokens)
-       :stream      false})))
+       :thinking    {:type (if thinking "enabled" "disabled")}
+       :stream      false}
+      (string? thinking) (assoc :reasoning_effort thinking))))
+
+(defn- body-json [request]
+  (.stringify js/JSON (clj->js (request-body request))))
 
 (defn- parse-response [body-text]
   (try
@@ -251,9 +305,27 @@ schema-catalog shows it.")
        :seon.ai/usage                   (-> body :usage)})
     (catch :default e
       {:seon.ai/text  ""
-       :seon.ai/error {:seon.ai/msg (str "Failed to parse deepseek response: "
-                                         (error/->message e))
-                       :seon.ai/raw body-text}})))
+       :seon.ai/error {:seon.ai/msg      (str "Failed to parse deepseek response: "
+                                              (error/->message e))
+                       :seon.ai/raw-body body-text}})))
+
+(defn- log-error!
+  "ERROR-log an LLM failure with the live agent + turn identity (read
+   from the ALS scopes seon.agent establishes around each turn) so a
+   timed-out/failed call is NEVER silent in logs/pod.log. Best-effort —
+   never throws."
+  [error-map]
+  (try
+    (let [agent-id (db/current-agent-id)
+          turn-id  (:seon.db/turn-id (db/current-tx-context))]
+      (log/error!
+        (cond-> {:seon.log/source  ::complete
+                 :seon.log/message (str "DeepSeek call failed"
+                                        (when turn-id (str " (turn " turn-id ")"))
+                                        " — " (:seon.ai/msg error-map))
+                 :seon.log/data    error-map}
+          agent-id (assoc :seon.log/agent agent-id))))
+    (catch :default _ nil)))
 
 (defn ^:async complete
   "Send a completion request to DeepSeek. Returns a Promise of a
@@ -285,28 +357,38 @@ schema-catalog shows it.")
                              :signal  (.-signal controller)
                              :headers {:Content-Type  "application/json"
                                        :Authorization (str "Bearer " (api-key))}
-                             :body    (body-json {:ctx           ctx
-                                                  :system-prompt system-prompt
-                                                  :model         model
-                                                  :temperature   temperature
-                                                  :max-tokens    max-tokens})})))
-            body-text (await (.text resp))]
-        (js/clearTimeout timer)
-        (if (.-ok resp)
-          (parse-response body-text)
-          {:seon.ai/text  ""
-           :seon.ai/error {:seon.ai/msg    (str "DeepSeek HTTP " (.-status resp)
-                                                ": " body-text)
-                           :seon.ai/status (.-status resp)}}))
+                             :body    (body-json
+                                        (cond-> {:seon.ai/ctx         ctx
+                                                 :seon.ai/model       model
+                                                 :seon.ai/temperature temperature
+                                                 :seon.ai/max-tokens  max-tokens}
+                                          system-prompt
+                                          (assoc :seon.ai/system-prompt system-prompt)))})))
+            body-text (await (.text resp))
+            _         (js/clearTimeout timer)
+            result    (if (.-ok resp)
+                        (parse-response body-text)
+                        {:seon.ai/text  ""
+                         :seon.ai/error {:seon.ai/msg    (str "DeepSeek HTTP " (.-status resp)
+                                                              ": " body-text)
+                                         :seon.ai/status (.-status resp)}})]
+        (when-let [err (:seon.ai/error result)]
+          (log-error! err))
+        result)
       (catch :default e
         (js/clearTimeout timer)
-        (let [aborted? (= "AbortError" (some-> e .-name))]
+        (let [aborted? (= "AbortError" (some-> e .-name))
+              err      (cond-> {:seon.ai/msg
+                                (if aborted?
+                                  (str "DeepSeek request timed out after " ms
+                                       "ms (wall-clock abort — no reply received)")
+                                  (str "DeepSeek fetch failed: " (error/->message e)))}
+                         ;; optional = absent — only present (true) on a
+                         ;; genuine wall-clock abort, never stored false.
+                         aborted? (assoc :seon.ai/timeout? true))]
+          (log-error! err)
           {:seon.ai/text  ""
-           :seon.ai/error {:seon.ai/msg
-                           (if aborted?
-                             (str "DeepSeek request timed out after " ms "ms")
-                             (str "DeepSeek fetch failed: " (error/->message e)))
-                           :seon.ai/timeout? aborted?}})))))
+           :seon.ai/error err})))))
 
 ;; ============================================================
 ;; Adapter for seon.agent.
@@ -318,18 +400,23 @@ schema-catalog shows it.")
 
 (defn ^:async ^:private complete+wrap
   "Internal — call complete with merged opts, wrap response into the
-   shape the turn loop expects."
+   shape the turn loop expects. On failure `:seon.ai/error` is lifted
+   to the TOP level (alongside `:text`) so the turn loop can surface
+   it without digging into `:seon.ai/raw`."
   [opts ctx-text]
   (let [resp (await (complete (assoc opts :seon.ai/ctx ctx-text)))]
-    {:text        (:seon.ai/text resp)
-     :seon.ai/raw resp}))
+    (cond-> {:text        (:seon.ai/text resp)
+             :seon.ai/raw resp}
+      (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))
 
 (defn agent-adapter
   "Returns a fn-of-ctx-string suitable for
    `seon.agent/run-turn-once!`'s `llm-fn`. Optional `opts` override
    request defaults (e.g. `{:seon.ai/temperature 0.2}`). The returned
    fn calls `complete` ^:async-internally and returns a Promise of
-   `{:text \"…\" :seon.ai/raw <full response>}`."
+   `{:text \"…\" :seon.ai/raw <full response>}` — plus a top-level
+   `:seon.ai/error` (see the `:seon.ai/error` schema) when the call
+   failed (timeout, fetch error, HTTP error, unparseable body)."
   ([] (agent-adapter {}))
   ([opts]
    (fn [ctx-text] (complete+wrap opts ctx-text))))
