@@ -122,7 +122,11 @@
     ;; Phase B item 9 — shared read-side wrapper over the analyzer
     ;; state. Required here so the build includes it; item 10's
     ;; detect-and-tee in seon.eval/eval-batch! consumes it.
-    [seon.analyzer-info])
+    [seon.analyzer-info]
+    ;; THE FLIP (unit 2.2e): the cluster-store DIS-peer seam — the
+    ;; :seon-wire PWriter, cluster connect config, and the foreign-tx
+    ;; listen adapter. open-cluster-conn! below builds on it.
+    [seon.store.wire :as store.wire])
   ;; Compile-time enumeration of the build's specced public fns —
   ;; `substrate-vars` below = curated unspecced base + this macro's
   ;; whole-closure roster (unit #23 fix b: index the WHOLE package
@@ -414,110 +418,69 @@
    :seon.test/created-at])
 
 ;; ---------------------------------------------------------------------------
-;; Persistent on-disk agent conn (Track A1, 2026-06-09).
+;; Cluster-store agent conn (unit 2.2e — THE FLIP, 2026-06-10).
 ;;
-;; The agent conn moved off `:backend :memory` (wiped every restart —
-;; only one run was ever reviewable) onto datahike's konserve :file
-;; backend. Each pod-run gets its own gitignored "session directory"
-;; under `data/seon-pod/<run-id>/`, PERSISTED (never auto-deleted) so
-;; past runs stay reviewable.
+;; The pod no longer mints a per-run `data/seon-pod/<run-id>` store. It
+;; connects to the SHARED cluster store (`data/clusters/default/store`)
+;; as a DIS peer: reads are local sync konserve (lazy LRU node fetch),
+;; writes route through the `:seon-wire` PWriter over the UDS wire to
+;; the JVM wire-server — the SOLE writer. See `seon.store.wire`.
 ;;
-;; run-id is a human-readable UTC timestamp (NOT a bare uuid) so the
-;; dirs sort chronologically and a human can tell runs apart at a
-;; glance. The store `:id` is derived deterministically from the
-;; run-id (stable per dir) so a reconnect to the same dir uses the same
-;; store identity.
-;;
-;; Konserve's node-filestore quirks (verified live, 2026-06-09):
-;;   - it does NOT mkdir -p the parent — `data/seon-pod/` must exist
-;;     before create-database (ENOENT otherwise);
-;;   - `create-database` THROWS if the store dir already exists, and
-;;     `connect` THROWS if it doesn't — so we branch on
-;;     `database-exists?` (create+connect when absent, connect-only
-;;     when present). This makes the helper idempotent across restarts
-;;     pointed at the same dir.
+;; Legacy per-run dirs under `data/seon-pod/` stay readable (the
+;; konserve header sniff handles their 1-byte meta-size encoding) but
+;; are never created again. No dual backend: if the wire-server is down
+;; at boot, the pod FAILS LOUD — it never falls back to a local store.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private node-fs (js/require "fs"))
-(def ^:private node-path (js/require "path"))
-(def ^:private node-crypto (js/require "crypto"))
-
-(defn- path->uuid
-  "Deterministic, well-formed UUID derived from a store path via md5.
-   Datahike's :file backend REQUIRES a UUID-typed :id and normalizes a
-   malformed one (e.g. `(uuid path)` wraps the raw string, which the
-   built fork re-hashes to a DIFFERENT id at create time → connect
-   then fails with :store-identity-mismatch). A proper RFC-shaped UUID
-   is preserved as-is through create→connect, so the same dir always
-   re-derives the same id and reconnect succeeds (verified live,
-   2026-06-09)."
-  [s]
-  (let [hex (-> (.createHash node-crypto "md5") (.update s) (.digest "hex"))]
-    (uuid (str (subs hex 0 8) "-" (subs hex 8 12) "-" (subs hex 12 16) "-"
-               (subs hex 16 20) "-" (subs hex 20 32)))))
-
-(def pod-store-base
-  "Gitignored base holding one session directory per pod-run."
-  "data/seon-pod")
-
-(defn- run-id
-  "Human-readable, filesystem-safe UTC timestamp run-id, e.g.
-   \"2026-06-09T14-55-02-123Z\". Colons/dots in the ISO form are
-   replaced with dashes so it's a valid directory name on every OS."
+(defn- pod-full-schema
+  "The pod's full datahike attribute schema: the agent bootstrap attrs
+   plus the tx-meta attrs, both Malli-derived via
+   `seon.db/malli->datahike-schema` (Phase 2.6 — no hand-written
+   `:db.type/*` entries). Adding a new attr is a Malli `register!` in
+   the owning ns plus a keyword line in `agent-bootstrap-attrs` above."
   []
-  (-> (.toISOString (js/Date.))
-      (str/replace #"[:.]" "-")))
+  (into (db/malli->datahike-schema agent-bootstrap-attrs)
+        (db/tx-meta-datahike-schema)))
 
-(defn- disk-store-cfg
-  "datahike config for a pod session directory under pod-store-base.
-   `:keep-history? true` is REQUIRED (assert-preconditions! re-asserts
-   it; tx-meta-as-history is a silent no-op without it).
-
-   `:id` is a deterministic, well-formed UUID derived from the store
-   path (see `path->uuid`). The store layer requires :id present (the
-   config default isn't applied on the database-exists?/connect path),
-   and it must be a properly-shaped UUID or the built datahike fork
-   re-normalizes it and connect fails with :store-identity-mismatch."
-  [rid]
-  (let [path (.join node-path pod-store-base rid)]
-    {:store              {:backend :file
-                          :path    path
-                          :id      (path->uuid path)}
-     :schema-flexibility :write
-     :keep-history?      true}))
-
-(defn ^:async open-disk-conn!
-  "Open a persistent file-backed datahike conn for the given run-id,
-   creating the database the first time and connecting on subsequent
-   opens of the same dir. Ensures the gitignored base dir exists first
-   (konserve does not mkdir -p). Returns a Promise of the conn."
-  [rid]
-  (let [cfg (disk-store-cfg rid)]
-    ;; konserve does not create parent dirs; the base must exist before
-    ;; create-database (ENOENT otherwise). recursive = mkdir -p, no-op
-    ;; if already present.
-    (.mkdirSync node-fs pod-store-base #js {:recursive true})
-    (let [exists? (await (d/database-exists? cfg))]
-      (when-not exists?
-        (await (d/create-database cfg)))
-      (await (d/connect cfg)))))
-
-(defn ^:async open-agent-conn! []
-  (let [rid (run-id)
-        conn (await (open-disk-conn! rid))]
-    (log/info-console! "seon.client/open-agent-conn!"
-                       (str "pod store: " (.join node-path pod-store-base rid)))
-    (let [
-          ;; Phase 2.6 (2026-05-23) — the agent schema AND the tx-meta
-          ;; schema both flow through `seon.db/malli->datahike-schema`,
-          ;; reading the shared `seon.schema` Malli registry. Adding a
-          ;; new attr is a Malli `register!` in the owning ns plus a
-          ;; keyword line in `agent-bootstrap-attrs` above. No more
-          ;; hand-written `:db.type/*` entries.
-          full-schema (into (db/malli->datahike-schema agent-bootstrap-attrs)
-                            (db/tx-meta-datahike-schema))]
-      (await (d/transact! conn full-schema))
+(defn ^:async open-agent-conn!
+  "Open a FRESH ISOLATED `:memory` conn carrying the pod's full
+   bootstrap schema. Test/diagnostic surface ONLY — the pod itself
+   boots on the shared cluster store via [[open-cluster-conn!]].
+   Isolated-by-construction: tests that build agents on this conn can
+   never touch the cluster store."
+  []
+  (let [cfg {:store              {:backend :memory
+                                  :id      (random-uuid)}
+             :schema-flexibility :write
+             :keep-history?      true}]
+    (await (d/create-database cfg))
+    (let [conn (await (d/connect cfg))]
+      (await (d/transact! conn (pod-full-schema)))
       conn)))
+
+(defn ^:async open-cluster-conn!
+  "Open the pod's DIS-peer conn on the shared cluster store and start
+   the foreign-tx listen adapter.
+
+   Order is load-bearing:
+     1. `ping!` — FAIL LOUD if the wire-server is down (no local
+        fallback, no dual backend).
+     2. `d/connect` — reads go local from here; writes dispatch to the
+        `:seon-wire` writer.
+     3. schema transact — the full Malli-derived attr schema goes OVER
+        THE WIRE to the JVM writer; idempotent `:db/ident` upserts, so
+        re-booting against the populated store re-asserts no-ops.
+     4. listen adapter — foreign writers' txs fire this conn's native
+        listeners (user-message triggers + inspector SSE)."
+  []
+  (await (store.wire/ping!))
+  (let [conn (await (d/connect (store.wire/cluster-config)))]
+    (log/info-console! "seon.client/open-cluster-conn!"
+                       (str "cluster store: " store.wire/default-store-path
+                            " (writer: " store.wire/default-sock-path ")"))
+    (await (d/transact! conn (pod-full-schema)))
+    (await (store.wire/start-listen-adapter! {:seon.store.wire/conn conn}))
+    conn))
 
 ;; ---------------------------------------------------------------------------
 ;; Resume — replay-program-graph!
@@ -1270,7 +1233,7 @@
    Subsequent (seon.agent/message! …) calls (or POST /chat) drive the
    loop via the kick listener."
   [& [{:keys [llm-fn] :or {llm-fn stub-llm}}]]
-  (let [conn          (or @!agent-conn (await (open-agent-conn!)))
+  (let [conn          (or @!agent-conn (await (open-cluster-conn!)))
         _             (reset! !agent-conn conn)
         ;; Bind the conn as the root *conn* so seon.db calls + the
         ;; kick listener resolve without per-call threading.
@@ -1492,6 +1455,14 @@
                                        :url (str "http://127.0.0.1:" port)
                                        :port-file port-file})))
           (.catch (fn [err]
-                    (log/error-console! "seon.client" "auto-boot failed" err))))))
+                    ;; FAIL LOUD (2.2e): the pod is useless without its
+                    ;; agent + cluster conn, and a half-up pod that looks
+                    ;; healthy is worse than a dead one. Most common
+                    ;; cause: wire-server down (the error says exactly
+                    ;; that). No local-store fallback, by design.
+                    (log/error-console! "seon.client"
+                                        "auto-boot FAILED — exiting (no local fallback)"
+                                        err)
+                    (.exit js/process 1))))))
   (log/info-console! "seon.client" "nREPL :7889 — (shadow.cljs.devtools.api/nrepl-select :client)")
   (start-heartbeat!))

@@ -43,7 +43,14 @@ process_command() {
     # env-bootstrap parses these at ns load — survives pod restarts,
     # unlike a live (seon.fs/configure! …). $SEON_ROOT is absolute
     # (computed at script top), so the grant is exact, not cwd-relative.
-    pod)         echo "SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1 node out/client/main.js" ;;
+    # css:build first — resources/public/css/output.css is a build
+    # artifact (not committed); the pod serves it, so every start
+    # rebuilds it before boot.
+    # `exec` is load-bearing: with a compound command, bash -c stays the
+    # parent and the supervisor would record (and later SIGTERM) the
+    # shell, orphaning node. exec replaces the shell with node after the
+    # css build, so the recorded pid IS the pod.
+    pod)         echo "npm run css:build && exec env SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1 node out/client/main.js" ;;
     cljs-watch)  echo "clj -M:cljs watch client" ;;
     jvm)         echo "./bin/run" ;;
     # V2 platform Host — JVM datahike wire-server (single-DB today).

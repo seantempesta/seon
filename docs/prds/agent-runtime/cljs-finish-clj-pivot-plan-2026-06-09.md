@@ -163,18 +163,35 @@ flows through the cluster's DB. The current multi-agent-in-one-pod is
 transitional/demo-only (interleaving risks:
 `research/multi-agent-state-isolation-2026-06-09.md`).
 
-**Pod flip checklist (unit 2.2e — IN FLIGHT NOW; from the DIS research file):**
+**Pod flip checklist (unit 2.2e — DONE 2026-06-10; the pod runs on the
+cluster store):**
 
-1. Move the `:seon-wire` writer + listen-adapter into the `:client` build
-   (live socket `tmp/seon-cluster-default-req.sock`, store
-   `data/clusters/default/store`, `:lock-blob? false`, store `:id` via
-   `seon.server.store/name->uuid`).
-2. `bin/seon restart wire-server` once — picks up the already-prepared
-   sha-aligned `:writer` alias (kills the mvn-0.8.1671 skew).
-3. Wire the adapter into `seon.db/listen!`; stop minting
-   `data/seon-pod/<run-id>` stores at boot.
-4. Keep `clj -M:replica-peer-jvm` + `clj -M:replica-probe-jvm` as the
-   regression pair; re-run both after the flip.
+1. ✅ `:seon-wire` writer + listen-adapter live in the `:client` build as
+   `seon.store.wire` (socket `tmp/seon-cluster-default-req.sock`, store
+   `data/clusters/default/store`, `:lock-blob? false`, store `:id`
+   replicated from `seon.server.store/name->uuid` — verified equal to
+   the live wire-server's `(:id (:store config))`).
+2. ✅ Wire-server runs the sha-aligned `:writer` alias (fork `01ba3f18`
+   plus the konserve `:local/root` fork on its live classpath); restarted
+   during the flip — the pod adapter re-subscribed automatically
+   (pump fail-loud → 2s backoff → re-subscribe).
+3. ✅ Foreign txs fire the conn's NATIVE `d/listen` listeners (the
+   adapter synthesizes the raw tx-report and fires
+   `(:listeners (meta conn))`), so every `seon.db/listen!` handler
+   (triggers, inspector SSE) rides one bus for own + foreign writes.
+   `data/seon-pod/<run-id>` minting deleted; `open-agent-conn!` is now
+   the tests' isolated `:memory` helper; the pod boots via
+   `open-cluster-conn!` (ping-gated, FAIL-LOUD, no local fallback).
+4. ✅ Regression pair green post-flip (`clj -M:replica-probe-jvm` 10/10,
+   `clj -M:replica-peer-jvm` 14/14). Flip oracles: boot + dedup
+   (substrate seeds once, Nth boot seeds []), stub E2E rows land in the
+   cluster store (verified JVM-side), a JVM-side foreign message WAKES
+   the pod agent, restart durability (prior agents/messages render
+   post-restart), `bin/test-cljs` 285/1065/0 (baseline minus the
+   deleted pod-disk-conn tests; cluster store untouched by the suite),
+   live DeepSeek run answered + persisted in the cluster store, and the
+   A4 register→transact gate holds OVER THE WIRE (unbridgeable type →
+   envelope before the wire).
 
 **FORWARD — what "merged" means:**
 
@@ -226,15 +243,22 @@ commit:
    one ns, ONE ALS carrying a single per-agent context map (today
    `seon.db/agent-id-als` and `seon.agents/substrate-ctx-als` are parallel);
    `run-as-agent` wraps `db/with-agent`.
-3. **css autobuild in `bin/seon`** + stop committing `output.css`.
+3. ~~css autobuild in `bin/seon`~~ — DONE 2026-06-10 (pod start runs
+   `npm run css:build` then `exec`s node; `output.css` is untracked).
 4. **stub-llm zero-forms termination fix** (§4 self-wake bug).
 5. **Test-litter** — fixtures minting disk store dirs → `:memory` (3.1 GB /
    2,295 run dirs accumulated under `data/seon-pod/`; add a prune policy).
 6. **Hook-loss source fix** (V2 server lane) — `^:clj-reload/keep` +
    key-based hook registration + remove the silent catch (§4).
 7. **Third tile panel** (§6 forward item 2).
-8. **Lane-merge 2.2e (TOP OF QUEUE — flip today, examples after)** — the §5 flip checklist; THEN Timbre unification + cljc
-   convergence.
+8. **Lane-merge 2.2e — FLIPPED 2026-06-10** (the §5 checklist, all ✅).
+   Remaining in this lane: Timbre unification + cljc convergence;
+   plus the flip follow-ups — re-arm user triggers for PRIOR agents at
+   boot (old idle agents persist in the durable store but only the
+   newly-minted boot agent gets a trigger; `rearm-user-triggers!` is
+   the mechanism, currently hot-reload-only) and stop minting a NEW
+   agent per pod restart (agents now ACCUMULATE in the durable store —
+   one per boot).
 9. **REPL-DEBUGGABILITY EVERYWHERE (user, 2026-06-10): every process, agent, and cluster DB reachable from a REPL.** The access matrix to make true: (a) any AGENT RUNTIME — the cljs MCP eval already takes `agent_id` (resolves agent-id → shadow runtime, survives restart); under process-per-agent every agent process loads the dev `:client` build and registers with the ONE shadow watcher — verify the `agent_id` path end-to-end (`seon.dev.node-agent`) as processes split; (b) the WIRE-SERVER — add nREPL alongside the 7891 socket REPL and wire it into the seon MCP server so the central writer is MCP-reachable like the dev JVM; (c) any CLUSTER DB — read-only DIS reader conns from any REPL (`:lock-blob? false`) + the wire-server REPL; document the one-liner recipes; (d) remote agents (later) — the wire protocol + DB are the admin surface (shadow websocket is dev-only). Document the matrix in CLAUDE.md Process Architecture when it lands.
 10. **CLUSTER RUNTIME (the topology step after the store flip — spec before building):** today = one pod process hosting N interleaved agents on the single "default" cluster; target = ONE NODE PROCESS PER AGENT. Pieces: (a) per-agent process launcher — slim boot (reader conn + wire-writer + one agent loop + dev shadow registration), e.g. `bin/seon agent start <cluster> <agent-id>`; (b) cluster lifecycle — create-cluster mints the DB via the existing JVM multi-DB registry, spawns the orchestrator agent process; (c) **spawn-agent capability** — a wire op + supervisor seam so an ORCHESTRATOR AGENT can request new task-agent processes (the swarm primitive); (d) the web UI becomes its OWN reader process over the cluster DB (today the pod serves it); (e) the in-process interleaving-risk list mostly dissolves per-process. Until this lands, multi-agent = interleaved-in-one-pod on cluster "default".
 11. **`bin/seon cluster reset [name]`** (user-approved; demo-path): one command = stop pod → stop wire-server → wipe `data/clusters/<name>/store` → restart both (fresh DB minted, substrate re-seeds via the idempotent boot). First use: wipe the Track-2 test debris from "default" right after the 2.2e flip verifies. Later grows `cluster create <name>`.
