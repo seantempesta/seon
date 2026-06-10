@@ -142,27 +142,134 @@
            "render error: " (or (.-message e) (str e))]))
       (unknown-entity-card entity))))
 
+;; ============================================================
+;; Static-vs-dynamic card discriminator + summaries (unit #24 item 1)
+;; ============================================================
+
+(defn- entity-creation-origin
+  "The `:seon.db/origin` of the tx that FIRST asserted anything on
+   `eid` (the creation tx). nil when the entity has no datoms or the
+   tx carries no origin."
+  [db eid]
+  (when eid
+    (when-let [txs (seq (map (fn [^js d] (.-tx d)) (d/datoms db :eavt eid)))]
+      (:seon.db/origin (d/entity db (apply min txs))))))
+
+(defn- static-entity?
+  "STATIC = collapsed-by-default in the right pane. Discriminator:
+   - sticky preamble entities (`:seon.sticky/position` present) — the
+     `:seon.system-prompt` / `:seon.conventions` cards;
+   - `:seon.schema` kind rows (`:seon.schema/key` present);
+   - `:seon.fn` / `:seon.ns` cards whose CREATION tx carries
+     `:seon.db/origin :substrate-seed` (the substrate index, seeded at
+     boot — agent-AUTHORED fns/nses have `:agent` origin and stay
+     expanded).
+   Everything else (messages, evals, agent-authored entities) is
+   DYNAMIC and renders expanded."
+  [db entity]
+  (boolean
+    (or (:seon.sticky/position entity)
+        (:seon.schema/key entity)
+        (and (or (:seon.fn/name entity) (:seon.ns/name entity))
+             (= :substrate-seed
+                (entity-creation-origin db (:db/id entity)))))))
+
+(defn- entity-summary-name
+  "Short identifying name for a collapsed card's summary line."
+  [entity]
+  (or (some-> (:seon.schema/key entity) pr-str)
+      (some-> (:seon.fn/name entity) str)
+      (some-> (:seon.ns/name entity) pr-str)
+      (:seon.system-prompt/id entity)
+      (:seon.conventions/id entity)
+      (:seon.sticky/id entity)
+      ""))
+
+(defn- entity-gist
+  "One-line gist for a collapsed card's summary: first line of the
+   doc/content, truncated to 80 chars."
+  [entity]
+  (let [s    (or (:seon.fn/doc entity)
+                 (:seon.system-prompt/content entity)
+                 (:seon.conventions/content entity)
+                 (:seon.message/content entity)
+                 "")
+        line (or (first (str/split-lines s)) "")]
+    (if (> (count line) 80) (str (subs line 0 80) "…") line)))
+
+;; ============================================================
+;; Turn grouping (unit #24 item 2) — derive each card's turn from the
+;; `:seon.session/turns` → `:seon.turn/messages|evals` component refs.
+;; ============================================================
+
+(defn- hh-mm-ss
+  [at]
+  (if (instance? js/Date at)
+    (let [pad #(if (< % 10) (str "0" %) (str %))]
+      (str (pad (.getHours at)) ":" (pad (.getMinutes at))
+           ":" (pad (.getSeconds at))))
+    ""))
+
+(defn- turn-info-by-child
+  "Map of child eid (message/eval) → `{::turn-n <int> ::turn-at <Date>}`.
+   Turn NUMBER is the 1-based index of the turn within its session's
+   turns sorted by `:seon.turn/at` — same derivation as the agent's
+   `turn N` prompt line. Entities not hanging off any turn (sticky
+   preamble, schema rows, substrate index) are absent from the map and
+   keep their tx-time position in the card list."
+  [db]
+  (let [turn-rows  (d/q '[:find ?s ?turn ?tat
+                          :where
+                          [?s :seon.session/turns ?turn]
+                          [?turn :seon.turn/at ?tat]]
+                        db)
+        turn->info (into {}
+                         (for [[_s rows] (group-by first turn-rows)
+                               :let [sorted (sort-by (fn [[_ _ ^js at]] (.getTime at))
+                                                     rows)]
+                               [i [_ turn at]] (map-indexed vector sorted)]
+                           [turn {::turn-n (inc i) ::turn-at at}]))
+        child-rows (d/q '[:find ?turn ?c
+                          :where
+                          (or [?turn :seon.turn/messages ?c]
+                              [?turn :seon.turn/evals ?c])]
+                        db)]
+    (into {}
+          (keep (fn [[turn c]]
+                  (when-let [info (get turn->info turn)]
+                    [c info])))
+          child-rows)))
+
 (defn- snapshot
   "Compute one render snapshot for `agent-id`:
      {:ai-text <string>
+      :section-texts [{:seon.ctx/name … :seon.render/text …} ...]
       :token-est <int>
       :char-count <int>
-      :html-cards [<hiccup> ...]   ; one per visible entity, in render order
-      :agent <pulled entity or nil>}"
+      :html-cards [<card-map> ...]  ; one per visible entity, in render order
+      :agent <pulled entity or nil>}
+   Each card-map: `{::hiccup ::static? ::kind ::name ::gist ::card-key
+   ::turn-n ::turn-at}` (turn keys absent for non-turn entities)."
   [agent-id]
   (let [{:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id agent-id})
         ;; ONE composer for the left-pane text (`seon.agent/assemble-context`,
         ;; the exact bytes the agent receives) + the entity list behind it —
         ;; both via `inspect/ctx-preview`, so the webview can NEVER diverge
         ;; from what the LLM sees.
-        {:seon.render/keys [text entities token-estimate]}
+        {:seon.render/keys [text entities token-estimate section-texts]}
         (inspect/ctx-preview {:seon.agent/id agent-id})
+        turn-info (turn-info-by-child db)
         cards (->> entities
                    (keep (fn [e]
                            (when-let [h (render-entity-hiccup db agent-id e)]
-                             [:div {:class (str "border-l-2 border-amber-700/40 "
-                                                "pl-2 py-1 mb-1")}
-                              h])))
+                             (merge
+                               {::hiccup   h
+                                ::static?  (static-entity? db e)
+                                ::kind     (entity-kind-label e)
+                                ::name     (entity-summary-name e)
+                                ::gist     (entity-gist e)
+                                ::card-key (str "card-" (:db/id e))}
+                               (get turn-info (:db/id e))))))
                    vec)
         ;; The agent's OWN tile (unit 1.4) — rendered explicitly (the
         ;; agent entity is not part of `visible-entities`). Per-entity
@@ -174,6 +281,7 @@
         ent   (default/all-running-agents db)
         agent (some #(when (= agent-id (:seon.agent/id %)) %) ent)]
     {:ai-text   (or text "")
+     :section-texts (or section-texts [])
      :char-count (count (or text ""))
      :token-est  (or token-estimate 0)
      :html-cards cards
@@ -212,15 +320,102 @@
      [:a {:href "/agents"
           :class "text-xs text-amber-500 hover:text-amber-300"} "← all agents"]]))
 
+(def ^:private open-ai-sections
+  "Left-pane sections that render EXPANDED by default — the dynamic
+   tail. Everything else (system, capabilities, catalogs, ns-context,
+   warnings) is static bulk the user has already read; it collapses to
+   a one-line summary. `:context` is the divergence-fallback pseudo-
+   section carrying the whole joined text (see
+   `seon.inspect/per-section-texts`) — must stay open."
+  #{:transcript :prompt :context})
+
+(defn- fmt-chars
+  "`3214` → `\"3,214\"` — comma-grouped char count for summaries."
+  [n]
+  (let [s (str n)]
+    (->> (reverse s)
+         (partition-all 3)
+         (map (partial apply str))
+         (str/join ",")
+         (str/reverse))))
+
+(defn- ai-section-details
+  "One `<details>` per context section. `data-seon-key` keys the
+   client-side open-state guard (user toggles survive SSE morphs)."
+  [{sec-name :seon.ctx/name sec-text :seon.render/text}]
+  (let [open? (contains? open-ai-sections sec-name)]
+    [:details (cond-> {:class "mb-1"
+                       :data-seon-key (str "ai-sec-" (name sec-name))}
+                open? (assoc :open true))
+     [:summary {:class (str "cursor-pointer select-none text-xs font-mono "
+                            "text-text-400 hover:text-text-200 py-0.5")}
+      (str (name sec-name) " (" (fmt-chars (count sec-text)) " chars)")]
+     [:pre {:class "whitespace-pre-wrap text-xs font-mono text-text-100 mt-0.5"}
+      sec-text]]))
+
 (defn- ai-pane-fragment
-  [agent-id {:keys [ai-text]}]
+  [agent-id {:keys [ai-text section-texts]}]
   [:div {:id (ai-pane-id agent-id)
          :class "flex flex-col h-full overflow-hidden border-r border-base-800"}
    [:div {:class "px-2 py-1 text-xs font-mono text-text-400 bg-base-900 border-b border-base-800"}
     ":seon.render/ai  (what the LLM sees)"]
-   [:pre {:class (str "flex-1 overflow-auto p-3 text-xs font-mono "
-                      "whitespace-pre-wrap text-text-100 bg-base-950")}
-    (if (str/blank? ai-text) "(empty context)" ai-text)]])
+   (cond
+     (str/blank? ai-text)
+     [:pre {:class (str "flex-1 overflow-auto p-3 text-xs font-mono "
+                        "whitespace-pre-wrap text-text-100 bg-base-950")}
+      "(empty context)"]
+
+     (seq section-texts)
+     (into [:div {:class "flex-1 overflow-auto p-3 bg-base-950"}]
+           (map ai-section-details)
+           section-texts)
+
+     :else
+     [:pre {:class (str "flex-1 overflow-auto p-3 text-xs font-mono "
+                        "whitespace-pre-wrap text-text-100 bg-base-950")}
+      ai-text])])
+
+(defn- card-block
+  "Render one card-map. STATIC cards wrap in a `<details>` collapsed by
+   default — summary = kind + name + one-line gist. DYNAMIC cards
+   render expanded as before."
+  [{::keys [hiccup static? kind name gist card-key]}]
+  (let [wrap-class "border-l-2 border-amber-700/40 pl-2 py-1 mb-1"]
+    (if static?
+      [:details {:class wrap-class :data-seon-key card-key}
+       [:summary {:class (str "cursor-pointer select-none text-xs font-mono "
+                              "text-text-400 hover:text-text-200")}
+        [:span {:class "font-semibold text-text-300"} kind]
+        (when (seq name)
+          [:span {:class "text-amber-500/80"} (str " " name)])
+        (when (seq gist)
+          [:span {:class "text-text-500"} (str " — " gist)])]
+       [:div {:class "mt-0.5"} hiccup]]
+      [:div {:class wrap-class} hiccup])))
+
+(defn- turn-separator
+  [turn-n turn-at]
+  [:div {:class "flex items-center gap-2 my-1 text-xs font-mono text-text-500"}
+   [:span {:class "flex-1 border-t border-base-800"}]
+   [:span (str "turn " turn-n
+               (let [t (hh-mm-ss turn-at)]
+                 (when (seq t) (str " · " t))))]
+   [:span {:class "flex-1 border-t border-base-800"}]])
+
+(defn- cards-with-separators
+  "Interleave turn-separator rows into the chronological card list: a
+   separator renders before the first card of each turn. Cards without
+   a turn keep their tx-time position and never break a turn group."
+  [cards]
+  (loop [out [] last-turn nil cards cards]
+    (if-let [{::keys [turn-n turn-at] :as card} (first cards)]
+      (let [new-turn? (and (some? turn-n) (not= turn-n last-turn))]
+        (recur (cond-> out
+                 new-turn? (conj (turn-separator turn-n turn-at))
+                 true      (conj (card-block card)))
+               (if new-turn? turn-n last-turn)
+               (rest cards)))
+      out)))
 
 (defn- html-pane-fragment
   [agent-id {:keys [html-cards agent-tile]}]
@@ -228,7 +423,13 @@
          :class "flex flex-col h-full overflow-hidden"}
    [:div {:class "px-2 py-1 text-xs font-mono text-text-400 bg-base-900 border-b border-base-800"}
     ":seon.render/html  (rendered view)"]
-   [:div {:class "flex-1 overflow-auto p-2 text-xs bg-base-950"}
+   ;; `data-seon-scroll` arms the client-side bottom-autoscroll: pinned
+   ;; to newest while the user is at/near the bottom; never yanks while
+   ;; they read history. Stable id so idiomorph preserves the element
+   ;; (and its scrollTop + JS-property flag) across SSE morphs.
+   [:div {:id (str "inspect-cards-" agent-id)
+          :data-seon-scroll "1"
+          :class "flex-1 overflow-auto p-2 text-xs bg-base-950"}
     ;; The agent's OWN tile — always ABOVE the per-entity cards. It
     ;; lives inside this morphed fragment, so every SSE push
     ;; re-renders it: the agent repoints `:seon.render/html` on its
@@ -238,7 +439,7 @@
                          "bg-base-900/60")}
        agent-tile])
     (if (seq html-cards)
-      (into [:div {:class "flex flex-col"}] html-cards)
+      (into [:div {:class "flex flex-col"}] (cards-with-separators html-cards))
       [:div {:class "text-text-500 italic p-2"}
        (str "nothing here yet — every entity this agent sees (messages, "
             "evals, fns, schemas) renders here as a card the moment it "
@@ -302,6 +503,11 @@
         [:link {:rel "stylesheet"
                 :href "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css"}]
         [:script {:src "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"}]
+        ;; Clojure is NOT in the hljs core CDN build — without this
+        ;; module every code block logged "Could not find the language
+        ;; 'clojure'" and fell back to no-highlight (observed live
+        ;; 2026-06-09: 100+ console warnings per page load).
+        [:script {:src "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/clojure.min.js"}]
         ;; marked.js — renders `:seon.eval/narration` markdown into HTML
         ;; in the right pane only (the AI pane keeps raw markdown — LLMs
         ;; read it fine as text). Loaded from CDN; no server-side dep.
@@ -386,18 +592,64 @@
                         "var esc=src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');"
                         "el.innerHTML=window.marked.parse(esc);"
                         "el.__mdSrc=src;});}"
+                        ;; Open-state survival across morphs: the server
+                        ;; always re-renders <details> with their DEFAULT
+                        ;; open state, and idiomorph SYNCS attributes — so
+                        ;; an SSE push would clobber every user toggle
+                        ;; (verified empirically: morph removes the user's
+                        ;; `open`). Same class of guard as __mdSrc: user
+                        ;; intent lives in a JS-side map (window.seonOpen,
+                        ;; keyed by data-seon-key) that the morph can't
+                        ;; touch; the observer pass reapplies it. Recording
+                        ;; happens on summary CLICK (a user gesture), via
+                        ;; setTimeout(0) so we read .open AFTER the default
+                        ;; toggle action ran. Programmatic .open changes
+                        ;; (our own reapply) never record.
+                        "window.seonOpen=window.seonOpen||{};"
+                        "document.addEventListener('click',function(e){"
+                        "var s=e.target&&e.target.closest?e.target.closest('summary'):null;"
+                        "if(!s)return;var d=s.parentElement;"
+                        "if(d&&d.tagName==='DETAILS'&&d.hasAttribute('data-seon-key')){"
+                        "setTimeout(function(){"
+                        "window.seonOpen[d.getAttribute('data-seon-key')]=d.open;},0);}});"
+                        "function seonReapplyOpen(){"
+                        "document.querySelectorAll('details[data-seon-key]').forEach(function(d){"
+                        "var k=d.getAttribute('data-seon-key');"
+                        "if(k in window.seonOpen&&d.open!==window.seonOpen[k]){"
+                        "d.open=window.seonOpen[k];}});}"
+                        ;; Bottom-autoscroll for [data-seon-scroll] panes:
+                        ;; pinned to newest while the user is at/near the
+                        ;; bottom (40px slack); a capturing scroll listener
+                        ;; records intent on the element as a JS property
+                        ;; (morph-proof — idiomorph preserves the node via
+                        ;; its stable id). Undefined flag = treat as
+                        ;; at-bottom (first render scrolls to newest).
+                        "document.addEventListener('scroll',function(e){"
+                        "var c=e.target;"
+                        "if(c&&c.hasAttribute&&c.hasAttribute('data-seon-scroll')){"
+                        "c.__seonAtBottom=(c.scrollTop+c.clientHeight>=c.scrollHeight-40);}},true);"
+                        "function seonAutoscroll(){"
+                        "document.querySelectorAll('[data-seon-scroll]').forEach(function(c){"
+                        "if(c.__seonAtBottom!==false){c.scrollTop=c.scrollHeight;}});}"
                         "document.addEventListener('DOMContentLoaded',function(){"
-                        "seonHighlightAll();seonMarkdownAll();});"
+                        "seonHighlightAll();seonMarkdownAll();"
+                        "seonReapplyOpen();seonAutoscroll();});"
                         ;; ANY childList mutation re-runs the passes — a
                         ;; Datastar morph can be removal-only (it clears the
                         ;; markdown container's rendered children), so
                         ;; gating on addedNodes misses it. Both passes are
                         ;; no-ops on already-rendered nodes, so the observer
                         ;; settles instead of looping.
+                        ;; seonReapplyOpen runs BEFORE seonAutoscroll —
+                        ;; reopening a details changes scrollHeight, so the
+                        ;; bottom-pin must measure after it. Both are no-ops
+                        ;; when state already matches, so the observer
+                        ;; settles instead of looping.
                         "new MutationObserver(function(muts){"
                         "var any=false;for(var i=0;i<muts.length;i++){"
                         "if(muts[i].type==='childList'){any=true;break;}}"
-                        "if(any){seonHighlightAll();seonMarkdownAll();}"
+                        "if(any){seonHighlightAll();seonMarkdownAll();"
+                        "seonReapplyOpen();seonAutoscroll();}"
                         "}).observe(document.body,{subtree:true,childList:true});"
                         ;; Cmd/Ctrl+Enter submits the chat form from anywhere.
                         "document.addEventListener('keydown',function(e){"
@@ -519,19 +771,24 @@
 ;; pushes for the watching ones.
 ;; ============================================================
 
-(defn- tx-agent-id
-  "Read `:seon.db/agent-id` off the tx eid in db-after. Multiple datoms
-   may have been emitted but they all share the same tx in a single
-   commit, so we just look at the first one."
-  [db datoms]
-  (when-let [tx (some (fn [d] (:seon.db/tx d)) datoms)]
-    (:seon.db/agent-id (d/entity db tx))))
-
 (defn- on-tx
+  "Fan a tx out to the watching agents it affects. Scope rules:
+   - substrate tx (no `:seon.db/agent-id`) → ALL watching agents;
+   - `:seon.db/origin :substrate-seed` → ALL watching agents EVEN
+     when agent-stamped (the boot-seed runs inside the booting agent's
+     `with-agent` scope today, but `agent-view` shows seed tx to every
+     agent — without this clause the OTHER agents' panes went stale on
+     every boot);
+   - otherwise → only the stamping agent.
+   All datoms in one commit share the tx, so the first datom's tx eid
+   is the commit's."
   [{:seon.db/keys [db datoms]}]
-  (let [scope-id (tx-agent-id db datoms)
+  (let [tx-eid   (some (fn [d] (:seon.db/tx d)) datoms)
+        tx-ent   (when tx-eid (d/entity db tx-eid))
+        scope-id (:seon.db/agent-id tx-ent)
+        seed?    (= :substrate-seed (:seon.db/origin tx-ent))
         watching (watching-agents)
-        targets  (if (nil? scope-id)
+        targets  (if (or (nil? scope-id) seed?)
                    watching
                    (filter #(= % scope-id) watching))]
     (doseq [aid targets]

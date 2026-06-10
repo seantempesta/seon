@@ -62,6 +62,16 @@
         ;; lookup (ctx-preview, assemble-context) throws.
         own-eid (try (:db/id (d/pull base '[:db/id] [:seon.agent/id id]))
                      (catch :default _ nil))
+        ;; Per-tx verdict memo. The pred runs on EVERY datom access
+        ;; through the FilteredDB, and `substrate-or-mine?` does a
+        ;; `d/entity` (tx-meta read) each time — on the file-backed pod
+        ;; store (A1, 2026-06-09) that made one inspector render issue
+        ;; MILLIONS of konserve index reads and wedge the pod event
+        ;; loop at 100% CPU (observed live). A tx's meta (`agent-id`,
+        ;; `origin`) is immutable once committed, so the verdict is
+        ;; cached per tx-eid for the lifetime of THIS filtered db value
+        ;; — each distinct tx is judged exactly once.
+        !tx-ok (atom {})
         pred (fn [db datom]
                (let [^js datom datom]
                  (or ;; Identity attrs are PUBLIC substrate facts —
@@ -71,7 +81,12 @@
                      ;; whose identity datom landed in the peer's own
                      ;; tx scope.
                      (contains? #{:seon.agent/id :seon.user/id} (.-a datom))
-                     (substrate-or-mine? db (.-tx datom) id)
+                     (let [tx (.-tx datom)]
+                       (if-some [v (get @!tx-ok tx)]
+                         v
+                         (let [v (substrate-or-mine? db tx id)]
+                           (swap! !tx-ok assoc tx v)
+                           v)))
                      (and (some? own-eid) (= own-eid (.-e datom))))))
         filtered (d/filter base pred)]
     {:seon.db/db filtered}))

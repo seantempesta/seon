@@ -967,6 +967,48 @@
       :else                              (update (or opts {}) :tx-meta
                                                  #(merge merged %)))))
 
+;; ---------------------------------------------------------------------------
+;; Origin-forge guard (verifier rec, 2026-06-09). An AGENT-scoped tx that
+;; claims `:seon.db/origin :substrate-seed` is forging substrate
+;; provenance — `seon.agent-view` trusts that origin to widen the tx's
+;; visibility across EVERY agent's filtered view, so a forging agent
+;; could inject context into all of its peers.
+;;
+;; The intended enforcement is to OVERRIDE the origin to `:agent` (the
+;; honest value) and log. But TODAY the legitimate boot-seed path
+;; (`seon.client/seed-substrate!`) still runs INSIDE the booting agent's
+;; `with-agent` scope (known client.cljs issue, other lane), so the
+;; override would silently re-stamp every boot-seed tx and break the
+;; cross-agent visibility the seed depends on. Until the seed moves
+;; outside agent scope this guard is WARN-ONLY: log + count, commit
+;; unchanged.
+;;
+;; TODO(after client.cljs runs seed-substrate! OUTSIDE with-agent —
+;; #23's lane): flip to enforcement — override the origin to :agent
+;; (keep the warn), gated on a private `*substrate-seed-allowed*`
+;; binding the seed path establishes.
+;; ---------------------------------------------------------------------------
+
+(defonce ^:no-doc !seed-origin-forge-count
+  ;; Public (no-doc) so tests can reset/read it. Counts agent-scoped
+  ;; tx that claimed :substrate-seed origin since pod boot.
+  (atom 0))
+
+(defn- warn-on-seed-origin-forge!
+  "WARN-ONLY guard: when an agent scope is active and the merged
+   tx-meta claims `:seon.db/origin :substrate-seed`, log a console
+   warning and bump `!seed-origin-forge-count`. Returns `merged-opts`
+   unchanged (see the enforcement TODO above)."
+  [merged-opts]
+  (when (and (some? (current-agent-id))
+             (= :substrate-seed (get-in merged-opts [:tx-meta ::origin])))
+    (swap! !seed-origin-forge-count inc)
+    (js/console.warn
+      "seon.db/transact!: agent-scoped tx claims :seon.db/origin :substrate-seed — substrate provenance from inside an agent scope (warn-only; see warn-on-seed-origin-forge!)"
+      #js {:agent (current-agent-id)
+           :count @!seed-origin-forge-count}))
+  merged-opts)
+
 (defn- error-envelope
   "Build a `{::ok? false ::error <error-map>}` failure envelope from a
    thrown error. Ensures `:seon.error/data` carries a `:seon.error/kind`
@@ -1042,7 +1084,8 @@
   (let [{::keys [tx-data opts conn] :or {conn *conn*}} arg
         c           (resolve-conn conn)
         attrs       (extract-tx-attrs tx-data)
-        merged-opts (merge-tx-context-into-opts opts)]
+        merged-opts (warn-on-seed-origin-forge!
+                      (merge-tx-context-into-opts opts))]
     (validate-attrs! attrs)
     (validate-values! tx-data)
     ;; Install datahike schema for any registered attr not yet in the

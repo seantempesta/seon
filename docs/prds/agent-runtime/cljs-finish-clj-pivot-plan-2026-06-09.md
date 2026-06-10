@@ -771,6 +771,78 @@ reply ONLY with forms + `;;` comments.
 6. **Test cleanup:** agent launched (bin/test-cljs end-to-end + the three
    known-broken suites + stale-pattern sweep).
 
+### Inspector right pane (2026-06-09 late — FIXED + humanized, browser-verified)
+
+- **"no renderable entities" root cause:** boot-seed tx (`:seon.db/origin
+  :substrate-seed` — the `:seon.schema` kind rows, sticky preamble, substrate
+  index) run inside the booting agent's `with-agent` scope, so they arrive
+  AGENT-STAMPED; re-boots fragmented the kind-row datoms across txs owned by
+  DIFFERENT agents, so every agent's `agent-view` filter saw only a partial
+  slice → `entity-primary-kind` never matched → zero render symbols → empty
+  pane for ALL agents. Fixed in `agent_view.cljs`: the filter keeps
+  `:substrate-seed`-origin tx, datoms on the agent's OWN entity (stub agents
+  created by a peer couldn't see their own `:seon.agent/id` → ctx-preview
+  threw), and `:seon.agent/id`/`:seon.user/id` datoms (identity = public;
+  cross-agent transcript labels need them). Deeper fix (client.cljs, other
+  lane): run the seed transacts OUTSIDE the agent ALS scope.
+- **Agent tile was dead:** `render.default/view` emitted lazy-seq hiccup
+  children; `valid-hiccup?` instrumentation rejected the output. Now `into`
+  vectors.
+- **Humanized:** message cards = direction line (`user → assistant`,
+  resolved via ref re-pull — `d/pull '[*]` returns bare `{:db/id}` refs),
+  `hh:mm:ss`, hops badge >0, content as markdown; unknown-kind fallback =
+  styled k/v table card (no more pr-str/EDN blobs); markdown pipeline
+  XSS-safe (pre-escape before `marked.parse`) and morph-proof (render keyed
+  on JS-property source guard; observer fires on removal-only mutations —
+  Datastar morphs used to blank every message body after the first SSE push).
+- Verified in Chrome: all 6 agents render cards; live SSE morph appends new
+  message cards without reload; hljs + marked fire post-morph; 0 console
+  errors. `bin/test-cljs` 284 tests / 1058 assertions / 2 fails (verifier's
+  corrected run 2026-06-09 — the earlier 276/1007/4 entry here was stale; the
+  2 remaining fails are owned by the in-flight client.cljs lane).
+
+### Inspector polish + hardening — unit #24 (2026-06-09 late, browser-verified)
+
+- **Auto-collapse static content.** LEFT pane: the AI context renders as
+  per-section `<details>` (`seon.inspect/ctx-preview` now returns
+  `:seon.render/section-texts` — same layout + section fns as
+  `assemble-context`, with a length-tolerance guard that falls back to one
+  `:context` blob on divergence; byte-equality is impossible because
+  `transcript-section` embeds the render timestamp). transcript + prompt
+  open; system/capabilities/catalogs/ns-context collapsed with
+  `name (N,NNN chars)` summaries. RIGHT pane: STATIC cards collapse to
+  `kind name — gist` summaries. Discriminator: sticky preamble
+  (`:seon.sticky/position`), `:seon.schema` kind rows (`:seon.schema/key`),
+  and `:seon.fn`/`:seon.ns` whose CREATION tx origin is `:substrate-seed`.
+- **Open-state survives SSE morphs** — empirically confirmed idiomorph DOES
+  clobber `open` (guard disabled → user-opened section closed on morph).
+  Guard: `window.seonOpen` map keyed by `data-seon-key`, recorded on summary
+  click, reapplied in the MutationObserver pass (same class as `__mdSrc`).
+- **Turn-grouped right pane**: `── turn N · hh:mm:ss ──` separators derived
+  from `:seon.session/turns`→`:seon.turn/messages|evals`; non-turn cards keep
+  tx-time position. Bottom-autoscroll pinned while at/near bottom (40px
+  slack); scrolled-up reader never yanked (both verified live in Chrome).
+- **Origin-forge guard (WARN-ONLY)** in `seon.db/transact!`: agent-scoped tx
+  claiming `:seon.db/origin :substrate-seed` logs + counts
+  (`!seed-origin-forge-count`); NOT overridden yet because the boot-seed
+  still runs inside `with-agent` (live warns from the booting agent prove
+  enforcement would break boots). Flip-to-enforce TODO sits next to the
+  guard. 3 tests in `test/seon/db/origin_guard_test.cljs`.
+- **Inspector on-tx fanout**: `:substrate-seed`-origin tx now push to ALL
+  watching agents even when agent-stamped (verified live: another agent's
+  seed tx pushed to a different watched agent's pane).
+- **agent-view perf**: per-tx verdict memo in the `d/filter` pred —
+  unmemoized, ONE inspector render on the A1 file-backed store issued
+  millions of tx-meta reads and wedged the pod at 100% CPU.
+- **hljs fix**: Clojure module added (core CDN build lacks it — 100+
+  console warnings/page, zero highlighting; now highlights, console clean).
+- Suite: `bin/test-cljs` 287/1066/2 — the 2 = the documented in-flight
+  client-lane ALS fails (`seon.agents-test`).
+- KNOWN GAP (other lane): `seon.render/renderable-entities` re-filters by
+  tx-agent-id and does NOT admit `:substrate-seed` txs, so agents that did
+  not run the seed see no sticky/schema cards (`render.cljs` `:when` clause,
+  ~L302). Mirror agent-view's origin clause there.
+
 ### Web UI status (2026-06-09 — FIXED + browser-verified)
 
 - **page.cljc escaping bug FIXED:** root `/` console-forwarder `<script>` wasn't
