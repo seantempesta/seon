@@ -74,8 +74,23 @@
     [seon.ai.deepseek :as deepseek]
     [seon.client :as client]
     [seon.db :as db]
+    ;; World-parity (2026-06-10 deep audit): the :test build has no
+    ;; :devtools preload slot, so without this require
+    ;; `client/!indexed-test-vars` stays [] and `client/index-tests`
+    ;; seeds NOTHING — gym worlds were missing every :seon.test row and
+    ;; the test-sibling :seon.ns/source rows, so :exemplars rendered
+    ;; 4/7 blocks vs the live pod. Requiring the preload here runs the
+    ;; SAME `(reset! client/!indexed-test-vars (deftest-vars))` the pod
+    ;; build runs, with the SAME require closure → the same roster.
+    [seon.dev.test-preload]
     [seon.eval :as seval]
     [seon.agent.fs :as sfs]
+    ;; Boot-parity: start-agent! seeds the substrate handler entity
+    ;; (`:wake/on-message`) + the hand-declared datahike idents at boot;
+    ;; the gym world seeds the same rows (no dispatcher is armed — v0
+    ;; handler rows are data only, so the stub drive stays the driver's).
+    [seon.handler :as h]
+    [seon.handlers.wake :as wake]
     [seon.repl :as repl]
     [seon.schema :as schema]
     [seon.warn :as warn]))
@@ -731,10 +746,15 @@
   (if-let [existing (get @!agents designator)]
     existing
     (let [agent-id (db/new-id!)]
-      (await (seval/setup-agent-ns! compile-state
-                                    (agent/home-ns agent-id)
-                                    agent-id))
-      (await (agent/create! {:seon.agent/id agent-id}))
+      ;; with-agent scope mirrors seon.client/boot-one-agent! — on a
+      ;; live boot the agent's own create! tx carries its agent-id.
+      (await
+        (db/with-agent agent-id
+          (fn ^:async boot-gym-agent! []
+            (await (seval/setup-agent-ns! compile-state
+                                          (agent/home-ns agent-id)
+                                          agent-id))
+            (await (agent/create! {:seon.agent/id agent-id})))))
       (swap! !agents assoc designator agent-id)
       agent-id)))
 
@@ -743,27 +763,38 @@
    scenario's prior-agent state on top. Two provenance layers, exactly
    like a live store:
 
-   1. The pod's boot seed — the same three transacts as
-      `seon.client/start-agent!`, in the same order, inside the same
+   1. The pod's boot seed — the same calls as
+      `seon.client/start-agent!`, in the same order: the substrate
+      handler bootstrap (`h/bootstrap-schema!` + `wake/bootstrap-schema!`
+      + the ONE `:wake/on-message` handler entity, data-only — no
+      dispatcher armed), then the three transacts inside the same
       `{:seon.db/origin :substrate-seed}` tx-context: entity-schema
       decomposition (`schema/all-entity-schemas-tx-data`), the
       preamble + user entity (`client/seed-substrate!`), and the
       substrate index (`client/substrate-index-tx` — :seon.ns/:seon.fn
-      rows PLUS a `:seon.schema` row per registered schema PLUS test
-      rows, conn-deduped). Gym iteration 1 ran WITHOUT the
-      entity-schema decomposition and index-schemas, so gym prompts
-      differed from real pod prompts — which hid the S-32 catalog bug
-      for a whole sweep. The seed-origin tx-context matters too:
+      rows PLUS a `:seon.schema` row per registered schema PLUS the
+      :seon.test rows + test-sibling exemplar sources, conn-deduped;
+      the test roster comes from the `seon.dev.test-preload` require
+      in this ns — the SAME mechanism the pod build uses). Gym
+      iteration 1 ran WITHOUT the entity-schema decomposition and
+      index-schemas, so gym prompts differed from real pod prompts —
+      which hid the S-32 catalog bug for a whole sweep; iteration 2
+      ran without the test roster, so :exemplars rendered 4/7 blocks
+      vs live. The seed-origin tx-context matters too:
       `seon.warn/domain-attrs` discriminates substrate vs agent attrs
-      by exactly that provenance.
+      by exactly that provenance. The caller (run-scenario!) invokes
+      this inside `(db/with-agent <:a's id>)` so the seed txs carry the
+      primary agent's id like a live boot's do.
 
    2. The scenario's registrations + fixtures — the state a PRIOR
       agent left in the store. Registered into the live registry, then
-      transacted in ORDINARY (non-seed) txs with the same tee-shaped
+      transacted in ORDINARY (non-seed) txs — inside a SYNTHETIC
+      prior-agent `with-agent` scope — with the same tee-shaped
       `:seon.schema` rows `seon.eval/build-tee-entities` writes for a
       real register! eval — so seeded attrs like `:seon.workout/*`
-      carry agent provenance and render in the domain-attrs reuse
-      surface, exactly as on the live store.
+      carry agent provenance (agent-id + non-seed origin, the
+      classifier's exact predicate) and render in the domain-attrs
+      reuse surface, exactly as on the live store.
 
    Fails LOUD on any non-ok envelope. Returns Promise<{:seon.gym/ok? true}>."
   {:malli/schema [:=> [:cat :seon.gym/seed-request] :seon.gym/seed-response]}
@@ -775,6 +806,30 @@
                    (throw (ex-info (str "gym: world seed transact failed at "
                                         step)
                                    env))))]
+    ;; Substrate handler rows — the SAME calls start-agent! makes, in the
+    ;; same order, BEFORE the seed-origin transacts: the hand-declared
+    ;; datahike idents (composite-tuple identity the Malli bridge can't
+    ;; emit) + the ONE `:wake/on-message` handler entity. Without these
+    ;; the gym store renders a `:seon.handler` instance count of 0 where
+    ;; every live store shows 1. No dispatcher is armed by these rows
+    ;; (v0: handler entities are data; wake-up is the per-agent trigger,
+    ;; which the gym deliberately does not install — the driver drives).
+    ;; The handler fns read the root `db/*conn*`; pin it to THIS conn for
+    ;; the duration (direct test callers don't pre-swap it the way
+    ;; run-scenario! does), restoring in finally.
+    (let [prev-conn db/*conn*]
+      (set! db/*conn* conn)
+      (try
+        (await (h/bootstrap-schema!))
+        (await (wake/bootstrap-schema!))
+        (await (h/register!
+                 {:seon.handler/name      :wake/on-message
+                  :seon.handler/match     {:seon.handler.match/attr
+                                           :seon.agent.message/to}
+                  :seon.handler/fn        'seon.handlers.wake/wake-on-message
+                  :seon.handler/on-origin #{:user :agent}}))
+        (finally
+          (set! db/*conn* prev-conn))))
     (await
       (db/with-tx-context {:seon.db/origin :substrate-seed}
         (fn ^:async boot-seed! []
@@ -792,34 +847,45 @@
                            {:seon.db/conn conn
                             :seon.db/tx-data
                             (await (client/substrate-index-tx conn))}))))))
-    (when (seq schema-registrations)
-      (doseq [[k v] schema-registrations] (schema/register! k v))
-      (let [now  (js/Date.)
-            tee  (vec (for [[k v] schema-registrations]
-                        (cond-> {:seon.schema/key        k
-                                 :seon.schema/source     (pr-str
-                                                           (list 'seon.schema/register! k v))
-                                 :seon.schema/created-at now}
-                          (namespace k)
-                          (assoc :seon.schema/ns
-                                 {:seon.ns/name (keyword (namespace k))}))))
-            ;; entity-shape :map registrations ALSO decompose into
-            ;; id-attr/required-attrs rows (the catalog's kind blocks) —
-            ;; separate tx so the identity upsert merges cleanly.
-            deco (into [] (mapcat (comp schema/entity-schema-tx-data first))
-                       schema-registrations)]
-        (check! :scenario-schemas
-                (await (db/transact! {:seon.db/conn conn
-                                      :seon.db/tx-data tee})))
-        (when (seq deco)
-          (check! :scenario-entity-schemas
-                  (await (db/transact! {:seon.db/conn conn
-                                        :seon.db/tx-data deco}))))))
-    (when (seq fixtures)
-      (check! :fixtures
-              (await (db/transact! {:seon.db/conn conn
-                                    :seon.db/tx-data
-                                    (resolve-fixture-dates fixtures)}))))
+    ;; PRIOR-AGENT PROVENANCE: on a live store this layer was written by
+    ;; a real agent inside its own with-agent scope, so its txs carry
+    ;; `:seon.db/agent-id` (the context-model ns-leg classifies
+    ;; agent-authored nses on exactly agent-id-present + non-seed
+    ;; origin). Stamp the layer with a minted SYNTHETIC prior-agent id —
+    ;; distinct from any designator the run boots — so classification
+    ;; matches what a real prior agent's work looks like.
+    (when (or (seq schema-registrations) (seq fixtures))
+      (await
+        (db/with-agent (db/new-id!)
+          (fn ^:async seed-prior-agent-layer! []
+            (when (seq schema-registrations)
+              (doseq [[k v] schema-registrations] (schema/register! k v))
+              (let [now  (js/Date.)
+                    tee  (vec (for [[k v] schema-registrations]
+                                (cond-> {:seon.schema/key        k
+                                         :seon.schema/source     (pr-str
+                                                                   (list 'seon.schema/register! k v))
+                                         :seon.schema/created-at now}
+                                  (namespace k)
+                                  (assoc :seon.schema/ns
+                                         {:seon.ns/name (keyword (namespace k))}))))
+                    ;; entity-shape :map registrations ALSO decompose into
+                    ;; id-attr/required-attrs rows (the catalog's kind blocks) —
+                    ;; separate tx so the identity upsert merges cleanly.
+                    deco (into [] (mapcat (comp schema/entity-schema-tx-data first))
+                               schema-registrations)]
+                (check! :scenario-schemas
+                        (await (db/transact! {:seon.db/conn conn
+                                              :seon.db/tx-data tee})))
+                (when (seq deco)
+                  (check! :scenario-entity-schemas
+                          (await (db/transact! {:seon.db/conn conn
+                                                :seon.db/tx-data deco}))))))
+            (when (seq fixtures)
+              (check! :fixtures
+                      (await (db/transact! {:seon.db/conn conn
+                                            :seon.db/tx-data
+                                            (resolve-fixture-dates fixtures)}))))))))
     {:seon.gym/ok? true}))
 
 (defn ^:async run-scenario!
@@ -878,12 +944,21 @@
             ;; SEON_FS_READ_ONLY=1). Both restored/irrelevant after the run.
             (sfs/configure! {:seon.agent.fs/allowed-roots [(.cwd js/process)]
                              :seon.agent.fs/read-only?    true})
-            ;; The pod boot seed + the scenario's prior-agent layer
-            ;; (registrations as tee-shaped :seon.schema rows +
-            ;; fixtures) — see [[seed-scenario-world!]] (world-parity:
-            ;; gym prompts must equal real pod prompts).
-            (await (seed-scenario-world! {:seon.db/conn conn
-                                          :seon.gym/scenario scenario}))
+            ;; Boot designator :a FIRST, then run the boot seed inside
+            ;; its with-agent scope — exactly start-agent!'s order (the
+            ;; per-agent create! precedes the seed transacts, and the
+            ;; seed txs carry the PRIMARY agent's id alongside the
+            ;; :substrate-seed origin — the live store's provenance
+            ;; shape, which the context-model classifier keys on).
+            ;; The scenario's prior-agent layer inside
+            ;; [[seed-scenario-world!]] re-scopes itself to a synthetic
+            ;; prior-agent id (nested with-agent — inner wins).
+            (let [primary (await (ensure-agent! !agents compile-state :a))]
+              (await
+                (db/with-agent primary
+                  (fn []
+                    (seed-scenario-world! {:seon.db/conn conn
+                                           :seon.gym/scenario scenario})))))
             (await (eval-fixture-sources! compile-state fixture-sources))
             ;; Drive every gym turn, strictly in order; each turn's agent
             ;; boots lazily on first use (multi-agent sequencing).

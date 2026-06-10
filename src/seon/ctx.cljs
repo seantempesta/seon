@@ -737,7 +737,8 @@
                      (when (seq doc) (str "\n      ; " doc))))
         roots (seq (:seon.agent.fs/allowed-roots @sfs/!config))]
     (if (seq rows)
-      (str "## What you can do\n\n"
+      (str "<capabilities>\n"
+           "## What you can do\n\n"
            "These are the core APIs. Map-in is the preferred shape: you pass\n"
            "ONE map with fully-namespaced keys (see the worked examples below).\n"
            "The db ops (query/pull/entity/transact!) ALSO accept a natural\n"
@@ -892,7 +893,8 @@
            "  (seon.db/transact!\n"
            "    {:seon.db/tx-data\n"
            "     [{:seon.agent/id    (seon.db/current-agent-id)\n"
-           "       :seon.render/html 'YOUR-CURRENT-NS/my-tile}]})  ; fully qualified")
+           "       :seon.render/html 'YOUR-CURRENT-NS/my-tile}]})  ; fully qualified\n"
+           "</capabilities>")
       "")))
 
 ;; ============================================================

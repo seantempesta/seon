@@ -19,6 +19,8 @@
     [malli.core :as m]
     [seon.agent :as agent]
     [seon.client :as client]
+    [seon.ctx :as ctx]
+    [seon.db :as db]
     [seon.gym.driver :as gym]
     [seon.schema :as schema]
     [seon.warn :as warn]))
@@ -187,6 +189,84 @@
                                   (is (str/includes? catalog
                                                      "all registered schemas")
                                       "index-schemas rows render (boot parity)")))))))
+          (.then (fn [_]
+                   (let [minted (remove keys-before (schema/current-keys))]
+                     (when (seq minted)
+                       (swap! @#'schema/*schemas #(apply dissoc % minted))))
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ---------------------------------------------------------------------------
+;; WORLD-PARITY (deep audit 2026-06-10) — the seeded world must carry the
+;; SAME row-classes a live pod boot produces, derived from THE SAME
+;; sources of truth the boot indexers use (so a future boot change moves
+;; this test, not just live behavior):
+;;   - every relevant-ns? member of (client/substrate-ns-set) has a FULL
+;;     :seon.ns/source row (the :exemplars 7-block set — gym iteration 2
+;;     rendered 4/7 because the :test build never loaded
+;;     seon.dev.test-preload and index-tests seeded nothing);
+;;   - one :seon.test row per preload-roster deftest var;
+;;   - the substrate :wake/on-message handler entity exists;
+;;   - the scenario's prior-agent layer carries agent provenance
+;;     (agent-id + non-seed origin — the context-model classifier's
+;;     exact predicate).
+;; ---------------------------------------------------------------------------
+
+(deftest seeded-world-carries-the-pod-boot-roster-exemplars-and-provenance
+  (async done
+    (let [keys-before (schema/current-keys)
+          scenario    (load-first
+                        "test/seon/gym/scenarios/s21-log-workout-existing-schema.edn")]
+      (is (pos? (count @client/!indexed-test-vars))
+          "the gym build carries the pod's preload deftest roster")
+      (-> (client/open-agent-conn!)
+          (.then (fn [conn]
+                   (-> (gym/seed-scenario-world!
+                         {:seon.db/conn conn :seon.gym/scenario scenario})
+                       (.then (fn [_]
+                                (let [dbv      @conn
+                                      expected (->> (client/substrate-ns-set)
+                                                    (map name)
+                                                    (filter ctx/relevant-ns?)
+                                                    set)
+                                      full-src (->> (db/query
+                                                      {:seon.db/db dbv
+                                                       :seon.db/query
+                                                       '[:find ?nm ?src
+                                                         :where
+                                                         [?n :seon.ns/name ?nm]
+                                                         [?n :seon.ns/source ?src]]})
+                                                    (keep (fn [[nm src]]
+                                                            (when (and (ctx/relevant-ns? (name nm))
+                                                                       (not= (str/trim src)
+                                                                             (str "(ns " (name nm) ")")))
+                                                              (name nm))))
+                                                    set)
+                                      test-rows (count (db/query
+                                                         {:seon.db/db dbv
+                                                          :seon.db/query
+                                                          '[:find ?t :where
+                                                            [?e :seon.test/sym ?t]]}))
+                                      handler   (db/query
+                                                  {:seon.db/db dbv
+                                                   :seon.db/query
+                                                   '[:find ?h :where
+                                                     [?h :seon.handler/name :wake/on-message]]})
+                                      prior     (db/query
+                                                  {:seon.db/db dbv
+                                                   :seon.db/query
+                                                   '[:find ?aid :where
+                                                     [?s :seon.schema/key :seon.workout/date ?tx]
+                                                     [?tx :seon.db/agent-id ?aid]
+                                                     (not [?tx :seon.db/origin :substrate-seed])]})]
+                                  (is (= expected full-src)
+                                      "every relevant ns the boot indexes carries full source (the exemplar block set)")
+                                  (is (= (count @client/!indexed-test-vars) test-rows)
+                                      "one :seon.test row per pod-roster deftest var")
+                                  (is (seq handler)
+                                      "the substrate :wake/on-message handler entity is seeded")
+                                  (is (seq prior)
+                                      "the scenario layer carries prior-agent provenance (agent-id + non-seed origin)")))))))
           (.then (fn [_]
                    (let [minted (remove keys-before (schema/current-keys))]
                      (when (seq minted)
