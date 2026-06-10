@@ -235,7 +235,8 @@ commit:
 7. **Third tile panel** (§6 forward item 2).
 8. **Lane-merge 2.2e (TOP OF QUEUE — flip today, examples after)** — the §5 flip checklist; THEN Timbre unification + cljc
    convergence.
-9. **MCP server health** — reset the broken `default` cljs session; GC the
+9. **REPL-DEBUGGABILITY EVERYWHERE (user, 2026-06-10): every process, agent, and cluster DB reachable from a REPL.** The access matrix to make true: (a) any AGENT RUNTIME — the cljs MCP eval already takes `agent_id` (resolves agent-id → shadow runtime, survives restart); under process-per-agent every agent process loads the dev `:client` build and registers with the ONE shadow watcher — verify the `agent_id` path end-to-end (`seon.dev.node-agent`) as processes split; (b) the WIRE-SERVER — add nREPL alongside the 7891 socket REPL and wire it into the seon MCP server so the central writer is MCP-reachable like the dev JVM; (c) any CLUSTER DB — read-only DIS reader conns from any REPL (`:lock-blob? false`) + the wire-server REPL; document the one-liner recipes; (d) remote agents (later) — the wire protocol + DB are the admin surface (shadow websocket is dev-only). Document the matrix in CLAUDE.md Process Architecture when it lands.
+10. **MCP server health** — reset the broken `default` cljs session; GC the
    26 stale sessions.
 
 ## 8. Standing principles (don't relearn)
