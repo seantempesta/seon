@@ -373,16 +373,14 @@
              :seon.gym.turn/llm-script
              ["(seon.agent/reply! {:seon.agent.message/content \"BETA-ANSWER\"})\n"]}]
            :seon.gym.scenario/predicates
-           ;; PINNED ENGINE BUG (datahike-cljs, observed 2026-06-10):
-           ;; a datalog query joining TWO identity-attr clauses through
-           ;; one message row —
-           ;;   [?ag :seon.agent/id ?bid] [?m :seon.agent.message/from ?ag]
-           ;;   [?m :seon.agent.message/to ?u]  [?u :seon.user/id "user"]
-           ;; — IGNORES the :in ?bid binding and returns the
-           ;; inverse-direction (user→agent) rows, regardless of clause
-           ;; order. Single-identity-join queries bind correctly. Gym
-           ;; predicates therefore use from-agent + hops>0 ("a message
-           ;; the agent sent onward") instead of the user-entity join.
+           ;; ENGINE BUG FIXED (datahike fork sha 1ae35696, deps commit
+           ;; 156a53e — multi-group join corruption fix): a datalog
+           ;; query joining TWO identity-attr clauses through one
+           ;; message row used to IGNORE the :in ?bid binding and
+           ;; return the inverse-direction (user→agent) rows. This is
+           ;; the ORIGINAL double-identity-join query, restored as the
+           ;; live regression pin for that fix: it must count ONLY b's
+           ;; reply to the user.
            [{:seon.gym.predicate/id     :b-sent-exactly-one-user-reply
              :seon.gym.predicate/kind   :datalog
              :seon.gym.predicate/axis   :replies-honestly
@@ -392,8 +390,8 @@
                                           :where
                                           [?ag :seon.agent/id ?bid]
                                           [?m :seon.agent.message/from ?ag]
-                                          [?m :seon.agent.message/hops ?h]
-                                          [(pos? ?h)]
+                                          [?m :seon.agent.message/to ?u]
+                                          [?u :seon.user/id "user"]
                                           [?m :seon.agent.message/content ?c]]
              :seon.gym.predicate/expect [:count 1]}
             {:seon.gym.predicate/id        :judge-a

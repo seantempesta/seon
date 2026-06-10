@@ -44,16 +44,25 @@
  :seon.gym.scenario/turns
  [{:seon.gym.turn/message "What does seon.agent/message! return — the full transact report or something smaller?"}]
  :seon.gym.scenario/predicates
+ ;; Anchored on the keyword colon: a consult means the eval actually
+ ;; touches a :my.* DOMAIN attr (e.g. :my.kb/confidence,
+ ;; :my.kb.codebase/claim). The old unanchored "my\\." substring also
+ ;; matched the agent's own my.agent.<id> home-ns symbol (in-ns noise),
+ ;; so a first eval that merely mentioned its own namespace scored as
+ ;; consulting.
  [{:seon.gym.predicate/id      :first-eval-consults-stored-findings
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/axis    :consults-findings
-   :seon.gym.predicate/pattern "my\\.kb\\.|my\\."}
+   :seon.gym.predicate/pattern ":my\\."}
   ;; searches-first INVERTED here: the answer is stored, so more than
   ;; one repo search = the run-7 re-derivation signature.
+  ;; Toolbelt renamed seon.search/seon.fs → seon.agent.search/seon.agent.fs
+  ;; in 06de140 (batch-2 reorg) — the old pattern matched nothing, making
+  ;; this predicate vacuously green.
   {:seon.gym.predicate/id      :at-most-one-repo-search
    :seon.gym.predicate/kind    :eval-count-matching
    :seon.gym.predicate/axis    :searches-first
-   :seon.gym.predicate/pattern "seon\\.search/grep|seon\\.fs/read-file"
+   :seon.gym.predicate/pattern "seon\\.agent\\.search/grep|seon\\.agent\\.fs/read-file"
    :seon.gym.predicate/expect  [:count<= 1]}
   ;; from-agent + hops>0, not the user-entity join (datahike-cljs
   ;; double-identity-join mis-binding — pinned in driver_test).
