@@ -190,6 +190,30 @@
       (log-error "interrupt failed:" (.getMessage e))
       nil)))
 
+(defn nrepl-close-session
+  "Close a session on the nREPL server (frees server-side state).
+   Best-effort — errors are logged and swallowed."
+  [port nrepl-session]
+  (try
+    (with-open [sock (connect port)]
+      (send-and-collect sock {"op" "close" "session" nrepl-session} 5000))
+    (catch Exception e
+      (log-error "close failed:" (.getMessage e))
+      nil)))
+
+(defn nrepl-live-sessions
+  "The set of session ids currently alive on the nREPL server, or nil
+   when the server is unreachable (distinct from #{} = reachable, none)."
+  [port]
+  (try
+    (with-open [sock (connect port)]
+      (let [responses (send-and-collect sock {"op" "ls-sessions"} 5000)]
+        (when-not (some #(some #{"error" "eof" "timeout"} (get % "status" [])) responses)
+          (set (mapcat #(get % "sessions" []) responses)))))
+    (catch Exception e
+      (log-error "ls-sessions failed:" (.getMessage e))
+      nil)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Session lifecycle (pivot a fresh nREPL session into CLJS)
 ;;; ---------------------------------------------------------------------------
@@ -210,13 +234,22 @@
                                         "(shadow/nrepl-select " build-id ")")
                                    10000)]
         (log-debug "pivot result:" pivot-resp)
-        (let [sid (gen-sid)]
-          (swap! sessions assoc sid
-                 {:nrepl-session nrepl-sid
-                  :build build-id
-                  :created-at (System/currentTimeMillis)
-                  :pivot-value (:value pivot-resp)})
-          sid)))))
+        ;; Validate the pivot. shadow/nrepl-select returns [:selected <build>]
+        ;; on success, :missing-nrepl-middleware otherwise, and throws on an
+        ;; unknown build. Storing a session whose pivot failed produces the
+        ;; wedged-default symptom: evals fall through to the CLJ compiler with
+        ;; no *ns* bound (NPE from Compiler.currentNS()). Refuse to store it.
+        (if (some-> (:value pivot-resp) (str/includes? ":selected"))
+          (let [sid (gen-sid)]
+            (swap! sessions assoc sid
+                   {:nrepl-session nrepl-sid
+                    :build build-id
+                    :created-at (System/currentTimeMillis)
+                    :pivot-value (:value pivot-resp)})
+            sid)
+          (do (log-error "pivot into" build-id "failed:" (pr-str (dissoc pivot-resp :out)))
+              (nrepl-close-session port nrepl-sid)
+              nil))))))
 
 (defn require-port! []
   (or (read-shadow-port)
@@ -225,24 +258,53 @@
 
 (defn get-or-create-session!
   "If sid is provided, look it up. If sid is 'default', use a singleton
-   :repl-build session. Otherwise create a new one."
+   default-build session, creating it lazily when absent. Throws when the
+   default session can't be created (pivot failed) or sid is unknown."
   [sid-arg]
   (let [port (require-port!)
         sid (or sid-arg "default")]
     (or (when-let [s (get @sessions sid)]
           {:sid sid :session-info s})
-        (cond
-          (= sid "default")
-          (let [new-sid (create-cljs-session! port default-build-id)]
-            {:sid "default" :session-info (assoc (get @sessions new-sid) :alias "default")
-             :_remapped (do (swap! sessions
-                                    (fn [m]
-                                      (let [info (get m new-sid)]
-                                        (-> m (dissoc new-sid) (assoc "default" info)))))
-                            true)})
+        (if (= sid "default")
+          (if-let [new-sid (create-cljs-session! port default-build-id)]
+            (let [info (get @sessions new-sid)]
+              (swap! sessions (fn [m] (-> m (dissoc new-sid) (assoc "default" info))))
+              {:sid "default" :session-info info})
+            (throw (ex-info (str "failed to create default CLJS session — pivot into "
+                                 default-build-id " failed (watcher up? build watched?)")
+                            {:build default-build-id})))
+          (throw (ex-info (str "unknown session id: " sid
+                               " (it may have been swept after a watcher restart — "
+                               "use create_session for a fresh one)")
+                          {:sid sid}))))))
 
-          :else
-          (throw (ex-info (str "unknown session id: " sid) {:sid sid}))))))
+(defn sweep-dead-sessions!
+  "Liveness sweep: reap tracked sessions whose nREPL session no longer
+   exists on the shadow server. Cloned nREPL sessions die when the watcher
+   restarts but were historically never reaped here (26+ stale entries
+   observed). Run on list_sessions/create_session. When the watcher is
+   unreachable every tracked session is dead by definition — reap all.
+   Sweeps the agent-session resolution cache by the same criterion.
+   Returns {:swept [..sids..] :agent-swept [..agent-ids..]}."
+  []
+  (let [port (read-shadow-port)
+        live (when port (nrepl-live-sessions port))
+        ;; No watcher → every cloned session is gone → reap all. Watcher up
+        ;; but ls-sessions errored (nil despite a port) → can't tell → keep
+        ;; everything rather than reap live sessions on a transient failure.
+        dead? (cond
+                (nil? port) (constantly true)
+                (nil? live) (constantly false)
+                :else (fn [info] (not (contains? live (:nrepl-session info)))))
+        dead (vec (keep (fn [[sid info]] (when (dead? info) sid)) @sessions))
+        agent-dead (vec (keep (fn [[aid info]] (when (dead? info) aid)) @agent-sessions))]
+    (when (seq dead)
+      (swap! sessions #(apply dissoc % dead))
+      (log-info "swept dead sessions:" (str/join ", " dead)))
+    (when (seq agent-dead)
+      (swap! agent-sessions #(apply dissoc % agent-dead))
+      (log-info "swept dead agent sessions:" (str/join ", " agent-dead)))
+    {:swept dead :agent-swept agent-dead}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Multi-runtime: resolve agent-id -> current client-id, pin a session to it
@@ -365,7 +427,17 @@
     ;; Shape 2 — status=error with no value AND no useful :err
     (and (some #{"error"} status)
          (nil? value)
-         (or (nil? err) (str/blank? err)))))
+         (or (nil? err) (str/blank? err)))
+    ;; Shape 3 — WEDGED session (the historical `default` NPE): the session
+    ;; fell out of the CLJS REPL (worker restart under it / half-failed
+    ;; pivot) so evals hit the CLJ compiler with no *ns* bound:
+    ;;   NullPointerException ... Compiler.currentNS() is null
+    ;; This state lives in the shadow JVM's session, so it survives pod
+    ;; restarts; recovery is the same drop-session-and-recreate.
+    (and (seq err)
+         (str/includes? err "NullPointerException")
+         (or (str/includes? err "currentNS")
+             (str/includes? err "Compiler")))))
 
 (defn- retry-with-fresh-session!
   "Drop the cached session, create a new one, and re-attempt eval.
@@ -374,7 +446,12 @@
    cljs.edn), the fresh session will route to whatever runtime is
    currently connected."
   [port session_id code timeout]
-  (swap! sessions dissoc (or session_id "default"))
+  (let [sid (or session_id "default")]
+    ;; Close the dead/wedged session server-side too — dropping only the
+    ;; local entry leaks the cloned session in the shadow JVM.
+    (when-let [old (get @sessions sid)]
+      (nrepl-close-session port (:nrepl-session old)))
+    (swap! sessions dissoc sid))
   (let [{:keys [sid session-info]} (get-or-create-session! session_id)
         nrepl-sid (:nrepl-session session-info)
         result (nrepl-eval port nrepl-sid code timeout)]
@@ -449,27 +526,36 @@
       (render-eval-result result sid))))))
 
 (defn execute-create-session [{:keys [build]}]
+  (sweep-dead-sessions!)
   (let [port (require-port!)
         build-id (or build default-build-id)
         sid (create-cljs-session! port build-id)]
     (if sid
       (mcp-success (str "session=" sid " build=" build-id
                         " (use this sid in mcp__seon_cljs__eval's session_id)"))
-      (mcp-error "failed to clone/pivot CLJS session"))))
+      (mcp-error (str "failed to clone/pivot CLJS session into " build-id
+                      " (watcher up? build watched? see stderr log)")))))
 
 (defn execute-list-sessions [_args]
-  (let [now (System/currentTimeMillis)
+  (let [{:keys [swept agent-swept]} (sweep-dead-sessions!)
+        now (System/currentTimeMillis)
         rows (for [[sid info] @sessions]
                (format "  %s  build=%s  nrepl-sid=%s  age=%.1fs"
                        sid (:build info) (:nrepl-session info)
                        (/ (double (- now (:created-at info))) 1000.0)))
         port (read-shadow-port)]
     (mcp-success (str "shadow port: " (or port "<no watcher>")
-                      "\nsessions:\n" (if (seq rows) (str/join "\n" rows) "  (none)")))))
+                      "\nsessions:\n" (if (seq rows) (str/join "\n" rows) "  (none)")
+                      (when (seq swept)
+                        (str "\nswept (dead nREPL session): " (str/join ", " swept)))
+                      (when (seq agent-swept)
+                        (str "\nswept agent cache: " (str/join ", " agent-swept)))))))
 
 (defn execute-stop-session [{:keys [session_id]}]
   (if-let [info (get @sessions session_id)]
     (do (swap! sessions dissoc session_id)
+        (when-let [port (read-shadow-port)]
+          (nrepl-close-session port (:nrepl-session info)))
         (mcp-success (str "stopped session " session_id)))
     (mcp-error (str "no such session: " session_id))))
 
@@ -523,11 +609,11 @@
                   :required []}}
 
    {:name "list_sessions"
-    :description "List active CLJS REPL sessions tracked by this MCP server, plus the shadow nREPL port."
+    :description "List active CLJS REPL sessions tracked by this MCP server, plus the shadow nREPL port. Runs a liveness sweep first: sessions whose nREPL session died (e.g. watcher restart) are reaped and reported."
     :inputSchema {:type "object" :properties {} :required []}}
 
    {:name "stop_session"
-    :description "Forget a session (frees the local sid; does not interrupt running eval)."
+    :description "Forget a session and close it on the nREPL server (does not interrupt running eval)."
     :inputSchema {:type "object"
                   :properties {:session_id {:type "string"}}
                   :required ["session_id"]}}

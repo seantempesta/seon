@@ -97,7 +97,7 @@
                    ;; Agent mode: session is implicit, simpler interface
                    "Evaluate Clojure code in your isolated REPL. Returns result and namespace. Use (user/reload) to reload code, (user/search \"query\") for research."
                    ;; Orchestrator mode: requires explicit session_id
-                   "Evaluate Clojure code. Use session_id='orchestrator' for the main REPL, or a 4-char hex session ID for an agent's isolated REPL. Returns result value and current namespace. Use (user/reload) to reload code, (user/search \"query\") for research.")
+                   "Evaluate Clojure code. Use session_id='orchestrator' for the main REPL (each eval runs in its own fresh nREPL session), or ':seon.agent/<id>' to scope the eval to a V2 agent's session conn. Returns result value and current namespace. Use (user/reload) to reload code, (user/search \"query\") for research.")
     :inputSchema (if enforced-session-id
                    ;; Agent mode: no session_id param - it's implicit
                    {:type "object"
@@ -109,7 +109,7 @@
                    ;; Orchestrator mode: session_id required
                    {:type "object"
                     :properties {:session_id {:type "string"
-                                              :description "'orchestrator' for main REPL, or 4-char hex session ID (e.g., 'a1b2')"}
+                                              :description "'orchestrator' for main REPL, or ':seon.agent/<id>' for an agent-scoped eval"}
                                  :code {:type "string"
                                         :description "Clojure code to evaluate"}
                                  :timeout_ms {:type "integer"
@@ -117,24 +117,24 @@
                     :required ["session_id" "code"]})}
 
    {:name "create_session"
-    :description "Create a new agent session with an isolated REPL and database. Returns the session_id to use with agent_eval."
+    :description "RETIRED — isolated agent-pool sessions were removed 2026-06-09. Use session_id 'orchestrator' (each eval already runs in its own fresh nREPL session) or ':seon.agent/<id>' for agent-scoped evals. This tool now returns a guiding error."
     :inputSchema {:type "object"
                   :properties {:namespace {:type "string"
                                            :description "Clojure namespace for the agent (e.g., 'seon.trading')"}}
                   :required ["namespace"]}}
 
    {:name "stop_session"
-    :description "Stop an agent session, flushing any pending state and cleaning up resources."
+    :description "RETIRED — isolated agent-pool sessions were removed 2026-06-09. There is nothing to stop; this tool now returns a guiding error."
     :inputSchema {:type "object"
                   :properties {:session_id {:type "string"
-                                            :description "4-character hex session ID"}}
+                                            :description "session ID (retired)"}}
                   :required ["session_id"]}}
 
    {:name "interrupt_eval"
-    :description "Interrupt a running evaluation in an agent session. Use when an eval is taking too long or appears hung."
+    :description "No-op for 'orchestrator'/':seon.agent/<id>' evals — each runs in its own per-eval nREPL session with a hard timeout and self-clears on expiry."
     :inputSchema {:type "object"
                   :properties {:session_id {:type "string"
-                                            :description "4-character hex session ID, or 'orchestrator' to interrupt a stuck orchestrator eval"}}
+                                            :description "'orchestrator' (no-op; per-eval sessions self-clear)"}}
                   :required ["session_id"]}}
 
    {:name "list_sessions"
@@ -412,30 +412,16 @@ You must then either:
 ;;; Session Helpers
 ;;; ---------------------------------------------------------------------------
 
-(defn get-session-info
-  "Query orchestrator for the nREPL port and nREPL session ID of a session.
-   Returns {:port <int> :nrepl-session-id <string>} or nil."
-  [session-id]
-  (let [code (format "(do (require 'seon.orchestrator.session)
-                          (let [result (seon.orchestrator.session/get-session-port
-                                         {:seon.orchestrator.session/id \"%s\"})]
-                            {:port (:seon.orchestrator.session/nrepl-port result)
-                             :nrepl-session-id (:seon.orchestrator.session/nrepl-session-id result)}))"
-                     session-id)
-        result (nrepl-eval orchestrator-port code)]
-    (when-let [value (:value result)]
-      (when (and value (not= "nil" value) (not= "{:port nil, :nrepl-session-id nil}" value))
-        ;; Parse the simple EDN map and validate port is present
-        (try
-          (let [info (clojure.edn/read-string value)]
-            (when (:port info)  ;; Ensure port is non-nil
-              info))
-          (catch Exception _ nil))))))
-
-(defn validate-session-id! [session-id]
-  (when-not (re-matches #"[A-Za-z0-9]{4,6}" session-id)
-    (throw (ex-info (str "Invalid session ID: " session-id ". Must be 4-6 base62 characters.")
-                    {:session_id session-id}))))
+(def retired-sessions-message
+  "Guiding fail-loud message for the retired agent-pool session feature.
+   The pool machinery (`:seon.flow/pool` / `:seon.orchestrator/sessions`
+   Integrant keys) was DISABLED-AND-REMOVED 2026-06-09 (resources/system.edn),
+   and `seon.orchestrator.session` was renamed to `seon.session` 2026-05-27 —
+   pool-backed isolated sessions cannot be created or addressed anymore."
+  (str "Isolated agent-pool sessions are retired (pool Integrant keys removed "
+       "2026-06-09). Use session_id 'orchestrator' — each eval already runs in "
+       "its own fresh per-eval nREPL session on the main JVM — or "
+       "':seon.agent/<id>' to scope an eval to a V2 agent's session conn."))
 
 ;;; ---------------------------------------------------------------------------
 ;;; V2 agent routing (Wave 4.5 Item E)
@@ -480,26 +466,6 @@ You must then either:
 ;;; Tool Execution
 ;;; ---------------------------------------------------------------------------
 
-(defn- record-activity!
-  "Record eval activity start or completion for a session (Phase 4c).
-   action is :start or :complete"
-  [session-id action code]
-  (when (and session-id (not= session-id "orchestrator"))
-    (let [fn-name (if (= action :start)
-                    "record-eval-start!"
-                    "record-eval-complete!")
-          activity-code (if (= action :start)
-                          (format "(seon.orchestrator.session/%s {:seon.orchestrator.session/id \"%s\"
-                                                                   :seon.orchestrator.session/code %s})"
-                                  fn-name session-id (pr-str code))
-                          (format "(seon.orchestrator.session/%s {:seon.orchestrator.session/id \"%s\"})"
-                                  fn-name session-id))]
-      ;; Fire and forget - don't block on activity tracking
-      (try
-        (nrepl-eval orchestrator-port activity-code 1000)
-        (catch Exception e
-          (log-debug "Activity tracking failed:" (.getMessage e)))))))
-
 (defn- truncate-code-preview
   "Truncate code to a short preview for error messages."
   [code max-len]
@@ -519,26 +485,6 @@ You must then either:
         result-key (str ":r-" (subs (str hash-val) 0 (min 4 (count (str hash-val)))))
         var-name (str "user/repl-" effective-session)]
     {:result-key result-key
-     :var-name var-name}))
-
-(defn- wrap-code-with-autosave
-  "Legacy single-message wrap (used by the 4-char-hex agent-pool route).
-
-   Per-eval-session routes use the two-message approach via
-   `autosave-of-*1-code` instead — see `execute-eval`. This wrap is fine
-   for the legacy path because those sessions persist across calls, so
-   alias-establishing requires from a previous call are already visible.
-
-   Returns {:wrapped-code <str> :result-key <str> :var-name <str>}."
-  [code effective-session]
-  (let [{:keys [result-key var-name]} (autosave-keys code effective-session)]
-    {:wrapped-code (str "(let [__r (do " code "\n)]"
-                        " (defonce " var-name " (atom {}))"
-                        " (let [__prev (get @" var-name " " result-key ")]"
-                        "   (when-not (= __prev __r)"
-                        "     (swap! " var-name " assoc " result-key " __r)))"
-                        " __r)")
-     :result-key result-key
      :var-name var-name}))
 
 (defn- autosave-of-*1-code
@@ -624,7 +570,7 @@ You must then either:
 
 (defn- format-eval-output
   "Format nREPL result with truncation and storage hints.
-   result-key and var-name come from wrap-code-with-autosave.
+   result-key and var-name come from autosave-keys.
    full? skips truncation (opt-in via #_:full prefix).
    ai-render-result is optional {:ai-text ...} or {:no-renderer true :keys [...]}."
   [result result-key var-name full? ai-render-result]
@@ -772,107 +718,26 @@ You must then either:
                 ;; Always close — the whole point of per-eval sessions.
                 (nrepl-close-session orchestrator-port ephemeral-session)))))
 
-        ;; ---- Legacy 4-char hex agent-pool path (unchanged behavior) ----
-        ;; Uses the old single-message wrap because these sessions persist
-        ;; across calls, so alias-establishing requires don't need to be
-        ;; in the same message.
-        (let [_ (validate-session-id! effective-session)
-              info (get-session-info effective-session)
-              _ (when-not info
-                  (throw (ex-info (str "Session not found or not running: "
-                                       effective-session)
-                                  {:session_id effective-session})))
-              port (:port info)
-              nrepl-session-id (:nrepl-session-id info)
-              {:keys [wrapped-code]} (wrap-code-with-autosave code effective-session)
-              do-eval (fn [port sid]
-                        (record-activity! effective-session :start code)
-                        (let [result (nrepl-eval port wrapped-code
-                                                 effective-timeout sid)]
-                          (log-debug "Eval result:" (pr-str result))
-                          (when (and (= (:ex result) "timeout") sid)
-                            (log-debug "Timeout, interrupting session:" sid)
-                            (nrepl-interrupt port sid))
-                          (record-activity! effective-session :complete nil)
-                          result))
-              result (do-eval port nrepl-session-id)]
-          (if (:ex result)
-            (mcp-error (:err result))
-            (let [ai-render (when-not full?
-                              (try-ai-render port nrepl-session-id (:value result)))]
-              (mcp-success (format-eval-output result result-key
-                                               var-name full? ai-render)))))))))
+        ;; ---- Retired 4-char hex agent-pool path: fail loud with guidance ----
+        ;; The pool-backed isolated-session feature was removed 2026-06-09;
+        ;; a hex session id can no longer resolve to a live nREPL port.
+        (mcp-error (str "Unknown session_id '" effective-session "'. "
+                        retired-sessions-message))))))
 
 (defn execute-create-session
-  "Execute the create_session tool.
-   After creating the session, clones an nREPL session for persistent *1/*2/*3 support
-   and stores it in the session registry."
+  "Execute the create_session tool — RETIRED. The pool machinery this
+   created sessions on was removed 2026-06-09; without a pool the old
+   `start-agent-session!` produced a port-less row that no eval could
+   reach. Fail loud with guidance instead of minting unusable sessions."
   [{:keys [namespace]}]
-  (log-debug "execute-create-session namespace:" namespace)
-
-  ;; Guard: orchestrator must be initialized before we can create sessions
-  (when-not @orchestrator-init-ready?
-    (throw (ex-info "Seon server is still initializing, please retry in a few seconds"
-                    {:initializing true})))
-
-  ;; First, create the session in Seon
-  (let [code (format "(do (require 'seon.orchestrator.session)
-                          (let [result (seon.orchestrator.session/start-agent-session!
-                                         {:seon.orchestrator.session/namespace '%s})]
-                            {:session_id (:seon.orchestrator.session/id result)
-                             :namespace '%s
-                             :nrepl_port (:seon.orchestrator.session/nrepl-port result)
-                             :status (name (:seon.orchestrator.session/status result))}))"
-                     namespace namespace)
-        result (nrepl-eval orchestrator-port code)]
-
-    (log-debug "Create session result:" (pr-str result))
-
-    (if (:ex result)
-      (mcp-error (str "creating session: " (:err result)))
-
-      ;; Session created, now clone nREPL session for persistence
-      (let [session-info (try (clojure.edn/read-string (:value result)) (catch Exception _ nil))
-            port (:nrepl_port session-info)
-            session-id (:session_id session-info)]
-        (if (and port session-id)
-          ;; Clone nREPL session
-          (let [nrepl-session-id (nrepl-clone-session port)]
-            (log-debug "Cloned nREPL session:" nrepl-session-id "for session:" session-id)
-
-            ;; Store the nREPL session ID in the Seon session registry
-            (when nrepl-session-id
-              (let [store-code (format "(seon.orchestrator.session/set-nrepl-session-id!
-                                          {:seon.orchestrator.session/id \"%s\"
-                                           :seon.orchestrator.session/nrepl-session-id \"%s\"})"
-                                       session-id nrepl-session-id)]
-                (nrepl-eval orchestrator-port store-code 5000)))
-
-            ;; Return session info with nrepl_session_id
-            (mcp-success (pr-str (assoc session-info :nrepl_session_id nrepl-session-id))))
-
-          ;; Failed to parse session info, return original
-          (mcp-success (:value result)))))))
+  (log-debug "execute-create-session namespace:" namespace "(retired)")
+  (mcp-error retired-sessions-message))
 
 (defn execute-stop-session
-  "Execute the stop_session tool."
+  "Execute the stop_session tool — RETIRED alongside create_session."
   [{:keys [session_id]}]
-  (log-debug "execute-stop-session session:" session_id)
-  (validate-session-id! session_id)
-
-  (let [code (format "(do (require 'seon.orchestrator.session)
-                          (let [result (seon.orchestrator.session/stop-agent-session!
-                                         {:seon.orchestrator.session/id \"%s\"})]
-                            {:session_id (:seon.orchestrator.session/id result)
-                             :status (name (:seon.orchestrator.session/status result))}))"
-                     session_id)
-        result (nrepl-eval orchestrator-port code)]
-
-    (log-debug "Stop session result:" (pr-str result))
-
-    (if (:ex result)
-      (mcp-error (str "stopping session: " (:err result)))
-      (mcp-success (:value result)))))
+  (log-debug "execute-stop-session session:" session_id "(retired)")
+  (mcp-error retired-sessions-message))
 
 (defn- cancel-running-future-if!
   "Cancel the running eval future if it matches the given session."
@@ -898,32 +763,17 @@ You must then either:
         "hard timeout. If a single eval is hung, it will self-clear "
         "when its deadline expires.")))
 
-(defn- interrupt-agent-session
-  "Interrupt an agent nREPL session. Returns MCP result."
-  [session-id]
-  (validate-session-id! session-id)
-  (if-let [info (get-session-info session-id)]
-    (let [port (:port info)
-          nrepl-session-id (:nrepl-session-id info)]
-      (if nrepl-session-id
-        (let [result (nrepl-interrupt port nrepl-session-id)]
-          (if (:error result)
-            (mcp-error (str "interrupting: " (:error result)))
-            (mcp-success (str "Interrupt sent. Status: " (pr-str (:status result))))))
-        (mcp-error "Session has no persistent nREPL session ID. Cannot interrupt ephemeral sessions.")))
-    (mcp-error (str "Session not found: " session-id))))
-
 (defn execute-interrupt-eval
   "Execute the interrupt_eval tool.
-   Sends an interrupt to the nREPL session for the given Seon session.
-   Also cancels any running future in the MCP server.
-   Supports session_id='orchestrator' to interrupt stuck orchestrator evals."
+   Cancels any running future in the MCP server. Per-eval sessions
+   (orchestrator / :seon.agent/<id>) self-clear on their deadline; the
+   retired agent-pool sessions can no longer be interrupted."
   [{:keys [session_id]}]
   (log-debug "execute-interrupt-eval session:" session_id)
   (cancel-running-future-if! session_id)
   (if (= session_id "orchestrator")
     (interrupt-orchestrator)
-    (interrupt-agent-session session_id)))
+    (mcp-error retired-sessions-message)))
 
 (defn execute-list-sessions
   "Execute the list_sessions tool.
@@ -937,39 +787,39 @@ You must then either:
   (log-debug "execute-list-sessions")
 
   ;; The Clojure code calculates uptime_seconds from started_at and formats dates
-  (let [code "(do (require 'seon.orchestrator.session)
+  (let [code "(do (require 'seon.session)
                   (let [now (System/currentTimeMillis)
-                        sessions (seon.orchestrator.session/list-agent-sessions {})]
+                        sessions (seon.session/list-agent-sessions {})]
                     (mapv (fn [s]
-                            (let [started-at (:seon.orchestrator.session/started-at s)
+                            (let [started-at (:seon.session/started-at s)
                                   uptime-ms (when started-at
                                               (- now (.getTime ^java.util.Date started-at)))]
-                              (cond-> {:session_id (:seon.orchestrator.session/id s)
-                                       :namespace (str (:seon.orchestrator.session/namespace s))
-                                       :nrepl_port (:seon.orchestrator.session/nrepl-port s)
-                                       :status (name (:seon.orchestrator.session/status s))}
+                              (cond-> {:session_id (:seon.session/id s)
+                                       :namespace (str (:seon.session/namespace s))
+                                       :nrepl_port (:seon.session/nrepl-port s)
+                                       :status (name (:seon.session/status s))}
                                 uptime-ms
                                 (assoc :uptime_seconds (quot uptime-ms 1000))
 
-                                (:seon.orchestrator.session/nrepl-session-id s)
+                                (:seon.session/nrepl-session-id s)
                                 (assoc :nrepl_session_id
-                                       (:seon.orchestrator.session/nrepl-session-id s))
+                                       (:seon.session/nrepl-session-id s))
 
-                                (:seon.orchestrator.session/last-activity-at s)
+                                (:seon.session/last-activity-at s)
                                 (assoc :last_activity_at
-                                       (str (:seon.orchestrator.session/last-activity-at s)))
+                                       (str (:seon.session/last-activity-at s)))
 
-                                (:seon.orchestrator.session/eval-count s)
+                                (:seon.session/eval-count s)
                                 (assoc :eval_count
-                                       (:seon.orchestrator.session/eval-count s))
+                                       (:seon.session/eval-count s))
 
-                                (:seon.orchestrator.session/current-eval s)
+                                (:seon.session/current-eval s)
                                 (assoc :current_eval
-                                       {:code (:seon.orchestrator.session/code
-                                                (:seon.orchestrator.session/current-eval s))
+                                       {:code (:seon.session/code
+                                                (:seon.session/current-eval s))
                                         :started_at
-                                        (str (:seon.orchestrator.session/started-at
-                                               (:seon.orchestrator.session/current-eval s)))}))))
+                                        (str (:seon.session/started-at
+                                               (:seon.session/current-eval s)))}))))
                           sessions)))"
         result (nrepl-eval orchestrator-port code)]
 
