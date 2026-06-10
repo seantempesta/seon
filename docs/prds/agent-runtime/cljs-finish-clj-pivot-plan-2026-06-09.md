@@ -265,3 +265,73 @@ commit:
 - **Data rules**: fully-namespaced keywords everywhere; no `:any` in
   seon-authored data (third-party boundaries excepted); no `[:maybe]` —
   `{:optional true}`; shared shapes registered once and referenced.
+
+## 9. Carried-forward register (restored after the rewrite's loss-audit)
+
+Items the 2026-06-10 rewrite dropped that remain LIVE obligations or
+operational knowledge. Each is one line + its source of detail.
+
+### Open work (belongs in the §7 queue)
+
+- **Atom kill-list (USER-APPROVED)** — eliminate/migrate the risky mutable
+  state per the census top-5 (`!next-budget-ms` → fiber-local; agents
+  `::state` → derive from DB; stash-prefix drift; `seon.repl/!conn` fold;
+  unify the two agent-writable timeout knobs) + globalThis stash eviction.
+  Detail: `research/multi-agent-state-isolation-2026-06-09.md` §Q3.
+- **A3 / T12 — per-form emission polish (only UNFINISHED Track-A item)**:
+  keep per-form emissions but make each CONCISE + VERY CLEAR; tighten the
+  legible `:seon.eval/error` so every error is short + unambiguous; eval
+  results stay per-eval REPL-style in the transcript.
+- **B3 — checks as a wire op**: the warn-registry checks re-homed as a
+  location-aware enhancement of `seon.dev.compliance`'s Malli walk (one fn,
+  not a v2), exposed as a wire `handle-op` returning the clustered-warning
+  shape the pod renders. The CLJS `seon.warn` registry is the stopgap.
+- **B4 — session-browser UI** over the central store (sessions → turns →
+  prompts/messages/evals) + wiring the reactive query-subscription layer
+  into UI pushes (the guest `listen!` loop already targets it).
+- **doc/source/apropos shims (REPL-parity successors)**: `(doc x)` →
+  `:seon.fn/doc`, `(source x)` → `:seon.fn/source`, apropos/dir → fn-row
+  queries — program-graph-backed, so they see agent-authored fns too.
+  Boundary note: `(do *ns*)`-style wrapped forms are NOT intercepted.
+
+### Design contracts that govern future work (not just shipped code)
+
+- **Warnings architecture (A2)**: every NEW check is a separate,
+  independently-tested fn returning
+  `{:seon.warn/kind k :seon.warn/affected [{:sym s :where …}] :explain :example}`;
+  `warnings-section` composes the registry; render CLUSTERED per kind (ONE
+  explanation + ONE fix example + "Affecting: … (N)"); SPECIFIC defects only
+  (never "one of these things"); optional ns-scope, default = agent's
+  current ns; warnings render at context-assembly (whole-turn,
+  self-healing). NO missing-identity check — identity is optional.
+- **Message model (1.5)**: every `:seon.message` stores `from` (ref) +
+  `to` (vector of refs, fan-out) + `content` + `at` + `hops`; role/agent
+  attrs are RETIRED; "my conversation" is derived (`from=me OR to∋me`);
+  wake = `to∋me ∧ from≠me`, hop-cap 4 enforced AT wake (refusal surfaces
+  as a clustered warning); `reply!` targets the waking message's `from`
+  via `:seon.turn/woken-by`; hops derive from the LATEST inbound; blank
+  content refused at `message!` (the only entry point).
+- **Sticky preamble** (`:seon.system-prompt`/`:seon.conventions`/
+  `:seon.sticky/*`): planned DB-resident runtime-editable preamble —
+  seeded, rendered by the inspector path only, NOT yet in the agent
+  composer. Leave alone until deliberately wired.
+
+### Operational gotchas (cost real time — do not re-learn)
+
+- JVM MCP: isolated session clone is BROKEN (references the retired
+  `seon.orchestrator.session`) — always use session `"orchestrator"`.
+- CLJS MCP: the `default` singleton session wedges (`Compiler.currentNS()`
+  NPE) and survives pod restarts — always `create_session` a fresh sid;
+  sessions die when the pod event loop blocks or the watcher restarts.
+- `(require … :reload)` in the CLJS REPL only recompiles as a TOP-LEVEL
+  form (silently stale inside `(do …)`).
+- Shadow runs in deps mode: `shadow-cljs.edn :source-paths` is INERT;
+  the classpath comes from deps.edn aliases. Probe builds compile in a
+  fresh JVM (`clj -M:cljs compile <build>`), never in cljs-watch; resource
+  -only classpath changes need a `.shadow-cljs/builds/<build>` purge.
+- Stub agents self-wake to the turn cap (the stub always emits forms, so
+  zero-forms termination never fires) — drive ONE turn then read, or
+  expect cap-runs.
+- konserve readers must set `:lock-blob? false` (readers take the lock by
+  default; two sync readers race and throw) — required in any pod-flip
+  connect config.
