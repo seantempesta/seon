@@ -85,12 +85,16 @@ Prose that survives: SOUL/system identity only.
   REALLY EXECUTED at render time against the live store (never
   templated results) — demonstrating: `(seon.agent.todo/list-open {})`
   (replaces the todos section), a `:seon.schema` catalog query
-  (replaces the passive domain-attrs wall), a `my.kb` consult query
-  (replaces consult-first prose), and a query over the NEW
-  `:seon.instruction/*` ENTITIES — instructions are DATA (id, text,
-  applies-when, priority), seeded by the substrate, runtime-editable by
-  user AND agents via transact (resurrects the orphaned sticky-preamble
-  mechanism as data). The agent wakes mid-session in a REPL where the
+  (replaces the passive domain-attrs wall), and a query over
+  **`my.kb.instruction`** — instructions are DATA in the FIRST WORKED
+  `my.kb` DOMAIN (real schema: `:my.kb.instruction/text`,
+  `applies-when`, `priority`, + the shared `:my.kb/*` provenance
+  attrs), seeded by the substrate, runtime-editable by user AND agents
+  via transact (resurrects the orphaned sticky-preamble mechanism as
+  data). Pulling your instructions IS the my.kb consult demo — the
+  scaffold ships with a living example domain, not comments describing
+  one (user correction 2026-06-10: NOT a seon.instruction ns —
+  instructions are my.kb content). The agent wakes mid-session in a REPL where the
   orientation queries already ran — imitation over obedience. Dynamic
   demos live AFTER the byte-stable prefix (transcript zone). Convert
   ONE section per unit, gym-scorecard each (does S-32 consult-rate move
