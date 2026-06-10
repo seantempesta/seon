@@ -414,155 +414,43 @@ operational knowledge. Each is one line + its source of detail.
   default; two sync readers race and throw) — required in any pod-flip
   connect config.
 
-## 10. HANDOFF (2026-06-10 EVENING, account switch — user resumes on new login)
+## 10. HANDOFF (2026-06-11 early — refactor DONE + MEASURED; user signing off)
 
-State: **RUN-8 PASS BAR GREEN** (gym S-12: agent B's first eval is a verbatim
-`:kb.finding` datalog query, 2 consecutive paid sweeps — commit 884a75d) plus
-~16 verified commits this session: #26 + thinking-off + fail-loud LLM errors
-(44a42df), UI basics (0902cbc), gym harness+catalog+judge tier (24ade2f,
-0e66717, 884a75d), context E1+E2 full-source exemplars (bb51af8), context
-iteration 1 (12faa70 — S-32 GREEN judge-100, S-12 mechanically GREEN), JVM
-hook-loss + flow-status (69cfe77), dev-hook gen-check side-effect fix
-(9723929), replay/registry-stomp fix (7ce6381), datahike fork engine fix
-pushed + sha bump to 1ae35696 (156a53e — multi-group join corruption; JVM
-affected too when planner on). Cluster store wiped clean 16:24 + legacy data
-dirs deleted (data/ = 4.5MB: clusters/default/store + dev-hook only). Stack
-green on the new sha. CLJS suite ~323/1241/0; JVM 2551/0/0.
+**THE PLAN IS NOW [[open-issues-prd-2026-06-11]]** (tiered register, ae6d9a6)
++ the task board (P-numbers). Read those two, then this section.
 
-**IN FLIGHT at handoff (review → verify → explicit-path commit when they
-report):**
+State: the context-v3 reorg is COMPLETE through P5 and MEASURED (P8, 5
+paid runs + corrected-world re-run): consult-first 5/5 under anchored
+predicates, provenance storage + cross-agent correction real, reply
+discipline transformed, ZERO src-behavior regressions across ~25 commits.
+Gym worlds now byte-identical to live boots (095a00b — parity derived
+from the boot's own code, permanent regression test). Corrected-world
+S-32 = the first new-baseline card (pass, judge 100;
+tmp/gym-parity-fix-s32.log). Suite 326/1365/0 CLJS, 2551/0/0 JVM ×3.
+Live: durable resumed agents, my.kb.instruction seeded + editable,
+purpose seeds, Seon.app (open pod-host/wasm-tauri/target/debug/bundle/
+macos/Seon.app — starts the stack itself, quit never kills it).
 
-1. **V3-A** — `seon.db` → public face + `seon.db.internal` split (target
-   ≤15k chars public). Oracles: suite, replica probes 10/10+14/14, live
-   pod roundtrip.
-2. **S-21 root causes** — warn.cljs `internal-attr-ns?` regex hides ALL
-   `seon.*` domain attrs (production bug); `register!` single-segment gate;
-   gym driver world-parity; de-vacuous fork predicate; paid S-21 re-run.
+**Wednesday (Tier 1):** P21 loop economy (#35 — replied+no-inbound→stop;
+pairs w/ #22 stub fix) → P22 legibility (#36 — hoist envelope into
+transact!*, stale ctx citations, warn wording, the transcript-render
+suspicion) → re-baseline S-12 + 3-run S-21 stability probe on the
+parity world. **Thursday:** P9 demo rehearsal (script: demo-script-
+2026-06-12.md, committed 014416e) — rehearse, THEN cluster reset, seed
+prior-day conversation, snapshot the store, freeze the substrate.
+**Friday:** the demo (arc: durability opener → S-10 question →
+restart-on-camera closer → instruction-edit kicker).
 
-**UNCOMMITTED in tree (intentional, pending):** `src/seon/todo.cljs` +
-`test/seon/todo_test.cljs` (built, suite-green, REVIEWED-no-objection;
-wired into boot via client.cljs require + bootstrap attrs — commit with the
-exemplar-root swap fs→todo), plus whatever the two in-flight agents leave.
+User decisions standing: DeepSeek spend free; resets free; correctness >
+benchmark continuity; no upstream PR; tiles/labels PARKED (his call
+pending); seon.session (JVM) untouched. GIT: agents NEVER
+stash/checkout/reset (one did — put the rule in every prompt).
+Performance read (user concurs): "at the floor — only going to get
+better"; capability proven, economy + source-legibility are the named
+gaps, both tractable (Tier 1).
 
-**Tonight's USER DECISIONS (all firm):**
-
-- **Demo closer = fresh-session store/retrieve competence**, NOT tiles.
-- **Context v3 = code-first** (spec: `context-v3-code-first-2026-06-10.md`,
-  1d8becd): full source for relevant nses; `*.internal` sub-namespace
-  convention IS the filter (no lists/regex/stamping — classification
-  derived at render time from ONE full-index query); datahike query API
-  included (render from var docstrings); **NO recipes ns — real namespaces
-  doing real work**; remaining teaching → docstrings of the public faces;
-  prose survivors = SOUL + a few behavioral lines.
-- **KB = `my.kb`, SCHEMA'D DATA NOT TEXT (user, 2026-06-10 late, twice
-  refined):** no generic store!/consult, no text-claim rows (memory-file
-  problem), NO RAG/embeddings. The base is **`my.kb`** —
-  substrate-scaffolded with (a) GENERAL GUIDELINES all users get
-  (ns-doc/docstrings: "create `my.kb.<domain>` sub-namespaces with REAL
-  schemas for each kind of knowledge; do NOT build a general
-  memory-markdown structure; storing large text is allowed when the user
-  wants it but is never the default") and (b) the SHARED PROVENANCE shapes
-  registered once (`:my.kb/source-path` `:my.kb/source-line`
-  `:my.kb/verified-at` `:my.kb/confidence` — multi-segment by
-  construction) for domain schemas to reference. Agents DESIGN a schema
-  per knowledge kind (`my.kb.codebase.fn/*`, `my.kb.paper/*`, …) — same
-  skill as user-data modeling; everyone's kb is different by construction.
-  Consult = catalog + datalog (salience surface already built). Generic
-  `:kb.finding/*` teaching replaced (store freshly wiped — no legacy rows);
-  gym S-12/S-32 predicates update to "consults relevant my.kb.*/my.* attrs
-  first". `seon.kb` as a namespace is DEAD — superseded by the my.kb
-  scaffold.
-
-**ORPHANED WORK IN TREE (session-limit killed 3 agents 2026-06-10 ~13:36;
-resume actions):** (1) V3-A ~90% done — db.cljs 16.8k + db/internal.cljs
-47.3k exist but caller re-points unfinished: SUITE IS COMPILE-FAIL at
-test/seon/db_test.cljs:109 (`@#'db/system-attr?` moved). Fresh agent
-finishes re-points → suite green → replica probes 10/10+14/14 + live
-roundtrip → commit. (2) S-21 edits present (warn.cljs +59, schema.cljc
-+44, new test/seon/schema_test.cljs, warn_test +62, gym driver+scenario)
-but UNVERIFIED, no paid re-run — verifier falsifies vs the original S-21
-unit spec, runs paid S-21, then commit. (3) spec-writing unit died before
-writing — relaunch (incl. correcting V3-B to the my.kb design above).
-Live pod unaffected (runs last-good hot-reload). seon.todo + tests +
-client.cljs todo wiring remain intentionally uncommitted.
-- **Agent code base ns = `my.*`** (user-confirmed): agents own it freely,
-  everything under it auto-renders to ALL cluster agents (derived from tx
-  provenance — agent-scoped txs vs `:substrate-seed`, no maintained list);
-  `seon.*` stays substrate-only **BY CONVENTION, not enforcement** (user
-  2026-06-10: "by convention they'll listen" — no write-blocking machinery;
-  the register! single-segment gate is the only hard gate); `*.internal`
-  hidden uniformly. Transition: temporary exclusion set for not-yet-split
-  substrate plumbing nses — shrinks to empty, then deleted.
-  DECIDED: agent HOME namespaces mint as **`my.agent.<id>`** (today
-  `seon.agent.<id>` — substrate squatting). Rename unit = mint site
-  (client.cljs), home-ns (agent.cljs), replay, inspector, tests asserting
-  the old prefix; queued first in next session (files owned by in-flight
-  lanes at handoff).
-- **`{:seon.db/entity true}` (user-confirmed 2026-06-10):** entity-kind-ness
-  is DECLARED on the map schema (opt-in, explicit — same family as
-  `{:seon.db/identity true}`), never inferred from "contains an id key".
-  `derive-entity-id-attr` fires only on declared entities; kills the 8
-  phantom request/response entity kinds. Sweep the ~10 genuine entity
-  schemas; `register!` emits the standard guiding warn when a map carries
-  an identity attr without the marker. Unit lands right after the S-21
-  verifier frees schema.cljc, before V3-C (which then deletes the
-  inference path). Domain-attrs reuse surface is independent of this —
-  no invisibility risk for agents who forget the marker.
-  **DONE 2026-06-10:** deriver gated on the marker (inference path
-  deleted), 10 genuine kinds swept (`:seon.agent` `:seon.eval`
-  `:seon.message` `:seon.fn` `:seon.ns` `:seon.schema`
-  `:seon.agent.todo/todo` `:seon.test` `:seon.system-prompt`
-  `:seon.conventions`), warn-only nudge in `register!`, suite
-  303/1205/0. Known consequence: the 8 substrate envelope schemas
-  match the warn predicate and emit the nudge at every process load
-  (pod.log noise; suffix-based suppression is an open follow-up).
-  Live-store note: a store seeded by a pre-change boot keeps its 8
-  phantom `:seon.schema` rows (identity upsert never retracts) —
-  gone at the next fresh-store boot.
-- **TOOLBELT = `seon.agent.*` (user-confirmed 2026-06-10):** root
-  `seon.*` = the language layer ONLY (`seon.db`, `seon.schema`,
-  `seon.repl`); everything an agent USES lives under `seon.agent.*` —
-  `seon.agent` itself is the agent's surface (reply!/message! already
-  live there) and RENDERS to agents; `seon.agent.todo` / `.fs` /
-  `.search` are the tools; **`seon.agent.internal` is HIDDEN** (the
-  standard `*.internal` rule — the future agent.cljs split moves the
-  loop machinery there, making `seon.agent.*` minus `.internal` exactly
-  the agent's public world). The full namespace sentence agents learn:
-  "your code is `my.*`, your knowledge is `my.kb.*`, your tools are
-  `seon.agent.*`, the language is `seon.db`/`seon.schema`/`seon.repl`."
-  Migration: todo rename folded into the wiring unit's commit (~free,
-  uncommitted); fs/search rename = small follow-up unit (ns+test renames,
-  exemplar roots, gym fixtures; store re-indexes via name+source dedup);
-  agent.cljs → seon.agent.internal split queued as the next V3-A-style
-  refactor (also a precondition for rendering seon.agent itself, which
-  at 150k chars is unshowable until split).
-- DeepSeek spend unlimited; cluster resets free; errors ALWAYS surface at
-  the user-facing layer.
-
-**Queue (next session, in order):** review/commit the 2 in-flight lanes +
-todo wiring & exemplar-root swap → V3-B `seon.kb` + docstring moves → V3-C
-one-query/one-classifier unification (+ my.* exposure + agreement property
-test) → V3-D datahike API block → V3-E delete superseded prose (gym trio =
-oracle per unit) → `bin/seon start/restart all` (dependency-ordered:
-cljs-watch → wire-server → pod; ready-gate on the SOCKET; auto-prep on sha
-change; pod gets bounded ping retry ~10s) → LIVE RESUME TEST (user-ordered,
-task #4: agent writes my.* schemas+fns+todos → restart pod → replay n-ok>0
-→ fresh agent retrieves; + upsert-on-redefine probe: redefine fn 2× →
-exactly ONE current row, latest source replays) → gym: flip back the
-driver_test.cljs:233 engine-bug workaround (fix shipped in 1ae35696), S-06
-restart scenario, judge-content red (agents think transact! throws —
-covered by docstring moves, re-measure) → auto-run agent tests on fn
-update (program graph links fns→tests; results as reactive section) →
-remaining §7 backlog (ALS merge, stub zero-forms, :seon.turn/error attr,
-MCP session GC, third tile panel) → `seon.mcp` (call user's MCP servers —
-user-requested, post-demo OK) → Thursday demo examples on the durable
-store. Upstream candidates: datahike join fix PR + the 2 pre-existing
-planner stratum-bridge errors.
-
-**Orchestrator protocol that worked (keep):** one unit per agent (≤7 files) →
-seon-verifier (or live-proof set for probe/harness lanes) → explicit-path
-commit (`git reset HEAD -- . && git add <files> && git diff --cached --stat`
-— eyeball — then commit; NEVER bare add+commit, concurrent agents stage);
-fence lanes by file list in every prompt; live system is the proof; loss-audit
-before any doc rewrite; gym scorecards quantify every context change. Memory
-chain: `MEMORY.md` → `project_mvp_demo_status` → this PRD.
+**Orchestrator protocol (keep):** launch-ready specs from the PRDs; one
+unit per agent ≤7 files w/ explicit fence + git-safety line; finisher
+agents for orphaned lanes (3 recoveries today worked); explicit-path
+commits, eyeball the stat; suite per unit not per edit; the gym is the
+referee; memory chain MEMORY.md → project_mvp_demo_status → this PRD.
