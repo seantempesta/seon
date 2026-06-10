@@ -944,7 +944,17 @@
         batch      (await (seval/eval-batch! compile-state parsed
                                              (home-ns id) id id-of-turn))]
     (cond->
-      {:seon.agent/eval-count (:seon.eval/n-ok batch)}
+      ;; ATTEMPTED forms (ok + failed), not just n-ok: the loop's
+      ;; zero-forms stop policy means "prose only, no progress
+      ;; possible" — NOT "every form errored". Counting only n-ok
+      ;; ended the loop when a turn's sole eval failed, so the agent
+      ;; idled WITHOUT EVER SEEING the error and never replied (gym
+      ;; S-12, 2026-06-10: B's one consult query used
+      ;; clojure.string/includes? inside :where — eval error, n-ok 0,
+      ;; silent idle). A failed eval must yield a next turn that shows
+      ;; the error; turns-cap still bounds a stuck agent.
+      {:seon.agent/eval-count (+ (:seon.eval/n-ok batch)
+                                 (:seon.eval/n-fail batch))}
       ;; The turn-log record of the raw LLM output: a fully-formed
       ;; self→self message (from = to = this agent — appears in the
       ;; agent's own derived conversation, wakes nothing since the
@@ -1623,6 +1633,12 @@
            "source as data is NOT registration — an unregistered attr is\n"
            "REJECTED by transact!. register! is the single source of truth:\n"
            "register the TYPE and the system derives datahike storage.\n\n"
+           "But FIRST check the schema-catalog's `domain data attrs` block:\n"
+           "if attrs for this kind of fact ALREADY exist, the kind is not\n"
+           "new — transact with the existing keywords directly, zero\n"
+           "register! calls needed. Registering a parallel shape beside an\n"
+           "existing one (new namespace, new units) forks the data: the\n"
+           "next query misses half the rows.\n\n"
            "Use DEEP, namespaced attrs — the keyword namespace must have at\n"
            "least TWO dot-separated segments, like a real code namespace:\n"
            "  :kb.finding/claim   YES — multi-segment namespace\n"
@@ -1708,7 +1724,10 @@
            "                           [?f :kb.finding/line        ?line]]})\n"
            "  ;; A hit IS the answer, with provenance — cite it (re-read the\n"
            "  ;; source line only if you must verify). Search the repo ONLY\n"
-           "  ;; when no stored finding covers the question.\n\n"
+           "  ;; when no stored finding covers the question.\n"
+           "  ;; NOTE: only built-in predicates work inside :where (=, <,\n"
+           "  ;; get-else, missing?) — clojure.string/* fns DO NOT resolve\n"
+           "  ;; in a query. Fetch the rows plain, filter in code after.\n\n"
            "  ;; 1. grep for a term (regex). Call it as the WHOLE form — the\n"
            "  ;;    result is auto-awaited; inside a let you'd get a Promise.\n"
            "  (seon.search/grep {:seon.search/pattern \"validate-entity-values!\"\n"
@@ -1749,6 +1768,12 @@
            "  (seon.agent/reply! {:seon.message/content \"on it — here's what I found\"})\n"
            "  ;; => {:seon.message/ok? true, :seon.message/id \"MSG…\",\n"
            "  ;;     :seon.message/hops 1}   ; failure → {:seon.db/ok? false …}\n\n"
+           "A turn serving a user question MUST END with reply! — as\n"
+           "non-negotiable as consult-first. Consulting, searching and\n"
+           "computing are never the end of the work: the moment you have\n"
+           "the answer (a stored finding, a query result), compose the\n"
+           "reply! in the SAME response. Research without a reply is a\n"
+           "failed turn — your human sees NOTHING until reply! lands.\n\n"
            "Messaging another agent (or an explicit target) — :seon.message/to\n"
            "takes a ref or a vector of refs:\n\n"
            "  (seon.agent/message!\n"
@@ -2129,7 +2154,14 @@
    reuse contract — the run-4 fix for forked parallel attrs; a trailing
    `stored findings` block surfaces finding CONTENT one-liners (the #26
    consult-before-research salience fix). Stores nothing; register a
-   new entity kind and it appears here next render."
+   new entity kind and it appears here next render.
+
+   The wrapper renders when ANY block has content — the kinds list does
+   NOT gate the trailing blocks. (Gym iteration 1, 2026-06-10: on a
+   store with no `:seon.schema/render-fn` rows the old `(seq kinds)`
+   gate silently dropped the domain-attrs and finding-claims blocks,
+   so S-21 forked a parallel workout namespace and S-32 re-derived a
+   seeded finding — neither ever SAW the reuse/consult surface.)"
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db]}]
   (let [kinds (->> (db/query
@@ -2144,8 +2176,20 @@
                           {:kind k :id-attr ida :owner-ns (namespace ida)})))
         groups (->> kinds
                     (group-by :owner-ns)
-                    (sort-by first))]
-    (if (seq kinds)
+                    (sort-by first))
+        kinds-block
+        (when (seq kinds)
+          (str/join "\n\n"
+            (for [[ns ks] groups]
+              (str "=== " ns " ===\n"
+                   (str/join "\n\n"
+                     (map #(catalog-kind-block db %)
+                          (sort-by (comp str :kind) ks)))))))
+        summary-block (schema-ns-summary-block db)
+        domain-block  (domain-attrs-block db)
+        claims-block  (finding-claims-block db)]
+    (if (or kinds-block
+            (seq summary-block) (seq domain-block) (seq claims-block))
       (str "<schema-catalog>\n"
            ";; Every kind of entity stored in the system, grouped by namespace.\n"
            ";; This is the WHOLE substrate — not just your current ns. These\n"
@@ -2153,15 +2197,10 @@
            ";; exactly); register! only what's missing. Query any kind by its\n"
            ";; id-attr, e.g. (seon.db/query {:seon.db/query\n"
            ";;   '[:find ?id :where [?e :seon.fn/sym ?id]]}).\n\n"
-           (str/join "\n\n"
-             (for [[ns ks] groups]
-               (str "=== " ns " ===\n"
-                    (str/join "\n\n"
-                      (map #(catalog-kind-block db %)
-                           (sort-by (comp str :kind) ks))))))
-           (schema-ns-summary-block db)
-           (domain-attrs-block db)
-           (finding-claims-block db)
+           kinds-block
+           summary-block
+           domain-block
+           claims-block
            "\n</schema-catalog>")
       "")))
 
