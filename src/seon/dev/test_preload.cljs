@@ -26,7 +26,6 @@
     [seon.test.async-fixture-test]
     ;; Platform tests that exercise the runner end-to-end against
     ;; real production namespaces.
-    [seon.agents-test]
     [seon.db-test]
     [seon.render-test]
     [seon.boot.preconditions-test]

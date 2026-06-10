@@ -22,14 +22,10 @@
  ;; :source-paths vector is IGNORED. Proven live: the 2026-06-09 watcher
  ;; restart built :client green (0 warnings) with the real
  ;; `src/seon/db.cljs`, even though an earlier revision listed
- ;; `guest-cljs/src-overlay` (whose `seon/db.cljs` shim would have broken
- ;; the pod) first here. The REAL path set is deps.edn's `:cljs` alias
- ;; (`src` + `test` + `guest-cljs/src` + `resources`); the overlay rides
- ;; ONLY the opt-in `:cljs-guest` alias
- ;; (`clj -M:cljs:cljs-guest release guest-agent` / `v0-probe`).
- ;; Kept in sync with deps.edn for documentation value only — never list
- ;; the overlay here.
- :source-paths ["src" "test" "guest-cljs/src"]
+ ;; an overlay shim first here. The REAL path set is deps.edn's `:cljs`
+ ;; alias (`src` + `test` + `resources`). Kept in sync with deps.edn for
+ ;; documentation value only.
+ :source-paths ["src" "test"]
 
  :builds
  {;; The V0 pod entry. One long-running Node process; stays alive via
@@ -105,24 +101,6 @@
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
 
-  ;; Track 2 unit 2.1 — sync UDS bridge probe. Drives the UNCHANGED guest
-  ;; client (seon.client-runtime.db → wit) over the plain-Node sync bridge
-  ;; (seon.dev.wire-sync + wire_sync_worker.js) against the running
-  ;; wire-server's ambient conn. Requires guest-cljs/src on the classpath, so
-  ;; build in a FRESH JVM (`clj -M:cljs compile wire-sync-probe`) — the
-  ;; long-running watcher predates the guest-cljs/ move and can't see it.
-  ;; :devtools disabled — it's a run-to-exit probe, not a live runtime.
-  ;;
-  ;; Build:  clj -M:cljs compile wire-sync-probe
-  ;; Run:    node out/wire-sync-probe/main.js   (from the project root)
-  :wire-sync-probe
-  {:target           :node-script
-   :output-to        "out/wire-sync-probe/main.js"
-   :main             seon.dev.wire-sync/-main
-   :devtools         {:enabled false}
-   :compiler-options {:warnings-as-errors false
-                      :externs           ["externs/node_fs.js"]}}
-
   ;; 2.2c DIS-replica probe — Node READER side. Opens a JVM-written :file
   ;; store with a stub non-streaming writer (deref-conn follow-the-store
   ;; mode) and reports max-tx / query results / timings / counted blob
@@ -159,59 +137,6 @@
    :devtools         {:enabled false}
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
-
-  ;; Milestone-1 WASM smoke build. Minimal CLJS bundle that exposes
-  ;; `datahike-smoke-test!` (inlined) on globalThis.seonSmoke for the
-  ;; wasm-rquickjs ESM shim. Deliberately doesn't require seon.client
-  ;; (no agent loop, no web server, no deepseek) — narrow the surface
-  ;; so a smoke failure points at cljs.js or datahike-cljs.
-  ;;
-  ;; Build: `clj -M:cljs release smoke`
-  ;; Output: out/smoke/main.js (CJS, :node-script target)
-  :smoke
-  {:target           :node-script
-   :output-to        "out/smoke/main.js"
-   :main             seon.wasm-smoke/-main
-   :devtools         {:enabled false}
-   :compiler-options {:warnings-as-errors false
-                      :externs           ["externs/node_fs.js"]}}
-
-  ;; Milestone-2 WASM eval-smoke build. Sibling of :smoke but pulls in
-  ;; cljs.js + shadow.cljs.bootstrap.node so the bundle can compile
-  ;; arbitrary CLJS forms at runtime via the bootstrap-loaded analysis
-  ;; cache.
-  ;;
-  ;; Designed to be invoked inside wasmtime with `out/bootstrap/`
-  ;; mounted as a WASI preopen (e.g. `--dir out/bootstrap::bootstrap`).
-  ;; The bundle sets globalThis.seonEvalInitBootstrap and
-  ;; globalThis.seonEvalForm; the WIT host wraps both.
-  ;;
-  ;; Build: `clj -M:cljs release eval-smoke`
-  ;; Output: out/eval-smoke/main.js (CJS, :node-script target)
-  :eval-smoke
-  {:target           :node-script
-   :output-to        "out/eval-smoke/main.js"
-   :main             seon.wasm-eval-smoke/-main
-   :devtools         {:enabled false}
-   ;; `:optimizations :simple` (NOT :advanced) is load-bearing here.
-   ;; shadow.cljs.bootstrap.node calls `(js/goog.globalEval js)` at
-   ;; runtime, and the JS text it evals references `cljs.core.X` /
-   ;; `goog.provide(...)` directly. :advanced would rename everything;
-   ;; :simple preserves the names. (Heller's bootstrap blog + the
-   ;; shadow-cljs user guide both call this out — `:simple` is the
-   ;; canonical host-build setting.)
-   ;;
-   ;; NOTE: shadow-cljs wraps both `:node-script` and `:node-library`
-   ;; targets in an IIFE / UMD factory regardless of `:output-wrapper`
-   ;; (that flag only affects Closure's own wrapper, not shadow's
-   ;; per-target wrapper). The hoist in seon.wasm-eval-smoke
-   ;; (`(js* "globalThis.goog = goog")` etc.) bridges out of the IIFE
-   ;; so the bootstrap-loaded JS — which runs in GLOBAL scope via
-   ;; `goog.globalEval = (0,eval)(s)` — can find them by name.
-   :compiler-options {:warnings-as-errors false
-                      :optimizations     :simple
-                      :externs           ["externs/node_fs.js"]}}
-
   ;; Bootstrap-CLJS bundle (spec-02 §6.1). The :target :bootstrap
   ;; output is the analysis-cache + per-namespace compiled JS for
   ;; each namespace in :entries, suitable for runtime loading via
@@ -243,47 +168,6 @@
   ;; (:require [cljs.js :as cljs]) in seon.client / seon.eval and
   ;; ships there. The bootstrap bundle only provides the
   ;; analysis-cache cljs.js consumes at eval time.
-  ;;
-  ;; Guest agent bundle. Compiles the synthetic agent at
-  ;; guest-cljs/src/seon/client_runtime/agent.cljs together with
-  ;; the wit + db wire-client overlay. The output is loaded by the ESM shim at
-  ;; guest-cljs/build/agent.mjs, wrapped into a
-  ;; wasm32-wasip2 component via wasm-rquickjs, and instantiated 3x by the
-  ;; Rust host for the multi-agent smoke.
-  ;;
-  ;; Build: `clj -M:cljs:cljs-guest release guest-agent`
-  ;;        (cljs-guest alias adds guest-cljs/src-overlay so the overlay
-  ;;        seon.db wire shim shadows src/seon/db.cljs — deps-mode
-  ;;        classpath, NOT the ignored :source-paths above)
-  ;; Output: out/guest-agent/main.js (CJS, :node-script target)
-  :guest-agent
-  {:target           :node-script
-   :output-to        "out/guest-agent/main.js"
-   :main             seon.client-runtime.agent/-main
-   :devtools         {:enabled false}
-   :compiler-options {:warnings-as-errors false
-                      :optimizations     :simple
-                      :externs           ["externs/node_fs.js"]}}
-
-  ;; V0-port probe build. Pulls in V0 substrate namespaces through the
-  ;; guest overlay (seon.db is the wire-client shim from src-overlay) so
-  ;; we can measure how much V0 code compiles unchanged inside the
-  ;; guest. Each successful require demonstrates one more layer
-  ;; of V0 working in wasm.
-  ;;
-  ;; Build: `clj -M:cljs:cljs-guest release v0-probe`
-  ;;        (cljs-guest alias adds src-overlay to extra-paths so the
-  ;;        overlay seon.db is reachable on the classpath)
-  ;; Output: out/v0-probe/main.js
-  :v0-probe
-  {:target           :node-script
-   :output-to        "out/v0-probe/main.js"
-   :main             seon.client-runtime.seon-bootstrap/probe-info
-   :devtools         {:enabled false}
-   :compiler-options {:warnings-as-errors false
-                      :optimizations     :simple
-                      :externs           ["externs/node_fs.js"]}}
-
   ;; CLJS test runner — shadow's :node-test target. Compiles every
   ;; namespace matching `-test$` under the source paths into a single
   ;; Node-runnable artifact at `out/test/test.js`. Invoked by

@@ -257,17 +257,7 @@
   ;;   - partial-cps: fix/ioc-await-probe-safety — defensive try/catch
   ;;     around the three macro-probe sites in ioc.clj so CLJS 1.12.145's
   ;;     cljs.core/await doesn't crash the CPS transformer.
-  ;; Guest-overlay alias — opt-in V0 namespace shadowing for the
-  ;; guest-agent build. Adds `src-overlay/` AHEAD of `src/` so that
-  ;; `seon.db` etc. resolve to the wire-client copies. NEVER
-  ;; activate alongside `:client` — that build needs the real V0
-  ;; `seon.db`. Use: `clj -M:cljs:cljs-guest release guest-agent`.
-  :cljs-guest {:extra-paths ["guest-cljs/src-overlay"]}
-
-  :cljs {;; guest-cljs lives outside src/; add as an
-         ;; extra-path so shadow-cljs's classpath picker finds
-         ;; seon.client-runtime.* namespaces during the :guest-agent build.
-         ;; `test` is on shadow-cljs.edn :source-paths but must ALSO appear
+  :cljs {;; `test` is on shadow-cljs.edn :source-paths but must ALSO appear
          ;; here so shadow's JVM classpath actually sees the test files
          ;; — without it, `seon.test.runner-test` and friends resolve to
          ;; "not available" even though the .cljs files exist on disk.
@@ -277,7 +267,7 @@
          ;; datahike's version-check (macro-baked into CLJS at compile
          ;; time) sees a konserve version for the :local/root fork —
          ;; without it old 0.9.346-stamped stores refuse to open.
-         :extra-paths   ["guest-cljs/src" "test" "dev-resources/konserve-shim"]
+         :extra-paths   ["test" "dev-resources/konserve-shim"]
          :extra-deps    {org.clojure/clojurescript            {:mvn/version "1.12.145"}
                          org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}
                          thheller/shadow-cljs                 {:mvn/version "3.4.10"}
