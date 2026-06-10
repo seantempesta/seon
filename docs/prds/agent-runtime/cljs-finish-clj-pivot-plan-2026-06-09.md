@@ -414,33 +414,84 @@ operational knowledge. Each is one line + its source of detail.
   default; two sync readers race and throw) — required in any pod-flip
   connect config.
 
-## 10. HANDOFF (2026-06-10, orchestrator context rollover)
+## 10. HANDOFF (2026-06-10 EVENING, account switch — user resumes on new login)
 
-State at handoff: **THE FLIP IS DONE (0c9c76e)** — one unified CLJ+CLJS
-system; pod runs on the durable cluster store (`data/clusters/default/store`),
-JVM sole writer, cross-process reactivity proven, fail-loud no-fallback boot.
-All four processes green (`bin/seon status`). Suite 285/1065/0 exit-0.
+State: **RUN-8 PASS BAR GREEN** (gym S-12: agent B's first eval is a verbatim
+`:kb.finding` datalog query, 2 consecutive paid sweeps — commit 884a75d) plus
+~16 verified commits this session: #26 + thinking-off + fail-loud LLM errors
+(44a42df), UI basics (0902cbc), gym harness+catalog+judge tier (24ade2f,
+0e66717, 884a75d), context E1+E2 full-source exemplars (bb51af8), context
+iteration 1 (12faa70 — S-32 GREEN judge-100, S-12 mechanically GREEN), JVM
+hook-loss + flow-status (69cfe77), dev-hook gen-check side-effect fix
+(9723929), replay/registry-stomp fix (7ce6381), datahike fork engine fix
+pushed + sha bump to 1ae35696 (156a53e — multi-group join corruption; JVM
+affected too when planner on). Cluster store wiped clean 16:24 + legacy data
+dirs deleted (data/ = 4.5MB: clusters/default/store + dev-hook only). Stack
+green on the new sha. CLJS suite ~323/1241/0; JVM 2551/0/0.
 
-**IN FLIGHT: none — the cluster-reset + UI-front-door unit LANDED (see this commit).** Was — builds
-`bin/seon cluster reset` (and performs the user-approved one-time wipe of the
-test debris as its live proof) and diagnoses/fixes the human chat path in the
-browser (user couldn't trigger agents from the UI; evidence suggests messages
-LAND but the boot agent's llm-fn or the visible-response link is broken —
-reproduce as a human first). When it reports: verify its live proofs → commit
-with explicit-path staging → then proceed down §7.
+**IN FLIGHT at handoff (review → verify → explicit-path commit when they
+report):**
 
-**Next in queue (in order):** #26 finding-salience + instruction-clarity
-(teach MULTI-SEGMENT keyword namespaces, e.g. `:kb.finding/*` — single-segment
-is the violation; the agent followed our own bad example) → run 8 with the
-USER driving from the UI (pass bar: agent #2's first eval queries findings) →
-the agent-gym harness (§7 item 12) → demo examples Thursday on the durable
-store. The demo script draft + open question (tile-rewrite closer in/out)
-is in the 2026-06-10 conversation; re-confirm with the user.
+1. **V3-A** — `seon.db` → public face + `seon.db.internal` split (target
+   ≤15k chars public). Oracles: suite, replica probes 10/10+14/14, live
+   pod roundtrip.
+2. **S-21 root causes** — warn.cljs `internal-attr-ns?` regex hides ALL
+   `seon.*` domain attrs (production bug); `register!` single-segment gate;
+   gym driver world-parity; de-vacuous fork predicate; paid S-21 re-run.
+
+**UNCOMMITTED in tree (intentional, pending):** `src/seon/todo.cljs` +
+`test/seon/todo_test.cljs` (built, suite-green, REVIEWED-no-objection;
+wired into boot via client.cljs require + bootstrap attrs — commit with the
+exemplar-root swap fs→todo), plus whatever the two in-flight agents leave.
+
+**Tonight's USER DECISIONS (all firm):**
+
+- **Demo closer = fresh-session store/retrieve competence**, NOT tiles.
+- **Context v3 = code-first** (spec: `context-v3-code-first-2026-06-10.md`,
+  1d8becd): full source for relevant nses; `*.internal` sub-namespace
+  convention IS the filter (no lists/regex/stamping — classification
+  derived at render time from ONE full-index query); datahike query API
+  included (render from var docstrings); **NO recipes ns — real namespaces
+  doing real work**: findings become `seon.kb` (store!/consult, owns
+  `:kb.finding/*`, consult-first lives in its docstrings); remaining
+  teaching → docstrings of the public faces; prose survivors = SOUL + a
+  few behavioral lines.
+- **Agent code base ns = `my.*`** (user-confirmed): agents own it freely,
+  everything under it auto-renders to ALL cluster agents (derived from tx
+  provenance — agent-scoped txs vs `:substrate-seed`, no maintained list);
+  `seon.*` is WRITE-BLOCKED for agents (gate alongside register!'s);
+  `*.internal` hidden uniformly. Transition: temporary exclusion set for
+  not-yet-split substrate plumbing nses — shrinks to empty, then deleted.
+  Open sub-decision: agent HOME namespaces currently mint as
+  `seon.agent.<id>` (substrate squatting) — `my.agents.<id>` vs classify
+  runtime-internal; decide in the guard unit.
+- DeepSeek spend unlimited; cluster resets free; errors ALWAYS surface at
+  the user-facing layer.
+
+**Queue (next session, in order):** review/commit the 2 in-flight lanes +
+todo wiring & exemplar-root swap → V3-B `seon.kb` + docstring moves → V3-C
+one-query/one-classifier unification (+ my.* exposure + agreement property
+test) → V3-D datahike API block → V3-E delete superseded prose (gym trio =
+oracle per unit) → `bin/seon start/restart all` (dependency-ordered:
+cljs-watch → wire-server → pod; ready-gate on the SOCKET; auto-prep on sha
+change; pod gets bounded ping retry ~10s) → LIVE RESUME TEST (user-ordered,
+task #4: agent writes my.* schemas+fns+todos → restart pod → replay n-ok>0
+→ fresh agent retrieves; + upsert-on-redefine probe: redefine fn 2× →
+exactly ONE current row, latest source replays) → gym: flip back the
+driver_test.cljs:233 engine-bug workaround (fix shipped in 1ae35696), S-06
+restart scenario, judge-content red (agents think transact! throws —
+covered by docstring moves, re-measure) → auto-run agent tests on fn
+update (program graph links fns→tests; results as reactive section) →
+remaining §7 backlog (ALS merge, stub zero-forms, :seon.turn/error attr,
+MCP session GC, third tile panel) → `seon.mcp` (call user's MCP servers —
+user-requested, post-demo OK) → Thursday demo examples on the durable
+store. Upstream candidates: datahike join fix PR + the 2 pre-existing
+planner stratum-bridge errors.
 
 **Orchestrator protocol that worked (keep):** one unit per agent (≤7 files) →
 seon-verifier (or live-proof set for probe/harness lanes) → explicit-path
 commit (`git reset HEAD -- . && git add <files> && git diff --cached --stat`
 — eyeball — then commit; NEVER bare add+commit, concurrent agents stage);
 fence lanes by file list in every prompt; live system is the proof; loss-audit
-before any doc rewrite. Memory chain: `MEMORY.md` → `project_mvp_demo_status`
-→ this PRD.
+before any doc rewrite; gym scorecards quantify every context change. Memory
+chain: `MEMORY.md` → `project_mvp_demo_status` → this PRD.
