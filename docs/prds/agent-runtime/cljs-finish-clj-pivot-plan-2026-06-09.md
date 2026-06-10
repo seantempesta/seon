@@ -363,3 +363,34 @@ operational knowledge. Each is one line + its source of detail.
 - konserve readers must set `:lock-blob? false` (readers take the lock by
   default; two sync readers race and throw) — required in any pod-flip
   connect config.
+
+## 10. HANDOFF (2026-06-10, orchestrator context rollover)
+
+State at handoff: **THE FLIP IS DONE (0c9c76e)** — one unified CLJ+CLJS
+system; pod runs on the durable cluster store (`data/clusters/default/store`),
+JVM sole writer, cross-process reactivity proven, fail-loud no-fallback boot.
+All four processes green (`bin/seon status`). Suite 285/1065/0 exit-0.
+
+**IN FLIGHT (one agent):** the cluster-reset + UI-front-door unit — builds
+`bin/seon cluster reset` (and performs the user-approved one-time wipe of the
+test debris as its live proof) and diagnoses/fixes the human chat path in the
+browser (user couldn't trigger agents from the UI; evidence suggests messages
+LAND but the boot agent's llm-fn or the visible-response link is broken —
+reproduce as a human first). When it reports: verify its live proofs → commit
+with explicit-path staging → then proceed down §7.
+
+**Next in queue (in order):** #26 finding-salience + instruction-clarity
+(teach MULTI-SEGMENT keyword namespaces, e.g. `:kb.finding/*` — single-segment
+is the violation; the agent followed our own bad example) → run 8 with the
+USER driving from the UI (pass bar: agent #2's first eval queries findings) →
+the agent-gym harness (§7 item 12) → demo examples Thursday on the durable
+store. The demo script draft + open question (tile-rewrite closer in/out)
+is in the 2026-06-10 conversation; re-confirm with the user.
+
+**Orchestrator protocol that worked (keep):** one unit per agent (≤7 files) →
+seon-verifier (or live-proof set for probe/harness lanes) → explicit-path
+commit (`git reset HEAD -- . && git add <files> && git diff --cached --stat`
+— eyeball — then commit; NEVER bare add+commit, concurrent agents stage);
+fence lanes by file list in every prompt; live system is the proof; loss-audit
+before any doc rewrite. Memory chain: `MEMORY.md` → `project_mvp_demo_status`
+→ this PRD.
