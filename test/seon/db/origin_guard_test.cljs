@@ -1,11 +1,11 @@
 (ns seon.db.origin-guard-test
   "Origin-forge guard tests (unit #24 item 3, verifier rec 2026-06-09).
 
-   Contract under test — `seon.db/warn-on-seed-origin-forge!` via the
+   Contract under test — `seon.db.internal/warn-on-seed-origin-forge!` via the
    public `transact!` path:
 
    1. An AGENT-scoped tx claiming `:seon.db/origin :substrate-seed`
-      bumps `seon.db/!seed-origin-forge-count` (and console-warns).
+      bumps `seon.db.internal/!seed-origin-forge-count` (and console-warns).
    2. The guard is WARN-ONLY today: the tx still commits and the
       origin lands UNCHANGED as `:substrate-seed` (the boot-seed path
       still runs inside `with-agent` — see the enforcement TODO in
@@ -20,6 +20,7 @@
     [cljs.test :as t :refer [deftest is testing async]]
     [datahike.api :as d]
     [seon.db :as db]
+    [seon.db.internal :as internal]
     [seon.schema :as schema]))
 
 (schema/register! ::name :string)
@@ -60,13 +61,13 @@
   (async done
     (-> (fresh-conn)
         (.then (fn [conn]
-                 (reset! db/!seed-origin-forge-count 0)
+                 (reset! internal/!seed-origin-forge-count 0)
                  (-> (seed-origin-transact! conn "forger-agent-1")
                      (.then (fn [env]
                               (testing "tx still commits (warn-only)"
                                 (is (true? (:seon.db/ok? env))))
                               (testing "forge counter bumped exactly once"
-                                (is (= 1 @db/!seed-origin-forge-count)))
+                                (is (= 1 @internal/!seed-origin-forge-count)))
                               (testing "origin lands UNCHANGED — warn-only, no override yet"
                                 (let [report (:seon.db/tx-report env)
                                       tx-eid (.-tx ^js (first (:tx-data report)))
@@ -84,12 +85,12 @@
   (async done
     (-> (fresh-conn)
         (.then (fn [conn]
-                 (reset! db/!seed-origin-forge-count 0)
+                 (reset! internal/!seed-origin-forge-count 0)
                  (-> (seed-origin-transact! conn nil)
                      (.then (fn [env]
                               (is (true? (:seon.db/ok? env)))
                               (testing "legitimate substrate seed → no warn count"
-                                (is (zero? @db/!seed-origin-forge-count)))
+                                (is (zero? @internal/!seed-origin-forge-count)))
                               (done))))))
         (.catch (fn [err]
                   (is false (str "unexpected rejection: " err))
@@ -99,7 +100,7 @@
   (async done
     (-> (fresh-conn)
         (.then (fn [conn]
-                 (reset! db/!seed-origin-forge-count 0)
+                 (reset! internal/!seed-origin-forge-count 0)
                  (-> (db/with-agent "honest-agent-1"
                        (fn []
                          (db/with-tx-context
@@ -110,7 +111,7 @@
                      (.then (fn [env]
                               (is (true? (:seon.db/ok? env)))
                               (testing "agent-origin tx in agent scope → no warn count"
-                                (is (zero? @db/!seed-origin-forge-count)))
+                                (is (zero? @internal/!seed-origin-forge-count)))
                               (done))))))
         (.catch (fn [err]
                   (is false (str "unexpected rejection: " err))

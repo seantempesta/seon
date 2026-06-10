@@ -155,8 +155,8 @@
     ;; --- sha alignment of the :writer alias (static check) ------------------
     (println "== :writer alias sha alignment (deps resolution) ==")
     (let [cp (:out (shell/sh "clojure" "-A:writer" "-Spath"))]
-      (rec! ":writer resolves datahike to the fork sha (01ba3f18)"
-            (str/includes? cp "datahike/01ba3f18")
+      (rec! ":writer resolves datahike to the fork sha (1ae35696)"
+            (str/includes? cp "datahike/1ae35696")
             {:datahike-entry (some #(when (str/includes? % "datahike") %)
                                    (str/split (str/trim cp) #":"))})
       (rec! ":writer resolves konserve to the :local/root fork"

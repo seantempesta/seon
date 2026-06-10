@@ -23,6 +23,7 @@
     [datahike.api :as d]
     [malli.instrument :as mi]
     [seon.db :as db]
+    [seon.db.internal :as internal]
     [seon.error.instrument :as ei]
     [seon.instrument :as si]
     [seon.schema :as schema]))
@@ -101,15 +102,16 @@
   (db/transact! {::db/tx-data tx-data ::db/conn conn}))
 
 ;; ---------------------------------------------------------------------------
-;; Schema gate — the private validation helpers. We exercise them directly
-;; via `#'`-deref so test names map 1:1 to the behavior the JVM-side mirror
-;; also has to preserve.
+;; Schema gate — the validation plumbing, now public fns in
+;; `seon.db.internal` (the ns boundary is the privacy boundary; the V3-A
+;; split, 2026-06-10). Local aliases keep test names mapping 1:1 to the
+;; behavior the JVM-side mirror also has to preserve.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private system-attr?       @#'db/system-attr?)
-(def ^:private extract-tx-attrs   @#'db/extract-tx-attrs)
-(def ^:private validate-attrs!    @#'db/validate-attrs!)
-(def ^:private validate-values!   @#'db/validate-values!)
+(def ^:private system-attr?       internal/system-attr?)
+(def ^:private extract-tx-attrs   internal/extract-tx-attrs)
+(def ^:private validate-attrs!    internal/validate-attrs!)
+(def ^:private validate-values!   internal/validate-values!)
 
 (deftest system-attr?-recognizes-db-namespace
   (is (system-attr? :db/ident))
