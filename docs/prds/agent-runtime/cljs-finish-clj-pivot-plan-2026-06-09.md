@@ -498,6 +498,21 @@ client.cljs todo wiring remain intentionally uncommitted.
   (client.cljs), home-ns (agent.cljs), replay, inspector, tests asserting
   the old prefix; queued first in next session (files owned by in-flight
   lanes at handoff).
+- **`{:seon.db/entity true}` (user-confirmed 2026-06-10):** entity-kind-ness
+  is DECLARED on the map schema (opt-in, explicit — same family as
+  `{:seon.db/identity true}`), never inferred from "contains an id key".
+  `derive-entity-id-attr` fires only on declared entities; kills the 8
+  phantom request/response entity kinds. Sweep the ~10 genuine entity
+  schemas; `register!` emits the standard guiding warn when a map carries
+  an identity attr without the marker. Unit lands right after the S-21
+  verifier frees schema.cljc, before V3-C (which then deletes the
+  inference path). Domain-attrs reuse surface is independent of this —
+  no invisibility risk for agents who forget the marker.
+- **PROPOSED (awaiting user confirm): toolbelt under `seon.agent.*`** —
+  root `seon.*` = language layer (db, schema, repl); agent tooling =
+  `seon.agent.todo` / `.fs` / `.search` (reply!/message! already live in
+  seon.agent); future agent.cljs split → `seon.agent.internal`. Todo
+  rename ~free (uncommitted); fs/search rename = small follow-up unit.
 - DeepSeek spend unlimited; cluster resets free; errors ALWAYS surface at
   the user-facing layer.
 
