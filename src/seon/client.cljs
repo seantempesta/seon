@@ -598,23 +598,74 @@
          (sort-by :tx)
          vec)))
 
+(defn- error-chain-message
+  "Human-readable message for a `seon.error/->map` map, composed from
+   the WHOLE `:seon.error/cause` chain (deduped, joined with ` <- `).
+   Fail-loud: cljs.js wraps analysis errors in ex-info layers whose
+   top-level message is the literal string \"ERROR\" — the real defect
+   (e.g. schema/register!'s legible invalid-schema explanation) lives
+   one or two causes down. Surfacing only the top message produced
+   warn lines like `replay of schema :seon.workout/date failed: ERROR`
+   (live incident 2026-06-10)."
+  [err-map]
+  (->> (iterate :seon.error/cause err-map)
+       (take-while some?)
+       (map :seon.error/message)
+       (remove str/blank?)
+       (distinct)
+       (str/join " <- ")))
+
+(defn- error-chain-stack
+  "Deepest available `:seon.error/stack` in the cause chain — the
+   original throw site, not cljs.js's compile-loop trampoline."
+  [err-map]
+  (->> (iterate :seon.error/cause err-map)
+       (take-while some?)
+       (keep :seon.error/stack)
+       (last)))
+
+(defn ^:async ^:private ensure-target-ns!
+  "Make sure `ns-sym` exists in the compile-state before replaying a
+   def-shaped entry into it. Replay is tx-ordered, but agents routinely
+   author defns BEFORE writing the `(ns …)` form (live: the workout
+   corpus's :ns row tx-sorts AFTER its 4 fns), and an entry's owning ns
+   may have no :seon.ns row at all. On a fresh compile-state, cljs.js
+   with `:def-emits-var true` then dies in the cljs compiler's
+   `emit* :the-var` `{:pre [(ana/ast? sym)]}` (compiler.cljc:506) —
+   every boot/agent-create logged `replay of fn … failed: Assert
+   failed: (ana/ast? sym)` (2026-06-10 15:38/15:46). Evaling a bare
+   `(ns <sym>)` first is what an editor does when loading a file; the
+   real `(ns …)` row — when one exists — re-evals over it harmlessly
+   in its own tx position."
+  [compile-state ns-sym]
+  (when-not (or (= 'cljs.user ns-sym)
+                (some? (get-in @compile-state
+                               [:cljs.analyzer/namespaces ns-sym :name])))
+    (await (seval/eval compile-state (str "(ns " ns-sym ")")
+                       {:ns 'cljs.user :analyze-deps? false})))
+  nil)
+
 (defn ^:async ^:private replay-one!
   "Replay a single entry. Returns
      {:ok? true}
    or
      {:ok? false :error <message-string> :stack <stack-string>}.
-   Never throws — converts any exception to data."
+   Never throws — converts any exception to data. `:error` carries the
+   full cause-chain message (see [[error-chain-message]]), `:stack` the
+   deepest cause's stack — both chosen so a replay-failure warn names
+   the actual defect, not cljs.js's \"ERROR\" wrapper."
   [compile-state {:keys [source] :as entry}]
   (try
     (let [ns-sym (target-ns-for-entry entry)
+          _      (await (ensure-target-ns! compile-state ns-sym))
           r      (await (seval/eval compile-state source
                                     {:ns            ns-sym
                                      :analyze-deps? false}))]
       (if (:ok r)
         {:ok? true}
         {:ok? false
-         :error (or (some-> r :error :seon.error/message) "unknown")
-         :stack (or (some-> r :error :seon.error/stack) "")}))
+         :error (or (not-empty (some-> r :error error-chain-message)) "unknown")
+         :stack (or (some-> r :error error-chain-stack) "")}))
     (catch :default e
       {:ok? false
        :error (or (.-message e) (str e))

@@ -384,6 +384,26 @@
                     (and core-path (resolves-on-globalthis? core-path))
                     (resolves-on-globalthis? munged-suffix)))))))
 
+(defn- guarded-load
+  "`:load` fn for cljs.js — `boot/load` plus a post-load invariant
+   re-assert. The bootstrap bundle's per-ns JS is goog.globalEval'd into
+   the SHARED host runtime, so a load can re-run a library namespace's
+   top-level side effects against live state. Live incident (2026-06-10,
+   logs/pod.log 15:21): an agent eval of `(require '[malli.core :as m])`
+   loaded the bundle's `malli.core$macros.js`, whose macro-mode compile
+   of malli/core.cljc re-ran `(mr/set-default-registry! …)` against the
+   live `malli.registry` — stomping the registry with a
+   default-schemas-only snapshot and severing every seon-registered
+   schema process-wide (`m/schema :seon.db/conn` → invalid-schema; broke
+   replay, record-eval!, and POST /agents/new). Relinking after every
+   load is idempotent and cheap; it runs synchronously before the
+   compiled form continues, so no code observes the stomped registry."
+  [compile-state rc cb]
+  (boot/load compile-state rc
+             (fn [result]
+               (schema/relink-registry!)
+               (cb result))))
+
 (defn ^:async ^:private raw-eval
   "Internal — returns a Promise that resolves with {:value v :ns ns}
    or rejects with the error. The public `eval` catches both.
@@ -416,7 +436,7 @@
           (fn []
             (cljs/eval-str compile-state form-str 'seon.dynamic
               {:eval          cljs/js-eval
-               :load          (partial boot/load compile-state)
+               :load          (partial guarded-load compile-state)
                :ns            ns-sym
                :context       :statement
                :def-emits-var true

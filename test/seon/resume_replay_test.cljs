@@ -34,10 +34,13 @@
      (cljs.test/run-tests 'seon.resume-replay-test)"
   (:require
     [cljs.test :as t :refer [deftest is async]]
+    [malli.core :as m]
+    [malli.registry :as mr]
     [seon.client :as client]
     [seon.db :as db]
     [seon.eval :as seval]
-    [seon.repl :as repl]))
+    [seon.repl :as repl]
+    [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
 ;; Seed — a fresh conn with BOTH substrate rows (must be skipped) and
@@ -164,5 +167,99 @@
                         (is (:ok r) "agent test source replayed without error")
                         (is (= 50 (:value r))
                             "replayed test (def replay-marker 42) is in scope: 42+8=50"))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Fail-loud replay errors — the warn must name the actual defect, not
+;; cljs.js's literal "ERROR" wrapper (live incident 2026-06-10: every
+;; :seon.workout/* replay failure logged as `failed: ERROR`).
+;; ---------------------------------------------------------------------------
+
+(deftest error-chain-message-surfaces-the-real-defect
+  (let [err {:seon.error/message "ERROR"
+             :seon.error/stack   "Error: ERROR\n    at compile-loop"
+             :seon.error/cause
+             {:seon.error/message "schema/register! :seon.workout/date: bad form"
+              :seon.error/stack   "Error: schema/register!…\n    at assert_compilable"
+              :seon.error/cause
+              {:seon.error/message ":malli.core/invalid-schema"}}}]
+    (is (= (str "ERROR <- schema/register! :seon.workout/date: bad form"
+                " <- :malli.core/invalid-schema")
+           ((deref #'client/error-chain-message) err))
+        "every cause-level message joins into the surfaced string")
+    (is (= "Error: schema/register!…\n    at assert_compilable"
+           ((deref #'client/error-chain-stack) err))
+        "stack comes from the DEEPEST level that has one — the throw site")))
+
+(deftest error-chain-message-dedupes-and-skips-blanks
+  (is (= "boom"
+         ((deref #'client/error-chain-message)
+          {:seon.error/message "boom"
+           :seon.error/cause {:seon.error/message ""
+                              :seon.error/cause {:seon.error/message "boom"}}}))
+      "blank + duplicate messages collapse"))
+
+;; ---------------------------------------------------------------------------
+;; Registry stomp recovery — relink-registry! restores seon-registered
+;; schema resolution after a foreign (mr/set-default-registry! …), the
+;; exact side effect a bootstrap load of malli.core$macros.js re-runs.
+;; ---------------------------------------------------------------------------
+
+(deftest relink-registry!-heals-a-default-registry-stomp
+  (try
+    ;; Simulate the stomp: default registry loses seon's mutable layer.
+    (mr/set-default-registry! (m/default-schemas))
+    (is (thrown? js/Error (m/schema :seon.db/conn))
+        "after the stomp, seon-registered keywords no longer resolve")
+    (finally
+      ;; The fn under test doubles as the cleanup — MUST heal even if
+      ;; the assertion above throws, or the rest of the suite breaks.
+      (is (true? (schema/relink-registry!)))))
+  (is (some? (m/schema :seon.db/conn))
+      "after relink-registry!, seon-registered keywords resolve again"))
+
+;; ---------------------------------------------------------------------------
+;; Defn-before-ns ordering — a fn entry whose owning ns has NO :seon.ns
+;; row (or whose ns row tx-sorts later, as the live workout corpus does)
+;; must still replay on a FRESH compile-state. Without ensure-target-ns!
+;; cljs.js's :def-emits-var dies in the cljs compiler's emit* :the-var
+;; `{:pre [(ana/ast? sym)]}` — live: `replay of fn "seon.workout/…"
+;; failed: Assert failed: (ana/ast? sym)` on every boot (2026-06-10).
+;; ---------------------------------------------------------------------------
+
+(deftest replay-fn-without-ns-row-creates-its-namespace
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (client/open-agent-conn!)
+                (.then
+                  (fn [conn]
+                    (binding [db/*conn* conn]
+                      (-> (db/transact!
+                            {:seon.db/tx-data
+                             ;; fn row ONLY — deliberately no :seon.ns row for
+                             ;; seon.replay.orphan (defn-before-ns shape).
+                             [{:seon.fn/sym "seon.replay.orphan/orphan-fn"
+                               :seon.fn/source "(defn orphan-fn [n] (+ n 5))"
+                               :seon.fn/arglists "([n])"
+                               :seon.fn/doc ""
+                               :seon.fn/private? false}]})
+                          (.then
+                            (fn [_]
+                              (client/replay-program-graph!
+                                {:conn conn :compile-state cs
+                                 :agent-id "resume-replay-test"})))
+                          (.then
+                            (fn [stats]
+                              (is (= 0 (:seon.client/replay-n-fail stats))
+                                  "fn replays into an auto-created ns — no ana/ast? assert")
+                              (seval/eval cs "(seon.replay.orphan/orphan-fn 37)"
+                                          {:ns 'cljs.user :analyze-deps? false})))
+                          (.then
+                            (fn [r]
+                              (is (:ok r) "replayed orphan fn is callable")
+                              (is (= 42 (:value r)) "(orphan-fn 37) => 42"))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

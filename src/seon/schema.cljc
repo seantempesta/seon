@@ -37,13 +37,36 @@
 ;; Use `defonce` to survive namespace reloads.
 (defonce ^:private *schemas (atom {}))
 
-;; Initialize the global registry once at load time.
-;; Combines Malli's default schemas with our mutable registry.
-(defonce ^:private _registry-init
+(defn relink-registry!
+  "(Re)point malli's process-global default registry at the composite of
+   malli's default schemas + seon's mutable `*schemas` atom. Idempotent —
+   safe to call any number of times; registered schemas live in `*schemas`
+   and survive the relink.
+
+   Why this is a public, re-callable operation and not just load-time
+   init: `malli.core` runs `(mr/set-default-registry! …)` as a TOP-LEVEL
+   side effect of namespace load (malli/core.cljc `default-registry`).
+   In the CLJS pod, the bootstrap self-host compiler can re-execute that
+   side effect against the LIVE `malli.registry` — e.g. an agent eval of
+   `(require '[malli.core :as m])` goog.globalEvals the bootstrap
+   bundle's `malli.core$macros.js`, whose macro-mode compile of
+   malli/core.cljc still calls the live `set-default-registry!`. That
+   stomps the registry with a default-schemas-only snapshot (and
+   macro-land IntoSchema instances), severing every seon-registered
+   schema: `m/schema` of any `:seon.*` keyword throws
+   `:malli.core/invalid-schema` process-wide (live incident 2026-06-10,
+   logs/pod.log 15:21–15:22). `seon.eval`'s bootstrap `:load` wrapper
+   calls this after every load to re-assert the invariant."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
   (mr/set-default-registry!
    (mr/composite-registry
     (m/default-schemas)
-    (mr/mutable-registry *schemas))))
+    (mr/mutable-registry *schemas)))
+  true)
+
+;; Initialize the global registry once at load time.
+(defonce ^:private _registry-init (relink-registry!))
 
 ;; Register :inst as a keyword type (Malli only provides inst? predicate).
 ;; This lets schemas use :inst instead of inst? for consistency with :string, :int, etc.
