@@ -84,6 +84,60 @@
                     ;; 2026-05-22 — derived from the session log now.
                     :seon.agent/turn-count (default/agent-turn-count ent)}))))))
 
+(defn- findings-data
+  "Every `:finding/*` row in the DB, oldest-first — the cluster's
+   accumulated knowledge. Cross-agent BY DESIGN: no agent filter, so a
+   finding stored by agent A renders in agent B's knowledge pane.
+   NOTE: the live attrs are bare-ns `:finding/*` (agent-authored during
+   research run 7) — rendered as-is; flagged as a schema smell."
+  [db]
+  (->> (d/q '[:find (pull ?e [*]) :where [?e :finding/claim]] db)
+       (map first)
+       (sort-by :db/id)
+       vec))
+
+(defn- cluster-stats
+  "Headline numbers for the mission-control strip. All derived live
+   from the DB — they tick up as agents work."
+  [db]
+  {::agent-count   (count (d/q '[:find ?e :where [?e :seon.agent/id]] db))
+   ::turn-count    (count (d/q '[:find ?t :where [?t :seon.turn/at]] db))
+   ::fn-count      (count (d/q '[:find ?e :where [?e :seon.fn/sym]] db))
+   ::finding-count (count (d/q '[:find ?e :where [?e :finding/claim]] db))
+   ::datom-count   (count (d/datoms db :eavt))})
+
+(defn- confidence-pill
+  [confidence]
+  (let [verified? (= :verified confidence)]
+    [:span {:class (str "text-[10px] font-mono uppercase tracking-wider "
+                        "border rounded px-1 py-px "
+                        (if verified?
+                          "text-amber-400 border-amber-700/60 bg-amber-900/20"
+                          "text-text-400 border-base-700"))}
+     (name (or confidence :inferred))]))
+
+(defn- finding-card
+  "One knowledge card: question (dim), claim (primary), source-file:line
+   as a monospace citation, confidence pill."
+  [{:finding/keys [question claim source-file line confidence]}]
+  [:div {:class (str "border border-base-800 rounded p-2 bg-base-900/60 "
+                     "animate-appear")}
+   (when (seq question)
+     [:div {:class "text-xs text-text-400 italic mb-1"} question])
+   [:div {:class "text-xs text-text-100 leading-snug"} claim]
+   [:div {:class "flex items-center gap-2 mt-1.5"}
+    (when (seq source-file)
+      [:span {:class "text-[10px] font-mono text-amber-500/90"}
+       (str source-file (when line (str ":" line)))])
+    [:span {:class "ml-auto"} (confidence-pill confidence)]]])
+
+(defn- knowledge-cards
+  [findings]
+  (into [:div {:class "grid gap-2"
+               :style "grid-template-columns:repeat(auto-fill,minmax(320px,1fr));"}]
+        (map finding-card)
+        findings))
+
 (defn- entity-kind-label
   "Best-effort kind label for an entity with no resolved renderer: the
    most common keyword NAMESPACE among its attrs (`seon.eval`,
@@ -277,8 +331,17 @@
                                 ::name     (entity-summary-name e)
                                 ::gist     (entity-gist e)
                                 ::card-key (str "card-" (:db/id e))}
+                               (when-let [d (:seon.eval/duration-ms e)]
+                                 {::dur d})
                                (get turn-info (:db/id e))))))
                    vec)
+        ;; Per-turn elapsed = Σ eval duration-ms within the turn. Powers
+        ;; the turn-separator badge + the header activity sparkline.
+        turn-durs (->> cards
+                       (filter ::turn-n)
+                       (group-by ::turn-n)
+                       (sort-by key)
+                       (mapv (fn [[n cs]] [n (reduce + 0 (keep ::dur cs))])))
         ;; The agent's OWN tile (unit 1.4) — rendered explicitly (the
         ;; agent entity is not part of `visible-entities`). Per-entity
         ;; `:seon.render/html` override wins; default is
@@ -293,6 +356,11 @@
      :char-count (count (or text ""))
      :token-est  (or token-estimate 0)
      :html-cards cards
+     :turn-durs  turn-durs
+     ;; Knowledge is CROSS-AGENT by design: read the UNFILTERED conn,
+     ;; not the agent-view FilteredDB — agent B must see agent A's
+     ;; findings (the demo money-shot is exactly that reuse).
+     :findings   (findings-data @db/*conn*)
      ;; render-cap overflow (seon.render/renderable-entities) — rides
      ;; as metadata on the entities vector so the response schema is
      ;; unchanged. Surfaced as the "older elided" note in the pane.
@@ -316,17 +384,49 @@
 (defn- html-pane-id [agent-id] (str "inspect-html-" agent-id))
 (defn- header-id    [agent-id] (str "inspect-header-" agent-id))
 
+(defn- fmt-ms
+  "`1234` → `\"1.2s\"`, `53` → `\"53ms\"`."
+  [ms]
+  (if (>= ms 1000)
+    (str (.toFixed (/ ms 1000) 1) "s")
+    (str ms "ms")))
+
+(defn- activity-sparkline
+  "Last 12 turns' eval time as a strip of tiny bars — pure divs, no
+   deps. Hover a bar for `turn N · 1.2s`."
+  [turn-durs]
+  (when (seq turn-durs)
+    (let [last12 (vec (take-last 12 turn-durs))
+          mx     (max 1 (apply max (map second last12)))]
+      (into [:div {:class "flex items-end gap-px h-3.5"
+                   :title "eval time per turn"}]
+            (map (fn [[n d]]
+                   [:div {:class "w-1 rounded-sm bg-amber-600/70"
+                          :style (str "height:"
+                                      (max 12 (js/Math.round (* 100 (/ d mx))))
+                                      "%")
+                          :title (str "turn " n " · " (fmt-ms d))}]))
+            last12))))
+
 (defn- header-fragment
-  [agent-id {:keys [agent char-count token-est handler-count]}]
+  [agent-id {:keys [agent char-count token-est handler-count turn-durs]}]
   (let [state (or (:seon.agent/state agent) :unknown)
         ;; Derived — the :seon.agent/turn-count attr was retired.
         turns (default/agent-turn-count agent)]
     [:header {:id (header-id agent-id)
               :class "flex items-center gap-3 p-2 border-b border-base-800 bg-base-900"}
      [:span {:class "text-xs font-mono text-text-200"} "agent " agent-id]
-     (comp/status-dot state)
+     (if (= :running state)
+       ;; The live "the agent is thinking RIGHT NOW" pulse — resolves
+       ;; back to the plain status dot on the next morph when the turn
+       ;; completes.
+       [:span {:class "inline-flex items-center gap-1.5 text-xs font-mono text-amber-400"}
+        [:span {:class "w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"}]
+        (str "thinking — turn " (inc turns))]
+       (comp/status-dot state))
      [:span {:class "text-xs text-text-400"} (str "turn " turns)]
      [:span {:class "text-xs text-text-400"} (str handler-count " handlers")]
+     (activity-sparkline turn-durs)
      [:span {:class "text-xs text-text-500 ml-auto"}
       (str "~" token-est " tokens · " char-count " chars")]
      [:a {:href "/agents"
@@ -390,11 +490,25 @@
 (defn- card-block
   "Render one card-map. STATIC cards wrap in a `<details>` collapsed by
    default — summary = kind + name + one-line gist. DYNAMIC cards
-   render expanded as before."
+   render expanded, visually weighted for chat-first reading:
+   - `seon.message` → the conversation. Full-width, no machinery rail.
+   - `seon.eval`    → the machinery. Indented + dimmer border, so the
+     eye follows the dialogue and the evals read as the agent's 'work
+     shown' underneath it.
+   Every dynamic card carries a stable `:id` (`card-<eid>`) so
+   idiomorph PRESERVES existing nodes across SSE morphs and only
+   genuinely-new cards get the `.animate-appear` first-paint
+   fade/drift (`@starting-style` in input.css — no JS)."
   [{::keys [hiccup static? kind name gist card-key]}]
-  (let [wrap-class "border-l-2 border-amber-700/40 pl-2 py-1 mb-1"]
+  (let [wrap-class (case kind
+                     "seon.eval"
+                     "border-l-2 border-base-700/80 pl-2 py-1 mb-1 ml-3 opacity-90"
+                     "seon.message"
+                     "py-1 mb-1"
+                     "border-l-2 border-amber-700/40 pl-2 py-1 mb-1")]
     (if static?
-      [:details {:class wrap-class :data-seon-key card-key}
+      [:details {:class "border-l-2 border-amber-700/40 pl-2 py-1 mb-1"
+                 :data-seon-key card-key}
        [:summary {:class (str "cursor-pointer select-none text-xs font-mono "
                               "text-text-400 hover:text-text-200")}
         [:span {:class "font-semibold text-text-300"} kind]
@@ -403,66 +517,104 @@
         (when (seq gist)
           [:span {:class "text-text-500"} (str " — " gist)])]
        [:div {:class "mt-0.5"} hiccup]]
-      [:div {:class wrap-class} hiccup])))
+      [:div {:id card-key :class (str wrap-class " animate-appear")} hiccup])))
 
 (defn- turn-separator
-  [turn-n turn-at]
+  [turn-n turn-at dur]
   [:div {:class "flex items-center gap-2 my-1 text-xs font-mono text-text-500"}
    [:span {:class "flex-1 border-t border-base-800"}]
    [:span (str "turn " turn-n
                (let [t (hh-mm-ss turn-at)]
-                 (when (seq t) (str " · " t))))]
+                 (when (seq t) (str " · " t)))
+               (when (and dur (pos? dur))
+                 (str " · " (fmt-ms dur))))]
    [:span {:class "flex-1 border-t border-base-800"}]])
 
 (defn- cards-with-separators
   "Interleave turn-separator rows into the chronological card list: a
-   separator renders before the first card of each turn. Cards without
-   a turn keep their tx-time position and never break a turn group."
-  [cards]
-  (loop [out [] last-turn nil cards cards]
-    (if-let [{::keys [turn-n turn-at] :as card} (first cards)]
-      (let [new-turn? (and (some? turn-n) (not= turn-n last-turn))]
-        (recur (cond-> out
-                 new-turn? (conj (turn-separator turn-n turn-at))
-                 true      (conj (card-block card)))
-               (if new-turn? turn-n last-turn)
-               (rest cards)))
-      out)))
+   separator renders before the first card of each turn (with the
+   turn's Σ eval time from `turn-durs`). Cards without a turn keep
+   their tx-time position and never break a turn group."
+  [cards turn-durs]
+  (let [dur-by-turn (into {} turn-durs)]
+    (loop [out [] last-turn nil cards cards]
+      (if-let [{::keys [turn-n turn-at] :as card} (first cards)]
+        (let [new-turn? (and (some? turn-n) (not= turn-n last-turn))]
+          (recur (cond-> out
+                   new-turn? (conj (turn-separator turn-n turn-at
+                                                   (get dur-by-turn turn-n)))
+                   true      (conj (card-block card)))
+                 (if new-turn? turn-n last-turn)
+                 (rest cards)))
+        out))))
+
+(defn- knowledge-group
+  "Collapsible 'cluster knowledge' group at the top of the right pane —
+   the money-shot surface. Open by default; the open-state guard
+   (`data-seon-key`) keeps the user's toggle across morphs. Renders
+   nothing when no findings exist yet — derived, self-healing."
+  [findings]
+  (when (seq findings)
+    [:details {:open true
+               :data-seon-key "cluster-knowledge"
+               :class (str "border border-amber-700/40 rounded p-1.5 mb-2 "
+                           "bg-amber-950/20")}
+     [:summary {:class (str "cursor-pointer select-none text-xs font-mono "
+                            "text-amber-400 hover:text-amber-300")}
+      (str "◆ what this cluster has learned — " (count findings)
+           (if (= 1 (count findings)) " finding" " findings"))]
+     [:div {:class "mt-1.5"} (knowledge-cards findings)]]))
+
+(defn- thinking-bubble
+  "Placeholder bubble pinned under the newest card while the agent is
+   `:running` — it 'resolves' into the real cards on the next morph.
+   No stable id ON PURPOSE: every morph treats it as a fresh node, so
+   it re-animates while real cards stay put."
+  [turns]
+  [:div {:class (str "flex items-center gap-2 py-1.5 px-2 mb-1 rounded "
+                     "border border-amber-700/40 bg-amber-950/30 "
+                     "text-xs font-mono text-amber-400 animate-appear")}
+   [:span {:class "w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"}]
+   (str "thinking — turn " (inc turns) " …")])
 
 (defn- html-pane-fragment
-  [agent-id {:keys [html-cards agent-tile elided]}]
-  [:div {:id (html-pane-id agent-id)
-         :class "flex flex-col h-full overflow-hidden"}
-   [:div {:class "px-2 py-1 text-xs font-mono text-text-400 bg-base-900 border-b border-base-800"}
-    ":seon.render/html  (rendered view)"]
-   ;; `data-seon-scroll` arms the client-side bottom-autoscroll: pinned
-   ;; to newest while the user is at/near the bottom; never yanks while
-   ;; they read history. Stable id so idiomorph preserves the element
-   ;; (and its scrollTop + JS-property flag) across SSE morphs.
-   [:div {:id (str "inspect-cards-" agent-id)
-          :data-seon-scroll "1"
-          :class "flex-1 overflow-auto p-2 text-xs bg-base-950"}
-    ;; The agent's OWN tile — always ABOVE the per-entity cards. It
-    ;; lives inside this morphed fragment, so every SSE push
-    ;; re-renders it: the agent repoints `:seon.render/html` on its
-    ;; entity and the tile updates live.
-    (when agent-tile
-      [:div {:class (str "border border-amber-700/60 rounded p-1 mb-2 "
-                         "bg-base-900/60")}
-       agent-tile])
-    ;; render-cap note — oldest entities beyond the bound are not
-    ;; materialized at all (seon.render/render-cap); collapsed static
-    ;; cards make them low-value, so say how many were skipped.
-    (when (and elided (pos? elided))
-      [:div {:class "text-text-500 italic text-xs font-mono px-2 py-0.5"}
-       (str "… " elided " older " (if (= 1 elided) "entity" "entities")
-            " elided")])
-    (if (seq html-cards)
-      (into [:div {:class "flex flex-col"}] (cards-with-separators html-cards))
-      [:div {:class "text-text-500 italic p-2"}
-       (str "nothing here yet — every entity this agent sees (messages, "
-            "evals, fns, schemas) renders here as a card the moment it "
-            "is created")])]])
+  [agent-id {:keys [html-cards agent-tile elided findings turn-durs agent]}]
+  (let [running? (= :running (:seon.agent/state agent))]
+    [:div {:id (html-pane-id agent-id)
+           :class "flex flex-col h-full overflow-hidden"}
+     [:div {:class "px-2 py-1 text-xs font-mono text-text-400 bg-base-900 border-b border-base-800"}
+      ":seon.render/html  (rendered view)"]
+     ;; `data-seon-scroll` arms the client-side bottom-autoscroll: pinned
+     ;; to newest while the user is at/near the bottom; never yanks while
+     ;; they read history. Stable id so idiomorph preserves the element
+     ;; (and its scrollTop + JS-property flag) across SSE morphs.
+     [:div {:id (str "inspect-cards-" agent-id)
+            :data-seon-scroll "1"
+            :class "flex-1 overflow-auto p-2 text-xs bg-base-950"}
+      ;; The agent's OWN tile — always ABOVE the per-entity cards. It
+      ;; lives inside this morphed fragment, so every SSE push
+      ;; re-renders it: the agent repoints `:seon.render/html` on its
+      ;; entity and the tile updates live.
+      (when agent-tile
+        [:div {:class (str "border border-amber-700/60 rounded p-1 mb-2 "
+                           "bg-base-900/60")}
+         agent-tile])
+      ;; Cross-agent knowledge — any agent's findings render here.
+      (knowledge-group findings)
+      ;; render-cap note — oldest entities beyond the bound are not
+      ;; materialized at all (seon.render/render-cap); collapsed static
+      ;; cards make them low-value, so say how many were skipped.
+      (when (and elided (pos? elided))
+        [:div {:class "text-text-500 italic text-xs font-mono px-2 py-0.5"}
+         (str "… " elided " older " (if (= 1 elided) "entity" "entities")
+              " elided")])
+      (if (seq html-cards)
+        (into [:div {:class "flex flex-col"}]
+              (cards-with-separators html-cards turn-durs))
+        [:div {:class "text-text-500 italic p-2"}
+         "ask this agent something ↓ — every message, eval, fn and schema it touches will appear here live"])
+      (when running?
+        (thinking-bubble (default/agent-turn-count agent)))]]))
 
 (defn- chat-bar-fragment
   "Sticky bottom bar spanning both panes. Submits as a regular
@@ -676,37 +828,97 @@
                         "var f=document.getElementById('seon-chat-form');"
                         "if(f){e.preventDefault();f.requestSubmit();}}});"))]]])))
 
+(defn- stat-cell
+  "One headline number in the mission-control strip. Ticks up live —
+   the dash fragment re-morphs on every commit."
+  [label value]
+  [:div {:class (str "flex flex-col px-3 py-1.5 border border-base-800 "
+                     "rounded bg-base-900/60 min-w-20")}
+   [:span {:class "text-base leading-tight font-mono font-semibold text-amber-400 tabular-nums"}
+    (str value)]
+   [:span {:class "text-[10px] uppercase tracking-wider text-text-400"}
+    label]])
+
+(defn- agent-grid-tile
+  "One clickable agent tile on the index — the agent's own
+   `render-agent-tile` surface wrapped in a link-card."
+  [db {:seon.agent/keys [id state turn-count]}]
+  (let [tile (:seon.render/hiccup
+               (render/render-agent-tile {:seon.db/db db
+                                          :seon.agent/id id}))]
+    ;; flex-col + flex-1/shrink-0 split: the grid stretches the anchor,
+    ;; and the tile's own `h-full` would otherwise consume 100% and
+    ;; push the footer past the `overflow-hidden` edge (observed live
+    ;; 2026-06-09: footer rendered at y=255 inside a 175px-tall card).
+    [:a {:href (str "/agent/" id)
+         :class (str "flex flex-col border border-base-800 rounded "
+                     "overflow-hidden hover:border-amber-700/70 "
+                     "transition-colors animate-appear")}
+     [:div {:class "flex-1 min-h-0"}
+      (or tile
+          [:div {:class "p-3 bg-base-900"}
+           [:div {:class "flex items-center gap-2"}
+            (comp/status-dot state id)
+            [:span {:class "text-xs text-text-400 ml-auto"}
+             (str "turn " turn-count)]]])]
+     [:div {:class (str "shrink-0 flex items-center px-3 py-1 "
+                        "border-t border-base-800 "
+                        "bg-base-900/80 text-xs font-mono")}
+      [:span {:class "text-text-500"} (str "turn " turn-count)]
+      [:span {:class "ml-auto text-amber-500"} "inspect →"]]]))
+
+(defn- agents-dash-fragment
+  "The whole mission-control surface — ONE morph target (`#agents-dash`)
+   so the SSE listener re-renders strip + tiles + knowledge atomically.
+   Derived 100% from the DB at render time."
+  []
+  (let [db   @db/*conn*
+        rows (list-agents-data)
+        {::keys [agent-count turn-count fn-count finding-count datom-count]}
+        (cluster-stats db)
+        findings (findings-data db)]
+    [:div {:id "agents-dash" :class "flex flex-col gap-4"}
+     [:div {:class "flex items-center gap-4 flex-wrap"}
+      [:div
+       [:h1 {:class "text-lg font-semibold tracking-tight"} "seon · cluster"]
+       [:p {:class "text-text-400 text-xs mt-0.5 font-mono"}
+        "live agents on a shared substrate — everything below is derived from the DB right now"]]
+      [:div {:class "flex gap-2 ml-auto"}
+       (stat-cell "agents"   agent-count)
+       (stat-cell "turns"    turn-count)
+       (stat-cell "fns"      fn-count)
+       (stat-cell "findings" finding-count)
+       (stat-cell "datoms"   datom-count)]]
+     (if (seq rows)
+       (into [:div {:class "grid gap-2"
+                    :style "grid-template-columns:repeat(auto-fill,minmax(300px,1fr));"}]
+             (map #(agent-grid-tile db %))
+             rows)
+       [:p {:class "text-text-500 italic text-xs"}
+        "no agents yet — boot one via the REPL and it will appear here live"])
+     (when (seq findings)
+       [:section
+        [:h2 {:class (str "text-xs font-semibold text-amber-400 uppercase "
+                          "tracking-wider mb-2 font-mono")}
+         (str "◆ what this cluster has learned · " (count findings))]
+        (knowledge-cards findings)])]))
+
 (defn- agents-index-page
   []
-  (let [rows (list-agents-data)]
-    (str
-      "<!DOCTYPE html>"
-      (html/->string
-        [:html {:lang "en" :data-theme "phosphor"}
-         [:head
-          [:meta {:charset "utf-8"}]
-          [:title "seon · agents"]
-          [:link {:rel "stylesheet" :href "/css/output.css"}]]
-         [:body {:class "min-h-screen bg-base-950 text-text-50 font-sans p-4"}
-          [:h1 {:class "text-lg font-semibold mb-3"} "agents"]
-          (if (seq rows)
-            [:table {:class "w-full max-w-3xl text-xs font-mono"}
-             [:thead
-              [:tr {:class "text-text-400 text-left"}
-               [:th {:class "py-1.5 px-2"} "id"]
-               [:th {:class "py-1.5 px-2"} "state"]
-               [:th {:class "py-1.5 px-2"} "turns"]
-               [:th {:class "py-1.5 px-2"} ""]]]
-             (into [:tbody]
-                   (for [{:seon.agent/keys [id state turn-count]} rows]
-                     [:tr {:class "border-t border-base-800 hover:bg-base-900"}
-                      [:td {:class "py-1.5 px-2 text-text-100"} id]
-                      [:td {:class "py-1.5 px-2"} (comp/status-dot state)]
-                      [:td {:class "py-1.5 px-2 text-text-300"} (str turn-count)]
-                      [:td {:class "py-1.5 px-2"}
-                       [:a {:href (str "/agent/" id)
-                            :class "text-amber-500 hover:text-amber-300"} "inspect →"]]]))]
-            [:p {:class "text-text-500 italic"} "no agents yet — boot one via the REPL"])]]))))
+  (str
+    "<!DOCTYPE html>"
+    (html/->string
+      [:html {:lang "en" :data-theme "phosphor"}
+       [:head
+        [:meta {:charset "utf-8"}]
+        [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
+        [:title "seon · agents"]
+        [:link {:rel "stylesheet" :href "/css/output.css"}]
+        [:script {:type "module" :src "/js/datastar.js"}]]
+       [:body {:class "min-h-screen bg-base-950 text-text-50 font-sans p-4"}
+        [:div {:data-init "@get('/agents/sse')"
+               :data-on:online__window "@get('/agents/sse')"}]
+        (agents-dash-fragment)]])))
 
 ;; ============================================================
 ;; Routing — called from serve.cljs router via `route?` + `handle!`.
@@ -731,6 +943,7 @@
    `seon.web.serve`'s GET branch to delegate."
   [path]
   (or (= path "/agents")
+      (= path "/agents/sse")
       (and (str/starts-with? path "/agent/")
            (> (count path) (count "/agent/")))))
 
@@ -770,19 +983,35 @@
 ;; the window collapse into one render.
 ;; ============================================================
 
+(defn- push-index!
+  "Re-render and write the `#agents-dash` morph fragment to every
+   connection watching the index. Best-effort per-connection."
+  []
+  (try
+    (let [payload (patch-fragment (agents-dash-fragment))
+          conns   (get @!sse-by-agent ::index)]
+      (doseq [{:keys [res]} conns]
+        (try (.write res payload)
+             (catch :default e
+               (log/error-console! "seon.web.inspector" "index write failed" e)))))
+    (catch :default e
+      (log/error-console! "seon.web.inspector" "push-index! threw" e))))
+
 (defonce ^:private !pending (atom {}))
 
 (defn- schedule-push! [agent-id]
   ;; First arrival in the window starts a 100ms trailing timer. Later
   ;; arrivals inside the window just keep `!pending` set; the timer's
-  ;; callback drains it.
+  ;; callback drains it. `::index` is the agents-index pseudo-agent.
   (let [was-pending? (get @!pending agent-id)]
     (swap! !pending assoc agent-id true)
     (when-not was-pending?
       (js/setTimeout
         (fn []
           (swap! !pending dissoc agent-id)
-          (push-agent! agent-id))
+          (if (= ::index agent-id)
+            (push-index!)
+            (push-agent! agent-id)))
         100))))
 
 ;; ============================================================
@@ -808,8 +1037,12 @@
         seed?    (= :substrate-seed (:seon.db/origin tx-ent))
         watching (watching-agents)
         targets  (if (or (nil? scope-id) seed?)
-                   watching
-                   (filter #(= % scope-id) watching))]
+                   (disj watching ::index)
+                   (filter #(= % scope-id) watching))
+        ;; The agents-index dashboard watches EVERY commit — its
+        ;; numbers (turns, datoms, findings) tick on any agent's work.
+        targets  (cond-> (set targets)
+                   (contains? watching ::index) (conj ::index))]
     (doseq [aid targets]
       (schedule-push! aid))))
 
@@ -861,6 +1094,24 @@
       (catch :default e
         (log/error-console! "seon.web.inspector" "initial render failed" e)))))
 
+(defn- open-index-sse!
+  "SSE stream for the `/agents` mission-control page. Registered under
+   the `::index` pseudo-agent key in the same registry; `on-tx` fans
+   every commit to it."
+  [^js req ^js res]
+  (.writeHead res 200 #js {"Content-Type"      "text/event-stream"
+                           "Cache-Control"     "no-cache"
+                           "Connection"        "keep-alive"
+                           "X-Accel-Buffering" "no"})
+  (.write res ": connected\n\n")
+  (let [conn {:id (random-uuid) :res res :opened-at (js/Date.)}]
+    (add-conn! ::index conn)
+    (.on req "close" (fn [] (remove-conn! ::index (:id conn))))
+    (try
+      (.write res (patch-fragment (agents-dash-fragment)))
+      (catch :default e
+        (log/error-console! "seon.web.inspector" "index initial render failed" e)))))
+
 (defn handle!
   "Inspector route dispatcher. Returns true if handled."
   [^js req ^js res path]
@@ -868,6 +1119,9 @@
     (= path "/agents")
     (do (write-status! res 200 "text/html; charset=utf-8" (agents-index-page))
         true)
+
+    (= path "/agents/sse")
+    (do (open-index-sse! req res) true)
 
     (str/starts-with? path "/agent/")
     (let [[agent-id rest-path] (parse-agent-id path)]

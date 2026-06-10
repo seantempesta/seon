@@ -1,8 +1,12 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
-/* Scan Clojure source files for classes */
+/* Scan Clojure source files for classes — .clj (JVM), .cljs (pod UI),
+   .cljc (shared components). The pod inspector lives in .cljs files;
+   without these globs its classes silently fall out of output.css. */
 @source "../../../src/**/*.clj";
+@source "../../../src/**/*.cljs";
+@source "../../../src/**/*.cljc";
 
 /* Custom theme tokens using Tailwind v4 @theme directive.
    Phosphor Terminal theme - warm blacks, cream text, amber accents.
@@ -20,7 +24,9 @@
 
   /* Text colors (cream, not white) */
   --color-text-50: #faf9f7;
+  --color-text-100: #ece9e3;
   --color-text-200: #d4d0c8;
+  --color-text-300: #b0aa9e;
   --color-text-400: #8c8578;
   --color-text-500: #6b6459;
 

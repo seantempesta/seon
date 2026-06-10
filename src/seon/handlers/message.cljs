@@ -83,23 +83,37 @@
         body   (or (:seon.message/content entity) "")
         at     (:seon.message/at entity)
         hops   (or (:seon.message/hops entity) 0)
+        user?      (= label "user")
         from-class (cond
-                     (= label "user")      "text-amber-400"
+                     user?                 "text-amber-400"
                      (= label "assistant") "text-text-100"
-                     :else                 "text-amber-300/80")]
+                     :else                 "text-amber-300/80")
+        ;; Chat-first: user messages are right-aligned amber-tinted
+        ;; bubbles; the agent (and other agents) answer from the left
+        ;; in warm-black bubbles. Distinct at a glance from across a
+        ;; demo room.
+        bubble-class (cond
+                       user?
+                       "ml-auto bg-amber-950/40 border border-amber-800/40"
+                       (= label "assistant")
+                       "mr-auto bg-base-900 border border-base-800"
+                       :else
+                       "mr-auto bg-base-900 border border-amber-900/50")]
     {:seon.render/hiccup
-     [:div {:class "py-1"}
-      [:div {:class "flex items-baseline gap-2 flex-wrap"}
-       [:span {:class (str "text-xs font-mono font-semibold " from-class)}
-        label]
-       (when (seq tos)
-         [:span {:class "text-xs font-mono text-text-500"}
-          (str "→ " (str/join ", " tos))])
-       (when (instance? js/Date at)
-         [:span {:class "text-xs text-text-500"} (hh-mm-ss at)])
-       (when (pos? hops)
-         [:span {:class (str "text-xs font-mono text-amber-500/90 "
-                             "border border-amber-700/50 rounded px-1")}
-          (str "hops " hops)])]
-      [:div {:class "markdown mt-0.5"
-             :data-markdown (str/trim body)}]]}))
+     [:div {:class "py-1 flex"}
+      [:div {:class (str "max-w-[85%] min-w-40 rounded px-2.5 py-1.5 "
+                         bubble-class)}
+       [:div {:class "flex items-baseline gap-2 flex-wrap"}
+        [:span {:class (str "text-xs font-mono font-semibold " from-class)}
+         label]
+        (when (seq tos)
+          [:span {:class "text-xs font-mono text-text-500"}
+           (str "→ " (str/join ", " tos))])
+        (when (instance? js/Date at)
+          [:span {:class "text-xs text-text-500"} (hh-mm-ss at)])
+        (when (pos? hops)
+          [:span {:class (str "text-xs font-mono text-amber-500/90 "
+                              "border border-amber-700/50 rounded px-1")}
+           (str "hops " hops)])]
+       [:div {:class "markdown mt-0.5"
+              :data-markdown (str/trim body)}]]]}))
