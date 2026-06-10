@@ -194,9 +194,15 @@
        (map (fn [^js d] (.-tx d)))
        (reduce max 0)))
 
-(defn- tx-agent-id
-  [db tx-eid]
-  (:seon.db/agent-id (d/entity db tx-eid)))
+(def ^:private render-cap
+  "Hard bound on non-sticky entities materialized (pulled '[*] +
+   kind-matched) per render. The inspector window shows at most
+   `default-window-size` (64) anyway — pulling EVERY entity on the
+   file-backed store made one render take 12-30s (observed live
+   2026-06-09). Sticky entities are exempt (always kept); the newest
+   `render-cap` of the rest win; older are elided (count reported via
+   `:seon.render/elided` metadata on the entities vector)."
+  100)
 
 (defn- renderable-kinds
   "Datalog-driven enumeration of every entity-shape `:seon.schema` row
@@ -234,79 +240,149 @@
             :html    (get htmls k)})
          base)))
 
+;; Single-slot cache for the schema-kind lookup tables, keyed by db
+;; value identity. `entity-primary-kind` used to run one datalog query
+;; PER ENTITY through the FilteredDB (each datom access re-runs the
+;; filter pred) — the dominant cost of an inspector render on the
+;; file-backed store. The tables derive purely from `:seon.schema`
+;; rows, which are immutable for a given db value, so one slot keyed
+;; by `identical?` is correct and survives exactly as long as the
+;; render that's using it.
+(defonce ^:private !kind-cache (atom nil))
+
+(defn- kind-tables
+  "Return `{:kinds <renderable-kinds seq> :kinds-by-kw {<kw> <info>}
+   :required-by-kind {<kw> #{<attr> …}}}` for `db`, computed once per
+   db value (single-slot identity-keyed cache)."
+  [db]
+  (let [c @!kind-cache]
+    (if (and c (identical? (:db c) db))
+      (:tables c)
+      (let [kinds    (renderable-kinds db)
+            req-rows (d/q '[:find ?key ?req
+                            :where
+                            [?s :seon.schema/key ?key]
+                            [?s :seon.schema/required-attrs ?req]]
+                          db)
+            required (reduce (fn [m [k req]]
+                               (update m k (fnil conj #{}) req))
+                             {} req-rows)
+            tables   {:kinds            kinds
+                      :kinds-by-kw      (into {} (map (juxt :kind identity) kinds))
+                      :required-by-kind required}]
+        (reset! !kind-cache {:db db :tables tables})
+        tables))))
+
 (defn- entity-primary-kind
   "Pick the most-specific `:seon.schema` kind whose required-attrs are
-   ALL present on `entity`. Uses the `:in [?req ...]` collection-
-   binding idiom — the only form that works in datahike-cljs (see
-   docs/prds/agent-runtime/research/schemas-as-queryable-data-2026-05-26.md
-   §C). The natural join on `?req` is implicit: a schema's required
-   attr matches an entity's present attr iff they share a value.
+   ALL present on `entity`. Pure in-memory subset test against the
+   per-db cached `:required-by-kind` table ([[kind-tables]]) — the
+   former per-entity datalog query was the inspector's render
+   bottleneck on the file store.
 
-   A schema 'fully matches' when its matched-count equals the cached
-   total required-count (`seon.schema/schema-required-count`). Among
-   full matches, the schema with the most required attrs wins
-   (specificity). Tie-broken alphabetically by `:seon.schema/key` for
-   stable output (research §D)."
+   A schema 'fully matches' when every required attr is present on the
+   entity. Among full matches, the schema with the most required attrs
+   wins (specificity). Tie-broken alphabetically by `:seon.schema/key`
+   for stable output (research §D)."
   [db entity]
-  (let [present (vec (filter keyword? (keys entity)))]
+  (let [present (set (filter keyword? (keys entity)))]
     (when (seq present)
-      (let [matched (d/q '[:find ?key (count ?req)
-                           :in $ [?req ...]
-                           :where
-                           [?s :seon.schema/key ?key]
-                           [?s :seon.schema/required-attrs ?req]]
-                         db present)
-            full    (filter (fn [[k matched-n]]
-                              (= matched-n
-                                 (or (schema/schema-required-count k) 0)))
-                            matched)]
+      (let [{:keys [required-by-kind]} (kind-tables db)
+            full (keep (fn [[k req]]
+                         (when (and (seq req)
+                                    (every? #(contains? present %) req))
+                           [k (count req)]))
+                       required-by-kind)]
         (when (seq full)
           (->> full
                (sort-by (juxt (comp - second) (comp str first)))
                ffirst))))))
 
-(defn- renderable-entities
-  "Enumerate all renderable entities visible to `agent-id`. Walks
-   `(d/datoms db :aevt <id-attr>)` for each kind whose schema declares
-   `:seon.render/ai`, pulls each, and attaches resolved render symbols.
+(def ^:private subsumed-kinds
+  "Kinds never shown in the chronological window — subsumed by the
+   `:seon.eval` card that created them (visible-entities step 5)."
+  #{:seon.fn :seon.schema :seon.ns})
 
-   Returns a seq of:
-     {:eid <entity-id>
-      :last-tx <tx-eid>
-      :agent-id <string-or-nil>
-      :entity <pulled-entity-map>
-      :kind <kw>
-      :render/ai <sym>}
+(defn- renderable-entities
+  "Enumerate the renderable entities visible to `agent-id`, bounded.
+
+   Phases (cheap-first so the expensive pull runs on few entities):
+     1. Walk `(d/datoms db :aevt <id-attr>)` per kind → candidate eids
+        (remembering WHICH kind's id-attr discovered each eid).
+     2. Per-eid last-tx + per-TX visibility verdict (memoized — a seed
+        tx covers hundreds of entities): visible when the tx is
+        unstamped (substrate), stamped with THIS agent, or carries
+        `:seon.db/origin :substrate-seed` (the boot seed runs inside
+        the booting agent's `with-agent` scope, so seed tx arrive
+        stamped with ANOTHER agent's id — same clause as
+        `seon.agent-view/substrate-or-mine?`; without it agents that
+        didn't run the seed lose every sticky/schema card).
+     3. Bound: sticky eids always kept; non-sticky eids discovered
+        ONLY via subsumed-kind id-attrs are dropped (visible-entities
+        drops them post-pull anyway); newest `render-cap` of the rest
+        by last-tx win, older are counted as elided.
+     4. Pull '[*] + primary-kind + ai-sym ONLY for kept rows.
+
+   Returns `{:seon.render/rows [<row> …] :seon.render/elided <int>}`
+   where each row is
+     {:eid <entity-id> :last-tx <tx-eid> :agent-id <string-or-nil>
+      :entity <pulled-entity-map> :kind <kw> :render/ai <sym>}
 
    Per-entity override: if the pulled entity carries its own
    `:seon.render/ai`, that wins over the kind's default."
   [db agent-id]
-  (let [kinds        (renderable-kinds db)
-        kinds-by-kw  (into {} (map (juxt :kind identity) kinds))
-        ;; Distinct eids across all kind indices (an entity could in
-        ;; principle carry id-attrs for multiple kinds — Phase 1c).
-        eids         (->> kinds
-                          (mapcat (fn [{:keys [id-attr]}]
-                                    (->> (d/datoms db :aevt id-attr)
-                                         (map (fn [^js d] (.-e d))))))
-                          distinct)
-        rows (for [eid eids
-                   :let [tx     (entity-last-tx db eid)
-                         tx-aid (tx-agent-id db tx)
-                         ent    (d/pull db '[*] eid)
+  (let [{:keys [kinds kinds-by-kw]} (kind-tables db)
+        ;; 1. eid → set of discovery kinds (an entity could carry
+        ;; id-attrs for multiple kinds — Phase 1c).
+        eid->kinds  (reduce (fn [m {:keys [kind id-attr]}]
+                              (reduce (fn [m ^js d]
+                                        (update m (.-e d) (fnil conj #{}) kind))
+                                      m
+                                      (d/datoms db :aevt id-attr)))
+                            {} kinds)
+        sticky-eids (into #{}
+                          (map (fn [^js d] (.-e d)))
+                          (d/datoms db :aevt :seon.sticky/position))
+        ;; 2. Per-tx meta memo — agent-id + origin judged once per tx.
+        !tx-meta    (atom {})
+        tx-meta     (fn [tx]
+                      (or (get @!tx-meta tx)
+                          (let [ent (d/entity db tx)
+                                m   {:tx-aid (:seon.db/agent-id ent)
+                                     :origin (:seon.db/origin ent)}]
+                            (swap! !tx-meta assoc tx m)
+                            m)))
+        candidates  (for [[eid disc-kinds] eid->kinds
+                          :let [tx (entity-last-tx db eid)
+                                {:keys [tx-aid origin]} (tx-meta tx)]
+                          :when (or (nil? tx-aid)
+                                    (= tx-aid agent-id)
+                                    (= :substrate-seed origin))]
+                      {:eid eid :last-tx tx :tx-aid tx-aid
+                       :disc-kinds disc-kinds})
+        ;; 3. Bound.
+        {sticky true window-cand false}
+        (group-by #(contains? sticky-eids (:eid %)) candidates)
+        window-cand (remove #(every? subsumed-kinds (:disc-kinds %))
+                            window-cand)
+        newest      (take render-cap (sort-by (comp - :last-tx) window-cand))
+        elided      (- (count window-cand) (count newest))
+        ;; 4. Materialize only the kept rows.
+        rows (for [{:keys [eid last-tx tx-aid]} (concat sticky newest)
+                   :let [ent    (d/pull db '[*] eid)
                          kind   (entity-primary-kind db ent)
                          k-info (get kinds-by-kw kind)
                          ai-sym (or (:seon.render/ai ent)
                                     (:ai k-info))]
-                   :when (and ai-sym
-                              (or (nil? tx-aid) (= tx-aid agent-id)))]
+                   :when ai-sym]
                {:eid       eid
-                :last-tx   tx
+                :last-tx   last-tx
                 :agent-id  tx-aid
                 :entity    ent
                 :kind      kind
                 :render/ai ai-sym})]
-    rows))
+    {:seon.render/rows   (vec rows)
+     :seon.render/elided elided}))
 
 (defn- sticky?
   [row]
@@ -328,9 +404,8 @@
    kind. nil if neither path yields a symbol."
   [db entity]
   (or (:seon.render/html entity)
-      (let [kinds-by-kw (into {} (map (juxt :kind identity)
-                                      (renderable-kinds db)))
-            kind        (entity-primary-kind db entity)]
+      (let [{:keys [kinds-by-kw]} (kind-tables db)
+            kind (entity-primary-kind db entity)]
         ;; NOTE: `(get kinds-by-kw kind)`, NOT `(some-> kinds-by-kw kind …)`
         ;; — the latter invokes `kind` as a fn and throws a TypeError
         ;; when entity-primary-kind returns nil (no kind matched).
@@ -342,9 +417,8 @@
    kind."
   [db entity]
   (or (:seon.render/ai entity)
-      (let [kinds-by-kw (into {} (map (juxt :kind identity)
-                                      (renderable-kinds db)))
-            kind        (entity-primary-kind db entity)]
+      (let [{:keys [kinds-by-kw]} (kind-tables db)
+            kind (entity-primary-kind db entity)]
         ;; Same nil-kind guard as entity-html-sym.
         (some-> (get kinds-by-kw kind) :ai))))
 
@@ -455,14 +529,13 @@
   [{:seon.agent/keys [id window-size] :seon.db/keys [db]}]
   (let [db    (or db @db/*conn*)
         n     (or window-size default-window-size)
-        rows  (renderable-entities db id)
+        {:seon.render/keys [rows elided]} (renderable-entities db id)
         ;; Subsumption rule (Phase 1c): entities whose primary kind is
         ;; :seon.fn / :seon.schema / :seon.ns are NOT shown in the
         ;; chronological window — they're subsumed by the :seon.eval
         ;; that created them (the (defn …) / (schema/register! …) /
         ;; (ns …) source is already shown in the eval card). They DO
         ;; appear when sticky (substrate-shipped at the front).
-        subsumed-kinds #{:seon.fn :seon.schema :seon.ns}
         {sticks true window false} (group-by sticky? rows)
         window (remove #(contains? subsumed-kinds (:kind %)) window)
         sticky-sorted (sort-prefix (or sticks []))
@@ -470,4 +543,8 @@
         window-tail   (vec (take-last n window-sorted))
         ordered       (concat sticky-sorted window-tail)
         ents          (mapv :entity ordered)]
-    {:seon.render/entities ents}))
+    ;; `:seon.render/elided` rides as metadata so the response schema
+    ;; (a plain entities vector consumed by the agent-context path and
+    ;; the inspector alike) is unchanged; the inspector surfaces it as
+    ;; an "older elided" note.
+    {:seon.render/entities (with-meta ents {:seon.render/elided elided})}))

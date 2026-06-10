@@ -160,17 +160,24 @@
    - sticky preamble entities (`:seon.sticky/position` present) — the
      `:seon.system-prompt` / `:seon.conventions` cards;
    - `:seon.schema` kind rows (`:seon.schema/key` present);
-   - `:seon.fn` / `:seon.ns` cards whose CREATION tx carries
-     `:seon.db/origin :substrate-seed` (the substrate index, seeded at
-     boot — agent-AUTHORED fns/nses have `:agent` origin and stay
-     expanded).
+   - `:seon.fn` / `:seon.ns` / `:seon.test` cards whose CREATION tx
+     carries `:seon.db/origin :substrate-seed` (the substrate index,
+     seeded at boot — agent-AUTHORED fns/nses/tests have `:agent`
+     origin and stay expanded).
    Everything else (messages, evals, agent-authored entities) is
    DYNAMIC and renders expanded."
   [db entity]
   (boolean
     (or (:seon.sticky/position entity)
         (:seon.schema/key entity)
-        (and (or (:seon.fn/name entity) (:seon.ns/name entity))
+        ;; Identity attrs per the registered schemas: :seon.fn/sym +
+        ;; :seon.test/sym (strings), :seon.ns/name (keyword). The #24
+        ;; version checked :seon.fn/name, which is not a registered
+        ;; attr — the fn clause was dead code (masked because
+        ;; non-sticky :seon.fn cards are subsumed out of the window).
+        (and (or (:seon.fn/sym entity)
+                 (:seon.ns/name entity)
+                 (:seon.test/sym entity))
              (= :substrate-seed
                 (entity-creation-origin db (:db/id entity)))))))
 
@@ -178,8 +185,9 @@
   "Short identifying name for a collapsed card's summary line."
   [entity]
   (or (some-> (:seon.schema/key entity) pr-str)
-      (some-> (:seon.fn/name entity) str)
+      (some-> (:seon.fn/sym entity) str)
       (some-> (:seon.ns/name entity) pr-str)
+      (some-> (:seon.test/sym entity) str)
       (:seon.system-prompt/id entity)
       (:seon.conventions/id entity)
       (:seon.sticky/id entity)
@@ -285,6 +293,10 @@
      :char-count (count (or text ""))
      :token-est  (or token-estimate 0)
      :html-cards cards
+     ;; render-cap overflow (seon.render/renderable-entities) — rides
+     ;; as metadata on the entities vector so the response schema is
+     ;; unchanged. Surfaced as the "older elided" note in the pane.
+     :elided    (or (:seon.render/elided (meta entities)) 0)
      :agent-tile tile
      :agent      agent
      :handler-count
@@ -418,7 +430,7 @@
       out)))
 
 (defn- html-pane-fragment
-  [agent-id {:keys [html-cards agent-tile]}]
+  [agent-id {:keys [html-cards agent-tile elided]}]
   [:div {:id (html-pane-id agent-id)
          :class "flex flex-col h-full overflow-hidden"}
    [:div {:class "px-2 py-1 text-xs font-mono text-text-400 bg-base-900 border-b border-base-800"}
@@ -438,6 +450,13 @@
       [:div {:class (str "border border-amber-700/60 rounded p-1 mb-2 "
                          "bg-base-900/60")}
        agent-tile])
+    ;; render-cap note — oldest entities beyond the bound are not
+    ;; materialized at all (seon.render/render-cap); collapsed static
+    ;; cards make them low-value, so say how many were skipped.
+    (when (and elided (pos? elided))
+      [:div {:class "text-text-500 italic text-xs font-mono px-2 py-0.5"}
+       (str "… " elided " older " (if (= 1 elided) "entity" "entities")
+            " elided")])
     (if (seq html-cards)
       (into [:div {:class "flex flex-col"}] (cards-with-separators html-cards))
       [:div {:class "text-text-500 italic p-2"}

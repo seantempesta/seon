@@ -861,7 +861,48 @@ reply ONLY with forms + `;;` comments.
 - KNOWN GAP (other lane): `seon.render/renderable-entities` re-filters by
   tx-agent-id and does NOT admit `:substrate-seed` txs, so agents that did
   not run the seed see no sticky/schema cards (`render.cljs` `:when` clause,
-  ~L302). Mirror agent-view's origin clause there.
+  ~L302). Mirror agent-view's origin clause there. → CLOSED by unit #25.
+
+### Pod perf guards — unit #25 (2026-06-10, live + browser-verified)
+
+- **datahike :trace flood KILLED**: `seon.log/quiet-library-logs!` installs a
+  trove log-fn that noops `:trace`/`:debug` from `datahike`/`konserve`/
+  `superv`/`replikativ`/`hitchhiker` namespaces (trove's CLJS console backend
+  defaults to min-level nil → per-index-node `:datahike/index-access` traces;
+  one cold-store render wrote 813 MB / 39 M lines to pod.log). Called FIRST in
+  `seon.client/-main`, before any store opens. Verified: 0 index-access lines
+  across boot + seeds + renders post-restart (was 73 at boot alone).
+- **renderable-entities origin clause** (#24's flagged gap CLOSED): the tx
+  filter now admits `:substrate-seed`-origin txs (mirrors agent-view), with a
+  per-tx verdict memo (one seed tx covers hundreds of entities). Verified
+  live cross-agent: agent A's page still shows sticky/system-prompt cards
+  after agent B's re-seed restamped their last-tx with B's agent-id.
+- **Inspector render 14.2s → ~0.5s** (curl `%{time_total}`, same-scale
+  seeded store; `ctx-preview` REPL-timed at 540ms): (a) `entity-primary-kind`
+  now does an in-memory subset test against a per-db-value cached kind table
+  (`kind-tables`, single-slot `identical?`-keyed) instead of one datalog
+  query PER ENTITY through the FilteredDB; (b) `render-cap` = 100 — sticky
+  always kept, non-sticky bounded to newest-100 by last-tx, pull '[*] runs
+  only on kept rows, non-sticky subsumed-kind (:seon.fn/:seon.schema/
+  :seon.ns) eids skipped pre-pull; elided count rides as metadata on the
+  entities vector and renders as an "… N older entities elided" note.
+- **`:seon.test` cards static**: discriminator now collapses seed-origin test
+  cards. SMELL FIXED en route: #24's clause checked `:seon.fn/name` (and the
+  plan said `:seon.test/name`) — neither is a registered attr; the real
+  identity attrs are `:seon.fn/sym` + `:seon.test/sym` (the fn clause was
+  dead code, masked by window subsumption). Verified: 154 seeded test
+  entities, sample `static? true`, 39 collapsed test cards in the live page.
+- **Session-kill verdict (#24 verifier)**: NOT reproducible post-fix.
+  `seon.inspect/visible-entities` from a REPL session returns (60 KB) and
+  the session stays healthy; a deliberate 5 MB result trips shadow's 1 MB
+  remote-print limit GRACEFULLY (`:repl/print-error!`, session survives) —
+  so payload size is NOT the killer. Best-supported hypothesis: the pre-fix
+  12-30s synchronous event-loop wedge (millions of FilteredDB konserve
+  reads) starved shadow's runtime heartbeat → runtime disconnect →
+  "unknown session" right after the call returned. The perf fixes remove
+  the wedge.
+- Pod restarted (pre-demo, required for the boot-time log gate); suite
+  `bin/test-cljs` 287/1066/2 — the 2 = the documented ALS fails. 0 warnings.
 
 ### Web UI status (2026-06-09 — FIXED + browser-verified)
 

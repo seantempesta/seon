@@ -64,7 +64,9 @@
     [cljs.reader :as edn]
     [clojure.string :as str]
     [seon.platform :as platform]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [taoensso.trove :as trove]
+    [taoensso.trove.console :as trove-console]))
 
 ;; ============================================================
 ;; Console output — structured, grep-friendly stdout/stderr lines.
@@ -110,6 +112,41 @@
                :warn  js/console.warn
                js/console.log)]
     (sink line)))
+
+;; ============================================================
+;; Library log gate — datahike-cljs (and konserve) log through the
+;; taoensso.trove facade (via replikativ.logging). Trove's CLJS console
+;; backend defaults to min-level nil, so datahike's PER-INDEX-NODE
+;; `(log/trace :datahike/index-access …)` (persistent_set.cljc:343)
+;; floods stdout on every uncached store read — observed live
+;; 2026-06-09: logs/pod.log hit 813 MB / 39 M lines during one
+;; inspector render against the cold file store. Gate trace/debug from
+;; the replikativ stack to noop; info/warn/error still pass. Seon's own
+;; logging does NOT route through trove (it uses [[console!]] below),
+;; so this gate affects library logs only.
+;; ============================================================
+
+(def ^:private quiet-ns-prefixes
+  ["datahike" "konserve" "superv" "replikativ" "hitchhiker"])
+
+(defn- noisy-lib-ns?
+  [ns-str]
+  (boolean (some #(str/starts-with? ns-str %) quiet-ns-prefixes)))
+
+(defn quiet-library-logs!
+  "Install a trove log-fn that drops `:trace`/`:debug` calls from the
+   replikativ stack (datahike, konserve, superv, hitchhiker) while
+   passing everything else to the default console backend. Idempotent;
+   call once at pod boot (seon.client/-main)."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (let [base (trove-console/get-log-fn)]
+    (trove/set-log-fn!
+      (fn [ns* coords level id lazy_]
+        (when-not (and (contains? #{:trace :debug} level)
+                       (noisy-lib-ns? (str ns*)))
+          (base ns* coords level id lazy_)))))
+  nil)
 
 (defn error-console!
   "stderr log line — boot errors, request failures, anything you want

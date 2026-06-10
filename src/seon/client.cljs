@@ -1432,6 +1432,11 @@
                              (or (.-message err) err)))))
 
 (defn -main [& _args]
+  ;; FIRST: gate datahike-cljs/konserve trace+debug (per-index-node
+  ;; `:datahike/index-access` traces flooded pod.log to 813 MB on one
+  ;; cold-store inspector render, 2026-06-09). Must run before the
+  ;; smoke test / start-agent! open any store.
+  (log/quiet-library-logs!)
   (install-process-safety-net!)
   (log/info-console! "seon.client" "-main boot" {:boot-at (:boot-at @!state)})
   ;; Phase A item 7+8 — install Malli instrumentation. Collects every
