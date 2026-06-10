@@ -2,7 +2,8 @@
 ;; bar (PRD §1). Agent A researches + stores findings; fresh agent B is
 ;; asked a RELATED question on the SAME store — no fixtures, A's output
 ;; IS B's fixture (the accumulation thesis). The pass bar: B's FIRST
-;; eval consults the stored :kb.finding rows before any repo search.
+;; eval consults the stored my.kb.* knowledge rows before any repo
+;; search.
 ;; Run 7's agent #2 answered RIGHT while behaving WRONG (re-derived a
 ;; stored answer in a flawless 70s pipeline) — consults-findings is
 ;; therefore graded mechanically, SEPARATE from the judged answer
@@ -11,7 +12,7 @@
 ;; DEEPSEEK TIER — costs real money. The driver refuses to run it
 ;; unless called with {:seon.gym/allow-paid? true} + DEEPSEEK_API_KEY.
 {:seon.gym.scenario/id     :s12-run8-two-agent-consultation
- :seon.gym.scenario/doc    "RUN 8: agent A researches transact-time schema validation and stores findings; fresh agent B (same store) must CONSULT those findings FIRST for a related question, then reply. Known-RED on consults-findings until #26 lands (catalog §6) — that is the point."
+ :seon.gym.scenario/doc    "RUN 8: agent A researches transact-time schema validation and stores my.kb knowledge rows; fresh agent B (same store) must CONSULT those rows FIRST for a related question, then reply."
  :seon.gym.scenario/tier   :deepseek
  :seon.gym.scenario/status :active
  :seon.gym.scenario/axes   [:sees-question :searches-first :consults-findings
@@ -25,12 +26,14 @@
  [{:seon.gym.predicate/id     :a-stored-at-least-two-findings-with-provenance
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :stores-proactively
+   ;; shape-agnostic on the DOMAIN attr (the agent designs its own
+   ;; my.kb.<domain> schema) — the SHARED provenance attrs are the
+   ;; predictable storage signature.
    :seon.gym.predicate/query  [:find ?f
                                :where
-                               [?f :kb.finding/claim _]
-                               [?f :kb.finding/source-path _]
-                               [?f :kb.finding/line _]
-                               [?f :kb.finding/confidence _]]
+                               [?f :my.kb/source-path _]
+                               [?f :my.kb/source-line _]
+                               [?f :my.kb/confidence _]]
    :seon.gym.predicate/expect [:count>= 2]}
   {:seon.gym.predicate/id      :a-searched-the-repo
    :seon.gym.predicate/kind    :eval-count-matching
@@ -43,7 +46,7 @@
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/agent   :b
    :seon.gym.predicate/axis    :consults-findings
-   :seon.gym.predicate/pattern "kb\\.finding"}
+   :seon.gym.predicate/pattern "my\\.kb\\.|my\\."}
   ;; "B sent a message onward" — from B with hops>0 (replies to the
   ;; user carry waking-hops+1; the turn-log self-folds carry 0). NOT
   ;; the user-entity join: the datahike-cljs engine mis-binds queries

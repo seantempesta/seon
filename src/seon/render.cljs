@@ -169,24 +169,15 @@
 ;; the agent-id stamped on each entity's most-recent assertion. Without
 ;; an agent-id stamp the entity is substrate-wide (always visible).
 ;;
-;; Sticky entities (`:seon.sticky/position :prefix`) are always
-;; included and sorted by `:seon.sticky/order` (sparse int, manual).
 ;; The window is "last N renderable entities by tx-time" with N
 ;; defaulting to 64 (agent override: `:seon.agent/window-size`).
+;; (The `:seon.sticky` prefix-pinning machinery was DELETED 2026-06-10
+;; with the sticky preamble — `my.kb.instruction` rows rendered by the
+;; agent's `:instructions` context section superseded it.)
 ;;
 ;; Token budget is a coarse char-count heuristic for v0 (4 chars ≈ 1
 ;; token). Replace with a real tokenizer when measured.
 ;; ============================================================
-
-(schema/register! :seon.sticky/position [:enum :prefix :suffix])
-(schema/register! :seon.sticky/order    :int)
-(schema/register! :seon.sticky/id       [:string {:seon.db/identity true}])
-
-(schema/register! :seon.sticky
-  [:map {:seon.db/entity true}
-   [:seon.sticky/id       :seon.sticky/id]
-   [:seon.sticky/position {:optional true} :seon.sticky/position]
-   [:seon.sticky/order    {:optional true} :seon.sticky/order]])
 
 (schema/register! :seon.agent/window-size [:int {:min 1 :max 512}])
 
@@ -201,13 +192,13 @@
        (reduce max 0)))
 
 (def ^:private render-cap
-  "Hard bound on non-sticky entities materialized (pulled '[*] +
-   kind-matched) per render. The inspector window shows at most
+  "Hard bound on entities materialized (pulled '[*] + kind-matched)
+   per render. The inspector window shows at most
    `default-window-size` (64) anyway — pulling EVERY entity on the
    file-backed store made one render take 12-30s (observed live
-   2026-06-09). Sticky entities are exempt (always kept); the newest
-   `render-cap` of the rest win; older are elided (count reported via
-   `:seon.render/elided` metadata on the entities vector)."
+   2026-06-09). The newest `render-cap` win; older are elided (count
+   reported via `:seon.render/elided` metadata on the entities
+   vector)."
   100)
 
 (defn- renderable-kinds
@@ -338,11 +329,11 @@
         the booting agent's `with-agent` scope, so seed tx arrive
         stamped with ANOTHER agent's id — same clause as
         `seon.agent-view/substrate-or-mine?`; without it agents that
-        didn't run the seed lose every sticky/schema card).
-     3. Bound: sticky eids always kept; non-sticky eids discovered
-        ONLY via subsumed-kind id-attrs are dropped (visible-entities
-        drops them post-pull anyway); newest `render-cap` of the rest
-        by last-tx win, older are counted as elided.
+        didn't run the seed lose every schema card).
+     3. Bound: eids discovered ONLY via subsumed-kind id-attrs are
+        dropped (visible-entities drops them post-pull anyway); newest
+        `render-cap` of the rest by last-tx win, older are counted as
+        elided.
      4. Pull '[*] + primary-kind + ai-sym ONLY for kept rows.
 
    Returns `{:seon.render/rows [<row> …] :seon.render/elided <int>}`
@@ -370,9 +361,6 @@
                                       m
                                       (d/datoms db :aevt id-attr)))
                             {} kinds)
-        sticky-eids (into #{}
-                          (map (fn [^js d] (.-e d)))
-                          (d/datoms db :aevt :seon.sticky/position))
         ;; 2. Per-tx meta memo — agent-id + origin judged once per tx.
         !tx-meta    (atom {})
         tx-meta     (fn [tx]
@@ -391,14 +379,12 @@
                       {:eid eid :last-tx tx :tx-aid tx-aid
                        :disc-kinds disc-kinds})
         ;; 3. Bound.
-        {sticky true window-cand false}
-        (group-by #(contains? sticky-eids (:eid %)) candidates)
         window-cand (remove #(every? subsumed-kinds (:disc-kinds %))
-                            window-cand)
+                            candidates)
         newest      (take render-cap (sort-by (comp - :last-tx) window-cand))
         elided      (- (count window-cand) (count newest))
         ;; 4. Materialize only the kept rows.
-        rows (for [{:keys [eid last-tx tx-aid]} (concat sticky newest)
+        rows (for [{:keys [eid last-tx tx-aid]} newest
                    :let [ent    (d/pull db '[*] eid)
                          kind   (entity-primary-kind db ent)
                          k-info (get kinds-by-kw kind)
@@ -413,16 +399,6 @@
                 :render/ai ai-sym})]
     {:seon.render/rows   (vec rows)
      :seon.render/elided elided}))
-
-(defn- sticky?
-  [row]
-  (= :prefix (:seon.sticky/position (:entity row))))
-
-(defn- sort-prefix
-  [rows]
-  (sort-by (juxt #(or (:seon.sticky/order (:entity %)) 0)
-                 :last-tx)
-           rows))
 
 (defn- sort-window
   [rows]
@@ -546,11 +522,9 @@
 
    1. Query all entities carrying `:seon.render/ai` visible to the agent
       (substrate or own tx).
-   2. Split into prefix-sticky and window.
-   3. Sort prefix by `:seon.sticky/order` then tx-time; window by tx-time
-      (oldest first).
-   4. Take last N of window where N = `:seon.agent/window-size` (default 64).
-   5. Subsumed kinds (:seon.fn/:seon.schema/:seon.ns) drop from the window
+   2. Sort by tx-time (oldest first).
+   3. Take last N where N = `:seon.agent/window-size` (default 64).
+   4. Subsumed kinds (:seon.fn/:seon.schema/:seon.ns) drop from the window
       (shown inside their :seon.eval card instead).
 
    Returns `{:seon.render/entities [<entity-map> ...]}` in render order."
@@ -564,15 +538,11 @@
         ;; :seon.fn / :seon.schema / :seon.ns are NOT shown in the
         ;; chronological window — they're subsumed by the :seon.eval
         ;; that created them (the (defn …) / (schema/register! …) /
-        ;; (ns …) source is already shown in the eval card). They DO
-        ;; appear when sticky (substrate-shipped at the front).
-        {sticks true window false} (group-by sticky? rows)
-        window (remove #(contains? subsumed-kinds (:kind %)) window)
-        sticky-sorted (sort-prefix (or sticks []))
+        ;; (ns …) source is already shown in the eval card).
+        window        (remove #(contains? subsumed-kinds (:kind %)) rows)
         window-sorted (->> (or window []) sort-window vec)
         window-tail   (vec (take-last n window-sorted))
-        ordered       (concat sticky-sorted window-tail)
-        ents          (mapv :entity ordered)]
+        ents          (mapv :entity window-tail)]
     ;; `:seon.render/elided` rides as metadata so the response schema
     ;; (a plain entities vector consumed by the agent-context path and
     ;; the inspector alike) is unchanged; the inspector surfaces it as

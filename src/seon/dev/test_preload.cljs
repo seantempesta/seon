@@ -46,6 +46,11 @@
     ;; seon.agent.search (2026-06-09): the exemplar npm-package wrapper —
     ;; ripgrep envelope contract, seon.agent.fs allowlist gating, truncation.
     [seon.agent.search-test]
+    ;; my.kb scaffold (V3-B, 2026-06-10): provenance shapes registered
+    ;; once + my.kb.instruction seed/section/edit-by-transact contract.
+    ;; Required here so the deftest-vars roster carries my.kb-test and
+    ;; its full source renders as the exemplar test sibling.
+    [my.kb-test]
     ;; Boot-time test indexing (unit #23 fix b): this preload's require
     ;; closure IS the pod's test roster, so the deftest-vars macro below
     ;; can see every deftest var — seon.client (compiled before the test

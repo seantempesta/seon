@@ -48,7 +48,8 @@
     ;; :seon.ns rows (full file text) via client/index-tests, the same
     ;; mechanism the pod's preload-driven boot uses.
     [seon.agent.search-test]
-    [seon.agent.todo-test]))
+    [seon.agent.todo-test]
+    [my.kb-test]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fixture — a fresh conn seeded with one agent + session + turns. Returns a
@@ -137,6 +138,9 @@
   []
   (vec
     (concat
+      ;; the user entity + the my.kb.instruction guidance rows
+      ;; (drives the :instructions section)
+      (client/seed-substrate!)
       ;; the introspection-indexed core-fn :seon.ns + :seon.fn rows
       ;; (drives capabilities)
       (client/index-substrate!)
@@ -154,7 +158,8 @@
       ;; test-sibling blocks.
       (client/index-tests
         [#'seon.agent.search-test/match-found-with-path-line-text
-         #'seon.agent.todo-test/the-store-retrieve-arc-with-resume]))))
+         #'seon.agent.todo-test/the-store-retrieve-arc-with-resume
+         #'my.kb-test/instructions-are-runtime-editable-by-transact]))))
 
 (defn- with-seeded-conn
   "Open a fresh conn, seed it (optionally with `extra-evals` on turn 2),
@@ -210,14 +215,15 @@
                   (agent/assemble-context {:seon.db/db db :seon.agent/id agent-id})]
               (is (pos? (count text))
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
-              (is (= [:system :capabilities :exemplars :schema-catalog
-                      :functions-catalog :namespace-context :warnings
-                      :open-todos :transcript :prompt]
+              (is (= [:system :instructions :capabilities :exemplars
+                      :schema-catalog :functions-catalog :namespace-context
+                      :warnings :open-todos :transcript :prompt]
                      sections)
                   "the substrate-default section names, in order
-                   (static→dynamic): system, capabilities, exemplars,
-                   schema-catalog, functions-catalog, namespace-context,
-                   warnings, open-todos, transcript, prompt"))))
+                   (static→dynamic): system, instructions, capabilities,
+                   exemplars, schema-catalog, functions-catalog,
+                   namespace-context, warnings, open-todos, transcript,
+                   prompt"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -351,10 +357,10 @@
   (let [names (mapv :seon.ctx/name (agent/substrate-default-ctx))]
     (is (some #{:capabilities} names)
         "substrate-default-ctx contains the :capabilities section")
-    (is (= [:system :capabilities :exemplars]
-           (vec (take 3 names)))
-        ":capabilities renders right after :system, :exemplars right after
-         (both fully byte-stable — the cache prefix)")
+    (is (= [:system :instructions :capabilities :exemplars]
+           (vec (take 4 names)))
+        ":instructions (the my.kb.instruction rows) right after :system,
+         then :capabilities and :exemplars (the cache prefix)")
     (is (not (contains? (set names) :root-pull))
         "no :root-pull section in the default layout — the amplifier is gone")))
 
@@ -413,18 +419,21 @@
                   "no double-wrapped arglists render")
               (is (not (re-find #"\(seon\.db/(pull|entity) \(\)\)" cap))
                   "no empty-arglists `(sym ())` render for pull/entity")
-              ;; #26 — consult-before-research is the taught FIRST MOVE,
-              ;; modeled as a copyable worked query, not prose.
-              (is (str/includes? cap "CONSULT FINDINGS → SEARCH → READ")
-                  "recipe leads with consulting stored findings")
-              (is (str/includes? cap ":kb.finding/claim")
-                  "consult query + finding shape use multi-segment ns attrs")
-              (is (str/includes? cap ":kb.finding/source-path")
-                  "storage example models the multi-segment namespace")
+              ;; V3-B — consult-before-research is an INSTRUCTION row;
+              ;; capabilities keeps the HOW: a copyable catalog-driven
+              ;; my.kb consult query + the my.kb.<domain> storage shape.
+              (is (str/includes? cap "CONSULT KNOWLEDGE → SEARCH → READ")
+                  "recipe leads with consulting stored knowledge")
+              (is (str/includes? cap ":my.kb.codebase.fn/claim")
+                  "storage example models a my.kb.<domain> schema")
+              (is (str/includes? cap ":my.kb/source-path")
+                  "storage example references the SHARED provenance attrs")
               (is (str/includes? cap "single-segment namespace")
                   "the multi-segment rule is EXPLAINED, not just modeled")
-              (is (str/includes? cap "STORE PROACTIVELY")
-                  "store-proactively nudge present — persist by default")
+              (is (not (str/includes? cap "kb.finding"))
+                  "zero kb.finding occurrences — the generic taught shape is dead")
+              (is (not (str/includes? cap "STORE PROACTIVELY"))
+                  "store-proactively prose moved to the my.kb.instruction row")
               ;; #26 — concise message!/reply! return modeled in the example.
               (is (str/includes? cap ":seon.agent.message/ok? true")
                   "reply! example shows the concise return shape")
@@ -452,8 +461,9 @@
   (let [names (mapv :seon.ctx/name (agent/substrate-default-ctx))]
     (is (some #{:schema-catalog} names)
         "substrate-default-ctx contains the :schema-catalog section")
-    (is (= [:system :capabilities :exemplars :schema-catalog :functions-catalog]
-           (vec (take 5 names)))
+    (is (= [:system :instructions :capabilities :exemplars
+            :schema-catalog :functions-catalog]
+           (vec (take 6 names)))
         ":schema-catalog and :functions-catalog sit between :exemplars
          (static) and :namespace-context (the deep per-ns view)")))
 
@@ -602,9 +612,9 @@
   (let [names (mapv :seon.ctx/name (agent/substrate-default-ctx))]
     (is (some #{:functions-catalog} names)
         "substrate-default-ctx contains the :functions-catalog section")
-    (is (= [:system :capabilities :exemplars :schema-catalog
+    (is (= [:system :instructions :capabilities :exemplars :schema-catalog
             :functions-catalog :namespace-context]
-           (vec (take 6 names)))
+           (vec (take 7 names)))
         ":functions-catalog sits right after :schema-catalog and before
          :namespace-context")))
 
@@ -742,17 +752,32 @@
                   "todo's test sibling renders a full deftest body")
               (is (not (str/includes? txt "<exemplar ns=\"seon.agent.fs\">"))
                   "seon.agent.fs rotated OUT of the exemplar set (context-v3 unit 2)")
-              ;; Deterministic order: search → search-test → todo → todo-test
-              ;; (alphabetical by subject, test sibling after its subject).
-              (let [i-search (str/index-of txt "<exemplar ns=\"seon.agent.search\">")
-                    i-stest  (str/index-of txt "<exemplar ns=\"seon.agent.search-test\">")
-                    i-todo   (str/index-of txt "<exemplar ns=\"seon.agent.todo\">")
-                    i-ttest  (str/index-of txt "<exemplar ns=\"seon.agent.todo-test\">")]
-                (is (and i-search i-stest i-todo i-ttest)
-                    "all four exemplar blocks present")
-                (is (< i-search i-stest i-todo i-ttest)
-                    "render order is search → search-test → todo → todo-test
-                     (roots sort by name; subjects first, tests after their subject)")))))
+              ;; V3-B: the my.kb scaffold renders at full source too —
+              ;; root (provenance shapes + ns-doc guidance), the
+              ;; my.kb.instruction worked domain, and the test sibling.
+              (is (str/includes? txt "(ns my.kb\n")
+                  "my.kb's real ns form renders (the fn-less root)")
+              (is (str/includes? txt "(ns my.kb.instruction")
+                  "my.kb.instruction (the worked domain) renders")
+              (is (str/includes? txt "(deftest instructions-are-runtime-editable-by-transact")
+                  "my.kb's test sibling renders a full deftest body")
+              ;; Deterministic order: my.kb → my.kb-test → my.kb.instruction
+              ;; → search → search-test → todo → todo-test (alphabetical by
+              ;; subject, test sibling after its subject).
+              (let [idx      (fn [ns-str]
+                               (str/index-of txt (str "<exemplar ns=\"" ns-str "\">")))
+                    i-kb     (idx "my.kb")
+                    i-kbtest (idx "my.kb-test")
+                    i-instr  (idx "my.kb.instruction")
+                    i-search (idx "seon.agent.search")
+                    i-stest  (idx "seon.agent.search-test")
+                    i-todo   (idx "seon.agent.todo")
+                    i-ttest  (idx "seon.agent.todo-test")]
+                (is (and i-kb i-kbtest i-instr i-search i-stest i-todo i-ttest)
+                    "all seven exemplar blocks present")
+                (is (< i-kb i-kbtest i-instr i-search i-stest i-todo i-ttest)
+                    "render order is alphabetical by subject, test sibling
+                     after its subject")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

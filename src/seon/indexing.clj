@@ -50,9 +50,15 @@
   [d]
   (merge (:meta d) (select-keys d [:private :fn-var :file :line :test])))
 
-(defn- seon-ns? [ns-sym]
+(defn- indexed-ns?
+  "Namespaces the boot indexers cover: the substrate (`seon.*`) plus the
+   compiled `my.*` scaffold (`my.kb`, `my.kb.instruction`, ... -- the
+   human's world ships indexed like substrate; runtime-authored `my.*`
+   nses are teed by eval, not by this compile-time roster)."
+  [ns-sym]
   (let [s (str ns-sym)]
-    (or (= s "seon") (.startsWith s "seon."))))
+    (or (= s "seon") (.startsWith s "seon.")
+        (= s "my")   (.startsWith s "my."))))
 
 (defmacro specced-fn-vars
   "Expand to a vector of `#'`-literals: every PUBLIC fn var carrying
@@ -64,7 +70,7 @@
         reach (transitive-requires nss (-> &env :ns :name))
         syms  (sort
                 (for [n     reach
-                      :when (seon-ns? n)
+                      :when (indexed-ns? n)
                       [_ d] (:defs (get nss n))
                       :let  [m (def-meta d)]
                       :when (and (:fn-var m)
@@ -85,7 +91,7 @@
         reach (transitive-requires nss (-> &env :ns :name))
         syms  (sort
                 (for [n     reach
-                      :when (seon-ns? n)
+                      :when (indexed-ns? n)
                       [_ d] (:defs (get nss n))
                       :let  [m (def-meta d)]
                       :when (and (some? (:test m))

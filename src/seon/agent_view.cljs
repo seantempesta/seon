@@ -22,7 +22,7 @@
    - no `:seon.db/agent-id` stamped (substrate tx), OR
    - stamped with this agent's id, OR
    - `:seon.db/origin :substrate-seed` — boot-seed tx (entity-kind
-     `:seon.schema` rows, sticky preamble, substrate `:seon.ns`/
+     `:seon.schema` rows, my.kb.instruction rows, substrate `:seon.ns`/
      `:seon.fn` index). These are SUBSTRATE data by definition, but
      `seon.client/start-agent!` runs the seed inside the booting
      agent's `with-agent` scope, so they arrive agent-stamped. Without
@@ -45,7 +45,7 @@
 (defn agent-view
   "Return a filtered db value that scopes reads to `agent-id` plus
    substrate-wide tx. Substrate tx are never filtered out (they carry
-   shared schema, sticky entities, handler registrations).
+   shared schema, instruction rows, handler registrations).
 
    Map-in, map-out (returns the db value under `:seon.db/db`)."
   {:malli/schema [:=> [:cat [:map [:seon.agent/id :string]

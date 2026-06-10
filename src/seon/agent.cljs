@@ -1620,7 +1620,7 @@
 
 ;; ------------------------------------------------------------
 ;; capabilities-section — the "## What you can do" worked-examples
-;; block the system-prompt sticky promises. DERIVED, never hardcoded:
+;; block. DERIVED, never hardcoded:
 ;; the core seon.db API fns are persisted as :seon.fn entities
 ;; (seeded by seon.client/index-substrate!), each carrying the real
 ;; :seon.fn/sym + :seon.fn/arglists + :seon.fn/doc. We render those
@@ -1703,8 +1703,8 @@
       [(str "(" sym " …)")])))
 
 (defn capabilities-section
-  "Render the `## What you can do` block the system-prompt sticky
-   promises. DERIVED from the persisted core `:seon.fn` entities —
+  "Render the `## What you can do` worked-examples block.
+   DERIVED from the persisted core `:seon.fn` entities —
    each fn's `:seon.fn/sym` + `:seon.fn/arglists` (the map-in shape) +
    a one-line `:seon.fn/doc`. Includes one fully-worked `transact!`
    example so the positional-call mistake is impossible to make from
@@ -1746,10 +1746,10 @@
            "next query misses half the rows.\n\n"
            "Use DEEP, namespaced attrs — the keyword namespace must have at\n"
            "least TWO dot-separated segments, like a real code namespace:\n"
-           "  :kb.finding/claim   YES — multi-segment namespace\n"
-           "  :finding/claim      NO  — single-segment namespace, same\n"
-           "                            violation as a bare key\n"
-           "  :title              NO  — bare key\n"
+           "  :my.kb.codebase/claim   YES — multi-segment namespace\n"
+           "  :finding/claim          NO  — single-segment namespace, same\n"
+           "                                violation as a bare key\n"
+           "  :title                  NO  — bare key\n"
            "Common shapes:\n"
            "  - natural-key identity (upsert): [:string {:seon.db/identity true}]\n"
            "  - a reference to another entity: :seon.db/ref\n"
@@ -1757,20 +1757,20 @@
            "  - numbers: :int for counts/ids, :double for measures —\n"
            "    :number is NOT a type (the transact! gate will tell you).\n\n"
            "  ;; 1. register the attrs (do this ONCE per attr)\n"
-           "  (seon.schema/register! :kb.doc/path  [:string {:seon.db/identity true}])\n"
-           "  (seon.schema/register! :kb.doc/title :string)\n"
-           "  (seon.schema/register! :kb.doc/tags  [:vector :keyword])\n\n"
-           "  ;; 2. NOW transact data using those attrs — upserts by :kb.doc/path\n"
+           "  (seon.schema/register! :my.kb.doc/path  [:string {:seon.db/identity true}])\n"
+           "  (seon.schema/register! :my.kb.doc/title :string)\n"
+           "  (seon.schema/register! :my.kb.doc/tags  [:vector :keyword])\n\n"
+           "  ;; 2. NOW transact data using those attrs — upserts by :my.kb.doc/path\n"
            "  (seon.db/transact!\n"
            "    {:seon.db/tx-data\n"
-           "     [{:kb.doc/path  \"docs/seon/_dashboard.md\"\n"
-           "       :kb.doc/title \"Dashboard\"\n"
-           "       :kb.doc/tags  [:index :dashboard]}]})\n\n"
+           "     [{:my.kb.doc/path  \"docs/seon/_dashboard.md\"\n"
+           "       :my.kb.doc/title \"Dashboard\"\n"
+           "       :my.kb.doc/tags  [:index :dashboard]}]})\n\n"
            "  ;; 3. read it back\n"
            "  (seon.db/query {:seon.db/query\n"
            "                  '[:find ?path ?title\n"
-           "                    :where [?e :kb.doc/path ?path]\n"
-           "                           [?e :kb.doc/title ?title]]})\n\n"
+           "                    :where [?e :my.kb.doc/path ?path]\n"
+           "                           [?e :my.kb.doc/title ?title]]})\n\n"
            "Totals and aggregates: compute IN the query over the STORED data —\n"
            "(sum ?v), (count ?e), (max ?v) — never by hand from your own turn:\n"
            "  (seon.db/query {:seon.db/query\n"
@@ -1784,7 +1784,7 @@
            "When a query comes back EMPTY (#{}), suspect a misspelled attribute\n"
            "before you conclude there's no data. The usual cause is a shortened\n"
            "namespace: copy the attribute keyword EXACTLY as the schema-catalog\n"
-           "shows it (if the catalog lists :seon.kb.doc/path, query that — not\n"
+           "shows it (if the catalog lists :my.kb.doc/path, query that — not\n"
            ":kb.doc/path). Fix the keyword and re-run.\n\n"
            "### Reading one entity: pull and entity\n\n"
            "The db ops are datahike-compatible — map-in (shown) and positional\n"
@@ -1814,22 +1814,18 @@
            "Paths are ABSOLUTE, real machine paths — there is no virtual\n"
            "root or chroot. When your human asks where something is,\n"
            "answer with the real path exactly as the substrate returns it.\n\n"
-           "The recipe is CONSULT FINDINGS → SEARCH → READ PRECISELY (never\n"
-           "walk + guess). Your FIRST move on ANY repo question is step 0 —\n"
-           "prior agents already answered many questions and stored the\n"
-           "answers; re-deriving one is wasted turns:\n\n"
-           "  ;; 0. FIRST: query stored findings on the topic. The\n"
-           "  ;;    schema-catalog's domain-attrs block shows the EXACT\n"
-           "  ;;    finding attrs that exist — query those keywords.\n"
+           "The recipe is CONSULT KNOWLEDGE → SEARCH → READ PRECISELY (never\n"
+           "walk + guess). Step 0 is the consult-before-research instruction:\n"
+           "the schema-catalog lists the my.kb.* (and other my.*) attrs that\n"
+           "exist — datalog those EXACT keywords; there is no consult API:\n\n"
+           "  ;; 0. e.g. the catalog shows :my.kb.codebase/claim et al:\n"
            "  (seon.db/query {:seon.db/query\n"
-           "                  '[:find ?q ?claim ?path ?line\n"
-           "                    :where [?f :kb.finding/question    ?q]\n"
-           "                           [?f :kb.finding/claim       ?claim]\n"
-           "                           [?f :kb.finding/source-path ?path]\n"
-           "                           [?f :kb.finding/line        ?line]]})\n"
+           "                  '[:find ?claim ?path ?line\n"
+           "                    :where [?f :my.kb.codebase/claim ?claim]\n"
+           "                           [?f :my.kb/source-path    ?path]\n"
+           "                           [?f :my.kb/source-line    ?line]]})\n"
            "  ;; A hit IS the answer, with provenance — cite it (re-read the\n"
-           "  ;; source line only if you must verify). Search the repo ONLY\n"
-           "  ;; when no stored finding covers the question.\n"
+           "  ;; source line only if you must verify).\n"
            "  ;; NOTE: only built-in predicates work inside :where (=, <,\n"
            "  ;; get-else, missing?) — clojure.string/* fns DO NOT resolve\n"
            "  ;; in a query. Fetch the rows plain, filter in code after.\n\n"
@@ -1845,40 +1841,31 @@
            "A denial is a VALUE, not a crash — {:seon.agent.fs/ok? false\n"
            ":seon.agent.fs/error \"…\"} tells you whether the path is out of scope\n"
            "or the fs is read-only. Read the error; it says what to do.\n\n"
-           "### Storing what you learn — the canonical finding shape\n\n"
-           "STORE PROACTIVELY: whenever you VERIFY a non-trivial result —\n"
-           "an answer dug out of the repo, a computed fact, a confirmed\n"
-           "behavior — store it as a finding by default, without being\n"
-           "asked. A finding nobody stored is research the next agent (or\n"
-           "you, next session) pays for again.\n\n"
-           "Use these EXACT attrs (check the schema-catalog first: if\n"
-           "finding attrs already exist there, REUSE those exact keywords —\n"
-           "NEVER invent a parallel shape):\n\n"
-           "  (seon.schema/register! :kb.finding/question    :string)\n"
-           "  (seon.schema/register! :kb.finding/claim       :string)\n"
-           "  (seon.schema/register! :kb.finding/source-path :string)\n"
-           "  (seon.schema/register! :kb.finding/line        :int)\n"
-           "  (seon.schema/register! :kb.finding/confidence  [:enum :verified :inferred])\n\n"
+           "### Storing what you learn — design a my.kb.<domain> schema\n\n"
+           "Knowledge is SCHEMA'D DATA in my.kb.<domain> namespaces, one REAL\n"
+           "schema per knowledge kind (see the my.kb exemplar above; the\n"
+           "store-proactively instruction says WHEN). Check the schema-catalog\n"
+           "first: if attrs for this kind already exist, REUSE those exact\n"
+           "keywords — NEVER invent a parallel shape. Reference the shared\n"
+           ":my.kb/* provenance attrs (already registered) instead of\n"
+           "re-inventing source-path/line/confidence per domain:\n\n"
+           "  ;; e.g. verified facts about fns in a codebase:\n"
+           "  (seon.schema/register! :my.kb.codebase.fn/name  [:string {:seon.db/identity true}])\n"
+           "  (seon.schema/register! :my.kb.codebase.fn/claim :string)\n\n"
            "  (seon.db/transact!\n"
            "    {:seon.db/tx-data\n"
-           "     [{:kb.finding/question    \"how does transact! validate schemas?\"\n"
-           "       :kb.finding/claim       \"seon.db/transact! Malli-validates every entity before the tx reaches datahike\"\n"
-           "       :kb.finding/source-path \"src/seon/db.cljs\"\n"
-           "       :kb.finding/line        803\n"
-           "       :kb.finding/confidence  :verified}]})  ; :verified = you read that line\n\n"
-           "WHY one shape: the next agent discovers your attrs in the\n"
-           "schema-catalog, CONSULTS your claims (recipe step 0) and reuses\n"
-           "them — findings compound only when everyone writes the same kind.\n\n"
+           "     [{:my.kb.codebase.fn/name  \"seon.db/transact!\"\n"
+           "       :my.kb.codebase.fn/claim \"Malli-validates every entity before the tx reaches datahike\"\n"
+           "       :my.kb/source-path       \"src/seon/db.cljs\"\n"
+           "       :my.kb/source-line       803\n"
+           "       :my.kb/confidence        :verified}]})  ; :verified = you read that line\n\n"
+           "WHY schemas, not text blobs: the next agent discovers your attrs\n"
+           "in the schema-catalog, datalogs your rows (recipe step 0) and\n"
+           "reuses them — knowledge compounds only when it is queryable.\n\n"
            "### Replying — one line, the substrate knows who asked:\n\n"
            "  (seon.agent/reply! {:seon.agent.message/content \"on it — here's what I found\"})\n"
            "  ;; => {:seon.agent.message/ok? true, :seon.agent.message/id \"MSG…\",\n"
            "  ;;     :seon.agent.message/hops 1}   ; failure → {:seon.db/ok? false …}\n\n"
-           "A turn serving a user question MUST END with reply! — as\n"
-           "non-negotiable as consult-first. Consulting, searching and\n"
-           "computing are never the end of the work: the moment you have\n"
-           "the answer (a stored finding, a query result), compose the\n"
-           "reply! in the SAME response. Research without a reply is a\n"
-           "failed turn — your human sees NOTHING until reply! lands.\n\n"
            "Messaging another agent (or an explicit target) — :seon.agent.message/to\n"
            "takes a ref or a vector of refs:\n\n"
            "  (seon.agent/message!\n"
@@ -1921,19 +1908,23 @@
    starts with `<root>.` (children ride along by default), or is the
    TEST SIBLING (`…-test`) of an included ns — see [[exemplar-ns?]].
 
-   Why these two (context-v3 unit 2): `seon.agent.search` is THE exemplar
-   npm-package wrapper (wrapper doctrine, 17 register! calls,
-   map-in/map-out request/response schemas, error envelopes);
+   Why these three: `seon.agent.search` is THE exemplar npm-package
+   wrapper (wrapper doctrine, 17 register! calls, map-in/map-out
+   request/response schemas, error envelopes);
    `seon.agent.todo` is THE store/retrieve + resume arc (register! attrs,
    error-as-value envelopes, a pure derived context view, everything
-   re-derived from the conn so a resuming agent sees its open work).
-   Their test siblings (`seon.agent.search-test`, `seon.agent.todo-test`) are the
-   model test nses. `seon.agent.fs` rotated out 2026-06-10 (it stays a core
-   taught API via the capabilities section; full-depth return is
-   V3-D/E). Lives in code as a def (same lifecycle as the build that
-   contains the source); a DB-resident override is deliberately NOT v1
-   (spec open question 3)."
-  #{"seon.agent.search" "seon.agent.todo"})
+   re-derived from the conn so a resuming agent sees its open work);
+   `my.kb` (+ child `my.kb.instruction`, V3-B) is the knowledge-base
+   scaffold — the shared `:my.kb/*` provenance shapes and the worked
+   `my.kb.<domain>` example agents copy when designing their own
+   knowledge schemas (`my.*` renders to every agent by the name rule).
+   Test siblings (`seon.agent.search-test`, `seon.agent.todo-test`,
+   `my.kb-test`) are the model test nses. `seon.agent.fs` rotated out
+   2026-06-10 (it stays a core taught API via the capabilities section;
+   full-depth return is V3-D/E). Lives in code as a def (same lifecycle
+   as the build that contains the source); a DB-resident override is
+   deliberately NOT v1 (spec open question 3)."
+  #{"seon.agent.search" "seon.agent.todo" "my.kb"})
 
 (defn- exemplar-base-name
   "The ns name with a trailing `-test` stripped — the SUBJECT ns a test
@@ -2192,8 +2183,9 @@
    not just attr names (#26 finding-salience: run 7 proved attr names in
    the catalog are discoverable but not CONSULTED — agent #2 re-derived
    a stored answer). Renders the values of every domain attr NAMED
-   `claim` (any namespace — the taught shape is :kb.finding/claim, but
-   earlier corpora used other namespaces), capped at 12 rows of ≤140
+   `claim` (any namespace — the taught shape is a claim-carrying
+   my.kb.<domain> attr like :my.kb.codebase.fn/claim, but earlier
+   corpora used other namespaces), capped at 12 rows of ≤140
    chars. Empty string when no claims exist. Pure render of the db —
    stores nothing."
   [db]
@@ -3024,27 +3016,32 @@
    per the context-render PRD (Phase 2) table:
 
      1. :system            — Seon identity + CLJS-in-Node + REPL contract (static)
-     2. :capabilities      — core API worked examples (static)
-     3. :exemplars         — FULL source of the exemplar namespaces
-                             (seon.agent.search, seon.agent.todo + test siblings),
-                             queried from :seon.ns/source; byte-stable for
-                             the pod's life (static — inside the cache prefix)
-     4. :schema-catalog    — GLOBAL catalog of every entity KIND in the
+     2. :instructions      — cluster-wide behavioral guidance: the
+                             :my.kb.instruction rows, priority-ordered
+                             (semi-static — busts only on an instruction
+                             transact; runtime-editable by anyone)
+     3. :capabilities      — core API worked examples (static)
+     4. :exemplars         — FULL source of the exemplar namespaces
+                             (seon.agent.search, seon.agent.todo, my.kb +
+                             children + test siblings), queried from
+                             :seon.ns/source; byte-stable for the pod's
+                             life (static — inside the cache prefix)
+     5. :schema-catalog    — GLOBAL catalog of every entity KIND in the
                              system (cross-ns; what DATA exists), grouped by
                              namespace with attrs + instance counts;
                              semi-static (busts only on schema register)
-     5. :functions-catalog — THIN per-ns count index of every fn defined in
+     6. :functions-catalog — THIN per-ns count index of every fn defined in
                              the system (cross-ns; what CODE exists);
                              semi-static (busts when a fn is (re)defined)
-     6. :namespace-context — `render-namespace` of required nses + own ns
+     7. :namespace-context — `render-namespace` of required nses + own ns
                              (mostly static; busts on ns edit)
-     7. :warnings          — current cross-agent problems (failed/slow evals,
+     8. :warnings          — current cross-agent problems (failed/slow evals,
                              failing tests); reactive, vanishes when fixed (dynamic)
-     8. :open-todos        — the CALLING agent's open work items
+     9. :open-todos        — the CALLING agent's open work items
                              (seon.agent.todo/open-todos-section); derived from the
                              db, vanishes when the work is done (dynamic)
-     9. :transcript        — messages + evals interleaved chronologically (dynamic)
-    10. :prompt            — `my.agent.<id>=>  ; turn N` (always changing)
+    10. :transcript        — messages + evals interleaved chronologically (dynamic)
+    11. :prompt            — `my.agent.<id>=>  ; turn N` (always changing)
 
    :exemplars sits at 22, between :capabilities (20) and :schema-catalog
    (25): system + capabilities + exemplars are all fully byte-stable while
@@ -3062,6 +3059,8 @@
   []
   [{:seon.ctx/name :system            :seon.ctx/priority 10
     :seon.ctx/fn   'seon.agent/system-section}
+   {:seon.ctx/name :instructions      :seon.ctx/priority 15
+    :seon.ctx/fn   'my.kb.instruction/instructions-section}
    {:seon.ctx/name :capabilities      :seon.ctx/priority 20
     :seon.ctx/fn   'seon.agent/capabilities-section}
    {:seon.ctx/name :exemplars         :seon.ctx/priority 22

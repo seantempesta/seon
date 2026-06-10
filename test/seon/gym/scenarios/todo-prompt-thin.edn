@@ -37,7 +37,7 @@
     :seon.gym.predicate/expect :non-empty}]}
 
  {:seon.gym.scenario/id     :stores-findings-unprompted
-  :seon.gym.scenario/doc    "TODO: a codebase question WITHOUT 'store what you find' phrasing. Pass = a :kb.finding row with provenance lands anyway (store-proactively is the default, not a request). §2 gap — storing currently happens only when asked."
+  :seon.gym.scenario/doc    "TODO: a codebase question WITHOUT 'store what you find' phrasing. Pass = a my.kb row with provenance lands anyway (store-proactively is the default, not a request). §2 gap — storing currently happens only when asked."
   :seon.gym.scenario/tier   :deepseek
   :seon.gym.scenario/status :todo
   :seon.gym.scenario/axes   [:stores-proactively :replies-honestly :terminates]
@@ -47,5 +47,5 @@
   [{:seon.gym.predicate/id     :finding-stored-without-being-asked
     :seon.gym.predicate/kind   :datalog
     :seon.gym.predicate/axis   :stores-proactively
-    :seon.gym.predicate/query  [:find ?c :where [?f :kb.finding/claim ?c]]
+    :seon.gym.predicate/query  [:find ?f :where [?f :my.kb/source-path _] [?f :my.kb/confidence _]]
     :seon.gym.predicate/expect :non-empty}]}]

@@ -98,10 +98,12 @@
     [seon.handlers.fn]
     [seon.handlers.schema]
     [seon.handlers.ns]
-    ;; P2 substrate seed — renderers + entity-shape schemas for the
-    ;; sticky preamble entities (`:seon.system-prompt`, `:seon.conventions`).
-    ;; `seed-substrate!` below transacts the actual rows.
-    [seon.handlers.system-prompt]
+    ;; The my.* scaffold — shared provenance shapes (my.kb) + the
+    ;; cluster-wide instruction rows (my.kb.instruction) that
+    ;; `seed-substrate!` below transacts. Required here so their
+    ;; register! calls run before the boot install of :my.kb/* attrs.
+    [my.kb]
+    [my.kb.instruction]
     ;; Substrate handler registration — `wake-on-message`. Required so
     ;; start-agent! can call `handler/register!` + `wake/bootstrap-schema!`
     ;; at boot. Without this, the inspector header shows "0 handlers"
@@ -416,17 +418,19 @@
    ;; broke pod boot; removing them resolves the boot error AND aligns
    ;; with the no-transient-data-in-DB rule.
 
-   ;; --- Sticky preamble (P2 substrate seed, 2026-05-27). ---
-   ;; `:seon.sticky/*` already declared (registered in seon.render).
-   ;; The two preamble kinds carry id + content; the renderer pins them
-   ;; to the front of every context via :seon.sticky/position :prefix.
-   :seon.sticky/position
-   :seon.sticky/order
-   :seon.sticky/id
-   :seon.system-prompt/id
-   :seon.system-prompt/content
-   :seon.conventions/id
-   :seon.conventions/content
+   ;; --- my.kb (knowledge-base scaffold, 2026-06-10). ---
+   ;; The shared provenance shapes (registered in my.kb) installed at
+   ;; boot so agent-designed my.kb.<domain> schemas can reference them
+   ;; before any kb tx lands, plus the my.kb.instruction first worked
+   ;; domain (cluster-wide guidance rows seeded by seed-substrate!).
+   :my.kb/source-path
+   :my.kb/source-line
+   :my.kb/verified-at
+   :my.kb/confidence
+   :my.kb.instruction/id
+   :my.kb.instruction/text
+   :my.kb.instruction/priority
+   :my.kb.instruction/applies-when
 
    ;; --- Test (Phase 2 — test capture as data) ---
    :seon.test/sym
@@ -784,15 +788,14 @@
 ;;
 ;; Per docs/prds/agent-runtime/mvp-completion-plan-2026-05-27.md §Phase 2
 ;; + research/repl-session-context-template-2026-05-26.md §5: the substrate
-;; transacts a deterministic sticky preamble (system-prompt + conventions)
-;; plus an introspection-indexed set of core fns at boot, BEFORE any agent
-;; turn. This gives the chronological renderer a stable cacheable prefix and
-;; means replay-from-tx-0 starts on a fully-seeded substrate, not mid-air.
+;; transacts the user entity + the my.kb.instruction guidance rows plus an
+;; introspection-indexed set of core fns at boot, BEFORE any agent turn —
+;; so replay-from-tx-0 starts on a fully-seeded substrate, not mid-air.
 ;;
 ;; Tx-ordering at boot (in start-agent!):
 ;;   1. Entity-schema decomposition (schema/all-entity-schemas-tx-data)
 ;;      — already shipped, Item 4 commit 35035d8.
-;;   2. seed-substrate!    — sticky preamble (system-prompt + conventions)
+;;   2. seed-substrate!    — user entity + my.kb.instruction rows
 ;;   3. index-substrate!   — :seon.ns + :seon.fn rows from REAL runtime
 ;;                           introspection (var meta + source file-read)
 ;;
@@ -800,56 +803,24 @@
 ;; audit queries can isolate seed datoms from agent-produced ones.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private default-conventions
-  "Substrate conventions the agent must know. Lives as a `:seon.conventions`
-   entity so it's queryable + rendered into every turn's context as a
-   stable cached prefix. Compact deliberately — full conventions live in
-   `docs/conventions.md` and the agent can ask for them."
-  "Conventions for the substrate:
-
-- Every public fn fully specs + validates ALL its args and its return via
-  `:malli/schema`. Two shapes: (1) map-in/map-out — one namespaced-keyword
-  map in, one out (PREFERRED for API-like fns; request + response are
-  registered Malli schemas `::foo-request` + `::foo-response`); or (2) named
-  positional — each arg a fully-namespaced-spec'd slot via Malli `:catn`
-  inside a `:=>`/`:function` schema (fine for ordinary data-processing fns and
-  for mimicking a well-known API). Every arg must be named + specced; an
-  unspecced/bare arg is the violation, not a positional one. All keys in any
-  map are fully namespaced (`:seon.db/query`, never `:query`).
-- Concrete types only. No `:any`. Use `{:optional true}` for absent
-  fields — never store nil.
-- Retraction is explicit: `[:db/retract eid :attr]`.
-- One mechanism for storing program-graph entities: the analyzer plus
-  a source string. Don't reparse with rewrite-clj; don't write parallel
-  v1/v2 versions of fns.
-- The DB is the source of truth. Don't cache atom-state that's
-  derivable from datoms.")
-
 (defn seed-substrate!
-  "Tx-data for the sticky preamble (system-prompt + conventions) plus
-   THE user entity.
-
-   The preamble rows carry `:seon.sticky/position :prefix` so the
-   chronological renderer pins them to the front regardless of tx-time
-   ordering. Identity upsert on `:seon.system-prompt/id` and
-   `:seon.conventions/id` — re-running is cheap.
+  "Tx-data for THE user entity plus the cluster-wide
+   `:my.kb.instruction` guidance rows
+   (`my.kb.instruction/seed-tx-data` — the first worked my.kb domain;
+   rendered by every agent's `:instructions` context section,
+   runtime-editable by transact).
 
    The user row is the ONE `:seon.user/id` entity every
    `:seon.agent.message/from`/`to` user-ref resolves to (identity upsert,
    idempotent — same pattern as agent entities; one human for now).
+   Instruction rows identity-upsert on `:my.kb.instruction/id` with
+   static values — re-running asserts zero new datoms.
 
    Pure fn. Caller transacts via `db/transact!` with
    `:seon.db/origin :substrate-seed`."
   []
-  [{:seon.user/id "user"}
-   {:seon.system-prompt/id      "default"
-    :seon.system-prompt/content deepseek/default-system-prompt
-    :seon.sticky/position       :prefix
-    :seon.sticky/order          0}
-   {:seon.conventions/id      "default"
-    :seon.conventions/content default-conventions
-    :seon.sticky/position     :prefix
-    :seon.sticky/order        1}])
+  (into [{:seon.user/id "user"}]
+        (my.kb.instruction/seed-tx-data)))
 
 ;; ---------------------------------------------------------------------------
 ;; index-substrate! — runtime introspection of compiled substrate fns
@@ -936,9 +907,11 @@
    A fn (not a def) because `!indexed-test-vars` is populated by the
    preload AFTER this ns loads; robust by construction either way — it's
    NOT tx-meta and NOT a hand-typed ns list, it's the live var-meta `:ns`
-   of the indexed vars."
+   of the indexed vars. Exemplar ROOTS join the set explicitly because a
+   fn-less root (`my.kb`) owns an indexed full-source `:seon.ns` row
+   without owning any var."
   []
-  (into #{}
+  (into (into #{} (map keyword) agent/exemplar-roots)
         (map #(keyword (str (:ns (meta %)))))
         (concat substrate-vars @!indexed-test-vars)))
 
@@ -1156,7 +1129,13 @@
   []
   (let [now     (js/Date.)
         fn-rows (keep #(var->fn-row % now) substrate-vars)
-        ns-syms (into #{} (map #(first (str/split (:seon.fn/sym %) #"/" 2)) fn-rows))
+        ;; Exemplar ROOTS are unioned in explicitly: a root with no
+        ;; public fns of its own (`my.kb` — register! calls + ns-doc
+        ;; only) still needs its full-source `:seon.ns` row, since the
+        ;; :exemplars section renders from exactly these datoms.
+        ns-syms (into agent/exemplar-roots
+                      (map #(first (str/split (:seon.fn/sym %) #"/" 2)))
+                      fn-rows)
         ns-rows (map ns-row (sort ns-syms))]
     (vec (concat ns-rows fn-rows))))
 
@@ -1530,9 +1509,8 @@
                 ;;   1. entity-schema decomposition (Item 4) — must
                 ;;      land first so subsequent entities reference
                 ;;      registered shapes.
-                ;;   2. sticky preamble (system-prompt + conventions)
-                ;;      — pinned to context-front via
-                ;;      `:seon.sticky/position :prefix`.
+                ;;   2. user entity + my.kb.instruction guidance rows
+                ;;      (seed-substrate!).
                 ;;   3. substrate index — `:seon.ns` + `:seon.fn` rows
                 ;;      built by `index-substrate!` from REAL runtime
                 ;;      introspection (var meta + source file-read), DEDUPED

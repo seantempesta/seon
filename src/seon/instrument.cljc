@@ -113,7 +113,11 @@
       Idempotent: re-calling re-registers (no-op; same keys + values)
       and re-instruments (replaces the wrapper)."
      []
-     (let [n-reg (collect!)]
+     ;; Two prefixes: the substrate plus the compiled my.* scaffold
+     ;; (my.kb, my.kb.instruction — V3-B). Runtime-authored my.* fns
+     ;; aren't on the compile-time roster (the analyzer can't see
+     ;; them); they validate through the eval path instead.
+     (let [n-reg (+ (collect! "seon") (collect! "my."))]
        ;; `mi/instrument!` returns nil (not a count) — it mutates each
        ;; registered fn's var-binding in place to install the validating
        ;; wrapper. n-registered == n-instrumented by construction

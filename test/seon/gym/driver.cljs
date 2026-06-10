@@ -84,7 +84,7 @@
 ;; Schemas — scenario, predicate, result, scorecard. Registered once,
 ;; referenced everywhere (shared-shape rule). Keyword namespaces are
 ;; multi-segment data namespaces under :seon.gym.* (same convention as
-;; the taught :kb.finding/*).
+;; the taught my.kb.<domain> shape).
 ;; ===========================================================================
 
 ;; --- rubric -----------------------------------------------------------------
@@ -746,7 +746,7 @@
    1. The pod's boot seed — the same three transacts as
       `seon.client/start-agent!`, in the same order, inside the same
       `{:seon.db/origin :substrate-seed}` tx-context: entity-schema
-      decomposition (`schema/all-entity-schemas-tx-data`), the sticky
+      decomposition (`schema/all-entity-schemas-tx-data`), the
       preamble + user entity (`client/seed-substrate!`), and the
       substrate index (`client/substrate-index-tx` — :seon.ns/:seon.fn
       rows PLUS a `:seon.schema` row per registered schema PLUS test
@@ -870,7 +870,7 @@
                 compile-state (await (repl/ensure-bootstrap!))
                 !agents       (atom {})]
             ;; The scratch store must be THE WORLD A POD BOOTS INTO, not an
-            ;; empty void: seed the substrate (sticky preamble + the
+            ;; empty void: seed the substrate (instruction rows + the
             ;; :seon.ns/:seon.fn program-graph rows that render the "What
             ;; you can do" teaching — without them agents never learn that
             ;; grep/register!/reply! exist) and mirror the pod's fs

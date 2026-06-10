@@ -139,7 +139,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; WORLD-PARITY — the gym scratch world must be THE WORLD A POD BOOTS
-;; INTO (entity-schema decomposition + sticky preamble + substrate
+;; INTO (entity-schema decomposition + instruction rows + substrate
 ;; index, under :substrate-seed provenance) with the scenario's
 ;; prior-agent layer on top (tee-shaped :seon.schema rows + fixtures,
 ;; agent provenance). Iteration 1 ran without the decomposition /

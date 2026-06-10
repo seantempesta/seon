@@ -160,7 +160,7 @@
 (defn- entity-kind-label
   "Best-effort kind label for an entity with no resolved renderer: the
    most common keyword NAMESPACE among its attrs (`seon.eval`,
-   `seon.sticky`, …). Returns a string, `\"entity\"` when nothing
+   `my.kb.instruction`, ...). Returns a string, `\"entity\"` when nothing
    namespaced is present."
   [entity]
   (or (->> (keys entity)
@@ -230,8 +230,6 @@
 
 (defn- static-entity?
   "STATIC = collapsed-by-default in the right pane. Discriminator:
-   - sticky preamble entities (`:seon.sticky/position` present) — the
-     `:seon.system-prompt` / `:seon.conventions` cards;
    - `:seon.schema` kind rows (`:seon.schema/key` present);
    - `:seon.fn` / `:seon.ns` / `:seon.test` cards whose CREATION tx
      carries `:seon.db/origin :substrate-seed` (the substrate index,
@@ -241,13 +239,12 @@
    DYNAMIC and renders expanded."
   [db entity]
   (boolean
-    (or (:seon.sticky/position entity)
-        (:seon.schema/key entity)
+    (or (:seon.schema/key entity)
         ;; Identity attrs per the registered schemas: :seon.fn/sym +
         ;; :seon.test/sym (strings), :seon.ns/name (keyword). The #24
         ;; version checked :seon.fn/name, which is not a registered
         ;; attr — the fn clause was dead code (masked because
-        ;; non-sticky :seon.fn cards are subsumed out of the window).
+        ;; window :seon.fn cards are subsumed out of the window).
         (and (or (:seon.fn/sym entity)
                  (:seon.ns/name entity)
                  (:seon.test/sym entity))
@@ -261,9 +258,6 @@
       (some-> (:seon.fn/sym entity) str)
       (some-> (:seon.ns/name entity) pr-str)
       (some-> (:seon.test/sym entity) str)
-      (:seon.system-prompt/id entity)
-      (:seon.conventions/id entity)
-      (:seon.sticky/id entity)
       ""))
 
 (defn- entity-gist
@@ -271,8 +265,6 @@
    doc/content, truncated to 80 chars."
   [entity]
   (let [s    (or (:seon.fn/doc entity)
-                 (:seon.system-prompt/content entity)
-                 (:seon.conventions/content entity)
                  (:seon.agent.message/content entity)
                  "")
         line (or (first (str/split-lines s)) "")]
@@ -295,9 +287,9 @@
   "Map of child eid (message/eval) → `{::turn-n <int> ::turn-at <Date>}`.
    Turn NUMBER is the 1-based index of the turn within its session's
    turns sorted by `:seon.agent.turn/at` — same derivation as the agent's
-   `turn N` prompt line. Entities not hanging off any turn (sticky
-   preamble, schema rows, substrate index) are absent from the map and
-   keep their tx-time position in the card list."
+   `turn N` prompt line. Entities not hanging off any turn (schema
+   rows, substrate index) are absent from the map and keep their
+   tx-time position in the card list."
   [db]
   (let [turn-rows  (d/q '[:find ?s ?turn ?tat
                           :where
