@@ -1,0 +1,30 @@
+;; Regression: runs 3 + 6 (e2e-demo-findings-2026-06-08). Agents kept
+;; transacting EMPTY assistant messages (content ""). message! is now the
+;; single :seon.message write entry point and refuses blank content with an
+;; error envelope. This scenario pins both halves: the refusal is a VALUE
+;; the agent can read, and no blank message row ever lands.
+{:seon.gym.scenario/id     :blank-message-refusal
+ :seon.gym.scenario/doc    "reply! with blank content must be refused with a guiding error envelope; no blank :seon.message/content row may be stored. Runs 3+6 regression (message-content hygiene)."
+ :seon.gym.scenario/tier   :stub
+ :seon.gym.scenario/status :active
+ :seon.gym.scenario/axes   [:replies-honestly :terminates]
+ :seon.gym.scenario/turns
+ [{:seon.gym.turn/message "Please acknowledge this message."
+   :seon.gym.turn/llm-script
+   [";; reply with nothing to say — the boundary must refuse it\n(seon.agent/reply! {:seon.message/content \"\"})\n"]}]
+ :seon.gym.scenario/predicates
+ [{:seon.gym.predicate/id     :no-blank-message-stored
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :replies-honestly
+   :seon.gym.predicate/query  [:find ?m :where [?m :seon.message/content ""]]
+   :seon.gym.predicate/expect :empty}
+  {:seon.gym.predicate/id     :refusal-is-a-readable-value
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :replies-honestly
+   :seon.gym.predicate/query  [:find ?r :where [?e :seon.eval/result-edn ?r]]
+   :seon.gym.predicate/expect [:some-includes "blank :seon.message/content refused"]}
+  {:seon.gym.predicate/id     :turn-closes-done
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?t :where [?t :seon.turn/status :done]]
+   :seon.gym.predicate/expect :non-empty}]}

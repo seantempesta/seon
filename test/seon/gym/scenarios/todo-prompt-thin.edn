@@ -1,0 +1,51 @@
+;; TODO scenarios — the known PROMPT-THIN spots the gym must eventually
+;; cover (PRD §7 item 12). Encoded now so the rubric axes have owners;
+;; each is :todo because the pass bar needs behavioral (deepseek) runs and
+;; in two cases the TEACHING itself is still too thin to expect a pass:
+;;   - test-writing:    thinnest teaching in the current context.
+;;   - function-reuse:  never yet observed in any live run.
+;;   - store-proactively: storing happens when asked; the default should
+;;     be to persist any verified non-trivial result (§2 gap).
+;; The driver refuses :todo scenarios — flip :status to :active once the
+;; teaching lands and the predicates are sharpened against a live run.
+[{:seon.gym.scenario/id     :writes-tests-for-own-fns
+  :seon.gym.scenario/doc    "TODO: after defining a fn for the user's task, the agent writes + runs a deftest for it without being asked. Predicate sketch: a :seon.test/sym row exists in the agent's ns AND the test passed. Teaching is currently the thinnest section — expect fail until it lands."
+  :seon.gym.scenario/tier   :deepseek
+  :seon.gym.scenario/status :todo
+  :seon.gym.scenario/axes   [:writes-tests :terminates]
+  :seon.gym.scenario/turns
+  [{:seon.gym.turn/message "Write a function that converts meters to miles, test it, and store it for reuse."}]
+  :seon.gym.scenario/predicates
+  [{:seon.gym.predicate/id     :test-row-persisted
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :writes-tests
+    :seon.gym.predicate/query  [:find ?t :where [?e :seon.test/sym ?t]]
+    :seon.gym.predicate/expect :non-empty}]}
+
+ {:seon.gym.scenario/id     :reuses-stored-functions
+  :seon.gym.scenario/doc    "TODO: a fixture seeds a prior agent's :seon.fn (e.g. meters->miles) and the question needs exactly it. Pass = the agent CALLS the stored fn instead of re-defining a parallel one. Never yet observed live — encode the bar before teaching to it."
+  :seon.gym.scenario/tier   :deepseek
+  :seon.gym.scenario/status :todo
+  :seon.gym.scenario/axes   [:reuses-functions :terminates]
+  :seon.gym.scenario/turns
+  [{:seon.gym.turn/message "How many miles is a 10k run? There may already be a conversion helper stored."}]
+  :seon.gym.scenario/predicates
+  [{:seon.gym.predicate/id     :no-parallel-fn-defined
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :reuses-functions
+    :seon.gym.predicate/query  [:find ?f :where [?e :seon.fn/sym ?f]]
+    :seon.gym.predicate/expect :non-empty}]}
+
+ {:seon.gym.scenario/id     :stores-findings-unprompted
+  :seon.gym.scenario/doc    "TODO: a codebase question WITHOUT 'store what you find' phrasing. Pass = a :kb.finding row with provenance lands anyway (store-proactively is the default, not a request). §2 gap — storing currently happens only when asked."
+  :seon.gym.scenario/tier   :deepseek
+  :seon.gym.scenario/status :todo
+  :seon.gym.scenario/axes   [:stores-proactively :replies-honestly :terminates]
+  :seon.gym.scenario/turns
+  [{:seon.gym.turn/message "Where does the pod decide between the stub LLM and the deepseek adapter?"}]
+  :seon.gym.scenario/predicates
+  [{:seon.gym.predicate/id     :finding-stored-without-being-asked
+    :seon.gym.predicate/kind   :datalog
+    :seon.gym.predicate/axis   :stores-proactively
+    :seon.gym.predicate/query  [:find ?c :where [?f :kb.finding/claim ?c]]
+    :seon.gym.predicate/expect :non-empty}]}]

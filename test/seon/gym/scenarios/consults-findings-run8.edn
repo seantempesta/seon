@@ -1,0 +1,59 @@
+;; RUN 8's pass bar (PRD §1 + §7 #26): stored knowledge must be CONSULTED,
+;; not just discoverable. Run 7's agent #2 efficiently RE-DERIVED a stored
+;; answer (70s flawless pipeline) without ever querying the finding rows.
+;; This scenario seeds agent #1's findings as fixtures and asks a RELATED
+;; question — the pass bar is that the fresh agent's FIRST eval queries the
+;; stored :kb.finding rows before any repo search.
+;;
+;; DEEPSEEK TIER — costs real money. The driver refuses to run it unless
+;; called with {:seon.gym/allow-paid? true} and DEEPSEEK_API_KEY set.
+{:seon.gym.scenario/id     :consults-findings-run8
+ :seon.gym.scenario/doc    "Agent #2's FIRST move must be consulting stored :kb.finding rows for a related question (run-8 pass bar, §1 demo bar). Behavioral — requires the real adapter; the predicates run mechanically either way."
+ :seon.gym.scenario/tier   :deepseek
+ :seon.gym.scenario/status :active
+ :seon.gym.scenario/axes   [:sees-question :consults-findings
+                            :replies-honestly :terminates]
+ :seon.gym.scenario/schema-registrations
+ [[:kb.finding/claim :string]
+  [:kb.finding/source-path :string]
+  [:kb.finding/line :int]
+  [:kb.finding/confidence [:enum :verified :inferred]]
+  [:kb.finding/question :string]]
+ :seon.gym.scenario/fixtures
+ [{:kb.finding/claim       "validate-attrs! rejects any tx whose attr is not registered in seon.schema before the tx reaches datahike"
+   :kb.finding/source-path "src/seon/db.cljs"
+   :kb.finding/line        630
+   :kb.finding/confidence  :verified
+   :kb.finding/question    "How does seon validate schemas at transact time?"}
+  {:kb.finding/claim       "validate-entity-values! Malli-validates every entity value against the registered attr schema"
+   :kb.finding/source-path "src/seon/db.cljs"
+   :kb.finding/line        694
+   :kb.finding/confidence  :verified
+   :kb.finding/question    "How does seon validate schemas at transact time?"}]
+ :seon.gym.scenario/turns
+ [{:seon.gym.turn/message "What happens when an agent transacts an entity whose attribute isn't registered? Check what is already known before digging into the repo."}]
+ :seon.gym.scenario/predicates
+ [{:seon.gym.predicate/id      :first-eval-consults-stored-findings
+   :seon.gym.predicate/kind    :first-eval-matches
+   :seon.gym.predicate/axis    :consults-findings
+   :seon.gym.predicate/pattern "kb\\.finding"}
+  {:seon.gym.predicate/id     :agent-replies-to-the-user
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :replies-honestly
+   :seon.gym.predicate/query  [:find ?m
+                               :where
+                               [?m :seon.message/from ?a]
+                               [?a :seon.agent/id ?aid]
+                               [?m :seon.message/to ?u]
+                               [?u :seon.user/id "user"]]
+   :seon.gym.predicate/expect :non-empty}
+  {:seon.gym.predicate/id     :agent-saw-the-question
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :sees-question
+   :seon.gym.predicate/query  [:find ?e :where [?e :seon.eval/id ?id]]
+   :seon.gym.predicate/expect :non-empty}
+  {:seon.gym.predicate/id     :agent-terminates-idle
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?a :where [?a :seon.agent/state :idle]]
+   :seon.gym.predicate/expect :non-empty}]}

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# bin/gym — run the AGENT-GYM scenario harness and surface its scorecards.
+#
+# The stub-tier gym scenarios execute inside the CLJS test suite
+# (seon.gym.driver-test), so this is a thin wrapper around bin/test-cljs
+# that greps the emitted `SEON-GYM SCORECARD` lines back out. Scorecards
+# are keyed (scenario × git sha) — diff them across commits to quantify
+# context iteration.
+#
+# Usage:
+#   bin/gym                # compile + run suite, print scorecards
+#   bin/gym --no-build     # skip compile (reuse out/test/test.js)
+#
+# Deepseek-tier scenarios NEVER run here (budget guard in the driver) —
+# drive those from a REPL with {:seon.gym/allow-paid? true}.
+
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+mkdir -p tmp
+LOG="tmp/gym-latest.log"
+
+bin/test-cljs "$@" | tee "$LOG"
+STATUS=${PIPESTATUS[0]}
+
+echo ""
+echo "== AGENT-GYM scorecards (scenario × git sha) =="
+grep -a "SEON-GYM SCORECARD" "$LOG" || echo "(none emitted)"
+
+exit "$STATUS"

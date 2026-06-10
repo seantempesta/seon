@@ -1,0 +1,44 @@
+;; Regression: run 7 (e2e-demo-findings-2026-06-08) proved the finding
+;; pipeline — register :kb.finding/* (multi-segment namespace, NOT a bare
+;; :finding/* fork), store claims with full provenance (claim, source path,
+;; line, confidence), reply AFTER the store. This scenario pins the taught
+;; storage shape end-to-end through the real eval pipeline (register! tee →
+;; transact → reply!), so a context/teaching change that breaks the
+;; convention shows up as a failed predicate, not a burned live run.
+{:seon.gym.scenario/id     :finding-storage-shape
+ :seon.gym.scenario/doc    "An agent following the taught finding convention must produce a :kb.finding row with FULL provenance (claim + source-path + line + confidence), in the multi-segment namespace, and confirm to the user only after the store. Run-7 pipeline regression."
+ :seon.gym.scenario/tier   :stub
+ :seon.gym.scenario/status :active
+ :seon.gym.scenario/axes   [:stores-proactively :reuses-schemas
+                            :replies-honestly :terminates]
+ :seon.gym.scenario/turns
+ [{:seon.gym.turn/message "How does seon validate schemas at transact time? Store what you find so the next agent doesn't have to redo this."
+   :seon.gym.turn/llm-script
+   [";; register the finding schema FIRST — multi-segment namespace\n(seon.schema/register! :kb.finding/claim :string)\n(seon.schema/register! :kb.finding/source-path :string)\n(seon.schema/register! :kb.finding/line :int)\n(seon.schema/register! :kb.finding/confidence [:enum :verified :inferred])\n"
+    ";; store the finding with full provenance\n(seon.db/transact! {:seon.db/tx-data [{:kb.finding/claim \"transact! Malli-validates every entity before the tx reaches datahike\" :kb.finding/source-path \"src/seon/db.cljs\" :kb.finding/line 630 :kb.finding/confidence :verified}]})\n"
+    ";; reply AFTER the verified store\n(seon.agent/reply! {:seon.message/content \"Stored 1 finding with provenance (src/seon/db.cljs:630): transact! Malli-validates every entity before the tx reaches datahike.\"})\n"]}]
+ :seon.gym.scenario/predicates
+ [{:seon.gym.predicate/id     :finding-row-with-full-provenance
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :stores-proactively
+   :seon.gym.predicate/query  [:find ?claim ?path ?line ?conf
+                               :where
+                               [?f :kb.finding/claim ?claim]
+                               [?f :kb.finding/source-path ?path]
+                               [?f :kb.finding/line ?line]
+                               [?f :kb.finding/confidence ?conf]]
+   :seon.gym.predicate/expect [:count 1]}
+  {:seon.gym.predicate/id     :no-single-segment-namespace-fork
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :reuses-schemas
+   :seon.gym.predicate/query  [:find ?f :where [?f :finding/claim ?c]]
+   :seon.gym.predicate/expect :empty}
+  {:seon.gym.predicate/id   :reply-confirms-after-store
+   :seon.gym.predicate/kind :transcript-includes
+   :seon.gym.predicate/axis :replies-honestly
+   :seon.gym.predicate/text "Stored 1 finding with provenance"}
+  {:seon.gym.predicate/id     :turn-closes-done
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?t :where [?t :seon.turn/status :done]]
+   :seon.gym.predicate/expect :non-empty}]}

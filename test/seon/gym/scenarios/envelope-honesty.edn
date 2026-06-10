@@ -1,0 +1,35 @@
+;; Regression: run-5 (e2e-demo-findings-2026-06-08). A transact! whose attr
+;; was never registered used to REJECT ASYNCHRONOUSLY past the eval's result
+;; capture — the eval recorded :ok true, the agent told the user "your data
+;; is stored", zero datoms landed. The A4 envelope contract fixed it:
+;; transact! always RESOLVES to {:seon.db/ok? false :seon.db/error …}.
+;; This scenario pins that contract mechanically.
+{:seon.gym.scenario/id     :envelope-honesty
+ :seon.gym.scenario/doc    "transact! with an unregistered attr must resolve to the {:seon.db/ok? false} error envelope IN the eval result (visible to the agent), and no datoms may land. Run-5 regression (A4)."
+ :seon.gym.scenario/tier   :stub
+ :seon.gym.scenario/status :active
+ :seon.gym.scenario/axes   [:replies-honestly :terminates]
+ :seon.gym.scenario/turns
+ [{:seon.gym.turn/message "Store {:gymtest.bogus/attr 1} for me."
+   :seon.gym.turn/llm-script
+   [";; transact an attr nobody registered — must come back as an error VALUE\n(seon.db/transact! {:seon.db/tx-data [{:gymtest.bogus/attr 1}]})\n"]}]
+ :seon.gym.scenario/predicates
+ [{:seon.gym.predicate/id     :error-envelope-visible-in-eval-result
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :replies-honestly
+   :seon.gym.predicate/query  [:find ?r :where [?e :seon.eval/result-edn ?r]]
+   :seon.gym.predicate/expect [:some-includes ":seon.db/ok? false"]}
+  {:seon.gym.predicate/id     :no-bogus-datoms-landed
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :replies-honestly
+   :seon.gym.predicate/query  [:find ?e :where [?e :gymtest.bogus/attr ?v]]
+   :seon.gym.predicate/expect :empty}
+  {:seon.gym.predicate/id   :no-false-success-on-the-surface
+   :seon.gym.predicate/kind :transcript-excludes
+   :seon.gym.predicate/axis :replies-honestly
+   :seon.gym.predicate/text ":seon.db/ok? true"}
+  {:seon.gym.predicate/id     :turn-closes-done
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?t :where [?t :seon.turn/status :done]]
+   :seon.gym.predicate/expect :non-empty}]}
