@@ -291,20 +291,52 @@
 ;; Domain attrs — the agent-created reuse surface.
 ;; ============================================================
 
-(defn- internal-attr-ns?
-  "True for substrate/datahike-internal keyword namespaces (`seon`,
-   `seon.*`, `db`, `db.*`) — never agent-forkable data domains."
-  [ns-str]
-  (boolean (re-matches #"(db|seon)(\..*)?" ns-str)))
+(defn- agent-registered-attrs
+  "The set of attr keywords whose `:seon.schema/key` row landed in a tx
+   that does NOT carry `:seon.db/origin :substrate-seed` — i.e. attrs
+   registered by an AGENT (every agent `register!` eval is teed into a
+   `:seon.schema` row by `seon.eval/build-tee-entities`, in an
+   agent-origin tx), as opposed to the substrate's own registrations
+   (boot-seeded by `seon.client/index-schemas` /
+   `all-entity-schemas-tx-data`, always inside the
+   `{:seon.db/origin :substrate-seed}` tx-context, forge-guarded in
+   `seon.db`).
+
+   This PROVENANCE rule replaces the old keyword-namespace blanket
+   `(db|seon)(\\..*)?` — which wrongly hid agent-authored `seon.*` data
+   domains (the live store's `:seon.workout/*`) from the whole reuse
+   surface (gym S-21 root cause, 2026-06-10). Provenance stays correct
+   as the substrate grows with NO list to maintain: new substrate
+   registrations arrive via the boot seed (seed origin → hidden), and
+   anything an agent registers is teed in its own tx (→ visible),
+   whatever keyword namespace it picks."
+  [db]
+  (let [seed-txs (into #{}
+                       (map first)
+                       (db/query {:seon.db/db db
+                                  :seon.db/query
+                                  '[:find ?tx
+                                    :where
+                                    [?tx :seon.db/origin :substrate-seed]]}))]
+    (into #{}
+          (keep (fn [[k tx]] (when-not (contains? seed-txs tx) k)))
+          (db/query {:seon.db/db db
+                     :seon.db/query
+                     '[:find ?k ?tx
+                       :where [?s :seon.schema/key ?k ?tx]]}))))
 
 (defn domain-attrs
   "Every DOMAIN attr installed on `db` — the db's datahike schema attrs
-   minus substrate/datahike internals. These are the attrs agents
-   registered for the human's data: the reuse surface the
-   schema-catalog renders and [[check-parallel-attr]] guards. Derived
-   from the db value itself (NOT the live registry), so it survives pod
-   restarts and stays per-conn. An attr appears once data (or schema
-   installation via the first transact!) has landed."
+   intersected with [[agent-registered-attrs]] (provenance: the attr's
+   `:seon.schema/key` row was asserted OUTSIDE the boot seed). These
+   are the attrs agents registered for the human's data — INCLUDING
+   `seon.*` data domains like `:seon.workout/*` — the reuse surface
+   the schema-catalog renders and [[check-parallel-attr]] guards.
+   Substrate attrs (`:seon.db/*`, `:seon.agent/*`, …) stay hidden
+   because their rows land under `:seon.db/origin :substrate-seed`.
+   Derived from the db value itself (NOT the live registry), so it
+   survives pod restarts and stays per-conn. An attr appears once data
+   (or schema installation via the first transact!) has landed."
   {:malli/schema [:=> [:cat ::check-request] [:vector :keyword]]}
   [{:seon.db/keys [db]}]
   (let [schema (try (:schema db)
@@ -314,11 +346,12 @@
                       ;; THROWS, which took down the whole ctx-preview.
                       ;; The schema is conn-level (the filter can't
                       ;; change it), so read through to the wrapped db.
-                      (:schema (.-unfiltered-db ^js db))))]
+                      (:schema (.-unfiltered-db ^js db))))
+        agent-attrs (agent-registered-attrs db)]
     (->> (keys schema)
          (filter keyword?)
          (filter namespace)
-         (remove #(internal-attr-ns? (namespace %)))
+         (filter agent-attrs)
          distinct
          (sort-by str)
          vec)))

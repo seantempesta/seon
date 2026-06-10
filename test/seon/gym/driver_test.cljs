@@ -17,7 +17,11 @@
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
     [malli.core :as m]
-    [seon.gym.driver :as gym]))
+    [seon.agent :as agent]
+    [seon.client :as client]
+    [seon.gym.driver :as gym]
+    [seon.schema :as schema]
+    [seon.warn :as warn]))
 
 (def ^:private scenario-files
   ["test/seon/gym/scenarios/s01-stub-pipeline-smoke.edn"
@@ -130,6 +134,118 @@
                                (remove #(= :deliberately-broken
                                            (:seon.gym.predicate/id %))
                                        (:seon.gym.scorecard/results card))))
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ---------------------------------------------------------------------------
+;; WORLD-PARITY — the gym scratch world must be THE WORLD A POD BOOTS
+;; INTO (entity-schema decomposition + sticky preamble + substrate
+;; index, under :substrate-seed provenance) with the scenario's
+;; prior-agent layer on top (tee-shaped :seon.schema rows + fixtures,
+;; agent provenance). Iteration 1 ran without the decomposition /
+;; index-schemas, so gym prompts differed from real pod prompts and the
+;; S-32 catalog bug hid for a whole sweep.
+;; ---------------------------------------------------------------------------
+
+(deftest seeded-world-matches-a-pod-boot-and-surfaces-domain-attrs
+  (async done
+    (let [keys-before (schema/current-keys)
+          scenario    (load-first
+                        "test/seon/gym/scenarios/s21-log-workout-existing-schema.edn")]
+      (-> (client/open-agent-conn!)
+          (.then (fn [conn]
+                   (-> (gym/seed-scenario-world!
+                         {:seon.db/conn conn :seon.gym/scenario scenario})
+                       (.then (fn [_]
+                                (let [db      @conn
+                                      domain  (set (warn/domain-attrs
+                                                     {:seon.db/db db}))
+                                      catalog (agent/schema-catalog-section
+                                                {:seon.db/db db})]
+                                  ;; the seeded reuse surface IS domain attrs
+                                  ;; (S-21 production-bug pin: seon.* DATA
+                                  ;; domains must not be blanket-hidden)
+                                  (is (contains? domain :seon.workout/date))
+                                  (is (contains? domain
+                                                 :seon.workout/duration-minutes))
+                                  ;; substrate attrs stay OUT of the reuse
+                                  ;; surface (seed provenance)
+                                  (is (not-any? #(= "seon.db" (namespace %))
+                                                domain)
+                                      "no :seon.db/* leaks into domain attrs")
+                                  (is (not (contains? domain :seon.agent/id)))
+                                  ;; …and the agent-facing catalog renders the
+                                  ;; reuse block with the exact keywords
+                                  (is (str/includes? catalog
+                                                     "domain data attrs")
+                                      "the reuse block renders")
+                                  (is (str/includes? catalog
+                                                     ":seon.workout/duration-minutes")
+                                      "the established attr is in the prompt")
+                                  ;; pod-boot parity: the substrate index +
+                                  ;; entity-schema decomposition are present
+                                  (is (str/includes? catalog
+                                                     "all registered schemas")
+                                      "index-schemas rows render (boot parity)")))))))
+          (.then (fn [_]
+                   (let [minted (remove keys-before (schema/current-keys))]
+                     (when (seq minted)
+                       (swap! @#'schema/*schemas #(apply dissoc % minted))))
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ---------------------------------------------------------------------------
+;; GENERIC FORK DETECTION — the :domain-attrs predicate kind must catch
+;; an attr fork in ANY namespace (the old S-21 predicate only checked
+;; seon.workout, so :fitness.workout/* forks passed vacuously).
+;; ---------------------------------------------------------------------------
+
+(deftest domain-attrs-predicate-catches-a-fork-in-any-namespace
+  (async done
+    (let [scenario
+          {:seon.gym.scenario/id     :gymtest-attr-fork-any-namespace
+           :seon.gym.scenario/doc    "Inline stub: the scripted agent forks the seeded workout shape into a DIFFERENT namespace + unit; the generic :domain-attrs no-fork predicate must fail the scorecard."
+           :seon.gym.scenario/tier   :stub
+           :seon.gym.scenario/status :active
+           :seon.gym.scenario/llm    :scripted-replay
+           :seon.gym.scenario/axes   [:reuses-schemas]
+           :seon.gym.scenario/schema-registrations
+           [[:seon.workout/date :string]
+            [:seon.workout/type :keyword]
+            [:seon.workout/duration-minutes :int]
+            [:seon.workout/notes :string]]
+           :seon.gym.scenario/fixtures
+           [{:seon.workout/date "{{today}}"
+             :seon.workout/type :strength
+             :seon.workout/duration-minutes 45}]
+           :seon.gym.scenario/turns
+           [{:seon.gym.turn/message "I ran this morning — 24 minutes."
+             :seon.gym.turn/llm-script
+             [(str ";; deliberately fork into another namespace + unit\n"
+                   "(seon.schema/register! :fitness.workout/duration-seconds :int)\n"
+                   "(seon.db/transact! {:seon.db/tx-data "
+                   "[{:fitness.workout/duration-seconds 1440}]})\n")]}]
+           :seon.gym.scenario/predicates
+           [{:seon.gym.predicate/id     :no-attr-fork-anywhere
+             :seon.gym.predicate/kind   :domain-attrs
+             :seon.gym.predicate/axis   :reuses-schemas
+             :seon.gym.predicate/expect [:every-in [":seon.workout/date"
+                                                    ":seon.workout/type"
+                                                    ":seon.workout/duration-minutes"
+                                                    ":seon.workout/notes"]]}]}]
+      (-> (gym/run-scenario! {:seon.gym/scenario scenario})
+          (.then (fn [card]
+                   (gym/print-scorecard! card)
+                   (is (false? (:seon.gym.scorecard/pass? card))
+                       "the fork fails the scorecard")
+                   (let [r (->> (:seon.gym.scorecard/results card)
+                                (filter #(= :no-attr-fork-anywhere
+                                            (:seon.gym.predicate/id %)))
+                                first)]
+                     (is (false? (:seon.gym.result/pass? r)))
+                     (is (str/includes? (:seon.gym.result/actual r)
+                                        ":fitness.workout/duration-seconds")
+                         "the actual names the forked attr"))
                    (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 

@@ -77,7 +77,8 @@
     [seon.eval :as seval]
     [seon.fs :as sfs]
     [seon.repl :as repl]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.warn :as warn]))
 
 ;; ===========================================================================
 ;; Schemas — scenario, predicate, result, scorecard. Registered once,
@@ -114,9 +115,15 @@
 ;; :llm-judge — NOT mechanical. Rubric + reference facts + the agent's
 ;;   verbatim reply → graded verdict on the SEPARATE judge axis of the
 ;;   scorecard ("behaved right, answered wrong" stays distinguishable).
+;; :domain-attrs — rows = the post-run store's DOMAIN attrs (one attr
+;;   per row, via seon.warn/domain-attrs — agent-provenance only, so
+;;   ANY attr the agent register!ed shows up regardless of the keyword
+;;   namespace it picked). [:every-in [...]] = "the agent forked NO new
+;;   attr anywhere" (the generic S-21 no-fork predicate); [:count>= n]
+;;   = "the seeded reuse surface is actually visible".
 (schema/register! :seon.gym.predicate/kind
   [:enum :datalog :transcript-includes :transcript-excludes
-   :first-eval-matches :eval-count-matching :llm-judge])
+   :first-eval-matches :eval-count-matching :domain-attrs :llm-judge])
 (schema/register! :seon.gym.predicate/axis :seon.gym.axis/name)
 ;; Datalog query/args are datahike's domain — third-party boundary,
 ;; :any allowed (same stance as :seon.db/query-request).
@@ -282,6 +289,12 @@
    [:seon.gym/judge-fn {:optional true} :seon.gym/judge-fn]])
 (schema/register! :seon.gym/run-response
   [:or :seon.gym/scorecard :seon.gym/refusal])
+(schema/register! :seon.gym/seed-request
+  [:map
+   [:seon.db/conn :seon.db/conn]
+   [:seon.gym/scenario :seon.gym/scenario]])
+(schema/register! :seon.gym/seed-response
+  [:map [:seon.gym/ok? [:= true]]])
 
 ;; ===========================================================================
 ;; Scenario loading
@@ -421,7 +434,13 @@
               [(expect-pass? expect (mapv vector matching))
                (str (when agent (str "agent " agent " "))
                     (count matching) "/" (count srcs) " evals match "
-                    (pr-str pattern) " expect=" (pr-str expect))]))
+                    (pr-str pattern) " expect=" (pr-str expect))])
+
+            :domain-attrs
+            (let [attrs (warn/domain-attrs {:seon.db/db dbv})]
+              [(expect-pass? expect (mapv vector attrs))
+               (str "domain attrs: " (pr-str attrs)
+                    " expect=" (pr-str expect))]))
           (catch :default e
             [false (str "predicate THREW: " e)]))]
     {:seon.gym.predicate/id   id
@@ -719,6 +738,90 @@
       (swap! !agents assoc designator agent-id)
       agent-id)))
 
+(defn ^:async seed-scenario-world!
+  "Seed a scratch conn into THE WORLD A POD BOOTS INTO, then layer the
+   scenario's prior-agent state on top. Two provenance layers, exactly
+   like a live store:
+
+   1. The pod's boot seed — the same three transacts as
+      `seon.client/start-agent!`, in the same order, inside the same
+      `{:seon.db/origin :substrate-seed}` tx-context: entity-schema
+      decomposition (`schema/all-entity-schemas-tx-data`), the sticky
+      preamble + user entity (`client/seed-substrate!`), and the
+      substrate index (`client/substrate-index-tx` — :seon.ns/:seon.fn
+      rows PLUS a `:seon.schema` row per registered schema PLUS test
+      rows, conn-deduped). Gym iteration 1 ran WITHOUT the
+      entity-schema decomposition and index-schemas, so gym prompts
+      differed from real pod prompts — which hid the S-32 catalog bug
+      for a whole sweep. The seed-origin tx-context matters too:
+      `seon.warn/domain-attrs` discriminates substrate vs agent attrs
+      by exactly that provenance.
+
+   2. The scenario's registrations + fixtures — the state a PRIOR
+      agent left in the store. Registered into the live registry, then
+      transacted in ORDINARY (non-seed) txs with the same tee-shaped
+      `:seon.schema` rows `seon.eval/build-tee-entities` writes for a
+      real register! eval — so seeded attrs like `:seon.workout/*`
+      carry agent provenance and render in the domain-attrs reuse
+      surface, exactly as on the live store.
+
+   Fails LOUD on any non-ok envelope. Returns Promise<{:seon.gym/ok? true}>."
+  {:malli/schema [:=> [:cat :seon.gym/seed-request] :seon.gym/seed-response]}
+  [{conn     :seon.db/conn
+    scenario :seon.gym/scenario}]
+  (let [{:seon.gym.scenario/keys [schema-registrations fixtures]} scenario
+        check! (fn [step {ok? :seon.db/ok? :as env}]
+                 (when-not ok?
+                   (throw (ex-info (str "gym: world seed transact failed at "
+                                        step)
+                                   env))))]
+    (await
+      (db/with-tx-context {:seon.db/origin :substrate-seed}
+        (fn ^:async boot-seed! []
+          (check! :entity-schemas
+                  (await (db/transact!
+                           {:seon.db/conn conn
+                            :seon.db/tx-data
+                            (schema/all-entity-schemas-tx-data)})))
+          (check! :substrate-seed
+                  (await (db/transact!
+                           {:seon.db/conn conn
+                            :seon.db/tx-data (vec (client/seed-substrate!))})))
+          (check! :substrate-index
+                  (await (db/transact!
+                           {:seon.db/conn conn
+                            :seon.db/tx-data
+                            (await (client/substrate-index-tx conn))}))))))
+    (when (seq schema-registrations)
+      (doseq [[k v] schema-registrations] (schema/register! k v))
+      (let [now  (js/Date.)
+            tee  (vec (for [[k v] schema-registrations]
+                        (cond-> {:seon.schema/key        k
+                                 :seon.schema/source     (pr-str
+                                                           (list 'seon.schema/register! k v))
+                                 :seon.schema/created-at now}
+                          (namespace k)
+                          (assoc :seon.schema/ns
+                                 {:seon.ns/name (keyword (namespace k))}))))
+            ;; entity-shape :map registrations ALSO decompose into
+            ;; id-attr/required-attrs rows (the catalog's kind blocks) —
+            ;; separate tx so the identity upsert merges cleanly.
+            deco (into [] (mapcat (comp schema/entity-schema-tx-data first))
+                       schema-registrations)]
+        (check! :scenario-schemas
+                (await (db/transact! {:seon.db/conn conn
+                                      :seon.db/tx-data tee})))
+        (when (seq deco)
+          (check! :scenario-entity-schemas
+                  (await (db/transact! {:seon.db/conn conn
+                                        :seon.db/tx-data deco}))))))
+    (when (seq fixtures)
+      (check! :fixtures
+              (await (db/transact! {:seon.db/conn conn
+                                    :seon.db/tx-data
+                                    (resolve-fixture-dates fixtures)}))))
+    {:seon.gym/ok? true}))
+
 (defn ^:async run-scenario!
   "Run ONE scenario end-to-end on a scratch `:memory` conn and return a
    Promise of the scorecard (or a refusal map — errors are values):
@@ -728,8 +831,9 @@
        AND DEEPSEEK_API_KEY is set — the suite must never burn money.
 
    Pipeline: open scratch conn → swap the root `seon.db/*conn*`
-   (restored in finally) → ensure bootstrap compile-state → seed the
-   user entity + scenario registrations/fixtures (+ fixture sources) →
+   (restored in finally) → ensure bootstrap compile-state → seed THE
+   WORLD A POD BOOTS INTO + the scenario's prior-agent layer
+   ([[seed-scenario-world!]]) (+ fixture sources) →
    per gym-turn: lazily boot the turn's agent, land the user message,
    drive per tier/llm-injection → evaluate mechanical predicates
    against the post-run db + transcript → run :llm-judge predicates on
@@ -740,9 +844,8 @@
   [{scenario    :seon.gym/scenario
     allow-paid? :seon.gym/allow-paid?
     judge-fn    :seon.gym/judge-fn}]
-  (let [{:seon.gym.scenario/keys [id tier status axes schema-registrations
-                                  fixtures fixture-sources llm turns
-                                  predicates]} scenario]
+  (let [{:seon.gym.scenario/keys [id tier status axes fixture-sources llm
+                                  turns predicates]} scenario]
     (cond
       (= :todo status)
       {:seon.gym/ok? false
@@ -775,17 +878,12 @@
             ;; SEON_FS_READ_ONLY=1). Both restored/irrelevant after the run.
             (sfs/configure! {:seon.fs/allowed-roots [(.cwd js/process)]
                              :seon.fs/read-only?    true})
-            ;; Scenario-declared schema registrations (for fixtures that
-            ;; use non-substrate attrs), then the substrate seed + the user
-            ;; entity + fixtures (relative dates resolved) + fn sources.
-            (doseq [[k v] schema-registrations] (schema/register! k v))
-            (let [env (await (db/transact!
-                               {:seon.db/tx-data
-                                (-> (vec (client/seed-substrate!))
-                                    (into (client/index-substrate!))
-                                    (into (resolve-fixture-dates fixtures)))}))]
-              (when-not (:seon.db/ok? env)
-                (throw (ex-info "gym: fixture transact failed" env))))
+            ;; The pod boot seed + the scenario's prior-agent layer
+            ;; (registrations as tee-shaped :seon.schema rows +
+            ;; fixtures) — see [[seed-scenario-world!]] (world-parity:
+            ;; gym prompts must equal real pod prompts).
+            (await (seed-scenario-world! {:seon.db/conn conn
+                                          :seon.gym/scenario scenario}))
             (await (eval-fixture-sources! compile-state fixture-sources))
             ;; Drive every gym turn, strictly in order; each turn's agent
             ;; boots lazily on first use (multi-agent sequencing).

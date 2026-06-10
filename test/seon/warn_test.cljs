@@ -29,6 +29,9 @@
 (schema/register! :warntest.dom/duration-minutes :int)
 (schema/register! :warntest.dom/date :inst)
 (schema/register! :warntest.dom/type :keyword)
+;; The provenance test's agent-authored seon.* DATA domain (the live
+;; store's shape — same registration the S-21 gym scenario seeds).
+(schema/register! :seon.workout/date :string)
 
 ;; ---------------------------------------------------------------------------
 ;; Fixture — fresh conn + a corpus of defective and clean rows.
@@ -150,6 +153,18 @@
      ;; ── domain data: the parallel-attr fork ──────────────────────
      ;; 2 entities on the ESTABLISHED attr (duration-seconds), 1 on the
      ;; fork (duration-minutes) — mirrors run 4's live :workout data.
+     ;; The tee-shaped :seon.schema rows give the attrs AGENT
+     ;; provenance (this whole seed tx is non-:substrate-seed), exactly
+     ;; like seon.eval/build-tee-entities does for a real register!
+     ;; eval — domain-attrs discriminates on that provenance.
+     {:seon.schema/key :warntest.dom/duration-seconds
+      :seon.schema/created-at (t 0)}
+     {:seon.schema/key :warntest.dom/duration-minutes
+      :seon.schema/created-at (t 0)}
+     {:seon.schema/key :warntest.dom/date
+      :seon.schema/created-at (t 0)}
+     {:seon.schema/key :warntest.dom/type
+      :seon.schema/created-at (t 0)}
      {:warntest.dom/date (t 0)
       :warntest.dom/type :run
       :warntest.dom/duration-seconds 1470}
@@ -286,6 +301,53 @@
                   "no unit suffix → never collides (date/type are safe)")
               (is (str/includes? (:seon.warn/example r) "convert at write time")
                   "the fix example teaches conversion, not a new attr"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest domain-attrs-discriminate-by-provenance-not-keyword-namespace
+  ;; S-21 production-bug pin (2026-06-10): the old keyword-namespace
+  ;; blanket `(db|seon)(\..*)?` hid agent-authored `seon.*` data
+  ;; domains (the live store's :seon.workout/*) from the whole reuse
+  ;; surface. Domain-attrs now discriminate by PROVENANCE: a
+  ;; :seon.schema/key row asserted OUTSIDE the :substrate-seed
+  ;; tx-context = agent-registered = domain; inside = substrate =
+  ;; hidden — whatever the keyword namespace.
+  (async done
+    (-> (client/open-agent-conn!)
+        (.then (fn [conn]
+          (-> ;; substrate layer — :seon.agent/id's schema row + an
+              ;; install of the attr, inside the seed tx-context (the
+              ;; same provenance seon.client/start-agent! stamps).
+              (db/with-tx-context {:seon.db/origin :substrate-seed}
+                (fn []
+                  (db/transact!
+                    {:seon.db/conn conn
+                     :seon.db/tx-data
+                     [{:seon.schema/key :seon.agent/id
+                       :seon.schema/created-at (js/Date.)}
+                      ;; 14 chars — :seon.agent/id is :seon.db/id-shaped
+                      {:seon.agent/id "warntest-prova"}]})))
+              (.then (fn [env]
+                (is (:seon.db/ok? env) "substrate-layer tx lands")
+                ;; agent layer — the tee row + data for a seon.* DATA
+                ;; domain, in an ordinary (non-seed) tx.
+                (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data
+                   [{:seon.schema/key :seon.workout/date
+                     :seon.schema/source
+                     "(seon.schema/register! :seon.workout/date :string)"
+                     :seon.schema/created-at (js/Date.)}
+                    {:seon.workout/date "2026-06-10"}]})))
+              (.then (fn [env]
+                (is (:seon.db/ok? env) "agent-layer tx lands")
+                (let [attrs (set (warn/domain-attrs {:seon.db/db @conn}))]
+                  (is (contains? attrs :seon.workout/date)
+                      "agent-registered seon.* DATA domain renders as a domain attr")
+                  (is (not (contains? attrs :seon.agent/id))
+                      "substrate-seeded seon.* attr stays hidden")
+                  (is (not (contains? attrs :seon.schema/key))
+                      "attrs with no :seon.schema row at all stay hidden")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

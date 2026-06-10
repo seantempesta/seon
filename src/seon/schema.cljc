@@ -26,7 +26,8 @@
    - Parse individual `register!` forms
    - Update single schema definitions
    - Track which schemas are defined in which namespace"
-  (:require [malli.core :as m]
+  (:require [clojure.string :as str]
+            [malli.core :as m]
             [malli.registry :as mr]))
 
 ;;; ---------------------------------------------------------------------------
@@ -288,6 +289,43 @@
                 :seon.error/kind   :user-input}
                e)))))
 
+(defn- assert-multi-segment-namespace!
+  "Gate (gym S-21 / run-paid finding, 2026-06-10): reject attrs whose
+   keyword NAMESPACE is single-segment (`:workout/date`) at register!
+   time, with a guiding error. Seon's rule (CLAUDE.md Data Rules):
+   keyword namespaces are DOMAINS with at least two segments — a
+   single-segment namespace collides with code-namespace roots and
+   fragments the reuse surface (`:workout/date` landed in a paid run
+   beside the established `:seon.workout/date`). The fix is a
+   domain-prefixed namespace: `:kb.workout/date`,
+   `:fitness.workout/date`, or reuse the existing attr.
+
+   Same failure mode as [[assert-compilable-schema!]] — register!'s
+   established error shape is a thrown `:user-input` ex-info (the eval
+   pipeline surfaces it as an error-envelope value to the agent).
+
+   CLJS (pod) only for now: the JVM substrate still carries the legacy
+   single-segment `:form/*` registrations in `seon.repl` (clj) — a
+   reported smell in ANOTHER lane; enforcement goes cljc once those are
+   renamed. Every CLJS substrate registration is multi-segment
+   (verified by grep + the full suite, 2026-06-10)."
+  [k]
+  (let [ns-str (namespace k)]
+    (when (and ns-str (not (str/includes? ns-str ".")))
+      (throw (ex-info
+               (str "schema/register! " k ": single-segment keyword "
+                    "namespace " (pr-str ns-str) " is not allowed. "
+                    "Keyword namespaces are data DOMAINS and need ≥2 "
+                    "segments — e.g. :" ns-str "/" (name k) " → :kb."
+                    ns-str "/" (name k) " or :fitness." ns-str "/"
+                    (name k) ". FIRST check the schema-catalog's "
+                    "domain-attrs block: if an attr for this fact "
+                    "already exists, reuse its EXACT keyword instead "
+                    "of registering a new one.")
+               {:seon.schema/error :seon.schema/single-segment-namespace
+                :seon.schema/key   k
+                :seon.error/kind   :user-input})))))
+
 (defn register!
   "Register a single schema in the global registry.
 
@@ -313,6 +351,10 @@
        ;; stored with props {:seon.render/ai 'foo
        ;;                    :seon.entity/id-attr :seon.eval/id}"
   [k v]
+  ;; CLJS-only until the JVM's legacy `:form/*` registrations are
+  ;; renamed — see [[assert-multi-segment-namespace!]].
+  #?(:cljs (assert-multi-segment-namespace! k)
+     :clj  nil)
   (assert-compilable-schema! k v)
   (swap! *schemas assoc k (with-entity-id-attr v))
   k)
