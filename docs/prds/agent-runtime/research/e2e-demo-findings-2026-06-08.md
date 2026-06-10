@@ -666,3 +666,46 @@ race" and retried — right instinct, wrong information.
 ### MVP loop status: work-directed design → store → cross-agent reuse →
 in-query aggregate ALL DEMONSTRATED LIVE. Remaining for the demo: messaging
 codified (1.5), `:with` teaching, empty-message hygiene, file-corpus scenario.
+
+## Run 7 — 2026-06-10 ~00:49Z, codebase-Q&A demo scenario (post units 1.5→#25)
+
+Question (Vdx-2606092048, fresh): "How does seon validate schemas at transact
+time? … Store what you find so the next agent doesn't have to redo this."
+
+### Scenario 1: PASS — the full taught pipeline executed
+
+- 16s: `seon.search/grep` for "validate" AND "unregistered" (searched the
+  ERROR TEXT — smart) — the search→read recipe verbatim.
+- 47s: registered `:finding/*` EXACTLY per the taught convention (no fork).
+- Stored 3 findings with provenance: validate-attrs! (db.cljs:630,
+  :verified), validate-entity-values! (:694, :verified), pipeline summary
+  honestly :inferred.
+- 95s: correct user-facing answer (two-step Malli-backed gate).
+- Post-reply: kept extracting transact!'s body, hit its own string-code
+  errors, read them via (result :id) and retried — accretion instinct
+  works; slightly over-eager after the answer.
+
+### Scenario 2 (tIY-2606092100, fresh, related question): EFFICIENT RE-DERIVE,
+### NOT REUSE
+
+- 70s flawless: grep (validate-entity-values! BY NAME at 8s — suspiciously
+  specific; convention-guess or attr-name osmosis) → read-file → exact line
+  ranges → correct reply! to the user.
+- BUT: never queried the :finding rows. Knowledge was stored, discoverable
+  (attrs in its catalog), and ignored.
+
+### The next context gap (one level above run-4's)
+
+Schemas get reused (taught). FINDINGS don't get consulted — discoverable ≠
+salient. Fix candidates: (a) prompt/capabilities line: "before researching,
+query existing :finding rows for your topic"; (b) render recent findings'
+:finding/question one-liners in the catalog block (content salience, not
+just attr names); (c) maybe a warnings-style surface when stored findings
+match terms in the inbound question.
+
+### Substrate scoreboard for the day
+
+search→read recipe: PROVEN · finding convention: PROVEN · envelope honesty:
+no false claims observed · reply! routing: PROVEN · UI: watchable live
+(collapsed statics, turn separators, sub-second renders) · finding REUSE:
+the one remaining behavior for the Friday demo bar.
