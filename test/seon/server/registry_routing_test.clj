@@ -20,12 +20,15 @@
 ;;; --- Fixture ---------------------------------------------------------------
 
 (defn ^:private isolate [t]
+  ;; Snapshot BEFORE resetting hooks — restore-registry! puts the live
+  ;; hooks (::raw-broadcast, ::reactive, ...) back from the snapshot, so
+  ;; running this suite in a live JVM no longer strands an empty hook
+  ;; vector (one of the 2026-06-10 hook-loss vectors).
   (let [{::reg/keys [snapshot]} (reg/snapshot-registry {})]
     (reg/reset-on-ensure-db-hooks!)
     (try
       (t)
       (finally
-        (reg/reset-on-ensure-db-hooks!)
         (reg/restore-registry! {::reg/snapshot snapshot})))))
 
 (use-fixtures :each isolate)
@@ -123,7 +126,9 @@
             exactly once (idempotent re-ensure does NOT re-fire)"
     (let [calls (atom [])]
       (reg/register-on-ensure-db-hook!
-       (fn [conn db-name] (swap! calls conj [db-name (some? conn) (some? @conn)])))
+       {::reg/hook-key ::fires-once
+        ::reg/hook-fn (fn [conn db-name]
+                        (swap! calls conj [db-name (some? conn) (some? @conn)]))})
       (let [c1 (::reg/conn (mem :cluster/hook))
             c2 (::reg/conn (mem :cluster/hook))]   ; idempotent re-ensure
         (is (identical? c1 c2) "re-ensure returns same conn")
@@ -133,13 +138,40 @@
       (reg/remove-db! {::reg/db-name :cluster/hook}))))
 
 (deftest on-ensure-db-multiple-hooks-all-fire-in-order
-  (testing "multiple registered hooks all run, in registration order"
+  (testing "multiple registered hooks all run, in first-registration order"
     (let [order (atom [])]
-      (reg/register-on-ensure-db-hook! (fn [_ _] (swap! order conj :first)))
-      (reg/register-on-ensure-db-hook! (fn [_ _] (swap! order conj :second)))
+      (reg/register-on-ensure-db-hook!
+       {::reg/hook-key ::first
+        ::reg/hook-fn (fn [_ _] (swap! order conj :first))})
+      (reg/register-on-ensure-db-hook!
+       {::reg/hook-key ::second
+        ::reg/hook-fn (fn [_ _] (swap! order conj :second))})
       (mem :cluster/multi)
       (is (= [:first :second] @order))
       (reg/remove-db! {::reg/db-name :cluster/multi}))))
+
+(deftest on-ensure-db-hook-reregistration-replaces-by-key
+  (testing "re-registering the same ::hook-key REPLACES the fn in place —
+            no duplicate fire, original position kept. This is the reload
+            self-heal contract: wire/boot re-register at every ns load with
+            no defonce guard, and the hook set never accumulates copies."
+    (let [order (atom [])]
+      (reg/register-on-ensure-db-hook!
+       {::reg/hook-key ::replaced
+        ::reg/hook-fn (fn [_ _] (swap! order conj :stale))})
+      (reg/register-on-ensure-db-hook!
+       {::reg/hook-key ::tail
+        ::reg/hook-fn (fn [_ _] (swap! order conj :tail))})
+      ;; simulate the ns reload re-running its registration form
+      (let [{::reg/keys [hook-count]}
+            (reg/register-on-ensure-db-hook!
+             {::reg/hook-key ::replaced
+              ::reg/hook-fn (fn [_ _] (swap! order conj :fresh))})]
+        (is (= 2 hook-count) "re-registration did not grow the hook set"))
+      (mem :cluster/rereg)
+      (is (= [:fresh :tail] @order)
+          "replaced fn fired once, in its original position; stale fn never fired")
+      (reg/remove-db! {::reg/db-name :cluster/rereg}))))
 
 (deftest on-ensure-db-hook-can-install-a-listener-that-gets-the-tx-report
   (testing "the canonical use: a hook registers a d/listen! that receives the
@@ -147,9 +179,10 @@
             ::reactive seam)"
     (let [reports (atom [])]
       (reg/register-on-ensure-db-hook!
-       (fn [conn _db-name]
-         (d/listen conn ::test-listener
-                   (fn [report] (swap! reports conj report)))))
+       {::reg/hook-key ::test-listener
+        ::reg/hook-fn (fn [conn _db-name]
+                        (d/listen conn ::test-listener
+                                  (fn [report] (swap! reports conj report))))})
       (let [conn (::reg/conn (mem :cluster/listen))]
         ;; real multi-clause schema + data
         (d/transact conn [{:db/ident :person/name

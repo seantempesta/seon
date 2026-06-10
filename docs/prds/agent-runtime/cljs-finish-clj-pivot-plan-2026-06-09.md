@@ -99,8 +99,13 @@ schemas, 154 tests. Per-section verdicts (baseline audit:
 - CLJS: `bin/test-cljs` **288 tests / 1073 assertions / 0 failures, exit 0**
   — verified identical across 3 consecutive runs
   (`research/test-stability-audit-2026-06-10.md`).
-- JVM: `(user/run-tests)` **2544 pass / 1 fail / 0 errors** — the 1 is the
-  known `collect-flow-status` `[:maybe]` violation (ledger #4, JVM lane).
+- JVM: `(user/run-tests)` **2546 pass / 0 fail / 0 errors** (2026-06-10,
+  post hook-loss + `collect-flow-status` fixes — ledger #4 cleared).
+  Honest caveat (verifier, same day): in a heavily-used REPL the full
+  suite showed 2545/3/0 — all 3 in `ingest-spec-entity-pipeline-test`
+  (generative; passes 171/0/0 isolated twice). Order/state-sensitive
+  flake, pre-existing; suite-contamination unit queued (likely shares a
+  root with the dev-hook generative `ensure-db!` side-effects).
 
 **The live-run iteration loop (the method, keep it):** drive a bounded,
 observed live agent run; every failure becomes a named defect; fix it with a
@@ -115,12 +120,16 @@ finding pipeline). Full per-run history:
 - **Stub self-wake** (pod lane): `stub-llm` ALWAYS emits two forms, so the
   loop's zero-forms stop never fires for stubs — a single wake burns turns
   to `turns-cap`. Fix: stub emits zero forms on its 2nd+ turn since inbound.
-- **JVM clj-reload hook-loss** (V2 server lane): reloading
-  `seon.server.registry` empties `!on-ensure-db-hooks` while defonce guards
-  block re-registration until JVM restart; failures swallowed by
-  `catch Throwable _`. Source fix = `^:clj-reload/keep` (or key-based
-  idempotent registration) + remove the silent catch. Live JVM repaired via
-  REPL; details in the test-stability audit.
+- ~~JVM clj-reload hook-loss~~ — FIXED 2026-06-10: hook registration is
+  key-based idempotent (`{::hook-key ::hook-fn}` entries, re-registration
+  replaces by key); wire/boot register at every ns load with NO defonce
+  guard, so any reload of registry cascades into wire/boot and re-registers
+  (self-healing even from an emptied vector). Hook failures are caught but
+  LOGGED (`log/error`), never swallowed. Second loss vector also closed:
+  `registry-routing-test`'s fixture used to reset hooks without restoring —
+  `snapshot-registry`/`restore-registry!` now carry `:hooks`. Live proof:
+  hooks present + firing (subscription schema seeded, both listeners
+  installed) on a fresh `ensure-db!` after `(user/reload)`.
 - ~~Inspector dead-agent SSE 404~~ — FIXED 2026-06-10: `handle!` guards
   the page AND SSE routes with `agent-exists?` — stale tabs/bookmarks
   get a clean 404 "not in this cluster store" page (was: page 500'd
@@ -132,8 +141,11 @@ finding pipeline). Full per-run history:
 - **MCP cljs `default` session NPE** (`Compiler.currentNS()` null) — reset =
   drop + recreate the singleton session; 26 stale sessions accumulated
   (session GC wanted). See §7 MCP-health unit.
-- **`[:maybe ::flow-status]`** in `src/seon/flow/status.clj:393` (JVM lane):
-  bump in place to `::flow-status` + explicit not-registered error.
+- ~~`[:maybe ::flow-status]`~~ — FIXED 2026-06-10: `collect-flow-status`
+  returns `::flow-status` and throws ex-info
+  (`::error :flow-not-registered`) for unknown flows; the previously-failing
+  conventions-check test passes (live-proven against a running infra flow:
+  happy path returns a valid status map, unknown id throws).
 - **Agent-authored schema replay BROKEN** (found live 2026-06-10: every
   `:seon.workout/*` replay fails with a swallowed analyzer "ERROR" at new-
   agent boot; same window `/agents/new` 500'd `:malli.core/invalid-schema`

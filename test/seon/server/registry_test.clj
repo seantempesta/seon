@@ -23,6 +23,14 @@
 
 (use-fixtures :each isolate-registry)
 
+(defn- session-count
+  "Current registry size. Tests assert DELTAS against a baseline captured at
+   test start — the live JVM's registry may legitimately hold ambient entries
+   (and the dev hook's generative checks have been observed to leak entries),
+   so absolute counts are not stable."
+  []
+  (count (::ss/sessions (ss/list-sessions {}))))
+
 ;;; --- Tests -----------------------------------------------------------------
 
 (deftest happy-path-create-get-transact-query-remove
@@ -48,17 +56,20 @@
 
 (deftest ensure-db-is-idempotent
   (testing "calling ensure-db! twice with same db-name returns same conn"
-    (let [name :test/idem
-          e1   (ss/ensure-db! {::ss/db-name name ::ss/backend :memory})
-          e2   (ss/ensure-db! {::ss/db-name name ::ss/backend :memory})]
+    (let [baseline (session-count)
+          name     :test/idem
+          e1       (ss/ensure-db! {::ss/db-name name ::ss/backend :memory})
+          e2       (ss/ensure-db! {::ss/db-name name ::ss/backend :memory})]
       (is (identical? (::ss/conn e1) (::ss/conn e2))
           "second ensure must return the same identical conn")
-      (is (= 1 (count (::ss/sessions (ss/list-sessions {})))))
+      (is (= (inc baseline) (session-count))
+          "two ensures added exactly one registry entry")
       (ss/remove-db! {::ss/db-name name}))))
 
 (deftest concurrent-ensure-converges
   (testing "N threads racing on same db-name → all get the same conn"
-    (let [name      :test/race
+    (let [baseline  (session-count)
+          name      :test/race
           n         8
           latch     (promise)
           fs        (vec
@@ -73,8 +84,8 @@
           first-c   (first conns)]
       (is (every? #(identical? first-c %) conns)
           "all racing threads must observe the same conn")
-      (is (= 1 (count (::ss/sessions (ss/list-sessions {}))))
-          "registry contains exactly one entry for the raced name")
+      (is (= (inc baseline) (session-count))
+          "registry gained exactly one entry for the raced name")
       (ss/remove-db! {::ss/db-name name}))))
 
 (deftest list-sessions-reflects-state
@@ -96,10 +107,12 @@
 
 (deftest remove-absent-is-noop
   (testing "remove-db! on unregistered name returns {::removed? false}"
-    (let [{::ss/keys [removed?]}
+    (let [baseline (session-count)
+          {::ss/keys [removed?]}
           (ss/remove-db! {::ss/db-name :never/registered})]
       (is (false? removed?))
-      (is (= 0 (count (::ss/sessions (ss/list-sessions {}))))))))
+      (is (= baseline (session-count))
+          "no-op remove leaves the registry size unchanged"))))
 
 (deftest get-conn-absent-returns-no-conn
   (testing "get-conn on unregistered name returns a response without ::conn"

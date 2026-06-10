@@ -33,18 +33,20 @@
 
    ## On-ensure-db extension point (the reactive seam)
 
-   `ensure-db!` invokes a per-conn extension point — an atom of
-   `(fn [conn db-name])` hooks registered via `register-on-ensure-db-hook!`
-   — after opening (and BEFORE handing back) a conn. The wire-server
-   registers its own `::raw-broadcast` `d/listen!` here; the reactive
-   engine registers its `::reactive` `d/listen!` here too, WITHOUT this ns
-   (or `wire.clj`) requiring `seon.server.reactive`. See
+   `ensure-db!` invokes a per-conn extension point — an atom of keyed
+   `{::hook-key k ::hook-fn (fn [conn db-name])}` entries registered via
+   `register-on-ensure-db-hook!` (idempotent by key: re-registration
+   replaces in place) — after opening (and BEFORE handing back) a conn.
+   The wire-server registers its own `::raw-broadcast` `d/listen!` here;
+   the reactive engine registers its `::reactive` `d/listen!` here too,
+   WITHOUT this ns (or `wire.clj`) requiring `seon.server.reactive`. See
    `docs/prds/agent-runtime/clusters-and-multi-db-wiring-2026-06-03.md` §5
    and the platform-review hook-mechanism section."
   (:require [clojure.set :as set]
             [datahike.api :as d]
             [seon.schema :as schema]
-            [seon.server.store :as store]))
+            [seon.server.store :as store]
+            [taoensso.timbre :as log]))
 
 ;;; --- Schemas ---------------------------------------------------------------
 
@@ -86,6 +88,27 @@
 (schema/register! ::get-conn-request [:map [::db-name ::db-name]])
 (schema/register! ::get-conn-response
                   [:map [::conn {:optional true} ::conn]])
+
+;; On-ensure-db hook entries. `::hook-key` is the registration identity —
+;; re-registering the same key REPLACES the fn in place (idempotent across
+;; ns reloads, no defonce guard needed at call sites). The key doubles as
+;; the conventional `d/listen!` key the hook installs (`::raw-broadcast`,
+;; `:seon.server.boot/reactive`, ...).
+(schema/register! ::hook-key :qualified-keyword)
+(schema/register! ::hook-fn [:fn fn?])
+(schema/register! ::hook-entry
+                  [:map
+                   [::hook-key ::hook-key]
+                   [::hook-fn ::hook-fn]])
+
+(schema/register! ::register-on-ensure-db-hook!-request ::hook-entry)
+(schema/register! ::register-on-ensure-db-hook!-response
+                  [:map [::hook-count :int]])
+
+;; `db-name` is a keyword for registry-opened conns, but the wire-server's
+;; ambient conn calls `run-on-ensure-db-hooks!` with its STRING name
+;; (`wire/-main`). Spec'd as reality until that mismatch is unified.
+(schema/register! ::hook-db-name [:or ::db-name :string])
 
 (schema/register! ::snapshot-registry-request [:map])
 (schema/register! ::snapshot-registry-response [:map [::snapshot :map]])
@@ -197,31 +220,52 @@
 
 ;;; --- On-ensure-db extension point ------------------------------------------
 ;;;
-;;; A vector of `(fn [conn db-name])` hooks invoked by `ensure-db!` exactly
-;;; once per newly-opened conn, after `d/connect` and before the entry is
-;;; handed back. The wire-server registers its `::raw-broadcast` `d/listen!`
-;;; here; the reactive engine registers its `::reactive` `d/listen!` here too.
-;;; This is the seam that lets `wire.clj` install broadcast without requiring
-;;; `seon.server.reactive`, and lets the reactive track plug in WITHOUT
-;;; `wire.clj` (or this ns) requiring it. Hooks fire on the create-winner's
-;;; thread, under the `!registry` lock — idempotent ensures fire hooks ONCE.
+;;; A vector of `{::hook-key k ::hook-fn (fn [conn db-name])}` entries invoked
+;;; by `ensure-db!` exactly once per newly-opened conn, after `d/connect` and
+;;; before the entry is handed back. The wire-server registers its
+;;; `::raw-broadcast` `d/listen!` here; the reactive engine registers its
+;;; `::reactive` `d/listen!` here too. This is the seam that lets `wire.clj`
+;;; install broadcast without requiring `seon.server.reactive`, and lets the
+;;; reactive track plug in WITHOUT `wire.clj` (or this ns) requiring it.
+;;; Hooks fire on the create-winner's thread, under the `!registry` lock —
+;;; idempotent ensures fire hooks ONCE.
+;;;
+;;; Registration is KEY-BASED and idempotent: re-registering an existing
+;;; `::hook-key` replaces the fn in place. Call sites register at ns load with
+;;; NO defonce guard — every reload of the registering ns re-runs the
+;;; registration, so the hook set self-heals even if this ns is reloaded and
+;;; the vector were ever lost (the 2026-06-10 hook-loss bug: defonce guards in
+;;; wire/boot blocked re-registration until JVM restart).
 
-(defonce ^:private !on-ensure-db-hooks (atom []))
+(defonce ^:private !on-ensure-db-hooks
+  ;; vector of ::hook-entry, in first-registration order
+  (atom []))
 
 (defn register-on-ensure-db-hook!
-  "Register a `(fn [conn db-name])` invoked once per newly-opened conn by
-   `ensure-db!`. Returns the new hook count. Hooks run in registration order.
-   A hook typically calls `(d/listen! conn <key> <callback>)` under its own
-   distinct key (`::raw-broadcast`, `::reactive`, ...) — datahike fires every
-   distinct-keyed listener. Hook exceptions are swallowed so one bad hook can't
-   wedge `ensure-db!` for the rest."
-  [f]
-  (count (swap! !on-ensure-db-hooks conj f)))
+  "Register a `(fn [conn db-name])` under `::hook-key`, invoked once per
+   newly-opened conn by `ensure-db!`. Idempotent by key: re-registering an
+   existing key replaces the fn in place (same position). Hooks run in
+   first-registration order. A hook typically calls
+   `(d/listen! conn <key> <callback>)` under its own distinct key
+   (`::raw-broadcast`, `::reactive`, ...) — datahike fires every
+   distinct-keyed listener. Returns `{::hook-count n}`."
+  {:malli/schema [:=> [:cat ::register-on-ensure-db-hook!-request]
+                  ::register-on-ensure-db-hook!-response]}
+  [{::keys [hook-key hook-fn]}]
+  (let [entry  {::hook-key hook-key ::hook-fn hook-fn}
+        hooks' (swap! !on-ensure-db-hooks
+                      (fn [hooks]
+                        (if (some #(= hook-key (::hook-key %)) hooks)
+                          (mapv #(if (= hook-key (::hook-key %)) entry %) hooks)
+                          (conj hooks entry))))]
+    {::hook-count (count hooks')}))
 
 (defn ^:no-doc reset-on-ensure-db-hooks!
   "Test seam: drop all on-ensure-db hooks."
+  {:malli/schema [:=> [:cat] :nil]}
   []
-  (reset! !on-ensure-db-hooks []))
+  (reset! !on-ensure-db-hooks [])
+  nil)
 
 (defn run-on-ensure-db-hooks!
   "Fire every registered on-ensure-db hook for `conn`/`db-name`. `ensure-db!`
@@ -229,10 +273,21 @@
    for its AMBIENT conn (created directly by `wire/ensure-db!`, outside the
    registry) so that conn ALSO gets the `::reactive` listener + subscription
    schema the hooks install — not just the `::raw-broadcast` it wires itself.
-   Hook exceptions are swallowed so one bad hook can't wedge the caller."
+   A hook exception is caught so one bad hook can't wedge the caller, but it
+   is LOGGED LOUDLY (never swallowed) — a failed hook means the conn is
+   missing its listener/schema and downstream ops will misbehave."
+  {:malli/schema [:=> [:catn
+                       [::conn ::conn]
+                       [::hook-db-name ::hook-db-name]]
+                  :nil]}
   [conn db-name]
-  (doseq [f @!on-ensure-db-hooks]
-    (try (f conn db-name) (catch Throwable _))))
+  (doseq [{::keys [hook-key hook-fn]} @!on-ensure-db-hooks]
+    (try
+      (hook-fn conn db-name)
+      (catch Throwable t
+        (log/error t "on-ensure-db hook failed — conn is missing this hook's listener/schema"
+                   {::hook-key hook-key ::db-name db-name}))))
+  nil)
 
 ;;; --- Public API ------------------------------------------------------------
 
@@ -394,23 +449,30 @@
 ;;; --- Test seam -------------------------------------------------------------
 
 (defn ^:no-doc snapshot-registry
-  "Test helper: capture the current registry + agent map for
-   restoration. Used by `session_test.clj`'s fixture to isolate
-   test state."
+  "Test helper: capture the current registry + agent map + on-ensure-db
+   hooks for restoration. Used by test fixtures to isolate test state.
+   Hooks are included so a fixture that resets them for isolation puts
+   the live JVM's hooks (::raw-broadcast, ::reactive, ...) back on
+   restore instead of stranding an empty hook vector."
   {:malli/schema [:=> [:cat ::snapshot-registry-request] ::snapshot-registry-response]}
   [{}]
-  {::snapshot {:registry @!registry :agents @!agents}})
+  {::snapshot {:registry @!registry
+               :agents @!agents
+               :hooks @!on-ensure-db-hooks}})
 
 (defn ^:no-doc restore-registry!
   "Test helper: replace registry + agent map with `::snapshot`.
    Releases any conns that were added since the snapshot was taken.
-   Accepts both the new shape (`{:registry ... :agents ...}`) and
-   the legacy bare-map shape for backwards compatibility."
+   When the snapshot carries `:hooks` (as `snapshot-registry` now
+   produces), the on-ensure-db hook vector is restored too — a fixture
+   that resets hooks for isolation puts the live hooks back. Accepts
+   the new shape (`{:registry ... :agents ... :hooks ...}`), the
+   hookless shape, and the legacy bare-map shape."
   {:malli/schema [:=> [:cat ::restore-registry-request] ::restore-registry-response]}
   [{::keys [snapshot]}]
   (locking !registry
     (let [;; legacy snapshots were a bare {db-name -> entry} map; new
-          ;; snapshots wrap registry + agents.
+          ;; snapshots wrap registry + agents (+ hooks).
           legacy?       (not (contains? snapshot :registry))
           registry-snap (if legacy? snapshot (:registry snapshot))
           agents-snap   (if legacy? {} (:agents snapshot))
@@ -422,4 +484,6 @@
           (try (d/release conn) (catch Throwable _))))
       (reset! !registry registry-snap)
       (reset! !agents agents-snap)
+      (when (contains? snapshot :hooks)
+        (reset! !on-ensure-db-hooks (:hooks snapshot)))
       {::restored? true})))

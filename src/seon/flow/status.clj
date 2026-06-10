@@ -396,11 +396,15 @@
    Request keys:
      ::id - Flow identifier
 
-   Returns a flow-status map or nil if the flow is not registered."
-  {:malli/schema [:=> [:cat ::collect-flow-status-request]
-                  [:maybe ::flow-status]]}
+   Returns a flow-status map. Throws ex-info (`::error :flow-not-registered`)
+   if no flow is registered under `::id` — callers that tolerate absence
+   should consult `collect-status` (`::flows`) instead of probing."
+  {:malli/schema [:=> [:cat ::collect-flow-status-request] ::flow-status]}
   [{::keys [id]}]
-  (request-via-collector! ::collect-flow-status {::id id} default-timeout-ms))
+  (or (request-via-collector! ::collect-flow-status {::id id} default-timeout-ms)
+      (throw (ex-info (str "Flow not registered: " id)
+                      {::error :flow-not-registered
+                       ::id id}))))
 
 (defn collect-status
   "Snapshot all registered flows.

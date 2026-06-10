@@ -35,7 +35,8 @@
             [seon.server.registry :as registry]
             [seon.server.broadcast :as bcast]
             [seon.server.transit :as transit]
-            [seon.server.reactive :as reactive])
+            [seon.server.reactive :as reactive]
+            [taoensso.timbre :as log])
   (:import [java.util.concurrent ConcurrentLinkedQueue]
            [java.util.concurrent.atomic AtomicInteger])
   (:gen-class))
@@ -163,42 +164,47 @@
                      :db/cardinality :db.cardinality/one}]))
 
 ;; Install the reactive engine as a per-conn ::reactive d/listen! via the
-;; registry's on-ensure-db hook. Idempotent guard (defonce) prevents the hook
-;; vector from accumulating duplicate copies across reloads — mirrors how
-;; wire.clj guards its ::raw-broadcast hook. Each commit routes through the
-;; engine's two-gate dispatch and emits a changed-summaries event on the SAME
-;; pub fanout (db-name-tagged), so changed query rows ride the existing broadcast.
-(defonce ^:private reactive-hook-installed?
-  (do (registry/register-on-ensure-db-hook!
-       (fn [conn db-name]
-         (try
-           (let [db-name-str (if (keyword? db-name) (subs (str db-name) 1) (str db-name))
-                 state       (engine-for db-name-str)]
-             ;; seed the durable subscription attrs so register-subscription!
-             ;; can persist its datom under :schema-flexibility :write.
-             (seed-subscription-schema! conn)
-             ;; reconstitute the engine cache from any persisted active subs
-             ;; (a file-backed conn may already hold subscription datoms).
-             (try (reactive/rebuild! state conn) (catch Throwable _))
-             (d/listen conn ::reactive
-                       (fn [report]
-                         (reactive/on-tx!
-                          {:db-name db-name-str
-                           :conn conn
-                           :state state
-                           :emit! (fn [ev]
-                                    ;; tag the changed-summaries event with the
-                                    ;; db-name for pub routing, ship the body as
-                                    ;; a Transit-JSON payload (it carries
-                                    ;; keywords/rows that CBOR can't represent).
-                                    (bcast/broadcast!
-                                     {"event"   "changed-summaries"
-                                      "db-name" db-name-str
-                                      "basis-t" (:seon.server.reactive/basis-t ev)
-                                      "payload" (transit/write-str ev)}))}
-                          report))))
-           (catch Throwable _))))
-      true))
+;; registry's on-ensure-db hook. Runs at every ns load — registration is
+;; key-based idempotent (re-registering ::reactive replaces in place), so
+;; reloads can't accumulate copies AND can't strand an emptied hook vector
+;; (the 2026-06-10 hook-loss bug: a defonce guard here blocked
+;; re-registration until JVM restart) — mirrors wire.clj's ::raw-broadcast
+;; hook. Each commit routes through the engine's two-gate dispatch and emits
+;; a changed-summaries event on the SAME pub fanout (db-name-tagged), so
+;; changed query rows ride the existing broadcast. Hook failures are caught +
+;; logged by `run-on-ensure-db-hooks!`.
+(registry/register-on-ensure-db-hook!
+ {:seon.server.registry/hook-key ::reactive
+  :seon.server.registry/hook-fn
+  (fn [conn db-name]
+    (let [db-name-str (if (keyword? db-name) (subs (str db-name) 1) (str db-name))
+          state       (engine-for db-name-str)]
+      ;; seed the durable subscription attrs so register-subscription!
+      ;; can persist its datom under :schema-flexibility :write.
+      (seed-subscription-schema! conn)
+      ;; reconstitute the engine cache from any persisted active subs
+      ;; (a file-backed conn may already hold subscription datoms).
+      (try (reactive/rebuild! state conn)
+           (catch Throwable t
+             (log/warn t "reactive engine rebuild! failed on ensure-db — engine starts empty"
+                       {:seon.server.registry/db-name db-name})))
+      (d/listen conn ::reactive
+                (fn [report]
+                  (reactive/on-tx!
+                   {:db-name db-name-str
+                    :conn conn
+                    :state state
+                    :emit! (fn [ev]
+                             ;; tag the changed-summaries event with the
+                             ;; db-name for pub routing, ship the body as
+                             ;; a Transit-JSON payload (it carries
+                             ;; keywords/rows that CBOR can't represent).
+                             (bcast/broadcast!
+                              {"event"   "changed-summaries"
+                               "db-name" db-name-str
+                               "basis-t" (:seon.server.reactive/basis-t ev)
+                               "payload" (transit/write-str ev)}))}
+                   report)))))})
 
 (defmethod wire/handle-op "register-subscription" [conn req]
   (let [sub-id (get req "sub-id")

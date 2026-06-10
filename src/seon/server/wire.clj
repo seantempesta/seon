@@ -313,16 +313,17 @@
 ;; Register the wire-server's ::raw-broadcast listener as an on-ensure-db hook,
 ;; so EVERY conn the registry opens gets broadcast wired — without the registry
 ;; requiring this ns. The reactive engine registers its own ::reactive hook the
-;; same way. Registered once at ns load; idempotent guard prevents dupes on
-;; reload (the hook vector would otherwise accumulate copies).
-(defonce ^:private raw-broadcast-hook-installed?
-  (do (registry/register-on-ensure-db-hook!
-       (fn [conn db-name]
-         (try
-           (seed-base-schema! conn)
-           (d/listen conn ::raw-broadcast (raw-broadcast-listener-fn db-name))
-           (catch Throwable _))))
-      true))
+;; same way. Runs at every ns load — registration is key-based idempotent
+;; (re-registering ::raw-broadcast replaces in place), so reloads can't
+;; accumulate copies AND can't strand an emptied hook vector (the 2026-06-10
+;; hook-loss bug: a defonce guard here blocked re-registration until JVM
+;; restart). Hook failures are caught + logged by `run-on-ensure-db-hooks!`.
+(registry/register-on-ensure-db-hook!
+ {:seon.server.registry/hook-key ::raw-broadcast
+  :seon.server.registry/hook-fn
+  (fn [conn db-name]
+    (seed-base-schema! conn)
+    (d/listen conn ::raw-broadcast (raw-broadcast-listener-fn db-name)))})
 
 (defn- ok-response-from-report [{:keys [wire-data added retracted bt bt-before
                                         tempids tx-meta request-id]}]
