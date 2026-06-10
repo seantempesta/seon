@@ -121,9 +121,14 @@ finding pipeline). Full per-run history:
   `catch Throwable _`. Source fix = `^:clj-reload/keep` (or key-based
   idempotent registration) + remove the silent catch. Live JVM repaired via
   REPL; details in the test-stability audit.
-- **Inspector dead-agent SSE 404** (pod lane): fix lives in
-  `seon.web.inspector`'s `route?`/`handle!` pair (serve.cljs:366 dispatch;
-  unclaimed routes fall to the 404 at :367).
+- ~~Inspector dead-agent SSE 404~~ — FIXED 2026-06-10: `handle!` guards
+  the page AND SSE routes with `agent-exists?` — stale tabs/bookmarks
+  get a clean 404 "not in this cluster store" page (was: page 500'd
+  out of `snapshot`, SSE registered a connection that threw `push!`
+  on every tx). The chat bar also surfaces non-ok POST responses in
+  `#seon-chat-err` (was: silent swallow — the post-flip "UI doesn't
+  trigger anything" report was humans typing into stale pre-flip tabs
+  and getting zero feedback on the 422).
 - **MCP cljs `default` session NPE** (`Compiler.currentNS()` null) — reset =
   drop + recreate the singleton session; 26 stale sessions accumulated
   (session GC wanted). See §7 MCP-health unit.
@@ -234,7 +239,7 @@ cluster store):**
 Each item is launchable as one agent unit (≤7 files), implement → verify →
 commit:
 
-1. **#26 finding-salience + instruction-clarity rewrite** — consult-before-
+1. **#26 finding-salience + instruction-clarity rewrite** — PLUS (user, 2026-06-10, observed live): `message!`/`reply!` must return a CONCISE registered response (`{:seon.message/ok? :seon.message/id :seon.message/hops}`; error envelope on failure) — today they return the raw transact envelope (full tx-report = ~1.5k transcript chars per reply + a misdirected "narrow your query" hint). The A3 principle applied. Also: consult-before-
    research (query `:finding` rows for the topic BEFORE searching),
    fully-qualified-keyword teaching (the worked example models real
    namespaces and explains the rule), store-proactively. Then **run 8**;
@@ -261,7 +266,7 @@ commit:
    one per boot).
 9. **REPL-DEBUGGABILITY EVERYWHERE (user, 2026-06-10): every process, agent, and cluster DB reachable from a REPL.** The access matrix to make true: (a) any AGENT RUNTIME — the cljs MCP eval already takes `agent_id` (resolves agent-id → shadow runtime, survives restart); under process-per-agent every agent process loads the dev `:client` build and registers with the ONE shadow watcher — verify the `agent_id` path end-to-end (`seon.dev.node-agent`) as processes split; (b) the WIRE-SERVER — add nREPL alongside the 7891 socket REPL and wire it into the seon MCP server so the central writer is MCP-reachable like the dev JVM; (c) any CLUSTER DB — read-only DIS reader conns from any REPL (`:lock-blob? false`) + the wire-server REPL; document the one-liner recipes; (d) remote agents (later) — the wire protocol + DB are the admin surface (shadow websocket is dev-only). Document the matrix in CLAUDE.md Process Architecture when it lands.
 10. **CLUSTER RUNTIME (the topology step after the store flip — spec before building):** today = one pod process hosting N interleaved agents on the single "default" cluster; target = ONE NODE PROCESS PER AGENT. Pieces: (a) per-agent process launcher — slim boot (reader conn + wire-writer + one agent loop + dev shadow registration), e.g. `bin/seon agent start <cluster> <agent-id>`; (b) cluster lifecycle — create-cluster mints the DB via the existing JVM multi-DB registry, spawns the orchestrator agent process; (c) **spawn-agent capability** — a wire op + supervisor seam so an ORCHESTRATOR AGENT can request new task-agent processes (the swarm primitive); (d) the web UI becomes its OWN reader process over the cluster DB (today the pod serves it); (e) the in-process interleaving-risk list mostly dissolves per-process. Until this lands, multi-agent = interleaved-in-one-pod on cluster "default".
-11. **`bin/seon cluster reset [name]`** (user-approved; demo-path): one command = stop pod → stop wire-server → wipe `data/clusters/<name>/store` → restart both (fresh DB minted, substrate re-seeds via the idempotent boot). First use: wipe the Track-2 test debris from "default" right after the 2.2e flip verifies. Later grows `cluster create <name>`.
+11. ~~`bin/seon cluster reset [name]`~~ — DONE 2026-06-10: stop pod → stop wire-server → wipe `data/clusters/<name>/store` (store dir ONLY) → start wire-server (waits for `[writer] ready`, mints fresh DB) → start pod (re-seeds idempotently). First real run wiped the Track-2 debris: fresh store verified via the 7891 socket REPL = 1 agent / 106 fns / 0 messages / 3154 datoms, mission control matched exactly, full human chat loop browser-verified with a live DeepSeek reply. Non-"default" names wipe only (no processes registered for them yet). Later grows `cluster create <name>`.
 12. **AGENT-GYM scenario harness (the testing methodology — behind #26):** scenarios as EDN data ({questions, fixtures, PASS-PREDICATES as datalog queries against the post-run store + transcript}); a driver that boots fresh agents on a SCRATCH cluster DB, sends via `message!`, awaits idle, evaluates predicates mechanically, emits a scorecard keyed (scenario × git sha) — section-by-section context iteration becomes QUANTIFIED. Rubric axes: sees-question · searches-first · models-work-directed · reuses-schemas · consults-findings · reuses-FUNCTIONS · writes-tests · replies-honestly · terminates · stores-proactively. Budget tiers: stub-llm for plumbing scenarios, deepseek (2-4 calls) for behavioral. Every defect from runs 3-7 becomes a permanent regression predicate; run 8 = the first scenario. Known prompt-thin spots the gym must cover: test-writing (thinnest teaching), function-reuse (never yet observed), store-proactively.
 13. **MCP server health** — reset the broken `default` cljs session; GC the
    26 stale sessions.
