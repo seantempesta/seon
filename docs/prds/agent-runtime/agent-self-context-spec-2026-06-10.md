@@ -16,8 +16,8 @@ attr, one section shape. Nothing new is stored except datoms and code.
 Every agent IS an entity in the cluster store. That entity carries the
 agent's own context sections under the EXISTING `:seon.agent/ctx` attr — a
 vector of section maps MERGED with the substrate's default sections by one
-priority sort. A section is either literal text (static doctrine) or a
-`:seon.render/ai` symbol pointing at a function — usually one the agent
+priority sort. A section's `:seon.render/ai` slot holds either a literal string
+(static doctrine) or a symbol pointing at a function — usually one the agent
 wrote in its own `my.*` namespace, which already persists and replays via
 the program graph. Pull one entity and you see the whole specialist; edit
 it (agent or human) by transacting; restart changes nothing.
@@ -32,8 +32,8 @@ it (agent or human) by transacting; restart changes nothing.
 :seon.agent/ctx
 [{:seon.ctx/name     :doctrine
   :seon.ctx/priority 15                      ; same scale as defaults
-  :seon.ctx/text     "Always reconcile against my.finance.ledger
-                      before answering balance questions."}
+  :seon.render/ai    "Always reconcile against my.finance.ledger
+                      before answering balance questions."}  ; string = verbatim
 
  {:seon.ctx/name     :my-positions
   :seon.ctx/priority 46
@@ -51,26 +51,34 @@ at `transact!` like everything else):
   defaults (system 10 … capabilities 20 … exemplars 22 … catalog 25 …
   warnings 40 … open-todos 45 … transcript 50 … prompt 99). An agent CAN
   interleave anywhere; the renderer sorts the union.
-- EXACTLY ONE of:
-  - `:seon.ctx/text` — string, rendered verbatim. The "just a string"
-    case: doctrine, notes-to-self, standing reminders.
-  - `:seon.render/ai` — qualified symbol (symbol-only at storage, the
-    existing render-slot spec), resolved LATE by the existing
-    materializer, called as a pure fn of the db (+ agent ref) at every
-    render. Optional `:seon.render/html` twin gives the same section an
-    inspector/tile view through the same dispatch.
+- `:seon.render/ai` — **string OR qualified symbol** (slot spec relaxes
+  from symbol-only to `[:or :string :symbol]`): a string renders
+  verbatim (doctrine, notes-to-self — content as source, not cached
+  output, so the original symbol-only guard's intent survives); a
+  symbol resolves LATE via the existing materializer to a fn called at
+  every render. Optional `:seon.render/html` twin: **hiccup literal OR
+  a symbol of a fn returning hiccup** — static badge or live inspector
+  view, same slot. (If the malli→datahike bridge can't store
+  hiccup-shaped EDN, fix the bridge — house rule.)
 
 What dies: `:seon.ctx/fn` (redundant twin of `:seon.render/ai` — one slot
-attr everywhere); the planned-but-rejected `:seon.agent/instructions` /
-`:seon.agent/ctx-additions` attrs (instructions are just low-priority
-text sections); the stored-ctx-REPLACES-defaults semantics.
+attr everywhere); `:seon.ctx/text` (never built — the relaxed slot
+carries strings directly); the planned-but-rejected
+`:seon.agent/instructions` / `:seon.agent/ctx-additions` attrs; the
+stored-ctx-REPLACES-defaults semantics.
 
 ## Render semantics (in `seon.ctx`, the V3-C engine)
 
 ```
 sections = sort-by priority (substrate-default-sections ∪ agent's :seon.agent/ctx)
-render   = for each: text → verbatim | slot → (materialize :seon.render/ai) db agent-ref
+input    = {:seon.db/db db, :seon.agent/entity (pull db [*] my-ref)}  ; pulled ONCE
+render   = for each: string → verbatim | symbol → ((materialize slot) input)
 ```
+
+**Section fns receive ONE map — the db value + the agent's own pulled
+entity** (the smart default: every section is a pure fn of (the world,
+myself); fns that don't need the self ignore it free; none re-pull).
+Substrate default sections migrate to the same signature in P5.
 
 - **Merge, never replace.** Substrate evolution always flows through;
   agent customization layers on top. Name collisions with substrate
@@ -89,7 +97,7 @@ render   = for each: text → verbatim | slot → (materialize :seon.render/ai) 
 
 ```clojure
 (seon.agent/add-section!
-  {:seon.ctx/name :doctrine :seon.ctx/priority 15 :seon.ctx/text "…"})
+  {:seon.ctx/name :doctrine :seon.ctx/priority 15 :seon.render/ai "…"})
 ;; => {:seon.agent/ok? true :seon.ctx/name :doctrine}     ; envelope, like todo
 (seon.agent/remove-section! {:seon.ctx/name :doctrine})
 ```
