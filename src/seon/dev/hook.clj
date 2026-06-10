@@ -246,10 +246,13 @@
                 (and unit-result (::verify/success unit-result))
                 (conj (str (::verify/test-count unit-result) " tests"))
 
-                ;; Gen tests passed
-
+                ;; Gen tests passed. Side-effecting fns are excluded from
+                ;; generative invocation (verify/skip-gen-check?) — surface
+                ;; the count so coverage loss stays visible.
                 (and gen-result (::verify/success gen-result))
-                (conj "gen-tests")
+                (conj (if-let [skipped (seq (::verify/skipped gen-result))]
+                        (str "gen-tests (" (count skipped) " side-effecting skipped)")
+                        "gen-tests"))
 
                 ;; Compliance
                 (and compliance-result (:compliant? compliance-result))

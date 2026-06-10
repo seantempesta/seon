@@ -26,7 +26,8 @@
             [malli.generator :as mg]
             [malli.instrument :as mi]
             [malli.registry :as mr]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [taoensso.timbre :as log]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration (per CONVENTIONS.md)
@@ -62,7 +63,8 @@
                    [::error-count {:optional true} ::error-count]
                    [::output {:optional true} :string]
                    [::error {:optional true} :string]
-                   [::timeout {:optional true} :boolean]])
+                   [::timeout {:optional true} :boolean]
+                   [::test-ns {:optional true} ::namespace-symbol]])
 
 (schema/register! ::gen-test-failure
                   [:map
@@ -74,6 +76,7 @@
                   [:map
                    [::success :boolean]
                    [::failures [:vector ::gen-test-failure]]
+                   [::skipped {:optional true} [:vector ::namespace-symbol]]
                    [::error {:optional true} :string]
                    [::timeout {:optional true} :boolean]])
 
@@ -103,12 +106,12 @@
 (schema/register! ::format-unit-result-request
                   [:map
                    [::result ::unit-test-result]
-                   [::test-ns {:optional true} [:maybe ::namespace-symbol]]])
+                   [::test-ns {:optional true} ::namespace-symbol]])
 
 (schema/register! ::format-gen-result-request
                   [:map
                    [::result ::gen-test-result]
-                   [::namespace {:optional true} [:maybe ::namespace-symbol]]])
+                   [::namespace {:optional true} ::namespace-symbol]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Unit Test Running
@@ -247,6 +250,29 @@
   [ns-sym]
   (get (m/function-schemas) ns-sym))
 
+(defn- skip-gen-check?
+  "True when `fn-sym` must NOT be generatively invoked.
+
+   Generative checks call the real function with generated arguments
+   against the LIVE system — for side-effecting functions that means
+   real mutations (e.g. `registry/ensure-db!` creating LMDB stores
+   under `data/sessions/` for generated keywords). Two general signals
+   mark a function as side-effecting, no name-specific skip-list:
+
+   - the Clojure `!`-suffix convention on the fn name
+   - explicit `:seon.dev/no-gen true` var metadata (for side-effecting
+     fns whose name lacks the `!`)
+
+   A pure fn that happens to end in `!` can force checking back on with
+   `:seon.dev/gen-check true` var metadata."
+  [ns-sym fn-sym]
+  (let [var-meta (some-> (ns-resolve ns-sym fn-sym) meta)]
+    (cond
+      (:seon.dev/gen-check var-meta) false
+      (:seon.dev/no-gen var-meta) true
+      (str/ends-with? (name fn-sym) "!") true
+      :else false)))
+
 (defn- check-function
   "Run generative tests on a single function.
 
@@ -283,12 +309,18 @@
      ::namespace - Namespace symbol (e.g., seon.core)
      ::num-tests - Optional. Tests per function (default: 10)
 
+   Side-effecting functions are NEVER generatively invoked (they would
+   mutate the live system with generated arguments). See `skip-gen-check?`
+   for the mechanism (`!` suffix / `:seon.dev/no-gen`); skipped fns are
+   logged and returned under ::skipped so coverage loss is visible.
+
    Response keys:
      ::success  - true if all tests passed
      ::failures - Vector of failure maps, each with:
                   ::fn-symbol - Function that failed
                   ::shrunk    - Shrunk counterexample (if available)
                   ::error     - Error details (if check failed)
+     ::skipped  - Vector of fn symbols excluded as side-effecting
 
    Example:
      (run-gen-tests {::namespace 'seon.core})
@@ -309,14 +341,20 @@
       ;; work well with dynamic namespace symbols at runtime
       (mi/clj-collect! {:ns namespace})
       (let [schemas (get-function-schemas namespace)
-            failures (if (nil? schemas)
-                       []
-                       (->> (for [[fn-sym _] schemas]
-                              (check-function namespace fn-sym num-tests))
-                            (remove nil?)
-                            (into [])))]
+            fn-syms (sort (keys schemas))
+            {skipped true checked false} (group-by #(skip-gen-check? namespace %)
+                                                   fn-syms)
+            skipped (vec skipped)
+            _ (when (seq skipped)
+                (log/info "Generative checks skipped for side-effecting fns"
+                          {::namespace namespace ::skipped skipped}))
+            failures (->> checked
+                          (map #(check-function namespace % num-tests))
+                          (remove nil?)
+                          (into []))]
         {::success (empty? failures)
-         ::failures failures})
+         ::failures failures
+         ::skipped skipped})
       (catch Exception e
         {::success false
          ::failures []
@@ -382,7 +420,11 @@
      ;; => \"Generative tests failed: foo (seon.core)\""
   {:malli/schema [:=> [:cat ::format-gen-result-request] :string]}
   [{::keys [result namespace]}]
-  (let [ns-suffix (when namespace (str " (" namespace ")"))]
+  (let [ns-suffix (when namespace (str " (" namespace ")"))
+        skipped (::skipped result)
+        skip-suffix (when (seq skipped)
+                      (str "; skipped " (count skipped)
+                           " side-effecting: " (str/join ", " skipped)))]
     (cond
       (::timeout result)
       (str "Generative tests timed out" ns-suffix)
@@ -391,7 +433,7 @@
       (str "Generative test error: " (::error result) ns-suffix)
 
       (::success result)
-      (str "Generative tests passed" ns-suffix)
+      (str "Generative tests passed" ns-suffix skip-suffix)
 
       :else
       (let [failed-fns (str/join ", " (map #(str (::fn-symbol %)) (::failures result)))]

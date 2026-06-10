@@ -61,12 +61,6 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest run-gen-tests-test
-  (testing "Returns success when namespace has no schemas"
-    ;; hook-test-ns has functions but no Malli schemas registered
-    (let [result (v/run-gen-tests {::v/namespace 'seon.dev.hook-test-ns})]
-      (is (true? (::v/success result)))
-      (is (empty? (::v/failures result)))))
-
   (testing "Returns error when namespace doesn't exist"
     (let [result (v/run-gen-tests {::v/namespace 'seon.totally-nonexistent-ns})]
       (is (false? (::v/success result)))
@@ -95,6 +89,29 @@
       (is (boolean? (::v/success result)) "Should return success status")
       ;; repair functions should pass with valid schemas
       (is (vector? (::v/failures result)) "Should have failures vector"))))
+
+(deftest run-gen-tests-side-effect-skip-test
+  ;; The 2026-06-10 bug: generative checks invoked side-effecting fns
+  ;; (registry/ensure-db!) with generated args against the LIVE system,
+  ;; creating real LMDB stores under data/sessions/. Side-effecting fns
+  ;; must be SKIPPED (and reported), pure fns must still be CHECKED.
+  (testing "side-effecting fns are skipped, pure fns are generatively checked"
+    (require 'seon.dev.hook-test-ns)
+    (let [side-count (deref (resolve 'seon.dev.hook-test-ns/side-effect-count))
+          pure-count (deref (resolve 'seon.dev.hook-test-ns/pure-check-count))]
+      (reset! side-count 0)
+      (reset! pure-count 0)
+      (let [result (v/run-gen-tests {::v/namespace 'seon.dev.hook-test-ns
+                                     ::v/num-tests 5})]
+        (is (true? (::v/success result)))
+        (is (empty? (::v/failures result)))
+        (is (= #{'mutate-something! 'covert-mutation}
+               (set (::v/skipped result)))
+            "`!`-suffixed and :seon.dev/no-gen fns are skipped; :seon.dev/gen-check forces shout! back in")
+        (is (zero? @side-count)
+            "skipped side-effecting fns were never invoked")
+        (is (pos? @pure-count)
+            "generative checks actually executed the pure fn")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; format-unit-result Tests
@@ -145,6 +162,13 @@
                   ::v/failures [{::v/fn-symbol 'foo}
                                 {::v/fn-symbol 'bar}]}]
       (is (= "Generative tests failed: foo, bar" (v/format-gen-result {::v/result result})))))
+
+  (testing "Surfaces skipped side-effecting fns on success"
+    (let [result {::v/success true
+                  ::v/failures []
+                  ::v/skipped ['ensure-db! 'remove-db!]}]
+      (is (= "Generative tests passed; skipped 2 side-effecting: ensure-db!, remove-db!"
+             (v/format-gen-result {::v/result result})))))
 
   (testing "Formats error result"
     (let [result {::v/success false
@@ -202,6 +226,7 @@
                   ::v/error-count 0}]
       (is (= "0 tests passed" (v/format-unit-result {::v/result result})))))
 
-  (testing "Handles nil namespace suffix gracefully"
-    (is (string? (v/format-unit-result {::v/result {::v/success true ::v/test-count 1} ::v/test-ns nil})))
-    (is (string? (v/format-gen-result {::v/result {::v/success true ::v/failures []} ::v/namespace nil})))))
+  (testing "Handles absent namespace suffix gracefully"
+    ;; Optional = absent: omit the key entirely (nil values are banned)
+    (is (string? (v/format-unit-result {::v/result {::v/success true ::v/test-count 1}})))
+    (is (string? (v/format-gen-result {::v/result {::v/success true ::v/failures []}})))))
