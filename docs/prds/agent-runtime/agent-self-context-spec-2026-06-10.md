@@ -1,6 +1,6 @@
 ---
 type: prd
-status: draft
+status: active
 tags: [prd, agent]
 ---
 
