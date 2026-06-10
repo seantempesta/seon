@@ -508,11 +508,23 @@ client.cljs todo wiring remain intentionally uncommitted.
   verifier frees schema.cljc, before V3-C (which then deletes the
   inference path). Domain-attrs reuse surface is independent of this —
   no invisibility risk for agents who forget the marker.
-- **PROPOSED (awaiting user confirm): toolbelt under `seon.agent.*`** —
-  root `seon.*` = language layer (db, schema, repl); agent tooling =
-  `seon.agent.todo` / `.fs` / `.search` (reply!/message! already live in
-  seon.agent); future agent.cljs split → `seon.agent.internal`. Todo
-  rename ~free (uncommitted); fs/search rename = small follow-up unit.
+- **TOOLBELT = `seon.agent.*` (user-confirmed 2026-06-10):** root
+  `seon.*` = the language layer ONLY (`seon.db`, `seon.schema`,
+  `seon.repl`); everything an agent USES lives under `seon.agent.*` —
+  `seon.agent` itself is the agent's surface (reply!/message! already
+  live there) and RENDERS to agents; `seon.agent.todo` / `.fs` /
+  `.search` are the tools; **`seon.agent.internal` is HIDDEN** (the
+  standard `*.internal` rule — the future agent.cljs split moves the
+  loop machinery there, making `seon.agent.*` minus `.internal` exactly
+  the agent's public world). The full namespace sentence agents learn:
+  "your code is `my.*`, your knowledge is `my.kb.*`, your tools are
+  `seon.agent.*`, the language is `seon.db`/`seon.schema`/`seon.repl`."
+  Migration: todo rename folded into the wiring unit's commit (~free,
+  uncommitted); fs/search rename = small follow-up unit (ns+test renames,
+  exemplar roots, gym fixtures; store re-indexes via name+source dedup);
+  agent.cljs → seon.agent.internal split queued as the next V3-A-style
+  refactor (also a precondition for rendering seon.agent itself, which
+  at 150k chars is unshowable until split).
 - DeepSeek spend unlimited; cluster resets free; errors ALWAYS surface at
   the user-facing layer.
 

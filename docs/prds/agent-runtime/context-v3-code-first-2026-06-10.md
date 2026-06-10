@@ -17,8 +17,18 @@ docs and normal ways of expressing ideas via Clojure code.**
 A namespace is either **relevant → full source rendered in context** or
 **internal → not rendered** (still indexed; one taught query away). One
 config set, one full-index query, one classifier, one renderer. The
-teaching itself becomes CODE: docstrings on the real fns + a worked-example
-namespace, not handcrafted prompt prose.
+teaching itself becomes CODE: docstrings on the real fns, not handcrafted
+prompt prose.
+
+**The namespace map (user-confirmed 2026-06-10):** root `seon.*` = the
+language layer only (`seon.db` `seon.schema` `seon.repl`); the agent's
+TOOLBELT = `seon.agent.*` (`seon.agent` itself = reply!/message!, SHOWN;
+`seon.agent.todo`/`.fs`/`.search` = tools, SHOWN; `seon.agent.internal` =
+loop machinery, HIDDEN by the standard `*.internal` rule); agent code =
+`my.*`; knowledge = `my.kb.*` sub-namespaces with real schemas. The
+sentence agents learn: "your code is `my.*`, your knowledge is `my.kb.*`,
+your tools are `seon.agent.*`, the language is `seon.db`/`seon.schema`/
+`seon.repl`."
 
 ## What renders (the relevant set)
 
@@ -27,9 +37,10 @@ namespace, not handcrafted prompt prose.
 | `seon.db` (post-split API) | ~12k est | transact!/query/pull/entity/with-agent + envelope schemas |
 | `seon.schema` (post-split API) | ~8k est | register! + the rules, as docstrings |
 | datahike API surface | ~8–33k | from var metadata / `api.specification` — unit measures + trims |
-| `seon.fs` | 18.1k | nodejs integration exemplar |
-| `seon.search` + test | 26.6k | npm wrapper + the model test ns |
-| `seon.todo` + test | 18.5k | store/retrieve arc + resume |
+| `seon.agent.fs` (rename of seon.fs) | 18.1k | nodejs integration exemplar |
+| `seon.agent.search` (rename) + test | 26.6k | npm wrapper + the model test ns |
+| `seon.agent.todo` (rename) + test | 18.5k | store/retrieve arc + resume |
+| `seon.agent` (post-split, future) | — | the agent's surface: reply!/message!; renders once the loop machinery splits to the HIDDEN `seon.agent.internal` (150k today — unshowable until split) |
 | `seon.repl` | 5.3k | |
 | `my.kb` (new) | ~3k target | substrate-scaffolded knowledge base ns: general guidelines as ns-doc/docstrings + shared provenance shapes (`:my.kb/*`). SUPERSEDES the earlier `seon.recipes` idea (user, 2026-06-10: NO recipes ns — real namespaces doing real work; remaining teaching → docstrings of the public faces) |
 
