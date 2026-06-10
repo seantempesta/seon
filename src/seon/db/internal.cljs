@@ -234,19 +234,25 @@
       (= head :and)
       (form->datahike-value-type (resolve-malli-form (first (form-children resolved-form))))
 
-      ;; [:or alt-1 alt-2] — bridge on the first alt. We don't have
-      ;; mixed-type :or fields in v1; if one appears, fail loud.
+      ;; [:or alt-1 alt-2] — when every alt maps to ONE datahike type,
+      ;; bridge on it. MIXED-type :or (e.g. the relaxed render slots
+      ;; `[:or :string :symbol]` / `[:or :symbol <hiccup>]`, self-context
+      ;; spec 2026-06-10) stores as `:db.type/string` carrying the
+      ;; pr-str'd EDN of the value — datahike's typed schema cannot hold
+      ;; a scalar union, so the bridge owns ONE representation:
+      ;; `transact!*` encodes such attrs ([[encode-edn-slot-values]]),
+      ;; `seon.db/decode-edn-value` is the read-side inverse. Unmappable
+      ;; alts (`[:fn …]` predicates like the hiccup shape) count as
+      ;; mixed.
       (= head :or)
-      (let [child-types (set (map #(form->datahike-value-type (resolve-malli-form %))
+      (let [child-types (set (map #(try (form->datahike-value-type
+                                          (resolve-malli-form %))
+                                        (catch :default _ ::unmappable))
                                   (form-children resolved-form)))]
-        (if (= 1 (count child-types))
+        (if (and (= 1 (count child-types))
+                 (not (contains? child-types ::unmappable)))
           (first child-types)
-          (throw (ex-info (str "Malli :or with mixed datahike types not "
-                               "supported: "
-                               (pr-str resolved-form))
-                          {::db/error :seon.db/unbridgeable-malli-form
-                           ::db/form resolved-form
-                           ::db/distinct-types child-types}))))
+          :db.type/string))
 
       :else
       (or (malli-type->datahike-type head)
@@ -323,6 +329,56 @@
    given (matters for forward references between schema entities)."
   [attr-keys]
   (mapv malli->datahike-attr attr-keys))
+
+(defn edn-encoded-attr?
+  "True when `attr`'s registered Malli form is a MIXED-type `:or` — the
+   shapes the bridge stores as `:db.type/string` carrying pr-str'd EDN
+   (see the `:or` branch of [[form->datahike-value-type]]). The two
+   live cases are the relaxed render slots `:seon.render/ai`
+   `[:or :string :symbol]` and `:seon.render/html`
+   `[:or :symbol <hiccup>]` (self-context spec 2026-06-10)."
+  [attr]
+  (boolean
+    (when (and (keyword? attr) (schema/registered? attr))
+      (let [resolved (resolve-malli-form (schema/schema-definition attr))]
+        (when (and (vector? resolved) (= :or (first resolved)))
+          (let [child-types (set (map #(try (form->datahike-value-type
+                                              (resolve-malli-form %))
+                                            (catch :default _ ::unmappable))
+                                      (form-children resolved)))]
+            (or (> (count child-types) 1)
+                (contains? child-types ::unmappable))))))))
+
+(defn encode-edn-slot-values
+  "Encode the values of EDN-string-bridged attrs ([[edn-encoded-attr?]])
+   in `tx-data` to their pr-str'd form — the write half of the mixed-:or
+   representation (`seon.db/decode-edn-value` is the read half). Walks
+   map entities (including nested component maps) and `[:db/add e a v]`
+   vector forms. ALWAYS pr-str's (strings included — `\"x\"` stores as
+   `\"\\\"x\\\"\"`), so decode by `read-string` is unambiguous. Callers
+   re-transacting a PULLED value must decode first (the section verbs
+   do) — double-encoding is on them."
+  [tx-data]
+  (letfn [(encode-map [m]
+            (reduce-kv
+              (fn [acc k v]
+                (assoc acc k
+                       (cond
+                         (edn-encoded-attr? k) (pr-str v)
+                         (map? v)              (encode-map v)
+                         (and (vector? v) (some map? v))
+                         (mapv #(if (map? %) (encode-map %) %) v)
+                         :else v)))
+              {} m))]
+    (mapv (fn [form]
+            (cond
+              (map? form) (encode-map form)
+              (and (vector? form)
+                   (= :db/add (first form))
+                   (edn-encoded-attr? (nth form 2 nil)))
+              (update form 3 pr-str)
+              :else form))
+          tx-data)))
 
 (defn tx-meta-datahike-schema
   "The datahike schema entries for the 7 tx-meta attrs (v1.md §2.3).
@@ -909,7 +965,8 @@
       ;; as a third arg that datahike silently ignored — so user tx-meta
       ;; NEVER reached the db before this fix. The single arg-map shape
       ;; is the only supported call path.
-      (let [arg-map (merge {:tx-data tx-data} merged-opts)
+      (let [arg-map (merge {:tx-data (encode-edn-slot-values tx-data)}
+                           merged-opts)
             report  (await (d/transact! c arg-map))]
         {::db/ok? true ::db/tx-report report})
       (catch :default e

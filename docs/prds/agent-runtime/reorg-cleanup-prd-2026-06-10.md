@@ -94,7 +94,24 @@ code; git history preserves the parser utilities.
 2. #12 home-ns → `my.agent.<id>` (3 mints + prompt text + rust + tests)
 3. #14 `my.kb` scaffold + `my.kb.instruction` first domain
 4. #16 V3-C → `seon.ctx` (one query/classifier/renderers; deletes the
-   remaining legacy filters; agreement property test)
+   remaining legacy filters; agreement property test) — **DONE
+   2026-06-10 evening**: `seon.ctx` carries the classifier
+   (`context-model`: *.internal hidden / my.* shown / agent-tx
+   provenance / `relevant-roots`), the merged composer
+   (override-by-name, render guard, 8k agent-section budget), the
+   `:purpose` + `:your-sections` seeds; verbs
+   `add-section!`/`remove-section!`/`set-purpose!` on `seon.agent`;
+   slots relaxed to `[:or :string :symbol]` / `[:or :symbol <hiccup>]`
+   via the bridge's EDN-string storage (mixed-:or →
+   `:db.type/string`, pr-str/read-string); `:seon.ctx/fn` deleted;
+   structural first-party boundary (source under repo root) replaces
+   the name prefixes in `seon.indexing` + `seon.instrument`;
+   `substrate-ns-name?`/`exemplar-ns?` deleted (one `relevant-ns?`
+   def). Cluster store reset once (slot valueType change). Suite
+   325/1360/0; resume + purpose + guard live-proven. Deferred:
+   growing `relevant-roots` to the post-split faces (context-size +
+   gym check first); the exclusion-set death-condition test rides
+   with that growth.
 5. #18 splits, copy-then-delete: `seon.eval` face/internal,
    `seon.schema` face, `seon.warn`, then `agent.cljs` →
    `seon.agent` + `seon.agent.internal` (after V3-C removed its context

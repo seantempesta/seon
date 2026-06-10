@@ -936,6 +936,18 @@
        ;; plenty), so idiomorph may visually reset the label mid-boot;
        ;; the server-side in-flight guard (409) makes double-clicks
        ;; harmless.
+       ;; Optional PURPOSE for the new agent (self-context spec
+       ;; 2026-06-10): the words typed here seed its durable :purpose
+       ;; section — "Your human created you for: <text>" — rendered
+       ;; every turn. Left empty, the agent gets the
+       ;; acquire-your-purpose placeholder instead.
+       [:input
+        {:id "seon-new-agent-purpose"
+         :type "text"
+         :placeholder "purpose (optional)…"
+         :class (str "px-2 py-1.5 border border-base-700 rounded "
+                     "bg-base-900 text-text-300 placeholder-text-500 "
+                     "text-xs font-mono w-56")}]
        [:button
         {:id "seon-new-agent"
          :type "button"
@@ -944,7 +956,13 @@
                      "text-amber-400 hover:text-amber-300 "
                      "text-xs font-mono cursor-pointer")
          :onclick (str "var b=this;b.disabled=true;b.textContent='booting…';"
-                       "fetch('/agents/new',{method:'POST'})"
+                       "var p=document.getElementById('seon-new-agent-purpose');"
+                       "var body=p&&p.value?"
+                       "'purpose='+encodeURIComponent(p.value):'';"
+                       "fetch('/agents/new',{method:'POST',"
+                       "headers:{'Content-Type':"
+                       "'application/x-www-form-urlencoded'},"
+                       "body:body})"
                        ".then(function(r){"
                        "if(r.ok){r.text().then(function(id){"
                        "window.location='/agent/'+id.trim();});}"

@@ -29,16 +29,37 @@
   #?(:cljs (:require-macros [seon.instrument :refer [collect!]]))
   (:require
     #?@(:clj  [[cljs.analyzer.api :as ana]
+               [clojure.java.io :as io]
                [clojure.string :as str]]
         :cljs [[malli.core :as m]
                [malli.instrument :as mi]
                [seon.error.instrument :as ei]])))
 
 #?(:clj
+   (defn- first-party-file?
+     "STRUCTURAL first/third-party boundary (V3-C, 2026-06-10 — same
+      rule as `seon.indexing/first-party-file?`): a def is FIRST-PARTY
+      iff its analyzer `:file` resolves to a file under the repo root
+      (the macroexpanding JVM's working dir). Jars (`jar:` URLs) and
+      gitlibs checkouts (file URLs outside the root) are third-party.
+      Replaces the two name-prefix `collect!` calls (\"seon\" +
+      \"my.\")."
+     [file]
+     (boolean
+       (when (and file (string? file))
+         (let [root (System/getProperty "user.dir")]
+           (if (str/starts-with? file "/")
+             (str/starts-with? file root)
+             (when-let [url (io/resource file)]
+               (and (= "file" (.getProtocol url))
+                    (str/starts-with? (.getPath url) root)))))))))
+
+#?(:clj
    (defn- collect-registrations
-     "Compile-time scan: walk every CLJS namespace matching
-      `ns-pattern` (a string prefix; e.g. \"seon\"), find every def
-      whose metadata carries `:malli/schema`, and return a vector of
+     "Compile-time scan: walk every FIRST-PARTY CLJS namespace
+      ([[first-party-file?]] over each def's analyzer `:file` — the
+      structural boundary, not a name prefix), find every def whose
+      metadata carries `:malli/schema`, and return a vector of
       [ns-sym fn-sym schema-form] triples. Run at macroexpand time.
 
       `^:async` fns are skipped — their `:malli/schema` describes the
@@ -50,24 +71,26 @@
       output validation, (2) a per-fn opt-out marker. For v1 we just
       skip — input validation is the bigger win, and async fns mostly
       delegate to other (synchronously instrumented) fns anyway."
-     [ns-pattern]
+     []
      (vec
        (for [ns-sym  (ana/all-ns)
-             :let    [ns-str (str ns-sym)]
-             :when   (str/starts-with? ns-str ns-pattern)
              [fn-sym ana-info] (ana/ns-publics ns-sym)
              :let    [meta-map (:meta ana-info)
                       schema   (:malli/schema meta-map)
-                      async?   (boolean (:async meta-map))]
-             :when   (and schema (not async?))]
+                      async?   (boolean (:async meta-map))
+                      file     (or (:file ana-info) (:file meta-map))]
+             :when   (and schema (not async?)
+                          (first-party-file? file))]
          [ns-sym fn-sym schema]))))
 
 #?(:clj
    (defmacro collect!
      "Expand at compile time to a `(do …)` of
       `(malli.core/-register-function-schema! 'ns 'name <schema> {})`
-      calls — one per discovered `:malli/schema`-annotated fn under
-      namespaces starting with `ns-pattern` (default `\"seon\"`).
+      calls — one per discovered `:malli/schema`-annotated fn in a
+      FIRST-PARTY namespace (structural boundary — every def whose
+      source file lives under the repo root; see
+      [[first-party-file?]]).
 
       Re-runs on every CLJS rebuild — picks up new fns as they're
       added. Returns the registration count.
@@ -77,9 +100,8 @@
           'seon.db 'transact!
           [:=> [:cat ::transact-request] ::transact-response]
           {})"
-     ([] `(collect! "seon"))
-     ([ns-pattern]
-      (let [registrations (collect-registrations ns-pattern)]
+     []
+     (let [registrations (collect-registrations)]
         ;; The 6-arity passes `:cljs` (the runtime key) + `identity`
         ;; (the transformer). This mirrors the canonical `m/=>` macro
         ;; expansion for CLJS (malli/core.cljc:3106-3107). The 4-arity
@@ -95,7 +117,7 @@
                `(malli.core/-register-function-schema!
                   '~ns-sym '~fn-sym ~schema {}
                   :cljs identity))
-           ~(count registrations))))))
+           ~(count registrations)))))
 
 #?(:cljs
    (defn install!
@@ -113,11 +135,12 @@
       Idempotent: re-calling re-registers (no-op; same keys + values)
       and re-instruments (replaces the wrapper)."
      []
-     ;; Two prefixes: the substrate plus the compiled my.* scaffold
-     ;; (my.kb, my.kb.instruction — V3-B). Runtime-authored my.* fns
-     ;; aren't on the compile-time roster (the analyzer can't see
-     ;; them); they validate through the eval path instead.
-     (let [n-reg (+ (collect! "seon") (collect! "my."))]
+     ;; ONE structural collect (V3-C): every first-party def — the
+     ;; substrate plus the compiled my.* scaffold — by source-file
+     ;; location, no name prefixes. Runtime-authored my.* fns aren't on
+     ;; the compile-time roster (the analyzer can't see them); they
+     ;; validate through the eval path instead.
+     (let [n-reg (collect!)]
        ;; `mi/instrument!` returns nil (not a count) — it mutates each
        ;; registered fn's var-binding in place to install the validating
        ;; wrapper. n-registered == n-instrumented by construction

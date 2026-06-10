@@ -291,8 +291,12 @@
 ;; Domain attrs — the agent-created reuse surface.
 ;; ============================================================
 
-(defn- agent-registered-attrs
-  "The set of attr keywords whose `:seon.schema/key` row landed in a tx
+(defn agent-registered-attrs
+  "PUBLIC: the `seon.ctx/context-model` classifier consumes this as its
+   `:seon.ctx/agent-attrs` leg — ONE provenance query for the attr
+   surface, shared by domain-attrs and the classifier (V3-C).
+
+   The set of attr keywords whose `:seon.schema/key` row landed in a tx
    that does NOT carry `:seon.db/origin :substrate-seed` — i.e. attrs
    registered by an AGENT (every agent `register!` eval is teed into a
    `:seon.schema` row by `seon.eval/build-tee-entities`, in an

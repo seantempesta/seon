@@ -13,11 +13,9 @@
    `(seon.db/current-agent-id)` so REPL calls from inside an agent
    scope work with no argument."
   (:require
-    [clojure.string :as str]
-    [seon.agent :as agent]
     [seon.agent-view :as agent-view]
+    [seon.ctx :as ctx]
     [seon.db :as db]
-    [seon.eval :as seval]
     [seon.handler :as handler]
     [seon.render :as render]
     [seon.schema :as schema]))
@@ -55,68 +53,26 @@
                "seon.agent.inspect: no agent-id — pass :seon.agent/id or call inside (seon.db/with-agent id ...)."
                {:seon.agent.inspect/error :no-agent-id}))))
 
-(defn- per-section-texts
-  "Render the agent's context PER SECTION — same layout source (stored
-   `:seon.agent/ctx` override or `seon.agent/substrate-default-ctx`) and
-   same section fns as `seon.agent/assemble-context`, so each entry is
-   the exact text that section contributed to `joined-text`.
-
-   SAFETY GUARD against divergence from the one composer: byte-equality
-   with `joined-text` is IMPOSSIBLE — `transcript-section` embeds the
-   render-time timestamp (verified live 2026-06-09), so two renders ms
-   apart always differ by a few bytes. Instead the per-section join's
-   LENGTH must land within 64 chars of `joined-text`'s. Timestamp
-   drift moves a handful of bytes; a structural divergence (dropped
-   section, changed join separator, composer logic change) shifts far
-   more. On guard failure, fall back to ONE pseudo-section `:context`
-   carrying the whole joined text — the honest single blob instead of
-   a wrong split. (assemble-context itself can't return per-section
-   text today — seon.agent is owned by another in-flight lane; fold
-   this in there when it frees up.)"
-  [db id joined-text]
-  (let [stored   (sort-by :seon.ctx/priority
-                          (:seon.agent/ctx
-                            (db/pull {:seon.db/db db
-                                      :seon.db/pull-pattern
-                                      '[{:seon.agent/ctx
-                                         [:seon.ctx/name :seon.ctx/priority
-                                          :seon.ctx/fn]}]
-                                      :seon.db/ref [:seon.agent/id id]})))
-        sections (if (seq stored) stored (agent/substrate-default-ctx))
-        base-in  {:seon.db/db db :seon.agent/id id}
-        rendered (->> sections
-                      (map (fn [section]
-                             (let [f (seval/lookup-value (:seon.ctx/fn section))
-                                   in (assoc base-in :seon.agent/ctx-entity section)]
-                               {:seon.ctx/name    (:seon.ctx/name section)
-                                :seon.render/text (if f (f in) (agent/pretty-ai section))})))
-                      (remove (comp str/blank? :seon.render/text))
-                      vec)]
-    (if (<= (js/Math.abs (- (count joined-text)
-                            (count (str/join "\n\n" (map :seon.render/text rendered)))))
-            64)
-      rendered
-      [{:seon.ctx/name :context :seon.render/text joined-text}])))
-
 (defn ctx-preview
   "Return the assembled AI-context the agent would see on its next render
    — the EXACT bytes the LLM receives, via the ONE composer
-   `seon.agent/assemble-context` (the same fn the agent prompt path
-   calls; divergence is impossible). `:seon.render/entities` is the
-   ordered set of entities BEHIND that context (for drill-in), via
-   `seon.render/visible-entities`. Reads from the agent's filtered view
-   so cross-agent tx are hidden."
+   `seon.ctx/assemble-context` (the same fn the agent prompt path
+   calls; divergence is impossible — the composer itself returns the
+   per-section texts, so the old duplicate per-section walk died with
+   V3-C). `:seon.render/entities` is the ordered set of entities BEHIND
+   that context (for drill-in), via `seon.render/visible-entities`.
+   Reads from the agent's filtered view so cross-agent tx are hidden."
   {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/ctx-response]}
   [{:seon.agent/keys [id]}]
   (let [id (resolve-id id)
         {:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id id})
-        {:seon.render/keys [text token-estimate]}
-        (agent/assemble-context {:seon.agent/id id :seon.db/db db})
+        {:seon.render/keys [text token-estimate section-texts]}
+        (ctx/assemble-context {:seon.agent/id id :seon.db/db db})
         {:seon.render/keys [entities]}
         (render/visible-entities {:seon.agent/id id :seon.db/db db})]
     {:seon.render/text            text
      :seon.render/entities        entities
-     :seon.render/section-texts   (per-section-texts db id text)
+     :seon.render/section-texts   section-texts
      :seon.render/token-estimate  token-estimate}))
 
 (defn visible-entities

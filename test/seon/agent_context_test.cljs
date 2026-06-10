@@ -687,16 +687,22 @@
             ;; namespace (non-seon.*, the taught domain-ns shape) — the
             ;; same rows detect-and-tee writes. (Pass :seon.db/conn explicitly:
             ;; the db/*conn* binding does not survive .then — see fixture.)
-            (-> (db/transact!
-                  {:seon.db/conn conn
-                   :seon.db/tx-data
-                   [{:seon.ns/name :zzcat.domain
-                     :seon.ns/source "(ns zzcat.domain)"}
-                    {:seon.fn/sym      "zzcat.domain/helper"
-                     :seon.fn/ns       [:seon.ns/name :zzcat.domain]
-                     :seon.fn/arglists "([x])"
-                     :seon.fn/doc      "A throwaway helper for the derivation test."
-                     :seon.fn/source   "(defn helper [x] (inc x))"}]})
+            ;; Stamped as an AGENT tx — exactly what a live eval tee
+            ;; does (it runs inside the agent's with-agent scope). The
+            ;; V3-C classifier derives agent-authored-ness from this
+            ;; provenance, not from the ns name.
+            (-> (db/with-tx-context {:seon.db/agent-id agent-id}
+                  (fn []
+                    (db/transact!
+                      {:seon.db/conn conn
+                       :seon.db/tx-data
+                       [{:seon.ns/name :zzcat.domain
+                         :seon.ns/source "(ns zzcat.domain)"}
+                        {:seon.fn/sym      "zzcat.domain/helper"
+                         :seon.fn/ns       [:seon.ns/name :zzcat.domain]
+                         :seon.fn/arglists "([x])"
+                         :seon.fn/doc      "A throwaway helper for the derivation test."
+                         :seon.fn/source   "(defn helper [x] (inc x))"}]})))
                 (.then (fn [_]
                          ;; rebind: the fixture's binding does not survive
                          ;; the .then boundary.
@@ -835,6 +841,11 @@
   ;; fixture total post-rename: 66,265 (exemplars 47,775, capabilities
   ;; 9,782, schema-catalog 3,858, functions-catalog 1,432, system 1,768,
   ;; warnings 1,033, transcript 222, namespace-context 187).
+  ;; Raised to 84k 2026-06-10 evening: V3-B (#14) added the my.kb
+  ;; exemplar family (my.kb 1,830 + my.kb.instruction 6,086 +
+  ;; my.kb-test 5,520 + wrappers ≈ +14k full-source chars) — the test
+  ;; was red at HEAD 951dedb before V3-C touched anything (verified by
+  ;; a stash run). Measured fixture total with my.kb: 80,421.
   (async done
     (-> (with-seeded-conn
           (fn [conn]
@@ -844,8 +855,8 @@
                            {:seon.db/db db :seon.agent/id agent-id}))]
               (is (str/includes? text "<exemplars>")
                   "budget measured WITH the exemplar payload present")
-              (is (<= (count text) 68000)
-                  (str "turn-0 context within the 68k budget — got "
+              (is (<= (count text) 84000)
+                  (str "turn-0 context within the 84k budget — got "
                        (count text))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -920,7 +931,7 @@
         "no eid → generic placeholder, still actionable")))
 
 (deftest format-eval-row-small-result-is-clean
-  (let [row (#'agent/format-eval-row
+  (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3" :seon.eval/id "sm0000001a"
                :seon.eval/duration-ms 1})]
@@ -930,7 +941,7 @@
 
 (deftest format-eval-row-huge-result-is-bounded-and-guided
   (let [huge-edn (pr-str (apply str (repeat 5000 "z")))
-        row      (#'agent/format-eval-row
+        row      (#'seon.ctx/format-eval-row
                    {:seon.eval/source "(big-string)" :seon.eval/ok? true
                     :seon.eval/result-edn huge-edn :seon.eval/id "hg0000002b"
                     :seon.eval/duration-ms 7})]
@@ -946,7 +957,7 @@
   ;; whose row-guide is prepended; that guide must survive format-eval-row's
   ;; display cap, and NOT trigger a second (size) guide — no double-noising.
   (let [edn (seval/render-result-edn "cc0000003c" (vec (range 5000)))
-        row (#'agent/format-eval-row
+        row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(seon.db/query {…})" :seon.eval/ok? true
                :seon.eval/result-edn edn :seon.eval/id "cc0000003c"
                :seon.eval/duration-ms 12})]
@@ -994,13 +1005,13 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest format-eval-row-shows-captured-print-output
-  (let [row (#'agent/format-eval-row
+  (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(println \"hi\")" :seon.eval/ok? true
                :seon.eval/result-edn "nil" :seon.eval/output "hi\n"
                :seon.eval/id "pr0000001a" :seon.eval/duration-ms 1})]
     (is (str/includes? row "hi\nnil")
         "captured output renders above the result, REPL-style"))
-  (let [row (#'agent/format-eval-row
+  (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3"
                :seon.eval/id "pr0000002b" :seon.eval/duration-ms 1})]

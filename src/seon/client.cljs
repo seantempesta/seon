@@ -54,6 +54,7 @@
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
     [seon.agent :as agent]
+    [seon.ctx :as ctx]
     [seon.ai.deepseek :as deepseek]
     [seon.db :as db]
     [seon.eval :as seval]
@@ -312,10 +313,11 @@
    :seon.render/ai
    :seon.render/html
 
-   ;; --- Ctx section entities (v1.md §5) ---
+   ;; --- Ctx section entities (seon.ctx; self-context spec 2026-06-10).
+   ;; :seon.ctx/fn is DEAD — the one slot attr is :seon.render/ai
+   ;; (above), string-or-symbol via the bridge's EDN-string encoding. ---
    :seon.ctx/name
    :seon.ctx/priority
-   :seon.ctx/fn
 
    ;; --- Session (v1.md §2.1) ---
    ;; turns-since-inbound is DERIVED from the count of :seon.agent.turn
@@ -892,7 +894,7 @@
 ;; tests index themselves via the runner's run-and-record path instead.
 (defonce !indexed-test-vars (atom []))
 
-(defn- substrate-ns-set
+(defn substrate-ns-set
   "The set of namespace keywords owned by the COMPILED substrate, derived
    from `substrate-vars` + the preload's deftest vars — the SAME sources of
    truth the boot indexers write from, so they can never drift. Used by
@@ -911,7 +913,7 @@
    fn-less root (`my.kb`) owns an indexed full-source `:seon.ns` row
    without owning any var."
   []
-  (into (into #{} (map keyword) agent/exemplar-roots)
+  (into (into #{} (map keyword) ctx/relevant-roots)
         (map #(keyword (str (:ns (meta %)))))
         (concat substrate-vars @!indexed-test-vars)))
 
@@ -969,8 +971,8 @@
 (defn- ns-row
   "Build the `:seon.ns` row for an owning ns name string.
 
-   EXEMPLAR nses (`seon.agent/exemplar-ns?` — the context-focus-redesign
-   root set + children + test siblings) carry the REAL FULL FILE TEXT as
+   RELEVANT nses (`seon.ctx/relevant-ns?` — the V3-C classifier's
+   full-source set + children + test siblings) carry the REAL FULL FILE TEXT as
    `:seon.ns/source`: the boot indexer is the ONE file-reader; the
    `:exemplars` context section (and anything else downstream) renders
    that attr from the graph, never re-reading files. Safe because
@@ -985,7 +987,7 @@
    no-replay invariant trivially cheap to reason about."
   [ns-sym-str]
   (let [stub (str "(ns " ns-sym-str ")")
-        src  (if (agent/exemplar-ns? ns-sym-str)
+        src  (if (ctx/relevant-ns? ns-sym-str)
                (or (read-src-file (ns-file-path ns-sym-str))
                    (do (log/error-console!
                          "seon.client/ns-row"
@@ -1133,7 +1135,7 @@
         ;; public fns of its own (`my.kb` — register! calls + ns-doc
         ;; only) still needs its full-source `:seon.ns` row, since the
         ;; :exemplars section renders from exactly these datoms.
-        ns-syms (into agent/exemplar-roots
+        ns-syms (into ctx/relevant-roots
                       (map #(first (str/split (:seon.fn/sym %) #"/" 2)))
                       fn-rows)
         ns-rows (map ns-row (sort ns-syms))]
@@ -1382,15 +1384,18 @@
    `mcp__seon_cljs__eval agent_id=<id>` pins this pod. Runs inside its
    own `with-agent` scope so every transact carries the right agent-id.
    Returns boot!'s `{:seon.agent/id _ :seon.agent/ns _}`."
-  [{:seon.agent/keys [id llm-fn compile-state]}]
+  [{:seon.agent/keys [id llm-fn compile-state purpose]}]
   (await
     (db/with-agent id
       (fn ^:async boot-agent! []
         (await (seval/setup-agent-ns! compile-state (agent/home-ns id) id))
         (let [res (await (agent/boot!
-                           {:seon.agent/id            id
-                            :seon.agent/llm-fn        llm-fn
-                            :seon.agent/compile-state compile-state}))]
+                           (cond->
+                             {:seon.agent/id            id
+                              :seon.agent/llm-fn        llm-fn
+                              :seon.agent/compile-state compile-state}
+                             (some? purpose)
+                             (assoc :seon.agent/purpose purpose))))]
           (runtime-id/host! id)
           res)))))
 
@@ -1418,7 +1423,7 @@
       :seon.web/port _ :seon.web/port-file _}.
    Subsequent (seon.agent/message! …) calls (or POST /chat) drive the
    loop via the kick listener."
-  [& [{:keys [llm-fn mint?] :or {llm-fn stub-llm}}]]
+  [& [{:keys [llm-fn mint? purpose] :or {llm-fn stub-llm}}]]
   (let [conn          (or @!agent-conn (await (open-cluster-conn!)))
         _             (reset! !agent-conn conn)
         ;; Bind the conn as the root *conn* so seon.db calls + the
@@ -1473,9 +1478,16 @@
                                 (doseq [aid agent-ids]
                                   (vswap! !acc conj
                                           (await (boot-one-agent!
-                                                   {:seon.agent/id            aid
-                                                    :seon.agent/llm-fn        llm-fn
-                                                    :seon.agent/compile-state compile-state}))))
+                                                   (cond->
+                                                     {:seon.agent/id            aid
+                                                      :seon.agent/llm-fn        llm-fn
+                                                      :seon.agent/compile-state compile-state}
+                                                     ;; The stated purpose seeds
+                                                     ;; ONLY a minted agent
+                                                     ;; (create! never re-seeds
+                                                     ;; an existing entity).
+                                                     (some #{aid} minted-ids)
+                                                     (assoc :seon.agent/purpose purpose))))))
                                 @!acc)
                 {:seon.agent/keys [id ns]}
                 (first results)
@@ -1582,7 +1594,9 @@
 ;; is THE explicit create path; without it a second start-agent! would
 ;; just re-resume the already-armed roster instead of minting.
 (web.serve/set-create-agent-fn!
-  (fn [] (start-agent! {:llm-fn (current-llm-fn) :mint? true})))
+  (fn [& [{purpose :seon.agent/purpose}]]
+    (start-agent! (cond-> {:llm-fn (current-llm-fn) :mint? true}
+                    (some? purpose) (assoc :purpose purpose)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Entry point

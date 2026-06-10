@@ -341,7 +341,7 @@
    agent id as plain text; the mission-control button navigates to
    `/agent/<id>`. One create at a time (boot is heavyweight: replay +
    substrate seed) — concurrent requests get 409."
-  [_req res]
+  [req res]
   (let [f @!create-agent-fn]
     (cond
       (nil? f)
@@ -356,7 +356,18 @@
       (do
         (reset! !create-in-flight true)
         (log/info-console! "seon.web.serve" "POST /agents/new — creating agent" {})
-        (-> (f)
+        (-> (read-body req)
+            (.then
+              (fn [body]
+                ;; Optional `purpose` form param (self-context spec
+                ;; 2026-06-10) — the human's words seed the new agent's
+                ;; :purpose section ("Your human created you for: …").
+                ;; Absent/blank → the acquire-your-purpose placeholder.
+                (let [purpose (some-> (get (parse-urlencoded (or body ""))
+                                           "purpose")
+                                      str/trim
+                                      not-empty)]
+                  (f (when purpose {:seon.agent/purpose purpose})))))
             (.then (fn [{id :seon.agent/id}]
                      (reset! !create-in-flight false)
                      (log/info-console! "seon.web.serve" "POST /agents/new OK"

@@ -55,6 +55,7 @@
    `:seon.agent.message/hops`). `seon.trigger/register!` is the data-driven
    layer over this primitive — triggers persisted as DB entities."
   (:require
+    [cljs.reader :as reader]
     [datahike.api :as d]
     [seon.db.internal :as internal]
     [seon.schema :as schema]))
@@ -433,6 +434,20 @@
   "Datahike schema entries for the 7 `:seon.db/*` tx-meta attrs."
   []
   (internal/tx-meta-datahike-schema))
+
+(defn decode-edn-value
+  "Read-side inverse of the bridge's mixed-`:or` EDN-string storage
+   (see `seon.db.internal/encode-edn-slot-values`): attrs whose Malli
+   form is a mixed-type `:or` (the render slots `:seon.render/ai` /
+   `:seon.render/html`) store as pr-str'd EDN strings; this decodes a
+   pulled value back to its real shape. Values of other attrs — and
+   non-string values from pre-encoding stores — pass through unchanged."
+  {:malli/schema [:=> [:catn [::attr :keyword] [::value :any]] :any]}
+  [attr v]
+  (if (and (string? v) (internal/edn-encoded-attr? attr))
+    (try (reader/read-string v)
+         (catch :default _ v))
+    v))
 
 (defn assert-preconditions!
   "Validate boot preconditions (conn has `:keep-history? true`; tx-meta

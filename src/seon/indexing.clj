@@ -22,7 +22,8 @@
    closure changes, so the expansion stays current for code edits. The one
    stale case is a brand-new ns not yet required anywhere — which by
    definition isn't in the build either."
-  (:require [cljs.env :as env]))
+  (:require [cljs.env :as env]
+            [clojure.java.io :as io]))
 
 (defn- analyzer-namespaces
   "The CLJS analyzer's namespaces map ({ns-sym ns-map}), or nil outside a
@@ -50,15 +51,24 @@
   [d]
   (merge (:meta d) (select-keys d [:private :fn-var :file :line :test])))
 
-(defn- indexed-ns?
-  "Namespaces the boot indexers cover: the substrate (`seon.*`) plus the
-   compiled `my.*` scaffold (`my.kb`, `my.kb.instruction`, ... -- the
-   human's world ships indexed like substrate; runtime-authored `my.*`
-   nses are teed by eval, not by this compile-time roster)."
-  [ns-sym]
-  (let [s (str ns-sym)]
-    (or (= s "seon") (.startsWith s "seon.")
-        (= s "my")   (.startsWith s "my."))))
+(defn- first-party-file?
+  "STRUCTURAL first/third-party boundary (V3-C, 2026-06-10): a def is
+   FIRST-PARTY iff its analyzer `:file` resolves to a file under the
+   repo root (the macroexpanding JVM's working dir) — `src/`, `test/`,
+   etc. Third-party code arrives from jars (`jar:` resource URLs) or
+   gitlibs checkouts (file URLs OUTSIDE the repo root) and is excluded.
+   Replaces the `seon.*`/`my.*` name-prefix predicate (`indexed-ns?`):
+   the indexer KNOWS the file path, so the name no longer has to carry
+   the classification."
+  [file]
+  (boolean
+    (when (and file (string? file))
+      (let [root (System/getProperty "user.dir")]
+        (if (.startsWith ^String file "/")
+          (.startsWith ^String file root)
+          (when-let [url (io/resource file)]
+            (and (= "file" (.getProtocol url))
+                 (.startsWith (.getPath url) root))))))))
 
 (defmacro specced-fn-vars
   "Expand to a vector of `#'`-literals: every PUBLIC fn var carrying
@@ -70,13 +80,12 @@
         reach (transitive-requires nss (-> &env :ns :name))
         syms  (sort
                 (for [n     reach
-                      :when (indexed-ns? n)
                       [_ d] (:defs (get nss n))
                       :let  [m (def-meta d)]
                       :when (and (:fn-var m)
                                  (not (:private m))
                                  (some? (:malli/schema m))
-                                 (:file m)
+                                 (first-party-file? (:file m))
                                  (:line m))]
                   (:name d)))]
     `[~@(map (fn [s] (list 'var s)) syms)]))
@@ -91,11 +100,10 @@
         reach (transitive-requires nss (-> &env :ns :name))
         syms  (sort
                 (for [n     reach
-                      :when (indexed-ns? n)
                       [_ d] (:defs (get nss n))
                       :let  [m (def-meta d)]
                       :when (and (some? (:test m))
-                                 (:file m)
+                                 (first-party-file? (:file m))
                                  (:line m))]
                   (:name d)))]
     `[~@(map (fn [s] (list 'var s)) syms)]))

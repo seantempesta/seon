@@ -47,20 +47,6 @@
 (schema/register! :seon.db/db   :any)
 (schema/register! :seon.db/conn :any)
 
-;; :seon.render/ai is SYMBOL-ONLY at storage (literal strings would
-;; deprive the agent of dynamic ctx — current convo, recent evals,
-;; schema ref, …). Force-symbol ensures the default ctx fn is always
-;; the baseline. The Malli :symbol type validates identically to
-;; `[:fn symbol?]` AND maps cleanly through the seon.db schema bridge
-;; to `:db.type/symbol`; the previous `[:fn symbol?]` shape didn't.
-(schema/register! :seon.render/ai :symbol)
-
-;; :seon.render/html — symbol-only at entity storage (V0.5 limitation;
-;; see seon.client/agent-bootstrap-schema for the datahike side). The
-;; in-process dispatch path still accepts literal hiccup at call sites
-;; (e.g. when a render fn returns a vector that wraps another).
-(schema/register! :seon.render/html :symbol)
-
 ;; Hiccup data shape — recursive vector starting with keyword, optional
 ;; attrs map, children. Defined via Malli local registry so the
 ;; recursive ref resolves. Kept registered for documentation purposes;
@@ -106,6 +92,22 @@
                [(first rest-x) (rest rest-x)]
                [nil rest-x])]
          (every? valid-hiccup-elem? children))))
+
+;; The render SLOTS (self-context spec, 2026-06-10 — relaxed from
+;; symbol-only):
+;;
+;;   :seon.render/ai   — string (verbatim doctrine — content as source,
+;;                       not cached output) OR a qualified symbol
+;;                       resolved LATE at every render.
+;;   :seon.render/html — qualified symbol OR a literal hiccup vector
+;;                       (static badge), same slot.
+;;
+;; Storage: a mixed-type :or can't map to one datahike valueType, so
+;; the seon.db bridge stores these as pr-str'd EDN strings
+;; (`:db.type/string`); `seon.db/decode-edn-value` is the read-side
+;; inverse used by every consumer here.
+(schema/register! :seon.render/ai   [:or :string :symbol])
+(schema/register! :seon.render/html [:or :symbol [:fn valid-hiccup?]])
 
 ;; Renderer return shapes — map-in / map-out per seon house rule.
 (schema/register! :seon.render/ai-response
@@ -388,7 +390,9 @@
                    :let [ent    (d/pull db '[*] eid)
                          kind   (entity-primary-kind db ent)
                          k-info (get kinds-by-kw kind)
-                         ai-sym (or (:seon.render/ai ent)
+                         ai-sym (or (some->> (:seon.render/ai ent)
+                                             (db/decode-edn-value
+                                               :seon.render/ai))
                                     (:ai k-info))]
                    :when ai-sym]
                {:eid       eid
@@ -409,7 +413,8 @@
    else datalog lookup against the entity's primary `:seon.schema`
    kind. nil if neither path yields a symbol."
   [db entity]
-  (or (:seon.render/html entity)
+  (or (some->> (:seon.render/html entity)
+               (db/decode-edn-value :seon.render/html))
       (let [{:keys [kinds-by-kw]} (kind-tables db)
             kind (entity-primary-kind db entity)]
         ;; NOTE: `(get kinds-by-kw kind)`, NOT `(some-> kinds-by-kw kind …)`
@@ -422,7 +427,8 @@
    else datalog lookup against the entity's primary `:seon.schema`
    kind."
   [db entity]
-  (or (:seon.render/ai entity)
+  (or (some->> (:seon.render/ai entity)
+               (db/decode-edn-value :seon.render/ai))
       (let [{:keys [kinds-by-kw]} (kind-tables db)
             kind (entity-primary-kind db entity)]
         ;; Same nil-kind guard as entity-html-sym.
