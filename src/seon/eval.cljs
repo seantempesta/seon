@@ -528,7 +528,7 @@
 ;; here — the value is the raw object.
 ;;
 ;; Key shape: "__seon_results_<eval-id>"
-;; Agent reads via `(seon.agent.<id>/result :abc123)` which is
+;; Agent reads via `(my.agent.<id>/result :abc123)` which is
 ;; set up by setup-agent-ns! to do the same js/Reflect.get lookup.
 ;; ============================================================
 
@@ -1195,7 +1195,7 @@
      compile-state — the bootstrap compile-state (defonce'd at boot)
      parsed        — vector from `seon.repl.internal/parse-forms`
                      (mix of `:kind :form` and `:kind :read` entries)
-     agent-ns-sym  — agent's home ns (e.g. 'seon.agent.seon)
+     agent-ns-sym  — agent's home ns (e.g. 'my.agent.seon)
      agent-id      — the owning agent's id
      turn-id       — the owning :seon.turn/id string (eval lands as a
                      component child of this turn via :seon.turn/evals)

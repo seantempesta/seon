@@ -244,7 +244,7 @@ compute from the query result — never report a number you did not
 just read back.
 
 Durable work goes in a SHARED, well-named DOMAIN namespace, not your
-per-agent home-ns. Your home-ns (seon.agent.<your-id>) is scratch; a
+per-agent home-ns. Your home-ns (my.agent.<your-id>) is scratch; a
 function or schema other turns and other agents should find and reuse
 belongs in a namespace named for the work itself — open one with a
 (ns my.domain.thing) form and define there. That is how today's function

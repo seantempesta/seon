@@ -55,7 +55,7 @@
                      vec)})))
 
 (defn- short-name
-  "For an FQ symbol string `\"seon.agent.XAR-.../foo\"`, return `\"foo\"`.
+  "For an FQ symbol string `\"my.agent.XAR-.../foo\"`, return `\"foo\"`.
    For schemas (keywords like `:seon.foo/bar`), return `\":bar\"`."
   [s]
   (let [s (str s)]
@@ -66,7 +66,7 @@
 (defn render-ai
   "Compact one-line summary with counts and short names:
 
-     [ns seon.agent.XAR-...]  fns: add, sub  schemas: :answer, :id"
+     [ns my.agent.XAR-...]  fns: add, sub  schemas: :answer, :id"
   {:malli/schema [:=> [:cat :map] :seon.render/ai-response]}
   [{:seon.db/keys [db] :seon.render/keys [entity]}]
   (let [n      (:seon.ns/name entity)

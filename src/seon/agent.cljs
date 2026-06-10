@@ -4,7 +4,7 @@
    runs.' There is no separate seon.session — the agent IS the unit.
 
    The agent operates as a real REPL: bootstrap-CLJS evaluates its
-   forms, results land in a per-agent home namespace (`seon.agent.<id>`)
+   forms, results land in a per-agent home namespace (`my.agent.<id>`)
    as live values keyed by eval-id (on globalThis, via [[seon.eval]]),
    and durable records land as `:seon.eval` entities in the database.
    The agent calls the real `seon.db/*` APIs directly — no
@@ -469,9 +469,9 @@
 
 (defn home-ns
   "Return the deterministic home-ns symbol for an agent id.
-   `(home-ns \"seon\") => 'seon.agent.seon`."
+   `(home-ns \"seon\") => 'my.agent.seon`."
   [agent-id]
-  (symbol (str "seon.agent." agent-id)))
+  (symbol (str "my.agent." agent-id)))
 
 ;; ============================================================
 ;; Turn loop — was seon.session.cljs, now consolidated here.
@@ -501,7 +501,7 @@
   [sym agent-id]
   (and (qualified-symbol? sym)
        (str/starts-with? (namespace sym)
-                         (str "seon.agent." agent-id))))
+                         (str "my.agent." agent-id))))
 
 (defn- ai-render-input
   "Build the input map for the agent's `:seon.render/ai` dispatch.
@@ -509,7 +509,7 @@
   [sym db agent-id ent]
   (if (per-agent-shape? sym agent-id)
     {:seon.db/db                                          db
-     (keyword (str "seon.agent." agent-id) "ctx")         ent}
+     (keyword (str "my.agent." agent-id) "ctx")         ent}
     {:seon.db/db    db
      :seon.agent/id agent-id}))
 
@@ -2603,15 +2603,13 @@
 ;; ============================================================
 
 (defn- substrate-ns-name?
-  "True when `ns-str` names a COMPILED-substrate namespace — `seon.*`
-   but not the per-agent home nses (`seon.agent.<id>`, id-shaped:
-   3 chars + dash + digits). The toolbelt (`seon.agent.todo`/.fs/…)
-   IS substrate and gets count lines. INTERIM name rule — the home-ns
-   exclusion dies with the my.agent.<id> rename (P3) and the whole
-   heuristic dies with the V3-C seon.ctx classifier."
+  "True when `ns-str` names a COMPILED-substrate namespace — `seon.*`.
+   Agent home nses are `my.agent.<id>` and never match. The toolbelt
+   (`seon.agent.todo`/.fs/…) IS substrate and gets count lines.
+   INTERIM name rule — the heuristic dies with the V3-C seon.ctx
+   classifier."
   [ns-str]
-  (and (str/starts-with? ns-str "seon.")
-       (not (re-find #"^seon\.agent\.\w{3}-\d" ns-str))))
+  (str/starts-with? ns-str "seon."))
 
 (defn- fn-catalog-block-brief
   "One AGENT-authored fn for the catalog: ONE LINE — the first-arity
@@ -2971,7 +2969,7 @@
                              (seon.agent.todo/open-todos-section); derived from the
                              db, vanishes when the work is done (dynamic)
      9. :transcript        — messages + evals interleaved chronologically (dynamic)
-    10. :prompt            — `seon.agent.<id>=>  ; turn N` (always changing)
+    10. :prompt            — `my.agent.<id>=>  ; turn N` (always changing)
 
    :exemplars sits at 22, between :capabilities (20) and :schema-catalog
    (25): system + capabilities + exemplars are all fully byte-stable while

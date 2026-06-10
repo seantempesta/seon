@@ -4,7 +4,7 @@
    On resume/boot the SUBSTRATE corpus is rebuilt from real source by
    `seon.client/index-substrate!` (no replay — its rows are compiled fns;
    re-evaling `(defn ^:async transact! …)` would be wrong). The agent's OWN
-   corpus (fns / tests / schemas / nses under `seon.agent.<id>`) IS replayed:
+   corpus (fns / tests / schemas / nses under `my.agent.<id>`) IS replayed:
    `replay-program-graph!` re-evals each persisted `:source` so the agent's
    definitions come back after a pod restart.
 
@@ -50,7 +50,7 @@
 ;;                       source (the exact thing the old curated path wrote);
 ;;                       must be SKIPPED so the compiled fn is never shadowed.
 ;;   :seon.test.runner — substrate ns + a `run!` :seon.test row; must be SKIPPED.
-;;   :seon.agent.t1    — agent ns + an `agent-fn` fn + a `my-test` :seon.test
+;;   :my.agent.t1    — agent ns + an `agent-fn` fn + a `my-test` :seon.test
 ;;                       row whose source `(def replay-marker 42)` EVALS; both
 ;;                       must REPLAY.
 ;; ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@
 (def ^:private seed-tx
   [{:seon.ns/name :seon.db :seon.ns/source "(ns seon.db)"}
    {:seon.ns/name :seon.test.runner :seon.ns/source "(ns seon.test.runner)"}
-   {:seon.ns/name :seon.agent.t1 :seon.ns/source "(ns seon.agent.t1)"}
+   {:seon.ns/name :my.agent.t1 :seon.ns/source "(ns my.agent.t1)"}
    ;; SUBSTRATE fn with a `,,,` stub source — must be SKIPPED on replay.
    {:seon.fn/sym "seon.db/transact!"
     :seon.fn/ns [:seon.ns/name :seon.db]
@@ -67,15 +67,15 @@
     :seon.fn/doc ""
     :seon.fn/private? false}
    ;; AGENT fn — must REPLAY (re-eval into the agent ns).
-   {:seon.fn/sym "seon.agent.t1/agent-fn"
-    :seon.fn/ns [:seon.ns/name :seon.agent.t1]
+   {:seon.fn/sym "my.agent.t1/agent-fn"
+    :seon.fn/ns [:seon.ns/name :my.agent.t1]
     :seon.fn/source "(defn agent-fn [n] (* n 2))"
     :seon.fn/arglists "([n])"
     :seon.fn/doc ""
     :seon.fn/private? false}
    ;; AGENT test row — must REPLAY its source.
-   {:seon.test/sym "seon.agent.t1/my-test"
-    :seon.test/ns [:seon.ns/name :seon.agent.t1]
+   {:seon.test/sym "my.agent.t1/my-test"
+    :seon.test/ns [:seon.ns/name :my.agent.t1]
     :seon.test/source "(def replay-marker 42)"}
    ;; SUBSTRATE test row — must be SKIPPED.
    {:seon.test/sym "seon.test.runner/run!"
@@ -111,9 +111,9 @@
               (fn [entries]
                 (let [pairs (set (map (juxt :kind :ident) entries))]
                   ;; AGENT corpus IS in the replay set.
-                  (is (contains? pairs [:ns :seon.agent.t1]) "agent ns replays")
-                  (is (contains? pairs [:fn "seon.agent.t1/agent-fn"]) "agent fn replays")
-                  (is (contains? pairs [:test "seon.agent.t1/my-test"])
+                  (is (contains? pairs [:ns :my.agent.t1]) "agent ns replays")
+                  (is (contains? pairs [:fn "my.agent.t1/agent-fn"]) "agent fn replays")
+                  (is (contains? pairs [:test "my.agent.t1/my-test"])
                       "agent :seon.test row replays its source")
                   ;; SUBSTRATE corpus is NOT in the replay set — even the
                   ;; `,,,`-stubbed transact! row, which the old curated path
@@ -153,7 +153,7 @@
                             "no replay failures")))
                     (.then
                       (fn [_]
-                        (seval/eval cs "(seon.agent.t1/agent-fn 21)"
+                        (seval/eval cs "(my.agent.t1/agent-fn 21)"
                                     {:ns 'cljs.user :analyze-deps? false})))
                     (.then
                       (fn [r]
@@ -161,7 +161,7 @@
                         (is (= 42 (:value r))
                             "replayed agent-fn is callable: (agent-fn 21) => 42")
                         (seval/eval cs "(+ replay-marker 8)"
-                                    {:ns 'seon.agent.t1 :analyze-deps? false})))
+                                    {:ns 'my.agent.t1 :analyze-deps? false})))
                     (.then
                       (fn [r]
                         (is (:ok r) "agent test source replayed without error")

@@ -63,7 +63,7 @@
 (defn- seed-tx
   "tx-data for an agent with NO `:seon.agent/ctx`, a session with two
    turns. Turn 1: a user message + a FAILED eval (drives warnings).
-   Turn 2: a successful eval in ns `:seon.agent.ctx-260610` plus a
+   Turn 2: a successful eval in ns `:my.agent.ctx-260610` plus a
    `:seon.ns`/`:seon.fn` for that ns (drives current-ns). `extra-evals`
    lets a test append big-result evals to turn 2.
 
@@ -103,7 +103,7 @@
               :seon.eval/source "(seon.db/query [:bad])"
               :seon.eval/ok? false
               :seon.eval/error "boom — bad query"
-              :seon.eval/ns :seon.agent.ctx-260610}]}
+              :seon.eval/ns :my.agent.ctx-260610}]}
            {:seon.turn/id "TRNctxtest0002"
             :seon.turn/at (t 20)
             :seon.turn/status :done
@@ -113,15 +113,15 @@
                     :seon.eval/duration-ms 3
                     :seon.eval/source "(defn greet [] :hi)"
                     :seon.eval/ok? true
-                    :seon.eval/result-edn "#'seon.agent.ctx-260610/greet"
-                    :seon.eval/ns :seon.agent.ctx-260610}]
+                    :seon.eval/result-edn "#'my.agent.ctx-260610/greet"
+                    :seon.eval/ns :my.agent.ctx-260610}]
                   extra-evals)}]}]}
        ;; Program-graph entities for the agent's current ns so
        ;; namespace-context-section has source to render.
-       {:seon.ns/name :seon.agent.ctx-260610
-        :seon.ns/source "(ns seon.agent.ctx-260610)"}
-       {:seon.fn/sym "seon.agent.ctx-260610/greet"
-        :seon.fn/ns [:seon.ns/name :seon.agent.ctx-260610]
+       {:seon.ns/name :my.agent.ctx-260610
+        :seon.ns/source "(ns my.agent.ctx-260610)"}
+       {:seon.fn/sym "my.agent.ctx-260610/greet"
+        :seon.fn/ns [:seon.ns/name :my.agent.ctx-260610]
         :seon.fn/source "(defn greet [] :hi)"}])))
 
 (defn- boot-seed-tx
@@ -195,7 +195,7 @@
    :seon.eval/source "(seon.db/pull {:seon.db/pull-pattern '[*]})"
    :seon.eval/ok? true
    :seon.eval/result-edn (apply str (repeat n "x"))
-   :seon.eval/ns :seon.agent.ctx-260610})
+   :seon.eval/ns :my.agent.ctx-260610})
 
 ;; ---------------------------------------------------------------------------
 ;; (a) THE regression — no stored ctx still yields the full default context.
@@ -325,7 +325,7 @@
                   i-user      (str/index-of ts "user> build me a thing")
                   i-assistant (str/index-of ts "assistant> on it")
                   i-failed    (str/index-of ts "boom — bad query")
-                  i-success   (str/index-of ts "seon.agent.ctx-260610/greet")]
+                  i-success   (str/index-of ts "my.agent.ctx-260610/greet")]
               (is (str/includes? ts "<transcript>") "transcript marker present")
               (is (and i-user i-assistant i-failed i-success)
                   "all four transcript items present (2 msgs + 2 evals)")
@@ -650,9 +650,9 @@
               (is (not (str/includes? txt "(defn greet [] :hi)"))
                   "own-ns source does NOT render here (it renders ONCE, in
                    :namespace-context)")
-              ;; AGENT-authored ns (seon.agent.ctx-260610) keeps per-fn callable
+              ;; AGENT-authored ns (my.agent.ctx-260610) keeps per-fn callable
               ;; lines (greet has no stored arglists → the `(sym …)` fallback).
-              (is (str/includes? txt "(seon.agent.ctx-260610/greet …)")
+              (is (str/includes? txt "(my.agent.ctx-260610/greet …)")
                   "agent-authored ns renders one callable line per fn")
               ;; No other ns's full source leaks in.
               (is (not (str/includes? txt "(defn transact!"))
@@ -954,7 +954,7 @@
                   "status block: turn · since-user (cap N) · ISO timestamp")
               ;; the final line is EXACTLY the REPL prompt — ns + `=> `,
               ;; nothing after (the old `; turn N` tail is gone).
-              (is (re-find #"(?m)^seon\.agent\.ctx-260610=> $" prompt)
+              (is (re-find #"(?m)^my\.agent\.ctx-260610=> $" prompt)
                   "final line is exactly `<current-ns>=> ` (clean)")
               (is (not (str/includes? prompt "; turn "))
                   "no trailing `; turn N` metadata on the prompt line")

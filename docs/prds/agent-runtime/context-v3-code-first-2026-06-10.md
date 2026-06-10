@@ -168,6 +168,14 @@ pod's `@seon.client/!agent-conn`, cluster store `data/clusters/default`):
 
 ### Unit 1 — home-ns rename `seon.agent.<id>` → `my.agent.<id>`
 
+**STATUS: SHIPPED 2026-06-10 (uncommitted).** All mints + classifier +
+prompt + Rust default-ns renamed; `substrate-ns-name?` simplified to
+plain `(str/starts-with? ns-str "seon.")` (the interim id-shape regex
+died with the home-exclusion). client.cljs doc-comment sites SKIPPED
+(P3.5 fence — sweeps there). bin/test-cljs 306/1216/0 PASS; cargo build
+green; live pod boot ns `my.agent.<id>`, home-ns eval + prompt line +
+system-prompt text all verified on agent zEJ-2606101556.
+
 Goal: agent HOME namespaces mint as `my.agent.<id>` (convention only —
 NO write-block machinery; user decision c60e334). `seon.*` stays
 substrate-only by convention.

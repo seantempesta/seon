@@ -21,28 +21,28 @@
     [seon.eval :as seval]))
 
 (deftest in-ns-translates-to-a-teaching-error
-  (let [r (seval/parity-intercept "(in-ns 'kb.docs)" 'seon.agent.x)]
+  (let [r (seval/parity-intercept "(in-ns 'kb.docs)" 'my.agent.x)]
     (is (= :error (:seon.eval/parity r)))
     (testing "names the exact replacement, with the agent's own target ns"
       (is (str/includes? (:seon.error/message r) "in-ns is not available"))
       (is (str/includes? (:seon.error/message r) "(ns kb.docs)"))))
   (testing "unquoted / whitespace variants still intercept"
-    (let [r (seval/parity-intercept "  (in-ns  my.ns)" 'seon.agent.x)]
+    (let [r (seval/parity-intercept "  (in-ns  my.ns)" 'my.agent.x)]
       (is (= :error (:seon.eval/parity r)))
       (is (str/includes? (:seon.error/message r) "(ns my.ns)")))))
 
 (deftest bare-star-ns-returns-the-current-ns-as-a-value
   ;; The honest intercept: *ns* IS the ns the form runs in — returning it
   ;; beats both the silent nil and a teaching-only error.
-  (let [r (seval/parity-intercept "*ns*" 'seon.agent.abc)]
+  (let [r (seval/parity-intercept "*ns*" 'my.agent.abc)]
     (is (= :value (:seon.eval/parity r)))
-    (is (= 'seon.agent.abc (:seon.eval/value r))))
+    (is (= 'my.agent.abc (:seon.eval/value r))))
   (let [r (seval/parity-intercept " *ns* " 'other.ns)]
     (is (= 'other.ns (:seon.eval/value r)) "whitespace-trimmed")))
 
 (deftest star-1-2-3-teach-the-result-accessor
   (doseq [s ["*1" "*2" "*3"]]
-    (let [r (seval/parity-intercept s 'seon.agent.x)]
+    (let [r (seval/parity-intercept s 'my.agent.x)]
       (is (= :error (:seon.eval/parity r)) (str s " intercepted"))
       (is (str/includes? (:seon.error/message r) "(result :<eval-id>)")
           (str s " teaches the durable replacement")))))

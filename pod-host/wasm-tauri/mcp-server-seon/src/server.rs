@@ -53,7 +53,7 @@ pub struct EvalParams {
     pub agent_id: String,
     /// Clojure form to evaluate.
     pub code: String,
-    /// Namespace to eval inside. Defaults to `seon.agent.<agent_id>`.
+    /// Namespace to eval inside. Defaults to `my.agent.<agent_id>`.
     #[serde(default)]
     pub ns: Option<String>,
 }
@@ -89,10 +89,10 @@ impl SeonServer {
     #[tool(
         name        = "eval",
         description = "Eval a Clojure form in the agent's home namespace. \
-                       `ns` defaults to seon.agent.<agent_id>.",
+                       `ns` defaults to my.agent.<agent_id>.",
     )]
     pub async fn eval(&self, Parameters(p): Parameters<EvalParams>) -> CallToolResult {
-        let ns = p.ns.unwrap_or_else(|| format!("seon.agent.{}", p.agent_id));
+        let ns = p.ns.unwrap_or_else(|| format!("my.agent.{}", p.agent_id));
         let mut pod = self.pod.lock().await;
         match pod.call_eval_form_async(&p.agent_id, &p.code, &ns).await {
             Ok(Ok(res)) => text_result(serde_json::json!({
