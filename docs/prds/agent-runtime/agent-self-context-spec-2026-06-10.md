@@ -109,14 +109,31 @@ explicit `:seon.agent/id` allowed (the human or another agent can
 configure an agent — it's all just transacts anyway, the verb is the
 validated path).
 
+## The :purpose section — the seeded example IS the launch directive (user, 2026-06-10)
+
+Every agent is seeded at create! with a `:purpose` section, priority ~12
+(after SOUL/system, BEFORE capabilities — purpose frames everything):
+
+- Created with a stated purpose (the web create form gains a purpose
+  field; future spawner agents supply it): text = "Your human created
+  you for: <their words>." Durable, rendered EVERY turn, restart-proof
+  — the launch directive can't scroll away into transcript history.
+- Created without one: the seed text directs the agent to acquire it —
+  "Derive your purpose from your human's first messages, then update
+  this section (add-section! :purpose) so you keep your direction."
+  The placeholder teaches the mechanism by demanding its use.
+- The agent (or the human, by transact) refines it over time —
+  upsert-by-name, one datom, visible in the inspector. Purpose
+  fulfilled → complete!. ANTI-DRIFT: user messages push turn by turn;
+  the purpose section pulls back every render — a constant the
+  transcript cannot dilute.
+
 ## Show don't tell — how agents LEARN this
 
-1. **Seeded worked examples** (at `create!`): every new agent's entity
-   ships with one text section whose text IS the customization hint
-   ("This is your doctrine section. add-section! adds more; sections
-   with :seon.render/ai point at functions you write.") and one tiny
-   working computed section. The examples ARE config — copyable shapes,
-   not prose about shapes.
+1. **The seeded :purpose section** (above) is the worked example —
+   real config the agent has a live reason to read and update, not a
+   demo. A second tiny computed section ships beside it as the
+   fn-shaped copyable.
 2. **The turn-0 demonstrated eval** (V3-E): a really-executed
    `(seon.db/pull db [:seon.agent/ctx …] my-ref)` whose RESULT shows the
    populated vector. The agent reads its own self every turn.
