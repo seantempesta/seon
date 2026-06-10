@@ -78,9 +78,24 @@ Prose that survives: SOUL/system identity only.
 - **V3-D — datahike API block**: render the query API from var metadata
   (docstrings live on the vars; code-as-data, no dep-file reads). Budget
   guard; trim to the querying surface (q, pull, entity, datoms, history…).
-- **V3-E — delete the hacks**: remove superseded taught-prose sections;
-  gym trio (S-01/S-32/S-21/S-12) re-run is the oracle for every unit; the
-  agreement property test (all surfaces classify identically) lands here.
+- **V3-E — SHOW DON'T TELL: sections → demonstrated evals + instruction
+  entities (user, 2026-06-10 late — reshapes the old "delete the prose"
+  unit):** after the static corpus, turn-0's transcript OPENS with a
+  small fixed list (4–6) of substrate-authored evals — real forms,
+  REALLY EXECUTED at render time against the live store (never
+  templated results) — demonstrating: `(seon.agent.todo/list-open {})`
+  (replaces the todos section), a `:seon.schema` catalog query
+  (replaces the passive domain-attrs wall), a `my.kb` consult query
+  (replaces consult-first prose), and a query over the NEW
+  `:seon.instruction/*` ENTITIES — instructions are DATA (id, text,
+  applies-when, priority), seeded by the substrate, runtime-editable by
+  user AND agents via transact (resurrects the orphaned sticky-preamble
+  mechanism as data). The agent wakes mid-session in a REPL where the
+  orientation queries already ran — imitation over obedience. Dynamic
+  demos live AFTER the byte-stable prefix (transcript zone). Convert
+  ONE section per unit, gym-scorecard each (does S-32 consult-rate move
+  when consult is demonstrated instead of told?). The agreement
+  property test (all surfaces classify identically) still lands here.
 
 Budget: turn-0 ≈ 105–130k chars ≈ 27–33k tokens, byte-stable prefix.
 User: token cost is acceptable; correctness of the lesson > size.
