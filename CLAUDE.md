@@ -2,64 +2,32 @@
 
 **Every Claude instance reads this file** — orchestrator, seon agents, and Claude Code subagents. Keep it universal. Role-specific instructions live in `ORCHESTRATOR.md` and `AGENT.md`.
 
-## Current focus (2026-05-20)
+## Current focus (2026-06-10) — ONE unified system
 
-Active branch: **`feature/agent-runtime`**.
+Active branch: **`feature/agent-runtime`**. **THE source of truth for goals,
+status, and the work queue is the PRD:**
+`docs/prds/agent-runtime/cljs-finish-clj-pivot-plan-2026-06-09.md` (rewritten
+2026-06-10 as a fresh-read spec — read it before anything else).
 
-The current substrate is the **V0 CLJS pod** at `src/seon/*.cljs` — a long-running Node process that hosts the agent loop, datahike-cljs, the bootstrap CLJS compiler, and a loopback HTTP+SSE server. Run it via `node out/client/main.js` after `clj -M:cljs compile client`. See `docs/cljs-dev-loop.md` for the dev loop.
+The substrate is the **CLJS pod** (`src/seon/*.cljs`, long-running Node:
+agent loop, bootstrap CLJS compiler, loopback HTTP+SSE inspector UI) backed by
+the **central JVM datahike store** (the `wire-server` process; file-backed
+datahike on `data/clusters/default/store`). The 2026-06-10 LANE-MERGE (unit
+2.2e) moves the pod onto that store via DIS (Distributed Index Space): the JVM
+is the sole writer (pod writes forward over a Unix socket), reads are local
+lazy db values (memory ∝ working set). A **cluster** = one DB + an
+orchestrator agent + N task agents; all coordination flows through the DB;
+target is one Node process per agent.
 
-**Where we are:**
+Settled (no longer open choices — do not re-litigate): NO WASM; DIS replica
+(proven by two committed regression harnesses); per-CLUSTER DBs; messaging =
+from/to refs + hop-cap; the CLJS sandbox is NOT a security boundary (it
+catches LLM hallucinations; isolation comes from process boundaries + the
+wire capability surface).
 
-- Phase 1 (stability + accident-prevention) shipped 2026-05-20: default-deny `seon.fs` allowlist with path-traversal-proof normalization, per-form eval timeout (`seon.eval/budget` for one-shot overrides), AbortController HTTP timeout in `seon.ai.deepseek`, project-local `tmp/seon-port`, hot-reload hygiene on broadcast + agent listeners. All seon CLJS builds: **0 warnings**.
-- The CLJS sandbox layer is **NOT a security boundary** — the agent's `cljs.js` eval can mutate the `!config` atoms or `(js/require "node:fs")` directly. It catches LLM hallucinations, not adversarial code.
-
-**Where we're going (Phase 3 — alpha-blocking) — OPEN CHOICES (2026-06-08):**
-
-Two architecture decisions are now PROVISIONAL, not settled. Don't assume the
-old answers; see `docs/prds/agent-runtime/RESUME-2026-06-08.md` ("Architecture:
-provisional choices + pivot triggers").
-
-- **Containment is UNDECIDED: secured-Node OR WASM.** The original plan was
-  WASM-Tauri containment (CLJS pod as a `wasm32-wasip2` Component via
-  wasm-rquickjs inside wasmtime, embedded in a Tauri Rust process; WIT-typed
-  capability surface `fs`/`http`/`mcp`/`capability-prompt`/`eval`, Rust host
-  decides grants, wasmtime enforces). That is NO LONGER certain — secured Node
-  runtimes (Node's permission model / hardened Node) are being evaluated as an
-  easier path to the same controls. Treat WASM-Tauri as one candidate, not the
-  mandate. WASM design of record (if pursued): `docs/seon/pod/wasm-spike-2026-05-20.md`;
-  workspace `pod-host/wasm-tauri/`; first milestone = `cljs.js` smoke test under `wasmtime`.
-- **datahike-cljs is PROVISIONAL.** All current V0 work runs on in-process
-  datahike-cljs. If we hit trouble ROOTED IN datahike-cljs (correctness, perf,
-  multi-conn limits, ALS-across-`await` fragility, missing features) → PIVOT,
-  don't keep pushing. Pivot target: a centralized CLJ datahike reader/writer
-  (single JVM datahike the pod talks to over the wire) — the V2 wire idea
-  reframed as a fallback adopted ON TROUBLE, not a mandated port.
-- **Multi-agent can be CLJS-ONLY** (one Node pod): per-agent `home-ns` + ALS
-  isolation, agent-scoped shared datahike-cljs DB, async-interleaved loops. The
-  JVM/WASM track is for HARD isolation + scale, NOT a prerequisite for
-  multi-agent itself.
-
-**Hard rule:** seon is the substrate. Consumer-product code (specific UI, vendor integrations, custom domain models) lives in downstream repos. No consumer-specific references in `src/`, `docs/`, or `pod-host/`.
-
----
-
-## Two-platform reality (2026-05-26)
-
-Seon has two tracks. As of 2026-06-08 the relationship is reframed: V1 is the
-active substrate; V2 is a FALLBACK we adopt on trouble, not a mandated port (see
-the provisional-choices note above).
-
-- **V1 / MVP track**: `src/seon/*.cljs` — single-process Node CLJS pod
-  with in-process datahike-cljs. Active LLM agent work happens here. This is
-  where the agent-runtime MVP is being built.
-- **V2 / Platform track**: `pod-host/sidecar-poc/` — multi-session
-  sidecar with wasm guests, JVM datahike, Transit wire. The centralized-CLJ-
-  datahike pieces here are the PIVOT TARGET if datahike-cljs proves
-  insufficient — not an inevitability on a fixed cutover clock.
-
-If you're working on V2: read `pod-host/sidecar-poc/AGENT.md` first.
-If you're working on V1: leave `pod-host/sidecar-poc/` alone.
-Cutover progress: `pod-host/sidecar-poc/CUTOVER.md`.
+**Hard rule:** seon is the substrate. Consumer-product code (specific UI,
+vendor integrations, custom domain models) lives in downstream repos. No
+consumer-specific references in `src/`, `docs/`, or `pod-host/`.
 
 ---
 
@@ -201,7 +169,7 @@ The whole repo is on a feature branch. Atomic refactors are the cheap option, no
 6. **Verify in the REPL, not just with tests.** Tests passing is necessary but not sufficient. Query the live system and confirm the actual state matches your intent.
 7. **Falsify, don't confirm.** Don't ask "does my change work?" Ask "how would I know if my change is broken?" Then check for that.
 
-**The REPL is the oracle.** Not the code, not the tests, not the docs. The running system tells you the truth. Every claim should be verifiable with a REPL expression.
+**Live proof, not inference.** Not the code, not the tests, not the docs — the running system tells you the truth. Every unit of work ships with "live proofs": checks OBSERVED in the running system (a datom read back, a page fetched, a log line) rather than inferred from passing tests. Every claim should be verifiable with a REPL expression.
 
 **Honesty is paramount.** It is far worse to hide remaining work than to report it. Never mark a task as "done" if there are known issues. Report what's actually working, what's broken, and what's left.
 
@@ -484,7 +452,7 @@ Datahike is **embedded** in the Seon JVM (in-process LMDB) — there is no separ
 |---------|------|-------------|
 | **Seon JVM** | 7888 (nREPL), 8080 (HTTP) | Main app — orchestrator, web UI, agents, and embedded Datahike (LMDB) |
 | **Caddy** | 3030 | HTTPS reverse proxy (optional) |
-| **Agent JVMs** | 7900-7902 | Isolated agent nREPL processes |
+| **wire-server** | UDS + 7891 (socket REPL, `nc` only) | Central datahike writer — the durable cluster store (`data/clusters/default/store`) |
 
 ### Why This Matters
 
@@ -516,7 +484,7 @@ bin/seon restart cljs-watch
 bin/seon stop pod
 ```
 
-Registered processes: `pod` (CLJS pod via Node), `cljs-watch` (CLJS rebuild watcher), `jvm` (`./bin/run`). Add new ones by editing the `process_command` case statement at the top of the script.
+Registered processes: `pod` (CLJS pod via Node), `cljs-watch` (CLJS rebuild watcher), `jvm` (`./bin/run`), `wire-server` (central datahike writer). Add new ones by editing the `process_command` case statement at the top of the script.
 
 For inside-the-JVM REPL operations, the JVM REPL still has its own verbs:
 
