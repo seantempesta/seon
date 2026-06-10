@@ -1,59 +1,89 @@
-;; RUN 8's pass bar (PRD §1 + §7 #26): stored knowledge must be CONSULTED,
-;; not just discoverable. Run 7's agent #2 efficiently RE-DERIVED a stored
-;; answer (70s flawless pipeline) without ever querying the finding rows.
-;; This scenario seeds agent #1's findings as fixtures and asks a RELATED
-;; question — the pass bar is that the fresh agent's FIRST eval queries the
-;; stored :kb.finding rows before any repo search.
+;; S-12 (catalog §4) — RUN 8: two-agent finding consultation, THE demo
+;; bar (PRD §1). Agent A researches + stores findings; fresh agent B is
+;; asked a RELATED question on the SAME store — no fixtures, A's output
+;; IS B's fixture (the accumulation thesis). The pass bar: B's FIRST
+;; eval consults the stored :kb.finding rows before any repo search.
+;; Run 7's agent #2 answered RIGHT while behaving WRONG (re-derived a
+;; stored answer in a flawless 70s pipeline) — consults-findings is
+;; therefore graded mechanically, SEPARATE from the judged answer
+;; correctness.
 ;;
-;; DEEPSEEK TIER — costs real money. The driver refuses to run it unless
-;; called with {:seon.gym/allow-paid? true} and DEEPSEEK_API_KEY set.
-{:seon.gym.scenario/id     :consults-findings-run8
- :seon.gym.scenario/doc    "Agent #2's FIRST move must be consulting stored :kb.finding rows for a related question (run-8 pass bar, §1 demo bar). Behavioral — requires the real adapter; the predicates run mechanically either way."
+;; DEEPSEEK TIER — costs real money. The driver refuses to run it
+;; unless called with {:seon.gym/allow-paid? true} + DEEPSEEK_API_KEY.
+{:seon.gym.scenario/id     :s12-run8-two-agent-consultation
+ :seon.gym.scenario/doc    "RUN 8: agent A researches transact-time schema validation and stores findings; fresh agent B (same store) must CONSULT those findings FIRST for a related question, then reply. Known-RED on consults-findings until #26 lands (catalog §6) — that is the point."
  :seon.gym.scenario/tier   :deepseek
  :seon.gym.scenario/status :active
- :seon.gym.scenario/axes   [:sees-question :consults-findings
-                            :replies-honestly :terminates]
- :seon.gym.scenario/schema-registrations
- [[:kb.finding/claim :string]
-  [:kb.finding/source-path :string]
-  [:kb.finding/line :int]
-  [:kb.finding/confidence [:enum :verified :inferred]]
-  [:kb.finding/question :string]]
- :seon.gym.scenario/fixtures
- [{:kb.finding/claim       "validate-attrs! rejects any tx whose attr is not registered in seon.schema before the tx reaches datahike"
-   :kb.finding/source-path "src/seon/db.cljs"
-   :kb.finding/line        630
-   :kb.finding/confidence  :verified
-   :kb.finding/question    "How does seon validate schemas at transact time?"}
-  {:kb.finding/claim       "validate-entity-values! Malli-validates every entity value against the registered attr schema"
-   :kb.finding/source-path "src/seon/db.cljs"
-   :kb.finding/line        694
-   :kb.finding/confidence  :verified
-   :kb.finding/question    "How does seon validate schemas at transact time?"}]
+ :seon.gym.scenario/axes   [:sees-question :searches-first :consults-findings
+                            :stores-proactively :replies-honestly :terminates]
  :seon.gym.scenario/turns
- [{:seon.gym.turn/message "What happens when an agent transacts an entity whose attribute isn't registered? Check what is already known before digging into the repo."}]
+ [{:seon.gym.turn/agent   :a
+   :seon.gym.turn/message "How does seon validate schemas at transact time? Walk me through what actually happens when I transact an attribute that was never registered. Store what you find so the next agent doesn't have to redo this."}
+  {:seon.gym.turn/agent   :b
+   :seon.gym.turn/message "Where exactly does seon check the VALUES of an entity against their Malli schemas during a transact, and what error do I get back when a value doesn't conform?"}]
  :seon.gym.scenario/predicates
- [{:seon.gym.predicate/id      :first-eval-consults-stored-findings
+ [{:seon.gym.predicate/id     :a-stored-at-least-two-findings-with-provenance
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :stores-proactively
+   :seon.gym.predicate/query  [:find ?f
+                               :where
+                               [?f :kb.finding/claim _]
+                               [?f :kb.finding/source-path _]
+                               [?f :kb.finding/line _]
+                               [?f :kb.finding/confidence _]]
+   :seon.gym.predicate/expect [:count>= 2]}
+  {:seon.gym.predicate/id      :a-searched-the-repo
+   :seon.gym.predicate/kind    :eval-count-matching
+   :seon.gym.predicate/agent   :a
+   :seon.gym.predicate/axis    :searches-first
+   :seon.gym.predicate/pattern "seon\\.search/grep|seon\\.fs/read-file"
+   :seon.gym.predicate/expect  [:count>= 1]}
+  ;; THE pass bar (PRD §1): B's earliest eval queries the finding rows.
+  {:seon.gym.predicate/id      :b-first-eval-consults-stored-findings
    :seon.gym.predicate/kind    :first-eval-matches
+   :seon.gym.predicate/agent   :b
    :seon.gym.predicate/axis    :consults-findings
    :seon.gym.predicate/pattern "kb\\.finding"}
-  {:seon.gym.predicate/id     :agent-replies-to-the-user
+  ;; "B sent a message onward" — from B with hops>0 (replies to the
+  ;; user carry waking-hops+1; the turn-log self-folds carry 0). NOT
+  ;; the user-entity join: the datahike-cljs engine mis-binds queries
+  ;; joining two identity attrs through one message (pinned repro in
+  ;; driver_test's two-agent scenario).
+  {:seon.gym.predicate/id     :b-replied-to-the-user
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :replies-honestly
+   :seon.gym.predicate/args   [:seon.gym.agent/b]
    :seon.gym.predicate/query  [:find ?m
+                               :in $ ?bid
                                :where
-                               [?m :seon.message/from ?a]
-                               [?a :seon.agent/id ?aid]
-                               [?m :seon.message/to ?u]
-                               [?u :seon.user/id "user"]]
+                               [?ag :seon.agent/id ?bid]
+                               [?m :seon.message/from ?ag]
+                               [?m :seon.message/hops ?h]
+                               [(pos? ?h)]]
    :seon.gym.predicate/expect :non-empty}
-  {:seon.gym.predicate/id     :agent-saw-the-question
+  ;; G5 — multi-segment finding namespace, no :finding/* fork.
+  {:seon.gym.predicate/id     :no-single-segment-finding-fork
    :seon.gym.predicate/kind   :datalog
-   :seon.gym.predicate/axis   :sees-question
-   :seon.gym.predicate/query  [:find ?e :where [?e :seon.eval/id ?id]]
-   :seon.gym.predicate/expect :non-empty}
-  {:seon.gym.predicate/id     :agent-terminates-idle
+   :seon.gym.predicate/axis   :stores-proactively
+   :seon.gym.predicate/query  [:find ?f :where [?f :finding/claim ?c]]
+   :seon.gym.predicate/expect :empty}
+  {:seon.gym.predicate/id     :both-agents-end-idle
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :terminates
-   :seon.gym.predicate/query  [:find ?a :where [?a :seon.agent/state :idle]]
-   :seon.gym.predicate/expect :non-empty}]}
+   :seon.gym.predicate/query  [:find ?a
+                               :where
+                               [?a :seon.agent/state :idle]]
+   :seon.gym.predicate/expect [:count 2]}
+  ;; --- judged answer correctness, SEPARATE from the behavior bits ---
+  {:seon.gym.predicate/id        :judge-a-answer-two-step-gate
+   :seon.gym.predicate/kind      :llm-judge
+   :seon.gym.predicate/agent     :a
+   :seon.gym.predicate/axis      :replies-honestly
+   :seon.gym.predicate/rubric    "PASS only if the reply correctly describes seon's TWO-STEP transact gate — (1) attribute-registration check (an attr never registered via seon.schema/register! is rejected before the tx reaches the database), then (2) per-value Malli validation of entity values — AND grounds it with a real file citation (src/seon/db.cljs). The reply must state that the failure comes back as an error VALUE ({:seon.db/ok? false :seon.db/error ...}), not a thrown exception. Vague hand-waving about 'validation happens' without the registration-check/value-check distinction fails."
+   :seon.gym.predicate/reference "Ground truth (run-7 verified findings): validate-attrs! in src/seon/db.cljs (~line 630) rejects any tx whose attr is not registered in seon.schema before the tx reaches datahike; validate-entity-values! in src/seon/db.cljs (~line 694) Malli-validates every entity value against the registered attr schema. transact! never throws past the boundary — it resolves to {:seon.db/ok? false :seon.db/error ...} on failure and {:seon.db/ok? true ...} on success."}
+  {:seon.gym.predicate/id        :judge-b-answer-value-validation
+   :seon.gym.predicate/kind      :llm-judge
+   :seon.gym.predicate/agent     :b
+   :seon.gym.predicate/axis      :replies-honestly
+   :seon.gym.predicate/rubric    "PASS only if the reply names validate-entity-values! (or unambiguously locates the per-value Malli validation step) in src/seon/db.cljs and describes the error envelope shape — {:seon.db/ok? false :seon.db/error ...} returned as a VALUE when a value doesn't conform. The answer must be consistent with the reference facts; claiming the transact throws an exception, or citing a different file for the value check, fails."
+   :seon.gym.predicate/reference "Ground truth (run-7 verified findings): validate-entity-values! in src/seon/db.cljs (~line 694) Malli-validates every entity value against the registered attr schema during transact; a non-conforming value yields {:seon.db/ok? false :seon.db/error ...} (errors are values — the promise resolves, it does not reject/throw)."}]}

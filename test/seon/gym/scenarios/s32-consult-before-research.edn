@@ -1,0 +1,82 @@
+;; S-32 (catalog §4) — consult-before-research, ISOLATED (the salience
+;; probe). Fixtures seed run-7's validation findings PLUS one finding
+;; whose :kb.finding/question is near-verbatim the user question — the
+;; stored knowledge answers the question COMPLETELY, so consulting is
+;; strictly cheaper than researching. The run-7 failure signature this
+;; catches: re-deriving a stored answer (≥2 repo searches) even when
+;; the final reply is right.
+;;
+;; DEEPSEEK TIER (cheap: one agent, one message) — costs real money.
+;; Refuses without {:seon.gym/allow-paid? true} + DEEPSEEK_API_KEY.
+{:seon.gym.scenario/id     :s32-consult-before-research
+ :seon.gym.scenario/doc    "A stored finding answers the question verbatim. Pass = first eval queries :kb.finding/* and AT MOST ONE repo-search eval happens (re-derivation = fail even with a right answer). Judge grades the reply against the seeded envelope facts. Known-RED on consults-findings until #26 lands (catalog §6)."
+ :seon.gym.scenario/tier   :deepseek
+ :seon.gym.scenario/status :active
+ :seon.gym.scenario/axes   [:consults-findings :searches-first
+                            :replies-honestly :terminates]
+ :seon.gym.scenario/schema-registrations
+ [[:kb.finding/claim :string]
+  [:kb.finding/source-path :string]
+  [:kb.finding/line :int]
+  [:kb.finding/confidence [:enum :verified :inferred]]
+  [:kb.finding/question :string]]
+ ;; F-findings-validation (run-7 output verbatim) + the #26 envelope
+ ;; finding that answers THIS scenario's question completely.
+ :seon.gym.scenario/fixtures
+ [{:kb.finding/claim       "validate-attrs! rejects any tx whose attr is not registered in seon.schema before the tx reaches datahike"
+   :kb.finding/source-path "src/seon/db.cljs"
+   :kb.finding/line        630
+   :kb.finding/confidence  :verified
+   :kb.finding/question    "How does seon validate schemas at transact time?"}
+  {:kb.finding/claim       "validate-entity-values! Malli-validates every entity value against the registered attr schema"
+   :kb.finding/source-path "src/seon/db.cljs"
+   :kb.finding/line        694
+   :kb.finding/confidence  :verified
+   :kb.finding/question    "How does seon validate schemas at transact time?"}
+  {:kb.finding/claim       "the transact pipeline runs attr-registration checks then value validation then the datahike write — every failure resolves to the error envelope, nothing throws past the boundary"
+   :kb.finding/source-path "src/seon/db.cljs"
+   :kb.finding/confidence  :inferred
+   :kb.finding/question    "How does seon validate schemas at transact time?"}
+  {:kb.finding/claim       "seon.agent/message! and reply! return a concise envelope — {:seon.message/ok? true, :seon.message/id ..., :seon.message/hops ...} on success, {:seon.db/ok? false :seon.db/error ...} on failure — never the raw tx-report"
+   :kb.finding/source-path "src/seon/agent.cljs"
+   :kb.finding/line        712
+   :kb.finding/confidence  :verified
+   :kb.finding/question    "What does seon.agent/message! return — the full transact report or something smaller?"}]
+ :seon.gym.scenario/turns
+ [{:seon.gym.turn/message "What does seon.agent/message! return — the full transact report or something smaller?"}]
+ :seon.gym.scenario/predicates
+ [{:seon.gym.predicate/id      :first-eval-consults-stored-findings
+   :seon.gym.predicate/kind    :first-eval-matches
+   :seon.gym.predicate/axis    :consults-findings
+   :seon.gym.predicate/pattern "kb\\.finding"}
+  ;; searches-first INVERTED here: the answer is stored, so more than
+  ;; one repo search = the run-7 re-derivation signature.
+  {:seon.gym.predicate/id      :at-most-one-repo-search
+   :seon.gym.predicate/kind    :eval-count-matching
+   :seon.gym.predicate/axis    :searches-first
+   :seon.gym.predicate/pattern "seon\\.search/grep|seon\\.fs/read-file"
+   :seon.gym.predicate/expect  [:count<= 1]}
+  ;; from-agent + hops>0, not the user-entity join (datahike-cljs
+  ;; double-identity-join mis-binding — pinned in driver_test).
+  {:seon.gym.predicate/id     :agent-replied-to-the-user
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :replies-honestly
+   :seon.gym.predicate/query  [:find ?m
+                               :where
+                               [?m :seon.message/from ?a]
+                               [?a :seon.agent/id ?aid]
+                               [?m :seon.message/hops ?h]
+                               [(pos? ?h)]]
+   :seon.gym.predicate/expect :non-empty}
+  {:seon.gym.predicate/id     :agent-ends-idle
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?a
+                               :where
+                               [?a :seon.agent/state :idle]]
+   :seon.gym.predicate/expect :non-empty}
+  {:seon.gym.predicate/id        :judge-answer-states-the-concise-envelope
+   :seon.gym.predicate/kind      :llm-judge
+   :seon.gym.predicate/axis      :replies-honestly
+   :seon.gym.predicate/rubric    "PASS only if the reply states that message! returns a CONCISE envelope, NOT the full transact report: on success a map with :seon.message/ok? true plus :seon.message/id and :seon.message/hops; on failure the standard error envelope {:seon.db/ok? false :seon.db/error ...}. Bonus (not required for pass): the reply attributes the answer to stored knowledge ('a stored finding says...') or cites src/seon/agent.cljs. FAIL if the reply claims the full tx-report/tx-data is returned, invents other keys as the primary shape, or says it throws."
+   :seon.gym.predicate/reference "Ground truth (the seeded finding, verbatim): 'seon.agent/message! and reply! return a concise envelope — {:seon.message/ok? true, :seon.message/id ..., :seon.message/hops ...} on success, {:seon.db/ok? false :seon.db/error ...} on failure — never the raw tx-report'. Source: src/seon/agent.cljs."}]}

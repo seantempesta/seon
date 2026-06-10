@@ -1,0 +1,59 @@
+;; S-01 (catalog §4) — stub pipeline smoke: message → wake → turn → idle.
+;; Proves the harness itself with ZERO spend, through the REAL agentic
+;; loop (:scripted-replay llm injection): turn 1 evals a reply!, turn 2
+;; is prose-only so the loop's zero-forms stop policy terminates.
+;;
+;; NOTE: the catalog's "expected RED until §7 item 4" applies to the
+;; POD's built-in stub llm (which always emits forms and burns to the
+;; turn cap). This scenario uses the gym's replay llm-fn through the
+;; same run-agentic-loop!, so it pins the TARGET pipeline behavior
+;; (message lands fully formed → wake → done turn → idle within 3
+;; turns) without reproducing the pod-stub bug.
+{:seon.gym.scenario/id     :s01-stub-pipeline-smoke
+ :seon.gym.scenario/doc    "Pipeline smoke: a user 'ping' lands as a fully-formed message (from user, hops 0, non-blank), wakes the agent, the woken turn closes :done, and the agent is :idle within 3 turns. Catalog S-01."
+ :seon.gym.scenario/tier   :stub
+ :seon.gym.scenario/status :active
+ :seon.gym.scenario/llm    :scripted-replay
+ :seon.gym.scenario/axes   [:sees-question :terminates]
+ :seon.gym.scenario/turns
+ [{:seon.gym.turn/message "ping"
+   :seon.gym.turn/llm-script
+   ["(seon.agent/reply! {:seon.message/content \"pong\"})\n"]}]
+ :seon.gym.scenario/predicates
+ [{:seon.gym.predicate/id     :message-row-landed-fully-formed
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :sees-question
+   :seon.gym.predicate/query  [:find ?m
+                               :where
+                               [?m :seon.message/content "ping"]
+                               [?m :seon.message/hops 0]
+                               [?m :seon.message/from ?u]
+                               [?u :seon.user/id "user"]]
+   :seon.gym.predicate/expect :non-empty}
+  {:seon.gym.predicate/id     :agent-woke-on-the-message-and-finished
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :sees-question
+   :seon.gym.predicate/query  [:find ?t
+                               :where
+                               [?m :seon.message/content "ping"]
+                               [?t :seon.turn/woken-by ?m]
+                               [?t :seon.turn/status :done]]
+   :seon.gym.predicate/expect :non-empty}
+  {:seon.gym.predicate/id     :terminates-within-three-turns
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?t
+                               :where
+                               [?t :seon.turn/id ?tid]]
+   :seon.gym.predicate/expect [:count<= 3]}
+  {:seon.gym.predicate/id     :agent-ends-idle
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?a
+                               :where
+                               [?a :seon.agent/state :idle]]
+   :seon.gym.predicate/expect :non-empty}
+  {:seon.gym.predicate/id   :reply-reached-the-transcript
+   :seon.gym.predicate/kind :transcript-includes
+   :seon.gym.predicate/axis :sees-question
+   :seon.gym.predicate/text "pong"}]}

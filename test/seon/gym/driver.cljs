@@ -4,18 +4,25 @@
    Scenarios are EDN DATA: a question (or several), optional fixtures
    (tx-data seeded before the run), and PASS-PREDICATES — datalog
    queries against the post-run store plus transcript checks — that a
-   driver evaluates MECHANICALLY. Section-by-section context iteration
-   becomes QUANTIFIED: every defect class from live runs 3–7 is encoded
-   as a permanent regression predicate, and the scorecard is keyed
+   driver evaluates MECHANICALLY, plus optional LLM-JUDGE predicates
+   (rubric + reference facts → graded verdict) recorded on a SEPARATE
+   scorecard axis. Section-by-section context iteration becomes
+   QUANTIFIED: every defect class from live runs 3–7 is encoded as a
+   permanent regression predicate, and the scorecard is keyed
    (scenario × git sha) so a context/prompt change shows up as a moved
    number, not an anecdote.
 
-   Isolation: every run boots a FRESH agent on a SCRATCH `:memory` conn
+   Isolation: every run boots FRESH agents on a SCRATCH `:memory` conn
    via `seon.client/open-agent-conn!` (the tests' isolated path) — the
    live cluster store is untouchable by construction. The root
    `seon.db/*conn*` is swapped for the duration of the run and restored
    in a `finally`; schema-registry keys minted during the run (by
    fixtures OR by the agent's own `register!` evals) are removed after.
+
+   Multi-agent sequencing (catalog §7): each turn carries an agent
+   DESIGNATOR (`:seon.gym.turn/agent`, default `:a`); designators boot
+   lazily on the same scratch store and turns run strictly in order, so
+   'boot A → await idle → boot B' falls out of the sequential drive.
 
    Budget tiers:
      :stub     — FREE. The scenario scripts the LLM responses
@@ -23,13 +30,19 @@
                  the driver drives ONE `run-turn!` per script entry —
                  deliberately NOT the trigger-driven loop, because the
                  stub self-wake bug (PRD §4) burns trigger-driven stub
-                 loops to the turn cap. Deterministic plumbing checks.
+                 loops to the turn cap. Set `:seon.gym.scenario/llm` to
+                 `:scripted-replay` to drive the REAL agentic loop with
+                 a replaying llm-fn instead (terminates via the loop's
+                 zero-forms stop policy), or `:rejecting` for the
+                 simulated-provider-failure fixture.
      :deepseek — costs real money. The driver wires
                  `seon.ai.deepseek/agent-adapter` through
                  `run-agentic-loop!` (awaits the loop's own
                  termination = idle), but REFUSES to run unless the
                  caller passes `:seon.gym/allow-paid? true` AND
-                 DEEPSEEK_API_KEY is set. Behavioral scenarios.
+                 DEEPSEEK_API_KEY is set. LLM-judge predicates run
+                 under the same guard (or with an injected
+                 `:seon.gym/judge-fn` — how tests mock the judge).
 
    Rubric axes (the vocabulary every predicate tags itself with):
      sees-question · searches-first · models-work-directed ·
@@ -43,16 +56,26 @@
            {:seon.gym/path \"test/seon/gym/scenarios/envelope-honesty.edn\"})
          :seon.gym/scenarios first
          (as-> s (seon.gym.driver/run-scenario! {:seon.gym/scenario s}))
-         (.then seon.gym.driver/print-scorecard!))"
+         (.then seon.gym.driver/print-scorecard!))
+
+   Driver-feature gaps still TODO (catalog §7 — not needed by the
+   top-4 scenarios):
+     - mid-scenario pod restart against the same scratch store (S-06).
+     - captured return values from driver-level message! calls (S-05).
+     - fixture-sources tee into the :seon.fn functions-catalog (the
+       fns ARE callable; catalog visibility needs the record-eval! tee
+       outside a turn — required before S-31 function-reuse is encoded)."
   (:require
     [cljs.reader :as reader]
     [clojure.string :as str]
+    [clojure.walk :as walk]
     [malli.core :as m]
     [seon.agent :as agent]
     [seon.ai.deepseek :as deepseek]
     [seon.client :as client]
     [seon.db :as db]
     [seon.eval :as seval]
+    [seon.fs :as sfs]
     [seon.repl :as repl]
     [seon.schema :as schema]))
 
@@ -73,38 +96,68 @@
 (schema/register! :seon.gym.turn/message :string)
 ;; One scripted LLM response text per driven turn. Stub tier only.
 (schema/register! :seon.gym.turn/llm-script [:vector :string])
+;; Agent DESIGNATOR (:a, :b, …) — multi-agent sequencing (catalog §7).
+;; Turns run strictly in order; each designator's agent is created
+;; lazily on first use, on the SAME scratch store. Default :a.
+(schema/register! :seon.gym.turn/agent :keyword)
 (schema/register! :seon.gym/turn
   [:map
    [:seon.gym.turn/message :seon.gym.turn/message]
+   [:seon.gym.turn/agent {:optional true} :seon.gym.turn/agent]
    [:seon.gym.turn/llm-script {:optional true} :seon.gym.turn/llm-script]])
 
 ;; --- predicates ---------------------------------------------------------------
 (schema/register! :seon.gym.predicate/id   :keyword)
+;; :eval-count-matching — rows = the (optionally agent-scoped) evals
+;;   whose source matches :pattern; :expect applies to that row set
+;;   ([:count 0] = "never did X", [:count<= 1] = "at most once", …).
+;; :llm-judge — NOT mechanical. Rubric + reference facts + the agent's
+;;   verbatim reply → graded verdict on the SEPARATE judge axis of the
+;;   scorecard ("behaved right, answered wrong" stays distinguishable).
 (schema/register! :seon.gym.predicate/kind
   [:enum :datalog :transcript-includes :transcript-excludes
-   :first-eval-matches])
+   :first-eval-matches :eval-count-matching :llm-judge])
 (schema/register! :seon.gym.predicate/axis :seon.gym.axis/name)
 ;; Datalog query/args are datahike's domain — third-party boundary,
 ;; :any allowed (same stance as :seon.db/query-request).
 (schema/register! :seon.gym.predicate/query [:vector :any])
+;; Args may contain agent-designator placeholders — a keyword in the
+;; :seon.gym.agent namespace (e.g. :seon.gym.agent/b) is substituted
+;; with that designator's actual agent id at evaluation time.
 (schema/register! :seon.gym.predicate/args  [:vector :any])
 (schema/register! :seon.gym.predicate/expect
   [:or
    [:enum :non-empty :empty]
    [:tuple [:= :count] :int]
-   [:tuple [:= :some-includes] :string]])
+   [:tuple [:= :count<=] :int]
+   [:tuple [:= :count>=] :int]
+   [:tuple [:= :some-includes] :string]
+   ;; every value in every row must be one of these strings (set
+   ;; membership after `str` — used for attr-name-subset predicates).
+   [:tuple [:= :every-in] [:vector :string]]])
 (schema/register! :seon.gym.predicate/text    :string)
 (schema/register! :seon.gym.predicate/pattern :string)
+;; Scope an eval-shaped predicate (first-eval-matches /
+;; eval-count-matching) or a judge predicate to ONE agent designator.
+;; Absent = the whole store for eval predicates, :a for judges.
+(schema/register! :seon.gym.predicate/agent :seon.gym.turn/agent)
+;; LLM-judge inputs: the grading rubric and the reference (ground-
+;; truth) facts the verdict must be checked against.
+(schema/register! :seon.gym.predicate/rubric    :string)
+(schema/register! :seon.gym.predicate/reference :string)
 (schema/register! :seon.gym/predicate
   [:map
    [:seon.gym.predicate/id      :seon.gym.predicate/id]
    [:seon.gym.predicate/kind    :seon.gym.predicate/kind]
    [:seon.gym.predicate/axis    :seon.gym.predicate/axis]
+   [:seon.gym.predicate/agent   {:optional true} :seon.gym.predicate/agent]
    [:seon.gym.predicate/query   {:optional true} :seon.gym.predicate/query]
    [:seon.gym.predicate/args    {:optional true} :seon.gym.predicate/args]
    [:seon.gym.predicate/expect  {:optional true} :seon.gym.predicate/expect]
    [:seon.gym.predicate/text    {:optional true} :seon.gym.predicate/text]
-   [:seon.gym.predicate/pattern {:optional true} :seon.gym.predicate/pattern]])
+   [:seon.gym.predicate/pattern {:optional true} :seon.gym.predicate/pattern]
+   [:seon.gym.predicate/rubric    {:optional true} :seon.gym.predicate/rubric]
+   [:seon.gym.predicate/reference {:optional true} :seon.gym.predicate/reference]])
 
 ;; --- scenario -----------------------------------------------------------------
 (schema/register! :seon.gym.scenario/id     :keyword)
@@ -116,7 +169,26 @@
 (schema/register! :seon.gym/malli-form [:or :keyword [:vector :any]])
 (schema/register! :seon.gym.scenario/schema-registrations
   [:vector [:tuple :keyword :seon.gym/malli-form]])
+;; Fixture tx-data. String values may carry the relative-date
+;; placeholders {{today}} and {{days-ago:N}} — resolved to ISO dates
+;; against the run date at seed time ("last week" stays last week).
 (schema/register! :seon.gym.scenario/fixtures :seon.db/tx-data)
+;; Fixture SOURCE strings — evaluated through `seon.eval/eval` at
+;; fixture-load so the defined fns are CALLABLE from agent evals
+;; (code-as-data seeding, catalog F-helper-fns). TODO: tee them into
+;; the :seon.fn functions-catalog too (needs the record-eval! tee
+;; outside a turn) — required before S-31 (function reuse) is encoded.
+(schema/register! :seon.gym.scenario/fixture-sources [:vector :string])
+;; Per-scenario llm-fn injection (catalog §7), stub tier only:
+;;   :scripted-replay — drive run-agentic-loop! (the REAL trigger-style
+;;     loop) with an llm-fn replaying the turn's :llm-script entries in
+;;     order; once exhausted it answers prose-only, so the loop's
+;;     zero-forms stop policy terminates it.
+;;   :rejecting — an llm-fn whose Promise REJECTS after 100ms
+;;     (simulated provider failure; catalog F-llm-reject / S-08).
+;; Absent on a stub scenario = the one-run-turn!-per-script-entry
+;; driver (see ns docstring on the stub self-wake bug).
+(schema/register! :seon.gym.scenario/llm [:enum :scripted-replay :rejecting])
 (schema/register! :seon.gym.scenario/turns [:vector :seon.gym/turn])
 (schema/register! :seon.gym.scenario/predicates
   [:vector :seon.gym/predicate])
@@ -130,6 +202,9 @@
    [:seon.gym.scenario/schema-registrations {:optional true}
     :seon.gym.scenario/schema-registrations]
    [:seon.gym.scenario/fixtures {:optional true} :seon.gym.scenario/fixtures]
+   [:seon.gym.scenario/fixture-sources {:optional true}
+    :seon.gym.scenario/fixture-sources]
+   [:seon.gym.scenario/llm {:optional true} :seon.gym.scenario/llm]
    [:seon.gym.scenario/turns      :seon.gym.scenario/turns]
    [:seon.gym.scenario/predicates :seon.gym.scenario/predicates]])
 
@@ -152,6 +227,24 @@
   [:map-of :seon.gym.axis/name :boolean])
 (schema/register! :seon.gym.scorecard/results
   [:vector :seon.gym/result])
+;; --- judge verdicts — a SEPARATE scorecard axis from the mechanical
+;; results. :seon.gym.scorecard/pass?/axes/results stay PURELY
+;; mechanical; judge-pass?/judge-results carry the semantic grading, so
+;; "behaved right, answered wrong" reads as pass? true + judge-pass?
+;; false — a distinct failure signature, never merged.
+(schema/register! :seon.gym.judge/pass?  :boolean)
+(schema/register! :seon.gym.judge/score  :int) ; 0–100
+(schema/register! :seon.gym.judge/justification :string)
+(schema/register! :seon.gym/judge-result
+  [:map
+   [:seon.gym.predicate/id        :seon.gym.predicate/id]
+   [:seon.gym.predicate/axis      :seon.gym.predicate/axis]
+   [:seon.gym.judge/pass?         :seon.gym.judge/pass?]
+   [:seon.gym.judge/score         :seon.gym.judge/score]
+   [:seon.gym.judge/justification :seon.gym.judge/justification]])
+(schema/register! :seon.gym.scorecard/judge-pass? :boolean)
+(schema/register! :seon.gym.scorecard/judge-results
+  [:vector :seon.gym/judge-result])
 (schema/register! :seon.gym/scorecard
   [:map
    [:seon.gym.scorecard/scenario :seon.gym.scorecard/scenario]
@@ -161,7 +254,12 @@
    [:seon.gym.scorecard/agent-id :seon.gym.scorecard/agent-id]
    [:seon.gym.scorecard/pass?    :seon.gym.scorecard/pass?]
    [:seon.gym.scorecard/axes     :seon.gym.scorecard/axes]
-   [:seon.gym.scorecard/results  :seon.gym.scorecard/results]])
+   [:seon.gym.scorecard/results  :seon.gym.scorecard/results]
+   ;; present iff the scenario carries :llm-judge predicates
+   [:seon.gym.scorecard/judge-pass? {:optional true}
+    :seon.gym.scorecard/judge-pass?]
+   [:seon.gym.scorecard/judge-results {:optional true}
+    :seon.gym.scorecard/judge-results]])
 
 ;; --- request/response shapes ------------------------------------------------
 (schema/register! :seon.gym/path :string)
@@ -173,10 +271,15 @@
 (schema/register! :seon.gym/error :string)
 (schema/register! :seon.gym/refusal
   [:map [:seon.gym/ok? [:= false]] [:seon.gym/error :seon.gym/error]])
+;; Injectable judge llm-fn: ctx-string → Promise<{:text "…"}>. Tests
+;; inject a mock (zero spend) to prove the verdict→axis wiring; absent,
+;; the driver builds the DeepSeek judge — but ONLY under allow-paid?.
+(schema/register! :seon.gym/judge-fn fn?)
 (schema/register! :seon.gym/run-request
   [:map
    [:seon.gym/scenario :seon.gym/scenario]
-   [:seon.gym/allow-paid? {:optional true} :seon.gym/allow-paid?]])
+   [:seon.gym/allow-paid? {:optional true} :seon.gym/allow-paid?]
+   [:seon.gym/judge-fn {:optional true} :seon.gym/judge-fn]])
 (schema/register! :seon.gym/run-response
   [:or :seon.gym/scorecard :seon.gym/refusal])
 
@@ -217,53 +320,110 @@
     (= :empty expect)     (empty? rows)
     (and (vector? expect) (= :count (first expect)))
     (= (second expect) (count rows))
+    (and (vector? expect) (= :count<= (first expect)))
+    (<= (count rows) (second expect))
+    (and (vector? expect) (= :count>= (first expect)))
+    (>= (count rows) (second expect))
     (and (vector? expect) (= :some-includes (first expect)))
     (boolean (some (fn [row]
                      (some #(str/includes? (str %) (second expect)) row))
                    rows))
+    (and (vector? expect) (= :every-in (first expect)))
+    (let [allowed (set (second expect))]
+      (every? (fn [row] (every? #(contains? allowed (str %)) row)) rows))
     :else false))
 
-(defn- first-eval-source
-  "Source text of the run's chronologically FIRST eval (by :seon.eval/at),
-   or nil when no eval ran. The scratch conn holds exactly one agent, so
-   no agent filter is needed."
-  [dbv]
-  (->> (db/query {:seon.db/query '[:find ?at ?src
-                                   :where
-                                   [?e :seon.eval/at ?at]
-                                   [?e :seon.eval/source ?src]]
-                  :seon.db/db dbv})
+(defn- eval-at+source
+  "All [at source] eval pairs, chronological. With `agent-id`, scoped
+   to that agent's evals via agent → sessions → turns → evals; nil =
+   the whole scratch store (single-agent scenarios)."
+  [dbv agent-id]
+  (->> (if agent-id
+         (db/query {:seon.db/query '[:find ?at ?src
+                                     :in $ ?aid
+                                     :where
+                                     [?ag :seon.agent/id ?aid]
+                                     [?ag :seon.agent/sessions ?s]
+                                     [?s :seon.session/turns ?t]
+                                     [?t :seon.turn/evals ?ev]
+                                     [?ev :seon.eval/at ?at]
+                                     [?ev :seon.eval/source ?src]]
+                    :seon.db/args [agent-id]
+                    :seon.db/db   dbv})
+         (db/query {:seon.db/query '[:find ?at ?src
+                                     :where
+                                     [?e :seon.eval/at ?at]
+                                     [?e :seon.eval/source ?src]]
+                    :seon.db/db dbv}))
        (sort-by #(.getTime ^js (first %)))
-       first
-       second))
+       vec))
+
+(defn- first-eval-source
+  "Source text of the chronologically FIRST eval (by :seon.eval/at) —
+   optionally scoped to one agent — or nil when no eval ran."
+  [dbv agent-id]
+  (second (first (eval-at+source dbv agent-id))))
+
+(defn- resolve-predicate-args
+  "Substitute agent-designator placeholders (:seon.gym.agent/a …) in a
+   predicate's datalog args with the actual agent ids minted this run."
+  [agents args]
+  (mapv (fn [a]
+          (if (and (keyword? a) (= "seon.gym.agent" (namespace a)))
+            (or (get agents (keyword (name a)))
+                (throw (ex-info (str "gym: predicate args reference unknown "
+                                     "agent designator " a)
+                                {:seon.gym.run/agents agents})))
+            a))
+        args))
 
 (defn- eval-predicate
-  "Evaluate ONE predicate against the post-run db value + rendered
-   transcript. Returns a `:seon.gym/result` map — pass/fail plus the
-   ACTUAL observation (so a failing scorecard explains itself)."
-  [dbv transcript {:seon.gym.predicate/keys [id kind axis query args expect
-                                             text pattern]}]
-  (let [[pass? actual]
-        (case kind
-          :datalog
-          (let [rows (vec (db/query (cond-> {:seon.db/query query
-                                             :seon.db/db    dbv}
-                                      args (assoc :seon.db/args args))))]
-            [(expect-pass? expect rows)
-             (str "rows=" (pr-str rows) " expect=" (pr-str expect))])
+  "Evaluate ONE MECHANICAL predicate against the post-run db value +
+   rendered transcript (+ the designator→agent-id map for scoped
+   predicates). Returns a `:seon.gym/result` map — pass/fail plus the
+   ACTUAL observation (so a failing scorecard explains itself). A
+   predicate that THROWS (e.g. a bad datalog form) scores pass? false
+   with the error as the actual — broken predicates must be visible,
+   never crash the scorecard."
+  [dbv transcript agents
+   {:seon.gym.predicate/keys [id kind axis query args expect
+                              text pattern agent]}]
+  (let [agent-id (when agent (get agents agent))
+        [pass? actual]
+        (try
+          (case kind
+            :datalog
+            (let [rows (vec (db/query (cond-> {:seon.db/query query
+                                               :seon.db/db    dbv}
+                                        args (assoc :seon.db/args
+                                                    (resolve-predicate-args
+                                                      agents args)))))]
+              [(expect-pass? expect rows)
+               (str "rows=" (pr-str rows) " expect=" (pr-str expect))])
 
-          :transcript-includes
-          [(str/includes? transcript text)
-           (str "transcript " (count transcript) " chars; looked for " (pr-str text))]
+            :transcript-includes
+            [(str/includes? transcript text)
+             (str "transcript " (count transcript) " chars; looked for " (pr-str text))]
 
-          :transcript-excludes
-          [(not (str/includes? transcript text))
-           (str "transcript " (count transcript) " chars; must NOT contain " (pr-str text))]
+            :transcript-excludes
+            [(not (str/includes? transcript text))
+             (str "transcript " (count transcript) " chars; must NOT contain " (pr-str text))]
 
-          :first-eval-matches
-          (let [src (first-eval-source dbv)]
-            [(boolean (and src (re-find (js/RegExp. pattern) src)))
-             (str "first eval source: " (pr-str src))]))]
+            :first-eval-matches
+            (let [src (first-eval-source dbv agent-id)]
+              [(boolean (and src (re-find (js/RegExp. pattern) src)))
+               (str (when agent (str "agent " agent " "))
+                    "first eval source: " (pr-str src))])
+
+            :eval-count-matching
+            (let [srcs     (mapv second (eval-at+source dbv agent-id))
+                  matching (filterv #(re-find (js/RegExp. pattern) %) srcs)]
+              [(expect-pass? expect (mapv vector matching))
+               (str (when agent (str "agent " agent " "))
+                    (count matching) "/" (count srcs) " evals match "
+                    (pr-str pattern) " expect=" (pr-str expect))]))
+          (catch :default e
+            [false (str "predicate THREW: " e)]))]
     {:seon.gym.predicate/id   id
      :seon.gym.predicate/axis axis
      :seon.gym.result/pass?   (boolean pass?)
@@ -282,6 +442,153 @@
         axes))
 
 ;; ===========================================================================
+;; LLM-judge — rubric + reference facts + the agent's verbatim reply →
+;; graded verdict {pass?/score/justification}, on the scorecard's
+;; SEPARATE judge axis. The judge grades MEANING only; mechanical
+;; predicates grade behavior. Calls go through the injected judge-fn
+;; (tests) or the DeepSeek NON-thinking judge (allow-paid? only).
+;; ===========================================================================
+
+(def ^:private judge-system-prompt
+  (str "You are a STRICT grader for an AI-agent evaluation harness.\n"
+       "You receive: the question(s) a user asked an agent, the agent's\n"
+       "verbatim reply, a grading rubric, and reference facts (ground\n"
+       "truth). Grade ONLY the reply's semantic correctness against the\n"
+       "rubric and the reference facts — never style, never behavior.\n"
+       "A reply that contradicts the reference facts fails. A reply\n"
+       "that is correct in different words passes.\n"
+       "Output ONLY a JSON object, no markdown fences, no prose:\n"
+       "{\"pass\": true|false, \"score\": 0-100, \"justification\": "
+       "\"one short paragraph naming exactly what matched or failed\"}"))
+
+(defn- agent-reply-text
+  "All messages the designated agent sent TO the user, chronological,
+   joined — the judge's 'verbatim reply'.
+
+   Deliberately fetch-then-filter in CLJS rather than one datalog join:
+   the datahike-cljs engine MIS-BINDS queries that join TWO
+   identity-attr clauses ([?ag :seon.agent/id ?aid] + [?u :seon.user/id
+   \"user\"]) through one message row — it ignores the :in binding and
+   returns the inverse-direction (user→agent) rows. Pinned repro lives
+   in driver_test's two-agent scenario comment; reported upstream as a
+   query-engine smell. Until that's fixed, no gym predicate or judge
+   query may use the double-identity-join shape."
+  [dbv agent-id]
+  (let [agent-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id agent-id]
+                                      :seon.db/db  dbv}))
+        user-eid  (:db/id (db/entity {:seon.db/ref [:seon.user/id "user"]
+                                      :seon.db/db  dbv}))
+        rows      (db/query {:seon.db/query '[:find ?m ?f ?t ?at ?c
+                                              :where
+                                              [?m :seon.message/from ?f]
+                                              [?m :seon.message/to ?t]
+                                              [?m :seon.message/at ?at]
+                                              [?m :seon.message/content ?c]]
+                             :seon.db/db dbv})
+        mine      (->> rows
+                       (filter (fn [[_ f t _ _]]
+                                 (and (= f agent-eid) (= t user-eid))))
+                       (sort-by (fn [[_ _ _ at _]] (.getTime ^js at)))
+                       (map (fn [[_ _ _ _ c]] c)))]
+    (if (seq mine)
+      (str/join "\n\n" mine)
+      "(the agent sent NO reply to the user)")))
+
+(defn- judge-ctx
+  "Assemble the grading context for one :llm-judge predicate: the
+   designated agent's question(s), its verbatim reply, the rubric, the
+   reference facts."
+  [turns agents dbv {:seon.gym.predicate/keys [agent rubric reference]}]
+  (let [designator (or agent :a)
+        agent-id   (get agents designator)
+        questions  (->> turns
+                        (filter #(= designator
+                                    (or (:seon.gym.turn/agent %) :a)))
+                        (map :seon.gym.turn/message))]
+    (str "== Question(s) the user asked the agent ==\n"
+         (str/join "\n---\n" questions)
+         "\n\n== Agent's reply (verbatim) ==\n"
+         (if agent-id
+           (agent-reply-text dbv agent-id)
+           "(no such agent ran in this scenario)")
+         "\n\n== Rubric ==\n" rubric
+         "\n\n== Reference facts (ground truth) ==\n" reference)))
+
+(defn- parse-judge-verdict
+  "Parse the judge LLM's JSON verdict into a judge-result fragment.
+   Unparseable output = pass? false with the raw text preserved —
+   a mute judge must read as a fail, never a silent pass."
+  [text]
+  (let [cleaned (-> (str text) (str/replace #"```(json)?" "") str/trim)
+        parsed  (try (js->clj (.parse js/JSON cleaned) :keywordize-keys true)
+                     (catch :default _ nil))]
+    (if (and (map? parsed) (boolean? (:pass parsed)))
+      {:seon.gym.judge/pass? (:pass parsed)
+       :seon.gym.judge/score (let [s (:score parsed)]
+                               (if (number? s)
+                                 (js/Math.round s)
+                                 (if (:pass parsed) 100 0)))
+       :seon.gym.judge/justification (str (:justification parsed))}
+      {:seon.gym.judge/pass? false
+       :seon.gym.judge/score 0
+       :seon.gym.judge/justification
+       (str "judge output unparseable — raw: " (truncate-actual text))})))
+
+(defn- default-judge-fn
+  "The DeepSeek judge: NON-thinking (the module default), temperature
+   0, read-only use of seon.ai.deepseek's public `complete`. Built
+   ONLY under the allow-paid? guard."
+  []
+  (fn [ctx]
+    (.then (deepseek/complete {:seon.ai/ctx           ctx
+                               :seon.ai/system-prompt judge-system-prompt
+                               :seon.ai/temperature   0.0})
+           (fn [resp]
+             (cond-> {:text (:seon.ai/text resp)}
+               (:seon.ai/error resp)
+               (assoc :seon.ai/error (:seon.ai/error resp)))))))
+
+(defn- skipped-judge-result
+  "Verdict recorded when judge predicates exist but no judge is
+   available — an explicit fail naming the guard, never a silent pass."
+  [{:seon.gym.predicate/keys [id axis]}]
+  {:seon.gym.predicate/id        id
+   :seon.gym.predicate/axis      axis
+   :seon.gym.judge/pass?         false
+   :seon.gym.judge/score         0
+   :seon.gym.judge/justification
+   (str "judge SKIPPED — needs an injected :seon.gym/judge-fn (tests) "
+        "or :seon.gym/allow-paid? true + DEEPSEEK_API_KEY (live "
+        "grading); recorded as a fail, never a silent pass")})
+
+(defn ^:async ^:private judge-predicates!
+  "Run every :llm-judge predicate sequentially through `judge-fn` and
+   return the vector of judge-results. An LLM error is a fail-verdict
+   value (errors are values), never a thrown run."
+  [judge-fn turns agents dbv preds]
+  (loop [preds preds
+         acc   []]
+    (if-let [[p & more] (seq preds)]
+      (let [resp    (try (await (judge-fn (judge-ctx turns agents dbv p)))
+                         (catch :default e
+                           {:text ""
+                            :seon.ai/error {:seon.ai/msg (str e)}}))
+            verdict (if (:seon.ai/error resp)
+                      {:seon.gym.judge/pass? false
+                       :seon.gym.judge/score 0
+                       :seon.gym.judge/justification
+                       (str "judge LLM call failed: "
+                            (truncate-actual (pr-str (:seon.ai/error resp))))}
+                      (parse-judge-verdict (:text resp)))]
+        (recur more
+               (conj acc (merge {:seon.gym.predicate/id
+                                 (:seon.gym.predicate/id p)
+                                 :seon.gym.predicate/axis
+                                 (:seon.gym.predicate/axis p)}
+                                verdict))))
+      acc)))
+
+;; ===========================================================================
 ;; The run
 ;; ===========================================================================
 
@@ -291,12 +598,68 @@
       (str/trim (str (.execSync cp "git rev-parse --short HEAD"))))
     (catch :default _ "unknown")))
 
+(defn- iso-date [^js d] (.slice (.toISOString d) 0 10))
+
+(defn- days-ago [n]
+  (iso-date (js/Date. (- (.getTime (js/Date.)) (* n 86400000)))))
+
+(defn- resolve-fixture-dates
+  "Replace {{today}} and {{days-ago:N}} placeholders in fixture string
+   values with ISO dates relative to the run date (catalog §7
+   relative-date fixtures — 'last week' must stay last week)."
+  [fixtures]
+  (walk/postwalk
+    (fn [x]
+      (if (string? x)
+        (-> x
+            (str/replace "{{today}}" (days-ago 0))
+            (str/replace #"\{\{days-ago:(\d+)\}\}"
+                         (fn [[_ n]] (days-ago (js/parseInt n 10)))))
+        x))
+    fixtures))
+
+(defn ^:async ^:private eval-fixture-sources!
+  "Evaluate fixture source strings through the bootstrap compile-state
+   so the defined fns are CALLABLE from agent evals. Fails LOUD on any
+   eval error — a half-seeded fixture must never silently score."
+  [compile-state sources]
+  (loop [sources sources]
+    (when-let [[src & more] (seq sources)]
+      (let [res (await (seval/eval compile-state src {:ns 'cljs.user}))]
+        (when-not (:ok res)
+          (throw (ex-info "gym: fixture source eval failed"
+                          {:seon.gym/error      (pr-str (:error res))
+                           :seon.gym.run/source src}))))
+      (recur more))))
+
 (defn- scripted-llm
   "Stub-tier llm-fn: resolves with exactly the scripted response text.
    One scripted text = one driven turn (see ns docstring on why the
    driver does NOT use the trigger loop for stubs)."
   [text]
   (fn [_ctx] (js/Promise.resolve {:text text})))
+
+(defn- replay-llm
+  "Scripted-replay llm-fn (catalog F-llm-script): one scripted text per
+   loop turn, in order; once exhausted it answers prose-only, so the
+   agentic loop's zero-forms stop policy terminates it."
+  [scripts]
+  (let [scripts (vec scripts)
+        !i      (atom -1)]
+    (fn [_ctx]
+      (js/Promise.resolve
+        {:text (or (nth scripts (swap! !i inc) nil)
+                   "Script exhausted — nothing further to do.")}))))
+
+(defn- rejecting-llm
+  "Catalog F-llm-reject: a Promise that REJECTS after 100ms (simulated
+   provider timeout). The turn must record :error, not hang or vanish."
+  [_ctx]
+  (js/Promise.
+    (fn [_resolve reject]
+      (js/setTimeout
+        #(reject (js/Error. "gym: simulated LLM provider failure"))
+        100))))
 
 (defn ^:async ^:private send-user-message!
   "Land the scenario question as a real user message (the same
@@ -326,18 +689,35 @@
                     :seon.turn/woken-by       [:seon.message/id mid]}))))
       (recur more))))
 
-(defn ^:async ^:private drive-deepseek-loop!
-  "Behavioral tier: the REAL adapter through `run-agentic-loop!`. The
-   loop's own stop policies (zero forms / error / cap) are the
-   awaits-idle signal — when the promise resolves, the agent is idle."
-  [agent-id compile-state mid]
+(defn ^:async ^:private drive-loop!
+  "Drive `run-agentic-loop!` (the REAL multi-turn driver) with the
+   given llm-fn. The loop's own stop policies (zero forms / error /
+   cap) are the awaits-idle signal — when the promise resolves, the
+   agent is idle."
+  [agent-id compile-state mid llm-fn]
   (await (db/with-agent agent-id
            (fn []
              (agent/run-agentic-loop!
                {:seon.agent/id            agent-id
-                :seon.agent/llm-fn        (deepseek/agent-adapter)
+                :seon.agent/llm-fn        llm-fn
                 :seon.agent/compile-state compile-state
                 :seon.turn/woken-by       [:seon.message/id mid]})))))
+
+(defn ^:async ^:private ensure-agent!
+  "Lazily create the agent behind a turn DESIGNATOR (:a, :b, …) on the
+   scratch store. Multi-agent sequencing (catalog §7): turns run in
+   order and every drive awaits idle, so 'boot A → await idle → boot
+   B on the same store' falls out of the sequential doseq."
+  [!agents compile-state designator]
+  (if-let [existing (get @!agents designator)]
+    existing
+    (let [agent-id (db/new-id!)]
+      (await (seval/setup-agent-ns! compile-state
+                                    (agent/home-ns agent-id)
+                                    agent-id))
+      (await (agent/create! {:seon.agent/id agent-id}))
+      (swap! !agents assoc designator agent-id)
+      agent-id)))
 
 (defn ^:async run-scenario!
   "Run ONE scenario end-to-end on a scratch `:memory` conn and return a
@@ -349,15 +729,20 @@
 
    Pipeline: open scratch conn → swap the root `seon.db/*conn*`
    (restored in finally) → ensure bootstrap compile-state → seed the
-   user entity + scenario registrations/fixtures → create the agent →
-   per gym-turn: land the user message, drive turns per tier →
-   evaluate every predicate against the post-run db + transcript →
-   validated scorecard keyed (scenario × git sha)."
+   user entity + scenario registrations/fixtures (+ fixture sources) →
+   per gym-turn: lazily boot the turn's agent, land the user message,
+   drive per tier/llm-injection → evaluate mechanical predicates
+   against the post-run db + transcript → run :llm-judge predicates on
+   the separate judge axis (injected `:seon.gym/judge-fn`, or the
+   DeepSeek judge under allow-paid?) → validated scorecard keyed
+   (scenario × git sha)."
   {:malli/schema [:=> [:cat :seon.gym/run-request] :seon.gym/run-response]}
   [{scenario    :seon.gym/scenario
-    allow-paid? :seon.gym/allow-paid?}]
+    allow-paid? :seon.gym/allow-paid?
+    judge-fn    :seon.gym/judge-fn}]
   (let [{:seon.gym.scenario/keys [id tier status axes schema-registrations
-                                  fixtures turns predicates]} scenario]
+                                  fixtures fixture-sources llm turns
+                                  predicates]} scenario]
     (cond
       (= :todo status)
       {:seon.gym/ok? false
@@ -374,57 +759,112 @@
 
       :else
       (let [prev-conn    db/*conn*
+            prev-fs      @sfs/!config
             keys-before  (schema/current-keys)]
         (try
           (let [conn          (await (client/open-agent-conn!))
                 _             (set! db/*conn* conn)
                 compile-state (await (repl/ensure-bootstrap!))
-                agent-id      (db/new-id!)]
+                !agents       (atom {})]
+            ;; The scratch store must be THE WORLD A POD BOOTS INTO, not an
+            ;; empty void: seed the substrate (sticky preamble + the
+            ;; :seon.ns/:seon.fn program-graph rows that render the "What
+            ;; you can do" teaching — without them agents never learn that
+            ;; grep/register!/reply! exist) and mirror the pod's fs
+            ;; capability (bin/seon runs the pod with SEON_FS_ROOT=$SEON_ROOT
+            ;; SEON_FS_READ_ONLY=1). Both restored/irrelevant after the run.
+            (sfs/configure! {:seon.fs/allowed-roots [(.cwd js/process)]
+                             :seon.fs/read-only?    true})
             ;; Scenario-declared schema registrations (for fixtures that
-            ;; use non-substrate attrs), then the user entity + fixtures.
+            ;; use non-substrate attrs), then the substrate seed + the user
+            ;; entity + fixtures (relative dates resolved) + fn sources.
             (doseq [[k v] schema-registrations] (schema/register! k v))
             (let [env (await (db/transact!
                                {:seon.db/tx-data
-                                (into [{:seon.user/id "user"}] fixtures)}))]
+                                (-> (vec (client/seed-substrate!))
+                                    (into (client/index-substrate!))
+                                    (into (resolve-fixture-dates fixtures)))}))]
               (when-not (:seon.db/ok? env)
                 (throw (ex-info "gym: fixture transact failed" env))))
-            (await (seval/setup-agent-ns! compile-state
-                                          (agent/home-ns agent-id)
-                                          agent-id))
-            (await (agent/create! {:seon.agent/id agent-id}))
-            ;; Drive every gym turn.
-            (doseq [{:seon.gym.turn/keys [message llm-script]} turns]
-              (let [mid (await (send-user-message! agent-id message))]
-                (if (= :stub tier)
+            (await (eval-fixture-sources! compile-state fixture-sources))
+            ;; Drive every gym turn, strictly in order; each turn's agent
+            ;; boots lazily on first use (multi-agent sequencing).
+            (doseq [{:seon.gym.turn/keys [message llm-script agent]} turns]
+              (let [agent-id (await (ensure-agent! !agents compile-state
+                                                   (or agent :a)))
+                    mid      (await (send-user-message! agent-id message))]
+                (case (or llm (if (= :stub tier) :per-turn-script :deepseek))
+                  :per-turn-script
                   (await (drive-stub-turns! agent-id compile-state mid
                                             llm-script))
-                  (await (drive-deepseek-loop! agent-id compile-state mid)))))
-            ;; Mechanical scoring against the post-run store + transcript.
-            (let [dbv        @conn
-                  transcript (agent/transcript-section
-                               {:seon.db/db dbv :seon.agent/id agent-id})
-                  results    (mapv #(eval-predicate dbv transcript %)
-                                   predicates)
-                  card       {:seon.gym.scorecard/scenario id
-                              :seon.gym.scorecard/git-sha  (git-sha)
-                              :seon.gym.scorecard/tier     tier
-                              :seon.gym.scorecard/at       (js/Date.)
-                              :seon.gym.scorecard/agent-id agent-id
-                              :seon.gym.scorecard/pass?
-                              (every? :seon.gym.result/pass? results)
-                              :seon.gym.scorecard/axes
-                              (axes-rollup axes results)
-                              :seon.gym.scorecard/results  results}]
+                  :scripted-replay
+                  (await (drive-loop! agent-id compile-state mid
+                                      (replay-llm llm-script)))
+                  :rejecting
+                  (await (drive-loop! agent-id compile-state mid
+                                      rejecting-llm))
+                  :deepseek
+                  (await (drive-loop! agent-id compile-state mid
+                                      (deepseek/agent-adapter))))))
+            ;; Mechanical scoring against the post-run store + transcript;
+            ;; judge predicates score on the SEPARATE judge axis.
+            (let [agents      @!agents
+                  dbv         @conn
+                  primary     (or (get agents :a) (second (first agents)))
+                  transcript  (->> (sort-by key agents)
+                                   (map (fn [[_ aid]]
+                                          (agent/transcript-section
+                                            {:seon.db/db    dbv
+                                             :seon.agent/id aid})))
+                                   (str/join "\n"))
+                  mech-preds  (vec (remove #(= :llm-judge
+                                               (:seon.gym.predicate/kind %))
+                                           predicates))
+                  judge-preds (filterv #(= :llm-judge
+                                           (:seon.gym.predicate/kind %))
+                                       predicates)
+                  results     (mapv #(eval-predicate dbv transcript agents %)
+                                    mech-preds)
+                  judge-fn*   (or judge-fn
+                                  (when (and allow-paid?
+                                             (.. js/process -env
+                                                 -DEEPSEEK_API_KEY))
+                                    (default-judge-fn)))
+                  judge-results
+                  (if (seq judge-preds)
+                    (if judge-fn*
+                      (await (judge-predicates! judge-fn* turns agents dbv
+                                                judge-preds))
+                      (mapv skipped-judge-result judge-preds))
+                    nil)
+                  card (cond->
+                         {:seon.gym.scorecard/scenario id
+                          :seon.gym.scorecard/git-sha  (git-sha)
+                          :seon.gym.scorecard/tier     tier
+                          :seon.gym.scorecard/at       (js/Date.)
+                          :seon.gym.scorecard/agent-id primary
+                          :seon.gym.scorecard/pass?
+                          (every? :seon.gym.result/pass? results)
+                          :seon.gym.scorecard/axes
+                          (axes-rollup axes results)
+                          :seon.gym.scorecard/results  results}
+                         (seq judge-preds)
+                         (assoc :seon.gym.scorecard/judge-pass?
+                                (every? :seon.gym.judge/pass? judge-results)
+                                :seon.gym.scorecard/judge-results
+                                judge-results))]
               (when-not (m/validate :seon.gym/scorecard card)
                 (throw (ex-info "gym: emitted scorecard fails its own schema"
                                 {:seon.gym/explain
                                  (pr-str (m/explain :seon.gym/scorecard card))})))
               card))
           (finally
-            ;; Restore the root conn + drop every schema key minted during
-            ;; the run (scenario registrations AND agent-eval register!s) so
-            ;; one scenario can't leak shapes into the next.
+            ;; Restore the root conn + fs capability config + drop every
+            ;; schema key minted during the run (scenario registrations AND
+            ;; agent-eval register!s) so one scenario can't leak into the
+            ;; next (or into non-gym tests sharing the process).
             (set! db/*conn* prev-conn)
+            (reset! sfs/!config prev-fs)
             (let [minted (remove keys-before (schema/current-keys))]
               (when (seq minted)
                 (swap! schema/*schemas #(apply dissoc % minted))))))))))

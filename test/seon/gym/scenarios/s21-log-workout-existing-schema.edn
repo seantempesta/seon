@@ -1,0 +1,83 @@
+;; S-21 (catalog §4) — log a workout against the EXISTING schema, no
+;; fork. Fixtures register exactly the LIVE store's :seon.workout/*
+;; shape (date is a STRING — the live row stores "2026-06-10" as a
+;; string; duration-minutes is an INT) plus the real strength/45min row
+;; dated {{today}} — i.e. the world the demo store is actually in. The
+;; run-4 regression this pins: a `duration-minutes` vs
+;; `duration-seconds` style attr fork, or any re-register! when the
+;; schema already covers the message.
+;;
+;; DEEPSEEK TIER (cheap) — refuses without allow-paid? + key.
+{:seon.gym.scenario/id     :s21-log-workout-existing-schema
+ :seon.gym.scenario/doc    "'I ran this morning — 24 minutes.' must land as ONE new row reusing the established :seon.workout/* attrs — zero attr forks, ideally zero register! evals (the schema already covers the message). Fully mechanical; catalog S-21."
+ :seon.gym.scenario/tier   :deepseek
+ :seon.gym.scenario/status :active
+ :seon.gym.scenario/axes   [:reuses-schemas :models-work-directed
+                            :terminates :replies-honestly]
+ ;; F-workout-schema — the live store's exact shape (catalog §3).
+ :seon.gym.scenario/schema-registrations
+ [[:seon.workout/date :string]
+  [:seon.workout/type :keyword]
+  [:seon.workout/duration-minutes :int]
+  [:seon.workout/notes :string]]
+ ;; The live store's real row (strength/45min/today).
+ :seon.gym.scenario/fixtures
+ [{:seon.workout/date "{{today}}"
+   :seon.workout/type :strength
+   :seon.workout/duration-minutes 45}]
+ :seon.gym.scenario/turns
+ [{:seon.gym.turn/message "I ran this morning — 24 minutes, felt good. Log it with my other workouts."}]
+ :seon.gym.scenario/predicates
+ [{:seon.gym.predicate/id     :run-row-landed-with-established-attrs
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :reuses-schemas
+   :seon.gym.predicate/query  [:find ?e
+                               :where
+                               [?e :seon.workout/type :run]
+                               [?e :seon.workout/duration-minutes 24]]
+   :seon.gym.predicate/expect [:count 1]}
+  ;; The run-4 fork predicate, permanent: every attr in the
+  ;; seon.workout namespace must be one of the four established names.
+  {:seon.gym.predicate/id     :no-workout-attr-fork
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :reuses-schemas
+   :seon.gym.predicate/query  [:find ?n
+                               :where
+                               [_ ?a _]
+                               [(namespace ?a) ?ns]
+                               [(= ?ns "seon.workout")]
+                               [(name ?a) ?n]]
+   :seon.gym.predicate/expect [:every-in ["date" "type"
+                                          "duration-minutes" "notes"]]}
+  ;; The ideal: ZERO register! evals — the schema already covers it.
+  {:seon.gym.predicate/id      :zero-schema-registrations-needed
+   :seon.gym.predicate/kind    :eval-count-matching
+   :seon.gym.predicate/axis    :models-work-directed
+   :seon.gym.predicate/pattern "schema/register!"
+   :seon.gym.predicate/expect  [:count 0]}
+  ;; from-agent + hops>0, not the user-entity join (datahike-cljs
+  ;; double-identity-join mis-binding — pinned in driver_test).
+  {:seon.gym.predicate/id     :agent-replied-to-the-user
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :replies-honestly
+   :seon.gym.predicate/query  [:find ?m
+                               :where
+                               [?m :seon.message/from ?a]
+                               [?a :seon.agent/id ?aid]
+                               [?m :seon.message/hops ?h]
+                               [(pos? ?h)]]
+   :seon.gym.predicate/expect :non-empty}
+  {:seon.gym.predicate/id     :agent-ends-idle
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?a
+                               :where
+                               [?a :seon.agent/state :idle]]
+   :seon.gym.predicate/expect :non-empty}
+  {:seon.gym.predicate/id     :terminates-under-cap
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?t
+                               :where
+                               [?t :seon.turn/id ?tid]]
+   :seon.gym.predicate/expect [:count<= 19]}]}
