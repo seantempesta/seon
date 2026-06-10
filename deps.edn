@@ -139,10 +139,25 @@
   ;; version mirrors :test (0.8.1671). `src` + `resources` give the
   ;; seon.server.* sources and seed resources; konserve-jdbc / sqlite-jdbc
   ;; come from the base :deps.
-  :writer {:extra-deps {org.replikativ/datahike {:mvn/version "0.8.1671"}
+  ;; 2.2d Stage B sha alignment (PREPARED, not flipped): datahike moved from
+  ;; mvn 0.8.1671 to the SAME fork sha the pod's :cljs alias runs
+  ;; (seantempesta/datahike@01ba3f18), killing the reader-newer version-skew
+  ;; flag, and konserve is the Stage A header-fix fork (:local/root — no
+  ;; pushable remote; see :replica-probe-jvm's note). dev-resources/
+  ;; konserve-shim gives datahike's version-check a konserve version for the
+  ;; :local/root dep (reads nil from a non-jar classpath entry otherwise).
+  ;; The RUNNING wire-server keeps its old deps until its next restart
+  ;; (`bin/seon restart wire-server`) — verified to start + serve on a
+  ;; throwaway store by `clj -M:replica-peer-jvm` (the Stage B peer oracle).
+  :writer {:extra-paths ["dev-resources/konserve-shim"]
+           :extra-deps {org.replikativ/datahike
+                        {:git/url "https://github.com/seantempesta/datahike"
+                         :git/sha "01ba3f18bf08da2c093eb0972ec1f272b817f23d"}
                         com.cognitect/transit-clj {:mvn/version "1.0.333"}
                         com.fasterxml.jackson.dataformat/jackson-dataformat-cbor
                         {:mvn/version "2.17.0"}}
+           :override-deps {org.replikativ/konserve
+                           {:local/root "/Users/sean/src/konserve"}}
            :main-opts ["-m" "seon.server.boot"]}
 
   ;; 2.2c DIS-replica probe — JVM writer side. Self-contained on purpose
@@ -169,6 +184,24 @@
    ;; konserve version (nil with :local/root) — see the file's comments.
    :replace-paths ["probe" "dev-resources/konserve-shim"]
    :main-opts     ["-m" "seon.probe.replica-jvm"]}
+
+  ;; 2.2d Stage B peer oracle — JVM orchestrator. Spawns a SECOND wire-server
+  ;; (`clojure -M:writer`, sha-aligned, throwaway store tmp/replica-peer/) and
+  ;; drives Node DIS peers (out/replica-peer/main.js — reader on the same
+  ;; store + the :seon-wire PWriter forwarding transacts over UDS). Same
+  ;; self-contained dep set as :replica-probe-jvm so the orchestrator can
+  ;; independently read the store root via konserve. The LIVE wire-server,
+  ;; pod, cljs-watch and dev JVM are never touched.
+  ;; Usage: clj -M:replica-peer-jvm   (after `clj -M:cljs compile replica-peer`)
+  :replica-peer-jvm
+  {:replace-deps  {org.clojure/clojure {:mvn/version "1.12.0"}
+                   org.replikativ/datahike
+                   {:git/url "https://github.com/seantempesta/datahike"
+                    :git/sha "01ba3f18bf08da2c093eb0972ec1f272b817f23d"}
+                   org.replikativ/konserve
+                   {:local/root "/Users/sean/src/konserve"}}
+   :replace-paths ["probe" "dev-resources/konserve-shim"]
+   :main-opts     ["-m" "seon.probe.replica-peer"]}
 
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
           :ns-default build}

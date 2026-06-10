@@ -675,6 +675,26 @@ only per-op READS retire from the pod's path (kept server-side).
   transact/query) against the cluster store; a :user message transacted
   JVM-side wakes the pod trigger (cross-process reactivity); S1-style
   stub scenario lands data visible from the wire-server REPL.
+- **Stage B OFF-POD DONE (2026-06-09, uncommitted): all cutover machinery
+  built + proven on the probe harness; LIVE POD/WIRE-SERVER UNTOUCHED**
+  (two-lane rule — the final flip is post-Friday). New: `:seon-wire`
+  PWriter + subscribe-tx→listen! adapter in `src/seon/dev/replica_peer.cljs`
+  (`:replica-peer` shadow build only, NOT `:client`), JVM orchestrator
+  `probe/seon/probe/replica_peer.clj` (`clj -M:replica-peer-jvm` — spawns a
+  SECOND sha-aligned wire-server on a throwaway store, since the live one
+  runs the known mvn-0.8.1671 skew). `:writer` alias sha-aligned in
+  deps.edn (fork 01ba3f18 + :local/root konserve + shim) — PREPARED, takes
+  effect on the next `bin/seon restart wire-server`. **All 14 oracle claims
+  CONFIRMED**: (a) RYOW over the wire on deref attempt 1 (2.3–4.1 ms);
+  (b) foreign wire write → feed event → handler with the db VALUE holding
+  the datom, consecutive db/db-before, own-tx skipped; (c) lazy in family
+  (18 blob reads / 42-blob store); (d) two peer processes both follow one
+  write. **NEW FINDING: readers MUST set konserve `:config {:lock-blob?
+  false}`** — sync Node readers racing on the root blob's `.LOCK` throw
+  after 101 spins (found by oracle d; lock-free reads are DIS-correct).
+  Regressions green after: Stage A probe 10/10, bin/test-cljs 287/1066
+  with only the 2 documented ALS fails. Full numbers + remaining-flip
+  list: research file "Stage B off-pod results".
 
 ### REPL-PARITY CONTRACT (user, 2026-06-10) — reflexive REPL actions must work
 

@@ -140,6 +140,26 @@
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
 
+  ;; 2.2d Stage B — DIS read-only-peer build (OFF-POD; :client untouched).
+  ;; A full datahike PEER on Node: lazy konserve reader on a wire-server's
+  ;; :file store + the REAL `:seon-wire` PWriter that forwards transact!
+  ;; over the existing UDS `transact` op, plus the subscribe-tx → listen!
+  ;; adapter prototype. Driven by `clj -M:replica-peer-jvm`, which also
+  ;; spawns the sha-aligned second wire-server. Run-to-exit oracle —
+  ;; :devtools disabled; build in a FRESH JVM (`clj -M:cljs compile
+  ;; replica-peer`), NOT in cljs-watch (the long-running watcher still has
+  ;; the OLD mvn konserve on its classpath — version baked at macroexpansion).
+  ;;
+  ;; Build:  clj -M:cljs compile replica-peer
+  ;; Run:    node out/replica-peer/main.js   (env: PEER_* — see the ns)
+  :replica-peer
+  {:target           :node-script
+   :output-to        "out/replica-peer/main.js"
+   :main             seon.dev.replica-peer/-main
+   :devtools         {:enabled false}
+   :compiler-options {:warnings-as-errors false
+                      :externs           ["externs/node_fs.js"]}}
+
   ;; Milestone-1 WASM smoke build. Minimal CLJS bundle that exposes
   ;; `datahike-smoke-test!` (inlined) on globalThis.seonSmoke for the
   ;; wasm-rquickjs ESM shim. Deliberately doesn't require seon.client

@@ -299,3 +299,106 @@ when the fix ships as a real mvn artifact. The live pod + wire-server keep
 running the OLD konserve until their next build/boot (deliberately not
 restarted); the `:writer` alias (mvn datahike 0.8.1671) is untouched — its
 sha alignment is the Stage B item.
+
+## Stage B off-pod results (2.2d, 2026-06-09)
+
+Built and proven ENTIRELY on the probe harness — the live pod, the live
+wire-server (`data/clusters/default/store`, mvn 0.8.1671), cljs-watch, and
+the dev JVM were never touched or restarted. Because the live writer runs
+the KNOWN mvn-skew, the peer oracle uses a SECOND wire-server instance on
+the fork sha + a fresh throwaway store (`tmp/replica-peer/store`), exactly
+as the Stage B spec's caution prescribed. **All 14 oracle claims CONFIRMED**
+(`clj -M:replica-peer-jvm`); the Stage A probe re-ran green after
+(`clj -M:replica-probe-jvm` 10/10), and `bin/test-cljs` stayed at baseline
+(287 tests / 1066 assertions / the 2 documented client-lane ALS fails).
+
+### The pieces (all off-pod)
+
+- **`:seon-wire` PWriter — `src/seon/dev/replica_peer.cljs`** (compiled only
+  into the new `:replica-peer` shadow build; `:client` untouched). Mirrors
+  `datahike.http.writer/DatahikeServerWriter`: `-streaming? false` (flips
+  `deref-conn` into follow-the-store mode), `-dispatch!` forwards
+  `{:op 'transact! :args [arg-map]}` over the EXISTING UDS `transact` op via
+  `seon.dev.wire-node/rpc`, returns a `promise-chan` the writer go-loop
+  consumes. Registration = exactly two defmethods:
+  `datahike.writer/create-writer :seon-wire` and
+  `datahike.connector/-connect* :seon-wire` (delegating to
+  `-connect-impl*`), both in the peer ns. Tx-report is synthesized from the
+  wire ack: `:db-after` = a fresh local deref, `:tx-data` = the envelope's
+  wire datoms reconstituted as REAL `datahike.datom/datom`s, `:tempids` /
+  `:tx-meta` Transit-decoded, `:db-before` = `d/as-of` at basis-t-before.
+- **RYOW in the PWriter**: the dispatch resolves ONLY after a local deref
+  shows `:max-tx ≥` the ack'd basis-t. Confirmed IMMEDIATE: every ack in
+  every run satisfied on deref **attempt 1** (flush-before-ack), deref
+  2.3–4.1 ms. Bonus confirmation: `writer/transact!` fires the conn's
+  native `d/listen` listeners for OWN txs with the synthesized report
+  (own-tap saw both commits' max-txs).
+- **listen!/notification adapter** (prototype of the pod's cutover adapter):
+  `subscribe-tx` over the wire feed → bounded `next-tx-event` poll loop →
+  on FOREIGN event (own request-ids tracked + skipped — own txs already
+  fired locally), re-deref to ≥ event basis-t and invoke handlers with the
+  exact `seon.db/listen!` envelope
+  (`:seon.db/{tx-report,db,db-before,datoms,attr-index}`), where db /
+  db-before are CONSECUTIVE materialized values (previous adapter deref →
+  fresh deref).
+- **JVM `:writer` sha alignment — PREPARED, NOT FLIPPED** (deps.edn):
+  datahike → fork sha `01ba3f18`, konserve → `:local/root` fork, plus
+  `dev-resources/konserve-shim` on `:extra-paths`. Verified by the oracle:
+  the aligned alias STARTS and SERVES (`clojure -M:writer` second instance
+  reached `[writer] ready` and handled transact/subscribe ops on the
+  throwaway store). The RUNNING wire-server keeps its old deps until its
+  next `bin/seon restart wire-server`.
+
+### Oracle evidence (numbers from the green run)
+
+- **(a) transact over the wire → local lazy read**: rows `[[1 "alpha"]]`
+  from BOTH the synthesized report's `:db-after` and a fresh deref; RYOW
+  attempts = 1 for both txs (basis-t 536870916/17); the disk root read
+  independently via konserve from the orchestrator JVM matched the peer's
+  max-tx (536870917).
+- **(b) JVM-side/foreign write → feed event → handler**: a raw wire-client
+  poke (`:seon.peer/id 99`) committed at basis-t 536870919; the listen
+  peer's handler fired once with a db VALUE containing the datom
+  (`expect-row ["foreign-poke"]`), consecutive values
+  (db-before 536870918 → db 536870919), and the peer's own tx was skipped
+  by the adapter (own-skips 1) after firing locally.
+- **(c) lazy in family**: 18 blob reads across connect+write+query on a
+  42-blob store; deref 1.6–4.1 ms, connect ~16–19 ms — same family as the
+  2.2c numbers (deref ~2.3 ms).
+- **(d) two peers, one store**: two concurrent listen-peer PROCESSES both
+  fired on the same foreign write (`expect-row ["fanout"]` in both;
+  handler-fired 2 each — the second event being the sibling's own tx,
+  correctly foreign to each other).
+
+### NEW FINDING — readers must take NO konserve blob locks
+
+First run of oracle (d) REFUTED multi-reader sharing as-defaulted: konserve
+`:lock-blob?` defaults to TRUE and the read path takes a `.ksv.LOCK` even
+for plain `k/get`; the Node SYNC lock acquisition cannot wait (no sync
+sleep), so two concurrent sync readers racing on the branch-root blob spin
+101 iterations and THROW (`:file-lock-acquisition-error`). Fix (and the
+POD CUTOVER REQUIREMENT): the reader's store config carries
+`:config {:lock-blob? false}` — DIS-correct because the root is replaced by
+atomic rename, index nodes are content-addressed + immutable, and peer
+WRITES go over the wire, never through local konserve. With lock-free
+reads, oracle (d) passes. **Carry `:lock-blob? false` into the pod's
+connect config at cutover** (and any other store the wire-server itself
+opens stays locked as it likes — the flag is per-connection).
+
+### What the pod cutover (the final flip, post-Friday) still needs
+
+1. Move the `:seon-wire` writer ns (or its content) somewhere the `:client`
+   build can require WITHOUT the probe scaffolding (the writer +
+   registration is ~60 lines; the adapter ~40), pointed at the live socket
+   `tmp/seon-cluster-default-req.sock` and store
+   `data/clusters/default/store` (+ `:lock-blob? false`, store `:id` =
+   `seon.server.store/name->uuid` of the cluster db-name).
+2. Restart the wire-server once (`bin/seon restart wire-server`) so it
+   picks up the ALREADY-PREPARED aligned `:writer` alias — kills the
+   mvn-0.8.1671 skew before the pod reads that store.
+3. Wire the adapter into `seon.db/listen!`'s machinery (the pod's own-tx
+   path already fires native listeners via `writer/transact!`; the adapter
+   covers foreign writers) and stop minting `data/seon-pod/<run-id>` stores
+   at boot.
+4. Keep `clj -M:replica-peer-jvm` (+ `clj -M:replica-probe-jvm`) as the
+   regression pair; re-run both after the flip.
