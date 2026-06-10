@@ -454,17 +454,37 @@ exemplar-root swap fs→todo), plus whatever the two in-flight agents leave.
   included (render from var docstrings); **NO recipes ns — real namespaces
   doing real work**; remaining teaching → docstrings of the public faces;
   prose survivors = SOUL + a few behavioral lines.
-- **KB = SCHEMA'D DATA, NOT TEXT (user, 2026-06-10 late):** no generic
-  store!/consult, no text-claim rows (memory-file problem), NO
-  RAG/embeddings. Agents DESIGN a real schema per knowledge kind in domain
-  sub-namespaces (`kb.codebase.fn/*`, `kb.paper/*`, …) — same skill as
-  user-data modeling; everyone's kb is different by construction. `seon.kb`
-  shrinks to registering the SHARED PROVENANCE shapes once
-  (`:kb/source-path` `:kb/source-line` `:kb/verified-at` `:kb/confidence`)
-  for other schemas to reference. Consult = catalog + datalog (salience
-  surface already built). Generic `:kb.finding/*` teaching replaced
-  (store is freshly wiped — no legacy rows to honor); gym S-12/S-32
-  predicates update to "consults relevant kb.*/my.* attrs first".
+- **KB = `my.kb`, SCHEMA'D DATA NOT TEXT (user, 2026-06-10 late, twice
+  refined):** no generic store!/consult, no text-claim rows (memory-file
+  problem), NO RAG/embeddings. The base is **`my.kb`** —
+  substrate-scaffolded with (a) GENERAL GUIDELINES all users get
+  (ns-doc/docstrings: "create `my.kb.<domain>` sub-namespaces with REAL
+  schemas for each kind of knowledge; do NOT build a general
+  memory-markdown structure; storing large text is allowed when the user
+  wants it but is never the default") and (b) the SHARED PROVENANCE shapes
+  registered once (`:my.kb/source-path` `:my.kb/source-line`
+  `:my.kb/verified-at` `:my.kb/confidence` — multi-segment by
+  construction) for domain schemas to reference. Agents DESIGN a schema
+  per knowledge kind (`my.kb.codebase.fn/*`, `my.kb.paper/*`, …) — same
+  skill as user-data modeling; everyone's kb is different by construction.
+  Consult = catalog + datalog (salience surface already built). Generic
+  `:kb.finding/*` teaching replaced (store freshly wiped — no legacy rows);
+  gym S-12/S-32 predicates update to "consults relevant my.kb.*/my.* attrs
+  first". `seon.kb` as a namespace is DEAD — superseded by the my.kb
+  scaffold.
+
+**ORPHANED WORK IN TREE (session-limit killed 3 agents 2026-06-10 ~13:36;
+resume actions):** (1) V3-A ~90% done — db.cljs 16.8k + db/internal.cljs
+47.3k exist but caller re-points unfinished: SUITE IS COMPILE-FAIL at
+test/seon/db_test.cljs:109 (`@#'db/system-attr?` moved). Fresh agent
+finishes re-points → suite green → replica probes 10/10+14/14 + live
+roundtrip → commit. (2) S-21 edits present (warn.cljs +59, schema.cljc
++44, new test/seon/schema_test.cljs, warn_test +62, gym driver+scenario)
+but UNVERIFIED, no paid re-run — verifier falsifies vs the original S-21
+unit spec, runs paid S-21, then commit. (3) spec-writing unit died before
+writing — relaunch (incl. correcting V3-B to the my.kb design above).
+Live pod unaffected (runs last-good hot-reload). seon.todo + tests +
+client.cljs todo wiring remain intentionally uncommitted.
 - **Agent code base ns = `my.*`** (user-confirmed): agents own it freely,
   everything under it auto-renders to ALL cluster agents (derived from tx
   provenance — agent-scoped txs vs `:substrate-seed`, no maintained list);
