@@ -354,13 +354,18 @@
   (:seon.fs/ok? (stat req)))
 
 (defn home-dir
-  "Convenience — returns the user's home directory. :node only."
-  {:malli/schema [:=> [:cat] [:maybe :string]]}
+  "Convenience — returns the user's home directory as a string. :node
+   only; throws with a legible message on :wasi or when neither HOME
+   nor USERPROFILE is set (absent = error, never nil — no-maybe rule)."
+  {:malli/schema [:=> [:cat] :string]}
   []
   (case (platform/host)
     :node (or (.. js/process -env -HOME)
-              (.. js/process -env -USERPROFILE))
-    :wasi nil))
+              (.. js/process -env -USERPROFILE)
+              (throw (ex-info "home-dir: neither HOME nor USERPROFILE is set"
+                              {:seon.fs/op :home-dir})))
+    :wasi (throw (ex-info "home-dir is :node only (no :wasi home concept yet)"
+                          {:seon.fs/op :home-dir}))))
 
 ;; ============================================================
 ;; Recursive walk — discover files under a tree, filter by extension,

@@ -1106,8 +1106,9 @@
      {:seon.eval/parity :value :seon.eval/value    <substituted value>}
 
    Pure string check on the TRIMMED whole form — embedded uses (e.g.
-   `*1` inside a larger form) are not intercepted; they fail or nil out
-   on their own and the taught replacement covers them too."
+   `*1` inside a larger form, or `(do *ns*)` wrapping) are NOT
+   intercepted; they fail or silently nil out on their own (known
+   parity boundary) and the taught replacement covers them too."
   [source current-ns]
   (let [s (str/trim (or source ""))]
     (cond

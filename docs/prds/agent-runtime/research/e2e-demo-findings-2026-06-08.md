@@ -77,6 +77,7 @@ DATA entities (15 of them, all `seon.kb.*`):
 :seon.kb.fact/content     "[:string]"
 :seon.kb.fact/source      "[:string]"
 :seon.kb.fact/tags        "[:vector :keyword]"
+
 ```
 
 It defined a storage fn (note the **bare-keyword destructuring and missing
@@ -94,6 +95,7 @@ It defined a storage fn (note the **bare-keyword destructuring and missing
        :seon.kb.fact/content content
        :seon.kb.fact/source  source
        :seon.kb.fact/tags    tags}]}))
+
 ```
 
 ### What it failed to do (the gap)
@@ -154,6 +156,7 @@ turn N ▸ run-turn! error #error {:message ":malli.core/invalid-output",
          :seon.error.malli/humanized ["should be a symbol"],
          :seon.error.malli/got-edn "{}",
          :seon.error.malli/return-value-edn "{nil {}, cljs.compiler {...}}"}}
+
 ```
 
 - Function: `seon.analyzer-info/snapshot-defs`
@@ -252,6 +255,7 @@ Schemas it registered (T13 confirmed working — attrs land in `(:schema @conn)`
 ;; and the kb.doc family (path = identity upsert key):
 ;; :seon.kb.doc/path :seon.kb.doc/title :seon.kb.doc/type
 ;; :seon.kb.doc/tags :seon.kb.doc/summary :seon.kb.doc/content
+
 ```
 
 `:seon.kb.doc/*` attrs were ABSENT at baseline (0) and PRESENT after the run (6).
@@ -271,6 +275,7 @@ Real data it transacted (3 `:seon.kb.doc` entities, queried back from DB):
  :seon.kb.doc/path "docs/seon/components/agent-system.md"
  :seon.kb.doc/type :component :seon.kb.doc/tags [:agent :component :provider :system]
  :seon.kb.doc/summary "Provider-agnostic AI agent lifecycle — launch, observe, persist, interrupt ..."}
+
 ```
 
 Deeply-typed, fully-namespaced, natural-key identity (`path`), keyword enum
@@ -327,6 +332,7 @@ produced a DB-grounded answer:
                                    :where [?e :kb.doc/path ?path]
                                           [?e :kb.doc/title ?title]]})
   ;; => #{}   (empty; never noticed the typo, never recovered)
+
   ```
 
   Count of correct `:seon.kb.doc/`-namespaced queries by SgL: **0**. It produced no
@@ -663,9 +669,11 @@ race" and retried — right instinct, wrong information.
   20:59:09) — message-content hygiene at the transact boundary (run-3
   defect #4).
 
-### MVP loop status: work-directed design → store → cross-agent reuse →
-in-query aggregate ALL DEMONSTRATED LIVE. Remaining for the demo: messaging
-codified (1.5), `:with` teaching, empty-message hygiene, file-corpus scenario.
+### MVP loop status
+
+Work-directed design → store → cross-agent reuse → in-query aggregate ALL
+DEMONSTRATED LIVE. Remaining for the demo: messaging codified (1.5), `:with`
+teaching, empty-message hygiene, file-corpus scenario.
 
 ## Run 7 — 2026-06-10 ~00:49Z, codebase-Q&A demo scenario (post units 1.5→#25)
 
@@ -685,8 +693,7 @@ time? … Store what you find so the next agent doesn't have to redo this."
   errors, read them via (result :id) and retried — accretion instinct
   works; slightly over-eager after the answer.
 
-### Scenario 2 (tIY-2606092100, fresh, related question): EFFICIENT RE-DERIVE,
-### NOT REUSE
+### Scenario 2 (tIY-2606092100, fresh, related question): EFFICIENT RE-DERIVE, NOT REUSE
 
 - 70s flawless: grep (validate-entity-values! BY NAME at 8s — suspiciously
   specific; convention-guess or attr-name osmosis) → read-file → exact line

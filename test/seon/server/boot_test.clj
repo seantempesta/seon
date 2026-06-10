@@ -19,16 +19,21 @@
 
 (set! *warn-on-reflection* true)
 
-;; One fixed ambient db-name so the conn's ::raw-broadcast, the ::reactive
-;; listener, and subscribe-tx's db-name resolution all agree. In production
-;; wire/-main sets wire's state :ambient-db-name to the conn's cfg :name and
-;; runs the hooks under it; the in-process fixture mirrors that here.
-(def ^:private ambient "boot-test-ambient")
+;; One ambient db-name PER FIXTURE INVOCATION so the conn's ::raw-broadcast,
+;; the ::reactive listener, and subscribe-tx's db-name resolution all agree.
+;; In production wire/-main sets wire's state :ambient-db-name to the conn's
+;; cfg :name and runs the hooks under it; the in-process fixture mirrors that.
+;; The name must be UNIQUE per test: boot's `!engines` defonce caches engine
+;; state by db-name for the JVM's lifetime (one-engine-per-conn — sound for a
+;; wire-server boot, which is a fresh JVM). Reusing a fixed name across runs
+;; handed test 2+ a stale engine bound to a dead conn (with prior sub-ids
+;; cached) — first-run-green / rerun-red (audit 2026-06-10).
 
 (use-fixtures :each
   (fn [tfn]
-    (let [ctx  (tu/spawn-writer!)
-          conn (:conn ctx)]
+    (let [ambient (str "boot-test-ambient-" (System/nanoTime))
+          ctx     (tu/spawn-writer!)
+          conn    (:conn ctx)]
       ;; Pin wire's ambient-db-name to `ambient`, re-install ::raw-broadcast
       ;; under that name (replaces the spawn-writer! one, keyed by ::raw-broadcast),
       ;; and run the registry on-ensure-db hooks (installs ::reactive + seeds

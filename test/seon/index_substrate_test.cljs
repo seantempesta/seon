@@ -95,6 +95,18 @@
     (is (not= "()" (:seon.fn/arglists pull))
         "multi-arity fns no longer collapse to empty arglists")))
 
+(deftest arglists-expand-local-auto-kws
+  ;; listen!'s real arg vector is `[{::keys [handler key conn] …}]` —
+  ;; rendered verbatim, `::keys` would mis-resolve against the READER's
+  ;; ns. The stored arglist must carry the explicit `:seon.db/keys`.
+  (let [tx      (client/index-substrate!)
+        listen  (by-sym tx "seon.db/listen!")
+        al      (:seon.fn/arglists listen)]
+    (is (str/includes? al ":seon.db/keys")
+        "listen!'s ::keys destructure is expanded to :seon.db/keys")
+    (is (not (str/includes? al "::"))
+        "no raw auto-resolved :: survives in listen!'s stored arglists")))
+
 (deftest no-stub-source-anywhere
   ;; Permissive + honest: every indexed fn has REAL source (or is OMITTED),
   ;; never a `,,,` stub.

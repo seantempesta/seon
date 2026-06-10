@@ -972,6 +972,19 @@
             (recur (inc i) pdepth bdepth in-str? false fresh? vecs)
             :else (recur (inc i) pdepth bdepth in-str? false false vecs)))))))
 
+(defn- expand-local-auto-kws
+  "Display-expansion for arglists: rewrite namespace-LOCAL auto-resolved
+   keywords (`::keys`, `::handler`) to their explicit form
+   (`:seon.db/keys`) so an agent reading the arglist OUTSIDE the owning
+   ns can't mis-resolve `::` against its own ns. Alias-qualified
+   `::alias/x` is left untouched (the char class excludes `/` and the
+   lookahead requires a delimiter right after the name, so `::db/key`
+   never matches)."
+  [arglists-str owning-ns-str]
+  (str/replace arglists-str
+               #"::([^\s,\[\]\{\}\(\)/]+)(?=[\s,\[\]\{\}\(\)]|$)"
+               (str ":" owning-ns-str "/$1")))
+
 (defn- var->fn-row
   "Build a `:seon.fn` row for a `#'`-literal substrate var from runtime
    introspection. Returns nil (and logs) when the source file can't be read or
@@ -994,7 +1007,9 @@
                :seon.fn/ns         [:seon.ns/name ns-kw]
                :seon.fn/source     src
                :seon.fn/fn-var?    true
-               :seon.fn/arglists   (arglists-from-source src)
+               :seon.fn/arglists   (expand-local-auto-kws
+                                     (arglists-from-source src)
+                                     (str (:ns m)))
                :seon.fn/doc        (or (:doc m) "")
                :seon.fn/private?   (boolean (:private m))
                :seon.fn/created-at now}
