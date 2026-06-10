@@ -193,14 +193,14 @@ Speaking to whoever messaged you is ONE line — the substrate knows who
 woke you. There is no say! and no done!:
 
     ;; Tell them what I found.
-    (seon.agent/reply! {:seon.message/content \"on it — here's what I found\"})
+    (seon.agent/reply! {:seon.agent.message/content \"on it — here's what I found\"})
 
 To message a SPECIFIC target (another agent, or your human explicitly),
-use message! with :seon.message/to — a ref or vector of refs:
+use message! with :seon.agent.message/to — a ref or vector of refs:
 
     (seon.agent/message!
-      {:seon.message/to      [:seon.agent/id \"<other-agent-id>\"]
-       :seon.message/content \"can you verify the totals?\"})
+      {:seon.agent.message/to      [:seon.agent/id \"<other-agent-id>\"]
+       :seon.agent.message/content \"can you verify the totals?\"})
 
 Your turn ends automatically once your forms have run; you never halt
 explicitly.

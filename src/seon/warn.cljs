@@ -557,7 +557,7 @@
 (def slow-eval-threshold-ms 500)
 
 (def hop-cap
-  "Max `:seon.message/hops` before the wake trigger refuses a message
+  "Max `:seon.agent.message/hops` before the wake trigger refuses a message
    (agent↔agent ping-pong guard). Lives here (not seon.agent) so both
    the trigger (seon.agent) and `check-hop-exhausted` read ONE value
    without a require cycle. hops = 0 when from = the user; each
@@ -567,16 +567,16 @@
 (defn- latest-user-at
   "Wall-clock of the latest message FROM the user anywhere, or nil.
    Identity is the ref: a user message is one whose
-   `:seon.message/from` resolves to a `:seon.user/id` entity."
+   `:seon.agent.message/from` resolves to a `:seon.user/id` entity."
   [db]
   (ffirst (db/query
             {:seon.db/db db
              :seon.db/query
              '[:find (max ?at)
                :where
-               [?m :seon.message/from ?u]
+               [?m :seon.agent.message/from ?u]
                [?u :seon.user/id _]
-               [?m :seon.message/at ?at]]})))
+               [?m :seon.agent.message/at ?at]]})))
 
 (defn- failed-eval-rows
   "[eval-id error-string] rows for failed evals since the latest user
@@ -660,7 +660,7 @@
    "(seon.schema/register! :kb.doc/path [:string {:seon.db/identity true}])"})
 
 (defn check-hop-exhausted
-  "Messages whose `:seon.message/hops` reached [[hop-cap]] SINCE the
+  "Messages whose `:seon.agent.message/hops` reached [[hop-cap]] SINCE the
    latest user message — each one is a wake the trigger REFUSED (an
    agent↔agent reply chain hit the ping-pong guard and was dropped on
    the floor). A fresh human message resets the chain (hops 0) and
@@ -674,10 +674,10 @@
                   '[:find ?mid ?hops ?at
                     :in $ ?cap
                     :where
-                    [?m :seon.message/hops ?hops]
+                    [?m :seon.agent.message/hops ?hops]
                     [(>= ?hops ?cap)]
-                    [?m :seon.message/id ?mid]
-                    [?m :seon.message/at ?at]]
+                    [?m :seon.agent.message/id ?mid]
+                    [?m :seon.agent.message/at ?at]]
                   :seon.db/args [hop-cap]})]
     {:seon.warn/kind :hop-exhausted
      :seon.warn/affected
@@ -697,7 +697,7 @@
           "stop replying to replies; involve the human (message the user) "
           "to continue the thread, which resets hops to 0.")
      :seon.warn/example
-     "(seon.agent/message! {:seon.message/content \"summary for you — …\"})  ; to defaults to the user"}))
+     "(seon.agent/message! {:seon.agent.message/content \"summary for you — …\"})  ; to defaults to the user"}))
 
 (defn check-slow-evals
   "Evals over the slow threshold in the last hour, anywhere. Stops

@@ -72,9 +72,9 @@
    :seon.gym.predicate/axis   :replies-honestly
    :seon.gym.predicate/query  [:find ?m
                                :where
-                               [?m :seon.message/from ?a]
+                               [?m :seon.agent.message/from ?a]
                                [?a :seon.agent/id ?aid]
-                               [?m :seon.message/hops ?h]
+                               [?m :seon.agent.message/hops ?h]
                                [(pos? ?h)]]
    :seon.gym.predicate/expect :non-empty}
   {:seon.gym.predicate/id     :agent-ends-idle
@@ -89,5 +89,5 @@
    :seon.gym.predicate/axis   :terminates
    :seon.gym.predicate/query  [:find ?t
                                :where
-                               [?t :seon.turn/id ?tid]]
+                               [?t :seon.agent.turn/id ?tid]]
    :seon.gym.predicate/expect [:count<= 19]}]}

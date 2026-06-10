@@ -31,5 +31,5 @@
   {:seon.gym.predicate/id     :turn-closes-done
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :terminates
-   :seon.gym.predicate/query  [:find ?t :where [?t :seon.turn/status :done]]
+   :seon.gym.predicate/query  [:find ?t :where [?t :seon.agent.turn/status :done]]
    :seon.gym.predicate/expect :non-empty}]}

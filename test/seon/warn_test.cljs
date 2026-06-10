@@ -121,20 +121,20 @@
      ;; from/to refs (unit 1.5): nested-map upserts create the user +
      ;; a stub agent entity in the same tx. Fully formed message:
      ;; from + to + content + at + id + hops.
-     {:seon.message/id "MSGwarntest001"
-      :seon.message/from {:seon.user/id "user"}
-      :seon.message/to [{:seon.agent/id "warntest-agent"}]
-      :seon.message/content "hello"
-      :seon.message/at (t 100)
-      :seon.message/hops 0}
+     {:seon.agent.message/id "MSGwarntest001"
+      :seon.agent.message/from {:seon.user/id "user"}
+      :seon.agent.message/to [{:seon.agent/id "warntest-agent"}]
+      :seon.agent.message/content "hello"
+      :seon.agent.message/at (t 100)
+      :seon.agent.message/hops 0}
      ;; a hop-exhausted message AFTER the user msg — wake was refused;
      ;; check-hop-exhausted must surface exactly this one
-     {:seon.message/id "MSGwarntestHOP"
-      :seon.message/from {:seon.agent/id "warntest-agent"}
-      :seon.message/to [{:seon.agent/id "warntest-agnt2"}]
-      :seon.message/content "ping"
-      :seon.message/at (t 400)
-      :seon.message/hops 4}
+     {:seon.agent.message/id "MSGwarntestHOP"
+      :seon.agent.message/from {:seon.agent/id "warntest-agent"}
+      :seon.agent.message/to [{:seon.agent/id "warntest-agnt2"}]
+      :seon.agent.message/content "ping"
+      :seon.agent.message/at (t 400)
+      :seon.agent.message/hops 4}
      {:seon.eval/id "EVLwarnFAIL001"
       :seon.eval/at (t 200)
       :seon.eval/source "(boom)"

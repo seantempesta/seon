@@ -28,7 +28,7 @@
      {:seon.error/kind :seon.error.kind/malli-instrument-input  ; or /output, /arity, /guard
       :seon.error.malli/fn-sym 'seon.db/transact!
       :seon.error.malli/schema [:=> [:cat …] …]
-      :seon.error.malli/path   [:seon.db/tx-data 0 :seon.message/at]
+      :seon.error.malli/path   [:seon.db/tx-data 0 :seon.agent.message/at]
       :seon.error.malli/leaf-type :malli.core/missing-key
       :seon.error.malli/expected \"…\"
       :seon.error.malli/got-edn  \"…\"
@@ -56,7 +56,7 @@
 ;; Per the research caveat (Q4): `{:optional true}` is only meaningful
 ;; inside a parent `:map`. These registrations are scalar shapes;
 ;; optionality is enforced at the consumer (the renderer treats absent
-;; keys as "skip that row"). Same pattern as :seon.message/hops.
+;; keys as "skip that row"). Same pattern as :seon.agent.message/hops.
 ;; ============================================================
 
 (schema/register! :seon.error/kind             :keyword)

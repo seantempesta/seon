@@ -846,8 +846,8 @@
   "Store-time char cap for any pr-str'd string persisted as a datom
    (`:seon.eval/result-edn`, `:seon.eval/error`). (The turn prompt no
    longer flows through here — it persists whole as a
-   logs/prompts/<agent>/<turn>.txt blob with `:seon.turn/prompt-chars`
-   + `:seon.turn/prompt-file` datom projections, 2026-06-09.)
+   logs/prompts/<agent>/<turn>.txt blob with `:seon.agent.turn/prompt-chars`
+   + `:seon.agent.turn/prompt-file` datom projections, 2026-06-09.)
 
    MEMORY-SAFETY invariant: the DB must never hold a multi-MB blob in a
    single datom. A 9.7M-char `pull [*]` result once landed verbatim as
@@ -964,7 +964,7 @@
 
 (defn ^:async record-eval!
   "Transact one :seon.eval entity as a component child of its owning
-   turn (per v1.md §2.1 — `:seon.turn/evals` is component-many). The
+   turn (per v1.md §2.1 — `:seon.agent.turn/evals` is component-many). The
    nested-map shorthand creates the eval inline; datahike's component
    semantics mean a one-pull on the turn returns its evals without
    needing a back-ref query.
@@ -1068,8 +1068,8 @@
         ;; detect-and-tee, v1.md §2.2 / Phase B item 10) ride in the same
         ;; tx so they share `:seon.db/eval-id` tx-meta and either all
         ;; land or none do.
-        eval-tx  [{:seon.turn/id    turn-id
-                   :seon.turn/evals [eval-map]}]
+        eval-tx  [{:seon.agent.turn/id    turn-id
+                   :seon.agent.turn/evals [eval-map]}]
         tx-data  (into eval-tx tee)
         ;; Explicit conn on both transacts — see docstring (retry runs
         ;; after an await, outside any CLJS `binding` of *conn*).
@@ -1197,8 +1197,8 @@
                      (mix of `:kind :form` and `:kind :read` entries)
      agent-ns-sym  — agent's home ns (e.g. 'my.agent.seon)
      agent-id      — the owning agent's id
-     turn-id       — the owning :seon.turn/id string (eval lands as a
-                     component child of this turn via :seon.turn/evals)
+     turn-id       — the owning :seon.agent.turn/id string (eval lands as a
+                     component child of this turn via :seon.agent.turn/evals)
 
    Returns `{:seon.eval/ids    [<id> ...]   ; ordered, one per entry
              :seon.eval/n-ok   <int>        ; successful evals

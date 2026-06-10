@@ -28,7 +28,7 @@
   (:require
     [cljs.test :as t :refer [deftest is testing async]]
     [datahike.api :as d]
-    [seon.agent]                          ; :seon.eval/:seon.turn/:seon.ns/:seon.schema registrations
+    [seon.agent]                          ; :seon.eval/:seon.agent.turn/:seon.ns/:seon.schema registrations
     [seon.client :as client]
     [seon.db :as db]
     [seon.eval :as seval]))
@@ -37,7 +37,7 @@
 ;; Fresh :memory conn per test, with the SAME datahike schema the pod
 ;; installs at boot (db/malli->datahike-schema over agent-bootstrap-attrs).
 ;; The boot install is required: record-eval!'s eval-map rides NESTED under
-;; :seon.turn/evals, and ensure-datahike-attrs!/extract-tx-attrs only see
+;; :seon.agent.turn/evals, and ensure-datahike-attrs!/extract-tx-attrs only see
 ;; TOP-LEVEL attrs — nested attrs must already be in the conn's schema
 ;; (exactly the prod situation).
 ;; ---------------------------------------------------------------------------

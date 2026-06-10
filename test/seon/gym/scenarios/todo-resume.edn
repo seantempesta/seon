@@ -1,0 +1,136 @@
+;; TODO-RESUME (board P7/#15, live resume test 2026-06-10) — the
+;; datoms→code resume arc: an agent authors a my.* corpus (ns + schemas
+;; + fn + deftest + data row + open todo) through the eval surface
+;; (detect-and-tee), the POD RESTARTS against the same cluster store,
+;; replay rebuilds the code from :seon.fn/:seon.ns/:seon.schema rows,
+;; and a fresh session retrieves everything.
+;;
+;; STATUS :todo — mid-scenario pod restart is NOT driver-supported yet
+;; (driver.cljs docstring "Driver-feature gaps", S-06). Until S-06
+;; lands, this file documents the MANUAL sequence proven live on
+;; 2026-06-10 (cluster reset → corpus via eval-batch! → `bin/seon
+;; restart pod` → post-restart probes) plus the predicates the driver
+;; will run once it can restart the pod between turn groups.
+;;
+;; The :seon.gym.scenario/turns below are the corpus exactly as driven
+;; live (scripted-replay shape). The restart boundary goes between turn
+;; 3 and the predicate phase; predicates marked "post-restart" are
+;; meaningful only after the restart.
+;;
+;; LIVE RESULTS (2026-06-10, manual run):
+;;   - upsert probe: 3 defines of my.workout/add-workout! → exactly ONE
+;;     current :seon.fn row, source = v3 (latest). PASS.
+;;   - replay boot line: {:replay-n-total 6 :n-ok 5 :n-fail 1}.
+;;     THE FAIL: the deftest replays BEFORE its owning ns row because
+;;     build-tee-entities re-upserts {:seon.ns/name kw} on EVERY define
+;;     (eval.cljs:786), bumping the ns row's identity-datom tx to the
+;;     LAST define's tx; query-program-graph-entries sorts by that tx
+;;     (client.cljs:586-613), so `(ns my.workout (:require [cljs.test]))`
+;;     replayed AFTER the deftest → undeclared cljs.test/deftest.
+;;     Encoded below as :replay-zero-failures (will stay RED until the
+;;     ordering fix — replay :ns entries first).
+;;   - resumed fn runs its LATEST body (v3 marker row). PASS.
+;;   - pre-restart data row queries back post-restart. PASS.
+;;   - schema catalog domain-attrs lists :my.workout/*. PASS.
+;;   - open todo SURVIVES but does not render in the new boot agent's
+;;     turn-0: start-agent! mints a fresh agent-id each boot
+;;     (client.cljs:1375), so the owner-scoped todo section scopes to a
+;;     dead agent. Encoded as :todo-renders-for-boot-agent (RED until
+;;     agent identity is durable across restarts).
+{:seon.gym.scenario/id     :todo-resume
+ :seon.gym.scenario/doc    "Datoms→code resume: agent authors my.workout (schemas + fn redefined 3x + deftest + data row) and an open todo; pod restarts on the same store; replay rebuilds the corpus (one current :seon.fn row per sym, latest source), the fn runs its latest body, the data row and todo query back, and the catalog shows :my.workout/*. Requires driver S-06 (mid-scenario pod restart)."
+ :seon.gym.scenario/tier   :stub
+ :seon.gym.scenario/status :todo
+ :seon.gym.scenario/llm    :scripted-replay
+ :seon.gym.scenario/axes   [:reuses-functions :stores-proactively]
+ :seon.gym.scenario/turns
+ [{:seon.gym.turn/message "Track my workouts: schema, a store fn with a test, log today's run, and leave yourself a todo to verify it all after your next restart."
+   :seon.gym.turn/llm-script
+   ["(ns my.workout (:require [cljs.test]))\n\n(seon.schema/register! :my.workout/date :string)\n\n(seon.schema/register! :my.workout/kind :keyword)\n\n(seon.schema/register! :my.workout/version :string)\n\n(defn add-workout!\n  \"Store one workout row.\"\n  [date kind]\n  (seon.db/transact!\n    {:seon.db/tx-data\n     [{:my.workout/date date :my.workout/kind kind :my.workout/version \"v1\"}]}))\n\n(cljs.test/deftest add-workout-test\n  (cljs.test/is (fn? my.workout/add-workout!)))\n\n(my.workout/add-workout! \"2026-06-10\" :run)\n\n(seon.agent.todo/add! {:seon.agent.todo/title \"Verify my.workout after restart\"})\n"]}
+  ;; Upsert probe: two redefinitions — the program graph must keep ONE
+  ;; current row carrying the LATEST source.
+  {:seon.gym.turn/message "Improve add-workout! (twice)."
+   :seon.gym.turn/llm-script
+   ["(defn add-workout!\n  \"Store one workout row (v2).\"\n  [date kind]\n  (seon.db/transact!\n    {:seon.db/tx-data\n     [{:my.workout/date date :my.workout/kind kind :my.workout/version \"v2\"}]}))\n"
+    "(defn add-workout!\n  \"Store one workout row (v3 — latest).\"\n  [date kind]\n  (seon.db/transact!\n    {:seon.db/tx-data\n     [{:my.workout/date date :my.workout/kind kind :my.workout/version \"v3\"}]}))\n"]}
+  ;; ---- RESTART BOUNDARY (S-06): driver restarts the pod here against
+  ;; ---- the same scratch store, then runs one post-restart turn.
+  {:seon.gym.turn/message "You just restarted. Log a swim for 2026-06-11 with your workout fn."
+   :seon.gym.turn/llm-script
+   ["(my.workout/add-workout! \"2026-06-11\" :swim)\n"]}]
+ :seon.gym.scenario/predicates
+ [;; Upsert probe — exactly one current :seon.fn row for the sym, and
+  ;; its source is the LATEST (v3) define.
+  {:seon.gym.predicate/id     :one-current-fn-row-per-sym
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :reuses-functions
+   :seon.gym.predicate/query  [:find ?e
+                               :where
+                               [?e :seon.fn/sym "my.workout/add-workout!"]]
+   :seon.gym.predicate/expect [:count<= 1]}
+  {:seon.gym.predicate/id     :fn-row-carries-latest-source
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :reuses-functions
+   :seon.gym.predicate/query  [:find ?e
+                               :where
+                               [?e :seon.fn/sym "my.workout/add-workout!"]
+                               [?e :seon.fn/source ?src]
+                               [(clojure.string/includes? ?src "v3")]]
+   :seon.gym.predicate/expect :non-empty}
+  ;; Post-restart: replay must rebuild the corpus with ZERO failures.
+  ;; RED as of 2026-06-10 (deftest replays before its ns row's
+  ;; :require — see header). The driver needs a :replay-stats predicate
+  ;; kind (or scrape the :seon.log warn rows) once S-06 lands; until
+  ;; then this datalog form asserts no replay-failure warn rows.
+  {:seon.gym.predicate/id     :replay-zero-failures
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :stores-proactively
+   :seon.gym.predicate/query  [:find ?l
+                               :where
+                               [?l :seon.log/message ?m]
+                               [(clojure.string/starts-with? ?m "replay of")]]
+   :seon.gym.predicate/expect :empty}
+  ;; Post-restart: the resumed fn ran its LATEST body — the post-restart
+  ;; call wrote a v3 row for the swim.
+  {:seon.gym.predicate/id     :resumed-fn-runs-latest-version
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :stores-proactively
+   :seon.gym.predicate/query  [:find ?e
+                               :where
+                               [?e :my.workout/date "2026-06-11"]
+                               [?e :my.workout/kind :swim]
+                               [?e :my.workout/version "v3"]]
+   :seon.gym.predicate/expect :non-empty}
+  ;; Post-restart: the PRE-restart data row survived the restart.
+  {:seon.gym.predicate/id     :pre-restart-data-row-survives
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :stores-proactively
+   :seon.gym.predicate/query  [:find ?e
+                               :where
+                               [?e :my.workout/date "2026-06-10"]
+                               [?e :my.workout/kind :run]
+                               [?e :my.workout/version "v1"]]
+   :seon.gym.predicate/expect :non-empty}
+  ;; Post-restart: the open todo survived.
+  {:seon.gym.predicate/id     :open-todo-survives-restart
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :stores-proactively
+   :seon.gym.predicate/query  [:find ?t
+                               :where
+                               [?t :seon.agent.todo/title "Verify my.workout after restart"]
+                               [?t :seon.agent.todo/status :open]]
+   :seon.gym.predicate/expect :non-empty}
+  ;; Post-restart: the boot agent's turn-0 context shows the open todo.
+  ;; RED as of 2026-06-10: start-agent! mints a NEW agent-id each boot
+  ;; (client.cljs:1375), so the owner-scoped section renders "" for the
+  ;; new agent while the todo's owner is the dead pre-restart agent.
+  {:seon.gym.predicate/id   :todo-renders-for-boot-agent
+   :seon.gym.predicate/kind :transcript-includes
+   :seon.gym.predicate/axis :stores-proactively
+   :seon.gym.predicate/text "Your open work items"}
+  ;; Post-restart: the schema catalog's domain-attrs block carries the
+  ;; agent-registered :my.workout/* attrs (the S-21 fix surface).
+  {:seon.gym.predicate/id   :catalog-lists-my-workout-attrs
+   :seon.gym.predicate/kind :transcript-includes
+   :seon.gym.predicate/axis :stores-proactively
+   :seon.gym.predicate/text ":my.workout/date"}]}

@@ -265,12 +265,12 @@
    :seon.gym.scenario/turns
    [{:seon.gym.turn/message "What does message! return?"
      :seon.gym.turn/llm-script
-     ["(seon.agent/reply! {:seon.message/content \"message! returns the concise envelope {:seon.message/ok? true ...}\"})\n"]}]
+     ["(seon.agent/reply! {:seon.agent.message/content \"message! returns the concise envelope {:seon.agent.message/ok? true ...}\"})\n"]}]
    :seon.gym.scenario/predicates
    [{:seon.gym.predicate/id     :turn-closes-done
      :seon.gym.predicate/kind   :datalog
      :seon.gym.predicate/axis   :terminates
-     :seon.gym.predicate/query  '[:find ?t :where [?t :seon.turn/status :done]]
+     :seon.gym.predicate/query  '[:find ?t :where [?t :seon.agent.turn/status :done]]
      :seon.gym.predicate/expect :non-empty}
     ;; live proof for the datalog built-ins S-21's fork predicate uses
     {:seon.gym.predicate/id     :namespace-name-builtins-resolve
@@ -278,10 +278,10 @@
      :seon.gym.predicate/axis   :terminates
      :seon.gym.predicate/query  '[:find ?n
                                   :where
-                                  [?m :seon.message/content _]
+                                  [?m :seon.agent.message/content _]
                                   [?m ?a _]
                                   [(namespace ?a) ?ns]
-                                  [(= ?ns "seon.message")]
+                                  [(= ?ns "seon.agent.message")]
                                   [(name ?a) ?n]]
      :seon.gym.predicate/expect [:every-in ["id" "from" "to" "content"
                                             "at" "hops"]]}
@@ -289,7 +289,7 @@
      :seon.gym.predicate/kind      :llm-judge
      :seon.gym.predicate/axis      :replies-honestly
      :seon.gym.predicate/rubric    "Reply must state the concise envelope."
-     :seon.gym.predicate/reference "message! returns {:seon.message/ok? true ...} — never the raw tx-report."}]})
+     :seon.gym.predicate/reference "message! returns {:seon.agent.message/ok? true ...} — never the raw tx-report."}]})
 
 (deftest llm-judge-verdict-wiring-with-mocked-judge
   (async done
@@ -367,17 +367,17 @@
            [{:seon.gym.turn/agent   :a
              :seon.gym.turn/message "alpha question"
              :seon.gym.turn/llm-script
-             ["(seon.agent/reply! {:seon.message/content \"ALPHA-ANSWER\"})\n"]}
+             ["(seon.agent/reply! {:seon.agent.message/content \"ALPHA-ANSWER\"})\n"]}
             {:seon.gym.turn/agent   :b
              :seon.gym.turn/message "beta question"
              :seon.gym.turn/llm-script
-             ["(seon.agent/reply! {:seon.message/content \"BETA-ANSWER\"})\n"]}]
+             ["(seon.agent/reply! {:seon.agent.message/content \"BETA-ANSWER\"})\n"]}]
            :seon.gym.scenario/predicates
            ;; PINNED ENGINE BUG (datahike-cljs, observed 2026-06-10):
            ;; a datalog query joining TWO identity-attr clauses through
            ;; one message row —
-           ;;   [?ag :seon.agent/id ?bid] [?m :seon.message/from ?ag]
-           ;;   [?m :seon.message/to ?u]  [?u :seon.user/id "user"]
+           ;;   [?ag :seon.agent/id ?bid] [?m :seon.agent.message/from ?ag]
+           ;;   [?m :seon.agent.message/to ?u]  [?u :seon.user/id "user"]
            ;; — IGNORES the :in ?bid binding and returns the
            ;; inverse-direction (user→agent) rows, regardless of clause
            ;; order. Single-identity-join queries bind correctly. Gym
@@ -391,10 +391,10 @@
                                           :in $ ?bid
                                           :where
                                           [?ag :seon.agent/id ?bid]
-                                          [?m :seon.message/from ?ag]
-                                          [?m :seon.message/hops ?h]
+                                          [?m :seon.agent.message/from ?ag]
+                                          [?m :seon.agent.message/hops ?h]
                                           [(pos? ?h)]
-                                          [?m :seon.message/content ?c]]
+                                          [?m :seon.agent.message/content ?c]]
              :seon.gym.predicate/expect [:count 1]}
             {:seon.gym.predicate/id        :judge-a
              :seon.gym.predicate/kind      :llm-judge

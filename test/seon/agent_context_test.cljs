@@ -9,7 +9,7 @@
          never empty just because no `:seon.agent/ctx` was seeded.
      (b) agent-path (`render-prompt`) ≡ inspector-path
          (`inspect/ctx-preview`) ≡ the would-be persisted
-         `:seon.turn/prompt-text` for the same (db,id) — ONE composer,
+         `:seon.agent.turn/prompt-text` for the same (db,id) — ONE composer,
          divergence impossible.
      (c) each section fn renders non-blank given seeded data (would have
          caught a section silently returning \"\" when data IS present).
@@ -77,26 +77,26 @@
       [{:seon.agent/id agent-id
         :seon.agent/state :idle
         :seon.agent/sessions
-        [{:seon.session/id "SESctxtest0001"
-          :seon.session/at (t 0)
-          :seon.session/turns
-          [{:seon.turn/id "TRNctxtest0001"
-            :seon.turn/at (t 10)
-            :seon.turn/status :done
-            :seon.turn/messages
-            [{:seon.message/id "MSGctxtest0001"
-              :seon.message/from {:seon.user/id "user"}
-              :seon.message/to [{:seon.agent/id agent-id}]
-              :seon.message/content "build me a thing"
-              :seon.message/at (t 11)
-              :seon.message/hops 0}
-             {:seon.message/id "MSGctxtest0002"
-              :seon.message/from {:seon.agent/id agent-id}
-              :seon.message/to [{:seon.user/id "user"}]
-              :seon.message/content "on it"
-              :seon.message/at (t 12)
-              :seon.message/hops 1}]
-            :seon.turn/evals
+        [{:seon.agent.session/id "SESctxtest0001"
+          :seon.agent.session/at (t 0)
+          :seon.agent.session/turns
+          [{:seon.agent.turn/id "TRNctxtest0001"
+            :seon.agent.turn/at (t 10)
+            :seon.agent.turn/status :done
+            :seon.agent.turn/messages
+            [{:seon.agent.message/id "MSGctxtest0001"
+              :seon.agent.message/from {:seon.user/id "user"}
+              :seon.agent.message/to [{:seon.agent/id agent-id}]
+              :seon.agent.message/content "build me a thing"
+              :seon.agent.message/at (t 11)
+              :seon.agent.message/hops 0}
+             {:seon.agent.message/id "MSGctxtest0002"
+              :seon.agent.message/from {:seon.agent/id agent-id}
+              :seon.agent.message/to [{:seon.user/id "user"}]
+              :seon.agent.message/content "on it"
+              :seon.agent.message/at (t 12)
+              :seon.agent.message/hops 1}]
+            :seon.agent.turn/evals
             [{:seon.eval/id "EVLctxtestF001"
               :seon.eval/at (t 13)
               :seon.eval/duration-ms 5
@@ -104,10 +104,10 @@
               :seon.eval/ok? false
               :seon.eval/error "boom — bad query"
               :seon.eval/ns :my.agent.ctx-260610}]}
-           {:seon.turn/id "TRNctxtest0002"
-            :seon.turn/at (t 20)
-            :seon.turn/status :done
-            :seon.turn/evals
+           {:seon.agent.turn/id "TRNctxtest0002"
+            :seon.agent.turn/at (t 20)
+            :seon.agent.turn/status :done
+            :seon.agent.turn/evals
             (into [{:seon.eval/id "EVLctxtestK001"
                     :seon.eval/at (t 21)
                     :seon.eval/duration-ms 3
@@ -240,7 +240,7 @@
           (fn [conn]
             (let [db          @conn
                   ;; render-prompt is what run-turn! persists as
-                  ;; :seon.turn/prompt-text — assert that exact source.
+                  ;; :seon.agent.turn/prompt-text — assert that exact source.
                   agent-text  (strip-now (agent/render-prompt agent-id))
                   composer    (strip-now
                                 (:seon.render/text
@@ -426,7 +426,7 @@
               (is (str/includes? cap "STORE PROACTIVELY")
                   "store-proactively nudge present — persist by default")
               ;; #26 — concise message!/reply! return modeled in the example.
-              (is (str/includes? cap ":seon.message/ok? true")
+              (is (str/includes? cap ":seon.agent.message/ok? true")
                   "reply! example shows the concise return shape")
               ;; bounded — curated core API + worked examples, not a dump.
               ;; (raised from 4000 when the fs/search recipe, finding shape,
@@ -468,7 +468,7 @@
               (is (str/includes? txt "<schema-catalog>") "wrapper marker present")
               ;; Every substrate entity kind must be listed.
               (doseq [k [:seon.fn :seon.ns :seon.schema :seon.eval
-                         :seon.message :seon.test]]
+                         :seon.agent.message :seon.test]]
                 (is (str/includes? txt (str "[" k "]"))
                     (str k " kind listed in the catalog")))
               ;; Attributes surfaced, with the identity flag.
@@ -494,7 +494,7 @@
               ;; exact per-turn count busted the prompt cache every render).
               (is (str/includes? txt "[:seon.eval]  (per-turn data — uncounted)")
                   "eval kind listed, count omitted (cache-prefix stability)")
-              (is (str/includes? txt "[:seon.message]  (per-turn data — uncounted)")
+              (is (str/includes? txt "[:seon.agent.message]  (per-turn data — uncounted)")
                   "message kind listed, count omitted")
               ;; Low-churn kinds keep a (bucketed) count.
               (is (re-find #"\[:seon.ns\]  \d+\+? instances?" txt)

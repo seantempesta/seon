@@ -57,8 +57,8 @@
                                :in $ ?bid
                                :where
                                [?ag :seon.agent/id ?bid]
-                               [?m :seon.message/from ?ag]
-                               [?m :seon.message/hops ?h]
+                               [?m :seon.agent.message/from ?ag]
+                               [?m :seon.agent.message/hops ?h]
                                [(pos? ?h)]]
    :seon.gym.predicate/expect :non-empty}
   ;; G5 — multi-segment finding namespace, no :finding/* fork.

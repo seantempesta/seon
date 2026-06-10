@@ -16,7 +16,7 @@
    :seon.gym.turn/llm-script
    [";; register the finding schema FIRST — multi-segment namespace\n(seon.schema/register! :kb.finding/claim :string)\n(seon.schema/register! :kb.finding/source-path :string)\n(seon.schema/register! :kb.finding/line :int)\n(seon.schema/register! :kb.finding/confidence [:enum :verified :inferred])\n"
     ";; store the finding with full provenance\n(seon.db/transact! {:seon.db/tx-data [{:kb.finding/claim \"transact! Malli-validates every entity before the tx reaches datahike\" :kb.finding/source-path \"src/seon/db.cljs\" :kb.finding/line 630 :kb.finding/confidence :verified}]})\n"
-    ";; reply AFTER the verified store\n(seon.agent/reply! {:seon.message/content \"Stored 1 finding with provenance (src/seon/db.cljs:630): transact! Malli-validates every entity before the tx reaches datahike.\"})\n"]}]
+    ";; reply AFTER the verified store\n(seon.agent/reply! {:seon.agent.message/content \"Stored 1 finding with provenance (src/seon/db.cljs:630): transact! Malli-validates every entity before the tx reaches datahike.\"})\n"]}]
  :seon.gym.scenario/predicates
  [{:seon.gym.predicate/id     :finding-row-with-full-provenance
    :seon.gym.predicate/kind   :datalog
@@ -40,5 +40,5 @@
   {:seon.gym.predicate/id     :turn-closes-done
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :terminates
-   :seon.gym.predicate/query  [:find ?t :where [?t :seon.turn/status :done]]
+   :seon.gym.predicate/query  [:find ?t :where [?t :seon.agent.turn/status :done]]
    :seon.gym.predicate/expect :non-empty}]}

@@ -5,7 +5,7 @@
    Boot stays fail-loud, just not fail-instant.
 
    `seon.store.internal.wire-node/rpc` is stubbed via root `set!` (same rationale
-   as `seon.message-test/with-conn`: dynamic `binding` is popped at the
+   as `seon.agent.message-test/with-conn`: dynamic `binding` is popped at the
    first microtask boundary inside `^:async` bodies; the root swap is
    visible across microtasks, tests run serially, restore in
    `.finally`). No real socket is touched.

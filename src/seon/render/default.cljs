@@ -88,13 +88,13 @@
                   :in $ ?me
                   :where
                   (or-join [?m ?me]
-                    [?m :seon.message/from ?me]
-                    [?m :seon.message/to ?me])
-                  [?m :seon.message/at ?at]
-                  [?m :seon.message/from ?f]
+                    [?m :seon.agent.message/from ?me]
+                    [?m :seon.agent.message/to ?me])
+                  [?m :seon.agent.message/at ?at]
+                  [?m :seon.agent.message/from ?f]
                   [(get-else $ ?f :seon.user/id "") ?uid]
                   [(get-else $ ?f :seon.agent/id "") ?aid]
-                  [?m :seon.message/content ?content]]
+                  [?m :seon.agent.message/content ?content]]
          rows   (when my-eid
                   (if db
                     (db/query {:seon.db/db db
@@ -127,14 +127,14 @@
 
 (defn ^:no-doc agent-turn-count
   "Derived turn count for an agent ENTITY: the number of
-   `:seon.session/turns` in its most-recent session (by
-   `:seon.session/at`). The stored `:seon.agent/turn-count` attr was
+   `:seon.agent.session/turns` in its most-recent session (by
+   `:seon.agent.session/at`). The stored `:seon.agent/turn-count` attr was
    retired 2026-05-22 — this mirrors how `seon.agent/prompt-section`
    derives `turn N` (count of current-session turns), without
    requiring `seon.agent` (would close the dependency cycle)."
   [ent]
-  (let [session (last (sort-by :seon.session/at (:seon.agent/sessions ent)))]
-    (count (:seon.session/turns session))))
+  (let [session (last (sort-by :seon.agent.session/at (:seon.agent/sessions ent)))]
+    (count (:seon.agent.session/turns session))))
 
 (defn ^:no-doc all-running-agents
   "Return every agent entity whose `:seon.agent/state` is `:idle` or

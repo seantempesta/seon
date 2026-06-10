@@ -253,7 +253,7 @@
                 (write-status! res 500 "text/plain; charset=utf-8" (str err))))))
 
 (defn- handle-clear! [req res]
-  ;; Retract every :seon.message AND :seon.eval entity for the agent.
+  ;; Retract every :seon.agent.message AND :seon.eval entity for the agent.
   ;; Evals contain the full source of (seon.db/transact! ...) calls
   ;; that include the assistant message text — so retracting messages
   ;; alone leaves the conversation visible via the timeline's eval
@@ -281,8 +281,8 @@
                                  :in $ ?me
                                  :where
                                  (or-join [?m ?me]
-                                   [?m :seon.message/from ?me]
-                                   [?m :seon.message/to ?me])]
+                                   [?m :seon.agent.message/from ?me]
+                                   [?m :seon.agent.message/to ?me])]
                                :seon.db/args [my-eid]})
                             (map first)))
             eval-eids (->> (db/query
@@ -389,10 +389,10 @@
                      ;; single entry point; the envelope is checked,
                      ;; never assumed.
                      (-> (agent/message!
-                           {:seon.message/from    agent/user-ref
-                            :seon.message/to      [[:seon.agent/id agent-id]]
-                            :seon.message/content text})
-                         (.then (fn [{ok? :seon.message/ok? error :seon.db/error}]
+                           {:seon.agent.message/from    agent/user-ref
+                            :seon.agent.message/to      [[:seon.agent/id agent-id]]
+                            :seon.agent.message/content text})
+                         (.then (fn [{ok? :seon.agent.message/ok? error :seon.db/error}]
                                   (if ok?
                                     (do
                                       (log/info-console! "seon.web.serve" "POST /chat"

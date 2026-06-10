@@ -1,4 +1,4 @@
-(ns seon.message-test
+(ns seon.agent.message-test
   "Unit tests for messaging codified (unit 1.5): `seon.agent/message!` +
    `reply!`, the from/to refs schema, hops derivation, the blank-content
    guard, the derived conversation (`seon.agent/messages` — from = me OR
@@ -9,8 +9,8 @@
    live agent conn.
 
    Run interactively via MCP eval:
-     (require 'seon.message-test :reload)
-     (cljs.test/run-tests 'seon.message-test)"
+     (require 'seon.agent.message-test :reload)
+     (cljs.test/run-tests 'seon.agent.message-test)"
   (:require
     [cljs.test :refer [deftest is testing async]]
     [datahike.api :as d]
@@ -69,17 +69,17 @@
                      (.finally (fn [] (set! db/*conn* orig)))))))))
 
 (defn- pulled-msgs
-  "All :seon.message rows in the conn, oldest-first, from/to pulled with
+  "All :seon.agent.message rows in the conn, oldest-first, from/to pulled with
    their id attrs."
   [conn]
-  (->> (d/q '[:find (pull ?m [* {:seon.message/from
+  (->> (d/q '[:find (pull ?m [* {:seon.agent.message/from
                                  [:db/id :seon.user/id :seon.agent/id]
-                                 :seon.message/to
+                                 :seon.agent.message/to
                                  [:db/id :seon.user/id :seon.agent/id]}])
-              :where [?m :seon.message/id _]]
+              :where [?m :seon.agent.message/id _]]
             @conn)
        (map first)
-       (sort-by #(.getTime ^js (:seon.message/at %)))
+       (sort-by #(.getTime ^js (:seon.agent.message/at %)))
        vec))
 
 ;; ---------------------------------------------------------------------------
@@ -91,13 +91,13 @@
     (-> (with-conn
           (fn [conn]
             (-> (agent/message!
-                  {:seon.message/from    agent/user-ref
-                   :seon.message/to      [:seon.agent/id a-id]
-                   :seon.message/content "hello agent A"})
+                  {:seon.agent.message/from    agent/user-ref
+                   :seon.agent.message/to      [:seon.agent/id a-id]
+                   :seon.agent.message/content "hello agent A"})
                 (.then
-                  (fn [{ok?  :seon.message/ok?
-                        mid  :seon.message/id
-                        hops :seon.message/hops
+                  (fn [{ok?  :seon.agent.message/ok?
+                        mid  :seon.agent.message/id
+                        hops :seon.agent.message/hops
                         :as  env}]
                     (is (true? ok?) "concise success envelope")
                     (is (string? mid) "response carries the message id")
@@ -106,15 +106,15 @@
                         "raw tx-report is OFF the agent surface")
                     (let [[m] (pulled-msgs conn)]
                       (testing "stored message is FULLY formed"
-                        (is (= mid (:seon.message/id m))
+                        (is (= mid (:seon.agent.message/id m))
                             "response id = the stored row's id")
-                        (is (= "user" (:seon.user/id (:seon.message/from m))))
+                        (is (= "user" (:seon.user/id (:seon.agent.message/from m))))
                         (is (= [a-id]
-                               (mapv :seon.agent/id (:seon.message/to m)))
+                               (mapv :seon.agent/id (:seon.agent.message/to m)))
                             "single ref normalized to a vector")
-                        (is (= "hello agent A" (:seon.message/content m)))
-                        (is (some? (:seon.message/at m)))
-                        (is (= 0 (:seon.message/hops m))
+                        (is (= "hello agent A" (:seon.agent.message/content m)))
+                        (is (some? (:seon.agent.message/at m)))
+                        (is (= 0 (:seon.agent.message/hops m))
                             "from = the user ⇒ hops 0"))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -126,18 +126,18 @@
             (-> (db/with-agent a-id
                   (fn []
                     (agent/message!
-                      {:seon.message/content "report for my human"})))
+                      {:seon.agent.message/content "report for my human"})))
                 (.then
-                  (fn [{ok? :seon.message/ok? hops :seon.message/hops}]
+                  (fn [{ok? :seon.agent.message/ok? hops :seon.agent.message/hops}]
                     (is (true? ok?))
                     (is (= 1 hops) "response hops = stored hops")
                     (let [[m] (pulled-msgs conn)]
-                      (is (= a-id (:seon.agent/id (:seon.message/from m)))
+                      (is (= a-id (:seon.agent/id (:seon.agent.message/from m)))
                           "from defaulted to the ALS agent")
                       (is (= ["user"]
-                             (mapv :seon.user/id (:seon.message/to m)))
+                             (mapv :seon.user/id (:seon.agent.message/to m)))
                           "to defaulted to THE user")
-                      (is (= 1 (:seon.message/hops m))
+                      (is (= 1 (:seon.agent.message/hops m))
                           "agent-originated, no waking msg ⇒ hops 0+1")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -146,8 +146,8 @@
   (async done
     (-> (with-conn
           (fn [conn]
-            (-> (agent/message! {:seon.message/from agent/user-ref
-                                 :seon.message/content "   "})
+            (-> (agent/message! {:seon.agent.message/from agent/user-ref
+                                 :seon.agent.message/content "   "})
                 (.then
                   (fn [{ok? :seon.db/ok? error :seon.db/error}]
                     (is (false? ok?) "blank content → error envelope")
@@ -161,7 +161,7 @@
   (async done
     (-> (with-conn
           (fn [conn]
-            (-> (agent/message! {:seon.message/content "who am I?"})
+            (-> (agent/message! {:seon.agent.message/content "who am I?"})
                 (.then
                   (fn [{ok? :seon.db/ok? error :seon.db/error}]
                     (is (false? ok?))
@@ -176,27 +176,27 @@
 
 (defn- seed-woken-turn!
   "Transact a waking message (from `from-map`, hops `hops`) + a session
-   with one turn whose :seon.turn/woken-by points at it. Returns a
+   with one turn whose :seon.agent.turn/woken-by points at it. Returns a
    Promise."
   [conn from-map hops]
   (d/transact!
     conn
     {:tx-data
-     [{:seon.message/id      "MSGmsgtestWAKE"
-       :seon.message/from    from-map
-       :seon.message/to      [{:seon.agent/id a-id}]
-       :seon.message/content "are you there?"
-       :seon.message/at      (js/Date.)
-       :seon.message/hops    hops}
+     [{:seon.agent.message/id      "MSGmsgtestWAKE"
+       :seon.agent.message/from    from-map
+       :seon.agent.message/to      [{:seon.agent/id a-id}]
+       :seon.agent.message/content "are you there?"
+       :seon.agent.message/at      (js/Date.)
+       :seon.agent.message/hops    hops}
       {:seon.agent/id a-id
        :seon.agent/sessions
-       [{:seon.session/id "SESmsgtest0001"
-         :seon.session/at (js/Date.)
-         :seon.session/turns
-         [{:seon.turn/id       "TRNmsgtest0001"
-           :seon.turn/at       (js/Date. (+ (js/Date.now) 5))
-           :seon.turn/status   :running
-           :seon.turn/woken-by [:seon.message/id "MSGmsgtestWAKE"]}]}]}]}))
+       [{:seon.agent.session/id "SESmsgtest0001"
+         :seon.agent.session/at (js/Date.)
+         :seon.agent.session/turns
+         [{:seon.agent.turn/id       "TRNmsgtest0001"
+           :seon.agent.turn/at       (js/Date. (+ (js/Date.now) 5))
+           :seon.agent.turn/status   :running
+           :seon.agent.turn/woken-by [:seon.agent.message/id "MSGmsgtestWAKE"]}]}]}]}))
 
 (deftest reply-targets-the-waking-sender-and-increments-hops
   (async done
@@ -207,20 +207,20 @@
                          (db/with-agent a-id
                            (fn []
                              (agent/reply!
-                               {:seon.message/content "yes — here"})))))
+                               {:seon.agent.message/content "yes — here"})))))
                 (.then
-                  (fn [{ok? :seon.message/ok? hops :seon.message/hops}]
+                  (fn [{ok? :seon.agent.message/ok? hops :seon.agent.message/hops}]
                     (is (true? ok?))
                     (is (= 1 hops) "concise response carries hops 0 + 1")
                     (let [m (->> (pulled-msgs conn)
                                  (remove #(= "MSGmsgtestWAKE"
-                                             (:seon.message/id %)))
+                                             (:seon.agent.message/id %)))
                                  first)]
                       (is (= ["user"]
-                             (mapv :seon.user/id (:seon.message/to m)))
+                             (mapv :seon.user/id (:seon.agent.message/to m)))
                           "reply target = the waking message's from")
-                      (is (= a-id (:seon.agent/id (:seon.message/from m))))
-                      (is (= 1 (:seon.message/hops m))
+                      (is (= a-id (:seon.agent/id (:seon.agent.message/from m))))
+                      (is (= 1 (:seon.agent.message/hops m))
                           "waking hops 0 + 1")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -234,19 +234,19 @@
                          (db/with-agent a-id
                            (fn []
                              (agent/reply!
-                               {:seon.message/content "checked — totals ok"})))))
+                               {:seon.agent.message/content "checked — totals ok"})))))
                 (.then
-                  (fn [{ok? :seon.message/ok? hops :seon.message/hops}]
+                  (fn [{ok? :seon.agent.message/ok? hops :seon.agent.message/hops}]
                     (is (true? ok?))
                     (is (= 3 hops) "concise response carries the climbing hops")
                     (let [m (->> (pulled-msgs conn)
                                  (remove #(= "MSGmsgtestWAKE"
-                                             (:seon.message/id %)))
+                                             (:seon.agent.message/id %)))
                                  first)]
                       (is (= [b-id]
-                             (mapv :seon.agent/id (:seon.message/to m)))
+                             (mapv :seon.agent/id (:seon.agent.message/to m)))
                           "reply goes back to agent B")
-                      (is (= 3 (:seon.message/hops m))
+                      (is (= 3 (:seon.agent.message/hops m))
                           "waking hops 2 + 1 — the chain marches to the cap")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -262,27 +262,27 @@
             (-> (d/transact!
                   conn
                   {:tx-data
-                   [{:seon.message/id "MSGmsgtestIN01"
-                     :seon.message/from {:seon.user/id "user"}
-                     :seon.message/to [{:seon.agent/id a-id}]
-                     :seon.message/content "for A"
-                     :seon.message/at (js/Date. (+ (js/Date.now) 1))
-                     :seon.message/hops 0}
-                    {:seon.message/id "MSGmsgtestOUT1"
-                     :seon.message/from {:seon.agent/id a-id}
-                     :seon.message/to [{:seon.user/id "user"}]
-                     :seon.message/content "from A"
-                     :seon.message/at (js/Date. (+ (js/Date.now) 2))
-                     :seon.message/hops 1}
-                    {:seon.message/id "MSGmsgtestB2B1"
-                     :seon.message/from {:seon.agent/id b-id}
-                     :seon.message/to [{:seon.user/id "user"}]
-                     :seon.message/content "B's own thread"
-                     :seon.message/at (js/Date. (+ (js/Date.now) 3))
-                     :seon.message/hops 1}]})
+                   [{:seon.agent.message/id "MSGmsgtestIN01"
+                     :seon.agent.message/from {:seon.user/id "user"}
+                     :seon.agent.message/to [{:seon.agent/id a-id}]
+                     :seon.agent.message/content "for A"
+                     :seon.agent.message/at (js/Date. (+ (js/Date.now) 1))
+                     :seon.agent.message/hops 0}
+                    {:seon.agent.message/id "MSGmsgtestOUT1"
+                     :seon.agent.message/from {:seon.agent/id a-id}
+                     :seon.agent.message/to [{:seon.user/id "user"}]
+                     :seon.agent.message/content "from A"
+                     :seon.agent.message/at (js/Date. (+ (js/Date.now) 2))
+                     :seon.agent.message/hops 1}
+                    {:seon.agent.message/id "MSGmsgtestB2B1"
+                     :seon.agent.message/from {:seon.agent/id b-id}
+                     :seon.agent.message/to [{:seon.user/id "user"}]
+                     :seon.agent.message/content "B's own thread"
+                     :seon.agent.message/at (js/Date. (+ (js/Date.now) 3))
+                     :seon.agent.message/hops 1}]})
                 (.then
                   (fn [_]
-                    (let [ids (mapv :seon.message/id
+                    (let [ids (mapv :seon.agent.message/id
                                     (agent/messages {:seon.agent/id a-id}))]
                       (is (= ["MSGmsgtestIN01" "MSGmsgtestOUT1"] ids)
                           "from = me OR to ∋ me — B's unrelated message excluded")))))))

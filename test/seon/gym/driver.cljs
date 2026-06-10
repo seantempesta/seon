@@ -357,8 +357,8 @@
                                      :where
                                      [?ag :seon.agent/id ?aid]
                                      [?ag :seon.agent/sessions ?s]
-                                     [?s :seon.session/turns ?t]
-                                     [?t :seon.turn/evals ?ev]
+                                     [?s :seon.agent.session/turns ?t]
+                                     [?t :seon.agent.turn/evals ?ev]
                                      [?ev :seon.eval/at ?at]
                                      [?ev :seon.eval/source ?src]]
                     :seon.db/args [agent-id]
@@ -499,10 +499,10 @@
                                       :seon.db/db  dbv}))
         rows      (db/query {:seon.db/query '[:find ?m ?f ?t ?at ?c
                                               :where
-                                              [?m :seon.message/from ?f]
-                                              [?m :seon.message/to ?t]
-                                              [?m :seon.message/at ?at]
-                                              [?m :seon.message/content ?c]]
+                                              [?m :seon.agent.message/from ?f]
+                                              [?m :seon.agent.message/to ?t]
+                                              [?m :seon.agent.message/at ?at]
+                                              [?m :seon.agent.message/content ?c]]
                              :seon.db/db dbv})
         mine      (->> rows
                        (filter (fn [[_ f t _ _]]
@@ -683,16 +683,16 @@
 (defn ^:async ^:private send-user-message!
   "Land the scenario question as a real user message (the same
    `message!` entry point POST /chat uses). Returns the message id —
-   the turn's `:seon.turn/woken-by` anchor. Fails loud on a non-ok
+   the turn's `:seon.agent.turn/woken-by` anchor. Fails loud on a non-ok
    envelope: a scenario whose question never landed must not score."
   [agent-id text]
   (let [env (await (agent/message!
-                     {:seon.message/content text
-                      :seon.message/from    agent/user-ref
-                      :seon.message/to      [[:seon.agent/id agent-id]]}))]
-    (when-not (:seon.message/ok? env)
+                     {:seon.agent.message/content text
+                      :seon.agent.message/from    agent/user-ref
+                      :seon.agent.message/to      [[:seon.agent/id agent-id]]}))]
+    (when-not (:seon.agent.message/ok? env)
       (throw (ex-info "gym: user message! failed" env)))
-    (:seon.message/id env)))
+    (:seon.agent.message/id env)))
 
 (defn ^:async ^:private drive-stub-turns!
   "Drive one `run-turn!` per scripted LLM response — woken by `mid`."
@@ -705,7 +705,7 @@
                    {:seon.agent/id            agent-id
                     :seon.agent/llm-fn        (scripted-llm text)
                     :seon.agent/compile-state compile-state
-                    :seon.turn/woken-by       [:seon.message/id mid]}))))
+                    :seon.agent.turn/woken-by       [:seon.agent.message/id mid]}))))
       (recur more))))
 
 (defn ^:async ^:private drive-loop!
@@ -720,7 +720,7 @@
                {:seon.agent/id            agent-id
                 :seon.agent/llm-fn        llm-fn
                 :seon.agent/compile-state compile-state
-                :seon.turn/woken-by       [:seon.message/id mid]})))))
+                :seon.agent.turn/woken-by       [:seon.agent.message/id mid]})))))
 
 (defn ^:async ^:private ensure-agent!
   "Lazily create the agent behind a turn DESIGNATOR (:a, :b, …) on the

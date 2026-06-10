@@ -114,7 +114,7 @@
    from the DB — they tick up as agents work."
   [db]
   {::agent-count   (count (d/q '[:find ?e :where [?e :seon.agent/id]] db))
-   ::turn-count    (count (d/q '[:find ?t :where [?t :seon.turn/at]] db))
+   ::turn-count    (count (d/q '[:find ?t :where [?t :seon.agent.turn/at]] db))
    ::fn-count      (count (d/q '[:find ?e :where [?e :seon.fn/sym]] db))
    ::finding-count (count (d/q '[:find ?e :where [?e :finding/claim]] db))
    ::datom-count   (count (d/datoms db :eavt))})
@@ -267,14 +267,14 @@
   (let [s    (or (:seon.fn/doc entity)
                  (:seon.system-prompt/content entity)
                  (:seon.conventions/content entity)
-                 (:seon.message/content entity)
+                 (:seon.agent.message/content entity)
                  "")
         line (or (first (str/split-lines s)) "")]
     (if (> (count line) 80) (str (subs line 0 80) "…") line)))
 
 ;; ============================================================
 ;; Turn grouping (unit #24 item 2) — derive each card's turn from the
-;; `:seon.session/turns` → `:seon.turn/messages|evals` component refs.
+;; `:seon.agent.session/turns` → `:seon.agent.turn/messages|evals` component refs.
 ;; ============================================================
 
 (defn- hh-mm-ss
@@ -288,15 +288,15 @@
 (defn- turn-info-by-child
   "Map of child eid (message/eval) → `{::turn-n <int> ::turn-at <Date>}`.
    Turn NUMBER is the 1-based index of the turn within its session's
-   turns sorted by `:seon.turn/at` — same derivation as the agent's
+   turns sorted by `:seon.agent.turn/at` — same derivation as the agent's
    `turn N` prompt line. Entities not hanging off any turn (sticky
    preamble, schema rows, substrate index) are absent from the map and
    keep their tx-time position in the card list."
   [db]
   (let [turn-rows  (d/q '[:find ?s ?turn ?tat
                           :where
-                          [?s :seon.session/turns ?turn]
-                          [?turn :seon.turn/at ?tat]]
+                          [?s :seon.agent.session/turns ?turn]
+                          [?turn :seon.agent.turn/at ?tat]]
                         db)
         turn->info (into {}
                          (for [[_s rows] (group-by first turn-rows)
@@ -306,8 +306,8 @@
                            [turn {::turn-n (inc i) ::turn-at at}]))
         child-rows (d/q '[:find ?turn ?c
                           :where
-                          (or [?turn :seon.turn/messages ?c]
-                              [?turn :seon.turn/evals ?c])]
+                          (or [?turn :seon.agent.turn/messages ?c]
+                              [?turn :seon.agent.turn/evals ?c])]
                         db)]
     (into {}
           (keep (fn [[turn c]]
@@ -504,7 +504,7 @@
   "Render one card-map. STATIC cards wrap in a `<details>` collapsed by
    default — summary = kind + name + one-line gist. DYNAMIC cards
    render expanded, visually weighted for chat-first reading:
-   - `seon.message` → the conversation. Full-width, no machinery rail.
+   - `seon.agent.message` → the conversation. Full-width, no machinery rail.
    - `seon.eval`    → the machinery. Indented + dimmer border, so the
      eye follows the dialogue and the evals read as the agent's 'work
      shown' underneath it.
@@ -516,7 +516,7 @@
   (let [wrap-class (case kind
                      "seon.eval"
                      "border-l-2 border-base-700/80 pl-2 py-1 mb-1 ml-3 opacity-90"
-                     "seon.message"
+                     "seon.agent.message"
                      "py-1 mb-1"
                      "border-l-2 border-amber-700/40 pl-2 py-1 mb-1")]
     (if static?

@@ -241,13 +241,13 @@
   ;; Register a substrate handler.
   (h/register!
     {:seon.handler/name :wake/on-message
-     :seon.handler/match {:seon.handler.match/attr :seon.message/to}
+     :seon.handler/match {:seon.handler.match/attr :seon.agent.message/to}
      :seon.handler/fn 'seon.handlers.wake/wake-on-message})
 
   ;; Re-register with a new fn — should upsert, not duplicate.
   (h/register!
     {:seon.handler/name :wake/on-message
-     :seon.handler/match {:seon.handler.match/attr :seon.message/to}
+     :seon.handler/match {:seon.handler.match/attr :seon.agent.message/to}
      :seon.handler/fn 'seon.handlers.wake/wake-on-message-v2})
 
   (h/query-handlers {})

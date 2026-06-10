@@ -1,7 +1,7 @@
 (ns seon.handlers.wake
   "Substrate handler: wake-on-message.
 
-   When a `:seon.message/to <agent-id>` datom lands, emit a `:wake`
+   When a `:seon.agent.message/to <agent-id>` datom lands, emit a `:wake`
    effect for each target agent. The actual wake interpreter
    (`run-agent-loop!` re-entry, ALS rebinding) lives in
    `seon.runtime` and isn't part of this v0 step — we only produce
@@ -18,11 +18,11 @@
     [seon.schema :as schema]))
 
 ;; ============================================================
-;; Schemas — `:seon.message/from` / `:seon.message/to` are owned by
-;; `seon.agent` (the `:seon.message` kind owner) since the from/to
+;; Schemas — `:seon.agent.message/from` / `:seon.agent.message/to` are owned by
+;; `seon.agent` (the `:seon.agent.message` kind owner) since the from/to
 ;; migration (unit 1.5, 2026-06-09): from is a single ref (the sender
 ;; entity — user or agent), to is a vector of refs so one message can
-;; fan out to N agents. This handler only CONSUMES `:seon.message/to`.
+;; fan out to N agents. This handler only CONSUMES `:seon.agent.message/to`.
 ;; ============================================================
 
 (defn ^:async bootstrap-schema!
@@ -32,10 +32,10 @@
   []
   (await (datahike.api/transact! seon.db/*conn*
            {:tx-data
-            [{:db/ident :seon.message/to
+            [{:db/ident :seon.agent.message/to
               :db/valueType :db.type/ref
               :db/cardinality :db.cardinality/many}
-             {:db/ident :seon.message/from
+             {:db/ident :seon.agent.message/from
               :db/valueType :db.type/ref
               :db/cardinality :db.cardinality/one}]}))
   {:seon.handlers.wake/bootstrapped? true})
@@ -69,7 +69,7 @@
 ;; ============================================================
 
 (defn wake-on-message
-  "Substrate handler. For each new `:seon.message/to <agent-ref>`
+  "Substrate handler. For each new `:seon.agent.message/to <agent-ref>`
    datom in the tx, emit a `:wake` effect descriptor naming the
    target agent. The dispatcher's effect interpreter handles the
    actual wake (setTimeout + with-agent re-entry — v0 leaves this
@@ -85,8 +85,8 @@
   {:malli/schema [:=> [:cat :seon.handler/input]
                        :seon.handler/output]}
   [{:seon.db/keys [db attr-index datoms]}]
-  (let [to-datoms (or (get attr-index :seon.message/to)
-                      (filter #(= :seon.message/to (:seon.db/a %))
+  (let [to-datoms (or (get attr-index :seon.agent.message/to)
+                      (filter #(= :seon.agent.message/to (:seon.db/a %))
                               (or datoms [])))
         added-to  (filter :seon.db/added? to-datoms)
         ;; Each datom's :v is the eid of the target agent entity.

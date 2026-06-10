@@ -42,7 +42,7 @@
     [seon.db.envelope-test]
     ;; Unit 1.5 (2026-06-09): messaging codified — message!/reply!,
     ;; from/to refs, hops, blank-content guard, derived conversation.
-    [seon.message-test]
+    [seon.agent.message-test]
     ;; seon.agent.search (2026-06-09): the exemplar npm-package wrapper —
     ;; ripgrep envelope contract, seon.agent.fs allowlist gating, truncation.
     [seon.agent.search-test]

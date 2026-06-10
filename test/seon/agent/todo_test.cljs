@@ -45,7 +45,7 @@
   "Fresh seeded conn, `set!` as the ROOT db/*conn* for `body` (conn →
    Promise), prior root restored after. Root set!, not `binding` — CLJS
    dynamic bindings pop at the first microtask boundary inside ^:async
-   bodies (verified live; see seon.message-test)."
+   bodies (verified live; see seon.agent.message-test)."
   [body]
   (-> (fresh-conn)
       (.then (fn [conn]

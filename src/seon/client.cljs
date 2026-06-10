@@ -25,9 +25,9 @@
      ;; Then message it (from defaults to the calling scope; the
      ;; HTTP /chat adapter stamps from = the user ref explicitly):
      (seon.agent/message!
-       {:seon.message/from    seon.agent/user-ref
-        :seon.message/to      [[:seon.agent/id \"<agent-id>\"]]
-        :seon.message/content \"hello\"})"
+       {:seon.agent.message/from    seon.agent/user-ref
+        :seon.agent.message/to      [[:seon.agent/id \"<agent-id>\"]]
+        :seon.agent.message/content \"hello\"})"
   (:require
     [clojure.string :as str]
     [datahike.api :as d]
@@ -87,7 +87,7 @@
     ;; Per-agent inspector UI (/agent/<id>) — installs its own
     ;; tx-listener that pushes morphs to that page's SSE stream.
     [seon.web.inspector]
-    ;; Default :seon.render/ai + :seon.render/html for :seon.message
+    ;; Default :seon.render/ai + :seon.render/html for :seon.agent.message
     ;; entities. Referenced by symbol from message tx data.
     [seon.handlers.message]
     ;; Renderers for :seon.eval / :seon.fn / :seon.schema / :seon.ns —
@@ -309,34 +309,34 @@
    :seon.ctx/fn
 
    ;; --- Session (v1.md §2.1) ---
-   ;; turns-since-inbound is DERIVED from the count of :seon.turn
-   ;; entities with :seon.turn/at > the latest inbound message's :at.
+   ;; turns-since-inbound is DERIVED from the count of :seon.agent.turn
+   ;; entities with :seon.agent.turn/at > the latest inbound message's :at.
    ;; See seon.agent/turns-since-inbound.
-   :seon.session/id
-   :seon.session/at
-   :seon.session/turns
+   :seon.agent.session/id
+   :seon.agent.session/at
+   :seon.agent.session/turns
 
    ;; --- Turn (v1.md §2.1) ---
-   :seon.turn/id
-   :seon.turn/at
-   :seon.turn/status
+   :seon.agent.turn/id
+   :seon.agent.turn/at
+   :seon.agent.turn/status
    ;; The full prompt is a logs/prompts/<agent>/<turn>.txt BLOB (three-
    ;; tier storage); the datoms are the char-count projection + the
-   ;; file pointer. :seon.turn/prompt-text RETIRED 2026-06-09 (was
+   ;; file pointer. :seon.agent.turn/prompt-text RETIRED 2026-06-09 (was
    ;; silently cap-edn-truncated at 16,406 chars — useless evidence).
-   :seon.turn/prompt-chars
-   :seon.turn/prompt-file
-   :seon.turn/woken-by
-   :seon.turn/messages
-   :seon.turn/evals
+   :seon.agent.turn/prompt-chars
+   :seon.agent.turn/prompt-file
+   :seon.agent.turn/woken-by
+   :seon.agent.turn/messages
+   :seon.agent.turn/evals
 
    ;; --- Message (from/to refs since unit 1.5 — role/agent retired) ---
-   :seon.message/id
-   :seon.message/from
-   :seon.message/to
-   :seon.message/content
-   :seon.message/at
-   :seon.message/hops
+   :seon.agent.message/id
+   :seon.agent.message/from
+   :seon.agent.message/to
+   :seon.agent.message/content
+   :seon.agent.message/at
+   :seon.agent.message/hops
 
    ;; --- User (ONE human entity, seeded at boot) ---
    :seon.user/id
@@ -354,7 +354,7 @@
    :seon.agent.todo/from
 
    ;; --- Eval ---
-   ;; Evals are component-many on :seon.turn/evals — no standalone
+   ;; Evals are component-many on :seon.agent.turn/evals — no standalone
    ;; back-refs to agent / turn-n needed (reachable via the component
    ;; chain). Deleted 2026-05-23.
    :seon.eval/id
@@ -828,7 +828,7 @@
    `:seon.conventions/id` — re-running is cheap.
 
    The user row is the ONE `:seon.user/id` entity every
-   `:seon.message/from`/`to` user-ref resolves to (identity upsert,
+   `:seon.agent.message/from`/`to` user-ref resolves to (identity upsert,
    idempotent — same pattern as agent entities; one human for now).
 
    Pure fn. Caller transacts via `db/transact!` with
@@ -1280,7 +1280,7 @@
                ";; stub LLM here — the real one needs DEEPSEEK_API_KEY\n"
                ";; reply to whoever woke this turn\n"
                "(seon.agent/reply!\n"
-               "  {:seon.message/content "
+               "  {:seon.agent.message/content "
                (pr-str (str "hello from the stub LLM — saw "
                             (count ctx) " chars of ctx"))
                "})\n\n"
@@ -1449,7 +1449,7 @@
                 _ (await (h/register!
                            {:seon.handler/name      :wake/on-message
                             :seon.handler/match     {:seon.handler.match/attr
-                                                     :seon.message/to}
+                                                     :seon.agent.message/to}
                             :seon.handler/fn        'seon.handlers.wake/wake-on-message
                             :seon.handler/on-origin #{:user :agent}}))
                 ;; Schemas-as-queryable-data: decompose every registered

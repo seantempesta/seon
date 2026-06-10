@@ -18,16 +18,16 @@
  :seon.gym.scenario/turns
  [{:seon.gym.turn/message "ping"
    :seon.gym.turn/llm-script
-   ["(seon.agent/reply! {:seon.message/content \"pong\"})\n"]}]
+   ["(seon.agent/reply! {:seon.agent.message/content \"pong\"})\n"]}]
  :seon.gym.scenario/predicates
  [{:seon.gym.predicate/id     :message-row-landed-fully-formed
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :sees-question
    :seon.gym.predicate/query  [:find ?m
                                :where
-                               [?m :seon.message/content "ping"]
-                               [?m :seon.message/hops 0]
-                               [?m :seon.message/from ?u]
+                               [?m :seon.agent.message/content "ping"]
+                               [?m :seon.agent.message/hops 0]
+                               [?m :seon.agent.message/from ?u]
                                [?u :seon.user/id "user"]]
    :seon.gym.predicate/expect :non-empty}
   {:seon.gym.predicate/id     :agent-woke-on-the-message-and-finished
@@ -35,16 +35,16 @@
    :seon.gym.predicate/axis   :sees-question
    :seon.gym.predicate/query  [:find ?t
                                :where
-                               [?m :seon.message/content "ping"]
-                               [?t :seon.turn/woken-by ?m]
-                               [?t :seon.turn/status :done]]
+                               [?m :seon.agent.message/content "ping"]
+                               [?t :seon.agent.turn/woken-by ?m]
+                               [?t :seon.agent.turn/status :done]]
    :seon.gym.predicate/expect :non-empty}
   {:seon.gym.predicate/id     :terminates-within-three-turns
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :terminates
    :seon.gym.predicate/query  [:find ?t
                                :where
-                               [?t :seon.turn/id ?tid]]
+                               [?t :seon.agent.turn/id ?tid]]
    :seon.gym.predicate/expect [:count<= 3]}
   {:seon.gym.predicate/id     :agent-ends-idle
    :seon.gym.predicate/kind   :datalog

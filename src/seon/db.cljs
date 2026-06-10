@@ -50,9 +50,9 @@
    back to `*conn*`, no stale reads.
 
    The canonical reaction is the agent's own wake-up: a listener over
-   newly-added `:seon.message/to` datoms targeting me (from ≠ me, so my
+   newly-added `:seon.agent.message/to` datoms targeting me (from ≠ me, so my
    own replies never re-trigger me; agent↔agent chains are bounded by
-   `:seon.message/hops`). `seon.trigger/register!` is the data-driven
+   `:seon.agent.message/hops`). `seon.trigger/register!` is the data-driven
    layer over this primitive — triggers persisted as DB entities."
   (:require
     [datahike.api :as d]

@@ -51,7 +51,7 @@
   (testing "seon.* substrate-style two-segment namespace"
     (is (= :schematest.gate/ok?
            (schema/register! :schematest.gate/ok? :boolean))))
-  (testing "un-namespaced entity-kind keys (the :seon.message shape)"
+  (testing "un-namespaced entity-kind keys (the :seon.agent.message shape)"
     (is (= :schematest.kind
            (schema/register! :schematest.kind
                              [:map [:schematest.workout/date
@@ -111,7 +111,7 @@
 (deftest catalog-surfaces-only-declared-kinds
   (let [kinds (set (schema/entity-schema-keys))]
     (testing "the genuine entity kinds are declared and present"
-      (doseq [k [:seon.agent :seon.eval :seon.message :seon.fn
+      (doseq [k [:seon.agent :seon.eval :seon.agent.message :seon.fn
                  :seon.ns :seon.schema :seon.agent.todo/todo :seon.test]]
         (is (contains? kinds k) (str k " is a declared entity kind"))))
     (testing "the 8 formerly-phantom request/response wrappers are gone"

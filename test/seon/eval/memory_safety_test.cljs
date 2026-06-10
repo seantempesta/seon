@@ -151,6 +151,6 @@
     (is (re-find #"9000 rows" capped))))
 
 ;; (The old `huge-prompt-is-stored-capped` test is RETIRED with the
-;; :seon.turn/prompt-text datom itself — prompts now persist whole as
+;; :seon.agent.turn/prompt-text datom itself — prompts now persist whole as
 ;; logs/prompts blobs; only the int char-count + file path are datoms,
 ;; so there is nothing to cap on that path anymore.)
