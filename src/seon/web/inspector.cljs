@@ -61,6 +61,19 @@
 ;; per-entity hiccup list.
 ;; ============================================================
 
+(defn- agent-exists?
+  "True iff `agent-id` resolves to a live `:seon.agent/id` entity in the
+   cluster store. Guards the page + SSE routes: stale tabs/bookmarks
+   carry ids from prior stores (pre-flip pods, reset clusters) — without
+   this check the page 500s on `snapshot`'s lookup-ref pull and the SSE
+   registers a connection that throws on every subsequent tx."
+  [agent-id]
+  (boolean
+    (seq (db/query {:seon.db/query '[:find ?e
+                                     :in $ ?id
+                                     :where [?e :seon.agent/id ?id]]
+                    :seon.db/args  [agent-id]}))))
+
 (defn- list-agents-data
   "Pull `[id state turn-count]` rows for every `:seon.agent/id` entity.
    Sorted by id asc."
@@ -632,13 +645,23 @@
           :method "post"
           :class (str "shrink-0 flex items-center gap-2 "
                       "border-t border-base-800 bg-base-900 px-2 py-1.5")
+          ;; Failure is SHOWN, never swallowed: a non-ok response (422
+          ;; dead agent, 500) lands its body in #seon-chat-err — before
+          ;; this, a human typing into a stale tab got NO feedback at
+          ;; all (observed live 2026-06-10: post-flip tabs pointing at
+          ;; pre-flip agent ids silently 422'd on every send).
           :onsubmit (str "event.preventDefault();"
                         "var f=this;var i=f.elements['text'];"
+                        "var e=document.getElementById('seon-chat-err');"
                         "var text=i.value;if(!text||!text.trim())return false;"
                         "fetch(f.action,{method:'POST',"
                         "headers:{'Content-Type':'application/x-www-form-urlencoded'},"
                         "body:'text='+encodeURIComponent(text)})"
-                        ".then(function(r){if(r.ok){i.value='';i.focus();}});"
+                        ".then(function(r){if(r.ok){i.value='';i.focus();"
+                        "if(e)e.textContent='';}"
+                        "else{r.text().then(function(t){"
+                        "if(e)e.textContent='\\u2717 '+(t||('HTTP '+r.status));});}})"
+                        ".catch(function(err){if(e)e.textContent='\\u2717 '+err;});"
                         "return false;")}
    [:input {:type "text"
             :name "text"
@@ -649,6 +672,9 @@
                         "px-2 py-1 text-amber-50 text-xs font-mono "
                         "placeholder:text-text-500 "
                         "focus:outline-none focus:border-amber-700")}]
+   [:span {:id "seon-chat-err"
+           :class (str "shrink max-w-[40%] truncate text-red-400 "
+                       "text-xs font-mono")}]
    [:button {:type "submit"
              :class (str "bg-amber-900/70 hover:bg-amber-800 text-amber-50 "
                          "px-3 py-1 rounded text-xs font-mono")}
@@ -938,6 +964,29 @@
       [(subs trimmed 0 slash) (subs trimmed slash)]
       [trimmed ""])))
 
+(defn- agent-not-found-page
+  "Small full page for `/agent/<id>` when `<id>` has no entity in the
+   cluster store — stale tabs and bookmarks land here after a pod
+   restart onto a different store or a `bin/seon cluster reset`."
+  [agent-id]
+  (str
+    "<!DOCTYPE html>"
+    (html/->string
+      [:html {:lang "en" :data-theme "phosphor"}
+       [:head
+        [:meta {:charset "utf-8"}]
+        [:title (str "seon · agent " agent-id " not found")]
+        [:link {:rel "stylesheet" :href "/css/output.css"}]]
+       [:body {:class "h-screen bg-base-950 text-text-50 font-mono antialiased flex items-center justify-center"}
+        [:div {:class "text-center"}
+         [:div {:class "text-amber-400 text-sm mb-2"}
+          (str "agent " agent-id " is not in this cluster store")]
+         [:div {:class "text-text-500 text-xs mb-4"}
+          "it belonged to a previous store — this tab is stale"]
+         [:a {:href "/agents"
+              :class "text-amber-500 hover:text-amber-300 text-xs underline"}
+          "← all live agents"]]]])))
+
 (defn route?
   "True iff this `path` is an inspector route. Called from
    `seon.web.serve`'s GET branch to delegate."
@@ -1128,6 +1177,20 @@
       (cond
         (str/blank? agent-id)
         (do (write-status! res 404 "text/plain; charset=utf-8" "missing agent id")
+            true)
+
+        ;; Dead-agent guard (§4 inspector SSE bug): ids from a prior
+        ;; store (pre-flip pod runs, reset clusters) 404 cleanly here.
+        ;; Ordering matters — the SSE branch must NOT register a
+        ;; connection for a nonexistent agent (every later tx would
+        ;; re-render it and throw), and the page branch must not 500
+        ;; out of `snapshot`'s lookup-ref pull.
+        (not (agent-exists? agent-id))
+        (do (if (= rest-path "/sse")
+              (write-status! res 404 "text/plain; charset=utf-8"
+                             (str "agent " agent-id " not found"))
+              (write-status! res 404 "text/html; charset=utf-8"
+                             (agent-not-found-page agent-id)))
             true)
 
         (= rest-path "/sse")

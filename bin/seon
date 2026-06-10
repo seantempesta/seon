@@ -301,6 +301,79 @@ cmd_logs() {
   tail -n "$n" "$lf"
 }
 
+cmd_cluster() {
+  # Cluster lifecycle. Today: `reset [name]` (name defaults to
+  # "default"). One command = stop pod → stop wire-server → wipe the
+  # cluster's STORE DIR ONLY → start wire-server (mints a fresh DB) →
+  # start pod (boot re-seeds the substrate idempotently).
+  #
+  # The store is the durable home of every agent/message/finding in
+  # the cluster — reset is DESTRUCTIVE and deliberate; there is no
+  # confirmation prompt because the caller already typed "reset".
+  local sub="${1:?cluster requires a subcommand (reset)}"
+  shift
+  case "$sub" in
+    reset) cluster_reset "${1:-default}" ;;
+    *) echo "unknown cluster subcommand: $sub (try: reset [name])" >&2; exit 1 ;;
+  esac
+}
+
+cluster_reset() {
+  local name="$1"
+
+  # Defensive: the name becomes a path segment under data/clusters/.
+  case "$name" in
+    */*|.|..|"") echo "✗ invalid cluster name: '$name'" >&2; exit 1 ;;
+  esac
+
+  local store_dir="data/clusters/$name/store"
+
+  # Only the "default" cluster has registered processes today
+  # (wire-server's CLI args are pinned to data/clusters/default).
+  # Other names get their store wiped but no process bounce.
+  local bounce=0
+  [ "$name" = "default" ] && bounce=1
+
+  echo "▶ cluster reset: $name"
+
+  if [ "$bounce" = 1 ]; then
+    cmd_stop pod
+    cmd_stop wire-server
+    # Stale UDS sockets from the killed server would refuse the fresh
+    # one's bind; they're recreated on start.
+    rm -f "tmp/seon-cluster-$name-req.sock" "tmp/seon-cluster-$name-pub.sock"
+  fi
+
+  if [ -d "$store_dir" ]; then
+    # The store dir ONLY — nothing else under data/clusters/<name>/.
+    rm -rf "$store_dir"
+    echo "✗ wiped $store_dir"
+  else
+    echo "○ no store at $store_dir (nothing to wipe)"
+  fi
+
+  if [ "$bounce" = 1 ]; then
+    cmd_start wire-server
+    # The pod's boot is ping-gated FAIL-LOUD against the wire socket —
+    # wait for the writer to mint the fresh DB before starting it.
+    echo "  waiting for wire-server ready (mints fresh DB) ..."
+    local waited=0
+    until grep -q '\[writer\] ready' "$(log_file wire-server)" 2>/dev/null; do
+      sleep 1
+      waited=$((waited + 1))
+      if [ "$waited" -gt 180 ]; then
+        echo "✗ wire-server not ready after ${waited}s — check bin/seon logs wire-server" >&2
+        exit 1
+      fi
+    done
+    echo "  wire-server ready (${waited}s)"
+    cmd_start pod
+    echo "▶ cluster $name reset complete — pod boot re-seeds the substrate"
+  else
+    echo "▶ cluster $name store wiped (no processes registered for it)"
+  fi
+}
+
 cmd_adopt() {
   # Use case: process started manually in a terminal (e.g. node out/client/main.js
   # in a watched tab) and the supervisor should now track it.
@@ -331,6 +404,7 @@ case "${1:-help}" in
   tail)    shift; cmd_tail "$@" ;;
   logs)    shift; cmd_logs "$@" ;;
   adopt)   shift; cmd_adopt "$@" ;;
+  cluster) shift; cmd_cluster "$@" ;;
   help|--help|-h|*)
     cat <<'EOF'
 Usage: bin/seon <command> [process] [args...]
@@ -343,6 +417,9 @@ Commands:
   tail <name>        tail -f logs/<name>.log  (Ctrl-C to exit)
   logs <name> [n]    Last n lines (default 200)
   adopt <name> <pid> Register a manually-started PID under <name>
+  cluster reset [n]  DESTRUCTIVE: stop pod+wire-server, wipe
+                     data/clusters/<n>/store (default "default"),
+                     restart both — fresh DB, substrate re-seeds
 
 Processes (registered in script):
   pod          node out/client/main.js

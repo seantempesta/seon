@@ -376,7 +376,7 @@ system; pod runs on the durable cluster store (`data/clusters/default/store`),
 JVM sole writer, cross-process reactivity proven, fail-loud no-fallback boot.
 All four processes green (`bin/seon status`). Suite 285/1065/0 exit-0.
 
-**IN FLIGHT (one agent):** the cluster-reset + UI-front-door unit — builds
+**IN FLIGHT: none — the cluster-reset + UI-front-door unit LANDED (see this commit).** Was — builds
 `bin/seon cluster reset` (and performs the user-approved one-time wipe of the
 test debris as its live proof) and diagnoses/fixes the human chat path in the
 browser (user couldn't trigger agents from the UI; evidence suggests messages
