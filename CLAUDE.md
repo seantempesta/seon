@@ -386,6 +386,17 @@ Tests run inside the running JVM via the REPL — never by spawning a separate p
 
 Results are **auto-saved** to `@user/repl-<session>`. Dig into stored keys instead of re-running. If the REPL is down, use `bin/test` as a fallback (~30s startup). See `/clojure-testing` skill for fixtures, generators, and debugging patterns.
 
+### Test cadence = token economy (user directive, 2026-06-10)
+
+**Run the full suite ONCE, after a unit of work completes — never after
+each sub-step of a refactor.** Targeted single-ns runs are for active
+debugging only. Yes, this means some breakage surfaces later than it
+could — that's the accepted trade: everything is in git and reverts are
+cheap, while per-step suite runs burn minutes and tokens on confirmation
+rather than information. The same economy applies to any expensive
+oracle (paid LLM runs, live-agent drives): once per unit at the natural
+checkpoint, not per edit.
+
 ---
 
 ## UI Development
