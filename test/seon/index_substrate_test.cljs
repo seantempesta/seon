@@ -26,7 +26,10 @@
     [cljs.test :as t :refer [deftest is async]]
     [seon.client :as client]
     [seon.db :as db]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    ;; The exemplar TEST SIBLING — required so its deftest vars are
+    ;; available as #'-literals for the test-sibling full-source guard.
+    [seon.search-test]))
 
 (defn- by-sym [tx sym]
   (first (filter #(= sym (:seon.fn/sym %)) tx)))
@@ -121,8 +124,9 @@
 
 (deftest emits-ns-rows-for-owning-nses
   ;; Each owning ns gets a :seon.ns row so the [:seon.ns/name kw] lookup-ref
-  ;; on :seon.fn/ns resolves. ns source is the minimal `(ns x)` stub today
-  ;; (replay-safe — see index-substrate! docstring).
+  ;; on :seon.fn/ns resolves. NON-exemplar substrate nses keep the minimal
+  ;; `(ns x)` stub; exemplar nses carry the real full file text (see the
+  ;; dedicated exemplar tests below).
   (let [tx      (client/index-substrate!)
         ns-rows (filter :seon.ns/name tx)
         names   (set (map :seon.ns/name ns-rows))]
@@ -131,7 +135,48 @@
     (is (contains? names :seon.test.runner) ":seon.test.runner ns row emitted")
     (is (= "(ns seon.db)"
            (:seon.ns/source (first (filter #(= :seon.db (:seon.ns/name %)) ns-rows))))
-        "ns source is the minimal (ns x) stub (replay-safe)")))
+        "non-exemplar ns source is the minimal (ns x) stub")))
+
+(deftest exemplar-ns-rows-carry-full-file-source
+  ;; Context-focus-redesign E1: the exemplar root set (seon.search, seon.fs)
+  ;; persists the REAL FULL FILE TEXT on :seon.ns/source — the :exemplars
+  ;; context section renders this attr from the graph, never re-reading
+  ;; files at render time. Safe to upgrade from the old stub because
+  ;; substrate rows are replay-skipped (Step 4).
+  (let [tx      (client/index-substrate!)
+        ns-rows (filter :seon.ns/name tx)
+        row-for (fn [k] (first (filter #(= k (:seon.ns/name %)) ns-rows)))
+        search  (:seon.ns/source (row-for :seon.search))
+        fs      (:seon.ns/source (row-for :seon.fs))]
+    (is (str/starts-with? search "(ns seon.search")
+        "seon.search source starts with the real ns form")
+    (is (> (count search) 10000)
+        "seon.search source is the full file text, not the stub")
+    (is (str/includes? search "(defn ^:async grep")
+        "the full file carries grep's real defn")
+    (is (str/includes? search "schema/register!")
+        "the full file carries the register! exemplar shapes")
+    (is (str/starts-with? fs "(ns seon.fs")
+        "seon.fs source starts with the real ns form")
+    (is (> (count fs) 10000)
+        "seon.fs source is the full file text, not the stub")))
+
+(deftest exemplar-test-sibling-carries-full-file-source
+  ;; The TEST SIBLING rule: seon.search-test is not a name-child of
+  ;; seon.search (no dot), so exemplar-ns? includes `-test` siblings
+  ;; explicitly. index-tests builds its :seon.ns row with the full test
+  ;; file text via the same ns-row mechanism.
+  (let [rows  (client/index-tests
+                [#'seon.search-test/match-found-with-path-line-text])
+        nsrow (first (filter #(= :seon.search-test (:seon.ns/name %)) rows))
+        src   (:seon.ns/source nsrow)]
+    (is (some? nsrow) "an owning :seon.ns row is emitted for the test ns")
+    (is (str/starts-with? src "(ns seon.search-test")
+        "test-sibling ns source starts with the real ns form")
+    (is (> (count src) 5000)
+        "test-sibling ns source is the full file text, not the stub")
+    (is (str/includes? src "(deftest match-found-with-path-line-text")
+        "the full test file carries real deftest bodies")))
 
 (deftest pure-index-emits-valid-refs
   ;; index-substrate! is a PURE builder: every :seon.fn/ns it emits is a
@@ -250,4 +295,41 @@
                     (done))))))
         (.catch (fn [e]
                   (is false (str "idempotency test threw: " (or (.-message e) e)))
+                  (done))))))
+
+(deftest substrate-index-tx-reasserts-drifted-ns-source
+  ;; E1's stub→full upgrade path: ns rows dedup on name AND source. A store
+  ;; whose :seon.ns/source for an exemplar ns differs from the freshly-built
+  ;; full file text (e.g. the pre-E1 `(ns x)` stub) gets exactly that ns row
+  ;; re-emitted; everything else stays a no-op.
+  (async done
+    (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
+                             (db/tx-meta-datahike-schema)))
+        (.then
+          (fn [conn]
+            (-> (client/substrate-index-tx conn)
+                (.then (fn [first-tx]
+                         (db/transact! {:seon.db/conn conn
+                                        :seon.db/tx-data first-tx})))
+                ;; Regress seon.search back to the pre-E1 stub — the shape an
+                ;; existing durable store carries before its first post-E1 boot.
+                (.then (fn [_]
+                         (db/transact!
+                           {:seon.db/conn conn
+                            :seon.db/tx-data
+                            [{:seon.ns/name   :seon.search
+                              :seon.ns/source "(ns seon.search)"}]})))
+                (.then (fn [_] (client/substrate-index-tx conn)))
+                (.then
+                  (fn [tx]
+                    (let [ns-rows (filter :seon.ns/name tx)]
+                      (is (= [:seon.search] (mapv :seon.ns/name ns-rows))
+                          "ONLY the drifted ns row re-emits (one assertion lands)")
+                      (is (> (count (:seon.ns/source (first ns-rows))) 10000)
+                          "re-emitted with the full file text, not the stub")
+                      (is (empty? (remove :seon.ns/name tx))
+                          "no fn/schema/test rows ride along"))
+                    (done))))))
+        (.catch (fn [e]
+                  (is false (str "drift test threw: " (or (.-message e) e)))
                   (done))))))

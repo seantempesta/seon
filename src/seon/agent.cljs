@@ -86,9 +86,10 @@
    map `{:seon.db/db :seon.agent/id :seon.agent/ctx-entity}`, and joins
    the non-blank string results.
 
-   Substrate defaults (`substrate-default-ctx`): eight sections —
-   `system`, `capabilities`, `schema-catalog`, `functions-catalog`,
-   `namespace-context`, `warnings`, `transcript`, `prompt`.
+   Substrate defaults (`substrate-default-ctx`): nine sections —
+   `system`, `capabilities`, `exemplars`, `schema-catalog`,
+   `functions-catalog`, `namespace-context`, `warnings`, `transcript`,
+   `prompt`.
    The agent customizes by transacting different
    `:seon.ctx` entities into `:seon.agent/ctx` (use `update-ctx!`)
    or by transacting a completely different symbol onto the agent's
@@ -1766,6 +1767,123 @@
       "")))
 
 ;; ============================================================
+;; exemplars-section — FULL source of the chosen exemplar namespaces,
+;; rendered from the program graph (context-focus-redesign 2026-06-10).
+;; The user direction: fewer mechanisms at full depth beats 102
+;; signatures at zero depth — give the agent COMPLETE, in-conventions
+;; namespaces (schemas + fns + tests) to copy the SHAPE from.
+;;
+;; The section NEVER re-reads files at render time (code-as-data): the
+;; boot indexer (`seon.client/index-substrate!` / `index-tests`) is the
+;; ONE file-reader; it persists the real full file text on
+;; `:seon.ns/source` for every ns matched by `exemplar-ns?`. This
+;; section just queries those datoms. Byte-stable for the life of a pod
+;; process (source can only change with a build change, which restarts
+;; the pod) — it belongs inside the provider-cacheable static prefix,
+;; so it renders at priority 22, between :capabilities (20) and the
+;; semi-static :schema-catalog (25).
+;; ============================================================
+
+(def exemplar-roots
+  "ROOT namespace names (strings) of the exemplar set — the namespaces
+   whose FULL file source renders into every prompt as the :exemplars
+   section. An indexed ns is included iff its name equals a root,
+   starts with `<root>.` (children ride along by default), or is the
+   TEST SIBLING (`…-test`) of an included ns — see [[exemplar-ns?]].
+
+   Why these two (context-focus-redesign §1): `seon.search` is THE
+   exemplar npm-package wrapper (wrapper doctrine, 17 register! calls,
+   map-in/map-out request/response schemas, error envelopes);
+   `seon.fs` is the agent's most-used API (config-map pattern,
+   allowlist/default-deny envelopes, sync + async fns). Their test
+   sibling (`seon.search-test`) is the model test ns. Lives in code as
+   a def (same lifecycle as the build that contains the source); a
+   DB-resident override is deliberately NOT v1 (spec open question 3)."
+  #{"seon.fs" "seon.search"})
+
+(defn- exemplar-base-name
+  "The ns name with a trailing `-test` stripped — the SUBJECT ns a test
+   sibling pairs with (`seon.search-test` → `seon.search`). Non-test
+   names pass through unchanged."
+  [ns-str]
+  (if (str/ends-with? ns-str "-test")
+    (subs ns-str 0 (- (count ns-str) 5))
+    ns-str))
+
+(defn exemplar-ns?
+  "True when `ns-name` (string, symbol, or ns-name keyword) is in the
+   exemplar set: equal to a root in [[exemplar-roots]], a name-child of
+   one (`<root>.<x>`), or the `-test` sibling of an included ns
+   (`<included>-test` / `<included>.<child>-test` — test nses are not
+   name-children, so the sibling rule is explicit). Used by the boot
+   indexer (`seon.client`) to decide which `:seon.ns/source` rows carry
+   the real full file text, and by [[exemplars-section]] to select the
+   rows it renders — ONE rule, two sites, no drift."
+  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+  [ns-name]
+  (let [s    (if (keyword? ns-name) (name ns-name) (str ns-name))
+        base (exemplar-base-name s)]
+    (boolean (some #(or (= base %) (str/starts-with? base (str % ".")))
+                   exemplar-roots))))
+
+(defn- exemplar-sort-key
+  "Deterministic render order for exemplar nses: alphabetical by the
+   base (subject) name, test sibling AFTER its subject. For the current
+   set that yields seon.fs → seon.search → seon.search-test — which is
+   also dependency order (search requires fs) and is byte-stable across
+   renders (LLM cache-prefix invariant: no timestamps, no map-order
+   nondeterminism)."
+  [ns-str]
+  [(exemplar-base-name ns-str) (if (str/ends-with? ns-str "-test") 1 0)])
+
+(def ^:private exemplars-header
+  ";; These complete namespaces are THE models for code you write: this is\n;; what a finished schema set, a specced map-in/map-out fn, an error\n;; envelope, and a test suite look like here. Copy the SHAPE — register!\n;; shapes, ::request/::response pairs, :malli/schema on every public fn,\n;; errors as values, deftest + fixture + envelope assertions.\n;; These fns already exist — call them; never re-define them.")
+
+(defn exemplars-section
+  "FULL source of the exemplar namespaces ([[exemplar-roots]] + children
+   + test siblings), each wrapped in `<exemplar ns=\"…\">…</exemplar>`,
+   queried from the `:seon.ns/source` datoms the boot indexer persisted —
+   never a render-time file read (code-as-data: the boot indexer is the
+   ONE file-reader; everything downstream reads the graph).
+
+   A matched ns whose source is missing or still the `(ns x)` stub
+   renders NOTHING for that ns and logs fail-loud — never throws, never
+   silently pads with the stub. Deterministically ordered
+   ([[exemplar-sort-key]]) so the section is byte-stable across renders."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.db/keys [db]}]
+  (let [rows   (->> (db/query
+                      {:seon.db/db db
+                       :seon.db/query
+                       '[:find ?nm ?src
+                         :where
+                         [?n :seon.ns/name ?nm]
+                         [?n :seon.ns/source ?src]]})
+                    (map (fn [[nm src]] [(name nm) src]))
+                    (filter (fn [[ns-str _]] (exemplar-ns? ns-str)))
+                    (sort-by (fn [[ns-str _]] (exemplar-sort-key ns-str))))
+        blocks (keep (fn [[ns-str src]]
+                       (if (or (str/blank? src)
+                               (= (str/trim src) (str "(ns " ns-str ")")))
+                         (do (seon-log/error-console!
+                               "seon.agent/exemplars-section"
+                               (str "exemplar ns " ns-str " has no full "
+                                    ":seon.ns/source (stub or blank) — "
+                                    "omitted from the section; the boot "
+                                    "indexer should have persisted the "
+                                    "real file text"))
+                             nil)
+                         (str "<exemplar ns=\"" ns-str "\">\n"
+                              (str/trim src)
+                              "\n</exemplar>")))
+                     rows)]
+    (if (seq blocks)
+      (str "<exemplars>\n" exemplars-header "\n\n"
+           (str/join "\n\n" blocks)
+           "\n</exemplars>")
+      "")))
+
+;; ============================================================
 ;; schema-catalog-section — the GLOBAL cross-namespace catalog of every
 ;; ENTITY kind stored in the system. Layered ON TOP of the per-ns
 ;; `namespace-context` (T5): namespace-context is the DEEP current-ns
@@ -2390,127 +2508,110 @@
            "\n</namespace-context>"))))
 
 ;; ============================================================
-;; functions-catalog-section — the GLOBAL cross-namespace catalog of
-;; every fn the agents have defined, ANYWHERE in the substrate. The
-;; sibling of `schema-catalog-section`: the catalog answers "what KINDS
-;; of data exist"; this answers "what CODE already exists". This is how
-;; a later agent (or a later turn) discovers and reuses an earlier
-;; agent's work instead of re-deriving it (user, 2026-06-09 — kill the
-;; over-orientation / re-implementation loop).
+;; functions-catalog-section — the THIN cross-namespace INDEX of the fn
+;; corpus. The sibling of `schema-catalog-section`: the catalog answers
+;; "what KINDS of data exist"; this answers "what CODE already exists".
+;; This is how a later agent (or a later turn) discovers and reuses an
+;; earlier agent's work instead of re-deriving it (user, 2026-06-09 —
+;; kill the over-orientation / re-implementation loop).
 ;;
-;; Two render depths, keyed off the agent's CURRENT ns so each agent
-;; sees its own code in full and everyone else's as a directory:
-;;   - fns IN the agent's own ns   — signature + one-line doc + full
-;;     source (the agent's working code; it should see what it wrote).
-;;   - fns in EVERY OTHER ns        — signature + one-line doc only
-;;     (enough to know it exists + how to call it; the body is one
-;;     `:seon.fn/source` pull away when actually needed).
+;; Collapsed to a thin index (context-focus-redesign §2, unit E2/E3):
+;;   - SUBSTRATE nses (compiled seon.* code) — ONE count line per ns;
+;;     bodies are one `:seon.fn/source` pull away (the header teaches
+;;     the query). Exemplar-root nses cross-reference the full source
+;;     rendered in :exemplars above.
+;;   - AGENT-AUTHORED nses — one callable line per fn for small groups,
+;;     a count line for large ones. The agent's OWN ns renders its full
+;;     source in :namespace-context (the deep current-ns view) — the
+;;     old own-ns full-source duplicate here DIED with the redesign.
 ;;
 ;; DERIVED, never hardcoded: one datalog join over the `:seon.fn` corpus
 ;; (the same entities `index-substrate!` seeds and detect-and-tee
 ;; appends). Define a fn → it appears here next render; stores nothing.
-;; Per-fn bounded by the same doc/source clips the namespace render uses,
-;; so a whole-substrate catalog stays a few KB.
 ;; ============================================================
 
-(defn- fn-catalog-sig
-  "Render a fn's signature for the catalog: one CALLABLE shape per
-   arity (via `callable-sigs`), newline-joined and aligned under the
-   block's two-space indent. Falls back to `(sym …)` when arglists are
-   blank/\"()\" (unknown arity)."
-  [sym arglists]
-  (str/join "\n  " (callable-sigs sym arglists)))
+(defn- substrate-ns-name?
+  "True when `ns-str` names a COMPILED-substrate namespace — `seon.*`
+   but not the per-agent home nses (`seon.agent.<id>`). Used to pick
+   the count-line depth in the functions catalog. A NAME rule, not the
+   var-derived `seon.client/substrate-ns-set` (require direction: client
+   requires agent) — agents author in `seon.agent.<id>` home nses and
+   their own domain nses (`kb.findings`, …), neither of which matches,
+   so agent code keeps per-fn lines."
+  [ns-str]
+  (and (str/starts-with? ns-str "seon.")
+       (not (str/starts-with? ns-str "seon.agent."))))
 
 (defn- fn-catalog-block-brief
-  "One OTHER-ns fn for the catalog: ONE LINE — the first-arity callable
-   signature only. Compact — the agent only needs to know it exists and
-   how to call it; doc + body are one `:seon.fn` pull away (the header
-   teaches the query)."
+  "One AGENT-authored fn for the catalog: ONE LINE — the first-arity
+   callable signature only. Compact — the agent only needs to know it
+   exists and how to call it; doc + body are one `:seon.fn` pull away
+   (the header teaches the query)."
   [{:keys [sym arglists]}]
   (str "  " (first (callable-sigs sym arglists))))
 
 (def ^:private fn-catalog-brief-max
-  "Other-ns groups with at most this many fns render one line per fn;
-   larger groups (the big substrate nses — seon.db, seon.agent, …)
-   collapse to a single count line. With the whole package surface
-   indexed (unit #23 fix b: ~100+ fns) per-fn lines for every ns would
-   blow the turn-0 context budget; the DB carries everything either
-   way — the catalog shows the index, the header teaches the query."
+  "Agent-authored ns groups with at most this many fns render one line
+   per fn; larger groups collapse to a single count line. The DB carries
+   everything either way — the catalog shows the index, the header
+   teaches the query."
   8)
 
 (defn- fn-catalog-summary-line
-  "Single count line for a LARGE other-ns group — the fns are all
-   `:seon.fn` rows; the catalog header teaches how to list them."
+  "Single count line for a substrate or LARGE agent-ns group — the fns
+   are all `:seon.fn` rows; the catalog header teaches how to list them,
+   so the line is JUST `ns — N fns` (the old per-line 'query :seon.fn
+   rows' boilerplate repeated ~30× and tripled the section)."
   [ns-name ns-fns]
-  (str "=== " ns-name " ===  " (count ns-fns)
-       " fns (indexed — query :seon.fn rows, see header)"))
-
-(defn- fn-catalog-block-full
-  "One OWN-ns fn for the catalog: signature + one-line doc + full source.
-   This is the agent's own code; it should see what it wrote, not a
-   one-liner. Source clipped only by a generous backstop."
-  [{:keys [sym arglists doc src priv]}]
-  (let [header (str "  " (fn-catalog-sig sym arglists)
-                    (when priv "  :private? true"))
-        doc-ln (when-let [d (first-doc-line doc)]
-                 (str "    ; " (clip d member-doc-clip)))
-        src-ln (when (and src (not (str/blank? src)))
-                 (clip (str/trim src) 1200))]
-    (str/join "\n" (remove nil? [header doc-ln src-ln]))))
+  (str "  " ns-name " — " (count ns-fns)
+       " fn" (when (not= 1 (count ns-fns)) "s")))
 
 (defn functions-catalog-section
-  "GLOBAL catalog of every fn defined in the substrate, grouped by
-   owning namespace — the sibling of `schema-catalog-section`. The
-   agent's OWN ns renders each fn with full source; every OTHER ns
-   renders signature + one-line doc only. This is how a later agent
-   discovers + reuses an earlier agent's work rather than re-writing it.
+  "THIN index of every fn defined in the substrate, grouped by owning
+   namespace — the sibling of `schema-catalog-section`. Substrate nses
+   collapse to one count line each (exemplar nses cross-reference their
+   full source in :exemplars above); agent-authored nses render one
+   callable line per fn (count line when large). The agent's own ns
+   source renders ONCE per prompt — in :namespace-context, not here.
 
    DERIVED from the `:seon.fn` corpus (one datalog join `:seon.fn` →
    `:seon.fn/ns` → `:seon.ns/name`); stores nothing. Define a fn and it
    appears here next render."
   {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  ;; current-ns returns a keyword (latest eval's :seon.eval/ns) OR a symbol
-  ;; (the home-ns fallback). `name` strips the leading colon either way so it
-  ;; compares against the (name :seon.ns/name) ns labels below.
-  (let [own-ns (name (current-ns {:seon.agent/id id}))
-        rows   (db/query
+  [{:seon.db/keys [db]}]
+  (let [rows   (db/query
                  {:seon.db/db db
                   :seon.db/query
-                  '[:find ?sym ?nm ?arglists ?doc ?src ?priv
+                  '[:find ?sym ?nm ?arglists
                     :where
                     [?f :seon.fn/sym ?sym]
                     [?f :seon.fn/ns ?ns]
                     [?ns :seon.ns/name ?nm]
-                    [(get-else $ ?f :seon.fn/arglists "") ?arglists]
-                    [(get-else $ ?f :seon.fn/doc "") ?doc]
-                    [(get-else $ ?f :seon.fn/source "") ?src]
-                    [(get-else $ ?f :seon.fn/private? false) ?priv]]})
-        fns    (map (fn [[sym nm arglists doc src priv]]
-                      {:sym sym :ns (name nm) :arglists arglists
-                       :doc doc :src src :priv priv})
+                    [(get-else $ ?f :seon.fn/arglists "") ?arglists]]})
+        fns    (map (fn [[sym nm arglists]]
+                      {:sym sym :ns (name nm) :arglists arglists})
                     rows)
         groups (->> fns (group-by :ns) (sort-by first))]
     (if (seq fns)
       (str "<functions>\n"
            ";; Every fn defined across the WHOLE substrate is a :seon.fn row,\n"
-           ";; grouped here by namespace. Your own ns shows full source; small\n"
-           ";; namespaces show one callable line per fn; large namespaces show a\n"
-           ";; count only. List any namespace's fns from the db, e.g.:\n"
+           ";; indexed here by namespace. This is a COUNT INDEX — more exists\n"
+           ";; than is shown. List any namespace's fns from the db, e.g.:\n"
            ";;   (seon.db/query {:seon.db/query\n"
            ";;     '[:find ?sym ?arglists :where [?f :seon.fn/ns ?n]\n"
            ";;       [?n :seon.ns/name :seon.db] [?f :seon.fn/sym ?sym]\n"
            ";;       [(get-else $ ?f :seon.fn/arglists \"\") ?arglists]]})\n"
            ";; and pull :seon.fn/source / :seon.fn/doc by [:seon.fn/sym \"…\"].\n"
            ";; Check here BEFORE writing a helper — it may already exist.\n\n"
-           (str/join "\n\n"
-             (for [[ns-name ns-fns] groups
-                   :let [own? (= ns-name own-ns)]]
+           (str/join "\n"
+             (for [[ns-name ns-fns] groups]
                (cond
-                 own?
-                 (str "=== " ns-name "  (your ns) ===\n"
-                      (str/join "\n\n"
-                        (map fn-catalog-block-full (sort-by :sym ns-fns))))
+                 (exemplar-ns? ns-name)
+                 (str (fn-catalog-summary-line ns-name ns-fns)
+                      " (full source above)")
+
+                 (substrate-ns-name? ns-name)
+                 (fn-catalog-summary-line ns-name ns-fns)
 
                  (<= (count ns-fns) fn-catalog-brief-max)
                  (str "=== " ns-name " ===\n"
@@ -2780,28 +2881,33 @@
 
      1. :system            — Seon identity + CLJS-in-Node + REPL contract (static)
      2. :capabilities      — core API worked examples (static)
-     3. :schema-catalog    — GLOBAL catalog of every entity KIND in the
+     3. :exemplars         — FULL source of the exemplar namespaces
+                             (seon.fs, seon.search + test sibling), queried
+                             from :seon.ns/source; byte-stable for the pod's
+                             life (static — inside the cache prefix)
+     4. :schema-catalog    — GLOBAL catalog of every entity KIND in the
                              system (cross-ns; what DATA exists), grouped by
                              namespace with attrs + instance counts;
                              semi-static (busts only on schema register)
-     4. :functions-catalog — GLOBAL catalog of every fn defined in the
-                             system (cross-ns; what CODE exists), own-ns in
-                             full + other nses as signature+doc; semi-static
-                             (busts when a fn is (re)defined)
-     5. :namespace-context — `render-namespace` of required nses + own ns
+     5. :functions-catalog — THIN per-ns count index of every fn defined in
+                             the system (cross-ns; what CODE exists);
+                             semi-static (busts when a fn is (re)defined)
+     6. :namespace-context — `render-namespace` of required nses + own ns
                              (mostly static; busts on ns edit)
-     6. :warnings          — current cross-agent problems (failed/slow evals,
+     7. :warnings          — current cross-agent problems (failed/slow evals,
                              failing tests); reactive, vanishes when fixed (dynamic)
-     7. :transcript        — messages + evals interleaved chronologically (dynamic)
-     8. :prompt            — `seon.agent.<id>=>  ; turn N` (always changing)
+     8. :transcript        — messages + evals interleaved chronologically (dynamic)
+     9. :prompt            — `seon.agent.<id>=>  ; turn N` (always changing)
 
-   The two catalogs sit between capabilities (static) and namespace-context:
-   they are the BROAD cross-ns view — schema-catalog is 'what kinds of data
-   exist', functions-catalog is 'what code already exists' (so a later agent
-   reuses an earlier one's work instead of re-deriving it). The per-ns
-   `namespace-context` that follows is the DEEP current-ns view. The catalogs
-   are semi-static (bust only on schema register / fn redefine, vs. any ns
-   edit), so they render first.
+   :exemplars sits at 22, between :capabilities (20) and :schema-catalog
+   (25): system + capabilities + exemplars are all fully byte-stable while
+   the catalogs are only semi-static (fuzzy counts move on corpus growth) —
+   static-before-semi-static maximizes the provider-cacheable prefix
+   (context-focus-redesign §2). The two catalogs are the BROAD cross-ns
+   view — schema-catalog is 'what kinds of data exist', functions-catalog
+   is 'what code already exists' (so a later agent reuses an earlier one's
+   work instead of re-deriving it). The per-ns `namespace-context` that
+   follows is the DEEP current-ns view.
 
    Smallest priority first. `root-pull` is DELETED (was the
    `[*]`-everywhere amplifier that flooded context); `current-turn`/
@@ -2811,6 +2917,8 @@
     :seon.ctx/fn   'seon.agent/system-section}
    {:seon.ctx/name :capabilities      :seon.ctx/priority 20
     :seon.ctx/fn   'seon.agent/capabilities-section}
+   {:seon.ctx/name :exemplars         :seon.ctx/priority 22
+    :seon.ctx/fn   'seon.agent/exemplars-section}
    {:seon.ctx/name :schema-catalog    :seon.ctx/priority 25
     :seon.ctx/fn   'seon.agent/schema-catalog-section}
    {:seon.ctx/name :functions-catalog :seon.ctx/priority 27
@@ -2825,15 +2933,18 @@
     :seon.ctx/fn   'seon.agent/prompt-section}])
 
 (defn ^:async reset-ctx!
-  "Restore the substrate-default ctx layout for `agent-id`. Retracts
-   :seon.agent/ctx (cascade-retracts the existing :seon.ctx entities
-   via component semantics), then transacts the six defaults."
+  "Restore the substrate-default ctx layout for `agent-id` by RETRACTING
+   the stored :seon.agent/ctx override (cascade-retracts the existing
+   :seon.ctx entities via component semantics). With no stored ctx,
+   `assemble-context` falls back to the CODE default
+   (`substrate-default-ctx`) — so the agent tracks every future layout
+   change automatically instead of freezing a stored copy of today's
+   default (the pre-2026-06-10 behavior, which left prior agents on
+   stale layouts whenever the default evolved)."
   [agent-id]
   (await (db/transact!
            {:seon.db/tx-data
-            [[:db/retract [:seon.agent/id agent-id] :seon.agent/ctx]
-             {:seon.agent/id agent-id
-              :seon.agent/ctx (substrate-default-ctx)}]})))
+            [[:db/retract [:seon.agent/id agent-id] :seon.agent/ctx]]})))
 
 (defn ^:async update-ctx!
   "Apply `f` to the current ctx vector for `agent-id`; transact the

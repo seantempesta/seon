@@ -930,6 +930,49 @@
                                        (recur (inc i) d in-str? false started?)))
             :else                  (recur (inc i) depth in-str? false started?)))))))
 
+(defn- ns-file-path
+  "Classpath-relative source file for a namespace name string —
+   `seon.search` → `seon/search.cljs`, `seon.search-test` →
+   `seon/search_test.cljs` (munged like the compiler: dots → dirs,
+   dashes → underscores). `read-src-file` probes the source roots
+   (src, test, guest-cljs/src), so test siblings resolve too."
+  [ns-sym-str]
+  (str (-> ns-sym-str
+           (str/replace "." "/")
+           (str/replace "-" "_"))
+       ".cljs"))
+
+(defn- ns-row
+  "Build the `:seon.ns` row for an owning ns name string.
+
+   EXEMPLAR nses (`seon.agent/exemplar-ns?` — the context-focus-redesign
+   root set + children + test siblings) carry the REAL FULL FILE TEXT as
+   `:seon.ns/source`: the boot indexer is the ONE file-reader; the
+   `:exemplars` context section (and anything else downstream) renders
+   that attr from the graph, never re-reading files. Safe because
+   substrate rows are replay-skipped (`query-program-graph-entries`
+   excludes any entry whose owning ns is in `(substrate-ns-set)` —
+   Step 4, landed). An exemplar whose file can't be read falls back to
+   the stub and logs fail-loud — the corpus stays honest, the section
+   omits it.
+
+   All OTHER substrate nses keep the minimal `(ns x)` stub — full text
+   would be dead weight (nothing renders it) and the stub keeps the
+   no-replay invariant trivially cheap to reason about."
+  [ns-sym-str]
+  (let [stub (str "(ns " ns-sym-str ")")
+        src  (if (agent/exemplar-ns? ns-sym-str)
+               (or (read-src-file (ns-file-path ns-sym-str))
+                   (do (log/error-console!
+                         "seon.client/ns-row"
+                         (str "exemplar ns " ns-sym-str " source file "
+                              (pr-str (ns-file-path ns-sym-str))
+                              " unreadable — falling back to the (ns x) stub"))
+                       stub))
+               stub)]
+    {:seon.ns/name   (keyword ns-sym-str)
+     :seon.ns/source src}))
+
 (defn- arglists-from-source
   "Parse the pr-str-style arglists string (e.g. \"([{::keys [a b]}])\") from a
    `(defn …)` source text. Reader-free: an arg-vector is a `[..]` sitting
@@ -1035,14 +1078,13 @@
    introspection over `substrate-vars` (file-read at var-meta `:file`/`:line`
    + var meta for spec/doc). Replaces the old curated `seed-core-fns!`.
 
-   Per owning ns, emits a `:seon.ns/name` + `:seon.ns/source` row so the
-   `[:seon.ns/name <kw>]` lookup-ref on `:seon.fn/ns` resolves. The ns source
-   is a MINIMAL `(ns x)` stub, NOT the file's real ns form: the replay path
-   (replay-program-graph!) still re-evals `:seon.ns/source` today, and a bare
-   `(ns seon.db)` is safe + cheap to replay whereas the real `(ns seon.db
-   (:require …))` form would attempt requires in bootstrap CLJS. (Step 4 of the
-   PRD makes substrate rows no-replay; when that lands this can carry real ns
-   source.)
+   Per owning ns, emits a `:seon.ns/name` + `:seon.ns/source` row (via
+   [[ns-row]]) so the `[:seon.ns/name <kw>]` lookup-ref on `:seon.fn/ns`
+   resolves. EXEMPLAR nses (context-focus-redesign root set) carry the
+   REAL FULL FILE TEXT; all other substrate nses keep the minimal
+   `(ns x)` stub. Both are replay-safe: substrate rows are skipped on
+   replay (Step 4 — `query-program-graph-entries` excludes any entry
+   whose owning ns is in `(substrate-ns-set)`).
 
    Always emits the FULL substrate row set — a PURE function of `substrate-vars`
    + the on-disk source, independent of any conn. Re-seeding the same rows on a
@@ -1064,9 +1106,7 @@
   (let [now     (js/Date.)
         fn-rows (keep #(var->fn-row % now) substrate-vars)
         ns-syms (into #{} (map #(first (str/split (:seon.fn/sym %) #"/" 2)) fn-rows))
-        ns-rows (for [ns-sym ns-syms]
-                  {:seon.ns/name   (keyword ns-sym)
-                   :seon.ns/source (str "(ns " ns-sym ")")})]
+        ns-rows (map ns-row (sort ns-syms))]
     (vec (concat ns-rows fn-rows))))
 
 (def ^:private schema-source-cap
@@ -1139,9 +1179,7 @@
    (let [now     (js/Date.)
          rows    (keep #(var->test-row % now) vars)
          ns-syms (into #{} (map #(first (str/split (:seon.test/sym %) #"/" 2)) rows))
-         ns-rows (for [ns-sym ns-syms]
-                   {:seon.ns/name   (keyword ns-sym)
-                    :seon.ns/source (str "(ns " ns-sym ")")})]
+         ns-rows (map ns-row (sort ns-syms))]
      (vec (concat ns-rows rows)))))
 
 (defn ^:async substrate-index-tx
@@ -1164,12 +1202,25 @@
                           (index-tests))
         db        (await (d/db conn))
         have-fns  (into #{} (map first) (d/q '[:find ?sym :where [?f :seon.fn/sym ?sym]] db))
-        have-nses (into #{} (map first) (d/q '[:find ?nm :where [?n :seon.ns/name ?nm]] db))
+        ;; ns rows dedup on name AND source: a `:seon.ns` row re-emits when
+        ;; its stored `:seon.ns/source` differs from the freshly-built one —
+        ;; this is what upgrades a pre-existing store's `(ns x)` stub to the
+        ;; real full file text for EXEMPLAR nses (context-focus-redesign E1)
+        ;; and keeps the stored source tracking the build thereafter.
+        ;; Identity upsert on `:seon.ns/name` means the re-emit lands as one
+        ;; `:seon.ns/source` re-assertion, never a duplicate entity.
+        have-nses (into {} (d/q '[:find ?nm ?src
+                                  :where
+                                  [?n :seon.ns/name ?nm]
+                                  [?n :seon.ns/source ?src]]
+                                db))
         have-schs (into #{} (map first) (d/q '[:find ?k :where [?s :seon.schema/key ?k]] db))
         have-tsts (into #{} (map first) (d/q '[:find ?t :where [?e :seon.test/sym ?t]] db))]
     (vec (remove (fn [row]
                    (or (contains? have-fns  (:seon.fn/sym row))
-                       (contains? have-nses (:seon.ns/name row))
+                       (and (contains? row :seon.ns/name)
+                            (= (get have-nses (:seon.ns/name row))
+                               (:seon.ns/source row)))
                        (contains? have-schs (:seon.schema/key row))
                        (contains? have-tsts (:seon.test/sym row))))
                  all))))

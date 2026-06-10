@@ -43,7 +43,11 @@
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.inspect :as inspect]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    ;; The exemplar TEST SIBLING — required so the fixture can seed its
+    ;; :seon.ns row (full file text) via client/index-tests, the same
+    ;; mechanism the pod's preload-driven boot uses.
+    [seon.search-test]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fixture — a fresh conn seeded with one agent + session + turns. Returns a
@@ -130,7 +134,14 @@
         ;; the whole-registry :seon.schema rows (unit #23 fix b) — drives
         ;; the schema-catalog's per-ns summary block. Deduped by key
         ;; against the entity rows above via identity upsert.
-        (client/index-schemas)))))
+        (client/index-schemas)
+        ;; the exemplar TEST SIBLING's :seon.ns + :seon.test rows — the
+        ;; preload-populated default roster is empty in the :node-test
+        ;; build, so seed one search-test deftest explicitly (the SAME
+        ;; builder the pod boot uses). Drives the :exemplars section's
+        ;; test-sibling block.
+        (client/index-tests
+          [#'seon.search-test/match-found-with-path-line-text])))))
 
 (defn- with-seeded-conn
   "Open a fresh conn, seed it (optionally with `extra-evals` on turn 2),
@@ -176,13 +187,14 @@
                   (agent/assemble-context {:seon.db/db db :seon.agent/id agent-id})]
               (is (pos? (count text))
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
-              (is (= [:system :capabilities :schema-catalog :functions-catalog
-                      :namespace-context :warnings :transcript :prompt]
+              (is (= [:system :capabilities :exemplars :schema-catalog
+                      :functions-catalog :namespace-context :warnings
+                      :transcript :prompt]
                      sections)
                   "the substrate-default section names, in order
-                   (static→dynamic): system, capabilities, schema-catalog,
-                   functions-catalog, namespace-context, warnings, transcript,
-                   prompt"))))
+                   (static→dynamic): system, capabilities, exemplars,
+                   schema-catalog, functions-catalog, namespace-context,
+                   warnings, transcript, prompt"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -316,9 +328,10 @@
   (let [names (mapv :seon.ctx/name (agent/substrate-default-ctx))]
     (is (some #{:capabilities} names)
         "substrate-default-ctx contains the :capabilities section")
-    (is (= [:system :capabilities]
-           (vec (take 2 names)))
-        ":capabilities renders right after :system")
+    (is (= [:system :capabilities :exemplars]
+           (vec (take 3 names)))
+        ":capabilities renders right after :system, :exemplars right after
+         (both fully byte-stable — the cache prefix)")
     (is (not (contains? (set names) :root-pull))
         "no :root-pull section in the default layout — the amplifier is gone")))
 
@@ -416,9 +429,9 @@
   (let [names (mapv :seon.ctx/name (agent/substrate-default-ctx))]
     (is (some #{:schema-catalog} names)
         "substrate-default-ctx contains the :schema-catalog section")
-    (is (= [:system :capabilities :schema-catalog :functions-catalog]
-           (vec (take 4 names)))
-        ":schema-catalog and :functions-catalog sit between :capabilities
+    (is (= [:system :capabilities :exemplars :schema-catalog :functions-catalog]
+           (vec (take 5 names)))
+        ":schema-catalog and :functions-catalog sit between :exemplars
          (static) and :namespace-context (the deep per-ns view)")))
 
 (deftest schema-catalog-lists-all-entity-kinds
@@ -557,13 +570,17 @@
   (let [names (mapv :seon.ctx/name (agent/substrate-default-ctx))]
     (is (some #{:functions-catalog} names)
         "substrate-default-ctx contains the :functions-catalog section")
-    (is (= [:system :capabilities :schema-catalog :functions-catalog
-            :namespace-context]
-           (vec (take 5 names)))
+    (is (= [:system :capabilities :exemplars :schema-catalog
+            :functions-catalog :namespace-context]
+           (vec (take 6 names)))
         ":functions-catalog sits right after :schema-catalog and before
          :namespace-context")))
 
-(deftest functions-catalog-own-ns-full-other-ns-brief
+(deftest functions-catalog-is-a-thin-count-index
+  ;; Context-focus-redesign E2/E3: the catalog collapsed to a thin per-ns
+  ;; index. Substrate nses are ONE count line each; exemplar nses
+  ;; cross-reference the full source in :exemplars; the own-ns
+  ;; full-source duplicate DIED (own ns renders in :namespace-context).
   (async done
     (-> (with-seeded-conn
           (fn [conn]
@@ -577,29 +594,36 @@
               (is (str/includes? txt "<functions>") "wrapper marker present")
               (is (str/includes? full "<functions>")
                   "section reaches the assembled context")
-              ;; current-ns derives to :seon.agent.ctxtest (the latest ok eval);
-              ;; the seeded greet fn lives there, so it is the agent's OWN ns.
-              (is (str/includes? txt "=== seon.agent.ctxtest  (your ns) ===")
-                  "the agent's own ns is flagged (your ns)")
-              ;; OWN-ns fn renders WITH full source.
-              (is (str/includes? txt "(defn greet [] :hi)")
-                  "own-ns fn (greet) shows its full source body")
-              ;; OTHER-ns rendering scales with the widened corpus (unit #23
-              ;; fix b): SMALL nses render one callable line per fn; LARGE
-              ;; nses (seon.db with the whole package indexed) collapse to a
-              ;; count line — the DB carries everything, context shows the
-              ;; index.
-              (is (str/includes? txt "=== seon.db ===")
-                  "other namespaces (seon.db) are listed")
-              (is (re-find #"=== seon\.db ===  \d+ fns" txt)
-                  "large other-ns group collapses to a count line")
-              (is (str/includes? txt "(seon.schema/register! k v)")
-                  "small other-ns group renders one callable line per fn")
-              ;; transact!'s real source is long + multiline; the catalog
-              ;; must NOT inline another ns's full source.
-              (let [db-section (subs txt (str/index-of txt "=== seon.db ==="))]
-                (is (not (str/includes? db-section "(defn transact!"))
-                    "other-ns fn does NOT inline its full (defn …) source")))))
+              ;; SUBSTRATE nses collapse to count lines — every one of them.
+              (is (re-find #"seon\.db — \d+ fns" txt)
+                  "seon.db collapses to a count line")
+              (is (re-find #"seon\.schema — \d+ fns" txt)
+                  "small substrate nses (seon.schema) ALSO collapse to a count
+                   line — no per-fn signature lines for compiled substrate")
+              (is (not (str/includes? txt "(seon.schema/register! k v)"))
+                  "no per-fn signature lines for substrate nses")
+              ;; EXEMPLAR nses cross-reference the full source above.
+              (is (re-find #"seon\.search — \d+ fns? \(full source above\)" txt)
+                  "exemplar ns count line carries the full-source cross-reference")
+              (is (re-find #"seon\.fs — \d+ fns? \(full source above\)" txt)
+                  "seon.fs cross-references too")
+              ;; The OWN-ns full-source special case is DEAD.
+              (is (not (str/includes? txt "(your ns)"))
+                  "no own-ns special case in the catalog")
+              (is (not (str/includes? txt "(defn greet [] :hi)"))
+                  "own-ns source does NOT render here (it renders ONCE, in
+                   :namespace-context)")
+              ;; AGENT-authored ns (seon.agent.ctxtest) keeps per-fn callable
+              ;; lines (greet has no stored arglists → the `(sym …)` fallback).
+              (is (str/includes? txt "(seon.agent.ctxtest/greet …)")
+                  "agent-authored ns renders one callable line per fn")
+              ;; No other ns's full source leaks in.
+              (is (not (str/includes? txt "(defn transact!"))
+                  "no substrate fn inlines its full (defn …) source")
+              ;; THE budget: the whole section is a thin index (spec E3:
+              ;; turn-0 <functions> ≤ 2k chars).
+              (is (< (count txt) 2000)
+                  (str "functions-catalog is thin — got " (count txt))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -610,36 +634,139 @@
             (is (not (str/includes?
                        (agent/functions-catalog-section
                          {:seon.db/db @conn :seon.agent/id agent-id})
-                       "zzcat/helper"))
+                       "zzcat.domain/helper"))
                 "throwaway fn absent before it's transacted")
-            ;; Transact a :seon.ns + :seon.fn in a brand-new namespace — the
-            ;; same shape detect-and-tee writes. (Pass :seon.db/conn explicitly:
+            ;; Transact a :seon.ns + :seon.fn in a brand-new AGENT-authored
+            ;; namespace (non-seon.*, the taught domain-ns shape) — the
+            ;; same rows detect-and-tee writes. (Pass :seon.db/conn explicitly:
             ;; the db/*conn* binding does not survive .then — see fixture.)
             (-> (db/transact!
                   {:seon.db/conn conn
                    :seon.db/tx-data
-                   [{:seon.ns/name :seon.zzcat
-                     :seon.ns/source "(ns seon.zzcat)"}
-                    {:seon.fn/sym      "seon.zzcat/helper"
-                     :seon.fn/ns       [:seon.ns/name :seon.zzcat]
+                   [{:seon.ns/name :zzcat.domain
+                     :seon.ns/source "(ns zzcat.domain)"}
+                    {:seon.fn/sym      "zzcat.domain/helper"
+                     :seon.fn/ns       [:seon.ns/name :zzcat.domain]
                      :seon.fn/arglists "([x])"
                      :seon.fn/doc      "A throwaway helper for the derivation test."
                      :seon.fn/source   "(defn helper [x] (inc x))"}]})
                 (.then (fn [_]
                          ;; rebind: the fixture's binding does not survive
-                         ;; the .then boundary, and functions-catalog-section
-                         ;; reaches @db/*conn* for cross-ns fn rows.
+                         ;; the .then boundary.
                          (let [after (binding [db/*conn* conn]
                                        (agent/functions-catalog-section
                                          {:seon.db/db @conn :seon.agent/id agent-id}))]
-                           (is (str/includes? after "=== seon.zzcat ===")
+                           (is (str/includes? after "=== zzcat.domain ===")
                                "newly-defined fn's ns APPEARS — derived, not hardcoded")
                            ;; CALLABLE per-arity shape (2026-06-09 fix):
                            ;; arglists "([x])" renders as `(sym x)`, not the
                            ;; old bracket-wrapped `(sym [x])`.
-                           (is (str/includes? after "(seon.zzcat/helper x)")
+                           (is (str/includes? after "(zzcat.domain/helper x)")
                                "the new fn's signature renders as a CALLABLE shape
-                                (small other-ns group → one line per fn)")))))))
+                                (agent-authored ns → one line per fn)")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; (l) exemplars-section — FULL exemplar source from the program graph
+;;     (context-focus-redesign 2026-06-10, units E1+E2). Guards: full
+;;     seon.search/seon.fs/seon.search-test source renders, in deterministic
+;;     dependency order; byte-stable across renders (cache-prefix invariant);
+;;     a stubbed root renders nothing (fail-loud, no stub padding); the whole
+;;     turn-0 context respects the spec's budget ceiling.
+;; ---------------------------------------------------------------------------
+
+(deftest exemplars-section-renders-full-source-in-order
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db    @conn
+                  input {:seon.db/db db :seon.agent/id agent-id}
+                  txt   (agent/exemplars-section input)
+                  full  (:seon.render/text
+                          (agent/assemble-context
+                            {:seon.db/db db :seon.agent/id agent-id}))]
+              (is (str/includes? txt "<exemplars>") "wrapper marker present")
+              (is (str/includes? full "<exemplar ns=\"seon.search\">")
+                  "the exemplar section reaches the assembled context")
+              ;; FULL source, not reconstituted/clipped blocks.
+              (is (str/includes? txt "(ns seon.search")
+                  "seon.search's real ns form renders")
+              (is (str/includes? txt "(defn ^:async grep")
+                  "grep's full defn body renders (not a 240-char clip)")
+              (is (str/includes? txt "(ns seon.fs")
+                  "seon.fs renders too")
+              (is (str/includes? txt "(deftest match-found-with-path-line-text")
+                  "the test sibling renders at least one full deftest body")
+              ;; Deterministic dependency order: fs → search → search-test.
+              (let [i-fs     (str/index-of txt "<exemplar ns=\"seon.fs\">")
+                    i-search (str/index-of txt "<exemplar ns=\"seon.search\">")
+                    i-test   (str/index-of txt "<exemplar ns=\"seon.search-test\">")]
+                (is (and i-fs i-search i-test) "all three exemplar blocks present")
+                (is (< i-fs i-search i-test)
+                    "render order is fs → search → search-test (deps first,
+                     tests after their subject)")))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest exemplars-static-prefix-is-byte-stable
+  ;; The cache-prefix invariant: system + capabilities + exemplars must be
+  ;; BYTE-IDENTICAL across consecutive renders — no timestamps, no
+  ;; map-order nondeterminism in the new section.
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db     @conn
+                  input  {:seon.db/db db :seon.agent/id agent-id}
+                  prefix (fn []
+                           (str (agent/system-section input)
+                                (agent/capabilities-section input)
+                                (agent/exemplars-section input)))
+                  a      (prefix)
+                  b      (prefix)]
+              (is (pos? (count a)) "static prefix non-empty")
+              (is (= a b) "two consecutive static-prefix renders are
+                           byte-identical"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest exemplars-stub-root-renders-nothing-for-that-ns
+  ;; A root whose :seon.ns/source is still the `(ns x)` stub (e.g. an
+  ;; un-upgraded store) renders NOTHING for that ns — never the stub.
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data
+                   [{:seon.ns/name   :seon.search
+                     :seon.ns/source "(ns seon.search)"}]})
+                (.then (fn [_]
+                         (let [txt (agent/exemplars-section
+                                     {:seon.db/db @conn :seon.agent/id agent-id})]
+                           (is (not (str/includes? txt "<exemplar ns=\"seon.search\">"))
+                               "stubbed root omitted — no stub padding")
+                           (is (str/includes? txt "<exemplar ns=\"seon.fs\">")
+                               "the other exemplars still render")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest turn0-context-respects-the-budget-ceiling
+  ;; Spec E2 pass predicate: turn-0 total ≤ 65k chars with the FULL
+  ;; exemplar set in place (measured design point ≈ 59k on the live pod;
+  ;; this fixture's transcript/ns sections are smaller).
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         (agent/assemble-context
+                           {:seon.db/db db :seon.agent/id agent-id}))]
+              (is (str/includes? text "<exemplars>")
+                  "budget measured WITH the exemplar payload present")
+              (is (<= (count text) 65000)
+                  (str "turn-0 context within the 65k budget — got "
+                       (count text))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -659,11 +786,15 @@
                     full  (agent/render-prompt agent-id)
                     ;; Comfortable ceiling: a handful of capped rows +
                     ;; the other sections. Far below the 5 MB blob.
-                    ceil  50000]
+                    ceil  50000
+                    ;; The full prompt additionally carries the ~45k
+                    ;; byte-stable exemplar payload (context-focus-redesign
+                    ;; E2) — a deliberate static cost, not result blow-up.
+                    full-ceil (+ ceil 50000)]
                 (is (< (count ts) ceil)
                     (str "transcript bounded despite " big-n
                          "-char result — got " (count ts)))
-                (is (< (count full) ceil)
+                (is (< (count full) full-ceil)
                     (str "render-prompt bounded — got " (count full)))
                 ;; T7: the size clip now carries a GUIDING message in
                 ;; place of a bare marker — a clip is feedback, not a
