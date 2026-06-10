@@ -116,6 +116,23 @@ code; git history preserves the parser utilities.
    `seon.schema` face, `seon.warn`, then `agent.cljs` →
    `seon.agent` + `seon.agent.internal` (after V3-C removed its context
    third). `seon.test.runner` → `seon.agent.test` face last.
+   - **First slice DONE 2026-06-10 night: `seon.agent.message`** —
+     `:seon.agent.message/*` keywords now live in their real code ns.
+     Moved (copy-then-delete): the message attr + entity-kind schemas,
+     the `:seon.user` block + `user-ref`, the `::message-request`/
+     `::message-response` envelopes (keys re-homed to
+     `:seon.agent.message/message-*`), `user-entity?`, `waking-hops`,
+     `message!`, `reply!`. The WAKE side (trigger + hop-cap refusal)
+     stays in `seon.agent` (it drives `run-agentic-loop!` — moving it
+     would cycle). Face RE-EXPORTS `message!`/`reply!`/`user-ref`
+     (ctx-alias pattern) — the agent-taught surface
+     (`seon.agent/reply!`) and every caller (serve /chat, gym driver,
+     message_test) are unchanged. Suite 326/1365/0; live chat
+     roundtrip + restart/resume proven. Stale corpus rows
+     (`seon.agent/message!`+`reply!` `:seon.fn` rows, the old
+     `:seon.agent/message-request` `:seon.schema` row) wait for the
+     planned end-of-batches cluster reset — `index-substrate!`
+     upserts, never retracts.
 - Gym trio re-run after #16 and after the agent.cljs split (the two
   renders-affecting steps); not per batch.
 
