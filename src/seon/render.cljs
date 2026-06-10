@@ -182,6 +182,12 @@
 (schema/register! :seon.sticky/order    :int)
 (schema/register! :seon.sticky/id       [:string {:seon.db/identity true}])
 
+(schema/register! :seon.sticky
+  [:map {:seon.db/entity true}
+   [:seon.sticky/id       :seon.sticky/id]
+   [:seon.sticky/position {:optional true} :seon.sticky/position]
+   [:seon.sticky/order    {:optional true} :seon.sticky/order]])
+
 (schema/register! :seon.agent/window-size [:int {:min 1 :max 512}])
 
 (def ^:private default-window-size 64)

@@ -32,6 +32,14 @@
 ;; The provenance test's agent-authored seon.* DATA domain (the live
 ;; store's shape — same registration the S-21 gym scenario seeds).
 (schema/register! :seon.workout/date :string)
+;; The unmarked-entity-kinds fixture: an identity attr plus a
+;; registered-but-UNMARKED :map schema carrying it (the shape the old
+;; register!-time warn could not tell apart from an envelope). The
+;; marked :warntest.ent kind is registered INSIDE the test, after rows
+;; exist, to prove the warning self-heals.
+(schema/register! :warntest.ent/id [:string {:seon.db/identity true}])
+(schema/register! :warntest.ent/lookup
+  [:map [:warntest.ent/id :warntest.ent/id]])
 
 ;; ---------------------------------------------------------------------------
 ;; Fixture — fresh conn + a corpus of defective and clean rows.
@@ -348,6 +356,64 @@
                       "substrate-seeded seon.* attr stays hidden")
                   (is (not (contains? attrs :seon.schema/key))
                       "attrs with no :seon.schema row at all stay hidden")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest unmarked-entity-kinds-fires-on-stored-rows-and-heals-when-marked
+  ;; The entity-marker nudge, REWORKED behavioral (user ruling
+  ;; 2026-06-10): the old register!-time warn was a false-positive
+  ;; generator by construction. This check fires only where rows EXIST
+  ;; under an identity attr no marked schema declares — and vanishes
+  ;; the moment the kind is marked (registry change, same db value).
+  (async done
+    (-> (client/open-agent-conn!)
+        (.then (fn [conn]
+          (binding [db/*conn* conn]
+            (-> (db/transact! {:seon.db/conn conn
+                               :seon.db/tx-data [{:warntest.ent/id "row-1"}]})
+                (.then (fn [env]
+                  (is (:seon.db/ok? env) "the row lands")
+                  (let [r     (warn/check-unmarked-entity-kinds
+                                {:seon.db/db @conn})
+                        entry (->> (:seon.warn/affected r)
+                                   (filter #(= ":warntest.ent/id"
+                                               (:seon.warn/sym %)))
+                                   first)]
+                    (is (= :unmarked-entity-kinds (:seon.warn/kind r)))
+                    (is (some? entry)
+                        "rows under an undeclared id-attr → fires, naming the attr")
+                    (is (str/includes? (str (:seon.warn/where entry))
+                                       ":warntest.ent/lookup")
+                        "names the registered-but-unmarked map schema carrying it")
+                    (is (str/includes? (:seon.warn/example r)
+                                       "{:seon.db/entity true}")
+                        "the fix example shows the marker")
+                    ;; mark the kind → the warning self-heals
+                    (schema/register! :warntest.ent
+                      [:map {:seon.db/entity true}
+                       [:warntest.ent/id :warntest.ent/id]])
+                    (let [r2 (warn/check-unmarked-entity-kinds
+                               {:seon.db/db @conn})]
+                      (is (not (contains? (affected-syms r2)
+                                          ":warntest.ent/id"))
+                          "marked → vanishes, same db value")))))
+                (.then (fn [_]
+                  ;; un-register the marked kind so the registry is
+                  ;; clean for the rest of the suite
+                  (swap! @#'schema/*schemas dissoc :warntest.ent)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest unmarked-entity-kinds-clean-when-no-rows-exist
+  (async done
+    (-> (client/open-agent-conn!)
+        (.then (fn [conn]
+          ;; the FULL bootstrap schema is installed (identity attrs
+          ;; everywhere) but NO data rows — the check must stay silent:
+          ;; an id-carrying schema without rows is not a defect.
+          (let [r (warn/check-unmarked-entity-kinds {:seon.db/db @conn})]
+            (is (= [] (:seon.warn/affected r))
+                "no rows → no warning, whatever schemas are installed"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

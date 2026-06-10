@@ -24,9 +24,9 @@
    CURRENT ns so an agent isn't confused by other namespaces' defects.
    Omit it for the whole-substrate overview. The RUNTIME checks
    (failed-evals / slow-evals / failing-tests / bad-ref) and the
-   DOMAIN-attr check (parallel-attr — keyword namespaces are data
-   domains, not code nses) stay global — cross-agent visibility is
-   their point.
+   SCHEMA/DOMAIN checks (parallel-attr, unmarked-entity-kinds —
+   keyword namespaces are data domains, not code nses) stay global —
+   cross-agent visibility is their point.
 
    Everything here is derived from the DB at render time — no warning
    datoms are stored, so warnings self-heal the moment the underlying
@@ -325,6 +325,17 @@
                      '[:find ?k ?tx
                        :where [?s :seon.schema/key ?k ?tx]]}))))
 
+(defn- db-schema
+  "The conn-level datahike schema map of `db`. FilteredDB (the
+   inspector's per-agent view) doesn't implement ILookup — `(:schema
+   db)` THROWS, which once took down the whole ctx-preview. The schema
+   is conn-level (the filter can't change it), so read through to the
+   wrapped db."
+  [db]
+  (try (:schema db)
+       (catch :default _
+         (:schema (.-unfiltered-db ^js db)))))
+
 (defn domain-attrs
   "Every DOMAIN attr installed on `db` — the db's datahike schema attrs
    intersected with [[agent-registered-attrs]] (provenance: the attr's
@@ -339,14 +350,7 @@
    (or schema installation via the first transact!) has landed."
   {:malli/schema [:=> [:cat ::check-request] [:vector :keyword]]}
   [{:seon.db/keys [db]}]
-  (let [schema (try (:schema db)
-                    (catch :default _
-                      ;; FilteredDB (the inspector's per-agent view)
-                      ;; doesn't implement ILookup — `(:schema db)`
-                      ;; THROWS, which took down the whole ctx-preview.
-                      ;; The schema is conn-level (the filter can't
-                      ;; change it), so read through to the wrapped db.
-                      (:schema (.-unfiltered-db ^js db))))
+  (let [schema      (db-schema db)
         agent-attrs (agent-registered-attrs db)]
     (->> (keys schema)
          (filter keyword?)
@@ -426,6 +430,85 @@
      :seon.warn/example
      (str ";; use the existing :workout/duration-seconds; convert at write time:\n"
           "{:workout/duration-seconds (* 35 60)}  ; NOT :workout/duration-minutes 35")}))
+
+(defn- identity-attrs
+  "Every identity attr installed on `db`'s datahike schema
+   (`:db/unique :db.unique/identity`), excluding datahike's own `:db/*`
+   attrs (`:db/ident` is unique-identity by construction and carries a
+   datom per installed attr — it is schema plumbing, not a kind)."
+  [db]
+  (->> (db-schema db)
+       (keep (fn [[k v]]
+               (when (and (keyword? k)
+                          (not= "db" (namespace k))
+                          (= :db.unique/identity (:db/unique v)))
+                 k)))))
+
+(defn- marked-entity-id-attrs
+  "The set of id-attrs DECLARED by registered `:map` schemas carrying
+   `{:seon.db/entity true}` — `register!` derives `:seon.entity/id-attr`
+   into the stored props, so its presence ≡ the marker + an id entry."
+  []
+  (into #{}
+        (keep (fn [[_ v]]
+                (when (and (vector? v) (= :map (first v)) (map? (second v)))
+                  (:seon.entity/id-attr (second v)))))
+        (schema/registered-schemas)))
+
+(defn- unmarked-map-schemas-carrying
+  "Registered `:map` schemas that have an entry for `attr` but NO
+   `{:seon.db/entity true}` marker — the schema(s) an author most
+   likely MEANT to mark. Sorted for stable rendering."
+  [attr]
+  (->> (schema/registered-schemas)
+       (keep (fn [[k v]]
+               (when (and (vector? v) (= :map (first v)))
+                 (let [props   (when (map? (second v)) (second v))
+                       entries (if props (drop 2 v) (rest v))]
+                   (when (and (not (:seon.db/entity props))
+                              (some #(and (vector? %) (= attr (first %)))
+                                    entries))
+                     k)))))
+       (sort-by str)))
+
+(defn check-unmarked-entity-kinds
+  "BEHAVIORAL entity-marker check: identity attrs that HAVE stored
+   datoms but NO registered `:map` schema marked `{:seon.db/entity
+   true}` declaring them as a kind. Replaces the register!-time warn,
+   which was a false-positive generator by construction — at
+   registration an id-carrying map is indistinguishable between
+   unmarked-entity and legitimate envelope; once rows EXIST under the
+   id-attr, an undeclared kind is a real defect. Derived at render,
+   self-heals the moment the kind is marked. GLOBAL — fires on
+   substrate and agents alike; :seon.warn/ns is ignored."
+  {:malli/schema [:=> [:cat ::check-request] ::check-response]}
+  [{:seon.db/keys [db]}]
+  (let [marked (marked-entity-id-attrs)]
+    {:seon.warn/kind :unmarked-entity-kinds
+     :seon.warn/affected
+     (->> (identity-attrs db)
+          (remove marked)
+          (filter #(pos? (attr-instance-count db %)))
+          (sort-by str)
+          (mapv (fn [attr]
+                  (let [carriers (unmarked-map-schemas-carrying attr)]
+                    (cond-> {:seon.warn/sym (str attr)}
+                      (seq carriers)
+                      (assoc :seon.warn/where
+                             (str "carried unmarked by "
+                                  (str/join ", " (map str carriers)))))))))
+     :seon.warn/explain
+     (str "Rows are STORED under an identity attr but no registered :map "
+          "schema marked {:seon.db/entity true} declares that kind — its "
+          "entities are invisible to the catalog and the renderer. "
+          "Register (or re-register) the kind's :map schema WITH the "
+          "marker. Request/response envelopes stay unmarked; this fires "
+          "only where rows actually exist.")
+     :seon.warn/example
+     (str "(seon.schema/register! :kb.doc\n"
+          "  [:map {:seon.db/entity true}\n"
+          "   [:kb.doc/path :kb.doc/path]  ; the identity attr\n"
+          "   …])")}))
 
 (defn- test-index
   "[set-of-test-syms, concatenated-test-source] for the ns scope —
@@ -691,6 +774,7 @@
    check-no-input-spec
    check-missing-test
    check-parallel-attr
+   check-unmarked-entity-kinds
    check-bad-ref
    check-failed-evals
    check-hop-exhausted

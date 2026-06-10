@@ -143,7 +143,8 @@
 ;; lands in `entity-schema-keys`, decomposes into a `:seon.schema` row at
 ;; boot, and renders per-kind in render-namespace + the inspector panes.
 (schema/register! :seon.test
-  [:map {:seon.render/ai   'seon.handlers.test/render-ai
+  [:map {:seon.db/entity   true
+         :seon.render/ai   'seon.handlers.test/render-ai
          :seon.render/html 'seon.handlers.test/render-html}
    [:seon.test/sym :seon.test/sym]
    [:seon.test/ns                   {:optional true} :seon.test/ns]

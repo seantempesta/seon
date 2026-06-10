@@ -21,7 +21,8 @@
 (schema/register! :seon.system-prompt/content :string)
 
 (schema/register! :seon.system-prompt
-  [:map {:seon.render/ai   'seon.handlers.system-prompt/render-ai
+  [:map {:seon.db/entity   true
+         :seon.render/ai   'seon.handlers.system-prompt/render-ai
          :seon.render/html 'seon.handlers.system-prompt/render-html}
    [:seon.system-prompt/id      :seon.system-prompt/id]
    [:seon.system-prompt/content :seon.system-prompt/content]])
@@ -34,7 +35,8 @@
 (schema/register! :seon.conventions/content :string)
 
 (schema/register! :seon.conventions
-  [:map {:seon.render/ai   'seon.handlers.system-prompt/render-conventions-ai
+  [:map {:seon.db/entity   true
+         :seon.render/ai   'seon.handlers.system-prompt/render-conventions-ai
          :seon.render/html 'seon.handlers.system-prompt/render-conventions-html}
    [:seon.conventions/id      :seon.conventions/id]
    [:seon.conventions/content :seon.conventions/content]])

@@ -139,8 +139,9 @@
 ;; --- Schemas-as-queryable-data meta-schema (research:
 ;; docs/prds/agent-runtime/research/schemas-as-queryable-data-2026-05-26.md).
 ;;
-;; Every entity-shape `:map` schema registered via `register!` (i.e. one
-;; that has a derived `:seon.entity/id-attr`) ALSO transacts a
+;; Every DECLARED entity-kind `:map` schema registered via `register!`
+;; (one carrying `{:seon.db/entity true}` in its own properties, which
+;; gives it a derived `:seon.entity/id-attr`) ALSO transacts a
 ;; `:seon.schema` entity carrying its required-attrs set, id-attr, and
 ;; the symbol naming its AI render fn. Kind-lookup in `seon.render`
 ;; queries those entities via datalog — the schema registry becomes
@@ -196,21 +197,44 @@
         body (if (and (seq body) (map? (first body))) (rest body) body)]
     (vec body)))
 
-(defn- derive-entity-id-attr
-  "If `v` is a `:map`-shaped schema and any of its entry keys is itself
-   a registered attr carrying `{:seon.db/identity true}`, return that
-   entry-key. Otherwise return nil.
+(defn- schema-properties
+  "Return the :map schema's properties map (the optional second slot
+   between the head and the entries), or nil."
+  [v]
+  (when (map-shape? v)
+    (let [body (rest v)]
+      (when (and (seq body) (map? (first body)))
+        (first body)))))
 
-   This makes a registered entity schema self-describing for the
-   renderer's discovery walk (no separate `:seon.entity/kind` stamp
-   needed — the schema's own props point at the attr that identifies
-   instances of that kind)."
+(defn- map-identity-entry-key
+  "The first entry key of `:map` schema `v` that is itself a registered
+   attr carrying `{:seon.db/identity true}`, or nil."
   [v]
   (when (map-shape? v)
     (some (fn [entry]
             (when-let [k (and (vector? entry) (first entry))]
               (when (attr-has-identity? k) k)))
           (map-entries v))))
+
+(defn- derive-entity-id-attr
+  "If `v` is a `:map` schema DECLARED as a stored entity kind via
+   `{:seon.db/entity true}` in its own properties, return its
+   identity-attr entry key. Otherwise nil.
+
+   Entity-kind-ness is DECLARED, never inferred (user decision
+   2026-06-10): a request/response envelope that happens to carry an
+   id entry must NOT become a catalogued kind — the old
+   contains-an-id-key inference stamped eight phantom wrapper kinds
+   into the live store. Same opt-in property family as
+   `{:seon.db/identity true}`.
+
+   The derived id-attr makes a declared entity schema self-describing
+   for the renderer's discovery walk (no separate `:seon.entity/kind`
+   stamp needed — the schema's own props point at the attr that
+   identifies instances of that kind)."
+  [v]
+  (when (:seon.db/entity (schema-properties v))
+    (map-identity-entry-key v)))
 
 (defn- map-required-attrs
   "Return the set of `[entry-key ...]` whose props do NOT carry
@@ -231,19 +255,11 @@
                         k)))))
           (map-entries v))))
 
-(defn- schema-properties
-  "Return the :map schema's properties map (the optional second slot
-   between the head and the entries), or nil."
-  [v]
-  (when (map-shape? v)
-    (let [body (rest v)]
-      (when (and (seq body) (map? (first body)))
-        (first body)))))
-
 (defn- with-entity-id-attr
   "Attach `{:seon.entity/id-attr <k>}` to a `:map` schema's properties
-   when one of its entries is an identity attr. Preserves any existing
-   props (including author-declared `:seon.render/ai`, etc)."
+   when the schema is a DECLARED entity kind (`{:seon.db/entity true}`)
+   with an identity-attr entry. Preserves any existing props (including
+   author-declared `:seon.render/ai`, etc)."
   [v]
   (if-let [id-attr (derive-entity-id-attr v)]
     (let [head     (first v)
@@ -336,19 +352,26 @@
    Returns:
      The registered schema keyword.
 
-   When `v` is a `:map`-shaped schema and one of its entries' keys is
-   itself a registered attr carrying `{:seon.db/identity true}`, the
-   stored schema is rewritten to carry `{:seon.entity/id-attr <k>}` in
-   its own properties. This lets the renderer enumerate instances of a
-   kind by walking the AEVT index for that id-attr — no per-row
-   `:seon.entity/kind` stamp required.
+   When `v` is a `:map` schema DECLARED as a stored entity kind via
+   `{:seon.db/entity true}` in its properties (same opt-in family as
+   `{:seon.db/identity true}`), the stored schema is rewritten to carry
+   `{:seon.entity/id-attr <k>}` pointing at its identity-attr entry.
+   This lets the renderer enumerate instances of a kind by walking the
+   AEVT index for that id-attr — no per-row `:seon.entity/kind` stamp
+   required. Maps WITHOUT the marker (request/response envelopes, view
+   inputs) never become catalogued kinds — register! is silent about
+   them. The nudge toward the marker lives where rows actually exist:
+   `seon.warn/check-unmarked-entity-kinds` fires when an identity attr
+   has stored datoms but no marked schema declares its kind.
 
    Example:
      (register! ::api-key [:string {:min 1}])
      (register! ::timeout [:int {:min 1000 :max 600000}])
-     (register! :seon.eval [:map {:seon.render/ai 'foo}
+     (register! :seon.eval [:map {:seon.db/entity true
+                                  :seon.render/ai 'foo}
                             [:seon.eval/id ...] ...])  ;; →
-       ;; stored with props {:seon.render/ai 'foo
+       ;; stored with props {:seon.db/entity true
+       ;;                    :seon.render/ai 'foo
        ;;                    :seon.entity/id-attr :seon.eval/id}"
   [k v]
   ;; CLJS-only until the JVM's legacy `:form/*` registrations are

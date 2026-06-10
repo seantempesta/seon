@@ -516,7 +516,8 @@
             (schema/register! :seon.zzcatalog/id [:string {:seon.db/identity true}])
             (schema/register! :seon.zzcatalog/label :string)
             (schema/register! :seon.zzcatalog
-              [:map {:seon.render/ai 'seon.handlers.fn/render-ai}
+              [:map {:seon.db/entity true
+                     :seon.render/ai 'seon.handlers.fn/render-ai}
                [:seon.zzcatalog/id :seon.zzcatalog/id]
                [:seon.zzcatalog/label :seon.zzcatalog/label]])
             ;; NOTE: db/*conn* binding does NOT survive `.then` boundaries

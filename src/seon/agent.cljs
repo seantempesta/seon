@@ -167,6 +167,10 @@
 ;; message refs are uniform; later home for user prefs/memory.
 (schema/register! :seon.user/id         [:string {:seon.db/identity true}])
 
+(schema/register! :seon.user
+  [:map {:seon.db/entity true}
+   [:seon.user/id :seon.user/id]])
+
 (def user-ref
   "Lookup ref of THE user entity (one human for now). Seeded at boot by
    seon.client; the default `:seon.message/to` target."
@@ -267,6 +271,24 @@
 (schema/register! :seon.turn/messages     [:vector {:seon.db/component true} :seon.db/ref])
 (schema/register! :seon.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
 
+(schema/register! :seon.session
+  [:map {:seon.db/entity true}
+   [:seon.session/id    :seon.session/id]
+   [:seon.session/at    :seon.session/at]
+   [:seon.session/turns {:optional true} :seon.session/turns]])
+
+(schema/register! :seon.turn
+  [:map {:seon.db/entity true}
+   [:seon.turn/id           :seon.turn/id]
+   [:seon.turn/at           :seon.turn/at]
+   [:seon.turn/status       :seon.turn/status]
+   [:seon.turn/woken-by     {:optional true} :seon.turn/woken-by]
+   [:seon.turn/prompt-text  {:optional true} :seon.turn/prompt-text]
+   [:seon.turn/prompt-chars {:optional true} :seon.turn/prompt-chars]
+   [:seon.turn/prompt-file  {:optional true} :seon.turn/prompt-file]
+   [:seon.turn/messages     {:optional true} :seon.turn/messages]
+   [:seon.turn/evals        {:optional true} :seon.turn/evals]])
+
 (schema/register! :seon.agent/sessions    [:vector {:seon.db/component true} :seon.db/ref])
 
 ;; ============================================================
@@ -324,10 +346,12 @@
 (schema/register! :seon.schema/created-at :inst)
 
 ;; ============================================================
-;; Entity-kind `:map` schemas. One per renderable kind. The
+;; Entity-kind `:map` schemas. One per renderable kind, each DECLARED
+;; with `{:seon.db/entity true}` (entity-kind-ness is declared, never
+;; inferred — request/response envelopes stay unmarked). The
 ;; `:seon.render/ai` / `:seon.render/html` symbols live on the schema's
-;; own properties — `seon.schema/register!` walks the entries and
-;; auto-derives `:seon.entity/id-attr` from whichever entry carries
+;; own properties — for a declared entity, `seon.schema/register!`
+;; derives `:seon.entity/id-attr` from whichever entry carries
 ;; `{:seon.db/identity true}`. That id-attr is what the renderer
 ;; enumerates in AEVT to find all instances of the kind; the render
 ;; symbols are looked up via `(m/properties (m/schema :seon.eval))`
@@ -357,7 +381,8 @@
 ;; queries those entities via datalog.
 
 (schema/register! :seon.eval
-  [:map {:seon.render/ai   'seon.handlers.eval/render-ai
+  [:map {:seon.db/entity   true
+         :seon.render/ai   'seon.handlers.eval/render-ai
          :seon.render/html 'seon.handlers.eval/render-html}
    [:seon.eval/id          :seon.eval/id]
    [:seon.eval/source      :seon.eval/source]
@@ -372,7 +397,8 @@
    [:seon.eval/error-data  {:optional true} :seon.eval/error-data]])
 
 (schema/register! :seon.message
-  [:map {:seon.render/ai   'seon.handlers.message/render-ai
+  [:map {:seon.db/entity   true
+         :seon.render/ai   'seon.handlers.message/render-ai
          :seon.render/html 'seon.handlers.message/render-html}
    [:seon.message/id      :seon.message/id]
    [:seon.message/from    :seon.message/from]
@@ -382,7 +408,8 @@
    [:seon.message/hops    :seon.message/hops]])
 
 (schema/register! :seon.fn
-  [:map {:seon.render/ai   'seon.handlers.fn/render-ai
+  [:map {:seon.db/entity   true
+         :seon.render/ai   'seon.handlers.fn/render-ai
          :seon.render/html 'seon.handlers.fn/render-html}
    [:seon.fn/sym    :seon.fn/sym]
    [:seon.fn/ns     :seon.fn/ns]
@@ -399,7 +426,8 @@
    [:seon.fn/created-at {:optional true} :seon.fn/created-at]])
 
 (schema/register! :seon.schema
-  [:map {:seon.render/ai   'seon.handlers.schema/render-ai
+  [:map {:seon.db/entity   true
+         :seon.render/ai   'seon.handlers.schema/render-ai
          :seon.render/html 'seon.handlers.schema/render-html}
    [:seon.schema/key    :seon.schema/key]
    [:seon.schema/source :seon.schema/source]
@@ -407,7 +435,8 @@
    [:seon.schema/created-at {:optional true} :seon.schema/created-at]])
 
 (schema/register! :seon.ns
-  [:map {:seon.render/ai   'seon.handlers.ns/render-ai
+  [:map {:seon.db/entity   true
+         :seon.render/ai   'seon.handlers.ns/render-ai
          :seon.render/html 'seon.handlers.ns/render-html}
    [:seon.ns/name   :seon.ns/name]
    [:seon.ns/source :seon.ns/source]])
@@ -422,7 +451,8 @@
 ;; Required attrs (id + state) mirror `create!`, the one writer that
 ;; runs unconditionally; everything else arrives lazily.
 (schema/register! :seon.agent
-  [:map {:seon.render/html 'seon.render.default/view}
+  [:map {:seon.db/entity   true
+         :seon.render/html 'seon.render.default/view}
    [:seon.agent/id    :seon.agent/id]
    [:seon.agent/state :seon.agent/state]
    [:seon.agent/sessions  {:optional true} :seon.agent/sessions]

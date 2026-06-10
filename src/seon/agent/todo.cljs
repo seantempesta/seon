@@ -44,8 +44,12 @@
 (schema/register! ::complete-request [:map [::id ::id]])
 (schema/register! ::reopen-request   [:map [::id ::id]])
 
+;; --- The stored entity kind. `{:seon.db/entity true}` DECLARES that
+;; --- rows of this shape live in the DB (it's what puts the kind in the
+;; --- catalog); request/response envelopes above carry no marker.
+
 (schema/register! ::todo
-  [:map
+  [:map {:seon.db/entity true}
    [::id          ::id]
    [::title       ::title]
    [::created-at  ::created-at]
