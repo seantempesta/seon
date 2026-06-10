@@ -165,7 +165,7 @@
   ;; pod's :cljs alias overrides to (seantempesta/datahike@1ae35696), so the
   ;; probe falsifies fressian/store compat WITHOUT version skew and WITHOUT
   ;; touching the main JVM deps the dev JVM / wire-server resolve
-  ;; (:writer stays pinned to mvn 0.8.1671 — converging it is a follow-up).
+  ;; (:writer runs the SAME fork sha since 156a53e — converged).
   ;; Usage: clj -M:replica-probe-jvm   (after `clj -M:cljs compile replica-probe`)
   ;; Store: tmp/replica-probe/store (throwaway, wiped each run).
   :replica-probe-jvm

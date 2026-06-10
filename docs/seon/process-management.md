@@ -22,23 +22,46 @@ The supervisor removes ownership. State (PIDs, start times, logs) lives in known
 ## Subcommands
 
 ```text
-bin/seon start <name>       Start (idempotent — no-op if already running)
-bin/seon stop <name>        Stop (idempotent — no-op if not running)
-bin/seon restart <name>     stop + start
+bin/seon start <name|all>   Start (idempotent — no-op if already running)
+bin/seon stop <name|all>    Stop (idempotent — no-op if not running)
+bin/seon restart <name|all> stop + start
 bin/seon status [name]      Show one or all (omitted = all)
 bin/seon tail <name>        tail -f logs/<name>.log  (Ctrl-C to exit)
 bin/seon logs <name> [n]    Last n lines (default 200)
 bin/seon adopt <name> <pid> Register a manually-started PID under <name>
+bin/seon cluster reset [n]  DESTRUCTIVE: wipe data/clusters/<n>/store,
+                            bounce wire-server + pod (fresh DB)
 
 ```
+
+## `start all` / `restart all` / `stop all` — the whole stack, ordered + gated
+
+`bin/seon start all` brings the stack up in dependency order — **cljs-watch → wire-server → pod** — and gates each stage on REAL readiness before starting the next (`stop all` reverses: pod → wire-server → cljs-watch). `jvm` is deliberately NOT in `all` — it's an independent lane; start it explicitly.
+
+Ready gates (`wait_ready` in the script — observed signals, not just log lines):
+
+| Process | Ready when | Bound |
+|---|---|---|
+| `cljs-watch` | `out/client/main.js` newer than this start, or `Build completed` in the fresh log | 300s |
+| `wire-server` | `tmp/seon-cluster-default-req.sock` ACCEPTS a connection (real `nc -U` connect — macOS `nc -z -U` is broken) + `tmp/seon-writer-repl-port` written | 180s |
+| `pod` | `tmp/seon-port` written + HTTP answers on `/agents` | 120s |
+
+On timeout or early death the wait fails LOUD, naming the log to read, and later stages are not started. `bin/seon cluster reset` shares the same `wait_ready` helper.
+
+The pod side cooperates: `seon.store.wire/ping!` (the fail-loud boot gate) retries the wire-server ping for ~10s (5 × 2s rpc timeout, 500ms backoff) before throwing, closing the race where the pod execs before the writer's socket accepts. Boot stays fail-loud — just not fail-instant.
+
+### Auto-prep on dep (git sha) change
+
+Real failure 2026-06-10: a datahike `:git/sha` bump made the first wire-server start download + build the git dep inside its ready window — boot timeouts blew and the pod fail-loud-exited against the missing socket. The supervisor now hashes deps.edn's `:git/url`/`:git/sha` lines into `tmp/proc/<name>/deps-fingerprint` (plus a `~/.gitlibs` presence check) before spawning `wire-server` (`:writer`) or `cljs-watch` (`:cljs`); on change it runs `clojure -P -M:<alias>` + `clojure -X:deps prep :aliases '[:<alias>]'` SYNCHRONOUSLY and loudly (output in `logs/<name>.log`) before the spawn.
 
 ## Registered processes
 
 | Name | Command | Log | Ready-when |
 |---|---|---|---|
-| `pod` | `node out/client/main.js` | `logs/pod.log` | `tmp/seon-port` exists |
+| `pod` | `node out/client/main.js` | `logs/pod.log` | `tmp/seon-port` written + HTTP answers on `/agents` |
 | `cljs-watch` | `clj -M:cljs watch client` | `logs/cljs-watch.log` | "Build completed" appears in log |
 | `jvm` | `./bin/run` | `logs/jvm.log` | `logs/app.log` shows "Server started" |
+| `wire-server` | `clojure -M:writer ...` | `logs/wire-server.log` | `tmp/seon-cluster-default-req.sock` accepting + `tmp/seon-writer-repl-port` written |
 
 ### IMPORTANT — pod ↔ cljs-watch dependency
 

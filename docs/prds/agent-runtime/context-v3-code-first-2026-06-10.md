@@ -139,6 +139,7 @@ pod's `@seon.client/!agent-conn`, cluster store `data/clusters/default`):
 ;;   :seon.todo/complete-request :seon.agent/render-namespace-request
 ;;   :seon.handler/input :seon.inspect/request
 ;;   :seon.render/assemble-request :seon.effect/wake-request
+
 ```
 
 ### Unit 1 — home-ns rename `seon.agent.<id>` → `my.agent.<id>`
@@ -498,6 +499,19 @@ eval timing, was the A1 wedge vector). Gym oracle: full trio
 S-01/S-12/S-21/S-32 re-run + the agreement test green.
 
 ### Unit 5 — `bin/seon start/restart all`
+
+**STATUS: SHIPPED 2026-06-10 (uncommitted).** `start|stop|restart all`
+with `wait_ready` socket/HTTP/build gates and auto-prep fingerprint
+landed in `bin/seon`; ping bounded retry (5 × 2s + 500ms backoff, same
+fail-loud error) in `src/seon/store/wire.cljs` with unit tests at
+`test/seon/store/wire_test.cljs` (stubs wire-node/rpc; multi-arity
+stub required — direct `arity$3` call sites). Live proofs: no-op
+`start all` 0.2s clean; `restart all` 32.6s ordered+gated, pod clean
+first-try ping; bin/test-cljs 330/1277 green. deps.edn:168 stale
+:writer comment fixed; protocol doc updated. NOT proven live (deliberate):
+`cluster reset` (destructive — wipes the live store; it now shares
+`wait_ready`, which the restart proved) and the actual-prep run
+(detection proven both ways; prep commands not exercised end-to-end).
 
 Goal: one command brings the whole stack up dependency-ordered with
 real ready gates; sha bumps stop blowing boot timeouts.

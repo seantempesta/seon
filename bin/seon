@@ -9,9 +9,12 @@
 # where neither agent "owns" a process — both invoke this script.
 #
 # Subcommands:
-#   start <name>       Idempotent. Spawns via nohup; logs to logs/<name>.log
-#   stop <name>        SIGTERM, wait 2.5s, SIGKILL if still alive
-#   restart <name>     stop + start
+#   start <name|all>   Idempotent. Spawns via nohup; logs to logs/<name>.log
+#                      `all` = cljs-watch → wire-server → pod, each gated on
+#                      REAL readiness before the next (jvm NOT included)
+#   stop <name|all>    SIGTERM, wait 2.5s, SIGKILL if still alive
+#                      `all` reverses: pod → wire-server → cljs-watch
+#   restart <name|all> stop + start
 #   status [name]      Show one or all
 #   tail <name>        tail -f logs/<name>.log
 #   logs <name> [n]    Last n lines (default 200) of logs/<name>.log
@@ -65,15 +68,158 @@ process_command() {
 
 process_ready_hint() {
   case "$1" in
-    pod)         echo "  ready: tmp/seon-port exists (HTTP+SSE loopback bound)" ;;
+    pod)         echo "  ready: tmp/seon-port written + HTTP answers on /agents" ;;
     cljs-watch)  echo "  ready: 'Build completed' appears in logs/cljs-watch.log" ;;
     jvm)         echo "  ready: logs/app.log shows 'Server started'" ;;
-    wire-server) echo "  ready: '[writer] ready' appears in logs/wire-server.log; REPL on 127.0.0.1:7891 (tmp/seon-writer-repl-port)" ;;
+    wire-server) echo "  ready: tmp/seon-cluster-default-req.sock ACCEPTING; REPL on 127.0.0.1:7891 (tmp/seon-writer-repl-port)" ;;
     *) echo "" ;;
   esac
 }
 
 all_processes() { echo "pod cljs-watch jvm wire-server"; }
+
+stack_processes() {
+  # Dependency-ordered stack for `start all` (stop reverses the order):
+  # cljs-watch builds out/client/main.js which the pod execs; the pod's
+  # boot ping is fail-loud (bounded ~10s retry, seon.store.wire/ping!)
+  # against the wire-server's socket. `jvm` is deliberately NOT in the
+  # stack — independent lane, start it explicitly.
+  echo "cljs-watch wire-server pod"
+}
+
+# ============================================================
+# Real readiness gates — `start all` / `restart all` / cluster reset
+# gate each stage on OBSERVED readiness (socket accepting, HTTP
+# answering, build completed), not just a log line.
+# ============================================================
+
+nc_supports_uds() { nc -h 2>&1 | head -1 | grep -q 'U'; }
+
+ready_check() {
+  local name="$1"
+  case "$name" in
+    wire-server)
+      [ -S tmp/seon-cluster-default-req.sock ] || return 1
+      [ -f tmp/seon-writer-repl-port ] || return 1
+      if nc_supports_uds; then
+        # A real connect with immediate EOF. NOT `nc -z -U`: macOS nc's
+        # -z returns 1 even against a live, accepting UDS (verified
+        # 2026-06-10). Socket accepting implies datahike is up — the
+        # writer binds the socket only after "[writer] datahike ready".
+        nc -U tmp/seon-cluster-default-req.sock -w 1 </dev/null >/dev/null 2>&1
+      else
+        grep -q '\[writer\] ready' "$(log_file wire-server)" 2>/dev/null
+      fi
+      ;;
+    pod)
+      [ -f tmp/seon-port ] || return 1
+      curl -fsS -m 2 -o /dev/null \
+        "http://127.0.0.1:$(cat tmp/seon-port)/agents" 2>/dev/null
+      ;;
+    cljs-watch)
+      # Build artifact newer than this start, or completion line in the
+      # (truncated-at-start) log. No socket exists for shadow watch.
+      { [ -f out/client/main.js ] \
+          && [ out/client/main.js -nt "$(started_file cljs-watch)" ]; } \
+        || grep -q 'Build completed' "$(log_file cljs-watch)" 2>/dev/null
+      ;;
+    *) return 0 ;;
+  esac
+}
+
+ready_bound() {
+  case "$1" in
+    wire-server) echo 180 ;;   # matches cluster reset's historical wait
+    pod)         echo 120 ;;
+    cljs-watch)  echo 300 ;;   # cold shadow-cljs build
+    *)           echo 0 ;;
+  esac
+}
+
+wait_ready() {
+  # Bounded wait for ready_check. Loud on timeout or early death,
+  # naming the log to read. Processes without a gate (jvm) pass through.
+  local name="$1"
+  local bound
+  bound="$(ready_bound "$name")"
+  [ "$bound" = 0 ] && return 0
+  local waited=0
+  printf '  waiting for %s ready (bound %ss) ' "$name" "$bound"
+  until ready_check "$name"; do
+    if ! is_running "$name"; then
+      echo ""
+      echo "✗ $name DIED while waiting for readiness — read its log:" >&2
+      echo "    bin/seon logs $name   (logs/$name.log)" >&2
+      return 1
+    fi
+    if [ "$waited" -ge "$bound" ]; then
+      echo ""
+      echo "✗ $name not ready after ${bound}s — read its log:" >&2
+      echo "    bin/seon logs $name   (logs/$name.log)" >&2
+      return 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+    printf '.'
+  done
+  echo ""
+  echo "  ● $name ready (${waited}s)"
+}
+
+# ============================================================
+# Auto-prep on dep change. Real failure 2026-06-10: a datahike
+# :git/sha bump made the first wire-server/cljs-watch start download +
+# build the git dep INSIDE its ready window — boot timeouts blew, the
+# pod raced the missing socket and fail-loud-exited. Detect the change
+# up front (hash of deps.edn's :git/url+:git/sha lines, stored at
+# tmp/proc/<name>/deps-fingerprint, plus a ~/.gitlibs presence check)
+# and run the download + prep SYNCHRONOUSLY and loudly before spawning.
+# ============================================================
+
+deps_fingerprint() {
+  grep -E ':git/(url|sha)' deps.edn 2>/dev/null | shasum | awk '{print $1}'
+}
+
+gitlibs_missing_sha() {
+  # True if any :git/sha pinned in deps.edn has no ~/.gitlibs checkout.
+  local sha
+  for sha in $(grep ':git/sha' deps.edn | grep -oE '[0-9a-f]{40}' | sort -u); do
+    ls -d "$HOME"/.gitlibs/libs/*/*/"$sha" >/dev/null 2>&1 || return 0
+  done
+  return 1
+}
+
+maybe_prep_deps() {
+  local name="$1"
+  local alias
+  case "$name" in
+    wire-server) alias="writer" ;;
+    cljs-watch)  alias="cljs" ;;
+    *) return 0 ;;
+  esac
+  local fp_file current stored
+  fp_file="$(state_dir "$name")/deps-fingerprint"
+  current="$(deps_fingerprint)"
+  stored="$(cat "$fp_file" 2>/dev/null || true)"
+  if [ "$current" = "$stored" ] && ! gitlibs_missing_sha; then
+    return 0
+  fi
+  echo "  ▶ deps changed (or git libs unprepped) for $name — running"
+  echo "    clojure -P -M:$alias && clojure -X:deps prep :aliases '[:$alias]'"
+  echo "    SYNCHRONOUSLY before spawn (a fresh git dep can take minutes)"
+  echo "    progress: logs/$name.log"
+  {
+    echo "== [bin/seon] auto-prep :$alias started $(date -u +%FT%TZ) =="
+    clojure -P -M:"$alias" \
+      && clojure -X:deps prep :aliases "[:$alias]" \
+      && echo "== [bin/seon] auto-prep :$alias done $(date -u +%FT%TZ) =="
+  } >> "$(log_file "$name")" 2>&1 || {
+    echo "  ✗ deps prep for :$alias FAILED — read: bin/seon logs $name" >&2
+    return 1
+  }
+  echo "$current" > "$fp_file"
+  echo "  ● deps prepped for :$alias"
+}
 
 # ============================================================
 # State file paths.
@@ -187,6 +333,10 @@ _start_unlocked() {
   # Fresh log on each start so tail isn't polluted with prior runs.
   : > "$(log_file "$name")"
 
+  # Sha-bump guard: download + prep git deps BEFORE spawn so they never
+  # build inside the process's own ready window (no-op when unchanged).
+  maybe_prep_deps "$name" || return 1
+
   # nohup + & detaches from this shell; bash -c handles multi-word cmds.
   nohup bash -c "$cmd" >> "$(log_file "$name")" 2>&1 &
   local pid=$!
@@ -230,8 +380,34 @@ _stop_unlocked() {
   rm -f "$(pid_file "$name")"
 }
 
+start_all() {
+  # Dependency-ordered bring-up, each stage gated on REAL readiness
+  # before the next starts. Idempotent: already-running stages no-op
+  # in cmd_start and (being ready) pass their gate immediately.
+  local name
+  for name in $(stack_processes); do
+    cmd_start "$name"
+    wait_ready "$name" || {
+      echo "✗ start all ABORTED at $name (later stages not started)" >&2
+      exit 1
+    }
+  done
+  echo "▶ stack up: cljs-watch → wire-server → pod"
+  echo "  (jvm not included — bin/seon start jvm if you need it)"
+}
+
+stop_all() {
+  # Reverse dependency order: pod → wire-server → cljs-watch.
+  local name reversed=""
+  for name in $(stack_processes); do reversed="$name $reversed"; done
+  for name in $reversed; do
+    cmd_stop "$name"
+  done
+}
+
 cmd_start() {
   local name="${1:?start requires a process name}"
+  if [ "$name" = "all" ]; then start_all; return 0; fi
   acquire_lock "$name"
   _start_unlocked "$name"
   release_lock "$name"
@@ -239,6 +415,7 @@ cmd_start() {
 
 cmd_stop() {
   local name="${1:?stop requires a process name}"
+  if [ "$name" = "all" ]; then stop_all; return 0; fi
   acquire_lock "$name"
   _stop_unlocked "$name"
   release_lock "$name"
@@ -248,7 +425,9 @@ cmd_restart() {
   # One lock spans stop+start. Atomic from any other agent's POV —
   # they see "stopped" or "started" but never an intermediate state
   # where another agent could race in and start a competing instance.
+  # (`restart all` is per-process atomic, not stack-atomic.)
   local name="${1:?restart requires a process name}"
+  if [ "$name" = "all" ]; then stop_all; start_all; return 0; fi
   acquire_lock "$name"
   _stop_unlocked "$name"
   _start_unlocked "$name"
@@ -355,19 +534,12 @@ cluster_reset() {
   if [ "$bounce" = 1 ]; then
     cmd_start wire-server
     # The pod's boot is ping-gated FAIL-LOUD against the wire socket —
-    # wait for the writer to mint the fresh DB before starting it.
-    echo "  waiting for wire-server ready (mints fresh DB) ..."
-    local waited=0
-    until grep -q '\[writer\] ready' "$(log_file wire-server)" 2>/dev/null; do
-      sleep 1
-      waited=$((waited + 1))
-      if [ "$waited" -gt 180 ]; then
-        echo "✗ wire-server not ready after ${waited}s — check bin/seon logs wire-server" >&2
-        exit 1
-      fi
-    done
-    echo "  wire-server ready (${waited}s)"
+    # wait for the writer to mint the fresh DB before starting it
+    # (socket accepting implies datahike is up; the writer binds the
+    # socket only after the DB is ready).
+    wait_ready wire-server || exit 1
     cmd_start pod
+    wait_ready pod || exit 1
     echo "▶ cluster $name reset complete — pod boot re-seeds the substrate"
   else
     echo "▶ cluster $name store wiped (no processes registered for it)"
@@ -410,9 +582,13 @@ case "${1:-help}" in
 Usage: bin/seon <command> [process] [args...]
 
 Commands:
-  start <name>       Start a process (idempotent — no-op if already running)
-  stop <name>        Stop a process (idempotent)
-  restart <name>     stop + start
+  start <name|all>   Start a process (idempotent — no-op if already running)
+                     `all` = cljs-watch → wire-server → pod, dependency-
+                     ordered with REAL ready gates between stages (socket
+                     accepting / HTTP answering / build completed).
+                     jvm is NOT in `all` — start it explicitly.
+  stop <name|all>    Stop a process (idempotent); `all` reverses the order
+  restart <name|all> stop + start
   status [name]      Show one or all
   tail <name>        tail -f logs/<name>.log  (Ctrl-C to exit)
   logs <name> [n]    Last n lines (default 200)
@@ -429,9 +605,17 @@ Processes (registered in script):
                wire-server; loopback REPL on 127.0.0.1:7891)
 
 Examples:
+  bin/seon start all          # whole stack, ordered + ready-gated
   bin/seon start pod && bin/seon tail pod
   bin/seon status
   bin/seon restart cljs-watch
+
+Auto-prep:
+  Before spawning wire-server/cljs-watch the supervisor hashes
+  deps.edn's :git/url+:git/sha lines (tmp/proc/<name>/deps-fingerprint)
+  and checks ~/.gitlibs; on change it runs `clojure -P -M:<alias>` +
+  `clojure -X:deps prep` SYNCHRONOUSLY (logged to logs/<name>.log) so a
+  sha bump never builds inside the process's ready window.
 
 Concurrency:
   Multi-agent safe — any number of agents can invoke any command at

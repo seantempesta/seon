@@ -112,27 +112,59 @@
 ;; ---------------------------------------------------------------------------
 ;; Boot gate — fail LOUD if the wire-server is down. No dual backend: a
 ;; pod that can't reach its writer must not boot against a local store.
+;;
+;; The ping retries for ~10s before the fail-loud throw: `bin/seon
+;; start all` brings the wire-server and pod up in order, but the pod
+;; can exec before the writer's UDS socket accepts (or while a freshly
+;; sha-bumped JVM warms up). Boot stays fail-loud, just not
+;; fail-instant — after the budget the same error throws.
 ;; ---------------------------------------------------------------------------
 
-(defn ^:async ping!
-  "Ping the wire-server. Resolves to the reply map on success; throws a
-   clear, actionable error when the wire-server is unreachable."
+(defn- sleep [ms]
+  (js/Promise. (fn [res] (js/setTimeout res ms))))
+
+(def ^:private ping-attempts 5)
+(def ^:private ping-timeout-ms 2000)
+(def ^:private ping-retry-delay-ms 500)
+
+(defn ^:async ^:private ping-once!
+  "One ping rpc. Resolves to the reply map; throws on not-ok/transport."
   []
-  (try
-    (let [resp (await (wire/rpc default-sock-path {"op" "ping"}
-                                {:timeout-ms 3000}))]
-      (when-not (get resp "ok")
-        (throw (ex-info "wire-server ping returned not-ok"
-                        {::resp resp})))
-      resp)
-    (catch :default e
-      (throw (ex-info
-              (str "seon.store.wire: the cluster wire-server is UNREACHABLE at "
-                   default-sock-path " (" (or (.-message e) (str e)) "). "
-                   "The pod boots ONLY against the cluster store — there is "
-                   "no local fallback. Start it with: bin/seon start wire-server")
-              {::sock-path default-sock-path
-               :seon.error/kind :substrate-bug})))))
+  (let [resp (await (wire/rpc default-sock-path {"op" "ping"}
+                              {:timeout-ms ping-timeout-ms}))]
+    (when-not (get resp "ok")
+      (throw (ex-info "wire-server ping returned not-ok"
+                      {::resp resp})))
+    resp))
+
+(defn ^:async ping!
+  "Ping the wire-server, retrying up to `ping-attempts` times (~10s
+   worst case: 5 × 2s rpc timeout, 500ms backoff between attempts).
+   Resolves to the reply map on success; throws a clear, actionable
+   error once the budget is exhausted."
+  []
+  (await
+   ((fn ^:async attempt [n]
+      (try
+        (await (ping-once!))
+        (catch :default e
+          (if (< n ping-attempts)
+            (do (js/console.warn
+                 (str "[seon.store.wire] ping attempt " n "/" ping-attempts
+                      " failed (" (or (.-message e) (str e))
+                      ") — retrying in " ping-retry-delay-ms "ms"))
+                (await (sleep ping-retry-delay-ms))
+                (await (attempt (inc n))))
+            (throw (ex-info
+                    (str "seon.store.wire: the cluster wire-server is UNREACHABLE at "
+                         default-sock-path " (" (or (.-message e) (str e)) ") "
+                         "after " n " attempts (~10s). "
+                         "The pod boots ONLY against the cluster store — there is "
+                         "no local fallback. Start it with: bin/seon start wire-server")
+                    {::sock-path default-sock-path
+                     ::attempts  n
+                     :seon.error/kind :substrate-bug}))))))
+    1)))
 
 ;; ---------------------------------------------------------------------------
 ;; Wire datom decode — server datom shape is [e a-transit v-transit t op]
@@ -290,9 +322,6 @@
                         (some? tx-meta) (assoc :tx-meta tx-meta))]
         (swap! !adapter assoc :last-db db)
         (fire-native-listeners! conn report)))))
-
-(defn- sleep [ms]
-  (js/Promise. (fn [res] (js/setTimeout res ms))))
 
 (defn ^:async ^:private subscribe! [sock-path]
   (let [sub (await (wire/subscribe-tx sock-path {}))]
