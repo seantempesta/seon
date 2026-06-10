@@ -29,9 +29,12 @@
     [cljs.test :as t :refer [deftest is testing async]]
     [datahike.api :as d]
     [seon.agent]                          ; :seon.eval/:seon.agent.turn/:seon.ns/:seon.schema registrations
+    [seon.analyzer-info :as analyzer-info]
     [seon.client :as client]
     [seon.db :as db]
-    [seon.eval :as seval]))
+    [seon.eval :as seval]
+    [seon.repl :as repl]
+    [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fresh :memory conn per test, with the SAME datahike schema the pod
@@ -203,5 +206,148 @@
                                  (d/q '[:find ?k
                                         :where [?s :seon.schema/key ?k]]
                                       db*)))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; deftest detection (board #33 part 1, live resume test 2026-06-10).
+;;
+;; cljs.analyzer stores the deftest marker as TOP-LEVEL `:test true` on the
+;; var-map and explicitly dissoc's `:test` from `:meta` (analyzer.cljc ~1958,
+;; "remove actual test metadata … cannot be present in analysis cached to
+;; disk"). build-tee-entities used to check `(:test (:meta var-map))` —
+;; ALWAYS nil — so agent deftests teed only as :seon.fn rows, never
+;; :seon.test rows: the :seon.test replay lane, tests-referring-to and the
+;; auto-run never saw agent tests. These tests pin the fix: a deftest evaled
+;; through the eval surface tees EXACTLY one :seon.test row (substrate
+;; index-tests shape: sym/ns/source/created-at) and NO :seon.fn row —
+;; matching the substrate's disjoint substrate-vars/!indexed-test-vars split
+;; and keeping resume single-lane. A plain defn still tees :seon.fn only.
+;; ---------------------------------------------------------------------------
+
+(defn- tee-for
+  "Eval `source` in `ns-sym` on the bootstrap compile-state and return
+   build-tee-entities' output for exactly that form — the same
+   snapshot-before/eval/diff sequence eval-batch! performs."
+  [cs ns-sym source]
+  (let [defs-before    (analyzer-info/snapshot-defs cs)
+        schemas-before (schema/current-keys)]
+    (-> (seval/eval cs source {:ns ns-sym :analyze-deps? false})
+        (.then (fn [r]
+                 (is (:ok r) (str "eval ok: " source))
+                 ((deref #'seval/build-tee-entities)
+                  {:compile-state  cs
+                   :defs-before    defs-before
+                   :schemas-before schemas-before
+                   :source         source
+                   :at             (js/Date.)}))))))
+
+(deftest agent-deftest-tees-a-seon-test-row-not-a-fn-row
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (seval/eval cs "(ns probe.teetest (:require [cljs.test]))"
+                            {:ns 'cljs.user :analyze-deps? false})
+                (.then (fn [r] (is (:ok r) "probe ns evals")))
+                (.then (fn [_]
+                         (tee-for cs 'probe.teetest
+                                  "(cljs.test/deftest tee-probe-test (cljs.test/is (= 1 1)))")))
+                (.then
+                  (fn [tee]
+                    (let [test-rows (filter :seon.test/sym tee)
+                          fn-rows   (filter :seon.fn/sym tee)
+                          row       (first test-rows)]
+                      (testing "EXACTLY one :seon.test row for the deftest"
+                        (is (= 1 (count test-rows)))
+                        (is (= "probe.teetest/tee-probe-test" (:seon.test/sym row))))
+                      (testing "substrate index-tests shape: sym/ns/source/created-at"
+                        (is (= {:seon.ns/name :probe.teetest} (:seon.test/ns row))
+                            "nested-map ns upsert, same as every tee row")
+                        (is (= "(cljs.test/deftest tee-probe-test (cljs.test/is (= 1 1)))"
+                               (:seon.test/source row)))
+                        (is (some? (:seon.test/created-at row))))
+                      (testing "NO :seon.fn row — deftests are test-lane only, like substrate"
+                        (is (= [] (vec fn-rows))))
+                      ;; And the row LANDS: record-eval! with this tee →
+                      ;; :seon.test row queryable on a fresh conn.
+                      (-> (fresh-conn)
+                          (.then
+                            (fn [conn]
+                              (-> (record! conn (eval-args (db/new-id!) (db/new-id!)
+                                                           (:seon.test/source row) tee))
+                                  (.then
+                                    (fn [_]
+                                      (testing ":seon.test row EXISTS after record-eval!"
+                                        (is (= #{["probe.teetest/tee-probe-test" :probe.teetest]}
+                                               (d/q '[:find ?sym ?nm
+                                                      :where [?e :seon.test/sym ?sym]
+                                                             [?e :seon.test/ns ?n]
+                                                             [?n :seon.ns/name ?nm]]
+                                                    @conn))))))))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest plain-defn-still-tees-a-seon-fn-row-only
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (seval/eval cs "(ns probe.teefn)" {:ns 'cljs.user :analyze-deps? false})
+                (.then (fn [_]
+                         (tee-for cs 'probe.teefn "(defn tee-probe-fn [n] (+ n 1))")))
+                (.then
+                  (fn [tee]
+                    (testing "defn detection unchanged: one :seon.fn row, zero :seon.test rows"
+                      (is (= ["probe.teefn/tee-probe-fn"]
+                             (mapv :seon.fn/sym (filter :seon.fn/sym tee))))
+                      (is (= [] (vec (filter :seon.test/sym tee))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Replay lane — the teed :seon.test row (plus its ns row) replays through the
+;; :seon.test lane via replay-program-graph!, reconstituting the deftest var.
+;; ---------------------------------------------------------------------------
+
+(deftest teed-deftest-replays-through-the-test-lane
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (client/open-agent-conn!)
+                (.then
+                  (fn [conn]
+                    (binding [db/*conn* conn]
+                      (-> (db/transact!
+                            {:seon.db/tx-data
+                             ;; the EXACT shapes the fixed tee emits: ns row
+                             ;; from the (ns …) eval, :seon.test row from the
+                             ;; deftest eval (nested-map ns upsert).
+                             [{:seon.ns/name   :probe.teereplay
+                               :seon.ns/source "(ns probe.teereplay (:require [cljs.test]))"}
+                              {:seon.test/sym  "probe.teereplay/replayed-test"
+                               :seon.test/ns   {:seon.ns/name :probe.teereplay}
+                               :seon.test/source
+                               "(cljs.test/deftest replayed-test (cljs.test/is (= 1 1)))"
+                               :seon.test/created-at (js/Date.)}]})
+                          (.then
+                            (fn [_]
+                              (client/replay-program-graph!
+                                {:conn conn :compile-state cs
+                                 :agent-id "record-eval-tee-test"})))
+                          (.then
+                            (fn [stats]
+                              (is (= 2 (:seon.client/replay-n-total stats))
+                                  "ns row + :seon.test row are the replay set")
+                              (is (= 0 (:seon.client/replay-n-fail stats))
+                                  "the deftest replays through the :seon.test lane")
+                              (seval/eval cs "(some? probe.teereplay/replayed-test)"
+                                          {:ns 'cljs.user :analyze-deps? false})))
+                          (.then
+                            (fn [r]
+                              (is (:ok r) "replayed corpus is live")
+                              (is (true? (:value r))
+                                  "deftest var reconstituted on the compile-state"))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

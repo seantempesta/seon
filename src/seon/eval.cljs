@@ -682,12 +682,35 @@
       (mi/instrument! {:report  einstrument/report-fn
                        :filters [(fn [n s _d] (contains? target-set [n s]))]}))))
 
+(defn- deftest-def?
+  "True when an analyzer var-map came from a `(deftest …)` form.
+
+   The marker is TOP-LEVEL `:test true` on the var-map — NOT
+   `(:test (:meta var-map))`. cljs.analyzer's `parse 'def` (analyzer.cljc
+   ~1958, 1.11.x) stores `(assoc :test true)` on the var-map itself and
+   explicitly `(dissoc :test)` from `:meta` (\"remove actual test
+   metadata, as it includes non-valid EDN and cannot be present in
+   analysis cached to disk\"). So the `:meta` check is nil on EVERY CLJS
+   build, not just self-host — the live-resume bug where agent deftests
+   teed only `:seon.fn` rows, never `:seon.test` rows (board #33 part 1).
+   REPL-verified on the bootstrap compile-state 2026-06-10:
+   deftest var-map → `{:test true …}`, `:meta` has no `:test`;
+   plain defn var-map → no `:test` key at all.
+
+   Uniform with how defn detection reads the var-map: `:fn-var` is also
+   a top-level analyzer key, not meta. (The runtime `cljs$lang$test`
+   marker the test runner walks is the same fact post-emit; the analyzer
+   key is available synchronously from the snapshot diff the tee already
+   holds, so no globalThis walk is needed.)"
+  [var-map]
+  (true? (:test var-map)))
+
 (defn- collect-auto-test-targets
   "Phase 4 (mvp-completion-plan 2026-05-27): return the set of FQ test
    syms to run after a successful eval. Two sources:
 
    - Tests newly defined in THIS eval (a fresh `(deftest …)` form). The
-     symbol comes from `defs-since` filtered to defs with `:test` meta.
+     symbol comes from `defs-since` filtered via [[deftest-def?]].
    - Tests in the DB whose `:seon.test/source` mentions any fn newly
      defined in THIS eval. Substring match — v0 heuristic, see
      `seon.test.runner/tests-referring-to`.
@@ -697,14 +720,14 @@
   [compile-state defs-before]
   (let [new-defs    (analyzer-info/defs-since defs-before compile-state)
         new-tests   (for [{:keys [var-map]} new-defs
-                          :when (some? (:test (:meta var-map)))]
+                          :when (deftest-def? var-map)]
                       (symbol (str (:name var-map))))
         new-fn-syms (for [{:keys [var-map]} new-defs
                           :when (and (:fn-var var-map)
                                      ;; deftest's public fn ALSO has
                                      ;; :fn-var true; skip — already
                                      ;; in new-tests above.
-                                     (nil? (:test (:meta var-map))))]
+                                     (not (deftest-def? var-map)))]
                       (symbol (str (:name var-map))))
         referring   (mapcat test-runner/tests-referring-to new-fn-syms)]
     (set (concat new-tests referring))))
@@ -750,6 +773,13 @@
   (let [new-defs    (analyzer-info/defs-since defs-before compile-state)
         new-schemas (set/difference (schema/current-keys) schemas-before)
         fn-entities (for [{:keys [ns var-map]} new-defs
+                          ;; deftest defs are :seon.test rows ONLY (below),
+                          ;; matching the substrate split (`substrate-vars` →
+                          ;; :seon.fn via index-substrate-tx; `!indexed-test-
+                          ;; vars` → :seon.test via index-tests — disjoint).
+                          ;; Also keeps resume single-lane: a deftest teed as
+                          ;; BOTH rows would replay its source twice.
+                          :when (not (deftest-def? var-map))
                           :let [{:keys [sym fn-var? arglists doc private? spec]}
                                 (analyzer-info/var-projection var-map)
                                 ;; Phase 3 (mvp-completion-plan 2026-05-27): if
@@ -824,13 +854,16 @@
                            :seon.schema/source     source
                            :seon.schema/created-at at})
         ;; Phase 4 (mvp-completion-plan 2026-05-27): deftest defs carry
-        ;; `:test` meta with the test body fn. Each gets a `:seon.test`
-        ;; row keyed on the FQ sym (identity attr). Source is the same
-        ;; form text — `tests-referring-to` later substring-scans it
-        ;; to find tests that mention a redefined fn.
+        ;; the analyzer's top-level `:test true` marker (see
+        ;; [[deftest-def?]] — the old `(:test (:meta var-map))` check was
+        ;; ALWAYS nil, the live-resume bug where agent deftests never got
+        ;; a :seon.test row). Each gets a `:seon.test` row keyed on the
+        ;; FQ sym (identity attr). Source is the same form text —
+        ;; `tests-referring-to` later substring-scans it to find tests
+        ;; that mention a redefined fn.
         test-entities (for [{:keys [ns var-map]} new-defs
                             :let [{:keys [sym]} (analyzer-info/var-projection var-map)]
-                            :when (some? (:test (:meta var-map)))]
+                            :when (deftest-def? var-map)]
                         {:seon.test/sym        sym
                          ;; nested-map upsert — see :seon.fn/ns note above.
                          :seon.test/ns         {:seon.ns/name (keyword (str ns))}
