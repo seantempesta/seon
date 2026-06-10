@@ -127,6 +127,19 @@ Every agent is seeded at create! with a `:purpose` section, priority ~12
   fulfilled → complete!. ANTI-DRIFT: user messages push turn by turn;
   the purpose section pulls back every render — a constant the
   transcript cannot dilute.
+- NO special mechanism: `:purpose` is just a `:seon.ctx/name` value.
+  The sugar verb IS the lesson — its full source is visibly a
+  one-liner, teaching that purpose (and anything worth pinning) is
+  just a high-priority section:
+
+  ```clojure
+  (defn set-purpose!
+    "Pin or update why you exist — sugar over add-section!."
+    [{text :seon.render/ai}]
+    (add-section! {:seon.ctx/name     :purpose
+                   :seon.ctx/priority 12
+                   :seon.render/ai    text}))
+  ```
 
 ## Show don't tell — how agents LEARN this
 
