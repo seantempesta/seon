@@ -452,10 +452,19 @@ exemplar-root swap fs→todo), plus whatever the two in-flight agents leave.
   convention IS the filter (no lists/regex/stamping — classification
   derived at render time from ONE full-index query); datahike query API
   included (render from var docstrings); **NO recipes ns — real namespaces
-  doing real work**: findings become `seon.kb` (store!/consult, owns
-  `:kb.finding/*`, consult-first lives in its docstrings); remaining
-  teaching → docstrings of the public faces; prose survivors = SOUL + a
-  few behavioral lines.
+  doing real work**; remaining teaching → docstrings of the public faces;
+  prose survivors = SOUL + a few behavioral lines.
+- **KB = SCHEMA'D DATA, NOT TEXT (user, 2026-06-10 late):** no generic
+  store!/consult, no text-claim rows (memory-file problem), NO
+  RAG/embeddings. Agents DESIGN a real schema per knowledge kind in domain
+  sub-namespaces (`kb.codebase.fn/*`, `kb.paper/*`, …) — same skill as
+  user-data modeling; everyone's kb is different by construction. `seon.kb`
+  shrinks to registering the SHARED PROVENANCE shapes once
+  (`:kb/source-path` `:kb/source-line` `:kb/verified-at` `:kb/confidence`)
+  for other schemas to reference. Consult = catalog + datalog (salience
+  surface already built). Generic `:kb.finding/*` teaching replaced
+  (store is freshly wiped — no legacy rows to honor); gym S-12/S-32
+  predicates update to "consults relevant kb.*/my.* attrs first".
 - **Agent code base ns = `my.*`** (user-confirmed): agents own it freely,
   everything under it auto-renders to ALL cluster agents (derived from tx
   provenance — agent-scoped txs vs `:substrate-seed`, no maintained list);
