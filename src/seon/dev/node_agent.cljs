@@ -11,31 +11,17 @@
    The PUBLIC handle is the agent-id (a string passed via `--agent-id <id>` on
    argv). client-id is internal shadow plumbing and is NOT stable across a
    crash+restart. So resolution is done by PROBING: the shadow JVM enumerates
-   `repl-runtimes`, pins each, and evals `(agent-id)` to learn which runtime is
-   which agent. A respawned agent reports the same agent-id under a new
-   client-id with no extra bookkeeping — that is the no-restart survival path.
+   `repl-runtimes`, pins each, and evals `(seon.dev.runtime-id/hosted)` to
+   learn which runtime hosts which ids (membership match). A respawned agent
+   reports the same agent-id under a new client-id with no extra bookkeeping —
+   that is the no-restart survival path.
 
-   This ns is intentionally tiny: read id, expose id, print a ready line, idle.
-   No DB, no wire-server — that is out of scope for this probe."
-  (:require [clojure.string :as str]))
-
-;; The agent-id this process answers to. Set once at boot from argv/env.
-(defonce ^:private !agent-id (atom nil))
-
-(defn agent-id
-  "Return this process's agent-id string (or nil before boot). This is the
-   form the shadow JVM evals into each runtime to resolve agent-id -> runtime."
-  []
-  @!agent-id)
-
-(defn set-agent-id!
-  "Set this runtime's agent-id. Lets sibling node-script runtimes (e.g.
-   `seon.store.internal.wire-node`) be addressable by the SAME MCP probe
-   (`bin/mcp-server-cljs` evals `(seon.dev.node-agent/agent-id)` to resolve
-   agent-id -> shadow client-id) without re-implementing the resolver."
-  [id]
-  (reset! !agent-id id)
-  id)
+   This ns is intentionally tiny: read id, host! it, print a ready line, idle.
+   No DB, no wire-server — that is out of scope for this probe. It survives
+   until the per-agent launcher (main PRD §7 item 10a) is verified end-to-end;
+   then the reorg DECIDE becomes DELETE."
+  (:require [clojure.string :as str]
+            [seon.dev.runtime-id :as runtime-id]))
 
 (defn- parse-agent-id
   "Pull the agent-id from `--agent-id <id>` argv, falling back to the
@@ -58,7 +44,8 @@
     (when (str/blank? id)
       (js/console.error "node-agent: no --agent-id provided (argv or SEON_AGENT_ID)")
       (js/process.exit 2))
-    (reset! !agent-id id)
+    ;; Answer the MCP membership probe (`(seon.dev.runtime-id/hosted)`).
+    (runtime-id/host! id)
     ;; Distinct, greppable ready line so the probe can confirm 3 live agents.
     (js/console.log (str "node-agent ready: agent-id=" id
                          " pid=" (.-pid js/process)))

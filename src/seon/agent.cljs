@@ -123,6 +123,12 @@
 
 (schema/register! :seon.agent/id            [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.agent/state         [:enum :idle :running])
+;; Lifecycle (P3.5/#31, 2026-06-10): ABSENT = active. A booting pod
+;; resumes every agent entity WITHOUT this attr; `complete!` stamps it;
+;; un-complete is an explicit `[:db/retract …]` (mirrors
+;; `seon.agent.todo/completed-at` — one vocabulary). Completed agents
+;; stay queryable history: never resumed, never triggered.
+(schema/register! :seon.agent/completed-at  :inst)
 ;; v0 :seon.agent/turn-count, :seon.agent/turns-since-inbound,
 ;; :seon.agent/interrupted? attrs deleted 2026-05-22. turn-count
 ;; was a holdover that always read 0; turns-since-inbound moved to
@@ -455,6 +461,7 @@
          :seon.render/html 'seon.render.default/view}
    [:seon.agent/id    :seon.agent/id]
    [:seon.agent/state :seon.agent/state]
+   [:seon.agent/completed-at {:optional true} :seon.agent/completed-at]
    [:seon.agent/sessions  {:optional true} :seon.agent/sessions]
    [:seon.agent/turns-cap {:optional true} :seon.agent/turns-cap]
    [:seon.agent/ctx       {:optional true} :seon.agent/ctx]
@@ -825,6 +832,74 @@
                           [:seon.agent.turn/woken-by :seon.agent.message/from :db/id])]
     (await (message! {:seon.agent.message/content content
                       :seon.agent.message/to      (if woke-from [woke-from] [user-ref])}))))
+
+;; ============================================================
+;; complete! — agent lifecycle end-stamp (P3.5/#31). Same vocabulary as
+;; seon.agent.todo/complete!: stamp `completed-at`, unknown id → fail
+;; envelope, already-completed → idempotent success. A completed agent
+;; is HISTORY: the booting pod's resume query skips it, no trigger is
+;; armed, the mission-control page groups it collapsed at the bottom.
+;; ============================================================
+
+(schema/register! ::ok?    :boolean)
+(schema/register! ::error  :string)
+
+(schema/register! ::complete-request
+  [:map
+   ;; default: the calling agent from the ALS scope (like reply!).
+   [::id {:optional true} ::id]])
+
+(schema/register! ::complete-response
+  [:map
+   [::ok?   ::ok?]
+   [::id    {:optional true} ::id]
+   [::error {:optional true} ::error]])
+
+(defn ^:async complete!
+  "Mark an agent's work finished, stamping `:seon.agent/completed-at`.
+   Map-in / envelope-out; `:seon.agent/id` defaults to the calling agent
+   from the ALS scope (like `reply!`); an explicit id completes another
+   agent. Unknown id → fail envelope; already-completed is idempotent
+   success. Mirrors `seon.agent.todo/complete!` semantics exactly — one
+   vocabulary for 'done'.
+
+   A completed agent is not resumed at pod boot and its user-message
+   trigger is not re-armed — it remains queryable history. Un-complete
+   is an explicit retract (absent = active, nil is never stored):
+
+     (seon.db/transact!
+       {:seon.db/tx-data
+        [[:db/retract [:seon.agent/id id] :seon.agent/completed-at]]})
+
+   …after which the next pod boot resumes it again."
+  {:malli/schema [:=> [:cat ::complete-request] ::complete-response]}
+  [{::keys [id]}]
+  (let [id  (or id (db/current-agent-id))
+        ent (when id (db/entity {:seon.db/ref [:seon.agent/id id]}))]
+    (cond
+      (nil? id)
+      {::ok? false
+       ::error (str "complete!: no :seon.agent/id and no agent in scope — "
+                    "pass an id or call inside (seon.db/with-agent …).")}
+
+      (nil? (:seon.agent/id ent))
+      {::ok? false
+       ::error (str "complete!: no agent " (pr-str id)
+                    " — query [?a :seon.agent/id ?id] for the live ids.")}
+
+      (some? (:seon.agent/completed-at ent))
+      {::ok? true ::id id}
+
+      :else
+      (let [env (await (db/transact!
+                         {:seon.db/tx-data
+                          [{:seon.agent/id           id
+                            :seon.agent/completed-at (js/Date.)}]}))]
+        (if (:seon.db/ok? env)
+          {::ok? true ::id id}
+          {::ok? false
+           ::error (str "complete!: store failed — "
+                        (get-in env [:seon.db/error :seon.error/message]))})))))
 
 ;; ============================================================
 ;; v1 §6 — turn lifecycle.

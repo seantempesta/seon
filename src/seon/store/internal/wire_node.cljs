@@ -1,7 +1,7 @@
 (ns seon.store.internal.wire-node
   "Plain-Node (NO WASM) UDS transport to the JVM wire-server, built as a
    shadow-cljs `:node-script` runtime you can REPL into over MCP
-   (`mcp__seon_cljs__eval`, agent_id \"wire\").
+   (`mcp__seon_cljs__eval`, agent_id \"proc:wire\").
 
    This is the MISSING transport piece from the CLJ-pivot scoping: the CLJS
    guest client (`seon.client-runtime.db`) routes every datahike op through
@@ -23,12 +23,15 @@
    Stays OUT of the `:client` build (its own `:wire-node` shadow build, its own
    `-main`). Build: `clj -M:cljs watch wire-node`;
    run: `node out/wire-node/main.js`."
-  (:require [clojure.string :as str]
-            [cognitect.transit :as t]
+  (:require [cognitect.transit :as t]
             [seon.store.internal.cbor :as cbor]
-            ;; reused only so this runtime answers the MCP agent-id probe
-            ;; (`(seon.dev.node-agent/agent-id)`) — see set-agent-id! below.
-            [seon.dev.node-agent :as node-agent]))
+            ;; MCP runtime-addressing probe — this runtime answers
+            ;; `(seon.dev.runtime-id/hosted)` with [\"proc:<name>\"]
+            ;; (default \"proc:wire\"; the `proc:` grammar marks non-agent
+            ;; infrastructure runtimes — mcp-agent-id-unification PRD §2.1).
+            ;; Zero-require ns by design; the slim :wire-node build stays
+            ;; transit/cbor-only otherwise.
+            [seon.dev.runtime-id :as runtime-id]))
 
 (def ^js net (js/require "node:net"))
 
@@ -45,11 +48,6 @@
 (defn- reader [] (or @!reader (reset! !reader (t/reader :json))))
 
 (def default-req-sock "tmp/seon-cluster-default-req.sock")
-
-;; The agent-id this runtime answers to (so MCP eval can pin it). Mirrors
-;; seon.dev.node-agent's resolution contract.
-(defonce ^:private !agent-id (atom "wire"))
-(defn agent-id [] @!agent-id)
 
 ;; ---------- value codec ----------
 
@@ -181,17 +179,18 @@
 ;; ---------- main ----------
 
 (defn -main [& args]
-  (let [v (vec args)
-        id (loop [i 0]
-             (cond
-               (>= i (count v)) "wire"
-               (= "--agent-id" (nth v i)) (get v (inc i))
-               :else (recur (inc i))))]
-    (reset! !agent-id id)
-    ;; also set the node-agent atom so the MCP resolver's probe
-    ;; (`(seon.dev.node-agent/agent-id)`) finds THIS runtime by agent-id.
-    (node-agent/set-agent-id! id)
-    (js/console.log (str "wire-node ready: agent-id=" id
+  (let [v    (vec args)
+        name (loop [i 0]
+               (cond
+                 (>= i (count v)) "wire"
+                 (= "--process-name" (nth v i)) (or (get v (inc i)) "wire")
+                 :else (recur (inc i))))
+        id   (str "proc:" name)]
+    ;; Answer the MCP probe under the `proc:<name>` grammar — non-agent
+    ;; infrastructure runtimes share the agent resolver but can never
+    ;; collide with substrate agent ids (new-id! never emits `:`).
+    (runtime-id/host! id)
+    (js/console.log (str "wire-node ready: id=" id
                          " pid=" (.-pid js/process)
                          " req-sock=" default-req-sock))
     ;; idle forever so the process stays a live shadow runtime

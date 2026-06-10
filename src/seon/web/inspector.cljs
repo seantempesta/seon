@@ -75,8 +75,10 @@
                     :seon.db/args  [agent-id]}))))
 
 (defn- list-agents-data
-  "Pull `[id state turn-count]` rows for every `:seon.agent/id` entity.
-   Sorted by id asc."
+  "Pull `[id state turn-count completed-at?]` rows for every
+   `:seon.agent/id` entity. Sorted by id asc. `:seon.agent/completed-at`
+   is present only when the agent is completed (absent = active — see
+   `seon.agent/complete!`); the dashboard groups on it."
   []
   (let [conn db/*conn*
         db   @conn
@@ -91,11 +93,15 @@
          (mapv (fn [id]
                  (let [ent (db/entity {:seon.db/db db
                                        :seon.db/ref [:seon.agent/id id]})]
-                   {:seon.agent/id         id
-                    :seon.agent/state      (or (:seon.agent/state ent) :unknown)
-                    ;; :seon.agent/turn-count the ATTR was retired
-                    ;; 2026-05-22 — derived from the session log now.
-                    :seon.agent/turn-count (default/agent-turn-count ent)}))))))
+                   (cond->
+                     {:seon.agent/id         id
+                      :seon.agent/state      (or (:seon.agent/state ent) :unknown)
+                      ;; :seon.agent/turn-count the ATTR was retired
+                      ;; 2026-05-22 — derived from the session log now.
+                      :seon.agent/turn-count (default/agent-turn-count ent)}
+                     (some? (:seon.agent/completed-at ent))
+                     (assoc :seon.agent/completed-at
+                            (:seon.agent/completed-at ent)))))))))
 
 (defn- findings-data
   "Every `:finding/*` row in the DB, oldest-first — the cluster's
@@ -909,6 +915,11 @@
   []
   (let [db   @db/*conn*
         rows (list-agents-data)
+        ;; Lifecycle split (P3.5/#31): completed agents (stamped via
+        ;; seon.agent/complete!) are HISTORY — grouped collapsed at the
+        ;; bottom, never resumed, never triggered. Active = absent attr.
+        active    (vec (remove :seon.agent/completed-at rows))
+        completed (vec (filter :seon.agent/completed-at rows))
         {::keys [agent-count turn-count fn-count finding-count datom-count]}
         (cluster-stats db)
         findings (findings-data db)]
@@ -951,19 +962,32 @@
                        ".catch(function(e){b.disabled=false;"
                        "b.textContent='\\u2717 '+e;});")}
         "+ new agent"]]]
-     (if (seq rows)
+     (if (seq active)
        (into [:div {:class "grid gap-2"
                     :style "grid-template-columns:repeat(auto-fill,minmax(300px,1fr));"}]
              (map #(agent-grid-tile db %))
-             rows)
+             active)
        [:p {:class "text-text-500 italic text-xs"}
-        "no agents yet — boot one via the REPL and it will appear here live"])
+        "no active agents — boot one via the REPL and it will appear here live"])
      (when (seq findings)
        [:section
         [:h2 {:class (str "text-xs font-semibold text-amber-400 uppercase "
                           "tracking-wider mb-2 font-mono")}
          (str "◆ what this cluster has learned · " (count findings))]
-        (knowledge-cards findings)])]))
+        (knowledge-cards findings)])
+     ;; Completed agents — queryable history, collapsed at the bottom.
+     ;; Not resumed at boot, no trigger armed; un-complete is an explicit
+     ;; retract of :seon.agent/completed-at (see seon.agent/complete!).
+     (when (seq completed)
+       [:details {:class "mt-2"}
+        [:summary {:class (str "text-xs font-semibold text-text-400 uppercase "
+                               "tracking-wider mb-2 font-mono cursor-pointer "
+                               "hover:text-text-300 select-none")}
+         (str "◇ completed agents · " (count completed))]
+        (into [:div {:class "grid gap-2 opacity-60"
+                     :style "grid-template-columns:repeat(auto-fill,minmax(300px,1fr));"}]
+              (map #(agent-grid-tile db %))
+              completed)])]))
 
 (defn- agents-index-page
   []

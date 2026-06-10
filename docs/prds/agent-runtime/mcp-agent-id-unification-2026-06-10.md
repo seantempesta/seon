@@ -1,10 +1,21 @@
 ---
 type: prd
-status: draft
+status: completed
 tags: [prd, agent]
 ---
 
 # MCP agent-id unification — substrate `:seon.agent/id` is THE id (2026-06-10)
+
+> SHIPPED 2026-06-10 (P3.5/#31, with resume-don't-mint + agent
+> lifecycle): `seon.dev.runtime-id` (host!/unhost!/hosted),
+> `seon.client` hosts at resume/mint/re-arm, wire-node answers
+> `proc:wire` (the node-agent require + duplicate atom + set-agent-id!
+> deleted), `bin/mcp-server-cljs` resolves by membership across
+> active builds with a build-aware pin. Live-proven: `agent_id` evals
+> against the pod's resumed agents pin the pod runtime; `proc:`
+> membership unit-tested (`test/seon/dev/runtime_id_test.cljs`).
+> Deferred from §3 step 7: the CLAUDE.md access-matrix entry + main
+> PRD §7 item 9(a) note (doc-only, outside the implementation fence).
 
 User ruling (2026-06-10): ONE naming convention for addressing agent
 runtimes, no parallel id schemes. The MCP eval `agent_id` parameter, the

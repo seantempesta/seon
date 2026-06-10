@@ -71,8 +71,12 @@
   ;; under src/ so it's on the ALREADY-RUNNING watcher's classpath — add +
   ;; `watch node-agent` with no server restart.
   ;;
+  ;; MCP probe = (seon.dev.runtime-id/hosted) — the runtime answers with
+  ;; the vector of ids it hosts; the resolver matches by membership
+  ;; (mcp-agent-id-unification PRD 2026-06-10).
+  ;;
   ;; Build:  clj -M:cljs watch node-agent
-  ;; Run:    node out/node-agent/main.js --agent-id a1
+  ;; Run:    node out/node-agent/main.js --agent-id <substrate-agent-id>
   ;; Output: out/node-agent/main.js
   :node-agent
   {:target           :node-script
@@ -86,13 +90,13 @@
   ;; shadow runtime (the CLJ-pivot's missing transport piece). Built OUTSIDE
   ;; :client — its own :node-script build, its own :main. `:devtools {:enabled
   ;; true}` so the process registers as a shadow runtime addressable over MCP
-  ;; (`mcp__seon_cljs__eval` agent_id "wire"). Reuses the SAME Transit codec
+  ;; (`mcp__seon_cljs__eval` agent_id "proc:wire"). Reuses the SAME Transit codec
   ;; (seon.client-runtime.transit) the WASM guest uses; CBOR framing in
   ;; seon.store.internal.cbor.
   ;;
   ;; Build:  clj -M:cljs watch wire-node
-  ;; Run:    node out/wire-node/main.js --agent-id wire
-  ;; REPL:   mcp__seon_cljs__eval agent_id="wire"
+  ;; Run:    node out/wire-node/main.js --process-name wire
+  ;; REPL:   mcp__seon_cljs__eval agent_id="proc:wire"
   :wire-node
   {:target           :node-script
    :output-to        "out/wire-node/main.js"

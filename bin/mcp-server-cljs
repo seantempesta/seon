@@ -46,15 +46,18 @@
 ;; sid (string) -> {:nrepl-session "<uuid>" :build "<:repl>" :created-at ms}
 (def sessions (atom {}))
 
-;; Multi-runtime addressing (go/no-go: "N agents you can REPL into by id").
-;; agent-id (string) -> {:nrepl-session "<uuid>" :client-id <int> :build "<:node-agent>"}
-;; A node-agent process exposes its public handle via
-;; `(seon.dev.node-agent/agent-id)`; client-id is internal shadow plumbing and
-;; is NOT stable across a crash+restart, so we re-resolve agent-id -> client-id
-;; per eval and re-pin when it changes. The MCP server and shadow watcher never
-;; restart as agents churn.
+;; Multi-runtime addressing — the UNIFIED id scheme (mcp-agent-id-unification
+;; PRD, 2026-06-10): agent_id IS the substrate :seon.agent/id (e.g.
+;; "iCg-2606101519"), or "proc:<name>" for non-agent infrastructure runtimes
+;; (wire-node = "proc:wire"). A runtime answers the probe
+;; `(seon.dev.runtime-id/hosted)` with the VECTOR of ids it hosts; resolution
+;; is MEMBERSHIP across ALL active builds (no hardwired build id) — the pod
+;; hosts every agent it resumed/minted. client-id is internal shadow plumbing
+;; and is NOT stable across a crash+restart, so we re-resolve agent-id ->
+;; {build, client-id} per cache miss and re-pin when it changes. This atom is
+;; a resolution CACHE keyed by the unified id, not a second id scheme.
+;; agent-id (string) -> {:nrepl-session "<uuid>" :client-id <int> :build "<:client>"}
 (def agent-sessions (atom {}))
-(def agent-build-id ":node-agent")
 
 (def stdout-lock (Object.))
 
@@ -258,39 +261,55 @@
                 10000)
     nrepl-sid))
 
-(defn resolve-agent-client-id!
-  "Probe-resolve agent-id -> current client-id. Enumerates the agent build's
-   runtimes and, for each, asks `(seon.dev.node-agent/agent-id)` until one
-   matches. Survives restart for free: a respawned agent reports the same
-   agent-id under its new client-id. Returns an int client-id or nil."
+(defn resolve-agent-runtime!
+  "Probe-resolve agent-id -> {:build \"<:client>\" :client-id <int>} by
+   MEMBERSHIP. Enumerates EVERY active build's runtimes (no hardwired build
+   id) and, for each, pins it and asks `(seon.dev.runtime-id/hosted)` — a
+   vector of the ids that runtime hosts (substrate :seon.agent/id strings,
+   or proc:<name> for infra runtimes). The first runtime whose answer
+   contains `agent-id` wins. Runtimes that error on the probe (ns not
+   loaded) are skipped, exactly like a non-matching id. Survives restart
+   for free: a respawned process reports the same ids under its new
+   client-id. Returns nil when nothing hosts the id."
   [port agent-id]
   (let [clj-sid (nrepl-clone-session port)
-        ids-res (nrepl-eval port clj-sid
+        bs-res  (nrepl-eval port clj-sid
                             (str "(require '[shadow.cljs.devtools.api :as shadow]) "
-                                 "(mapv :client-id (shadow/repl-runtimes " agent-build-id "))")
+                                 "(mapv (fn [b] [b (mapv :client-id (shadow/repl-runtimes b))]) "
+                                 "(shadow/active-builds))")
                             10000)
-        cids (try (read-string (or (:value ids-res) "[]")) (catch Exception _ []))]
-    (some (fn [cid]
-            (let [psid (pin-session! port agent-build-id cid)
-                  v (:value (nrepl-eval port psid "(seon.dev.node-agent/agent-id)" 10000))
-                  aid (try (when (and v (not (str/blank? v))) (read-string v))
-                           (catch Exception _ nil))]
-              (when (= aid agent-id) cid)))
-          cids)))
+        build->cids (try (read-string (or (:value bs-res) "[]"))
+                         (catch Exception _ []))]
+    (some (fn [[build cids]]
+            (some (fn [cid]
+                    (let [psid   (pin-session! port (str build) cid)
+                          v      (:value (nrepl-eval port psid
+                                                     "(seon.dev.runtime-id/hosted)" 10000))
+                          hosted (try (when (and v (not (str/blank? v)))
+                                        (read-string v))
+                                      (catch Exception _ nil))]
+                      (when (and (sequential? hosted)
+                                 (some #(= agent-id %) hosted))
+                        {:build (str build) :client-id cid})))
+                  cids))
+          build->cids)))
 
 (defn ensure-agent-session!
-  "Return {:nrepl-session sid :client-id cid} pinned to agent-id's CURRENT
-   runtime. Reuses the cached pinned session if the agent's client-id is
-   unchanged; otherwise re-resolves and re-pins (the no-restart survival path
-   after a crash+respawn). Returns nil if the agent has no live runtime."
+  "Return {:nrepl-session sid :client-id cid :build b} pinned to agent-id's
+   CURRENT runtime. Reuses the cached pinned session if the agent's
+   build+client-id are unchanged; otherwise re-resolves and re-pins (the
+   no-restart survival path after a crash+respawn). Returns nil if no live
+   runtime hosts the id."
   [port agent-id]
-  (let [cid (resolve-agent-client-id! port agent-id)]
-    (when cid
+  (let [{:keys [build client-id] :as resolved} (resolve-agent-runtime! port agent-id)]
+    (when resolved
       (let [cached (get @agent-sessions agent-id)]
-        (if (and cached (= cid (:client-id cached)))
+        (if (and cached
+                 (= client-id (:client-id cached))
+                 (= build (:build cached)))
           cached
-          (when-let [nrepl-sid (pin-session! port agent-build-id cid)]
-            (let [info {:nrepl-session nrepl-sid :client-id cid :build agent-build-id}]
+          (when-let [nrepl-sid (pin-session! port build client-id)]
+            (let [info {:nrepl-session nrepl-sid :client-id client-id :build build}]
               (swap! agent-sessions assoc agent-id info)
               info)))))))
 
@@ -394,9 +413,13 @@
       ;; No live runtime for this agent yet — it may be (re)connecting.
       (if (< tries 10)
         (do (Thread/sleep 200) (recur (inc tries)))
-        (mcp-error (str "No live runtime for agent-id '" agent-id
-                        "'. Is the node-agent process running? "
-                        "(node out/node-agent/main.js --agent-id " agent-id ")"))))))
+        (mcp-error (str "No live runtime hosts agent-id '" agent-id "'. "
+                        "agent_id is the substrate :seon.agent/id (the pod "
+                        "hosts every agent it resumed/minted — check "
+                        "(seon.dev.runtime-id/hosted) on the :client runtime, "
+                        "or bin/seon status / restart pod), or proc:<name> "
+                        "for infra runtimes (proc:wire needs the :wire-node "
+                        "build watched + node out/wire-node/main.js running)."))))))
 
 (defn execute-eval [{:keys [code session_id timeout_ms agent_id]}]
   (let [port (require-port!)
@@ -485,7 +508,7 @@
                   :properties {:code {:type "string"
                                       :description "ClojureScript code to evaluate. Must reference fully-qualified names (cljs.user has no implicit aliases beyond core)."}
                                :agent_id {:type "string"
-                                          :description "Address a specific node-agent runtime by its public agent-id (e.g. 'a1'). The server resolves agent-id -> current shadow client-id and pins the eval to that runtime. Survives agent crash+restart (re-resolves the new client-id) with no MCP/shadow restart. Omit to use the default :client runtime."}
+                                          :description "Address the runtime hosting a specific agent: the substrate :seon.agent/id (e.g. 'iCg-2606101519' — the same id in the cluster store, message refs, and /agent/<id> URLs), or 'proc:<name>' for non-agent infrastructure runtimes (e.g. 'proc:wire'). Resolution is by membership: every active build's runtimes are probed via (seon.dev.runtime-id/hosted) and the one hosting this id is pinned. Survives process crash+restart (re-resolves the new client-id) with no MCP/shadow restart. Omit to use the default :client runtime."}
                                :session_id {:type "string"
                                             :description "Session sid. 'default' for the singleton :repl build session (auto-created). Or a sid from create_session. Ignored when agent_id is set."}
                                :timeout_ms {:type "integer"
