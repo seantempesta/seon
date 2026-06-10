@@ -141,7 +141,7 @@
   ;; come from the base :deps.
   ;; 2.2d Stage B sha alignment (PREPARED, not flipped): datahike moved from
   ;; mvn 0.8.1671 to the SAME fork sha the pod's :cljs alias runs
-  ;; (seantempesta/datahike@01ba3f18), killing the reader-newer version-skew
+  ;; (seantempesta/datahike@1ae35696), killing the reader-newer version-skew
   ;; flag, and konserve is the Stage A header-fix fork (:local/root — no
   ;; pushable remote; see :replica-probe-jvm's note). dev-resources/
   ;; konserve-shim gives datahike's version-check a konserve version for the
@@ -152,7 +152,7 @@
   :writer {:extra-paths ["dev-resources/konserve-shim"]
            :extra-deps {org.replikativ/datahike
                         {:git/url "https://github.com/seantempesta/datahike"
-                         :git/sha "01ba3f18bf08da2c093eb0972ec1f272b817f23d"}
+                         :git/sha "1ae3569611ec62c4b0e378ffb902e563bddf57e1"}
                         com.cognitect/transit-clj {:mvn/version "1.0.333"}
                         com.fasterxml.jackson.dataformat/jackson-dataformat-cbor
                         {:mvn/version "2.17.0"}}
@@ -162,7 +162,7 @@
 
   ;; 2.2c DIS-replica probe — JVM writer side. Self-contained on purpose
   ;; (`:replace-deps`/`:replace-paths`): runs the SAME datahike fork sha the
-  ;; pod's :cljs alias overrides to (seantempesta/datahike@01ba3f18), so the
+  ;; pod's :cljs alias overrides to (seantempesta/datahike@1ae35696), so the
   ;; probe falsifies fressian/store compat WITHOUT version skew and WITHOUT
   ;; touching the main JVM deps the dev JVM / wire-server resolve
   ;; (:writer stays pinned to mvn 0.8.1671 — converging it is a follow-up).
@@ -172,7 +172,7 @@
   {:replace-deps  {org.clojure/clojure {:mvn/version "1.12.0"}
                    org.replikativ/datahike
                    {:git/url "https://github.com/seantempesta/datahike"
-                    :git/sha "01ba3f18bf08da2c093eb0972ec1f272b817f23d"}
+                    :git/sha "1ae3569611ec62c4b0e378ffb902e563bddf57e1"}
                    ;; konserve header fix (2.2d Stage A): CLJS meta-size
                    ;; BE32 + legacy 1-byte sniff. The fork repo has no
                    ;; pushable remote (mvn 0.9.346 was deployed from it),
@@ -197,7 +197,7 @@
   {:replace-deps  {org.clojure/clojure {:mvn/version "1.12.0"}
                    org.replikativ/datahike
                    {:git/url "https://github.com/seantempesta/datahike"
-                    :git/sha "01ba3f18bf08da2c093eb0972ec1f272b817f23d"}
+                    :git/sha "1ae3569611ec62c4b0e378ffb902e563bddf57e1"}
                    org.replikativ/konserve
                    {:local/root "/Users/sean/src/konserve"}}
    :replace-paths ["probe" "dev-resources/konserve-shim"]
@@ -295,7 +295,7 @@
          ;; PR-shaped pending upstream review.
          :override-deps {org.replikativ/datahike
                          {:git/url "https://github.com/seantempesta/datahike"
-                          :git/sha "01ba3f18bf08da2c093eb0972ec1f272b817f23d"}
+                          :git/sha "1ae3569611ec62c4b0e378ffb902e563bddf57e1"}
                          ;; konserve header fix (2.2d Stage A): CLJS
                          ;; meta-size BE32 at bytes 4-7 + legacy 1-byte
                          ;; sniff in parse-header, so JVM- and Node-written
