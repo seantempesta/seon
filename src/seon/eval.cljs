@@ -1177,7 +1177,7 @@
      5. Transact a :seon.eval entity carrying :seon.eval/ns = the
         post-update accumulator value.
 
-   `:kind :read` (a parse-forms failure, see seon.parse):
+   `:kind :read` (a parse-forms failure, see seon.repl.internal):
      1. Skip the eval (no source to evaluate).
      2. Record as a failed :seon.eval with :seon.eval/ns = the
         unchanged accumulator value (the ns the form WOULD have
@@ -1193,7 +1193,7 @@
 
    Args:
      compile-state — the bootstrap compile-state (defonce'd at boot)
-     parsed        — vector from `seon.parse/parse-forms`
+     parsed        — vector from `seon.repl.internal/parse-forms`
                      (mix of `:kind :form` and `:kind :read` entries)
      agent-ns-sym  — agent's home ns (e.g. 'seon.agent.seon)
      agent-id      — the owning agent's id
@@ -1233,7 +1233,7 @@
           (db/with-tx-context tx-context
             (fn ^:async run-one-entry! []
               (cond
-                ;; Read-failure entry from seon.parse — no eval, record
+                ;; Read-failure entry from seon.repl.internal — no eval, record
                 ;; directly as a failed :seon.eval. :seon.eval/ns =
                 ;; the unchanged accumulator (last-known-good ns).
                 (and (= :read (:kind entry)) (false? (:ok? entry)))

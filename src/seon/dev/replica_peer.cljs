@@ -13,7 +13,7 @@
      called for, mirroring datahike.http.writer/DatahikeServerWriter's
      shape): `d/transact!` dispatches `{:op 'transact! :args [arg-map]}`
      here, we forward it over the EXISTING UDS `transact` op
-     (seon.dev.wire-node → seon.server.wire), and synthesize the tx-report
+     (seon.store.internal.wire-node → seon.server.wire), and synthesize the tx-report
      from the ack + a local re-deref.
    - RYOW: the dispatch resolves ONLY after a local deref shows
      `:max-tx` ≥ the ack'd basis-t. Flush-before-ack (writer.cljc:108-134,
@@ -53,7 +53,7 @@
    [datahike.writer :as w]
    ;; registers datahike's :file backend on Node (same require the pod does)
    [konserve.node-filestore]
-   [seon.dev.wire-node :as wire]))
+   [seon.store.internal.wire-node :as wire]))
 
 (def ^:private fs (js/require "fs"))
 

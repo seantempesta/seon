@@ -1,4 +1,4 @@
-(ns seon.search
+(ns seon.agent.search
   "Content search over allowed files — ripgrep wrapped as a substrate
    capability. THE EXEMPLAR npm-package wrapper: copy this file's shape
    when wrapping the next package.
@@ -13,16 +13,16 @@
       full `:malli/schema` on every public fn, ALL keys namespaced.
       No `:any` except at the npm boundary value itself.
    3. ERRORS ARE VALUES. Every public fn RESOLVES to an envelope —
-      `{:seon.search/ok? true …}` on success,
-      `{:seon.search/ok? false :seon.search/error <guiding message>
-        :seon.search/raw-error <npm-side detail>}` on failure.
+      `{:seon.agent.search/ok? true …}` on success,
+      `{:seon.agent.search/ok? false :seon.agent.search/error <guiding message>
+        :seon.agent.search/raw-error <npm-side detail>}` on failure.
       Never throws, never rejects (same contract as seon.db/transact!).
       Each failure mode of the wrapped tool gets its OWN guiding
       message; the raw npm/binary output is preserved at
-      `:seon.search/raw-error` for debugging.
-   4. CAPABILITY-GATED. File-touching wrappers honor the `seon.fs`
-      allowlist by DELEGATING to seon.fs's public surface (here:
-      `seon.fs/stat` per search root — same normalization, same
+      `:seon.agent.search/raw-error` for debugging.
+   4. CAPABILITY-GATED. File-touching wrappers honor the `seon.agent.fs`
+      allowlist by DELEGATING to seon.agent.fs's public surface (here:
+      `seon.agent.fs/stat` per search root — same normalization, same
       default-deny). Never reimplement the allowlist, never bypass it.
    5. Lazy `js/require` of the package inside a try — a missing binary
       is an envelope, not a load-time crash.
@@ -44,23 +44,23 @@
    ## The search→read recipe (the core move)
 
      ;; 1. grep for the term (pattern is a REGEX)
-     (await (seon.search/grep {:seon.search/pattern \"validate-entity-values!\"
-                               :seon.search/glob    \"*.cljs\"}))
-     ;; => {:seon.search/ok? true
-     ;;     :seon.search/matches
-     ;;     [{:seon.search/path \"/Users/me/src/seon/src/seon/db.cljs\"
-     ;;       :seon.search/line-number 803
-     ;;       :seon.search/line-text \"(defn- validate-entity-values!\"} …]
-     ;;     :seon.search/match-count 4 :seon.search/truncated? false}
+     (await (seon.agent.search/grep {:seon.agent.search/pattern \"validate-entity-values!\"
+                               :seon.agent.search/glob    \"*.cljs\"}))
+     ;; => {:seon.agent.search/ok? true
+     ;;     :seon.agent.search/matches
+     ;;     [{:seon.agent.search/path \"/Users/me/src/seon/src/seon/db.cljs\"
+     ;;       :seon.agent.search/line-number 803
+     ;;       :seon.agent.search/line-text \"(defn- validate-entity-values!\"} …]
+     ;;     :seon.agent.search/match-count 4 :seon.agent.search/truncated? false}
 
      ;; 2. read the hit precisely
-     (seon.fs/read-file {:seon.fs/path \"/Users/me/src/seon/src/seon/db.cljs\"})
+     (seon.agent.fs/read-file {:seon.agent.fs/path \"/Users/me/src/seon/src/seon/db.cljs\"})
      ;; result paths are absolute and allowlisted, so they feed
-     ;; seon.fs/read-file directly — search → read, no guessing."
+     ;; seon.agent.fs/read-file directly — search → read, no guessing."
   (:require
     ["node:child_process" :as cp]
     [clojure.string :as str]
-    [seon.fs :as fs]
+    [seon.agent.fs :as fs]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -74,7 +74,7 @@
 
 (def ^:private max-output-bytes
   "execFile :maxBuffer — rg stdout beyond this is dropped; the partial
-   output IS still parsed and returned with :seon.search/truncated? true."
+   output IS still parsed and returned with :seon.agent.search/truncated? true."
   (* 8 1024 1024))
 
 (def ^:private max-line-chars
@@ -88,46 +88,46 @@
 ;; Schemas — every key registered, request/response named.
 ;; ============================================================
 
-(schema/register! :seon.search/pattern [:string {:min 1}])
-(schema/register! :seon.search/paths [:vector :string])
-(schema/register! :seon.search/glob :string)
-(schema/register! :seon.search/max-results :int)
-(schema/register! :seon.search/case-insensitive? :boolean)
+(schema/register! :seon.agent.search/pattern [:string {:min 1}])
+(schema/register! :seon.agent.search/paths [:vector :string])
+(schema/register! :seon.agent.search/glob :string)
+(schema/register! :seon.agent.search/max-results :int)
+(schema/register! :seon.agent.search/case-insensitive? :boolean)
 
-(schema/register! :seon.search/ok? :boolean)
-(schema/register! :seon.search/error :string)
-(schema/register! :seon.search/raw-error :string)
+(schema/register! :seon.agent.search/ok? :boolean)
+(schema/register! :seon.agent.search/error :string)
+(schema/register! :seon.agent.search/raw-error :string)
 
-(schema/register! :seon.search/path :string)
-(schema/register! :seon.search/line-number :int)
-(schema/register! :seon.search/line-text :string)
+(schema/register! :seon.agent.search/path :string)
+(schema/register! :seon.agent.search/line-number :int)
+(schema/register! :seon.agent.search/line-text :string)
 
-(schema/register! :seon.search/match
+(schema/register! :seon.agent.search/match
   [:map
-   [:seon.search/path        :seon.search/path]
-   [:seon.search/line-number :seon.search/line-number]
-   [:seon.search/line-text   :seon.search/line-text]])
+   [:seon.agent.search/path        :seon.agent.search/path]
+   [:seon.agent.search/line-number :seon.agent.search/line-number]
+   [:seon.agent.search/line-text   :seon.agent.search/line-text]])
 
-(schema/register! :seon.search/matches [:vector :seon.search/match])
-(schema/register! :seon.search/match-count :int)
-(schema/register! :seon.search/truncated? :boolean)
+(schema/register! :seon.agent.search/matches [:vector :seon.agent.search/match])
+(schema/register! :seon.agent.search/match-count :int)
+(schema/register! :seon.agent.search/truncated? :boolean)
 
-(schema/register! :seon.search/grep-request
+(schema/register! :seon.agent.search/grep-request
   [:map
-   [:seon.search/pattern           :seon.search/pattern]
-   [:seon.search/paths             {:optional true} :seon.search/paths]
-   [:seon.search/glob              {:optional true} :seon.search/glob]
-   [:seon.search/max-results       {:optional true} :seon.search/max-results]
-   [:seon.search/case-insensitive? {:optional true} :seon.search/case-insensitive?]])
+   [:seon.agent.search/pattern           :seon.agent.search/pattern]
+   [:seon.agent.search/paths             {:optional true} :seon.agent.search/paths]
+   [:seon.agent.search/glob              {:optional true} :seon.agent.search/glob]
+   [:seon.agent.search/max-results       {:optional true} :seon.agent.search/max-results]
+   [:seon.agent.search/case-insensitive? {:optional true} :seon.agent.search/case-insensitive?]])
 
-(schema/register! :seon.search/grep-response
+(schema/register! :seon.agent.search/grep-response
   [:map
-   [:seon.search/ok?         :seon.search/ok?]
-   [:seon.search/matches     {:optional true} :seon.search/matches]
-   [:seon.search/match-count {:optional true} :seon.search/match-count]
-   [:seon.search/truncated?  {:optional true} :seon.search/truncated?]
-   [:seon.search/error       {:optional true} :seon.search/error]
-   [:seon.search/raw-error   {:optional true} :seon.search/raw-error]])
+   [:seon.agent.search/ok?         :seon.agent.search/ok?]
+   [:seon.agent.search/matches     {:optional true} :seon.agent.search/matches]
+   [:seon.agent.search/match-count {:optional true} :seon.agent.search/match-count]
+   [:seon.agent.search/truncated?  {:optional true} :seon.agent.search/truncated?]
+   [:seon.agent.search/error       {:optional true} :seon.agent.search/error]
+   [:seon.agent.search/raw-error   {:optional true} :seon.agent.search/raw-error]])
 
 ;; ============================================================
 ;; Envelope helpers
@@ -137,16 +137,16 @@
   "ok?-false envelope. `raw` (optional) preserves the npm-side detail."
   ([msg] (fail msg nil))
   ([msg raw]
-   (cond-> {:seon.search/ok?   false
-            :seon.search/error msg}
+   (cond-> {:seon.agent.search/ok?   false
+            :seon.agent.search/error msg}
      (and raw (not (str/blank? raw)))
-     (assoc :seon.search/raw-error (str/trim raw)))))
+     (assoc :seon.agent.search/raw-error (str/trim raw)))))
 
 (defn- ok-empty []
-  {:seon.search/ok?         true
-   :seon.search/matches     []
-   :seon.search/match-count 0
-   :seon.search/truncated?  false})
+  {:seon.agent.search/ok?         true
+   :seon.agent.search/matches     []
+   :seon.agent.search/match-count 0
+   :seon.agent.search/truncated?  false})
 
 ;; ============================================================
 ;; npm boundary — lazy require + execFile wrapper.
@@ -178,35 +178,35 @@
                    (resolve #js {:err err :stdout stdout :stderr stderr}))))))
 
 ;; ============================================================
-;; Allowlist gate — delegate to seon.fs, never reimplement.
+;; Allowlist gate — delegate to seon.agent.fs, never reimplement.
 ;; ============================================================
 
 (defn- default-roots
-  "The seon.fs allowed roots — the default search scope (\"search
+  "The seon.agent.fs allowed roots — the default search scope (\"search
    everything the agent may read\")."
   []
-  (vec (:seon.fs/allowed-roots @fs/!config)))
+  (vec (:seon.agent.fs/allowed-roots @fs/!config)))
 
 (defn- gate-path
-  "nil when `path` is readable per seon.fs; otherwise the ok?-false
+  "nil when `path` is readable per seon.agent.fs; otherwise the ok?-false
    envelope. Delegates normalization + allowlist + existence to
-   seon.fs/stat (the same gate read-file uses), so search and read
+   seon.agent.fs/stat (the same gate read-file uses), so search and read
    always agree on what is reachable."
   [path]
-  (let [{ok?   :seon.fs/ok?
-         error :seon.fs/error} (fs/stat {:seon.fs/path path})]
+  (let [{ok?   :seon.agent.fs/ok?
+         error :seon.agent.fs/error} (fs/stat {:seon.agent.fs/path path})]
     (when-not ok?
       (fail (str "search path " (pr-str path) " is not searchable — "
                  "path outside the allowed roots — ask your human to "
-                 "grant access via (seon.fs/configure! "
-                 "{:seon.fs/allowed-roots [...]}). seon.fs said: " error)))))
+                 "grant access via (seon.agent.fs/configure! "
+                 "{:seon.agent.fs/allowed-roots [...]}). seon.agent.fs said: " error)))))
 
 ;; ============================================================
 ;; rg --json parsing
 ;; ============================================================
 
 (defn- parse-match-line
-  "One rg --json line → a :seon.search/match map, or nil for non-match
+  "One rg --json line → a :seon.agent.search/match map, or nil for non-match
    events (begin/end/summary), unparsable fragments (the cut-off last
    line when the output cap hits), and non-UTF8 paths/lines (rg emits
    `bytes` instead of `text` for those — we skip them)."
@@ -219,9 +219,9 @@
                 path-text (some-> d .-path .-text)
                 line-text (some-> d .-lines .-text)]
             (when (and path-text line-text)
-              {:seon.search/path        path-text
-               :seon.search/line-number (.-line_number d)
-               :seon.search/line-text   (let [t (str/trim-newline line-text)]
+              {:seon.agent.search/path        path-text
+               :seon.agent.search/line-number (.-line_number d)
+               :seon.agent.search/line-text   (let [t (str/trim-newline line-text)]
                                           (if (> (count t) max-line-chars)
                                             (subs t 0 max-line-chars)
                                             t))}))))
@@ -229,7 +229,7 @@
 
 (defn- success-from
   "Parse rg --json stdout into the ok?-true envelope, clipping at
-   `cap` matches. Parses cap+1 rows so :seon.search/truncated? can
+   `cap` matches. Parses cap+1 rows so :seon.agent.search/truncated? can
    report that the clip actually dropped something."
   [stdout cap]
   (let [rows    (into []
@@ -237,61 +237,61 @@
                       (str/split-lines stdout))
         clipped (> (count rows) cap)
         ms      (if clipped (subvec rows 0 cap) rows)]
-    {:seon.search/ok?         true
-     :seon.search/matches     ms
-     :seon.search/match-count (count ms)
-     :seon.search/truncated?  clipped}))
+    {:seon.agent.search/ok?         true
+     :seon.agent.search/matches     ms
+     :seon.agent.search/match-count (count ms)
+     :seon.agent.search/truncated?  clipped}))
 
 ;; ============================================================
 ;; Public API
 ;; ============================================================
 
 (defn ^:async grep
-  "Search file CONTENTS under the seon.fs allowed roots. `^:async` —
-   returns a Promise that ALWAYS resolves to a :seon.search/grep-response
+  "Search file CONTENTS under the seon.agent.fs allowed roots. `^:async` —
+   returns a Promise that ALWAYS resolves to a :seon.agent.search/grep-response
    envelope (never rejects; errors are values).
 
    Request keys:
-     :seon.search/pattern           REQUIRED — a REGEX (rg syntax), not a
+     :seon.agent.search/pattern           REQUIRED — a REGEX (rg syntax), not a
                                     literal: escape ( ) [ ] { } . with \\\\
-     :seon.search/paths             optional — files/dirs to search;
-                                    DEFAULT = the seon.fs allowed roots
-     :seon.search/glob              optional — filename filter, e.g. \"*.cljs\"
-     :seon.search/max-results       optional — clip (default 100);
-                                    :seon.search/truncated? true when hit
-     :seon.search/case-insensitive? optional
+     :seon.agent.search/paths             optional — files/dirs to search;
+                                    DEFAULT = the seon.agent.fs allowed roots
+     :seon.agent.search/glob              optional — filename filter, e.g. \"*.cljs\"
+     :seon.agent.search/max-results       optional — clip (default 100);
+                                    :seon.agent.search/truncated? true when hit
+     :seon.agent.search/case-insensitive? optional
 
-   No matches is SUCCESS: {:seon.search/ok? true :seon.search/matches []}.
+   No matches is SUCCESS: {:seon.agent.search/ok? true :seon.agent.search/matches []}.
    rg exit 1 (nothing found) is not an error.
 
    Worked example — search → read precisely:
 
-     (await (seon.search/grep {:seon.search/pattern \"transact!\"
-                               :seon.search/glob    \"*.md\"}))
+     (await (seon.agent.search/grep {:seon.agent.search/pattern \"transact!\"
+                               :seon.agent.search/glob    \"*.md\"}))
      ;; pick a hit, then:
-     (seon.fs/read-file {:seon.fs/path <:seon.search/path of the hit>})
-     ;; jump to its :seon.search/line-number in the content.
+     (seon.agent.fs/read-file {:seon.agent.fs/path <:seon.agent.search/path of the hit>})
+     ;; jump to its :seon.agent.search/line-number in the content.
 
    NOTE: ^:async means Malli validates the request; the response schema
    documents the RESOLVED value (the raw return is a js/Promise — same
    caveat as seon.db/transact!)."
-  {:malli/schema [:=> [:cat :seon.search/grep-request]
-                  :seon.search/grep-response]}
-  [{:seon.search/keys [pattern paths glob max-results case-insensitive?]
+  {:malli/schema [:=> [:cat :seon.agent.search/grep-request]
+                  :seon.agent.search/grep-response]}
+  [{:seon.agent.search/keys [pattern paths glob max-results case-insensitive?]
     :or {max-results default-max-results}}]
   (try
     (let [roots (if (seq paths) (vec paths) (default-roots))
           bin   (rg-path)]
       (cond
         (or (nil? pattern) (str/blank? pattern))
-        (fail (str ":seon.search/pattern is required and must be non-blank "
+        (fail (str ":seon.agent.search/pattern is required and must be non-blank "
                    "— it is a regex over file contents."))
 
         (empty? roots)
-        (fail (str "nothing is searchable: no :seon.search/paths given and "
-                   "seon.fs has no allowed-roots configured (default-deny) "
+        (fail (str "nothing is searchable: no :seon.agent.search/paths given and "
+                   "seon.agent.fs has no allowed-roots configured (default-deny) "
                    "— ask your human to grant access via "
-                   "(seon.fs/configure! {:seon.fs/allowed-roots [...]})."))
+                   "(seon.agent.fs/configure! {:seon.agent.fs/allowed-roots [...]})."))
 
         (nil? bin)
         (fail (str "ripgrep binary not found — the @vscode/ripgrep npm "
@@ -314,8 +314,8 @@
               ;; Timeout — execFile killed the child.
               (and err (.-killed err))
               (fail (str "search timed out after " timeout-ms "ms — "
-                         "narrow :seon.search/paths, add a "
-                         ":seon.search/glob, or use a more specific "
+                         "narrow :seon.agent.search/paths, add a "
+                         ":seon.agent.search/glob, or use a more specific "
                          "pattern.")
                     stderr)
 
@@ -328,7 +328,7 @@
               ;; Output cap — partial stdout is still parseable.
               (and err (= "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" (.-code err)))
               (assoc (success-from stdout max-results)
-                     :seon.search/truncated? true)
+                     :seon.agent.search/truncated? true)
 
               ;; rg exit 1 = searched fine, found nothing. NOT an error.
               (and err (= 1 (.-code err)))
@@ -337,7 +337,7 @@
               ;; rg exit 2 (or anything else) — bad regex is the common case.
               err
               (fail (str "ripgrep rejected the search — most often an "
-                         "invalid regex in :seon.search/pattern (it is a "
+                         "invalid regex in :seon.agent.search/pattern (it is a "
                          "REGEX, not a literal: escape ( ) [ ] { } . with "
                          "\\\\). Detail: "
                          (or (first (str/split-lines (str stderr)))
@@ -347,5 +347,5 @@
               :else
               (success-from stdout max-results))))))
     (catch :default e
-      (fail (str "unexpected error in seon.search/grep: "
+      (fail (str "unexpected error in seon.agent.search/grep: "
                  (or (some-> e .-message) (str e)))))))

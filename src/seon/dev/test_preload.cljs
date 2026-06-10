@@ -43,9 +43,9 @@
     ;; Unit 1.5 (2026-06-09): messaging codified — message!/reply!,
     ;; from/to refs, hops, blank-content guard, derived conversation.
     [seon.message-test]
-    ;; seon.search (2026-06-09): the exemplar npm-package wrapper —
-    ;; ripgrep envelope contract, seon.fs allowlist gating, truncation.
-    [seon.search-test]
+    ;; seon.agent.search (2026-06-09): the exemplar npm-package wrapper —
+    ;; ripgrep envelope contract, seon.agent.fs allowlist gating, truncation.
+    [seon.agent.search-test]
     ;; Boot-time test indexing (unit #23 fix b): this preload's require
     ;; closure IS the pod's test roster, so the deftest-vars macro below
     ;; can see every deftest var — seon.client (compiled before the test

@@ -11,7 +11,7 @@
      (connector.cljc:69-78). No API change anywhere in `seon.db`.
    - WRITES go over the wire: `d/transact!` dispatches to the
      `SeonWireWriter`, which forwards the op over the existing UDS
-     `transact` op (`seon.dev.wire-node` → `seon.server.wire`) and
+     `transact` op (`seon.store.internal.wire-node` → `seon.server.wire`) and
      synthesizes the tx-report from the ack + a local RYOW re-deref.
      The JVM is the SOLE writer on the store.
    - CHANGE NOTIFICATION: `start-listen-adapter!` subscribes to the
@@ -33,7 +33,7 @@
    [datahike.connector :as connector]
    [datahike.datom :as dd]
    [datahike.writer :as w]
-   [seon.dev.wire-node :as wire]
+   [seon.store.internal.wire-node :as wire]
    [seon.log :as log]
    [seon.schema :as schema]))
 
@@ -56,7 +56,7 @@
 
 (def default-sock-path
   "The default cluster's UDS request socket (matches bin/seon's
-   wire-server launch args + seon.dev.wire-node/default-req-sock)."
+   wire-server launch args + seon.store.internal.wire-node/default-req-sock)."
   wire/default-req-sock)
 
 (def default-store-path

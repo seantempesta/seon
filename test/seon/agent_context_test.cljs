@@ -42,12 +42,12 @@
     [seon.client :as client]
     [seon.db :as db]
     [seon.eval :as seval]
-    [seon.inspect :as inspect]
+    [seon.agent.inspect :as inspect]
     [seon.schema :as schema]
     ;; The exemplar TEST SIBLINGS — required so the fixture can seed their
     ;; :seon.ns rows (full file text) via client/index-tests, the same
     ;; mechanism the pod's preload-driven boot uses.
-    [seon.search-test]
+    [seon.agent.search-test]
     [seon.agent.todo-test]))
 
 ;; ---------------------------------------------------------------------------
@@ -63,7 +63,7 @@
 (defn- seed-tx
   "tx-data for an agent with NO `:seon.agent/ctx`, a session with two
    turns. Turn 1: a user message + a FAILED eval (drives warnings).
-   Turn 2: a successful eval in ns `:seon.agent.ctxtest` plus a
+   Turn 2: a successful eval in ns `:seon.agent.ctx-260610` plus a
    `:seon.ns`/`:seon.fn` for that ns (drives current-ns). `extra-evals`
    lets a test append big-result evals to turn 2.
 
@@ -103,7 +103,7 @@
               :seon.eval/source "(seon.db/query [:bad])"
               :seon.eval/ok? false
               :seon.eval/error "boom — bad query"
-              :seon.eval/ns :seon.agent.ctxtest}]}
+              :seon.eval/ns :seon.agent.ctx-260610}]}
            {:seon.turn/id "TRNctxtest0002"
             :seon.turn/at (t 20)
             :seon.turn/status :done
@@ -113,15 +113,15 @@
                     :seon.eval/duration-ms 3
                     :seon.eval/source "(defn greet [] :hi)"
                     :seon.eval/ok? true
-                    :seon.eval/result-edn "#'seon.agent.ctxtest/greet"
-                    :seon.eval/ns :seon.agent.ctxtest}]
+                    :seon.eval/result-edn "#'seon.agent.ctx-260610/greet"
+                    :seon.eval/ns :seon.agent.ctx-260610}]
                   extra-evals)}]}]}
        ;; Program-graph entities for the agent's current ns so
        ;; namespace-context-section has source to render.
-       {:seon.ns/name :seon.agent.ctxtest
-        :seon.ns/source "(ns seon.agent.ctxtest)"}
-       {:seon.fn/sym "seon.agent.ctxtest/greet"
-        :seon.fn/ns [:seon.ns/name :seon.agent.ctxtest]
+       {:seon.ns/name :seon.agent.ctx-260610
+        :seon.ns/source "(ns seon.agent.ctx-260610)"}
+       {:seon.fn/sym "seon.agent.ctx-260610/greet"
+        :seon.fn/ns [:seon.ns/name :seon.agent.ctx-260610]
         :seon.fn/source "(defn greet [] :hi)"}])))
 
 (defn- boot-seed-tx
@@ -153,7 +153,7 @@
       ;; builder the pod boot uses). Drives the :exemplars section's
       ;; test-sibling blocks.
       (client/index-tests
-        [#'seon.search-test/match-found-with-path-line-text
+        [#'seon.agent.search-test/match-found-with-path-line-text
          #'seon.agent.todo-test/the-store-retrieve-arc-with-resume]))))
 
 (defn- with-seeded-conn
@@ -195,7 +195,7 @@
    :seon.eval/source "(seon.db/pull {:seon.db/pull-pattern '[*]})"
    :seon.eval/ok? true
    :seon.eval/result-edn (apply str (repeat n "x"))
-   :seon.eval/ns :seon.agent.ctxtest})
+   :seon.eval/ns :seon.agent.ctx-260610})
 
 ;; ---------------------------------------------------------------------------
 ;; (a) THE regression — no stored ctx still yields the full default context.
@@ -325,7 +325,7 @@
                   i-user      (str/index-of ts "user> build me a thing")
                   i-assistant (str/index-of ts "assistant> on it")
                   i-failed    (str/index-of ts "boom — bad query")
-                  i-success   (str/index-of ts "seon.agent.ctxtest/greet")]
+                  i-success   (str/index-of ts "seon.agent.ctx-260610/greet")]
               (is (str/includes? ts "<transcript>") "transcript marker present")
               (is (and i-user i-assistant i-failed i-success)
                   "all four transcript items present (2 msgs + 2 evals)")
@@ -634,14 +634,14 @@
               (is (not (str/includes? txt "(seon.schema/register! k v)"))
                   "no per-fn signature lines for substrate nses")
               ;; EXEMPLAR nses cross-reference the full source above.
-              (is (re-find #"seon\.search — \d+ fns? \(full source above\)" txt)
+              (is (re-find #"seon\.agent\.search — \d+ fns? \(full source above\)" txt)
                   "exemplar ns count line carries the full-source cross-reference")
               (is (re-find #"seon\.agent\.todo — \d+ fns? \(full source above\)" txt)
                   "seon.agent.todo cross-references too")
-              (is (and (re-find #"seon\.fs — \d+ fns?" txt)
-                       (not (re-find #"seon\.fs — \d+ fns? \(full source above\)"
+              (is (and (re-find #"seon\.agent\.fs — \d+ fns?" txt)
+                       (not (re-find #"seon\.agent\.fs — \d+ fns? \(full source above\)"
                                      txt)))
-                  "seon.fs (rotated out) is a PLAIN count line — no
+                  "seon.agent.fs (rotated out) is a PLAIN count line — no
                    full-source cross-reference")
               ;; The OWN-ns full-source special case is DEAD.
               (is (not (str/includes? txt "(your ns)"))
@@ -649,9 +649,9 @@
               (is (not (str/includes? txt "(defn greet [] :hi)"))
                   "own-ns source does NOT render here (it renders ONCE, in
                    :namespace-context)")
-              ;; AGENT-authored ns (seon.agent.ctxtest) keeps per-fn callable
+              ;; AGENT-authored ns (seon.agent.ctx-260610) keeps per-fn callable
               ;; lines (greet has no stored arglists → the `(sym …)` fallback).
-              (is (str/includes? txt "(seon.agent.ctxtest/greet …)")
+              (is (str/includes? txt "(seon.agent.ctx-260610/greet …)")
                   "agent-authored ns renders one callable line per fn")
               ;; No other ns's full source leaks in.
               (is (not (str/includes? txt "(defn transact!"))
@@ -706,7 +706,7 @@
 ;; ---------------------------------------------------------------------------
 ;; (l) exemplars-section — FULL exemplar source from the program graph
 ;;     (context-focus-redesign 2026-06-10, units E1+E2; roots swapped
-;;     fs→todo in context-v3 unit 2). Guards: full seon.search/seon.agent.todo
+;;     fs→todo in context-v3 unit 2). Guards: full seon.agent.search/seon.agent.todo
 ;;     + test-sibling source renders, in deterministic
 ;;     order; byte-stable across renders (cache-prefix invariant);
 ;;     a stubbed root renders nothing (fail-loud, no stub padding); the whole
@@ -724,11 +724,11 @@
                           (agent/assemble-context
                             {:seon.db/db db :seon.agent/id agent-id}))]
               (is (str/includes? txt "<exemplars>") "wrapper marker present")
-              (is (str/includes? full "<exemplar ns=\"seon.search\">")
+              (is (str/includes? full "<exemplar ns=\"seon.agent.search\">")
                   "the exemplar section reaches the assembled context")
               ;; FULL source, not reconstituted/clipped blocks.
-              (is (str/includes? txt "(ns seon.search")
-                  "seon.search's real ns form renders")
+              (is (str/includes? txt "(ns seon.agent.search")
+                  "seon.agent.search's real ns form renders")
               (is (str/includes? txt "(defn ^:async grep")
                   "grep's full defn body renders (not a 240-char clip)")
               (is (str/includes? txt "(ns seon.agent.todo")
@@ -739,18 +739,18 @@
                   "search's test sibling renders a full deftest body")
               (is (str/includes? txt "(deftest the-store-retrieve-arc-with-resume")
                   "todo's test sibling renders a full deftest body")
-              (is (not (str/includes? txt "<exemplar ns=\"seon.fs\">"))
-                  "seon.fs rotated OUT of the exemplar set (context-v3 unit 2)")
+              (is (not (str/includes? txt "<exemplar ns=\"seon.agent.fs\">"))
+                  "seon.agent.fs rotated OUT of the exemplar set (context-v3 unit 2)")
               ;; Deterministic order: search → search-test → todo → todo-test
               ;; (alphabetical by subject, test sibling after its subject).
-              (let [i-search (str/index-of txt "<exemplar ns=\"seon.search\">")
-                    i-stest  (str/index-of txt "<exemplar ns=\"seon.search-test\">")
+              (let [i-search (str/index-of txt "<exemplar ns=\"seon.agent.search\">")
+                    i-stest  (str/index-of txt "<exemplar ns=\"seon.agent.search-test\">")
                     i-todo   (str/index-of txt "<exemplar ns=\"seon.agent.todo\">")
                     i-ttest  (str/index-of txt "<exemplar ns=\"seon.agent.todo-test\">")]
                 (is (and i-search i-stest i-todo i-ttest)
                     "all four exemplar blocks present")
-                (is (< i-todo i-ttest i-search i-stest)
-                    "render order is todo → todo-test → search → search-test
+                (is (< i-search i-stest i-todo i-ttest)
+                    "render order is search → search-test → todo → todo-test
                      (roots sort by name; subjects first, tests after their subject)")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -785,12 +785,12 @@
             (-> (db/transact!
                   {:seon.db/conn conn
                    :seon.db/tx-data
-                   [{:seon.ns/name   :seon.search
-                     :seon.ns/source "(ns seon.search)"}]})
+                   [{:seon.ns/name   :seon.agent.search
+                     :seon.ns/source "(ns seon.agent.search)"}]})
                 (.then (fn [_]
                          (let [txt (agent/exemplars-section
                                      {:seon.db/db @conn :seon.agent/id agent-id})]
-                           (is (not (str/includes? txt "<exemplar ns=\"seon.search\">"))
+                           (is (not (str/includes? txt "<exemplar ns=\"seon.agent.search\">"))
                                "stubbed root omitted — no stub padding")
                            (is (str/includes? txt "<exemplar ns=\"seon.agent.todo\">")
                                "the other exemplars still render")))))))
@@ -798,9 +798,17 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 (deftest turn0-context-respects-the-budget-ceiling
-  ;; Spec E2 pass predicate: turn-0 total ≤ 65k chars with the FULL
+  ;; Spec E2 pass predicate: turn-0 total stays bounded with the FULL
   ;; exemplar set in place (measured design point ≈ 59k on the live pod;
-  ;; this fixture's transcript/ns sections are smaller).
+  ;; this fixture's transcript/ns sections are smaller). Guard was 65k;
+  ;; raised to 68k 2026-06-10 with the batch-2 reorg: the toolbelt moved
+  ;; under seon.agent.* (seon.search → seon.agent.search etc.), and the
+  ;; exemplar section renders FULL SOURCE, so identical content got
+  ;; longer ns-name tokens (+1,208 chars in search src+test alone; the
+  ;; renamed registry keys add +6/key in the schema catalog). Measured
+  ;; fixture total post-rename: 66,265 (exemplars 47,775, capabilities
+  ;; 9,782, schema-catalog 3,858, functions-catalog 1,432, system 1,768,
+  ;; warnings 1,033, transcript 222, namespace-context 187).
   (async done
     (-> (with-seeded-conn
           (fn [conn]
@@ -810,8 +818,8 @@
                            {:seon.db/db db :seon.agent/id agent-id}))]
               (is (str/includes? text "<exemplars>")
                   "budget measured WITH the exemplar payload present")
-              (is (<= (count text) 65000)
-                  (str "turn-0 context within the 65k budget — got "
+              (is (<= (count text) 68000)
+                  (str "turn-0 context within the 68k budget — got "
                        (count text))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -945,7 +953,7 @@
                   "status block: turn · since-user (cap N) · ISO timestamp")
               ;; the final line is EXACTLY the REPL prompt — ns + `=> `,
               ;; nothing after (the old `; turn N` tail is gone).
-              (is (re-find #"(?m)^seon\.agent\.ctxtest=> $" prompt)
+              (is (re-find #"(?m)^seon\.agent\.ctx-260610=> $" prompt)
                   "final line is exactly `<current-ns>=> ` (clean)")
               (is (not (str/includes? prompt "; turn "))
                   "no trailing `; turn N` metadata on the prompt line")

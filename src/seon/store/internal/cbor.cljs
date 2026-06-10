@@ -1,6 +1,6 @@
-(ns seon.dev.cbor
+(ns seon.store.internal.cbor
   "Minimal CBOR codec for the seon wire-server control envelope, in CLJS for
-   the Node transport (`seon.dev.wire-node`).
+   the Node transport (`seon.store.internal.wire-node`).
 
    The wire-server (`seon.server.codec`, Jackson CBORFactory) frames each
    message as: 4-byte big-endian length + CBOR payload. The control envelope is

@@ -110,14 +110,14 @@
     [seon.handler :as h]
     [seon.handlers.wake :as wake]
     ;; Local-machine capability surface — A-9. Required so the agent
-    ;; can call (seon.fs/read-file ...) + (seon.platform/host) from
+    ;; can call (seon.agent.fs/read-file ...) + (seon.platform/host) from
     ;; bootstrap-CLJS eval.
-    [seon.fs]
+    [seon.agent.fs]
     ;; Content search over allowed files — the exemplar npm-package
     ;; wrapper (@vscode/ripgrep). Required so the agent can call
-    ;; (seon.search/grep ...) from bootstrap-CLJS eval and so the
+    ;; (seon.agent.search/grep ...) from bootstrap-CLJS eval and so the
     ;; substrate-vars seed below can index it.
-    [seon.search]
+    [seon.agent.search]
     ;; Work items (user→agent asks + agent notes-to-self) — required so
     ;; its register! calls run before the boot install of :seon.agent.todo/*.
     [seon.agent.todo]
@@ -852,14 +852,14 @@
    #'db/listen!
    #'db/current-agent-id
    #'schema/register!
-   ;; Read surface on the user's machine (allowlist-gated, see seon.fs).
+   ;; Read surface on the user's machine (allowlist-gated, see seon.agent.fs).
    ;; Indexed so the functions catalog teaches the SEARCH→READ recipe.
-   #'seon.fs/read-file
-   #'seon.fs/list-dir
-   #'seon.fs/stat
-   #'seon.fs/walk-dir
-   #'seon.fs/home-dir
-   #'seon.search/grep
+   #'seon.agent.fs/read-file
+   #'seon.agent.fs/list-dir
+   #'seon.agent.fs/stat
+   #'seon.agent.fs/walk-dir
+   #'seon.agent.fs/home-dir
+   #'seon.agent.search/grep
    #'seon.test.runner/run!])
 
 (def ^:private substrate-vars
@@ -947,8 +947,8 @@
 
 (defn- ns-file-path
   "Classpath-relative source file for a namespace name string —
-   `seon.search` → `seon/search.cljs`, `seon.search-test` →
-   `seon/search_test.cljs` (munged like the compiler: dots → dirs,
+   `seon.agent.search` → `seon/agent/search.cljs`, `seon.agent.search-test` →
+   `seon/agent/search_test.cljs` (munged like the compiler: dots → dirs,
    dashes → underscores). `read-src-file` probes the source roots
    (src, test, guest-cljs/src), so test siblings resolve too."
   [ns-sym-str]

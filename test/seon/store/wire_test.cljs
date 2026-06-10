@@ -4,7 +4,7 @@
    wire rpc up to 5 times (~10s) before the existing fail-loud throw.
    Boot stays fail-loud, just not fail-instant.
 
-   `seon.dev.wire-node/rpc` is stubbed via root `set!` (same rationale
+   `seon.store.internal.wire-node/rpc` is stubbed via root `set!` (same rationale
    as `seon.message-test/with-conn`: dynamic `binding` is popped at the
    first microtask boundary inside `^:async` bodies; the root swap is
    visible across microtasks, tests run serially, restore in
@@ -15,7 +15,7 @@
      (cljs.test/run-tests 'seon.store.wire-test)"
   (:require
    [cljs.test :refer [deftest is async]]
-   [seon.dev.wire-node :as wire]
+   [seon.store.internal.wire-node :as wire]
    [seon.store.wire :as store.wire]))
 
 (defn- with-rpc-stub

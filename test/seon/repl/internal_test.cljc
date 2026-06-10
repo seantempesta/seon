@@ -1,6 +1,6 @@
-(ns seon.parse-test
-  "Corpus tests for `seon.parse/parse-forms`. CLJC so both JVM
-   (`bin/test seon.parse-test`) and the CLJS pod can exercise it
+(ns seon.repl.internal-test
+  "Corpus tests for `seon.repl.internal/parse-forms`. CLJC so both JVM
+   (`bin/test seon.repl.internal-test`) and the CLJS pod can exercise it
    from the same file.
 
    Test design: each `def` below holds a vector of `{:in :expected
@@ -11,7 +11,7 @@
   (:require
     #?(:clj  [clojure.test :as t :refer [deftest is testing]]
        :cljs [cljs.test    :as t :refer [deftest is testing]])
-    [seon.parse :as parse]))
+    [seon.repl.internal :as parse]))
 
 ;; ============================================================
 ;; Basic shapes — happy path

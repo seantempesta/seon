@@ -1,4 +1,4 @@
-(ns seon.parse
+(ns seon.repl.internal
   "REPL text parser — turns an LLM reply (text containing `;` comments
    interleaved with Clojure forms) into a vector of structured entries
    the eval pipeline can drive form-by-form.

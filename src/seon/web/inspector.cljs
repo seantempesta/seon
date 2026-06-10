@@ -24,7 +24,7 @@
     [datahike.api :as d]
     [seon.agent-view :as agent-view]
     [seon.db :as db]
-    [seon.inspect :as inspect]
+    [seon.agent.inspect :as inspect]
     [seon.log :as log]
     [seon.render :as render]
     [seon.render.default :as default]
@@ -451,7 +451,7 @@
    warnings) is static bulk the user has already read; it collapses to
    a one-line summary. `:context` is the divergence-fallback pseudo-
    section carrying the whole joined text (see
-   `seon.inspect/per-section-texts`) — must stay open."
+   `seon.agent.inspect/per-section-texts`) — must stay open."
   #{:transcript :prompt :context})
 
 (defn- fmt-chars

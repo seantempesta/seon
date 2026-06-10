@@ -1,4 +1,4 @@
-(ns seon.dev.wire-node
+(ns seon.store.internal.wire-node
   "Plain-Node (NO WASM) UDS transport to the JVM wire-server, built as a
    shadow-cljs `:node-script` runtime you can REPL into over MCP
    (`mcp__seon_cljs__eval`, agent_id \"wire\").
@@ -14,7 +14,7 @@
 
    Protocol (verified against `seon.server.{codec,transit,wire}`):
    - transport: node:net Unix-domain socket, one frame in / one frame out.
-   - framing: 4-byte big-endian length + CBOR payload (`seon.dev.cbor`).
+   - framing: 4-byte big-endian length + CBOR payload (`seon.store.internal.cbor`).
    - control envelope: CBOR map, string keys.
    - VALUES (query/args/tx-data/selectors/eids/results/tempids/tx-meta/datom
      a,v): Transit-JSON STRINGS (`seon.client-runtime.transit`).
@@ -25,7 +25,7 @@
    run: `node out/wire-node/main.js`."
   (:require [clojure.string :as str]
             [cognitect.transit :as t]
-            [seon.dev.cbor :as cbor]
+            [seon.store.internal.cbor :as cbor]
             ;; reused only so this runtime answers the MCP agent-id probe
             ;; (`(seon.dev.node-agent/agent-id)`) — see set-agent-id! below.
             [seon.dev.node-agent :as node-agent]))

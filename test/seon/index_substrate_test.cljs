@@ -29,7 +29,7 @@
     [seon.schema :as schema]
     ;; The exemplar TEST SIBLING — required so its deftest vars are
     ;; available as #'-literals for the test-sibling full-source guard.
-    [seon.search-test]))
+    [seon.agent.search-test]))
 
 (defn- by-sym [tx sym]
   (first (filter #(= sym (:seon.fn/sym %)) tx)))
@@ -139,7 +139,7 @@
 
 (deftest exemplar-ns-rows-carry-full-file-source
   ;; Context-focus-redesign E1 (roots swapped fs→todo, context-v3 unit 2):
-  ;; the exemplar root set (seon.search, seon.agent.todo) persists the REAL FULL
+  ;; the exemplar root set (seon.agent.search, seon.agent.todo) persists the REAL FULL
   ;; FILE TEXT on :seon.ns/source — the :exemplars context section renders
   ;; this attr from the graph, never re-reading files at render time. Safe
   ;; to upgrade from the old stub because substrate rows are replay-skipped
@@ -147,13 +147,13 @@
   (let [tx      (client/index-substrate!)
         ns-rows (filter :seon.ns/name tx)
         row-for (fn [k] (first (filter #(= k (:seon.ns/name %)) ns-rows)))
-        search  (:seon.ns/source (row-for :seon.search))
+        search  (:seon.ns/source (row-for :seon.agent.search))
         todo    (:seon.ns/source (row-for :seon.agent.todo))
-        fs      (:seon.ns/source (row-for :seon.fs))]
-    (is (str/starts-with? search "(ns seon.search")
-        "seon.search source starts with the real ns form")
+        fs      (:seon.ns/source (row-for :seon.agent.fs))]
+    (is (str/starts-with? search "(ns seon.agent.search")
+        "seon.agent.search source starts with the real ns form")
     (is (> (count search) 10000)
-        "seon.search source is the full file text, not the stub")
+        "seon.agent.search source is the full file text, not the stub")
     (is (str/includes? search "(defn ^:async grep")
         "the full file carries grep's real defn")
     (is (str/includes? search "schema/register!")
@@ -164,20 +164,20 @@
         "seon.agent.todo source is the full file text, not the stub")
     (is (str/includes? todo "(defn ^:async add!")
         "the full file carries add!'s real defn")
-    (is (= "(ns seon.fs)" fs)
-        "seon.fs rotated OUT of the exemplar set — back to the minimal stub")))
+    (is (= "(ns seon.agent.fs)" fs)
+        "seon.agent.fs rotated OUT of the exemplar set — back to the minimal stub")))
 
 (deftest exemplar-test-sibling-carries-full-file-source
-  ;; The TEST SIBLING rule: seon.search-test is not a name-child of
-  ;; seon.search (no dot), so exemplar-ns? includes `-test` siblings
+  ;; The TEST SIBLING rule: seon.agent.search-test is not a name-child of
+  ;; seon.agent.search (no dot), so exemplar-ns? includes `-test` siblings
   ;; explicitly. index-tests builds its :seon.ns row with the full test
   ;; file text via the same ns-row mechanism.
   (let [rows  (client/index-tests
-                [#'seon.search-test/match-found-with-path-line-text])
-        nsrow (first (filter #(= :seon.search-test (:seon.ns/name %)) rows))
+                [#'seon.agent.search-test/match-found-with-path-line-text])
+        nsrow (first (filter #(= :seon.agent.search-test (:seon.ns/name %)) rows))
         src   (:seon.ns/source nsrow)]
     (is (some? nsrow) "an owning :seon.ns row is emitted for the test ns")
-    (is (str/starts-with? src "(ns seon.search-test")
+    (is (str/starts-with? src "(ns seon.agent.search-test")
         "test-sibling ns source starts with the real ns form")
     (is (> (count src) 5000)
         "test-sibling ns source is the full file text, not the stub")
@@ -206,8 +206,8 @@
         "no duplicate :seon.fn/sym rows (curated + macro roster deduped)")
     (doseq [sym ["seon.db/transact!" "seon.db/query" "seon.db/pull"
                  "seon.db/entity" "seon.db/listen!" "seon.db/current-agent-id"
-                 "seon.schema/register!" "seon.fs/read-file" "seon.fs/walk-dir"
-                 "seon.search/grep" "seon.test.runner/run!"]]
+                 "seon.schema/register!" "seon.agent.fs/read-file" "seon.agent.fs/walk-dir"
+                 "seon.agent.search/grep" "seon.test.runner/run!"]]
       (is (some #{sym} syms) (str sym " present in the indexed roster")))
     (is (every? #(let [r (:seon.fn/ns %)]
                    (and (vector? r) (= 2 (count r)) (= :seon.ns/name (first r))
@@ -317,19 +317,19 @@
                 (.then (fn [first-tx]
                          (db/transact! {:seon.db/conn conn
                                         :seon.db/tx-data first-tx})))
-                ;; Regress seon.search back to the pre-E1 stub — the shape an
+                ;; Regress seon.agent.search back to the pre-E1 stub — the shape an
                 ;; existing durable store carries before its first post-E1 boot.
                 (.then (fn [_]
                          (db/transact!
                            {:seon.db/conn conn
                             :seon.db/tx-data
-                            [{:seon.ns/name   :seon.search
-                              :seon.ns/source "(ns seon.search)"}]})))
+                            [{:seon.ns/name   :seon.agent.search
+                              :seon.ns/source "(ns seon.agent.search)"}]})))
                 (.then (fn [_] (client/substrate-index-tx conn)))
                 (.then
                   (fn [tx]
                     (let [ns-rows (filter :seon.ns/name tx)]
-                      (is (= [:seon.search] (mapv :seon.ns/name ns-rows))
+                      (is (= [:seon.agent.search] (mapv :seon.ns/name ns-rows))
                           "ONLY the drifted ns row re-emits (one assertion lands)")
                       (is (> (count (:seon.ns/source (first ns-rows))) 10000)
                           "re-emitted with the full file text, not the stub")

@@ -42,9 +42,9 @@ mkdir -p "$PROC_DIR" "$LOG_DIR"
 process_command() {
   case "$1" in
     # Pod gets a DURABLE read-only fs grant on the repo (demo: agents
-    # read the seon source via seon.fs/seon.search). seon.fs's
+    # read the seon source via seon.agent.fs/seon.agent.search). seon.agent.fs's
     # env-bootstrap parses these at ns load — survives pod restarts,
-    # unlike a live (seon.fs/configure! …). $SEON_ROOT is absolute
+    # unlike a live (seon.agent.fs/configure! …). $SEON_ROOT is absolute
     # (computed at script top), so the grant is exact, not cwd-relative.
     # css:build first — resources/public/css/output.css is a build
     # artifact (not committed); the pod serves it, so every start

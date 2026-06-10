@@ -102,7 +102,7 @@
     [seon.eval :as seval]
     ;; Read-only fs capability — capabilities-section surfaces the LIVE
     ;; allowed-roots so the agent knows exactly what it may read.
-    [seon.fs :as sfs]
+    [seon.agent.fs :as sfs]
     [seon.handlers.fn :as h-fn]
     [seon.handlers.ns :as h-ns]
     [seon.handlers.schema :as h-schema]
@@ -1618,7 +1618,7 @@
                 (str (str/join "\n"
                        (map #(str "  " %) (callable-sigs sym arglists)))
                      (when (seq doc) (str "\n      ; " doc))))
-        roots (seq (:seon.fs/allowed-roots @sfs/!config))]
+        roots (seq (:seon.agent.fs/allowed-roots @sfs/!config))]
     (if (seq rows)
       (str "## What you can do\n\n"
            "These are the core APIs. Map-in is the preferred shape: you pass\n"
@@ -1704,7 +1704,7 @@
              (str "You can READ files under: " (str/join ", " roots) "\n"
                   "(read-only; everything outside these roots is denied)\n\n")
              (str "No filesystem roots are granted right now (default-deny) —\n"
-                  "every seon.fs call returns an error envelope that explains\n"
+                  "every seon.agent.fs call returns an error envelope that explains\n"
                   "how access is configured.\n\n"))
            "Paths are ABSOLUTE, real machine paths — there is no virtual\n"
            "root or chroot. When your human asks where something is,\n"
@@ -1730,15 +1730,15 @@
            "  ;; in a query. Fetch the rows plain, filter in code after.\n\n"
            "  ;; 1. grep for a term (regex). Call it as the WHOLE form — the\n"
            "  ;;    result is auto-awaited; inside a let you'd get a Promise.\n"
-           "  (seon.search/grep {:seon.search/pattern \"validate-entity-values!\"\n"
-           "                     :seon.search/glob    \"*.cljs\"})\n"
-           "  ;; => {:seon.search/ok? true, :seon.search/matches\n"
-           "  ;;     [{:seon.search/path \"…/src/seon/db.cljs\"\n"
-           "  ;;       :seon.search/line-number 803, …}], …}\n\n"
+           "  (seon.agent.search/grep {:seon.agent.search/pattern \"validate-entity-values!\"\n"
+           "                     :seon.agent.search/glob    \"*.cljs\"})\n"
+           "  ;; => {:seon.agent.search/ok? true, :seon.agent.search/matches\n"
+           "  ;;     [{:seon.agent.search/path \"…/src/seon/db.cljs\"\n"
+           "  ;;       :seon.agent.search/line-number 803, …}], …}\n\n"
            "  ;; 2. read the exact hit (sync; match paths are absolute)\n"
-           "  (seon.fs/read-file {:seon.fs/path \"<absolute path from the match>\"})\n\n"
-           "A denial is a VALUE, not a crash — {:seon.fs/ok? false\n"
-           ":seon.fs/error \"…\"} tells you whether the path is out of scope\n"
+           "  (seon.agent.fs/read-file {:seon.agent.fs/path \"<absolute path from the match>\"})\n\n"
+           "A denial is a VALUE, not a crash — {:seon.agent.fs/ok? false\n"
+           ":seon.agent.fs/error \"…\"} tells you whether the path is out of scope\n"
            "or the fs is read-only. Read the error; it says what to do.\n\n"
            "### Storing what you learn — the canonical finding shape\n\n"
            "STORE PROACTIVELY: whenever you VERIFY a non-trivial result —\n"
@@ -1816,23 +1816,23 @@
    starts with `<root>.` (children ride along by default), or is the
    TEST SIBLING (`…-test`) of an included ns — see [[exemplar-ns?]].
 
-   Why these two (context-v3 unit 2): `seon.search` is THE exemplar
+   Why these two (context-v3 unit 2): `seon.agent.search` is THE exemplar
    npm-package wrapper (wrapper doctrine, 17 register! calls,
    map-in/map-out request/response schemas, error envelopes);
    `seon.agent.todo` is THE store/retrieve + resume arc (register! attrs,
    error-as-value envelopes, a pure derived context view, everything
    re-derived from the conn so a resuming agent sees its open work).
-   Their test siblings (`seon.search-test`, `seon.agent.todo-test`) are the
-   model test nses. `seon.fs` rotated out 2026-06-10 (it stays a core
+   Their test siblings (`seon.agent.search-test`, `seon.agent.todo-test`) are the
+   model test nses. `seon.agent.fs` rotated out 2026-06-10 (it stays a core
    taught API via the capabilities section; full-depth return is
    V3-D/E). Lives in code as a def (same lifecycle as the build that
    contains the source); a DB-resident override is deliberately NOT v1
    (spec open question 3)."
-  #{"seon.search" "seon.agent.todo"})
+  #{"seon.agent.search" "seon.agent.todo"})
 
 (defn- exemplar-base-name
   "The ns name with a trailing `-test` stripped — the SUBJECT ns a test
-   sibling pairs with (`seon.search-test` → `seon.search`). Non-test
+   sibling pairs with (`seon.agent.search-test` → `seon.agent.search`). Non-test
    names pass through unchanged."
   [ns-str]
   (if (str/ends-with? ns-str "-test")
@@ -1858,7 +1858,7 @@
 (defn- exemplar-sort-key
   "Deterministic render order for exemplar nses: alphabetical by the
    base (subject) name, test sibling AFTER its subject. For the current
-   set that yields seon.search → seon.search-test → seon.agent.todo →
+   set that yields seon.agent.search → seon.agent.search-test → seon.agent.todo →
    seon.agent.todo-test — byte-stable across renders (LLM cache-prefix
    invariant: no timestamps, no map-order nondeterminism)."
   [ns-str]
@@ -2574,15 +2574,14 @@
 
 (defn- substrate-ns-name?
   "True when `ns-str` names a COMPILED-substrate namespace — `seon.*`
-   but not the per-agent home nses (`seon.agent.<id>`). Used to pick
-   the count-line depth in the functions catalog. A NAME rule, not the
-   var-derived `seon.client/substrate-ns-set` (require direction: client
-   requires agent) — agents author in `seon.agent.<id>` home nses and
-   their own domain nses (`kb.findings`, …), neither of which matches,
-   so agent code keeps per-fn lines."
+   but not the per-agent home nses (`seon.agent.<id>`, id-shaped:
+   3 chars + dash + digits). The toolbelt (`seon.agent.todo`/.fs/…)
+   IS substrate and gets count lines. INTERIM name rule — the home-ns
+   exclusion dies with the my.agent.<id> rename (P3) and the whole
+   heuristic dies with the V3-C seon.ctx classifier."
   [ns-str]
   (and (str/starts-with? ns-str "seon.")
-       (not (str/starts-with? ns-str "seon.agent."))))
+       (not (re-find #"^seon\.agent\.\w{3}-\d" ns-str))))
 
 (defn- fn-catalog-block-brief
   "One AGENT-authored fn for the catalog: ONE LINE — the first-arity
@@ -2924,7 +2923,7 @@
      1. :system            — Seon identity + CLJS-in-Node + REPL contract (static)
      2. :capabilities      — core API worked examples (static)
      3. :exemplars         — FULL source of the exemplar namespaces
-                             (seon.search, seon.agent.todo + test siblings),
+                             (seon.agent.search, seon.agent.todo + test siblings),
                              queried from :seon.ns/source; byte-stable for
                              the pod's life (static — inside the cache prefix)
      4. :schema-catalog    — GLOBAL catalog of every entity KIND in the

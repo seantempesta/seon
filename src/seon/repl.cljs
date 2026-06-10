@@ -1,7 +1,7 @@
 (ns seon.repl
   "Iteration-surface helpers — `dev-init!`, compile-state + history
    conn defonces. The text→entries parser used to live here too but
-   was extracted to [[seon.parse]] (.cljc — JVM-testable, no pod
+   was extracted to [[seon.repl.internal]] (.cljc — JVM-testable, no pod
    required for the corpus).
 
    ## Iteration surface (`dev-init!`)
@@ -49,21 +49,21 @@
     ;; Pulled in so the :client bundle can reach rewrite-clj via the
     ;; host REPL (mcp__seon_cljs__eval) for ad-hoc substrate probes
     ;; — e.g. `(rewrite-clj.parser/parse-string-all "...")`. The
-    ;; parse-forms parser itself lives in seon.parse (.cljc).
+    ;; parse-forms parser itself lives in seon.repl.internal (.cljc).
     [rewrite-clj.parser]
     [rewrite-clj.node]
     [rewrite-clj.zip]
-    [seon.parse]))
+    [seon.repl.internal]))
 
 ;; ============================================================
 ;; parse-forms re-export — historical compat. New callers should
-;; require seon.parse directly.
+;; require seon.repl.internal directly.
 ;; ============================================================
 
 (def parse-forms
-  "Re-exported from [[seon.parse/parse-forms]] for callers that still
-   reference `seon.repl/parse-forms`. New code: `seon.parse/parse-forms`."
-  seon.parse/parse-forms)
+  "Re-exported from [[seon.repl.internal/parse-forms]] for callers that still
+   reference `seon.repl/parse-forms`. New code: `seon.repl.internal/parse-forms`."
+  seon.repl.internal/parse-forms)
 
 ;; ============================================================
 ;; Iteration-surface — dev-init! opens an agent conn (history-on) +

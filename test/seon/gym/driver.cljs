@@ -75,7 +75,7 @@
     [seon.client :as client]
     [seon.db :as db]
     [seon.eval :as seval]
-    [seon.fs :as sfs]
+    [seon.agent.fs :as sfs]
     [seon.repl :as repl]
     [seon.schema :as schema]
     [seon.warn :as warn]))
@@ -876,8 +876,8 @@
             ;; grep/register!/reply! exist) and mirror the pod's fs
             ;; capability (bin/seon runs the pod with SEON_FS_ROOT=$SEON_ROOT
             ;; SEON_FS_READ_ONLY=1). Both restored/irrelevant after the run.
-            (sfs/configure! {:seon.fs/allowed-roots [(.cwd js/process)]
-                             :seon.fs/read-only?    true})
+            (sfs/configure! {:seon.agent.fs/allowed-roots [(.cwd js/process)]
+                             :seon.agent.fs/read-only?    true})
             ;; The pod boot seed + the scenario's prior-agent layer
             ;; (registrations as tee-shaped :seon.schema rows +
             ;; fixtures) — see [[seed-scenario-world!]] (world-parity:

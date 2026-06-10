@@ -7,19 +7,19 @@
      2. An NDJSON-EDN file (default `logs/pod-events.log`, configurable
         via `:seon.log/file` in [[!config]]). One `pr-str`'d entry map per line.
         Size-rotated (5 MB cap, last 3 kept). Agents read this via
-        `seon.fs/read-file` as a normal file.
+        `seon.agent.fs/read-file` as a normal file.
 
    ## tail reads the file
 
    [[tail]] is NOT magic. It opens the active log file, splits on
    newlines, parses each line as EDN, filters, and returns the last N
    newest-first. There is NO in-memory ring buffer — the file IS the
-   buffer. The same bytes the agent reads through `seon.fs` are the
+   buffer. The same bytes the agent reads through `seon.agent.fs` are the
    bytes `tail` sees. One source of truth.
 
    For history older than the current file, agents enumerate the
    rotated files (`pod-events.log.1`, `.2`, `.3`) themselves via
-   `seon.fs`. `tail` only reads the active file.
+   `seon.agent.fs`. `tail` only reads the active file.
 
    ## Why no DB rows
 
@@ -214,7 +214,7 @@
 ;; (Was a `^:dynamic` Var in Phase 1.5; moved into the atom because
 ;; dynvars don't reliably survive `await` boundaries in CLJS over
 ;; Promises, and the log file path is app-wide config, not per-agent
-;; runtime state — same shape as `seon.fs/!config`.)
+;; runtime state — same shape as `seon.agent.fs/!config`.)
 ;; ============================================================
 
 (defonce !config
@@ -354,7 +354,7 @@
 
 ;; ============================================================
 ;; tail — read the file. No ring, no magic. The same bytes the agent
-;; sees through `seon.fs/read-file` are the bytes here.
+;; sees through `seon.agent.fs/read-file` are the bytes here.
 ;;
 ;; For V0 file sizes (≤5MB rotated cap) reading the whole file is
 ;; fine. If this ever bites, switch to a backward streaming reader.
@@ -393,7 +393,7 @@
 
    Only reads the ACTIVE file — entries that lived in a now-rotated
    `pod-events.log.1` (etc.) are not visible here. For deeper history,
-   enumerate the rotated files via `seon.fs`."
+   enumerate the rotated files via `seon.agent.fs`."
   {:malli/schema [:=> [:cat :seon.log/tail-request] :seon.log/tail-response]}
   [{:seon.log/keys [n level agent source] :or {n 50}}]
   (let [pred (fn [e]

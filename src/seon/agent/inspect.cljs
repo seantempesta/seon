@@ -1,4 +1,4 @@
-(ns seon.inspect
+(ns seon.agent.inspect
   "Agent self-introspection: 'what am I seeing right now?'
 
    Three verbs:
@@ -22,29 +22,29 @@
     [seon.render :as render]
     [seon.schema :as schema]))
 
-(schema/register! :seon.inspect/request
+(schema/register! :seon.agent.inspect/request
   [:map [:seon.agent/id {:optional true} :string]])
 
 ;; One rendered section of the assembled context — name + the exact
 ;; text that section contributed to the joined prompt. Consumed by the
 ;; inspector's left pane so static sections can collapse per-section
 ;; instead of re-showing the full static bulk on every view.
-(schema/register! :seon.inspect/section-text
+(schema/register! :seon.agent.inspect/section-text
   [:map
    [:seon.ctx/name :seon.ctx/name]
    [:seon.render/text :string]])
 
-(schema/register! :seon.inspect/ctx-response
+(schema/register! :seon.agent.inspect/ctx-response
   [:map
    [:seon.render/text :string]
    [:seon.render/entities [:vector :any]]
-   [:seon.render/section-texts [:vector :seon.inspect/section-text]]
+   [:seon.render/section-texts [:vector :seon.agent.inspect/section-text]]
    [:seon.render/token-estimate :int]])
 
-(schema/register! :seon.inspect/entities-response
+(schema/register! :seon.agent.inspect/entities-response
   [:map [:seon.render/entities [:vector :any]]])
 
-(schema/register! :seon.inspect/handlers-response
+(schema/register! :seon.agent.inspect/handlers-response
   [:map [:seon.handler/list [:vector :map]]])
 
 (defn- resolve-id
@@ -52,8 +52,8 @@
   (or id
       (db/current-agent-id)
       (throw (ex-info
-               "seon.inspect: no agent-id — pass :seon.agent/id or call inside (seon.db/with-agent id ...)."
-               {:seon.inspect/error :no-agent-id}))))
+               "seon.agent.inspect: no agent-id — pass :seon.agent/id or call inside (seon.db/with-agent id ...)."
+               {:seon.agent.inspect/error :no-agent-id}))))
 
 (defn- per-section-texts
   "Render the agent's context PER SECTION — same layout source (stored
@@ -106,7 +106,7 @@
    ordered set of entities BEHIND that context (for drill-in), via
    `seon.render/visible-entities`. Reads from the agent's filtered view
    so cross-agent tx are hidden."
-  {:malli/schema [:=> [:cat :seon.inspect/request] :seon.inspect/ctx-response]}
+  {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/ctx-response]}
   [{:seon.agent/keys [id]}]
   (let [id (resolve-id id)
         {:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id id})
@@ -123,7 +123,7 @@
   "Return the entities the agent currently sees in its AI context, in
    render order. Subset of `ctx-preview` (same entities, no rendered
    strings)."
-  {:malli/schema [:=> [:cat :seon.inspect/request] :seon.inspect/entities-response]}
+  {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/entities-response]}
   [{:seon.agent/keys [id]}]
   (let [{:seon.render/keys [entities]} (ctx-preview {:seon.agent/id (resolve-id id)})]
     {:seon.render/entities entities}))
@@ -131,7 +131,7 @@
 (defn handlers
   "Return the live handler registry visible to the agent (substrate
    handlers + the agent's own, if any), sorted by priority desc."
-  {:malli/schema [:=> [:cat :seon.inspect/request] :seon.inspect/handlers-response]}
+  {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/handlers-response]}
   [{:seon.agent/keys [id]}]
   (let [id (resolve-id id)
         {:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id id})
