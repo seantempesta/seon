@@ -625,6 +625,12 @@ js/require branch). wire-server runs via `bin/seon` (store:
     `cross-await-binding-survives` and
     `multi-agent-interleaving-keeps-atoms-distinct` fail honestly until a
     getStore-backed read path lands in `seon.agents`.
+    - FIXED (2026-06-10, task #20): `ctx-or-throw` is now THE read path —
+      prefers `(.getStore substrate-ctx-als)` (fiber-local, survives await),
+      falls back to the dynvar for sync/JVM callers. Raw `@*ctx*` is
+      documented as sync-extent-only (Probe 13); docstrings updated to
+      match. Both pinned tests green; suite 287 tests / 1071 assertions /
+      0 failures, exit 0; verified live in the pod across a setTimeout hop.
 
 ### UNIT 2.2d — DIS same-box cutover (USER-APPROVED 2026-06-09 ~23:30Z)
 

@@ -5,19 +5,17 @@
    Each test exercises one Phase 0 invariant:
      1. *ctx* is unbound by default; ctx-or-throw fails loudly.
      2. run-as-agent binds *ctx* to the right atom; swap! mutates it.
-     3. The binding survives `await` (Node ALS extension).
+     3. The binding survives `await` when read via `ctx-or-throw`
+        (Node ALS — run-as-agent stores the atom via `.run`,
+        ctx-or-throw reads it via `.getStore`). The raw dynvar is
+        sync-extent-only by design (Probe 13).
      4. Two concurrent agents see only their own atom across interleaved
         awaits.
      5. Identity-assert: calling run-as-agent with an atom whose
         :seon.agents/id mismatches the claim throws AND logs.
 
    PRD: docs/prds/agent-runtime/atom-state-system-2026-05-26.md
-   Phase 0 spec: §10 Phase 0 row + §5 sketches.
-
-   Tests #3 + #4 (cross-await + interleaving) are written so the
-   runner picks them up; live runtime verification is gated on the
-   `seon-cljs` MCP being online (currently offline). They will run
-   on the next live REPL session."
+   Phase 0 spec: §10 Phase 0 row + §5 sketches."
   (:require
     [cljs.test :as t :refer [deftest is testing async]]
     [seon.agents :as agents]
@@ -106,8 +104,16 @@
 ;; #3 — Cross-await binding survival (LOAD-BEARING Phase 0 invariant)
 ;; ============================================================
 ;;
-;; VERIFIED: STATICALLY ONLY in this session (MCP cljs offline).
-;; Awaiting live REPL run.
+;; Post-await reads MUST go through `ctx-or-throw` (the ALS-backed
+;; read path). The raw dynvar unwinds when the body returns its
+;; Promise — that is the documented sync-extent-only behavior, not
+;; a bug (Probe 13).
+
+(defn- read-ctx
+  "Read the current agent ctx atom via the sanctioned read path,
+   nil if no agent scope is active (instead of the throw)."
+  []
+  (try (agents/ctx-or-throw) (catch :default _ nil)))
 
 (deftest cross-await-binding-survives
   (async done
@@ -122,10 +128,11 @@
              (fn []
                (-> (js/Promise.resolve nil)
                    (.then (fn [_]
-                            (reset! !observed
-                                    {:bound? (some? agents/*ctx*)
-                                     :same?  (identical? a agents/*ctx*)
-                                     :id     (:seon.agents/id @agents/*ctx*)})))))})
+                            (let [c (read-ctx)]
+                              (reset! !observed
+                                      {:bound? (some? c)
+                                       :same?  (identical? a c)
+                                       :id     (when c (:seon.agents/id @c))}))))))})
           finish (fn []
                    (is (:bound? @!observed)
                        "post-await *ctx* is still bound")
@@ -148,12 +155,11 @@
 ;;
 ;; Two agents, A and B. A's body schedules a microtask (the `.then`),
 ;; then B's body runs synchronously to completion, then A's microtask
-;; fires. Each MUST see its own atom only. Proves ALS-per-fiber
-;; scoping survives interleave (vs the naked-dynvar clobber from
-;; db.cljs §*tx-context* Probe 13).
-;;
-;; VERIFIED: STATICALLY ONLY in this session (MCP cljs offline).
-;; Awaiting live REPL run.
+;; fires. Each MUST see its own atom only — via `ctx-or-throw`, the
+;; ALS-backed read path. Proves ALS-per-fiber scoping survives
+;; interleave (vs the naked-dynvar clobber from db.cljs §*tx-context*
+;; Probe 13). B's sync body also reads through `ctx-or-throw` to pin
+;; that the ONE read path serves sync callers too.
 
 (deftest multi-agent-interleaving-keeps-atoms-distinct
   (async done
@@ -170,17 +176,19 @@
                  (fn []
                    (-> (js/Promise.resolve nil)
                        (.then (fn [_]
-                                (reset! !a-seen
-                                        {:same? (identical? atom-a agents/*ctx*)
-                                         :id    (:seon.agents/id @agents/*ctx*)})))))})
+                                (let [c (read-ctx)]
+                                  (reset! !a-seen
+                                          {:same? (identical? atom-a c)
+                                           :id    (when c (:seon.agents/id @c))}))))))})
           _ (agents/run-as-agent
               {:seon.agents/id      id-b
                :seon.agents/atom    atom-b
                :seon.agents/body-fn
                (fn []
-                 (reset! !b-seen
-                         {:same? (identical? atom-b agents/*ctx*)
-                          :id    (:seon.agents/id @agents/*ctx*)}))})
+                 (let [c (read-ctx)]
+                   (reset! !b-seen
+                           {:same? (identical? atom-b c)
+                            :id    (when c (:seon.agents/id @c))})))})
           finish (fn []
                    (is (:same? @!a-seen)
                        "A's post-await *ctx* is A's atom")

@@ -35,9 +35,20 @@
    On Node, `binding` does not survive `await` (Probe 13 — see
    `src/seon/db.cljs` §`*tx-context*` and
    `research/impl-finding-tx-context-promise-2026-05-22.md`). The
-   substrate uses Node's `AsyncLocalStorage` internally inside
-   `run-as-agent` so the `*ctx*` binding is reattached on every async
-   hop. Users never see ALS.
+   substrate uses Node's `AsyncLocalStorage` internally: `run-as-agent`
+   stores the agent's atom in ALS (`.run`), and the sanctioned read
+   path `ctx-or-throw` prefers the ALS store (`.getStore`) over the
+   raw dynvar. Consequence for callers:
+
+   - `(ctx-or-throw)` is correct EVERYWHERE — sync code, and any
+     continuation after an `await` / `.then` inside `run-as-agent`'s
+     dynamic extent. This is the one read path that honors the
+     per-agent contract across async hops.
+   - Raw `@*ctx*` deref is valid ONLY in the synchronous extent of
+     `run-as-agent`'s body — the dynvar unwinds the moment the body
+     returns its Promise (same mechanism as Probe 13).
+
+   Users never see ALS — they call `ctx-or-throw`.
 
    On JVM (e.g. the sidecar writer), bare `binding` is sufficient —
    Clojure's Var thread-bindings convey across thread switches via
@@ -132,11 +143,15 @@
 
 (def ^:dynamic *ctx*
   "Current agent's per-runtime state atom. The substrate binds this to
-   a fresh atom at agent boot, then re-binds it via Node ALS (inside
-   `run-as-agent`) around every entry into agent code so the binding
-   survives `await`.
+   a fresh atom at agent boot inside `run-as-agent`, which ALSO stores
+   the same atom in Node ALS so the per-agent binding survives `await`
+   — but ONLY when read through `ctx-or-throw`. A raw deref of this
+   var is valid solely in the synchronous extent of `run-as-agent`'s
+   body; the dynvar unwinds when the body returns its Promise (see ns
+   docstring §Await-survival). After any `await`, read via
+   `(ctx-or-throw)`.
 
-   Inside agent code, dereferences to the agent's OWN atom — never
+   Inside agent code, resolves to the agent's OWN atom — never
    another agent's. Mental model: parallel to `seon.db/*conn*`.
 
    This is runtime-specific special state, NOT app data. Persistent
@@ -149,29 +164,19 @@
    `reset!`, `@`. No `get!`/`set!`/`persist!` bespoke API."
   nil)
 
-(defn ctx-or-throw
-  "Read `*ctx*` and throw if it is not bound. Use at any read site
-   that should hard-fail when called outside `run-as-agent`. The
-   default `*ctx*` value is nil; we reject silent nil-reads at this
-   helper so substrate bugs surface immediately. Returns the atom
-   (not the value — caller derefs)."
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  (when (nil? *ctx*)
-    (throw (ex-info
-             (str "seon.agents/*ctx* is not bound. "
-                  "Every entry into agent code must go through "
-                  "seon.agents/run-as-agent. Caller is likely missing "
-                  "the wrapper.")
-             {:seon.agents/error :ctx-unbound})))
-  *ctx*)
-
 ;; ============================================================
 ;; ALS — substrate-internal plumbing for await-survival on Node.
 ;;
 ;; The ONE place ALS is mentioned. Agents never see this. JVM ports
 ;; (e.g. the sidecar writer) will reader-conditional this branch out;
 ;; bare `binding` is sufficient there.
+;;
+;; Write side: `run-as-agent` stores the agent's atom via `.run`.
+;; Read side: `ctx-or-throw` prefers `.getStore` over the dynvar —
+;; that is what makes the binding genuinely survive await (V8
+;; propagates the ALS context through Promise continuations; the
+;; dynvar alone unwinds at the first await — Probe 13/14, see
+;; seon.db §als-instance for the verified pattern).
 ;; ============================================================
 
 (defonce ^:private substrate-ctx-als
@@ -179,13 +184,44 @@
     (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
       (AsyncLocalStorage.))))
 
+(defn- als-ctx
+  "Substrate-internal read of the ALS store: the current agent's atom
+   when called anywhere inside a `run-as-agent` dynamic extent
+   (including post-await continuations), else nil. Normalizes JS
+   undefined (outside any `.run` scope) to nil."
+  []
+  (when (some? substrate-ctx-als)
+    (let [store (.getStore substrate-ctx-als)]
+      (when (some? store) store))))
+
+(defn ctx-or-throw
+  "Return the current agent's ctx atom, or throw if no agent scope is
+   active. THE sanctioned read path — prefers the ALS store (fiber-
+   local, survives `await`) and falls back to the dynvar for sync
+   callers (e.g. JVM ports where bare `binding` suffices, or direct
+   `binding` in tests). Use at any read site that should hard-fail
+   when called outside `run-as-agent`; silent nil-reads are rejected
+   here so substrate bugs surface immediately. Returns the atom
+   (not the value — caller derefs)."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (let [c (or (als-ctx) *ctx*)]
+    (when (nil? c)
+      (throw (ex-info
+               (str "seon.agents/*ctx* is not bound. "
+                    "Every entry into agent code must go through "
+                    "seon.agents/run-as-agent. Caller is likely missing "
+                    "the wrapper.")
+               {:seon.agents/error :ctx-unbound})))
+    c))
+
 (defn- assert-identity!
   "Verify that the atom currently visible through `*ctx*` actually
    belongs to the claimed agent. Loud failure on mismatch — throws
    AND logs via `seon.log/error!`. Substrate-internal; agents do not
    invoke this."
   [claimed-id]
-  (let [actual-id (try (:seon.agents/id @*ctx*) (catch :default _ nil))]
+  (let [actual-id (try (:seon.agents/id @(ctx-or-throw)) (catch :default _ nil))]
     (when-not (= claimed-id actual-id)
       (log/error! {:seon.log/source ::identity-mismatch
                    :seon.log/agent  (or claimed-id "<nil>")
@@ -208,10 +244,13 @@
                 :seon.agents/atom-id    actual-id})))))
 
 (defn run-as-agent
-  "Substrate-internal. Run `body-fn` (0-arg) with `*ctx*` bound to
-   `agents-atom`. On Node, ALS keeps the binding alive across every
-   `await` continuation; on JVM, bare `binding` is sufficient (the
-   ALS branch is a no-op when `substrate-ctx-als` is nil).
+  "Substrate-internal. Run `body-fn` (0-arg) with the agent scope
+   established two ways: `*ctx*` bound to `agent-atom` for the sync
+   extent, AND the same atom stored in ALS (`.run`) so reads through
+   `ctx-or-throw` survive every `await` continuation. On JVM, bare
+   `binding` is sufficient (the ALS branch is a no-op when
+   `substrate-ctx-als` is nil) and `ctx-or-throw` falls back to the
+   dynvar.
 
    After binding, asserts that the atom's `:seon.agents/id` matches
    the caller's `:seon.agents/id` — see ns docstring §SPOF.
@@ -222,7 +261,9 @@
       :seon.agents/body-fn <0-arg fn>}
 
    Returns whatever `body-fn` returns (often a Promise — that's fine;
-   ALS ensures the binding survives across its continuations).
+   ALS ensures `(ctx-or-throw)` resolves to this agent's atom across
+   all of its continuations, while the raw dynvar unwinds when the
+   body returns).
 
    Agents NEVER call this. Substrate calls it around every entry into
    agent code: eval-batch!, kick handlers, message handlers,
