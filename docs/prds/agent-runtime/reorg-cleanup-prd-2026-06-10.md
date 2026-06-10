@@ -119,16 +119,17 @@ code; git history preserves the parser utilities.
 - Gym trio re-run after #16 and after the agent.cljs split (the two
   renders-affecting steps); not per batch.
 
-## Remaining DECIDEs (from the audit, small — answer any time)
+## DECIDEs — ANSWERED (user, 2026-06-11)
 
-- `seon.dev.node-agent`: after agent-id inlines, dev-only probe — keep
-  (dev) or delete (probe era over)?
-- `seon.log/tail` is agent-usable — promote a `seon.agent.log` face
-  later, or leave agents reading via `seon.agent.fs`? (audit d5)
-- `seon.handlers.wake` is a trigger misfiled with renderers — relocate
-  when `seon.ctx` forms (no rush).
-- `seon.handlers.system-prompt` — deletable when V3-E's
-  `my.kb.instruction` supersedes the sticky preamble.
+- `seon.dev.node-agent`: KEEP as dev probe until the cluster-runtime
+  per-agent launcher (§7.10a) is verified, THEN delete.
+- `seon.agent.log`: YES — build the face. User: the value is agents
+  UNDERSTANDING they have a log; part of a growing toolbelt, "one step
+  at a time". Small unit, post-demo queue.
+- `seon.handlers.wake`: relocate during P6 (agreed).
+- `seon.handlers.system-prompt`: DELETED 2026-06-10 (P4, with the
+  sticky preamble).
+- `:seon.render/label` naming: decided at the live-tiles PRD review.
 
 ## Execution + spend notes
 
