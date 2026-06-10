@@ -29,7 +29,7 @@ Demo bar:
   thinking indicator, knowledge cards with file:line citations).
 
 Runs on the CURRENT pod (one Node process = one cluster); no central-store
-cutover required for Friday. The lane-merge (§5) is the post-Friday epic.
+cutover blocking the demo — but the LANE-MERGE IS NOW (user, 2026-06-10: "I want that ASAP, not post demo"): flip first, then build demo examples ON the unified durable store (per-run pod stores wipe on restart; the cluster store persists — examples built pre-flip get lost).
 
 ## 2. Single-agent capability — where we are
 
@@ -163,7 +163,7 @@ flows through the cluster's DB. The current multi-agent-in-one-pod is
 transitional/demo-only (interleaving risks:
 `research/multi-agent-state-isolation-2026-06-09.md`).
 
-**Pod flip checklist (post-Friday; from the DIS research file):**
+**Pod flip checklist (unit 2.2e — IN FLIGHT NOW; from the DIS research file):**
 
 1. Move the `:seon-wire` writer + listen-adapter into the `:client` build
    (live socket `tmp/seon-cluster-default-req.sock`, store
@@ -233,7 +233,7 @@ commit:
 6. **Hook-loss source fix** (V2 server lane) — `^:clj-reload/keep` +
    key-based hook registration + remove the silent catch (§4).
 7. **Third tile panel** (§6 forward item 2).
-8. **Lane-merge epic** — the §5 flip checklist + Timbre unification + cljc
+8. **Lane-merge 2.2e (TOP OF QUEUE — flip today, examples after)** — the §5 flip checklist; THEN Timbre unification + cljc
    convergence.
 9. **MCP server health** — reset the broken `default` cljs session; GC the
    26 stale sessions.
