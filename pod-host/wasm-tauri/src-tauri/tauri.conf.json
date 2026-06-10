@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Seon",
+  "mainBinaryName": "seon",
+  "version": "0.1.0",
+  "identifier": "app.seon.shell",
+  "build": {
+    "frontendDist": "./ui"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "splash",
+        "title": "Seon",
+        "width": 460,
+        "height": 300,
+        "resizable": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": ["icons/icon.icns", "icons/icon.png"]
+  }
+}

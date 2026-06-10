@@ -35,10 +35,9 @@ authors = ["Seon Contributors"]
 # sits at 46.0.0 but the latest *published* on crates.io is 44.x. We
 # follow crates.io. Bump deliberately and document version moves.
 [workspace.dependencies]
-# Tauri host
-tauri              = { version = "2.11", default-features = false }
-tauri-build        = { version = "2.6", default-features = false }
-tauri-plugin-dialog = { version = "2.7" }
+# Tauri host (default features on: wry webview, config-json codegen)
+tauri              = { version = "2.11" }
+tauri-build        = { version = "2.6" }
 
 # WASM runtime (wasmtime 44.x = latest crates.io release on 2026-05-19)
 wasmtime           = { version = "44" }
