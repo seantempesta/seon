@@ -658,7 +658,16 @@
                         "headers:{'Content-Type':'application/x-www-form-urlencoded'},"
                         "body:'text='+encodeURIComponent(text)})"
                         ".then(function(r){if(r.ok){i.value='';i.focus();"
-                        "if(e)e.textContent='';}"
+                        "if(e)e.textContent='';"
+                        ;; Sending a message re-PINS the chat to the
+                        ;; bottom — even if the user had scrolled up
+                        ;; reading history, their own send is an
+                        ;; explicit 'jump to newest' (otherwise the
+                        ;; agent's reply lands offscreen and the page
+                        ;; looks dead — the one case the pinned
+                        ;; autoscroll's read-protection got wrong).
+                        "var sc=document.querySelector('[data-seon-scroll]');"
+                        "if(sc){sc.__seonAtBottom=true;sc.scrollTop=sc.scrollHeight;}}"
                         "else{r.text().then(function(t){"
                         "if(e)e.textContent='\\u2717 '+(t||('HTTP '+r.status));});}})"
                         ".catch(function(err){if(e)e.textContent='\\u2717 '+err;});"
@@ -909,12 +918,39 @@
        [:h1 {:class "text-lg font-semibold tracking-tight"} "seon · cluster"]
        [:p {:class "text-text-400 text-xs mt-0.5 font-mono"}
         "live agents on a shared substrate — everything below is derived from the DB right now"]]
-      [:div {:class "flex gap-2 ml-auto"}
+      [:div {:class "flex gap-2 ml-auto items-stretch"}
        (stat-cell "agents"   agent-count)
        (stat-cell "turns"    turn-count)
        (stat-cell "fns"      fn-count)
        (stat-cell "findings" finding-count)
-       (stat-cell "datoms"   datom-count)]]
+       (stat-cell "datoms"   datom-count)
+       ;; New-agent affordance — POSTs to /agents/new (the injected
+       ;; seon.client/start-agent! boot path: trigger armed, live) and
+       ;; navigates to the new /agent/<id> page on success. Boot takes
+       ;; a few seconds (replay + substrate seed) — the button shows
+       ;; progress; errors land in its own text, never swallowed.
+       ;; NOTE: this fragment re-morphs on every commit (boot commits
+       ;; plenty), so idiomorph may visually reset the label mid-boot;
+       ;; the server-side in-flight guard (409) makes double-clicks
+       ;; harmless.
+       [:button
+        {:id "seon-new-agent"
+         :type "button"
+         :class (str "px-3 py-1.5 border border-amber-700/60 rounded "
+                     "bg-amber-950/40 hover:bg-amber-900/50 "
+                     "text-amber-400 hover:text-amber-300 "
+                     "text-xs font-mono cursor-pointer")
+         :onclick (str "var b=this;b.disabled=true;b.textContent='booting…';"
+                       "fetch('/agents/new',{method:'POST'})"
+                       ".then(function(r){"
+                       "if(r.ok){r.text().then(function(id){"
+                       "window.location='/agent/'+id.trim();});}"
+                       "else{r.text().then(function(t){"
+                       "b.disabled=false;"
+                       "b.textContent='\\u2717 '+(t||('HTTP '+r.status));});}})"
+                       ".catch(function(e){b.disabled=false;"
+                       "b.textContent='\\u2717 '+e;});")}
+        "+ new agent"]]]
      (if (seq rows)
        (into [:div {:class "grid gap-2"
                     :style "grid-template-columns:repeat(auto-fill,minmax(300px,1fr));"}]

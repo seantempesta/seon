@@ -69,6 +69,35 @@
   @!sse-connections)
 
 ;; ============================================================
+;; Agent creation — POST /agents/new
+;;
+;; The pod's boot path (`seon.client/start-agent!`) is the ONE way an
+;; agent comes to life (conn, bootstrap-CLJS, replay, seed, boot!,
+;; trigger). serve.cljs can't require seon.client (require cycle:
+;; client → serve), so client INJECTS its start-agent! closure here at
+;; load time via `set-create-agent-fn!`. No parallel creation
+;; mechanism — the endpoint just calls the existing boot path.
+;; ============================================================
+
+(defonce ^{:doc "0-arity fn returning a Promise of
+                  `{:seon.agent/id _ …}` — injected by seon.client at
+                  load time (its start-agent! with the current llm-fn).
+                  nil until the pod finishes loading."}
+  !create-agent-fn (atom nil))
+
+(defonce ^:private !create-in-flight (atom false))
+
+(defn set-create-agent-fn!
+  "Inject the agent-creation closure (seon.client/start-agent! with the
+   pod's current llm-fn). Called at namespace-load time from
+   seon.client — re-runs on hot reload so the closure tracks reloaded
+   code."
+  {:malli/schema [:=> [:cat fn?] :nil]}
+  [f]
+  (reset! !create-agent-fn f)
+  nil)
+
+;; ============================================================
 ;; Static serving
 ;;
 ;; Map URL prefix → disk root (relative to cwd). The pod is started
@@ -305,6 +334,40 @@
         (write-status! res 500 "text/plain; charset=utf-8"
                        (str "clear failed: " e))))))
 
+(defn- handle-create-agent!
+  "POST /agents/new — mint + start a NEW live agent via the injected
+   boot path (`seon.client/start-agent!` — trigger armed, reachable via
+   /chat, identical to the auto-boot agent). Responds 200 with the new
+   agent id as plain text; the mission-control button navigates to
+   `/agent/<id>`. One create at a time (boot is heavyweight: replay +
+   substrate seed) — concurrent requests get 409."
+  [_req res]
+  (let [f @!create-agent-fn]
+    (cond
+      (nil? f)
+      (write-status! res 503 "text/plain; charset=utf-8"
+                     "agent creation not wired yet (pod still booting)")
+
+      @!create-in-flight
+      (write-status! res 409 "text/plain; charset=utf-8"
+                     "an agent is already being created — retry in a moment")
+
+      :else
+      (do
+        (reset! !create-in-flight true)
+        (log/info-console! "seon.web.serve" "POST /agents/new — creating agent" {})
+        (-> (f)
+            (.then (fn [{id :seon.agent/id}]
+                     (reset! !create-in-flight false)
+                     (log/info-console! "seon.web.serve" "POST /agents/new OK"
+                                        {:agent id})
+                     (write-status! res 200 "text/plain; charset=utf-8" (str id))))
+            (.catch (fn [err]
+                      (reset! !create-in-flight false)
+                      (log/error-console! "seon.web.serve" "/agents/new failed" err)
+                      (write-status! res 500 "text/plain; charset=utf-8"
+                                     (str "create agent failed: " err)))))))))
+
 (defn- handle-chat! [req res]
   ;; Agent-id resolution (audit P1 — 2026-05-24): query param wins,
   ;; else `(db/current-agent-id)`, else 400 — no silent "seon" fallback.
@@ -329,7 +392,7 @@
                            {:seon.message/from    agent/user-ref
                             :seon.message/to      [[:seon.agent/id agent-id]]
                             :seon.message/content text})
-                         (.then (fn [{ok? :seon.db/ok? error :seon.db/error}]
+                         (.then (fn [{ok? :seon.message/ok? error :seon.db/error}]
                                   (if ok?
                                     (do
                                       (log/info-console! "seon.web.serve" "POST /chat"
@@ -368,6 +431,7 @@
                                                                    (str "Not found: " url)))
         "POST" (cond
                  (= path "/chat")                   (handle-chat! req res)
+                 (= path "/agents/new")             (handle-create-agent! req res)
                  (= path "/clear")                  (handle-clear! req res)
                  (= path "/log")                    (handle-log! req res)
                  :else                              (write-status! res 404 "text/plain; charset=utf-8"
@@ -419,8 +483,11 @@
 
    Default port is 7890 (override via $SEON_PORT; set to 0 for
    ephemeral). Writes the bound port to $SEON_PORT_FILE (default
-   `tmp/seon-port`). Idempotent — repeat calls close the old server
-   first.
+   `tmp/seon-port`). Idempotent — when a server is already LISTENING
+   the call resolves with the existing binding (restarting would drop
+   every open SSE stream AND kill the in-flight request when a second
+   agent boots via POST /agents/new → start-agent! → start!). A dead
+   (closed) server object is replaced.
 
    The server binds to 127.0.0.1 (loopback only). Browsers on the
    same machine can connect; nothing on the LAN sees the pod.
@@ -432,28 +499,42 @@
   []
   (js/Promise.
     (fn [resolve reject]
-      (when-let [old @!server]
-        (try (.close old) (catch :default _ nil))
-        (reset! !server nil)
-        (reset! !sse-connections []))
-      (let [server (.createServer http handler)
-            port   (requested-port)]
-        (.once server "error"
-               (fn [err]
-                 (log/error-console! "seon.web.serve"
-                                     (str "listen failed on port " port) err)
-                 (reject err)))
-        (.listen server port "127.0.0.1"
-                 (fn []
-                   (let [addr      (.address server)
-                         bound     (.-port addr)
-                         port-file (write-port-file! bound)]
-                     (reset! !server server)
-                     (log/info-console! "seon.web.serve"
-                                        (str "listening on http://127.0.0.1:" bound)
-                                        {:port-file port-file})
-                     (resolve {:seon.web/port bound
-                               :seon.web/port-file port-file}))))))))
+      (if-let [live-addr (some-> @!server .address)]
+        ;; Already listening — reuse (see docstring; a second
+        ;; start-agent! on the same pod must NOT bounce the server).
+        (resolve {:seon.web/port      (.-port live-addr)
+                  :seon.web/port-file (or (.. js/process -env -SEON_PORT_FILE)
+                                          "tmp/seon-port")})
+        (do
+          (when-let [old @!server]
+            ;; Exists but not listening (closed/dead) — replace it.
+            (try (.close old) (catch :default _ nil))
+            (reset! !server nil)
+            (reset! !sse-connections []))
+          (let [;; LATE-BINDING wrapper, not `handler` itself: createServer
+                ;; captures the fn OBJECT, so passing `handler` directly
+                ;; pins the server to boot-time routes forever — a
+                ;; hot-reloaded route 404s until pod restart (observed
+                ;; live 2026-06-10: /agents/new). The wrapper re-reads
+                ;; the var on every request.
+                server (.createServer http (fn [req res] (handler req res)))
+                port   (requested-port)]
+            (.once server "error"
+                   (fn [err]
+                     (log/error-console! "seon.web.serve"
+                                         (str "listen failed on port " port) err)
+                     (reject err)))
+            (.listen server port "127.0.0.1"
+                     (fn []
+                       (let [addr      (.address server)
+                             bound     (.-port addr)
+                             port-file (write-port-file! bound)]
+                         (reset! !server server)
+                         (log/info-console! "seon.web.serve"
+                                            (str "listening on http://127.0.0.1:" bound)
+                                            {:port-file port-file})
+                         (resolve {:seon.web/port bound
+                                   :seon.web/port-file port-file}))))))))))
 
 (defn stop!
   "Close the HTTP server, clear the connection registry. Returns nil."

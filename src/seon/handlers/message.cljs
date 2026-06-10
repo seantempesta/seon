@@ -65,8 +65,10 @@
   "Chat-bubble-style hiccup card — Phosphor Terminal palette.
 
    - Direction line: `user → assistant` (from-label colored by kind,
-     to-labels resolved + joined), `17:44:53` timestamp, hops badge
-     when > 0.
+     to-labels resolved + joined), `17:44:53` timestamp. The
+     `:seon.message/hops` counter stays in the DATA MODEL (loop
+     prevention) but is NOT displayed — it confused users
+     (user-requested, 2026-06-10).
    - Content rendered as MARKDOWN via the inspector's `[data-markdown]`
      + marked.js mechanism. XSS-safe end-to-end: the attr value is
      HTML-escaped by seon.ui.html at serialization, and the inspector's
@@ -82,7 +84,6 @@
                     vec)
         body   (or (:seon.message/content entity) "")
         at     (:seon.message/at entity)
-        hops   (or (:seon.message/hops entity) 0)
         user?      (= label "user")
         from-class (cond
                      user?                 "text-amber-400"
@@ -110,10 +111,6 @@
           [:span {:class "text-xs font-mono text-text-500"}
            (str "→ " (str/join ", " tos))])
         (when (instance? js/Date at)
-          [:span {:class "text-xs text-text-500"} (hh-mm-ss at)])
-        (when (pos? hops)
-          [:span {:class (str "text-xs font-mono text-amber-500/90 "
-                              "border border-amber-700/50 rounded px-1")}
-           (str "hops " hops)])]
+          [:span {:class "text-xs text-text-500"} (hh-mm-ss at)])]
        [:div {:class "markdown mt-0.5"
               :data-markdown (str/trim body)}]]]}))

@@ -1379,6 +1379,14 @@
   []
   (start-agent! {:llm-fn (deepseek/agent-adapter)}))
 
+;; Wire the UI's "new agent" affordance (POST /agents/new) to the ONE
+;; boot path. serve.cljs can't require this ns (cycle: client → serve),
+;; so the closure is injected at load time — re-runs on hot reload, so
+;; the endpoint always calls current code. `current-llm-fn` is resolved
+;; per CALL, matching -main's auto-boot selection.
+(web.serve/set-create-agent-fn!
+  (fn [] (start-agent! {:llm-fn (current-llm-fn)})))
+
 ;; ---------------------------------------------------------------------------
 ;; Entry point
 ;; ---------------------------------------------------------------------------
