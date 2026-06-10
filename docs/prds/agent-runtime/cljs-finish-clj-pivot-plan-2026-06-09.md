@@ -134,6 +134,20 @@ finding pipeline). Full per-run history:
   (session GC wanted). See §7 MCP-health unit.
 - **`[:maybe ::flow-status]`** in `src/seon/flow/status.clj:393` (JVM lane):
   bump in place to `::flow-status` + explicit not-registered error.
+- **Agent-authored schema replay BROKEN** (found live 2026-06-10: every
+  `:seon.workout/*` replay fails with a swallowed analyzer "ERROR" at new-
+  agent boot; same window `/agents/new` 500'd `:malli.core/invalid-schema`
+  on the `:seon.db/transact-response` function schema) — datoms→code resume
+  is the MVP retrieval arc; under investigation (debug unit in flight).
+- **Live-pod hot-require corrupts the malli registry** (gym incident
+  2026-06-10): MCP-requiring a not-yet-loaded ns re-executes
+  `malli.registry` (`registry*` is a plain `def`; `seon.schema`'s composite
+  install is defonce-guarded) → every new `m/schema`/`register!` throws
+  `:malli.core/invalid-schema` until pod restart. Root fix: defonce in the
+  fork and/or re-runnable registry init.
+- **`:seon.turn/error` not queryable**: a turn's failure detail lives only
+  in the ⚠ chat message; persist it onto the turn entity (small unit; makes
+  gym S-08 mechanical).
 
 ## 5. CLJ datahike / Track 2 — state + THE LANE-MERGE GOAL
 
@@ -239,11 +253,18 @@ cluster store):**
 Each item is launchable as one agent unit (≤7 files), implement → verify →
 commit:
 
-1. **#26 finding-salience + instruction-clarity rewrite** — PLUS (user, 2026-06-10, observed live): `message!`/`reply!` must return a CONCISE registered response (`{:seon.message/ok? :seon.message/id :seon.message/hops}`; error envelope on failure) — today they return the raw transact envelope (full tx-report = ~1.5k transcript chars per reply + a misdirected "narrow your query" hint). The A3 principle applied. Also: consult-before-
-   research (query `:finding` rows for the topic BEFORE searching),
-   fully-qualified-keyword teaching (the worked example models real
-   namespaces and explains the rule), store-proactively. Then **run 8**;
-   pass bar = agent #2's first move is consulting stored knowledge (§1).
+1. ~~#26 finding-salience + instruction-clarity + concise message!/reply!~~
+   — DONE 2026-06-10 (44a42df, verifier-falsified, live-proven): consult-
+   findings-first recipe, multi-segment `:kb.finding/*` teaching, store-
+   proactively, concise `{:seon.message/ok? id hops}` envelope (error
+   envelope on failure). Run 8 still pending — encoded as gym scenario
+   `consults-findings-run8` (deepseek tier); pass bar = agent #2's first
+   eval queries stored findings (§1). ALSO SHIPPED same-day (44a42df +
+   0902cbc): DeepSeek thinking OFF by default (`set-thinking!` knob,
+   ~1.5s replies), fail-loud LLM errors (turn closes `:error` + visible
+   "⚠ LLM call failed" chat message — the silent `done [0 ok]` death is
+   gone), UI create-agent + chat autoscroll + hops hidden + chat
+   envelope fix.
 2. **ALS unification + `seon.agent`/`seon.agents` MERGE** (user-approved) —
    one ns, ONE ALS carrying a single per-agent context map (today
    `seon.db/agent-id-als` and `seon.agents/substrate-ctx-als` are parallel);
@@ -267,7 +288,19 @@ commit:
 9. **REPL-DEBUGGABILITY EVERYWHERE (user, 2026-06-10): every process, agent, and cluster DB reachable from a REPL.** The access matrix to make true: (a) any AGENT RUNTIME — the cljs MCP eval already takes `agent_id` (resolves agent-id → shadow runtime, survives restart); under process-per-agent every agent process loads the dev `:client` build and registers with the ONE shadow watcher — verify the `agent_id` path end-to-end (`seon.dev.node-agent`) as processes split; (b) the WIRE-SERVER — add nREPL alongside the 7891 socket REPL and wire it into the seon MCP server so the central writer is MCP-reachable like the dev JVM; (c) any CLUSTER DB — read-only DIS reader conns from any REPL (`:lock-blob? false`) + the wire-server REPL; document the one-liner recipes; (d) remote agents (later) — the wire protocol + DB are the admin surface (shadow websocket is dev-only). Document the matrix in CLAUDE.md Process Architecture when it lands.
 10. **CLUSTER RUNTIME (the topology step after the store flip — spec before building):** today = one pod process hosting N interleaved agents on the single "default" cluster; target = ONE NODE PROCESS PER AGENT. Pieces: (a) per-agent process launcher — slim boot (reader conn + wire-writer + one agent loop + dev shadow registration), e.g. `bin/seon agent start <cluster> <agent-id>`; (b) cluster lifecycle — create-cluster mints the DB via the existing JVM multi-DB registry, spawns the orchestrator agent process; (c) **spawn-agent capability** — a wire op + supervisor seam so an ORCHESTRATOR AGENT can request new task-agent processes (the swarm primitive); (d) the web UI becomes its OWN reader process over the cluster DB (today the pod serves it); (e) the in-process interleaving-risk list mostly dissolves per-process. Until this lands, multi-agent = interleaved-in-one-pod on cluster "default".
 11. ~~`bin/seon cluster reset [name]`~~ — DONE 2026-06-10: stop pod → stop wire-server → wipe `data/clusters/<name>/store` (store dir ONLY) → start wire-server (waits for `[writer] ready`, mints fresh DB) → start pod (re-seeds idempotently). First real run wiped the Track-2 debris: fresh store verified via the 7891 socket REPL = 1 agent / 106 fns / 0 messages / 3154 datoms, mission control matched exactly, full human chat loop browser-verified with a live DeepSeek reply. Non-"default" names wipe only (no processes registered for them yet). Later grows `cluster create <name>`.
-12. **AGENT-GYM scenario harness (the testing methodology — behind #26):** scenarios as EDN data ({questions, fixtures, PASS-PREDICATES as datalog queries against the post-run store + transcript}); a driver that boots fresh agents on a SCRATCH cluster DB, sends via `message!`, awaits idle, evaluates predicates mechanically, emits a scorecard keyed (scenario × git sha) — section-by-section context iteration becomes QUANTIFIED. Rubric axes: sees-question · searches-first · models-work-directed · reuses-schemas · consults-findings · reuses-FUNCTIONS · writes-tests · replies-honestly · terminates · stores-proactively. Budget tiers: stub-llm for plumbing scenarios, deepseek (2-4 calls) for behavioral. Every defect from runs 3-7 becomes a permanent regression predicate; run 8 = the first scenario. Known prompt-thin spots the gym must cover: test-writing (thinnest teaching), function-reuse (never yet observed), store-proactively.
+12. **AGENT-GYM — harness LANDED 2026-06-10 (24ade2f), catalog LANDED
+    (0e66717: 19 scenarios, 5 families, demo-ordered).** Driver runs
+    EDN scenarios on isolated `:memory` conns; mechanical datalog
+    predicates + (user, 2026-06-10) **LLM-JUDGE predicates for semantic
+    correctness** (rubric + reference facts → graded verdict; separate
+    scorecard axis from behavior — judge runner NOT yet built). 3 stub
+    regression scenarios green; deepseek tier guarded behind
+    `allow-paid?`. REMAINING in this lane: judge runner; catalog §7
+    driver-feature gaps (fixture fn seeding, multi-agent sequencing,
+    per-scenario llm-fn injection, mid-scenario pod restart for the
+    resume scenario, relative-date fixtures); encode catalog top-4
+    (S-01 smoke, S-12 run-8, S-32 consult-isolated, S-21 log-workout);
+    then run deepseek tiers (user approved spend 2026-06-10).
 13. **MCP server health** — reset the broken `default` cljs session; GC the
    26 stale sessions.
 
