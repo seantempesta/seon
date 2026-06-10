@@ -70,11 +70,35 @@ Prose that survives: SOUL/system identity only.
   NO RAG. Consult = catalog + datalog (salience surface already built).
   Remaining capabilities teaching moves into docstrings of the public
   faces — NO recipes namespace.
-- **V3-C — context-model unification**: ONE full-index query → ONE
-  classifier (relevant-set config + agent-authored detection derived at
-  render time, no stamping) → dumb renderers. Deletes: internal-attr-ns?
-  regex (after S-21's interim fix), substrate-ns-name? heuristic,
-  per-section queries/gating, count lines, signature blocks.
+- **V3-C — context-model unification, HOMED IN `seon.ctx` (user,
+  2026-06-10: consolidate the context-generation namespaces under one
+  roof; `seon.ctx` over `seon.context` — the `:seon.ctx/*` keywords
+  already name exactly this)**: ONE full-index query → ONE classifier
+  (relevant-set config + agent-authored detection derived at render
+  time, no stamping) → dumb renderers, all moving OUT of agent.cljs
+  into `seon.ctx` (+ `seon.ctx.internal` if it grows plumbing).
+  Deletes: internal-attr-ns? regex (S-21's provenance query landed
+  fe2b026 — the FIRST of the six filters converted, validating the
+  provenance mechanism), substrate-ns-name? heuristic, per-section
+  queries/gating, count lines, signature blocks, entity-kind inference.
+
+### Mechanical method for the reorg (user, 2026-06-10 — standard for all moves)
+
+Never rebuild from scratch; git is the safety net. Two recipes:
+
+1. **Namespace move/rename** (proven on seon.agent.todo, ~10 min incl.
+   fallout): `mv` the files → one `perl -pi 's/old\.ns/new.ns/g'` sweep
+   over the explicit affected-file list (catches ns forms, keywords,
+   requires, strings, error messages in one pass; regex LITERALS with
+   escaped dots need a second targeted sweep) → full suite → fix the
+   2-3 semantic fallouts the suite names (sort orders, assertions) →
+   one atomic commit.
+2. **Face/internal split**: `cp x.cljs x/internal.cljs` → DELETE the
+   public face's fns from internal and the plumbing from the face (two
+   subtractive passes over intact, working code — never re-authoring)
+   → face requires internal → re-point external callers of moved
+   private vars → suite → commit. Future splits (schema.cljc,
+   agent.cljs) use this copy-then-delete route.
 - **V3-D — datahike API block**: render the query API from var metadata
   (docstrings live on the vars; code-as-data, no dep-file reads). Budget
   guard; trim to the querying surface (q, pull, entity, datoms, history…).
