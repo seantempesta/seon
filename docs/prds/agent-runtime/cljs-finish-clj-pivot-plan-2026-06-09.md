@@ -459,12 +459,16 @@ exemplar-root swap fs→todo), plus whatever the two in-flight agents leave.
 - **Agent code base ns = `my.*`** (user-confirmed): agents own it freely,
   everything under it auto-renders to ALL cluster agents (derived from tx
   provenance — agent-scoped txs vs `:substrate-seed`, no maintained list);
-  `seon.*` is WRITE-BLOCKED for agents (gate alongside register!'s);
-  `*.internal` hidden uniformly. Transition: temporary exclusion set for
-  not-yet-split substrate plumbing nses — shrinks to empty, then deleted.
-  Open sub-decision: agent HOME namespaces currently mint as
-  `seon.agent.<id>` (substrate squatting) — `my.agents.<id>` vs classify
-  runtime-internal; decide in the guard unit.
+  `seon.*` stays substrate-only **BY CONVENTION, not enforcement** (user
+  2026-06-10: "by convention they'll listen" — no write-blocking machinery;
+  the register! single-segment gate is the only hard gate); `*.internal`
+  hidden uniformly. Transition: temporary exclusion set for not-yet-split
+  substrate plumbing nses — shrinks to empty, then deleted.
+  DECIDED: agent HOME namespaces mint as **`my.agent.<id>`** (today
+  `seon.agent.<id>` — substrate squatting). Rename unit = mint site
+  (client.cljs), home-ns (agent.cljs), replay, inspector, tests asserting
+  the old prefix; queued first in next session (files owned by in-flight
+  lanes at handoff).
 - DeepSeek spend unlimited; cluster resets free; errors ALWAYS surface at
   the user-facing layer.
 
