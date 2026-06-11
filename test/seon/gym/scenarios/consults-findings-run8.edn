@@ -43,18 +43,23 @@
    :seon.gym.predicate/axis    :searches-first
    :seon.gym.predicate/pattern "seon\\.agent\\.search/grep|seon\\.agent\\.fs/read-file"
    :seon.gym.predicate/expect  [:count>= 1]}
-  ;; THE pass bar (PRD §1): B's earliest eval queries the finding rows.
-  ;; Anchored on the kb prefix (gym-upgrade §3.2, same fix as s32): a
-  ;; consult means the eval touches a :my.kb/* SHARED PROVENANCE attr
-  ;; (:my.kb/source-path, :my.kb/confidence — the predictable storage
-  ;; signature this scenario's storage predicate already keys on) or a
-  ;; :my.kb.<domain>/* attr A minted. The previous broad ":my\\."
-  ;; anchor passed on ANY :my.* touch — the schema-catalog recipe's own
-  ;; step-0 query, B's my.agent.<id> scratch attrs — measuring that the
-  ;; bait rendered, not that consulting replaced research (the false-
+  ;; THE pass bar (PRD §1): B's earliest message-driven eval queries
+  ;; the finding rows. Anchored on the kb prefix (gym-upgrade §3.2,
+  ;; same fix as s32): a consult means the eval touches a :my.kb/*
+  ;; SHARED PROVENANCE attr (:my.kb/source-path, :my.kb/confidence —
+  ;; the predictable storage signature this scenario's storage
+  ;; predicate already keys on) or a :my.kb.<domain>/* attr A minted.
+  ;; V4 consult evidence: B's creation turn runs
+  ;; `(seon.db/store-inventory)` for real, so A's stored kinds sit in
+  ;; B's own transcript (the catalogs are GONE — context-v4 V4-3); the
+  ;; my.kb namespace source rides in the prompt as a <namespace> tag.
+  ;; The previous broad ":my\\." anchor passed on ANY :my.* touch —
+  ;; e.g. B's my.agent.<id> scratch attrs — measuring that the bait
+  ;; rendered, not that consulting replaced research (the false-
   ;; positive class falsified both ways in driver_test's
-  ;; consult-anchor tests). The [./] boundary admits both :my.kb/x and
-  ;; :my.kb.codebase/x while rejecting other :my.* namespaces.
+  ;; consult-anchor tests; creation-turn tutorial evals are excluded
+  ;; by the driver's woken-by scoping). The [./] boundary admits both
+  ;; :my.kb/x and :my.kb.codebase/x while rejecting other :my.*.
   {:seon.gym.predicate/id      :b-first-eval-consults-stored-findings
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/agent   :b
@@ -90,6 +95,33 @@
                                :where
                                [?a :seon.agent/state :idle]]
    :seon.gym.predicate/expect [:count 2]}
+  ;; P21 #35 deferred predicates (gym-upgrade §8): each agent's loop
+  ;; terminates UNDER the turns-cap (seon.ctx/default-turns-cap = 20)
+  ;; by its own stop policy — same shape as S-01/S-21. Per-agent
+  ;; turn counts via the designator args; <= 19 incl. the creation
+  ;; turn means the cap never fired.
+  {:seon.gym.predicate/id     :a-terminates-under-cap
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/args   [:seon.gym.agent/a]
+   :seon.gym.predicate/query  [:find ?t
+                               :in $ ?aid
+                               :where
+                               [?ag :seon.agent/id ?aid]
+                               [?ag :seon.agent/sessions ?s]
+                               [?s :seon.agent.session/turns ?t]]
+   :seon.gym.predicate/expect [:count<= 19]}
+  {:seon.gym.predicate/id     :b-terminates-under-cap
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/args   [:seon.gym.agent/b]
+   :seon.gym.predicate/query  [:find ?t
+                               :in $ ?bid
+                               :where
+                               [?ag :seon.agent/id ?bid]
+                               [?ag :seon.agent/sessions ?s]
+                               [?s :seon.agent.session/turns ?t]]
+   :seon.gym.predicate/expect [:count<= 19]}
   ;; --- judged answer correctness, SEPARATE from the behavior bits ---
   {:seon.gym.predicate/id        :judge-a-answer-two-step-gate
    :seon.gym.predicate/kind      :llm-judge

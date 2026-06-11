@@ -56,6 +56,58 @@ What this means concretely:
   365/1545/0. Full table: e2e-demo-findings-2026-06-08.md §"PRE-V4
   BASELINE (post gym-simplification)".
 
+## r3 — POST-V4 ALIGNMENT (2026-06-11, after context-v4 landed)
+
+The gym was aligned to the v4 world (the prompt IS a REPL session;
+catalogs dead; consult evidence = the creation turn's
+`store-inventory` eval). Suite 373/1590/0 after all of it. The
+changes, each one mechanism:
+
+- **Shared `boot-seed!` (drift killer).** `seon.client/boot-seed!`
+  extracted from `start-agent!` (handlers + entity-schemas +
+  seed-substrate! + SOUL seed + substrate index, one
+  `:substrate-seed` tx-context); `seed-scenario-world!` now CALLS the
+  boot's own code path instead of hand-mirroring it. The third
+  observed drift (gym worlds missing the `:my.soul` rows) forced the
+  extraction; it is structurally impossible now.
+- **Boot-parity creation evals.** The gym's `ensure-agent!` runs
+  `seon.client/creation-evals!` after `create!` — gym agents carry
+  the same tile-wiring / `(seon.db/store-inventory)` /
+  `(my.kb.system/instructions)` tutorial transcript live agents do.
+  `run-scenario!` mints :a's id, seeds the world under its
+  `with-agent` scope, THEN boots :a — the live
+  mint-onto-populated-store order, so :a's startup inventory sees the
+  scenario's fixtures (a scenario's fixtures ARE prior state).
+- **Woken-turn scoping.** Eval-shaped predicates
+  (`first-eval-matches`, `eval-count-matching`) and the prompt-blob
+  kinds range over MESSAGE-DRIVEN turns only
+  (`:seon.agent.turn/woken-by` present) — the creation turn renders
+  no prompt and its tutorial evals are substrate-scripted, not
+  behavior. Without this every scenario's "first eval" would be the
+  tile wiring.
+- **Deferred P21 terminates-under-cap landed** (§8 hand-off): s32
+  global `[:count<= 19]` (S-21's shape); s12 per-agent (designator
+  args) `[:count<= 19]` each, both counting the creation turn.
+- **s32 kind decision** (the V4-3 composer flag):
+  `:my.kb.codebase/claim` became the fixture's IDENTITY attr so the
+  kind appears in `store-inventory` (`question` cannot be identity —
+  three fixture rows share one question and would upsert-merge).
+  S-21's `:seon.workout/*` deliberately stays identity-LESS: `date`
+  as identity would merge same-day workouts; the kind is invisible in
+  the inventory and the scenario now measures whether the
+  reconstituted namespace tags + domain-attr warnings carry schema
+  reuse alone.
+- **envelope-honesty re-anchor:** the blanket transcript-excludes
+  `":seon.db/ok? true"` tripped on the creation turn's legitimate
+  tile-wiring success; now a datalog pin on the bogus eval's own
+  result-edn prefix. (Workaround of record: datahike-cljs queries
+  cannot call `clojure.string/*` — not in the engine built-ins — and
+  EDN cannot carry regex literals for `re-find`; `subs`+`=` is the
+  available shape. `todo-resume`'s :todo predicates carry the same
+  trap, noted inline.)
+- **todo-resume** catalog-era predicate became a `:prompt-includes`
+  on the reconstituted `<namespace name="my.workout">` tag.
+
 User directives (2026-06-11, law for this PRD):
 
 - The gym ALWAYS represents a quality benchmark of the system as it

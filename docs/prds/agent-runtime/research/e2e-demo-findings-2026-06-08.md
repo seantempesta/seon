@@ -827,3 +827,166 @@ safe demo scenario.
   failures / 0 errors** (pre-simplification 366/1554/0; the −1/−9 is
   the two deleted structural falsification tests replaced by one
   telemetry test — expected).
+
+## POST-V4 SWEEP — 2026-06-11 (context-v4 landed at 5071468; gym aligned; FRESH cluster)
+
+Setup: gym aligned to v4 (shared `seon.client/boot-seed!`, boot-parity
+creation evals, woken-turn predicate scoping, s32 identity-kind
+fixture, P21 terminates-under-cap predicates — gym-upgrade PRD §r3);
+live cluster RESET to a fresh store (old store at
+`tmp/store-backups/store-pre-v4-reset-20260611-153550`; fresh boot
+verified: 1 minted agent, creation turn logs the 3 tutorial evals,
+zero `:my.kb.instruction`/`:your-sections` residue, live composer
+renders 90,975 chars with no dead sections and 0 `render failed`
+lines). Suite at sweep sha `815f908`+fence edits: **373/1590/0 on
+every run** (matches the pre-sweep baseline counts).
+
+### Stub tier
+
+All real stub scenarios PASS across all four suite runs (s01,
+blank-message-refusal, envelope-honesty, finding-storage-shape, plus
+the gymtest falsification stubs in their deliberate states). Stub gate
+HELD through the alignment.
+
+### Paid tier — scenario × sweep
+
+Sweep 1 ran BEFORE the answer-key fix (see harness fixes below) — its
+s32 salience "green" was contamination, recorded for the record.
+
+| scenario | sweep | mech | failed predicates | judge |
+|---|---|---|---|---|
+| s32 | 1 (pre-fix) | 4/6 | consult-first; repo-search (8 greps) | FAIL 40 |
+| s32 | 2 | 3/6 | consult-first; salience 0/5; repo-search (3) | FAIL 40 |
+| s32 | 3 | 4/6 | consult-first; salience 0/6 | **PASS 95** (0 repo searches — answered from the rendered `seon.agent` source) |
+| s21 | 1 | 5/7 | run-row never landed; 6/13 register! evals | n/a |
+| s21 | 2 | 5/7 | run-row never landed; 5/10 register! evals | n/a |
+| s21 | 3 | 4/7 | run-row never landed; **fork landed** (`:my.kb.workout/*` registered); 1 register! | n/a |
+| s12 | 1 | 6/8 | A stored 1 finding (<2); B grep'd first | **PASS 100/100** |
+| s12 | 2 | 6/8 | A stored 0 findings; B grep'd first | FAIL 40/30 (B: wrong file + "currently throws — that's a bug") |
+
+### The bar (set pre-v4) vs reality
+
+- **s32 → 5/5: NOT MET.** Consult-first red 3/3 (GREEN at the pre-v4
+  baseline — the V4-3 risk realized); the previously-EXPECTED-RED
+  salience predicate is GENUINELY red (0/N prompts carry the seeded
+  claim text) once decontaminated — sweep 1's green came from the
+  agent grepping the gym's own test files. Re-grep economy improved
+  monotonically across sweeps (8 → 3 → 0).
+- **s12 → ≥2 findings + judge ≥70 + no transact!-throws
+  misstatement: PARTIALLY MET, high variance.** Sweep 1: judges
+  100/100, zero misstatements (the V4-1 errors-as-values teaching
+  demonstrably landed) but 1 finding stored. Sweep 2: 0 findings,
+  judges 40/30, and agent B said an unregistered attr "currently
+  throws — that's a bug" — the misstatement class returned in 1 of 2
+  sweeps.
+- **S-21 stays 3/3: NOT MET — 0/3, the headline regression.**
+  Root-caused below (finding 1); in every run the strength/run row
+  the user asked to log NEVER landed in `:seon.workout/*`.
+
+### Harness fixes this sweep (before/after documented)
+
+1. **Filesystem answer-key leak (the §3.4 self-bait rule, fs
+   variant).** The gym configured `allowed-roots [cwd]`, so paid
+   agents grepped `test/seon/gym/driver_test.cljs` and read the
+   judge's reference text verbatim ("never the raw tx-report" reached
+   prompts via grep results — s32 sweep-1 blob
+   `logs/prompts/QPD-2606111538/ykT-2606111538.txt`). Fixed:
+   gym fs roots = `src/` + `docs/` (deliberate, documented parity
+   divergence). Before: salience 7/8 "green". After: 0/N — honest red.
+2. **envelope-honesty blanket transcript-excludes** tripped on the
+   creation turn's legitimate tile-wiring success envelope → re-
+   anchored as a datalog pin on the bogus eval's own result prefix.
+   (datahike-cljs queries can NOT call `clojure.string/*` — engine
+   built-ins only — and EDN can't carry regex literals; `subs`+`=` is
+   the available shape. JVM-datahike habits don't port.)
+3. **prompt-blob predicates** re-scoped to message-driven turns
+   (`woken-by` present); the missing-blob falsification fixture gained
+   a woken-by ref.
+
+### System findings, ranked (evidence inline; src fixes NOT made — fence)
+
+1. **Prior agents' domain schemas have NO v4 surface — the S-21
+   killer.** The schema-catalog died (V4-3); `store-inventory` only
+   lists kinds with an installed `:db.unique/identity` attr
+   (`:seon.workout` has none — and CAN'T: date-as-identity would
+   merge same-day rows); `seon.ctx/namespaces-section`
+   (src/seon/ctx.cljs:767–789) requires `[?n :seon.ns/source ?src]`,
+   and tee-minted data namespaces are SOURCELESS (`build-tee-entities`
+   nested-upserts `{:seon.ns/name kw}` only — fresh live store already
+   carries 13 sourceless ns rows). Net: an agent asked to "log it with
+   my other workouts" cannot see `:seon.workout/*` anywhere and forks
+   (`:my.kb.workout/*`, sweep 3) or stalls (sweeps 1–2). Fix
+   hypotheses: (a) namespaces-section renders sourceless ns rows that
+   have `:seon.schema/_ns`/`:seon.fn/_ns` members via the existing
+   `reconstituted-ns-source`; (b) V4-3's stated escalation 2 — richer
+   inventory rows (attr names) — plus a non-identity kind source
+   (domain-attrs) for the inventory's kind derivation.
+2. **Substrate namespaces are not requirable from agent evals.**
+   s21 sweep-2 chronology (agent BNv-2606111546, 19:46:36): the agent
+   imitated the rendered `my.kb` pattern with
+   `(ns my.kb.workout (:require [seon.schema :as schema] [my.kb :as kb]))`
+   → `"ns my.kb not available — :cljs/analysis-error"`. Cascade: ns
+   form failed → `schema/register!` ×5 = undeclared var → transact
+   rejected (unregistered attrs) → verification query threw the
+   typo-guard. The prompt renders namespaces the eval environment
+   refuses to require — show-don't-tell teaching a move that errors.
+   Hypothesis: the bootstrap compile-state's analyzer cache lacks
+   `my.*` entries (seon.repl/ensure-bootstrap! / seon.eval analysis
+   cache wiring).
+3. **Blind same-batch reply → false success claims to the user.** In
+   the same s21 run, ALL of research+register+transact+verify+reply
+   was ONE response batch; every form before the reply FAILED, and
+   `reply!` still executed: "logged — 24-minute run on June 11.
+   stored as run-2026-06-11." — nothing was stored. The reply is
+   composed before any result exists, so errors can't inform it.
+   Candidates: batch policy (stop executing a batch's remaining forms
+   after an error, or hold a `reply!` that follows failed forms), or
+   a taught reply-after-verify rule — measure with this same
+   scenario.
+4. **Consult-first regression (the V4-3 open risk, now measured).**
+   3/3 s32 runs grep/pull first despite the turn-1 prompt carrying
+   BOTH the system-prompt consult teaching AND the creation-turn
+   inventory result showing `{:kind :my.kb.codebase … :rows 4}`
+   (verified in blob QPD-2606111538/BzI-2606111538.txt — context
+   rendered, agent ignored). The seeded claim TEXT renders in zero
+   prompts, so salience stays red until a finding-claims surface
+   exists (gym-upgrade §4.3 kb-section rung). PRD escalations in
+   order: per-wake inventory eval → richer inventory rows → NEVER a
+   resurrected section. Note for predicate semantics: sweep 3's agent
+   answered correctly at judge 95 with ZERO repo searches by reading
+   the rendered `seon.agent` source — v4's full-source body makes
+   "consult the store first" and "already knows from the prompt"
+   converge; the consult anchor may need a v4 rethink (user call —
+   it's the behavior pin).
+5. **s12 storage still under-landing, now with variance:** 1 finding
+   (sweep 1) then 0 (sweep 2) vs the ≥2 bar; baseline stored 1.
+   Sweep-2 agent A also burned 47 evals / 7 turns. The
+   stores-proactively teaching is not landing as behavior.
+6. **First-boot creation evals run BEFORE the substrate seed.** Fresh
+   live pod: the FIRST agent's tutorial `store-inventory` showed all
+   rows 0 and `(my.kb.system/instructions)` → `[]` (singleton not yet
+   seeded); minted-later agents see the seeded world. Now a
+   one-binding fix: in `start-agent!` move
+   `(await (boot-seed! {:seon.db/conn conn}))` ABOVE the per-agent
+   boot loop (the extraction made the seed callable early).
+   src/seon/client.cljs.
+7. **Judge-rubric staleness risk (harness hygiene):** s12's rubrics
+   pin exact file/line ground truth (internal.cljs ~422/~499 —
+   verified still correct this sweep); any db split/refactor must
+   re-verify them or the judge grades against a dead tree.
+
+### Staging list (gym fence — the orchestrator commits)
+
+- `src/seon/client.cljs` (boot-seed! extraction ONLY + start-agent!
+  call site)
+- `test/seon/gym/driver.cljs`
+- `test/seon/gym/driver_test.cljs`
+- `test/seon/gym/scenarios/s32-consult-before-research.edn`
+- `test/seon/gym/scenarios/consults-findings-run8.edn`
+- `test/seon/gym/scenarios/envelope-honesty.edn`
+- `test/seon/gym/scenarios/todo-resume.edn`
+- `docs/prds/agent-runtime/gym-upgrade-prd-2026-06-11.md`
+- `docs/prds/agent-runtime/research/e2e-demo-findings-2026-06-08.md`
+
+Sweep logs: `tmp/gym-postv4-paid{1,2,3}.log` (sweep 1 = pre-fs-fix,
+contaminated s32 salience).

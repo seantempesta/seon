@@ -38,7 +38,7 @@
 ;;     dead agent. Encoded as :todo-renders-for-boot-agent (RED until
 ;;     agent identity is durable across restarts).
 {:seon.gym.scenario/id     :todo-resume
- :seon.gym.scenario/doc    "Datoms→code resume: agent authors my.workout (schemas + fn redefined 3x + deftest + data row) and an open todo; pod restarts on the same store; replay rebuilds the corpus (one current :seon.fn row per sym, latest source), the fn runs its latest body, the data row and todo query back, and the catalog shows :my.workout/*. Requires driver S-06 (mid-scenario pod restart)."
+ :seon.gym.scenario/doc    "Datoms→code resume: agent authors my.workout (schemas + fn redefined 3x + deftest + data row) and an open todo; pod restarts on the same store; replay rebuilds the corpus (one current :seon.fn row per sym, latest source), the fn runs its latest body, the data row and todo query back, and the prompt carries the reconstituted my.workout namespace tag (context-v4 — the catalogs died). Requires driver S-06 (mid-scenario pod restart)."
  :seon.gym.scenario/tier   :stub
  :seon.gym.scenario/status :todo
  :seon.gym.scenario/llm    :scripted-replay
@@ -82,6 +82,10 @@
   ;; :require — see header). The driver needs a :replay-stats predicate
   ;; kind (or scrape the :seon.log warn rows) once S-06 lands; until
   ;; then this datalog form asserts no replay-failure warn rows.
+  ;; NOTE (2026-06-11 sweep): datahike-cljs queries can NOT call
+  ;; clojure.string/* (engine built-ins only — see envelope-honesty's
+  ;; subs+= workaround); the clojure.string clauses here and below must
+  ;; be rewritten before this scenario goes :active with S-06.
   {:seon.gym.predicate/id     :replay-zero-failures
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :stores-proactively
@@ -128,9 +132,13 @@
    :seon.gym.predicate/kind :transcript-includes
    :seon.gym.predicate/axis :stores-proactively
    :seon.gym.predicate/text "Your open work items"}
-  ;; Post-restart: the schema catalog's domain-attrs block carries the
-  ;; agent-registered :my.workout/* attrs (the S-21 fix surface).
-  {:seon.gym.predicate/id   :catalog-lists-my-workout-attrs
-   :seon.gym.predicate/kind :transcript-includes
+  ;; Post-restart: the agent-authored corpus rides the prompt as a
+  ;; reconstituted <namespace name="my.workout"> tag (context-v4 V4-2/
+  ;; V4-3: the schema catalog DIED; agent-registered attrs are visible
+  ;; via reconstituted namespace sources + the store-inventory startup
+  ;; eval). Was a transcript-includes on ":my.workout/date", which the
+  ;; agent's own register! eval sources would satisfy vacuously.
+  {:seon.gym.predicate/id   :prompt-carries-my-workout-ns
+   :seon.gym.predicate/kind :prompt-includes
    :seon.gym.predicate/axis :stores-proactively
-   :seon.gym.predicate/text ":my.workout/date"}]}
+   :seon.gym.predicate/text "<namespace name=\"my.workout\">"}]}

@@ -19,8 +19,17 @@
  :seon.gym.scenario/status :active
  :seon.gym.scenario/axes   [:consults-findings :searches-first
                             :replies-honestly :terminates]
+ ;; V4 KIND DECISION (post-refactor sweep, 2026-06-11): the consult
+ ;; surface is now the creation turn's `(seon.db/store-inventory)`
+ ;; eval, which derives kinds from INSTALLED `:db.unique/identity`
+ ;; attrs — an identity-less domain is invisible there. `claim` is
+ ;; this domain's natural row key (every fixture claim is distinct);
+ ;; `question` can NOT be the identity attr — three fixture rows share
+ ;; one question and an identity upsert would merge them into a single
+ ;; entity. With claim as identity the inventory shows
+ ;; {:kind :my.kb.codebase :id-attr :my.kb.codebase/claim :rows 4}.
  :seon.gym.scenario/schema-registrations
- [[:my.kb.codebase/claim :string]
+ [[:my.kb.codebase/claim [:string {:seon.db/identity true}]]
   [:my.kb.codebase/question :string]]
  ;; F-findings-validation (run-7 output verbatim) + the #26 envelope
  ;; finding that answers THIS scenario's question completely.
@@ -49,14 +58,19 @@
  [{:seon.gym.turn/message "What does seon.agent/message! return — the full transact report or something smaller?"}]
  :seon.gym.scenario/predicates
  ;; Anchored on the SEEDED DOMAIN namespace (gym-upgrade §3.2): a
- ;; consult means the first eval actually touches a :my.kb.codebase/*
- ;; attr — the namespace the bait findings live in. The previous
- ;; ":my\\." anchor passed on ANY :my.* touch, including the
- ;; schema-catalog recipe's own step-0 query and the agent's
- ;; my.agent.<id> scratch attrs — it measured that the bait rendered
- ;; and pattern-matched, not that consulting replaced research.
+ ;; consult means the first message-driven eval actually touches a
+ ;; :my.kb.codebase/* attr — the namespace the bait findings live in.
+ ;; V4 consult evidence: the creation turn's `(seon.db/store-inventory)`
+ ;; startup eval puts the kind + id-attr + row count in the agent's own
+ ;; transcript (the catalogs are GONE — context-v4 V4-3); datalog on
+ ;; the inventoried attrs is the consult move. The previous ":my\\."
+ ;; anchor passed on ANY :my.* touch — including the agent's
+ ;; my.agent.<id> scratch attrs — measuring that the bait rendered and
+ ;; pattern-matched, not that consulting replaced research.
  ;; (Falsified in driver_test: an unrelated-:my.* first eval scores
- ;; this RED; a :my.kb.codebase/* first eval scores it green.)
+ ;; this RED; a :my.kb.codebase/* first eval scores it green. The
+ ;; creation-turn tutorial evals are excluded from 'first eval' by the
+ ;; driver's woken-by scoping.)
  [{:seon.gym.predicate/id      :first-eval-consults-stored-findings
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/axis    :consults-findings
@@ -104,6 +118,18 @@
                                :where
                                [?a :seon.agent/state :idle]]
    :seon.gym.predicate/expect :non-empty}
+  ;; P21 #35 deferred predicate (gym-upgrade §8): the loop terminates
+  ;; UNDER the turns-cap (seon.ctx/default-turns-cap = 20) by its own
+  ;; stop policy — same shape as S-01's :terminates-within-three-turns
+  ;; and S-21's :terminates-under-cap. Counts ALL turns incl. the
+  ;; creation turn, so <= 19 total still means the cap never fired.
+  {:seon.gym.predicate/id     :terminates-under-cap
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?t
+                               :where
+                               [?t :seon.agent.turn/id ?tid]]
+   :seon.gym.predicate/expect [:count<= 19]}
   {:seon.gym.predicate/id        :judge-answer-states-the-concise-envelope
    :seon.gym.predicate/kind      :llm-judge
    :seon.gym.predicate/axis      :replies-honestly

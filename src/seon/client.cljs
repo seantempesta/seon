@@ -1572,6 +1572,93 @@
           (runtime-id/host! id)
           res)))))
 
+(schema/register! ::seeded? [:= true])
+(schema/register! ::boot-seed-request  [:map [:seon.db/conn :seon.db/conn]])
+(schema/register! ::boot-seed-response [:map [::seeded? ::seeded?]])
+
+(defn ^:async boot-seed!
+  "THE substrate boot seed — ONE code path for 'make this store the
+   world a pod boots into', shared verbatim by `start-agent!` (live
+   boot) and the gym's `seed-scenario-world!` (scratch worlds), so the
+   two can never drift again (the gym hand-mirrored this sequence and
+   drifted twice — most recently missing the `:soul-seed` step, so gym
+   prompts lacked the `:my.soul` rows live prompts carry).
+
+   Steps, in boot order:
+     1. Substrate handler rows — `h/bootstrap-schema!` +
+        `wake/bootstrap-schema!` + the ONE `:wake/on-message` handler
+        entity (idempotent upserts; data-only — registering arms no
+        dispatcher).
+     2. Under ONE `{:seon.db/origin :substrate-seed}` tx-context, four
+        transacts (each its own tx so the substrate prefix stays a
+        stable sequence of tx-times):
+          :entity-schemas  — `schema/all-entity-schemas-tx-data`.
+          :substrate-seed  — `seed-substrate!` (user entity +
+                             my.kb.system instruction singleton).
+          :soul-seed       — `my.soul/seed-tx-data`, SEED-ONLY-IF-
+                             ABSENT (a user's runtime soul edit is
+                             never clobbered by reboot); skipped
+                             entirely when every row already exists.
+          :substrate-index — `substrate-index-tx` (`:seon.ns` /
+                             `:seon.fn` / `:seon.schema` / `:seon.test`
+                             rows, conn-deduped so an Nth boot on the
+                             same store re-seeds nothing).
+
+   Pins the root `db/*conn*` to `conn` for the duration (the handler
+   bootstrap fns read it), restoring in `finally`. ENVELOPE CONTRACT
+   (A4): `db/transact!` never rejects, so every step checks the
+   envelope and THROWS (surface-errors-loudly) — a silent partial seed
+   is far worse than a crashed boot."
+  {:malli/schema [:=> [:cat ::boot-seed-request] ::boot-seed-response]}
+  [{conn :seon.db/conn}]
+  (let [prev-conn db/*conn*]
+    (set! db/*conn* conn)
+    (try
+      (await (h/bootstrap-schema!))
+      (await (wake/bootstrap-schema!))
+      (await (h/register!
+               {:seon.handler/name      :wake/on-message
+                :seon.handler/match     {:seon.handler.match/attr
+                                         :seon.agent.message/to}
+                :seon.handler/fn        'seon.handlers.wake/wake-on-message
+                :seon.handler/on-origin #{:user :agent}}))
+      (let [index-tx (await (substrate-index-tx conn))
+            check!   (fn [step {ok?   :seon.db/ok?
+                                error :seon.db/error}]
+                       (when-not ok?
+                         (throw (ex-info
+                                  (str "boot seed transact failed at "
+                                       step ": "
+                                       (:seon.error/message error))
+                                  {:seon.client/seed-step step
+                                   :seon.db/error error}))))]
+        (await
+          (db/with-tx-context
+            {:seon.db/origin :substrate-seed}
+            (fn ^:async seed! []
+              (check! :entity-schemas
+                      (await (db/transact!
+                               {:seon.db/conn conn
+                                :seon.db/tx-data
+                                (schema/all-entity-schemas-tx-data)})))
+              (check! :substrate-seed
+                      (await (db/transact!
+                               {:seon.db/conn conn
+                                :seon.db/tx-data (seed-substrate!)})))
+              (let [soul-tx (my.soul/seed-tx-data (await (d/db conn)))]
+                (when (seq soul-tx)
+                  (check! :soul-seed
+                          (await (db/transact!
+                                   {:seon.db/conn conn
+                                    :seon.db/tx-data soul-tx})))))
+              (check! :substrate-index
+                      (await (db/transact!
+                               {:seon.db/conn conn
+                                :seon.db/tx-data index-tx})))))))
+      {::seeded? true}
+      (finally
+        (set! db/*conn* prev-conn)))))
+
 (def inventory-read-source
   "The creation-turn `store-inventory` eval (context-v4 §2.4/§3.1,
    V4-3): the catalogs died as sections; the inventory is a substrate
@@ -1781,85 +1868,11 @@
                 ;; this for the dev iteration loop.
                 {:seon.web/keys [port port-file]}
                 (await (web.serve/start!))
-                ;; Substrate handlers — register every substrate-wide
-                ;; handler entity in the DB so the dispatcher (and the
-                ;; inspector's handler count) sees them. Idempotent:
-                ;; `handler/register!` upserts on the composite tuple
-                ;; `[name agent]`; `wake/bootstrap-schema!` upserts on
-                ;; `:db/ident`. Re-running on hot-reload is cheap.
-                _ (await (h/bootstrap-schema!))
-                _ (await (wake/bootstrap-schema!))
-                _ (await (h/register!
-                           {:seon.handler/name      :wake/on-message
-                            :seon.handler/match     {:seon.handler.match/attr
-                                                     :seon.agent.message/to}
-                            :seon.handler/fn        'seon.handlers.wake/wake-on-message
-                            :seon.handler/on-origin #{:user :agent}}))
-                ;; Schemas-as-queryable-data: decompose every registered
-                ;; entity-shape :map schema into a :seon.schema DB entity
-                ;; so the renderer's kind-lookup can query via datalog
-                ;; (no in-memory atom walk on the hot path). Identity
-                ;; upsert on :seon.schema/key — re-running is cheap.
-                ;; P2 substrate seed — three transacts under one
-                ;; `:seon.db/origin :substrate-seed` tx-meta scope so
-                ;; audit queries can isolate seed datoms. Order is
-                ;; load-bearing for replay-from-tx-0:
-                ;;   1. entity-schema decomposition (Item 4) — must
-                ;;      land first so subsequent entities reference
-                ;;      registered shapes.
-                ;;   2. user entity + my.kb.system instruction singleton
-                ;;      (seed-substrate!), then the :my.soul
-                ;;      system-prompt rows (seed-only-if-absent — user
-                ;;      edits survive reboot).
-                ;;   3. substrate index — `:seon.ns` + `:seon.fn` rows
-                ;;      built by `index-substrate!` from REAL runtime
-                ;;      introspection (var meta + source file-read), DEDUPED
-                ;;      against the conn by `substrate-index-tx` so a second
-                ;;      agent's boot on the shared conn re-seeds nothing
-                ;;      (returns `[]`) — the "fresh agent, same conn" guard.
-                ;; Each transact is its own tx so the substrate prefix
-                ;; remains a stable cacheable sequence of tx-times.
-                index-tx (await (substrate-index-tx conn))
-                ;; ENVELOPE CONTRACT (A4): db/transact! never rejects —
-                ;; failures resolve as {:seon.db/ok? false …}. Boot seed
-                ;; MUST stay fail-loud, so each step checks the envelope
-                ;; and throws (surface-errors-loudly): a silent partial
-                ;; seed would be far worse than a crashed boot.
-                _ (await
-                    (db/with-tx-context
-                      {:seon.db/origin :substrate-seed}
-                      (fn ^:async seed! []
-                        (let [check!
-                              (fn [step {ok?   :seon.db/ok?
-                                         error :seon.db/error}]
-                                (when-not ok?
-                                  (throw (ex-info
-                                           (str "boot seed transact failed at "
-                                                step ": "
-                                                (:seon.error/message error))
-                                           {:seon.client/seed-step step
-                                            :seon.db/error error}))))]
-                          (check! :entity-schemas
-                                  (await (db/transact!
-                                           {:seon.db/tx-data
-                                            (schema/all-entity-schemas-tx-data)})))
-                          (check! :substrate-seed
-                                  (await (db/transact!
-                                           {:seon.db/tx-data (seed-substrate!)})))
-                          ;; Soul seed — SEED-ONLY-IF-ABSENT (unlike the
-                          ;; re-asserting seed-substrate! rows): the
-                          ;; :my.soul system-prompt rows seed from
-                          ;; SOUL.md + mechanics ONCE; a user's runtime
-                          ;; edit to a row is never clobbered by reboot.
-                          (let [soul-tx (my.soul/seed-tx-data
-                                          (await (d/db conn)))]
-                            (when (seq soul-tx)
-                              (check! :soul-seed
-                                      (await (db/transact!
-                                               {:seon.db/tx-data soul-tx})))))
-                          (check! :substrate-index
-                                  (await (db/transact!
-                                           {:seon.db/tx-data index-tx})))))))
+                ;; THE substrate boot seed — handlers + the four seed
+                ;; transacts, extracted to [[boot-seed!]] so the gym's
+                ;; scenario worlds run the boot's OWN code path (one
+                ;; mechanism — the hand-mirrored copy drifted twice).
+                _ (await (boot-seed! {:seon.db/conn conn}))
                 ;; Install the per-agent inspector tx-listener. Pushes
                 ;; morphs for the agent-view inspector page (/agent/<id>).
                 _ (seon.web.inspector/install!)]

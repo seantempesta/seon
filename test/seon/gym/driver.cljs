@@ -62,9 +62,10 @@
    top-4 scenarios):
      - mid-scenario pod restart against the same scratch store (S-06).
      - captured return values from driver-level message! calls (S-05).
-     - fixture-sources tee into the :seon.fn functions-catalog (the
-       fns ARE callable; catalog visibility needs the record-eval! tee
-       outside a turn — required before S-31 function-reuse is encoded)."
+     - fixture-sources tee into :seon.fn rows (the fns ARE callable;
+       prompt visibility — the reconstituted <namespace> tags,
+       context-v4 — needs the record-eval! tee outside a turn;
+       required before S-31 function-reuse is encoded)."
   (:require
     [cljs.reader :as reader]
     [clojure.string :as str]
@@ -86,12 +87,6 @@
     [seon.dev.test-preload]
     [seon.eval :as seval]
     [seon.agent.fs :as sfs]
-    ;; Boot-parity: start-agent! seeds the substrate handler entity
-    ;; (`:wake/on-message`) + the hand-declared datahike idents at boot;
-    ;; the gym world seeds the same rows (no dispatcher is armed — v0
-    ;; handler rows are data only, so the stub drive stays the driver's).
-    [seon.handler :as h]
-    [seon.handlers.wake :as wake]
     [seon.repl :as repl]
     [seon.schema :as schema]
     [seon.warn :as warn]))
@@ -226,8 +221,9 @@
 ;; Fixture SOURCE strings — evaluated through `seon.eval/eval` at
 ;; fixture-load so the defined fns are CALLABLE from agent evals
 ;; (code-as-data seeding, catalog F-helper-fns). TODO: tee them into
-;; the :seon.fn functions-catalog too (needs the record-eval! tee
-;; outside a turn) — required before S-31 (function reuse) is encoded.
+;; :seon.fn rows too, so they render in the reconstituted <namespace>
+;; tags (context-v4; needs the record-eval! tee outside a turn) —
+;; required before S-31 (function reuse) is encoded.
 (schema/register! :seon.gym.scenario/fixture-sources [:vector :string])
 ;; Per-scenario llm-fn injection (catalog §7), stub tier only:
 ;;   :scripted-replay — drive run-agentic-loop! (the REAL trigger-style
@@ -472,9 +468,16 @@
     :else false))
 
 (defn- eval-at+source
-  "All [at source] eval pairs, chronological. With `agent-id`, scoped
-   to that agent's evals via agent → sessions → turns → evals; nil =
-   the whole scratch store (single-agent scenarios)."
+  "All [at source] eval pairs from MESSAGE-DRIVEN turns (turns with a
+   `:seon.agent.turn/woken-by` datom), chronological. With `agent-id`,
+   scoped to that agent's evals via agent → sessions → turns → evals;
+   nil = the whole scratch store (single-agent scenarios).
+
+   The woken-by clause excludes the CREATION turn's tutorial evals
+   (tile wiring + store-inventory + instructions read — boot parity,
+   context-v4): eval-shaped predicates measure the agent's behavior IN
+   RESPONSE TO MESSAGES; the boot tutorial is substrate-scripted, not
+   behavior, and would otherwise be every scenario's 'first eval'."
   [dbv agent-id]
   (->> (if agent-id
          (db/query {:seon.db/query '[:find ?at ?src ?ev
@@ -483,6 +486,7 @@
                                      [?ag :seon.agent/id ?aid]
                                      [?ag :seon.agent/sessions ?s]
                                      [?s :seon.agent.session/turns ?t]
+                                     [?t :seon.agent.turn/woken-by _]
                                      [?t :seon.agent.turn/evals ?ev]
                                      [?ev :seon.eval/at ?at]
                                      [?ev :seon.eval/source ?src]]
@@ -490,6 +494,8 @@
                     :seon.db/db   dbv})
          (db/query {:seon.db/query '[:find ?at ?src ?ev
                                      :where
+                                     [?t :seon.agent.turn/woken-by _]
+                                     [?t :seon.agent.turn/evals ?ev]
                                      [?ev :seon.eval/at ?at]
                                      [?ev :seon.eval/source ?src]]
                     :seon.db/db dbv}))
@@ -507,11 +513,14 @@
   (second (first (eval-at+source dbv agent-id))))
 
 (defn- turn-prompt-files
-  "Chronological [turn-id prompt-file-or-nil] pairs for every turn in
-   the post-run store — optionally scoped to one agent's turns via
-   agent → sessions → turns. A nil prompt-file means the blob was
-   never written (persist-prompt! failure, or a seeded turn without
-   one) — prompt-predicate callers MUST treat that as RED."
+  "Chronological [turn-id prompt-file-or-nil] pairs for every
+   MESSAGE-DRIVEN turn (`:seon.agent.turn/woken-by` present — the
+   creation turn renders no prompt, so prompt predicates range over
+   the turns the agent was actually prompted on) in the post-run
+   store — optionally scoped to one agent's turns via agent →
+   sessions → turns. A nil prompt-file means the blob was never
+   written (persist-prompt! failure, or a seeded turn without one) —
+   prompt-predicate callers MUST treat that as RED."
   [dbv agent-id]
   (->> (if agent-id
          (db/query {:seon.db/query '[:find ?at ?tid ?t
@@ -520,12 +529,14 @@
                                      [?ag :seon.agent/id ?aid]
                                      [?ag :seon.agent/sessions ?s]
                                      [?s :seon.agent.session/turns ?t]
+                                     [?t :seon.agent.turn/woken-by _]
                                      [?t :seon.agent.turn/id ?tid]
                                      [?t :seon.agent.turn/at ?at]]
                     :seon.db/args [agent-id]
                     :seon.db/db   dbv})
          (db/query {:seon.db/query '[:find ?at ?tid ?t
                                      :where
+                                     [?t :seon.agent.turn/woken-by _]
                                      [?t :seon.agent.turn/id ?tid]
                                      [?t :seon.agent.turn/at ?at]]
                     :seon.db/db dbv}))
@@ -984,11 +995,24 @@
   "Lazily create the agent behind a turn DESIGNATOR (:a, :b, …) on the
    scratch store. Multi-agent sequencing (catalog §7): turns run in
    order and every drive awaits idle, so 'boot A → await idle → boot
-   B on the same store' falls out of the sequential doseq."
-  [!agents compile-state designator]
+   B on the same store' falls out of the sequential doseq.
+
+   Boot parity (context-v4): after create!, the agent runs the SAME
+   `seon.client/creation-evals!` block a live minted agent runs — the
+   tile wiring, the `(seon.db/store-inventory)` startup eval, and the
+   `(my.kb.system/instructions)` read — so its transcript carries the
+   v4 tutorial/consult evidence exactly like a live agent's. (The
+   creation turn has no `:seon.agent.turn/woken-by`; eval- and
+   prompt-shaped predicates exclude it — see [[eval-at+source]].)
+
+   `pre-id` (optional) pins the minted agent's id — run-scenario!
+   mints :a's id BEFORE seeding so the seed txs can carry it, then
+   boots :a here AFTER the seed (the live mint-onto-populated-store
+   order, so :a's creation evals see the seeded world)."
+  [!agents compile-state designator & [pre-id]]
   (if-let [existing (get @!agents designator)]
     existing
-    (let [agent-id (db/new-id!)]
+    (let [agent-id (or pre-id (db/new-id!))]
       ;; with-agent scope mirrors seon.client/boot-one-agent! — on a
       ;; live boot the agent's own create! tx carries its agent-id.
       (await
@@ -998,6 +1022,9 @@
                                           (agent/home-ns agent-id)
                                           agent-id))
             (await (agent/create! {:seon.agent/id agent-id})))))
+      (await (client/creation-evals!
+               {:seon.agent/id            agent-id
+                :seon.agent/compile-state compile-state}))
       (swap! !agents assoc designator agent-id)
       agent-id)))
 
@@ -1006,28 +1033,22 @@
    scenario's prior-agent state on top. Two provenance layers, exactly
    like a live store:
 
-   1. The pod's boot seed — the same calls as
-      `seon.client/start-agent!`, in the same order: the substrate
-      handler bootstrap (`h/bootstrap-schema!` + `wake/bootstrap-schema!`
-      + the ONE `:wake/on-message` handler entity, data-only — no
-      dispatcher armed), then the three transacts inside the same
-      `{:seon.db/origin :substrate-seed}` tx-context: entity-schema
-      decomposition (`schema/all-entity-schemas-tx-data`), the
-      preamble + user entity (`client/seed-substrate!`), and the
-      substrate index (`client/substrate-index-tx` — :seon.ns/:seon.fn
-      rows PLUS a `:seon.schema` row per registered schema PLUS the
-      :seon.test rows + test-sibling exemplar sources, conn-deduped;
-      the test roster comes from the `seon.dev.test-preload` require
-      in this ns — the SAME mechanism the pod build uses). Gym
-      iteration 1 ran WITHOUT the entity-schema decomposition and
-      index-schemas, so gym prompts differed from real pod prompts —
-      which hid the S-32 catalog bug for a whole sweep; iteration 2
-      ran without the test roster, so :exemplars rendered 4/7 blocks
-      vs live. The seed-origin tx-context matters too:
+   1. The pod's boot seed — `seon.client/boot-seed!`, the boot's OWN
+      code path (handlers + entity-schema decomposition +
+      seed-substrate! + soul seed + substrate index, under the
+      `:substrate-seed` origin). One mechanism: the gym used to
+      hand-mirror this sequence and drifted twice (iteration 1 missed
+      the entity-schema decomposition + index-schemas — hid the S-32
+      catalog bug for a whole sweep; iteration 2 missed the test
+      roster — :exemplars rendered 4/7 blocks vs live; the third
+      drift, missing the `:soul-seed` step, is what forced the
+      extraction). The seed-origin tx-context matters:
       `seon.warn/domain-attrs` discriminates substrate vs agent attrs
       by exactly that provenance. The caller (run-scenario!) invokes
-      this inside `(db/with-agent <:a's id>)` so the seed txs carry the
-      primary agent's id like a live boot's do.
+      this inside `(db/with-agent <:a's id>)` so the seed txs carry
+      the primary agent's id like a live boot's do. The test roster
+      comes from the `seon.dev.test-preload` require in this ns — the
+      SAME mechanism the pod build uses.
 
    2. The scenario's registrations + fixtures — the state a PRIOR
       agent left in the store. Registered into the live registry, then
@@ -1049,47 +1070,7 @@
                    (throw (ex-info (str "gym: world seed transact failed at "
                                         step)
                                    env))))]
-    ;; Substrate handler rows — the SAME calls start-agent! makes, in the
-    ;; same order, BEFORE the seed-origin transacts: the hand-declared
-    ;; datahike idents (composite-tuple identity the Malli bridge can't
-    ;; emit) + the ONE `:wake/on-message` handler entity. Without these
-    ;; the gym store renders a `:seon.handler` instance count of 0 where
-    ;; every live store shows 1. No dispatcher is armed by these rows
-    ;; (v0: handler entities are data; wake-up is the per-agent trigger,
-    ;; which the gym deliberately does not install — the driver drives).
-    ;; The handler fns read the root `db/*conn*`; pin it to THIS conn for
-    ;; the duration (direct test callers don't pre-swap it the way
-    ;; run-scenario! does), restoring in finally.
-    (let [prev-conn db/*conn*]
-      (set! db/*conn* conn)
-      (try
-        (await (h/bootstrap-schema!))
-        (await (wake/bootstrap-schema!))
-        (await (h/register!
-                 {:seon.handler/name      :wake/on-message
-                  :seon.handler/match     {:seon.handler.match/attr
-                                           :seon.agent.message/to}
-                  :seon.handler/fn        'seon.handlers.wake/wake-on-message
-                  :seon.handler/on-origin #{:user :agent}}))
-        (finally
-          (set! db/*conn* prev-conn))))
-    (await
-      (db/with-tx-context {:seon.db/origin :substrate-seed}
-        (fn ^:async boot-seed! []
-          (check! :entity-schemas
-                  (await (db/transact!
-                           {:seon.db/conn conn
-                            :seon.db/tx-data
-                            (schema/all-entity-schemas-tx-data)})))
-          (check! :substrate-seed
-                  (await (db/transact!
-                           {:seon.db/conn conn
-                            :seon.db/tx-data (vec (client/seed-substrate!))})))
-          (check! :substrate-index
-                  (await (db/transact!
-                           {:seon.db/conn conn
-                            :seon.db/tx-data
-                            (await (client/substrate-index-tx conn))}))))))
+    (await (client/boot-seed! {:seon.db/conn conn}))
     ;; PRIOR-AGENT PROVENANCE: on a live store this layer was written by
     ;; a real agent inside its own with-agent scope, so its txs carry
     ;; `:seon.db/agent-id` (the context-model ns-leg classifies
@@ -1185,25 +1166,37 @@
             ;; you can do" teaching — without them agents never learn that
             ;; grep/register!/reply! exist) and mirror the pod's fs
             ;; capability (bin/seon runs the pod with SEON_FS_ROOT=$SEON_ROOT
-            ;; SEON_FS_READ_ONLY=1). Both restored/irrelevant after the run.
-            (sfs/configure! {:seon.agent.fs/allowed-roots [(.cwd js/process)]
-                             :seon.agent.fs/read-only?    true})
-            ;; Boot designator :a FIRST, then run the boot seed inside
-            ;; its with-agent scope — exactly start-agent!'s order (the
-            ;; per-agent create! precedes the seed transacts, and the
-            ;; seed txs carry the PRIMARY agent's id alongside the
-            ;; :substrate-seed origin — the live store's provenance
-            ;; shape, which the context-model classifier keys on).
+            ;; SEON_FS_READ_ONLY=1) — MINUS test/: the gym's own scenario
+            ;; EDNs and judge references live under test/seon/gym/**, and
+            ;; the post-v4 sweep caught a paid agent grepping the judge's
+            ;; reference text out of driver_test.cljs (the answer key) —
+            ;; the filesystem variant of the §3.4 self-bait rule. src/ +
+            ;; docs/ is the realistic research surface; the deliberate
+            ;; parity divergence is documented here. Restored after the run.
+            (let [cwd (.cwd js/process)]
+              (sfs/configure! {:seon.agent.fs/allowed-roots
+                               [(str cwd "/src") (str cwd "/docs")]
+                               :seon.agent.fs/read-only?    true}))
+            ;; Mint :a's id FIRST and run the boot seed inside its
+            ;; with-agent scope — the seed txs carry the PRIMARY
+            ;; agent's id alongside the :substrate-seed origin (the
+            ;; live store's provenance shape, which the context-model
+            ;; classifier keys on). :a's actual BOOT (create! +
+            ;; creation evals) happens AFTER the seed + fixtures, so
+            ;; its creation-turn `store-inventory`/instructions evals
+            ;; see the seeded world — the live mint-onto-populated-
+            ;; store order (a scenario's fixtures ARE prior state).
             ;; The scenario's prior-agent layer inside
             ;; [[seed-scenario-world!]] re-scopes itself to a synthetic
             ;; prior-agent id (nested with-agent — inner wins).
-            (let [primary (await (ensure-agent! !agents compile-state :a))]
+            (let [primary (db/new-id!)]
               (await
                 (db/with-agent primary
                   (fn []
                     (seed-scenario-world! {:seon.db/conn conn
-                                           :seon.gym/scenario scenario})))))
-            (await (eval-fixture-sources! compile-state fixture-sources))
+                                           :seon.gym/scenario scenario}))))
+              (await (eval-fixture-sources! compile-state fixture-sources))
+              (await (ensure-agent! !agents compile-state :a primary)))
             ;; Drive every gym turn, strictly in order; each turn's agent
             ;; boots lazily on first use (multi-agent sequencing).
             (doseq [{:seon.gym.turn/keys [message llm-script agent]} turns]

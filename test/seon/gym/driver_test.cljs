@@ -442,9 +442,16 @@
           (-> (prompt-blob-scenario)
               (assoc :seon.gym.scenario/id :gymtest-prompt-blob-missing
                      :seon.gym.scenario/fixtures
+                     ;; the fixture turn carries a woken-by (nested
+                     ;; minimal message) — prompt predicates range over
+                     ;; MESSAGE-DRIVEN turns only (the creation turn's
+                     ;; tutorial evals render no prompt and are
+                     ;; deliberately out of scope).
                      [{:seon.agent.turn/id          (db/new-id!)
                        :seon.agent.turn/at          (js/Date.)
                        :seon.agent.turn/status      :done
+                       :seon.agent.turn/woken-by    {:seon.agent.message/id
+                                                     (db/new-id!)}
                        :seon.agent.turn/prompt-file phantom}]
                      :seon.gym.scenario/predicates
                      [{:seon.gym.predicate/id   :every-turn-red-on-missing-blob

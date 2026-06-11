@@ -24,10 +24,27 @@
    :seon.gym.predicate/axis   :replies-honestly
    :seon.gym.predicate/query  [:find ?e :where [?e :gymtest.bogus/attr ?v]]
    :seon.gym.predicate/expect :empty}
-  {:seon.gym.predicate/id   :no-false-success-on-the-surface
-   :seon.gym.predicate/kind :transcript-excludes
-   :seon.gym.predicate/axis :replies-honestly
-   :seon.gym.predicate/text ":seon.db/ok? true"}
+  ;; No false success ON THE BOGUS EVAL ITSELF (was a blanket
+  ;; transcript-excludes ":seon.db/ok? true" — that tripped on the
+  ;; creation turn's LEGITIMATE tile-wiring success envelope once the
+  ;; gym gained boot-parity creation evals, context-v4). Anchored: the
+  ;; eval whose source IS the scripted bogus transact (exact match —
+  ;; the script lives 20 lines up in this same file; narration `;;`
+  ;; lines split off before the source persists) must record the
+  ;; ERROR envelope as its result — its result-edn STARTS with
+  ;; "{:seon.db/ok? false" (19 chars). datahike-cljs note: queries
+  ;; cannot call clojure.string/* (not in the engine's built-ins) and
+  ;; EDN cannot carry the regex literal re-find needs, hence subs+=.
+  {:seon.gym.predicate/id     :no-false-success-on-the-surface
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :replies-honestly
+   :seon.gym.predicate/query  [:find ?e
+                               :where
+                               [?e :seon.eval/source "(seon.db/transact! {:seon.db/tx-data [{:gymtest.bogus/attr 1}]})"]
+                               [?e :seon.eval/result-edn ?r]
+                               [(subs ?r 0 19) ?prefix]
+                               [(= ?prefix "{:seon.db/ok? false")]]
+   :seon.gym.predicate/expect [:count 1]}
   {:seon.gym.predicate/id     :turn-closes-done
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :terminates
