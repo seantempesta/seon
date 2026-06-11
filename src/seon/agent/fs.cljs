@@ -42,6 +42,13 @@
      ;; ns-load reads SEON_FS_ROOT / SEON_FS_READ_ONLY into the
      ;; same atom).
 
+     ;; SEON_FS_LOCK=1 (host env) makes the env-bootstrapped grant
+     ;; IMMUTABLE: [[configure!]] becomes a legible no-op error and
+     ;; [[grants]] reports :seon.agent.fs/locked? true. Observed live
+     ;; 2026-06-11: an agent configure!'d itself to a NARROWER grant
+     ;; and locked itself out for the session — hosts that bootstrap
+     ;; the grant via env should set the lock too.
+
    ## Worked examples
 
      (seon.agent.fs/grants)    ;; the CONFIGURED roots + read-only flag —
@@ -98,23 +105,47 @@
 ;; SEON_FS_ROOT grants roots).
 (schema/register! :seon.agent.fs/allowed-roots [:vector :string])
 (schema/register! :seon.agent.fs/read-only?    :boolean)
+;; True when the host set SEON_FS_LOCK — the grant is immutable for
+;; this process; configure! is a no-op error. Read live from the env
+;; (the host owns it; the agent can't flip it from inside).
+(schema/register! :seon.agent.fs/locked?       :boolean)
 
 (schema/register! :seon.agent.fs/grants-response
   [:map
    [:seon.agent.fs/allowed-roots :seon.agent.fs/allowed-roots]
-   [:seon.agent.fs/read-only?    :seon.agent.fs/read-only?]])
+   [:seon.agent.fs/read-only?    :seon.agent.fs/read-only?]
+   [:seon.agent.fs/locked?       :seon.agent.fs/locked?]])
+
+(schema/register! :seon.agent.fs/configure-response
+  [:map
+   [:seon.agent.fs/ok?           :boolean]
+   [:seon.agent.fs/allowed-roots {:optional true} :seon.agent.fs/allowed-roots]
+   [:seon.agent.fs/read-only?    {:optional true} :seon.agent.fs/read-only?]
+   [:seon.agent.fs/locked?       {:optional true} :seon.agent.fs/locked?]
+   [:seon.agent.fs/error         {:optional true} :string]])
+
+;; read-file paging — line-based section reads (1-based from-line).
+(schema/register! :seon.agent.fs/from-line      :int)
+(schema/register! :seon.agent.fs/max-lines      :int)
+(schema/register! :seon.agent.fs/lines-returned :int)
+(schema/register! :seon.agent.fs/total-lines    :int)
 
 (schema/register! :seon.agent.fs/read-request
   [:map
-   [:seon.agent.fs/path     :string]
-   [:seon.agent.fs/encoding {:optional true} :string]])
+   [:seon.agent.fs/path      :string]
+   [:seon.agent.fs/encoding  {:optional true} :string]
+   [:seon.agent.fs/from-line {:optional true} :int]
+   [:seon.agent.fs/max-lines {:optional true} :int]])
 
 (schema/register! :seon.agent.fs/read-response
   [:map
-   [:seon.agent.fs/ok?     :boolean]
-   [:seon.agent.fs/path    :string]
-   [:seon.agent.fs/content {:optional true} :string]
-   [:seon.agent.fs/error   {:optional true} :string]])
+   [:seon.agent.fs/ok?            :boolean]
+   [:seon.agent.fs/path           :string]
+   [:seon.agent.fs/content        {:optional true} :string]
+   [:seon.agent.fs/from-line      {:optional true} :int]
+   [:seon.agent.fs/lines-returned {:optional true} :int]
+   [:seon.agent.fs/total-lines    {:optional true} :int]
+   [:seon.agent.fs/error          {:optional true} :string]])
 
 (schema/register! :seon.agent.fs/write-request
   [:map
@@ -200,6 +231,17 @@
 ;; SEON_FS_ROOT / SEON_FS_READ_ONLY callers keep working.
 (defonce !config (atom (or (env-bootstrap) {})))
 
+(defn- fs-locked?
+  "True when the HOST locked the grant via SEON_FS_LOCK. Read live
+   from the env on every call (not cached at ns load) — the host owns
+   the knob; nothing inside the pod can flip it. Any non-blank value
+   other than \"0\" locks."
+  []
+  (case (platform/host)
+    :node (let [v (some-> js/process .-env .-SEON_FS_LOCK)]
+            (boolean (and v (not (str/blank? v)) (not= "0" v))))
+    :wasi false))
+
 (defn configure!
   "Replace the active fs capability config. Merges over current state;
    pass nil for a key to leave it unchanged.
@@ -207,15 +249,27 @@
      (configure! {:seon.agent.fs/allowed-roots [\"/Users/me/work\"]
                   :seon.agent.fs/read-only?    false})
 
-   Returns the new config map."
-  {:malli/schema [:=> [:cat :map] :map]}
+   Returns the new config map with `:seon.agent.fs/ok? true`.
+
+   When the host set SEON_FS_LOCK, the env-bootstrapped grant is
+   IMMUTABLE and this is a legible no-op error (`:seon.agent.fs/ok?
+   false`, `:seon.agent.fs/locked? true`) — the live grant is
+   untouched. Observed 2026-06-11: an agent NARROWED its own grant and
+   locked itself out for the session; the lock exists so that can't
+   recur. Read the active grant with [[grants]]."
+  {:malli/schema [:=> [:cat :map] :seon.agent.fs/configure-response]}
   [updates]
-  (let [next (merge @!config
-                    (select-keys updates
-                                 [:seon.agent.fs/allowed-roots
-                                  :seon.agent.fs/read-only?]))]
-    (reset! !config next)
-    next))
+  (if (fs-locked?)
+    {:seon.agent.fs/ok?     false
+     :seon.agent.fs/locked? true
+     :seon.agent.fs/error   (str "grants are locked by the host (SEON_FS_LOCK); "
+                                 "read them with (seon.agent.fs/grants)")}
+    (let [next (merge @!config
+                      (select-keys updates
+                                   [:seon.agent.fs/allowed-roots
+                                    :seon.agent.fs/read-only?]))]
+      (reset! !config next)
+      (assoc next :seon.agent.fs/ok? true))))
 
 (defn- read-only? []
   (boolean (:seon.agent.fs/read-only? @!config)))
@@ -229,7 +283,12 @@
 
      (seon.agent.fs/grants)
      ;; => {:seon.agent.fs/allowed-roots [\"/Users/me/work-folder\"]
-     ;;     :seon.agent.fs/read-only?    false}
+     ;;     :seon.agent.fs/read-only?    false
+     ;;     :seon.agent.fs/locked?       false}
+
+   `:seon.agent.fs/locked?` true means the HOST locked the grant
+   (SEON_FS_LOCK env): it is immutable for this process and
+   [[configure!]] is a no-op error — work within the listed roots.
 
    Call this BEFORE reasoning about your filesystem access. A
    directory listing or your CWD tells you what EXISTS, not what you
@@ -251,7 +310,8 @@
   {:malli/schema [:=> [:cat] :seon.agent.fs/grants-response]}
   []
   {:seon.agent.fs/allowed-roots (allowed-roots)
-   :seon.agent.fs/read-only?    (read-only?)})
+   :seon.agent.fs/read-only?    (read-only?)
+   :seon.agent.fs/locked?       (fs-locked?)})
 
 (defn- denied [path reason]
   {:seon.agent.fs/ok?   false
@@ -314,22 +374,63 @@
 ;; Public API — map-in / Promise-out
 ;; ============================================================
 
+(defn- page-lines
+  "Slice `content` to the requested 1-based line window. Returns the
+   honest-totals keys: what range came back of how many total lines —
+   never let a partial read look complete."
+  [content from-line max-lines]
+  (let [lines (str/split content #"\n" -1)
+        ;; a trailing newline yields a final \"\" pseudo-line — drop it
+        ;; so total-lines matches what an editor shows
+        lines (if (and (seq lines) (= "" (peek lines))) (pop lines) lines)
+        total (count lines)
+        from  (max 1 (or from-line 1))
+        start (min (dec from) total)
+        end   (if max-lines
+                (min total (+ start (max 0 max-lines)))
+                total)]
+    {:seon.agent.fs/content        (str/join "\n" (subvec lines start end))
+     :seon.agent.fs/from-line      from
+     :seon.agent.fs/lines-returned (- end start)
+     :seon.agent.fs/total-lines    total}))
+
 (defn read-file
   "Read a file (sync). Returns:
      {:seon.agent.fs/ok? true  :seon.agent.fs/path <p> :seon.agent.fs/content <s>}    ; ok
      {:seon.agent.fs/ok? false :seon.agent.fs/path <p> :seon.agent.fs/error   <s>}    ; fail
 
-   Default encoding `utf-8`."
+   Default encoding `utf-8`.
+
+   ## Paged (section) reads — first-class, use them for long files
+
+   Optional `:seon.agent.fs/from-line` (1-based) and/or
+   `:seon.agent.fs/max-lines` return a line window instead of the
+   whole file, plus honest totals so a partial read NEVER looks
+   complete:
+
+     (seon.agent.fs/read-file {:seon.agent.fs/path \"/Users/me/work/big.md\"
+                               :seon.agent.fs/from-line 200
+                               :seon.agent.fs/max-lines 50})
+     ;; => {:seon.agent.fs/ok? true :seon.agent.fs/content \"...\"
+     ;;     :seon.agent.fs/from-line 200 :seon.agent.fs/lines-returned 50
+     ;;     :seon.agent.fs/total-lines 1841}
+
+   `lines-returned` < `max-lines` (or 0) means you ran off the end of
+   the file — `total-lines` is always the whole file's line count.
+   Don't summarize a file from one page: page through it (or bind the
+   full content and process with code)."
   {:malli/schema [:=> [:cat :seon.agent.fs/read-request] :seon.agent.fs/read-response]}
-  [{:seon.agent.fs/keys [path encoding] :or {encoding "utf-8"}}]
+  [{:seon.agent.fs/keys [path encoding from-line max-lines] :or {encoding "utf-8"}}]
   (case (platform/host)
     :node (cond
             (out-of-scope? path) (scope-denied path)
             :else (try
-                    (let [content (.readFileSync fs path encoding)]
-                      {:seon.agent.fs/ok?     true
-                       :seon.agent.fs/path    path
-                       :seon.agent.fs/content content})
+                    (let [content (.readFileSync fs path encoding)
+                          base    {:seon.agent.fs/ok?   true
+                                   :seon.agent.fs/path  path}]
+                      (if (or from-line max-lines)
+                        (merge base (page-lines content from-line max-lines))
+                        (assoc base :seon.agent.fs/content content)))
                     (catch :default e (->err path e))))
     :wasi (wasi-pending path "read-file")))
 

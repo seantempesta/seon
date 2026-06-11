@@ -32,6 +32,8 @@
 #   tail <name>        tail -f logs/<name>.log
 #   logs <name> [n]    Last n lines (default 200) of logs/<name>.log
 #   adopt <name>       Register a manually-started process by PID
+#   prep               Idempotent git-dep prep for :writer/:cljs aliases
+#                      (downstream supervisors shell out to this)
 #
 # State per process: tmp/proc/<name>/{pid,cmd,started-at,lock/}
 # Logs:              logs/<name>.log (truncated on fresh start)
@@ -255,6 +257,48 @@ maybe_prep_deps() {
   }
   echo "$current" > "$fp_file"
   echo "  ● deps prepped for :$alias"
+}
+
+cmd_prep() {
+  # Explicit git-dep prep verb for DOWNSTREAM supervisors (aria ask 7):
+  # after a git-dep repin, aliases that pull prep-requiring git deps
+  # fail with "libs must be prepared" until
+  #   clojure -X:deps prep :aliases '[:writer]'
+  # runs — plain `clojure -X:deps prep` is NOT enough (the fork only
+  # enters the classpath via the alias). bin/seon's auto-prep covers
+  # seon's own start paths; this verb lets a downstream launcher shell
+  # out (`bin/seon prep`) instead of rediscovering the incantation.
+  #
+  # Idempotent + fast no-op: same fingerprint scheme as auto-prep
+  # (deps.edn :git/url+:git/sha hash + ~/.gitlibs presence). On a real
+  # prep it also refreshes the per-process fingerprints so the next
+  # `start wire-server` / `start cljs-watch` skips its own auto-prep.
+  local prep_aliases="writer cljs"
+  local fp_file current stored
+  ensure_state prep
+  fp_file="$(state_dir prep)/deps-fingerprint"
+  current="$(deps_fingerprint)"
+  stored="$(cat "$fp_file" 2>/dev/null || true)"
+  if [ "$current" = "$stored" ] && ! gitlibs_missing_sha; then
+    echo "● deps already prepped for aliases: $prep_aliases (no-op)"
+    return 0
+  fi
+  local a
+  for a in $prep_aliases; do
+    echo "▶ prepping :$a — clojure -P -M:$a && clojure -X:deps prep :aliases '[:$a]'"
+    if ! { clojure -P -M:"$a" && clojure -X:deps prep :aliases "[:$a]"; }; then
+      echo "✗ prep for :$a FAILED" >&2
+      return 1
+    fi
+  done
+  echo "$current" > "$fp_file"
+  # Keep the per-process auto-prep fingerprints in sync so the next
+  # start doesn't redo the work this verb just did.
+  for a in wire-server cljs-watch; do
+    ensure_state "$a"
+    echo "$current" > "$(state_dir "$a")/deps-fingerprint"
+  done
+  echo "● deps prepped for aliases: $prep_aliases"
 }
 
 # ============================================================
@@ -627,6 +671,7 @@ case "${1:-help}" in
   tail)    shift; cmd_tail "$@" ;;
   logs)    shift; cmd_logs "$@" ;;
   adopt)   shift; cmd_adopt "$@" ;;
+  prep)    shift; cmd_prep "$@" ;;
   cluster) shift; cmd_cluster "$@" ;;
   help|--help|-h|*)
     cat <<'EOF'
@@ -648,6 +693,13 @@ Commands:
   tail <name>        tail -f logs/<name>.log  (Ctrl-C to exit)
   logs <name> [n]    Last n lines (default 200)
   adopt <name> <pid> Register a manually-started PID under <name>
+  prep               Prep git deps for the :writer and :cljs aliases
+                     (clojure -P -M:<a> + clojure -X:deps prep
+                     :aliases '[:<a>]'). For downstream supervisors —
+                     shell out to this instead of rediscovering the
+                     alias form (plain `clojure -X:deps prep` is NOT
+                     enough). Idempotent; fast no-op when already
+                     prepped (deps fingerprint + ~/.gitlibs check).
   cluster reset [n]  DESTRUCTIVE: stop pod+wire-server, wipe
                      data/clusters/<n>/store (default "default"),
                      restart both — fresh DB, substrate re-seeds
