@@ -1536,7 +1536,10 @@
 (schema/register! ::render-namespace-response
   [:map
    [:seon.render/text   {:optional true} :string]
-   [:seon.render/hiccup {:optional true} [:fn render/valid-hiccup?]]])
+   ;; Pure-data shallow hiccup bound — registered forms must not embed
+   ;; fns (platform law; see seon.render.live-tile). Deep validation
+   ;; stays at the render boundary.
+   [:seon.render/hiccup {:optional true} :seon.render.live-tile/hiccup]])
 
 (defn render-namespace
   "Render a WHOLE namespace — its `(ns …)` source plus every `:seon.fn`,

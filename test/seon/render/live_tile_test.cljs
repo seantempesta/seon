@@ -15,7 +15,9 @@
    Fresh isolated conn per integration test (client/open-agent-conn!)
    — NEVER the live pod conn."
   (:require
+    [cljs.reader :as reader]
     [cljs.test :refer [deftest is testing async]]
+    [malli.core :as m]
     [seon.client :as client]
     [seon.db :as db]
     [seon.render :as render]
@@ -136,6 +138,44 @@
         "twin names the wired value that broke")
     (is (re-find #"boom from tile fn" ai)
         "twin carries the exception's message")))
+
+;; ============================================================
+;; Pure-data platform law (sci-not-available regression, 2026-06-11):
+;; registered schema forms must survive the form round-trip —
+;; pr-str → read-string → m/schema — WITHOUT evaluation. The pod has
+;; no sci; a fn object in a registered form serialized as a symbol or
+;; #object[...] killed boot + the context-test family. Guards the
+;; exact shape of that bug for every key this fix owns.
+;; ============================================================
+
+(deftest registered-forms-are-pure-data
+  (doseq [k [:seon.render.live-tile/hiccup
+             :seon.render.live-tile/content
+             :seon.render.live-tile/wired-response
+             :seon.render.live-tile/error-request
+             :seon.render/html
+             :seon.render/html-response
+             :seon.render/ai-response
+             :seon.ctx/render-namespace-response
+             :seon.db/db-val
+             :seon.db/listen-request]]
+    (testing (str k)
+      (let [form (schema/schema-definition k)
+            s    (pr-str form)]
+        (is (not (re-find #"#object" s))
+            "no fn object in the registered form")
+        (is (some? (m/schema (reader/read-string s)))
+            "re-read form compiles WITHOUT sci")))))
+
+(deftest content-shape-semantics
+  (let [valid? #(m/validate
+                  (m/schema :seon.render.live-tile/content)
+                  %)]
+    (is (valid? 'my.ns/tile-fn) "qualified fn symbol")
+    (is (valid? [:h1 {:class "x"} "hi" [:span "nested"]]) "literal hiccup")
+    (is (not (valid? [])) "empty vector is not hiccup")
+    (is (not (valid? '(:h1 "x"))) "a list is not hiccup")
+    (is (not (valid? "string")) "bare string rejected")))
 
 ;; ============================================================
 ;; render-agent-tile integration — fresh conn, never the live pod.

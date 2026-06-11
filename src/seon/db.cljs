@@ -124,8 +124,16 @@
    [::conn {:optional true} ::conn]])
 
 ;; The ONE canonical "a datahike db value" shape — referenced by every
-;; positional :db slot below (shared-shape rule; never inline [:fn map?]).
-(schema/register! ::db-val [:fn map?])
+;; positional :db slot below (shared-shape rule; never inline a map
+;; check). `map?` is a malli DEFAULT-REGISTRY predicate schema — its
+;; form is the bare symbol, reconstructed by registry LOOKUP, never
+;; eval — so it satisfies the pure-data platform law (registered forms
+;; must not embed fn objects; see seon.render.live-tile) while staying
+;; honest about the value being a datahike runtime handle, not a
+;; seon-authored map.
+;; QUOTED — unquoted `map?` would pass the fn OBJECT (the exact poison
+;; the law bans); the quoted symbol is what the registry resolves.
+(schema/register! ::db-val 'map?)
 
 (schema/register!
   ::datom
@@ -149,7 +157,10 @@
 (schema/register!
   ::listen-request
   [:map
-   [::handler [:fn fn?]]
+   ;; QUOTED `fn?` = malli default-registry predicate schema (pure-data
+   ;; form, registry lookup — never `[:fn ...]` or a bare fn object in
+   ;; a register! form).
+   [::handler 'fn?]
    [::key     {:optional true} :any]
    [::conn    {:optional true} ::conn]])
 

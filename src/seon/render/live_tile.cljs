@@ -80,6 +80,25 @@
 ;; `:seon.render/html` is registered in seon.render BY REFERENCE to
 ;; `::content` (shared-shape rule: one shape, registered once, every
 ;; other key references it).
+;;
+;; PLATFORM LAW (2026-06-11, sci-not-available incident): registered
+;; schema forms must be PURE DATA — no `[:fn]`, no function objects,
+;; nothing whose form needs evaluation to reconstruct. Registered
+;; forms round-trip as forms (boot index → :seon.schema/source →
+;; re-read), and the pod has no sci: a fn in a registered form
+;; serializes as a symbol or `#object[...]` and dies (or degrades to
+;; garbage) on every subsequent read. Deep-structure validation that
+;; needs a predicate belongs at a FN boundary (instrumentation on a
+;; compiled fn never round-trips as a form) — see [[valid-hiccup?]].
+;;
+;; `::hiccup` below is therefore the PRAGMATIC STRUCTURAL BOUND
+;; (option b): a hiccup element = a vector with a keyword head.
+;; Option (a) — a recursive ref-based registered schema — was tested
+;; and REJECTED twice over: register!'s compilability guard throws
+;; `:malli.core/invalid-ref` on self-reference, and a recursive seqex
+;; trips `:malli.core/potentially-recursive-seqex` inside any
+;; instrumented fn schema. Deep validation runs at the render
+;; boundary instead, where [[valid-hiccup?]] stays a PLAIN fn.
 ;; ============================================================
 
 (declare valid-hiccup?)
@@ -101,10 +120,12 @@
    handles arbitrary-depth nesting without
    :malli.core/potentially-recursive-seqex.
 
-   Used as the `[:fn valid-hiccup?]` validator on `::content` and
-   `:seon.render/html-response`, since Malli's recursive seqex
-   schemas don't compose with instrumentation. (`:any` input — this
-   IS the validator for arbitrary values.)"
+   A PLAIN fn for render-boundary checks and fn instrumentation —
+   deliberately NOT inside any `register!` form (registered schema
+   forms must be pure data; see the platform-law comment above).
+   `::content` / `:seon.render/html-response` carry the shallow
+   `::hiccup` data shape instead. (`:any` input — this IS the
+   validator for arbitrary values.)"
   {:malli/schema [:=> [:catn [::x :any]] :boolean]}
   [x]
   (and (vector? x)
@@ -116,12 +137,21 @@
                [nil rest-x])]
          (every? valid-hiccup-elem? children))))
 
+;; The PURE-DATA hiccup bound: a vector with a keyword head. Shallow
+;; on purpose — children are `:any` (sanctioned: arbitrary hiccup
+;; trees; the deep walk happens at the render boundary via
+;; [[valid-hiccup?]] and html->string). Verified against the bridge:
+;; `:cat`/`:and` are unmappable datahike types, so any `:or` carrying
+;; this arm stays a MIXED-:or (pr-str'd EDN string storage) exactly
+;; as the `[:fn]` arm did.
+(schema/register! ::hiccup [:and [:vector :any] [:cat :keyword [:* :any]]])
+
 ;; THE live-tile key — qualified fn symbol OR literal hiccup, stored
 ;; as a pr-str'd EDN string by the mixed-:or bridge, decoded on read
 ;; via `seon.db/decode-edn-value`. `:seon.render/html` references
 ;; this shape (deliberate uniformity — agents already know that
 ;; vocabulary).
-(schema/register! ::content [:or :symbol [:fn valid-hiccup?]])
+(schema/register! ::content [:or :symbol ::hiccup])
 
 ;; Where the wired value came from — the tile's provenance. Rendered
 ;; into the agent's awareness section header so the agent always sees

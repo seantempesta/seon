@@ -104,21 +104,33 @@
 ;; accepted here until the follow-up sweep renames those producers.
 ;; Readers in THIS ns prefer `:seon.render/ai`, fall back to
 ;; `:seon.render/text`.
+;; "Carries :seon.render/ai (preferred) or legacy :seon.render/text"
+;; expressed as PURE DATA (an :or of maps — registered forms must not
+;; embed fns; see the platform-law comment in seon.render.live-tile):
+;; first arm requires :ai, second requires :text; both arms spec the
+;; other key as optional so a present-but-wrong-typed value never
+;; slips through an open map.
 (schema/register! :seon.render/ai-response
-  [:and
+  [:or
    [:map
-    [:seon.render/ai   {:optional true} :string]
+    [:seon.render/ai   :string]
     [:seon.render/text {:optional true} :string]]
-   [:fn {:error/message "ai-response carries :seon.render/ai (preferred) or legacy :seon.render/text"}
-    (fn [m] (or (contains? m :seon.render/ai)
-                (contains? m :seon.render/text)))]])
+   [:map
+    [:seon.render/text :string]
+    [:seon.render/ai   {:optional true} :string]]])
 
 ;; The error envelope a failed render carries (live-tiles U1) — the
 ;; standard `:seon.error/*` shape, registered in seon.db.
 (schema/register! :seon.render/error :seon.db/error)
 
-;; `[:fn valid-hiccup?]` bypasses Malli's recursive-seqex limitation by
-;; using a Clojure predicate — composes with fn-schema instrumentation.
+;; The hiccup slot carries the PURE-DATA shallow bound
+;; `:seon.render.live-tile/hiccup` (vector with keyword head) — NOT
+;; the deep recursive `:seon.render/hiccup` above (recursive seqex
+;; trips :malli.core/potentially-recursive-seqex inside instrumented
+;; fn schemas) and NOT `[:fn valid-hiccup?]` (registered forms must
+;; be pure data — fn objects don't survive the form round-trip; see
+;; the platform-law comment in seon.render.live-tile). The deep walk
+;; happens at the render boundary (html->string + valid-hiccup?).
 ;; `:nil` accepts render fns that explicitly return
 ;; `{:seon.render/hiccup nil}` to mean "render nothing"
 ;; (entity-html-sym callers already handle nil via `or`).
@@ -133,7 +145,7 @@
 ;; the agent sees its own renderer is broken (vanish = banned).
 (schema/register! :seon.render/html-response
   [:map
-   [:seon.render/hiccup [:or :nil [:fn valid-hiccup?]]]
+   [:seon.render/hiccup [:or :nil :seon.render.live-tile/hiccup]]
    [:seon.render/ai    {:optional true} :string]
    [:seon.render/error {:optional true} :seon.render/error]])
 

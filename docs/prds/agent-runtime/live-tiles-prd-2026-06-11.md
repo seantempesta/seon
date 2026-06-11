@@ -133,6 +133,30 @@ references it — register!'s compilability guard rejects forward
 references, so the shape definition had to live in the
 earlier-loading ns.
 
+**Implementation note — PLATFORM LAW (2026-06-11, sci-not-available
+incident): registered schema forms must be PURE DATA.** No `[:fn]`, no
+fn objects, nothing whose form needs evaluation to reconstruct.
+Registered forms round-trip as forms (boot index →
+`:seon.schema/source` → re-read; `var->fn-row`'s `m/schema` over var
+meta), and the pod bundles no sci — a fn in a registered form
+serializes as a symbol or `#object[…]` and dies on every subsequent
+read (first boot worked on the live fn value; every later
+form-roundtrip threw `:malli.core/sci-not-available`). If a shape
+can't be expressed as data, the shape is wrong or the validation
+belongs at a fn boundary — instrumentation on a fn in compiled code
+never round-trips as a form. Consequences in U1 code:
+`:seon.render.live-tile/content` is `[:or :symbol ::hiccup]` where
+`::hiccup` is the pure-data shallow bound
+`[:and [:vector :any] [:cat :keyword [:* :any]]]` (a recursive
+ref-based schema was tested and rejected: register! throws
+`:malli.core/invalid-ref` on self-reference, and recursive seqex trips
+instrumentation); `valid-hiccup?` stays a PLAIN fn doing the deep walk
+at the render boundary only. Quoted default-registry predicate symbols
+(`'map?`, `'fn?`) are allowed — they reconstruct by registry lookup,
+not eval. Boot re-index HEALS pre-law stores: `substrate-index-tx`
+re-emits a `:seon.schema` row when the stored source differs (agent
+`(register! …)` tee rows are never overwritten).
+
 ### No render levels — container queries over ONE render
 
 DECIDED(user 2026-06-11): small-vs-large is **CSS container queries

@@ -1088,7 +1088,27 @@
   (let [m       (meta v)
         sym     (str (:ns m) "/" (:name m))
         ns-kw   (keyword (str (:ns m)))
-        spec    (some-> (:malli/schema m) m/schema m/form pr-str)
+        ;; Per-var blast-radius guard (sci-not-available incident,
+        ;; 2026-06-11): CLJS var meta is UNEVALUATED data, so a
+        ;; `:malli/schema` form that embeds a symbol-referenced fn
+        ;; (e.g. `[:fn live-tile/valid-hiccup?]`) needs sci — which the
+        ;; pod doesn't bundle — and `m/schema` THROWS. One bad form
+        ;; must degrade ONE row (spec omitted, loud :warn), never kill
+        ;; boot + the whole context-test family. Registered forms are
+        ;; pure data by platform law (see seon.render.live-tile); this
+        ;; guard is the backstop for the metadata that isn't.
+        spec    (when-some [ms (:malli/schema m)]
+                  (try (-> ms m/schema m/form pr-str)
+                       (catch :default e
+                         (log/warn!
+                           {:seon.log/source  ::var->fn-row
+                            :seon.log/message
+                            (str "spec for " sym " is not pure-data Malli "
+                                 "(" (ex-message e) " — form " (pr-str ms)
+                                 ") — row persisted WITHOUT :seon.fn/spec; "
+                                 "fix the :malli/schema to reference "
+                                 "registered schemas, not fn objects")})
+                         nil)))
         txt     (read-src-file (:file m))
         src     (when txt (extract-form-at-line txt (:line m)))]
     (if (nil? src)
@@ -1257,14 +1277,30 @@
                                   [?n :seon.ns/name ?nm]
                                   [?n :seon.ns/source ?src]]
                                 db))
-        have-schs (into #{} (map first) (d/q '[:find ?k :where [?s :seon.schema/key ?k]] db))
+        ;; Schema rows dedup on key AND source (mirrors the ns-row rule
+        ;; above): a boot-indexed `:seon.schema` row RE-EMITS when its
+        ;; stored `:seon.schema/source` differs from the freshly-built
+        ;; one — identity upsert on `:seon.schema/key` re-asserts the
+        ;; source in place. This is what HEALS a pre-existing store
+        ;; whose rows carry unreadable pre-pure-data-law sources (the
+        ;; 2026-06-11 `[:fn #object[…]]` poison). An agent's own
+        ;; `(seon.schema/register! …)` TEE row — a replayable `(…)`
+        ;; call form, the same discriminator replay uses — is still
+        ;; NEVER overwritten by the boot index.
+        have-schs (into {} (d/q '[:find ?k ?src
+                                  :where
+                                  [?s :seon.schema/key ?k]
+                                  [?s :seon.schema/source ?src]]
+                                db))
         have-tsts (into #{} (map first) (d/q '[:find ?t :where [?e :seon.test/sym ?t]] db))]
     (vec (remove (fn [row]
                    (or (contains? have-fns  (:seon.fn/sym row))
                        (and (contains? row :seon.ns/name)
                             (= (get have-nses (:seon.ns/name row))
                                (:seon.ns/source row)))
-                       (contains? have-schs (:seon.schema/key row))
+                       (when-some [stored (get have-schs (:seon.schema/key row))]
+                         (or (= stored (:seon.schema/source row))
+                             (str/starts-with? (str/trim (str stored)) "(")))
                        (contains? have-tsts (:seon.test/sym row))))
                  all))))
 
