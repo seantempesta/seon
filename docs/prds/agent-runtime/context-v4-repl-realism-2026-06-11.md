@@ -8,22 +8,35 @@ tags: [prd, agent]
 
 Fresh-read spec. All design points below are **DECIDED (user,
 2026-06-11)** unless explicitly marked DECIDE. Do not re-litigate.
+Revised same day after user round-2 review (r2) — r2 decisions
+noted inline.
+
+## 0. The governing rule (user, r2): SIMPLER
+
+**This context system must be MUCH simpler than v3. Do not carry bad
+ideas forward.** No fragile namespace lists, no budgets (Clojure code
+is small — budgets return only on measured need), no structural
+coupling anywhere (especially the gym) that breaks every time the
+context changes. When a mechanism needs a list, find the structural
+rule instead. When a section needs justification gymnastics, kill it
+or shrink it.
 
 Extends [[context-v3-code-first-2026-06-10]] (relevant = full source,
 internal = hidden, teaching lives in code) to its conclusion: **the
-prompt IS a REPL session.** One static system header, the loaded
-namespaces as the body, a thin data inventory, the agent's own entity
-as data, and one threaded chronological transcript of messages and
-evals — ending in a status line and a clean prompt. Everything that
-was handcrafted prompt prose either becomes code (docstrings in
-rendered namespaces), data (rows the agent can pull), or dies.
+prompt IS a REPL session.** One static system header, the soul, ALL
+the loaded namespaces as the body, the agent's own entity as a map, a
+thin data inventory near the bottom, and one threaded chronological
+transcript of messages and evals — ending in a status line and a
+clean prompt. Everything that was handcrafted prompt prose either
+becomes code (docstrings and `;;`-commented tutorial evals), data
+(the agent's own entity), or dies.
 
 Prerequisite reading: `src/seon/ctx.cljs` (the composer +
 `substrate-default-ctx` + the current section fns), one recent prompt
 blob (`ls -t logs/prompts/`, ~82–87k chars — e.g.
 `logs/prompts/mtM-2606111151/ANk-2606111151.txt`),
 [[gym-upgrade-prd-2026-06-11]] §2 (the referee: prompt-blob
-predicates U1, structural turn-profile + cache-stability U3),
+predicates U1; U3's structural gates are REMOVED per r2),
 [[open-issues-prd-2026-06-11]] Tier 2 (rows this PRD absorbs),
 [[live-tiles-prd-2026-06-11]] U5 (the tile `::ai` twin this PRD
 references, never duplicates).
@@ -37,12 +50,16 @@ registered, a namespace modified, an instruction edited). Everything
 from `<warnings>` down is the volatile tail. The transcript is
 append-only within a session — cache-optimal by construction.
 
-**Standing gym predicate (from V4-1 on, every unit, every scenario):**
-the prefix above `<warnings>` is byte-identical across consecutive
-turns unless the world changed. This is gym-upgrade §2.2(b)'s
-cache-stability check with the boundary moved from `:transcript` up to
-`:warnings` — V4 makes more of the prompt stable, so the predicate
-gets stricter.
+**Gym relationship (r2 — DECOUPLED):** the gym does NOT assert context
+structure. No layout predicates, no section-name coupling, no standing
+structural gates — those broke every time the context improved (the
+fragility the user called out). The gym's whole job is (a) agent
+BEHAVIOR — LLM-judge interpretation plus mechanical store/outcome
+checks, and (b) CAPTURE — the prompt blobs (what the agent actually
+saw) and the db state per eval, so "why didn't it do X" is always
+answerable from the record. Cache-prefix stability may be reported as
+informational telemetry; it never gates a scorecard. (Gym U3's
+standing structural gates: REMOVED by user decision, r2.)
 
 ## 2. The layout (DECIDED, user 2026-06-11)
 
@@ -66,32 +83,53 @@ or vendor words, ever**:
 - **(c)** EVAL MECHANICS — a reply is multiple Clojure forms plus `;;`
   comments, nothing else; there are no tool calls.
 - **(d)** RESULT VARS — every eval's value is saved under its unique
-  var; `*1` `*2` `*3` `*e` are available; NEVER re-run what's already
-  computed; a clipped display is NOT a clipped value — dig into big
-  values with ordinary Clojure.
+  var; NEVER re-run what's already computed; a clipped display is NOT
+  a clipped value — dig into big values with ordinary Clojure.
+  (`*1` `*2` `*3` `*e`: PARKED, r2 — low priority; trivial to add
+  later since values are already stored per eval-id.)
 - **(e)** THE RENDERING SYSTEM — `:seon.render/ai` +
   `:seon.render/html` twins are how you show your human things.
-- **(f)** One sentence: `*conn*` is ambient — your universe binds it.
+- **(f)** THE SHARED STORE — all agents are wired to ONE shared
+  datahike (datomic-like) database; `*conn*` is ambient (your
+  universe binds it). How to use it is NOT explained here — `seon.db`
+  is an included namespace; its docstrings carry the API.
 - **(g)** The namespaces below are real loaded code, RECENCY-ordered
   (most-recently-modified last), not dependency-ordered — the runtime
   loaded them correctly.
+- **(h)** THINK IN COMMENTS — `;;` comment lines BEFORE each form are
+  where reasoning goes; the format teaching (forms + comments only,
+  nothing else) stays sharp.
 
-Plus the ONE taught query (carried over from today's system block):
-how to pull any namespace's fns/schemas/source from the db by
-`:seon.ns/name` / `:seon.fn/sym` — this single query replaces the
-`<functions>` count index for every namespace NOT included as a tag
-(§2.4).
+**The teaching split (r2): CONCEPTS in the system prompt, USAGE in
+code.** The system prompt explains the important concepts — the
+paragraphs above — and nothing else. The old "one taught query" and
+the functions index are dead (the user judged them poor explanations
+of the harness). Usage teaching rides two show-don't-tell surfaces:
+(a) the rendered namespace sources, whose docstrings and `;;` comments
+ARE the API documentation (they're in the prompt); (b) the **startup
+evals as a tutorial** — see §3.1 for the worked examples this PRD
+requires.
 
 Identity/personality is NOT here — it lives in the soul rows in
 `<instructions>` (`my.soul`, committed eeeb562).
 
-### 2.2 `<instructions>` — the user-editable layer
+### 2.2 `<instructions>` — the user-editable layer (r2: soul ONLY)
 
-The `my.kb.instruction` rows (priority-ordered, identity-upsert
-editable — unchanged) PLUS the `my.soul` identity row(s). One
-runtime-editable layer for everything a user (or agent) may amend
-without a rebuild. Semi-static: busts only on an instruction/soul
-transact.
+**`my.kb.instruction` DIES (user, r2).** Per-agent self-instructions
+live on the agent's OWN entity (§2.5) — rendered every turn, "it's
+just context." This section carries ONLY the `my.soul` rows (identity
+and repl-mechanics; user-editable store rows, committed eeeb562) —
+one swappable layer, busts only on a soul transact.
+
+**DECIDE(user): where the four cluster-wide teachings go**
+(consult-before-research, store-proactively, reply-once,
+namespace-map): (a) fold into the soul text — one user-editable blob;
+RECOMMENDED: behavioral policy is exactly what a user might swap — or
+(b) become docstrings on the relevant substrate fns. Until decided,
+the rows keep rendering from their current source.
+
+**Demo note:** the committed demo script's "instruction-edit kicker"
+beat referenced `my.kb.instruction` — the soul-edit replaces it.
 
 ### 2.3 `<namespace name="…">` tags — THE BODY
 
@@ -102,66 +140,64 @@ stable cache prefix and the churning ns (usually the agent's own)
 sits nearest the tail.
 
 This **dissolves `<exemplars>`** — exemplars were never a different
-kind of thing; they are just namespaces. The exemplar-root concept
-becomes the **namespace-SELECTION policy**:
+kind of thing; they are just namespaces. **Selection (r2): ONE
+structural rule, NO lists** —
 
-- always the agent's `my.*` namespaces (which also dissolves
-  `<namespace-context>` — the agent's own ns IS a namespace tag, full
-  source, no special section);
-- plus the substrate teaching set (today's `relevant-roots`:
-  `seon.agent.search`, `seon.agent.todo`, `my.kb` + children + test
-  siblings);
-- recency-bumped: a modified ns moves toward the tail, selection
-  itself unchanged.
+> Include ALL namespaces EXCEPT `*.internal` ones and third-party
+> packages. In practice: every `seon.*` and `my.*` namespace whose
+> name does not end in `.internal`.
 
-**Growth of the selection set is decided by gym A/B** (paid sweep per
-candidate addition, spend free per gym-upgrade §6.2) — this absorbs
-the open-issues "relevant-roots growth to post-split faces" row
-(+~47k chars/prompt candidates: `seon.db`, `seon.schema`,
-`seon.repl`, `seon.agent`, …). DECIDE(user): the budget bound for
-namespace selection — a max total chars for the namespace body, or
-per-ns caps, or unbounded-until-measured.
+New namespaces auto-include the moment they exist — no
+`relevant-roots`, no exemplar-root set, no per-list maintenance. This
+also dissolves `<namespace-context>` (the agent's own ns is just a
+tag like any other) and DELETES the budget question: **no namespace
+bounds or budgets for now (user, r2) — Clojure code is small;
+budgets return only on measured need.** The old relevant-roots-growth
+A/B is absorbed trivially: everything is in.
 
-### 2.4 `<store>` — thin data inventory
+### 2.4 `<store>` — thin data inventory (r2: moved NEAR THE BOTTOM)
 
-ONE line per entity kind: `kind · id-attr · row count` (per-turn
-kinds — `:seon.eval`, `:seon.agent.message`, turns/sessions — stay
-**uncounted** so counts don't bust the prefix every turn). **No
-teaching prose.** Justification: consult-first — the store inventory
-is the only surface that shows what prior agents actually stored;
-everything else about it the agent learns from the rendered
-namespaces and the one taught query.
+ONE line per entity kind: `kind · id-attr · row count`. **Placed in
+the volatile zone, just above `<warnings>`** (user, r2): it's tiny, so
+busting the cache there is cheap — which also means counts can be
+LIVE (no uncounted-kinds carve-out needed; that complexity dies with
+the placement). **No teaching prose.** Purpose: consult-first — the
+inventory is the only surface that shows what prior agents actually
+stored; the shapes live in the rendered namespace sources (register!
+calls are code).
 
-This **kills `<schema-catalog>` and `<functions>` as sections.** The
-per-attr shape detail moves to where it already lives: registered
-schemas are `:seon.schema` rows (one pull away), and the `my.kb`
-namespace tag teaches the shape conventions in source. The
-`<functions>` count index is replaced by the taught query in
-`<system>` (§2.1).
+This **kills `<schema-catalog>` and `<functions>` as sections.**
+Anything not visible in an included source is one ordinary datahike
+query away — `seon.db`'s docstrings (included) show how.
 
-### 2.5 `<your-entity>` — the agent's own datoms
+### 2.5 `<your-entity>` — the agent's own entity, as a MAP
 
-A literal pull of the agent's OWN entity, rendered as data (EDN):
-purpose, tile wiring (`:seon.render.live-tile/content`), registered
-sections (`:seon.agent/ctx`), lifecycle attrs. Replaces the
-`:purpose` section AND `:your-sections`.
+A pull of the agent's OWN entity rendered as a **pretty-printed map
+with keys and values** (r2: a map, NOT raw datoms): purpose, tile
+wiring (`:seon.render.live-tile/content`), registered sections,
+lifecycle attrs, and **any self-instructions the agent has written to
+itself**. Replaces the `:purpose` section AND `:your-sections` AND
+(r2) the per-agent role of `my.kb.instruction`.
 
-The point (user): the agent sees its own datoms, so
-"`transact!` → changes next turn" is self-evident — editing your
-purpose, wiring your tile, adding a section are all just writes to
-the entity you are looking at. Show, don't tell, applied to identity.
+The section's rendered header SAYS the second half out loud: *this is
+your entity — transact to it and the change appears here next turn;
+write notes and instructions to yourself here.* It's just context.
+Editing your purpose, wiring your tile, instructing your future self
+are all writes to the map you are looking at. Show-don't-tell applied
+to identity — and the startup evals (tiles-PRD U4) demonstrate the
+exact transact-by-lookup-ref move at creation.
 
 ### 2.6 `<your-tile>` — what your human currently sees
 
 The `::ai` twin of the wired live tile (one render, two twins) plus
 the wired fn pointer. Spec'd in [[live-tiles-prd-2026-06-11]] U5 —
 **reference, don't duplicate**; this PRD only fixes its slot in the
-layout (between `<your-entity>` and `<warnings>`).
+layout (after `<your-entity>`, before `<store>`).
 
 ### 2.7 `<warnings>` — unchanged
 
-Mechanics unchanged (reactive, derived, vanishes when fixed). Placed
-here — first element of the volatile tail.
+Mechanics unchanged (reactive, derived, vanishes when fixed). Sits
+just after `<store>` in the volatile tail.
 
 Sections not named in this layout (today: `:open-todos`, priority 45)
 keep their current slot in the volatile zone between `<warnings>` and
@@ -198,13 +234,76 @@ The final two lines of every prompt:
 ```text
 ;; ── <ns> · turn N · M since-user (cap C) · <user-localized time+tz> · inbox K · agent <id> ──
 <ns>=>
+
 ```
 
 The agent id lands here (moved out of `<system>`, §2.1). `inbox K` =
 count of unanswered inbound messages. DECIDE(user): anything else in
 the line.
 
-## 3. Capabilities dissolution
+## 3. The teaching model — tutorial evals + commented code (r2)
+
+The combo of raw namespace code and the initial evals carries the
+usage teaching, **written like a tutorial**: `;;` comments before each
+form explain what's happening and model think-in-comments. These
+examples are NORMATIVE — implementing units write to this register.
+
+### 3.1 The startup evals ARE the tutorial
+
+The creation turn (tiles-PRD U4) is real evals in the agent's log,
+written so reading them teaches the three core moves:
+
+```clojure
+;; I am an entity in the shared store — everything about me is data,
+;; and I change myself by transacting to my own lookup ref.
+;; First: wire my live tile (what my human sees) to the default
+;; welcome. Any fn returning {:seon.render/html … :seon.render/ai …}
+;; can go here — when I have something better to show, I write a fn
+;; and point this attr at it.
+(seon.db/transact!
+  [{:seon.db/ref [:seon.agent/id "kXQ-2606101814"]
+    :seon.render.live-tile/content 'seon.render.live-tile/welcome}])
+;; => {:seon.db/ok? true}
+
+;; Second: my todo view. A context section is just a query rendered
+;; every turn — register it once, and the section appears whenever
+;; the query has rows, vanishes when it doesn't.
+(seon.agent/add-section!
+  {:seon.ctx/id :open-todos
+   :seon.ctx/render 'seon.agent.todo/open-todos-section})
+;; => {:seon.ctx/ok? true}
+
+;; Anything I store this way survives restarts; anything I only
+;; compute does not. When in doubt, transact it.
+```
+
+A fresh agent reading its own log sees: writes-to-self by lookup ref,
+the value-or-fn render pattern, sections-as-queries, and the
+persistence rule — without one line of prose teaching.
+
+### 3.2 Docstrings read as usage docs
+
+Included namespaces are the API reference. The bar, by example
+(`seon.db/transact!`-style):
+
+```clojure
+(defn transact!
+  "Commit tx-data to the shared store. Maps with namespaced keys only;
+   every attr must be registered (seon.schema/register!) BEFORE first
+   use — unregistered attrs are rejected with a fix-example, nothing
+   partial commits. Returns {:seon.db/ok? true …} or an error envelope
+   {:seon.db/ok? false :seon.db/error …} — it NEVER throws.
+
+   ;; store a fact about an existing entity by lookup ref:
+   (transact! [{:seon.db/ref [:my.kb.doc/path \"README.md\"]
+                :my.kb.doc/title \"Seon\"}])"
+  …)
+```
+
+One docstring = contract + envelope behavior + a commented call. An
+agent that reads the source needs no capabilities section.
+
+## 3b. Capabilities dissolution
 
 The `<capabilities>` section (today ~214 lines of handcrafted worked
 examples) **dissolves**:
@@ -215,9 +314,9 @@ examples) **dissolves**:
   map-in/map-out, envelopes, provenance — and the public faces'
   docstrings carry the call shapes as the selection set grows).
 - **Irreducible prose** (register-before-transact, the deep-namespace
-  attr rule) → the system prompt's concept paragraphs or a
-  `my.kb.instruction` row — whichever surface the gym shows holds the
-  behavior.
+  attr rule) → the system prompt's concept paragraphs or a soul row
+  (r2 — `my.kb.instruction` is dead) — whichever surface the gym
+  shows holds the behavior.
 
 This **absorbs V3-D** (the datahike API block: datahike teaching rides
 the included ns sources/docstrings — no separate var-metadata render
@@ -240,12 +339,28 @@ not a silent accept.
 ## 5. The unit ladder
 
 Each unit converts/eliminates **EXACTLY ONE section**, and is
-gym-scored before the next: prompt-blob predicates (gym U1) + the
-cache-stability check (gym U3, §1's standing predicate) + S-32/S-12
-paid re-run + a paid sweep — **spend free** (gym-upgrade §6.2:
-accuracy is the only axis). Per unit: files ≤7, gym predicates,
-falsification. Correctness > benchmark continuity — numbers
-re-baseline per unit and the scorecard log says so.
+gym-scored before the next — **BEHAVIORALLY** (r2): LLM-judge +
+mechanical store/outcome checks + prompt-blob capture; NO structural
+section assertions (§1). Byte-level checks (cross-agent identity,
+prefix stability) live in UNIT TESTS where they pin the unit's own
+claim — never as standing gym gates. Paid re-runs per unit, **spend
+free**. Correctness > benchmark continuity — numbers re-baseline per
+unit and the scorecard log says so.
+
+### V4-0 — instructions simplification (r2, NEW — small, first)
+
+- **Converts:** `<instructions>` → soul rows only; `my.kb.instruction`
+  ns + seeds deleted (pending the DECIDE on the four teachings' home —
+  if soul, fold them into the soul text in this unit); `<your-entity>`
+  header gains the write-notes-to-yourself sentence when V4's
+  `<your-entity>` lands (until then, the existing purpose section
+  stays).
+- **Files (≤6):** delete `src/my/kb/instruction.cljs` + its seeds in
+  `client.cljs`, `src/my/soul.cljs` (absorb teachings if DECIDE=soul),
+  `src/seon/ctx.cljs` (instructions-section reads soul only), tests.
+- **Falsification:** prompt blob carries the teachings exactly once
+  (from soul); S-32 consult-first paid run stays green (the teaching
+  moved, not died); demo kicker rehearses as a soul edit.
 
 ### V4-1 — `<system>` rewrite + agent-id-to-tail
 
@@ -254,16 +369,13 @@ re-baseline per unit and the scorecard log says so.
 - **Files (≤7):** `src/seon/ctx.cljs` (`system-section`,
   `prompt-section` id line), `test/seon/agent_context_test.cljs`,
   gym scenario predicate additions.
-- **Gym predicates:** `:prompt-every-turn` on a system-paragraph
-  sentinel; `:prompt-excludes` any provider/vendor word list; NEW
-  standing cache-stability predicate (prefix above `<warnings>`
-  byte-identical across consecutive turns, two agents' system blocks
-  byte-identical to each other — cross-agent identity is the new
-  claim).
-- **Falsification:** diff two different agents' turn-0 blobs — the
-  `<system>` block must be byte-equal; grep blobs for the agent id
-  above the status line — zero hits outside `<your-entity>`/
-  transcript content.
+- **Gym predicates (behavioral only):** `:prompt-every-turn` on a
+  system-paragraph sentinel; `:prompt-excludes` any provider/vendor
+  word.
+- **Falsification (unit tests, not gym gates):** diff two different
+  agents' turn-0 blobs — the `<system>` block must be byte-equal;
+  grep blobs for the agent id above the status line — zero hits
+  outside `<your-entity>`/transcript content.
 
 ### V4-2 — namespace tags + recency ordering (exemplars dissolve)
 
@@ -274,16 +386,15 @@ re-baseline per unit and the scorecard log says so.
   `src/seon/client.cljs` (boot indexer must persist a last-modified
   signal for ordering — `:seon.ns` row tx time suffices),
   `test/seon/agent_context_test.cljs`, gym scenarios.
-- **Selection policy** (§2.3): agent's `my.*` + teaching set,
-  recency-bumped; growth via gym A/B (absorbs relevant-roots row).
-- **Gym predicates:** `:prompt-includes` `<namespace
-  name="seon.agent.todo">`; `:prompt-excludes` `<exemplar` and
-  `<namespace-context>`; ordering predicate — modify a ns between
-  turns (gym U5 `:foreign-write`/churn), next blob shows it LAST;
-  cache-stability standing.
-- **Falsification:** edit the agent's home ns mid-run — the prefix
-  above the moved tag must stay byte-identical (only the tail
-  reorders); a `*.internal` ns must never appear as a tag.
+- **Selection (§2.3, r2):** ONE rule — all `seon.*` + `my.*` except
+  `*.internal`; no lists, no budgets.
+- **Gym predicates (behavioral only):** `:prompt-includes`
+  `<namespace name="seon.agent.todo">`; `:prompt-excludes`
+  `<exemplar`.
+- **Falsification (unit tests):** a new namespace defined at runtime
+  appears as a tag next turn with NO config change; a `*.internal` ns
+  never appears; modify a ns between turns — next blob shows it LAST
+  and the prefix above the moved tag is byte-identical.
 
 ### V4-3 — catalogs → `<store>` (RISKIEST — gym gates HARD)
 
@@ -304,19 +415,18 @@ re-baseline per unit and the scorecard log says so.
   attrs back incrementally (id-attr → +attr names) until the gym is
   green — never a silent regression.
 - **Falsification:** a stub run scripted to consult must find the kind
-  via `<store>` + the taught query alone; `:prompt-excludes`
-  `<schema-catalog>` and `<functions>`; per-turn kinds show no count
-  (cache-stability standing predicate catches a leaked count).
+  via `<store>` + the namespace sources alone; `:prompt-excludes`
+  `<schema-catalog>` and `<functions>`.
 
 ### V4-4 — transcript threading + REPL rendering + resume marker + result vars
 
 - **Converts:** `:transcript` (threading is already merged today;
   this unit lands the REPL-real rendering, the per-eval result-var
-  id, the resume boundary, and verifies `*1` `*2` `*3` `*e` actually
-  resolve in the eval environment — §2.1(d) must not teach a lie).
+  id, and the resume boundary. `*1`-family: PARKED per r2 — the
+  system prompt must not mention it until it exists).
 - **Files (≤7):** `src/seon/ctx.cljs` (`format-eval-row`,
   `format-message-row`, `transcript-section`), `src/seon/eval.cljs`
-  (result-var binding + `*1`-family if missing; `(result old-id)`
+  (result-var rendering; `(result old-id)`
   prior-session error wording), `test/seon/agent_context_test.cljs`,
   `test/seon/resume_replay_test.cljs`, gym scenario (resume).
 - **Gym predicates:** `:prompt-includes` the `<ns>=>` eval prefix and
@@ -325,8 +435,8 @@ re-baseline per unit and the scorecard log says so.
   var handles, `(result old-id)` errors with "prior session";
   eviction predicate — eval flood never evicts a message (pinned
   test exists: `transcript-eviction-keeps-messages-under-eval-flood`).
-- **Falsification:** eval `*1` immediately after a known eval — must
-  return its value (a REPL that displays vars it can't deref is the
+- **Falsification:** dereference a rendered eval-id var — must return
+  its stored value (a REPL that displays vars it can't deref is the
   failure); force eviction and assert the OLDEST eval went first.
 - **DECIDE(build):** the exact result-var glyph (§2.8) — pick here,
   pin with a byte-level test.
@@ -340,18 +450,17 @@ re-baseline per unit and the scorecard log says so.
 - **Gym predicates:** `:prompt-every-turn` the `;; ──` line shape
   (regex); inbox count moves when a foreign message lands between
   turns (gym U5 `:foreign-write`).
-- **Falsification:** the status line is the ONLY place the turn
-  number/time appear — grep the blob above `<warnings>` for
-  timestamps (cache-stability standing predicate is the structural
-  version).
+- **Falsification (unit test):** the status line is the ONLY place
+  the turn number/time appear — grep the blob above `<warnings>` for
+  timestamps.
 - **DECIDE(user):** anything else in the line.
 
 ### V4-6 — capabilities dissolution
 
-- **Converts:** `:capabilities` → gone (§3): docstring/teaching audit
-  of the rendered namespaces + at most one new `my.kb.instruction`
-  row for irreducible prose + the §2.1 system paragraphs already
-  landed in V4-1.
+- **Converts:** `:capabilities` → gone (§3/§3b): docstring/teaching
+  audit of the rendered namespaces + at most one new soul row for
+  irreducible prose + the §2.1 system paragraphs already landed in
+  V4-1.
 - **Files (≤7):** `src/seon/ctx.cljs` (delete
   `capabilities-section` + helpers), the substrate ns docstrings the
   audit strengthens (e.g. `src/seon/db.cljs` faces,
@@ -372,9 +481,9 @@ re-baseline per unit and the scorecard log says so.
 
 | Item | Owner | Where it lands |
 |---|---|---|
+| The four cluster-wide teachings' home: soul text (recommended) vs docstrings | user | V4-0 |
 | Eval result-var glyph/format on the value line | build-time | V4-4, pinned by test |
 | Status-line extras beyond §2.9 | user | V4-5 |
-| Namespace-selection budget bound (total/per-ns/unbounded-until-measured) | user, informed by gym A/B | V4-2 |
 
 ## 7. Supersedes / absorbs
 
@@ -392,8 +501,8 @@ point here):
   superseded as an implementation plan.
 
 Relationship to in-flight work: [[gym-upgrade-prd-2026-06-11]] is the
-referee for every rung (U1 prompt-blob predicates and U3
-cache-stability should land before V4-1 scores);
+referee for every rung — AFTER the r2 gym simplification (rip out
+structural gates; behavior + capture only) lands;
 [[live-tiles-prd-2026-06-11]] U5 owns `<your-tile>`'s mechanics — this
 PRD only places it. Concurrent lanes (boot-fix, tiles T2, gym U3)
 touch `render/live_tile.cljs`, `render.cljs`, `client.cljs`,
