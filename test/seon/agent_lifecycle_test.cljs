@@ -21,7 +21,11 @@
     [cljs.test :refer [deftest is testing async]]
     [seon.agent :as agent]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.eval :as seval]
+    [seon.render.live-tile :as tile]
+    [seon.repl :as repl]
+    [seon.repl.internal :as repl.internal]))
 
 (defn- with-conn
   "Open a fresh schema-loaded conn, `set!` it as the ROOT `db/*conn*`
@@ -108,5 +112,72 @@
             (testing "retracting completed-at makes the agent resumable again"
               (is (= ["aaa-2606101200" "bbb-2606101200"]
                      (client/resumable-agent-ids @db/*conn*))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; creation-evals! — live-tiles PRD 2026-06-11 §6 U4 (minimal scope).
+;; A MINTED agent's first logged act is the REAL tile-wiring eval:
+;; the eval log opens with the tutorial transact, the datom lands on
+;; the agent's own entity (wired value, not the render fallback),
+;; and — because the datom is durable — a restart needs no re-seed.
+;; ============================================================
+
+(def ^:private wired-id "AGTwiretile001")        ; 14 chars (:seon.db/id)
+
+(deftest creation-evals!-wires-the-tile-as-a-real-logged-eval
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [compile-state (await (repl/ensure-bootstrap!))]
+              ;; The boot path's per-agent slice (boot-one-agent!'s
+              ;; relevant half): home ns + entity, in the agent's scope.
+              (await
+                (db/with-agent wired-id
+                  (fn ^:async boot []
+                    (await (seval/setup-agent-ns! compile-state
+                                                  (agent/home-ns wired-id)
+                                                  wired-id))
+                    (await (agent/create! {:seon.agent/id wired-id})))))
+              (let [batch (await (client/creation-evals!
+                                   {:seon.agent/id            wired-id
+                                    :seon.agent/compile-state compile-state}))]
+                (is (= 1 (:seon.eval/n-ok batch)) "ONE wiring eval, ok")
+                (is (zero? (:seon.eval/n-fail batch)) "no failures"))
+              (testing "the datom landed — render resolves the WIRED value"
+                (let [ent (db/entity {:seon.db/ref [:seon.agent/id wired-id]})
+                      raw (:seon.render.live-tile/content ent)]
+                  (is (some? raw) "attr present on the agent's own entity")
+                  (is (= tile/welcome-sym
+                         (db/decode-edn-value
+                           :seon.render.live-tile/content raw))
+                      "decodes to the substrate welcome symbol")
+                  (let [{:seon.render.live-tile/keys [source value]}
+                        (tile/wired-content
+                          {:seon.render/entity
+                           {:seon.agent/id wired-id
+                            :seon.render.live-tile/content raw}})]
+                    (is (= :seon.render.live-tile/content source)
+                        "provenance = the tile key — NOT the welcome fallback")
+                    (is (= tile/welcome-sym value)))))
+              (testing "the eval log's FIRST entry is the tutorial wiring eval"
+                (let [session (agent/current-session wired-id)
+                      turns   (:seon.agent.session/turns session)
+                      turn    (first turns)
+                      evals   (:seon.agent.turn/evals turn)
+                      ev      (first evals)]
+                  (is (= 1 (count turns)) "one creation turn")
+                  (is (= :done (:seon.agent.turn/status turn)))
+                  (is (= 1 (count evals)) "one eval — the wiring")
+                  (is (true? (:seon.eval/ok? ev)) "a REAL ok result")
+                  (is (= (:source (first (repl.internal/parse-forms
+                                           (tile/wiring-source wired-id))))
+                         (:seon.eval/source ev))
+                      "source is byte-faithfully the canonical wiring form")
+                  (is (re-find #"lookup ref" (str (:seon.eval/narration ev)))
+                      "tutorial comments ride as the eval's narration")
+                  (is (re-find #":seon.db/ok\? true"
+                               (str (:seon.eval/result-edn ev)))
+                      "the recorded result is the transact's ok envelope"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

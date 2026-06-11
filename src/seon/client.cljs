@@ -65,6 +65,9 @@
     ;; needed.
     [seon.render]
     [seon.render.default]
+    ;; The canonical creation-time tile wiring form (live-tiles U4) —
+    ;; `creation-evals!` evals live-tile/wiring-source AS the new agent.
+    [seon.render.live-tile :as live-tile]
     ;; Iteration surface — owns the canonical `!compile-state`
     ;; defonce (in `seon.repl`). start-agent! reads through
     ;; `seon.repl/ensure-bootstrap!` rather than holding a second
@@ -1443,6 +1446,65 @@
           (runtime-id/host! id)
           res)))))
 
+(defn ^:async creation-evals!
+  "The startup eval block a NEWLY MINTED agent runs as its first
+   logged act (live-tiles PRD 2026-06-11 §6 U4, minimal scope): ONE
+   real eval, AS the agent, through the same `eval-batch!` path every
+   turn uses — the tile welcome wiring
+   (`seon.render.live-tile/wiring-source`), whose tutorial `;;`
+   comments ride as the eval's narration. The eval transacts
+   `:seon.render.live-tile/content` onto the agent's own entity by
+   lookup ref; the datom is durable, so a pod restart resumes the
+   wiring with no re-seed. CREATION ONLY — resumed agents are never
+   retro-wired (their unwired state falls back to welcome at render
+   via `seon.render.live-tile/wired-content`).
+
+   Opens the agent's first session + a creation turn so the eval
+   lands where every eval lands (sessions → turns → evals) and the
+   agent re-reads it in its own transcript. Returns the eval-batch!
+   summary map; failures are logged LOUDLY but never abort the boot —
+   a missing wiring datom only means the welcome fallback."
+  [{:seon.agent/keys [id compile-state]}]
+  (await
+    (db/with-agent id
+      (fn ^:async run-creation-evals! []
+        (try
+          (let [session    (await (agent/ensure-session! id))
+                session-id (:seon.agent.session/id session)
+                turn-id    (db/new-id!)
+                source     (live-tile/wiring-source id)
+                batch
+                (await
+                  (db/with-tx-context
+                    {:seon.db/agent-id   id
+                     :seon.db/session-id session-id
+                     :seon.db/turn-id    turn-id
+                     :seon.db/origin     :system}
+                    (fn []
+                      (agent/with-turn!
+                        {:seon.agent/id                    id
+                         :seon.agent.session/id-of-session session-id
+                         :seon.agent.turn/id-of-turn       turn-id
+                         :seon.agent.turn/prompt-text      ""}
+                        (fn ^:async creation-turn-body! []
+                          (await (seval/eval-batch!
+                                   compile-state
+                                   (repl/parse-forms source)
+                                   (agent/home-ns id)
+                                   id turn-id)))))))]
+            (when (pos? (or (:seon.eval/n-fail batch) 0))
+              (log/error-console!
+                "seon.client/creation-evals!"
+                "creation wiring eval FAILED — tile falls back to welcome at render"
+                {:seon.agent/id id :seon.eval/batch batch}))
+            batch)
+          (catch :default e
+            (log/error-console!
+              "seon.client/creation-evals!"
+              "creation eval block THREW — tile falls back to welcome at render"
+              e)
+            {:seon.eval/ids [] :seon.eval/n-ok 0 :seon.eval/n-fail 1}))))))
+
 (defn ^:async start-agent!
   "Bring up the pod's agents: open conn, init bootstrap-CLJS, then
    RESUME every active agent in the cluster store — the agent entities
@@ -1531,7 +1593,15 @@
                                                      ;; (create! never re-seeds
                                                      ;; an existing entity).
                                                      (some #{aid} minted-ids)
-                                                     (assoc :seon.agent/purpose purpose))))))
+                                                     (assoc :seon.agent/purpose purpose)))))
+                                  ;; U4: the startup eval block —
+                                  ;; CREATION ONLY (a resumed agent is
+                                  ;; never retro-wired; unwired falls
+                                  ;; back to welcome at render).
+                                  (when (some #{aid} minted-ids)
+                                    (await (creation-evals!
+                                             {:seon.agent/id            aid
+                                              :seon.agent/compile-state compile-state}))))
                                 @!acc)
                 {:seon.agent/keys [id ns]}
                 (first results)

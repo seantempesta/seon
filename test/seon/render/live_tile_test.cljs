@@ -22,6 +22,7 @@
     [seon.db :as db]
     [seon.render :as render]
     [seon.render.live-tile :as tile]
+    [seon.repl.internal :as repl.internal]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -291,3 +292,29 @@
                                  "twin names the broken renderer"))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; wiring-source — the canonical creation-time wiring eval (U4).
+;; One definition shared by seon.client/creation-evals! and these
+;; assertions: the source must parse as ONE form whose narration is
+;; the §3.1 tutorial and whose form transacts welcome-sym onto the
+;; agent's own lookup ref.
+;; ============================================================
+
+(deftest wiring-source-parses-as-one-tutorial-form
+  (let [agent-id "AGTwiresrc0001"
+        parsed   (repl.internal/parse-forms (tile/wiring-source agent-id))
+        {:keys [kind narration form]} (first parsed)]
+    (is (= 1 (count parsed)) "exactly ONE form — the wiring transact")
+    (is (= :form kind) "it parses cleanly (:form, not :read)")
+    (testing "the tutorial comments ride as narration (context-v4 §3.1)"
+      (is (re-find #"I am an entity in the shared store" (str narration)))
+      (is (re-find #"lookup ref" (str narration))))
+    (testing "the form IS the transact onto the agent's own lookup ref"
+      (is (= 'seon.db/transact! (first form)))
+      (let [tx-map (first (:seon.db/tx-data (second form)))]
+        (is (= agent-id (:seon.agent/id tx-map))
+            "identity attr addresses the agent's OWN entity")
+        (is (= (list 'quote tile/welcome-sym)
+               (:seon.render.live-tile/content tx-map))
+            "wires the quoted substrate welcome symbol")))))

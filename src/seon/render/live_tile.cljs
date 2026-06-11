@@ -221,6 +221,31 @@
       (some? legacy)  {::source :seon.render/html   ::value legacy}
       :else           {::source ::welcome           ::value welcome-sym})))
 
+(defn wired-label
+  "The awareness-section header identity for a [[wired-content]]
+   result — the wired fn's fully-qualified name (its source is one
+   `:seon.fn`/catalog lookup away) or \"literal hiccup on your
+   entity\", with provenance (legacy slot / substrate default), so
+   the agent reading the section always sees HOW to change the
+   display."
+  {:malli/schema [:=> [:cat ::wired-response] :string]}
+  [{::keys [source value]}]
+  (case source
+    ::content
+    (if (symbol? value)
+      (str value " (a fn on your entity)")
+      "literal hiccup on your entity")
+
+    :seon.render/html
+    (if (symbol? value)
+      (str value " (a fn on the legacy :seon.render/html slot — "
+           "migrate it to :seon.render.live-tile/content)")
+      (str "literal hiccup on your entity (legacy :seon.render/html "
+           "slot — migrate it to :seon.render.live-tile/content)"))
+
+    ::welcome
+    (str value " (the substrate default — wire your own)")))
+
 ;; ============================================================
 ;; The welcome — the default tile every uncustomized agent shows.
 ;; ============================================================
@@ -327,6 +352,43 @@
           ", and: \"" panel-line "\" "
           "To replace it, transact :seon.render.live-tile/content onto "
           "your agent entity — a qualified fn symbol or literal hiccup.")}))
+
+;; ============================================================
+;; Creation wiring — the eval every NEW agent runs as its first
+;; logged act (live-tiles PRD 2026-06-11 §6 U4, minimal scope).
+;;
+;; ONE canonical definition of the wiring form, AS DATA (a source
+;; string), so the boot path (seon.client/creation-evals!) and the
+;; tests assert against the same artifact. The `;;` comments are the
+;; teaching register from the context-v4 PRD §3.1 — parse-forms
+;; accumulates them as the eval's :seon.eval/narration, so the agent
+;; re-reads the tutorial every time it reads its own log.
+;; ============================================================
+
+(defn wiring-source
+  "The creation-time wiring eval SOURCE for agent `agent-id`: tutorial
+   `;;` comments + ONE form that transacts [[welcome-sym]] onto the
+   agent's OWN entity by its `:seon.agent/id` lookup ref (identity-attr
+   upsert — the same 'transact to my own lookup ref' move the agent
+   uses for every later tile change). Evaled AS the new agent at
+   creation by `seon.client/creation-evals!`, so the eval log's first
+   entry is a real worked example; the datom it writes is durable,
+   surviving pod restarts with no re-seed."
+  {:malli/schema [:=> [:catn [:seon.agent/id :seon.db/id]] :string]}
+  [agent-id]
+  (str
+    ";; I am an entity in the shared store — everything about me is data,\n"
+    ";; and I change myself by transacting to my own lookup ref: the\n"
+    ";; identity attr :seon.agent/id in this map addresses MY entity.\n"
+    ";; First act: wire my live tile (the panel my human sees) to the\n"
+    ";; substrate welcome fn. Any fn returning\n"
+    ";; {:seon.render/hiccup … :seon.render/ai …} can go here — when I\n"
+    ";; have something better to show, I define a fn and point this\n"
+    ";; attr at it.\n"
+    "(seon.db/transact!\n"
+    "  {:seon.db/tx-data\n"
+    "   [{:seon.agent/id " (pr-str agent-id) "\n"
+    "     :seon.render.live-tile/content '" welcome-sym "}]})\n"))
 
 ;; ============================================================
 ;; Errors are legible — a broken tile never silently vanishes.
