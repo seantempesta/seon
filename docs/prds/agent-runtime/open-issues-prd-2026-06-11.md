@@ -92,6 +92,33 @@ rehearsed sha; only demo-blocking fixes after.
 Post-demo: P6 → roots-growth A/B → V3-D/E (one measured unit each) →
 the Tier-3 ladder in board order.
 
+## Agent-reported issues log (2026-06-11, full-day sweep)
+
+Everything agents flagged today that isn't already a row above or in
+the complexity-audit register. Source = the unit reports (P21/P22/T1–
+T6/SOUL/boot-fix/gym baseline).
+
+| Issue | Evidence / location | Suggested owner |
+|---|---|---|
+| **datahike pull THROWS on registered-but-never-transacted attrs** — substrate-wide trap; any explicit pull pattern naming an uninstalled attr crashes context assembly | T5 hit it live (29 assertion fails, fixed by gating); installs are lazy at first transact | render sweep: ONE `installed-schema` home in `seon.db` (now ×4+ copies: render, agent, warn, live-tile) + consider a pull-pattern guard in `seon.db` itself |
+| **datahike-cljs `get-else` defaults never fire** — rows lacking the attr are DROPPED, not defaulted | T2 found it (recent-messages silently dropped ALL agent-from messages); same dead branch in `seon.agent.message/waking-hops` (~129) | focused audit unit; candidate upstream fork fix (datahike fork is ours) |
+| **`reply!` logging artifact: an "assistant" message row carries the WHOLE eval source**, not the reply string (kXQ's last reply renders as `;; The user asked … (seon.agent/reply! {…})`) | T3 surfaced via the new last-reply tile | focused look at reply!/message logging; may be U2-era historical rows only — verify before fixing |
+| outgoing my-agent→peer messages render as ordinary assistant bubbles (rows lack `to` in the derived query) | T2 report; not fixed by T3 | chat polish (with U2b) |
+| boot re-index heals CHANGED schema sources but may not PRUNE rows for DELETED registrations (stale `:seon.render.chat/bubble` row possible) | T3 require-flip removed the register! | small unit: deletion-pruning or a loud stale-row warn |
+| `render-agent-tile` pulls `'[*]` on the agent entity — inlines the whole `:seon.agent/sessions` component tree per tile render | T5 report | render sweep: narrower pattern |
+| `seon.agent` ns docstring says "nine sections" (now twelve); `live-tile-section` missing from its re-export list | T5 report | V4 composer rewrite (the section list changes anyway) |
+| duplicated latest-inbound datalog: `replied-since-inbound?` (agent.cljs) ↔ `turns-since-inbound` (ctx.cljs) | P21 report (ctx was fenced) | P6 split: shared `latest-inbound-at` |
+| hardcoded line-number citations in context exemplars drift on every edit above them | P22 report (already repointed once) | derived citations from analyzer `:seon.fn` line info (reactive-context) |
+| `seon.test.runner/::selector` uses `[:fn]` for "exactly one of" — pure-data law violation; exclusivity not directly expressible as data | boot-fix report; non-crashing | design call: move the check into `run!`'s body |
+| JVM-side `[:fn]` registrations (`seon/server/registry.clj:59,98`, `seon/dev/*.clj`) — law violations if those forms ever round-trip | boot-fix report | JVM sweep, post-demo |
+| minute-resolution todo ages (`todo.cljs:115`) + 1h rolling warnings cutoff (`warn.cljs:717`) bust the provider cache prefix at every minute/hour boundary | gym U3 report | V4 composer rewrite (both sections land in the volatile tail anyway — verify placement solves it) |
+| `my.soul` references `:my.kb/*` provenance attrs from outside the my.kb family | SOUL report | decide: provenance shapes to a neutral ns, or bless cross-family reference |
+| `cljs-finish-clj-pivot-plan-2026-06-09.md:~321` still describes SOUL as hardcoded in deepseek | SOUL report | stale-doc fix with the next PRD touch |
+| s12 baseline: agents tell the user `transact!` THROWS; truth = errors-as-values | gym baseline (judge 40/40, both agents) | V4-1 system paragraphs + seon.db docstrings (in the v4 bar) |
+| s32 baseline: re-grep economy (2 greps, cap 1) — consults stored finding then greps anyway | gym baseline | v4 teaching surfaces; re-measure at the post-refactor sweep |
+| T6 overlay verified via curl markup only — backtick/Esc/focus-guard not exercised in a real browser | T3+T6 report | one manual check (or browser-automation pass) before demo |
+| outside-builder blockers: konserve local fork (4 deps.edn sites), `bin/run:11` hardcoded JAVA_HOME, README lacks build instructions, `.mcp.json` absolute paths, datahike gitlink pinned to unreachable sha | release-readiness research (d1b8e90) — push plan §7 PARKED for user go | release unit when user green-lights the push |
+
 ## What P8 proved (so the plan stays honest)
 
 Consult-first 5/5 under stricter predicates; provenance storage +
