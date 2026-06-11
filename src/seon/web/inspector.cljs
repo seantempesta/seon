@@ -611,9 +611,12 @@
      ;; to newest while the user is at/near the bottom; never yanks while
      ;; they read history. Stable id so idiomorph preserves the element
      ;; (and its scrollTop + JS-property flag) across SSE morphs.
+     ;; `seon-agent-content` opts this pane into the base content
+     ;; layer (input.css): semantic HTML in agent-rendered cards gets
+     ;; Phosphor element styling despite Tailwind preflight.
      [:div {:id (str "inspect-cards-" agent-id)
             :data-seon-scroll "1"
-            :class "flex-1 overflow-auto p-2 text-xs bg-base-950"}
+            :class "seon-agent-content flex-1 overflow-auto p-2 text-xs bg-base-950"}
       ;; The agent's OWN tile — always ABOVE the per-entity cards. It
       ;; lives inside this morphed fragment, so every SSE push
       ;; re-renders it: the agent repoints `:seon.render/html` on its
@@ -1061,16 +1064,30 @@
     ;; and the tile's own `h-full` would otherwise consume 100% and
     ;; push the footer past the `overflow-hidden` edge (observed live
     ;; 2026-06-09: footer rendered at y=255 inside a 175px-tall card).
-    [:a {:href (str "/agent/" id)
-         :class (str "flex flex-col border border-base-800 rounded "
-                     "overflow-hidden hover:border-amber-700/70 "
-                     "transition-colors animate-appear")}
-     [:div {:class "flex-1 min-h-0"} tile]
+    ;; FIXED h-44: grid tiles are uniform-height cards regardless of
+    ;; content — a long reply or tall agent hiccup CLIPS (paired with
+    ;; the .seon-tile-compact max-height clamp in input.css), never
+    ;; grows the cell (observed live 2026-06-11: unbounded vertical
+    ;; growth).
+    ;;
+    ;; DIV + stretched overlay link, NOT a wrapping <a>: agent hiccup
+    ;; legitimately contains [:a …] links, and an <a> inside an <a> is
+    ;; invalid HTML — the parser SPLITS the outer anchor and ejects the
+    ;; tile content out of the card (observed live 2026-06-11: the
+    ;; verification tile blew the whole grid row apart). The absolute
+    ;; inset-0 anchor keeps the entire card clickable.
+    [:div {:class (str "relative flex flex-col h-44 border border-base-800 "
+                       "rounded overflow-hidden hover:border-amber-700/70 "
+                       "transition-colors animate-appear")}
+     [:div {:class "flex-1 min-h-0 overflow-hidden"} tile]
      [:div {:class (str "shrink-0 flex items-center px-3 py-1 "
                         "border-t border-base-800 "
                         "bg-base-900/80 text-xs font-mono")}
       [:span {:class "text-text-500"} (str "turn " turn-count)]
-      [:span {:class "ml-auto text-amber-500"} "open →"]]]))
+      [:span {:class "ml-auto text-amber-500"} "open →"]]
+     [:a {:href (str "/agent/" id)
+          :aria-label (str "open agent " id)
+          :class "absolute inset-0"}]]))
 
 (defn- agents-dash-fragment
   "The whole mission-control surface — ONE morph target (`#agents-dash`)

@@ -48,7 +48,39 @@
    The substrate shows `.seon-tile-compact` below the breakpoint and
    `.seon-tile-expanded` at or above it (container rules live in
    `resources/public/css/input.css`). Untagged content renders at
-   every size.
+   every size. The compact block is HEIGHT-CLAMPED by the substrate
+   (grid tiles are uniform cards; overflow clips) — put a glanceable
+   summary there and the full content in the expanded block.
+
+   ## Styling — write SEMANTIC hiccup, zero classes needed
+
+   The substrate styles plain HTML elements inside your tile (and
+   chat/markdown/debug surfaces) — `[:table …]` with `[:thead]`/
+   `[:tbody]`, `[:ul …]`/`[:ol …]`, `[:h1 …]`–`[:h4 …]`, `[:p …]`,
+   `[:pre [:code …]]`, `[:blockquote …]`, `[:dl [:dt …] [:dd …]]`,
+   `[:hr]`, `[:a …]`, `[:strong]`/`[:em]` all render themed with no
+   classes. PREFER that: a classless `[:table]` of rows beats a div
+   soup of utilities.
+
+   When you do want layout/emphasis control, ONLY this utility
+   vocabulary exists at runtime (anything else silently does
+   nothing — the CSS is built ahead of time):
+
+   - layout: `flex` `flex-col` `flex-row` `flex-wrap` `flex-1`
+     `shrink-0` `grid` `grid-cols-2/3/4` `items-center` `items-start`
+     `items-baseline` `justify-between` `justify-end` `justify-center`
+     `gap-1..4` `w-full` `h-full` `min-w-0`
+   - spacing: `p-0..4` `px-1..4` `py-1..4` `mt-1/2` `mb-1/2`
+   - text: `text-xs/sm/base/lg` `text-left/center/right` `font-mono`
+     `font-semibold` `font-bold` `italic` `uppercase` `tracking-wider`
+     `tabular-nums` `whitespace-pre-wrap` `truncate`
+   - color: `text-text-50/100/200/300/400/500` (cream, bright→dim),
+     `text-signal` (amber) `text-success` `text-error` `text-warning`
+     `text-info` `text-amber-300/400/500` `bg-base-800/850/900/950`
+   - borders/overflow: `border` `border-t` `border-b`
+     `border-base-700/800` `rounded` `rounded-md` `divide-y`
+     `divide-base-800` `overflow-hidden` `overflow-auto`
+     `overflow-x-auto`
 
    ## Tile updates should be RENDERED DATABASE QUERIES
 

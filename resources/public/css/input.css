@@ -8,6 +8,34 @@
 @source "../../../src/**/*.cljs";
 @source "../../../src/**/*.cljc";
 
+/* ============================================================
+   SAFELIST — the agent utility vocabulary.
+   Tailwind only ships classes scanned from SOURCE at build time;
+   agents emit hiccup at RUNTIME, so any utility not safelisted
+   here silently doesn't exist on their surfaces. This is the
+   small curated vocabulary for data display, documented for
+   agents in the seon.render.live-tile ns docstring — keep the
+   two lists in sync (live_tile_test asserts the pairing).
+   Semantic hiccup (classless [:table …], [:ul …], [:h2 …]) needs
+   NONE of these — the base content layer below styles it.
+   ============================================================ */
+/* layout */
+@source inline("flex flex-col flex-row flex-wrap flex-1 shrink-0");
+@source inline("grid grid-cols-{2,3,4} items-{center,start,baseline} justify-{between,end,center}");
+@source inline("gap-{1,2,3,4} w-full h-full min-w-0");
+/* spacing */
+@source inline("p-{0,1,2,3,4} px-{1,2,3,4} py-{1,2,3,4} mt-{1,2} mb-{1,2}");
+/* typography */
+@source inline("text-{xs,sm,base,lg} text-{left,center,right} font-mono font-semibold font-bold");
+@source inline("italic uppercase tracking-wider tabular-nums whitespace-pre-wrap truncate");
+/* color — Phosphor palette only */
+@source inline("text-text-{50,100,200,300,400,500}");
+@source inline("text-{signal,success,error,warning,info} text-amber-{300,400,500}");
+@source inline("bg-base-{800,850,900,950}");
+/* borders + overflow */
+@source inline("border border-t border-b border-base-{700,800} rounded rounded-md");
+@source inline("divide-y divide-base-800 overflow-hidden overflow-auto overflow-x-auto");
+
 /* Custom theme tokens using Tailwind v4 @theme directive.
    Phosphor Terminal theme - warm blacks, cream text, amber accents.
    See docs/prds/namespace-ui/design-system.md for details. */
@@ -283,7 +311,17 @@ details.tool-call-details[open] .tool-preview {
   width: 100%;
   height: 100%;
 }
-.seon-tile-compact { display: block; }
+/* The compact block is a CLAMPED card face: bounded height,
+   overflow clipped — a tile must never grow its grid cell
+   vertically, no matter what an agent renders into it. 10rem
+   pairs with the grid card's fixed h-44 (footer takes the rest);
+   whichever bound is hit first clips. The EXPANDED block stays
+   unbounded — the agent-view right pane scrolls. */
+.seon-tile-compact {
+  display: block;
+  max-height: 10rem;
+  overflow: hidden;
+}
 .seon-tile-expanded { display: none; }
 @container (min-width: 480px) {
   .seon-tile-compact { display: none; }
@@ -321,4 +359,72 @@ details.tool-call-details[open] .tool-preview {
   width: 100%;
   height: 100%;
   border: 0;
+}
+
+/* ============================================================
+   BASE CONTENT LAYER — semantic HTML inside agent-rendered
+   containers. Tailwind's preflight strips ALL element styling, so
+   an agent rendering classless [:table …], [:ul …], [:h2 …],
+   [:pre [:code …]], [:dl …] would get flat unstyled output. These
+   rules restore Phosphor-styled (design-system.md) semantics
+   SCOPED to the agent-content containers only:
+     .seon-tile           — the live tile (all three surfaces)
+     .seon-bubble         — chat bubble content
+     .markdown            — rendered markdown bodies
+     .seon-agent-content  — debug-pane card streams
+   The taught path is "write semantic hiccup, zero classes needed";
+   the safelisted utility vocabulary (top of this file) layers on
+   top — utilities beat these rules (cascade layer order).
+   In `base` so Tailwind utilities and the inspector's inline
+   .markdown overrides both win ties.
+   ============================================================ */
+@layer base {
+  :is(.seon-tile, .seon-bubble, .markdown, .seon-agent-content) {
+    /* Headings — amber-graded emphasis, terminal-dense. */
+    & h1 { font-size: 0.95rem; font-weight: 600; color: var(--color-signal);   margin: 0.5rem 0 0.25rem; }
+    & h2 { font-size: 0.85rem; font-weight: 600; color: var(--color-text-50);  margin: 0.4rem 0 0.2rem; }
+    & h3 { font-size: 0.8rem;  font-weight: 600; color: var(--color-text-100); margin: 0.3rem 0 0.15rem; }
+    & h4 { font-size: 0.7rem;  font-weight: 600; color: var(--color-text-300);
+           text-transform: uppercase; letter-spacing: 0.05em; margin: 0.3rem 0 0.1rem; }
+
+    & p { margin: 0.25rem 0; }
+
+    /* Lists. */
+    & ul, & ol { margin: 0.25rem 0; padding-left: 1.1rem; }
+    & ul li { list-style: disc; }
+    & ol li { list-style: decimal; }
+    & li { margin: 0.1rem 0; }
+    & li::marker { color: var(--color-text-500); }
+
+    /* Tables — borders, header weight, row striping, tabular numerics. */
+    & table { width: 100%; border-collapse: collapse; font-size: 0.75rem; margin: 0.35rem 0; }
+    & th { text-align: left; font-weight: 600; color: var(--color-text-200);
+           font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
+           padding: 0.2rem 0.5rem; border-bottom: 1px solid var(--color-base-700); }
+    & td { padding: 0.2rem 0.5rem; color: var(--color-text-100);
+           border-bottom: 1px solid var(--color-base-800);
+           font-variant-numeric: tabular-nums; }
+    & tbody tr:nth-child(even) { background: color-mix(in srgb, var(--color-base-900) 60%, transparent); }
+
+    /* Code — inline + blocks, terminal monospace. */
+    & code { font-family: var(--font-mono); font-size: 0.7rem; color: #fde68a;
+             background: var(--color-base-900); padding: 0.05rem 0.25rem; border-radius: 0.15rem; }
+    & pre { background: var(--color-base-900); border: 1px solid var(--color-base-800);
+            padding: 0.4rem 0.5rem; border-radius: 0.25rem; overflow-x: auto; margin: 0.35rem 0; }
+    & pre code { background: transparent; padding: 0; }
+
+    & blockquote { border-left: 2px solid color-mix(in srgb, var(--color-signal) 50%, transparent);
+                   padding-left: 0.5rem; margin: 0.25rem 0; color: var(--color-text-300); }
+
+    /* Definition lists. */
+    & dl { margin: 0.25rem 0; }
+    & dt { font-weight: 600; color: var(--color-text-100); margin-top: 0.25rem; }
+    & dd { margin-left: 1rem; color: var(--color-text-300); }
+
+    & hr { border: 0; border-top: 1px solid var(--color-base-700); margin: 0.5rem 0; }
+
+    & a { color: var(--color-signal); text-decoration: underline; }
+    & strong { font-weight: 600; color: var(--color-text-50); }
+    & em { font-style: italic; color: var(--color-text-200); }
+  }
 }

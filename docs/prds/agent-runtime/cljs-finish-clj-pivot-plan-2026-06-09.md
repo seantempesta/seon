@@ -417,7 +417,7 @@ operational knowledge. Each is one line + its source of detail.
 ## 10. HANDOFF (2026-06-11 early — refactor DONE + MEASURED; user signing off)
 
 **THE PLAN IS NOW [[open-issues-prd-2026-06-11]]** (tiered register, ae6d9a6)
-+ the task board (P-numbers). Read those two, then this section.
+plus the task board (P-numbers). Read those two, then this section.
 
 State: the context-v3 reorg is COMPLETE through P5 and MEASURED (P8, 5
 paid runs + corrected-world re-run): consult-first 5/5 under anchored
