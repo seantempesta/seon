@@ -324,6 +324,8 @@
 ;; positional db slot is REQUIRED and explicit — no ambient *conn*).
 ;; ---------------------------------------------------------------------------
 
+(declare assert-known-query-attrs!)
+
 (defn query
   "Run a Datalog query. Two call shapes:
 
@@ -332,7 +334,14 @@
                          ::db/args [...]})                  ; extra :in inputs
    - positional, mirroring datahike `(d/q query db & inputs)`:
        (db/query '[:find ?n :where [?e ::name ?n]] <db>)
-       (db/query '[:find ?n :in $ ?t :where …] <db> \"Alice\")"
+       (db/query '[:find ?n :in $ ?t :where …] <db> \"Alice\")
+
+   GUARDED against silent typos (the sibling of [[pull]]'s guard): a
+   `:where` clause naming an attribute that is neither installed on
+   the db nor registered in seon.schema throws a legible error naming
+   the attr(s) and the fix, instead of silently returning #{}.
+   Registered attrs with no data yet behave exactly as datahike
+   defines (empty result / get-else default)."
   ;; Pure-variadic body so CLJS malli.instrument wraps every arity.
   {:malli/schema
    [:function
@@ -346,8 +355,10 @@
   (if (= 1 (count args))
     (let [{::keys [query args db conn] :or {conn *conn* args []}} (first args)
           db (or db @(internal/resolve-conn conn))]
+      (assert-known-query-attrs! db query)
       (apply d/q query db args))
     (let [[q db & inputs] args]
+      (assert-known-query-attrs! db q)
       (apply d/q q db inputs))))
 
 (defn installed-schema
@@ -409,6 +420,96 @@
   [attr]
   (let [a-ns (namespace attr)]
     (and a-ns (or (= a-ns "db") (str/starts-with? a-ns "db.")))))
+
+;; --- query attr guard --------------------------------------------------
+;; The sibling of the pull guard below (65dfc90), adapted to what
+;; datalog actually does (probed live 2026-06-11): d/q NEVER throws on
+;; an uninstalled attr — a never-installed attr in any clause shape
+;; (pattern, get-else, or-join, not) yields the correct empty/default
+;; result. So the only failure mode at this boundary is the SILENT
+;; one: a typo'd attribute returns #{} and the caller concludes "no
+;; data". The guard makes that legible: an attr that is neither
+;; installed on the db NOR registered in seon.schema can never match
+;; anything and is almost certainly a typo — throw with the fix.
+;; Registered-but-uninstalled attrs pass through untouched (datahike's
+;; empty/default result is already the honest answer).
+
+(defn- where-clause-attrs
+  "Every attribute keyword a `:where` clause names, recursively through
+   `not`/`or`/`and`/`or-join`/`not-join` and the `get-else`/`missing?`
+   fn clauses. Conservative: anything unrecognized contributes nothing
+   (rules, predicates, bindings)."
+  [clause]
+  (cond
+    ;; compound: (not …) (or …) (and …) (or-join [vars] …) (not-join …)
+    (seq? clause)
+    (let [[op & body] clause]
+      (cond
+        (contains? '#{not or and} op)
+        (mapcat where-clause-attrs body)
+        (contains? '#{or-join not-join} op)
+        (mapcat where-clause-attrs (rest body))
+        :else []))
+
+    (vector? clause)
+    (if (seq? (first clause))
+      ;; fn/predicate clause — only the attr-naming builtins matter:
+      ;; [(get-else $ ?e :attr default) ?x] / [(missing? $ ?e :attr)].
+      (let [[f & fargs] (first clause)]
+        (if (contains? '#{get-else missing?} f)
+          (take 1 (filter keyword? fargs))
+          []))
+      ;; data pattern [e a v …] — skip a leading src symbol ($/$x);
+      ;; the attr is the second slot when it's a keyword.
+      (let [items (if (and (symbol? (first clause))
+                           (str/starts-with? (str (first clause)) "$"))
+                    (rest clause)
+                    clause)
+            a     (second items)]
+        (if (keyword? a) [a] [])))
+
+    :else []))
+
+(defn- query-where-clauses
+  "The `:where` clauses of a query in vector or map form; nil for
+   string queries (unguarded — third-party passthrough)."
+  [q]
+  (cond
+    (map? q)    (:where q)
+    (vector? q) (->> q (drop-while #(not= :where %)) rest seq)
+    :else       nil))
+
+(defn- assert-known-query-attrs!
+  "Throw the legible typo error when `q` names attrs that are neither
+   installed on `db` nor registered in seon.schema (`:db/*` system
+   attrs exempt). See the guard comment above — datalog returns a
+   SILENT #{} for these, which reads as \"no data\" when the truth is
+   \"no such attribute\"."
+  [db q]
+  (when-let [clauses (query-where-clauses q)]
+    (let [named     (distinct (mapcat where-clause-attrs clauses))
+          installed (installed-schema db)
+          unknown   (->> named
+                         (remove system-pull-attr?)
+                         (remove #(contains? installed %))
+                         (remove schema/registered?)
+                         seq)]
+      (when unknown
+        (let [msg (str "Query names attribute(s) "
+                       (pr-str (vec (sort unknown)))
+                       " that this database has never seen — not installed "
+                       "in the datahike schema and not registered in "
+                       "seon.schema, so the query can only return empty. "
+                       "Most likely a typo: check spelling against "
+                       "(seon.db/installed-schema db). If the attr is new, "
+                       "(seon.schema/register! <attr> <type>) and transact "
+                       "data first.")]
+          (throw (ex-info msg
+                          {:seon.error/message msg
+                           :seon.error/data
+                           {:seon.error/kind :user-input
+                            ::missing-attrs  (vec (sort unknown))
+                            ::query          q}})))))))
 
 (defn- pull-pattern-attrs
   "Every attr keyword an explicit pull pattern names, recursively
@@ -628,3 +729,63 @@
   ([] (assert-preconditions! {}))
   ([{::keys [conn] :or {conn *conn*}}]
    (internal/assert-preconditions! conn)))
+
+;; ---------------------------------------------------------------------------
+;; Store inventory — what's in the shared store, one query away.
+;; ---------------------------------------------------------------------------
+
+(schema/register! ::kind    :keyword)
+(schema/register! ::id-attr :keyword)
+(schema/register! ::rows    :int)
+(schema/register! ::inventory-row
+  [:map
+   [::kind    ::kind]
+   [::id-attr ::id-attr]
+   [::rows    ::rows]])
+
+(defn store-inventory
+  "What the shared store holds RIGHT NOW — one row per entity KIND:
+   the kind (the id-attr's keyword namespace), its identity attribute,
+   and a live row count. Derived entirely from the db (the installed
+   schema's `:db.unique/identity` attrs + one count per kind), so a
+   kind appears here the moment its first row lands and the counts are
+   as-of the db you pass. Re-run it whenever you want fresh numbers —
+   this is an ordinary query, not a snapshot.
+
+   Check this BEFORE researching or registering anything new: a kind
+   that already exists means prior agents stored knowledge you can
+   query (datalog its id-attr's namespace), and a shape that already
+   exists must be REUSED, never forked in parallel.
+
+   ;; what's already here?
+   (seon.db/store-inventory)
+   ;; => [{:seon.db/kind :my.kb.codebase
+   ;;      :seon.db/id-attr :my.kb.codebase/question
+   ;;      :seon.db/rows 14}
+   ;;     {:seon.db/kind :seon.agent  …}
+   ;;     …]
+
+   ;; then read a kind's rows, e.g.:
+   (seon.db/query {:seon.db/query
+                   '[:find ?q :where [?e :my.kb.codebase/question ?q]]})"
+  {:malli/schema
+   [:function
+    [:=> [:cat] [:vector ::inventory-row]]
+    [:=> [:cat [:map [::db {:optional true} :any]
+                     [::conn {:optional true} ::conn]]]
+         [:vector ::inventory-row]]]}
+  ([] (store-inventory {}))
+  ([{::keys [db conn] :or {conn *conn*}}]
+   (let [db (or db @(internal/resolve-conn conn))]
+     (->> (installed-schema db)
+          (keep (fn [[attr props]]
+                  (when (and (= :db.unique/identity (:db/unique props))
+                             (not (system-pull-attr? attr)))
+                    attr)))
+          (sort-by str)
+          (mapv (fn [attr]
+                  {::kind    (keyword (namespace attr))
+                   ::id-attr attr
+                   ::rows    (count (query [:find '?e
+                                            :where ['?e attr '_]]
+                                           db))}))))))
