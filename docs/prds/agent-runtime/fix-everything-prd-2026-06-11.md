@@ -609,6 +609,21 @@ within the addendum reflects urgency, not filing order:
   (no parallel mechanism — don't keep the atom AND the row). Sequenced
   AFTER the paid measure: defaults don't change, but the unit touches
   the live call path the measure exercises.
+- **C-19 mark model-authored result-comments in the transcript render
+  (downstream ask 19, filed 2026-06-11 ~20:00).** ROOT-3 second half:
+  the A2 parser contract keeps fake result envelopes from EVALUATING,
+  but a model-written `;; => "…"` comment stays in the transcript
+  verbatim and later turns trust it as a real read (downstream F13:
+  fabricated 7-event section; F14: held one fabricated item under
+  direct user challenge). Real results render `; ⇒ (result :id) · Nms`
+  — a different channel — so the fix is render-side and structural:
+  when assembling the transcript section, comment lines matching a
+  result-claim shape (`;; =>` / `;; ⇒`) that did NOT come from the
+  runtime are rewritten to `;; [unverified narration — not a real
+  result]`. Downstream carries a soul-rule ban as mitigation; the
+  substrate render is the reliable layer. Touches ctx.cljs transcript
+  assembly → sequenced post-measure (same reasoning as C-16); their
+  filing says next-batch, not demo-blocking.
 - **C-16 absorb generic REPL discipline into substrate context.**
   Downstream identity files currently carry substrate-generic guidance
   every consumer would copy: hiccup shape rules for tile fns, "printed
