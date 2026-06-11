@@ -23,6 +23,7 @@
    event tells you immediately which capability broke."
   (:require
     [cljs.test :as t :refer [deftest is async]]
+    [clojure.string :as str]
     [datahike.api :as d]
     [seon.db :as db]
     [seon.test.runner :as r]
@@ -125,6 +126,34 @@
                   (reset! probes/armed? false)
                   (is false (str "threw — " e))
                   (done))))))
+
+;; ============================================================
+;; run! — selector exclusivity (enforced in the body, not the schema:
+;; `::selector` is the pure-data "at least one" :or-of-maps shape, so
+;; both-keys passes instrumentation and must die HERE with a legible
+;; envelope)
+;; ============================================================
+
+(deftest run!-rejects-ambiguous-selector-with-legible-envelope
+  (async done
+    (-> (r/run! {:seon.test.runner/vars
+                 '[seon.test.runner-probes/probe-passing-test]
+                 :seon.test.runner/ns probes-ns})
+        (.then
+          (fn [result]
+            (is false (str "expected ambiguous-selector throw, got result "
+                           (pr-str (:seon.test.runner/summary result))))
+            (done)))
+        (.catch
+          (fn [e]
+            (is (= :seon.test.runner/ambiguous-selector (:type (ex-data e)))
+                (str "expected ::ambiguous-selector envelope, got "
+                     (pr-str (ex-data e)) " / " e))
+            (is (some-> (ex-message e) (str/includes? "exactly one"))
+                (str "message should name the rule; got " (ex-message e)))
+            (is (contains? (:request (ex-data e)) :seon.test.runner/vars)
+                "envelope should carry the offending request")
+            (done))))))
 
 ;; ============================================================
 ;; run-ns! — sugar wrapper, default ::record? true

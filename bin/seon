@@ -12,6 +12,19 @@
 #   start <name|all>   Idempotent. Spawns via nohup; logs to logs/<name>.log
 #                      `all` = cljs-watch → wire-server → pod, each gated on
 #                      REAL readiness before the next (jvm NOT included)
+#
+# Why `all` excludes the jvm (decided 2026-06-11, not an oversight):
+# the jvm process hosts nREPL 7888 — the SHARED REPL that every Claude
+# agent's eval, the dev hook's reload+test cycle, and the seon MCP
+# bridge all run through — plus the embedded datahike (data/datahike).
+# It has no dependency on the pod stack (its store is separate from
+# the wire-server's data/clusters/* store), so there is no ordering
+# reason to include it; and because this script is multi-agent (any
+# agent may `restart all` to bounce the pod stack at any time),
+# including the jvm would let one agent silently sever every other
+# agent's live REPL session mid-flight. The jvm is therefore managed
+# only by name: `bin/seon restart jvm` — an explicit, deliberate act.
+# `start all` / `stop all` print this exclusion loudly.
 #   stop <name|all>    SIGTERM, wait 2.5s, SIGKILL if still alive
 #                      `all` reverses: pod → wire-server → cljs-watch
 #   restart <name|all> stop + start
@@ -83,7 +96,8 @@ stack_processes() {
   # cljs-watch builds out/client/main.js which the pod execs; the pod's
   # boot ping is fail-loud (bounded ~10s retry, seon.store.wire/ping!)
   # against the wire-server's socket. `jvm` is deliberately NOT in the
-  # stack — independent lane, start it explicitly.
+  # stack — it hosts the shared nREPL 7888 every agent depends on and
+  # has no dependency on these processes; see the header comment.
   echo "cljs-watch wire-server pod"
 }
 
@@ -393,7 +407,11 @@ start_all() {
     }
   done
   echo "▶ stack up: cljs-watch → wire-server → pod"
-  echo "  (jvm not included — bin/seon start jvm if you need it)"
+  echo "  NOTE: the jvm is NOT part of 'all' (by design — it hosts the"
+  echo "  shared nREPL 7888 that every agent's REPL/dev-hook/MCP bridge"
+  echo "  runs through; bouncing it from 'all' would sever other agents'"
+  echo "  live sessions). For a FULL restart run explicitly:"
+  echo "    bin/seon restart jvm"
 }
 
 stop_all() {
@@ -403,6 +421,9 @@ stop_all() {
   for name in $reversed; do
     cmd_stop "$name"
   done
+  echo "  NOTE: the jvm is NOT part of 'all' and was left running"
+  echo "  (by design — shared nREPL 7888; see bin/seon header)."
+  echo "  Stop it explicitly if you mean it: bin/seon stop jvm"
 }
 
 cmd_start() {
@@ -586,7 +607,11 @@ Commands:
                      `all` = cljs-watch → wire-server → pod, dependency-
                      ordered with REAL ready gates between stages (socket
                      accepting / HTTP answering / build completed).
-                     jvm is NOT in `all` — start it explicitly.
+                     jvm is NOT in `all` BY DESIGN — it hosts the shared
+                     nREPL 7888 (every agent's REPL, the dev hook, the
+                     MCP bridge); bouncing it inside `all` would sever
+                     other agents' live sessions. Manage it by name:
+                     bin/seon restart jvm. See the header comment.
   stop <name|all>    Stop a process (idempotent); `all` reverses the order
   restart <name|all> stop + start
   status [name]      Show one or all

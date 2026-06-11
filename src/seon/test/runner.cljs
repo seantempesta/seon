@@ -65,16 +65,22 @@
 
 (schema/register! ::recorded-syms [:vector :string])
 
-;; ::selector — exactly one of (::vars ::ns) for Phase 1. Future selectors
-;; (::nses ::all? ::failed-only? ::tag) added in later phases — schema
-;; only carries Phase 1 keys today to keep instrumentation honest.
+;; ::selector — "at least one of (::vars ::ns)" expressed as PURE DATA
+;; (an :or of maps — same pattern as :seon.render/ai-response; registered
+;; forms must not embed fns, the previous [:fn ...] arm couldn't survive
+;; the form round-trip). The Phase 1 EXCLUSIVITY rule (exactly one
+;; selector key) is enforced in `run!`'s body, where a violation throws
+;; a legible error envelope instead of an opaque schema failure. Future
+;; selectors (::nses ::all? ::failed-only? ::tag) added in later phases —
+;; schema only carries Phase 1 keys today to keep instrumentation honest.
 (schema/register! ::selector
-  [:and
+  [:or
    [:map
-    [::vars {:optional true} ::vars]
+    [::vars ::vars]
     [::ns   {:optional true} ::ns]]
-   [:fn {:error/message "exactly one selector key (::vars or ::ns) required"}
-    (fn [m] (= 1 (count (filter #(some? (get m %)) [::vars ::ns]))))]])
+   [:map
+    [::ns   ::ns]
+    [::vars {:optional true} ::vars]]])
 
 (schema/register! ::run-request
   [:and
@@ -670,6 +676,9 @@
    to the DB.
 
    Phase 1 selectors: exactly one of `::vars` or `::ns` must be present.
+   The schema (`::selector`) carries the pure-data \"at least one\"
+   shape; the exactly-one rule lives HERE so a violation gets a legible
+   error envelope naming both offending keys, not a schema dump.
 
    Examples:
      ;; one var
@@ -682,6 +691,12 @@
    and `::trigger` propagated through."
   {:malli/schema [:=> [:cat ::run-request] ::run-result]}
   [{::keys [record? trigger] :as req}]
+  (when (and (some? (::vars req)) (some? (::ns req)))
+    (throw (ex-info (str "Ambiguous selector — provide exactly one of "
+                         "::vars or ::ns, not both. Got ::vars "
+                         (pr-str (::vars req)) " AND ::ns "
+                         (pr-str (::ns req)) ".")
+                    {:type ::ambiguous-selector :request req})))
   (let [selected (vec (resolve-selector req))
         result   (await (run-vars {::vars selected}))
         base     (cond-> (assoc result ::selected-vars selected)

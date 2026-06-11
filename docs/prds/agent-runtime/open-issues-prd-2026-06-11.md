@@ -34,21 +34,35 @@ session's commit messages.
 | S-21 instability | zero-register! flake 1/2 — partly the warn wording, partly plan variance; 3-run probe before declaring | with P22/P9 |
 | **SOUL/system-prompt hardcoded** (user, 2026-06-11) | the SOUL-derived identity text is a compiled-in def at `seon.ai.deepseek/default-system-prompt` (deepseek.cljs:107) — uneditable without a rebuild, and identity content sits in a PROVIDER ns (placement smell: it isn't deepseek-specific). User directive: ANY user must be able to change this and control ALL content injected into context. Fix shape: load from an editable source — store entity seeded at boot from SOUL.md, same seeded+editable pattern as `my.kb.instruction` (one mechanism); the deepseek def becomes a read of it; SOUL.md the seed, the store the truth. **IMPLEMENTED 2026-06-11**: `my.soul` ns (NOT `my.kb.soul` — `my.kb` is an exemplar root, a child would double-inject the whole prompt into ctx as full-source exemplar, measured +18k chars, blew the 84k turn-0 budget). Two rows seeded at boot: `identity` (SOUL.md read at seed time) + `repl-mechanics`; seed-ONLY-if-absent so a user's transact edit survives reboot; `seon.ai.deepseek/effective-system-prompt` reads the store per call with a one-liner fallback. Tests: `my.soul-test` (seed, no-clobber, request-body reads store). PENDING: pod-level live proof — pod boot blocked by the live-tile `sci-not-available` instrumentation error (tiles unit) | unit landed, awaiting pod-boot fix for live proof |
 
-## Startup/restart reliability (user, 2026-06-11 — investigate)
+## Startup/restart reliability (user, 2026-06-11 — DONE, wave-2 unit)
 
-Observed during the 06-11 morning restart; one investigation unit:
+Observed during the 06-11 morning restart; resolved 2026-06-11:
 
-- `bin/seon restart all` excludes the JVM ("jvm not included") — a full
-  system restart is two commands; either include it or say why not.
-- The seon JVM MCP bridge caches a failed pre-flight across a JVM
-  restart and keeps reporting "server not running" after nREPL 7888 is
-  verifiably up (direct bencode clone succeeds) — requires a manual
-  `/mcp` reconnect. The CLJS bridge self-heals (b8b3400); the JVM
-  bridge should too (same fix shape: re-resolve on failure instead of
-  caching the verdict).
-- Post-start health check warns `:runtime-persisted {:instance-count
-  0}` degradation 30s after boot — likely benign before agents resume,
-  but verify and either fix the check's timing or document it.
+- `bin/seon restart all` excludes the JVM — **DECIDED: documented
+  exclusion, not inclusion.** The jvm has no dependency on the pod
+  stack (its embedded store is separate from the wire-server's cluster
+  store) but hosts the SHARED nREPL 7888 (every agent's REPL, the dev
+  hook, the MCP bridge); including it in `all` would let one agent
+  sever every other agent's live session mid-flight. `start all` /
+  `stop all` now print the rationale + the explicit command
+  (`bin/seon restart jvm`); decision documented in the script header.
+- JVM MCP bridge cached a failed pre-flight forever — **FIXED**
+  (b8b3400 shape): the background init loop is bounded (30 attempts ≈
+  2.5 min), so a JVM down longer than that wedged `ready?` false until
+  a manual `/mcp` reconnect. `execute-eval`'s not-ready guard now
+  RE-RUNS the pre-flight inline instead of throwing the cached verdict.
+  Live-proved on a sandbox server (`SEON_NREPL_PORT` testability
+  override): dead port → live error naming the port; loop exhausted
+  ("failed after 30 attempts"); port then came up (forwarder→7888);
+  next eval on the SAME server process returned the value — no
+  reconnect. Applies to newly-spawned bridge processes.
+- `:runtime-persisted {:instance-count 0}` post-start WARN — **FIXED**:
+  not "benign before agents resume" but a check for a retired feature —
+  instances register only via the pool-backed `seon.session` path and
+  the pool Integrant keys were removed 2026-06-09 (verified live: a
+  healthy 4h-uptime multi-agent JVM reads 0). `check-runtime-persisted`
+  now checks the registry is READABLE (only a throw is degradation) and
+  surfaces the count in `:details`.
 
 ## Complexity-audit register (2026-06-11, research/complexity-audit-2026-06-11.md)
 
@@ -112,7 +126,7 @@ T6/SOUL/boot-fix/gym baseline).
 | `seon.agent` ns docstring says "nine sections" (now twelve); `live-tile-section` missing from its re-export list | T5 report | V4 composer rewrite (the section list changes anyway) |
 | duplicated latest-inbound datalog: `replied-since-inbound?` (agent.cljs) ↔ `turns-since-inbound` (ctx.cljs) | P21 report (ctx was fenced) | P6 split: shared `latest-inbound-at` |
 | hardcoded line-number citations in context exemplars drift on every edit above them | P22 report (already repointed once) | derived citations from analyzer `:seon.fn` line info (reactive-context) |
-| `seon.test.runner/::selector` uses `[:fn]` for "exactly one of" — pure-data law violation; exclusivity not directly expressible as data | boot-fix report; non-crashing | design call: move the check into `run!`'s body |
+| `seon.test.runner/::selector` uses `[:fn]` for "exactly one of" — pure-data law violation; exclusivity not directly expressible as data — **FIXED 2026-06-11 (wave-2 unit)**: `::selector` is now the pure-data "at least one" :or-of-maps shape (same pattern as `:seon.render/ai-response`); the exactly-one rule moved into `run!`'s body throwing a legible `::ambiguous-selector` envelope naming both keys; pinned by `run!-rejects-ambiguous-selector-with-legible-envelope`; live-proved on the pod (ambiguous → envelope, valid call unchanged 1/1/0/0) | boot-fix report; non-crashing | done |
 | JVM-side `[:fn]` registrations (`seon/server/registry.clj:59,98`, `seon/dev/*.clj`) — law violations if those forms ever round-trip | boot-fix report | JVM sweep, post-demo |
 | minute-resolution todo ages (`todo.cljs:115`) + 1h rolling warnings cutoff (`warn.cljs:717`) bust the provider cache prefix at every minute/hour boundary | gym U3 report | V4 composer rewrite (both sections land in the volatile tail anyway — verify placement solves it) |
 | `my.soul` references `:my.kb/*` provenance attrs from outside the my.kb family | SOUL report | decide: provenance shapes to a neutral ns, or bless cross-family reference |

@@ -221,15 +221,25 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- check-runtime-persisted
-  "Check that runtime instances are registered in memory."
+  "Check that the runtime instance registry is READABLE — not that it
+   is populated.
+
+   An empty registry is the normal steady state: instances are only
+   registered by external agent sessions (seon.session/start-session!,
+   behind `when pool`), and the pool Integrant keys were removed
+   2026-06-09 — verified live 2026-06-11: a healthy multi-agent JVM at
+   4h uptime reports instance-count 0. The old `(pos? count)` condition
+   therefore warned `:runtime-persisted {:instance-count 0}` on EVERY
+   post-start check (30s/60s after boot) — pure noise. Only a registry
+   we cannot read (require/resolve/call throws) is degradation; the
+   count is surfaced in :details for observability."
   []
   (try
     (require 'seon.runtime)
     (let [instances-fn (resolve 'seon.runtime/instances)
-          instances (instances-fn {})
-          count-instances (count instances)]
-      {:ok (pos? count-instances)
-       :details {:instance-count count-instances}})
+          instances (instances-fn {})]
+      {:ok true
+       :details {:instance-count (count instances)}})
     (catch Exception e
       {:ok false
        :error (.getMessage e)})))

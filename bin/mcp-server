@@ -25,7 +25,11 @@
 ;;; Configuration
 ;;; ---------------------------------------------------------------------------
 
-(def orchestrator-port 7888)
+;; SEON_NREPL_PORT override exists for harness testing of the pre-flight
+;; self-heal (point a sandbox server at a controllable port without
+;; touching the shared 7888 JVM). Production config never sets it.
+(def orchestrator-port
+  (or (some-> (System/getenv "SEON_NREPL_PORT") parse-long) 7888))
 
 ;; SEON_SESSION_ID env var enforces session isolation for agents.
 ;; When set, this MCP server only allows evals to that session (not orchestrator).
@@ -607,6 +611,10 @@ You must then either:
            (str "\n;; ns: " ns))
          no-renderer-hint)))
 
+;; Defined in the Server Init section below; execute-eval's not-ready
+;; guard re-runs it inline so a failed pre-flight is never cached.
+(declare init-orchestrator-session!)
+
 (defn execute-eval
   "Execute the eval tool. Returns MCP result format.
 
@@ -649,11 +657,18 @@ You must then either:
                "per-eval?:" per-eval-route? ")"
                "timeout:" timeout_ms)
 
-    ;; Guard: if orchestrator init hasn't completed yet, surface the actual
-    ;; pre-flight error if we have one, otherwise a generic "still
-    ;; initializing" message.
+    ;; Guard: never serve a CACHED failed pre-flight verdict (the b8b3400
+    ;; fix shape: re-resolve on failure). The background init loop is
+    ;; bounded (30 attempts ≈ 2.5 min); if the JVM was down longer than
+    ;; that and came back later, `orchestrator-init-ready?` used to stay
+    ;; false FOREVER and every eval threw the stale "cannot connect"
+    ;; error until a manual /mcp reconnect (observed live 2026-06-11).
+    ;; Now: not-ready → re-run the pre-flight inline; a JVM that has
+    ;; since come up flips ready? true and the eval proceeds. Only a
+    ;; LIVE failure throws, carrying the FRESH error text.
     (when (and per-eval-route?
-               (not @orchestrator-init-ready?))
+               (not @orchestrator-init-ready?)
+               (not (init-orchestrator-session!)))
       (throw (ex-info (or @preflight-error
                           "Seon server is still initializing, please retry in a few seconds")
                       {:initializing true
@@ -1253,7 +1268,9 @@ You must then either:
               (log-info "Orchestrator not ready, retry" attempt "in" delay-ms "ms...")
               (Thread/sleep delay-ms)
               (recur (inc attempt) (min 5000 (* delay-ms 2))))
-            (log-error "Orchestrator init failed after 30 attempts — eval will not work"))))
+            (log-error (str "Orchestrator init failed after 30 attempts — "
+                            "evals will re-run the pre-flight on demand "
+                            "and succeed once the JVM is reachable")))))
       (catch Exception e
         (log-error "Background init failed:" (.getMessage e)))))
 
