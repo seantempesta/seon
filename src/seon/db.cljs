@@ -734,38 +734,41 @@
 ;; Store inventory — what's in the shared store, one query away.
 ;; ---------------------------------------------------------------------------
 
-(schema/register! ::kind    :keyword)
-(schema/register! ::id-attr :keyword)
-(schema/register! ::rows    :int)
+(schema/register! ::kind  :keyword)
+(schema/register! ::attrs [:map-of :keyword :int])
 (schema/register! ::inventory-row
   [:map
-   [::kind    ::kind]
-   [::id-attr ::id-attr]
-   [::rows    ::rows]])
+   [::kind  ::kind]
+   [::attrs ::attrs]])
 
 (defn store-inventory
-  "What the shared store holds RIGHT NOW — one row per entity KIND:
-   the kind (the id-attr's keyword namespace), its identity attribute,
-   and a live row count. Derived entirely from the db (the installed
-   schema's `:db.unique/identity` attrs + one count per kind), so a
-   kind appears here the moment its first row lands and the counts are
-   as-of the db you pass. Re-run it whenever you want fresh numbers —
-   this is an ordinary query, not a snapshot.
+  "What the shared store holds RIGHT NOW — one row per attribute
+   NAMESPACE (the kind), carrying every attr of that namespace that
+   has at least one live row, with its entity count. Derived entirely
+   from the datoms in the db you pass: an attr appears the moment its
+   first row lands, and an attr whose rows are all retracted simply
+   vanishes from the next run. Attrs that are only registered in code
+   (no data yet) do NOT show — registration is readable in the
+   rendered namespace sources; this surface is existence + sparsity.
+   Re-run it whenever you want fresh numbers — this is an ordinary
+   query, not a snapshot.
 
    Check this BEFORE researching or registering anything new: a kind
-   that already exists means prior agents stored knowledge you can
-   query (datalog its id-attr's namespace), and a shape that already
-   exists must be REUSED, never forked in parallel.
+   that already exists means prior agents stored data you can query
+   (datalog the listed attrs directly — the attr names here are the
+   exact keywords to put in your :where clauses), and a shape that
+   already exists must be REUSED, never forked in parallel.
 
    ;; what's already here?
    (seon.db/store-inventory)
    ;; => [{:seon.db/kind :my.kb.codebase
-   ;;      :seon.db/id-attr :my.kb.codebase/question
-   ;;      :seon.db/rows 14}
-   ;;     {:seon.db/kind :seon.agent  …}
+   ;;      :seon.db/attrs {:my.kb.codebase/answer 14
+   ;;                      :my.kb.codebase/question 14}}
+   ;;     {:seon.db/kind :seon.workout
+   ;;      :seon.db/attrs {:seon.workout/date 3, :seon.workout/type 3}}
    ;;     …]
 
-   ;; then read a kind's rows, e.g.:
+   ;; then read a kind's rows with the attrs it lists, e.g.:
    (seon.db/query {:seon.db/query
                    '[:find ?q :where [?e :my.kb.codebase/question ?q]]})"
   {:malli/schema
@@ -776,16 +779,18 @@
          [:vector ::inventory-row]]]}
   ([] (store-inventory {}))
   ([{::keys [db conn] :or {conn *conn*}}]
-   (let [db (or db @(internal/resolve-conn conn))]
-     (->> (installed-schema db)
-          (keep (fn [[attr props]]
-                  (when (and (= :db.unique/identity (:db/unique props))
-                             (not (system-pull-attr? attr)))
-                    attr)))
-          (sort-by str)
-          (mapv (fn [attr]
-                  {::kind    (keyword (namespace attr))
-                   ::id-attr attr
-                   ::rows    (count (query [:find '?e
-                                            :where ['?e attr '_]]
-                                           db))}))))))
+   (let [db    (or db @(internal/resolve-conn conn))
+         ;; distinct [entity attr] pairs — datalog results are sets, so
+         ;; cardinality-many attrs count each entity once.
+         pairs (query {::db db ::query '[:find ?e ?a :where [?e ?a _]]})
+         counts (reduce (fn [m [_ a]]
+                          (if (or (system-pull-attr? a) (nil? (namespace a)))
+                            m
+                            (update m a (fnil inc 0))))
+                        {} pairs)]
+     (->> counts
+          (group-by (fn [[a _]] (keyword (namespace a))))
+          (sort-by (comp str key))
+          (mapv (fn [[ns-kw attr-counts]]
+                  {::kind  ns-kw
+                   ::attrs (into (sorted-map) attr-counts)}))))))

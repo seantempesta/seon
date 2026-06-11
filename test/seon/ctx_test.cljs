@@ -67,14 +67,14 @@
     (is (true? (ctx/hidden-ns-name? n)) (str n " is hidden")))
   ;; 2-arity: a configured downstream prefix includes its root + children;
   ;; the *.internal exclusion is STRUCTURAL — it applies to every prefix.
-  (is (true? (ctx/included-ns? "aria.core" ["seon." "my." "aria."])))
-  (is (true? (ctx/included-ns? "aria" ["aria."]))
+  (is (true? (ctx/included-ns? "acme.core" ["seon." "my." "acme."])))
+  (is (true? (ctx/included-ns? "acme" ["acme."]))
       "a prefix includes its bare root ns")
-  (is (false? (ctx/included-ns? "aria.core" ["seon." "my."]))
+  (is (false? (ctx/included-ns? "acme.core" ["seon." "my."]))
       "unconfigured prefix is NOT included")
-  (is (false? (ctx/included-ns? "aria.core.internal" ["aria."]))
+  (is (false? (ctx/included-ns? "acme.core.internal" ["acme."]))
       "*.internal exclusion applies to configured prefixes too")
-  (is (false? (ctx/included-ns? "ariane.core" ["aria."]))
+  (is (false? (ctx/included-ns? "acmene.core" ["acme."]))
       "prefix matches on segment boundary, not substring")
   ;; full-source depth: my.* by RULE + the seon exemplar roots +
   ;; children + test siblings; big unsplit substrate stays shallow.
@@ -167,7 +167,7 @@
   (async done
     (-> (with-conn
           (fn [_conn]
-            (-> (transact-ns-row! "aria.core")
+            (-> (transact-ns-row! "acme.core")
                 (.then (fn [_] (transact-ns-row! "seon.client")))
                 (.then
                   (fn [_]
@@ -176,7 +176,7 @@
                         "no config row → built-in defaults")
                     (is (not (str/includes?
                                (ctx/namespaces-section {:seon.db/db @db/*conn*})
-                               "aria.core"))
+                               "acme.core"))
                         "unconfigured downstream prefix does not render")))
                 ;; the seed row (what ensure-ctx-config! transacts) …
                 (.then (fn [_]
@@ -192,32 +192,32 @@
                          (db/transact!
                            {:seon.db/tx-data
                             [{:seon.ctx/config-id "substrate"
-                              :seon.ctx/included-prefixes ["aria."]}]})))
+                              :seon.ctx/included-prefixes ["acme."]}]})))
                 (.then
                   (fn [_]
                     (let [txt (ctx/namespaces-section {:seon.db/db @db/*conn*})]
-                      (is (str/includes? txt "<namespace name=\"aria.core\">")
+                      (is (str/includes? txt "<namespace name=\"acme.core\">")
                           "ONE transact → downstream ns renders as a tag")
                       (is (str/includes? txt "<namespace name=\"seon.client\">")
                           "defaults still render alongside"))))
                 ;; the *.internal exclusion stays structural.
-                (.then (fn [_] (transact-ns-row! "aria.core.internal")))
+                (.then (fn [_] (transact-ns-row! "acme.core.internal")))
                 (.then
                   (fn [_]
                     (is (not (str/includes?
                                (ctx/namespaces-section {:seon.db/db @db/*conn*})
-                               "aria.core.internal"))
+                               "acme.core.internal"))
                         "*.internal never renders, configured prefix or not")))
                 ;; retract → gone next render.
                 (.then (fn [_]
                          (db/transact!
                            {:seon.db/tx-data
                             [[:db/retract ctx/config-ref
-                              :seon.ctx/included-prefixes "aria."]]})))
+                              :seon.ctx/included-prefixes "acme."]]})))
                 (.then
                   (fn [_]
                     (let [txt (ctx/namespaces-section {:seon.db/db @db/*conn*})]
-                      (is (not (str/includes? txt "aria.core"))
+                      (is (not (str/includes? txt "acme.core"))
                           "retracted prefix → tag gone next render")
                       (is (str/includes? txt "<namespace name=\"seon.client\">")
                           "defaults unaffected by the retract")))))))

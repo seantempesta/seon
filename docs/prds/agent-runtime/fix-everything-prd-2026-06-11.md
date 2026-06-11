@@ -21,8 +21,8 @@ they prove):
   ranked system findings and the scenario × sweep scorecard (S-21 0/3,
   s32 consult-first red 3/3, s12 variance).
 - [[open-issues-prd-2026-06-11]] — the register of record; its rows
-  route HERE for everything sweep-derived, plus the aria asks 7–13
-  (`orchestro.ai/repos/aria/docs/2026-06-11-seon-asks.md`, read-only).
+  route HERE for everything sweep-derived, plus the downstream asks 7–13
+  (filed externally, read-only).
 
 **INTEGRITY RULE (standing, user):** every fix below is a GENERAL
 mechanism. No scenario-specific fixes anywhere — nothing in this PRD
@@ -118,7 +118,7 @@ Data the agent retrieved (or could have) was lost in presentation:
   sample.
 - **LOUD truncation on every clipped display**: "⚠ TRUNCATED at 2KB of
   41KB — the live value is complete; bind and process with code."
-  Today's quiet clip invited a live aria fabrication incident (ask
+  Today's quiet clip invited a live downstream fabrication incident (ask
   10a: the agent summarized a clipped read, invented the unseen
   remainder, stored it `:verified` — its own post-mortem: "I answered
   from a clipped display without drilling into the full value").
@@ -127,7 +127,7 @@ Data the agent retrieved (or could have) was lost in presentation:
   first-class instead of clip-and-guess.
 
 Routes here: blind-spot rows 2, 3, 10; sweep f1, f4 (the salience
-half — richer inventory rows ARE the escalation f4 named); aria asks
+half — richer inventory rows ARE the escalation f4 named); downstream asks
 10a/10b.
 
 ### ROOT 3 — "The eval contract lets falsehoods through"
@@ -143,7 +143,7 @@ The response→eval→reply pipeline manufactures false transcript truth:
   self-evaluating map shape-matching `{:seon.*/ok? …}` — gets
   evaluated and becomes a real `my.agent.X=> {…}` transcript line,
   indistinguishable from a real read; subsequent turns answer from the
-  fake (aria ask 13, the self-poisoning incident). One mechanism:
+  fake (downstream ask 13, the self-poisoning incident). One mechanism:
   non-form segments (anything that isn't a deliberate operator-bearing
   form, including standalone literals and `…=>` echo mimicry) are
   discarded as narration, never evaluated.
@@ -171,14 +171,14 @@ The response→eval→reply pipeline manufactures false transcript truth:
   refuses (the executable-teachings harness will pin this once fixed).
 
 Routes here: blind-spot rows 4, 8, 12 (lookup-failure legibility rides
-the Wave A wire unit); sweep f2 (runtime half), f3; aria ask 13.
+the Wave A wire unit); sweep f2 (runtime half), f3; downstream ask 13.
 
 ### ROOT 4 — "Degrade, don't break"
 
 Single-point failures that take down the human's view or the agent's
 session instead of degrading:
 
-- **Tile hiccup-serialization guard** (aria asks 9 + 12): an agent's
+- **Tile hiccup-serialization guard** (downstream asks 9 + 12): an agent's
   malformed tile hiccup throws at serialization time and 500s the
   whole `/agent/<id>` page — the human loses the chat AND the agent
   can't be told visually; during boot replay a mid-replay stale tile
@@ -207,7 +207,7 @@ session instead of degrading:
   (it's a genuine uniformity canary); warnings surface only
   agent-actionable items.
 
-Routes here: blind-spot #11; aria asks 7, 8, 9, 12 (11 = DONE
+Routes here: blind-spot #11; downstream asks 7, 8, 9, 12 (11 = DONE
 500486a — boot-fatal tempid collision, entity-schema tempids carry the
 full keyword).
 
@@ -283,12 +283,12 @@ Scope: top-level bare literals and prose segments are narration —
 discarded, never evaluated; anything that fails a read is discarded
 rather than fragment-evaluated; standalone self-evaluating literals
 that shape-match result envelopes (map with `:seon.*/ok?`, no operator
-position) are rejected loudly (aria 13a); `…=>` transcript-echo
+position) are rejected loudly (downstream 13a); `…=>` transcript-echo
 mimicry is rejected. Deliberate forms (operator-position lists, defs,
 ns forms) evaluate exactly as today.
 Falsifications: (1) replay the actual mangled completions from the
 sweep logs (`24`, `", felt good…"`, the echoed result maps, the fake
-`my.agent.RnA-…=>` line, aria's fabricated fs envelope) → ZERO evals
+`my.agent.RnA-…=>` line, downstream's fabricated fs envelope) → ZERO evals
 produced; (2) a normal multi-form batch from a green run parses
 identically to today; (3) the fabricated-envelope case leaves NO
 `…=>` transcript line.
@@ -308,6 +308,27 @@ attrs + counts; (2) ordering is stable across runs (no hash order);
 (3) kinds with identity attrs render with the same information they
 do today (no regression in the existing rows' content).
 Fence: none beyond standing.
+**LANDED 2026-06-11** (run as the "discoverability trio": A3 +
+the ctx half of A4 + the sourceless-tee reconstitution from sweep
+finding 1). Shipped: per-attr-count inventory (datom-derived, count>0
+only, sorted, no carve-outs — `:seon.workout/*` visible by
+construction); LOUD ⚠ TRUNCATED markers on `cap-result` /
+`cap-result-body` / `truncate-edn` (shown-of-full chars + "live value
+is COMPLETE; bind and process with code"); `namespaces-section` no
+longer requires `:seon.ns/source` (sourceless tee rows reconstitute
+from member rows, ns form synthesized) and bare/seed stubs
+SELF-DESCRIBE ("stub — source not indexed") with a working
+member-query example in the header (replacing the dead `reply!` pull
+example). Live proofs: identity-less kind appears/vanishes with its
+datoms; `:seon.workout` register! calls render reconstituted on a
+boot-seeded scratch conn; clipped eval rows carry the marker with
+real numbers. Suite 409/1855/1 — the one red is
+`test/seon/gym/driver_test.cljs:197` pinning
+`(contains? kinds :seon.agent)` on a seeded world with no
+`:seon.agent` datoms (a pin on the OLD identity-derived semantics;
+gym fence owns the fix — assert `:seon.workout` presence instead,
+which is the actual S-21 reuse surface and now passes). A4's
+`eval.cljs` row-cap message + sorted clipped-seq windows remain open.
 
 **A4 — LOUD truncation + deterministic ordering on clipped displays.**
 Files (≤7): `src/seon/ctx.cljs` (clip helpers ~371–392),
@@ -403,7 +424,7 @@ after restart-resume.
 
 In board order, each its own small unit unless noted:
 
-1. **Tile hiccup-serialization guard** (aria 9+12) — banner fallback +
+1. **Tile hiccup-serialization guard** (downstream 9+12) — banner fallback +
    last-good tile; covers mid-replay renders. FENCED: `live_tile` /
    `inspector` belong to the CSS agent — launch after it lands.
 2. **Agent lifecycle UX** — board #14 spec (task board carries the

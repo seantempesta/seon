@@ -401,23 +401,61 @@
   (and (keyword? k)
        (= "db" (namespace k))))
 
+(declare ref-attr-arity)
+
+(defn ref-slot?
+  "True when `k` is a registered non-system attr whose Malli schema
+   describes a ref slot (single or many — see [[ref-attr-arity]]).
+   The tx-data walkers ([[extract-tx-attrs]],
+   [[normalize-entity-ref-keys]]) recurse ONLY into ref-slot values:
+   nested entity maps legally appear only under ref attrs, and maps
+   under non-ref attrs (e.g. hiccup attribute maps inside the
+   EDN-encoded render slots) must NOT be mistaken for entities."
+  [k]
+  (and (keyword? k)
+       (not (system-attr? k))
+       (schema/registered? k)
+       (some? (ref-attr-arity (schema/schema-definition k)))))
+
 (defn extract-tx-attrs
-  "Walk tx-data and collect every attribute keyword that appears. Handles
-   both entity-map forms (`{:attr v ...}`) and vector tuple forms
-   (`[:db/add e a v]`, `[:db/retract e a v]`). Tempids and metadata not
-   keyed by a true attribute are filtered out."
+  "Walk tx-data and collect every attribute keyword that appears,
+   INCLUDING attrs that only occur in NESTED entity maps (datahike's
+   nested-map shorthand under ref attrs) — those reach the store too,
+   so the runtime auto-installer ([[ensure-datahike-attrs!]]) must see
+   them; collecting only top-level keys made register!-then-transact of
+   a nested-only attr die on datahike's \"not defined in current
+   schema\" (fix-everything A1, 2026-06-11). Handles entity-map forms
+   (`{:attr v ...}`, recursing into [[ref-slot?]] values) and vector
+   tuple forms (`[:db/add e a v]`, `[:db/retract e a v]`). Tempids and
+   metadata not keyed by a true attribute are filtered out (lookup-ref
+   tuples are walked but contribute no keys — only entity-map KEYS are
+   collected)."
   [tx-data]
-  (into #{}
-        (mapcat (fn [datum]
-                  (cond
-                    (map? datum)
-                    (keys datum)
+  (letfn [(collect-entity [acc ent]
+            (reduce-kv
+              (fn [acc k v]
+                (cond-> (conj acc k)
+                  (ref-slot? k) (collect-ref-value v)))
+              acc ent))
+          (collect-ref-value [acc v]
+            (cond
+              (map? v)        (collect-entity acc v)
+              (sequential? v) (reduce collect-ref-value acc v)
+              :else           acc))]
+    (reduce (fn [acc datum]
+              (cond
+                (map? datum)
+                (collect-entity acc datum)
 
-                    (and (vector? datum) (>= (count datum) 3))
-                    [(nth datum 2)]
+                (and (vector? datum) (>= (count datum) 3))
+                (let [a   (nth datum 2)
+                      acc (conj acc a)]
+                  (cond-> acc
+                    (ref-slot? a) (collect-ref-value (nth datum 3 nil))))
 
-                    :else nil)))
-        tx-data))
+                :else acc))
+            #{}
+            tx-data)))
 
 (defn validate-attrs!
   "Ensure every non-`:db/*` attribute appearing in `tx-data` is registered
@@ -443,6 +481,84 @@
     (if (> (count s) 100)
       (str (subs s 0 97) "...")
       s)))
+
+(defn normalize-entity-ref-keys
+  "Rewrite the taught entity-identity shorthand — an entity map keyed by
+   `:seon.db/ref` (`{:seon.db/ref [:seon.agent/id \"…\"] :attr v}`, the
+   <your-entity> transact pattern) — into datahike's native `:db/id`
+   slot, recursively through nested entity maps and tx vectors.
+
+   WHY (fix-everything A1, 2026-06-11): `:seon.db/ref` is a registered
+   Malli SHAPE, not an installed datahike attribute. Left in the entity
+   map it reaches the store as a junk attr — the wire store rejects the
+   whole tx (\"Bad entity attribute :seon.db/ref …\"), and a conn that
+   somehow had it installed would silently assert a junk datom on a
+   junk entity. Datahike already resolves eids / tempids / lookup-refs
+   natively in the `:db/id` slot, so the normalizer's whole job is the
+   rename + DISSOC of `:seon.db/ref`.
+
+   Throws `:user-input` ex-info (converted to the failure envelope by
+   `transact!*`'s catch) when the ref value isn't a valid
+   `:seon.db/ref` shape, or when the map carries BOTH `:db/id` and a
+   conflicting `:seon.db/ref`."
+  [tx-data]
+  (letfn [(norm-entity [x]
+            ;; Recurse ONLY into ref-slot values (see [[ref-slot?]]) —
+            ;; maps under non-ref attrs (e.g. hiccup attribute maps in
+            ;; the EDN-encoded render slots) are opaque VALUES, not
+            ;; entities.
+            (let [ent (reduce-kv (fn [acc k v]
+                                   (assoc acc k (if (ref-slot? k)
+                                                  (norm-ref-value v)
+                                                  v)))
+                                 {} x)]
+              (if-not (contains? ent ::db/ref)
+                ent
+                (let [r (get ent ::db/ref)]
+                  (when-not (m/validate :seon.db/ref r)
+                    (throw (ex-info
+                             (str "seon.db/transact!: `:seon.db/ref` names "
+                                  "the entity a map transacts ONTO — its "
+                                  "value must be an eid, a string tempid, "
+                                  "or a lookup-ref like [:seon.agent/id "
+                                  "\"…\"]. Got: " (truncate-value r))
+                             {::db/error             :seon.db/invalid-value
+                              ::db/attr              ::db/ref
+                              ::db/actual-value      r
+                              ::db/malli-explanation (m/explain :seon.db/ref r)
+                              :seon.error/kind       :user-input})))
+                  (when (and (contains? ent :db/id)
+                             (not= (:db/id ent) r))
+                    (throw (ex-info
+                             (str "seon.db/transact!: entity map carries "
+                                  "BOTH :db/id " (truncate-value (:db/id ent))
+                                  " and :seon.db/ref " (truncate-value r)
+                                  " — they name different entities. Keep "
+                                  "exactly one.")
+                             {::db/error        :seon.db/conflicting-entity-refs
+                              ::db/actual-value {:db/id  (:db/id ent)
+                                                 ::db/ref r}
+                              :seon.error/kind  :user-input})))
+                  (-> ent (dissoc ::db/ref) (assoc :db/id r))))))
+          (norm-ref-value [v]
+            (cond
+              (map? v)        (norm-entity v)
+              (sequential? v) (mapv norm-ref-value v)
+              :else           v))]
+    (mapv (fn [datum]
+            (cond
+              (map? datum)
+              (norm-entity datum)
+
+              ;; `[:db/add e a v]` — normalize a nested entity map in
+              ;; the value slot when `a` is a ref slot.
+              (and (vector? datum)
+                   (>= (count datum) 4)
+                   (ref-slot? (nth datum 2)))
+              (update datum 3 norm-ref-value)
+
+              :else datum))
+          tx-data)))
 
 (defn ref-attr-arity
   "If the attr's resolved Malli schema describes a ref slot, returns
@@ -632,6 +748,13 @@
       ;; the guard name the missing key / unqualified-key hint.
       (and (= 1 (count args)) (map? a0))
       a0
+
+      ;; 1-arg tx-data shape: `(transact! [{…} …])` — the taught
+      ;; <your-entity> form. The conn defaults to `*conn*` at the face.
+      ;; Unambiguous: tx-data is sequential, a conn is a non-map IDeref,
+      ;; a request map is `map?` — no shape collides.
+      (and (= 1 (count args)) (sequential? a0))
+      {::db/tx-data a0}
 
       ;; Positional: first arg must be a conn.
       (not (conn? a0))
@@ -961,6 +1084,11 @@
   (try
     (let [{::db/keys [tx-data opts conn]} arg
           c           (resolve-conn conn)
+          ;; The taught `{:seon.db/ref <eid|lookup-ref> …}` entity-key
+          ;; shorthand becomes datahike's native `:db/id` slot HERE, so
+          ;; `:seon.db/ref` never reaches the store as a junk attr
+          ;; (throws :user-input on a malformed ref value — caught below).
+          tx-data     (normalize-entity-ref-keys tx-data)
           attrs       (extract-tx-attrs tx-data)
           merged-opts (warn-on-seed-origin-forge!
                         (merge-tx-context-into-opts opts))]

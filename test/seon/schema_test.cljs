@@ -79,7 +79,7 @@
                :schematest.entity))
 
 (deftest entity-schema-tempids-carry-the-full-keyword
-  ;; aria boot-fatal repro 2026-06-11: two kinds sharing a NAME segment
+  ;; downstream boot-fatal repro 2026-06-11: two kinds sharing a NAME segment
   ;; (:a.b/person + :c.d/person) collided on the tempid "schema-person"
   ;; in one seed tx → :transact/upsert conflict → pod exit, no resume.
   ;; Tempids must carry the FULL keyword; they are tx-local and never

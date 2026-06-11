@@ -154,11 +154,11 @@
 ;;
 ;;   (seon.db/transact!
 ;;     {:seon.db/tx-data [{:seon.ctx/config-id "substrate"
-;;                         :seon.ctx/included-prefixes ["aria."]}]})
+;;                         :seon.ctx/included-prefixes ["acme."]}]})
 ;;
-;; and its `aria.*` namespaces render as `<namespace>` tags for every
+;; and its `acme.*` namespaces render as `<namespace>` tags for every
 ;; agent on the next render; `[:db/retract <eid>
-;; :seon.ctx/included-prefixes "aria."]` removes it again
+;; :seon.ctx/included-prefixes "acme."]` removes it again
 ;; (cardinality-many — adds accumulate, never clobber the defaults).
 ;; The `*.internal` exclusion stays STRUCTURAL: it applies to every
 ;; prefix, configured or default.
@@ -204,8 +204,8 @@
         vec)))
 
 (defn- prefix-included?
-  "True when ns string `s` falls under config prefix `p`: `\"aria.\"`
-   matches the bare root `aria` and every `aria.*` child (the same
+  "True when ns string `s` falls under config prefix `p`: `\"acme.\"`
+   matches the bare root `acme` and every `acme.*` child (the same
    root-or-child rule the hardwired seon/my checks used)."
   [s p]
   (let [root (if (str/ends-with? p ".") (subs p 0 (dec (count p))) p)]
@@ -296,9 +296,12 @@
    not full content)."
   ([v] (truncate-edn v 2048))
   ([v limit]
-   (let [s (pr-str v)]
-     (if (> (count s) limit)
-       (str (subs s 0 (max 0 (- limit 4))) " ...")
+   (let [s (pr-str v)
+         n (count s)]
+     (if (> n limit)
+       (str (subs s 0 limit)
+            " …⟨⚠ TRUNCATED at " limit " of " n " chars — display clip, "
+            "the underlying value is complete⟩")
        s))))
 
 (defn message-label
@@ -335,15 +338,21 @@
 
 (defn cap-result
   "Truncate a rendered eval-result string to `eval-render-cap`,
-   appending an elision marker reporting how many chars were dropped.
-   Operates on the ALREADY-stringified result (`:seon.eval/result-edn`
-   is a pr-str string), so no re-quoting. Nil-safe."
+   appending a LOUD truncation marker (shown of full chars) so a
+   clipped display can never pass for complete content — the observed
+   failure mode is an agent summarizing INVENTED content from a
+   silently-clipped render. Operates on the ALREADY-stringified result
+   (`:seon.eval/result-edn` is a pr-str string), so no re-quoting.
+   Nil-safe."
   ([s] (cap-result s eval-render-cap))
   ([s limit]
    (let [s (str s)
          n (count s)]
      (if (> n limit)
-       (str (subs s 0 limit) " …⟨" (- n limit) " chars elided⟩")
+       (str (subs s 0 limit)
+            " …⟨⚠ TRUNCATED at " limit " of " n " chars — the DISPLAY is "
+            "clipped, the underlying data is complete; do not summarize "
+            "or quote beyond what is shown⟩")
        s))))
 
 (def message-render-cap
@@ -389,10 +398,13 @@
      (if (> n limit)
        (let [ref (if eid (str "(result :" eid ")") "(result :<id>)")]
          (str (subs s 0 limit)
-              " …⟨" (- n limit) " chars clipped at " limit "⟩"
-              "\n;; Narrow it: add a :find aggregate or limit, a tighter "
-              ":where, or pull fewer attrs; " ref " holds the full value "
-              "to drill with get-in/filter."))
+              " …⟨⚠ TRUNCATED at " limit " of " n " chars — the DISPLAY "
+              "is clipped, the live value is COMPLETE⟩"
+              "\n;; Never summarize or quote beyond the shown " limit
+              " chars — bind and process the value with code: " ref
+              " holds it whole; (count " ref "), subs, get-in/filter, or "
+              "paged take/drop. To get less next time: a :find aggregate, "
+              "a tighter :where, or pull fewer attrs."))
        s))))
 
 (defn- format-eval-row
@@ -761,15 +773,18 @@
 ;;
 ;; The section NEVER re-reads files at render time (code-as-data): the
 ;; boot indexer (`seon.client/ns-row`) is the ONE file-reader; this
-;; section renders the persisted `:seon.ns/source` datoms. Three
-;; depths, one render rule per row:
+;; section renders EVERY `:seon.ns/name` row — including SOURCELESS
+;; rows (the tee's nested `{:seon.ns/name kw}` upsert mints those for
+;; a prior agent's register!/defines). Three depths, one render rule
+;; per row:
 ;;   - real file text persisted (full-source-ns?)   → rendered whole;
-;;   - `(ns x)` stub but the ns OWNS member rows    → reconstituted
+;;   - stub/sourceless but the ns OWNS member rows  → reconstituted
 ;;     from the program graph (ns form + each :seon.fn/:seon.schema/
 ;;     :seon.test source, tx-ordered) — agent-authored nses render as
 ;;     the real code they are, exactly what bulk-load resume replays;
-;;   - bare stub, no members                        → the stub line
-;;     alone (existence; the body is compiled substrate).
+;;   - bare stub, no members (or seed provenance)   → the stub line
+;;     with a SELF-DESCRIBING "source not indexed" marker (a bare
+;;     stub has baited a fabricated quotation before).
 ;; ============================================================
 
 (defn- ns-stub?
@@ -781,10 +796,14 @@
 
 (defn- reconstituted-ns-source
   "Rebuild an ns's source text from the program graph: the `(ns …)`
-   form (the stored stub) followed by every owned `:seon.fn` /
+   form (the stored stub — SYNTHESIZED by the caller when the ns row
+   is sourceless, the tee's nested `{:seon.ns/name kw}` upsert mints
+   exactly such rows) followed by every owned `:seon.fn` /
    `:seon.schema` / `:seon.test` source in tx order — the same
    reconstruction bulk-load resume evals (code-as-data: one mechanism,
-   two readers). Returns nil when the ns owns no member rows."
+   two readers). A batch eval tees the SAME source string onto every
+   member it defined, so member sources dedupe (first tx wins).
+   Returns nil when the ns owns no member rows."
   [db ns-kw stub]
   (let [member-rows
         (fn [src-attr ns-attr]
@@ -801,14 +820,23 @@
     (when (seq rows)
       (str/join "\n\n"
         (cons (str/trim stub)
-              (->> rows (sort-by second) (map (comp str/trim first))))))))
+              (->> rows
+                   (sort-by second)
+                   (map (comp str/trim first))
+                   (distinct)))))))
 
 (def ^:private namespaces-header
   (str ";; Real loaded code, most-recently-modified LAST. Namespaces showing\n"
-       ";; only their (ns …) form are compiled substrate — their fns are\n"
-       ";; :seon.fn rows in the store, e.g.:\n"
-       ";;   (seon.db/pull {:seon.db/pull-pattern '[:seon.fn/sym :seon.fn/doc :seon.fn/source]\n"
-       ";;                  :seon.db/ref [:seon.fn/sym \"seon.agent/reply!\"]})"))
+       ";; only their (ns …) form are STUBS: their source is NOT in this\n"
+       ";; prompt — never quote or summarize a stub's contents from memory.\n"
+       ";; A stub's members are rows in the store; read them, e.g.:\n"
+       ";;   (seon.db/query {:seon.db/query '[:find ?sym ?src :where\n"
+       ";;                                    [?n :seon.ns/name :seon.warn]\n"
+       ";;                                    [?f :seon.fn/ns ?n]\n"
+       ";;                                    [?f :seon.fn/sym ?sym]\n"
+       ";;                                    [?f :seon.fn/source ?src]]})\n"
+       ";; (an empty result means the ns owns :seon.schema/:seon.test rows\n"
+       ";;  instead — query :seon.schema/ns / :seon.test/ns the same way)"))
 
 (defn namespaces-section
   "One `<namespace name=\"…\">` tag per included ns ([[included-ns?]] —
@@ -840,22 +868,47 @@
         ;; The configured prefix set, computed ONCE per render from the
         ;; SAME db snapshot every row is filtered against.
         prefixes (included-prefixes db)
+        ;; EVERY ns row, sourced or not — the tee's nested
+        ;; `{:seon.ns/name kw}` upsert mints SOURCELESS rows (a prior
+        ;; agent's register!/defines), and requiring `:seon.ns/source`
+        ;; in the join silently dropped them from the prompt (the S-21
+        ;; killer: the agent could not see :seon.workout anywhere).
+        ;; Sources joined separately and looked up in code.
+        sources (into {}
+                      (db/query
+                        {:seon.db/db db
+                         :seon.db/query
+                         '[:find ?nm ?src
+                           :where
+                           [?n :seon.ns/name ?nm]
+                           [?n :seon.ns/source ?src]]}))
         rows   (->> (db/query
                       {:seon.db/db db
                        :seon.db/query
-                       '[:find ?nm ?src ?tx
+                       '[:find ?nm ?tx
                          :where
-                         [?n :seon.ns/name ?nm ?tx]
-                         [?n :seon.ns/source ?src]]})
-                    (filter (fn [[nm _ _]] (included-ns? (name nm) prefixes)))
-                    (sort-by (fn [[nm _ tx]] [tx (name nm)])))
-        blocks (for [[nm src tx] rows]
+                         [?n :seon.ns/name ?nm ?tx]]})
+                    (filter (fn [[nm _]] (included-ns? (name nm) prefixes)))
+                    (sort-by (fn [[nm tx]] [tx (name nm)])))
+        blocks (for [[nm tx] rows]
                  (let [ns-str (name nm)
+                       src    (get sources nm)
                        seed?  (contains? seed-txs tx)
+                       stub   (str "(ns " ns-str ")")
                        body   (if (ns-stub? ns-str src)
                                 (or (when-not seed?
-                                      (reconstituted-ns-source db nm src))
-                                    (str "(ns " ns-str ")"))
+                                      (reconstituted-ns-source
+                                        db nm (if (str/blank? src) stub src)))
+                                    ;; genuinely bare stub — SELF-DESCRIBES
+                                    ;; so it can never pass for the ns's
+                                    ;; real (empty-looking) source: an
+                                    ;; agent has fabricated a quotation
+                                    ;; from a bare stub before.
+                                    (str stub
+                                         " ;; ⚠ stub — source not indexed"
+                                         " here; do NOT guess its contents;"
+                                         " its members are store rows"
+                                         " (see the query above)"))
                                 (str/trim src))]
                    (str "<namespace name=\"" ns-str "\">\n"
                         body

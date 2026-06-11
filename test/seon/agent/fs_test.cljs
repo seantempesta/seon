@@ -12,10 +12,10 @@
      - the enforcement agrees with the read-back: a path under a
        granted root resolves, a path outside it is denied
      - SEON_FS_LOCK makes configure! a legible no-op error and shows
-       up in grants as :seon.agent.fs/locked? (aria ask 8 — an agent
+       up in grants as :seon.agent.fs/locked? (consumer ask 8 — an agent
        NARROWED its own grant and locked itself out for the session)
      - read-file paging returns the requested line window + honest
-       totals (aria ask 10b — partial reads must never look complete)
+       totals (consumer ask 10b — partial reads must never look complete)
 
    The pod is live and `!config` is a shared atom — every test saves
    and restores it (and the SEON_FS_LOCK env var alongside).
@@ -81,7 +81,7 @@
           "outside the granted root → the allowlist denial"))))
 
 ;; ============================================================
-;; SEON_FS_LOCK — host-immutable grant (aria ask 8)
+;; SEON_FS_LOCK — host-immutable grant (consumer ask 8)
 ;; ============================================================
 
 (deftest seon-fs-lock-makes-configure!-a-legible-no-op
@@ -113,7 +113,7 @@
       (is (= ["/a"] (:seon.agent.fs/allowed-roots (fs/grants)))))))
 
 ;; ============================================================
-;; read-file paging — honest section reads (aria ask 10b)
+;; read-file paging — honest section reads (consumer ask 10b)
 ;; ============================================================
 
 (deftest read-file-paging-returns-range-plus-honest-totals

@@ -44,6 +44,13 @@
 ;; ":db/unique" error → translation.
 (schema/register! ::label :string)
 (schema/register! ::friend :seon.db/ref)
+;; Many-card COMPONENT ref + nested-only child attr — the A1 bug-2 pin
+;; (nested-only attrs must reach the runtime auto-installer).
+(schema/register! ::kids [:vector {:seon.db/component true} :seon.db/ref])
+(schema/register! ::kid-name :string)
+;; Identity attr — lookup-ref target for the A1 bug-1 pin (the taught
+;; `{:seon.db/ref [<identity-attr> v] …}` entity-key transact).
+(schema/register! ::code [:string {:seon.db/identity true}])
 
 (defn- fresh-conn
   "Promise of a fresh :memory datahike conn (schema-on-write, no
@@ -175,31 +182,85 @@
 ;; 4. Cryptic datahike messages → guiding translations + raw preserved.
 ;; ---------------------------------------------------------------------------
 
-(deftest not-in-schema-error-is-translated
-  ;; ::pet-name only ever appears NESTED, so ensure-datahike-attrs!
-  ;; never installs it → datahike rejects with the cryptic
-  ;; "not defined in current schema" → translated envelope.
+(deftest nested-only-attr-installs-and-commits
+  ;; Fix-everything A1 bug 2: ::pet-name only ever appears NESTED under
+  ;; the ref attr ::pet. extract-tx-attrs used to collect TOP-LEVEL keys
+  ;; only, so the auto-installer never saw ::pet-name and the tx died on
+  ;; datahike's cryptic "not defined in current schema". The walker now
+  ;; reaches nested entity maps → register!-then-transact of a
+  ;; nested-only attr installs and commits.
   (async done
     (-> (fresh-conn)
         (.then (fn [conn]
-                 (never-reject!
-                   (db/transact!
-                     {:seon.db/tx-data [{::name "A"
-                                         ::pet  {::pet-name "B"}}]
-                      :seon.db/conn    conn}))))
-        (.then (fn [{ok?       :seon.db/ok?
-                     error     :seon.db/error
-                     raw-error :seon.db/raw-error}]
-                 (is (false? ok?))
-                 (is (= :user-input
-                        (:seon.error/kind (:seon.error/data error))))
-                 (is (re-find #"seon\.schema/register!"
-                              (:seon.error/message error))
-                     "guiding message points at register!")
-                 (is (some? raw-error) "raw message preserved")
-                 (is (re-find #"not defined in current schema" raw-error)
-                     "raw-error carries the original datahike text")))
+                 (-> (never-reject!
+                       (db/transact!
+                         {:seon.db/tx-data [{::name "A"
+                                             ::pet  {::pet-name "B"}}]
+                          :seon.db/conn    conn}))
+                     (.then (fn [{ok?   :seon.db/ok?
+                                  error :seon.db/error}]
+                              (is (true? ok?)
+                                  (str "nested-only attr must install + "
+                                       "commit — "
+                                       (:seon.error/message error)))
+                              (is (= #{["B"]}
+                                     (set
+                                       (db/query
+                                         {:seon.db/query
+                                          '[:find ?n
+                                            :where [_ ::pet-name ?n]]
+                                          :seon.db/conn conn})))
+                                  "nested value round-trips"))))))
         (.then done))))
+
+(deftest nested-only-attr-under-component-ref-installs-and-commits
+  ;; The prompt-pinned variant: a FRESH attr appearing ONLY nested under
+  ;; a many-card COMPONENT ref installs and commits.
+  (async done
+    (-> (fresh-conn)
+        (.then (fn [conn]
+                 (-> (never-reject!
+                       (db/transact!
+                         {:seon.db/tx-data
+                          [{::name "P"
+                            ::kids [{::kid-name "K1"} {::kid-name "K2"}]}]
+                          :seon.db/conn conn}))
+                     (.then (fn [{ok?   :seon.db/ok?
+                                  error :seon.db/error}]
+                              (is (true? ok?)
+                                  (str "component-nested attr must install "
+                                       "+ commit — "
+                                       (:seon.error/message error)))
+                              (is (= #{["K1"] ["K2"]}
+                                     (set
+                                       (db/query
+                                         {:seon.db/query
+                                          '[:find ?n
+                                            :where [_ ::kid-name ?n]]
+                                          :seon.db/conn conn})))))))))
+        (.then done))))
+
+(deftest not-in-schema-error-is-translated
+  ;; The e2e nested-only path that used to produce this error now
+  ;; SUCCEEDS (see nested-only-attr-installs-and-commits), so the
+  ;; translation contract is pinned at the unit level: a synthetic
+  ;; datahike-shaped throw routes through commit-error-envelope into
+  ;; the guiding message with the raw text preserved.
+  (let [{ok?       :seon.db/ok?
+         error     :seon.db/error
+         raw-error :seon.db/raw-error}
+        (internal/commit-error-envelope
+          (ex-info (str "Bad entity attribute :seon.nope/x at "
+                        "{:db/id 1, :seon.nope/x 1}, not defined in "
+                        "current schema")
+                   {:attribute :seon.nope/x}))]
+    (is (false? ok?))
+    (is (= :user-input (:seon.error/kind (:seon.error/data error))))
+    (is (re-find #"seon\.schema/register!" (:seon.error/message error))
+        "guiding message points at register!")
+    (is (some? raw-error) "raw message preserved")
+    (is (re-find #"not defined in current schema" raw-error)
+        "raw-error carries the original datahike text")))
 
 (deftest lookup-ref-unique-error-is-translated
   (async done
@@ -229,6 +290,104 @@
                  (is (some? raw-error))
                  (is (re-find #":db/unique" raw-error))))
         (.then done))))
+
+;; ---------------------------------------------------------------------------
+;; 4b. A1 bug 1 — the taught `{:seon.db/ref <eid|lookup-ref> …}` entity-key
+;;     shorthand (the <your-entity> transact pattern) normalizes to
+;;     datahike's `:db/id` slot and NEVER reaches the store as a junk attr.
+;; ---------------------------------------------------------------------------
+
+(deftest lookup-ref-entity-key-transacts-without-junk-attr
+  (async done
+    (-> (fresh-conn)
+        (.then (fn [conn]
+                 (-> (db/transact! {:seon.db/tx-data [{::code "A1"
+                                                       ::name "Alpha"}]
+                                    :seon.db/conn    conn})
+                     (.then (fn [{ok? :seon.db/ok?}]
+                              (is (true? ok?) "setup tx must succeed")
+                              (never-reject!
+                                ;; the taught 1-arg tx-data shape, conn
+                                ;; passed explicitly via map-in to stay
+                                ;; off *conn*:
+                                (db/transact!
+                                  {:seon.db/tx-data
+                                   [{:seon.db/ref [::code "A1"]
+                                     ::label      "tagged"}]
+                                   :seon.db/conn conn}))))
+                     (.then (fn [{ok?   :seon.db/ok?
+                                  error :seon.db/error}]
+                              (is (true? ok?)
+                                  (str "lookup-ref entity-key transact must "
+                                       "succeed — "
+                                       (:seon.error/message error)))
+                              (let [ent (db/pull {:seon.db/pull-pattern '[*]
+                                                  :seon.db/ref [::code "A1"]
+                                                  :seon.db/conn conn})]
+                                (is (= "tagged" (::label ent))
+                                    "value landed on the SAME entity")
+                                (is (not (contains? ent :seon.db/ref))
+                                    "no junk :seon.db/ref attr on the entity"))
+                              (is (not (contains?
+                                         (db/installed-schema @conn)
+                                         :seon.db/ref))
+                                  "junk attr was never installed — no junk
+                                   datom can exist"))))))
+        (.then done))))
+
+(deftest one-arg-tx-data-shape-normalizes
+  ;; `(transact! [{…}])` — the exact <your-entity> header shape — must
+  ;; normalize to the map-in request (conn defaulting handled at the
+  ;; face). Unit-level: normalize-transact-args output.
+  (is (= {:seon.db/tx-data [{::name "x"}]}
+         (internal/normalize-transact-args [[{::name "x"}]]))))
+
+(deftest normalize-entity-ref-keys-unit
+  (testing "top-level + nested rewrite, eid and lookup-ref forms"
+    (is (= [{:db/id [::code "A1"] ::label "t"}]
+           (internal/normalize-entity-ref-keys
+             [{:seon.db/ref [::code "A1"] ::label "t"}])))
+    (is (= [{::name "p" ::kids [{:db/id 42 ::kid-name "k"}]}]
+           (internal/normalize-entity-ref-keys
+             [{::name "p"
+               ::kids [{:seon.db/ref 42 ::kid-name "k"}]}]))))
+  (testing "maps under non-ref attrs are opaque values, not entities"
+    (let [tx [{::name "x" ::blob {:a "b"}}]]
+      (is (= tx (internal/normalize-entity-ref-keys tx)))))
+  (testing "invalid ref value throws legible :user-input"
+    (let [err (try (internal/normalize-entity-ref-keys
+                     [{:seon.db/ref {:not "a-ref"} ::label "t"}])
+                   nil
+                   (catch :default e e))]
+      (is (some? err))
+      (is (= :user-input (:seon.error/kind (ex-data err))))
+      (is (re-find #"lookup-ref" (ex-message err)))))
+  (testing "conflicting :db/id + :seon.db/ref throws :user-input"
+    (let [err (try (internal/normalize-entity-ref-keys
+                     [{:db/id 1 :seon.db/ref 2 ::label "t"}])
+                   nil
+                   (catch :default e e))]
+      (is (some? err))
+      (is (= :user-input (:seon.error/kind (ex-data err))))
+      (is (= :seon.db/conflicting-entity-refs
+             (:seon.db/error (ex-data err)))))))
+
+(deftest extract-tx-attrs-walks-nested
+  (testing "nested entity maps under ref slots contribute their attrs"
+    (is (contains? (internal/extract-tx-attrs
+                     [{::name "A" ::pet {::pet-name "B"}}])
+                   ::pet-name))
+    (is (contains? (internal/extract-tx-attrs
+                     [{::name "P" ::kids [{::kid-name "K"}]}])
+                   ::kid-name))
+    (is (contains? (internal/extract-tx-attrs
+                     [[:db/add 1 ::pet {::pet-name "B"}]])
+                   ::pet-name)))
+  (testing "maps under non-ref attrs do NOT leak their keys as attrs"
+    (let [attrs (internal/extract-tx-attrs
+                  [{::name "x" ::blob {:a "b"}}])]
+      (is (not (contains? attrs :a)))
+      (is (contains? attrs ::blob)))))
 
 ;; ---------------------------------------------------------------------------
 ;; 5. register!-time gate — invalid Malli forms fail legibly.

@@ -32,7 +32,7 @@ below remain as the register of record.
 | f6 first-boot seed ordering | Wave C item 6 (verify — likely landed with 595aa2b boot-seed!) |
 | f7 judge-rubric staleness | ROOT 1 staleness class; rubric re-verify rides the harness habit |
 | blind-spot 5–7 (failing examples, docstring fiction, stub bait) | ROOT 1 — executable teachings + content sweep (Wave B) |
-| blind-spot 8 (prose-as-evals) + aria 13 | ROOT 3 — parser format contract (Wave A) |
+| blind-spot 8 (prose-as-evals) + the downstream consumer 13 | ROOT 3 — parser format contract (Wave A) |
 | blind-spot 11 (standing self-warning) | Wave C item 6 |
 | blind-spot 12 (lookup illegibility) + wire lookup-ref bug | Wave A unit A1 |
 | **s12 provenance predicate** | **DECIDED-widen (user 2026-06-11)** — storage predicate accepts provenance-SHAPED attrs in any namespace; consult/reuse scenarios stay strict; see PRD §2 |
@@ -170,16 +170,16 @@ T6/SOUL/boot-fix/gym baseline).
 | **DIS transient false-empty datalog read**: the same provenance query returned `#{}` once then the row seconds later on the live DIS conn (possible lazy node-fetch timing in datahike-cljs query). DISHONEST READS class — boot-time consumers (GC, replay selection) would silently mis-decide; GC under-prunes safely, but the read itself is wrong | 098c0b3 unit report | focused investigation unit — reproduce, then fix in the fork or the wire layer |
 | recurring `tx-feed pump failed (wire rpc timeout) — re-subscribing in 2s` in pod.log around heavy test runs; self-heals via re-subscribe; pre-existing | 098c0b3 unit report | watch; fold into wire hardening if frequency grows |
 
-## Downstream consumer asks (aria, 2026-06-11)
+## Downstream consumer asks (downstream, 2026-06-11)
 
-The first real downstream product ("aria") consumes seon as an
+The first real downstream product (external) consumes seon as an
 UNMODIFIED substrate. Its top asks, with routing + status. Asks 1–3
 landed as ONE unit (this row block's source); 4–6 are handled
 elsewhere as noted.
 
 | # | Ask | Status |
 |---|---|---|
-| 1 | **Composer ns-prefix extensibility** — the `<namespace>` tag inclusion rule was hardwired to `seon.* + my.*`. Now customize-with-data: `:seon.ctx/included-prefixes` (cardinality-many string) on the config entity `[:seon.ctx/config-id "substrate"]`, seeded with the defaults seed-if-absent at first render (`seon.ctx/ensure-ctx-config!`). A downstream adds `"aria."` by ONE identity-upsert transact; its `aria.*` nses render for every agent next turn; retract removes them. The `*.internal` exclusion stays STRUCTURAL (all prefixes) | **DONE 2026-06-11** — live-proved on the cluster store (transact → tag, retract → gone); pinned by `included-prefix-extensibility` (ctx_test.cljs) |
+| 1 | **Composer ns-prefix extensibility** — the `<namespace>` tag inclusion rule was hardwired to `seon.* + my.*`. Now customize-with-data: `:seon.ctx/included-prefixes` (cardinality-many string) on the config entity `[:seon.ctx/config-id "substrate"]`, seeded with the defaults seed-if-absent at first render (`seon.ctx/ensure-ctx-config!`). A downstream adds `"the downstream consumer."` by ONE identity-upsert transact; its `the downstream consumer.*` nses render for every agent next turn; retract removes them. The `*.internal` exclusion stays STRUCTURAL (all prefixes) | **DONE 2026-06-11** — live-proved on the cluster store (transact → tag, retract → gone); pinned by `included-prefix-extensibility` (ctx_test.cljs) |
 | 2 | **`SEON_RUNTIME_ROOT` env override** — build/source ARTIFACT reads (self-host bootstrap `out/bootstrap`, boot-indexer source roots `src`/`test`/`guest-cljs/src`, static `resources/public/*`) resolved CWD-relative, forcing a downstream to copy/symlink them. Now routed through ONE helper, `seon.platform/artifact-path`: resolves against `SEON_RUNTIME_ROOT` when set, byte-identical CWD-relative when unset. DATA paths (store, sockets, tmp, logs) deliberately stay CWD/world-relative — the downstream's own state. (`SHADOW_IMPORT_PATH` in the compiled `out/client/main.js` needed no change — already `__dirname`-relative) | **DONE 2026-06-11** — live-proved: second pod launched from a scratch world dir against this repo's artifacts + its OWN scratch store booted, minted an agent, served `/agents` + css; pinned by `platform_test.cljs` |
 | 3 | **`bin/seon` supervisor parametrization** — store path, UDS socket paths, and ports were baked in (fork-to-change). Now env overrides defaulting to today's values: `SEON_CLUSTER_DIR`, `SEON_REQ_SOCK`, `SEON_PUB_SOCK`, `SEON_WRITER_REPL_PORT`, plus pass-through `SEON_PORT` / `SEON_RUNTIME_ROOT` (read by the pod itself). A downstream shells out to `bin/seon` with env instead of re-implementing | **DONE 2026-06-11** — defaults expand byte-identical to the old command; live stack unaffected (`bin/seon status` green, idempotent starts no-op) |
 | 4 | **Publicly-resolvable deps** (outside-builder blocker: datahike gitlink, konserve `:local/root`) | **DONE — repinned 4929dfc** (datahike → ec902943 fork main, konserve → public git dep; `clojure -P` green on all four aliases) |

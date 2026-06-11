@@ -2,10 +2,12 @@
   "Tests for KI-1 — `seon.db/transact!`'s invocation-shape precondition.
 
    The contract: `transact!` takes ONE map argument with at minimum
-   `:seon.db/tx-data`. Positional invocations (`(transact! conn tx-data)`)
-   or unqualified-key maps (`{:tx-data […]}`) used to silently
-   destructure to nil and crash deep inside datahike with cryptic
-   errors.
+   `:seon.db/tx-data`, OR a bare tx-data vector (`(transact! [{…}])` —
+   the <your-entity> taught shape, conn defaulting to `*conn*`), OR the
+   datahike-mirroring positional `(transact! conn tx-data [tx-meta])`.
+   Unqualified-key maps (`{:tx-data […]}`) and non-conn/non-collection
+   first args used to silently destructure to nil and crash deep inside
+   datahike with cryptic errors.
 
    A4 (2026-06-09) changed the failure SURFACE: `transact!` never
    throws and never rejects — every failure RESOLVES to the envelope
@@ -32,14 +34,25 @@
 (deftest non-map-arg-resolves-invalid-shape
   (testing "positional / non-map first arg resolves to invalid-invocation-shape envelope"
     (async done
-      (let [pending (atom 4)
+      (let [pending (atom 3)
             check   (fn [v]
                       (is (= :seon.db/invalid-invocation-shape v))
                       (when (zero? (swap! pending dec)) (done)))]
         (envelope-error "not a map" check)
-        (envelope-error [{:foo "bar"}] check)
         (envelope-error nil check)
         (envelope-error 42 check)))))
+
+(deftest one-arg-tx-data-vector-is-a-valid-shape
+  ;; Fix-everything A1 (2026-06-11): `(transact! [{…}])` — the
+  ;; <your-entity> taught shape — is a VALID 1-arg tx-data call
+  ;; (conn defaults to *conn*). It must NOT fail the invocation-shape
+  ;; guard; any failure is downstream (unregistered attr, no conn).
+  (async done
+    (envelope-error [{:foo "bar"}]
+                    (fn [v]
+                      (is (not= :seon.db/invalid-invocation-shape v)
+                          "1-arg tx-data vector passes the shape guard")
+                      (done)))))
 
 (deftest unqualified-tx-data-key-resolves-invalid-shape
   (testing "{:tx-data …} (bare keyword) resolves to invalid-invocation-shape"

@@ -260,7 +260,7 @@ maybe_prep_deps() {
 }
 
 cmd_prep() {
-  # Explicit git-dep prep verb for DOWNSTREAM supervisors (aria ask 7):
+  # Explicit git-dep prep verb for DOWNSTREAM supervisors (consumer ask 7):
   # after a git-dep repin, aliases that pull prep-requiring git deps
   # fail with "libs must be prepared" until
   #   clojure -X:deps prep :aliases '[:writer]'

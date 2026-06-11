@@ -459,7 +459,7 @@
                 ;; FULL keyword in the tempid — (name k) alone collides
                 ;; when two kinds share a name segment (:a.b/person +
                 ;; :c.d/person → one tempid string → two upsert targets
-                ;; → boot-fatal :transact/upsert; aria repro 2026-06-11).
+                ;; → boot-fatal :transact/upsert; downstream repro 2026-06-11).
                 ;; Tempids are tx-local placeholders, never stored — the
                 ;; row's identity is :seon.schema/key — so no migration.
                 tid  (str "schema-" k)]

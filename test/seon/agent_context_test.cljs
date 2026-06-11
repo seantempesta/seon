@@ -441,45 +441,75 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; (h2) store-inventory — the catalogs' replacement (V4-3): derived, fresh,
-;;      one row per entity kind.
+;; (h2) store-inventory — the catalogs' replacement (V4-3, per-attr counts
+;;      since fix-everything A3): one row per attr NAMESPACE carrying every
+;;      attr with live rows + its entity count; derived from datoms, so
+;;      identity-less kinds are visible by construction and fully-retracted
+;;      attrs vanish.
 ;; ---------------------------------------------------------------------------
 
-(deftest store-inventory-lists-kinds-and-is-derived
+(deftest store-inventory-lists-attr-namespaces-with-live-counts
   (async done
     (-> (with-seeded-conn
           (fn [conn]
-            (let [inv   (db/store-inventory {:seon.db/db @conn})
-                  kinds (set (map :seon.db/kind inv))
+            (let [inv     (db/store-inventory {:seon.db/db @conn})
+                  kinds   (set (map :seon.db/kind inv))
                   by-kind (into {} (map (juxt :seon.db/kind identity)) inv)]
               (is (contains? kinds :seon.fn) ":seon.fn kind listed")
               (is (contains? kinds :seon.ns) ":seon.ns kind listed")
               (is (contains? kinds :seon.agent) ":seon.agent kind listed")
-              (is (pos? (:seon.db/rows (by-kind :seon.fn)))
-                  "row counts are live counts")
-              (is (= :seon.fn/sym (:seon.db/id-attr (by-kind :seon.fn)))
-                  "id-attr is the kind's identity attribute")
-              ;; derived: a NEW kind appears the moment its data lands.
+              (is (pos? (get-in by-kind [:seon.fn :seon.db/attrs :seon.fn/sym]))
+                  "per-attr counts are live entity counts")
+              (is (every? pos? (vals (get-in by-kind [:seon.agent :seon.db/attrs])))
+                  "ONLY attrs with rows appear — never a zero count")
+              (is (not-any? #(= "db" (namespace %))
+                            (mapcat (comp keys :seon.db/attrs) inv))
+                  "datahike's own :db/* attrs are excluded")
+              ;; IDENTITY-LESS kind: visible by construction (the S-21
+              ;; killer — :seon.workout/* had no identity attr and was
+              ;; invisible to the old identity-derived inventory).
               (is (not (contains? kinds :zzinv.domain))
                   "throwaway kind absent before any data")
-              (schema/register! :zzinv.domain/id
-                                [:string {:seon.db/identity true}])
+              (schema/register! :zzinv.domain/note :string)
               (-> (db/transact!
                     {:seon.db/conn conn
-                     :seon.db/tx-data [{:zzinv.domain/id "one"}]})
+                     :seon.db/tx-data [{:zzinv.domain/note "one"}
+                                       {:zzinv.domain/note "two"}]})
                   (.then
                     (fn [_]
-                      (let [kinds' (set (map :seon.db/kind
-                                             (db/store-inventory
-                                               {:seon.db/db @conn})))]
-                        (is (contains? kinds' :zzinv.domain)
-                            "new kind appears after first transact —
-                             derived, not hardcoded"))))))))
+                      (let [row (->> (db/store-inventory {:seon.db/db @conn})
+                                     (filter #(= :zzinv.domain (:seon.db/kind %)))
+                                     first)]
+                        (is (= {:zzinv.domain/note 2} (:seon.db/attrs row))
+                            "identity-less kind appears with per-attr
+                             entity counts the moment data lands"))))
+                  ;; retract ALL rows → the kind vanishes from the next run.
+                  (.then
+                    (fn [_]
+                      (let [db   @conn
+                            eids (map first
+                                      (db/query {:seon.db/db db
+                                                 :seon.db/query
+                                                 '[:find ?e :where
+                                                   [?e :zzinv.domain/note]]}))]
+                        (db/transact!
+                          {:seon.db/conn conn
+                           :seon.db/tx-data
+                           (vec (for [e eids]
+                                  [:db/retractEntity e]))}))))
+                  (.then
+                    (fn [_]
+                      (let [kinds'' (set (map :seon.db/kind
+                                              (db/store-inventory
+                                                {:seon.db/db @conn})))]
+                        (is (not (contains? kinds'' :zzinv.domain))
+                            "fully-retracted kind vanishes — derived from
+                             datoms, not from registration"))))))))
         (.then (fn [_]
-                 (swap! schema/*schemas dissoc :zzinv.domain/id)
+                 (swap! schema/*schemas dissoc :zzinv.domain/note)
                  (done)))
         (.catch (fn [e]
-                  (swap! schema/*schemas dissoc :zzinv.domain/id)
+                  (swap! schema/*schemas dissoc :zzinv.domain/note)
                   (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
@@ -520,6 +550,48 @@
                   "own ns is a tag like any other")
               (is (str/includes? txt "(defn greet [] :hi)")
                   "own ns reconstitutes its member source"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest sourceless-tee-ns-reconstitutes-and-bare-stubs-self-describe
+  ;; fix-everything A3 (S-21 root): the tee's nested `{:seon.ns/name kw}`
+  ;; upsert mints SOURCELESS ns rows for a prior agent's register! calls;
+  ;; requiring `:seon.ns/source` in the section's join silently dropped
+  ;; them — the agent could not see the domain anywhere. And a stub that
+  ;; genuinely has no indexed source must SELF-DESCRIBE (a bare stub has
+  ;; baited a fabricated quotation before — the judge-95 near-miss).
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data
+                   ;; tee-shaped register! row: NO :seon.ns/source anywhere.
+                   [{:seon.schema/key :my.kb.zztest/note
+                     :seon.schema/source
+                     "(seon.schema/register! :my.kb.zztest/note :string)"
+                     :seon.schema/created-at (js/Date.)
+                     :seon.schema/ns {:seon.ns/name :my.kb.zztest}}]})
+                (.then
+                  (fn [_]
+                    (let [txt (agent/namespaces-section
+                                {:seon.db/db @conn :seon.agent/id agent-id})]
+                      (is (str/includes? txt
+                                         "<namespace name=\"my.kb.zztest\">")
+                          "a SOURCELESS tee-minted ns renders a tag")
+                      (is (str/includes? txt "(ns my.kb.zztest)")
+                          "its ns form is synthesized from the name")
+                      (is (str/includes?
+                            txt
+                            "(seon.schema/register! :my.kb.zztest/note :string)")
+                          "a prior agent's register! source reconstitutes
+                           from member rows alone")
+                      (is (str/includes? txt "stub — source not indexed")
+                          "bare/seed stubs SELF-DESCRIBE instead of
+                           rendering as deceptively-empty source")
+                      (is (not (str/includes? txt "(defn transact!"))
+                          "self-description never inlines substrate
+                           bodies")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -590,10 +662,10 @@
                          "-char result — got " (count ts)))
                 (is (< (count full) full-ceil)
                     (str "render-prompt bounded — got " (count full)))
-                (is (str/includes? ts "chars clipped at")
-                    "the big result was clipped with the size marker")
-                (is (str/includes? ts "Narrow it")
-                    "the size clip carries a guiding narrow-it message")
+                (is (str/includes? ts "⚠ TRUNCATED at")
+                    "the big result was clipped with the LOUD size marker")
+                (is (str/includes? ts "live value is COMPLETE")
+                    "the clip says the display, not the value, is clipped")
                 (is (str/includes? ts "(result :")
                     "guide points the agent at the live full value"))))
           (.then (fn [_] (done)))
@@ -608,17 +680,18 @@
   (let [small "[0 1 2 3 4]"]
     (is (= small (agent/cap-result-body small))
         "under the cap → verbatim, no marker")
-    (is (not (str/includes? (agent/cap-result-body small) "Narrow it"))
+    (is (not (str/includes? (agent/cap-result-body small) "TRUNCATED"))
         "no guide on a small result — no false positive")))
 
 (deftest cap-result-body-clips-a-huge-scalar-with-a-guiding-message
   (let [huge (apply str (repeat 5000 "z"))
         out  (agent/cap-result-body huge agent/eval-render-cap "hg0000abcd")]
     (testing "bounded to the display cap (+ the appended guide)"
-      (is (< (count out) (+ agent/eval-render-cap 300))))
-    (testing "carries the size marker AND a guiding narrow-it message"
-      (is (str/includes? out "chars clipped at 1500"))
-      (is (str/includes? out "Narrow it")))
+      (is (< (count out) (+ agent/eval-render-cap 500))))
+    (testing "LOUD marker: shown of full chars, display-only clip"
+      (is (str/includes? out "⚠ TRUNCATED at 1500 of 5000 chars"))
+      (is (str/includes? out "live value is COMPLETE"))
+      (is (str/includes? out "Never summarize or quote beyond")))
     (testing "guide points at the live full value via (result :<eid>)"
       (is (str/includes? out "(result :hg0000abcd)")))))
 
@@ -663,10 +736,10 @@
                     :seon.eval/result-edn huge-edn :seon.eval/id "hg0000002b"
                     :seon.eval/duration-ms 7})]
     (testing "row is bounded regardless of how large the result is"
-      (is (< (count row) (+ agent/eval-render-cap 400))))
+      (is (< (count row) (+ agent/eval-render-cap 600))))
     (testing "guiding message present, anchored to the row's own eid"
-      (is (str/includes? row "chars clipped at 1500"))
-      (is (str/includes? row "Narrow it"))
+      (is (str/includes? row "⚠ TRUNCATED at 1500 of"))
+      (is (str/includes? row "live value is COMPLETE"))
       (is (str/includes? row "(result :hg0000002b)")))))
 
 (deftest format-eval-row-row-bounded-collection-preview-keeps-its-guide
@@ -680,7 +753,7 @@
                :seon.eval/duration-ms 12})]
     (is (str/includes? row "more clipped") "row-count guide survives")
     (is (str/includes? row "5000 rows"))
-    (is (not (str/includes? row "Narrow it"))
+    (is (not (str/includes? row "TRUNCATED"))
         "no SECOND size guide — preview is already small (no double-noise)")
     (is (< (count row) 1000) "preview row is bounded")))
 
