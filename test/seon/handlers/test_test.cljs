@@ -32,6 +32,7 @@
     [seon.db :as db]
     [seon.handlers.test :as h-test]
     [seon.render :as render]
+    [seon.render.live-tile :as tile]
     [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
@@ -67,9 +68,9 @@
    :seon.test/source "(deftest t-none (is true))"})
 
 (deftest render-ai-shows-sym-source-and-status
-  (let [pass (:seon.render/text (h-test/render-ai {:seon.render/entity ent-pass}))
-        fail (:seon.render/text (h-test/render-ai {:seon.render/entity ent-fail}))
-        none (:seon.render/text (h-test/render-ai {:seon.render/entity ent-none}))]
+  (let [pass (:seon.render/ai (h-test/render-ai {:seon.render/entity ent-pass}))
+        fail (:seon.render/ai (h-test/render-ai {:seon.render/entity ent-fail}))
+        none (:seon.render/ai (h-test/render-ai {:seon.render/entity ent-none}))]
     (is (str/includes? pass "[test demo.ns/t-pass]") "header carries the sym")
     (is (str/includes? pass "(deftest t-pass") "source rendered")
     (is (str/includes? pass "✓ test passing") "passing glyph for a passed run")
@@ -82,7 +83,7 @@
   (let [hiccup (:seon.render/hiccup (h-test/render-html {:seon.render/entity ent-fail}))]
     (is (vector? hiccup) "html form is a hiccup vector")
     (is (= :div (first hiccup)) "outer container is a :div")
-    (is (render/valid-hiccup? hiccup) "passes valid-hiccup?")
+    (is (tile/valid-hiccup? hiccup) "passes valid-hiccup?")
     (let [s (pr-str hiccup)]
       (is (str/includes? s "demo.ns/t-fail") "sym appears in the hiccup")
       (is (str/includes? s "failing") "failing pill present")
@@ -186,7 +187,7 @@
                               :seon.render/depth 0 :seon.render/format :html}))
                   s      (pr-str hiccup)]
               (is (vector? hiccup) "html form is a hiccup vector")
-              (is (render/valid-hiccup? hiccup) "passes valid-hiccup?")
+              (is (tile/valid-hiccup? hiccup) "passes valid-hiccup?")
               (is (str/includes? s "demo.ns/t-attached")
                   "the test sym appears in the ns's html")
               (is (str/includes? s "passing")

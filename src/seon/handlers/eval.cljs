@@ -95,7 +95,7 @@
                     true (conj header)
                     true (conj (truncate (str/trim src) source-truncate))
                     tail (conj tail))]
-    {:seon.render/text (str/join "\n" lines)}))
+    {:seon.render/ai (str/join "\n" lines)}))
 
 (defn render-html
   "Hiccup card for the inspector's HTML pane.

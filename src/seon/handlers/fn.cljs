@@ -15,7 +15,8 @@
      monospace signature, docstring, collapsible source."
   (:require
     [clojure.string :as str]
-    [datahike.api :as d]))
+    [datahike.api :as d]
+    [seon.db :as db]))
 
 (def ^:private source-inline-threshold 200)
 
@@ -46,23 +47,28 @@
    test entity maps. Safe when db is nil (returns []).
 
    We index via `:aevt :seon.test/source` directly rather than full
-   datalog so we can call `d/pull` per matched eid only — fewer
-   passes through the registry. The substring scan happens in CLJS."
+   datalog so we can pull per matched eid only — fewer passes through
+   the registry. The substring scan happens in CLJS.
+
+   The `d/datoms` scan is gated on `seon.db/installed-schema` (same
+   lazy-install trap as every datoms boundary: datahike THROWS on a
+   registered-but-never-transacted attr) and the per-eid pull routes
+   through guarded `seon.db/pull` — no bare try masking typos."
   [db fn-sym]
-  (if (or (nil? db) (nil? fn-sym))
+  (if (or (nil? db)
+          (nil? fn-sym)
+          (not (contains? (db/installed-schema db) :seon.test/source)))
     []
     (let [needle (str fn-sym)]
-      (try
-        (->> (d/datoms db :aevt :seon.test/source)
-             (filter (fn [^js dt] (str/includes? (.-v dt) needle)))
-             (map (fn [^js dt] (.-e dt)))
-             distinct
-             (map #(d/pull db '[:seon.test/sym
-                                :seon.test/last-passed-at
-                                :seon.test/last-failed-at
-                                :seon.test/last-failure-summary] %))
-             vec)
-        (catch :default _ [])))))
+      (->> (d/datoms db :aevt :seon.test/source)
+           (filter (fn [^js dt] (str/includes? (.-v dt) needle)))
+           (map (fn [^js dt] (.-e dt)))
+           distinct
+           (map #(db/pull db '[:seon.test/sym
+                               :seon.test/last-passed-at
+                               :seon.test/last-failed-at
+                               :seon.test/last-failure-summary] %))
+           vec))))
 
 (defn- test-passing?-row
   "True iff this test row has passed and has not failed more recently."
@@ -132,7 +138,7 @@
         lines     (cond-> [header status-line]
                     spec-line (conj spec-line)
                     doc-line (conj doc-line))]
-    {:seon.render/text (str/join "\n" lines)}))
+    {:seon.render/ai (str/join "\n" lines)}))
 
 (defn- pill
   "Tiny status pill — green dot when on, gray dot when off."

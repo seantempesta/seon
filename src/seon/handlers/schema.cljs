@@ -44,7 +44,7 @@
   (let [k     (:seon.schema/key entity)
         shape (live-shape k)
         shape-text (if shape (shape-summary shape 100) "<not registered>")]
-    {:seon.render/text
+    {:seon.render/ai
      (str "[schema " (pr-str k) "]  :shape " shape-text)}))
 
 (defn render-html

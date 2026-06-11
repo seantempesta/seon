@@ -364,9 +364,9 @@
                        (sort-by key)
                        (mapv (fn [[n cs]] [n (reduce + 0 (keep ::dur cs))])))
         ;; The agent's OWN tile (unit 1.4) — rendered explicitly (the
-        ;; agent entity is not part of `visible-entities`). Per-entity
-        ;; `:seon.render/html` override wins; default is
-        ;; `seon.render.default/view`.
+        ;; agent entity is not part of `visible-entities`). Wired
+        ;; `:seon.render.live-tile/content` wins; default is
+        ;; `seon.render.live-tile/welcome`.
         tile  (:seon.render/hiccup
                 (render/render-agent-tile {:seon.db/db db
                                            :seon.agent/id agent-id}))

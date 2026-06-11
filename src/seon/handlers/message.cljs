@@ -27,19 +27,21 @@
    known datahike-cljs limitation)."
   (:require
     [clojure.string :as str]
-    [datahike.api :as d]
-    [seon.agent :as agent]))
+    [seon.agent :as agent]
+    [seon.db :as db]))
 
 (defn- resolve-ref
   "Materialize a `{:db/id n}` ref into its identifying attrs. Returns
    the input unchanged when it already carries an identity attr (older
-   write paths stored the full map) or when `db` is nil. Never throws."
-  [db ref]
+   write paths stored the full map) or when `db` is nil. Routes
+   through guarded `seon.db/pull` (65dfc90): registered-but-never-
+   installed attrs are filtered (→ `{}` for a fresh store, labeled
+   `unknown`), typos throw legibly — the former bare try masked them."
+  [db-val ref]
   (cond
     (or (:seon.user/id ref) (:seon.agent/id ref)) ref
-    (and db (:db/id ref))
-    (try (d/pull db '[:seon.user/id :seon.agent/id] (:db/id ref))
-         (catch :default _ ref))
+    (and db-val (:db/id ref))
+    (or (db/pull db-val '[:seon.user/id :seon.agent/id] (:db/id ref)) ref)
     :else ref))
 
 (defn- hh-mm-ss
@@ -58,7 +60,7 @@
   [{:seon.db/keys [db] :seon.render/keys [entity] :seon.agent/keys [id]}]
   (let [from (resolve-ref db (:seon.agent.message/from entity))
         body (or (:seon.agent.message/content entity) "")]
-    {:seon.render/text
+    {:seon.render/ai
      (str "[" (agent/message-label from id) "] " body)}))
 
 (defn render-html

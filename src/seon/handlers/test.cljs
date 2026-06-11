@@ -92,7 +92,7 @@
                    (str/trim src))
         lines    (cond-> [header (status-line entity)]
                    src-line (conj src-line))]
-    {:seon.render/text (str/join "\n" lines)}))
+    {:seon.render/ai (str/join "\n" lines)}))
 
 (defn- status-pill
   "Tri-color pill — :ok = amber dot, :warn = amber-dim dot, :err = red dot."

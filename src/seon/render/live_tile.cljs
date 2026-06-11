@@ -61,8 +61,8 @@
    ## Who calls what
 
    `seon.render/render-agent-tile` is the one entry point: it calls
-   [[wired-content]] to resolve WHICH value is wired (new key →
-   legacy per-entity `:seon.render/html` → [[welcome]]), invokes it
+   [[wired-content]] to resolve WHICH value is wired
+   (`::content` → [[welcome]]), invokes it
    through `seon.render/html-render` (the ONE value-or-fn dispatch),
    and on a throw builds the legible [[error-response]] — a broken
    tile must never silently vanish (vanish = indistinguishable from
@@ -156,8 +156,10 @@
 
 ;; Where the wired value came from — the tile's provenance. Rendered
 ;; into the agent's awareness section header so the agent always sees
-;; HOW to change the display.
-(schema/register! ::source [:enum ::content :seon.render/html ::welcome])
+;; HOW to change the display. (The legacy `:seon.render/html` arm was
+;; deleted in the render sweep — PRD live-tiles §8.1, no legacy: that
+;; key now means ONLY the generic entity-card render slot.)
+(schema/register! ::source [:enum ::content ::welcome])
 
 (schema/register! ::wired-request
   [:map [:seon.render/entity :map]])
@@ -199,28 +201,23 @@
 (defn wired-content
   "Resolve WHICH value is the agent's live tile, with provenance.
 
-   Resolution order on the pulled agent `:seon.render/entity`:
+   Resolution on the pulled agent `:seon.render/entity`:
+   `:seon.render.live-tile/content` (THE tile key) when present, else
+   [[welcome-sym]] (the substrate welcome). Neither the per-entity
+   `:seon.render/html` nor the `:seon.agent` KIND default is consulted
+   — that key means ONLY the generic entity-card render slot (one key,
+   one meaning; the legacy tile fallback was deleted per PRD
+   live-tiles-prd-2026-06-11 §8.1).
 
-   1. `:seon.render.live-tile/content` — THE tile key.
-   2. per-entity `:seon.render/html` — legacy double-duty slot,
-      honored until the follow-up migration retires it (PRD
-      live-tiles-prd-2026-06-11 §8.1); the `:seon.agent` KIND default
-      is deliberately NOT consulted — that key now means only the
-      generic entity-card render.
-   3. [[welcome-sym]] — the substrate welcome.
-
-   Values arrive pr-str-encoded from the mixed-:or bridge; both attr
-   reads decode via `seon.db/decode-edn-value`."
+   Values arrive pr-str-encoded from the mixed-:or bridge; the attr
+   read decodes via `seon.db/decode-edn-value`."
   {:malli/schema [:=> [:cat ::wired-request] ::wired-response]}
   [{:seon.render/keys [entity]}]
   (let [content (some->> (::content entity)
-                         (db/decode-edn-value ::content))
-        legacy  (some->> (:seon.render/html entity)
-                         (db/decode-edn-value :seon.render/html))]
-    (cond
-      (some? content) {::source ::content           ::value content}
-      (some? legacy)  {::source :seon.render/html   ::value legacy}
-      :else           {::source ::welcome           ::value welcome-sym})))
+                         (db/decode-edn-value ::content))]
+    (if (some? content)
+      {::source ::content ::value content}
+      {::source ::welcome ::value welcome-sym})))
 
 (defn wired-label
   "The awareness-section header identity for a [[wired-content]]
@@ -236,13 +233,6 @@
     (if (symbol? value)
       (str value " (a fn on your entity)")
       "literal hiccup on your entity")
-
-    :seon.render/html
-    (if (symbol? value)
-      (str value " (a fn on the legacy :seon.render/html slot — "
-           "migrate it to :seon.render.live-tile/content)")
-      (str "literal hiccup on your entity (legacy :seon.render/html "
-           "slot — migrate it to :seon.render.live-tile/content)"))
 
     ::welcome
     (str value " (the substrate default — wire your own)")))

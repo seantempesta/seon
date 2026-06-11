@@ -39,7 +39,7 @@
   "Universal AI-side fallback. Emits the input map as edn."
   {:malli/schema [:=> [:cat :map] :seon.render/ai-response]}
   [input]
-  {:seon.render/text (pr-str input)})
+  {:seon.render/ai (pr-str input)})
 
 (defn pretty-html
   "Universal HTML-side fallback. Wraps an edn dump in a monospace
@@ -231,8 +231,8 @@
        (comp/status-dot state id)
        [:span {:class "text-xs text-text-400 ml-auto"} (str "turn " turns)]]
       ;; NOTE: children are built with `into` (vectors), NOT bare
-      ;; `(for …)` lazy seqs — `seon.render/valid-hiccup?` (the
-      ;; `:seon.render/html-response` validator) accepts only
+      ;; `(for …)` lazy seqs — `seon.render.live-tile/valid-hiccup?`
+      ;; (the render-boundary validator) accepts only
       ;; string/int/nil/vector children, so a lazy-seq child makes
       ;; instrumentation reject the whole tile (2026-06-09 inspector
       ;; tile-missing bug).

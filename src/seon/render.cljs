@@ -49,28 +49,18 @@
 (schema/register! :seon.db/db   :any)
 (schema/register! :seon.db/conn :any)
 
-;; Hiccup data shape — recursive vector starting with keyword, optional
-;; attrs map, children. Defined via Malli local registry so the
-;; recursive ref resolves. Kept registered for documentation purposes;
-;; instrumentation uses `valid-hiccup?` below (a `[:fn ...]` predicate)
-;; because Malli's recursive seqex schemas trip
-;; `:malli.core/potentially-recursive-seqex` when referenced inside a
-;; function schema.
-(schema/register! :seon.render/hiccup
-  [:schema {:registry {::elem [:or :string :int :nil ::node]
-                       ::node [:cat :keyword
-                                    [:? :map]
-                                    [:* [:ref ::elem]]]}}
-   ::elem])
-
-(def valid-hiccup?
-  "Forwarding def for `seon.render.live-tile/valid-hiccup?` — the
-   predicate moved there (live-tiles U1) because the canonical
-   value-or-fn slot shape (`:seon.render.live-tile/content`) is
-   registered in that ns, which loads before this one. Kept here so
-   existing compile-time callers (`seon.ctx`, tests) keep working;
-   repoint them in the follow-up sweep, then delete this def."
-  live-tile/valid-hiccup?)
+;; Hiccup has exactly ONE schema representation:
+;; `:seon.render.live-tile/hiccup` — the registered pure-data shallow
+;; bound (vector with keyword head), defined in seon.render.live-tile
+;; (loads first). The deep recursive walk happens at the render
+;; boundary only, via the PLAIN fn
+;; `seon.render.live-tile/valid-hiccup?` (registered forms must be
+;; pure data — platform law; recursive seqex schemas additionally trip
+;; `:malli.core/potentially-recursive-seqex` inside instrumented fn
+;; schemas). The old deep registered `:seon.render/hiccup` schema and
+;; this ns's forwarding `valid-hiccup?` def were deleted in the render
+;; sweep (2026-06-11) — `:seon.render/hiccup` remains ONLY as the map
+;; KEY in `:seon.render/html-response`.
 
 ;; The render SLOTS (self-context spec, 2026-06-10 — relaxed from
 ;; symbol-only):
@@ -96,16 +86,17 @@
 
 ;; Renderer return shapes — map-in / map-out per seon house rule.
 ;;
-;; CONVERGENCE IN PROGRESS (live-tiles U1, PRD §8.2): the text twin of
-;; a render is converging on `:seon.render/ai` (the more-used name —
-;; section twins and the tile twin already use it). `:seon.render/text`
-;; is the legacy key still produced by the `seon.handlers.*` renderers,
-;; `seon.render.default/pretty-ai`, and the ctx section pipeline —
-;; accepted here until the follow-up sweep renames those producers.
-;; Readers in THIS ns prefer `:seon.render/ai`, fall back to
-;; `:seon.render/text`.
-;; "Carries :seon.render/ai (preferred) or legacy :seon.render/text"
-;; expressed as PURE DATA (an :or of maps — registered forms must not
+;; TWIN-KEY CONVERGENCE (PRD live-tiles §8.2, producer sweep done
+;; 2026-06-11): the text twin of a render is `:seon.render/ai` —
+;; every renderer producer (the six `seon.handlers.*` render-ai fns,
+;; `seon.render.default/pretty-ai`, section twins, the tile twin) now
+;; emits it. The SECOND arm below exists for the ONE remaining
+;; `:seon.render/text` producer: the ctx prompt-composer family
+;; (`seon.ctx/assemble-context`'s response, which `ai-render`
+;; dispatches when it is the agent's prompt slot). That family's
+;; rename rides the V4 composer rewrite (seon.ctx is out of the
+;; render-sweep fence); delete the arm with it.
+;; Expressed as PURE DATA (an :or of maps — registered forms must not
 ;; embed fns; see the platform-law comment in seon.render.live-tile):
 ;; first arm requires :ai, second requires :text; both arms spec the
 ;; other key as optional so a present-but-wrong-typed value never
@@ -133,7 +124,7 @@
 ;; happens at the render boundary (html->string + valid-hiccup?).
 ;; `:nil` accepts render fns that explicitly return
 ;; `{:seon.render/hiccup nil}` to mean "render nothing"
-;; (entity-html-sym callers already handle nil via `or`).
+;; (render-entity-html callers already handle nil via `or`).
 ;;
 ;; `:seon.render/ai` — the OPTIONAL text twin (live-tiles U1, PRD §2):
 ;; how the agent knows what its human sees. Tile fns return it
@@ -425,31 +416,25 @@
   [rows]
   (sort-by :last-tx rows))
 
-(defn- entity-html-sym
-  "Resolve the HTML render symbol for `entity`: per-entity override wins,
-   else datalog lookup against the entity's primary `:seon.schema`
-   kind. nil if neither path yields a symbol."
-  [db entity]
-  (or (some->> (:seon.render/html entity)
-               (db/decode-edn-value :seon.render/html))
-      (let [{:keys [kinds-by-kw]} (kind-tables db)
-            kind (entity-primary-kind db entity)]
-        ;; NOTE: `(get kinds-by-kw kind)`, NOT `(some-> kinds-by-kw kind …)`
-        ;; — the latter invokes `kind` as a fn and throws a TypeError
-        ;; when entity-primary-kind returns nil (no kind matched).
-        (some-> (get kinds-by-kw kind) :html))))
+(defn- entity-render-slot
+  "Resolve the render value for `entity` on `surface` (`:html` or
+   `:ai`) — THE two-step resolution both twins share: per-entity attr
+   override wins (`:seon.render/html` / `:seon.render/ai`,
+   bridge-decoded), else the entity's primary `:seon.schema` kind's
+   default symbol. nil when neither step yields a value.
 
-(defn- entity-ai-sym
-  "Resolve the AI render symbol for `entity`: per-entity override wins,
-   else datalog lookup against the entity's primary `:seon.schema`
-   kind."
-  [db entity]
-  (or (some->> (:seon.render/ai entity)
-               (db/decode-edn-value :seon.render/ai))
-      (let [{:keys [kinds-by-kw]} (kind-tables db)
-            kind (entity-primary-kind db entity)]
-        ;; Same nil-kind guard as entity-html-sym.
-        (some-> (get kinds-by-kw kind) :ai))))
+   (Replaces the former entity-html-sym/entity-ai-sym twins — one
+   resolution path, one dispatch; render sweep 2026-06-11.)"
+  [db entity surface]
+  (let [attr (case surface :html :seon.render/html :ai :seon.render/ai)]
+    (or (some->> (get entity attr)
+                 (db/decode-edn-value attr))
+        (let [{:keys [kinds-by-kw]} (kind-tables db)
+              kind (entity-primary-kind db entity)]
+          ;; NOTE: `(get kinds-by-kw kind)`, NOT `(some-> kinds-by-kw kind …)`
+          ;; — the latter invokes `kind` as a fn and throws a TypeError
+          ;; when entity-primary-kind returns nil (no kind matched).
+          (get (get kinds-by-kw kind) surface)))))
 
 (defn render-entity-html
   "Render `entity` to hiccup via its resolved `:seon.render/html` symbol.
@@ -464,7 +449,7 @@
   {:malli/schema [:=> [:cat :map] [:maybe :any]]}
   [{:seon.db/keys [db] :seon.render/keys [entity] :as input}]
   (let [db (or db @db/*conn*)]
-    (when-let [sym (entity-html-sym db entity)]
+    (when-let [sym (entity-render-slot db entity :html)]
       (try
         (:seon.render/hiccup (html-render sym input))
         (catch :default _ nil)))))
@@ -472,12 +457,24 @@
 ;; ============================================================
 ;; Agent tile (live-tiles U1) — the agent's ONE always-visible HTML
 ;; surface. Resolution (seon.render.live-tile/wired-content):
-;; per-entity `:seon.render.live-tile/content` → legacy per-entity
-;; `:seon.render/html` (follow-up retires it, PRD §8.1) → the
-;; substrate welcome. The `:seon.agent` KIND default is no longer
-;; consulted for the TILE — that key now means only the generic
-;; entity-card render (one key, one meaning).
+;; per-entity `:seon.render.live-tile/content` → the substrate
+;; welcome. Neither `:seon.render/html` nor the `:seon.agent` KIND
+;; default is consulted for the TILE — that key means only the
+;; generic entity-card render (one key, one meaning; PRD §8.1).
 ;; ============================================================
+
+(def ^:private tile-entity-pattern
+  "What tile rendering READS of the agent entity — the wired slot
+   (wired-content), the welcome's purpose/id, and state. Deliberately
+   NOT '[*]: the full pull inlined the agent's whole
+   `:seon.agent/sessions` component tree per tile render (T5's
+   amplifier finding, open-issues 2026-06-11). Tile fns needing more
+   get `:seon.db/db` in their input and query for it."
+  [:db/id
+   :seon.agent/id
+   :seon.agent/state
+   :seon.agent/purpose
+   :seon.render.live-tile/content])
 
 (schema/register! :seon.render/tile-request
   [:map
@@ -499,7 +496,12 @@
   {:malli/schema [:=> [:cat :seon.render/tile-request] :seon.render/html-response]}
   [{:seon.agent/keys [id] :seon.db/keys [db]}]
   (let [db  (or db @db/*conn*)
-        ent (try (d/pull db '[*] [:seon.agent/id id])
+        ;; Guarded pull (seon.db/pull, 65dfc90): registered-but-never-
+        ;; installed attrs (e.g. ::content on a fresh store) are
+        ;; filtered, typos throw legibly. The remaining try covers only
+        ;; the unresolvable-lookup-ref throw (missing agent → nil
+        ;; hiccup, the documented contract).
+        ent (try (db/pull db tile-entity-pattern [:seon.agent/id id])
                  (catch :default _ nil))]
     (if (nil? (:seon.agent/id ent))
       {:seon.render/hiccup nil}
@@ -523,10 +525,13 @@
   {:malli/schema [:=> [:cat :map] [:maybe :string]]}
   [{:seon.db/keys [db] :seon.render/keys [entity] :as input}]
   (let [db (or db @db/*conn*)]
-    (when-let [sym (entity-ai-sym db entity)]
+    (when-let [sym (entity-render-slot db entity :ai)]
       (try
-        ;; Twin-key convergence (PRD §8.2): prefer :seon.render/ai,
-        ;; accept legacy :seon.render/text until the producer sweep.
+        ;; Twin-key convergence (PRD §8.2): all substrate producers
+        ;; emit :seon.render/ai (sweep 2026-06-11). The :text read
+        ;; stays as READER tolerance for agent-authored renderer fns
+        ;; already in live stores that learned the old key — drop it
+        ;; with the ctx-family rename (V4 composer rewrite).
         (let [out (ai-render sym input)]
           (or (:seon.render/ai out) (:seon.render/text out)))
         (catch :default _ nil)))))

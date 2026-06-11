@@ -76,7 +76,7 @@
   (let [input {:seon.db/db nil :seon.agent/id "x"}
         out   (render/ai-render 'nonexistent/sym input)]
     (is (= (default/pretty-ai input) out))
-    (is (string? (:seon.render/text out)))))
+    (is (string? (:seon.render/ai out)))))
 
 (deftest ai-render-nil-slot-falls-through-to-pretty-ai
   (let [input {:seon.db/db nil :seon.agent/id "x"}]
@@ -120,11 +120,15 @@
 ;; pretty-print floors — shapes match the spec'd response schemas.
 ;; ============================================================
 
-(deftest pretty-ai-returns-text-string
+(deftest pretty-ai-returns-ai-string
+  ;; Twin-key convergence (PRD live-tiles §8.2): the text twin of a
+  ;; render is :seon.render/ai — pretty-ai emits it, never the retired
+  ;; producer key :seon.render/text.
   (let [out (default/pretty-ai {:seon.db/db nil :seon.agent/id "x"})]
     (is (map? out))
-    (is (contains? out :seon.render/text))
-    (is (string? (:seon.render/text out)))))
+    (is (contains? out :seon.render/ai))
+    (is (string? (:seon.render/ai out)))
+    (is (not (contains? out :seon.render/text)))))
 
 (deftest pretty-html-returns-hiccup-pre
   (let [out (default/pretty-html {:seon.db/db nil :seon.agent/id "x"})]
@@ -136,21 +140,14 @@
 
 ;; ============================================================
 ;; render-agent-tile (unit 1.4) — the agent's ONE live tile.
-;;   • default: kind-lookup (or the hardcoded floor) resolves
-;;     seon.render.default/view → the "agent-<id>" tile div.
-;;   • override: a per-entity :seon.render/html symbol on the agent
-;;     entity WINS over the default.
+;;   • default: unwired agent → seon.render.live-tile/welcome.
+;;   • override: :seon.render.live-tile/content (covered in
+;;     seon.render.live-tile-test; the legacy :seon.render/html tile
+;;     fallback was DELETED in the render sweep — PRD §8.1, no legacy).
 ;;   • missing agent → {:seon.render/hiccup nil}, never a throw.
 ;; Fresh isolated conn per test (client/open-agent-conn!) — NEVER the
 ;; live pod conn.
 ;; ============================================================
-
-(defn tile-override
-  "Test tile renderer — the per-entity override target. Resolved by
-   `seon.eval/lookup-value` via its munged globalThis path."
-  {:malli/schema [:=> [:cat :map] :seon.render/html-response]}
-  [_input]
-  {:seon.render/hiccup [:h1 "custom-tile"]})
 
 (defn- with-tile-conn
   "Open a fresh conn, seed the :seon.agent kind schema entity + one
@@ -188,22 +185,29 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest render-agent-tile-per-entity-override-wins
+(deftest render-agent-tile-ignores-legacy-html-slot
+  ;; Render sweep 2026-06-11 (PRD §8.1, no legacy): a per-entity
+  ;; :seon.render/html value is the generic ENTITY-CARD slot only —
+  ;; the tile ignores it and falls through to the welcome. The
+  ;; positive ::content override path is pinned in
+  ;; seon.render.live-tile-test.
   (async done
     (-> (with-tile-conn "tileovr-000001"
           (fn [conn]
             (-> (db/transact!
                   {:seon.db/tx-data
                    [{:seon.agent/id    "tileovr-000001"
-                     :seon.render/html 'seon.render-test/tile-override}]})
+                     :seon.render/html [:h1 "card-slot-not-a-tile"]}]})
                 (.then (fn [_]
                          (binding [db/*conn* conn]
                            (let [{:seon.render/keys [hiccup]}
                                  (render/render-agent-tile
                                    {:seon.db/db @conn
                                     :seon.agent/id "tileovr-000001"})]
-                             (is (= [:h1 "custom-tile"] hiccup)
-                                 "per-entity :seon.render/html override wins over the kind default"))))))))
+                             (is (= "seon-tile" (:class (second hiccup)))
+                                 "tile ignores :seon.render/html and renders the welcome")
+                             (is (not= [:h1 "card-slot-not-a-tile"] hiccup)
+                                 "the entity-card slot never reaches the tile surface"))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

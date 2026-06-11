@@ -80,7 +80,7 @@
                   (conj (str "schemas(" (count schemas) "): " sc-list))
                   (and (empty? fns) (empty? schemas))
                   (conj "(empty)"))]
-    {:seon.render/text (str/join "  " parts)}))
+    {:seon.render/ai (str/join "  " parts)}))
 
 (defn- anchor-id
   "Stable in-page anchor id for a fn/schema entity card. Keep in

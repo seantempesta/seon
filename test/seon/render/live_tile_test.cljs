@@ -4,8 +4,9 @@
    render-agent-tile integration (live-tiles PRD 2026-06-11, U1):
 
      • greeting — time-of-day boundaries
-     • wired-content — ::content wins → legacy :seon.render/html →
-       welcome default; pr-str-encoded values decode
+     • wired-content — ::content wins (legacy :seon.render/html tile
+       fallback DELETED, PRD §8.1) → welcome default; pr-str-encoded
+       values decode
      • welcome — .seon-tile compact+expanded blocks, date, purpose,
        panel line, :seon.render/ai twin
      • error-response — fallback card + envelope + twin (never vanish)
@@ -55,14 +56,17 @@
     (is (= :seon.render.live-tile/content source))
     (is (= 'my.ns/tile-fn value) "new key wins AND decodes")))
 
-(deftest wired-content-legacy-html-second
+(deftest wired-content-ignores-legacy-html-slot
+  ;; Render sweep 2026-06-11 (PRD §8.1, no legacy): :seon.render/html
+  ;; is the generic entity-card slot ONLY — never the tile.
   (let [{:seon.render.live-tile/keys [source value]}
         (tile/wired-content
           {:seon.render/entity
            {:seon.agent/id    "wired-22060002"
             :seon.render/html (pr-str [:h1 "legacy"])}})]
-    (is (= :seon.render/html source))
-    (is (= [:h1 "legacy"] value) "per-entity legacy slot honored")))
+    (is (= :seon.render.live-tile/welcome source))
+    (is (= tile/welcome-sym value)
+        "the card slot never wires the tile — welcome renders")))
 
 (deftest wired-content-unwired-defaults-to-welcome
   (let [{:seon.render.live-tile/keys [source value]}
@@ -84,7 +88,7 @@
   (let [{:seon.render/keys [hiccup ai]}
         (tile/welcome {:seon.db/db nil :seon.agent/id "wlcm-2206110001"})
         classes (->> (flatten hiccup) (filter map?) (keep :class))]
-    (is (render/valid-hiccup? hiccup))
+    (is (tile/valid-hiccup? hiccup))
     (is (= "seon-tile" (:class (second hiccup)))
         "wrapped in the .seon-tile container")
     (is (some #(re-find #"seon-tile-compact" %) classes))
@@ -147,7 +151,7 @@
         (tile/error-response
           {:seon.db/error                 env
            :seon.render.live-tile/content 'my.ns/broken-tile})]
-    (is (render/valid-hiccup? hiccup) "human sees a card, not a blank")
+    (is (tile/valid-hiccup? hiccup) "human sees a card, not a blank")
     (is (some #(re-find #"tile error" %) (hiccup-strings hiccup)))
     (is (some #(re-find #"the agent has been shown the failure" %)
               (hiccup-strings hiccup)))

@@ -30,7 +30,7 @@
     [seon.agent :as agent]
     [seon.client :as client]
     [seon.db :as db]
-    [seon.render :as render]))
+    [seon.render.live-tile :as tile]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fixture — fresh conn seeded with a small ns graph:
@@ -114,7 +114,7 @@
                   hiccup (:seon.render/hiccup res)]
               (is (vector? hiccup) ":html form is a hiccup vector")
               (is (= :div (first hiccup)) "outer container is a :div")
-              (is (render/valid-hiccup? hiccup) "passes valid-hiccup?")
+              (is (tile/valid-hiccup? hiccup) "passes valid-hiccup?")
               (is (str/includes? (pr-str hiccup) "test.parent/greet")
                   "fn sym appears somewhere in the hiccup"))))
         (.then (fn [_] (done)))
