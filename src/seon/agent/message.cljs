@@ -19,6 +19,7 @@
     [clojure.string :as str]
     [seon.ctx :as ctx]
     [seon.db :as db]
+    [seon.eval :as seval]
     [seon.schema :as schema]))
 
 ;; Messaging codified (unit 1.5, 2026-06-09): every stored message is
@@ -82,7 +83,13 @@
    ;; to accepts ONE ref or a vector of refs (fan-out); defaults to
    ;; THE user. Storage is always the normalized vector.
    [:seon.agent.message/to {:optional true}
-    [:or :seon.db/ref [:vector :seon.db/ref]]]])
+    [:or :seon.db/ref [:vector :seon.db/ref]]]
+   ;; Override for the batch-failure guard (fix-everything B3): a send
+   ;; composed in the same batch as a FAILED earlier form is refused
+   ;; unless the caller passes force — a deliberate "I have seen the
+   ;; failures and am replying about them anyway". Request-only; never
+   ;; stored.
+   [:seon.agent.message/force {:optional true} :boolean]])
 
 ;; Concise success / standard error envelope (#26, A3 applied): the raw
 ;; transact tx-report is OFF the agent surface — ~1.5k transcript chars
@@ -133,6 +140,89 @@
                second))
         0)))
 
+;; ------------------------------------------------------------
+;; Batch-failure guard (fix-everything-prd-2026-06-11 §1 ROOT-3 / B3).
+;; The blind same-batch reply: research+register+transact+verify+reply
+;; composed as ONE batch, every form failed, and the reply still told
+;; the user "logged it" — the reply text was composed BEFORE any result
+;; existed, and envelope failures (errors-as-values, eval-ok? TRUE)
+;; correctly don't abort batches. The guard closes the gap at SEND
+;; time, deriving batch state instead of storing any:
+;;   - eval-batch! runs forms sequentially and AWAITS record-eval!
+;;     before the next form, so every EARLIER form of the current batch
+;;     is a durable :seon.eval row under the current turn;
+;;   - message!/reply! execute inside the batch's tx-context scope
+;;     (run-turn! layers :seon.db/turn-id; eval-batch!'s per-form scope
+;;     merges) — (db/current-tx-context) names the turn;
+;;   - ok-eval values live in the globalThis stash (seval/lookup-result).
+;; Outside a batch (HTTP adapter, tests, boot) there is no turn-id in
+;; scope and the guard is inert.
+;; ------------------------------------------------------------
+
+(defn- envelope-failure?
+  "Is `v` an error-envelope-shaped VALUE — a map carrying any `*/ok?`
+   key whose value is false? Structural (key NAME = \"ok?\"), not a
+   list of blessed envelope types: every substrate envelope
+   (`:seon.db/ok?`, `:seon.eval/ok?`, `:seon.agent.message/ok?`, …)
+   and any future one matches."
+  [v]
+  (boolean
+    (and (map? v)
+         (some (fn [[k val]]
+                 (and (keyword? k) (= "ok?" (name k)) (false? val)))
+               v))))
+
+(defn- envelope-error-message
+  "Best-effort human line from an error envelope: a top-level
+   `:seon.error/message`, or one nested under any `*/error` map key."
+  [v]
+  (when (map? v)
+    (or (:seon.error/message v)
+        (some (fn [[k val]]
+                (when (and (keyword? k) (= "error" (name k)) (map? val))
+                  (:seon.error/message val)))
+              v))))
+
+(defn- clip
+  [s n]
+  (let [s (str/replace (str s) #"\s+" " ")]
+    (if (> (count s) n) (str (subs s 0 n) "…") s)))
+
+(defn- batch-failure-lines
+  "One legible line per FAILED earlier form of the current batch, [] when
+   none (or outside a batch scope). Derived at send time — the current
+   turn's recorded :seon.eval rows, oldest-first; the in-flight form
+   (the one calling us) is not yet recorded, so every row is an EARLIER
+   form. A failure is an eval error (:seon.eval/ok? false — includes
+   read failures) OR an ok eval whose live value is an error envelope
+   (the errors-as-values case the s21 blobs proved decisive). An ok
+   eval whose live value can't be found is also flagged — unverifiable
+   is not verified."
+  []
+  (if-let [turn-id (:seon.db/turn-id (db/current-tx-context))]
+    (let [turn  (try (db/entity {:seon.db/ref [:seon.agent.turn/id turn-id]})
+                     (catch :default _ nil))
+          evals (sort-by #(.getTime ^js (:seon.eval/at %))
+                         (:seon.agent.turn/evals turn))]
+      (vec
+        (keep
+          (fn [e]
+            (let [id  (:seon.eval/id e)
+                  src (clip (:seon.eval/source e) 60)]
+              (cond
+                (false? (:seon.eval/ok? e))
+                (str "eval " id " «" src "» — eval ERROR: "
+                     (clip (or (:seon.eval/error e) "(see its transcript line)") 160))
+
+                (true? (:seon.eval/ok? e))
+                (let [live (seval/lookup-result id)]
+                  (when (envelope-failure? live)
+                    (str "eval " id " «" src "» — returned an error envelope"
+                         (when-let [m (envelope-error-message live)]
+                           (str ": " (clip m 160)))))))))
+          evals)))
+    []))
+
 (defn ^:async message!
   "Send a message — THE single entry point for `:seon.agent.message` writes.
    Map-in / map-out; returns a CONCISE envelope, never the raw
@@ -151,9 +241,20 @@
 
    Blank content is REJECTED with an error envelope — empty assistant
    messages were a recurring live defect (runs 3 + 6); since every
-   message write routes through here, the guard kills the class."
+   message write routes through here, the guard kills the class.
+
+   Same-batch failure guard (B3): when an EARLIER form of the current
+   batch failed (eval error OR an error-envelope value — see
+   [[batch-failure-lines]]), the send is REFUSED with a legible
+   envelope naming the failed forms; the refusal lands in the eval log
+   so the agent sees it next turn and replies honestly. Pass
+   `:seon.agent.message/force true` to send anyway (a deliberate reply
+   ABOUT the failures). The guard lives here — not only in `reply!` —
+   because message! is THE single write path: a fan-out to another
+   agent composed before its batch's results existed is the same false
+   claim as a user-facing reply."
   {:malli/schema [:=> [:cat ::message-request] ::message-response]}
-  [{:seon.agent.message/keys [content from to]}]
+  [{:seon.agent.message/keys [content from to force]}]
   (let [agent-id (db/current-agent-id)
         from     (or from (when agent-id [:seon.agent/id agent-id]))
         to       (cond
@@ -181,40 +282,60 @@
              "pass from explicitly or call inside (seon.db/with-agent …).")}}
 
       :else
-      (let [hops   (if (user-entity? from)
-                     0
-                     (inc (waking-hops agent-id)))
-            msg-id (db/new-id!)
-            env    (await
-                     (db/transact!
-                       {:seon.db/tx-data
-                        [{:seon.agent.message/id      msg-id
-                          :seon.agent.message/from    from
-                          :seon.agent.message/to      to
-                          :seon.agent.message/content content
-                          :seon.agent.message/at      (js/Date.)
-                          :seon.agent.message/hops    hops}]}))]
-        (if (:seon.db/ok? env)
-          ;; concise success — the tx-report stays off the agent surface;
-          ;; the id is the durable handle ([:seon.agent.message/id msg-id]).
-          {:seon.agent.message/ok?  true
-           :seon.agent.message/id   msg-id
-           :seon.agent.message/hops hops}
-          env)))))
+      (let [failures (when-not force (batch-failure-lines))]
+        (if (seq failures)
+          ;; Same-batch failure guard (B3) — refuse legibly; the refusal
+          ;; is itself a value the agent sees on its next wake.
+          {:seon.db/ok? false
+           :seon.db/error
+           {:seon.error/message
+            (str "message! REFUSED: " (count failures)
+                 " earlier form(s) in this batch FAILED — this message was "
+                 "composed before those results existed, so sending it "
+                 "would claim success the transcript contradicts. Failed:\n  "
+                 (str/join "\n  " failures)
+                 "\nVerify each failure, then reply about what ACTUALLY "
+                 "happened — or pass :seon.agent.message/force true to "
+                 "send this text anyway.")}}
+          (let [hops   (if (user-entity? from)
+                         0
+                         (inc (waking-hops agent-id)))
+                msg-id (db/new-id!)
+                env    (await
+                         (db/transact!
+                           {:seon.db/tx-data
+                            [{:seon.agent.message/id      msg-id
+                              :seon.agent.message/from    from
+                              :seon.agent.message/to      to
+                              :seon.agent.message/content content
+                              :seon.agent.message/at      (js/Date.)
+                              :seon.agent.message/hops    hops}]}))]
+            (if (:seon.db/ok? env)
+              ;; concise success — the tx-report stays off the agent
+              ;; surface; the id is the durable handle
+              ;; ([:seon.agent.message/id msg-id]).
+              {:seon.agent.message/ok?  true
+               :seon.agent.message/id   msg-id
+               :seon.agent.message/hops hops}
+              env)))))))
 
 (defn ^:async reply!
   "Reply to whoever woke the current turn: `message!` with `to` := the
    `:seon.agent.message/from` of the current turn's `:seon.agent.turn/woken-by`
    message (derived — the substrate knows who's talking to you; no
    target atom). Falls back to the user when the turn wasn't woken by a
-   message. Returns `message!`'s concise envelope. The one-liner for
-   both user- and agent-conversations:
+   message. Returns `message!`'s concise envelope — including its
+   same-batch failure refusal (B3): when an earlier form of this batch
+   failed, the reply is refused; pass `:seon.agent.message/force true`
+   to deliberately reply about the failures. The one-liner for both
+   user- and agent-conversations:
 
      (seon.agent/reply! {:seon.agent.message/content \"done — stored 2 rows\"})"
   {:malli/schema [:=> [:cat ::message-request] ::message-response]}
-  [{:seon.agent.message/keys [content]}]
+  [{:seon.agent.message/keys [content force]}]
   (let [agent-id (db/current-agent-id)
         woke-from (get-in (ctx/current-turn {:seon.agent/id agent-id})
                           [:seon.agent.turn/woken-by :seon.agent.message/from :db/id])]
-    (await (message! {:seon.agent.message/content content
-                      :seon.agent.message/to      (if woke-from [woke-from] [user-ref])}))))
+    (await (message! (cond-> {:seon.agent.message/content content
+                              :seon.agent.message/to      (if woke-from [woke-from] [user-ref])}
+                       (some? force) (assoc :seon.agent.message/force force))))))

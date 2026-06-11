@@ -16,7 +16,8 @@
     [datahike.api :as d]
     [seon.agent :as agent]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.eval :as seval]))
 
 (def ^:private a-id "msgtest-agent-a")
 (def ^:private b-id "msgtest-agent-b")
@@ -248,6 +249,169 @@
                           "reply goes back to agent B")
                       (is (= 3 (:seon.agent.message/hops m))
                           "waking hops 2 + 1 — the chain marches to the cap")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Same-batch failure guard (fix-everything B3): a reply!/message! form
+;; in a batch where an EARLIER form failed — eval error OR an
+;; `*/ok? false` error-envelope VALUE (errors-as-values, eval-ok? TRUE)
+;; — is refused with a legible envelope; :seon.agent.message/force true
+;; overrides. Earlier-batch state is DERIVED: the tx-context's
+;; :seon.db/turn-id → the turn's recorded :seon.eval rows + the
+;; globalThis live-value stash. No tx-context turn-id ⇒ guard inert
+;; (every test above runs without one and still passes).
+;; ---------------------------------------------------------------------------
+
+(def ^:private turn-id "TRNmsgtest0001")
+
+(defn- seed-turn-eval!
+  "Attach one :seon.eval row to the seeded turn (raw datahike — same
+   bypass as seed-woken-turn!). `stash` (optional) is the eval's live
+   value, stashed under its id exactly as eval-batch! does."
+  [conn {:keys [eval-id source ok? error stash]}]
+  (when (some? stash)
+    (seval/stash-result-raw! eval-id stash))
+  (d/transact!
+    conn
+    {:tx-data
+     [{:seon.agent.turn/id turn-id
+       :seon.agent.turn/evals
+       [(cond-> {:seon.eval/id     eval-id
+                 :seon.eval/at     (js/Date.)
+                 :seon.eval/source source
+                 :seon.eval/ns     :my.agent.msgtest
+                 :seon.eval/ok?    ok?}
+          error (assoc :seon.eval/error error))]}]}))
+
+(defn- reply-in-batch!
+  "Call reply! as the batch would: agent ALS scope + the turn's
+   tx-context (run-turn! layers :seon.db/turn-id; eval-batch!'s
+   per-form scope merges into it)."
+  [req]
+  (db/with-agent a-id
+    (fn []
+      (db/with-tx-context
+        {:seon.db/agent-id a-id :seon.db/turn-id turn-id}
+        (fn [] (agent/reply! req))))))
+
+(defn- non-wake-msgs [conn]
+  (->> (pulled-msgs conn)
+       (remove #(= "MSGmsgtestWAKE" (:seon.agent.message/id %)))))
+
+(deftest batch-guard-refuses-after-an-eval-error
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (seed-woken-turn! conn {:seon.user/id "user"} 0)
+                (.then (fn [_]
+                         (seed-turn-eval!
+                           conn {:eval-id "EVLmsgtstERR1"
+                                 :source  "(schema/register! ::run :string)"
+                                 :ok?     false
+                                 :error   "undeclared var schema/register!"})))
+                (.then (fn [_]
+                         (reply-in-batch!
+                           {:seon.agent.message/content "logged it — all stored"})))
+                (.then
+                  (fn [{ok? :seon.db/ok? error :seon.db/error}]
+                    (is (false? ok?) "eval error earlier in the batch → refusal")
+                    (let [m (:seon.error/message error)]
+                      (is (re-find #"REFUSED" m))
+                      (is (re-find #"EVLmsgtstERR1" m)
+                          "refusal NAMES the failed form")
+                      (is (re-find #"undeclared var" m)
+                          "refusal carries the failure's error text")
+                      (is (re-find #":seon.agent.message/force" m)
+                          "refusal teaches the override"))
+                    (is (empty? (non-wake-msgs conn))
+                        "nothing was sent to the user"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest batch-guard-refuses-on-an-error-envelope-value
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            ;; The decisive s21 case: the transact REJECTION is an
+            ;; eval-ok? TRUE value (errors-as-values) — the guard must
+            ;; count the `*/ok? false` envelope as a failure.
+            (-> (seed-woken-turn! conn {:seon.user/id "user"} 0)
+                (.then (fn [_]
+                         (seed-turn-eval!
+                           conn {:eval-id "EVLmsgtstENV1"
+                                 :source  "(db/transact! {:seon.db/tx-data [{:my.run/id \"run-1\"}]})"
+                                 :ok?     true
+                                 :stash   {:seon.db/ok? false
+                                           :seon.db/error
+                                           {:seon.error/message
+                                            "unregistered attr :my.run/id"}}})))
+                (.then (fn [_]
+                         (reply-in-batch!
+                           {:seon.agent.message/content "stored as run-1"})))
+                (.then
+                  (fn [{ok? :seon.db/ok? error :seon.db/error}]
+                    (is (false? ok?) "envelope failure (eval-ok? true) → refusal")
+                    (let [m (:seon.error/message error)]
+                      (is (re-find #"EVLmsgtstENV1" m))
+                      (is (re-find #"error envelope" m))
+                      (is (re-find #"unregistered attr" m)
+                          "refusal surfaces the envelope's error message"))
+                    (is (empty? (non-wake-msgs conn))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest batch-guard-force-sends-despite-failures
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (seed-woken-turn! conn {:seon.user/id "user"} 0)
+                (.then (fn [_]
+                         (seed-turn-eval!
+                           conn {:eval-id "EVLmsgtstENV2"
+                                 :source  "(db/transact! …)"
+                                 :ok?     true
+                                 :stash   {:seon.db/ok? false
+                                           :seon.db/error
+                                           {:seon.error/message "rejected"}}})))
+                (.then (fn [_]
+                         (reply-in-batch!
+                           {:seon.agent.message/content
+                            "the transact FAILED — nothing was stored; see eval EVLmsgtstENV2"
+                            :seon.agent.message/force true})))
+                (.then
+                  (fn [{ok? :seon.agent.message/ok?}]
+                    (is (true? ok?) "force = a deliberate reply ABOUT the failures")
+                    (is (= 1 (count (non-wake-msgs conn)))
+                        "the forced message IS stored"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest batch-guard-all-green-batch-sends-normally
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (seed-woken-turn! conn {:seon.user/id "user"} 0)
+                (.then (fn [_]
+                         (seed-turn-eval!
+                           conn {:eval-id "EVLmsgtstOK01"
+                                 :source  "(+ 1 2)"
+                                 :ok?     true
+                                 :stash   3})))
+                (.then (fn [_]
+                         (seed-turn-eval!
+                           conn {:eval-id "EVLmsgtstOK02"
+                                 :source  "(db/transact! {:seon.db/tx-data […]})"
+                                 :ok?     true
+                                 ;; success envelopes have ok? TRUE — not a failure
+                                 :stash   {:seon.db/ok? true}})))
+                (.then (fn [_]
+                         (reply-in-batch!
+                           {:seon.agent.message/content "done — stored 1 row"})))
+                (.then
+                  (fn [{ok? :seon.agent.message/ok?}]
+                    (is (true? ok?) "all-green batch → reply sends unchanged")
+                    (is (= 1 (count (non-wake-msgs conn)))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
