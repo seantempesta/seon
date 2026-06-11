@@ -103,11 +103,11 @@
     [seon.handlers.schema]
     [seon.handlers.ns]
     ;; The my.* scaffold — shared provenance shapes (my.kb) + the
-    ;; cluster-wide instruction rows (my.kb.instruction) that
+    ;; system-wide instruction singleton (my.kb.system) that
     ;; `seed-substrate!` below transacts. Required here so their
     ;; register! calls run before the boot install of :my.kb/* attrs.
     [my.kb]
-    [my.kb.instruction]
+    [my.kb.system]
     ;; The store-resident system prompt (:my.soul rows — SOUL.md +
     ;; REPL mechanics). Required so its register! calls run before the
     ;; boot install of :my.soul/* attrs and so start-agent! can call
@@ -432,16 +432,17 @@
    ;; --- my.kb (knowledge-base scaffold, 2026-06-10). ---
    ;; The shared provenance shapes (registered in my.kb) installed at
    ;; boot so agent-designed my.kb.<domain> schemas can reference them
-   ;; before any kb tx lands, plus the my.kb.instruction first worked
-   ;; domain (cluster-wide guidance rows seeded by seed-substrate!).
+   ;; before any kb tx lands, plus the my.kb.system system-wide
+   ;; instruction singleton (empty entity seeded by seed-substrate!;
+   ;; rows are appended at runtime by agents and the user).
    :my.kb/source-path
    :my.kb/source-line
    :my.kb/verified-at
    :my.kb/confidence
-   :my.kb.instruction/id
-   :my.kb.instruction/text
-   :my.kb.instruction/priority
-   :my.kb.instruction/applies-when
+   :my.kb.system/id
+   :my.kb.system/instructions
+   :my.kb.system/text
+   :my.kb.system/at
    ;; The store-resident system prompt (my.soul — seeded at boot
    ;; from SOUL.md + the REPL mechanics, seed-only-if-absent).
    :my.soul/id
@@ -804,14 +805,14 @@
 ;;
 ;; Per docs/prds/agent-runtime/mvp-completion-plan-2026-05-27.md §Phase 2
 ;; + research/repl-session-context-template-2026-05-26.md §5: the substrate
-;; transacts the user entity + the my.kb.instruction guidance rows plus an
+;; transacts the user entity + the my.kb.system instruction singleton plus an
 ;; introspection-indexed set of core fns at boot, BEFORE any agent turn —
 ;; so replay-from-tx-0 starts on a fully-seeded substrate, not mid-air.
 ;;
 ;; Tx-ordering at boot (in start-agent!):
 ;;   1. Entity-schema decomposition (schema/all-entity-schemas-tx-data)
 ;;      — already shipped, Item 4 commit 35035d8.
-;;   2. seed-substrate!    — user entity + my.kb.instruction rows
+;;   2. seed-substrate!    — user entity + my.kb.system singleton
 ;;   3. index-substrate!   — :seon.ns + :seon.fn rows from REAL runtime
 ;;                           introspection (var meta + source file-read)
 ;;
@@ -820,23 +821,23 @@
 ;; ---------------------------------------------------------------------------
 
 (defn seed-substrate!
-  "Tx-data for THE user entity plus the cluster-wide
-   `:my.kb.instruction` guidance rows
-   (`my.kb.instruction/seed-tx-data` — the first worked my.kb domain;
-   rendered by every agent's `:instructions` context section,
-   runtime-editable by transact).
+  "Tx-data for THE user entity plus the EMPTY system-wide instruction
+   singleton (`my.kb.system/seed-tx-data` — context-v4 §2.2 home 3;
+   agents and the user APPEND rows at runtime, read back via
+   `(my.kb.system/instructions)` in the creation-turn tutorial).
 
    The user row is the ONE `:seon.user/id` entity every
    `:seon.agent.message/from`/`to` user-ref resolves to (identity upsert,
    idempotent — same pattern as agent entities; one human for now).
-   Instruction rows identity-upsert on `:my.kb.instruction/id` with
-   static values — re-running asserts zero new datoms.
+   The instruction singleton identity-upserts on `:my.kb.system/id`
+   carrying NO rows — re-running asserts zero new datoms and never
+   clobbers runtime appends.
 
    Pure fn. Caller transacts via `db/transact!` with
    `:seon.db/origin :substrate-seed`."
   []
   (into [{:seon.user/id "user"}]
-        (my.kb.instruction/seed-tx-data)))
+        (my.kb.system/seed-tx-data)))
 
 ;; ---------------------------------------------------------------------------
 ;; index-substrate! — runtime introspection of compiled substrate fns
@@ -1446,13 +1447,29 @@
           (runtime-id/host! id)
           res)))))
 
+(def instructions-read-source
+  "The creation-turn READ of the system-wide instructions (context-v4
+   PRD §3.1 tutorial register, V4-0): the fn's source is visible in
+   the rendered `my.kb.system` namespace, the CALL is visible in the
+   transcript, the RESULT is the value line — and re-running the fn is
+   how the agent gets the current set. The `;;` comments ride as the
+   eval's narration via `parse-forms`."
+  (str
+    ";; Next: the system-wide instructions — standing guidance for ALL\n"
+    ";; agents in this cluster. Anyone (my human, another agent, me) can\n"
+    ";; append a row; I re-read when I want the current set.\n"
+    "(my.kb.system/instructions)\n"))
+
 (defn ^:async creation-evals!
   "The startup eval block a NEWLY MINTED agent runs as its first
-   logged act (live-tiles PRD 2026-06-11 §6 U4, minimal scope): ONE
-   real eval, AS the agent, through the same `eval-batch!` path every
-   turn uses — the tile welcome wiring
+   logged act (live-tiles PRD 2026-06-11 §6 U4 + context-v4 §3.1):
+   real evals, AS the agent, through the same `eval-batch!` path every
+   turn uses — (1) the tile welcome wiring
    (`seon.render.live-tile/wiring-source`), whose tutorial `;;`
-   comments ride as the eval's narration. The eval transacts
+   comments ride as the eval's narration, and (2) the
+   `(my.kb.system/instructions)` read ([[instructions-read-source]],
+   V4-0) so the system-wide instruction rows land in the transcript as
+   a demonstrated query. The wiring eval transacts
    `:seon.render.live-tile/content` onto the agent's own entity by
    lookup ref; the datom is durable, so a pod restart resumes the
    wiring with no re-seed. CREATION ONLY — resumed agents are never
@@ -1472,7 +1489,9 @@
           (let [session    (await (agent/ensure-session! id))
                 session-id (:seon.agent.session/id session)
                 turn-id    (db/new-id!)
-                source     (live-tile/wiring-source id)
+                source     (str (live-tile/wiring-source id)
+                                "\n"
+                                instructions-read-source)
                 batch
                 (await
                   (db/with-tx-context
@@ -1635,7 +1654,7 @@
                 ;;   1. entity-schema decomposition (Item 4) — must
                 ;;      land first so subsequent entities reference
                 ;;      registered shapes.
-                ;;   2. user entity + my.kb.instruction guidance rows
+                ;;   2. user entity + my.kb.system instruction singleton
                 ;;      (seed-substrate!), then the :my.soul
                 ;;      system-prompt rows (seed-only-if-absent — user
                 ;;      edits survive reboot).

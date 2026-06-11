@@ -155,8 +155,9 @@
    wrapper (wrapper doctrine, register! calls, map-in/map-out
    request/response schemas, error envelopes); `seon.agent.todo` is
    THE store/retrieve + resume arc; `my.kb` (+ child
-   `my.kb.instruction`) is the knowledge-base scaffold agents copy
-   when designing their own knowledge schemas.
+   `my.kb.system`, the system-wide instruction singleton) is the
+   knowledge-base scaffold agents copy when designing their own
+   knowledge schemas.
 
    DELIBERATE FOLLOW-UP (not this unit): the post-split public faces
    (`seon.db` — already split —, `seon.schema`, `seon.repl`,
@@ -595,8 +596,12 @@
 ;; ------------------------------------------------------------
 
 (defn system-section
-  "REPL header: who-am-I, the strict response-format contract, and the
-   discovery cheat-sheet.
+  "REPL header: who-am-I, the strict response-format contract, the
+   discovery cheat-sheet, and the four standing behavioral teachings
+   (consult-before-research, store-proactively, reply-once,
+   namespace-map — STAGED here by context-v4 V4-0 when the
+   `<instructions>` section died; V4-1 rewrites this whole block into
+   the §2.1 concept paragraphs).
 
    CACHE-PREFIX invariant: this section is the FIRST bytes of every
    turn's user message and must be BYTE-STABLE across turns. No
@@ -641,6 +646,27 @@
        "                    '[:seon.ns/source\n"
        "                       {:seon.fn/_ns [*] :seon.schema/_ns [*]}]\n"
        "                    :seon.db/ref [:seon.ns/name (seon.agent/current-ns)]})\n"
+       "\n"
+       "  STANDING GUIDANCE:\n"
+       "  - Consult stored knowledge FIRST: check the schema-catalog for\n"
+       "    my.kb.* attrs and datalog those exact keywords before any\n"
+       "    research. Prior agents already answered many questions —\n"
+       "    re-deriving a stored answer is wasted turns. Search the repo\n"
+       "    only when no stored knowledge covers the question.\n"
+       "  - Store what you verify, without being asked: design (or reuse)\n"
+       "    a my.kb.<domain> schema for the kind of knowledge at hand,\n"
+       "    reference the shared :my.kb/* provenance attrs, and transact\n"
+       "    the fact. Knowledge nobody stored is research the next agent\n"
+       "    pays for again.\n"
+       "  - A turn serving a question MUST end with (seon.agent/reply! …)\n"
+       "    in the SAME response — your human sees NOTHING until reply!\n"
+       "    lands. ONE reply per question: once reply! lands your wake is\n"
+       "    complete and the loop stops. Do not emit verification forms or\n"
+       "    follow-up replies after answering; a new message will wake you\n"
+       "    if more is needed.\n"
+       "  - Your code is my.*, your knowledge is my.kb.* (real schemas per\n"
+       "    domain), and the substrate is seon.agent.* plus the other\n"
+       "    seon.* namespaces — call substrate fns, never redefine them.\n"
        "</system>"))
 
 ;; ------------------------------------------------------------
@@ -2038,37 +2064,38 @@
    agent — ordered MOST-STATIC → MOST-DYNAMIC (prompt-cache friendly),
    per the context-render PRD (Phase 2) table:
 
-     1. :system            — Seon identity + CLJS-in-Node + REPL contract (static)
-     2. :instructions      — cluster-wide behavioral guidance: the
-                             :my.kb.instruction rows, priority-ordered
-                             (semi-static — busts only on an instruction
-                             transact; runtime-editable by anyone)
-     3. :capabilities      — core API worked examples (static)
-     4. :exemplars         — FULL source of the exemplar namespaces
+     1. :system            — Seon identity + CLJS-in-Node + REPL contract
+                             + the four standing behavioral teachings
+                             (static; context-v4 V4-0 — the old
+                             :instructions section DIED, system-wide
+                             runtime instructions live in my.kb.system,
+                             read by eval, never a section)
+     2. :capabilities      — core API worked examples (static)
+     3. :exemplars         — FULL source of the exemplar namespaces
                              (seon.agent.search, seon.agent.todo, my.kb +
                              children + test siblings), queried from
                              :seon.ns/source; byte-stable for the pod's
                              life (static — inside the cache prefix)
-     5. :schema-catalog    — GLOBAL catalog of every entity KIND in the
+     4. :schema-catalog    — GLOBAL catalog of every entity KIND in the
                              system (cross-ns; what DATA exists), grouped by
                              namespace with attrs + instance counts;
                              semi-static (busts only on schema register)
-     6. :functions-catalog — THIN per-ns count index of every fn defined in
+     5. :functions-catalog — THIN per-ns count index of every fn defined in
                              the system (cross-ns; what CODE exists);
                              semi-static (busts when a fn is (re)defined)
-     7. :live-tile         — what your human currently sees: the agent's
+     6. :live-tile         — what your human currently sees: the agent's
                              wired tile invoked against the turn's db, twin
                              text + wired identity (dynamic — present-tense
                              self-knowledge, like :warnings/:open-todos)
-     8. :namespace-context — `render-namespace` of required nses + own ns
+     7. :namespace-context — `render-namespace` of required nses + own ns
                              (mostly static; busts on ns edit)
-     9. :warnings          — current cross-agent problems (failed/slow evals,
+     8. :warnings          — current cross-agent problems (failed/slow evals,
                              failing tests); reactive, vanishes when fixed (dynamic)
-    10. :open-todos        — the CALLING agent's open work items
+     9. :open-todos        — the CALLING agent's open work items
                              (seon.agent.todo/open-todos-section); derived from the
                              db, vanishes when the work is done (dynamic)
-    11. :transcript        — messages + evals interleaved chronologically (dynamic)
-    12. :prompt            — `my.agent.<id>=>  ; turn N` (always changing)
+    10. :transcript        — messages + evals interleaved chronologically (dynamic)
+    11. :prompt            — `my.agent.<id>=>  ; turn N` (always changing)
 
    :exemplars sits at 22, between :capabilities (20) and :schema-catalog
    (25): system + capabilities + exemplars are all fully byte-stable while
@@ -2086,8 +2113,6 @@
   []
   [{:seon.ctx/name :system            :seon.ctx/priority 10
     :seon.render/ai 'seon.ctx/system-section}
-   {:seon.ctx/name :instructions      :seon.ctx/priority 15
-    :seon.render/ai 'my.kb.instruction/instructions-section}
    {:seon.ctx/name :capabilities      :seon.ctx/priority 20
     :seon.render/ai 'seon.ctx/capabilities-section}
    {:seon.ctx/name :exemplars         :seon.ctx/priority 22

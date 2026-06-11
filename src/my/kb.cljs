@@ -6,8 +6,8 @@
    `my.kb.paper/*`, …) — designing one is the same skill as modeling
    your human's data. Do NOT build a general memory-markdown structure;
    storing large text is allowed when your human wants it, but it is
-   never the default. `my.kb.instruction` (sibling file) is the worked
-   example of a domain.
+   never the default. `my.kb.system` (sibling file) is the worked
+   example of a domain — the system-wide instruction singleton.
 
    Reference the shared provenance attrs below from your domain schemas
    instead of re-inventing source-path/line/confidence per domain:

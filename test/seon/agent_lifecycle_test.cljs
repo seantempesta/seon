@@ -142,7 +142,9 @@
               (let [batch (await (client/creation-evals!
                                    {:seon.agent/id            wired-id
                                     :seon.agent/compile-state compile-state}))]
-                (is (= 1 (:seon.eval/n-ok batch)) "ONE wiring eval, ok")
+                (is (= 2 (:seon.eval/n-ok batch))
+                    "TWO creation evals, ok — the wiring + the
+                     (my.kb.system/instructions) read (V4-0)")
                 (is (zero? (:seon.eval/n-fail batch)) "no failures"))
               (testing "the datom landed — render resolves the WIRED value"
                 (let [ent (db/entity {:seon.db/ref [:seon.agent/id wired-id]})
@@ -168,7 +170,9 @@
                       ev      (first evals)]
                   (is (= 1 (count turns)) "one creation turn")
                   (is (= :done (:seon.agent.turn/status turn)))
-                  (is (= 1 (count evals)) "one eval — the wiring")
+                  (is (= 2 (count evals))
+                      "two evals — the wiring, then the system-wide
+                       instructions read (V4-0)")
                   (is (true? (:seon.eval/ok? ev)) "a REAL ok result")
                   (is (= (:source (first (repl.internal/parse-forms
                                            (tile/wiring-source wired-id))))
@@ -178,6 +182,15 @@
                       "tutorial comments ride as the eval's narration")
                   (is (re-find #":seon.db/ok\? true"
                                (str (:seon.eval/result-edn ev)))
-                      "the recorded result is the transact's ok envelope"))))))
+                      "the recorded result is the transact's ok envelope")
+                  (let [ev2 (second evals)]
+                    (is (= "(my.kb.system/instructions)"
+                           (:seon.eval/source ev2))
+                        "the SECOND eval is the system-wide instructions
+                         read — the §3.1 tutorial query")
+                    (is (true? (:seon.eval/ok? ev2)))
+                    (is (re-find #"system-wide instructions"
+                                 (str (:seon.eval/narration ev2)))
+                        "its tutorial comment rides as narration")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

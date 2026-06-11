@@ -419,7 +419,7 @@ claim — never as standing gym gates. Paid re-runs per unit, **spend
 free**. Correctness > benchmark continuity — numbers re-baseline per
 unit and the scorecard log says so.
 
-### V4-0 — instructions three-homes split (r3, DECIDED — small, first)
+### V4-0 — instructions three-homes split (r3, DECIDED) — **LANDED 2026-06-11** (my.kb.system live; teachings staged in system-section pending V4-1; append-survives-restart proven)
 
 - **Converts:** the `<instructions>` section → GONE. The four static
   teachings move into the system prompt text (lands fully with V4-1;

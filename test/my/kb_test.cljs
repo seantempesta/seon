@@ -1,23 +1,23 @@
 (ns my.kb-test
   "my.kb scaffold contract: the four shared provenance shapes are
-   registered ONCE; my.kb.instruction (the first worked domain) seeds
-   valid, provenance-carrying rows; the instructions view is derived
-   (priority-ordered, runtime-editable by transact, vanishes when no
-   rows). All on a FRESH :memory conn seeded like the pod boots —
-   never the live agent conn."
+   registered ONCE; my.kb.system (the system-wide instruction
+   singleton, context-v4 V4-0) seeds EMPTY and idempotent; rows are
+   APPENDED by transact (nested component maps under the many-ref) and
+   read back in append order via the `instructions` fn; re-seeding
+   never clobbers appended rows. All on a FRESH :memory conn seeded
+   like the pod boots — never the live agent conn."
   (:require
     [cljs.test :refer [deftest is async]]
     [datahike.api :as d]
-    [malli.core :as m]
     [seon.client :as client]
     [seon.db :as db]
     [seon.schema :as schema]
     [my.kb]
-    [my.kb.instruction :as instruction]))
+    [my.kb.system :as kb-system]))
 
 (defn- fresh-conn
   "Promise of a fresh :memory conn with the pod's boot schema + the
-   shipped instruction seed (the same rows seon.client seeds at boot)."
+   shipped my.kb.system seed (the same row seon.client seeds at boot)."
   []
   (let [cfg {:store              {:backend :memory :id (random-uuid)}
              :schema-flexibility :write
@@ -32,7 +32,7 @@
                                        (db/tx-meta-datahike-schema))})
                      (.then (fn [_]
                               (d/transact! conn
-                                {:tx-data (instruction/seed-tx-data)})))
+                                {:tx-data (kb-system/seed-tx-data)})))
                      (.then (fn [_] conn))))))))
 
 (defn- with-conn
@@ -55,64 +55,62 @@
          (schema/schema-definition :my.kb/confidence))
       "confidence is the shared enum — domains reference it, never inline it"))
 
-(deftest seed-rows-are-valid-instructions-with-provenance
-  (let [rows (instruction/seed-tx-data)]
-    (is (= ["consult-before-research" "store-proactively"
-            "reply-every-asked-turn" "namespace-map"]
-           (map :my.kb.instruction/id rows))
-        "the four shipped instructions, priority order")
-    (doseq [row rows]
-      (is (m/validate :my.kb.instruction/instruction row)
-          (str (:my.kb.instruction/id row) " validates against the entity schema"))
-      (is (= "src/my/kb/instruction.cljs" (:my.kb/source-path row))
-          "every seed row carries the shared provenance source-path")
-      (is (= :verified (:my.kb/confidence row))))))
+(deftest system-seed-is-the-empty-singleton
+  (let [rows (kb-system/seed-tx-data)]
+    (is (= [{:my.kb.system/id "system"}] rows)
+        "the seed is ONE empty identity row — the four behavioral
+         teachings live in the system prompt (V4-0), never here")))
 
-(deftest instructions-block-renders-seeded-rows-priority-ordered
+(deftest system-instructions-read-empty-then-ordered-after-appends
   (async done
     (-> (with-conn
-          (fn [conn]
-            (let [block (instruction/instructions-block @conn)]
-              (is (re-find #"(?s)\[consult-before-research\].*\[store-proactively\].*\[reply-every-asked-turn\].*\[namespace-map\]"
-                           block)
-                  "rows render smallest priority first")
-              (is (re-find #"identity upsert" block)
-                  "the block teaches the runtime-edit verb")
-              (is (= block (instruction/instructions-section
-                             {:seon.db/db @conn :seon.agent/id "any"}))
-                  "the section fn is the block over the render's db"))))
+          (fn [_conn]
+            (is (= [] (kb-system/instructions))
+                "fresh store → no rows → [] (the zero state)")
+            (-> (db/transact!
+                  {:seon.db/tx-data
+                   [{:my.kb.system/id "system"
+                     :my.kb.system/instructions
+                     [{:my.kb.system/text "Always store provenance with findings."
+                       :my.kb.system/at   (js/Date. 1000)}]}]})
+                (.then
+                  (fn [{ok? :seon.db/ok?}]
+                    (is (true? ok?) "an append is ONE nested-map transact")
+                    (db/transact!
+                      {:seon.db/tx-data
+                       [{:my.kb.system/id "system"
+                         :my.kb.system/instructions
+                         [{:my.kb.system/text "Prefer editing an existing schema."
+                           :my.kb.system/at   (js/Date. 2000)}]}]})))
+                (.then
+                  (fn [{ok? :seon.db/ok?}]
+                    (is (true? ok?) "a second agent's append is the same move")
+                    (is (= ["Always store provenance with findings."
+                            "Prefer editing an existing schema."]
+                           (kb-system/instructions))
+                        "re-read shows BOTH rows, oldest append first"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest instructions-are-runtime-editable-by-transact
+(deftest system-instructions-append-by-transact
+  ;; The reseed-safety contract: appending a row and then re-running
+  ;; the boot seed leaves the appended row intact (the seed carries no
+  ;; ::instructions value — identity upsert, zero clobber).
   (async done
     (-> (with-conn
           (fn [conn]
             (-> (db/transact!
                   {:seon.db/tx-data
-                   [{:my.kb.instruction/id   "namespace-map"
-                     :my.kb.instruction/text "AMENDED: namespaces moved."}]})
-                (.then
-                  (fn [{ok? :seon.db/ok?}]
-                    (is (true? ok?) "the edit is one identity-upsert transact")
-                    (let [block (instruction/instructions-block @conn)]
-                      (is (re-find #"\[namespace-map\] AMENDED: namespaces moved\."
-                                   block)
-                          "next render shows the amended text — no restart, no re-seed")
-                      (is (not (re-find #"Your code is my\.\*" block))
-                          "the old text is gone (last-write-wins, not accumulated)")))))))
+                   [{:my.kb.system/id "system"
+                     :my.kb.system/instructions
+                     [{:my.kb.system/text "Survives the reseed."
+                       :my.kb.system/at   (js/Date.)}]}]})
+                (.then (fn [_]
+                         ;; the pod-restart move: re-transact the seed
+                         (d/transact! conn {:tx-data (kb-system/seed-tx-data)})))
+                (.then (fn [_]
+                         (is (= ["Survives the reseed."]
+                                (kb-system/instructions))
+                             "re-seeding never clobbers appended rows"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest instructions-block-vanishes-without-rows
-  (async done
-    (let [cfg {:store              {:backend :memory :id (random-uuid)}
-               :schema-flexibility :write
-               :keep-history?      true}]
-      (-> (d/create-database cfg)
-          (.then (fn [_] (d/connect cfg {:sync? false})))
-          (.then (fn [conn]
-                   (is (= "" (instruction/instructions-block @conn))
-                       "no rows → empty string, the section vanishes")))
-          (.then (fn [_] (done)))
-          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

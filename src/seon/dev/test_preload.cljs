@@ -47,7 +47,7 @@
     ;; ripgrep envelope contract, seon.agent.fs allowlist gating, truncation.
     [seon.agent.search-test]
     ;; my.kb scaffold (V3-B, 2026-06-10): provenance shapes registered
-    ;; once + my.kb.instruction seed/section/edit-by-transact contract.
+    ;; once + my.kb.system seed/append/read contract (V4-0).
     ;; Required here so the deftest-vars roster carries my.kb-test and
     ;; its full source renders as the exemplar test sibling.
     [my.kb-test]

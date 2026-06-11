@@ -58,13 +58,13 @@
              "seon.x.internal.y" "my.foo.internal"]]
     (is (true? (ctx/hidden-ns-name? n)) (str n " is hidden")))
   ;; Rule 2 — my.* is the human's world.
-  (doseq [n ["my.kb" "my.kb.instruction" "my.agent.a1" "my.finance"]]
+  (doseq [n ["my.kb" "my.kb.system" "my.agent.a1" "my.finance"]]
     (is (true? (ctx/my-ns-name? n)) (str n " is my.*"))
     (is (false? (ctx/hidden-ns-name? n)) (str n " is not hidden")))
   ;; Rule 4 — relevant = the full-source root set + children + test
   ;; siblings; plumbing is not.
   (doseq [n ["seon.agent.search" "seon.agent.search-test"
-             "seon.agent.todo" "my.kb" "my.kb.instruction"]]
+             "seon.agent.todo" "my.kb" "my.kb.system"]]
     (is (true? (ctx/relevant-ns? n)) (str n " renders full source")))
   (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.db"
              "seon.agent.searcher" "my.finance"]]
