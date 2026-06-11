@@ -158,6 +158,33 @@
       :seon.eval/duration-ms 1500
       :seon.eval/source "(slow)"
       :seon.eval/ok? true}
+     ;; ── fs allowlist denials (check-fs-denied) ───────────────────
+     ;; fs ops never throw: a denial is an ok? TRUE eval whose RESULT
+     ;; carries the :seon.agent.fs/error envelope. This one is after
+     ;; the user msg — must surface.
+     {:seon.eval/id "EVLwarnFSDENY1"
+      :seon.eval/at (t 230)
+      :seon.eval/source "(seon.agent.fs/read-file {:seon.agent.fs/path \"/etc/passwd\"})"
+      :seon.eval/ok? true
+      :seon.eval/result-edn
+      (str "{:seon.agent.fs/ok? false, :seon.agent.fs/path \"/etc/passwd\", "
+           ":seon.agent.fs/error \"path outside allowed-roots [\\\"/Users/x/work\\\"]\"}")}
+     ;; a denial BEFORE the user msg — must NOT surface
+     {:seon.eval/id "EVLwarnFSSTALE"
+      :seon.eval/at (t 60)
+      :seon.eval/source "(seon.agent.fs/list-dir {:seon.agent.fs/path \"/old\"})"
+      :seon.eval/ok? true
+      :seon.eval/result-edn
+      (str "{:seon.agent.fs/ok? false, :seon.agent.fs/path \"/old\", "
+           ":seon.agent.fs/error \"seon.agent.fs has no allowed-roots configured (default-deny).\"}")}
+     ;; a grants READ-BACK after the user msg — mentions allowed-roots
+     ;; but carries no :seon.agent.fs/error; must NOT fire
+     {:seon.eval/id "EVLwarnFSGRANT"
+      :seon.eval/at (t 240)
+      :seon.eval/source "(seon.agent.fs/grants)"
+      :seon.eval/ok? true
+      :seon.eval/result-edn
+      "{:seon.agent.fs/allowed-roots [\"/Users/x/work\"], :seon.agent.fs/read-only? false}"}
      ;; ── domain data: the parallel-attr fork ──────────────────────
      ;; 2 entities on the ESTABLISHED attr (duration-seconds), 1 on the
      ;; fork (duration-minutes) — mirrors run 4's live :workout data.
@@ -441,6 +468,24 @@
                   "failures BEFORE the latest user msg don't surface")
               (is (not (contains? (affected-syms r) "EVLwarnREF0001"))
                   "lookup-ref failures belong to check-bad-ref"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest fs-denied-surfaces-only-post-user-denials
+  (async done
+    (-> (with-seeded-db
+          (fn [db]
+            (let [r     (warn/check-fs-denied {:seon.db/db db})
+                  entry (first (:seon.warn/affected r))]
+              (is (= :fs-denied (:seon.warn/kind r)))
+              (is (= #{"EVLwarnFSDENY1"} (affected-syms r))
+                  (str "stale (pre-user-msg) denials and grants "
+                       "read-backs never fire"))
+              (is (str/includes? (:seon.warn/where entry)
+                                 "path outside allowed-roots")
+                  "the affected entry carries the SPECIFIC denial text")
+              (is (str/includes? (:seon.warn/example r) "seon.agent.fs/grants")
+                  "the fix teaches the read API — never guessing from a listing"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

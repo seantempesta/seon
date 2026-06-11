@@ -658,6 +658,86 @@
         "                                 '[:find ?e :where [?e :kb.doc/path \"a.md\"]]})))\n"
         "{:kb.note/doc eid}  ; NOT {:kb.note/doc [:kb.doc/path \"a.md\"]}")})
 
+(def ^:private fs-error-key-marker
+  "The pr-str'd `:seon.agent.fs/error` key — its presence in a result
+   projection marks an fs op that returned a failure envelope."
+  ":seon.agent.fs/error")
+
+(def ^:private fs-denial-marker
+  "Substring present in BOTH allowlist-denial messages seon.agent.fs
+   produces (`scope-denied`): \"path outside allowed-roots …\" and
+   \"…no allowed-roots configured…\". A grants-response also mentions
+   allowed-roots but never carries `:seon.agent.fs/error`, so the two
+   markers TOGETHER identify a denial."
+  "allowed-roots")
+
+(defn- fs-denial-text
+  "Extract the `:seon.agent.fs/error` denial string from a result-edn
+   projection (the result may nest the fs response inside a larger
+   value). Falls back to a clip of the raw edn when unparseable."
+  [edn-str]
+  (let [v (try (edn/read-string edn-str) (catch :default _ nil))]
+    (or (->> (tree-seq coll? seq v)
+             (keep #(when (map? %) (:seon.agent.fs/error %)))
+             (filter #(and (string? %) (str/includes? % fs-denial-marker)))
+             first)
+        (clip edn-str 120))))
+
+(defn- fs-denied-eval-rows
+  "[eval-id denial-text] rows for evals since the latest user message
+   whose RESULT carries an fs allowlist denial. seon.agent.fs ops never
+   throw — a denial is an ok? false RESULT map (the eval itself
+   SUCCEEDS), so this scans `:seon.eval/result-edn`, not
+   `:seon.eval/error`. Marker filtering happens in Clojure, not in a
+   :where predicate (datahike-cljs string predicates in :where are a
+   known trap — see the gym S-12 note in seon.agent)."
+  [db]
+  (let [cutoff (latest-user-at db)
+        rows   (db/query
+                 {:seon.db/db db
+                  :seon.db/query
+                  '[:find ?eid ?edn ?at
+                    :where
+                    [?e :seon.eval/result-edn ?edn]
+                    [?e :seon.eval/at ?at]
+                    [?e :seon.eval/id ?eid]]})]
+    (->> rows
+         (filter (fn [[_ edn at]]
+                   (and (or (nil? cutoff)
+                            (> (.getTime ^js at) (.getTime ^js cutoff)))
+                        (str/includes? edn fs-error-key-marker)
+                        (str/includes? edn fs-denial-marker))))
+         (map (fn [[eid edn _]] [eid (fs-denial-text edn)])))))
+
+(defn check-fs-denied
+  "fs calls DENIED by the capability allowlist since the latest user
+   message — the grant-mismatch shape observed live 2026-06-11: an
+   agent INFERRED its grant from a CWD listing (wrongly — the granted
+   root was an ancestor) instead of reading the configured truth via
+   `(seon.agent.fs/grants)`. DERIVED from the eval log at render time;
+   self-heals when a new user message lands and subsequent fs calls
+   stay in scope. GLOBAL — :seon.warn/ns is ignored."
+  {:malli/schema [:=> [:cat ::check-request] ::check-response]}
+  [{:seon.db/keys [db]}]
+  {:seon.warn/kind :fs-denied
+   :seon.warn/affected
+   (->> (fs-denied-eval-rows db)
+        (sort-by first)
+        (mapv (fn [[eid text]]
+                {:seon.warn/sym   (str eid)
+                 :seon.warn/where (clip text 120)})))
+   :seon.warn/explain
+   (str "A seon.agent.fs call was DENIED by the allowlist — the path is "
+        "outside the configured grant (or no grant is configured at all). "
+        "Do NOT infer your grant from a directory listing or your current "
+        "directory: the granted root is often an ANCESTOR of where you "
+        "happen to be looking. Read the CONFIGURED truth and stay under "
+        "those roots.")
+   :seon.warn/example
+   (str "(seon.agent.fs/grants)\n"
+        ";; => {:seon.agent.fs/allowed-roots [\"/Users/me/work\"]\n"
+        ";;     :seon.agent.fs/read-only?    false}")})
+
 (defn check-hop-exhausted
   "Messages whose `:seon.agent.message/hops` reached [[hop-cap]] SINCE the
    latest user message — each one is a wake the trigger REFUSED (an
@@ -776,6 +856,7 @@
    check-unmarked-entity-kinds
    check-bad-ref
    check-failed-evals
+   check-fs-denied
    check-hop-exhausted
    check-slow-evals
    check-failing-tests])

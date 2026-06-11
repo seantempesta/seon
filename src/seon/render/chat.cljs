@@ -23,6 +23,13 @@
    transcript: from = me, to = [me]) never reach this surface —
    `recent-messages` excludes them at the derivation.
 
+   - `::system` — turn-level PROVIDER failures (an LLM call died and
+     the wake ended), rendered as a centered system-styled line so the
+     human is never left staring at a silently idle agent. DERIVED
+     from the turn log: the turn already records
+     `:seon.agent.turn/status :error` + its error self-message; the
+     stream renders that record — no notification row is ever stored.
+
    No acknowledgement state, no read markers, no per-view storage:
    the stream re-derives from the message log at every render
    (reactive-context doctrine — nothing stored that needs clearing).
@@ -45,7 +52,7 @@
 ;; Schemas — the bubble vocabulary.
 ;; ============================================================
 
-(schema/register! ::kind [:enum ::human ::agent ::peer])
+(schema/register! ::kind [:enum ::human ::agent ::peer ::system])
 
 ;; The direction label exactly as `recent-messages` derives it:
 ;; "user" / "assistant" / "agent-<id>" (incoming peer) /
@@ -111,23 +118,67 @@
     (= label "assistant") ::agent
     :else                 ::peer))
 
+(defn- provider-failure-rows
+  "DERIVED `[at content]` rows for this agent's turns that died on a
+   provider failure: `:seon.agent.turn/status :error` AND the turn
+   carries its error self-message. The LLM-error branch of
+   `seon.agent/ask-and-eval!` is the one writer of that shape (a
+   catastrophic turn close stores NO message), so 'error turn with a
+   message' ≡ provider failure. Renders what the turn log already
+   records — nothing stored per-view."
+  [db id]
+  (db/query
+    {:seon.db/db db
+     :seon.db/query
+     '[:find ?at ?content
+       :in $ ?id
+       :where
+       [?me :seon.agent/id ?id]
+       [?me :seon.agent/sessions ?s]
+       [?s :seon.agent.session/turns ?t]
+       [?t :seon.agent.turn/status :error]
+       [?t :seon.agent.turn/at ?at]
+       [?t :seon.agent.turn/messages ?m]
+       [?m :seon.agent.message/content ?content]]
+     :seon.db/args [id]}))
+
+(defn- system-messages
+  "Provider failures as `::system` bubble messages — the stored error
+   content plus the one thing the human needs to know: the agent is
+   not gone, the next message resumes it."
+  [db id]
+  (mapv (fn [[at content]]
+          {::at      at
+           ::kind    ::system
+           ::label   "system"
+           ::content (str "agent's turn failed: " content
+                          " — it will resume on your next message")})
+        (provider-failure-rows db id)))
+
 (defn conversation
   "The agent's conversation as bubble messages, oldest-first —
    DERIVED from the message log via
    `seon.render.default/recent-messages` (from = me OR to ∋ me;
-   nothing stored). Each message carries `::at` `::kind` `::label`
-   `::content`. `::limit` bounds the tail (default 50)."
+   nothing stored), merged with the turn log's provider-failure
+   `::system` lines (see [[provider-failure-rows]]). Each message
+   carries `::at` `::kind` `::label` `::content`. `::limit` bounds
+   the tail (default 50)."
   {:malli/schema [:=> [:cat ::conversation-request] ::conversation-response]}
   [{:seon.agent/keys [id] :seon.db/keys [db] ::keys [limit]}]
-  (let [db   (or db (some-> db/*conn* deref))
-        rows (default/recent-messages db id (or limit default-limit))]
+  (let [db    (or db (some-> db/*conn* deref))
+        n     (or limit default-limit)
+        rows  (default/recent-messages db id n)
+        msgs  (mapv (fn [[at label content]]
+                      {::at      at
+                       ::kind    (message-kind label)
+                       ::label   label
+                       ::content content})
+                    rows)]
     {::messages
-     (mapv (fn [[at label content]]
-             {::at      at
-              ::kind    (message-kind label)
-              ::label   label
-              ::content content})
-           rows)}))
+     (->> (into msgs (system-messages db id))
+          (sort-by #(.getTime ^js (::at %)))
+          (take-last n)
+          vec)}))
 
 (schema/register! ::last-reply-request
   [:map
@@ -177,7 +228,10 @@
    - `::agent` — left-aligned, markdown-rendered (`data-markdown`
      attribute + raw-text child for no-JS degradation).
    - `::peer`  — inline, dimmer, smaller, labeled with the peer's id
-     (`agent-<id>`) — visually subordinate to the human↔agent stream."
+     (`agent-<id>`) — visually subordinate to the human↔agent stream.
+   - `::system` — centered, amber-edged system line: a turn-level
+     provider failure the human must see (the agent went idle
+     mid-task; the next message resumes it)."
   {:malli/schema [:=> [:cat ::message] :seon.render.live-tile/hiccup]}
   [{::keys [at kind label content]}]
   (let [time (hh-mm at)]
@@ -199,6 +253,15 @@
                :data-markdown content}
          content]
         [:div {:class "text-[10px] font-mono text-text-500 mt-1"} time]]]
+
+      ::system
+      [:div {:class "flex justify-center"}
+       [:div {:class (str "seon-bubble max-w-[85%] rounded-lg "
+                          "border border-amber-900/50 bg-base-900/60 "
+                          "px-3 py-1.5 text-center")}
+        [:div {:class "text-[10px] font-mono text-amber-500/80 mb-0.5"} label]
+        [:div {:class "text-xs text-amber-200/90 whitespace-pre-wrap"} content]
+        [:div {:class "text-[10px] font-mono text-text-500 mt-0.5"} time]]]
 
       ;; ::peer — agent-to-agent, inline in the same stream.
       [:div {:class "flex justify-start pl-8"}

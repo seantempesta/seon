@@ -265,6 +265,13 @@
 (schema/register! :seon.agent.turn/prompt-text  :string)
 (schema/register! :seon.agent.turn/prompt-chars :int)
 (schema/register! :seon.agent.turn/prompt-file  :string)
+;; Honest record of the bounded LLM retry (agent-robustness unit,
+;; 2026-06-11): when the provider call failed TRANSPORT-shaped
+;; (`:seon.ai/transport?` — fetch threw before any HTTP status) the
+;; turn loop retries ONCE after a small backoff, and the turn carries
+;; how many retries happened (today always 1). ABSENT = no retry —
+;; optional-is-absent, never stored 0.
+(schema/register! :seon.agent.turn/llm-retries  :int)
 (schema/register! :seon.agent.turn/messages     [:vector {:seon.db/component true} :seon.db/ref])
 (schema/register! :seon.agent.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
 
@@ -283,6 +290,7 @@
    [:seon.agent.turn/prompt-text  {:optional true} :seon.agent.turn/prompt-text]
    [:seon.agent.turn/prompt-chars {:optional true} :seon.agent.turn/prompt-chars]
    [:seon.agent.turn/prompt-file  {:optional true} :seon.agent.turn/prompt-file]
+   [:seon.agent.turn/llm-retries  {:optional true} :seon.agent.turn/llm-retries]
    [:seon.agent.turn/messages     {:optional true} :seon.agent.turn/messages]
    [:seon.agent.turn/evals        {:optional true} :seon.agent.turn/evals]])
 
@@ -902,7 +910,9 @@
         (db/transact!
           {:seon.db/tx-data
            [(merge {:seon.agent.turn/id id-of-turn :seon.agent.turn/status :done}
-                   (select-keys result [:seon.agent.turn/messages :seon.agent.turn/status]))
+                   (select-keys result [:seon.agent.turn/messages
+                                        :seon.agent.turn/status
+                                        :seon.agent.turn/llm-retries]))
             {:seon.agent/id id :seon.agent/state :idle}]}))
       result)
     (catch :default e
@@ -949,28 +959,77 @@
                :seon.agent.message/at      (js/Date.)
                :seon.agent.message/hops    0}]))))
 
+(def llm-transport-retry-backoff-ms
+  "Backoff before the single transport-error LLM retry (see
+   [[ask-and-eval!]]). Small on purpose: a transient \"fetch failed\"
+   (DNS blip, dropped connection) usually heals immediately, and a
+   long wait just stretches the turn."
+  2000)
+
+(defn- transport-error?
+  "True when `resp` failed TRANSPORT-shaped: the provider fetch threw
+   before any HTTP status (`:seon.ai/transport?` on the error — see
+   seon.ai.deepseek). HTTP 4xx/5xx, parse failures, and wall-clock
+   timeouts are NOT transport errors and never retry."
+  [resp]
+  (true? (get-in resp [:seon.ai/error :seon.ai/transport?])))
+
+(defn ^:async ^:private call-llm!
+  "Internal — `(llm-fn prompt-text)` with ONE bounded retry on a
+   transport-shaped provider failure (observed live 2026-06-11: a
+   transient DeepSeek \"fetch failed\" ended the wake silently).
+   Network-shaped errors ONLY — HTTP-status/processing errors and
+   timeouts pass straight through. When the retry fires, the returned
+   resp carries `:seon.agent.turn/llm-retries 1` so the turn record
+   is honest whether the retry recovered or not."
+  [id id-of-turn llm-fn prompt-text]
+  (let [resp (await (llm-fn prompt-text))]
+    (if-not (transport-error? resp)
+      resp
+      (do
+        (log id id-of-turn "llm transport error — one retry in"
+             (str llm-transport-retry-backoff-ms "ms — "
+                  (get-in resp [:seon.ai/error :seon.ai/msg])))
+        (await (js/Promise.
+                 (fn [resolve]
+                   (js/setTimeout resolve llm-transport-retry-backoff-ms))))
+        (assoc (await (llm-fn prompt-text))
+               :seon.agent.turn/llm-retries 1)))))
+
 (defn ^:async ask-and-eval!
-  "Body of `with-turn!`. Calls the LLM with `prompt-text`, parses the
+  "Body of `with-turn!`. Calls the LLM with `prompt-text` (via
+   [[call-llm!]] — one bounded retry on transport-shaped provider
+   failures, recorded as `:seon.agent.turn/llm-retries`), parses the
    reply, eval-batches the forms (each as a `:seon.agent.turn/evals`
    component via Platform's eval-batch!), and returns
    `{:seon.agent.turn/messages [<assistant>] :seon.agent/eval-count n-ok}`
    for `with-turn!` to fold into the close-tx. An LLM-call failure
    (`:seon.ai/error` on the response) NEVER closes `done [0 ok]` — it
-   stores a visible error self-message and closes the turn :error."
+   stores a visible error self-message and closes the turn :error
+   (which seon.render.chat surfaces to the human as a system line in
+   the conversation — derived from this turn record, nothing extra
+   stored)."
   [{:seon.agent/keys [id llm-fn compile-state]
     :seon.agent.turn/keys  [id-of-turn prompt-text]}]
-  (let [resp (await (llm-fn prompt-text))]
+  (let [resp    (await (call-llm! id id-of-turn llm-fn prompt-text))
+        retries (:seon.agent.turn/llm-retries resp)]
     (if-let [err (:seon.ai/error resp)]
-      {:seon.agent/eval-count 0
-       :seon.agent.turn/status      :error
-       :seon.agent.turn/messages
-       [{:seon.agent.message/id      (db/new-id!)
-         :seon.agent.message/from    [:seon.agent/id id]
-         :seon.agent.message/to      [[:seon.agent/id id]]
-         :seon.agent.message/content (str "⚠ LLM call failed — " (:seon.ai/msg err))
-         :seon.agent.message/at      (js/Date.)
-         :seon.agent.message/hops    0}]}
-      (await (ask-and-eval-reply! resp id id-of-turn compile-state)))))
+      (cond->
+        {:seon.agent/eval-count 0
+         :seon.agent.turn/status      :error
+         :seon.agent.turn/messages
+         [{:seon.agent.message/id      (db/new-id!)
+           :seon.agent.message/from    [:seon.agent/id id]
+           :seon.agent.message/to      [[:seon.agent/id id]]
+           :seon.agent.message/content (str "⚠ LLM call failed"
+                                            (when retries
+                                              (str " (after " retries " retry)"))
+                                            " — " (:seon.ai/msg err))
+           :seon.agent.message/at      (js/Date.)
+           :seon.agent.message/hops    0}]}
+        retries (assoc :seon.agent.turn/llm-retries retries))
+      (cond-> (await (ask-and-eval-reply! resp id id-of-turn compile-state))
+        retries (assoc :seon.agent.turn/llm-retries retries)))))
 
 (defn- persist-prompt!
   "Write the turn's full assembled prompt to

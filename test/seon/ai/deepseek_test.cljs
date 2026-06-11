@@ -14,7 +14,8 @@
      (require 'seon.ai.deepseek-test :reload)
      (cljs.test/run-tests 'seon.ai.deepseek-test)"
   (:require
-    [cljs.test :refer [deftest is testing use-fixtures]]
+    [clojure.string :as str]
+    [cljs.test :refer [deftest is testing async use-fixtures]]
     [seon.ai.deepseek :as deepseek]))
 
 ;; Restore the runtime knobs after every test — the pod is live and
@@ -70,3 +71,60 @@
     (is (= 1234 (deepseek/set-timeout-ms! 1234)))
     (is (= 1234 @deepseek/!timeout-ms))
     (is (= 60000 (deepseek/set-timeout-ms! 60000)))))
+
+;; ============================================================
+;; Error classification (agent-robustness unit, 2026-06-11).
+;; `:seon.ai/transport?` marks the ONE retryable class — fetch threw
+;; before any HTTP status (the observed live "fetch failed"). HTTP
+;; status errors are processing errors and never carry the flag.
+;; js/fetch is stubbed per test; the real global is restored after.
+;; ============================================================
+
+(defn- with-stubbed-fetch
+  "Run `body` (0-arg → Promise) with `js/fetch` replaced by `stub` and
+   a test DEEPSEEK_API_KEY; restore both after. Returns a Promise."
+  [stub body]
+  (let [orig-fetch js/fetch
+        orig-key   (.. js/process -env -DEEPSEEK_API_KEY)]
+    (set! (.. js/process -env -DEEPSEEK_API_KEY) "test-key")
+    (set! js/fetch stub)
+    (-> (js/Promise.resolve (body))
+        (.finally (fn []
+                    (set! js/fetch orig-fetch)
+                    (if orig-key
+                      (set! (.. js/process -env -DEEPSEEK_API_KEY) orig-key)
+                      (js-delete (.-env js/process) "DEEPSEEK_API_KEY")))))))
+
+(deftest fetch-throw-is-transport-shaped
+  (async done
+    (-> (with-stubbed-fetch
+          (fn [_ _] (js/Promise.reject (js/TypeError. "fetch failed")))
+          #(deepseek/complete {:seon.ai/ctx "hi"}))
+        (.then
+          (fn [{:seon.ai/keys [text error]}]
+            (is (= "" text) "errors-as-values — empty text, never a rejection")
+            (is (true? (:seon.ai/transport? error))
+                "fetch threw with no HTTP status → the retryable class")
+            (is (not (contains? error :seon.ai/timeout?))
+                "a network throw is not a wall-clock abort")
+            (is (str/includes? (:seon.ai/msg error) "fetch failed"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest http-status-error-is-not-transport-shaped
+  (async done
+    (-> (with-stubbed-fetch
+          (fn [_ _]
+            (js/Promise.resolve
+              #js {:ok     false
+                   :status 400
+                   :text   (fn [] (js/Promise.resolve "bad request"))}))
+          #(deepseek/complete {:seon.ai/ctx "hi"}))
+        (.then
+          (fn [{:seon.ai/keys [text error]}]
+            (is (= "" text))
+            (is (= 400 (:seon.ai/status error)))
+            (is (not (contains? error :seon.ai/transport?))
+                "HTTP/processing errors must NEVER look retryable")))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

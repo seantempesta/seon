@@ -44,6 +44,8 @@
 
    ## Worked examples
 
+     (seon.agent.fs/grants)    ;; the CONFIGURED roots + read-only flag —
+                               ;; call this, never infer the grant from a listing
      (seon.agent.fs/read-file  {:seon.agent.fs/path \"/Users/me/work-folder/notes.md\"})
      (seon.agent.fs/write-file {:seon.agent.fs/path \"/Users/me/work-folder/out.txt\"
                           :seon.agent.fs/content \"hello\"})
@@ -90,6 +92,17 @@
 (schema/register! :seon.agent.fs/dir?     :boolean)
 (schema/register! :seon.agent.fs/file?    :boolean)
 (schema/register! :seon.agent.fs/mtime    :any) ; js/Date — :inst varies across CLJS reader registries
+
+;; The configured grant — what [[grants]] reads back. `allowed-roots`
+;; empty = default-deny (nothing readable until [[configure!]] /
+;; SEON_FS_ROOT grants roots).
+(schema/register! :seon.agent.fs/allowed-roots [:vector :string])
+(schema/register! :seon.agent.fs/read-only?    :boolean)
+
+(schema/register! :seon.agent.fs/grants-response
+  [:map
+   [:seon.agent.fs/allowed-roots :seon.agent.fs/allowed-roots]
+   [:seon.agent.fs/read-only?    :seon.agent.fs/read-only?]])
 
 (schema/register! :seon.agent.fs/read-request
   [:map
@@ -209,6 +222,36 @@
 
 (defn- allowed-roots []
   (vec (:seon.agent.fs/allowed-roots @!config)))
+
+(defn grants
+  "What am I allowed to touch? Returns the CONFIGURED grant — the
+   exact truth every fs op here enforces:
+
+     (seon.agent.fs/grants)
+     ;; => {:seon.agent.fs/allowed-roots [\"/Users/me/work-folder\"]
+     ;;     :seon.agent.fs/read-only?    false}
+
+   Call this BEFORE reasoning about your filesystem access. A
+   directory listing or your CWD tells you what EXISTS, not what you
+   may touch — the granted root is often an ANCESTOR of the directory
+   you happen to be looking at (observed live 2026-06-11: an agent
+   inferred its grant from a CWD listing and wrongly treated the CWD
+   as the boundary when the real grant was a parent directory).
+   Reading: a path resolves iff its absolute `..`-resolved form lives
+   under one of `allowed-roots`; empty = default-deny, nothing
+   resolves until [[configure!]] (or SEON_FS_ROOT) grants roots.
+   Writing: additionally refused whenever `read-only?` is true.
+
+   There is deliberately NO always-on prose section repeating this in
+   your context: the grant is one call away, and `seon.warn/check-fs-denied`
+   surfaces a DERIVED warning pointing here whenever your recent evals
+   show allowlist denials — it appears only while the problem exists
+   and self-heals once your calls stay in scope (reactive-context
+   doctrine: derived surfaces over stored notices)."
+  {:malli/schema [:=> [:cat] :seon.agent.fs/grants-response]}
+  []
+  {:seon.agent.fs/allowed-roots (allowed-roots)
+   :seon.agent.fs/read-only?    (read-only?)})
 
 (defn- denied [path reason]
   {:seon.agent.fs/ok?   false

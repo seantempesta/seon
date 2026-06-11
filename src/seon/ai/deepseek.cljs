@@ -38,6 +38,15 @@
 (schema/register! :seon.ai/msg :string)
 (schema/register! :seon.ai/status :int)
 (schema/register! :seon.ai/timeout? :boolean)
+;; TRANSPORT-shaped failure: js/fetch THREW before any HTTP status
+;; arrived — DNS failure, connection refused/reset, the observed live
+;; "fetch failed" (2026-06-11). This is the ONE retryable class: the
+;; request may never have reached the provider, so one bounded retry
+;; (seon.agent's turn loop) is safe and cheap. HTTP-status errors
+;; (4xx/5xx) and unparseable bodies are PROCESSING errors (never
+;; flagged); a wall-clock abort is :seon.ai/timeout? — also never
+;; flagged, it already burned the full timeout budget.
+(schema/register! :seon.ai/transport? :boolean)
 (schema/register! :seon.ai/raw-body :string)
 
 ;; The errors-are-values envelope for LLM calls. Every failure mode
@@ -47,10 +56,11 @@
 (schema/register!
   :seon.ai/error
   [:map
-   [:seon.ai/msg      :seon.ai/msg]
-   [:seon.ai/status   {:optional true} :seon.ai/status]
-   [:seon.ai/timeout? {:optional true} :seon.ai/timeout?]
-   [:seon.ai/raw-body {:optional true} :seon.ai/raw-body]])
+   [:seon.ai/msg        :seon.ai/msg]
+   [:seon.ai/status     {:optional true} :seon.ai/status]
+   [:seon.ai/timeout?   {:optional true} :seon.ai/timeout?]
+   [:seon.ai/transport? {:optional true} :seon.ai/transport?]
+   [:seon.ai/raw-body   {:optional true} :seon.ai/raw-body]])
 
 (schema/register!
   :seon.ai.deepseek/complete-request
@@ -261,7 +271,11 @@
                                   (str "DeepSeek fetch failed: " (error/->message e)))}
                          ;; optional = absent — only present (true) on a
                          ;; genuine wall-clock abort, never stored false.
-                         aborted? (assoc :seon.ai/timeout? true))]
+                         aborted?       (assoc :seon.ai/timeout? true)
+                         ;; fetch threw with NO abort = network-shaped
+                         ;; transport failure — the one retryable class
+                         ;; (see the :seon.ai/transport? registration).
+                         (not aborted?) (assoc :seon.ai/transport? true))]
           (log-error! err)
           {:seon.ai/text  ""
            :seon.ai/error err})))))
