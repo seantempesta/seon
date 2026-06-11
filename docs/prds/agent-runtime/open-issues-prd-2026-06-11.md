@@ -8,16 +8,34 @@ tags: [prd, agent, database]
 
 **POST-V4 STATE (evening):** the context-v4 refactor + all fix waves
 are COMMITTED (through 595aa2b) and pushed; the post-v4 gym sweep ran
-on a FRESH world and is the CURRENT source of open work — see
-[[research/e2e-demo-findings-2026-06-08]] §POST-V4 SWEEP (7 ranked
-findings; S-21 0/3 headline, consult-first regression, eval-env
-require gap, blind reply!) and the blind-spot analysis
-[[research/context-blind-spots-2026-06-11]] (in flight). A fresh
-consolidating fix-everything PRD follows the analysis. INTEGRITY
-RULES now standing: gym fs roots exclude the harness (answer-key leak
-caught + fixed); fixes must be GENERAL mechanisms, never
-scenario-coached answers. Historical tiers below remain as the
-register of record.
+on a FRESH world. **THE plan is now
+[[fix-everything-prd-2026-06-11]]** — it consolidates the sweep's 7
+ranked findings ([[research/e2e-demo-findings-2026-06-08]] §POST-V4
+SWEEP) and the 12-row blind-spot table
+([[research/context-blind-spots-2026-06-11]], whose headline reverses
+the sweep's framing: agents DID consult; the context defeated them)
+into FOUR root causes with one general mechanism each, three fix
+waves, and the re-measure bar. INTEGRITY RULES standing: gym fs roots
+exclude the harness (answer-key leak caught + fixed); fixes must be
+GENERAL mechanisms, never scenario-coached answers. Historical tiers
+below remain as the register of record.
+
+**Sweep-finding routing into [[fix-everything-prd-2026-06-11]]:**
+
+| Sweep finding / row | Routes to |
+|---|---|
+| f1 prior domain schemas invisible (+ blind-spot 2, 3, 10) | ROOT 2 — inventory by attr-namespace + loud truncation (Wave A) |
+| f2 substrate/`my.*` nses not requirable (+ teaching half) | ROOT 3 require fix (Wave B) + ROOT 1 executable teachings |
+| f3 blind same-batch reply (+ blind-spot 4) | ROOT 3 — reply! envelope-aware guard (Wave B) |
+| f4 consult-first regression (+ blind-spot 1: dangling catalog pointers) | ROOT 1 — executable teachings + content sweep; ROOT 2 salience |
+| f5 s12 storage under-landing (+ blind-spot 9) | §2 DECIDED-widen + ROOT 1 shown-not-told provenance example |
+| f6 first-boot seed ordering | Wave C item 6 (verify — likely landed with 595aa2b boot-seed!) |
+| f7 judge-rubric staleness | ROOT 1 staleness class; rubric re-verify rides the harness habit |
+| blind-spot 5–7 (failing examples, docstring fiction, stub bait) | ROOT 1 — executable teachings + content sweep (Wave B) |
+| blind-spot 8 (prose-as-evals) + aria 13 | ROOT 3 — parser format contract (Wave A) |
+| blind-spot 11 (standing self-warning) | Wave C item 6 |
+| blind-spot 12 (lookup illegibility) + wire lookup-ref bug | Wave A unit A1 |
+| **s12 provenance predicate** | **DECIDED-widen (user 2026-06-11)** — storage predicate accepts provenance-SHAPED attrs in any namespace; consult/reuse scenarios stay strict; see PRD §2 |
 
 Everything known-open after the 2026-06-10 refactor day (19 commits) and
 the P8 measurement (5 paid runs, sha 1ca105a). One doc to plan from.
@@ -167,6 +185,13 @@ elsewhere as noted.
 | 4 | **Publicly-resolvable deps** (outside-builder blocker: datahike gitlink, konserve `:local/root`) | **DONE — repinned 4929dfc** (datahike → ec902943 fork main, konserve → public git dep; `clojure -P` green on all four aliases) |
 | 5 | (handled by the parallel robustness unit — agent/ai/warn fence; see that unit's report for the ask text + status) | parallel unit |
 | 6 | (handled by the parallel robustness unit — see its report) | parallel unit |
+| 7 | **`bin/seon prep` verb** — git-dep prep needs the alias form (`clojure -X:deps prep :aliases '[:writer]'`); downstream supervisors rediscovered it | [[fix-everything-prd-2026-06-11]] Wave C item 5 |
+| 8 | **`SEON_FS_LOCK` env knob** — agent self-narrowed its grant via `configure!`; locked = env grant immutable, `configure!` a legible no-op | [[fix-everything-prd-2026-06-11]] Wave C item 3 (fenced behind the robustness unit's fs.cljs) |
+| 9 | **Tile hiccup-serialization errors 500 the page** — structure errors escape the fn-call guard | [[fix-everything-prd-2026-06-11]] Wave C item 1 (fenced behind the CSS unit's live_tile/inspector) |
+| 10 | **(a) loud truncation on clipped eval results** (confabulation incident) / **(b) fs read paging** | (a) Wave A unit A4; (b) Wave C item 4 — both in [[fix-everything-prd-2026-06-11]] |
+| 11 | **BOOT-FATAL schema-row id collision** — tempid dropped the keyword namespace; restart-resume died on agent-authored schemas | **DONE — 500486a** (entity-schema tempids carry the FULL keyword) |
+| 12 | **Stale live-tile 500 during boot replay** — same class as 9 | [[fix-everything-prd-2026-06-11]] Wave C item 1 (same guard) |
+| 13 | **Self-poisoning fake results** — model-completed bare result-envelope literals evaluate and become real transcript lines | [[fix-everything-prd-2026-06-11]] Wave A unit A2 (parser format contract) |
 
 **Future PRD row (explicitly OUT of scope for the asks-1–3 unit):** a
 **release-bundle target** — a self-contained artifact (compiled pod +
