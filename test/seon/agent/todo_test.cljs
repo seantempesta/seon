@@ -199,3 +199,31 @@
                 "unknown owner → empty block, not a throw")))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest section-tolerates-absent-db
+  ;; The composer-input contract: `:seon.db/db` is the render snapshot
+  ;; when present, and ABSENT db defaults to the current conn — the
+  ;; same convention as every other substrate section fn. Regression
+  ;; for the [open-todos] render-failed crash-loop (C-14 smell 1,
+  ;; 2026-06-11): nil db reached open-todos-block's instrumented
+  ;; :catn slot and every render printed :malli.core/invalid-input.
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (todo/add! {:seon.agent.todo/title "live item"
+                            :seon.agent.todo/owner a-ref})
+                (.then
+                  (fn [_]
+                    (is (re-find #"live item"
+                                 (todo/open-todos-section
+                                   {:seon.db/db @conn :seon.agent/id a-id}))
+                        "db present → renders against that snapshot")
+                    (is (re-find #"live item"
+                                 (todo/open-todos-section
+                                   {:seon.agent/id a-id}))
+                        "db absent → defaults to the current conn, no throw")
+                    (is (= "" (todo/open-todos-section
+                                {:seon.agent/id b-id}))
+                        "other agent, no items → empty, section vanishes"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
