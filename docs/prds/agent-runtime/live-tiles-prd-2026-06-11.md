@@ -1,371 +1,539 @@
 ---
 type: prd
-status: draft
+status: active
 tags: [prd, agent, web]
 ---
 
-# Live Tiles — the agent's surface at every zoom level (2026-06-11)
+# Live Tiles — three surfaces, one render (2026-06-11, revised)
 
-**The vision (user, near-verbatim):** the home screen is Windows Phone
-live tiles. CSS and HTML are designed so information is ALWAYS USEFUL AT
-EVERY LEVEL — tile → half screen. Like Claude artifacts, but more
-interactive. The TILE is whatever the agent is trying to convey to its
-human: charts, images, whatever the user asked for. The named key design
-question: **how do agents KNOW what their live tile is currently
-showing?** — via context rendering, "in such a way that the agent is
-very aware of what the user is seeing."
+**Rewritten 2026-06-11 after user review.** The decisions below marked
+DECIDED(user 2026-06-11) are law — do not re-litigate. This replaces
+the earlier draft of this file (render levels, hiccup-flatten floor,
+`set-tile!` sugar, and the post-Friday timing call are all superseded;
+see §9 for what was dropped and why).
 
-This PRD turns that into a buildable design on top of what already
-exists. Honest starting inventory:
+**The vision:** every agent owns ONE live tile — the thing it is
+currently conveying to its human (a chart, a status, a list, whatever
+the human asked for). The tile shows up at three zoom surfaces driven
+by ONE mechanism, and the agent always knows what its human currently
+sees because the same wired value renders into its own context every
+turn. Build target: **the demo on 2026-06-12** — default tile + agent
+view (bubbles + expanded tile) + welcome wiring + debug overlay +
+route swap (user: achievable for tomorrow).
+
+## 0. Honest starting inventory (verified in source 2026-06-11)
 
 | Already live | Where |
 |---|---|
-| Per-agent tile slot: `:seon.render/html` on the agent entity, symbol or hiccup literal, late-resolved | `seon.render/render-agent-tile`, capabilities-taught (`seon.ctx` "Your live tile" block) |
-| Mission control IS a tile grid, SSE-morphed on every tx | `inspector/agents-dash-fragment` + `agent-grid-tile` + `push-index!` |
-| Default tile: status dot + turn count + errors + last 5 messages | `seon.render.default/view` |
-| Section twins: one section, `:seon.render/ai` + optional `:seon.render/html` | self-context spec 2026-06-10, `:seon.ctx/section` schema |
-| The debug view: exact AI context beside entity cards | `/agent/<id>` two-pane inspector |
-| The interactivity endpoint: `POST /chat?agent=<id>` → `message!` → wake | chat-bar-fragment + the agent loop |
+| Per-agent tile slot: `:seon.render/html` on the agent entity — qualified symbol OR literal hiccup, late-resolved every render | `seon.render/render-agent-tile` (render.cljs:475), `html-render` (render.cljs:146) |
+| Default tile renderer: status dot + turn count + errors + last 5 messages | `seon.render.default/view` |
+| Mission control IS a tile grid, SSE-morphed per commit | `inspector/agents-dash-fragment` + `agent-grid-tile` + `push-index!` |
+| The debug view: raw AI context left, entity cards + tile right | `/agent/<id>` two-pane inspector (`inspector-shell`, inspector.cljs:690) |
+| Chat input + send path: `POST /chat?agent=<id>` → `message!` → wake | `chat-bar-fragment` + `serve.cljs/handle-chat!` |
+| Derived conversation query with from-kind labels (`user` / `assistant` / `agent-<id>`) | `seon.render.default/recent-messages` |
+| Section twins: one section, `:seon.render/ai` + optional `:seon.render/html` | `:seon.ctx/section` schema (ctx.cljs:90) |
+| Capabilities teaching of the tile (raw transact of `:seon.render/html`) | ctx.cljs ~908 "Your live tile" block |
+| ONE composer for prompt text, sections sorted by `:seon.ctx/priority` | `seon.ctx/assemble-context` + `substrate-default-ctx` |
+| Phosphor Terminal design system | `docs/prds/namespace-ui/design-system.md`, `seon.ui.components` |
 
-What's missing is the MIDDLE zoom level (the messaging+artifact view),
-the awareness loop (the agent seeing its own surface), and the content
-vocabulary (charts, actions). None of it needs a new render system —
-the one-render-system rule holds throughout.
+What's missing: the consumer view (bubbles + expanded tile), the
+root-grid default tile worth glancing at, the awareness section, the
+welcome experience, and the explicit live-tile key + twin contract.
 
-## 1. The three zoom levels
+## 1. The three surfaces — DECIDED(user 2026-06-11)
 
+One mechanism (§2) renders all three:
+
+```text
+SURFACE 1 — DEFAULT TILE   /agents               root grid, small
+SURFACE 2 — AGENT VIEW     /agent/<id>           consumer split screen
+SURFACE 3 — DEBUG VIEW     /agent/<id>/debug     today's inspector, kept exactly
 ```
-LEVEL 1 — TILE          /agents              the home screen grid
-LEVEL 2 — HALF-SCREEN   /agent/<id>          messaging + live surface
-LEVEL 3 — DEBUG         /agent/<id>/debug    today's two-pane inspector
+
+### Surface 1 — default tile (root view, small)
+
+The agent's **purpose + ID + last message, nicely formatted** — the
+agent's last REPLY rendered as readable text, not raw message data.
+This is what an uncustomized agent's tile shows; a customized agent's
+wired tile content renders here at compact size (§2 container rule).
+
+### Surface 2 — agent view at `/agent/<id>` (the consumer view)
+
+Split screen:
+
+- **LEFT — chat bubbles**, human ↔ agent, with a message-input box.
+  **Agent-to-agent messages render INLINE in the same stream, styled
+  differently** — dimmer, smaller, labeled with the other agent's id
+  (`agent-<id>`). The demo shows multi-agent coordination; the human
+  watches their agent confer with peers without leaving the
+  conversation. Data source is the existing derived conversation
+  query (from = me OR to ∋ me — `recent-messages` already labels by
+  from-kind); nothing new is stored.
+- **RIGHT — the SAME live tile, expanded.** Identical wired value as
+  the root grid, given room (container size selects the expanded
+  blocks, §2).
+
+### Surface 3 — debug view, kept exactly as today
+
+The current two-pane inspector (raw context sections left, rendered
+context/entity cards right, chat bar) moves UNCHANGED to
+`/agent/<id>/debug`. "What the agent sees exactly" remains a
+first-class feature.
+
+**Debug overlay — DECIDED(user 2026-06-11) that it exists; DECIDE:
+trigger.** The debug view is ALSO reachable from the consumer view as
+an overlay WITHOUT changing URLs. Proposed trigger (pick at build
+time, both are cheap): a `⚙ debug` button in the agent-view header
+AND a keybinding (proposal: backtick `` ` `` — single key, never
+typed in a chat input that has focus guard; alternative `Cmd/Ctrl+.`).
+The overlay is a full-viewport layer that loads `/agent/<id>/debug`
+content (an iframe is the zero-duplication floor; a fetched fragment
+is the polish). Esc or the button closes it.
+
+**Route swap:** mission-control tap goes to `/agent/<id>` (today it
+goes to the debug two-pane). Cross-links: `⚙ debug` in the agent-view
+header, `← chat` in the debug header.
+
+## 2. The tile mechanism — DECIDED(user 2026-06-11)
+
+### One attr, value matches `:seon.render/html` semantics
+
+ONE attr on the agent's entity wires the tile. Its value follows the
+EXISTING `:seon.render/html` pattern exactly (deliberate uniformity —
+agents already know this vocabulary):
+
+- **raw hiccup literal** for static content — `[:h1 "…"]` …
+- **a qualified fn symbol** for dynamic content, late-resolved at
+  every render via `seon.eval/lookup-value` (works for substrate AND
+  agent-defined fns — same single path as today).
+
+**Key naming — DECIDED shape, DECIDE name.** Keyword namespaces must
+be real code namespaces; the new `seon.render.live-tile` ns (§3) is
+the natural home. Proposed key: **`:seon.render.live-tile/content`**.
+(The user floated `:seon.render/live-tile-html`; that also satisfies
+the rule since `seon.render` is a real ns, but homing the key in the
+ns that owns the mechanism follows the schemas-live-with-their-owner
+convention.) Pick one at U1 build time and use it everywhere —
+including the migration of the agent entity's current tile use of
+`:seon.render/html`, which today double-serves as both the agent tile
+slot AND the generic per-entity-card render slot (drift finding, §8).
+
+### No render levels — container queries over ONE render
+
+DECIDED(user 2026-06-11): small-vs-large is **CSS container queries
+over ONE render**, not level-aware fns. The fn/hiccup emits compact
+AND expanded blocks in one document; substrate CSS shows the right
+one for the container size. The substrate provides the wrapper
+classes and conventions so agents just tag blocks:
+
+```clojure
+;; agents tag blocks; substrate CSS does the rest
+[:div.seon-tile
+ [:div.seon-tile-compact  [:span "3 workouts this week"]]
+ [:div.seon-tile-expanded [:svg …full chart…] [:table …]]]
 ```
 
-### What each level shows by default
+Substrate-owned CSS (one place, agents never write media/container
+queries): `.seon-tile { container-type: inline-size; }` plus
+`@container` rules that show `.seon-tile-compact` below the breakpoint
+and `.seon-tile-expanded` at or above it. Untagged content renders at
+every size (degrades sanely — fonts clamp, overflow fades). The exact
+breakpoint is a CSS constant, tuned once against the real grid cell.
 
-**Level 1 — tile** (WP-live-tile density, ~300×175px grid cell, exists
-today). Glanceable: one headline thing. Default (uncustomized agent):
-purpose line (first sentence of the `:purpose` section text) + status
-dot + last-activity age ("idle 4m") + turn count footer. The purpose
-line is the fix for today's anonymous tiles — an agent created "to
-track my workouts" says so on its tile before it ever customizes.
-(Naming of a short display label — `:seon.render/label` — is the PARKED
-#34/P20 decision; this PRD does NOT force it. The purpose-derived line
-is the no-new-attr default; if the user later wants an explicit label
-attr, it slots in as an override without changing anything here.)
+### Dynamic fns return a map with the AI twin
 
-**Level 2 — half-screen** (the new view, the messaging+artifact shape):
-a two-column page — **conversation on the left** (chat bubbles + the
-chat bar, already built as fragments), **the agent's live surface on
-the right** (the SAME render slot as the tile, given room). This is the
-view a human lives in: talk to the agent, watch the thing it's making
-for you update live. Claude-artifacts-shaped, but the artifact is a
-standing reactive surface, not a one-shot document.
+A tile FN returns a map carrying the html twin AND a text twin:
 
-**Level 3 — full/debug** (exists, KEEP — "what the agent sees exactly"
-remains a feature): the current side-by-side — raw AI context sections
-left, entity cards + tile right. Moves to `/agent/<id>/debug`;
-half-screen gets the prime `/agent/<id>` route. A `⚙ debug` link in the
-half-screen header and a `← chat` link back. Mission control tap goes
-to half-screen (today it goes to debug).
+```clojure
+{:seon.render/hiccup [...]        ;; what the human sees
+ :seon.render/ai     "3 workouts this week: Mon 4200kg, …"}
+;; the AI twin is how the agent knows what its human sees —
+;; say what the content MEANS; your human sees the picture,
+;; you see your words.
+```
 
-### How an agent targets the levels — RECOMMENDATION: one slot, one fn, a `:seon.render/level` input key
+Mechanically: `:seon.render/html-response` gains an optional
+`:seon.render/ai` `:string` entry. This matches the section-twin
+shape (`:seon.ctx/section` already pairs `:seon.render/ai` with
+`:seon.render/html`) — one twin idea everywhere.
 
-Three options considered:
+### Agent awareness is DERIVED, not stored
 
-- **(a) one slot + responsive CSS only** — agent writes one hiccup tree,
-  container queries scale it. Rejected as the WHOLE answer: WP live
-  tiles aren't shrunken full views; glanceability needs different
-  CONTENT (the workout tile shows this week's count; the half-screen
-  surface shows the full chart + table). CSS can't drop content
-  semantically.
-- **(b) per-level slots** (`:seon.render/tile` + `:seon.render/html` +
-  …) — rejected: two slots is two mechanisms, they drift, and every
-  consumer (renderer, teaching text, inspector, twin) doubles. This is
-  the foo-v2 trap applied to attributes.
-- **(c) RECOMMENDED: keep the ONE `:seon.render/html` slot; the render
-  input map (which already carries `:seon.db/db`, `:seon.agent/id`,
-  `:seon.render/entity`) gains `:seon.render/level` — `:tile` or
-  `:surface`.** A fn that ignores the key returns the same hiccup at
-  both levels and the chrome clips/scrolls it (the working floor — what
-  happens today). A fn that reads it returns level-appropriate content.
-  `seon.render.default/view` branches on it: `:tile` = the glanceable
-  default above; `:surface` = the richer message list it renders today.
+DECIDED(user 2026-06-11): the context composer invokes the SAME wired
+value at prompt-assembly time and embeds a section — "your human
+currently sees: …". Nothing is stored about "what I showed"; the
+section renders only when a tile is wired; when nothing is wired,
+nothing renders (reactive-context doctrine — nothing to clear).
 
-Why (c): it is literally the existing mechanism plus one input key —
-zero new attrs, zero new dispatch, the same fn-of-(world, self, now
-also: viewing-distance) purity. It also composes with the awareness
-answer below: one fn means ONE source of truth for "what is my human
-seeing", whichever level they're at.
+The one rule — **"you see exactly what's wired"**:
 
-Registered shape: `(schema/register! :seon.render/level [:enum :tile :surface])`,
-added `{:optional true}` to the render input schemas. Level 3 (debug)
-is not a render level — it shows the machinery, not a rendering.
+- wired value is a FN → the section body is the returned
+  `:seon.render/ai` text. A fn that omits the twin gets its returned
+  hiccup shown verbatim instead (same rule as below — and the raw
+  markup in its own context is itself the nudge to add the twin).
+- wired value is RAW HICCUP → the section body is the literal hiccup
+  verbatim. Hiccup is readable EDN the agent wrote; no flattening
+  machinery, no translation layer.
 
-Styling floor on top: the tile/surface CONTAINERS get CSS container
-queries (`@container`) so even a level-ignorant hiccup tree degrades
-sanely (font clamps, overflow fades). Container CSS is chrome,
-substrate-owned, one place — agents never write media queries.
+The **section header always includes the wired value's identity** —
+the fn's fully-qualified name (its source is one
+`:seon.fn`/catalog lookup away) or "literal hiccup on your entity" —
+so the agent always sees HOW to change the display:
 
-## 2. The agent's awareness — how it knows what its human sees
+```text
+## Your live tile (what your human currently sees)
+Wired: my.workouts/chart-tile   (a fn on your entity; default was the substrate welcome)
+3 workouts this week: Mon 4200kg, Wed 3800kg, Fri 4400kg — trending up.
+To change it: redefine the fn, or transact a new value onto the key.
+```
 
-The key question, and the recommendation up front:
+Section placement: substrate default section `:live-tile` at
+priority 28 — present-tense self-knowledge, after the catalogs
+(functions-catalog 27), before `:namespace-context` (30) and the
+dynamic tail. It sits in the per-agent dynamic zone (its content
+changes with the world), like `:warnings`/`:open-todos`.
 
-**RECOMMENDED: the tile is a SECTION — one section, two renders. The
-text twin of the human surface renders into the agent's own context
-every turn, derived at the same instant from the same db by the same
-fn.** Nothing is stored about "what I showed"; the agent's knowledge of
-its surface can never go stale because it IS the surface, re-derived.
+### Per-turn semantics — stated explicitly, correct by design
 
-Concretely: a substrate default section `:my-surface` (priority ~26,
-right after the catalogs — present-tense self-knowledge, before
-warnings/transcript) whose renders are:
+The human's tile updates per relevant tx (SSE morph, already live).
+The agent's twin is **as-of the turn's db value** — the snapshot the
+composer rendered the prompt from. Between turns the human may see
+fresher data than the agent's last twin. This is CORRECT BY DESIGN —
+do not "fix" it with stored presentation state or mid-turn refreshes;
+the next turn's twin re-derives from the then-current db.
 
-- **html render** = `render-agent-tile` — exactly what the inspector
-  and home screen call. Same fn, same input, same db value.
-- **ai render** = the TEXT TWIN of that same output, framed:
+### Errors are legible — never silently vanish
 
-  ```
-  ## Your live surface (what your human currently sees)
-  Renderer: my.workouts/chart-tile   (you set this; default was seon.render.default/view)
-  Tile now shows:
-    ● running · workouts · turn 12
-    "3 workouts this week · 12,400 kg total"
-    [bar chart: Mon 4200, Wed 3800, Fri 4400]
-  To change it: redefine the fn, or repoint :seon.render/html.
-  ```
+A tile fn that THROWS must remain distinguishable from an unwired
+tile on BOTH sides:
 
-Where the text twin comes from — two tiers, mechanical first:
+- **agent's section** shows the error envelope (the standard
+  `:seon.error/*` shape) in place of the twin — the agent sees its
+  own renderer is broken and what the exception said.
+- **human's tile** shows a fallback ("tile error — the agent has been
+  shown the failure"), NOT a blank. Today `render-agent-tile`
+  swallows throws into `{:seon.render/hiccup nil}` (render.cljs:497)
+  — that catch changes to produce the fallback + carry the error to
+  the twin path. Vanish = indistinguishable from unwired; banned.
 
-1. **Automatic hiccup→text flatten (the floor, every agent gets it
-   free).** Hiccup is data; walk the tree the fn just returned, emit
-   the strings, line-break on block tags, and describe non-text
-   elements from their attrs (`[:svg ...]` → `[svg chart, 7 bars]`
-   using `data-seon-desc` when present, tag+child-count when not;
-   `[:img {:alt a}]` → `[image: a]`). Deterministic, ~40 lines, no
-   LLM, no storage. This directly answers the user's "html in the ai
-   context is noise" concern: the agent never sees markup — it sees
-   the text content of its surface plus terse descriptions of the
-   visuals.
-2. **Author-supplied twin (the override).** A tile fn may return
-   `:seon.render/text` alongside `:seon.render/hiccup` in its response
-   map — same map-out, one more key. Agents writing rich charts are
-   taught to describe them ("say what the chart MEANS, your human sees
-   the picture; you see your words"). The flatten is the fallback when
-   the key is absent.
+### No `set-tile!` sugar — DECIDED(user 2026-06-11)
 
-Why this beats the alternatives the design considered:
+The taught path is the raw transact of the attr — one pattern,
+matching the `:seon.render/html` semantics agents already know:
 
-- **(b) self-entity pull shows the slot symbol + fn source** — already
-  exists (turn-0 demonstrated pull) and stays, but it answers "what is
-  my renderer?" not "what is rendered RIGHT NOW?". A chart fn over live
-  data produces different pictures every turn; the source doesn't.
-- **(c) stored presentation-state** ("last shown: …" datoms written at
-  render time) — violates reactive-context: stored state that the next
-  tx makes stale, plus render would become a writer (renders must stay
-  pure reads; the inspector renders on EVERY tx — writing on render is
-  a feedback loop).
-- The twin is the reactive-context principle verbatim: a section that
-  is a function of the db at render time, vanishing/changing exactly
-  when the underlying reality does. One section, two renders, the
-  agent literally reads the text version of what the human sees.
+```clojure
+(seon.db/transact!
+  {:seon.db/tx-data
+   [{:seon.agent/id (seon.db/current-agent-id)
+     :seon.render.live-tile/content 'my.workouts/chart-tile}]})
+```
 
-**Budget note:** the twin is charged like any section; flatten output
-caps at ~800 chars with a loud truncation marker (a tile that flattens
-to more than that is failing the glanceability bar anyway — the
-truncation marker IS feedback to the agent).
+Sugar only if friction shows later. The ctx.cljs "Your live tile"
+capabilities block updates to teach this key + the twin contract +
+the tag-blocks convention (it already teaches the raw-transact shape).
 
-**"When did my human last look?" (ceiling, v2, optional):** presence is
-partially derivable live — the inspector's SSE connection registry
-knows whether anyone has `/agent/<id>` or `/agents` open right now;
-the twin section can append "(your human is watching now)" from it.
-Historical "last viewed 2h ago" is NOT derivable — it would need view
-EVENTS (page-open facts, append-only like messages: events about the
-past, not clearable state, so they don't violate the derived-by-default
-rule). Worth having for "should I notify vs. just update the tile"
-judgment, but it is explicitly NOT in the floor. Open question for the
-user (§7).
+## 3. Namespaces — public faces feed agent context
 
-## 3. Content kinds — what agents can emit
+DECIDED(user 2026-06-11): two new PUBLIC namespaces, internals in
+`.internal` siblings (the standard `*.internal` convention —
+context-v3: `*.internal` is never rendered to agents; the ns name IS
+the filter):
 
-The slot's value vocabulary, floor → ceiling:
+- **`seon.render.live-tile`** — the tile mechanism: key registration,
+  content resolution (wraps the existing `html-render` value-or-fn
+  dispatch — no parallel resolver), the twin contract, the substrate
+  welcome fn (§4), the error-envelope fallback.
+- **`seon.render.chat`** — the conversation surface: the derived
+  bubble query (builds on `recent-messages`' from-kind labels), the
+  bubble hiccup (human / agent / inline agent-to-agent styles).
 
-1. **Hiccup + the `seon.ui.components` vocabulary** (live today).
-   Components are cljc hiccup factories (status-dot, card, table-*,
-   empty-state, buttons) in the Phosphor Terminal system — agents are
-   taught to call them rather than hand-rolling classes, so agent tiles
-   look native for free. Teaching addition: the components catalog
-   renders into capabilities (they're fns; the functions-catalog
-   already lists them — add a one-line "use these for your tile" nudge).
-2. **Charts = inline SVG hiccup** (the demo-floor chart answer).
-   `[:svg ...]` is just hiccup — zero new deps, streams over SSE,
-   morphs like everything else. Add `seon.ui.chart` (new cljc ns):
-   `bar`, `sparkline`, `line` — data in, `[:svg ...]` out, each
-   emitting `data-seon-desc` (feeds the §2 flatten) and phosphor
-   palette defaults. ~120 lines total; agents CAN hand-write SVG but
-   the helpers are the taught path.
-3. **Images** — `[:img {:src "data:image/png;base64,…" :alt "…"}]`.
-   Permitted: the slot stores a SYMBOL, the fn computes hiccup at
-   render, so data-URIs transit SSE only — they never become datoms
-   (three-tier storage rule holds: blobs don't go in the DB). `:alt`
-   required by the teaching (it's the twin's description). Discouraged
-   above ~100KB; charts should be SVG.
-4. **Interactivity = datastar actions that message the agent back**
-   (the artifact loop, and it's nearly free): a tile button POSTs to
-   the EXISTING `/chat?agent=<id>` endpoint → `message!` → the agent
-   wakes → handles it → its tile re-renders → SSE morphs the surface.
-   Ship `seon.ui.components/tile-action`:
+Non-internal namespaces auto-feed agent context — **the public fns
+ARE the teaching**. Keep them exemplary: full `:malli/schema` on
+every public fn, map-in/map-out (or `:catn` named positional),
+namespaced keys, docstrings that teach (an agent reading
+`seon.render.live-tile`'s source learns the whole tile vocabulary
+without a prose section).
 
-   ```clojure
-   (comp/tile-action {:seon.ui/label "log workout"
-                      :seon.ui/message "log: bench 5x5 @ 80kg"})
-   ;; => [:button {:data-on-click "@post('/chat?agent=…&text=…')"} …]
-   ```
+## 4. The default/welcome experience — show, don't tell
 
-   One component, no new endpoint, no new protocol — the interactivity
-   loop is the messaging loop. Forms (an input + send) are the same
-   shape with `data-bind`. This is the "more interactive than
-   artifacts" part: the surface talks back through the same channel the
-   human does, so the agent needs no second event system and the twin
-   section shows the agent its own buttons as `[action: "log workout"]`.
-5. **Sanitization (required before 4 ships):** agent-authored hiccup is
-   an XSS surface in the human's browser. `html/->string` escapes
-   strings, but attributes need a gate: strip `on*` attributes and
-   `javascript:` URLs from agent-slot hiccup at render; allow `class`,
-   `style`, `data-*` (datastar), svg presentation attrs, `src`/`href`
-   (scheme-checked). One `sanitize-hiccup` fn in `seon.render`, applied
-   to slot output only (substrate fns are trusted). The CLJS sandbox is
-   not a security boundary; the render boundary is where this belongs.
+### The welcome fn
 
-**Floor (demo-able):** a live-updating hiccup tile with an SVG chart —
-needs NOTHING new; the mechanism is live and capabilities-taught today
-(an agent can transact a chart-tile fn this minute). **Ceiling:**
-artifact-grade — charts + images + actions + forms, level-aware,
-twin-aware, sanitized.
+A substrate welcome fn (lives in `seon.render.live-tile`; takes the
+agent's entity/context — the standard render input) renders an
+elegant, simple, **TIME-AWARE** default:
 
-## 4. The home screen
+- current date/time for the user, and a time-aware greeting ("Good
+  evening" at 21:40);
+- the agent's purpose line (from the seeded `:purpose` — "created to
+  track your workouts");
+- a line like *"I'll update this panel as I work — charts, statuses,
+  whatever you ask for."*
 
-Mission control (`/agents`) already is the tile grid — live,
-SSE-morphed per commit, `render-agent-tile` per agent. Changes:
+The copy is double-duty by design: it tells the HUMAN what the panel
+is, and — because the agent reads this fn's twin and source every
+turn — it reinforces to the AGENT that writing more hiccup-returning
+fns is normal and easy.
 
-- **Tap → half-screen** (`/agent/<id>`), debug demoted to the `/debug`
-  route. One-line change in `agent-grid-tile` once §1's route move
-  lands.
-- **Default tile content** (uncustomized agent): purpose line + status
-  dot + last-activity age + turn footer (the §1 spec). Pulls the
-  `:purpose` section text from `:seon.agent/ctx` — already on the
-  entity, no new storage. Ties to but does not decide the parked
-  `:seon.render/label` question.
-- **Tiles render at `:seon.render/level :tile`** — the grid passes the
-  key; customized agents that branch get their glanceable form here.
-- Cluster strip, knowledge section, completed-agents fold: unchanged.
+DECIDE — welcome personalization: pull the human's name from the
+store when present (a `:seon.user/*` attr) — "Good evening, Sean."
+Cheap if the attr exists; skip silently when absent.
 
-## 5. Teaching — how agents learn to drive their tile
+### Wired by a REAL EVAL at agent creation — honest provenance
 
-Aligned with show-don't-tell; mostly extensions of surfaces that exist:
+DECIDED(user 2026-06-11): NOT a faked log entry. Agent creation
+actually EVALS the wiring form(s) AS the agent (inside its scope,
+through the normal eval path) — multiple forms in one turn is fine —
+so the eval log honestly shows "the agent set up its tile", and to
+the agent it reads like a turn already taken in the conversation
+(imitation over obedience, same trick as V3-E's demonstrated evals).
+The log never lies: the eval really ran, the datoms really landed,
+replay/resume reconstructs it like any other eval.
 
-1. **The capabilities block** ("Your live tile") already teaches
-   repointing. It grows: the `:seon.render/level` key, the
-   `:seon.render/text` twin ("describe what the chart MEANS — your
-   human sees the picture, you see your words"), `seon.ui.chart` +
-   `tile-action` one-liners.
-2. **The `:my-surface` section IS the feedback loop** — the agent sees
-   its own tile's text twin every turn. Write a tile fn, next render
-   shows you what your human now sees, iterate. No preview verb needed;
-   the context is the preview. (This is the §2 mechanism doing double
-   duty as the teacher — the same trick as the seeded `:purpose`
-   section.)
-3. **`(seon.agent/set-tile! {:seon.render/html 'my.ns/fn})`** — sugar
-   exactly like `set-purpose!`: a visible one-liner over a transact,
-   whose full source teaches that the tile is just an attr on your own
-   entity. (Decide at build time whether the sugar earns its keep; the
-   raw transact is already taught and works. Lean: ship it — symmetry
-   with set-purpose!, and "set-tile!" is the discoverable verb name in
-   the functions catalog.)
-4. **A `my.kb.instruction` row** ("when your human asks for anything
-   visual or standing — a chart, a status, a list — put it ON YOUR
-   TILE, don't paste it into chat") — the store-proactively rule's
-   visual sibling; user-editable doctrine.
-5. **The turn-0 demonstrated pull** already shows `:seon.render/html`
-   on the agent's own entity — unchanged, now corroborated by the
-   `:my-surface` section above it.
+### The steer: tile updates should be RENDERED DATABASE QUERIES
 
-## 6. Unit breakdown (≤7 files each, demo-floor first)
+DECIDED(user 2026-06-11), stated as doctrine in the teaching and the
+welcome fn's own implementation: most subsequent tile updates should
+be **queries over properly-transacted data** — transact important
+findings as linked entities, render by reference. Not hardcoded
+hiccup snapshots of computed values. This is what makes session
+resume work (the tile re-derives from the store on a fresh pod) and
+it is the reactive-context principle applied to the human surface.
 
-**Honest Friday call:** the demo-floor TILE BEHAVIOR can be in
-Friday's demo because it requires **zero substrate change** — the slot,
-the SSE morphing, and the teaching are live today; inline SVG is just
-hiccup. Per the standing handoff, Thursday freezes the substrate for
-rehearsal — so U1 (teaching text + gym scenario only) is the ONLY unit
-that may land before the demo, and only if it lands Wednesday alongside
-Tier-1 work and re-rehearses clean. U2+ are post-demo. The half-screen
-view will NOT exist by Friday; the demo shows tile + debug, which is
-what's rehearsed anyway.
+## 5. Styling — Phosphor, consumer-tuned
 
-- **U1 — demo floor: the chart-tile scenario (Wednesday-eligible,
-  teaching-only).** Extend the capabilities tile block with the inline-
-  SVG example + "tile, don't paste" instruction row; encode gym scenario
-  S-TILE (§ below). Files: `ctx.cljs` (capabilities text), seed
-  instruction, one scenario EDN, catalog note. No mechanism changes —
-  rehearsal-safe by construction. If Wednesday is full, SKIP and demo
-  the already-taught tile mechanism as-is.
-- **U2 — awareness twin (the §2 core).** `flatten-hiccup->text` +
-  optional `:seon.render/text` in `:seon.render/html-response` + the
-  `:my-surface` default section + budget cap + tests. Files:
-  `render.cljs`, `ctx.cljs`, two test nses.
-- **U3 — level key.** Register `:seon.render/level`; thread through
-  `render-agent-tile`/`html-render` inputs; `default/view` branches
-  tile/surface; grid + inspector pass their level. Files: `render.cljs`,
-  `render/default.cljs`, `inspector.cljs`, tests.
-- **U4 — half-screen view + route move.** `/agent/<id>` = chat column
-  (reuses chat-bar + message bubbles) beside the `:surface`-level
-  render; debug → `/agent/<id>/debug`; header cross-links; grid tap
-  target; SSE registry reused (both views are pushed by the same
-  per-agent tx listener). Files: `inspector.cljs` (or a split-out
-  `web/surface.cljs` if it crowds 7-file budget), routes, tests.
-- **U5 — default tile = purpose + activity.** `default/view` `:tile`
-  branch reads the `:purpose` section text + last-activity age. Small;
-  folds into U3 if it fits.
-- **U6 — sanitize + tile-action (interactivity).** `sanitize-hiccup`
-  gate on agent-slot output; `tile-action`/`tile-form` components;
-  teaching line. Files: `render.cljs`, `ui/components.cljc`,
-  `ctx.cljs`, tests.
-- **U7 — `seon.ui.chart`.** bar/sparkline/line helpers with
-  `data-seon-desc`; teaching line; generative tests on the svg shape.
-- **U8 (ceiling, user-gated) — presence.** SSE-registry "watching now"
-  in the twin; optionally view events for "last seen". Do not build
-  until the user wants the notify-vs-update judgment.
+The chat/tile surface keeps the Phosphor Terminal soul — warm blacks,
+cream text, amber accents (`bg-base-*`, `text-text-*`, amber
+emphasis) — but RELAXES the debug-view density for the consumer
+surface:
 
-### The gym scenario (measurement angle)
+- real chat bubbles (rounded, padded, sender-distinct), not log rows;
+- more breathing room (`p-3`/`p-4` where the debug view uses `p-1.5`);
+- larger primary text than the debug views (`text-sm` body where
+  debug uses `text-xs`);
+- agent-to-agent inline messages: dimmer (`text-text-400`), smaller
+  (`text-xs`), labeled `agent-<id>`, visually subordinate to the
+  human↔agent stream;
+- monospace stays for ids/code; prose bubbles may use the sans stack.
 
-**S-TILE "chart my workouts"** (deepseek tier, S-21's seeded workout
-world): human asks "put a chart of my workouts on your tile."
-Mechanical predicates: (1) agent entity carries a `:seon.render/html`
-override pointing at an agent-authored fn; (2) `render-agent-tile`
-returns hiccup containing `[:svg`; (3) post-U2: the agent's NEXT
-context contains the `:my-surface` section with the chart's
-description; (4) reply directs the human to the tile rather than
-pasting an ASCII chart. LLM-judge axis: does the twin's description
-match the seeded data (counts/weights)? Re-run after U2/U3 to verify
-the awareness loop changed behavior — the falsifiable claim is
-"an agent that SEES its surface stops re-describing it in chat."
+The bar (user): "you know how to make elegant chat systems and make
+them beautiful." The debug view's density rules are untouched.
 
-## 7. Open questions for the user
+## 6. Unit ladder — demo-floor first, ≤7 files each
 
-1. **`:seon.render/label` (#34/P20, parked — your call pending):** the
-   default tile derives its headline from the `:purpose` section text.
-   Good enough, or do you want an explicit short-label attr? (Nothing
-   here blocks on it.)
-2. **Route precedence:** OK that `/agent/<id>` becomes the half-screen
-   messaging view and debug moves to `/agent/<id>/debug`? (Bookmarks/
-   muscle memory change; mission-control tap follows.)
-3. **Presence/view events (U8):** do you want agents to know WHEN you
-   last looked (requires append-only view events), or is "what you see
-   when you look" (fully derived, no events) enough?
-4. **set-tile! sugar:** ship the one-liner verb (symmetry with
-   set-purpose!), or keep the raw transact as the only taught path?
-5. **Data-URI images:** comfortable allowing them (SSE-only transit,
-   never datoms, alt required), or SVG-only until a real need shows?
-6. **U1 before Friday:** teaching-text-only and Wednesday-eligible, but
-   it still touches the capabilities block the demo exercises — land it
-   and re-rehearse, or freeze and demo the tile mechanism as already
-   taught?
+All units are independently landable with explicit file fences and
+live proofs. **Registry-stomp caution:** U1 and U3 introduce brand-new
+namespaces — NEVER hot-require a new ns into the live pod; both
+require a planned pod restart (`bin/seon restart pod`, or fold into
+one restart after U3 if landing same-day). U2/U4/U5/U6 edit existing
+namespaces (hot-reload-safe via the watcher, restart still the clean
+path on demo day).
+
+### U1 — `seon.render.live-tile`: key, twin, welcome, container CSS
+
+The mechanism. New ns with: `register!` of the tile key (DECIDE name,
+§2) and the optional `:seon.render/ai` entry on
+`:seon.render/html-response`; `render-tile` resolution (delegating to
+`seon.render/html-render` — value-or-fn, one dispatch); the error
+envelope + human fallback (replacing the silent catch in
+`render-agent-tile`); the `welcome` fn (time-aware, purpose-aware);
+the `.seon-tile` container-query CSS + wrapper-class convention.
+
+- Files (≤7): `src/seon/render/live_tile.cljs` (new),
+  `src/seon/render.cljs` (twin entry on the response schema; tile
+  resolution reads the new key first), a CSS asset under
+  `resources/public/css/` (container rules; loaded by the pages),
+  `test/seon/render/live_tile_test.cljs` (new).
+- Touches live pod surface: YES — new ns, pod restart required.
+- Live proofs: (1) transact the key with literal hiccup onto a live
+  agent → root grid tile morphs to it; (2) wire a fn returning the
+  twin map → `render-tile` response carries both keys; (3) wire a
+  throwing fn → human tile shows the fallback text, response carries
+  the error envelope; (4) unwired agent → welcome renders with
+  today's date and a correct time-of-day greeting (read the actual
+  HTML, compare wall clock).
+
+### U2 — agent view + route swap (`seon.render.chat`)
+
+The consumer split screen at `/agent/<id>`: left bubbles + input
+(reuses the `/chat` endpoint and the chat-form submit pattern), right
+the expanded tile (`.seon-tile` at expanded container size). Debug
+view moves verbatim to `/agent/<id>/debug`; grid tap target and
+cross-links updated; the per-agent SSE listener pushes BOTH views
+(same tx-listener, one more morph fragment).
+
+- Files (≤7): `src/seon/render/chat.cljs` (new),
+  `src/seon/web/inspector.cljs` (routes, consumer shell, debug route
+  move, grid href), `test/seon/render/chat_test.cljs` (new),
+  optionally `src/seon/web/serve.cljs` if routing needs a touch
+  (likely not — `inspector/route?` owns `/agent/*`).
+- Touches live pod surface: YES — new ns, pod restart required (plan
+  ONE restart covering U1+U2 when landing together).
+- Live proofs: (1) `/agent/<id>` shows bubbles + expanded tile;
+  (2) send a message from the input → reply bubble appears via SSE
+  without reload; (3) a peer agent `message!`s this agent → the
+  exchange appears INLINE, dimmer, labeled `agent-<peer>`;
+  (4) `/agent/<id>/debug` is byte-identical in behavior to today's
+  inspector; (5) grid tap lands on the consumer view.
+
+### U3 — default root tile
+
+Uncustomized agents' root tile = purpose + ID + last reply nicely
+formatted (the agent's last assistant message rendered as text, not
+raw message data). Implemented as the welcome fn's compact block plus
+a `last-reply` derived read in `seon.render.chat` — the default tile
+IS a wired substrate fn, eating the same dogfood.
+
+- Files (≤7): `src/seon/render/live_tile.cljs`,
+  `src/seon/render/chat.cljs`, `src/seon/web/inspector.cljs` (grid
+  cell sizing if needed), tests.
+- Touches live pod surface: edits existing+U1 nses (no new ns).
+- Live proofs: root grid shows, per agent: purpose line, id, the
+  agent's actual last reply text (compare against the message log);
+  compact block only (no expanded chart bleed) at grid size.
+
+### U4 — welcome wiring as a REAL EVAL at creation
+
+`start-agent!` (the ONE boot path) evals the wiring form(s) as the
+new agent: define-or-reference the welcome (substrate fn — the form
+just transacts the key pointing at it), transact the key. Eval log
+carries the real eval(s); resume replays them like any agent eval.
+
+- Files (≤7): `src/seon/client.cljs` (creation path),
+  `src/seon/render/live_tile.cljs` (the canonical wiring form as
+  data/fn so client + tests share it), `test/` additions.
+- Touches live pod surface: edits `seon.client` (hot-reload risky on
+  the boot path — restart before demoing).
+- Live proofs: (1) create an agent via `/agents/new` → its eval log's
+  first entries include the tile wiring eval with real result;
+  (2) the new agent's first context shows the `:live-tile` section
+  quoting the welcome twin; (3) pod restart → replay keeps the wiring
+  (tile still welcome-rendered, no re-seed needed).
+
+### U5 — awareness section + teaching update
+
+The `:live-tile` section in `seon.ctx/substrate-default-ctx`
+(priority 28): invokes the wired value against the turn's db,
+renders header (wired identity) + body (twin text / verbatim hiccup /
+error envelope), renders NOTHING when unwired… except every agent is
+wired from creation (U4), so in practice it's always present — the
+unwired branch is the correctness floor. Update the capabilities
+"Your live tile" block: new key, twin contract, tag-blocks
+convention, the rendered-queries steer, no sugar.
+
+- Files (≤7): `src/seon/ctx.cljs`, `src/seon/render/live_tile.cljs`
+  (section fn lives with the mechanism; ctx just wires it),
+  `test/seon/ctx_*` additions.
+- Touches live pod surface: edits `seon.ctx` (the prompt path) —
+  re-verify a live turn after landing.
+- Live proofs: (1) ctx-preview of a welcome-wired agent contains the
+  section with the welcome twin text and the wired fn's name;
+  (2) agent transacts literal hiccup onto the key → NEXT turn's
+  context shows that hiccup verbatim; (3) throwing fn → section shows
+  the error envelope; (4) between-turns check: transact data the tile
+  queries AFTER a turn renders → human tile updates now, agent twin
+  updates next turn (assert both, in that order).
+
+### U6 — debug overlay
+
+The `⚙ debug` button + keybinding (DECIDE trigger, §1) opening the
+debug view as an overlay over `/agent/<id>` without a URL change.
+Iframe floor; Esc/button closes.
+
+- Files (≤7): `src/seon/web/inspector.cljs`, tests.
+- Touches live pod surface: edits existing ns.
+- Live proofs: open `/agent/<id>`, hit the trigger → debug two-pane
+  appears live (SSE updating inside it), URL unchanged; Esc returns.
+
+### U7 — measurement (post-demo OK; encode the predicates now)
+
+The gym angle (ties to `gym-upgrade-prd-2026-06-11.md` U1 prompt-blob
+predicates):
+
+- **Tile correctness is judgeable via the twin landing in prompt
+  blobs**: a scenario predicate asserts the `:live-tile` section is
+  present in the captured turn-0/turn-N prompt and that its body
+  matches the seeded data (mechanical regex + LLM-judge axis "does
+  the twin's description match the seeded counts/weights?").
+- **The welcome wiring eval is assertable mechanically**: datalog for
+  the creation-time eval entity whose source matches the tile key —
+  no judge needed.
+- **S-TILE "chart my workouts"** (carried from the original draft,
+  updated): human asks "put a chart of my workouts on your tile."
+  Predicates: (1) agent entity carries the tile key pointing at an
+  agent-authored fn; (2) the rendered tile contains `[:svg`/`<svg`;
+  (3) the agent's NEXT context contains the `:live-tile` section
+  describing the chart; (4) the reply directs the human to the tile
+  rather than pasting an ASCII chart. The falsifiable claim: an agent
+  that SEES its surface stops re-describing it in chat.
+- Files (≤7): one scenario EDN under `test/seon/gym/scenarios/`,
+  driver predicate additions if the prompt-blob harness needs them.
+
+## 7. Out of scope (not contradicted — parked)
+
+- **Interactivity components** (`tile-action` buttons POSTing back
+  through `/chat`, forms) — the loop is nearly free on this
+  architecture but is NOT in the demo cut.
+- **Hiccup sanitization gate** — agent-authored hiccup rendered in
+  the human's browser is an XSS surface (`on*` attrs,
+  `javascript:` URLs survive `html/->string`'s string escaping).
+  MUST land before any untrusted/multi-user deployment; flagged as
+  the first post-demo follow-up unit. (The CLJS sandbox is not a
+  security boundary; the render boundary is where this belongs.)
+- **Chart helpers** (`seon.ui.chart` bar/sparkline) — inline SVG
+  hiccup already works with zero new code; helpers are polish.
+- **Presence / "when did my human last look"** — would need
+  append-only view events; explicitly not in the floor. Revisit only
+  when the notify-vs-update judgment is wanted.
+- **`:seon.render/label` short-label attr** (#34/P20) — still parked;
+  the purpose-derived headline is the no-new-attr default.
+
+## 8. Uniformity / drift findings (follow-up units)
+
+Per the standing uniformity directive — the tile value DELIBERATELY
+matches `:seon.render/html` semantics (value-or-fn, late-resolved).
+Drift this work exposes, each a candidate follow-up unit:
+
+1. **`:seon.render/html` double duty.** Today the SAME key is both
+   the generic per-entity-card render slot AND the agent-tile slot
+   (render.cljs `entity-html-sym` → `render-agent-tile`). The
+   dedicated live-tile key separates the roles; after U1 the agent
+   entity's tile use of `:seon.render/html` should be migrated/
+   retired so one key means one thing. Until then `render-agent-tile`
+   reads the new key first, old key as fallback — delete the fallback
+   in the follow-up (no legacy).
+2. **Twin key naming drift**: `ai-render` responses use
+   `:seon.render/text`; section twins and the new tile twin use
+   `:seon.render/ai`. Two names for "the text twin of a render".
+   Converge on one (`:seon.render/ai` is the more-used) — follow-up
+   sweep.
+3. **The teaching block in `seon.ctx` is prose** describing the tile;
+   after U5 it should shrink toward "read `seon.render.live-tile`"
+   plus the worked transact — context-v3's code-first direction
+   (docstrings on real fns are the durable teaching).
+4. **`agent-grid-tile`'s inline fallback** (inspector.cljs:891-896)
+   duplicates a mini default tile in hiccup — after U3 the welcome fn
+   is the only default; delete the inline fallback.
+
+## 9. Superseded from the previous draft (loss audit)
+
+- **`:seon.render/level` enum + level-aware fns** — replaced by
+  container queries over ONE render (DECIDED). No level key, no
+  branching renderers.
+- **Automatic hiccup→text flatten** as the twin floor — replaced by
+  "you see exactly what's wired": fns return the `::ai` twin; raw
+  hiccup (and twin-less fn output) shows verbatim. No flatten
+  machinery.
+- **`set-tile!` sugar** — rejected (raw transact is the one taught
+  path).
+- **"Friday freeze / U1-teaching-only" timing** — superseded: the
+  user calls the full build achievable for the 06-12 demo.
+- **Charts/images/actions/sanitization as in-scope content
+  vocabulary** — moved to §7 parked/follow-up (sanitization flagged
+  as mandatory pre-multi-user).
+- **Presence ("watching now" / view events)** — moved to §7 parked.
+- Carried forward intact: tile-is-derived-awareness (one wired value,
+  two twins — the old "tile is a section" insight, now via the
+  composer invoking the wired value), the gym S-TILE scenario, the
+  route swap, the purpose-derived default headline, the teaching
+  bones (capabilities block + raw transact + the "tile, don't paste"
+  doctrine, now expressed as the rendered-queries steer).
