@@ -136,9 +136,26 @@
 ;;   namespace it picked). [:every-in [...]] = "the agent forked NO new
 ;;   attr anywhere" (the generic S-21 no-fork predicate); [:count>= n]
 ;;   = "the seeded reuse surface is actually visible".
+;; :prompt-includes / :prompt-excludes / :prompt-every-turn — the
+;;   referee's EYES (gym-upgrade PRD §2.1 / U1): assert against what
+;;   the agent ACTUALLY SAW. run-turn! persists every full prompt to
+;;   logs/prompts/<agent-id>/<turn-id>.txt (the turn datom carries
+;;   :seon.agent.turn/prompt-file); the driver collects the run's turns
+;;   from the post-run store and reads those blobs. :prompt-includes =
+;;   SOME turn's prompt contains :text; :prompt-excludes = NO turn's
+;;   prompt contains :text; :prompt-every-turn = EVERY turn's prompt
+;;   contains :text (the catalog's standing G2 sees-question shape).
+;;   Optional :seon.gym.predicate/turn pins ONE turn by chronological
+;;   index; :seon.gym.predicate/agent scopes to one designator's turns.
+;;   A turn with no prompt-file datom, an unreadable blob, an
+;;   out-of-range index, or a run with zero turns ALL score RED naming
+;;   the path/turn — NEVER a silent pass (a referee blind to its own
+;;   missing eyes would hide the exact regression class this exists
+;;   to catch).
 (schema/register! :seon.gym.predicate/kind
   [:enum :datalog :transcript-includes :transcript-excludes
-   :first-eval-matches :eval-count-matching :domain-attrs :llm-judge])
+   :first-eval-matches :eval-count-matching :domain-attrs
+   :prompt-includes :prompt-excludes :prompt-every-turn :llm-judge])
 (schema/register! :seon.gym.predicate/axis :seon.gym.axis/name)
 ;; Datalog query/args are datahike's domain — third-party boundary,
 ;; :any allowed (same stance as :seon.db/query-request).
@@ -160,9 +177,14 @@
 (schema/register! :seon.gym.predicate/text    :string)
 (schema/register! :seon.gym.predicate/pattern :string)
 ;; Scope an eval-shaped predicate (first-eval-matches /
-;; eval-count-matching) or a judge predicate to ONE agent designator.
-;; Absent = the whole store for eval predicates, :a for judges.
+;; eval-count-matching), a prompt-blob predicate, or a judge predicate
+;; to ONE agent designator. Absent = the whole store for eval/prompt
+;; predicates, :a for judges.
 (schema/register! :seon.gym.predicate/agent :seon.gym.turn/agent)
+;; Pin a prompt-blob predicate to ONE turn by chronological index
+;; (0-based, within the predicate's agent scope). Absent = the kind's
+;; quantifier ranges over every turn in the run.
+(schema/register! :seon.gym.predicate/turn [:int {:min 0}])
 ;; LLM-judge inputs: the grading rubric and the reference (ground-
 ;; truth) facts the verdict must be checked against.
 (schema/register! :seon.gym.predicate/rubric    :string)
@@ -173,6 +195,7 @@
    [:seon.gym.predicate/kind    :seon.gym.predicate/kind]
    [:seon.gym.predicate/axis    :seon.gym.predicate/axis]
    [:seon.gym.predicate/agent   {:optional true} :seon.gym.predicate/agent]
+   [:seon.gym.predicate/turn    {:optional true} :seon.gym.predicate/turn]
    [:seon.gym.predicate/query   {:optional true} :seon.gym.predicate/query]
    [:seon.gym.predicate/args    {:optional true} :seon.gym.predicate/args]
    [:seon.gym.predicate/expect  {:optional true} :seon.gym.predicate/expect]
@@ -249,6 +272,10 @@
   [:map-of :seon.gym.axis/name :boolean])
 (schema/register! :seon.gym.scorecard/results
   [:vector :seon.gym/result])
+;; Per-turn prompt-blob evidence (gym-upgrade PRD §6.6, default-on):
+;; every persisted prompt-file path for the run, chronological — a
+;; moved number is diffable to the exact context bytes the agent saw.
+(schema/register! :seon.gym.scorecard/prompt-files [:vector :string])
 ;; --- judge verdicts — a SEPARATE scorecard axis from the mechanical
 ;; results. :seon.gym.scorecard/pass?/axes/results stay PURELY
 ;; mechanical; judge-pass?/judge-results carry the semantic grading, so
@@ -277,6 +304,8 @@
    [:seon.gym.scorecard/pass?    :seon.gym.scorecard/pass?]
    [:seon.gym.scorecard/axes     :seon.gym.scorecard/axes]
    [:seon.gym.scorecard/results  :seon.gym.scorecard/results]
+   [:seon.gym.scorecard/prompt-files {:optional true}
+    :seon.gym.scorecard/prompt-files]
    ;; present iff the scenario carries :llm-judge predicates
    [:seon.gym.scorecard/judge-pass? {:optional true}
     :seon.gym.scorecard/judge-pass?]
@@ -392,6 +421,93 @@
   [dbv agent-id]
   (second (first (eval-at+source dbv agent-id))))
 
+(defn- turn-prompt-files
+  "Chronological [turn-id prompt-file-or-nil] pairs for every turn in
+   the post-run store — optionally scoped to one agent's turns via
+   agent → sessions → turns. A nil prompt-file means the blob was
+   never written (persist-prompt! failure, or a seeded turn without
+   one) — prompt-predicate callers MUST treat that as RED."
+  [dbv agent-id]
+  (->> (if agent-id
+         (db/query {:seon.db/query '[:find ?at ?tid
+                                     :in $ ?aid
+                                     :where
+                                     [?ag :seon.agent/id ?aid]
+                                     [?ag :seon.agent/sessions ?s]
+                                     [?s :seon.agent.session/turns ?t]
+                                     [?t :seon.agent.turn/id ?tid]
+                                     [?t :seon.agent.turn/at ?at]]
+                    :seon.db/args [agent-id]
+                    :seon.db/db   dbv})
+         (db/query {:seon.db/query '[:find ?at ?tid
+                                     :where
+                                     [?t :seon.agent.turn/id ?tid]
+                                     [?t :seon.agent.turn/at ?at]]
+                    :seon.db/db dbv}))
+       (sort-by #(.getTime ^js (first %)))
+       (mapv (fn [[_ tid]]
+               [tid (:seon.agent.turn/prompt-file
+                     (db/entity {:seon.db/ref [:seon.agent.turn/id tid]
+                                 :seon.db/db  dbv}))]))))
+
+(defn- read-prompt-blob
+  "Read one persisted prompt blob. Returns [:ok text] or
+   [:unreadable reason] — the caller turns :unreadable into a RED
+   result naming the path; this fn never throws."
+  [path]
+  (try
+    [:ok (.readFileSync (js/require "node:fs") path "utf8")]
+    (catch :default e
+      [:unreadable (str path " — " (or (.-message e) e))])))
+
+(defn- eval-prompt-predicate
+  "Evaluate one prompt-blob predicate (:prompt-includes /
+   :prompt-excludes / :prompt-every-turn — gym-upgrade PRD §2.1/U1)
+   against the prompts the agent ACTUALLY SAW: the blobs run-turn!
+   persisted to logs/prompts/<agent-id>/<turn-id>.txt, located via the
+   post-run store's :seon.agent.turn/prompt-file datoms. Returns
+   [pass? actual]. Every blind spot is RED, never a silent pass: zero
+   turns, an out-of-range :turn index, a turn with no prompt-file
+   datom, an unreadable blob — each named in the actual."
+  [dbv agent-id kind text turn-idx]
+  (let [all (turn-prompt-files dbv agent-id)]
+    (cond
+      (empty? all)
+      [false (str "RED — NO turns" (when agent-id (str " for agent " agent-id))
+                  " in the post-run store; nothing to assert prompts "
+                  "against")]
+
+      (and turn-idx (not (< -1 turn-idx (count all))))
+      [false (str "RED — :seon.gym.predicate/turn " turn-idx
+                  " out of range; run has " (count all) " turn(s)")]
+
+      :else
+      (let [reads  (mapv (fn [[tid path]]
+                           (if (nil? path)
+                             {:tid tid
+                              :missing (str "turn " tid " has NO "
+                                            ":seon.agent.turn/prompt-file — "
+                                            "blob never written (expected "
+                                            "under logs/prompts/)")}
+                             (let [[status payload] (read-prompt-blob path)]
+                               (if (= :ok status)
+                                 {:tid tid :path path :text payload}
+                                 {:tid tid :path path
+                                  :missing (str "prompt blob unreadable: "
+                                                payload)}))))
+                         (if turn-idx [(nth all turn-idx)] all))
+            broken (filterv :missing reads)]
+        (if (seq broken)
+          [false (str "RED — " (str/join "; " (map :missing broken)))]
+          (let [hits  (filterv #(str/includes? (:text %) text) reads)
+                stat  (str (count hits) "/" (count reads)
+                           " prompt blob(s) contain " (pr-str text)
+                           "; blobs: " (pr-str (mapv :path reads)))]
+            (case kind
+              :prompt-includes   [(boolean (seq hits)) stat]
+              :prompt-excludes   [(empty? hits) (str stat " (must be 0)")]
+              :prompt-every-turn [(= (count hits) (count reads)) stat])))))))
+
 (defn- resolve-predicate-args
   "Substitute agent-designator placeholders (:seon.gym.agent/a …) in a
    predicate's datalog args with the actual agent ids minted this run."
@@ -415,7 +531,7 @@
    never crash the scorecard."
   [dbv transcript agents
    {:seon.gym.predicate/keys [id kind axis query args expect
-                              text pattern agent]}]
+                              text pattern agent turn]}]
   (let [agent-id (when agent (get agents agent))
         [pass? actual]
         (try
@@ -455,7 +571,10 @@
             (let [attrs (warn/domain-attrs {:seon.db/db dbv})]
               [(expect-pass? expect (mapv vector attrs))
                (str "domain attrs: " (pr-str attrs)
-                    " expect=" (pr-str expect))]))
+                    " expect=" (pr-str expect))])
+
+            (:prompt-includes :prompt-excludes :prompt-every-turn)
+            (eval-prompt-predicate dbv agent-id kind text turn))
           (catch :default e
             [false (str "predicate THREW: " e)]))]
     {:seon.gym.predicate/id   id
@@ -1020,7 +1139,15 @@
                           (every? :seon.gym.result/pass? results)
                           :seon.gym.scorecard/axes
                           (axes-rollup axes results)
-                          :seon.gym.scorecard/results  results}
+                          :seon.gym.scorecard/results  results
+                          ;; gym-upgrade §6.6 (default-on): the run's
+                          ;; per-turn prompt-blob paths, chronological —
+                          ;; a moved number diffs to the exact context
+                          ;; bytes the agent saw. nil paths (blob write
+                          ;; failures) are dropped here; the prompt
+                          ;; PREDICATES are where missing blobs go RED.
+                          :seon.gym.scorecard/prompt-files
+                          (into [] (keep second) (turn-prompt-files dbv nil))}
                          (seq judge-preds)
                          (assoc :seon.gym.scorecard/judge-pass?
                                 (every? :seon.gym.judge/pass? judge-results)

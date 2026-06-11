@@ -330,6 +330,134 @@
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
 ;; ---------------------------------------------------------------------------
+;; PROMPT-BLOB PREDICATES (gym-upgrade PRD §2.1 / U1) — the referee's
+;; eyes. run-turn! persists every prompt to logs/prompts/<agent>/<turn>.txt;
+;; the new kinds read those blobs from the post-run store. Falsification
+;; (per the PRD): the question text passes :prompt-every-turn; text NOT
+;; in any prompt fails :prompt-includes WITH the blob path in the
+;; actual; a missing/unreadable blob scores RED naming the path.
+;; ---------------------------------------------------------------------------
+
+(def ^:private prompt-pred-question
+  "What is the gym prompt-blob marker question?")
+
+(defn- prompt-blob-scenario []
+  {:seon.gym.scenario/id     :gymtest-prompt-blob-predicates
+   :seon.gym.scenario/doc    "Inline stub (gym-upgrade U1 falsification): one scripted turn with a known prompt; :prompt-every-turn on the question text passes, :prompt-includes for absent text fails naming the blob path, :prompt-excludes on absent text passes, :turn index pins/ranges."
+   :seon.gym.scenario/tier   :stub
+   :seon.gym.scenario/status :active
+   :seon.gym.scenario/axes   [:sees-question]
+   :seon.gym.scenario/turns
+   [{:seon.gym.turn/message prompt-pred-question
+     :seon.gym.turn/llm-script
+     ["(seon.agent/reply! {:seon.agent.message/content \"noted\"})\n"]}]
+   :seon.gym.scenario/predicates
+   [{:seon.gym.predicate/id   :question-in-every-prompt
+     :seon.gym.predicate/kind :prompt-every-turn
+     :seon.gym.predicate/axis :sees-question
+     :seon.gym.predicate/text prompt-pred-question}
+    {:seon.gym.predicate/id   :absent-text-fails-naming-the-blob
+     :seon.gym.predicate/kind :prompt-includes
+     :seon.gym.predicate/axis :sees-question
+     :seon.gym.predicate/text "GYM-XYZZY-NEVER-IN-ANY-PROMPT"}
+    {:seon.gym.predicate/id   :absent-text-excludes-green
+     :seon.gym.predicate/kind :prompt-excludes
+     :seon.gym.predicate/axis :sees-question
+     :seon.gym.predicate/text "GYM-XYZZY-NEVER-IN-ANY-PROMPT"}
+    {:seon.gym.predicate/id   :turn-zero-pinned-includes-question
+     :seon.gym.predicate/kind :prompt-includes
+     :seon.gym.predicate/axis :sees-question
+     :seon.gym.predicate/turn 0
+     :seon.gym.predicate/text prompt-pred-question}
+    {:seon.gym.predicate/id   :turn-index-out-of-range-is-red
+     :seon.gym.predicate/kind :prompt-includes
+     :seon.gym.predicate/axis :sees-question
+     :seon.gym.predicate/turn 5
+     :seon.gym.predicate/text prompt-pred-question}]})
+
+(defn- result-by-id [card id]
+  (->> (:seon.gym.scorecard/results card)
+       (filter #(= id (:seon.gym.predicate/id %)))
+       first))
+
+(deftest prompt-blob-predicates-see-what-the-agent-saw
+  (async done
+    (-> (gym/run-scenario! {:seon.gym/scenario (prompt-blob-scenario)})
+        (.then (fn [card]
+                 (gym/print-scorecard! card)
+                 (is (m/validate :seon.gym/scorecard card)
+                     "scorecard with prompt predicates validates")
+                 ;; FALSIFICATION 1 — the known prompt carries the
+                 ;; question on every turn.
+                 (let [r (result-by-id card :question-in-every-prompt)]
+                   (is (true? (:seon.gym.result/pass? r))
+                       (str ":prompt-every-turn on the question passes — "
+                            (:seon.gym.result/actual r))))
+                 ;; FALSIFICATION 2 — absent text fails WITH the blob
+                 ;; path in the actual.
+                 (let [r (result-by-id card :absent-text-fails-naming-the-blob)]
+                   (is (false? (:seon.gym.result/pass? r))
+                       "text not in any prompt fails :prompt-includes")
+                   (is (str/includes? (:seon.gym.result/actual r)
+                                      "logs/prompts/")
+                       (str "the failing actual names the blob path — "
+                            (:seon.gym.result/actual r))))
+                 ;; :prompt-excludes is the same observation, inverted.
+                 (is (true? (:seon.gym.result/pass?
+                              (result-by-id card :absent-text-excludes-green))))
+                 ;; :turn pinning — index 0 hits the one real turn;
+                 ;; index 5 is out of range and must be RED, not vacuous.
+                 (is (true? (:seon.gym.result/pass?
+                              (result-by-id
+                                card :turn-zero-pinned-includes-question))))
+                 (let [r (result-by-id card :turn-index-out-of-range-is-red)]
+                   (is (false? (:seon.gym.result/pass? r)))
+                   (is (str/includes? (:seon.gym.result/actual r)
+                                      "out of range")))
+                 ;; one deliberately-failing predicate → card fails.
+                 (is (false? (:seon.gym.scorecard/pass? card)))
+                 ;; §6.6 evidence: the card carries the run's blob paths.
+                 (let [pfs (:seon.gym.scorecard/prompt-files card)]
+                   (is (seq pfs) "scorecard carries prompt-file evidence")
+                   (is (every? #(str/starts-with? % "logs/prompts/") pfs)))
+                 (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest prompt-predicate-missing-blob-scores-red-naming-the-path
+  ;; FALSIFICATION 3 — a turn whose :seon.agent.turn/prompt-file points
+  ;; at a file that does not exist (seeded as a fixture turn, exactly
+  ;; what a lost/unwritten blob looks like post-run) must score RED
+  ;; naming the path — NEVER a silent pass, even though the run's REAL
+  ;; turn prompt does contain the asserted text.
+  (async done
+    (let [phantom (str "logs/prompts/gym-missing/" (db/new-id!) ".txt")
+          scenario
+          (-> (prompt-blob-scenario)
+              (assoc :seon.gym.scenario/id :gymtest-prompt-blob-missing
+                     :seon.gym.scenario/fixtures
+                     [{:seon.agent.turn/id          (db/new-id!)
+                       :seon.agent.turn/at          (js/Date.)
+                       :seon.agent.turn/status      :done
+                       :seon.agent.turn/prompt-file phantom}]
+                     :seon.gym.scenario/predicates
+                     [{:seon.gym.predicate/id   :every-turn-red-on-missing-blob
+                       :seon.gym.predicate/kind :prompt-every-turn
+                       :seon.gym.predicate/axis :sees-question
+                       :seon.gym.predicate/text prompt-pred-question}]))]
+      (-> (gym/run-scenario! {:seon.gym/scenario scenario})
+          (.then (fn [card]
+                   (gym/print-scorecard! card)
+                   (let [r (result-by-id card :every-turn-red-on-missing-blob)]
+                     (is (false? (:seon.gym.result/pass? r))
+                         "a missing blob is RED, never a silent pass")
+                     (is (str/includes? (:seon.gym.result/actual r) phantom)
+                         (str "the RED actual names the missing path — "
+                              (:seon.gym.result/actual r))))
+                   (is (false? (:seon.gym.scorecard/pass? card)))
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ---------------------------------------------------------------------------
 ;; LLM-JUDGE wiring — proven with a MOCKED judge llm-fn (zero spend).
 ;; The judge verdict lands on the SEPARATE judge axis of the scorecard:
 ;; mechanical pass?/axes/results never mix with judge-pass?/judge-results,

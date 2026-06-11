@@ -23,10 +23,12 @@ imagined schema).
 Two predicate flavors, scored on SEPARATE axes — "behaved right, answered
 wrong" and "answered right, behaved wrong" are distinct failure signatures:
 
-- **MECHANICAL** — datalog over the post-run store + transcript: behavior
-  (which evals ran, in what order), structure (which attrs/entities exist),
-  termination (turns used vs cap, final state). Binary per predicate; no
-  LLM in the loop.
+- **MECHANICAL** — datalog over the post-run store + transcript, plus the
+  persisted per-turn prompt blobs (`:prompt-includes` /
+  `:prompt-excludes` / `:prompt-every-turn` — what the agent ACTUALLY
+  SAW, gym-upgrade U1): behavior (which evals ran, in what order),
+  structure (which attrs/entities exist), termination (turns used vs
+  cap, final state). Binary per predicate; no LLM in the loop.
 - **LLM-JUDGE** — rubric + reference facts → graded verdict WITH a written
   justification. Used only where many phrasings are valid (semantic answer
   correctness, schema-design quality). The judge never scores behavior;
@@ -52,8 +54,20 @@ so each run doubles as a regression sweep:
 - **G1 terminates** — turns used < `:seon.agent/turns-cap` (default 20)
   AND final `:seon.agent/state` = `:idle` AND the last turn's status is
   `:done` (never cap-exhaustion, never a dangling `:running`).
-- **G2 sees-question** — some turn's `:seon.turn/prompt-text` contains the
-  user message text (the run-3 transcript-loss regression, permanent).
+- **G2 sees-question** — `:prompt-every-turn` on the user message text:
+  EVERY turn's persisted prompt blob contains the question (the run-3
+  transcript-loss regression, permanent). Implemented on the prompt-blob
+  predicate kinds (`:prompt-includes` / `:prompt-excludes` /
+  `:prompt-every-turn`, gym-upgrade U1, 2026-06-11): `run-turn!` writes
+  the full prompt to `logs/prompts/<agent-id>/<turn-id>.txt` and the
+  turn datom carries `:seon.agent.turn/prompt-file`; the driver reads
+  those blobs post-run. Optional `:seon.gym.predicate/turn`
+  (chronological index) and `:seon.gym.predicate/agent` scope the
+  assertion. A missing/unreadable blob, an out-of-range index, or a
+  zero-turn run all score RED naming the path/turn — never a silent
+  pass. (The old `:seon.turn/prompt-text` datom this predicate was
+  first written against was retired to file blobs on 2026-06-09, which
+  had left G2 unimplementable.)
 - **G3 no-blank-replies** — no `:seon.message` with blank `content`
   (run-3 defect 4; refusal lives in `message!` agent.cljs:744).
 - **G4 envelope-honesty** — no assistant message claiming storage success

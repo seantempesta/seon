@@ -54,6 +54,20 @@
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/axis    :consults-findings
    :seon.gym.predicate/pattern ":my\\."}
+  ;; #26 salience axis, split honest (gym-upgrade U1): "the seeded
+  ;; claim TEXT rendered in the prompt the agent acted on" (context
+  ;; worked) scores SEPARATELY from "the first eval consulted it"
+  ;; (agent behaved) — so "context failed" vs "agent ignored context"
+  ;; are distinct failure signatures. The text is a fragment unique to
+  ;; the seeded #26 envelope claim (verified absent from src/ — it can
+  ;; only reach a prompt via the fixture row rendering). EXPECTED-RED
+  ;; until a context rung renders finding CLAIM TEXT (not just attr
+  ;; names) into the prompt — red-first is the gym pinning target
+  ;; behavior, per the gym-upgrade PRD §4.
+  {:seon.gym.predicate/id   :seeded-claim-rendered-in-prompt
+   :seon.gym.predicate/kind :prompt-includes
+   :seon.gym.predicate/axis :consults-findings
+   :seon.gym.predicate/text "never the raw tx-report"}
   ;; searches-first INVERTED here: the answer is stored, so more than
   ;; one repo search = the run-7 re-derivation signature.
   ;; Toolbelt renamed seon.search/seon.fs → seon.agent.search/seon.agent.fs
