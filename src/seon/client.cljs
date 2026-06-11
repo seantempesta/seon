@@ -580,6 +580,17 @@
     :test   (keyword (-> ident (str/split #"/" 2) first))
     :schema (keyword (namespace ident))))
 
+(defn- registration-call-source?
+  "Replay's `:seon.schema` substrate-vs-agent discriminator (Step 4): TRUE
+   when a stored `:seon.schema/source` is an eval-able `(…)` registration
+   call (an agent's `(seon.schema/register! …)` tee row) rather than a
+   boot-indexed shape literal (`[:string {…}]`, `:keyword`). The ONE rule —
+   `query-program-graph-entries` uses it to select replayable schema rows,
+   `substrate-index-tx` honors it as never-overwrite, and
+   `prune-substrate-ghosts!` honors it as never-prune."
+  [source]
+  (str/starts-with? (str/trim (str source)) "("))
+
 (defn- target-ns-for-entry
   "Per-entity target ns symbol for `(seval/eval … {:ns _})`.
 
@@ -639,7 +650,7 @@
          ;; `(seon.schema/register! …)` tee) is replayable; shape literals
          ;; are rebuilt from the live registry by `index-schemas` each boot.
          (remove #(and (= :schema (:kind %))
-                       (not (str/starts-with? (str/trim (str (:source %))) "("))))
+                       (not (registration-call-source? (:source %)))))
          ;; Replay order: ALL :ns entries FIRST (tx-ordered among
          ;; themselves), then the def-shaped entries (tx-ordered).
          ;; Plain tx order is WRONG here: the tee re-asserts
@@ -1304,9 +1315,109 @@
                                (:seon.ns/source row)))
                        (when-some [stored (get have-schs (:seon.schema/key row))]
                          (or (= stored (:seon.schema/source row))
-                             (str/starts-with? (str/trim (str stored)) "(")))
+                             (registration-call-source? stored)))
                        (contains? have-tsts (:seon.test/sym row))))
                  all))))
+
+(defn ^:async prune-substrate-ghosts!
+  "Boot-index GC (open-issues 2026-06-11, agent-reported row 5): retract
+   program-graph rows the boot indexers ONCE wrote but whose source
+   ns/fn/test/schema no longer exists in the booting code. `substrate-index-tx`
+   re-emits rows when source CHANGES (drift-healing) but never retracts —
+   renames and deletions left ghosts that rendered into every context
+   forever (live incident: the deleted `my.kb.instruction` ns kept
+   injecting its dead teachings until manually retracted; the removed
+   `:seon.render.chat/bubble` registration left a stale `:seon.schema` row).
+
+   A stored row is a GHOST iff ALL of:
+
+     1. SUBSTRATE-CLAIMED — its `:source` datom's tx carries
+        `:seon.db/origin :substrate-seed`, the persisted provenance claim
+        every boot-index transact writes (and the origin-forge guard in
+        `seon.db.internal` protects). Agent-authored rows (detect-and-tee,
+        replay, runner) carry other origins and are NEVER candidates —
+        even when their shape is identical and their ns is absent from
+        this build.
+     2. ABSENT FROM THIS BOOT — its ident (`:seon.ns/name` /
+        `:seon.fn/sym` / `:seon.test/sym` / `:seon.schema/key`) is not in
+        the freshly-built index set (the same pure builders
+        `substrate-index-tx` transacts from). A rename prunes the old
+        ident and keeps the new one.
+     3. NOT an agent `(…)` registration call — `:seon.schema` rows keep
+        replay's `registration-call-source?` discriminator (Step 4):
+        a `(seon.schema/register! …)` tee row is agent corpus, never
+        pruned, regardless of provenance.
+
+   A kind whose freshly-built ident set is EMPTY is skipped entirely
+   (degenerate-boot guard: an unreadable source tree must not mass-prune
+   the store; `:test` is legitimately empty in builds without the preload).
+
+   Runs BEFORE `replay-program-graph!` in `start-agent!` — load-bearing:
+   a deleted ns falls OUT of `(substrate-ns-set)`, so its ghost rows would
+   otherwise be misclassified as agent corpus and REPLAYED back into the
+   live compile-state.
+
+   Idempotent: pruned rows are gone, so the second boot finds zero
+   candidates. Loud: one `:seon.log` info names every pruned row and why.
+   Returns a Promise of `{:seon.client/pruned [[kind ident] …]}`."
+  [conn]
+  (let [idx    (index-substrate!)
+        tsts   (index-tests)
+        live   {:ns     (into #{} (keep :seon.ns/name) (concat idx tsts))
+                :fn     (into #{} (keep :seon.fn/sym) idx)
+                :test   (into #{} (keep :seon.test/sym) tsts)
+                :schema (into #{} (keep :seon.schema/key) (index-schemas))}
+        db     (await (d/db conn))
+        rows   (d/q '[:find ?e ?ident ?source ?kind
+                      :where
+                      (or-join [?e ?ident ?source ?kind ?tx]
+                        (and [?e :seon.ns/name   ?ident]
+                             [?e :seon.ns/source ?source ?tx]
+                             [(ground :ns) ?kind])
+                        (and [?e :seon.fn/sym    ?ident]
+                             [?e :seon.fn/source ?source ?tx]
+                             [(ground :fn) ?kind])
+                        (and [?e :seon.test/sym    ?ident]
+                             [?e :seon.test/source ?source ?tx]
+                             [(ground :test) ?kind])
+                        (and [?e :seon.schema/key    ?ident]
+                             [?e :seon.schema/source ?source ?tx]
+                             [(ground :schema) ?kind]))
+                      [?tx :seon.db/origin :substrate-seed]]
+                    db)
+        ghosts (->> rows
+                    (keep (fn [[e ident source kind]]
+                            (let [fresh (get live kind)]
+                              (when (and (seq fresh)
+                                         (not (contains? fresh ident))
+                                         (not (and (= :schema kind)
+                                                   (registration-call-source? source))))
+                                {:e e :kind kind :ident ident}))))
+                    (sort-by (fn [{:keys [kind ident]}] [kind (str ident)]))
+                    vec)]
+    (when (seq ghosts)
+      (await (log/info!
+               {:seon.log/source  ::prune-substrate-ghosts!
+                :seon.log/message
+                (str "boot-index GC: pruned " (count ghosts)
+                     " substrate ghost row(s) — substrate-seeded "
+                     "program-graph rows whose source no longer exists "
+                     "in the booting code: "
+                     (str/join ", " (map (fn [{:keys [kind ident]}]
+                                           (str (name kind) " " (pr-str ident)))
+                                         ghosts)))}))
+      (let [res (await (db/transact!
+                         conn
+                         (mapv (fn [{:keys [e]}] [:db/retractEntity e]) ghosts)
+                         {:seon.db/origin :substrate-seed}))]
+        ;; Boot maintenance stays fail-loud (same posture as the seed
+        ;; transacts): a silent half-prune would leave the store lying.
+        (when-not (:seon.db/ok? res)
+          (throw (ex-info (str "boot-index GC retract failed: "
+                               (get-in res [:seon.db/error :seon.error/message]))
+                          {:seon.client/pruned (mapv (juxt :kind :ident) ghosts)
+                           :seon.db/error      (:seon.db/error res)})))))
+    {:seon.client/pruned (mapv (juxt :kind :ident) ghosts)}))
 
 (defn- stub-llm
   "A fake LLM that demonstrates the REPL-as-harness response shape: a
@@ -1579,7 +1690,19 @@
     (await
       (db/with-agent primary
         (fn ^:async boot-with-agent! []
-          (let [;; v1.md §7.4. Re-eval every persisted AGENT-authored
+          (let [;; Boot-index GC — MUST run before replay: a DELETED
+                ;; substrate ns falls out of (substrate-ns-set), so its
+                ;; ghost rows would be misclassified as agent corpus and
+                ;; replayed back into the live compile-state (the
+                ;; my.kb.instruction dead-teachings incident). Idempotent;
+                ;; loud (one :seon.log info naming every pruned row).
+                prune-stats   (await (prune-substrate-ghosts! conn))
+                _             (log/info-console!
+                                "seon.client/start-agent!"
+                                (str "boot-index GC: "
+                                     (count (:seon.client/pruned prune-stats))
+                                     " ghost row(s) pruned"))
+                ;; v1.md §7.4. Re-eval every persisted AGENT-authored
                 ;; :seon.ns / :seon.fn / :seon.test / :seon.schema entity's
                 ;; :source in tx-id order. GLOBAL (not per-agent) — runs
                 ;; ONCE per boot, before any per-agent setup. Substrate

@@ -24,6 +24,7 @@
   (:require
     [clojure.string :as str]
     [cljs.test :as t :refer [deftest is async]]
+    [datahike.api :as d]
     [seon.client :as client]
     [seon.db :as db]
     [seon.schema :as schema]
@@ -301,6 +302,91 @@
                     (done))))))
         (.catch (fn [e]
                   (is false (str "idempotency test threw: " (or (.-message e) e)))
+                  (done))))))
+
+(deftest prune-substrate-ghosts-removes-only-substrate-claimed-absentees
+  ;; Boot-index GC (open-issues 2026-06-11 row 5). Pins all four hard
+  ;; constraints in one flow on one conn:
+  ;;
+  ;;   (a) discriminator — ONLY rows whose source tx carries
+  ;;       `:seon.db/origin :substrate-seed` are candidates; an
+  ;;       agent-authored my.* row with the IDENTICAL shape is never
+  ;;       pruned, and an agent's `(register! …)` tee schema row is
+  ;;       protected by replay's registration-call-source? rule even
+  ;;       under a (forged) substrate-seed origin;
+  ;;   (b) loudness is the log/info! inside the pruner (shape asserted
+  ;;       via the returned pruned vector, the same data the message
+  ;;       names);
+  ;;   (c) idempotence — a second prune on the same conn prunes nothing;
+  ;;   (d) rename semantics — the old ident (absent from the boot set)
+  ;;       goes, idents present in the boot set stay.
+  (async done
+    (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
+                             (db/tx-meta-datahike-schema)))
+        (.then
+          (fn [conn]
+            (-> (client/substrate-index-tx conn)
+                (.then (fn [first-tx]
+                         (db/transact! conn first-tx
+                                       {:seon.db/origin :substrate-seed})))
+                ;; GHOSTS: substrate-seeded rows whose ns/fn/schema no
+                ;; longer exists in the booting code (deleted/renamed).
+                (.then (fn [_]
+                         (db/transact!
+                           conn
+                           [{:seon.ns/name   :seon.ghost.deleted
+                             :seon.ns/source "(ns seon.ghost.deleted)"}
+                            {:seon.fn/sym    "seon.ghost.deleted/gone"
+                             :seon.fn/ns     {:seon.ns/name :seon.ghost.deleted}
+                             :seon.fn/source "(defn gone [] 1)"}
+                            ;; deleted registration → shape-literal source
+                            {:seon.schema/key    :seon.ghost/bubble
+                             :seon.schema/source "[:string]"}
+                            ;; agent register! TEE row — protected by the
+                            ;; `(…)`-call discriminator even though the
+                            ;; origin here claims substrate-seed.
+                            {:seon.schema/key    :my.agentish/teed
+                             :seon.schema/source "(seon.schema/register! :my.agentish/teed :string)"}]
+                           {:seon.db/origin :substrate-seed})))
+                ;; AGENT-AUTHORED row with the IDENTICAL shape as the
+                ;; ghost ns — different (non-substrate) provenance.
+                (.then (fn [_]
+                         (db/transact!
+                           conn
+                           [{:seon.ns/name   :my.todo-app
+                             :seon.ns/source "(ns my.todo-app)"}]
+                           {:seon.db/origin :agent})))
+                (.then (fn [_] (client/prune-substrate-ghosts! conn)))
+                (.then
+                  (fn [{pruned :seon.client/pruned}]
+                    (is (= [[:fn "seon.ghost.deleted/gone"]
+                            [:ns :seon.ghost.deleted]
+                            [:schema :seon.ghost/bubble]]
+                           pruned)
+                        "exactly the three substrate ghosts are pruned — not the agent ns row, not the (register! …) tee row")
+                    (let [db' @conn
+                          ns-names (into #{} (map first)
+                                         (d/q '[:find ?nm :where [?e :seon.ns/name ?nm]] db'))
+                          sch-keys (into #{} (map first)
+                                         (d/q '[:find ?k :where [?e :seon.schema/key ?k]] db'))]
+                      (is (not (contains? ns-names :seon.ghost.deleted))
+                          "ghost ns row is GONE from the store")
+                      (is (contains? ns-names :my.todo-app)
+                          "agent-authored my.* ns row with identical shape SURVIVES")
+                      (is (contains? ns-names :seon.db)
+                          "live substrate rows (present in the boot set) survive — rename keeps the new")
+                      (is (not (contains? sch-keys :seon.ghost/bubble))
+                          "deleted-registration schema row is GONE")
+                      (is (contains? sch-keys :my.agentish/teed)
+                          "agent (register! …) tee row SURVIVES the prune"))))
+                (.then (fn [_] (client/prune-substrate-ghosts! conn)))
+                (.then
+                  (fn [{pruned :seon.client/pruned}]
+                    (is (= [] pruned)
+                        "second boot's prune finds ZERO ghosts (idempotent)")
+                    (done))))))
+        (.catch (fn [e]
+                  (is false (str "prune test threw: " (or (.-message e) e)))
                   (done))))))
 
 (deftest substrate-index-tx-reasserts-drifted-ns-source
