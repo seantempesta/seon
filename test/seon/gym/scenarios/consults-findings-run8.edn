@@ -34,8 +34,10 @@
    ;; Anchored on attr NAMES via the engine's `name` built-in; the
    ;; substrate registers no other attrs with these names (verified
    ;; 2026-06-11 — only :my.kb/* carries them), so no vacuous pass.
-   ;; The consult/reuse predicates below stay STRICT on :my.kb[./] —
-   ;; cross-agent findability is where the namespace fork has a victim.
+   ;; (2026-06-11 evening: the consult anchor below WIDENED too — any
+   ;; store read counts; the judge carries answer quality. The earlier
+   ;; "stay strict on :my.kb[./]" stance is superseded by that
+   ;; decision.)
    ;; SHAPE NOTE (engine pin, verified live 2026-06-11): TWO datom
    ;; patterns with DISTINCT unbound attr vars joined on one entity
    ;; throw \"Cannot compare <keyword> to\" in datahike-cljs — so the
@@ -59,28 +61,26 @@
    :seon.gym.predicate/axis    :searches-first
    :seon.gym.predicate/pattern "seon\\.agent\\.search/grep|seon\\.agent\\.fs/read-file"
    :seon.gym.predicate/expect  [:count>= 1]}
-  ;; THE pass bar (PRD §1): B's earliest message-driven eval queries
-  ;; the finding rows. Anchored on the kb prefix (gym-upgrade §3.2,
-  ;; same fix as s32): a consult means the eval touches a :my.kb/*
-  ;; SHARED PROVENANCE attr (:my.kb/source-path, :my.kb/confidence —
-  ;; the predictable storage signature this scenario's storage
-  ;; predicate already keys on) or a :my.kb.<domain>/* attr A minted.
-  ;; V4 consult evidence: B's creation turn runs
-  ;; `(seon.db/store-inventory)` for real, so A's stored kinds sit in
-  ;; B's own transcript (the catalogs are GONE — context-v4 V4-3); the
-  ;; my.kb namespace source rides in the prompt as a <namespace> tag.
-  ;; The previous broad ":my\\." anchor passed on ANY :my.* touch —
-  ;; e.g. B's my.agent.<id> scratch attrs — measuring that the bait
-  ;; rendered, not that consulting replaced research (the false-
-  ;; positive class falsified both ways in driver_test's
-  ;; consult-anchor tests; creation-turn tutorial evals are excluded
-  ;; by the driver's woken-by scoping). The [./] boundary admits both
-  ;; :my.kb/x and :my.kb.codebase/x while rejecting other :my.*.
+  ;; THE pass bar (PRD §1): B's earliest message-driven eval READS THE
+  ;; STORE. WIDENED anchor (DECIDED, user 2026-06-11 — same behavior-
+  ;; not-vocabulary logic as the §2 provenance widening): "consulted
+  ;; first" = the first eval's SOURCE contains a seon.db READ op
+  ;; (query/pull/entity/store-inventory) — ANY store read counts, not
+  ;; just :my.kb-anchored ones. The previous ":my\\.kb[./]" anchor
+  ;; punished a vocabulary choice: a B that queried A's findings under
+  ;; a forked spelling HAD consulted; the judge below still measures
+  ;; whether the consult paid off in the answer. V4 consult evidence:
+  ;; B's creation turn runs `(seon.db/store-inventory)` for real, so
+  ;; A's stored kinds sit in B's own transcript (the catalogs are GONE
+  ;; — context-v4 V4-3); creation-turn tutorial evals are excluded
+  ;; from 'first eval' by the driver's woken-by scoping, so this
+  ;; measures B's first MESSAGE-DRIVEN move. (Falsified both ways in
+  ;; driver_test's consult-anchor tests.)
   {:seon.gym.predicate/id      :b-first-eval-consults-stored-findings
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/agent   :b
    :seon.gym.predicate/axis    :consults-findings
-   :seon.gym.predicate/pattern ":my\\.kb[./]"}
+   :seon.gym.predicate/pattern "seon\\.db/(query|pull|entity|store-inventory)"}
   ;; "B sent a message onward" — from B with hops>0 (replies to the
   ;; user carry waking-hops+1; the turn-log self-folds carry 0). NOT
   ;; the user-entity join: the datahike-cljs engine mis-binds queries

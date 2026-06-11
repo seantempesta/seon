@@ -234,6 +234,44 @@ A's findings if every agent invents its own provenance namespace. The
 scenarios that measure consumption of stored knowledge keep the shared
 `:my.kb/*` requirement — that is where the fork has a real victim.
 
+> **SUPERSEDED for the consult ANCHOR (user, 2026-06-11 evening):**
+> the consult-first predicates in s32/s12 now count ANY store
+> query/pull as "consulted first" — structurally, the first
+> message-driven eval's source contains a `seon.db` READ op
+> (`query`/`pull`/`entity`/`store-inventory`), not just a
+> `:my.kb`-anchored read. Same behavior-not-vocabulary logic as the
+> provenance widening above: an agent that went to the store first
+> HAS consulted, whatever attr spelling it reached for. The
+> answer-quality judge keeps measuring whether the consult actually
+> paid off. Falsified both ways in `driver_test`'s consult-anchor
+> tests; the retired vocabulary anchor is pinned there as the defect.
+
+### §2b DECIDED — gym text matching is whitespace-insensitive (user, 2026-06-11 evening)
+
+The self-bait load check and the salience/uniqueness verification
+normalize whitespace (collapse all runs, incl. newlines, to single
+spaces) before comparing. Trigger: the s32 salience fragment "never
+the raw tx-report" lives VERBATIM in `message!`'s docstring
+(`src/seon/agent/message.cljs`) split by a line break — verbatim
+matching called the text "verified absent from src/" while the
+normalized scan finds it. Applied to `check-self-bait!`, the
+prompt-blob predicates, and the transcript predicates
+(`test/seon/gym/driver.cljs` `normalize-ws`). The s32 seeded claim
+was RE-CUT ("the transaction report itself is swallowed at the
+boundary" — verified absent from src/ AND docs/ under normalization);
+fixture re-cut is harness hygiene, same semantics.
+
+### §2c DECIDED — `:seon.workout` removed from the gym (user, 2026-06-11 evening)
+
+"We shouldn't have `:seon.workout` in our shipping product." The gym
+fixture domain is renamed `:my.workout/*` everywhere (scenario EDNs,
+driver/driver_test, the re-pinned inventory expectation, warn/schema/
+resume test fixtures) — which is ALSO the correct convention: a prior
+agent's data domain is `my.*`; the old name modeled the wrong
+namespace rule. Remaining `src/` references are docstring/comment
+EXAMPLES held by other agents' fences (client.cljs, schema.cljc,
+db.cljs, ctx.cljs, warn.cljs) — orchestrator carries the one-liners.
+
 **Discoverability makes `:my.kb/*` win by gravity, not rubric.** Once
 ROOT 2's inventory and ROOT 1's shown-not-told mixed-namespace example
 land, the shared attrs are the visible, taught, lowest-friction path;
@@ -387,7 +425,22 @@ Fence: `search.cljs` is in `src/seon/agent/` — confirm the robustness
 agent's fence list (it owns `agent.cljs` and `agent/fs.cljs`; if its
 fence covers all of `src/seon/agent/`, B2 waits for it).
 
-**B3 — reply! envelope-aware batch guard.** Files (≤7):
+**B3 — reply! envelope-aware batch guard. LANDED 2026-06-11.**
+Deviation from the file list below: `eval.cljs` was held by a
+parallel agent AND no eval.cljs touch was needed — the batch seam is
+DERIVED (reactive-context): every earlier form's `:seon.eval` row is
+durably recorded under the turn before the next form runs, and
+`message!`/`reply!` execute inside the batch's tx-context
+(`:seon.db/turn-id`), so `seon.agent.message` reads the turn's evals
+plus the globalThis live-value stash at send time. The guard lives in
+`message!` (THE single write path — a fan-out composed before results
+existed is the same false claim as a user reply); `reply!` inherits
+it and passes `:seon.agent.message/force` through. All three
+falsifications proven live through the REAL
+`run-agentic-loop!`/`eval-batch!` pipeline (scripted llm-fn). Files
+actually touched: `src/seon/agent/message.cljs`,
+`test/seon/agent/message_test.cljs` (4 guard tests).
+Original spec — Files (≤7):
 `src/seon/eval.cljs` (`eval-batch!`), `src/seon/agent/message.cljs`
 (the refusal envelope), one test ns.
 Scope: a `reply!`/`message!` form in a batch where an EARLIER form's

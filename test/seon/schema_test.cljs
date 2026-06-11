@@ -3,7 +3,7 @@
 
    Pins the single-segment keyword-namespace gate (gym S-21 paid-run
    finding, 2026-06-10): `:workout/date` landed in a paid run beside
-   the established `:seon.workout/date` despite the teaching banning
+   the established `:my.workout/date` despite the teaching banning
    it — register! now refuses single-segment namespaces with a guiding
    error (the established register! failure mode: a thrown
    `:user-input` ex-info, surfaced to agents as an error envelope).

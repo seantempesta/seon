@@ -376,6 +376,15 @@
 ;; Scenario loading
 ;; ===========================================================================
 
+(defn- normalize-ws
+  "Collapse every whitespace run (incl. newlines) to one space, trimmed
+   — text predicates compare NORMALIZED forms (user decision
+   2026-06-11: the s32 salience text lived in message!'s docstring
+   SPLIT BY A LINE BREAK, so verbatim matching both missed real prompt
+   contamination and broke on rendered line wrapping)."
+  [s]
+  (str/trim (str/replace (str s) #"\s+" " ")))
+
 (defn- fixture-strings
   "Every string value reachable inside one fixture form (maps, vectors,
    nested) — the self-bait scan surface."
@@ -393,12 +402,16 @@
    the asked question, so the consult predicate measured the rendered
    bait, not the behavior). Loud load failure naming the offending
    fixture — paraphrase the fixture; predicates about consultation
-   anchor on attrs/structure, never on the question string."
+   anchor on attrs/structure, never on the question string.
+
+   Matching is WHITESPACE-NORMALIZED ([[normalize-ws]], user decision
+   2026-06-11): a turn message hiding in a fixture across a line break
+   is the same self-bait."
   [path {:seon.gym.scenario/keys [id fixtures fixture-sources turns]}]
   (doseq [msg (keep :seon.gym.turn/message turns)]
     (doseq [[i fx] (map-indexed vector fixtures)
             s      (fixture-strings fx)
-            :when  (str/includes? s msg)]
+            :when  (str/includes? (normalize-ws s) (normalize-ws msg))]
       (throw (ex-info (str "gym: SELF-BAIT — scenario " id " in " path
                            ": fixture #" i " contains a turn message "
                            "verbatim (" (pr-str msg) "). Paraphrase the "
@@ -410,7 +423,7 @@
                        :seon.gym.run/fixture-value s
                        :seon.gym.turn/message      msg})))
     (doseq [[i src] (map-indexed vector fixture-sources)
-            :when   (str/includes? src msg)]
+            :when   (str/includes? (normalize-ws src) (normalize-ws msg))]
       (throw (ex-info (str "gym: SELF-BAIT — scenario " id " in " path
                            ": fixture-source #" i " contains a turn "
                            "message verbatim (" (pr-str msg) ").")
@@ -567,7 +580,12 @@
    post-run store's :seon.agent.turn/prompt-file datoms. Returns
    [pass? actual]. Every blind spot is RED, never a silent pass: zero
    turns, an out-of-range :turn index, a turn with no prompt-file
-   datom, an unreadable blob — each named in the actual."
+   datom, an unreadable blob — each named in the actual.
+
+   Containment is WHITESPACE-NORMALIZED ([[normalize-ws]]): rendered
+   prompts line-wrap source text, so verbatim matching missed real
+   contamination (the s32 salience text split by a docstring line
+   break) and flaked on wrapping."
   [dbv agent-id kind text turn-idx]
   (let [all (turn-prompt-files dbv agent-id)]
     (cond
@@ -598,7 +616,9 @@
             broken (filterv :missing reads)]
         (if (seq broken)
           [false (str "RED — " (str/join "; " (map :missing broken)))]
-          (let [hits  (filterv #(str/includes? (:text %) text) reads)
+          (let [norm  (normalize-ws text)
+                hits  (filterv #(str/includes? (normalize-ws (:text %)) norm)
+                               reads)
                 stat  (str (count hits) "/" (count reads)
                            " prompt blob(s) contain " (pr-str text)
                            "; blobs: " (pr-str (mapv :path reads)))]
@@ -657,12 +677,14 @@
               [(expect-pass? expect rows)
                (str "rows=" (pr-str rows) " expect=" (pr-str expect))])
 
+            ;; whitespace-normalized containment (same rule as the
+            ;; prompt-blob predicates — see [[normalize-ws]]).
             :transcript-includes
-            [(str/includes? transcript text)
+            [(str/includes? (normalize-ws transcript) (normalize-ws text))
              (str "transcript " (count transcript) " chars; looked for " (pr-str text))]
 
             :transcript-excludes
-            [(not (str/includes? transcript text))
+            [(not (str/includes? (normalize-ws transcript) (normalize-ws text)))
              (str "transcript " (count transcript) " chars; must NOT contain " (pr-str text))]
 
             :first-eval-matches
@@ -1055,7 +1077,7 @@
       transacted in ORDINARY (non-seed) txs — inside a SYNTHETIC
       prior-agent `with-agent` scope — with the same tee-shaped
       `:seon.schema` rows `seon.eval/build-tee-entities` writes for a
-      real register! eval — so seeded attrs like `:seon.workout/*`
+      real register! eval — so seeded attrs like `:my.workout/*`
       carry agent provenance (agent-id + non-seed origin, the
       classifier's exact predicate) and render in the domain-attrs
       reuse surface, exactly as on the live store.

@@ -173,18 +173,18 @@
 ;; ---------------------------------------------------------------------------
 ;; Fail-loud replay errors — the warn must name the actual defect, not
 ;; cljs.js's literal "ERROR" wrapper (live incident 2026-06-10: every
-;; :seon.workout/* replay failure logged as `failed: ERROR`).
+;; :my.workout/* replay failure logged as `failed: ERROR`).
 ;; ---------------------------------------------------------------------------
 
 (deftest error-chain-message-surfaces-the-real-defect
   (let [err {:seon.error/message "ERROR"
              :seon.error/stack   "Error: ERROR\n    at compile-loop"
              :seon.error/cause
-             {:seon.error/message "schema/register! :seon.workout/date: bad form"
+             {:seon.error/message "schema/register! :my.workout/date: bad form"
               :seon.error/stack   "Error: schema/register!…\n    at assert_compilable"
               :seon.error/cause
               {:seon.error/message ":malli.core/invalid-schema"}}}]
-    (is (= (str "ERROR <- schema/register! :seon.workout/date: bad form"
+    (is (= (str "ERROR <- schema/register! :my.workout/date: bad form"
                 " <- :malli.core/invalid-schema")
            ((deref #'client/error-chain-message) err))
         "every cause-level message joins into the surfaced string")
@@ -224,7 +224,7 @@
 ;; row (or whose ns row tx-sorts later, as the live workout corpus does)
 ;; must still replay on a FRESH compile-state. Without ensure-target-ns!
 ;; cljs.js's :def-emits-var dies in the cljs compiler's emit* :the-var
-;; `{:pre [(ana/ast? sym)]}` — live: `replay of fn "seon.workout/…"
+;; `{:pre [(ana/ast? sym)]}` — live: `replay of fn "my.workout/…"
 ;; failed: Assert failed: (ana/ast? sym)` on every boot (2026-06-10).
 ;; ---------------------------------------------------------------------------
 

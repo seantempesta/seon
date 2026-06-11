@@ -14,7 +14,7 @@
 ;; DEEPSEEK TIER (cheap: one agent, one message) — costs real money.
 ;; Refuses without {:seon.gym/allow-paid? true} + DEEPSEEK_API_KEY.
 {:seon.gym.scenario/id     :s32-consult-before-research
- :seon.gym.scenario/doc    "A stored finding answers the question verbatim. Pass = first eval queries my.kb.*/my.* attrs and AT MOST ONE repo-search eval happens (re-derivation = fail even with a right answer). Judge grades the reply against the seeded envelope facts."
+ :seon.gym.scenario/doc    "A stored finding answers the question verbatim. Pass = the first eval READS THE STORE (any seon.db query/pull/entity/store-inventory) and AT MOST ONE repo-search eval happens (re-derivation = fail even with a right answer). Judge grades the reply against the seeded envelope facts."
  :seon.gym.scenario/tier   :deepseek
  :seon.gym.scenario/status :active
  :seon.gym.scenario/axes   [:consults-findings :searches-first
@@ -48,7 +48,14 @@
    :my.kb/source-path      "src/seon/db.cljs"
    :my.kb/confidence       :inferred
    :my.kb.codebase/question "How does seon validate schemas at transact time?"}
-  {:my.kb.codebase/claim   "seon.agent/message! and reply! return a concise envelope — {:seon.agent.message/ok? true, :seon.agent.message/id ..., :seon.agent.message/hops ...} on success, {:seon.db/ok? false :seon.db/error ...} on failure — never the raw tx-report"
+  ;; CLAIM RE-CUT 2026-06-11: the old wording ("never the raw
+  ;; tx-report") lives VERBATIM in message!'s docstring split by a line
+  ;; break — the whitespace-normalized salience check caught the
+  ;; contamination (the fragment could reach the prompt via the
+  ;; reconstituted <namespace> tag, not only via this fixture row).
+  ;; This wording is verified absent from src/ AND docs/ under
+  ;; normalization; same semantics.
+  {:my.kb.codebase/claim   "seon.agent/message! and reply! hand the caller a compact result envelope — {:seon.agent.message/ok? true, :seon.agent.message/id ..., :seon.agent.message/hops ...} on success, {:seon.db/ok? false :seon.db/error ...} on failure — the transaction report itself is swallowed at the boundary"
    :my.kb/source-path      "src/seon/agent.cljs"
    :my.kb/source-line      712
    :my.kb/confidence       :verified
@@ -57,38 +64,40 @@
  :seon.gym.scenario/turns
  [{:seon.gym.turn/message "What does seon.agent/message! return — the full transact report or something smaller?"}]
  :seon.gym.scenario/predicates
- ;; Anchored on the SEEDED DOMAIN namespace (gym-upgrade §3.2): a
- ;; consult means the first message-driven eval actually touches a
- ;; :my.kb.codebase/* attr — the namespace the bait findings live in.
- ;; V4 consult evidence: the creation turn's `(seon.db/store-inventory)`
- ;; startup eval puts the kind + id-attr + row count in the agent's own
- ;; transcript (the catalogs are GONE — context-v4 V4-3); datalog on
- ;; the inventoried attrs is the consult move. The previous ":my\\."
- ;; anchor passed on ANY :my.* touch — including the agent's
- ;; my.agent.<id> scratch attrs — measuring that the bait rendered and
- ;; pattern-matched, not that consulting replaced research.
- ;; (Falsified in driver_test: an unrelated-:my.* first eval scores
- ;; this RED; a :my.kb.codebase/* first eval scores it green. The
- ;; creation-turn tutorial evals are excluded from 'first eval' by the
- ;; driver's woken-by scoping.)
+ ;; WIDENED anchor (DECIDED, user 2026-06-11 — same behavior-not-
+ ;; vocabulary logic as the fix-everything PRD §2 provenance widening):
+ ;; "consulted first" = the first message-driven eval's SOURCE contains
+ ;; a seon.db READ op (query/pull/entity/store-inventory) — ANY store
+ ;; read counts, not just :my.kb-anchored ones. The previous
+ ;; domain-namespace anchor (":my\\.kb\\.codebase/") punished a
+ ;; vocabulary choice: an agent that queried the store through a
+ ;; different attr spelling had consulted, and the answer-quality judge
+ ;; below still measures whether the consult actually PAID OFF.
+ ;; (Falsified in driver_test's consult-anchor tests: a no-store-read
+ ;; first eval scores RED; any store-read first eval scores green. The
+ ;; creation-turn tutorial evals — incl. the scripted store-inventory —
+ ;; are excluded from 'first eval' by the driver's woken-by scoping.)
  [{:seon.gym.predicate/id      :first-eval-consults-stored-findings
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/axis    :consults-findings
-   :seon.gym.predicate/pattern ":my\\.kb\\.codebase/"}
+   :seon.gym.predicate/pattern "seon\\.db/(query|pull|entity|store-inventory)"}
   ;; #26 salience axis, split honest (gym-upgrade U1): "the seeded
   ;; claim TEXT rendered in the prompt the agent acted on" (context
   ;; worked) scores SEPARATELY from "the first eval consulted it"
   ;; (agent behaved) — so "context failed" vs "agent ignored context"
   ;; are distinct failure signatures. The text is a fragment unique to
-  ;; the seeded #26 envelope claim (verified absent from src/ — it can
-  ;; only reach a prompt via the fixture row rendering). EXPECTED-RED
-  ;; until a context rung renders finding CLAIM TEXT (not just attr
-  ;; names) into the prompt — red-first is the gym pinning target
-  ;; behavior, per the gym-upgrade PRD §4.
+  ;; the seeded #26 envelope claim — verified absent from src/ AND
+  ;; docs/ under WHITESPACE NORMALIZATION (2026-06-11; the old
+  ;; fragment "never the raw tx-report" was contaminated: it lives in
+  ;; message!'s docstring split by a line break, which verbatim
+  ;; matching missed), so it can only reach a prompt via the fixture
+  ;; row rendering. EXPECTED-RED until a context rung renders finding
+  ;; CLAIM TEXT (not just attr names) into the prompt — red-first is
+  ;; the gym pinning target behavior, per the gym-upgrade PRD §4.
   {:seon.gym.predicate/id   :seeded-claim-rendered-in-prompt
    :seon.gym.predicate/kind :prompt-includes
    :seon.gym.predicate/axis :consults-findings
-   :seon.gym.predicate/text "never the raw tx-report"}
+   :seon.gym.predicate/text "the transaction report itself is swallowed at the boundary"}
   ;; searches-first INVERTED here: the answer is stored, so more than
   ;; one repo search = the run-7 re-derivation signature.
   ;; Toolbelt renamed seon.search/seon.fs → seon.agent.search/seon.agent.fs
@@ -134,4 +143,4 @@
    :seon.gym.predicate/kind      :llm-judge
    :seon.gym.predicate/axis      :replies-honestly
    :seon.gym.predicate/rubric    "PASS only if the reply states that message! returns a CONCISE envelope, NOT the full transact report: on success a map with :seon.agent.message/ok? true plus :seon.agent.message/id and :seon.agent.message/hops; on failure the standard error envelope {:seon.db/ok? false :seon.db/error ...}. Bonus (not required for pass): the reply attributes the answer to stored knowledge ('a stored finding says...') or cites src/seon/agent.cljs. FAIL if the reply claims the full tx-report/tx-data is returned, invents other keys as the primary shape, or says it throws."
-   :seon.gym.predicate/reference "Ground truth (the seeded finding, verbatim): 'seon.agent/message! and reply! return a concise envelope — {:seon.agent.message/ok? true, :seon.agent.message/id ..., :seon.agent.message/hops ...} on success, {:seon.db/ok? false :seon.db/error ...} on failure — never the raw tx-report'. Source: src/seon/agent.cljs."}]}
+   :seon.gym.predicate/reference "Ground truth (the seeded finding, verbatim): 'seon.agent/message! and reply! hand the caller a compact result envelope — {:seon.agent.message/ok? true, :seon.agent.message/id ..., :seon.agent.message/hops ...} on success, {:seon.db/ok? false :seon.db/error ...} on failure — the transaction report itself is swallowed at the boundary'. Source: src/seon/agent.cljs."}]}

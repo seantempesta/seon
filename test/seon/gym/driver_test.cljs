@@ -170,11 +170,15 @@
                                       kinds     (set (map :seon.db/kind
                                                           inventory))]
                                   ;; the seeded reuse surface IS domain attrs
-                                  ;; (S-21 production-bug pin: seon.* DATA
-                                  ;; domains must not be blanket-hidden)
-                                  (is (contains? domain :seon.workout/date))
+                                  ;; (S-21 production-bug pin: agent DATA
+                                  ;; domains discriminate by PROVENANCE,
+                                  ;; never by keyword-namespace blankets;
+                                  ;; fixture domain renamed :seon.workout →
+                                  ;; :my.workout 2026-06-11 — agent data is
+                                  ;; my.*)
+                                  (is (contains? domain :my.workout/date))
                                   (is (contains? domain
-                                                 :seon.workout/duration-minutes))
+                                                 :my.workout/duration-minutes))
                                   ;; substrate attrs stay OUT of the reuse
                                   ;; surface (seed provenance)
                                   (is (not-any? #(= "seon.db" (namespace %))
@@ -190,12 +194,12 @@
                                   ;; WITH ROWS. The seeded world has no
                                   ;; :seon.agent datoms (boot-seed! only,
                                   ;; no start-agent!) — the fixture's
-                                  ;; identity-less :seon.workout being
+                                  ;; identity-less :my.workout being
                                   ;; VISIBLE here is the S-21 win this
                                   ;; rework exists for.
                                   (is (seq kinds)
                                       "store-inventory returns kinds for the seeded world")
-                                  (is (contains? kinds :seon.workout)
+                                  (is (contains? kinds :my.workout)
                                       "identity-less seeded domain kinds are inventoried")))))))
           (.then (fn [_]
                    (let [minted (remove keys-before (schema/current-keys))]
@@ -264,7 +268,7 @@
                                                   {:seon.db/db dbv
                                                    :seon.db/query
                                                    '[:find ?aid :where
-                                                     [?s :seon.schema/key :seon.workout/date ?tx]
+                                                     [?s :seon.schema/key :my.workout/date ?tx]
                                                      [?tx :seon.db/agent-id ?aid]
                                                      (not [?tx :seon.db/origin :substrate-seed])]})]
                                   (is (= expected full-src)
@@ -285,7 +289,7 @@
 ;; ---------------------------------------------------------------------------
 ;; GENERIC FORK DETECTION — the :domain-attrs predicate kind must catch
 ;; an attr fork in ANY namespace (the old S-21 predicate only checked
-;; seon.workout, so :fitness.workout/* forks passed vacuously).
+;; my.workout, so :fitness.workout/* forks passed vacuously).
 ;; ---------------------------------------------------------------------------
 
 (deftest domain-attrs-predicate-catches-a-fork-in-any-namespace
@@ -298,14 +302,14 @@
            :seon.gym.scenario/llm    :scripted-replay
            :seon.gym.scenario/axes   [:reuses-schemas]
            :seon.gym.scenario/schema-registrations
-           [[:seon.workout/date :string]
-            [:seon.workout/type :keyword]
-            [:seon.workout/duration-minutes :int]
-            [:seon.workout/notes :string]]
+           [[:my.workout/date :string]
+            [:my.workout/type :keyword]
+            [:my.workout/duration-minutes :int]
+            [:my.workout/notes :string]]
            :seon.gym.scenario/fixtures
-           [{:seon.workout/date "{{today}}"
-             :seon.workout/type :strength
-             :seon.workout/duration-minutes 45}]
+           [{:my.workout/date "{{today}}"
+             :my.workout/type :strength
+             :my.workout/duration-minutes 45}]
            :seon.gym.scenario/turns
            [{:seon.gym.turn/message "I ran this morning — 24 minutes."
              :seon.gym.turn/llm-script
@@ -317,10 +321,10 @@
            [{:seon.gym.predicate/id     :no-attr-fork-anywhere
              :seon.gym.predicate/kind   :domain-attrs
              :seon.gym.predicate/axis   :reuses-schemas
-             :seon.gym.predicate/expect [:every-in [":seon.workout/date"
-                                                    ":seon.workout/type"
-                                                    ":seon.workout/duration-minutes"
-                                                    ":seon.workout/notes"]]}]}]
+             :seon.gym.predicate/expect [:every-in [":my.workout/date"
+                                                    ":my.workout/type"
+                                                    ":my.workout/duration-minutes"
+                                                    ":my.workout/notes"]]}]}]
       (-> (gym/run-scenario! {:seon.gym/scenario scenario})
           (.then (fn [card]
                    (gym/print-scorecard! card)
@@ -576,6 +580,18 @@
           (str "the load failure names the rule — " (ex-message err)))
       (is (= 0 (:seon.gym.run/fixture-index (ex-data err)))
           "the load failure names the offending fixture"))
+    ;; WHITESPACE-NORMALIZED matching (user decision 2026-06-11 — the
+    ;; s32 salience contamination lived across a docstring line break):
+    ;; the same bait SPLIT BY A LINE BREAK must also fail to load.
+    (.writeFileSync fs path
+                    (pr-str (scenario (str/replace q "marker question"
+                                                   "marker\n   question"))))
+    (let [err (try (gym/load-scenarios! {:seon.gym/path path})
+                   nil
+                   (catch :default e e))]
+      (is (some? err) "the line-break-split self-bait must not load")
+      (is (str/includes? (str (ex-message err)) "SELF-BAIT")
+          (str "the normalized check names the rule — " (ex-message err))))
     ;; the same scenario with a PARAPHRASED fixture question loads fine
     (.writeFileSync fs path
                     (pr-str (scenario "A paraphrase, not the verbatim turn text.")))
@@ -584,18 +600,21 @@
     (.rmSync fs path)))
 
 ;; ---------------------------------------------------------------------------
-;; CONSULT-PREDICATE ANCHORING (gym-upgrade §3.2) — the s32 consult
-;; predicate is anchored on the seeded DOMAIN namespace
-;; (:my\.kb\.codebase/), not the broad :my\. — falsified both ways with
-;; free stub runs: an unrelated-:my.* first eval scores the anchored
-;; predicate RED (while the OLD broad anchor would have scored green —
-;; the defect, pinned as a green broad predicate in the same run); a
-;; :my.kb.codebase/* first eval scores it green.
+;; CONSULT-PREDICATE ANCHORING — WIDENED (user decision 2026-06-11,
+;; same behavior-not-vocabulary logic as the fix-everything PRD §2
+;; provenance widening): "consulted first" = the first message-driven
+;; eval's SOURCE contains a seon.db READ op
+;; (query/pull/entity/store-inventory) — ANY store read counts, not
+;; just :my.kb-anchored spellings. Falsified both ways with free stub
+;; runs: a first eval that never reads the store scores the anchor
+;; RED; a store read against ANY attr (even an unrelated :my.* one the
+;; retired domain-namespace anchor rejected) scores it green — the old
+;; vocabulary anchor is pinned here as the retired defect.
 ;; ---------------------------------------------------------------------------
 
 (defn- consult-anchor-scenario [first-eval]
   {:seon.gym.scenario/id     :gymtest-consult-anchor
-   :seon.gym.scenario/doc    "Inline stub (gym-upgrade §3.2 falsification): the anchored consult predicate must track the seeded domain namespace, not any :my.* touch."
+   :seon.gym.scenario/doc    "Inline stub (consult-anchor widening, 2026-06-11 falsification): the anchored consult predicate must track STORE READS (behavior), not attr vocabulary."
    :seon.gym.scenario/tier   :stub
    :seon.gym.scenario/status :active
    :seon.gym.scenario/axes   [:consults-findings]
@@ -612,17 +631,42 @@
    [{:seon.gym.predicate/id      :first-eval-consults-stored-findings
      :seon.gym.predicate/kind    :first-eval-matches
      :seon.gym.predicate/axis    :consults-findings
-     :seon.gym.predicate/pattern ":my\\.kb\\.codebase/"}
-    ;; the OLD s32 anchor, kept here ONLY to pin the defect shape: it
-    ;; goes green on the unrelated-:my.* eval the anchored one rejects.
-    {:seon.gym.predicate/id      :broad-my-anchor-the-old-defect
+     :seon.gym.predicate/pattern "seon\\.db/(query|pull|entity|store-inventory)"}
+    ;; the RETIRED domain-vocabulary anchor, kept ONLY to pin the
+    ;; defect the widening fixed: it scores RED on a legitimate store
+    ;; read that happens to touch a different attr spelling.
+    {:seon.gym.predicate/id      :domain-vocab-anchor-the-old-defect
      :seon.gym.predicate/kind    :first-eval-matches
      :seon.gym.predicate/axis    :consults-findings
-     :seon.gym.predicate/pattern ":my\\."}]})
+     :seon.gym.predicate/pattern ":my\\.kb\\.codebase/"}]})
 
-(deftest consult-anchor-rejects-unrelated-my-star-touches
-  ;; §3.2 falsification, RED side: first eval queries only an unrelated
-  ;; :my.* attr — anchored predicate RED, broad (old) predicate green.
+(deftest consult-anchor-rejects-a-first-eval-that-never-reads-the-store
+  ;; Widening falsification, RED side: the first eval is pure
+  ;; computation — no seon.db read op anywhere in its source — so the
+  ;; structural anchor scores RED.
+  (async done
+    (-> (gym/run-scenario!
+          {:seon.gym/scenario
+           (consult-anchor-scenario
+             "(str \"thinking out loud — no store read here\")\n")})
+        (.then (fn [card]
+                 (gym/print-scorecard! card)
+                 (let [anchored (result-by-id
+                                  card :first-eval-consults-stored-findings)]
+                   (is (false? (:seon.gym.result/pass? anchored))
+                       (str "a no-store-read first eval scores the consult "
+                            "anchor RED — "
+                            (:seon.gym.result/actual anchored))))
+                 (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest consult-anchor-passes-on-any-store-read
+  ;; Widening falsification, GREEN side: the first eval queries the
+  ;; store through an attr OUTSIDE the seeded :my.kb.codebase domain —
+  ;; under the 2026-06-11 decision that IS a consult (the agent went
+  ;; to the store first; the judge measures whether it paid off). The
+  ;; retired vocabulary anchor scores RED on the same eval — the
+  ;; punished-naming-preference defect, pinned.
   (async done
     (-> (gym/run-scenario!
           {:seon.gym/scenario
@@ -632,20 +676,20 @@
                  (gym/print-scorecard! card)
                  (let [anchored (result-by-id
                                   card :first-eval-consults-stored-findings)
-                       broad    (result-by-id
-                                  card :broad-my-anchor-the-old-defect)]
-                   (is (false? (:seon.gym.result/pass? anchored))
-                       (str "unrelated :my.* touch scores the anchored "
-                            "consult predicate RED — "
+                       vocab    (result-by-id
+                                  card :domain-vocab-anchor-the-old-defect)]
+                   (is (true? (:seon.gym.result/pass? anchored))
+                       (str "any store-read first eval scores the widened "
+                            "anchor green — "
                             (:seon.gym.result/actual anchored)))
-                   (is (true? (:seon.gym.result/pass? broad))
-                       "…while the OLD broad :my\\. anchor passes — the §3.2 defect"))
+                   (is (false? (:seon.gym.result/pass? vocab))
+                       "…while the RETIRED :my.kb.codebase vocabulary anchor scores it RED — the punished-vocabulary defect"))
                  (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 (deftest consult-anchor-passes-on-seeded-domain-touch
-  ;; §3.2 falsification, GREEN side: first eval queries the seeded
-  ;; :my.kb.codebase/* rows — anchored predicate green.
+  ;; GREEN side, seeded-domain spelling: a :my.kb.codebase/* query is
+  ;; still a store read — both anchors green.
   (async done
     (-> (gym/run-scenario!
           {:seon.gym/scenario

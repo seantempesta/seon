@@ -29,9 +29,11 @@
 (schema/register! :warntest.dom/duration-minutes :int)
 (schema/register! :warntest.dom/date :inst)
 (schema/register! :warntest.dom/type :keyword)
-;; The provenance test's agent-authored seon.* DATA domain (the live
-;; store's shape — same registration the S-21 gym scenario seeds).
-(schema/register! :seon.workout/date :string)
+;; The provenance test's agent-authored DATA domain (same registration
+;; the S-21 gym scenario seeds; renamed :seon.workout → :my.workout
+;; 2026-06-11 — agent data domains are my.*, the old name is out of
+;; the shipping product).
+(schema/register! :my.workout/date :string)
 ;; The unmarked-entity-kinds fixture: an identity attr plus a
 ;; registered-but-UNMARKED :map schema carrying it (the shape the old
 ;; register!-time warn could not tell apart from an envelope). The
@@ -342,8 +344,9 @@
 (deftest domain-attrs-discriminate-by-provenance-not-keyword-namespace
   ;; S-21 production-bug pin (2026-06-10): the old keyword-namespace
   ;; blanket `(db|seon)(\..*)?` hid agent-authored `seon.*` data
-  ;; domains (the live store's :seon.workout/*) from the whole reuse
-  ;; surface. Domain-attrs now discriminate by PROVENANCE: a
+  ;; domains (then-live :seon.workout/* — domain since renamed
+  ;; :my.workout/*, 2026-06-11) from the whole reuse surface.
+  ;; Domain-attrs now discriminate by PROVENANCE: a
   ;; :seon.schema/key row asserted OUTSIDE the :substrate-seed
   ;; tx-context = agent-registered = domain; inside = substrate =
   ;; hidden — whatever the keyword namespace.
@@ -364,21 +367,21 @@
                       {:seon.agent/id "warntest-prova"}]})))
               (.then (fn [env]
                 (is (:seon.db/ok? env) "substrate-layer tx lands")
-                ;; agent layer — the tee row + data for a seon.* DATA
+                ;; agent layer — the tee row + data for an agent DATA
                 ;; domain, in an ordinary (non-seed) tx.
                 (db/transact!
                   {:seon.db/conn conn
                    :seon.db/tx-data
-                   [{:seon.schema/key :seon.workout/date
+                   [{:seon.schema/key :my.workout/date
                      :seon.schema/source
-                     "(seon.schema/register! :seon.workout/date :string)"
+                     "(seon.schema/register! :my.workout/date :string)"
                      :seon.schema/created-at (js/Date.)}
-                    {:seon.workout/date "2026-06-10"}]})))
+                    {:my.workout/date "2026-06-10"}]})))
               (.then (fn [env]
                 (is (:seon.db/ok? env) "agent-layer tx lands")
                 (let [attrs (set (warn/domain-attrs {:seon.db/db @conn}))]
-                  (is (contains? attrs :seon.workout/date)
-                      "agent-registered seon.* DATA domain renders as a domain attr")
+                  (is (contains? attrs :my.workout/date)
+                      "agent-registered DATA domain renders as a domain attr")
                   (is (not (contains? attrs :seon.agent/id))
                       "substrate-seeded seon.* attr stays hidden")
                   (is (not (contains? attrs :seon.schema/key))
