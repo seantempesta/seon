@@ -219,12 +219,13 @@
               (is (pos? (count text))
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
               (is (= [:system :instructions :capabilities :exemplars
-                      :schema-catalog :functions-catalog :namespace-context
-                      :warnings :open-todos :transcript :prompt]
+                      :schema-catalog :functions-catalog :live-tile
+                      :namespace-context :warnings :open-todos :transcript
+                      :prompt]
                      sections)
                   "the substrate-default section names, in order
                    (static→dynamic): system, instructions, capabilities,
-                   exemplars, schema-catalog, functions-catalog,
+                   exemplars, schema-catalog, functions-catalog, live-tile,
                    namespace-context, warnings, open-todos, transcript,
                    prompt"))))
         (.then (fn [_] (done)))
@@ -665,10 +666,10 @@
     (is (some #{:functions-catalog} names)
         "substrate-default-ctx contains the :functions-catalog section")
     (is (= [:system :instructions :capabilities :exemplars :schema-catalog
-            :functions-catalog :namespace-context]
-           (vec (take 7 names)))
+            :functions-catalog :live-tile :namespace-context]
+           (vec (take 8 names)))
         ":functions-catalog sits right after :schema-catalog and before
-         :namespace-context")))
+         :live-tile / :namespace-context")))
 
 (deftest functions-catalog-is-a-thin-count-index
   ;; Context-focus-redesign E2/E3: the catalog collapsed to a thin per-ns
@@ -1069,3 +1070,127 @@
                :seon.eval/id "pr0000002b" :seon.eval/duration-ms 1})]
     (is (str/includes? row "> (+ 1 2)\n3")
         "no output attr → row unchanged (no blank line injected)")))
+
+;; ---------------------------------------------------------------------------
+;; (l) live-tile awareness section (live-tiles U5) — "what your human
+;;     currently sees". Kills the false belief a live T2 proof caught: a
+;;     DeepSeek agent replied "My tile is currently blank — I haven't set it
+;;     up yet" while its tile showed the substrate welcome. Guards:
+;;       • in the default ctx at priority 28 (after :functions-catalog,
+;;         before :namespace-context);
+;;       • default (welcome-wired) agent → section quotes the welcome twin
+;;         and names the wired fn;
+;;       • literal hiccup on the key → the section shows that hiccup
+;;         VERBATIM (you see exactly what's wired);
+;;       • throwing renderer → the section shows the error envelope (a
+;;         broken tile NEVER silently vanishes);
+;;       • no agent entity → "" (the unwired correctness floor).
+;; ---------------------------------------------------------------------------
+
+(defn boom-tile
+  "Test tile renderer that always throws — the section's error-envelope
+   target."
+  {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
+  [_input]
+  (throw (ex-info "deliberate ctx tile failure"
+                  {:seon.ctx/live-tile-test true})))
+
+(deftest substrate-default-ctx-has-live-tile-between-catalog-and-ns
+  (let [secs  (agent/substrate-default-ctx)
+        names (mapv :seon.ctx/name secs)
+        lt    (first (filter #(= :live-tile (:seon.ctx/name %)) secs))]
+    (is (some #{:live-tile} names)
+        "substrate-default-ctx contains the :live-tile section")
+    (is (= 28 (:seon.ctx/priority lt))
+        ":live-tile renders at priority 28 — after :functions-catalog (27),
+         before :namespace-context (30)")
+    (is (= 'seon.ctx/live-tile-section (:seon.render/ai lt)))))
+
+(deftest live-tile-section-quotes-the-welcome-twin-by-default
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         (agent/assemble-context
+                           {:seon.db/db db :seon.agent/id agent-id}))]
+              (is (str/includes? text "<live-tile>")
+                  "the awareness section reaches the assembled context")
+              (is (str/includes? text
+                                 "Wired: seon.render.live-tile/welcome")
+                  "header names the wired fn — the agent sees HOW to change it")
+              (is (str/includes? text "the substrate default")
+                  "provenance: the welcome is the substrate default, not agent-wired")
+              (is (re-find #"(?s)<live-tile>.*Good (morning|afternoon|evening|night)"
+                           text)
+                  "body is the welcome's :seon.render/ai twin — the agent can
+                   never believe its tile is blank while the human sees the
+                   welcome (the T2 false-belief incident)"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest live-tile-section-shows-literal-hiccup-verbatim
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data
+                   [{:seon.agent/id agent-id
+                     :seon.render.live-tile/content [:h1 "wired!"]}]})
+                (.then (fn [_]
+                         (binding [db/*conn* conn]
+                           (let [text (:seon.render/text
+                                        (agent/assemble-context
+                                          {:seon.db/db @conn
+                                           :seon.agent/id agent-id}))]
+                             (is (str/includes?
+                                   text "Wired: literal hiccup on your entity")
+                                 "header identifies the wired value as literal hiccup")
+                             (is (str/includes? text "[:h1 \"wired!\"]")
+                                 "body is the literal hiccup VERBATIM — you see
+                                  exactly what's wired"))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest live-tile-section-shows-error-envelope-on-throw
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data
+                   [{:seon.agent/id agent-id
+                     :seon.render.live-tile/content
+                     'seon.agent-context-test/boom-tile}]})
+                (.then (fn [_]
+                         (binding [db/*conn* conn]
+                           (let [text (:seon.render/text
+                                        (agent/assemble-context
+                                          {:seon.db/db @conn
+                                           :seon.agent/id agent-id}))]
+                             (is (str/includes? text "YOUR LIVE TILE IS BROKEN")
+                                 "the twin says the renderer is broken — never a
+                                  silent vanish")
+                             (is (str/includes? text "boom-tile")
+                                 "the broken twin names the wired fn")
+                             (is (str/includes? text "deliberate ctx tile failure")
+                                 "the envelope carries what the exception said")
+                             (is (str/includes? text ":seon.error/message")
+                                 "the :seon.error/* envelope shape renders in the
+                                  section"))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest live-tile-section-renders-nothing-without-an-agent-entity
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [txt (seon.ctx/live-tile-section
+                        {:seon.db/db @conn
+                         :seon.agent/id "AGTnoSuchAgent"})]
+              (is (= "" txt)
+                  "no agent entity → no tile resolves → the section suppresses
+                   itself (the unwired correctness floor)"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
