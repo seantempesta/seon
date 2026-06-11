@@ -99,8 +99,13 @@
         (is (= expected-source (:source (first entries))))))))
 
 ;; ============================================================
-;; Prose-symbol filter — LLM emits bare symbols when it forgets it's
-;; emitting code. Reader tokenizes them; we drop them at parse time.
+;; Narration-atom filter — the format contract: a form is `(...)`,
+;; `[...]`, `{...}`, or a reader-macro form. Top-level bare atoms
+;; (symbols, numbers, strings, keywords) are LLM prose tokenized by
+;; the reader — NARRATION, never evaluated. Shapes below include the
+;; exact mangles observed live (context-blind-spots-2026-06-11):
+;; `24`, `88.`, the `", felt good…"` quote-fragment string, prose
+;; sentences, echoed-prompt symbol lines.
 ;; ============================================================
 
 (def prose-cases
@@ -121,15 +126,59 @@
    {:in ";; thinking\nokay (+ 1 2)"
     :note "narration survives bare symbol — attaches to next form"
     :form-count 1
-    :first-narration "thinking"}])
+    :first-narration "thinking"}
 
-(deftest prose-symbols-dropped
-  (doseq [{:keys [in note form-count first-form first-narration]} prose-cases]
+   {:in "24"
+    :note "bare top-level number is narration, not an eval (observed: s21 sweep-3)"
+    :form-count 0}
+
+   {:in "88."
+    :note "number with trailing dot is narration (observed: s32 sweep-1)"
+    :form-count 0}
+
+   {:in "\", felt good. Before I design a schema, I need to check whether a workout schema already exists\""
+    :note "quote-fragment swallowed into a string literal is narration (the eaten consult intent)"
+    :form-count 0}
+
+   {:in "I ran this morning - 24 minutes, felt good."
+    :note "whole prose sentence — symbols + number + comma all narration, NO entries at all"
+    :form-count 0
+    :entry-count 0}
+
+   {:in ":ok"
+    :note "bare top-level keyword is narration"
+    :form-count 0}
+
+   {:in "do it now"
+    :note "special symbols (`do`) are atoms too — bare `do` is the English word"
+    :form-count 0}
+
+   {:in "my.agent.RnA-2606111546=>"
+    :note "echoed prompt line tokenizes to a symbol — narration"
+    :form-count 0}
+
+   {:in "The plan:\n(+ 1 2)\nThat should work"
+    :note "legitimate form sandwiched between prose lines — exactly one eval"
+    :form-count 1
+    :first-form '(+ 1 2)}
+
+   {:in "{:seon.eval/ok? true, :seon.eval/result 3}"
+    :note "echoed result map is a legal `{...}` form — still evals (harmless identity)"
+    :form-count 1
+    :first-form {:seon.eval/ok? true, :seon.eval/result 3}}])
+
+(deftest narration-atoms-dropped
+  (doseq [{:keys [in note form-count entry-count
+                  first-form first-narration]} prose-cases]
     (testing (str note " — " (pr-str in))
       (let [entries (parse/parse-forms in)
             forms   (filter #(= :form (:kind %)) entries)]
         (is (= form-count (count forms))
             (str "form-count mismatch for " (pr-str in)))
+        (when entry-count
+          (is (= entry-count (count entries))
+              (str "entry-count mismatch (a :read entry leaked?) for "
+                   (pr-str in))))
         (when first-form
           (is (= first-form (:form (first forms)))))
         (when first-narration
@@ -159,6 +208,10 @@
 
    {:in "(a)\n#unknown-tag value\n(b)"
     :note "unknown reader tag — recovers to next column-0 form"
+    :expected-kinds-contain [:form :form]}
+
+   {:in "(a)\nshe said \"felt good\n(b)"
+    :note "odd quote in prose opens an unterminated string — reader error mid-text must not poison adjacent forms"
     :expected-kinds-contain [:form :form]}])
 
 (deftest read-failures-isolated

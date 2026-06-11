@@ -23,6 +23,14 @@
         :source string        ; the bad span (offset → recovery point)
         :error string}        ; rewrite-clj's parser message
 
+   ## Format-contract enforcement
+
+   A form is `(...)`, `[...]`, `{...}`, or a reader-macro form — the
+   same contract the system prompt teaches. Top-level bare atoms
+   (symbols, numbers, strings, keywords, …) are LLM prose tokenized
+   by the reader; they are NARRATION, never evaluated — see
+   `narration-atom?`.
+
    ## Per-form error isolation
 
    If rewrite-clj can't parse a chunk, the parser scans forward to the
@@ -72,25 +80,39 @@
   (str/replace text fence-line-re ""))
 
 ;; ============================================================
-;; Prose filter — LLMs occasionally emit unescaped prose between
-;; forms ("Let me think about this..."), which the reader cheerfully
-;; tokenizes into a string of bare symbols. Each bare symbol would
-;; resolve to nil under cljs.js's permissive bootstrap and pollute
-;; the eval log. We drop them at parse time, carrying any accumulated
-;; narration forward to the next real form.
+;; Narration filter — the format contract the system prompt teaches
+;; is that a form is `(...)`, `[...]`, `{...}`, or a reader-macro
+;; form (`@x`, `'x`, `#{...}`, `#(...)` — all collection/list-shaped
+;; after read). Top-level BARE ATOMS — symbols, numbers, strings,
+;; keywords, booleans, nil, chars — only occur when the LLM emits
+;; unescaped prose between forms: a sentence tokenizes into bare
+;; symbols, `24 minutes` yields the number 24, a quote character in
+;; prose swallows text into a string literal (`", felt good…"`).
+;; Evaluating those pollutes the eval log and can eat real intent
+;; (observed live: a consult intent split into `24` + a giant string
+;; eval). We enforce the contract at parse time: bare atoms are
+;; narration, never evaluated — dropped, carrying any accumulated
+;; comment narration forward to the next real form.
 ;;
-;; Legitimate agent code is overwhelmingly list-shaped (function
-;; calls, special forms, defs) or reader-macro-shaped (`@!atom`,
-;; `'sym` — both list forms after read). Bare unqualified symbols
-;; at the top level have no legitimate use in the agent protocol.
+;; Special symbols (`do`, `if`, …) are atoms too — a bare top-level
+;; `do` is the English word, not a form. Collection literals stay
+;; legal: an echoed result map `{...}` still evals (harmless
+;; identity), exactly matching the taught contract.
 ;; ============================================================
 
-(defn- prose-symbol?
-  "True if `form` is a bare symbol that almost certainly came from
-   the LLM emitting unescaped prose instead of code."
+(defn- narration-atom?
+  "True if `form` is a top-level bare atom — symbol (incl. special
+   symbols), number, string, keyword, boolean, nil, or char — i.e.
+   LLM prose tokenized by the reader rather than a form the format
+   contract permits."
   [form]
-  (and (symbol? form)
-       (not (special-symbol? form))))
+  (or (symbol? form)
+      (number? form)
+      (string? form)
+      (keyword? form)
+      (boolean? form)
+      (nil? form)
+      (char? form)))
 
 ;; ============================================================
 ;; rewrite-clj node helpers
@@ -163,7 +185,11 @@
         (= tag :comment)
         {:kind :comment :text (comment-text node) :end end}
 
-        (#{:whitespace :newline} tag)
+        ;; :comma matters for prose: "24 minutes, felt good" — the
+        ;; comma is Clojure whitespace, but rewrite-clj tags it
+        ;; :comma; without it here the sexpr call throws and the
+        ;; comma poisons the span up to the next recovery anchor.
+        (#{:whitespace :newline :comma} tag)
         {:kind :whitespace :end end}
 
         :else
@@ -180,11 +206,13 @@
    comments with the form that follows it. See the namespace docstring
    for the entry-shape contract.
 
-   Bare top-level symbols (LLM prose tokenized as bare symbols) are
-   dropped silently — see `prose-symbol?`. Comments at the end of
+   Top-level bare atoms — symbols, numbers, strings, keywords (LLM
+   prose tokenized by the reader) — are narration, never evaluated;
+   they are dropped, see `narration-atom?`. Comments at the end of
    the text (no trailing form) attach to no entry and are dropped.
    Read errors do NOT halt the parse — each bad span becomes a
-   `:kind :read :ok? false` entry and parsing continues.
+   `:kind :read :ok? false` entry and parsing continues, so a reader
+   error mid-prose never poisons adjacent legitimate forms.
 
    Markdown code-fence lines (` ``` `, ` ```clojure `, ` ~~~ `, …)
    are stripped before reading — see `strip-code-fences`."
@@ -206,8 +234,8 @@
                    out)
 
             :form
-            (if (prose-symbol? (:form token))
-              ;; LLM prose tokenized as a bare symbol — drop, carry
+            (if (narration-atom? (:form token))
+              ;; LLM prose tokenized as a bare atom — drop, carry
               ;; narration forward so it attaches to the next real form.
               (recur (:end token) pending-narration out)
               (recur (:end token)
