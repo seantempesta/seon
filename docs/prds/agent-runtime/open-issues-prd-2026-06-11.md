@@ -204,7 +204,7 @@ elsewhere as noted.
 | 11 | **BOOT-FATAL schema-row id collision** — tempid dropped the keyword namespace; restart-resume died on agent-authored schemas | **DONE — 500486a** (entity-schema tempids carry the FULL keyword) |
 | 12 | **Stale live-tile 500 during boot replay** — same class as 9 | [[fix-everything-prd-2026-06-11]] Wave C item 1 (same guard) |
 | 13 | **Self-poisoning fake results** — model-completed bare result-envelope literals evaluate and become real transcript lines | [[fix-everything-prd-2026-06-11]] Wave A unit A2 (parser format contract) |
-| 14 | **Agent fn replay fails on pod boot** — 19 `log-replay-failure!` WARNs (`indexOf` on undefined), 2/4 tile fns don't rehydrate after snapshot restore; repro cut PRE-B4 | [[fix-everything-prd-2026-06-11]] Wave C addendum C-14 — verification unit first (B4 may have killed it) |
+| 14 | **Agent fn replay fails on pod boot** — 19 `log-replay-failure!` WARNs (`indexOf` on undefined), 2/4 tile fns don't rehydrate after snapshot restore; repro cut PRE-B4 (17:42 vs B4 18:16) | **CLOSED — FIXED BY B4 (72f6aab), live-proved 2026-06-11 late**: multi-agent restart on the real store, replay 9/8-ok/1-deliberate-fail, zero `indexOf` in pod.log, fns callable + tiles rehydrate. Proof: [[research/c14-replay-verify-2026-06-11]] |
 | 15 | **Identity-seed filename hardcoded** (`SOUL.md`) — downstream wants `SEON_SOUL_FILE` env + `AGENTS.md` fallback | Wave C addendum C-15 |
 | 16 | **Substrate-generic REPL discipline lives in downstream identity files** — hiccup tile rules, clipped-results discipline, never-write-expected-results, kb provenance | Wave C addendum C-16 (AFTER the paid measure — it changes measured context) |
 | 17 | **Branding not customizable** (BUG per user; demo-relevant Jun 12) — hardcoded "seon ·" titles/h1, `data-theme "phosphor"` | **DONE — 24671ca** (brand rows + `SEON_BRAND_NAME`/`SEON_BRAND_CSS`; live-proved Acme↔seon roundtrip) |
@@ -223,6 +223,14 @@ pointed at a checkout; the bundle is the next rung.
 | first render can race the boot brand-sync (~300ms window observed live: defaults render before the env tx lands; self-heals next request). `sync!` is fire-and-forget from `install!`; hard guarantee needs `install!` awaited in `start-agent!` | `web/brand.cljs` / `client.cljs` | accept self-heal for now; fold the await into the next client.cljs boot unit |
 | CONFIRMED AGAIN: MCP default `:client` runtime ≠ the pod (cost the unit one misleading "empty store" read; pid mismatch live-verified) | stale-MCP-runtime row | evidence appended to the existing open row |
 | `agents-dash-fragment` renders agent-authored tile content containing a bare `<h1>` — second h1 on the page (pre-existing, structural-HTML) | inspector dash | small unit: demote/strip headings in embedded tile content |
+
+## C-14 verify-unit smells (2026-06-11 late evening)
+
+| Smell | Where | Disposition |
+|---|---|---|
+| **`[open-todos] render failed: :malli.core/invalid-input` in EVERY agent's live assembled context** — a substrate section crash-looping per render. DEMO-AFFECTING correctness bug | `ctx.cljs` open-todos section | fix unit launched immediately (pre-measure, pre-demo) |
+| audit finding 5 CONFIRMED RED with forced-failure probe: replay failures surface ONLY on disk; broken ns renders healthy in `<namespace>` inventory; PLUS attribution bug — `log-replay-failure!` (`client.cljs:752`) stamps the PRIMARY agent, not the row's owner (live-observed). S-sized fix spec in [[research/c14-replay-verify-2026-06-11]] | `client.cljs:752`, `seon.log` (no DB rows by design) | post-demo (B4 fixed the actual failures; downstream workaround exists) |
+| stale UNSUPERVISED pod (pid 65066, no ports, in-memory world) is the second `:client` runtime — MCP session `default` silently pins to it; ate first repro rounds of two units today. Two orphan in-memory agents (EiA/fKP-2606111928) unreachable for complete! | process table | orchestrator: verify + kill the stray; OPERATIONAL RULE — address the pod via `agent_id`, never session `default` |
 
 ## Self-defeating-surfaces audit (2026-06-11 late evening)
 
