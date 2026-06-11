@@ -69,6 +69,7 @@
    unwired; banned)."
   (:require
     [seon.db :as db]
+    [seon.render.chat :as chat]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -302,9 +303,14 @@
   "I'll update this panel as I work — charts, statuses, whatever you ask for.")
 
 (defn welcome
-  "The substrate default tile — elegant, simple, TIME-AWARE. Renders
+  "The substrate default tile — elegant, simple, TIME-AWARE.
+
+   COMPACT (the root grid): purpose headline + agent id + the agent's
+   last reply as readable text (`seon.render.chat/last-reply` — the
+   conversation query, not raw message data), so an uncustomized
+   agent's grid tile is worth glancing at. EXPANDED (the agent view):
    a greeting (by name when the store knows one), today's date and
-   time, the agent's purpose line, and [[panel-line]].
+   time, the purpose line, and [[panel-line]].
 
    This fn is itself the worked example of the tile contract: ONE
    render emitting tagged compact + expanded blocks, plus the
@@ -313,7 +319,7 @@
    time — nothing stored, nothing stale (write your tile fns the
    same way: rendered database queries, not hiccup snapshots)."
   {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
-  [{:seon.db/keys [db] :seon.render/keys [entity]}]
+  [{:seon.db/keys [db] :seon.render/keys [entity] :seon.agent/keys [id]}]
   (let [now        (js/Date.)
         greet      (greeting (.getHours now))
         ;; Optional = absent, never nil-valued (house rule).
@@ -330,12 +336,27 @@
                                              :minute "2-digit"})
         purpose    (:seon.agent/purpose entity)
         purpose-line (or purpose
-                         "I'm still finding my purpose — tell me what you need.")]
+                         "I'm still finding my purpose — tell me what you need.")
+        agent-id   (or id (:seon.agent/id entity))
+        ;; Last reply — derived from the message log, schema-gated
+        ;; like [[user-name]] (querying a never-installed attr THROWS
+        ;; on datahike-cljs).
+        reply      (when (and db agent-id
+                              (contains? (installed-schema db)
+                                         :seon.agent.message/content))
+                     (:seon.render.chat/last-reply
+                       (chat/last-reply {:seon.agent/id agent-id
+                                         :seon.db/db    db})))]
     {:seon.render/hiccup
      [:div {:class "seon-tile"}
       [:div {:class "seon-tile-compact flex flex-col gap-1 p-3"}
-       [:div {:class "text-sm text-text-100"} greet-line]
-       [:div {:class "text-xs text-text-400"} purpose-line]]
+       [:div {:class "text-sm text-text-100"} purpose-line]
+       (when agent-id
+         [:div {:class "text-[10px] font-mono text-text-500"} agent-id])
+       (if reply
+         [:div {:class "seon-tile-reply text-xs text-text-300 whitespace-pre-wrap"}
+          reply]
+         [:div {:class "text-xs text-text-400 italic"} greet-line])]
       [:div {:class "seon-tile-expanded flex flex-col gap-3 p-4"}
        [:div {:class "text-lg text-text-50"} greet-line]
        [:div {:class "text-xs font-mono text-signal"}
@@ -343,13 +364,20 @@
        [:div {:class "text-sm text-text-200"} purpose-line]
        [:div {:class "text-xs text-text-400 italic"} panel-line]]]
      :seon.render/ai
-     (str "Welcome card (the substrate default — you haven't wired a tile "
-          "yet). Your human currently sees: \"" greet-line "\" with "
-          date-str " " time-str ", "
+     (str "Welcome card — your tile is showing the substrate default "
+          "(point :seon.render.live-tile/content at your own fn to "
+          "replace it). Your human currently sees — in the root grid "
+          "(compact): "
           (if purpose
             (str "your purpose (\"" purpose "\")")
             "a note that you're still acquiring your purpose")
-          ", and: \"" panel-line "\" "
+          ", your id"
+          (if reply
+            (str ", and your last reply (\"" reply "\")")
+            (str ", and \"" greet-line "\""))
+          "; expanded (the agent view): \"" greet-line "\" with "
+          date-str " " time-str ", your purpose line, and: \""
+          panel-line "\" "
           "To replace it, transact :seon.render.live-tile/content onto "
           "your agent entity — a qualified fn symbol or literal hiccup.")}))
 

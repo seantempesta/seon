@@ -188,6 +188,56 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+;; ============================================================
+;; last-reply — the default root tile's derived read (live-tiles U3).
+;; ============================================================
+
+(deftest last-reply-is-the-newest-assistant-message
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (agent/message!
+                  {:seon.agent.message/from    agent/user-ref
+                   :seon.agent.message/to      [:seon.agent/id a-id]
+                   :seon.agent.message/content "hello A"})
+                (.then (fn [_]
+                         (agent/message!
+                           {:seon.agent.message/from    [:seon.agent/id a-id]
+                            :seon.agent.message/to      [:seon.user/id "user"]
+                            :seon.agent.message/content "on it — 3 workouts logged"})))
+                (.then (fn [_]
+                         (agent/message!
+                           {:seon.agent.message/from    [:seon.agent/id b-id]
+                            :seon.agent.message/to      [:seon.agent/id a-id]
+                            :seon.agent.message/content "peer ping"})))
+                (.then
+                  (fn [_]
+                    (let [{::chat/keys [last-reply]}
+                          (chat/last-reply {:seon.agent/id a-id
+                                            :seon.db/db @conn})]
+                      (is (= "on it — 3 workouts logged" last-reply)
+                          (str "the newest ::agent message — the human's"
+                               " messages and peer traffic never count"
+                               " as MY reply"))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest last-reply-absent-when-never-replied
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (agent/message!
+                  {:seon.agent.message/from    agent/user-ref
+                   :seon.agent.message/to      [:seon.agent/id a-id]
+                   :seon.agent.message/content "anyone home?"})
+                (.then
+                  (fn [_]
+                    (is (= {} (chat/last-reply {:seon.agent/id a-id
+                                                :seon.db/db @conn}))
+                        "optional = absent — no key when the agent has never replied"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest conversation-limit-bounds-the-tail
   (async done
     (-> (with-conn

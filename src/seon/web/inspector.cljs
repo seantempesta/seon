@@ -928,10 +928,16 @@
         "thinking …"]
        (comp/status-dot state))
      [:span {:class "text-xs font-mono text-text-500"} (str "turn " turns)]
-     [:a {:href (str "/agent/" agent-id "/debug")
-          :class (str "ml-auto text-xs font-mono text-text-400 "
-                      "hover:text-amber-300 border border-base-700 "
-                      "rounded px-2 py-1")}
+     ;; Opens the debug view as a full-viewport OVERLAY (iframe onto
+     ;; /agent/<id>/debug) — no URL change (live-tiles PRD §1 Surface
+     ;; 3 / U6). Backtick opens it too; Esc or the button closes.
+     ;; Stable id + document-delegated click handler in
+     ;; [[debug-overlay-script-js]] — morph-proof.
+     [:button {:id "seon-debug-toggle"
+               :type "button"
+               :class (str "ml-auto text-xs font-mono text-text-400 "
+                           "hover:text-amber-300 border border-base-700 "
+                           "rounded px-2 py-1 cursor-pointer")}
       "⚙ debug"]
      [:a {:href "/agents"
           :class "text-xs font-mono text-amber-500 hover:text-amber-300"}
@@ -959,12 +965,56 @@
        [:div {:class "text-sm text-text-500 italic p-4"}
         "no tile yet — the agent will draw here as it works"])])
 
+(def ^:private debug-overlay-script-js
+  "Consumer-view-only script (live-tiles PRD §1 Surface 3 / U6): the
+   debug view opens as a full-viewport overlay WITHOUT a URL change —
+   an iframe lazily pointed at `/agent/<id>/debug` (the zero-
+   duplication floor: the real debug page, its own SSE stream inside).
+   Open: the `⚙ debug` header button (document-delegated click —
+   morph-proof) or backtick. Close: Esc or the button. The backtick
+   is FOCUS-GUARDED — never fires while the chat input (or any
+   input/textarea/select/contentEditable) has focus. Closing resets
+   the iframe to about:blank so its SSE stream tears down."
+  (str
+    "(function(){"
+    "function seonDebugOverlay(open){"
+    "var o=document.getElementById('seon-debug-overlay');"
+    "if(!o)return;"
+    "var f=document.getElementById('seon-debug-frame');"
+    "var isOpen=o.classList.contains('open');"
+    "if(open===undefined){open=!isOpen;}"
+    "if(open===isOpen)return;"
+    "if(open){f.src=f.getAttribute('data-src');o.classList.add('open');}"
+    "else{o.classList.remove('open');f.src='about:blank';}}"
+    "document.addEventListener('click',function(e){"
+    "var t=e.target.closest?e.target.closest('#seon-debug-toggle'):null;"
+    "if(t){e.preventDefault();seonDebugOverlay();}});"
+    "document.addEventListener('keydown',function(e){"
+    "if(e.key==='Escape'){seonDebugOverlay(false);return;}"
+    "if(e.key==='`'){"
+    "var t=e.target,tag=t&&t.tagName;"
+    "if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'"
+    "||(t&&t.isContentEditable))return;"
+    "e.preventDefault();seonDebugOverlay(true);}});"
+    "})();"))
+
+(defn- debug-overlay-fragment
+  "The (initially hidden) full-viewport overlay shell — static, NOT a
+   morph target; [[debug-overlay-script-js]] toggles `.open` and sets
+   the iframe src on demand (styles in input.css)."
+  [agent-id]
+  [:div {:id "seon-debug-overlay"}
+   [:iframe {:id "seon-debug-frame"
+             :title (str "debug view for agent " agent-id)
+             :data-src (str "/agent/" agent-id "/debug")}]])
+
 (defn- consumer-shell
   "The full consumer page for `/agent/<id>`: chat bubbles + input
    left, the expanded live tile right. Reuses the existing
    `POST /chat?agent=<id>` path via [[chat-bar-fragment]] and the
    shared page script (markdown bubbles, bottom-autoscroll,
-   Cmd/Ctrl+Enter)."
+   Cmd/Ctrl+Enter). Carries the debug overlay shell + its script
+   ([[debug-overlay-fragment]] — Surface 3 without leaving the page)."
   [agent-id snap]
   (str
     "<!DOCTYPE html>"
@@ -981,7 +1031,9 @@
           (chat-pane-fragment agent-id snap)
           (chat-bar-fragment agent-id)]
          (tile-pane-fragment agent-id snap)]
-        [:script (html/raw page-script-js)]]])))
+        (debug-overlay-fragment agent-id)
+        [:script (html/raw page-script-js)]
+        [:script (html/raw debug-overlay-script-js)]]])))
 
 (defn- stat-cell
   "One headline number in the mission-control strip. Ticks up live —
@@ -996,8 +1048,12 @@
 
 (defn- agent-grid-tile
   "One clickable agent tile on the index — the agent's own
-   `render-agent-tile` surface wrapped in a link-card."
-  [db {:seon.agent/keys [id state turn-count]}]
+   `render-agent-tile` surface wrapped in a link-card. No inline
+   fallback: `render-agent-tile` always resolves to a wired value or
+   `seon.render.live-tile/welcome` (the ONE default — live-tiles PRD
+   §8.4); nil hiccup only for a nonexistent entity, which the grid
+   (derived from live agent rows) never hands it."
+  [db {:seon.agent/keys [id turn-count]}]
   (let [tile (:seon.render/hiccup
                (render/render-agent-tile {:seon.db/db db
                                           :seon.agent/id id}))]
@@ -1009,13 +1065,7 @@
          :class (str "flex flex-col border border-base-800 rounded "
                      "overflow-hidden hover:border-amber-700/70 "
                      "transition-colors animate-appear")}
-     [:div {:class "flex-1 min-h-0"}
-      (or tile
-          [:div {:class "p-3 bg-base-900"}
-           [:div {:class "flex items-center gap-2"}
-            (comp/status-dot state id)
-            [:span {:class "text-xs text-text-400 ml-auto"}
-             (str "turn " turn-count)]]])]
+     [:div {:class "flex-1 min-h-0"} tile]
      [:div {:class (str "shrink-0 flex items-center px-3 py-1 "
                         "border-t border-base-800 "
                         "bg-base-900/80 text-xs font-mono")}

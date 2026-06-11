@@ -18,6 +18,7 @@
     [cljs.reader :as reader]
     [cljs.test :refer [deftest is testing async]]
     [malli.core :as m]
+    [seon.agent :as agent]
     [seon.client :as client]
     [seon.db :as db]
     [seon.render :as render]
@@ -120,6 +121,22 @@
     (is (some #(re-find #"finding my purpose" %) (hiccup-strings hiccup))
         "gracefully generic — no purpose, no name, still elegant")))
 
+(deftest welcome-compact-shows-purpose-id-and-truthful-twin
+  (let [{:seon.render/keys [hiccup ai]}
+        (tile/welcome {:seon.db/db nil
+                       :seon.agent/id "wlcm-2206110004"
+                       :seon.render/entity
+                       {:seon.agent/id      "wlcm-2206110004"
+                        :seon.agent/purpose "track your workouts"}})]
+    (is (some #(= "wlcm-2206110004" %) (hiccup-strings hiccup))
+        "the agent's id renders on the default tile (live-tiles U3)")
+    (testing "the twin is TRUTHFUL — every minted agent IS wired (to welcome)"
+      (is (not (re-find #"haven't wired" ai))
+          "the old wording lied: creation wires every agent to welcome")
+      (is (re-find #"substrate default" ai))
+      (is (re-find #":seon.render.live-tile/content" ai)
+          "the twin always says HOW to repoint the tile"))))
+
 ;; ============================================================
 ;; error-response — a broken tile is LEGIBLE on both sides.
 ;; ============================================================
@@ -197,19 +214,22 @@
 
 (defn- with-agent-conn
   "Open a fresh conn, seed the :seon.agent kind schema entity + one
-   agent row, call `body` with the conn bound. Returns a Promise."
+   agent row, call `body` with the conn HELD via set! for the WHOLE
+   promise chain (restored in .finally) — `binding` unwinds before an
+   async body's awaits run (the *conn*-unbound trap chat_test's
+   with-conn already dodges). Returns a Promise."
   [agent-id body]
   (-> (client/open-agent-conn!)
       (.then (fn [conn]
-               (binding [db/*conn* conn]
+               (let [orig db/*conn*]
+                 (set! db/*conn* conn)
                  (-> (db/transact!
                        {:seon.db/tx-data
                         (into (vec (schema/entity-schema-tx-data :seon.agent))
                               [{:seon.agent/id    agent-id
                                 :seon.agent/state :idle}])})
-                     (.then (fn [_]
-                              (binding [db/*conn* conn]
-                                (body conn))))))))))
+                     (.then (fn [_] (body conn)))
+                     (.finally (fn [] (set! db/*conn* orig)))))))))
 
 (deftest render-agent-tile-unwired-renders-welcome
   (async done
@@ -222,6 +242,39 @@
                   "unwired agent gets the substrate welcome")
               (is (re-find #"Good (morning|afternoon|evening|night)" (str ai))
                   "welcome's twin rides the response"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest welcome-compact-shows-the-last-reply
+  (async done
+    (-> (with-agent-conn "wlcmrpl-000001"
+          (fn [conn]
+            (-> (db/transact! {:seon.db/tx-data [{:seon.user/id "user"}]})
+                (.then (fn [_]
+                         (binding [db/*conn* conn]
+                           (agent/message!
+                             {:seon.agent.message/from    agent/user-ref
+                              :seon.agent.message/to      [:seon.agent/id "wlcmrpl-000001"]
+                              :seon.agent.message/content "how's it going?"}))))
+                (.then (fn [_]
+                         (binding [db/*conn* conn]
+                           (agent/message!
+                             {:seon.agent.message/from    [:seon.agent/id "wlcmrpl-000001"]
+                              :seon.agent.message/to      [:seon.user/id "user"]
+                              :seon.agent.message/content "I found 3 workouts this week"}))))
+                (.then
+                  (fn [_]
+                    (binding [db/*conn* conn]
+                      (let [{:seon.render/keys [hiccup ai]}
+                            (tile/welcome
+                              {:seon.db/db @conn
+                               :seon.agent/id "wlcmrpl-000001"
+                               :seon.render/entity {:seon.agent/id "wlcmrpl-000001"}})]
+                        (is (some #(= "I found 3 workouts this week" %)
+                                  (hiccup-strings hiccup))
+                            "the last REPLY renders as readable text (not raw message data)")
+                        (is (re-find #"I found 3 workouts this week" ai)
+                            "the twin tells the agent its reply is on display"))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

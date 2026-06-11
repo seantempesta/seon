@@ -33,7 +33,6 @@
   (:require
     [seon.db :as db]
     [seon.render.default :as default]
-    [seon.render.live-tile :as live-tile]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -75,11 +74,15 @@
 (schema/register! ::stream-request
   [:map [::messages [:vector ::message]]])
 
-;; One bubble's hiccup. PLATFORM LAW (2026-06-11): registered schema
-;; forms are PURE DATA — a fn object's form serializes as a
-;; symbol/#object and dies on the next form round-trip (boot index,
-;; second boot) without sci. Reference the registered data shape.
-(schema/register! ::bubble :seon.render.live-tile/hiccup)
+;; Bubble fns return the registered hiccup shape
+;; `:seon.render.live-tile/hiccup` — referenced DIRECTLY in their
+;; `:malli/schema` metadata (resolved at instrument time, after the
+;; whole bundle loads — same forward-metadata-reference pattern as
+;; seon.render.default's `:seon.render/ai-response`). NOT re-aliased
+;; via register! here: this ns now loads BEFORE seon.render.live-tile
+;; (live-tile requires [[last-reply]] for its welcome compact block,
+;; live-tiles U3), and register!'s compilability guard rejects forward
+;; references at load time.
 
 ;; ============================================================
 ;; The derived bubble query.
@@ -118,6 +121,34 @@
               ::content content})
            rows)}))
 
+(schema/register! ::last-reply-request
+  [:map
+   [:seon.agent/id :string]
+   [:seon.db/db    {:optional true} :any]])
+
+(schema/register! ::last-reply
+  ::content)
+
+(schema/register! ::last-reply-response
+  [:map [::last-reply {:optional true} ::last-reply]])
+
+(defn last-reply
+  "The agent's most recent REPLY — the newest `::agent` (label
+   `\"assistant\"`) message in [[conversation]] — as readable text.
+   Returns `{}` when the agent has never replied (optional = absent).
+
+   This is what the default root tile shows
+   (`seon.render.live-tile/welcome`'s compact block: purpose + id +
+   last reply) — DERIVED from the message log at render time, nothing
+   stored (reactive-context doctrine)."
+  {:malli/schema [:=> [:cat ::last-reply-request] ::last-reply-response]}
+  [{:seon.agent/keys [id] :seon.db/keys [db]}]
+  (let [{::keys [messages]} (conversation (cond-> {:seon.agent/id id}
+                                            db (assoc :seon.db/db db)))]
+    (if-some [m (peek (filterv #(= ::agent (::kind %)) messages))]
+      {::last-reply (::content m)}
+      {})))
+
 ;; ============================================================
 ;; The bubble hiccup — one fn per stream, one per message.
 ;; ============================================================
@@ -137,7 +168,7 @@
      attribute + raw-text child for no-JS degradation).
    - `::peer`  — inline, dimmer, smaller, labeled with the peer's id
      (`agent-<id>`) — visually subordinate to the human↔agent stream."
-  {:malli/schema [:=> [:cat ::message] ::bubble]}
+  {:malli/schema [:=> [:cat ::message] :seon.render.live-tile/hiccup]}
   [{::keys [at kind label content]}]
   (let [time (hh-mm at)]
     (case kind

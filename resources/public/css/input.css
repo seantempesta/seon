@@ -289,3 +289,36 @@ details.tool-call-details[open] .tool-preview {
   .seon-tile-compact { display: none; }
   .seon-tile-expanded { display: block; }
 }
+
+/* Compact-tile last reply (live-tiles U3): the default root tile
+   shows the agent's last reply as readable text — clamp it so a
+   long reply never blows the grid cell. */
+.seon-tile-reply {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ============================================================
+   Debug overlay (live-tiles U6): the debug view opens over the
+   consumer view (/agent/<id>) as a full-viewport layer — an iframe
+   onto /agent/<id>/debug — without a URL change. Toggled by the
+   ⚙ debug button / backtick (focus-guarded); Esc closes. Plain CSS
+   (not scanned utilities) so the overlay works independent of the
+   Tailwind content scan.
+   ============================================================ */
+#seon-debug-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--color-base-950, #0d0d0c);
+}
+#seon-debug-overlay.open { display: block; }
+#seon-debug-overlay iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
