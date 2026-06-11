@@ -576,6 +576,11 @@ within the addendum reflects urgency, not filing order:
   `page-head` so a product overrides theme tokens (`--color-base-*`,
   `--color-amber-*`, fonts) without forking resources. Name-only
   covers the demo; CSS hook is small enough to ship together.
+  **DONE 2026-06-11** — `seon.web.brand` (rows + env sync + css hook;
+  env OWNS the row across boots: set → asserted, unset → retracted, so
+  an unbranded boot returns the seon defaults); inspector titles/h1/
+  `data-theme`/tagline read `brand/info` at render time; sync kicked
+  from `inspector/install!`; tests in `seon.web.brand-test`.
 - **C-14 VERIFY: agent fn replay on pod boot.** Sharpened repro
   (2026-06-11 17:42, pre-B4): snapshot-restore a 4-agent world → 19
   `log-replay-failure!` WARNs ("Cannot read properties of undefined

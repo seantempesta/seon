@@ -215,6 +215,14 @@ bootstrap output + static assets + bin/seon) a downstream can vendor
 without a seon source checkout. Today's answer is `SEON_RUNTIME_ROOT`
 pointed at a checkout; the bundle is the next rung.
 
+## C-17 unit smells (2026-06-11 late evening)
+
+| Smell | Where | Disposition |
+|---|---|---|
+| first render can race the boot brand-sync (~300ms window observed live: defaults render before the env tx lands; self-heals next request). `sync!` is fire-and-forget from `install!`; hard guarantee needs `install!` awaited in `start-agent!` | `web/brand.cljs` / `client.cljs` | accept self-heal for now; fold the await into the next client.cljs boot unit |
+| CONFIRMED AGAIN: MCP default `:client` runtime ≠ the pod (cost the unit one misleading "empty store" read; pid mismatch live-verified) | stale-MCP-runtime row | evidence appended to the existing open row |
+| `agents-dash-fragment` renders agent-authored tile content containing a bare `<h1>` — second h1 on the page (pre-existing, structural-HTML) | inspector dash | small unit: demote/strip headings in embedded tile content |
+
 ## Self-defeating-surfaces audit (2026-06-11 late evening)
 
 Full ranked report (14 findings + checked-clean list):

@@ -39,7 +39,8 @@
     [seon.render.chat :as chat]
     [seon.render.default :as default]
     [seon.ui.components :as comp]
-    [seon.ui.html :as html]))
+    [seon.ui.html :as html]
+    [seon.web.brand :as brand]))
 
 ;; ============================================================
 ;; SSE connection registry — per-agent. Distinct from the main
@@ -731,8 +732,18 @@
        ".markdown blockquote{border-left:2px solid #57534e;padding-left:0.5rem;color:#a8a29e;margin:0.2rem 0;}"
        ".seon-bubble .markdown{font-size:0.875rem;line-height:1.5;}"))
 
+(defn- brand-css-style
+  "The downstream brand stylesheet as an inline [:style], or nil when
+   SEON_BRAND_CSS is unset/unreadable (C-17). Rendered AFTER the
+   output.css link in every page head so its token overrides
+   (--color-base-*, --color-amber-*, fonts) win the cascade."
+  []
+  (when-let [css (brand/css-text)]
+    [:style (html/raw css)]))
+
 (defn- page-head
-  "Shared <head> for both per-agent shells: output.css, highlight.js
+  "Shared <head> for both per-agent shells: output.css (+ the optional
+   downstream brand stylesheet, C-17), highlight.js
    (+ the Clojure language module — NOT in the core CDN build; without
    it every code block warned and fell back to no-highlight, observed
    live 2026-06-09), marked.js for `data-markdown` bodies, the
@@ -743,6 +754,7 @@
    [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
    [:title title]
    [:link {:rel "stylesheet" :href "/css/output.css"}]
+   (brand-css-style)
    [:link {:rel "stylesheet"
            :href "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css"}]
    [:script {:src "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"}]
@@ -869,21 +881,22 @@
    §1 Surface 3). The body contains the two-pane grid; the header is
    inside the morph zone so it updates too."
   [agent-id snap]
-  (str
-    "<!DOCTYPE html>"
-    (html/->string
-      [:html {:lang "en" :data-theme "phosphor"}
-       (page-head (str "seon · agent " agent-id " · debug"))
-       [:body {:class "h-screen bg-base-950 text-text-50 font-sans antialiased flex flex-col"}
-        [:div {:data-init (str "@get('/agent/" agent-id "/debug/sse')")
-               :data-on:online__window (str "@get('/agent/" agent-id "/debug/sse')")}]
-        (header-fragment agent-id snap)
-        [:div {:class "flex-1 grid h-0 min-h-0"
-               :style "grid-template-columns: 1fr 1fr;"}
-         (ai-pane-fragment   agent-id snap)
-         (html-pane-fragment agent-id snap)]
-        (chat-bar-fragment agent-id)
-        [:script (html/raw page-script-js)]]])))
+  (let [b (brand/info)]
+    (str
+      "<!DOCTYPE html>"
+      (html/->string
+        [:html {:lang "en" :data-theme (::brand/theme b)}
+         (page-head (brand/page-title b (str "agent " agent-id " · debug")))
+         [:body {:class "h-screen bg-base-950 text-text-50 font-sans antialiased flex flex-col"}
+          [:div {:data-init (str "@get('/agent/" agent-id "/debug/sse')")
+                 :data-on:online__window (str "@get('/agent/" agent-id "/debug/sse')")}]
+          (header-fragment agent-id snap)
+          [:div {:class "flex-1 grid h-0 min-h-0"
+                 :style "grid-template-columns: 1fr 1fr;"}
+           (ai-pane-fragment   agent-id snap)
+           (html-pane-fragment agent-id snap)]
+          (chat-bar-fragment agent-id)
+          [:script (html/raw page-script-js)]]]))))
 
 ;; ============================================================
 ;; The CONSUMER agent view — `/agent/<id>` (live-tiles PRD §1
@@ -1019,24 +1032,25 @@
    Cmd/Ctrl+Enter). Carries the debug overlay shell + its script
    ([[debug-overlay-fragment]] — Surface 3 without leaving the page)."
   [agent-id snap]
-  (str
-    "<!DOCTYPE html>"
-    (html/->string
-      [:html {:lang "en" :data-theme "phosphor"}
-       (page-head (str "seon · agent " agent-id))
-       [:body {:class "h-screen bg-base-950 text-text-50 font-sans antialiased flex flex-col"}
-        [:div {:data-init (str "@get('/agent/" agent-id "/sse')")
-               :data-on:online__window (str "@get('/agent/" agent-id "/sse')")}]
-        (consumer-header-fragment agent-id snap)
-        [:div {:class "flex-1 grid h-0 min-h-0"
-               :style "grid-template-columns: minmax(0,1fr) minmax(0,1fr);"}
-         [:div {:class "flex flex-col h-full overflow-hidden"}
-          (chat-pane-fragment agent-id snap)
-          (chat-bar-fragment agent-id)]
-         (tile-pane-fragment agent-id snap)]
-        (debug-overlay-fragment agent-id)
-        [:script (html/raw page-script-js)]
-        [:script (html/raw debug-overlay-script-js)]]])))
+  (let [b (brand/info)]
+    (str
+      "<!DOCTYPE html>"
+      (html/->string
+        [:html {:lang "en" :data-theme (::brand/theme b)}
+         (page-head (brand/page-title b (str "agent " agent-id)))
+         [:body {:class "h-screen bg-base-950 text-text-50 font-sans antialiased flex flex-col"}
+          [:div {:data-init (str "@get('/agent/" agent-id "/sse')")
+                 :data-on:online__window (str "@get('/agent/" agent-id "/sse')")}]
+          (consumer-header-fragment agent-id snap)
+          [:div {:class "flex-1 grid h-0 min-h-0"
+                 :style "grid-template-columns: minmax(0,1fr) minmax(0,1fr);"}
+           [:div {:class "flex flex-col h-full overflow-hidden"}
+            (chat-pane-fragment agent-id snap)
+            (chat-bar-fragment agent-id)]
+           (tile-pane-fragment agent-id snap)]
+          (debug-overlay-fragment agent-id)
+          [:script (html/raw page-script-js)]
+          [:script (html/raw debug-overlay-script-js)]]]))))
 
 (defn- stat-cell
   "One headline number in the mission-control strip. Ticks up live —
@@ -1103,13 +1117,15 @@
         completed (vec (filter :seon.agent/completed-at rows))
         {::keys [agent-count turn-count fn-count finding-count datom-count]}
         (cluster-stats db)
-        findings (findings-data db)]
+        findings (findings-data db)
+        b        (brand/info db)]
     [:div {:id "agents-dash" :class "flex flex-col gap-4"}
      [:div {:class "flex items-center gap-4 flex-wrap"}
       [:div
-       [:h1 {:class "text-lg font-semibold tracking-tight"} "seon · cluster"]
+       [:h1 {:class "text-lg font-semibold tracking-tight"}
+        (brand/page-title b "cluster")]
        [:p {:class "text-text-400 text-xs mt-0.5 font-mono"}
-        "live agents on a shared substrate — everything below is derived from the DB right now"]]
+        (::brand/tagline b)]]
       [:div {:class "flex gap-2 ml-auto items-stretch"}
        (stat-cell "agents"   agent-count)
        (stat-cell "turns"    turn-count)
@@ -1190,20 +1206,22 @@
 
 (defn- agents-index-page
   []
-  (str
-    "<!DOCTYPE html>"
-    (html/->string
-      [:html {:lang "en" :data-theme "phosphor"}
-       [:head
-        [:meta {:charset "utf-8"}]
-        [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
-        [:title "seon · agents"]
-        [:link {:rel "stylesheet" :href "/css/output.css"}]
-        [:script {:type "module" :src "/js/datastar.js"}]]
-       [:body {:class "min-h-screen bg-base-950 text-text-50 font-sans p-4"}
-        [:div {:data-init "@get('/agents/sse')"
-               :data-on:online__window "@get('/agents/sse')"}]
-        (agents-dash-fragment)]])))
+  (let [b (brand/info)]
+    (str
+      "<!DOCTYPE html>"
+      (html/->string
+        [:html {:lang "en" :data-theme (::brand/theme b)}
+         [:head
+          [:meta {:charset "utf-8"}]
+          [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
+          [:title (brand/page-title b "agents")]
+          [:link {:rel "stylesheet" :href "/css/output.css"}]
+          (brand-css-style)
+          [:script {:type "module" :src "/js/datastar.js"}]]
+         [:body {:class "min-h-screen bg-base-950 text-text-50 font-sans p-4"}
+          [:div {:data-init "@get('/agents/sse')"
+                 :data-on:online__window "@get('/agents/sse')"}]
+          (agents-dash-fragment)]]))))
 
 ;; ============================================================
 ;; Routing — called from serve.cljs router via `route?` + `handle!`.
@@ -1228,23 +1246,25 @@
    cluster store — stale tabs and bookmarks land here after a pod
    restart onto a different store or a `bin/seon cluster reset`."
   [agent-id]
-  (str
-    "<!DOCTYPE html>"
-    (html/->string
-      [:html {:lang "en" :data-theme "phosphor"}
-       [:head
-        [:meta {:charset "utf-8"}]
-        [:title (str "seon · agent " agent-id " not found")]
-        [:link {:rel "stylesheet" :href "/css/output.css"}]]
-       [:body {:class "h-screen bg-base-950 text-text-50 font-mono antialiased flex items-center justify-center"}
-        [:div {:class "text-center"}
-         [:div {:class "text-amber-400 text-sm mb-2"}
-          (str "agent " agent-id " is not in this cluster store")]
-         [:div {:class "text-text-500 text-xs mb-4"}
-          "it belonged to a previous store — this tab is stale"]
-         [:a {:href "/agents"
-              :class "text-amber-500 hover:text-amber-300 text-xs underline"}
-          "← all live agents"]]]])))
+  (let [b (brand/info)]
+    (str
+      "<!DOCTYPE html>"
+      (html/->string
+        [:html {:lang "en" :data-theme (::brand/theme b)}
+         [:head
+          [:meta {:charset "utf-8"}]
+          [:title (brand/page-title b (str "agent " agent-id " not found"))]
+          [:link {:rel "stylesheet" :href "/css/output.css"}]
+          (brand-css-style)]
+         [:body {:class "h-screen bg-base-950 text-text-50 font-mono antialiased flex items-center justify-center"}
+          [:div {:class "text-center"}
+           [:div {:class "text-amber-400 text-sm mb-2"}
+            (str "agent " agent-id " is not in this cluster store")]
+           [:div {:class "text-text-500 text-xs mb-4"}
+            "it belonged to a previous store — this tab is stale"]
+           [:a {:href "/agents"
+                :class "text-amber-500 hover:text-amber-300 text-xs underline"}
+            "← all live agents"]]]]))))
 
 (defn route?
   "True iff this `path` is an inspector route. Called from
@@ -1377,8 +1397,13 @@
 
 (defn install!
   "Install the inspector tx-listener. Idempotent — re-installing
-   replaces the prior handler."
+   replaces the prior handler. Also kicks off the brand env sync
+   (C-17): the SEON_BRAND_* env vars own the `:seon.web.brand` row,
+   and install! is the web surface's boot hook (called after
+   boot-seed! with the root conn bound). Fire-and-forget — sync!
+   never rejects and logs its own failures."
   []
+  (brand/sync!)
   (db/listen! {:seon.db/key     ::inspector
                :seon.db/handler on-tx}))
 
