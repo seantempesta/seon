@@ -6,6 +6,19 @@ tags: [prd, agent, database]
 
 # Open issues — accumulated register + plan (2026-06-11)
 
+**POST-V4 STATE (evening):** the context-v4 refactor + all fix waves
+are COMMITTED (through 595aa2b) and pushed; the post-v4 gym sweep ran
+on a FRESH world and is the CURRENT source of open work — see
+[[research/e2e-demo-findings-2026-06-08]] §POST-V4 SWEEP (7 ranked
+findings; S-21 0/3 headline, consult-first regression, eval-env
+require gap, blind reply!) and the blind-spot analysis
+[[research/context-blind-spots-2026-06-11]] (in flight). A fresh
+consolidating fix-everything PRD follows the analysis. INTEGRITY
+RULES now standing: gym fs roots exclude the harness (answer-key leak
+caught + fixed); fixes must be GENERAL mechanisms, never
+scenario-coached answers. Historical tiers below remain as the
+register of record.
+
 Everything known-open after the 2026-06-10 refactor day (19 commits) and
 the P8 measurement (5 paid runs, sha 1ca105a). One doc to plan from.
 Board P-numbers in brackets; evidence lives in the P8 sweep logs
