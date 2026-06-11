@@ -389,25 +389,72 @@
                     (and core-path (resolves-on-globalthis? core-path))
                     (resolves-on-globalthis? munged-suffix)))))))
 
+(defn ns-live-on-globalthis?
+  "True when `ns-sym`'s munged JS object exists on globalThis — i.e.
+   its JS has actually executed in this process. Two callers, two
+   views of the same fact:
+
+   - [[guarded-load]]: a ns missing from the bootstrap bundle's index
+     but live here is HOST-BUNDLED (compiled into out/client/main.js —
+     `my.kb`, `seon.db`, `my.kb.system`): store-indexed and rendered
+     into the agent's prompt as code, but absent from shadow's
+     `:bootstrap :entries`, so a bare `boot/load` throws `ns X not
+     available`. Live ⇒ no-op the load — the JS is already loaded.
+   - `seon.client/ensure-target-ns!`: an analyzer entry WITHOUT a live
+     object marks a half-failed `(ns …)` eval; defs into it would die
+     on `undefined`, so the bare-(ns) heal must still run."
+  {:malli/schema [:=> [:cat :symbol] :boolean]}
+  [ns-sym]
+  (some? (js/goog.getObjectByName (str (cljs.core/munge ns-sym)))))
+
 (defn- guarded-load
   "`:load` fn for cljs.js — `boot/load` plus a post-load invariant
-   re-assert. The bootstrap bundle's per-ns JS is goog.globalEval'd into
-   the SHARED host runtime, so a load can re-run a library namespace's
-   top-level side effects against live state. Live incident (2026-06-10,
-   logs/pod.log 15:21): an agent eval of `(require '[malli.core :as m])`
-   loaded the bundle's `malli.core$macros.js`, whose macro-mode compile
-   of malli/core.cljc re-ran `(mr/set-default-registry! …)` against the
-   live `malli.registry` — stomping the registry with a
+   re-assert and a host-bundle fallback. The bootstrap bundle's per-ns
+   JS is goog.globalEval'd into the SHARED host runtime, so a load can
+   re-run a library namespace's top-level side effects against live
+   state. Live incident (2026-06-10, logs/pod.log 15:21): an agent eval
+   of `(require '[malli.core :as m])` loaded the bundle's
+   `malli.core$macros.js`, whose macro-mode compile of malli/core.cljc
+   re-ran `(mr/set-default-registry! …)` against the live
+   `malli.registry` — stomping the registry with a
    default-schemas-only snapshot and severing every seon-registered
    schema process-wide (`m/schema :seon.db/conn` → invalid-schema; broke
    replay, record-eval!, and POST /agents/new). Relinking after every
    load is idempotent and cheap; it runs synchronously before the
-   compiled form continues, so no code observes the stomped registry."
+   compiled form continues, so no code observes the stomped registry.
+
+   HOST-BUNDLE FALLBACK (fix-everything B4 + downstream bug #14,
+   2026-06-11): `boot/load` throws synchronously (`ns X not available`,
+   from shadow's `env/get-ns-info`) for any ns absent from BOTH the
+   compile-state and the bootstrap bundle's index. That made
+   `(:require [my.kb :as kb])` — the move the prompt teaches, since it
+   renders substrate namespaces as code — fail as a `:cljs/analysis-
+   error`, at define time AND on every replay of a stored `(ns …)` row
+   (logs/pod-events.log: `replay of ns :my.kb.instruction failed:
+   Could not require my.kb`; the failed ns row then cascaded into
+   `Cannot set/read properties of undefined` for every def in the ns).
+   When the missing ns is live on globalThis ([[ns-live-on-globalthis?]] —
+   compiled into the host bundle), its JS is ALREADY loaded: answer the
+   load with an empty `:js` source. cljs.js marks the ns loaded, the
+   alias map wires up from the ns form's parse, and cross-ns var refs
+   resolve at runtime via the same munged globalThis paths
+   `truly-undeclared?` probes. NEVER re-eval host source here — that's
+   the registry-stomp/shadowing class replay's substrate-skip exists to
+   prevent. Macro loads (`:macros` rc) and genuinely-absent nses
+   rethrow, preserving the legible `Could not require X <- ns X not
+   available` error."
   [compile-state rc cb]
-  (boot/load compile-state rc
-             (fn [result]
-               (schema/relink-registry!)
-               (cb result))))
+  (try
+    (boot/load compile-state rc
+               (fn [result]
+                 (schema/relink-registry!)
+                 (cb result)))
+    (catch :default e
+      (if (and (not (:macros rc))
+               (symbol? (:name rc))
+               (ns-live-on-globalthis? (:name rc)))
+        (cb {:lang :js :source ""})
+        (throw e)))))
 
 (defn ^:async ^:private raw-eval
   "Internal — returns a Promise that resolves with {:value v :ns ns}

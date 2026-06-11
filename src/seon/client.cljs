@@ -692,22 +692,33 @@
        (last)))
 
 (defn ^:async ^:private ensure-target-ns!
-  "Make sure `ns-sym` exists in the compile-state before replaying a
-   def-shaped entry into it. Replay is tx-ordered, but agents routinely
-   author defns BEFORE writing the `(ns …)` form (live: the workout
-   corpus's :ns row tx-sorts AFTER its 4 fns), and an entry's owning ns
-   may have no :seon.ns row at all. On a fresh compile-state, cljs.js
-   with `:def-emits-var true` then dies in the cljs compiler's
-   `emit* :the-var` `{:pre [(ana/ast? sym)]}` (compiler.cljc:506) —
-   every boot/agent-create logged `replay of fn … failed: Assert
-   failed: (ana/ast? sym)` (2026-06-10 15:38/15:46). Evaling a bare
-   `(ns <sym>)` first is what an editor does when loading a file; the
-   real `(ns …)` row — when one exists — re-evals over it harmlessly
-   in its own tx position."
+  "Make sure `ns-sym` exists in the compile-state AND as a live JS ns
+   object before replaying a def-shaped entry into it. Replay is
+   tx-ordered, but agents routinely author defns BEFORE writing the
+   `(ns …)` form (live: the workout corpus's :ns row tx-sorts AFTER its
+   4 fns), and an entry's owning ns may have no :seon.ns row at all. On
+   a fresh compile-state, cljs.js with `:def-emits-var true` then dies
+   in the cljs compiler's `emit* :the-var` `{:pre [(ana/ast? sym)]}`
+   (compiler.cljc:506) — every boot/agent-create logged `replay of fn …
+   failed: Assert failed: (ana/ast? sym)` (2026-06-10 15:38/15:46).
+   Evaling a bare `(ns <sym>)` first is what an editor does when
+   loading a file; the real `(ns …)` row — when one exists — re-evals
+   over it harmlessly in its own tx position.
+
+   BOTH probes are load-bearing (downstream bug #14, 2026-06-11): a
+   `(ns …)` row whose `:require` fails mid-load (the B4 class) still
+   REGISTERS the analyzer entry before dying, but never emits the
+   `goog.provide` that creates the JS object. Trusting the analyzer
+   entry alone then skips the bare-(ns) heal and every def in the ns
+   fails with `Cannot set/read properties of undefined` on both replay
+   passes (logs/pod-events.log, agents UPE-2606101815 /
+   vGq-2606111337). So: skip only when the analyzer knows the ns AND
+   its munged object exists on globalThis."
   [compile-state ns-sym]
   (when-not (or (= 'cljs.user ns-sym)
-                (some? (get-in @compile-state
-                               [:cljs.analyzer/namespaces ns-sym :name])))
+                (and (some? (get-in @compile-state
+                                    [:cljs.analyzer/namespaces ns-sym :name]))
+                     (seval/ns-live-on-globalthis? ns-sym)))
     (await (seval/eval compile-state (str "(ns " ns-sym ")")
                        {:ns 'cljs.user :analyze-deps? false})))
   nil)

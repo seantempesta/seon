@@ -312,6 +312,102 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+;; ---------------------------------------------------------------------------
+;; Downstream bug #14 (2026-06-11) — agent corpus whose (ns …) row REQUIRES a
+;; host-bundled, store-indexed ns (my.kb — the move the prompt teaches). Before
+;; the guarded-load host-bundle fallback, the ns row's replay died with
+;; `Could not require my.kb <- ns my.kb not available` (B4 inside replay);
+;; the half-failed ns eval left an ANALYZER ENTRY but no JS ns object, so
+;; ensure-target-ns! skipped its heal and every def in the ns failed with
+;; `Cannot set/read properties of undefined` on BOTH passes
+;; (logs/pod-events.log, agents UPE-2606101815 / vGq-2606111337) — agent fns
+;; gone after every pod restart until re-defined by hand.
+;; ---------------------------------------------------------------------------
+
+(deftest replay-ns-row-with-host-bundled-require-succeeds
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (client/open-agent-conn!)
+                (.then
+                  (fn [conn]
+                    (binding [db/*conn* conn]
+                      (-> (db/transact!
+                            {:seon.db/tx-data
+                             [{:seon.ns/name :seon.replay.kbreq
+                               :seon.ns/source
+                               "(ns seon.replay.kbreq (:require [my.kb :as kb]))"}
+                              {:seon.fn/sym "seon.replay.kbreq/kb-fn"
+                               :seon.fn/ns {:seon.ns/name :seon.replay.kbreq}
+                               :seon.fn/source "(defn kb-fn [n] (+ n 7))"
+                               :seon.fn/arglists "([n])"
+                               :seon.fn/doc ""
+                               :seon.fn/private? false}]})
+                          (.then
+                            (fn [_]
+                              (client/replay-program-graph!
+                                {:conn conn :compile-state cs
+                                 :agent-id "resume-replay-test"})))
+                          (.then
+                            (fn [stats]
+                              (is (= 0 (:seon.client/replay-n-fail stats))
+                                  (str "ns row requiring my.kb replays clean "
+                                       "(B4-in-replay fixed) — " (pr-str stats)))
+                              (seval/eval cs "(seon.replay.kbreq/kb-fn 35)"
+                                          {:ns 'cljs.user :analyze-deps? false})))
+                          (.then
+                            (fn [r]
+                              (is (:ok r) "fn in the requiring ns is callable")
+                              (is (= 42 (:value r)) "(kb-fn 35) => 42"))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest replay-heals-analyzer-entry-without-live-ns-object
+  ;; The #14 cascade mechanism in isolation: an analyzer entry EXISTS
+  ;; (a half-failed ns eval registers one) but the munged JS ns object
+  ;; was never created. The old ensure-target-ns! trusted the analyzer
+  ;; entry alone and skipped the bare-(ns) heal — every def then died
+  ;; writing onto `undefined`. Both probes must hold before skipping.
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            ;; Poison: analyzer knows the ns; globalThis does not.
+            (swap! cs assoc-in
+                   [:cljs.analyzer/namespaces 'seon.replay.poisoned :name]
+                   'seon.replay.poisoned)
+            (is (false? (seval/ns-live-on-globalthis? 'seon.replay.poisoned))
+                "PRECONDITION: no JS object for the poisoned ns")
+            (-> (client/open-agent-conn!)
+                (.then
+                  (fn [conn]
+                    (binding [db/*conn* conn]
+                      (-> (db/transact!
+                            {:seon.db/tx-data
+                             [{:seon.fn/sym "seon.replay.poisoned/healed-fn"
+                               :seon.fn/source "(defn healed-fn [n] (* n 6))"
+                               :seon.fn/arglists "([n])"
+                               :seon.fn/doc ""
+                               :seon.fn/private? false}]})
+                          (.then
+                            (fn [_]
+                              (client/replay-program-graph!
+                                {:conn conn :compile-state cs
+                                 :agent-id "resume-replay-test"})))
+                          (.then
+                            (fn [stats]
+                              (is (= 0 (:seon.client/replay-n-fail stats))
+                                  "fn replays into the healed ns — no `Cannot set properties of undefined`")
+                              (seval/eval cs "(seon.replay.poisoned/healed-fn 7)"
+                                          {:ns 'cljs.user :analyze-deps? false})))
+                          (.then
+                            (fn [r]
+                              (is (:ok r) "healed fn is callable")
+                              (is (= 42 (:value r)) "(healed-fn 7) => 42"))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest replay-fn-without-ns-row-creates-its-namespace
   (async done
     (-> (repl/ensure-bootstrap!)
