@@ -1259,24 +1259,21 @@
 
 (defn- stub-llm
   "A fake LLM that demonstrates the REPL-as-harness response shape: a
-   `;; narration` line then a real `seon.db/transact!` form, then
-   another narration + the state-flip-to-idle form. The agent reads
-   its own eval log in subsequent turns and learns by mimicking what
-   it sees here. Returns a Promise of {:text \"...\"}."
+   `;; narration` line then a real `seon.agent/reply!` form. The
+   loop's reply-landed stop policy
+   (`seon.agent/replied-since-inbound?`, #35) ends the wake after this
+   turn — the old extra `:seon.agent/state :idle` transact taught a
+   non-mechanism (the loop never read mid-turn state) and burned turns
+   to the cap (#22). Returns a Promise of {:text \"...\"}."
   [ctx]
   (let [text (str
                ";; stub LLM here — the real one needs DEEPSEEK_API_KEY\n"
-               ";; reply to whoever woke this turn\n"
+               ";; reply to whoever woke this turn — replying ends the wake\n"
                "(seon.agent/reply!\n"
                "  {:seon.agent.message/content "
                (pr-str (str "hello from the stub LLM — saw "
                             (count ctx) " chars of ctx"))
-               "})\n\n"
-               ";; halt the loop\n"
-               "(seon.db/transact!\n"
-               "  {:seon.db/tx-data\n"
-               "   [{:seon.agent/id     (seon.db/current-agent-id)\n"
-               "     :seon.agent/state  :idle}]})\n")]
+               "})\n")]
     (.then (.resolve js/Promise nil) (fn [_] {:text text}))))
 
 (defn- current-llm-fn

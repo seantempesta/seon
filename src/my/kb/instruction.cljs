@@ -77,9 +77,12 @@
          {::id       "reply-every-asked-turn"
           ::priority 30
           ::text     (str "A turn serving a question MUST end with "
-                          "(seon.agent/reply! …) in the SAME response. Consulting, "
-                          "searching and computing are never the end of the work — "
-                          "your human sees NOTHING until reply! lands.")
+                          "(seon.agent/reply! …) in the SAME response — your human "
+                          "sees NOTHING until reply! lands. ONE reply per question: "
+                          "once reply! lands your wake is complete and the loop "
+                          "stops. Do not emit verification forms or follow-up "
+                          "replies after answering; a new message will wake you "
+                          "if more is needed.")
           ::applies-when "every turn woken by a question"}
          {::id       "namespace-map"
           ::priority 40

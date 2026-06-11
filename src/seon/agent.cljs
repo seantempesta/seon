@@ -1040,12 +1040,78 @@
         {:seon.agent.turn/status :error
          :seon.error/data (str e)}))))
 
+(schema/register! ::replied-since-inbound-request
+  [:map [::id ::id]])
+
+(defn replied-since-inbound?
+  "Loop-economy stop derivation (#35): TRUE when an OUTBOUND message
+   (from = me with at least one recipient ≠ me — a `reply!` to the
+   asker or a `message!` consult to another agent; the per-turn
+   assistant self-message is from = to = me and never counts) landed
+   strictly AFTER the latest live inbound message (to ∋ me, from ≠ me,
+   hops < `warn/hop-cap` — the same window `turns-since-inbound`
+   counts against). With no inbound on record the baseline is the
+   current session's start, so replies from prior wakes don't stop a
+   manually-driven loop. Fully derived from the message log — nothing
+   stored, nothing to clear (docs/seon/concepts/reactive-context).
+   A NEW inbound message arriving after the reply moves the inbound
+   side of the comparison forward, so the loop keeps running for it."
+  {:malli/schema [:=> [:cat ::replied-since-inbound-request] :boolean]}
+  [{::keys [id]}]
+  (let [my-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))
+        latest-at
+        (fn [q args]
+          (ffirst (db/query {:seon.db/query q :seon.db/args args})))
+        inbound-at
+        (when my-eid
+          (latest-at
+            '[:find (max ?at)
+              :in $ ?me ?cap
+              :where
+              [?m :seon.agent.message/to ?me]
+              [?m :seon.agent.message/from ?f]
+              [(not= ?f ?me)]
+              ;; hop-exhausted messages never wake a loop and must not
+              ;; anchor its reply window either (mirrors
+              ;; seon.ctx/turns-since-inbound).
+              [(get-else $ ?m :seon.agent.message/hops 0) ?h]
+              [(< ?h ?cap)]
+              [?m :seon.agent.message/at ?at]]
+            [my-eid warn/hop-cap]))
+        outbound-at
+        (when my-eid
+          (latest-at
+            '[:find (max ?at)
+              :in $ ?me
+              :where
+              [?m :seon.agent.message/from ?me]
+              [?m :seon.agent.message/to ?t]
+              [(not= ?t ?me)]
+              [?m :seon.agent.message/at ?at]]
+            [my-eid]))
+        baseline (or inbound-at
+                     (:seon.agent.session/at (current-session id)))]
+    (boolean (and outbound-at baseline
+                  (> (.getTime ^js outbound-at)
+                     (.getTime ^js baseline))))))
+
 (defn ^:async run-agentic-loop!
   "Per v1.md §6.2 — multi-turn driver. Calls `run-turn!` repeatedly
    until a stop policy fires.
 
    Default stop policies:
      - Last turn errored.
+     - A reply landed during this wake and no newer inbound message
+       arrived (`replied-since-inbound?`) — the conversation ball is in
+       the other court; churning verification turns to the cap after
+       answering was the #35 loop-economy bug (3/5 paid P8 runs burned
+       ~15 turns post-answer). A new inbound message re-wakes the loop
+       via the kick trigger. Halt marker: `:seon.agent/halt :replied`.
+       SHARP EDGE: ANY outbound to a non-self recipient ends the wake —
+       including an interim \"I'm looking into it\" acknowledgement or a
+       `message!` consult to another agent. Complete the work first,
+       reply once; consults resume via the re-wake when the answer
+       arrives.
      - Last turn produced zero forms (agent emitted prose only).
      - `turns-since-inbound` exceeded `(turns-cap id)` — derived
        from the message + turn log; see docs/seon/concepts/reactive-context.
@@ -1062,6 +1128,11 @@
       (cond
         (= :error status)
         result
+
+        (replied-since-inbound? {::id id})
+        (do (log id (turn-index (:seon.agent.session/id (current-session id)))
+                 "halt" "replied — wake complete")
+            (assoc result :seon.agent/halt :replied))
 
         (zero? n-forms)
         result
