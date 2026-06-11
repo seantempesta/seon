@@ -458,6 +458,124 @@
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
 ;; ---------------------------------------------------------------------------
+;; SELF-BAIT LOAD CHECK (gym-upgrade §3.4) — a scenario whose fixture
+;; values contain a turn message verbatim must FAIL TO LOAD with the
+;; named error: any predicate keyed on question text could otherwise
+;; pass by string coincidence (the s32 class).
+;; ---------------------------------------------------------------------------
+
+(deftest self-baited-scenario-fails-to-load
+  (let [fs       (js/require "node:fs")
+        path     "tmp/gymtest-self-bait.edn"
+        q        "What is the self-bait marker question for the load check?"
+        scenario (fn [fixture-q]
+                   {:seon.gym.scenario/id     :gymtest-self-bait
+                    :seon.gym.scenario/doc    "Deliberately self-baited (gym-upgrade §3.4 falsification): the fixture's question IS the turn message."
+                    :seon.gym.scenario/tier   :stub
+                    :seon.gym.scenario/status :active
+                    :seon.gym.scenario/axes   [:sees-question]
+                    :seon.gym.scenario/fixtures
+                    [{:my.kb.codebase/claim    "an answer"
+                      :my.kb.codebase/question fixture-q}]
+                    :seon.gym.scenario/turns
+                    [{:seon.gym.turn/message q}]
+                    :seon.gym.scenario/predicates []})]
+    (.mkdirSync fs "tmp" #js {:recursive true})
+    (.writeFileSync fs path (pr-str (scenario q)))
+    (let [err (try (gym/load-scenarios! {:seon.gym/path path})
+                   nil
+                   (catch :default e e))]
+      (is (some? err) "the self-baited scenario must not load")
+      (is (str/includes? (str (ex-message err)) "SELF-BAIT")
+          (str "the load failure names the rule — " (ex-message err)))
+      (is (= 0 (:seon.gym.run/fixture-index (ex-data err)))
+          "the load failure names the offending fixture"))
+    ;; the same scenario with a PARAPHRASED fixture question loads fine
+    (.writeFileSync fs path
+                    (pr-str (scenario "A paraphrase, not the verbatim turn text.")))
+    (is (seq (:seon.gym/scenarios (gym/load-scenarios! {:seon.gym/path path})))
+        "the paraphrased variant loads")
+    (.rmSync fs path)))
+
+;; ---------------------------------------------------------------------------
+;; CONSULT-PREDICATE ANCHORING (gym-upgrade §3.2) — the s32 consult
+;; predicate is anchored on the seeded DOMAIN namespace
+;; (:my\.kb\.codebase/), not the broad :my\. — falsified both ways with
+;; free stub runs: an unrelated-:my.* first eval scores the anchored
+;; predicate RED (while the OLD broad anchor would have scored green —
+;; the defect, pinned as a green broad predicate in the same run); a
+;; :my.kb.codebase/* first eval scores it green.
+;; ---------------------------------------------------------------------------
+
+(defn- consult-anchor-scenario [first-eval]
+  {:seon.gym.scenario/id     :gymtest-consult-anchor
+   :seon.gym.scenario/doc    "Inline stub (gym-upgrade §3.2 falsification): the anchored consult predicate must track the seeded domain namespace, not any :my.* touch."
+   :seon.gym.scenario/tier   :stub
+   :seon.gym.scenario/status :active
+   :seon.gym.scenario/axes   [:consults-findings]
+   :seon.gym.scenario/schema-registrations
+   [[:my.kb.codebase/claim :string]
+    [:my.kb.codebase/question :string]]
+   :seon.gym.scenario/fixtures
+   [{:my.kb.codebase/claim    "the stored answer"
+     :my.kb.codebase/question "a paraphrased stored question"}]
+   :seon.gym.scenario/turns
+   [{:seon.gym.turn/message "Where is the stored answer recorded?"
+     :seon.gym.turn/llm-script [first-eval]}]
+   :seon.gym.scenario/predicates
+   [{:seon.gym.predicate/id      :first-eval-consults-stored-findings
+     :seon.gym.predicate/kind    :first-eval-matches
+     :seon.gym.predicate/axis    :consults-findings
+     :seon.gym.predicate/pattern ":my\\.kb\\.codebase/"}
+    ;; the OLD s32 anchor, kept here ONLY to pin the defect shape: it
+    ;; goes green on the unrelated-:my.* eval the anchored one rejects.
+    {:seon.gym.predicate/id      :broad-my-anchor-the-old-defect
+     :seon.gym.predicate/kind    :first-eval-matches
+     :seon.gym.predicate/axis    :consults-findings
+     :seon.gym.predicate/pattern ":my\\."}]})
+
+(deftest consult-anchor-rejects-unrelated-my-star-touches
+  ;; §3.2 falsification, RED side: first eval queries only an unrelated
+  ;; :my.* attr — anchored predicate RED, broad (old) predicate green.
+  (async done
+    (-> (gym/run-scenario!
+          {:seon.gym/scenario
+           (consult-anchor-scenario
+             "(seon.db/query {:seon.db/query '[:find ?v :where [?e :my.agent.scratch/note ?v]]})\n")})
+        (.then (fn [card]
+                 (gym/print-scorecard! card)
+                 (let [anchored (result-by-id
+                                  card :first-eval-consults-stored-findings)
+                       broad    (result-by-id
+                                  card :broad-my-anchor-the-old-defect)]
+                   (is (false? (:seon.gym.result/pass? anchored))
+                       (str "unrelated :my.* touch scores the anchored "
+                            "consult predicate RED — "
+                            (:seon.gym.result/actual anchored)))
+                   (is (true? (:seon.gym.result/pass? broad))
+                       "…while the OLD broad :my\\. anchor passes — the §3.2 defect"))
+                 (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest consult-anchor-passes-on-seeded-domain-touch
+  ;; §3.2 falsification, GREEN side: first eval queries the seeded
+  ;; :my.kb.codebase/* rows — anchored predicate green.
+  (async done
+    (-> (gym/run-scenario!
+          {:seon.gym/scenario
+           (consult-anchor-scenario
+             "(seon.db/query {:seon.db/query '[:find ?c :where [?e :my.kb.codebase/claim ?c]]})\n")})
+        (.then (fn [card]
+                 (gym/print-scorecard! card)
+                 (let [anchored (result-by-id
+                                  card :first-eval-consults-stored-findings)]
+                   (is (true? (:seon.gym.result/pass? anchored))
+                       (str "a :my.kb.codebase/* consult scores green — "
+                            (:seon.gym.result/actual anchored))))
+                 (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; LLM-JUDGE wiring — proven with a MOCKED judge llm-fn (zero spend).
 ;; The judge verdict lands on the SEPARATE judge axis of the scorecard:
 ;; mechanical pass?/axes/results never mix with judge-pass?/judge-results,

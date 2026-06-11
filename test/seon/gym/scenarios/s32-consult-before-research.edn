@@ -2,7 +2,10 @@
 ;; probe). Fixtures seed run-7's validation findings (migrated to the
 ;; V3-B my.kb shape: a my.kb.codebase domain referencing the shared
 ;; :my.kb/* provenance attrs) PLUS one finding whose
-;; :my.kb.codebase/question is near-verbatim the user question — the
+;; :my.kb.codebase/question PARAPHRASES the user question (same
+;; meaning, different surface form — gym-upgrade §3.2: a verbatim
+;; seeded question is self-bait that lets text-match predicates pass
+;; by string coincidence; the §3.4 load check enforces this). The
 ;; stored knowledge answers the question COMPLETELY, so consulting is
 ;; strictly cheaper than researching. The run-7 failure signature this
 ;; catches: re-deriving a stored answer (≥2 repo searches) even when
@@ -40,20 +43,24 @@
    :my.kb/source-path      "src/seon/agent.cljs"
    :my.kb/source-line      712
    :my.kb/confidence       :verified
-   :my.kb.codebase/question "What does seon.agent/message! return — the full transact report or something smaller?"}]
+   ;; PARAPHRASE of the asked turn question (§3.2 — never verbatim).
+   :my.kb.codebase/question "Does message! hand back the whole datahike transaction report, or just a compact result map?"}]
  :seon.gym.scenario/turns
  [{:seon.gym.turn/message "What does seon.agent/message! return — the full transact report or something smaller?"}]
  :seon.gym.scenario/predicates
- ;; Anchored on the keyword colon: a consult means the eval actually
- ;; touches a :my.* DOMAIN attr (e.g. :my.kb/confidence,
- ;; :my.kb.codebase/claim). The old unanchored "my\\." substring also
- ;; matched the agent's own my.agent.<id> home-ns symbol (in-ns noise),
- ;; so a first eval that merely mentioned its own namespace scored as
- ;; consulting.
+ ;; Anchored on the SEEDED DOMAIN namespace (gym-upgrade §3.2): a
+ ;; consult means the first eval actually touches a :my.kb.codebase/*
+ ;; attr — the namespace the bait findings live in. The previous
+ ;; ":my\\." anchor passed on ANY :my.* touch, including the
+ ;; schema-catalog recipe's own step-0 query and the agent's
+ ;; my.agent.<id> scratch attrs — it measured that the bait rendered
+ ;; and pattern-matched, not that consulting replaced research.
+ ;; (Falsified in driver_test: an unrelated-:my.* first eval scores
+ ;; this RED; a :my.kb.codebase/* first eval scores it green.)
  [{:seon.gym.predicate/id      :first-eval-consults-stored-findings
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/axis    :consults-findings
-   :seon.gym.predicate/pattern ":my\\."}
+   :seon.gym.predicate/pattern ":my\\.kb\\.codebase/"}
   ;; #26 salience axis, split honest (gym-upgrade U1): "the seeded
   ;; claim TEXT rendered in the prompt the agent acted on" (context
   ;; worked) scores SEPARATELY from "the first eval consulted it"

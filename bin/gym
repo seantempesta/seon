@@ -37,7 +37,23 @@ SEON_GYM_PAID="$PAID" bin/test-cljs "${ARGS[@]+"${ARGS[@]}"}" | tee "$LOG"
 STATUS=${PIPESTATUS[0]}
 
 echo ""
-echo "== AGENT-GYM scorecards (scenario × git sha) =="
+echo "== AGENT-GYM paid gate (gym-upgrade §3.3 — value + resolved enabled-set) =="
+grep -a "SEON-GYM PAID-GATE" "$LOG" \
+  || echo "WARNING: no PAID-GATE line in the log — gate observability regressed (seon.gym.paid-test)"
+
+echo ""
+echo "== AGENT-GYM scorecards (scenario × git sha × run-id) =="
 grep -a "SEON-GYM SCORECARD" "$LOG" || echo "(none emitted)"
+
+# §3.1: the same card printed twice (double-done class) shows up as a
+# duplicated run-id — every run-scenario! mints a fresh uuid.
+DUP_RUN_IDS=$(grep -a "SEON-GYM SCORECARD" "$LOG" \
+  | grep -oE ':seon\.gym\.scorecard/run-id #uuid "[^"]+"' \
+  | sort | uniq -d)
+if [ -n "$DUP_RUN_IDS" ]; then
+  echo ""
+  echo "WARNING: duplicate scorecard run-ids — a card printed twice (async double-done class):"
+  echo "$DUP_RUN_IDS"
+fi
 
 exit "$STATUS"

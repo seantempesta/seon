@@ -264,6 +264,13 @@
    [:seon.gym.result/actual  :seon.gym.result/actual]])
 (schema/register! :seon.gym.scorecard/scenario :keyword)
 (schema/register! :seon.gym.scorecard/git-sha  :string)
+;; One fresh uuid per run-scenario! invocation (gym-upgrade §3.1): a
+;; scenario that runs twice under one (scenario × sha) key — the S-12
+;; async double-done class — shows up as TWO cards with DISTINCT
+;; run-ids, while the SAME card printed twice shows duplicate run-ids
+;; (bin/gym flags those). Either way the double-fire is VISIBLE, never
+;; a silent overwrite.
+(schema/register! :seon.gym.scorecard/run-id   :uuid)
 (schema/register! :seon.gym.scorecard/tier     :seon.gym.scenario/tier)
 (schema/register! :seon.gym.scorecard/at       :inst)
 (schema/register! :seon.gym.scorecard/agent-id :seon.db/id)
@@ -298,6 +305,7 @@
   [:map
    [:seon.gym.scorecard/scenario :seon.gym.scorecard/scenario]
    [:seon.gym.scorecard/git-sha  :seon.gym.scorecard/git-sha]
+   [:seon.gym.scorecard/run-id   :seon.gym.scorecard/run-id]
    [:seon.gym.scorecard/tier     :seon.gym.scorecard/tier]
    [:seon.gym.scorecard/at       :seon.gym.scorecard/at]
    [:seon.gym.scorecard/agent-id :seon.gym.scorecard/agent-id]
@@ -344,11 +352,55 @@
 ;; Scenario loading
 ;; ===========================================================================
 
+(defn- fixture-strings
+  "Every string value reachable inside one fixture form (maps, vectors,
+   nested) — the self-bait scan surface."
+  [fixture]
+  (let [!acc (atom [])]
+    (walk/postwalk (fn [x] (when (string? x) (swap! !acc conj x)) x)
+                   fixture)
+    @!acc))
+
+(defn- check-self-bait!
+  "Gym-upgrade §3.4: a scenario's turn MESSAGE text must never appear
+   verbatim inside its own fixture values or fixture sources. When it
+   does, any predicate keyed on question TEXT can pass by string
+   coincidence (the s32 class: the seeded :my.kb.codebase/question WAS
+   the asked question, so the consult predicate measured the rendered
+   bait, not the behavior). Loud load failure naming the offending
+   fixture — paraphrase the fixture; predicates about consultation
+   anchor on attrs/structure, never on the question string."
+  [path {:seon.gym.scenario/keys [id fixtures fixture-sources turns]}]
+  (doseq [msg (keep :seon.gym.turn/message turns)]
+    (doseq [[i fx] (map-indexed vector fixtures)
+            s      (fixture-strings fx)
+            :when  (str/includes? s msg)]
+      (throw (ex-info (str "gym: SELF-BAIT — scenario " id " in " path
+                           ": fixture #" i " contains a turn message "
+                           "verbatim (" (pr-str msg) "). Paraphrase the "
+                           "fixture; anchor consultation predicates on "
+                           "attrs/structure, never the question string.")
+                      {:seon.gym/path              path
+                       :seon.gym.scenario/id       id
+                       :seon.gym.run/fixture-index i
+                       :seon.gym.run/fixture-value s
+                       :seon.gym.turn/message      msg})))
+    (doseq [[i src] (map-indexed vector fixture-sources)
+            :when   (str/includes? src msg)]
+      (throw (ex-info (str "gym: SELF-BAIT — scenario " id " in " path
+                           ": fixture-source #" i " contains a turn "
+                           "message verbatim (" (pr-str msg) ").")
+                      {:seon.gym/path                     path
+                       :seon.gym.scenario/id              id
+                       :seon.gym.run/fixture-source-index i
+                       :seon.gym.turn/message             msg})))))
+
 (defn load-scenarios!
   "Read one scenario EDN file (a single scenario map OR a vector of
    them) and validate every scenario against `:seon.gym/scenario`.
    Invalid EDN fails LOUD with the Malli explain — a scenario that
-   doesn't parse must never silently score."
+   doesn't parse must never silently score. Also enforces the §3.4
+   self-bait rule ([[check-self-bait!]]) at load time."
   {:malli/schema [:=> [:cat :seon.gym/load-request] :seon.gym/load-response]}
   [{path :seon.gym/path}]
   (let [fs        (js/require "node:fs")
@@ -358,7 +410,8 @@
       (when-not (m/validate :seon.gym/scenario s)
         (throw (ex-info (str "gym: invalid scenario EDN — " path)
                         {:seon.gym/path    path
-                         :seon.gym/explain (pr-str (m/explain :seon.gym/scenario s))}))))
+                         :seon.gym/explain (pr-str (m/explain :seon.gym/scenario s))})))
+      (check-self-bait! path s))
     {:seon.gym/scenarios scenarios}))
 
 ;; ===========================================================================
@@ -396,7 +449,7 @@
    the whole scratch store (single-agent scenarios)."
   [dbv agent-id]
   (->> (if agent-id
-         (db/query {:seon.db/query '[:find ?at ?src
+         (db/query {:seon.db/query '[:find ?at ?src ?ev
                                      :in $ ?aid
                                      :where
                                      [?ag :seon.agent/id ?aid]
@@ -407,13 +460,17 @@
                                      [?ev :seon.eval/source ?src]]
                     :seon.db/args [agent-id]
                     :seon.db/db   dbv})
-         (db/query {:seon.db/query '[:find ?at ?src
+         (db/query {:seon.db/query '[:find ?at ?src ?ev
                                      :where
-                                     [?e :seon.eval/at ?at]
-                                     [?e :seon.eval/source ?src]]
+                                     [?ev :seon.eval/at ?at]
+                                     [?ev :seon.eval/source ?src]]
                     :seon.db/db dbv}))
-       (sort-by #(.getTime ^js (first %)))
-       vec))
+       ;; :seon.eval/at is ms precision — same-ms ties break on the eid
+       ;; (monotonic allocation order on the scratch conn). Datahike's
+       ;; tx-id is the canonical sub-ms order; eid is the cheap proxy
+       ;; available in this row shape.
+       (sort-by (fn [[at _ eid]] [(.getTime ^js at) eid]))
+       (mapv (fn [[at src _]] [at src]))))
 
 (defn- first-eval-source
   "Source text of the chronologically FIRST eval (by :seon.eval/at) —
@@ -429,7 +486,7 @@
    one) — prompt-predicate callers MUST treat that as RED."
   [dbv agent-id]
   (->> (if agent-id
-         (db/query {:seon.db/query '[:find ?at ?tid
+         (db/query {:seon.db/query '[:find ?at ?tid ?t
                                      :in $ ?aid
                                      :where
                                      [?ag :seon.agent/id ?aid]
@@ -439,13 +496,16 @@
                                      [?t :seon.agent.turn/at ?at]]
                     :seon.db/args [agent-id]
                     :seon.db/db   dbv})
-         (db/query {:seon.db/query '[:find ?at ?tid
+         (db/query {:seon.db/query '[:find ?at ?tid ?t
                                      :where
                                      [?t :seon.agent.turn/id ?tid]
                                      [?t :seon.agent.turn/at ?at]]
                     :seon.db/db dbv}))
-       (sort-by #(.getTime ^js (first %)))
-       (mapv (fn [[_ tid]]
+       ;; :seon.agent.turn/at is ms precision — same-ms ties break on
+       ;; the turn eid (monotonic allocation order; datahike's tx-id is
+       ;; the canonical sub-ms order, eid is the cheap proxy here).
+       (sort-by (fn [[at _ eid]] [(.getTime ^js at) eid]))
+       (mapv (fn [[_ tid _]]
                [tid (:seon.agent.turn/prompt-file
                      (db/entity {:seon.db/ref [:seon.agent.turn/id tid]
                                  :seon.db/db  dbv}))]))))
@@ -1132,6 +1192,9 @@
                   card (cond->
                          {:seon.gym.scorecard/scenario id
                           :seon.gym.scorecard/git-sha  (git-sha)
+                          ;; §3.1: fresh per run — a double-run under one
+                          ;; (scenario × sha) key is two DISTINCT cards.
+                          :seon.gym.scorecard/run-id   (random-uuid)
                           :seon.gym.scorecard/tier     tier
                           :seon.gym.scorecard/at       (js/Date.)
                           :seon.gym.scorecard/agent-id primary
