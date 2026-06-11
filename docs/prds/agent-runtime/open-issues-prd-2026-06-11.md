@@ -118,6 +118,7 @@ T6/SOUL/boot-fix/gym baseline).
 | s32 baseline: re-grep economy (2 greps, cap 1) — consults stored finding then greps anyway | gym baseline | v4 teaching surfaces; re-measure at the post-refactor sweep |
 | T6 overlay verified via curl markup only — backtick/Esc/focus-guard not exercised in a real browser | T3+T6 report | one manual check (or browser-automation pass) before demo |
 | outside-builder blockers: konserve local fork (4 deps.edn sites), `bin/run:11` hardcoded JAVA_HOME, README lacks build instructions, `.mcp.json` absolute paths, datahike gitlink pinned to unreachable sha | release-readiness research (d1b8e90) — push plan §7 PARKED for user go | release unit when user green-lights the push |
+| pull-guard bypasses: `handlers/fn.cljs:60` + `handlers/message.cljs:41` call `d/pull` directly (raw-throw on uninstalled attrs; the message one masks typos in a bare try); the `query`/`d/datoms` boundary has the same lazy-install trap (render's :aevt scan gates manually) | 65dfc90 unit report | route handlers through `seon.db/pull` + a sibling guard for `query` — fold into the render sweep / composer rewrite |
 
 ## What P8 proved (so the plan stays honest)
 
