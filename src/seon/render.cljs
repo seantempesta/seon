@@ -31,8 +31,10 @@
   (:require
     [datahike.api :as d]
     [seon.db :as db]
+    [seon.error :as err]
     [seon.eval :as eval]
     [seon.render.default :as default]
+    [seon.render.live-tile :as live-tile]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -61,37 +63,14 @@
                                     [:* [:ref ::elem]]]}}
    ::elem])
 
-(declare valid-hiccup?)
-
-(defn- valid-hiccup-elem?
-  "True if `x` is a valid hiccup ELEMENT — string, int, nil, or a
-   nested vector that starts with a keyword. Mirrors the recursive
-   `::elem` shape in the :seon.render/hiccup schema."
-  [x]
-  (or (string? x)
-      (int? x)
-      (nil? x)
-      (valid-hiccup? x)))
-
-(defn valid-hiccup?
-  "True if `x` is a valid hiccup VECTOR: starts with a keyword tag,
-   optional second-position attrs map, zero or more children where
-   each child is a valid hiccup element. Non-recursive Malli idiom —
-   handles arbitrary-depth nesting without :malli.core/potentially-
-   recursive-seqex.
-
-   Used as the [:fn valid-hiccup?] validator on
-   `:seon.render/html-response` since Malli's recursive seqex
-   schemas don't compose with instrumentation."
-  [x]
-  (and (vector? x)
-       (keyword? (first x))
-       (let [rest-x (rest x)
-             [_maybe-attrs children]
-             (if (map? (first rest-x))
-               [(first rest-x) (rest rest-x)]
-               [nil rest-x])]
-         (every? valid-hiccup-elem? children))))
+(def valid-hiccup?
+  "Forwarding def for `seon.render.live-tile/valid-hiccup?` — the
+   predicate moved there (live-tiles U1) because the canonical
+   value-or-fn slot shape (`:seon.render.live-tile/content`) is
+   registered in that ns, which loads before this one. Kept here so
+   existing compile-time callers (`seon.ctx`, tests) keep working;
+   repoint them in the follow-up sweep, then delete this def."
+  live-tile/valid-hiccup?)
 
 ;; The render SLOTS (self-context spec, 2026-06-10 — relaxed from
 ;; symbol-only):
@@ -107,19 +86,56 @@
 ;; (`:db.type/string`); `seon.db/decode-edn-value` is the read-side
 ;; inverse used by every consumer here.
 (schema/register! :seon.render/ai   [:or :string :symbol])
-(schema/register! :seon.render/html [:or :symbol [:fn valid-hiccup?]])
+
+;; `:seon.render/html` REFERENCES the canonical value-or-fn shape
+;; `:seon.render.live-tile/content` (live-tiles U1) — same shape,
+;; registered once. The definition lives in seon.render.live-tile
+;; because that ns loads first (this ns requires it) and register!'s
+;; compilability guard rejects forward references.
+(schema/register! :seon.render/html :seon.render.live-tile/content)
 
 ;; Renderer return shapes — map-in / map-out per seon house rule.
+;;
+;; CONVERGENCE IN PROGRESS (live-tiles U1, PRD §8.2): the text twin of
+;; a render is converging on `:seon.render/ai` (the more-used name —
+;; section twins and the tile twin already use it). `:seon.render/text`
+;; is the legacy key still produced by the `seon.handlers.*` renderers,
+;; `seon.render.default/pretty-ai`, and the ctx section pipeline —
+;; accepted here until the follow-up sweep renames those producers.
+;; Readers in THIS ns prefer `:seon.render/ai`, fall back to
+;; `:seon.render/text`.
 (schema/register! :seon.render/ai-response
-  [:map [:seon.render/text :string]])
+  [:and
+   [:map
+    [:seon.render/ai   {:optional true} :string]
+    [:seon.render/text {:optional true} :string]]
+   [:fn {:error/message "ai-response carries :seon.render/ai (preferred) or legacy :seon.render/text"}
+    (fn [m] (or (contains? m :seon.render/ai)
+                (contains? m :seon.render/text)))]])
+
+;; The error envelope a failed render carries (live-tiles U1) — the
+;; standard `:seon.error/*` shape, registered in seon.db.
+(schema/register! :seon.render/error :seon.db/error)
 
 ;; `[:fn valid-hiccup?]` bypasses Malli's recursive-seqex limitation by
 ;; using a Clojure predicate — composes with fn-schema instrumentation.
 ;; `:nil` accepts render fns that explicitly return
 ;; `{:seon.render/hiccup nil}` to mean "render nothing"
 ;; (entity-html-sym callers already handle nil via `or`).
+;;
+;; `:seon.render/ai` — the OPTIONAL text twin (live-tiles U1, PRD §2):
+;; how the agent knows what its human sees. Tile fns return it
+;; alongside the hiccup; the awareness section renders it into the
+;; agent's context every turn. Same twin idea as `:seon.ctx/section`.
+;;
+;; `:seon.render/error` — present when the renderer THREW: the hiccup
+;; is the human fallback card and this entry carries the envelope so
+;; the agent sees its own renderer is broken (vanish = banned).
 (schema/register! :seon.render/html-response
-  [:map [:seon.render/hiccup [:or :nil [:fn valid-hiccup?]]]])
+  [:map
+   [:seon.render/hiccup [:or :nil [:fn valid-hiccup?]]]
+   [:seon.render/ai    {:optional true} :string]
+   [:seon.render/error {:optional true} :seon.render/error]])
 
 ;; System renderer input — for `seon.render.default/*` and other
 ;; non-agent-namespaced fns. Doesn't know which agent ahead of time;
@@ -453,19 +469,14 @@
         (catch :default _ nil)))))
 
 ;; ============================================================
-;; Agent tile (unit 1.4) — the agent's ONE always-visible HTML
-;; surface. Resolution order: per-entity `:seon.render/html` override
-;; on the agent entity → `:seon.agent` kind default (the schema-map
-;; property, seeded as a `:seon.schema` entity at boot) → the
-;; hardcoded `default-agent-tile-sym` floor so the tile renders even
-;; on conns booted BEFORE the `:seon.agent` kind schema existed.
+;; Agent tile (live-tiles U1) — the agent's ONE always-visible HTML
+;; surface. Resolution (seon.render.live-tile/wired-content):
+;; per-entity `:seon.render.live-tile/content` → legacy per-entity
+;; `:seon.render/html` (follow-up retires it, PRD §8.1) → the
+;; substrate welcome. The `:seon.agent` KIND default is no longer
+;; consulted for the TILE — that key now means only the generic
+;; entity-card render (one key, one meaning).
 ;; ============================================================
-
-(def default-agent-tile-sym
-  "Fallback tile renderer symbol — `seon.render.default/view`. Used
-   when neither a per-entity override nor the `:seon.agent` kind
-   schema entity yields a symbol."
-  'seon.render.default/view)
 
 (schema/register! :seon.render/tile-request
   [:map
@@ -473,14 +484,17 @@
    [:seon.db/db    {:optional true} :seon.db/db]])
 
 (defn render-agent-tile
-  "Render the agent's OWN tile — the one HTML surface the agent
-   dynamically rewrites (by transacting `:seon.render/html '<fn-sym>`
-   onto its own agent entity; the override wins over the kind
-   default `seon.render.default/view`).
+  "Render the agent's live tile — the one HTML surface the agent
+   dynamically rewrites (by transacting a qualified fn symbol or
+   literal hiccup onto `:seon.render.live-tile/content` on its own
+   agent entity; see seon.render.live-tile's ns docstring for the
+   full contract).
 
-   Returns `{:seon.render/hiccup <vec-or-nil>}` — nil hiccup when the
-   agent entity doesn't exist or the renderer throws (the tile must
-   never crash its caller)."
+   Returns `:seon.render/html-response`. A renderer that THROWS does
+   NOT vanish: the response is `seon.render.live-tile/error-response`
+   — fallback card for the human, `:seon.render/error` envelope +
+   `:seon.render/ai` twin for the agent. nil hiccup only when the
+   agent entity doesn't exist (the tile never crashes its caller)."
   {:malli/schema [:=> [:cat :seon.render/tile-request] :seon.render/html-response]}
   [{:seon.agent/keys [id] :seon.db/keys [db]}]
   (let [db  (or db @db/*conn*)
@@ -488,13 +502,17 @@
                  (catch :default _ nil))]
     (if (nil? (:seon.agent/id ent))
       {:seon.render/hiccup nil}
-      (let [slot  (or (entity-html-sym db ent) default-agent-tile-sym)
+      (let [{:seon.render.live-tile/keys [value]}
+            (live-tile/wired-content {:seon.render/entity ent})
             input {:seon.db/db         db
                    :seon.agent/id      id
                    :seon.render/entity ent}]
         (try
-          (html-render slot input)
-          (catch :default _ {:seon.render/hiccup nil}))))))
+          (html-render value input)
+          (catch :default e
+            (live-tile/error-response
+              {:seon.db/error                 (err/->map e)
+               :seon.render.live-tile/content value})))))))
 
 (defn render-entity-ai
   "Render `entity` to text via its resolved `:seon.render/ai` symbol.
@@ -506,7 +524,10 @@
   (let [db (or db @db/*conn*)]
     (when-let [sym (entity-ai-sym db entity)]
       (try
-        (:seon.render/text (ai-render sym input))
+        ;; Twin-key convergence (PRD §8.2): prefer :seon.render/ai,
+        ;; accept legacy :seon.render/text until the producer sweep.
+        (let [out (ai-render sym input)]
+          (or (:seon.render/ai out) (:seon.render/text out)))
         (catch :default _ nil)))))
 
 (schema/register! :seon.render/visible-request

@@ -1,0 +1,328 @@
+(ns seon.render.live-tile
+  "The live tile — the ONE thing an agent is currently conveying to
+   its human (a chart, a status, a list — whatever the human asked
+   for). One wired value renders at every zoom surface: the root grid
+   (compact), the agent view (expanded), and — as a text twin — the
+   agent's own context every turn, so the agent always knows what its
+   human currently sees.
+
+   ## Wiring the tile
+
+   ONE attr on your agent entity: `:seon.render.live-tile/content`.
+   Its value follows the `:seon.render/html` semantics exactly:
+
+   - a LITERAL HICCUP vector for static content — `[:h1 \"hi\"]`
+   - a QUALIFIED FN SYMBOL for dynamic content, late-resolved at
+     every render via `seon.eval/lookup-value` (substrate fns and
+     fns you define yourself both resolve — same single path).
+
+   Wire it with a raw transact (no sugar — one pattern):
+
+       (seon.db/transact!
+         {:seon.db/tx-data
+          [{:seon.agent/id (seon.db/current-agent-id)
+            :seon.render.live-tile/content 'my.workouts/chart-tile}]})
+
+   ## The twin contract
+
+   A tile FN returns the standard `:seon.render/html-response` map,
+   carrying the html twin AND a text twin:
+
+       {:seon.render/hiccup [...]   ;; what the human sees
+        :seon.render/ai \"3 workouts this week: Mon 4200kg, …\"}
+
+   The `:seon.render/ai` string is how YOU know what your human sees —
+   say what the content MEANS. Your human sees the picture; you see
+   your words. A fn that omits the twin gets its hiccup shown to it
+   verbatim instead.
+
+   ## Compact vs expanded — tag blocks, never write media queries
+
+   Small-vs-large is substrate CSS container queries over ONE render.
+   Emit both blocks in one document and tag them:
+
+       [:div.seon-tile
+        [:div.seon-tile-compact  [:span \"3 workouts this week\"]]
+        [:div.seon-tile-expanded [:svg …full chart…] [:table …]]]
+
+   The substrate shows `.seon-tile-compact` below the breakpoint and
+   `.seon-tile-expanded` at or above it (container rules live in
+   `resources/public/css/input.css`). Untagged content renders at
+   every size.
+
+   ## Tile updates should be RENDERED DATABASE QUERIES
+
+   Transact important findings as linked entities; render by
+   reference. A tile fn that QUERIES the store re-derives on a fresh
+   pod (session resume works for free) — a hardcoded hiccup snapshot
+   of a computed value goes stale and dies with the session. This is
+   the reactive-context principle applied to the human surface.
+
+   ## Who calls what
+
+   `seon.render/render-agent-tile` is the one entry point: it calls
+   [[wired-content]] to resolve WHICH value is wired (new key →
+   legacy per-entity `:seon.render/html` → [[welcome]]), invokes it
+   through `seon.render/html-render` (the ONE value-or-fn dispatch),
+   and on a throw builds the legible [[error-response]] — a broken
+   tile must never silently vanish (vanish = indistinguishable from
+   unwired; banned)."
+  (:require
+    [seon.db :as db]
+    [seon.schema :as schema]))
+
+;; ============================================================
+;; The hiccup predicate + the canonical value-or-fn shape.
+;;
+;; This ns loads BEFORE seon.render (which requires it), and
+;; register!'s compilability guard rejects forward references — so
+;; the ONE definition of the value-or-fn slot shape lives here, and
+;; `:seon.render/html` is registered in seon.render BY REFERENCE to
+;; `::content` (shared-shape rule: one shape, registered once, every
+;; other key references it).
+;; ============================================================
+
+(declare valid-hiccup?)
+
+(defn valid-hiccup-elem?
+  "True if `x` is a valid hiccup ELEMENT — string, int, nil, or a
+   nested vector that starts with a keyword."
+  {:malli/schema [:=> [:catn [::elem :any]] :boolean]}
+  [x]
+  (or (string? x)
+      (int? x)
+      (nil? x)
+      (valid-hiccup? x)))
+
+(defn valid-hiccup?
+  "True if `x` is a valid hiccup VECTOR: starts with a keyword tag,
+   optional second-position attrs map, zero or more children where
+   each child is a valid hiccup element. Non-recursive Malli idiom —
+   handles arbitrary-depth nesting without
+   :malli.core/potentially-recursive-seqex.
+
+   Used as the `[:fn valid-hiccup?]` validator on `::content` and
+   `:seon.render/html-response`, since Malli's recursive seqex
+   schemas don't compose with instrumentation. (`:any` input — this
+   IS the validator for arbitrary values.)"
+  {:malli/schema [:=> [:catn [::x :any]] :boolean]}
+  [x]
+  (and (vector? x)
+       (keyword? (first x))
+       (let [rest-x (rest x)
+             [_maybe-attrs children]
+             (if (map? (first rest-x))
+               [(first rest-x) (rest rest-x)]
+               [nil rest-x])]
+         (every? valid-hiccup-elem? children))))
+
+;; THE live-tile key — qualified fn symbol OR literal hiccup, stored
+;; as a pr-str'd EDN string by the mixed-:or bridge, decoded on read
+;; via `seon.db/decode-edn-value`. `:seon.render/html` references
+;; this shape (deliberate uniformity — agents already know that
+;; vocabulary).
+(schema/register! ::content [:or :symbol [:fn valid-hiccup?]])
+
+;; Where the wired value came from — the tile's provenance. Rendered
+;; into the agent's awareness section header so the agent always sees
+;; HOW to change the display.
+(schema/register! ::source [:enum ::content :seon.render/html ::welcome])
+
+(schema/register! ::wired-request
+  [:map [:seon.render/entity :map]])
+
+(schema/register! ::wired-response
+  [:map
+   [::source ::source]
+   [::value  ::content]])
+
+(schema/register! ::error-request
+  [:map
+   [:seon.db/error :seon.db/error]
+   [::content {:optional true} ::content]])
+
+(schema/register! ::hour [:int {:min 0 :max 23}])
+
+(schema/register! ::user-name :string)
+
+;; `:seon.db/db` (the datahike db snapshot — a runtime handle,
+;; registered `:any` in seon.render today; reported drift — wants to
+;; live in seon.db) loads AFTER this ns, so the request shape specs
+;; the handle inline as `:any` (the sanctioned third-party-boundary
+;; exception).
+(schema/register! ::user-name-request
+  [:map [:seon.db/db {:optional true} :any]])
+
+(schema/register! ::user-name-response
+  [:map [::user-name {:optional true} ::user-name]])
+
+;; ============================================================
+;; Resolution — which value is wired.
+;; ============================================================
+
+(def welcome-sym
+  "The substrate default tile — [[welcome]], late-resolved like any
+   other wired symbol (the default eats the same dogfood)."
+  'seon.render.live-tile/welcome)
+
+(defn wired-content
+  "Resolve WHICH value is the agent's live tile, with provenance.
+
+   Resolution order on the pulled agent `:seon.render/entity`:
+
+   1. `:seon.render.live-tile/content` — THE tile key.
+   2. per-entity `:seon.render/html` — legacy double-duty slot,
+      honored until the follow-up migration retires it (PRD
+      live-tiles-prd-2026-06-11 §8.1); the `:seon.agent` KIND default
+      is deliberately NOT consulted — that key now means only the
+      generic entity-card render.
+   3. [[welcome-sym]] — the substrate welcome.
+
+   Values arrive pr-str-encoded from the mixed-:or bridge; both attr
+   reads decode via `seon.db/decode-edn-value`."
+  {:malli/schema [:=> [:cat ::wired-request] ::wired-response]}
+  [{:seon.render/keys [entity]}]
+  (let [content (some->> (::content entity)
+                         (db/decode-edn-value ::content))
+        legacy  (some->> (:seon.render/html entity)
+                         (db/decode-edn-value :seon.render/html))]
+    (cond
+      (some? content) {::source ::content           ::value content}
+      (some? legacy)  {::source :seon.render/html   ::value legacy}
+      :else           {::source ::welcome           ::value welcome-sym})))
+
+;; ============================================================
+;; The welcome — the default tile every uncustomized agent shows.
+;; ============================================================
+
+(defn greeting
+  "Time-of-day greeting for `hour` (0-23): morning 5-11,
+   afternoon 12-16, evening 17-21, night otherwise."
+  {:malli/schema [:=> [:catn [::hour ::hour]] :string]}
+  [hour]
+  (cond
+    (<= 5 hour 11)  "Good morning"
+    (<= 12 hour 16) "Good afternoon"
+    (<= 17 hour 21) "Good evening"
+    :else           "Good night"))
+
+(defn installed-schema
+  "The datahike schema map of `db`, FilteredDB-safe and nil-safe.
+   FilteredDB (the inspector's per-agent view) doesn't implement
+   ILookup — `(:schema db)` THROWS; read through to the wrapped db.
+   Mirrors `seon.render/db-schema` / `seon.agent/db-schema` /
+   `seon.warn/domain-attrs` — fourth copy; the guard wants a home in
+   `seon.db` (reported drift, live-tiles U1). `:any` input — the db
+   value is a datahike runtime handle (third-party boundary)."
+  {:malli/schema [:=> [:catn [:seon.db/db :any]] :map]}
+  [db]
+  (or (try (:schema db)
+           (catch :default _
+             (:schema (.-unfiltered-db ^js db))))
+      {}))
+
+(defn user-name
+  "The human's name, when the store carries one (`:seon.user/name` on
+   the user entity). Returns `{::user-name \"Sean\"}` or `{}` —
+   gracefully generic when the attr was never installed (querying an
+   attr datahike has never seen THROWS, so the installed-schema gate
+   is load-bearing, not defensive fluff)."
+  {:malli/schema [:=> [:cat ::user-name-request] ::user-name-response]}
+  [{:seon.db/keys [db]}]
+  (let [db (or db (some-> db/*conn* deref))]
+    (if (and db (contains? (installed-schema db) :seon.user/name))
+      (if-some [n (ffirst (db/query
+                            {:seon.db/db    db
+                             :seon.db/query '[:find ?n
+                                              :where [_ :seon.user/name ?n]]}))]
+        {::user-name n}
+        {})
+      {})))
+
+(def panel-line
+  "The double-duty line: tells the HUMAN what the panel is, and —
+   because the agent reads this fn's twin and source every turn —
+   reinforces to the AGENT that writing hiccup-returning fns is
+   normal and easy."
+  "I'll update this panel as I work — charts, statuses, whatever you ask for.")
+
+(defn welcome
+  "The substrate default tile — elegant, simple, TIME-AWARE. Renders
+   a greeting (by name when the store knows one), today's date and
+   time, the agent's purpose line, and [[panel-line]].
+
+   This fn is itself the worked example of the tile contract: ONE
+   render emitting tagged compact + expanded blocks, plus the
+   `:seon.render/ai` twin saying what the human sees. Note it
+   DERIVES everything from the db value and the wall clock at render
+   time — nothing stored, nothing stale (write your tile fns the
+   same way: rendered database queries, not hiccup snapshots)."
+  {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
+  [{:seon.db/keys [db] :seon.render/keys [entity]}]
+  (let [now        (js/Date.)
+        greet      (greeting (.getHours now))
+        ;; Optional = absent, never nil-valued (house rule).
+        uname      (::user-name (user-name (if db {:seon.db/db db} {})))
+        greet-line (if uname
+                     (str greet ", " uname ".")
+                     (str greet "."))
+        date-str   (.toLocaleDateString now "en-US"
+                                        #js {:weekday "long"
+                                             :month   "long"
+                                             :day     "numeric"})
+        time-str   (.toLocaleTimeString now "en-US"
+                                        #js {:hour   "2-digit"
+                                             :minute "2-digit"})
+        purpose    (:seon.agent/purpose entity)
+        purpose-line (or purpose
+                         "I'm still finding my purpose — tell me what you need.")]
+    {:seon.render/hiccup
+     [:div {:class "seon-tile"}
+      [:div {:class "seon-tile-compact flex flex-col gap-1 p-3"}
+       [:div {:class "text-sm text-text-100"} greet-line]
+       [:div {:class "text-xs text-text-400"} purpose-line]]
+      [:div {:class "seon-tile-expanded flex flex-col gap-3 p-4"}
+       [:div {:class "text-lg text-text-50"} greet-line]
+       [:div {:class "text-xs font-mono text-signal"}
+        (str date-str " · " time-str)]
+       [:div {:class "text-sm text-text-200"} purpose-line]
+       [:div {:class "text-xs text-text-400 italic"} panel-line]]]
+     :seon.render/ai
+     (str "Welcome card (the substrate default — you haven't wired a tile "
+          "yet). Your human currently sees: \"" greet-line "\" with "
+          date-str " " time-str ", "
+          (if purpose
+            (str "your purpose (\"" purpose "\")")
+            "a note that you're still acquiring your purpose")
+          ", and: \"" panel-line "\" "
+          "To replace it, transact :seon.render.live-tile/content onto "
+          "your agent entity — a qualified fn symbol or literal hiccup.")}))
+
+;; ============================================================
+;; Errors are legible — a broken tile never silently vanishes.
+;; ============================================================
+
+(defn error-response
+  "Build the html-response for a tile fn that THREW: the human sees a
+   fallback card (NOT a blank — vanish is indistinguishable from
+   unwired, banned), the agent's twin carries the error so it sees
+   its own renderer is broken, and the full `:seon.error/*` envelope
+   rides on `:seon.render/error` for the awareness section."
+  {:malli/schema [:=> [:cat ::error-request] :seon.render/html-response]}
+  [{error :seon.db/error wired ::content}]
+  (let [msg       (:seon.error/message error)
+        wired-str (if (symbol? wired)
+                    (str wired)
+                    "literal hiccup on your entity")]
+    {:seon.render/hiccup
+     [:div {:class "seon-tile"}
+      [:div {:class "flex flex-col gap-1 p-3 border border-error/40 bg-error/10 rounded"}
+       [:div {:class "text-xs text-error font-mono font-bold"} "⚠ tile error"]
+       [:div {:class "text-xs text-text-300"}
+        "the agent has been shown the failure"]]]
+     :seon.render/ai
+     (str "YOUR LIVE TILE IS BROKEN — the wired renderer (" wired-str
+          ") threw: " msg ". Your human sees a fallback error card, not "
+          "your content. Fix the fn, or transact a working value onto "
+          ":seon.render.live-tile/content.")
+     :seon.render/error error}))

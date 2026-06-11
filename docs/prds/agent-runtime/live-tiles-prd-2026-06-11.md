@@ -95,12 +95,11 @@ context/entity cards right, chat bar) moves UNCHANGED to
 `/agent/<id>/debug`. "What the agent sees exactly" remains a
 first-class feature.
 
-**Debug overlay — DECIDED(user 2026-06-11) that it exists; DECIDE:
-trigger.** The debug view is ALSO reachable from the consumer view as
-an overlay WITHOUT changing URLs. Proposed trigger (pick at build
-time, both are cheap): a `⚙ debug` button in the agent-view header
-AND a keybinding (proposal: backtick `` ` `` — single key, never
-typed in a chat input that has focus guard; alternative `Cmd/Ctrl+.`).
+**Debug overlay — DECIDED(user 2026-06-11) that it exists;
+DECIDED(user 2026-06-11): trigger = the `⚙ debug` header button AND
+the backtick `` ` `` keybinding** (single key, never typed in a chat
+input that has focus guard). The debug view is ALSO reachable from
+the consumer view as an overlay WITHOUT changing URLs.
 The overlay is a full-viewport layer that loads `/agent/<id>/debug`
 content (an iframe is the zero-duplication floor; a fetched fragment
 is the polish). Esc or the button closes it.
@@ -122,16 +121,17 @@ agents already know this vocabulary):
   every render via `seon.eval/lookup-value` (works for substrate AND
   agent-defined fns — same single path as today).
 
-**Key naming — DECIDED shape, DECIDE name.** Keyword namespaces must
-be real code namespaces; the new `seon.render.live-tile` ns (§3) is
-the natural home. Proposed key: **`:seon.render.live-tile/content`**.
-(The user floated `:seon.render/live-tile-html`; that also satisfies
-the rule since `seon.render` is a real ns, but homing the key in the
-ns that owns the mechanism follows the schemas-live-with-their-owner
-convention.) Pick one at U1 build time and use it everywhere —
-including the migration of the agent entity's current tile use of
-`:seon.render/html`, which today double-serves as both the agent tile
-slot AND the generic per-entity-card render slot (drift finding, §8).
+**Key naming — DECIDED(user 2026-06-11): `:seon.render.live-tile/content`**,
+homed in the ns that owns the mechanism (schemas-live-with-their-owner).
+Used everywhere as of U1 — including the migration of the agent
+entity's current tile use of `:seon.render/html`, which today
+double-serves as both the agent tile slot AND the generic
+per-entity-card render slot (drift finding, §8). U1 implementation
+note: the canonical value-or-fn SHAPE is registered under this key in
+`seon.render.live-tile` (which loads first), and `:seon.render/html`
+references it — register!'s compilability guard rejects forward
+references, so the shape definition had to live in the
+earlier-loading ns.
 
 ### No render levels — container queries over ONE render
 
@@ -289,9 +289,14 @@ is, and — because the agent reads this fn's twin and source every
 turn — it reinforces to the AGENT that writing more hiccup-returning
 fns is normal and easy.
 
-DECIDE — welcome personalization: pull the human's name from the
-store when present (a `:seon.user/*` attr) — "Good evening, Sean."
-Cheap if the attr exists; skip silently when absent.
+DECIDED(user 2026-06-11) — welcome personalization: greet the human
+by name when a user attr exists in the store (`:seon.user/name` on
+the user entity) — "Good evening, Sean." — gracefully generic
+otherwise. U1 implements the read side (installed-schema-gated query
+in `seon.render.live-tile/user-name`); registering `:seon.user/name`
+itself belongs with the `:seon.user` entity schema in
+`seon.agent.message` (follow-up one-liner — until it lands, the
+generic branch is the live behavior).
 
 ### Wired by a REAL EVAL at agent creation — honest provenance
 
@@ -345,7 +350,8 @@ path on demo day).
 
 ### U1 — `seon.render.live-tile`: key, twin, welcome, container CSS
 
-The mechanism. New ns with: `register!` of the tile key (DECIDE name,
+**LANDED 2026-06-11 (this unit).** The mechanism. New ns with:
+`register!` of the tile key (DECIDED `:seon.render.live-tile/content`,
 §2) and the optional `:seon.render/ai` entry on
 `:seon.render/html-response`; `render-tile` resolution (delegating to
 `seon.render/html-render` — value-or-fn, one dispatch); the error

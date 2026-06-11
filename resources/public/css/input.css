@@ -265,3 +265,27 @@ details.tool-call-details[open] .tool-preview {
   --tw-prose-th-borders: #3d3a36;
   --tw-prose-td-borders: #302e2b;
 }
+
+/* ============================================================
+   Live tile container queries (seon.render.live-tile, U1).
+   ONE render emits both blocks; the CONTAINER's size — not the
+   viewport — selects which is visible. Agents tag blocks with
+   .seon-tile-compact / .seon-tile-expanded and never write
+   media/container queries themselves. Untagged content renders
+   at every size.
+
+   Breakpoint: 480px — substrate constant, tune ONCE against the
+   real mission-control grid cell (grid cells sit well below it;
+   the agent-view right pane sits well above it).
+   ============================================================ */
+.seon-tile {
+  container-type: inline-size;
+  width: 100%;
+  height: 100%;
+}
+.seon-tile-compact { display: block; }
+.seon-tile-expanded { display: none; }
+@container (min-width: 480px) {
+  .seon-tile-compact { display: none; }
+  .seon-tile-expanded { display: block; }
+}

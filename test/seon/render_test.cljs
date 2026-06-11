@@ -168,22 +168,23 @@
                               (binding [db/*conn* conn]
                                 (body conn))))))))))
 
-(deftest render-agent-tile-default-renders-view
+(deftest render-agent-tile-default-renders-welcome
+  ;; live-tiles U1: an UNWIRED agent's tile is the substrate welcome
+  ;; (seon.render.live-tile/welcome), no longer the :seon.agent kind
+  ;; default seon.render.default/view — the tile slot and the generic
+  ;; entity-card slot are separate roles now (PRD §8.1).
   (async done
     (-> (with-tile-conn "tiletest-00001"
           (fn [conn]
-            (let [{:seon.render/keys [hiccup]}
+            (let [{:seon.render/keys [hiccup ai]}
                   (render/render-agent-tile {:seon.db/db @conn
                                              :seon.agent/id "tiletest-00001"})]
               (is (vector? hiccup) "default tile renders hiccup")
-              (is (= :div (first hiccup)))
-              (is (= "agent-tiletest-00001" (:id (second hiccup)))
-                  "it is seon.render.default/view's tile div")
-              (testing "tile shows the DERIVED turn count (turn-count attr retired)"
-                (is (= "turn 0"
-                       (->> (flatten hiccup)
-                            (filter #(and (string? %) (re-find #"^turn " (str %))))
-                            first)))))))
+              (is (= "seon-tile" (:class (second hiccup)))
+                  "it is the welcome's .seon-tile container")
+              (is (string? ai) "the welcome carries its :seon.render/ai twin")
+              (is (re-find #"Good (morning|afternoon|evening|night)" ai)
+                  "twin carries the time-aware greeting"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
