@@ -308,7 +308,7 @@
 
    This PROVENANCE rule replaces the old keyword-namespace blanket
    `(db|seon)(\\..*)?` — which wrongly hid agent-authored `seon.*` data
-   domains (the live store's `:seon.workout/*`) from the whole reuse
+   domains (the live store's `:my.workout/*`) from the whole reuse
    surface (gym S-21 root cause, 2026-06-10). Provenance stays correct
    as the substrate grows with NO list to maintain: new substrate
    registrations arrive via the boot seed (seed origin → hidden), and
@@ -334,7 +334,7 @@
    intersected with [[agent-registered-attrs]] (provenance: the attr's
    `:seon.schema/key` row was asserted OUTSIDE the boot seed). These
    are the attrs agents registered for the human's data — INCLUDING
-   `seon.*` data domains like `:seon.workout/*` — the reuse surface
+   `seon.*` data domains like `:my.workout/*` — the reuse surface
    the schema-catalog renders and [[check-parallel-attr]] guards.
    Substrate attrs (`:seon.db/*`, `:seon.agent/*`, …) stay hidden
    because their rows land under `:seon.db/origin :substrate-seed`.

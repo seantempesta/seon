@@ -312,7 +312,7 @@
    keyword namespaces are DOMAINS with at least two segments — a
    single-segment namespace collides with code-namespace roots and
    fragments the reuse surface (`:workout/date` landed in a paid run
-   beside the established `:seon.workout/date`). The fix is a
+   beside the established `:my.workout/date`). The fix is a
    domain-prefixed namespace: `:kb.workout/date`,
    `:fitness.workout/date`, or reuse the existing attr.
 
