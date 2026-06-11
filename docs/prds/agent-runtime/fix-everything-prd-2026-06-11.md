@@ -593,6 +593,22 @@ within the addendum reflects urgency, not filing order:
 - **C-15 identity-seed filename.** `my.soul/soul-md-path` hardcodes
   "SOUL.md". Add env override (`SEON_SOUL_FILE`) + `AGENTS.md`
   fallback name. Cosmetic, small.
+- **C-18 downstream LLM-settings override (user, 2026-06-11 late).**
+  DeepSeek call settings are fork-to-change: model / endpoint /
+  temperature / max-tokens are private defs
+  (`ai/deepseek.cljs:86-89`); thinking is a REPL-only volatile atom
+  (`!thinking` + `set-thinking!`, disabled by default). A downstream
+  must be able to override WITHOUT forking — e.g. turn thinking on.
+  Fix shape: mirror the C-17 brand surface — `:seon.ai/config` row
+  (model, endpoint, temperature, max-tokens, thinking mode
+  false/true/reasoning-effort string, timeout), env-seeded
+  (`SEON_AI_MODEL`, `SEON_AI_THINKING`, …), read per call (hot
+  reload / live retune friendly — `agent-adapter` is already
+  re-resolved per call). Defaults unchanged when env+row absent
+  (byte-identical wire bodies). `set-thinking!` folds into the row
+  (no parallel mechanism — don't keep the atom AND the row). Sequenced
+  AFTER the paid measure: defaults don't change, but the unit touches
+  the live call path the measure exercises.
 - **C-16 absorb generic REPL discipline into substrate context.**
   Downstream identity files currently carry substrate-generic guidance
   every consumer would copy: hiccup shape rules for tile fns, "printed

@@ -207,7 +207,8 @@ elsewhere as noted.
 | 14 | **Agent fn replay fails on pod boot** — 19 `log-replay-failure!` WARNs (`indexOf` on undefined), 2/4 tile fns don't rehydrate after snapshot restore; repro cut PRE-B4 | [[fix-everything-prd-2026-06-11]] Wave C addendum C-14 — verification unit first (B4 may have killed it) |
 | 15 | **Identity-seed filename hardcoded** (`SOUL.md`) — downstream wants `SEON_SOUL_FILE` env + `AGENTS.md` fallback | Wave C addendum C-15 |
 | 16 | **Substrate-generic REPL discipline lives in downstream identity files** — hiccup tile rules, clipped-results discipline, never-write-expected-results, kb provenance | Wave C addendum C-16 (AFTER the paid measure — it changes measured context) |
-| 17 | **Branding not customizable** (BUG per user; demo-relevant Jun 12) — hardcoded "seon ·" titles/h1, `data-theme "phosphor"` | Wave C addendum C-17 — **agent in flight 2026-06-11 late** (brand rows + `SEON_BRAND_NAME`/`SEON_BRAND_CSS`) |
+| 17 | **Branding not customizable** (BUG per user; demo-relevant Jun 12) — hardcoded "seon ·" titles/h1, `data-theme "phosphor"` | **DONE — 24671ca** (brand rows + `SEON_BRAND_NAME`/`SEON_BRAND_CSS`; live-proved Acme↔seon roundtrip) |
+| 18 | **LLM settings fork-to-change** (user, relayed) — DeepSeek model/endpoint/temp/max-tokens are private defs, thinking is a REPL-only atom; downstream needs override (e.g. thinking ON) | Wave C addendum C-18 — `:seon.ai/config` row, env-seeded, C-17 pattern; after the paid measure |
 
 **Future PRD row (explicitly OUT of scope for the asks-1–3 unit):** a
 **release-bundle target** — a self-contained artifact (compiled pod +
