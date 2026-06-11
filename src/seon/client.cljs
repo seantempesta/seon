@@ -105,6 +105,12 @@
     ;; register! calls run before the boot install of :my.kb/* attrs.
     [my.kb]
     [my.kb.instruction]
+    ;; The store-resident system prompt (:my.soul rows — SOUL.md +
+    ;; REPL mechanics). Required so its register! calls run before the
+    ;; boot install of :my.soul/* attrs and so start-agent! can call
+    ;; my.soul/seed-tx-data (seed-only-if-absent — a user's runtime
+    ;; edit to the soul survives reboot).
+    [my.soul]
     ;; Substrate handler registration — `wake-on-message`. Required so
     ;; start-agent! can call `handler/register!` + `wake/bootstrap-schema!`
     ;; at boot. Without this, the inspector header shows "0 handlers"
@@ -433,6 +439,11 @@
    :my.kb.instruction/text
    :my.kb.instruction/priority
    :my.kb.instruction/applies-when
+   ;; The store-resident system prompt (my.soul — seeded at boot
+   ;; from SOUL.md + the REPL mechanics, seed-only-if-absent).
+   :my.soul/id
+   :my.soul/text
+   :my.soul/priority
 
    ;; --- Test (Phase 2 — test capture as data) ---
    :seon.test/sym
@@ -1519,7 +1530,9 @@
                 ;;      land first so subsequent entities reference
                 ;;      registered shapes.
                 ;;   2. user entity + my.kb.instruction guidance rows
-                ;;      (seed-substrate!).
+                ;;      (seed-substrate!), then the :my.soul
+                ;;      system-prompt rows (seed-only-if-absent — user
+                ;;      edits survive reboot).
                 ;;   3. substrate index — `:seon.ns` + `:seon.fn` rows
                 ;;      built by `index-substrate!` from REAL runtime
                 ;;      introspection (var meta + source file-read), DEDUPED
@@ -1555,6 +1568,17 @@
                           (check! :substrate-seed
                                   (await (db/transact!
                                            {:seon.db/tx-data (seed-substrate!)})))
+                          ;; Soul seed — SEED-ONLY-IF-ABSENT (unlike the
+                          ;; re-asserting seed-substrate! rows): the
+                          ;; :my.soul system-prompt rows seed from
+                          ;; SOUL.md + mechanics ONCE; a user's runtime
+                          ;; edit to a row is never clobbered by reboot.
+                          (let [soul-tx (my.soul/seed-tx-data
+                                          (await (d/db conn)))]
+                            (when (seq soul-tx)
+                              (check! :soul-seed
+                                      (await (db/transact!
+                                               {:seon.db/tx-data soul-tx})))))
                           (check! :substrate-index
                                   (await (db/transact!
                                            {:seon.db/tx-data index-tx})))))))
