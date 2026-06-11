@@ -336,6 +336,24 @@
    `:seon.eval/result-edn` blob is."
   1500)
 
+(def substrate-eval-render-cap
+  "Render cap for SUBSTRATE-AUTHORED eval rows (the creation-turn
+   tutorial evals — tile wiring, store-inventory, the my.kb.system
+   read — and any future substrate-scripted eval). These are OUR
+   output: well-controlled, written by compiled substrate code, never
+   by an LLM — so they render IN FULL (user directive 2026-06-11:
+   'our own context should be well controlled… don't be cheap'). The
+   1500-char agent cap defeated the inventory's own purpose: the
+   per-attr result clipped BEFORE the user-domain rows rendered, so
+   agents never saw e.g. :my.workout. 50,000 is a runaway BACKSTOP
+   against a pathological store, not a working limit — substrate eval
+   results are expected to fit whole far below it. (Stored
+   `:seon.eval/result-edn` is itself bounded upstream at
+   `seon.eval/store-edn-cap`, 16,384, so in practice this cap never
+   bites.) AGENT evals keep [[eval-render-cap]] + the loud ⚠ clip —
+   they can return literally anything."
+  50000)
+
 (defn cap-result
   "Truncate a rendered eval-result string to `eval-render-cap`,
    appending a LOUD truncation marker (shown of full chars) so a
@@ -423,38 +441,46 @@
    says so once). Errors render `;; ERROR …` with a plain `; # <id>`
    footer — there is no value to dereference.
 
-   The rendered result/error body is capped at `eval-render-cap` chars
-   so one huge eval result can't dominate the agent's context
-   (context-SAFETY invariant). Error rendering branches: a Malli
-   instrumentation envelope renders via `render-malli-error`;
-   otherwise the pre-rendered legible `:seon.eval/error` string."
+   The rendered result/error body of an AGENT eval is capped at
+   `eval-render-cap` chars so one huge eval result can't dominate the
+   agent's context (context-SAFETY invariant — agent code can return
+   literally anything). A SUBSTRATE-AUTHORED row
+   (`:seon.ctx/substrate-authored?` true, tagged by [[session-evals]]
+   from its promptless owning turn) renders at
+   [[substrate-eval-render-cap]] instead — our own scripted output is
+   well-controlled and must arrive whole (the inventory-clip defect).
+   Error rendering branches: a Malli instrumentation envelope renders
+   via `render-malli-error`; otherwise the pre-rendered legible
+   `:seon.eval/error` string."
   ([row] (format-eval-row row false))
-  ([{src      :seon.eval/source
-     ok?      :seon.eval/ok?
-     res      :seon.eval/result-edn
-     out      :seon.eval/output
-     err      :seon.eval/error
-     err-data :seon.eval/error-data
-     eid      :seon.eval/id
-     dur      :seon.eval/duration-ms
-     narr     :seon.eval/narration
-     eval-ns  :seon.eval/ns}
+  ([{src        :seon.eval/source
+     ok?        :seon.eval/ok?
+     res        :seon.eval/result-edn
+     out        :seon.eval/output
+     err        :seon.eval/error
+     err-data   :seon.eval/error-data
+     eid        :seon.eval/id
+     dur        :seon.eval/duration-ms
+     narr       :seon.eval/narration
+     eval-ns    :seon.eval/ns
+     substrate? :seon.ctx/substrate-authored?}
     prior?]
    (let [envelope (read-error-envelope err-data)
+         limit    (if substrate? substrate-eval-render-cap eval-render-cap)
          body (cond
                 ok?
-                (cap-result-body (or res "nil") eval-render-cap eid)
+                (cap-result-body (or res "nil") limit eid)
 
                 (einstrument/instrument-error? envelope)
                 (cap-result-body (einstrument/render-malli-error envelope)
-                                 eval-render-cap eid)
+                                 limit eid)
 
                 (and (string? err) (not (str/blank? err)))
                 ;; `:seon.eval/error` is stored pre-rendered + legible
                 ;; (`seon.eval/render-error-string`) — prefix + plain-clip.
                 ;; NOT `cap-result-body`, whose "narrow your query" guide
                 ;; is for oversized RESULTS, nonsensical on an error.
-                (cap-result (str ";; ERROR " err))
+                (cap-result (str ";; ERROR " err) limit)
 
                 :else ";; <no result>")
          dur-str (when dur (str " · " dur "ms"))
@@ -465,9 +491,9 @@
          ;; Captured println/prn output — shown above the value like a
          ;; real REPL prints before returning. Bounded by the same cap.
          out-ln (when (and (string? out) (not (str/blank? out)))
-                  (str (cap-result (str/trimr out)) "\n"))]
+                  (str (cap-result (str/trimr out) limit) "\n"))]
      (str (when (and narr (not (str/blank? narr))) (str narr "\n"))
-          (if eval-ns (name eval-ns) "?") "=> " (cap-result src) "\n"
+          (if eval-ns (name eval-ns) "?") "=> " (cap-result src limit) "\n"
           out-ln
           body suffix))))
 
@@ -542,12 +568,39 @@
          session (current-session id db)]
      (last (sort-by :seon.agent.turn/at (:seon.agent.session/turns session))))))
 
+(schema/register! ::substrate-authored? :boolean)
+
+(defn substrate-authored-turn?
+  "True when the turn was SCRIPTED BY THE SUBSTRATE rather than
+   authored by the agent's LLM: it carries no prompt
+   (`:seon.agent.turn/prompt-chars` 0 or absent). An LLM turn is
+   CONSTITUTED by its prompt — `run-turn!` always renders one and
+   records its char count on the turn-open tx — so a promptless turn
+   means no model was consulted and every eval on it is
+   substrate-written tutorial code (`seon.client/creation-evals!`
+   passes prompt-text \"\"). Chosen over the other candidate markers
+   because it is structural and load-bearing: the eval txs' origin is
+   overwritten to `:agent` by `eval-batch!`'s per-form tx-context (and
+   the turn-open tx is `:system` for BOTH paths), and
+   `:seon.agent.turn/woken-by` is also absent on harness-driven LLM
+   turns. No name-lists, no flags to keep in sync.
+
+   `turn` is a pulled turn map OR a datahike Entity (the
+   [[session-evals]] walk hands entities) — `:any` is the third-party
+   boundary exception: Entity is a datahike deftype, not `map?`."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [turn]
+  (zero? (or (:seon.agent.turn/prompt-chars turn) 0)))
+
 (defn session-evals
   "ALL :seon.eval entries for `agent-id`, oldest-first across ALL
    sessions, each tagged with its owning `:seon.agent.session/id` —
    the transcript's cross-restart read (context-v4 §2.8: prior-session
-   evals render too, behind a resume boundary marker). Walks agent →
-   sessions → turns → evals. Optional `db` snapshot."
+   evals render too, behind a resume boundary marker) — and with
+   `:seon.ctx/substrate-authored?` ([[substrate-authored-turn?]] on the
+   owning turn), which [[format-eval-row]] reads to render substrate
+   tutorial rows IN FULL while agent rows keep the eval cap. Walks
+   agent → sessions → turns → evals. Optional `db` snapshot."
   [agent-id db]
   (let [a (db/entity (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
                        db (assoc :seon.db/db db)))]
@@ -557,7 +610,9 @@
             e (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
         (assoc (into {} e)
                :seon.agent.session/id-of-session
-               (:seon.agent.session/id s))))))
+               (:seon.agent.session/id s)
+               ::substrate-authored?
+               (substrate-authored-turn? t))))))
 
 (defn evals
   "Last N :seon.eval entries for the agent's current session,
@@ -872,7 +927,7 @@
         ;; `{:seon.ns/name kw}` upsert mints SOURCELESS rows (a prior
         ;; agent's register!/defines), and requiring `:seon.ns/source`
         ;; in the join silently dropped them from the prompt (the S-21
-        ;; killer: the agent could not see :seon.workout anywhere).
+        ;; killer: the agent could not see :my.workout anywhere).
         ;; Sources joined separately and looked up in code.
         sources (into {}
                       (db/query
@@ -1404,7 +1459,10 @@
    user's last message past the budget (S-12 KoQ turn
    Ckz-2606101827). The conversation is never sacrificed for eval
    bulk; each message is individually bounded by
-   [[message-render-cap]], each eval row by [[eval-render-cap]]."
+   [[message-render-cap]], each AGENT eval row by [[eval-render-cap]].
+   SUBSTRATE-AUTHORED eval rows (the creation-turn tutorial — tagged
+   by [[session-evals]]) render at [[substrate-eval-render-cap]]
+   instead: our own scripted output arrives whole."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.agent/keys [id] db :seon.db/db :as input}]
   (let [n        (or (:seon.agent/n (:seon.ctx/section input)) 50)

@@ -759,14 +759,25 @@
    exact keywords to put in your :where clauses), and a shape that
    already exists must be REUSED, never forked in parallel.
 
+   ORDERING serves that consult-first read: USER-DOMAIN kinds — the
+   ones agents created for THIS human, the rows you came to consult —
+   sort FIRST; the substrate's own bookkeeping kinds (evals, turns,
+   program-graph rows) follow. Alphabetical within each group. A kind
+   is substrate iff its namespace registered an attr in the boot
+   index's `:substrate-seed` txs (derived per call from tx provenance
+   in the db — the same provenance the namespaces section trusts —
+   never a name-list, so an agent-registered `:my.workout` correctly
+   sorts with the user's domains).
+
    ;; what's already here?
    (seon.db/store-inventory)
-   ;; => [{:seon.db/kind :my.kb.codebase
+   ;; => [{:seon.db/kind :my.kb.codebase            ; user domains first
    ;;      :seon.db/attrs {:my.kb.codebase/answer 14
    ;;                      :my.kb.codebase/question 14}}
-   ;;     {:seon.db/kind :seon.workout
-   ;;      :seon.db/attrs {:seon.workout/date 3, :seon.workout/type 3}}
-   ;;     …]
+   ;;     {:seon.db/kind :my.workout              ; agent-registered
+   ;;      :seon.db/attrs {:my.workout/date 3, :my.workout/type 3}}
+   ;;     …
+   ;;     {:seon.db/kind :seon.agent …}]            ; substrate last
 
    ;; then read a kind's rows with the attrs it lists, e.g.:
    (seon.db/query {:seon.db/query
@@ -780,6 +791,21 @@
   ([] (store-inventory {}))
   ([{::keys [db conn] :or {conn *conn*}}]
    (let [db    (or db @(internal/resolve-conn conn))
+         ;; The substrate kind set, DERIVED from tx provenance: every
+         ;; attr namespace whose `:seon.schema/key` row was asserted by
+         ;; a `:substrate-seed` boot-index tx (`seon.client/index-schemas`
+         ;; persists one row per compiled-substrate registration under
+         ;; that origin). Agent registrations tee under `:agent` txs, so
+         ;; their kinds — `my.*` AND agent-minted `seon.*` domains like
+         ;; `:my.workout` — fall outside this set by construction.
+         substrate-kinds
+         (into #{}
+               (keep (fn [[k]] (some-> (namespace k) keyword)))
+               (query {::db db
+                       ::query '[:find ?k
+                                 :where
+                                 [?tx :seon.db/origin :substrate-seed]
+                                 [?s :seon.schema/key ?k ?tx]]}))
          ;; distinct [entity attr] pairs — datalog results are sets, so
          ;; cardinality-many attrs count each entity once.
          pairs (query {::db db ::query '[:find ?e ?a :where [?e ?a _]]})
@@ -790,7 +816,11 @@
                         {} pairs)]
      (->> counts
           (group-by (fn [[a _]] (keyword (namespace a))))
-          (sort-by (comp str key))
+          ;; User-domain kinds FIRST (consult-first — see docstring),
+          ;; substrate kinds after; alphabetical within each group.
+          (sort-by (fn [[ns-kw _]]
+                     [(if (contains? substrate-kinds ns-kw) 1 0)
+                      (str ns-kw)]))
           (mapv (fn [[ns-kw attr-counts]]
                   {::kind  ns-kw
                    ::attrs (into (sorted-map) attr-counts)}))))))

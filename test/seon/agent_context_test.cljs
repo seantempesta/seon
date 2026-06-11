@@ -87,6 +87,12 @@
           [{:seon.agent.turn/id "TRNctxtest0001"
             :seon.agent.turn/at (t 10)
             :seon.agent.turn/status :done
+            ;; LLM turns ALWAYS carry their prompt's char count
+            ;; (with-turn! records it on the open tx). A PROMPTLESS
+            ;; turn means substrate-scripted evals — rendered UNCAPPED
+            ;; (seon.ctx/substrate-authored-turn?) — so the seeds must
+            ;; look like real LLM turns for the clip tests to bite.
+            :seon.agent.turn/prompt-chars 4321
             :seon.agent.turn/messages
             [{:seon.agent.message/id "MSGctxtest0001"
               :seon.agent.message/from {:seon.user/id "user"}
@@ -111,6 +117,7 @@
            {:seon.agent.turn/id "TRNctxtest0002"
             :seon.agent.turn/at (t 20)
             :seon.agent.turn/status :done
+            :seon.agent.turn/prompt-chars 4321
             :seon.agent.turn/evals
             (into [{:seon.eval/id "EVLctxtestK001"
                     :seon.eval/at (t 21)
@@ -466,7 +473,7 @@
                             (mapcat (comp keys :seon.db/attrs) inv))
                   "datahike's own :db/* attrs are excluded")
               ;; IDENTITY-LESS kind: visible by construction (the S-21
-              ;; killer — :seon.workout/* had no identity attr and was
+              ;; killer — :my.workout/* had no identity attr and was
               ;; invisible to the old identity-derived inventory).
               (is (not (contains? kinds :zzinv.domain))
                   "throwaway kind absent before any data")
@@ -477,12 +484,26 @@
                                        {:zzinv.domain/note "two"}]})
                   (.then
                     (fn [_]
-                      (let [row (->> (db/store-inventory {:seon.db/db @conn})
-                                     (filter #(= :zzinv.domain (:seon.db/kind %)))
-                                     first)]
+                      (let [inv'  (db/store-inventory {:seon.db/db @conn})
+                            kinds (mapv :seon.db/kind inv')
+                            row   (->> inv'
+                                       (filter #(= :zzinv.domain (:seon.db/kind %)))
+                                       first)
+                            idx   (fn [k] (.indexOf kinds k))]
                         (is (= {:zzinv.domain/note 2} (:seon.db/attrs row))
                             "identity-less kind appears with per-attr
-                             entity counts the moment data lands"))))
+                             entity counts the moment data lands")
+                        ;; ORDERING — consult-first: user-domain kinds
+                        ;; (registered OUTSIDE the :substrate-seed boot
+                        ;; index — :zzinv.domain here, despite sorting
+                        ;; LAST alphabetically) come BEFORE substrate
+                        ;; kinds; alphabetical within each group.
+                        (is (< (idx :zzinv.domain) (idx :seon.fn))
+                            "user-domain kind sorts BEFORE substrate
+                             kinds — the inventory leads with what prior
+                             agents stored for THIS human")
+                        (is (< (idx :seon.agent) (idx :seon.fn))
+                            "substrate group stays alphabetical"))))
                   ;; retract ALL rows → the kind vanishes from the next run.
                   (.then
                     (fn [_]
@@ -756,6 +777,98 @@
     (is (not (str/includes? row "TRUNCATED"))
         "no SECOND size guide — preview is already small (no double-noise)")
     (is (< (count row) 1000) "preview row is bounded")))
+
+;; ---------------------------------------------------------------------------
+;; (g3) Substrate-authored rows render IN FULL — the inventory-clip defect
+;;      (2026-06-11): the creation-turn store-inventory result clipped at
+;;      1500 chars BEFORE the user-domain rows rendered, so the surface
+;;      defeated its own purpose. Substrate-scripted evals (a promptless
+;;      owning turn — seon.ctx/substrate-authored-turn?) are OUR output and
+;;      render uncapped (50k runaway backstop); agent evals keep the loud
+;;      ⚠ clip (pinned by format-eval-row-huge-result-is-bounded-and-guided).
+;; ---------------------------------------------------------------------------
+
+(deftest format-eval-row-substrate-row-renders-whole
+  (let [huge (pr-str (apply str (repeat 5000 "k")))
+        row  (#'seon.ctx/format-eval-row
+               {:seon.eval/source "(seon.db/store-inventory)"
+                :seon.eval/ok? true
+                :seon.eval/result-edn huge
+                :seon.eval/id "sb0000004d"
+                :seon.eval/duration-ms 3
+                :seon.eval/ns :my.agent.pin
+                :seon.ctx/substrate-authored? true}
+               false)]
+    (is (str/includes? row huge)
+        "the full 5000-char substrate result renders WHOLE")
+    (is (not (str/includes? row "TRUNCATED"))
+        "no clip marker on a substrate-authored row"))
+  ;; the 50k backstop still bites on a runaway substrate value.
+  (let [runaway (apply str (repeat 60000 "r"))
+        row     (#'seon.ctx/format-eval-row
+                  {:seon.eval/source "(seon.db/store-inventory)"
+                   :seon.eval/ok? true
+                   :seon.eval/result-edn runaway
+                   :seon.eval/id "sb0000005e"
+                   :seon.eval/duration-ms 3
+                   :seon.eval/ns :my.agent.pin
+                   :seon.ctx/substrate-authored? true}
+                  false)]
+    (is (str/includes? row "⚠ TRUNCATED at 50000 of 60000")
+        "the runaway backstop clips LOUDLY at 50k, never silently")))
+
+(deftest session-evals-tag-substrate-authorship-from-promptless-turns
+  (async done
+    (let [big (pr-str (apply str (repeat 5000 "k")))
+          at  (js/Date. (+ (.getTime (js/Date.)) 40))]
+      (-> (with-seeded-conn
+            (fn [conn]
+              ;; A creation-shaped turn: NO prompt-chars (creation-evals!
+              ;; passes prompt-text "" → with-turn! records 0; this seeds
+              ;; the attr ABSENT, the same promptless classification).
+              (-> (db/transact!
+                    {:seon.db/conn conn
+                     :seon.db/tx-data
+                     [{:seon.agent.session/id "SESctxtest0001"
+                       :seon.agent.session/turns
+                       [{:seon.agent.turn/id "TRNctxtest0003"
+                         :seon.agent.turn/at at
+                         :seon.agent.turn/status :done
+                         :seon.agent.turn/evals
+                         [{:seon.eval/id "EVLctxtestSUB1"
+                           :seon.eval/at at
+                           :seon.eval/duration-ms 2
+                           :seon.eval/source "(seon.db/store-inventory)"
+                           :seon.eval/ok? true
+                           :seon.eval/result-edn big
+                           :seon.eval/ns :my.agent.ctx-260610}]}]}]})
+                  (.then
+                    (fn [_]
+                      (let [db  @conn
+                            es  (seon.ctx/session-evals agent-id db)
+                            sub (->> es
+                                     (filter #(= "EVLctxtestSUB1"
+                                                 (:seon.eval/id %)))
+                                     first)
+                            agt (->> es
+                                     (filter #(= "EVLctxtestK001"
+                                                 (:seon.eval/id %)))
+                                     first)
+                            ts  (agent/transcript-section
+                                  {:seon.db/db db :seon.agent/id agent-id})]
+                        (is (true? (:seon.ctx/substrate-authored? sub))
+                            "promptless turn → substrate-authored eval")
+                        (is (false? (:seon.ctx/substrate-authored? agt))
+                            "prompted (LLM) turn → agent eval")
+                        (is (str/includes? ts big)
+                            "the substrate result is IN the rendered
+                             transcript, whole — agents see every
+                             inventory row")
+                        (is (not (str/includes?
+                                   ts (str "TRUNCATED at 1500 of")))
+                            "no agent-cap clip fired anywhere")))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; (g2) V4-4 — session resume: the boundary marker, prior-session rendering,
