@@ -43,20 +43,23 @@
 
    ## The search→read recipe (the core move)
 
-     ;; 1. grep for the term (pattern is a REGEX)
-     (await (seon.agent.search/grep {:seon.agent.search/pattern \"validate-entity-values!\"
-                               :seon.agent.search/glob    \"*.cljs\"}))
+     ;; 1. grep for the term (pattern is a REGEX). grep resolves to an
+     ;;    envelope; at the top level of your turn the REPL resolves the
+     ;;    Promise for you — write the bare call, NO await (await is
+     ;;    only legal inside your own ^:async fns).
+     (seon.agent.search/grep {:seon.agent.search/pattern \"register!\"
+                              :seon.agent.search/glob    \"*.cljs\"})
      ;; => {:seon.agent.search/ok? true
      ;;     :seon.agent.search/matches
-     ;;     [{:seon.agent.search/path \"/Users/me/src/seon/src/seon/db.cljs\"
-     ;;       :seon.agent.search/line-number 803
-     ;;       :seon.agent.search/line-text \"(defn- validate-entity-values!\"} …]
-     ;;     :seon.agent.search/match-count 4 :seon.agent.search/truncated? false}
+     ;;     [{:seon.agent.search/path \"<abs path of the hit>\"
+     ;;       :seon.agent.search/line-number 42
+     ;;       :seon.agent.search/line-text \"(seon.schema/register! …)\"} …]
+     ;;     :seon.agent.search/match-count 7 :seon.agent.search/truncated? false}
 
-     ;; 2. read the hit precisely
-     (seon.agent.fs/read-file {:seon.agent.fs/path \"/Users/me/src/seon/src/seon/db.cljs\"})
-     ;; result paths are absolute and allowlisted, so they feed
-     ;; seon.agent.fs/read-file directly — search → read, no guessing."
+     ;; 2. read a hit precisely — a match's :seon.agent.search/path is
+     ;;    absolute and allowlisted, so it feeds read-file directly:
+     ;;    search → read, no guessing.
+     (seon.agent.fs/read-file {:seon.agent.fs/path \"<:seon.agent.search/path of a hit>\"})"
   (:require
     ["node:child_process" :as cp]
     [clojure.string :as str]
@@ -264,12 +267,13 @@
    No matches is SUCCESS: {:seon.agent.search/ok? true :seon.agent.search/matches []}.
    rg exit 1 (nothing found) is not an error.
 
-   Worked example — search → read precisely:
+   Worked example — search → read precisely (top-level call, no await:
+   the REPL resolves the returned Promise for you):
 
-     (await (seon.agent.search/grep {:seon.agent.search/pattern \"transact!\"
-                               :seon.agent.search/glob    \"*.md\"}))
+     (seon.agent.search/grep {:seon.agent.search/pattern \"transact!\"
+                              :seon.agent.search/glob    \"*.md\"})
      ;; pick a hit, then:
-     (seon.agent.fs/read-file {:seon.agent.fs/path <:seon.agent.search/path of the hit>})
+     (seon.agent.fs/read-file {:seon.agent.fs/path \"<:seon.agent.search/path of the hit>\"})
      ;; jump to its :seon.agent.search/line-number in the content.
 
    NOTE: ^:async means Malli validates the request; the response schema

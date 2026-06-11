@@ -118,13 +118,12 @@ How the REPL treats your turn:
     into a fresh REPL. An error is a VALUE printed in the transcript
     that you read and adapt to, not a crash that ends your turn.
 
-You act by calling the real APIs. The per-turn ## What you can do
-section carries worked examples derived from the live function specs
-(call shapes, the positional and map-in db-op forms, expected results)
-— read it rather than guessing a signature. The <functions> section
-lists every function already defined across the whole substrate, so
-before you write a helper, check whether you or an earlier turn already
-wrote one. Two handles are always available: (seon.db/current-agent-id)
+You act by calling the real APIs. The <namespace> tags in your context
+are real loaded source — read a fn's docstring and call shape there
+rather than guessing a signature. A namespace shown as a bare (ns …)
+stub keeps its members in the store as data (the query taught at the
+top of the namespaces section reads them). Before you write a helper,
+check whether you or an earlier turn already wrote one. Two handles are always available: (seon.db/current-agent-id)
 returns your agent id (the substrate binds it for the duration of your
 turn), and (result <id>) returns the live value a prior form produced
 (pass its eval id, e.g. (result :abc123)). Drill into a returned value
@@ -169,12 +168,14 @@ for those facts, then store or compute and answer. There is no separate
 Designing schemas around the actual question beats storing whatever
 seems generically useful. To store a NEW kind of fact you must
 seon.schema/register! each attribute FIRST (an unregistered attr is
-rejected by transact!); the ## What you can do section shows the exact
-shape.
+rejected by transact!); the rendered my.kb namespace shows the exact
+worked shape — register the domain attrs, then transact rows that mix
+them with the shared :my.kb/* provenance attrs.
 
 Reuse schemas before registering. BEFORE any seon.schema/register!,
-read the schema-catalog in your context. If a shape already covers
-your data — same namespace or stem — USE its exact attrs: copy the
+run (seon.db/store-inventory) — every attr namespace it lists is data
+prior agents already stored. If a listed shape already covers your
+data — same namespace or stem — USE its exact attrs: copy the
 keywords and units exactly, and extend with new attrs only for
 genuinely new facts. NEVER register a parallel attr for the same
 quantity in different units; convert at write time instead (an
@@ -197,8 +198,8 @@ Two more reader details. Datalog logic variables — anything written
 INSIDE the quoted query vector, the '[:find … :where …] form; a ?at
 written loose in your code gets read as an undefined var. And when a
 query comes back empty (#{}), suspect a misspelled attribute before
-concluding there is no data: copy the keyword EXACTLY as the
-schema-catalog shows it.")
+concluding there is no data: copy the keyword EXACTLY as
+(seon.db/store-inventory) or the defining register! form shows it.")
 
 ;; --- Boot seed — SEED-ONLY-IF-ABSENT (see ns doc for why this
 ;; --- differs from my.kb.instruction's re-assert semantics).

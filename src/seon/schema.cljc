@@ -334,10 +334,10 @@
                     "Keyword namespaces are data DOMAINS and need ≥2 "
                     "segments — e.g. :" ns-str "/" (name k) " → :kb."
                     ns-str "/" (name k) " or :fitness." ns-str "/"
-                    (name k) ". FIRST check the schema-catalog's "
-                    "domain-attrs block: if an attr for this fact "
-                    "already exists, reuse its EXACT keyword instead "
-                    "of registering a new one.")
+                    (name k) ". FIRST run (seon.db/store-inventory): "
+                    "if an attr for this fact already exists, reuse "
+                    "its EXACT keyword instead of registering a new "
+                    "one.")
                {:seon.schema/error :seon.schema/single-segment-namespace
                 :seon.schema/key   k
                 :seon.error/kind   :user-input})))))

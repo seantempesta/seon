@@ -335,7 +335,7 @@
    `:seon.schema/key` row was asserted OUTSIDE the boot seed). These
    are the attrs agents registered for the human's data — INCLUDING
    `seon.*` data domains like `:my.workout/*` — the reuse surface
-   the schema-catalog renders and [[check-parallel-attr]] guards.
+   (seon.db/store-inventory) reports and [[check-parallel-attr]] guards.
    Substrate attrs (`:seon.db/*`, `:seon.agent/*`, …) stay hidden
    because their rows land under `:seon.db/origin :substrate-seed`.
    Derived from the db value itself (NOT the live registry), so it
@@ -493,7 +493,8 @@
      :seon.warn/explain
      (str "Rows are STORED under an identity attr but no registered :map "
           "schema marked {:seon.db/entity true} declares that kind — its "
-          "entities are invisible to the catalog and the renderer. "
+          "entities are invisible to the entity renderer (the rows still "
+          "show in (seon.db/store-inventory), which keys off live data). "
           "Register (or re-register) the kind's :map schema WITH the "
           "marker. Request/response envelopes stay unmarked; this fires "
           "only where rows actually exist.")

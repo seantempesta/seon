@@ -400,6 +400,16 @@ example turns the suite red; (2) the harness's first honest run
 enumerates exactly the known corpus failures (catalog pointers, search
 docstring, header pull) before B2 sweeps them; (3) zero
 scenario-specific strings anywhere in the harness (integrity rule).
+**LANDED 2026-06-11** — `test/seon/teachings_test.cljs` (the
+extraction convention is documented ONCE, in its ns docstring; the
+corpus derives from the seeded world's rows — `:my.soul/text`,
+full-source `:seon.ns/source` ns docstrings, `seon.ctx/system-text` +
+the namespaces-section header, the creation-turn tutorial sources
+verbatim, every `:seon.fn/doc` — never a parallel list). Examples run
+in prompt-reading order on ONE scratch boot-seeded world (gym-parity
+fs roots). Reds name surface + line; an in-run canary fixture proves
+red-ability every run. No ctx.cljs touch needed — the extraction
+helper lives in the suite ns (ctx was a parallel agent's fence).
 
 **B2 — one-time content sweep (everything B1 flags).** Files (≤7):
 `src/my/kb.cljs`, `src/my/soul.cljs`, `src/seon/agent/search.cljs`,
@@ -424,6 +434,29 @@ bare stub tags, no fictional file/line claims.
 Fence: `search.cljs` is in `src/seon/agent/` — confirm the robustness
 agent's fence list (it owns `agent.cljs` and `agent/fs.cljs`; if its
 fence covers all of `src/seon/agent/`, B2 waits for it).
+**LANDED 2026-06-11** — swept: `my.kb` (catalog pointer →
+store-inventory consult; worked example is now the FULL runnable move
+incl. the mixed-provenance transact row, on the `:my.kb.codebase`
+example domain the `store-inventory` docstring already promises);
+`my.soul` mechanics-text (3 dead-section pointers — "## What you can
+do" ×2, `<functions>` — and 2 schema-catalog pointers replaced;
+data-store consult is the taught first move); `seon.agent.search`
+(await idiom removed + convention STATED; fictional file/line →
+runnable example + obviously-fake placeholders); `seon.warn`
+("invisible to the catalog" ×2); `seon.schema` single-segment error
+(catalog → store-inventory); `seon.schema-test` assertion updated. The
+header pull example was already gone (v4 composer ships a working
+member-rows query — B1 runs it green); stub-tag self-description
+already landed in ctx. NOT swept (other agents' fences — defects
+reported in the unit report): `agent.cljs` ns docstring still lists
+the v3 nine sections; `client.cljs:891` "functions catalog" comment;
+`render.cljs:243` names the dead `schema-catalog-section`;
+`seon.agent/complete!` docstring uses a bare free `id` metavariable
+(harness classifies it as a shape, not a red). Live-store residue: the
+soul row is seed-only-if-absent and `:seon.fn` rows dedupe on sym, so
+existing stores keep the OLD mechanics text + fn docstrings;
+`:seon.ns/source` rows DO re-emit on change, so rendered namespace
+tags heal on next boot.
 
 **B3 — reply! envelope-aware batch guard. LANDED 2026-06-11.**
 Deviation from the file list below: `eval.cljs` was held by a
@@ -472,6 +505,33 @@ Falsifications: (1) fresh agent evals
 works; (2) require of a genuinely-absent ns still errors legibly;
 (3) an agent-authored ns defined in a PRIOR session is requirable
 after restart-resume.
+
+**LANDED 2026-06-11** (one unit with downstream bug #14 — same root).
+INVESTIGATED root: the failing nses (`my.kb`, `seon.db`, …) are
+HOST-BUNDLED (compiled into `out/client/main.js`, live on globalThis)
+but absent from the bootstrap bundle's index, so shadow's `boot/load`
+threw `ns X not available` synchronously. Fix is neither of the two
+guessed shapes' heavy form: `seon.eval/guarded-load` catches the
+index miss and, when `seon.eval/ns-live-on-globalthis?` confirms the
+munged JS object exists, answers the load with an empty `:js` source —
+the JS is already loaded by construction (never re-evals host source:
+the registry-stomp/shadowing class). Agent-authored prior-session nses
+were already covered by replay pre-load (falsification 3 passes via
+the compile-state path). **Bug #14 was the same defect inside replay**:
+a stored `(ns … (:require [my.kb]))` row failed replay, the half-failed
+eval left an analyzer entry with NO JS ns object, and
+`ensure-target-ns!` (trusting the analyzer entry alone) skipped its
+heal — every def in the ns then died with `Cannot set/read properties
+of undefined` on both passes (logs/pod-events.log, agents
+UPE-2606101815 / vGq-2606111337); agent fns + wired tiles gone on
+every restart. `ensure-target-ns!` now requires BOTH probes (analyzer
+entry AND live JS object) before skipping. All three falsifications +
+a real pod restart proven live 2026-06-11 (tile fn replayed 2/2,
+renders over HTTP without re-wiring; `(require '[my.kb])` green in the
+restarted pod). Tests: `test/seon/eval/require_test.cljs` +
+`replay-ns-row-with-host-bundled-require-succeeds` /
+`replay-heals-analyzer-entry-without-live-ns-object` in
+`test/seon/resume_replay_test.cljs`. Suite 425/1909/0.
 
 ### Wave C — the ROOT-4 queue (6 queued items)
 

@@ -41,8 +41,8 @@
           "agent-input error kind — the established register! failure mode")
       (is (str/includes? (ex-message e) ":kb.workout/date")
           "the error GUIDES: names a corrected multi-segment example")
-      (is (str/includes? (ex-message e) "domain-attrs")
-          "the error teaches reuse-first: check the catalog before registering"))))
+      (is (str/includes? (ex-message e) "(seon.db/store-inventory)")
+          "the error teaches reuse-first: consult the store before registering"))))
 
 (deftest multi-segment-and-bare-keys-still-register
   (testing "multi-segment data domain"

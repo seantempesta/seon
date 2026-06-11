@@ -10,19 +10,26 @@
    example of a domain — the system-wide instruction singleton.
 
    Reference the shared provenance attrs below from your domain schemas
-   instead of re-inventing source-path/line/confidence per domain:
+   instead of re-inventing source-path/line/confidence per domain. The
+   FULL move — domain attrs registered, then ONE row mixing the domain
+   attrs with the shared :my.kb/* provenance attrs (never fork your own
+   parallel source-path/confidence):
 
-     (schema/register! :my.kb.codebase.fn/name  [:string {:seon.db/identity true}])
-     (schema/register! :my.kb.codebase.fn/claim :string)
-     ;; provenance: REFERENCE the shared shapes, don't redefine them
-     ;; — :my.kb/source-path, :my.kb/source-line, :my.kb/verified-at,
-     ;; :my.kb/confidence are already registered; just transact them
-     ;; on your rows.
+     (seon.schema/register! :my.kb.codebase/question [:string {:seon.db/identity true}])
+     (seon.schema/register! :my.kb.codebase/answer   :string)
+     (seon.db/transact!
+       {:seon.db/tx-data
+        [{:my.kb.codebase/question \"what does seon.db/transact! return on failure?\"
+          :my.kb.codebase/answer   \"an envelope value with :seon.db/ok? false — it never rejects\"
+          :my.kb/source-path       \"src/seon/db.cljs\"
+          :my.kb/verified-at       (js/Date.)
+          :my.kb/confidence        :verified}]})
 
-   Consulting = the schema-catalog + datalog, FIRST, before research:
-   the catalog lists every `my.kb.*` attr that exists; query those
-   exact keywords. There is no store!/consult API — `seon.db/transact!`
-   and `seon.db/query` over your domain schemas ARE the knowledge base."
+   Consulting = (seon.db/store-inventory) + datalog, FIRST, before
+   research: the inventory lists every attr namespace with live rows;
+   datalog those exact keywords. There is no store!/consult API —
+   `seon.db/transact!` and `seon.db/query` over your domain schemas ARE
+   the knowledge base."
   (:require
     [seon.schema :as schema]))
 
