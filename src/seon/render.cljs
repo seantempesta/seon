@@ -335,17 +335,6 @@
    `:seon.eval` card that created them (visible-entities step 5)."
   #{:seon.fn :seon.schema :seon.ns})
 
-(defn- db-schema
-  "The datahike schema map of `db`, FilteredDB-safe. FilteredDB (the
-   inspector's per-agent view) doesn't implement ILookup — `(:schema db)`
-   THROWS. The schema is conn-level (the filter can't change it), so read
-   through to the wrapped db. Same guard as `seon.agent/db-schema` and
-   `seon.warn/domain-attrs`."
-  [db]
-  (try (:schema db)
-       (catch :default _
-         (:schema (.-unfiltered-db ^js db)))))
-
 (defn- renderable-entities
   "Enumerate the renderable entities visible to `agent-id`, bounded.
 
@@ -381,7 +370,7 @@
         ;; in the INSTALLED schema may reach the :aevt scan. The kind
         ;; is simply absent until its first transact installs the attr
         ;; — fail-soft, no error swallowed.
-        installed   (db-schema db)
+        installed   (db/installed-schema db)
         kinds       (filter #(contains? installed (:id-attr %)) kinds)
         ;; 1. eid → set of discovery kinds (an entity could carry
         ;; id-attrs for multiple kinds — Phase 1c).

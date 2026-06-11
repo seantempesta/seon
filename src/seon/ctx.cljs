@@ -1136,20 +1136,6 @@
     (str "[" kind "]  " label "\n"
          (str/join "\n" lines))))
 
-(defn- db-schema
-  "The datahike schema map of `db`, FilteredDB-safe. FilteredDB (the
-   inspector's per-agent view) doesn't implement ILookup — `(:schema db)`
-   THROWS. The schema is conn-level (the filter can't change it), so
-   read through to the wrapped db. Same guard as
-   `seon.warn/domain-attrs`; surfaced live at the flip (2.2e) because
-   the cluster store carries attrs absent from the live Malli registry
-   (other writers' attrs), which sent [[domain-attr-line]] down the
-   installed-valueType fallback for the first time on a FilteredDB."
-  [db]
-  (try (:schema db)
-       (catch :default _
-         (:schema (.-unfiltered-db ^js db)))))
-
 (defn- domain-attr-line
   "One catalog line for a DOMAIN attr: keyword, compact type (live
    registry when present, installed datahike valueType otherwise) and
@@ -1158,7 +1144,7 @@
   [db attr]
   (let [t (if-let [form (schema/schema-definition attr)]
             (catalog-type-str form)
-            (str (get-in (db-schema db) [attr :db/valueType])))
+            (str (get-in (db/installed-schema db) [attr :db/valueType])))
         n (fuzzy-count (catalog-kind-count db attr))]
     (str "  " attr " : " t " — " n " entit" (if (= "1" n) "y" "ies"))))
 
@@ -1842,9 +1828,9 @@
       ;; THROWS on pulling an attr the conn never installed (installs
       ;; are lazy, at first transact), and a store predating the tile
       ;; key must still assemble context — so the slot is read here
-      ;; behind the same installed-schema gate `live-tile/user-name`
-      ;; uses (load-bearing, not defensive fluff).
-      (let [ent   (if (contains? (live-tile/installed-schema db)
+      ;; behind the same `seon.db/installed-schema` gate
+      ;; `live-tile/user-name` uses (load-bearing, not defensive fluff).
+      (let [ent   (if (contains? (db/installed-schema db)
                                  :seon.render.live-tile/content)
                     (merge entity
                            (db/pull {:seon.db/db db

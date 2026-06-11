@@ -262,31 +262,16 @@
     (<= 17 hour 21) "Good evening"
     :else           "Good night"))
 
-(defn installed-schema
-  "The datahike schema map of `db`, FilteredDB-safe and nil-safe.
-   FilteredDB (the inspector's per-agent view) doesn't implement
-   ILookup — `(:schema db)` THROWS; read through to the wrapped db.
-   Mirrors `seon.render/db-schema` / `seon.agent/db-schema` /
-   `seon.warn/domain-attrs` — fourth copy; the guard wants a home in
-   `seon.db` (reported drift, live-tiles U1). `:any` input — the db
-   value is a datahike runtime handle (third-party boundary)."
-  {:malli/schema [:=> [:catn [:seon.db/db :any]] :map]}
-  [db]
-  (or (try (:schema db)
-           (catch :default _
-             (:schema (.-unfiltered-db ^js db))))
-      {}))
-
 (defn user-name
   "The human's name, when the store carries one (`:seon.user/name` on
    the user entity). Returns `{::user-name \"Sean\"}` or `{}` —
    gracefully generic when the attr was never installed (querying an
-   attr datahike has never seen THROWS, so the installed-schema gate
-   is load-bearing, not defensive fluff)."
+   attr datahike has never seen THROWS, so the `seon.db/installed-schema`
+   gate is load-bearing, not defensive fluff)."
   {:malli/schema [:=> [:cat ::user-name-request] ::user-name-response]}
   [{:seon.db/keys [db]}]
   (let [db (or db (some-> db/*conn* deref))]
-    (if (and db (contains? (installed-schema db) :seon.user/name))
+    (if (and db (contains? (db/installed-schema db) :seon.user/name))
       (if-some [n (ffirst (db/query
                             {:seon.db/db    db
                              :seon.db/query '[:find ?n
@@ -342,7 +327,7 @@
         ;; like [[user-name]] (querying a never-installed attr THROWS
         ;; on datahike-cljs).
         reply      (when (and db agent-id
-                              (contains? (installed-schema db)
+                              (contains? (db/installed-schema db)
                                          :seon.agent.message/content))
                      (:seon.render.chat/last-reply
                        (chat/last-reply {:seon.agent/id agent-id

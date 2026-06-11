@@ -329,17 +329,6 @@
                      '[:find ?k ?tx
                        :where [?s :seon.schema/key ?k ?tx]]}))))
 
-(defn- db-schema
-  "The conn-level datahike schema map of `db`. FilteredDB (the
-   inspector's per-agent view) doesn't implement ILookup — `(:schema
-   db)` THROWS, which once took down the whole ctx-preview. The schema
-   is conn-level (the filter can't change it), so read through to the
-   wrapped db."
-  [db]
-  (try (:schema db)
-       (catch :default _
-         (:schema (.-unfiltered-db ^js db)))))
-
 (defn domain-attrs
   "Every DOMAIN attr installed on `db` — the db's datahike schema attrs
    intersected with [[agent-registered-attrs]] (provenance: the attr's
@@ -354,7 +343,7 @@
    (or schema installation via the first transact!) has landed."
   {:malli/schema [:=> [:cat ::check-request] [:vector :keyword]]}
   [{:seon.db/keys [db]}]
-  (let [schema      (db-schema db)
+  (let [schema      (db/installed-schema db)
         agent-attrs (agent-registered-attrs db)]
     (->> (keys schema)
          (filter keyword?)
@@ -441,7 +430,7 @@
    attrs (`:db/ident` is unique-identity by construction and carries a
    datom per installed attr — it is schema plumbing, not a kind)."
   [db]
-  (->> (db-schema db)
+  (->> (db/installed-schema db)
        (keep (fn [[k v]]
                (when (and (keyword? k)
                           (not= "db" (namespace k))

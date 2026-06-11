@@ -55,6 +55,7 @@
    `:seon.agent.message/hops`). `seon.trigger/register!` is the data-driven
    layer over this primitive — triggers persisted as DB entities."
   (:require
+    [clojure.string :as str]
     [cljs.reader :as reader]
     [datahike.api :as d]
     [seon.db.internal :as internal]
@@ -349,12 +350,173 @@
     (let [[q db & inputs] args]
       (apply d/q q db inputs))))
 
+(defn installed-schema
+  "The datahike schema map actually INSTALLED on `db` — attrs the conn
+   has seen, keyed by ident keyword. FilteredDB-safe and nil-safe.
+
+   THE TRAP this fn exists to gate: datahike installs an attr's schema
+   lazily, at the attr's FIRST `transact!` — `seon.schema/register!`
+   alone only teaches the Malli registry. Querying or pulling an attr
+   the conn has never installed THROWS (`:transact/schema`,
+   resolve-datom: \"Bad entity attribute … not defined in current
+   schema\") under `:schema-flexibility :write`. So any code that
+   names an attr in a `d/datoms` scan, a Datalog where-clause, or an
+   explicit pull pattern must EITHER be sure data has landed OR gate
+   on `(contains? (db/installed-schema db) <attr>)` — load-bearing,
+   not defensive fluff. ([[pull]] gates its own patterns with this
+   automatically.)
+
+   FilteredDB (the inspector's per-agent view) doesn't implement
+   ILookup — `(:schema db)` THROWS; the schema is conn-level (a filter
+   can't change it), so read through to the wrapped db. Returns `{}`
+   for a nil/schema-less db. `:any` input — the db value is a datahike
+   runtime handle (third-party boundary)."
+  {:malli/schema [:=> [:catn [::db :any]] :map]}
+  [db]
+  (or (try (:schema db)
+           (catch :default _
+             (:schema (.-unfiltered-db ^js db))))
+      {}))
+
+;; --- pull-pattern guard -----------------------------------------------------
+;; datahike-cljs throws the cryptic resolve-datom error above when an
+;; explicit pull pattern names an attr the conn never installed.
+;; [[pull]] guards that boundary; helpers below walk/rewrite patterns.
+
+(defn- pattern-attr
+  "The attr keyword an explicit pull-pattern item names: a bare
+   keyword, or the head of an attr-with-opts seq like
+   `(:attr :limit 10)` / `[:attr :as :x]`. nil for wildcards (`*`),
+   recursion markers, and anything else."
+  [item]
+  (cond
+    (keyword? item) item
+    (and (sequential? item) (keyword? (first item))) (first item)
+    :else nil))
+
+(defn- forward-attr
+  "Normalize a reverse-ref attr (`:ns/_attr`) to its forward form —
+   the installed schema is keyed by forward idents only."
+  [attr]
+  (let [n (name attr)]
+    (if (str/starts-with? n "_")
+      (keyword (namespace attr) (subs n 1))
+      attr)))
+
+(defn- system-pull-attr?
+  "datahike's own attrs (`:db/id`, `:db/ident`, `:db.*/…`) are exempt
+   from schema-presence validation — mirror that exemption."
+  [attr]
+  (let [a-ns (namespace attr)]
+    (and a-ns (or (= a-ns "db") (str/starts-with? a-ns "db.")))))
+
+(defn- pull-pattern-attrs
+  "Every attr keyword an explicit pull pattern names, recursively
+   through map specs (`{:ref-attr [subpattern]}`) and attr-with-opts.
+   Wildcards and recursion limits contribute nothing."
+  [pattern]
+  (letfn [(walk [acc spec]
+            (reduce
+              (fn [acc item]
+                (if (map? item)
+                  (reduce-kv
+                    (fn [acc k v]
+                      (let [acc (if-let [a (pattern-attr k)] (conj acc a) acc)]
+                        (if (sequential? v) (walk acc v) acc)))
+                    acc item)
+                  (if-let [a (pattern-attr item)] (conj acc a) acc)))
+              acc spec))]
+    (walk #{} pattern)))
+
+(defn- filter-pull-pattern
+  "Rewrite `pattern` without the items naming attrs in `drop-set`
+   (forward forms). Map-spec entries whose subpattern filters to empty
+   are dropped whole (their value could only have pulled nothing)."
+  [pattern drop-set]
+  (letfn [(drop-attr? [item]
+            (when-let [a (pattern-attr item)]
+              (contains? drop-set (forward-attr a))))
+          (walk [spec]
+            (into []
+                  (keep (fn [item]
+                          (cond
+                            (map? item)
+                            (let [m (reduce-kv
+                                      (fn [m k v]
+                                        (cond
+                                          (drop-attr? k) m
+                                          (sequential? v)
+                                          (let [v' (walk v)]
+                                            (if (seq v') (assoc m k v') m))
+                                          :else (assoc m k v)))
+                                      {} item)]
+                              (when (seq m) m))
+                            (drop-attr? item) nil
+                            :else item)))
+                  spec))]
+    (walk pattern)))
+
+(defn- guarded-pull
+  "[[pull]]'s body: d/pull behind the uninstalled-attr guard. Returns
+   the pulled map (or nil); throws the legible typo error. nil when
+   the guard filters the whole pattern away (no attr could have
+   matched ⇒ same result datahike returns for a pattern of
+   installed-but-absent attrs)."
+  [db pattern ref]
+  (let [named       (pull-pattern-attrs pattern)
+        installed   (installed-schema db)
+        uninstalled (->> named
+                         (map forward-attr)
+                         (remove system-pull-attr?)
+                         (remove #(contains? installed %))
+                         distinct)
+        {registered   true
+         unregistered false} (group-by (comp boolean schema/registered?)
+                                       uninstalled)]
+    (when (seq unregistered)
+      (let [msg (str "Pull pattern names attribute(s) "
+                     (pr-str (vec (sort unregistered)))
+                     " that this database has never seen — not installed in "
+                     "the datahike schema and not registered in seon.schema. "
+                     "Most likely a typo: check spelling against "
+                     "(seon.db/installed-schema db). If the attr is new, "
+                     "(seon.schema/register! <attr> <type>) and transact "
+                     "data first — datahike installs attr schema lazily at "
+                     "first transact!.")]
+        (throw (ex-info msg
+                        {:seon.error/message msg
+                         :seon.error/data
+                         {:seon.error/kind :user-input
+                          ::missing-attrs  (vec (sort unregistered))
+                          ::pull-pattern   pattern}}))))
+    (if (empty? registered)
+      (d/pull db pattern ref)
+      (let [pattern' (filter-pull-pattern pattern (set registered))]
+        (when (seq pattern')
+          (d/pull db pattern' ref))))))
+
 (defn pull
   "Pull an entity by ref using a pull pattern. Sync. Returns the pulled
    map, or nil if the ref doesn't resolve.
 
    - map-in:     (db/pull {::db/pull-pattern '[*] ::db/ref eid})
-   - positional, mirroring datahike: (db/pull <db> selector eid)"
+   - positional, mirroring datahike: (db/pull <db> selector eid)
+
+   GUARDED against the lazy-install trap (see [[installed-schema]]):
+   datahike installs an attr's schema at its first transact!, and
+   raw `d/pull` THROWS a cryptic resolve-datom error when an explicit
+   pattern names a never-installed attr. Here, per uninstalled attr:
+
+   - REGISTERED in seon.schema → silently filtered from the pattern.
+     Provably equivalent to the result had the attr been installed
+     with zero rows (the key would be absent either way), so valid
+     pulls are unchanged and nothing is masked — \"no data yet\"
+     renders as no data.
+   - NOT registered → a legible throw naming the attr(s) and the fix,
+     because silently filtering an unknown attr would mask typos.
+     (`:db/*` system attrs are exempt, mirroring datahike.)
+
+   Valid pulls — every named attr installed — run exactly as before."
   {:malli/schema
    [:function
     [:=> [:cat ::pull-request] :any]
@@ -362,9 +524,9 @@
   ([req]
    (let [{::keys [pull-pattern ref db conn] :or {conn *conn*}} req
          db (or db @(internal/resolve-conn conn))]
-     (d/pull db pull-pattern ref)))
+     (guarded-pull db pull-pattern ref)))
   ([db selector eid]
-   (d/pull db selector eid)))
+   (guarded-pull db selector eid)))
 
 (defn entity
   "Look up an entity by eid or lookup-ref. Sync. Returns a datahike
