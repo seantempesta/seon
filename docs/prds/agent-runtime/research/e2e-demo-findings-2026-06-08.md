@@ -990,3 +990,187 @@ s32 salience "green" was contamination, recorded for the record.
 
 Sweep logs: `tmp/gym-postv4-paid{1,2,3}.log` (sweep 1 = pre-fs-fix,
 contaminated s32 salience).
+
+## POST-WAVE-A RE-MEASURE — 2026-06-11 (Wave A landed: A2 = 2093b0e, A1+A3 = 3dbada1; measured at b185c2c + fenced gym edits)
+
+Re-ran ONLY the post-v4 reds per fix-everything PRD "Then: the
+re-measure". Suite (post-Wave-A): **409/1855/0** on all five runs
+(was 373/1590/0 — Wave A added tests). Stub gate HELD (all stub
+scenarios in their expected states, every run). Before the paid runs,
+two DECIDED/required harness cuts landed in fence:
+
+1. **§2 provenance widening applied** to the s12 storage predicate:
+   provenance-SHAPED rows (source-path/source-line/confidence attr
+   NAMES) in ANY namespace count; consult predicates stay strict on
+   `:my.kb[./]`. Implementation note — engine pin, verified live:
+   datahike-cljs THROWS "Cannot compare <keyword> to" when TWO datom
+   patterns with distinct unbound attr vars join on one entity; the
+   predicate rides a nested `q` (one unbound-attr pattern per level) +
+   `set`/`contains?`, all engine built-ins. Falsified both ways
+   (matches shared AND forked namespaces; excludes a row missing
+   confidence).
+2. **s12 judge ground-truth re-verified (f7 discipline):** Wave A
+   moved the anchors — validate-attrs! 422→460,
+   validate-entity-values! 499→615 in `src/seon/db/internal.cljs`;
+   behavior claims unchanged. References updated.
+
+### Scorecard — post-Wave-A vs post-v4 reds vs pre-v4 baseline
+
+| scenario | sweep | result | failed predicates | judge |
+|---|---|---|---|---|
+| s21 | 1 | **PASS 7/7** | — (0/4 register evals, 3 turns) | n/a |
+| s21 | 2 | **PASS 7/7** | — (0/8 register evals, 6 turns) | n/a |
+| s21 | 3 | **PASS 7/7** | — (0/4 register evals, 3 turns) | n/a |
+| s32 | 1 | 4/6 | consult-first; salience 0/2 | **PASS 100** (0 greps) |
+| s32 | 2 | 5/6 | consult-first (salience 1/11 = docstring-contaminated, see below) | **PASS 100** (0 greps) |
+| s32 | 3 | 4/6 | consult-first; salience 0/12 | **PASS 100** (1 grep) |
+| s12 | 1* | 6/8 | storage 1 row; B grep'd first | FAIL 40/30 (*judge miscalibration — see harness fix 3) |
+| s12 | 2 | 6/8 | storage 1 row; B consulted :seon.fn first | **PASS 100/100**, zero misstatements |
+| s12 | 4 (re-run after judge fix) | 7/8 | B consulted :seon.fn first | **PASS 100/100**, zero misstatements, **storage 2 rows** |
+
+### The bar vs reality
+
+- **S-21 3/3: MET.** 0/3 → **3/3**, and better than the pre-v4
+  baseline's economy: zero `schema/register!` evals in all three runs
+  (pre-Wave-A: 6/13, 5/10, 1/8 register evals) and one clean transact
+  of all four established attrs
+  (`{:seon.workout/date "2026-06-11" :seon.workout/type :run
+  :seon.workout/duration-minutes 24 :seon.workout/notes "felt good"}`),
+  3-turn arcs, reply in a post-verify turn (the f3 blind-reply class
+  did not recur here).
+- **s32 5/5: NOT MET — but every red is a predicate-semantics call,
+  not a behavior defect.** Re-grep economy GREEN 3/3 (0/0/1 vs the
+  run-7 signature; pre-v4: 8→3→0); judge PASS 100 3/3 (post-v4: FAIL
+  40 ×2); replied/idle/under-cap green. Consult-FIRST red 3/3 — and in
+  ALL THREE runs the first eval WAS a store consult: a datalog/pull of
+  the `:seon.fn` program graph for `message!` (the v4 convergence the
+  post-v4 sweep already flagged — "consult the store" and "consult
+  :my.kb.codebase" diverge when the store carries full sources; the
+  anchor is the user's call). Salience: honestly red 2/3; sweep 2's
+  1/11 "hit" is CONTAMINATION-BY-DOCSTRING (below).
+- **s12 ≥2 findings + judge ≥70 + zero misstatements: MET on the
+  judge-calibrated runs, storage variance remains.** Judges 100/100
+  on both calibrated sweeps; ZERO transact!-throws misstatements in
+  every sweep (sweep 1's judge-B FAIL 30 graded a CORRECT reply —
+  see fix 3). Storage: 1 → 1 → 2 rows (pre-v4: 0–1); sweep 4 met the
+  ≥2 bar with the TAUGHT mixed shape (`:my.kb.codebase.fn/*` domain
+  attrs + shared `:my.kb/source-path/-line/confidence` on the same
+  rows). Sweep 1's extra rows used `file`/`line` names with NO
+  confidence-shaped attr — outside even the widened cut; counting
+  them would be answer-chasing, so it stays red for that sweep.
+
+### What each Wave-A fix demonstrably changed (blob evidence)
+
+- **A1 (wire tx normalization):** S-21's run row LANDED 3/3 (post-v4:
+  0/3 — "run-row never landed"). Single-eval transacts with the
+  taught map form succeed (`:seon.eval/ok? true` on the transact
+  evals; row read back by the predicate's post-run datalog).
+- **A2 (parse-forms format contract):** S-21 eval counts collapsed
+  13/10/8 → 4/8/4 with ZERO register evals; narration lines
+  (`assistant> ;; …`) ride prompts as comments, and no run produced
+  the eaten-consult `:read`-span signature. s12 sweep 2's agent A
+  still burned 47 evals/13 turns — A2 removes parse losses, not
+  re-derivation appetite.
+- **A3 (per-attr inventory + loud truncation + sourceless
+  reconstitution):** the S-21 carrier was the RECONSTITUTED ns
+  source — all four `(schema/register! :seon.workout/… …)` forms
+  render in the namespaces section in all three runs (post-v4: the
+  namespaces-section required `:seon.ns/source` and tee-minted ns
+  rows were invisible). The inventory itself contains
+  `{:seon.db/kind :seon.workout …}` in the live value, but the
+  creation-turn DISPLAY clips at "⚠ TRUNCATED at 1500 of 2294 chars"
+  — deterministically at `:seon.handler.matc…`, so the workout row
+  was NEVER visible in the rendered inventory in any run (sorted
+  output puts `:seon.*` substrate kinds before user-domain kinds…
+  and `:seon.workout` last). The truncation banner IS loud and the
+  agents did not fork — but the inventory display budget is the top
+  remaining gap (below).
+
+### Harness fixes this re-measure (before/after)
+
+3. **s12 judge miscalibration (sweep 1).** Judge-B FAILed (30) a
+   reply that traced "internal throw → transact! catch →
+   `{:seon.db/ok? false …}` envelope" — verbatim ground truth — by
+   misreading the internal-throw description as a caller-facing throw
+   claim (justification preserved in
+   `tmp/gym-postwaveA-paid1.log`). Rubrics for judge-a/judge-b now
+   state the internal/surface distinction explicitly ("describing the
+   internal throw is CORRECT; FAIL only a claim that the CALLER sees
+   a throw/rejection"). This calibrates the judge to reference facts
+   it already had; agents never see rubrics. s12 was re-run (sweep 4)
+   so both counted measurements use the calibrated judge. After:
+   100/100, 100/100.
+4. **s32 salience text is NOT unique to the fixture.** Sweep 2's
+   1/11 "green": the agent pulled `message!`'s FULL SOURCE from the
+   program graph, and the real docstring contains "returns a CONCISE
+   envelope, never the raw\n   tx-report" — the §3.4 uniqueness check
+   missed it because a LINE BREAK splits the phrase in src (verified:
+   single-line grep of src/ finds nothing; blob line 2340 of
+   `logs/prompts/NSD-2606111713/eLW-2606111713.txt` carries the full
+   docstring). The fixture claim was authored FROM the docstring, so
+   contamination-by-substrate is structural. NOT re-cut here — the
+   predicate stays EXPECTED-RED and any new anchor text is the same
+   user call as the consult anchor (both are the v4
+   store-source/my.kb convergence question). Future self-bait checks
+   must be whitespace-insensitive.
+
+### System findings (report-only, src out of fence)
+
+1. **Creation-turn inventory display clips before user-domain kinds
+   (every S-21 run).** The per-attr inventory value is 2294 chars;
+   the eval display caps at 1500; sorted order puts ~13 substrate
+   kinds first. `:seon.workout` (and any user-domain kind) never
+   renders. Fix hypotheses (general): render the creation-turn
+   inventory result unclipped (it is THE consult surface), or sort
+   non-substrate kinds first, or shrink substrate rows (they're
+   derivable from the rendered namespaces anyway). src/seon/ctx.cljs
+   (eval display clamp) / src/seon/db.cljs:744 (sort).
+2. **`:seon.fn/sym` value-shape trap.** Agents consistently first try
+   `[?f :seon.fn/sym "message!"]` (bare name) — stored values are
+   qualified (`"seon.agent.message/message!"`) → silent empty. s32
+   sweep 2 recovered via unbound `?sym` + client-side filter; sweep 3
+   concluded (falsely narrated) "message! isn't stored as a :seon.fn
+   row" and went to grep. Same legibility family as the query
+   typo-guard, but for VALUE shapes on identity-ish attrs: a no-rows
+   result on a unique-attr equality where a near-miss exists (suffix
+   match) should say so. src/seon/db.cljs (query guard) or index bare
+   names alongside.
+3. **Consult-first behavior has converged on the program graph, not
+   my.kb.** 4/4 first evals across s32+s12-B post-Wave-A were
+   `:seon.fn`/`:seon.ns` datalog — the store IS being consulted
+   first, the strict `:my.kb` anchors mark it red. The kb-section /
+   finding-claims rung (gym-upgrade §4.3) plus the anchor-semantics
+   user call are now the whole remaining distance on these axes.
+4. **s12 storage variance persists** (1 → 1 → 2 rows vs ≥2 bar;
+   judge-perfect answers regardless). The stores-proactively teaching
+   lands as ONE exemplary row most runs. Wave B's shown-not-told
+   mixed-namespace example (ROOT 1) is the open lever; sweep 4 shows
+   the taught shape DOES land when the agent stores at all.
+5. **Dangling schema-catalog pointers still in tree** (Wave B scope,
+   unchanged): src/my/kb.cljs:22-23, src/my/soul.cljs:176,201 — one
+   S-21 narration again said "The schema-catalog call…". Did not
+   cause forks this time (reconstituted sources carried), but ROOT
+   1's executable-teachings unit remains the fix.
+
+### Ranked remaining gaps
+
+1. Inventory display clip (finding 1) — hides exactly the rows the
+   surface exists to show; cheap, general, src-side.
+2. kb-section / finding-claims rung + the TWO user calls on predicate
+   semantics (consult anchor, salience anchor) — without them s32's
+   two reds are unmovable by any agent behavior.
+3. Wave B executable teachings (catalog pointers, sym-shape examples,
+   shown mixed-namespace provenance) — findings 2, 4, 5.
+4. s12 storage volume (behavioral; re-measure after Wave B).
+
+### Staging list (gym fence — the orchestrator commits)
+
+- `test/seon/gym/scenarios/consults-findings-run8.edn` (§2 widening +
+  judge calibration + f7 line re-anchors)
+- `docs/prds/agent-runtime/research/e2e-demo-findings-2026-06-08.md`
+  (this section)
+
+Sweep logs: `tmp/gym-postwaveA-stub.log`,
+`tmp/gym-postwaveA-paid{1,2,3,4}.log`; cards extracted at
+`tmp/card-{s21,s32,s12}-{1..4}.edn`. Sweep 1 s12 = pre-judge-fix
+(recorded, superseded by sweep 4).
