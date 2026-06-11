@@ -119,6 +119,8 @@ T6/SOUL/boot-fix/gym baseline).
 | T6 overlay verified via curl markup only — backtick/Esc/focus-guard not exercised in a real browser | T3+T6 report | one manual check (or browser-automation pass) before demo |
 | outside-builder blockers: konserve local fork (4 deps.edn sites), `bin/run:11` hardcoded JAVA_HOME, README lacks build instructions, `.mcp.json` absolute paths, datahike gitlink pinned to unreachable sha | release-readiness research (d1b8e90) — push plan §7 PARKED for user go | release unit when user green-lights the push |
 | pull-guard bypasses: `handlers/fn.cljs:60` + `handlers/message.cljs:41` call `d/pull` directly (raw-throw on uninstalled attrs; the message one masks typos in a bare try); the `query`/`d/datoms` boundary has the same lazy-install trap (render's :aevt scan gates manually) | 65dfc90 unit report | route handlers through `seon.db/pull` + a sibling guard for `query` — fold into the render sweep / composer rewrite |
+| **DIS transient false-empty datalog read**: the same provenance query returned `#{}` once then the row seconds later on the live DIS conn (possible lazy node-fetch timing in datahike-cljs query). DISHONEST READS class — boot-time consumers (GC, replay selection) would silently mis-decide; GC under-prunes safely, but the read itself is wrong | 098c0b3 unit report | focused investigation unit — reproduce, then fix in the fork or the wire layer |
+| recurring `tx-feed pump failed (wire rpc timeout) — re-subscribing in 2s` in pod.log around heavy test runs; self-heals via re-subscribe; pre-existing | 098c0b3 unit report | watch; fold into wire hardening if frequency grows |
 
 ## What P8 proved (so the plan stays honest)
 
