@@ -5,17 +5,23 @@
    ## The stream is DERIVED — nothing stored per-view
 
    [[conversation]] builds on `seon.render.default/recent-messages`
-   (from = me OR to ∋ me, labeled by from-ref kind) and classifies
-   each row into a bubble kind:
+   (from = me OR to ∋ me, labeled by DIRECTION — from-ref kind ×
+   to-ref kinds) and classifies each row into a bubble kind:
 
    - `::human` — the human's messages (label `\"user\"`). Right-aligned,
      amber-tinted: the human's own words.
-   - `::agent` — this agent's replies (label `\"assistant\"`).
-     Left-aligned, markdown-rendered: the agent speaking.
-   - `::peer`  — another agent's messages (label `\"agent-<id>\"`).
-     INLINE in the same stream, dimmer and smaller, labeled with the
-     peer's id — the human watches their agent confer with peers
-     without leaving the conversation.
+   - `::agent` — this agent's REPLIES to the human (label
+     `\"assistant\"` — from = me AND to ∋ the user). Left-aligned,
+     markdown-rendered: the agent speaking.
+   - `::peer`  — peer traffic, both directions, INLINE in the same
+     stream, dimmer and smaller, direction-labeled: incoming carries
+     the sender's id (`\"agent-<id>\"`), outgoing carries the target
+     (`\"→ agent-<id>\"`) — the human watches their agent confer with
+     peers without leaving the conversation.
+
+   The agent's per-turn SELF-messages (raw LLM output logged for the
+   transcript: from = me, to = [me]) never reach this surface —
+   `recent-messages` excludes them at the derivation.
 
    No acknowledgement state, no read markers, no per-view storage:
    the stream re-derives from the message log at every render
@@ -41,8 +47,9 @@
 
 (schema/register! ::kind [:enum ::human ::agent ::peer])
 
-;; The from-kind label exactly as `recent-messages` derives it:
-;; "user" / "assistant" / "agent-<id>" / "unknown".
+;; The direction label exactly as `recent-messages` derives it:
+;; "user" / "assistant" / "agent-<id>" (incoming peer) /
+;; "→ agent-<id>" (outgoing peer) / "unknown".
 (schema/register! ::label :string)
 
 (schema/register! ::content :string)
@@ -93,9 +100,10 @@
   50)
 
 (defn message-kind
-  "Classify a `recent-messages` from-kind label into a bubble kind:
-   `\"user\"` → `::human`, `\"assistant\"` (this agent) → `::agent`,
-   anything else (`\"agent-<id>\"`, `\"unknown\"`) → `::peer`."
+  "Classify a `recent-messages` direction label into a bubble kind:
+   `\"user\"` → `::human`, `\"assistant\"` (this agent → the human) →
+   `::agent`, anything else (`\"agent-<id>\"` incoming peer,
+   `\"→ agent-<id>\"` outgoing peer, `\"unknown\"`) → `::peer`."
   {:malli/schema [:=> [:catn [::label ::label]] ::kind]}
   [label]
   (cond
@@ -134,7 +142,9 @@
 
 (defn last-reply
   "The agent's most recent REPLY — the newest `::agent` (label
-   `\"assistant\"`) message in [[conversation]] — as readable text.
+   `\"assistant\"`: from = me AND to ∋ the user) message in
+   [[conversation]] — as readable text. Transcript self-narration and
+   outgoing peer sends never count (direction-classified upstream).
    Returns `{}` when the agent has never replied (optional = absent).
 
    This is what the default root tile shows

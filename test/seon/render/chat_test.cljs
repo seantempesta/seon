@@ -31,6 +31,8 @@
   (is (= ::chat/agent (chat/message-kind "assistant")))
   (is (= ::chat/peer  (chat/message-kind "agent-b2-000001"))
       "another agent's label is a peer")
+  (is (= ::chat/peer  (chat/message-kind "→ agent-b2-000001"))
+      "an OUTGOING peer send is also peer traffic — direction lives in the label")
   (is (= ::chat/peer  (chat/message-kind "unknown"))
       "unknown senders render subordinate, never as the human"))
 
@@ -165,6 +167,19 @@
                            {:seon.agent.message/from    [:seon.agent/id b-id]
                             :seon.agent.message/to      [:seon.agent/id a-id]
                             :seon.agent.message/content "peer ping"})))
+                (.then (fn [_]
+                         ;; outgoing peer send — from me, to a peer
+                         (agent/message!
+                           {:seon.agent.message/from    [:seon.agent/id a-id]
+                            :seon.agent.message/to      [:seon.agent/id b-id]
+                            :seon.agent.message/content "pong back at you"})))
+                (.then (fn [_]
+                         ;; transcript SELF-message — raw LLM output, from
+                         ;; me to me (what the loop logs per turn)
+                         (agent/message!
+                           {:seon.agent.message/from    [:seon.agent/id a-id]
+                            :seon.agent.message/to      [:seon.agent/id a-id]
+                            :seon.agent.message/content ";; thinking out loud\n(seon.agent/reply! {…})"})))
                 (.then
                   (fn [_]
                     (let [{::chat/keys [messages]}
@@ -173,16 +188,24 @@
                           by-content (into {} (map (juxt ::chat/content
                                                          identity))
                                            messages)]
-                      (is (= 3 (count messages))
-                          "from = me OR to ∋ me — the whole exchange")
+                      (is (= 4 (count messages))
+                          (str "from = me OR to ∋ me, MINUS the self-"
+                               "narration row — transcript noise never"
+                               " becomes a bubble"))
+                      (is (nil? (by-content ";; thinking out loud\n(seon.agent/reply! {…})"))
+                          "the agent→self transcript row is excluded")
                       (is (= ::chat/human
                              (::chat/kind (by-content "hello A"))))
                       (is (= ::chat/agent
                              (::chat/kind (by-content "hi human"))))
-                      (testing "the peer message is a labeled ::peer"
+                      (testing "the incoming peer message is a labeled ::peer"
                         (let [m (by-content "peer ping")]
                           (is (= ::chat/peer (::chat/kind m)))
                           (is (= (str "agent-" b-id) (::chat/label m)))))
+                      (testing "the OUTGOING peer message is a direction-labeled ::peer"
+                        (let [m (by-content "pong back at you")]
+                          (is (= ::chat/peer (::chat/kind m)))
+                          (is (= (str "→ agent-" b-id) (::chat/label m)))))
                       (is (every? #(instance? js/Date (::chat/at %)) messages)
                           "every bubble carries its timestamp")))))))
         (.then (fn [_] (done)))
@@ -210,14 +233,24 @@
                            {:seon.agent.message/from    [:seon.agent/id b-id]
                             :seon.agent.message/to      [:seon.agent/id a-id]
                             :seon.agent.message/content "peer ping"})))
+                (.then (fn [_]
+                         ;; the per-turn transcript SELF-message lands
+                         ;; AFTER the reply — the kXQ root-tile bug
+                         ;; (2026-06-11) was this row, raw eval source,
+                         ;; rendering as the "last reply"
+                         (agent/message!
+                           {:seon.agent.message/from    [:seon.agent/id a-id]
+                            :seon.agent.message/to      [:seon.agent/id a-id]
+                            :seon.agent.message/content ";; The user asked …\n(seon.agent/reply! {…})"})))
                 (.then
                   (fn [_]
                     (let [{::chat/keys [last-reply]}
                           (chat/last-reply {:seon.agent/id a-id
                                             :seon.db/db @conn})]
                       (is (= "on it — 3 workouts logged" last-reply)
-                          (str "the newest ::agent message — the human's"
-                               " messages and peer traffic never count"
+                          (str "the newest agent→HUMAN message — the"
+                               " human's messages, peer traffic, and"
+                               " transcript self-narration never count"
                                " as MY reply"))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

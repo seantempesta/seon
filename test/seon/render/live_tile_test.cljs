@@ -262,6 +262,16 @@
                              {:seon.agent.message/from    [:seon.agent/id "wlcmrpl-000001"]
                               :seon.agent.message/to      [:seon.user/id "user"]
                               :seon.agent.message/content "I found 3 workouts this week"}))))
+                (.then (fn [_]
+                         ;; the per-turn transcript SELF-message (from =
+                         ;; to = the agent, raw eval source) lands AFTER
+                         ;; the reply — the kXQ root-tile bug 2026-06-11:
+                         ;; this row rendered as the "last reply"
+                         (binding [db/*conn* conn]
+                           (agent/message!
+                             {:seon.agent.message/from    [:seon.agent/id "wlcmrpl-000001"]
+                              :seon.agent.message/to      [:seon.agent/id "wlcmrpl-000001"]
+                              :seon.agent.message/content ";; The user asked …\n(seon.agent/reply! {…})"}))))
                 (.then
                   (fn [_]
                     (binding [db/*conn* conn]
@@ -273,6 +283,9 @@
                         (is (some #(= "I found 3 workouts this week" %)
                                   (hiccup-strings hiccup))
                             "the last REPLY renders as readable text (not raw message data)")
+                        (is (not-any? #(re-find #"reply!" (str %))
+                                      (hiccup-strings hiccup))
+                            "transcript self-narration never shows as the last reply")
                         (is (re-find #"I found 3 workouts this week" ai)
                             "the twin tells the agent its reply is on display"))))))))
         (.then (fn [_] (done)))

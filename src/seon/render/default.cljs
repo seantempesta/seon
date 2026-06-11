@@ -70,8 +70,19 @@
   "Return the most-recent `n` messages of agent `id`'s conversation
    (DERIVED: from = me OR to ∋ me — nothing stored per-agent),
    oldest-first. Each row is `[at label content]`; the label resolves
-   by from-ref kind: `user` / `assistant` (the agent itself) /
-   `agent-<id>` (another agent)."
+   by DIRECTION (from-ref kind × to-ref kinds):
+
+   - `user`           — human → agent
+   - `assistant`      — this agent → the user (a real reply: to ∋ user)
+   - `agent-<id>`     — another agent → me (incoming peer)
+   - `→ agent-<id>`   — this agent → a peer (outgoing peer)
+
+   Rows from me whose `to` contains NEITHER the user NOR another agent
+   (i.e. agent → self) are the per-turn transcript SELF-messages — raw
+   LLM output logged for the turn record, not conversation — and are
+   EXCLUDED here (observed live 2026-06-11, kXQ root tile: a self
+   row of raw eval source rendered as the agent's \"last reply\"
+   because the pre-fix query ignored `to` entirely)."
   ([db id] (recent-messages db id 20))
   ([db id n]
    (let [;; All reads via QUERY, not d/entity — the inspector hands
@@ -107,16 +118,52 @@
                        [?m :seon.agent.message/at ?at]
                        [?m :seon.agent.message/from ?f]
                        [?m :seon.agent.message/content ?content]]
-                     my-eid))]
+                     my-eid))
+         ;; to-refs per message eid — `to` is cardinality-many, so this
+         ;; query yields one row per (message, to-ref); fold into sets.
+         ;; Direction needs it: from=me alone can't tell a real reply
+         ;; (to ∋ user) from transcript self-narration (to = [me]) from
+         ;; an outgoing peer send (to ∋ other agent).
+         tos    (when (seq rows)
+                  (reduce (fn [acc [m t]] (update acc m (fnil conj #{}) t))
+                          {}
+                          (q '[:find ?m ?t
+                               :in $ ?me
+                               :where
+                               (or-join [?m ?me]
+                                 [?m :seon.agent.message/from ?me]
+                                 [?m :seon.agent.message/to ?me])
+                               [?m :seon.agent.message/to ?t]]
+                             my-eid)))]
      (->> rows
-          (map (fn [[_m at f content]]
-                 [at
-                  (cond
-                    (contains? users f)    "user"
-                    (= (get agents f) id)  "assistant"
-                    (contains? agents f)   (str "agent-" (get agents f))
-                    :else                  "unknown")
-                  content]))
+          (keep (fn [[m at f content]]
+                  (let [to    (get tos m #{})
+                        label (cond
+                                (contains? users f)
+                                "user"
+
+                                (= (get agents f) id)
+                                (cond
+                                  ;; a real reply — to ∋ the user
+                                  (some #(contains? users %) to)
+                                  "assistant"
+                                  ;; outgoing peer send — to ∋ another agent
+                                  (some #(and (contains? agents %) (not= % f)) to)
+                                  (str "→ agent-"
+                                       (some (fn [t]
+                                               (when (and (contains? agents t)
+                                                          (not= t f))
+                                                 (get agents t)))
+                                             to))
+                                  ;; agent → self: transcript narration, not
+                                  ;; conversation — exclude (nil → keep drops).
+                                  :else nil)
+
+                                (contains? agents f)
+                                (str "agent-" (get agents f))
+
+                                :else "unknown")]
+                    (when label [at label content]))))
           (sort-by first)
           (take-last n)))))
 
