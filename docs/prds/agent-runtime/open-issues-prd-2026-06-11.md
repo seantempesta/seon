@@ -32,6 +32,23 @@ session's commit messages.
 | V3-D datahike API block | query API from var docstrings — querying is core, agents only see our wrapper docs | queued |
 | V3-E show-don't-tell | sections → demonstrated evals (todo list-open, catalog query, my.kb consult, pull-own-entity); one section per unit, scorecard each | queued |
 | S-21 instability | zero-register! flake 1/2 — partly the warn wording, partly plan variance; 3-run probe before declaring | with P22/P9 |
+| **SOUL/system-prompt hardcoded** (user, 2026-06-11) | the SOUL-derived identity text is a compiled-in def at `seon.ai.deepseek/default-system-prompt` (deepseek.cljs:107) — uneditable without a rebuild, and identity content sits in a PROVIDER ns (placement smell: it isn't deepseek-specific). User directive: ANY user must be able to change this and control ALL content injected into context. Fix shape: load from an editable source — store entity seeded at boot from SOUL.md, same seeded+editable pattern as `my.kb.instruction` (one mechanism); the deepseek def becomes a read of it; SOUL.md the seed, the store the truth | new unit |
+
+## Startup/restart reliability (user, 2026-06-11 — investigate)
+
+Observed during the 06-11 morning restart; one investigation unit:
+
+- `bin/seon restart all` excludes the JVM ("jvm not included") — a full
+  system restart is two commands; either include it or say why not.
+- The seon JVM MCP bridge caches a failed pre-flight across a JVM
+  restart and keeps reporting "server not running" after nREPL 7888 is
+  verifiably up (direct bencode clone succeeds) — requires a manual
+  `/mcp` reconnect. The CLJS bridge self-heals (b8b3400); the JVM
+  bridge should too (same fix shape: re-resolve on failure instead of
+  caching the verdict).
+- Post-start health check warns `:runtime-persisted {:instance-count
+  0}` degradation 30s after boot — likely benign before agents resume,
+  but verify and either fix the check's timing or document it.
 
 ## Tier 3 — platform (post-demo unless cheap)
 
