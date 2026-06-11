@@ -456,7 +456,13 @@
                 ;; id-attr is always required — listed separately so it's
                 ;; not duplicated when the entry has no {:optional true}.
                 reqs (vec (distinct (cons id-attr reqs)))
-                tid  (str "schema-" (name k))]
+                ;; FULL keyword in the tempid — (name k) alone collides
+                ;; when two kinds share a name segment (:a.b/person +
+                ;; :c.d/person → one tempid string → two upsert targets
+                ;; → boot-fatal :transact/upsert; aria repro 2026-06-11).
+                ;; Tempids are tx-local placeholders, never stored — the
+                ;; row's identity is :seon.schema/key — so no migration.
+                tid  (str "schema-" k)]
             (swap! *schema-required-counts assoc k (count reqs))
             (cond-> [[:db/add tid :seon.schema/key k]
                      [:db/add tid :seon.schema/id-attr id-attr]]

@@ -78,6 +78,32 @@
   (unregister! :schematest.entity/id :schematest.entity/label
                :schematest.entity))
 
+(deftest entity-schema-tempids-carry-the-full-keyword
+  ;; aria boot-fatal repro 2026-06-11: two kinds sharing a NAME segment
+  ;; (:a.b/person + :c.d/person) collided on the tempid "schema-person"
+  ;; in one seed tx → :transact/upsert conflict → pod exit, no resume.
+  ;; Tempids must carry the FULL keyword; they are tx-local and never
+  ;; stored, so this is identity-free to change.
+  (schema/register! :schematest.one.person/id [:string {:seon.db/identity true}])
+  (schema/register! :schematest.two.person/id [:string {:seon.db/identity true}])
+  (schema/register! :schematest.one/person
+    [:map {:seon.db/entity true}
+     [:schematest.one.person/id :schematest.one.person/id]])
+  (schema/register! :schematest.two/person
+    [:map {:seon.db/entity true}
+     [:schematest.two.person/id :schematest.two.person/id]])
+  (let [tids (fn [k] (->> (schema/entity-schema-tx-data k)
+                          (map second)   ; [:db/add TID attr v]
+                          set))
+        one  (tids :schematest.one/person)
+        two  (tids :schematest.two/person)]
+    (is (= 1 (count one)))
+    (is (= 1 (count two)))
+    (is (not (some one two))
+        "same name segment must NOT share a tempid (boot-fatal upsert)"))
+  (unregister! :schematest.one.person/id :schematest.two.person/id
+               :schematest.one/person :schematest.two/person))
+
 (deftest unmarked-map-with-id-key-does-not-derive-and-is-silent
   ;; The old register!-time warn was a false-positive generator by
   ;; construction: at registration an id-carrying map is
