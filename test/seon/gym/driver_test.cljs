@@ -51,12 +51,13 @@
             (str path " — " (:seon.gym.scenario/id s) " validates"))))))
 
 (deftest rubric-axes-are-the-prd-vocabulary
-  ;; The §7 item-12 rubric, verbatim, plus the U3 structural axis — a
-  ;; predicate tagged outside this vocabulary must fail schema
-  ;; validation at load time.
+  ;; The §7 item-12 rubric, verbatim — agent BEHAVIOR only. A predicate
+  ;; tagged outside this vocabulary must fail schema validation at load
+  ;; time. (:context-fidelity was REMOVED with the structural gates,
+  ;; user r2 2026-06-11 — the gym tests the agent, not the layout.)
   (is (m/validate :seon.gym.axis/name :consults-findings))
   (is (m/validate :seon.gym.axis/name :stores-proactively))
-  (is (m/validate :seon.gym.axis/name :context-fidelity))
+  (is (not (m/validate :seon.gym.axis/name :context-fidelity)))
   (is (not (m/validate :seon.gym.axis/name :made-up-axis))))
 
 ;; ---------------------------------------------------------------------------
@@ -460,123 +461,75 @@
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
 ;; ---------------------------------------------------------------------------
-;; STRUCTURAL PER-TURN PROFILE (gym-upgrade PRD §2.2 / U3) — every run
-;; captures one :seon.gym/turn-profile per driven turn against the
-;; pre-turn db value and scores two standing structural results derived
-;; from the composer's own code: layout completeness (every
-;; substrate-default-ctx name in the merged layout) and cache-prefix
-;; byte-stability (double-render byte-identical up to :transcript).
-;; Falsification per the PRD: a section fn embedding (js/Date.) at a
-;; STATIC priority flips the stability check RED; removed → green. The
-;; volatile fn also bumps an atom counter — a bare (js/Date.) can
-;; render IDENTICALLY on a same-millisecond double-render, which would
-;; make the RED side flaky-green; the counter makes the volatility
-;; deterministic (the PRD's "timestamp or counter" class).
+;; PER-TURN CONTEXT TELEMETRY — informational only, NEVER gates pass?
+;; (user r2, 2026-06-11: the former structural gates broke the gym on
+;; every context change and were removed). Each driven turn's scorecard
+;; profile records what context was loaded — section names in render
+;; order + per-section char counts — so "what db state/context did the
+;; agent see" stays answerable without coupling the verdict to layout.
 ;; ---------------------------------------------------------------------------
 
-(defn- prefix-stability-scenario [id fn-name fixture-src]
-  {:seon.gym.scenario/id     id
-   :seon.gym.scenario/doc    "Inline stub (gym-upgrade U3 falsification): turn 1 installs an agent section at STATIC priority 12 (inside the cache prefix); turn 2's profile double-renders against the pre-turn db. A volatile section fn must flip the standing cache-prefix-stability result RED; a byte-stable one stays green."
-   :seon.gym.scenario/tier   :stub
-   :seon.gym.scenario/status :active
-   :seon.gym.scenario/axes   [:context-fidelity]
-   :seon.gym.scenario/fixture-sources [fixture-src]
-   :seon.gym.scenario/turns
-   [{:seon.gym.turn/message "Install your static section now."
-     :seon.gym.turn/llm-script
-     [(str "(seon.agent/add-section! {:seon.ctx/name :gymtest-static "
-           ":seon.ctx/priority 12 :seon.render/ai 'cljs.user/" fn-name "})\n")]}
-    {:seon.gym.turn/message "Now render a turn with it in place."
-     :seon.gym.turn/llm-script
-     ["(seon.agent/reply! {:seon.agent.message/content \"rendered\"})\n"]}]
-   :seon.gym.scenario/predicates []})
-
-(deftest volatile-static-section-flips-cache-prefix-stability-red
-  ;; U3 falsification, RED side.
+(deftest turn-profiles-record-context-telemetry-without-gating
   (async done
-    (-> (gym/run-scenario!
-          {:seon.gym/scenario
-           (prefix-stability-scenario
-             :gymtest-prefix-unstable "gymtest-unstable-section"
-             (str "(def !gymtest-renders (atom 0))\n"
-                  "(defn gymtest-unstable-section [_]\n"
-                  "  (str \";; rendered at \" (js/Date.)"
-                  " \" render#\" (swap! !gymtest-renders inc)))"))})
-        (.then (fn [card]
-                 (gym/print-scorecard! card)
-                 (is (m/validate :seon.gym/scorecard card)
-                     "scorecard with turn-profiles validates")
-                 (let [r (result-by-id card :gym.structural/cache-prefix-stable)]
-                   (is (false? (:seon.gym.result/pass? r))
-                       "a volatile static-priority section is RED")
-                   (is (str/includes? (:seon.gym.result/actual r)
-                                      "gymtest-static")
-                       (str "the actual names the volatile section — "
-                            (:seon.gym.result/actual r))))
-                 ;; layout completeness is an INDEPENDENT check — green.
-                 (is (true? (:seon.gym.result/pass?
-                              (result-by-id card
-                                            :gym.structural/layout-complete))))
-                 (is (false? (:seon.gym.scorecard/pass? card))
-                     "the structural RED fails the card")
-                 (is (false? (get-in card [:seon.gym.scorecard/axes
-                                           :context-fidelity]))
-                     "the declared structural axis rolls up false")
-                 ;; per-turn evidence: turn 1 (pre-install) stable, turn 2
-                 ;; (section in place) unstable, with the diff named.
-                 (let [[p1 p2] (:seon.gym.scorecard/turn-profiles card)]
-                   (is (m/validate :seon.gym/turn-profile p1))
-                   (is (true? (:seon.gym.profile/prefix-stable? p1))
-                       "turn 1 (before the install) is stable")
-                   (is (false? (:seon.gym.profile/prefix-stable? p2))
-                       "turn 2 (volatile section live) is unstable")
-                   (is (some #{:gymtest-static} (:seon.render/sections p2))
-                       "the installed section is in turn 2's layout")
-                   (is (str/includes? (str (:seon.gym.profile/prefix-diff p2))
-                                      "first diff at char")
-                       "the profile carries the byte-level diff detail"))
-                 (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest stable-static-section-keeps-cache-prefix-green
-  ;; U3 falsification, GREEN side: the SAME scenario shape with the
-  ;; volatility removed — plus the derived layout-completeness check
-  ;; proven against substrate-default-ctx itself (not a hand-list).
-  (async done
-    (-> (gym/run-scenario!
-          {:seon.gym/scenario
-           (prefix-stability-scenario
-             :gymtest-prefix-stable "gymtest-stable-section"
-             "(defn gymtest-stable-section [_] \";; a byte-stable static contribution\")")})
-        (.then (fn [card]
-                 (gym/print-scorecard! card)
-                 (is (true? (:seon.gym.scorecard/pass? card))
-                     (str "stable variant passes — failing results: "
-                          (pr-str (filterv (complement :seon.gym.result/pass?)
-                                           (:seon.gym.scorecard/results card)))))
-                 (is (true? (:seon.gym.result/pass?
-                              (result-by-id card
-                                            :gym.structural/cache-prefix-stable))))
-                 (is (true? (get-in card [:seon.gym.scorecard/axes
-                                          :context-fidelity])))
-                 ;; layout completeness DERIVED from the composer's code:
-                 ;; every substrate default name is in every captured layout.
-                 (let [defaults (map :seon.ctx/name (ctx/substrate-default-ctx))
-                       profiles (:seon.gym.scorecard/turn-profiles card)]
-                   (is (= 2 (count profiles)) "one profile per driven turn")
-                   (doseq [p profiles]
-                     (is (every? (set (:seon.render/sections p)) defaults)
-                         "every substrate-default-ctx name is in the layout")))
-                 ;; per-section char counts: substrate sections render, and
-                 ;; the installed agent section shows up in turn 2's sizes.
-                 (let [chars (into {} (:seon.gym.profile/section-chars
-                                       (last (:seon.gym.scorecard/turn-profiles
-                                              card))))]
-                   (is (pos? (get chars :system 0)))
-                   (is (pos? (get chars :gymtest-static 0))
-                       "the installed section renders into the profile"))
-                 (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [scenario
+          {:seon.gym.scenario/id     :gymtest-context-telemetry
+           :seon.gym.scenario/doc    "Inline stub: an agent installs a custom section; turn-profiles record sections + char counts as evidence, and the verdict comes ONLY from the scenario's predicates."
+           :seon.gym.scenario/tier   :stub
+           :seon.gym.scenario/status :active
+           :seon.gym.scenario/axes   [:terminates]
+           :seon.gym.scenario/fixture-sources
+           ["(defn gymtest-telemetry-section [_] \";; a custom agent contribution\")"]
+           :seon.gym.scenario/turns
+           [{:seon.gym.turn/message "Install your section now."
+             :seon.gym.turn/llm-script
+             [(str "(seon.agent/add-section! {:seon.ctx/name :gymtest-static "
+                   ":seon.ctx/priority 12 "
+                   ":seon.render/ai 'cljs.user/gymtest-telemetry-section})\n")]}
+            {:seon.gym.turn/message "Now render a turn with it in place."
+             :seon.gym.turn/llm-script
+             ["(seon.agent/reply! {:seon.agent.message/content \"rendered\"})\n"]}]
+           :seon.gym.scenario/predicates
+           [{:seon.gym.predicate/id     :turn-closes-done
+             :seon.gym.predicate/kind   :datalog
+             :seon.gym.predicate/axis   :terminates
+             :seon.gym.predicate/query  '[:find ?t :where
+                                          [?t :seon.agent.turn/status :done]]
+             :seon.gym.predicate/expect :non-empty}]}]
+      (-> (gym/run-scenario! {:seon.gym/scenario scenario})
+          (.then (fn [card]
+                   (gym/print-scorecard! card)
+                   (is (m/validate :seon.gym/scorecard card)
+                       "scorecard with turn-profiles validates")
+                   (is (true? (:seon.gym.scorecard/pass? card))
+                       (str "verdict comes only from the scenario's own "
+                            "predicates — failing results: "
+                            (pr-str (filterv (complement :seon.gym.result/pass?)
+                                             (:seon.gym.scorecard/results card)))))
+                   ;; telemetry NEVER injects results: every result id is a
+                   ;; scenario-declared predicate, nothing auto-appended.
+                   (is (= [:turn-closes-done]
+                          (mapv :seon.gym.predicate/id
+                                (:seon.gym.scorecard/results card)))
+                       "no standing/structural results ride the scorecard")
+                   ;; ...but the evidence is all there.
+                   (let [profiles (:seon.gym.scorecard/turn-profiles card)]
+                     (is (= 2 (count profiles)) "one profile per driven turn")
+                     (doseq [p profiles]
+                       (is (m/validate :seon.gym/turn-profile p)))
+                     (let [chars (into {} (:seon.gym.profile/section-chars
+                                           (last profiles)))]
+                       (is (pos? (get chars :system 0))
+                           "substrate sections render into the profile")
+                       (is (pos? (get chars :gymtest-static 0))
+                           "the installed section renders into the profile"))
+                     (is (some #{:gymtest-static}
+                               (:seon.render/sections (last profiles)))
+                         "turn 2's layout records the installed section"))
+                   ;; prompt-file evidence: what the agent saw, per turn.
+                   (is (seq (:seon.gym.scorecard/prompt-files card))
+                       "scorecard carries prompt-blob paths")
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; SELF-BAIT LOAD CHECK (gym-upgrade §3.4) — a scenario whose fixture

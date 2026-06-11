@@ -716,3 +716,114 @@ search→read recipe: PROVEN · finding convention: PROVEN · envelope honesty:
 no false claims observed · reply! routing: PROVEN · UI: watchable live
 (collapsed statics, turn separators, sub-second renders) · finding REUSE:
 the one remaining behavior for the Friday demo bar.
+
+## PRE-V4 BASELINE (post gym-simplification) — 2026-06-11
+
+The gym was simplified per the user's r2 directive (gym-upgrade PRD
+§r2): the U3 structural pass-gates (`:gym.structural/layout-complete`,
+`:gym.structural/cache-prefix-stable`) and the `:context-fidelity`
+rubric axis were RIPPED OUT, along with the double-render machinery.
+The gym now tests AGENT BEHAVIOR only — mechanical store/outcome
+datalog + prompt-blob predicates + the LLM judge — plus full CAPTURE
+(prompt-blob paths, run-id uuids, per-turn section-name/char-count
+telemetry, informational only). Then the baseline was rerun: stub tier
+plus paid DeepSeek tier (`--paid=s32,s21,s12`), working tree at
+`14bf47f` plus the uncommitted simplification.
+
+### Harness fixes in this baseline (the simplification summary)
+
+- `test/seon/gym/driver.cljs` (−118 lines net): `structural-results`,
+  `dynamic-tail-sections`, `prefix-section-texts`, `first-char-diff`,
+  `prefix-diff-detail` deleted; `capture-turn-profile` is a single
+  render recording `[section-name char-count]` pairs; profile schema
+  dropped `layout-complete?`/`layout-missing`/`prefix-stable?`/
+  `prefix-diff`; `:seon.gym.axis/name` enum dropped
+  `:context-fidelity`. `:seon.gym.scorecard/turn-profiles` stays a
+  REQUIRED scorecard key and the driver unconditionally populates it —
+  cards validate (the "schema still requires turn-profiles" trap was
+  checked: not present).
+- `test/seon/gym/driver_test.cljs`: the two structural falsification
+  tests (volatile/stable static section) replaced by ONE telemetry
+  test (`turn-profiles-record-context-telemetry-without-gating`) that
+  asserts the verdict comes ONLY from scenario predicates while the
+  evidence (profiles, prompt files) is all captured.
+- No dangling refs to the deleted gates anywhere in `test/seon/gym/**`
+  or `bin/gym` (grep-verified); scenario EDNs carry no
+  `:context-fidelity` axes.
+
+### Scenario table — stub tier (run 1, `tmp/gym-baseline-run1.log`)
+
+Deliberate-falsification stubs (`gymtest-*` RED rows, the
+`:deliberately-broken` envelope-honesty variant, prompt-blob-missing)
+are SUPPOSED to be red — their deftests assert the red; the suite was
+0-failure. Real stub scenarios:
+
+| scenario | pass? | failed predicates | turns | run-id |
+|---|---|---|---|---|
+| s01-stub-pipeline-smoke | PASS | — (5/5) | 1 | 8ae80c60 |
+| blank-message-refusal | PASS | — (3/3) | 1 | 8bef3671 |
+| envelope-honesty (honest variant) | PASS | — (4/4) | 1 | 3e211c86 |
+| finding-storage-shape | PASS | — (4/4) | 1 | 445ece13 |
+| gymtest-context-telemetry (new) | PASS | — (1/1) | 2 | 43ee0263 |
+| judge-wiring-mock | PASS | judge 88 "states the concise envelope keys" | 1 | 592626a1 |
+| two-agent-judge-wiring | PASS | judges a:100, b:100 | 2 | 1dbe7fd6 |
+
+### Scenario table — paid DeepSeek tier
+
+| scenario | pass? | failed predicates | judge | turns | run-id |
+|---|---|---|---|---|---|
+| s21-log-workout-existing-schema (run 1) | PASS | — (7/7) | n/a (mechanical only) | 1 | bc091093 |
+| s32-consult-before-research | **FAIL** | `:at-most-one-repo-search` (2/10 evals grepped; cap 1) | judge-pass? TRUE — 100: "correctly states message! returns a concise envelope… cites the source file, matching ground truth exactly" | 1 | 6c73d314 |
+| s12-run8-two-agent-consultation | **FAIL** | `:a-stored-at-least-two-findings-with-provenance` (rows=1, need ≥2) | judge-pass? FALSE — a:40, b:40 (both replies claim transact! THROWS; ground truth: errors are VALUES — `{:seon.db/ok? false :seon.db/error …}`, caller never sees a throw; missing file citations) | 2 | 1a00af62 |
+
+### S-21 stability verdict: 3/3 PASS — STABLE
+
+Three independent paid probes, all 7/7 green
+(`:run-row-landed-with-established-attrs`, `:no-attr-fork-anywhere`,
+`:seeded-attrs-visible-as-domain-attrs`,
+`:zero-schema-registrations-needed`, `:agent-replied-to-the-user`,
+`:agent-ends-idle`, `:terminates-under-cap`):
+
+| probe | run-id | log |
+|---|---|---|
+| 1 | bc091093 | tmp/gym-baseline-run1.log |
+| 2 | 2744f2b0 | tmp/gym-s21-probe2.log |
+| 3 | 3b6b9a6e | tmp/gym-s21-probe3.log |
+
+Schema-reuse on an existing domain schema is reproducibly solid — a
+safe demo scenario.
+
+### System findings, ranked by demo risk (demo 2026-06-12)
+
+1. **s12 judge double-fail (a:40, b:40) — the agent misdescribes the
+   substrate's OWN error model.** Both agents told the user transact!
+   throws ex-info; the real surface returns an error VALUE. If the
+   demo includes "ask the agent how seon works", this exact wrong
+   answer is on the table. Context candidate: the error-envelope
+   contract (`:seon.db/ok?` value-not-throw) is evidently not salient
+   in the rendered context.
+2. **s12 finding under-storage (1 stored, need ≥2)** — same
+   storage-salience class as run-7/#26; agent A consulted and searched
+   correctly but stored only one finding row. Behavior, not harness.
+3. **s32 over-searching (`:at-most-one-repo-search` red, 2 greps)** —
+   the agent consulted the stored finding FIRST (predicate green) but
+   then re-derived via grep anyway. Cost/efficiency smell, mild demo
+   risk (slower turns), not a correctness risk.
+4. **EXPECTATION DIVERGENCE, good direction: s32's
+   `:seeded-claim-rendered-in-prompt` was expected-RED and came up
+   GREEN** in run 1 — the seeded finding text IS rendering into the
+   prompt now. The known finding-salience gap (#26) appears at least
+   partially closed at the context layer; the remaining gap is
+   behavioral (using it instead of re-searching, storing enough).
+
+### Baseline numbers v4 must beat
+
+- Stub tier: 7/7 real scenarios PASS (gate: stay 7/7).
+- Paid tier: s21 3/3 stable PASS; s32 FAIL (1 red predicate, judge
+  green); s12 FAIL (1 red predicate + judge double-fail at 40/40).
+  v4 bar: s32 → 5/5 green; s12 → ≥2 findings stored AND judge ≥70 on
+  both answers (no value-vs-throw misstatement).
+- CLJS suite at this baseline: **365 tests / 1545 assertions / 0
+  failures / 0 errors** (pre-simplification 366/1554/0; the −1/−9 is
+  the two deleted structural falsification tests replaced by one
+  telemetry test — expected).

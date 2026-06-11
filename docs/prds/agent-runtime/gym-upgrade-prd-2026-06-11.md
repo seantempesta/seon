@@ -14,6 +14,48 @@ exists today: `test/seon/gym/driver.cljs` (1051 lines, scenario EDNs in
 catalog `gym-scenario-catalog-2026-06-10.md`, and the one composer
 `seon.ctx/assemble-context`.
 
+## r2 — SIMPLIFICATION (user, 2026-06-11 — supersedes anything below that conflicts)
+
+The user's restated purpose, verbatim intent and law: **"The gym should
+be focused on testing the agent and having an LLM judge interpret if it
+did what it was supposed to do and catching bugs. That's it. I don't
+want strict issues that we are going to break the gym every time we
+update the context… focus on making sure the right context/datoms/
+dbstate is loaded for each eval and we are capturing everything so we
+can figure out what's working and why. So many times we've been
+wondering why the agent didn't do something and we were not including
+the info it needed in the context — the gym's goal should be to make
+this clear."**
+
+What this means concretely:
+
+- **U3's structural gates are REMOVED (user r2).** The standing
+  results `:gym.structural/layout-complete` and
+  `:gym.structural/cache-prefix-stable` no longer exist; nothing
+  layout-shaped or section-name-coupled may ever gate `pass?` again.
+  The `:context-fidelity` axis is deleted from the rubric. The
+  double-render machinery is deleted; the per-turn profile survives
+  only as INFORMATIONAL telemetry on the scorecard (agent + section
+  names + per-section char counts, single render against the pre-turn
+  db value) — it never affects the verdict.
+- **What the gym IS:** behavioral predicates (store/outcome datalog,
+  eval-pattern, prompt-blob includes/excludes) + the LLM judge, plus
+  CAPTURE: prompt-blob paths, run-id uuids, turn-profiles, and enough
+  scorecard evidence that "what context/datoms/db-state was loaded for
+  each eval" is always answerable after the fact.
+- **What survives from U1–U2 (the valuable half):** prompt-blob
+  predicate kinds (§2.1), per-eval capture, run-id uuids, call-once
+  done, the self-bait check, paid-gate logging.
+- §2.2's checks, U3's unit, and every "structural standing" item in
+  U4 are dead. U4 is re-scoped below to BEHAVIORAL standing predicates
+  only.
+- **DONE (2026-06-11): ripout shipped + baseline rerun.** Driver/test
+  simplification landed; stub tier 7/7 green; paid s21 3/3 STABLE
+  PASS, s32 FAIL (`:at-most-one-repo-search`), s12 FAIL (1 finding
+  stored + judge 40/40 on the value-vs-throw misstatement); suite
+  365/1545/0. Full table: e2e-demo-findings-2026-06-08.md §"PRE-V4
+  BASELINE (post gym-simplification)".
+
 User directives (2026-06-11, law for this PRD):
 
 - The gym ALWAYS represents a quality benchmark of the system as it
@@ -101,7 +143,14 @@ acted on" (context worked) is a SEPARATE predicate from "the agent's
 first eval consulted it" (agent behaved) — "context failed" vs "agent
 ignored context" become distinct failure signatures.
 
-### 2.2 Structural per-turn section profile
+### 2.2 Structural per-turn section profile — REMOVED (user r2, 2026-06-11)
+
+The two derived checks below shipped as standing scorecard gates
+(commit 4070e2c) and were RIPPED OUT the same day: they coupled the
+gym's verdict to the context layout, so every context change broke the
+gym. Only the informational per-turn telemetry (section names + char
+counts, single render) remains on the scorecard. Original text kept
+for the record:
 
 `assemble-context` already returns `:seon.render/sections` (layout
 provenance, all merged names in render order) and
@@ -373,7 +422,13 @@ where they change predicate semantics.
   (uuid); self-bait load check.
 - **Falsification:** per §3.1–3.4 above.
 
-### U3 — structural per-turn profile + cache-prefix stability (2.2)
+### U3 — structural per-turn profile + cache-prefix stability — REMOVED (user r2)
+
+Shipped as 4070e2c, ripped out 2026-06-11 per the r2 directive: the
+layout-completeness and cache-prefix-stability GATES are deleted (no
+structural results, no `:context-fidelity` axis, no double-render).
+The per-turn profile survives as informational scorecard telemetry
+only. Original unit text for the record:
 
 - **Files:** `test/seon/gym/driver.cljs` (capture
   `:seon.render/sections`/`section-texts` per driven turn — thread
@@ -388,13 +443,18 @@ where they change predicate semantics.
   a static-priority section in a test — the stability check must go
   RED; remove it — green.
 
-### U4 — auto-appended standing predicates (2.5)
+### U4 — auto-appended standing predicates (2.5) — re-scoped BEHAVIORAL-only (user r2)
 
 - **Files:** `test/seon/gym/driver.cljs`,
   `test/seon/gym/driver_test.cljs`, catalog doc.
-- **Mechanism:** at `load-scenarios!`, append G1/G2/G3/G5 (G2 built
-  from the scenario's own turn messages via U1's kind); a scenario may
-  opt out per-predicate with an explicit
+- **Mechanism:** at `load-scenarios!`, append the BEHAVIORAL standing
+  predicates only — G1 (terminates: turns < cap, final state `:idle`,
+  last turn `:done`), G2 (sees-question, built from the scenario's own
+  turn messages via U1's prompt-blob kind), G5 (replies: the agent
+  sent the user a non-blank reply). Those are agent behavior. ANY
+  structural standing item (layout, section names, prefix bytes,
+  attr-shape hygiene as a gate) is dropped per r2. A scenario may opt
+  out per-predicate with an explicit
   `:seon.gym.scenario/skip-standing` set naming WHY (e.g. S-08's error
   turn legitimately fails G1's `:done`).
 - **Falsification:** load any scenario EDN with zero predicates →
