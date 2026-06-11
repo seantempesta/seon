@@ -66,6 +66,7 @@ The component tables below describe the **JVM substrate** (Datahike + Integrant 
 | [[components/renderer]] | production | Specificity-based discovery, multi-format |
 | [[components/namespace-lifecycle]] | production | Dynamic ns startup, ctx injection |
 | [[components/web-layer]] | stable | HTTP, SSE, Datastar, Phosphor Terminal |
+| [[components/web-brand]] | stable | Downstream brand surface — env-synced rows, titles/h1/theme, CSS hook |
 | [[components/agent-system]] | stable | AI providers, sessions, observatory |
 | [[components/dev-tools]] | production | Hook, instrumentation, REPL helpers |
 | [[components/testing]] | production | 70 test files, ~819 tests, REPL-first runner |
