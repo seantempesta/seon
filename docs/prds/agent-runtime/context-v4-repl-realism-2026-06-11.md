@@ -257,6 +257,29 @@ Prior-session evals render WITHOUT result-var handles;
 individually bounded by `message-render-cap`); eval rows evict
 **oldest-first** within the transcript budget.
 
+### 2.8b The twin contract — unchanged, and the debug view rides it
+
+Every v4 section keeps the existing `:seon.ctx/section` shape
+(ctx.cljs:88): **`:seon.render/ai` mandatory** (it IS the prompt
+text), **`:seon.render/html` optional** (the debug view's right
+pane). v4 changes WHICH sections exist, never this contract — the
+debug view (`/agent/<id>/debug`: AI twins left = exactly what the
+agent sees; HTML twins right) keeps working by construction.
+
+HTML-twin guidance per v4 section (default for anything unlisted:
+escaped `<pre>` of the AI text — never blank):
+
+- `<system>` / soul: collapsible prose card.
+- `<namespace>` tags: one collapsible source block per ns,
+  syntax-highlighted, recency order preserved.
+- `<your-entity>`: the pretty-printed map (the existing entity-card
+  renderer).
+- `<your-tile>`: the tile's OWN html twin (one render, two twins —
+  the same value both surfaces show).
+- `<warnings>`: the existing warning cards.
+- `<transcript>`: the chat-bubble rendering (seon.render.chat) for
+  messages; collapsible eval rows (form/output/value) interleaved.
+
 ### 2.9 Status line + prompt
 
 The final two lines of every prompt:
