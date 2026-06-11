@@ -549,6 +549,49 @@
                        (pr-str eval-id) "—"
                        (error/->message e)))))
 
+(defn lookup-result
+  "The live value of a prior eval, keyed by the id on its value line
+   in the transcript (string or keyword). Backed by the globalThis
+   stash, so any value type round-trips. This is what the per-agent
+   `(result <id>)` sugar calls.
+
+   ERRORS ARE VALUES: a miss never throws — it returns an error map
+   that says exactly why there is no value:
+
+   - the eval ran in a PRIOR SESSION (the row is in the db but the
+     process that held its value is gone) → \"prior session\" — the
+     resume boundary in the transcript marks where that history ends;
+   - the eval ERRORED (it never produced a value);
+   - no such eval id exists (typo)."
+  [id]
+  (let [id-str (if (keyword? id) (name id) (str id))
+        k      (result-key id-str)]
+    (if (js/Reflect.has js/globalThis k)
+      (js/Reflect.get js/globalThis k)
+      (let [row (try (db/entity {:seon.db/ref [:seon.eval/id id-str]})
+                     (catch :default _ nil))]
+        (cond
+          (nil? (:seon.eval/id row))
+          {:seon.eval/ok? false
+           :seon.error/message
+           (str "no eval " (pr-str id-str) " exists — check the id against "
+                "the value lines in your transcript ((seon.agent/evals) "
+                "has the full log).")}
+
+          (false? (:seon.eval/ok? row))
+          {:seon.eval/ok? false
+           :seon.error/message
+           (str "eval " id-str " ERRORED — it produced no value; its error "
+                "text is in your transcript.")}
+
+          :else
+          {:seon.eval/ok? false
+           :seon.error/message
+           (str "eval " id-str " is from a prior session — its live value "
+                "did not survive the process restart (the transcript's "
+                "resume marker shows the boundary). Re-run the form (its "
+                "source is on the eval's prompt line) to recompute it.")})))))
+
 (defn ^:async setup-agent-ns!
   "Create + initialize the agent's home namespace. Returns the agent-ns
    symbol (for convenience — same as the input). Idempotent.
@@ -574,10 +617,10 @@
   [compile-state agent-ns-sym _agent-id]
   (let [setup-src
         (str "(ns " agent-ns-sym ")"
-             "(defn result [id]"
-             "  (js/Reflect.get js/globalThis"
-             "    (str " (pr-str results-key-prefix)
-             "         (if (keyword? id) (name id) (str id)))))"
+             ;; Delegates to the substrate so a MISS is a legible error
+             ;; VALUE (prior session / errored eval / unknown id) — see
+             ;; seon.eval/lookup-result.
+             "(defn result [id] (seon.eval/lookup-result id))"
              ":seon.eval/setup-ok")
         r (await (eval compile-state setup-src
                        {:ns 'cljs.user
@@ -1182,8 +1225,8 @@
        :seon.error/message
        (str s " is not maintained here — every eval's value is durable "
             "and addressable instead: call (result :<eval-id>); the ids "
-            "are in your transcript on each eval's footer line "
-            "(; # <eval-id>).")})))
+            "are in your transcript on each eval's value line "
+            "(; ⇒ (result :<eval-id>)).")})))
 
 (defn ^:async eval-batch!
   "Execute a sequence of parsed entries as a REPL batch. Partial-
