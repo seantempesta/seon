@@ -16,9 +16,18 @@
    turn produces one render.
 
    Routes (mounted from seon.web.serve):
-     GET /agents           — pick an agent
-     GET /agent/<id>       — the inspector page for <id>
-     GET /agent/<id>/sse   — SSE stream for that agent"
+     GET /agents                 — mission control (the tile grid)
+     GET /agent/<id>             — the CONSUMER view: chat bubbles +
+                                   input left, the expanded live tile
+                                   right (live-tiles PRD §1 Surface 2)
+     GET /agent/<id>/sse         — SSE stream for the consumer view
+     GET /agent/<id>/debug       — the two-pane debug inspector
+                                   (today's view, kept exactly)
+     GET /agent/<id>/debug/sse   — SSE stream for the debug view
+
+   ONE tx-listener serves both per-agent views: each SSE connection is
+   tagged with its view; `push-agent!` renders the right fragment set
+   per view from the same coalesced push."
   (:require
     [clojure.string :as str]
     [datahike.api :as d]
@@ -27,6 +36,7 @@
     [seon.agent.inspect :as inspect]
     [seon.log :as log]
     [seon.render :as render]
+    [seon.render.chat :as chat]
     [seon.render.default :as default]
     [seon.ui.components :as comp]
     [seon.ui.html :as html]))
@@ -440,6 +450,8 @@
      (activity-sparkline turn-durs)
      [:span {:class "text-xs text-text-500 ml-auto"}
       (str "~" token-est " tokens · " char-count " chars")]
+     [:a {:href (str "/agent/" agent-id)
+          :class "text-xs text-amber-500 hover:text-amber-300"} "← chat"]
      [:a {:href "/agents"
           :class "text-xs text-amber-500 hover:text-amber-300"} "← all agents"]]))
 
@@ -687,179 +699,289 @@
                          "px-3 py-1 rounded text-xs font-mono")}
     "send"]])
 
+(def ^:private page-style-css
+  "Inline style shared by both per-agent shells: bend a couple of
+   atom-one-dark colors toward the Phosphor Terminal palette (amber
+   emphasis), minimal markdown body styling for narration/bubbles
+   (Tailwind's `prose` plugin isn't loaded via CDN), and the consumer
+   bubble's larger markdown body (`.seon-bubble` is absent from the
+   debug view, so the override is inert there)."
+  (str "code.hljs{background:transparent !important;padding:0 !important;}"
+       ".hljs-keyword,.hljs-built_in{color:#fbbf24;}"
+       ".hljs-string{color:#fde68a;}"
+       ".hljs-symbol,.hljs-literal{color:#fcd34d;}"
+       ".hljs-comment{color:#78716c;font-style:italic;}"
+       ".markdown{color:#d6d3d1;font-size:0.75rem;line-height:1.4;}"
+       ".markdown h1{font-size:0.95rem;color:#fbbf24;margin:0.4rem 0 0.2rem;font-weight:600;}"
+       ".markdown h2{font-size:0.85rem;color:#fcd34d;margin:0.35rem 0 0.15rem;font-weight:600;}"
+       ".markdown h3{font-size:0.8rem;color:#fde68a;margin:0.3rem 0 0.1rem;font-weight:600;}"
+       ".markdown p{margin:0.2rem 0;}"
+       ".markdown ul,.markdown ol{margin:0.2rem 0 0.2rem 1rem;}"
+       ".markdown li{margin:0.05rem 0;list-style:disc;}"
+       ".markdown ol li{list-style:decimal;}"
+       ".markdown code{font-family:ui-monospace,monospace;color:#fde68a;background:#1c1917;padding:0 0.2rem;border-radius:0.15rem;}"
+       ".markdown pre{background:#1c1917;padding:0.3rem 0.4rem;border-radius:0.2rem;overflow-x:auto;margin:0.2rem 0;}"
+       ".markdown pre code{background:transparent;padding:0;}"
+       ".markdown strong{color:#fef3c7;font-weight:600;}"
+       ".markdown em{color:#fde68a;font-style:italic;}"
+       ".markdown a{color:#fbbf24;text-decoration:underline;}"
+       ".markdown blockquote{border-left:2px solid #57534e;padding-left:0.5rem;color:#a8a29e;margin:0.2rem 0;}"
+       ".seon-bubble .markdown{font-size:0.875rem;line-height:1.5;}"))
+
+(defn- page-head
+  "Shared <head> for both per-agent shells: output.css, highlight.js
+   (+ the Clojure language module — NOT in the core CDN build; without
+   it every code block warned and fell back to no-highlight, observed
+   live 2026-06-09), marked.js for `data-markdown` bodies, the
+   Phosphor style overrides, and the Datastar module."
+  [title]
+  [:head
+   [:meta {:charset "utf-8"}]
+   [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
+   [:title title]
+   [:link {:rel "stylesheet" :href "/css/output.css"}]
+   [:link {:rel "stylesheet"
+           :href "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css"}]
+   [:script {:src "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"}]
+   [:script {:src "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/clojure.min.js"}]
+   [:script {:src "https://cdn.jsdelivr.net/npm/marked/marked.min.js"}]
+   [:style (html/raw page-style-css)]
+   [:script {:type "module" :src "/js/datastar.js"}]])
+
+(def ^:private page-script-js
+  "Inline page JS shared by both per-agent shells — the re-highlight /
+   markdown / details-open-state / bottom-autoscroll passes plus the
+   Cmd/Ctrl+Enter chat submit. Every pass is a no-op on nodes whose
+   state already matches, so the MutationObserver settles instead of
+   looping. (See the inline comments below for the hard-won details.)"
+  ;; Settle guard (__hlSrc property): highlightElement
+  ;; mutates childList, which re-fires the observer below —
+  ;; skipping nodes whose text hasn't changed since their
+  ;; last highlight makes the pass a no-op the second time
+  ;; around instead of looping. textContent is stable
+  ;; across highlighting (spans wrap, text unchanged).
+  (str "function seonHighlightAll(){"
+       "if(!window.hljs)return;"
+       "document.querySelectorAll('pre code.language-clojure').forEach(function(el){"
+       "var t=el.textContent;"
+       "if(el.__hlSrc===t)return;"
+       "el.removeAttribute('data-highlighted');"
+       "window.hljs.highlightElement(el);"
+       "el.__hlSrc=t;});}"
+       ;; marked.js: walk every [data-markdown] container,
+       ;; render its raw text into innerHTML once (then mark
+       ;; it done so re-runs on subsequent mutations skip).
+       ;; XSS: getAttribute returns the UNescaped original
+       ;; text and marked passes inline HTML through, so we
+       ;; escape &/</> BEFORE parsing — agent-authored
+       ;; <script>/<img onerror> renders as visible text,
+       ;; while markdown (bold/code/lists/headings) still
+       ;; formats normally.
+       ;;
+       ;; Re-render guard: keyed on the JS property __mdSrc
+       ;; (NOT a data- attribute — Datastar's idiomorph can
+       ;; carry old attributes across a morph while CLEARING
+       ;; the rendered children, which left every message
+       ;; body empty after the first SSE push). A node
+       ;; re-renders when its source changed OR its children
+       ;; were wiped; otherwise it's skipped, so the
+       ;; MutationObserver below can't loop.
+       "function seonMarkdownAll(){"
+       "if(!window.marked)return;"
+       "document.querySelectorAll('[data-markdown]').forEach(function(el){"
+       "var src=el.getAttribute('data-markdown')||'';"
+       "if(el.__mdSrc===src&&el.childNodes.length>0)return;"
+       "var esc=src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');"
+       "el.innerHTML=window.marked.parse(esc);"
+       "el.__mdSrc=src;});}"
+       ;; Open-state survival across morphs: the server
+       ;; always re-renders <details> with their DEFAULT
+       ;; open state, and idiomorph SYNCS attributes — so
+       ;; an SSE push would clobber every user toggle
+       ;; (verified empirically: morph removes the user's
+       ;; `open`). Same class of guard as __mdSrc: user
+       ;; intent lives in a JS-side map (window.seonOpen,
+       ;; keyed by data-seon-key) that the morph can't
+       ;; touch; the observer pass reapplies it. Recording
+       ;; happens on summary CLICK (a user gesture), via
+       ;; setTimeout(0) so we read .open AFTER the default
+       ;; toggle action ran. Programmatic .open changes
+       ;; (our own reapply) never record.
+       "window.seonOpen=window.seonOpen||{};"
+       "document.addEventListener('click',function(e){"
+       "var s=e.target&&e.target.closest?e.target.closest('summary'):null;"
+       "if(!s)return;var d=s.parentElement;"
+       "if(d&&d.tagName==='DETAILS'&&d.hasAttribute('data-seon-key')){"
+       "setTimeout(function(){"
+       "window.seonOpen[d.getAttribute('data-seon-key')]=d.open;},0);}});"
+       "function seonReapplyOpen(){"
+       "document.querySelectorAll('details[data-seon-key]').forEach(function(d){"
+       "var k=d.getAttribute('data-seon-key');"
+       "if(k in window.seonOpen&&d.open!==window.seonOpen[k]){"
+       "d.open=window.seonOpen[k];}});}"
+       ;; Bottom-autoscroll for [data-seon-scroll] panes:
+       ;; pinned to newest while the user is at/near the
+       ;; bottom (40px slack); a capturing scroll listener
+       ;; records intent on the element as a JS property
+       ;; (morph-proof — idiomorph preserves the node via
+       ;; its stable id). Undefined flag = treat as
+       ;; at-bottom (first render scrolls to newest).
+       "document.addEventListener('scroll',function(e){"
+       "var c=e.target;"
+       "if(c&&c.hasAttribute&&c.hasAttribute('data-seon-scroll')){"
+       "c.__seonAtBottom=(c.scrollTop+c.clientHeight>=c.scrollHeight-40);}},true);"
+       "function seonAutoscroll(){"
+       "document.querySelectorAll('[data-seon-scroll]').forEach(function(c){"
+       "if(c.__seonAtBottom!==false){c.scrollTop=c.scrollHeight;}});}"
+       "document.addEventListener('DOMContentLoaded',function(){"
+       "seonHighlightAll();seonMarkdownAll();"
+       "seonReapplyOpen();seonAutoscroll();});"
+       ;; ANY childList mutation re-runs the passes — a
+       ;; Datastar morph can be removal-only (it clears the
+       ;; markdown container's rendered children), so
+       ;; gating on addedNodes misses it. Both passes are
+       ;; no-ops on already-rendered nodes, so the observer
+       ;; settles instead of looping.
+       ;; seonReapplyOpen runs BEFORE seonAutoscroll —
+       ;; reopening a details changes scrollHeight, so the
+       ;; bottom-pin must measure after it. Both are no-ops
+       ;; when state already matches, so the observer
+       ;; settles instead of looping.
+       "new MutationObserver(function(muts){"
+       "var any=false;for(var i=0;i<muts.length;i++){"
+       "if(muts[i].type==='childList'){any=true;break;}}"
+       "if(any){seonHighlightAll();seonMarkdownAll();"
+       "seonReapplyOpen();seonAutoscroll();}"
+       "}).observe(document.body,{subtree:true,childList:true});"
+       ;; Cmd/Ctrl+Enter submits the chat form from anywhere.
+       "document.addEventListener('keydown',function(e){"
+       "if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){"
+       "var f=document.getElementById('seon-chat-form');"
+       "if(f){e.preventDefault();f.requestSubmit();}}});"))
+
 (defn- inspector-shell
-  "The full page for `/agent/<id>`. The body contains the two-pane grid;
-   the header is inside the morph zone so it updates too."
+  "The full page for `/agent/<id>/debug` — the two-pane debug
+   inspector (raw context sections left, rendered cards right), kept
+   exactly as it was when it lived at `/agent/<id>` (live-tiles PRD
+   §1 Surface 3). The body contains the two-pane grid; the header is
+   inside the morph zone so it updates too."
   [agent-id snap]
   (str
     "<!DOCTYPE html>"
     (html/->string
       [:html {:lang "en" :data-theme "phosphor"}
-       [:head
-        [:meta {:charset "utf-8"}]
-        [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
-        [:title (str "seon · agent " agent-id)]
-        [:link {:rel "stylesheet" :href "/css/output.css"}]
-        ;; highlight.js — atom-one-dark theme. Loaded from CDN; no
-        ;; server-side dep. After SSE morphs swap in new <code> blocks,
-        ;; we re-run `hljs.highlightAll()` via a MutationObserver on
-        ;; the html pane (see inline script below).
-        [:link {:rel "stylesheet"
-                :href "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-dark.min.css"}]
-        [:script {:src "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"}]
-        ;; Clojure is NOT in the hljs core CDN build — without this
-        ;; module every code block logged "Could not find the language
-        ;; 'clojure'" and fell back to no-highlight (observed live
-        ;; 2026-06-09: 100+ console warnings per page load).
-        [:script {:src "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/clojure.min.js"}]
-        ;; marked.js — renders `:seon.eval/narration` markdown into HTML
-        ;; in the right pane only (the AI pane keeps raw markdown — LLMs
-        ;; read it fine as text). Loaded from CDN; no server-side dep.
-        [:script {:src "https://cdn.jsdelivr.net/npm/marked/marked.min.js"}]
-        ;; Inline override: bend a couple of atom-one-dark colors toward
-        ;; the Phosphor Terminal palette (amber emphasis), plus minimal
-        ;; markdown body styling for narration (Tailwind's `prose` plugin
-        ;; isn't loaded via CDN).
-        [:style (html/raw
-                  (str "code.hljs{background:transparent !important;padding:0 !important;}"
-                       ".hljs-keyword,.hljs-built_in{color:#fbbf24;}"
-                       ".hljs-string{color:#fde68a;}"
-                       ".hljs-symbol,.hljs-literal{color:#fcd34d;}"
-                       ".hljs-comment{color:#78716c;font-style:italic;}"
-                       ".markdown{color:#d6d3d1;font-size:0.75rem;line-height:1.4;}"
-                       ".markdown h1{font-size:0.95rem;color:#fbbf24;margin:0.4rem 0 0.2rem;font-weight:600;}"
-                       ".markdown h2{font-size:0.85rem;color:#fcd34d;margin:0.35rem 0 0.15rem;font-weight:600;}"
-                       ".markdown h3{font-size:0.8rem;color:#fde68a;margin:0.3rem 0 0.1rem;font-weight:600;}"
-                       ".markdown p{margin:0.2rem 0;}"
-                       ".markdown ul,.markdown ol{margin:0.2rem 0 0.2rem 1rem;}"
-                       ".markdown li{margin:0.05rem 0;list-style:disc;}"
-                       ".markdown ol li{list-style:decimal;}"
-                       ".markdown code{font-family:ui-monospace,monospace;color:#fde68a;background:#1c1917;padding:0 0.2rem;border-radius:0.15rem;}"
-                       ".markdown pre{background:#1c1917;padding:0.3rem 0.4rem;border-radius:0.2rem;overflow-x:auto;margin:0.2rem 0;}"
-                       ".markdown pre code{background:transparent;padding:0;}"
-                       ".markdown strong{color:#fef3c7;font-weight:600;}"
-                       ".markdown em{color:#fde68a;font-style:italic;}"
-                       ".markdown a{color:#fbbf24;text-decoration:underline;}"
-                       ".markdown blockquote{border-left:2px solid #57534e;padding-left:0.5rem;color:#a8a29e;margin:0.2rem 0;}"))]
-        [:script {:type "module" :src "/js/datastar.js"}]]
+       (page-head (str "seon · agent " agent-id " · debug"))
        [:body {:class "h-screen bg-base-950 text-text-50 font-sans antialiased flex flex-col"}
-        [:div {:data-init (str "@get('/agent/" agent-id "/sse')")
-               :data-on:online__window (str "@get('/agent/" agent-id "/sse')")}]
+        [:div {:data-init (str "@get('/agent/" agent-id "/debug/sse')")
+               :data-on:online__window (str "@get('/agent/" agent-id "/debug/sse')")}]
         (header-fragment agent-id snap)
         [:div {:class "flex-1 grid h-0 min-h-0"
                :style "grid-template-columns: 1fr 1fr;"}
          (ai-pane-fragment   agent-id snap)
          (html-pane-fragment agent-id snap)]
         (chat-bar-fragment agent-id)
-        ;; Re-highlight on every Datastar morph. The patched HTML lands
-        ;; via `datastar-patch-elements`; we listen for any added <code>
-        ;; node anywhere in the document and call hljs.highlightElement
-        ;; on it (cheaper than highlightAll on every mutation).
-        [:script (html/raw
-                   ;; Settle guard (__hlSrc property): highlightElement
-                   ;; mutates childList, which re-fires the observer below —
-                   ;; skipping nodes whose text hasn't changed since their
-                   ;; last highlight makes the pass a no-op the second time
-                   ;; around instead of looping. textContent is stable
-                   ;; across highlighting (spans wrap, text unchanged).
-                   (str "function seonHighlightAll(){"
-                        "if(!window.hljs)return;"
-                        "document.querySelectorAll('pre code.language-clojure').forEach(function(el){"
-                        "var t=el.textContent;"
-                        "if(el.__hlSrc===t)return;"
-                        "el.removeAttribute('data-highlighted');"
-                        "window.hljs.highlightElement(el);"
-                        "el.__hlSrc=t;});}"
-                        ;; marked.js: walk every [data-markdown] container,
-                        ;; render its raw text into innerHTML once (then mark
-                        ;; it done so re-runs on subsequent mutations skip).
-                        ;; XSS: getAttribute returns the UNescaped original
-                        ;; text and marked passes inline HTML through, so we
-                        ;; escape &/</> BEFORE parsing — agent-authored
-                        ;; <script>/<img onerror> renders as visible text,
-                        ;; while markdown (bold/code/lists/headings) still
-                        ;; formats normally.
-                        ;;
-                        ;; Re-render guard: keyed on the JS property __mdSrc
-                        ;; (NOT a data- attribute — Datastar's idiomorph can
-                        ;; carry old attributes across a morph while CLEARING
-                        ;; the rendered children, which left every message
-                        ;; body empty after the first SSE push). A node
-                        ;; re-renders when its source changed OR its children
-                        ;; were wiped; otherwise it's skipped, so the
-                        ;; MutationObserver below can't loop.
-                        "function seonMarkdownAll(){"
-                        "if(!window.marked)return;"
-                        "document.querySelectorAll('[data-markdown]').forEach(function(el){"
-                        "var src=el.getAttribute('data-markdown')||'';"
-                        "if(el.__mdSrc===src&&el.childNodes.length>0)return;"
-                        "var esc=src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');"
-                        "el.innerHTML=window.marked.parse(esc);"
-                        "el.__mdSrc=src;});}"
-                        ;; Open-state survival across morphs: the server
-                        ;; always re-renders <details> with their DEFAULT
-                        ;; open state, and idiomorph SYNCS attributes — so
-                        ;; an SSE push would clobber every user toggle
-                        ;; (verified empirically: morph removes the user's
-                        ;; `open`). Same class of guard as __mdSrc: user
-                        ;; intent lives in a JS-side map (window.seonOpen,
-                        ;; keyed by data-seon-key) that the morph can't
-                        ;; touch; the observer pass reapplies it. Recording
-                        ;; happens on summary CLICK (a user gesture), via
-                        ;; setTimeout(0) so we read .open AFTER the default
-                        ;; toggle action ran. Programmatic .open changes
-                        ;; (our own reapply) never record.
-                        "window.seonOpen=window.seonOpen||{};"
-                        "document.addEventListener('click',function(e){"
-                        "var s=e.target&&e.target.closest?e.target.closest('summary'):null;"
-                        "if(!s)return;var d=s.parentElement;"
-                        "if(d&&d.tagName==='DETAILS'&&d.hasAttribute('data-seon-key')){"
-                        "setTimeout(function(){"
-                        "window.seonOpen[d.getAttribute('data-seon-key')]=d.open;},0);}});"
-                        "function seonReapplyOpen(){"
-                        "document.querySelectorAll('details[data-seon-key]').forEach(function(d){"
-                        "var k=d.getAttribute('data-seon-key');"
-                        "if(k in window.seonOpen&&d.open!==window.seonOpen[k]){"
-                        "d.open=window.seonOpen[k];}});}"
-                        ;; Bottom-autoscroll for [data-seon-scroll] panes:
-                        ;; pinned to newest while the user is at/near the
-                        ;; bottom (40px slack); a capturing scroll listener
-                        ;; records intent on the element as a JS property
-                        ;; (morph-proof — idiomorph preserves the node via
-                        ;; its stable id). Undefined flag = treat as
-                        ;; at-bottom (first render scrolls to newest).
-                        "document.addEventListener('scroll',function(e){"
-                        "var c=e.target;"
-                        "if(c&&c.hasAttribute&&c.hasAttribute('data-seon-scroll')){"
-                        "c.__seonAtBottom=(c.scrollTop+c.clientHeight>=c.scrollHeight-40);}},true);"
-                        "function seonAutoscroll(){"
-                        "document.querySelectorAll('[data-seon-scroll]').forEach(function(c){"
-                        "if(c.__seonAtBottom!==false){c.scrollTop=c.scrollHeight;}});}"
-                        "document.addEventListener('DOMContentLoaded',function(){"
-                        "seonHighlightAll();seonMarkdownAll();"
-                        "seonReapplyOpen();seonAutoscroll();});"
-                        ;; ANY childList mutation re-runs the passes — a
-                        ;; Datastar morph can be removal-only (it clears the
-                        ;; markdown container's rendered children), so
-                        ;; gating on addedNodes misses it. Both passes are
-                        ;; no-ops on already-rendered nodes, so the observer
-                        ;; settles instead of looping.
-                        ;; seonReapplyOpen runs BEFORE seonAutoscroll —
-                        ;; reopening a details changes scrollHeight, so the
-                        ;; bottom-pin must measure after it. Both are no-ops
-                        ;; when state already matches, so the observer
-                        ;; settles instead of looping.
-                        "new MutationObserver(function(muts){"
-                        "var any=false;for(var i=0;i<muts.length;i++){"
-                        "if(muts[i].type==='childList'){any=true;break;}}"
-                        "if(any){seonHighlightAll();seonMarkdownAll();"
-                        "seonReapplyOpen();seonAutoscroll();}"
-                        "}).observe(document.body,{subtree:true,childList:true});"
-                        ;; Cmd/Ctrl+Enter submits the chat form from anywhere.
-                        "document.addEventListener('keydown',function(e){"
-                        "if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){"
-                        "var f=document.getElementById('seon-chat-form');"
-                        "if(f){e.preventDefault();f.requestSubmit();}}});"))]]])))
+        [:script (html/raw page-script-js)]]])))
+
+;; ============================================================
+;; The CONSUMER agent view — `/agent/<id>` (live-tiles PRD §1
+;; Surface 2). Split screen: chat bubbles + input left, the SAME live
+;; tile expanded right. One render mechanism — the right pane is wide
+;; enough that the `.seon-tile` container query selects the expanded
+;; blocks (breakpoint 480px, resources/public/css/input.css).
+;; ============================================================
+
+(defn- chat-pane-id   [agent-id] (str "chat-pane-" agent-id))
+(defn- tile-pane-id   [agent-id] (str "tile-pane-" agent-id))
+(defn- chat-header-id [agent-id] (str "chat-header-" agent-id))
+
+(defn- consumer-snapshot
+  "Compute one consumer-view render snapshot for `agent-id`:
+   `{:agent <entity> :tile <hiccup-or-nil> :messages [<bubble-msg> …]}`.
+   Deliberately CHEAPER than [[snapshot]] — no ctx-preview (the
+   consumer view never shows the raw prompt), just the conversation
+   query + the tile render against the live conn."
+  [agent-id]
+  (let [db  @db/*conn*
+        ent (db/entity {:seon.db/db db
+                        :seon.db/ref [:seon.agent/id agent-id]})]
+    {:agent    ent
+     :tile     (:seon.render/hiccup
+                 (render/render-agent-tile {:seon.db/db db
+                                            :seon.agent/id agent-id}))
+     :messages (:seon.render.chat/messages
+                 (chat/conversation {:seon.agent/id agent-id
+                                     :seon.db/db db}))}))
+
+(defn- consumer-header-fragment
+  "Consumer-view header — breathing room over density (PRD §5): the
+   agent's id + live status, the `⚙ debug` cross-link. Morph target
+   (the thinking pulse resolves on the next push)."
+  [agent-id {:keys [agent]}]
+  (let [state (or (:seon.agent/state agent) :unknown)
+        turns (default/agent-turn-count agent)]
+    [:header {:id (chat-header-id agent-id)
+              :class "flex items-center gap-3 px-4 py-3 border-b border-base-800 bg-base-900"}
+     [:span {:class "text-sm font-mono text-text-100"} (str "agent " agent-id)]
+     (if (= :running state)
+       [:span {:class "inline-flex items-center gap-1.5 text-xs font-mono text-amber-400"}
+        [:span {:class "w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"}]
+        "thinking …"]
+       (comp/status-dot state))
+     [:span {:class "text-xs font-mono text-text-500"} (str "turn " turns)]
+     [:a {:href (str "/agent/" agent-id "/debug")
+          :class (str "ml-auto text-xs font-mono text-text-400 "
+                      "hover:text-amber-300 border border-base-700 "
+                      "rounded px-2 py-1")}
+      "⚙ debug"]
+     [:a {:href "/agents"
+          :class "text-xs font-mono text-amber-500 hover:text-amber-300"}
+      "← all agents"]]))
+
+(defn- chat-pane-fragment
+  "Left pane — the bubble stream (`seon.render.chat/bubble-stream`),
+   bottom-pinned via the shared `data-seon-scroll` autoscroll."
+  [agent-id {:keys [messages]}]
+  [:div {:id (chat-pane-id agent-id)
+         :data-seon-scroll "1"
+         :class "flex-1 overflow-auto p-4 bg-base-950"}
+   (:seon.render/hiccup
+     (chat/bubble-stream {:seon.render.chat/messages (or messages [])}))])
+
+(defn- tile-pane-fragment
+  "Right pane — the SAME live tile as the root grid, given room: the
+   pane is wider than the 480px container breakpoint, so the tile's
+   `.seon-tile-expanded` blocks show. Identical wired value, zero
+   tile-side awareness of the surface."
+  [agent-id {:keys [tile]}]
+  [:div {:id (tile-pane-id agent-id)
+         :class "h-full overflow-auto border-l border-base-800 bg-base-900/40 p-4"}
+   (or tile
+       [:div {:class "text-sm text-text-500 italic p-4"}
+        "no tile yet — the agent will draw here as it works"])])
+
+(defn- consumer-shell
+  "The full consumer page for `/agent/<id>`: chat bubbles + input
+   left, the expanded live tile right. Reuses the existing
+   `POST /chat?agent=<id>` path via [[chat-bar-fragment]] and the
+   shared page script (markdown bubbles, bottom-autoscroll,
+   Cmd/Ctrl+Enter)."
+  [agent-id snap]
+  (str
+    "<!DOCTYPE html>"
+    (html/->string
+      [:html {:lang "en" :data-theme "phosphor"}
+       (page-head (str "seon · agent " agent-id))
+       [:body {:class "h-screen bg-base-950 text-text-50 font-sans antialiased flex flex-col"}
+        [:div {:data-init (str "@get('/agent/" agent-id "/sse')")
+               :data-on:online__window (str "@get('/agent/" agent-id "/sse')")}]
+        (consumer-header-fragment agent-id snap)
+        [:div {:class "flex-1 grid h-0 min-h-0"
+               :style "grid-template-columns: minmax(0,1fr) minmax(0,1fr);"}
+         [:div {:class "flex flex-col h-full overflow-hidden"}
+          (chat-pane-fragment agent-id snap)
+          (chat-bar-fragment agent-id)]
+         (tile-pane-fragment agent-id snap)]
+        [:script (html/raw page-script-js)]]])))
 
 (defn- stat-cell
   "One headline number in the mission-control strip. Ticks up live —
@@ -898,7 +1020,7 @@
                         "border-t border-base-800 "
                         "bg-base-900/80 text-xs font-mono")}
       [:span {:class "text-text-500"} (str "turn " turn-count)]
-      [:span {:class "ml-auto text-amber-500"} "inspect →"]]]))
+      [:span {:class "ml-auto text-amber-500"} "open →"]]]))
 
 (defn- agents-dash-fragment
   "The whole mission-control surface — ONE morph target (`#agents-dash`)
@@ -1077,23 +1199,44 @@
          "data: elements " (str/replace html-str "\n" "\ndata: elements ")
          "\n\n")))
 
+(defn- debug-payloads
+  "The debug view's three morph fragments (header + both panes) as one
+   SSE payload string."
+  [agent-id snap]
+  (str (patch-fragment (header-fragment agent-id snap))
+       (patch-fragment (ai-pane-fragment agent-id snap))
+       (patch-fragment (html-pane-fragment agent-id snap))))
+
+(defn- consumer-payloads
+  "The consumer view's three morph fragments (header + bubbles + tile)
+   as one SSE payload string."
+  [agent-id csnap]
+  (str (patch-fragment (consumer-header-fragment agent-id csnap))
+       (patch-fragment (chat-pane-fragment agent-id csnap))
+       (patch-fragment (tile-pane-fragment agent-id csnap))))
+
 (defn- push-agent!
-  "Re-render and write the three morph fragments (header + both panes)
-   to every connection watching `agent-id`. Best-effort per-connection."
+  "Re-render and write the morph fragments to every connection
+   watching `agent-id` — ONE tx fan-out serves BOTH views: each conn
+   is tagged `:view` (:consumer | :debug) and gets its view's
+   fragment set; each view's snapshot is computed at most once per
+   push. Best-effort per-connection."
   [agent-id]
   (try
-    (let [snap (snapshot agent-id)
-          payloads (str (patch-fragment (header-fragment agent-id snap))
-                        (patch-fragment (ai-pane-fragment agent-id snap))
-                        (patch-fragment (html-pane-fragment agent-id snap)))
-          conns (get @!sse-by-agent agent-id)]
-      (doseq [{:keys [res]} conns]
-        (try (.write res payloads)
-             (catch :default e
-               (log/error-console! "seon.web.inspector" "write failed" e))))
+    (let [conns    (get @!sse-by-agent agent-id)
+          views    (set (map #(get % :view :debug) conns))
+          dbg      (when (contains? views :debug)
+                     (debug-payloads agent-id (snapshot agent-id)))
+          consumer (when (contains? views :consumer)
+                     (consumer-payloads agent-id (consumer-snapshot agent-id)))]
+      (doseq [{:keys [res] :as conn} conns]
+        (let [payload (if (= :consumer (get conn :view :debug)) consumer dbg)]
+          (try (some->> payload (.write res))
+               (catch :default e
+                 (log/error-console! "seon.web.inspector" "write failed" e)))))
       (log/info-console! "seon.web.inspector" "push"
                          {:agent agent-id :conns (count conns)
-                          :chars (:char-count snap)}))
+                          :views views}))
     (catch :default e
       (log/error-console! "seon.web.inspector" "push! threw" e))))
 
@@ -1186,16 +1329,22 @@
 ;; HTTP handlers — called from seon.web.serve when route? matched.
 ;; ============================================================
 
-(defn- open-agent-sse! [^js req ^js res agent-id]
+(defn- open-agent-sse!
+  "Open a per-agent SSE stream for `view` (:consumer | :debug) —
+   `/agent/<id>/sse` and `/agent/<id>/debug/sse` respectively. Both
+   register in the same per-agent registry; `push-agent!` writes each
+   conn its view's fragment set."
+  [^js req ^js res agent-id view]
   (.writeHead res 200 #js {"Content-Type"      "text/event-stream"
                            "Cache-Control"     "no-cache"
                            "Connection"        "keep-alive"
                            "X-Accel-Buffering" "no"})
   (.write res ": connected\n\n")
-  (let [conn {:id (random-uuid) :res res :opened-at (js/Date.)}]
+  (let [conn {:id (random-uuid) :res res :view view :opened-at (js/Date.)}]
     (add-conn! agent-id conn)
     (log/info-console! "seon.web.inspector" "SSE OPEN"
                        {:agent agent-id
+                        :view view
                         :conn-id (str (:id conn))
                         :total (count (get @!sse-by-agent agent-id))})
     (.on req "close"
@@ -1206,10 +1355,9 @@
     ;; Send an initial render immediately so the page populates without
     ;; waiting for the next tx.
     (try
-      (let [snap (snapshot agent-id)]
-        (.write res (patch-fragment (header-fragment agent-id snap)))
-        (.write res (patch-fragment (ai-pane-fragment agent-id snap)))
-        (.write res (patch-fragment (html-pane-fragment agent-id snap))))
+      (.write res (if (= :consumer view)
+                    (consumer-payloads agent-id (consumer-snapshot agent-id))
+                    (debug-payloads agent-id (snapshot agent-id))))
       (catch :default e
         (log/error-console! "seon.web.inspector" "initial render failed" e)))))
 
@@ -1232,7 +1380,13 @@
         (log/error-console! "seon.web.inspector" "index initial render failed" e)))))
 
 (defn handle!
-  "Inspector route dispatcher. Returns true if handled."
+  "Inspector route dispatcher. Returns true if handled.
+
+   The `/agent/<id>` family (live-tiles U2 route swap):
+     \"\"            → consumer view (bubbles + expanded tile)
+     \"/sse\"        → consumer SSE stream
+     \"/debug\"      → debug two-pane inspector (today's view, verbatim)
+     \"/debug/sse\"  → debug SSE stream"
   [^js req ^js res path]
   (cond
     (= path "/agents")
@@ -1251,12 +1405,12 @@
 
         ;; Dead-agent guard (§4 inspector SSE bug): ids from a prior
         ;; store (pre-flip pod runs, reset clusters) 404 cleanly here.
-        ;; Ordering matters — the SSE branch must NOT register a
+        ;; Ordering matters — the SSE branches must NOT register a
         ;; connection for a nonexistent agent (every later tx would
-        ;; re-render it and throw), and the page branch must not 500
+        ;; re-render it and throw), and the page branches must not 500
         ;; out of `snapshot`'s lookup-ref pull.
         (not (agent-exists? agent-id))
-        (do (if (= rest-path "/sse")
+        (do (if (or (= rest-path "/sse") (= rest-path "/debug/sse"))
               (write-status! res 404 "text/plain; charset=utf-8"
                              (str "agent " agent-id " not found"))
               (write-status! res 404 "text/html; charset=utf-8"
@@ -1264,11 +1418,19 @@
             true)
 
         (= rest-path "/sse")
-        (do (open-agent-sse! req res agent-id) true)
+        (do (open-agent-sse! req res agent-id :consumer) true)
+
+        (= rest-path "/debug/sse")
+        (do (open-agent-sse! req res agent-id :debug) true)
+
+        (= rest-path "/debug")
+        (do (write-status! res 200 "text/html; charset=utf-8"
+                           (inspector-shell agent-id (snapshot agent-id)))
+            true)
 
         (or (= rest-path "") (= rest-path "/"))
         (do (write-status! res 200 "text/html; charset=utf-8"
-                           (inspector-shell agent-id (snapshot agent-id)))
+                           (consumer-shell agent-id (consumer-snapshot agent-id)))
             true)
 
         :else

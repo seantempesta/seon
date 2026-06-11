@@ -74,42 +74,48 @@
    `agent-<id>` (another agent)."
   ([db id] (recent-messages db id 20))
   ([db id n]
-   (let [;; eid via QUERY, not d/entity — the inspector hands `view` a
-         ;; FilteredDB, and datahike-cljs FilteredDB doesn't implement
-         ;; -lookup (entity-by-lookup-ref throws); queries work fine.
-         eid-q  '[:find ?e :in $ ?id :where [?e :seon.agent/id ?id]]
-         my-eid (ffirst (if db
-                          (db/query {:seon.db/db db
-                                     :seon.db/query eid-q
-                                     :seon.db/args [id]})
-                          (db/query {:seon.db/query eid-q
-                                     :seon.db/args [id]})))
-         query  '[:find ?at ?uid ?aid ?content
-                  :in $ ?me
-                  :where
-                  (or-join [?m ?me]
-                    [?m :seon.agent.message/from ?me]
-                    [?m :seon.agent.message/to ?me])
-                  [?m :seon.agent.message/at ?at]
-                  [?m :seon.agent.message/from ?f]
-                  [(get-else $ ?f :seon.user/id "") ?uid]
-                  [(get-else $ ?f :seon.agent/id "") ?aid]
-                  [?m :seon.agent.message/content ?content]]
-         rows   (when my-eid
+   (let [;; All reads via QUERY, not d/entity — the inspector hands
+         ;; `view` a FilteredDB, and datahike-cljs FilteredDB doesn't
+         ;; implement -lookup (entity-by-lookup-ref throws); queries
+         ;; work fine.
+         q      (fn [query & args]
                   (if db
                     (db/query {:seon.db/db db
                                :seon.db/query query
-                               :seon.db/args [my-eid]})
+                               :seon.db/args (vec args)})
                     (db/query {:seon.db/query query
-                               :seon.db/args [my-eid]})))]
+                               :seon.db/args (vec args)})))
+         my-eid (ffirst (q '[:find ?e :in $ ?id
+                             :where [?e :seon.agent/id ?id]]
+                           id))
+         ;; The from-ref's KIND resolves in Clojure against these two
+         ;; eid→id maps, NOT via datalog `get-else` — on datahike-cljs
+         ;; get-else's default branch never fires (rows whose ?f lacks
+         ;; the attr are DROPPED, not defaulted), which silently
+         ;; filtered every agent-from message out of the conversation
+         ;; (observed live 2026-06-11, live-tiles U2: assistant replies
+         ;; existed in the store but never rendered).
+         users  (into {} (q '[:find ?f ?uid :where [?f :seon.user/id ?uid]]))
+         agents (into {} (q '[:find ?f ?aid :where [?f :seon.agent/id ?aid]]))
+         rows   (when my-eid
+                  (q '[:find ?m ?at ?f ?content
+                       :in $ ?me
+                       :where
+                       (or-join [?m ?me]
+                         [?m :seon.agent.message/from ?me]
+                         [?m :seon.agent.message/to ?me])
+                       [?m :seon.agent.message/at ?at]
+                       [?m :seon.agent.message/from ?f]
+                       [?m :seon.agent.message/content ?content]]
+                     my-eid))]
      (->> rows
-          (map (fn [[at uid aid content]]
+          (map (fn [[_m at f content]]
                  [at
                   (cond
-                    (seq uid)  "user"
-                    (= aid id) "assistant"
-                    (seq aid)  (str "agent-" aid)
-                    :else      "unknown")
+                    (contains? users f)    "user"
+                    (= (get agents f) id)  "assistant"
+                    (contains? agents f)   (str "agent-" (get agents f))
+                    :else                  "unknown")
                   content]))
           (sort-by first)
           (take-last n)))))

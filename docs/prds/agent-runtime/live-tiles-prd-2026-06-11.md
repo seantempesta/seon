@@ -375,6 +375,16 @@ the `.seon-tile` container-query CSS + wrapper-class convention.
 
 ### U2 — agent view + route swap (`seon.render.chat`)
 
+**LANDED 2026-06-11.** All five live proofs observed on the running
+pod (agent kXQ-2606101814): consumer split at `/agent/<id>`, real
+DeepSeek reply bubble via SSE, peer message inline/dim/labeled,
+debug view at `/agent/<id>/debug` (SSE at `/agent/<id>/debug/sse`),
+grid tap → consumer view. Note: landing exposed and fixed a live
+substrate bug — datahike-cljs `get-else` defaults never fire, so
+`seon.render.default/recent-messages` dropped every agent-from
+message (only `user` rows survived); the label resolution now joins
+eid→id maps in Clojure.
+
 The consumer split screen at `/agent/<id>`: left bubbles + input
 (reuses the `/chat` endpoint and the chat-form submit pattern), right
 the expanded tile (`.seon-tile` at expanded container size). Debug
