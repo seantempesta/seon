@@ -507,22 +507,31 @@ gaps. Full test suite once per unit, at the unit's natural checkpoint
 1. **Transcript bound:** turn-bound (~50 turns floated), char-budget
    (current 24k), or layered both (§4.1 proposal)? Recommend deciding
    from U7's measured turn-profiles, not a priori.
-2. **Paid-spend cadence for re-baselining:** after each landed unit
-   that changes prompts (U5/U7/U9 all move bytes), the paid scenarios'
-   numbers move. One paid sweep per unit is the test-cadence-consistent
-   answer, but it's real money — per-unit, per-day, or only at
-   §7 migration time?
+2. **Paid-spend cadence for re-baselining:** DECIDED (user,
+   2026-06-11): spend freely — DeepSeek is cheap; do NOT optimize for
+   token economy here. One paid sweep per landed prompt-moving unit.
+   "Focus on making the gym as accurate a system as possible for
+   measuring different scenarios" — accuracy is the only axis.
 3. **Live-shadow in CI or on demand?** It reads the real store, so its
    results vary run-to-run by design (that's the point). Recommendation:
    on demand (`bin/gym --shadow`) + a daily run, NOT in the blocking
    suite — a live-store mess should be a loud report, not a blocked
    commit. Confirm.
-4. **Writable fork of the real store** (analysis Q1): the read-only
-   shadow tier ships in U10; is a writable fork (drive scenarios
-   against a copy of real accumulated state) worth the machinery later?
-5. **Is `ensure-session!`'s cross-pod-restart session reuse intended?**
-   (Docstring says per-pod-run; implementation reuses across restarts.)
-   Decides what U11 asserts.
+4. **Writable fork of the real store** (analysis Q1): DECIDED (user,
+   2026-06-11): forked copy approved IF it's easy — point the world at
+   a copied store path. Schema-staleness note: the fork freezes
+   accumulated DATA at fork time (that's the point — testing against
+   real prior state), while the boot re-seeds the substrate index on
+   top, so substrate schemas/fns always come from the code under test.
+   Re-fork whenever a fresher data snapshot is wanted.
+5. **`ensure-session!` cross-pod-restart session reuse:** DECIDED
+   (user, 2026-06-11): NOT intended — the docstring ("within the same
+   pod run") is right, the implementation is wrong. Fix in src (small
+   unit, src/seon/agent.cljs) ; U11 asserts fresh-session-per-boot. The
+   intended shape is the user's stated model: known DB state → live
+   agent responds → optionally update state or boot a NEW agent with
+   fresh context on the updated system → assert it uses prior DB state
+   wisely.
 6. **Prompt blobs as scorecard evidence** (analysis Q4): should the
    scorecard carry per-turn prompt-file paths/hashes so a moved number
    is diffable to the exact context bytes? Cheap to add in U1 —
