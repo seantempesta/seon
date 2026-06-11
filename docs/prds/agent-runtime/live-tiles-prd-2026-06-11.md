@@ -436,12 +436,23 @@ IS a wired substrate fn, eating the same dogfood.
   agent's actual last reply text (compare against the message log);
   compact block only (no expanded chart bleed) at grid size.
 
-### U4 — welcome wiring as a REAL EVAL at creation
+### U4 — startup evals at creation: tile wiring + todo registration
 
 `start-agent!` (the ONE boot path) evals the wiring form(s) as the
 new agent: define-or-reference the welcome (substrate fn — the form
 just transacts the key pointing at it), transact the key. Eval log
 carries the real eval(s); resume replays them like any agent eval.
+
+**EXPANDED (user, 2026-06-11): the startup eval block is the home for
+ALL agent-specific instance wiring, not just the tile.** Same turn,
+multiple forms: (1) the tile wiring above; (2) **todo-system
+registration** — `add-section!` of the open-todos section moves from
+`substrate-default-ctx`'s static defaults to a real startup eval, so
+the agent SEES itself wire its own todo view (and learns
+remove-section!/add-section! by example). Anything agent-instance-
+specific added later (new default sections, future per-agent wiring)
+joins this block — one place, one mechanism, all visible in the eval
+log. Context-v4's `<your-entity>` then shows the resulting datoms.
 
 - Files (≤7): `src/seon/client.cljs` (creation path),
   `src/seon/render/live_tile.cljs` (the canonical wiring form as
