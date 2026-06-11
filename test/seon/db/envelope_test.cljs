@@ -23,6 +23,7 @@
     [cljs.test :as t :refer [deftest is testing async]]
     [datahike.api :as d]
     [seon.db :as db]
+    [seon.db.internal :as internal]
     [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
@@ -116,6 +117,32 @@
                                             :where [_ ::distance-km ?d]]
                                           :seon.db/conn conn})))
                                   ":double value round-trips"))))))
+        (.then done))))
+
+;; ---------------------------------------------------------------------------
+;; 1b. The envelope conversion is LOCAL to `internal/transact!*` (P22 #36):
+;;     calling the commit body DIRECTLY (no `seon.db/transact!` face, no
+;;     face-level catch) must STILL resolve a validation-gate throw to the
+;;     envelope. Two independent agents misread the contract from source
+;;     when the validators' throws were only converted at the face — this
+;;     pins the throw→envelope truth where the throws live.
+;; ---------------------------------------------------------------------------
+
+(deftest transact*-converts-validator-throws-locally
+  (async done
+    (-> (fresh-conn)
+        (.then (fn [conn]
+                 (never-reject!
+                   (internal/transact!*
+                     {:seon.db/tx-data [{:seon.nope3/x 1}]
+                      :seon.db/conn    conn}))))
+        (.then (fn [{ok?   :seon.db/ok?
+                     error :seon.db/error}]
+                 (is (false? ok?)
+                     "transact!* itself resolves to ok? false — the
+                      face's catch is NOT what makes the envelope")
+                 (is (= :seon.db/unregistered-attrs
+                        (:seon.db/error (:seon.error/data error))))))
         (.then done))))
 
 ;; ---------------------------------------------------------------------------

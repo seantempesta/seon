@@ -40,6 +40,9 @@
     [datahike.api :as d]
     [seon.agent :as agent]
     [seon.client :as client]
+    ;; required explicitly: the format-eval-row tests deref
+    ;; #'seon.ctx/format-eval-row directly (private fn, var-quote)
+    [seon.ctx]
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.agent.inspect :as inspect]
@@ -343,6 +346,55 @@
                    (proves merge by :at, not message-block-then-eval-block)")
               (is (< i-failed i-success)
                   "failed eval (t13) before successful eval (t21)"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; (d3) transcript budget eviction NEVER drops messages — the S-12 live
+;;      defect (KoQ turn Ckz-2606101827): a burst of eval rows after the
+;;      user's last message pushed the message past the 24k budget, and
+;;      the agent saw a transcript with its waking question missing.
+;;      Messages are exempt from eviction; eval rows still evict
+;;      oldest-first under the remaining budget.
+;; ---------------------------------------------------------------------------
+
+(defn- flood-eval
+  "One of N same-shaped big evals for the budget-eviction test — `i`
+   disambiguates id/at; the 2000-char result renders at the 1500-char
+   eval cap + clip guide, ≈1.8k chars/row. The +1h offset guarantees
+   the flood sorts AFTER every [[seed-tx]] item: seed timestamps are
+   captured at TRANSACT time (seconds after these maps are built, the
+   boot seed is slow), so a small ms offset here would land BEFORE the
+   seed's t13/t21 evals and invert the eviction order under test."
+  [i]
+  {:seon.eval/id (str "EVLctxflood" (.padStart (str i) 3 "0"))
+   :seon.eval/at (js/Date. (+ (.getTime (js/Date.)) 3600000 i))
+   :seon.eval/duration-ms 4
+   :seon.eval/source (str "(flood " i ")")
+   :seon.eval/ok? true
+   :seon.eval/result-edn (apply str (repeat 2000 "y"))
+   :seon.eval/ns :my.agent.ctx-260610})
+
+(deftest transcript-eviction-keeps-messages-under-eval-flood
+  (async done
+    (-> (with-seeded-conn
+          (mapv flood-eval (range 1 21))      ; ~36k rendered eval chars
+          (fn [conn]
+            (let [db @conn
+                  ts (agent/transcript-section
+                       {:seon.db/db db :seon.agent/id agent-id})]
+              (is (str/includes? ts "user> build me a thing")
+                  "the user's message SURVIVES the eval flood — the S-12
+                   'last message missing from the visible transcript' bug")
+              (is (str/includes? ts "assistant> on it")
+                  "the agent's own reply survives too")
+              (is (str/includes? ts "older eval item")
+                  "the elision note fired — the flood DID overflow the budget")
+              (is (not (str/includes? ts "boom — bad query"))
+                  "the OLDEST eval row was evicted — eviction still works,
+                   it just no longer takes messages with it")
+              (is (str/includes? ts "(flood 20)")
+                  "the newest eval row is kept"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

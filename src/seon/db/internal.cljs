@@ -848,12 +848,15 @@
       ;; "Lookup ref attribute should be marked as :db/unique"
       (re-find #"Lookup ref attribute should be marked as :db/unique" msg)
       (rewrite
-        (str "lookup-ref failed: the lookup-ref's target attr must be an "
-             "identity attr — add {:seon.db/identity true} to its "
-             "register! call, e.g. (seon.schema/register! :my.ns/id "
-             "[:string {:seon.db/identity true}]). Alternatively the "
-             "referenced entity doesn't exist yet — transact it first "
-             "(or use a tempid in the same tx)."))
+        (str "lookup-ref failed: a lookup-ref [attr v] only works when "
+             "attr is an IDENTITY attr. Usually the fix is NOT identity: "
+             "query for the entity's eid and use that, or transact the "
+             "entity first (or via a tempid in the same tx). Do NOT "
+             "re-register an EXISTING attr just to add "
+             "{:seon.db/identity true} — that mutates a shared data "
+             "model others already query. Only a NEW attr that is "
+             "genuinely the kind's natural key (rows upsert by it) "
+             "should be registered as an identity attr."))
 
       :else envelope)))
 
@@ -942,23 +945,34 @@
    args (map-in OR positional) into the canonical request map, runs the
    invocation-shape guard, resolves the default `*conn*`, then delegates
    here. `arg` is the canonical `{::tx-data … ::opts … ::conn …}` map
-   with `::conn` already defaulted. Returns the `{::ok? …}` envelope;
-   the datahike commit failure path is caught here, the
-   pre-normalization failures are caught by `seon.db/transact!`."
+   with `::conn` already defaulted.
+
+   THE ERROR CONTRACT, in one place: transact!* NEVER rejects/throws to
+   its caller. Every throw on the commit path — conn resolution, the
+   validation gate ([[validate-attrs!]] / [[validate-values!]] throw
+   ex-info on bad input), runtime schema install
+   ([[ensure-datahike-attrs!]]), and the datahike commit itself — is
+   caught HERE and converted by [[commit-error-envelope]] into the
+   `{::ok? false …}` failure envelope the agent reads as a VALUE.
+   Success returns `{::ok? true ::tx-report …}`. The only failures the
+   `seon.db/transact!` face still catches are PRE-normalization ones
+   (malformed call shape, before this fn is reached)."
   [arg]
-  (let [{::db/keys [tx-data opts conn]} arg
-        c           (resolve-conn conn)
-        attrs       (extract-tx-attrs tx-data)
-        merged-opts (warn-on-seed-origin-forge!
-                      (merge-tx-context-into-opts opts))]
-    (validate-attrs! attrs)
-    (validate-values! tx-data)
-    ;; Install datahike schema for any registered attr not yet in the
-    ;; conn (e.g. one the agent just `seon.schema/register!`'d at runtime).
-    ;; Schema-before-data in its own tx; skips attrs already present. See
-    ;; `ensure-datahike-attrs!` for the why.
-    (await (ensure-datahike-attrs! c attrs))
-    (try
+  (try
+    (let [{::db/keys [tx-data opts conn]} arg
+          c           (resolve-conn conn)
+          attrs       (extract-tx-attrs tx-data)
+          merged-opts (warn-on-seed-origin-forge!
+                        (merge-tx-context-into-opts opts))]
+      ;; Validation gate — these THROW ex-info on bad input; the outer
+      ;; catch below converts every throw to the failure envelope.
+      (validate-attrs! attrs)
+      (validate-values! tx-data)
+      ;; Install datahike schema for any registered attr not yet in the
+      ;; conn (e.g. one the agent just `seon.schema/register!`'d at
+      ;; runtime). Schema-before-data in its own tx; skips attrs already
+      ;; present. See `ensure-datahike-attrs!` for the why.
+      (await (ensure-datahike-attrs! c attrs))
       ;; Datahike-cljs `d/transact!` takes one arg-map combining
       ;; `:tx-data` + `:tx-meta` (see datahike.api.impl/transact! L29-41).
       ;; The previous shape `(d/transact! c tx-data opts)` passed opts
@@ -968,12 +982,12 @@
       (let [arg-map (merge {:tx-data (encode-edn-slot-values tx-data)}
                            merged-opts)
             report  (await (d/transact! c arg-map))]
-        {::db/ok? true ::db/tx-report report})
-      (catch :default e
-        ;; Datahike-side / async commit failure. Translation rewrites
-        ;; the two known cryptic messages and retags them :user-input;
-        ;; anything else past the gate stays :substrate-bug.
-        (commit-error-envelope e)))))
+        {::db/ok? true ::db/tx-report report}))
+    (catch :default e
+      ;; Validation-gate / schema-install / datahike commit failure.
+      ;; Translation rewrites the known cryptic messages and retags
+      ;; them :user-input; anything else stays :substrate-bug.
+      (commit-error-envelope e))))
 
 ;; ---------------------------------------------------------------------------
 ;; Boot preconditions.

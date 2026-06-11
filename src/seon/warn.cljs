@@ -658,10 +658,16 @@
    (str "A transact used a lookup ref [:attr v] whose target attr is "
         "not registered with {:seon.db/identity true} (datahike says "
         "\"Lookup ref attribute should be marked as :db/unique\"). "
-        "Either register the attr as an identity, or — if the entity "
-        "doesn't exist yet — transact it first (or in the same tx).")
+        "Usually the fix is NOT identity: query for the entity's eid "
+        "and reference that, or transact the entity first (or via a "
+        "tempid in the same tx). Do NOT re-register an EXISTING attr "
+        "to add identity — that mutates a shared data model. Identity "
+        "is only for a NEW attr that is the kind's natural key.")
    :seon.warn/example
-   "(seon.schema/register! :kb.doc/path [:string {:seon.db/identity true}])"})
+   (str ";; reference by eid instead of a lookup-ref on a non-identity attr:\n"
+        "(def eid (ffirst (seon.db/query {:seon.db/query\n"
+        "                                 '[:find ?e :where [?e :kb.doc/path \"a.md\"]]})))\n"
+        "{:kb.note/doc eid}  ; NOT {:kb.note/doc [:kb.doc/path \"a.md\"]}")})
 
 (defn check-hop-exhausted
   "Messages whose `:seon.agent.message/hops` reached [[hop-cap]] SINCE the

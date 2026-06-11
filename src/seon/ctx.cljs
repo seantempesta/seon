@@ -297,14 +297,6 @@
     (:seon.agent/id from)            (str "agent-" (:seon.agent/id from))
     :else                            "unknown"))
 
-(defn- format-message-row
-  "Render one message as a REPL event for the interleaved transcript:
-   `user> …` / `assistant> …` / `agent-<id>> …`. The `<label>>` prefix
-   lines it up visually with eval `> form` lines so the merged stream
-   reads as one coherent REPL session."
-  [{from :seon.agent.message/from content :seon.agent.message/content} own-id]
-  (str (message-label from own-id) "> " content))
-
 (defn- read-error-envelope
   "Best-effort EDN decode of a `:seon.eval/error-data` instrument-envelope
    string. Returns the envelope map, or nil when blank/unreadable. Never
@@ -337,6 +329,26 @@
      (if (> n limit)
        (str (subs s 0 limit) " …⟨" (- n limit) " chars elided⟩")
        s))))
+
+(def message-render-cap
+  "Per-message rendered-content char cap for the transcript section.
+   Messages are EXEMPT from the transcript's budget eviction (the
+   conversation is never sacrificed for eval bulk — see
+   [[transcript-section]]), so each one must be individually bounded
+   or a single pasted blob could blow the context. 4000 (≈1k tokens)
+   keeps any realistic chat turn whole; the full content stays in the
+   db ((seon.agent/messages))."
+  4000)
+
+(defn- format-message-row
+  "Render one message as a REPL event for the interleaved transcript:
+   `user> …` / `assistant> …` / `agent-<id>> …`. The `<label>>` prefix
+   lines it up visually with eval `> form` lines so the merged stream
+   reads as one coherent REPL session. Content is capped at
+   [[message-render-cap]] (context-SAFETY invariant — messages are
+   never evicted from the transcript, so they must be bounded)."
+  [{from :seon.agent.message/from content :seon.agent.message/content} own-id]
+  (str (message-label from own-id) "> " (cap-result content message-render-cap)))
 
 (defn cap-result-body
   "Like `cap-result`, but for an eval RESULT body specifically: when the
@@ -764,13 +776,20 @@
            "                                violation as a bare key\n"
            "  :title                  NO  — bare key\n"
            "Common shapes:\n"
-           "  - natural-key identity (upsert): [:string {:seon.db/identity true}]\n"
+           "  - plain values:                  :string, :keyword, :inst, :boolean\n"
            "  - a reference to another entity: :seon.db/ref\n"
            "  - many references:               [:vector :seon.db/ref]\n"
            "  - numbers: :int for counts/ids, :double for measures —\n"
-           "    :number is NOT a type (the transact! gate will tell you).\n\n"
+           "    :number is NOT a type (the transact! gate will tell you).\n"
+           "  - identity is OPTIONAL — [:string {:seon.db/identity true}]\n"
+           "    only on a kind's ONE natural key, and only when rows must\n"
+           "    upsert by that key (re-transacting the same key updates the\n"
+           "    row instead of adding a duplicate). Most attrs, one-off\n"
+           "    entities, and bulk rows need NO identity attr at all; never\n"
+           "    re-register an existing attr just to add identity.\n\n"
            "  ;; 1. register the attrs (do this ONCE per attr)\n"
            "  (seon.schema/register! :my.kb.doc/path  [:string {:seon.db/identity true}])\n"
+           "  ;;   ^ identity ONLY because docs re-index by path (upsert key)\n"
            "  (seon.schema/register! :my.kb.doc/title :string)\n"
            "  (seon.schema/register! :my.kb.doc/tags  [:vector :keyword])\n\n"
            "  ;; 2. NOW transact data using those attrs — upserts by :my.kb.doc/path\n"
@@ -847,8 +866,8 @@
            "  (seon.agent.search/grep {:seon.agent.search/pattern \"validate-entity-values!\"\n"
            "                     :seon.agent.search/glob    \"*.cljs\"})\n"
            "  ;; => {:seon.agent.search/ok? true, :seon.agent.search/matches\n"
-           "  ;;     [{:seon.agent.search/path \"…/src/seon/db.cljs\"\n"
-           "  ;;       :seon.agent.search/line-number 803, …}], …}\n\n"
+           "  ;;     [{:seon.agent.search/path \"…/src/seon/db/internal.cljs\"\n"
+           "  ;;       :seon.agent.search/line-number 499, …}], …}\n\n"
            "  ;; 2. read the exact hit (sync; match paths are absolute)\n"
            "  (seon.agent.fs/read-file {:seon.agent.fs/path \"<absolute path from the match>\"})\n\n"
            "A denial is a VALUE, not a crash — {:seon.agent.fs/ok? false\n"
@@ -864,13 +883,15 @@
            "re-inventing source-path/line/confidence per domain:\n\n"
            "  ;; e.g. verified facts about fns in a codebase:\n"
            "  (seon.schema/register! :my.kb.codebase.fn/name  [:string {:seon.db/identity true}])\n"
+           "  ;;   ^ identity ONLY because claims upsert by fn name; most\n"
+           "  ;;     attrs need no identity (see Common shapes)\n"
            "  (seon.schema/register! :my.kb.codebase.fn/claim :string)\n\n"
            "  (seon.db/transact!\n"
            "    {:seon.db/tx-data\n"
            "     [{:my.kb.codebase.fn/name  \"seon.db/transact!\"\n"
            "       :my.kb.codebase.fn/claim \"Malli-validates every entity before the tx reaches datahike\"\n"
-           "       :my.kb/source-path       \"src/seon/db.cljs\"\n"
-           "       :my.kb/source-line       803\n"
+           "       :my.kb/source-path       \"src/seon/db/internal.cljs\"\n"
+           "       :my.kb/source-line       499\n"
            "       :my.kb/confidence        :verified}]})  ; :verified = you read that line\n\n"
            "WHY schemas, not text blobs: the next agent discovers your attrs\n"
            "in the schema-catalog, datalogs your rows (recipe step 0) and\n"
@@ -1801,7 +1822,16 @@
    Change B 2026-06-09); evals via `seon.agent/evals` (turn-walk). Merges
    by `:at`, stores nothing. Each eval row is
    `cap-result`-bounded (`format-eval-row`) so one huge result can't
-   dominate the transcript (context-SAFETY invariant)."
+   dominate the transcript (context-SAFETY invariant).
+
+   Budget eviction applies to EVAL rows ONLY — message rows are ALWAYS
+   kept, in chronological position. Before this exemption a burst of
+   ~16 worst-case eval rows after the user's last message pushed that
+   message past the budget, and the agent correctly narrated 'the
+   user's last message is missing from the visible transcript' (S-12
+   KoQ turn Ckz-2606101827). The conversation is never sacrificed for
+   eval bulk; each message is individually bounded by
+   [[message-render-cap]] so the exemption can't blow the context."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.agent/keys [id] :as input}]
   (let [n     (or (:seon.agent/n (:seon.ctx/section input)) 50)
@@ -1811,24 +1841,37 @@
                    (sort-by transcript-item-at))]
     (if (seq items)
       (let [rendered (mapv #(format-transcript-item % id) items)
-            ;; NEWEST-FIRST retention under the total budget: walk from
-            ;; the end accumulating rendered chars; keep the newest
-            ;; items WHOLE (always at least one), drop everything older.
-            kept-n   (loop [i (dec (count rendered)) acc 0 kept 0]
-                       (if (neg? i)
-                         kept
-                         (let [acc' (+ acc (count (rendered i)) 2)]
-                           (if (and (pos? kept) (> acc' transcript-char-budget))
-                             kept
-                             (recur (dec i) acc' (inc kept))))))
-            elided   (- (count rendered) kept-n)
-            kept     (subvec rendered elided)]
+            msg-at?  (mapv #(contains? % :seon.agent.message/at) items)
+            ;; Chars the always-kept message rows consume up front.
+            msg-chars (transduce
+                        (keep-indexed
+                          (fn [i s] (when (msg-at? i) (+ (count s) 2))))
+                        + 0 rendered)
+            ;; NEWEST-FIRST retention over the EVAL rows with whatever
+            ;; budget the messages leave: walk from the end accumulating
+            ;; rendered chars; keep the newest eval rows WHOLE (always
+            ;; at least one), drop everything older.
+            kept-eval (loop [i (dec (count rendered)) acc msg-chars
+                             kept #{}]
+                        (if (neg? i)
+                          kept
+                          (if (msg-at? i)
+                            (recur (dec i) acc kept)
+                            (let [acc' (+ acc (count (rendered i)) 2)]
+                              (if (and (seq kept)
+                                       (> acc' transcript-char-budget))
+                                kept
+                                (recur (dec i) acc' (conj kept i)))))))
+            kept-idx (filterv #(or (msg-at? %) (kept-eval %))
+                              (range (count rendered)))
+            elided   (- (count rendered) (count kept-idx))
+            kept     (mapv rendered kept-idx)]
         (str "<transcript>\n"
              (when (pos? elided)
-               (str ";; … " elided " older item" (when (not= 1 elided) "s")
+               (str ";; … " elided " older eval item" (when (not= 1 elided) "s")
                     " elided (transcript capped at " transcript-char-budget
-                    " chars; the full log is in the db — "
-                    "(seon.agent/messages) / (seon.agent/evals))\n\n"))
+                    " chars; messages are always kept; the full log is in "
+                    "the db — (seon.agent/messages) / (seon.agent/evals))\n\n"))
              (str/join "\n\n" kept)
              "\n</transcript>"))
       "")))
