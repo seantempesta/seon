@@ -185,17 +185,18 @@
                                   ;; (context-v4: the catalogs died; the
                                   ;; store-inventory eval is the consult
                                   ;; surface) renders kinds for this world.
-                                  ;; NOTE: :seon.workout/date is registered
-                                  ;; WITHOUT identity, so it is a domain
-                                  ;; ATTR, not an inventory KIND — the
-                                  ;; post-refactor gym sweep owns deciding
-                                  ;; whether identity-less domains need a
-                                  ;; consult surface beyond the rendered
-                                  ;; namespace sources.
+                                  ;; Re-pinned for A3's datom-derived
+                                  ;; inventory: kinds = attr namespaces
+                                  ;; WITH ROWS. The seeded world has no
+                                  ;; :seon.agent datoms (boot-seed! only,
+                                  ;; no start-agent!) — the fixture's
+                                  ;; identity-less :seon.workout being
+                                  ;; VISIBLE here is the S-21 win this
+                                  ;; rework exists for.
                                   (is (seq kinds)
                                       "store-inventory returns kinds for the seeded world")
-                                  (is (contains? kinds :seon.agent)
-                                      "substrate kinds are inventoried")))))))
+                                  (is (contains? kinds :seon.workout)
+                                      "identity-less seeded domain kinds are inventoried")))))))
           (.then (fn [_]
                    (let [minted (remove keys-before (schema/current-keys))]
                      (when (seq minted)

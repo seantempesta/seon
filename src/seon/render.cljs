@@ -35,7 +35,8 @@
     [seon.eval :as eval]
     [seon.render.default :as default]
     [seon.render.live-tile :as live-tile]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.ui.html :as html]))
 
 ;; ============================================================
 ;; Schemas — every shape this surface reads or writes (spec-05 §15.1).
@@ -511,7 +512,32 @@
                    :seon.agent/id      id
                    :seon.render/entity ent}]
         (try
-          (html-render value input)
+          (let [resp   (html-render value input)
+                hiccup (:seon.render/hiccup resp)]
+            ;; SERIALIZATION joins the same guarded path as invocation
+            ;; (aria asks 9+12): a structurally-broken hiccup (e.g. a
+            ;; vector-of-vectors child) doesn't throw at html-render —
+            ;; it used to escape here and detonate LATER at page
+            ;; serialization, 500ing /agent/<id>, the grid, and
+            ;; mid-boot-replay renders. Two layers, one catch:
+            (when (some? hiccup)
+              ;; (a) serializer-faithful structural walk — a legible
+              ;;     message locating the defect (path included);
+              (when-some [{:seon.render.live-tile/keys
+                           [structure-path structure-message]}
+                          (live-tile/hiccup-structure-error hiccup)]
+                (throw (ex-info (str "invalid tile hiccup — "
+                                     structure-message
+                                     " (at path " (pr-str structure-path)
+                                     ")")
+                                {:seon.render.live-tile/structure-path
+                                 structure-path})))
+              ;; (b) backstop: PROVE the hiccup serializes. ->string is
+              ;;     pure + deterministic, so success here guarantees
+              ;;     the page render embedding this hiccup cannot throw
+              ;;     on this tile.
+              (html/->string hiccup))
+            resp)
           (catch :default e
             (live-tile/error-response
               {:seon.db/error                 (err/->map e)

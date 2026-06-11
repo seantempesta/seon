@@ -102,7 +102,8 @@
   (:require
     [seon.db :as db]
     [seon.render.chat :as chat]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.ui.html :as html]))
 
 ;; ============================================================
 ;; The hiccup predicate + the canonical value-or-fn shape.
@@ -169,6 +170,94 @@
                [(first rest-x) (rest rest-x)]
                [nil rest-x])]
          (every? valid-hiccup-elem? children))))
+
+;; ============================================================
+;; Serialization-boundary structural check (aria asks 9+12,
+;; fix-everything Wave C): [[valid-hiccup?]] above is the strict
+;; AUTHORING shape, deliberately narrower than what the serializer
+;; accepts (seqs, numbers, raw, stringifiable values all render fine
+;; via seon.ui.html/->string) — so it CANNOT gate the render path
+;; without falsely erroring legitimate tiles. The fns below mirror
+;; the SERIALIZER's acceptance exactly and return the FIRST fatal
+;; defect with its path, so a broken tile degrades to
+;; [[error-response]] with a legible message instead of throwing
+;; later at page serialization and 500ing /agent/<id> + the grid.
+;; ============================================================
+
+(schema/register! ::structure-path [:vector :int])
+(schema/register! ::structure-message :string)
+(schema/register! ::structure-error
+  [:map
+   [::structure-path    ::structure-path]
+   [::structure-message ::structure-message]])
+
+(defn- pr-str-bounded
+  "pr-str `x` clipped to ~120 chars — error messages quote the
+   offending node without dumping a whole hiccup tree."
+  [x]
+  (let [s (pr-str x)]
+    (if (> (count s) 120) (str (subs s 0 120) "…") s)))
+
+(defn- structure-error-at
+  "Walk `x` the way seon.ui.html renders it; return the first fatal
+   structural defect as {::structure-path ::structure-message}, or
+   nil. Fatal = exactly what makes ->string THROW: a vector element
+   whose tag slot isn't a keyword/symbol/string. Everything the
+   serializer tolerates (nil/false, raw, seqs, stringifiable scalars)
+   passes."
+  [x path]
+  (cond
+    (or (nil? x) (false? x)) nil
+    (html/raw? x)            nil
+
+    (vector? x)
+    (let [tag (nth x 0 nil)]
+      (cond
+        (vector? tag)
+        {::structure-path path
+         ::structure-message
+         (str "vector-of-vectors child — the element at this path is a "
+              "vector whose first slot is itself a vector ("
+              (pr-str-bounded tag) "). Splice the children into the "
+              "parent vector, or emit them as a seq — "
+              "(list [:div …] [:div …]) — never a nested vector of "
+              "elements.")}
+
+        (not (or (keyword? tag) (symbol? tag) (string? tag)))
+        {::structure-path path
+         ::structure-message
+         (str "invalid tag — must be a keyword, symbol, or string; got "
+              (pr-str-bounded tag))}
+
+        :else
+        (let [body      (rest x)
+              attrs?    (and (map? (first body))
+                             (not (html/raw? (first body))))
+              children  (if attrs? (rest body) body)
+              offset    (if attrs? 2 1)]
+          (some identity
+                (map-indexed
+                  (fn [i c] (structure-error-at c (conj path (+ offset i))))
+                  children)))))
+
+    (seq? x)
+    (some identity
+          (map-indexed (fn [i c] (structure-error-at c (conj path i)))
+                       x))
+
+    :else nil))
+
+(defn hiccup-structure-error
+  "Serializer-faithful structural check for a tile's hiccup. Returns
+   nil when `seon.ui.html/->string` would serialize `x` cleanly, or
+   `{::structure-path […] ::structure-message \"…\"}` locating the
+   FIRST fatal defect (e.g. a vector-of-vectors child). A PLAIN fn at
+   the render boundary, like [[valid-hiccup?]] — never inside a
+   registered form. (`:any` input — this IS the validator for
+   arbitrary values.)"
+  {:malli/schema [:=> [:catn [::x :any]] [:maybe ::structure-error]]}
+  [x]
+  (structure-error-at x []))
 
 ;; The PURE-DATA hiccup bound: a vector with a keyword head. Shallow
 ;; on purpose — children are `:any` (sanctioned: arbitrary hiccup
