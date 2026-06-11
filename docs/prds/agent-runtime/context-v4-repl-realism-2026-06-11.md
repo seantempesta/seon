@@ -111,26 +111,47 @@ ARE the API documentation (they're in the prompt); (b) the **startup
 evals as a tutorial** — see §3.1 for the worked examples this PRD
 requires.
 
-Identity/personality is NOT here — it lives in the soul rows in
-`<instructions>` (`my.soul`, committed eeeb562).
+Identity/personality is NOT here — it lives in the `my.soul` store
+rows feeding the API-level system message (committed eeeb562), which
+the user can swap without a rebuild.
 
-### 2.2 `<instructions>` — the user-editable layer (r2: soul ONLY)
+### 2.2 Instructions — three homes, NO section (r3, user-decided)
 
-**`my.kb.instruction` DIES (user, r2).** Per-agent self-instructions
-live on the agent's OWN entity (§2.5) — rendered every turn, "it's
-just context." This section carries ONLY the `my.soul` rows (identity
-and repl-mechanics; user-editable store rows, committed eeeb562) —
-one swappable layer, busts only on a soul transact.
+**The `<instructions>` section DIES; `my.kb.instruction` as it exists
+dies with it.** Instructions have three homes, each matching its
+lifetime:
 
-**DECIDE(user): where the four cluster-wide teachings go**
-(consult-before-research, store-proactively, reply-once,
-namespace-map): (a) fold into the soul text — one user-editable blob;
-RECOMMENDED: behavioral policy is exactly what a user might swap — or
-(b) become docstrings on the relevant substrate fns. Until decided,
-the rows keep rendering from their current source.
+1. **Static behavioral teachings → the system prompt.** The four
+   teachings (consult-before-research, store-proactively, reply-once,
+   namespace-map) are static defaults — they join §2.1's concept
+   paragraphs. DECIDED (user, r3): "instructions can go into the
+   system prompt — they are static."
+2. **Per-agent instructions → the agent's OWN entity** (§2.5). As the
+   user tells an agent things, the agent transacts them to itself —
+   rendered in `<your-entity>` every turn. Or to the knowledge base
+   when they're knowledge, not standing orders.
+3. **System-wide instructions → `my.kb.system`** — explicitly
+   system-wide, shown to ALL agents: one entity carrying a MANY-refs
+   vector of instruction rows, so agents and the user just keep
+   APPENDING (transact a new row + conj the ref). Agents are wired in
+   the startup tutorial (§3.1) to READ it as a real eval — same
+   pattern as `store-inventory`: source visible, call visible, result
+   in the transcript, re-run for fresh. Exact attr names + row shape:
+   build-time (the user's sketch: `my.kb.system` + many-refs; keep
+   it that simple).
 
-**Demo note:** the committed demo script's "instruction-edit kicker"
-beat referenced `my.kb.instruction` — the soul-edit replaces it.
+The `my.soul` rows (committed eeeb562) keep their separate job: they
+feed the API-level system message — the user-swappable identity layer.
+(`my.soul` is a `my.*` ns, so its SOURCE is in the prompt via §2.3
+automatically — no section needed for it either.)
+
+Staleness note: a startup-eval read ages like the inventory does;
+same accepted trade, same escalation (per-wake read), never a
+section.
+
+**Demo note:** the demo script's "instruction-edit kicker" beat
+becomes either a soul edit or a `my.kb.system` append — both are live
+transacts a viewer can watch change behavior.
 
 ### 2.3 `<namespace name="…">` tags — THE BODY
 
@@ -292,8 +313,16 @@ written so reading them teaches the three core moves:
 ;;     {:kind :seon.workout    :id-attr :seon.workout/date       :rows 9}
 ;;     …]
 
+;; Fourth: the system-wide instructions — standing guidance for ALL
+;; agents in this cluster. Anyone (my human, another agent, me) can
+;; append a row; I re-read when I want the current set.
+(my.kb.system/instructions)
+;; => ["Always store provenance (:my.kb/source-path) with findings."
+;;     "Prefer editing an existing schema over registering a parallel one."]
+
 ;; Anything I store this way survives restarts; anything I only
 ;; compute does not. When in doubt, transact it.
+
 ```
 
 A fresh agent reading its own log sees: writes-to-self by lookup ref,
@@ -317,6 +346,7 @@ Included namespaces are the API reference. The bar, by example
    (transact! [{:seon.db/ref [:my.kb.doc/path \"README.md\"]
                 :my.kb.doc/title \"Seon\"}])"
   …)
+
 ```
 
 One docstring = contract + envelope behavior + a commented call. An
@@ -366,20 +396,25 @@ claim — never as standing gym gates. Paid re-runs per unit, **spend
 free**. Correctness > benchmark continuity — numbers re-baseline per
 unit and the scorecard log says so.
 
-### V4-0 — instructions simplification (r2, NEW — small, first)
+### V4-0 — instructions three-homes split (r3, DECIDED — small, first)
 
-- **Converts:** `<instructions>` → soul rows only; `my.kb.instruction`
-  ns + seeds deleted (pending the DECIDE on the four teachings' home —
-  if soul, fold them into the soul text in this unit); `<your-entity>`
-  header gains the write-notes-to-yourself sentence when V4's
-  `<your-entity>` lands (until then, the existing purpose section
-  stays).
-- **Files (≤6):** delete `src/my/kb/instruction.cljs` + its seeds in
-  `client.cljs`, `src/my/soul.cljs` (absorb teachings if DECIDE=soul),
-  `src/seon/ctx.cljs` (instructions-section reads soul only), tests.
+- **Converts:** the `<instructions>` section → GONE. The four static
+  teachings move into the system prompt text (lands fully with V4-1;
+  this unit may stage them in the current system section).
+  `my.kb.instruction` is REPLACED by `my.kb.system` — the system-wide
+  instruction entity (many-refs vector of rows; agents and user
+  APPEND) plus a reader fn with a tutorial-grade docstring; seeded
+  with any current rows worth keeping. The startup tutorial
+  (tiles-PRD U4, §3.1) gains the `(my.kb.system/instructions)` read
+  eval.
+- **Files (≤7):** `src/my/kb/instruction.cljs` → `src/my/kb/system.cljs`
+  (rename+reshape), seeds in `client.cljs`, `src/seon/ctx.cljs`
+  (delete instructions-section), tests.
 - **Falsification:** prompt blob carries the teachings exactly once
-  (from soul); S-32 consult-first paid run stays green (the teaching
-  moved, not died); demo kicker rehearses as a soul edit.
+  (system prompt); the startup eval's result shows the system-wide
+  rows; an APPEND by a second agent is visible to a re-read; S-32
+  consult-first paid run stays green (the teaching moved, not died);
+  demo kicker rehearses as a soul edit or my.kb.system append.
 
 ### V4-1 — `<system>` rewrite + agent-id-to-tail
 
@@ -502,7 +537,7 @@ unit and the scorecard log says so.
 
 | Item | Owner | Where it lands |
 |---|---|---|
-| The four cluster-wide teachings' home: soul text (recommended) vs docstrings | user | V4-0 |
+| Exact `my.kb.system` attr names / row shape (user's sketch: many-refs vector, append-friendly) | build-time | V4-0 |
 | Eval result-var glyph/format on the value line | build-time | V4-4, pinned by test |
 | Status-line extras beyond §2.9 | user | V4-5 |
 
