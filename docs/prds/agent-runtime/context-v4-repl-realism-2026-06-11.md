@@ -201,7 +201,7 @@ exact transact-by-lookup-ref move at creation.
 The `::ai` twin of the wired live tile (one render, two twins) plus
 the wired fn pointer. Spec'd in [[live-tiles-prd-2026-06-11]] U5 —
 **reference, don't duplicate**; this PRD only fixes its slot in the
-layout (after `<your-entity>`, before `<store>`).
+layout (after `<your-entity>`, before `<warnings>`).
 
 ### 2.7 `<warnings>` — unchanged
 
