@@ -73,6 +73,21 @@ Split screen:
   the root grid, given room (container size selects the expanded
   blocks, §2).
 
+### Surface 2b — FOCUS MODE (optional, user 2026-06-11): full-screen tile + chat bar
+
+If the tiles land well: a toggle on the agent view collapses the
+split into **the live tile at full viewport + a chat bar** (input +
+the last reply only). The chat history panel toggles back in on
+demand — "generally users only care about the last message." This is
+the same one-render mechanism at a third container size: the tile
+gets the whole canvas, the agent needs no awareness that the mode
+exists (it just gets more room; the `::ai` twin is unchanged).
+Demo-optional, not demo-floor: build after T2 if T1/T2 prove out —
+it is a layout + toggle, no new agent-facing mechanism, no new
+namespace (hot-reload-safe). The demo beat: the agent's WORKSPACE as
+the primary surface, conversation reduced to an input bar — "crazy
+to think how the default experience is just normal text" (user).
+
 ### Surface 3 — debug view, kept exactly as today
 
 The current two-pane inspector (raw context sections left, rendered
@@ -374,6 +389,20 @@ cross-links updated; the per-agent SSE listener pushes BOTH views
   exchange appears INLINE, dimmer, labeled `agent-<peer>`;
   (4) `/agent/<id>/debug` is byte-identical in behavior to today's
   inspector; (5) grid tap lands on the consumer view.
+
+### U2b — focus mode (OPTIONAL, after T1/T2 prove out)
+
+Surface 2b: a toggle on the agent view → full-viewport tile + chat
+bar (input + last reply); history panel toggles back. Pure layout +
+one container size — no new namespace, no agent-facing change,
+hot-reload-safe. Build only if the demo floor is solid and time
+allows; the toggle state is client-side (signal), nothing stored.
+
+- Files (≤4): `src/seon/render/chat.cljs`,
+  `src/seon/web/inspector.cljs`, the CSS asset, tests.
+- Live proofs: toggle → tile fills viewport at expanded container
+  size, chat collapses to bar with last reply; toggle back restores
+  the split; agent's `::ai` twin unchanged in both modes.
 
 ### U3 — default root tile
 
