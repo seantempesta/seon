@@ -449,6 +449,24 @@ Performance read (user concurs): "at the floor — only going to get
 better"; capability proven, economy + source-legibility are the named
 gaps, both tractable (Tier 1).
 
+**OVERNIGHT ADDENDUM (06-11 early, all committed, tree clean):**
+seon.agent.message split landed (73efd37 — re-export face, zero caller/
+teaching churn; P6 slice 1 done). THREE PRDs await the user's morning
+review: seon-agent-mcp-prd (482a582 — secrets-by-reference, self-call
+guard; open Qs §8), live-tiles-prd (7d5af37 — one slot + :seon.render/
+level, tile=section-with-two-twins awareness, tiles DEMOABLE FRIDAY
+with zero substrate change; open Qs §7 incl. the parked label naming),
+v3e-demonstrated-evals-prd (ab44c53 — 4 real demos, three-surface
+canary; its open-Q2 already resolved per the commit note). Audit
+DECIDEs answered (d80058e): node-agent keep-till-cluster-runtime;
+seon.agent.log APPROVED (P24/#38); wake rides P6. Board now carries
+P21-P30 (#35-#44) — the COMPLETE open-issues queue with deps; P29/#43
+is the gate task for mcp+tiles unit ladders (DO NOT start before the
+user's review). Morning order: PRD reviews → launch P21 (#35 loop
+economy) + P22 (#36 legibility) in parallel (disjoint: agent.cljs-loop
+vs db/internal+ctx+warn) → P28 (#42 stability probe + S-12 re-baseline)
+→ Thursday P9 rehearsal → freeze.
+
 **Orchestrator protocol (keep):** launch-ready specs from the PRDs; one
 unit per agent ≤7 files w/ explicit fence + git-safety line; finisher
 agents for orphaned lanes (3 recoveries today worked); explicit-path
