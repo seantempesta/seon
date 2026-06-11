@@ -439,7 +439,7 @@ unit and the scorecard log says so.
   consult-first paid run stays green (the teaching moved, not died);
   demo kicker rehearses as a soul edit or my.kb.system append.
 
-### V4-1 — `<system>` rewrite + agent-id-to-tail
+### V4-1 — `<system>` rewrite + agent-id-to-tail — **LANDED 2026-06-11** (one-agent composer rewrite: V4-1…V4-6 all landed in one unit; per-rung notes inline below. §2.3 deviation: full-source-for-ALL measured at 873 KB ≈ 218k tokens on the live index — over every provider window — so DEPTH keeps a 2-element `full-source-roots` list (+ my.* by rule) until the `*.internal` splits land; SELECTION (which tags appear) is the one rule as decided. See `seon.ctx/full-source-roots` docstring.)
 
 - **Converts:** `:system` (and moves the id into the prompt/status
   line, partially fronting V4-5).
@@ -454,7 +454,7 @@ unit and the scorecard log says so.
   grep blobs for the agent id above the status line — zero hits
   outside `<your-entity>`/transcript content.
 
-### V4-2 — namespace tags + recency ordering (exemplars dissolve)
+### V4-2 — namespace tags + recency ordering (exemplars dissolve) — **LANDED 2026-06-11** (recency = `:seon.ns/name` datom tx; agent-authored stub rows RECONSTITUTE from member sources, seed-provenance stubs render shallow `(ns x)` tags; the get-else-over-bare-tx datalog trap was hit and routed around — see `seon.ctx/namespaces-section`)
 
 - **Converts:** `:exemplars` → `<namespace name="…">` tags; absorbs
   `:namespace-context` (own ns = a tag).
@@ -473,7 +473,7 @@ unit and the scorecard log says so.
   never appears; modify a ns between turns — next blob shows it LAST
   and the prefix above the moved tag is byte-identical.
 
-### V4-3 — catalogs → `store-inventory` fn + startup eval (RISKIEST — gym gates HARD)
+### V4-3 — catalogs → `store-inventory` fn + startup eval (RISKIEST — gym gates HARD) — **LANDED 2026-06-11** (`seon.db/store-inventory` derives kinds from installed `:db.unique/identity` attrs; creation turn runs it between the tile wiring and the my.kb.system read; catalogs + helpers deleted, NOT ported. Gym gate (S-32/S-12 paid runs) DEFERRED to the post-refactor sweep per user cadence — the consult-first risk is OPEN until that sweep runs)
 
 - **Converts:** `:schema-catalog` + `:functions-catalog` → DELETED
   sections; replaced by `seon.db/store-inventory` (a pre-written
@@ -497,7 +497,7 @@ unit and the scorecard log says so.
   kind via the startup eval's result + the namespace sources alone;
   `:prompt-excludes` `<schema-catalog>`, `<functions>`, `<store>`.
 
-### V4-4 — transcript threading + REPL rendering + resume marker + result vars
+### V4-4 — transcript threading + REPL rendering + resume marker + result vars — **LANDED 2026-06-11** (pinned glyph: `<value>  ; ⇒ (result :<id>) · <dur>ms`, byte-test `format-eval-row-pinned-glyph`; errors keep `; # <id>`; read legs (messages/evals/current-ns/turns-since-inbound/current-session) all take the composer's db snapshot — the run-3 latent class closed)
 
 - **Converts:** `:transcript` (threading is already merged today;
   this unit lands the REPL-real rendering, the per-eval result-var
@@ -520,7 +520,7 @@ unit and the scorecard log says so.
 - **DECIDE(build):** the exact result-var glyph (§2.8) — pick here,
   pin with a byte-level test.
 
-### V4-5 — status line + prompt
+### V4-5 — status line + prompt — **LANDED 2026-06-11** (§2.9 two-line form + pressure nudges above when escalating; localized time via host IANA tz; `inbox K` = inbound after my last outbound)
 
 - **Converts:** `:prompt` → the §2.9 two-line form (`inbox K`,
   `agent <id>`, user-localized time+tz; V4-1 already moved the id).
@@ -534,7 +534,7 @@ unit and the scorecard log says so.
   timestamps.
 - **DECIDE(user):** anything else in the line.
 
-### V4-6 — capabilities dissolution
+### V4-6 — capabilities dissolution — **LANDED 2026-06-11** (section + helpers deleted; `<your-entity>` replaced the `:purpose`/`:your-sections` seeds — purpose is `:seon.agent/purpose` entity data, `set-purpose!` transacts it; irreducible prose (register-before-transact, deep-attr rule, errors-as-values) landed as §2.1 system sentences; no new soul row needed)
 
 - **Converts:** `:capabilities` → gone (§3/§3b): docstring/teaching
   audit of the rendered namespaces + at most one new soul row for
