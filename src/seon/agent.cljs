@@ -778,9 +778,20 @@
   (count (:seon.agent.session/turns
            (db/entity {:seon.db/ref [:seon.agent.session/id session-id]}))))
 
+(defonce ^:private !boot-sessions
+  ;; Session ids opened by THIS pod process. `defonce` — survives hot
+  ;; reload (a reload is the same pod run), empty on a fresh Node boot.
+  ;; `ensure-session!` only reuses sessions found here, so a pod
+  ;; restart always opens a FRESH session for a resumed agent: the
+  ;; agent entity, purpose, and messages persist across restarts
+  ;; (messages are global), but evals are session-scoped — the
+  ;; intended resume shape.
+  (atom #{}))
+
 (defn ^:async start-session!
   "Open a new `:seon.agent.session` for `agent-id` and append to
-   `:seon.agent/sessions`. Returns the new session entity."
+   `:seon.agent/sessions`. Records the id in `!boot-sessions` (this
+   process opened it). Returns the new session entity."
   [agent-id]
   (let [session-id (db/new-id!)]
     (await (db/transact!
@@ -789,14 +800,22 @@
                 :seon.agent/sessions
                 [{:seon.agent.session/id session-id
                   :seon.agent.session/at (js/Date.)}]}]}))
+    (swap! !boot-sessions conj session-id)
     (db/entity {:seon.db/ref [:seon.agent.session/id session-id]})))
 
 (defn ^:async ensure-session!
-  "Return the agent's current session, opening one if none exists.
-   Idempotent — re-uses an existing session within the same pod run."
+  "Return the agent's current session, opening one if THIS pod process
+   hasn't opened one yet. Idempotent within a pod run; a session found
+   in the DB but opened by a previous pod run is NOT reused — every
+   pod boot starts a fresh session for a resumed agent (cross-restart
+   reuse was never intended; messages stay global, evals are
+   session-scoped)."
   [agent-id]
-  (or (current-session agent-id)
-      (await (start-session! agent-id))))
+  (let [sess (current-session agent-id)]
+    (if (and sess
+             (contains? @!boot-sessions (:seon.agent.session/id sess)))
+      sess
+      (await (start-session! agent-id)))))
 
 (defn render-prompt
   "Sync — resolve the agent's `:seon.render/ai` slot (default

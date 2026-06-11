@@ -126,6 +126,41 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; ensure-session! — session scope is the POD PROCESS, not the DB.
+;; A session present in the store but opened by a previous pod run
+;; (simulated by transacting it directly — it's never in
+;; `!boot-sessions`) must NOT be reused; within one run it must.
+;; ---------------------------------------------------------------------------
+
+(deftest ensure-session!-fresh-session-per-pod-boot
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            ;; Resumed agent: entity + a prior-run session already in
+            ;; the DB, but THIS process never opened that session.
+            (await (db/transact!
+                     {:seon.db/tx-data
+                      [{:seon.agent/id agent-id
+                        :seon.agent/state :idle
+                        :seon.agent/sessions
+                        [{:seon.agent.session/id "SESpriorboot01"
+                          :seon.agent.session/at (js/Date.)}]}]}))
+            (let [s1 (await (agent/ensure-session! agent-id))]
+              (testing "prior-run session is NOT reused — boot opens fresh"
+                (is (some? (:seon.agent.session/id s1)))
+                (is (not= "SESpriorboot01" (:seon.agent.session/id s1))))
+              (testing "agent entity persists — BOTH sessions on it"
+                (is (= 2 (count (:seon.agent/sessions
+                                  (db/entity {:seon.db/ref
+                                              [:seon.agent/id agent-id]}))))))
+              (testing "idempotent within the same pod run — reuses"
+                (let [s2 (await (agent/ensure-session! agent-id))]
+                  (is (= (:seon.agent.session/id s1)
+                         (:seon.agent.session/id s2))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; The loop through the REAL pipeline — bootstrap compile-state, real
 ;; eval-batch, real reply!. The llm-fn emits a reply! form EVERY turn
 ;; (the churn shape: under the pre-#35 policy this ran to the 20-turn
