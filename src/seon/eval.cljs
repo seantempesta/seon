@@ -47,6 +47,7 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.error.instrument :as einstrument]
+            [seon.platform :as platform]
             [seon.schema :as schema]
             [seon.test.runner :as test-runner]))
 
@@ -248,14 +249,18 @@
    pair the result with `init-version` to detect stale-after-reload
    state; see [[seon.repl/!init-version]]."
   []
-  (let [state (cljs/empty-state)]
+  (let [state          (cljs/empty-state)
+        ;; SEON_RUNTIME_ROOT-aware: a downstream pod running from its
+        ;; own world root finds the bootstrap output in the seon
+        ;; checkout; unset = "out/bootstrap" (CWD-relative) as before.
+        bootstrap-path (platform/artifact-path "out/bootstrap")]
     (await (js/Promise.
              (fn [resolve _reject]
                (boot/init state
-                          {:path "out/bootstrap"
+                          {:path bootstrap-path
                            :load-on-init '#{cljs.core}}
                           (fn [] (resolve nil))))))
-    (load-all-analysis-caches! state "out/bootstrap")
+    (load-all-analysis-caches! state bootstrap-path)
     (when-not (and (some? (.-cljs js/global))
                    (some? (.-core (.-cljs js/global))))
       (throw (js/Error.

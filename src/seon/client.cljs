@@ -956,15 +956,20 @@
 
 (defn- read-src-file
   "Read a substrate source file given a var-meta `:file` (classpath-relative,
-   e.g. \"seon/db.cljs\" or \"seon/agent_context_test.cljs\"). The pod is
-   Node; cwd is the repo root; sources live under the deps.edn `:cljs` source
-   roots (src, test, guest-cljs/src — probed in that order). Returns the file
-   text, or nil if it can't be read."
+   e.g. \"seon/db.cljs\" or \"seon/agent_context_test.cljs\"). Sources live
+   under the deps.edn `:cljs` source roots (src, test, guest-cljs/src —
+   probed in that order), resolved via `seon.platform/artifact-path`:
+   CWD-relative when the pod runs from the repo root (seon's own usage),
+   or under SEON_RUNTIME_ROOT when a downstream pod runs from its own
+   world root. Returns the file text, or nil if it can't be read."
   [file]
   (let [fs (js/require "fs")]
     (some (fn [root]
             (try
-              (.readFileSync fs (str (.cwd js/process) "/" root "/" file) "utf8")
+              (.readFileSync
+                fs
+                (str (seon.platform/artifact-path root) "/" file)
+                "utf8")
               (catch :default _ nil)))
           ["src" "test" "guest-cljs/src"])))
 

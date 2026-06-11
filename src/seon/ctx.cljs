@@ -19,8 +19,10 @@
        by one priority sort (override-by-name). Render guard (a broken
        section renders an inline error line, never breaks assembly)
        and the per-agent section char budget live here.
-     - the selection rules: [[included-ns?]] (ALL seon.* + my.* minus
-       *.internal — the ONE rule, no lists) and [[full-source-ns?]]
+     - the selection rules: [[included-ns?]] (ALL nses under the
+       store-configured [[included-prefixes]] — defaults seon.* + my.*
+       — minus *.internal; the ONE rule, no lists; downstreams extend
+       by one transact onto [[config-ref]]) and [[full-source-ns?]]
        (which rows the boot indexer inlines real file text for).
      - the substrate default section fns (system, namespaces,
        your-entity, live-tile, warnings, transcript, prompt) and the
@@ -145,18 +147,89 @@
   (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
     (boolean (or (= s "my") (str/starts-with? s "my.")))))
 
+;; ------------------------------------------------------------
+;; Included-prefix config — the customize-with-data row behind the
+;; ONE selection rule. A downstream consumer (an unmodified-substrate
+;; product) extends the prefix set by ONE transact:
+;;
+;;   (seon.db/transact!
+;;     {:seon.db/tx-data [{:seon.ctx/config-id "substrate"
+;;                         :seon.ctx/included-prefixes ["aria."]}]})
+;;
+;; and its `aria.*` namespaces render as `<namespace>` tags for every
+;; agent on the next render; `[:db/retract <eid>
+;; :seon.ctx/included-prefixes "aria."]` removes it again
+;; (cardinality-many — adds accumulate, never clobber the defaults).
+;; The `*.internal` exclusion stays STRUCTURAL: it applies to every
+;; prefix, configured or default.
+;; ------------------------------------------------------------
+
+(schema/register! :seon.ctx/config-id [:string {:seon.db/identity true}])
+(schema/register! :seon.ctx/included-prefixes [:vector :string])
+
+(def config-ref
+  "Lookup ref of THE substrate ctx-config entity — the carrier of
+   `:seon.ctx/included-prefixes` (and any future composer config rows).
+   Seeded if absent by the composer ([[assemble-context]])."
+  [:seon.ctx/config-id "substrate"])
+
+(def default-included-prefixes
+  "The built-in prefix set: the substrate (`seon.*`) and the human's
+   world (`my.*`). Seeded onto the config entity at first render;
+   downstreams ADD to the row, they never need to restate these."
+  ["seon." "my."])
+
+(defn included-prefixes
+  "The CURRENT included-prefix set — the config entity's
+   `:seon.ctx/included-prefixes` rows when present (sorted vector;
+   cardinality-many reads back as a set), else
+   [[default-included-prefixes]]. Optional `db` snapshot (the composer
+   threads its render db); the no-arg arity reads the live conn and
+   falls back to the defaults when no conn is bound (pure-name tests).
+   The `installed-schema` gate is load-bearing: datahike throws on a
+   lookup ref whose attr the conn never installed (installs are lazy,
+   at first transact)."
+  {:malli/schema [:function
+                  [:=> [:cat] [:vector :string]]
+                  [:=> [:cat :seon.db/db-val] [:vector :string]]]}
+  ([] (if-let [db (some-> db/*conn* deref)]
+        (included-prefixes db)
+        (vec (sort default-included-prefixes))))
+  ([db]
+   (->> (or (when (contains? (db/installed-schema db) :seon.ctx/config-id)
+              (seq (:seon.ctx/included-prefixes
+                     (db/entity {:seon.db/db db :seon.db/ref config-ref}))))
+            default-included-prefixes)
+        sort
+        vec)))
+
+(defn- prefix-included?
+  "True when ns string `s` falls under config prefix `p`: `\"aria.\"`
+   matches the bare root `aria` and every `aria.*` child (the same
+   root-or-child rule the hardwired seon/my checks used)."
+  [s p]
+  (let [root (if (str/ends-with? p ".") (subs p 0 (dec (count p))) p)]
+    (boolean (or (= s root) (str/starts-with? s (str root "."))))))
+
 (defn included-ns?
   "The ONE selection rule for the `<namespace>` tags (context-v4 §2.3,
-   r2): every `seon.*` and `my.*` namespace is included EXCEPT
-   `*.internal` ones. No lists, no budgets — a new namespace
-   auto-includes the moment its `:seon.ns` row exists."
-  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
-  [ns-name]
-  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
-    (boolean (and (not (hidden-ns-name? s))
-                  (or (my-ns-name? s)
-                      (= s "seon")
-                      (str/starts-with? s "seon."))))))
+   r2): every namespace under an included prefix (store-configured —
+   [[included-prefixes]]; defaults `seon.*` + `my.*`) is included
+   EXCEPT `*.internal` ones (STRUCTURAL — applies to all prefixes). No
+   lists, no budgets — a new namespace auto-includes the moment its
+   `:seon.ns` row exists; a downstream prefix auto-includes the moment
+   its config row is transacted. Pass the per-render `prefixes` (the
+   composer computes them ONCE per render from its db snapshot); the
+   1-arity reads the live conn."
+  {:malli/schema [:function
+                  [:=> [:cat [:or :string :keyword :symbol]] :boolean]
+                  [:=> [:cat [:or :string :keyword :symbol]
+                        [:vector :string]] :boolean]]}
+  ([ns-name] (included-ns? ns-name (included-prefixes)))
+  ([ns-name prefixes]
+   (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
+     (boolean (and (not (hidden-ns-name? s))
+                   (some #(prefix-included? s %) prefixes))))))
 
 (def full-source-roots
   "ROOT namespace names (strings) of the seon.* nses whose complete
@@ -764,6 +837,9 @@
                           :seon.db/query
                           '[:find ?tx
                             :where [?tx :seon.db/origin :substrate-seed]]}))
+        ;; The configured prefix set, computed ONCE per render from the
+        ;; SAME db snapshot every row is filtered against.
+        prefixes (included-prefixes db)
         rows   (->> (db/query
                       {:seon.db/db db
                        :seon.db/query
@@ -771,7 +847,7 @@
                          :where
                          [?n :seon.ns/name ?nm ?tx]
                          [?n :seon.ns/source ?src]]})
-                    (filter (fn [[nm _ _]] (included-ns? (name nm))))
+                    (filter (fn [[nm _ _]] (included-ns? (name nm) prefixes)))
                     (sort-by (fn [[nm _ tx]] [tx (name nm)])))
         blocks (for [[nm src tx] rows]
                  (let [ns-str (name nm)
@@ -1625,6 +1701,32 @@
                   s))
               rendered)))))
 
+(defonce ^:private !config-seed-attempted?
+  ;; Once-per-process latch for the lazy config seed below — the row is
+  ;; identity-upserted, so a lost race is harmless; the latch just stops
+  ;; every render from re-checking after the first.
+  (atom false))
+
+(defn- ensure-ctx-config!
+  "Seed THE ctx-config entity ([[config-ref]]) with
+   [[default-included-prefixes]] IF ABSENT — fire-and-forget (transact!
+   is safe-by-default), at most one attempt per process. Reads presence
+   from the render snapshot `db`; readers fall back to the defaults
+   until the row lands, so a lost write costs nothing but the
+   downstream's read-modify convenience."
+  [db]
+  (let [present? (and (contains? (db/installed-schema db)
+                                 :seon.ctx/config-id)
+                      (some? (db/entity {:seon.db/db db
+                                         :seon.db/ref config-ref})))]
+    (when (and (not present?)
+               (compare-and-set! !config-seed-attempted? false true))
+      (db/transact!
+        {:seon.db/tx-data
+         [{:seon.ctx/config-id "substrate"
+           :seon.ctx/included-prefixes default-included-prefixes}]}))
+    nil))
+
 (defn assemble-context
   "Compose the LLM context — the ONE composer, called by BOTH the agent
    prompt path (`seon.agent/render-prompt`) and the inspector, so
@@ -1648,6 +1750,7 @@
   {:malli/schema [:=> [:cat :seon.render/assemble-request]
                        :seon.render/assemble-response]}
   [{:seon.db/keys [db] :seon.agent/keys [id] :as input}]
+  (ensure-ctx-config! db)
   (let [entity   (db/pull {:seon.db/db db
                            :seon.db/pull-pattern
                            ;; Registered-but-uninstalled attrs (e.g. the

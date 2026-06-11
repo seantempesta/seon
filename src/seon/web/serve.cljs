@@ -47,6 +47,7 @@
     [seon.agent :as agent]
     [seon.db :as db]
     [seon.log :as log]
+    [seon.platform :as platform]
     [seon.web.inspector :as inspector]))
 
 ;; ============================================================
@@ -100,14 +101,16 @@
 ;; ============================================================
 ;; Static serving
 ;;
-;; Map URL prefix → disk root (relative to cwd). The pod is started
-;; from the seon submodule root (`./bin/start` → seon/bin/run), so
-;; cwd should be the seon dir; relative paths resolve under it.
+;; Map URL prefix → disk root. The roots are seon BUILD ARTIFACTS, so
+;; they resolve through `seon.platform/artifact-path`: CWD-relative
+;; when the pod runs from the seon repo root (today's usage), under
+;; SEON_RUNTIME_ROOT when a downstream pod runs from its own world
+;; root.
 ;; ============================================================
 
 (def ^:private static-roots
-  {"/css/" "resources/public/css/"
-   "/js/"  "resources/public/js/"})
+  {"/css/" (platform/artifact-path "resources/public/css/")
+   "/js/"  (platform/artifact-path "resources/public/js/")})
 
 (defn- mime-type [filename]
   (cond

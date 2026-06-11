@@ -65,6 +65,17 @@
   ;; hidden beats everything, even under my.*.
   (doseq [n ["seon.db.internal" "seon.agent.internal" "my.foo.internal"]]
     (is (true? (ctx/hidden-ns-name? n)) (str n " is hidden")))
+  ;; 2-arity: a configured downstream prefix includes its root + children;
+  ;; the *.internal exclusion is STRUCTURAL — it applies to every prefix.
+  (is (true? (ctx/included-ns? "aria.core" ["seon." "my." "aria."])))
+  (is (true? (ctx/included-ns? "aria" ["aria."]))
+      "a prefix includes its bare root ns")
+  (is (false? (ctx/included-ns? "aria.core" ["seon." "my."]))
+      "unconfigured prefix is NOT included")
+  (is (false? (ctx/included-ns? "aria.core.internal" ["aria."]))
+      "*.internal exclusion applies to configured prefixes too")
+  (is (false? (ctx/included-ns? "ariane.core" ["aria."]))
+      "prefix matches on segment boundary, not substring")
   ;; full-source depth: my.* by RULE + the seon exemplar roots +
   ;; children + test siblings; big unsplit substrate stays shallow.
   (doseq [n ["my.kb" "my.kb.system" "my.soul" "my.soul-test"
@@ -143,6 +154,75 @@
                             "prefix above the moved tag's old position is byte-identical")))))))
           (.then (fn [] (done)))
           (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done)))))))
+
+;; ------------------------------------------------------------
+;; Downstream prefix extensibility — the customize-with-data row.
+;; A downstream consumer adds its ns prefix by ONE transact onto the
+;; config entity; the next render carries the tags; a retract removes
+;; them. Defaults seed-if-absent ([[ctx/ensure-ctx-config!]] via the
+;; composer); reads fall back to the defaults until then.
+;; ------------------------------------------------------------
+
+(deftest included-prefix-extensibility
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (-> (transact-ns-row! "aria.core")
+                (.then (fn [_] (transact-ns-row! "seon.client")))
+                (.then
+                  (fn [_]
+                    (is (= (vec (sort ctx/default-included-prefixes))
+                           (ctx/included-prefixes @db/*conn*))
+                        "no config row → built-in defaults")
+                    (is (not (str/includes?
+                               (ctx/namespaces-section {:seon.db/db @db/*conn*})
+                               "aria.core"))
+                        "unconfigured downstream prefix does not render")))
+                ;; the seed row (what ensure-ctx-config! transacts) …
+                (.then (fn [_]
+                         (db/transact!
+                           {:seon.db/tx-data
+                            [{:seon.ctx/config-id "substrate"
+                              :seon.ctx/included-prefixes
+                              ctx/default-included-prefixes}]})))
+                ;; … then the downstream's ONE transact (identity upsert +
+                ;; cardinality-many ADD — the defaults are never restated
+                ;; or clobbered).
+                (.then (fn [_]
+                         (db/transact!
+                           {:seon.db/tx-data
+                            [{:seon.ctx/config-id "substrate"
+                              :seon.ctx/included-prefixes ["aria."]}]})))
+                (.then
+                  (fn [_]
+                    (let [txt (ctx/namespaces-section {:seon.db/db @db/*conn*})]
+                      (is (str/includes? txt "<namespace name=\"aria.core\">")
+                          "ONE transact → downstream ns renders as a tag")
+                      (is (str/includes? txt "<namespace name=\"seon.client\">")
+                          "defaults still render alongside"))))
+                ;; the *.internal exclusion stays structural.
+                (.then (fn [_] (transact-ns-row! "aria.core.internal")))
+                (.then
+                  (fn [_]
+                    (is (not (str/includes?
+                               (ctx/namespaces-section {:seon.db/db @db/*conn*})
+                               "aria.core.internal"))
+                        "*.internal never renders, configured prefix or not")))
+                ;; retract → gone next render.
+                (.then (fn [_]
+                         (db/transact!
+                           {:seon.db/tx-data
+                            [[:db/retract ctx/config-ref
+                              :seon.ctx/included-prefixes "aria."]]})))
+                (.then
+                  (fn [_]
+                    (let [txt (ctx/namespaces-section {:seon.db/db @db/*conn*})]
+                      (is (not (str/includes? txt "aria.core"))
+                          "retracted prefix → tag gone next render")
+                      (is (str/includes? txt "<namespace name=\"seon.client\">")
+                          "defaults unaffected by the retract")))))))
+        (.then (fn [] (done)))
+        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
 ;; ------------------------------------------------------------
 ;; Composer: purpose-as-entity-data, your-entity, merge, verbs.

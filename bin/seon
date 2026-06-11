@@ -49,6 +49,28 @@ LOG_DIR="logs"
 mkdir -p "$PROC_DIR" "$LOG_DIR"
 
 # ============================================================
+# Downstream parametrization — env overrides, each defaulting to
+# today's baked-in value so seon's own usage is byte-identical. A
+# downstream consumer shells out to bin/seon with env instead of
+# forking the script:
+#
+#   SEON_CLUSTER_DIR        wire-server store parent dir
+#                           (store at $SEON_CLUSTER_DIR/store)
+#   SEON_REQ_SOCK           wire-server request UDS path
+#   SEON_PUB_SOCK           wire-server publish UDS path
+#   SEON_WRITER_REPL_PORT   wire-server loopback socket-REPL port
+#   SEON_PORT               pod HTTP port (read by the pod itself —
+#                           seon.web.serve; inherits through nohup)
+#   SEON_RUNTIME_ROOT       pod artifact root (read by the pod itself —
+#                           seon.platform/artifact-path; inherits)
+# ============================================================
+
+SEON_CLUSTER_DIR="${SEON_CLUSTER_DIR:-data/clusters/default}"
+SEON_REQ_SOCK="${SEON_REQ_SOCK:-tmp/seon-cluster-default-req.sock}"
+SEON_PUB_SOCK="${SEON_PUB_SOCK:-tmp/seon-cluster-default-pub.sock}"
+SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-7891}"
+
+# ============================================================
 # Process registry — add a process by adding one case branch.
 # ============================================================
 
@@ -74,7 +96,7 @@ process_command() {
     # layout (P1); they're CLI args, not code identifiers. The --repl-port
     # opens a loopback-only socket REPL on 127.0.0.1 for diagnostics, and
     # the chosen port is written to tmp/seon-writer-repl-port.
-    wire-server) echo "clojure -M:writer --backend file --path data/clusters/default/store --req-sock tmp/seon-cluster-default-req.sock --pub-sock tmp/seon-cluster-default-pub.sock --repl-port 7891" ;;
+    wire-server) echo "clojure -M:writer --backend file --path $SEON_CLUSTER_DIR/store --req-sock $SEON_REQ_SOCK --pub-sock $SEON_PUB_SOCK --repl-port $SEON_WRITER_REPL_PORT" ;;
     *) return 1 ;;
   esac
 }
@@ -84,7 +106,7 @@ process_ready_hint() {
     pod)         echo "  ready: tmp/seon-port written + HTTP answers on /agents" ;;
     cljs-watch)  echo "  ready: 'Build completed' appears in logs/cljs-watch.log" ;;
     jvm)         echo "  ready: logs/app.log shows 'Server started'" ;;
-    wire-server) echo "  ready: tmp/seon-cluster-default-req.sock ACCEPTING; REPL on 127.0.0.1:7891 (tmp/seon-writer-repl-port)" ;;
+    wire-server) echo "  ready: $SEON_REQ_SOCK ACCEPTING; REPL on 127.0.0.1:$SEON_WRITER_REPL_PORT (tmp/seon-writer-repl-port)" ;;
     *) echo "" ;;
   esac
 }
@@ -113,14 +135,14 @@ ready_check() {
   local name="$1"
   case "$name" in
     wire-server)
-      [ -S tmp/seon-cluster-default-req.sock ] || return 1
+      [ -S "$SEON_REQ_SOCK" ] || return 1
       [ -f tmp/seon-writer-repl-port ] || return 1
       if nc_supports_uds; then
         # A real connect with immediate EOF. NOT `nc -z -U`: macOS nc's
         # -z returns 1 even against a live, accepting UDS (verified
         # 2026-06-10). Socket accepting implies datahike is up — the
         # writer binds the socket only after "[writer] datahike ready".
-        nc -U tmp/seon-cluster-default-req.sock -w 1 </dev/null >/dev/null 2>&1
+        nc -U "$SEON_REQ_SOCK" -w 1 </dev/null >/dev/null 2>&1
       else
         grep -q '\[writer\] ready' "$(log_file wire-server)" 2>/dev/null
       fi
@@ -526,11 +548,19 @@ cluster_reset() {
     */*|.|..|"") echo "✗ invalid cluster name: '$name'" >&2; exit 1 ;;
   esac
 
-  local store_dir="data/clusters/$name/store"
+  # The "default" cluster lives wherever SEON_CLUSTER_DIR points (env-
+  # overridable; defaults to data/clusters/default). Other names keep
+  # the conventional layout.
+  local store_dir
+  if [ "$name" = "default" ]; then
+    store_dir="$SEON_CLUSTER_DIR/store"
+  else
+    store_dir="data/clusters/$name/store"
+  fi
 
   # Only the "default" cluster has registered processes today
-  # (wire-server's CLI args are pinned to data/clusters/default).
-  # Other names get their store wiped but no process bounce.
+  # (wire-server's CLI args target $SEON_CLUSTER_DIR). Other names get
+  # their store wiped but no process bounce.
   local bounce=0
   [ "$name" = "default" ] && bounce=1
 
@@ -541,7 +571,7 @@ cluster_reset() {
     cmd_stop wire-server
     # Stale UDS sockets from the killed server would refuse the fresh
     # one's bind; they're recreated on start.
-    rm -f "tmp/seon-cluster-$name-req.sock" "tmp/seon-cluster-$name-pub.sock"
+    rm -f "$SEON_REQ_SOCK" "$SEON_PUB_SOCK"
   fi
 
   if [ -d "$store_dir" ]; then
@@ -634,6 +664,15 @@ Examples:
   bin/seon start pod && bin/seon tail pod
   bin/seon status
   bin/seon restart cljs-watch
+
+Env overrides (downstream parametrization — defaults = today's values):
+  SEON_CLUSTER_DIR        wire-server store parent (default data/clusters/default)
+  SEON_REQ_SOCK           wire-server request UDS (default tmp/seon-cluster-default-req.sock)
+  SEON_PUB_SOCK           wire-server publish UDS (default tmp/seon-cluster-default-pub.sock)
+  SEON_WRITER_REPL_PORT   wire-server loopback REPL port (default 7891)
+  SEON_PORT               pod HTTP port (default 7890; read by the pod)
+  SEON_RUNTIME_ROOT       pod artifact root (read by the pod; build/source
+                          artifacts resolve against it — data stays CWD-local)
 
 Auto-prep:
   Before spawning wire-server/cljs-watch the supervisor hashes
