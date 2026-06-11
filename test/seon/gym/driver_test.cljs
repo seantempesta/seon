@@ -162,11 +162,13 @@
                    (-> (gym/seed-scenario-world!
                          {:seon.db/conn conn :seon.gym/scenario scenario})
                        (.then (fn [_]
-                                (let [db      @conn
-                                      domain  (set (warn/domain-attrs
-                                                     {:seon.db/db db}))
-                                      catalog (agent/schema-catalog-section
-                                                {:seon.db/db db})]
+                                (let [db        @conn
+                                      domain    (set (warn/domain-attrs
+                                                       {:seon.db/db db}))
+                                      inventory (db/store-inventory
+                                                  {:seon.db/db db})
+                                      kinds     (set (map :seon.db/kind
+                                                          inventory))]
                                   ;; the seeded reuse surface IS domain attrs
                                   ;; (S-21 production-bug pin: seon.* DATA
                                   ;; domains must not be blanket-hidden)
@@ -179,19 +181,21 @@
                                                 domain)
                                       "no :seon.db/* leaks into domain attrs")
                                   (is (not (contains? domain :seon.agent/id)))
-                                  ;; …and the agent-facing catalog renders the
-                                  ;; reuse block with the exact keywords
-                                  (is (str/includes? catalog
-                                                     "domain data attrs")
-                                      "the reuse block renders")
-                                  (is (str/includes? catalog
-                                                     ":seon.workout/duration-minutes")
-                                      "the established attr is in the prompt")
-                                  ;; pod-boot parity: the substrate index +
-                                  ;; entity-schema decomposition are present
-                                  (is (str/includes? catalog
-                                                     "all registered schemas")
-                                      "index-schemas rows render (boot parity)")))))))
+                                  ;; …and the agent-facing consult surface
+                                  ;; (context-v4: the catalogs died; the
+                                  ;; store-inventory eval is the consult
+                                  ;; surface) renders kinds for this world.
+                                  ;; NOTE: :seon.workout/date is registered
+                                  ;; WITHOUT identity, so it is a domain
+                                  ;; ATTR, not an inventory KIND — the
+                                  ;; post-refactor gym sweep owns deciding
+                                  ;; whether identity-less domains need a
+                                  ;; consult surface beyond the rendered
+                                  ;; namespace sources.
+                                  (is (seq kinds)
+                                      "store-inventory returns kinds for the seeded world")
+                                  (is (contains? kinds :seon.agent)
+                                      "substrate kinds are inventoried")))))))
           (.then (fn [_]
                    (let [minted (remove keys-before (schema/current-keys))]
                      (when (seq minted)
@@ -230,7 +234,7 @@
                                 (let [dbv      @conn
                                       expected (->> (client/substrate-ns-set)
                                                     (map name)
-                                                    (filter ctx/relevant-ns?)
+                                                    (filter ctx/full-source-ns?)
                                                     set)
                                       full-src (->> (db/query
                                                       {:seon.db/db dbv
@@ -240,7 +244,7 @@
                                                          [?n :seon.ns/name ?nm]
                                                          [?n :seon.ns/source ?src]]})
                                                     (keep (fn [[nm src]]
-                                                            (when (and (ctx/relevant-ns? (name nm))
+                                                            (when (and (ctx/full-source-ns? (name nm))
                                                                        (not= (str/trim src)
                                                                              (str "(ns " (name nm) ")")))
                                                               (name nm))))

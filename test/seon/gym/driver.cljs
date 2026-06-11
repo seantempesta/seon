@@ -625,11 +625,24 @@
         (try
           (case kind
             :datalog
-            (let [rows (vec (db/query (cond-> {:seon.db/query query
-                                               :seon.db/db    dbv}
-                                        args (assoc :seon.db/args
-                                                    (resolve-predicate-args
-                                                      agents args)))))]
+            ;; The query typo-guard (seon.db/query, context-v4) throws a
+            ;; legible error when a query names an attr that is neither
+            ;; installed nor registered. Predicates DELIBERATELY query
+            ;; such attrs to assert "nothing landed" (e.g. a rejected
+            ;; unregistered attr) — for the gym's purposes the honest
+            ;; answer is the empty set, so map that one error back to [].
+            (let [rows (try
+                         (vec (db/query (cond-> {:seon.db/query query
+                                                 :seon.db/db    dbv}
+                                          args (assoc :seon.db/args
+                                                      (resolve-predicate-args
+                                                        agents args)))))
+                         (catch :default e
+                           (if (get-in (ex-data e)
+                                       [:seon.error/data
+                                        :seon.db/missing-attrs])
+                             []
+                             (throw e))))]
               [(expect-pass? expect rows)
                (str "rows=" (pr-str rows) " expect=" (pr-str expect))])
 
