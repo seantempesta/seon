@@ -24,12 +24,13 @@ or shrink it.
 Extends [[context-v3-code-first-2026-06-10]] (relevant = full source,
 internal = hidden, teaching lives in code) to its conclusion: **the
 prompt IS a REPL session.** One static system header, the soul, ALL
-the loaded namespaces as the body, the agent's own entity as a map, a
-thin data inventory near the bottom, and one threaded chronological
-transcript of messages and evals — ending in a status line and a
-clean prompt. Everything that was handcrafted prompt prose either
-becomes code (docstrings and `;;`-commented tutorial evals), data
-(the agent's own entity), or dies.
+the loaded namespaces as the body, the agent's own entity as a map,
+and one threaded chronological transcript of messages and evals —
+ending in a status line and a clean prompt. Everything that was
+handcrafted prompt prose either becomes code (docstrings and
+`;;`-commented tutorial evals), data (the agent's own entity), or
+dies — including the store inventory, which is a fn the startup
+tutorial demonstrably RUNS (§2.4), not a section.
 
 Prerequisite reading: `src/seon/ctx.cljs` (the composer +
 `substrate-default-ctx` + the current section fns), one recent prompt
@@ -155,20 +156,28 @@ bounds or budgets for now (user, r2) — Clojure code is small;
 budgets return only on measured need.** The old relevant-roots-growth
 A/B is absorbed trivially: everything is in.
 
-### 2.4 `<store>` — thin data inventory (r2: moved NEAR THE BOTTOM)
+### 2.4 The store inventory — NOT a section (r3): a fn + a startup eval
 
-ONE line per entity kind: `kind · id-attr · row count`. **Placed in
-the volatile zone, just above `<warnings>`** (user, r2): it's tiny, so
-busting the cache there is cheap — which also means counts can be
-LIVE (no uncounted-kinds carve-out needed; that complexity dies with
-the placement). **No teaching prose.** Purpose: consult-first — the
-inventory is the only surface that shows what prior agents actually
-stored; the shapes live in the rendered namespace sources (register!
-calls are code).
+**`<store>` is DEAD too (user, r3).** The inventory is a pre-written
+substrate fn (e.g. `seon.db/store-inventory` — one line per entity
+kind: kind · id-attr · row count) that the creation turn RUNS as a
+real startup eval (§3.1's tutorial). Everything connects: the fn's
+SOURCE is visible (it lives in an included namespace), the CALL is
+visible (in the transcript), the RESULT is visible (the value line) —
+the agent knows exactly where the numbers come from and that
+re-running the fn is how you get fresh ones. No section, no special
+mechanism: it's just a query, demonstrated.
 
-This **kills `<schema-catalog>` and `<functions>` as sections.**
-Anything not visible in an included source is one ordinary datahike
-query away — `seon.db`'s docstrings (included) show how.
+Staleness trade (stated, accepted): the startup eval's counts age
+within a session; "re-run the query for current numbers" IS the REPL
+model being taught. If the gym shows consult-first degrading on stale
+counts, the escalation is a per-WAKE eval (fresh at every wake, still
+in-transcript) — never a resurrected section.
+
+This **kills `<schema-catalog>`, `<functions>`, AND `<store>` as
+sections.** Anything not visible in an included source is one
+ordinary datahike query away — `seon.db`'s docstrings show how, and
+the startup eval demonstrates it.
 
 ### 2.5 `<your-entity>` — the agent's own entity, as a MAP
 
@@ -196,8 +205,8 @@ layout (after `<your-entity>`, before `<store>`).
 
 ### 2.7 `<warnings>` — unchanged
 
-Mechanics unchanged (reactive, derived, vanishes when fixed). Sits
-just after `<store>` in the volatile tail.
+Mechanics unchanged (reactive, derived, vanishes when fixed). First
+element of the volatile tail, after `<your-tile>`.
 
 Sections not named in this layout (today: `:open-todos`, priority 45)
 keep their current slot in the volatile zone between `<warnings>` and
@@ -272,6 +281,16 @@ written so reading them teaches the three core moves:
   {:seon.ctx/id :open-todos
    :seon.ctx/render 'seon.agent.todo/open-todos-section})
 ;; => {:seon.ctx/ok? true}
+
+;; Third: what's already in the shared store? Other agents stored
+;; knowledge here before me — checking BEFORE researching is how I
+;; avoid paying for answers that already exist. (The fn's source is
+;; in seon.db below — it's an ordinary query; I re-run it whenever I
+;; need current numbers.)
+(seon.db/store-inventory)
+;; => [{:kind :my.kb.codebase  :id-attr :my.kb.codebase/question :rows 14}
+;;     {:kind :seon.workout    :id-attr :seon.workout/date       :rows 9}
+;;     …]
 
 ;; Anything I store this way survives restarts; anything I only
 ;; compute does not. When in doubt, transact it.
@@ -396,27 +415,29 @@ unit and the scorecard log says so.
   never appears; modify a ns between turns — next blob shows it LAST
   and the prefix above the moved tag is byte-identical.
 
-### V4-3 — catalogs → `<store>` (RISKIEST — gym gates HARD)
+### V4-3 — catalogs → `store-inventory` fn + startup eval (RISKIEST — gym gates HARD)
 
-- **Converts:** `:schema-catalog` + `:functions-catalog` → `<store>`
-  (one conversion: the two catalogs are one surface, "what exists" —
-  they die together into one inventory).
-- **Files (≤7):** `src/seon/ctx.cljs` (new `store-section`, delete
-  the two catalog sections), `test/seon/agent_context_test.cljs`,
-  s32/s12 scenario EDNs (predicates re-anchored on the inventory
-  line + the taught query).
+- **Converts:** `:schema-catalog` + `:functions-catalog` → DELETED
+  sections; replaced by `seon.db/store-inventory` (a pre-written
+  substrate fn, source visible in the included `seon.db` tag) RUN as
+  a real eval in the creation turn (§2.4, §3.1 — r3).
+- **Files (≤7):** `src/seon/db.cljs` (`store-inventory` + its
+  tutorial-grade docstring), `src/seon/ctx.cljs` (delete the two
+  catalog sections), `src/seon/client.cljs` (the startup-eval form
+  joins tiles-PRD U4's creation turn), `test/`, s32/s12 scenario
+  EDNs (predicates re-anchored on the eval result in the transcript).
 - **Risk:** consult-first (P8's proven 5/5 behavior) currently leans
-  on the schema-catalog's attr listing. The `<store>` line shows the
-  KIND exists but not its attrs — the agent must take the one taught
-  query to get shapes. **Gate:** S-32 + S-12 paid runs must stay
-  green on consult-first under the anchored predicates
+  on the schema-catalog's attr listing. Now the agent sees the
+  inventory RESULT in its transcript (kinds + counts) and gets shapes
+  from the namespace sources / a re-run. **Gate:** S-32 + S-12 paid
+  runs must stay green on consult-first under the anchored predicates
   (`:my\.kb\.codebase/`-class, gym §3.2) BEFORE V4-4 starts; if
-  consult-rate drops, the unit stops and the inventory line gains
-  attrs back incrementally (id-attr → +attr names) until the gym is
-  green — never a silent regression.
-- **Falsification:** a stub run scripted to consult must find the kind
-  via `<store>` + the namespace sources alone; `:prompt-excludes`
-  `<schema-catalog>` and `<functions>`.
+  consult-rate drops: first escalation = run the inventory eval per
+  WAKE (fresh numbers, still in-transcript); second = richer
+  inventory rows (attr names). NEVER a resurrected section.
+- **Falsification:** a stub run scripted to consult must find the
+  kind via the startup eval's result + the namespace sources alone;
+  `:prompt-excludes` `<schema-catalog>`, `<functions>`, `<store>`.
 
 ### V4-4 — transcript threading + REPL rendering + resume marker + result vars
 
