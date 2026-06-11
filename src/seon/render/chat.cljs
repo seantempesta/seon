@@ -75,13 +75,11 @@
 (schema/register! ::stream-request
   [:map [::messages [:vector ::message]]])
 
-;; One bubble's hiccup. Registered (rather than inlined as
-;; `[:fn …]` in [[bubble]]'s :malli/schema metadata) because fn
-;; metadata is re-read from SOURCE by the boot indexer, where an
-;; aliased fn reference can't resolve (`:malli.core/sci-not-available`
-;; crashed the pod boot, observed live 2026-06-11). register! is
-;; evaluated code — the fn object is captured here once.
-(schema/register! ::bubble [:fn live-tile/valid-hiccup?])
+;; One bubble's hiccup. PLATFORM LAW (2026-06-11): registered schema
+;; forms are PURE DATA — a fn object's form serializes as a
+;; symbol/#object and dies on the next form round-trip (boot index,
+;; second boot) without sci. Reference the registered data shape.
+(schema/register! ::bubble :seon.render.live-tile/hiccup)
 
 ;; ============================================================
 ;; The derived bubble query.
