@@ -67,6 +67,7 @@ API key (the one required secret — other models later).
 ```bash
 git clone https://github.com/seantempesta/seon && cd seon
 npm install
+clojure -X:deps prep :aliases '[:writer]'   # one-time: datahike's java prep
 export DEEPSEEK_API_KEY=sk-...
 bin/seon start all        # cljs build → wire-server → agent pod, ready-gated
 open http://localhost:7890/agents

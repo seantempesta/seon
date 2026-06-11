@@ -152,12 +152,13 @@
   :writer {:extra-paths ["dev-resources/konserve-shim"]
            :extra-deps {org.replikativ/datahike
                         {:git/url "https://github.com/seantempesta/datahike"
-                         :git/sha "1ae3569611ec62c4b0e378ffb902e563bddf57e1"}
+                         :git/sha "ec90294374931711fdc5f48c48a1d5863affc8c1"}
                         com.cognitect/transit-clj {:mvn/version "1.0.333"}
                         com.fasterxml.jackson.dataformat/jackson-dataformat-cbor
                         {:mvn/version "2.17.0"}}
            :override-deps {org.replikativ/konserve
-                           {:local/root "/Users/sean/src/konserve"}}
+                           {:git/url "https://github.com/seantempesta/konserve"
+                            :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}
            :main-opts ["-m" "seon.server.boot"]}
 
   ;; 2.2c DIS-replica probe — JVM writer side. Self-contained on purpose
@@ -172,14 +173,15 @@
   {:replace-deps  {org.clojure/clojure {:mvn/version "1.12.0"}
                    org.replikativ/datahike
                    {:git/url "https://github.com/seantempesta/datahike"
-                    :git/sha "1ae3569611ec62c4b0e378ffb902e563bddf57e1"}
+                    :git/sha "ec90294374931711fdc5f48c48a1d5863affc8c1"}
                    ;; konserve header fix (2.2d Stage A): CLJS meta-size
                    ;; BE32 + legacy 1-byte sniff. The fork repo has no
                    ;; pushable remote (mvn 0.9.346 was deployed from it),
                    ;; so :local/root until the fix ships as a new mvn
                    ;; version. Konserve repo commit: 32e3c598.
                    org.replikativ/konserve
-                   {:local/root "/Users/sean/src/konserve"}}
+                   {:git/url "https://github.com/seantempesta/konserve"
+                            :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}
    ;; konserve-shim: pom.properties so datahike's version-check sees a
    ;; konserve version (nil with :local/root) — see the file's comments.
    :replace-paths ["probe" "dev-resources/konserve-shim"]
@@ -197,9 +199,10 @@
   {:replace-deps  {org.clojure/clojure {:mvn/version "1.12.0"}
                    org.replikativ/datahike
                    {:git/url "https://github.com/seantempesta/datahike"
-                    :git/sha "1ae3569611ec62c4b0e378ffb902e563bddf57e1"}
+                    :git/sha "ec90294374931711fdc5f48c48a1d5863affc8c1"}
                    org.replikativ/konserve
-                   {:local/root "/Users/sean/src/konserve"}}
+                   {:git/url "https://github.com/seantempesta/konserve"
+                            :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}
    :replace-paths ["probe" "dev-resources/konserve-shim"]
    :main-opts     ["-m" "seon.probe.replica-peer"]}
 
@@ -285,7 +288,7 @@
          ;; PR-shaped pending upstream review.
          :override-deps {org.replikativ/datahike
                          {:git/url "https://github.com/seantempesta/datahike"
-                          :git/sha "1ae3569611ec62c4b0e378ffb902e563bddf57e1"}
+                          :git/sha "ec90294374931711fdc5f48c48a1d5863affc8c1"}
                          ;; konserve header fix (2.2d Stage A): CLJS
                          ;; meta-size BE32 at bytes 4-7 + legacy 1-byte
                          ;; sniff in parse-header, so JVM- and Node-written
@@ -294,7 +297,8 @@
                          ;; => :local/root until a new mvn deploy.
                          ;; Konserve repo commit: 32e3c598 (sync-only).
                          org.replikativ/konserve
-                         {:local/root "/Users/sean/src/konserve"}
+                         {:git/url "https://github.com/seantempesta/konserve"
+                            :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}
                          org.replikativ/superv.async
                          ;; Patched simple-supervisor's stale-pending
                          ;; watchdog to be LAZY: instead of starting a
