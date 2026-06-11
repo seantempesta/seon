@@ -94,6 +94,43 @@ Sketch (G1):
  [(count ?t) ?turns]]          ;; assert ?turns < ?cap, ?state = :idle
 ```
 
+### Predicate-semantics changes (gym-upgrade U2/U3, 2026-06-11)
+
+These change what existing scenarios MEASURE — correctness >
+benchmark continuity; a green→red flip on these is the fix working,
+not a regression (re-baseline per the gym-upgrade PRD §7):
+
+- **Consult anchors are domain/provenance-scoped, never `:my.`-broad
+  (U2 / §3.2).** S-32's `first-eval-consults-stored-findings` anchors
+  on the seeded domain namespace (`:my\.kb\.codebase/`); S-12's anchors
+  on the shared kb prefix (`:my\.kb[./]` — the `:my.kb/*` provenance
+  attrs plus any `:my.kb.<domain>/*` attrs agent A minted). The old
+  broad `":my\."` anchor passed on ANY `:my.*` touch — the
+  schema-catalog recipe's own step-0 query, the agent's
+  `my.agent.<id>` scratch attrs — so it measured that the bait
+  rendered and pattern-matched, not that consulting replaced research.
+  Falsified both ways with free stub runs (driver_test's
+  consult-anchor tests).
+- **Standing self-bait load rule (U2 / §3.4).** A scenario's turn
+  message text must not appear verbatim inside its own fixture values
+  or fixture-sources — `load-scenarios!` fails LOUD naming the
+  offending fixture (any predicate keyed on question text could
+  otherwise pass by string coincidence, the original s32 defect).
+  Paraphrase seeded questions; consultation predicates anchor on
+  attrs/structure, never the question string.
+- **Standing structural results (U3 / PRD §2.2).** EVERY run — stub
+  and deepseek alike — scores two auto-appended structural results on
+  the `:context-fidelity` axis, derived from the composer's own code
+  (never a hand-list): `:gym.structural/layout-complete` (every
+  `substrate-default-ctx` section name appears in each driven turn's
+  merged layout) and `:gym.structural/cache-prefix-stable`
+  (double-rendering `assemble-context` against the same pre-turn db
+  value is byte-identical up to the `:transcript` boundary — the
+  provider-cache invariant; a timestamp/counter leaking into a static
+  section is a silent cache-bust). The scorecard carries the per-turn
+  evidence as `:seon.gym.scorecard/turn-profiles` (section layout +
+  per-section char counts + the byte-level diff on failure).
+
 ## 3. Fixture library (shared, referenced by id)
 
 Fixtures are EDN seeded into the scratch cluster DB before agent boot

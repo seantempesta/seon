@@ -73,6 +73,7 @@
     [seon.agent :as agent]
     [seon.ai.deepseek :as deepseek]
     [seon.client :as client]
+    [seon.ctx :as ctx]
     [seon.db :as db]
     ;; World-parity (2026-06-10 deep audit): the :test build has no
     ;; :devtools preload slot, so without this require
@@ -103,10 +104,16 @@
 ;; ===========================================================================
 
 ;; --- rubric -----------------------------------------------------------------
+;; The §7 item-12 behavioral vocabulary, PLUS :context-fidelity — the
+;; axis of the gym-upgrade U3 STRUCTURAL checks (layout completeness +
+;; cache-prefix byte-stability): not agent behavior but whether the
+;; composer's output is the right context. Auto-appended structural
+;; results carry it; scenarios declare it to surface the rollup.
 (schema/register! :seon.gym.axis/name
   [:enum :sees-question :searches-first :models-work-directed
    :reuses-schemas :consults-findings :reuses-functions
-   :writes-tests :replies-honestly :terminates :stores-proactively])
+   :writes-tests :replies-honestly :terminates :stores-proactively
+   :context-fidelity])
 
 ;; --- turns ------------------------------------------------------------------
 (schema/register! :seon.gym.turn/message :string)
@@ -283,6 +290,40 @@
 ;; every persisted prompt-file path for the run, chronological — a
 ;; moved number is diffable to the exact context bytes the agent saw.
 (schema/register! :seon.gym.scorecard/prompt-files [:vector :string])
+;; --- structural per-turn profile (gym-upgrade PRD §2.2 / U3) ----------------
+;; Captured once per driven gym turn from `assemble-context`'s OWN
+;; output against the PRE-TURN db value (user message landed, turn not
+;; yet run — the exact db the turn's prompt renders from). The two
+;; derived checks ride [[structural-results]] onto every scorecard.
+(schema/register! :seon.gym.profile/agent :seon.gym.turn/agent)
+;; [section-name rendered-char-count] in render order — only the
+;; non-blank contributions (assemble-context's :seon.render/section-texts).
+(schema/register! :seon.gym.profile/section-chars
+  [:vector [:tuple :seon.ctx/name :int]])
+;; (a) every substrate-default-ctx section name appears in the merged
+;; layout (:seon.render/sections) — derived from the composer's own
+;; code, never a hand-list; override-by-name keeps the name, so a
+;; missing one = a composer merge regression.
+(schema/register! :seon.gym.profile/layout-complete? :boolean)
+(schema/register! :seon.gym.profile/layout-missing [:vector :seon.ctx/name])
+;; (b) double-render against the SAME db value is byte-identical up to
+;; the :transcript boundary — the provider-cache invariant the
+;; most-static→most-dynamic ordering exists to serve.
+(schema/register! :seon.gym.profile/prefix-stable? :boolean)
+(schema/register! :seon.gym.profile/prefix-diff :string)
+(schema/register! :seon.gym/turn-profile
+  [:map
+   [:seon.gym.profile/agent            :seon.gym.profile/agent]
+   [:seon.render/sections              :seon.render/sections]
+   [:seon.gym.profile/section-chars    :seon.gym.profile/section-chars]
+   [:seon.gym.profile/layout-complete? :seon.gym.profile/layout-complete?]
+   [:seon.gym.profile/layout-missing {:optional true}
+    :seon.gym.profile/layout-missing]
+   [:seon.gym.profile/prefix-stable?   :seon.gym.profile/prefix-stable?]
+   [:seon.gym.profile/prefix-diff {:optional true}
+    :seon.gym.profile/prefix-diff]])
+(schema/register! :seon.gym.scorecard/turn-profiles
+  [:vector :seon.gym/turn-profile])
 ;; --- judge verdicts — a SEPARATE scorecard axis from the mechanical
 ;; results. :seon.gym.scorecard/pass?/axes/results stay PURELY
 ;; mechanical; judge-pass?/judge-results carry the semantic grading, so
@@ -314,6 +355,9 @@
    [:seon.gym.scorecard/results  :seon.gym.scorecard/results]
    [:seon.gym.scorecard/prompt-files {:optional true}
     :seon.gym.scorecard/prompt-files]
+   ;; U3: one structural profile per driven turn, chronological — the
+   ;; evidence behind the two standing structural results.
+   [:seon.gym.scorecard/turn-profiles :seon.gym.scorecard/turn-profiles]
    ;; present iff the scenario carries :llm-judge predicates
    [:seon.gym.scorecard/judge-pass? {:optional true}
     :seon.gym.scorecard/judge-pass?]
@@ -653,6 +697,131 @@
                              (filter #(= axis (:seon.gym.predicate/axis %))
                                      results))]))
         axes))
+
+;; ===========================================================================
+;; Structural per-turn profile (gym-upgrade PRD §2.2 / U3). The section
+;; set/sizes come from `assemble-context`'s OWN output against the
+;; pre-turn db value; both checks are DERIVED from the composer's own
+;; code, never a hand-maintained list:
+;;   (a) layout completeness — every [[ctx/substrate-default-ctx]] name
+;;       appears in the merged :seon.render/sections layout;
+;;   (b) cache-prefix byte-stability — rendering TWICE against the SAME
+;;       db value is byte-identical up to the :transcript boundary. A
+;;       timestamp or counter leaking into a static-priority section is
+;;       a silent provider-cache bust (spend regression) — asserted
+;;       nowhere before this.
+;; Both gate EVERY scorecard as standing structural results on the
+;; :context-fidelity axis.
+;; ===========================================================================
+
+(def ^:private dynamic-tail-sections
+  "Sections at/after the cache boundary — everything from :transcript on
+   is per-turn-volatile BY DESIGN (:prompt embeds the wall clock), so
+   the stability check stops at the first of these."
+  #{:transcript :prompt})
+
+(defn- prefix-section-texts
+  "The provider-cacheable prefix: section-texts strictly before the
+   first dynamic-tail section."
+  [section-texts]
+  (vec (take-while #(not (dynamic-tail-sections (:seon.ctx/name %)))
+                   section-texts)))
+
+(defn- first-char-diff
+  "Index of the first differing char between two strings (= min length
+   when one is a prefix of the other)."
+  [a b]
+  (let [n (min (count a) (count b))]
+    (loop [i 0]
+      (if (or (= i n) (not= (.charAt a i) (.charAt b i)))
+        i
+        (recur (inc i))))))
+
+(defn- prefix-diff-detail
+  "Name the FIRST prefix section whose double-render output diverges —
+   the actual a failing stability result explains itself with."
+  [p1 p2]
+  (or (some (fn [[{n1 :seon.ctx/name t1 :seon.render/text}
+                  {n2 :seon.ctx/name t2 :seon.render/text}]]
+              (cond
+                (not= n1 n2)
+                (str "prefix section order/set diverges between renders: "
+                     n1 " vs " n2)
+                (not= t1 t2)
+                (str "[" (name n1) "] renders DIFFERENTLY on a double-render "
+                     "against the SAME db value — " (count t1) " vs "
+                     (count t2) " chars, first diff at char "
+                     (first-char-diff t1 t2) " (volatile bytes above the "
+                     ":transcript boundary = silent provider-cache bust)")))
+            (map vector p1 p2))
+      (str "prefix section count diverges between renders: "
+           (count p1) " vs " (count p2))))
+
+(defn- capture-turn-profile
+  "One `:seon.gym/turn-profile` for the turn about to run: call
+   [[ctx/assemble-context]] TWICE against the pre-turn db value and
+   derive the layout-completeness + prefix-stability verdicts from the
+   composer's own output."
+  [dbv agent-id designator]
+  (let [render!  #(ctx/assemble-context {:seon.db/db dbv
+                                         :seon.agent/id agent-id})
+        r1       (render!)
+        r2       (render!)
+        names    (set (:seon.render/sections r1))
+        missing  (vec (remove names (map :seon.ctx/name
+                                         (ctx/substrate-default-ctx))))
+        p1       (prefix-section-texts (:seon.render/section-texts r1))
+        p2       (prefix-section-texts (:seon.render/section-texts r2))
+        joined   (fn [p] (str/join "\n\n" (map :seon.render/text p)))
+        stable?  (= (joined p1) (joined p2))]
+    (cond-> {:seon.gym.profile/agent designator
+             :seon.render/sections   (:seon.render/sections r1)
+             :seon.gym.profile/section-chars
+             (mapv (fn [{nm :seon.ctx/name txt :seon.render/text}]
+                     [nm (count txt)])
+                   (:seon.render/section-texts r1))
+             :seon.gym.profile/layout-complete? (empty? missing)
+             :seon.gym.profile/prefix-stable?   stable?}
+      (seq missing) (assoc :seon.gym.profile/layout-missing missing)
+      (not stable?) (assoc :seon.gym.profile/prefix-diff
+                           (prefix-diff-detail p1 p2)))))
+
+(defn- structural-results
+  "The two standing structural results every run scores (U3) — derived
+   from the captured turn-profiles, appended to the mechanical results
+   so a regression flips the scorecard, never hides."
+  [profiles]
+  (let [bad-layout (filterv (complement :seon.gym.profile/layout-complete?)
+                            profiles)
+        bad-prefix (filterv (complement :seon.gym.profile/prefix-stable?)
+                            profiles)
+        n          (count profiles)
+        base       (if (zero? n)
+                     "0 turn-profiles captured (zero driven turns) — vacuous; "
+                     (str n " turn-profile(s); "))]
+    [{:seon.gym.predicate/id   :gym.structural/layout-complete
+      :seon.gym.predicate/axis :context-fidelity
+      :seon.gym.result/pass?   (empty? bad-layout)
+      :seon.gym.result/actual
+      (truncate-actual
+        (if (empty? bad-layout)
+          (str base "every substrate default section present in every "
+               "turn's merged layout")
+          (str base "MISSING substrate sections "
+               (pr-str (mapv (juxt :seon.gym.profile/agent
+                                   :seon.gym.profile/layout-missing)
+                             bad-layout)))))}
+     {:seon.gym.predicate/id   :gym.structural/cache-prefix-stable
+      :seon.gym.predicate/axis :context-fidelity
+      :seon.gym.result/pass?   (empty? bad-prefix)
+      :seon.gym.result/actual
+      (truncate-actual
+        (if (empty? bad-prefix)
+          (str base "double-render byte-identical up to :transcript on "
+               "every turn")
+          (str base (count bad-prefix) " UNSTABLE turn(s): "
+               (str/join "; " (map :seon.gym.profile/prefix-diff
+                                   bad-prefix)))))}]))
 
 ;; ===========================================================================
 ;; LLM-judge — rubric + reference facts + the agent's verbatim reply →
@@ -1113,7 +1282,8 @@
           (let [conn          (await (client/open-agent-conn!))
                 _             (set! db/*conn* conn)
                 compile-state (await (repl/ensure-bootstrap!))
-                !agents       (atom {})]
+                !agents       (atom {})
+                !profiles     (atom [])]
             ;; The scratch store must be THE WORLD A POD BOOTS INTO, not an
             ;; empty void: seed the substrate (instruction rows + the
             ;; :seon.ns/:seon.fn program-graph rows that render the "What
@@ -1145,6 +1315,11 @@
               (let [agent-id (await (ensure-agent! !agents compile-state
                                                    (or agent :a)))
                     mid      (await (send-user-message! agent-id message))]
+                ;; U3: structural profile against the PRE-TURN db value —
+                ;; the message has landed, the turn hasn't run; the exact
+                ;; db the turn's prompt renders from.
+                (swap! !profiles conj
+                       (capture-turn-profile @conn agent-id (or agent :a)))
                 (case (or llm (if (= :stub tier) :per-turn-script :deepseek))
                   :per-turn-script
                   (await (drive-stub-turns! agent-id compile-state mid
@@ -1175,8 +1350,13 @@
                   judge-preds (filterv #(= :llm-judge
                                            (:seon.gym.predicate/kind %))
                                        predicates)
-                  results     (mapv #(eval-predicate dbv transcript agents %)
-                                    mech-preds)
+                  profiles    @!profiles
+                  ;; scenario predicates first, then the two standing
+                  ;; structural results (U3) — every run scores them.
+                  results     (into (mapv #(eval-predicate dbv transcript
+                                                           agents %)
+                                          mech-preds)
+                                    (structural-results profiles))
                   judge-fn*   (or judge-fn
                                   (when (and allow-paid?
                                              (.. js/process -env
@@ -1210,7 +1390,10 @@
                           ;; failures) are dropped here; the prompt
                           ;; PREDICATES are where missing blobs go RED.
                           :seon.gym.scorecard/prompt-files
-                          (into [] (keep second) (turn-prompt-files dbv nil))}
+                          (into [] (keep second) (turn-prompt-files dbv nil))
+                          ;; U3 evidence: one structural profile per
+                          ;; driven turn, chronological.
+                          :seon.gym.scorecard/turn-profiles profiles}
                          (seq judge-preds)
                          (assoc :seon.gym.scorecard/judge-pass?
                                 (every? :seon.gym.judge/pass? judge-results)
