@@ -58,6 +58,39 @@ A short list of the people I'm explicitly indebted to. The longer list — Engel
 - **Neal Stephenson** (*The Diamond Age*, 1995). The Young Lady's Illustrated Primer is the design-fiction reference point for what a bonded AI ought to do for the person it serves.
 - **Rich Sutton** ("[The Bitter Lesson](http://www.incompleteideas.net/IncIdeas/BitterLesson.html)", 2019). Seventy years of AI research collapsed into one usable principle. Seon's "language, not tools" bet is one version of his thesis applied to agent harness design.
 
+## Quickstart
+
+Run the substrate, talk to an agent, watch it work. Requirements:
+Node 20+, Clojure CLI, a [DeepSeek](https://platform.deepseek.com)
+API key (the one required secret — other models later).
+
+```bash
+git clone https://github.com/seantempesta/seon && cd seon
+npm install
+export DEEPSEEK_API_KEY=sk-...
+bin/seon start all        # cljs build → wire-server → agent pod, ready-gated
+open http://localhost:7890/agents
+```
+
+Mint an agent on that page and talk to it: the left pane is the
+conversation, the right pane is the agent's **live tile** — the thing
+it is currently showing you, which it updates by writing code. Press
+backtick (or the ⚙ button) for the debug overlay: the exact context
+the agent sees each turn, because the prompt IS a REPL session over
+the shared database.
+
+You customize Seon with **data, not source edits**: the agent's
+identity is `SOUL.md` (seeded into the store, editable live by
+transact), standing instructions live in `my.kb.system` rows, and
+everything your agents build lands in `my.*` namespaces that survive
+restarts. `src/seon/` is the substrate — treat it like a runtime you
+installed, not a library you fork.
+
+The optional JVM seat (`bin/run`, nREPL 7888) is for development and
+orchestration, not required to run agents. `bin/seon status|tail|stop`
+manage the processes; state lives under `data/` (delete it for a
+fresh world).
+
 ## Status
 
 This is a research project in active development, not a product. Some parts work; others are designed but not built; honest detail is in [`docs/seon/vision/`](docs/seon/vision/) and [`docs/seon/_dashboard.md`](docs/seon/_dashboard.md).
