@@ -163,12 +163,9 @@
 (def cap-result ctx/cap-result)
 (def cap-result-body ctx/cap-result-body)
 (def system-section ctx/system-section)
-(def capabilities-section ctx/capabilities-section)
-(def exemplars-section ctx/exemplars-section)
-(def schema-catalog-section ctx/schema-catalog-section)
-(def functions-catalog-section ctx/functions-catalog-section)
+(def namespaces-section ctx/namespaces-section)
+(def your-entity-section ctx/your-entity-section)
 (def render-namespace ctx/render-namespace)
-(def namespace-context-section ctx/namespace-context-section)
 (def warnings-section ctx/warnings-section)
 (def transcript-char-budget ctx/transcript-char-budget)
 (def transcript-section ctx/transcript-section)
@@ -604,24 +601,36 @@
 
 (schema/register! :seon.agent/purpose :string)
 
+(def acquire-purpose-text
+  "The `:seon.agent/purpose` seed when the agent is created WITHOUT a
+   stated purpose — the placeholder teaches the mechanism (your purpose
+   is an attr on YOUR entity; transact a better one) by demanding its
+   use."
+  (str "Derive your purpose from your human's first messages, then "
+       "transact it onto :seon.agent/purpose on your own entity so you "
+       "keep your direction."))
+
 (defn ^:async create!
   "Allocate an agent entity. Idempotent: re-calling with the same id
    resets state to :idle (transact is upsert-by-unique-id) and NEVER
-   re-seeds — a resumed agent keeps its own sections. A GENUINELY NEW
-   entity is seeded with its `:purpose` launch-directive section plus
-   the tiny fn-shaped `:your-sections` example (`seon.ctx/seed-sections`
-   — agent-self-context spec 2026-06-10). Optional
-   `:seon.agent/purpose` carries the human's stated purpose (the web
-   create form / a future spawner agent); absent → the
-   acquire-your-purpose placeholder."
+   re-seeds — a resumed agent keeps its own purpose and sections. A
+   GENUINELY NEW entity gets `:seon.agent/purpose` — the human's
+   stated purpose when given, else the acquire-your-purpose
+   placeholder. Purpose is ENTITY DATA rendered by the `<your-entity>`
+   section (context-v4 §2.5 — the old `:purpose`/`:your-sections` seed
+   sections died with it)."
   [{:seon.agent/keys [id purpose]}]
   (let [fresh? (nil? (db/entity {:seon.db/ref [:seon.agent/id id]}))
         res    (await (db/transact!
                         {:seon.db/tx-data
                          [(cond-> {:seon.agent/id    id
                                    :seon.agent/state :idle}
-                            fresh? (assoc :seon.agent/ctx
-                                          (ctx/seed-sections purpose)))]}))]
+                            fresh?
+                            (assoc :seon.agent/purpose
+                                   (if (and (string? purpose)
+                                            (not (str/blank? purpose)))
+                                     purpose
+                                     acquire-purpose-text)))]}))]
     ;; Surface-errors-loudly: a failed create means NO agent entity —
     ;; everything downstream (triggers, renders) would chase a ghost.
     (when (false? (:seon.db/ok? res))
@@ -1362,10 +1371,26 @@
               {::ok? true :seon.ctx/name nm})))))))
 
 (defn ^:async set-purpose!
-  "Pin or update why you exist — sugar over add-section!."
-  {:malli/schema [:=> [:cat [:map [:seon.render/ai :string]]]
+  "Pin or update why you exist — sugar over a one-attr transact to
+   your own entity (`:seon.agent/purpose`, rendered every turn in
+   `<your-entity>`). Equivalent to the lookup-ref transact the
+   creation tutorial demonstrates."
+  {:malli/schema [:=> [:cat [:map
+                             [:seon.render/ai :string]
+                             [:seon.agent/id {:optional true} :string]]]
                   ::section-response]}
-  [{text :seon.render/ai}]
-  (await (add-section! {:seon.ctx/name     :purpose
-                        :seon.ctx/priority 12
-                        :seon.render/ai    text})))
+  [{text :seon.render/ai id :seon.agent/id}]
+  (let [id (or id (db/current-agent-id))]
+    (if (nil? id)
+      {::ok? false
+       ::error (str "set-purpose!: no agent in scope — pass "
+                    ":seon.agent/id or call inside (seon.db/with-agent id …).")}
+      (let [res (await (db/transact!
+                         {:seon.db/tx-data
+                          [{:seon.agent/id      id
+                            :seon.agent/purpose text}]}))]
+        (if (false? (:seon.db/ok? res))
+          {::ok? false
+           ::error (str "set-purpose! transact failed: "
+                        (:seon.error/message (:seon.db/error res)))}
+          {::ok? true :seon.ctx/name :purpose})))))

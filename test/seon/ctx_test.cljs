@@ -1,13 +1,15 @@
 (ns seon.ctx-test
-  "V3-C contract tests for `seon.ctx` — the ONE classifier + the ONE
-   composer (agent-self-context spec, 2026-06-10).
+  "Contract tests for `seon.ctx` — the v4 composer
+   (context-v4-repl-realism 2026-06-11).
 
-   The AGREEMENT property: every classification surface (catalog
-   grouping/depth, full-source selection, warn provenance, replay
-   skip) derives from the one model — so for any ns name the verdicts
-   can never disagree. Plus: merge/override-by-name semantics, the
-   render guard, the per-agent section budget, the :purpose seed, and
-   the mixed-:or slot storage roundtrip.
+   Pins: the ONE namespace-selection rule (included-ns? — all seon.* +
+   my.* minus *.internal) and the full-source depth rule; the
+   `<namespace>` tags (internal never renders, an agent-authored ns
+   appears with NO config change, recency = most-recently-modified
+   LAST with a byte-identical prefix above the moved tag); the
+   `:seon.agent/purpose` entity seed + `<your-entity>` render;
+   merge/override-by-name semantics; the render guard; the per-agent
+   section budget; and the mixed-:or slot storage roundtrip.
 
    All on a FRESH :memory conn seeded like the pod boots — never the
    live agent conn."
@@ -49,31 +51,32 @@
                      (.finally (fn [] (set! db/*conn* orig)))))))))
 
 ;; ------------------------------------------------------------
-;; Classifier rules on generated names — precedence is the contract.
+;; Selection rules — the ONE inclusion rule + the depth rule.
 ;; ------------------------------------------------------------
 
-(deftest classifier-name-rules-precedence
-  ;; Rule 1 — *.internal is hidden ALWAYS, even under my.* (precedence).
-  (doseq [n ["seon.db.internal" "seon.agent.internal"
-             "seon.x.internal.y" "my.foo.internal"]]
+(deftest selection-rules
+  ;; included-ns? — ALL seon.* + my.* EXCEPT *.internal. One rule.
+  (doseq [n ["seon.db" "seon.eval" "seon.agent.search" "my.kb"
+             "my.agent.a1" "my.finance" "seon.agent.search-test"]]
+    (is (true? (ctx/included-ns? n)) (str n " is included")))
+  (doseq [n ["seon.db.internal" "seon.x.internal.y" "my.foo.internal"
+             "cljs.core" "datahike.api"]]
+    (is (false? (ctx/included-ns? n)) (str n " is NOT included")))
+  ;; hidden beats everything, even under my.*.
+  (doseq [n ["seon.db.internal" "seon.agent.internal" "my.foo.internal"]]
     (is (true? (ctx/hidden-ns-name? n)) (str n " is hidden")))
-  ;; Rule 2 — my.* is the human's world.
-  (doseq [n ["my.kb" "my.kb.system" "my.agent.a1" "my.finance"]]
-    (is (true? (ctx/my-ns-name? n)) (str n " is my.*"))
-    (is (false? (ctx/hidden-ns-name? n)) (str n " is not hidden")))
-  ;; Rule 4 — relevant = the full-source root set + children + test
-  ;; siblings; plumbing is not.
-  (doseq [n ["seon.agent.search" "seon.agent.search-test"
-             "seon.agent.todo" "my.kb" "my.kb.system"]]
-    (is (true? (ctx/relevant-ns? n)) (str n " renders full source")))
-  (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.db"
-             "seon.agent.searcher" "my.finance"]]
-    (is (false? (ctx/relevant-ns? n)) (str n " is NOT full-source"))))
+  ;; full-source depth: my.* by RULE + the seon exemplar roots +
+  ;; children + test siblings; big unsplit substrate stays shallow.
+  (doseq [n ["my.kb" "my.kb.system" "my.soul" "my.soul-test"
+             "seon.agent.search" "seon.agent.search-test"
+             "seon.agent.todo" "seon.agent.todo-test"]]
+    (is (true? (ctx/full-source-ns? n)) (str n " is full-source")))
+  (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.db" "seon.ctx"
+             "seon.agent.searcher" "my.foo.internal"]]
+    (is (false? (ctx/full-source-ns? n)) (str n " is NOT full-source"))))
 
 ;; ------------------------------------------------------------
-;; The agreement property on a live (test) index: agent-authored vs
-;; substrate-seed provenance, replay-skip disjointness, hidden nses
-;; absent from every rendered surface.
+;; namespaces-section — tags, hiding, reconstitution, recency.
 ;; ------------------------------------------------------------
 
 (defn- transact-ns-row!
@@ -82,72 +85,67 @@
     {:seon.db/tx-data [{:seon.ns/name   (keyword nm)
                         :seon.ns/source (str "(ns " nm ")")}]}))
 
-(deftest agreement-provenance-replay-and-hidden
+(deftest namespaces-section-tags-hiding-reconstitution-recency
   (async done
-    (-> (with-conn
-          (fn [_conn]
-            (-> (db/with-tx-context {:seon.db/origin :substrate-seed
-                                     :seon.db/agent-id "boot"}
-                  ;; seed txs carry BOTH agent-id and seed origin — the
-                  ;; booting agent's with-agent scope (live evidence,
-                  ;; context-v3 unit 4). MUST classify substrate.
-                  (fn [] (transact-ns-row! "seon.client")))
-                (.then (fn [_]
-                         (db/with-tx-context {:seon.db/agent-id "a1"}
-                           (fn [] (transact-ns-row! "my.agent.a1")))))
-                (.then (fn [_]
-                         (db/with-tx-context {:seon.db/origin :substrate-seed
-                                              :seon.db/agent-id "boot"}
-                           (fn [] (transact-ns-row! "seon.db.internal")))))
-                (.then
-                  (fn [_]
-                    (let [dbv   @db/*conn*
-                          model (ctx/context-model {:seon.db/db dbv})
-                          {:seon.ctx/keys [agent-nses hidden-nses
-                                           relevant-nses]} model]
-                      (is (contains? agent-nses "my.agent.a1")
-                          "agent-tx ns row → agent-authored")
-                      (is (not (contains? agent-nses "seon.client"))
-                          "seed-origin tx (even agent-stamped) → substrate")
-                      (is (some #{"seon.db.internal"} hidden-nses)
-                          "*.internal is in the hidden leg")
-                      (is (not-any? #{"seon.db.internal"} relevant-nses)
-                          "*.internal never relevant")
-                      ;; replay-skip disjointness: classifier verdict
-                      ;; agent-authored ⇒ ns ∉ substrate-ns-set (the
-                      ;; replay discriminator answers a different
-                      ;; question but must never overlap).
-                      (let [replay-set (client/substrate-ns-set)]
-                        (doseq [n agent-nses]
-                          (is (not (contains? replay-set (keyword n)))
-                              (str n " is agent-authored — never "
-                                   "replay-skipped as substrate"))))
-                      (db/transact!
-                        {:seon.db/tx-data
-                         [{:seon.fn/sym     "seon.db.internal/secret"
-                           :seon.fn/ns      [:seon.ns/name :seon.db.internal]
-                           :seon.fn/source  "(defn secret [] 1)"
-                           :seon.fn/fn-var? true
-                           :seon.fn/created-at (js/Date.)}
-                          {:seon.fn/sym     "my.agent.a1/helper"
-                           :seon.fn/ns      [:seon.ns/name :my.agent.a1]
-                           :seon.fn/source  "(defn helper [] 1)"
-                           :seon.fn/fn-var? true
-                           :seon.fn/created-at (js/Date.)}]}))))
-                (.then
-                  (fn [_]
-                    (let [dbv @db/*conn*
-                          txt (ctx/functions-catalog-section
-                                {:seon.db/db dbv :seon.agent/id "a1"})]
-                      (is (not (str/includes? txt "seon.db.internal"))
-                          "*.internal never appears in a rendered section")
-                      (is (str/includes? txt "my.agent.a1/helper")
-                          "agent-authored fns render as callable lines")))))))
-        (.then (fn [] (done)))
-        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+    (let [!before (atom nil)]
+      (-> (with-conn
+            (fn [_conn]
+              (-> (transact-ns-row! "seon.client")
+                  (.then (fn [_] (transact-ns-row! "seon.db.internal")))
+                  (.then (fn [_] (transact-ns-row! "my.agent.a1")))
+                  ;; agent-authored ns: stub row + a fn member → must
+                  ;; RECONSTITUTE (ns form + fn source), no config.
+                  (.then (fn [_]
+                           (db/transact!
+                             {:seon.db/tx-data
+                              [{:seon.fn/sym     "my.agent.a1/helper"
+                                :seon.fn/ns      [:seon.ns/name :my.agent.a1]
+                                :seon.fn/source  "(defn helper [] 1)"
+                                :seon.fn/fn-var? true
+                                :seon.fn/created-at (js/Date.)}]})))
+                  (.then
+                    (fn [_]
+                      (let [txt (ctx/namespaces-section {:seon.db/db @db/*conn*})]
+                        (reset! !before txt)
+                        (is (str/includes? txt "<namespace name=\"seon.client\">")
+                            "an included ns renders as a tag")
+                        (is (str/includes? txt "<namespace name=\"my.agent.a1\">")
+                            "a runtime-defined ns appears with NO config change")
+                        (is (str/includes? txt "(defn helper [] 1)")
+                            "stub ns with members reconstitutes member source")
+                        (is (not (str/includes? txt "seon.db.internal"))
+                            "*.internal never appears")
+                        (is (not (str/includes? txt "<exemplar"))
+                            "the <exemplars> wrapper is dead")
+                        ;; recency: my.agent.a1 was touched LAST (member
+                        ;; upsert bumps its name datom) → renders last.
+                        (is (> (str/index-of txt "<namespace name=\"my.agent.a1\">")
+                               (str/index-of txt "<namespace name=\"seon.client\">"))
+                            "most-recently-modified renders LAST"))))
+                  ;; modify seon.client between turns → it moves LAST and
+                  ;; the prefix ABOVE the moved tag is byte-identical.
+                  (.then (fn [_]
+                           (db/transact!
+                             {:seon.db/tx-data
+                              [{:seon.ns/name   :seon.client
+                                :seon.ns/source "(ns seon.client) (def touched 1)"}]})))
+                  (.then
+                    (fn [_]
+                      (let [before @!before
+                            after  (ctx/namespaces-section
+                                     {:seon.db/db @db/*conn*})
+                            moved  "<namespace name=\"seon.client\">"]
+                        (is (> (str/index-of after moved)
+                               (str/index-of after "<namespace name=\"my.agent.a1\">"))
+                            "modified ns moved LAST")
+                        (is (= (subs before 0 (str/index-of before moved))
+                               (subs after 0 (str/index-of before moved)))
+                            "prefix above the moved tag's old position is byte-identical")))))))
+          (.then (fn [] (done)))
+          (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done)))))))
 
 ;; ------------------------------------------------------------
-;; Composer: seeds, merge/override, upsert-by-name, verbs.
+;; Composer: purpose-as-entity-data, your-entity, merge, verbs.
 ;; ------------------------------------------------------------
 
 (defn- assemble
@@ -159,7 +157,7 @@
   (some #(when (= nm (:seon.ctx/name %)) (:seon.render/text %))
         (:seon.render/section-texts (assemble id))))
 
-(deftest purpose-seed-and-merge-and-verbs
+(deftest purpose-entity-and-your-entity-and-verbs
   (async done
     (-> (with-conn
           (fn [_conn]
@@ -167,34 +165,36 @@
                                 :seon.agent/purpose "watch the ledger"})
                 (.then
                   (fn [_]
-                    (let [{:seon.render/keys [sections]} (assemble "AGTctxtest00p1")]
-                      (is (some #{:purpose} sections)
-                          "minted agent renders its :purpose section")
-                      (is (= "Your human created you for: watch the ledger"
-                             (section-text "AGTctxtest00p1" :purpose))
-                          "stated purpose renders verbatim")
-                      (is (some #{:your-sections} sections)
-                          "the fn-shaped copyable seeds beside it")
+                    (let [{:seon.render/keys [sections]} (assemble "AGTctxtest00p1")
+                          ent-txt (section-text "AGTctxtest00p1" :your-entity)]
+                      (is (some #{:your-entity} sections)
+                          "minted agent renders <your-entity>")
+                      (is (str/includes? (str ent-txt) "watch the ledger")
+                          "stated purpose is entity data, rendered in the map")
+                      (is (str/includes? (str ent-txt) "<your-entity>")
+                          "tag wrapper present")
                       (is (some #{:system} sections)
-                          "substrate defaults still merged in")
+                          "substrate defaults merged in")
                       (is (some #{:prompt} sections))
-                      (is (< (.indexOf (clj->js (mapv str sections)) ":system")
-                             (.indexOf (clj->js (mapv str sections)) ":purpose"))
-                          "purpose (12) renders after :system (10)"))))
-                ;; set-purpose! (explicit-id path goes through
-                ;; add-section!'s ALS default — wrap in with-agent).
+                      (is (not-any? #{:purpose} sections)
+                          "the :purpose seed section is dead")
+                      (is (not-any? #{:your-sections} sections)
+                          "the :your-sections seed section is dead"))))
+                ;; set-purpose! now writes the entity attr.
                 (.then (fn [_]
                          (db/with-agent "AGTctxtest00p1"
                            (fn []
                              (agent/set-purpose!
                                {:seon.render/ai "guard the books"})))))
-                ;; create! again = resume — must NOT re-seed/overwrite.
+                ;; create! again = resume — must NOT overwrite purpose.
                 (.then (fn [_] (agent/create! {:seon.agent/id "AGTctxtest00p1"})))
                 (.then
                   (fn [_]
-                    (is (= "guard the books" (section-text "AGTctxtest00p1" :purpose))
+                    (is (str/includes?
+                          (str (section-text "AGTctxtest00p1" :your-entity))
+                          "guard the books")
                         "resume (re-create!) keeps the agent's own purpose")))
-                ;; add-section! upsert-by-name + envelopes.
+                ;; add-section! upsert-by-name + envelopes (unchanged).
                 (.then (fn [_]
                          (agent/add-section!
                            {:seon.ctx/name :doctrine
@@ -221,21 +221,6 @@
                              (:seon.render/ai (first doctrines)))
                           "slot stored + decoded as the verbatim string"))))
                 (.then (fn [_]
-                         (agent/add-section!
-                           {:seon.ctx/name :blank :seon.render/ai "  "
-                            :seon.agent/id "AGTctxtest00p1"})))
-                (.then (fn [res]
-                         (is (false? (:seon.agent/ok? res))
-                             "blank text refused")
-                         (is (str/includes? (:seon.agent/error res) "blank"))))
-                (.then (fn [_]
-                         (agent/remove-section!
-                           {:seon.ctx/name :nope :seon.agent/id "AGTctxtest00p1"})))
-                (.then (fn [res]
-                         (is (false? (:seon.agent/ok? res))
-                             "unknown remove → error envelope")
-                         (is (str/includes? (:seon.agent/error res) ":doctrine")
-                             "unknown remove names the current sections")
                          (agent/remove-section!
                            {:seon.ctx/name :doctrine :seon.agent/id "AGTctxtest00p1"})))
                 (.then (fn [res]

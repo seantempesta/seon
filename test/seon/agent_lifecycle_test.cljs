@@ -142,8 +142,9 @@
               (let [batch (await (client/creation-evals!
                                    {:seon.agent/id            wired-id
                                     :seon.agent/compile-state compile-state}))]
-                (is (= 2 (:seon.eval/n-ok batch))
-                    "TWO creation evals, ok — the wiring + the
+                (is (= 3 (:seon.eval/n-ok batch))
+                    "THREE creation evals, ok — the wiring, the
+                     (seon.db/store-inventory) read (V4-3), and the
                      (my.kb.system/instructions) read (V4-0)")
                 (is (zero? (:seon.eval/n-fail batch)) "no failures"))
               (testing "the datom landed — render resolves the WIRED value"
@@ -166,13 +167,18 @@
                 (let [session (agent/current-session wired-id)
                       turns   (:seon.agent.session/turns session)
                       turn    (first turns)
-                      evals   (:seon.agent.turn/evals turn)
+                      ;; entity many-refs come back as a SET — order by
+                      ;; :at (the batch runs the three tutorial forms in
+                      ;; sequence).
+                      evals   (vec (sort-by :seon.eval/at
+                                            (:seon.agent.turn/evals turn)))
                       ev      (first evals)]
                   (is (= 1 (count turns)) "one creation turn")
                   (is (= :done (:seon.agent.turn/status turn)))
-                  (is (= 2 (count evals))
-                      "two evals — the wiring, then the system-wide
-                       instructions read (V4-0)")
+                  (is (= 3 (count evals))
+                      "three evals — the wiring, the store-inventory
+                       read (V4-3), then the system-wide instructions
+                       read (V4-0)")
                   (is (true? (:seon.eval/ok? ev)) "a REAL ok result")
                   (is (= (:source (first (repl.internal/parse-forms
                                            (tile/wiring-source wired-id))))
@@ -184,13 +190,22 @@
                                (str (:seon.eval/result-edn ev)))
                       "the recorded result is the transact's ok envelope")
                   (let [ev2 (second evals)]
-                    (is (= "(my.kb.system/instructions)"
+                    (is (= "(seon.db/store-inventory)"
                            (:seon.eval/source ev2))
-                        "the SECOND eval is the system-wide instructions
-                         read — the §3.1 tutorial query")
+                        "the SECOND eval is the store-inventory read —
+                         the §3.1 consult-first tutorial query (V4-3)")
                     (is (true? (:seon.eval/ok? ev2)))
-                    (is (re-find #"system-wide instructions"
+                    (is (re-find #"already in the shared store"
                                  (str (:seon.eval/narration ev2)))
+                        "its tutorial comment rides as narration"))
+                  (let [ev3 (nth evals 2)]
+                    (is (= "(my.kb.system/instructions)"
+                           (:seon.eval/source ev3))
+                        "the THIRD eval is the system-wide instructions
+                         read — the §3.1 tutorial query")
+                    (is (true? (:seon.eval/ok? ev3)))
+                    (is (re-find #"system-wide instructions"
+                                 (str (:seon.eval/narration ev3)))
                         "its tutorial comment rides as narration")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

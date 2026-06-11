@@ -920,6 +920,16 @@
 ;; tests index themselves via the runner's run-and-record path instead.
 (defonce !indexed-test-vars (atom []))
 
+(def ^:private fn-less-compiled-roots
+  "COMPILED substrate nses that own no indexed var (register! calls +
+   ns-doc only) but DO own a boot-indexed full-source `:seon.ns` row —
+   they must join [[substrate-ns-set]] (replay-skip: re-evaling their
+   shipped source would re-run register! forms) and get an
+   [[index-substrate!]] ns-row even though no fn-row names them.
+   `seon.ctx/full-source-roots` rides along for the same reason
+   (idempotent for roots that do own vars)."
+  #{"my.kb" "my.soul"})
+
 (defn substrate-ns-set
   "The set of namespace keywords owned by the COMPILED substrate, derived
    from `substrate-vars` + the preload's deftest vars — the SAME sources of
@@ -935,11 +945,12 @@
    A fn (not a def) because `!indexed-test-vars` is populated by the
    preload AFTER this ns loads; robust by construction either way — it's
    NOT tx-meta and NOT a hand-typed ns list, it's the live var-meta `:ns`
-   of the indexed vars. Exemplar ROOTS join the set explicitly because a
-   fn-less root (`my.kb`) owns an indexed full-source `:seon.ns` row
-   without owning any var."
+   of the indexed vars. [[fn-less-compiled-roots]] + the full-source
+   roots join explicitly because a fn-less compiled root (`my.kb`) owns
+   an indexed full-source `:seon.ns` row without owning any var."
   []
-  (into (into #{} (map keyword) ctx/relevant-roots)
+  (into (into #{} (map keyword)
+              (concat fn-less-compiled-roots ctx/full-source-roots))
         (map #(keyword (str (:ns (meta %)))))
         (concat substrate-vars @!indexed-test-vars)))
 
@@ -997,27 +1008,28 @@
 (defn- ns-row
   "Build the `:seon.ns` row for an owning ns name string.
 
-   RELEVANT nses (`seon.ctx/relevant-ns?` — the V3-C classifier's
-   full-source set + children + test siblings) carry the REAL FULL FILE TEXT as
-   `:seon.ns/source`: the boot indexer is the ONE file-reader; the
-   `:exemplars` context section (and anything else downstream) renders
-   that attr from the graph, never re-reading files. Safe because
-   substrate rows are replay-skipped (`query-program-graph-entries`
-   excludes any entry whose owning ns is in `(substrate-ns-set)` —
-   Step 4, landed). An exemplar whose file can't be read falls back to
-   the stub and logs fail-loud — the corpus stays honest, the section
-   omits it.
+   FULL-SOURCE nses (`seon.ctx/full-source-ns?` — all `my.*` plus the
+   `seon.ctx/full-source-roots` set, children, and test siblings)
+   carry the REAL FULL FILE TEXT as `:seon.ns/source`: the boot
+   indexer is the ONE file-reader; the `:namespaces` context section
+   (and anything else downstream) renders that attr from the graph,
+   never re-reading files. Safe because substrate rows are
+   replay-skipped (`query-program-graph-entries` excludes any entry
+   whose owning ns is in `(substrate-ns-set)` — Step 4, landed). A
+   full-source ns whose file can't be read falls back to the stub and
+   logs fail-loud — the corpus stays honest.
 
-   All OTHER substrate nses keep the minimal `(ns x)` stub — full text
-   would be dead weight (nothing renders it) and the stub keeps the
-   no-replay invariant trivially cheap to reason about."
+   All OTHER substrate nses keep the minimal `(ns x)` stub — they
+   render as shallow existence tags (the `*.internal` split roadmap
+   shrinks files toward inlinable size; see full-source-roots) and the
+   stub keeps the no-replay invariant trivially cheap to reason about."
   [ns-sym-str]
   (let [stub (str "(ns " ns-sym-str ")")
-        src  (if (ctx/relevant-ns? ns-sym-str)
+        src  (if (ctx/full-source-ns? ns-sym-str)
                (or (read-src-file (ns-file-path ns-sym-str))
                    (do (log/error-console!
                          "seon.client/ns-row"
-                         (str "exemplar ns " ns-sym-str " source file "
+                         (str "full-source ns " ns-sym-str " source file "
                               (pr-str (ns-file-path ns-sym-str))
                               " unreadable — falling back to the (ns x) stub"))
                        stub))
@@ -1177,11 +1189,13 @@
   []
   (let [now     (js/Date.)
         fn-rows (keep #(var->fn-row % now) substrate-vars)
-        ;; Exemplar ROOTS are unioned in explicitly: a root with no
-        ;; public fns of its own (`my.kb` — register! calls + ns-doc
-        ;; only) still needs its full-source `:seon.ns` row, since the
-        ;; :exemplars section renders from exactly these datoms.
-        ns-syms (into ctx/relevant-roots
+        ;; Fn-less compiled roots are unioned in explicitly: a root
+        ;; with no public fns of its own (`my.kb` — register! calls +
+        ;; ns-doc only) still needs its full-source `:seon.ns` row,
+        ;; since the :namespaces section renders from exactly these
+        ;; datoms.
+        ns-syms (into (set (concat fn-less-compiled-roots
+                                   ctx/full-source-roots))
                       (map #(first (str/split (:seon.fn/sym %) #"/" 2)))
                       fn-rows)
         ns-rows (map ns-row (sort ns-syms))]
@@ -1558,6 +1572,20 @@
           (runtime-id/host! id)
           res)))))
 
+(def inventory-read-source
+  "The creation-turn `store-inventory` eval (context-v4 §2.4/§3.1,
+   V4-3): the catalogs died as sections; the inventory is a substrate
+   fn the creation turn demonstrably RUNS — the fn's source is visible
+   in the rendered `seon.db` namespace tag, the CALL is visible here,
+   the RESULT is the value line, and re-running the fn is how you get
+   fresh numbers. The `;;` comments ride as the eval's narration."
+  (str
+    ";; What's already in the shared store? Other agents stored knowledge\n"
+    ";; here before me — checking BEFORE researching is how I avoid paying\n"
+    ";; for answers that already exist. (An ordinary query; I re-run it\n"
+    ";; whenever I need current numbers.)\n"
+    "(seon.db/store-inventory)\n"))
+
 (def instructions-read-source
   "The creation-turn READ of the system-wide instructions (context-v4
    PRD §3.1 tutorial register, V4-0): the fn's source is visible in
@@ -1601,6 +1629,8 @@
                 session-id (:seon.agent.session/id session)
                 turn-id    (db/new-id!)
                 source     (str (live-tile/wiring-source id)
+                                "\n"
+                                inventory-read-source
                                 "\n"
                                 instructions-read-source)
                 batch

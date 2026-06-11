@@ -1,44 +1,41 @@
 (ns seon.ctx
-  "Context generation — the V3-C engine (one full-index query → one
-   classifier → dumb renderers), moved out of seon.agent 2026-06-10.
+  "Context generation — the v4 composer (context-v4-repl-realism
+   2026-06-11): the prompt IS a REPL session. One static `<system>`
+   header, ALL the loaded namespaces as the body (`<namespace>` tags,
+   recency-ordered), the agent's own entity as a map, what the human
+   currently sees, the reactive warnings/todos, ONE threaded
+   chronological transcript of messages and evals, and a status line +
+   clean REPL prompt. Layout is ordered top→bottom = static→volatile:
+   everything above `<warnings>` is the provider-cacheable prefix.
 
    This namespace owns:
      - the `:seon.ctx/*` section schemas (`:seon.ctx/name`,
-       `:seon.ctx/priority`, the `:seon.ctx/section` map shape).
-       `:seon.ctx/fn` is DEAD — the one slot attr is `:seon.render/ai`
-       (string = verbatim doctrine, symbol = late-bound section fn).
+       `:seon.ctx/priority`, the `:seon.ctx/section` map shape). The
+       one slot attr is `:seon.render/ai` (string = verbatim doctrine,
+       symbol = late-bound section fn); `:seon.render/html` is the
+       optional debug-view twin (§2.8b).
      - `assemble-context` — the ONE composer. Substrate default
        sections MERGED with the agent's own `:seon.agent/ctx` sections
-       by one priority sort (override-by-name; replace-semantics died
-       with the self-context spec, 2026-06-10). Render guard (a broken
+       by one priority sort (override-by-name). Render guard (a broken
        section renders an inline error line, never breaks assembly)
        and the per-agent section char budget live here.
-     - `context-model` — the ONE classifier over the full index
-       (`:seon.ns` rows + tx provenance). Rules, in precedence order:
-         1. `*.internal` ns name → hidden, ALWAYS (the convention IS
-            the filter).
-         2. `my.*` → shown, ALWAYS (the human's world; provenance not
-            consulted).
-         3. ns whose corpus rows landed in an AGENT tx (tx carries
-            `:seon.db/agent-id` and NOT `:seon.db/origin
-            :substrate-seed`) → agent-authored → shown.
-         4. `seon.*` → full-source relevant iff under a
-            [[relevant-roots]] root; else a catalog count line.
-       Every section consumes the model — none re-classifies.
-     - the substrate default section fns (system, capabilities,
-       exemplars, schema-catalog, functions-catalog,
-       namespace-context, warnings, transcript, prompt) and the
-       derived read API they share (messages / evals / current-ns /
-       turns-since-inbound / …).
-     - `seed-sections` — the `:purpose` launch-directive section (+ the
-       tiny fn-shaped copyable) seeded onto every agent at create!.
+     - the selection rules: [[included-ns?]] (ALL seon.* + my.* minus
+       *.internal — the ONE rule, no lists) and [[full-source-ns?]]
+       (which rows the boot indexer inlines real file text for).
+     - the substrate default section fns (system, namespaces,
+       your-entity, live-tile, warnings, transcript, prompt) and the
+       derived read API they share (messages / evals / session-evals /
+       current-ns / turns-since-inbound / …) — every read takes the
+       composer's `:seon.db/db` snapshot so one render is one db view.
+     - `render-namespace` — the standalone whole-namespace render
+       (ns + fns + schemas + tests, :ai or :html), an agent-callable
+       substrate capability.
 
    Section fns receive ONE map:
-     {:seon.db/db       <db value>
-      :seon.agent/id    <id string>          ; convenience, = entity id
+     {:seon.db/db        <db value>
+      :seon.agent/id     <id string>          ; convenience, = entity id
       :seon.agent/entity <the agent's own entity, pulled ONCE>
-      :seon.ctx/section  <this section's map>  ; per-section overrides
-      :seon.ctx/model    <context-model>}      ; the one classifier pass
+      :seon.ctx/section  <this section's map>} ; per-section overrides
    and return a string; \"\" suppresses the section.
 
    seon.agent requires this ns and re-exports the agent-taught read
@@ -46,18 +43,15 @@
    agent.cljs split finishes the relocation."
   (:require
     [clojure.string :as str]
+    [cljs.pprint :as pprint]
     [cljs.reader :as edn]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
-    ;; Read-only fs capability — capabilities-section surfaces the LIVE
-    ;; allowed-roots so the agent knows exactly what it may read.
-    [seon.agent.fs :as sfs]
     [seon.handlers.fn :as h-fn]
     [seon.handlers.ns :as h-ns]
     [seon.handlers.schema :as h-schema]
     [seon.handlers.test :as h-test]
-    [seon.log :as seon-log]
     [seon.render :as render]
     [seon.render.live-tile :as live-tile]
     [seon.schema :as schema]
@@ -99,11 +93,14 @@
   "Read `:seon.agent/turns-cap` from the agent entity. Returns the
    configured cap or `default-turns-cap` when the attr is absent.
    Use this at every cap-check site so the agent can override the
-   default by transacting its own value."
-  [agent-id]
-  (or (:seon.agent/turns-cap
-        (db/entity {:seon.db/ref [:seon.agent/id agent-id]}))
-      default-turns-cap))
+   default by transacting its own value. Optional `db` value (the
+   composer's snapshot); defaults to the live conn."
+  ([agent-id] (turns-cap agent-id nil))
+  ([agent-id db]
+   (or (:seon.agent/turns-cap
+         (db/entity (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
+                      db (assoc :seon.db/db db))))
+       default-turns-cap)))
 
 (defn home-ns
   "Return the deterministic home-ns symbol for an agent id.
@@ -113,10 +110,15 @@
 
 (defn current-session
   "Most-recent `:seon.agent.session` entity for `agent-id`. Returns nil if
-   the agent has no sessions yet (fresh boot before `start-session!`)."
-  [agent-id]
-  (let [a (db/entity {:seon.db/ref [:seon.agent/id agent-id]})]
-    (last (sort-by :seon.agent.session/at (:seon.agent/sessions a)))))
+   the agent has no sessions yet (fresh boot before `start-session!`).
+   Optional `db` value (the composer's snapshot) — the run-3 bug class
+   fix: section fns must read the SAME db value the composer renders
+   from, never reach back to the live conn mid-render."
+  ([agent-id] (current-session agent-id nil))
+  ([agent-id db]
+   (let [a (db/entity (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
+                        db (assoc :seon.db/db db)))]
+     (last (sort-by :seon.agent.session/at (:seon.agent/sessions a))))))
 
 ;; ============================================================
 ;; The classifier — ONE pass over the full index; every section
@@ -143,32 +145,41 @@
   (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
     (boolean (or (= s "my") (str/starts-with? s "my.")))))
 
-(def relevant-roots
-  "ROOT namespace names (strings) of the FULL-SOURCE set — the
-   namespaces whose complete file source renders into every prompt as
-   the :exemplars section (rule 4 of the classifier). An indexed ns is
-   included iff its name equals a root, starts with `<root>.`
-   (children ride along), or is the TEST SIBLING (`…-test`) of an
-   included ns — see [[relevant-ns?]].
+(defn included-ns?
+  "The ONE selection rule for the `<namespace>` tags (context-v4 §2.3,
+   r2): every `seon.*` and `my.*` namespace is included EXCEPT
+   `*.internal` ones. No lists, no budgets — a new namespace
+   auto-includes the moment its `:seon.ns` row exists."
+  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+  [ns-name]
+  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
+    (boolean (and (not (hidden-ns-name? s))
+                  (or (my-ns-name? s)
+                      (= s "seon")
+                      (str/starts-with? s "seon."))))))
 
-   Why these three: `seon.agent.search` is THE exemplar npm-package
-   wrapper (wrapper doctrine, register! calls, map-in/map-out
-   request/response schemas, error envelopes); `seon.agent.todo` is
-   THE store/retrieve + resume arc; `my.kb` (+ child
-   `my.kb.system`, the system-wide instruction singleton) is the
-   knowledge-base scaffold agents copy when designing their own
-   knowledge schemas.
+(def full-source-roots
+  "ROOT namespace names (strings) of the seon.* nses whose complete
+   FILE source is inlined into every prompt (children + `-test`
+   siblings ride along — see [[full-source-ns?]]); all `my.*` nses are
+   full-source by RULE, not by membership here. Why these two:
+   `seon.agent.search` is THE npm-package wrapper exemplar (register!
+   calls, map-in/map-out request/response schemas, error envelopes);
+   `seon.agent.todo` is THE store/retrieve + resume arc.
 
-   DELIBERATE FOLLOW-UP (not this unit): the post-split public faces
-   (`seon.db` — already split —, `seon.schema`, `seon.repl`,
-   `seon.agent`, `seon.agent.fs`, `seon.agent.inspect`) join this set
-   as their `*.internal` splits land AND the added context size is
-   re-measured against the gym (adding them today is ~+47k chars per
-   prompt, unvalidated). Until then they render as catalog count
-   lines, not full source."
-  #{"seon.agent.search" "seon.agent.todo" "my.kb"})
+   WHY THIS LIST STILL EXISTS (context-v4 §2.3 deviation, measured
+   2026-06-11): the decided rule — full source for ALL non-internal
+   nses — is 873 KB ≈ 218k tokens over the current index (seon.ctx
+   alone is 120 KB), beyond any provider window, because the big
+   substrate nses have not had their `*.internal` splits yet. Until
+   those splits land, non-full-source nses render as shallow
+   `(ns …)`-only tags (existence + the store read, not the body);
+   each split that lands shrinks a file toward inlinable size, and
+   when they are all done this list dies by flipping
+   [[full-source-ns?]] to [[included-ns?]]."
+  #{"seon.agent.search" "seon.agent.todo"})
 
-(defn- relevant-base-name
+(defn- base-ns-name
   "The ns name with a trailing `-test` stripped — the SUBJECT ns a test
    sibling pairs with (`seon.agent.search-test` → `seon.agent.search`).
    Non-test names pass through unchanged."
@@ -177,93 +188,23 @@
     (subs ns-str 0 (- (count ns-str) 5))
     ns-str))
 
-(defn relevant-ns?
-  "True when `ns-name` (string, symbol, or ns-name keyword) is in the
-   FULL-SOURCE set: equal to a root in [[relevant-roots]], a name-child
-   of one (`<root>.<x>`), or the `-test` sibling of an included ns.
-   Used by the boot indexer (`seon.client/ns-row`) to decide which
-   `:seon.ns/source` rows carry the real full file text, and by
-   [[exemplars-section]] to select the rows it renders — ONE rule, two
-   sites, no drift. (Replaces seon.agent/exemplar-ns?, V3-C.)"
+(defn full-source-ns?
+  "True when `ns-name` (string, symbol, or ns-name keyword) carries its
+   REAL FULL FILE TEXT as `:seon.ns/source`: every `my.*` ns (the
+   human's world — always inlined), plus the [[full-source-roots]]
+   set, children, and `-test` siblings of either. Used by the boot
+   indexer (`seon.client/ns-row`) to decide which rows get the file
+   read; [[namespaces-section]] renders whatever depth the row has —
+   one rule, one writer, no drift."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
   [ns-name]
   (let [s    (if (keyword? ns-name) (name ns-name) (str ns-name))
-        base (relevant-base-name s)]
-    (boolean (some #(or (= base %) (str/starts-with? base (str % ".")))
-                   relevant-roots))))
-
-(defn- agent-authored-nses
-  "Rule 3's evidence: the set of ns-name STRINGS whose `:seon.ns/name`
-   row landed in an AGENT-scoped tx. The provenance predicate (verified
-   against the live store, context-v3 unit 4): a tx is agent-scoped iff
-   it carries `:seon.db/agent-id` AND NOT `:seon.db/origin
-   :substrate-seed` (the boot seed runs inside the booting agent's
-   `with-agent` scope, so seed txs carry BOTH attrs). Same clause
-   family as `seon.warn/agent-registered-attrs` (the attr leg) —
-   [[context-model]] is the single owner of the ns leg."
-  [db]
-  (let [agent-txs (into #{}
-                        (map first)
-                        (db/query
-                          {:seon.db/db db
-                           :seon.db/query
-                           '[:find ?tx
-                             :where
-                             [?tx :seon.db/agent-id _]
-                             (not [?tx :seon.db/origin :substrate-seed])]}))]
-    (into #{}
-          (keep (fn [[nm tx]]
-                  (when (contains? agent-txs tx) (name nm))))
-          (db/query {:seon.db/db db
-                     :seon.db/query
-                     '[:find ?nm ?tx
-                       :where [?n :seon.ns/name ?nm ?tx]]}))))
-
-(schema/register! :seon.ctx/relevant-nses [:vector :string])
-(schema/register! :seon.ctx/hidden-nses   [:vector :string])
-(schema/register! :seon.ctx/agent-nses    [:set :string])
-(schema/register! :seon.ctx/agent-attrs   [:set :keyword])
-
-(schema/register! :seon.ctx/model
-  [:map
-   [:seon.ctx/relevant-nses :seon.ctx/relevant-nses]
-   [:seon.ctx/hidden-nses   :seon.ctx/hidden-nses]
-   [:seon.ctx/agent-nses    :seon.ctx/agent-nses]
-   [:seon.ctx/agent-attrs   :seon.ctx/agent-attrs]])
-
-(schema/register! :seon.ctx/model-request
-  [:map [:seon.db/db :seon.db/db]])
-
-(defn context-model
-  "ONE pass over the full index → the classification model every
-   section consumes (none re-queries, none re-classifies):
-
-     {:seon.ctx/relevant-nses [<ns-str> …]  ;; full source renders
-      :seon.ctx/hidden-nses   [<ns-str> …]  ;; *.internal — never rendered
-      :seon.ctx/agent-nses    #{<ns-str> …} ;; agent-authored (any agent)
-      :seon.ctx/agent-attrs   #{<kw> …}}    ;; agent-registered attrs
-
-   Precedence: hidden beats everything; `my.*` and agent-authored are
-   shown (catalog depth); [[relevant-roots]] membership grants full
-   source. The attr leg delegates to
-   `seon.warn/agent-registered-attrs` — the validated provenance query
-   (S-21) — so the two surfaces can never disagree."
-  {:malli/schema [:=> [:cat :seon.ctx/model-request] :seon.ctx/model]}
-  [{db :seon.db/db}]
-  (let [ns-names (->> (db/query {:seon.db/db db
-                                 :seon.db/query
-                                 '[:find ?nm :where [_ :seon.ns/name ?nm]]})
-                      (map (comp name first)))
-        hidden   (filterv hidden-ns-name? (sort ns-names))
-        agent    (agent-authored-nses db)]
-    {:seon.ctx/relevant-nses (->> ns-names
-                                  (remove hidden-ns-name?)
-                                  (filter relevant-ns?)
-                                  sort
-                                  vec)
-     :seon.ctx/hidden-nses   hidden
-     :seon.ctx/agent-nses    (into #{} (remove hidden-ns-name?) agent)
-     :seon.ctx/agent-attrs   (warn/agent-registered-attrs db)}))
+        base (base-ns-name s)]
+    (boolean (and (not (hidden-ns-name? s))
+                  (or (my-ns-name? base)
+                      (some #(or (= base %)
+                                 (str/starts-with? base (str % ".")))
+                            full-source-roots))))))
 
 ;; ------------------------------------------------------------
 ;; Pretty-print + truncation helpers.
@@ -382,56 +323,68 @@
        s))))
 
 (defn- format-eval-row
-  "Multi-line render for the recent-evals tile — narration, source,
-   result/error, and the timing footer (`; # eval-id  Nms`).
+  "REPL-real render of one eval (context-v4 §2.8): the `<ns>=> <form>`
+   prompt line (narration `;;` comments above it, as written), the
+   captured output, then the VALUE LINE carrying the eval's result-var
+   id — the pinned glyph:
+
+     my.agent.kXQ=> (+ 1 2)
+     3  ; ⇒ (result :EVLabc-123) · 4ms
+
+   The id is visible per eval and the suffix IS the retrieval call —
+   show-don't-tell for the result-var system. PRIOR-SESSION evals
+   (`prior?` true) render WITHOUT the result-var handle (their live
+   values did not survive the restart; the resume boundary marker
+   says so once). Errors render `;; ERROR …` with a plain `; # <id>`
+   footer — there is no value to dereference.
 
    The rendered result/error body is capped at `eval-render-cap` chars
-   (`cap-result`) so one huge eval result can't dominate the agent's
-   context (context-SAFETY invariant).
+   so one huge eval result can't dominate the agent's context
+   (context-SAFETY invariant). Error rendering branches: a Malli
+   instrumentation envelope renders via `render-malli-error`;
+   otherwise the pre-rendered legible `:seon.eval/error` string."
+  ([row] (format-eval-row row false))
+  ([{src      :seon.eval/source
+     ok?      :seon.eval/ok?
+     res      :seon.eval/result-edn
+     out      :seon.eval/output
+     err      :seon.eval/error
+     err-data :seon.eval/error-data
+     eid      :seon.eval/id
+     dur      :seon.eval/duration-ms
+     narr     :seon.eval/narration
+     eval-ns  :seon.eval/ns}
+    prior?]
+   (let [envelope (read-error-envelope err-data)
+         body (cond
+                ok?
+                (cap-result-body (or res "nil") eval-render-cap eid)
 
-   Error rendering branches: if `:seon.eval/error-data` decodes to a
-   Malli instrumentation envelope, use `render-malli-error` (the
-   structured ;; ERROR block with expected/got/reason/hint columns).
-   Otherwise fall back to the legacy `(str \";; ERROR \" err)` plain
-   path — covers timeouts, generic throws, anything pre-instrumentation."
-  [{src      :seon.eval/source
-    ok?      :seon.eval/ok?
-    res      :seon.eval/result-edn
-    out      :seon.eval/output
-    err      :seon.eval/error
-    err-data :seon.eval/error-data
-    eid      :seon.eval/id
-    dur      :seon.eval/duration-ms
-    narr     :seon.eval/narration}]
-  (let [envelope (read-error-envelope err-data)
-        body (cond
-               ok?
-               (cap-result-body (or res "nil") eval-render-cap eid)
+                (einstrument/instrument-error? envelope)
+                (cap-result-body (einstrument/render-malli-error envelope)
+                                 eval-render-cap eid)
 
-               (einstrument/instrument-error? envelope)
-               (cap-result-body (einstrument/render-malli-error envelope)
-                                eval-render-cap eid)
+                (and (string? err) (not (str/blank? err)))
+                ;; `:seon.eval/error` is stored pre-rendered + legible
+                ;; (`seon.eval/render-error-string`) — prefix + plain-clip.
+                ;; NOT `cap-result-body`, whose "narrow your query" guide
+                ;; is for oversized RESULTS, nonsensical on an error.
+                (cap-result (str ";; ERROR " err))
 
-               (and (string? err) (not (str/blank? err)))
-               ;; `:seon.eval/error` is now stored pre-rendered + legible
-               ;; (deepest real message + structured `:seon.error/data`,
-               ;; no opaque raw/stack) by `seon.eval/render-error-string`,
-               ;; so it's already short — just prefix + plain-clip. NOT
-               ;; `cap-result-body`, whose "narrow your query" guide is for
-               ;; oversized RESULTS and is nonsensical on an error.
-               (cap-result (str ";; ERROR " err))
-
-               :else ";; <no result>")
-        footer (str "  ; # " eid (when dur (str "  " dur "ms")))
-        ;; Captured println/prn output (fix f) — shown above the result
-        ;; like a real REPL prints before returning. Bounded by the same
-        ;; per-eval render cap.
-        out-ln (when (and (string? out) (not (str/blank? out)))
-                 (str (cap-result (str/trimr out)) "\n"))]
-    (str (when (and narr (not (str/blank? narr))) (str narr "\n"))
-         "> " (cap-result src) "\n"
-         out-ln
-         body footer)))
+                :else ";; <no result>")
+         dur-str (when dur (str " · " dur "ms"))
+         suffix  (cond
+                   prior? ""
+                   ok?    (str "  ; ⇒ (result :" eid ")" dur-str)
+                   :else  (str "  ; # " eid dur-str))
+         ;; Captured println/prn output — shown above the value like a
+         ;; real REPL prints before returning. Bounded by the same cap.
+         out-ln (when (and (string? out) (not (str/blank? out)))
+                  (str (cap-result (str/trimr out)) "\n"))]
+     (str (when (and narr (not (str/blank? narr))) (str narr "\n"))
+          (if eval-ns (name eval-ns) "?") "=> " (cap-result src) "\n"
+          out-ln
+          body suffix))))
 
 ;; ------------------------------------------------------------
 ;; Read API — what the agent calls from its REPL to walk its own
@@ -466,14 +419,19 @@
    messages (the turn-walk was the run-3 demo killer: standalone
    inbound messages never attach to a turn). The from/to refs are
    pulled with their id attrs so transcript labeling resolves by ref
-   kind. Default {:seon.agent/n 50}."
+   kind. Default {:seon.agent/n 50}. Optional `:seon.db/db` — the
+   composer threads its render snapshot here so every section reads
+   the SAME db value (the run-3 bug class fix)."
   ([] (messages {}))
-  ([{:seon.agent/keys [n id] :or {n 50}}]
+  ([{:seon.agent/keys [n id] db :seon.db/db :or {n 50}}]
    (let [id     (resolve-id id)
-         my-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))
+         db     (or db @db/*conn*)
+         my-eid (:db/id (db/entity {:seon.db/db db
+                                    :seon.db/ref [:seon.agent/id id]}))
          rows   (when my-eid
                   (db/query
-                    {:seon.db/query
+                    {:seon.db/db db
+                     :seon.db/query
                      '[:find (pull ?m [* {:seon.agent.message/from
                                           [:db/id :seon.user/id :seon.agent/id]
                                           :seon.agent.message/to
@@ -494,20 +452,37 @@
   "Most-recent :seon.agent.turn on the agent's current session — the one
    that's :running, or the last :done if no turn is open."
   ([] (current-turn {}))
-  ([{:seon.agent/keys [id]}]
+  ([{:seon.agent/keys [id] db :seon.db/db}]
    (let [id      (resolve-id id)
-         session (current-session id)]
+         session (current-session id db)]
      (last (sort-by :seon.agent.turn/at (:seon.agent.session/turns session))))))
+
+(defn session-evals
+  "ALL :seon.eval entries for `agent-id`, oldest-first across ALL
+   sessions, each tagged with its owning `:seon.agent.session/id` —
+   the transcript's cross-restart read (context-v4 §2.8: prior-session
+   evals render too, behind a resume boundary marker). Walks agent →
+   sessions → turns → evals. Optional `db` snapshot."
+  [agent-id db]
+  (let [a (db/entity (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
+                       db (assoc :seon.db/db db)))]
+    (vec
+      (for [s (sort-by :seon.agent.session/at (:seon.agent/sessions a))
+            t (sort-by :seon.agent.turn/at (:seon.agent.session/turns s))
+            e (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
+        (assoc (into {} e)
+               :seon.agent.session/id-of-session
+               (:seon.agent.session/id s))))))
 
 (defn evals
   "Last N :seon.eval entries for the agent's current session,
    oldest-first. Walks :seon.agent.session/turns → :seon.agent.turn/evals (Platform
    migrated eval storage to this shape in commit 5786247).
-   Default {:seon.agent/n 20}."
+   Default {:seon.agent/n 20}. Optional `:seon.db/db` snapshot."
   ([] (evals {}))
-  ([{:seon.agent/keys [n id] :or {n 20}}]
+  ([{:seon.agent/keys [n id] db :seon.db/db :or {n 20}}]
    (let [id      (resolve-id id)
-         session (current-session id)
+         session (current-session id db)
          es      (for [t (sort-by :seon.agent.turn/at (:seon.agent.session/turns session))
                        e (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
                    e)]
@@ -518,13 +493,16 @@
    eval's :seon.eval/ns. Falls back to (home-ns id) when no successful
    eval has run yet. Reactive: the next successful eval that switches
    ns (via `(ns …)`) shows up here on the next call. See
-   docs/seon/concepts/reactive-context."
+   docs/seon/concepts/reactive-context. Optional `:seon.db/db`
+   snapshot (the composer threads its render db here)."
   ([] (current-ns {}))
-  ([{:seon.agent/keys [id]}]
+  ([{:seon.agent/keys [id] db :seon.db/db}]
    (let [id (resolve-id id)
          ;; All evals across all sessions, latest first.
          all-evals
-         (for [s (:seon.agent/sessions (db/entity {:seon.db/ref [:seon.agent/id id]}))
+         (for [s (:seon.agent/sessions
+                   (db/entity (cond-> {:seon.db/ref [:seon.agent/id id]}
+                                db (assoc :seon.db/db db))))
                t (:seon.agent.session/turns s)
                e (:seon.agent.turn/evals t)
                :when (true? (:seon.eval/ok? e))]
@@ -540,17 +518,20 @@
    cap policy. Derived from the message + turn log; nothing stored.
    See docs/seon/concepts/reactive-context."
   ([] (turns-since-inbound {}))
-  ([{:seon.agent/keys [id]}]
+  ([{:seon.agent/keys [id] db :seon.db/db}]
    (let [id      (resolve-id id)
-         session (current-session id)
+         db      (or db @db/*conn*)
+         session (current-session id db)
          turns   (:seon.agent.session/turns session)
          ;; lookup refs are NOT auto-resolved in query args — bind the
          ;; eid explicitly so the ref-valued ?me joins work.
-         my-eid  (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))
+         my-eid  (:db/id (db/entity {:seon.db/db db
+                                     :seon.db/ref [:seon.agent/id id]}))
          latest-inbound-at
          (when my-eid
            (->> (db/query
-                  {:seon.db/query
+                  {:seon.db/db db
+                   :seon.db/query
                    '[:find (max ?at)
                      :in $ ?me ?cap
                      :where
@@ -595,712 +576,216 @@
 ;; empty string = section suppressed by the composer.
 ;; ------------------------------------------------------------
 
+(def system-text
+  "The ONE universal `<system>` block (context-v4 §2.1) — the concept
+   paragraphs (a–h) plus the four standing behavioral teachings, and
+   nothing else. Usage teaching lives in the rendered namespace
+   sources (docstrings + `;;` comments) and the startup tutorial
+   evals, never here.
+
+   BYTE-IDENTICAL for every agent and every turn — a `def`, not a fn
+   of the agent: the agent id lives in the status line at the very
+   END of the prompt (§2.9), so this block is one shared cacheable
+   artifact across the whole cluster. CACHE-PREFIX invariant: no
+   timestamps, no ids, no counts — anything volatile lives in
+   `prompt-section`. PROVIDER-NEUTRAL: no model or vendor words, ever."
+  (str
+    "<system>\n"
+    "You are at a live Clojure REPL on one human's runtime. The REPL is\n"
+    "your only tool: everything you do — read, compute, store, reply,\n"
+    "render — is a Clojure form evaluated here.\n"
+    "\n"
+    "THE LIVE CONTEXT SYSTEM. This whole prompt re-derives from the\n"
+    "shared database every turn: every section is a view of NOW, not an\n"
+    "accumulating log. Fix a problem and its warning vanishes; store\n"
+    "data and the next render shows it; other agents' writes appear on\n"
+    "your next turn. The status line and a clean REPL prompt\n"
+    "(<your-ns>=>) are the very END of this context — your reply is the\n"
+    "next REPL input.\n"
+    "\n"
+    "EVAL MECHANICS. Your reply is one or more Clojure forms, each\n"
+    "preceded by ;; comment lines. There are no tool calls. Anything\n"
+    "that is not a form or a ;; comment is a bug — bare prose HAS eaten\n"
+    "responses before.\n"
+    "\n"
+    "  Correct shape:                 Wrong shape (don't do this):\n"
+    "    ;; first, look around          Let me look around first.\n"
+    "    (seon.db/query ...)            (seon.db/query ...)\n"
+    "    ;; then, write a reply         Now I'll write the reply.\n"
+    "    (seon.db/transact! ...)        (seon.db/transact! ...)\n"
+    "\n"
+    "THINK IN COMMENTS. The ;; lines BEFORE each form are where your\n"
+    "reasoning lives — what you are about to do and why. If you write a\n"
+    "sentence, put ;; in front of every line of it.\n"
+    "\n"
+    "RESULT VARS. Every eval's value is saved under the id shown on its\n"
+    "value line in the transcript; (result :<id>) returns the live\n"
+    "value. NEVER re-run what is already computed. A clipped display is\n"
+    "NOT a clipped value — dig into a big stored value with ordinary\n"
+    "Clojure (get-in, filter, count) instead of re-querying.\n"
+    "\n"
+    "ERRORS ARE VALUES. Substrate calls never throw at you — a failure\n"
+    "comes back as data, e.g. {:seon.db/ok? false :seon.db/error …}.\n"
+    "Read the error map; it names the defect and the fix. Telling your\n"
+    "human something \"threw an exception\" when you were handed an error\n"
+    "envelope is wrong — nothing was thrown; the failure is a value you\n"
+    "read.\n"
+    "\n"
+    "THE RENDERING SYSTEM. You show your human things with render\n"
+    "twins: :seon.render/ai (text for you) + :seon.render/html (hiccup\n"
+    "for their screen) — one render, two surfaces. Your live tile and\n"
+    "your context sections both ride this shape.\n"
+    "\n"
+    "THE SHARED STORE. All agents are wired to ONE shared datahike\n"
+    "(datomic-style) database; *conn* is ambient — your universe binds\n"
+    "it, never thread it. seon.db is rendered below; its docstrings are\n"
+    "the API reference. Two laws worth stating once: register an\n"
+    "attribute (seon.schema/register!) BEFORE the first transact that\n"
+    "uses it, and give every attribute keyword a namespace of at least\n"
+    "two dot-separated segments (:my.kb.doc/title — never :doc/title,\n"
+    "never :title).\n"
+    "\n"
+    "THE NAMESPACES BELOW are real loaded code, ordered by RECENCY —\n"
+    "most-recently-modified LAST, not dependency order; the runtime\n"
+    "loaded them correctly. Namespaces are workspaces: (ns\n"
+    "my.domain.thing) moves you there and your context follows your\n"
+    "namespace. Your code is my.*, your knowledge is my.kb.* (real\n"
+    "schemas per domain); the substrate is seon.* — call its fns, never\n"
+    "redefine them.\n"
+    "\n"
+    "STANDING TEACHINGS:\n"
+    "- Consult stored knowledge FIRST: run (seon.db/store-inventory) —\n"
+    "  your creation turn already did; the result is in your transcript\n"
+    "  — and datalog the existing attrs before any research. Prior\n"
+    "  agents already answered many questions; re-deriving a stored\n"
+    "  answer is wasted turns.\n"
+    "- Store what you verify, without being asked: design (or reuse) a\n"
+    "  my.kb.<domain> schema, reference the shared :my.kb/* provenance\n"
+    "  attrs, and transact the fact. Knowledge nobody stored is\n"
+    "  research the next agent pays for again.\n"
+    "- A turn serving a question MUST end with (seon.agent/reply! …) in\n"
+    "  the SAME response — your human sees NOTHING until reply! lands.\n"
+    "  ONE reply per question: once it lands your wake is complete and\n"
+    "  the loop stops; a new message will wake you if more is needed.\n"
+    "</system>"))
+
 (defn system-section
-  "REPL header: who-am-I, the strict response-format contract, the
-   discovery cheat-sheet, and the four standing behavioral teachings
-   (consult-before-research, store-proactively, reply-once,
-   namespace-map — STAGED here by context-v4 V4-0 when the
-   `<instructions>` section died; V4-1 rewrites this whole block into
-   the §2.1 concept paragraphs).
-
-   CACHE-PREFIX invariant: this section is the FIRST bytes of every
-   turn's user message and must be BYTE-STABLE across turns. No
-   timestamps, no current-ns, no counts — anything per-turn volatile
-   lives in `prompt-section` (the always-changing tail). The old
-   `Now: <ISO>` line here busted the provider prompt-cache at char 35
-   every single turn (context-audit-2026-06-09 §4)."
+  "The universal `<system>` header — returns [[system-text]] verbatim.
+   A fn only because sections render through the symbol slot; it takes
+   the standard section input and ignores it (byte-identical for every
+   agent and turn — the whole point)."
   {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.agent/keys [id]}]
-  (str "<system agent=\"" id "\">\n"
-       "  Your current namespace, the turn counts and the wall-clock time\n"
-       "  are in the status block at the very END of this context; the\n"
-       "  final line is a clean REPL prompt (<your-ns>=>) — your reply is\n"
-       "  the next REPL input.\n"
-       "\n"
-       "  FORMAT IS STRICT. Everything you emit is either\n"
-       "    (a) a Clojure form — (...), [...], {...}, @!atom\n"
-       "    (b) a comment line starting with ;;\n"
-       "  Anything else is a bug. Bare prose HAS eaten responses before\n"
-       "  (\"Let me read the file\" once became four bogus eval entries).\n"
-       "  If you write a sentence, put ;; in front of every line of it.\n"
-       "\n"
-       "  Correct shape:                 Wrong shape (don't do this):\n"
-       "    ;; first, look around          Let me look around first.\n"
-       "    (seon.db/query ...)            (seon.db/query ...)\n"
-       "    ;; then, write a reply         Now I'll write the reply.\n"
-       "    (seon.db/transact! ...)        (seon.db/transact! ...)\n"
-       "\n"
-       "  Walk your own state:\n"
-       "    (seon.agent/messages)        ; current session's messages — default {:seon.agent/n 50}\n"
-       "    (seon.agent/evals)           ; current session's evals — default {:seon.agent/n 20}\n"
-       "    (seon.agent/current-ns)      ; your ns as data (the prompt line shows it too)\n"
-       "    (result <eval-id>)           ; full live result of a prior eval (this session)\n"
-       "\n"
-       "  Namespaces are workspaces: (ns my.domain.thing) moves you there\n"
-       "  and your CONTEXT FOLLOWS YOUR NAMESPACE — build where the work\n"
-       "  lives. println/prn output is captured onto the eval's record\n"
-       "  (shown above the result), but prefer returning values.\n"
-       "\n"
-       "  See your code in the current ns:\n"
-       "    (seon.db/pull {:seon.db/pull-pattern\n"
-       "                    '[:seon.ns/source\n"
-       "                       {:seon.fn/_ns [*] :seon.schema/_ns [*]}]\n"
-       "                    :seon.db/ref [:seon.ns/name (seon.agent/current-ns)]})\n"
-       "\n"
-       "  STANDING GUIDANCE:\n"
-       "  - Consult stored knowledge FIRST: check the schema-catalog for\n"
-       "    my.kb.* attrs and datalog those exact keywords before any\n"
-       "    research. Prior agents already answered many questions —\n"
-       "    re-deriving a stored answer is wasted turns. Search the repo\n"
-       "    only when no stored knowledge covers the question.\n"
-       "  - Store what you verify, without being asked: design (or reuse)\n"
-       "    a my.kb.<domain> schema for the kind of knowledge at hand,\n"
-       "    reference the shared :my.kb/* provenance attrs, and transact\n"
-       "    the fact. Knowledge nobody stored is research the next agent\n"
-       "    pays for again.\n"
-       "  - A turn serving a question MUST end with (seon.agent/reply! …)\n"
-       "    in the SAME response — your human sees NOTHING until reply!\n"
-       "    lands. ONE reply per question: once reply! lands your wake is\n"
-       "    complete and the loop stops. Do not emit verification forms or\n"
-       "    follow-up replies after answering; a new message will wake you\n"
-       "    if more is needed.\n"
-       "  - Your code is my.*, your knowledge is my.kb.* (real schemas per\n"
-       "    domain), and the substrate is seon.agent.* plus the other\n"
-       "    seon.* namespaces — call substrate fns, never redefine them.\n"
-       "</system>"))
+  [_input]
+  system-text)
 
-;; ------------------------------------------------------------
-;; capabilities-section — the "## What you can do" worked-examples
-;; block. DERIVED, never hardcoded:
-;; the core seon.db API fns are persisted as :seon.fn entities
-;; (seeded by seon.client/index-substrate!), each carrying the real
-;; :seon.fn/sym + :seon.fn/arglists + :seon.fn/doc. We render those
-;; rows so the agent sees the exact MAP-IN call shape — the mistake
-;; we observed (calling transact!/query positionally, hallucinating
-;; seon.agent/current-agent-id) becomes impossible to make from
-;; context. Bounded: the curated core API only (~5 fns), NOT every
-;; registered :seon.fn — never the unbounded fn dump.
-;; ------------------------------------------------------------
-
-;; Render order + which core fns appear. These are exactly the syms
-;; seon.client/index-substrate! persists; we pull them by identity so
-;; the rendered shape is the SAME data the agent reads via
-;; (seon.db/pull [:seon.fn/sym …]) — one source, no divergence.
-(def ^:private capability-syms
-  ["seon.schema/register!"
-   "seon.db/transact!"
-   "seon.db/query"
-   "seon.db/pull"
-   "seon.db/entity"
-   "seon.db/listen!"
-   "seon.db/current-agent-id"])
-
-(defn- first-doc-line
-  "First SENTENCE of a docstring (joined across the first few lines, cut
-   at the first \". \") — the one-liner for the catalogs. The old
-   first-LINE version dangled mid-sentence (\"Two call shapes:\") when a
-   docstring's opening sentence wrapped. Full doc stays on the
-   :seon.fn entity."
-  [doc]
-  (let [flat (->> (str/split-lines (or doc ""))
-                  (map str/trim)
-                  (remove str/blank?)
-                  (take 3)
-                  (str/join " "))
-        idx  (str/index-of flat ". ")]
-    (cond
-      (str/blank? flat) nil
-      (some? idx)       (subs flat 0 (inc idx))
-      (> (count flat) 140) (str (subs flat 0 140) " …")
-      :else             flat)))
-
-(defn- arglist-vectors
-  "Split a stored `:seon.fn/arglists` string — \"([k v])\",
-   \"([req] [db selector eid])\" — into its top-level arg-vector strings
-   ([\"[k v]\"] / [\"[req]\" \"[db selector eid]\"]). Returns [] for
-   blank or \"()\" (unknown arity)."
-  [arglists]
-  (let [s (str/trim (or arglists ""))
-        n (count s)]
-    (loop [i 0 depth 0 start nil out []]
-      (if (>= i n)
-        out
-        (let [c (nth s i)]
-          (cond
-            (= c \[) (recur (inc i) (inc depth)
-                            (if (zero? depth) i start) out)
-            (= c \]) (let [d (dec depth)]
-                       (if (and (zero? d) (some? start))
-                         (recur (inc i) d nil (conj out (subs s start (inc i))))
-                         (recur (inc i) d start out)))
-            :else    (recur (inc i) depth start out)))))))
-
-(defn- callable-sigs
-  "One CALLABLE shape per arity from a fn sym + stored arglists string:
-   \"([k v])\" → [\"(sym k v)\"]; \"([req] [db eid])\" → [\"(sym req)\"
-   \"(sym db eid)\"]. The old render glued the raw arglists string after
-   the sym — `(seon.db/pull ())` / `(register! ([k v]))` — which taught
-   an UNCALLABLE shape (context-audit 2026-06-09 §2). Unknown arity →
-   [\"(sym …)\"]."
-  [sym arglists]
-  (let [vs (arglist-vectors arglists)]
-    (if (seq vs)
-      (mapv (fn [v]
-              (let [inner (str/trim (subs v 1 (dec (count v))))]
-                (if (str/blank? inner)
-                  (str "(" sym ")")
-                  (str "(" sym " " inner ")"))))
-            vs)
-      [(str "(" sym " …)")])))
-
-(defn capabilities-section
-  "Render the `## What you can do` worked-examples block.
-   DERIVED from the persisted core `:seon.fn` entities —
-   each fn's `:seon.fn/sym` + `:seon.fn/arglists` (the map-in shape) +
-   a one-line `:seon.fn/doc`. Includes one fully-worked `transact!`
-   example so the positional-call mistake is impossible to make from
-   context. Bounded to the curated core API (`capability-syms`)."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.db/keys [db]}]
-  (let [rows  (->> capability-syms
-                   (keep (fn [sym]
-                           (let [e (db/entity {:seon.db/db db
-                                               :seon.db/ref [:seon.fn/sym sym]})]
-                             (when e
-                               {:sym      (:seon.fn/sym e)
-                                :arglists (:seon.fn/arglists e)
-                                :doc      (first-doc-line (:seon.fn/doc e))})))))
-        lines (for [{:keys [sym arglists doc]} rows]
-                (str (str/join "\n"
-                       (map #(str "  " %) (callable-sigs sym arglists)))
-                     (when (seq doc) (str "\n      ; " doc))))
-        roots (seq (:seon.agent.fs/allowed-roots @sfs/!config))]
-    (if (seq rows)
-      (str "<capabilities>\n"
-           "## What you can do\n\n"
-           "These are the core APIs. Map-in is the preferred shape: you pass\n"
-           "ONE map with fully-namespaced keys (see the worked examples below).\n"
-           "The db ops (query/pull/entity/transact!) ALSO accept a natural\n"
-           "datahike-style positional form.\n\n"
-           (str/join "\n" lines)
-           "\n\n"
-           "### Storing a NEW KIND of data: register the schema FIRST\n\n"
-           "To store a NEW kind of fact you must REGISTER each attribute with\n"
-           "`seon.schema/register!` BEFORE you transact it. Storing a schema's\n"
-           "source as data is NOT registration — an unregistered attr is\n"
-           "REJECTED by transact!. register! is the single source of truth:\n"
-           "register the TYPE and the system derives datahike storage.\n\n"
-           "But FIRST check the schema-catalog's `domain data attrs` block:\n"
-           "if attrs for this kind of fact ALREADY exist, the kind is not\n"
-           "new — transact with the existing keywords directly, zero\n"
-           "register! calls needed. Registering a parallel shape beside an\n"
-           "existing one (new namespace, new units) forks the data: the\n"
-           "next query misses half the rows.\n\n"
-           "Use DEEP, namespaced attrs — the keyword namespace must have at\n"
-           "least TWO dot-separated segments, like a real code namespace:\n"
-           "  :my.kb.codebase/claim   YES — multi-segment namespace\n"
-           "  :finding/claim          NO  — single-segment namespace, same\n"
-           "                                violation as a bare key\n"
-           "  :title                  NO  — bare key\n"
-           "Common shapes:\n"
-           "  - plain values:                  :string, :keyword, :inst, :boolean\n"
-           "  - a reference to another entity: :seon.db/ref\n"
-           "  - many references:               [:vector :seon.db/ref]\n"
-           "  - numbers: :int for counts/ids, :double for measures —\n"
-           "    :number is NOT a type (the transact! gate will tell you).\n"
-           "  - identity is OPTIONAL — [:string {:seon.db/identity true}]\n"
-           "    only on a kind's ONE natural key, and only when rows must\n"
-           "    upsert by that key (re-transacting the same key updates the\n"
-           "    row instead of adding a duplicate). Most attrs, one-off\n"
-           "    entities, and bulk rows need NO identity attr at all; never\n"
-           "    re-register an existing attr just to add identity.\n\n"
-           "  ;; 1. register the attrs (do this ONCE per attr)\n"
-           "  (seon.schema/register! :my.kb.doc/path  [:string {:seon.db/identity true}])\n"
-           "  ;;   ^ identity ONLY because docs re-index by path (upsert key)\n"
-           "  (seon.schema/register! :my.kb.doc/title :string)\n"
-           "  (seon.schema/register! :my.kb.doc/tags  [:vector :keyword])\n\n"
-           "  ;; 2. NOW transact data using those attrs — upserts by :my.kb.doc/path\n"
-           "  (seon.db/transact!\n"
-           "    {:seon.db/tx-data\n"
-           "     [{:my.kb.doc/path  \"docs/seon/_dashboard.md\"\n"
-           "       :my.kb.doc/title \"Dashboard\"\n"
-           "       :my.kb.doc/tags  [:index :dashboard]}]})\n\n"
-           "  ;; 3. read it back\n"
-           "  (seon.db/query {:seon.db/query\n"
-           "                  '[:find ?path ?title\n"
-           "                    :where [?e :my.kb.doc/path ?path]\n"
-           "                           [?e :my.kb.doc/title ?title]]})\n\n"
-           "Totals and aggregates: compute IN the query over the STORED data —\n"
-           "(sum ?v), (count ?e), (max ?v) — never by hand from your own turn:\n"
-           "  (seon.db/query {:seon.db/query\n"
-           "                  '[:find (sum ?secs)\n"
-           "                    ;; :with ?e is REQUIRED for a row total —\n"
-           "                    ;; datalog is set-semantics, so without it\n"
-           "                    ;; two entities with the SAME value dedupe\n"
-           "                    ;; to one and the sum comes out short.\n"
-           "                    :with ?e\n"
-           "                    :where [?e :my.domain/duration-seconds ?secs]]})\n\n"
-           "When a query comes back EMPTY (#{}), suspect a misspelled attribute\n"
-           "before you conclude there's no data. The usual cause is a shortened\n"
-           "namespace: copy the attribute keyword EXACTLY as the schema-catalog\n"
-           "shows it (if the catalog lists :my.kb.doc/path, query that — not\n"
-           ":kb.doc/path). Fix the keyword and re-run.\n\n"
-           "### Reading one entity: pull and entity\n\n"
-           "The db ops are datahike-compatible — map-in (shown) and positional\n"
-           "(db-first, e.g. (seon.db/pull <db> selector eid)) both work.\n\n"
-           "  ;; pull — one entity as a plain map, by lookup-ref or eid\n"
-           "  (seon.db/pull {:seon.db/pull-pattern '[:seon.fn/sym :seon.fn/doc]\n"
-           "                 :seon.db/ref          [:seon.fn/sym \"seon.db/query\"]})\n\n"
-           "  ;; entity — lazy map-like view; read attrs like a map\n"
-           "  (:seon.fn/doc (seon.db/entity {:seon.db/ref [:seon.fn/sym \"seon.db/query\"]}))\n\n"
-           "### Reacting to writes: listen!\n\n"
-           "  (seon.db/listen!\n"
-           "    {:seon.db/key     :my-ns/watch\n"
-           "     :seon.db/handler (fn [{:seon.db/keys [db attr-index]}]\n"
-           "                        ;; runs after EVERY transact; attr-index\n"
-           "                        ;; groups the tx's datoms by attribute\n"
-           "                        (when (:kb.doc/path attr-index)\n"
-           "                          (js/console.log \"new doc stored\")))})\n"
-           "  ;; same :seon.db/key replaces; remove with\n"
-           "  ;; (seon.db/unlisten! {:seon.db/key :my-ns/watch})\n\n"
-           "### Reading the repo (files on this machine)\n\n"
-           (if roots
-             (str "You can READ files under: " (str/join ", " roots) "\n"
-                  "(read-only; everything outside these roots is denied)\n\n")
-             (str "No filesystem roots are granted right now (default-deny) —\n"
-                  "every seon.agent.fs call returns an error envelope that explains\n"
-                  "how access is configured.\n\n"))
-           "Paths are ABSOLUTE, real machine paths — there is no virtual\n"
-           "root or chroot. When your human asks where something is,\n"
-           "answer with the real path exactly as the substrate returns it.\n\n"
-           "The recipe is CONSULT KNOWLEDGE → SEARCH → READ PRECISELY (never\n"
-           "walk + guess). Step 0 is the consult-before-research instruction:\n"
-           "the schema-catalog lists the my.kb.* (and other my.*) attrs that\n"
-           "exist — datalog those EXACT keywords; there is no consult API:\n\n"
-           "  ;; 0. e.g. the catalog shows :my.kb.codebase/claim et al:\n"
-           "  (seon.db/query {:seon.db/query\n"
-           "                  '[:find ?claim ?path ?line\n"
-           "                    :where [?f :my.kb.codebase/claim ?claim]\n"
-           "                           [?f :my.kb/source-path    ?path]\n"
-           "                           [?f :my.kb/source-line    ?line]]})\n"
-           "  ;; A hit IS the answer, with provenance — cite it (re-read the\n"
-           "  ;; source line only if you must verify).\n"
-           "  ;; NOTE: only built-in predicates work inside :where (=, <,\n"
-           "  ;; get-else, missing?) — clojure.string/* fns DO NOT resolve\n"
-           "  ;; in a query. Fetch the rows plain, filter in code after.\n\n"
-           "  ;; 1. grep for a term (regex). Call it as the WHOLE form — the\n"
-           "  ;;    result is auto-awaited; inside a let you'd get a Promise.\n"
-           "  (seon.agent.search/grep {:seon.agent.search/pattern \"validate-entity-values!\"\n"
-           "                     :seon.agent.search/glob    \"*.cljs\"})\n"
-           "  ;; => {:seon.agent.search/ok? true, :seon.agent.search/matches\n"
-           "  ;;     [{:seon.agent.search/path \"…/src/seon/db/internal.cljs\"\n"
-           "  ;;       :seon.agent.search/line-number 499, …}], …}\n\n"
-           "  ;; 2. read the exact hit (sync; match paths are absolute)\n"
-           "  (seon.agent.fs/read-file {:seon.agent.fs/path \"<absolute path from the match>\"})\n\n"
-           "A denial is a VALUE, not a crash — {:seon.agent.fs/ok? false\n"
-           ":seon.agent.fs/error \"…\"} tells you whether the path is out of scope\n"
-           "or the fs is read-only. Read the error; it says what to do.\n\n"
-           "### Storing what you learn — design a my.kb.<domain> schema\n\n"
-           "Knowledge is SCHEMA'D DATA in my.kb.<domain> namespaces, one REAL\n"
-           "schema per knowledge kind (see the my.kb exemplar above; the\n"
-           "store-proactively instruction says WHEN). Check the schema-catalog\n"
-           "first: if attrs for this kind already exist, REUSE those exact\n"
-           "keywords — NEVER invent a parallel shape. Reference the shared\n"
-           ":my.kb/* provenance attrs (already registered) instead of\n"
-           "re-inventing source-path/line/confidence per domain:\n\n"
-           "  ;; e.g. verified facts about fns in a codebase:\n"
-           "  (seon.schema/register! :my.kb.codebase.fn/name  [:string {:seon.db/identity true}])\n"
-           "  ;;   ^ identity ONLY because claims upsert by fn name; most\n"
-           "  ;;     attrs need no identity (see Common shapes)\n"
-           "  (seon.schema/register! :my.kb.codebase.fn/claim :string)\n\n"
-           "  (seon.db/transact!\n"
-           "    {:seon.db/tx-data\n"
-           "     [{:my.kb.codebase.fn/name  \"seon.db/transact!\"\n"
-           "       :my.kb.codebase.fn/claim \"Malli-validates every entity before the tx reaches datahike\"\n"
-           "       :my.kb/source-path       \"src/seon/db/internal.cljs\"\n"
-           "       :my.kb/source-line       499\n"
-           "       :my.kb/confidence        :verified}]})  ; :verified = you read that line\n\n"
-           "WHY schemas, not text blobs: the next agent discovers your attrs\n"
-           "in the schema-catalog, datalogs your rows (recipe step 0) and\n"
-           "reuses them — knowledge compounds only when it is queryable.\n\n"
-           "### Replying — one line, the substrate knows who asked:\n\n"
-           "  (seon.agent/reply! {:seon.agent.message/content \"on it — here's what I found\"})\n"
-           "  ;; => {:seon.agent.message/ok? true, :seon.agent.message/id \"MSG…\",\n"
-           "  ;;     :seon.agent.message/hops 1}   ; failure → {:seon.db/ok? false …}\n\n"
-           "Messaging another agent (or an explicit target) — :seon.agent.message/to\n"
-           "takes a ref or a vector of refs:\n\n"
-           "  (seon.agent/message!\n"
-           "    {:seon.agent.message/to      [:seon.agent/id \"<other-agent-id>\"]\n"
-           "     :seon.agent.message/content \"can you check the workout totals?\"})\n\n"
-           "### Your live tile (your one HTML surface in the inspector)\n\n"
-           "You own ONE always-visible tile, rendered above the entity cards.\n"
-           "Default renderer: seon.render.live-tile/welcome. Repoint it: define a fn\n"
-           "returning {:seon.render/hiccup [...]}, then transact its symbol:\n\n"
-           "  (defn my-tile [_input]\n"
-           "    {:seon.render/hiccup [:div [:h2 \"status\"] [:p \"all green\"]]})\n\n"
-           "  (seon.db/transact!\n"
-           "    {:seon.db/tx-data\n"
-           "     [{:seon.agent/id (seon.db/current-agent-id)\n"
-           "       :seon.render.live-tile/content 'YOUR-CURRENT-NS/my-tile}]})  ; fully qualified\n"
-           "</capabilities>")
-      "")))
 
 ;; ============================================================
-;; exemplars-section — FULL source of the chosen exemplar namespaces,
-;; rendered from the program graph (context-focus-redesign 2026-06-10).
-;; The user direction: fewer mechanisms at full depth beats 102
-;; signatures at zero depth — give the agent COMPLETE, in-conventions
-;; namespaces (schemas + fns + tests) to copy the SHAPE from.
+;; namespaces-section — THE BODY of the prompt (context-v4 §2.3): one
+;; `<namespace name="…">` tag per included ns, recency-ordered
+;; most-recently-modified LAST. Dissolves `<exemplars>` (exemplars
+;; were never a different kind of thing — they are just namespaces)
+;; AND `<namespace-context>` (the agent's own ns is just a tag).
 ;;
 ;; The section NEVER re-reads files at render time (code-as-data): the
-;; boot indexer (`seon.client/index-substrate!` / `index-tests`) is the
-;; ONE file-reader; it persists the real full file text on
-;; `:seon.ns/source` for every ns matched by `relevant-ns?`. This
-;; section just queries those datoms. Byte-stable for the life of a pod
-;; process (source can only change with a build change, which restarts
-;; the pod) — it belongs inside the provider-cacheable static prefix,
-;; so it renders at priority 22, between :capabilities (20) and the
-;; semi-static :schema-catalog (25).
+;; boot indexer (`seon.client/ns-row`) is the ONE file-reader; this
+;; section renders the persisted `:seon.ns/source` datoms. Three
+;; depths, one render rule per row:
+;;   - real file text persisted (full-source-ns?)   → rendered whole;
+;;   - `(ns x)` stub but the ns OWNS member rows    → reconstituted
+;;     from the program graph (ns form + each :seon.fn/:seon.schema/
+;;     :seon.test source, tx-ordered) — agent-authored nses render as
+;;     the real code they are, exactly what bulk-load resume replays;
+;;   - bare stub, no members                        → the stub line
+;;     alone (existence; the body is compiled substrate).
 ;; ============================================================
 
+(defn- ns-stub?
+  "True when `src` is blank or the boot indexer's minimal `(ns x)`
+   stub for `ns-str`."
+  [ns-str src]
+  (or (str/blank? src)
+      (= (str/trim src) (str "(ns " ns-str ")"))))
 
-(defn- relevant-sort-key
-  "Deterministic render order for exemplar nses: alphabetical by the
-   base (subject) name, test sibling AFTER its subject. For the current
-   set that yields seon.agent.search → seon.agent.search-test → seon.agent.todo →
-   seon.agent.todo-test — byte-stable across renders (LLM cache-prefix
-   invariant: no timestamps, no map-order nondeterminism)."
-  [ns-str]
-  [(relevant-base-name ns-str) (if (str/ends-with? ns-str "-test") 1 0)])
+(defn- reconstituted-ns-source
+  "Rebuild an ns's source text from the program graph: the `(ns …)`
+   form (the stored stub) followed by every owned `:seon.fn` /
+   `:seon.schema` / `:seon.test` source in tx order — the same
+   reconstruction bulk-load resume evals (code-as-data: one mechanism,
+   two readers). Returns nil when the ns owns no member rows."
+  [db ns-kw stub]
+  (let [member-rows
+        (fn [src-attr ns-attr]
+          (db/query {:seon.db/db db
+                     :seon.db/query
+                     [:find '?src '?tx
+                      :where
+                      ['?n :seon.ns/name ns-kw]
+                      ['?m ns-attr '?n]
+                      ['?m src-attr '?src '?tx]]}))
+        rows (concat (member-rows :seon.fn/source     :seon.fn/ns)
+                     (member-rows :seon.schema/source :seon.schema/ns)
+                     (member-rows :seon.test/source   :seon.test/ns))]
+    (when (seq rows)
+      (str/join "\n\n"
+        (cons (str/trim stub)
+              (->> rows (sort-by second) (map (comp str/trim first))))))))
 
-(def ^:private exemplars-header
-  ";; These complete namespaces are THE models for code you write: this is\n;; what a finished schema set, a specced map-in/map-out fn, an error\n;; envelope, and a test suite look like here. Copy the SHAPE — register!\n;; shapes, ::request/::response pairs, :malli/schema on every public fn,\n;; errors as values, deftest + fixture + envelope assertions.\n;; These fns already exist — call them; never re-define them.")
+(def ^:private namespaces-header
+  (str ";; Real loaded code, most-recently-modified LAST. Namespaces showing\n"
+       ";; only their (ns …) form are compiled substrate — their fns are\n"
+       ";; :seon.fn rows in the store, e.g.:\n"
+       ";;   (seon.db/pull {:seon.db/pull-pattern '[:seon.fn/sym :seon.fn/doc :seon.fn/source]\n"
+       ";;                  :seon.db/ref [:seon.fn/sym \"seon.agent/reply!\"]})"))
 
-(defn exemplars-section
-  "FULL source of the exemplar namespaces ([[relevant-roots]] + children
-   + test siblings), each wrapped in `<exemplar ns=\"…\">…</exemplar>`,
-   queried from the `:seon.ns/source` datoms the boot indexer persisted —
-   never a render-time file read (code-as-data: the boot indexer is the
-   ONE file-reader; everything downstream reads the graph).
-
-   A matched ns whose source is missing or still the `(ns x)` stub
-   renders NOTHING for that ns and logs fail-loud — never throws, never
-   silently pads with the stub. Deterministically ordered
-   ([[relevant-sort-key]]) so the section is byte-stable across renders."
+(defn namespaces-section
+  "One `<namespace name=\"…\">` tag per included ns ([[included-ns?]] —
+   ALL seon.* + my.* minus *.internal; ONE rule, no lists), ordered by
+   RECENCY: most-recently-modified LAST (tx of the `:seon.ns/name`
+   datom — bumped by the tee's nested upsert on every define), name as
+   the tie-break, so the stable substrate set forms a stable cache
+   prefix and the churning ns sits nearest the tail. Render depth per
+   row is the ns-block comment's three-case rule; the stub branch
+   discriminates by TX PROVENANCE — a stub row asserted by the
+   `:substrate-seed` boot tx is compiled substrate (shallow tag: its
+   members are the boot-indexed `:seon.fn` rows of the WHOLE compiled
+   ns; inlining them re-creates the 200k+-char dump the depth rule
+   exists to avoid), while a stub row from any other tx is
+   agent-authored and reconstitutes. Never a render-time file read."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db]}]
-  (let [rows   (->> (db/query
+  (let [;; seed-provenance tx set queried SEPARATELY — `get-else` over a
+        ;; tx-eid that carries NO meta datoms silently DROPS the row in
+        ;; datahike-cljs (probed 2026-06-11; the open-issues get-else
+        ;; trap), so membership is checked in code instead.
+        seed-txs (into #{}
+                       (map first)
+                       (db/query
+                         {:seon.db/db db
+                          :seon.db/query
+                          '[:find ?tx
+                            :where [?tx :seon.db/origin :substrate-seed]]}))
+        rows   (->> (db/query
                       {:seon.db/db db
                        :seon.db/query
-                       '[:find ?nm ?src
+                       '[:find ?nm ?src ?tx
                          :where
-                         [?n :seon.ns/name ?nm]
+                         [?n :seon.ns/name ?nm ?tx]
                          [?n :seon.ns/source ?src]]})
-                    (map (fn [[nm src]] [(name nm) src]))
-                    (filter (fn [[ns-str _]] (relevant-ns? ns-str)))
-                    (sort-by (fn [[ns-str _]] (relevant-sort-key ns-str))))
-        blocks (keep (fn [[ns-str src]]
-                       (if (or (str/blank? src)
-                               (= (str/trim src) (str "(ns " ns-str ")")))
-                         (do (seon-log/error-console!
-                               "seon.agent/exemplars-section"
-                               (str "exemplar ns " ns-str " has no full "
-                                    ":seon.ns/source (stub or blank) — "
-                                    "omitted from the section; the boot "
-                                    "indexer should have persisted the "
-                                    "real file text"))
-                             nil)
-                         (str "<exemplar ns=\"" ns-str "\">\n"
-                              (str/trim src)
-                              "\n</exemplar>")))
-                     rows)]
+                    (filter (fn [[nm _ _]] (included-ns? (name nm))))
+                    (sort-by (fn [[nm _ tx]] [tx (name nm)])))
+        blocks (for [[nm src tx] rows]
+                 (let [ns-str (name nm)
+                       seed?  (contains? seed-txs tx)
+                       body   (if (ns-stub? ns-str src)
+                                (or (when-not seed?
+                                      (reconstituted-ns-source db nm src))
+                                    (str "(ns " ns-str ")"))
+                                (str/trim src))]
+                   (str "<namespace name=\"" ns-str "\">\n"
+                        body
+                        "\n</namespace>")))]
     (if (seq blocks)
-      (str "<exemplars>\n" exemplars-header "\n\n"
-           (str/join "\n\n" blocks)
-           "\n</exemplars>")
-      "")))
-
-;; ============================================================
-;; schema-catalog-section — the GLOBAL cross-namespace catalog of every
-;; ENTITY kind stored in the system. Layered ON TOP of the per-ns
-;; `namespace-context` (T5): namespace-context is the DEEP current-ns
-;; view (this ns's fns/tests/source); the catalog is the BROAD view —
-;; ALL the kinds of things that exist in the substrate, REGARDLESS of
-;; the agent's current ns. This is HOW the agent knows what data the
-;; system holds (user, 2026-06-08 night).
-;;
-;; DERIVED, never hardcoded: the catalog reads the `:seon.schema`
-;; entities seeded at boot (`all-entity-schemas-tx-data`). An entity
-;; KIND is a `:seon.schema` entity that carries a `:seon.schema/render-fn`
-;; — i.e. a renderable `:map` entity-shape schema (`:seon.fn`, `:seon.ns`,
-;; `:seon.eval`, `:seon.agent.message`, `:seon.schema`, `:seon.test`, …) — as
-;; opposed to a request/response `:map` (which has no render symbol). The
-;; `:seon.schema` entity stores the kind's `:seon.schema/id-attr`; the
-;; per-attr SHAPE (type + which attrs are optional) is pulled from the
-;; live registry via `seon.schema/schema-definition`, the source the
-;; `:seon.schema` entity doesn't itself carry. Instance counts come from
-;; one AEVT count on each kind's id-attr — defined-but-empty kinds still
-;; list (count 0 is informative).
-;;
-;; Pure render of the DB + registry — stores nothing.
-;; ============================================================
-
-(defn- catalog-type-str
-  "Render an attr's registered Malli form as a COMPACT type label for the
-   catalog: a bare keyword as-is; `[:and {…} inner]` (the identity-wrap)
-   as its inner ref; `[:vector/:set {…} elem]` as `vector<elem>`;
-   `[:enum …]` as `enum (…)`; any other `[:type {props}]` as just `:type`.
-   Keeps each attr line to one short token so a whole-system catalog of
-   ~10 kinds stays a few KB."
-  [t]
-  (cond
-    (keyword? t) (str t)
-    (vector? t)
-    (let [head (first t)
-          rst  (rest t)]
-      (case head
-        :and (let [inner (remove map? rst)]
-               (if (= 1 (count inner))
-                 (catalog-type-str (first inner))
-                 (str "(" (str/join " & " (map catalog-type-str inner)) ")")))
-        :or  (str "(" (str/join " | " (map catalog-type-str (remove map? rst))) ")")
-        (:vector :set) (str (name head) "<" (catalog-type-str (last (remove map? rst))) ">")
-        :enum (str "enum " (pr-str (vec rst)))
-        (str head)))
-    :else (pr-str t)))
-
-(defn- catalog-attr-rows
-  "Attribute rows for an entity KIND, pulled from the live registry
-   (`seon.schema/schema-definition`). Each row:
-   `{:attr <kw> :type <compact-str> :optional <bool> :id? <bool>}`.
-   Returns nil when `kind` isn't a registered `:map` schema. The id-attr
-   is read from the schema's derived `:seon.entity/id-attr` prop."
-  [kind]
-  (let [form (schema/schema-definition kind)]
-    (when (and (vector? form) (= :map (first form)))
-      (let [props   (when (map? (second form)) (second form))
-            id-attr (:seon.entity/id-attr props)
-            body    (let [b (rest form)]
-                      (if (and (seq b) (map? (first b))) (rest b) b))]
-        (for [entry body :when (and (vector? entry) (keyword? (first entry)))]
-          (let [k     (first entry)
-                eprops (let [p (second entry)] (when (map? p) p))]
-            {:attr     k
-             :type     (catalog-type-str (schema/schema-definition k))
-             :optional (boolean (:optional eprops))
-             :id?      (= k id-attr)}))))))
-
-(defn- catalog-kind-count
-  "Count instances of `kind` by counting datoms on its `id-attr`
-   (one AEVT scan). Bounded: one count query per kind."
-  [db id-attr]
-  (count (db/query {:seon.db/db db
-                    :seon.db/query [:find '?e :where ['?e id-attr '_]]})))
-
-(def ^:private uncounted-kind-id-attrs
-  "Id-attrs of HIGH-CHURN substrate kinds whose live instance count
-   changes EVERY turn (each eval + message is an instance) — rendering
-   an exact count here would bust the prompt-cache prefix on every
-   render (context-audit 2026-06-09 §4). The kind + attrs still list;
-   the instances themselves are already in the transcript."
-  #{:seon.eval/id :seon.agent.message/id})
-
-(defn- fuzzy-count
-  "Bucketed live-count label for catalog blocks: exact below 20, then
-   rounded DOWN to a bucket (\"40+\", \"300+\", \"2000+\") so slow corpus
-   growth doesn't bust the semi-static catalog prefix per increment."
-  [n]
-  (cond
-    (< n 20)   (str n)
-    (< n 200)  (str (* 10 (quot n 10)) "+")
-    (< n 2000) (str (* 100 (quot n 100)) "+")
-    :else      (str (* 1000 (quot n 1000)) "+")))
-
-(defn- catalog-kind-block
-  "Render one entity kind: a `[kind  N instances]` header then one line
-   per attribute (`id`/`opt` flags + compact type). The id-attr line is
-   marked `id`; optional attrs are marked `?`. High-churn substrate
-   kinds (`uncounted-kind-id-attrs`) render without a count; other
-   kinds use the bucketed `fuzzy-count` label — both are cache-prefix
-   stability measures."
-  [db {:keys [kind id-attr]}]
-  (let [rows  (sort-by (fn [{:keys [id? attr]}] [(if id? 0 1) (str attr)])
-                       (catalog-attr-rows kind))
-        lines (for [{:keys [attr type optional id?]} rows]
-                (str "  " (cond id? "id " optional "?  " :else "   ")
-                     attr " : " type))
-        label (if (contains? uncounted-kind-id-attrs id-attr)
-                "(per-turn data — uncounted)"
-                (let [n (fuzzy-count (catalog-kind-count db id-attr))]
-                  (str n " instance" (when (not= "1" n) "s"))))]
-    (str "[" kind "]  " label "\n"
-         (str/join "\n" lines))))
-
-(defn- domain-attr-line
-  "One catalog line for a DOMAIN attr: keyword, compact type (live
-   registry when present, installed datahike valueType otherwise) and
-   the live instance count — `duration-seconds (2 entities)` is what
-   makes an existing attr hard to miss."
-  [db attr]
-  (let [t (if-let [form (schema/schema-definition attr)]
-            (catalog-type-str form)
-            (str (get-in (db/installed-schema db) [attr :db/valueType])))
-        n (fuzzy-count (catalog-kind-count db attr))]
-    (str "  " attr " : " t " — " n " entit" (if (= "1" n) "y" "ies"))))
-
-(defn- domain-attrs-block
-  "The `domain data attrs` portion of the catalog: every agent-
-   registered attr installed on the db (via [[seon.warn/domain-attrs]]
-   — substrate internals excluded), grouped by keyword namespace, each
-   with type + live instance count. Empty string when no domain attrs
-   exist yet. This is the REUSE surface: run 4 proved an agent forks a
-   parallel attr when the existing shape isn't in front of it."
-  [db]
-  (let [attrs  (warn/domain-attrs {:seon.db/db db})
-        groups (->> attrs (group-by namespace) (sort-by first))]
-    (if (seq attrs)
-      (str "\n\n=== domain data attrs — REUSE these exact keywords ===\n"
-           ";; Attrs already holding your human's data. Before you register!\n"
-           ";; a new attr, check here: same kind of fact → use the EXISTING\n"
-           ";; attr (exact keyword, exact unit). Extend with new attrs only\n"
-           ";; for genuinely new facts; never fork the same quantity into\n"
-           ";; different units.\n"
-           (str/join "\n"
-             (for [[ns-str ks] groups]
-               (str "[" ns-str "]\n"
-                    (str/join "\n" (map #(domain-attr-line db %) ks))))))
-      "")))
-
-(defn- squash-one-line
-  "Whitespace-squash + cap a stored string for a one-line catalog row."
-  [s]
-  (let [flat (str/replace (str s) #"\s+" " ")]
-    (if (> (count flat) 140) (str (subs flat 0 140) " …") flat)))
-
-(defn- finding-claims-block
-  "One-liner CONTENT of stored findings — the claim strings themselves,
-   not just attr names (#26 finding-salience: run 7 proved attr names in
-   the catalog are discoverable but not CONSULTED — agent #2 re-derived
-   a stored answer). Renders the values of every domain attr NAMED
-   `claim` (any namespace — the taught shape is a claim-carrying
-   my.kb.<domain> attr like :my.kb.codebase.fn/claim, but earlier
-   corpora used other namespaces), capped at 12 rows of ≤140
-   chars. Empty string when no claims exist. Pure render of the db —
-   stores nothing."
-  [db]
-  (let [claim-attrs (->> (warn/domain-attrs {:seon.db/db db})
-                         (filter #(= "claim" (name %))))
-        rows (->> claim-attrs
-                  (mapcat (fn [a]
-                            (->> (db/query {:seon.db/db db
-                                            :seon.db/query
-                                            [:find '?v :where ['_ a '?v]]})
-                                 (map first)
-                                 sort
-                                 (map (fn [v] [a v])))))
-                  (take 12))]
-    (if (seq rows)
-      (str "\n\n=== stored findings — CONSULT these before re-deriving ===\n"
-           ";; Claims prior agents verified and stored. If one answers the\n"
-           ";; question at hand, pull its full row (sibling attrs in the\n"
-           ";; same namespace: question, source path, line, confidence)\n"
-           ";; instead of re-searching the repo.\n"
-           (str/join "\n"
-             (for [[a v] rows]
-               (str "  " a " — \"" (squash-one-line v) "\""))))
-      "")))
-
-(defn- schema-ns-summary-block
-  "Compact index of EVERY registered schema in the system, as per-ns
-   count lines (unit #23 fix b: all ~276 registered schemas are now
-   `:seon.schema` rows; rendering each would blow the context budget, so
-   the catalog shows the index and teaches the entity-read). Namespaced
-   keys only — the un-namespaced entity KINDS already render as full
-   blocks above. Counts are bucketed (`fuzzy-count`) for cache-prefix
-   stability."
-  [db]
-  (let [ks     (->> (db/query {:seon.db/db db
-                               :seon.db/query
-                               '[:find ?k :where [?e :seon.schema/key ?k]]})
-                    (map first)
-                    (filter namespace))
-        groups (->> ks (group-by namespace) (sort-by first))]
-    (if (seq groups)
-      (str "\n\n=== all registered schemas, by namespace ===\n"
-           ";; Every registered schema is a :seon.schema row; read a shape:\n"
-           ";; (:seon.schema/source (seon.db/entity\n"
-           ";;    {:seon.db/ref [:seon.schema/key :seon.db/ref]}))\n"
-           (str/join "\n"
-             (for [[ns-str ns-ks] groups]
-               (str "  " ns-str " — " (fuzzy-count (count ns-ks))
-                    " schema" (when (not= 1 (count ns-ks)) "s")))))
-      "")))
-
-(defn schema-catalog-section
-  "GLOBAL schema catalog — EVERY registered entity KIND in the system,
-   grouped by owning namespace, REGARDLESS of the agent's current ns.
-   This is how the agent knows what data the substrate holds: each kind's
-   key, its attributes (name + compact type, identity attr flagged), and
-   a live instance count.
-
-   DERIVED from the `:seon.schema` entities (seeded at boot via
-   `seon.schema/all-entity-schemas-tx-data`) — a kind is a `:seon.schema`
-   entity carrying a `:seon.schema/render-fn` (a renderable `:map`
-   entity-shape, not a request/response map). Per-attr shapes come from
-   the live registry; counts from an AEVT scan on each id-attr. A
-   trailing `domain data attrs` block lists every agent-registered attr
-   installed on the db (with type + instance count) and states the
-   reuse contract — the run-4 fix for forked parallel attrs; a trailing
-   `stored findings` block surfaces finding CONTENT one-liners (the #26
-   consult-before-research salience fix). Stores nothing; register a
-   new entity kind and it appears here next render.
-
-   The wrapper renders when ANY block has content — the kinds list does
-   NOT gate the trailing blocks. (Gym iteration 1, 2026-06-10: on a
-   store with no `:seon.schema/render-fn` rows the old `(seq kinds)`
-   gate silently dropped the domain-attrs and finding-claims blocks,
-   so S-21 forked a parallel workout namespace and S-32 re-derived a
-   seeded finding — neither ever SAW the reuse/consult surface.)"
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.db/keys [db]}]
-  (let [kinds (->> (db/query
-                     {:seon.db/db db
-                      :seon.db/query
-                      '[:find ?k ?ida
-                        :where
-                        [?e :seon.schema/key ?k]
-                        [?e :seon.schema/id-attr ?ida]
-                        [?e :seon.schema/render-fn _]]})
-                   (map (fn [[k ida]]
-                          {:kind k :id-attr ida :owner-ns (namespace ida)})))
-        groups (->> kinds
-                    (group-by :owner-ns)
-                    (sort-by first))
-        kinds-block
-        (when (seq kinds)
-          (str/join "\n\n"
-            (for [[ns ks] groups]
-              (str "=== " ns " ===\n"
-                   (str/join "\n\n"
-                     (map #(catalog-kind-block db %)
-                          (sort-by (comp str :kind) ks)))))))
-        summary-block (schema-ns-summary-block db)
-        domain-block  (domain-attrs-block db)
-        claims-block  (finding-claims-block db)]
-    (if (or kinds-block
-            (seq summary-block) (seq domain-block) (seq claims-block))
-      (str "<schema-catalog>\n"
-           ";; Every kind of entity stored in the system, grouped by namespace.\n"
-           ";; This is the WHOLE substrate — not just your current ns. These\n"
-           ";; shapes EXIST: REUSE their exact attrs (copy keywords + units\n"
-           ";; exactly); register! only what's missing. Query any kind by its\n"
-           ";; id-attr, e.g. (seon.db/query {:seon.db/query\n"
-           ";;   '[:find ?id :where [?e :seon.fn/sym ?id]]}).\n\n"
-           kinds-block
-           summary-block
-           domain-block
-           claims-block
-           "\n</schema-catalog>")
+      (str namespaces-header "\n\n" (str/join "\n\n" blocks))
       "")))
 
 ;; ============================================================
@@ -1595,177 +1080,6 @@
        (str/join "\n\n" (for [k order]
                           (render-one-ns-ai k (data-by-kw k))))})))
 
-(defn namespace-context-section
-  "The agent's NAMESPACE context — `render-namespace` of the agent's
-   current namespace at depth 1, so its direct `(:require …)`s render
-   FIRST (prepended), then the ns itself. Drop a fresh agent into a
-   near-empty home-ns that requires a parent agent ns and depth-1 brings
-   the parent's fns/schemas/tests into view.
-
-   Pure render of the DB: `render-namespace` reads the persisted
-   `:seon.ns`/`:seon.fn`/`:seon.schema`/`:seon.test` corpus and stores
-   nothing. Renders blank only when the ns has no recorded entities and
-   no requires (a brand-new home-ns before any `(ns …)`/`(defn …)`)."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [ns    (current-ns {:seon.agent/id id})
-        ;; current-ns returns a SYMBOL (the home-ns / latest eval's ns);
-        ;; render-namespace's input schema requires a keyword :seon.ns/name.
-        ns-kw (if (keyword? ns) ns (keyword (str ns)))
-        text  (-> (render-namespace {:seon.ns/name ns-kw
-                                     :seon.render/depth 1
-                                     :seon.render/format :ai
-                                     :seon.db/db db})
-                  :seon.render/text)
-        ;; Empty-ns nudge (unit #23 fix c): when the CURRENT ns owns no
-        ;; fns/schemas/tests, say so and teach the move — context follows
-        ;; the namespace, so an agent sitting in an empty ns should either
-        ;; define here or (ns …) to where the code is.
-        data  (pull-ns-data db ns-kw)
-        empty-ns? (and (empty? (:seon.fn/_ns data))
-                       (empty? (:seon.schema/_ns data))
-                       (empty? (:seon.test/_ns data)))
-        ;; A fresh agent's own not-yet-in-db home-ns used to render as
-        ;; ';; requires: <own-ns> (not in db)' — a mislabel (it's not a
-        ;; require; context-audit item 11). Drop that lone line; the
-        ;; empty-ns nudge below says it properly.
-        text  (if (and (nil? data)
-                       (= (str/trim text)
-                          (str ";; requires: " (name ns-kw) " (not in db)")))
-                ""
-                text)
-        nudge (when empty-ns?
-                (str ";; Your current namespace (" (name ns-kw) ") is EMPTY —\n"
-                     ";; no fns, schemas or tests yet. Define here, or switch\n"
-                     ";; with (ns other.ns) to move where the code is: your\n"
-                     ";; context follows your namespace."))]
-    (cond
-      (and (str/blank? text) (nil? nudge)) ""
-      (str/blank? text)
-      (str "<namespace-context>\n" nudge "\n</namespace-context>")
-      :else
-      (str "<namespace-context>\n" text
-           (when nudge (str "\n\n" nudge))
-           "\n</namespace-context>"))))
-
-;; ============================================================
-;; functions-catalog-section — the THIN cross-namespace INDEX of the fn
-;; corpus. The sibling of `schema-catalog-section`: the catalog answers
-;; "what KINDS of data exist"; this answers "what CODE already exists".
-;; This is how a later agent (or a later turn) discovers and reuses an
-;; earlier agent's work instead of re-deriving it (user, 2026-06-09 —
-;; kill the over-orientation / re-implementation loop).
-;;
-;; Collapsed to a thin index (context-focus-redesign §2, unit E2/E3):
-;;   - SUBSTRATE nses (compiled seon.* code) — ONE count line per ns;
-;;     bodies are one `:seon.fn/source` pull away (the header teaches
-;;     the query). Exemplar-root nses cross-reference the full source
-;;     rendered in :exemplars above.
-;;   - AGENT-AUTHORED nses — one callable line per fn for small groups,
-;;     a count line for large ones. The agent's OWN ns renders its full
-;;     source in :namespace-context (the deep current-ns view) — the
-;;     old own-ns full-source duplicate here DIED with the redesign.
-;;
-;; DERIVED, never hardcoded: one datalog join over the `:seon.fn` corpus
-;; (the same entities `index-substrate!` seeds and detect-and-tee
-;; appends). Define a fn → it appears here next render; stores nothing.
-;; ============================================================
-
-(defn- fn-catalog-block-brief
-  "One AGENT-authored fn for the catalog: ONE LINE — the first-arity
-   callable signature only. Compact — the agent only needs to know it
-   exists and how to call it; doc + body are one `:seon.fn` pull away
-   (the header teaches the query)."
-  [{:keys [sym arglists]}]
-  (str "  " (first (callable-sigs sym arglists))))
-
-(def ^:private fn-catalog-brief-max
-  "Agent-authored ns groups with at most this many fns render one line
-   per fn; larger groups collapse to a single count line. The DB carries
-   everything either way — the catalog shows the index, the header
-   teaches the query."
-  8)
-
-(defn- fn-catalog-summary-line
-  "Single count line for a substrate or LARGE agent-ns group — the fns
-   are all `:seon.fn` rows; the catalog header teaches how to list them,
-   so the line is JUST `ns — N fns` (the old per-line 'query :seon.fn
-   rows' boilerplate repeated ~30× and tripled the section)."
-  [ns-name ns-fns]
-  (str "  " ns-name " — " (count ns-fns)
-       " fn" (when (not= 1 (count ns-fns)) "s")))
-
-(defn functions-catalog-section
-  "THIN index of every fn defined in the substrate, grouped by owning
-   namespace — the sibling of `schema-catalog-section`. Substrate nses
-   collapse to one count line each (exemplar nses cross-reference their
-   full source in :exemplars above); agent-authored nses render one
-   callable line per fn (count line when large). The agent's own ns
-   source renders ONCE per prompt — in :namespace-context, not here.
-
-   DERIVED from the `:seon.fn` corpus (one datalog join `:seon.fn` →
-   `:seon.fn/ns` → `:seon.ns/name`); stores nothing. Define a fn and it
-   appears here next render."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.db/keys [db] :as input}]
-  (let [model  (or (:seon.ctx/model input) (context-model {:seon.db/db db}))
-        agent-nses (:seon.ctx/agent-nses model)
-        rows   (db/query
-                 {:seon.db/db db
-                  :seon.db/query
-                  '[:find ?sym ?nm ?arglists
-                    :where
-                    [?f :seon.fn/sym ?sym]
-                    [?f :seon.fn/ns ?ns]
-                    [?ns :seon.ns/name ?nm]
-                    [(get-else $ ?f :seon.fn/arglists "") ?arglists]]})
-        fns    (map (fn [[sym nm arglists]]
-                      {:sym sym :ns (name nm) :arglists arglists})
-                    rows)
-        groups (->> fns
-                    (group-by :ns)
-                    ;; Rule 1: *.internal is indexed, never rendered.
-                    (remove (fn [[ns-name _]] (hidden-ns-name? ns-name)))
-                    (sort-by first))]
-    (if (seq fns)
-      (str "<functions>\n"
-           ";; Every fn defined across the WHOLE substrate is a :seon.fn row,\n"
-           ";; indexed here by namespace. This is a COUNT INDEX — more exists\n"
-           ";; than is shown. List any namespace's fns from the db, e.g.:\n"
-           ";;   (seon.db/query {:seon.db/query\n"
-           ";;     '[:find ?sym ?arglists :where [?f :seon.fn/ns ?n]\n"
-           ";;       [?n :seon.ns/name :seon.db] [?f :seon.fn/sym ?sym]\n"
-           ";;       [(get-else $ ?f :seon.fn/arglists \"\") ?arglists]]})\n"
-           ";; and pull :seon.fn/source / :seon.fn/doc by [:seon.fn/sym \"…\"].\n"
-           ";; Check here BEFORE writing a helper — it may already exist.\n\n"
-           (str/join "\n"
-             (for [[ns-name ns-fns] groups]
-               (cond
-                 ;; Full source already rendered in :exemplars — just
-                 ;; the cross-reference.
-                 (relevant-ns? ns-name)
-                 (str (fn-catalog-summary-line ns-name ns-fns)
-                      " (full source above)")
-
-                 ;; Agent-authored / my.* code (the classifier's
-                 ;; provenance + name rules): one callable line per fn
-                 ;; while the group is small — this is the cross-agent
-                 ;; reuse surface.
-                 (and (or (contains? agent-nses ns-name)
-                          (my-ns-name? ns-name))
-                      (<= (count ns-fns) fn-catalog-brief-max))
-                 (str "=== " ns-name " ===\n"
-                      (str/join "\n"
-                        (map fn-catalog-block-brief (sort-by :sym ns-fns))))
-
-                 ;; Everything else (substrate plumbing, large agent
-                 ;; groups): ONE count line — the body is one
-                 ;; :seon.fn/source pull away (the header teaches it).
-                 :else
-                 (fn-catalog-summary-line ns-name ns-fns))))
-           "\n</functions>")
-      "")))
-
 ;; ============================================================
 ;; live-tile-section — "what your human currently sees" (live-tiles
 ;; U5). Kills the false belief a live T2 proof caught: a DeepSeek
@@ -1849,6 +1163,40 @@
              ":seon.render.live-tile/content on your agent entity.\n"
              "</live-tile>")))))
 
+(defn your-entity-section
+  "The agent's OWN entity as a pretty-printed MAP (context-v4 §2.5):
+   purpose, tile wiring, registered sections, lifecycle attrs, and any
+   self-instructions the agent has written to itself. Replaces the
+   `:purpose` and `:your-sections` seed sections — identity is data
+   you look at, and editing it is a transact to the map you are
+   looking at (the startup evals demonstrate the lookup-ref move).
+
+   Renders the ONCE-pulled composer entity (`:seon.agent/entity` in
+   the section input) with the render slots and ctx sections
+   bridge-decoded — what you see is what a `seon.db/pull` returns.
+   Show-don't-tell applied to identity."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.agent/keys [id] entity :seon.agent/entity}]
+  (if (nil? entity)
+    ""
+    (let [decoded (cond-> (decode-section (into {} entity))
+                    (seq (:seon.agent/ctx entity))
+                    (assoc :seon.agent/ctx
+                           (mapv decode-section (:seon.agent/ctx entity)))
+                    (contains? entity :seon.render.live-tile/content)
+                    (update :seon.render.live-tile/content
+                            #(db/decode-edn-value
+                               :seon.render.live-tile/content %)))]
+      (str "<your-entity>\n"
+           ";; YOUR OWN ENTITY in the shared store, re-pulled every turn.\n"
+           ";; Transact to it by lookup ref — e.g.\n"
+           ";;   (seon.db/transact! [{:seon.db/ref [:seon.agent/id \"" id "\"]\n"
+           ";;                        :seon.agent/purpose \"…\"}])\n"
+           ";; — and the change appears here next turn. Write notes and\n"
+           ";; standing instructions to yourself here; this map IS you.\n"
+           (str/trimr (with-out-str (pprint/pprint decoded)))
+           "\n</your-entity>"))))
+
 (defn warnings-section
   "Render current problems as ONE clustered `<warnings>` block via the
    `seon.warn` check registry: one complete explanation + one targeted
@@ -1899,69 +1247,91 @@
   (let [d (or (:seon.agent.message/at item) (:seon.eval/at item))]
     (if d (.getTime ^js d) 0)))
 
-(defn- format-transcript-item
-  "Render one transcript item — a `:seon.agent.message` as a REPL event
-   (`user>`/`assistant>`/`agent-<id>>` line, labeled by from-ref kind)
-   or a `:seon.eval` via `format-eval-row` (`> form\\n result`).
-   Dispatch on which kind-keyed `:at` is present."
-  [item own-id]
-  (if (:seon.agent.message/at item)
-    (format-message-row item own-id)
-    (format-eval-row item)))
+(def resume-marker-line
+  "The session-resume boundary row (context-v4 §2.8): rendered ONCE per
+   resume, between the last eval of a previous process and the first of
+   the next. Everything above it ran in a process that no longer
+   exists — its result vars are not dereferenceable."
+  (str ";; ── session resumed — the evals above ran in a previous process; "
+       "their result vars are gone (re-run a form to recompute a value) ──"))
 
 (defn transcript-section
   "The chronological TRANSCRIPT — the agent's messages and evals
-   INTERLEAVED into a single oldest-first stream, so the agent reads one
-   coherent REPL session (user input as `user>`/`assistant>` events,
-   evals as `> form` + result) rather than two divorced blocks. Reads
-   `:seon.agent/n` from the ctx-entity if present (caps EACH stream
-   before the merge), else defaults to 50 messages + 50 evals.
+   INTERLEAVED into a single oldest-first stream (context-v4 §2.8), so
+   the agent reads ONE coherent REPL session: `user>`/`assistant>`
+   message events and `<ns>=> form` evals whose value lines carry the
+   result-var id. Reads `:seon.agent/n` from the ctx-entity if present
+   (caps EACH stream before the merge), else 50 messages + 50 evals.
 
-   Pure render: messages via `seon.agent/messages` (direct agent-ref query,
-   Change B 2026-06-09); evals via `seon.agent/evals` (turn-walk). Merges
-   by `:at`, stores nothing. Each eval row is
-   `cap-result`-bounded (`format-eval-row`) so one huge result can't
-   dominate the transcript (context-SAFETY invariant).
+   SESSION RESUME: evals from PREVIOUS sessions render too
+   ([[session-evals]] walks all sessions), separated by ONE
+   [[resume-marker-line]] per resume; prior-session evals render
+   WITHOUT result-var handles (their live values died with the
+   process — `(result <old-id>)` says so).
 
-   Budget eviction applies to EVAL rows ONLY — message rows are ALWAYS
-   kept, in chronological position. Before this exemption a burst of
-   ~16 worst-case eval rows after the user's last message pushed that
-   message past the budget, and the agent correctly narrated 'the
-   user's last message is missing from the visible transcript' (S-12
-   KoQ turn Ckz-2606101827). The conversation is never sacrificed for
-   eval bulk; each message is individually bounded by
-   [[message-render-cap]] so the exemption can't blow the context."
+   Budget eviction applies to EVAL rows ONLY, oldest-first — message
+   rows and resume markers are ALWAYS kept, in chronological position.
+   Before this exemption a burst of worst-case eval rows pushed the
+   user's last message past the budget (S-12 KoQ turn
+   Ckz-2606101827). The conversation is never sacrificed for eval
+   bulk; each message is individually bounded by
+   [[message-render-cap]], each eval row by [[eval-render-cap]]."
   {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.agent/keys [id] :as input}]
-  (let [n     (or (:seon.agent/n (:seon.ctx/section input)) 50)
-        msgs  (messages {:seon.agent/n n :seon.agent/id id})
-        es    (evals    {:seon.agent/n n :seon.agent/id id})
-        items (->> (concat msgs es)
-                   (sort-by transcript-item-at))]
+  [{:seon.agent/keys [id] db :seon.db/db :as input}]
+  (let [n        (or (:seon.agent/n (:seon.ctx/section input)) 50)
+        msgs     (messages {:seon.agent/n n :seon.agent/id id :seon.db/db db})
+        es       (vec (take-last n (session-evals id db)))
+        cur-sess (:seon.agent.session/id (current-session id db))
+        msg-items
+        (map (fn [m] {:seon.ctx/kind :seon.ctx/msg
+                      :seon.ctx/at   (transcript-item-at m)
+                      :seon.render/text (format-message-row m id)})
+             msgs)
+        eval-items
+        (loop [[e & more] es prev-sess ::none out []]
+          (if (nil? e)
+            out
+            (let [sess   (:seon.agent.session/id-of-session e)
+                  at     (transcript-item-at e)
+                  prior? (and (some? cur-sess) (not= sess cur-sess))
+                  marker (when (and (not= prev-sess ::none)
+                                    (not= prev-sess sess))
+                           {:seon.ctx/kind :seon.ctx/marker
+                            ;; just before its session's first eval
+                            :seon.ctx/at   (dec at)
+                            :seon.render/text resume-marker-line})
+                  row    {:seon.ctx/kind :seon.ctx/eval
+                          :seon.ctx/at   at
+                          :seon.render/text (format-eval-row e prior?)}]
+              (recur more sess (into out (if marker [marker row] [row]))))))
+        items (->> (concat msg-items eval-items)
+                   (sort-by :seon.ctx/at)
+                   vec)]
     (if (seq items)
-      (let [rendered (mapv #(format-transcript-item % id) items)
-            msg-at?  (mapv #(contains? % :seon.agent.message/at) items)
-            ;; Chars the always-kept message rows consume up front.
-            msg-chars (transduce
-                        (keep-indexed
-                          (fn [i s] (when (msg-at? i) (+ (count s) 2))))
-                        + 0 rendered)
+      (let [rendered (mapv :seon.render/text items)
+            exempt?  (mapv #(not= :seon.ctx/eval (:seon.ctx/kind %)) items)
+            ;; Chars the always-kept rows consume up front.
+            kept-chars (transduce
+                         (keep-indexed
+                           (fn [i s] (when (exempt? i) (+ (count s) 2))))
+                         + 0 rendered)
             ;; NEWEST-FIRST retention over the EVAL rows with whatever
-            ;; budget the messages leave: walk from the end accumulating
-            ;; rendered chars; keep the newest eval rows WHOLE (always
-            ;; at least one), drop everything older.
-            kept-eval (loop [i (dec (count rendered)) acc msg-chars
+            ;; budget the exempt rows leave: walk from the end
+            ;; accumulating rendered chars; keep the newest eval rows
+            ;; WHOLE (always at least one), drop everything older —
+            ;; eviction is OLDEST-FIRST by construction.
+            kept-eval (loop [i (dec (count rendered)) acc kept-chars
                              kept #{}]
                         (if (neg? i)
                           kept
-                          (if (msg-at? i)
+                          (if (exempt? i)
                             (recur (dec i) acc kept)
                             (let [acc' (+ acc (count (rendered i)) 2)]
                               (if (and (seq kept)
                                        (> acc' transcript-char-budget))
                                 kept
                                 (recur (dec i) acc' (conj kept i)))))))
-            kept-idx (filterv #(or (msg-at? %) (kept-eval %))
+            kept-idx (filterv #(or (exempt? %) (kept-eval %))
                               (range (count rendered)))
             elided   (- (count rendered) (count kept-idx))
             kept     (mapv rendered kept-idx)]
@@ -1975,36 +1345,59 @@
              "\n</transcript>"))
       "")))
 
+(defn- inbox-count
+  "Count of UNANSWERED inbound messages in `msgs` (the agent's derived
+   conversation, oldest-first): inbound items (from ≠ me) strictly
+   after my own latest outbound message — every inbound when I have
+   never replied. The `inbox K` slot of the status line (§2.9)."
+  [msgs own-id]
+  (let [outbound? #(= own-id (:seon.agent/id (:seon.agent.message/from %)))
+        after-out (->> msgs
+                       reverse
+                       (take-while (complement outbound?)))]
+    (count (remove outbound? after-out))))
+
+(defn localized-now
+  "The current wall-clock time rendered in the HUMAN'S timezone (the
+   pod host's IANA tz) — `2026-06-11 14:23:08 Europe/Madrid`. The
+   sv-SE locale gives the ISO-like `YYYY-MM-DD HH:mm:ss` shape."
+  []
+  (let [tz (host-timezone)]
+    (str (try (.toLocaleString (js/Date.) "sv-SE" #js {:timeZone tz})
+              (catch :default _ (.toISOString (js/Date.))))
+         " " tz)))
+
 (defn prompt-section
-  "TERMINAL-style trailing prompt (unit #23 fix e, per the plan's
-   REPL-PARITY CONTRACT prompt redesign): a per-turn STATUS BLOCK above,
-   then a CLEAN REPL prompt as the very last line —
+  "The final two lines of every prompt (context-v4 §2.9): one status
+   line, then a CLEAN REPL prompt —
 
-     ;; You are at a ClojureScript REPL — reply ONLY with forms + ;; comments.
-     ;; ── turn 6 · 3 since-user (cap 20) · 2026-06-09T22:14:00.000Z ──
-     my.domain.thing=>
+     ;; ── my.agent.kXQ · turn 6 · 3 since-user (cap 20) · 2026-06-11 14:23:08 Europe/Madrid · inbox 1 · agent kXQ-2606101814 ──
+     my.agent.kXQ=>
 
-   The status block carries the session turn count, the since-inbound
-   count vs the agent's turns-cap, and the wall-clock timestamp (+ pod
-   tz) — every per-turn-volatile byte lives HERE at the context tail so
-   the static sections above stay a stable provider-cacheable prefix
-   (context-audit 2026-06-09 §4). Turn-pressure nudges render inside
-   this block when escalating (wrap up at halfway, FINAL WARNING three
-   turns before `run-agentic-loop!` cuts the loop off). The final line
-   is EXACTLY `<current-ns>=> ` — no trailing metadata; the agent
-   completes the next REPL input. Always present (never blank)."
+   Every per-turn-volatile byte lives HERE at the context tail so the
+   sections above stay a stable provider-cacheable prefix
+   (context-audit 2026-06-09 §4). The agent id lands here (moved OUT
+   of `<system>`, §2.1 — the system block is one shared cacheable
+   artifact across the cluster). `inbox K` = unanswered inbound
+   messages. Turn-pressure nudges render ABOVE the status line when
+   escalating (wrap up at halfway, FINAL WARNING before
+   `run-agentic-loop!` cuts the loop off) — normally the section is
+   exactly the two lines. The final line is EXACTLY `<current-ns>=> `
+   — no trailing metadata; the agent completes the next REPL input.
+   Always present (never blank)."
   {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.agent/keys [id]}]
-  (let [now      (.toISOString (js/Date.))
-        ns       (current-ns {:seon.agent/id id})
+  [{:seon.agent/keys [id] db :seon.db/db}]
+  (let [ns       (current-ns {:seon.agent/id id :seon.db/db db})
         ;; current-ns returns a keyword (latest eval's :seon.eval/ns) or a
         ;; symbol (home-ns fallback) — render without the keyword colon,
         ;; like a real REPL prompt.
         ns-str   (if (keyword? ns) (name ns) (str ns))
-        sess     (current-session id)
+        sess     (current-session id db)
         n-turns  (count (:seon.agent.session/turns sess))
-        since-u  (turns-since-inbound {:seon.agent/id id})
-        cap      (turns-cap id)
+        since-u  (turns-since-inbound {:seon.agent/id id :seon.db/db db})
+        cap      (turns-cap id db)
+        inbox    (inbox-count (messages {:seon.agent/id id :seon.db/db db})
+                              id)
         pressure
         (cond
           (>= since-u (max 1 (- cap 3)))
@@ -2022,10 +1415,10 @@
                ";; most questions need 2–4 turns. If you have the answer,\n"
                ";; reply now.\n")
           :else "")]
-    (str ";; You are at a ClojureScript REPL — reply ONLY with forms + ;; comments.\n"
-         ";; ── turn " n-turns " · " since-u " since-user (cap " cap ") · "
-         now " (pod tz: " (host-timezone) ") ──\n"
-         pressure
+    (str pressure
+         ";; ── " ns-str " · turn " n-turns " · " since-u
+         " since-user (cap " cap ") · " (localized-now)
+         " · inbox " inbox " · agent " id " ──\n"
          ns-str "=> ")))
 (schema/register! :seon.render/sections [:vector :seon.ctx/name])
 
@@ -2047,77 +1440,49 @@
    [:seon.render/token-estimate  :int]])
 (defn substrate-default-ctx
   "The default :seon.ctx section layout that ships with every fresh
-   agent — ordered MOST-STATIC → MOST-DYNAMIC (prompt-cache friendly),
-   per the context-render PRD (Phase 2) table:
+   agent — the context-v4 layout (§2), ordered top→bottom =
+   static→volatile (the provider-cache contract, §1):
 
-     1. :system            — Seon identity + CLJS-in-Node + REPL contract
-                             + the four standing behavioral teachings
-                             (static; context-v4 V4-0 — the old
-                             :instructions section DIED, system-wide
-                             runtime instructions live in my.kb.system,
-                             read by eval, never a section)
-     2. :capabilities      — core API worked examples (static)
-     3. :exemplars         — FULL source of the exemplar namespaces
-                             (seon.agent.search, seon.agent.todo, my.kb +
-                             children + test siblings), queried from
-                             :seon.ns/source; byte-stable for the pod's
-                             life (static — inside the cache prefix)
-     4. :schema-catalog    — GLOBAL catalog of every entity KIND in the
-                             system (cross-ns; what DATA exists), grouped by
-                             namespace with attrs + instance counts;
-                             semi-static (busts only on schema register)
-     5. :functions-catalog — THIN per-ns count index of every fn defined in
-                             the system (cross-ns; what CODE exists);
-                             semi-static (busts when a fn is (re)defined)
-     6. :live-tile         — what your human currently sees: the agent's
-                             wired tile invoked against the turn's db, twin
-                             text + wired identity (dynamic — present-tense
-                             self-knowledge, like :warnings/:open-todos)
-     7. :namespace-context — `render-namespace` of required nses + own ns
-                             (mostly static; busts on ns edit)
-     8. :warnings          — current cross-agent problems (failed/slow evals,
-                             failing tests); reactive, vanishes when fixed (dynamic)
-     9. :open-todos        — the CALLING agent's open work items
-                             (seon.agent.todo/open-todos-section); derived from the
-                             db, vanishes when the work is done (dynamic)
-    10. :transcript        — messages + evals interleaved chronologically (dynamic)
-    11. :prompt            — `my.agent.<id>=>  ; turn N` (always changing)
+     1. :system      — the universal concept paragraphs + standing
+                       teachings; byte-identical for every agent and
+                       turn (the agent id lives in the status line)
+     2. :namespaces  — THE BODY: one <namespace> tag per included ns
+                       (ALL seon.* + my.* minus *.internal),
+                       recency-ordered most-recently-modified LAST
+     3. :your-entity — the agent's own entity as a pretty-printed map
+                       (purpose, tile wiring, sections, self-notes)
+     4. :live-tile   — what your human currently sees (tiles-PRD U5;
+                       this layout only fixes its slot: after
+                       :your-entity, before :warnings)
+     5. :warnings    — current problems; reactive, vanishes when fixed
+     6. :open-todos  — the agent's open work items; derived, vanishes
+     7. :transcript  — ONE threaded REPL stream: messages + evals
+                       chronological, append-only within a session
+     8. :prompt      — the §2.9 status line + clean REPL prompt
+                       (always changing — the volatile tail's end)
 
-   :exemplars sits at 22, between :capabilities (20) and :schema-catalog
-   (25): system + capabilities + exemplars are all fully byte-stable while
-   the catalogs are only semi-static (fuzzy counts move on corpus growth) —
-   static-before-semi-static maximizes the provider-cacheable prefix
-   (context-focus-redesign §2). The two catalogs are the BROAD cross-ns
-   view — schema-catalog is 'what kinds of data exist', functions-catalog
-   is 'what code already exists' (so a later agent reuses an earlier one's
-   work instead of re-deriving it). The per-ns `namespace-context` that
-   follows is the DEEP current-ns view.
-
-   Smallest priority first. `root-pull` is DELETED (was the
-   `[*]`-everywhere amplifier that flooded context); `current-turn`/
-   `current-session` fold into the prompt line."
+   The dead sections (capabilities, exemplars, schema-catalog,
+   functions-catalog, namespace-context, the :purpose/:your-sections
+   seeds) dissolved into code (docstrings, the rendered namespace
+   sources), data (the agent's own entity), or the startup tutorial
+   evals (store-inventory, my.kb.system/instructions) — context-v4
+   §§2.2–2.4, 3b. Smallest priority renders first."
   []
-  [{:seon.ctx/name :system            :seon.ctx/priority 10
+  [{:seon.ctx/name :system       :seon.ctx/priority 10
     :seon.render/ai 'seon.ctx/system-section}
-   {:seon.ctx/name :capabilities      :seon.ctx/priority 20
-    :seon.render/ai 'seon.ctx/capabilities-section}
-   {:seon.ctx/name :exemplars         :seon.ctx/priority 22
-    :seon.render/ai 'seon.ctx/exemplars-section}
-   {:seon.ctx/name :schema-catalog    :seon.ctx/priority 25
-    :seon.render/ai 'seon.ctx/schema-catalog-section}
-   {:seon.ctx/name :functions-catalog :seon.ctx/priority 27
-    :seon.render/ai 'seon.ctx/functions-catalog-section}
-   {:seon.ctx/name :live-tile         :seon.ctx/priority 28
+   {:seon.ctx/name :namespaces   :seon.ctx/priority 20
+    :seon.render/ai 'seon.ctx/namespaces-section}
+   {:seon.ctx/name :your-entity  :seon.ctx/priority 30
+    :seon.render/ai 'seon.ctx/your-entity-section}
+   {:seon.ctx/name :live-tile    :seon.ctx/priority 35
     :seon.render/ai 'seon.ctx/live-tile-section}
-   {:seon.ctx/name :namespace-context :seon.ctx/priority 30
-    :seon.render/ai 'seon.ctx/namespace-context-section}
-   {:seon.ctx/name :warnings          :seon.ctx/priority 40
+   {:seon.ctx/name :warnings     :seon.ctx/priority 40
     :seon.render/ai 'seon.ctx/warnings-section}
-   {:seon.ctx/name :open-todos        :seon.ctx/priority 45
+   {:seon.ctx/name :open-todos   :seon.ctx/priority 45
     :seon.render/ai 'seon.agent.todo/open-todos-section}
-   {:seon.ctx/name :transcript        :seon.ctx/priority 50
+   {:seon.ctx/name :transcript   :seon.ctx/priority 50
     :seon.render/ai 'seon.ctx/transcript-section}
-   {:seon.ctx/name :prompt            :seon.ctx/priority 99
+   {:seon.ctx/name :prompt       :seon.ctx/priority 99
     :seon.render/ai 'seon.ctx/prompt-section}])
 
 ;; ============================================================
@@ -2285,17 +1650,19 @@
   [{:seon.db/keys [db] :seon.agent/keys [id] :as input}]
   (let [entity   (db/pull {:seon.db/db db
                            :seon.db/pull-pattern
+                           ;; Registered-but-uninstalled attrs (e.g. the
+                           ;; tile slot on a store predating it) are
+                           ;; silently filtered by the pull guard — safe.
                            '[:db/id :seon.agent/id :seon.agent/state
+                             :seon.agent/purpose
                              :seon.agent/turns-cap :seon.agent/completed-at
                              :seon.render/ai :seon.render/html
+                             :seon.render.live-tile/content
                              {:seon.agent/ctx [*]}]
                            :seon.db/ref [:seon.agent/id id]})
-        model    (context-model {:seon.db/db db})
         sections (merge-sections (substrate-default-ctx)
                                  (agent-sections entity))
-        base-in  (assoc input
-                        :seon.agent/entity entity
-                        :seon.ctx/model    model)
+        base-in  (assoc input :seon.agent/entity entity)
         rendered (->> sections
                       (map (fn [section]
                              (assoc section :seon.render/text
@@ -2316,55 +1683,3 @@
                                        rendered)
      :seon.render/token-estimate (quot (count text) 4)}))
 
-;; ============================================================
-;; Seeds — the :purpose launch directive + the tiny fn-shaped
-;; copyable, transacted onto every agent at create! (NOT at resume —
-;; existing agents keep theirs).
-;; ============================================================
-
-(def acquire-purpose-text
-  "The :purpose seed when the agent is created WITHOUT a stated
-   purpose — the placeholder teaches the mechanism by demanding its
-   use."
-  (str "Derive your purpose from your human's first messages, then "
-       "update this section (add-section! :purpose) so you keep your "
-       "direction."))
-
-(defn purpose-text
-  "The :purpose section text: the human's words when stated, else the
-   acquire-your-purpose placeholder."
-  [purpose]
-  (if (and (string? purpose) (not (str/blank? purpose)))
-    (str "Your human created you for: " purpose)
-    acquire-purpose-text))
-
-(defn own-sections-section
-  "The tiny fn-shaped copyable seeded beside :purpose — renders the
-   agent's OWN section list from its once-pulled entity. Its full
-   source is small enough to read in the functions catalog; copy the
-   shape for your own computed sections."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{entity :seon.agent/entity}]
-  (let [secs (agent-sections entity)]
-    (if (empty? secs)
-      ""
-      (str "Your own context sections (edit with seon.agent/add-section! / "
-           "remove-section! / set-purpose!):\n"
-           (str/join "\n"
-                     (for [{nm :seon.ctx/name pri :seon.ctx/priority
-                            slot :seon.render/ai} secs]
-                       (str "  " pri " " nm
-                            (if (string? slot) " (text)" (str " → " slot)))))))))
-
-(defn seed-sections
-  "The section maps seeded into `:seon.agent/ctx` at create!:
-   the :purpose launch directive (priority 12 — after SOUL/system,
-   BEFORE capabilities; purpose frames everything) and the
-   :your-sections computed example (the fn-shaped copyable)."
-  [purpose]
-  [{:seon.ctx/name     :purpose
-    :seon.ctx/priority 12
-    :seon.render/ai    (purpose-text purpose)}
-   {:seon.ctx/name     :your-sections
-    :seon.ctx/priority 13
-    :seon.render/ai    'seon.ctx/own-sections-section}])
