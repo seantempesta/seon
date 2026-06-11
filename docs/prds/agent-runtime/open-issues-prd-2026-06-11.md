@@ -204,12 +204,39 @@ elsewhere as noted.
 | 11 | **BOOT-FATAL schema-row id collision** — tempid dropped the keyword namespace; restart-resume died on agent-authored schemas | **DONE — 500486a** (entity-schema tempids carry the FULL keyword) |
 | 12 | **Stale live-tile 500 during boot replay** — same class as 9 | [[fix-everything-prd-2026-06-11]] Wave C item 1 (same guard) |
 | 13 | **Self-poisoning fake results** — model-completed bare result-envelope literals evaluate and become real transcript lines | [[fix-everything-prd-2026-06-11]] Wave A unit A2 (parser format contract) |
+| 14 | **Agent fn replay fails on pod boot** — 19 `log-replay-failure!` WARNs (`indexOf` on undefined), 2/4 tile fns don't rehydrate after snapshot restore; repro cut PRE-B4 | [[fix-everything-prd-2026-06-11]] Wave C addendum C-14 — verification unit first (B4 may have killed it) |
+| 15 | **Identity-seed filename hardcoded** (`SOUL.md`) — downstream wants `SEON_SOUL_FILE` env + `AGENTS.md` fallback | Wave C addendum C-15 |
+| 16 | **Substrate-generic REPL discipline lives in downstream identity files** — hiccup tile rules, clipped-results discipline, never-write-expected-results, kb provenance | Wave C addendum C-16 (AFTER the paid measure — it changes measured context) |
+| 17 | **Branding not customizable** (BUG per user; demo-relevant Jun 12) — hardcoded "seon ·" titles/h1, `data-theme "phosphor"` | Wave C addendum C-17 — **agent in flight 2026-06-11 late** (brand rows + `SEON_BRAND_NAME`/`SEON_BRAND_CSS`) |
 
 **Future PRD row (explicitly OUT of scope for the asks-1–3 unit):** a
 **release-bundle target** — a self-contained artifact (compiled pod +
 bootstrap output + static assets + bin/seon) a downstream can vendor
 without a seon source checkout. Today's answer is `SEON_RUNTIME_ROOT`
 pointed at a checkout; the bundle is the next rung.
+
+## Self-defeating-surfaces audit (2026-06-11 late evening)
+
+Full ranked report (14 findings + checked-clean list):
+[[research/self-defeating-surfaces-2026-06-11]]. Read-only audit;
+nothing fixed yet. Top rows registered here so they queue into Wave
+C+; the doc carries the other eight plus evidence.
+
+| Smell | Where | Disposition |
+|---|---|---|
+| `create!` returns `{:seon.agent/id id}` even when its transact FAILED (console.error only) — everything downstream chases a ghost agent. DISHONEST RECORDS | `agent.cljs:636-647` | easy win (S): return the error envelope; joins the open `create!` turns-cap row |
+| generic entity-render paths `(catch :default _ nil)` — broken agent-authored renderer's card silently vanishes; makes inspector's own render-error fallback (`inspector.cljs:221-226`) dead code. AGENT BLINDNESS (the tile fix didn't cover these surfaces) | `render.cljs:451-457, 556-564` | S–M: surface the error like the tile banner |
+| one throwing warn-check kills the WHOLE warnings section (no per-check guard in `run-checks`) — all warnings degrade to one `render failed` line | `warn.cljs` | S: per-check try → synthetic cluster |
+| auto-instrument / auto-test-run failures are console-only — `:seon.test` rows keep stale ✓ stamps; context renders green against code the tests never ran on; specced fn can be silently uninstrumented. DISHONEST RECORDS | `eval.cljs:1493-1497, 1519-1524` | M |
+| boot-replay failures live only in the disk log while rendered `<namespace>` sections claim the fn is live (fails at call time). B4 fixed the biggest cause, not the class | `client.cljs:752-823`, `log.cljs` | M: derive liveness at render (B4 probes exist) — overlaps ask #14 / C-14 |
+| agent-forged `:seon.db/origin :substrate-seed` is warn-only (enforcement TODO) and now LOAD-BEARING for boot GC via `prune-substrate-ghosts!` — a forged row is GC bait. GUESSED AUTHORITY; mechanism high-confidence, end-to-end UNVERIFIED (labeled) | `db/internal.cljs:905-919` | investigation unit before any fix |
+| findings 6–8, 10–14 (remaining silent-truncation stragglers, context-defeats-consultation candidates, et al.) | see the research doc | rank into Wave C+ at next planning pass |
+
+Audit also CONFIRMED live (fresh 18:13 prompt blob): Wave A/B fixes
+rendering (loud clips, stub self-description, attr-keyed inventory);
+`:seon.handler/key` standing warning still fires (Wave C item 6
+evidence); 33 registered schemas exceed the quiet 200-char
+member-block clip (e.g. `:seon.agent.turn` at 722 chars).
 
 ## What P8 proved (so the plan stays honest)
 

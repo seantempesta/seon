@@ -557,6 +557,48 @@ In board order, each its own small unit unless noted:
 CSS clamp/base-layer/safelist: IN-FLIGHT — not queued here; this PRD
 references its landing.
 
+#### Wave C addendum — downstream-consumer asks 14–17 (filed 2026-06-11 evening)
+
+Source: the downstream consumer's asks file (their repo, read-only).
+Asks 1–13 are CLOSED at b185c2c; these four are the new batch. Order
+within the addendum reflects urgency, not filing order:
+
+- **C-17 BRANDING SURFACE (DEMO-RELEVANT Jun 12 — jumps the queue).**
+  The web UI hardcodes product name + theme: `seon.web.inspector` page
+  titles ("seon · agents", "seon · agent <id>"), the "seon · cluster"
+  h1, `data-theme "phosphor"`. Per the user this is a BUG — the
+  thesis is customize-with-data and the product name is the most basic
+  customization. Fix shape (decided in the ask, accept it): (a) brand
+  rows `:seon.web.brand/name`, `:seon.web.brand/tagline`,
+  `:seon.web.brand/theme`, env-seedable (`SEON_BRAND_NAME`), read at
+  render time in titles/h1/data-theme; (b) optional downstream
+  stylesheet `SEON_BRAND_CSS=<abs path>` linked after `output.css` in
+  `page-head` so a product overrides theme tokens (`--color-base-*`,
+  `--color-amber-*`, fonts) without forking resources. Name-only
+  covers the demo; CSS hook is small enough to ship together.
+- **C-14 VERIFY: agent fn replay on pod boot.** Sharpened repro
+  (2026-06-11 17:42, pre-B4): snapshot-restore a 4-agent world → 19
+  `log-replay-failure!` WARNs ("Cannot read properties of undefined
+  (reading 'indexOf')"), 2 of 4 tile fns don't rehydrate. B4
+  (72fa…/72f6aab, "agent code/tiles survive restarts") landed AFTER
+  the repro was cut — first step is a verification unit: reproduce a
+  multi-agent restart in OUR world; if the indexOf path is dead, close
+  with proof; if not, it's a Wave C fix unit (dishonest-record-adjacent:
+  replay failure must also surface to the owning agent's context).
+- **C-15 identity-seed filename.** `my.soul/soul-md-path` hardcodes
+  "SOUL.md". Add env override (`SEON_SOUL_FILE`) + `AGENTS.md`
+  fallback name. Cosmetic, small.
+- **C-16 absorb generic REPL discipline into substrate context.**
+  Downstream identity files currently carry substrate-generic guidance
+  every consumer would copy: hiccup shape rules for tile fns, "printed
+  results are clipped — bind and process with code", "never write
+  expected results; your output is REPL input" (explicit system-prompt
+  sentence on top of the parser contract), provenance/confidence
+  discipline for kb writes. Fold into the substrate `<system>`
+  section so identity files are purely product persona. Pairs
+  naturally with ctx work; respects rule 4 (substrate context renders
+  in full).
+
 ### Then: the re-measure
 
 **Re-run ONLY the failed paid scenarios** (S-21, s32, s12) after Wave
