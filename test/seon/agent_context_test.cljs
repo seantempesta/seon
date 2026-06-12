@@ -42,7 +42,7 @@
     [seon.client :as client]
     ;; required explicitly: the format-eval-row tests deref
     ;; #'seon.ctx/format-eval-row directly (private fn, var-quote)
-    [seon.ctx]
+    [seon.ctx :as ctx]
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.agent.inspect :as inspect]
@@ -816,6 +816,105 @@
               false)]
     (is (= "my.agent.pin=> (boom)\n;; ERROR kaput  ; # er0000001a · 2ms" row)
         "error rows carry the plain id footer, not a result var")))
+
+;; ---------------------------------------------------------------------------
+;; C-19 — model-authored result-claim comments are NEUTRALIZED in the
+;; transcript (two live fabrication incidents, F13/F14: an agent wrote
+;; `;; => …` narration that later turns trusted as a real read). The
+;; provenance gate: narration + source are rewritten BEFORE the composer
+;; appends the runtime-owned `; ⇒ (result :<id>)` value line, so real
+;; result lines never pass through the rewrite.
+;; ---------------------------------------------------------------------------
+
+(deftest neutralize-result-claims-rewrites-claim-shapes
+  ;; every result-claim shape variant is rewritten WHOLE — the claimed
+  ;; value (the poison) is dropped, not quoted.
+  (doseq [claim [";; => {:events 7}"
+                 ";; ⇒ \"all stored\""
+                 "; => 42"
+                 ";⇒ :ok"
+                 ";;=> [1 2 3]"]]
+    (let [out (ctx/neutralize-result-claims claim)]
+      (is (= ctx/unverified-narration-marker out)
+          (str (pr-str claim) " rewritten to the marker"))
+      (is (not (str/includes? out (subs claim (inc (str/last-index-of claim " ")))))
+          "claimed value absent")))
+  ;; ordinary narration / code is untouched — byte-identical.
+  (doseq [plain [";; storing the events now"
+                 ";; note: x maps to y, see => is not at comment start? no:"
+                 "(def x 1)"
+                 ";; TODO follow up"]]
+    (is (= plain (ctx/neutralize-result-claims plain))
+        (str (pr-str plain) " passes through byte-identical"))))
+
+(deftest neutralize-result-claims-multiline-inline-idempotent
+  ;; multi-line: claim lines rewritten IN POSITION, others untouched.
+  (let [narr (str ";; reading the 7 events\n"
+                  ";; => [{:e 1} {:e 2} {:e 3} {:e 4} {:e 5} {:e 6} {:e 7}]\n"
+                  ";; all good")
+        out  (ctx/neutralize-result-claims narr)]
+    (is (= (str ";; reading the 7 events\n"
+                ctx/unverified-narration-marker "\n"
+                ";; all good")
+           out)
+        "line position preserved, only the claim line rewritten")
+    (is (not (str/includes? out "{:e 1}")) "fabricated value gone"))
+  ;; inline: code before the claim survives, the claim is replaced.
+  (is (= (str "(+ 1 2) " ctx/unverified-narration-marker)
+         (ctx/neutralize-result-claims "(+ 1 2) ;; => 99")))
+  ;; idempotent: the marker does not match the claim shape.
+  (is (= ctx/unverified-narration-marker
+         (ctx/neutralize-result-claims ctx/unverified-narration-marker)))
+  (let [once (ctx/neutralize-result-claims ";; => 1\n;; ⇒ 2")]
+    (is (= once (ctx/neutralize-result-claims once))
+        "re-applying changes nothing — no double-marking")))
+
+(deftest format-eval-row-neutralizes-fake-claims-keeps-real-results
+  ;; fake `;; =>` in stored narration → rewritten in the rendered row;
+  ;; the runtime-owned value line is untouched, byte-exact.
+  (let [row (#'seon.ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "fk0000001a"
+               :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin
+               :seon.eval/narration ";; => {:fabricated 7}"}
+              false)]
+    (is (= (str ctx/unverified-narration-marker "\n"
+                "my.agent.pin=> (+ 1 2)\n"
+                "3  ; ⇒ (result :fk0000001a) · 1ms")
+           row)
+        "fake claim neutralized; real result line byte-identical")
+    (is (not (str/includes? row ":fabricated")) "claimed value absent"))
+  ;; inline claim inside SOURCE is neutralized too — code survives.
+  (let [row (#'seon.ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2) ;; => 99" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "fk0000002b"
+               :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin}
+              false)]
+    (is (str/includes? row "my.agent.pin=> (+ 1 2) ;; [unverified"))
+    (is (not (str/includes? row "99")) "inline claimed value absent")
+    (is (str/includes? row "3  ; ⇒ (result :fk0000002b)")
+        "real value line unaffected"))
+  ;; clean narration renders byte-identical — no false positives.
+  (let [row (#'seon.ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "cl0000003c"
+               :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin
+               :seon.eval/narration ";; adding two numbers"}
+              false)]
+    (is (= (str ";; adding two numbers\n"
+                "my.agent.pin=> (+ 1 2)\n"
+                "3  ; ⇒ (result :cl0000003c) · 1ms")
+           row)))
+  ;; re-render is stable: a row whose stored narration already carries
+  ;; the marker renders it ONCE, unchanged.
+  (let [row (#'seon.ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "id0000004d"
+               :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin
+               :seon.eval/narration ctx/unverified-narration-marker}
+              false)]
+    (is (= 1 (count (re-seq #"\[unverified narration" row)))
+        "no double-marking on re-render")))
 
 (deftest format-eval-row-huge-result-is-bounded-and-guided
   (let [huge-edn (pr-str (apply str (repeat 5000 "z")))

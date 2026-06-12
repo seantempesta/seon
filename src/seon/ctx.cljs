@@ -425,9 +425,44 @@
               "a tighter :where, or pull fewer attrs."))
        s))))
 
+(def unverified-narration-marker
+  "What a model-authored result-claim comment is rewritten to in the
+   transcript. Deliberately does NOT match [[result-claim-re]] itself
+   (no `=>`/`⇒` after the semicolons), so the rewrite is idempotent."
+  ";; [unverified narration — not a real result]")
+
+(def ^:private result-claim-re
+  "A comment posing as a REPL result read: one-or-more `;`, optional
+   whitespace, then `=>` or `⇒` — `;; =>`, `;; ⇒`, `; =>`, `;⇒`,
+   `;;=>` all match — through to end of line. Shape-match, line-
+   position preserving: applies anywhere in a line, so inline claims
+   (`(+ 1 2) ;; => 3`) lose only the comment, never the code.
+   `[^\\n]*` instead of `(?m)…$` because CLJS `str/replace` rebuilds
+   the RegExp with only the `g` flag, dropping `m`."
+  #";+[ \t]*(?:=>|⇒)[^\n]*")
+
+(defn neutralize-result-claims
+  "Rewrite every model-authored result-claim comment in `s` to
+   [[unverified-narration-marker]], dropping the claimed value
+   entirely (the claimed value is the poison: a later turn reads
+   `;; => {...}` as a real result and trusts data that was never
+   computed — two live fabrication incidents, F13/F14).
+
+   PROVENANCE GATE, not regex luck: this runs ONLY on the
+   model-authored transcript channels — `:seon.eval/narration` and
+   `:seon.eval/source` — BEFORE [[format-eval-row]] composes the row.
+   Real result lines (`<value>  ; ⇒ (result :<id>) · <n>ms`) are
+   appended by the composer itself AFTER this rewrite and never pass
+   through it. Idempotent: the marker doesn't match the claim shape."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [s]
+  (str/replace s result-claim-re unverified-narration-marker))
+
 (defn- format-eval-row
   "REPL-real render of one eval (context-v4 §2.8): the `<ns>=> <form>`
-   prompt line (narration `;;` comments above it, as written), the
+   prompt line (narration `;;` comments above it, as written — except
+   result-claim comments, neutralized via
+   [[neutralize-result-claims]]), the
    captured output, then the VALUE LINE carrying the eval's result-var
    id — the pinned glyph:
 
@@ -492,8 +527,10 @@
          ;; real REPL prints before returning. Bounded by the same cap.
          out-ln (when (and (string? out) (not (str/blank? out)))
                   (str (cap-result (str/trimr out) limit) "\n"))]
-     (str (when (and narr (not (str/blank? narr))) (str narr "\n"))
-          (if eval-ns (name eval-ns) "?") "=> " (cap-result src limit) "\n"
+     (str (when (and narr (not (str/blank? narr)))
+            (str (neutralize-result-claims narr) "\n"))
+          (if eval-ns (name eval-ns) "?") "=> "
+          (cap-result (neutralize-result-claims src) limit) "\n"
           out-ln
           body suffix))))
 
