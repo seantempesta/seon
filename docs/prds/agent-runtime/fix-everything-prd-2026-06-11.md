@@ -669,6 +669,79 @@ section.
 
 ---
 
+## §3b Opus-informed improvement plan (2026-06-12, post-demo)
+
+Source: [[research/opus-live-tests-2026-06-12]] (13 ranked harness
+limitations + 2 quantified behavioral reds). Status legend: ✅ fixed
+43c5145/098f22d · 🔧 workaround shipped, real fix open · ⬜ open.
+
+**Already closed:** ✅ env-clobbering ai_test (L2) · ✅ s32 predicate
+re-cut (L3) · ✅ anthropic cache_control wire-side (L4 — LIVE
+VERIFICATION PENDING, first paid run) · ✅ spend telemetry (L7) · ✅
+SEON_AI_* gym world-parity (L8). L9 (turn-1 think-tax) closes with L4
+verification; no separate work.
+
+**OPUS-S batch (one unit, small, do first):**
+
+- ⬜ L11 `<turns>` countdown — one-line derived context section
+  ("turn N of M; reply before the cap") rendered when the agent has a
+  turns-cap; the s12-A non-convergence affordance (model self-moderates
+  on a visible meter). Cheap, general.
+- ⬜ L10 gym log quiet lane — demote trace-level datahike logging in
+  gym/scratch worlds (27-49MB/run, MB-sized single lines drown
+  evidence; the test footer greps megabytes).
+- ⬜ L13 tier rename `:deepseek` → `:paid` in scenario EDNs + driver
+  (now means "paid", misleading).
+- ⬜ task #21 boot! branches on create!'s error envelope (last night's
+  honesty fix's sharp edge).
+
+**OPUS-M batch (each its own unit):**
+
+- ⬜ L1 REAL fix: isolate the agent's in-eval `cljs.test` env from the
+  host suite (shared `*current-env*`/async machinery → agent's passing
+  tests fire shadow.test.node `process.exit(0)`). Interposer holds
+  meanwhile.
+- ⬜ L6 entity-schema register! tee-drop (`record-eval!` tx fails
+  `:seon.ns/name … got nil` on `[:map {:seon.db/entity true} …]` under
+  a fresh ns; eval row kept, program-graph row DROPPED → that
+  registration does not resume). Investigation-first: joins the
+  record-eval! dishonest-record register row.
+- ⬜ L12 related-question salience — the next rung after #26: s12-B
+  re-derived (first eval = grep) because B's question is related but
+  not verbatim-matched to A's stored rows. THE next capability bar
+  (the s12 demo scenario). Design question: render ALL user-domain kb
+  rows (the findings rung already does — why didn't B's prompt carry
+  A's rows? VERIFY FIRST: in the s12 world, did the findings rung
+  render A's findings into B's context? If yes, this is salience-of-
+  presentation, not absence), or a query-shaped retrieval rung.
+- ⬜ L5 context economy as a COST feature — `:namespaces` is ~97.7k of
+  ~110-123k chars/turn (~50k tokens). With caching live this is
+  cache-WRITE once + read thereafter, so measure after L4 verification
+  before investing; candidate: namespaces digest + on-demand expansion.
+
+**Behavioral targets (context iteration, gym-measured):**
+
+- ⬜ B-1 todo adherence 1/3 on Opus (same rendered teaching: run 1c
+  minted 4 + completed as it went; runs 3/4 minted zero). The
+  WHEN-bullet doesn't bind reliably even on a frontier model.
+  Iteration candidates (general, no answer-shaping): teaching placement
+  (system bullet vs the todo ns docstring arc), an empty-state
+  affordance (the open-todos section currently vanishes when empty —
+  a one-line "no open todos — for multi-step work, mint one per step"
+  stub on multi-step turns), or turn-0 salience. Measure: 3+ paid runs
+  per variant on the todo scenario.
+- ⬜ B-2 s12-A non-convergence — burned the full 20-turn cap
+  researching, reply judged 40 (omitted an asked step). First lever is
+  L11 (visible meter); second is a closure teaching ("answer the asked
+  question before deepening"). Re-measure s12 after L11 + L12.
+
+**Paid verification/discovery (the new $20):** (1) cache live-verify
+(cache_read > 0, multi-turn, ~$1); (2) todo adherence baseline
+firming, 3 runs (~$3-5 cached); (3) s12 re-run post-OPUS-S (~$2-3
+cached — also re-checks L12 verify-first question); (4) discovery run
+on an untested surface (error-recovery arc or live-tile authoring) to
+find NEW limitations; reserve the remainder.
+
 ## §4 Standing invariants this PRD establishes
 
 1. **Executable teachings live in the suite FOREVER.** B1 is not a
