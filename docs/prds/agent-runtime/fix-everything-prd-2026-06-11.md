@@ -706,14 +706,21 @@ verification; no separate work.
   a fresh ns; eval row kept, program-graph row DROPPED → that
   registration does not resume). Investigation-first: joins the
   record-eval! dishonest-record register row.
-- ⬜ L12 related-question salience — the next rung after #26: s12-B
-  re-derived (first eval = grep) because B's question is related but
-  not verbatim-matched to A's stored rows. THE next capability bar
-  (the s12 demo scenario). Design question: render ALL user-domain kb
-  rows (the findings rung already does — why didn't B's prompt carry
-  A's rows? VERIFY FIRST: in the s12 world, did the findings rung
-  render A's findings into B's context? If yes, this is salience-of-
-  presentation, not absence), or a query-shaped retrieval rung.
+- ⬜ L12 related-question salience — VERIFIED 2026-06-12 (orchestrator
+  forensics on the opus s12 blobs): A's stored row rendered IN FULL in
+  every one of B's 9 prompts; B's question ("where does seon check
+  entity VALUES … what error comes back") is related-but-distinct from
+  A's (unregistered ATTRS), and A's rendered answer names the exact
+  bridge ("the validation gate (validate-attrs! then validate-values!)"
+  + the envelope shape) — the scaffolding WAS in B's prompt, one
+  inference hop from the question. B grepped anyway. So: NOT a
+  retrieval/rendering gap — QUESTION-ADJACENT BINDING. The findings
+  section sits ~2.2k lines into a ~125k-char prompt, far from the
+  question. Fix shape: a short relevance-pointer line rendered NEAR
+  the prompt ("before researching: stored findings mention
+  <term-overlap terms> — see <findings>"), term-overlap scored,
+  structural, scales as findings grow (relocating the whole section
+  doesn't). THE next capability bar (the s12 demo scenario).
 - ⬜ L5 context economy as a COST feature — `:namespaces` is ~97.7k of
   ~110-123k chars/turn (~50k tokens). With caching live this is
   cache-WRITE once + read thereafter, so measure after L4 verification
