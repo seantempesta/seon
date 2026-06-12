@@ -226,6 +226,28 @@ pointed at a checkout; the bundle is the next rung.
 | CONFIRMED AGAIN: MCP default `:client` runtime ≠ the pod (cost the unit one misleading "empty store" read; pid mismatch live-verified) | stale-MCP-runtime row | evidence appended to the existing open row |
 | `agents-dash-fragment` renders agent-authored tile content containing a bare `<h1>` — second h1 on the page (pre-existing, structural-HTML) | inspector dash | small unit: demote/strip headings in embedded tile content |
 
+## Opus live-test unit — harness limitations + smells (2026-06-12Z, [[research/opus-live-tests-2026-06-12]])
+
+Spend: ≈$17.61 (unit budget $15 — honest $2.61 overrun, under the $20
+evening cap; s12 alone $8.44, all uncached). Headlines: **#26
+salience GREEN first paid confirmation** (judge 100/100, 1 turn);
+opus stored 3 provenance findings (deepseek 0/4); todo-teaching
+adherence 1/3 completed runs = real behavioral red; s12-B's
+first-eval repo grep proves re-derivation is NOT a weak-model
+artifact (the related-question salience gap IS the demo bar).
+
+| Smell | Where | Disposition |
+|---|---|---|
+| agent's in-eval `cljs.test/run-tests` shares global completion machinery with the host suite → `process.exit(0)` kills the gym referee mid-run (root-caused, stack trace in doc). In-fence interposer shipped; REAL fix = isolate the agent's test-runner env | src test-runner env | M unit, post-demo (interposer holds) |
+| `seon.ai-test` DELETES operator `SEON_AI_*` env mid-suite (first "opus" run silently drove deepseek; caught by new telemetry). paid_test snapshot/restore shipped; proper fix in ai_test | test/seon/ai_test.cljs | S tonight |
+| s32 consult predicate punishes post-#26 OPTIMAL behavior (answer now renders → consulting redundant) | s32 scenario edn | S re-cut tonight: consult OR (salient-claim-rendered AND zero searches) |
+| Anthropic adapter sends NO `cache_control` — `cache_read 0` on all 49 calls; ~$8 of s12's $8.44 was uncached re-billing. Dominant opus cost driver | src/seon/ai/anthropic.cljs | S tonight: cache_control on the stable prefix |
+| turn budget invisible to the agent (no countdown rendered) — s12-A burned the 20-cap unable to see the meter | ctx | queue: small derived section/system line |
+| `record-eval!` drops the program-graph tee row on entity-schema `register!` (`:seon.ns/name got nil`, live stack) — replay implications for agent-authored entity schemas | eval.cljs tee path | investigation unit FIRST (load-bearing path; joins record-eval! register row) |
+| salience is verbatim-shaped: paraphrase answered instantly, RELATED question re-derived | findings rung scope | post-demo: the next salience rung (related-question retrieval) |
+| `:deepseek` tier keyword now semantically means "paid" | scenario files | S rename sweep post-demo |
+| 38MB trace logs drown run evidence | gym logging | S: per-run log paths/rotation |
+
 ## Todo teachability unit smells (2026-06-12Z)
 
 | Smell | Where | Disposition |
