@@ -164,7 +164,14 @@
    toggle: for :deepseek, disabled unless the row turns it on
    ({:thinking {:type \"enabled\"}} + optional :reasoning_effort);
    for :openai-compat, sent ONLY when the row turns it on (absent
-   otherwise — graceful no-op on plain gateways)."
+   otherwise — graceful no-op on plain gateways).
+
+   Prompt caching (task #34): NO wire change here. The assembled ctx
+   rides as ONE user message with the stable prefix (sections through
+   :namespaces, incl. the in-band seon.ctx/stable-boundary line)
+   already FIRST by section order — deepseek's gateway auto-cache is
+   prefix-based, so it benefits from the same stability with zero
+   cache_control vocabulary (which is Anthropic-only)."
   {:malli/schema [:=> [:cat :seon.ai.deepseek/complete-request] :map]}
   [{:seon.ai/keys [ctx model temperature max-tokens] :as request}]
   (let [cfg      (ai/current)

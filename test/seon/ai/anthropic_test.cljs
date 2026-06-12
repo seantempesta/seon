@@ -2,10 +2,12 @@
   "Tests for the Anthropic Messages API client's pure surface (C-20):
      - request-body defaults: model claude-opus-4-8, max_tokens 16000,
        system TOP-LEVEL (:system, not a messages entry) as a
-       content-block ARRAY whose only block carries cache_control
-       {:type \"ephemeral\"} (prompt caching on the stable prefix —
-       live-test limitation 4), ONE user msg with NO cache_control
-       (the ctx re-renders every wake — no stable message boundary);
+       content-block ARRAY with cache_control {:type \"ephemeral\"}
+       breakpoints; a ctx carrying seon.ctx's in-band stable-boundary
+       (task #34) splits — system = [soul block, stable-ctx block],
+       BOTH with breakpoints, messages = volatile tail ONLY; a
+       boundary-less ctx degrades to the pre-split shape (one system
+       block, full ctx as the user msg, NO message cache_control);
        the deepseek body is UNCHANGED by the caching change (plain
        string system message, no cache_control anywhere)
      - thinking is ADAPTIVE-ONLY: config row truthy → {:type
@@ -27,6 +29,7 @@
     [seon.ai :as ai]
     [seon.ai.anthropic :as anthropic]
     [seon.ai.deepseek :as deepseek]
+    [seon.ctx :as ctx]
     [seon.db :as db]))
 
 ;; ============================================================
@@ -156,10 +159,11 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
-;; Prompt caching — cache_control on the stable prefix ONLY
-;; (live-test limitation 4: cache_read 0 on all 49 calls). Wire-shape
-;; pins, no live call — first live confirmation (usage
-;; :cache_read_input_tokens > 0) rides the next paid run.
+;; Prompt caching (task #34) — the ctx's in-band stable boundary
+;; splits the wire body: system = [soul block, stable-ctx block],
+;; BOTH cache_control breakpoints (2 of the allowed 4); messages =
+;; the volatile tail ONLY. A boundary-less ctx (tests, stub prompts)
+;; degrades to the pre-split shape. Wire-shape pins, no live call.
 ;; ============================================================
 
 (deftest cache-control-on-system-block-only
@@ -171,14 +175,56 @@
                   [sys-block & more] (:system body)]
               (is (vector? (:system body))
                   "system is a content-block ARRAY (a bare string can't carry a breakpoint)")
-              (is (nil? more) "exactly ONE system block")
+              (is (nil? more) "boundary-less ctx → exactly ONE system block")
               (is (= {:type "ephemeral"} (:cache_control sys-block))
                   "the last/only system block is the cache breakpoint — caches tools+system")
               (is (= "sys" (:text sys-block)))
               (is (= [{:role "user" :content "the ctx"}] (:messages body))
-                  (str "the user message carries NO cache_control — ctx "
-                       "re-renders every wake, a breakpoint there would only "
-                       "pay the write premium with zero reads")))))
+                  (str "the user message carries NO cache_control — and a "
+                       "boundary-less ctx rides through whole (pre-split "
+                       "degradation)")))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest stable-ctx-splits-into-second-system-block
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (let [stable   "<system>core</system>\n\n<namespace name=\"seon.db\">…</namespace>"
+                  volatile "<transcript>…</transcript>\n\nmy.agent.a=> "
+                  full     (str stable "\n\n" ctx/stable-boundary "\n\n" volatile)
+                  body     (anthropic/request-body
+                             {:seon.ai/ctx full :seon.ai/system-prompt "sys"})
+                  [soul-block stable-block & more] (:system body)]
+              (is (nil? more) "exactly TWO system blocks on a split ctx")
+              (is (= {:type "text" :text "sys"
+                      :cache_control {:type "ephemeral"}}
+                     soul-block)
+                  "block 1 = the soul/system prompt, breakpoint kept")
+              (is (= {:type "text" :text stable
+                      :cache_control {:type "ephemeral"}}
+                     stable-block)
+                  (str "block 2 = the ctx's STABLE prefix with the LAST "
+                       "breakpoint — caches tools+system+stable, the "
+                       "boundary line itself is consumed by the split"))
+              (is (= [{:role "user" :content volatile}] (:messages body))
+                  "messages carry ONLY the volatile tail, no cache_control"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest blank-half-degrades-to-unsplit
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            ;; Pathological: boundary present but a blank half — never
+            ;; send an empty system block or an empty user message.
+            (let [full (str "" "\n\n" ctx/stable-boundary "\n\n" "tail only")
+                  body (anthropic/request-body
+                         {:seon.ai/ctx full :seon.ai/system-prompt "sys"})]
+              (is (= 1 (count (:system body)))
+                  "blank stable half → no second system block")
+              (is (= [{:role "user" :content full}] (:messages body))
+                  "…and the ctx rides through whole"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

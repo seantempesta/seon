@@ -398,6 +398,79 @@
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
+;; ------------------------------------------------------------
+;; Stable/volatile split — the provider-cache contract (task #34).
+;; Two assembles over the SAME db value → byte-identical stable
+;; blocks; a volatile-only change (a new turn row) leaves the stable
+;; block untouched; split-context recovers exactly the two halves
+;; from the joined text.
+;; ------------------------------------------------------------
+
+(deftest stable-volatile-split-determinism
+  (async done
+    (let [!first (atom nil)]
+      (-> (with-conn
+            (fn [_conn]
+              (-> (agent/create! {:seon.agent/id "AGTctxtest00d1"})
+                  (.then (fn [_] (transact-ns-row! "seon.client")))
+                  (.then
+                    (fn [_]
+                      (let [db @db/*conn*
+                            a1 (ctx/assemble-context {:seon.db/db db
+                                                      :seon.agent/id "AGTctxtest00d1"})
+                            a2 (ctx/assemble-context {:seon.db/db db
+                                                      :seon.agent/id "AGTctxtest00d1"})]
+                        (reset! !first a1)
+                        (is (= (:seon.render/stable-text a1)
+                               (:seon.render/stable-text a2))
+                            "same db value → byte-identical stable blocks")
+                        (is (not (str/blank? (:seon.render/stable-text a1)))
+                            "stable block is non-blank (system + namespaces)")
+                        (is (str/includes? (:seon.render/stable-text a1)
+                                           "<namespace name=\"seon.client\">")
+                            "the namespaces body lives in the STABLE half")
+                        (is (not (str/includes? (:seon.render/stable-text a1)
+                                                ctx/stable-boundary))
+                            "the boundary line is the join, never inside a half")
+                        (is (str/includes? (:seon.render/text a1)
+                                           ctx/stable-boundary)
+                            "the joined text carries the in-band boundary")
+                        (is (= {:seon.render/stable-text
+                                (:seon.render/stable-text a1)
+                                :seon.render/volatile-text
+                                (:seon.render/volatile-text a1)}
+                               (ctx/split-context (:seon.render/text a1)))
+                            "split-context recovers exactly the two halves"))))
+                  ;; volatile-only change: a NEW TURN ROW on a fresh
+                  ;; session — transcript/turns are volatile sections.
+                  (.then (fn [_] (agent/start-session! "AGTctxtest00d1")))
+                  (.then (fn [sess]
+                           (db/transact!
+                             {:seon.db/tx-data
+                              [{:seon.agent.session/id
+                                (:seon.agent.session/id sess)
+                                :seon.agent.session/turns
+                                [{:seon.agent.turn/id (db/new-id!)
+                                  :seon.agent.turn/at (js/Date.)
+                                  :seon.agent.turn/status :running
+                                  :seon.agent.turn/prompt-chars 1}]}]})))
+                  (.then
+                    (fn [_]
+                      (let [after (ctx/assemble-context
+                                    {:seon.db/db @db/*conn*
+                                     :seon.agent/id "AGTctxtest00d1"})]
+                        (is (= (:seon.render/stable-text @!first)
+                               (:seon.render/stable-text after))
+                            "a volatile-only change (new turn row) leaves the stable block untouched")))))))
+          (.then (fn [] (done)))
+          (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done)))))))
+
+(deftest split-context-without-boundary-is-all-volatile
+  (is (= {:seon.render/stable-text   ""
+          :seon.render/volatile-text "plain ctx, no boundary"}
+         (ctx/split-context "plain ctx, no boundary"))
+      "boundary-less text degrades to all-volatile (pre-split behavior)"))
+
 (deftest slot-storage-roundtrip
   (async done
     (-> (with-conn

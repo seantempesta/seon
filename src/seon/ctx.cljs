@@ -1723,12 +1723,58 @@
    [:seon.ctx/name :seon.ctx/name]
    [:seon.render/text :string]])
 
+(schema/register! :seon.render/stable-text   :string)
+(schema/register! :seon.render/volatile-text :string)
+
 (schema/register! :seon.render/assemble-response
   [:map
    [:seon.render/text            :string]
+   [:seon.render/stable-text     :seon.render/stable-text]
+   [:seon.render/volatile-text   :seon.render/volatile-text]
    [:seon.render/sections        :seon.render/sections]
    [:seon.render/section-texts   [:vector :seon.ctx/section-text]]
    [:seon.render/token-estimate  :int]])
+
+(schema/register! :seon.render/split-response
+  [:map
+   [:seon.render/stable-text   :seon.render/stable-text]
+   [:seon.render/volatile-text :seon.render/volatile-text]])
+
+(def stable-boundary
+  "The in-band cache-boundary line the composer joins between the
+   STABLE prefix (every section through :namespaces — byte-stable
+   within a session given the deterministic rendering) and the
+   VOLATILE tail (everything after: your-entity, live-tile, warnings,
+   open-todos, findings, transcript, turns, findings-pointer, prompt).
+
+   In-band because the agent loop hands providers ONE assembled
+   string (`llm-fn` is fn-of-ctx-string): [[split-context]] recovers
+   the two halves on the provider side, so the Anthropic adapter can
+   put the stable prefix in a cache_control'd system block and send
+   only the volatile tail as the user message (task #34 — cache
+   coverage was 5.4k of ~38k input tokens). Built by concatenation so
+   the marker can never appear verbatim in rendered source text."
+  (str ";; ──── ctx cache boundary — everything above this line is the "
+       "byte-stable" " prefix; everything below changes per turn ────"))
+
+(def ^:private stable-boundary-delim
+  (str "\n\n" stable-boundary "\n\n"))
+
+(defn split-context
+  "Split an assembled ctx string at [[stable-boundary]] into the
+   stable prefix and the volatile tail. A string WITHOUT the boundary
+   (hand-rolled test ctx, stub prompts) is all volatile —
+   `:seon.render/stable-text` is \"\" and the input rides through
+   unchanged as the tail, so providers degrade to pre-split behavior."
+  {:malli/schema [:=> [:catn [:seon.render/text :string]]
+                  :seon.render/split-response]}
+  [text]
+  (let [i (.indexOf text stable-boundary-delim)]
+    (if (neg? i)
+      {:seon.render/stable-text   ""
+       :seon.render/volatile-text text}
+      {:seon.render/stable-text   (subs text 0 i)
+       :seon.render/volatile-text (subs text (+ i (count stable-boundary-delim)))})))
 (defn substrate-default-ctx
   "The default :seon.ctx section layout that ships with every fresh
    agent — the context-v4 layout (§2), ordered top→bottom =
@@ -1973,8 +2019,21 @@
    turn/eval component) and rides in the input map every section fn
    receives.
 
+   The render splits at [[stable-boundary]]: every section through
+   :namespaces (by merged render order) is the STABLE prefix —
+   byte-stable within a session given the deterministic rendering —
+   and everything after is the VOLATILE tail. `:seon.render/text` is
+   the full prompt with the boundary line joined in-band between the
+   halves; `:seon.render/stable-text` / `:seon.render/volatile-text`
+   carry the halves separately (and [[split-context]] recovers them
+   from the joined string — the provider-cache contract, task #34).
+   An agent section with priority below :namespaces' lands in the
+   stable half — it must render byte-stably (verbatim strings do).
+
    Returns
      `{:seon.render/text \"…\"
+       :seon.render/stable-text \"…\"
+       :seon.render/volatile-text \"…\"
        :seon.render/sections [<section-name> …]      ; render order
        :seon.render/section-texts [{:seon.ctx/name _
                                     :seon.render/text _} …]
@@ -2005,14 +2064,34 @@
                       (remove (comp str/blank? :seon.render/text))
                       vec
                       apply-agent-budget)
-        text     (str/join "\n\n" (map :seon.render/text rendered))]
+        ;; Stable/volatile boundary: everything through :namespaces in
+        ;; merged render order is the stable prefix (see docstring).
+        ;; Names are unique post-merge, so the stable set is a prefix
+        ;; of `rendered` (which preserves merged order).
+        names    (mapv :seon.ctx/name sections)
+        stable?  (set (take (inc (.indexOf names :namespaces)) names))
+        stable-text   (->> rendered
+                           (filter (comp stable? :seon.ctx/name))
+                           (map :seon.render/text)
+                           (str/join "\n\n"))
+        volatile-text (->> rendered
+                           (remove (comp stable? :seon.ctx/name))
+                           (map :seon.render/text)
+                           (str/join "\n\n"))
+        text     (cond
+                   (str/blank? stable-text)   volatile-text
+                   (str/blank? volatile-text) stable-text
+                   :else (str stable-text "\n\n" stable-boundary
+                              "\n\n" volatile-text))]
     {:seon.render/text           text
+     :seon.render/stable-text    stable-text
+     :seon.render/volatile-text  volatile-text
      ;; :seon.render/sections is LAYOUT PROVENANCE — every merged
      ;; section name in render order, including ones whose fn rendered
      ;; blank this turn (a suppressed section is still part of the
      ;; layout). :seon.render/section-texts carries only the non-blank
      ;; contributions (what the inspector shows).
-     :seon.render/sections       (mapv :seon.ctx/name sections)
+     :seon.render/sections       names
      :seon.render/section-texts  (mapv #(select-keys % [:seon.ctx/name
                                                         :seon.render/text])
                                        rendered)

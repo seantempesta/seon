@@ -28,20 +28,26 @@
        blocks, skip \"thinking\" blocks; check :stop_reason BEFORE
        reading content (Fable adds \"refusal\": empty content array,
        surfaced as a legible :seon.ai/error envelope)
-     - PROMPT CACHING (2026-06-12, live-test limitation 4 — cache_read
-       was 0 on all 49 calls; ~$8 of one $8.44 run was uncached
-       re-billing): :system goes as a content-block ARRAY with
-       cache_control {:type \"ephemeral\"} on its only block — the
-       stable prefix (tools→system→messages render order; a breakpoint
-       on the last system block caches everything before it). No
-       message-level breakpoint: the agent loop re-renders the FULL
-       ctx into ONE user message each wake, so there is no stable
-       message boundary until ctx is structured into messages (then a
-       second breakpoint on the last-but-one message buys per-turn
-       hits). Caveats: prefixes under ~1024 tokens silently don't
-       cache, and first live confirmation (usage
-       :cache_read_input_tokens > 0) rides the next paid run."
-  (:require [seon.ai :as ai]
+     - PROMPT CACHING (task #34, 2026-06-12 — the system-block-only
+       breakpoint covered just ~5.4k of ~38k input tokens because the
+       ENTIRE assembled ctx rode as one user message AFTER the only
+       breakpoint): the ctx string carries seon.ctx's in-band
+       [[seon.ctx/stable-boundary]]; [[seon.ctx/split-context]]
+       recovers the STABLE prefix (sections through :namespaces —
+       byte-stable within a session) and the VOLATILE tail. :system
+       becomes TWO content blocks, each with cache_control {:type
+       \"ephemeral\"} — [core soul block] [stable-ctx block] — and
+       :messages carries ONLY the volatile tail (2 of the 4 allowed
+       breakpoints; tools→system→messages render order means the
+       second breakpoint caches everything before it). A ctx WITHOUT
+       the boundary (tests, stub prompts) degrades to the pre-split
+       shape: one system block, full ctx as the user message.
+       Caveats: prefixes under the model's minimum (4096 tokens on
+       Opus 4.x) silently don't cache; verify with usage
+       :cache_read_input_tokens on call 2."
+  (:require [clojure.string :as str]
+            [seon.ai :as ai]
+            [seon.ctx :as ctx]
             [seon.error :as error]
             [seon.schema :as schema]))
 
@@ -107,18 +113,30 @@
    what goes over the wire."
   {:malli/schema [:=> [:cat :seon.ai.anthropic/complete-request] :map]}
   [{:seon.ai/keys [ctx model max-tokens] :as request}]
-  (let [cfg (ai/current)]
+  (let [cfg (ai/current)
+        {:seon.render/keys [stable-text volatile-text]} (ctx/split-context ctx)
+        ;; Both halves must be non-blank to split — a boundary-less ctx
+        ;; (tests, stub prompts) degrades to the pre-split wire shape.
+        split? (not (or (str/blank? stable-text) (str/blank? volatile-text)))]
     (cond->
       {:model      (or model (:seon.ai/model cfg) default-model)
        :max_tokens (or max-tokens (:seon.ai/max-tokens cfg) default-max-tokens)
        ;; Block array (not a bare string) so the stable prefix carries
-       ;; a cache breakpoint — see the ns docstring's PROMPT CACHING
-       ;; pin. cache_control on the last/only system block caches
-       ;; tools+system; the volatile ctx stays after the breakpoint.
-       :system     [{:type "text"
-                     :text (ai/effective-system-prompt request)
-                     :cache_control {:type "ephemeral"}}]
-       :messages   [{:role "user" :content ctx}]}
+       ;; cache breakpoints — see the ns docstring's PROMPT CACHING
+       ;; pin. Block 1 = the soul/system prompt; block 2 = the ctx's
+       ;; stable prefix (through :namespaces). cache_control on the
+       ;; LAST system block caches tools + system + stable ctx; only
+       ;; the volatile tail rides after the breakpoint as the user
+       ;; message. 2 of the 4 allowed breakpoints — the first keeps a
+       ;; partial hit alive when the stable ctx changes (reload, new
+       ;; ns) while the soul doesn't.
+       :system     (cond-> [{:type "text"
+                             :text (ai/effective-system-prompt request)
+                             :cache_control {:type "ephemeral"}}]
+                     split? (conj {:type "text"
+                                   :text stable-text
+                                   :cache_control {:type "ephemeral"}}))
+       :messages   [{:role "user" :content (if split? volatile-text ctx)}]}
       ;; Adaptive-only: any truthy thinking mode (true or an effort
       ;; string) maps to adaptive; reasoning-effort levels are a
       ;; deepseek wire concept with no Messages-API equivalent here.
