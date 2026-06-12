@@ -64,7 +64,8 @@
 
 (def ^:private seon-ai-env-vars
   ["SEON_AI_PROVIDER" "SEON_AI_MODEL" "SEON_AI_TEMPERATURE"
-   "SEON_AI_MAX_TOKENS" "SEON_AI_THINKING" "SEON_AI_TIMEOUT_MS"])
+   "SEON_AI_MAX_TOKENS" "SEON_AI_THINKING" "SEON_AI_TIMEOUT_MS"
+   "SEON_AI_BASE_URL" "SEON_AI_API_KEY_ENV"])
 
 (defn- with-env-restored
   "Snapshot every SEON_AI_* var on js process.env, run `body` (which
@@ -92,13 +93,24 @@
       (aset env "SEON_AI_MAX_TOKENS" "2048")
       (aset env "SEON_AI_THINKING" "true")
       (aset env "SEON_AI_TIMEOUT_MS" "")        ; blank = unset
+      (aset env "SEON_AI_BASE_URL" "https://gw.example.com/v1/chat/completions")
+      (aset env "SEON_AI_API_KEY_ENV" "ACME_GW_KEY")
       (is (= {::ai/provider    :anthropic
               ::ai/model       "claude-opus-4-8"
               ::ai/temperature 0.3
               ::ai/max-tokens  2048
-              ::ai/thinking    "true"}
+              ::ai/thinking    "true"
+              ::ai/base-url    "https://gw.example.com/v1/chat/completions"
+              ::ai/api-key-env "ACME_GW_KEY"}
              (ai/env-row))
           "set vars parse to the attrs' concrete types; blank/unset absent"))))
+
+(deftest provider-parses-openai-compat
+  (with-env-restored
+    (fn [env]
+      (aset env "SEON_AI_PROVIDER" "openai-compat")
+      (is (= :openai-compat (ai/provider))
+          "openai-compat is a known provider (task #30)"))))
 
 (deftest env-row-skips-unparseable-values-loudly
   (with-env-restored

@@ -1,9 +1,28 @@
 (ns seon.ai.deepseek
-  "DeepSeek HTTP client. ^:async — returns Promises.
+  "OpenAI-compatible chat-completions HTTP client (the DeepSeek wire
+   format IS the OpenAI format). ^:async — returns Promises.
+
+   ONE request path, two providers (no fork — task #30):
+
+     - `:deepseek` (the default) — the shipped endpoint
+       (https://api.deepseek.com/chat/completions) and the
+       `DEEPSEEK_API_KEY` env default.
+     - `:openai-compat` — any OpenAI-compatible gateway. The endpoint
+       is the config row's `:seon.ai/base-url` (SEON_AI_BASE_URL): the
+       FULL chat-completions URL, posted as-is, no path appended. No
+       shipped default — `:openai-compat` selected with no base-url is
+       a legible error envelope at call time, never a throw.
+
+   API-key resolution (read from `process.env` at CALL TIME — the key
+   value itself is never stored in the DB):
+     1. the env var NAMED by `:seon.ai/api-key-env`
+        (SEON_AI_API_KEY_ENV) when set;
+     2. for `:deepseek` only — `DEEPSEEK_API_KEY` (the shipped
+        default, pre-#30 behavior preserved);
+     3. `SEON_AI_API_KEY` directly (the conventional fallback).
 
    One agent-facing fn: [[agent-adapter]] returns `(fn [ctx-string])`
-   compatible with `seon.agent/run-turn-once!`'s `llm-fn`. Reads the
-   API key from `DEEPSEEK_API_KEY` in `process.env`.
+   compatible with `seon.agent/run-turn-once!`'s `llm-fn`.
 
    Call settings (model, temperature, max-tokens, thinking,
    timeout-ms) come from the `:seon.ai/config` row, read PER CALL via
@@ -68,9 +87,13 @@
 ;; Thinking mode (deepseek-v4-pro). The API DEFAULTS TO ENABLED, which
 ;; is slow — a long-ctx thinking call can blow past the 60s wall-clock
 ;; timeout (observed 2026-06-10: turn 4 aborted at exactly 60.8s with
-;; no reply). We send {"thinking": {"type": "disabled"}} unless the
-;; config row's :seon.ai/thinking (SEON_AI_THINKING) turns it on:
-;; "true" → enabled, "high"/"max" → enabled + that reasoning_effort.
+;; no reply). For :deepseek we send {"thinking": {"type": "disabled"}}
+;; unless the config row's :seon.ai/thinking (SEON_AI_THINKING) turns
+;; it on: "true" → enabled, "high"/"max" → enabled + that
+;; reasoning_effort. For :openai-compat the thinking field is sent
+;; ONLY when set truthy — absent/"false" sends NOTHING (graceful no-op
+;; on gateways that don't know the field; deepseek's explicit-disable
+;; rationale doesn't apply to a generic gateway).
 
 ;; ============================================================
 ;; HTTP — js/fetch + ^:async/await. Errors return as values on the
@@ -78,11 +101,49 @@
 ;; Uses Node 18+'s native fetch; no polyfill.
 ;; ============================================================
 
-(defn- api-key []
-  (or (some-> js/process .-env .-DEEPSEEK_API_KEY)
-      (throw (ex-info
-               "DEEPSEEK_API_KEY not set in process.env"
-               {:seon.ai.deepseek/error :missing-api-key}))))
+(defn- env*
+  "process.env value for `var-name`, or nil when unset/blank."
+  [var-name]
+  (let [v (some-> js/process .-env (aget var-name))]
+    (when (and (string? v) (seq v)) v)))
+
+(defn- openai-compat?
+  "Is this pod's active provider :openai-compat? Read per call
+   (reactive-context) — the SAME request path serves both providers."
+  []
+  (= :openai-compat (ai/provider)))
+
+(defn- endpoint
+  "The chat-completions URL for this call: the shipped deepseek
+   endpoint for :deepseek; the config row's :seon.ai/base-url (FULL
+   URL, posted as-is — see the ns doc) for :openai-compat, with the
+   SEON_AI_BASE_URL env as the pre-sync fallback. nil = :openai-compat
+   selected but unconfigured ([[complete]] returns a legible error
+   envelope)."
+  []
+  (if (openai-compat?)
+    (or (:seon.ai/base-url (ai/current))
+        (:seon.ai/base-url (ai/env-row)))
+    default-endpoint))
+
+(defn- resolved-api-key
+  "The bearer key for this call, or nil — see the ns doc for the
+   resolution order. Read from process.env at call time; the key value
+   is never transacted."
+  []
+  (let [key-env (or (:seon.ai/api-key-env (ai/current))
+                    (:seon.ai/api-key-env (ai/env-row)))]
+    (or (some-> key-env env*)
+        (when-not (openai-compat?) (env* "DEEPSEEK_API_KEY"))
+        (env* "SEON_AI_API_KEY"))))
+
+(defn api-key-configured?
+  "Whether a bearer API key resolves for the ACTIVE provider (see the
+   ns doc's resolution order). `seon.client/current-llm-fn` uses this
+   to fall back to the stub llm-fn when no key is available."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (boolean (resolved-api-key)))
 
 (defn request-body
   "Build the DeepSeek JSON request body as a CLJ map. The bare keys
@@ -93,21 +154,28 @@
    explicit request opts win over the row, the row wins over the
    shipped defaults. Public so tests and live debugging can inspect
    exactly what goes over the wire — in particular the thinking
-   toggle: disabled unless the row turns it on
-   ({:thinking {:type \"enabled\"}} + optional :reasoning_effort)."
+   toggle: for :deepseek, disabled unless the row turns it on
+   ({:thinking {:type \"enabled\"}} + optional :reasoning_effort);
+   for :openai-compat, sent ONLY when the row turns it on (absent
+   otherwise — graceful no-op on plain gateways)."
   {:malli/schema [:=> [:cat :seon.ai.deepseek/complete-request] :map]}
   [{:seon.ai/keys [ctx model temperature max-tokens] :as request}]
   (let [cfg      (ai/current)
-        thinking (ai/thinking-mode cfg)]
+        thinking (ai/thinking-mode cfg)
+        compat?  (openai-compat?)]
     (cond->
       {:model       (or model (:seon.ai/model cfg) default-model)
        :messages    [{:role "system" :content (ai/effective-system-prompt request)}
                      {:role "user"   :content ctx}]
        :temperature (or temperature (:seon.ai/temperature cfg) default-temperature)
        :max_tokens  (or max-tokens (:seon.ai/max-tokens cfg) default-max-tokens)
-       :thinking    {:type (if thinking "enabled" "disabled")}
        :stream      false}
-      (string? thinking) (assoc :reasoning_effort thinking))))
+      ;; :deepseek always sends the explicit toggle (the API defaults
+      ;; to enabled — see the thinking-mode comment above);
+      ;; :openai-compat sends the field ONLY when thinking is truthy.
+      (not compat?)          (assoc :thinking {:type (if thinking "enabled" "disabled")})
+      (and compat? thinking) (assoc :thinking {:type "enabled"})
+      (string? thinking)     (assoc :reasoning_effort thinking))))
 
 (defn- body-json [request]
   (.stringify js/JSON (clj->js (request-body request))))
@@ -140,9 +208,19 @@
                                               (error/->message e))
                        :seon.ai/raw-body body-text}})))
 
+(defn- config-error
+  "Errors-as-values envelope for a CALL-TIME config gap (no endpoint /
+   no key). Never transport-flagged — a config error must not look
+   retryable. Logged loudly, returned as a value."
+  [label msg]
+  (let [err {:seon.ai/msg msg}]
+    (ai/log-error! label err)
+    {:seon.ai/text "" :seon.ai/error err}))
+
 (defn ^:async complete
-  "Send a completion request to DeepSeek. Returns a Promise of a
-   `:seon.ai.deepseek/complete-response` map.
+  "Send a chat-completions request to the active provider's endpoint
+   (see the ns doc — :deepseek default or :openai-compat gateway).
+   Returns a Promise of a `:seon.ai.deepseek/complete-response` map.
 
    Request opts (only :seon.ai/ctx required):
      :seon.ai/ctx           — the full ctx text (required)
@@ -152,52 +230,80 @@
      :seon.ai/temperature   — override config row / default-temperature
      :seon.ai/max-tokens    — override config row / default-max-tokens
 
-   Network/HTTP failures resolve to `{:seon.ai/text \"\" :seon.ai/error
-   {…}}` (per spec-02 §2.5: safe-by-default at the boundary). Callers
-   destructure both `:seon.ai/text` and `:seon.ai/error`."
+   Config gaps (no base-url for :openai-compat, no resolvable API key)
+   and network/HTTP failures resolve to `{:seon.ai/text \"\"
+   :seon.ai/error {…}}` (per spec-02 §2.5: safe-by-default at the
+   boundary) — never a throw to the agent loop. Callers destructure
+   both `:seon.ai/text` and `:seon.ai/error`."
   {:malli/schema [:=> [:cat :seon.ai.deepseek/complete-request]
                   :seon.ai.deepseek/complete-response]}
   [request]
-  (let [controller (js/AbortController.)
-        ms         (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
-        timer      (js/setTimeout #(.abort controller) ms)]
-    (try
-      (let [resp (await (js/fetch default-endpoint
-                          (clj->js
-                            {:method  "POST"
-                             :signal  (.-signal controller)
-                             :headers {:Content-Type  "application/json"
-                                       :Authorization (str "Bearer " (api-key))}
-                             :body    (body-json request)})))
-            body-text (await (.text resp))
-            _         (js/clearTimeout timer)
-            result    (if (.-ok resp)
-                        (parse-response body-text)
-                        {:seon.ai/text  ""
-                         :seon.ai/error {:seon.ai/msg    (str "DeepSeek HTTP " (.-status resp)
-                                                              ": " body-text)
-                                         :seon.ai/status (.-status resp)}})]
-        (when-let [err (:seon.ai/error result)]
-          (ai/log-error! "DeepSeek" err))
-        result)
-      (catch :default e
-        (js/clearTimeout timer)
-        (let [aborted? (= "AbortError" (some-> e .-name))
-              err      (cond-> {:seon.ai/msg
-                                (if aborted?
-                                  (str "DeepSeek request timed out after " ms
-                                       "ms (wall-clock abort — no reply received)")
-                                  (str "DeepSeek fetch failed: " (error/->message e)))}
-                         ;; optional = absent — only present (true) on a
-                         ;; genuine wall-clock abort, never stored false.
-                         aborted?       (assoc :seon.ai/timeout? true)
-                         ;; fetch threw with NO abort = network-shaped
-                         ;; transport failure — the one retryable class
-                         ;; (see the :seon.ai/transport? registration).
-                         (not aborted?) (assoc :seon.ai/transport? true))]
-          (ai/log-error! "DeepSeek" err)
-          {:seon.ai/text  ""
-           :seon.ai/error err})))))
+  (let [compat? (openai-compat?)
+        label   (if compat? "OpenAI-compat" "DeepSeek")
+        url     (endpoint)
+        key     (resolved-api-key)]
+    (cond
+      (nil? url)
+      (config-error
+        label
+        (str ":openai-compat provider selected but no chat-completions URL "
+             "configured — set SEON_AI_BASE_URL (or transact :seon.ai/base-url "
+             "on the :seon.ai/config row) to the gateway's FULL "
+             "chat-completions URL, e.g. "
+             "\"https://gw.example.com/v1/chat/completions\""))
+
+      (nil? key)
+      (config-error
+        label
+        (str label " API key not found in process.env — "
+             (if compat?
+               (str "set SEON_AI_API_KEY, or point :seon.ai/api-key-env "
+                    "(SEON_AI_API_KEY_ENV) at the name of the env var "
+                    "holding the gateway's bearer key")
+               (str "set DEEPSEEK_API_KEY (or SEON_AI_API_KEY, or "
+                    ":seon.ai/api-key-env / SEON_AI_API_KEY_ENV)"))))
+
+      :else
+      (let [controller (js/AbortController.)
+            ms         (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
+            timer      (js/setTimeout #(.abort controller) ms)]
+        (try
+          (let [resp (await (js/fetch url
+                              (clj->js
+                                {:method  "POST"
+                                 :signal  (.-signal controller)
+                                 :headers {:Content-Type  "application/json"
+                                           :Authorization (str "Bearer " key)}
+                                 :body    (body-json request)})))
+                body-text (await (.text resp))
+                _         (js/clearTimeout timer)
+                result    (if (.-ok resp)
+                            (parse-response body-text)
+                            {:seon.ai/text  ""
+                             :seon.ai/error {:seon.ai/msg    (str label " HTTP " (.-status resp)
+                                                                  ": " body-text)
+                                             :seon.ai/status (.-status resp)}})]
+            (when-let [err (:seon.ai/error result)]
+              (ai/log-error! label err))
+            result)
+          (catch :default e
+            (js/clearTimeout timer)
+            (let [aborted? (= "AbortError" (some-> e .-name))
+                  err      (cond-> {:seon.ai/msg
+                                    (if aborted?
+                                      (str label " request timed out after " ms
+                                           "ms (wall-clock abort — no reply received)")
+                                      (str label " fetch failed: " (error/->message e)))}
+                             ;; optional = absent — only present (true) on a
+                             ;; genuine wall-clock abort, never stored false.
+                             aborted?       (assoc :seon.ai/timeout? true)
+                             ;; fetch threw with NO abort = network-shaped
+                             ;; transport failure — the one retryable class
+                             ;; (see the :seon.ai/transport? registration).
+                             (not aborted?) (assoc :seon.ai/transport? true))]
+              (ai/log-error! label err)
+              {:seon.ai/text  ""
+               :seon.ai/error err})))))))
 
 ;; ============================================================
 ;; Adapter for seon.agent.

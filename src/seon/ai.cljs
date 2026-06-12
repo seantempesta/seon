@@ -4,9 +4,10 @@
    deployment retunes the LLM (provider, model, thinking, budgets)
    without forking an adapter ns.
 
-   One singleton row (identity `::id` = \"config\") carries up to six
-   attrs: `::provider`, `::model`, `::temperature`, `::max-tokens`,
-   `::thinking`, `::timeout-ms`. Adapters ([[seon.ai.deepseek]],
+   One singleton row (identity `::id` = \"config\") carries up to
+   eight attrs: `::provider`, `::model`, `::temperature`,
+   `::max-tokens`, `::thinking`, `::timeout-ms`, `::base-url`,
+   `::api-key-env`. Adapters ([[seon.ai.deepseek]],
    [[seon.ai.anthropic]]) read it PER CALL via [[current]] —
    reactive-context: no cached atom, absent row/attr = each adapter's
    shipped defaults, byte-identical wire bodies to the pre-C-18 output.
@@ -83,7 +84,24 @@
 ;; ============================================================
 
 (schema/register! ::id [:string {:seon.db/identity true}])  ; always "config"
-(schema/register! ::provider [:enum :deepseek :anthropic])
+;; :openai-compat = any OpenAI-compatible chat-completions gateway
+;; (enterprise, bearer-keyed). Same wire path as :deepseek
+;; (seon.ai.deepseek) with endpoint + key resolved from ::base-url /
+;; ::api-key-env instead of the shipped deepseek defaults.
+(schema/register! ::provider [:enum :deepseek :anthropic :openai-compat])
+;; The FULL chat-completions URL of an OpenAI-compatible gateway
+;; (e.g. "https://gw.example.com/v1/chat/completions") — NOT a prefix
+;; the adapter appends a path to. One semantic: what you set is what
+;; js/fetch POSTs to. Required when ::provider is :openai-compat
+;; (no shipped default endpoint — missing = legible error at call
+;; time). Env: SEON_AI_BASE_URL.
+(schema/register! ::base-url [:string {:min 1}])
+;; The NAME of the env var holding the bearer API key — never the key
+;; itself (keys are read at call time from process.env, never
+;; transacted). Env: SEON_AI_API_KEY_ENV. Absent → the provider's
+;; default (DEEPSEEK_API_KEY for :deepseek) and the conventional
+;; SEON_AI_API_KEY fallback — see seon.ai.deepseek's key resolution.
+(schema/register! ::api-key-env [:string {:min 1}])
 ;; "false" | "true" | reasoning-effort string ("high"/"max"/…). Stored
 ;; as the env var's string shape; [[thinking-mode]] is the parse.
 (schema/register! ::thinking [:string {:min 1}])
@@ -98,7 +116,9 @@
    [::temperature {:optional true} ::temperature]
    [::max-tokens {:optional true} ::max-tokens]
    [::thinking   {:optional true} ::thinking]
-   [::timeout-ms {:optional true} ::timeout-ms]])
+   [::timeout-ms {:optional true} ::timeout-ms]
+   [::base-url    {:optional true} ::base-url]
+   [::api-key-env {:optional true} ::api-key-env]])
 
 (schema/register! ::config
   [:map {:seon.db/entity true}
@@ -108,7 +128,9 @@
    [::temperature {:optional true} ::temperature]
    [::max-tokens  {:optional true} ::max-tokens]
    [::thinking    {:optional true} ::thinking]
-   [::timeout-ms  {:optional true} ::timeout-ms]])
+   [::timeout-ms  {:optional true} ::timeout-ms]
+   [::base-url    {:optional true} ::base-url]
+   [::api-key-env {:optional true} ::api-key-env]])
 
 (schema/register! ::synced? :boolean)
 (schema/register! ::sync-request
@@ -119,7 +141,8 @@
 
 ;; The attr order is the sync + row-read iteration order.
 (def ^:private config-attrs
-  [::provider ::model ::temperature ::max-tokens ::thinking ::timeout-ms])
+  [::provider ::model ::temperature ::max-tokens ::thinking ::timeout-ms
+   ::base-url ::api-key-env])
 
 ;; ============================================================
 ;; Env reads — SEON_AI_*, parsed to the attr's concrete type.
@@ -143,8 +166,9 @@
 (defn- parse-provider
   [s]
   (case s
-    "deepseek"  :deepseek
-    "anthropic" :anthropic
+    "deepseek"      :deepseek
+    "anthropic"     :anthropic
+    "openai-compat" :openai-compat
     nil))
 
 ;; attr → [env-var-name parse-fn]. parse-fn returns nil on an
@@ -157,7 +181,9 @@
    ::temperature ["SEON_AI_TEMPERATURE" parse-double*]
    ::max-tokens  ["SEON_AI_MAX_TOKENS"  parse-int*]
    ::thinking    ["SEON_AI_THINKING"    identity]
-   ::timeout-ms  ["SEON_AI_TIMEOUT_MS"  parse-int*]})
+   ::timeout-ms  ["SEON_AI_TIMEOUT_MS"  parse-int*]
+   ::base-url    ["SEON_AI_BASE_URL"    identity]
+   ::api-key-env ["SEON_AI_API_KEY_ENV" identity]})
 
 (defn env-row
   "The LLM-config attrs present in the environment — `::row`-shaped,

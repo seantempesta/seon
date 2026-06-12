@@ -1485,10 +1485,15 @@
    code, defeating the re-arm."
   []
   (case (ai/provider)
-    :anthropic (if (.. js/process -env -ANTHROPIC_API_KEY)
-                 (anthropic/agent-adapter)
-                 stub-llm)
-    (if (.. js/process -env -DEEPSEEK_API_KEY)
+    :anthropic     (if (.. js/process -env -ANTHROPIC_API_KEY)
+                     (anthropic/agent-adapter)
+                     stub-llm)
+    ;; :openai-compat rides the SAME adapter as :deepseek (the wire
+    ;; format is OpenAI's) — endpoint + key resolve per call from the
+    ;; :seon.ai/config row / SEON_AI_* env (see seon.ai.deepseek's ns
+    ;; doc). :deepseek likewise uses the shared key resolution
+    ;; (DEEPSEEK_API_KEY default, SEON_AI_API_KEY / api-key-env too).
+    (if (deepseek/api-key-configured?)
       (deepseek/agent-adapter)
       stub-llm)))
 
@@ -2030,7 +2035,7 @@
           provider (ai/provider)
           key-set? (case provider
                      :anthropic (boolean (.. js/process -env -ANTHROPIC_API_KEY))
-                     (boolean (.. js/process -env -DEEPSEEK_API_KEY)))]
+                     (deepseek/api-key-configured?))]
       (log/info-console! "seon.client"
                          (if key-set?
                            (str "using " (name provider) " LLM (API key set)")
