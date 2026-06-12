@@ -32,7 +32,8 @@
   (:require
     [cljs.pprint :as pprint]
     [clojure.string :as str]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.schema :as schema]))
 
 (def kind-render-cap
   "Per-kind rendered-chars BACKSTOP, not a working limit — findings
@@ -86,10 +87,24 @@
                     row))
             rows))))
 
-(defn- user-domain-kinds
+;; The renderable-kind entry shape — shared by [[findings-block]] (the
+;; agent's `:findings` context rung) and the inspector's findings pane
+;; (`seon.web.inspector`), so the dashboard and the prompt read ONE
+;; derivation (shared-shape rule — no twin query). `:seon.db/kind` /
+;; `:seon.db/attrs` are `store-inventory`'s own registered shapes,
+;; referenced, not re-inlined.
+(schema/register! ::rows [:vector :map])
+(schema/register! ::kind-entry
+  [:tuple :seon.db/kind :seon.db/attrs ::rows])
+
+(defn user-domain-kinds
   "The renderable kinds of db value `db` — `[[kind attrs rows] …]`,
    kind-name order (deterministic). Selection rules (a) + (b) from the
-   ns docstring."
+   ns docstring. PUBLIC: the inspector findings pane derives its
+   per-kind summary from this same fn (one truth for 'what has this
+   cluster learned' — prompt and dashboard can never disagree)."
+  {:malli/schema [:=> [:catn [::db :seon.db/db-val]]
+                  [:vector ::kind-entry]]}
   [db]
   (let [sub (substrate-kinds db)]
     (->> (db/store-inventory {:seon.db/db db})

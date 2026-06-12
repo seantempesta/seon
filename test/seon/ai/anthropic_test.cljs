@@ -1,7 +1,13 @@
 (ns seon.ai.anthropic-test
   "Tests for the Anthropic Messages API client's pure surface (C-20):
      - request-body defaults: model claude-opus-4-8, max_tokens 16000,
-       system TOP-LEVEL (:system, not a messages entry), ONE user msg
+       system TOP-LEVEL (:system, not a messages entry) as a
+       content-block ARRAY whose only block carries cache_control
+       {:type \"ephemeral\"} (prompt caching on the stable prefix —
+       live-test limitation 4), ONE user msg with NO cache_control
+       (the ctx re-renders every wake — no stable message boundary);
+       the deepseek body is UNCHANGED by the caching change (plain
+       string system message, no cache_control anywhere)
      - thinking is ADAPTIVE-ONLY: config row truthy → {:type
        \"adaptive\"}; falsy → the :thinking key is ABSENT (an explicit
        {:type \"disabled\"} 400s on Fable)
@@ -16,9 +22,11 @@
    C-18+C-20 unit report (two bounded calls, claude-opus-4-8)."
   (:require
     [cljs.test :refer [deftest is testing async]]
+    [clojure.string :as str]
     [datahike.api :as d]
     [seon.ai :as ai]
     [seon.ai.anthropic :as anthropic]
+    [seon.ai.deepseek :as deepseek]
     [seon.db :as db]))
 
 ;; ============================================================
@@ -63,11 +71,14 @@
                                                 :seon.ai/system-prompt "sys"})]
               (is (= {:model      "claude-opus-4-8"
                       :max_tokens 16000
-                      :system     "sys"
+                      :system     [{:type "text"
+                                    :text "sys"
+                                    :cache_control {:type "ephemeral"}}]
                       :messages   [{:role "user" :content "the ctx"}]}
                      body)
                   (str "no env, no row → exactly the pinned default body: "
-                       "opus-4-8, 16000 max_tokens, top-level :system, one "
+                       "opus-4-8, 16000 max_tokens, top-level :system as a "
+                       "block array with cache_control on its only block, one "
                        "user message, NO :thinking key, NO sampling params")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -141,6 +152,52 @@
                                        :seon.ai/max-tokens 256})]
                            (is (= "claude-sonnet-4-6" (:model body)))
                            (is (= 256 (:max_tokens body)))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; Prompt caching — cache_control on the stable prefix ONLY
+;; (live-test limitation 4: cache_read 0 on all 49 calls). Wire-shape
+;; pins, no live call — first live confirmation (usage
+;; :cache_read_input_tokens > 0) rides the next paid run.
+;; ============================================================
+
+(deftest cache-control-on-system-block-only
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (let [body (anthropic/request-body {:seon.ai/ctx           "the ctx"
+                                                :seon.ai/system-prompt "sys"})
+                  [sys-block & more] (:system body)]
+              (is (vector? (:system body))
+                  "system is a content-block ARRAY (a bare string can't carry a breakpoint)")
+              (is (nil? more) "exactly ONE system block")
+              (is (= {:type "ephemeral"} (:cache_control sys-block))
+                  "the last/only system block is the cache breakpoint — caches tools+system")
+              (is (= "sys" (:text sys-block)))
+              (is (= [{:role "user" :content "the ctx"}] (:messages body))
+                  (str "the user message carries NO cache_control — ctx "
+                       "re-renders every wake, a breakpoint there would only "
+                       "pay the write premium with zero reads")))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest deepseek-body-unchanged-by-anthropic-caching
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (let [body (deepseek/request-body {:seon.ai/ctx           "the ctx"
+                                               :seon.ai/system-prompt "sys"})]
+              (is (= [{:role "system" :content "sys"}
+                      {:role "user"   :content "the ctx"}]
+                     (:messages body))
+                  (str "deepseek keeps its plain-string system MESSAGE — "
+                       "cache_control is Anthropic wire vocabulary "
+                       "(deepseek's wire auto-caches)"))
+              (is (not (contains? body :system))
+                  "no top-level :system on the deepseek wire")
+              (is (not (str/includes? (pr-str body) ":cache_control"))
+                  "no cache_control anywhere in the deepseek body"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

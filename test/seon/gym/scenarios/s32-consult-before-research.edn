@@ -14,7 +14,7 @@
 ;; DEEPSEEK TIER (cheap: one agent, one message) — costs real money.
 ;; Refuses without {:seon.gym/allow-paid? true} + DEEPSEEK_API_KEY.
 {:seon.gym.scenario/id     :s32-consult-before-research
- :seon.gym.scenario/doc    "A stored finding answers the question verbatim. Pass = the first eval READS THE STORE (any seon.db query/pull/entity/store-inventory) and AT MOST ONE repo-search eval happens (re-derivation = fail even with a right answer). Judge grades the reply against the seeded envelope facts."
+ :seon.gym.scenario/doc    "A stored finding answers the question (paraphrased). Pass = no re-derivation: the first eval either READS THE STORE (any seon.db query/pull/entity/store-inventory) or acts WITHOUT a repo search (post-#26 the finding renders in the prompt, so answering directly is optimal); the same axis separately requires the seeded claim to have rendered, and AT MOST ONE repo-search eval may happen run-wide. Judge grades the reply against the seeded envelope facts."
  :seon.gym.scenario/tier   :deepseek
  :seon.gym.scenario/status :active
  :seon.gym.scenario/axes   [:consults-findings :searches-first
@@ -64,23 +64,40 @@
  :seon.gym.scenario/turns
  [{:seon.gym.turn/message "What does seon.agent/message! return — the full transact report or something smaller?"}]
  :seon.gym.scenario/predicates
- ;; WIDENED anchor (DECIDED, user 2026-06-11 — same behavior-not-
- ;; vocabulary logic as the fix-everything PRD §2 provenance widening):
- ;; "consulted first" = the first message-driven eval's SOURCE contains
- ;; a seon.db READ op (query/pull/entity/store-inventory) — ANY store
- ;; read counts, not just :my.kb-anchored ones. The previous
- ;; domain-namespace anchor (":my\\.kb\\.codebase/") punished a
- ;; vocabulary choice: an agent that queried the store through a
- ;; different attr spelling had consulted, and the answer-quality judge
- ;; below still measures whether the consult actually PAID OFF.
- ;; (Falsified in driver_test's consult-anchor tests: a no-store-read
- ;; first eval scores RED; any store-read first eval scores green. The
- ;; creation-turn tutorial evals — incl. the scripted store-inventory —
- ;; are excluded from 'first eval' by the driver's woken-by scoping.)
+ ;; RE-CUT 2026-06-12 (post-#26, opus-live-tests limitation 3): the
+ ;; old cut REQUIRED a store-read first eval — but since the #26
+ ;; salience fix renders the seeded claim into the prompt, the OPTIMAL
+ ;; first eval is a direct reply (Opus s32 run1: one reply! eval,
+ ;; judge 100/100, zero searches — scored RED). A store-consult there
+ ;; would be redundant re-derivation-FROM-STORE. Intent (user
+ ;; 2026-06-12): pass = no re-derivation, i.e. (first eval consults)
+ ;; OR (claim rendered AND zero repo searches). Composed from the
+ ;; legs already in this file, no new matching material:
+ ;;   - this pattern = the WIDENED store-read alternation (user
+ ;;     2026-06-11, behavior-not-vocabulary: ANY seon.db read op, not
+ ;;     :my.kb-anchored) OR-ed with a negative lookahead built from
+ ;;     :at-most-one-repo-search's exact search-op pattern — green
+ ;;     when the first message-driven eval reads the store OR contains
+ ;;     no repo-search op (re-derivation-first stays RED, the run-7/
+ ;;     run-8/s12-agent-B signature).
+ ;;   - "claim rendered" is the SAME-axis :seeded-claim-rendered-in-
+ ;;     prompt below — the :consults-findings axis ANDs them, so a
+ ;;     direct-reply first eval only passes the axis when the salience
+ ;;     rung actually delivered the answer.
+ ;;   - the run-wide search budget stays :at-most-one-repo-search
+ ;;     (untouched). HONEST LIMIT vs the asked OR: no single predicate
+ ;;     kind sees eval order + prompt blobs + run-wide counts at once,
+ ;;     so "zero searches" is enforced as first-eval-not-a-search here
+ ;;     plus <=1 run-wide there; a clean first eval followed by exactly
+ ;;     one late search passes mechanically where the strict OR would
+ ;;     not (>=2 still reds the card).
+ ;; (Creation-turn tutorial evals — incl. the scripted store-inventory
+ ;; — remain excluded from 'first eval' by the driver's woken-by
+ ;; scoping, falsified in driver_test's consult-anchor tests.)
  [{:seon.gym.predicate/id      :first-eval-consults-stored-findings
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/axis    :consults-findings
-   :seon.gym.predicate/pattern "seon\\.db/(query|pull|entity|store-inventory)"}
+   :seon.gym.predicate/pattern "seon\\.db/(query|pull|entity|store-inventory)|^(?![\\s\\S]*(seon\\.agent\\.search/grep|seon\\.agent\\.fs/read-file))"}
   ;; #26 salience axis, split honest (gym-upgrade U1): "the seeded
   ;; claim TEXT rendered in the prompt the agent acted on" (context
   ;; worked) scores SEPARATELY from "the first eval consulted it"

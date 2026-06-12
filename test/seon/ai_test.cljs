@@ -55,13 +55,37 @@
       "anything else is a reasoning-effort string, passed through"))
 
 ;; ============================================================
-;; env-row — reads SEON_AI_*, parses to concrete types (set/cleaned
-;; around the assertion).
+;; env-row — reads SEON_AI_*, parses to concrete types. SNAPSHOT/
+;; RESTORE, never delete-what-we-didn't-set: these tests mutate the
+;; OPERATOR's process.env, and the old js-delete teardown wiped a live
+;; SEON_AI_PROVIDER=anthropic mid-suite — a paid "Opus" gym run
+;; silently drove DeepSeek (opus-live-tests 2026-06-12, limitation 2).
 ;; ============================================================
 
-(deftest env-row-reads-and-parses-set-vars
-  (let [env (.. js/process -env)]
+(def ^:private seon-ai-env-vars
+  ["SEON_AI_PROVIDER" "SEON_AI_MODEL" "SEON_AI_TEMPERATURE"
+   "SEON_AI_MAX_TOKENS" "SEON_AI_THINKING" "SEON_AI_TIMEOUT_MS"])
+
+(defn- with-env-restored
+  "Snapshot every SEON_AI_* var on js process.env, run `body` (which
+   may aset/js-delete them freely), then restore each var to EXACTLY
+   its prior state — prior value re-asserted, originally-absent vars
+   deleted. The operator's provider steering survives the suite."
+  [body]
+  (let [env   (.. js/process -env)
+        saved (into {} (map (fn [k] [k (aget env k)])) seon-ai-env-vars)]
     (try
+      (body env)
+      (finally
+        (doseq [k seon-ai-env-vars]
+          (let [v (get saved k)]
+            (if (some? v)            ; absent js prop reads as undefined
+              (aset env k v)
+              (js-delete env k))))))))
+
+(deftest env-row-reads-and-parses-set-vars
+  (with-env-restored
+    (fn [env]
       (aset env "SEON_AI_PROVIDER" "anthropic")
       (aset env "SEON_AI_MODEL" "claude-opus-4-8")
       (aset env "SEON_AI_TEMPERATURE" "0.3")
@@ -74,34 +98,45 @@
               ::ai/max-tokens  2048
               ::ai/thinking    "true"}
              (ai/env-row))
-          "set vars parse to the attrs' concrete types; blank/unset absent")
-      (finally
-        (doseq [v ["SEON_AI_PROVIDER" "SEON_AI_MODEL" "SEON_AI_TEMPERATURE"
-                   "SEON_AI_MAX_TOKENS" "SEON_AI_THINKING" "SEON_AI_TIMEOUT_MS"]]
-          (js-delete env v))))))
+          "set vars parse to the attrs' concrete types; blank/unset absent"))))
 
 (deftest env-row-skips-unparseable-values-loudly
-  (let [env (.. js/process -env)]
-    (try
+  (with-env-restored
+    (fn [env]
+      (doseq [v seon-ai-env-vars] (js-delete env v))
       (aset env "SEON_AI_PROVIDER" "openai")          ; not a known provider
       (aset env "SEON_AI_TEMPERATURE" "warm")          ; not a number
       (aset env "SEON_AI_MAX_TOKENS" "lots")           ; not a number
       (is (= {} (ai/env-row))
-          "unparseable values are ignored (logged) — adapter defaults apply")
-      (finally
-        (doseq [v ["SEON_AI_PROVIDER" "SEON_AI_TEMPERATURE" "SEON_AI_MAX_TOKENS"]]
-          (js-delete env v))))))
+          "unparseable values are ignored (logged) — adapter defaults apply"))))
 
 (deftest provider-defaults-to-deepseek-and-reads-env-first
-  (let [env (.. js/process -env)]
-    (try
+  (with-env-restored
+    (fn [env]
       (js-delete env "SEON_AI_PROVIDER")
       (is (= :deepseek (ai/provider)) "no env, no row → deepseek")
       (aset env "SEON_AI_PROVIDER" "anthropic")
       (is (= :anthropic (ai/provider))
-          "env wins — readable pre-boot, consistent with env owning the row")
-      (finally
-        (js-delete env "SEON_AI_PROVIDER")))))
+          "env wins — readable pre-boot, consistent with env owning the row"))))
+
+(deftest with-env-restored-restores-prior-state
+  ;; The fixture's own contract: a var set BEFORE the body survives the
+  ;; body deleting it; a var absent before stays absent after the body
+  ;; sets it. This is the exact regression that flipped a paid opus run
+  ;; to deepseek.
+  (let [env (.. js/process -env)]
+    (with-env-restored
+      (fn [_]
+        (aset env "SEON_AI_PROVIDER" "anthropic")   ; "operator steering"
+        (js-delete env "SEON_AI_MODEL")             ; "operator unset"
+        (with-env-restored
+          (fn [_]
+            (js-delete env "SEON_AI_PROVIDER")      ; rude inner test
+            (aset env "SEON_AI_MODEL" "x")))
+        (is (= "anthropic" (aget env "SEON_AI_PROVIDER"))
+            "deleted-by-test operator value is re-asserted on teardown")
+        (is (nil? (aget env "SEON_AI_MODEL"))
+            "set-by-test var that was absent before is deleted on teardown")))))
 
 ;; ============================================================
 ;; Store roundtrip — current reads the row at call time; sync tx-data

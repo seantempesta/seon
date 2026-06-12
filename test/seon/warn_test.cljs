@@ -563,3 +563,53 @@
                        "fresh conn, no defects → empty string, section suppressed"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Per-check degradation (self-defeating-surfaces audit 2026-06-11
+;; finding 3): ONE throwing check must NOT kill the whole <warnings>
+;; section — it becomes its own loud :warn-check-error cluster while
+;; every healthy check still renders.
+;; ---------------------------------------------------------------------------
+
+(defn- healthy-fake-check
+  "A registry stand-in that always fires with one affected entry."
+  [_req]
+  {:seon.warn/kind     :fake-healthy
+   :seon.warn/affected [{:seon.warn/sym "warntest.main/fake-defect"}]
+   :seon.warn/explain  "a healthy check that fires"
+   :seon.warn/example  ";; nothing to fix — fixture"})
+
+(defn- throwing-fake-check
+  "A registry stand-in that throws — the broken-check failure mode
+   (datalog over an unexpected store shape, etc.)."
+  [_req]
+  (throw (ex-info "boom from fake check" {})))
+
+(deftest one-throwing-check-degrades-to-its-own-cluster
+  (async done
+    (-> (with-seeded-db
+          (fn [db]
+            (with-redefs [warn/checks [healthy-fake-check
+                                       throwing-fake-check]]
+              (let [clusters (warn/run-checks {:seon.db/db db})
+                    by-kind  (group-by :seon.warn/kind clusters)
+                    synth    (first (:warn-check-error by-kind))]
+                (is (= 2 (count clusters))
+                    "BOTH checks produced a cluster — the throw did not
+                     propagate and kill the section")
+                (is (some? (:fake-healthy by-kind))
+                    "the healthy check's warnings survive")
+                (is (some? synth) "the throw became a synthetic cluster")
+                (is (str/includes? (:seon.warn/explain synth)
+                                   "boom from fake check")
+                    "the cluster carries the throw's message")
+                (is (str/includes? (:seon.warn/explain synth)
+                                   "throwing-fake-check")
+                    "names the EXACT broken check, not 'a check'")
+                (let [text (warn/render-warnings {:seon.db/db db})]
+                  (is (str/includes? text "[fake-healthy]")
+                      "rendered block keeps the healthy cluster")
+                  (is (str/includes? text "[warn-check-error]")
+                      "and renders the broken check loudly"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

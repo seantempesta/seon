@@ -626,8 +626,16 @@
    stated purpose when given, else the acquire-your-purpose
    placeholder. Purpose is ENTITY DATA rendered by the `<your-entity>`
    section (context-v4 §2.5 — the old `:purpose`/`:your-sections` seed
-   sections died with it)."
-  [{:seon.agent/keys [id purpose]}]
+   sections died with it). `:seon.agent/turns-cap`, when given, is
+   transacted onto the entity (it only WORKS as entity data — see
+   `seon.ctx/turns-cap`); absent leaves the stored cap unchanged.
+
+   Returns `{:seon.agent/id id}` on success; on a FAILED transact the
+   db error envelope (`{:seon.db/ok? false :seon.db/error …}`) comes
+   back as-is — errors are values, the same contract as
+   `seon.agent.message/message!`. A failed create means NO agent
+   entity; callers must branch instead of chasing a ghost."
+  [{:seon.agent/keys [id purpose turns-cap]}]
   (let [fresh? (nil? (db/entity {:seon.db/ref [:seon.agent/id id]}))
         res    (await (db/transact!
                         {:seon.db/tx-data
@@ -638,14 +646,17 @@
                                    (if (and (string? purpose)
                                             (not (str/blank? purpose)))
                                      purpose
-                                     acquire-purpose-text)))]}))]
-    ;; Surface-errors-loudly: a failed create means NO agent entity —
-    ;; everything downstream (triggers, renders) would chase a ghost.
-    (when (false? (:seon.db/ok? res))
-      (js/console.error
-        (str "seon.agent/create! transact FAILED for " id ": "
-             (:seon.error/message (:seon.db/error res)))))
-    {:seon.agent/id id}))
+                                     acquire-purpose-text))
+                            (some? turns-cap)
+                            (assoc :seon.agent/turns-cap turns-cap))]}))]
+    (if (false? (:seon.db/ok? res))
+      ;; Surface-errors-loudly AND return the failure: a success-shaped
+      ;; map after a failed transact is a dishonest record.
+      (do (js/console.error
+            (str "seon.agent/create! transact FAILED for " id ": "
+                 (:seon.error/message (:seon.db/error res))))
+          res)
+      {:seon.agent/id id})))
 
 ;; ============================================================
 ;; Boot. The single entry point seon.client calls at startup.

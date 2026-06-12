@@ -116,6 +116,59 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
+;; create! — honesty + turns-cap pass-through (self-defeating-surfaces
+;; audit 2026-06-11 finding 1 + the open turns-cap register row).
+;; ============================================================
+
+(deftest create!-roundtrips-turns-cap
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (testing "the cap in the request lands as entity data"
+              (let [res (await (agent/create!
+                                 {:seon.agent/id "AGTcapround001"
+                                  :seon.agent/turns-cap 7}))]
+                (is (= {:seon.agent/id "AGTcapround001"} res)
+                    "success keeps the success shape")
+                (is (= 7 (:seon.agent/turns-cap
+                           (db/entity {:seon.db/ref
+                                       [:seon.agent/id "AGTcapround001"]})))
+                    "turns-cap is no longer dropped on the floor")
+                (is (= 7 (agent/turns-cap "AGTcapround001"))
+                    "the loop's cap read sees it (not the 20 default)")))
+            (testing "absent cap leaves the stored cap unchanged (re-create)"
+              (await (agent/create! {:seon.agent/id "AGTcapround001"}))
+              (is (= 7 (:seon.agent/turns-cap
+                         (db/entity {:seon.db/ref
+                                     [:seon.agent/id "AGTcapround001"]})))
+                  "idempotent re-create never retracts the cap"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest create!-returns-the-error-envelope-on-failed-transact
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            ;; Force the transact to FAIL via an invalid attr value —
+            ;; :seon.agent/turns-cap is :int, a string is rejected by
+            ;; the transact! validation gate.
+            (let [res (await (agent/create!
+                               {:seon.agent/id "AGTcapround002"
+                                :seon.agent/turns-cap "not-an-int"}))]
+              (is (false? (:seon.db/ok? res))
+                  "failure returns the db error envelope, NOT the
+                   success shape (errors are values, like message!)")
+              (is (map? (:seon.db/error res)) "the error map rides along")
+              (is (nil? (:seon.agent/id res))
+                  "no success key on the failure path")
+              (is (nil? (db/entity {:seon.db/ref
+                                    [:seon.agent/id "AGTcapround002"]}))
+                  "and indeed NO entity exists — anything downstream
+                   trusting the old success shape chased a ghost"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
 ;; creation-evals! — live-tiles PRD 2026-06-11 §6 U4 (minimal scope).
 ;; A MINTED agent's first logged act is the REAL tile-wiring eval:
 ;; the eval log opens with the tutorial transact, the datom lands on

@@ -128,6 +128,30 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+(deftest user-domain-kinds-is-the-shared-pane-derivation
+  ;; The inspector findings pane derives its per-kind summary from this
+  ;; PUBLIC fn — same derivation as findings-block (shared-shape rule,
+  ;; no twin query). Pins the [[kind attrs rows]] entry contract.
+  (async done
+    (-> (with-world
+          (fn ^:async t [conn]
+            (is (= [] (findings/user-domain-kinds @conn))
+                "boot-seeded store → no user-domain kinds")
+            (await (seed-scratch-kind! scratch-registrations scratch-rows))
+            (let [entries (findings/user-domain-kinds @conn)
+                  [kind attrs rows] (first entries)]
+              (is (= 1 (count entries)))
+              (is (= :my.kb.scratch kind))
+              (is (contains? attrs :my.kb.scratch/claim)
+                  "attrs map carries the kind's live attrs")
+              (is (= 2 (count rows)))
+              (is (some #(str/includes? (str (:my.kb.scratch/claim %))
+                                        "never rejects")
+                        rows)
+                  "rows are the pulled content the pane samples from"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest numeric-only-kinds-carry-nothing-to-read
   (async done
     (-> (with-world

@@ -32,6 +32,7 @@
     [clojure.string :as str]
     [datahike.api :as d]
     [seon.agent-view :as agent-view]
+    [seon.agent.findings :as findings]
     [seon.db :as db]
     [seon.agent.inspect :as inspect]
     [seon.log :as log]
@@ -114,17 +115,56 @@
                      (assoc :seon.agent/completed-at
                             (:seon.agent/completed-at ent)))))))))
 
+(def ^:private sample-attr-preference
+  "Attr NAMES whose string value makes the best one-line sample for a
+   kind, in preference order — claim/title-ish first."
+  ["claim" "title" "question" "name" "text"])
+
+(defn- kind-sample
+  "A short sample string for one user-domain kind: the first live
+   string value under the kind's OWN attrs across `rows`, preferring
+   claim/title-ish attr names. Clipped at 140 chars (display only —
+   the stored rows are complete)."
+  [kind rows]
+  (let [knm (name kind)
+        own-strings
+        (fn [row]
+          (into {}
+                (keep (fn [[a v]]
+                        (when (and (keyword? a) (= knm (namespace a)))
+                          (cond
+                            (string? v) [(name a) v]
+                            (and (sequential? v) (some string? v))
+                            [(name a) (first (filter string? v))]))))
+                row))
+        m (some #(let [s (own-strings %)] (when (seq s) s)) rows)
+        s (when m
+            (or (some m sample-attr-preference)
+                (val (first (sort-by key m)))))]
+    (when s
+      (if (> (count s) 140) (str (subs s 0 140) "…") s))))
+
 (defn- findings-data
-  "Every `:finding/*` row in the DB, oldest-first — the cluster's
-   accumulated knowledge. Cross-agent BY DESIGN: no agent filter, so a
-   finding stored by agent A renders in agent B's knowledge pane.
-   NOTE: the live attrs are bare-ns `:finding/*` (agent-authored during
-   research run 7) — rendered as-is; flagged as a schema smell."
+  "Per-KIND summary of the cluster's stored user-domain knowledge —
+   `[{::kind ::row-count ::sample} …]`, derived via
+   `seon.agent.findings/user-domain-kinds`: the SAME derivation the
+   agent's `:findings` context rung renders from, so the dashboard and
+   the prompt can never disagree (the legacy bare-ns `:finding/*`
+   query read \"0 findings\" while agents SAW findings in context).
+   Cross-agent BY DESIGN: no agent filter."
   [db]
-  (->> (d/q '[:find (pull ?e [*]) :where [?e :finding/claim]] db)
-       (map first)
-       (sort-by :db/id)
-       vec))
+  (mapv (fn [[kind _attrs rows]]
+          (cond-> {::kind      kind
+                   ::row-count (count rows)}
+            (some? (kind-sample kind rows))
+            (assoc ::sample (kind-sample kind rows))))
+        (findings/user-domain-kinds db)))
+
+(defn- findings-row-total
+  "Total stored rows across the pane's kinds — the honest headline
+   number for the knowledge group summaries."
+  [findings]
+  (transduce (map ::row-count) + 0 findings))
 
 (defn- cluster-stats
   "Headline numbers for the mission-control strip. All derived live
@@ -133,39 +173,28 @@
   {::agent-count   (count (d/q '[:find ?e :where [?e :seon.agent/id]] db))
    ::turn-count    (count (d/q '[:find ?t :where [?t :seon.agent.turn/at]] db))
    ::fn-count      (count (d/q '[:find ?e :where [?e :seon.fn/sym]] db))
-   ::finding-count (count (d/q '[:find ?e :where [?e :finding/claim]] db))
+   ;; user-domain rows, via the SAME derivation the findings rung and
+   ;; the knowledge pane read — one truth (was the legacy bare-ns
+   ;; :finding/claim count, stuck at 0 while agents saw findings).
+   ::finding-count (findings-row-total (findings-data db))
    ::datom-count   (count (d/datoms db :eavt))})
 
-(defn- confidence-pill
-  [confidence]
-  (let [verified? (= :verified confidence)]
-    [:span {:class (str "text-[10px] font-mono uppercase tracking-wider "
-                        "border rounded px-1 py-px "
-                        (if verified?
-                          "text-amber-400 border-amber-700/60 bg-amber-900/20"
-                          "text-text-400 border-base-700"))}
-     (name (or confidence :inferred))]))
-
-(defn- finding-card
-  "One knowledge card: question (dim), claim (primary), source-file:line
-   as a monospace citation, confidence pill."
-  [{:finding/keys [question claim source-file line confidence]}]
+(defn- kind-card
+  "One stored-knowledge KIND: dot+text header (kind · row count) plus a
+   sample claim/title string from its rows."
+  [{::keys [kind row-count sample]}]
   [:div {:class (str "border border-base-800 rounded p-2 bg-base-900/60 "
                      "animate-appear")}
-   (when (seq question)
-     [:div {:class "text-xs text-text-400 italic mb-1"} question])
-   [:div {:class "text-xs text-text-100 leading-snug"} claim]
-   [:div {:class "flex items-center gap-2 mt-1.5"}
-    (when (seq source-file)
-      [:span {:class "text-[10px] font-mono text-amber-500/90"}
-       (str source-file (when line (str ":" line)))])
-    [:span {:class "ml-auto"} (confidence-pill confidence)]]])
+   [:div {:class "text-xs font-mono text-amber-400"}
+    (str "● " kind " · " row-count (if (= 1 row-count) " row" " rows"))]
+   (when (seq sample)
+     [:div {:class "text-xs text-text-100 leading-snug mt-1"} sample])])
 
 (defn- knowledge-cards
   [findings]
   (into [:div {:class "grid gap-2"
                :style "grid-template-columns:repeat(auto-fill,minmax(320px,1fr));"}]
-        (map finding-card)
+        (map kind-card)
         findings))
 
 (defn- entity-kind-label
@@ -585,8 +614,11 @@
                            "bg-amber-950/20")}
      [:summary {:class (str "cursor-pointer select-none text-xs font-mono "
                             "text-amber-400 hover:text-amber-300")}
-      (str "◆ what this cluster has learned — " (count findings)
-           (if (= 1 (count findings)) " finding" " findings"))]
+      (let [total (findings-row-total findings)]
+        (str "◆ what this cluster has learned — " total
+             (if (= 1 total) " row" " rows")
+             " across " (count findings)
+             (if (= 1 (count findings)) " kind" " kinds")))]
      [:div {:class "mt-1.5"} (knowledge-cards findings)]]))
 
 (defn- thinking-bubble
@@ -1188,7 +1220,9 @@
        [:section
         [:h2 {:class (str "text-xs font-semibold text-amber-400 uppercase "
                           "tracking-wider mb-2 font-mono")}
-         (str "◆ what this cluster has learned · " (count findings))]
+         (str "◆ what this cluster has learned · "
+              (findings-row-total findings) " rows · "
+              (count findings) " kinds")]
         (knowledge-cards findings)])
      ;; Completed agents — queryable history, collapsed at the bottom.
      ;; Not resumed at boot, no trigger armed; un-complete is an explicit

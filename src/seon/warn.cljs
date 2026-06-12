@@ -862,13 +862,41 @@
    check-slow-evals
    check-failing-tests])
 
+(defn- check-name
+  "Best-effort display name for a registry fn — the demunged compiled
+   fn name (e.g. `seon.warn/check-bad-ref`)."
+  [check]
+  (let [n (.-name check)]
+    (if (seq n) (demunge n) "anonymous-check")))
+
+(defn- check-error-cluster
+  "Synthetic ::check-response for a registry check that THREW instead
+   of returning a cluster — the section degrades PER CHECK, loudly,
+   instead of one broken check killing the whole <warnings> block.
+   Self-heals: renders only while the check keeps throwing."
+  [check e]
+  (let [nm (check-name check)]
+    {:seon.warn/kind     :warn-check-error
+     :seon.warn/affected [{:seon.warn/sym nm}]
+     :seon.warn/explain  (str "warn check " nm " failed: "
+                              (or (ex-message e) (str e))
+                              " — its warnings are MISSING this render; "
+                              "every other check rendered normally.")
+     :seon.warn/example  (str ";; reproduce the throw, then fix the check:\n"
+                              "(" nm " {:seon.db/db (deref seon.db/*conn*)})")}))
+
 (defn run-checks
   "Run every registered check against the request; return only the
-   non-clean responses (those with at least one affected entry)."
+   non-clean responses (those with at least one affected entry). A
+   check that THROWS becomes its own `:warn-check-error` cluster — the
+   remaining checks still run and render (degrade per-check, loudly)."
   {:malli/schema [:=> [:cat ::check-request] [:vector ::check-response]]}
   [req]
   (->> checks
-       (map (fn [check] (check req)))
+       (map (fn [check]
+              (try (check req)
+                   (catch :default e
+                     (check-error-cluster check e)))))
        (filterv (comp seq :seon.warn/affected))))
 
 (defn- render-affected-entry
