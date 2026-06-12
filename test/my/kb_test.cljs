@@ -50,6 +50,9 @@
 (deftest the-shared-provenance-shapes-are-registered-once
   (is (= :string (schema/schema-definition :my.kb/source-path)))
   (is (= :int (schema/schema-definition :my.kb/source-line)))
+  (is (= :int (schema/schema-definition :my.kb/source-line-end))
+      "line RANGES are two ints on shared attrs (start + inclusive end) —
+       never a string, never a forked plural attr")
   (is (= :inst (schema/schema-definition :my.kb/verified-at)))
   (is (= [:enum :verified :inferred]
          (schema/schema-definition :my.kb/confidence))

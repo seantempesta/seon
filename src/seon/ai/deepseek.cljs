@@ -5,62 +5,33 @@
    compatible with `seon.agent/run-turn-once!`'s `llm-fn`. Reads the
    API key from `DEEPSEEK_API_KEY` in `process.env`.
 
+   Call settings (model, temperature, max-tokens, thinking,
+   timeout-ms) come from the `:seon.ai/config` row, read PER CALL via
+   `seon.ai/current` (C-18 — env-seeded via SEON_AI_*, runtime-tunable
+   by transact). Precedence: explicit request opt > config row > the
+   shipped defaults below. Absent env + absent row sends EXACTLY the
+   pre-C-18 wire body.
+
    The system prompt sets the agent up as a REPL and is STORE-RESIDENT:
    priority-ordered `:my.soul` rows (seeded at boot from SOUL.md +
    the REPL mechanics, runtime-editable by transact — see
-   `my.soul`), read per call by [[effective-system-prompt]] with a
-   minimal [[fallback-system-prompt]] for the store-unavailable boot
-   edge. The per-turn ctx
-   (rendered via `seon.render/ai-render` against the agent's
-   `:seon.render/ai` slot; default `'seon.agent/assemble-context`)
-   follows.
+   `my.soul`), read per call by `seon.ai/effective-system-prompt` with
+   a minimal fallback for the store-unavailable boot edge. The
+   per-turn ctx (rendered via `seon.render/ai-render` against the
+   agent's `:seon.render/ai` slot; default
+   `'seon.agent/assemble-context`) follows.
 
    No tool-calling envelope, no streaming — the agent's responses are
    parsed as Clojure forms by `seon.repl/parse-forms`, evaluated as
    a REPL batch by `seon.eval/eval-batch!`."
-  (:require [my.soul :as soul]
-            [seon.db :as db]
+  (:require [seon.ai :as ai]
             [seon.error :as error]
-            [seon.log :as log]
             [seon.schema :as schema]))
 
 ;; ============================================================
-;; Schemas — request + response shapes.
+;; Schemas — request + response shapes. The shared :seon.ai/* field
+;; vocabulary (text, model, error envelope, …) lives in seon.ai.
 ;; ============================================================
-
-(schema/register! :seon.ai/text :string)
-(schema/register! :seon.ai/model :string)
-(schema/register! :seon.ai/temperature :double)
-(schema/register! :seon.ai/max-tokens :int)
-(schema/register! :seon.ai/system-prompt :string)
-(schema/register! :seon.ai/ctx :string)
-(schema/register! :seon.ai/usage :map)
-(schema/register! :seon.ai/msg :string)
-(schema/register! :seon.ai/status :int)
-(schema/register! :seon.ai/timeout? :boolean)
-;; TRANSPORT-shaped failure: js/fetch THREW before any HTTP status
-;; arrived — DNS failure, connection refused/reset, the observed live
-;; "fetch failed" (2026-06-11). This is the ONE retryable class: the
-;; request may never have reached the provider, so one bounded retry
-;; (seon.agent's turn loop) is safe and cheap. HTTP-status errors
-;; (4xx/5xx) and unparseable bodies are PROCESSING errors (never
-;; flagged); a wall-clock abort is :seon.ai/timeout? — also never
-;; flagged, it already burned the full timeout budget.
-(schema/register! :seon.ai/transport? :boolean)
-(schema/register! :seon.ai/raw-body :string)
-
-;; The errors-are-values envelope for LLM calls. Every failure mode
-;; (timeout, fetch throw, HTTP non-2xx, unparseable body) resolves to
-;; a response map carrying this under :seon.ai/error — never a
-;; rejected Promise. Callers (seon.agent's turn loop) MUST surface it.
-(schema/register!
-  :seon.ai/error
-  [:map
-   [:seon.ai/msg        :seon.ai/msg]
-   [:seon.ai/status     {:optional true} :seon.ai/status]
-   [:seon.ai/timeout?   {:optional true} :seon.ai/timeout?]
-   [:seon.ai/transport? {:optional true} :seon.ai/transport?]
-   [:seon.ai/raw-body   {:optional true} :seon.ai/raw-body]])
 
 (schema/register!
   :seon.ai.deepseek/complete-request
@@ -80,69 +51,26 @@
    [:seon.ai/usage                   {:optional true} :map]])
 
 ;; ============================================================
-;; Config — pinned model + endpoint.
+;; Config — the shipped defaults. The :seon.ai/config row (read per
+;; call) overrides these; explicit request opts override the row.
 ;; ============================================================
 
 (def ^:private default-model       "deepseek-v4-pro")
 (def ^:private default-endpoint    "https://api.deepseek.com/chat/completions")
 (def ^:private default-temperature 0.7)
 (def ^:private default-max-tokens  4096)
-
 ;; Wall-clock timeout for the DeepSeek HTTP call. A hung API stops
 ;; wedging the agent loop — turn fails with a timeout error and the
-;; next user message kicks again. Replace via [[set-timeout-ms!]].
-(defonce !timeout-ms (atom 60000))
-
-(defn set-timeout-ms!
-  "Replace the per-call wall-clock timeout (default 60000ms). Returns
-   the new value."
-  {:malli/schema [:=> [:cat :int] :int]}
-  [ms]
-  (reset! !timeout-ms ms))
+;; next user message kicks again. Override via the config row's
+;; :seon.ai/timeout-ms (SEON_AI_TIMEOUT_MS).
+(def ^:private default-timeout-ms  60000)
 
 ;; Thinking mode (deepseek-v4-pro). The API DEFAULTS TO ENABLED, which
 ;; is slow — a long-ctx thinking call can blow past the 60s wall-clock
 ;; timeout (observed 2026-06-10: turn 4 aborted at exactly 60.8s with
-;; no reply). We send {"thinking": {"type": "disabled"}} by default for
-;; fast iteration; re-enable per-run via [[set-thinking!]].
-;;
-;; Value: false (disabled — default), true (enabled), or a
-;; reasoning-effort string "high"/"max" (enabled + "reasoning_effort").
-(defonce !thinking (atom false))
-
-(defn set-thinking!
-  "Set DeepSeek thinking mode for subsequent calls. `mode` is `false`
-   (disabled — the default), `true` (enabled), or \"high\"/\"max\"
-   (enabled with that reasoning_effort). Returns the new value."
-  {:malli/schema [:=> [:cat [:or :boolean [:enum "high" "max"]]]
-                  [:or :boolean [:enum "high" "max"]]]}
-  [mode]
-  (reset! !thinking mode))
-
-(def fallback-system-prompt
-  "Minimal boot-edge fallback ONLY — used when the store has no
-   :my.soul rows yet (or the conn is not up). The REAL system
-   prompt lives in the store as :my.soul rows, seeded at boot from
-   the repo's SOUL.md + my.soul/mechanics-text and editable at
-   runtime by transact (see my.soul)."
-  (str "You are Seon, a bonded Clojure agent. Your entire output is "
-       "read and evaluated as ClojureScript source — act by emitting "
-       "forms, narrate with ; line comments, no markdown fences."))
-
-(defn effective-system-prompt
-  "The system message content for a call: the request's explicit
-   `:seon.ai/system-prompt` override when given, else the
-   store-resident soul ([[my.soul/system-prompt-text]] — the
-   priority-ordered :my.soul rows, seeded at boot from SOUL.md and
-   runtime-editable by transact), else [[fallback-system-prompt]]
-   (store empty or unavailable). Never throws."
-  {:malli/schema [:=> [:cat :seon.ai.deepseek/complete-request]
-                  :seon.ai/system-prompt]}
-  [{:seon.ai/keys [system-prompt]}]
-  (or system-prompt
-      (try (not-empty (soul/system-prompt-text))
-           (catch :default _ nil))
-      fallback-system-prompt))
+;; no reply). We send {"thinking": {"type": "disabled"}} unless the
+;; config row's :seon.ai/thinking (SEON_AI_THINKING) turns it on:
+;; "true" → enabled, "high"/"max" → enabled + that reasoning_effort.
 
 ;; ============================================================
 ;; HTTP — js/fetch + ^:async/await. Errors return as values on the
@@ -161,19 +89,22 @@
    (:model, :messages, :thinking, …) are the DeepSeek API's wire
    format — a third-party boundary, deliberately un-namespaced.
 
-   Public so tests and live debugging can inspect exactly what goes
-   over the wire — in particular the thinking toggle ([[!thinking]]):
-   disabled by default, {:thinking {:type \"enabled\"}} (+ optional
-   :reasoning_effort) when [[set-thinking!]] turned it on."
+   Reads the `:seon.ai/config` row PER CALL (`seon.ai/current`);
+   explicit request opts win over the row, the row wins over the
+   shipped defaults. Public so tests and live debugging can inspect
+   exactly what goes over the wire — in particular the thinking
+   toggle: disabled unless the row turns it on
+   ({:thinking {:type \"enabled\"}} + optional :reasoning_effort)."
   {:malli/schema [:=> [:cat :seon.ai.deepseek/complete-request] :map]}
   [{:seon.ai/keys [ctx model temperature max-tokens] :as request}]
-  (let [thinking @!thinking]
+  (let [cfg      (ai/current)
+        thinking (ai/thinking-mode cfg)]
     (cond->
-      {:model       (or model default-model)
-       :messages    [{:role "system" :content (effective-system-prompt request)}
+      {:model       (or model (:seon.ai/model cfg) default-model)
+       :messages    [{:role "system" :content (ai/effective-system-prompt request)}
                      {:role "user"   :content ctx}]
-       :temperature (or temperature default-temperature)
-       :max_tokens  (or max-tokens default-max-tokens)
+       :temperature (or temperature (:seon.ai/temperature cfg) default-temperature)
+       :max_tokens  (or max-tokens (:seon.ai/max-tokens cfg) default-max-tokens)
        :thinking    {:type (if thinking "enabled" "disabled")}
        :stream      false}
       (string? thinking) (assoc :reasoning_effort thinking))))
@@ -194,24 +125,6 @@
                                               (error/->message e))
                        :seon.ai/raw-body body-text}})))
 
-(defn- log-error!
-  "ERROR-log an LLM failure with the live agent + turn identity (read
-   from the ALS scopes seon.agent establishes around each turn) so a
-   timed-out/failed call is NEVER silent in logs/pod.log. Best-effort —
-   never throws."
-  [error-map]
-  (try
-    (let [agent-id (db/current-agent-id)
-          turn-id  (:seon.db/turn-id (db/current-tx-context))]
-      (log/error!
-        (cond-> {:seon.log/source  ::complete
-                 :seon.log/message (str "DeepSeek call failed"
-                                        (when turn-id (str " (turn " turn-id ")"))
-                                        " — " (:seon.ai/msg error-map))
-                 :seon.log/data    error-map}
-          agent-id (assoc :seon.log/agent agent-id))))
-    (catch :default _ nil)))
-
 (defn ^:async complete
   "Send a completion request to DeepSeek. Returns a Promise of a
    `:seon.ai.deepseek/complete-response` map.
@@ -219,22 +132,19 @@
    Request opts (only :seon.ai/ctx required):
      :seon.ai/ctx           — the full ctx text (required)
      :seon.ai/system-prompt — overrides the store-resident soul
-                              (see [[effective-system-prompt]])
-     :seon.ai/model         — override default-model
-     :seon.ai/temperature   — override default-temperature
-     :seon.ai/max-tokens    — override default-max-tokens
+                              (see `seon.ai/effective-system-prompt`)
+     :seon.ai/model         — override config row / default-model
+     :seon.ai/temperature   — override config row / default-temperature
+     :seon.ai/max-tokens    — override config row / default-max-tokens
 
    Network/HTTP failures resolve to `{:seon.ai/text \"\" :seon.ai/error
    {…}}` (per spec-02 §2.5: safe-by-default at the boundary). Callers
    destructure both `:seon.ai/text` and `:seon.ai/error`."
   {:malli/schema [:=> [:cat :seon.ai.deepseek/complete-request]
                   :seon.ai.deepseek/complete-response]}
-  [{:seon.ai/keys [ctx system-prompt model temperature max-tokens]
-    :or {model       default-model
-         temperature default-temperature
-         max-tokens  default-max-tokens}}]
+  [request]
   (let [controller (js/AbortController.)
-        ms         @!timeout-ms
+        ms         (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
         timer      (js/setTimeout #(.abort controller) ms)]
     (try
       (let [resp (await (js/fetch default-endpoint
@@ -243,13 +153,7 @@
                              :signal  (.-signal controller)
                              :headers {:Content-Type  "application/json"
                                        :Authorization (str "Bearer " (api-key))}
-                             :body    (body-json
-                                        (cond-> {:seon.ai/ctx         ctx
-                                                 :seon.ai/model       model
-                                                 :seon.ai/temperature temperature
-                                                 :seon.ai/max-tokens  max-tokens}
-                                          system-prompt
-                                          (assoc :seon.ai/system-prompt system-prompt)))})))
+                             :body    (body-json request)})))
             body-text (await (.text resp))
             _         (js/clearTimeout timer)
             result    (if (.-ok resp)
@@ -259,7 +163,7 @@
                                                               ": " body-text)
                                          :seon.ai/status (.-status resp)}})]
         (when-let [err (:seon.ai/error result)]
-          (log-error! err))
+          (ai/log-error! "DeepSeek" err))
         result)
       (catch :default e
         (js/clearTimeout timer)
@@ -276,7 +180,7 @@
                          ;; transport failure — the one retryable class
                          ;; (see the :seon.ai/transport? registration).
                          (not aborted?) (assoc :seon.ai/transport? true))]
-          (log-error! err)
+          (ai/log-error! "DeepSeek" err)
           {:seon.ai/text  ""
            :seon.ai/error err})))))
 

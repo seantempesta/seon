@@ -55,6 +55,8 @@
     ;; schemas are registered before start-agent! runs.
     [seon.agent :as agent]
     [seon.ctx :as ctx]
+    [seon.ai :as ai]
+    [seon.ai.anthropic :as anthropic]
     [seon.ai.deepseek :as deepseek]
     [seon.db :as db]
     [seon.eval :as seval]
@@ -1469,17 +1471,22 @@
     (.then (.resolve js/Promise nil) (fn [_] {:text text}))))
 
 (defn- current-llm-fn
-  "The llm-fn for this pod process: the DeepSeek adapter when
-   DEEPSEEK_API_KEY is set, else the stub. Single selection point —
-   `-main` and the hot-reload re-arm both call it. Rebuilt FRESH at
-   each call (not cached) so a hot reload of seon.ai.deepseek takes
-   effect on re-armed listeners; a registry of boot-time llm-fn
-   closures would pin agents to pre-reload adapter code, defeating
-   the re-arm."
+  "The llm-fn for this pod process: the provider the `:seon.ai/config`
+   row / SEON_AI_PROVIDER selects (`seon.ai/provider` — default
+   :deepseek, C-20) when its API key is set, else the stub. Single
+   selection point — `-main` and the hot-reload re-arm both call it.
+   Rebuilt FRESH at each call (not cached) so a hot reload of the
+   adapter ns takes effect on re-armed listeners; a registry of
+   boot-time llm-fn closures would pin agents to pre-reload adapter
+   code, defeating the re-arm."
   []
-  (if (.. js/process -env -DEEPSEEK_API_KEY)
-    (deepseek/agent-adapter)
-    stub-llm))
+  (case (ai/provider)
+    :anthropic (if (.. js/process -env -ANTHROPIC_API_KEY)
+                 (anthropic/agent-adapter)
+                 stub-llm)
+    (if (.. js/process -env -DEEPSEEK_API_KEY)
+      (deepseek/agent-adapter)
+      stub-llm)))
 
 (defn- live-agent-ids
   "Agent ids whose `:seon.agent/state` is `:idle` or `:running` AND
@@ -1889,6 +1896,10 @@
                 ;; scenario worlds run the boot's OWN code path (one
                 ;; mechanism — the hand-mirrored copy drifted twice).
                 _ (await (boot-seed! {:seon.db/conn conn}))
+                ;; C-18: sync the :seon.ai/config row to the SEON_AI_*
+                ;; env vars (env owns the row across boots). Fire-and-
+                ;; forget — sync! never rejects, logs its own failures.
+                _ (ai/sync!)
                 ;; Install the per-agent inspector tx-listener. Pushes
                 ;; morphs for the agent-view inspector page (/agent/<id>).
                 _ (seon.web.inspector/install!)]
@@ -1989,11 +2000,16 @@
   ;; Cheap default for dev iteration — browser hits the loopback port,
   ;; no REPL needed. Disable when running the bare smoke test alone.
   (when-not (.. js/process -env -SEON_NO_AUTO_BOOT)
-    (let [llm-fn (current-llm-fn)]
+    (let [llm-fn   (current-llm-fn)
+          provider (ai/provider)
+          key-set? (case provider
+                     :anthropic (boolean (.. js/process -env -ANTHROPIC_API_KEY))
+                     (boolean (.. js/process -env -DEEPSEEK_API_KEY)))]
       (log/info-console! "seon.client"
-                         (if (.. js/process -env -DEEPSEEK_API_KEY)
-                           "using DeepSeek LLM (DEEPSEEK_API_KEY set)"
-                           "using stub LLM (DEEPSEEK_API_KEY unset)"))
+                         (if key-set?
+                           (str "using " (name provider) " LLM (API key set)")
+                           (str "using stub LLM (" (name provider)
+                                " selected but its API key is unset)")))
       (-> (start-agent! {:llm-fn llm-fn})
           (.then (fn [{:seon.agent/keys [id ns]
                        :seon.client/keys [resumed-ids minted-ids]

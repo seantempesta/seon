@@ -47,6 +47,9 @@
     [clojure.string :as str]
     [cljs.pprint :as pprint]
     [cljs.reader :as edn]
+    ;; load-only: provides the :findings section fn (late-bound symbol
+    ;; slot in substrate-default-ctx — the require puts it in the build).
+    [seon.agent.findings]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
@@ -794,9 +797,10 @@
     "redefine them.\n"
     "\n"
     "STANDING TEACHINGS:\n"
-    "- Consult stored knowledge FIRST: run (seon.db/store-inventory) —\n"
-    "  your creation turn already did; the result is in your transcript\n"
-    "  — and datalog the existing attrs before any research. Prior\n"
+    "- Consult stored knowledge FIRST: the <findings> section renders\n"
+    "  stored user-domain rows IN FULL — read them before any research;\n"
+    "  run (seon.db/store-inventory) — your creation turn already did —\n"
+    "  and datalog the existing attrs for anything not shown. Prior\n"
     "  agents already answered many questions; re-deriving a stored\n"
     "  answer is wasted turns.\n"
     "- Store what you verify, without being asked: design (or reuse) a\n"
@@ -1643,9 +1647,12 @@
                        :your-entity, before :warnings)
      5. :warnings    — current problems; reactive, vanishes when fixed
      6. :open-todos  — the agent's open work items; derived, vanishes
-     7. :transcript  — ONE threaded REPL stream: messages + evals
+     7. :findings    — stored user-domain rows IN FULL (the salience
+                       rung — content, not just attr names); derived,
+                       vanishes when the store holds none
+     8. :transcript  — ONE threaded REPL stream: messages + evals
                        chronological, append-only within a session
-     8. :prompt      — the §2.9 status line + clean REPL prompt
+     9. :prompt      — the §2.9 status line + clean REPL prompt
                        (always changing — the volatile tail's end)
 
    The dead sections (capabilities, exemplars, schema-catalog,
@@ -1667,6 +1674,8 @@
     :seon.render/ai 'seon.ctx/warnings-section}
    {:seon.ctx/name :open-todos   :seon.ctx/priority 45
     :seon.render/ai 'seon.agent.todo/open-todos-section}
+   {:seon.ctx/name :findings     :seon.ctx/priority 48
+    :seon.render/ai 'seon.agent.findings/findings-section}
    {:seon.ctx/name :transcript   :seon.ctx/priority 50
     :seon.render/ai 'seon.ctx/transcript-section}
    {:seon.ctx/name :prompt       :seon.ctx/priority 99

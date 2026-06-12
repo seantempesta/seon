@@ -208,9 +208,9 @@ elsewhere as noted.
 | 15 | **Identity-seed filename hardcoded** (`SOUL.md`) — downstream wants `SEON_SOUL_FILE` env + `AGENTS.md` fallback | Wave C addendum C-15 |
 | 16 | **Substrate-generic REPL discipline lives in downstream identity files** — hiccup tile rules, clipped-results discipline, never-write-expected-results, kb provenance | Wave C addendum C-16 (AFTER the paid measure — it changes measured context) |
 | 17 | **Branding not customizable** (BUG per user; demo-relevant Jun 12) — hardcoded "seon ·" titles/h1, `data-theme "phosphor"` | **DONE — 24671ca** (brand rows + `SEON_BRAND_NAME`/`SEON_BRAND_CSS`; live-proved Acme↔seon roundtrip) |
-| 18 | **LLM settings fork-to-change** (user, relayed) — DeepSeek model/endpoint/temp/max-tokens are private defs, thinking is a REPL-only atom; downstream needs override (e.g. thinking ON) | Wave C addendum C-18 — `:seon.ai/config` row, env-seeded, C-17 pattern; after the paid measure |
+| 18 | **LLM settings fork-to-change** (user, relayed) — DeepSeek model/endpoint/temp/max-tokens are private defs, thinking is a REPL-only atom; downstream needs override (e.g. thinking ON) | **DONE 2026-06-11 night (one unit with 20)** — `seon.ai` ns: `:seon.ai/config` singleton row (provider/model/temperature/max-tokens/thinking/timeout-ms), `SEON_AI_*` env owns the row (C-17 sync contract), read PER CALL by both adapters; `!thinking`/`set-thinking!`/`!timeout-ms` atoms FOLDED into the row (no parallel mechanism); absent env+row → byte-identical deepseek wire body (pinned by full-map test + live read); live-proved transact→same-call pickup→sync-retract roundtrip on the running pod, no restart |
 | 19 | **Model-authored result-comments indistinguishable from real results in the transcript** — fake `;; =>` narration survives the A2 parser (correctly doesn't eval) but later turns trust it as a real read (downstream F13/F14 fabrication incidents) | Wave C addendum C-19 — render-side rewrite to `;; [unverified narration]`; post-measure; downstream soul-rule mitigation in place |
-| 20 | **Anthropic provider support** (user, direct) — latest Claude models, default `claude-opus-4-8`; key already in env | Wave C addendum C-20 — ONE UNIT with C-18 (`:seon.ai/provider` on the config row + `anthropic.cljs` adapter); API specifics pinned in the PRD item |
+| 20 | **Anthropic provider support** (user, direct) — latest Claude models, default `claude-opus-4-8`; key already in env | **DONE 2026-06-11 night (one unit with 18)** — `seon.ai.anthropic` (same agent-adapter contract as deepseek; adaptive-only thinking truthy→adaptive/falsy→OMIT, sampling params never sent, top-level `:system`, typed content-block parse, `stop_reason` checked incl. refusal→error envelope); provider selection in `client/current-llm-fn` off the config row (`SEON_AI_PROVIDER`), deepseek stays default; live-proved with two bounded real API calls on `claude-opus-4-8` (\"OK\" end_turn; adaptive-thinking call accepted, correct arithmetic) |
 
 **Future PRD row (explicitly OUT of scope for the asks-1–3 unit):** a
 **release-bundle target** — a self-contained artifact (compiled pod +
@@ -225,6 +225,26 @@ pointed at a checkout; the bundle is the next rung.
 | first render can race the boot brand-sync (~300ms window observed live: defaults render before the env tx lands; self-heals next request). `sync!` is fire-and-forget from `install!`; hard guarantee needs `install!` awaited in `start-agent!` | `web/brand.cljs` / `client.cljs` | accept self-heal for now; fold the await into the next client.cljs boot unit |
 | CONFIRMED AGAIN: MCP default `:client` runtime ≠ the pod (cost the unit one misleading "empty store" read; pid mismatch live-verified) | stale-MCP-runtime row | evidence appended to the existing open row |
 | `agents-dash-fragment` renders agent-authored tile content containing a bare `<h1>` — second h1 on the page (pre-existing, structural-HTML) | inspector dash | small unit: demote/strip headings in embedded tile content |
+
+## Salience unit (#26) smells (2026-06-12Z)
+
+| Smell | Where | Disposition |
+|---|---|---|
+| twin provenance query — `findings.cljs/substrate-kinds` duplicates store-inventory's derivation (`db.cljs` ~801; seon.db was outside the unit's fence) | findings.cljs / db.cljs | S refactor: store-inventory exposes the kind-set (or rows carry `:seon.db/substrate?`); findings consumes it — shared-shape rule |
+| **inspector findings pane is legacy bare-ns `:finding/*`** — dashboard tile reads "0 findings" while agents now SEE findings in context. DEMO-VISIBLE inconsistency | `web/inspector.cljs:117-137` | S, TONIGHT if time: point the pane at the same user-domain derivation |
+| `cap-result`-family helpers in ctx.cljs are near-triplets of the new `cap-kind` loud-truncation marker — wording drift risk (already bit a test draft) | ctx.cljs | S: one shared loud-truncate helper |
+| datahike-cljs rejects `clojure.string/starts-with?` as a datalog predicate (JVM datahike resolves it) — parity gap, confirmed live | datahike-cljs fork | register; fork/wire backlog with the DIS false-empty row |
+| context component note not updated with the `:findings` section | docs | folded into task #17 docs batch |
+
+## C-18+C-20 unit smells (2026-06-12Z)
+
+| Smell | Where | Disposition |
+|---|---|---|
+| `index-substrate!` reads source files from DISK at test runtime — a concurrent agent editing `my/*.cljs` between compile and run misaligns `:seon.fn/source` (caused 3 spurious suite failures, clean on re-run). Shared-tree race, structural | boot indexer / test harness | register; candidate fix: index from the compiled/analyzer view, not a second disk read (code-as-data rule — one mechanism) |
+| dev-hook convention checker reports "missing :malli/schema" for fns that DON'T EXIST in the written file (analyzed a stale/wrong target on NEW `.cljs` files, twice) | dev hook | investigation S — false feedback trains agents to ignore the hook |
+| clj-kondo OOM'd (Java heap) twice linting `client.cljs`; edits succeeded on retry but lint SILENTLY SKIPPED — fail-loud violation | dev hook lint stage | S: surface the skip loudly; look at heap ceiling |
+| boot-path `(ai/sync!)` wired in `start-agent!` but not yet exercised by a real boot (restart was fenced) — fn live-proved standalone | client.cljs boot | exercise + verify on the demo-readiness sweep's pod restart tonight |
+| `my/soul.cljs:81` docstring cites nonexistent `seon.ai.deepseek/default-system-prompt` (pre-existing staleness; file owned by the in-flight salience agent) | my/soul.cljs | fold into whichever unit lands it; re-check after salience unit |
 
 ## Post-Wave-B measure — verdicts + smells (2026-06-12Z collection)
 

@@ -1,0 +1,357 @@
+(ns seon.ai
+  "Shared LLM surface (fix-everything PRD C-18 + C-20) — the provider
+   call settings are DATA, not compiled constants. A downstream
+   deployment retunes the LLM (provider, model, thinking, budgets)
+   without forking an adapter ns.
+
+   One singleton row (identity `::id` = \"config\") carries up to six
+   attrs: `::provider`, `::model`, `::temperature`, `::max-tokens`,
+   `::thinking`, `::timeout-ms`. Adapters ([[seon.ai.deepseek]],
+   [[seon.ai.anthropic]]) read it PER CALL via [[current]] —
+   reactive-context: no cached atom, absent row/attr = each adapter's
+   shipped defaults, byte-identical wire bodies to the pre-C-18 output.
+
+   ENV OWNS THE ROW. [[sync!]] (called from `seon.client/start-agent!`
+   at boot) syncs the row to the `SEON_AI_*` env vars: set → asserted,
+   unset → retracted (same contract as `seon.web.brand` — booting
+   WITHOUT the env vars must return the defaults; the LLM config is
+   the deployment's configuration, not the store's memory). A runtime
+   transact against the row survives within a pod run; the next boot
+   re-syncs from env.
+
+   `::thinking` is stored as a STRING (the env var's shape):
+   \"false\" (off — the default), \"true\" (on), or a reasoning-effort
+   string like \"high\"/\"max\". [[thinking-mode]] parses it to the
+   value adapters consume (false / true / effort string). This row
+   REPLACES deepseek's old `!thinking` + `set-thinking!` atom and its
+   `!timeout-ms` + `set-timeout-ms!` — one mechanism, no parallel
+   knobs.
+
+   This ns also owns the shared `:seon.ai/*` schema vocabulary (the
+   errors-are-values envelope, request/response field shapes) and the
+   provider-agnostic system-prompt resolution — both providers send
+   the same store-resident soul."
+  (:require [clojure.string :as str]
+            [my.soul :as soul]
+            [seon.db :as db]
+            [seon.log :as log]
+            [seon.schema :as schema]))
+
+;; ============================================================
+;; Shared schemas — the :seon.ai/* vocabulary both providers use.
+;; (Moved here from seon.ai.deepseek — the keywords' namespace now
+;; matches the code ns that registers them.)
+;; ============================================================
+
+(schema/register! ::text :string)
+(schema/register! ::model :string)
+(schema/register! ::temperature :double)
+(schema/register! ::max-tokens :int)
+(schema/register! ::system-prompt :string)
+(schema/register! ::ctx :string)
+(schema/register! ::usage :map)
+(schema/register! ::msg :string)
+(schema/register! ::status :int)
+(schema/register! ::timeout? :boolean)
+;; TRANSPORT-shaped failure: js/fetch THREW before any HTTP status
+;; arrived — DNS failure, connection refused/reset, the observed live
+;; "fetch failed" (2026-06-11). This is the ONE retryable class: the
+;; request may never have reached the provider, so one bounded retry
+;; (seon.agent's turn loop) is safe and cheap. HTTP-status errors
+;; (4xx/5xx) and unparseable bodies are PROCESSING errors (never
+;; flagged); a wall-clock abort is :seon.ai/timeout? — also never
+;; flagged, it already burned the full timeout budget.
+(schema/register! ::transport? :boolean)
+(schema/register! ::raw-body :string)
+
+;; The errors-are-values envelope for LLM calls. Every failure mode
+;; (timeout, fetch throw, HTTP non-2xx, unparseable body, refusal)
+;; resolves to a response map carrying this under :seon.ai/error —
+;; never a rejected Promise. Callers (seon.agent's turn loop) MUST
+;; surface it.
+(schema/register!
+  ::error
+  [:map
+   [::msg        ::msg]
+   [::status     {:optional true} ::status]
+   [::timeout?   {:optional true} ::timeout?]
+   [::transport? {:optional true} ::transport?]
+   [::raw-body   {:optional true} ::raw-body]])
+
+;; ============================================================
+;; The config row — :seon.ai/config singleton (identity ::id "config").
+;; ============================================================
+
+(schema/register! ::id [:string {:seon.db/identity true}])  ; always "config"
+(schema/register! ::provider [:enum :deepseek :anthropic])
+;; "false" | "true" | reasoning-effort string ("high"/"max"/…). Stored
+;; as the env var's string shape; [[thinking-mode]] is the parse.
+(schema/register! ::thinking [:string {:min 1}])
+(schema/register! ::timeout-ms :int)
+
+;; The config attrs a row (or the env) may carry — shared shape for
+;; [[sync-tx-data]]'s two inputs and the row read.
+(schema/register! ::row
+  [:map
+   [::provider   {:optional true} ::provider]
+   [::model      {:optional true} ::model]
+   [::temperature {:optional true} ::temperature]
+   [::max-tokens {:optional true} ::max-tokens]
+   [::thinking   {:optional true} ::thinking]
+   [::timeout-ms {:optional true} ::timeout-ms]])
+
+(schema/register! ::config
+  [:map {:seon.db/entity true}
+   [::id          ::id]
+   [::provider    {:optional true} ::provider]
+   [::model       {:optional true} ::model]
+   [::temperature {:optional true} ::temperature]
+   [::max-tokens  {:optional true} ::max-tokens]
+   [::thinking    {:optional true} ::thinking]
+   [::timeout-ms  {:optional true} ::timeout-ms]])
+
+(schema/register! ::synced? :boolean)
+(schema/register! ::sync-request
+  [:map
+   [::row {:optional true} ::row]
+   [::env ::row]])
+(schema/register! ::sync-response [:map [::synced? ::synced?]])
+
+;; The attr order is the sync + row-read iteration order.
+(def ^:private config-attrs
+  [::provider ::model ::temperature ::max-tokens ::thinking ::timeout-ms])
+
+;; ============================================================
+;; Env reads — SEON_AI_*, parsed to the attr's concrete type.
+;; ============================================================
+
+(defn- env-val
+  "process.env value for `var-name`, or nil when unset/blank (or when
+   there is no Node process env at all)."
+  [var-name]
+  (let [v (some-> (.. js/globalThis -process) (.-env) (aget var-name))]
+    (when (and (string? v) (not (str/blank? v))) v)))
+
+(defn- parse-double*
+  [s]
+  (let [v (js/parseFloat s)] (when-not (js/isNaN v) v)))
+
+(defn- parse-int*
+  [s]
+  (let [v (js/parseInt s 10)] (when-not (js/isNaN v) v)))
+
+(defn- parse-provider
+  [s]
+  (case s
+    "deepseek"  :deepseek
+    "anthropic" :anthropic
+    nil))
+
+;; attr → [env-var-name parse-fn]. parse-fn returns nil on an
+;; unparseable value — [[env-row]] logs LOUDLY and skips it (a typo'd
+;; SEON_AI_TEMPERATURE must not take the boot down, but must never be
+;; silent either).
+(def ^:private env-var-specs
+  {::provider    ["SEON_AI_PROVIDER"    parse-provider]
+   ::model       ["SEON_AI_MODEL"       identity]
+   ::temperature ["SEON_AI_TEMPERATURE" parse-double*]
+   ::max-tokens  ["SEON_AI_MAX_TOKENS"  parse-int*]
+   ::thinking    ["SEON_AI_THINKING"    identity]
+   ::timeout-ms  ["SEON_AI_TIMEOUT_MS"  parse-int*]})
+
+(defn env-row
+  "The LLM-config attrs present in the environment — `::row`-shaped,
+   only the keys whose SEON_AI_* var is set, non-blank, and parseable.
+   An unparseable value logs LOUDLY and is skipped."
+  {:malli/schema [:=> [:cat] ::row]}
+  []
+  (reduce-kv
+    (fn [m attr [var-name parse]]
+      (if-let [raw (env-val var-name)]
+        (if-some [v (parse raw)]
+          (assoc m attr v)
+          (do (log/error-console!
+                "seon.ai"
+                (str var-name " is set but unparseable — IGNORED "
+                     "(adapter defaults apply): " (pr-str raw)))
+              m))
+        m))
+    {}
+    env-var-specs))
+
+;; ============================================================
+;; The row read + effective config.
+;; ============================================================
+
+(defn- row
+  "The config row's attrs from db value `db` as a `::row` map, or nil
+   when no `::id` \"config\" entity exists. An existing entity with no
+   config attrs returns {} (distinct from nil — retracts may target
+   it)."
+  [db]
+  (when-let [e (ffirst (db/query {:seon.db/query '[:find ?e
+                                                   :where [?e ::id "config"]]
+                                  :seon.db/db db}))]
+    (let [ent (db/entity {:seon.db/db db :seon.db/ref e})]
+      (into {}
+            (keep (fn [attr]
+                    (when-some [v (get ent attr)] [attr v])))
+            config-attrs))))
+
+(defn current
+  "The config row's set attrs — `::row`-shaped, possibly {}. Adapters
+   call this PER CALL (reactive-context — no cache) and apply their
+   own defaults for absent keys: explicit request opt > config row >
+   adapter default. 0-arity reads the ambient `seon.db/*conn*` and
+   NEVER throws ({} on the conn-not-up boot edge); 1-arity takes an
+   explicit db value."
+  {:malli/schema [:function
+                  [:=> [:cat] ::row]
+                  [:=> [:catn [::db :seon.db/db-val]] ::row]]}
+  ([] (or (try (some-> db/*conn* deref row)
+               (catch :default _ nil))
+          {}))
+  ([db] (or (row db) {})))
+
+(schema/register! ::thinking-value
+  [:or :boolean [:string {:min 1}]])
+
+(defn thinking-mode
+  "Parse a `::row` map's `::thinking` string to the value adapters
+   consume: absent or \"false\" → false (off — the default),
+   \"true\" → true, anything else → the string itself (a
+   reasoning-effort level like \"high\"/\"max\")."
+  {:malli/schema [:=> [:catn [::row ::row]] ::thinking-value]}
+  [{::keys [thinking]}]
+  (case thinking
+    (nil "false") false
+    "true"        true
+    thinking))
+
+(defn provider
+  "The active LLM provider: SEON_AI_PROVIDER env (readable BEFORE the
+   conn is up — `seon.client/-main` selects the llm-fn pre-boot), else
+   the config row's `::provider`, else `:deepseek`. Env-first is
+   consistent with env owning the row."
+  {:malli/schema [:=> [:cat] ::provider]}
+  []
+  (or (::provider (env-row))
+      (::provider (current))
+      :deepseek))
+
+;; ============================================================
+;; Shared system-prompt resolution — both providers send the same
+;; store-resident soul.
+;; ============================================================
+
+(def fallback-system-prompt
+  "Minimal boot-edge fallback ONLY — used when the store has no
+   :my.soul rows yet (or the conn is not up). The REAL system
+   prompt lives in the store as :my.soul rows, seeded at boot from
+   the repo's SOUL.md + my.soul/mechanics-text and editable at
+   runtime by transact (see my.soul)."
+  (str "You are Seon, a bonded Clojure agent. Your entire output is "
+       "read and evaluated as ClojureScript source — act by emitting "
+       "forms, narrate with ; line comments, no markdown fences."))
+
+(schema/register! ::prompt-request
+  [:map [::system-prompt {:optional true} ::system-prompt]])
+
+(defn effective-system-prompt
+  "The system message content for a call: the request's explicit
+   `:seon.ai/system-prompt` override when given, else the
+   store-resident soul (`my.soul/system-prompt-text` — the
+   priority-ordered :my.soul rows, seeded at boot from SOUL.md and
+   runtime-editable by transact), else [[fallback-system-prompt]]
+   (store empty or unavailable). Never throws."
+  {:malli/schema [:=> [:cat ::prompt-request] ::system-prompt]}
+  [{::keys [system-prompt]}]
+  (or system-prompt
+      (try (not-empty (soul/system-prompt-text))
+           (catch :default _ nil))
+      fallback-system-prompt))
+
+;; ============================================================
+;; Shared error logging — a failed LLM call is NEVER silent.
+;; ============================================================
+
+(schema/register! ::provider-label [:string {:min 1}])
+
+(defn log-error!
+  "ERROR-log an LLM failure with the live agent + turn identity (read
+   from the ALS scopes seon.agent establishes around each turn) so a
+   timed-out/failed call is NEVER silent in logs/pod.log.
+   `provider-label` names the provider (\"DeepSeek\"/\"Anthropic\").
+   Best-effort — never throws."
+  {:malli/schema [:=> [:catn [::provider-label ::provider-label]
+                       [::error ::error]]
+                  :nil]}
+  [provider-label error-map]
+  (try
+    (let [agent-id (db/current-agent-id)
+          turn-id  (:seon.db/turn-id (db/current-tx-context))]
+      (log/error!
+        (cond-> {:seon.log/source  ::complete
+                 :seon.log/message (str provider-label " call failed"
+                                        (when turn-id (str " (turn " turn-id ")"))
+                                        " — " (::msg error-map))
+                 :seon.log/data    error-map}
+          agent-id (assoc :seon.log/agent agent-id))))
+    (catch :default _ nil))
+  nil)
+
+;; ============================================================
+;; Boot sync — env owns the row (same contract as seon.web.brand).
+;; ============================================================
+
+(defn sync-tx-data
+  "Tx-data syncing the config row to the environment (pure — both
+   inputs are passed in). For each config attr:
+     - env has a value ≠ the row's        → assert (identity upsert);
+     - env lacks it but the row has it    → retract;
+     - equal, or absent on both           → nothing.
+   `::row` absent/nil = no config entity exists (retracts impossible).
+   Empty result = nothing to do."
+  {:malli/schema [:=> [:cat ::sync-request] :seon.db/tx-data]}
+  [{existing ::row env ::env}]
+  (let [asserts  (reduce (fn [m attr]
+                           (if-some [v (get env attr)]
+                             (if (= v (get existing attr)) m (assoc m attr v))
+                             m))
+                         {} config-attrs)
+        retracts (when (some? existing)
+                   (keep (fn [attr]
+                           (when-some [v (get existing attr)]
+                             (when-not (contains? env attr)
+                               [:db/retract [::id "config"] attr v])))
+                         config-attrs))]
+    (cond-> (vec retracts)
+      (seq asserts) (conj (assoc asserts ::id "config")))))
+
+(defn ^:async sync!
+  "Sync the config row on the ambient `seon.db/*conn*` to the
+   SEON_AI_* env vars (see ns doc: env OWNS the row across boots).
+   Called from `seon.client/start-agent!` at boot; idempotent — a
+   second call with the same env transacts nothing. Failures log
+   LOUDLY and resolve `{::synced? false}` — LLM config must never take
+   the boot down."
+  {:malli/schema [:=> [:cat] ::sync-response]}
+  []
+  (try
+    (let [tx (sync-tx-data (let [existing (row @db/*conn*)]
+                             (cond-> {::env (env-row)}
+                               (some? existing) (assoc ::row existing))))]
+      (if (empty? tx)
+        {::synced? false}
+        (let [{ok?   :seon.db/ok?
+               error :seon.db/error} (await (db/transact! {:seon.db/tx-data tx}))]
+          (if ok?
+            (log/info-console! "seon.ai" "LLM config row synced from env"
+                               {:tx-ops (count tx)})
+            (log/error-console! "seon.ai"
+                                "LLM config env sync transact FAILED — adapters use the prior/default config"
+                                error))
+          {::synced? (boolean ok?)})))
+    (catch :default e
+      (log/error-console! "seon.ai" "LLM config env sync threw" e)
+      {::synced? false})))

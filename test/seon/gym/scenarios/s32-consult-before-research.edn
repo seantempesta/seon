@@ -91,9 +91,14 @@
   ;; fragment "never the raw tx-report" was contaminated: it lives in
   ;; message!'s docstring split by a line break, which verbatim
   ;; matching missed), so it can only reach a prompt via the fixture
-  ;; row rendering. EXPECTED-RED until a context rung renders finding
-  ;; CLAIM TEXT (not just attr names) into the prompt — red-first is
-  ;; the gym pinning target behavior, per the gym-upgrade PRD §4.
+  ;; row rendering. Was EXPECTED-RED while no context rung rendered
+  ;; finding CLAIM TEXT (red-first pinning, gym-upgrade PRD §4);
+  ;; EXPECTED-GREEN since 2026-06-12: the `:findings` section
+  ;; (seon.agent.findings, substrate-default-ctx priority 48) renders
+  ;; user-domain row CONTENT in full — live-proved (scratch kb row's
+  ;; claim text observed verbatim in a live agent's assembled context;
+  ;; section vanished on retraction). Red here now means the salience
+  ;; rung REGRESSED.
   {:seon.gym.predicate/id   :seeded-claim-rendered-in-prompt
    :seon.gym.predicate/kind :prompt-includes
    :seon.gym.predicate/axis :consults-findings

@@ -54,8 +54,10 @@
    [::id       ::id]
    [::text     ::text]
    [::priority ::priority]
-   [:my.kb/source-path {:optional true} :my.kb/source-path]
-   [:my.kb/confidence  {:optional true} :my.kb/confidence]])
+   [:my.kb/source-path     {:optional true} :my.kb/source-path]
+   [:my.kb/source-line     {:optional true} :my.kb/source-line]
+   [:my.kb/source-line-end {:optional true} :my.kb/source-line-end]
+   [:my.kb/confidence      {:optional true} :my.kb/confidence]])
 
 ;; --- Seed sources.
 
@@ -219,11 +221,18 @@ concluding there is no data: copy the keyword EXACTLY as
         soul (when-not (contains? have "identity") (read-soul-md))]
     (cond-> []
       soul
+      ;; Full provenance shape, line range included — agents imitate
+      ;; what is SHOWN, so the ambient seed rows carry the same
+      ;; source-line/-end attrs the my.kb teaching tells them to store
+      ;; (told-vs-shown, blind-spot #9). The range is honest: the row's
+      ;; text IS SOUL.md lines 1..N, counted from the text just read.
       (conj {::id       "identity"
              ::priority 10
              ::text     soul
-             :my.kb/source-path soul-md-path
-             :my.kb/confidence  :verified})
+             :my.kb/source-path     soul-md-path
+             :my.kb/source-line     1
+             :my.kb/source-line-end (count (str/split-lines soul))
+             :my.kb/confidence      :verified})
       (not (contains? have "repl-mechanics"))
       (conj {::id       "repl-mechanics"
              ::priority 20

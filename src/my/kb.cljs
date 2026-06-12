@@ -10,10 +10,15 @@
    example of a domain — the system-wide instruction singleton.
 
    Reference the shared provenance attrs below from your domain schemas
-   instead of re-inventing source-path/line/confidence per domain. The
-   FULL move — domain attrs registered, then ONE row mixing the domain
-   attrs with the shared :my.kb/* provenance attrs (never fork your own
-   parallel source-path/confidence):
+   instead of re-inventing source-path/line/confidence per domain.
+   Provenance ALWAYS carries :my.kb/source-line — the 1-based line you
+   read the fact from; a fact spanning lines adds :my.kb/source-line-end
+   (the inclusive last line — a range is TWO ints on the same shared
+   attrs, never a \"460-470\" string and never a forked plural attr); a
+   single-line fact just omits the end. The FULL move — domain attrs
+   registered, then ONE row mixing the domain attrs with the shared
+   :my.kb/* provenance attrs (never fork your own parallel
+   source-path/confidence/source-lines):
 
      (seon.schema/register! :my.kb.codebase/question [:string {:seon.db/identity true}])
      (seon.schema/register! :my.kb.codebase/answer   :string)
@@ -22,6 +27,8 @@
         [{:my.kb.codebase/question \"what does seon.db/transact! return on failure?\"
           :my.kb.codebase/answer   \"an envelope value with :seon.db/ok? false — it never rejects\"
           :my.kb/source-path       \"src/seon/db.cljs\"
+          :my.kb/source-line       287
+          :my.kb/source-line-end   296
           :my.kb/verified-at       (js/Date.)
           :my.kb/confidence        :verified}]})
 
@@ -37,7 +44,10 @@
 ;; --- register-once rule: every my.kb.<domain> schema references these
 ;; --- instead of inlining its own copy).
 
-(schema/register! ::source-path :string)  ; repo-relative or absolute file path
-(schema/register! ::source-line :int)     ; 1-based line the fact was read from
-(schema/register! ::verified-at :inst)    ; when the fact was last verified
+(schema/register! ::source-path :string)     ; repo-relative or absolute file path
+(schema/register! ::source-line :int)        ; 1-based line the fact was read from
+                                             ; (the FIRST line, when citing a range)
+(schema/register! ::source-line-end :int)    ; inclusive last line of a multi-line
+                                             ; fact; single-line facts omit it
+(schema/register! ::verified-at :inst)       ; when the fact was last verified
 (schema/register! ::confidence  [:enum :verified :inferred])

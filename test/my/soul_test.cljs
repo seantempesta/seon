@@ -3,7 +3,7 @@
    from SOUL.md + the REPL mechanics, SEED-ONLY-IF-ABSENT (a runtime
    edit survives reboot — the user-facing promise), priority-joined by
    system-prompt-text, and read by the LLM call path
-   (seon.ai.deepseek/effective-system-prompt → request-body's system
+   (seon.ai/effective-system-prompt → request-body's system
    message). All on a FRESH :memory conn seeded like the pod boots —
    never the live agent conn."
   (:require
@@ -11,6 +11,7 @@
     [clojure.string :as str]
     [datahike.api :as d]
     [malli.core :as m]
+    [seon.ai :as ai]
     [seon.ai.deepseek :as deepseek]
     [seon.client :as client]
     [seon.db :as db]
@@ -70,6 +71,12 @@
                            (:my.soul/text (first rows)))
                   "identity row is SOUL.md (read from the repo)")
               (is (= "SOUL.md" (:my.kb/source-path (first rows))))
+              (is (= 1 (:my.kb/source-line (first rows)))
+                  "the seed SHOWS the full provenance shape agents are
+                   taught to store (told-vs-shown)")
+              (is (= (count (str/split-lines (:my.soul/text (first rows))))
+                     (:my.kb/source-line-end (first rows)))
+                  "line range is honest: 1..N of the SOUL.md text just read")
               (is (re-find #"YOUR OUTPUT IS A REPL"
                            (:my.soul/text (second rows)))
                   "mechanics row carries the REPL contract")
@@ -127,7 +134,7 @@
                 "no rows → empty string")
             (let [body (deepseek/request-body {:seon.ai/ctx "hi"})
                   sys  (-> body :messages first :content)]
-              (is (= deepseek/fallback-system-prompt sys)
+              (is (= ai/fallback-system-prompt sys)
                   "empty store → the minimal boot-edge fallback")
               (is (= "OVERRIDE"
                      (-> (deepseek/request-body {:seon.ai/ctx "hi"

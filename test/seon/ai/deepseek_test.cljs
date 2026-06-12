@@ -1,10 +1,14 @@
 (ns seon.ai.deepseek-test
-  "Tests for the DeepSeek client's pure surface:
-     - request-body carries the thinking toggle (DISABLED by default —
-       the API defaults to enabled, which blew the 60s wall-clock
-       timeout on 2026-06-10)
-     - set-thinking! flips it / adds reasoning_effort
-     - set-timeout-ms! roundtrip
+  "Tests for the DeepSeek client's pure surface (post-C-18):
+     - request-body with NO env + NO config row is BYTE-IDENTICAL to
+       the pre-C-18 wire body (thinking disabled, temperature 0.7,
+       max_tokens 4096, deepseek-v4-pro)
+     - the :seon.ai/config row drives thinking / model / temperature /
+       max-tokens PER CALL (transact a row → the very next
+       request-body picks it up; no atoms, no restart)
+     - explicit request opts win over the row
+     - error classification (:seon.ai/transport? = the one retryable
+       class) over a stubbed js/fetch
 
    The actual HTTP path (timeout abort, error-as-value envelope) is
    proven live against the real API — see the 2026-06-10 unit report.
@@ -15,38 +19,118 @@
      (cljs.test/run-tests 'seon.ai.deepseek-test)"
   (:require
     [clojure.string :as str]
-    [cljs.test :refer [deftest is testing async use-fixtures]]
-    [seon.ai.deepseek :as deepseek]))
+    [cljs.test :refer [deftest is testing async]]
+    [datahike.api :as d]
+    [seon.ai :as ai]
+    [seon.ai.deepseek :as deepseek]
+    [seon.db :as db]))
 
-;; Restore the runtime knobs after every test — the pod is live and
-;; shares these atoms.
-(use-fixtures :each
-  {:before (fn [] nil)
-   :after  (fn []
-             (deepseek/set-thinking! false)
-             (deepseek/set-timeout-ms! 60000))})
+;; ============================================================
+;; Conn helpers — fresh :memory conn carrying the :seon.ai/config
+;; attrs (same pattern as seon.web.brand-test), bound as the ROOT
+;; db/*conn* so request-body's per-call config read sees it.
+;; ============================================================
 
-(deftest thinking-disabled-by-default
-  (testing "request body sends thinking disabled unless toggled"
-    (let [body (deepseek/request-body {:seon.ai/ctx "hi"})]
-      (is (= {:type "disabled"} (:thinking body)))
-      (is (not (contains? body :reasoning_effort))))))
+(defn- fresh-conn
+  []
+  (let [cfg {:store              {:backend :memory :id (random-uuid)}
+             :schema-flexibility :write
+             :keep-history?      true}]
+    (-> (d/create-database cfg)
+        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [conn]
+                 (-> (d/transact!
+                       conn
+                       {:tx-data (into (db/malli->datahike-schema
+                                         [::ai/id ::ai/provider ::ai/model
+                                          ::ai/temperature ::ai/max-tokens
+                                          ::ai/thinking ::ai/timeout-ms])
+                                       (db/tx-meta-datahike-schema))})
+                     (.then (fn [_] conn))))))))
 
-(deftest set-thinking!-enables
-  (testing "set-thinking! true → thinking enabled, no effort key"
-    (deepseek/set-thinking! true)
-    (let [body (deepseek/request-body {:seon.ai/ctx "hi"})]
-      (is (= {:type "enabled"} (:thinking body)))
-      (is (not (contains? body :reasoning_effort)))))
-  (testing "set-thinking! \"high\" → enabled + reasoning_effort"
-    (deepseek/set-thinking! "high")
-    (let [body (deepseek/request-body {:seon.ai/ctx "hi"})]
-      (is (= {:type "enabled"} (:thinking body)))
-      (is (= "high" (:reasoning_effort body)))))
-  (testing "set-thinking! false → back to disabled"
-    (deepseek/set-thinking! false)
-    (is (= {:type "disabled"}
-           (:thinking (deepseek/request-body {:seon.ai/ctx "hi"}))))))
+(defn- with-conn
+  [body]
+  (-> (fresh-conn)
+      (.then (fn [conn]
+               (let [orig db/*conn*]
+                 (set! db/*conn* conn)
+                 (-> (js/Promise.resolve (body conn))
+                     (.finally (fn [] (set! db/*conn* orig)))))))))
+
+;; ============================================================
+;; Byte-identical default — absent env + absent row sends EXACTLY the
+;; pre-C-18 body. The system prompt is pinned explicitly so the
+;; assertion is a FULL-map equality, not a key sample.
+;; ============================================================
+
+(deftest request-body-default-is-byte-identical-to-pre-c18
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (is (= {:model       "deepseek-v4-pro"
+                    :messages    [{:role "system" :content "sys"}
+                                  {:role "user"   :content "the ctx"}]
+                    :temperature 0.7
+                    :max_tokens  4096
+                    :thinking    {:type "disabled"}
+                    :stream      false}
+                   (deepseek/request-body {:seon.ai/ctx           "the ctx"
+                                           :seon.ai/system-prompt "sys"}))
+                "no env, no config row → the exact pre-C-18 wire body")))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; The config row drives the body PER CALL.
+;; ============================================================
+
+(deftest config-row-drives-thinking-and-budgets-per-call
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            ;; 1. Row absent → thinking disabled.
+            (is (= {:type "disabled"}
+                   (:thinking (deepseek/request-body {:seon.ai/ctx "hi"}))))
+            ;; 2. Transact thinking "true" → enabled, SAME call path,
+            ;;    no restart, no atom.
+            (-> (db/transact!
+                  {:seon.db/tx-data [{::ai/id "config" ::ai/thinking "true"}]})
+                (.then (fn [{ok? :seon.db/ok?}]
+                         (is (true? ok?))
+                         (let [body (deepseek/request-body {:seon.ai/ctx "hi"})]
+                           (is (= {:type "enabled"} (:thinking body)))
+                           (is (not (contains? body :reasoning_effort))))
+                         ;; 3. Effort string → enabled + reasoning_effort.
+                         (db/transact!
+                           {:seon.db/tx-data [{::ai/id "config" ::ai/thinking "high"}]})))
+                (.then (fn [_]
+                         (let [body (deepseek/request-body {:seon.ai/ctx "hi"})]
+                           (is (= {:type "enabled"} (:thinking body)))
+                           (is (= "high" (:reasoning_effort body))))
+                         ;; 4. Model/temperature/max-tokens from the row.
+                         (db/transact!
+                           {:seon.db/tx-data [{::ai/id          "config"
+                                               ::ai/thinking    "false"
+                                               ::ai/model       "deepseek-chat"
+                                               ::ai/temperature 0.2
+                                               ::ai/max-tokens  99}]})))
+                (.then (fn [_]
+                         (let [body (deepseek/request-body {:seon.ai/ctx "hi"})]
+                           (is (= {:type "disabled"} (:thinking body)))
+                           (is (= "deepseek-chat" (:model body)))
+                           (is (= 0.2 (:temperature body)))
+                           (is (= 99 (:max_tokens body))))
+                         ;; 5. Explicit request opts WIN over the row.
+                         (let [body (deepseek/request-body
+                                      {:seon.ai/ctx         "x"
+                                       :seon.ai/model       "deepseek-v4-pro"
+                                       :seon.ai/temperature 0.9
+                                       :seon.ai/max-tokens  7})]
+                           (is (= "deepseek-v4-pro" (:model body)))
+                           (is (= 0.9 (:temperature body)))
+                           (is (= 7 (:max_tokens body)))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 (deftest request-body-defaults-and-overrides
   (testing "defaults fill model/temperature/max_tokens; ctx is the user msg"
@@ -65,12 +149,6 @@
       (is (= 0.2 (:temperature body)))
       (is (= 99 (:max_tokens body)))
       (is (= "sys" (-> body :messages first :content))))))
-
-(deftest set-timeout-ms!-roundtrip
-  (testing "set-timeout-ms! returns and installs the new value"
-    (is (= 1234 (deepseek/set-timeout-ms! 1234)))
-    (is (= 1234 @deepseek/!timeout-ms))
-    (is (= 60000 (deepseek/set-timeout-ms! 60000)))))
 
 ;; ============================================================
 ;; Error classification (agent-robustness unit, 2026-06-11).
