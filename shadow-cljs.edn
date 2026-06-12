@@ -8,6 +8,19 @@
 
  :nrepl {:port 7889}
 
+ ;; npm package roots for the COMPILE-TIME resolver (shadow's npm
+ ;; service probes each dir in order — build/npm.clj:1049-1089 +
+ ;; find-package* npm.clj:227-235; duplicates are harmless). The
+ ;; #shadow/env reader tag (config.clj:103-108, config_env.cljc) makes
+ ;; the second entry the SEON_EXTRA_NPM downstream node_modules when
+ ;; that env var is set, defaulting to "node_modules" (= today's
+ ;; behavior byte-identical) when unset. RUNTIME resolution is a
+ ;; different machine: :node-script leaves require("pkg") for Node, so
+ ;; bin/seon's pod command additionally exports NODE_PATH=$SEON_EXTRA_NPM.
+ ;; Task #36 (SEON_EXTRA_SRC) — see
+ ;; docs/prds/agent-runtime/research/extra-src-research-2026-06-12.md §c.
+ :js-package-dirs ["node_modules" #shadow/env ["SEON_EXTRA_NPM" "node_modules"]]
+
  ;; When a runtime connects (e.g. the pod's websocket client after
  ;; `bin/seon restart pod`), make it the default REPL target. Without
  ;; this, shadow keeps the first-ever runtime's id as :default-runtime-id

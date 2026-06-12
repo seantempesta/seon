@@ -950,6 +950,73 @@
 ;; tests index themselves via the runner's run-and-record path instead.
 (defonce !indexed-test-vars (atom []))
 
+;; Downstream extra-substrate vars (task #36 — SEON_EXTRA_SRC; spec:
+;; docs/prds/agent-runtime/research/extra-src-research-2026-06-12.md §d).
+;; A downstream consumer's entry ns (named by SEON_EXTRA_PRELOAD, loaded
+;; via the :devtools :preloads slot bin/seon --config-merges in) registers
+;; its specced surface here — the same precedent as `!indexed-test-vars`:
+;;
+;;   (reset! client/!extra-substrate-vars
+;;           (filterv #(str/starts-with? (str (:ns (meta %))) "acme.")
+;;                    (seon.indexing/specced-fn-vars)))
+;;
+;; The boot indexers consume it alongside `substrate-vars`: fn-rows +
+;; FULL-SOURCE ns-rows in [[index-substrate!]], replay-skip membership in
+;; [[substrate-ns-set]]. Empty in builds without a downstream preload.
+(defonce !extra-substrate-vars (atom []))
+
+(defn- extra-substrate-vars*
+  "The registered extra vars MINUS any whose fully-qualified sym is
+   already in `substrate-vars` — a downstream entry's `specced-fn-vars`
+   expansion sees the seon surface its require closure pulls in, and
+   those must dedup away silently (no duplicate rows, no reserved-prefix
+   refusal) rather than double-index."
+  []
+  (let [have (into #{}
+                   (map (fn [v] (str (:ns (meta v)) "/" (:name (meta v)))))
+                   substrate-vars)]
+    (into []
+          (remove #(contains? have (str (:ns (meta %)) "/" (:name (meta %)))))
+          @!extra-substrate-vars)))
+
+(defn- reserved-extra-nses
+  "The reserved-prefix violators among extra-var ns name strings:
+   `seon.*` (the substrate's) and `my.*` (the human's store-replayed
+   corpus — a COMPILED `my.*` ns would replay-skip what should be
+   agent-authored rows). Sorted distinct vector; empty = all clear."
+  [ns-strs]
+  (->> ns-strs
+       (filter (fn [s]
+                 (some #(or (= s %) (str/starts-with? s (str % ".")))
+                       ["seon" "my"])))
+       distinct
+       sort
+       vec))
+
+(defn- assert-extra-vars-unreserved!
+  "LOUD structural refusal at boot-index time (extra-src research §e):
+   throws, naming every offending ns, when the registered extra vars
+   (post-dedup — see [[extra-substrate-vars*]]) provide reserved-prefix
+   nses. Fires regardless of how the atom was populated."
+  [vars]
+  (let [bad (reserved-extra-nses (map #(str (:ns (meta %))) vars))]
+    (when (seq bad)
+      (throw (ex-info
+               (str "extra-substrate registration provides RESERVED-prefix nses: "
+                    (str/join ", " bad)
+                    " — seon.* is the substrate's and my.* is the human's "
+                    "store-replayed corpus; SEON_EXTRA_SRC code must live "
+                    "under the downstream's own root prefix (e.g. acme.*)")
+               {:seon.client/reserved-extra-nses bad})))))
+
+(defn- extra-substrate-ns-strs
+  "Ns name strings owned by the registered extra-substrate vars — these
+   render FULL-SOURCE (the extra-src render-as-stubs gap closure: a
+   downstream's nses are exactly the exemplar-grade surface it wants its
+   agents reading whole)."
+  []
+  (into #{} (map #(str (:ns (meta %)))) @!extra-substrate-vars))
+
 (def ^:private fn-less-compiled-roots
   "COMPILED substrate nses that own no indexed var (register! calls +
    ns-doc only) but DO own a boot-indexed full-source `:seon.ns` row —
@@ -982,7 +1049,7 @@
   (into (into #{} (map keyword)
               (concat fn-less-compiled-roots ctx/full-source-roots))
         (map #(keyword (str (:ns (meta %)))))
-        (concat substrate-vars @!indexed-test-vars)))
+        (concat substrate-vars @!indexed-test-vars @!extra-substrate-vars)))
 
 (defn- read-src-file
   "Read a substrate source file given a var-meta `:file` (classpath-relative,
@@ -991,17 +1058,24 @@
    probed in that order), resolved via `seon.platform/artifact-path`:
    CWD-relative when the pod runs from the repo root (seon's own usage),
    or under SEON_RUNTIME_ROOT when a downstream pod runs from its own
-   world root. Returns the file text, or nil if it can't be read."
+   world root. When SEON_EXTRA_SRC is set (task #36 — a downstream's
+   compiled-in source root), `$SEON_EXTRA_SRC/src` and `/test` are probed
+   AFTER the artifact roots, RAW (not via artifact-path — the extra root
+   is not a seon-checkout artifact). Returns the file text, or nil if it
+   can't be read."
   [file]
-  (let [fs (js/require "fs")]
+  (let [fs    (js/require "fs")
+        extra (let [v (some-> (.. js/globalThis -process)
+                              (.-env)
+                              (aget "SEON_EXTRA_SRC"))]
+                (when (and (string? v) (not= v ""))
+                  [(str v "/src") (str v "/test")]))]
     (some (fn [root]
             (try
-              (.readFileSync
-                fs
-                (str (seon.platform/artifact-path root) "/" file)
-                "utf8")
+              (.readFileSync fs (str root "/" file) "utf8")
               (catch :default _ nil)))
-          ["src" "test" "guest-cljs/src"])))
+          (concat (map seon.platform/artifact-path ["src" "test" "guest-cljs/src"])
+                  extra))))
 
 (defn- extract-form-at-line
   "Return the exact text of the top-level form beginning at `line-1based` in
@@ -1060,7 +1134,13 @@
    stub keeps the no-replay invariant trivially cheap to reason about."
   [ns-sym-str]
   (let [stub (str "(ns " ns-sym-str ")")
-        src  (if (ctx/full-source-ns? ns-sym-str)
+        ;; Extra-substrate nses (downstream SEON_EXTRA_SRC code) are
+        ;; full-source by rule, like my.* — closes the render-as-stubs
+        ;; gap for the extra root without touching ctx's
+        ;; full-source-roots set (whose store-row generalization is the
+        ;; reported seon-internal follow-up).
+        src  (if (or (ctx/full-source-ns? ns-sym-str)
+                     (contains? (extra-substrate-ns-strs) ns-sym-str))
                (or (read-src-file (ns-file-path ns-sym-str))
                    (do (log/error-console!
                          "seon.client/ns-row"
@@ -1205,8 +1285,9 @@
    replay (Step 4 — `query-program-graph-entries` excludes any entry
    whose owning ns is in `(substrate-ns-set)`).
 
-   Always emits the FULL substrate row set — a PURE function of `substrate-vars`
-   + the on-disk source, independent of any conn. Re-seeding the same rows on a
+   Always emits the FULL substrate row set — a function of `substrate-vars`
+   + the registered `!extra-substrate-vars` + the on-disk source,
+   independent of any conn. Re-seeding the same rows on a
    later boot is idempotent at the DB layer: every row upserts on its identity
    attr (`:seon.ns/name` / `:seon.fn/sym`). The lookup-ref `[:seon.ns/name <kw>]`
    is the only ref shape ever emitted for `:seon.fn/ns` (a single
@@ -1223,7 +1304,13 @@
    `:seon.db/origin :substrate-seed`."
   []
   (let [now     (js/Date.)
-        fn-rows (keep #(var->fn-row % now) substrate-vars)
+        ;; Downstream extra-substrate vars join the roster after the
+        ;; sym-dedup against substrate-vars; the reserved-prefix guard
+        ;; (seon.*/my.*) is the boot-index-time LOUD refusal — extra-src
+        ;; research §e.
+        extra   (extra-substrate-vars*)
+        _       (assert-extra-vars-unreserved! extra)
+        fn-rows (keep #(var->fn-row % now) (concat substrate-vars extra))
         ;; Fn-less compiled roots are unioned in explicitly: a root
         ;; with no public fns of its own (`my.kb` — register! calls +
         ;; ns-doc only) still needs its full-source `:seon.ns` row,

@@ -51,24 +51,37 @@
   [d]
   (merge (:meta d) (select-keys d [:private :fn-var :file :line :test])))
 
+(defn- first-party-roots
+  "Roots a def's `:file` may live under to count as first-party: the
+   repo root (the macroexpanding JVM's working dir) plus, when the
+   `SEON_EXTRA_SRC` env var is set (task #36 — downstream consumers add
+   their own CLJS source root via a `:local/root` dep injected by
+   bin/seon), that extra root. Compile-time JVM-side, so `getenv` is
+   trivially available; unset env = exactly today's single root."
+  []
+  (let [extra (System/getenv "SEON_EXTRA_SRC")]
+    (cond-> [(System/getProperty "user.dir")]
+      (and extra (not= extra "")) (conj extra))))
+
 (defn- first-party-file?
   "STRUCTURAL first/third-party boundary (V3-C, 2026-06-10): a def is
-   FIRST-PARTY iff its analyzer `:file` resolves to a file under the
-   repo root (the macroexpanding JVM's working dir) — `src/`, `test/`,
-   etc. Third-party code arrives from jars (`jar:` resource URLs) or
-   gitlibs checkouts (file URLs OUTSIDE the repo root) and is excluded.
+   FIRST-PARTY iff its analyzer `:file` resolves to a file under one of
+   [[first-party-roots]] — the repo root (`src/`, `test/`, etc.) or the
+   `SEON_EXTRA_SRC` downstream root when that env var is set.
+   Third-party code arrives from jars (`jar:` resource URLs) or
+   gitlibs checkouts (file URLs OUTSIDE all roots) and is excluded.
    Replaces the `seon.*`/`my.*` name-prefix predicate (`indexed-ns?`):
    the indexer KNOWS the file path, so the name no longer has to carry
    the classification."
   [file]
   (boolean
     (when (and file (string? file))
-      (let [root (System/getProperty "user.dir")]
+      (let [roots (first-party-roots)]
         (if (.startsWith ^String file "/")
-          (.startsWith ^String file root)
+          (some #(.startsWith ^String file ^String %) roots)
           (when-let [url (io/resource file)]
             (and (= "file" (.getProtocol url))
-                 (.startsWith (.getPath url) root))))))))
+                 (some #(.startsWith (.getPath url) ^String %) roots))))))))
 
 (defmacro specced-fn-vars
   "Expand to a vector of `#'`-literals: every PUBLIC fn var carrying

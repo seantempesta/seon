@@ -42,8 +42,25 @@ if [ "$BUILD" = "1" ]; then
   # <unresolved-section> and makes instrumentation a no-op. The pod itself
   # runs dev-compiled (`clj -M:cljs compile client`) — dev compile keeps
   # the test env faithful to the live substrate. (2026-06-09)
+  #
+  # SEON_EXTRA_SRC (task #36): when set, the downstream's deps.edn project
+  # joins the classpath via -Sdeps :local/root — the :test build's
+  # :ns-regexp "-test$" then sweeps THEIR tests too (feature for them;
+  # seon CI/gym stays env-clean — bin/gym strips these vars). The
+  # SEON_EXTRA_PRELOAD entry ns is appended to :devtools :preloads via
+  # --config-merge (node-test honors preloads — shadow node_test.clj:50),
+  # so extra-substrate registration is live for tests that exercise it.
+  # All vars unset = today's command byte-identical.
+  COMPILE_CMD=(clojure)
+  if [ -n "${SEON_EXTRA_SRC:-}" ]; then
+    COMPILE_CMD+=(-Sdeps "{:deps {seon.extra/src {:local/root \"$SEON_EXTRA_SRC\"}}}")
+  fi
+  COMPILE_CMD+=(-M:cljs compile test)
+  if [ -n "${SEON_EXTRA_SRC:-}" ] && [ -n "${SEON_EXTRA_PRELOAD:-}" ]; then
+    COMPILE_CMD+=(--config-merge "{:devtools {:preloads [$SEON_EXTRA_PRELOAD]}}")
+  fi
   echo "== Compiling :test build (shadow-cljs, dev) =="
-  if ! clojure -M:cljs compile test 2>&1 | tee "$TMPOUT"; then
+  if ! "${COMPILE_CMD[@]}" 2>&1 | tee "$TMPOUT"; then
     echo ""
     echo "========================================"
     echo "COMPILE FAIL"

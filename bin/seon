@@ -65,12 +65,56 @@ mkdir -p "$PROC_DIR" "$LOG_DIR"
 #                           seon.web.serve; inherits through nohup)
 #   SEON_RUNTIME_ROOT       pod artifact root (read by the pod itself —
 #                           seon.platform/artifact-path; inherits)
+#   SEON_EXTRA_SRC          downstream CLJS source root (deps.edn project)
+#                           injected into clj -M:cljs via -Sdeps :local/root
+#   SEON_EXTRA_PRELOAD      downstream entry ns appended to :devtools
+#                           :preloads via --config-merge
+#   SEON_EXTRA_NPM          downstream node_modules (NODE_PATH on the pod;
+#                           #shadow/env :js-package-dirs at compile time)
 # ============================================================
 
 SEON_CLUSTER_DIR="${SEON_CLUSTER_DIR:-data/clusters/default}"
 SEON_REQ_SOCK="${SEON_REQ_SOCK:-tmp/seon-cluster-default-req.sock}"
 SEON_PUB_SOCK="${SEON_PUB_SOCK:-tmp/seon-cluster-default-pub.sock}"
 SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-7891}"
+
+# ============================================================
+# SEON_EXTRA_SRC — downstream CLJS source roots (task #36; spec:
+# docs/prds/agent-runtime/research/extra-src-research-2026-06-12.md).
+# A downstream consumer points SEON_EXTRA_SRC at THEIR tiny deps.edn
+# project ({:paths ["src"]} + their own deps) and names their entry ns
+# via SEON_EXTRA_PRELOAD; the helpers below inject both into every
+# `clj -M:cljs …` invocation:
+#
+#   -Sdeps '{:deps {seon.extra/src {:local/root "<SEON_EXTRA_SRC>"}}}'
+#   --config-merge '{:devtools {:preloads [<SEON_EXTRA_PRELOAD>]}}'
+#
+# shadow runs in DEPS MODE, so the tools.deps classpath IS the build's
+# source-path set; --config-merge deep-merge CONCATS :preloads onto the
+# build's existing vector (seon.dev.test-preload is kept). SEON_EXTRA_NPM
+# additionally feeds NODE_PATH into the pod command (runtime require
+# resolution) and the #shadow/env :js-package-dirs entry in
+# shadow-cljs.edn (compile-time). ALL THREE UNSET = every command below
+# byte-identical to today (verify: bin/seon print-cmd <name>).
+# ============================================================
+
+extra_src_sdeps() {
+  if [ -n "${SEON_EXTRA_SRC:-}" ]; then
+    printf " -Sdeps '{:deps {seon.extra/src {:local/root \"%s\"}}}'" "$SEON_EXTRA_SRC"
+  fi
+}
+
+extra_preload_merge() {
+  if [ -n "${SEON_EXTRA_SRC:-}" ] && [ -n "${SEON_EXTRA_PRELOAD:-}" ]; then
+    printf " --config-merge '{:devtools {:preloads [%s]}}'" "$SEON_EXTRA_PRELOAD"
+  fi
+}
+
+extra_npm_node_path() {
+  if [ -n "${SEON_EXTRA_NPM:-}" ]; then
+    printf ' NODE_PATH="%s"' "$SEON_EXTRA_NPM"
+  fi
+}
 
 # ============================================================
 # Process registry — add a process by adding one case branch.
@@ -90,8 +134,13 @@ process_command() {
     # parent and the supervisor would record (and later SIGTERM) the
     # shell, orphaning node. exec replaces the shell with node after the
     # css build, so the recorded pid IS the pod.
-    pod)         echo "npm run css:build && exec env SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1 node out/client/main.js" ;;
-    cljs-watch)  echo "clj -M:cljs watch client" ;;
+    # NODE_PATH is appended only when SEON_EXTRA_NPM is set (downstream
+    # npm deps — the CJS bundle's require("pkg") resolves at runtime from
+    # out/'s location and would otherwise only see seon's node_modules).
+    # SEON_EXTRA_SRC itself needs no mapping here: it inherits through
+    # nohup to the pod, where the boot indexer's read-src-file probes it.
+    pod)         echo "npm run css:build && exec env SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1$(extra_npm_node_path) node out/client/main.js" ;;
+    cljs-watch)  echo "clj$(extra_src_sdeps) -M:cljs watch client$(extra_preload_merge)" ;;
     jvm)         echo "./bin/run" ;;
     # V2 platform Host — JVM datahike wire-server (single-DB today).
     # Socket/path strings use "cluster" naming for the eventual multi-DB
@@ -672,6 +721,11 @@ case "${1:-help}" in
   logs)    shift; cmd_logs "$@" ;;
   adopt)   shift; cmd_adopt "$@" ;;
   prep)    shift; cmd_prep "$@" ;;
+  # Print the exact command a process would spawn with (env expansion
+  # included) WITHOUT spawning it — pins the "unset env = byte-identical
+  # commands" invariant for the SEON_EXTRA_* knobs, and lets a downstream
+  # eyeball their injected invocation.
+  print-cmd) shift; process_command "${1:?print-cmd requires a process name}" ;;
   cluster) shift; cmd_cluster "$@" ;;
   help|--help|-h|*)
     cat <<'EOF'
@@ -700,6 +754,9 @@ Commands:
                      alias form (plain `clojure -X:deps prep` is NOT
                      enough). Idempotent; fast no-op when already
                      prepped (deps fingerprint + ~/.gitlibs check).
+  print-cmd <name>   Print the exact spawn command for a process (env
+                     expansion included) without spawning it — pins the
+                     SEON_EXTRA_* "unset = byte-identical" invariant
   cluster reset [n]  DESTRUCTIVE: stop pod+wire-server, wipe
                      data/clusters/<n>/store (default "default"),
                      restart both — fresh DB, substrate re-seeds
@@ -725,6 +782,17 @@ Env overrides (downstream parametrization — defaults = today's values):
   SEON_PORT               pod HTTP port (default 7890; read by the pod)
   SEON_RUNTIME_ROOT       pod artifact root (read by the pod; build/source
                           artifacts resolve against it — data stays CWD-local)
+  SEON_EXTRA_SRC          downstream CLJS source root: a deps.edn project
+                          ({:paths ["src"]} + their deps) injected into every
+                          clj -M:cljs invocation via -Sdeps :local/root.
+                          Changing it requires: bin/seon restart cljs-watch
+  SEON_EXTRA_PRELOAD      downstream entry ns (e.g. acme.pod), appended to
+                          the build's :devtools :preloads via --config-merge
+  SEON_EXTRA_NPM          downstream node_modules dir — compile-time via
+                          shadow-cljs.edn's #shadow/env :js-package-dirs
+                          entry, runtime via NODE_PATH on the pod command
+                          (all three unset = today's commands byte-identical;
+                          inspect with: bin/seon print-cmd <name>)
 
 Auto-prep:
   Before spawning wire-server/cljs-watch the supervisor hashes

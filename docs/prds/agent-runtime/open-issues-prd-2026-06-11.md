@@ -224,6 +224,23 @@ elsewhere as noted.
 | — | a24 behavior delta worth relaying: `SEON_AI_API_KEY` now also enables `:deepseek` (DEEPSEEK_API_KEY still wins — existing deployments unchanged) | seon.ai.deepseek | note for the consumer relay |
 | — | cljs-watch reload did NOT propagate a new public fn to the pod runtime (explicit `:reload` require needed during live proof) — reload-on-save gap class | pod hot reload | investigation S; bit one live proof |
 | a24b | **Gateway streams SSE unconditionally** (downstream live-verified 2026-06-12 with a real key: completions + code-gen WORK, but `stream:false` is ignored — gateway bug, flagged to its owners) — adapter must tolerate either body shape | **DONE 2026-06-12** — content-type branch (charset-tolerant): SSE → `parse-sse-response` (delta concat, last usage chunk, [DONE] required, reasoning deltas dropped w/ debug log → feeds the a20 guard); JSON path byte-identical (re-pinned); malformed stream → legible envelope w/ raw body; live-proved with stubbed fetch |
+## SEON_EXTRA_SRC shipped (2026-06-12) — third-party compiled base
+
+Ship-first rung DONE (research: [[research/extra-src-research-2026-06-12]];
+quickstart: docs/seon/components/extra-src.md). `SEON_EXTRA_SRC` (mini
+deps.edn project) + `SEON_EXTRA_PRELOAD` + `SEON_EXTRA_NPM` → bin/seon
+/ bin/test-cljs inject -Sdeps + --config-merge (byte-identical when
+unset, pinned via the new `bin/seon print-cmd` verb); preload registers
+into `!extra-substrate-vars`; indexer accepts the root, extra nses
+render FULL-SOURCE; reserved-prefix (`seon.*`/`my.*`) loud refusal;
+gym strips the env (measures stock substrate). Deferred (doc'd):
+full-source-roots store-row generalization (M), `.cljc` boot-read
+probe, per-product out/ redirect.
+
+| Smell | Where | Disposition |
+|---|---|---|
+| downstream entry requiring a seon ns outside seon.client's closure surfaces its vars as "extra" → trips the prefix guard — quickstart shows the own-prefix filterv form as the rule | extra-src registration | doc'd; revisit if a real downstream hits it |
+
 ## FACTS-chips unit smells (2026-06-12)
 
 | Smell | Where | Disposition |

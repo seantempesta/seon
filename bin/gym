@@ -33,7 +33,14 @@ for arg in "$@"; do
   esac
 done
 
-SEON_GYM_PAID="$PAID" bin/test-cljs "${ARGS[@]+"${ARGS[@]}"}" | tee "$LOG"
+# Gym measurements run against the STOCK substrate: strip the
+# SEON_EXTRA_* downstream knobs so an operator shell that exports them
+# can't leak a downstream's source/preload/npm roots into what the gym
+# scores (extra-src spec invariant — research doc §d; same idea as
+# paid_test's SEON_AI_* load-time snapshot, applied at COMPILE time
+# because SEON_EXTRA_SRC acts on the shadow classpath, not the runtime).
+SEON_GYM_PAID="$PAID" env -u SEON_EXTRA_SRC -u SEON_EXTRA_PRELOAD -u SEON_EXTRA_NPM \
+  bin/test-cljs "${ARGS[@]+"${ARGS[@]}"}" | tee "$LOG"
 STATUS=${PIPESTATUS[0]}
 
 echo ""
