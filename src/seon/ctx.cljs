@@ -1540,11 +1540,15 @@
              "\n</transcript>"))
       "")))
 
-(defn- inbox-count
+(defn inbox-count
   "Count of UNANSWERED inbound messages in `msgs` (the agent's derived
    conversation, oldest-first): inbound items (from ≠ me) strictly
    after my own latest outbound message — every inbound when I have
-   never replied. The `inbox K` slot of the status line (§2.9)."
+   never replied. The `inbox K` slot of the status line (§2.9), and
+   the mid-task gate of `seon.agent.turns/turns-block` (one
+   derivation, no twin query)."
+  {:malli/schema [:=> [:catn [::msgs [:vector :map]] [::own-id :string]]
+                  :int]}
   [msgs own-id]
   (let [outbound? #(= own-id (:seon.agent/id (:seon.agent.message/from %)))
         after-out (->> msgs
@@ -1656,7 +1660,10 @@
                        vanishes when the store holds none
      8. :transcript  — ONE threaded REPL stream: messages + evals
                        chronological, append-only within a session
-     9. :prompt      — the §2.9 status line + clean REPL prompt
+     9. :turns       — the turn-budget countdown (one line, mid-task
+                       only; derived, vanishes when idle) — just
+                       above the prompt tail for salience
+    10. :prompt      — the §2.9 status line + clean REPL prompt
                        (always changing — the volatile tail's end)
 
    The dead sections (capabilities, exemplars, schema-catalog,
@@ -1682,6 +1689,8 @@
     :seon.render/ai 'seon.agent.findings/findings-section}
    {:seon.ctx/name :transcript   :seon.ctx/priority 50
     :seon.render/ai 'seon.ctx/transcript-section}
+   {:seon.ctx/name :turns        :seon.ctx/priority 90
+    :seon.render/ai 'seon.agent.turns/turns-section}
    {:seon.ctx/name :prompt       :seon.ctx/priority 99
     :seon.render/ai 'seon.ctx/prompt-section}])
 

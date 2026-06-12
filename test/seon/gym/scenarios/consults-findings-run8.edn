@@ -13,7 +13,7 @@
 ;; unless called with {:seon.gym/allow-paid? true} + DEEPSEEK_API_KEY.
 {:seon.gym.scenario/id     :s12-run8-two-agent-consultation
  :seon.gym.scenario/doc    "RUN 8: agent A researches transact-time schema validation and stores my.kb knowledge rows; fresh agent B (same store) must CONSULT those rows FIRST for a related question, then reply."
- :seon.gym.scenario/tier   :deepseek
+ :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
  :seon.gym.scenario/axes   [:sees-question :searches-first :consults-findings
                             :stores-proactively :replies-honestly :terminates]

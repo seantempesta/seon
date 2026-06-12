@@ -13,7 +13,7 @@
 ;; DEEPSEEK TIER (cheap) — refuses without allow-paid? + key.
 {:seon.gym.scenario/id     :s21-log-workout-existing-schema
  :seon.gym.scenario/doc    "'I ran this morning — 24 minutes.' must land as ONE new row reusing the established :my.workout/* attrs — zero attr forks, ideally zero register! evals (the schema already covers the message). Fully mechanical; catalog S-21."
- :seon.gym.scenario/tier   :deepseek
+ :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
  :seon.gym.scenario/axes   [:reuses-schemas :models-work-directed
                             :terminates :replies-honestly]

@@ -169,6 +169,43 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
+;; boot! — task #21: create!'s error envelope must propagate through
+;; the boot path (the honesty fix's sharp edge: boot! used to
+;; destructure :seon.agent/id off the envelope, getting nil, then
+;; install a trigger + return a success shape for a ghost agent).
+;; ============================================================
+
+(deftest boot!-propagates-create!-error-envelope
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [stub-llm (fn [_] (js/Promise.resolve {:text ""}))]
+              (testing "forced create! failure (id violates :seon.db/id —
+                        14 chars) surfaces the db error envelope"
+                (let [res (await (agent/boot!
+                                   {:seon.agent/id            "short"
+                                    :seon.agent/llm-fn        stub-llm
+                                    :seon.agent/compile-state nil}))]
+                  (is (false? (:seon.db/ok? res))
+                      "boot! hands the create! envelope up — errors are
+                       values; no nil id leaks downstream")
+                  (is (map? (:seon.db/error res)) "the error map rides along")
+                  (is (nil? (:seon.agent/ns res))
+                      "no success keys on the failure path")))
+              (testing "normal path unchanged"
+                (let [res (await (agent/boot!
+                                   {:seon.agent/id            "AGTbootok00001"
+                                    :seon.agent/llm-fn        stub-llm
+                                    :seon.agent/compile-state nil}))]
+                  (is (= "AGTbootok00001" (:seon.agent/id res)))
+                  (is (= 'my.agent.AGTbootok00001 (:seon.agent/ns res)))
+                  (is (some? (db/entity {:seon.db/ref
+                                         [:seon.agent/id "AGTbootok00001"]}))
+                      "the entity exists on the success path"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
 ;; creation-evals! — live-tiles PRD 2026-06-11 §6 U4 (minimal scope).
 ;; A MINTED agent's first logged act is the REAL tile-wiring eval:
 ;; the eval log opens with the tutorial transact, the datom lands on

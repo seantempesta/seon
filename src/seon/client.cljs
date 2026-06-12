@@ -135,6 +135,10 @@
     ;; Work items (user→agent asks + agent notes-to-self) — required so
     ;; its register! calls run before the boot install of :seon.agent.todo/*.
     [seon.agent.todo]
+    ;; The <turns> countdown section (substrate-default-ctx :turns) —
+    ;; required so the build includes it; seon.ctx references it by
+    ;; symbol only (late lookup-value resolution, no require cycle).
+    [seon.agent.turns]
     [seon.platform]
     ;; Phase B item 9 — shared read-side wrapper over the analyzer
     ;; state. Required here so the build includes it; item 10's
@@ -1592,8 +1596,18 @@
                               :seon.agent/compile-state compile-state}
                              (some? purpose)
                              (assoc :seon.agent/purpose purpose))))]
-          (runtime-id/host! id)
-          res)))))
+          ;; boot! propagates create!'s db error envelope (task #21 —
+          ;; errors are values). A failed create means NO agent entity:
+          ;; don't host the id for MCP addressing, hand the envelope up.
+          (if (false? (:seon.db/ok? res))
+            (do (log/error-console!
+                  "seon.client/boot-one-agent!"
+                  (str "agent/boot! FAILED for " id
+                       " — no entity; propagating the error envelope")
+                  res)
+                res)
+            (do (runtime-id/host! id)
+                res)))))))
 
 (schema/register! ::seeded? [:= true])
 (schema/register! ::boot-seed-request  [:map [:seon.db/conn :seon.db/conn]])
@@ -1885,6 +1899,18 @@
                                              {:seon.agent/id            aid
                                               :seon.agent/compile-state compile-state}))))
                                 @!acc)
+                ;; Task #21: a boot-one-agent! that came back as an
+                ;; error envelope means an agent with NO entity —
+                ;; destructuring :seon.agent/id below would thread nil
+                ;; through the whole boot. Same stance as boot-seed!'s
+                ;; check!: a crashed boot beats a silent ghost roster.
+                _             (when-let [bad (some #(when (false? (:seon.db/ok? %)) %)
+                                                   results)]
+                                (throw (ex-info
+                                         (str "start-agent!: agent boot "
+                                              "transact failed — refusing to "
+                                              "boot the pod on a ghost roster")
+                                         bad)))
                 {:seon.agent/keys [id ns]}
                 (first results)
                 ;; Boot the pod's HTTP+SSE server (A-5). The browser hits

@@ -681,19 +681,32 @@ VERIFICATION PENDING, first paid run) · ✅ spend telemetry (L7) · ✅
 SEON_AI_* gym world-parity (L8). L9 (turn-1 think-tax) closes with L4
 verification; no separate work.
 
-**OPUS-S batch (one unit, small, do first):**
+**OPUS-S batch (one unit, small, do first):** ✅ DONE 2026-06-12
+(461/2052 green; live-proved on the running pod).
 
-- ⬜ L11 `<turns>` countdown — one-line derived context section
-  ("turn N of M; reply before the cap") rendered when the agent has a
-  turns-cap; the s12-A non-convergence affordance (model self-moderates
-  on a visible meter). Cheap, general.
-- ⬜ L10 gym log quiet lane — demote trace-level datahike logging in
-  gym/scratch worlds (27-49MB/run, MB-sized single lines drown
-  evidence; the test footer greps megabytes).
-- ⬜ L13 tier rename `:deepseek` → `:paid` in scenario EDNs + driver
-  (now means "paid", misleading).
-- ⬜ task #21 boot! branches on create!'s error envelope (last night's
-  honesty fix's sharp edge).
+- ✅ L11 `<turns>` countdown — `seon.agent.turns/turns-section`
+  (`:turns`, priority 90, just above `:prompt`): one line, "turn N of
+  M — reply to the user before the cap; an incomplete honest answer
+  beats a capped silence", derived per render (inbox gate via
+  `ctx/inbox-count` + `turns-since-inbound` + `turns-cap`); vanishes
+  when idle. DELIBERATE deviation from "renders NOTHING when no cap":
+  `run-agentic-loop!` ALWAYS enforces a cap (default 20), so the
+  meter shows the EFFECTIVE cap — gating on the attr would have made
+  the section a no-op for every default-capped agent (incl. s12).
+- ✅ L10 gym log quiet lane — `seon.gym.driver` installs the live
+  pod's own `seon.log/quiet-library-logs!` gate at ns load (the
+  :test/gym processes never ran `-main`, so they flooded); suite log
+  56KB vs 27-49MB. `bin/test-cljs` footer grep guarded with
+  `cut -c1-400`.
+- ✅ L13 tier rename `:deepseek` → `:paid` — scenario EDNs (6 rows) +
+  driver enum/refusal/dispatch + docstrings; clean break, no alias
+  (no test pinned the keyword; the refusal regex "costs real money"
+  is unchanged).
+- ✅ task #21 boot! branches on create!'s error envelope —
+  `agent/boot!` propagates the envelope (no trigger installed, no nil
+  id); `client/boot-one-agent!` skips MCP hosting on it;
+  `start-agent!` throws on a ghost roster (boot-seed! check!
+  precedent).
 
 **OPUS-M batch (each its own unit):**
 

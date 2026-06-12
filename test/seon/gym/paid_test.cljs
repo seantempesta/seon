@@ -1,5 +1,5 @@
 (ns seon.gym.paid-test
-  "PAID deepseek-tier gym runs — the live behavioral measurements.
+  "PAID-TIER gym runs — the live behavioral measurements.
 
    GATED on the SEON_GYM_PAID env var (comma-separated scenario keys,
    or `all`): without it every test here is a no-op, so `bin/test-cljs`
@@ -45,7 +45,7 @@
       (aset env k v))))
 
 (def ^:private paid-scenario-keys
-  "Every deepseek-tier scenario key this ns can drive — the resolved
+  "Every paid-tier scenario key this ns can drive — the resolved
    enabled-set in the PAID-GATE line is computed against this roster."
   [:s32 :s21 :s12 :todo])
 

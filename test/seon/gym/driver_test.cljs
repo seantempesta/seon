@@ -903,18 +903,18 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; Budget guards — deepseek tier and :todo scenarios REFUSE with an
+;; Budget guards — paid tier and :todo scenarios REFUSE with an
 ;; error value; the suite can never burn money or run unencoded intent.
 ;; ---------------------------------------------------------------------------
 
-(deftest deepseek-tier-refuses-without-allow-paid
+(deftest paid-tier-refuses-without-allow-paid
   (async done
     (-> (gym/run-scenario!
           {:seon.gym/scenario
            (load-first "test/seon/gym/scenarios/consults-findings-run8.edn")})
         (.then (fn [resp]
                  (is (false? (:seon.gym/ok? resp))
-                     "deepseek scenario refused without allow-paid?")
+                     "paid scenario refused without allow-paid?")
                  (is (re-find #"costs real money" (str (:seon.gym/error resp)))
                      "the refusal explains the budget guard")
                  (done)))

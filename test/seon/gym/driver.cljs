@@ -35,12 +35,13 @@
                  a replaying llm-fn instead (terminates via the loop's
                  zero-forms stop policy), or `:rejecting` for the
                  simulated-provider-failure fixture.
-     :deepseek — costs real money. The driver wires
-                 `seon.ai.deepseek/agent-adapter` through
-                 `run-agentic-loop!` (awaits the loop's own
-                 termination = idle), but REFUSES to run unless the
-                 caller passes `:seon.gym/allow-paid? true` AND
-                 DEEPSEEK_API_KEY is set. LLM-judge predicates run
+     :paid     — costs real money. The driver wires the ACTIVE
+                 provider's agent adapter (`seon.ai/provider` —
+                 anthropic or deepseek) through `run-agentic-loop!`
+                 (awaits the loop's own termination = idle), but
+                 REFUSES to run unless the caller passes
+                 `:seon.gym/allow-paid? true` AND the active
+                 provider's API key is set. LLM-judge predicates run
                  under the same guard (or with an injected
                  `:seon.gym/judge-fn` — how tests mock the judge).
 
@@ -89,9 +90,20 @@
     [seon.dev.test-preload]
     [seon.eval :as seval]
     [seon.agent.fs :as sfs]
+    [seon.log :as slog]
     [seon.repl :as repl]
     [seon.schema :as schema]
     [seon.warn :as warn]))
+
+;; QUIET LANE for gym/scratch worlds (opus-live-tests 2026-06-12
+;; limitation 10): datahike's per-index-node trace logging wrote
+;; 27-49MB per suite run with single MB-sized lines (whole tx-data
+;; inline), drowning paid-run evidence and the test footer grep. The
+;; live pod installs this exact gate at boot (seon.client/-main); the
+;; :test/gym processes never ran -main, so they flooded. Same
+;; mechanism, same defaults — trace/debug from the replikativ stack
+;; drop, info/warn/error pass, seon's own logging is untouched.
+(slog/quiet-library-logs!)
 
 ;; ===========================================================================
 ;; Schemas — scenario, predicate, result, scorecard. Registered once,
@@ -209,7 +221,7 @@
 ;; --- scenario -----------------------------------------------------------------
 (schema/register! :seon.gym.scenario/id     :keyword)
 (schema/register! :seon.gym.scenario/doc    :string)
-(schema/register! :seon.gym.scenario/tier   [:enum :stub :deepseek])
+(schema/register! :seon.gym.scenario/tier   [:enum :stub :paid])
 (schema/register! :seon.gym.scenario/status [:enum :active :todo])
 (schema/register! :seon.gym.scenario/axes   [:vector :seon.gym.axis/name])
 ;; A Malli schema FORM is malli's open domain — third-party boundary.
@@ -981,9 +993,9 @@
   "The paid tier's agent llm-fn: the provider `seon.ai/provider`
    selects (SEON_AI_PROVIDER env / `:seon.ai/config` row — the SAME
    selection point as the live pod's `seon.client/current-llm-fn`),
-   wrapped in [[usage-logging]]. The tier keyword stays `:deepseek`
-   (historical name — every scenario file carries it); semantically it
-   now means PAID-PROVIDER tier."
+   wrapped in [[usage-logging]]. Scenario files carry
+   `:seon.gym.scenario/tier :paid` (renamed from the historical
+   `:deepseek` 2026-06-12, L13 — the name predated provider dispatch)."
   []
   (let [provider (ai/provider)]
     (usage-logging provider
@@ -1178,8 +1190,9 @@
    Promise of the scorecard (or a refusal map — errors are values):
 
      - :todo scenarios refuse (encoded intent, not yet runnable).
-     - :deepseek scenarios refuse unless `:seon.gym/allow-paid? true`
-       AND DEEPSEEK_API_KEY is set — the suite must never burn money.
+     - :paid scenarios refuse unless `:seon.gym/allow-paid? true` AND
+       the active provider's API key is set — the suite must never
+       burn money.
 
    Pipeline: open scratch conn → swap the root `seon.db/*conn*`
    (restored in finally) → ensure bootstrap compile-state → seed THE
@@ -1203,10 +1216,10 @@
        :seon.gym/error (str "scenario " id " is :todo — encoded intent, "
                             "not yet runnable (see its :doc)")}
 
-      (and (= :deepseek tier)
+      (and (= :paid tier)
            (not (and allow-paid? (paid-key-set?))))
       {:seon.gym/ok? false
-       :seon.gym/error (str "scenario " id " is :deepseek (paid) tier — costs "
+       :seon.gym/error (str "scenario " id " is :paid tier — costs "
                             "real money. Pass {:seon.gym/allow-paid? true} "
                             "with the active provider's API key set "
                             "(provider: " (name (ai/provider)) ") to run it.")}
@@ -1276,7 +1289,7 @@
                 ;; db the turn's prompt renders from. Informational only.
                 (swap! !profiles conj
                        (capture-turn-profile @conn agent-id (or agent :a)))
-                (case (or llm (if (= :stub tier) :per-turn-script :deepseek))
+                (case (or llm (if (= :stub tier) :per-turn-script :paid))
                   :per-turn-script
                   (await (drive-stub-turns! agent-id compile-state mid
                                             llm-script))
@@ -1286,7 +1299,7 @@
                   :rejecting
                   (await (drive-loop! agent-id compile-state mid
                                       rejecting-llm))
-                  :deepseek
+                  :paid
                   (await (drive-loop! agent-id compile-state mid
                                       (paid-adapter))))))
             ;; Mechanical scoring against the post-run store + transcript;

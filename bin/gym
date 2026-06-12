@@ -10,12 +10,12 @@
 # Usage:
 #   bin/gym                       # compile + run suite, print scorecards
 #   bin/gym --no-build            # skip compile (reuse out/test/test.js)
-#   bin/gym --paid=s32,s21,s12    # ALSO run the named deepseek-tier
+#   bin/gym --paid=s32,s21,s12    # ALSO run the named paid-tier
 #                                 # scenarios (or --paid=all). COSTS REAL
 #                                 # MONEY — needs DEEPSEEK_API_KEY. Drives
 #                                 # seon.gym.paid-test via SEON_GYM_PAID.
 #
-# Without --paid, deepseek-tier scenarios NEVER run (budget guard in the
+# Without --paid, paid-tier scenarios NEVER run (budget guard in the
 # driver + env-var gate in seon.gym.paid-test).
 
 set -uo pipefail

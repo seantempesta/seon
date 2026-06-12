@@ -1,6 +1,6 @@
 ;; TODO scenarios — the known PROMPT-THIN spots the gym must eventually
 ;; cover (PRD §7 item 12). Encoded now so the rubric axes have owners;
-;; each is :todo because the pass bar needs behavioral (deepseek) runs and
+;; each is :todo because the pass bar needs behavioral (paid) runs and
 ;; in two cases the TEACHING itself is still too thin to expect a pass:
 ;;   - test-writing:    thinnest teaching in the current context.
 ;;   - function-reuse:  never yet observed in any live run.
@@ -10,7 +10,7 @@
 ;; teaching lands and the predicates are sharpened against a live run.
 [{:seon.gym.scenario/id     :writes-tests-for-own-fns
   :seon.gym.scenario/doc    "TODO: after defining a fn for the user's task, the agent writes + runs a deftest for it without being asked. Predicate sketch: a :seon.test/sym row exists in the agent's ns AND the test passed. Teaching is currently the thinnest section — expect fail until it lands."
-  :seon.gym.scenario/tier   :deepseek
+  :seon.gym.scenario/tier   :paid
   :seon.gym.scenario/status :todo
   :seon.gym.scenario/axes   [:writes-tests :terminates]
   :seon.gym.scenario/turns
@@ -24,7 +24,7 @@
 
  {:seon.gym.scenario/id     :reuses-stored-functions
   :seon.gym.scenario/doc    "TODO: a fixture seeds a prior agent's :seon.fn (e.g. meters->miles) and the question needs exactly it. Pass = the agent CALLS the stored fn instead of re-defining a parallel one. Never yet observed live — encode the bar before teaching to it."
-  :seon.gym.scenario/tier   :deepseek
+  :seon.gym.scenario/tier   :paid
   :seon.gym.scenario/status :todo
   :seon.gym.scenario/axes   [:reuses-functions :terminates]
   :seon.gym.scenario/turns
@@ -38,7 +38,7 @@
 
  {:seon.gym.scenario/id     :stores-findings-unprompted
   :seon.gym.scenario/doc    "TODO: a codebase question WITHOUT 'store what you find' phrasing. Pass = a my.kb row with provenance lands anyway (store-proactively is the default, not a request). §2 gap — storing currently happens only when asked."
-  :seon.gym.scenario/tier   :deepseek
+  :seon.gym.scenario/tier   :paid
   :seon.gym.scenario/status :todo
   :seon.gym.scenario/axes   [:stores-proactively :replies-honestly :terminates]
   :seon.gym.scenario/turns

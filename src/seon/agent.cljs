@@ -679,18 +679,29 @@
      :seon.agent/llm-fn         ctx-string -> Promise<{:text \"…\"}>
      :seon.agent/compile-state  defonce'd bootstrap compile-state
 
-   Returns `{:seon.agent/id _ :seon.agent/ns _}`. The first user
-   message kicks `run-agentic-loop!` (which lazily opens a
-   `:seon.agent.session` on first turn)."
+   Returns `{:seon.agent/id _ :seon.agent/ns _}`. On a FAILED create!
+   the db error envelope (`{:seon.db/ok? false :seon.db/error …}`)
+   propagates as-is — errors are values, same contract as create!
+   itself: there is NO agent entity, so no trigger is installed and no
+   nil id leaks downstream. The first user message kicks
+   `run-agentic-loop!` (which lazily opens a `:seon.agent.session` on
+   first turn)."
   [{:seon.agent/keys [id llm-fn compile-state purpose]}]
-  (let [{:seon.agent/keys [id]}
-        (await (create! {:seon.agent/id id :seon.agent/purpose purpose}))
-        agent-ns (home-ns id)]
-    (install-user-trigger! {:seon.agent/id id
-                    :seon.agent/llm-fn llm-fn
-                    :seon.agent/compile-state compile-state})
-    {:seon.agent/id id
-     :seon.agent/ns agent-ns}))
+  (let [res (await (create! {:seon.agent/id id :seon.agent/purpose purpose}))]
+    (if (false? (:seon.db/ok? res))
+      ;; create! already console.error'd the transact failure; name the
+      ;; boot path too, then hand the envelope up — callers branch.
+      (do (js/console.error
+            (str "seon.agent/boot! ABORTED for " id
+                 " — create! failed; propagating the error envelope"))
+          res)
+      (let [{:seon.agent/keys [id]} res
+            agent-ns (home-ns id)]
+        (install-user-trigger! {:seon.agent/id id
+                                :seon.agent/llm-fn llm-fn
+                                :seon.agent/compile-state compile-state})
+        {:seon.agent/id id
+         :seon.agent/ns agent-ns}))))
 
 ;; ============================================================
 ;; message! / reply! — moved to seon.agent.message (P6 split,

@@ -74,7 +74,10 @@ else
   echo "FAIL (${ELAPSED}s)"
   echo ""
   echo "Failing assertions:"
-  grep -E "FAIL|ERROR" "$TMPOUT" | head -20 || true
+  # cut guards against MB-sized single lines (datahike tx blobs inline
+  # whole tx-data - opus-live-tests 2026-06-12 limitation 10): without
+  # it one matched line can print megabytes into the footer.
+  grep -E "FAIL|ERROR" "$TMPOUT" | cut -c1-400 | head -20 || true
 fi
 echo "========================================"
 

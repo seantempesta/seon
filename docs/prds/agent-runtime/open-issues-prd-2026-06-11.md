@@ -265,11 +265,11 @@ artifact (the related-question salience gap IS the demo bar).
 | `seon.ai-test` DELETES operator `SEON_AI_*` env mid-suite (first "opus" run silently drove deepseek; caught by new telemetry). paid_test snapshot/restore shipped; proper fix in ai_test | test/seon/ai_test.cljs | S tonight |
 | s32 consult predicate punishes post-#26 OPTIMAL behavior (answer now renders → consulting redundant) | s32 scenario edn | S re-cut tonight: consult OR (salient-claim-rendered AND zero searches) |
 | Anthropic adapter sends NO `cache_control` — `cache_read 0` on all 49 calls; ~$8 of s12's $8.44 was uncached re-billing. Dominant opus cost driver | src/seon/ai/anthropic.cljs | S tonight: cache_control on the stable prefix |
-| turn budget invisible to the agent (no countdown rendered) — s12-A burned the 20-cap unable to see the meter | ctx | queue: small derived section/system line |
+| ~~turn budget invisible to the agent~~ — CLOSED 2026-06-12: `seon.agent.turns` `<turns>` countdown section (OPUS-S, fix-everything §3b) | ctx | done |
 | `record-eval!` drops the program-graph tee row on entity-schema `register!` (`:seon.ns/name got nil`, live stack) — replay implications for agent-authored entity schemas | eval.cljs tee path | investigation unit FIRST (load-bearing path; joins record-eval! register row) |
 | salience is verbatim-shaped: paraphrase answered instantly, RELATED question re-derived | findings rung scope | post-demo: the next salience rung (related-question retrieval) |
-| `:deepseek` tier keyword now semantically means "paid" | scenario files | S rename sweep post-demo |
-| 38MB trace logs drown run evidence | gym logging | S: per-run log paths/rotation |
+| ~~`:deepseek` tier keyword~~ — CLOSED 2026-06-12: renamed `:paid` across EDNs + driver (OPUS-S) | scenario files | done |
+| ~~38MB trace logs drown run evidence~~ — CLOSED 2026-06-12: gym/test processes install the pod's quiet-library-logs! gate; suite log 56KB (OPUS-S) | gym logging | done |
 
 ## Todo teachability unit smells (2026-06-12Z)
 
@@ -343,7 +343,7 @@ C+; the doc carries the other eight plus evidence.
 
 | Smell | Where | Disposition |
 |---|---|---|
-| `create!` returns `{:seon.agent/id id}` even when its transact FAILED (console.error only) — everything downstream chases a ghost agent. DISHONEST RECORDS | `agent.cljs:636-647` | easy win (S): return the error envelope; joins the open `create!` turns-cap row |
+| ~~`create!` returns success on failed transact~~ — CLOSED: envelope returned (43c5145) AND the boot path now branches on it (task #21, OPUS-S 2026-06-12: `boot!` propagates, `boot-one-agent!` skips MCP hosting, `start-agent!` refuses a ghost roster) | `agent.cljs` | done |
 | generic entity-render paths `(catch :default _ nil)` — broken agent-authored renderer's card silently vanishes; makes inspector's own render-error fallback (`inspector.cljs:221-226`) dead code. AGENT BLINDNESS (the tile fix didn't cover these surfaces) | `render.cljs:451-457, 556-564` | S–M: surface the error like the tile banner |
 | one throwing warn-check kills the WHOLE warnings section (no per-check guard in `run-checks`) — all warnings degrade to one `render failed` line | `warn.cljs` | S: per-check try → synthetic cluster |
 | auto-instrument / auto-test-run failures are console-only — `:seon.test` rows keep stale ✓ stamps; context renders green against code the tests never ran on; specced fn can be silently uninstrumented. DISHONEST RECORDS | `eval.cljs:1493-1497, 1519-1524` | M |
