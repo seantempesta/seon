@@ -621,3 +621,47 @@
                     (.finally (fn [] (unregister! k))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; Task #37 — the tee-family remainder: a teed ENTITY-schema row has a
+;; SINGLE-SEGMENT ident (:probe.selftee.entityreplay — keyword namespace
+;; nil). Selection already worked (#24), but target-ns-for-entry did
+;; `(-> ident namespace symbol)` → `(symbol nil)` → every entity-schema
+;; replay failed. The stored source is a fully-qualified register! call,
+;; so the fix evals it from 'cljs.user.
+(deftest teed-entity-schema-row-replays-after-registry-rebuild
+  (async done
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then
+          (fn [res]
+            (let [cs   (aget res 0)
+                  conn (aget res 1)
+                  k    :probe.selftee.entityreplay]
+              (is (false? (schema/registered? k))
+                  "precondition: entity key absent from the registry (post-restart state)")
+              (binding [db/*conn* conn]
+                (-> (db/transact!
+                      {:seon.db/tx-data
+                       ;; the EXACT row shape the tee writes for an entity
+                       ;; schema: nil keyword-ns → NO :seon.schema/ns link.
+                       [{:seon.schema/key        k
+                         :seon.schema/source     "(seon.schema/register! :probe.selftee.entityreplay [:map [:probe.selftee.entityreplay/x :string]])"
+                         :seon.schema/created-at (js/Date.)}]})
+                    (.then
+                      (fn [_]
+                        (is (= 'cljs.user
+                               ((deref #'client/target-ns-for-entry)
+                                {:kind :schema :ident k}))
+                            "nil-ns schema ident targets cljs.user, not (symbol nil)")
+                        (client/replay-program-graph!
+                          {:conn conn :compile-state cs
+                           :agent-id "record-eval-tee-test"})))
+                    (.then
+                      (fn [stats]
+                        (is (= 0 (:seon.client/replay-n-fail stats))
+                            (str "entity-schema registration replays cleanly — "
+                                 (pr-str stats)))
+                        (is (true? (schema/registered? k))
+                            "registry rebuilt from the store — entity schema live again")))
+                    (.finally (fn [] (unregister! k :probe.selftee.entityreplay/x))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

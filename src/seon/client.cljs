@@ -609,13 +609,21 @@
    the ns on its own; we eval from 'cljs.user. For :fn / :test / :schema
    the source is a bare (defn …) / (deftest …) / (schema/register! …) —
    we must be IN the owning ns before eval so the def lands in the right
-   slot."
+   slot.
+
+   :schema idents can be SINGLE-SEGMENT keywords (entity schemas like
+   :my.garden.watering — task #37): `(namespace ident)` is nil there,
+   and `(symbol nil)` blew up every entity-schema replay. The stored
+   source is a fully-qualified `(seon.schema/register! …)` call, so the
+   target ns is irrelevant — fall back to 'cljs.user."
   [{:keys [kind ident]}]
   (case kind
     :ns     'cljs.user
     :fn     (-> ident (str/split #"/" 2) first symbol)
     :test   (-> ident (str/split #"/" 2) first symbol)
-    :schema (-> ident namespace symbol)))
+    :schema (if-some [ns-str (namespace ident)]
+              (symbol ns-str)
+              'cljs.user)))
 
 (defn ^:async ^:private query-program-graph-entries
   "Returns a vector of {:kind <:ns|:fn|:test|:schema> :ident <id-value>
