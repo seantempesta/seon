@@ -11,6 +11,7 @@
   (:require
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
+    [seon.agent :as agent]
     [seon.client :as client]
     [seon.db :as db]
     [seon.schema :as schema]
@@ -53,10 +54,13 @@
 (defn- stats [db] ((var seon.web.inspector/cluster-stats) db))
 
 (defn- dash-html
-  "The #agents-dash fragment as an HTML string, for the given header
-   view (`system?` = the ?system=1 machinery toggle)."
-  [system?]
-  (html/->string ((var seon.web.inspector/agents-dash-fragment) system?)))
+  "The #agents-dash fragment as an HTML string, for the given view
+   (`system?` = the ?system=1 machinery toggle, `completed?` = the
+   ?completed=1 completed-agents toggle)."
+  ([system?] (dash-html system? false))
+  ([system? completed?]
+   (html/->string ((var seon.web.inspector/agents-dash-fragment)
+                   system? completed?))))
 
 (defn- chip?
   "True iff the rendered strip contains a chip labeled `label` — the
@@ -71,16 +75,15 @@
             (let [{:seon.web.inspector/keys [fact-count fn-count datom-count]}
                   (stats @conn)
                   s (dash-html false)]
-              ;; Not zero: the wake-handler registration row lands at
-              ;; conn-open, BEFORE boot-seed! stamps :substrate-seed —
-              ;; one known pre-existing machinery row that /data's
-              ;; default view also shows (reported as a smell, fix is
-              ;; the boot path's, not the chip's). The chip mirrors
-              ;; /data exactly — so assert the EXCLUSION did its job:
-              ;; the boot index's thousands of rows don't count.
-              (is (< fact-count 5)
-                  "bootstrap-origin rows are excluded from FACTS —
-                   only the conn-open stragglers remain")
+              ;; ZERO, exactly: every boot-seed transact — including
+              ;; the :wake/on-message handler registration row (demo-
+              ;; polish fix 2026-06-12: it used to land at conn-open,
+              ;; BEFORE the :substrate-seed tx-context) — carries seed
+              ;; provenance. Handler registration rows are machinery,
+              ;; never the cluster's "data": a fresh world has FACTS=0.
+              (is (zero? fact-count)
+                  "fresh world → FACTS=0 — every boot-seed row
+                   (handler registration included) is bootstrap-origin")
               (is (pos? fn-count)
                   "the machinery counts DO see the boot index")
               (is (> datom-count fact-count)
@@ -138,6 +141,44 @@
                        (:seon.web.inspector/fact-count (stats @conn)))
                     "retracting one row decrements by exactly one —
                      derived, nothing stored, nothing to clear")))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest completed-agents-hidden-by-default-toggle-reveals
+  ;; Task #10 demo half (demo-polish 2026-06-12): completed agents are
+  ;; HISTORY — the default grid hides them entirely; the `?completed=1`
+  ;; query-param toggle (same pattern as ?system) reveals them. Active
+  ;; cards carry the ✓ complete POST affordance.
+  (async done
+    (-> (with-world
+          (fn ^:async t [conn]
+            (let [{ok? :seon.db/ok?}
+                  (await (db/transact!
+                           {:seon.db/tx-data
+                            [{:seon.agent/id "chips-active-1"
+                              :seon.agent/state :idle}
+                             {:seon.agent/id "chips-done-001"
+                              :seon.agent/state :idle}]}))]
+              (is ok? "two agent rows land"))
+            (let [{done? :seon.agent/ok?}
+                  (await (agent/complete!
+                           {:seon.agent/id "chips-done-001"}))]
+              (is done? "complete! stamps :seon.agent/completed-at"))
+            (let [hidden (dash-html false false)
+                  shown  (dash-html false true)]
+              (is (str/includes? hidden "/agent/chips-active-1\"")
+                  "active agent's card is in the default grid")
+              (is (not (str/includes? hidden "/agent/chips-done-001\""))
+                  "completed agent's card is HIDDEN by default")
+              (is (str/includes? hidden "show completed (1)")
+                  "default view offers the show-completed toggle")
+              (is (str/includes? hidden "/agent/chips-active-1/complete")
+                  "active card carries the ✓ complete POST affordance")
+              (is (str/includes? shown "/agent/chips-done-001\"")
+                  "?completed=1 reveals the completed agent's card")
+              (is (not (str/includes? shown
+                                      "/agent/chips-done-001/complete"))
+                  "completed cards never offer ✓ again"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

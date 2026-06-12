@@ -1137,7 +1137,7 @@
    `seon.render.live-tile/welcome` (the ONE default — live-tiles PRD
    §8.4); nil hiccup only for a nonexistent entity, which the grid
    (derived from live agent rows) never hands it."
-  [db {:seon.agent/keys [id turn-count]}]
+  [db {:seon.agent/keys [id turn-count completed-at]}]
   (let [tile (:seon.render/hiccup
                (render/render-agent-tile {:seon.db/db db
                                           :seon.agent/id id}))]
@@ -1165,10 +1165,43 @@
                         "border-t border-base-800 "
                         "bg-base-900/80 text-xs font-mono")}
       [:span {:class "text-text-500"} (str "turn " turn-count)]
-      [:span {:class "ml-auto text-amber-500"} "open →"]]
+      ;; ✓ complete — stamps :seon.agent/completed-at via the POST
+      ;; endpoint (seon.agent/complete!). Confirm-free: reversible by
+      ;; an explicit retract (see complete!'s docstring); the SSE
+      ;; re-morph drops the card from the default grid on commit.
+      ;; `relative z-10` lifts the button above the stretched overlay
+      ;; anchor so it receives the click instead of navigating.
+      (when-not completed-at
+        [:button
+         {:type "button"
+          :title "mark agent completed"
+          :aria-label (str "complete agent " id)
+          :class (str "relative z-10 ml-auto mr-2 px-1.5 rounded "
+                      "text-text-500 hover:text-amber-300 "
+                      "hover:bg-base-800 cursor-pointer")
+          :onclick (str "event.stopPropagation();var b=this;"
+                        "fetch('/agent/" id "/complete',{method:'POST'})"
+                        ".then(function(r){if(!r.ok){r.text().then("
+                        "function(t){b.textContent='\\u2717 '+"
+                        "(t||('HTTP '+r.status));});}})"
+                        ".catch(function(e){b.textContent='\\u2717 '+e;});")}
+         "✓"])
+      [:span {:class (if completed-at "ml-auto text-amber-500"
+                                      "text-amber-500")}
+       "open →"]]
      [:a {:href (str "/agent/" id)
           :aria-label (str "open agent " id)
           :class "absolute inset-0"}]]))
+
+(defn- agents-url
+  "The /agents URL for a header view — query string carries the view
+   state (`?system=1` machinery row, `?completed=1` completed agents),
+   a signal, never stored. Same pattern as the /data browser."
+  [system? completed?]
+  (let [qs (cond-> []
+             system?    (conj "system=1")
+             completed? (conj "completed=1"))]
+    (str "/agents" (when (seq qs) (str "?" (str/join "&" qs))))))
 
 (defn- agents-dash-fragment
   "The whole mission-control surface — ONE morph target (`#agents-dash`)
@@ -1180,8 +1213,10 @@
    default row count — one derivation, see `cluster-stats`; links to
    /data). Zero-count chips are hidden. `system?` (the `?system=1`
    param, same as /data) adds the machinery row: datoms · fns ·
-   schemas · tests."
-  [system?]
+   schemas · tests. `completed?` (the `?completed=1` param — same
+   query-param pattern) reveals completed agents; the default grid
+   shows ACTIVE agents only, with a 'show completed (N)' toggle."
+  [system? completed?]
   (let [db   @db/*conn*
         rows (list-agents-data)
         ;; Lifecycle split (P3.5/#31): completed agents (stamped via
@@ -1207,7 +1242,7 @@
                          "text-amber-500 hover:text-amber-300")}
          "⛁ data browser →"]
         ;; System-counts toggle — same `system` query param as /data.
-        [:a {:href (if system? "/agents" "/agents?system=1")
+        [:a {:href (agents-url (not system?) completed?)
              :class (str "text-xs font-mono "
                          (if system?
                            "text-amber-400 hover:text-amber-300"
@@ -1288,27 +1323,37 @@
               (findings-row-total findings) " rows · "
               (count findings) " kinds")]
         (knowledge-cards findings)])
-     ;; Completed agents — queryable history, collapsed at the bottom.
-     ;; Not resumed at boot, no trigger armed; un-complete is an explicit
-     ;; retract of :seon.agent/completed-at (see seon.agent/complete!).
+     ;; Completed agents — queryable history, HIDDEN by default (task
+     ;; #10 demo half). The `?completed=1` query param reveals them —
+     ;; same view-state-in-the-URL pattern as `?system=1`. Not resumed
+     ;; at boot, no trigger armed; un-complete is an explicit retract
+     ;; of :seon.agent/completed-at (see seon.agent/complete!).
      (when (seq completed)
-       [:details {:class "mt-2"}
-        [:summary {:class (str "text-xs font-semibold text-text-400 uppercase "
-                               "tracking-wider mb-2 font-mono cursor-pointer "
-                               "hover:text-text-300 select-none")}
-         (str "◇ completed agents · " (count completed))]
-        (into [:div {:class "grid gap-2 opacity-60"
-                     :style "grid-template-columns:repeat(auto-fill,minmax(300px,1fr));"}]
-              (map #(agent-grid-tile db %))
-              completed)])]))
+       [:section {:class "mt-2"}
+        [:a {:href (agents-url system? (not completed?))
+             :class (str "text-xs font-semibold uppercase tracking-wider "
+                         "font-mono select-none "
+                         (if completed?
+                           "text-amber-400 hover:text-amber-300"
+                           "text-text-400 hover:text-text-300"))}
+         (if completed?
+           (str "◆ completed agents · " (count completed) " — hide")
+           (str "◇ show completed (" (count completed) ")"))]
+        (when completed?
+          (into [:div {:class "grid gap-2 opacity-60 mt-2"
+                       :style "grid-template-columns:repeat(auto-fill,minmax(300px,1fr));"}]
+                (map #(agent-grid-tile db %))
+                completed))])]))
 
 (defn- agents-index-page
-  "Full page for GET /agents. `system?` (the `?system=1` machinery-row
-   toggle) rides the SSE URL too, so every commit re-morphs the exact
-   header the tab is on."
-  [system?]
+  "Full page for GET /agents. The view params (`?system=1` machinery
+   row, `?completed=1` completed agents) ride the SSE URL too, so
+   every commit re-morphs the exact view the tab is on."
+  [system? completed?]
   (let [b   (brand/info)
-        sse (str "@get('/agents/sse" (when system? "?system=1") "')")]
+        sse (str "@get('/agents/sse"
+                 (subs (agents-url system? completed?) (count "/agents"))
+                 "')")]
     (str
       "<!DOCTYPE html>"
       (html/->string
@@ -1323,7 +1368,7 @@
          [:body {:class "min-h-screen bg-base-950 text-text-50 font-sans p-4"}
           [:div {:data-init sse
                  :data-on:online__window sse}]
-          (agents-dash-fragment system?)]]))))
+          (agents-dash-fragment system? completed?)]]))))
 
 ;; ============================================================
 ;; /data — the live data browser (task #28). Level 1: the kinds the
@@ -1672,13 +1717,16 @@
 
 (defn- push-index!
   "Re-render and write the `#agents-dash` morph fragment to every
-   connection watching the index. Each conn carries ITS header view
-   (`:system?` — the machinery-row toggle); identical views render
-   once. Best-effort per-connection."
+   connection watching the index. Each conn carries ITS view
+   (`:system?` machinery row, `:completed?` completed agents);
+   identical views render once. Best-effort per-connection."
   []
   (try
-    (doseq [[system? cs] (group-by :system? (get @!sse-by-agent ::index))]
-      (let [payload (patch-fragment (agents-dash-fragment system?))]
+    (doseq [[[system? completed?] cs]
+            (group-by (juxt :system? :completed?)
+                      (get @!sse-by-agent ::index))]
+      (let [payload (patch-fragment
+                      (agents-dash-fragment system? completed?))]
         (doseq [{:keys [res]} cs]
           (try (.write res payload)
                (catch :default e
@@ -1824,13 +1872,15 @@
                            "Connection"        "keep-alive"
                            "X-Accel-Buffering" "no"})
   (.write res ": connected\n\n")
-  (let [system? (= "1" (query-param req "system"))
-        conn    {:id (random-uuid) :res res :system? system?
-                 :opened-at (js/Date.)}]
+  (let [system?    (= "1" (query-param req "system"))
+        completed? (= "1" (query-param req "completed"))
+        conn       {:id (random-uuid) :res res :system? system?
+                    :completed? completed? :opened-at (js/Date.)}]
     (add-conn! ::index conn)
     (.on req "close" (fn [] (remove-conn! ::index (:id conn))))
     (try
-      (.write res (patch-fragment (agents-dash-fragment system?)))
+      (.write res (patch-fragment
+                    (agents-dash-fragment system? completed?)))
       (catch :default e
         (log/error-console! "seon.web.inspector" "index initial render failed" e)))))
 
@@ -1868,7 +1918,9 @@
   (cond
     (= path "/agents")
     (do (write-status! res 200 "text/html; charset=utf-8"
-                       (agents-index-page (= "1" (query-param req "system"))))
+                       (agents-index-page
+                         (= "1" (query-param req "system"))
+                         (= "1" (query-param req "completed"))))
         true)
 
     (= path "/agents/sse")

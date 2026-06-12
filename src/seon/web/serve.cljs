@@ -382,6 +382,41 @@
                       (write-status! res 500 "text/plain; charset=utf-8"
                                      (str "create agent failed: " err)))))))))
 
+(defn- handle-complete-agent!
+  "POST /agent/<id>/complete — stamp `:seon.agent/completed-at` via
+   `seon.agent/complete!` (the ONE 'done' verb). Confirm-free: it's
+   reversible by an explicit retract (see complete!'s docstring). The
+   completed agent drops out of the mission-control default grid on
+   the SSE re-morph; 200 + id on success, 404 with the envelope's
+   error for an unknown id."
+  [_req res agent-id]
+  (-> (agent/complete! {:seon.agent/id agent-id})
+      (.then (fn [{ok? :seon.agent/ok? id :seon.agent/id
+                   error :seon.agent/error}]
+               (if ok?
+                 (do (log/info-console! "seon.web.serve"
+                                        "POST /agent/<id>/complete OK"
+                                        {:agent id})
+                     (write-status! res 200 "text/plain; charset=utf-8"
+                                    (str id)))
+                 (do (log/error-console! "seon.web.serve"
+                                         "/agent/<id>/complete refused" error)
+                     (write-status! res 404 "text/plain; charset=utf-8"
+                                    (str error))))))
+      (.catch (fn [err]
+                (log/error-console! "seon.web.serve"
+                                    "/agent/<id>/complete threw" err)
+                (write-status! res 500 "text/plain; charset=utf-8"
+                               (str "complete failed: " err))))))
+
+(defn- complete-path->agent-id
+  "`/agent/<id>/complete` → `<id>`; nil for any other path."
+  [path]
+  (when (and (str/starts-with? path "/agent/")
+             (str/ends-with? path "/complete"))
+    (not-empty (subs path (count "/agent/")
+                     (- (count path) (count "/complete"))))))
+
 (defn- handle-chat! [req res]
   ;; Agent-id resolution (audit P1 — 2026-05-24): query param wins,
   ;; else `(db/current-agent-id)`, else 400 — no silent "seon" fallback.
@@ -446,6 +481,9 @@
         "POST" (cond
                  (= path "/chat")                   (handle-chat! req res)
                  (= path "/agents/new")             (handle-create-agent! req res)
+                 (complete-path->agent-id path)     (handle-complete-agent!
+                                                      req res
+                                                      (complete-path->agent-id path))
                  (= path "/clear")                  (handle-clear! req res)
                  (= path "/log")                    (handle-log! req res)
                  :else                              (write-status! res 404 "text/plain; charset=utf-8"

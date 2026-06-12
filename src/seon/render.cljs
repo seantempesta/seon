@@ -443,6 +443,12 @@
    default html symbol (Phase 1 schema-property pattern). Returns nil
    when no symbol resolves OR the resolved fn returns nil.
 
+   A renderer that THROWS does NOT vanish (same posture as the live
+   tile's `error-response`): the card becomes a legible error banner
+   naming the fn + message, siblings render untouched, the page stays
+   200. The old `(catch … nil)` swallow made a broken agent-authored
+   renderer indistinguishable from \"no renderer\" — banned.
+
    `input` is the system-input shape every render fn receives:
      {:seon.db/db    <db>
       :seon.agent/id <agent-id>
@@ -453,7 +459,13 @@
     (when-let [sym (entity-render-slot db entity :html)]
       (try
         (:seon.render/hiccup (html-render sym input))
-        (catch :default _ nil)))))
+        (catch :default e
+          [:div {:class (str "flex flex-col gap-1 p-3 border "
+                             "border-error/40 bg-error/10 rounded")}
+           [:div {:class "text-xs text-error font-mono font-bold"}
+            "⚠ render error"]
+           [:div {:class "text-xs font-mono text-text-300 break-all"}
+            (str sym " threw: " (or (.-message e) (str e)))]])))))
 
 ;; ============================================================
 ;; Agent tile (live-tiles U1) — the agent's ONE always-visible HTML
@@ -560,7 +572,12 @@
         ;; with the ctx-family rename (V4 composer rewrite).
         (let [out (ai-render sym input)]
           (or (:seon.render/ai out) (:seon.render/text out)))
-        (catch :default _ nil)))))
+        ;; A throwing AI renderer is LEGIBLE, never nil-vanished — the
+        ;; agent reading its context sees its own renderer is broken
+        ;; (mirror of the html banner above / the tile's error twin).
+        (catch :default e
+          (str "[render error — " sym " threw: "
+               (or (.-message e) (str e)) "]"))))))
 
 (schema/register! :seon.render/visible-request
   [:map

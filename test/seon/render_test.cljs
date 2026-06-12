@@ -21,7 +21,8 @@
     [seon.eval :as eval]
     [seon.render :as render]
     [seon.render.default :as default]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.ui.html :as html]))
 
 ;; ============================================================
 ;; html-render — literal hiccup short-circuits, missing symbol
@@ -208,6 +209,68 @@
                                  "tile ignores :seon.render/html and renders the welcome")
                              (is (not= [:h1 "card-slot-not-a-tile"] hiccup)
                                  "the entity-card slot never reaches the tile surface"))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; render-entity-html / render-entity-ai — a THROWING renderer is
+;; legible, never a silent vanish (demo-polish 2026-06-12; the old
+;; `(catch … nil)` made a broken agent-authored renderer's card
+;; indistinguishable from "no renderer" and dead-coded the
+;; inspector's render-error fallback).
+;; ============================================================
+
+(defn throwing-renderer
+  "Deliberately broken renderer — resolvable via eval/lookup-value at
+   the munged globalThis path, throws on call."
+  [_input]
+  (throw (ex-info "boom-renderer" {})))
+
+(defn sibling-renderer
+  "Healthy sibling renderer."
+  [_input]
+  {:seon.render/hiccup [:p "sibling-ok"]})
+
+(deftest render-entity-html-throwing-renderer-shows-banner
+  (async done
+    (-> (with-tile-conn "rethrow-00001"
+          (fn [conn]
+            (let [broken {:db/id 1
+                          :seon.render/html 'seon.render-test/throwing-renderer}
+                  good   {:db/id 2
+                          :seon.render/html 'seon.render-test/sibling-renderer}
+                  render-one (fn [entity]
+                               (render/render-entity-html
+                                 {:seon.db/db @conn
+                                  :seon.agent/id "rethrow-00001"
+                                  :seon.render/entity entity}))
+                  banner (html/->string (render-one broken))
+                  sib    (html/->string (render-one good))]
+              (is (re-find #"render error" banner)
+                  "throwing renderer → legible banner, not a vanish")
+              (is (re-find #"seon.render-test/throwing-renderer" banner)
+                  "banner names the broken fn")
+              (is (re-find #"boom-renderer" banner)
+                  "banner carries the thrown message")
+              (is (re-find #"sibling-ok" sib)
+                  "sibling cards render untouched"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest render-entity-ai-throwing-renderer-is-legible
+  (async done
+    (-> (with-tile-conn "rethrow-00002"
+          (fn [conn]
+            (let [out (render/render-entity-ai
+                        {:seon.db/db @conn
+                         :seon.agent/id "rethrow-00002"
+                         :seon.render/entity
+                         {:db/id 1
+                          :seon.render/ai 'seon.render-test/throwing-renderer}})]
+              (is (string? out) "throwing AI renderer → string, never nil")
+              (is (re-find #"render error" out))
+              (is (re-find #"boom-renderer" out)
+                  "the agent sees its own renderer's failure"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

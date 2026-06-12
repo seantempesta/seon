@@ -1727,13 +1727,20 @@
    prompts lacked the `:my.soul` rows live prompts carry).
 
    Steps, in boot order:
-     1. Substrate handler rows — `h/bootstrap-schema!` +
-        `wake/bootstrap-schema!` + the ONE `:wake/on-message` handler
-        entity (idempotent upserts; data-only — registering arms no
-        dispatcher).
-     2. Under ONE `{:seon.db/origin :substrate-seed}` tx-context, four
+     1. Substrate handler SCHEMA — `h/bootstrap-schema!` +
+        `wake/bootstrap-schema!` (raw `:db/ident` attr rows; never
+        counted as data).
+     2. Under ONE `{:seon.db/origin :substrate-seed}` tx-context, five
         transacts (each its own tx so the substrate prefix stays a
         stable sequence of tx-times):
+          :wake-handler    — the ONE `:wake/on-message` handler entity
+                             (idempotent upsert; data-only — registering
+                             arms no dispatcher). INSIDE the seed
+                             context so its row carries `:substrate-seed`
+                             provenance — a fresh world boots with
+                             FACTS=0 (machinery rows are never the
+                             cluster's data; demo-polish fix
+                             2026-06-12).
           :entity-schemas  — `schema/all-entity-schemas-tx-data`.
           :substrate-seed  — `seed-substrate!` (user entity +
                              my.kb.system instruction singleton).
@@ -1758,12 +1765,6 @@
     (try
       (await (h/bootstrap-schema!))
       (await (wake/bootstrap-schema!))
-      (await (h/register!
-               {:seon.handler/name      :wake/on-message
-                :seon.handler/match     {:seon.handler.match/attr
-                                         :seon.agent.message/to}
-                :seon.handler/fn        'seon.handlers.wake/wake-on-message
-                :seon.handler/on-origin #{:user :agent}}))
       (let [index-tx (await (substrate-index-tx conn))
             check!   (fn [step {ok?   :seon.db/ok?
                                 error :seon.db/error}]
@@ -1778,6 +1779,16 @@
           (db/with-tx-context
             {:seon.db/origin :substrate-seed}
             (fn ^:async seed! []
+              (let [{registered? :seon.handler/registered?}
+                    (await (h/register!
+                             {:seon.handler/name      :wake/on-message
+                              :seon.handler/match     {:seon.handler.match/attr
+                                                       :seon.agent.message/to}
+                              :seon.handler/fn        'seon.handlers.wake/wake-on-message
+                              :seon.handler/on-origin #{:user :agent}}))]
+                (when-not registered?
+                  (throw (ex-info "boot seed transact failed at :wake-handler"
+                                  {:seon.client/seed-step :wake-handler}))))
               (check! :entity-schemas
                       (await (db/transact!
                                {:seon.db/conn conn
