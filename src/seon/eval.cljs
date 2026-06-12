@@ -850,6 +850,29 @@
         (second form)))
     (catch :default _ nil)))
 
+(defn- schema-tee-row
+  "ONE builder for the `:seon.schema` program-graph row both tee paths
+   write (detect-and-tee in [[build-tee-entities]]; the register!
+   self-tee in [[tee-registered-schema!]]). Identity-upsert on
+   `:seon.schema/key` keeps the two idempotent.
+
+   `:seon.schema/ns` uses the NESTED-MAP upsert form and is included
+   ONLY when `k` HAS a keyword namespace — matching
+   `seon.client/index-schemas`. An ENTITY-KIND key (`:my.garden.watering`
+   — a `:map {:seon.db/entity true}` registration) is a single-segment
+   keyword: `(namespace k)` is nil, and the old unconditional
+   `{:seon.ns/name (keyword nil)}` put a LITERAL nil through Malli
+   (`:seon.ns/name … got nil`), failing the WHOLE record-eval! tx and
+   silently dropping the tee row (opus run2 live stack,
+   open-issues-prd-2026-06-11 — resume-durability loss for every
+   agent-authored entity schema)."
+  [k source at]
+  (cond-> {:seon.schema/key        k
+           :seon.schema/source     source
+           :seon.schema/created-at at}
+    (namespace k)
+    (assoc :seon.schema/ns {:seon.ns/name (keyword (namespace k))})))
+
 (defn- build-tee-entities
   "Return a vector of program-graph entity maps for everything `source`
    newly defined (def/defn → :seon.fn; schema/register! → :seon.schema;
@@ -941,13 +964,10 @@
         ;; `[?s :seon.schema/ns ?n]` join stays coherent for data
         ;; namespaces too. REPL-verified on a scratch conn 2026-06-09:
         ;; create+link for a fresh ns, no-dup upsert for an existing
-        ;; one.
+        ;; one. Entity-kind keys (nil keyword namespace) carry NO ns
+        ;; link at all — see [[schema-tee-row]].
         schema-entities (for [k new-schemas]
-                          {:seon.schema/key        k
-                           :seon.schema/ns         {:seon.ns/name
-                                                    (keyword (namespace k))}
-                           :seon.schema/source     source
-                           :seon.schema/created-at at})
+                          (schema-tee-row k source at))
         ;; Phase 4 (mvp-completion-plan 2026-05-27): deftest defs carry
         ;; the analyzer's top-level `:test true` marker (see
         ;; [[deftest-def?]] — the old `(:test (:meta var-map))` check was
@@ -969,6 +989,101 @@
                       [{:seon.ns/name   (keyword (str ns-sym))
                         :seon.ns/source source}])]
     (vec (concat ns-entities fn-entities schema-entities test-entities))))
+
+;; ============================================================
+;; register! self-tee (open-issues 2026-06-12, task #24 symptom 1).
+;;
+;; Detect-and-tee only covers AGENT evals (record-eval!'s :tee arg).
+;; A REPL-scope `(seon.schema/register! …)` — the MCP eval surface,
+;; any non-turn caller — registered in-memory only: NO :seon.schema
+;; row, so the attr VANISHED from the registry on restart while its
+;; datoms stayed readable (new transacts rejected as unregistered —
+;; silently write-dead; orchestrator-verified live 2026-06-12).
+;;
+;; register! now tees its OWN row through a hook this ns installs
+;; (seon.schema can't require seon.db — cycle). One mechanism with
+;; the eval tee: same row shape ([[schema-tee-row]]), identity-upsert
+;; on :seon.schema/key, so an agent-eval registration writing through
+;; BOTH paths still yields exactly one row.
+;; ============================================================
+
+;; Stamped on a partially-recorded eval row when its program-graph tee
+;; rows could not be persisted (record-eval! stage-2 recovery) — the
+;; honest record of the dropped tee. Registered here: seon.eval owns
+;; the :seon.eval keyword namespace. Transacted TOP-LEVEL (identity
+;; upsert on :seon.eval/id), so lazy attr-install covers it without a
+;; boot-schema entry.
+(schema/register! :seon.eval/record-error :string)
+
+(defn- tee-registered-schema!
+  "The register! self-tee hook body (installed via
+   `seon.schema/set-tee-fn!` at load). Conn-gated and boot-composed:
+
+   - NO bound `seon.db/*conn*` → nil (pure-registry contexts, JVM-side
+     compile, the ~500 boot ns-load registrations before a conn
+     exists — boot semantics unchanged; `seon.client/index-schemas`
+     remains the owner of substrate rows).
+   - REPLAY scope (`:seon.db/replay? true` in the tx-context) → nil.
+     Replayed `(seon.schema/register! …)` sources re-run register!;
+     re-teeing them would write a no-op upsert per schema per boot,
+     re-anchoring row tx-ids (the exact churn the replay design's
+     'detect-and-tee doesn't re-fire' invariant exists to avoid).
+   - SUBSTRATE-CLAIMED row (current `:seon.schema/source` datom's tx
+     carries `:seon.db/origin :substrate-seed`) → nil. The bootstrap
+     self-host compiler can re-execute compiled-bundle registrations
+     at runtime (an agent's `(require …)` goog.globalEvals bundle JS,
+     the relink-registry! incident class); without this guard those
+     re-registrations would convert boot-indexed rows into never-
+     prunable, replayable `(…)` call rows. Same provenance rule as
+     `seon.client/prune-substrate-ghosts!`.
+   - IDENTICAL stored source → nil (idempotent re-registration; no
+     no-op upsert churn).
+
+   Otherwise transacts ONE [[schema-tee-row]] whose source is the
+   replayable call form `(seon.schema/register! <k> <form>)` — the
+   discriminator `seon.client/registration-call-source?` selects it
+   for replay-on-boot, closing the registry/store disagreement.
+
+   Never throws; a tee tx failure is surfaced via console.error (the
+   in-memory registration already succeeded — durability failed, and
+   that fact must be loud, not fatal). Returns the transact Promise,
+   or nil when skipped — register! stashes it in `seon.schema/!last-tee`
+   for deterministic test/proof awaiting."
+  [k form]
+  (when-some [conn db/*conn*]
+    (when-not (:seon.db/replay? (db/current-tx-context))
+      (let [source (pr-str (list 'seon.schema/register! k form))
+            [stored-src origin]
+            (first (db/query
+                     {:seon.db/query
+                      '[:find ?src ?origin
+                        :in $ ?k
+                        :where
+                        [?s :seon.schema/key ?k]
+                        [?s :seon.schema/source ?src ?tx]
+                        [(get-else $ ?tx :seon.db/origin :seon.db/untagged)
+                         ?origin]]
+                      :seon.db/conn conn
+                      :seon.db/args [k]}))]
+        (when-not (or (= origin :substrate-seed)
+                      (= stored-src source))
+          (-> (db/transact!
+                {:seon.db/tx-data [(schema-tee-row k source (js/Date.))]
+                 :seon.db/conn    conn})
+              (.then
+                (fn [r]
+                  (when-not (:seon.db/ok? r)
+                    (js/console.error
+                      "[seon.eval/tee-registered-schema!] self-tee tx FAILED —"
+                      "registration of" (str k) "is IN-MEMORY ONLY (will not"
+                      "survive a restart):"
+                      (-> r :seon.db/error :seon.error/message)))
+                  r))))))))
+
+;; Install at load — idempotent (a bundle re-execution re-installs the
+;; same fn). At THIS point in load order seon.schema is long loaded and
+;; no conn is bound yet, so nothing tees during boot ns-loads.
+(schema/set-tee-fn! tee-registered-schema!)
 
 (def store-edn-cap
   "Store-time char cap for any pr-str'd string persisted as a datom
@@ -1109,7 +1224,10 @@
    1. Full tx (eval + tee) fails → `console.error` with the message +
       source, then RETRY without the tee rows. The transcript is the
       agent's memory — a dropped tee row is recoverable (re-derivable
-      from source), a dropped eval row is not.
+      from source), a dropped eval row is not. The recovered eval row
+      is then stamped `:seon.eval/record-error` (separate top-level
+      tx) — the PARTIAL record is honest, queryable, and surfaces via
+      `seon.warn/check-record-errors` in every agent's context.
    2. Even the bare eval-row retry fails → `console.error` marked
       DATA LOSS. Nothing softer than error for either stage.
 
@@ -1215,10 +1333,35 @@
                       conn (assoc :seon.db/conn conn))
               r2    (await (db/transact! retry))]
           (if (:seon.db/ok? r2)
-            (js/console.error
-              "[seon.eval/record-eval!] eval row RECOVERED without tee —"
-              (count tee) "program-graph tee row(s) DROPPED for eval"
-              eval-id)
+            ;; HONEST RECORDS (task #24 symptom 3): a recovered-without-
+            ;; tee eval is a PARTIAL record — the dropped tee means that
+            ;; registration/def will NOT resume after a restart. The old
+            ;; behavior was a console.error and nothing else: the log
+            ;; lied by omission. Stamp :seon.eval/record-error on the
+            ;; eval row (a SEPARATE top-level tx — nested attrs need a
+            ;; boot-schema entry, top-level attrs lazy-install) so the
+            ;; failure is queryable and seon.warn/check-record-errors
+            ;; derives the warning into every agent's context until the
+            ;; next user message scopes it out.
+            (let [reason (cap-edn
+                           (str (count tee) " program-graph tee row(s) "
+                                "DROPPED (will not survive a restart) — "
+                                "tee tx failed: "
+                                (-> r :seon.db/error :seon.error/message)))
+                  r3     (await (db/transact!
+                                  (cond-> {:seon.db/tx-data
+                                           [{:seon.eval/id eval-id
+                                             :seon.eval/record-error reason}]}
+                                    conn (assoc :seon.db/conn conn))))]
+              (js/console.error
+                "[seon.eval/record-eval!] eval row RECOVERED without tee —"
+                (count tee) "program-graph tee row(s) DROPPED for eval"
+                eval-id)
+              (when-not (:seon.db/ok? r3)
+                (js/console.error
+                  "[seon.eval/record-eval!] could not stamp"
+                  ":seon.eval/record-error on eval" eval-id ":"
+                  (-> r3 :seon.db/error :seon.error/message))))
             (js/console.error
               "[seon.eval/record-eval!] DATA LOSS — eval row" eval-id
               "could not be persisted even without tee:"

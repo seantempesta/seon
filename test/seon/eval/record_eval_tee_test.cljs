@@ -27,6 +27,7 @@
      (cljs.test/run-tests 'seon.eval.record-eval-tee-test)"
   (:require
     [cljs.test :as t :refer [deftest is testing async]]
+    [clojure.string :as str]
     [datahike.api :as d]
     [seon.agent]                          ; :seon.eval/:seon.agent.turn/:seon.ns/:seon.schema registrations
     [seon.analyzer-info :as analyzer-info]
@@ -34,7 +35,15 @@
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.repl :as repl]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.warn :as warn]))
+
+(defn- unregister!
+  "Drop test keys from the in-memory registry (same helper as
+   seon.schema-test) — keeps the process-shared registry clean across
+   suite runs."
+  [& ks]
+  (swap! @#'schema/*schemas #(apply dissoc % ks)))
 
 ;; ---------------------------------------------------------------------------
 ;; Fresh :memory conn per test, with the SAME datahike schema the pod
@@ -210,6 +219,46 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; HONEST RECORDS (task #24 symptom 3): when the tee tx fails and only the
+;; bare eval row could be recovered, the eval row carries
+;; :seon.eval/record-error and seon.warn/check-record-errors derives a
+;; warning cluster from it — the partial record is loud, not silent.
+;; ---------------------------------------------------------------------------
+
+(deftest dropped-tee-stamps-record-error-and-the-warning-surfaces
+  (async done
+    (-> (fresh-conn)
+        (.then
+          (fn [conn]
+            (let [eval-id (db/new-id!)
+                  src     "(whatever)"
+                  bad-tee [{:seon.schema/key        :no.such.ns/attr2
+                            ;; the OLD broken lookup-ref shape — guaranteed
+                            ;; tee tx failure, fires the recovery path.
+                            :seon.schema/ns         [:seon.ns/name :no.such.ns]
+                            :seon.schema/source     src
+                            :seon.schema/created-at (js/Date.)}]]
+              (-> (record! conn (eval-args eval-id (db/new-id!) src bad-tee))
+                  (.then
+                    (fn [_]
+                      (let [db* @conn
+                            err (ffirst
+                                  (d/q '[:find ?err :in $ ?id
+                                         :where [?e :seon.eval/id ?id]
+                                                [?e :seon.eval/record-error ?err]]
+                                       db* eval-id))]
+                        (testing "the recovered eval row carries :seon.eval/record-error"
+                          (is (string? err))
+                          (is (str/includes? (str err) "DROPPED")))
+                        (testing "seon.warn/check-record-errors derives the warning"
+                          (let [{:seon.warn/keys [kind affected]}
+                                (warn/check-record-errors {:seon.db/db db*})]
+                            (is (= :record-errors kind))
+                            (is (= [eval-id] (mapv :seon.warn/sym affected))))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; deftest detection (board #33 part 1, live resume test 2026-06-10).
 ;;
 ;; cljs.analyzer stores the deftest marker as TOP-LEVEL `:test true` on the
@@ -349,5 +398,226 @@
                               (is (:ok r) "replayed corpus is live")
                               (is (true? (:value r))
                                   "deftest var reconstituted on the compile-state"))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Entity-schema tee (task #24 symptom 2, opus run2 live stack):
+;; a `:map {:seon.db/entity true}` registration's key (`:probe.garden.plant`)
+;; has NO keyword namespace — the old tee unconditionally wrote
+;; `{:seon.ns/name (keyword nil)}` → Malli `:seon.ns/name … got nil` →
+;; whole tx failed → tee row dropped. Fixed: schema-tee-row omits
+;; :seon.schema/ns for nil-namespace keys (mirroring
+;; seon.client/index-schemas), so the row lands and is replay-selectable
+;; (its source is a `(…)` registration call).
+;; ---------------------------------------------------------------------------
+
+(deftest entity-schema-under-fresh-ns-tees-and-lands
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (seval/eval cs "(ns probe.garden)" {:ns 'cljs.user :analyze-deps? false})
+                (.then (fn [_]
+                         (seval/eval cs "(seon.schema/register! :probe.garden.plant/id [:and {:seon.db/identity true} :seon.db/id])"
+                                     {:ns 'probe.garden :analyze-deps? false})))
+                (.then (fn [r] (is (:ok r) "id-attr registers")))
+                (.then (fn [_]
+                         (tee-for cs 'probe.garden
+                                  "(seon.schema/register! :probe.garden.plant [:map {:seon.db/entity true} [:probe.garden.plant/id :probe.garden.plant/id]])")))
+                (.then
+                  (fn [tee]
+                    (let [rows (filter #(= :probe.garden.plant (:seon.schema/key %)) tee)
+                          row  (first rows)]
+                      (testing "exactly one tee row for the entity-schema key"
+                        (is (= 1 (count rows))))
+                      (testing "NO :seon.schema/ns — nil keyword namespace must not produce a nil ns link"
+                        (is (not (contains? row :seon.schema/ns))))
+                      (testing "replay-selectable: source is a `(…)` registration call"
+                        (is (str/starts-with? (str/trim (:seon.schema/source row)) "(")))
+                      ;; And it LANDS: the whole tee (entity row included)
+                      ;; transacts with the eval row — no recovery path.
+                      (let [eval-id (db/new-id!)]
+                        (-> (fresh-conn)
+                            (.then
+                              (fn [conn]
+                                (-> (record! conn (eval-args eval-id (db/new-id!)
+                                                             (:seon.schema/source row) tee))
+                                    (.then
+                                      (fn [_]
+                                        (let [db* @conn]
+                                          (testing "tee row present in the store"
+                                            (is (= #{[:probe.garden.plant]}
+                                                   (d/q '[:find ?k :in $ ?k
+                                                          :where [?s :seon.schema/key ?k]]
+                                                        db* :probe.garden.plant))))
+                                          (testing "eval row carries NO record-error — nothing was dropped"
+                                            (is (= #{}
+                                                   (d/q '[:find ?err :in $ ?id
+                                                          :where [?e :seon.eval/id ?id]
+                                                                 [?e :seon.eval/record-error ?err]]
+                                                        db* eval-id))))))))))))))))))
+        (.then (fn [_]
+                 (unregister! :probe.garden.plant/id :probe.garden.plant)
+                 (done)))
+        (.catch (fn [e]
+                  (unregister! :probe.garden.plant/id :probe.garden.plant)
+                  (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; register! self-tee (task #24 symptom 1, orchestrator-verified live
+;; 2026-06-12): a REPL-scope register! with a bound conn tees its own
+;; :seon.schema row (replayable call-form source); without a conn it
+;; registers exactly as before — no tee, no throw. An agent-eval
+;; registration writing through BOTH the self-tee and the eval tee still
+;; yields exactly ONE row (identity upsert on :seon.schema/key).
+;; ---------------------------------------------------------------------------
+
+(deftest repl-scope-register-with-conn-tees-a-replayable-row
+  (async done
+    (-> (fresh-conn)
+        (.then
+          (fn [conn]
+            (let [prev db/*conn*
+                  k    :probe.selftee/attr]
+              (set! db/*conn* conn)
+              (-> (js/Promise.resolve (schema/register! k :string))
+                  (.then (fn [ret]
+                           (is (= k ret) "register! returns the key as before")
+                           (or @schema/!last-tee (js/Promise.resolve nil))))
+                  (.then
+                    (fn [r]
+                      (is (:seon.db/ok? r) "self-tee tx committed")
+                      (testing "the row exists with the replayable call-form source"
+                        (is (= #{[k "(seon.schema/register! :probe.selftee/attr :string)"]}
+                               (d/q '[:find ?k ?src :in $ ?k
+                                      :where [?s :seon.schema/key ?k]
+                                             [?s :seon.schema/source ?src]]
+                                    @conn k))))))
+                  (.finally (fn []
+                              (set! db/*conn* prev)
+                              (unregister! k)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest register-without-conn-neither-throws-nor-tees
+  (let [prev db/*conn*
+        k    :probe.selftee/no-conn]
+    (try
+      (set! db/*conn* nil)
+      (reset! schema/!last-tee :sentinel)
+      (is (= k (schema/register! k :int)) "registers exactly as before")
+      (is (nil? @schema/!last-tee) "tee hook ran and skipped — no tx, no throw")
+      (finally
+        (set! db/*conn* prev)
+        (unregister! k)))))
+
+(deftest agent-eval-register-yields-exactly-one-row
+  (async done
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (fresh-conn)])
+        (.then
+          (fn [res]
+            (let [cs   (aget res 0)
+                  conn (aget res 1)
+                  prev db/*conn*
+                  k    :probe.teeagent/x
+                  src  "(seon.schema/register! :probe.teeagent/x :int)"]
+              ;; conn bound for the WHOLE sequence, as in the live pod
+              ;; (start-agent! root-set!s *conn*): the self-tee fires
+              ;; during the eval AND record-eval! writes the eval tee.
+              (set! db/*conn* conn)
+              (-> (seval/eval cs "(ns probe.teeagent)" {:ns 'cljs.user :analyze-deps? false})
+                  (.then (fn [_] (tee-for cs 'probe.teeagent src)))
+                  (.then
+                    (fn [tee]
+                      (-> (or @schema/!last-tee (js/Promise.resolve nil))
+                          (.then (fn [_] (record! conn (eval-args (db/new-id!) (db/new-id!)
+                                                                  src tee)))))))
+                  (.then
+                    (fn [_]
+                      (testing "exactly ONE :seon.schema row — self-tee + eval tee upsert, never duplicate"
+                        (is (= [[1]]
+                               (vec (d/q '[:find (count ?s) :in $ ?k
+                                           :where [?s :seon.schema/key ?k]]
+                                         @conn k)))))))
+                  (.finally (fn []
+                              (set! db/*conn* prev)
+                              (unregister! k)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest substrate-claimed-row-is-never-overwritten-by-the-self-tee
+  (async done
+    (-> (client/open-agent-conn!)
+        (.then
+          (fn [conn]
+            (let [prev db/*conn*
+                  k    :probe.selftee.claimed/x]
+              ;; Boot-index claim: shape-literal source under a
+              ;; :substrate-seed-origin tx (same provenance rule
+              ;; prune-substrate-ghosts! honors).
+              (-> (db/with-tx-context {:seon.db/origin :substrate-seed}
+                    (fn []
+                      (db/transact!
+                        {:seon.db/tx-data [{:seon.schema/key        k
+                                            :seon.schema/source     ":string"
+                                            :seon.schema/created-at (js/Date.)}]
+                         :seon.db/conn    conn})))
+                  (.then
+                    (fn [seed-r]
+                      (is (:seon.db/ok? seed-r) "substrate claim tx ok")
+                      (set! db/*conn* conn)
+                      (reset! schema/!last-tee :sentinel)
+                      (schema/register! k :string)
+                      (-> (js/Promise.resolve @schema/!last-tee)
+                          (.then
+                            (fn [tee-ret]
+                              (is (nil? tee-ret)
+                                  "self-tee SKIPPED a substrate-claimed row")
+                              (testing "boot-indexed source untouched — boot stays the owner"
+                                (is (= #{[":string"]}
+                                       (d/q '[:find ?src :in $ ?k
+                                              :where [?s :seon.schema/key ?k]
+                                                     [?s :seon.schema/source ?src]]
+                                            @conn k))))))
+                          (.finally (fn []
+                                      (set! db/*conn* prev)
+                                      (unregister! k))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; The registry/store disagreement, closed end-to-end: a self-teed row
+;; replays on boot (simulated registry rebuild — the key is NOT in the
+;; in-memory registry until replay re-runs the stored call form).
+(deftest teed-registration-replays-after-registry-rebuild
+  (async done
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then
+          (fn [res]
+            (let [cs   (aget res 0)
+                  conn (aget res 1)
+                  k    :probe.selftee.replay/y]
+              (is (false? (schema/registered? k))
+                  "precondition: key absent from the registry (the post-restart state)")
+              (binding [db/*conn* conn]
+                (-> (db/transact!
+                      {:seon.db/tx-data
+                       ;; the EXACT row shape the self-tee writes
+                       [{:seon.schema/key        k
+                         :seon.schema/source     "(seon.schema/register! :probe.selftee.replay/y :string)"
+                         :seon.schema/ns         {:seon.ns/name :probe.selftee.replay}
+                         :seon.schema/created-at (js/Date.)}]})
+                    (.then
+                      (fn [_]
+                        (client/replay-program-graph!
+                          {:conn conn :compile-state cs
+                           :agent-id "record-eval-tee-test"})))
+                    (.then
+                      (fn [stats]
+                        (is (= 0 (:seon.client/replay-n-fail stats))
+                            "the registration call replays cleanly")
+                        (is (true? (schema/registered? k))
+                            "registry rebuilt from the store — attr is live again")))
+                    (.finally (fn [] (unregister! k))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

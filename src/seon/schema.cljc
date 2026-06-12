@@ -342,6 +342,41 @@
                 :seon.schema/key   k
                 :seon.error/kind   :user-input})))))
 
+;;; --- register! self-tee hook -----------------------------------------------
+;;; The registry is in-memory and dies with the process; durability for
+;;; RUNTIME registrations (agent evals, REPL-scope register! through the
+;;; MCP eval surface) comes from a `:seon.schema` program-graph row whose
+;;; `:seon.schema/source` is the replayable `(seon.schema/register! …)`
+;;; call form — the same row shape detect-and-tee writes, identity-upsert
+;;; on `:seon.schema/key` (ONE mechanism; open-issues 2026-06-12 verified
+;;; row: REPL-scope register! previously teed NOTHING, so REPL-registered
+;;; attrs went silently write-dead after a pod restart).
+;;;
+;;; This ns must not require seon.db (cycle: db→schema), so the tee is a
+;;; late-bound hook: `seon.eval` installs [[set-tee-fn!]] at load. The
+;;; installed fn is conn-gated (no bound `seon.db/*conn*` → no-op) — the
+;;; ~500 boot-time register! calls from compiled-ns loads run BEFORE any
+;;; conn exists and are untouched; boot indexing (seon.client/index-schemas)
+;;; remains the owner of substrate rows.
+
+(defonce ^:private !tee-fn (atom nil))
+
+(defonce !last-tee
+  ;; The most recent tee invocation's return (a Promise in CLJS, nil when
+  ;; the tee skipped). register! itself stays synchronous — tests and live
+  ;; proofs `await` this to observe the row land deterministically.
+  (atom nil))
+
+(defn set-tee-fn!
+  "Install the registration self-tee hook — called once at load by the
+   conn-owning side (seon.eval). `f` is `(fn [k form] …)`; it must never
+   throw (durability failure is ITS problem to surface loudly — a tee
+   failure must not fail the in-memory registration). Idempotent."
+  {:malli/schema [:=> [:cat fn?] :nil]}
+  [f]
+  (reset! !tee-fn f)
+  nil)
+
 (defn register!
   "Register a single schema in the global registry.
 
@@ -380,6 +415,12 @@
      :clj  nil)
   (assert-compilable-schema! k v)
   (swap! *schemas assoc k (with-entity-id-attr v))
+  ;; Self-tee (durability): hand the ORIGINAL form to the hook — replay
+  ;; re-derives :seon.entity/id-attr by re-running register!. No hook
+  ;; installed (JVM, pure-registry contexts, boot ns-loads before
+  ;; seon.eval) → registers exactly as before, no tee, no error.
+  (when-some [f @!tee-fn]
+    (reset! !last-tee (f k v)))
   k)
 
 (defn current-keys

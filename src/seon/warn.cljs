@@ -779,6 +779,47 @@
      :seon.warn/example
      "(seon.agent/message! {:seon.agent.message/content \"summary for you — …\"})  ; to defaults to the user"}))
 
+(defn check-record-errors
+  "Evals whose RECORDING partially failed (`:seon.eval/record-error`,
+   stamped by seon.eval/record-eval! when the program-graph tee rows
+   were dropped and only the bare eval row could be recovered) since
+   the latest user message. Each one is a registration/def that will
+   NOT survive a pod restart — the transcript alone looks fine, which
+   is exactly the dishonest-record class this check makes loud.
+   DERIVED at render; scoped out by the next user message. GLOBAL —
+   :seon.warn/ns is ignored."
+  {:malli/schema [:=> [:cat ::check-request] ::check-response]}
+  [{:seon.db/keys [db]}]
+  (let [cutoff (latest-user-at db)
+        rows   (db/query
+                 {:seon.db/db db
+                  :seon.db/query
+                  '[:find ?eid ?err ?at
+                    :where
+                    [?e :seon.eval/record-error ?err]
+                    [?e :seon.eval/id ?eid]
+                    [?e :seon.eval/at ?at]]})]
+    {:seon.warn/kind :record-errors
+     :seon.warn/affected
+     (->> rows
+          (filter (fn [[_ _ at]]
+                    (or (nil? cutoff) (> (.getTime ^js at)
+                                         (.getTime ^js cutoff)))))
+          (sort-by first)
+          (mapv (fn [[eid err _]]
+                  {:seon.warn/sym   (str eid)
+                   :seon.warn/where (clip err 120)})))
+     :seon.warn/explain
+     (str "These evals were only PARTIALLY recorded: the substrate could "
+          "not persist their program-graph tee rows (fn/schema/test "
+          "registrations), so whatever they defined exists in-memory "
+          "ONLY and will NOT survive a restart. Re-run the defining form "
+          "after fixing the cause in :seon.eval/record-error — a fresh "
+          "successful eval re-tees it durably.")
+     :seon.warn/example
+     (str "(seon.db/pull {:seon.db/pull-pattern '[*]\n"
+          "               :seon.db/ref [:seon.eval/id \"<eval-id>\"]})")}))
+
 (defn check-slow-evals
   "Evals over the slow threshold in the last hour, anywhere. Stops
    surfacing when new evals are fast and the offenders age out."
@@ -857,6 +898,7 @@
    check-unmarked-entity-kinds
    check-bad-ref
    check-failed-evals
+   check-record-errors
    check-fs-denied
    check-hop-exhausted
    check-slow-evals
