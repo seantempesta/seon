@@ -1174,3 +1174,335 @@ Sweep logs: `tmp/gym-postwaveA-stub.log`,
 `tmp/gym-postwaveA-paid{1,2,3,4}.log`; cards extracted at
 `tmp/card-{s21,s32,s12}-{1..4}.edn`. Sweep 1 s12 = pre-judge-fix
 (recorded, superseded by sweep 4).
+
+---
+
+## POST-WAVE-B RE-MEASURE — 2026-06-11 evening (Wave B landed; tree frozen at ba9a71e; S-21 NOT re-run — 3/3 this afternoon stands)
+
+Re-ran ONLY s32 and s12 per fix-everything PRD "Then: the re-measure".
+Suite (post-Wave-B): **432/1935/0** on every run (stub-gate run plus
+5×s32 plus 4×s12) — stub gate HELD throughout. No harness cuts were needed
+pre-flight: the §2 storage widening, the widened consult anchor, the
+§2b whitespace normalization, and the s32 fixture re-cut were already
+in tree. **Zero predicate re-cuts this measure.**
+
+### Scorecard — post-Wave-B
+
+| scenario | sweep | consult-first | repo-search | storage | judge | notes |
+|---|---|---|---|---|---|---|
+| s32 | 1 | **PASS** | 0 greps | n/a | PASS 100 | salience red (expected-red pin) |
+| s32 | 2 | **PASS** | 4 greps (red) | n/a | PASS 100 | re-derivation appetite recurred |
+| s32 | 3 | **PASS** | 0 greps | n/a | PASS 100 | |
+| s32 | 4 | **PASS** | 0 greps | n/a | PASS 100 | |
+| s32 | 5 | **PASS** | 0 greps | n/a | **FAIL 0** | honest red — see below |
+| s12 | A1 | B grep'd first | A searched ok | **0 rows** | **0 / 30** | A never replied; B misstated (below) |
+| s12 | B1 | B grep'd first | A searched ok | 1 row | 95 / **30** | |
+| s12 | A2 | B grep'd first | A searched ok | 1 row | **40** / 95 | |
+| s12 | A3 | B grep'd first | A searched ok | **0 rows** | 95 / 100 | zero misstatements |
+
+### The bar vs reality
+
+- **s32 consult-first 5/5 (widened anchor): MET.** Every run's first
+  message-driven eval was a `seon.db/query` of the `:seon.fn`/`:seon.ns`
+  program graph — the widened "any store read" anchor passes 5/5 (the
+  old vocabulary anchor would have scored 0/5; behavior identical to
+  post-Wave-A, the anchor semantics were the fix). Repo-search economy
+  4/5 (run 2: 4 greps = the run-7 re-derivation signature, once).
+  Judge 4/5 at 100. **Run 5's judge 0 is an honest red and the
+  remaining s32 risk shape:** the agent queried
+  `[?n :seon.ns/name :seon.agent]` for `message!`'s source — wrong ns
+  (it lives in `seon.agent.message`; runs 1–4 queried correctly or
+  recovered) — got empty rows, never fell back to the seeded
+  `:my.kb.codebase` finding (which answers verbatim), and replied "the
+  store query came back empty". Program-graph consult with NO kb
+  fallback = right reflex, brittle target. Salience predicate red 5/5
+  as pinned (EXPECTED-RED until a context rung renders claim text).
+- **s12: ALL THREE SUB-BARS MISSED.**
+  - **Storage ≥2: 0 / 1 / 1 / 0** (post-Wave-A: 1/1/2 — no
+    improvement; A1's and A3's agent A stored NOTHING despite A3's A
+    giving a judge-95 answer).
+  - **ZERO transact!-throws misstatements: 1 misstatement** (A1's
+    agent B). Verified against the actual reply text, not just the
+    judge: B read the internal validator and told the user "If
+    validation fails, it THROWS — not an envelope — … So you get an
+    `ExceptionInfo` whose `ex-data` contains …" with no mention of
+    the `transact!` catch. The live surface contract
+    (src/seon/db.cljs `transact!`, "SAFE BY DEFAULT … never throws
+    into your eval") is unchanged — the reply is a caller-facing
+    throw claim, exactly the class the bar tracks. Honest red.
+  - **Judges ≥70: 4 of 8 slots below** (0, 30, 30, 40). A1's 0 = A
+    sent no reply at all (2-turn arc, idle without replying — the f3
+    blind-idle sibling). The 30s/40 are real answer defects
+    (wrong/absent function locations, missing the second gate step),
+    with one stale-ground-truth caveat (smell 2 below) that does NOT
+    flip any verdict.
+  - **NEW REGRESSION — B's consult-first: 0/4** (post-Wave-A: 3/3
+    store-consult). Every B's first message-driven eval was a
+    `seon.agent.search/grep`, so even the WIDENED any-store-read
+    anchor fails. Wave B's context changes steered B to the repo
+    before the store; this axis moved backward while s32's identical
+    axis is 5/5 — the difference is the question shape ("where
+    exactly does seon check…" reads as a code question; s32's reads
+    as an API question).
+
+### Smells (report-only; src/ out of fence)
+
+1. **`seon.agent.search/grep` returns wrong results when scoped via
+   `:seon.agent.search/paths`.** A1's agent B grepped
+   `"validate-values!"` in `src/seon/db/internal.cljs` and got
+   match-count 2: line 1098 (real) + `(defn- validate-values!` at line
+   1147. The live file has EIGHT matching lines, the defn (no dash) is
+   at 678, and live line 1147 is `:keep-history?` precondition code;
+   the text `(defn- validate-values!` exists in this repo ONLY in
+   `src/seon/db.clj:129` (the JVM sibling). Cross-file result/label or
+   offset bug in the search tool — it fed B the wrong line numbers it
+   then cited (1153–1171). Worth a focused agent.
+2. **s12 judge references missed the f7 re-verification for Wave B.**
+   They still anchor "post-Wave-A 3dbada1" and treat
+   `validate-entity-values!` as the only correct name —
+   `validate-values!` (the tx-walking wrapper, internal.cljs:678,
+   called at the 1098 gate) is a CORRECT thing for an agent to name,
+   and judge-b dinged A1/B1 partly for naming it. Did not flip
+   verdicts (A1-B's red stands on the misstatement; B1-B also
+   invented `validate-entity` @333), but re-anchor before the next
+   paid s12.
+3. **One silent paid no-op (non-reproduced).** The stub-gate run
+   (`tmp/test-cljs-20260611-195542-86333.log`) printed
+   `SEON-GYM PAID-GATE {… gate "s32" enabled [:s32]}` yet left ZERO
+   s32 trace — no scorecard, no refusal failure, 432/1935/0, 1m49s
+   (stub-only duration). All five sweep runs against the SAME
+   compiled test.js + env ran s32 normally. One-off; if it recurs,
+   instrument `run-paid!`'s skip/refuse/run branches.
+4. **Scorecard lines appear twice per run log** — benign: the second
+   is `bin/gym`'s epilogue re-echoing the grep of `tmp/gym-latest.log`
+   into the same redirected file, not a double print (run-ids
+   confirmed single in the live stream).
+
+### Operational note (this measure)
+
+The s12 sweep launch double-fired (two identical 3-run loops ~1 min
+apart); the duplicate was killed after its run 1 completed cleanly.
+That extra completed run is COUNTED (B1 — same binary, same protocol);
+its killed run 2 is discarded. The `tmp/gym-postwaveB-s12-{1,2}.log`
+files are two-writer chimeras — the per-invocation
+`tmp/test-cljs-<ts>-<pid>.log` files are the source of truth and are
+what the cards were cut from.
+
+### Staging list (gym fence — the orchestrator commits)
+
+- `docs/prds/agent-runtime/research/e2e-demo-findings-2026-06-08.md`
+  (this section)
+
+Sweep logs: s32 `tmp/gym-postwaveB-s32-{1..5}.log` (cards
+`tmp/card-postwaveB-s32-{1..5}.edn`); s12 per-pid
+`tmp/test-cljs-20260611-{200915-98110,201042-99010,201215-99978,201617-2925}.log`
+(cards `tmp/card-postwaveB-s12-{A1,B1,A2,A3}.edn`). Prompt blobs:
+s32 `logs/prompts/{rxh-2606111959,shz-2606112001,dhV-2606112004,ICX-2606112006,Kdx-2606112008}/`;
+s12 `logs/prompts/{iDn,UZm}-2606112010/`,
+`{Xes-2606112011,WMf-2606112013}/`, `{UTN-2606112013,KYl-2606112014}/`,
+`{YPW-2606112017,ruI-2606112018}/`.
+
+## POST-WAVE-B COLLECTION COMPLETE — 2026-06-12Z (run 4 recovered + root-cause diagnosis)
+
+The post-Wave-B measure RAN TO COMPLETION: the gym driver process
+survived the harness restart that killed the driving agent, and s12
+run 4 (agent pair `kdB-2606112024` / `hrq-2606112026`) finished and
+cut a card. This section reconciles ALL artifacts, adds run 4, and
+diagnoses the two universal failures. NO new paid runs; src/ read-only.
+
+### Artifact reconciliation (read this before trusting file counts)
+
+- 7 s12 card FILES = **5 distinct runs**. `card-postwaveB-s12-1.edn` is
+  a byte-level duplicate of `-B1` (run-id `34794e2a…`, agent
+  `Xes-2606112011`) and `-s12-3.edn` duplicates `-A3` (run-id
+  `888fa200…`, agent `YPW-2606112017`) — same cards saved under a
+  second naming scheme. There is no "run 2" under the numeric scheme.
+- `card-postwaveB-s32-{4,5}.edn` each contain the SAME scorecard twice
+  (identical run-id and timestamp, `SEON-GYM SCORECARD` prefix) — a
+  duplicate echo of one run, NOT an earlier appended run. 5 distinct
+  s32 runs total, as scored.
+- Only run 4's driver log survives (`tmp/gym-postwaveB-s12-4.log`;
+  `tmp/gym-latest.log` is the same invocation modulo the epilogue
+  echo). Earlier-run evidence = cards + prompt blobs.
+
+### Run 4 (the recovered run) — the best s12 run of the sweep
+
+| predicate | result |
+|---|---|
+| `:a-stored-at-least-two-findings-with-provenance` | **FAIL** rows=[] |
+| `:a-searched-the-repo` | PASS (10/56 evals) |
+| `:b-first-eval-consults-stored-findings` | **PASS** — B's first eval: `(seon.db/query … [?e :my.kb.codebase/question ?q] [?e :my.kb.codebase/answer ?a])` |
+| `:b-replied-to-the-user` / idle / caps | all PASS |
+| judges | **100 / 100** — zero misstatements |
+
+Run 4 flips two claims in the section above: B-consult-first is
+**1/5, not 0/4** (run 4's B consulted A's stored finding FIRST and the
+consult paid off — the accumulation thesis demonstrated end-to-end
+once), and "judges ≥70 both slots" holds in **2/5** runs (A3, 4).
+Blobs: `logs/prompts/{kdB-2606112024,hrq-2606112026}/`.
+
+### Corrected scenario × run table (5 s32 + 5 s12 distinct runs)
+
+| scenario | run | agent | consult-first | salience | storage | judge | card |
+|---|---|---|---|---|---|---|---|
+| s32 | 1 | rxh-2606111959 | PASS | red 0/6 | n/a | 100 | s32-1 |
+| s32 | 2 | shz-2606112001 | PASS | red 0/9 | n/a | 100 (4 greps red) | s32-2 |
+| s32 | 3 | dhV-2606112004 | PASS | red 0/2 | n/a | 100 | s32-3 |
+| s32 | 4 | ICX-2606112006 | PASS | red 0/3 | n/a | 100 | s32-4 (dup echo) |
+| s32 | 5 | Kdx-2606112008 | PASS | red 0/2 | n/a | **0** | s32-5 (dup echo) |
+| s12 | A1 | iDn/UZm-2606112010 | FAIL (grep) | — | **0 rows** | **0 / 30** | s12-A1 |
+| s12 | B1 | Xes/WMf-2606112011 | FAIL (grep) | — | 1 row (eid 1054) | 95 / **30** | s12-B1 ≡ s12-1 |
+| s12 | A2 | UTN/KYl-2606112013 | FAIL (grep) | — | 1 row (eid 1065) | **40** / 95 | s12-A2 |
+| s12 | A3 | YPW/ruI-2606112017 | FAIL (grep) | — | **0 rows** | 95 / 100 | s12-A3 ≡ s12-3 |
+| s12 | 4 | kdB/hrq-2606112024 | **PASS** | — | **0 rows** | 100 / 100 | s12-4 |
+
+**Bars: s32 consult-first 5/5 MET (judge 4/5, repo-economy 4/5,
+salience 0/5 = the expected-red pin). s12 bar NOT met** (storage ≥2:
+0/5 runs; zero-misstatement: violated once, A1-B; judges ≥70 both
+slots: 2/5).
+
+### Diagnosis 1 — s12 storage rows≈0: predicate is CORRECT, the misses are real, three mechanisms
+
+The scenario EDN's storage predicate IS the fix-everything §2 decided
+shape (name-anchored `source-path` + `source-line` + `confidence` on
+one entity, any namespace, nested-q form) — verified by reading
+`test/seon/gym/scenarios/consults-findings-run8.edn` against PRD §2.
+And it WORKS: it found the one fully-provenanced row in B1 (eid 1054)
+and A2 (eid 1065). The universal sub-2 counts are agent behavior, with
+concrete mechanisms proven from run 4's tx log + the rendered prompts:
+
+1. **The worked example agents copy omits `:my.kb/source-line`.** The
+   rendered `my.kb` ns docstring's canonical transact row carries
+   `source-path` + `verified-at` + `confidence` — NO `source-line`.
+   The ambient `my.soul` seed rows (visible in every store-inventory)
+   carry the same line-less shape. Agents imitate what is shown; the
+   predicate demands what is told. Same told-vs-shown failure as
+   blind-spot #9, one attr over.
+2. **Line RANGES make agents fork a plural attr.** Run 4's A read a
+   multi-line validator and registered
+   `(seon.schema/register! :my.kb/source-lines :string)` (plus a
+   `:my.kb.codebase/source-lines` sibling) because the registered
+   `:my.kb/source-line` is a single `:int` — then stored ONE Q&A
+   mega-row with `source-path` + `confidence` + `source-lineS`. The
+   name check (`"source-line"` exactly) scores it 0. The §2 widening
+   un-pinned the NAMESPACE but still pins the exact NAME; "source-lines"
+   is the same vocabulary-vs-behavior near-miss one rung down.
+3. **Consolidation under an identity question-attr.** Registering
+   `:my.kb.codebase/question` as identity (run 4 did) upserts
+   everything about one question into ONE row — ≥2 rows requires ≥2
+   questions' worth of granular claims, which a single-question prompt
+   doesn't naturally produce. A1's A is the degenerate case: idle
+   after one truncated grep, stored nothing, replied nothing.
+
+**Fix units:** (S) align the `my.kb` docstring example + `my.soul`
+seed rows to carry `:my.kb/source-line` — show the full shape agents
+are graded on; (S) DECIDE range semantics — either bless a registered
+`:my.kb/source-line-end :int` next to the `:int` start (and show it),
+or keep single-line and say so in the docstring; do NOT silently widen
+the predicate to accept `source-lines` before the vocabulary decision;
+(M) if granular multi-row storage is the bar, the `my.kb` instructions
+must show a TWO-row store (one claim per row) for one question — the
+current example shows exactly one row per question.
+
+### Diagnosis 2 — s32 salience 0/5: world seeded fine; NO prompt surface carries row content; pinned red by design
+
+- **The seed WAS transacted in every run world.** All 5 runs' prompt
+  blobs show `(seon.db/store-inventory)` returning
+  `{:seon.db/kind :my.kb.codebase, :seon.db/attrs {:my.kb.codebase/claim 4, :my.kb.codebase/question 4}}`.
+- **The predicate is the documented EXPECTED-RED pin** (fixture
+  comment: "EXPECTED-RED until a context rung renders finding CLAIM
+  TEXT (not just attr names) into the prompt" — gym-upgrade §4). Not a
+  regression; it is the #26 target behavior awaiting its fix unit.
+- **Mechanism, precisely:** the rendered sections are
+  `[:system :namespaces :your-entity :live-tile :warnings :open-todos :transcript :prompt]`.
+  Stored data reaches a prompt ONLY via (a) store-inventory output in
+  the transcript — attr names + counts, never values — or (b) an
+  agent's own query results. No s32 agent ever queried
+  `:my.kb.codebase` (all five first-evals targeted `:seon.fn` source
+  rows), so claim text never entered any blob. The substrate even
+  diagnoses the render gap itself, live, in every s32 prompt:
+  `[unmarked-entity-kinds] … Affecting: :my.kb.codebase/claim` — the
+  seeded kind has an identity attr but no `{:seon.db/entity true}`
+  `:map` schema, so its rows are "invisible to the entity renderer".
+  Note the warning would NOT have fixed salience: no prompt rung
+  renders entity-marked row content either.
+- **Side effect worth tracking:** that warning ends "Please correct
+  before moving on" — in s32 worlds it points at the FIXTURE's kind,
+  nudging paid agents toward schema housekeeping on harness-seeded
+  data (self-defeating-surfaces adjacent; rxh spent transacts on it).
+
+**Fix unit (M, the #26 unit this measure specs):** a derived findings
+rung — render the rows of kb-shaped kinds (claim/question + provenance
+attrs) as a context section, content not just names, clipped per kind;
+the salience predicate then flips green with zero gym edits. Smaller
+alternative (S, weaker): teach the kb instructions an explicit
+"inventory shows a `:my.kb.*` kind → datalog its rows BEFORE the
+program graph" rule; this also addresses the s32-5 judge-0 class
+(empty wrong-ns program-graph query → "undocumented" reply, with the
+verbatim answer sitting in 4 seeded rows the agent never read).
+
+### Diagnosis 3 — judge-red classes (named, with evidence)
+
+- **A1 judge-a 0 — premature-idle/no-reply** (f3 blind-idle sibling):
+  A's whole arc = tile-wire, inventory, ONE grep (result display
+  truncated at 1500/16405 chars), idle. No store, no reply. Real.
+- **A1 judge-b 30 — internal-throw SURFACE-MISATTRIBUTION (new class,
+  NOT the old hallucinated transact!-throws).** B grepped and read the
+  REAL validator in `src/seon/db/internal.cljs`, then told the user
+  "If validation fails, it THROWS — not an envelope … you get an
+  `ExceptionInfo`". The old class invented a throw from priors; this
+  one reads true internal code and reports the internal throw as the
+  caller contract, never tracing the catch in `seon.db/transact!`'s
+  public face. Evidence-grounded wrongness survives Wave A because
+  Wave A fixed the priors path, not the partial-read path.
+- **B1 judge-b 30 — fabricated provenance:** non-existent
+  `validate-entity` "at line 333" + misstated pipeline order.
+- **A2 judge-a 40 — omission:** described gate step 1
+  (`validate-attrs!`) only; never mentioned per-value Malli validation.
+- Bonus from A1-B's transcript: B emitted bare prose lines outside
+  `;;` comments → 3 reader-error evals → the `message!` REFUSAL gate
+  correctly blocked the composed-before-results reply (gate working as
+  designed, live). The transcript then shows the agent evaluating a
+  bare `{:seon.agent.message/ok? true …}` map LITERAL — which renders
+  indistinguishably from a real send result. C-19's
+  model-authored-result flagging covers exactly this; +1 priority.
+
+### Diagnosis 4 — cleanup check: CLEAN
+
+- The gym's scratch-store isolation held: the live pod store
+  (`http://127.0.0.1:7890/agents`, HTTP 200) lists 9 agents, ALL
+  pre-existing (newest `FqR-/yPU-2606111933`); zero `rxh-*` or
+  `26061120xx`-cohort ids leaked. No `seon.agent/complete!` strays to
+  sweep.
+- Pod healthy end-state: `bin/seon status` green (pod, cljs-watch,
+  jvm, wire-server all up); pod restart at 23:34Z predates nothing in
+  this measure.
+
+### Smells (additive to the four above)
+
+5. **Gym card writer emits duplicate artifacts** — same card echoed
+   twice into one file (`s32-{4,5}.edn`, `SEON-GYM SCORECARD` prefix)
+   and same run saved under two file names (`s12-1`≡`B1`, `s12-3`≡`A3`).
+   A naive reader counts 7 s12 runs where 5 exist; one canonical
+   `card-<run-id>.edn` per run would make miscounting impossible.
+6. **`:my.kb/source-line` is `:int` (single line) while the gym's own
+   reference answers cite ranges** ("~line 460", "1153–1171") — the
+   substrate's provenance vocabulary cannot express what its own
+   ground truth uses; that contradiction is what pushed run-4's A to
+   mint `source-lines`.
+7. **s32 worlds nag agents about fixture schemas** (`unmarked-entity-
+   kinds` fires on `:my.kb.codebase/claim`, "Please correct before
+   moving on") — harness-seeded data generating a standing to-do in a
+   paid agent's prompt; either seed the kind entity-marked or exempt
+   identity-attr kinds without entity schemas from the imperative tone.
+
+### Verdict
+
+- **s32: bar MET** (consult-first 5/5 on the widened anchor); salience
+  0/5 stays the pinned #26 target; one honest judge-0 (no-kb-fallback
+  class); one re-derivation relapse (run 2).
+- **s12: bar NOT met** — storage 0/5 (real, three mechanisms above),
+  one misstatement (new surface-misattribution class), judges ≥70 both
+  slots 2/5. Run 4 is the existence proof the demo loop works
+  end-to-end: A stores, B consults FIRST, B answers 100 — the storage
+  red there is purely the `source-lines` vocabulary near-miss.

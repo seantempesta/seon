@@ -226,6 +226,30 @@ pointed at a checkout; the bundle is the next rung.
 | CONFIRMED AGAIN: MCP default `:client` runtime ≠ the pod (cost the unit one misleading "empty store" read; pid mismatch live-verified) | stale-MCP-runtime row | evidence appended to the existing open row |
 | `agents-dash-fragment` renders agent-authored tile content containing a bare `<h1>` — second h1 on the page (pre-existing, structural-HTML) | inspector dash | small unit: demote/strip headings in embedded tile content |
 
+## Post-Wave-B measure — verdicts + smells (2026-06-12Z collection)
+
+Full analysis: [[research/e2e-demo-findings-2026-06-08]] §POST-WAVE-B
+COLLECTION COMPLETE. **s32 bar MET** (consult-first 5/5 widened
+anchor; salience 0/5 is the fixture's own documented expected-red pin,
+not a regression). **s12 bar NOT met** — predicate verified CORRECT
+(§2 shape); misses are real, three mechanisms (worked example omits
+`source-line` so agents copy the shown shape; `:my.kb/source-line
+:int` can't express ranges → agents fork plural attrs; identity-upsert
+makes ≥2 rows structurally hard from one question). Judge reds are
+NEW classes, not the extinct transact!-throws one:
+premature-idle/no-reply, internal-throw surface-misattribution
+(partial-read path), fabricated provenance, omission. Run 4 proved the
+accumulation thesis end-to-end once (B consulted stored kb rows first,
+judges 100/100).
+
+| Smell | Where | Disposition |
+|---|---|---|
+| duplicate gym card artifacts — same card echoed twice in one file (s32-4/5), same run under two filenames (s12-1≡B1, s12-3≡A3) → miscounts (bit the orchestrator's own preliminary read) | gym driver card-writing | S: one canonical `card-<run-id>.edn` per run |
+| `:my.kb/source-line` `:int` contradicts the gym's own ground truth (line RANGES) — directly caused the run-4 `source-lines :string` fork | kb schema + the rendered worked example | fix unit: decide the canonical shape, align example + predicate; the worked example must SHOW source-line |
+| s32 worlds nag paid agents about fixture-seeded kinds (`unmarked-entity-kinds` + "Please correct before moving on") — self-defeating-surface-adjacent; burned agent transacts | warn/world seeding | S: seeded fixture kinds carry whatever marking the check wants, or the check excludes seed-origin rows (structural, not name-list) |
+| `seon.agent.search/grep` with `:paths` returns WRONG LINE NUMBERS — agent cited them, judge-failed | seon.agent.search | unit-worthy S/M: reproduce + fix; feeds the fabricated-provenance class |
+| C-19 priority +1: live instance of a bare result-envelope literal rendering indistinguishably from a real send result (after the B3 refusal gate correctly blocked the reply) | transcript render | C-19 (task #7) bumped above C-16 |
+
 ## C-14 verify-unit smells (2026-06-11 late evening)
 
 | Smell | Where | Disposition |
