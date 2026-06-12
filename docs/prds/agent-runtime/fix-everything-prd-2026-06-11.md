@@ -609,6 +609,28 @@ within the addendum reflects urgency, not filing order:
   (no parallel mechanism — don't keep the atom AND the row). Sequenced
   AFTER the paid measure: defaults don't change, but the unit touches
   the live call path the measure exercises.
+- **C-20 Anthropic provider adapter — latest Claude models, default
+  Opus (user, 2026-06-11 night).** ONE UNIT WITH C-18: provider
+  selection is just another field on the same `:seon.ai/config` row
+  (`:seon.ai/provider` `:deepseek`/`:anthropic`, plus the C-18 fields).
+  New `seon.ai/anthropic.cljs` sibling to `deepseek.cljs` exposing the
+  same `agent-adapter` contract (client.cljs already re-resolves the
+  adapter per call — selection slots in there). Messages API specifics
+  (pinned from the API reference 2026-06-11, exact strings — do NOT
+  append date suffixes): default model `claude-opus-4-8`; supported:
+  `claude-sonnet-4-6`, `claude-haiku-4-5`, `claude-fable-5`. POST
+  /v1/messages, headers `x-api-key` (from `ANTHROPIC_API_KEY`, already
+  in the user's env) + `anthropic-version: 2023-06-01`. Thinking on
+  Opus 4.7+/Fable is ADAPTIVE-ONLY: `{:thinking {:type "adaptive"}}`
+  or omit; `budget_tokens` 400s. Sampling params (`temperature`,
+  `top_p`, `top_k`) are REMOVED on Opus 4.7+/Fable and 400 — the
+  adapter must NOT inherit deepseek's temperature default; map the
+  config row's thinking field to adaptive/omit instead of deepseek's
+  enabled/disabled shape. No assistant prefill. `stop_reason` checked
+  before reading content (Fable adds `:refusal`). Raw-HTTP wire shape
+  mirroring deepseek.cljs (one pattern, no new SDK dep) unless the
+  implementing agent finds a hard reason otherwise. DeepSeek stays the
+  default provider until the user flips it.
 - **C-19 mark model-authored result-comments in the transcript render
   (downstream ask 19, filed 2026-06-11 ~20:00).** ROOT-3 second half:
   the A2 parser contract keeps fake result envelopes from EVALUATING,

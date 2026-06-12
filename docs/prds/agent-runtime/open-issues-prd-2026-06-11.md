@@ -210,6 +210,7 @@ elsewhere as noted.
 | 17 | **Branding not customizable** (BUG per user; demo-relevant Jun 12) — hardcoded "seon ·" titles/h1, `data-theme "phosphor"` | **DONE — 24671ca** (brand rows + `SEON_BRAND_NAME`/`SEON_BRAND_CSS`; live-proved Acme↔seon roundtrip) |
 | 18 | **LLM settings fork-to-change** (user, relayed) — DeepSeek model/endpoint/temp/max-tokens are private defs, thinking is a REPL-only atom; downstream needs override (e.g. thinking ON) | Wave C addendum C-18 — `:seon.ai/config` row, env-seeded, C-17 pattern; after the paid measure |
 | 19 | **Model-authored result-comments indistinguishable from real results in the transcript** — fake `;; =>` narration survives the A2 parser (correctly doesn't eval) but later turns trust it as a real read (downstream F13/F14 fabrication incidents) | Wave C addendum C-19 — render-side rewrite to `;; [unverified narration]`; post-measure; downstream soul-rule mitigation in place |
+| 20 | **Anthropic provider support** (user, direct) — latest Claude models, default `claude-opus-4-8`; key already in env | Wave C addendum C-20 — ONE UNIT with C-18 (`:seon.ai/provider` on the config row + `anthropic.cljs` adapter); API specifics pinned in the PRD item |
 
 **Future PRD row (explicitly OUT of scope for the asks-1–3 unit):** a
 **release-bundle target** — a self-contained artifact (compiled pod +
