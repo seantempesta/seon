@@ -166,18 +166,25 @@
   [findings]
   (transduce (map ::row-count) + 0 findings))
 
+(declare data-scan)
+
 (defn- cluster-stats
   "Headline numbers for the mission-control strip. All derived live
-   from the DB — they tick up as agents work."
+   from the DB — they tick up as agents work. `::fact-count` is the
+   /data browser's DEFAULT row count — distinct post-bootstrap data
+   rows via the SAME `data-scan` derivation (provenance from
+   `seon.db/bootstrap-row-ids`), so the header chip and /data can
+   never disagree. Findings ARE facts here — the separate findings
+   chip died with the legacy bare-ns attr query. The datom/fn/schema/
+   test counts back the `?system=1` machinery row."
   [db]
-  {::agent-count   (count (d/q '[:find ?e :where [?e :seon.agent/id]] db))
-   ::turn-count    (count (d/q '[:find ?t :where [?t :seon.agent.turn/at]] db))
-   ::fn-count      (count (d/q '[:find ?e :where [?e :seon.fn/sym]] db))
-   ;; user-domain rows, via the SAME derivation the findings rung and
-   ;; the knowledge pane read — one truth (was the legacy bare-ns
-   ;; :finding/claim count, stuck at 0 while agents saw findings).
-   ::finding-count (findings-row-total (findings-data db))
-   ::datom-count   (count (d/datoms db :eavt))})
+  {::agent-count  (count (d/q '[:find ?e :where [?e :seon.agent/id]] db))
+   ::turn-count   (count (d/q '[:find ?t :where [?t :seon.agent.turn/at]] db))
+   ::fact-count   (count (into #{} cat (vals (::kinds (data-scan db false)))))
+   ::datom-count  (count (d/datoms db :eavt))
+   ::fn-count     (count (d/q '[:find ?e :where [?e :seon.fn/sym]] db))
+   ::schema-count (count (d/q '[:find ?e :where [?e :seon.schema/key]] db))
+   ::test-count   (count (d/q '[:find ?e :where [?e :seon.test/sym]] db))})
 
 (defn- kind-card
   "One stored-knowledge KIND: dot+text header (kind · row count) plus a
@@ -1108,14 +1115,20 @@
 
 (defn- stat-cell
   "One headline number in the mission-control strip. Ticks up live —
-   the dash fragment re-morphs on every commit."
-  [label value]
-  [:div {:class (str "flex flex-col px-3 py-1.5 border border-base-800 "
-                     "rounded bg-base-900/60 min-w-20")}
-   [:span {:class "text-base leading-tight font-mono font-semibold text-amber-400 tabular-nums"}
-    (str value)]
-   [:span {:class "text-[10px] uppercase tracking-wider text-text-400"}
-    label]])
+   the dash fragment re-morphs on every commit. With `href` the whole
+   cell is a link (FACTS → /data: drill-down is one click away)."
+  ([label value] (stat-cell label value nil))
+  ([label value href]
+   [(if href :a :div)
+    (cond-> {:class (str "flex flex-col px-3 py-1.5 border border-base-800 "
+                         "rounded bg-base-900/60 min-w-20"
+                         (when href
+                           " hover:border-amber-700/70 transition-colors"))}
+      href (assoc :href href))
+    [:span {:class "text-base leading-tight font-mono font-semibold text-amber-400 tabular-nums"}
+     (str value)]
+    [:span {:class "text-[10px] uppercase tracking-wider text-text-400"}
+     label]]))
 
 (defn- agent-grid-tile
   "One clickable agent tile on the index — the agent's own
@@ -1160,8 +1173,15 @@
 (defn- agents-dash-fragment
   "The whole mission-control surface — ONE morph target (`#agents-dash`)
    so the SSE listener re-renders strip + tiles + knowledge atomically.
-   Derived 100% from the DB at render time."
-  []
+   Derived 100% from the DB at render time.
+
+   Header chips are USER-meaningful by default: AGENTS · TURNS
+   (activity a demo viewer parses instantly) + FACTS (the /data
+   default row count — one derivation, see `cluster-stats`; links to
+   /data). Zero-count chips are hidden. `system?` (the `?system=1`
+   param, same as /data) adds the machinery row: datoms · fns ·
+   schemas · tests."
+  [system?]
   (let [db   @db/*conn*
         rows (list-agents-data)
         ;; Lifecycle split (P3.5/#31): completed agents (stamped via
@@ -1169,7 +1189,8 @@
         ;; bottom, never resumed, never triggered. Active = absent attr.
         active    (vec (remove :seon.agent/completed-at rows))
         completed (vec (filter :seon.agent/completed-at rows))
-        {::keys [agent-count turn-count fn-count finding-count datom-count]}
+        {::keys [agent-count turn-count fact-count
+                 datom-count fn-count schema-count test-count]}
         (cluster-stats db)
         findings (findings-data db)
         b        (brand/info db)]
@@ -1180,16 +1201,33 @@
         (brand/page-title b "cluster")]
        [:p {:class "text-text-400 text-xs mt-0.5 font-mono"}
         (::brand/tagline b)]
-       [:a {:href "/data"
-            :class (str "inline-block mt-1 text-xs font-mono "
-                        "text-amber-500 hover:text-amber-300")}
-        "⛁ data browser →"]]
+       [:div {:class "flex items-baseline gap-3 mt-1"}
+        [:a {:href "/data"
+             :class (str "text-xs font-mono "
+                         "text-amber-500 hover:text-amber-300")}
+         "⛁ data browser →"]
+        ;; System-counts toggle — same `system` query param as /data.
+        [:a {:href (if system? "/agents" "/agents?system=1")
+             :class (str "text-xs font-mono "
+                         (if system?
+                           "text-amber-400 hover:text-amber-300"
+                           "text-text-500 hover:text-text-300"))}
+         (if system?
+           "● system counts shown — hide"
+           "○ system counts")]]]
       [:div {:class "flex gap-2 ml-auto items-stretch"}
-       (stat-cell "agents"   agent-count)
-       (stat-cell "turns"    turn-count)
-       (stat-cell "fns"      fn-count)
-       (stat-cell "findings" finding-count)
-       (stat-cell "datoms"   datom-count)
+       (when (or system? (pos? agent-count))
+         (stat-cell "agents" agent-count))
+       (when (or system? (pos? turn-count))
+         (stat-cell "turns" turn-count))
+       (when (or system? (pos? fact-count))
+         (stat-cell "facts" fact-count "/data"))
+       ;; Machinery — revealed by ?system=1 only (default header shows
+       ;; user-meaningful counts, never fns/schemas/tests/datoms).
+       (when system? (stat-cell "datoms"  datom-count))
+       (when system? (stat-cell "fns"     fn-count))
+       (when system? (stat-cell "schemas" schema-count))
+       (when system? (stat-cell "tests"   test-count))
        ;; New-agent affordance — POSTs to /agents/new (the injected
        ;; seon.client/start-agent! boot path: trigger armed, live) and
        ;; navigates to the new /agent/<id> page on success. Boot takes
@@ -1265,8 +1303,12 @@
               completed)])]))
 
 (defn- agents-index-page
-  []
-  (let [b (brand/info)]
+  "Full page for GET /agents. `system?` (the `?system=1` machinery-row
+   toggle) rides the SSE URL too, so every commit re-morphs the exact
+   header the tab is on."
+  [system?]
+  (let [b   (brand/info)
+        sse (str "@get('/agents/sse" (when system? "?system=1") "')")]
     (str
       "<!DOCTYPE html>"
       (html/->string
@@ -1279,9 +1321,9 @@
           (brand-css-style)
           [:script {:type "module" :src "/js/datastar.js"}]]
          [:body {:class "min-h-screen bg-base-950 text-text-50 font-sans p-4"}
-          [:div {:data-init "@get('/agents/sse')"
-                 :data-on:online__window "@get('/agents/sse')"}]
-          (agents-dash-fragment)]]))))
+          [:div {:data-init sse
+                 :data-on:online__window sse}]
+          (agents-dash-fragment system?)]]))))
 
 ;; ============================================================
 ;; /data — the live data browser (task #28). Level 1: the kinds the
@@ -1630,15 +1672,18 @@
 
 (defn- push-index!
   "Re-render and write the `#agents-dash` morph fragment to every
-   connection watching the index. Best-effort per-connection."
+   connection watching the index. Each conn carries ITS header view
+   (`:system?` — the machinery-row toggle); identical views render
+   once. Best-effort per-connection."
   []
   (try
-    (let [payload (patch-fragment (agents-dash-fragment))
-          conns   (get @!sse-by-agent ::index)]
-      (doseq [{:keys [res]} conns]
-        (try (.write res payload)
-             (catch :default e
-               (log/error-console! "seon.web.inspector" "index write failed" e)))))
+    (doseq [[system? cs] (group-by :system? (get @!sse-by-agent ::index))]
+      (let [payload (patch-fragment (agents-dash-fragment system?))]
+        (doseq [{:keys [res]} cs]
+          (try (.write res payload)
+               (catch :default e
+                 (log/error-console! "seon.web.inspector"
+                                     "index write failed" e))))))
     (catch :default e
       (log/error-console! "seon.web.inspector" "push-index! threw" e))))
 
@@ -1779,11 +1824,13 @@
                            "Connection"        "keep-alive"
                            "X-Accel-Buffering" "no"})
   (.write res ": connected\n\n")
-  (let [conn {:id (random-uuid) :res res :opened-at (js/Date.)}]
+  (let [system? (= "1" (query-param req "system"))
+        conn    {:id (random-uuid) :res res :system? system?
+                 :opened-at (js/Date.)}]
     (add-conn! ::index conn)
     (.on req "close" (fn [] (remove-conn! ::index (:id conn))))
     (try
-      (.write res (patch-fragment (agents-dash-fragment)))
+      (.write res (patch-fragment (agents-dash-fragment system?)))
       (catch :default e
         (log/error-console! "seon.web.inspector" "index initial render failed" e)))))
 
@@ -1820,7 +1867,8 @@
   [^js req ^js res path]
   (cond
     (= path "/agents")
-    (do (write-status! res 200 "text/html; charset=utf-8" (agents-index-page))
+    (do (write-status! res 200 "text/html; charset=utf-8"
+                       (agents-index-page (= "1" (query-param req "system"))))
         true)
 
     (= path "/agents/sse")

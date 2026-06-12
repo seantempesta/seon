@@ -224,6 +224,14 @@ elsewhere as noted.
 | — | a24 behavior delta worth relaying: `SEON_AI_API_KEY` now also enables `:deepseek` (DEEPSEEK_API_KEY still wins — existing deployments unchanged) | seon.ai.deepseek | note for the consumer relay |
 | — | cljs-watch reload did NOT propagate a new public fn to the pod runtime (explicit `:reload` require needed during live proof) — reload-on-save gap class | pod hot reload | investigation S; bit one live proof |
 | a24b | **Gateway streams SSE unconditionally** (downstream live-verified 2026-06-12 with a real key: completions + code-gen WORK, but `stream:false` is ignored — gateway bug, flagged to its owners) — adapter must tolerate either body shape | **DONE 2026-06-12** — content-type branch (charset-tolerant): SSE → `parse-sse-response` (delta concat, last usage chunk, [DONE] required, reasoning deltas dropped w/ debug log → feeds the a20 guard); JSON path byte-identical (re-pinned); malformed stream → legible envelope w/ raw body; live-proved with stubbed fetch |
+## FACTS-chips unit smells (2026-06-12)
+
+| Smell | Where | Disposition |
+|---|---|---|
+| handler registration rows count as FACTS — `seon.handlers.wake` registers at conn-open BEFORE boot-seed! stamps seed-origin → fresh world shows FACTS=1 not 0 | client.cljs boot path | S: stamp conn-open machinery txes as seed-origin (provenance fix, not a chip fix — chip honestly mirrors /data) |
+| lazy schema-install tee rows (+2 :seon.schema/:seon.ns per new agent kind) count as facts — arguably correct (agent-authored = user data); awareness row | per-row provenance rule | accept; revisit if demo viewers ask |
+| `no-stub-source-anywhere` failed mid-parallel-work (whitespace-leading :seon.fn source from seon.ctx) — matches the REGISTERED index-substrate disk-read race signature, two agents mid-edit in ctx/eval | shared-tree race (known row) | verify on the settled tree with the next unit's suite; route to tee-family agent if it persists |
+
 ## Mid-task gate unit smells (2026-06-12)
 
 | Smell | Where | Disposition |
