@@ -226,6 +226,21 @@ pointed at a checkout; the bundle is the next rung.
 | CONFIRMED AGAIN: MCP default `:client` runtime ≠ the pod (cost the unit one misleading "empty store" read; pid mismatch live-verified) | stale-MCP-runtime row | evidence appended to the existing open row |
 | `agents-dash-fragment` renders agent-authored tile content containing a bare `<h1>` — second h1 on the page (pre-existing, structural-HTML) | inspector dash | small unit: demote/strip headings in embedded tile content |
 
+## Demo-readiness sweep (2026-06-12 ~03:15Z) — PASS
+
+Pod restarted clean at 43c5145: replay 2/2 zero failures, zero
+`indexOf`; provider boot line `using deepseek LLM` (config row
+pristine `{}`, provider `:deepseek` — C-18 boot path exercised); GC
+correctly pruned the 3 folded `deepseek/set-thinking!`-era ghost fn
+rows (code-as-data self-heal observed); `/agents` 200; unbranded
+defaults (`seon · agents` / `seon · cluster`); store hygiene clean
+(only the resident `nme-2606111920` non-completed). Suite at HEAD:
+457/2037/0.
+
+| Smell | Where | Disposition |
+|---|---|---|
+| forged-origin warn fires ×4 on LEGITIMATE boot replay (agent-scoped replay txes claim `:substrate-seed`) — warn-only noise, but it means the deprioritized forged-origin row's eventual enforcement MUST distinguish replay-scope from live agent evals, or boot breaks | db/internal warn-on-seed-origin-forge! / replay scope | fold into the forged-origin backlog row as a hard constraint |
+
 ## Opus live-test unit — harness limitations + smells (2026-06-12Z, [[research/opus-live-tests-2026-06-12]])
 
 Spend: ≈$17.61 (unit budget $15 — honest $2.61 overrun, under the $20
