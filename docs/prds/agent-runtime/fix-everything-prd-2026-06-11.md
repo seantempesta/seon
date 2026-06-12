@@ -719,7 +719,7 @@ verification; no separate work.
   a fresh ns; eval row kept, program-graph row DROPPED → that
   registration does not resume). Investigation-first: joins the
   record-eval! dishonest-record register row.
-- ⬜ L12 related-question salience — VERIFIED 2026-06-12 (orchestrator
+- ✅ L12 related-question salience — VERIFIED 2026-06-12 (orchestrator
   forensics on the opus s12 blobs): A's stored row rendered IN FULL in
   every one of B's 9 prompts; B's question ("where does seon check
   entity VALUES … what error comes back") is related-but-distinct from
@@ -734,6 +734,21 @@ verification; no separate work.
   <term-overlap terms> — see <findings>"), term-overlap scored,
   structural, scales as findings grow (relocating the whole section
   doesn't). THE next capability bar (the s12 demo scenario).
+  SHIPPED 2026-06-12: `seon.agent.findings/findings-pointer-block`
+  (`:findings-pointer`, substrate-default-ctx priority 95 — after
+  `:turns` 90, before `:prompt` 99). Scoring: count of shared
+  lowercase tokens, len>=4, code tokens intact
+  (`validate-values!`, `seon.db/query`), articles/pronouns-only
+  stopwords; threshold 2 shared, top 3 rows; question window = the
+  same unanswered-inbound window `ctx/inbox-count` counts. Renders
+  the ACTUAL shared terms + the kind + the read-back query; "" when
+  idle / no overlap / empty store. findings now requires seon.ctx
+  (the seon.agent.turns load pattern — ctx's load-only require moved
+  to seon.client). Suite 493/2195 green; live-proved on the running
+  pod (scratch agent + scratch `:my.l12proof.scratch` finding →
+  pointer at char ~103.6k of ~104.1k naming flux-capacitron!/
+  hyperflux-quota/intake; idle resident agent renders ""); scratch
+  rows retracted. Effect on the s12 re-run = paid measure, pending.
 - ⬜ L5 context economy as a COST feature — `:namespaces` is ~97.7k of
   ~110-123k chars/turn (~50k tokens). With caching live this is
   cache-WRITE once + read thereafter, so measure after L4 verification

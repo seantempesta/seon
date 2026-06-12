@@ -31,7 +31,9 @@
    exact query that reads the rest."
   (:require
     [cljs.pprint :as pprint]
+    [clojure.set :as cset]
     [clojure.string :as str]
+    [seon.ctx :as ctx]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -164,3 +166,176 @@
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db]}]
   (findings-block (or db @db/*conn*)))
+
+;; ============================================================
+;; The question-adjacent pointer (`:findings-pointer`, priority 95 —
+;; after :turns at 90, before :prompt at 99). The L12 finding
+;; (opus-live-tests 2026-06-12 addendum 3): a stored finding rendered
+;; IN FULL in <findings> — ~2.2k lines into a ~125k-char prompt — and
+;; the agent STILL grepped the repo for an answer the section already
+;; held. Not a retrieval gap, a QUESTION-ADJACENT-BINDING gap. The fix
+;; is a one-to-three-line relevance pointer rendered near the prompt
+;; tail: which stored kinds share distinctive terms with the agent's
+;; open question. STRUCTURAL — term overlap only, no scenario's terms
+;; special-cased anywhere; scales as findings grow (relocating the
+;; whole section would not).
+;; ============================================================
+
+(def pointer-min-term-len
+  "Minimum token length to count as DISTINCTIVE. Short tokens
+   (is/are/db/the/fn) are overwhelmingly structural English or
+   ubiquitous code fragments; 4+ keeps identifiers
+   (validate-values!, transact, entity) and drops the chaff. The
+   SIMPLE deterministic scoring choice (vs inverse-frequency
+   weighting): count of shared len>=4 tokens — zero state, zero
+   tuning, byte-stable per db value."
+  4)
+
+(def pointer-min-shared
+  "Minimum SHARED distinctive tokens for a finding row to clear the
+   pointer threshold. One shared token is coincidence; two is a
+   relation worth a line."
+  2)
+
+(def pointer-max-rows
+  "Pointer covers at most the top N matching rows — it is a POINTER,
+   not a second findings render."
+  3)
+
+(def pointer-stopwords
+  "Tokens never counted as distinctive: articles + pronouns/pro-forms
+   (incl. the wh- words) ONLY. Deliberately NO domain or content
+   words — dropping those would be answer-shaping by omission. Most
+   structural English (is/and/for/not/…) already falls to
+   [[pointer-min-term-len]]."
+  #{"the" "a" "an"
+    "i" "me" "my" "mine" "myself" "you" "your" "yours" "yourself"
+    "we" "us" "our" "ours" "ourselves" "he" "him" "his" "himself"
+    "she" "her" "hers" "herself" "it" "its" "itself"
+    "they" "them" "their" "theirs" "themselves"
+    "this" "that" "these" "those"
+    "what" "which" "who" "whom" "whose"
+    "where" "when" "how" "why" "there" "here"})
+
+(schema/register! ::text :string)
+(schema/register! ::terms [:set :string])
+
+(defn terms
+  "The distinctive-term set of `s`: lowercase, tokenized so code-ish
+   tokens survive intact (`validate-values!`, `seon.db/query`,
+   `:my.kb/claim` — the token charset keeps !?*+=<>_./- inside a
+   token; surrounding prose punctuation splits), stripped of
+   leading/trailing ./-_: (so a sentence-ending `transact.` equals
+   `transact` and a keyword's colon drops), minus
+   [[pointer-stopwords]], minimum [[pointer-min-term-len]] chars."
+  {:malli/schema [:=> [:catn [::text ::text]] ::terms]}
+  [s]
+  (->> (re-seq #"[a-z0-9!?*+=<>_./:-]+" (str/lower-case s))
+       (map #(str/replace % #"^[./:_-]+|[./:_-]+$" ""))
+       (remove pointer-stopwords)
+       (filter #(>= (count %) pointer-min-term-len))
+       set))
+
+(defn- row-terms
+  "[[terms]] over every string value of a pulled row
+   (cardinality-many string values count element-wise) — the same
+   readable content [[string-content?]] gates on, all attrs included
+   (provenance paths overlap questions that mention files)."
+  [row]
+  (transduce (comp (mapcat (fn [v]
+                             (cond
+                               (string? v)     [v]
+                               (sequential? v) (filter string? v)
+                               :else           nil)))
+                   (map terms))
+             cset/union #{} (vals row)))
+
+(schema/register! ::shared-terms [:vector :string])
+(schema/register! ::pointer-match
+  [:map
+   [:seon.db/kind :seon.db/kind]
+   [::shared-terms ::shared-terms]])
+
+(defn question-matches
+  "The finding rows of `kinds` (a [[user-domain-kinds]] result) whose
+   string content shares at least [[pointer-min-shared]] distinctive
+   terms with `question` — top [[pointer-max-rows]] by shared-term
+   count (ties broken by kind name then terms — deterministic), each
+   as {:seon.db/kind k ::shared-terms [sorted …]}. Pure: no db, no
+   special-casing of any term."
+  {:malli/schema [:=> [:catn [::question ::text]
+                       [::kinds [:vector ::kind-entry]]]
+                  [:vector ::pointer-match]]}
+  [question kinds]
+  (let [q (terms question)]
+    (if (empty? q)
+      []
+      (->> (for [[kind _attrs rows] kinds
+                 row rows
+                 :let [shared (cset/intersection q (row-terms row))]
+                 :when (>= (count shared) pointer-min-shared)]
+             {:seon.db/kind kind ::shared-terms (vec (sort shared))})
+           distinct
+           (sort-by (juxt #(- (count (::shared-terms %)))
+                          (comp str :seon.db/kind)
+                          ::shared-terms))
+           (take pointer-max-rows)
+           vec))))
+
+(defn- unanswered-inbound-text
+  "The text of the agent's UNANSWERED inbound messages — the same
+   window `seon.ctx/inbox-count` counts (inbound strictly after my
+   latest outbound), joined oldest-first. \"\" when idle."
+  [db agent-id]
+  (let [msgs      (ctx/messages {:seon.agent/id agent-id :seon.db/db db})
+        outbound? #(= agent-id
+                      (:seon.agent/id (:seon.agent.message/from %)))]
+    (->> msgs
+         reverse
+         (take-while (complement outbound?))
+         reverse
+         (keep :seon.agent.message/content)
+         (str/join "\n"))))
+
+(defn findings-pointer-block
+  "The `<findings-pointer>` block for `agent-id` in db value `db`: one
+   line per matched kind naming the ACTUAL shared terms and the
+   read-back query, pointing the agent at the full rows already
+   rendered in `<findings>` above. \"\" when the agent is idle (no
+   unanswered inbound question), when the store holds no user-domain
+   content, or when no row clears [[pointer-min-shared]] —
+   reactive-context: derived per render, vanishes by itself."
+  {:malli/schema [:=> [:catn [::db :seon.db/db-val] [::agent-id :string]]
+                  :string]}
+  [db agent-id]
+  (let [question (unanswered-inbound-text db agent-id)]
+    (if (str/blank? question)
+      ""
+      (let [kinds   (user-domain-kinds db)
+            matches (question-matches question kinds)]
+        (if (empty? matches)
+          ""
+          (let [attrs-of (into {} (map (fn [[k a _]] [k a]) kinds))
+                grouped  (reduce (fn [acc {k :seon.db/kind
+                                           ts ::shared-terms}]
+                                   (update acc k (fnil into (sorted-set))
+                                           ts))
+                                 (sorted-map) matches)]
+            (str "<findings-pointer>\n"
+                 (str/join "\n"
+                   (for [[kind ts] grouped]
+                     (str "Stored findings overlap your question — " kind
+                          " (terms: " (str/join ", " ts) "). Full rows"
+                          " are in <findings> above — consult them"
+                          " BEFORE researching; re-read: "
+                          (read-query-hint (attrs-of kind)))))
+                 "\n</findings-pointer>")))))))
+
+(defn findings-pointer-section
+  "Context-section fn (`:findings-pointer`, substrate-default-ctx
+   priority 95): [[findings-pointer-block]] for the CALLING agent —
+   absent `:seon.db/db` defaults to the current conn, the same
+   convention as every sibling section fn."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (findings-pointer-block (or db @db/*conn*) id))

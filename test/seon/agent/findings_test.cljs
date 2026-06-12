@@ -7,7 +7,7 @@
    scratch `:memory` world (`client/open-agent-conn!` + `boot-seed!` —
    the same provenance layout a pod boots into), never the live conn."
   (:require
-    [cljs.test :refer [deftest is async]]
+    [cljs.test :refer [deftest is testing async]]
     [clojure.string :as str]
     [seon.agent.findings :as findings]
     [seon.client :as client]
@@ -162,6 +162,176 @@
             (is (= "" (findings/findings-block @conn))
                 "a kind with no string content has nothing to render —
                  rule (b), structural, not a name list")))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; The question-adjacent pointer (L12). Synthetic Acme rows ONLY — the
+;; mechanism never special-cases any scenario's terms (no-coaching rule).
+;; ---------------------------------------------------------------------------
+
+(def acme-registrations
+  [[:my.acme.scratch/question [:string {:seon.db/identity true}]]
+   [:my.acme.scratch/claim :string]])
+
+(def acme-rows
+  [{:my.acme.scratch/question "How does acme-sync! handle quota overflow?"
+    :my.acme.scratch/claim    (str "acme-sync! retries with exponential "
+                                   "backoff when the portal quota is "
+                                   "exhausted")}])
+
+(defn ^:async seed-inbound!
+  "Mint `agent-id` + ONE unanswered inbound user message carrying
+   `content` — the mid-task shape the pointer gates on."
+  [agent-id content]
+  (let [env (await
+              (db/transact!
+                {:seon.db/tx-data
+                 [{:seon.agent/id agent-id :seon.agent/state :idle}
+                  {:seon.agent.message/id      (db/new-id!)
+                   :seon.agent.message/from    {:seon.user/id "user"}
+                   :seon.agent.message/to      [{:seon.agent/id agent-id}]
+                   :seon.agent.message/content content
+                   :seon.agent.message/at      (js/Date.)
+                   :seon.agent.message/hops    0}]}))]
+    (when-not (:seon.db/ok? env)
+      (throw (ex-info "findings-test: inbound seed failed" env)))))
+
+(deftest terms-keeps-code-tokens-and-drops-structural-noise
+  (let [ts (findings/terms
+             (str "Where does the system check entity values — it calls "
+                  "(seon.db/transact! …) and validate-values!."))]
+    (is (contains? ts "validate-values!")
+        "code-ish tokens survive INTACT — bang included, trailing
+         sentence period trimmed")
+    (is (contains? ts "seon.db/transact!")
+        "qualified call names stay one token (paren split off)")
+    (is (and (contains? ts "entity") (contains? ts "values")))
+    (is (not (contains? ts "where"))
+        "wh- pro-forms are stopwords")
+    (is (not (contains? ts "the")) "articles are stopwords")
+    (is (not (contains? ts "it")) "pronouns are stopwords")
+    (is (not-any? #(< (count %) findings/pointer-min-term-len) ts)
+        "short structural tokens (and/is/db) fall to the length floor")
+    (is (= ts (findings/terms
+                (str "Where does the system check entity values — it calls "
+                     "(seon.db/transact! …) and validate-values!.")))
+        "deterministic")))
+
+(deftest question-matches-scores-shared-distinctive-terms
+  (let [kinds [[:my.acme.scratch
+                {:my.acme.scratch/claim 1}
+                [{:my.acme.scratch/claim
+                  "acme-sync! retries when the portal quota is exhausted"}]]]]
+    (testing "two+ shared distinctive terms clear the threshold"
+      (let [[m :as ms] (findings/question-matches
+                         "did acme-sync! exhaust the portal quota again?"
+                         kinds)]
+        (is (= 1 (count ms)))
+        (is (= :my.acme.scratch (:seon.db/kind m)))
+        (is (= ["acme-sync!" "portal" "quota"]
+               (:seon.agent.findings/shared-terms m))
+            "the ACTUAL shared terms ride the match, sorted")))
+    (testing "one shared term is coincidence — below threshold"
+      (is (= [] (findings/question-matches
+                  "show me the quota dashboard please" kinds))))
+    (testing "unrelated question matches nothing"
+      (is (= [] (findings/question-matches
+                  "summarize tuesday's standup notes" kinds))))
+    (testing "blank question matches nothing"
+      (is (= [] (findings/question-matches "" kinds))))
+    (testing "top-N rows cap (identical matches dedupe first)"
+      (let [many [[:my.acme.scratch
+                   {:my.acme.scratch/claim 1}
+                   (vec (for [i (range 5)]
+                          {:my.acme.scratch/claim
+                           (str "acme-sync! portal quota marker-" i)}))]]
+            q    "acme-sync! portal quota marker-0 marker-1 marker-2 marker-3 marker-4"]
+        (is (= findings/pointer-max-rows
+               (count (findings/question-matches q many)))
+            "5 distinct matching rows → top 3 — a pointer, not a second
+             findings render")))))
+
+(deftest pointer-renders-terms-kind-and-readback-near-the-question
+  (async done
+    (-> (with-world
+          (fn ^:async t [conn]
+            (await (seed-scratch-kind! acme-registrations acme-rows))
+            (await (seed-inbound!
+                     "AGTfindptr0001"
+                     "did acme-sync! exhaust the portal quota again?"))
+            (let [block (findings/findings-pointer-block
+                          @conn "AGTfindptr0001")]
+              (is (str/includes? block "<findings-pointer>"))
+              (is (str/includes? block ":my.acme.scratch")
+                  "the pointer NAMES the overlapping kind")
+              (is (and (str/includes? block "acme-sync!")
+                       (str/includes? block "quota"))
+                  "the pointer shows the ACTUAL shared terms")
+              (is (str/includes? block "re-read: (seon.db/query")
+                  "the read-back query rides the pointer")
+              (is (str/includes? block "<findings> above")
+                  "points BACK at the full rows, never re-renders them")
+              (is (not (str/includes?
+                         block "exponential"))
+                  "row CONTENT stays in <findings> — the pointer is
+                   terms + kind only")
+              (is (<= (count (str/split-lines block)) 5)
+                  "tiny — tag lines + at most 3 match lines")
+              (is (= block (findings/findings-pointer-block
+                             @conn "AGTfindptr0001"))
+                  "deterministic — byte-identical for one db value")
+              (is (= block (findings/findings-pointer-section
+                             {:seon.db/db    @conn
+                              :seon.agent/id "AGTfindptr0001"}))
+                  "the section fn matches the block (same derivation)"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest pointer-vanishes-when-nothing-overlaps-or-nothing-pends
+  (async done
+    (-> (with-world
+          (fn ^:async t [conn]
+            (testing "inbound question + EMPTY store → \"\""
+              (await (seed-inbound!
+                       "AGTfindptr0002"
+                       "did acme-sync! exhaust the portal quota again?"))
+              (is (= "" (findings/findings-pointer-block
+                          @conn "AGTfindptr0002"))))
+            (testing "stored rows + UNRELATED question → \"\""
+              (await (seed-scratch-kind! acme-registrations acme-rows))
+              (await (seed-inbound!
+                       "AGTfindptr0003"
+                       "summarize tuesday's standup notes"))
+              (is (= "" (findings/findings-pointer-block
+                          @conn "AGTfindptr0003"))
+                  "no row clears the 2-shared-term threshold"))
+            (testing "stored rows + NO unanswered inbound → \"\""
+              (let [env (await (db/transact!
+                                 {:seon.db/tx-data
+                                  [{:seon.agent/id    "AGTfindptr0004"
+                                    :seon.agent/state :idle}]}))]
+                (is (true? (:seon.db/ok? env)))
+                (is (= "" (findings/findings-pointer-block
+                            @conn "AGTfindptr0004"))
+                    "idle agent — no question, no pointer")))
+            (testing "agent already REPLIED since the inbound → \"\""
+              (await (seed-inbound!
+                       "AGTfindptr0005"
+                       "did acme-sync! exhaust the portal quota again?"))
+              (let [env (await
+                          (db/transact!
+                            {:seon.db/tx-data
+                             [{:seon.agent.message/id   (db/new-id!)
+                               :seon.agent.message/from {:seon.agent/id "AGTfindptr0005"}
+                               :seon.agent.message/to   [{:seon.user/id "user"}]
+                               :seon.agent.message/content "yes — quota hit"
+                               :seon.agent.message/at   (js/Date. (+ (js/Date.now) 50))
+                               :seon.agent.message/hops 1}]}))]
+                (is (true? (:seon.db/ok? env)))
+                (is (= "" (findings/findings-pointer-block
+                            @conn "AGTfindptr0005"))
+                    "answered = idle — derived, vanishes by itself")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

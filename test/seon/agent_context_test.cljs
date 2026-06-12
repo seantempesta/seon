@@ -220,7 +220,7 @@
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
               (is (= [:system :namespaces :your-entity :live-tile
                       :warnings :open-todos :findings :transcript :turns
-                      :prompt]
+                      :findings-pointer :prompt]
                      sections)
                   "the v4 substrate-default section names, in order
                    (static→volatile) — the catalogs, capabilities,

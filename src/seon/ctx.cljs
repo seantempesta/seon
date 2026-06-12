@@ -47,9 +47,6 @@
     [clojure.string :as str]
     [cljs.pprint :as pprint]
     [cljs.reader :as edn]
-    ;; load-only: provides the :findings section fn (late-bound symbol
-    ;; slot in substrate-default-ctx — the require puts it in the build).
-    [seon.agent.findings]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
@@ -1679,7 +1676,12 @@
      9. :turns       — the turn-budget countdown (one line, mid-task
                        only; derived, vanishes when idle) — just
                        above the prompt tail for salience
-    10. :prompt      — the §2.9 status line + clean REPL prompt
+    10. :findings-pointer — the question-adjacent relevance pointer
+                       (L12): 1–3 lines naming the stored kinds whose
+                       terms overlap the open question, pointing back
+                       at the full <findings> rows; derived, vanishes
+                       when idle or when nothing overlaps
+    11. :prompt      — the §2.9 status line + clean REPL prompt
                        (always changing — the volatile tail's end)
 
    The dead sections (capabilities, exemplars, schema-catalog,
@@ -1707,6 +1709,8 @@
     :seon.render/ai 'seon.ctx/transcript-section}
    {:seon.ctx/name :turns        :seon.ctx/priority 90
     :seon.render/ai 'seon.agent.turns/turns-section}
+   {:seon.ctx/name :findings-pointer :seon.ctx/priority 95
+    :seon.render/ai 'seon.agent.findings/findings-pointer-section}
    {:seon.ctx/name :prompt       :seon.ctx/priority 99
     :seon.render/ai 'seon.ctx/prompt-section}])
 
