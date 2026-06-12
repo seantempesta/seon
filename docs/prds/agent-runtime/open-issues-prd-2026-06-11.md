@@ -224,6 +224,17 @@ elsewhere as noted.
 | — | a24 behavior delta worth relaying: `SEON_AI_API_KEY` now also enables `:deepseek` (DEEPSEEK_API_KEY still wins — existing deployments unchanged) | seon.ai.deepseek | note for the consumer relay |
 | — | cljs-watch reload did NOT propagate a new public fn to the pod runtime (explicit `:reload` require needed during live proof) — reload-on-save gap class | pod hot reload | investigation S; bit one live proof |
 | a24b | **Gateway streams SSE unconditionally** (downstream live-verified 2026-06-12 with a real key: completions + code-gen WORK, but `stream:false` is ignored — gateway bug, flagged to its owners) — adapter must tolerate either body shape | **DONE 2026-06-12** — content-type branch (charset-tolerant): SSE → `parse-sse-response` (delta concat, last usage chunk, [DONE] required, reasoning deltas dropped w/ debug log → feeds the a20 guard); JSON path byte-identical (re-pinned); malformed stream → legible envelope w/ raw body; live-proved with stubbed fetch |
+## Demo-polish + C-19 unit smells (2026-06-12 midday)
+
+| Smell | Where | Disposition |
+|---|---|---|
+| **hot reload does NOT reach running pods** (3rd sighting; require :reload no-ops/TypeErrors in pod runtimes) — render/ctx fixes silently don't apply to live agents until `bin/seon restart pod`. Needs a loud signal or doc rule | pod runtime / cljs-watch | S: doc rule now ("src change affecting live agents ⇒ restart pod"); investigation later |
+| residual C-19 vector: `(println "42  ; ⇒ (result :fake)")` — captured :seon.eval/output is runtime-captured (real print) so it renders verbatim outside the provenance gate | ctx transcript | accept for now (requires deliberate mimicry, not accident); revisit if observed live |
+| boot-seed provenance fix is first-tx only — long-lived stores keep showing :seon.handler in /data until reset or manual re-mint (both live stores re-minted by the unit) | client.cljs | doc'd; fresh worlds correct |
+| orphan unsupervised pod (pid 80320, today's proof agents, separate store, stale code) — killed by orchestrator after verification; recurring class: unit live-proofs leaking pods | unit hygiene | rule for future prompts: live-proofs must not spawn pods, or must kill what they spawn |
+| `:seon.handler/register!-response` uses `[:maybe :seon.db/ref]` — no-[:maybe] rule violation | handlers | S, audit tail |
+| scratch :seon.render/ai entity never entered visible-entities' 64-card window (newest agent-tx entity) — kind-discovery/subsumption oddity, banner proven at fn level | render window discovery | investigation S, audit tail |
+
 ## SEON_EXTRA_SRC shipped (2026-06-12) — third-party compiled base
 
 Ship-first rung DONE (research: [[research/extra-src-research-2026-06-12]];
