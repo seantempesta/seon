@@ -72,6 +72,8 @@
     [clojure.walk :as walk]
     [malli.core :as m]
     [seon.agent :as agent]
+    [seon.ai :as ai]
+    [seon.ai.anthropic :as anthropic]
     [seon.ai.deepseek :as deepseek]
     [seon.client :as client]
     [seon.ctx :as ctx]
@@ -961,6 +963,43 @@
         {:text (or (nth scripts (swap! !i inc) nil)
                    "Script exhausted — nothing further to do.")}))))
 
+(defn- usage-logging
+  "Wrap a paid llm-fn so every response's usage block prints as ONE
+   greppable line (`SEON-GYM LLM-USAGE <provider> <usage>`). Spend
+   telemetry: paid sweeps previously had NO per-call token/cost
+   evidence — budgets were tracked by guesswork. Response passes
+   through unchanged."
+  [provider llm-fn]
+  (fn [ctx]
+    (.then (llm-fn ctx)
+           (fn [resp]
+             (when-let [u (get-in resp [:seon.ai/raw :seon.ai/usage])]
+               (println "SEON-GYM LLM-USAGE" (name provider) (pr-str u)))
+             resp))))
+
+(defn- paid-adapter
+  "The paid tier's agent llm-fn: the provider `seon.ai/provider`
+   selects (SEON_AI_PROVIDER env / `:seon.ai/config` row — the SAME
+   selection point as the live pod's `seon.client/current-llm-fn`),
+   wrapped in [[usage-logging]]. The tier keyword stays `:deepseek`
+   (historical name — every scenario file carries it); semantically it
+   now means PAID-PROVIDER tier."
+  []
+  (let [provider (ai/provider)]
+    (usage-logging provider
+                   (case provider
+                     :anthropic (anthropic/agent-adapter)
+                     (deepseek/agent-adapter)))))
+
+(defn- paid-key-set?
+  "Is the ACTIVE provider's API key present? The paid-tier budget
+   guard — generalized from the former hardwired DEEPSEEK_API_KEY
+   check when the provider became selectable."
+  []
+  (case (ai/provider)
+    :anthropic (boolean (.. js/process -env -ANTHROPIC_API_KEY))
+    (boolean (.. js/process -env -DEEPSEEK_API_KEY))))
+
 (defn- rejecting-llm
   "Catalog F-llm-reject: a Promise that REJECTS after 100ms (simulated
    provider timeout). The turn must record :error, not hang or vanish."
@@ -1165,12 +1204,12 @@
                             "not yet runnable (see its :doc)")}
 
       (and (= :deepseek tier)
-           (not (and allow-paid?
-                     (.. js/process -env -DEEPSEEK_API_KEY))))
+           (not (and allow-paid? (paid-key-set?))))
       {:seon.gym/ok? false
-       :seon.gym/error (str "scenario " id " is :deepseek tier — costs real "
-                            "money. Pass {:seon.gym/allow-paid? true} with "
-                            "DEEPSEEK_API_KEY set to run it.")}
+       :seon.gym/error (str "scenario " id " is :deepseek (paid) tier — costs "
+                            "real money. Pass {:seon.gym/allow-paid? true} "
+                            "with the active provider's API key set "
+                            "(provider: " (name (ai/provider)) ") to run it.")}
 
       :else
       (let [prev-conn    db/*conn*
@@ -1214,9 +1253,16 @@
             (let [primary (db/new-id!)]
               (await
                 (db/with-agent primary
-                  (fn []
-                    (seed-scenario-world! {:seon.db/conn conn
-                                           :seon.gym/scenario scenario}))))
+                  (fn ^:async seed-and-sync! []
+                    (await (seed-scenario-world! {:seon.gym/scenario scenario
+                                                  :seon.db/conn conn}))
+                    ;; World-parity: a live boot syncs the :seon.ai/config
+                    ;; row from the SEON_AI_* env vars (start-agent! →
+                    ;; ai/sync!; env OWNS the row). The gym never ran the
+                    ;; sync, so env knobs (SEON_AI_TIMEOUT_MS, _MODEL,
+                    ;; _THINKING) were silently DEAD in gym worlds while
+                    ;; live pods honored them.
+                    (await (ai/sync!)))))
               (await (eval-fixture-sources! compile-state fixture-sources))
               (await (ensure-agent! !agents compile-state :a primary)))
             ;; Drive every gym turn, strictly in order; each turn's agent
@@ -1242,7 +1288,7 @@
                                       rejecting-llm))
                   :deepseek
                   (await (drive-loop! agent-id compile-state mid
-                                      (deepseek/agent-adapter))))))
+                                      (paid-adapter))))))
             ;; Mechanical scoring against the post-run store + transcript;
             ;; judge predicates score on the SEPARATE judge axis.
             (let [agents      @!agents
