@@ -224,6 +224,14 @@ elsewhere as noted.
 | — | a24 behavior delta worth relaying: `SEON_AI_API_KEY` now also enables `:deepseek` (DEEPSEEK_API_KEY still wins — existing deployments unchanged) | seon.ai.deepseek | note for the consumer relay |
 | — | cljs-watch reload did NOT propagate a new public fn to the pod runtime (explicit `:reload` require needed during live proof) — reload-on-save gap class | pod hot reload | investigation S; bit one live proof |
 | a24b | **Gateway streams SSE unconditionally** (downstream live-verified 2026-06-12 with a real key: completions + code-gen WORK, but `stream:false` is ignored — gateway bug, flagged to its owners) — adapter must tolerate either body shape | **DONE 2026-06-12** — content-type branch (charset-tolerant): SSE → `parse-sse-response` (delta concat, last usage chunk, [DONE] required, reasoning deltas dropped w/ debug log → feeds the a20 guard); JSON path byte-identical (re-pinned); malformed stream → legible envelope w/ raw body; live-proved with stubbed fetch |
+## Mid-task gate unit smells (2026-06-12)
+
+| Smell | Where | Disposition |
+|---|---|---|
+| **CONSUMER SECRET IN THE LIVE STORE**: `:my.config/secret` (hex token) + cloud-run URL render verbatim into every agent's `<findings>` section → transited LLM providers on every live wake. USER MUST RELAY: rotate the token | live cluster store / findings rung | URGENT unit launched: secret-shaped redaction in findings render + `:seon.ctx/excluded-kinds` customize-with-data row; consumer relay re rotation |
+| ctx read-API public fns unspecced (`turns-since-inbound`, `messages`, siblings) — instrumentation-rule drift, second report (OPUS-S flagged the same family) | ctx.cljs | S sweep unit, queue |
+| after a `:cap-hit` halt without reply, `task-in-progress?` stays TRUE until next inbound — harmless today (renders only happen in wakes); matters if a future renderer assembles context for parked agents | ctx.cljs | note; revisit with the lifecycle UX unit |
+
 ## Sweep findings (2026-06-12, $4.60 — full section in [[research/opus-live-tests-2026-06-12]])
 
 Cache VERIFIED live (reads every call 2+, cross-process) but covers ~14% of input (system block only). s32 pass. s12: A stores + terminates under cap now; consult-first red on a THIRD model. Todo adherence 1/3 on haiku = opus's 1/3 (model-independent). Sonnet = measurement default.

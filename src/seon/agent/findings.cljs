@@ -282,33 +282,26 @@
            (take pointer-max-rows)
            vec))))
 
-(defn- unanswered-inbound-text
-  "The text of the agent's UNANSWERED inbound messages — the same
-   window `seon.ctx/inbox-count` counts (inbound strictly after my
-   latest outbound), joined oldest-first. \"\" when idle."
-  [db agent-id]
-  (let [msgs      (ctx/messages {:seon.agent/id agent-id :seon.db/db db})
-        outbound? #(= agent-id
-                      (:seon.agent/id (:seon.agent.message/from %)))]
-    (->> msgs
-         reverse
-         (take-while (complement outbound?))
-         reverse
-         (keep :seon.agent.message/content)
-         (str/join "\n"))))
-
 (defn findings-pointer-block
   "The `<findings-pointer>` block for `agent-id` in db value `db`: one
    line per matched kind naming the ACTUAL shared terms and the
    read-back query, pointing the agent at the full rows already
    rendered in `<findings>` above. \"\" when the agent is idle (no
-   unanswered inbound question), when the store holds no user-domain
-   content, or when no row clears [[pointer-min-shared]] —
-   reactive-context: derived per render, vanishes by itself."
+   task in progress — `seon.ctx/task-in-progress?`, the same MID-TASK
+   gate as `seon.agent.turns/turns-block`; the per-turn self-fold does
+   NOT close it, so the pointer persists through a research wake —
+   opus-live-tests 2026-06-12 finding 1), when the store holds no
+   user-domain content, or when no row clears [[pointer-min-shared]] —
+   reactive-context: derived per render, vanishes by itself. The
+   question text is the MOST RECENT live inbound message
+   (`seon.ctx/latest-inbound-text`), regardless of fold state."
   {:malli/schema [:=> [:catn [::db :seon.db/db-val] [::agent-id :string]]
                   :string]}
   [db agent-id]
-  (let [question (unanswered-inbound-text db agent-id)]
+  (let [input    {:seon.agent/id agent-id :seon.db/db db}
+        question (if (ctx/task-in-progress? input)
+                   (ctx/latest-inbound-text input)
+                   "")]
     (if (str/blank? question)
       ""
       (let [kinds   (user-domain-kinds db)

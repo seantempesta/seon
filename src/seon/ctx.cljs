@@ -1557,9 +1557,12 @@
   "Count of UNANSWERED inbound messages in `msgs` (the agent's derived
    conversation, oldest-first): inbound items (from ≠ me) strictly
    after my own latest outbound message — every inbound when I have
-   never replied. The `inbox K` slot of the status line (§2.9), and
-   the mid-task gate of `seon.agent.turns/turns-block` (one
-   derivation, no twin query)."
+   never replied. The `inbox K` slot of the status line (§2.9). NOTE:
+   ANY outbound from me counts here, INCLUDING the per-turn self-fold
+   (from = to = me) — so this window closes after turn 1 of a wake.
+   The MID-TASK gate is [[task-in-progress?]], which mirrors the
+   loop's reply semantics instead (opus-live-tests 2026-06-12
+   finding 1: sections gated on inbox-count were first-turn-only)."
   {:malli/schema [:=> [:catn [::msgs [:vector :map]] [::own-id :string]]
                   :int]}
   [msgs own-id]
@@ -1568,6 +1571,82 @@
                        reverse
                        (take-while (complement outbound?)))]
     (count (remove outbound? after-out))))
+
+(defn- latest-live-inbound
+  "The latest LIVE inbound message for `my-eid` in db value `db` as
+   [at content] — to ∋ me, from ≠ me, hops < `warn/hop-cap` (the same
+   window [[turns-since-inbound]] and the loop's cap policy count
+   against). nil when none."
+  [db my-eid]
+  (->> (db/query
+         {:seon.db/db db
+          :seon.db/query
+          '[:find ?at ?content
+            :in $ ?me ?cap
+            :where
+            [?m :seon.agent.message/to ?me]
+            [?m :seon.agent.message/from ?f]
+            [(not= ?f ?me)]
+            [(get-else $ ?m :seon.agent.message/hops 0) ?h]
+            [(< ?h ?cap)]
+            [?m :seon.agent.message/at ?at]
+            [?m :seon.agent.message/content ?content]]
+          :seon.db/args [my-eid warn/hop-cap]})
+       (sort-by #(.getTime ^js (first %)))
+       last))
+
+(defn task-in-progress?
+  "MID-TASK derivation — TRUE from a live inbound message until the
+   agent REPLIES to it: the latest live inbound (to ∋ me, from ≠ me,
+   hops < `warn/hop-cap`) has no LATER outbound to a NON-SELF
+   recipient. Mirrors the loop's own stop semantics
+   (`seon.agent/replied-since-inbound?`, halt `:replied`) read-only
+   from the message log at render time — the per-turn self-fold
+   (from = to = me) never closes the window, unlike [[inbox-count]]'s
+   any-outbound window (opus-live-tests 2026-06-12 finding 1: gating
+   `<turns>`/`<findings-pointer>` on inbox-count made them
+   first-turn-only — dead exactly where the countdown matters). The
+   ONE gate both sections consume; nothing stored, nothing to clear
+   (docs/seon/concepts/reactive-context)."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [{:seon.agent/keys [id] db :seon.db/db}]
+  (let [id     (resolve-id id)
+        db     (or db @db/*conn*)
+        my-eid (:db/id (db/entity {:seon.db/db db
+                                   :seon.db/ref [:seon.agent/id id]}))
+        [inbound-at _] (when my-eid (latest-live-inbound db my-eid))
+        reply-at
+        (when my-eid
+          (ffirst
+            (db/query
+              {:seon.db/db db
+               :seon.db/query
+               '[:find (max ?at)
+                 :in $ ?me
+                 :where
+                 [?m :seon.agent.message/from ?me]
+                 [?m :seon.agent.message/to ?t]
+                 [(not= ?t ?me)]
+                 [?m :seon.agent.message/at ?at]]
+               :seon.db/args [my-eid]})))]
+    (boolean (and inbound-at
+                  (or (nil? reply-at)
+                      (<= (.getTime ^js reply-at)
+                          (.getTime ^js inbound-at)))))))
+
+(defn latest-inbound-text
+  "Content of the agent's MOST RECENT live inbound message, regardless
+   of fold/reply state — the question text source for
+   `seon.agent.findings/findings-pointer-block` (the pointer must name
+   the live question on EVERY turn of a wake, not just before the
+   first self-fold). \"\" when no live inbound exists."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.agent/keys [id] db :seon.db/db}]
+  (let [id     (resolve-id id)
+        db     (or db @db/*conn*)
+        my-eid (:db/id (db/entity {:seon.db/db db
+                                   :seon.db/ref [:seon.agent/id id]}))]
+    (or (second (when my-eid (latest-live-inbound db my-eid))) "")))
 
 (defn localized-now
   "The current wall-clock time rendered in the HUMAN'S timezone (the

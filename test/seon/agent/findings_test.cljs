@@ -335,6 +335,75 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+(deftest pointer-survives-the-self-fold-and-rearms
+  ;; THE finding-1 regression (opus-live-tests 2026-06-12): the pointer
+  ;; rendered in 1 of B's 14 blobs — its first — because the per-turn
+  ;; self-fold outbound (from = to = me) closed the unanswered-inbox
+  ;; window. The gate is now seon.ctx/task-in-progress? (reply-aware)
+  ;; and the question text is the MOST RECENT live inbound regardless
+  ;; of fold state, so the pointer persists through a research wake.
+  (async done
+    (-> (with-world
+          (fn ^:async t [conn]
+            (let [id "AGTfindptr0006"
+                  me {:seon.agent/id id}
+                  at (fn [ms] (js/Date. (+ (js/Date.now) ms)))]
+              (await (seed-scratch-kind! acme-registrations acme-rows))
+              (await (seed-inbound!
+                       id "did acme-sync! exhaust the portal quota again?"))
+              (let [block (findings/findings-pointer-block @conn id)]
+                (is (str/includes? block ":my.acme.scratch")
+                    "pre-fold: pointer renders (turn 1 of the wake)")
+                ;; The self-fold — the agent's per-turn assistant
+                ;; self-message, the outbound that used to kill the
+                ;; pointer after turn 1.
+                (let [env (await
+                            (db/transact!
+                              {:seon.db/tx-data
+                               [{:seon.agent.message/id      (db/new-id!)
+                                 :seon.agent.message/from    me
+                                 :seon.agent.message/to      [me]
+                                 :seon.agent.message/content "[fold] grepping…"
+                                 :seon.agent.message/at      (at 50)
+                                 :seon.agent.message/hops    1}]}))]
+                  (is (true? (:seon.db/ok? env))))
+                (is (= block (findings/findings-pointer-block @conn id))
+                    "the self-fold does NOT kill the pointer — it stays
+                     byte-identical through the research turns"))
+              ;; The reply — outbound to a non-self recipient.
+              (let [env (await
+                          (db/transact!
+                            {:seon.db/tx-data
+                             [{:seon.agent.message/id      (db/new-id!)
+                               :seon.agent.message/from    me
+                               :seon.agent.message/to      [{:seon.user/id "user"}]
+                               :seon.agent.message/content "yes — quota hit"
+                               :seon.agent.message/at      (at 100)
+                               :seon.agent.message/hops    1}]}))]
+                (is (true? (:seon.db/ok? env))))
+              (is (= "" (findings/findings-pointer-block @conn id))
+                  "replied + idle → pointer gone")
+              ;; A NEW matching inbound re-arms the pointer — and the
+              ;; question text is the MOST RECENT inbound, so the match
+              ;; reflects the live question.
+              (let [env (await
+                          (db/transact!
+                            {:seon.db/tx-data
+                             [{:seon.agent.message/id      (db/new-id!)
+                               :seon.agent.message/from    {:seon.user/id "user"}
+                               :seon.agent.message/to      [me]
+                               :seon.agent.message/content
+                               "walk me through acme-sync! portal quota retries"
+                               :seon.agent.message/at      (at 150)
+                               :seon.agent.message/hops    0}]}))]
+                (is (true? (:seon.db/ok? env))))
+              (is (str/includes?
+                    (findings/findings-pointer-block @conn id)
+                    ":my.acme.scratch")
+                  "a new inbound re-arms the pointer"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest oversized-kind-truncates-loudly
   (async done
     (-> (with-world

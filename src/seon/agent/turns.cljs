@@ -14,19 +14,21 @@
    (`seon.ctx/turns-since-inbound` over the message + turn log;
    `seon.ctx/turns-cap` reads `:seon.agent/turns-cap` entity data,
    default `seon.ctx/default-turns-cap`). Renders NOTHING when the
-   agent is idle — no unanswered inbound message means no budget is
-   burning, and the section vanishes; nothing stored, nothing to
-   acknowledge."
+   agent is idle — no task in progress means no budget is burning,
+   and the section vanishes; nothing stored, nothing to acknowledge."
   (:require
     [seon.ctx :as ctx]
     [seon.db :as db]))
 
 (defn turns-block
   "The `<turns>` countdown for `agent-id` in db value `db` — \"\" when
-   the agent is idle (no unanswered inbound message — `inbox 0` in the
-   status line). MID-TASK = at least one inbound message newer than the
-   agent's latest outbound reply: the same window
-   `run-agentic-loop!`'s cap policy counts.
+   the agent is idle. MID-TASK = `seon.ctx/task-in-progress?`: a live
+   inbound message the agent has not REPLIED to yet — the same window
+   `run-agentic-loop!`'s `:replied` stop policy watches. The per-turn
+   self-fold outbound does NOT close it, so the meter renders on EVERY
+   turn of a research wake (opus-live-tests 2026-06-12 finding 1: the
+   old inbox-count gate died after turn 1, exactly where the countdown
+   matters).
 
    The rendered turn number is the turn ABOUT to run:
    `turns-since-inbound` counts already-opened turns after the latest
@@ -35,9 +37,8 @@
   {:malli/schema [:=> [:catn [::db :seon.db/db-val] [::agent-id :string]]
                   :string]}
   [db agent-id]
-  (let [input {:seon.agent/id agent-id :seon.db/db db}
-        inbox (ctx/inbox-count (ctx/messages input) agent-id)]
-    (if (pos? inbox)
+  (let [input {:seon.agent/id agent-id :seon.db/db db}]
+    (if (ctx/task-in-progress? input)
       (let [n   (inc (ctx/turns-since-inbound input))
             cap (ctx/turns-cap agent-id db)]
         (str "<turns>\n"
