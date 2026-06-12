@@ -47,7 +47,7 @@
 (def ^:private paid-scenario-keys
   "Every paid-tier scenario key this ns can drive — the resolved
    enabled-set in the PAID-GATE line is computed against this roster."
-  [:s32 :s21 :s12 :todo])
+  [:s32 :s21 :s12 :todo :err])
 
 (defn- gate-value
   "The raw SEON_GYM_PAID env value (\"\" when unset)."
@@ -238,4 +238,10 @@
   (async done
     (run-paid! :todo
                "test/seon/gym/scenarios/todo-multistep-tracking.edn"
+               done)))
+
+(deftest err-recovery-unregistered-attr-paid
+  (async done
+    (run-paid! :err
+               "test/seon/gym/scenarios/err-recovery-unregistered-attr.edn"
                done)))

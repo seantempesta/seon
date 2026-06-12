@@ -861,11 +861,21 @@
 (defn- default-judge-fn
   "The DeepSeek judge: NON-thinking (the module default), temperature
    0, read-only use of seon.ai.deepseek's public `complete`. Built
-   ONLY under the allow-paid? guard."
+   ONLY under the allow-paid? guard.
+
+   MODEL PINNED EXPLICITLY (2026-06-12, paid sweep run 0): the
+   `:seon.ai/config` row's `:seon.ai/model` is provider-UNQUALIFIED —
+   a sweep steering the AGENT via SEON_AI_MODEL=claude-sonnet-4-6
+   leaked that name into the judge's deepseek call (HTTP 400 \"The
+   supported API model names are deepseek-v4-pro or
+   deepseek-v4-flash\"), killing every judge verdict. The judge is a
+   FIXED grading instrument — it must never inherit the agent-under-
+   test's model steering."
   []
   (fn [ctx]
     (.then (deepseek/complete {:seon.ai/ctx           ctx
                                :seon.ai/system-prompt judge-system-prompt
+                               :seon.ai/model         "deepseek-v4-pro"
                                :seon.ai/temperature   0.0})
            (fn [resp]
              (cond-> {:text (:seon.ai/text resp)}

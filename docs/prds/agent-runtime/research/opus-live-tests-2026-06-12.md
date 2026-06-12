@@ -370,3 +370,203 @@ evening cap). The s12 estimate missed that A would burn the full
 turn cap at ~56k uncached tokens/turn; with prompt caching
 (limitation 4) the same run would have cost ~$2. No further paid
 calls were made after this run.
+
+## Paid measurement sweep — task #27 (2026-06-12, sonnet/haiku tiers)
+
+HEAD d6337b0 at start (docs-only commits a32c759/e2cc53d landed
+mid-sweep — src untouched; card git-shas drift accordingly). Measuring
+the week's landed fixes: anthropic cache_control, `<turns>` countdown,
+L12 question-adjacent findings-pointer, store-inventory user-data
+default, s32 consult re-cut, a20 wake guard, markdown teaching.
+Models per plan: sonnet-4-6 + haiku-4-5; NO opus (reserve condition
+never fired — every result was unambiguous).
+
+### Spend (from per-call SEON-GYM LLM-USAGE blocks)
+
+| run | model | scenario | calls | in (uncached) | cache w/r | out | cost | cum |
+|---|---|---|---|---|---|---|---|---|
+| 0 | sonnet | s32 | 1 | 34,006 | 5,392 / 0 | 197 | $0.13 | $0.13 |
+| 2a | haiku | todo | 2 | 71,353 | 5,391 / 5,391 | 1,719 | $0.09 | $0.21 |
+| 1 | sonnet | s12 | 32 | 1,215,757 | 5,392 / 167,152 | 8,910 | $3.85 | $4.06 |
+| 2b | haiku | todo | 3 | 113,306 | 5,391 / 10,782 | 4,572 | $0.14 | $4.21 |
+| 2c | haiku | todo | 6 | 236,408 | 0 / 32,346 | 5,231 | $0.27 | $4.47 |
+| 3 | sonnet | err (new) | 1 | 33,339 | 5,392 / 0 | 388 | $0.13 | **$4.60** |
+
+Judge calls: DeepSeek, pennies. Total ≈ **$4.60 of the $15 soft cap**.
+
+### Run 0 — CACHE VERIFY: WORKS, but covers only the system prefix
+
+- `cache_creation_input_tokens 5392` on call 1 of every fresh run, and
+  `cache_read_input_tokens 5391-5392 > 0` on EVERY call 2+ (first
+  live confirmation of the C-20 cache_control placement). Run 2c even
+  hit CROSS-PROCESS reads on call 1 (2b's write, 5m TTL spanning runs).
+- **Economics caveat:** the breakpoint sits on the system block only
+  (~5.4k tokens of soul). The ~33-40k-token ctx rides in the user
+  message AFTER the breakpoint — uncached every call. Limitation 4's
+  cost driver is only ~14% mitigated; per-turn hits need ctx
+  structured into messages with a second breakpoint (the ns-docstring
+  pin already says this). s12 evidence: 1.22M uncached vs 167k cached.
+
+### Run 0 — s32 on sonnet: PASS, the re-cut predicate works
+
+Card `tmp/gym-paid-card-s32-69a6b7a7-….edn`, blob
+`logs/prompts/KMJ-2606120806/`. Mechanical **pass? true** (all 6).
+First eval = direct `reply!` with the exact envelope facts + the
+line-712 citation, zero searches, 2 turns — post-#26-optimal behavior
+now scores GREEN (the old cut scored the identical opus behavior RED).
+`:seeded-claim-rendered-in-prompt` green; `<turns>` countdown AND
+`<findings-pointer>` both observed verbatim in the blob. Judge: the
+verdict FAILED on a NEW harness defect (next bullet), fixed in-fence,
+verified on the s12 run.
+
+### NEW harness defect (found run 0, fixed in-fence, verified run 1)
+
+`SEON_AI_MODEL=claude-sonnet-4-6` lands in the shared
+`:seon.ai/config` row (ai/sync!) and `deepseek/complete` reads the
+SAME row → the judge sent the anthropic model name to DeepSeek (HTTP
+400 "supported names are deepseek-v4-pro or deepseek-v4-flash") —
+every judge verdict dead whenever the agent-under-test is steered by
+model name. The opus unit never saw it (SEON_AI_MODEL unset). Fix:
+`default-judge-fn` now pins `:seon.ai/model "deepseek-v4-pro"`
+explicitly (the judge is a fixed grading instrument). Root smell
+stands for src: `:seon.ai/model` is provider-UNQUALIFIED in a row
+shared across providers.
+
+### Run 1 — s12 on sonnet: A improved on opus's bars, B's red persists
+
+Card `tmp/gym-paid-card-s12-7dda17c7-….edn`. 32 calls / $3.85
+(opus same scenario: $8.44). pass? false, judge-pass? false.
+
+- A: `:a-stored-at-least-two-findings-with-provenance` **GREEN (2
+  rows, kind :my.kb.seon-internals)**; `:a-terminates-under-cap`
+  **GREEN — 19 turns total, terminated by its own stop policy** (opus
+  burned all 20, RED). Judge on A: 30/100 — reply described the
+  registration gate but omitted the per-value step (same closure-
+  quality gap as opus's 40; the walk-through ask is still not met).
+- B: judge **100/100** (named validate-entity-values!, internal.cljs,
+  envelope shape). BUT `:b-first-eval-consults-stored-findings`
+  **RED** — B's first eval was `seon.agent.search/grep`, the run-7/8
+  signature, on a THIRD model now (deepseek, opus, sonnet).
+- **Pointer mechanism evidence (the L12 question):** the
+  `<findings-pointer>` DID render in B's FIRST turn blob
+  (`logs/prompts/sdb-2606120821/nmC-2606120821.txt`) naming A's kind,
+  the shared terms, and a copy-pasteable re-read query — and B
+  grepped anyway. The consult failure is pure question-adjacent
+  BINDING, not retrieval/salience: rendering the answer's location at
+  the prompt elbow is still not enough.
+
+### THE structural finding: question-gated sections are first-turn-only
+
+Across A's 19 s12 turns: `<turns>` rendered in turn 1 ONLY (header
+`inbox 1`), absent in all 18 later prompts (`inbox 0`). Same for
+`<findings-pointer>` (1 of B's 14 blobs — its first). The agent's own
+turn-log self-fold outbound closes the "unanswered inbound" window
+after turn 1 of a wake, long before any user reply exists. So the
+countdown cannot apply pressure near the cap (exactly where it
+matters) and the pointer cannot persist through a research arc. The
+per-turn header line (`turn N · K since-user (cap 20)`) is what
+actually rendered every turn — plausibly what kept sonnet under the
+cap. Fix shape (src, post-freeze): the unanswered-window predicate
+must ignore self-fold outbounds (or key on "no reply to the waking
+message yet").
+
+### Runs 2a/2b/2c — todo adherence ×3 on haiku: 1/3, same as opus
+
+Cards `tmp/gym-paid-card-todo-{d17e3be0,589a3819,d6aba448}-….edn`.
+
+- 2a: minted 1 todo (completed it), schema green
+  (:my.kb.watering/*), NO deftest, replied, 3 turns. pass? false.
+- 2b: **full todo adherence** — minted 3, all closed, deftests
+  written (4/35 evals) — but `:designed-a-domain-schema` RED
+  (domain attrs [] — work defined in evals, rows never landed).
+  pass? false.
+- 2c: minted 0, schema green (:my.kb.plant-care/*), deftest green,
+  replied, 7 turns. pass? false.
+- Adherence vs the bar (minted>=2 + all closed): **1/3 — identical to
+  opus's 1/3.** The todo teaching's WHEN-bullet binds stochastically
+  regardless of model tier; the teaching, not the model, is the lever.
+- Haiku as floor: every run designed a sane schema in a proper
+  namespace, replied honestly, terminated early ($0.09-0.27/run). No
+  catastrophic floor behavior observed.
+
+### Run 3 — err-recovery discovery (NEW scenario) on sonnet: clean pass
+
+New in-fence scenario
+`test/seon/gym/scenarios/err-recovery-unregistered-attr.edn` (+ :err
+roster key/deftest in paid_test.cljs): seeded :my.books rows; the ask
+needs two UNREGISTERED attrs on an existing entity — the obvious
+naive transact would return the error envelope. Card
+`tmp/gym-paid-card-err-8a08ede8-….edn`: **pass? true, judge 100/100,
+ONE LLM call, $0.13.** Sonnet registered FIRST (3/5 evals match
+register!), extended the seeded entity (:my.books/score,
+:my.books/date-finished — no fork, no parallel kind), replied
+honestly. **The error envelope never fired** — the register-before-
+transact teaching binds reliably on sonnet, so the envelope-teaching
+arc remains UNMEASURED; a future cut needs a failure the teaching
+can't preempt (e.g. a value-schema violation on a seeded attr).
+
+### Suite-integrity observations (free, but logged here)
+
+- Run 2a's outer suite counted 494/2198/1-failure with NO "FAIL in"
+  line anywhere in the transcript; same build free-suite reruns are
+  494/2196/0. Run 2b's outer suite collapsed to 211 tests (agent ran
+  its own deftests in-eval — the ROOT-3 cljs.test global-env
+  collision again; the interposer saved the card both times). The
+  collision class also SWALLOWS failure detail — invisible-failure
+  observability smell on top of the known early-exit one.
+- Gym-world default `(seon.db/store-inventory)` on a fresh store
+  shows only substrate bookkeeping kinds (:seon.agent, :seon.eval,
+  :seon.ai…) — post-bootstrap rows by provenance, but reads as noise
+  against the "user data only" intent.
+
+### Ranked: behaviors changed by this week's fixes (evidence, not vibes)
+
+1. CACHE: live-verified working, but system-prefix-only (~14% of
+   input). Biggest remaining cost lever = ctx-in-messages breakpoint.
+2. s32 re-cut: opus's punished-optimal behavior now scores green on
+   the same behavior class (sonnet one-shot reply, pass? true).
+3. Under-cap termination: sonnet s12 A terminated at 19/20 where opus
+   capped — but the `<turns>` section only rendered turn 1; credit
+   belongs to the always-on header countdown + model difference, NOT
+   the new section (it is effectively dead after turn 1).
+4. L12 pointer: renders correctly, names the right kind/terms/query —
+   and did NOT flip B's first move. Binding gap, not retrieval gap.
+   Also first-turn-only (same window bug as #3).
+5. Todo teaching: unchanged — 1/3 on haiku = opus's 1/3.
+
+### NEW limitations discovered
+
+1. Question-gated sections (countdown, pointer) die after turn 1 of a
+   wake — self-fold outbound closes the unanswered-inbox window.
+2. Judge inherits the agent's SEON_AI_MODEL via the shared config row
+   (fixed in-fence for the gym; the provider-unqualified
+   :seon.ai/model row is a src smell).
+3. ROOT-3 cljs.test collision also swallows failure DETAIL (invisible
+   1-failure suites), not just early exit.
+4. Register-first teaching is strong enough on sonnet that the error-
+   envelope recovery arc can't be measured with an unregistered-attr
+   trap; needs a value-violation cut.
+
+### Model-tier read (same scenarios as yesterday's opus)
+
+- s32: sonnet = opus behavior (one-shot correct reply from rendered
+  context) at ~1/2 the per-call price; the re-cut now scores both
+  honestly.
+- s12: sonnet strictly better than opus on A's mechanical bars
+  (stored 2 vs 3, but terminated under cap vs cap-burn), equal on B
+  (judge 100, consult red), at $3.85 vs $8.44. Reply depth on the
+  two-step walk-through is WORSE (judge 30 vs 40) — neither passes.
+- todo: haiku = opus adherence (1/3) at ~1/25 the cost; work quality
+  lower variance than expected (schema+reply solid every run, deftest
+  2/3).
+- Verdict: nothing in this sweep needed opus. Sonnet is the
+  measurement default; haiku is a usable floor for structured tasks.
+
+### Hygiene
+
+Live pod untouched (scratch :memory worlds; `bin/seon status` green
+throughout). No agents minted on the live store; nothing to
+complete!. In-fence files: driver.cljs (judge model pin),
+paid_test.cljs (:err roster + deftest), new scenario EDN; uncommitted.
+Logs: tmp/sweep27-run{0,1,2a,2b,2c,3}-*.log/.err; cards in tmp/
+(gym-paid-card-*); prompt blobs logs/prompts/{KMJ,muc,lmN,sdb,HAL}-*.
