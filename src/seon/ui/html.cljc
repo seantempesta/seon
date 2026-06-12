@@ -34,7 +34,9 @@
      `false` / `nil` → attribute omitted, anything else → escaped value.
    - `:class` accepts a string OR a collection (joined with spaces).
    - `:style` accepts a string OR a map (`{:color \"red\"}` →
-     `color: red;`).
+     `color: red;`). Map keys are normalized to kebab-case CSS
+     property names (`:fontSize` → `font-size`, `:WebkitMask` →
+     `-webkit-mask`); custom properties (`--*`) pass through.
 
    ## What this does NOT implement
 
@@ -153,7 +155,8 @@
 ;; Three special cases:
 ;;   :class — string OR collection (joined with spaces). Merged with
 ;;            classes parsed from the tag shorthand.
-;;   :style — string OR map (rendered as `prop: val; prop: val;`).
+;;   :style — string OR map (rendered as `prop: val; prop: val;`,
+;;            keys normalized camelCase → kebab-case).
 ;;   true   — emit bare attribute (`<input checked>`).
 ;;   false / nil — omit attribute entirely.
 ;;
@@ -167,15 +170,39 @@
 ;; makes SSE diff-and-skip (spec §15.4) cache-stable.
 ;; ============================================================
 
+(defn- style-key->css
+  "Normalize a style-map key to its CSS property name (React
+   hyphenateStyleName semantics). camelCase → kebab-case
+   (`:fontSize` → `font-size`); a leading capital marks a vendor
+   prefix and gains a leading dash (`:WebkitMask` → `-webkit-mask`);
+   CSS custom properties (keys starting `--`) pass through untouched;
+   already-kebab keys are unchanged. LLMs carry React priors and
+   write camelCase style keys forever — without this they render
+   verbatim into the style attribute and are silently dead in the
+   browser."
+  [k]
+  (let [s (name-of k)]
+    (if (str/starts-with? s "--")
+      s
+      (let [kebab (-> s
+                      (str/replace #"([a-z0-9])([A-Z])" "$1-$2")
+                      str/lower-case)]
+        (if (re-find #"^[A-Z]" s)
+          (str "-" kebab)
+          kebab)))))
+
 (defn- render-style
   "Render a `:style` value. Strings pass through; maps become
-   `prop: val; prop: val` (no trailing semicolon)."
+   `prop: val; prop: val` (no trailing semicolon) with keys
+   normalized via `style-key->css` and sorted by the normalized
+   name for deterministic output."
   [v]
   (cond
     (string? v) v
     (map? v)    (->> v
-                     (sort-by (comp name-of key))
-                     (map (fn [[k v]] (str (name-of k) ": " v)))
+                     (map (fn [[k v]] [(style-key->css k) v]))
+                     (sort-by first)
+                     (map (fn [[k v]] (str k ": " v)))
                      (str/join "; "))
     :else       (str v)))
 

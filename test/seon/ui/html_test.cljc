@@ -80,6 +80,46 @@
   (is (= "<div style=\"color: red;\"></div>"
          (h/->string [:div {:style "color: red;"}]))))
 
+(deftest attribute-style-camel-case-normalized
+  ;; React-prior camelCase keys must render as working CSS, not verbatim.
+  (is (= "<div style=\"font-size: 0.5rem\"></div>"
+         (h/->string [:div {:style {:fontSize "0.5rem"}}]))))
+
+(deftest attribute-style-kebab-unchanged
+  (is (= "<div style=\"font-size: 0.5rem\"></div>"
+         (h/->string [:div {:style {:font-size "0.5rem"}}]))))
+
+(deftest attribute-style-vendor-prefix-leading-dash
+  ;; Leading-cap vendor prefix gains a leading dash (React semantics).
+  (is (= "<div style=\"-webkit-mask: url(#m)\"></div>"
+         (h/->string [:div {:style {:WebkitMask "url(#m)"}}]))))
+
+(deftest attribute-style-custom-property-untouched
+  ;; CSS custom properties (`--*`) pass through verbatim.
+  (is (= "<div style=\"--color-amber-400: #fbbf24\"></div>"
+         (h/->string [:div {:style {"--color-amber-400" "#fbbf24"}}]))))
+
+(deftest attribute-style-string-keys-normalized-like-keywords
+  ;; String keys take the same normalization path as keyword keys.
+  (is (= (h/->string [:div {:style {:fontSize "0.5rem"}}])
+         (h/->string [:div {:style {"fontSize" "0.5rem"}}]))))
+
+(deftest attribute-style-mixed-map-deterministic
+  ;; Mixed camel/kebab/custom-property keys sort by NORMALIZED name,
+  ;; so insertion order never changes the output.
+  (let [a (h/->string [:div {:style {:fontSize       "0.5rem"
+                                     :color          "red"
+                                     :WebkitMask     "url(#m)"
+                                     "--accent"      "#fbbf24"}}])
+        b (h/->string [:div {:style {"--accent"      "#fbbf24"
+                                     :WebkitMask     "url(#m)"
+                                     :color          "red"
+                                     :fontSize       "0.5rem"}}])]
+    (is (= a b))
+    (is (= (str "<div style=\"--accent: #fbbf24; -webkit-mask: url(#m); "
+                "color: red; font-size: 0.5rem\"></div>")
+           a))))
+
 (deftest attribute-order-is-stable
   ;; Same attrs in different map literal order produce identical HTML.
   (let [a (h/->string [:input {:type "text" :name "x" :id "i"}])
