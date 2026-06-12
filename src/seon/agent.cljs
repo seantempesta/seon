@@ -609,26 +609,23 @@
 
 (schema/register! :seon.agent/purpose :string)
 
-(def acquire-purpose-text
-  "The `:seon.agent/purpose` seed when the agent is created WITHOUT a
-   stated purpose — the placeholder teaches the mechanism (your purpose
-   is an attr on YOUR entity; transact a better one) by demanding its
-   use."
-  (str "Derive your purpose from your human's first messages, then "
-       "transact it onto :seon.agent/purpose on your own entity so you "
-       "keep your direction."))
-
 (defn ^:async create!
   "Allocate an agent entity. Idempotent: re-calling with the same id
    resets state to :idle (transact is upsert-by-unique-id) and NEVER
    re-seeds — a resumed agent keeps its own purpose and sections. A
-   GENUINELY NEW entity gets `:seon.agent/purpose` — the human's
-   stated purpose when given, else the acquire-your-purpose
-   placeholder. Purpose is ENTITY DATA rendered by the `<your-entity>`
-   section (context-v4 §2.5 — the old `:purpose`/`:your-sections` seed
-   sections died with it). `:seon.agent/turns-cap`, when given, is
-   transacted onto the entity (it only WORKS as entity data — see
-   `seon.ctx/turns-cap`); absent leaves the stored cap unchanged.
+   GENUINELY NEW entity gets `:seon.agent/purpose` ONLY when the human
+   stated one; otherwise the attr stays ABSENT (optional = absent)
+   until the agent derives a purpose and transacts it — the
+   derive-your-purpose teaching lives in the `<your-entity>` context
+   render (seon.ctx/your-entity-section), NEVER in the stored value:
+   the welcome tile shows purpose verbatim to the CUSTOMER, so
+   agent-directed instruction text must not masquerade as data
+   (chat-surface task #29, a23). Purpose is ENTITY DATA rendered by
+   the `<your-entity>` section (context-v4 §2.5 — the old
+   `:purpose`/`:your-sections` seed sections died with it).
+   `:seon.agent/turns-cap`, when given, is transacted onto the entity
+   (it only WORKS as entity data — see `seon.ctx/turns-cap`); absent
+   leaves the stored cap unchanged.
 
    Returns `{:seon.agent/id id}` on success; on a FAILED transact the
    db error envelope (`{:seon.db/ok? false :seon.db/error …}`) comes
@@ -641,12 +638,10 @@
                         {:seon.db/tx-data
                          [(cond-> {:seon.agent/id    id
                                    :seon.agent/state :idle}
-                            fresh?
-                            (assoc :seon.agent/purpose
-                                   (if (and (string? purpose)
-                                            (not (str/blank? purpose)))
-                                     purpose
-                                     acquire-purpose-text))
+                            (and fresh?
+                                 (string? purpose)
+                                 (not (str/blank? purpose)))
+                            (assoc :seon.agent/purpose purpose)
                             (some? turns-cap)
                             (assoc :seon.agent/turns-cap turns-cap))]}))]
     (if (false? (:seon.db/ok? res))

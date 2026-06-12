@@ -20,7 +20,8 @@
     [seon.client :as client]
     [seon.db :as db]
     [seon.render.chat :as chat]
-    [seon.render.live-tile :as tile]))
+    [seon.render.live-tile :as tile]
+    [seon.ui.html :as html]))
 
 ;; ============================================================
 ;; message-kind — label classification.
@@ -56,18 +57,55 @@
     (is (some #(= "hello there" %) (hiccup-strings h)))
     (is (some #(re-find #"14:30" %) (hiccup-strings h)) "timestamp renders")))
 
-(deftest bubble-agent-renders-markdown-with-degradation
-  (let [content "**bold** reply"
+(deftest bubble-agent-renders-markdown-server-side
+  (let [content (str "## status\n\n**bold** reply with `inline`\n\n"
+                     "- item one\n- item two\n\n"
+                     "1. first\n2. second\n\n"
+                     "```clojure\n(+ 1 2)\n```\n\n"
+                     "<script>alert(1)</script>")
         h (chat/bubble {::chat/at at ::chat/kind ::chat/agent
                         ::chat/label "assistant" ::chat/content content})
-        md-attrs (->> (flatten h) (filter map?)
-                      (some #(when (contains? % :data-markdown) %)))]
-    (is (tile/valid-hiccup? h))
+        s (html/->string h)]
+    (is (tile/valid-hiccup? h)
+        "md->hiccup output satisfies the strict authoring shape")
     (is (some #(re-find #"justify-start" %) (hiccup-classes h)))
-    (is (= content (:data-markdown md-attrs))
-        "agent bubbles carry the raw markdown for the client-side pass")
-    (is (some #(= content %) (hiccup-strings h))
-        "raw text child — the bubble degrades to plain text without JS")))
+    (is (re-find #"<strong[^>]*>bold</strong>" s)
+        "**bold** converts to <strong> SERVER-SIDE — curl sees it")
+    (is (re-find #"<h2" s) "headings render")
+    (is (re-find #"<ul" s) "bullet lists render")
+    (is (re-find #"<ol" s) "numbered lists render")
+    (is (re-find #"<code" s) "inline code renders")
+    (is (re-find #"<pre" s) "code fences render")
+    (is (not (re-find #"<script" s))
+        "raw HTML NEVER passes through — agent content is untrusted")
+    (is (re-find #"&lt;script&gt;alert\(1\)&lt;/script&gt;" s)
+        "the script tag degrades to escaped visible text")))
+
+(deftest bubble-human-renders-markdown-too
+  ;; Symmetry (a21): the human's words get the same structure.
+  (let [h (chat/bubble {::chat/at at ::chat/kind ::chat/human
+                        ::chat/label "user"
+                        ::chat/content "please **check** the list"})
+        s (html/->string h)]
+    (is (tile/valid-hiccup? h))
+    (is (re-find #"<strong[^>]*>check</strong>" s))
+    (is (some #(re-find #"justify-end" %) (hiccup-classes h))
+        "still the human's side")))
+
+(deftest bubble-links-are-nofollow-and-scheme-guarded
+  (let [safe   (html/->string
+                 (chat/bubble {::chat/at at ::chat/kind ::chat/agent
+                               ::chat/label "assistant"
+                               ::chat/content "[docs](https://example.com/d)"}))
+        unsafe (html/->string
+                 (chat/bubble {::chat/at at ::chat/kind ::chat/agent
+                               ::chat/label "assistant"
+                               ::chat/content "[x](javascript:alert(1))"}))]
+    (is (re-find #"<a [^>]*href=\"https://example.com/d\"" safe))
+    (is (re-find #"rel=\"nofollow noopener\"" safe))
+    (is (re-find #"target=\"_blank\"" safe))
+    (is (not (re-find #"javascript:" unsafe))
+        "javascript: hrefs never render — text-only degradation")))
 
 (deftest bubble-peer-is-inline-dimmer-smaller-labeled
   (let [h (chat/bubble {::chat/at at ::chat/kind ::chat/peer

@@ -814,6 +814,9 @@
     "  seon.agent.todo/add! BEFORE you start, and complete! each id as\n"
     "  the step lands. Your open todos render every turn with their\n"
     "  ids; an empty <open-todos> section is your done-signal.\n"
+    "- Your replies render as markdown on your human's screen — use\n"
+    "  structure when it helps (short headings, lists, code fences for\n"
+    "  code or data); plain prose otherwise.\n"
     "- A turn serving a question MUST end with (seon.agent/reply! …) in\n"
     "  the SAME response — your human sees NOTHING until reply! lands.\n"
     "  ONE reply per question: once it lands your wake is complete and\n"
@@ -1389,6 +1392,16 @@
            ";;                        :seon.agent/purpose \"…\"}])\n"
            ";; — and the change appears here next turn. Write notes and\n"
            ";; standing instructions to yourself here; this map IS you.\n"
+           ;; Derive-your-purpose teaching — CONTEXT, not stored data:
+           ;; the welcome tile renders :seon.agent/purpose verbatim to
+           ;; the customer, so the instruction lives here and only
+           ;; while the attr is absent (self-healing: the agent's own
+           ;; transact makes this line vanish). Chat-surface #29, a23.
+           (when (nil? (:seon.agent/purpose entity))
+             (str ";; Your :seon.agent/purpose is UNSET. Derive it from your\n"
+                  ";; human's first messages, then transact it onto your own\n"
+                  ";; entity (the lookup-ref move above) so you keep your\n"
+                  ";; direction — your human sees it as your tile's headline.\n"))
            (str/trimr (with-out-str (pprint/pprint decoded)))
            "\n</your-entity>"))))
 

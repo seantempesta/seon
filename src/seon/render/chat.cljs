@@ -39,14 +39,24 @@
    Warm blacks, cream text, amber accents — but RELAXED from the
    debug-view density: real rounded bubbles, `text-sm` body,
    `px-4 py-2.5` padding. Monospace stays for ids and timestamps;
-   prose rides the sans stack. Agent bubbles carry their content in a
-   `data-markdown` attribute (rendered client-side by the page's
-   marked.js pass) WITH the raw text as a child, so the bubble
-   degrades to plain text when JS is off."
+   prose rides the sans stack.
+
+   ## Markdown — rendered SERVER-SIDE (chat-surface task #29, a21)
+
+   Human and agent bubble content renders markdown → hiccup at render
+   time via `seon.ui.markdown/md->hiccup` (bold/italic/lists/inline
+   code/fences/headings/links) — both directions, symmetric. The
+   hiccup serializer escapes ALL text nodes, so agent-authored raw
+   HTML (`<script>…`) degrades to visible text, never markup; link
+   hrefs are scheme-guarded and carry rel=\"nofollow noopener\"
+   target=_blank inside md->hiccup. Server-side means curl sees the
+   `<strong>` — no JS pass required (the debug view's `data-markdown`
+   marked.js pass still serves the transcript fragments, untouched)."
   (:require
     [seon.db :as db]
     [seon.render.default :as default]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.ui.markdown :as md]))
 
 ;; ============================================================
 ;; Schemas — the bubble vocabulary.
@@ -226,14 +236,17 @@
 (defn bubble
   "Render ONE conversation message as a chat bubble:
 
-   - `::human` — right-aligned, amber-tinted, plain text.
-   - `::agent` — left-aligned, markdown-rendered (`data-markdown`
-     attribute + raw-text child for no-JS degradation).
+   - `::human` — right-aligned, amber-tinted, markdown-rendered.
+   - `::agent` — left-aligned, markdown-rendered.
    - `::peer`  — inline, dimmer, smaller, labeled with the peer's id
      (`agent-<id>`) — visually subordinate to the human↔agent stream.
    - `::system` — centered, amber-edged system line: a turn-level
      provider failure the human must see (the agent went idle
-     mid-task; the next message resumes it)."
+     mid-task; the next message resumes it).
+
+   Human and agent content renders markdown → hiccup SERVER-SIDE
+   (`seon.ui.markdown/md->hiccup` — symmetric, escaped-by-the-
+   serializer; see the ns docstring)."
   {:malli/schema [:=> [:cat ::message] :seon.render.live-tile/hiccup]}
   [{::keys [at kind label content]}]
   (let [time (hh-mm at)]
@@ -243,7 +256,7 @@
        [:div {:class (str "seon-bubble max-w-[80%] rounded-2xl rounded-br-md "
                           "bg-amber-900/30 border border-amber-800/40 "
                           "px-4 py-2.5")}
-        [:div {:class "text-sm text-amber-50 whitespace-pre-wrap"} content]
+        (md/md->hiccup content {:wrap-class "markdown text-sm text-amber-50"})
         [:div {:class "text-[10px] font-mono text-text-500 mt-1 text-right"}
          time]]]
 
@@ -251,9 +264,7 @@
       [:div {:class "flex justify-start"}
        [:div {:class (str "seon-bubble max-w-[85%] rounded-2xl rounded-bl-md "
                           "bg-base-850 border border-base-800 px-4 py-2.5")}
-        [:div {:class "markdown text-sm text-text-100"
-               :data-markdown content}
-         content]
+        (md/md->hiccup content {:wrap-class "markdown text-sm text-text-100"})
         [:div {:class "text-[10px] font-mono text-text-500 mt-1"} time]]]
 
       ::system

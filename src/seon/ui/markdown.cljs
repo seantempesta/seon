@@ -35,6 +35,16 @@
   ;; other inline markers), then links, then bold, then italic.
   #"(`([^`]+)`)|(\[([^\]]+)\]\(([^)]+)\))|(\*\*([^*]+)\*\*)|(\*([^*]+)\*)")
 
+(defn- safe-link-url
+  "`url` when its scheme is http(s)/mailto (or it is scheme-relative /
+   path-relative), else nil — `javascript:`/`data:` and friends never
+   become a clickable href. Agent-authored content is untrusted on the
+   chat surface (chat-surface task #29)."
+  [url]
+  (when (or (re-matches #"(?i)^(https?:|mailto:)\S*" url)
+            (re-matches #"^[/#.][^:\s]*" url))
+    url))
+
 (defn- inline->hiccup
   "Split a single line of text into hiccup spans for inline markdown.
    Returns a vector of strings / hiccup forms."
@@ -56,10 +66,15 @@
                           [:code {:class "px-1 py-0.5 rounded bg-base-800 text-warning text-xs font-mono"}
                            code-body])
         link-text  (swap! acc conj
-                          [:a {:href link-url
-                               :class "text-info underline hover:text-warning"
-                               :target "_blank"}
-                           link-text])
+                          (if-let [url (safe-link-url link-url)]
+                            [:a {:href url
+                                 :class "text-info underline hover:text-warning"
+                                 :target "_blank"
+                                 :rel "nofollow noopener"}
+                             link-text]
+                            ;; Unsafe scheme — degrade to the visible
+                            ;; text, never a clickable href.
+                            link-text))
         bold-body  (swap! acc conj [:strong {:class "text-text-100 font-bold"} bold-body])
         ital-body  (swap! acc conj [:em {:class "italic"} ital-body]))
       (reset! last-end end))
@@ -102,17 +117,20 @@
                   4 "text-xs font-semibold text-text-200 mt-1")]
         (into [tag {:class cls}] (inline->hiccup content)))
 
+      ;; Lists splice their <li> children as VECTOR children (not one
+      ;; lazy-seq child) so the whole tree satisfies the strict
+      ;; authoring shape `seon.render.live-tile/valid-hiccup?`.
       :bullets
-      [:ul {:class "list-disc pl-5 my-1 space-y-0.5"}
-       (for [ln lines]
-         (into [:li {:class "text-text-100"}]
-               (inline->hiccup (bullet-item ln))))]
+      (into [:ul {:class "list-disc pl-5 my-1 space-y-0.5"}]
+            (for [ln lines]
+              (into [:li {:class "text-text-100"}]
+                    (inline->hiccup (bullet-item ln)))))
 
       :numbered
-      [:ol {:class "list-decimal pl-5 my-1 space-y-0.5"}
-       (for [ln lines]
-         (into [:li {:class "text-text-100"}]
-               (inline->hiccup (numbered-item ln))))]
+      (into [:ol {:class "list-decimal pl-5 my-1 space-y-0.5"}]
+            (for [ln lines]
+              (into [:li {:class "text-text-100"}]
+                    (inline->hiccup (numbered-item ln)))))
 
       :paragraph
       (into [:p {:class "my-1 text-text-100 whitespace-pre-wrap"}]

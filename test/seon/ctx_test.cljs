@@ -237,6 +237,56 @@
   (some #(when (= nm (:seon.ctx/name %)) (:seon.render/text %))
         (:seon.render/section-texts (assemble id))))
 
+(deftest your-entity-teaches-derive-purpose-only-while-unset
+  ;; Chat-surface task #29 (a23): the derive-your-purpose instruction
+  ;; is CONTEXT — never stored on the attr the customer tile renders.
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (-> (agent/create! {:seon.agent/id "AGTctxtest00p2"})
+                (.then
+                  (fn [_]
+                    (let [txt (str (section-text "AGTctxtest00p2"
+                                                 :your-entity))]
+                      ;; The header's example transact contains the
+                      ;; literal `:seon.agent/purpose "…"` — exclude it:
+                      ;; a REAL value is any other string after the attr.
+                      (is (not (re-find #":seon\.agent/purpose \"(?!…)" txt))
+                          "no purpose VALUE rendered — the attr is absent")
+                      (is (str/includes? txt "purpose is UNSET")
+                          "unset purpose → the derive teaching renders")
+                      (is (str/includes? txt "transact it onto your own")
+                          "…and names the transact move"))))
+                ;; The agent claims a purpose → the teaching vanishes
+                ;; (derived section, self-healing — nothing to clear).
+                (.then (fn [_]
+                         (db/transact!
+                           {:seon.db/tx-data
+                            [{:seon.db/ref [:seon.agent/id "AGTctxtest00p2"]
+                              :seon.agent/purpose "watch Acme invoices"}]})))
+                (.then
+                  (fn [_]
+                    (let [txt (str (section-text "AGTctxtest00p2"
+                                                 :your-entity))]
+                      (is (str/includes? txt "watch Acme invoices")
+                          "claimed purpose renders as entity data")
+                      (is (not (str/includes? txt "purpose is UNSET"))
+                          "teaching gone the moment the attr exists")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest system-text-teaches-markdown-replies
+  ;; Chat-surface task #29 (a21 writing teaching): one prose-shaped
+  ;; standing teaching — no parens-leading lines for the extractor.
+  (is (str/includes? ctx/system-text
+                     "replies render as markdown"))
+  (let [bullet-lines (->> (str/split-lines ctx/system-text)
+                          (drop-while #(not (str/includes? % "markdown")))
+                          (take 3))]
+    (is (seq bullet-lines))
+    (is (not-any? #(str/starts-with? (str/triml %) "(") bullet-lines)
+        "prose-shaped — the B1 extractor must not eval it")))
+
 (deftest purpose-entity-and-your-entity-and-verbs
   (async done
     (-> (with-conn

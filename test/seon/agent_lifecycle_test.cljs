@@ -145,6 +145,41 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+;; ------------------------------------------------------------
+;; Purpose is NEVER defaulted (chat-surface task #29, a23): the
+;; welcome tile renders :seon.agent/purpose verbatim to the customer,
+;; so the old agent-directed acquire-your-purpose instruction text
+;; must not be seeded as stored data. Absent until stated or derived;
+;; the derive teaching moved to seon.ctx/your-entity-section.
+;; ------------------------------------------------------------
+
+(deftest create!-leaves-purpose-absent-unless-stated
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (testing "no stated purpose → attr ABSENT (optional = absent)"
+              (await (agent/create! {:seon.agent/id "AGTpurpose0001"}))
+              (is (nil? (:seon.agent/purpose
+                          (db/entity {:seon.db/ref
+                                      [:seon.agent/id "AGTpurpose0001"]})))
+                  "no instruction-text default leaks to the customer tile"))
+            (testing "blank purpose is treated as unstated"
+              (await (agent/create! {:seon.agent/id "AGTpurpose0002"
+                                     :seon.agent/purpose "   "}))
+              (is (nil? (:seon.agent/purpose
+                          (db/entity {:seon.db/ref
+                                      [:seon.agent/id "AGTpurpose0002"]})))))
+            (testing "an explicitly stated purpose still lands unchanged"
+              (await (agent/create! {:seon.agent/id "AGTpurpose0003"
+                                     :seon.agent/purpose "track Acme orders"}))
+              (is (= "track Acme orders"
+                     (:seon.agent/purpose
+                       (db/entity {:seon.db/ref
+                                   [:seon.agent/id "AGTpurpose0003"]})))
+                  "the downstream explicit-purpose param path is intact"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest create!-returns-the-error-envelope-on-failed-transact
   (async done
     (-> (with-conn
