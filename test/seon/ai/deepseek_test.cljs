@@ -407,6 +407,177 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+;; ============================================================
+;; SSE body tolerance (task #31; downstream ask a24b). We always send
+;; `stream: false`, but the downstream gateway streams SSE
+;; unconditionally (gateway bug, live-verified by them). The adapter
+;; branches on the response Content-Type: JSON path unchanged; a
+;; text/event-stream body is aggregated into the SAME completion
+;; shape. No paid calls — fetch is stubbed throughout.
+;; ============================================================
+
+(defn- response-of
+  "A fetch Response stub with an explicit Content-Type header."
+  [content-type body]
+  #js {:ok      true
+       :status  200
+       :headers #js {:get (fn [k]
+                            (when (= "content-type" (str/lower-case k))
+                              content-type))}
+       :text    (fn [] (js/Promise.resolve body))})
+
+(defn- sse-line
+  "One `data:` SSE line for the clj chunk map `m` (JSON-encoded)."
+  [m]
+  (str "data: " (.stringify js/JSON (clj->js m)) "\n\n"))
+
+(def ^:private usage-fixture
+  {:prompt_tokens 3 :completion_tokens 5 :total_tokens 8})
+
+(def ^:private sse-body-fixture
+  ;; Multi-chunk content deltas + a finish chunk + a usage-only final
+  ;; chunk (empty choices, as real gateways send) + the terminator.
+  (str (sse-line {:choices [{:delta {:role "assistant" :content "Hel"}}]})
+       (sse-line {:choices [{:delta {:content "lo, "}}]})
+       (sse-line {:choices [{:delta {:content "world"}}]})
+       (sse-line {:choices [{:delta {} :finish_reason "stop"}]})
+       (sse-line {:choices [] :usage usage-fixture})
+       "data: [DONE]\n\n"))
+
+(def ^:private json-body-fixture
+  ;; The JSON-path equivalent of sse-body-fixture — same text, same
+  ;; finish_reason, same usage.
+  (.stringify js/JSON
+    (clj->js {:choices [{:message       {:role "assistant" :content "Hello, world"}
+                         :finish_reason "stop"}]
+              :usage   usage-fixture})))
+
+(deftest sse-body-aggregates-to-the-json-path-equivalent
+  (async done
+    (let [results (atom {})]
+      (-> (with-stubbed-fetch
+            (fn [_ _] (js/Promise.resolve
+                        (response-of "application/json" json-body-fixture)))
+            #(deepseek/complete {:seon.ai/ctx "hi" :seon.ai/system-prompt "sys"}))
+          (.then (fn [r] (swap! results assoc :json r)))
+          (.then (fn [_]
+                   (with-stubbed-fetch
+                     (fn [_ _] (js/Promise.resolve
+                                 (response-of "text/event-stream" sse-body-fixture)))
+                     #(deepseek/complete {:seon.ai/ctx "hi" :seon.ai/system-prompt "sys"}))))
+          (.then
+            (fn [sse-r]
+              (let [json-r (:json @results)]
+                (is (nil? (:seon.ai/error json-r)))
+                (is (nil? (:seon.ai/error sse-r)))
+                (is (= "Hello, world" (:seon.ai/text sse-r))
+                    "content deltas concatenate into the text")
+                (is (= "stop" (:seon.ai.deepseek/finish-reason sse-r)))
+                (is (= usage-fixture (:seon.ai/usage sse-r))
+                    "the final data chunk carries usage")
+                (is (= json-r sse-r)
+                    "ONE parse target — the aggregated SSE envelope equals the JSON-path envelope"))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest json-content-type-keeps-the-json-path
+  ;; Re-pin: an explicit JSON content-type (with charset) takes
+  ;; exactly today's parse path. (Header-less stubs are pinned by the
+  ;; earlier tests — absent header also means JSON path.)
+  (async done
+    (-> (with-stubbed-fetch
+          (fn [_ _] (js/Promise.resolve
+                      (response-of "application/json; charset=utf-8"
+                                   json-body-fixture)))
+          #(deepseek/complete {:seon.ai/ctx "hi"}))
+        (.then
+          (fn [{:seon.ai/keys [text usage error]}]
+            (is (nil? error))
+            (is (= "Hello, world" text))
+            (is (= usage-fixture usage))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest sse-content-type-with-charset-suffix-matches
+  (async done
+    (-> (with-stubbed-fetch
+          (fn [_ _] (js/Promise.resolve
+                      (response-of "text/event-stream; charset=utf-8"
+                                   sse-body-fixture)))
+          #(deepseek/complete {:seon.ai/ctx "hi"}))
+        (.then
+          (fn [{:seon.ai/keys [text error]}]
+            (is (nil? error))
+            (is (= "Hello, world" text)
+                "\"text/event-stream; charset=utf-8\" is still the SSE branch")))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest sse-reasoning-only-deltas-yield-empty-text
+  ;; Thinking-mode tokens landing entirely in reasoning_content are
+  ;; NOT visible content — dropped (with a debug log), same semantics
+  ;; as the JSON path. The empty text feeds the a20 empty-turn guard
+  ;; in seon.agent/run-agentic-loop! (not-replied + zero-eval → nudge),
+  ;; exactly as an empty JSON-path completion does.
+  (async done
+    (-> (with-stubbed-fetch
+          (fn [_ _]
+            (js/Promise.resolve
+              (response-of
+                "text/event-stream"
+                (str (sse-line {:choices [{:delta {:reasoning_content "thinking…"}}]})
+                     (sse-line {:choices [{:delta {:reasoning_content " more"}}]})
+                     (sse-line {:choices [{:delta {} :finish_reason "stop"}]})
+                     "data: [DONE]\n\n"))))
+          #(deepseek/complete {:seon.ai/ctx "hi"}))
+        (.then
+          (fn [{:seon.ai/keys [text error] :as resp}]
+            (is (nil? error) "reasoning-only is NOT malformed — no error envelope")
+            (is (= "" text) "reasoning deltas are dropped, not surfaced as text")
+            (is (= "stop" (:seon.ai.deepseek/finish-reason resp)))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest sse-without-done-terminator-is-a-legible-error
+  (async done
+    (-> (with-stubbed-fetch
+          (fn [_ _]
+            (js/Promise.resolve
+              (response-of
+                "text/event-stream"
+                (str (sse-line {:choices [{:delta {:content "Hel"}}]})
+                     (sse-line {:choices [{:delta {:content "lo"}}]})))))
+          #(deepseek/complete {:seon.ai/ctx "hi"}))
+        (.then
+          (fn [{:seon.ai/keys [text error]}]
+            (is (= "" text) "truncated stream → error envelope, never a throw")
+            (is (str/includes? (:seon.ai/msg error) "[DONE]")
+                "the error names the missing terminator")
+            (is (string? (:seon.ai/raw-body error))
+                "raw body attached for diagnosis")
+            (is (not (contains? error :seon.ai/transport?))
+                "a parse failure must not look retryable")))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest sse-bad-json-line-is-a-legible-error
+  (async done
+    (-> (with-stubbed-fetch
+          (fn [_ _]
+            (js/Promise.resolve
+              (response-of
+                "text/event-stream"
+                (str "data: {not json at all\n\n"
+                     "data: [DONE]\n\n"))))
+          #(deepseek/complete {:seon.ai/ctx "hi"}))
+        (.then
+          (fn [{:seon.ai/keys [text error]}]
+            (is (= "" text))
+            (is (str/includes? (:seon.ai/msg error) "Failed to parse SSE"))
+            (is (str/includes? (:seon.ai/raw-body error) "not json"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest openai-compat-seon-ai-api-key-is-the-direct-fallback
   (async done
     (let [captured (atom nil)]

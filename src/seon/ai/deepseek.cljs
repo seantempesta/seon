@@ -40,10 +40,17 @@
    agent's `:seon.render/ai` slot; default
    `'seon.agent/assemble-context`) follows.
 
-   No tool-calling envelope, no streaming — the agent's responses are
-   parsed as Clojure forms by `seon.repl/parse-forms`, evaluated as
-   a REPL batch by `seon.eval/eval-batch!`."
-  (:require [seon.ai :as ai]
+   No tool-calling envelope, no streaming REQUESTED — we always send
+   `stream: false` and the agent's responses are parsed as Clojure
+   forms by `seon.repl/parse-forms`, evaluated as a REPL batch by
+   `seon.eval/eval-batch!`. Some gateways IGNORE `stream: false` and
+   send an SSE body anyway (observed live, 2026-06-11 — gateway bug,
+   flagged upstream); the response path branches on the Content-Type
+   header and aggregates a `text/event-stream` body into the SAME
+   completion shape the JSON path produces — one parse target
+   downstream, no streaming to consumers."
+  (:require [clojure.string :as str]
+            [seon.ai :as ai]
             [seon.error :as error]
             [seon.schema :as schema]))
 
@@ -208,6 +215,88 @@
                                               (error/->message e))
                        :seon.ai/raw-body body-text}})))
 
+;; ============================================================
+;; SSE body tolerance (task #31). We always send `stream: false`, but
+;; some gateways stream SSE unconditionally (gateway bug — observed
+;; live downstream 2026-06-11, flagged to its owners). The body is
+;; already fully buffered by `(.text resp)` above, so this is a
+;; split-and-aggregate over `data:` lines, NOT consumer streaming.
+;; ============================================================
+
+(defn- sse-content-type?
+  "Does this Content-Type header value denote an SSE body? Matches
+   `text/event-stream` with or without parameters
+   (\"text/event-stream; charset=utf-8\"). nil/absent header → false."
+  [content-type]
+  (boolean
+    (some-> content-type str/lower-case str/trim
+            (str/starts-with? "text/event-stream"))))
+
+(defn- sse-data-lines
+  "The `data:` field values of a buffered SSE body, in order.
+   Per the SSE spec, the field value starts after `data:` with one
+   optional leading space; other fields (event:, id:, retry:,
+   comments) and blank separator lines are ignored."
+  [body-text]
+  (keep (fn [line]
+          (let [line (str/replace line #"\r$" "")]
+            (when (str/starts-with? line "data:")
+              (let [v (subs line 5)]
+                (if (str/starts-with? v " ") (subs v 1) v)))))
+        (str/split-lines body-text)))
+
+(defn- parse-sse-response
+  "Aggregate a fully-buffered SSE chat-completions body into the SAME
+   shape [[parse-response]] produces — one parse target downstream.
+
+   Each `data: {json}` line is a chat-completion chunk:
+   `choices[0].delta.content` fragments concatenate into the text;
+   `delta.reasoning_content` is NOT visible content and is dropped
+   with a debug log (same semantics as the JSON path's
+   reasoning_content); the final data chunk carries `usage`;
+   `data: [DONE]` terminates the stream.
+
+   Malformed input (no [DONE] terminator, unparseable JSON line) →
+   legible error envelope with the raw body attached, never a throw."
+  [body-text]
+  (try
+    (let [lines  (sse-data-lines body-text)
+          [chunks-raw terminated]
+          (loop [ls lines acc []]
+            (cond
+              (empty? ls)             [acc false]
+              (= "[DONE]" (first ls)) [acc true]
+              :else                   (recur (rest ls) (conj acc (first ls)))))]
+      (if-not terminated
+        {:seon.ai/text  ""
+         :seon.ai/error {:seon.ai/msg      (str "Malformed SSE response: stream has no "
+                                                "data: [DONE] terminator ("
+                                                (count chunks-raw) " data chunk(s) seen) — "
+                                                "truncated or not a chat-completions stream")
+                         :seon.ai/raw-body body-text}}
+        (let [chunks    (mapv #(js->clj (.parse js/JSON %) :keywordize-keys true)
+                              chunks-raw)
+              deltas    (keep #(-> % :choices first :delta) chunks)
+              text      (apply str (keep :content deltas))
+              reasoning (transduce (keep #(some-> % :reasoning_content count))
+                                   + 0 deltas)
+              finish    (last (keep #(-> % :choices first :finish_reason) chunks))
+              usage     (last (keep :usage chunks))]
+          (when (and (zero? (count text)) (pos? reasoning))
+            (js/console.debug
+              (str "seon.ai.deepseek: SSE completion content EMPTY but"
+                   " reasoning_content deltas present (" reasoning
+                   " chars) — thinking-mode tokens landed in the reasoning"
+                   " field; dropping it (same semantics as the JSON path)")))
+          {:seon.ai/text                    text
+           :seon.ai.deepseek/finish-reason  finish
+           :seon.ai/usage                   usage})))
+    (catch :default e
+      {:seon.ai/text  ""
+       :seon.ai/error {:seon.ai/msg      (str "Failed to parse SSE response: "
+                                              (error/->message e))
+                       :seon.ai/raw-body body-text}})))
+
 (defn- config-error
   "Errors-as-values envelope for a CALL-TIME config gap (no endpoint /
    no key). Never transport-flagged — a config error must not look
@@ -277,12 +366,20 @@
                                  :body    (body-json request)})))
                 body-text (await (.text resp))
                 _         (js/clearTimeout timer)
-                result    (if (.-ok resp)
-                            (parse-response body-text)
+                ;; Some gateways ignore `stream: false` and send SSE
+                ;; anyway — branch on the Content-Type header (see the
+                ;; SSE section above). Absent header → JSON path.
+                sse?      (sse-content-type?
+                            (some-> resp .-headers (.get "content-type")))
+                result    (cond
+                            (not (.-ok resp))
                             {:seon.ai/text  ""
                              :seon.ai/error {:seon.ai/msg    (str label " HTTP " (.-status resp)
                                                                   ": " body-text)
-                                             :seon.ai/status (.-status resp)}})]
+                                             :seon.ai/status (.-status resp)}}
+
+                            sse?  (parse-sse-response body-text)
+                            :else (parse-response body-text))]
             (when-let [err (:seon.ai/error result)]
               (ai/log-error! label err))
             result)
