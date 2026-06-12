@@ -228,7 +228,7 @@ elsewhere as noted.
 
 | Smell | Where | Disposition |
 |---|---|---|
-| **CONSUMER SECRET IN THE LIVE STORE**: `:my.config/secret` (hex token) + cloud-run URL render verbatim into every agent's `<findings>` section → transited LLM providers on every live wake. USER MUST RELAY: rotate the token | live cluster store / findings rung | URGENT unit launched: secret-shaped redaction in findings render + `:seon.ctx/excluded-kinds` customize-with-data row; consumer relay re rotation |
+| **CONSUMER SECRET IN THE LIVE STORE**: `:my.config/secret` (hex token) + cloud-run URL render verbatim into every agent's `<findings>` section → transited LLM providers on every live wake. USER MUST RELAY: rotate the token | live cluster store / findings rung | DEFERRED (user, 2026-06-12: "how do we know what a secret is?" — the name-pattern heuristic is dubious; demo focus first). Post-demo shape: the STRUCTURAL piece only — `:seon.ctx/excluded-kinds` opt-out row (consumer marks kinds, no guessing). RELAY STANDS: rotate the leaked token |
 | ctx read-API public fns unspecced (`turns-since-inbound`, `messages`, siblings) — instrumentation-rule drift, second report (OPUS-S flagged the same family) | ctx.cljs | S sweep unit, queue |
 | after a `:cap-hit` halt without reply, `task-in-progress?` stays TRUE until next inbound — harmless today (renders only happen in wakes); matters if a future renderer assembles context for parked agents | ctx.cljs | note; revisit with the lifecycle UX unit |
 
