@@ -226,6 +226,13 @@ pointed at a checkout; the bundle is the next rung.
 | CONFIRMED AGAIN: MCP default `:client` runtime ≠ the pod (cost the unit one misleading "empty store" read; pid mismatch live-verified) | stale-MCP-runtime row | evidence appended to the existing open row |
 | `agents-dash-fragment` renders agent-authored tile content containing a bare `<h1>` — second h1 on the page (pre-existing, structural-HTML) | inspector dash | small unit: demote/strip headings in embedded tile content |
 
+## Todo teachability unit smells (2026-06-12Z)
+
+| Smell | Where | Disposition |
+|---|---|---|
+| B1 extractor blind spot (structural): `(-> …)`/`(.then …)`-headed taught examples are silently NOT extracted (head must be letter-initial + qualified/definer) — an author can write uncovered "executable" examples | teachings_test extractor | S: canary test or convention note in the harness |
+| clj-kondo hook OOM (Java heap) AGAIN (todo_test.cljs edit; third occurrence tonight incl. 2× client.cljs) — retry passes, lint silently skipped each time | dev hook | bump: recurring; same row as the C-18 smell — needs the heap look + loud-skip |
+
 ## Salience unit (#26) smells (2026-06-12Z)
 
 | Smell | Where | Disposition |
