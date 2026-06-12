@@ -121,7 +121,7 @@ The aggregator debounces rapid code changes (50ms default), groups by namespace,
 
 - **`seon.web.agents`** is the largest file (~1150 lines) — the observatory rendering could be split into a dedicated view namespace, similar to how `seon.ai.agent.views` works
 - **`seon.web.html`** mixes base template with dashboard-specific content; dashboard content could move to its own namespace
-- **Log viewer title** still says "ML Options Trading" (`log-viewer-shim`) — stale from before the rename to Seon
+- **Log viewer title** still says "ML Options Trading" (`log-viewer-shim`, `src/seon/web/html.clj` ~line 304) — stale from before the rename to Seon. Verified still present 2026-06-11; one-line fix, queued
 - **`seon.agent.helpers`** SQL functions all throw "not yet migrated" — dead code that should be removed or ported to Datahike query helpers
 - **SSE flow** (`sse/flow.clj`) exists alongside the simpler broadcast mult in `sse.clj` — the flow adds code-change aggregation and client tracking but the broadcast mult is what actually drives page updates. These could be unified.
 - **`seon.web.namespace`** creates a fresh `render-handler` per request (to ensure current bindings) — this works but allocates a new channel tap each time

@@ -105,6 +105,14 @@ Before persisting, `filter-serializable` round-trips each value through `pr-str`
 - **`requiring-resolve` for soft deps**: SSE, http-kit, and Chassis are resolved at call time, not at load time. Ctx can be loaded without the web layer.
 - **EDN for persistence**: State serialized as a single EDN string in `:seon.ctx/data`. Simple but loses type information for some values and limits queryability.
 
+## CLJS pod sibling — `seon.ctx` (`src/seon/ctx.cljs`)
+
+The CLJS pod lane has its own `seon.ctx`: the agent prompt composer (`substrate-default-ctx` section layout + `assemble-context`), unrelated to the JVM atom/watch system above. Additions of 2026-06-11:
+
+- **`:findings` section (priority 48)** — `seon.agent.findings/findings-section` (`src/seon/agent/findings.cljs`) renders every user-domain kind's stored rows IN FULL (kb-row content, not just attr names) into the prompt; cross-agent by design, derived per render, vanishes when the store holds none. The inspector's findings pane reads the same `user-domain-kinds` derivation — see [[components/web-inspector]].
+- **Todo standing teaching + `:open-todos` render** — the `<system>` standing teachings now instruct: mint one todo per step via `seon.agent.todo/add!` BEFORE starting and `complete!` each id as steps land. The `:open-todos` section (priority 45, `seon.agent.todo/open-todos-section`) renders each open item as `<id> [<age>] <title>` plus the `complete!` call hint, so ids are always actionable from the prompt; empty = the section vanishes (done-signal).
+- **`:seon.ai/config` row + provider selection** — `src/seon/ai.cljs`: one singleton row (identity `:seon.ai/id` = `"config"`) carries provider/model/temperature/max-tokens/thinking/timeout-ms as DATA; env-owned across boots (`SEON_AI_*`, same contract as [[components/web-brand]]), read per call via `seon.ai/current` (no cached atom). Provider selection (`seon.ai/provider`): env > config row > `:deepseek`.
+
 ## Refactoring Opportunities
 
 - **`get-entry` exposes internals**: Returns the raw registry map. Consumers (`seon.ns.routes`) are coupled to `::atom`, `::render-fn`, `::clients`. A curated return map would decouple them (noted as P3 in source).

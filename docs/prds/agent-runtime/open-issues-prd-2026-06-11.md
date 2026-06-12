@@ -226,6 +226,14 @@ pointed at a checkout; the bundle is the next rung.
 | CONFIRMED AGAIN: MCP default `:client` runtime ≠ the pod (cost the unit one misleading "empty store" read; pid mismatch live-verified) | stale-MCP-runtime row | evidence appended to the existing open row |
 | `agents-dash-fragment` renders agent-authored tile content containing a bare `<h1>` — second h1 on the page (pre-existing, structural-HTML) | inspector dash | small unit: demote/strip headings in embedded tile content |
 
+## Docs unit smells (2026-06-12 ~03:40Z)
+
+| Smell | Where | Disposition |
+|---|---|---|
+| `"ML Options Trading - Log Viewer"` hardcoded title — a consumer-domain string in substrate src (hard-rule violation), in the PAUSED JVM web lane so zero demo risk | `src/seon/web/html.clj:304` | one-liner, fold into the next JVM-lane src unit post-demo |
+| TWO unrelated `seon.ctx` systems share one ns name (JVM atom/watch state vs CLJS prompt composer) — standing confusion source, now both documented in the context note | src/seon/ctx.clj vs ctx.cljs | post-demo decide: rename one lane or document as permanent |
+| frontmatter taxonomy drift: component notes use `status: production`/`stable` while the documented enum is active/draft/completed/abandoned; the markdown linter tolerates both — uniformity canary | docs linter vs CLAUDE.md taxonomy | S: reconcile the enum (linter or docs) |
+
 ## Demo-readiness sweep (2026-06-12 ~03:15Z) — PASS
 
 Pod restarted clean at 43c5145: replay 2/2 zero failures, zero
