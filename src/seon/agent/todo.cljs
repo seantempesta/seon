@@ -3,7 +3,32 @@
    stored as `:seon.agent.todo` entities and queried at boot so a RESUMING agent
    sees exactly where it left off. THE EXEMPLAR store/retrieve ns: attrs via
    `schema/register!`, map-in/map-out fns, errors as `:seon.agent.todo/ok?`
-   envelopes (never throws), a pure derived view for context rendering."
+   envelopes (never throws), a pure derived view for context rendering.
+
+   WHEN: any task with two or more steps. Mint one todo per step BEFORE you
+   start — title = the step, from = the asker's ref — then complete! each id
+   as that step lands. Your open items render in the <open-todos> section
+   every turn, each line carrying its id, so a resumed or distracted you
+   always sees what is left; an empty section is the done-signal. Nothing
+   to clear, nothing to remember across turns.
+
+   The full arc — add!'s response carries the durable id, and that exact
+   id is what complete! takes:
+
+     (let [step (seon.agent.todo/add!
+                  {:seon.agent.todo/title \"register the my.kb.note schema\"
+                   :seon.agent.todo/from  [:seon.user/id \"user\"]})]
+       (.then step (fn [{:seon.agent.todo/keys [id]}]
+                     ;; the step's real work goes here, then close it:
+                     (seon.agent.todo/complete! {:seon.agent.todo/id id}))))
+     ;; => {:seon.agent.todo/ok? true :seon.agent.todo/id \"k7x2-0jh99tq40d\"}
+
+   In ordinary turn-by-turn work you rarely need the .then: add! on its own
+   line prints its envelope on the value line — read the id there, or off
+   the <open-todos> section next turn, and pass it to complete! when the
+   step is done. reopen! flips a done item back to open. When you reply
+   mid-task, include how many items are still open so your human knows
+   where you are."
   (:require
     [clojure.string :as str]
     [seon.db :as db]

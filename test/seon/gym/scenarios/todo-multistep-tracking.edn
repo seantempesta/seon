@@ -1,0 +1,90 @@
+;; TODO-MULTISTEP-TRACKING (task #18, todo teachability 2026-06-11) —
+;; does the standing teaching land? The message is a genuinely
+;; multi-step data task (3 independent steps: design a schema, store
+;; rows, define a fn with a test) and NEVER mentions todos — the
+;; behavioral bar is that the agent spontaneously (a) mints work items
+;; for the steps (≥2 owner-scoped :seon.agent.todo rows) and (b) closes
+;; its own loop: by run end NO todo it owns is still :open (the
+;; <open-todos> section it sees every turn renders empty = done), while
+;; the work itself actually lands (domain attrs registered, a deftest
+;; written) and the human gets one reply.
+;;
+;; GYM INTEGRITY: predicates are STRUCTURAL — rows minted/completed,
+;; owner-scoped via the agent entity; nothing checks any title or any
+;; plant. The teaching under test is WHEN/HOW to use todos generally
+;; (system-text standing bullet + the seon.agent.todo docstring arc),
+;; never this scenario's specific task.
+;;
+;; DEEPSEEK TIER (cheap) — refuses without allow-paid? + key.
+{:seon.gym.scenario/id     :todo-multistep-tracking
+ :seon.gym.scenario/doc    "A 3-step data task (schema + rows + fn-with-test) that never mentions todos: the standing teaching says 2+ steps → mint one todo per step and complete! as you go. Bar: ≥2 owner-scoped todo rows minted AND zero still :open at run end (the agent closes its own loop — an empty <open-todos> section is the done-signal), the work lands (≥2 domain attrs, a deftest), one honest reply, under the turn cap."
+ :seon.gym.scenario/tier   :deepseek
+ :seon.gym.scenario/status :active
+ :seon.gym.scenario/axes   [:stores-proactively :models-work-directed
+                            :writes-tests :terminates :replies-honestly]
+ :seon.gym.scenario/turns
+ [{:seon.gym.turn/message "Set up watering tracking for my houseplants: design a schema for waterings, log that I watered the fern and the monstera today, and write me a fn that lists which plants were watered on a given date — with a test proving it works. Then tell me what you built."}]
+ :seon.gym.scenario/predicates
+ [;; (a) The agent minted work items for the steps — ≥2 todo rows whose
+  ;; owner is an agent entity (structural: count + ownership, never
+  ;; titles).
+  {:seon.gym.predicate/id     :minted-todos-for-the-steps
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :stores-proactively
+   :seon.gym.predicate/query  [:find ?t
+                               :where
+                               [?t :seon.agent.todo/owner ?a]
+                               [?a :seon.agent/id ?aid]]
+   :seon.gym.predicate/expect [:count>= 2]}
+  ;; (b) …and CLOSED THE LOOP: by run end no agent-owned todo is still
+  ;; :open — staying on track means completing what you minted. (The
+  ;; minted-count predicate above is this one's vacuity guard: zero
+  ;; todos would pass :empty here but fail [:count>= 2] there.)
+  {:seon.gym.predicate/id     :closed-the-loop-no-open-todos
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :stores-proactively
+   :seon.gym.predicate/query  [:find ?t
+                               :where
+                               [?t :seon.agent.todo/status :open]
+                               [?t :seon.agent.todo/owner ?a]
+                               [?a :seon.agent/id ?aid]]
+   :seon.gym.predicate/expect :empty}
+  ;; The work itself landed: the agent designed a schema — agent-
+  ;; provenance domain attrs are visible on the post-run store
+  ;; (whatever keyword namespace it picked; structural, not nominal).
+  {:seon.gym.predicate/id     :designed-a-domain-schema
+   :seon.gym.predicate/kind   :domain-attrs
+   :seon.gym.predicate/axis   :models-work-directed
+   :seon.gym.predicate/expect [:count>= 2]}
+  ;; …and the fn got a real test.
+  {:seon.gym.predicate/id      :wrote-a-test-for-the-fn
+   :seon.gym.predicate/kind    :eval-count-matching
+   :seon.gym.predicate/axis    :writes-tests
+   :seon.gym.predicate/pattern "deftest"
+   :seon.gym.predicate/expect  [:count>= 1]}
+  ;; from-agent + hops>0, not the user-entity join (datahike-cljs
+  ;; double-identity-join mis-binding — pinned in driver_test).
+  {:seon.gym.predicate/id     :agent-replied-to-the-user
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :replies-honestly
+   :seon.gym.predicate/query  [:find ?m
+                               :where
+                               [?m :seon.agent.message/from ?a]
+                               [?a :seon.agent/id ?aid]
+                               [?m :seon.agent.message/hops ?h]
+                               [(pos? ?h)]]
+   :seon.gym.predicate/expect :non-empty}
+  {:seon.gym.predicate/id     :agent-ends-idle
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?a
+                               :where
+                               [?a :seon.agent/state :idle]]
+   :seon.gym.predicate/expect :non-empty}
+  {:seon.gym.predicate/id     :terminates-under-cap
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?t
+                               :where
+                               [?t :seon.agent.turn/id ?tid]]
+   :seon.gym.predicate/expect [:count<= 19]}]}

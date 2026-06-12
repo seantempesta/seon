@@ -33,7 +33,8 @@
    "test/seon/gym/scenarios/consults-findings-run8.edn"
    "test/seon/gym/scenarios/s32-consult-before-research.edn"
    "test/seon/gym/scenarios/s21-log-workout-existing-schema.edn"
-   "test/seon/gym/scenarios/todo-prompt-thin.edn"])
+   "test/seon/gym/scenarios/todo-prompt-thin.edn"
+   "test/seon/gym/scenarios/todo-multistep-tracking.edn"])
 
 (defn- load-first [path]
   (first (:seon.gym/scenarios (gym/load-scenarios! {:seon.gym/path path}))))

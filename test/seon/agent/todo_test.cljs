@@ -6,6 +6,7 @@
    FRESH :memory conn seeded like the pod boots — never the live agent conn."
   (:require
     [cljs.test :refer [deftest is async]]
+    [clojure.string :as str]
     [datahike.api :as d]
     [seon.client :as client]
     [seon.db :as db]
@@ -146,8 +147,15 @@
                     (is (= ["first (oldest)" "second" "b's item"]
                            (open-titles (todo/list-open {:seon.agent.todo/all? true})))
                         "all? widens across owners")
-                    (let [block (todo/open-todos-block @conn a-ref)]
-                      (is (re-find #"complete!" block) "block teaches the verb")
+                    (let [block (todo/open-todos-block @conn a-ref)
+                          ids   (mapv :seon.agent.todo/id
+                                      (:seon.agent.todo/todos
+                                        (todo/list-open {:seon.agent.todo/owner a-ref})))]
+                      (is (re-find #"\(seon\.agent\.todo/complete! \{:seon\.agent\.todo/id <id>\}\)"
+                                   block)
+                          "header teaches the exact complete! call shape")
+                      (is (and (seq ids) (every? #(str/includes? block %) ids))
+                          "every open row renders its durable id — actionable without a query")
                       (is (re-find #"(?m)^\S+ \[2m\] first \(oldest\)$" block)
                           "line = <id> [<age>] <title>, oldest first"))
                     (let [id (-> (todo/list-open {:seon.agent.todo/owner a-ref})
