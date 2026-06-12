@@ -12,8 +12,15 @@
      - the loop halts with `:seon.agent/halt :replied` after the turn
        whose eval landed a `reply!` — even when the LLM would keep
        emitting forms every turn (the churn shape).
-     - zero-forms termination (#22): a prose-only LLM response ends the
-       wake cleanly in one turn — no spin to the cap.
+     - the EMPTY-TURN guard (downstream ask 20): a turn with zero
+       evals while the agent has NOT replied since the inbound (the
+       deepseek thinking-mode shape — all tokens in the reasoning
+       field, visible content empty) re-prompts with a substrate nudge
+       instead of ending the wake silently; bounded at
+       `agent/max-empty-reprompts` consecutive re-prompts, then ends
+       with a chat-visible system line (turn :error + self-message —
+       the ask-6 shape). A replied agent's wake still ends normally;
+       the turns-cap still bounds re-prompts.
 
    Tests open a FRESH `:memory` conn (via `seon.client/open-agent-conn!`,
    the same boot helper the pod uses) — nothing here touches the live
@@ -28,6 +35,7 @@
     [seon.client :as client]
     [seon.db :as db]
     [seon.eval :as seval]
+    [seon.render.chat :as chat]
     [seon.repl :as repl]))
 
 (defn- with-conn
@@ -231,30 +239,143 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest zero-forms-terminates-cleanly
+;; ---------------------------------------------------------------------------
+;; The EMPTY-TURN guard (downstream ask 20) — a completion with EMPTY
+;; visible content (the deepseek thinking-mode shape: every token in
+;; the reasoning field) yields 0 forms; pre-fix the loop closed
+;; `done [0 "ok"]` and the wake ended with NO reply — the agent looked
+;; dead until a manual "continue". Now: nudge + re-prompt (bounded),
+;; then a chat-visible system line.
+;; ---------------------------------------------------------------------------
+
+(defn- nudge-count
+  "How many substrate empty-completion nudges are in the message log."
+  []
+  (count (db/query
+           {:seon.db/query '[:find ?m
+                             :in $ ?content
+                             :where [?m :seon.agent.message/content ?content]]
+            :seon.db/args  [agent/empty-completion-nudge]})))
+
+(defn- scripted-seq-llm
+  "ctx-string -> Promise<{:text t}> — replays `texts` in order, then
+   repeats the last one."
+  [texts]
+  (let [!n (atom -1)]
+    (fn [_ctx]
+      (let [i (swap! !n inc)]
+        (js/Promise.resolve
+          {:text (nth texts (min i (dec (count texts))))})))))
+
+(def ^:private reply-form
+  "(seon.agent/reply! {:seon.agent.message/content \"pong\"})\n")
+
+(defn ^:async ^:private drive-loop! [compile-state mid llm-fn]
+  (await
+    (db/with-agent agent-id
+      (fn []
+        (agent/run-agentic-loop!
+          {:seon.agent/id            agent-id
+           :seon.agent/llm-fn        llm-fn
+           :seon.agent/compile-state compile-state
+           :seon.agent.turn/woken-by [:seon.agent.message/id mid]})))))
+
+(deftest empty-completions-reprompt-then-system-line
   (async done
     (-> (with-conn
           (fn ^:async run []
             (let [compile-state (await (repl/ensure-bootstrap!))
-                  mid (await (boot-loop-agent! compile-state "ping"))
-                  result
-                  (await
-                    (db/with-agent agent-id
-                      (fn []
-                        (agent/run-agentic-loop!
-                          {:seon.agent/id            agent-id
-                           :seon.agent/llm-fn
-                           (scripted-llm ";; prose only — nothing to eval\n")
-                           :seon.agent/compile-state compile-state
-                           :seon.agent.turn/woken-by
-                           [:seon.agent.message/id mid]}))))]
-              (is (nil? (:seon.agent/halt result))
-                  "zero-forms stop, not a halt marker")
-              (is (= 1 (session-turn-count))
-                  "ONE turn — prose-only ends the wake, no spin (#22)")
+                  mid    (await (boot-loop-agent! compile-state "ping"))
+                  result (await (drive-loop! compile-state mid
+                                             (scripted-llm "")))]
+              (is (= :no-visible-output (:seon.agent/halt result))
+                  "wake ends with the empty-turn halt marker, not silence")
+              (is (= (inc agent/max-empty-reprompts) (session-turn-count))
+                  "1 + max-empty-reprompts turns — re-prompts consumed turns")
+              (is (= agent/max-empty-reprompts (nudge-count))
+                  "one substrate nudge per re-prompt landed in the message log")
+              (is (= :error (:seon.agent.turn/status
+                              (db/entity {:seon.db/ref
+                                          [:seon.agent.turn/id
+                                           (:seon.agent.turn/id result)]})))
+                  "final turn flipped to :error (the ask-6 chat-visible shape)")
+              (let [{::chat/keys [messages]}
+                    (chat/conversation {:seon.agent/id agent-id})]
+                (is (some #(and (= ::chat/system (::chat/kind %))
+                                (re-find #"no visible output" (::chat/content %)))
+                          messages)
+                    "the human's chat shows a system line — agent never looks dead"))
               (is (= :idle (:seon.agent/state
                              (db/entity {:seon.db/ref
                                          [:seon.agent/id agent-id]})))
-                  "agent ends :idle"))))
+                  "agent ends :idle — the next message resumes it"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest empty-completion-recovers-on-reprompt
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [compile-state (await (repl/ensure-bootstrap!))
+                  mid    (await (boot-loop-agent! compile-state "ping"))
+                  result (await (drive-loop! compile-state mid
+                                             (scripted-seq-llm ["" reply-form])))]
+              (is (= :replied (:seon.agent/halt result))
+                  "second completion replied — wake completes normally")
+              (is (= 2 (session-turn-count))
+                  "empty turn + recovered turn")
+              (is (= 1 (nudge-count))
+                  "exactly ONE nudge — the streak ended on recovery"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest replied-agent-empty-completion-ends-normally
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [compile-state (await (repl/ensure-bootstrap!))
+                  mid (await (boot-loop-agent! compile-state "ping"))]
+              ;; The agent already replied to the inbound (e.g. via a
+              ;; prior turn of this wake) — transacted directly with an
+              ;; :at strictly after the inbound's.
+              (let [seeded
+                    (await (db/transact!
+                             {:seon.db/tx-data
+                              [{:seon.agent.message/id      "MSGloopreply01"
+                                :seon.agent.message/from    {:seon.agent/id agent-id}
+                                :seon.agent.message/to      [{:seon.user/id "user"}]
+                                :seon.agent.message/content "already answered"
+                                :seon.agent.message/at      (js/Date.)
+                                :seon.agent.message/hops    1}]}))]
+                (is (not (false? (:seon.db/ok? seeded)))
+                    "seeded reply transact landed"))
+              (let [result (await (drive-loop! compile-state mid
+                                               (scripted-llm "")))]
+                (is (= :replied (:seon.agent/halt result))
+                    "replied agent's wake ends normally on an empty completion")
+                (is (= 1 (session-turn-count)) "ONE turn, no spin")
+                (is (zero? (nudge-count))
+                    "no spurious re-prompt for an agent that already replied")))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest turns-cap-bounds-reprompts
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [compile-state (await (repl/ensure-bootstrap!))
+                  mid (await (boot-loop-agent! compile-state "ping"))]
+              (await (db/transact!
+                       {:seon.db/tx-data
+                        [{:seon.agent/id agent-id
+                          :seon.agent/turns-cap 1}]}))
+              (let [result (await (drive-loop! compile-state mid
+                                               (scripted-llm "")))]
+                (is (= :cap-hit (:seon.agent/halt result))
+                    "cap checked BEFORE the empty-turn guard — re-prompts
+                     can never push past the turns-cap")
+                (is (= 1 (session-turn-count)) "cap 1 → one turn")
+                (is (zero? (nudge-count))
+                    "no nudge once the cap is reached")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

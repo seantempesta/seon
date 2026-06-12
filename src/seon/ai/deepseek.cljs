@@ -114,8 +114,23 @@
 
 (defn- parse-response [body-text]
   (try
-    (let [body (js->clj (.parse js/JSON body-text) :keywordize-keys true)
-          msg  (-> body :choices first :message :content)]
+    (let [body      (js->clj (.parse js/JSON body-text) :keywordize-keys true)
+          message   (-> body :choices first :message)
+          msg       (:content message)
+          reasoning (:reasoning_content message)]
+      ;; Diagnosis evidence, not behavior (downstream ask 20): a
+      ;; thinking-mode completion can land EVERY token in
+      ;; reasoning_content and return empty visible content — the
+      ;; turn-outcome guard in seon.agent/run-agentic-loop! handles the
+      ;; re-prompt; here we just log that the reasoning field was
+      ;; present and dropped, so an empty turn is attributable.
+      (when (and (zero? (count (or msg "")))
+                 (pos? (count (or reasoning ""))))
+        (js/console.debug
+          (str "seon.ai.deepseek: completion content EMPTY but"
+               " reasoning_content present (" (count reasoning)
+               " chars) — thinking-mode tokens landed in the reasoning"
+               " field; dropping it (parsed as before)")))
       {:seon.ai/text                    (or msg "")
        :seon.ai.deepseek/finish-reason  (-> body :choices first :finish_reason)
        :seon.ai/usage                   (-> body :usage)})

@@ -1204,6 +1204,36 @@
                   (> (.getTime ^js outbound-at)
                      (.getTime ^js baseline))))))
 
+(def max-empty-reprompts
+  "Bound on CONSECUTIVE re-prompts after a turn that produced no
+   visible output (zero evals, zero outbound, no reply since the
+   inbound — see [[run-agentic-loop!]]). Two re-prompts, then the wake
+   ends WITH a chat-visible system line — the agent never just looks
+   dead, and a provider stuck returning empty completions can't burn
+   turns forever."
+  2)
+
+(def empty-completion-nudge
+  "The substrate-origin transcript note injected before an
+   empty-completion re-prompt (self→self message — appears in the
+   agent's transcript next turn, wakes nothing, never reads as
+   user-directed). Same bracketed-substrate-note shape as the
+   turn-cap note."
+  (str "[previous completion produced no visible output — no forms"
+       " were evaluated and nothing was sent. Respond with Clojure"
+       " forms to evaluate, or reply to your human via"
+       " (seon.agent/reply! {:seon.agent.message/content \"…\"}).]"))
+
+(defn- empty-completion-give-up-text
+  "Content of the chat-visible system line stored when the empty-turn
+   guard gives up (the ask-6 pattern: an :error turn carrying a
+   self-message renders as a `::system` chat line —
+   seon.render.chat/provider-failure-rows appends
+   \"— it will resume on your next message\")."
+  [attempts]
+  (str "completion produced no visible output (0 forms, no reply) on "
+       attempts " consecutive turns despite re-prompts — wake ended"))
+
 (defn ^:async run-agentic-loop!
   "Per v1.md §6.2 — multi-turn driver. Calls `run-turn!` repeatedly
    until a stop policy fires.
@@ -1221,30 +1251,46 @@
        `message!` consult to another agent. Complete the work first,
        reply once; consults resume via the re-wake when the answer
        arrives.
-     - Last turn produced zero forms (agent emitted prose only).
-     - `turns-since-inbound` exceeded `(turns-cap id)` — derived
-       from the message + turn log; see docs/seon/concepts/reactive-context.
+     - `turns-since-inbound` reached `(turns-cap id)` — derived from
+       the message + turn log; see docs/seon/concepts/reactive-context.
+       Checked BEFORE the empty-turn guard so re-prompts (which consume
+       turns like any other) can never push past the cap.
+     - EMPTY-TURN GUARD (downstream ask 20): a turn that produced ZERO
+       evals while the agent has NOT replied since the inbound used to
+       end the wake silently (`done [0 \"ok\"]`) — observed with
+       deepseek thinking-mode completions that put every token in the
+       reasoning field and return EMPTY visible content; the agent
+       looked dead until a manual \"continue\". The guard watches the
+       TURN OUTCOME (provider-agnostic — an anthropic
+       thinking-blocks-only response trips it the same way): zero evals
+       also implies zero outbound messages (sends only happen through
+       evals, and any outbound would have fired the `:replied` branch
+       above). Instead of ending, it injects [[empty-completion-nudge]]
+       as a self→self transcript note and re-prompts — at most
+       [[max-empty-reprompts]] consecutive times (any turn with forms
+       resets the streak), then ends the wake by flipping the last turn
+       to `:seon.agent.turn/status :error` with a stored self-message
+       (the ask-6 LLM-error shape) so the human sees a `::system` chat
+       line instead of silence. Halt marker:
+       `:seon.agent/halt :no-visible-output`.
 
    The message-arrival stop policy is handled externally: the kick
    handler's state-machine guard + scheduled-latch ensure a fresh
    inbound message can't stack new loops on top of an in-flight one."
   [{:seon.agent/keys [id] :as input}]
-  (loop []
+  (loop [empty-streak 0]
     (let [result   (await (run-turn! input))
           since-in (turns-since-inbound {:seon.agent/id id})
           status   (:seon.agent.turn/status result)
-          n-forms  (or (:seon.agent/eval-count result) 0)]
+          n-forms  (or (:seon.agent/eval-count result) 0)
+          turn-idx (turn-index (:seon.agent.session/id (current-session id)))]
       (cond
         (= :error status)
         result
 
         (replied-since-inbound? {::id id})
-        (do (log id (turn-index (:seon.agent.session/id (current-session id)))
-                 "halt" "replied — wake complete")
+        (do (log id turn-idx "halt" "replied — wake complete")
             (assoc result :seon.agent/halt :replied))
-
-        (zero? n-forms)
-        result
 
         (>= since-in (turns-cap id))
         (do (await
@@ -1261,8 +1307,45 @@
                       " narrow the question.]")}))
             (assoc result :seon.agent/halt :cap-hit))
 
+        (zero? n-forms)
+        (if (< empty-streak max-empty-reprompts)
+          (do (log id turn-idx "empty turn"
+                   (str "no visible output (streak "
+                        (inc empty-streak) "/" (inc max-empty-reprompts)
+                        ") — nudge + re-prompt"))
+              (await (msg/message!
+                       {:seon.agent.message/from    [:seon.agent/id id]
+                        :seon.agent.message/to      [[:seon.agent/id id]]
+                        :seon.agent.message/content empty-completion-nudge}))
+              (recur (inc empty-streak)))
+          (let [attempts (inc empty-streak)]
+            (log id turn-idx "halt"
+                 (str "no visible output after " attempts
+                      " attempts — system line + wake end"))
+            ;; Flip THIS turn to the ask-6 LLM-error shape (status
+            ;; :error + stored self-message) — the one shape
+            ;; seon.render.chat derives a chat-visible `::system` line
+            ;; from. Nothing new stored per-view; the turn record
+            ;; honestly says this wake's final turn produced nothing.
+            (await (db/transact!
+                     {:seon.db/tx-data
+                      [{:seon.agent.turn/id
+                        (:seon.agent.turn/id result)
+                        :seon.agent.turn/status :error
+                        :seon.agent.turn/messages
+                        [{:seon.agent.message/id      (db/new-id!)
+                          :seon.agent.message/from    [:seon.agent/id id]
+                          :seon.agent.message/to      [[:seon.agent/id id]]
+                          :seon.agent.message/content
+                          (str "⚠ " (empty-completion-give-up-text attempts))
+                          :seon.agent.message/at      (js/Date.)
+                          :seon.agent.message/hops    0}]}]}))
+            (assoc result
+                   :seon.agent.turn/status :error
+                   :seon.agent/halt :no-visible-output)))
+
         :else
-        (recur)))))
+        (recur 0)))))
 
 ;; ============================================================
 ;; v1 §5 render-side helpers + section fns + composer.

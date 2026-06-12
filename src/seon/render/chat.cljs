@@ -122,10 +122,12 @@
   "DERIVED `[at content]` rows for this agent's turns that died on a
    provider failure: `:seon.agent.turn/status :error` AND the turn
    carries its error self-message. The LLM-error branch of
-   `seon.agent/ask-and-eval!` is the one writer of that shape (a
-   catastrophic turn close stores NO message), so 'error turn with a
-   message' ≡ provider failure. Renders what the turn log already
-   records — nothing stored per-view."
+   `seon.agent/ask-and-eval!` writes that shape, as does the
+   empty-turn guard in `seon.agent/run-agentic-loop!` when it gives up
+   after consecutive no-visible-output completions (downstream ask 20)
+   — a catastrophic turn close stores NO message, so 'error turn with
+   a message' ≡ a failure the human should see. Renders what the turn
+   log already records — nothing stored per-view."
   [db id]
   (db/query
     {:seon.db/db db
