@@ -8,12 +8,12 @@
 
    STRUCTURAL, never a name-list (uniformity rule — one mechanism, no
    `:my.kb` special case): a kind renders here iff
-     (a) it is USER-DOMAIN — its attr namespace is NOT in the
-         substrate-kind set, derived per render from tx provenance
-         (the namespaces whose `:seon.schema/key` rows were asserted
-         under a `:substrate-seed` boot-index tx — the SAME rule
-         `seon.db/store-inventory` orders by, so an agent-minted kind
-         qualifies whatever its keyword spelling), and
+     (a) it is USER-DOMAIN — its attr namespace is NOT in
+         `seon.db/substrate-kinds` (THE shared provenance derivation:
+         a kind is substrate iff its `:seon.schema/key` row is a
+         bootstrap row — the SAME rule `seon.db/store-inventory`
+         orders and splits by, so an agent-minted kind qualifies
+         whatever its keyword spelling), and
      (b) it has READABLE CONTENT — at least one live string value
          under one of its own attrs (pure-numeric tally kinds carry
          nothing to read; querying them is taught elsewhere).
@@ -42,21 +42,6 @@
    replaced by a loud marker carrying the query that reads the
    complete rows."
   20000)
-
-(defn- substrate-kinds
-  "Attr namespaces (keywords) whose `:seon.schema/key` rows were
-   asserted under a `:substrate-seed` boot-index tx. The same
-   provenance derivation `seon.db/store-inventory` uses for its
-   user-domain-first ordering (kept textually in sync; smell on
-   record: `seon.db` should expose the flag once, per-row)."
-  [db]
-  (into #{}
-        (keep (fn [[k]] (some-> (namespace k) keyword)))
-        (db/query {:seon.db/db db
-                   :seon.db/query '[:find ?k
-                                    :where
-                                    [?tx :seon.db/origin :substrate-seed]
-                                    [?s :seon.schema/key ?k ?tx]]})))
 
 (defn- kind-rows
   "Every row carrying at least one of `attr-ks`, pulled `[*]`, ordered
@@ -106,7 +91,7 @@
   {:malli/schema [:=> [:catn [::db :seon.db/db-val]]
                   [:vector ::kind-entry]]}
   [db]
-  (let [sub (substrate-kinds db)]
+  (let [sub (db/substrate-kinds db)]
     (->> (db/store-inventory {:seon.db/db db})
          (remove #(contains? sub (:seon.db/kind %)))
          (keep (fn [{:seon.db/keys [kind attrs]}]

@@ -288,7 +288,10 @@ artifact (the related-question salience gap IS the demo bar).
 
 | Smell | Where | Disposition |
 |---|---|---|
-| twin provenance query — `findings.cljs/substrate-kinds` duplicates store-inventory's derivation (`db.cljs` ~801; seon.db was outside the unit's fence) | findings.cljs / db.cljs | S refactor: store-inventory exposes the kind-set (or rows carry `:seon.db/substrate?`); findings consumes it — shared-shape rule |
+| twin provenance query — `findings.cljs/substrate-kinds` duplicates store-inventory's derivation | findings.cljs / db.cljs | **CLOSED with the data-browser unit (2026-06-12)** — `seon.db/bootstrap-row-ids` + `seon.db/substrate-kinds` are THE derivation; findings consumes them |
+| inspector SSE registry maps use bare keywords (`:id :res :view :opened-at :params`) — namespaced-keys rule violation across the registry | inspector.cljs | S rename unit, all five keys at once |
+| pre-existing agents' stored creation-turn eval results carry the OLD full inventory (`:seon.eval/result-edn` is history, not re-derived) — honest, but a demo on an old agent shows the old blob in its transcript | eval history | accept (history is history); demo agents should be freshly minted |
+| `/data` SSE push full-datom-scans per 100ms coalesced window (same cost class as `/agents` findings-data) — fine at current sizes | inspector.cljs | memoize on db-value identity if it shows in profiles |
 | **inspector findings pane is legacy bare-ns `:finding/*`** — dashboard tile reads "0 findings" while agents now SEE findings in context. DEMO-VISIBLE inconsistency | `web/inspector.cljs:117-137` | S, TONIGHT if time: point the pane at the same user-domain derivation |
 | `cap-result`-family helpers in ctx.cljs are near-triplets of the new `cap-kind` loud-truncation marker — wording drift risk (already bit a test draft) | ctx.cljs | S: one shared loud-truncate helper |
 | datahike-cljs rejects `clojure.string/starts-with?` as a datalog predicate (JVM datahike resolves it) — parity gap, confirmed live | datahike-cljs fork | register; fork/wire backlog with the DIS false-empty row |

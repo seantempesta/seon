@@ -928,7 +928,24 @@
            (ai-pane-fragment   agent-id snap)
            (html-pane-fragment agent-id snap)]
           (chat-bar-fragment agent-id)
-          [:script (html/raw page-script-js)]]]))))
+          [:div {:class (str "shrink-0 px-2 py-0.5 text-right text-[10px] "
+                             "font-mono text-text-500 bg-base-900 "
+                             "border-t border-base-800")}
+           "esc → chat"]
+          [:script (html/raw page-script-js)]
+          ;; Escape leaves debug for the chat view. Standalone tab →
+          ;; navigate to /agent/<id>; inside the consumer page's debug
+          ;; OVERLAY iframe → ask the parent to close it (the parent's
+          ;; own Esc handler can't fire while focus is in the iframe).
+          ;; Same one-keybinding pattern as the overlay script.
+          [:script (html/raw
+                     (str "document.addEventListener('keydown',function(e){"
+                          "if(e.key!=='Escape')return;"
+                          "if(window.self!==window.top){"
+                          "try{window.parent.postMessage('seon-debug-close','*');}"
+                          "catch(err){}}"
+                          "else{window.location='/agent/"
+                          agent-id "';}});"))]]]))))
 
 ;; ============================================================
 ;; The CONSUMER agent view — `/agent/<id>` (live-tiles PRD §1
@@ -1037,6 +1054,11 @@
     "document.addEventListener('click',function(e){"
     "var t=e.target.closest?e.target.closest('#seon-debug-toggle'):null;"
     "if(t){e.preventDefault();seonDebugOverlay();}});"
+    ;; The debug page posts 'seon-debug-close' when Esc is pressed
+    ;; WITH FOCUS INSIDE the overlay iframe (the parent's keydown
+    ;; can't see that) — same close path as the parent's own Esc.
+    "window.addEventListener('message',function(e){"
+    "if(e.data==='seon-debug-close'){seonDebugOverlay(false);}});"
     "document.addEventListener('keydown',function(e){"
     "if(e.key==='Escape'){seonDebugOverlay(false);return;}"
     "if(e.key==='`'){"
@@ -1157,7 +1179,11 @@
        [:h1 {:class "text-lg font-semibold tracking-tight"}
         (brand/page-title b "cluster")]
        [:p {:class "text-text-400 text-xs mt-0.5 font-mono"}
-        (::brand/tagline b)]]
+        (::brand/tagline b)]
+       [:a {:href "/data"
+            :class (str "inline-block mt-1 text-xs font-mono "
+                        "text-amber-500 hover:text-amber-300")}
+        "⛁ data browser →"]]
       [:div {:class "flex gap-2 ml-auto items-stretch"}
        (stat-cell "agents"   agent-count)
        (stat-cell "turns"    turn-count)
@@ -1258,6 +1284,240 @@
           (agents-dash-fragment)]]))))
 
 ;; ============================================================
+;; /data — the live data browser (task #28). Level 1: the kinds the
+;; cluster stored, with row counts. Level 2 (?kind=…): that kind's
+;; attrs + a paginated rows table (pull [*], keys sorted, rows by
+;; :db/id). DEFAULT shows post-bootstrap data only — provenance via
+;; `seon.db/bootstrap-row-ids`, the SAME per-row derivation
+;; `store-inventory` splits by (one mechanism, no name-lists).
+;; `?system=1` shows ALL rows (the demo move: the whole system is
+;; data). View state is the query string — a signal, never stored.
+;; Live: every commit re-morphs `#data-browser` over the same SSE
+;; pattern the /agents dash rides (`::data` pseudo-agent key).
+;; ============================================================
+
+(def ^:private data-page-size 50)
+
+(defn- query-param
+  "Pull one query-string value out of `req.url`. nil when absent."
+  [^js req k]
+  (try
+    (let [u (js/URL. (str "http://x" (.-url req)))]
+      (.get (.-searchParams u) k))
+    (catch :default _ nil)))
+
+(defn- data-params
+  "The /data browser's view params from the request URL."
+  [^js req]
+  (let [kind (some-> (query-param req "kind") not-empty keyword)
+        page (let [p (js/parseInt (or (query-param req "page") "0") 10)]
+               (if (js/Number.isNaN p) 0 (max 0 p)))]
+    {::data-kind    kind
+     ::data-page    page
+     ::data-system? (= "1" (query-param req "system"))}))
+
+(defn- data-qs
+  "Query string (\"\" or \"?…\") for a /data view-params map."
+  [{::keys [data-kind data-page data-system?]}]
+  (let [qs (cond-> []
+             data-kind        (conj (str "kind=" (js/encodeURIComponent
+                                                   (subs (str data-kind) 1))))
+             (pos? data-page) (conj (str "page=" data-page))
+             data-system?     (conj "system=1"))]
+    (if (seq qs) (str "?" (str/join "&" qs)) "")))
+
+(defn- data-url [params] (str "/data" (data-qs params)))
+
+(defn- data-attr?
+  "Counted attrs: namespaced, not datahike's own (`db`/`db.*`)."
+  [a]
+  (let [n (namespace a)]
+    (boolean (and n (not= n "db") (not (str/starts-with? n "db."))))))
+
+(defn- data-scan
+  "One pass powering the whole /data page:
+   `{::kinds {kind → #{eids}} ::attr-counts {kind → {attr → n}}}`.
+   Rows are post-bootstrap data rows by default (bootstrap rows and tx
+   provenance entities excluded — `seon.db/bootstrap-row-ids` is the
+   shared derivation); `system?` includes every row."
+  [db system?]
+  (let [bootstrap (if system? #{} (db/bootstrap-row-ids db))
+        tx-ids    (if system?
+                    #{}
+                    (into #{} (map first)
+                          (db/query {:seon.db/db db
+                                     :seon.db/query
+                                     '[:find ?tx :where [_ _ _ ?tx]]})))
+        pairs     (db/query {:seon.db/db db
+                             :seon.db/query '[:find ?e ?a :where [?e ?a _]]})]
+    (reduce (fn [acc [e a]]
+              (if (or (not (data-attr? a))
+                      (contains? bootstrap e)
+                      (contains? tx-ids e))
+                acc
+                (let [kind (keyword (namespace a))]
+                  (-> acc
+                      (update-in [::kinds kind] (fnil conj #{}) e)
+                      (update-in [::attr-counts kind a] (fnil inc 0))))))
+            {::kinds {} ::attr-counts {}}
+            pairs)))
+
+(defn- data-toggle-link
+  "The system-data toggle — same view, `system` query param flipped
+   (page reset: the row sets differ)."
+  [{::keys [data-system?] :as params}]
+  [:a {:href (data-url (assoc params ::data-page 0
+                              ::data-system? (not data-system?)))
+       :class (str "text-xs font-mono "
+                   (if data-system?
+                     "text-amber-400 hover:text-amber-300"
+                     "text-text-400 hover:text-text-200"))}
+   (if data-system?
+     "● system data shown — hide"
+     "○ show system data")])
+
+(defn- data-kind-index
+  "Level 1 — every stored kind with its row count, kind-name order."
+  [kinds params]
+  (if (empty? kinds)
+    [:div {:class "text-text-500 italic text-xs font-mono p-2"}
+     "no data rows yet — agents store rows here as they work"]
+    (into [:div {:class "flex flex-col"}]
+          (map (fn [[kind eids]]
+                 [:a {:href (data-url (assoc params ::data-kind kind
+                                             ::data-page 0))
+                      :class (str "flex items-baseline gap-2 px-2 py-1 "
+                                  "border-b border-base-800/60 "
+                                  "hover:bg-base-900 text-xs font-mono")}
+                  [:span {:class "text-amber-400"} (str "● " kind)]
+                  [:span {:class "ml-auto text-text-400 tabular-nums"}
+                   (str (count eids) (if (= 1 (count eids)) " row" " rows"))]]))
+          (sort-by (comp str key) kinds))))
+
+(defn- data-row-table
+  "The page's rows as one table: columns = :db/id + the union of the
+   page rows' attrs, keys sorted; cells pr-str'd, display-clipped (the
+   stored values are complete)."
+  [db eids]
+  (let [rows (mapv #(db/pull db '[*] %) eids)
+        cols (into [:db/id]
+                   (->> rows
+                        (mapcat keys)
+                        (remove #(= :db/id %))
+                        distinct
+                        (sort-by str)))]
+    [:div {:class "overflow-x-auto"}
+     [:table {:class "text-xs font-mono w-full"}
+      [:thead
+       (into [:tr {:class "text-left text-text-400 border-b border-base-700"}]
+             (map (fn [c] [:th {:class "pr-3 py-0.5 whitespace-nowrap font-normal"}
+                           (pr-str c)]))
+             cols)]
+      (into [:tbody]
+            (map (fn [row]
+                   (into [:tr {:class "border-b border-base-800/60 align-top"}]
+                         (map (fn [c]
+                                [:td {:class "pr-3 py-0.5 text-text-100 break-all"}
+                                 (if (contains? row c)
+                                   (truncate-val (get row c) 120)
+                                   "")]))
+                         cols)))
+            rows)]]))
+
+(defn- data-kind-detail
+  "Level 2 — one kind: its attrs with counts + the paginated rows
+   table. Rows ordered by :db/id ascending (insertion order,
+   deterministic for a given db value); explicit prev/next."
+  [db kind eids attr-counts params]
+  (let [sorted    (vec (sort eids))
+        total     (count sorted)
+        last-page (max 0 (quot (max 0 (dec total)) data-page-size))
+        page      (min (::data-page params) last-page)
+        start     (* page data-page-size)
+        page-eids (subvec sorted (min start total)
+                          (min (+ start data-page-size) total))]
+    [:div {:class "flex flex-col gap-2"}
+     [:div {:class "flex items-baseline gap-3 text-xs font-mono"}
+      [:a {:href (data-url (assoc params ::data-kind nil ::data-page 0))
+           :class "text-amber-500 hover:text-amber-300"} "← all kinds"]
+      [:span {:class "text-amber-400"} (str "● " kind)]
+      [:span {:class "text-text-400"}
+       (str total (if (= 1 total) " row" " rows"))]]
+     (when (seq attr-counts)
+       (into [:div {:class "flex flex-wrap gap-x-4 gap-y-0.5 text-xs font-mono text-text-400"}]
+             (map (fn [[a n]]
+                    [:span (pr-str a) " "
+                     [:span {:class "text-text-200 tabular-nums"} (str n)]]))
+             (sort-by (comp str key) attr-counts)))
+     (if (zero? total)
+       [:div {:class "text-text-500 italic text-xs font-mono"}
+        (str "no rows under " kind " in this view — retracted, or stored "
+             "by the bootstrap (toggle system data)")]
+       [:div {:class "flex flex-col gap-2"}
+        (data-row-table db page-eids)
+        [:div {:class "flex items-center gap-3 text-xs font-mono text-text-400"}
+         (if (pos? page)
+           [:a {:href (data-url (assoc params ::data-page (dec page)))
+                :class "text-amber-500 hover:text-amber-300"} "‹ prev"]
+           [:span {:class "text-text-600"} "‹ prev"])
+         [:span {:class "tabular-nums"}
+          (str "rows " (inc start) "–" (+ start (count page-eids))
+               " of " total)]
+         (if (< page last-page)
+           [:a {:href (data-url (assoc params ::data-page (inc page)))
+                :class "text-amber-500 hover:text-amber-300"} "next ›"]
+           [:span {:class "text-text-600"} "next ›"])]])]))
+
+(defn- data-browser-fragment
+  "The whole /data surface — ONE morph target (`#data-browser`),
+   derived 100% from the DB at render time."
+  [{::keys [data-kind data-system?] :as params}]
+  (let [db (deref db/*conn*)
+        {::keys [kinds attr-counts]} (data-scan db data-system?)]
+    [:div {:id "data-browser" :class "flex flex-col gap-3"}
+     [:div {:class "flex items-baseline gap-4 flex-wrap"}
+      [:h1 {:class "text-sm font-mono font-semibold text-text-100"}
+       "data"]
+      [:span {:class "text-xs font-mono text-text-500"}
+       (if data-system?
+         "every row in the store — the whole system is data"
+         "what this cluster stored after bootstrap")]
+      [:div {:class "ml-auto flex items-baseline gap-4"}
+       (data-toggle-link params)
+       [:a {:href "/agents"
+            :class "text-xs font-mono text-amber-500 hover:text-amber-300"}
+        "← all agents"]]]
+     (if data-kind
+       (data-kind-detail db data-kind
+                         (get kinds data-kind #{})
+                         (get attr-counts data-kind {})
+                         params)
+       (data-kind-index kinds params))]))
+
+(defn- data-page
+  "Full page for GET /data — same shell pattern as the /agents index;
+   the SSE stream carries this view's params so every commit re-morphs
+   the exact view the tab is on."
+  [params]
+  (let [b (brand/info)]
+    (str
+      "<!DOCTYPE html>"
+      (html/->string
+        [:html {:lang "en" :data-theme (::brand/theme b)}
+         [:head
+          [:meta {:charset "utf-8"}]
+          [:meta {:name "viewport" :content "width=device-width, initial-scale=1.0"}]
+          [:title (brand/page-title b "data")]
+          [:link {:rel "stylesheet" :href "/css/output.css"}]
+          (brand-css-style)
+          [:script {:type "module" :src "/js/datastar.js"}]]
+         [:body {:class "min-h-screen bg-base-950 text-text-50 font-sans p-4"}
+          [:div {:data-init (str "@get('/data/sse" (data-qs params) "')")
+                 :data-on:online__window
+                 (str "@get('/data/sse" (data-qs params) "')")}]
+          (data-browser-fragment params)]]))))
+
+;; ============================================================
 ;; Routing — called from serve.cljs router via `route?` + `handle!`.
 ;; ============================================================
 
@@ -1306,6 +1566,8 @@
   [path]
   (or (= path "/agents")
       (= path "/agents/sse")
+      (= path "/data")
+      (= path "/data/sse")
       (and (str/starts-with? path "/agent/")
            (> (count path) (count "/agent/")))))
 
@@ -1380,20 +1642,39 @@
     (catch :default e
       (log/error-console! "seon.web.inspector" "push-index! threw" e))))
 
+(defn- push-data!
+  "Re-render and write the `#data-browser` morph fragment to every
+   connection watching /data. Each conn carries ITS view's params
+   (kind/page/system) — identical param sets render once. Best-effort
+   per-connection."
+  []
+  (try
+    (doseq [[params cs] (group-by :params (get @!sse-by-agent ::data))]
+      (let [payload (patch-fragment (data-browser-fragment params))]
+        (doseq [{:keys [res]} cs]
+          (try (.write res payload)
+               (catch :default e
+                 (log/error-console! "seon.web.inspector"
+                                     "data write failed" e))))))
+    (catch :default e
+      (log/error-console! "seon.web.inspector" "push-data! threw" e))))
+
 (defonce ^:private !pending (atom {}))
 
 (defn- schedule-push! [agent-id]
   ;; First arrival in the window starts a 100ms trailing timer. Later
   ;; arrivals inside the window just keep `!pending` set; the timer's
-  ;; callback drains it. `::index` is the agents-index pseudo-agent.
+  ;; callback drains it. `::index` / `::data` are the agents-index and
+  ;; data-browser pseudo-agents.
   (let [was-pending? (get @!pending agent-id)]
     (swap! !pending assoc agent-id true)
     (when-not was-pending?
       (js/setTimeout
         (fn []
           (swap! !pending dissoc agent-id)
-          (if (= ::index agent-id)
-            (push-index!)
+          (case agent-id
+            ::index (push-index!)
+            ::data  (push-data!)
             (push-agent! agent-id)))
         100))))
 
@@ -1420,12 +1701,13 @@
         seed?    (= :substrate-seed (:seon.db/origin tx-ent))
         watching (watching-agents)
         targets  (if (or (nil? scope-id) seed?)
-                   (disj watching ::index)
+                   (disj watching ::index ::data)
                    (filter #(= % scope-id) watching))
-        ;; The agents-index dashboard watches EVERY commit — its
-        ;; numbers (turns, datoms, findings) tick on any agent's work.
+        ;; The agents-index dashboard AND the /data browser watch
+        ;; EVERY commit — their numbers/rows tick on any agent's work.
         targets  (cond-> (set targets)
-                   (contains? watching ::index) (conj ::index))]
+                   (contains? watching ::index) (conj ::index)
+                   (contains? watching ::data)  (conj ::data))]
     (doseq [aid targets]
       (schedule-push! aid))))
 
@@ -1505,6 +1787,28 @@
       (catch :default e
         (log/error-console! "seon.web.inspector" "index initial render failed" e)))))
 
+(defn- open-data-sse!
+  "SSE stream for the /data browser. The connection pins ITS view's
+   query params (kind/page/system) — `push-data!` re-renders exactly
+   that view on every commit. Registered under the `::data`
+   pseudo-agent key in the same registry."
+  [^js req ^js res]
+  (.writeHead res 200 #js {"Content-Type"      "text/event-stream"
+                           "Cache-Control"     "no-cache"
+                           "Connection"        "keep-alive"
+                           "X-Accel-Buffering" "no"})
+  (.write res ": connected\n\n")
+  (let [params (data-params req)
+        conn   {:id (random-uuid) :res res :params params
+                :opened-at (js/Date.)}]
+    (add-conn! ::data conn)
+    (.on req "close" (fn [] (remove-conn! ::data (:id conn))))
+    (try
+      (.write res (patch-fragment (data-browser-fragment params)))
+      (catch :default e
+        (log/error-console! "seon.web.inspector"
+                            "data initial render failed" e)))))
+
 (defn handle!
   "Inspector route dispatcher. Returns true if handled.
 
@@ -1521,6 +1825,14 @@
 
     (= path "/agents/sse")
     (do (open-index-sse! req res) true)
+
+    (= path "/data")
+    (do (write-status! res 200 "text/html; charset=utf-8"
+                       (data-page (data-params req)))
+        true)
+
+    (= path "/data/sse")
+    (do (open-data-sse! req res) true)
 
     (str/starts-with? path "/agent/")
     (let [[agent-id rest-path] (parse-agent-id path)]

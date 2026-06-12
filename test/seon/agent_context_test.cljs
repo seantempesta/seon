@@ -434,7 +434,11 @@
               ;; the four standing teachings render in <system> —
               ;; sentinel per teaching (plain substring count; JS
               ;; regexes have no \\Q quoting).
-              (doseq [sentinel ["store-inventory"
+              ;; ("store-inventory" itself now legitimately appears
+              ;; twice: the consult call AND the taught
+              ;; {:seon.db/system? true} full-inventory form.)
+              (doseq [sentinel ["Consult stored knowledge FIRST"
+                                "(seon.db/store-inventory {:seon.db/system? true})"
                                 "Store what you verify, without being asked"
                                 "ONE reply per question"
                                 "Your code is my.*"]]
@@ -533,6 +537,68 @@
         (.catch (fn [e]
                   (swap! schema/*schemas dissoc :zzinv.domain/note)
                   (is false (str "threw — " e)) (done))))))
+
+(deftest store-inventory-splits-rows-by-bootstrap-provenance
+  ;; Task #28 — the per-ROW origin split, never per-kind-name: a row
+  ;; is BOOTSTRAP iff its identity datom landed under a
+  ;; `:substrate-seed` tx (`seon.db/bootstrap-row-ids`, THE shared
+  ;; derivation). The default inventory shows only post-bootstrap
+  ;; data; `{:seon.db/system? true}` shows everything. The fixture is
+  ;; exactly the discriminating world: boot-indexed `:seon.fn` rows
+  ;; (bootstrap) AND the agent-authored greet fn row (same kind, data).
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  inv  (db/store-inventory {:seon.db/db db})
+                  sys  (db/store-inventory {:seon.db/db db
+                                            :seon.db/system? true})
+                  row  (fn [v k]
+                         (some #(when (= k (:seon.db/kind %)) %) v))
+                  fn-default (get-in (row inv :seon.fn)
+                                     [:seon.db/attrs :seon.fn/sym])
+                  fn-system  (get-in (row sys :seon.fn)
+                                     [:seon.db/attrs :seon.fn/sym])]
+              (is (= 1 fn-default)
+                  "PER-ROW: only the agent-authored greet row counts by
+                   default — the boot index's :seon.fn rows are
+                   bootstrap, the kind NAME decides nothing")
+              (is (> fn-system 1)
+                  "system view counts every row, boot index included")
+              (is (nil? (row inv :my.kb.system))
+                  "boot-seeded :my.kb.system rows are bootstrap — the
+                   kind is absent by default DESPITE the my.* spelling
+                   (provenance, never a name-list)")
+              (is (some? (row sys :my.kb.system))
+                  "…and visible in the system view")
+              (is (nil? (row inv :seon.schema))
+                  "the boot schema index is bootstrap")
+              (is (nil? (row inv :seon.db))
+                  "tx provenance entities are bookkeeping, not data rows")
+              (is (some? (row sys :seon.db))
+                  "…but the system view shows even those")
+              ;; the shared derivation, consumed directly
+              (let [boot  (db/bootstrap-row-ids db)
+                    kb    (ffirst (db/query
+                                    {:seon.db/db db
+                                     :seon.db/query
+                                     '[:find ?e :where
+                                       [?e :my.kb.system/id _]]}))
+                    greet (ffirst (db/query
+                                    {:seon.db/db db
+                                     :seon.db/query
+                                     '[:find ?e :where
+                                       [?e :seon.fn/sym
+                                        "my.agent.ctx-260610/greet"]]}))]
+                (is (contains? boot kb)
+                    "the seeded kb.system row classifies bootstrap")
+                (is (not (contains? boot greet))
+                    "the agent-authored fn row classifies data"))
+              (is (contains? (db/substrate-kinds db) :seon.fn)
+                  ":seon.fn was registered by the boot index →
+                   substrate kind (the ordering/findings filter)"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
 ;; (l) namespaces-section in the assembled context — full source for the
