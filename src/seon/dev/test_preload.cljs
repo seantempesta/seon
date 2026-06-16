@@ -46,6 +46,14 @@
     ;; seon.agent.search (2026-06-09): the exemplar npm-package wrapper —
     ;; ripgrep envelope contract, seon.agent.fs allowlist gating, truncation.
     [seon.agent.search-test]
+    ;; LLM adapter wire-contract tests (2026-06-16): the OpenAI-compatible
+    ;; + Anthropic clients. Required here so their ns objects join the
+    ;; compiled build graph (goog-reachable) and seon.test.runner can drive
+    ;; them — a REPL-only require leaves the munged ns object absent, which
+    ;; makes both seon.test.runner/vars-in-ns AND cljs.test/run-tests fail
+    ;; to find the deftest vars.
+    [seon.ai.openai-compat-test]
+    [seon.ai.anthropic-test]
     ;; my.kb scaffold (V3-B, 2026-06-10): provenance shapes registered
     ;; once + my.kb.system seed/append/read contract (V4-0).
     ;; Required here so the deftest-vars roster carries my.kb-test and

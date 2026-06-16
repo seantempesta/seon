@@ -78,11 +78,20 @@
   ;; Pin provider=deepseek: clear the ambient SEON_AI_PROVIDER (this pod may
   ;; be deployed :openai-compat) + fresh empty row → provider defaults to
   ;; :deepseek, so the deepseek-specific :thinking toggle is deterministic.
+  ;;
+  ;; NESTING: with-conn OUTERMOST, with-env INSIDE — matches the working
+  ;; base-url-strip-reconciliation pattern. with-env is a forward-declared
+  ;; var (defined below); when it heads the `->` thread the shadow-cljs
+  ;; analyzer can't see its promise return and wraps the call in an
+  ;; `(await (async-IIFE))`, which unwraps the promise to a plain value
+  ;; BEFORE the `.then` — so `<value>.then` throws and the test wedges
+  ;; (done never fires). with-conn is defined above the tests, so heading
+  ;; the thread with it compiles to a clean `with_conn(...).then(...)`.
   (async done
-    (-> (with-env {"SEON_AI_PROVIDER" nil}
-          (fn []
-            (with-conn
-              (fn [_conn]
+    (-> (with-conn
+          (fn [_conn]
+            (with-env {"SEON_AI_PROVIDER" nil}
+              (fn []
                 (let [params (openai/request-params {:seon.ai/ctx           "the ctx"
                                                      :seon.ai/system-prompt "sys"})]
                   (is (= {:model          "deepseek-v4-pro"
@@ -104,11 +113,13 @@
 (deftest config-row-drives-params-per-call
   ;; Pin provider=deepseek (see request-params-default-shape) so the
   ;; deepseek :thinking toggle is asserted regardless of this pod's deploy.
+  ;; NESTING: with-conn OUTERMOST, with-env INSIDE (see
+  ;; request-params-default-shape for why with-env must not head the thread).
   (async done
-    (-> (with-env {"SEON_AI_PROVIDER" nil}
-          (fn []
-           (with-conn
-            (fn [_conn]
+    (-> (with-conn
+          (fn [_conn]
+           (with-env {"SEON_AI_PROVIDER" nil}
+            (fn []
               ;; Row absent → thinking disabled.
               (is (= {:type "disabled"}
                      (:thinking (openai/request-params {:seon.ai/ctx "hi"}))))
