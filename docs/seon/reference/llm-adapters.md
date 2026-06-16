@@ -54,6 +54,7 @@ default.
 | `SEON_AI_TEMPERATURE` | `:seon.ai/temperature` | double | openai-compat only | **ignored by anthropic** (sampling params 400 on Opus 4.7+/Fable) |
 | `SEON_AI_BASE_URL` | `:seon.ai/base-url` | string | openai-compat | the `/v1` ROOT (preferred) — see baseURL |
 | `SEON_AI_API_KEY_ENV` | `:seon.ai/api-key-env` | string | all | NAME of the env var holding the key |
+| `SEON_AI_EXTRA_BODY` | `:seon.ai/extra-body-edn` | EDN-map string | all | extra request fields for the agent loop — see Extra request fields |
 | `SEON_AI_API_KEY` | — (never stored) | string | all | direct key fallback |
 | `DEEPSEEK_API_KEY` | — (never stored) | string | deepseek | shipped deepseek default key |
 | `ANTHROPIC_API_KEY` | — (never stored) | string | anthropic | the anthropic key |
@@ -134,17 +135,26 @@ export SEON_AI_API_KEY=EMPTY                          # or whatever the server r
 ```
 
 **Toggling Qwen's thinking mode** is a `chat_template_kwargs` body field, which
-Seon passes through generically via `:extra-body` (NOT a Seon-modeled knob).
-Disable thinking by setting the config row once:
+Seon passes through generically via extra-body (NOT a Seon-modeled knob). For
+the **agent turn loop** (which builds the adapter with no per-call opts), the
+data-only door is the env var / config row — an EDN-map STRING:
+
+```bash
+export SEON_AI_EXTRA_BODY='{:chat_template_kwargs {:enable_thinking false}}'
+```
+
+equivalently, transact the row once (note: the stored attr is the EDN string
+`:seon.ai/extra-body-edn`, NOT a map — datahike can't store a raw map):
 
 ```clojure
 (seon.db/transact!
   {:seon.db/tx-data
    [{:seon.ai/id "config"
-     :seon.ai/extra-body {:chat_template_kwargs {:enable_thinking false}}}]})
+     :seon.ai/extra-body-edn "{:chat_template_kwargs {:enable_thinking false}}"}]})
 ```
 
-or per call: `{:seon.ai/extra-body {:chat_template_kwargs {:enable_thinking false}}}`.
+For a **direct (non-loop) call**, pass the decoded map as a per-call opt
+(which wins over the row): `{:seon.ai/extra-body {:chat_template_kwargs {:enable_thinking false}}}`.
 
 **Reasoning separation depends on the server.** With `--reasoning-parser qwen3`
 (a dedicated server), Qwen's reasoning tokens arrive in a separate
@@ -183,7 +193,18 @@ emit-and-eval loop is unaffected when you pass no tools.
 Any map under `:seon.ai/extra-body` is **merged into the request params (the
 1st arg)** — openai-node passes unknown top-level params through to the wire
 verbatim. Use it for per-server knobs Seon doesn't model (`chat_template_kwargs`,
-custom sampling, routing hints). Per-call opt or config row.
+custom sampling, routing hints).
+
+Two ways to set it:
+
+- **Per-call opt** (`:seon.ai/extra-body <map>`) — wins; for direct `complete`
+  calls. Unreachable from the agent turn loop (it builds the adapter with no
+  opts).
+- **Config row / env** — the data-only door for the loop. Store the EDN-map
+  STRING under `:seon.ai/extra-body-edn` (env `SEON_AI_EXTRA_BODY`); a raw map
+  is not datahike-storable, so the row holds the string and the adapter decodes
+  it (`seon.ai/config-extra-body`) per call. `:seon.ai/tools` / `:seon.ai/tool-choice`
+  remain per-call-opt only.
 
 > Do **not** use the SDK's 2nd-arg request-options `{body: …}` for this — in
 > openai-node `options.body` **replaces** the request body (it does not merge),

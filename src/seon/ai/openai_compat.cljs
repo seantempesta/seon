@@ -208,11 +208,13 @@
 
 (defn- request-extra-body
   "The generic extra request fields for this call — `:seon.ai/extra-body`
-   from the request opt (winning) or the config row. nil when neither
-   set (no 2nd-arg body needed)."
+   from the request opt (winning), else the config row's data-only door
+   (`seon.ai/config-extra-body` — env SEON_AI_EXTRA_BODY / the row's
+   ::extra-body-edn, the only path that reaches the agent turn loop). nil
+   when neither set (nothing to merge)."
   [request]
   (or (:seon.ai/extra-body request)
-      (:seon.ai/extra-body (ai/current))))
+      (not-empty (ai/config-extra-body))))
 
 (def ^:private known-completion-keys
   "Top-level ChatCompletion keys the adapter consumes directly — the

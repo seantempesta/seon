@@ -33,6 +33,7 @@
    provider-agnostic system-prompt resolution — both providers send
    the same store-resident soul."
   (:require [clojure.string :as str]
+            [cljs.reader :as reader]
             [my.soul :as soul]
             [seon.db :as db]
             [seon.log :as log]
@@ -118,6 +119,16 @@
 ;; as the env var's string shape; [[thinking-mode]] is the parse.
 (schema/register! ::thinking [:string {:min 1}])
 (schema/register! ::timeout-ms :int)
+;; The :seon.ai/extra-body map (generic extra request fields, e.g. Qwen's
+;; chat_template_kwargs) is a [:map] — datahike can't bridge it. The config
+;; row stores its EDN STRING form under ::extra-body-edn (env:
+;; SEON_AI_EXTRA_BODY, an EDN map like "{:chat_template_kwargs
+;; {:enable_thinking false}}"); [[config-extra-body]] reads it back into the
+;; map adapters merge. This is the data-only door for the agent turn loop —
+;; the loop builds the adapter with no opts, so the request-opt path is
+;; unreachable there (task #30, 2026-06-16). ::tools / ::tool-choice stay
+;; request-opt-only (inherently per-call; no persisted form yet).
+(schema/register! ::extra-body-edn [:string {:min 1}])
 
 ;; The config attrs a row (or the env) may carry — shared shape for
 ;; [[sync-tx-data]]'s two inputs and the row read.
@@ -131,9 +142,7 @@
    [::timeout-ms {:optional true} ::timeout-ms]
    [::base-url    {:optional true} ::base-url]
    [::api-key-env {:optional true} ::api-key-env]
-   [::tools       {:optional true} ::tools]
-   [::tool-choice {:optional true} ::tool-choice]
-   [::extra-body  {:optional true} ::extra-body]])
+   [::extra-body-edn {:optional true} ::extra-body-edn]])
 
 (schema/register! ::config
   [:map {:seon.db/entity true}
@@ -146,9 +155,7 @@
    [::timeout-ms  {:optional true} ::timeout-ms]
    [::base-url    {:optional true} ::base-url]
    [::api-key-env {:optional true} ::api-key-env]
-   [::tools       {:optional true} ::tools]
-   [::tool-choice {:optional true} ::tool-choice]
-   [::extra-body  {:optional true} ::extra-body]])
+   [::extra-body-edn {:optional true} ::extra-body-edn]])
 
 (schema/register! ::synced? :boolean)
 (schema/register! ::sync-request
@@ -160,7 +167,7 @@
 ;; The attr order is the sync + row-read iteration order.
 (def ^:private config-attrs
   [::provider ::model ::temperature ::max-tokens ::thinking ::timeout-ms
-   ::base-url ::api-key-env])
+   ::base-url ::api-key-env ::extra-body-edn])
 
 ;; ============================================================
 ;; Env reads — SEON_AI_*, parsed to the attr's concrete type.
@@ -189,6 +196,15 @@
     "openai-compat" :openai-compat
     nil))
 
+(defn- parse-extra-body-edn
+  "Validate SEON_AI_EXTRA_BODY: it must read as an EDN MAP. Returns the
+   raw string (stored verbatim — [[config-extra-body]] re-reads it) when
+   it parses to a map, else nil (env-row logs LOUDLY and skips it)."
+  [s]
+  (try
+    (when (map? (reader/read-string s)) s)
+    (catch :default _ nil)))
+
 ;; attr → [env-var-name parse-fn]. parse-fn returns nil on an
 ;; unparseable value — [[env-row]] logs LOUDLY and skips it (a typo'd
 ;; SEON_AI_TEMPERATURE must not take the boot down, but must never be
@@ -201,7 +217,8 @@
    ::thinking    ["SEON_AI_THINKING"    identity]
    ::timeout-ms  ["SEON_AI_TIMEOUT_MS"  parse-int*]
    ::base-url    ["SEON_AI_BASE_URL"    identity]
-   ::api-key-env ["SEON_AI_API_KEY_ENV" identity]})
+   ::api-key-env ["SEON_AI_API_KEY_ENV" identity]
+   ::extra-body-edn ["SEON_AI_EXTRA_BODY" parse-extra-body-edn]})
 
 (defn env-row
   "The LLM-config attrs present in the environment — `::row`-shaped,
@@ -256,6 +273,19 @@
                (catch :default _ nil))
           {}))
   ([db] (or (row db) {})))
+
+(defn config-extra-body
+  "The `:seon.ai/extra-body` map from the config row's `::extra-body-edn`
+   (env SEON_AI_EXTRA_BODY) — the DATA-ONLY door for the agent turn loop,
+   which builds the adapter with no request opts. `{}` when unset or
+   unreadable (a direct transact of a non-map / malformed EDN is swallowed
+   here, not surfaced as a crash). Adapters merge a non-empty result into
+   the wire body; a per-call `:seon.ai/extra-body` opt still wins."
+  {:malli/schema [:=> [:cat] ::extra-body]}
+  []
+  (let [v (try (some-> (::extra-body-edn (current)) reader/read-string)
+               (catch :default _ nil))]
+    (if (map? v) v {})))
 
 (schema/register! ::thinking-value
   [:or :boolean [:string {:min 1}]])

@@ -52,7 +52,8 @@
                                          [::ai/id ::ai/provider ::ai/model
                                           ::ai/temperature ::ai/max-tokens
                                           ::ai/thinking ::ai/timeout-ms
-                                          ::ai/base-url ::ai/api-key-env])
+                                          ::ai/base-url ::ai/api-key-env
+                                          ::ai/extra-body-edn])
                                        (db/tx-meta-datahike-schema))})
                      (.then (fn [_] conn))))))))
 
@@ -65,73 +66,86 @@
                  (-> (js/Promise.resolve (body conn))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
 
+;; Forward ref — with-env is defined with the other env/fetch helpers
+;; below, but the provider-pinned pure-shape tests above it use it.
+(declare with-env)
+
 ;; ============================================================
 ;; Pure request-params shape.
 ;; ============================================================
 
 (deftest request-params-default-shape
+  ;; Pin provider=deepseek: clear the ambient SEON_AI_PROVIDER (this pod may
+  ;; be deployed :openai-compat) + fresh empty row → provider defaults to
+  ;; :deepseek, so the deepseek-specific :thinking toggle is deterministic.
   (async done
-    (-> (with-conn
-          (fn [_conn]
-            (let [params (openai/request-params {:seon.ai/ctx           "the ctx"
-                                                 :seon.ai/system-prompt "sys"})]
-              (is (= {:model          "deepseek-v4-pro"
-                      :messages       [{:role "system" :content "sys"}
-                                       {:role "user"   :content "the ctx"}]
-                      :temperature    0.7
-                      :max_tokens     4096
-                      :stream_options {:include_usage true}
-                      :thinking       {:type "disabled"}}
-                     params)
-                  (str "no env, no row → the pre-SDK body shape PLUS "
-                       ":stream_options, and NO :stream key (the SDK owns "
-                       "streaming)"))
-              (is (not (contains? params :stream))
-                  "no manual :stream flag — the SDK sets it"))))
+    (-> (with-env {"SEON_AI_PROVIDER" nil}
+          (fn []
+            (with-conn
+              (fn [_conn]
+                (let [params (openai/request-params {:seon.ai/ctx           "the ctx"
+                                                     :seon.ai/system-prompt "sys"})]
+                  (is (= {:model          "deepseek-v4-pro"
+                          :messages       [{:role "system" :content "sys"}
+                                           {:role "user"   :content "the ctx"}]
+                          :temperature    0.7
+                          :max_tokens     4096
+                          :stream_options {:include_usage true}
+                          :thinking       {:type "disabled"}}
+                         params)
+                      (str "no env, no row → the pre-SDK body shape PLUS "
+                           ":stream_options, and NO :stream key (the SDK owns "
+                           "streaming)"))
+                  (is (not (contains? params :stream))
+                      "no manual :stream flag — the SDK sets it"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 (deftest config-row-drives-params-per-call
+  ;; Pin provider=deepseek (see request-params-default-shape) so the
+  ;; deepseek :thinking toggle is asserted regardless of this pod's deploy.
   (async done
-    (-> (with-conn
-          (fn [_conn]
-            ;; Row absent → thinking disabled.
-            (is (= {:type "disabled"}
-                   (:thinking (openai/request-params {:seon.ai/ctx "hi"}))))
-            (-> (db/transact!
-                  {:seon.db/tx-data [{::ai/id "config" ::ai/thinking "true"}]})
-                (.then (fn [{ok? :seon.db/ok?}]
-                         (is (true? ok?))
-                         (let [p (openai/request-params {:seon.ai/ctx "hi"})]
-                           (is (= {:type "enabled"} (:thinking p)))
-                           (is (not (contains? p :reasoning_effort))))
-                         (db/transact!
-                           {:seon.db/tx-data [{::ai/id "config" ::ai/thinking "high"}]})))
-                (.then (fn [_]
-                         (let [p (openai/request-params {:seon.ai/ctx "hi"})]
-                           (is (= {:type "enabled"} (:thinking p)))
-                           (is (= "high" (:reasoning_effort p))))
-                         (db/transact!
-                           {:seon.db/tx-data [{::ai/id          "config"
-                                               ::ai/thinking    "false"
-                                               ::ai/model       "deepseek-chat"
-                                               ::ai/temperature 0.2
-                                               ::ai/max-tokens  99}]})))
-                (.then (fn [_]
-                         (let [p (openai/request-params {:seon.ai/ctx "hi"})]
-                           (is (= {:type "disabled"} (:thinking p)))
-                           (is (= "deepseek-chat" (:model p)))
-                           (is (= 0.2 (:temperature p)))
-                           (is (= 99 (:max_tokens p))))
-                         ;; Explicit request opts WIN over the row.
-                         (let [p (openai/request-params
-                                   {:seon.ai/ctx         "x"
-                                    :seon.ai/model       "deepseek-v4-pro"
-                                    :seon.ai/temperature 0.9
-                                    :seon.ai/max-tokens  7})]
-                           (is (= "deepseek-v4-pro" (:model p)))
-                           (is (= 0.9 (:temperature p)))
-                           (is (= 7 (:max_tokens p)))))))))
+    (-> (with-env {"SEON_AI_PROVIDER" nil}
+          (fn []
+           (with-conn
+            (fn [_conn]
+              ;; Row absent → thinking disabled.
+              (is (= {:type "disabled"}
+                     (:thinking (openai/request-params {:seon.ai/ctx "hi"}))))
+              (-> (db/transact!
+                    {:seon.db/tx-data [{::ai/id "config" ::ai/thinking "true"}]})
+                  (.then (fn [{ok? :seon.db/ok?}]
+                           (is (true? ok?))
+                           (let [p (openai/request-params {:seon.ai/ctx "hi"})]
+                             (is (= {:type "enabled"} (:thinking p)))
+                             (is (not (contains? p :reasoning_effort))))
+                           (db/transact!
+                             {:seon.db/tx-data [{::ai/id "config" ::ai/thinking "high"}]})))
+                  (.then (fn [_]
+                           (let [p (openai/request-params {:seon.ai/ctx "hi"})]
+                             (is (= {:type "enabled"} (:thinking p)))
+                             (is (= "high" (:reasoning_effort p))))
+                           (db/transact!
+                             {:seon.db/tx-data [{::ai/id          "config"
+                                                 ::ai/thinking    "false"
+                                                 ::ai/model       "deepseek-chat"
+                                                 ::ai/temperature 0.2
+                                                 ::ai/max-tokens  99}]})))
+                  (.then (fn [_]
+                           (let [p (openai/request-params {:seon.ai/ctx "hi"})]
+                             (is (= {:type "disabled"} (:thinking p)))
+                             (is (= "deepseek-chat" (:model p)))
+                             (is (= 0.2 (:temperature p)))
+                             (is (= 99 (:max_tokens p))))
+                           ;; Explicit request opts WIN over the row.
+                           (let [p (openai/request-params
+                                     {:seon.ai/ctx         "x"
+                                      :seon.ai/model       "deepseek-v4-pro"
+                                      :seon.ai/temperature 0.9
+                                      :seon.ai/max-tokens  7})]
+                             (is (= "deepseek-v4-pro" (:model p)))
+                             (is (= 0.9 (:temperature p)))
+                             (is (= 7 (:max_tokens p)))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -259,8 +273,12 @@
 (deftest happy-path-streams-text-and-usage
   (async done
     (let [captured (atom nil)]
-      (-> (with-stubbed (streaming-fetch captured (sse-completion))
-            #(openai/complete {:seon.ai/ctx "hi" :seon.ai/system-prompt "sys"}))
+      ;; Fresh empty row (with-conn) so the live pod's :openai-compat config
+      ;; row doesn't override the stubbed :deepseek key path / endpoint.
+      (-> (with-conn
+            (fn [_conn]
+              (with-stubbed (streaming-fetch captured (sse-completion))
+                #(openai/complete {:seon.ai/ctx "hi" :seon.ai/system-prompt "sys"}))))
           (.then
             (fn [{:seon.ai/keys [text usage error] :as resp}]
               (is (nil? error))
@@ -353,6 +371,38 @@
                 ;; survive alongside the merged field.
                 (is (some? (:model body)) "model survives the extra-body merge")
                 (is (seq (:messages body)) "messages survive the extra-body merge"))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest extra-body-config-row-reaches-the-loop
+  ;; The DATA-ONLY door (task #30): the agent turn loop builds the adapter
+  ;; with NO request opts, so :extra-body must flow from the config row.
+  ;; A row carrying ::extra-body-edn (env SEON_AI_EXTRA_BODY) is decoded by
+  ;; ai/config-extra-body and merged into the wire body — proving the loop
+  ;; (no per-call opt) can suppress Qwen's <think> via enable_thinking.
+  (async done
+    (let [captured (atom nil)]
+      (-> (with-conn
+            (fn [_conn]
+              (-> (db/transact!
+                    {:seon.db/tx-data
+                     [{:seon.ai/id "config"
+                       :seon.ai/extra-body-edn
+                       "{:chat_template_kwargs {:enable_thinking false}}"}]})
+                  (.then
+                    (fn [{ok? :seon.db/ok?}]
+                      (is (true? ok?) "::extra-body-edn is a storable string attr")
+                      ;; NO :seon.ai/extra-body opt — only the row.
+                      (with-stubbed (streaming-fetch captured (sse-completion))
+                        #(openai/complete {:seon.ai/ctx "hi"})))))))
+          (.then
+            (fn [{:seon.ai/keys [error]}]
+              (is (nil? error))
+              (let [body (:body @captured)]
+                (is (= {:enable_thinking false} (:chat_template_kwargs body))
+                    "config-row ::extra-body-edn decodes + reaches the wire with no per-call opt")
+                (is (some? (:model body)) "model survives")
+                (is (seq (:messages body)) "messages survive"))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
