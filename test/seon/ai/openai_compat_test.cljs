@@ -152,7 +152,10 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest extra-body-is-not-inlined-into-params
+(deftest extra-body-not-in-request-params-output
+  ;; request-params builds ONLY the typed wire body; :extra-body is
+  ;; merged in by `complete` (see extra-body-reaches-the-wire), so it is
+  ;; absent from request-params' own output.
   (async done
     (-> (with-conn
           (fn [_conn]
@@ -160,9 +163,9 @@
                       {:seon.ai/ctx        "hi"
                        :seon.ai/extra-body {:chat_template_kwargs {:enable_thinking false}}})]
               (is (not (contains? p :extra-body))
-                  ":extra-body is the SEPARATE 2nd-arg body, never in params")
+                  ":seon.ai/extra-body is not echoed as a wire key")
               (is (not (contains? p :chat_template_kwargs))
-                  "… and its contents are NOT inlined into params either"))))
+                  "request-params does not itself inline extra-body (complete does)"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -339,9 +342,17 @@
           (.then
             (fn [{:seon.ai/keys [error]}]
               (is (nil? error))
-              (is (= {:enable_thinking false}
-                     (-> @captured :body :chat_template_kwargs))
-                  "the 2nd-arg {:body extra} merges into the request body on the wire")))
+              (let [body (:body @captured)]
+                (is (= {:enable_thinking false}
+                       (:chat_template_kwargs body))
+                    ":extra-body is merged INTO the request params (1st arg), reaching the wire body verbatim")
+                ;; Regression guard: extra-body must NOT clobber the body.
+                ;; Using the SDK's 2nd-arg {:body …} REPLACED the whole
+                ;; payload, dropping model/messages → 400 on every
+                ;; extra-body call (verified live). model + messages MUST
+                ;; survive alongside the merged field.
+                (is (some? (:model body)) "model survives the extra-body merge")
+                (is (seq (:messages body)) "messages survive the extra-body merge"))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 

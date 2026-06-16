@@ -173,8 +173,8 @@
    bare keys (:model, :messages, :thinking, …) are the OpenAI/DeepSeek
    API's wire format — a third-party boundary, deliberately
    un-namespaced. NOTE: the `:seon.ai/extra-body` map is NOT inlined
-   here — it is passed SEPARATELY to the SDK's 2nd-arg request-options
-   `{:body …}` (see [[complete]]).
+   here — [[complete]] merges it into these params (the SDK's 2nd-arg
+   `:body` would REPLACE the body, dropping model/messages).
 
    Reads the `:seon.ai/config` row PER CALL (`seon.ai/current`);
    explicit request opts win over the row, the row wins over the
@@ -362,14 +362,17 @@
       :else
       (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
             ^js client (make-client url key ms)
-            params  (clj->js (request-params request))
             extra   (request-extra-body request)
-            opts    (when (seq extra) #js{:body (clj->js extra)})
+            ;; :extra-body is MERGED into the request PARAMS (1st arg).
+            ;; openai-node passes unknown top-level params through
+            ;; verbatim. The 2nd-arg RequestOptions :body REPLACES the
+            ;; body (does NOT merge) — using it dropped model/messages
+            ;; and 400'd every extra-body call (verified live).
+            params  (clj->js (cond-> (request-params request)
+                               (seq extra) (merge extra)))
             ^js completions (.. client -chat -completions)]
         (try
-          (let [^js stream (if opts
-                             (.stream completions params opts)
-                             (.stream completions params))
+          (let [^js stream (.stream completions params)
                 completion (await (.finalChatCompletion stream))
                 result     (parse-completion completion)]
             (when-let [err (:seon.ai/error result)]

@@ -146,9 +146,15 @@ Disable thinking by setting the config row once:
 
 or per call: `{:seon.ai/extra-body {:chat_template_kwargs {:enable_thinking false}}}`.
 
-Qwen's reasoning tokens arrive in `reasoning_content`; the adapter drops them
-from `:seon.ai/text` (so the agent loop never parses them as code) and keeps
-them in the response metadata.
+**Reasoning separation depends on the server.** With `--reasoning-parser qwen3`
+(a dedicated server), Qwen's reasoning tokens arrive in a separate
+`reasoning_content` field; the adapter drops them from `:seon.ai/text` (so the
+agent loop never parses them as code) and keeps them in metadata. **A server
+WITHOUT the reasoning parser does not separate them** — with thinking on, the
+reasoning text leaks straight into `content` (and thus into `:seon.ai/text`).
+On such a shared endpoint the `reasoning_content`-drop is a no-op, and
+`:extra-body {:chat_template_kwargs {:enable_thinking false}}` is **mandatory,
+not optional**, to keep reasoning out of the reply.
 
 ## Tool / function calling (default off)
 
@@ -174,11 +180,15 @@ emit-and-eval loop is unaffected when you pass no tools.
 
 ## Extra request fields (`:seon.ai/extra-body`)
 
-Any map under `:seon.ai/extra-body` is merged into the request via the SDK's
-2nd-arg request-options `{body: …}` (the Node SDK passthrough — **not** the
-Python `extra_body`). Use it for per-server knobs Seon doesn't model
-(`chat_template_kwargs`, custom sampling, routing hints). Per-call opt or config
-row.
+Any map under `:seon.ai/extra-body` is **merged into the request params (the
+1st arg)** — openai-node passes unknown top-level params through to the wire
+verbatim. Use it for per-server knobs Seon doesn't model (`chat_template_kwargs`,
+custom sampling, routing hints). Per-call opt or config row.
+
+> Do **not** use the SDK's 2nd-arg request-options `{body: …}` for this — in
+> openai-node `options.body` **replaces** the request body (it does not merge),
+> which drops `model`/`messages` and 400s every call. The Node passthrough is
+> inlining into params, not the Python `extra_body` and not `options.body`.
 
 ## Streaming
 

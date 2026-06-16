@@ -121,9 +121,9 @@
   "Build the Anthropic Messages API request PARAMS as a CLJ map. The
    bare keys (:model, :messages, :system, …) are the API's wire format
    — a third-party boundary, deliberately un-namespaced. NOTE: the
-   `:seon.ai/extra-body` map is NOT inlined here — it is passed
-   SEPARATELY to the SDK's 2nd-arg request-options `{:body …}` (see
-   [[complete]]).
+   `:seon.ai/extra-body` map is NOT inlined here — [[complete]] merges
+   it into these params (the SDK's 2nd-arg `:body` would REPLACE the
+   body, dropping model/messages).
 
    Reads the `:seon.ai/config` row PER CALL (`seon.ai/current`);
    explicit request opts win over the row, the row wins over the
@@ -319,14 +319,16 @@
         "ANTHROPIC_API_KEY not set in process.env — set it to the Anthropic bearer key")
       (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
             ^js client (make-client key ms)
-            params  (clj->js (request-params request))
             extra   (request-extra-body request)
-            opts    (when (seq extra) #js{:body (clj->js extra)})
+            ;; :extra-body is MERGED into the request PARAMS (1st arg) —
+            ;; the SDK's 2nd-arg RequestOptions :body REPLACES the body
+            ;; (drops model/messages), so it must NOT be used. Same fix
+            ;; as seon.ai.openai-compat (verified live there).
+            params  (clj->js (cond-> (request-params request)
+                               (seq extra) (merge extra)))
             ^js messages (.. client -messages)]
         (try
-          (let [^js stream (if opts
-                          (.stream messages params opts)
-                          (.stream messages params))
+          (let [^js stream (.stream messages params)
                 message (await (.finalMessage stream))
                 result  (parse-completion message)]
             (when-let [err (:seon.ai/error result)]
