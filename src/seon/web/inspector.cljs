@@ -1165,33 +1165,34 @@
                         "border-t border-base-800 "
                         "bg-base-900/80 text-xs font-mono")}
       [:span {:class "text-text-500"} (str "turn " turn-count)]
-      ;; ✓ complete — stamps :seon.agent/completed-at via the POST
-      ;; endpoint (seon.agent/complete!). Confirm-free: reversible by
-      ;; an explicit retract (see complete!'s docstring); the SSE
-      ;; re-morph drops the card from the default grid on commit.
-      ;; `relative z-10` lifts the button above the stretched overlay
-      ;; anchor so it receives the click instead of navigating.
-      (when-not completed-at
-        [:button
-         {:type "button"
-          :title "mark agent completed"
-          :aria-label (str "complete agent " id)
-          :class (str "relative z-10 ml-auto mr-2 px-1.5 rounded "
-                      "text-text-500 hover:text-amber-300 "
-                      "hover:bg-base-800 cursor-pointer")
-          :onclick (str "event.stopPropagation();var b=this;"
-                        "fetch('/agent/" id "/complete',{method:'POST'})"
-                        ".then(function(r){if(!r.ok){r.text().then("
-                        "function(t){b.textContent='\\u2717 '+"
-                        "(t||('HTTP '+r.status));});}})"
-                        ".catch(function(e){b.textContent='\\u2717 '+e;});")}
-         "✓"])
-      [:span {:class (if completed-at "ml-auto text-amber-500"
-                                      "text-amber-500")}
-       "open →"]]
+      [:span {:class "ml-auto text-amber-500"} "open →"]]
      [:a {:href (str "/agent/" id)
           :aria-label (str "open agent " id)
-          :class "absolute inset-0"}]]))
+          :class "absolute inset-0"}]
+     ;; ✓ complete — stamps :seon.agent/completed-at via the POST
+     ;; endpoint (seon.agent/complete!). Confirm-free: reversible by
+     ;; an explicit retract (see complete!'s docstring); the SSE
+     ;; re-morph drops the card from the default grid on commit.
+     ;; Pinned to the card's upper-right corner (absolute) so it reads
+     ;; as a real control, not footer decoration (Sean couldn't find it
+     ;; in the action row). `relative z-10` is needed AFTER the inset-0
+     ;; overlay anchor so this button — not the navigate link — receives
+     ;; the click.
+     (when-not completed-at
+       [:button
+        {:type "button"
+         :title "mark agent completed"
+         :aria-label (str "complete agent " id)
+         :class (str "absolute top-1 right-1 z-10 px-1.5 rounded "
+                     "text-text-500 hover:text-amber-300 "
+                     "hover:bg-base-800 cursor-pointer")
+         :onclick (str "event.stopPropagation();var b=this;"
+                       "fetch('/agent/" id "/complete',{method:'POST'})"
+                       ".then(function(r){if(!r.ok){r.text().then("
+                       "function(t){b.textContent='\\u2717 '+"
+                       "(t||('HTTP '+r.status));});}})"
+                       ".catch(function(e){b.textContent='\\u2717 '+e;});")}
+        "✓"])]))
 
 (defn- agents-url
   "The /agents URL for a header view — query string carries the view

@@ -37,6 +37,8 @@
   (:require [cljs.analyzer :as ana]
             [cljs.js :as cljs]
             [cljs.reader :as reader]
+            [cljs.tools.reader :as tools-reader]
+            [cljs.tools.reader.reader-types :as reader-types]
             [clojure.set :as set]
             [clojure.string :as str]
             [goog.object :as gobj]
@@ -873,6 +875,96 @@
     (namespace k)
     (assoc :seon.schema/ns {:seon.ns/name (keyword (namespace k))})))
 
+;; ============================================================
+;; #29 — refuse side-effecting bare `def`s from the program graph.
+;;
+;; A test agent self-tee'd `(def virtue-eval (seon.agent/message!
+;; {…}))`. The tee indexed it as a `:seon.fn` row; replay re-evaled its
+;; `:source` on EVERY pod boot and EVERY fresh-agent mint, so the
+;; effectful init re-fired and a ghost message from a long-gone agent
+;; opened every new chat (live 2026-06-12; Aria retracted the row + 8
+;; ghosts by hand).
+;;
+;; The class: a NON-`defn` bare `(def sym <init>)` whose init form CALLS
+;; an effectful substrate fn. Nothing pure can depend on such a value
+;; (the value IS the side effect's return), so dropping it from the
+;; corpus loses nothing — `defn`s, `(def f (fn …))`, and pure value
+;; defs are untouched.
+;;
+;; ONE predicate, used at BOTH integration points:
+;;   - tee   (`build-tee-entities`) — never create the `:seon.fn` row,
+;;            so new evals never poison the store.
+;;   - replay (`seon.client/query-program-graph-entries`) — also drop
+;;            already-stored such rows from the replay set, so poison in
+;;            DEPLOYED stores stops re-firing without a manual retract.
+;; ============================================================
+
+(def ^:private effectful-call-syms
+  "Substrate fns whose call inside a bare-`def` init makes that def a
+   replay hazard. Both simple and fully-qualified forms — the source
+   scan also matches any symbol whose NAME is one of these, so an
+   alias like `agent/message!` is caught too. Data-driven: extend the
+   set, not the scan."
+  '#{message! reply! transact!
+     seon.agent/message! seon.agent/reply!
+     seon.db/transact! db/transact!})
+
+(def ^:private effectful-call-names
+  "Simple-name projection of [[effectful-call-syms]] — matches FQ/alias
+   call positions (`agent/message!`, `seon.agent/message!`) by name."
+  (into #{} (map (comp symbol name)) effectful-call-syms))
+
+(defn- form-calls-effectful?
+  "TRUE when `form` (recursively) has a call position whose operator is
+   one of [[effectful-call-syms]] (by full symbol or by simple name)."
+  [form]
+  (cond
+    (and (seq? form) (symbol? (first form))
+         (let [op (first form)]
+           (or (contains? effectful-call-syms op)
+               (contains? effectful-call-names (symbol (name op))))))
+    true
+    (coll? form) (boolean (some form-calls-effectful? (seq form)))
+    :else false))
+
+(defn- bare-def-effectful?
+  "TRUE when `form` is a bare `(def sym <init>)` — NOT `defn`, NOT
+   `(def sym (fn …))` — whose `<init>` calls an effectful substrate fn
+   (see [[form-calls-effectful?]])."
+  [form]
+  (and (seq? form)
+       (= 'def (first form))
+       (symbol? (second form))
+       (>= (count form) 3)
+       (let [init (nth form 2)]
+         (and (not (and (seq? init) (= 'fn (first init))))
+              (form-calls-effectful? init)))))
+
+(defn- read-all-forms
+  "All top-level forms in `source` (an eval text may carry several).
+   Returns nil on a read error — callers treat unreadable source as
+   non-effectful (fail-open: a parse failure must not silently drop a
+   row)."
+  [source]
+  (try
+    (let [rdr (reader-types/string-push-back-reader (str source))]
+      (loop [acc []]
+        (let [f (tools-reader/read {:eof ::eof :read-cond :allow} rdr)]
+          (if (= f ::eof) acc (recur (conj acc f))))))
+    (catch :default _ nil)))
+
+(defn effectful-bare-def?
+  "Replay/tee classifier (#29). TRUE when `source` contains a bare,
+   non-`defn` `def` whose init form calls an effectful substrate fn
+   (`message!` / `reply!` / `transact!`, incl. FQ + aliased forms).
+   Such a def's value IS a side effect; re-evaling it on boot/mint
+   re-fires the effect (ghost messages). `defn`s, `(def f (fn …))`, and
+   pure value `def`s are FALSE. Read-only — fail-open on unreadable
+   source (returns false)."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [source]
+  (boolean (some bare-def-effectful? (read-all-forms source))))
+
 (defn- build-tee-entities
   "Return a vector of program-graph entity maps for everything `source`
    newly defined (def/defn → :seon.fn; schema/register! → :seon.schema;
@@ -897,7 +989,17 @@
                           ;; vars` → :seon.test via index-tests — disjoint).
                           ;; Also keeps resume single-lane: a deftest teed as
                           ;; BOTH rows would replay its source twice.
-                          :when (not (deftest-def? var-map))
+                          :when (and (not (deftest-def? var-map))
+                                     ;; #29 — a bare (non-fn) `def` whose init
+                                     ;; calls message!/reply!/transact! is a
+                                     ;; replay hazard: its value IS a side
+                                     ;; effect, and re-evaling on boot/mint
+                                     ;; re-fires it (ghost messages). Never
+                                     ;; index it as a :seon.fn row. `:fn-var`
+                                     ;; false ⇒ bare def; defn/(def f (fn …))
+                                     ;; have :fn-var true and are unaffected.
+                                     (not (and (not (:fn-var var-map))
+                                               (effectful-bare-def? source))))
                           :let [{:keys [sym fn-var? arglists doc private? spec]}
                                 (analyzer-info/var-projection var-map)
                                 ;; Phase 3 (mvp-completion-plan 2026-05-27): if

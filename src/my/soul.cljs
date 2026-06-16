@@ -61,21 +61,58 @@
 
 ;; --- Seed sources.
 
-(def soul-md-path
-  "Repo-relative path of the identity seed. The pod runs with cwd =
-   repo root (same convention as seon.client's exemplar file reads)."
+(def default-soul-md-path
+  "Default repo-relative path of the identity seed. The pod runs with
+   cwd = repo root (same convention as seon.client's exemplar file
+   reads). Overridable via SEON_SOUL_FILE; falls back to AGENTS.md when
+   SOUL.md is absent (see [[resolved-soul-path]])."
   "SOUL.md")
 
-(defn- read-soul-md
-  "SOUL.md text, or nil when unreadable (missing file — e.g. a
-   downstream deploy without one). nil = the identity row is simply
-   not seeded this boot; it seeds on a later boot once the file
-   exists. Never throws."
-  []
+(def ^:private fallback-soul-md-path
+  "Seed path tried when SEON_SOUL_FILE is unset and the default
+   SOUL.md does not exist — Aria's identity file lives in AGENTS.md."
+  "AGENTS.md")
+
+(defn- env-val
+  "process.env value for `var-name`, or nil when unset/blank (or when
+   there is no Node process env at all). Same access pattern as
+   seon.web.brand/env-val and seon.platform/runtime-root."
+  [var-name]
+  (let [v (some-> (.. js/globalThis -process) (.-env) (aget var-name))]
+    (when (and (string? v) (not (str/blank? v))) v)))
+
+(defn- file-exists?
+  "True when `path` (resolved against cwd) is a readable file. Never
+   throws — a missing fs/file just answers false."
+  [path]
   (try
     (let [fs (js/require "fs")]
-      (.readFileSync fs (str (.cwd js/process) "/" soul-md-path) "utf8"))
-    (catch :default _ nil)))
+      (.existsSync fs (str (.cwd js/process) "/" path)))
+    (catch :default _ false)))
+
+(defn resolved-soul-path
+  "The repo-relative identity-seed path actually used this boot.
+   Resolution order: (1) SEON_SOUL_FILE when set & non-blank; (2)
+   SOUL.md when it exists; (3) AGENTS.md fallback. The returned path is
+   what [[seed-tx-data]] stamps onto `:my.kb/source-path` so the row
+   reflects the file actually read."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (or (env-val "SEON_SOUL_FILE")
+      (when (file-exists? default-soul-md-path) default-soul-md-path)
+      fallback-soul-md-path))
+
+(defn- read-soul-md
+  "Identity-seed text for `path` (default [[resolved-soul-path]]), or
+   nil when unreadable (missing file — e.g. a downstream deploy without
+   one). nil = the identity row is simply not seeded this boot; it
+   seeds on a later boot once the file exists. Never throws."
+  ([] (read-soul-md (resolved-soul-path)))
+  ([path]
+   (try
+     (let [fs (js/require "fs")]
+       (.readFileSync fs (str (.cwd js/process) "/" path) "utf8"))
+     (catch :default _ nil))))
 
 (def mechanics-text
   "The your-output-is-a-REPL contract — the substrate-mechanics half of
@@ -218,7 +255,8 @@ concluding there is no data: copy the keyword EXACTLY as
   (let [have (into #{} (map first)
                    (db/query {:seon.db/query '[:find ?id :where [?e ::id ?id]]
                               :seon.db/db    db}))
-        soul (when-not (contains? have "identity") (read-soul-md))]
+        path (resolved-soul-path)
+        soul (when-not (contains? have "identity") (read-soul-md path))]
     (cond-> []
       soul
       ;; Full provenance shape, line range included — agents imitate
@@ -229,7 +267,7 @@ concluding there is no data: copy the keyword EXACTLY as
       (conj {::id       "identity"
              ::priority 10
              ::text     soul
-             :my.kb/source-path     soul-md-path
+             :my.kb/source-path     path
              :my.kb/source-line     1
              :my.kb/source-line-end (count (str/split-lines soul))
              :my.kb/confidence      :verified})

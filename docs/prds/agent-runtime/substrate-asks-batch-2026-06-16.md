@@ -98,6 +98,26 @@ bootstrap from post-bootstrap rows and apply it here).
 **Acceptance:** fresh world shows ~0 for learned fns/datoms; zero-count chips
 absent; `?system=1` shows the full counts.
 
+**Status (2026-06-16): ALREADY SATISFIED by the 2026-06-12 unasked UI work** —
+no code change needed. Live-verified against the pod (`:7890`):
+
+- Default `/agents` chips: `agents · turns · facts` only. `facts` is the /data
+  default row count via the SAME `data-scan` post-bootstrap derivation
+  (`inspector.cljs` `cluster-stats`/`agents-dash-fragment`, ~L171–265,
+  L1206–1265) — header and /data can never disagree.
+- Zero-count chips are hidden (`(when (or system? (pos? …)) …)`), so the
+  confusing `FINDINGS=0` chip is gone (findings folded into `facts`).
+- `?system=1` (same query param as /data) reveals the machinery row:
+  `datoms · fns · schemas · tests` (full-store counts — the intended "full
+  view" semantics).
+
+Divergence from the literal ask: the default view omits `fns`/`datoms` entirely
+rather than showing post-bootstrap-filtered counts for them. This is arguably
+cleaner (machinery lives behind the toggle; the default surfaces only
+user-meaningful learned `facts`) and satisfies the acceptance's intent
+(no misleading full-store numbers by default; zero chips absent; full counts
+under `?system=1`).
+
 ### #28-UI — Move the ✓ complete button to the card corner
 
 Sean couldn't find the ✓ button (eaa03a1) — it sits inline next to "open" in the
@@ -167,6 +187,76 @@ The hook is the genuinely new mechanism (where does reply emission fire — find
 `seon.agent/reply!`/`message!` and the turn-close path; the hook should fire
 there, async, fail-soft). Design before building (EnterPlanMode).
 
+### Design (2026-06-16 research)
+
+Full design + source citations:
+[[docs/prds/agent-runtime/research/27-28-architecture-2026-06-16]].
+
+**Chosen fire-site:** `seon.agent/ask-and-eval!`, the SUCCESS branch
+(`src/seon/agent.cljs:1066-1069`). It is the one place per turn that holds the
+raw assistant completion (`reply-text`, derived in `ask-and-eval-reply!` at
+`agent.cljs:959`), the agent id, and the turn id, BEFORE the turn closes —
+firing here catches EVERY turn that called the LLM, not just turns where the
+model chose to `reply!` (the user-facing `reply!` is the WRONG point: not every
+turn emits one, defeating "every reply"). Thread `reply-text` into the call.
+
+**Mechanism:** a process atom `!on-reply-hooks` of registered SYMBOLS (a
+legitimate runtime artifact per reactive-context, same shape as `seon.warn`'s
+check registry); `register-on-reply!` / `unregister-on-reply!` verbs. At
+fire-time, `fire-on-reply-hooks!` resolves each symbol via
+`seval/lookup-value` (late resolution → hot-reload-safe, like `:seon.render/ai`
+slots), runs it inside `db/with-agent` (re-enter the ALS scope on the new
+microtask), fire-and-forget with a `.catch` that only logs — NOT awaited,
+cannot change the turn outcome (mirrors `persist-prompt!`'s fail-soft posture).
+The hook transacts its own `:my.virtue/*` rows keyed to the turn ref.
+
+**Data shapes (Malli):**
+
+```clojure
+(schema/register! :seon.agent.reply/text :string)
+(schema/register! :seon.agent/on-reply-input
+  [:map
+   [:seon.agent/id         :seon.agent/id]
+   [:seon.agent.turn/id    :seon.agent.turn/id]
+   [:seon.agent.reply/text :seon.agent.reply/text]])
+;; downstream, in the #28 seed dir (NOT src/ — IP boundary):
+(schema/register! :my.virtue/id        [:string {:seon.db/identity true}])
+(schema/register! :my.virtue/turn      :seon.db/ref)
+(schema/register! :my.virtue/dimension :keyword)
+(schema/register! :my.virtue/score     :int)
+(schema/register! :my.virtue/at        :inst)
+```
+
+**Panel:** a stacked pane in the existing consumer-view right column
+(`inspector.cljs:1106-1111`, the tile column) — zero layout reflow, reuses the
+existing per-agent SSE push (`consumer-snapshot` / `push-agent!`,
+`inspector.cljs:969-985,1700`). The panel body is a section fn querying the
+turn's `:my.virtue/*` rows — pure reactive-context, vanishes on a fresh world.
+The SVG radar (`my.virtue/radar-svg`) lives in the seed dir as `[:svg …]`
+hiccup (axis spokes + `[:polygon …]` per cluster, pure cljs math, no deps —
+like `activity-sparkline`). Note: `docs/2026-06-12-virtue-tile.md` does NOT
+exist in this tree and the angelic source is not vendored — port from the
+visual spec only.
+
+**Checklist:**
+
+1. Register `:seon.agent.reply/text` + `:seon.agent/on-reply-input` in
+   `seon.agent`.
+2. Add `!on-reply-hooks` atom + `register-on-reply!` / `unregister-on-reply!`
+   (store symbols; resolve late).
+3. Add `fire-on-reply-hooks!` (fail-soft, not awaited, `with-agent` re-entry);
+   call from `ask-and-eval!`'s success branch threading `reply-text`.
+4. Add the consumer-view panel fragment; extend `consumer-snapshot` /
+   `consumer-payloads`; panel resolves a configurable downstream symbol
+   (default absent = no panel).
+5. (Downstream) `my.virtue` schemas + hook fn + `radar-svg` in the #28 seed
+   dir.
+
+**Open questions:** fire per-turn only (recommended) or also on user-facing
+`reply!`? Panel stacked-in-tile-column (recommended) vs third grid column?
+Hook concurrency backpressure (defer — add a single-flight latch only if it
+bites).
+
 ### #28 — Boot-seed downstream `my.*` source from a consumer-owned dir
 
 Seon ships `my.kb`/`my.soul`/`my.kb.system` as compiled source required at boot.
@@ -184,6 +274,75 @@ for the code the #27 hook would call. Read [[docs/seon/concepts/code-as-data-run
 ("the substrate source IS the bootstrap"). Design before building; coordinate
 with #29 (the recording/replay path is the same machinery — seeding through it
 must not re-fire side effects).
+
+### Design (2026-06-16 research)
+
+Full design + source citations:
+[[docs/prds/agent-runtime/research/27-28-architecture-2026-06-16]].
+
+**Recommendation: `SEON_SEED_DIR` driving the RECORDED path** (primary), with
+the already-designed `SEON_EXTRA_SRC` compiled path (task #36, partially wired:
+`!extra-substrate-vars` / `read-src-file` probe / `substrate-ns-set` union all
+exist in `client.cljs`) as the power-user sibling. Recorded is what the ask
+literally requests, needs NO build (the consumer's stated blocker), and is the
+home for the #27 hook code.
+
+**Seed-dir flow through the recording path:** mirror `creation-evals!`
+(`client.cljs:1842-1906`), which already evals a source string through
+`seval/eval-batch!` as a system-origin boot turn — that IS the recording path.
+New step in `start-agent!` AFTER `replay-program-graph!` (`client.cljs:1985`),
+BEFORE the per-agent boots: read `SEON_SEED_DIR` via the `env-val` pattern
+(`brand.cljs:88`; nil/blank = no-op), list+read `*.cljs` (sorted, Node `fs`),
+eval each through `eval-batch!` inside a `{:seon.db/origin :seed-dir}`
+tx-context. detect-and-tee (`eval.cljs:876`) then persists the
+`:seon.fn`/`:seon.ns`/`:seon.schema` rows automatically — no separate persist
+code; they replay on every subsequent boot.
+
+**#29 coordination (critical):** the seed step MUST be idempotent — on the
+second boot the file's defs are already program-graph rows, so re-evaling would
+re-fire effectful top-level forms (exactly the #29 ghost-message bug). Guard:
+before evaling a file, query the program graph for its ns and SKIP files whose
+defs already exist (same conn-dedup `substrate-index-tx` does,
+`client.cljs:1417`). First boot seeds; later boots let REPLAY reconstitute.
+And #28's correctness DEPENDS on #29 landing — the seed dir is a new SOURCE of
+exactly the rows #29's "don't replay effectful bare `def`s" makes safe. Build
+#28 AFTER #29. Seed-file contract: `defn`/pure `def` only; wiring via verb
+calls (`register-on-reply!`), never `(def x (effectful …))`.
+
+**Env var:** `SEON_SEED_DIR` (absolute path), `SEON_*` family, default absent =
+byte-identical behavior. Read via `env-val`, NOT through `artifact-path` (the
+dir is the consumer's, like `read-src-file`'s `SEON_EXTRA_SRC` probe). If both
+`SEON_SEED_DIR` and `SEON_EXTRA_SRC` name the same ns, compiled wins (it is in
+`substrate-ns-set`, so seed-dir rows for that ns replay-skip) — use one path
+per ns.
+
+**Compiled-vs-recorded tradeoff:** recorded persists rows that survive file
+deletion and replay each boot (needs the #29 guard); compiled re-derives from
+source each boot, is never replayed (no side-effect risk), and gets full Malli
+instrumentation via `index-substrate!`. Recorded is for product code with no
+build (Aria's `my.virtue`); compiled is for exemplar nses a downstream wants
+agents reading whole. **Recommend recorded for #28.**
+
+**Checklist:**
+
+1. `seed-dir` helper (`env-val "SEON_SEED_DIR"`; nil/blank → no-op).
+2. List + read `*.cljs` (sorted) via Node `fs`.
+3. Idempotency guard: skip files whose ns defs already exist in the program
+   graph (conn-dedup shape).
+4. Eval each remaining file through `eval-batch!` as a system-origin boot turn
+   (mirror `creation-evals!`), `{:seon.db/origin :seed-dir}`.
+5. Call in `start-agent!` after `replay-program-graph!`, before per-agent
+   boots.
+6. Depends on #29 (the effectful-bare-`def` replay guard must land first).
+7. Document the seed-dir contract (`my.*` prefix, `defn`/pure `def`, verb-call
+   wiring).
+
+**Open questions:** `my.*` prefix asymmetry — `SEON_EXTRA_SRC` REJECTS `my.*`
+(would replay-skip agent corpus) but the seed dir WANTS `my.*` (it IS replayed
+corpus); confirm `my.*` and ensure a seed-dir ns is never also in
+`substrate-ns-set`. Provenance origin: distinct `:seed-dir` (recommended, for
+audit) vs reuse `:substrate-seed`? Re-seed on file CHANGE (v1: no,
+first-boot-only).
 
 ## Verification (all asks)
 
