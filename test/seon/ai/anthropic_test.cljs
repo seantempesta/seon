@@ -25,15 +25,16 @@
   (:require
     [cljs.test :refer [deftest is testing async]]
     [clojure.string :as str]
+    ["@anthropic-ai/sdk" :as Anthropic]
     [datahike.api :as d]
     [seon.ai :as ai]
     [seon.ai.anthropic :as anthropic]
-    [seon.ai.deepseek :as deepseek]
+    [seon.ai.openai-compat :as openai]
     [seon.ctx :as ctx]
     [seon.db :as db]))
 
 ;; ============================================================
-;; Conn helpers — same pattern as seon.ai.deepseek-test.
+;; Conn helpers — same pattern as seon.ai.openai-compat-test.
 ;; ============================================================
 
 (defn- fresh-conn
@@ -70,7 +71,7 @@
   (async done
     (-> (with-conn
           (fn [_conn]
-            (let [body (anthropic/request-body {:seon.ai/ctx           "the ctx"
+            (let [body (anthropic/request-params {:seon.ai/ctx           "the ctx"
                                                 :seon.ai/system-prompt "sys"})]
               (is (= {:model      "claude-opus-4-8"
                       :max_tokens 16000
@@ -96,7 +97,7 @@
                   {:seon.db/tx-data [{::ai/id "config" ::ai/temperature 0.3}]})
                 (.then (fn [{ok? :seon.db/ok?}]
                          (is (true? ok?))
-                         (let [body (anthropic/request-body {:seon.ai/ctx "hi"})]
+                         (let [body (anthropic/request-params {:seon.ai/ctx "hi"})]
                            (is (not (contains? body :temperature))
                                "temperature MUST NOT be sent — 400s on Opus 4.7+/Fable")
                            (is (not (contains? body :top_p)))
@@ -109,14 +110,14 @@
     (-> (with-conn
           (fn [_conn]
             ;; Falsy (absent row) → :thinking key ABSENT.
-            (is (not (contains? (anthropic/request-body {:seon.ai/ctx "hi"})
+            (is (not (contains? (anthropic/request-params {:seon.ai/ctx "hi"})
                                 :thinking))
                 "thinking off → OMIT the key entirely (never {:type \"disabled\"})")
             (-> (db/transact!
                   {:seon.db/tx-data [{::ai/id "config" ::ai/thinking "true"}]})
                 (.then (fn [_]
                          (is (= {:type "adaptive"}
-                                (:thinking (anthropic/request-body {:seon.ai/ctx "hi"})))
+                                (:thinking (anthropic/request-params {:seon.ai/ctx "hi"})))
                              "thinking \"true\" → adaptive (the only on-mode)")
                          ;; An effort string is also just truthy → adaptive
                          ;; (reasoning-effort levels are a deepseek wire
@@ -124,13 +125,13 @@
                          (db/transact!
                            {:seon.db/tx-data [{::ai/id "config" ::ai/thinking "high"}]})))
                 (.then (fn [_]
-                         (let [body (anthropic/request-body {:seon.ai/ctx "hi"})]
+                         (let [body (anthropic/request-params {:seon.ai/ctx "hi"})]
                            (is (= {:type "adaptive"} (:thinking body)))
                            (is (not (contains? body :reasoning_effort))))
                          (db/transact!
                            {:seon.db/tx-data [{::ai/id "config" ::ai/thinking "false"}]})))
                 (.then (fn [_]
-                         (is (not (contains? (anthropic/request-body {:seon.ai/ctx "hi"})
+                         (is (not (contains? (anthropic/request-params {:seon.ai/ctx "hi"})
                                              :thinking))
                              "\"false\" → back to omitted"))))))
         (.then (fn [_] (done)))
@@ -145,11 +146,11 @@
                                       ::ai/model      "claude-fable-5"
                                       ::ai/max-tokens 2048}]})
                 (.then (fn [_]
-                         (let [body (anthropic/request-body {:seon.ai/ctx "hi"})]
+                         (let [body (anthropic/request-params {:seon.ai/ctx "hi"})]
                            (is (= "claude-fable-5" (:model body)))
                            (is (= 2048 (:max_tokens body))))
                          ;; Explicit request opts win over the row.
-                         (let [body (anthropic/request-body
+                         (let [body (anthropic/request-params
                                       {:seon.ai/ctx        "hi"
                                        :seon.ai/model      "claude-sonnet-4-6"
                                        :seon.ai/max-tokens 256})]
@@ -170,7 +171,7 @@
   (async done
     (-> (with-conn
           (fn [_conn]
-            (let [body (anthropic/request-body {:seon.ai/ctx           "the ctx"
+            (let [body (anthropic/request-params {:seon.ai/ctx           "the ctx"
                                                 :seon.ai/system-prompt "sys"})
                   [sys-block & more] (:system body)]
               (is (vector? (:system body))
@@ -193,7 +194,7 @@
             (let [stable   "<system>core</system>\n\n<namespace name=\"seon.db\">…</namespace>"
                   volatile "<transcript>…</transcript>\n\nmy.agent.a=> "
                   full     (str stable "\n\n" ctx/stable-boundary "\n\n" volatile)
-                  body     (anthropic/request-body
+                  body     (anthropic/request-params
                              {:seon.ai/ctx full :seon.ai/system-prompt "sys"})
                   [soul-block stable-block & more] (:system body)]
               (is (nil? more) "exactly TWO system blocks on a split ctx")
@@ -219,7 +220,7 @@
             ;; Pathological: boundary present but a blank half — never
             ;; send an empty system block or an empty user message.
             (let [full (str "" "\n\n" ctx/stable-boundary "\n\n" "tail only")
-                  body (anthropic/request-body
+                  body (anthropic/request-params
                          {:seon.ai/ctx full :seon.ai/system-prompt "sys"})]
               (is (= 1 (count (:system body)))
                   "blank stable half → no second system block")
@@ -232,7 +233,7 @@
   (async done
     (-> (with-conn
           (fn [_conn]
-            (let [body (deepseek/request-body {:seon.ai/ctx           "the ctx"
+            (let [body (openai/request-params {:seon.ai/ctx           "the ctx"
                                                :seon.ai/system-prompt "sys"})]
               (is (= [{:role "system" :content "sys"}
                       {:role "user"   :content "the ctx"}]
@@ -248,34 +249,210 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
-;; Response parsing — typed content blocks + stop_reason gate.
+;; Response parsing — `parse-completion` operates on the assembled
+;; Message OBJECT (post `.finalMessage`), NOT a body string. Typed
+;; content blocks + stop_reason gate + tool_use + provider-fields.
 ;; ============================================================
 
-(defn- json [m] (.stringify js/JSON (clj->js m)))
+;; Build the clj->js Message object parse-completion consumes (the SDK
+;; hands us a JS object, not a JSON string).
+(defn- msg-obj [m] (clj->js m))
 
-(deftest parse-response-extracts-text-blocks-skips-thinking
+(deftest parse-completion-extracts-text-blocks-skips-thinking
   (testing "text blocks joined, thinking blocks skipped"
-    (let [resp (anthropic/parse-response
-                 (json {:stop_reason "end_turn"
-                        :content [{:type "thinking" :thinking "hmm" :signature "s"}
-                                  {:type "text" :text "(+ 1 "}
-                                  {:type "text" :text "2)"}]
-                        :usage {:input_tokens 10 :output_tokens 5}}))]
+    (let [resp (anthropic/parse-completion
+                 (msg-obj {:id "m1" :type "message" :role "assistant"
+                           :model "claude-opus-4-8"
+                           :stop_reason "end_turn"
+                           :content [{:type "thinking" :thinking "hmm" :signature "s"}
+                                     {:type "text" :text "(+ 1 "}
+                                     {:type "text" :text "2)"}]
+                           :usage {:input_tokens 10 :output_tokens 5}}))]
       (is (= "(+ 1 2)" (:seon.ai/text resp)))
       (is (= "end_turn" (:seon.ai.anthropic/stop-reason resp)))
       (is (= {:input_tokens 10 :output_tokens 5} (:seon.ai/usage resp)))
-      (is (not (contains? resp :seon.ai/error))))))
+      (is (not (contains? resp :seon.ai/error)))
+      (is (not (contains? resp :seon.ai/tool-calls)) "no tool_use → no tool-calls key")
+      (is (not (contains? resp :seon.ai/provider-fields))
+          "only known keys present → no provider-fields"))))
 
-(deftest parse-response-refusal-is-a-legible-error
+(deftest parse-completion-refusal-is-a-legible-error
   (testing "stop_reason refusal (empty content) → error envelope, never a reply"
-    (let [resp (anthropic/parse-response
-                 (json {:stop_reason "refusal" :content [] :usage {}}))]
+    (let [resp (anthropic/parse-completion
+                 (msg-obj {:stop_reason "refusal" :content [] :usage {}}))]
       (is (= "" (:seon.ai/text resp)))
       (is (= "refusal" (:seon.ai.anthropic/stop-reason resp)))
       (is (some? (:seon.ai/error resp)) "refusal MUST surface as an error")
       (is (re-find #"refusal" (:seon.ai/msg (:seon.ai/error resp)))))))
 
-(deftest parse-response-garbage-is-an-error-with-raw-body
-  (let [resp (anthropic/parse-response "not json {{{")]
-    (is (= "" (:seon.ai/text resp)))
-    (is (= "not json {{{" (:seon.ai/raw-body (:seon.ai/error resp))))))
+(deftest parse-completion-surfaces-tool-use-and-provider-fields
+  (testing "tool_use blocks → :seon.ai/tool-calls; unknown top-level → provider-fields"
+    (let [resp (anthropic/parse-completion
+                 (msg-obj {:id "m2" :type "message" :role "assistant"
+                           :model "claude-opus-4-8"
+                           :stop_reason "tool_use"
+                           :content [{:type "text" :text "calling"}
+                                     {:type "tool_use" :id "t1" :name "f"
+                                      :input {:x 1}}]
+                           :usage {:input_tokens 3 :output_tokens 2}
+                           :container {:id "ctr-1"}}))]
+      (is (= "calling" (:seon.ai/text resp)))
+      (is (= [{:type "tool_use" :id "t1" :name "f" :input {:x 1}}]
+             (:seon.ai/tool-calls resp))
+          "tool_use blocks surfaced verbatim")
+      (is (= {:container {:id "ctr-1"}} (:seon.ai/provider-fields resp))
+          "an unrecognized top-level field is preserved (#25)"))))
+
+;; ============================================================
+;; Wire-test seam — inject a fetch into the SDK client via
+;; seon.ai.anthropic/*fetch* (root set!, same rationale as
+;; openai-compat: the instrumented ^:async body runs past a binding's
+;; synchronous unwind). The Messages API streams SSE; the SDK buffers
+;; it into one assembled Message via .finalMessage.
+;; ============================================================
+
+(defn- with-fetch
+  [stub body]
+  (set! anthropic/*fetch* stub)
+  (-> (js/Promise.resolve (body))
+      (.finally (fn [] (set! anthropic/*fetch* nil)))))
+
+(defn- with-key
+  "Run `body` with a deterministic ANTHROPIC_API_KEY (restored after)."
+  [body]
+  (let [env   (.. js/process -env)
+        saved (aget env "ANTHROPIC_API_KEY")]
+    (aset env "ANTHROPIC_API_KEY" "test-key")
+    (-> (js/Promise.resolve (body))
+        (.finally (fn []
+                    (if (some? saved)
+                      (aset env "ANTHROPIC_API_KEY" saved)
+                      (js-delete env "ANTHROPIC_API_KEY")))))))
+
+(defn- sse-stream
+  [s]
+  (js/ReadableStream.
+    #js{:start (fn [ctrl]
+                 (.enqueue ctrl (.encode (js/TextEncoder.) s))
+                 (.close ctrl))}))
+
+(def ^:private anth-sse-ok
+  ;; A minimal Messages-API event stream: message_start →
+  ;; content_block_start/delta/stop (one text block) → message_delta
+  ;; (stop_reason + output usage) → message_stop.
+  (str "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-opus-4-8\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n"
+       "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"
+       "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n"
+       "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+       "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":5}}\n\n"
+       "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
+
+(defn- streaming-fetch
+  [captured sse-string]
+  (fn [url init]
+    (reset! captured {:url  url
+                      :body (js->clj (.parse js/JSON (.-body init))
+                                     :keywordize-keys true)})
+    (js/Promise.resolve
+      (js/Response. (sse-stream sse-string)
+                    #js{:status 200 :headers #js{"content-type" "text/event-stream"}}))))
+
+(deftest happy-path-streams-text-and-usage
+  (async done
+    (let [captured (atom nil)]
+      (-> (with-conn
+            (fn [_conn]
+              (with-key
+                #(with-fetch (streaming-fetch captured anth-sse-ok)
+                   (fn [] (anthropic/complete {:seon.ai/ctx "hi" :seon.ai/system-prompt "sys"}))))))
+          (.then
+            (fn [{:seon.ai/keys [text usage error] :as resp}]
+              (is (nil? error))
+              (is (= "hello" text) "the streamed text block assembles")
+              (is (= "end_turn" (:seon.ai.anthropic/stop-reason resp)))
+              (is (map? usage) "usage assembled from the message")
+              (is (str/ends-with? (:url @captured) "/v1/messages")
+                  "the SDK owns the Messages URL")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest extra-body-reaches-the-wire
+  (async done
+    (let [captured (atom nil)]
+      (-> (with-conn
+            (fn [_conn]
+              (with-key
+                #(with-fetch (streaming-fetch captured anth-sse-ok)
+                   (fn [] (anthropic/complete
+                            {:seon.ai/ctx        "hi"
+                             :seon.ai/extra-body {:metadata {:user_id "abc"}}}))))))
+          (.then
+            (fn [{:seon.ai/keys [error]}]
+              (is (nil? error))
+              (is (= {:user_id "abc"} (-> @captured :body :metadata))
+                  "the 2nd-arg {:body extra} merges into the request body")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest missing-key-is-a-legible-config-error
+  (async done
+    (let [env   (.. js/process -env)
+          saved (aget env "ANTHROPIC_API_KEY")
+          called (atom 0)]
+      (js-delete env "ANTHROPIC_API_KEY")
+      (-> (with-fetch (fn [_ _] (swap! called inc)
+                        (js/Promise.resolve (js/Response. "" #js{:status 200})))
+            #(anthropic/complete {:seon.ai/ctx "hi"}))
+          (.then
+            (fn [{:seon.ai/keys [text error]}]
+              (is (= "" text) "error envelope, not a throw")
+              (is (zero? @called) "no SDK call on a config gap")
+              (is (str/includes? (:seon.ai/msg error) "ANTHROPIC_API_KEY"))
+              (is (not (contains? error :seon.ai/transport?)))))
+          (.finally (fn []
+                      (if (some? saved)
+                        (aset env "ANTHROPIC_API_KEY" saved)
+                        (js-delete env "ANTHROPIC_API_KEY"))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest fetch-throw-is-transport-shaped
+  (async done
+    (-> (with-key
+          #(with-fetch
+             (fn [_ _] (js/Promise.reject (js/TypeError. "fetch failed")))
+             (fn [] (anthropic/complete {:seon.ai/ctx "hi"}))))
+        (.then
+          (fn [{:seon.ai/keys [text error]}]
+            (is (= "" text))
+            (is (true? (:seon.ai/transport? error))
+                "a thrown fetch → APIConnectionError → the retryable class")
+            (is (not (contains? error :seon.ai/timeout?)))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest http-status-error-is-not-transport-shaped
+  (async done
+    (-> (with-key
+          #(with-fetch
+             (fn [_ _]
+               (js/Promise.resolve
+                 (js/Response. "{\"type\":\"error\"}"
+                               #js{:status 400
+                                   :headers #js{"content-type" "application/json"}})))
+             (fn [] (anthropic/complete {:seon.ai/ctx "hi"}))))
+        (.then
+          (fn [{:seon.ai/keys [text error]}]
+            (is (= "" text))
+            (is (= 400 (:seon.ai/status error)))
+            (is (not (contains? error :seon.ai/transport?)))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest timeout-class-maps-to-timeout-flag
+  (testing "error->envelope classifies the timeout subclass correctly"
+    (let [classify @#'anthropic/error->envelope
+          tmo      (new (.-APIConnectionTimeoutError Anthropic) #js{})
+          env      (classify tmo)]
+      (is (true? (:seon.ai/timeout? env)))
+      (is (not (contains? env :seon.ai/transport?))))))

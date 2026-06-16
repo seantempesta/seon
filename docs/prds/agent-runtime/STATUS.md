@@ -30,6 +30,33 @@ and how to iterate. **Design lives in [README.md](README.md) and the
 versioned specs (v1.md, v2.md, v3.md). This file does not duplicate
 spec content.**
 
+## Recent ships (2026-06-16) — LLM SDK migration + rename
+
+- **Both LLM adapters migrated from hand-rolled `js/fetch` to the
+  official Node SDKs** (`openai ^6.42.0` for the OpenAI-compatible path,
+  `@anthropic-ai/sdk ^0.104.2` for the Claude path; both vendored under
+  `reference-code/openai-node` + `reference-code/anthropic-sdk-typescript`).
+- **Ns rename (atomic):** `seon.ai.deepseek` → **`seon.ai.openai-compat`**
+  — it serves BOTH the `:deepseek` and `:openai-compat` providers (the
+  OpenAI wire format). Provider **ENUM VALUES are UNCHANGED**
+  (`:deepseek`/`:openai-compat`/`:anthropic` — config surface preserved);
+  keyword `:seon.ai.deepseek/finish-reason` → `:seon.ai.openai-compat/finish-reason`.
+- **baseURL:** `SEON_AI_BASE_URL` now PREFERS the `/v1` root form (the SDK
+  appends `/chat/completions`); the old full `/v1/chat/completions` form
+  still works (auto-stripped).
+- New capabilities: native streaming transport (buffered to full text,
+  NOT consumer streaming); optional tool/function-calling passthrough
+  (default off); generic `:seon.ai/extra-body` request-field merge (e.g.
+  Qwen3.6 `chat_template_kwargs` — Qwen3.6-35B-A3B supported via
+  `:openai-compat`, no Qwen-specific code); #25 provider-metadata
+  preservation (`:seon.ai/usage` always set + `:seon.ai/provider-fields`,
+  persisted per-turn as `:seon.agent.turn/llm-usage` + `:seon.agent.turn/llm-meta`).
+- Closes asks #18/#24 migrations + #25 (tiers 1+2); supersedes #24b
+  (SSE-tolerance workaround / `parse-sse-response` DELETED). Agent-adapter
+  contract + `:seon.ai/error` envelope unchanged; `maxRetries:0` on both
+  clients (agent loop stays the sole retry authority). See
+  [[open-issues-prd-2026-06-11]] for the full register.
+
 ## Tracks
 
 - **MVP track**: agent eval surface — design in [v1.md](v1.md).

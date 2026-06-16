@@ -75,7 +75,7 @@
     [seon.agent :as agent]
     [seon.ai :as ai]
     [seon.ai.anthropic :as anthropic]
-    [seon.ai.deepseek :as deepseek]
+    [seon.ai.openai-compat :as openai]
     [seon.client :as client]
     [seon.ctx :as ctx]
     [seon.db :as db]
@@ -860,7 +860,7 @@
 
 (defn- default-judge-fn
   "The DeepSeek judge: NON-thinking (the module default), temperature
-   0, read-only use of seon.ai.deepseek's public `complete`. Built
+   0, read-only use of seon.ai.openai-compat's public `complete`. Built
    ONLY under the allow-paid? guard.
 
    MODEL PINNED EXPLICITLY (2026-06-12, paid sweep run 0): the
@@ -873,10 +873,10 @@
    test's model steering."
   []
   (fn [ctx]
-    (.then (deepseek/complete {:seon.ai/ctx           ctx
-                               :seon.ai/system-prompt judge-system-prompt
-                               :seon.ai/model         "deepseek-v4-pro"
-                               :seon.ai/temperature   0.0})
+    (.then (openai/complete {:seon.ai/ctx           ctx
+                             :seon.ai/system-prompt judge-system-prompt
+                             :seon.ai/model         "deepseek-v4-pro"
+                             :seon.ai/temperature   0.0})
            (fn [resp]
              (cond-> {:text (:seon.ai/text resp)}
                (:seon.ai/error resp)
@@ -1011,7 +1011,7 @@
     (usage-logging provider
                    (case provider
                      :anthropic (anthropic/agent-adapter)
-                     (deepseek/agent-adapter)))))
+                     (openai/agent-adapter)))))
 
 (defn- paid-key-set?
   "Is the ACTIVE provider's API key present? The paid-tier budget

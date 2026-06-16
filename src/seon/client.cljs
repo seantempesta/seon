@@ -57,7 +57,7 @@
     [seon.ctx :as ctx]
     [seon.ai :as ai]
     [seon.ai.anthropic :as anthropic]
-    [seon.ai.deepseek :as deepseek]
+    [seon.ai.openai-compat :as openai]
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.log :as log]
@@ -1590,11 +1590,11 @@
                      stub-llm)
     ;; :openai-compat rides the SAME adapter as :deepseek (the wire
     ;; format is OpenAI's) — endpoint + key resolve per call from the
-    ;; :seon.ai/config row / SEON_AI_* env (see seon.ai.deepseek's ns
-    ;; doc). :deepseek likewise uses the shared key resolution
+    ;; :seon.ai/config row / SEON_AI_* env (see seon.ai.openai-compat's
+    ;; ns doc). :deepseek likewise uses the shared key resolution
     ;; (DEEPSEEK_API_KEY default, SEON_AI_API_KEY / api-key-env too).
-    (if (deepseek/api-key-configured?)
-      (deepseek/agent-adapter)
+    (if (openai/api-key-configured?)
+      (openai/agent-adapter)
       stub-llm)))
 
 (defn- live-agent-ids
@@ -1916,8 +1916,8 @@
 
      :llm-fn — fn of ctx-string returning a Promise of {:text \"...\"}.
                Optional; defaults to stub-llm for verification without
-               an API key. Pass (seon.ai.deepseek/agent-adapter) for
-               the real thing.
+               an API key. Pass (seon.ai.openai-compat/agent-adapter)
+               for the real thing.
      :mint?  — force-mint a NEW agent even when resumable agents exist
                (they are already armed from boot). The /agents/new path.
 
@@ -2065,7 +2065,7 @@
   "Bring up the V0 agent against the real deepseek API. Requires
    DEEPSEEK_API_KEY in process.env. Returns a channel."
   []
-  (start-agent! {:llm-fn (deepseek/agent-adapter)}))
+  (start-agent! {:llm-fn (openai/agent-adapter)}))
 
 ;; Wire the UI's "new agent" affordance (POST /agents/new) to the ONE
 ;; boot path. serve.cljs can't require this ns (cycle: client → serve),
@@ -2146,7 +2146,7 @@
           provider (ai/provider)
           key-set? (case provider
                      :anthropic (boolean (.. js/process -env -ANTHROPIC_API_KEY))
-                     (deepseek/api-key-configured?))]
+                     (openai/api-key-configured?))]
       (log/info-console! "seon.client"
                          (if key-set?
                            (str "using " (name provider) " LLM (API key set)")

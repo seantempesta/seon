@@ -5,7 +5,7 @@
 
    Rows follow the `my.kb.instruction` pattern (id/text/priority,
    identity upsert on `::id`) but feed a DIFFERENT injection point:
-   `seon.ai.deepseek` joins them priority-ordered into the `system`
+   `seon.ai.openai-compat` joins them priority-ordered into the `system`
    message of every LLM call ([[system-prompt-text]]). They are NOT
    rendered into the per-turn ctx — `my.kb.instruction` rows own the
    `<instructions>` ctx section; mixing the two would double-inject.
@@ -80,7 +80,7 @@
 (def mechanics-text
   "The your-output-is-a-REPL contract — the substrate-mechanics half of
    the system prompt (formerly the tail of the compiled-in
-   seon.ai.deepseek/default-system-prompt). Seeded as the
+   seon.ai.openai-compat/default-system-prompt). Seeded as the
    \"repl-mechanics\" row so it is just as runtime-editable as the
    identity."
   "Now the mechanics — how the work actually gets done.
@@ -245,7 +245,7 @@ concluding there is no data: copy the keyword EXACTLY as
 (defn system-prompt-text
   "The system prompt: every `:my.soul` row's text, priority-ordered
    (smallest first), joined with a blank line. \"\" when no rows exist
-   (the caller falls back — see seon.ai.deepseek). 0-arity reads the
+   (the caller falls back — see seon.ai.openai-compat). 0-arity reads the
    ambient `seon.db/*conn*`; 1-arity takes an explicit db value."
   {:malli/schema [:function
                   [:=> [:cat] :string]

@@ -12,7 +12,7 @@
     [datahike.api :as d]
     [malli.core :as m]
     [seon.ai :as ai]
-    [seon.ai.deepseek :as deepseek]
+    [seon.ai.openai-compat :as openai]
     [seon.client :as client]
     [seon.db :as db]
     [my.soul :as soul]))
@@ -115,9 +115,9 @@
                                "next prompt reads the edited text")
                            (is (not (re-find #"That is what it means to be Seon" text))
                                "the shipped identity text is gone (last-write-wins)"))
-                         ;; The LLM call path reads the store: request-body's
+                         ;; The LLM call path reads the store: request-params'
                          ;; system message IS the store text.
-                         (let [body (deepseek/request-body {:seon.ai/ctx "hi"})
+                         (let [body (openai/request-params {:seon.ai/ctx "hi"})
                                sys  (-> body :messages first :content)]
                            (is (str/starts-with? sys "EDITED SOUL: serve the porpoise.")
                                "the system message sent to the API is the store-resident soul")
@@ -132,12 +132,12 @@
             ;; conn has the boot schema but NO soul rows.
             (is (= "" (soul/system-prompt-text @db/*conn*))
                 "no rows → empty string")
-            (let [body (deepseek/request-body {:seon.ai/ctx "hi"})
+            (let [body (openai/request-params {:seon.ai/ctx "hi"})
                   sys  (-> body :messages first :content)]
               (is (= ai/fallback-system-prompt sys)
                   "empty store → the minimal boot-edge fallback")
               (is (= "OVERRIDE"
-                     (-> (deepseek/request-body {:seon.ai/ctx "hi"
+                     (-> (openai/request-params {:seon.ai/ctx "hi"
                                                  :seon.ai/system-prompt "OVERRIDE"})
                          :messages first :content))
                   "an explicit :seon.ai/system-prompt still wins"))))

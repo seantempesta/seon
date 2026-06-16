@@ -272,6 +272,13 @@
 ;; how many retries happened (today always 1). ABSENT = no retry —
 ;; optional-is-absent, never stored 0.
 (schema/register! :seon.agent.turn/llm-retries  :int)
+;; #25 tier-2 LLM provider metadata, per turn: the structured usage map
+;; (:seon.ai/usage — prompt/completion/total tokens, cache fields) and
+;; the EDN-stringified provider-fields (the unrecognized top-level
+;; response fields the adapter preserved). Both ABSENT on a stub-LLM
+;; turn or when the provider returns neither — optional-is-absent.
+(schema/register! :seon.agent.turn/llm-usage    :map)
+(schema/register! :seon.agent.turn/llm-meta     :string)
 (schema/register! :seon.agent.turn/messages     [:vector {:seon.db/component true} :seon.db/ref])
 (schema/register! :seon.agent.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
 
@@ -291,6 +298,8 @@
    [:seon.agent.turn/prompt-chars {:optional true} :seon.agent.turn/prompt-chars]
    [:seon.agent.turn/prompt-file  {:optional true} :seon.agent.turn/prompt-file]
    [:seon.agent.turn/llm-retries  {:optional true} :seon.agent.turn/llm-retries]
+   [:seon.agent.turn/llm-usage    {:optional true} :seon.agent.turn/llm-usage]
+   [:seon.agent.turn/llm-meta     {:optional true} :seon.agent.turn/llm-meta]
    [:seon.agent.turn/messages     {:optional true} :seon.agent.turn/messages]
    [:seon.agent.turn/evals        {:optional true} :seon.agent.turn/evals]])
 
@@ -929,7 +938,9 @@
            [(merge {:seon.agent.turn/id id-of-turn :seon.agent.turn/status :done}
                    (select-keys result [:seon.agent.turn/messages
                                         :seon.agent.turn/status
-                                        :seon.agent.turn/llm-retries]))
+                                        :seon.agent.turn/llm-retries
+                                        :seon.agent.turn/llm-usage
+                                        :seon.agent.turn/llm-meta]))
             {:seon.agent/id id :seon.agent/state :idle}]}))
       result)
     (catch :default e
@@ -986,7 +997,7 @@
 (defn- transport-error?
   "True when `resp` failed TRANSPORT-shaped: the provider fetch threw
    before any HTTP status (`:seon.ai/transport?` on the error — see
-   seon.ai.deepseek). HTTP 4xx/5xx, parse failures, and wall-clock
+   seon.ai.openai-compat). HTTP 4xx/5xx, parse failures, and wall-clock
    timeouts are NOT transport errors and never retry."
   [resp]
   (true? (get-in resp [:seon.ai/error :seon.ai/transport?])))
@@ -1029,7 +1040,14 @@
   [{:seon.agent/keys [id llm-fn compile-state]
     :seon.agent.turn/keys  [id-of-turn prompt-text]}]
   (let [resp    (await (call-llm! id id-of-turn llm-fn prompt-text))
-        retries (:seon.agent.turn/llm-retries resp)]
+        retries (:seon.agent.turn/llm-retries resp)
+        ;; #25 tier-2: the provider's structured usage + unrecognized
+        ;; top-level fields ride under :seon.ai/raw (the adapter's full
+        ;; response). Both ABSENT on a stub-LLM turn or when the
+        ;; provider returns neither — optional-is-absent.
+        raw     (:seon.ai/raw resp)
+        usage   (:seon.ai/usage raw)
+        pfields (:seon.ai/provider-fields raw)]
     (if-let [err (:seon.ai/error resp)]
       (cond->
         {:seon.agent/eval-count 0
@@ -1046,7 +1064,9 @@
            :seon.agent.message/hops    0}]}
         retries (assoc :seon.agent.turn/llm-retries retries))
       (cond-> (await (ask-and-eval-reply! resp id id-of-turn compile-state))
-        retries (assoc :seon.agent.turn/llm-retries retries)))))
+        retries     (assoc :seon.agent.turn/llm-retries retries)
+        (seq usage) (assoc :seon.agent.turn/llm-usage usage)
+        (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))))
 
 (defn- persist-prompt!
   "Write the turn's full assembled prompt to

@@ -159,7 +159,8 @@ design pass. Listed here so future agents don't re-litigate them.
   per-entity-specificity dispatch system.
 - **No `seon.blob` namespace in v1.** Full subsystem ships in v2.
 - **Namespace count: 6 in v1, 7 in v2.** `seon.db`, `seon.schema`,
-  `seon.fs`, `seon.eval`, `seon.agent`, `seon.ai.deepseek` (v1) +
+  `seon.fs`, `seon.eval`, `seon.agent`, `seon.ai.openai-compat`
+  (renamed from `seon.ai.deepseek` 2026-06-16; also `seon.ai.anthropic`) (v1) +
   `seon.blob` (v2). Earlier drafts split ID generation into
   `seon.id`; collapsed into `seon.agent` 2026-05-22 — a 5-line
   generator + a single schema does not earn its own namespace.

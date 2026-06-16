@@ -7,7 +7,7 @@
    One singleton row (identity `::id` = \"config\") carries up to
    eight attrs: `::provider`, `::model`, `::temperature`,
    `::max-tokens`, `::thinking`, `::timeout-ms`, `::base-url`,
-   `::api-key-env`. Adapters ([[seon.ai.deepseek]],
+   `::api-key-env`. Adapters ([[seon.ai.openai-compat]],
    [[seon.ai.anthropic]]) read it PER CALL via [[current]] —
    reactive-context: no cached atom, absent row/attr = each adapter's
    shipped defaults, byte-identical wire bodies to the pre-C-18 output.
@@ -40,8 +40,8 @@
 
 ;; ============================================================
 ;; Shared schemas — the :seon.ai/* vocabulary both providers use.
-;; (Moved here from seon.ai.deepseek — the keywords' namespace now
-;; matches the code ns that registers them.)
+;; (Moved here from the OpenAI-compatible adapter — the keywords'
+;; namespace now matches the code ns that registers them.)
 ;; ============================================================
 
 (schema/register! ::text :string)
@@ -65,6 +65,18 @@
 (schema/register! ::transport? :boolean)
 (schema/register! ::raw-body :string)
 
+;; Tool/function-calling + extra-request + provider-metadata vocabulary
+;; (SDK migration, 2026-06-16). These ride third-party-shaped maps: the
+;; OpenAI/Anthropic tool defs, the returned tool_calls / tool_use, the
+;; unrecognized top-level response fields (#25), and the generic extra
+;; request body (e.g. Qwen's chat_template_kwargs). :any / :map are
+;; deliberate third-party boundaries — seon does not own these shapes.
+(schema/register! ::tools          [:sequential :map])
+(schema/register! ::tool-choice    :any)
+(schema/register! ::tool-calls     [:sequential :map])
+(schema/register! ::provider-fields [:map])
+(schema/register! ::extra-body     [:map])
+
 ;; The errors-are-values envelope for LLM calls. Every failure mode
 ;; (timeout, fetch throw, HTTP non-2xx, unparseable body, refusal)
 ;; resolves to a response map carrying this under :seon.ai/error —
@@ -86,7 +98,7 @@
 (schema/register! ::id [:string {:seon.db/identity true}])  ; always "config"
 ;; :openai-compat = any OpenAI-compatible chat-completions gateway
 ;; (enterprise, bearer-keyed). Same wire path as :deepseek
-;; (seon.ai.deepseek) with endpoint + key resolved from ::base-url /
+;; (seon.ai.openai-compat) with endpoint + key resolved from ::base-url /
 ;; ::api-key-env instead of the shipped deepseek defaults.
 (schema/register! ::provider [:enum :deepseek :anthropic :openai-compat])
 ;; The FULL chat-completions URL of an OpenAI-compatible gateway
@@ -100,7 +112,7 @@
 ;; itself (keys are read at call time from process.env, never
 ;; transacted). Env: SEON_AI_API_KEY_ENV. Absent → the provider's
 ;; default (DEEPSEEK_API_KEY for :deepseek) and the conventional
-;; SEON_AI_API_KEY fallback — see seon.ai.deepseek's key resolution.
+;; SEON_AI_API_KEY fallback — see seon.ai.openai-compat's key resolution.
 (schema/register! ::api-key-env [:string {:min 1}])
 ;; "false" | "true" | reasoning-effort string ("high"/"max"/…). Stored
 ;; as the env var's string shape; [[thinking-mode]] is the parse.
@@ -118,7 +130,10 @@
    [::thinking   {:optional true} ::thinking]
    [::timeout-ms {:optional true} ::timeout-ms]
    [::base-url    {:optional true} ::base-url]
-   [::api-key-env {:optional true} ::api-key-env]])
+   [::api-key-env {:optional true} ::api-key-env]
+   [::tools       {:optional true} ::tools]
+   [::tool-choice {:optional true} ::tool-choice]
+   [::extra-body  {:optional true} ::extra-body]])
 
 (schema/register! ::config
   [:map {:seon.db/entity true}
@@ -130,7 +145,10 @@
    [::thinking    {:optional true} ::thinking]
    [::timeout-ms  {:optional true} ::timeout-ms]
    [::base-url    {:optional true} ::base-url]
-   [::api-key-env {:optional true} ::api-key-env]])
+   [::api-key-env {:optional true} ::api-key-env]
+   [::tools       {:optional true} ::tools]
+   [::tool-choice {:optional true} ::tool-choice]
+   [::extra-body  {:optional true} ::extra-body]])
 
 (schema/register! ::synced? :boolean)
 (schema/register! ::sync-request

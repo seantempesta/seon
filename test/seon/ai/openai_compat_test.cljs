@@ -1,0 +1,468 @@
+(ns seon.ai.openai-compat-test
+  "Tests for the OpenAI-compatible client (official `openai` SDK):
+     - request-params with NO env + NO config row keeps the pre-SDK wire
+       shape (deepseek-v4-pro, temperature 0.7, max_tokens 4096,
+       thinking disabled) PLUS the streaming knobs (no `:stream false`;
+       `:stream_options {:include_usage true}`)
+     - the :seon.ai/config row drives thinking / model / temperature /
+       max-tokens PER CALL; explicit request opts win over the row
+     - tools / tool_choice included only when passed; :extra-body is a
+       SEPARATE 2nd-arg body, never inlined into params
+     - SDK error classification onto the :seon.ai/error envelope
+       (transport / status) over an injected fetch
+     - happy-path streaming assembly + provider-fields (#25) + tool-calls
+
+   THE WIRE-TEST SEAM: `seon.ai.openai-compat/*fetch*` is a dynamic var
+   the adapter's `make-client` injects as the SDK `:fetch` option when
+   bound. We ROOT-`set!` it (not `binding`) because `complete` is an
+   instrumented ^:async fn whose body runs past a `binding`'s
+   synchronous unwind — a root set! survives the async boundary. Each
+   test restores it to nil in a `.finally`.
+
+   Run interactively via MCP eval:
+
+     (require 'seon.ai.openai-compat-test :reload)
+     (cljs.test/run-tests 'seon.ai.openai-compat-test)"
+  (:require
+    [clojure.string :as str]
+    [cljs.test :refer [deftest is testing async]]
+    ["openai" :as OpenAI]
+    [datahike.api :as d]
+    [seon.ai :as ai]
+    [seon.ai.openai-compat :as openai]
+    [seon.db :as db]))
+
+;; ============================================================
+;; Conn helpers — fresh :memory conn carrying the :seon.ai/config
+;; attrs, bound as the ROOT db/*conn* so request-params' per-call
+;; config read sees it.
+;; ============================================================
+
+(defn- fresh-conn
+  []
+  (let [cfg {:store              {:backend :memory :id (random-uuid)}
+             :schema-flexibility :write
+             :keep-history?      true}]
+    (-> (d/create-database cfg)
+        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [conn]
+                 (-> (d/transact!
+                       conn
+                       {:tx-data (into (db/malli->datahike-schema
+                                         [::ai/id ::ai/provider ::ai/model
+                                          ::ai/temperature ::ai/max-tokens
+                                          ::ai/thinking ::ai/timeout-ms
+                                          ::ai/base-url ::ai/api-key-env])
+                                       (db/tx-meta-datahike-schema))})
+                     (.then (fn [_] conn))))))))
+
+(defn- with-conn
+  [body]
+  (-> (fresh-conn)
+      (.then (fn [conn]
+               (let [orig db/*conn*]
+                 (set! db/*conn* conn)
+                 (-> (js/Promise.resolve (body conn))
+                     (.finally (fn [] (set! db/*conn* orig)))))))))
+
+;; ============================================================
+;; Pure request-params shape.
+;; ============================================================
+
+(deftest request-params-default-shape
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (let [params (openai/request-params {:seon.ai/ctx           "the ctx"
+                                                 :seon.ai/system-prompt "sys"})]
+              (is (= {:model          "deepseek-v4-pro"
+                      :messages       [{:role "system" :content "sys"}
+                                       {:role "user"   :content "the ctx"}]
+                      :temperature    0.7
+                      :max_tokens     4096
+                      :stream_options {:include_usage true}
+                      :thinking       {:type "disabled"}}
+                     params)
+                  (str "no env, no row → the pre-SDK body shape PLUS "
+                       ":stream_options, and NO :stream key (the SDK owns "
+                       "streaming)"))
+              (is (not (contains? params :stream))
+                  "no manual :stream flag — the SDK sets it"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest config-row-drives-params-per-call
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            ;; Row absent → thinking disabled.
+            (is (= {:type "disabled"}
+                   (:thinking (openai/request-params {:seon.ai/ctx "hi"}))))
+            (-> (db/transact!
+                  {:seon.db/tx-data [{::ai/id "config" ::ai/thinking "true"}]})
+                (.then (fn [{ok? :seon.db/ok?}]
+                         (is (true? ok?))
+                         (let [p (openai/request-params {:seon.ai/ctx "hi"})]
+                           (is (= {:type "enabled"} (:thinking p)))
+                           (is (not (contains? p :reasoning_effort))))
+                         (db/transact!
+                           {:seon.db/tx-data [{::ai/id "config" ::ai/thinking "high"}]})))
+                (.then (fn [_]
+                         (let [p (openai/request-params {:seon.ai/ctx "hi"})]
+                           (is (= {:type "enabled"} (:thinking p)))
+                           (is (= "high" (:reasoning_effort p))))
+                         (db/transact!
+                           {:seon.db/tx-data [{::ai/id          "config"
+                                               ::ai/thinking    "false"
+                                               ::ai/model       "deepseek-chat"
+                                               ::ai/temperature 0.2
+                                               ::ai/max-tokens  99}]})))
+                (.then (fn [_]
+                         (let [p (openai/request-params {:seon.ai/ctx "hi"})]
+                           (is (= {:type "disabled"} (:thinking p)))
+                           (is (= "deepseek-chat" (:model p)))
+                           (is (= 0.2 (:temperature p)))
+                           (is (= 99 (:max_tokens p))))
+                         ;; Explicit request opts WIN over the row.
+                         (let [p (openai/request-params
+                                   {:seon.ai/ctx         "x"
+                                    :seon.ai/model       "deepseek-v4-pro"
+                                    :seon.ai/temperature 0.9
+                                    :seon.ai/max-tokens  7})]
+                           (is (= "deepseek-v4-pro" (:model p)))
+                           (is (= 0.9 (:temperature p)))
+                           (is (= 7 (:max_tokens p)))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest tools-included-only-when-passed
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (let [tools [{:type "function"
+                          :function {:name "f" :parameters {}}}]
+                  p0    (openai/request-params {:seon.ai/ctx "hi"})
+                  p1    (openai/request-params {:seon.ai/ctx         "hi"
+                                                :seon.ai/tools       tools
+                                                :seon.ai/tool-choice "auto"})]
+              (is (not (contains? p0 :tools)) "no tools opt → no :tools key")
+              (is (not (contains? p0 :tool_choice)))
+              (is (= tools (:tools p1)) "tools passthrough verbatim")
+              (is (= "auto" (:tool_choice p1))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest extra-body-is-not-inlined-into-params
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (let [p (openai/request-params
+                      {:seon.ai/ctx        "hi"
+                       :seon.ai/extra-body {:chat_template_kwargs {:enable_thinking false}}})]
+              (is (not (contains? p :extra-body))
+                  ":extra-body is the SEPARATE 2nd-arg body, never in params")
+              (is (not (contains? p :chat_template_kwargs))
+                  "… and its contents are NOT inlined into params either"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; Wire-test seam — inject a fetch into the SDK client via *fetch*.
+;; ============================================================
+
+(defn- with-env
+  "Run `body` (0-arg → Promise) with process.env vars set/deleted per
+   `settings` (var-name → string, or nil = deleted); snapshot every
+   touched var first and restore it EXACTLY after."
+  [settings body]
+  (let [env   (.. js/process -env)
+        saved (into {} (map (fn [[k _]] [k (aget env k)])) settings)]
+    (doseq [[k v] settings]
+      (if (some? v) (aset env k v) (js-delete env k)))
+    (-> (js/Promise.resolve (body))
+        (.finally (fn []
+                    (doseq [[k _] settings]
+                      (let [v (get saved k)]
+                        (if (some? v) (aset env k v) (js-delete env k)))))))))
+
+(defn- with-fetch
+  "Run `body` (0-arg → Promise) with `seon.ai.openai-compat/*fetch*`
+   root-set! to `stub`; restore nil after. Root set! (not binding)
+   because complete's instrumented ^:async body runs past a binding's
+   synchronous unwind."
+  [stub body]
+  (set! openai/*fetch* stub)
+  (-> (js/Promise.resolve (body))
+      (.finally (fn [] (set! openai/*fetch* nil)))))
+
+(defn- with-stubbed
+  "Stubbed fetch + a deterministic :deepseek key environment (a test
+   DEEPSEEK_API_KEY, provider-steering vars cleared so an operator env
+   can't flip the provider mid-suite). All restored after."
+  [stub body]
+  (with-env {"DEEPSEEK_API_KEY"    "test-key"
+             "SEON_AI_PROVIDER"    nil
+             "SEON_AI_API_KEY"     nil
+             "SEON_AI_API_KEY_ENV" nil}
+    #(with-fetch stub body)))
+
+(defn- sse-stream
+  "A ReadableStream that enqueues `s` (UTF-8) and closes — the shape an
+   injected fetch returns as a streaming Response body."
+  [s]
+  (js/ReadableStream.
+    #js{:start (fn [ctrl]
+                 (.enqueue ctrl (.encode (js/TextEncoder.) s))
+                 (.close ctrl))}))
+
+(defn- chunk-line [m] (str "data: " (.stringify js/JSON (clj->js m)) "\n\n"))
+
+(def ^:private usage-fixture
+  {:prompt_tokens 3 :completion_tokens 5 :total_tokens 8})
+
+(defn- sse-completion
+  "A canned OpenAI streaming chat-completion: one content-delta chunk, a
+   finish chunk, a usage-only final chunk, then [DONE]. `extra-top`
+   merges into the first chunk's top-level (to exercise provider-fields)
+   and `tool-calls` rides the content delta when given."
+  ([] (sse-completion {} nil))
+  ([extra-top tool-calls]
+   (str (chunk-line (merge {:id "x" :object "chat.completion.chunk" :created 1
+                            :model "m"
+                            :choices [{:index 0
+                                       :delta (cond-> {:role "assistant" :content "hi"}
+                                                tool-calls (assoc :tool_calls tool-calls))
+                                       :finish_reason nil}]}
+                           extra-top))
+        (chunk-line {:id "x" :object "chat.completion.chunk" :created 1 :model "m"
+                     :choices [{:index 0 :delta {} :finish_reason "stop"}]})
+        (chunk-line {:id "x" :object "chat.completion.chunk" :created 1 :model "m"
+                     :choices [] :usage usage-fixture})
+        "data: [DONE]\n\n")))
+
+(defn- streaming-fetch
+  "An injected fetch that records [url init] into `captured` and returns
+   a 200 streaming Response whose body is `sse-string`."
+  [captured sse-string]
+  (fn [url init]
+    (reset! captured {:url     url
+                      :auth    (some-> init .-headers (.get "authorization"))
+                      :body    (js->clj (.parse js/JSON (.-body init))
+                                        :keywordize-keys true)})
+    (js/Promise.resolve
+      (js/Response. (sse-stream sse-string)
+                    #js{:status 200 :headers #js{"content-type" "text/event-stream"}}))))
+
+(deftest happy-path-streams-text-and-usage
+  (async done
+    (let [captured (atom nil)]
+      (-> (with-stubbed (streaming-fetch captured (sse-completion))
+            #(openai/complete {:seon.ai/ctx "hi" :seon.ai/system-prompt "sys"}))
+          (.then
+            (fn [{:seon.ai/keys [text usage error] :as resp}]
+              (is (nil? error))
+              (is (= "hi" text) "the streamed content deltas assemble to text")
+              (is (= usage-fixture usage) "usage ALWAYS set on success")
+              (is (= "stop" (:seon.ai.openai-compat/finish-reason resp)))
+              ;; The SDK posts to <root>/chat/completions and sends the
+              ;; bearer — proves sdk-base-url strip-reconciliation here is
+              ;; the default /v1 root path.
+              (is (str/ends-with? (:url @captured) "/chat/completions"))
+              (is (= "Bearer test-key" (:auth @captured)))
+              (is (= {:include_usage true} (-> @captured :body :stream_options))
+                  ":stream_options rides the wire")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest base-url-strip-reconciliation
+  (async done
+    (let [captured (atom nil)]
+      (-> (with-conn
+            (fn [_conn]
+              (with-env {"SEON_AI_PROVIDER"    "openai-compat"
+                         "ACME_GW_KEY"         "gw-secret"
+                         "SEON_AI_API_KEY"     nil
+                         "SEON_AI_API_KEY_ENV" nil
+                         "SEON_AI_BASE_URL"    nil
+                         "DEEPSEEK_API_KEY"    "decoy"}
+                (fn []
+                  (-> (db/transact!
+                        {:seon.db/tx-data
+                         ;; The LEGACY full chat-completions URL — the
+                         ;; adapter must strip it to the /v1 root, then
+                         ;; the SDK re-appends /chat/completions.
+                         [{::ai/id          "config"
+                           ::ai/base-url    "https://gw.example.com/v1/chat/completions"
+                           ::ai/api-key-env "ACME_GW_KEY"}]})
+                      (.then
+                        (fn [{ok? :seon.db/ok?}]
+                          (is (true? ok?))
+                          (with-fetch (streaming-fetch captured (sse-completion))
+                            #(openai/complete {:seon.ai/ctx "hi"}))))
+                      (.then
+                        (fn [{:seon.ai/keys [error]}]
+                          (is (nil? error))
+                          (is (= "https://gw.example.com/v1/chat/completions"
+                                 (:url @captured))
+                              "full /v1/chat/completions config → stripped to /v1, re-appended by the SDK = same URL")
+                          (is (= "Bearer gw-secret" (:auth @captured))
+                              "key resolves via api-key-env, never the deepseek default"))))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest provider-fields-and-tool-calls-surface
+  (async done
+    (let [captured (atom nil)
+          tc       [{:index 0 :id "t1" :type "function"
+                     :function {:name "f" :arguments "{}"}}]]
+      (-> (with-stubbed
+            (streaming-fetch captured
+                             (sse-completion {:seon_unknown "keepme"} tc))
+            #(openai/complete {:seon.ai/ctx "hi"}))
+          (.then
+            (fn [{:seon.ai/keys [tool-calls provider-fields error]}]
+              (is (nil? error))
+              (is (= {:seon_unknown "keepme"} provider-fields)
+                  "an unrecognized top-level completion field is preserved (#25)")
+              (is (seq tool-calls) "tool_calls surfaced when present")
+              (is (= "t1" (-> tool-calls first :id)))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest extra-body-reaches-the-wire
+  (async done
+    (let [captured (atom nil)]
+      (-> (with-stubbed (streaming-fetch captured (sse-completion))
+            #(openai/complete
+               {:seon.ai/ctx        "hi"
+                :seon.ai/extra-body {:chat_template_kwargs {:enable_thinking false}}}))
+          (.then
+            (fn [{:seon.ai/keys [error]}]
+              (is (nil? error))
+              (is (= {:enable_thinking false}
+                     (-> @captured :body :chat_template_kwargs))
+                  "the 2nd-arg {:body extra} merges into the request body on the wire")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ============================================================
+;; Error classification — the SDK's error classes onto the envelope.
+;; ============================================================
+
+(deftest fetch-throw-is-transport-shaped
+  (async done
+    (-> (with-stubbed
+          (fn [_ _] (js/Promise.reject (js/TypeError. "fetch failed")))
+          #(openai/complete {:seon.ai/ctx "hi"}))
+        (.then
+          (fn [{:seon.ai/keys [text error]}]
+            (is (= "" text) "errors-as-values — empty text, never a rejection")
+            (is (true? (:seon.ai/transport? error))
+                "the SDK wraps a thrown fetch in APIConnectionError → the retryable class")
+            (is (not (contains? error :seon.ai/timeout?))
+                "a network throw is not a wall-clock abort")))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest http-status-error-is-not-transport-shaped
+  (async done
+    (-> (with-stubbed
+          (fn [_ _]
+            (js/Promise.resolve
+              (js/Response. "bad request"
+                            #js{:status 400
+                                :headers #js{"content-type" "application/json"}})))
+          #(openai/complete {:seon.ai/ctx "hi"}))
+        (.then
+          (fn [{:seon.ai/keys [text error]}]
+            (is (= "" text))
+            (is (= 400 (:seon.ai/status error))
+                "the SDK turns a 400 Response into an APIError carrying .status")
+            (is (not (contains? error :seon.ai/transport?))
+                "HTTP/processing errors must NEVER look retryable")
+            (is (not (contains? error :seon.ai/timeout?)))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest timeout-class-maps-to-timeout-flag
+  ;; A constructed APIConnectionTimeoutError (a SUBCLASS of
+  ;; APIConnectionError) must map to :timeout?, NOT :transport? — the
+  ;; branch order in error->envelope checks timeout/abort first.
+  (testing "error->envelope classifies the timeout subclass correctly"
+    (let [classify @#'openai/error->envelope
+          tmo      (new (.-APIConnectionTimeoutError OpenAI) #js{})
+          env      (classify "OpenAI-compat" tmo)]
+      (is (true? (:seon.ai/timeout? env)))
+      (is (not (contains? env :seon.ai/transport?))
+          "timeout is checked BEFORE the connection class it subclasses"))))
+
+(deftest max-retries-zero-means-one-fetch-on-500
+  (async done
+    (let [calls (atom 0)]
+      (-> (with-stubbed
+            (fn [_ _]
+              (swap! calls inc)
+              (js/Promise.resolve
+                (js/Response. "boom"
+                              #js{:status 500
+                                  :headers #js{"content-type" "application/json"}})))
+            #(openai/complete {:seon.ai/ctx "hi"}))
+          (.then
+            (fn [{:seon.ai/keys [error]}]
+              (is (= 500 (:seon.ai/status error)))
+              (is (= 1 @calls)
+                  "maxRetries:0 — the SDK does NOT retry; the agent loop is the sole retry authority")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ============================================================
+;; Config-gap guards (no fetch attempted).
+;; ============================================================
+
+(deftest openai-compat-missing-base-url-is-a-legible-config-error
+  (async done
+    (let [called (atom 0)]
+      (-> (with-conn
+            (fn [_conn]
+              (with-env {"SEON_AI_PROVIDER"    "openai-compat"
+                         "SEON_AI_BASE_URL"    nil
+                         "SEON_AI_API_KEY"     "k"
+                         "SEON_AI_API_KEY_ENV" nil}
+                (fn []
+                  (with-fetch (fn [_ _]
+                                (swap! called inc)
+                                (js/Promise.resolve
+                                  (js/Response. "" #js{:status 200})))
+                    #(openai/complete {:seon.ai/ctx "hi"}))))))
+          (.then
+            (fn [{:seon.ai/keys [text error]}]
+              (is (= "" text) "error envelope, not a throw")
+              (is (zero? @called) "no fetch attempted on a config gap")
+              (is (str/includes? (:seon.ai/msg error) "SEON_AI_BASE_URL"))
+              (is (str/includes? (:seon.ai/msg error) ":seon.ai/base-url"))
+              (is (not (contains? error :seon.ai/transport?)))
+              (is (not (contains? error :seon.ai/timeout?)))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest openai-compat-missing-key-is-a-legible-config-error
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (with-env {"SEON_AI_PROVIDER"    "openai-compat"
+                       "SEON_AI_API_KEY"     nil
+                       "SEON_AI_API_KEY_ENV" nil
+                       "DEEPSEEK_API_KEY"    "decoy"}
+              (fn []
+                (-> (db/transact!
+                      {:seon.db/tx-data
+                       [{::ai/id       "config"
+                         ::ai/base-url "https://gw.example.com/v1"}]})
+                    (.then (fn [_] (openai/complete {:seon.ai/ctx "hi"}))))))))
+        (.then
+          (fn [{:seon.ai/keys [text error]}]
+            (is (= "" text))
+            (is (str/includes? (:seon.ai/msg error) "SEON_AI_API_KEY"))
+            (is (not (contains? error :seon.ai/transport?)))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

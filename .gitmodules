@@ -91,3 +91,9 @@
 [submodule "reference-code/shadow-cljs"]
 	path = reference-code/shadow-cljs
 	url = https://github.com/thheller/shadow-cljs.git
+[submodule "reference-code/openai-node"]
+	path = reference-code/openai-node
+	url = https://github.com/openai/openai-node.git
+[submodule "reference-code/anthropic-sdk-typescript"]
+	path = reference-code/anthropic-sdk-typescript
+	url = https://github.com/anthropics/anthropic-sdk-typescript.git

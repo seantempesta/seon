@@ -1,10 +1,13 @@
 (ns seon.ai.anthropic
-  "Anthropic Messages API client (C-20). ^:async — returns Promises.
-   Same agent-adapter contract as [[seon.ai.deepseek]]: one
-   agent-facing fn, [[agent-adapter]], returns `(fn [ctx-string])`
-   compatible with `seon.agent/run-turn-once!`'s `llm-fn`. Reads the
-   API key from `ANTHROPIC_API_KEY` in `process.env`. Raw js/fetch
-   wire shape mirroring deepseek.cljs — one pattern, no SDK dep.
+  "Anthropic Messages API client (C-20) on the official
+   `@anthropic-ai/sdk` Node SDK (SDK migration, 2026-06-16). ^:async —
+   returns Promises. Same agent-adapter contract as
+   [[seon.ai.openai-compat]]: one agent-facing fn, [[agent-adapter]],
+   returns `(fn [ctx-string])` compatible with
+   `seon.agent/run-turn-once!`'s `llm-fn`. Reads the API key from
+   `ANTHROPIC_API_KEY` in `process.env`. The SDK owns streaming
+   (`.stream` + `.finalMessage`, buffered to one assembled Message) and
+   sets the `anthropic-version` header itself.
 
    Call settings come from the `:seon.ai/config` row, read PER CALL
    via `seon.ai/current` (C-18). Precedence: explicit request opt >
@@ -14,8 +17,8 @@
    strings — do NOT append date suffixes):
      - default model \"claude-opus-4-8\"; also valid:
        \"claude-sonnet-4-6\", \"claude-haiku-4-5\", \"claude-fable-5\"
-     - POST https://api.anthropic.com/v1/messages; headers `x-api-key`
-       + `anthropic-version: 2023-06-01`
+     - POST https://api.anthropic.com/v1/messages (the SDK owns the URL
+       + the `x-api-key` / `anthropic-version` headers)
      - thinking is ADAPTIVE-ONLY on Opus 4.7+/Fable: config thinking
        truthy → {:thinking {:type \"adaptive\"}}; falsy → OMIT the key
        entirely (an explicit {:type \"disabled\"} 400s on Fable)
@@ -46,6 +49,7 @@
        Opus 4.x) silently don't cache; verify with usage
        :cache_read_input_tokens on call 2."
   (:require [clojure.string :as str]
+            ["@anthropic-ai/sdk" :as Anthropic]
             [seon.ai :as ai]
             [seon.ctx :as ctx]
             [seon.error :as error]
@@ -63,7 +67,10 @@
    [:seon.ai/ctx           :seon.ai/ctx]
    [:seon.ai/system-prompt {:optional true} :seon.ai/system-prompt]
    [:seon.ai/model         {:optional true} :seon.ai/model]
-   [:seon.ai/max-tokens    {:optional true} :seon.ai/max-tokens]])
+   [:seon.ai/max-tokens    {:optional true} :seon.ai/max-tokens]
+   [:seon.ai/tools         {:optional true} :seon.ai/tools]
+   [:seon.ai/tool-choice   {:optional true} :seon.ai/tool-choice]
+   [:seon.ai/extra-body    {:optional true} :seon.ai/extra-body]])
 
 (schema/register! :seon.ai.anthropic/stop-reason :string)
 
@@ -73,7 +80,9 @@
    [:seon.ai/text                   :string]
    [:seon.ai/error                  {:optional true} :seon.ai/error]
    [:seon.ai.anthropic/stop-reason  {:optional true} :seon.ai.anthropic/stop-reason]
-   [:seon.ai/usage                  {:optional true} :map]])
+   [:seon.ai/usage                  {:optional true} :seon.ai/usage]
+   [:seon.ai/tool-calls             {:optional true} :seon.ai/tool-calls]
+   [:seon.ai/provider-fields        {:optional true} :seon.ai/provider-fields]])
 
 ;; ============================================================
 ;; Config — the shipped defaults. The :seon.ai/config row (read per
@@ -81,43 +90,58 @@
 ;; ============================================================
 
 (def ^:private default-model      "claude-opus-4-8")
-(def ^:private default-endpoint   "https://api.anthropic.com/v1/messages")
 ;; max_tokens is REQUIRED by the Messages API. 16000 keeps long
-;; non-streaming replies from truncating mid-thought (current API
-;; guidance) while staying under HTTP timeouts.
+;; replies from truncating mid-thought (current API guidance) while
+;; staying under HTTP timeouts.
 (def ^:private default-max-tokens 16000)
 (def ^:private default-timeout-ms 60000)
-(def ^:private anthropic-version  "2023-06-01")
 
-(defn- api-key []
-  (or (some-> js/process .-env .-ANTHROPIC_API_KEY)
-      (throw (ex-info
-               "ANTHROPIC_API_KEY not set in process.env"
-               {:seon.ai.anthropic/error :missing-api-key}))))
+(defn- api-key
+  "The Anthropic bearer key from `ANTHROPIC_API_KEY` in process.env, or
+   nil — read at call time, never transacted. [[complete]] turns a nil
+   into a legible config-error envelope (never a throw)."
+  []
+  (let [v (some-> js/process .-env .-ANTHROPIC_API_KEY)]
+    (when (and (string? v) (seq v)) v)))
+
+(defn- config-error
+  "Errors-as-values envelope for a CALL-TIME config gap (no API key).
+   Never transport-flagged — a config error must not look retryable.
+   Logged loudly, returned as a value."
+  [msg]
+  (let [err {:seon.ai/msg msg}]
+    (ai/log-error! "Anthropic" err)
+    {:seon.ai/text "" :seon.ai/error err}))
 
 ;; ============================================================
 ;; Request body.
 ;; ============================================================
 
-(defn request-body
-  "Build the Anthropic Messages API JSON request body as a CLJ map.
-   The bare keys (:model, :messages, :system, …) are the API's wire
-   format — a third-party boundary, deliberately un-namespaced.
+(defn request-params
+  "Build the Anthropic Messages API request PARAMS as a CLJ map. The
+   bare keys (:model, :messages, :system, …) are the API's wire format
+   — a third-party boundary, deliberately un-namespaced. NOTE: the
+   `:seon.ai/extra-body` map is NOT inlined here — it is passed
+   SEPARATELY to the SDK's 2nd-arg request-options `{:body …}` (see
+   [[complete]]).
 
    Reads the `:seon.ai/config` row PER CALL (`seon.ai/current`);
    explicit request opts win over the row, the row wins over the
    shipped defaults. Thinking: config row truthy → adaptive; falsy →
    the :thinking key is ABSENT (never {:type \"disabled\"} — 400s on
    Fable). NEVER carries :temperature/:top_p/:top_k (400 on Opus
-   4.7+/Fable). Public so tests and live debugging can inspect exactly
-   what goes over the wire."
+   4.7+/Fable). `:tools` / `:tool_choice` included ONLY when present
+   (request opt > config row). Public so tests and live debugging can
+   inspect exactly what goes over the wire."
   {:malli/schema [:=> [:cat :seon.ai.anthropic/complete-request] :map]}
-  [{:seon.ai/keys [ctx model max-tokens] :as request}]
+  [{:seon.ai/keys [ctx model max-tokens tools tool-choice] :as request}]
   (let [cfg (ai/current)
         {:seon.render/keys [stable-text volatile-text]} (ctx/split-context ctx)
         ;; Both halves must be non-blank to split — a boundary-less ctx
         ;; (tests, stub prompts) degrades to the pre-split wire shape.
-        split? (not (or (str/blank? stable-text) (str/blank? volatile-text)))]
+        split?  (not (or (str/blank? stable-text) (str/blank? volatile-text)))
+        tools*  (or tools (:seon.ai/tools cfg))
+        choice* (or tool-choice (:seon.ai/tool-choice cfg))]
     (cond->
       {:model      (or model (:seon.ai/model cfg) default-model)
        :max_tokens (or max-tokens (:seon.ai/max-tokens cfg) default-max-tokens)
@@ -140,10 +164,17 @@
       ;; Adaptive-only: any truthy thinking mode (true or an effort
       ;; string) maps to adaptive; reasoning-effort levels are a
       ;; deepseek wire concept with no Messages-API equivalent here.
-      (ai/thinking-mode cfg) (assoc :thinking {:type "adaptive"}))))
+      (ai/thinking-mode cfg) (assoc :thinking {:type "adaptive"})
+      (some? tools*)         (assoc :tools tools*)
+      (some? choice*)        (assoc :tool_choice choice*))))
 
-(defn- body-json [request]
-  (.stringify js/JSON (clj->js (request-body request))))
+(defn- request-extra-body
+  "The generic extra request fields for this call — `:seon.ai/extra-body`
+   from the request opt (winning) or the config row. nil when neither
+   set (no 2nd-arg body needed)."
+  [request]
+  (or (:seon.ai/extra-body request)
+      (:seon.ai/extra-body (ai/current))))
 
 ;; ============================================================
 ;; Response parsing — :content is an ARRAY of typed blocks; check
@@ -159,18 +190,36 @@
        (map :text)
        (apply str)))
 
-(defn parse-response
-  "Parse a Messages API response body string to a
-   `:seon.ai.anthropic/complete-response` map. `stop_reason`
-   \"refusal\" (Fable safety classifiers; empty content array) becomes
-   a legible `:seon.ai/error` envelope — callers must never read
-   content as a reply when the model declined. Public for tests."
-  {:malli/schema [:=> [:catn [:seon.ai/raw-body :seon.ai/raw-body]]
+(defn- tool-use-blocks
+  "The \"tool_use\" blocks in a Messages API content array (the
+   convenience `:seon.ai/tool-calls` surface). Empty when none."
+  [content]
+  (filterv #(= "tool_use" (:type %)) content))
+
+(def ^:private known-message-keys
+  "Top-level Message keys the adapter consumes directly — the REMAINDER
+   is preserved as :seon.ai/provider-fields (#25). `:parsed_output` is
+   an SDK-added convenience field (not provider data), dropped too."
+  #{:content :usage :id :type :role :model :stop_reason :stop_sequence
+    :parsed_output})
+
+(defn parse-completion
+  "Map the assembled Anthropic Message OBJECT (post `.finalMessage`) to
+   a `:seon.ai.anthropic/complete-response`. `stop_reason` \"refusal\"
+   (Fable safety classifiers; empty content array) becomes a legible
+   `:seon.ai/error` envelope — callers must never read content as a
+   reply when the model declined. `:content` is an ARRAY of typed
+   blocks — \"text\" blocks joined, \"thinking\" skipped, \"tool_use\"
+   surfaced as `:seon.ai/tool-calls`; unrecognized top-level fields →
+   `:seon.ai/provider-fields` (omitted when empty). Public for tests."
+  {:malli/schema [:=> [:catn [:seon.ai.anthropic/message :any]]
                   :seon.ai.anthropic/complete-response]}
-  [body-text]
+  [message]
   (try
-    (let [body        (js->clj (.parse js/JSON body-text) :keywordize-keys true)
-          stop-reason (:stop_reason body)]
+    (let [body        (js->clj message :keywordize-keys true)
+          stop-reason (:stop_reason body)
+          tool-calls  (tool-use-blocks (:content body))
+          extras      (apply dissoc body known-message-keys)]
       (if (= "refusal" stop-reason)
         {:seon.ai/text                  ""
          :seon.ai.anthropic/stop-reason stop-reason
@@ -182,20 +231,69 @@
                             "the call is not billed pre-output.")}}
         (cond-> {:seon.ai/text  (text-of-blocks (:content body))
                  :seon.ai/usage (:usage body)}
-          stop-reason (assoc :seon.ai.anthropic/stop-reason stop-reason))))
+          stop-reason      (assoc :seon.ai.anthropic/stop-reason stop-reason)
+          (seq tool-calls) (assoc :seon.ai/tool-calls tool-calls)
+          (seq extras)     (assoc :seon.ai/provider-fields extras))))
     (catch :default e
       {:seon.ai/text  ""
-       :seon.ai/error {:seon.ai/msg      (str "Failed to parse anthropic response: "
-                                              (error/->message e))
-                       :seon.ai/raw-body body-text}})))
+       :seon.ai/error {:seon.ai/msg (str "Failed to parse anthropic response: "
+                                         (error/->message e))}})))
 
 ;; ============================================================
-;; HTTP — js/fetch + ^:async/await, errors-as-values (same envelope +
-;; failure classification as deepseek: timeout / transport / HTTP).
+;; SDK call — `.stream` + `.finalMessage` (buffered), errors-as-values.
+;; Same envelope + failure classification as openai-compat: timeout /
+;; transport / HTTP-status. The SDK's error classes are the source of
+;; truth (it wraps a thrown fetch into APIConnectionError, an HTTP
+;; non-2xx into an APIError subclass carrying .status).
 ;; ============================================================
+
+(defn- error->envelope
+  "Map an SDK error (or any throwable) onto the `:seon.ai/error`
+   envelope. Branch order matters: APIConnectionTimeoutError /
+   APIUserAbortError are SUBCLASSES of APIConnectionError which is a
+   subclass of APIError — so check timeout/abort FIRST, connection
+   (transport) SECOND, the generic APIError (carries .status) THIRD,
+   and a plain message LAST (parse/unknown — no flags)."
+  [e]
+  (cond
+    (or (instance? (.-APIConnectionTimeoutError Anthropic) e)
+        (instance? (.-APIUserAbortError Anthropic) e))
+    {:seon.ai/msg      (str "Anthropic request timed out / aborted: "
+                           (error/->message e))
+     :seon.ai/timeout? true}
+
+    (instance? (.-APIConnectionError Anthropic) e)
+    {:seon.ai/msg        (str "Anthropic connection failed: " (error/->message e))
+     :seon.ai/transport? true}
+
+    (instance? (.-APIError Anthropic) e)
+    {:seon.ai/msg    (str "Anthropic HTTP " (.-status e) ": " (error/->message e))
+     :seon.ai/status (.-status e)}
+
+    :else
+    {:seon.ai/msg (str "Anthropic call failed: " (error/->message e))}))
+
+(def ^:dynamic *fetch*
+  "Test seam ONLY — see seon.ai.openai-compat/*fetch*. When bound,
+   [[make-client]] hands it to the SDK as the `:fetch` option. nil
+   (default) → the SDK uses Node's native fetch."
+  nil)
+
+(defn- make-client
+  "Construct the `@anthropic-ai/sdk` client. `maxRetries 0` — the agent
+   loop is the single retry authority. The SDK sets the
+   `anthropic-version` + `x-api-key` headers itself. Injects [[*fetch*]]
+   when bound (tests)."
+  [key ms]
+  (new (.-Anthropic Anthropic)
+       (cond-> #js{:apiKey     key
+                   :timeout    ms
+                   :maxRetries 0}
+         *fetch* (doto (aset "fetch" *fetch*)))))
 
 (defn ^:async complete
-  "Send a completion request to Anthropic. Returns a Promise of a
+  "Send a completion request to Anthropic via the official
+   `@anthropic-ai/sdk` (streamed + buffered). Returns a Promise of a
    `:seon.ai.anthropic/complete-response` map.
 
    Request opts (only :seon.ai/ctx required):
@@ -204,53 +302,41 @@
                               (see `seon.ai/effective-system-prompt`)
      :seon.ai/model         — override config row / default-model
      :seon.ai/max-tokens    — override config row / default-max-tokens
+     :seon.ai/tools         — Anthropic tool defs (passthrough, off by default)
+     :seon.ai/tool-choice   — {:type \"auto\"|\"any\"|\"tool\" …}
+     :seon.ai/extra-body    — generic extra request fields
 
-   Network/HTTP failures resolve to `{:seon.ai/text \"\" :seon.ai/error
-   {…}}` — never a rejected Promise. Callers destructure both
-   `:seon.ai/text` and `:seon.ai/error`."
+   A missing API key and network/HTTP failures resolve to
+   `{:seon.ai/text \"\" :seon.ai/error {…}}` — never a rejected
+   Promise. Callers destructure both `:seon.ai/text` and
+   `:seon.ai/error`."
   {:malli/schema [:=> [:cat :seon.ai.anthropic/complete-request]
                   :seon.ai.anthropic/complete-response]}
   [request]
-  (let [controller (js/AbortController.)
-        ms         (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
-        timer      (js/setTimeout #(.abort controller) ms)]
-    (try
-      (let [resp (await (js/fetch default-endpoint
-                          (clj->js
-                            {:method  "POST"
-                             :signal  (.-signal controller)
-                             :headers {:content-type      "application/json"
-                                       :x-api-key         (api-key)
-                                       :anthropic-version anthropic-version}
-                             :body    (body-json request)})))
-            body-text (await (.text resp))
-            _         (js/clearTimeout timer)
-            result    (if (.-ok resp)
-                        (parse-response body-text)
-                        {:seon.ai/text  ""
-                         :seon.ai/error {:seon.ai/msg    (str "Anthropic HTTP " (.-status resp)
-                                                              ": " body-text)
-                                         :seon.ai/status (.-status resp)}})]
-        (when-let [err (:seon.ai/error result)]
-          (ai/log-error! "Anthropic" err))
-        result)
-      (catch :default e
-        (js/clearTimeout timer)
-        (let [aborted? (= "AbortError" (some-> e .-name))
-              err      (cond-> {:seon.ai/msg
-                                (if aborted?
-                                  (str "Anthropic request timed out after " ms
-                                       "ms (wall-clock abort — no reply received)")
-                                  (str "Anthropic fetch failed: " (error/->message e)))}
-                         ;; optional = absent — only present (true) on a
-                         ;; genuine wall-clock abort, never stored false.
-                         aborted?       (assoc :seon.ai/timeout? true)
-                         ;; fetch threw with NO abort = network-shaped
-                         ;; transport failure — the one retryable class.
-                         (not aborted?) (assoc :seon.ai/transport? true))]
-          (ai/log-error! "Anthropic" err)
-          {:seon.ai/text  ""
-           :seon.ai/error err})))))
+  (let [key (api-key)]
+    (if (nil? key)
+      (config-error
+        "ANTHROPIC_API_KEY not set in process.env — set it to the Anthropic bearer key")
+      (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
+            ^js client (make-client key ms)
+            params  (clj->js (request-params request))
+            extra   (request-extra-body request)
+            opts    (when (seq extra) #js{:body (clj->js extra)})
+            ^js messages (.. client -messages)]
+        (try
+          (let [^js stream (if opts
+                          (.stream messages params opts)
+                          (.stream messages params))
+                message (await (.finalMessage stream))
+                result  (parse-completion message)]
+            (when-let [err (:seon.ai/error result)]
+              (ai/log-error! "Anthropic" err))
+            result)
+          (catch :default e
+            (let [err (error->envelope e)]
+              (ai/log-error! "Anthropic" err)
+              {:seon.ai/text  ""
+               :seon.ai/error err})))))))
 
 ;; ============================================================
 ;; Adapter for seon.agent — same bridge shape as deepseek's.
