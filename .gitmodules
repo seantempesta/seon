@@ -97,3 +97,12 @@
 [submodule "reference-code/anthropic-sdk-typescript"]
 	path = reference-code/anthropic-sdk-typescript
 	url = https://github.com/anthropics/anthropic-sdk-typescript.git
+[submodule "reference-code/cider-nrepl"]
+	path = reference-code/cider-nrepl
+	url = https://github.com/clojure-emacs/cider-nrepl
+[submodule "reference-code/orchard"]
+	path = reference-code/orchard
+	url = https://github.com/clojure-emacs/orchard
+[submodule "reference-code/clojurescript"]
+	path = reference-code/clojurescript
+	url = https://github.com/clojure/clojurescript
