@@ -112,7 +112,7 @@ This is the most ambitious existence-proof in any Sean-authored repo. It is *not
 
 Lead the README with **Framing 1's verbatim opener** ("an AI assistant capable of writing bespoke code to build apps interactively to any specification the user desires") because (a) Sean already wrote it and never improved on it; (b) it is the consumer claim Sean spoke this session, in his prior phrasing; (c) it explains the personal-AI promise without overclaiming.
 
-Then layer in Framing 2's "bonded servant" Sanderson line as naming/lore, and Framing 4's technical paragraph as "how it's built". Mention Framing 5 (the Primer) as the canonical existence proof — "the same substrate that tracks your trades can build your child's tutor." The current Framing 3 slogan is the *result* of stripping out everything specific from Framing 1 — restore the original.
+Then layer in Framing 2's "bonded servant" Sanderson line as naming/lore, and Framing 4's technical paragraph as "how it's built". Mention Framing 5 (the Primer) as the canonical existence proof — "the same core that tracks your trades can build your child's tutor." The current Framing 3 slogan is the *result* of stripping out everything specific from Framing 1 — restore the original.
 
 ## 3. The Primer ctx-as-OS pattern in full
 
@@ -222,9 +222,9 @@ Stack proposed (December 2025): Gemini 3 Flash + Gemini 2.5 Flash Image ("Nano B
 
 > We are not just building a chatbot; we are building a companion. The technology stack outlined here — secure, low-latency, and deeply integrated — provides the skeleton. **The "flesh" will be the shared stories, the "Ractor" persona, and the bond formed between the child and the machine.** As *The Diamond Age* posits, the goal is not to create a perfect teacher, but a perfect *context* for the child to teach themselves.
 
-Critical observation: the Primer plan does NOT mention Seon. Sean's working Diamond-Age vision sits in a sibling repo with no current code reference back to Seon. The architecture-vision.md in `docs/prds/primer/` on `feature/super-repl` explicitly bridges them ("scene = data, templates = render fns, transitions = AI-driven state changes" — the substrate IS Seon), but the standalone primer plan from late 2025 doesn't.
+Critical observation: the Primer plan does NOT mention Seon. Sean's working Diamond-Age vision sits in a sibling repo with no current code reference back to Seon. The architecture-vision.md in `docs/prds/primer/` on `feature/super-repl` explicitly bridges them ("scene = data, templates = render fns, transitions = AI-driven state changes" — the core IS Seon), but the standalone primer plan from late 2025 doesn't.
 
-**Implication for README:** Sean's most evocative writing about AI-as-companion lives in a repo that does not yet say "this runs on Seon." Bridging that — explicitly noting that the Primer's substrate IS the Seon runtime — would let the README borrow the Diamond Age frame without overclaiming.
+**Implication for README:** Sean's most evocative writing about AI-as-companion lives in a repo that does not yet say "this runs on Seon." Bridging that — explicitly noting that the Primer's core IS the Seon runtime — would let the README borrow the Diamond Age frame without overclaiming.
 
 ### 5.3 `~/src/_publishing/` — the curated lineage archive
 
@@ -242,7 +242,7 @@ This is closer to Framing 4 than the live README, with the verbs more active.
 
 **`_publishing/seon-2024-10-kit-migration/README.md`** — Kit framework experiment, Oct 2024 → Jan 2025:
 
-> Concurrent sibling to seon-2024-10-xtdb-biff (started one day later, on the same week). Where the Biff exploration tested one Clojure framework, this repo tested another — Kit — to find which one provided the right substrate for an AI-driven runtime. 45 commits over ~3 months. ... seon eventually adopted neither and built its own Integrant-based composition. ... **Foundations for code-graph analysis.** Hints in the deps and structure that pointed toward "what if the AI agent could query the code itself as a graph?" — an idea that became seon's code-graph component.
+> Concurrent sibling to seon-2024-10-xtdb-biff (started one day later, on the same week). Where the Biff exploration tested one Clojure framework, this repo tested another — Kit — to find which one provided the right core for an AI-driven runtime. 45 commits over ~3 months. ... seon eventually adopted neither and built its own Integrant-based composition. ... **Foundations for code-graph analysis.** Hints in the deps and structure that pointed toward "what if the AI agent could query the code itself as a graph?" — an idea that became seon's code-graph component.
 
 **`_publishing/seon-2025-02-architecture/README.md`** — the 1962-line vision doc with publication metadata:
 
@@ -252,13 +252,13 @@ This is closer to Framing 4 than the live README, with the verbs more active.
 
 > This is the **immediate git ancestor of seon** — the canonical Clojure agentic-AI runtime. The codebase was renamed to `seon` on 2025-12-13 (seon's first commit reads "Initial commit: ml-options codebase copy"). 59 commits, 2025-11-28 → 2025-12-05. ... The trading domain itself was a vehicle for testing these patterns at scale (1.9M+ option records, ThetaData ingest pipeline). Once the patterns proved out, the codebase was renamed to seon and refocused away from trading toward general agentic infrastructure.
 
-**Implication for the README rewrite:** the Lineage section currently on `main` is a four-row table. Sean has *already* written publication-quality prose lineage notes — they live in `_publishing/`. The README should consume them: replace the table with a narrative paragraph distilled from the five `_publishing/*/README.md` opening sections. The five-stage story (2024-10 dual experiments → 2025-02 architecture → 2025-11 trading-domain → 2025-12 rename to seon → 2026 substrate / WASM) is far more compelling than the current table.
+**Implication for the README rewrite:** the Lineage section currently on `main` is a four-row table. Sean has *already* written publication-quality prose lineage notes — they live in `_publishing/`. The README should consume them: replace the table with a narrative paragraph distilled from the five `_publishing/*/README.md` opening sections. The five-stage story (2024-10 dual experiments → 2025-02 architecture → 2025-11 trading-domain → 2025-12 rename to seon → 2026 core / WASM) is far more compelling than the current table.
 
 ### 5.4 `~/src/seon-visualizations/README.md` — explains, doesn't frame
 
 > Presentation-grade, data-driven visualizations that explain Seon's architecture and design ideas. ... Audience: technical peers, stakeholders, meetup attendees, and collaborators evaluating Seon's direction.
 
-Scope: a React+Vite visualization deck explaining Spec-first development, contract enforcement, generative testing, namespace ownership, accretive growth, local-vs-shared persistence. Useful **as content** for the README — there are scenes documented under `docs/` that visualize the substrate's claims. **Worth a single link** in the README's "Where to read next" section: "Visual explanations of these concepts: <https://github.com/seantempesta/seon-visualizations>".
+Scope: a React+Vite visualization deck explaining Spec-first development, contract enforcement, generative testing, namespace ownership, accretive growth, local-vs-shared persistence. Useful **as content** for the README — there are scenes documented under `docs/` that visualize the core's claims. **Worth a single link** in the README's "Where to read next" section: "Visual explanations of these concepts: <https://github.com/seantempesta/seon-visualizations>".
 
 ### 5.5 `~/src/seon-gsap/README.md` — spatial multi-session UX, January 2025
 
@@ -341,7 +341,7 @@ Specifically (from the 1936-line `seon-biff/README.md`):
 4. **App-registry + db-persisted apps** — current `function-discovery.md` / `code-graph.md` is the broader generalization.
 5. **WebSocket out-of-band updates from ctx changes** — current SSE+Datastar architecture is the heir.
 
-Five Seon primitives, fully specced 14 months ago. The current architecture is the disciplined realization. **README should claim this lineage explicitly** ("these patterns have been validated across four prior repos before being assembled into the current substrate").
+Five Seon primitives, fully specced 14 months ago. The current architecture is the disciplined realization. **README should claim this lineage explicitly** ("these patterns have been validated across four prior repos before being assembled into the current core").
 
 ### 7.3 The Primer is *not yet* documented as a Seon application
 

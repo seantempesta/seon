@@ -36,7 +36,7 @@ See [[seon/components/database]] for full component documentation.
 | `seon.db.schema` | `src/seon/db/schema.clj` | Malli-to-Datahike schema bridge, entity schema validation | mature |
 | `seon.db.tx` | `src/seon/db/tx.clj` | Transaction metadata (timestamps, caller, source) for every write | stable |
 | `seon.db.datahike.conn-process` | `src/seon/db/datahike/conn_process.clj` | Connection manager: caching, per-DB locking, Integrant component | mature |
-| `seon.db.datahike.system` | `src/seon/db/datahike/system.clj` | Datahike Integrant system wiring (embedded LMDB store) | mature |
+| `seon.db.datahike.system` | `src/seon/db/datahike/system.clj` | `[JVM track — paused]` Datahike Integrant system wiring (embedded LMDB store) | mature |
 | `seon.db.datahike.flow` | `src/seon/db/datahike/flow.clj` | Infrastructure flow writer/reader step-fns over Datahike | mature |
 | `seon.db.datahike.schema` | `src/seon/db/datahike/schema.clj` | Bridge translating registered Malli schemas to Datahike schema tx | mature |
 | `seon.db.datahike.tx-bus` | `src/seon/db/datahike/tx_bus.clj` | Transaction bus for tx-listener fan-out | mature |

@@ -55,7 +55,7 @@ mcp__seon_cljs__eval { code: "(seon.fs/configure!
 
 ### Iteration surface — `seon.repl/dev-init!`
 
-For substrate experiments (spec verification, REPL-as-data-shape work,
+For core experiments (spec verification, REPL-as-data-shape work,
 testing claims one form at a time) the V0 pod ships a tiny init
 helper that opens a history-enabled datahike conn AND initializes
 bootstrap-CLJS, both as defonce'd atoms. **Decoupled from
@@ -81,7 +81,7 @@ one whose semantics match the question you're asking.
 
 | Surface | Mechanism | Use when |
 |---|---|---|
-| **Host eval** | `mcp__seon_cljs__eval` piggybacks shadow's nREPL into the `:client` runtime. Forms see every var statically required by `seon.client` (rewrite-clj, datahike, cljs.js, the whole substrate). | Substrate-library questions. "Does rewrite-clj parse comments alongside forms?" "Does `(d/history db)` return the tx datoms I expect?" — no in-pod simulation needed. |
+| **Host eval** | `mcp__seon_cljs__eval` piggybacks shadow's nREPL into the `:client` runtime. Forms see every var statically required by `seon.client` (rewrite-clj, datahike, cljs.js, the whole core). | Core-library questions. "Does rewrite-clj parse comments alongside forms?" "Does `(d/history db)` return the tx datoms I expect?" — no in-pod simulation needed. |
 | **Bootstrap-CLJS eval** | `(seon.eval/eval @seon.repl/!compile-state "...")` compiles + runs the string through `cljs.js` against the persistent compile-state. | The question IS what an LLM-emitted form experiences. Error shapes (`:kind :compile` vs `:runtime`), `(ns other)` switches, `(def x …)` cross-call persistence gotcha, `^:async`/`await`. |
 
 Both surfaces write to the same datahike conn (`@seon.repl/!conn`)
@@ -89,7 +89,7 @@ when they do persistence work, so `:tx-meta {:seon.eval/id ...}`
 tagging and history queries behave the same through either path.
 
 ```clojure
-;; Host eval — testing a substrate library
+;; Host eval — testing a core library
 mcp__seon_cljs__eval { code:
   "(rewrite-clj.parser/parse-string-all \";; hi\\n(+ 1 2)\\n\")" }
 
@@ -103,7 +103,7 @@ mcp__seon_cljs__eval { code:
 `seon.repl/!compile-state` is nil until `dev-init!` runs. Call it
 once at the start of any iteration session.
 
-## Platform substrate — what's robust, what to know
+## Platform core — what's robust, what to know
 
 ### Bootstrap analyzer cache: discover-and-load-all
 

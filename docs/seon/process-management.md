@@ -131,7 +131,7 @@ bin/seon tail pod       # safe to run alongside any number of agents
 
 ```
 
-**Agent A wants a clean pod after changing substrate code:**
+**Agent A wants a clean pod after changing core code:**
 
 ```bash
 bin/seon restart pod    # stop + start, atomic from caller's view
@@ -175,7 +175,7 @@ This should be rare. Normal Ctrl-C and most other signals trigger the trap that 
 
 - **Caddy** (port 3030) — separate process, not currently supervised. Run manually if you need HTTPS proxy.
 - **MCP servers** (`bin/mcp-server`, `bin/mcp-server-cljs`) — launched by Claude Code via the MCP integration, not supervised here.
-- **JVM REPL operations** (`(user/reload)`, `(user/reset)`, `(user/restart-db!)`) — these are inside-the-JVM verbs that operate on Integrant components, not on OS processes. Keep using them for in-process operations; use `bin/seon restart jvm` only when you actually need a fresh JVM.
+- **JVM REPL operations** `[JVM track — paused]` (`(user/reload)`, `(user/reset)`, `(user/restart-db!)`) — these are inside-the-JVM verbs that operate on Integrant components, not on OS processes. They belong to the paused JVM main-app track; the active track is the CLJS pod (`bin/seon ... pod`). Use them for in-process JVM operations when working that track; use `bin/seon restart jvm` only when you actually need a fresh JVM.
 
 ## Cross-references
 

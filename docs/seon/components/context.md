@@ -7,6 +7,8 @@ tags: [component, flow]
 
 > Per-instance state management via atom + watches, with debounced persistence, SSE push, and Malli validation.
 
+`[JVM track — paused]` The atom/watch system described below belongs to the paused JVM main-app track. The active CLJS pod has its own `seon.ctx` (the agent prompt composer) — see the "CLJS pod sibling" section near the end.
+
 ## Purpose
 
 The context system gives each namespace instance a managed stateful atom. When namespace code runs (e.g. a trading dashboard), it gets a ctx atom that automatically persists changes to Datahike, pushes SSE updates to connected browsers, and validates state transitions via Malli. It replaced four prior state systems with a single unified API.

@@ -116,10 +116,11 @@ Search returns a plain text string, auto-saved like all REPL output. Truncated r
 
 ### Process Architecture (Know What Exists)
 
-- **Seon JVM** (ports 7888/8080) — Main app, orchestrator, embedded Datahike database (in-process LMDB), and the REPL host the orchestrator uses
-- **Agent JVMs** (ports 7900+) — Isolated nREPL processes, one per agent (including you). Each agent has its own Datahike instance for sandboxed work.
+- **CLJS pod** (Node, port 7890) — the active agent runtime. It does **not** embed datahike: it forwards writes over a Unix socket to the central `wire-server` writer (file-backed datahike at `data/clusters/default/store`) and reads local lazy db values.
+- **`[JVM track — paused]` Seon JVM** (ports 7888/8080) — Main app, orchestrator, embedded Datahike database (in-process LMDB), and the REPL host the orchestrator uses
+- **`[JVM track — paused]` Agent JVMs** (ports 7900+) — Isolated nREPL processes, one per agent. Each agent has its own Datahike instance for sandboxed work.
 
-Datahike is **embedded** in whichever JVM owns it — there is no separate database service. If your agent JVM's Datahike connection fails, that's your problem to diagnose; if the orchestrator's Seon JVM has DB trouble, it's the orchestrator's problem.
+`[JVM track — paused]` On the JVM track, datahike is embedded in whichever JVM owns it. If your agent JVM's Datahike connection fails, that's your problem to diagnose; if the orchestrator's Seon JVM has DB trouble, it's the orchestrator's problem.
 
 ### If Something Breaks During Your Work
 
@@ -405,6 +406,6 @@ Never use `/tmp` or system directories.
 6. **If you caused it, revert your change** — `git checkout -- path/to/file`
 7. **Report to the orchestrator** with specifics — see the "CRITICAL" section above
 
-**Never attempt to restart services yourself.** Never `pkill`. Never delete data directories. Never kill PIDs on ports. The orchestrator manages all process lifecycle — the Seon JVM (with embedded Datahike) and agent JVMs are separate processes with specific shutdown procedures.
+**Never attempt to restart services yourself.** Never `pkill`. Never delete data directories. Never kill PIDs on ports. The orchestrator manages all process lifecycle — the CLJS pod, the `wire-server` writer, and (on the paused JVM track) the Seon JVM and agent JVMs are separate processes with specific shutdown procedures.
 
 **Never attempt to restart services yourself.** Never `pkill`. Never delete data directories. The orchestrator manages the system lifecycle and will coordinate restarts to minimize impact on other running agents.

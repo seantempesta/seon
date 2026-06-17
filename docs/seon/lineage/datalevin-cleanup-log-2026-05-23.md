@@ -67,7 +67,7 @@ Sweep of current-state docs to remove stale Datalevin references. The migration 
 | docs/seon/components/agent-system.md | **left as-is** | Already has explanatory migration note |
 | docs/seon/architecture/decisions/006-separate-jvm.md | **left as-is** | ADR — historical decision record with explicit migration note already present |
 | docs/seon/architecture/datahike-reactive.md | **left as-is** | Already has historical-name note for the `datalevin-reactive` PRD reference |
-| docs/seon/_dashboard.md | done | "older JVM substrate (Datalevin + ...)" → "JVM substrate (Datahike + ...)" — the prior framing was wrong; the JVM substrate has been on Datahike for months |
+| docs/seon/_dashboard.md | done | "older JVM core (Datalevin + ...)" → "JVM core (Datahike + ...)" — the prior framing was wrong; the JVM core has been on Datahike for months |
 
 ## Smell observations
 

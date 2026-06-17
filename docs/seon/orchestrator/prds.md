@@ -19,7 +19,8 @@ All feature specifications live in `docs/prds/`. Each directory contains a `prd.
 | [[prds/test-infrastructure/design]] | design | Unified test fixtures, data isolation, generative testing with shrinking | [[components/testing]] |
 | [[prds/mcp-resilience/prd]] | active | MCP server resilience: async request processing (Phase 1 done, remaining paused) | [[components/agent-system]] |
 | [[prds/datahike-migration/prd]] | active | Replace Datalevin with embedded Datahike: per-namespace DBs, file backend default, single in-process writer, git-friendly time-travel. **Phases 1+2 shipped, Phase 3 in flight.** See [[orchestrator/active]] for status. |  [[components/database]], [[components/schema-system]] |
-| [[prds/datahike-migration/phase-3-harness-migration]] | active | Phase 3 substrate: agent JVM as playground, `:seon.session` registry, harness DI, rendered LLM context. Demo target shipped 2026-04-25. | [[components/database]], [[components/agent-system]] |
+| [[prds/datahike-migration/phase-3-harness-migration]] | active | Phase 3 core: agent JVM as playground, `:seon.session` registry, harness DI, rendered LLM context. Demo target shipped 2026-04-25. | [[components/database]], [[components/agent-system]] |
+| [[prds/agent-runtime/substrate-asks-batch-2026-06-16]], [[prds/agent-runtime/overridable-substrate-2026-06-17]], [[prds/agent-runtime/research/simplification-audit-2026-06-17]], [[prds/agent-runtime/research/27-28-architecture-2026-06-16]] | active | Recent core-track PRDs + research on branch `feature/overridable-substrate`. | [[components/agent-system]] |
 
 ## Completed PRDs
 

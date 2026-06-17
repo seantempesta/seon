@@ -13,7 +13,7 @@ A few `docs/seon/reference/` files still mix stale references (XTDB, ml-options 
 
 | File | Issue |
 |------|-------|
-| `separate-jvm-exploration.md` | `src/seon/experimental/ns_instance.clj` dead; PRD path needs archive prefix; surviving Datalevin/XTDB mentions need rewording for embedded Datahike |
+| `separate-jvm-exploration.md` | `src/seon/experimental/ns_instance.clj` dead; PRD path needs archive prefix; surviving Datalevin/XTDB mentions need rewording for the embedded Datahike of the JVM track `[JVM track — paused]` |
 | `durable-ctx-design.md` | Broken internal link `docs/reference/` → `docs/seon/reference/`; some Datalevin assumptions linger in the design narrative |
 
 ## Already Fixed (prior waves)

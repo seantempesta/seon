@@ -8,9 +8,9 @@ tags: [research, vision]
 
 ## 1. TL;DR
 
-- **Seon is a personal AI that can do anything for you, because it can write code.** The agent IS the product; the codebase architecture is the substrate that lets the agent ship reliable software for its human, on the human's hardware.
-- **The product is a substrate, not a feature set.** Concretely it is: a Datalog graph database of every function and schema, a REPL that is the only valid way to add or change code, Malli contracts on every public function, and namespace-scoped agents that own their code long-term.
-- **Personal domains (trading, health, finance) are test cases, not the product.** They prove the substrate works. Anything a person can describe — track this metric, watch this market, render this dashboard, react to this event — becomes a namespace the substrate can grow.
+- **Seon is a personal AI that can do anything for you, because it can write code.** The agent IS the product; the codebase architecture is the core that lets the agent ship reliable software for its human, on the human's hardware.
+- **The product is a core, not a feature set.** Concretely it is: a Datalog graph database of every function and schema, a REPL that is the only valid way to add or change code, Malli contracts on every public function, and namespace-scoped agents that own their code long-term.
+- **Personal domains (trading, health, finance) are test cases, not the product.** They prove the core works. Anything a person can describe — track this metric, watch this market, render this dashboard, react to this event — becomes a namespace the core can grow.
 - **Eight milestones, M1 → M8.** M1–M5 (Reliable Runtime → Observable System) are partial/in-progress today. M6 (Eval Pipeline), M7 (Namespace as Living Process), M8 (Autonomous Namespace Agents) are the unbuilt half — that's where "agent owns and evolves the namespace" becomes real.
 - **WebAssembly containment is the deployment story, not the project.** Phase 3 puts the CLJS pod inside a `wasm32-wasip2` component running in wasmtime, embedded in a Tauri Rust host with a WIT-typed capability surface (`fs`, `http`, `mcp`, `capability-prompt`, `eval`). It is what makes "the agent can do anything" survivable.
 
@@ -26,7 +26,7 @@ There are three live framings on disk. They are compatible but emphasize differe
 >
 > The personal domains (trading, health, finance) are test cases. The infrastructure is the product.
 
-Audience: other infra/agent researchers. Sells the substrate. Says nothing about what an end-user gets.
+Audience: other infra/agent researchers. Sells the core. Says nothing about what an end-user gets.
 
 ### Framing B — `docs/seon/vision/index.md:7-24` (current main vision)
 
@@ -40,13 +40,13 @@ Audience: other infra/agent researchers. Sells the substrate. Says nothing about
 >
 > **Seon is infrastructure for AI agents to write reliable software.**
 
-Same product claim as A, but with the "why now" wedge. This is the strongest version of the substrate framing.
+Same product claim as A, but with the "why now" wedge. This is the strongest version of the core framing.
 
 ### Framing C — the user's spoken pitch (2026-05-23)
 
 > A personal AI that can do anything for you because it can write code.
 
-This is the consumer-facing claim. It is absent from the current README and only implicit in the vision doc (the line "The personal domains (trading, health, finance) are test cases" gestures at it). The substrate framings (A and B) explain *how*; framing C explains *what for*.
+This is the consumer-facing claim. It is absent from the current README and only implicit in the vision doc (the line "The personal domains (trading, health, finance) are test cases" gestures at it). The core framings (A and B) explain *how*; framing C explains *what for*.
 
 ### The 924820e framing (commit `924820e`, the oldest README)
 
@@ -56,7 +56,7 @@ This is the most *technically descriptive* one-paragraph framing the project has
 
 ### Reconciliation
 
-A new README should layer all three: lead with C (what the user gets), follow with A/B (what makes it reliable), and keep the 924820e technical sentence as the "how it's built" mid-section paragraph. The personal-AI claim and the substrate claim are not in tension — the substrate exists *so that* the personal AI is reliable enough to trust. Burying that connection (as the current README does) makes the project look like a niche Clojure architecture exercise instead of an alpha product.
+A new README should layer all three: lead with C (what the user gets), follow with A/B (what makes it reliable), and keep the 924820e technical sentence as the "how it's built" mid-section paragraph. The personal-AI claim and the core claim are not in tension — the core exists *so that* the personal AI is reliable enough to trust. Burying that connection (as the current README does) makes the project look like a niche Clojure architecture exercise instead of an alpha product.
 
 ## 3. Capability Scope — what a finished Seon lets a user DO
 
@@ -69,7 +69,7 @@ Pulled from M1–M8 + 28 capability docs under `docs/seon/vision/capabilities/`.
 > `seon.health.workout` starts with the default step function. It handles requests via `topology/request!`, persists ctx changes to the database, and pushes SSE updates to connected browsers. Standard behavior, no custom code.
 > A user starts logging workouts. The health agent notices a pattern: after every workout log, three other namespaces poll for the updated workout count. The agent decides to add a feed signal.
 
-User says "track my workouts." The substrate spins up a namespace with default behavior. The agent on the namespace observes how it's being used and adds reactivity. No human writes a schema, a route, or a SSE handler.
+User says "track my workouts." The core spins up a namespace with default behavior. The agent on the namespace observes how it's being used and adds reactivity. No human writes a schema, a route, or a SSE handler.
 
 **Display a new data type** (M4 scenario, `m4-discoverable-codebase.md:14-37`)
 
@@ -84,7 +84,7 @@ Renderers, transformers, validators, event handlers — all discovered by shape,
 > An agent working on `seon.trading.signals` hits an infinite loop. Its JVM pegs a CPU core and stops responding to health checks.
 > 1. The pool's health monitor detects the unresponsive JVM after the grace period expires.
 > 2. ... A pre-warmed replacement JVM is already available.
-> 3. The operator (or orchestrator) relaunches the agent. It acquires a fresh JVM, opens its embedded Datahike connection, and picks up where it left off -- its session history is in the database, not in the dead process.
+> 3. The operator (or orchestrator) relaunches the agent. It acquires a fresh JVM, opens its embedded Datahike connection `[JVM track — paused]`, and picks up where it left off -- its session history is in the database, not in the dead process.
 
 **Agents react to schema changes upstream** (M8 scenario, `m8-autonomous-agents.md:14-58`)
 
@@ -105,7 +105,7 @@ Grouped by what the user gets:
 | Ask "what can this data do?" | `capabilities/function-discovery.md`, `renderer-discovery.md`, `code-graph.md` | Datalog query over function schemas; specificity-ranked results; no grep |
 | Get reliable code | `m2-trustworthy-data.md`, `capabilities/validated-writes.md`, `data-contracts.md`, `code-quality-pipeline.md` | Malli validation on every write; generative roundtrip tests; eval pipeline rejects schema-less code |
 | Agents that own their code | `m8-autonomous-agents.md`, `capabilities/agent-isolation.md`, `repl-first-development.md`, `inter-agent-messaging.md` | Namespace-scoped agents, typed mailboxes, schema-change notifications, persistent stewardship |
-| Survive failure | `m1-reliable-runtime.md`, `capabilities/pool-self-healing.md`, `resilient-writes.md`, `mcp-resilience.md`, `self-monitoring.md` | Isolated JVMs (substrate) or WASM components (Phase 3), pre-warmed pool, separate DB process, auto-replenishment |
+| Survive failure | `m1-reliable-runtime.md`, `capabilities/pool-self-healing.md`, `resilient-writes.md`, `mcp-resilience.md`, `self-monitoring.md` | Isolated JVMs (core) or WASM components (Phase 3), pre-warmed pool, separate DB process, auto-replenishment |
 | Learn from history | `vision/index.md` Layer 6, `capabilities/agent-log-access.md` | All messages persisted; session replay; pattern extraction; mistake tracking |
 
 This list deliberately leaves out the partner WebAssembly track — covered in §4 as a pillar, not a capability.
@@ -148,7 +148,7 @@ Each pillar is a load-bearing idea. Without any one of them, the personal-AI cla
 
 ### 4.7 Namespace-scoped agents (long-term ownership, not task completion)
 
-`m8-autonomous-agents.md`, `capabilities/agent-isolation.md`, `capabilities/repl-first-development.md`. One agent stewards one namespace. The agent has its own JVM (substrate) or its own WASM component (Phase 3), its own context, its own typed mailbox. It is not Claude Code spawned for a task — it is a persistent process that wakes on notifications, evolves the namespace over months, hands off ownership on context exhaustion. `m8-autonomous-agents.md:10-12`: "The agent does not need Claude Code. It does not edit files. It receives Malli-specced messages through flow, evaluates forms in the REPL pipeline, and its work is validated, persisted, and tested automatically."
+`m8-autonomous-agents.md`, `capabilities/agent-isolation.md`, `capabilities/repl-first-development.md`. One agent stewards one namespace. The agent has its own JVM (core) or its own WASM component (Phase 3), its own context, its own typed mailbox. It is not Claude Code spawned for a task — it is a persistent process that wakes on notifications, evolves the namespace over months, hands off ownership on context exhaustion. `m8-autonomous-agents.md:10-12`: "The agent does not need Claude Code. It does not edit files. It receives Malli-specced messages through flow, evaluates forms in the REPL pipeline, and its work is validated, persisted, and tested automatically."
 
 ### 4.8 WASM containment (the deployment story)
 
@@ -163,7 +163,7 @@ Six README revisions tracked on main. Two pairs are duplicates from squashed bra
 | `924820e` | earliest | **Technical-architectural** | "A Clojure runtime designed so AI agents can write, own, and evolve software reliably. Every namespace is wired in as a `core.async.flow` process with a typed message envelope and an injected, schema-validated state atom; functions are discovered via Malli schema contracts queried from a Datalog graph (Datalevin / Datahike on LMDB) rather than by name lookup or file imports." |
 | `35b912e` / `584b08c` | mid | **Slogan + status + license** | "Infrastructure for AI agents to write reliable software. Not a framework. Not a library. A codebase architecture where agents can discover functions by their contracts, learn from history, own code long-term, and compose safely." (The trading/health/finance line as test-cases is here.) |
 | `33cdce3` / `09e3b9c` | later | Same slogan + **Lineage** section | Adds the four-predecessor table and the RFC 3161 timestamping note. Same lead. |
-| `c0c2888` | newest | Same slogan + Lineage + **Active tracks** | Adds the "Substrate / WebAssembly containment" two-track section. Same lead. |
+| `c0c2888` | newest | Same slogan + Lineage + **Active tracks** | Adds the "Core / WebAssembly containment" two-track section. Same lead. |
 
 Ranked by usefulness for the new README:
 
@@ -232,7 +232,7 @@ These are the missing falsifiers. The current vision doc has milestones but no t
 
 ### `feature/refinement:docs/archive/primer/docs/primer/research/architecture-vision.md` — the Primer state-machine framing
 
-A different application built on the same substrate. The key idea:
+A different application built on the same core. The key idea:
 
 > The Core Insight: A Primer session is a server-controlled state machine where:
 > - Scene = current state (data structure)
@@ -246,7 +246,7 @@ A different application built on the same substrate. The key idea:
 > 3. Composable complexity (templates call templates)
 > 4. Debuggable (inspect state at any point)
 
-This vision (an AI tutor / Diamond Age "Primer" built on the substrate) demonstrates that the substrate is general-purpose. The README does not currently illustrate any application beyond trading/health/finance. One sentence — "the same substrate powers a Diamond Age-style Primer prototype that lives on `feature/refinement`" — would do a lot to communicate scope.
+This vision (an AI tutor / Diamond Age "Primer" built on the core) demonstrates that the core is general-purpose. The README does not currently illustrate any application beyond trading/health/finance. One sentence — "the same core powers a Diamond Age-style Primer prototype that lives on `feature/refinement`" — would do a lot to communicate scope.
 
 ### `feature/refinement:docs/archive/seon-transform/prd.md` — the Sanderson Elantris name origin
 
@@ -272,9 +272,9 @@ Concrete inventory of `/Users/sean/src/seon` on `main` at `c0c2888`. The README 
 
 ### Top-level Clojure namespaces under `src/seon/`
 
-Two lanes, per CLAUDE.md "Lane discipline": `.clj` (JVM substrate) and `.cljs` (CLJS pod). Some `.cljc` for portable code.
+Two lanes, per CLAUDE.md "Lane discipline": `.clj` (JVM core) and `.cljs` (CLJS pod). Some `.cljc` for portable code.
 
-**JVM lane (existing substrate):** `ai.clj`, `config.clj`, `core.clj`, `db.clj`, `health.clj`, `logging.clj`, `render.clj`, `repl.clj`, `runner.clj`, `runtime.clj`, `session.clj`, `system.clj` — plus subdirs `agent/`, `ai/` (provider clients), `claude/`, `ctx/`, `db/` (`datahike/`, `relay.clj`, `schema.clj`, `tx.clj`), `dev/`, `flow/`, `graph/`, `health/`, `ns/`, `orchestrator/`, `phase2/`, `render/`, `repl/`, `system/`, `test/`, `ui/`, `web/` (`broadcast.cljs`, `caddy.clj`, `components.clj`, `flows.clj`, `handlers.clj`, `html.clj`, `logs.clj`, `namespace.clj`, `reactive/`, `routes.clj`, `server.clj`, `sse.clj`, `sse/`, `tailwind.clj`).
+**JVM lane (existing core):** `ai.clj`, `config.clj`, `core.clj`, `db.clj`, `health.clj`, `logging.clj`, `render.clj`, `repl.clj`, `runner.clj`, `runtime.clj`, `session.clj`, `system.clj` — plus subdirs `agent/`, `ai/` (provider clients), `claude/`, `ctx/`, `db/` (`datahike/`, `relay.clj`, `schema.clj`, `tx.clj`), `dev/`, `flow/`, `graph/`, `health/`, `ns/`, `orchestrator/`, `phase2/`, `render/`, `repl/`, `system/`, `test/`, `ui/`, `web/` (`broadcast.cljs`, `caddy.clj`, `components.clj`, `flows.clj`, `handlers.clj`, `html.clj`, `logs.clj`, `namespace.clj`, `reactive/`, `routes.clj`, `server.clj`, `sse.clj`, `sse/`, `tailwind.clj`).
 
 **CLJS pod lane (V0):** `agent.cljs`, `client.cljs`, `db.cljs`, `db_test.cljs`, `error.cljs`, `eval.cljs`, `fs.cljs`, `log.cljs`, `platform.cljs`, `render.cljs`, `render_test.cljs`, `repl.cljs`, `wasm_eval_smoke.cljs`, `wasm_smoke.cljs`. Per CLAUDE.md current-focus: "the long-running Node process that hosts the agent loop, datahike-cljs, the bootstrap CLJS compiler, and a loopback HTTP+SSE server. Run it via `node out/client/main.js`."
 
@@ -315,7 +315,7 @@ The current README (~67 lines, 5 sections: title/slogan, Status, Active tracks, 
 6. **WebAssembly containment as the deployment story.** The Active tracks block names it but does not explain *why* it matters: the agent's eval surface needs to be sandboxed beyond what the CLJS sandbox provides (CLAUDE.md current-focus: "The CLJS sandbox layer is NOT a security boundary"). WASM is what makes the personal-AI claim survivable on the user's machine.
 7. **The graph as source of truth.** The single most distinctive architectural claim is missing. From `vision/index.md:111-112`: "The file system is a persistence format, not the source of truth. The graph database is the system."
 8. **Schema-driven function discovery.** The vision's core primitive (`vision/index.md:75-95`). Renderer discovery works in production; M4 generalizes it. None of this is mentioned.
-9. **REPL-as-interface for agents.** Agents don't edit files; they eval forms validated by a constraint pipeline. This is M6 — and the v1 spec under `docs/prds/agent-runtime/v1.md` is the most detailed surviving artifact of the user's "REPL is the substrate" thesis.
+9. **REPL-as-interface for agents.** Agents don't edit files; they eval forms validated by a constraint pipeline. This is M6 — and the v1 spec under `docs/prds/agent-runtime/v1.md` is the most detailed surviving artifact of the user's "REPL is the core" thesis.
 10. **Validation criteria.** The `feature/super-repl:VISION.md` near/medium/long-term checklist is missing. Without falsifiers, "research project" reads as "indefinitely incomplete."
 11. **Lineage prose vs lineage table.** The current lineage section is a four-row table of predecessor repos. That's fine for prior-art but undersells the *story*: 18 months of experiments converged on this specific shape. The 924820e version had this in prose form.
 12. **Why Clojure, why Datalog, why immutable.** `vision/index.md:30-69` has the answer in a table and three paragraphs. The README points at this doc but doesn't summarize it.
@@ -325,14 +325,14 @@ The current README (~67 lines, 5 sections: title/slogan, Status, Active tracks, 
 Headings + one-line intent each (no prose):
 
 1. **Title + one-line tagline** — Framing C: "A personal AI that can do anything for you because it can write code."
-2. **What it is** — Two paragraphs: the M-B substrate framing + the test-cases-not-the-product line.
+2. **What it is** — Two paragraphs: the M-B core framing + the test-cases-not-the-product line.
 3. **Why now** — The "agents will write most software" wedge from `vision/index.md`.
-4. **A scenario** — One of the M7/M8 user-facing scenarios verbatim. "You ask Seon to track your workouts. The substrate spins up a namespace. The agent observes usage and writes the dashboard."
+4. **A scenario** — One of the M7/M8 user-facing scenarios verbatim. "You ask Seon to track your workouts. The core spins up a namespace. The agent observes usage and writes the dashboard."
 5. **What's distinctive** — The 924820e technical paragraph + a bulleted list of the eight pillars (§4 of this doc).
 6. **Naming** — The Sanderson Seon bonded-servant line.
 7. **Where it is** — The eight milestones with status, copied from `vision/index.md:282-290`. Bold the unbuilt ones (M6–M8) so the alpha-blocking work is visible.
-8. **Active tracks** — Substrate (datahike-migration) + WebAssembly containment, current README's Active tracks block expanded with one paragraph each on why both exist.
-9. **The personal domains** — Trading, health, finance as test cases. Link to the relevant component / domain notes for each. Frame them as proofs of the substrate, not as products.
+8. **Active tracks** — Core (datahike-migration) + WebAssembly containment, current README's Active tracks block expanded with one paragraph each on why both exist.
+9. **The personal domains** — Trading, health, finance as test cases. Link to the relevant component / domain notes for each. Frame them as proofs of the core, not as products.
 10. **How to verify it works** — Time-bound validation criteria from `feature/super-repl:VISION.md` (near/medium/long-term).
 11. **Lineage** — Current table + the one-line story "this is the shape that survived 18 months of experiments." Keep the RFC 3161 timestamping note.
 12. **Where to read next** — Pointers: `docs/seon/vision/index.md`, `docs/seon/_dashboard.md`, `docs/prds/agent-runtime/v1.md`, `CLAUDE.md`.

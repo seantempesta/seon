@@ -42,7 +42,7 @@ The runtime is built on five primitives. Each has a component note in [`docs/seo
 
 - **Multi-agent shared workspace.** Multiple agents work inside the same running runtime, calling each other's functions, transacting into the same graph, and editing each other's code under capability gates. Code is organized into Clojure namespaces wired into a `core.async.flow` topology — typed message envelopes, uniform backpressure, observability — but agents aren't pinned to a single namespace. Any agent can touch any surface the capability layer permits. ([`docs/seon/concepts/namespace-as-process.md`](docs/seon/concepts/namespace-as-process.md))
 - **Schema-as-contract.** Public functions advertise Malli input/output schemas with fully namespaced keywords (`:seon.trading/position`, never `:position`). The schemas land as datoms in a Datalog graph. "Which functions accept this shape?" is a database query. ([`docs/seon/components/schema-system.md`](docs/seon/components/schema-system.md))
-- **Graph-as-source-of-truth.** Datahike (embedded Datomic-style EAV with bitemporal history, on LMDB) holds the program graph, the data graph, and the conversation graph. One pull reconstructs any agent turn. Sessions survive restarts because the database is the system. ([`docs/seon/components/database.md`](docs/seon/components/database.md))
+- **Graph-as-source-of-truth.** Datahike (Datomic-style EAV with bitemporal history, on LMDB) holds the program graph, the data graph, and the conversation graph. The active CLJS pod does not embed datahike — it forwards writes over a Unix socket to the central `wire-server` writer (file-backed datahike at `data/clusters/default/store`) and reads local lazy db values. (The paused JVM track embeds datahike in-process — `[JVM track — paused]`.) One pull reconstructs any agent turn. Sessions survive restarts because the database is durable. ([`docs/seon/components/database.md`](docs/seon/components/database.md))
 - **REPL-as-interface.** The agent does not edit files. It evals forms in an nREPL. The pipeline validates the schema, transacts metadata into the graph, persists the source to disk, and runs the tests the schema selects. Files are a persistence format, not the source of truth. ([`docs/seon/components/dev-tools.md`](docs/seon/components/dev-tools.md))
 - **WASM containment.** The agent's eval surface is moving into a `wasm32-wasip2` Component embedded in a Tauri host process. The capability surface is WIT-typed: `fs`, `http`, `mcp`, `capability-prompt`, `eval`. The Rust host decides what to grant. Wasmtime enforces. ([`docs/prds/agent-runtime/platform.md`](docs/prds/agent-runtime/platform.md))
 
@@ -60,7 +60,7 @@ A short list of the people I'm explicitly indebted to. The longer list — Engel
 
 ## Quickstart
 
-Run the substrate, talk to an agent, watch it work. Requirements:
+Run the core, talk to an agent, watch it work. Requirements:
 Node 20+, Clojure CLI, a [DeepSeek](https://platform.deepseek.com)
 API key (the one required secret — other models later).
 
@@ -84,7 +84,7 @@ You customize Seon with **data, not source edits**: the agent's
 identity is `SOUL.md` (seeded into the store, editable live by
 transact), standing instructions live in `my.kb.system` rows, and
 everything your agents build lands in `my.*` namespaces that survive
-restarts. `src/seon/` is the substrate — treat it like a runtime you
+restarts. `src/seon/` is the core — treat it like a runtime you
 installed, not a library you fork.
 
 The optional JVM seat (`bin/run`, nREPL 7888) is for development and
@@ -98,7 +98,7 @@ This is a research project in active development, not a product. Some parts work
 
 | Milestone | Status |
 |---|---|
-| [M1: Reliable runtime](docs/seon/vision/m1-reliable-runtime.md) | partial — flow + pool + embedded Datahike on main |
+| [M1: Reliable runtime](docs/seon/vision/m1-reliable-runtime.md) | partial — flow + pool + embedded Datahike on main `[JVM track — paused]` |
 | [M2: Trustworthy data](docs/seon/vision/m2-trustworthy-data.md) | partial — validation gate live; some `:any` holdouts remain |
 | [M3: Convention uniformity](docs/seon/vision/m3-convention-uniformity.md) | in progress — dev hook enforces on new code |
 | [M4: Discoverable codebase](docs/seon/vision/m4-discoverable-codebase.md) | partial — renderer discovery and shape graph live |

@@ -16,7 +16,7 @@ An agent working on `seon.trading.signals` hits an infinite loop. Its JVM pegs a
 1. The pool's health monitor detects the unresponsive JVM after the grace period expires.
 2. The pool disposes of the dead JVM and marks the agent run as crashed in the runtime registry.
 3. A pre-warmed replacement JVM is already available. The pool's auto-replenishment had kept the target size filled.
-4. The operator (or orchestrator) relaunches the agent. It acquires a fresh JVM, opens its embedded Datahike connection, and picks up where it left off -- its session history is in the database, not in the dead process.
+4. The operator (or orchestrator) relaunches the agent. It acquires a fresh JVM, opens its embedded Datahike connection `[JVM track — paused]`, and picks up where it left off -- its session history is in the database, not in the dead process.
 5. Meanwhile, `seon.health.metrics` and `seon.web` continued running without interruption. They never knew the trading agent died, because their flow processes are independent.
 
 ```clojure
@@ -35,7 +35,7 @@ The crash was contained. No data was lost. No other process was affected.
 
 **Flow as sole routing backbone.** Every cross-boundary call -- database writes, REPL evals, inter-namespace function calls -- routes through `topology/request!`. No side channel. The promise-register/inject/step/reply-router/deliver pattern is the only way data crosses process boundaries.
 
-**Datahike as embedded LMDB store.** The database is embedded in the Seon JVM via Datahike — there is no separate database service. Persistence is guaranteed by the on-disk LMDB store under `data/`: killing the JVM and restarting it reopens the same store with full history intact. The LMDB process-local lock is owned by whichever JVM holds the connection; the connection manager ensures only one JVM at a time opens a given store.
+**Datahike as embedded LMDB store.** `[JVM track — paused]` On the paused JVM main-app track, the database is embedded in the Seon JVM via Datahike — there is no separate database service. Persistence is guaranteed by the on-disk LMDB store under `data/`: killing the JVM and restarting it reopens the same store with full history intact. The LMDB process-local lock is owned by whichever JVM holds the connection; the connection manager ensures only one JVM at a time opens a given store. (The active CLJS pod track does not embed datahike — it forwards writes over a Unix socket to the `wire-server` central writer at `data/clusters/default/store`; reads are local lazy db values.)
 
 **Per-DB connection locking.** The connection manager uses `ConcurrentHashMap` with double-checked locking so that two threads never race to open the same database simultaneously. This prevents the LMDB corruption race that occurs when concurrent first-opens hit the store before initialization completes.
 
@@ -47,9 +47,9 @@ The crash was contained. No data was lost. No other process was affected.
 
 ## What Already Exists
 
-- [[vision/capabilities/agent-isolation]] -- complete. Each agent gets an isolated JVM with nREPL and its own embedded Datahike connection. TCP routing via harness. Nippy wire protocol.
+- [[vision/capabilities/agent-isolation]] -- complete. Each agent gets an isolated JVM with nREPL and its own embedded Datahike connection `[JVM track — paused]`. TCP routing via harness. Nippy wire protocol.
 - [[vision/capabilities/flow-topology]] -- complete. `topology/request!` is the universal entry point. Infrastructure flow handles writer, reader, REPL eval, reply-router.
-- [[vision/capabilities/database-platform]] -- complete. Datahike embedded in-process. Connection manager with per-DB locking. Two-phase startup.
+- [[vision/capabilities/database-platform]] -- complete. Datahike embedded in-process `[JVM track — paused]`. Connection manager with per-DB locking. Two-phase startup.
 - [[vision/capabilities/pool-self-healing]] -- complete. Health checks, auto-replenishment, rate limiting, correct JVM opts.
 - [[vision/capabilities/mcp-resilience]] -- complete. Async dispatch, cancellation, non-blocking init.
 - [[vision/capabilities/self-monitoring]] -- complete. Readiness gates, post-start observation, circuit breakers.

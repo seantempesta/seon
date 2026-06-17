@@ -49,9 +49,11 @@ Render functions produce either `:seon.render/html` (Hiccup for browsers) or `:s
 
 ## How the System Boots
 
+`[JVM track — paused]` The Integrant/Aero two-phase boot described here belongs to the paused JVM main-app track. The active track is the CLJS pod (Node, port 7890), which forwards writes to the separate `wire-server` central datahike writer over a Unix socket rather than opening datahike in-process.
+
 Startup is orchestrated by Integrant, configured via Aero. [[components/system-lifecycle]] manages a two-phase boot:
 
-**Phase 1** brings up foundational services: Datahike connections (opened in-process against the LMDB store on disk), schema registration, the runtime registry, and the connection manager. These have no dependencies on the flow topology.
+**Phase 1** brings up foundational services: Datahike connections (on this JVM track, opened in-process against the LMDB store on disk), schema registration, the runtime registry, and the connection manager. These have no dependencies on the flow topology.
 
 **Phase 2** builds on Phase 1: the infrastructure flow starts (with a sync barrier — `flow/ping` must succeed within 5 seconds), the runtime database initializes, the web server binds ports, the code graph scanner runs its first pass in a background future, and function instrumentation activates.
 

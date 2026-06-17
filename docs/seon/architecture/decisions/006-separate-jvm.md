@@ -48,7 +48,7 @@ Pre-warmed JVM pool eliminates startup latency:
 - `seon.flow.pool` manages claim!/release-session! lifecycle
 - Pool of 2-3 pre-warmed JVMs at ~186MB each
 
-> **Note (Datahike migration, 2026-04):** This ADR originally described agents holding a Datalevin client to a shared server on port 8898. With the move to embedded Datahike on LMDB, LMDB's single-writer-process model means agents no longer open the store directly. DB requests from agents route through `topology/request!` to the orchestrator's per-db conn-process, which owns the LMDB handle. The isolation properties (separate Malli registry, separate memory, OS-level crash isolation) still hold.
+> **Note (Datahike migration, 2026-04):** `[JVM track — paused]` This ADR (and the migration note below) describes the now-paused JVM main-app track; the active track is the CLJS pod, which forwards writes to the separate `wire-server` central datahike writer over a Unix socket. This ADR originally described agents holding a Datalevin client to a shared server on port 8898. With the move to embedded Datahike on LMDB, LMDB's single-writer-process model means agents no longer open the store directly. DB requests from agents route through `topology/request!` to the orchestrator's per-db conn-process, which owns the LMDB handle. The isolation properties (separate Malli registry, separate memory, OS-level crash isolation) still hold.
 
 ## Consequences
 

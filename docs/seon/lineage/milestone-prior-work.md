@@ -63,11 +63,11 @@ Datalog store survives crashes; the pool self-heals; startup is deterministic.
 
 **Current README status.** `partial`.
 
-**Recommended new status.**
+**Recommended new status.** `[JVM track — paused]`
 `partial — flow backbone, pool, embedded Datahike crash-survival all live; atom-watches + state registries still bypass flow.`
-This matches the milestone doc's own "What Remains Honest" section verbatim.
+This matches the milestone doc's own "What Remains Honest" section verbatim. (Describes the paused JVM main-app track; the active track is the CLJS pod backed by `wire-server`.)
 
-**One-line replacement.**
+**One-line replacement.** `[JVM track — paused]`
 `| [M1: Reliable runtime](docs/seon/vision/m1-reliable-runtime.md)                | partial — flow + pool + embedded Datahike all live on main; atom watches still bypass flow |`
 
 ### M2: Trustworthy Data
@@ -405,7 +405,7 @@ composes itself.
 
 ## Recommended Status Table Replacement
 
-Paste this into the README in place of the current Status table:
+Paste this into the README in place of the current Status table. Note: the M1 row's "embedded Datahike all live on main" describes the paused JVM main-app track `[JVM track — paused]`; the active track is the CLJS pod backed by the `wire-server` central datahike writer.
 
 ```markdown
 | Milestone                                                                      | Status |

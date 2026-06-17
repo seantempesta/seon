@@ -21,7 +21,7 @@ Routing: `seon.web.serve/handler` owns `/`, static `/css/` + `/js/`, `/sse`, and
 
 ## SSE morphing
 
-- ONE `db/listen!` tx-listener (`install!`, key `::inspector`) serves every view. Fan-out scope per commit: substrate tx (no `:seon.db/agent-id` stamp) and `:substrate-seed`-origin tx go to ALL watching agents; agent-stamped tx only to that agent; the `::index` pseudo-agent (the `/agents` dashboard) watches every commit.
+- ONE `db/listen!` tx-listener (`install!`, key `::inspector`) serves every view. Fan-out scope per commit: core tx (no `:seon.db/agent-id` stamp) and `:substrate-seed`-origin tx go to ALL watching agents; agent-stamped tx only to that agent; the `::index` pseudo-agent (the `/agents` dashboard) watches every commit.
 - Pushes coalesce on a 100ms trailing timer per agent-id (`schedule-push!`) — a burst of tx within one turn produces one render.
 - Per-agent registry `!sse-by-agent`; each connection is tagged `:view` (`:consumer` | `:debug`) and `push-agent!` writes its view's fragment set — `consumer-snapshot` is deliberately cheaper than the debug `snapshot` (no `ctx-preview`).
 - Payloads are hand-built `datastar-patch-elements` events (`patch-fragment` — inlined to keep the require graph acyclic); idiomorph morphs by stable fragment ids (header + both panes per view, `#agents-dash` for the index).

@@ -19,7 +19,7 @@ paths, different jobs (research:
 - **Path B — `SEON_EXTRA_SRC`** (this component): the downstream ships
   AOT-compiled CLJS namespaces (their own root prefix, e.g. `acme.*`)
   plus npm deps, compiled INTO the pod bundle and boot-indexed like the
-  substrate's own. Use for stable product code: vendor wrappers,
+  core's own. Use for stable product code: vendor wrappers,
   domain APIs, anything wanting compile-time checking, instrumentation,
   and replay-skip semantics.
 
@@ -87,7 +87,7 @@ it (mirrors `seon.dev.test-preload`):
 
 ## Rules and edges
 
-- **Reserved prefixes:** `seon.*` (substrate) and `my.*` (the human's
+- **Reserved prefixes:** `seon.*` (core) and `my.*` (the human's
   store-replayed corpus) are refused at boot-index time — the pod
   fails loudly naming the offending ns. Use your own root prefix.
 - Changing `SEON_EXTRA_SRC` requires `bin/seon restart cljs-watch`
@@ -100,7 +100,7 @@ it (mirrors `seon.dev.test-preload`):
   lands in seon's `out/`).
 - `.cljs` files only for the extra root (boot source read probes
   `.cljs` paths); release/`:advanced` builds are out of scope (the
-  substrate itself requires dev compilation).
+  core itself requires dev compilation).
 
 ## Key files
 

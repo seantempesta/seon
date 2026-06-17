@@ -5,11 +5,13 @@ tags: [component, database]
 ---
 # Database
 
-> Sole database API for Seon — all reads and writes route through `seon.db`. Backed by embedded Datahike (in-process LMDB), with per-namespace stores owned by a `core.async.flow`.
+> Sole database API for the paused JVM main-app track — all reads and writes route through `seon.db`. Backed by embedded Datahike (in-process LMDB), with per-namespace stores owned by a `core.async.flow`.
+
+`[JVM track — paused]` This doc describes the JVM main-app database layer (embedded in-process Datahike, core.async flow routing), which is paused but not deleted. The ACTIVE track is the CLJS pod: it does NOT embed datahike — it forwards writes over a Unix socket to the central `wire-server` writer (file-backed datahike at `data/clusters/default/store`) and reads local lazy db values. So "embedded / no separate database process" below is true ONLY of this paused JVM track, not of Seon as currently run.
 
 ## Status (2026-05-20)
 
-Datahike is the substrate. `seon.db` dispatches per db-name through dedicated flow processes (`seon.db.datahike.conn-process`), one per database. Migration narrative lives in `docs/prds/datahike-migration/`.
+Datahike is the core. `seon.db` dispatches per db-name through dedicated flow processes (`seon.db.datahike.conn-process`), one per database. Migration narrative lives in `docs/prds/datahike-migration/`.
 
 - **`seon.db` public API**: `(transact! :seon.weather ...)`, `(query :seon.weather ...)`, etc. Stable at the call site.
 - **Internally**: db-names declared under `:seon.db/flow` in `resources/system.edn` route through the datahike flow.
@@ -151,7 +153,7 @@ Each db-name has one conn-process that owns the embedded Datahike connection and
 
 ## Design Decisions
 
-**Embedded Datahike.** The database lives in the Seon JVM. There is no separate database process and no database TCP port. LMDB files live under `data/datahike/<db-name>/`. Bringing the JVM down brings the database down with it; bringing it back up reopens cleanly.
+**Embedded Datahike.** `[JVM track — paused]` On this paused track the database lives in the Seon JVM — no separate database process and no database TCP port for it; LMDB files live under `data/datahike/<db-name>/`, and bringing the JVM down brings the database down with it. (This is NOT universally true of Seon: the active CLJS pod forwards writes to the separate `wire-server` central writer over a Unix socket.)
 
 **Positional arguments on `seon.db`.** Under the 2026-06-08 rule, positional public fns are a sanctioned first-class shape (named, specced `:catn` slots), so `seon.db` is no longer an *exception* — it is the canonical example of the positional shape. The API mirrors `datahike.api` for drop-in familiarity: `(query :seon '[:find ?e ...])`. Each positional slot still gets its own fully-namespaced spec (see `docs/prds/agent-runtime/research/positional-db-ops-spec-2026-06-08.md`).
 

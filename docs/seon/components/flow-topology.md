@@ -7,6 +7,8 @@ tags: [component, flow]
 
 > core.async.flow-based routing backbone for all cross-boundary calls -- database writes, REPL eval, and inter-namespace function calls.
 
+`[JVM track — paused]` This doc describes the JVM main-app flow topology (core.async.flow, per-db conn-processes over embedded Datahike), which is paused but not deleted. The active CLJS pod track does not use this flow backbone; it forwards writes to the separate `wire-server` central datahike writer over a Unix socket. The "embedded Datahike store" references below apply only to this paused track.
+
 ## Purpose
 
 The flow topology is Seon's central nervous system. Every cross-boundary operation -- database writes, database reads, REPL eval on agent JVMs, and cross-namespace function calls -- routes through `topology/request!`. This gives a single observation point for all system activity: tracing, backpressure, error collection, and status monitoring.

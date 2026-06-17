@@ -10,7 +10,7 @@ tags: [research, vision]
 
 ## Statement of purpose
 
-None of the foundational ideas in Seon are original to Sean Tempesta. What is his own is the **specific synthesis**: a personal substrate where AI agents own and evolve code, built on immutable Datalog over LMDB, schema-as-contract, REPL-driven Clojure, capability-typed WASM containment, and a narrative inspired by bonded luminous helpers from speculative fiction. This document credits the earliest credible sources for each load-bearing idea so that the public README and vision documents can give honest attribution. The goal is intellectual honesty, not exhaustive citation. Where lineage is murky, that is noted.
+None of the foundational ideas in Seon are original to Sean Tempesta. What is his own is the **specific synthesis**: a personal core where AI agents own and evolve code, built on immutable Datalog over LMDB, schema-as-contract, REPL-driven Clojure, capability-typed WASM containment, and a narrative inspired by bonded luminous helpers from speculative fiction. This document credits the earliest credible sources for each load-bearing idea so that the public README and vision documents can give honest attribution. The goal is intellectual honesty, not exhaustive citation. Where lineage is murky, that is noted.
 
 ---
 
@@ -20,11 +20,11 @@ None of the foundational ideas in Seon are original to Sean Tempesta. What is hi
 - Brandon Sanderson — *Elantris* (Tor Books, 2005). Seons are autonomous, sentient, luminous beings that have given themselves to the service of mankind, each bearing an Aon (the magic glyph) at its center. The name "Seon" is from an archaic verb "to see"; Sanderson notes the visual inspiration was Michael Whelan's *Passage* paintings (floating candle-bubbles).
 
 **Lineage**
-- Neal Stephenson — *The Diamond Age: Or, a Young Lady's Illustrated Primer* (Bantam Spectra, 1995). The Primer is an AI book that acts as a teacher and mentor, adapting to the child it is bonded with — perhaps the most direct fictional precedent for a personal AI substrate.
+- Neal Stephenson — *The Diamond Age: Or, a Young Lady's Illustrated Primer* (Bantam Spectra, 1995). The Primer is an AI book that acts as a teacher and mentor, adapting to the child it is bonded with — perhaps the most direct fictional precedent for a personal AI core.
 - HAL 9000 (Clarke / Kubrick, *2001*, 1968), KITT (*Knight Rider*, 1982), Bicentennial Man (Asimov, 1976), Cortana, JARVIS — predecessors in the "bonded helpful machine intelligence" archetype.
 
 **How Seon uses it**
-- The project name and visual/affective register come directly from Sanderson's Seons (luminous, bonded, voluntarily in service). The Primer-as-substrate gives the deeper architectural intuition: a personal device that grows with its user.
+- The project name and visual/affective register come directly from Sanderson's Seons (luminous, bonded, voluntarily in service). The Primer-as-core gives the deeper architectural intuition: a personal device that grows with its user.
 
 ---
 
@@ -99,7 +99,7 @@ None of the foundational ideas in Seon are original to Sean Tempesta. What is hi
 - Elm — Evan Czaplicki, designed 2011; "Asynchronous Functional Reactive Programming for GUIs," PLDI 2013. The Elm Architecture (model–update–view) directly inspired Redux.
 
 **How Seon uses it**
-- Datastar SSE + render-from-DB-state means the UI is genuinely a projection of the live system. Bret Victor's "immediate connection" is the design tax Seon pays to make the substrate trustworthy.
+- Datastar SSE + render-from-DB-state means the UI is genuinely a projection of the live system. Bret Victor's "immediate connection" is the design tax Seon pays to make the core trustworthy.
 
 ---
 
@@ -130,7 +130,7 @@ None of the foundational ideas in Seon are original to Sean Tempesta. What is hi
 - XTDB / Crux (JUXT, ~2018) and Datomic (2012) brought bitemporality to general programming.
 
 **How Seon uses it**
-- The Datalog substrate gives transaction-time for free (append-only datoms). Application-time is modeled per domain (trading positions, health records).
+- The Datalog core gives transaction-time for free (append-only datoms). Application-time is modeled per domain (trading positions, health records).
 
 ---
 
@@ -206,7 +206,7 @@ None of the foundational ideas in Seon are original to Sean Tempesta. What is hi
 - TypeScript (2012), Flow (2014), ReasonML (2016) — gradual typing for industrial languages.
 
 **How Seon uses it**
-- Every public function has `:malli/schema` metadata. Schemas are queryable from the database (the shape graph indexes 138 shapes, 333 entries). An agent finds a function by what shape it produces. This is Hoogle at the substrate level.
+- Every public function has `:malli/schema` metadata. Schemas are queryable from the database (the shape graph indexes 138 shapes, 333 entries). An agent finds a function by what shape it produces. This is Hoogle at the core level.
 
 ---
 
@@ -282,7 +282,7 @@ None of the foundational ideas in Seon are original to Sean Tempesta. What is hi
 - Jürgen Schmidhuber — "Gödel Machines: Self-Referential Universal Problem Solvers Making Provably Optimal Self-Improvements," IDSIA TR-19-03 / arXiv:cs.LO/0309048, September 2003.
 
 **How Seon uses it**
-- Seon's agents don't yet rewrite their own substrate, but the design intent — code agents can read, write, and evolve responsibly — is the practical descendant of Eurisko and the Gödel Machine, with "provably useful" replaced by "tested + schema-validated."
+- Seon's agents don't yet rewrite their own core, but the design intent — code agents can read, write, and evolve responsibly — is the practical descendant of Eurisko and the Gödel Machine, with "provably useful" replaced by "tested + schema-validated."
 
 ---
 
@@ -313,7 +313,7 @@ None of the foundational ideas in Seon are original to Sean Tempesta. What is hi
 - WeChat (Tencent, 2011) — the "super-app" archetype that proved one app *can* hold every domain.
 
 **How Seon uses it**
-- Trading, health, finance, ingest — these aren't separate apps. They're domains inside one personal substrate, queryable across boundaries because they share the EAV datoms.
+- Trading, health, finance, ingest — these aren't separate apps. They're domains inside one personal core, queryable across boundaries because they share the EAV datoms.
 
 ---
 
@@ -351,7 +351,7 @@ None of the foundational ideas in Seon are original to Sean Tempesta. What is hi
 
 ## Acknowledgments (draft for README)
 
-> Seon stands on a long lineage of ideas. The bonded-helper image comes from Brandon Sanderson's Seons of *Elantris* (2005) and Neal Stephenson's *Diamond Age* (1995). The architectural genealogy traces through Vannevar Bush (Memex, 1945), Engelbart (Augmenting Human Intellect, 1962), Licklider (Man-Computer Symbiosis, 1960), and Kay (Dynabook, 1972). The runtime model is Lisp (McCarthy, 1958), the REPL is Smalltalk (Kay/Ingalls, 1972), the database model is Datalog (Codd 1970, Maier 1980s, Hickey's Datomic 2012). The containment story descends from Dennis & Van Horn's capabilities (1966) through Mark Miller's *Robust Composition* (2006) to the WebAssembly Component Model (2024). The schema-as-discovery surface owes to Hindley (1969), Milner (1978), Mitchell's Hoogle (2004), and Hickey's clojure.spec (2016). The live-programming aesthetic is Bret Victor's principle (2012), with respectful nods to Smalltalk, Self, Subtext, and Eve. The reactive UI lineage starts with VisiCalc (1979), runs through Fran (Elliott & Hudak, 1997), and lands in Datastar today. Property-based testing is Claessen & Hughes's QuickCheck (2000). What is Sean's own is the synthesis: a personal substrate where these pieces compose into infrastructure AI agents can use to write reliable software.
+> Seon stands on a long lineage of ideas. The bonded-helper image comes from Brandon Sanderson's Seons of *Elantris* (2005) and Neal Stephenson's *Diamond Age* (1995). The architectural genealogy traces through Vannevar Bush (Memex, 1945), Engelbart (Augmenting Human Intellect, 1962), Licklider (Man-Computer Symbiosis, 1960), and Kay (Dynabook, 1972). The runtime model is Lisp (McCarthy, 1958), the REPL is Smalltalk (Kay/Ingalls, 1972), the database model is Datalog (Codd 1970, Maier 1980s, Hickey's Datomic 2012). The containment story descends from Dennis & Van Horn's capabilities (1966) through Mark Miller's *Robust Composition* (2006) to the WebAssembly Component Model (2024). The schema-as-discovery surface owes to Hindley (1969), Milner (1978), Mitchell's Hoogle (2004), and Hickey's clojure.spec (2016). The live-programming aesthetic is Bret Victor's principle (2012), with respectful nods to Smalltalk, Self, Subtext, and Eve. The reactive UI lineage starts with VisiCalc (1979), runs through Fran (Elliott & Hudak, 1997), and lands in Datastar today. Property-based testing is Claessen & Hughes's QuickCheck (2000). What is Sean's own is the synthesis: a personal core where these pieces compose into infrastructure AI agents can use to write reliable software.
 
 ---
 

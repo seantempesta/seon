@@ -95,7 +95,7 @@ words. Ranked by ambition + how much they shape the rest of the system.
 > Malli-specced messages through flow, evaluates forms in the REPL pipeline,
 > and its work is validated, persisted, and tested automatically."
 
-Why it's big: this is the difference between "AI tool" and "AI substrate." The
+Why it's big: this is the difference between "AI tool" and "AI core." The
 README's framing-A "agents own code long-term" hand-waves at this; M8 makes it
 concrete (notification → wake → write handler → next message handled by
 discovery → return to idle). It's the load-bearing claim under "personal AI
@@ -180,7 +180,7 @@ AI-for-code-land works this way today.
 > 'What changed between working and broken?' Most databases can't answer these
 > questions. **For agents learning from experience, they're essential.**"
 
-Current substrate: `docs/prds/agent-runtime/v1.md:1107-1115`:
+Current core: `docs/prds/agent-runtime/v1.md:1107-1115`:
 
 > "`:keep-history? true` on the agent conn. Tx-meta datoms only persist when
 > history is on. ... Pulling `[:seon.eval/id "K9p…"]` returns the eval entity
@@ -195,7 +195,7 @@ Current substrate: `docs/prds/agent-runtime/v1.md:1107-1115`:
 
 Why it's big: the agent's mistakes are first-class data. Replay is a query,
 not an instrumented capture. Datahike's keep-history? makes the XTDB bitemporal
-pitch survive into the current substrate — this is the most under-sold property
+pitch survive into the current core — this is the most under-sold property
 of the database choice.
 
 ### #6 The agent never knows whether code runs in-process, in a separate JVM, or in a WASM sandbox. The dispatch layer routes transparently.
@@ -215,7 +215,7 @@ of the database choice.
 > under wasmtime + wasm-rquickjs with the analyzer fully populated, error
 > shapes meaningful, and async/await native."
 
-Why it's big: the substrate is mode-agnostic. A function call is "send map,
+Why it's big: the core is mode-agnostic. A function call is "send map,
 receive map" whether the target is in your JVM or a wasmtime instance in a
 Tauri host on a stranger's laptop. This is where the WASM track becomes part of
 the user-facing pitch, not just deployment plumbing.
@@ -249,7 +249,7 @@ makes "personal AI that can do anything" safe to deploy on the user's machine.
 `docs/prds/agent-runtime/platform.md:30-34`:
 
 > "**Dynamic deps.** Agent runs `(seon.deps/install ...)` from the REPL and
-> acquires new CLJS or npm packages without a substrate rebuild.
+> acquires new CLJS or npm packages without a core rebuild.
 > Capability-bounded: fs cache + HTTP + (eventually) a curated registry, all
 > via WIT imports."
 
@@ -258,7 +258,7 @@ makes "personal AI that can do anything" safe to deploy on the user's machine.
 > "Agent decides it needs a new dep. `(seon.deps/install '[reagent/reagent
 > "1.2.0"])`. Pod fetches, caches, makes analyzer-visible. Returns `:installed`.
 > Agent requires + uses it. ... Today's agent can write the deftest and run it.
-> They can't install the dep — that's Phase 5. **Path is clear; substrate is
+> They can't install the dep — that's Phase 5. **Path is clear; core is
 > ready to grow into it.**"
 
 Why it's big: the agent isn't just writing code in a pre-bundled environment —
@@ -288,7 +288,7 @@ platform spec, not a stretch goal.
 Why it's big: the system's quality gates are extensible without changing the
 pipeline. Seon evolves itself through the same primitive it evolves user code.
 
-### #10 The substrate is general-purpose. The same architecture powers a Diamond Age-style "Primer" — an AI tutor for children.
+### #10 The core is general-purpose. The same architecture powers a Diamond Age-style "Primer" — an AI tutor for children.
 
 `feature/refinement:docs/archive/primer/docs/primer/prd.md` Vision section:
 
@@ -308,7 +308,7 @@ pipeline. Seon evolves itself through the same primitive it evolves user code.
 > 'generate HTML' — it generates state transitions.**"
 
 Why it's big: Trading/health/finance are routine. A literary-grade tutor for a
-child, built on the same substrate, is the most evocative existence proof of
+child, built on the same core, is the most evocative existence proof of
 "personal AI that can do anything because it can write code." Worth one line in
 the README.
 
@@ -335,7 +335,7 @@ npm deps):
 
 **The CLJS-vs-CLJ lane discipline (today) reads as a stepping stone.** CLAUDE.md:
 
-> "for spec-01 `seon.*` API surfaces the V0 substrate uses **`.cljs` files
+> "for spec-01 `seon.*` API surfaces the V0 core uses **`.cljs` files
 > alongside the existing `.clj` files**, not `.cljc` (yet). ... `seon.schema`
 > is the one exception — promoted to `.cljc` 2026-05-16 because the file was
 > 100% platform-portable. Other promotions wait until both sides converge on
@@ -463,7 +463,7 @@ load-bearing ideas Sean has returned to across 18+ months.
    `vision/index.md:120-128`, `concepts/progressive-enhancement.md`,
    `m7-namespace-as-process.md`, `inter-agent-messaging.md`,
    `bootstrap_v2.clj` impl.
-8. **REPL is the substrate, not the file.** `vision/index.md:99-112`,
+8. **REPL is the core, not the file.** `vision/index.md:99-112`,
    `m6-eval-pipeline.md`, `super-repl/prd.md`, `agent-repl-interface/prd.md`,
    `agent-runtime/v1.md`. This is the most consistently restated claim
    in the codebase.
@@ -480,11 +480,11 @@ These nine are the README's load-bearing skeleton.
 Ideas alive in the archives but missing from `vision/index.md`. Each deserves
 a one-line shout in the README rewrite.
 
-### 5.1 The Primer — Diamond Age tutor on the same substrate
+### 5.1 The Primer — Diamond Age tutor on the same core
 
 (Already #10 in §1.) `feature/refinement:docs/archive/primer/` is a ~650 LOC
 working prototype with full design docs for a child's interactive storytelling
-system built on the substrate. Demonstrates: scene = state, template = render
+system built on the core. Demonstrates: scene = state, template = render
 fn, transition = valid next state, checkpoint = bitemporal store. Nowhere in
 current vision/index.md.
 
@@ -496,7 +496,7 @@ current vision/index.md.
 > Only.** Rationale: 1. Agents know SQL — it's universal. 2. SQL is XTDB v2's
 > primary interface. 3. One syntax to learn, not two."
 
-Current substrate is Datahike + Datalog. The "agents know SQL" insight got
+Current core is Datahike + Datalog. The "agents know SQL" insight got
 buried in the XTDB→Datahike pivot. **Worth reviving as a wrapper layer** —
 agents could be given a SQL surface over Datahike for joins they'd otherwise
 struggle to express in Datalog.
@@ -525,7 +525,7 @@ complete, but archived as "single provider suffices"):
 > providers produce `::ai/message` entities that can be stored, queried, and
 > analyzed uniformly."
 
-The archive's "single provider suffices" is current-substrate-correct (V0 pod
+The archive's "single provider suffices" is current-core-correct (V0 pod
 runs against deepseek alone), but the design preserves multi-model. Worth a
 sentence in §7 contradictions.
 
@@ -563,7 +563,7 @@ archives. Current vision/index.md never quite says it this cleanly.
 > The frozen time is an implementation detail they never see."
 
 A trading agent that operates against a historical snapshot is a backtesting
-substrate — but the design generalises to "agent runs against any point in
+core — but the design generalises to "agent runs against any point in
 DB history." Datahike + `:keep-history?` makes this trivial.
 
 ### 5.8 "Death from boredom" — agents going idle is normal, not a bug
@@ -624,7 +624,7 @@ Drawn directly from the material with cites. Pick one, or layer two of them.
    offline. Full control over the runtime."** (Paraphrased from
    `docs/seon/vision/index.md:271-275`.)
 
-10. **"The same substrate that tracks your trades also tutors your kids — and
+10. **"The same core that tracks your trades also tutors your kids — and
     the agent decides which to build first."** (Composite, drawing from the
     Primer archive + the M7 health-namespace scenario. Not a verbatim quote;
     closest to it: `m7-namespace-as-process.md:14-28` + `primer/prd.md`
@@ -646,8 +646,9 @@ sequence.
 
 ### 7.1 Datahike is the database (resolved)
 
-Resolved 2026-05-23: the database is **Datahike, embedded in-process** —
-no TCP, no separate JVM. The current-state docs (vision/index.md,
+Resolved 2026-05-23: the database is **Datahike, embedded in-process** `[JVM track — paused]` —
+no TCP, no separate JVM. (This holds on the paused JVM track; the active CLJS pod
+forwards writes over a Unix socket to the `wire-server` central writer.) The current-state docs (vision/index.md,
 capability docs, milestones) were swept to remove stale Datalevin
 references. The `datahike-migration` PRD remains as the historical record.
 
@@ -667,36 +668,36 @@ The architecture is already mode-agnostic
 (`docs/prds/unified-namespace-flow/design.md:747-755`) but the vision doc
 locks Clojure in. If the README leads with "language-agnostic," the vision
 doc and the "Why Clojure" table need to be re-framed as "we picked Clojure
-for the substrate; the pods can be any WASM-compatible language."
+for the core; the pods can be any WASM-compatible language."
 
 **Concrete inconsistency to fix:** ADR 001 picks Nippy (Clojure-specific) for
 inter-JVM wire. If non-Clojure pods land, Nippy is wrong. **Either** keep
 Nippy and confine non-Clojure pods to WIT-typed function calls (no shared
 in-memory data), **or** swap Nippy for a polyglot wire format.
 
-### 7.3 JVM substrate vs WASM pod
+### 7.3 JVM core vs WASM pod
 
-Two substrates ship today:
+Two cores ship today:
 
 - JVM lane in `src/seon/*.clj` — datahike, flow, web, all the milestone work
   (M1–M5) is on this. The capability docs describe this as "the system."
-- CLJS pod in `src/seon/*.cljs` — V0 substrate running `node out/client/main.js`,
+- CLJS pod in `src/seon/*.cljs` — V0 core running `node out/client/main.js`,
   hosting the agent loop, with datahike-cljs and a loopback HTTP+SSE server.
   This is what the v1 spec is being written against. Phase 3 will move this
   into a wasm32-wasip2 component inside Tauri.
 
 Question for the README: which one is "Seon" today? Both? Most readers will
 assume "the WASM thing" is roadmap. The current state is "two functioning
-substrates that need to converge." Sean's note in CLAUDE.md: "the convergence
+cores that need to converge." Sean's note in CLAUDE.md: "the convergence
 is a deliberate Stage 2/3 step in the convergence plan."
 
 **Recommendation:** the README's "Active tracks" section (already exists at
 `README.md:c0c2888`) is the right shape — keep it, but make it crystal clear
-that the JVM substrate is "what works today end-to-end" and the WASM pod is
+that the JVM core is "what works today end-to-end" and the WASM pod is
 "the deployable form factor we are building toward and have shipping smokes
 for."
 
-### 7.4 The substrate is the product vs the substrate is a means to an end
+### 7.4 The core is the product vs the core is a means to an end
 
 `README.md:c0c2888` framing A:
 
@@ -707,7 +708,7 @@ Sean's pitch (2026-05-23 + the archive's "OS for life" framing):
 
 > "A personal AI that can do anything for you because it can write code."
 
-These are not contradictory — the substrate exists *so that* the personal AI
+These are not contradictory — the core exists *so that* the personal AI
 is reliable — but the current README emphasises the wrong half. To a
 first-time visitor, "infrastructure for AI agents" reads as developer-tooling
 for AI researchers; "personal AI that can do anything" reads as consumer
@@ -744,7 +745,7 @@ disk fills. The story is "v1 keeps everything; v2 lets you curate; v3 has
 proper retention." Skirt it in the README; let the v1/v2/v3 doc speak for
 itself.
 
-### 7.7 Substrate authors files vs agent authors files
+### 7.7 Core authors files vs agent authors files
 
 `docs/prds/agent-repl-interface/prd.md`: "Agents develop Clojure code
 exclusively through REPL eval — no file editing, no line numbers, no
@@ -771,10 +772,10 @@ the README rewrite shouldn't surface it but a vision update should.
 `README.md:c0c2888`: "The personal domains (trading, health, finance) are
 test cases. The infrastructure is the product."
 `feature/refinement:docs/archive/primer/`: a fourth domain (children's AI
-tutor) that demonstrates the substrate's generality much more vividly than
+tutor) that demonstrates the core's generality much more vividly than
 the canonical three.
 
 The README should either (a) update the list to include the Primer (with the
 caveat that it lives on a different branch), or (b) reframe "domains" as
-"applications that prove the substrate." The current "trading / health /
+"applications that prove the core." The current "trading / health /
 finance" enumeration reads as the *complete* set, which is wrong.

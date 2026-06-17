@@ -7,6 +7,8 @@ tags: [component, flow]
 
 > Integrant-based two-phase startup, graceful shutdown, health monitoring, and Aero configuration loading.
 
+`[JVM track — paused]` This doc describes the JVM main-app boot sequence (Integrant, embedded in-process Datahike, core.async flow), which is paused but not deleted. The active track is the CLJS pod (Node, port 7890), which forwards writes to the separate `wire-server` central datahike writer over a Unix socket rather than embedding datahike. References below to "Datahike is embedded / no DB port" apply only to this paused track.
+
 ## Purpose
 
 Manages the full lifecycle of the Seon system: configuration loading, two-phase component initialization, health checking, readiness gating, graceful shutdown, and the `(go)` / `(halt)` / `(reset)` REPL workflow. The design ensures that even if database or flow components fail, the developer always has an nREPL and HTTP server to debug with.

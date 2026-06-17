@@ -194,17 +194,20 @@ Each namespace should have a **steward** — see `docs/seon/concepts/namespace-s
 
 **Never blindly kill processes.** The orchestrator owns system restarts. Agents diagnose and report — they never restart. See `CLAUDE.md` "Process Architecture" for the full process map.
 
-### One Process, One Database
+### Database
 
-Datahike is **embedded** in the Seon JVM. There is no separate database service to manage — the Seon JVM owns the connection, the LMDB store lives on disk under `data/`, and starting the JVM opens a connection against it.
+The active CLJS pod track does **not** embed datahike — the pod forwards writes over a Unix socket to the central `wire-server` writer (file-backed datahike at `data/clusters/default/store`) and serves reads as local lazy db values.
+
+`[JVM track — paused]` On the paused JVM main-app track, datahike is embedded in the Seon JVM — that JVM owns the connection, the LMDB store lives on disk under `data/`, and starting the JVM opens a connection against it.
 
 ```bash
+# [JVM track — paused]
 lsof -ti :7888   # Seon nREPL PID
 lsof -ti :8080   # Seon HTTP PID
 ls data/datahike/  # On-disk LMDB store
 ```
 
-### Server
+### Server `[JVM track — paused]`
 
 ```bash
 ./bin/run              # Start Seon (opens Datahike connection against on-disk store)
@@ -221,14 +224,14 @@ cat logs/startup.log | grep -iE 'datahike|db'
 tail -f logs/app.log | grep -iE 'datahike|db'
 ```
 
-### Two-Phase Startup
+### Two-Phase Startup `[JVM track — paused]`
 
 - **Phase 1 (~1.5s)**: nREPL (7888) + HTTP (8080) + schema registry + Tailwind + Claude SDK
 - **Phase 2 (~8s)**: Datahike connection + flow topology + agent pool + code scanner
 
 If Phase 2 fails, Phase 1 stays alive — connect via nREPL and investigate.
 
-### Database Management
+### Database Management `[JVM track — paused]`
 
 | Function | What it does |
 |----------|-------------|

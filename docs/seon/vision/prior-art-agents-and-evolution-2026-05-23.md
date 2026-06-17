@@ -10,7 +10,7 @@ Companion to the classical-CS prior-art document. This file covers the modern AI
 
 ## Statement of purpose
 
-Seon is a substrate for AI agents to write and evolve software they themselves run inside. That puts it downstream of a long lineage of ideas: self-modifying programs, evolutionary code synthesis, LLM agents, tool-using language models, sandboxed execution of agent code, and continual learning. This document credits those predecessors so the project can speak honestly about which ideas are its own and which are borrowed.
+Seon is a core for AI agents to write and evolve software they themselves run inside. That puts it downstream of a long lineage of ideas: self-modifying programs, evolutionary code synthesis, LLM agents, tool-using language models, sandboxed execution of agent code, and continual learning. This document credits those predecessors so the project can speak honestly about which ideas are its own and which are borrowed.
 
 The format throughout: a single entry per work, with year, citation, optional one-line quote, and a one-line "how Seon relates." We err on the side of acknowledging too many predecessors rather than too few — the goal is humble citation, not novelty claims.
 
@@ -32,7 +32,7 @@ How Seon relates: Seon's pitch that an agent edits the code it runs inside, and 
 
 Eurisko was AM's successor and the first widely-cited *recursively self-improving* program: heuristics that modified other heuristics, including themselves. It famously won the U.S. Traveller Trillion Credit Squadron championship in 1981 and 1982 by inventing fleet designs its human author did not understand. The system reported that "the discovery of heuristics which help the system discover heuristics" was one of its eight task domains.
 
-How Seon relates: Eurisko is the canonical prior art for the "Seon agent edits Seon's own substrate" claim. Where modern LLM-driven systems (FunSearch, AlphaEvolve, Promptbreeder) recreate Eurisko's loop using a language model as the mutation operator, Seon imagines the same loop with an agent that also owns the surrounding scaffolding (DB, REPL, web UI, sandbox).
+How Seon relates: Eurisko is the canonical prior art for the "Seon agent edits Seon's own core" claim. Where modern LLM-driven systems (FunSearch, AlphaEvolve, Promptbreeder) recreate Eurisko's loop using a language model as the mutation operator, Seon imagines the same loop with an agent that also owns the surrounding scaffolding (DB, REPL, web UI, sandbox).
 
 ### Jürgen Schmidhuber — Gödel Machine (2003)
 
@@ -48,7 +48,7 @@ How Seon relates: Seon does not aspire to formal proofs of improvement. But Schm
 
 Sims evolved both the body morphology and the neural-network controller of simulated creatures, jointly. The result was creatures that swam, jumped, and followed light, with body plans that emerged from the same evolutionary pressure that shaped their brains. The work is the gold-standard reference for *co-evolution of structure and behavior.*
 
-How Seon relates: Seon-the-substrate evolves alongside the agents that use it — the agent's code and the surrounding system are co-designed. Sims showed how dramatic that joint search can be even with primitive primitives.
+How Seon relates: Seon-the-core evolves alongside the agents that use it — the agent's code and the surrounding system are co-designed. Sims showed how dramatic that joint search can be even with primitive primitives.
 
 ### Allen Newell, John Laird, Paul Rosenbloom — SOAR (1987)
 
@@ -102,7 +102,7 @@ How Seon relates: This is the closest published predecessor for "LLM proposes a 
 
 AlphaEvolve generalizes FunSearch from short snippets to entire codebases, using Gemini 2.0 Flash and Pro in a population-based evolutionary loop with continuous evaluator feedback. DeepMind reports practical wins on matrix multiplication kernels and Google data-center scheduling code.
 
-How Seon relates: Of all listed predecessors, AlphaEvolve is the one whose loop *most closely resembles what Seon wants to do.* The two material differences: AlphaEvolve runs in a black-box DeepMind harness with internal-only tooling; Seon aims to make the same loop reproducible on a single developer's laptop, with the substrate, DB, and sandbox all open.
+How Seon relates: Of all listed predecessors, AlphaEvolve is the one whose loop *most closely resembles what Seon wants to do.* The two material differences: AlphaEvolve runs in a black-box DeepMind harness with internal-only tooling; Seon aims to make the same loop reproducible on a single developer's laptop, with the core, DB, and sandbox all open.
 
 ### OpenAI — Eureka (2023)
 
@@ -354,7 +354,7 @@ The high-water mark for "make a single neural network keep learning without forg
 
 Foundational textbook; relevant here as the conceptual ancestor of every LLM-agent system that thinks of itself as performing trial-and-error against an environment with delayed reward.
 
-How Seon relates: Seon's bet is that the "lifetime" of an agent is the lifetime of the codebase it inhabits, and continuity comes from the *persistent substrate* (DB, namespaces, accumulated tests) rather than from carrying weights forward. The continual-learning lineage is the conceptual ancestor of that bet even though the mechanism is different.
+How Seon relates: Seon's bet is that the "lifetime" of an agent is the lifetime of the codebase it inhabits, and continuity comes from the *persistent core* (DB, namespaces, accumulated tests) rather than from carrying weights forward. The continual-learning lineage is the conceptual ancestor of that bet even though the mechanism is different.
 
 ---
 
@@ -388,9 +388,9 @@ Seon draws openly on a long lineage of work it does not pretend to invent.
 
 The idea that a program can extend itself by discovering new heuristics traces to Doug Lenat's *AM* (1976) and *Eurisko* (1983), and to Schmidhuber's *Gödel Machine* (2003). The idea that programs can be evolved as a population is John Holland's (1975) and John Koza's (1992); modern LLM-driven variants — DeepMind's *FunSearch* (Romera-Paredes et al., 2023), *AlphaEvolve* (2025), *Promptbreeder* (Fernando et al., 2023), and OpenAI's *Eureka* (Ma et al., 2023) — taught us what the inner loop looks like when an LLM is the variation operator. The agent loop itself — reason, act, observe, repeat — is Yao et al.'s *ReAct* (2022); the practice of self-critique is Shinn et al.'s *Reflexion* (2023), Madaan et al.'s *Self-Refine* (2023), and Chen et al.'s *Self-Debug* (2023). The pattern of an agent that grows its own skill library is Wang et al.'s *Voyager* (2023). The argument that agents need a purpose-built interface to a codebase, not a generic shell, is Yang et al.'s *SWE-agent* (2024).
 
-For the substrate side: tool-use as a teachable behavior is Schick et al.'s *Toolformer* (2023); standardizing tool exchange across model vendors is Anthropic's *Model Context Protocol* (2024); typed, capability-style sandboxing for agent code is the Bytecode Alliance's *WASI Preview 2* (2024). The contract-driven framing — every LLM call is a typed module — is Khattab et al.'s *DSPy* (2023). For the older multi-agent foundations: Shoham's *Agent-Oriented Programming* (1993), Wooldridge & Jennings' agents survey (1995), and Rao & Georgeff's *BDI* (1991). For the framing that intelligence accrues across a lifetime: Thrun & Mitchell's *Lifelong Robot Learning* (1995) and Ring's *CHILD* (1997).
+For the core side: tool-use as a teachable behavior is Schick et al.'s *Toolformer* (2023); standardizing tool exchange across model vendors is Anthropic's *Model Context Protocol* (2024); typed, capability-style sandboxing for agent code is the Bytecode Alliance's *WASI Preview 2* (2024). The contract-driven framing — every LLM call is a typed module — is Khattab et al.'s *DSPy* (2023). For the older multi-agent foundations: Shoham's *Agent-Oriented Programming* (1993), Wooldridge & Jennings' agents survey (1995), and Rao & Georgeff's *BDI* (1991). For the framing that intelligence accrues across a lifetime: Thrun & Mitchell's *Lifelong Robot Learning* (1995) and Ring's *CHILD* (1997).
 
-Seon's contribution, to the extent it has one, is not in any single one of these mechanisms but in the *integration*: an LLM agent runs an evolutionary improvement loop over a Clojure substrate it itself extends, with typed contracts at every boundary, capability-sandboxed execution, and a queryable persistent memory. Every piece of that sentence is somebody else's idea. The combination, and the bet that the combination matters, is what we are putting forward.
+Seon's contribution, to the extent it has one, is not in any single one of these mechanisms but in the *integration*: an LLM agent runs an evolutionary improvement loop over a Clojure core it itself extends, with typed contracts at every boundary, capability-sandboxed execution, and a queryable persistent memory. Every piece of that sentence is somebody else's idea. The combination, and the bet that the combination matters, is what we are putting forward.
 
 ---
 

@@ -47,9 +47,9 @@ The original plan identified three hard problems with namespace cloning in a sha
 
 ### 2. Database Access Across JVMs
 
-**Note (2026-05):** The original exploration assumed Datalevin's client-server model. The current substrate uses **Datahike**, which is embedded (in-process LMDB) — there is no TCP server to connect to.
+**Note (2026-05):** The original exploration assumed Datalevin's client-server model. The core runs two tracks. On the **paused JVM main-app track** `[JVM track — paused]`, Datahike is embedded (in-process LMDB) — there is no TCP server to connect to. On the **active CLJS pod track**, the pod does not embed Datahike at all: it forwards writes over a Unix socket to the central `wire-server` datahike writer (file-backed datahike at `data/clusters/default/store`), and reads are local lazy db values.
 
-**Implication for separate-JVM isolation:** Agent JVMs cannot share a single embedded Datahike instance directly. Cross-JVM database access must route through the orchestrator's flow topology (the orchestrator owns the embedded Datahike; agents send query/transact requests via nREPL or core.async.flow channels and receive replies). This is heavier than the original ~50ms TCP-client estimate, but the flow path is already how `seon.db` works inside a single JVM.
+**Implication for separate-JVM isolation:** `[JVM track — paused]` On the JVM track, agent JVMs cannot share a single embedded Datahike instance directly. Cross-JVM database access must route through the orchestrator's flow topology (the orchestrator owns the embedded Datahike; agents send query/transact requests via nREPL or core.async.flow channels and receive replies). This is heavier than the original ~50ms TCP-client estimate, but the flow path is already how `seon.db` works inside a single JVM. (The active pod track sidesteps this entirely by centralizing writes in `wire-server`.)
 
 ### 3. nREPL Already Works Cross-Process
 
@@ -115,7 +115,7 @@ Created and tested a minimal agent JVM. Files:
 - `org.clojure/clojure` 1.12.0
 - `org.clojure/core.async` 1.9.829-alpha2
 - `metosin/malli` 0.17.0
-- `datalevin/datalevin` (local from reference-code; the substrate has since migrated to embedded Datahike — see Section 2 note)
+- `datalevin/datalevin` (local from reference-code; the core has since migrated to Datahike — see Section 2 note)
 - `nrepl/nrepl` 1.3.0
 - `com.taoensso/timbre` 6.5.0
 - `cheshire/cheshire` 5.13.0
@@ -201,7 +201,7 @@ Replace the old "Namespace Instances" phase with:
 
 2. **nREPL eval latency** — How much overhead does nREPL add per eval? For interactive agent work, <10ms per eval is fine.
 
-3. **Cross-JVM DB access from agent JVM** — Originally planned as a Datalevin client connection; with Datahike (embedded), this needs to route through the orchestrator's flow topology instead. Not yet verified end-to-end.
+3. **Cross-JVM DB access from agent JVM** `[JVM track — paused]` — Originally planned as a Datalevin client connection; on the JVM track (embedded Datahike), this needs to route through the orchestrator's flow topology instead. Not yet verified end-to-end. (The active CLJS pod track instead centralizes writes in `wire-server` over a Unix socket.)
 
 4. **Per-namespace deps generation** — How do we automatically determine what deps a namespace needs? clj-kondo analysis gives us `require` chains, but mapping those to Maven coordinates needs work.
 

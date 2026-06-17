@@ -9,16 +9,18 @@ status: active
 
 ## Active focus — agent runtime (2026-05-23)
 
-Branch: **`feature/agent-runtime`**. PRD root: [[../prds/agent-runtime/README]].
+PRD root: [[../prds/agent-runtime/README]].
 
-- **What runs today:** the V0 CLJS pod (Node-hosted, in `src/seon/*.cljs`). Phase 1 substrate hardening shipped + Phase 2 test capture as data + Phase A HTTPS allowlist + symbol-lookup refactor (`seon.eval/lookup-value` + render fns renamed `*-render`). See `docs/seon/pod/` and [[../prds/agent-runtime/STATUS]].
+Seon runs two tracks. The **active** track is the CLJS pod (Node-hosted, port 7890), backed by the `wire-server` central datahike writer (file-backed datahike at `data/clusters/default/store`); the pod does NOT embed datahike — it forwards writes over a Unix socket to `wire-server`, and reads are local lazy db values. The **paused** track is the JVM main-app (`./bin/run`, nREPL 7888 / HTTP 8080, embedded in-process datahike LMDB, core.async flow) — paused but not deleted.
+
+- **What runs today:** the V0 CLJS pod (Node-hosted, in `src/seon/*.cljs`). Phase 1 core hardening shipped + Phase 2 test capture as data + Phase A HTTPS allowlist + symbol-lookup refactor (`seon.eval/lookup-value` + render fns renamed `*-render`). See `docs/seon/pod/` and [[../prds/agent-runtime/STATUS]].
 - **MVP track next:** v1 spec implementation — sessions/turns/ctx composition, run-turn!, six default section fns, eval-replay resume. Design: [[../prds/agent-runtime/v1]].
-- **Platform track next:** Phase 2.5 substrate primitives (D13 dynvar probe, `seon.id`, history flip, tx-meta auto-merge) in flight; Phase 3 WASM-Tauri containment alpha-blocking. Phases 8–10 (Tauri shell, LAN/Tailscale remote, mobile pod-in-webview) designed.
+- **Platform track next:** Phase 2.5 core primitives (D13 dynvar probe, `seon.id`, history flip, tx-meta auto-merge) in flight; Phase 3 WASM-Tauri containment alpha-blocking. Phases 8–10 (Tauri shell, LAN/Tailscale remote, mobile pod-in-webview) designed.
 - **Cross-platform delivery:** [[../prds/agent-runtime/platform]] Phases 8–10 lay out write-once-run-everywhere via Tauri 2 (macOS/Win/Linux/iOS/Android). Mobile path uses pod-in-webview (Apple's WKWebView JIT exception) to sidestep wasmtime's iOS JIT restriction.
 - **WASM containment:** Authoritative design at [[pod/wasm-spike-2026-05-20]]; pod-host workspace at `pod-host/wasm-tauri/`.
 - **Dev loop:** [[../cljs-dev-loop]] (V0 / pre-WASM). WASM dev loop is documented in the spike doc.
 
-The component tables below describe the **JVM substrate** (Datahike + Integrant + flow topology). That substrate is paused as the active feature track but not deleted — its files still live under `src/seon/*.clj`. The active development is the CLJS pod + Phase 3 WASM-Tauri work, not the JVM seat.
+The component tables below describe the **JVM core** (Datahike + Integrant + flow topology). `[JVM track — paused]` That track is paused as the active feature track but not deleted — its files still live under `src/seon/*.clj`. The active development is the CLJS pod + Phase 3 WASM-Tauri work, not the JVM seat.
 
 ## How to Use This Vault
 
