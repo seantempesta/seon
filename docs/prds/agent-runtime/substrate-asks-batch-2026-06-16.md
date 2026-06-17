@@ -78,6 +78,36 @@ is NOT replayed (or runs in a no-send sandbox) on boot/mint; `defn`s and pure
 `def`s are unaffected; existing replay round-trip tests still pass. Live-prove:
 mint a fresh agent after seeding such a def — no ghost message.
 
+**SHIPPED (narrow):** committed `a69e89a` — `seon.eval/effectful-bare-def?`
+classifier skips teeing/replaying a bare def whose init calls
+`message!`/`reply!`/`transact!`; used at both the tee (`build-tee-entities`)
+and the replay filter (`query-program-graph-entries`). 527 tests green,
+live-proved the poison row is dropped from the replay set.
+
+**FOLLOW-UP — stricter persistence policy (user, 2026-06-17), supersedes the
+narrow guard.** Persist/replay ONLY a literal `defn`, a schema registration,
+or a `deftest`. Everything else is NOT persisted or resumed, and the agent gets
+a warning that it won't be:
+
+- `defn` → `:seon.fn` (the only fn-defining form that persists).
+- `schema/register!` → `:seon.schema`.
+- `deftest` → `:seon.test`.
+- bare `(def x …)` — rejected + warned (regardless of init purity).
+- `(def f (fn …))` — ALSO rejected + warned (write `defn`; "no `(def _ (fn …))`
+  crap"). The classifier must read the original FORM HEAD (`defn` vs `def`) —
+  the analyzer's `:fn-var?` is `true` for both `defn` and `(def f (fn …))`
+  (both macroexpand identically) and so cannot distinguish them.
+- Implication: `effectful-bare-def?` becomes dead code (subsumed) and is
+  removed; replay drops any stored row that is not a `defn`/schema/test.
+- Warning surface: a non-persisted def leaves NO DB row, so the warning is
+  stamped at eval-time (on the `:seon.eval` entity the warnings section
+  queries) or returned inline in the eval result — confirm against
+  `seon.warn`. Rationale: "don't store/replay arbitrary code — if an agent
+  causes a crash, resuming re-causes it; `defn`/schema/`deftest` are
+  declarative and safe to re-eval."
+- This is a separate unit on `feature/overridable-substrate`; it is compatible
+  with the overridable-substrate design (overrides are `defn`s → persist).
+
 ### #26 — Header chips count substrate bootstrap
 
 `/agents` header chips (TURNS · FNS · FINDINGS · DATOMS) count the whole store
