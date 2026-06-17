@@ -16,32 +16,28 @@
     [seon.db :as db]))
 
 ;; ============================================================
-;; Pure — sync-tx-data (env owns the row; brand_test's four cases).
+;; Pure — sync-tx-data (env/config SEEDS ONCE → the DB OWNS the row).
 ;; ============================================================
 
-(deftest sync-tx-data-covers-the-four-env-row-cases
+(deftest sync-tx-data-seeds-once-then-db-owns
   (is (= [] (ai/sync-tx-data {::ai/env {}}))
-      "no env + no row → nothing to do (adapter defaults at call time)")
+      "no env + no row → nothing to seed (adapter defaults at call time)")
   (is (= [{::ai/id "config" ::ai/thinking "true"}]
          (ai/sync-tx-data {::ai/env {::ai/thinking "true"}}))
-      "env set + no row → one identity-upsert assert")
+      "env set + unconfigured row → ONE seed upsert")
   (is (= [] (ai/sync-tx-data {::ai/row {::ai/thinking "true"}
                               ::ai/env {::ai/thinking "true"}}))
-      "env equals row → idempotent, transacts nothing")
-  (is (= [{::ai/id "config" ::ai/thinking "high"}]
-         (ai/sync-tx-data {::ai/row {::ai/thinking "true"}
-                           ::ai/env {::ai/thinking "high"}}))
-      "env changed → re-assert (last-write-wins upsert)")
-  (is (= [[:db/retract [::ai/id "config"] ::ai/thinking "true"]]
-         (ai/sync-tx-data {::ai/row {::ai/thinking "true"}
-                           ::ai/env {}}))
-      "env unset but row present → retract — defaults return next call")
-  (is (= [[:db/retract [::ai/id "config"] ::ai/model "deepseek-chat"]
-          {::ai/id "config" ::ai/provider :anthropic ::ai/max-tokens 2048}]
-         (ai/sync-tx-data
-           {::ai/row {::ai/provider :deepseek ::ai/model "deepseek-chat"}
-            ::ai/env {::ai/provider :anthropic ::ai/max-tokens 2048}}))
-      "mixed: retracts first, then one assert map for the set attrs"))
+      "row already configured → DB owns, no-op (even when env matches)")
+  (is (= [] (ai/sync-tx-data {::ai/row {::ai/thinking "true"}
+                              ::ai/env {::ai/thinking "high"}}))
+      "row configured + env DIFFERS → DB owns, env IGNORED (not re-asserted)")
+  (is (= [] (ai/sync-tx-data {::ai/row {::ai/thinking "true"}
+                              ::ai/env {}}))
+      "row configured + env unset → DB owns, NOT retracted (runtime switch persists)")
+  (is (= [] (ai/sync-tx-data
+              {::ai/row {::ai/provider :deepseek ::ai/model "deepseek-chat"}
+               ::ai/env {::ai/provider :anthropic ::ai/max-tokens 2048}}))
+      "configured row → DB owns; env never overrides after the initial seed"))
 
 ;; ============================================================
 ;; Pure — thinking-mode parses the stored string.
@@ -181,14 +177,14 @@
                  (-> (js/Promise.resolve (body conn))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
 
-(deftest current-empty-then-rowed-then-retracted
+(deftest current-empty-then-seeded-then-persists
   (async done
     (-> (with-conn
           (fn [conn]
             ;; 1. Empty store → {} — adapters fall back to their defaults.
             (is (= {} (ai/current @conn))
                 "absent env + absent row → no overrides")
-            ;; 2. "Boot with env": transact the sync tx-data.
+            ;; 2. "Boot with env on a fresh store": seed the row.
             (-> (db/transact!
                   {:seon.db/tx-data
                    (ai/sync-tx-data
@@ -196,23 +192,23 @@
                                 ::ai/thinking "true"
                                 ::ai/max-tokens 2048}})})
                 (.then (fn [{ok? :seon.db/ok?}]
-                         (is (true? ok?) "config sync transact lands")
+                         (is (true? ok?) "config seed transact lands")
                          (let [c (ai/current @conn)]
                            (is (= :anthropic (::ai/provider c)))
                            (is (= 2048 (::ai/max-tokens c)))
                            (is (true? (ai/thinking-mode c))))
-                         ;; 3. "Reboot WITHOUT env": sync against the now-
-                         ;;    populated row retracts — defaults return.
-                         (db/transact!
-                           {:seon.db/tx-data
-                            (ai/sync-tx-data
-                              {::ai/row {::ai/provider :anthropic
-                                         ::ai/thinking "true"
-                                         ::ai/max-tokens 2048}
-                               ::ai/env {}})})))
-                (.then (fn [{ok? :seon.db/ok?}]
-                         (is (true? ok?) "unset-env sync transact lands")
-                         (is (= {} (ai/current @conn))
-                             "env removed → no overrides — adapter defaults return"))))))
+                         ;; 3. "Reboot WITHOUT env": the row is configured, so
+                         ;;    seed is a NO-OP (nothing retracted) → the config
+                         ;;    PERSISTS. The DB owns the row.
+                         (is (= [] (ai/sync-tx-data
+                                     {::ai/row {::ai/provider :anthropic
+                                                ::ai/thinking "true"
+                                                ::ai/max-tokens 2048}
+                                      ::ai/env {}}))
+                             "configured row + no env → no-op seed (no retract)")
+                         (let [c (ai/current @conn)]
+                           (is (= :anthropic (::ai/provider c))
+                               "reboot WITHOUT env → row PERSISTS (DB owns)")
+                           (is (= 2048 (::ai/max-tokens c)))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

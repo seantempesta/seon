@@ -12,13 +12,18 @@
    reactive-context: no cached atom, absent row/attr = each adapter's
    shipped defaults, byte-identical wire bodies to the pre-C-18 output.
 
-   ENV OWNS THE ROW. [[sync!]] (called from `seon.client/start-agent!`
-   at boot) syncs the row to the `SEON_AI_*` env vars: set → asserted,
-   unset → retracted (same contract as `seon.web.brand` — booting
-   WITHOUT the env vars must return the defaults; the LLM config is
-   the deployment's configuration, not the store's memory). A runtime
-   transact against the row survives within a pod run; the next boot
-   re-syncs from env.
+   ENV/CONFIG SEEDS ONCE → THE DB OWNS THE ROW. [[sync!]] (called from
+   `seon.client/start-agent!` at boot) SEEDS the row from the `SEON_AI_*`
+   env vars ONLY when it is unconfigured (a fresh store). Once seeded the
+   DB is authoritative: a later boot does NOT re-sync, so a runtime
+   transact against the row (a model/provider switch) PERSISTS across
+   reboots. Env is the INITIAL config source, not the row's owner — to
+   re-seed from env, clear the config row first. API KEYS are never
+   stored: they are read from the environment at call time
+   ([[seon.ai.anthropic]]/[[seon.ai.openai-compat]]); only the non-secret
+   config (provider/model/…) is seeded and DB-owned. (NB: this DIVERGES
+   from `seon.web.brand`, which is still strictly env-owned — flagged for
+   later convergence; the same seed-once model likely fits branding too.)
 
    `::thinking` is stored as a STRING (the env var's shape):
    \"false\" (off — the default), \"true\" (on), or a reasoning-effort
@@ -303,14 +308,16 @@
     thinking))
 
 (defn provider
-  "The active LLM provider: SEON_AI_PROVIDER env (readable BEFORE the
-   conn is up — `seon.client/-main` selects the llm-fn pre-boot), else
-   the config row's `::provider`, else `:deepseek`. Env-first is
-   consistent with env owning the row."
+  "The active LLM provider: the DB-owned config row's `::provider` (read
+   per call via [[current]]), else `SEON_AI_PROVIDER` env (the initial
+   seed source, and the only one readable on the pre-conn boot edge where
+   [[current]] returns `{}`), else `:deepseek`. ROW-FIRST now that the DB
+   owns the row after env seeds it — so a runtime provider switch
+   persists and a later boot honors the row, not a (possibly unset) env."
   {:malli/schema [:=> [:cat] ::provider]}
   []
-  (or (::provider (env-row))
-      (::provider (current))
+  (or (::provider (current))
+      (::provider (env-row))
       :deepseek))
 
 ;; ============================================================
@@ -379,36 +386,32 @@
 ;; ============================================================
 
 (defn sync-tx-data
-  "Tx-data syncing the config row to the environment (pure — both
-   inputs are passed in). For each config attr:
-     - env has a value ≠ the row's        → assert (identity upsert);
-     - env lacks it but the row has it    → retract;
-     - equal, or absent on both           → nothing.
-   `::row` absent/nil = no config entity exists (retracts impossible).
-   Empty result = nothing to do."
+  "Tx-data SEEDING the config row from the environment, ONCE (pure —
+   both inputs passed in). SEED-ONCE → THE DB OWNS:
+     - `existing` row already configured (≥1 config attr) → `[]`
+       (the DB owns it; env is ignored and runtime switches are kept);
+     - row unconfigured (nil / `{}`) AND env carries config → ONE upsert
+       seeding every present env config attr;
+     - nothing to seed → `[]`.
+   NEVER retracts — a runtime switch (an attr changed in the DB but not
+   in env) is preserved across the next boot. `::row` absent/nil/`{}`
+   means unconfigured."
   {:malli/schema [:=> [:cat ::sync-request] :seon.db/tx-data]}
   [{existing ::row env ::env}]
-  (let [asserts  (reduce (fn [m attr]
-                           (if-some [v (get env attr)]
-                             (if (= v (get existing attr)) m (assoc m attr v))
-                             m))
-                         {} config-attrs)
-        retracts (when (some? existing)
-                   (keep (fn [attr]
-                           (when-some [v (get existing attr)]
-                             (when-not (contains? env attr)
-                               [:db/retract [::id "config"] attr v])))
-                         config-attrs))]
-    (cond-> (vec retracts)
-      (seq asserts) (conj (assoc asserts ::id "config")))))
+  (if (seq existing)
+    []
+    (let [seed (select-keys env config-attrs)]
+      (if (seq seed)
+        [(assoc seed ::id "config")]
+        []))))
 
 (defn ^:async sync!
-  "Sync the config row on the ambient `seon.db/*conn*` to the
-   SEON_AI_* env vars (see ns doc: env OWNS the row across boots).
-   Called from `seon.client/start-agent!` at boot; idempotent — a
-   second call with the same env transacts nothing. Failures log
-   LOUDLY and resolve `{::synced? false}` — LLM config must never take
-   the boot down."
+  "SEED the config row on the ambient `seon.db/*conn*` from the SEON_AI_*
+   env vars — once, only when the row is unconfigured (see ns doc: env
+   SEEDS, the DB OWNS). Called from `seon.client/start-agent!` at boot;
+   idempotent — a boot with an already-configured row transacts nothing,
+   so runtime switches persist. Failures log LOUDLY and resolve
+   `{::synced? false}` — LLM config must never take the boot down."
   {:malli/schema [:=> [:cat] ::sync-response]}
   []
   (try
@@ -420,10 +423,10 @@
         (let [{ok?   :seon.db/ok?
                error :seon.db/error} (await (db/transact! {:seon.db/tx-data tx}))]
           (if ok?
-            (log/info-console! "seon.ai" "LLM config row synced from env"
+            (log/info-console! "seon.ai" "LLM config row seeded from env (DB owns it now)"
                                {:tx-ops (count tx)})
             (log/error-console! "seon.ai"
-                                "LLM config env sync transact FAILED — adapters use the prior/default config"
+                                "LLM config env seed transact FAILED — adapters use the default config"
                                 error))
           {::synced? (boolean ok?)})))
     (catch :default e
