@@ -144,6 +144,24 @@
                      (not= before-digest now-digest))]
       {:ns ns-sym :sym sym :var-map var-map})))
 
+(defn- raw-ns-deps
+  "The UNFILTERED set of ns-NAME symbols `ns-sym` depends on, read
+   straight from the analyzer. Composes the VALUES of the analyzer's
+   `:requires` + `:uses` + `:require-macros` maps (each `{alias→ns,
+   ns→ns}`, so `(vals …)` yields ns names; aliases are values, not
+   keys, and drop out by taking vals — LIVE-verified 2026-06-17, see
+   phase0-live-verification). Self is removed. `:require-macros` is
+   included because macro-only deps don't appear in `:requires` yet
+   still load first. Returns `#{}` for an unknown / never-eval'd ns.
+   Shared raw extraction for [[ns-deps]] (filtered) and
+   [[ns-requires]] (unfiltered, keyword-ized)."
+  [compile-state ns-sym]
+  (let [ns-info (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])]
+    (-> (set (concat (vals (:requires ns-info))
+                     (vals (:uses ns-info))
+                     (vals (:require-macros ns-info))))
+        (disj ns-sym))))
+
 (defn ns-deps
   "Set of agent-ns syms `ns-sym` depends on, intersected with
    `known-ns-set` (so cljs.core / clojure.* / bootstrap nses drop
@@ -154,13 +172,22 @@
    `:requires` but DO need to load first on resume."
   {:malli/schema [:=> [:cat ::compile-state :symbol [:set :symbol]] [:set :symbol]]}
   [compile-state ns-sym known-ns-set]
-  (let [ns-info (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])
-        deps   (set (concat (vals (:requires ns-info))
-                            (vals (:uses ns-info))
-                            (vals (:require-macros ns-info))))]
-    (-> deps
-        (disj ns-sym)
-        (set/intersection known-ns-set))))
+  (set/intersection (raw-ns-deps compile-state ns-sym) known-ns-set))
+
+(defn ns-requires
+  "The UNFILTERED dependency-edge set for `ns-sym` as ns-name KEYWORDS,
+   read from the analyzer (no source parsing). This is what the tee
+   stores as `:seon.ns/requires` so the DB-layer load can topo-sort by
+   requires (the one unblocking fix — see the db-is-the-running-system
+   PRD). Unlike [[ns-deps]] it is NOT intersected with a known-set: the
+   full required-ns set is stored, and the load-time topo intersects
+   with the DB-layer ns set. Excludes self. Returns `#{}` for an
+   unknown / never-eval'd ns. Aliases are dropped (vals, not keys) —
+   reconstitution rebuilds the alias-bearing `(ns …)` form from
+   `:seon.ns/source` (Phase 2)."
+  {:malli/schema [:=> [:cat ::compile-state :symbol] [:set :keyword]]}
+  [compile-state ns-sym]
+  (into #{} (map #(keyword (str %))) (raw-ns-deps compile-state ns-sym)))
 
 (defn var-projection
   "Persistable subset of an analyzer var-map for `:seon.fn` storage.

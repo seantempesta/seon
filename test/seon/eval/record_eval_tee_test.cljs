@@ -387,10 +387,10 @@
                                  :agent-id "record-eval-tee-test"})))
                           (.then
                             (fn [stats]
-                              (is (= 2 (:seon.client/replay-n-total stats))
-                                  "ns row + :seon.test row are the replay set")
+                              (is (= 1 (:seon.client/replay-n-total stats))
+                                  "the agent ns is the one load unit (its deftest is reconstituted into it)")
                               (is (= 0 (:seon.client/replay-n-fail stats))
-                                  "the deftest replays through the :seon.test lane")
+                                  "the deftest reconstitutes via the ns's whole-source load")
                               (seval/eval cs "(some? probe.teereplay/replayed-test)"
                                           {:ns 'cljs.user :analyze-deps? false})))
                           (.then
@@ -624,10 +624,10 @@
 
 ;; Task #37 — the tee-family remainder: a teed ENTITY-schema row has a
 ;; SINGLE-SEGMENT ident (:probe.selftee.entityreplay — keyword namespace
-;; nil). Selection already worked (#24), but target-ns-for-entry did
-;; `(-> ident namespace symbol)` → `(symbol nil)` → every entity-schema
-;; replay failed. The stored source is a fully-qualified register! call,
-;; so the fix evals it from 'cljs.user.
+;; nil), so the tee files it with NO :seon.schema/ns link. The DB-layer
+;; load reconstitutes schema rows through their ns link, so a ns-less
+;; entity-schema row is loaded by `standalone-schema-sources` instead —
+;; a fully-qualified register! call eval'd from 'cljs.user.
 (deftest teed-entity-schema-row-replays-after-registry-rebuild
   (async done
     (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
@@ -648,10 +648,6 @@
                          :seon.schema/created-at (js/Date.)}]})
                     (.then
                       (fn [_]
-                        (is (= 'cljs.user
-                               ((deref #'client/target-ns-for-entry)
-                                {:kind :schema :ident k}))
-                            "nil-ns schema ident targets cljs.user, not (symbol nil)")
                         (client/replay-program-graph!
                           {:conn conn :compile-state cs
                            :agent-id "record-eval-tee-test"})))

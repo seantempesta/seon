@@ -396,18 +396,90 @@
    its JS has actually executed in this process. Two callers, two
    views of the same fact:
 
-   - [[guarded-load]]: a ns missing from the bootstrap bundle's index
-     but live here is HOST-BUNDLED (compiled into out/client/main.js —
-     `my.kb`, `seon.db`, `my.kb.system`): store-indexed and rendered
-     into the agent's prompt as code, but absent from shadow's
-     `:bootstrap :entries`, so a bare `boot/load` throws `ns X not
-     available`. Live ⇒ no-op the load — the JS is already loaded.
-   - `seon.client/ensure-target-ns!`: an analyzer entry WITHOUT a live
-     object marks a half-failed `(ns …)` eval; defs into it would die
-     on `undefined`, so the bare-(ns) heal must still run."
+   [[guarded-load]]: a ns missing from the bootstrap bundle's index but
+   live here is HOST-BUNDLED (compiled into out/client/main.js — `my.kb`,
+   `seon.db`, `my.kb.system`): store-indexed and rendered into the
+   agent's prompt as code, but absent from shadow's `:bootstrap
+   :entries`, so a bare `boot/load` throws `ns X not available`. Live ⇒
+   no-op the load (empty `:js`) — the JS is already loaded. (This branch
+   takes precedence over the DB-layer branch, so a compiled-but-unindexed
+   ns is never re-evaled from its display rows.)"
   {:malli/schema [:=> [:cat :symbol] :boolean]}
   [ns-sym]
   (some? (js/goog.getObjectByName (str (cljs.core/munge ns-sym)))))
+
+(defn registration-call-source?
+  "TRUE when a stored `:seon.schema/source` is an eval-able `(…)`
+   registration call (an agent's `(seon.schema/register! …)` tee row)
+   rather than a boot-indexed shape literal (`[:string {…}]`, `:keyword`).
+   Only call-shaped schema rows are loadable; shape literals are rebuilt
+   from the live registry each boot. The ONE rule both the DB-layer load
+   (reconstitution) AND `seon.client`'s core-indexer use to distinguish a
+   replayable register! call from a boot-indexed shape literal."
+  {:malli/schema [:=> [:catn [::source :string]] :boolean]}
+  [source]
+  (str/starts-with? (str/trim (str source)) "("))
+
+(defn ns-rows-in-db?
+  "TRUE when `ns-sym` (a symbol) has a `:seon.ns/name` row in `db` — the
+   discriminator the DB branch of [[guarded-load]] uses to decide a
+   missing ns is agent-authored (loadable from the DB) rather than
+   genuinely absent. `db` is a datahike db value (third-party boundary)."
+  {:malli/schema [:=> [:catn [::db :any] [::ns-sym :symbol]] :boolean]}
+  [db ns-sym]
+  (boolean (seq (db/query '[:find ?e
+                            :in $ ?ns
+                            :where [?e :seon.ns/name ?ns]]
+                          db (keyword ns-sym)))))
+
+(defn reconstitute-ns-source
+  "One loadable source STRING for the agent-authored namespace `ns-kw`,
+   read from the DB-layer rows (db-is-the-running-system PRD, shape A):
+
+     `:seon.ns/source`  — the agent's `(ns … (:require [x :as y] …))`
+        form VERBATIM. We use the stored ns form (not a rebuilt one)
+        because it carries the `:as` aliases an aliased ref like `b/bv`
+        needs — a rebuilt form without `:as b` breaks with `b is not
+        defined`.
+     + every CURRENT member source for the ns: `:seon.fn/source` rows,
+       `:seon.schema/source` rows that pass [[registration-call-source?]]
+       (agent `register!` calls, not boot shape literals), and
+       `:seon.test/source` rows.
+
+   Pure string CONCATENATION — no parsing. Same-ns forward refs resolve
+   in one `eval-str` pass (LIVE-PROVEN). Member rows are deduped (a batch
+   eval tees the same source onto every member it defined). `cljs.js`'s
+   `*load-fn*` (the DB branch of [[guarded-load]]) returns this string so
+   the compiler analyzes the requires and loads each transitive dep, in
+   dependency order, with cycle detection + load-once — we write no
+   ordering code here. `db` is a datahike db value (third-party boundary)."
+  {:malli/schema [:=> [:catn [::db :any] [::ns-kw :keyword]] :string]}
+  [db ns-kw]
+  (let [ns-src (-> (db/query '[:find ?src
+                               :in $ ?ns
+                               :where
+                               [?e :seon.ns/name ?ns]
+                               [?e :seon.ns/source ?src]]
+                             db ns-kw)
+                   first first)
+        member (fn [src-attr ns-attr]
+                 (->> (db/query [:find '?src
+                                 :in '$ '?ns
+                                 :where
+                                 ['?n :seon.ns/name '?ns]
+                                 ['?m ns-attr '?n]
+                                 ['?m src-attr '?src]]
+                                db ns-kw)
+                      (map first)))
+        fns     (member :seon.fn/source     :seon.fn/ns)
+        schemas (filter registration-call-source?
+                        (member :seon.schema/source :seon.schema/ns))
+        tests   (member :seon.test/source   :seon.test/ns)]
+    (->> (concat [ns-src] fns schemas tests)
+         (remove str/blank?)
+         (map str/trim)
+         (distinct)
+         (str/join "\n\n"))))
 
 (defn- guarded-load
   "`:load` fn for cljs.js — `boot/load` plus a post-load invariant
@@ -442,21 +514,45 @@
    resolve at runtime via the same munged globalThis paths
    `truly-undeclared?` probes. NEVER re-eval host source here — that's
    the registry-stomp/shadowing class replay's core-skip exists to
-   prevent. Macro loads (`:macros` rc) and genuinely-absent nses
-   rethrow, preserving the legible `Could not require X <- ns X not
-   available` error."
+   prevent.
+
+   DB-LAYER BRANCH (db-is-the-running-system PRD, shape B): when the
+   missing ns is NOT compiled (boot/load AND globalThis both failed) but
+   has agent-authored `:seon.ns` rows in the DB, answer with its
+   reconstituted source (`{:lang :clj :source …}`). cljs.js analyzes the
+   `(ns … (:require …))` head, sees the dep edges, and recursively asks
+   this same load-fn for each transitive require — so this ONE branch
+   serves BOTH cold-boot resume AND live agent evals that require an
+   agent ns. `relink-registry!` still runs after the eval (the DB branch
+   evals agent defn/register/deftest source, which doesn't stomp the
+   malli registry the way re-running bundle macro JS did, but the relink
+   is idempotent + cheap, so keep it uniform). Macro loads (`:macros` rc)
+   and genuinely-absent nses rethrow, preserving the legible
+   `Could not require X <- ns X not available` error."
   [compile-state rc cb]
-  (try
-    (boot/load compile-state rc
-               (fn [result]
-                 (schema/relink-registry!)
-                 (cb result)))
-    (catch :default e
-      (if (and (not (:macros rc))
-               (symbol? (:name rc))
-               (ns-live-on-globalthis? (:name rc)))
-        (cb {:lang :js :source ""})
-        (throw e)))))
+  (let [relink-cb (fn [result] (schema/relink-registry!) (cb result))]
+    (try
+      (boot/load compile-state rc relink-cb)
+      (catch :default e
+        ;; `*conn*` is root-bound at session start, but a load-fn can fire
+        ;; before boot completes or in a conn-less test context — bind once
+        ;; and only take the DB branch when a conn is actually present;
+        ;; otherwise fall through to the legible `Could not require X` throw.
+        (let [nm   (:name rc)
+              conn db/*conn*]
+          (cond
+            (or (:macros rc) (not (symbol? nm)))
+            (throw e)
+
+            (ns-live-on-globalthis? nm)
+            (cb {:lang :js :source ""})
+
+            (and (some? conn) (ns-rows-in-db? @conn nm))
+            (relink-cb {:lang   :clj
+                        :source (reconstitute-ns-source @conn (keyword nm))})
+
+            :else
+            (throw e)))))))
 
 (defn ^:async ^:private raw-eval
   "Internal — returns a Promise that resolves with {:value v :ns ns}
@@ -1075,6 +1171,61 @@
                         :seon.ns/source source}])]
     (vec (concat ns-entities fn-entities schema-entities test-entities))))
 
+;; ----------------------------------------------------------------------------
+;; :seon.ns/requires diff-upsert (the one fix that unblocks DB-layer load —
+;; db-is-the-running-system PRD). :seon.ns/requires is CARDINALITY-MANY
+;; (a queryable dep-edge set), so a plain entity-map upsert ACCUMULATES the
+;; vector instead of replacing it. To keep the stored set EXACTLY equal to the
+;; analyzer's current requires for the ns, the tee emits a DIFF: an entity-map
+;; upsert for the ADDED names plus an explicit `[:db/retract …]` for each
+;; REMOVED name. A brand-new ns (no current requires) is additions-only — the
+;; entity-map upsert creates the :seon.ns row. Captured on EVERY successful
+;; eval's ending ns (a `(ns … (:require …))`, a re-eval'd ns form, or a bare
+;; `(require '[x])` at the REPL all keep the index current), gated to real
+;; (non-transient) namespaces by the caller.
+;; ----------------------------------------------------------------------------
+
+(defn ns-requires-tx
+  "Diff-upsert tx ops so `:seon.ns/requires` for `ns-kw` becomes EXACTLY
+   `new-req-set` (a set of ns-name keywords). Reads the ns's CURRENT
+   stored requires from the `db` value and returns:
+
+   - `[{:seon.ns/name ns-kw :seon.ns/requires (vec additions)}]` for
+     names in `new-req-set` not already stored (identity-attr upsert;
+     creates the `:seon.ns` row if absent), AND
+   - one `[:db/retract [:seon.ns/name ns-kw] :seon.ns/requires r]` per
+     stored name no longer in `new-req-set`.
+
+   Returns `[]` when nothing changed (no spurious tx ops). The retract
+   lookup-ref is safe: removed names are read from the db, so the entity
+   already exists. `db` is a datahike db value (third-party boundary)."
+  {:malli/schema
+   [:=> [:catn [::db :any] [::ns-kw :keyword] [::new-req-set [:set :keyword]]]
+        [:vector :any]]}
+  [db ns-kw new-req-set]
+  (let [current   (into #{}
+                        (map first)
+                        (db/query '[:find ?r
+                                    :in $ ?ns
+                                    :where
+                                    [?e :seon.ns/name ?ns]
+                                    [?e :seon.ns/requires ?r]]
+                                  db ns-kw))
+        additions (set/difference new-req-set current)
+        removals  (set/difference current new-req-set)
+        upsert    (when (seq additions)
+                    [{:seon.ns/name     ns-kw
+                      :seon.ns/requires (vec additions)}])
+        retracts  (for [r removals]
+                    [:db/retract [:seon.ns/name ns-kw] :seon.ns/requires r])]
+    (vec (concat upsert retracts))))
+
+;; Namespaces the requires-tee SKIPS — transient eval scaffolding, never
+;; a real program-graph ns: `cljs.user` (REPL default home) and
+;; `seon.dynamic` (the `cljs.js/eval-str` target). A real agent/core ns
+;; (`seon.*`, `my.*`, a data ns) gets a `:seon.ns` row; these do not.
+(def ^:private transient-ns-syms #{'cljs.user 'seon.dynamic})
+
 ;; ============================================================
 ;; register! self-tee (open-issues 2026-06-12, task #24 symptom 1).
 ;;
@@ -1126,8 +1277,8 @@
 
    Otherwise transacts ONE [[schema-tee-row]] whose source is the
    replayable call form `(seon.schema/register! <k> <form>)` — the
-   discriminator `seon.client/registration-call-source?` selects it
-   for replay-on-boot, closing the registry/store disagreement.
+   discriminator [[registration-call-source?]] selects it for the
+   DB-layer load (reconstitution), closing the registry/store disagreement.
 
    Never throws; a tee tx failure is surfaced via console.error (the
    in-memory registration already succeeded — durability failed, and
@@ -1690,13 +1841,35 @@
                   ;; back analyzer defs and never touch the schema registry,
                   ;; so diff would be empty anyway; we still skip
                   ;; explicitly to keep the contract obvious.
-                  (let [tee (when (:ok result)
-                              (build-tee-entities
-                                {:compile-state  compile-state
-                                 :defs-before    defs-before
-                                 :schemas-before schemas-before
-                                 :source         source
-                                 :at             at}))]
+                  (let [tee-entities (when (:ok result)
+                                       (build-tee-entities
+                                         {:compile-state  compile-state
+                                          :defs-before    defs-before
+                                          :schemas-before schemas-before
+                                          :source         source
+                                          :at             at}))
+                        ;; Capture `:seon.ns/requires` for the ENDING ns on
+                        ;; EVERY successful eval — not only `(ns …)` forms — so
+                        ;; a re-eval'd ns form or a bare `(require '[x])` keeps
+                        ;; the dep-edge index current (the one fix that unblocks
+                        ;; DB-layer load; db-is-the-running-system PRD). Skip the
+                        ;; transient eval-scaffolding nses (`cljs.user` /
+                        ;; `seon.dynamic`) so we never mint a `:seon.ns` row for
+                        ;; them. Diff-upsert against the live db value so the
+                        ;; cardinality-many set tracks EXACTLY (add + retract);
+                        ;; rides in record-eval!'s atomic tee tx.
+                        ending-ns (when (:ok result) @current-ns)
+                        req-tx    (when (and ending-ns
+                                             (symbol? ending-ns)
+                                             (not (contains? transient-ns-syms
+                                                             ending-ns))
+                                             db/*conn*)
+                                    (ns-requires-tx
+                                      @db/*conn*
+                                      (keyword (str ending-ns))
+                                      (analyzer-info/ns-requires
+                                        compile-state ending-ns)))
+                        tee (vec (concat tee-entities req-tx))]
                     ;; Durable record — always. :seon.eval/ns is the
                     ;; post-update accumulator (ending ns on success;
                     ;; unchanged ns on failure). Tee rides in the same tx.

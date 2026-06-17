@@ -29,6 +29,7 @@
         :seon.agent.message/to      [[:seon.agent/id \"<agent-id>\"]]
         :seon.agent.message/content \"hello\"})"
   (:require
+    [clojure.set :as set]
     [clojure.string :as str]
     [datahike.api :as d]
     ;; konserve.node-filestore registers datahike's :file store backend
@@ -537,161 +538,114 @@
     conn))
 
 ;; ---------------------------------------------------------------------------
-;; Resume — replay-program-graph!
+;; Resume — replay-program-graph! (the DB-is-the-running-system spine)
 ;;
-;; v1.md §7.4. Re-eval every :seon.ns / :seon.fn / :seon.schema entity's
-;; persisted :source in tx-id order after pod restart, restoring the
-;; agent's vars / namespaces / Malli registrations into the live
-;; compile-state + globalThis.
+;; Load the agent-authored DB LAYER (agent code + overrides) on top of the
+;; compiled package after a pod restart, restoring the agent's namespaces /
+;; vars / Malli registrations into the live compile-state + globalThis.
 ;;
-;; Design derived from research/resume-findings-2026-05-23.md:
+;; The compiled package (kernel + core + third-party) is ALREADY in the
+;; runtime from module-load — its rows are DISPLAY-only and are NOT loaded.
+;; Only the agent DB layer loads, whole-namespace + dependency-ordered:
 ;;
-;;   - Query against `@conn`, NOT `(d/history db)`. Single-card identity
-;;     attrs are last-write-wins; the current db gives us the latest
-;;     :source per entity. Tx-id bound is the LATEST upsert tx.
-;;     NB (2026-06-10): latest-upsert-tx is NOT a safe total order — the
-;;     tee's nested `:seon.fn/ns` upsert bumps the owning ns row's tx on
-;;     every define, so replay puts :ns entries FIRST, then def-shaped
-;;     entries, each group tx-ordered (see query-program-graph-entries).
-;;   - Bypass `eval-batch!`. Replay goes straight to `seval/eval`.
-;;     - No `:seon.eval` entry written per replay (there's no turn
-;;       to attach to, and the schema doesn't make :seon.eval/turn
-;;       optional).
-;;     - detect-and-tee (MVP's incoming addition to eval-batch!)
-;;       doesn't re-fire, so we don't write no-op upserts that would
-;;       re-anchor tx-ids across boots.
-;;   - Per-entity target ns:
-;;     - :ns     → source IS the (ns foo …) form; eval from 'cljs.user
-;;     - :fn     → ident is "<ns>/<name>" string; ns is the prefix
-;;     - :schema → ident is the keyword; ns is its namespace segment
-;;   - Failures land as `:seon.log` :warn entries (NOT new :seon.eval
-;;     entries — no turn to attach them to). One try/catch per entity;
-;;     a failure doesn't abort the rest of the replay.
+;;   - `agent-ns-set` — every `:seon.ns/name` row minus `(core-ns-set)`.
+;;   - `topo-sort-nses` over the STORED `:seon.ns/requires` (intersected
+;;     with the agent-ns-set — intra-agent edges only; core deps load
+;;     on-demand via the DB load-fn). A dep loads before its dependent.
+;;   - For each ns in topo order, eval its reconstituted whole source
+;;     (`seon.eval/reconstitute-ns-source`: the verbatim (ns … (:require …))
+;;     form + every current :seon.fn/:seon.schema/:seon.test source). The
+;;     ns form is the head, so the ns is created first by construction;
+;;     cljs.js's load-fn (the DB branch of `seon.eval/guarded-load`)
+;;     supplies any transitive agent require's source on demand, with
+;;     cycle detection + load-once.
+;;   - Per-ns try/catch: a failing ns logs a `:seon.log` :warn and the load
+;;     CONTINUES to the next ns. NO 2-pass retry, NO per-fn fallback.
 ;;   - The replay-level (with-tx-context {:seon.db/origin :replay
-;;     :seon.db/replay? true}) tags only the log-write transactions —
-;;     no eval entities are written.
+;;     :seon.db/replay? true}) tags only the log-write transactions — no
+;;     eval entities are written.
 ;; ---------------------------------------------------------------------------
 
 (declare core-ns-set)
 
-(defn- entry-ns-kw
-  "The owning-namespace keyword for a program-graph entry. Used as the
-   core-vs-agent replay discriminator (Step 4): an entry whose
-   `entry-ns-kw` is in `(core-ns-set)` is a core row (re-indexed
-   by index-core! every boot) and is skipped on replay.
+(defn ^:private agent-ns-set
+  "The set of agent-authored namespace keywords in the DB layer — every
+   `:seon.ns/name` row whose ns is NOT in `(core-ns-set)`. Core nses are
+   COMPILED (present in the bundle, indexed for DISPLAY only); only the
+   agent-authored DB layer is LOADED on boot. Read against the db value."
+  [db]
+  (let [all (into #{}
+                  (map first)
+                  (db/query '[:find ?n :where [?e :seon.ns/name ?n]] db))]
+    (set/difference all (core-ns-set))))
 
-     :ns     → ident IS the ns keyword.
-     :fn     → ident is \"<ns>/<name>\"; ns is the prefix.
-     :test   → ident is \"<ns>/<name>\"; ns is the prefix.
-     :schema → ident is a keyword; ns is its keyword namespace."
-  [{:keys [kind ident]}]
-  (case kind
-    :ns     ident
-    :fn     (keyword (-> ident (str/split #"/" 2) first))
-    :test   (keyword (-> ident (str/split #"/" 2) first))
-    :schema (keyword (namespace ident))))
+(defn ^:private agent-ns-requires
+  "Map of `agent-ns-kw → #{intra-agent require ns-kws}` for topo-sort.
+   Reads the STORED `:seon.ns/requires` (the one unblocking fix —
+   captured at tee from the analyzer, NOT re-parsed here) for each ns in
+   `agent-nses`, INTERSECTED with `agent-nses` so only intra-agent edges
+   order the load kick. Core/third-party deps are NOT edges here — they
+   are satisfied on-demand by the compiled bundle via the DB load-fn
+   (`seon.eval/guarded-load`) DURING each ns's eval. An agent ns with no
+   stored requires (or only core deps) has an empty edge set."
+  [db agent-nses]
+  (into {}
+        (map (fn [ns-kw]
+               (let [reqs (into #{}
+                                (map first)
+                                (db/query '[:find ?r
+                                            :in $ ?ns
+                                            :where
+                                            [?e :seon.ns/name ?ns]
+                                            [?e :seon.ns/requires ?r]]
+                                          db ns-kw))]
+                 [ns-kw (set/intersection reqs agent-nses)])))
+        agent-nses))
 
-(defn- registration-call-source?
-  "Replay's `:seon.schema` core-vs-agent discriminator (Step 4): TRUE
-   when a stored `:seon.schema/source` is an eval-able `(…)` registration
-   call (an agent's `(seon.schema/register! …)` tee row) rather than a
-   boot-indexed shape literal (`[:string {…}]`, `:keyword`). The ONE rule —
-   `query-program-graph-entries` uses it to select replayable schema rows,
-   `core-index-tx` honors it as never-overwrite, and
-   `prune-core-ghosts!` honors it as never-prune."
-  [source]
-  (str/starts-with? (str/trim (str source)) "("))
+(defn ^:private topo-sort-nses
+  "Dependency-ordered vector of the keys of `edges` (a `ns → #{dep-ns}`
+   map) — a dep comes before its dependent (DFS post-order).
+   Deterministic (sorted within each level). A require cycle is broken by
+   the `visiting` guard (a back-edge to a node already on the DFS stack
+   is skipped) so this always terminates; cljs.js then detects the actual
+   circular dep and errors that ns during its per-ns eval (user
+   directive: broken input just errors that ns and moves on)."
+  [edges]
+  (let [!order   (volatile! [])
+        !seen    (volatile! #{})
+        visit    (fn visit [ns-kw visiting]
+                   (when-not (or (@!seen ns-kw) (visiting ns-kw))
+                     (let [visiting' (conj visiting ns-kw)]
+                       (doseq [dep (sort (get edges ns-kw))]
+                         (visit dep visiting'))
+                       (vswap! !seen conj ns-kw)
+                       (vswap! !order conj ns-kw))))]
+    (doseq [ns-kw (sort (keys edges))]
+      (visit ns-kw #{}))
+    @!order))
 
-(defn- target-ns-for-entry
-  "Per-entity target ns symbol for `(seval/eval … {:ns _})`.
-
-   For :ns entries the source itself is a (ns …) form which switches
-   the ns on its own; we eval from 'cljs.user. For :fn / :test / :schema
-   the source is a bare (defn …) / (deftest …) / (schema/register! …) —
-   we must be IN the owning ns before eval so the def lands in the right
-   slot.
-
-   :schema idents can be SINGLE-SEGMENT keywords (entity schemas like
-   :my.garden.watering — task #37): `(namespace ident)` is nil there,
-   and `(symbol nil)` blew up every entity-schema replay. The stored
-   source is a fully-qualified `(seon.schema/register! …)` call, so the
-   target ns is irrelevant — fall back to 'cljs.user."
-  [{:keys [kind ident]}]
-  (case kind
-    :ns     'cljs.user
-    :fn     (-> ident (str/split #"/" 2) first symbol)
-    :test   (-> ident (str/split #"/" 2) first symbol)
-    :schema (if-some [ns-str (namespace ident)]
-              (symbol ns-str)
-              'cljs.user)))
-
-(defn ^:async ^:private query-program-graph-entries
-  "Returns a vector of {:kind <:ns|:fn|:test|:schema> :ident <id-value>
-   :source <string> :tx <long>} sorted by tx-id ascending, EXCLUDING
-   core rows (Step 4). Reads against the CURRENT db so only
-   currently-asserted sources land in the replay set; retracted /
-   superseded source values stay in history and are not replayed.
-
-   Core rows (those whose owning ns is in `(core-ns-set)`) are
-   filtered out: the compiled core fns are re-indexed from var meta
-   + file-read by `index-core!` on every boot, so re-evaling their
-   `:source` would shadow the real compiled fn. Only agent-authored
-   corpus (`:seon.fn` / `:seon.test` / `:seon.schema` / `:seon.ns` rows
-   in `my.agent.<id>` nses) replays.
-
-   `:seon.test` rows replay their `:seon.test/source` (the agent's
-   deftest form) alongside fns/schemas. Result rows (`last-passed-at`
-   etc.) carry no `:seon.test/source` and so are never selected."
-  [conn]
-  (let [rows (d/q '[:find ?ident ?source ?tx ?kind
-                    :where
-                    (or-join [?e ?ident ?source ?tx ?kind]
-                      (and [?e :seon.ns/name   ?ident ?tx]
-                           [?e :seon.ns/source ?source]
-                           [(ground :ns) ?kind])
-                      (and [?e :seon.fn/sym    ?ident ?tx]
-                           [?e :seon.fn/source ?source]
-                           [(ground :fn) ?kind])
-                      (and [?e :seon.test/sym    ?ident ?tx]
-                           [?e :seon.test/source ?source]
-                           [(ground :test) ?kind])
-                      (and [?e :seon.schema/key    ?ident ?tx]
-                           [?e :seon.schema/source ?source]
-                           [(ground :schema) ?kind]))]
-                  @conn)]
-    (->> rows
-         (map (fn [[ident source tx kind]]
-                {:kind kind :ident ident :source source :tx tx}))
-         (remove #(contains? (core-ns-set) (entry-ns-kw %)))
-         ;; Boot-indexed `:seon.schema` rows store the registered SHAPE
-         ;; (`[:string {...}]`, `:keyword`) as :source — an index row, not
-         ;; an eval-able registration call. Only a `(…)` form (an agent's
-         ;; `(seon.schema/register! …)` tee) is replayable; shape literals
-         ;; are rebuilt from the live registry by `index-schemas` each boot.
-         (remove #(and (= :schema (:kind %))
-                       (not (registration-call-source? (:source %)))))
-         ;; Strict persistence (#7): only a single literal (defn …) replays
-         ;; as a :seon.fn row. The tee no longer creates rows for bare
-         ;; (def …)/(def f (fn …))/multi-form sources, but DEPLOYED stores
-         ;; carry historical bare-def rows (incl. the #29 ghost-message
-         ;; poison) — drop any :fn row whose CURRENT source isn't a clean
-         ;; defn so it neither replays nor re-fires. One-release migration
-         ;; filter; fresh stores never accrue these.
-         (remove #(and (= :fn (:kind %))
-                       (not (seval/defn-form? (:source %)))))
-         ;; Replay order: ALL :ns entries FIRST (tx-ordered among
-         ;; themselves), then the def-shaped entries (tx-ordered).
-         ;; Plain tx order is WRONG here: the tee re-asserts
-         ;; `:seon.fn/ns {:seon.ns/name <kw>}` on every define, and the
-         ;; nested-map upsert bumps the owning ns row's identity-datom
-         ;; tx — a later redefine drags the ns row PAST entries that
-         ;; depend on its requires (live 2026-06-10: a deftest replayed
-         ;; before its `(ns … (:require [cljs.test]))` row and failed
-         ;; with `undeclared cljs.test/deftest`). The stored ns source
-         ;; is always the agent's LATEST ns form, so ns-first is safe;
-         ;; ensure-target-ns! covers nses with no stored row at all.
-         (sort-by (juxt #(if (= :ns (:kind %)) 0 1) :tx))
-         vec)))
+(defn ^:private standalone-schema-sources
+  "The replayable `:seon.schema/source` strings for agent schema rows
+   that own NO `:seon.ns` membership — single-segment ENTITY-schema keys
+   (`:my.garden.watering`, a `:map {:seon.db/entity true}` registration)
+   whose `(namespace k)` is nil, so the tee files them with no
+   `:seon.schema/ns` link ([[seon.eval/reconstitute-ns-source]] joins
+   schema members through that link, so these would otherwise never
+   load). Only call-shaped sources (an agent's `(seon.schema/register!
+   …)` tee) — boot-indexed shape literals are rebuilt from the registry.
+   Returns each fully-qualified registration call; eval'd from
+   `cljs.user` (the key carries its own namespace)."
+  [db]
+  (->> (db/query '[:find ?src
+                   :where
+                   [?s :seon.schema/key ?k]
+                   [?s :seon.schema/source ?src]
+                   (not [?s :seon.schema/ns _])]
+                 db)
+       (map first)
+       (filter #(str/starts-with? (str/trim (str %)) "("))
+       distinct
+       vec))
 
 (defn- error-chain-message
   "Human-readable message for a `seon.error/->map` map, composed from
@@ -719,94 +673,65 @@
        (keep :seon.error/stack)
        (last)))
 
-(defn ^:async ^:private ensure-target-ns!
-  "Make sure `ns-sym` exists in the compile-state AND as a live JS ns
-   object before replaying a def-shaped entry into it. Replay is
-   tx-ordered, but agents routinely author defns BEFORE writing the
-   `(ns …)` form (live: the workout corpus's :ns row tx-sorts AFTER its
-   4 fns), and an entry's owning ns may have no :seon.ns row at all. On
-   a fresh compile-state, cljs.js with `:def-emits-var true` then dies
-   in the cljs compiler's `emit* :the-var` `{:pre [(ana/ast? sym)]}`
-   (compiler.cljc:506) — every boot/agent-create logged `replay of fn …
-   failed: Assert failed: (ana/ast? sym)` (2026-06-10 15:38/15:46).
-   Evaling a bare `(ns <sym>)` first is what an editor does when
-   loading a file; the real `(ns …)` row — when one exists — re-evals
-   over it harmlessly in its own tx position.
-
-   BOTH probes are load-bearing (downstream bug #14, 2026-06-11): a
-   `(ns …)` row whose `:require` fails mid-load (the B4 class) still
-   REGISTERS the analyzer entry before dying, but never emits the
-   `goog.provide` that creates the JS object. Trusting the analyzer
-   entry alone then skips the bare-(ns) heal and every def in the ns
-   fails with `Cannot set/read properties of undefined` on both replay
-   passes (logs/pod-events.log, agents UPE-2606101815 /
-   vGq-2606111337). So: skip only when the analyzer knows the ns AND
-   its munged object exists on globalThis."
-  [compile-state ns-sym]
-  (when-not (or (= 'cljs.user ns-sym)
-                (and (some? (get-in @compile-state
-                                    [:cljs.analyzer/namespaces ns-sym :name]))
-                     (seval/ns-live-on-globalthis? ns-sym)))
-    (await (seval/eval compile-state (str "(ns " ns-sym ")")
-                       {:ns 'cljs.user :analyze-deps? false})))
-  nil)
-
-(defn ^:async ^:private replay-one!
-  "Replay a single entry. Returns
-     {:ok? true}
-   or
-     {:ok? false :error <message-string> :stack <stack-string>}.
-   Never throws — converts any exception to data. `:error` carries the
-   full cause-chain message (see [[error-chain-message]]), `:stack` the
-   deepest cause's stack — both chosen so a replay-failure warn names
-   the actual defect, not cljs.js's \"ERROR\" wrapper."
-  [compile-state {:keys [source] :as entry}]
-  (try
-    (let [ns-sym (target-ns-for-entry entry)
-          _      (await (ensure-target-ns! compile-state ns-sym))
-          r      (await (seval/eval compile-state source
-                                    {:ns            ns-sym
-                                     :analyze-deps? false}))]
-      (if (:ok r)
-        {:ok? true}
-        {:ok? false
-         :error (or (not-empty (some-> r :error error-chain-message)) "unknown")
-         :stack (or (some-> r :error error-chain-stack) "")}))
-    (catch :default e
-      {:ok? false
-       :error (or (.-message e) (str e))
-       :stack (or (.-stack e) "")})))
-
 (defn ^:async ^:private log-replay-failure!
-  [agent-id {:keys [kind ident]} {:keys [error stack]}]
+  [agent-id ns-kw {:keys [error stack]}]
   (await
     (log/warn! {:seon.log/source  ::log-replay-failure!
                 :seon.log/agent   agent-id
-                :seon.log/message (str "replay of " (name kind) " "
-                                       (pr-str ident) " failed: " error)
+                :seon.log/message (str "load of ns " (pr-str ns-kw)
+                                       " failed: " error)
                 :seon.log/stack   (or stack "")})))
 
+(defn ^:private load-error->log
+  "Normalize a load failure `err` (a `seon.error/->map` from
+   `seon.eval/eval`'s `{:ok false :error …}`, or a raw caught JS error)
+   into the `{:error <message-string> :stack <stack-string>}` shape
+   `log-replay-failure!` expects. `:error` carries the full cause-chain
+   message ([[error-chain-message]]); `:stack` the deepest cause's stack
+   — chosen so a load-failure warn names the actual defect, not cljs.js's
+   \"ERROR\" wrapper."
+  [err]
+  {:error (or (some-> err error-chain-message not-empty)
+              (some-> err .-message)
+              (str err))
+   :stack (or (some-> err error-chain-stack)
+              (some-> err .-stack)
+              "")})
+
 (defn ^:async replay-program-graph!
-  "Re-eval every :seon.ns / :seon.fn / :seon.schema entity's persisted
-   :source — :ns entries first, then def-shaped entries, each group in
-   tx-id order, with one retry pass over pass-1 failures (redefines bump
-   row txs, so stored tx order is not a reliable dependency order).
-   Persistent failures land as :seon.log :warn entries and do NOT abort
-   replay — every entity gets its own try/catch.
+  "Load the DB layer (agent-authored code + overrides) on top of the
+   compiled package — db-is-the-running-system PRD, the spine.
+
+   The whole-namespace, dependency-ordered load (DELETES the old
+   per-definition replay loop, the tx-order sort, the 2-pass retry, and
+   `ensure-target-ns!`):
+
+     1. `agent-ns-set` — every `:seon.ns/name` row minus `(core-ns-set)`.
+        Core/third-party are COMPILED (in the bundle), indexed for
+        DISPLAY only; only the agent DB layer is loaded.
+     2. `topo-sort-nses` over the STORED `:seon.ns/requires` intersected
+        with the agent-ns-set (intra-agent edges only — core deps load
+        on-demand via the load-fn). A dep loads before its dependent.
+     3. For each ns in topo order, `(seval/eval compile-state
+        (seval/reconstitute-ns-source db ns-kw) {:ns 'cljs.user})`. The
+        reconstituted source's head is the `(ns … (:require …))` form, so
+        the ns is created first by construction (no `ensure-target-ns!`).
+        cljs.js's load-fn (`guarded-load`'s DB branch) supplies any
+        transitive agent require's source on demand, with cycle detection
+        + load-once — we write no ordering beyond the topo kick.
+
+   Per-ns try/catch: a failing ns (broken stored code, require cycle)
+   logs a `:seon.log` :warn and the load CONTINUES to the next ns — no
+   retry, no per-fn fallback (user directive: broken input just errors
+   that ns and moves on).
 
    Returns a Promise of
      {:seon.client/replay-n-total <int>
       :seon.client/replay-n-ok    <int>
       :seon.client/replay-n-fail  <int>}.
 
-   Core rows are NOT replayed (Step 4) — `query-program-graph-entries`
-   excludes any entry whose owning ns is in `(core-ns-set)`. The
-   compiled core fns are rebuilt from var meta + file-read by
-   `index-core!` on every boot, so only agent-authored corpus
-   (fns / tests / schemas / nses under `my.agent.<id>`) replays here.
-
    Call sites:
-     - Boot path in start-agent!, before setup-agent-ns!.
+     - Boot path in start-agent!, before per-agent setup.
      - REPL probe via the same-pod-session test pattern — see
        research/resume-findings-2026-05-23.md §'Same-pod-session test'."
   [{:keys [conn compile-state agent-id]}]
@@ -815,40 +740,47 @@
      :seon.db/replay?  true
      :seon.db/agent-id agent-id}
     (fn ^:async run-replay! []
-      (let [entries (await (query-program-graph-entries conn))
-            ;; Pass 1. Def-shaped entries can mis-order WITHIN the
-            ;; def group: every redefine bumps the redefined row's
-            ;; tx (and, via the tee's nested :seon.fn/ns upsert, its
-            ;; ns row's tx), so an entry referencing a LATER-redefined
-            ;; var replays before it and dies with undeclared-var
-            ;; (live 2026-06-10: my.workout/add-workout-test before
-            ;; the twice-redefined add-workout!). Editor fixpoint-load
-            ;; semantics: collect pass-1 failures, retry them ONCE
-            ;; after everything else has landed. Only pass-2 failures
-            ;; are real.
-            !failed (volatile! [])
-            !n-fail (volatile! 0)]
-        (doseq [entry entries]
-          (let [r (await (replay-one! compile-state entry))]
-            (when-not (:ok? r)
-              (vswap! !failed conj entry))))
-        ;; Pass 2 — retry pass-1 failures now that later defs exist.
-        (doseq [entry @!failed]
-          (let [r (await (replay-one! compile-state entry))]
-            (when-not (:ok? r)
+      (let [db       @conn
+            agents   (agent-ns-set db)
+            order    (topo-sort-nses (agent-ns-requires db agents))
+            standalone (standalone-schema-sources db)
+            !n-fail  (volatile! 0)]
+        ;; Whole-namespace, dependency-ordered load (the spine).
+        (doseq [ns-kw order]
+          (let [r (try
+                    (let [src (seval/reconstitute-ns-source db ns-kw)]
+                      (await (seval/eval compile-state src {:ns 'cljs.user})))
+                    (catch :default e
+                      {:ok false :error e}))]
+            (when-not (:ok r)
               (vswap! !n-fail inc)
-              ;; Best-effort log; swallow log-write failure (would
-              ;; be a double-fault and we want the rest of replay
-              ;; to continue).
+              ;; Best-effort log; swallow log-write failure (a
+              ;; double-fault must not abort the rest of the load).
               (try
-                (await (log-replay-failure! agent-id entry r))
+                (await (log-replay-failure!
+                         agent-id ns-kw (load-error->log (:error r))))
                 (catch :default e
                   (log/error-console!
                     "seon.client/replay-program-graph!"
                     (str "log-replay-failure failed: " (.-message e))))))))
-        {:seon.client/replay-n-total (count entries)
-         :seon.client/replay-n-ok    (- (count entries) @!n-fail)
-         :seon.client/replay-n-fail  @!n-fail}))))
+        ;; Standalone (ns-less) entity-schema rows — fully-qualified
+        ;; register! calls evaled from cljs.user.
+        (doseq [src standalone]
+          (let [r (try (await (seval/eval compile-state src {:ns 'cljs.user}))
+                       (catch :default e {:ok false :error e}))]
+            (when-not (:ok r)
+              (vswap! !n-fail inc)
+              (try
+                (await (log-replay-failure!
+                         agent-id :standalone-schema (load-error->log (:error r))))
+                (catch :default e
+                  (log/error-console!
+                    "seon.client/replay-program-graph!"
+                    (str "log-replay-failure failed: " (.-message e))))))))
+        (let [total (+ (count order) (count standalone))]
+          {:seon.client/replay-n-total total
+           :seon.client/replay-n-ok    (- total @!n-fail)
+           :seon.client/replay-n-fail  @!n-fail})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Core boot seed (P2, 2026-05-27)
@@ -1040,13 +972,13 @@
   "The set of namespace keywords owned by the COMPILED core, derived
    from `core-vars` + the preload's deftest vars — the SAME sources of
    truth the boot indexers write from, so they can never drift. Used by
-   `query-program-graph-entries` (Step 4) as the replay discriminator: any
-   program-graph entry whose owning ns is in this set is a CORE row
-   (re-indexed from var meta + file-read on every boot) and is SKIPPED on
-   replay. Re-evaling a core row's source — e.g. `(defn ^:async
-   transact! …)` — would shadow the real compiled fn, so core is never
-   replayed; only agent-authored corpus (in `my.agent.<id>` / agent domain
-   nses) replays.
+   [[agent-ns-set]] as the DB-layer load discriminator: a `:seon.ns/name`
+   row whose ns is in this set is a COMPILED core ns (already in the
+   bundle from module-load; indexed for DISPLAY only) and is EXCLUDED
+   from the load — only the agent-authored DB layer loads. Re-evaling a
+   core row's source — e.g. `(defn ^:async transact! …)` — would shadow
+   the real compiled fn, so core is never loaded; only agent-authored
+   corpus (in `my.agent.<id>` / agent domain nses) loads.
 
    A fn (not a def) because `!indexed-test-vars` is populated by the
    preload AFTER this ns loads; robust by construction either way — it's
@@ -1132,8 +1064,8 @@
    indexer is the ONE file-reader; the `:namespaces` context section
    (and anything else downstream) renders that attr from the graph,
    never re-reading files. Safe because core rows are
-   replay-skipped (`query-program-graph-entries` excludes any entry
-   whose owning ns is in `(core-ns-set)` — Step 4, landed). A
+   NOT loaded ([[agent-ns-set]] excludes any ns in `(core-ns-set)`
+   from the DB-layer load). A
    full-source ns whose file can't be read falls back to the stub and
    logs fail-loud — the corpus stays honest.
 
@@ -1290,9 +1222,9 @@
    [[ns-row]]) so the `[:seon.ns/name <kw>]` lookup-ref on `:seon.fn/ns`
    resolves. EXEMPLAR nses (context-focus-redesign root set) carry the
    REAL FULL FILE TEXT; all other core nses keep the minimal
-   `(ns x)` stub. Both are replay-safe: core rows are skipped on
-   replay (Step 4 — `query-program-graph-entries` excludes any entry
-   whose owning ns is in `(core-ns-set)`).
+   `(ns x)` stub. Both are load-safe: core rows are NOT loaded
+   ([[agent-ns-set]] excludes any ns in `(core-ns-set)` from the
+   DB-layer load).
 
    Always emits the FULL core row set — a function of `core-vars`
    + the registered `!extra-core-vars` + the on-disk source,
@@ -1460,7 +1392,7 @@
                                (:seon.ns/source row)))
                        (when-some [stored (get have-schs (:seon.schema/key row))]
                          (or (= stored (:seon.schema/source row))
-                             (registration-call-source? stored)))
+                             (seval/registration-call-source? stored)))
                        (contains? have-tsts (:seon.test/sym row))))
                  all))))
 
@@ -1536,7 +1468,7 @@
                               (when (and (seq fresh)
                                          (not (contains? fresh ident))
                                          (not (and (= :schema kind)
-                                                   (registration-call-source? source))))
+                                                   (seval/registration-call-source? source))))
                                 {:e e :kind kind :ident ident}))))
                     (sort-by (fn [{:keys [kind ident]}] [kind (str ident)]))
                     vec)]
@@ -1981,16 +1913,14 @@
                                 (str "boot-index GC: "
                                      (count (:seon.client/pruned prune-stats))
                                      " ghost row(s) pruned"))
-                ;; v1.md §7.4. Re-eval every persisted AGENT-authored
-                ;; :seon.ns / :seon.fn / :seon.test / :seon.schema entity's
-                ;; :source in tx-id order. GLOBAL (not per-agent) — runs
-                ;; ONCE per boot, before any per-agent setup. Core
-                ;; rows are excluded by query-program-graph-entries
-                ;; (Step 4) — they're rebuilt by index-core! later
-                ;; in this fn — so replay no longer needs to be ordered
-                ;; ahead of core setup to avoid shadowing the
-                ;; compiled core fns. Idempotent against an empty
-                ;; conn (genuine first boot) — returns {…replay-n-total 0 …}.
+                ;; Load the agent-authored DB LAYER on top of the compiled
+                ;; package: each agent ns's reconstituted whole source, in
+                ;; dependency order. GLOBAL (not per-agent) — runs ONCE per
+                ;; boot, before any per-agent setup. Core nses are EXCLUDED
+                ;; ([[agent-ns-set]] drops `(core-ns-set)`) — they're
+                ;; compiled (display-only rows). Idempotent against an
+                ;; empty conn (genuine first boot) — returns
+                ;; {…replay-n-total 0 …}.
                 replay-stats  (await (replay-program-graph!
                                        {:conn          conn
                                         :compile-state compile-state

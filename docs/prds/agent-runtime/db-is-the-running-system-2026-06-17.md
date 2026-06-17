@@ -255,6 +255,21 @@ the `my.soul` data/seed/external-file layer.
 the DB, upserting on `:seon.fn/sym` (third-party wins), as a PRE-AGENT boot step
 (fixes B4). DELETE `core-index-tx` + `prune-core-ghosts!`.
 
+- ✅ **Phase 1a DONE (2026-06-17, live-verified):** registered `:seon.ns/requires`
+  `[:vector :keyword]` (`seon.ctx`, maps to cardinality-many keyword via the bridge);
+  added analyzer-based capture `seon.analyzer-info/ns-requires` (shared `raw-ns-deps`
+  extraction with `ns-deps`, aliases dropped via `(vals …)`, ns-names → keywords);
+  added the diff-upsert `seon.eval/ns-requires-tx` (cardinality-many ⇒ additions +
+  explicit retractions so the stored set tracks the analyzer EXACTLY); wired it into
+  the tee at `eval-batch!` for the ending ns on EVERY successful eval (transient
+  `cljs.user`/`seon.dynamic` gated out, rides in `record-eval!`'s atomic tx). LIVE
+  proof: `(ns probe.req1 (:require [clojure.string :as s]))` → stored `#{:clojure.string}`;
+  add `clojure.set` → upsert-only tx, stored `#{:clojure.set :clojure.string}`; shrink
+  to `#{:clojure.set}` → retract-only tx, stored `#{:clojure.set}`. Full CLJS suite
+  green (527 tests / 2344 assertions / 0 fail). Phase-2 deletion targets UNTOUCHED.
+- TODO (rest of Phase 1): index core → third-party pre-agent; DELETE `core-index-tx`
+  + `prune-core-ghosts!`.
+
 **Phase 2 — DB `*load-fn*` + whole-namespace dependency-ordered load** (the spine).
 Add the DB branch to the `eval.cljs:493` load-fn. Replace `replay-program-graph!`'s
 per-definition loop with: one query → reconstitute → topo-sort by `:seon.ns/requires`

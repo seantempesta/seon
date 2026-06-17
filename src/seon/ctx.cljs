@@ -73,6 +73,18 @@
 ;; stays in seon.agent until the P6 split finds them a real home.
 (schema/register! :seon.ns/name    [:keyword {:seon.db/identity true}])
 (schema/register! :seon.ns/source  :string)
+;; The dependency-edge SET for a namespace: the required ns-NAMES as
+;; keywords (aliases dropped — those are reconstituted from
+;; :seon.ns/source's ns form in Phase 2). Captured + diff-upserted at
+;; the tee from the analyzer (seon.analyzer-info/ns-requires). A
+;; `[:vector :keyword]` maps to :db.cardinality/many keyword via the
+;; bridge (db/internal form->cardinality) — INTENDED: a queryable set
+;; of dep edges, so the load can topo-sort by requires (the one fix
+;; that unblocks DB-layer load — see db-is-the-running-system PRD).
+;; Cardinality-many means a plain upsert ACCUMULATES; the tee writes a
+;; diff (additions + explicit retractions) so the stored set EXACTLY
+;; matches the analyzer's current requires.
+(schema/register! :seon.ns/requires [:vector :keyword])
 
 (schema/register! :seon.ctx/name     :keyword)
 (schema/register! :seon.ctx/priority :int)
