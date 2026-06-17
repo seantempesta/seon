@@ -89,7 +89,7 @@
   ;; (mcp-agent-id-unification PRD 2026-06-10).
   ;;
   ;; Build:  clj -M:cljs watch node-agent
-  ;; Run:    node out/node-agent/main.js --agent-id <substrate-agent-id>
+  ;; Run:    node out/node-agent/main.js --agent-id <core-agent-id>
   ;; Output: out/node-agent/main.js
   :node-agent
   {:target           :node-script

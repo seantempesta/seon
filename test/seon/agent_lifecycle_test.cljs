@@ -279,7 +279,7 @@
                   (is (= tile/welcome-sym
                          (db/decode-edn-value
                            :seon.render.live-tile/content raw))
-                      "decodes to the substrate welcome symbol")
+                      "decodes to the core welcome symbol")
                   (let [{:seon.render.live-tile/keys [source value]}
                         (tile/wired-content
                           {:seon.render/entity

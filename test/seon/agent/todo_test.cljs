@@ -211,7 +211,7 @@
 (deftest section-tolerates-absent-db
   ;; The composer-input contract: `:seon.db/db` is the render snapshot
   ;; when present, and ABSENT db defaults to the current conn — the
-  ;; same convention as every other substrate section fn. Regression
+  ;; same convention as every other core section fn. Regression
   ;; for the [open-todos] render-failed crash-loop (C-14 smell 1,
   ;; 2026-06-11): nil db reached open-todos-block's instrumented
   ;; :catn slot and every render printed :malli.core/invalid-input.

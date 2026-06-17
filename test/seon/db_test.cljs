@@ -246,7 +246,7 @@
   ;; task 9b finding 2 regression. `:seon.db/tx-data` MUST be a sequential
   ;; collection. Strings, JS objects, numbers, nil — non-sequential values
   ;; used to slip past `assert-invocation-shape!` and fail deep inside
-  ;; `extract-tx-attrs`, getting misclassified as `:substrate-bug`. The
+  ;; `extract-tx-attrs`, getting misclassified as `:core-bug`. The
   ;; sequential? check in the shape guard catches them at the boundary
   ;; and tags `:user-input`.
   (async done
@@ -256,7 +256,7 @@
             (.then (fn [{::db/keys [ok? error]}]
                      (is (false? ok?))
                      (is (= :user-input (:seon.error/kind (:seon.error/data error)))
-                         "string tx-data → :user-input, not :substrate-bug")
+                         "string tx-data → :user-input, not :core-bug")
                      (is (= :seon.db/invalid-invocation-shape
                             (:seon.db/error (:seon.error/data error))))))
             (.then (fn [_] (tx! conn 42)))
@@ -277,7 +277,7 @@
 
 (deftest transact!-pod-stays-alive-after-bad-input
   ;; Regression check: after a failure envelope, the conn is still
-  ;; usable for follow-up writes. The substrate didn't crash.
+  ;; usable for follow-up writes. The core didn't crash.
   (async done
     (with-conn
       (fn [conn]

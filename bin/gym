@@ -33,7 +33,7 @@ for arg in "$@"; do
   esac
 done
 
-# Gym measurements run against the STOCK substrate: strip the
+# Gym measurements run against the STOCK core: strip the
 # SEON_EXTRA_* downstream knobs so an operator shell that exports them
 # can't leak a downstream's source/preload/npm roots into what the gym
 # scores (extra-src spec invariant — research doc §d; same idea as

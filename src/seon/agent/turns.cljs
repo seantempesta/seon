@@ -1,6 +1,6 @@
 (ns seon.agent.turns
   "The agent's turn budget as CONTEXT — the `<turns>` countdown
-   (`:turns`, substrate-default-ctx priority 90, just above the
+   (`:turns`, core-default-ctx priority 90, just above the
    prompt tail for salience): ONE line naming the turn the agent is
    about to take and the cap the loop enforces
    (`seon.agent/run-agentic-loop!` halts at `seon.ctx/turns-cap`).
@@ -48,7 +48,7 @@
       "")))
 
 (defn turns-section
-  "Context-section fn (`:turns`, substrate-default-ctx priority 90):
+  "Context-section fn (`:turns`, core-default-ctx priority 90):
    [[turns-block]] for the CALLING agent — absent `:seon.db/db`
    defaults to the current conn, the same convention as every sibling
    section fn."

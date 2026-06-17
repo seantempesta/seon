@@ -111,7 +111,7 @@
   ;; row rendering. Was EXPECTED-RED while no context rung rendered
   ;; finding CLAIM TEXT (red-first pinning, gym-upgrade PRD §4);
   ;; EXPECTED-GREEN since 2026-06-12: the `:findings` section
-  ;; (seon.agent.findings, substrate-default-ctx priority 48) renders
+  ;; (seon.agent.findings, core-default-ctx priority 48) renders
   ;; user-domain row CONTENT in full — live-proved (scratch kb row's
   ;; claim text observed verbatim in a live agent's assembled context;
   ;; section vanished on retraction). Red here now means the salience

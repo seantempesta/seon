@@ -14,7 +14,7 @@
        one slot attr is `:seon.render/ai` (string = verbatim doctrine,
        symbol = late-bound section fn); `:seon.render/html` is the
        optional debug-view twin (§2.8b).
-     - `assemble-context` — the ONE composer. Substrate default
+     - `assemble-context` — the ONE composer. Core default
        sections MERGED with the agent's own `:seon.agent/ctx` sections
        by one priority sort (override-by-name). Render guard (a broken
        section renders an inline error line, never breaks assembly)
@@ -24,14 +24,14 @@
        — minus *.internal; the ONE rule, no lists; downstreams extend
        by one transact onto [[config-ref]]) and [[full-source-ns?]]
        (which rows the boot indexer inlines real file text for).
-     - the substrate default section fns (system, namespaces,
+     - the core default section fns (system, namespaces,
        your-entity, live-tile, warnings, transcript, prompt) and the
        derived read API they share (messages / evals / session-evals /
        current-ns / turns-since-inbound / …) — every read takes the
        composer's `:seon.db/db` snapshot so one render is one db view.
      - `render-namespace` — the standalone whole-namespace render
        (ns + fns + schemas + tests, :ai or :html), an agent-callable
-       substrate capability.
+       core capability.
 
    Section fns receive ONE map:
      {:seon.db/db        <db value>
@@ -61,11 +61,11 @@
 
 ;; ============================================================
 ;; Section schemas. A section is a plain map — the SAME shape whether
-;; it lives in code (substrate defaults) or as a component entity on
+;; it lives in code (core defaults) or as a component entity on
 ;; the agent's :seon.agent/ctx vector.
 ;; ============================================================
 
-(declare decode-section substrate-default-ctx)
+(declare decode-section core-default-ctx)
 
 ;; Program-graph ns rows — registered HERE (not seon.agent) because
 ;; this ns loads first and its render-namespace schemas reference
@@ -125,7 +125,7 @@
 ;; ============================================================
 ;; The classifier — ONE pass over the full index; every section
 ;; consumes the resulting model, none re-classifies. Replaces the
-;; six scattered name filters (substrate-ns-name?, exemplar-ns?
+;; six scattered name filters (core-ns-name?, exemplar-ns?
 ;; duplication, the warn internal-attr-ns? regex, …).
 ;; ============================================================
 
@@ -149,11 +149,11 @@
 
 ;; ------------------------------------------------------------
 ;; Included-prefix config — the customize-with-data row behind the
-;; ONE selection rule. A downstream consumer (an unmodified-substrate
+;; ONE selection rule. A downstream consumer (an unmodified-core
 ;; product) extends the prefix set by ONE transact:
 ;;
 ;;   (seon.db/transact!
-;;     {:seon.db/tx-data [{:seon.ctx/config-id "substrate"
+;;     {:seon.db/tx-data [{:seon.ctx/config-id "core"
 ;;                         :seon.ctx/included-prefixes ["acme."]}]})
 ;;
 ;; and its `acme.*` namespaces render as `<namespace>` tags for every
@@ -168,13 +168,13 @@
 (schema/register! :seon.ctx/included-prefixes [:vector :string])
 
 (def config-ref
-  "Lookup ref of THE substrate ctx-config entity — the carrier of
+  "Lookup ref of THE core ctx-config entity — the carrier of
    `:seon.ctx/included-prefixes` (and any future composer config rows).
    Seeded if absent by the composer ([[assemble-context]])."
-  [:seon.ctx/config-id "substrate"])
+  [:seon.ctx/config-id "core"])
 
 (def default-included-prefixes
-  "The built-in prefix set: the substrate (`seon.*`) and the human's
+  "The built-in prefix set: the core (`seon.*`) and the human's
    world (`my.*`). Seeded onto the config entity at first render;
    downstreams ADD to the row, they never need to restate these."
   ["seon." "my."])
@@ -244,7 +244,7 @@
    2026-06-11): the decided rule — full source for ALL non-internal
    nses — is 873 KB ≈ 218k tokens over the current index (seon.ctx
    alone is 120 KB), beyond any provider window, because the big
-   substrate nses have not had their `*.internal` splits yet. Until
+   core nses have not had their `*.internal` splits yet. Until
    those splits land, non-full-source nses render as shallow
    `(ns …)`-only tags (existence + the store read, not the body);
    each split that lands shrinks a file toward inlinable size, and
@@ -336,17 +336,17 @@
    `:seon.eval/result-edn` blob is."
   1500)
 
-(def substrate-eval-render-cap
-  "Render cap for SUBSTRATE-AUTHORED eval rows (the creation-turn
+(def core-eval-render-cap
+  "Render cap for CORE-AUTHORED eval rows (the creation-turn
    tutorial evals — tile wiring, store-inventory, the my.kb.system
-   read — and any future substrate-scripted eval). These are OUR
-   output: well-controlled, written by compiled substrate code, never
+   read — and any future core-scripted eval). These are OUR
+   output: well-controlled, written by compiled core code, never
    by an LLM — so they render IN FULL (user directive 2026-06-11:
    'our own context should be well controlled… don't be cheap'). The
    1500-char agent cap defeated the inventory's own purpose: the
    per-attr result clipped BEFORE the user-domain rows rendered, so
    agents never saw e.g. :my.workout. 50,000 is a runaway BACKSTOP
-   against a pathological store, not a working limit — substrate eval
+   against a pathological store, not a working limit — core eval
    results are expected to fit whole far below it. (Stored
    `:seon.eval/result-edn` is itself bounded upstream at
    `seon.eval/store-edn-cap`, 16,384, so in practice this cap never
@@ -479,10 +479,10 @@
    The rendered result/error body of an AGENT eval is capped at
    `eval-render-cap` chars so one huge eval result can't dominate the
    agent's context (context-SAFETY invariant — agent code can return
-   literally anything). A SUBSTRATE-AUTHORED row
-   (`:seon.ctx/substrate-authored?` true, tagged by [[session-evals]]
+   literally anything). A CORE-AUTHORED row
+   (`:seon.ctx/core-authored?` true, tagged by [[session-evals]]
    from its promptless owning turn) renders at
-   [[substrate-eval-render-cap]] instead — our own scripted output is
+   [[core-eval-render-cap]] instead — our own scripted output is
    well-controlled and must arrive whole (the inventory-clip defect).
    Error rendering branches: a Malli instrumentation envelope renders
    via `render-malli-error`; otherwise the pre-rendered legible
@@ -498,10 +498,10 @@
      dur        :seon.eval/duration-ms
      narr       :seon.eval/narration
      eval-ns    :seon.eval/ns
-     substrate? :seon.ctx/substrate-authored?}
+     core? :seon.ctx/core-authored?}
     prior?]
    (let [envelope (read-error-envelope err-data)
-         limit    (if substrate? substrate-eval-render-cap eval-render-cap)
+         limit    (if core? core-eval-render-cap eval-render-cap)
          body (cond
                 ok?
                 (cap-result-body (or res "nil") limit eid)
@@ -605,16 +605,16 @@
          session (current-session id db)]
      (last (sort-by :seon.agent.turn/at (:seon.agent.session/turns session))))))
 
-(schema/register! ::substrate-authored? :boolean)
+(schema/register! ::core-authored? :boolean)
 
-(defn substrate-authored-turn?
-  "True when the turn was SCRIPTED BY THE SUBSTRATE rather than
+(defn core-authored-turn?
+  "True when the turn was SCRIPTED BY THE CORE rather than
    authored by the agent's LLM: it carries no prompt
    (`:seon.agent.turn/prompt-chars` 0 or absent). An LLM turn is
    CONSTITUTED by its prompt — `run-turn!` always renders one and
    records its char count on the turn-open tx — so a promptless turn
    means no model was consulted and every eval on it is
-   substrate-written tutorial code (`seon.client/creation-evals!`
+   core-written tutorial code (`seon.client/creation-evals!`
    passes prompt-text \"\"). Chosen over the other candidate markers
    because it is structural and load-bearing: the eval txs' origin is
    overwritten to `:agent` by `eval-batch!`'s per-form tx-context (and
@@ -634,8 +634,8 @@
    sessions, each tagged with its owning `:seon.agent.session/id` —
    the transcript's cross-restart read (context-v4 §2.8: prior-session
    evals render too, behind a resume boundary marker) — and with
-   `:seon.ctx/substrate-authored?` ([[substrate-authored-turn?]] on the
-   owning turn), which [[format-eval-row]] reads to render substrate
+   `:seon.ctx/core-authored?` ([[core-authored-turn?]] on the
+   owning turn), which [[format-eval-row]] reads to render core
    tutorial rows IN FULL while agent rows keep the eval cap. Walks
    agent → sessions → turns → evals. Optional `db` snapshot."
   [agent-id db]
@@ -648,8 +648,8 @@
         (assoc (into {} e)
                :seon.agent.session/id-of-session
                (:seon.agent.session/id s)
-               ::substrate-authored?
-               (substrate-authored-turn? t))))))
+               ::core-authored?
+               (core-authored-turn? t))))))
 
 (defn evals
   "Last N :seon.eval entries for the agent's current session,
@@ -801,7 +801,7 @@
     "NOT a clipped value — dig into a big stored value with ordinary\n"
     "Clojure (get-in, filter, count) instead of re-querying.\n"
     "\n"
-    "ERRORS ARE VALUES. Substrate calls never throw at you — a failure\n"
+    "ERRORS ARE VALUES. Core calls never throw at you — a failure\n"
     "comes back as data, e.g. {:seon.db/ok? false :seon.db/error …}.\n"
     "Read the error map; it names the defect and the fix. Telling your\n"
     "human something \"threw an exception\" when you were handed an error\n"
@@ -827,7 +827,7 @@
     "loaded them correctly. Namespaces are workspaces: (ns\n"
     "my.domain.thing) moves you there and your context follows your\n"
     "namespace. Your code is my.*, your knowledge is my.kb.* (real\n"
-    "schemas per domain); the substrate is seon.* — call its fns, never\n"
+    "schemas per domain); the core is seon.* — call its fns, never\n"
     "redefine them.\n"
     "\n"
     "STANDING TEACHINGS:\n"
@@ -836,7 +836,7 @@
     "  run (seon.db/store-inventory) — your creation turn already did —\n"
     "  and datalog the existing attrs for anything not shown. It lists\n"
     "  the data added AFTER bootstrap; the full system inventory — the\n"
-    "  substrate's own fn/schema/test index included — is one call away:\n"
+    "  core's own fn/schema/test index included — is one call away:\n"
     "  (seon.db/store-inventory {:seon.db/system? true})\n"
     "  Prior agents already answered many questions; re-deriving a\n"
     "  stored answer is wasted turns.\n"
@@ -946,11 +946,11 @@
    ALL seon.* + my.* minus *.internal; ONE rule, no lists), ordered by
    RECENCY: most-recently-modified LAST (tx of the `:seon.ns/name`
    datom — bumped by the tee's nested upsert on every define), name as
-   the tie-break, so the stable substrate set forms a stable cache
+   the tie-break, so the stable core set forms a stable cache
    prefix and the churning ns sits nearest the tail. Render depth per
    row is the ns-block comment's three-case rule; the stub branch
    discriminates by TX PROVENANCE — a stub row asserted by the
-   `:substrate-seed` boot tx is compiled substrate (shallow tag: its
+   `:core-seed` boot tx is compiled core (shallow tag: its
    members are the boot-indexed `:seon.fn` rows of the WHOLE compiled
    ns; inlining them re-creates the 200k+-char dump the depth rule
    exists to avoid), while a stub row from any other tx is
@@ -967,7 +967,7 @@
                          {:seon.db/db db
                           :seon.db/query
                           '[:find ?tx
-                            :where [?tx :seon.db/origin :substrate-seed]]}))
+                            :where [?tx :seon.db/origin :core-seed]]}))
         ;; The configured prefix set, computed ONCE per render from the
         ;; SAME db snapshot every row is filtered against.
         prefixes (included-prefixes db)
@@ -1316,7 +1316,7 @@
 ;; live-tile-section — "what your human currently sees" (live-tiles
 ;; U5). Kills the false belief a live T2 proof caught: a DeepSeek
 ;; agent replied "My tile is currently blank — I haven't set it up
-;; yet" while its tile showed the substrate welcome. The agent sees
+;; yet" while its tile showed the core welcome. The agent sees
 ;; the SAME wired value the human surfaces render — derived every
 ;; turn, nothing stored (reactive-context doctrine).
 ;; ============================================================
@@ -1452,7 +1452,7 @@
    the agent's CURRENT ns so an agent isn't confused by other
    namespaces' defects. Override per-section via the `:seon.ctx` entity:
    `:seon.warn/ns <ns-kw>` scopes to that ns; `:seon.warn/ns
-   :seon.warn/all` is the whole-substrate overview. The RUNTIME checks
+   :seon.warn/all` is the whole-core overview. The RUNTIME checks
    (failed-evals, bad-ref, slow-evals, failing-tests) are always global
    — cross-agent visibility is their point.
 
@@ -1518,8 +1518,8 @@
    Ckz-2606101827). The conversation is never sacrificed for eval
    bulk; each message is individually bounded by
    [[message-render-cap]], each AGENT eval row by [[eval-render-cap]].
-   SUBSTRATE-AUTHORED eval rows (the creation-turn tutorial — tagged
-   by [[session-evals]]) render at [[substrate-eval-render-cap]]
+   CORE-AUTHORED eval rows (the creation-turn tutorial — tagged
+   by [[session-evals]]) render at [[core-eval-render-cap]]
    instead: our own scripted output arrives whole."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.agent/keys [id] db :seon.db/db :as input}]
@@ -1812,7 +1812,7 @@
        :seon.render/volatile-text text}
       {:seon.render/stable-text   (subs text 0 i)
        :seon.render/volatile-text (subs text (+ i (count stable-boundary-delim)))})))
-(defn substrate-default-ctx
+(defn core-default-ctx
   "The default :seon.ctx section layout that ships with every fresh
    agent — the context-v4 layout (§2), ordered top→bottom =
    static→volatile (the provider-cache contract, §1):
@@ -1880,7 +1880,7 @@
 ;; Composer — merge semantics + render guard + budget (the
 ;; agent-self-context spec, 2026-06-10):
 ;;
-;;   sections = sort-by priority (substrate defaults ∪ agent's
+;;   sections = sort-by priority (core defaults ∪ agent's
 ;;              :seon.agent/ctx)   — MERGE, never replace; a name
 ;;              collision means override-by-name (deliberate, visible
 ;;              as data).
@@ -1893,14 +1893,14 @@
 ;;
 ;; Budget: agent-authored sections share a per-agent char budget
 ;; (agent-section-char-budget). Over budget → lowest-priority agent
-;; sections truncate with a loud marker. Substrate sections are not
+;; sections truncate with a loud marker. Core sections are not
 ;; charged to it.
 ;; ============================================================
 
 (def agent-section-char-budget
   "Total rendered-chars budget shared by the agent's OWN sections
    (everything in :seon.agent/ctx — strings and computed alike).
-   Substrate default sections are not charged. Over budget, the
+   Core default sections are not charged. Over budget, the
    LOWEST-priority (largest number, renders last) agent sections
    truncate first, each with a loud marker line."
   8000)
@@ -1927,9 +1927,9 @@
        vec))
 
 (defn- merge-sections
-  "Substrate defaults ∪ the agent's own sections, ONE priority sort.
+  "Core defaults ∪ the agent's own sections, ONE priority sort.
    Name collisions = override-by-name (the agent's entry wins — the
-   deliberate escape hatch). Ties sort substrate-first, then by name,
+   deliberate escape hatch). Ties sort core-first, then by name,
    for byte-stable output."
   [defaults agent-sects]
   (let [agent-names (into #{} (map :seon.ctx/name) agent-sects)
@@ -1978,7 +1978,7 @@
    sections. `rendered` is [{:seon.ctx/name _ :seon.ctx/agent? _
    :seon.ctx/priority _ :seon.render/text _} …] in render order.
    Truncates the lowest-priority (largest number) agent sections first,
-   replacing the overflow with a loud marker; substrate sections pass
+   replacing the overflow with a loud marker; core sections pass
    through untouched."
   [rendered]
   (let [agent-total (transduce (comp (filter :seon.ctx/agent?)
@@ -2038,7 +2038,7 @@
                (compare-and-set! !config-seed-attempted? false true))
       (db/transact!
         {:seon.db/tx-data
-         [{:seon.ctx/config-id "substrate"
+         [{:seon.ctx/config-id "core"
            :seon.ctx/included-prefixes default-included-prefixes}]}))
     nil))
 
@@ -2047,9 +2047,9 @@
    prompt path (`seon.agent/render-prompt`) and the inspector, so
    divergence is impossible.
 
-   Sections = substrate defaults ([[substrate-default-ctx]]) MERGED
+   Sections = core defaults ([[core-default-ctx]]) MERGED
    with the agent's own `:seon.agent/ctx` section maps by one priority
-   sort (override-by-name; merge-never-replace — substrate evolution
+   sort (override-by-name; merge-never-replace — core evolution
    always flows through, agent customization layers on top). The agent
    entity is pulled ONCE (sans the session log — the transcript section
    walks that separately; a bare `[*]` pull would inline every
@@ -2091,7 +2091,7 @@
                              :seon.render.live-tile/content
                              {:seon.agent/ctx [*]}]
                            :seon.db/ref [:seon.agent/id id]})
-        sections (merge-sections (substrate-default-ctx)
+        sections (merge-sections (core-default-ctx)
                                  (agent-sections entity))
         base-in  (assoc input :seon.agent/entity entity)
         rendered (->> sections

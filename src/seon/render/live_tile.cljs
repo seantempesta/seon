@@ -13,7 +13,7 @@
 
    - a LITERAL HICCUP vector for static content — `[:h1 \"hi\"]`
    - a QUALIFIED FN SYMBOL for dynamic content, late-resolved at
-     every render via `seon.eval/lookup-value` (substrate fns and
+     every render via `seon.eval/lookup-value` (core fns and
      fns you define yourself both resolve — same single path).
 
    Wire it with a raw transact (no sugar — one pattern):
@@ -38,23 +38,23 @@
 
    ## Compact vs expanded — tag blocks, never write media queries
 
-   Small-vs-large is substrate CSS container queries over ONE render.
+   Small-vs-large is core CSS container queries over ONE render.
    Emit both blocks in one document and tag them:
 
        [:div.seon-tile
         [:div.seon-tile-compact  [:span \"3 workouts this week\"]]
         [:div.seon-tile-expanded [:svg …full chart…] [:table …]]]
 
-   The substrate shows `.seon-tile-compact` below the breakpoint and
+   The core shows `.seon-tile-compact` below the breakpoint and
    `.seon-tile-expanded` at or above it (container rules live in
    `resources/public/css/input.css`). Untagged content renders at
-   every size. The compact block is HEIGHT-CLAMPED by the substrate
+   every size. The compact block is HEIGHT-CLAMPED by the core
    (grid tiles are uniform cards; overflow clips) — put a glanceable
    summary there and the full content in the expanded block.
 
    ## Styling — write SEMANTIC hiccup, zero classes needed
 
-   The substrate styles plain HTML elements inside your tile (and
+   The core styles plain HTML elements inside your tile (and
    chat/markdown/debug surfaces) — `[:table …]` with `[:thead]`/
    `[:tbody]`, `[:ul …]`/`[:ol …]`, `[:h1 …]`–`[:h4 …]`, `[:p …]`,
    `[:pre [:code …]]`, `[:blockquote …]`, `[:dl [:dt …] [:dd …]]`,
@@ -315,7 +315,7 @@
 ;; ============================================================
 
 (def welcome-sym
-  "The substrate default tile — [[welcome]], late-resolved like any
+  "The core default tile — [[welcome]], late-resolved like any
    other wired symbol (the default eats the same dogfood)."
   'seon.render.live-tile/welcome)
 
@@ -324,7 +324,7 @@
 
    Resolution on the pulled agent `:seon.render/entity`:
    `:seon.render.live-tile/content` (THE tile key) when present, else
-   [[welcome-sym]] (the substrate welcome). Neither the per-entity
+   [[welcome-sym]] (the core welcome). Neither the per-entity
    `:seon.render/html` nor the `:seon.agent` KIND default is consulted
    — that key means ONLY the generic entity-card render slot (one key,
    one meaning; the legacy tile fallback was deleted per PRD
@@ -344,7 +344,7 @@
   "The awareness-section header identity for a [[wired-content]]
    result — the wired fn's fully-qualified name (its source is one
    `:seon.fn`/catalog lookup away) or \"literal hiccup on your
-   entity\", with provenance (legacy slot / substrate default), so
+   entity\", with provenance (legacy slot / core default), so
    the agent reading the section always sees HOW to change the
    display."
   {:malli/schema [:=> [:cat ::wired-response] :string]}
@@ -356,7 +356,7 @@
       "literal hiccup on your entity")
 
     ::welcome
-    (str value " (the substrate default — wire your own)")))
+    (str value " (the core default — wire your own)")))
 
 ;; ============================================================
 ;; The welcome — the default tile every uncustomized agent shows.
@@ -399,7 +399,7 @@
   "I'll update this panel as I work — charts, statuses, whatever you ask for.")
 
 (defn welcome
-  "The substrate default tile — elegant, simple, TIME-AWARE.
+  "The core default tile — elegant, simple, TIME-AWARE.
 
    COMPACT (the root grid): purpose headline + agent id + the agent's
    last reply as readable text (`seon.render.chat/last-reply` — the
@@ -460,7 +460,7 @@
        [:div {:class "text-sm text-text-200"} purpose-line]
        [:div {:class "text-xs text-text-400 italic"} panel-line]]]
      :seon.render/ai
-     (str "Welcome card — your tile is showing the substrate default "
+     (str "Welcome card — your tile is showing the core default "
           "(point :seon.render.live-tile/content at your own fn to "
           "replace it). Your human currently sees — in the root grid "
           "(compact): "
@@ -505,7 +505,7 @@
     ";; and I change myself by transacting to my own lookup ref: the\n"
     ";; identity attr :seon.agent/id in this map addresses MY entity.\n"
     ";; First act: wire my live tile (the panel my human sees) to the\n"
-    ";; substrate welcome fn. Any fn returning\n"
+    ";; core welcome fn. Any fn returning\n"
     ";; {:seon.render/hiccup … :seon.render/ai …} can go here — when I\n"
     ";; have something better to show, I define a fn and point this\n"
     ";; attr at it.\n"

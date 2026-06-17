@@ -48,7 +48,7 @@
   (testing "multi-segment data domain"
     (is (= :schematest.workout/date
            (schema/register! :schematest.workout/date :string))))
-  (testing "seon.* substrate-style two-segment namespace"
+  (testing "seon.* core-style two-segment namespace"
     (is (= :schematest.gate/ok?
            (schema/register! :schematest.gate/ok? :boolean))))
   (testing "un-namespaced entity-kind keys (the :seon.agent.message shape)"

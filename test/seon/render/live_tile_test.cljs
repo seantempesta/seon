@@ -138,7 +138,7 @@
     (testing "the twin is TRUTHFUL — every minted agent IS wired (to welcome)"
       (is (not (re-find #"haven't wired" ai))
           "the old wording lied: creation wires every agent to welcome")
-      (is (re-find #"substrate default" ai))
+      (is (re-find #"core default" ai))
       (is (re-find #":seon.render.live-tile/content" ai)
           "the twin always says HOW to repoint the tile"))))
 
@@ -188,7 +188,7 @@
               (:seon.render/hiccup
                 (tile/welcome {:seon.db/db nil
                                :seon.agent/id "structok-000001"}))))
-      "the substrate welcome passes its own gate"))
+      "the core welcome passes its own gate"))
 
 (deftest structure-error-locates-vector-of-vectors
   (let [{:seon.render.live-tile/keys [structure-path structure-message]}
@@ -292,7 +292,7 @@
                   (render/render-agent-tile {:seon.db/db @conn
                                              :seon.agent/id "tilewlc-000001"})]
               (is (= "seon-tile" (:class (second hiccup)))
-                  "unwired agent gets the substrate welcome")
+                  "unwired agent gets the core welcome")
               (is (re-find #"Good (morning|afternoon|evening|night)" (str ai))
                   "welcome's twin rides the response"))))
         (.then (fn [_] (done)))
@@ -495,7 +495,7 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
-;; CSS contract — the substrate stylesheet honors what the ns
+;; CSS contract — the core stylesheet honors what the ns
 ;; docstring teaches (CSS-correctness unit, 2026-06-11):
 ;;   • .seon-tile-compact is CLAMPED (bounded height, overflow
 ;;     clipped) — grid tiles never grow vertically;
@@ -605,4 +605,4 @@
             "identity attr addresses the agent's OWN entity")
         (is (= (list 'quote tile/welcome-sym)
                (:seon.render.live-tile/content tx-map))
-            "wires the quoted substrate welcome symbol")))))
+            "wires the quoted core welcome symbol")))))

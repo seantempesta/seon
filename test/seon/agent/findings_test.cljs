@@ -1,6 +1,6 @@
 (ns seon.agent.findings-test
   "seon.agent.findings contract — the derived salience rung: stored
-   user-domain row CONTENT renders into context; substrate-seeded rows
+   user-domain row CONTENT renders into context; core-seeded rows
    never do; retraction makes the section vanish (reactive-context —
    derived, nothing stored, nothing to clear); pathological content is
    LOUDLY truncated, never quietly clipped. All on a boot-seeded
@@ -16,7 +16,7 @@
 
 (defn ^:async with-world
   "Boot-seeded scratch world around `body` (fn [conn] → Promise): the
-   pod's bootstrap schema + `client/boot-seed!` (so `:substrate-seed`
+   pod's bootstrap schema + `client/boot-seed!` (so `:core-seed`
    tx provenance exists exactly like a live boot). Root conn and the
    schema registry are restored after (minted scratch keys removed)."
   [body]
@@ -51,7 +51,7 @@
 (defn ^:async seed-scratch-kind!
   "Register a scratch user domain + transact `rows` under a minted
    agent id — agent provenance, like the gym's prior-agent layer (NOT
-   `:substrate-seed`, so the kind classifies user-domain)."
+   `:core-seed`, so the kind classifies user-domain)."
   [registrations rows]
   (await
     (db/with-agent (db/new-id!)
@@ -71,7 +71,7 @@
     (-> (with-world
           (fn ^:async t [conn]
             (is (= "" (findings/findings-block @conn))
-                "substrate-seeded rows (soul, kb.system singleton, user
+                "core-seeded rows (soul, kb.system singleton, user
                  entity, program-graph index) NEVER render as findings —
                  a fresh world has no section at all")))
         (.then (fn [_] (done)))
@@ -99,7 +99,7 @@
               (is (str/includes? block "re-read: (seon.db/query")
                   "the header teaches the copy-paste read-back query")
               (is (not (str/includes? block ":my.soul/text"))
-                  "the soul (substrate-seeded :my.* kind) is NOT
+                  "the soul (core-seeded :my.* kind) is NOT
                    re-injected through this section")
               (is (= block (findings/findings-block @conn))
                   "deterministic — byte-identical for one db value"))))

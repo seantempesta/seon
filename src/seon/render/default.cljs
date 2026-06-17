@@ -14,7 +14,7 @@
 
    The agent's PROMPT is NOT composed here: the live default
    `:seon.render/ai` path is `seon.agent/assemble-context`, whose
-   section layout is `seon.agent/substrate-default-ctx`. The old `ctx`
+   section layout is `seon.agent/core-default-ctx`. The old `ctx`
    composer and its fragment helpers were deleted 2026-06-09 (unit 1.3)
    after their teaching content was folded into the live sections
    (`seon.agent/system-section`, `seon.agent/prompt-section`).

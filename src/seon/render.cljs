@@ -25,7 +25,7 @@
    ## Late-bound symbol lookup
 
    `seon.eval/lookup-value` walks `js/globalThis` with `cljs.core/munge`
-   per segment — works for substrate fns (shadow-cljs precompiled
+   per segment — works for core fns (shadow-cljs precompiled
    bundle) AND agent-defined fns (written by `cljs.js/eval-str` at the
    same munged paths). Single path, no boot-time wire-up needed."
   (:require
@@ -189,7 +189,7 @@
 ;;
 ;; Per-agent scoping uses tx-meta `:seon.db/agent-id`: the query reads
 ;; the agent-id stamped on each entity's most-recent assertion. Without
-;; an agent-id stamp the entity is substrate-wide (always visible).
+;; an agent-id stamp the entity is core-wide (always visible).
 ;;
 ;; The window is "last N renderable entities by tx-time" with N
 ;; defaulting to 64 (agent override: `:seon.agent/window-size`).
@@ -230,7 +230,7 @@
    :ai <sym> :html <sym>}`. Each schema entity is materialized at agent
    boot from `seon.schema/all-entity-schemas-tx-data` (and on every
    subsequent `register!`), so the renderer reads schemas from
-   substrate state instead of walking the in-memory
+   core state instead of walking the in-memory
    `seon.schema/*schemas` atom.
 
    The render-fn clause is load-bearing, not cosmetic: rows WITHOUT a
@@ -335,11 +335,11 @@
         (remembering WHICH kind's id-attr discovered each eid).
      2. Per-eid last-tx + per-TX visibility verdict (memoized — a seed
         tx covers hundreds of entities): visible when the tx is
-        unstamped (substrate), stamped with THIS agent, or carries
-        `:seon.db/origin :substrate-seed` (the boot seed runs inside
+        unstamped (core), stamped with THIS agent, or carries
+        `:seon.db/origin :core-seed` (the boot seed runs inside
         the booting agent's `with-agent` scope, so seed tx arrive
         stamped with ANOTHER agent's id — same clause as
-        `seon.agent-view/substrate-or-mine?`; without it agents that
+        `seon.agent-view/core-or-mine?`; without it agents that
         didn't run the seed lose every schema card).
      3. Bound: eids discovered ONLY via subsumed-kind id-attrs are
         dropped (visible-entities drops them post-pull anyway); newest
@@ -386,7 +386,7 @@
                                 {:keys [tx-aid origin]} (tx-meta tx)]
                           :when (or (nil? tx-aid)
                                     (= tx-aid agent-id)
-                                    (= :substrate-seed origin))]
+                                    (= :core-seed origin))]
                       {:eid eid :last-tx tx :tx-aid tx-aid
                        :disc-kinds disc-kinds})
         ;; 3. Bound.
@@ -470,7 +470,7 @@
 ;; ============================================================
 ;; Agent tile (live-tiles U1) — the agent's ONE always-visible HTML
 ;; surface. Resolution (seon.render.live-tile/wired-content):
-;; per-entity `:seon.render.live-tile/content` → the substrate
+;; per-entity `:seon.render.live-tile/content` → the core
 ;; welcome. Neither `:seon.render/html` nor the `:seon.agent` KIND
 ;; default is consulted for the TILE — that key means only the
 ;; generic entity-card render (one key, one meaning; PRD §8.1).
@@ -565,7 +565,7 @@
   (let [db (or db @db/*conn*)]
     (when-let [sym (entity-render-slot db entity :ai)]
       (try
-        ;; Twin-key convergence (PRD §8.2): all substrate producers
+        ;; Twin-key convergence (PRD §8.2): all core producers
         ;; emit :seon.render/ai (sweep 2026-06-11). The :text read
         ;; stays as READER tolerance for agent-authored renderer fns
         ;; already in live stores that learned the old key — drop it
@@ -597,7 +597,7 @@
    composer; the inspector left pane and the agent both call it).
 
    1. Query all entities carrying `:seon.render/ai` visible to the agent
-      (substrate or own tx).
+      (core or own tx).
    2. Sort by tx-time (oldest first).
    3. Take last N where N = `:seon.agent/window-size` (default 64).
    4. Subsumed kinds (:seon.fn/:seon.schema/:seon.ns) drop from the window

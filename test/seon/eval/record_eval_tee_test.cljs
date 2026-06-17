@@ -15,7 +15,7 @@
 
    - `:seon.schema/ns` is the NESTED-MAP upsert `{:seon.ns/name <kw>}` —
      creates a minimal `:seon.ns` entity for data namespaces, identity-
-     upserts onto the existing one for substrate/`(ns …)` namespaces.
+     upserts onto the existing one for core/`(ns …)` namespaces.
    - `record-eval!` on tx failure logs console.error (NOT warn) and
      RETRIES without the tee rows so the `:seon.eval` row always survives.
 
@@ -142,7 +142,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Regression: a schema registered for a ns whose :seon.ns entity ALREADY
-;; exists (substrate ns, or a prior `(ns …)` eval) upserts onto it — no
+;; exists (core ns, or a prior `(ns …)` eval) upserts onto it — no
 ;; duplicate entity, existing :seon.ns/source untouched.
 ;; ---------------------------------------------------------------------------
 
@@ -268,9 +268,9 @@
 ;; ALWAYS nil — so agent deftests teed only as :seon.fn rows, never
 ;; :seon.test rows: the :seon.test replay lane, tests-referring-to and the
 ;; auto-run never saw agent tests. These tests pin the fix: a deftest evaled
-;; through the eval surface tees EXACTLY one :seon.test row (substrate
+;; through the eval surface tees EXACTLY one :seon.test row (core
 ;; index-tests shape: sym/ns/source/created-at) and NO :seon.fn row —
-;; matching the substrate's disjoint substrate-vars/!indexed-test-vars split
+;; matching the core's disjoint core-vars/!indexed-test-vars split
 ;; and keeping resume single-lane. A plain defn still tees :seon.fn only.
 ;; ---------------------------------------------------------------------------
 
@@ -310,13 +310,13 @@
                       (testing "EXACTLY one :seon.test row for the deftest"
                         (is (= 1 (count test-rows)))
                         (is (= "probe.teetest/tee-probe-test" (:seon.test/sym row))))
-                      (testing "substrate index-tests shape: sym/ns/source/created-at"
+                      (testing "core index-tests shape: sym/ns/source/created-at"
                         (is (= {:seon.ns/name :probe.teetest} (:seon.test/ns row))
                             "nested-map ns upsert, same as every tee row")
                         (is (= "(cljs.test/deftest tee-probe-test (cljs.test/is (= 1 1)))"
                                (:seon.test/source row)))
                         (is (some? (:seon.test/created-at row))))
-                      (testing "NO :seon.fn row — deftests are test-lane only, like substrate"
+                      (testing "NO :seon.fn row — deftests are test-lane only, like core"
                         (is (= [] (vec fn-rows))))
                       ;; And the row LANDS: record-eval! with this tee →
                       ;; :seon.test row queryable on a fresh conn.
@@ -546,7 +546,7 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest substrate-claimed-row-is-never-overwritten-by-the-self-tee
+(deftest core-claimed-row-is-never-overwritten-by-the-self-tee
   (async done
     (-> (client/open-agent-conn!)
         (.then
@@ -554,9 +554,9 @@
             (let [prev db/*conn*
                   k    :probe.selftee.claimed/x]
               ;; Boot-index claim: shape-literal source under a
-              ;; :substrate-seed-origin tx (same provenance rule
-              ;; prune-substrate-ghosts! honors).
-              (-> (db/with-tx-context {:seon.db/origin :substrate-seed}
+              ;; :core-seed-origin tx (same provenance rule
+              ;; prune-core-ghosts! honors).
+              (-> (db/with-tx-context {:seon.db/origin :core-seed}
                     (fn []
                       (db/transact!
                         {:seon.db/tx-data [{:seon.schema/key        k
@@ -565,7 +565,7 @@
                          :seon.db/conn    conn})))
                   (.then
                     (fn [seed-r]
-                      (is (:seon.db/ok? seed-r) "substrate claim tx ok")
+                      (is (:seon.db/ok? seed-r) "core claim tx ok")
                       (set! db/*conn* conn)
                       (reset! schema/!last-tee :sentinel)
                       (schema/register! k :string)
@@ -573,7 +573,7 @@
                           (.then
                             (fn [tee-ret]
                               (is (nil? tee-ret)
-                                  "self-tee SKIPPED a substrate-claimed row")
+                                  "self-tee SKIPPED a core-claimed row")
                               (testing "boot-indexed source untouched — boot stays the owner"
                                 (is (= #{[":string"]}
                                        (d/q '[:find ?src :in $ ?k

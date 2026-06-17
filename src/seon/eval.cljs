@@ -30,7 +30,7 @@
      `(def !x (atom 42))` + `@!x` works. Fns are unaffected — they
      cross namespaces fine. (Historically the agent's home ns held
      a `!session-id` atom for this reason; that was dropped 2026-05-25
-     in favor of the substrate-provided `(seon.db/current-agent-id)`
+     in favor of the core-provided `(seon.db/current-agent-id)`
      which reads from the turn-scoped ALS dynvar.)
    - **`(in-ns 'foo)` is not bootstrapped.** Use `(ns foo)` to switch."
   (:refer-clojure :exclude [eval])
@@ -204,7 +204,7 @@
 ;;
 ;; D13 result (research/impl-finding-tx-context-promise-2026-05-22.md)
 ;; confirms Node `AsyncLocalStorage` survives Promise / await
-;; boundaries; CLJS `binding` does not. Same substrate as
+;; boundaries; CLJS `binding` does not. Same core as
 ;; `seon.db/with-tx-context`.
 ;; ============================================================
 
@@ -294,7 +294,7 @@
 
    Works uniformly for:
 
-   - Substrate fns precompiled into `out/client/main.js` by
+   - Core fns precompiled into `out/client/main.js` by
      shadow-cljs (live at goog-global munged paths).
    - Agent-defined fns written by `cljs.js/eval-str` (cljs.js uses
      the same munge logic; lands at the same paths).
@@ -430,7 +430,7 @@
    from shadow's `env/get-ns-info`) for any ns absent from BOTH the
    compile-state and the bootstrap bundle's index. That made
    `(:require [my.kb :as kb])` — the move the prompt teaches, since it
-   renders substrate namespaces as code — fail as a `:cljs/analysis-
+   renders core namespaces as code — fail as a `:cljs/analysis-
    error`, at define time AND on every replay of a stored `(ns …)` row
    (logs/pod-events.log: `replay of ns :my.kb.instruction failed:
    Could not require my.kb`; the failed ns row then cascaded into
@@ -441,7 +441,7 @@
    alias map wires up from the ns form's parse, and cross-ns var refs
    resolve at runtime via the same munged globalThis paths
    `truly-undeclared?` probes. NEVER re-eval host source here — that's
-   the registry-stomp/shadowing class replay's substrate-skip exists to
+   the registry-stomp/shadowing class replay's core-skip exists to
    prevent. Macro loads (`:macros` rc) and genuinely-absent nses
    rethrow, preserving the legible `Could not require X <- ns X not
    available` error."
@@ -656,7 +656,7 @@
                     globalThis so any value type round-trips.
 
    For the agent's own id, use `(seon.db/current-agent-id)` — the
-   substrate provides it via the ALS dynvar bound at turn entry. The
+   core provides it via the ALS dynvar bound at turn entry. The
    prior `!session-id` atom + `(session-id)` accessor were dropped
    2026-05-25: the agent IS the session, and identity lives in one
    place (the ALS dynvar). No per-agent home-ns duplicate.
@@ -671,7 +671,7 @@
   [compile-state agent-ns-sym _agent-id]
   (let [setup-src
         (str "(ns " agent-ns-sym ")"
-             ;; Delegates to the substrate so a MISS is a legible error
+             ;; Delegates to the core so a MISS is a legible error
              ;; VALUE (prior session / errored eval / unknown id) — see
              ;; seon.eval/lookup-result.
              "(defn result [id] (seon.eval/lookup-result id))"
@@ -886,7 +886,7 @@
 ;; ghosts by hand).
 ;;
 ;; The class: a NON-`defn` bare `(def sym <init>)` whose init form CALLS
-;; an effectful substrate fn. Nothing pure can depend on such a value
+;; an effectful core fn. Nothing pure can depend on such a value
 ;; (the value IS the side effect's return), so dropping it from the
 ;; corpus loses nothing — `defn`s, `(def f (fn …))`, and pure value
 ;; defs are untouched.
@@ -900,7 +900,7 @@
 ;; ============================================================
 
 (def ^:private effectful-call-syms
-  "Substrate fns whose call inside a bare-`def` init makes that def a
+  "Core fns whose call inside a bare-`def` init makes that def a
    replay hazard. Both simple and fully-qualified forms — the source
    scan also matches any symbol whose NAME is one of these, so an
    alias like `agent/message!` is caught too. Data-driven: extend the
@@ -929,7 +929,7 @@
 
 (defn- bare-def-effectful?
   "TRUE when `form` is a bare `(def sym <init>)` — NOT `defn`, NOT
-   `(def sym (fn …))` — whose `<init>` calls an effectful substrate fn
+   `(def sym (fn …))` — whose `<init>` calls an effectful core fn
    (see [[form-calls-effectful?]])."
   [form]
   (and (seq? form)
@@ -955,7 +955,7 @@
 
 (defn effectful-bare-def?
   "Replay/tee classifier (#29). TRUE when `source` contains a bare,
-   non-`defn` `def` whose init form calls an effectful substrate fn
+   non-`defn` `def` whose init form calls an effectful core fn
    (`message!` / `reply!` / `transact!`, incl. FQ + aliased forms).
    Such a def's value IS a side effect; re-evaling it on boot/mint
    re-fires the effect (ghost messages). `defn`s, `(def f (fn …))`, and
@@ -984,8 +984,8 @@
         new-schemas (set/difference (schema/current-keys) schemas-before)
         fn-entities (for [{:keys [ns var-map]} new-defs
                           ;; deftest defs are :seon.test rows ONLY (below),
-                          ;; matching the substrate split (`substrate-vars` →
-                          ;; :seon.fn via index-substrate-tx; `!indexed-test-
+                          ;; matching the core split (`core-vars` →
+                          ;; :seon.fn via index-core-tx; `!indexed-test-
                           ;; vars` → :seon.test via index-tests — disjoint).
                           ;; Also keeps resume single-lane: a deftest teed as
                           ;; BOTH rows would replay its source twice.
@@ -1061,7 +1061,7 @@
         ;; (run-4 root cause, e2e-demo-findings-2026-06-08 §Run 4
         ;; CORRECTION). The nested map `{:seon.ns/name <kw>}` upserts:
         ;; identity-attr resolution links to the existing `:seon.ns`
-        ;; entity when one exists (substrate or `(ns …)`-created) and
+        ;; entity when one exists (core or `(ns …)`-created) and
         ;; creates a minimal one otherwise — so handlers.ns's
         ;; `[?s :seon.schema/ns ?n]` join stays coherent for data
         ;; namespaces too. REPL-verified on a scratch conn 2026-06-09:
@@ -1124,20 +1124,20 @@
    - NO bound `seon.db/*conn*` → nil (pure-registry contexts, JVM-side
      compile, the ~500 boot ns-load registrations before a conn
      exists — boot semantics unchanged; `seon.client/index-schemas`
-     remains the owner of substrate rows).
+     remains the owner of core rows).
    - REPLAY scope (`:seon.db/replay? true` in the tx-context) → nil.
      Replayed `(seon.schema/register! …)` sources re-run register!;
      re-teeing them would write a no-op upsert per schema per boot,
      re-anchoring row tx-ids (the exact churn the replay design's
      'detect-and-tee doesn't re-fire' invariant exists to avoid).
-   - SUBSTRATE-CLAIMED row (current `:seon.schema/source` datom's tx
-     carries `:seon.db/origin :substrate-seed`) → nil. The bootstrap
+   - CORE-CLAIMED row (current `:seon.schema/source` datom's tx
+     carries `:seon.db/origin :core-seed`) → nil. The bootstrap
      self-host compiler can re-execute compiled-bundle registrations
      at runtime (an agent's `(require …)` goog.globalEvals bundle JS,
      the relink-registry! incident class); without this guard those
      re-registrations would convert boot-indexed rows into never-
      prunable, replayable `(…)` call rows. Same provenance rule as
-     `seon.client/prune-substrate-ghosts!`.
+     `seon.client/prune-core-ghosts!`.
    - IDENTICAL stored source → nil (idempotent re-registration; no
      no-op upsert churn).
 
@@ -1167,7 +1167,7 @@
                          ?origin]]
                       :seon.db/conn conn
                       :seon.db/args [k]}))]
-        (when-not (or (= origin :substrate-seed)
+        (when-not (or (= origin :core-seed)
                       (= stored-src source))
           (-> (db/transact!
                 {:seon.db/tx-data [(schema-tee-row k source (js/Date.))]
@@ -1477,7 +1477,7 @@
 ;; REPL-parity intercepts (unit #23 fix d, per the plan's REPL-PARITY
 ;; CONTRACT). The agent's context mimics a real Clojure REPL, so its
 ;; reflexive moves must work — or fail with a translation that teaches
-;; the substrate equivalent. Three forms get a form-level pre-check
+;; the core equivalent. Three forms get a form-level pre-check
 ;; BEFORE eval (probed live 2026-06-09: `(in-ns 'foo)` fails with an
 ;; opaque undeclared-var error; bare `*ns*` and `*1` both SILENTLY
 ;; eval to nil — silent wrong answers, the worst kind):
@@ -1487,7 +1487,7 @@
 ;;                  it IS the ns this form runs in; teaching-only would
 ;;                  leave the silent nil in place).
 ;;   *1 *2 *3     → legible ERROR teaching (result :<eval-id>) — the
-;;                  substrate's richer replacement (every value durable
+;;                  core's richer replacement (every value durable
 ;;                  + addressable).
 ;; ============================================================
 

@@ -10,7 +10,7 @@
 
    Reactive: a single tx-listener subscribes to every commit. For each
    tx-report we read `:seon.db/agent-id` from the tx eid in db-after.
-   Substrate tx (nil agent-id) fan out to ALL watching agents; per-agent
+   Core tx (nil agent-id) fan out to ALL watching agents; per-agent
    tx fan out only to that agent's connections. Pushes are coalesced
    per-agent on a 100ms trailing timer so a burst of tx within one
    turn produces one render.
@@ -279,7 +279,7 @@
   "STATIC = collapsed-by-default in the right pane. Discriminator:
    - `:seon.schema` kind rows (`:seon.schema/key` present);
    - `:seon.fn` / `:seon.ns` / `:seon.test` cards whose CREATION tx
-     carries `:seon.db/origin :substrate-seed` (the substrate index,
+     carries `:seon.db/origin :core-seed` (the core index,
      seeded at boot — agent-AUTHORED fns/nses/tests have `:agent`
      origin and stay expanded).
    Everything else (messages, evals, agent-authored entities) is
@@ -295,7 +295,7 @@
         (and (or (:seon.fn/sym entity)
                  (:seon.ns/name entity)
                  (:seon.test/sym entity))
-             (= :substrate-seed
+             (= :core-seed
                 (entity-creation-origin db (:db/id entity)))))))
 
 (defn- entity-summary-name
@@ -335,7 +335,7 @@
    Turn NUMBER is the 1-based index of the turn within its session's
    turns sorted by `:seon.agent.turn/at` — same derivation as the agent's
    `turn N` prompt line. Entities not hanging off any turn (schema
-   rows, substrate index) are absent from the map and keep their
+   rows, core index) are absent from the map and keep their
    tx-time position in the card list."
   [db]
   (let [turn-rows  (d/q '[:find ?s ?turn ?tat
@@ -1267,7 +1267,7 @@
        ;; New-agent affordance — POSTs to /agents/new (the injected
        ;; seon.client/start-agent! boot path: trigger armed, live) and
        ;; navigates to the new /agent/<id> page on success. Boot takes
-       ;; a few seconds (replay + substrate seed) — the button shows
+       ;; a few seconds (replay + core seed) — the button shows
        ;; progress; errors land in its own text, never swallowed.
        ;; NOTE: this fragment re-morphs on every commit (boot commits
        ;; plenty), so idiomorph may visually reset the label mid-boot;
@@ -1779,8 +1779,8 @@
 
 (defn- on-tx
   "Fan a tx out to the watching agents it affects. Scope rules:
-   - substrate tx (no `:seon.db/agent-id`) → ALL watching agents;
-   - `:seon.db/origin :substrate-seed` → ALL watching agents EVEN
+   - core tx (no `:seon.db/agent-id`) → ALL watching agents;
+   - `:seon.db/origin :core-seed` → ALL watching agents EVEN
      when agent-stamped (the boot-seed runs inside the booting agent's
      `with-agent` scope today, but `agent-view` shows seed tx to every
      agent — without this clause the OTHER agents' panes went stale on
@@ -1792,7 +1792,7 @@
   (let [tx-eid   (some (fn [d] (:seon.db/tx d)) datoms)
         tx-ent   (when tx-eid (d/entity db tx-eid))
         scope-id (:seon.db/agent-id tx-ent)
-        seed?    (= :substrate-seed (:seon.db/origin tx-ent))
+        seed?    (= :core-seed (:seon.db/origin tx-ent))
         watching (watching-agents)
         targets  (if (or (nil? scope-id) seed?)
                    (disj watching ::index ::data)

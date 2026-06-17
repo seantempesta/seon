@@ -77,7 +77,7 @@
   (is (false? (ctx/included-ns? "acmene.core" ["acme."]))
       "prefix matches on segment boundary, not substring")
   ;; full-source depth: my.* by RULE + the seon exemplar roots +
-  ;; children + test siblings; big unsplit substrate stays shallow.
+  ;; children + test siblings; big unsplit core stays shallow.
   (doseq [n ["my.kb" "my.kb.system" "my.soul" "my.soul-test"
              "seon.agent.search" "seon.agent.search-test"
              "seon.agent.todo" "seon.agent.todo-test"]]
@@ -182,7 +182,7 @@
                 (.then (fn [_]
                          (db/transact!
                            {:seon.db/tx-data
-                            [{:seon.ctx/config-id "substrate"
+                            [{:seon.ctx/config-id "core"
                               :seon.ctx/included-prefixes
                               ctx/default-included-prefixes}]})))
                 ;; … then the downstream's ONE transact (identity upsert +
@@ -191,7 +191,7 @@
                 (.then (fn [_]
                          (db/transact!
                            {:seon.db/tx-data
-                            [{:seon.ctx/config-id "substrate"
+                            [{:seon.ctx/config-id "core"
                               :seon.ctx/included-prefixes ["acme."]}]})))
                 (.then
                   (fn [_]
@@ -304,7 +304,7 @@
                       (is (str/includes? (str ent-txt) "<your-entity>")
                           "tag wrapper present")
                       (is (some #{:system} sections)
-                          "substrate defaults merged in")
+                          "core defaults merged in")
                       (is (some #{:prompt} sections))
                       (is (not-any? #{:purpose} sections)
                           "the :purpose seed section is dead")

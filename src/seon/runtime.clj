@@ -292,8 +292,8 @@
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
 
 ;; In-memory set of generated IDs for collision checking
-;; Substrate state — ONE atom per the atom-state PRD's
-;; "one substrate atom per concern" principle (Wave 4.5 item D, 2026-05-27).
+;; Core state — ONE atom per the atom-state PRD's
+;; "one core atom per concern" principle (Wave 4.5 item D, 2026-05-27).
 ;; Keys:
 ;;   ::generated-ids  — set of generated IDs for collision checking
 ;;   ::registry-cache — cache of runtime registry entries (mirror of DB)

@@ -32,7 +32,7 @@
    ;; source-path/source-line/confidence-shaped provenance), not the
    ;; VOCABULARY (:my.kb/* vs a self-minted :my.kb.<domain>/* sibling).
    ;; Anchored on attr NAMES via the engine's `name` built-in; the
-   ;; substrate registers no other attrs with these names (verified
+   ;; core registers no other attrs with these names (verified
    ;; 2026-06-11 — only :my.kb/* carries them), so no vacuous pass.
    ;; (2026-06-11 evening: the consult anchor below WIDENED too — any
    ;; store read counts; the judge carries answer quality. The earlier

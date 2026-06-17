@@ -5,7 +5,7 @@
    originated inside `(seon.db/with-agent id ...)` — already shipped
    in commit 5a82742. To give agent A a view of 'just my universe',
    we wrap the conn in a `d/filter` that keeps a datom only when its
-   tx is either substrate (no `:seon.db/agent-id`) or matches the
+   tx is either core (no `:seon.db/agent-id`) or matches the
    given agent-id.
 
    Probe 1b confirmed `d/filter` works in datahike-cljs. The
@@ -17,13 +17,13 @@
     [datahike.api :as d]
     [seon.db :as db]))
 
-(defn- substrate-or-mine?
+(defn- core-or-mine?
   "True when the tx at `tx-eid` should be visible to `agent-id`:
-   - no `:seon.db/agent-id` stamped (substrate tx), OR
+   - no `:seon.db/agent-id` stamped (core tx), OR
    - stamped with this agent's id, OR
-   - `:seon.db/origin :substrate-seed` — boot-seed tx (entity-kind
-     `:seon.schema` rows, my.kb.instruction rows, substrate `:seon.ns`/
-     `:seon.fn` index). These are SUBSTRATE data by definition, but
+   - `:seon.db/origin :core-seed` — boot-seed tx (entity-kind
+     `:seon.schema` rows, my.kb.instruction rows, core `:seon.ns`/
+     `:seon.fn` index). These are CORE data by definition, but
      `seon.client/start-agent!` runs the seed inside the booting
      agent's `with-agent` scope, so they arrive agent-stamped. Without
      this clause every OTHER agent's filtered view loses the kind
@@ -40,11 +40,11 @@
         tx-aid (:seon.db/agent-id tx-ent)]
     (or (nil? tx-aid)
         (= tx-aid agent-id)
-        (= :substrate-seed (:seon.db/origin tx-ent)))))
+        (= :core-seed (:seon.db/origin tx-ent)))))
 
 (defn agent-view
   "Return a filtered db value that scopes reads to `agent-id` plus
-   substrate-wide tx. Substrate tx are never filtered out (they carry
+   core-wide tx. Core tx are never filtered out (they carry
    shared schema, instruction rows, handler registrations).
 
    Map-in, map-out (returns the db value under `:seon.db/db`)."
@@ -63,7 +63,7 @@
         own-eid (try (:db/id (d/pull base '[:db/id] [:seon.agent/id id]))
                      (catch :default _ nil))
         ;; Per-tx verdict memo. The pred runs on EVERY datom access
-        ;; through the FilteredDB, and `substrate-or-mine?` does a
+        ;; through the FilteredDB, and `core-or-mine?` does a
         ;; `d/entity` (tx-meta read) each time — on the file-backed pod
         ;; store (A1, 2026-06-09) that made one inspector render issue
         ;; MILLIONS of konserve index reads and wedge the pod event
@@ -74,7 +74,7 @@
         !tx-ok (atom {})
         pred (fn [db datom]
                (let [^js datom datom]
-                 (or ;; Identity attrs are PUBLIC substrate facts —
+                 (or ;; Identity attrs are PUBLIC core facts —
                      ;; "agents know other agents purely by id"
                      ;; (messaging 1.5). Without this an agent can't
                      ;; label `agent-<id>` on messages from/to peers
@@ -84,7 +84,7 @@
                      (let [tx (.-tx datom)]
                        (if-some [v (get @!tx-ok tx)]
                          v
-                         (let [v (substrate-or-mine? db tx id)]
+                         (let [v (core-or-mine? db tx id)]
                            (swap! !tx-ok assoc tx v)
                            v)))
                      (and (some? own-eid) (= own-eid (.-e datom))))))

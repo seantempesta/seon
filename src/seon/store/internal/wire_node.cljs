@@ -188,7 +188,7 @@
         id   (str "proc:" name)]
     ;; Answer the MCP probe under the `proc:<name>` grammar — non-agent
     ;; infrastructure runtimes share the agent resolver but can never
-    ;; collide with substrate agent ids (new-id! never emits `:`).
+    ;; collide with core agent ids (new-id! never emits `:`).
     (runtime-id/host! id)
     (js/console.log (str "wire-node ready: id=" id
                          " pid=" (.-pid js/process)

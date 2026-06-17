@@ -167,7 +167,7 @@
                                 (body conn))))))))))
 
 (deftest render-agent-tile-default-renders-welcome
-  ;; live-tiles U1: an UNWIRED agent's tile is the substrate welcome
+  ;; live-tiles U1: an UNWIRED agent's tile is the core welcome
   ;; (seon.render.live-tile/welcome), no longer the :seon.agent kind
   ;; default seon.render.default/view — the tile slot and the generic
   ;; entity-card slot are separate roles now (PRD §8.1).

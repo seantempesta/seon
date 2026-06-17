@@ -92,7 +92,7 @@ When caching is unjustified: most reads. Datahike queries against a `:memory` co
 
 - **Genuinely stateful artifacts** that aren't derived from the log: the bootstrap-CLJS compile-state cache, the datahike connection itself, the AsyncLocalStorage instance. These are runtime infrastructure, not domain data.
 - **Identity attrs** for entity lookup (`:seon.eval/id`, `:seon.fn/sym`). Identifiers are stored; the entity's other attributes might be derived for some, persisted for others depending on whether they come from input or from analysis.
-- **The eval log itself.** `:seon.eval/source`, `:seon.eval/ok?`, `:seon.eval/ns`, `:seon.eval/at` are the substrate of derivation; they're what gets queried. Same for messages, turns, sessions.
+- **The eval log itself.** `:seon.eval/source`, `:seon.eval/ok?`, `:seon.eval/ns`, `:seon.eval/at` are the core of derivation; they're what gets queried. Same for messages, turns, sessions.
 - **Caching of expensive derivations** (see above). Memoization is fine; bifurcation isn't.
 
 ## Cross-agent coordination falls out for free
@@ -109,7 +109,7 @@ When writing a new section function, ask:
 
 1. **Is the value derivable from existing entities?** If yes — write a query. If no — verify it's genuinely stateful and that the state belongs to someone (typically the eval log or the entity it's tracking).
 2. **Does it need to vanish when the underlying problem vanishes?** Almost always yes. If you find yourself writing "if newer-than-X, return empty", that's the system asking you to query for newness instead.
-3. **Should other agents see this too?** Default to yes — don't filter unless there's a reason. Cross-agent visibility is part of the substrate.
+3. **Should other agents see this too?** Default to yes — don't filter unless there's a reason. Cross-agent visibility is part of the core.
 4. **Is the derivation cheap?** Datahike `:memory` queries are sub-millisecond for small datom counts. Measure with `(.now js/Date)` deltas before adding caching.
 5. **If you DO need to cache,** memoize with a cheap invalidation signal (latest tx-id) — don't store the derived value as a datom.
 

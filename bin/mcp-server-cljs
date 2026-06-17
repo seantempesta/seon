@@ -47,7 +47,7 @@
 (def sessions (atom {}))
 
 ;; Multi-runtime addressing — the UNIFIED id scheme (mcp-agent-id-unification
-;; PRD, 2026-06-10): agent_id IS the substrate :seon.agent/id (e.g.
+;; PRD, 2026-06-10): agent_id IS the core :seon.agent/id (e.g.
 ;; "iCg-2606101519"), or "proc:<name>" for non-agent infrastructure runtimes
 ;; (wire-node = "proc:wire"). A runtime answers the probe
 ;; `(seon.dev.runtime-id/hosted)` with the VECTOR of ids it hosts; resolution
@@ -327,7 +327,7 @@
   "Probe-resolve agent-id -> {:build \"<:client>\" :client-id <int>} by
    MEMBERSHIP. Enumerates EVERY active build's runtimes (no hardwired build
    id) and, for each, pins it and asks `(seon.dev.runtime-id/hosted)` — a
-   vector of the ids that runtime hosts (substrate :seon.agent/id strings,
+   vector of the ids that runtime hosts (core :seon.agent/id strings,
    or proc:<name> for infra runtimes). The first runtime whose answer
    contains `agent-id` wins. Runtimes that error on the probe (ns not
    loaded) are skipped, exactly like a non-matching id. Survives restart
@@ -491,7 +491,7 @@
       (if (< tries 10)
         (do (Thread/sleep 200) (recur (inc tries)))
         (mcp-error (str "No live runtime hosts agent-id '" agent-id "'. "
-                        "agent_id is the substrate :seon.agent/id (the pod "
+                        "agent_id is the core :seon.agent/id (the pod "
                         "hosts every agent it resumed/minted — check "
                         "(seon.dev.runtime-id/hosted) on the :client runtime, "
                         "or bin/seon status / restart pod), or proc:<name> "
@@ -594,7 +594,7 @@
                   :properties {:code {:type "string"
                                       :description "ClojureScript code to evaluate. Must reference fully-qualified names (cljs.user has no implicit aliases beyond core)."}
                                :agent_id {:type "string"
-                                          :description "Address the runtime hosting a specific agent: the substrate :seon.agent/id (e.g. 'iCg-2606101519' — the same id in the cluster store, message refs, and /agent/<id> URLs), or 'proc:<name>' for non-agent infrastructure runtimes (e.g. 'proc:wire'). Resolution is by membership: every active build's runtimes are probed via (seon.dev.runtime-id/hosted) and the one hosting this id is pinned. Survives process crash+restart (re-resolves the new client-id) with no MCP/shadow restart. Omit to use the default :client runtime."}
+                                          :description "Address the runtime hosting a specific agent: the core :seon.agent/id (e.g. 'iCg-2606101519' — the same id in the cluster store, message refs, and /agent/<id> URLs), or 'proc:<name>' for non-agent infrastructure runtimes (e.g. 'proc:wire'). Resolution is by membership: every active build's runtimes are probed via (seon.dev.runtime-id/hosted) and the one hosting this id is pinned. Survives process crash+restart (re-resolves the new client-id) with no MCP/shadow restart. Omit to use the default :client runtime."}
                                :session_id {:type "string"
                                             :description "Session sid. 'default' for the singleton :repl build session (auto-created). Or a sid from create_session. Ignored when agent_id is set."}
                                :timeout_ms {:type "integer"

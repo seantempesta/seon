@@ -22,7 +22,7 @@
    no-return-spec / no-input-spec / missing-test) to one namespace —
    the caller (seon.agent/warnings-section) defaults it to the agent's
    CURRENT ns so an agent isn't confused by other namespaces' defects.
-   Omit it for the whole-substrate overview. The RUNTIME checks
+   Omit it for the whole-core overview. The RUNTIME checks
    (failed-evals / slow-evals / failing-tests / bad-ref) and the
    SCHEMA/DOMAIN checks (parallel-attr, unmarked-entity-kinds —
    keyword namespaces are data domains, not code nses) stay global —
@@ -297,20 +297,20 @@
    surface, shared by domain-attrs and the classifier (V3-C).
 
    The set of attr keywords whose `:seon.schema/key` row landed in a tx
-   that does NOT carry `:seon.db/origin :substrate-seed` — i.e. attrs
+   that does NOT carry `:seon.db/origin :core-seed` — i.e. attrs
    registered by an AGENT (every agent `register!` eval is teed into a
    `:seon.schema` row by `seon.eval/build-tee-entities`, in an
-   agent-origin tx), as opposed to the substrate's own registrations
+   agent-origin tx), as opposed to the core's own registrations
    (boot-seeded by `seon.client/index-schemas` /
    `all-entity-schemas-tx-data`, always inside the
-   `{:seon.db/origin :substrate-seed}` tx-context, forge-guarded in
+   `{:seon.db/origin :core-seed}` tx-context, forge-guarded in
    `seon.db`).
 
    This PROVENANCE rule replaces the old keyword-namespace blanket
    `(db|seon)(\\..*)?` — which wrongly hid agent-authored `seon.*` data
    domains (the live store's `:my.workout/*`) from the whole reuse
    surface (gym S-21 root cause, 2026-06-10). Provenance stays correct
-   as the substrate grows with NO list to maintain: new substrate
+   as the core grows with NO list to maintain: new core
    registrations arrive via the boot seed (seed origin → hidden), and
    anything an agent registers is teed in its own tx (→ visible),
    whatever keyword namespace it picks."
@@ -321,7 +321,7 @@
                                   :seon.db/query
                                   '[:find ?tx
                                     :where
-                                    [?tx :seon.db/origin :substrate-seed]]}))]
+                                    [?tx :seon.db/origin :core-seed]]}))]
     (into #{}
           (keep (fn [[k tx]] (when-not (contains? seed-txs tx) k)))
           (db/query {:seon.db/db db
@@ -336,8 +336,8 @@
    are the attrs agents registered for the human's data — INCLUDING
    `seon.*` data domains like `:my.workout/*` — the reuse surface
    (seon.db/store-inventory) reports and [[check-parallel-attr]] guards.
-   Substrate attrs (`:seon.db/*`, `:seon.agent/*`, …) stay hidden
-   because their rows land under `:seon.db/origin :substrate-seed`.
+   Core attrs (`:seon.db/*`, `:seon.agent/*`, …) stay hidden
+   because their rows land under `:seon.db/origin :core-seed`.
    Derived from the db value itself (NOT the live registry), so it
    survives pod restarts and stays per-conn. An attr appears once data
    (or schema installation via the first transact!) has landed."
@@ -473,7 +473,7 @@
    unmarked-entity and legitimate envelope; once rows EXIST under the
    id-attr, an undeclared kind is a real defect. Derived at render,
    self-heals the moment the kind is marked. GLOBAL — fires on
-   substrate and agents alike; :seon.warn/ns is ignored."
+   core and agents alike; :seon.warn/ns is ignored."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
   (let [marked (marked-entity-id-attrs)]
@@ -810,7 +810,7 @@
                   {:seon.warn/sym   (str eid)
                    :seon.warn/where (clip err 120)})))
      :seon.warn/explain
-     (str "These evals were only PARTIALLY recorded: the substrate could "
+     (str "These evals were only PARTIALLY recorded: the core could "
           "not persist their program-graph tee rows (fn/schema/test "
           "registrations), so whatever they defined exists in-memory "
           "ONLY and will NOT survive a restart. Re-run the defining form "
@@ -962,7 +962,7 @@
   "Run the registry and render the non-clean checks as a single
    `<warnings>` block, one cluster per kind. Empty string when clean.
    Scope the corpus checks with `:seon.warn/ns`; omit it for the
-   whole-substrate overview."
+   whole-core overview."
   {:malli/schema [:=> [:cat ::check-request] :string]}
   [req]
   (let [clusters (run-checks req)]

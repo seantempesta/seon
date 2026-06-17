@@ -1,5 +1,5 @@
 (ns seon.handlers.wake
-  "Substrate handler: wake-on-message.
+  "Core handler: wake-on-message.
 
    When a `:seon.agent.message/to <agent-id>` datom lands, emit a `:wake`
    effect for each target agent. The actual wake interpreter
@@ -69,7 +69,7 @@
 ;; ============================================================
 
 (defn wake-on-message
-  "Substrate handler. For each new `:seon.agent.message/to <agent-ref>`
+  "Core handler. For each new `:seon.agent.message/to <agent-ref>`
    datom in the tx, emit a `:wake` effect descriptor naming the
    target agent. The dispatcher's effect interpreter handles the
    actual wake (setTimeout + with-agent re-entry — v0 leaves this

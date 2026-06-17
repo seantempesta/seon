@@ -1,7 +1,7 @@
 (ns seon.db.internal
   "Plumbing behind `seon.db` — validation gate, invocation normalization,
    error envelopes, the Malli→datahike schema bridge, tx-meta machinery,
-   AsyncLocalStorage substrate, and listener wrapping.
+   AsyncLocalStorage core, and listener wrapping.
 
    This namespace is INTERNAL: it is never rendered into agent context
    (the `*.internal` ns name IS the filter — context-v3 convention,
@@ -21,7 +21,7 @@
     [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
-;; AsyncLocalStorage substrate — fiber-local context for tx-meta + agent-id.
+;; AsyncLocalStorage core — fiber-local context for tx-meta + agent-id.
 ;;
 ;; We DO NOT use a CLJS `^:dynamic` Var here, even though that's the
 ;; idiomatic Clojure spelling. CLJS `binding` macroexpands to
@@ -698,7 +698,7 @@
                     "passed. Bind via session-flow setup, or pass "
                     "::db/conn explicitly.")
                {::db/error       :seon.db/no-conn
-                :seon.error/kind :substrate-bug}))))
+                :seon.error/kind :core-bug}))))
 
 ;; ---------------------------------------------------------------------------
 ;; Invocation normalization + shape guard for the write path.
@@ -835,7 +835,7 @@
     ;; shape guard so it's classified `:user-input`. Without this
     ;; check, the value flows into `extract-tx-attrs`/`mapcat` which
     ;; throws an opaque "X is not ISeqable" → outer catch tags it
-    ;; `:substrate-bug`. That misclassification was task-9b finding 2.
+    ;; `:core-bug`. That misclassification was task-9b finding 2.
     (not (sequential? (::db/tx-data arg)))
     (throw (ex-info
              (str "seon.db/transact!: `:seon.db/tx-data` must be a "
@@ -878,42 +878,42 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Origin-forge guard (verifier rec, 2026-06-09). An AGENT-scoped tx that
-;; claims `:seon.db/origin :substrate-seed` is forging substrate
+;; claims `:seon.db/origin :core-seed` is forging core
 ;; provenance — `seon.agent-view` trusts that origin to widen the tx's
 ;; visibility across EVERY agent's filtered view, so a forging agent
 ;; could inject context into all of its peers.
 ;;
 ;; The intended enforcement is to OVERRIDE the origin to `:agent` (the
 ;; honest value) and log. But TODAY the legitimate boot-seed path
-;; (`seon.client/seed-substrate!`) still runs INSIDE the booting agent's
+;; (`seon.client/seed-core!`) still runs INSIDE the booting agent's
 ;; `with-agent` scope (known client.cljs issue, other lane), so the
 ;; override would silently re-stamp every boot-seed tx and break the
 ;; cross-agent visibility the seed depends on. Until the seed moves
 ;; outside agent scope this guard is WARN-ONLY: log + count, commit
 ;; unchanged.
 ;;
-;; TODO(after client.cljs runs seed-substrate! OUTSIDE with-agent —
+;; TODO(after client.cljs runs seed-core! OUTSIDE with-agent —
 ;; #23's lane): flip to enforcement — override the origin to :agent
-;; (keep the warn), gated on a private `*substrate-seed-allowed*`
+;; (keep the warn), gated on a private `*core-seed-allowed*`
 ;; binding the seed path establishes.
 ;; ---------------------------------------------------------------------------
 
 (defonce !seed-origin-forge-count
   ;; Public so tests can reset/read it. Counts agent-scoped tx that
-  ;; claimed :substrate-seed origin since pod boot.
+  ;; claimed :core-seed origin since pod boot.
   (atom 0))
 
 (defn warn-on-seed-origin-forge!
   "WARN-ONLY guard: when an agent scope is active and the merged
-   tx-meta claims `:seon.db/origin :substrate-seed`, log a console
+   tx-meta claims `:seon.db/origin :core-seed`, log a console
    warning and bump `!seed-origin-forge-count`. Returns `merged-opts`
    unchanged (see the enforcement TODO above)."
   [merged-opts]
   (when (and (some? (current-agent-id))
-             (= :substrate-seed (get-in merged-opts [:tx-meta ::db/origin])))
+             (= :core-seed (get-in merged-opts [:tx-meta ::db/origin])))
     (swap! !seed-origin-forge-count inc)
     (js/console.warn
-      "seon.db/transact!: agent-scoped tx claims :seon.db/origin :substrate-seed — substrate provenance from inside an agent scope (warn-only; see warn-on-seed-origin-forge!)"
+      "seon.db/transact!: agent-scoped tx claims :seon.db/origin :core-seed — core provenance from inside an agent scope (warn-only; see warn-on-seed-origin-forge!)"
       #js {:agent (current-agent-id)
            :count @!seed-origin-forge-count}))
   merged-opts)
@@ -926,14 +926,14 @@
 (defn error-envelope
   "Build a `{::ok? false ::error <error-map>}` failure envelope from a
    thrown error. Ensures `:seon.error/data` carries a `:seon.error/kind`
-   tag (defaulting to `:substrate-bug` when the throw didn't ship one).
+   tag (defaulting to `:core-bug` when the throw didn't ship one).
    `:user-input` is reserved for caller-fault paths — invocation shape,
    unregistered attr, value Malli failure. Anything else (datahike
-   internals, store I/O, schema bridge bug) defaults to `:substrate-bug`."
+   internals, store I/O, schema bridge bug) defaults to `:core-bug`."
   [e]
   (let [emap (error/->map e)
         data (or (:seon.error/data emap) {})
-        kind (:seon.error/kind data :substrate-bug)
+        kind (:seon.error/kind data :core-bug)
         emap (assoc emap :seon.error/data (assoc data :seon.error/kind kind))]
     {::db/ok? false ::db/error emap}))
 
@@ -943,7 +943,7 @@
    message is preserved verbatim under `:seon.db/raw-error`. Both are
    caller-fixable, so `:seon.error/kind` is retagged `:user-input`
    (datahike throws them from its internals, which the generic
-   classifier would mislabel `:substrate-bug`). Non-matching envelopes
+   classifier would mislabel `:core-bug`). Non-matching envelopes
    pass through unchanged."
   [{::db/keys [error] :as envelope}]
   (let [msg  (:seon.error/message error)
@@ -966,7 +966,7 @@
                "schema — register it with (seon.schema/register! "
                (pr-str attr) " <type>) BEFORE transacting. If you "
                "registered it earlier this turn and still see this "
-               "error, report a substrate bug.")))
+               "error, report a core bug.")))
 
       ;; "Lookup ref attribute should be marked as :db/unique"
       (re-find #"Lookup ref attribute should be marked as :db/unique" msg)
@@ -1004,7 +1004,7 @@
    attr must have a datahike schema datom BEFORE its first transact —
    otherwise `d/transact!` throws \"Bad entity attribute … not defined in
    current schema\". At boot, `seon.client/open-agent-conn!` installs the
-   substrate's attrs from a fixed list. But when an AGENT registers a NEW
+   core's attrs from a fixed list. But when an AGENT registers a NEW
    attr at runtime via `seon.schema/register!`, only the Malli registry
    learns about it — the datahike conn does not. Without this step the
    agent's register→transact flow ALWAYS failed at the datahike layer,
@@ -1114,7 +1114,7 @@
     (catch :default e
       ;; Validation-gate / schema-install / datahike commit failure.
       ;; Translation rewrites the known cryptic messages and retags
-      ;; them :user-input; anything else stays :substrate-bug.
+      ;; them :user-input; anything else stays :core-bug.
       (commit-error-envelope e))))
 
 ;; ---------------------------------------------------------------------------

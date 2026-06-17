@@ -96,7 +96,7 @@
 ;; per reply taught nothing and carried a misdirected "narrow your
 ;; query" hint. Success answers the three things a sender can act on:
 ;; did it store, which message, at what hop depth. Failure stays the
-;; substrate-standard error envelope (errors are values).
+;; core-standard error envelope (errors are values).
 (schema/register! ::message-response
   [:or
    [:map
@@ -162,7 +162,7 @@
 (defn- envelope-failure?
   "Is `v` an error-envelope-shaped VALUE — a map carrying any `*/ok?`
    key whose value is false? Structural (key NAME = \"ok?\"), not a
-   list of blessed envelope types: every substrate envelope
+   list of blessed envelope types: every core envelope
    (`:seon.db/ok?`, `:seon.eval/ok?`, `:seon.agent.message/ok?`, …)
    and any future one matches."
   [v]
@@ -322,7 +322,7 @@
 (defn ^:async reply!
   "Reply to whoever woke the current turn: `message!` with `to` := the
    `:seon.agent.message/from` of the current turn's `:seon.agent.turn/woken-by`
-   message (derived — the substrate knows who's talking to you; no
+   message (derived — the core knows who's talking to you; no
    target atom). Falls back to the user when the turn wasn't woken by a
    message. Returns `message!`'s concise envelope — including its
    same-batch failure refusal (B3): when an earlier form of this batch

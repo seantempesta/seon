@@ -76,6 +76,6 @@
                         "fail-loud message preserved")
                     (is (re-find #"after 5 attempts" (.-message e))
                         "message names the exhausted retry budget")
-                    (is (= :substrate-bug (:seon.error/kind (ex-data e)))
+                    (is (= :core-bug (:seon.error/kind (ex-data e)))
                         "error kind unchanged")))
           (.finally done)))))

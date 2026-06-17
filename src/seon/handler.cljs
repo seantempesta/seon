@@ -2,7 +2,7 @@
   "Handler registry — `register!` is the one verb (unified-loop-v1.md §1 D3).
 
    A handler is a DB entity that says 'when datoms with attribute X
-   land, call symbol F'. Substrate-wide handlers carry no agent;
+   land, call symbol F'. Core-wide handlers carry no agent;
    per-agent handlers carry `:seon.handler/agent`. The composite-tuple
    identity on `[name agent]` upserts on re-registration so editing a
    handler is one transact, not retract-then-add.
@@ -36,7 +36,7 @@
 ;; per-agent fns. Composite identity `[name agent]` does the dedup.
 (schema/register! :seon.handler/name      :keyword)
 
-;; Owner. Nil ⇒ substrate-wide (the dispatcher scopes via the tx's
+;; Owner. Nil ⇒ core-wide (the dispatcher scopes via the tx's
 ;; matched-datom). Otherwise a lookup-ref to a `:seon.agent` entity.
 ;; Stored as a ref so retracting the agent cascades the handler.
 (schema/register! :seon.handler/agent     :seon.db/ref)
@@ -78,7 +78,7 @@
    [:seon.handler.match/value? {:optional true} :seon.handler.match/value?]])
 
 ;; Composite-tuple identity. Probe 1a confirmed this works in
-;; datahike-cljs including with nil components — so substrate handlers
+;; datahike-cljs including with nil components — so core handlers
 ;; (agent nil) and agent handlers ([:seon.agent/id _]) live in the
 ;; same attr without colliding on name alone.
 ;;
@@ -162,7 +162,7 @@
    replaces the prior `:fn` / `:priority` / `:on-origin` rather than
    creating a duplicate row.
 
-   Agent omitted ⇒ substrate-wide handler. Pass `:seon.handler/agent
+   Agent omitted ⇒ core-wide handler. Pass `:seon.handler/agent
    [:seon.agent/id \"<id>\"]` for a per-agent handler."
   {:malli/schema [:=> [:cat :seon.handler/register!-request]
                        :seon.handler/register!-response]}
@@ -201,10 +201,10 @@
 
 (defn query-handlers
   "Return the seq of registered handlers visible to `agent-id` (a
-   string) — substrate-wide handlers PLUS the agent's own. Each map
+   string) — core-wide handlers PLUS the agent's own. Each map
    is the pulled entity.
 
-   With no agent-id, returns substrate-wide handlers only.
+   With no agent-id, returns core-wide handlers only.
 
    Sorted by `:seon.handler/priority` descending so the caller can
    walk in dispatch order without re-sorting."
@@ -238,7 +238,7 @@
   ;; Boot the schema once at pod start.
   (h/bootstrap-schema!)
 
-  ;; Register a substrate handler.
+  ;; Register a core handler.
   (h/register!
     {:seon.handler/name :wake/on-message
      :seon.handler/match {:seon.handler.match/attr :seon.agent.message/to}

@@ -1,7 +1,7 @@
 (ns seon.dev.runtime-id
   "The MCP runtime-addressing probe surface (mcp-agent-id-unification
    PRD, 2026-06-10). ONE id grammar: a runtime answers the probe with
-   the VECTOR of ids it hosts — substrate `:seon.agent/id` strings for
+   the VECTOR of ids it hosts — core `:seon.agent/id` strings for
    agent-hosting processes (the pod hosts every agent it resumed or
    minted), or `proc:<name>` for non-agent infrastructure runtimes
    (wire-node = `proc:wire`). `bin/mcp-server-cljs` resolves an
@@ -24,7 +24,7 @@
 (defonce ^:private !hosted (atom #{}))
 
 (defn host!
-  "Register `id` (a substrate `:seon.agent/id` string, or `proc:<name>`
+  "Register `id` (a core `:seon.agent/id` string, or `proc:<name>`
    for infra runtimes) as hosted by THIS process. Idempotent."
   {:malli/schema [:=> [:catn [:seon.dev.runtime-id/id :string]] :string]}
   [id]

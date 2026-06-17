@@ -44,7 +44,7 @@
 ;; The pod reads two kinds of relative paths:
 ;;
 ;;   ARTIFACTS — things the seon checkout OWNS: the self-host
-;;     bootstrap output (out/bootstrap), the substrate source roots
+;;     bootstrap output (out/bootstrap), the core source roots
 ;;     the boot indexer reads (src, test, guest-cljs/src), the static
 ;;     web assets (resources/public/*). These route through
 ;;     [[artifact-path]]: when the SEON_RUNTIME_ROOT env var is set

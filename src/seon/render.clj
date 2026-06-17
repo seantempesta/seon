@@ -50,7 +50,7 @@
 ;;; ---------------------------------------------------------------------------
 ;;;
 ;;; The renderer-lookup path used to require a runtime-DB conn-override under
-;;; the legacy storage substrate. That path was silently broken on the current
+;;; the legacy storage core. That path was silently broken on the current
 ;;; boot (the connection-manager Integrant key is gone from system.edn), so
 ;;; M-1 (2026-05-15) deleted the `get-conn` / `*conn-override` aliases plus the
 ;;; legacy storage require. `set-conn!` and `invalidate-render-cache!` survive

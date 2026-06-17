@@ -9,7 +9,7 @@ status, and the work queue is the PRD:**
 `docs/prds/agent-runtime/cljs-finish-clj-pivot-plan-2026-06-09.md` (rewritten
 2026-06-10 as a fresh-read spec — read it before anything else).
 
-The substrate is the **CLJS pod** (`src/seon/*.cljs`, long-running Node:
+The core is the **CLJS pod** (`src/seon/*.cljs`, long-running Node:
 agent loop, bootstrap CLJS compiler, loopback HTTP+SSE inspector UI) backed by
 the **central JVM datahike store** (the `wire-server` process; file-backed
 datahike on `data/clusters/default/store`). The 2026-06-10 LANE-MERGE (unit
@@ -25,7 +25,7 @@ from/to refs + hop-cap; the CLJS sandbox is NOT a security boundary (it
 catches LLM hallucinations; isolation comes from process boundaries + the
 wire capability surface).
 
-**Hard rule:** seon is the substrate. Consumer-product code (specific UI,
+**Hard rule:** seon is the core. Consumer-product code (specific UI,
 vendor integrations, custom domain models) lives in downstream repos. No
 consumer-specific references in `src/`, `docs/`, or `pod-host/`.
 
@@ -196,7 +196,7 @@ Caching is the perf escape hatch — memoize an expensive derivation, don't bifu
 
 What this rules out: storing counters derivable from the log, atom-backed registries for derivable state, separate event/notification systems for new context kinds, "mark this warning as seen" acknowledgement state. What it does NOT rule out: genuinely stateful runtime artifacts (compile-state, DB conn, AsyncLocalStorage instance), identity attrs for lookup, the eval/message/turn log itself.
 
-Cross-agent coordination falls out: a section function that doesn't filter by `:seon.agent/id` sees the whole substrate. Agent A's failed eval shows up in agent B's render. No subscription, no event bus.
+Cross-agent coordination falls out: a section function that doesn't filter by `:seon.agent/id` sees the whole core. Agent A's failed eval shows up in agent B's render. No subscription, no event bus.
 
 Full principle + design checklist + canonical examples: [[docs/seon/concepts/reactive-context]].
 
@@ -204,9 +204,9 @@ Full principle + design checklist + canonical examples: [[docs/seon/concepts/rea
 
 ## Code as data — the runtime IS the database
 
-**The substrate's source code, the agent's eval log, and the in-memory analyzer state are three views of the same code corpus.** Persisting the agent's defining forms as `:seon.fn` / `:seon.ns` / `:seon.schema` entities lets the substrate seed, detect-and-tee, bulk-load resume, the publish gate, and the disk-write debug mode all read from one place. They look like five separate features; they are one mechanism viewed five ways.
+**The core's source code, the agent's eval log, and the in-memory analyzer state are three views of the same code corpus.** Persisting the agent's defining forms as `:seon.fn` / `:seon.ns` / `:seon.schema` entities lets the core seed, detect-and-tee, bulk-load resume, the publish gate, and the disk-write debug mode all read from one place. They look like five separate features; they are one mechanism viewed five ways.
 
-The corollary: don't re-parse source with rewrite-clj when the analyzer already produced the structured data. Don't write a build-time `bootstrap.edn` when the substrate source IS the bootstrap (read at boot via the analyzer). Don't replay-every-eval on resume when bulk-loading reconstituted ns files is what editors already do. One mechanism for "where do program-graph entities come from": always the analyzer plus a source string.
+The corollary: don't re-parse source with rewrite-clj when the analyzer already produced the structured data. Don't write a build-time `bootstrap.edn` when the core source IS the bootstrap (read at boot via the analyzer). Don't replay-every-eval on resume when bulk-loading reconstituted ns files is what editors already do. One mechanism for "where do program-graph entities come from": always the analyzer plus a source string.
 
 Full principle + the five mechanisms + cross-agent publish gate + recursive-bootstrap use case: [[docs/seon/concepts/code-as-data-runtime]].
 
@@ -260,7 +260,7 @@ Any git operation that changes branch, discards files, or modifies history affec
 
 ### Lane discipline: `.clj` (JVM) vs `.cljs` (CLJS pod) siblings
 
-As of 2026-05-16, for spec-01 `seon.*` API surfaces the V0 substrate uses **`.cljs` files alongside the existing `.clj` files**, not `.cljc` (yet). Both compilers cleanly pick their own — CLJS reads `.cljs`, CLJ reads `.clj`, neither sees the other's. Two lanes:
+As of 2026-05-16, for spec-01 `seon.*` API surfaces the V0 core uses **`.cljs` files alongside the existing `.clj` files**, not `.cljc` (yet). Both compilers cleanly pick their own — CLJS reads `.cljs`, CLJ reads `.clj`, neither sees the other's. Two lanes:
 
 - **JVM seat** (Phase M / R / T datahike-migration work) — owns all existing `.clj` files under `src/seon/`. Don't author `.cljc` for namespaces that have a `.clj` sibling; the `.cljc` migration is a deliberate Stage 2/3 step in the convergence plan.
 - **V0 CLJS pod seat** — owns the new `.cljs` siblings (`seon.client.cljs`, the pending `seon.db.cljs`, `seon.trigger.cljs`, etc.) and the genuinely-shared `.cljc` files under `src/seon/agent/`. Doesn't touch the existing `.clj` files.

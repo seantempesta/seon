@@ -97,7 +97,7 @@
    [:map
     [::ok?       [:= false]]
     [::error     ::error]
-    ;; When the substrate translated a cryptic datahike message into a
+    ;; When the core translated a cryptic datahike message into a
     ;; guiding one, the ORIGINAL message is preserved here verbatim.
     [::raw-error {:optional true} :string]]])
 
@@ -186,7 +186,7 @@
 (schema/register! ::session-id      :seon.db/id)
 (schema/register! ::turn-id         :seon.db/id)
 (schema/register! ::eval-id         :seon.db/id)
-(schema/register! ::origin          [:enum :user :agent :system :replay :substrate-seed :test-run])
+(schema/register! ::origin          [:enum :user :agent :system :replay :core-seed :test-run])
 (schema/register! ::replay?         :boolean)
 (schema/register! ::resume-marker?  :boolean)
 
@@ -291,11 +291,11 @@
 
      {::db/ok? true  ::db/tx-report <datahike report>}   ; success
      {::db/ok? false ::db/error <error map>}             ; failure
-     ;; + ::db/raw-error <original message> when the substrate
+     ;; + ::db/raw-error <original message> when the core
      ;; translated a cryptic datahike error into a guiding one
 
    The error's `:seon.error/data` carries `:seon.error/kind` —
-   `:user-input` (fix tx-data and retry) vs `:substrate-bug` (the pod
+   `:user-input` (fix tx-data and retry) vs `:core-bug` (the pod
    survived; report it, don't retry blindly).
 
    Before committing it validates shape, attrs, and values; installs
@@ -749,7 +749,7 @@
    inventory split needs:
      ::bootstrap-rows — entity ids whose IDENTITY datom (the entity's
        first assertion, min tx) landed under a tx carrying
-       `:seon.db/origin :substrate-seed` (the boot index/seed);
+       `:seon.db/origin :core-seed` (the boot index/seed);
      ::tx-rows — entity ids that ARE transactions (they appear in a
        datom's tx slot) — provenance machinery, not data rows;
      ::pairs — the distinct `[e a]` pairs (datalog results are sets,
@@ -760,7 +760,7 @@
                        (query {::db db
                                ::query '[:find ?tx
                                          :where
-                                         [?tx :seon.db/origin :substrate-seed]]}))
+                                         [?tx :seon.db/origin :core-seed]]}))
         triples  (query {::db db ::query '[:find ?e ?a ?tx :where [?e ?a _ ?tx]]})
         first-tx (reduce (fn [m [e _ tx]]
                            (update m e #(if % (min % tx) tx)))
@@ -774,23 +774,23 @@
 
 (defn bootstrap-row-ids
   "Entity ids whose IDENTITY datom (the entity's first assertion) was
-   transacted under a tx carrying `:seon.db/origin :substrate-seed` —
-   the rows the boot index/seed minted (compiled substrate: the
+   transacted under a tx carrying `:seon.db/origin :core-seed` —
+   the rows the boot index/seed minted (compiled core: the
    program-graph `:seon.fn`/`:seon.schema`/`:seon.test`/`:seon.ns`
    index, the soul/kb seed). Everything else is data this cluster
    added AFTER bootstrap. Per-ROW, never per-kind-name: an
    agent-authored `:seon.fn` row is NOT in this set; a boot-indexed
    one is. THE shared provenance derivation — [[store-inventory]]'s
-   user/system split, [[substrate-kinds]], and the inspector's /data
+   user/system split, [[core-kinds]], and the inspector's /data
    browser all read this one mechanism."
   {:malli/schema [:=> [:catn [::db ::db-val]] ::row-ids]}
   [db]
   (::bootstrap-rows (row-origin-scan db)))
 
-(defn substrate-kinds
+(defn core-kinds
   "Attr namespaces (keywords) whose `:seon.schema/key` row is a
    BOOTSTRAP row ([[bootstrap-row-ids]]) — kinds the compiled
-   substrate's boot index registered, as opposed to agent-registered
+   core's boot index registered, as opposed to agent-registered
    kinds. Used by [[store-inventory]] for its user-domain-first
    ordering and by `seon.agent.findings` for its user-domain filter —
    ONE derivation, shared (the prior findings-side twin query is
@@ -800,7 +800,7 @@
    [:function
     [:=> [:catn [::db ::db-val]] ::kind-set]
     [:=> [:catn [::db ::db-val] [::bootstrap-rows ::row-ids]] ::kind-set]]}
-  ([db] (substrate-kinds db (bootstrap-row-ids db)))
+  ([db] (core-kinds db (bootstrap-row-ids db)))
   ([db bootstrap-rows]
    (into #{}
          (keep (fn [[s k]]
@@ -822,7 +822,7 @@
    query, not a snapshot.
 
    DEFAULT = the data added AFTER bootstrap: a row counts only when
-   its identity datom did NOT land under a `:substrate-seed` boot tx
+   its identity datom did NOT land under a `:core-seed` boot tx
    ([[bootstrap-row-ids]] — per-ROW provenance, never a name-list, so
    agent-authored `:seon.fn` rows count while the boot index's
    thousands do not, and an agent-registered `:my.workout` shows the
@@ -830,7 +830,7 @@
    bookkeeping) are also excluded. Kinds with zero post-bootstrap
    rows simply don't appear. Pass `{:seon.db/system? true}` for the
    FULL system inventory — every row including the compiled
-   substrate's boot index (`:seon.fn`, `:seon.schema`, `:seon.test`,
+   core's boot index (`:seon.fn`, `:seon.schema`, `:seon.test`,
    `:seon.ns`, tx provenance rows).
 
    Check this BEFORE researching or registering anything new: a kind
@@ -841,9 +841,9 @@
 
    ORDERING serves that consult-first read: USER-DOMAIN kinds — the
    ones agents created for THIS human, the rows you came to consult —
-   sort FIRST; the substrate's own bookkeeping kinds (evals, turns,
+   sort FIRST; the core's own bookkeeping kinds (evals, turns,
    program-graph rows) follow. Alphabetical within each group. A kind
-   is substrate iff [[substrate-kinds]] says so (its `:seon.schema/key`
+   is core iff [[core-kinds]] says so (its `:seon.schema/key`
    row is a bootstrap row — derived per call from tx provenance,
    never a name-list).
 
@@ -855,7 +855,7 @@
    ;;     {:seon.db/kind :my.workout              ; agent-registered
    ;;      :seon.db/attrs {:my.workout/date 3, :my.workout/type 3}}
    ;;     …
-   ;;     {:seon.db/kind :seon.agent …}]            ; substrate last
+   ;;     {:seon.db/kind :seon.agent …}]            ; core last
 
    ;; EVERYTHING, boot index included:
    (seon.db/store-inventory {:seon.db/system? true})
@@ -874,7 +874,7 @@
   ([{::keys [db conn system?] :or {conn *conn*}}]
    (let [db (or db @(internal/resolve-conn conn))
          {::keys [bootstrap-rows tx-rows pairs]} (row-origin-scan db)
-         sub-kinds (substrate-kinds db bootstrap-rows)
+         sub-kinds (core-kinds db bootstrap-rows)
          counts (reduce (fn [m [e a]]
                           (if (or (system-pull-attr? a) (nil? (namespace a))
                                   ;; default view: post-bootstrap data
@@ -889,7 +889,7 @@
      (->> counts
           (group-by (fn [[a _]] (keyword (namespace a))))
           ;; User-domain kinds FIRST (consult-first — see docstring),
-          ;; substrate kinds after; alphabetical within each group.
+          ;; core kinds after; alphabetical within each group.
           (sort-by (fn [[ns-kw _]]
                      [(if (contains? sub-kinds ns-kw) 1 0)
                       (str ns-kw)]))

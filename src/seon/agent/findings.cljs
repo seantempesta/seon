@@ -1,6 +1,6 @@
 (ns seon.agent.findings
   "Stored findings as CONTEXT — the derived salience rung (`:findings`,
-   substrate-default-ctx priority 48): the CONTENT of every user-domain
+   core-default-ctx priority 48): the CONTENT of every user-domain
    row in the shared store, rendered into the prompt so agents read
    stored knowledge instead of answering from priors or re-deriving it
    from the repo. `seon.db/store-inventory` teaches what EXISTS (attr
@@ -9,8 +9,8 @@
    STRUCTURAL, never a name-list (uniformity rule — one mechanism, no
    `:my.kb` special case): a kind renders here iff
      (a) it is USER-DOMAIN — its attr namespace is NOT in
-         `seon.db/substrate-kinds` (THE shared provenance derivation:
-         a kind is substrate iff its `:seon.schema/key` row is a
+         `seon.db/core-kinds` (THE shared provenance derivation:
+         a kind is core iff its `:seon.schema/key` row is a
          bootstrap row — the SAME rule `seon.db/store-inventory`
          orders and splits by, so an agent-minted kind qualifies
          whatever its keyword spelling), and
@@ -25,7 +25,7 @@
    sees every agent's stored findings (cross-agent accumulation is the
    point).
 
-   Substrate-authored context renders IN FULL; a pathological kind is
+   Core-authored context renders IN FULL; a pathological kind is
    LOUDLY truncated (never a quiet clip — the observed failure mode is
    an agent summarizing invented content from a silent clip) with the
    exact query that reads the rest."
@@ -40,7 +40,7 @@
 (def kind-render-cap
   "Per-kind rendered-chars BACKSTOP, not a working limit — findings
    are expected to fit whole far below it (same stance as
-   `seon.ctx/substrate-eval-render-cap`). Over it, the kind's tail is
+   `seon.ctx/core-eval-render-cap`). Over it, the kind's tail is
    replaced by a loud marker carrying the query that reads the
    complete rows."
   20000)
@@ -93,7 +93,7 @@
   {:malli/schema [:=> [:catn [::db :seon.db/db-val]]
                   [:vector ::kind-entry]]}
   [db]
-  (let [sub (db/substrate-kinds db)]
+  (let [sub (db/core-kinds db)]
     (->> (db/store-inventory {:seon.db/db db})
          (remove #(contains? sub (:seon.db/kind %)))
          (keep (fn [{:seon.db/keys [kind attrs]}]
@@ -159,7 +159,7 @@
            "\n</findings>"))))
 
 (defn findings-section
-  "Context-section fn (`:findings`, substrate-default-ctx priority 48):
+  "Context-section fn (`:findings`, core-default-ctx priority 48):
    [[findings-block]] over the render's db snapshot — absent
    `:seon.db/db` defaults to the current conn, the same convention as
    every sibling section fn."
@@ -325,7 +325,7 @@
                  "\n</findings-pointer>")))))))
 
 (defn findings-pointer-section
-  "Context-section fn (`:findings-pointer`, substrate-default-ctx
+  "Context-section fn (`:findings-pointer`, core-default-ctx
    priority 95): [[findings-pointer-block]] for the CALLING agent —
    absent `:seon.db/db` defaults to the current conn, the same
    convention as every sibling section fn."

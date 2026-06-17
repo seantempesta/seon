@@ -22,7 +22,7 @@
 
 (defn ^:async with-world
   "Boot-seeded scratch world around `body` (fn [conn] → Promise) —
-   same harness as seon.agent.findings-test: real `:substrate-seed`
+   same harness as seon.agent.findings-test: real `:core-seed`
    tx provenance, root conn + schema registry restored after."
   [body]
   (let [prev-conn   db/*conn*
@@ -78,7 +78,7 @@
               ;; ZERO, exactly: every boot-seed transact — including
               ;; the :wake/on-message handler registration row (demo-
               ;; polish fix 2026-06-12: it used to land at conn-open,
-              ;; BEFORE the :substrate-seed tx-context) — carries seed
+              ;; BEFORE the :core-seed tx-context) — carries seed
               ;; provenance. Handler registration rows are machinery,
               ;; never the cluster's "data": a fresh world has FACTS=0.
               (is (zero? fact-count)

@@ -115,7 +115,7 @@
      (catch :default _ nil))))
 
 (def mechanics-text
-  "The your-output-is-a-REPL contract — the substrate-mechanics half of
+  "The your-output-is-a-REPL contract — the core-mechanics half of
    the system prompt (formerly the tail of the compiled-in
    seon.ai.openai-compat/default-system-prompt). Seeded as the
    \"repl-mechanics\" row so it is just as runtime-editable as the
@@ -163,12 +163,12 @@ rather than guessing a signature. A namespace shown as a bare (ns …)
 stub keeps its members in the store as data (the query taught at the
 top of the namespaces section reads them). Before you write a helper,
 check whether you or an earlier turn already wrote one. Two handles are always available: (seon.db/current-agent-id)
-returns your agent id (the substrate binds it for the duration of your
+returns your agent id (the core binds it for the duration of your
 turn), and (result <id>) returns the live value a prior form produced
 (pass its eval id, e.g. (result :abc123)). Drill into a returned value
 with ordinary Clojure — get-in, filter, and friends.
 
-Speaking to whoever messaged you is ONE line — the substrate knows who
+Speaking to whoever messaged you is ONE line — the core knows who
 woke you. There is no say! and no done!:
 
     ;; Tell them what I found.
@@ -249,7 +249,7 @@ concluding there is no data: copy the keyword EXACTLY as
    survives every reboot. The \"identity\" row reads SOUL.md fresh at
    seed time (omitted when the file is unreadable). Caller
    (`seon.client` boot) transacts under
-   `:seon.db/origin :substrate-seed`; empty result = nothing to seed."
+   `:seon.db/origin :core-seed`; empty result = nothing to seed."
   {:malli/schema [:=> [:catn [::db :seon.db/db-val]] [:vector ::section]]}
   [db]
   (let [have (into #{} (map first)

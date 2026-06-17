@@ -145,7 +145,7 @@
 ;; `:seon.schema` entity carrying its required-attrs set, id-attr, and
 ;; the symbol naming its AI render fn. Kind-lookup in `seon.render`
 ;; queries those entities via datalog — the schema registry becomes
-;; queryable substrate state.
+;; queryable core state.
 ;;
 ;; These attrs are leaf scalars; they have no chicken-and-egg with the
 ;; entity-shape :seon.schema map (which references :seon.schema/key as
@@ -320,10 +320,10 @@
    established error shape is a thrown `:user-input` ex-info (the eval
    pipeline surfaces it as an error-envelope value to the agent).
 
-   CLJS (pod) only for now: the JVM substrate still carries the legacy
+   CLJS (pod) only for now: the JVM core still carries the legacy
    single-segment `:form/*` registrations in `seon.repl` (clj) — a
    reported smell in ANOTHER lane; enforcement goes cljc once those are
-   renamed. Every CLJS substrate registration is multi-segment
+   renamed. Every CLJS core registration is multi-segment
    (verified by grep + the full suite, 2026-06-10)."
   [k]
   (let [ns-str (namespace k)]
@@ -357,7 +357,7 @@
 ;;; installed fn is conn-gated (no bound `seon.db/*conn*` → no-op) — the
 ;;; ~500 boot-time register! calls from compiled-ns loads run BEFORE any
 ;;; conn exists and are untouched; boot indexing (seon.client/index-schemas)
-;;; remains the owner of substrate rows.
+;;; remains the owner of core rows.
 
 (defonce ^:private !tee-fn (atom nil))
 

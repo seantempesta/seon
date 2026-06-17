@@ -76,7 +76,7 @@
    subtitle line."
   {::name    "seon"
    ::theme   "phosphor"
-   ::tagline "live agents on a shared substrate — everything below is derived from the DB right now"})
+   ::tagline "live agents on a shared core — everything below is derived from the DB right now"})
 
 ;; --- Env reads.
 

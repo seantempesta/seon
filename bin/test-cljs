@@ -35,13 +35,13 @@ TMPOUT="tmp/test-cljs-$(date +%Y%m%d-%H%M%S)-$$.log"
 START=$(date +%s)
 
 if [ "$BUILD" = "1" ]; then
-  # DEV compile (not `release`): the substrate resolves fns by walking
+  # DEV compile (not `release`): the core resolves fns by walking
   # goog.global at munged paths (seon.eval/lookup-value, malli.instrument's
   # -get-ns). Closure :simple/:advanced flatten namespaces into the bundle's
   # local scope, so a release :test build renders every context section as
   # <unresolved-section> and makes instrumentation a no-op. The pod itself
   # runs dev-compiled (`clj -M:cljs compile client`) — dev compile keeps
-  # the test env faithful to the live substrate. (2026-06-09)
+  # the test env faithful to the live core. (2026-06-09)
   #
   # SEON_EXTRA_SRC (task #36): when set, the downstream's deps.edn project
   # joins the classpath via -Sdeps :local/root — the :test build's
@@ -49,7 +49,7 @@ if [ "$BUILD" = "1" ]; then
   # seon CI/gym stays env-clean — bin/gym strips these vars). The
   # SEON_EXTRA_PRELOAD entry ns is appended to :devtools :preloads via
   # --config-merge (node-test honors preloads — shadow node_test.clj:50),
-  # so extra-substrate registration is live for tests that exercise it.
+  # so extra-core registration is live for tests that exercise it.
   # All vars unset = today's command byte-identical.
   COMPILE_CMD=(clojure)
   if [ -n "${SEON_EXTRA_SRC:-}" ]; then

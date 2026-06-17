@@ -43,8 +43,8 @@
     ;; namespaces doesn't drag instrumentation init into the hot path.
     [malli.instrument :as mi]
     ;; malli.core/form round-trips a fn's `:malli/schema` to the stable
-    ;; `:seon.fn/spec` string in index-substrate! (the runtime-introspection
-    ;; substrate indexer — coherent-bootstrap-indexing Step 2).
+    ;; `:seon.fn/spec` string in index-core! (the runtime-introspection
+    ;; core indexer — coherent-bootstrap-indexing Step 2).
     [malli.core :as m]
     ;; Phase A item 7 — seon-native collector that walks the analyzer
     ;; at compile time for :malli/schema metadata and registers with
@@ -99,14 +99,14 @@
     ;; Renderers for :seon.eval / :seon.fn / :seon.schema / :seon.ns —
     ;; stamped at the write site (record-eval!, build-tee-entities) so
     ;; each persisted entity appears in the inspector's two panes via
-    ;; the substrate-wide `:seon.render/ai`-walking assembler.
+    ;; the core-wide `:seon.render/ai`-walking assembler.
     [seon.handlers.eval]
     [seon.handlers.fn]
     [seon.handlers.schema]
     [seon.handlers.ns]
     ;; The my.* scaffold — shared provenance shapes (my.kb) + the
     ;; system-wide instruction singleton (my.kb.system) that
-    ;; `seed-substrate!` below transacts. Required here so their
+    ;; `seed-core!` below transacts. Required here so their
     ;; register! calls run before the boot install of :my.kb/* attrs.
     [my.kb]
     [my.kb.system]
@@ -116,10 +116,10 @@
     ;; my.soul/seed-tx-data (seed-only-if-absent — a user's runtime
     ;; edit to the soul survives reboot).
     [my.soul]
-    ;; Substrate handler registration — `wake-on-message`. Required so
+    ;; Core handler registration — `wake-on-message`. Required so
     ;; start-agent! can call `handler/register!` + `wake/bootstrap-schema!`
     ;; at boot. Without this, the inspector header shows "0 handlers"
-    ;; and the substrate has no wake-on-message responder beyond the
+    ;; and the core has no wake-on-message responder beyond the
     ;; per-agent `install-user-trigger!` already wired by agent/boot!.
     [seon.handler :as h]
     [seon.handlers.wake :as wake]
@@ -130,17 +130,17 @@
     ;; Content search over allowed files — the exemplar npm-package
     ;; wrapper (@vscode/ripgrep). Required so the agent can call
     ;; (seon.agent.search/grep ...) from bootstrap-CLJS eval and so the
-    ;; substrate-vars seed below can index it.
+    ;; core-vars seed below can index it.
     [seon.agent.search]
     ;; Work items (user→agent asks + agent notes-to-self) — required so
     ;; its register! calls run before the boot install of :seon.agent.todo/*.
     [seon.agent.todo]
-    ;; The :findings + :findings-pointer sections (substrate-default-ctx)
+    ;; The :findings + :findings-pointer sections (core-default-ctx)
     ;; — required so the build includes them; seon.ctx references them
     ;; by symbol only (late lookup-value resolution, no require cycle —
     ;; findings itself requires seon.ctx for the inbox window).
     [seon.agent.findings]
-    ;; The <turns> countdown section (substrate-default-ctx :turns) —
+    ;; The <turns> countdown section (core-default-ctx :turns) —
     ;; required so the build includes it; seon.ctx references it by
     ;; symbol only (late lookup-value resolution, no require cycle).
     [seon.agent.turns]
@@ -158,7 +158,7 @@
     ;; `mcp__seon_cljs__eval agent_id=<id>` pins THIS runtime.
     [seon.dev.runtime-id :as runtime-id])
   ;; Compile-time enumeration of the build's specced public fns —
-  ;; `substrate-vars` below = curated unspecced base + this macro's
+  ;; `core-vars` below = curated unspecced base + this macro's
   ;; whole-closure roster (unit #23 fix b: index the WHOLE package
   ;; surface, never hand-list hundreds of vars).
   (:require-macros [seon.indexing :refer [specced-fn-vars]]))
@@ -208,7 +208,7 @@
   (start-heartbeat!))
 
 ;; ---------------------------------------------------------------------------
-;; datahike-cljs smoke test — proves the substrate works end-to-end.
+;; datahike-cljs smoke test — proves the core works end-to-end.
 ;;
 ;; This is the canonical 'is datahike-cljs alive?' check. Useful as:
 ;;   - boot-time verification (`-main` runs it),
@@ -315,7 +315,7 @@
 (def agent-bootstrap-attrs
   "The full set of registered seon attr keywords whose datahike schema the
    agent conn needs. Public so tests can build an isolated `:memory` conn with
-   the same schema the pod boots against (see index-substrate-test)."
+   the same schema the pod boots against (see index-core-test)."
   [;; --- Agent ---
    ;; :seon.agent/current-ns deleted 2026-05-23 — derived from the
    ;; latest successful eval's :seon.eval/ns. See
@@ -444,7 +444,7 @@
    ;; The shared provenance shapes (registered in my.kb) installed at
    ;; boot so agent-designed my.kb.<domain> schemas can reference them
    ;; before any kb tx lands, plus the my.kb.system system-wide
-   ;; instruction singleton (empty entity seeded by seed-substrate!;
+   ;; instruction singleton (empty entity seeded by seed-core!;
    ;; rows are appended at runtime by agents and the user).
    :my.kb/source-path
    :my.kb/source-line
@@ -572,13 +572,13 @@
 ;;     no eval entities are written.
 ;; ---------------------------------------------------------------------------
 
-(declare substrate-ns-set)
+(declare core-ns-set)
 
 (defn- entry-ns-kw
   "The owning-namespace keyword for a program-graph entry. Used as the
-   substrate-vs-agent replay discriminator (Step 4): an entry whose
-   `entry-ns-kw` is in `(substrate-ns-set)` is a substrate row (re-indexed
-   by index-substrate! every boot) and is skipped on replay.
+   core-vs-agent replay discriminator (Step 4): an entry whose
+   `entry-ns-kw` is in `(core-ns-set)` is a core row (re-indexed
+   by index-core! every boot) and is skipped on replay.
 
      :ns     → ident IS the ns keyword.
      :fn     → ident is \"<ns>/<name>\"; ns is the prefix.
@@ -592,13 +592,13 @@
     :schema (keyword (namespace ident))))
 
 (defn- registration-call-source?
-  "Replay's `:seon.schema` substrate-vs-agent discriminator (Step 4): TRUE
+  "Replay's `:seon.schema` core-vs-agent discriminator (Step 4): TRUE
    when a stored `:seon.schema/source` is an eval-able `(…)` registration
    call (an agent's `(seon.schema/register! …)` tee row) rather than a
    boot-indexed shape literal (`[:string {…}]`, `:keyword`). The ONE rule —
    `query-program-graph-entries` uses it to select replayable schema rows,
-   `substrate-index-tx` honors it as never-overwrite, and
-   `prune-substrate-ghosts!` honors it as never-prune."
+   `core-index-tx` honors it as never-overwrite, and
+   `prune-core-ghosts!` honors it as never-prune."
   [source]
   (str/starts-with? (str/trim (str source)) "("))
 
@@ -628,13 +628,13 @@
 (defn ^:async ^:private query-program-graph-entries
   "Returns a vector of {:kind <:ns|:fn|:test|:schema> :ident <id-value>
    :source <string> :tx <long>} sorted by tx-id ascending, EXCLUDING
-   substrate rows (Step 4). Reads against the CURRENT db so only
+   core rows (Step 4). Reads against the CURRENT db so only
    currently-asserted sources land in the replay set; retracted /
    superseded source values stay in history and are not replayed.
 
-   Substrate rows (those whose owning ns is in `(substrate-ns-set)`) are
-   filtered out: the compiled substrate fns are re-indexed from var meta
-   + file-read by `index-substrate!` on every boot, so re-evaling their
+   Core rows (those whose owning ns is in `(core-ns-set)`) are
+   filtered out: the compiled core fns are re-indexed from var meta
+   + file-read by `index-core!` on every boot, so re-evaling their
    `:source` would shadow the real compiled fn. Only agent-authored
    corpus (`:seon.fn` / `:seon.test` / `:seon.schema` / `:seon.ns` rows
    in `my.agent.<id>` nses) replays.
@@ -662,7 +662,7 @@
     (->> rows
          (map (fn [[ident source tx kind]]
                 {:kind kind :ident ident :source source :tx tx}))
-         (remove #(contains? (substrate-ns-set) (entry-ns-kw %)))
+         (remove #(contains? (core-ns-set) (entry-ns-kw %)))
          ;; Boot-indexed `:seon.schema` rows store the registered SHAPE
          ;; (`[:string {...}]`, `:keyword`) as :source — an index row, not
          ;; an eval-able registration call. Only a `(…)` form (an agent's
@@ -799,10 +799,10 @@
       :seon.client/replay-n-ok    <int>
       :seon.client/replay-n-fail  <int>}.
 
-   Substrate rows are NOT replayed (Step 4) — `query-program-graph-entries`
-   excludes any entry whose owning ns is in `(substrate-ns-set)`. The
-   compiled substrate fns are rebuilt from var meta + file-read by
-   `index-substrate!` on every boot, so only agent-authored corpus
+   Core rows are NOT replayed (Step 4) — `query-program-graph-entries`
+   excludes any entry whose owning ns is in `(core-ns-set)`. The
+   compiled core fns are rebuilt from var meta + file-read by
+   `index-core!` on every boot, so only agent-authored corpus
    (fns / tests / schemas / nses under `my.agent.<id>`) replays here.
 
    Call sites:
@@ -851,26 +851,26 @@
          :seon.client/replay-n-fail  @!n-fail}))))
 
 ;; ---------------------------------------------------------------------------
-;; Substrate boot seed (P2, 2026-05-27)
+;; Core boot seed (P2, 2026-05-27)
 ;;
 ;; Per docs/prds/agent-runtime/mvp-completion-plan-2026-05-27.md §Phase 2
-;; + research/repl-session-context-template-2026-05-26.md §5: the substrate
+;; + research/repl-session-context-template-2026-05-26.md §5: the core
 ;; transacts the user entity + the my.kb.system instruction singleton plus an
 ;; introspection-indexed set of core fns at boot, BEFORE any agent turn —
-;; so replay-from-tx-0 starts on a fully-seeded substrate, not mid-air.
+;; so replay-from-tx-0 starts on a fully-seeded core, not mid-air.
 ;;
 ;; Tx-ordering at boot (in start-agent!):
 ;;   1. Entity-schema decomposition (schema/all-entity-schemas-tx-data)
 ;;      — already shipped, Item 4 commit 35035d8.
-;;   2. seed-substrate!    — user entity + my.kb.system singleton
-;;   3. index-substrate!   — :seon.ns + :seon.fn rows from REAL runtime
+;;   2. seed-core!    — user entity + my.kb.system singleton
+;;   3. index-core!   — :seon.ns + :seon.fn rows from REAL runtime
 ;;                           introspection (var meta + source file-read)
 ;;
-;; Each transact carries `:seon.db/origin :substrate-seed` in tx-meta so
+;; Each transact carries `:seon.db/origin :core-seed` in tx-meta so
 ;; audit queries can isolate seed datoms from agent-produced ones.
 ;; ---------------------------------------------------------------------------
 
-(defn seed-substrate!
+(defn seed-core!
   "Tx-data for THE user entity plus the EMPTY system-wide instruction
    singleton (`my.kb.system/seed-tx-data` — context-v4 §2.2 home 3;
    agents and the user APPEND rows at runtime, read back via
@@ -884,13 +884,13 @@
    clobbers runtime appends.
 
    Pure fn. Caller transacts via `db/transact!` with
-   `:seon.db/origin :substrate-seed`."
+   `:seon.db/origin :core-seed`."
   []
   (into [{:seon.user/id "user"}]
         (my.kb.system/seed-tx-data)))
 
 ;; ---------------------------------------------------------------------------
-;; index-substrate! — runtime introspection of compiled substrate fns
+;; index-core! — runtime introspection of compiled core fns
 ;; (Step 2 of docs/prds/agent-runtime/coherent-bootstrap-indexing-2026-06-08.md)
 ;;
 ;; Replaces the old `core-fn-curated` / `synthesize-fn-source` / `seed-core-fns!`
@@ -911,10 +911,10 @@
 ;; This produces a `:seon.fn` row IDENTICAL in shape to a detect-and-tee row
 ;; (eval.cljs/build-tee-entities) — downstream readers never branch on origin.
 ;; The agent extends the indexed surface by transacting its own fns; grow
-;; `substrate-vars` to widen the seeded set.
+;; `core-vars` to widen the seeded set.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private curated-substrate-vars
+(def ^:private curated-core-vars
   "Hand-curated `#'`-literal vars indexed REGARDLESS of `:malli/schema` —
    the honestly-unspecced core surface (`register!`, `current-agent-id`,
    the fs read fns) that the auto roster below can't see. MUST be
@@ -936,14 +936,14 @@
    #'seon.agent.search/grep
    #'seon.test.runner/run!])
 
-(def ^:private substrate-vars
+(def ^:private core-vars
   "Every var indexed into the corpus at boot: the curated unspecced base
    PLUS the compile-time roster of every PUBLIC `:malli/schema`-carrying fn
    across the build's whole `seon.*` require closure
    (`seon.indexing/specced-fn-vars` — unit #23 fix b: 'all of the schemas,
    functions and tests in the cljs package should be present in the
    database'). Deduped by fully-qualified sym, curated entries first."
-  (->> (into curated-substrate-vars (specced-fn-vars))
+  (->> (into curated-core-vars (specced-fn-vars))
        (reduce (fn [[seen out] v]
                  (let [k (str (:ns (meta v)) "/" (:name (meta v)))]
                    (if (contains? seen k)
@@ -959,38 +959,38 @@
 ;; tests index themselves via the runner's run-and-record path instead.
 (defonce !indexed-test-vars (atom []))
 
-;; Downstream extra-substrate vars (task #36 — SEON_EXTRA_SRC; spec:
+;; Downstream extra-core vars (task #36 — SEON_EXTRA_SRC; spec:
 ;; docs/prds/agent-runtime/research/extra-src-research-2026-06-12.md §d).
 ;; A downstream consumer's entry ns (named by SEON_EXTRA_PRELOAD, loaded
 ;; via the :devtools :preloads slot bin/seon --config-merges in) registers
 ;; its specced surface here — the same precedent as `!indexed-test-vars`:
 ;;
-;;   (reset! client/!extra-substrate-vars
+;;   (reset! client/!extra-core-vars
 ;;           (filterv #(str/starts-with? (str (:ns (meta %))) "acme.")
 ;;                    (seon.indexing/specced-fn-vars)))
 ;;
-;; The boot indexers consume it alongside `substrate-vars`: fn-rows +
-;; FULL-SOURCE ns-rows in [[index-substrate!]], replay-skip membership in
-;; [[substrate-ns-set]]. Empty in builds without a downstream preload.
-(defonce !extra-substrate-vars (atom []))
+;; The boot indexers consume it alongside `core-vars`: fn-rows +
+;; FULL-SOURCE ns-rows in [[index-core!]], replay-skip membership in
+;; [[core-ns-set]]. Empty in builds without a downstream preload.
+(defonce !extra-core-vars (atom []))
 
-(defn- extra-substrate-vars*
+(defn- extra-core-vars*
   "The registered extra vars MINUS any whose fully-qualified sym is
-   already in `substrate-vars` — a downstream entry's `specced-fn-vars`
+   already in `core-vars` — a downstream entry's `specced-fn-vars`
    expansion sees the seon surface its require closure pulls in, and
    those must dedup away silently (no duplicate rows, no reserved-prefix
    refusal) rather than double-index."
   []
   (let [have (into #{}
                    (map (fn [v] (str (:ns (meta v)) "/" (:name (meta v)))))
-                   substrate-vars)]
+                   core-vars)]
     (into []
           (remove #(contains? have (str (:ns (meta %)) "/" (:name (meta %)))))
-          @!extra-substrate-vars)))
+          @!extra-core-vars)))
 
 (defn- reserved-extra-nses
   "The reserved-prefix violators among extra-var ns name strings:
-   `seon.*` (the substrate's) and `my.*` (the human's store-replayed
+   `seon.*` (the core's) and `my.*` (the human's store-replayed
    corpus — a COMPILED `my.*` ns would replay-skip what should be
    agent-authored rows). Sorted distinct vector; empty = all clear."
   [ns-strs]
@@ -1005,46 +1005,46 @@
 (defn- assert-extra-vars-unreserved!
   "LOUD structural refusal at boot-index time (extra-src research §e):
    throws, naming every offending ns, when the registered extra vars
-   (post-dedup — see [[extra-substrate-vars*]]) provide reserved-prefix
+   (post-dedup — see [[extra-core-vars*]]) provide reserved-prefix
    nses. Fires regardless of how the atom was populated."
   [vars]
   (let [bad (reserved-extra-nses (map #(str (:ns (meta %))) vars))]
     (when (seq bad)
       (throw (ex-info
-               (str "extra-substrate registration provides RESERVED-prefix nses: "
+               (str "extra-core registration provides RESERVED-prefix nses: "
                     (str/join ", " bad)
-                    " — seon.* is the substrate's and my.* is the human's "
+                    " — seon.* is the core's and my.* is the human's "
                     "store-replayed corpus; SEON_EXTRA_SRC code must live "
                     "under the downstream's own root prefix (e.g. acme.*)")
                {:seon.client/reserved-extra-nses bad})))))
 
-(defn- extra-substrate-ns-strs
-  "Ns name strings owned by the registered extra-substrate vars — these
+(defn- extra-core-ns-strs
+  "Ns name strings owned by the registered extra-core vars — these
    render FULL-SOURCE (the extra-src render-as-stubs gap closure: a
    downstream's nses are exactly the exemplar-grade surface it wants its
    agents reading whole)."
   []
-  (into #{} (map #(str (:ns (meta %)))) @!extra-substrate-vars))
+  (into #{} (map #(str (:ns (meta %)))) @!extra-core-vars))
 
 (def ^:private fn-less-compiled-roots
-  "COMPILED substrate nses that own no indexed var (register! calls +
+  "COMPILED core nses that own no indexed var (register! calls +
    ns-doc only) but DO own a boot-indexed full-source `:seon.ns` row —
-   they must join [[substrate-ns-set]] (replay-skip: re-evaling their
+   they must join [[core-ns-set]] (replay-skip: re-evaling their
    shipped source would re-run register! forms) and get an
-   [[index-substrate!]] ns-row even though no fn-row names them.
+   [[index-core!]] ns-row even though no fn-row names them.
    `seon.ctx/full-source-roots` rides along for the same reason
    (idempotent for roots that do own vars)."
   #{"my.kb" "my.soul"})
 
-(defn substrate-ns-set
-  "The set of namespace keywords owned by the COMPILED substrate, derived
-   from `substrate-vars` + the preload's deftest vars — the SAME sources of
+(defn core-ns-set
+  "The set of namespace keywords owned by the COMPILED core, derived
+   from `core-vars` + the preload's deftest vars — the SAME sources of
    truth the boot indexers write from, so they can never drift. Used by
    `query-program-graph-entries` (Step 4) as the replay discriminator: any
-   program-graph entry whose owning ns is in this set is a SUBSTRATE row
+   program-graph entry whose owning ns is in this set is a CORE row
    (re-indexed from var meta + file-read on every boot) and is SKIPPED on
-   replay. Re-evaling a substrate row's source — e.g. `(defn ^:async
-   transact! …)` — would shadow the real compiled fn, so substrate is never
+   replay. Re-evaling a core row's source — e.g. `(defn ^:async
+   transact! …)` — would shadow the real compiled fn, so core is never
    replayed; only agent-authored corpus (in `my.agent.<id>` / agent domain
    nses) replays.
 
@@ -1058,10 +1058,10 @@
   (into (into #{} (map keyword)
               (concat fn-less-compiled-roots ctx/full-source-roots))
         (map #(keyword (str (:ns (meta %)))))
-        (concat substrate-vars @!indexed-test-vars @!extra-substrate-vars)))
+        (concat core-vars @!indexed-test-vars @!extra-core-vars)))
 
 (defn- read-src-file
-  "Read a substrate source file given a var-meta `:file` (classpath-relative,
+  "Read a core source file given a var-meta `:file` (classpath-relative,
    e.g. \"seon/db.cljs\" or \"seon/agent_context_test.cljs\"). Sources live
    under the deps.edn `:cljs` source roots (src, test, guest-cljs/src —
    probed in that order), resolved via `seon.platform/artifact-path`:
@@ -1131,25 +1131,25 @@
    carry the REAL FULL FILE TEXT as `:seon.ns/source`: the boot
    indexer is the ONE file-reader; the `:namespaces` context section
    (and anything else downstream) renders that attr from the graph,
-   never re-reading files. Safe because substrate rows are
+   never re-reading files. Safe because core rows are
    replay-skipped (`query-program-graph-entries` excludes any entry
-   whose owning ns is in `(substrate-ns-set)` — Step 4, landed). A
+   whose owning ns is in `(core-ns-set)` — Step 4, landed). A
    full-source ns whose file can't be read falls back to the stub and
    logs fail-loud — the corpus stays honest.
 
-   All OTHER substrate nses keep the minimal `(ns x)` stub — they
+   All OTHER core nses keep the minimal `(ns x)` stub — they
    render as shallow existence tags (the `*.internal` split roadmap
    shrinks files toward inlinable size; see full-source-roots) and the
    stub keeps the no-replay invariant trivially cheap to reason about."
   [ns-sym-str]
   (let [stub (str "(ns " ns-sym-str ")")
-        ;; Extra-substrate nses (downstream SEON_EXTRA_SRC code) are
+        ;; Extra-core nses (downstream SEON_EXTRA_SRC code) are
         ;; full-source by rule, like my.* — closes the render-as-stubs
         ;; gap for the extra root without touching ctx's
         ;; full-source-roots set (whose store-row generalization is the
         ;; reported seon-internal follow-up).
         src  (if (or (ctx/full-source-ns? ns-sym-str)
-                     (contains? (extra-substrate-ns-strs) ns-sym-str))
+                     (contains? (extra-core-ns-strs) ns-sym-str))
                (or (read-src-file (ns-file-path ns-sym-str))
                    (do (log/error-console!
                          "seon.client/ns-row"
@@ -1231,7 +1231,7 @@
                (str ":" owning-ns-str "/$1")))
 
 (defn- var->fn-row
-  "Build a `:seon.fn` row for a `#'`-literal substrate var from runtime
+  "Build a `:seon.fn` row for a `#'`-literal core var from runtime
    introspection. Returns nil (and logs) when the source file can't be read or
    the form can't be extracted — NO `,,,` stub is ever persisted. `now` is the
    shared `:seon.fn/created-at` instant."
@@ -1281,21 +1281,21 @@
         ;; PRESENT ⇒ specced (exact contract in corpus); ABSENT ⇒ unspecced.
         (some? spec) (assoc :seon.fn/spec spec)))))
 
-(defn index-substrate!
-  "Tx-data for substrate `:seon.ns` + `:seon.fn` rows, built by REAL runtime
-   introspection over `substrate-vars` (file-read at var-meta `:file`/`:line`
+(defn index-core!
+  "Tx-data for core `:seon.ns` + `:seon.fn` rows, built by REAL runtime
+   introspection over `core-vars` (file-read at var-meta `:file`/`:line`
    + var meta for spec/doc). Replaces the old curated `seed-core-fns!`.
 
    Per owning ns, emits a `:seon.ns/name` + `:seon.ns/source` row (via
    [[ns-row]]) so the `[:seon.ns/name <kw>]` lookup-ref on `:seon.fn/ns`
    resolves. EXEMPLAR nses (context-focus-redesign root set) carry the
-   REAL FULL FILE TEXT; all other substrate nses keep the minimal
-   `(ns x)` stub. Both are replay-safe: substrate rows are skipped on
+   REAL FULL FILE TEXT; all other core nses keep the minimal
+   `(ns x)` stub. Both are replay-safe: core rows are skipped on
    replay (Step 4 — `query-program-graph-entries` excludes any entry
-   whose owning ns is in `(substrate-ns-set)`).
+   whose owning ns is in `(core-ns-set)`).
 
-   Always emits the FULL substrate row set — a function of `substrate-vars`
-   + the registered `!extra-substrate-vars` + the on-disk source,
+   Always emits the FULL core row set — a function of `core-vars`
+   + the registered `!extra-core-vars` + the on-disk source,
    independent of any conn. Re-seeding the same rows on a
    later boot is idempotent at the DB layer: every row upserts on its identity
    attr (`:seon.ns/name` / `:seon.fn/sym`). The lookup-ref `[:seon.ns/name <kw>]`
@@ -1303,23 +1303,23 @@
    `:seon.db/ref`); it is never a bare keyword.
 
    Boot-time DEDUP (the \"fresh agent, same conn\" guard) is applied by the
-   caller via [[substrate-index-tx]], which drops rows already present on the
+   caller via [[core-index-tx]], which drops rows already present on the
    conn so a second/Nth `start-agent!` on the shared `*conn*` re-seeds nothing.
    Keeping THIS fn conn-free preserves its role as a pure tx-data builder (the
-   shape the index-substrate-test guards rely on).
+   shape the index-core-test guards rely on).
 
    Fns whose source can't be read are OMITTED, not stubbed — the corpus stays
    honest. Returns the tx-data vector; caller transacts under
-   `:seon.db/origin :substrate-seed`."
+   `:seon.db/origin :core-seed`."
   []
   (let [now     (js/Date.)
-        ;; Downstream extra-substrate vars join the roster after the
-        ;; sym-dedup against substrate-vars; the reserved-prefix guard
+        ;; Downstream extra-core vars join the roster after the
+        ;; sym-dedup against core-vars; the reserved-prefix guard
         ;; (seon.*/my.*) is the boot-index-time LOUD refusal — extra-src
         ;; research §e.
-        extra   (extra-substrate-vars*)
+        extra   (extra-core-vars*)
         _       (assert-extra-vars-unreserved! extra)
-        fn-rows (keep #(var->fn-row % now) (concat substrate-vars extra))
+        fn-rows (keep #(var->fn-row % now) (concat core-vars extra))
         ;; Fn-less compiled roots are unioned in explicitly: a root
         ;; with no public fns of its own (`my.kb` — register! calls +
         ;; ns-doc only) still needs its full-source `:seon.ns` row,
@@ -1347,7 +1347,7 @@
    registered Malli FORM (pr-str), so the full shape of every attr is one
    entity-read away for the agent.
 
-   Pure tx-data builder; the boot dedup in [[substrate-index-tx]] drops
+   Pure tx-data builder; the boot dedup in [[core-index-tx]] drops
    keys already present on the conn, so an agent's own
    `(seon.schema/register! …)` tee row (whose :source is the replayable
    call form) is NEVER overwritten by the boot index."
@@ -1396,7 +1396,7 @@
    `#'`-literal vars (default: the preload-populated `!indexed-test-vars` —
    every deftest the pod build loads). Same shape the detect-and-tee path
    writes, so downstream readers never branch on origin. Pure tx-data
-   builder; [[substrate-index-tx]] dedups against the conn."
+   builder; [[core-index-tx]] dedups against the conn."
   ([] (index-tests @!indexed-test-vars))
   ([vars]
    (let [now     (js/Date.)
@@ -1405,22 +1405,22 @@
          ns-rows (map ns-row (sort ns-syms))]
      (vec (concat ns-rows rows)))))
 
-(defn ^:async substrate-index-tx
-  "Boot-time substrate index tx-data: [[index-substrate!]] + [[index-schemas]]
+(defn ^:async core-index-tx
+  "Boot-time core index tx-data: [[index-core!]] + [[index-schemas]]
    + [[index-tests]] filtered to the rows not yet present on `conn`. This is
    the idempotency guard for the
    \"fresh agent, same conn\" path — on the FIRST boot of a conn it returns the
    full set; on the SECOND and Nth boot (a second `start-agent!` on the shared
    `*conn*`, or a reconnect to a persistent store that already holds the
-   substrate index) it returns ONLY rows whose `:seon.fn/sym` / `:seon.ns/name`
+   core index) it returns ONLY rows whose `:seon.fn/sym` / `:seon.ns/name`
    identity is absent — typically `[]`.
 
    Querying the conn's CURRENT identity set and emitting only the gap means a
-   re-index never re-transacts a substrate row against the populated store —
+   re-index never re-transacts a core row against the populated store —
    removing the re-seed interaction that the Run-3 findings traced to a
    malformed `:seon.fn/ns` value. Returns a Promise of the tx-data vector."
   [conn]
-  (let [all       (concat (index-substrate!)
+  (let [all       (concat (index-core!)
                           (index-schemas)
                           (index-tests))
         db        (await (d/db conn))
@@ -1464,10 +1464,10 @@
                        (contains? have-tsts (:seon.test/sym row))))
                  all))))
 
-(defn ^:async prune-substrate-ghosts!
+(defn ^:async prune-core-ghosts!
   "Boot-index GC (open-issues 2026-06-11, agent-reported row 5): retract
    program-graph rows the boot indexers ONCE wrote but whose source
-   ns/fn/test/schema no longer exists in the booting code. `substrate-index-tx`
+   ns/fn/test/schema no longer exists in the booting code. `core-index-tx`
    re-emits rows when source CHANGES (drift-healing) but never retracts —
    renames and deletions left ghosts that rendered into every context
    forever (live incident: the deleted `my.kb.instruction` ns kept
@@ -1476,8 +1476,8 @@
 
    A stored row is a GHOST iff ALL of:
 
-     1. SUBSTRATE-CLAIMED — its `:source` datom's tx carries
-        `:seon.db/origin :substrate-seed`, the persisted provenance claim
+     1. CORE-CLAIMED — its `:source` datom's tx carries
+        `:seon.db/origin :core-seed`, the persisted provenance claim
         every boot-index transact writes (and the origin-forge guard in
         `seon.db.internal` protects). Agent-authored rows (detect-and-tee,
         replay, runner) carry other origins and are NEVER candidates —
@@ -1486,7 +1486,7 @@
      2. ABSENT FROM THIS BOOT — its ident (`:seon.ns/name` /
         `:seon.fn/sym` / `:seon.test/sym` / `:seon.schema/key`) is not in
         the freshly-built index set (the same pure builders
-        `substrate-index-tx` transacts from). A rename prunes the old
+        `core-index-tx` transacts from). A rename prunes the old
         ident and keeps the new one.
      3. NOT an agent `(…)` registration call — `:seon.schema` rows keep
         replay's `registration-call-source?` discriminator (Step 4):
@@ -1498,7 +1498,7 @@
    the store; `:test` is legitimately empty in builds without the preload).
 
    Runs BEFORE `replay-program-graph!` in `start-agent!` — load-bearing:
-   a deleted ns falls OUT of `(substrate-ns-set)`, so its ghost rows would
+   a deleted ns falls OUT of `(core-ns-set)`, so its ghost rows would
    otherwise be misclassified as agent corpus and REPLAYED back into the
    live compile-state.
 
@@ -1506,7 +1506,7 @@
    candidates. Loud: one `:seon.log` info names every pruned row and why.
    Returns a Promise of `{:seon.client/pruned [[kind ident] …]}`."
   [conn]
-  (let [idx    (index-substrate!)
+  (let [idx    (index-core!)
         tsts   (index-tests)
         live   {:ns     (into #{} (keep :seon.ns/name) (concat idx tsts))
                 :fn     (into #{} (keep :seon.fn/sym) idx)
@@ -1528,7 +1528,7 @@
                         (and [?e :seon.schema/key    ?ident]
                              [?e :seon.schema/source ?source ?tx]
                              [(ground :schema) ?kind]))
-                      [?tx :seon.db/origin :substrate-seed]]
+                      [?tx :seon.db/origin :core-seed]]
                     db)
         ghosts (->> rows
                     (keep (fn [[e ident source kind]]
@@ -1542,10 +1542,10 @@
                     vec)]
     (when (seq ghosts)
       (await (log/info!
-               {:seon.log/source  ::prune-substrate-ghosts!
+               {:seon.log/source  ::prune-core-ghosts!
                 :seon.log/message
                 (str "boot-index GC: pruned " (count ghosts)
-                     " substrate ghost row(s) — substrate-seeded "
+                     " core ghost row(s) — core-seeded "
                      "program-graph rows whose source no longer exists "
                      "in the booting code: "
                      (str/join ", " (map (fn [{:keys [kind ident]}]
@@ -1554,7 +1554,7 @@
       (let [res (await (db/transact!
                          conn
                          (mapv (fn [{:keys [e]}] [:db/retractEntity e]) ghosts)
-                         {:seon.db/origin :substrate-seed}))]
+                         {:seon.db/origin :core-seed}))]
         ;; Boot maintenance stays fail-loud (same posture as the seed
         ;; transacts): a silent half-prune would leave the store lying.
         (when-not (:seon.db/ok? res)
@@ -1728,7 +1728,7 @@
 (schema/register! ::boot-seed-response [:map [::seeded? ::seeded?]])
 
 (defn ^:async boot-seed!
-  "THE substrate boot seed — ONE code path for 'make this store the
+  "THE core boot seed — ONE code path for 'make this store the
    world a pod boots into', shared verbatim by `start-agent!` (live
    boot) and the gym's `seed-scenario-world!` (scratch worlds), so the
    two can never drift again (the gym hand-mirrored this sequence and
@@ -1736,28 +1736,28 @@
    prompts lacked the `:my.soul` rows live prompts carry).
 
    Steps, in boot order:
-     1. Substrate handler SCHEMA — `h/bootstrap-schema!` +
+     1. Core handler SCHEMA — `h/bootstrap-schema!` +
         `wake/bootstrap-schema!` (raw `:db/ident` attr rows; never
         counted as data).
-     2. Under ONE `{:seon.db/origin :substrate-seed}` tx-context, five
-        transacts (each its own tx so the substrate prefix stays a
+     2. Under ONE `{:seon.db/origin :core-seed}` tx-context, five
+        transacts (each its own tx so the core prefix stays a
         stable sequence of tx-times):
           :wake-handler    — the ONE `:wake/on-message` handler entity
                              (idempotent upsert; data-only — registering
                              arms no dispatcher). INSIDE the seed
-                             context so its row carries `:substrate-seed`
+                             context so its row carries `:core-seed`
                              provenance — a fresh world boots with
                              FACTS=0 (machinery rows are never the
                              cluster's data; demo-polish fix
                              2026-06-12).
           :entity-schemas  — `schema/all-entity-schemas-tx-data`.
-          :substrate-seed  — `seed-substrate!` (user entity +
+          :core-seed  — `seed-core!` (user entity +
                              my.kb.system instruction singleton).
           :soul-seed       — `my.soul/seed-tx-data`, SEED-ONLY-IF-
                              ABSENT (a user's runtime soul edit is
                              never clobbered by reboot); skipped
                              entirely when every row already exists.
-          :substrate-index — `substrate-index-tx` (`:seon.ns` /
+          :core-index — `core-index-tx` (`:seon.ns` /
                              `:seon.fn` / `:seon.schema` / `:seon.test`
                              rows, conn-deduped so an Nth boot on the
                              same store re-seeds nothing).
@@ -1774,7 +1774,7 @@
     (try
       (await (h/bootstrap-schema!))
       (await (wake/bootstrap-schema!))
-      (let [index-tx (await (substrate-index-tx conn))
+      (let [index-tx (await (core-index-tx conn))
             check!   (fn [step {ok?   :seon.db/ok?
                                 error :seon.db/error}]
                        (when-not ok?
@@ -1786,7 +1786,7 @@
                                    :seon.db/error error}))))]
         (await
           (db/with-tx-context
-            {:seon.db/origin :substrate-seed}
+            {:seon.db/origin :core-seed}
             (fn ^:async seed! []
               (let [{registered? :seon.handler/registered?}
                     (await (h/register!
@@ -1803,17 +1803,17 @@
                                {:seon.db/conn conn
                                 :seon.db/tx-data
                                 (schema/all-entity-schemas-tx-data)})))
-              (check! :substrate-seed
+              (check! :core-seed
                       (await (db/transact!
                                {:seon.db/conn conn
-                                :seon.db/tx-data (seed-substrate!)})))
+                                :seon.db/tx-data (seed-core!)})))
               (let [soul-tx (my.soul/seed-tx-data (await (d/db conn)))]
                 (when (seq soul-tx)
                   (check! :soul-seed
                           (await (db/transact!
                                    {:seon.db/conn conn
                                     :seon.db/tx-data soul-tx})))))
-              (check! :substrate-index
+              (check! :core-index
                       (await (db/transact!
                                {:seon.db/conn conn
                                 :seon.db/tx-data index-tx})))))))
@@ -1823,7 +1823,7 @@
 
 (def inventory-read-source
   "The creation-turn `store-inventory` eval (context-v4 §2.4/§3.1,
-   V4-3): the catalogs died as sections; the inventory is a substrate
+   V4-3): the catalogs died as sections; the inventory is a core
    fn the creation turn demonstrably RUNS — the fn's source is visible
    in the rendered `seon.db` namespace tag, the CALL is visible here,
    the RESULT is the value line, and re-running the fn is how you get
@@ -1953,7 +1953,7 @@
         ;; Bootstrap-CLJS init via the shared iteration-surface atom.
         ;; Version-stamped — a hot-reload of seon.eval rotates the
         ;; gensym so the next call rebuilds the state. Idempotent
-        ;; while the substrate code is stable.
+        ;; while the core code is stable.
         compile-state (await (repl/ensure-bootstrap!))
         ;; RESUME, DON'T MINT (P3.5/#31): the store is the identity
         ;; source. Mint only on genuine first boot or explicit create.
@@ -1970,12 +1970,12 @@
       (db/with-agent primary
         (fn ^:async boot-with-agent! []
           (let [;; Boot-index GC — MUST run before replay: a DELETED
-                ;; substrate ns falls out of (substrate-ns-set), so its
+                ;; core ns falls out of (core-ns-set), so its
                 ;; ghost rows would be misclassified as agent corpus and
                 ;; replayed back into the live compile-state (the
                 ;; my.kb.instruction dead-teachings incident). Idempotent;
                 ;; loud (one :seon.log info naming every pruned row).
-                prune-stats   (await (prune-substrate-ghosts! conn))
+                prune-stats   (await (prune-core-ghosts! conn))
                 _             (log/info-console!
                                 "seon.client/start-agent!"
                                 (str "boot-index GC: "
@@ -1984,12 +1984,12 @@
                 ;; v1.md §7.4. Re-eval every persisted AGENT-authored
                 ;; :seon.ns / :seon.fn / :seon.test / :seon.schema entity's
                 ;; :source in tx-id order. GLOBAL (not per-agent) — runs
-                ;; ONCE per boot, before any per-agent setup. Substrate
+                ;; ONCE per boot, before any per-agent setup. Core
                 ;; rows are excluded by query-program-graph-entries
-                ;; (Step 4) — they're rebuilt by index-substrate! later
+                ;; (Step 4) — they're rebuilt by index-core! later
                 ;; in this fn — so replay no longer needs to be ordered
-                ;; ahead of substrate setup to avoid shadowing the
-                ;; compiled substrate fns. Idempotent against an empty
+                ;; ahead of core setup to avoid shadowing the
+                ;; compiled core fns. Idempotent against an empty
                 ;; conn (genuine first boot) — returns {…replay-n-total 0 …}.
                 replay-stats  (await (replay-program-graph!
                                        {:conn          conn
@@ -2042,7 +2042,7 @@
                 ;; this for the dev iteration loop.
                 {:seon.web/keys [port port-file]}
                 (await (web.serve/start!))
-                ;; THE substrate boot seed — handlers + the four seed
+                ;; THE core boot seed — handlers + the four seed
                 ;; transacts, extracted to [[boot-seed!]] so the gym's
                 ;; scenario worlds run the boot's OWN code path (one
                 ;; mechanism — the hand-mirrored copy drifted twice).
@@ -2094,10 +2094,10 @@
 
 (defn- install-process-safety-net!
   "Belt-and-suspenders: Node 15+ defaults to terminating the process on
-   an unhandled Promise rejection. Anything in the pod (substrate, agent
+   an unhandled Promise rejection. Anything in the pod (core, agent
    eval, HTTP handlers) that throws inside an async chain and isn't
    caught upstream brings the whole pod down by default — a tiny
-   substrate bug becomes a denial-of-service.
+   core bug becomes a denial-of-service.
 
    This handler converts unhandled rejections into logged warnings and
    keeps the process alive. The pod stays a 'mostly survives, surfaces

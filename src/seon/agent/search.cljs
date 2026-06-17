@@ -1,5 +1,5 @@
 (ns seon.agent.search
-  "Content search over allowed files — ripgrep wrapped as a substrate
+  "Content search over allowed files — ripgrep wrapped as a core
    capability. THE EXEMPLAR npm-package wrapper: copy this file's shape
    when wrapping the next package.
 

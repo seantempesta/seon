@@ -503,7 +503,7 @@
    The woken-by clause excludes the CREATION turn's tutorial evals
    (tile wiring + store-inventory + instructions read — boot parity,
    context-v4): eval-shaped predicates measure the agent's behavior IN
-   RESPONSE TO MESSAGES; the boot tutorial is substrate-scripted, not
+   RESPONSE TO MESSAGES; the boot tutorial is core-scripted, not
    behavior, and would otherwise be every scenario's 'first eval'."
   [dbv agent-id]
   (->> (if agent-id
@@ -1118,15 +1118,15 @@
 
    1. The pod's boot seed — `seon.client/boot-seed!`, the boot's OWN
       code path (handlers + entity-schema decomposition +
-      seed-substrate! + soul seed + substrate index, under the
-      `:substrate-seed` origin). One mechanism: the gym used to
+      seed-core! + soul seed + core index, under the
+      `:core-seed` origin). One mechanism: the gym used to
       hand-mirror this sequence and drifted twice (iteration 1 missed
       the entity-schema decomposition + index-schemas — hid the S-32
       catalog bug for a whole sweep; iteration 2 missed the test
       roster — :exemplars rendered 4/7 blocks vs live; the third
       drift, missing the `:soul-seed` step, is what forced the
       extraction). The seed-origin tx-context matters:
-      `seon.warn/domain-attrs` discriminates substrate vs agent attrs
+      `seon.warn/domain-attrs` discriminates core vs agent attrs
       by exactly that provenance. The caller (run-scenario!) invokes
       this inside `(db/with-agent <:a's id>)` so the seed txs carry
       the primary agent's id like a live boot's do. The test roster
@@ -1245,7 +1245,7 @@
                 !agents       (atom {})
                 !profiles     (atom [])]
             ;; The scratch store must be THE WORLD A POD BOOTS INTO, not an
-            ;; empty void: seed the substrate (instruction rows + the
+            ;; empty void: seed the core (instruction rows + the
             ;; :seon.ns/:seon.fn program-graph rows that render the "What
             ;; you can do" teaching — without them agents never learn that
             ;; grep/register!/reply! exist) and mirror the pod's fs
@@ -1263,7 +1263,7 @@
                                :seon.agent.fs/read-only?    true}))
             ;; Mint :a's id FIRST and run the boot seed inside its
             ;; with-agent scope — the seed txs carry the PRIMARY
-            ;; agent's id alongside the :substrate-seed origin (the
+            ;; agent's id alongside the :core-seed origin (the
             ;; live store's provenance shape, which the context-model
             ;; classifier keys on). :a's actual BOOT (create! +
             ;; creation evals) happens AFTER the seed + fixtures, so

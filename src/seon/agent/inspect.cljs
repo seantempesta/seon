@@ -7,7 +7,7 @@
      - `visible-entities` — the list of entity maps the agent sees, in
        render order. Identical set to what `ctx-preview` walked.
      - `handlers` — the live handler registry visible to the agent
-       (substrate + per-agent).
+       (core + per-agent).
 
    All map-in, map-out. Defaults `:seon.agent/id` to
    `(seon.db/current-agent-id)` so REPL calls from inside an agent
@@ -85,7 +85,7 @@
     {:seon.render/entities entities}))
 
 (defn handlers
-  "Return the live handler registry visible to the agent (substrate
+  "Return the live handler registry visible to the agent (core
    handlers + the agent's own, if any), sorted by priority desc."
   {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/handlers-response]}
   [{:seon.agent/keys [id]}]

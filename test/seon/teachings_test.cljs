@@ -35,7 +35,7 @@
    - An eval failing ONLY on an undeclared free local in the eval ns
      (e.g. a metavariable `id` in a retract shape) classifies as a
      shape, not a red — any OTHER undeclared (a bad alias, a typo'd
-     substrate fn) is a teaching lie and goes red.
+     core fn) is a teaching lie and goes red.
    - `;; => …` comment lines after a block are its PROMISE. A promise
      asserts the live run returns data: red when the value is
      nil/empty, when the promise shows rows (`[{`/`[\"`) and none come
@@ -369,7 +369,7 @@
 (defn- free-local-undeclared?
   "True when eval result `res` failed ONLY on an undeclared free local
    in the eval ns (a metavariable like `id` in a shape example) — a
-   shape, not a lie. Any other undeclared (bad alias, typo'd substrate
+   shape, not a lie. Any other undeclared (bad alias, typo'd core
    fn) stays red."
   [res]
   (let [und (get-in res [:error :seon.error/data :seon.eval/undeclared])]

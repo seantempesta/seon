@@ -29,7 +29,7 @@
    2026-05-19 audit). This namespace becomes dev-mode only — a
    standalone-pod render path so we can iterate on agent code in
    Chrome without booting the full server stack. The CLJS pod's role
-   in the V0.5 demo Tauri shell becomes 'eval substrate', not
+   in the V0.5 demo Tauri shell becomes 'eval core', not
    'HTTP server'.
 
    ## SSE connection registry
@@ -343,7 +343,7 @@
    /chat, identical to the auto-boot agent). Responds 200 with the new
    agent id as plain text; the mission-control button navigates to
    `/agent/<id>`. One create at a time (boot is heavyweight: replay +
-   substrate seed) — concurrent requests get 409."
+   core seed) — concurrent requests get 409."
   [req res]
   (let [f @!create-agent-fn]
     (cond

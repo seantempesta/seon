@@ -91,7 +91,7 @@
 
 ;; M-2c: initial-value-calls-namespace-fn-test removed when the
 ;; seon.health.workout demo namespace was deleted. Restore once a
-;; substrate-internal fixture namespace exposes an `initial-state` fn
+;; core-internal fixture namespace exposes an `initial-state` fn
 ;; and a registered `*ctx*` schema for testing.
 
 (deftest initial-value-returns-nil-for-unknown-ns-test
@@ -122,7 +122,7 @@
 ;; removed when the seon.health.workout demo namespace was deleted. Both depend on
 ;; a real loadable namespace with an `initial-state` fn and a registered ctx schema
 ;; whose required keys are typed (so a wrong-type swap! throws). Restore once a
-;; substrate-internal fixture namespace fills that role.
+;; core-internal fixture namespace fills that role.
 
 (deftest ensure-instance-with-explicit-id-test
   (testing "uses provided instance-id when no existing instance"

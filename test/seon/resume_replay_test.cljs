@@ -1,8 +1,8 @@
 (ns seon.resume-replay-test
   "Step 4 of coherent-bootstrap-indexing-2026-06-08: resume coverage + cleanup.
 
-   On resume/boot the SUBSTRATE corpus is rebuilt from real source by
-   `seon.client/index-substrate!` (no replay — its rows are compiled fns;
+   On resume/boot the CORE corpus is rebuilt from real source by
+   `seon.client/index-core!` (no replay — its rows are compiled fns;
    re-evaling `(defn ^:async transact! …)` would be wrong). The agent's OWN
    corpus (fns / tests / schemas / nses under `my.agent.<id>`) IS replayed:
    `replay-program-graph!` re-evals each persisted `:source` so the agent's
@@ -10,19 +10,19 @@
 
    These tests pin the Step 4 discriminator + cleanup:
 
-     - `query-program-graph-entries` EXCLUDES substrate rows (owning ns in
-       `substrate-ns-kws` = #{:seon.db :seon.schema :seon.test.runner}) — even
-       when a substrate `:seon.fn` carries a `,,,` stub source, it is SKIPPED.
+     - `query-program-graph-entries` EXCLUDES core rows (owning ns in
+       `core-ns-kws` = #{:seon.db :seon.schema :seon.test.runner}) — even
+       when a core `:seon.fn` carries a `,,,` stub source, it is SKIPPED.
      - It INCLUDES agent-authored `:seon.fn` AND `:seon.test` rows (and agent
        `:seon.ns`), in tx order.
      - A full `replay-program-graph!` re-evals the agent fn + agent test source
        into the bootstrap compile-state (agent-fn callable, test `(def …)`
-       reconstituted) and counts ONLY the agent rows — substrate rows are not
+       reconstituted) and counts ONLY the agent rows — core rows are not
        replayed and contribute no failures.
 
-   The discriminator is ns membership (derived from `substrate-vars`, the same
-   source `index-substrate!` writes from) — NOT the `:seon.db/origin
-   :substrate-seed` tx-meta, which can be absent on a re-asserted / older row.
+   The discriminator is ns membership (derived from `core-vars`, the same
+   source `index-core!` writes from) — NOT the `:seon.db/origin
+   :core-seed` tx-meta, which can be absent on a re-asserted / older row.
    The old `,,,`/last-write-race ordering hack is therefore gone.
 
    Tests open a FRESH `:memory` conn (via `seon.client/open-agent-conn!`, the
@@ -43,13 +43,13 @@
     [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
-;; Seed — a fresh conn with BOTH substrate rows (must be skipped) and
+;; Seed — a fresh conn with BOTH core rows (must be skipped) and
 ;; agent-authored rows (must replay).
 ;;
-;;   :seon.db          — substrate ns + a `transact!` fn carrying a `,,,` STUB
+;;   :seon.db          — core ns + a `transact!` fn carrying a `,,,` STUB
 ;;                       source (the exact thing the old curated path wrote);
 ;;                       must be SKIPPED so the compiled fn is never shadowed.
-;;   :seon.test.runner — substrate ns + a `run!` :seon.test row; must be SKIPPED.
+;;   :seon.test.runner — core ns + a `run!` :seon.test row; must be SKIPPED.
 ;;   :my.agent.t1    — agent ns + an `agent-fn` fn + a `my-test` :seon.test
 ;;                       row whose source `(def replay-marker 42)` EVALS; both
 ;;                       must REPLAY.
@@ -59,7 +59,7 @@
   [{:seon.ns/name :seon.db :seon.ns/source "(ns seon.db)"}
    {:seon.ns/name :seon.test.runner :seon.ns/source "(ns seon.test.runner)"}
    {:seon.ns/name :my.agent.t1 :seon.ns/source "(ns my.agent.t1)"}
-   ;; SUBSTRATE fn with a `,,,` stub source — must be SKIPPED on replay.
+   ;; CORE fn with a `,,,` stub source — must be SKIPPED on replay.
    {:seon.fn/sym "seon.db/transact!"
     :seon.fn/ns [:seon.ns/name :seon.db]
     :seon.fn/source "(defn transact! [x] ,,,)"
@@ -77,7 +77,7 @@
    {:seon.test/sym "my.agent.t1/my-test"
     :seon.test/ns [:seon.ns/name :my.agent.t1]
     :seon.test/source "(def replay-marker 42)"}
-   ;; SUBSTRATE test row — must be SKIPPED.
+   ;; CORE test row — must be SKIPPED.
    {:seon.test/sym "seon.test.runner/run!"
     :seon.test/ns [:seon.ns/name :seon.test.runner]
     :seon.test/source "(def should-not-replay true)"}])
@@ -102,7 +102,7 @@
 ;; query-program-graph-entries — the replay discriminator.
 ;; ---------------------------------------------------------------------------
 
-(deftest replay-set-includes-agent-corpus-skips-substrate
+(deftest replay-set-includes-agent-corpus-skips-core
   (async done
     (-> (with-seeded-conn
           (fn [conn]
@@ -115,17 +115,17 @@
                   (is (contains? pairs [:fn "my.agent.t1/agent-fn"]) "agent fn replays")
                   (is (contains? pairs [:test "my.agent.t1/my-test"])
                       "agent :seon.test row replays its source")
-                  ;; SUBSTRATE corpus is NOT in the replay set — even the
+                  ;; CORE corpus is NOT in the replay set — even the
                   ;; `,,,`-stubbed transact! row, which the old curated path
                   ;; would have re-evaled into a broken shadow.
                   (is (not (contains? pairs [:ns :seon.db]))
-                      "substrate :seon.db ns is SKIPPED")
+                      "core :seon.db ns is SKIPPED")
                   (is (not (contains? pairs [:fn "seon.db/transact!"]))
-                      "substrate transact! fn is SKIPPED (even with a ,,, stub)")
+                      "core transact! fn is SKIPPED (even with a ,,, stub)")
                   (is (not (contains? pairs [:ns :seon.test.runner]))
-                      "substrate :seon.test.runner ns is SKIPPED")
+                      "core :seon.test.runner ns is SKIPPED")
                   (is (not (contains? pairs [:test "seon.test.runner/run!"]))
-                      "substrate run! :seon.test row is SKIPPED")
+                      "core run! :seon.test row is SKIPPED")
                   ;; The whole replay set is agent-only: exactly the 3 agent rows.
                   (is (= 3 (count entries)) "only the 3 agent rows survive the filter"))))))
         (.then (fn [_] (done)))
@@ -143,7 +143,7 @@
 
 (def ^:private ghost-seed-tx
   [{:seon.ns/name :my.agent.g1 :seon.ns/source "(ns my.agent.g1)"}
-   ;; POISON: bare def whose init calls an effectful substrate fn.
+   ;; POISON: bare def whose init calls an effectful core fn.
    ;; MUST be dropped from the replay set (deployed-store poison path).
    {:seon.fn/sym "my.agent.g1/virtue-eval"
     :seon.fn/ns [:seon.ns/name :my.agent.g1]
@@ -211,7 +211,7 @@
                       {:conn conn :compile-state cs :agent-id "resume-replay-test"})
                     (.then
                       (fn [stats]
-                        ;; ONLY the 3 agent rows replay; substrate rows skipped.
+                        ;; ONLY the 3 agent rows replay; core rows skipped.
                         (is (= 3 (:seon.client/replay-n-total stats))
                             "exactly the 3 agent rows are in the replay set")
                         (is (= 0 (:seon.client/replay-n-fail stats))

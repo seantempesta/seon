@@ -620,7 +620,7 @@ cmd_cluster() {
   # Cluster lifecycle. Today: `reset [name]` (name defaults to
   # "default"). One command = stop pod → stop wire-server → wipe the
   # cluster's STORE DIR ONLY → start wire-server (mints a fresh DB) →
-  # start pod (boot re-seeds the substrate idempotently).
+  # start pod (boot re-seeds the core idempotently).
   #
   # The store is the durable home of every agent/message/finding in
   # the cluster — reset is DESTRUCTIVE and deliberate; there is no
@@ -684,7 +684,7 @@ cluster_reset() {
     wait_ready wire-server || exit 1
     cmd_start pod
     wait_ready pod || exit 1
-    echo "▶ cluster $name reset complete — pod boot re-seeds the substrate"
+    echo "▶ cluster $name reset complete — pod boot re-seeds the core"
   else
     echo "▶ cluster $name store wiped (no processes registered for it)"
   fi
@@ -759,7 +759,7 @@ Commands:
                      SEON_EXTRA_* "unset = byte-identical" invariant
   cluster reset [n]  DESTRUCTIVE: stop pod+wire-server, wipe
                      data/clusters/<n>/store (default "default"),
-                     restart both — fresh DB, substrate re-seeds
+                     restart both — fresh DB, core re-seeds
 
 Processes (registered in script):
   pod          node out/client/main.js

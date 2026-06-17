@@ -2,7 +2,7 @@
   "Compile-time enumeration of the CLJS build's program-graph surface.
 
    Self-host CLJS has no runtime `resolve` (it's a compile-time macro), so
-   `seon.client/substrate-vars` must be a list of `#'`-literals. Hand-listing
+   `seon.client/core-vars` must be a list of `#'`-literals. Hand-listing
    hundreds of vars is the dumbass move — these macros emit the var list
    FROM THE ANALYZER ENV at compile time instead (unit #23 fix b: the whole
    CLJS package surface, not a 7-fn curated sliver).

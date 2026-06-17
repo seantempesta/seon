@@ -72,7 +72,7 @@
    lets a test append big-result evals to turn 2.
 
    Boot-equivalent rows live in [[boot-seed-tx]] — transacted
-   separately under the `:substrate-seed` tx-context, exactly like a
+   separately under the `:core-seed` tx-context, exactly like a
    real pod boot."
   [extra-evals]
   (let [now (js/Date.)
@@ -89,8 +89,8 @@
             :seon.agent.turn/status :done
             ;; LLM turns ALWAYS carry their prompt's char count
             ;; (with-turn! records it on the open tx). A PROMPTLESS
-            ;; turn means substrate-scripted evals — rendered UNCAPPED
-            ;; (seon.ctx/substrate-authored-turn?) — so the seeds must
+            ;; turn means core-scripted evals — rendered UNCAPPED
+            ;; (seon.ctx/core-authored-turn?) — so the seeds must
             ;; look like real LLM turns for the clip tests to bite.
             :seon.agent.turn/prompt-chars 4321
             :seon.agent.turn/messages
@@ -138,7 +138,7 @@
 (defn- boot-seed-tx
   "The pod's boot-seed rows — the SAME data `seon.client/start-agent!`
    transacts. Transacted SEPARATELY from [[seed-tx]], inside the
-   `{:seon.db/origin :substrate-seed}` tx-context, because provenance
+   `{:seon.db/origin :core-seed}` tx-context, because provenance
    is load-bearing since the S-21 fix (2026-06-10):
    `seon.warn/domain-attrs` treats any `:seon.schema/key` row asserted
    OUTSIDE the seed context as an AGENT-registered domain attr."
@@ -147,9 +147,9 @@
     (concat
       ;; the user entity + the my.kb.system instruction singleton
       ;; (read by eval — the :instructions section died, V4-0)
-      (client/seed-substrate!)
+      (client/seed-core!)
       ;; the introspection-indexed core-fn :seon.ns + :seon.fn rows
-      (client/index-substrate!)
+      (client/index-core!)
       ;; the :seon.schema entities for every entity kind
       (schema/all-entity-schemas-tx-data)
       ;; the whole-registry :seon.schema rows (unit #23 fix b)
@@ -172,7 +172,7 @@
    the ALS-backed `db/with-agent`), so we rebind `db/*conn*` right
    around the synchronous `body` call. Two transacts, matching a real
    pod boot's provenance: [[boot-seed-tx]] under
-   `{:seon.db/origin :substrate-seed}`, then the runtime fixture
+   `{:seon.db/origin :core-seed}`, then the runtime fixture
    [[seed-tx]] in an ordinary tx. Returns a Promise."
   ([body] (with-seeded-conn [] body))
   ([extra-evals body]
@@ -181,7 +181,7 @@
                 ;; transact under the binding so tx-context defaults resolve,
                 ;; then re-establish it around the synchronous body call.
                 (binding [db/*conn* conn]
-                  (-> (db/with-tx-context {:seon.db/origin :substrate-seed}
+                  (-> (db/with-tx-context {:seon.db/origin :core-seed}
                         (fn []
                           (db/transact! {:seon.db/conn conn
                                          :seon.db/tx-data (boot-seed-tx)})))
@@ -222,7 +222,7 @@
                       :warnings :open-todos :findings :transcript :turns
                       :findings-pointer :prompt]
                      sections)
-                  "the v4 substrate-default section names, in order
+                  "the v4 core-default section names, in order
                    (static→volatile) — the catalogs, capabilities,
                    exemplars, namespace-context, and seed sections are
                    all DEAD (context-v4)"))))
@@ -499,16 +499,16 @@
                             "identity-less kind appears with per-attr
                              entity counts the moment data lands")
                         ;; ORDERING — consult-first: user-domain kinds
-                        ;; (registered OUTSIDE the :substrate-seed boot
+                        ;; (registered OUTSIDE the :core-seed boot
                         ;; index — :zzinv.domain here, despite sorting
-                        ;; LAST alphabetically) come BEFORE substrate
+                        ;; LAST alphabetically) come BEFORE core
                         ;; kinds; alphabetical within each group.
                         (is (< (idx :zzinv.domain) (idx :seon.fn))
-                            "user-domain kind sorts BEFORE substrate
+                            "user-domain kind sorts BEFORE core
                              kinds — the inventory leads with what prior
                              agents stored for THIS human")
                         (is (< (idx :seon.agent) (idx :seon.fn))
-                            "substrate group stays alphabetical"))))
+                            "core group stays alphabetical"))))
                   ;; retract ALL rows → the kind vanishes from the next run.
                   (.then
                     (fn [_]
@@ -541,7 +541,7 @@
 (deftest store-inventory-splits-rows-by-bootstrap-provenance
   ;; Task #28 — the per-ROW origin split, never per-kind-name: a row
   ;; is BOOTSTRAP iff its identity datom landed under a
-  ;; `:substrate-seed` tx (`seon.db/bootstrap-row-ids`, THE shared
+  ;; `:core-seed` tx (`seon.db/bootstrap-row-ids`, THE shared
   ;; derivation). The default inventory shows only post-bootstrap
   ;; data; `{:seon.db/system? true}` shows everything. The fixture is
   ;; exactly the discriminating world: boot-indexed `:seon.fn` rows
@@ -594,15 +594,15 @@
                     "the seeded kb.system row classifies bootstrap")
                 (is (not (contains? boot greet))
                     "the agent-authored fn row classifies data"))
-              (is (contains? (db/substrate-kinds db) :seon.fn)
+              (is (contains? (db/core-kinds db) :seon.fn)
                   ":seon.fn was registered by the boot index →
-                   substrate kind (the ordering/findings filter)"))))
+                   core kind (the ordering/findings filter)"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
 ;; (l) namespaces-section in the assembled context — full source for the
-;;     full-source set, shallow tags for unsplit substrate, byte-stable
+;;     full-source set, shallow tags for unsplit core, byte-stable
 ;;     static prefix.
 ;; ---------------------------------------------------------------------------
 
@@ -626,7 +626,7 @@
                   "my.kb renders full source (my.* rule)")
               (is (str/includes? txt "(ns my.kb.system")
                   "my.kb.system (the system-wide instruction home) renders")
-              ;; shallow tags exist for unsplit substrate — present but
+              ;; shallow tags exist for unsplit core — present but
               ;; ns-form only.
               (is (str/includes? txt "<namespace name=\"seon.db\">")
                   "seon.db appears as a tag")
@@ -678,7 +678,7 @@
                           "bare/seed stubs SELF-DESCRIBE instead of
                            rendering as deceptively-empty source")
                       (is (not (str/includes? txt "(defn transact!"))
-                          "self-description never inlines substrate
+                          "self-description never inlines core
                            bodies")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -707,7 +707,7 @@
   ;; The v4 layout's turn-0 total stays bounded with the full-source
   ;; namespace payload in place. The previous design point was ≤84k;
   ;; v4 swaps capabilities+catalogs (~15k) for my.* full sources +
-  ;; shallow substrate tags. Guard at 100k — if this grows, something
+  ;; shallow core tags. Guard at 100k — if this grows, something
   ;; ported scar tissue or a huge ns joined the full-source set.
   (async done
     (-> (with-seeded-conn
@@ -945,16 +945,16 @@
     (is (< (count row) 1000) "preview row is bounded")))
 
 ;; ---------------------------------------------------------------------------
-;; (g3) Substrate-authored rows render IN FULL — the inventory-clip defect
+;; (g3) Core-authored rows render IN FULL — the inventory-clip defect
 ;;      (2026-06-11): the creation-turn store-inventory result clipped at
 ;;      1500 chars BEFORE the user-domain rows rendered, so the surface
-;;      defeated its own purpose. Substrate-scripted evals (a promptless
-;;      owning turn — seon.ctx/substrate-authored-turn?) are OUR output and
+;;      defeated its own purpose. Core-scripted evals (a promptless
+;;      owning turn — seon.ctx/core-authored-turn?) are OUR output and
 ;;      render uncapped (50k runaway backstop); agent evals keep the loud
 ;;      ⚠ clip (pinned by format-eval-row-huge-result-is-bounded-and-guided).
 ;; ---------------------------------------------------------------------------
 
-(deftest format-eval-row-substrate-row-renders-whole
+(deftest format-eval-row-core-row-renders-whole
   (let [huge (pr-str (apply str (repeat 5000 "k")))
         row  (#'seon.ctx/format-eval-row
                {:seon.eval/source "(seon.db/store-inventory)"
@@ -963,13 +963,13 @@
                 :seon.eval/id "sb0000004d"
                 :seon.eval/duration-ms 3
                 :seon.eval/ns :my.agent.pin
-                :seon.ctx/substrate-authored? true}
+                :seon.ctx/core-authored? true}
                false)]
     (is (str/includes? row huge)
-        "the full 5000-char substrate result renders WHOLE")
+        "the full 5000-char core result renders WHOLE")
     (is (not (str/includes? row "TRUNCATED"))
-        "no clip marker on a substrate-authored row"))
-  ;; the 50k backstop still bites on a runaway substrate value.
+        "no clip marker on a core-authored row"))
+  ;; the 50k backstop still bites on a runaway core value.
   (let [runaway (apply str (repeat 60000 "r"))
         row     (#'seon.ctx/format-eval-row
                   {:seon.eval/source "(seon.db/store-inventory)"
@@ -978,12 +978,12 @@
                    :seon.eval/id "sb0000005e"
                    :seon.eval/duration-ms 3
                    :seon.eval/ns :my.agent.pin
-                   :seon.ctx/substrate-authored? true}
+                   :seon.ctx/core-authored? true}
                   false)]
     (is (str/includes? row "⚠ TRUNCATED at 50000 of 60000")
         "the runaway backstop clips LOUDLY at 50k, never silently")))
 
-(deftest session-evals-tag-substrate-authorship-from-promptless-turns
+(deftest session-evals-tag-core-authorship-from-promptless-turns
   (async done
     (let [big (pr-str (apply str (repeat 5000 "k")))
           at  (js/Date. (+ (.getTime (js/Date.)) 40))]
@@ -1022,12 +1022,12 @@
                                      first)
                             ts  (agent/transcript-section
                                   {:seon.db/db db :seon.agent/id agent-id})]
-                        (is (true? (:seon.ctx/substrate-authored? sub))
-                            "promptless turn → substrate-authored eval")
-                        (is (false? (:seon.ctx/substrate-authored? agt))
+                        (is (true? (:seon.ctx/core-authored? sub))
+                            "promptless turn → core-authored eval")
+                        (is (false? (:seon.ctx/core-authored? agt))
                             "prompted (LLM) turn → agent eval")
                         (is (str/includes? ts big)
-                            "the substrate result is IN the rendered
+                            "the core result is IN the rendered
                              transcript, whole — agents see every
                              inventory row")
                         (is (not (str/includes?
@@ -1176,8 +1176,8 @@
   (throw (ex-info "deliberate ctx tile failure"
                   {:seon.ctx/live-tile-test true})))
 
-(deftest substrate-default-ctx-slots-live-tile-after-your-entity
-  (let [secs  (agent/substrate-default-ctx)
+(deftest core-default-ctx-slots-live-tile-after-your-entity
+  (let [secs  (agent/core-default-ctx)
         names (mapv :seon.ctx/name secs)
         lt    (first (filter #(= :live-tile (:seon.ctx/name %)) secs))]
     (is (= [:system :namespaces :your-entity :live-tile :warnings]
@@ -1201,8 +1201,8 @@
               (is (str/includes? text
                                  "Wired: seon.render.live-tile/welcome")
                   "header names the wired fn — the agent sees HOW to change it")
-              (is (str/includes? text "the substrate default")
-                  "provenance: the welcome is the substrate default, not agent-wired")
+              (is (str/includes? text "the core default")
+                  "provenance: the welcome is the core default, not agent-wired")
               (is (re-find #"(?s)<live-tile>.*Good (morning|afternoon|evening|night)"
                            text)
                   "body is the welcome's :seon.render/ai twin — the agent can

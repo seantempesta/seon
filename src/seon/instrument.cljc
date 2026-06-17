@@ -136,7 +136,7 @@
       and re-instruments (replaces the wrapper)."
      []
      ;; ONE structural collect (V3-C): every first-party def — the
-     ;; substrate plus the compiled my.* scaffold — by source-file
+     ;; core plus the compiled my.* scaffold — by source-file
      ;; location, no name prefixes. Runtime-authored my.* fns aren't on
      ;; the compile-time roster (the analyzer can't see them); they
      ;; validate through the eval path instead.

@@ -1,7 +1,7 @@
 (ns seon.repl-parity-test
   "Unit #23 fix d — REPL-parity translations (the plan's REPL-PARITY
    CONTRACT): the agent's reflexive REPL moves must work or fail with a
-   translation that teaches the substrate equivalent.
+   translation that teaches the core equivalent.
 
    Probed live 2026-06-09 before this unit: `(in-ns 'foo)` failed with an
    opaque `undeclared-var cljs.user/in-ns`; bare `*ns*` and `*1` both

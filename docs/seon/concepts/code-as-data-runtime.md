@@ -6,10 +6,10 @@ tags: [concept, architecture, agent, cljs]
 
 # Code as data — the runtime IS the database
 
-**The CLJS substrate's source, the agent's eval log, and the
+**The CLJS core's source, the agent's eval log, and the
 in-memory analyzer state are three views of the same code corpus.
 Persisting the agent's defining forms as `:seon.fn` / `:seon.ns` /
-`:seon.schema` entities lets the substrate, the agent, the resume
+`:seon.schema` entities lets the core, the agent, the resume
 mechanism, the warnings system, and the cross-agent code-sharing
 gate all read from one place.**
 
@@ -20,7 +20,7 @@ they are one mechanism viewed from five angles.
 
 ## The three views
 
-1. **Substrate source code** (`.cljs` files on disk in development;
+1. **Core source code** (`.cljs` files on disk in development;
    bundled resources in WASM). The thing humans (or earlier agents,
    in the recursive-bootstrap case) wrote and committed.
 2. **Live analyzer state** at `@!compile-state` —
@@ -33,7 +33,7 @@ they are one mechanism viewed from five angles.
    program graph".
 
 These views agree by construction. The analyzer state is built FROM
-source files (at substrate boot) or FROM agent evals (via
+source files (at core boot) or FROM agent evals (via
 detect-and-tee). The DB entities are projections of the analyzer
 state. The reconstituted source for bulk-load resume is built FROM
 the DB entities, then re-evaled to rebuild the analyzer state.
@@ -42,7 +42,7 @@ circle closes.
 
 ## Five mechanisms, one principle
 
-### Substrate boot — source files as the substrate seed
+### Core boot — source files as the core seed
 
 First-boot helper walks `@!compile-state`'s `seon.*` namespaces,
 reads each source file from disk, slices defining forms by
@@ -50,7 +50,7 @@ reads each source file from disk, slices defining forms by
 `:seon.schema` entities. No separate `bootstrap.edn` file.
 
 Same code path as detect-and-tee — both produce the same entity
-shape from analyzer state. The substrate is just the agent's
+shape from analyzer state. The core is just the agent's
 first commit.
 
 ### Detect-and-tee — agent code becomes DB entities
@@ -111,12 +111,12 @@ Uses:
   debug folder. Get autocomplete, jump-to-def, real navigation
   over the agent's accumulated work.
 - **Export** — `zip -r agent-AbCdEfGh1234.zip tmp/debug/agents/AbCdEfGh1234`
-  produces a runnable substrate snapshot. Drop it elsewhere, point
+  produces a runnable core snapshot. Drop it elsewhere, point
   a fresh pod at it, the agent's work runs.
 - **Recursive bootstrap** — an agent's accumulated `.cljs` files
-  become the basis for the *next* seon substrate version. The
+  become the basis for the *next* seon core version. The
   agent's work isn't trapped in a DB; it's source code, ready to
-  ship as substrate the next round.
+  ship as core the next round.
 
 The disk write is a DERIVATION from DB state, on a flag. No
 authority is moved off the DB; the disk files are just another
@@ -141,7 +141,7 @@ view, like the analyzer state.
 
 ## What it does NOT rule out
 
-- **Source files as the authoring surface** — substrate developers
+- **Source files as the authoring surface** — core developers
   edit `.cljs` files in their editor. Source is a first-class
   citizen.
 - **The DB as the agent's authoring surface** — agents author via
@@ -158,7 +158,7 @@ view, like the analyzer state.
   what reactive-context is to the warnings tile: derive from DB,
   no separate path.
 - `docs/prds/agent-runtime/v1.md` §2.2 — the schemas
-- `docs/prds/agent-runtime/v1.md` §7.3 — substrate seed from source
+- `docs/prds/agent-runtime/v1.md` §7.3 — core seed from source
 - `docs/prds/agent-runtime/v1.md` §7.4 — bulk-load resume
 - `docs/prds/agent-runtime/research/analyzer-driven-extraction-and-resume-2026-05-24.md`
 - `docs/prds/agent-runtime/research/resume-as-bulk-file-load-2026-05-24.md`

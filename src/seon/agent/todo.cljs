@@ -242,11 +242,11 @@
                           todos))))))
 
 (defn open-todos-section
-  "Context-section fn (`:open-todos`, substrate-default-ctx priority 45):
+  "Context-section fn (`:open-todos`, core-default-ctx priority 45):
    [[open-todos-block]] for the CALLING agent — the `:seon.agent/id` in the
    render input, resolved as a `[:seon.agent/id id]` ref against the render's
    db value — absent `:seon.db/db` defaults to the current conn, the same
-   convention as every other substrate section fn. Returns \"\" when the
+   convention as every other core section fn. Returns \"\" when the
    agent has no open items (the section vanishes — derived, nothing stored,
    nothing to acknowledge)."
   {:malli/schema [:=> [:cat :map] :string]}

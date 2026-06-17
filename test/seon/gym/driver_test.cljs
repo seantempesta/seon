@@ -145,8 +145,8 @@
 
 ;; ---------------------------------------------------------------------------
 ;; WORLD-PARITY — the gym scratch world must be THE WORLD A POD BOOTS
-;; INTO (entity-schema decomposition + instruction rows + substrate
-;; index, under :substrate-seed provenance) with the scenario's
+;; INTO (entity-schema decomposition + instruction rows + core
+;; index, under :core-seed provenance) with the scenario's
 ;; prior-agent layer on top (tee-shaped :seon.schema rows + fixtures,
 ;; agent provenance). Iteration 1 ran without the decomposition /
 ;; index-schemas, so gym prompts differed from real pod prompts and the
@@ -180,7 +180,7 @@
                                   (is (contains? domain :my.workout/date))
                                   (is (contains? domain
                                                  :my.workout/duration-minutes))
-                                  ;; substrate attrs stay OUT of the reuse
+                                  ;; core attrs stay OUT of the reuse
                                   ;; surface (seed provenance)
                                   (is (not-any? #(= "seon.db" (namespace %))
                                                 domain)
@@ -214,12 +214,12 @@
 ;; SAME row-classes a live pod boot produces, derived from THE SAME
 ;; sources of truth the boot indexers use (so a future boot change moves
 ;; this test, not just live behavior):
-;;   - every relevant-ns? member of (client/substrate-ns-set) has a FULL
+;;   - every relevant-ns? member of (client/core-ns-set) has a FULL
 ;;     :seon.ns/source row (the :exemplars 7-block set — gym iteration 2
 ;;     rendered 4/7 because the :test build never loaded
 ;;     seon.dev.test-preload and index-tests seeded nothing);
 ;;   - one :seon.test row per preload-roster deftest var;
-;;   - the substrate :wake/on-message handler entity exists;
+;;   - the core :wake/on-message handler entity exists;
 ;;   - the scenario's prior-agent layer carries agent provenance
 ;;     (agent-id + non-seed origin — the context-model classifier's
 ;;     exact predicate).
@@ -238,7 +238,7 @@
                          {:seon.db/conn conn :seon.gym/scenario scenario})
                        (.then (fn [_]
                                 (let [dbv      @conn
-                                      expected (->> (client/substrate-ns-set)
+                                      expected (->> (client/core-ns-set)
                                                     (map name)
                                                     (filter ctx/full-source-ns?)
                                                     set)
@@ -271,13 +271,13 @@
                                                    '[:find ?aid :where
                                                      [?s :seon.schema/key :my.workout/date ?tx]
                                                      [?tx :seon.db/agent-id ?aid]
-                                                     (not [?tx :seon.db/origin :substrate-seed])]})]
+                                                     (not [?tx :seon.db/origin :core-seed])]})]
                                   (is (= expected full-src)
                                       "every relevant ns the boot indexes carries full source (the exemplar block set)")
                                   (is (= (count @client/!indexed-test-vars) test-rows)
                                       "one :seon.test row per pod-roster deftest var")
                                   (is (seq handler)
-                                      "the substrate :wake/on-message handler entity is seeded")
+                                      "the core :wake/on-message handler entity is seeded")
                                   (is (seq prior)
                                       "the scenario layer carries prior-agent provenance (agent-id + non-seed origin)")))))))
           (.then (fn [_]
@@ -536,7 +536,7 @@
                      (let [chars (into {} (:seon.gym.profile/section-chars
                                            (last profiles)))]
                        (is (pos? (get chars :system 0))
-                           "substrate sections render into the profile")
+                           "core sections render into the profile")
                        (is (pos? (get chars :gymtest-static 0))
                            "the installed section renders into the profile"))
                      (is (some #{:gymtest-static}

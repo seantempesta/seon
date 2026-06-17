@@ -1,7 +1,7 @@
 (ns seon.eval.require-test
   "Wave B4 (fix-everything-prd-2026-06-11 §3): `(:require [my.kb …])`
    in an agent eval must resolve for STORE-INDEXED, HOST-BUNDLED
-   namespaces. The prompt renders substrate namespaces as code, so
+   namespaces. The prompt renders core namespaces as code, so
    agents reasonably require them — but `my.kb` / `seon.db` / … are
    compiled into the host bundle (out/client/main.js), NOT into the
    bootstrap bundle's index, so shadow's `boot/load` threw
@@ -40,7 +40,7 @@
   (is (true? (seval/ns-live-on-globalthis? 'my.kb))
       "my.kb is compiled into this build — its munged object is live")
   (is (true? (seval/ns-live-on-globalthis? 'seon.eval))
-      "substrate nses resolve the same way")
+      "core nses resolve the same way")
   (is (false? (seval/ns-live-on-globalthis? 'no.such.namespace))
       "an absent ns has no globalThis object"))
 

@@ -15,7 +15,7 @@
      - the EMPTY-TURN guard (downstream ask 20): a turn with zero
        evals while the agent has NOT replied since the inbound (the
        deepseek thinking-mode shape — all tokens in the reasoning
-       field, visible content empty) re-prompts with a substrate nudge
+       field, visible content empty) re-prompts with a core nudge
        instead of ending the wake silently; bounded at
        `agent/max-empty-reprompts` consecutive re-prompts, then ends
        with a chat-visible system line (turn :error + self-message —
@@ -249,7 +249,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- nudge-count
-  "How many substrate empty-completion nudges are in the message log."
+  "How many core empty-completion nudges are in the message log."
   []
   (count (db/query
            {:seon.db/query '[:find ?m
@@ -293,7 +293,7 @@
               (is (= (inc agent/max-empty-reprompts) (session-turn-count))
                   "1 + max-empty-reprompts turns — re-prompts consumed turns")
               (is (= agent/max-empty-reprompts (nudge-count))
-                  "one substrate nudge per re-prompt landed in the message log")
+                  "one core nudge per re-prompt landed in the message log")
               (is (= :error (:seon.agent.turn/status
                               (db/entity {:seon.db/ref
                                           [:seon.agent.turn/id

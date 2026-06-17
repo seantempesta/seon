@@ -163,7 +163,7 @@
                          "no local fallback. Start it with: bin/seon start wire-server")
                     {::sock-path default-sock-path
                      ::attempts  n
-                     :seon.error/kind :substrate-bug}))))))
+                     :seon.error/kind :core-bug}))))))
     1)))
 
 ;; ---------------------------------------------------------------------------
@@ -208,7 +208,7 @@
   (atom #{}))
 
 (def ^:private transact-timeout-ms
-  "Wire rpc timeout for transacts. Generous: the boot substrate-index
+  "Wire rpc timeout for transacts. Generous: the boot core-index
    transact carries thousands of rows in one tx."
   30000)
 

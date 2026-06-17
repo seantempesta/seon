@@ -2,7 +2,7 @@
 ;; design, superseding run 7's generic :kb.finding/* shape) — design a
 ;; my.kb.<domain> schema (multi-segment namespace, NOT a bare
 ;; :finding/* fork), reference the SHARED :my.kb/* provenance attrs
-;; (substrate-registered — never re-invented per domain), store with
+;; (core-registered — never re-invented per domain), store with
 ;; full provenance, reply AFTER the store. Runs end-to-end through the
 ;; real eval pipeline (register! tee → transact → reply!), so a
 ;; context/teaching change that breaks the convention shows up as a

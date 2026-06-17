@@ -8,7 +8,7 @@
 
    `dev-init!` opens a history-enabled datahike conn AND initializes
    bootstrap-CLJS, both stashed in defonce'd atoms. Decoupled from
-   `seon.client/start-agent!` so substrate experiments don't have to
+   `seon.client/start-agent!` so core experiments don't have to
    spin up the stub LLM, web server, or broadcast watcher.
 
    ### Typical loop via mcp__seon_cljs__eval
@@ -31,7 +31,7 @@
    ### Two eval surfaces
 
    - **Host eval** (shadow nREPL piggyback) reaches every var
-     statically required by :client. Use for substrate-library
+     statically required by :client. Use for core-library
      questions (does rewrite-clj load, does datahike's history
      API behave as documented).
    - **Bootstrap-CLJS eval** (`seon.eval/eval` against
@@ -47,7 +47,7 @@
     [datahike.api :as d]
     [seon.eval :as seval]
     ;; Pulled in so the :client bundle can reach rewrite-clj via the
-    ;; host REPL (mcp__seon_cljs__eval) for ad-hoc substrate probes
+    ;; host REPL (mcp__seon_cljs__eval) for ad-hoc core probes
     ;; — e.g. `(rewrite-clj.parser/parse-string-all "...")`. The
     ;; parse-forms parser itself lives in seon.repl.internal (.cljc).
     [rewrite-clj.parser]
@@ -69,7 +69,7 @@
 ;; Iteration-surface — dev-init! opens an agent conn (history-on) +
 ;; bootstrap-CLJS compile-state. Both stored in defonce atoms so
 ;; subsequent calls are cheap. Wired separately from
-;; seon.client/start-agent! so substrate experiments don't drag in
+;; seon.client/start-agent! so core experiments don't drag in
 ;; the stub LLM, web server, or broadcast watcher.
 ;; ============================================================
 
@@ -93,7 +93,7 @@
    Version-stamped: if `seon.eval/init-version` differs from the
    cached `@!init-version`, the cache is invalidated and a fresh
    init runs. That solves KI-2 — hot-reloads of `seon.eval` rotate
-   the version, so the substrate-iteration loop doesn't have to
+   the version, so the core-iteration loop doesn't have to
    manually nil the atom."
   []
   (if (and @!compile-state

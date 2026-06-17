@@ -138,7 +138,7 @@
 ;;; --- Legacy dynamic vars (deprecated; preserved as no-op stubs) ---
 ;;;
 ;;; These vars predate the datahike migration (they steered the prior
-;;; substrate's direct-mode and connection manager). They are no longer
+;;; core's direct-mode and connection manager). They are no longer
 ;;; consulted by any active code path; they survive only so that the few
 ;;; remaining call sites that `(binding [db/*direct-mode* true] ...)` or
 ;;; `(binding [db/*conn-manager* ...] ...)` continue to compile. Both will

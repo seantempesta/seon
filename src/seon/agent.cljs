@@ -48,7 +48,7 @@
                               (the message-model home: from/to refs,
                               hops derivation, blank-content guard)
      - `boot!`              — wire everything: create entity + install
-                              inbound-message trigger + install substrate
+                              inbound-message trigger + install core
                               default `:seon.ctx` layout
      - `reset-ctx!` / `update-ctx!` / `ctx-entities` — agent's ctx-layout
        editing surface
@@ -81,13 +81,13 @@
 
    Default symbol: `'seon.agent/assemble-context` (a transitional alias
    of `seon.ctx/assemble-context` — the ONE composer, V3-C). The
-   substrate section LAYOUT is CODE (`seon.ctx/substrate-default-ctx`);
+   core section LAYOUT is CODE (`seon.ctx/core-default-ctx`);
    the agent's own `:seon.agent/ctx` section maps MERGE with it by one
    priority sort (override-by-name). Each section's `:seon.render/ai`
    slot is a verbatim string or a fn symbol resolved late via
    `seon.eval/lookup-value`.
 
-   Substrate defaults (`substrate-default-ctx`): nine sections —
+   Core defaults (`core-default-ctx`): nine sections —
    `system`, `capabilities`, `exemplars`, `schema-catalog`,
    `functions-catalog`, `namespace-context`, `warnings`, `transcript`,
    `prompt`.
@@ -171,7 +171,7 @@
 (def transcript-section ctx/transcript-section)
 (def prompt-section ctx/prompt-section)
 (def assemble-context ctx/assemble-context)
-(def substrate-default-ctx ctx/substrate-default-ctx)
+(def core-default-ctx ctx/core-default-ctx)
 
 (schema/register! :seon.eval/id          [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.eval/at          :inst)
@@ -306,7 +306,7 @@
 (schema/register! :seon.agent/sessions    [:vector {:seon.db/component true} :seon.db/ref])
 
 ;; The agent's OWN context sections — a component vector of
-;; :seon.ctx/section maps (see seon.ctx). MERGED with the substrate
+;; :seon.ctx/section maps (see seon.ctx). MERGED with the core
 ;; defaults by one priority sort at render time (override-by-name);
 ;; the old stored-ctx-REPLACES-defaults semantics died with the
 ;; self-context spec (2026-06-10). :seon.ctx/fn is DEAD — the one
@@ -319,7 +319,7 @@
 ;; plain refs (NOT component — a fn does not own its ns). Identity
 ;; attrs upsert on redefine; history retains prior :source values.
 ;;
-;; Substrate fns/schemas/nses populate via bootstrap.edn on first
+;; Core fns/schemas/nses populate via bootstrap.edn on first
 ;; boot (§7.3); agent-defined entities populate via detect-and-tee
 ;; in eval-batch! (§4.2 step 7).
 ;; ============================================================
@@ -668,7 +668,7 @@
 ;; V0 hardcoded `default-id` / `default-ns` removed 2026-05-24 (audit P1
 ;; — see docs/prds/agent-runtime/research/schema-state-architecture-audit
 ;; -2026-05-23.md §2). Multi-agent v1 needs agent identity to flow via
-;; the `seon.db/agent-id-als` substrate, not via process-global atoms.
+;; the `seon.db/agent-id-als` core, not via process-global atoms.
 ;; Callers (seon.client/start-agent!) now mint the id locally and wrap
 ;; the boot pipeline in `(seon.db/with-agent id …)`. The home-ns stays
 ;; deterministic via `(home-ns id)`.
@@ -1120,7 +1120,7 @@
       (let [result (await
                      ;; Two nested ALS scopes — tx-context carries the
                      ;; full causality bundle into every transact's
-                     ;; tx-meta; agent-id-als is the substrate read by
+                     ;; tx-meta; agent-id-als is the core read by
                      ;; non-tx code (inspectors, section fns, web
                      ;; handlers) via `(seon.db/current-agent-id)`.
                      (db/with-agent id
@@ -1229,10 +1229,10 @@
   2)
 
 (def empty-completion-nudge
-  "The substrate-origin transcript note injected before an
+  "The core-origin transcript note injected before an
    empty-completion re-prompt (self→self message — appears in the
    agent's transcript next turn, wakes nothing, never reads as
-   user-directed). Same bracketed-substrate-note shape as the
+   user-directed). Same bracketed-core-note shape as the
    turn-cap note."
   (str "[previous completion produced no visible output — no forms"
        " were evaluated and nothing was sent. Respond with Clojure"
@@ -1376,7 +1376,7 @@
 
 
 ;; ------------------------------------------------------------
-;; Layout verbs — reset-ctx! restores substrate defaults; update-ctx!
+;; Layout verbs — reset-ctx! restores core defaults; update-ctx!
 ;; threads f over the current :seon.agent/ctx and retract-then-adds
 ;; the result. Component-cardinality-many means the retract is needed
 ;; to drop the old ctx entities before transacting new ones (per
@@ -1385,11 +1385,11 @@
 
 
 (defn ^:async reset-ctx!
-  "Restore the substrate-default ctx layout for `agent-id` by RETRACTING
+  "Restore the core-default ctx layout for `agent-id` by RETRACTING
    the stored :seon.agent/ctx override (cascade-retracts the existing
    :seon.ctx entities via component semantics). With no stored ctx,
    `assemble-context` falls back to the CODE default
-   (`substrate-default-ctx`) — so the agent tracks every future layout
+   (`core-default-ctx`) — so the agent tracks every future layout
    change automatically instead of freezing a stored copy of today's
    default (the pre-2026-06-10 behavior, which left prior agents on
    stale layouts whenever the default evolved)."
@@ -1456,7 +1456,7 @@
   "Add or update ONE section of your own context — upsert-by-name
    within your `:seon.agent/ctx` vector (re-adding a name replaces that
    entry, so iterating on a section doesn't accumulate copies). A name
-   that collides with a substrate default OVERRIDES it (deliberate,
+   that collides with a core default OVERRIDES it (deliberate,
    visible as data). `:seon.render/ai` is a string (rendered verbatim —
    doctrine, notes-to-self) or a qualified symbol of a fn called at
    every render with {:seon.db/db … :seon.agent/entity …}.

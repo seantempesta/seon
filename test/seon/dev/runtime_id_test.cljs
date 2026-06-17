@@ -2,7 +2,7 @@
   "The MCP runtime-addressing probe surface (mcp-agent-id-unification PRD
    2026-06-10). Pins the contract `bin/mcp-server-cljs` resolves against:
 
-     - `hosted` answers the VECTOR of ids this process hosts — substrate
+     - `hosted` answers the VECTOR of ids this process hosts — core
        agent ids AND `proc:<name>` infra ids share ONE roster.
      - resolution is MEMBERSHIP: `(some #{agent-id} (hosted))` — pinned
        here because the bb-side resolver can't be unit-tested from CLJS

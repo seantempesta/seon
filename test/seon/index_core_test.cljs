@@ -1,8 +1,8 @@
-(ns seon.index-substrate-test
-  "Guard tests for `seon.client/index-substrate!` — the runtime-introspection
-   substrate indexer (Step 2 of coherent-bootstrap-indexing-2026-06-08).
+(ns seon.index-core-test
+  "Guard tests for `seon.client/index-core!` — the runtime-introspection
+   core indexer (Step 2 of coherent-bootstrap-indexing-2026-06-08).
 
-   index-substrate! replaced the old curated `core-fn-curated` /
+   index-core! replaced the old curated `core-fn-curated` /
    `synthesize-fn-source` / `seed-core-fns!` table. It builds `:seon.fn` rows
    from REAL runtime introspection: spec + doc from var meta, and source +
    real arglists from a file-read at the var's `:file`/`:line` (paren-balance,
@@ -19,8 +19,8 @@
    straight unit test — no live pod.
 
    Run interactively via MCP eval:
-     (require 'seon.index-substrate-test :reload)
-     (cljs.test/run-tests 'seon.index-substrate-test)"
+     (require 'seon.index-core-test :reload)
+     (cljs.test/run-tests 'seon.index-core-test)"
   (:require
     [clojure.string :as str]
     [cljs.test :as t :refer [deftest is async]]
@@ -39,7 +39,7 @@
   ;; The single most important criterion: transact! carries the real spec
   ;; form AND real source/arglists — not the old curated `([arg])`-mangled,
   ;; `,,,`-stubbed, `specced? false` lie.
-  (let [tx (client/index-substrate!)
+  (let [tx (client/index-core!)
         t  (by-sym tx "seon.db/transact!")]
     (is (some? t) "transact! is present in the indexed tx-data")
     (is (str/starts-with? (:seon.fn/source t) "(defn ^:async transact!")
@@ -58,7 +58,7 @@
         "arglists parsed from real source (T15 transact! is [& call-args])")))
 
 (deftest specced-vs-unspecced-matches-reality
-  (let [tx       (client/index-substrate!)
+  (let [tx       (client/index-core!)
         query    (by-sym tx "seon.db/query")
         register (by-sym tx "seon.schema/register!")
         cai      (by-sym tx "seon.db/current-agent-id")]
@@ -79,7 +79,7 @@
   ;; instrumentation-mangled `([arg])` var-meta. query is the T15 pure-variadic
   ;; `[& args]` form (see db.cljs docstring) — its arglist is `([& args])`,
   ;; recovered verbatim from source.
-  (let [tx    (client/index-substrate!)
+  (let [tx    (client/index-core!)
         query (by-sym tx "seon.db/query")]
     (is (= "([& args])" (:seon.fn/arglists query))
         "query's real [& args] arglist is recovered from source")
@@ -89,7 +89,7 @@
   ;; `([args] body)` at paren-depth 2 — the old depth-1-only scan returned
   ;; "()" for them, which rendered the uncallable `(seon.db/pull ())` in
   ;; capabilities (context-audit §2). Both arities must now be recovered.
-  (let [tx     (client/index-substrate!)
+  (let [tx     (client/index-core!)
         pull   (by-sym tx "seon.db/pull")
         entity (by-sym tx "seon.db/entity")]
     (is (= "([req] [db selector eid])" (:seon.fn/arglists pull))
@@ -103,7 +103,7 @@
   ;; listen!'s real arg vector is `[{::keys [handler key conn] …}]` —
   ;; rendered verbatim, `::keys` would mis-resolve against the READER's
   ;; ns. The stored arglist must carry the explicit `:seon.db/keys`.
-  (let [tx      (client/index-substrate!)
+  (let [tx      (client/index-core!)
         listen  (by-sym tx "seon.db/listen!")
         al      (:seon.fn/arglists listen)]
     (is (str/includes? al ":seon.db/keys")
@@ -114,7 +114,7 @@
 (deftest no-stub-source-anywhere
   ;; Permissive + honest: every indexed fn has REAL source (or is OMITTED),
   ;; never a `,,,` stub.
-  (let [tx (client/index-substrate!)]
+  (let [tx (client/index-core!)]
     (is (every? #(str/starts-with? (:seon.fn/source %) "(defn")
                 (filter :seon.fn/sym tx))
         "every indexed :seon.fn row has real (defn …) source")
@@ -125,10 +125,10 @@
 
 (deftest emits-ns-rows-for-owning-nses
   ;; Each owning ns gets a :seon.ns row so the [:seon.ns/name kw] lookup-ref
-  ;; on :seon.fn/ns resolves. NON-exemplar substrate nses keep the minimal
+  ;; on :seon.fn/ns resolves. NON-exemplar core nses keep the minimal
   ;; `(ns x)` stub; exemplar nses carry the real full file text (see the
   ;; dedicated exemplar tests below).
-  (let [tx      (client/index-substrate!)
+  (let [tx      (client/index-core!)
         ns-rows (filter :seon.ns/name tx)
         names   (set (map :seon.ns/name ns-rows))]
     (is (contains? names :seon.db) ":seon.db ns row emitted")
@@ -143,9 +143,9 @@
   ;; the exemplar root set (seon.agent.search, seon.agent.todo) persists the REAL FULL
   ;; FILE TEXT on :seon.ns/source — the :exemplars context section renders
   ;; this attr from the graph, never re-reading files at render time. Safe
-  ;; to upgrade from the old stub because substrate rows are replay-skipped
+  ;; to upgrade from the old stub because core rows are replay-skipped
   ;; (Step 4).
-  (let [tx      (client/index-substrate!)
+  (let [tx      (client/index-core!)
         ns-rows (filter :seon.ns/name tx)
         row-for (fn [k] (first (filter #(= k (:seon.ns/name %)) ns-rows)))
         search  (:seon.ns/source (row-for :seon.agent.search))
@@ -186,7 +186,7 @@
         "the full test file carries real deftest bodies")))
 
 (deftest pure-index-emits-valid-refs
-  ;; index-substrate! is a PURE builder: every :seon.fn/ns it emits is a
+  ;; index-core! is a PURE builder: every :seon.fn/ns it emits is a
   ;; [:seon.ns/name <kw>] lookup-ref (a single :seon.db/ref), NEVER a bare
   ;; keyword — the malformed value the Run-3 findings traced to the second boot.
   ;;
@@ -196,7 +196,7 @@
   ;; on every roster change). Instead: the curated core surface must be
   ;; present, the set must be substantially wider than the old curated 14,
   ;; and every row must be structurally valid + unique.
-  (let [tx   (client/index-substrate!)
+  (let [tx   (client/index-core!)
         fns  (filter :seon.fn/sym tx)
         syms (map :seon.fn/sym fns)]
     (is (>= (count fns) 14)
@@ -241,17 +241,17 @@
   ;; default roster is empty in the :node-test build).
   (let [rows (client/index-tests [#'pure-index-emits-valid-refs])
         row  (first (filter :seon.test/sym rows))]
-    (is (= "seon.index-substrate-test/pure-index-emits-valid-refs"
+    (is (= "seon.index-core-test/pure-index-emits-valid-refs"
            (:seon.test/sym row)))
-    (is (= [:seon.ns/name :seon.index-substrate-test] (:seon.test/ns row))
+    (is (= [:seon.ns/name :seon.index-core-test] (:seon.test/ns row))
         "owning ns as a lookup-ref")
     (is (str/starts-with? (:seon.test/source row) "(deftest pure-index-emits-valid-refs")
         "source is the REAL (deftest …) text read from the test file")
-    (is (some #(= :seon.index-substrate-test (:seon.ns/name %)) rows)
+    (is (some #(= :seon.index-core-test (:seon.ns/name %)) rows)
         "an owning :seon.ns row is emitted alongside")))
 
-(deftest substrate-index-tx-idempotent-across-boots
-  ;; The "fresh agent, same conn" guard: substrate-index-tx drops rows already
+(deftest core-index-tx-idempotent-across-boots
+  ;; The "fresh agent, same conn" guard: core-index-tx drops rows already
   ;; present on the conn, so a SECOND start-agent! on the shared conn re-seeds
   ;; nothing ([]). This is what makes a second agent boot clean instead of
   ;; aborting on a re-seed against the populated store.
@@ -267,19 +267,19 @@
             ;; Pass :seon.db/conn explicitly — a `binding` of the dynamic
             ;; *conn* does NOT survive across Promise `.then` boundaries in
             ;; cljs (the binding frame pops when the sync callback returns).
-            (-> (client/substrate-index-tx conn)
+            (-> (client/core-index-tx conn)
                 (.then
                   (fn [first-tx]
                     ;; FIRST boot of the fresh conn: the full set — DERIVED
                     ;; from the pure builders, never a hardcoded count.
-                    (is (= (count (filter :seon.fn/sym (client/index-substrate!)))
+                    (is (= (count (filter :seon.fn/sym (client/index-core!)))
                            (count (filter :seon.fn/sym first-tx)))
-                        "first boot emits every substrate fn row")
+                        "first boot emits every core fn row")
                     (is (= (count (client/index-schemas))
                            (count (filter :seon.schema/key first-tx)))
                         "first boot emits a :seon.schema row per registered schema")
                     (db/transact! {:seon.db/conn conn :seon.db/tx-data first-tx})))
-                (.then (fn [_] (client/substrate-index-tx conn)))
+                (.then (fn [_] (client/core-index-tx conn)))
                 (.then
                   (fn [second-tx]
                     ;; SECOND boot of the now-populated conn: clean no-op.
@@ -289,7 +289,7 @@
                       {:seon.db/conn conn
                        :seon.db/tx-data
                        [[:db/retractEntity [:seon.fn/sym "seon.schema/register!"]]]})))
-                (.then (fn [_] (client/substrate-index-tx conn)))
+                (.then (fn [_] (client/core-index-tx conn)))
                 (.then
                   (fn [gap-tx]
                     ;; After dropping one fn, the re-index emits ONLY the gap,
@@ -304,16 +304,16 @@
                   (is false (str "idempotency test threw: " (or (.-message e) e)))
                   (done))))))
 
-(deftest prune-substrate-ghosts-removes-only-substrate-claimed-absentees
+(deftest prune-core-ghosts-removes-only-core-claimed-absentees
   ;; Boot-index GC (open-issues 2026-06-11 row 5). Pins all four hard
   ;; constraints in one flow on one conn:
   ;;
   ;;   (a) discriminator — ONLY rows whose source tx carries
-  ;;       `:seon.db/origin :substrate-seed` are candidates; an
+  ;;       `:seon.db/origin :core-seed` are candidates; an
   ;;       agent-authored my.* row with the IDENTICAL shape is never
   ;;       pruned, and an agent's `(register! …)` tee schema row is
   ;;       protected by replay's registration-call-source? rule even
-  ;;       under a (forged) substrate-seed origin;
+  ;;       under a (forged) core-seed origin;
   ;;   (b) loudness is the log/info! inside the pruner (shape asserted
   ;;       via the returned pruned vector, the same data the message
   ;;       names);
@@ -325,11 +325,11 @@
                              (db/tx-meta-datahike-schema)))
         (.then
           (fn [conn]
-            (-> (client/substrate-index-tx conn)
+            (-> (client/core-index-tx conn)
                 (.then (fn [first-tx]
                          (db/transact! conn first-tx
-                                       {:seon.db/origin :substrate-seed})))
-                ;; GHOSTS: substrate-seeded rows whose ns/fn/schema no
+                                       {:seon.db/origin :core-seed})))
+                ;; GHOSTS: core-seeded rows whose ns/fn/schema no
                 ;; longer exists in the booting code (deleted/renamed).
                 (.then (fn [_]
                          (db/transact!
@@ -344,26 +344,26 @@
                              :seon.schema/source "[:string]"}
                             ;; agent register! TEE row — protected by the
                             ;; `(…)`-call discriminator even though the
-                            ;; origin here claims substrate-seed.
+                            ;; origin here claims core-seed.
                             {:seon.schema/key    :my.agentish/teed
                              :seon.schema/source "(seon.schema/register! :my.agentish/teed :string)"}]
-                           {:seon.db/origin :substrate-seed})))
+                           {:seon.db/origin :core-seed})))
                 ;; AGENT-AUTHORED row with the IDENTICAL shape as the
-                ;; ghost ns — different (non-substrate) provenance.
+                ;; ghost ns — different (non-core) provenance.
                 (.then (fn [_]
                          (db/transact!
                            conn
                            [{:seon.ns/name   :my.todo-app
                              :seon.ns/source "(ns my.todo-app)"}]
                            {:seon.db/origin :agent})))
-                (.then (fn [_] (client/prune-substrate-ghosts! conn)))
+                (.then (fn [_] (client/prune-core-ghosts! conn)))
                 (.then
                   (fn [{pruned :seon.client/pruned}]
                     (is (= [[:fn "seon.ghost.deleted/gone"]
                             [:ns :seon.ghost.deleted]
                             [:schema :seon.ghost/bubble]]
                            pruned)
-                        "exactly the three substrate ghosts are pruned — not the agent ns row, not the (register! …) tee row")
+                        "exactly the three core ghosts are pruned — not the agent ns row, not the (register! …) tee row")
                     (let [db' @conn
                           ns-names (into #{} (map first)
                                          (d/q '[:find ?nm :where [?e :seon.ns/name ?nm]] db'))
@@ -374,12 +374,12 @@
                       (is (contains? ns-names :my.todo-app)
                           "agent-authored my.* ns row with identical shape SURVIVES")
                       (is (contains? ns-names :seon.db)
-                          "live substrate rows (present in the boot set) survive — rename keeps the new")
+                          "live core rows (present in the boot set) survive — rename keeps the new")
                       (is (not (contains? sch-keys :seon.ghost/bubble))
                           "deleted-registration schema row is GONE")
                       (is (contains? sch-keys :my.agentish/teed)
                           "agent (register! …) tee row SURVIVES the prune"))))
-                (.then (fn [_] (client/prune-substrate-ghosts! conn)))
+                (.then (fn [_] (client/prune-core-ghosts! conn)))
                 (.then
                   (fn [{pruned :seon.client/pruned}]
                     (is (= [] pruned)
@@ -389,7 +389,7 @@
                   (is false (str "prune test threw: " (or (.-message e) e)))
                   (done))))))
 
-(deftest substrate-index-tx-reasserts-drifted-ns-source
+(deftest core-index-tx-reasserts-drifted-ns-source
   ;; E1's stub→full upgrade path: ns rows dedup on name AND source. A store
   ;; whose :seon.ns/source for an exemplar ns differs from the freshly-built
   ;; full file text (e.g. the pre-E1 `(ns x)` stub) gets exactly that ns row
@@ -399,7 +399,7 @@
                              (db/tx-meta-datahike-schema)))
         (.then
           (fn [conn]
-            (-> (client/substrate-index-tx conn)
+            (-> (client/core-index-tx conn)
                 (.then (fn [first-tx]
                          (db/transact! {:seon.db/conn conn
                                         :seon.db/tx-data first-tx})))
@@ -411,7 +411,7 @@
                             :seon.db/tx-data
                             [{:seon.ns/name   :seon.agent.search
                               :seon.ns/source "(ns seon.agent.search)"}]})))
-                (.then (fn [_] (client/substrate-index-tx conn)))
+                (.then (fn [_] (client/core-index-tx conn)))
                 (.then
                   (fn [tx]
                     (let [ns-rows (filter :seon.ns/name tx)]
