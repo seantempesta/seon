@@ -355,6 +355,35 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; B9 tee-gate bug (db-is-the-running-system PRD): a usage-example
+;; `(defn f {:test (fn [] …)} …)` carries the analyzer's TOP-LEVEL `:test
+;; true` marker (deftest-def? TRUE) just like a real `(deftest …)`, so the
+;; old gate `(not (deftest-def? …))` DROPPED the defn's :seon.fn row (lost!)
+;; AND mis-filed it as a :seon.test row. Classifying on the FORM HEAD
+;; (`defn-form?`) fixes it: a `:test`-bearing defn → :seon.fn row, NO
+;; :seon.test row; a `(deftest …)` (defn-form? FALSE) → :seon.test row only.
+;; ---------------------------------------------------------------------------
+
+(deftest test-bearing-defn-tees-a-fn-row-not-a-test-row
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (seval/eval cs "(ns probe.teeexample)" {:ns 'cljs.user :analyze-deps? false})
+                (.then (fn [_]
+                         (tee-for cs 'probe.teeexample
+                                  "(defn tee-example-fn {:test (fn [] (assert true))} [a b] (+ a b))")))
+                (.then
+                  (fn [tee]
+                    (testing "the :test-bearing defn produces EXACTLY one :seon.fn row"
+                      (is (= ["probe.teeexample/tee-example-fn"]
+                             (mapv :seon.fn/sym (filter :seon.fn/sym tee)))))
+                    (testing "and NO :seon.test row — a defn is never a test, regardless of :test marker"
+                      (is (= [] (vec (filter :seon.test/sym tee))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; Replay lane — the teed :seon.test row (plus its ns row) replays through the
 ;; :seon.test lane via replay-program-graph!, reconstituting the deftest var.
 ;; ---------------------------------------------------------------------------
@@ -661,3 +690,81 @@
                     (.finally (fn [] (unregister! k :probe.selftee.entityreplay/x))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Agent-no-override-core guard (db-is-the-running-system PRD; Sean: agents
+;; must NOT override compiled core/third-party fns). core-origin-fn-syms
+;; detects, by ORIGIN, which of the syms an agent eval just (re)defined are
+;; existing compiled-core fns (current source datom's tx is :core-seed);
+;; reject-core-overrides drops those :seon.fn tee rows so the core display
+;; row stays intact and the override takes no ephemeral live effect. A NEW
+;; sym, or one the agent itself owns, passes through.
+;; ---------------------------------------------------------------------------
+
+(defn- seed-fn-row!
+  "Transact a :seon.fn row for `sym` under tx-origin `origin` on `conn`."
+  [conn origin sym]
+  (db/with-tx-context {:seon.db/origin origin}
+    (fn []
+      (db/transact!
+        {:seon.db/tx-data [{:seon.fn/sym        sym
+                            :seon.fn/source     (str "(defn x [] " (name origin) ")")
+                            :seon.fn/created-at (js/Date.)}]
+         :seon.db/conn    conn}))))
+
+(defn- install-tx-meta-schema!
+  "fresh-conn installs only agent-bootstrap-attrs (entity attrs); the
+   tx-meta attrs (`:seon.db/origin`, …) are a SEPARATE schema set that
+   the live pod installs at boot. The override guard reads
+   `[?tx :seon.db/origin :core-seed]`, so the test conn must install
+   it too (otherwise the origin datom never lands and the query is empty
+   — exactly the prod schema, just split across two install calls)."
+  [conn]
+  (db/transact! {:seon.db/tx-data (db/tx-meta-datahike-schema)
+                 :seon.db/conn    conn}))
+
+(deftest core-origin-fn-syms-detects-only-core-seed-syms
+  (async done
+    (-> (fresh-conn)
+        (.then
+          (fn [conn]
+            (binding [db/*conn* conn]
+              (-> (install-tx-meta-schema! conn)
+                  (.then (fn [_] (seed-fn-row! conn :core-seed "seon.core.demo/corefn")))
+                  (.then (fn [_] (seed-fn-row! conn :agent "my.agent/agentfn")))
+                  (.then
+                    (fn [_]
+                      (let [db* @conn]
+                        (testing "only the :core-seed sym is flagged"
+                          (is (= #{"seon.core.demo/corefn"}
+                                 (seval/core-origin-fn-syms
+                                   db* ["seon.core.demo/corefn"
+                                        "my.agent/agentfn"
+                                        "my.agent/brand-new-fn"]))))
+                        (testing "an agent-origin sym is NOT flagged"
+                          (is (= #{}
+                                 (seval/core-origin-fn-syms db* ["my.agent/agentfn"]))))
+                        (testing "a sym with no row at all is NOT flagged"
+                          (is (= #{}
+                                 (seval/core-origin-fn-syms db* ["my.agent/never-seen"])))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest reject-core-overrides-drops-blocked-fn-rows-only
+  (let [tee     [{:seon.fn/sym "seon.core.demo/corefn"
+                  :seon.fn/source "(defn corefn [] :override)"}
+                 {:seon.fn/sym "my.agent/agentfn"
+                  :seon.fn/source "(defn agentfn [] :mine)"}
+                 {:seon.ns/name :my.agent :seon.ns/source "(ns my.agent)"}
+                 [:db/retract [:seon.ns/name :my.agent] :seon.ns/requires :foo]]
+        blocked #{"seon.core.demo/corefn"}
+        out     (seval/reject-core-overrides tee blocked)]
+    (testing "the blocked core-override :seon.fn row is removed"
+      (is (nil? (some #(and (map? %) (= "seon.core.demo/corefn" (:seon.fn/sym %))) out))))
+    (testing "the agent's own :seon.fn row passes through"
+      (is (some? (some #(and (map? %) (= "my.agent/agentfn" (:seon.fn/sym %))) out))))
+    (testing "non-:seon.fn rows (ns map, retract vector) pass through untouched"
+      (is (some? (some #(and (map? %) (= :my.agent (:seon.ns/name %))) out)))
+      (is (some? (some vector? out))))
+    (testing "empty blocked set is a no-op identity"
+      (is (= tee (seval/reject-core-overrides tee #{}))))))

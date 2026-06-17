@@ -1060,12 +1060,19 @@
   (let [new-defs    (analyzer-info/defs-since defs-before compile-state)
         new-schemas (set/difference (schema/current-keys) schemas-before)
         fn-entities (for [{:keys [ns var-map]} new-defs
-                          ;; deftest defs are :seon.test rows ONLY (below),
-                          ;; matching the core split (`core-vars` →
-                          ;; :seon.fn via index-core-tx; `!indexed-test-
-                          ;; vars` → :seon.test via index-tests — disjoint).
-                          ;; Also keeps resume single-lane: a deftest teed as
-                          ;; BOTH rows would replay its source twice.
+                          ;; Classify on the FORM HEAD, not the analyzer's
+                          ;; `:test` marker (B9, db-is-the-running-system PRD).
+                          ;; The analyzer collapses BOTH a `(deftest …)` AND a
+                          ;; usage-example `(defn f {:test (fn [] …)} …)` into
+                          ;; top-level `:test true`, so `deftest-def?` is TRUE
+                          ;; for both. The old gate `(not (deftest-def? …))`
+                          ;; therefore DROPPED a `:test`-bearing defn's
+                          ;; :seon.fn row (lost!) AND mis-filed it as a
+                          ;; :seon.test row. `defn-form?` ALONE is the correct
+                          ;; gate: a `(defn …)`/`(defn- …)` (with or without
+                          ;; `:test`) → :seon.fn row; a `(deftest …)`
+                          ;; (defn-form? FALSE) → :seon.test row (below), never
+                          ;; both — keeping resume single-lane.
                           ;;
                           ;; Strict persistence (#7): create a :seon.fn row
                           ;; ONLY when `source` is a literal single `(defn …)`
@@ -1077,8 +1084,7 @@
                           ;; #29 effectful-bare-def heuristic). `:fn-var?`
                           ;; stays a RENDER attr below; it no longer gates
                           ;; row creation.
-                          :when (and (not (deftest-def? var-map))
-                                     (defn-form? source))
+                          :when (defn-form? source)
                           :let [{:keys [sym fn-var? arglists doc private? spec]}
                                 (analyzer-info/var-projection var-map)
                                 ;; Phase 3 (mvp-completion-plan 2026-05-27): if
@@ -1159,7 +1165,16 @@
         ;; that mention a redefined fn.
         test-entities (for [{:keys [ns var-map]} new-defs
                             :let [{:keys [sym]} (analyzer-info/var-projection var-map)]
-                            :when (deftest-def? var-map)]
+                            ;; A :seon.test row ONLY for a real `(deftest …)`:
+                            ;; deftest-def? TRUE *and* defn-form? FALSE. A
+                            ;; usage-example `(defn f {:test …} …)` also carries
+                            ;; the analyzer's `:test true` marker (deftest-def?
+                            ;; TRUE) but is a defn (defn-form? TRUE) → it gets a
+                            ;; :seon.fn row above, NOT a :seon.test row (B9,
+                            ;; db-is-the-running-system PRD). The form head is
+                            ;; the disambiguator the analyzer's marker can't be.
+                            :when (and (deftest-def? var-map)
+                                       (not (defn-form? source)))]
                         {:seon.test/sym        sym
                          ;; nested-map upsert — see :seon.fn/ns note above.
                          :seon.test/ns         {:seon.ns/name (keyword (str ns))}
@@ -1225,6 +1240,69 @@
 ;; `seon.dynamic` (the `cljs.js/eval-str` target). A real agent/core ns
 ;; (`seon.*`, `my.*`, a data ns) gets a `:seon.ns` row; these do not.
 (def ^:private transient-ns-syms #{'cljs.user 'seon.dynamic})
+
+;; ----------------------------------------------------------------------------
+;; Agent-no-override-core guard (db-is-the-running-system PRD; Sean: agents
+;; must NOT override compiled core/third-party fns). An agent eval that
+;; REDEFINES an EXISTING compiled-core fn must not persist a :seon.fn override
+;; row — it would clobber the core display row and take ephemeral live effect.
+;; Detect by ORIGIN: a sym whose CURRENT `:seon.fn/source` datom's tx carries
+;; `:seon.db/origin :core-seed` is compiled core/third-party (same provenance
+;; rule [[tee-registered-schema!]] uses for the schema self-tee). A NEW sym
+;; (no row) or an agent-origin sym is NOT blocked — agents freely define and
+;; redefine in their OWN namespaces; only redefining an existing :core-seed
+;; sym is denied.
+;; ----------------------------------------------------------------------------
+
+(defn core-origin-fn-syms
+  "Of `syms` (FQ `:seon.fn/sym` strings), the subset whose CURRENT
+   `:seon.fn/source` datom's tx carries `:seon.db/origin :core-seed` —
+   i.e. compiled core/third-party fns the agent must not override. A sym
+   with no `:seon.fn` row, or whose latest source was written under any
+   non-core origin (`:agent`, `:replay`, …), is NOT included (it is the
+   agent's own / a free new def). Returns a set. `db` is a datahike db
+   value (third-party boundary)."
+  {:malli/schema
+   [:=> [:catn [::db :any] [::syms [:sequential :string]]]
+        [:set :string]]}
+  [db syms]
+  (let [want (set syms)]
+    (into #{}
+          (comp (map first) (filter want))
+          (db/query '[:find ?sym
+                      :where
+                      [?e :seon.fn/sym ?sym]
+                      [?e :seon.fn/source _ ?tx]
+                      [?tx :seon.db/origin :core-seed]]
+                    db))))
+
+(defn reject-core-overrides
+  "Filter `tee-entities` for the override guard: drop any `:seon.fn` row
+   whose `:seon.fn/sym` is in `blocked` (a set of core-origin syms from
+   [[core-origin-fn-syms]]) and, for each dropped sym, `js/console.warn`
+   a specific, actionable one-liner. Non-`:seon.fn` rows (`:seon.ns`,
+   `:seon.schema`, `:seon.test`, the `ns-requires-tx` retract vectors)
+   pass through untouched. Returns the filtered vector. Pure except for
+   the warn side effect; never throws."
+  {:malli/schema
+   [:=> [:catn [::tee-entities [:vector :any]] [::blocked [:set :string]]]
+        [:vector :any]]}
+  [tee-entities blocked]
+  (if (empty? blocked)
+    tee-entities
+    (vec
+      (remove
+        (fn [entity]
+          (let [sym (and (map? entity) (:seon.fn/sym entity))]
+            (when (and sym (contains? blocked sym))
+              (js/console.warn
+                (str "[seon.eval] agent cannot override compiled core fn "
+                     sym " — its :seon.fn row is ignored (not persisted). "
+                     "Agents define/redefine in their OWN namespaces; core "
+                     "is changed via a build-time third-party override "
+                     "(see examples/third-party-override)."))
+              true)))
+        tee-entities))))
 
 ;; ============================================================
 ;; register! self-tee (open-issues 2026-06-12, task #24 symptom 1).
@@ -1848,6 +1926,24 @@
                                           :schemas-before schemas-before
                                           :source         source
                                           :at             at}))
+                        ;; Agent-no-override-core guard (db-is-the-running-
+                        ;; system PRD; Sean): drop any tee'd :seon.fn row that
+                        ;; would REDEFINE an existing compiled-core fn (a sym
+                        ;; whose current source datom's tx is `:core-seed`), so
+                        ;; the core display row stays intact and the override
+                        ;; takes no ephemeral live effect. A NEW sym or an
+                        ;; agent-origin sym is NOT removed — agents define and
+                        ;; redefine freely in their OWN namespaces. `@db/*conn*`
+                        ;; is the live db value here (same as `ns-requires-tx`).
+                        tee-entities
+                        (let [fn-syms (->> tee-entities
+                                           (keep #(when (map? %) (:seon.fn/sym %)))
+                                           vec)]
+                          (if (and db/*conn* (seq fn-syms))
+                            (reject-core-overrides
+                              (vec tee-entities)
+                              (core-origin-fn-syms @db/*conn* fn-syms))
+                            tee-entities))
                         ;; Capture `:seon.ns/requires` for the ENDING ns on
                         ;; EVERY successful eval — not only `(ns …)` forms — so
                         ;; a re-eval'd ns form or a bare `(require '[x])` keeps
