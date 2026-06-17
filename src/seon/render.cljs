@@ -527,7 +527,7 @@
           (let [resp   (html-render value input)
                 hiccup (:seon.render/hiccup resp)]
             ;; SERIALIZATION joins the same guarded path as invocation
-            ;; (aria asks 9+12): a structurally-broken hiccup (e.g. a
+            ;; (serialization-boundary hardening): a structurally-broken hiccup (e.g. a
             ;; vector-of-vectors child) doesn't throw at html-render —
             ;; it used to escape here and detonate LATER at page
             ;; serialization, 500ing /agent/<id>, the grid, and

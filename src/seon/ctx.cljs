@@ -486,7 +486,12 @@
    well-controlled and must arrive whole (the inventory-clip defect).
    Error rendering branches: a Malli instrumentation envelope renders
    via `render-malli-error`; otherwise the pre-rendered legible
-   `:seon.eval/error` string."
+   `:seon.eval/error` string.
+
+   On SUCCESS, a reactive 'won't persist' note (#7) is DERIVED from the
+   eval's source via [[seon.eval/scratch-def-note]] and appended as a
+   trailing `;;` line — pure, no stored attr, recomputed each render so
+   it FOLLOWS the form. Blank for everything but a bare `(def …)`."
   ([row] (format-eval-row row false))
   ([{src        :seon.eval/source
      ok?        :seon.eval/ok?
@@ -526,13 +531,19 @@
          ;; Captured println/prn output — shown above the value like a
          ;; real REPL prints before returning. Bounded by the same cap.
          out-ln (when (and (string? out) (not (str/blank? out)))
-                  (str (cap-result (str/trimr out) limit) "\n"))]
+                  (str (cap-result (str/trimr out) limit) "\n"))
+         ;; Reactive 'won't persist' note (#7) — DERIVED from source, no
+         ;; stored attr; recomputed each render so it follows the form.
+         ;; Appended AFTER neutralize-result-claims and carries no `=>`/
+         ;; `⇒`, so it never trips [[result-claim-re]].
+         note   (when ok? (seval/scratch-def-note src))]
      (str (when (and narr (not (str/blank? narr)))
             (str (neutralize-result-claims narr) "\n"))
           (if eval-ns (name eval-ns) "?") "=> "
           (cap-result (neutralize-result-claims src) limit) "\n"
           out-ln
-          body suffix))))
+          body suffix
+          (when (and note (not (str/blank? note))) (str "\n" note))))))
 
 ;; ------------------------------------------------------------
 ;; Read API — what the agent calls from its REPL to walk its own

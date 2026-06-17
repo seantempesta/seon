@@ -70,7 +70,7 @@
 
 (def ^:private fallback-soul-md-path
   "Seed path tried when SEON_SOUL_FILE is unset and the default
-   SOUL.md does not exist — Aria's identity file lives in AGENTS.md."
+   SOUL.md does not exist — the agent's identity file lives in AGENTS.md."
   "AGENTS.md")
 
 (defn- env-val

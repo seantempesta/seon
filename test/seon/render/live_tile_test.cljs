@@ -165,14 +165,15 @@
 ;; ============================================================
 ;; hiccup-structure-error — serializer-faithful, NOT valid-hiccup?:
 ;; everything ->string tolerates passes; everything that makes
-;; ->string THROW is located with a path (aria asks 9+12).
+;; ->string THROW is located with a path (serialization-boundary hardening).
 ;; ============================================================
 
-(def aria-repro-hiccup
-  "The EXACT shape from the aria incident: a vector-of-vectors child
-   (`[:div hdr [[:div …] [:div …]]]`) — the fn call succeeds, then
-   page serialization throws Invalid tag and 500s /agent/<id>."
-  [:div "People & Projects" [[:div "Sean"] [:div "TJ"]]])
+(def vov-repro-hiccup
+  "The EXACT shape from the vector-of-vectors incident: a
+   vector-of-vectors child (`[:div hdr [[:div …] [:div …]]]`) — the fn
+   call succeeds, then page serialization throws Invalid tag and 500s
+   /agent/<id>."
+  [:div "Header" [[:div "row-a"] [:div "row-b"]]])
 
 (deftest structure-error-nil-on-serializable-hiccup
   ;; Serializer-tolerant shapes valid-hiccup? REJECTS must pass here —
@@ -192,7 +193,7 @@
 
 (deftest structure-error-locates-vector-of-vectors
   (let [{:seon.render.live-tile/keys [structure-path structure-message]}
-        (tile/hiccup-structure-error aria-repro-hiccup)]
+        (tile/hiccup-structure-error vov-repro-hiccup)]
     (is (= [2] structure-path) "the defect's path, not just 'somewhere'")
     (is (re-find #"vector-of-vectors" structure-message))
     (is (re-find #"Splice" structure-message)
@@ -413,7 +414,7 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
-;; Serialization errors join the guarded path (aria asks 9+12): a
+;; Serialization errors join the guarded path (serialization-boundary hardening): a
 ;; tile whose FN CALL succeeds but whose hiccup can't serialize must
 ;; degrade to error-response — the page (and the chat on it) never
 ;; 500s for a tile problem, and the response hiccup itself is PROVEN
@@ -421,12 +422,12 @@
 ;; ============================================================
 
 (defn vector-of-vectors-tile
-  "Test tile reproducing the aria incident: the call SUCCEEDS, the
-   hiccup is structurally broken."
+  "Test tile reproducing the vector-of-vectors incident: the call
+   SUCCEEDS, the hiccup is structurally broken."
   {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
   [_input]
-  {:seon.render/hiccup aria-repro-hiccup
-   :seon.render/ai     "people & projects"})
+  {:seon.render/hiccup vov-repro-hiccup
+   :seon.render/ai     "header rows"})
 
 (defn unparseable-tag-tile
   "Test tile whose hiccup passes the structural walk (keyword tag)
@@ -479,7 +480,7 @@
   ;; old guard couldn't fire at all. Same seam covers it.
   (async done
     (-> (tile-degrades-legibly
-          "tilevov-000002" aria-repro-hiccup #"vector-of-vectors")
+          "tilevov-000002" vov-repro-hiccup #"vector-of-vectors")
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

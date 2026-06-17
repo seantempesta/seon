@@ -132,52 +132,60 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; #29 — side-effecting bare `def`s are NOT replayed.
+;; Strict persistence (#7) — only a literal single `(defn …)` replays as a
+;; :seon.fn row. Classify on the form HEAD.
 ;;
-;; A test agent self-tee'd `(def virtue-eval (seon.agent/message! {…}))`.
-;; Replay re-evaled its `:source` on every boot/mint → ghost message. The
-;; tee now refuses to create the row, AND replay drops any already-stored
-;; such row so deployed-store poison stops re-firing. `defn`s and pure
-;; value `def`s are unaffected.
+;; The old #29 effectful-bare-def heuristic is GONE: under strict-head gating
+;; a bare `(def x (message! …))` is never persisted, so there is nothing to
+;; scan. The replay-set filter now drops ANY :fn row whose source isn't a
+;; clean defn — that catches the deployed-store ghost-message poison AND
+;; pure-value defs in ONE rule, no effectful scan.
 ;; ---------------------------------------------------------------------------
 
 (def ^:private ghost-seed-tx
   [{:seon.ns/name :my.agent.g1 :seon.ns/source "(ns my.agent.g1)"}
-   ;; POISON: bare def whose init calls an effectful core fn.
-   ;; MUST be dropped from the replay set (deployed-store poison path).
+   ;; POISON: bare def whose init calls an effectful core fn. Historical
+   ;; deployed-store row (the tee no longer creates these). MUST be dropped
+   ;; from the replay set so it never re-fires.
    {:seon.fn/sym "my.agent.g1/virtue-eval"
     :seon.fn/ns [:seon.ns/name :my.agent.g1]
     :seon.fn/source "(def virtue-eval (seon.agent/message! {:to :user :text \"Running virtue eval…\"}))"
     :seon.fn/fn-var? false
     :seon.fn/arglists "nil" :seon.fn/doc "" :seon.fn/private? false}
-   ;; A defn whose BODY calls message! — unaffected (replaying a defn just
-   ;; redefines the fn; it does not fire the effect). MUST replay.
+   ;; A real `(defn …)` — clean defining form. MUST replay.
    {:seon.fn/sym "my.agent.g1/notify"
     :seon.fn/ns [:seon.ns/name :my.agent.g1]
     :seon.fn/source "(defn notify [t] (seon.agent/message! {:to :user :text t}))"
     :seon.fn/fn-var? true
     :seon.fn/arglists "([t])" :seon.fn/doc "" :seon.fn/private? false}
-   ;; A pure value def — MUST replay.
+   ;; A pure value def — POLICY FLIP (#7): a `(def …)` is runtime state, not
+   ;; a function. Now DROPPED from the replay set (was kept under #29).
    {:seon.fn/sym "my.agent.g1/answer"
     :seon.fn/ns [:seon.ns/name :my.agent.g1]
     :seon.fn/source "(def answer 42)"
     :seon.fn/fn-var? false
     :seon.fn/arglists "nil" :seon.fn/doc "" :seon.fn/private? false}])
 
-(deftest effectful-bare-def-classifier-is-precise
-  ;; The ONE predicate used at both the tee and replay sites.
-  (is (true?  (seval/effectful-bare-def? "(def virtue-eval (seon.agent/message! {:to :user :text \"hi\"}))")))
-  (is (true?  (seval/effectful-bare-def? "(def w (db/transact! [{:a 1}]))")))
-  (is (true?  (seval/effectful-bare-def? "(def q (let [x 1] (message! {:text x})))")))
-  (is (true?  (seval/effectful-bare-def? "(def r (agent/reply! {:text \"x\"}))"))
-      "FQ/aliased call matched by simple name")
-  (is (false? (seval/effectful-bare-def? "(def y 42)")))
-  (is (false? (seval/effectful-bare-def? "(def z (fn [a] a))")))
-  (is (false? (seval/effectful-bare-def? "(defn f [a] a)")))
-  (is (false? (seval/effectful-bare-def? "(defn notify [t] (seon.agent/message! {:to :user :text t})))"))
-      "a defn calling message! in its BODY is unaffected"))
+(deftest defn-form-classifier-is-precise
+  ;; The strict-head gate used at both the tee and replay sites.
+  (is (true?  (seval/defn-form? "(defn f [a] a)")))
+  (is (true?  (seval/defn-form? "(defn- g [a] a)")))
+  (is (true?  (seval/defn-form? "(defn notify [t] (seon.agent/message! {:to :user :text t}))"))
+      "a defn whose body calls message! still persists — it's a defn")
+  (is (false? (seval/defn-form? "(def y 42)")))
+  (is (false? (seval/defn-form? "(def z (fn [a] a))")))
+  (is (false? (seval/defn-form? "(def r (agent/reply! {:text \"x\"}))")))
+  (is (false? (seval/defn-form? "(do (defn a []) (defn b []))"))
+      "a do-wrapped defn is not a single literal defn")
+  (is (false? (seval/defn-form? "(defn a []) (defn b [])"))
+      "multi-form source is not a single defn")
+  (is (false? (seval/defn-form? "(deftest t (is true))"))
+      "head is deftest — persists via its own path, not as a defn row")
+  (is (false? (seval/defn-form? "")))
+  (is (false? (seval/defn-form? "(("))
+      "unreadable source classifies false (fail-closed)"))
 
-(deftest replay-set-drops-effectful-bare-defs
+(deftest replay-set-keeps-only-defns
   (async done
     (-> (client/open-agent-conn!)
         (.then (fn [conn]
@@ -188,11 +196,11 @@
           (fn [entries]
             (let [fn-idents (set (->> entries (filter #(= :fn (:kind %))) (map :ident)))]
               (is (not (contains? fn-idents "my.agent.g1/virtue-eval"))
-                  "side-effecting bare def is DROPPED from the replay set")
+                  "effectful bare def is DROPPED from the replay set")
+              (is (not (contains? fn-idents "my.agent.g1/answer"))
+                  "pure value def is now DROPPED (strict-policy flip)")
               (is (contains? fn-idents "my.agent.g1/notify")
-                  "defn calling message! in its body still replays")
-              (is (contains? fn-idents "my.agent.g1/answer")
-                  "pure value def still replays"))))
+                  "a clean `(defn …)` row is KEPT"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

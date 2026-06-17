@@ -8,7 +8,7 @@ tags: [prd, agent, web, flow]
 
 ## Context
 
-The aria (downstream consumer) integration filed a batch of substrate asks in
+A downstream consumer integration filed a batch of substrate asks in
 `tmp/2026-06-11-seon-asks.md` (a living, gitignored doc — current reality, not a
 log). The LLM-related asks are **done** on `feature/llm-sdk-migration` and are
 out of scope here:
@@ -31,7 +31,7 @@ substrate/UI/boot fixes.
 - Work on **`feature/substrate-asks`**, stacked on the `feature/llm-sdk-migration`
   tip (the LLM branch merges independently first; this rebases onto the base
   after). It was branched at the LLM tip with **no working-tree change**.
-- **The live Aria/Qwen pod runs from this working tree.** Do NOT checkout a
+- **The live pod runs from this working tree.** Do NOT checkout a
   branch that lacks the LLM migration (the working tree would lose the
   `seon.ai.openai-compat` adapter, cljs-watch would recompile old code, and the
   running deployment would break on reload). Stay on `feature/substrate-asks`.
@@ -61,7 +61,7 @@ The only real bug here; it silently poisons every agent mint. Found live
 {...to user... "Running virtue eval…"}))`. The tee indexed it as a `:seon.fn`
 row; **replay re-executed it on every pod boot and agent mint**, so every fresh
 agent's chat opened with a ghost message from an agent that no longer exists.
-Aria fixed the instance by retracting the fn row + 8 ghost messages.
+The instance was fixed by retracting the fn row + 8 ghost messages.
 
 **Ask:** make replay (or the tee/indexer) refuse bare non-`defn` `def`s whose
 init form calls effectful substrate fns (`message!` / `reply!` / `transact!`),
@@ -167,7 +167,7 @@ still POSTs complete.
 
 ### #15 — Configurable identity-seed filename (SOUL.md → AGENTS.md)
 
-`my.soul/soul-md-path` hardcodes `"SOUL.md"`. Aria's identity file is now
+`my.soul/soul-md-path` hardcodes `"SOUL.md"`. The downstream identity file is now
 `pod/AGENTS.md` with a `SOUL.md → AGENTS.md` symlink workaround.
 
 **Ask:** read the seed filename from an env var (`SEON_SOUL_FILE`?) and/or try
@@ -179,13 +179,13 @@ still POSTs complete.
 
 **Acceptance:** `SEON_SOUL_FILE=AGENTS.md` (or a fallback to `AGENTS.md` when
 `SOUL.md` absent) seeds identity from that file; default unchanged when unset;
-aria can drop the symlink.
+the consumer can drop the symlink.
 
 ## Then (small-medium polish)
 
 ### #16 — Fold generic REPL discipline into the substrate `<system>`
 
-Aria's identity file carries substrate-generic guidance every downstream product
+The downstream identity file carries substrate-generic guidance every downstream product
 would copy: (a) hiccup shape rules for tile fns (splice children with `into`;
 call the fn once before wiring), (b) "printed results are clipped — bind and
 process with code", (c) "never write expected results; your output is REPL
@@ -200,7 +200,7 @@ don't duplicate what the parser contract already enforces.
 
 ### #27 — On-reply hook for ambient post-processing (virtue panel)
 
-Aria wants a virtue panel reacting to EVERY assistant reply (Sean, 2026-06-12),
+The downstream consumer wants a virtue panel reacting to EVERY assistant reply (Sean, 2026-06-12),
 not just on-demand agent self-scoring (model-dependent, per-agent).
 
 **Ask:** a substrate `on-reply` hook — register a fn that fires on each
@@ -290,16 +290,16 @@ bites).
 ### #28 — Boot-seed downstream `my.*` source from a consumer-owned dir
 
 Seon ships `my.kb`/`my.soul`/`my.kb.system` as compiled source required at boot.
-A downstream product (Aria) has no build of its own and seon's tree is read-only
-to it (IP boundary), so Aria's durable product code (e.g. `my.virtue`) has
+A downstream product has no build of its own and seon's tree is read-only
+to it (IP boundary), so the downstream's durable product code (e.g. `my.virtue`) has
 nowhere first-class to live (agent-authored `:seon.fn` rows are
 snapshot-only/fragile; raw evals don't persist).
 
 **Ask:** `SEON_SEED_DIR=<abs path>` whose `*.cljs` files are evaluated through
 the recording path at startup (persisted as replayable
 `:seon.fn`/`:seon.ns`/`:seon.schema` rows), OR compiled+required like the
-built-in `my.*`. The durable home for Aria's `pod/seed/my_virtue.cljs`; closes
-the `aria.*`/compiled-ns gap. Relates to #16 and #27. This is the natural home
+built-in `my.*`. The durable home for the downstream's `pod/seed/my_virtue.cljs`; closes
+the `acme.*`/compiled-ns gap. Relates to #16 and #27. This is the natural home
 for the code the #27 hook would call. Read [[docs/seon/concepts/code-as-data-runtime]]
 ("the substrate source IS the bootstrap"). Design before building; coordinate
 with #29 (the recording/replay path is the same machinery — seeding through it
@@ -350,7 +350,7 @@ per ns.
 deletion and replay each boot (needs the #29 guard); compiled re-derives from
 source each boot, is never replayed (no side-effect risk), and gets full Malli
 instrumentation via `index-substrate!`. Recorded is for product code with no
-build (Aria's `my.virtue`); compiled is for exemplar nses a downstream wants
+build (the downstream's `my.virtue`); compiled is for exemplar nses a downstream wants
 agents reading whole. **Recommend recorded for #28.**
 
 **Checklist:**

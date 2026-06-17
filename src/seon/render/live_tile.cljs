@@ -172,8 +172,8 @@
          (every? valid-hiccup-elem? children))))
 
 ;; ============================================================
-;; Serialization-boundary structural check (aria asks 9+12,
-;; fix-everything Wave C): [[valid-hiccup?]] above is the strict
+;; Serialization-boundary structural check (serialization-boundary
+;; hardening): [[valid-hiccup?]] above is the strict
 ;; AUTHORING shape, deliberately narrower than what the serializer
 ;; accepts (seqs, numbers, raw, stringifiable values all render fine
 ;; via seon.ui.html/->string) — so it CANNOT gate the render path

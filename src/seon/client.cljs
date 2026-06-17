@@ -670,15 +670,15 @@
          ;; are rebuilt from the live registry by `index-schemas` each boot.
          (remove #(and (= :schema (:kind %))
                        (not (registration-call-source? (:source %)))))
-         ;; #29 belt-and-suspenders: drop already-stored `:seon.fn` rows
-         ;; that are side-effecting bare `def`s (init calls
-         ;; message!/reply!/transact!). The tee now refuses to create
-         ;; these, but DEPLOYED stores carry historical poison — replaying
-         ;; their `:source` re-fires the effect on every boot/mint (the
-         ;; ghost-message bug). Dropping them here stops the re-fire with
-         ;; no manual retract. `defn`s and pure value defs are untouched.
+         ;; Strict persistence (#7): only a single literal (defn …) replays
+         ;; as a :seon.fn row. The tee no longer creates rows for bare
+         ;; (def …)/(def f (fn …))/multi-form sources, but DEPLOYED stores
+         ;; carry historical bare-def rows (incl. the #29 ghost-message
+         ;; poison) — drop any :fn row whose CURRENT source isn't a clean
+         ;; defn so it neither replays nor re-fires. One-release migration
+         ;; filter; fresh stores never accrue these.
          (remove #(and (= :fn (:kind %))
-                       (seval/effectful-bare-def? (:source %))))
+                       (not (seval/defn-form? (:source %)))))
          ;; Replay order: ALL :ns entries FIRST (tx-ordered among
          ;; themselves), then the def-shaped entries (tx-ordered).
          ;; Plain tx order is WRONG here: the tee re-asserts

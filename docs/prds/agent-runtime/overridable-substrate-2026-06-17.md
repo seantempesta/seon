@@ -47,7 +47,7 @@ seed dir is the delivery vehicle, extended with an override-targeted sibling).
 All proofs ran `seon.eval/eval` against `@seon.repl/!compile-state` into scratch
 `sandbox.*` nses, in the live pod's `default` REPL session. That session has NO
 bound conn (`@seon.repl/!conn` is nil), so no `db/transact!` could reach the
-Aria store, and bare `eval` (not `eval-batch!`) fires no detect-and-tee — zero
+downstream store, and bare `eval` (not `eval-batch!`) fires no detect-and-tee — zero
 store writes, the live deployment untouched. Full record:
 `tmp/vendor-test/README.md`.
 

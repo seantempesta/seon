@@ -876,75 +876,24 @@
     (assoc :seon.schema/ns {:seon.ns/name (keyword (namespace k))})))
 
 ;; ============================================================
-;; #29 — refuse side-effecting bare `def`s from the program graph.
+;; Strict persistence policy (#7) — classify on the FORM HEAD.
 ;;
-;; A test agent self-tee'd `(def virtue-eval (seon.agent/message!
-;; {…}))`. The tee indexed it as a `:seon.fn` row; replay re-evaled its
-;; `:source` on EVERY pod boot and EVERY fresh-agent mint, so the
-;; effectful init re-fired and a ghost message from a long-gone agent
-;; opened every new chat (live 2026-06-12; Aria retracted the row + 8
-;; ghosts by hand).
-;;
-;; The class: a NON-`defn` bare `(def sym <init>)` whose init form CALLS
-;; an effectful core fn. Nothing pure can depend on such a value
-;; (the value IS the side effect's return), so dropping it from the
-;; corpus loses nothing — `defn`s, `(def f (fn …))`, and pure value
-;; defs are untouched.
-;;
-;; ONE predicate, used at BOTH integration points:
-;;   - tee   (`build-tee-entities`) — never create the `:seon.fn` row,
-;;            so new evals never poison the store.
-;;   - replay (`seon.client/query-program-graph-entries`) — also drop
-;;            already-stored such rows from the replay set, so poison in
-;;            DEPLOYED stores stops re-firing without a manual retract.
+;; A `:seon.fn` row is created (and later replayed) ONLY for a literal
+;; single `(defn …)`/`(defn- …)`. A bare `(def …)`, `(def f (fn …))`, a
+;; `(do …)`-wrapped defn, or a multi-form source RUNS as scratch but is
+;; never teed/replayed — so re-evaling on boot/mint can never re-fire a
+;; side effect (the #29 ghost-message class). This subsumes the old
+;; `effectful-bare-def?` heuristic entirely: under strict-head gating an
+;; effectful bare def is simply never persisted, so there is nothing to
+;; scan. See docs/prds/agent-runtime/research/
+;; simplification-audit-2026-06-17.md (Findings 1, 2, 4, 5).
 ;; ============================================================
-
-(def ^:private effectful-call-syms
-  "Core fns whose call inside a bare-`def` init makes that def a
-   replay hazard. Both simple and fully-qualified forms — the source
-   scan also matches any symbol whose NAME is one of these, so an
-   alias like `agent/message!` is caught too. Data-driven: extend the
-   set, not the scan."
-  '#{message! reply! transact!
-     seon.agent/message! seon.agent/reply!
-     seon.db/transact! db/transact!})
-
-(def ^:private effectful-call-names
-  "Simple-name projection of [[effectful-call-syms]] — matches FQ/alias
-   call positions (`agent/message!`, `seon.agent/message!`) by name."
-  (into #{} (map (comp symbol name)) effectful-call-syms))
-
-(defn- form-calls-effectful?
-  "TRUE when `form` (recursively) has a call position whose operator is
-   one of [[effectful-call-syms]] (by full symbol or by simple name)."
-  [form]
-  (cond
-    (and (seq? form) (symbol? (first form))
-         (let [op (first form)]
-           (or (contains? effectful-call-syms op)
-               (contains? effectful-call-names (symbol (name op))))))
-    true
-    (coll? form) (boolean (some form-calls-effectful? (seq form)))
-    :else false))
-
-(defn- bare-def-effectful?
-  "TRUE when `form` is a bare `(def sym <init>)` — NOT `defn`, NOT
-   `(def sym (fn …))` — whose `<init>` calls an effectful core fn
-   (see [[form-calls-effectful?]])."
-  [form]
-  (and (seq? form)
-       (= 'def (first form))
-       (symbol? (second form))
-       (>= (count form) 3)
-       (let [init (nth form 2)]
-         (and (not (and (seq? init) (= 'fn (first init))))
-              (form-calls-effectful? init)))))
 
 (defn- read-all-forms
   "All top-level forms in `source` (an eval text may carry several).
    Returns nil on a read error — callers treat unreadable source as
-   non-effectful (fail-open: a parse failure must not silently drop a
-   row)."
+   classifying false (a parse failure yields zero forms, so the strict
+   persistence gate fails closed: no row is created/replayed)."
   [source]
   (try
     (let [rdr (reader-types/string-push-back-reader (str source))]
@@ -953,17 +902,49 @@
           (if (= f ::eof) acc (recur (conj acc f))))))
     (catch :default _ nil)))
 
-(defn effectful-bare-def?
-  "Replay/tee classifier (#29). TRUE when `source` contains a bare,
-   non-`defn` `def` whose init form calls an effectful core fn
-   (`message!` / `reply!` / `transact!`, incl. FQ + aliased forms).
-   Such a def's value IS a side effect; re-evaling it on boot/mint
-   re-fires the effect (ghost messages). `defn`s, `(def f (fn …))`, and
-   pure value `def`s are FALSE. Read-only — fail-open on unreadable
-   source (returns false)."
+(defn defn-form?
+  "Strict persistence gate (#7): TRUE iff `source` is exactly ONE
+   top-level form whose head is `defn`/`defn-`. A bare `(def …)`,
+   `(def f (fn …))`, a `(do …)`-wrapped defn, a macro, or a multi-form
+   source is FALSE — it RUNS as scratch but is never teed/replayed as a
+   `:seon.fn` row. Read-only; fail-closed on unreadable source (false).
+   See docs/prds/agent-runtime/research/simplification-audit-2026-06-17.md."
   {:malli/schema [:=> [:cat :string] :boolean]}
   [source]
-  (boolean (some bare-def-effectful? (read-all-forms source))))
+  (let [forms (read-all-forms source)]
+    (boolean (and (= 1 (count forms))
+                  (seq? (first forms))
+                  (contains? '#{defn defn-} (first (first forms)))))))
+
+(defn scratch-def-note
+  "Reactive 'won't persist' note (#7), DERIVED from an eval's source —
+   pure, no stored attr, re-computed every render so it FOLLOWS the
+   form. Returns a one-line `;;`-comment string when `source` is a bare
+   single `(def …)` (the run-but-don't-tee scratch case the strict
+   persistence policy never tees). Returns \"\" otherwise: a clean
+   `(defn …)`/`(defn- …)`/`(deftest …)`/`(seon.schema/register! …)`
+   PERSISTS (no note), and a non-defining expression defined nothing.
+   \"\" (not nil) so callers blank-check like :seon.eval/output.
+   See docs/prds/agent-runtime/research/simplification-audit-2026-06-17.md."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [source]
+  (let [forms (read-all-forms source)
+        f1    (first forms)
+        one?  (= 1 (count forms))
+        def?  (and one? (seq? f1) (= 'def (first f1)) (symbol? (second f1)))
+        sym   (when def? (second f1))
+        init  (when (and def? (>= (count f1) 3)) (nth f1 2))
+        fn-init? (and (seq? init) (= 'fn (first init)))]
+    (cond
+      fn-init?
+      (str ";; won't persist across reboots: `(def " sym " (fn …))` is a "
+           "value binding, not a defn — write `(defn " sym " …)` to record "
+           "it as a program-graph fn")
+      def?
+      (str ";; won't persist across reboots: `(def " sym " …)` is runtime "
+           "state, not a function — store it with `db/transact!` if it must "
+           "survive")
+      :else "")))
 
 (defn- build-tee-entities
   "Return a vector of program-graph entity maps for everything `source`
@@ -989,17 +970,19 @@
                           ;; vars` → :seon.test via index-tests — disjoint).
                           ;; Also keeps resume single-lane: a deftest teed as
                           ;; BOTH rows would replay its source twice.
+                          ;;
+                          ;; Strict persistence (#7): create a :seon.fn row
+                          ;; ONLY when `source` is a literal single `(defn …)`
+                          ;; (classify on the form HEAD, not on `:fn-var?`).
+                          ;; A bare `(def …)`, `(def f (fn …))`, a do-wrapped
+                          ;; defn, or a multi-form source RAN as scratch but
+                          ;; is never teed — so re-evaling on boot/mint can
+                          ;; never re-fire a side effect (subsumes the old
+                          ;; #29 effectful-bare-def heuristic). `:fn-var?`
+                          ;; stays a RENDER attr below; it no longer gates
+                          ;; row creation.
                           :when (and (not (deftest-def? var-map))
-                                     ;; #29 — a bare (non-fn) `def` whose init
-                                     ;; calls message!/reply!/transact! is a
-                                     ;; replay hazard: its value IS a side
-                                     ;; effect, and re-evaling on boot/mint
-                                     ;; re-fires it (ghost messages). Never
-                                     ;; index it as a :seon.fn row. `:fn-var`
-                                     ;; false ⇒ bare def; defn/(def f (fn …))
-                                     ;; have :fn-var true and are unaffected.
-                                     (not (and (not (:fn-var var-map))
-                                               (effectful-bare-def? source))))
+                                     (defn-form? source))
                           :let [{:keys [sym fn-var? arglists doc private? spec]}
                                 (analyzer-info/var-projection var-map)
                                 ;; Phase 3 (mvp-completion-plan 2026-05-27): if
@@ -1717,16 +1700,16 @@
                     ;; Durable record — always. :seon.eval/ns is the
                     ;; post-update accumulator (ending ns on success;
                     ;; unchanged ns on failure). Tee rides in the same tx.
-                    (await (record-eval! {:eval-id     eval-id
-                                          :turn-id     turn-id
-                                          :at          at
-                                          :duration-ms duration-ms
-                                          :narration   narration
-                                          :source      source
-                                          :ns          @current-ns
-                                          :result      result
-                                          :output      output
-                                          :tee         tee}))
+                    (await (record-eval! {:eval-id      eval-id
+                                          :turn-id      turn-id
+                                          :at           at
+                                          :duration-ms  duration-ms
+                                          :narration    narration
+                                          :source       source
+                                          :ns           @current-ns
+                                          :result       result
+                                          :output       output
+                                          :tee          tee}))
                     ;; Phase 3 (mvp-completion-plan 2026-05-27) —
                     ;; auto-instrument any newly-defined fn whose
                     ;; `:malli/schema` parsed cleanly. Runs AFTER the tee
