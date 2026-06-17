@@ -1,0 +1,4 @@
+;; Minimal deps project for a third-party override source root.
+;; bin/seon injects this as a tools.deps :local/root when SEON_EXTRA_SRC
+;; points here (see ../README.md). On its own it does nothing.
+{:paths ["src"]}

@@ -66,7 +66,7 @@
    ;; against the live `:client` pod. See:
    ;; docs/prds/agent-runtime/research/cljs-testing-infrastructure-2026-05-25.md §6 Phase 1.
    :devtools         {:enabled  true
-                      :preloads [seon.dev.test-preload]}
+                      :preloads [seon.dev.test-preload seon.demo]}
    ;; externs/node_fs.js declares `fs.existsSync` etc. so Closure's
    ;; :advanced pass doesn't rename them to `fs.g_(...)` and crash
    ;; environ.core's load-time `.lein-env` probe. Originally shipped
