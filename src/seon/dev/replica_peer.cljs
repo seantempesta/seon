@@ -63,7 +63,8 @@
 ;; opens each blob via fs.openSync, so ".ksv opens" = konserve blob reads.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private !opens (atom []))
+;; defonce (not def): a hot reload must not zero the live read-counter.
+(defonce ^:private !opens (atom []))
 
 (defn- install-read-counter! []
   (let [orig (.-openSync fs)]
@@ -101,10 +102,11 @@
 ;; FALSIFY that loudly rather than hang.
 ;; ---------------------------------------------------------------------------
 
-(def !ryow
-  "Per-write RYOW evidence: {:seon.peer/basis-t :seon.peer/attempts
-   :seon.peer/deref-ms}. The oracle asserts attempts = 1 on every entry."
-  (atom []))
+;; Per-write RYOW evidence: {:seon.peer/basis-t :seon.peer/attempts
+;; :seon.peer/deref-ms}. The oracle asserts attempts = 1 on every entry.
+;; defonce (not def): a hot reload of this ns must NOT wipe live peer
+;; state mid-flight.
+(defonce !ryow (atom []))
 
 (defn- ryow-deref! [conn basis-t]
   (loop [attempt 1]
@@ -131,10 +133,11 @@
 ;; the remote channel, returns a promise-chan the writer go-loop consumes.
 ;; ---------------------------------------------------------------------------
 
-(def !own-request-ids
-  "request-ids of txs THIS peer dispatched — the listen adapter skips their
-   feed events (own txs already fire local listeners via writer/transact!)."
-  (atom #{}))
+;; request-ids of txs THIS peer dispatched — the listen adapter skips their
+;; feed events (own txs already fire local listeners via writer/transact!).
+;; defonce (not def): a hot reload must NOT drop in-flight own-request-ids
+;; (would double-fire local listeners for txs already dispatched).
+(defonce !own-request-ids (atom #{}))
 
 (defrecord SeonWireWriter [sock-path conn]
   w/PWriter
@@ -199,9 +202,12 @@
 ;; handler-input envelope.
 ;; ---------------------------------------------------------------------------
 
-(def !handlers (atom {}))
-(def !last-db (atom nil))
-(def !own-skips (atom 0))
+;; defonce (not def): hot reload must NOT wipe live listen state — bare
+;; def-atoms reset on every reload, dropping handlers / the last-db basis /
+;; the own-skip count mid-flight.
+(defonce !handlers (atom {}))
+(defonce !last-db (atom nil))
+(defonce !own-skips (atom 0))
 
 (defn listen!
   "Register `handler` (fn of one seon.db-shaped handler-input map) under `k`."
