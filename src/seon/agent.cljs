@@ -272,12 +272,21 @@
 ;; how many retries happened (today always 1). ABSENT = no retry —
 ;; optional-is-absent, never stored 0.
 (schema/register! :seon.agent.turn/llm-retries  :int)
-;; #25 tier-2 LLM provider metadata, per turn: the structured usage map
-;; (:seon.ai/usage — prompt/completion/total tokens, cache fields) and
-;; the EDN-stringified provider-fields (the unrecognized top-level
-;; response fields the adapter preserved). Both ABSENT on a stub-LLM
-;; turn or when the provider returns neither — optional-is-absent.
-(schema/register! :seon.agent.turn/llm-usage    :map)
+;; #25 tier-2 LLM provider metadata, per turn: BOTH are EDN-stringified
+;; opaque provider telemetry — the usage map (:seon.ai/usage —
+;; prompt/completion/total tokens, cache fields, provider-specific
+;; nested *_tokens_details) and the provider-fields (unrecognized
+;; top-level response fields the adapter preserved). Stored as strings,
+;; NOT :map: provider telemetry is a third-party boundary with arbitrary
+;; nesting/keys (e.g. DeepSeek's :prompt_token_ids), and :map is not a
+;; bridgeable datahike attr type — a :map attr's close-tx fails the
+;; schema bridge (`:seon.db/unbridgeable-attrs`), and since with-turn!'s
+;; close-tx silently dropped that envelope, the turn never closed and
+;; the agent hung in :running forever (deaf-after-one-message bug,
+;; 2026-06-17). pr-str at the write site (mirrors llm-meta); no consumer
+;; reads it back today (pure telemetry). Both ABSENT on a stub-LLM turn
+;; or when the provider returns neither — optional-is-absent.
+(schema/register! :seon.agent.turn/llm-usage    :string)
 (schema/register! :seon.agent.turn/llm-meta     :string)
 (schema/register! :seon.agent.turn/messages     [:vector {:seon.db/component true} :seon.db/ref])
 (schema/register! :seon.agent.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
@@ -924,32 +933,75 @@
       open-result
       (with-turn-body! id id-of-turn body-fn))))
 
+(defn ^:async ^:private ensure-idle!
+  "Failsafe state-reset for `id` (errors-are-values, never throws). The
+   wake guard `(not= :running state)` in inbound-message-handler means a
+   single missed `:idle` reset leaves the agent permanently DEAF (the
+   deaf-after-one-message bug, 2026-06-17: a close-tx that failed the
+   schema bridge for an unbridgeable folded attr left state :running
+   forever). So EVERY exit from a turn — close success, close FAILURE,
+   throw, throw-handler failure — funnels through here: a minimal
+   state-only tx that can't itself carry an unbridgeable attr. Loud on
+   failure; swallows its own throw (the loop must keep running)."
+  [id]
+  (try
+    (let [env (await (db/transact!
+                       {:seon.db/tx-data
+                        [{:seon.agent/id id :seon.agent/state :idle}]}))]
+      (when (false? (:seon.db/ok? env))
+        (js/console.error
+          (str "seon.agent/ensure-idle!: state reset FAILED for " id
+               " — agent may stay deaf to new messages. " (pr-str (:seon.db/error env))))))
+    (catch :default e
+      (js/console.error
+        (str "seon.agent/ensure-idle!: state reset THREW for " id
+             " — agent may stay deaf to new messages. " (or (.-message e) e))))))
+
 (defn ^:async ^:private with-turn-body!
   "Internal — the body of `with-turn!` after the open-tx succeeded.
    Split out so the open-tx envelope short-circuit at the call site
-   stays readable. Maintains the same behavior the inlined version had:
-   await body-fn, close the turn on success, flip to :error on throw."
+   stays readable. await body-fn, close the turn on success, flip to
+   :error on throw. CRITICAL: state ALWAYS returns to :idle on EVERY
+   exit (close success OR close FAILURE OR throw) — a missed reset
+   leaves the wake guard permanently blocked and the agent deaf."
   [id id-of-turn body-fn]
   (try
-    (let [result (await (body-fn))]
-      (await
-        (db/transact!
-          {:seon.db/tx-data
-           [(merge {:seon.agent.turn/id id-of-turn :seon.agent.turn/status :done}
-                   (select-keys result [:seon.agent.turn/messages
-                                        :seon.agent.turn/status
-                                        :seon.agent.turn/llm-retries
-                                        :seon.agent.turn/llm-usage
-                                        :seon.agent.turn/llm-meta]))
-            {:seon.agent/id id :seon.agent/state :idle}]}))
+    (let [result (await (body-fn))
+          close  (await
+                   (db/transact!
+                     {:seon.db/tx-data
+                      [(merge {:seon.agent.turn/id id-of-turn :seon.agent.turn/status :done}
+                              (select-keys result [:seon.agent.turn/messages
+                                                   :seon.agent.turn/status
+                                                   :seon.agent.turn/llm-retries
+                                                   :seon.agent.turn/llm-usage
+                                                   :seon.agent.turn/llm-meta]))
+                       {:seon.agent/id id :seon.agent/state :idle}]}))]
+      ;; A4: db/transact! returns an envelope, never throws. If the
+      ;; combined close-tx FAILED (e.g. a folded telemetry attr won't
+      ;; bridge), the agent state was NOT reset — funnel through the
+      ;; minimal state-only failsafe so the wake guard never stays
+      ;; blocked. The turn record may stay :running, but the agent
+      ;; recovers (the failure is logged loudly for diagnosis).
+      (when (false? (:seon.db/ok? close))
+        (js/console.error
+          (str "seon.agent/with-turn-body!: turn close-tx FAILED for "
+               id " turn " id-of-turn " — forcing :idle. "
+               (pr-str (:seon.db/error close))))
+        (await (ensure-idle! id)))
       result)
     (catch :default e
-      (try
-        (await (db/transact!
-                 {:seon.db/tx-data
-                  [{:seon.agent.turn/id id-of-turn :seon.agent.turn/status :error}
-                   {:seon.agent/id id :seon.agent/state :idle}]}))
-        (catch :default _ nil))
+      ;; Mark the turn :error AND reset state. If the combined tx fails
+      ;; (e.g. the turn entity is gone), the failsafe still forces :idle
+      ;; so the agent never goes deaf on a throwing turn.
+      (let [env (try
+                  (await (db/transact!
+                           {:seon.db/tx-data
+                            [{:seon.agent.turn/id id-of-turn :seon.agent.turn/status :error}
+                             {:seon.agent/id id :seon.agent/state :idle}]}))
+                  (catch :default _ {:seon.db/ok? false}))]
+        (when (false? (:seon.db/ok? env))
+          (await (ensure-idle! id))))
       (throw e))))
 
 (defn ^:async ^:private ask-and-eval-reply!
@@ -1065,7 +1117,9 @@
         retries (assoc :seon.agent.turn/llm-retries retries))
       (cond-> (await (ask-and-eval-reply! resp id id-of-turn compile-state))
         retries     (assoc :seon.agent.turn/llm-retries retries)
-        (seq usage) (assoc :seon.agent.turn/llm-usage usage)
+        ;; EDN-stringified (mirrors llm-meta) — :map is unbridgeable, see
+        ;; the :seon.agent.turn/llm-usage register! note above.
+        (seq usage) (assoc :seon.agent.turn/llm-usage (pr-str usage))
         (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))))
 
 (defn- persist-prompt!
