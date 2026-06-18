@@ -106,3 +106,6 @@
 [submodule "reference-code/clojurescript"]
 	path = reference-code/clojurescript
 	url = https://github.com/clojure/clojurescript
+[submodule "reference-code/proximum"]
+	path = reference-code/proximum
+	url = https://github.com/replikativ/proximum.git

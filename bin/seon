@@ -46,6 +46,22 @@ set -euo pipefail
 SEON_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$SEON_ROOT"
 
+# Java 22+ for every JVM process this supervisor launches. The wire-server's
+# Proximum secondary index (HNSW vector search) ships class-file 66.0 + uses
+# the Foreign Memory API, both Java 22+ only; a Java-21 runtime throws
+# UnsupportedClassVersionError. Pin to the 22.x JDK if present, else fall back
+# to whatever is current so the script still runs on machines without 22.
+if [ -z "${JAVA_HOME:-}" ] || ! "${JAVA_HOME}/bin/java" -version 2>&1 | grep -qE '"(2[2-9]|[3-9][0-9])'; then
+  _j22="$(/usr/libexec/java_home -v 22 2>/dev/null || /usr/libexec/java_home 2>/dev/null || true)"
+  [ -n "$_j22" ] && export JAVA_HOME="$_j22"
+fi
+# The `clojure` CLI on this machine resolves the JVM from `java` on PATH, NOT
+# from JAVA_HOME — so prepend it (and export JAVA_CMD as a belt-and-braces).
+if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/java" ]; then
+  export PATH="${JAVA_HOME}/bin:${PATH}"
+  export JAVA_CMD="${JAVA_HOME}/bin/java"
+fi
+
 PROC_DIR="tmp/proc"
 LOG_DIR="logs"
 mkdir -p "$PROC_DIR" "$LOG_DIR"
