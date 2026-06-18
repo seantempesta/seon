@@ -291,17 +291,10 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest missing-test-spares-the-tested-fn
-  (async done
-    (-> (with-seeded-db
-          (fn [db]
-            (let [r (warn/check-missing-test (scoped db))]
-              (is (not (contains? (affected-syms r) "warntest.main/clean"))
-                  "clean has clean-test — covered")
-              (is (contains? (affected-syms r) "warntest.main/any-ret")
-                  "untested fns are flagged"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+;; NOTE: the former `missing-test-spares-the-tested-fn` test was removed
+;; with `check-missing-test` (B9): a usage example is OPT-IN, so there is
+;; no "this fn has no test" warning to assert. A currently-FAILING test is
+;; covered by the runtime `check-failing-tests` path instead.
 
 (deftest ns-scope-defaults-to-everything-when-unscoped
   (async done

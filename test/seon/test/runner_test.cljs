@@ -95,6 +95,60 @@
             (done))))))
 
 ;; ============================================================
+;; B9 — a `defn` usage example RUNS its `:test` thunk (not the impl)
+;; ============================================================
+
+(deftest run!-runs-a-defn-with-test-usage-example
+  ;; The Part-4 proof: `probe-example-add` is a `defn` (NOT a deftest)
+  ;; carrying `{:test (fn [] (is (= 5 (probe-example-add 2 3))))}`. Its
+  ;; thunk lands on `cljs$lang$test`. If `resolve-test-fn` returned the
+  ;; IMPLEMENTATION fn instead, driving it would call `(probe-example-add)`
+  ;; at arity 0 → an `:error`, never the example's `:pass`. A clean
+  ;; `:pass` here proves the EXAMPLE ran.
+  (async done
+    (-> (r/run! {:seon.test.runner/vars
+                 '[seon.test.runner-probes/probe-example-add]})
+        (.then
+          (fn [result]
+            (let [{:keys [test pass fail error]}
+                  (:seon.test.runner/summary result)]
+              (is (= 1 test)  (str "expected 1 test, summary="
+                                   (pr-str (:seon.test.runner/summary result))))
+              (is (= 1 pass)  (str "the example's (is (= 5 (probe-example-add 2 3))) "
+                                   "must fire as 1 PASS — not the impl at arity 0; "
+                                   "summary=" (pr-str (:seon.test.runner/summary result))))
+              (is (= 0 fail)  "passing example → 0 fails")
+              (is (= 0 error) (str "0 errors — an error here means the impl fn ran "
+                                   "(wrong arity) instead of the :test thunk")))
+            (done)))
+        (.catch (fn [e]
+                  (is false (str "threw — " e))
+                  (done))))))
+
+(deftest run!-surfaces-a-failing-defn-with-test-example
+  ;; A failing usage example must report a FAIL (so a redefine that breaks
+  ;; the contract is caught). Arm the example's assertion, drive it, expect
+  ;; exactly one fail.
+  (async done
+    (reset! probes/armed? true)
+    (-> (r/run! {:seon.test.runner/vars
+                 '[seon.test.runner-probes/probe-example-armed]})
+        (.then
+          (fn [result]
+            (let [{:keys [test pass fail error]}
+                  (:seon.test.runner/summary result)]
+              (is (= 1 test) (str "expected 1 test, summary=" (pr-str (:seon.test.runner/summary result))))
+              (is (= 1 fail) (str "the armed example's assertion must FAIL (1 fail); "
+                                  "summary=" (pr-str (:seon.test.runner/summary result))))
+              (is (= 0 error) "a failing assertion is a :fail, not an :error"))
+            (reset! probes/armed? false)
+            (done)))
+        (.catch (fn [e]
+                  (reset! probes/armed? false)
+                  (is false (str "threw — " e))
+                  (done))))))
+
+;; ============================================================
 ;; run! — ::ns selector
 ;; ============================================================
 
@@ -114,11 +168,18 @@
                   "probe-failing-test must be in selected-vars")
               (is (contains? selected 'seon.test.runner-probes/probe-async-test)
                   "probe-async-test must be in selected-vars")
-              (is (= 3 (:test summary))
-                  (str "expected 3 tests (one per probe), summary="
-                       (pr-str summary)))
+              ;; B9: a `defn` with a `:test` example is ALSO a discoverable
+              ;; test target (its thunk lands on `cljs$lang$test`, the same
+              ;; slot `vars-in-ns` scans). One unified notion of "a test".
+              (is (contains? selected 'seon.test.runner-probes/probe-example-add)
+                  "probe-example-add (defn-with-:test example) must be discovered")
+              (is (contains? selected 'seon.test.runner-probes/probe-example-armed)
+                  "probe-example-armed (defn-with-:test example) must be discovered")
+              (is (= 5 (:test summary))
+                  (str "expected 5 tests (3 deftest probes + 2 defn-with-:test "
+                       "example probes), summary=" (pr-str summary)))
               (is (pos? (:fail summary))
-                  (str "expected at least 1 fail from probe-failing-test; "
+                  (str "expected at least 1 fail from the armed probes; "
                        "summary=" (pr-str summary))))
             (reset! probes/armed? false)
             (done)))

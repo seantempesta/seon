@@ -50,3 +50,32 @@
         (is true)
         (done))
       25)))
+
+;; ============================================================
+;; B9 usage-example probes — a `defn` with a `:test` var-meta thunk (NOT
+;; a `deftest`). The compiler emits the thunk to the fn object's
+;; `cljs$lang$test` slot (not `cljs$lang$var`), so `resolve-test-fn` must
+;; read that slot to drive the EXAMPLE (its `is` assertions) instead of
+;; the IMPLEMENTATION fn. The driving self-test (`runner-test`) runs
+;; these via `r/run!` and asserts the example's assertion fired — proving
+;; the example RUNS (Part 4 of B9), not the impl at the wrong arity.
+;; ============================================================
+
+(defn probe-example-add
+  "A defn whose `:test` is a PASSING usage example: it asserts on the
+   fn's own result. Driven via `r/run!` it must produce a `:pass`."
+  {:test (fn [] (is (= 5 (probe-example-add 2 3))))}
+  [a b]
+  (+ a b))
+
+(defn probe-example-armed
+  "A defn whose `:test` example FAILS only when `armed?` — same arming
+   trick as `probe-failing-test`, so the outer direct `bin/test-cljs`
+   run (unarmed) passes vacuously while the runner-driven invocation
+   sees the example's `is` FAIL. Proves a failing example surfaces."
+  {:test (fn []
+           (if @armed?
+             (is (= 999 (probe-example-armed 1 1)))
+             (is true "unarmed — direct invocation is a vacuous pass")))}
+  [a b]
+  (+ a b))

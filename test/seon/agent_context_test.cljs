@@ -220,12 +220,13 @@
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
               (is (= [:system :namespaces :your-entity :live-tile
                       :warnings :open-todos :findings :transcript :turns
-                      :findings-pointer :prompt]
+                      :findings-pointer :inventory :prompt]
                      sections)
                   "the v4 core-default section names, in order
                    (static→volatile) — the catalogs, capabilities,
                    exemplars, namespace-context, and seed sections are
-                   all DEAD (context-v4)"))))
+                   all DEAD (context-v4); :inventory is the cheap
+                   <data-inventory> surface in the volatile tail"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -601,53 +602,66 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; (l) namespaces-section in the assembled context — full source for the
-;;     full-source set, shallow tags for unsplit core, byte-stable
-;;     static prefix.
+;; (l) namespaces-section in the assembled context (B9 compact tiering) —
+;;     every included ns renders COMPACT (ns form + schemas full + fns as
+;;     elided defns, standalone tests DROPPED); the agent's OWN CURRENT ns
+;;     renders full ONLY when it has real persisted source (this seed's own
+;;     ns is a stub, so it too renders compact). Bare-stub core OMITTED.
 ;; ---------------------------------------------------------------------------
 
-(deftest namespaces-render-full-source-for-the-full-source-set
+(deftest namespaces-render-compact-with-elided-fn-bodies
   (async done
     (-> (with-seeded-conn
           (fn [conn]
             (let [db    @conn
                   input {:seon.db/db db :seon.agent/id agent-id}
                   txt   (agent/namespaces-section input)]
-              ;; FULL source for the full-source set.
+              ;; The ns form renders (its :require deps are the dependency map).
               (is (str/includes? txt "(ns seon.agent.search")
                   "seon.agent.search's real ns form renders")
+              ;; A fn renders as its real `defn` HEAD (signature + attr-map),
+              ;; with the BODY elided to `…)` — not the full implementation.
               (is (str/includes? txt "(defn ^:async grep")
-                  "grep's full defn body renders")
+                  "grep renders as its real defn head")
               (is (str/includes? txt "(defn ^:async add!")
-                  "seon.agent.todo's full source renders")
-              (is (str/includes? txt "(deftest match-found-with-path-line-text")
-                  "search's test sibling renders a full deftest body")
+                  "seon.agent.todo's add! renders its defn head")
+              (is (str/includes? txt "\n  …)")
+                  "fn bodies are elided to `…)` (the B9 compact form)")
+              ;; Standalone deftests are DROPPED from the prompt BODY (they
+              ;; live in the on-demand render-namespace deep view).
+              (is (not (str/includes? txt "(deftest match-found-with-path-line-text"))
+                  "search's test sibling is DROPPED from the compact body")
               (is (str/includes? txt "(ns my.kb\n")
-                  "my.kb renders full source (my.* rule)")
+                  "my.kb renders its ns form (my.* rule)")
               (is (str/includes? txt "(ns my.kb.system")
                   "my.kb.system (the system-wide instruction home) renders")
-              ;; shallow tags exist for unsplit core — present but
-              ;; ns-form only.
-              (is (str/includes? txt "<namespace name=\"seon.db\">")
-                  "seon.db appears as a tag")
+              ;; compiled-core bare stubs are OMITTED — no tag, no body
+              ;; (they would otherwise be a useless (ns x) line; members
+              ;; stay queryable from the store).
+              (is (not (str/includes? txt "<namespace name=\"seon.db\">"))
+                  "seon.db (a compiled-core bare stub) is omitted — no tag")
               (is (not (str/includes? txt "(defn transact!"))
-                  "seon.db's body is NOT inlined (shallow tag until the
-                   *.internal split lands)")
-              ;; the agent's own ns is just a tag (namespace-context died).
+                  "seon.db's body is NOT inlined")
+              ;; the agent's own current ns renders compact here (its seed
+              ;; source is a bare stub — no full text to show); its member
+              ;; fn `greet` shows as an elided defn head.
               (is (str/includes? txt "<namespace name=\"my.agent.ctx-260610\">")
                   "own ns is a tag like any other")
-              (is (str/includes? txt "(defn greet [] :hi)")
-                  "own ns reconstitutes its member source"))))
+              (is (str/includes? txt "(defn greet []")
+                  "own ns renders its member fn as an elided defn head"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest sourceless-tee-ns-reconstitutes-and-bare-stubs-self-describe
+(deftest sourceless-tee-ns-reconstitutes-and-bare-stubs-are-omitted
   ;; fix-everything A3 (S-21 root): the tee's nested `{:seon.ns/name kw}`
   ;; upsert mints SOURCELESS ns rows for a prior agent's register! calls;
   ;; requiring `:seon.ns/source` in the section's join silently dropped
-  ;; them — the agent could not see the domain anywhere. And a stub that
-  ;; genuinely has no indexed source must SELF-DESCRIBE (a bare stub has
-  ;; baited a fabricated quotation before — the judge-95 near-miss).
+  ;; them — the agent could not see the domain anywhere. A ns that owns
+  ;; member rows still RECONSTITUTES from them. A ns that would fall
+  ;; through to a bare `(ns x)` line — seed-provenance compiled core, or
+  ;; a non-seed stub with no members — is OMITTED ENTIRELY: no tag at
+  ;; all (a bare stub baited a fabricated quotation before — the
+  ;; judge-95 near-miss — and renders no useful source).
   (async done
     (-> (with-seeded-conn
           (fn [conn]
@@ -674,11 +688,14 @@
                             "(seon.schema/register! :my.kb.zztest/note :string)")
                           "a prior agent's register! source reconstitutes
                            from member rows alone")
-                      (is (str/includes? txt "stub — source not indexed")
-                          "bare/seed stubs SELF-DESCRIBE instead of
-                           rendering as deceptively-empty source")
+                      (is (not (str/includes?
+                                 txt "<namespace name=\"seon.db\">"))
+                          "a seed-provenance compiled-core ns (bare stub)
+                           is OMITTED — no tag")
+                      (is (not (str/includes? txt "source not indexed"))
+                          "the old self-describing stub marker is gone")
                       (is (not (str/includes? txt "(defn transact!"))
-                          "self-description never inlines core
+                          "an omitted core stub never inlines core
                            bodies")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -706,9 +723,10 @@
 (deftest turn0-context-respects-the-budget-ceiling
   ;; The v4 layout's turn-0 total stays bounded with the full-source
   ;; namespace payload in place. The previous design point was ≤84k;
-  ;; v4 swaps capabilities+catalogs (~15k) for my.* full sources +
-  ;; shallow core tags. Guard at 100k — if this grows, something
-  ;; ported scar tissue or a huge ns joined the full-source set.
+  ;; v4 swaps capabilities+catalogs (~15k) for my.* full sources
+  ;; (compiled-core bare stubs are omitted, not tagged). Guard at 100k —
+  ;; if this grows, something ported scar tissue or a huge ns joined the
+  ;; full-source set.
   (async done
     (-> (with-seeded-conn
           (fn [conn]

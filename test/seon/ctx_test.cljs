@@ -20,7 +20,8 @@
     [seon.agent :as agent]
     [seon.client :as client]
     [seon.ctx :as ctx]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.schema :as schema]))
 
 (defn- fresh-conn
   "Promise of a fresh :memory conn with the pod's boot schema."
@@ -96,12 +97,28 @@
     {:seon.db/tx-data [{:seon.ns/name   (keyword nm)
                         :seon.ns/source (str "(ns " nm ")")}]}))
 
+(defn- transact-ns-with-member!
+  "An ns stub row PLUS one fn member, so the ns reconstitutes and renders
+   (a bare stub with no members is omitted entirely from the section)."
+  [nm]
+  (-> (transact-ns-row! nm)
+      (.then (fn [_]
+               (db/transact!
+                 {:seon.db/tx-data
+                  [{:seon.fn/sym        (str nm "/probe")
+                    :seon.fn/ns         [:seon.ns/name (keyword nm)]
+                    :seon.fn/source     "(defn probe [] :p)"
+                    :seon.fn/fn-var?    true
+                    :seon.fn/created-at (js/Date.)}]})))))
+
 (deftest namespaces-section-tags-hiding-reconstitution-recency
   (async done
     (let [!before (atom nil)]
       (-> (with-conn
             (fn [_conn]
-              (-> (transact-ns-row! "seon.client")
+              ;; seon.client: stub row + a fn member → it RECONSTITUTES
+              ;; (a bare stub with NO members would be omitted entirely).
+              (-> (transact-ns-with-member! "seon.client")
                   (.then (fn [_] (transact-ns-row! "seon.db.internal")))
                   (.then (fn [_] (transact-ns-row! "my.agent.a1")))
                   ;; agent-authored ns: stub row + a fn member → must
@@ -119,17 +136,23 @@
                       (let [txt (ctx/namespaces-section {:seon.db/db @db/*conn*})]
                         (reset! !before txt)
                         (is (str/includes? txt "<namespace name=\"seon.client\">")
-                            "an included ns renders as a tag")
+                            "a stub ns with a member renders as a tag")
                         (is (str/includes? txt "<namespace name=\"my.agent.a1\">")
                             "a runtime-defined ns appears with NO config change")
-                        (is (str/includes? txt "(defn helper [] 1)")
-                            "stub ns with members reconstitutes member source")
+                        ;; B9 compact: a sourceless ns's fn member renders
+                        ;; as its elided defn head (body → `…)`), not the
+                        ;; full source. No id in this input → all compact.
+                        (is (str/includes? txt "(defn helper []")
+                            "stub ns with members renders the member's defn head")
+                        (is (not (str/includes? txt "(defn helper [] 1)"))
+                            "the member BODY is elided in the compact form")
                         (is (not (str/includes? txt "seon.db.internal"))
                             "*.internal never appears")
                         (is (not (str/includes? txt "<exemplar"))
                             "the <exemplars> wrapper is dead")
-                        ;; recency: my.agent.a1 was touched LAST (member
-                        ;; upsert bumps its name datom) → renders last.
+                        ;; recency: my.agent.a1's member was upserted LAST
+                        ;; (bumps its name datom) → renders last; seon.client
+                        ;; was touched earlier → renders before it.
                         (is (> (str/index-of txt "<namespace name=\"my.agent.a1\">")
                                (str/index-of txt "<namespace name=\"seon.client\">"))
                             "most-recently-modified renders LAST"))))
@@ -167,8 +190,8 @@
   (async done
     (-> (with-conn
           (fn [_conn]
-            (-> (transact-ns-row! "acme.core")
-                (.then (fn [_] (transact-ns-row! "seon.client")))
+            (-> (transact-ns-with-member! "acme.core")
+                (.then (fn [_] (transact-ns-with-member! "seon.client")))
                 (.then
                   (fn [_]
                     (is (= (vec (sort ctx/default-included-prefixes))
@@ -200,8 +223,10 @@
                           "ONE transact → downstream ns renders as a tag")
                       (is (str/includes? txt "<namespace name=\"seon.client\">")
                           "defaults still render alongside"))))
-                ;; the *.internal exclusion stays structural.
-                (.then (fn [_] (transact-ns-row! "acme.core.internal")))
+                ;; the *.internal exclusion stays structural — give it a
+                ;; member so its absence is attributable ONLY to the
+                ;; *.internal rule, not to bare-stub omission.
+                (.then (fn [_] (transact-ns-with-member! "acme.core.internal")))
                 (.then
                   (fn [_]
                     (is (not (str/includes?
@@ -412,7 +437,7 @@
       (-> (with-conn
             (fn [_conn]
               (-> (agent/create! {:seon.agent/id "AGTctxtest00d1"})
-                  (.then (fn [_] (transact-ns-row! "seon.client")))
+                  (.then (fn [_] (transact-ns-with-member! "seon.client")))
                   (.then
                     (fn [_]
                       (let [db @db/*conn*
@@ -502,5 +527,53 @@
                           "storage representation is the EDN string")
                       (is (= "my.x/view-section" (:seon.render/ai raw-tile))
                           "…the pr-str of the symbol")))))))
+        (.then (fn [] (done)))
+        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+
+;; ------------------------------------------------------------
+;; inventory-section — the cheap <data-inventory> discovery surface.
+;; ------------------------------------------------------------
+
+(deftest inventory-section-renders-stored-kinds-compact
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            ;; REACTIVE: a fresh conn has NO post-bootstrap data → the
+            ;; section is suppressed (composer drops it), not an empty shell.
+            (is (= "" (ctx/inventory-section {:seon.db/db @db/*conn*}))
+                "no user-domain data → \"\" (reactive suppression)")
+            (schema/register! :my.workout/date :string)
+            (schema/register! :my.workout/type :keyword)
+            (-> (db/transact!
+                  {:seon.db/tx-data
+                   [{:my.workout/date "2026-06-17" :my.workout/type :run}
+                    {:my.workout/date "2026-06-16" :my.workout/type :lift}
+                    {:my.workout/date "2026-06-15" :my.workout/type :run}]})
+                (.then
+                  (fn [_]
+                    (let [txt   (ctx/inventory-section {:seon.db/db @db/*conn*})
+                          lines (str/split-lines txt)]
+                      (is (str/includes? txt "<data-inventory>")
+                          "rendered behind the <data-inventory> tag")
+                      ;; ONE line per kind: the kind name is the line label,
+                      ;; written ONCE, then bare attr-name count pairs.
+                      (is (str/includes? txt "my.workout: ")
+                          "kind is the line label (namespace written once)")
+                      ;; count is correct (3 rows, both attrs present on each).
+                      (is (str/includes? txt "date 3")
+                          "attr count is the live row count, namespace stripped")
+                      (is (str/includes? txt "type 3")
+                          "second attr counted the same")
+                      ;; attr NAMES appear WITHOUT their namespace prefix —
+                      ;; the line label already carries it.
+                      (is (not (str/includes? txt ":my.workout/date"))
+                          "attr namespace prefix is stripped from the pairs")
+                      (is (not (str/includes? txt "my.workout/date"))
+                          "no qualified attr name leaks into the pairs")
+                      ;; one-line-per-kind: exactly ONE body line mentions
+                      ;; the kind (the header is ;; comments, not a kind line).
+                      (is (= 1 (count (filter #(str/starts-with? % "my.workout: ")
+                                              lines)))
+                          "exactly one line per kind")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))

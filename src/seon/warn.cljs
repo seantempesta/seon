@@ -19,7 +19,7 @@
 
    ns-scope (`:seon.warn/ns`, optional) limits the CORPUS checks
    (no-malli-schema / return-is-any / arg-is-any / uses-maybe /
-   no-return-spec / no-input-spec / missing-test) to one namespace —
+   no-return-spec / no-input-spec) to one namespace —
    the caller (seon.agent/warnings-section) defaults it to the agent's
    CURRENT ns so an agent isn't confused by other namespaces' defects.
    Omit it for the whole-core overview. The RUNTIME checks
@@ -504,44 +504,15 @@
           "   [:kb.doc/path :kb.doc/path]  ; the identity attr\n"
           "   …])")}))
 
-(defn- test-index
-  "[set-of-test-syms, concatenated-test-source] for the ns scope —
-   the two ways a fn counts as tested (a `<sym>-test` deftest, or any
-   in-scope test whose source calls the fn)."
-  [db ns-kw]
-  (let [rows (db/query
-               {:seon.db/db db
-                :seon.db/query
-                '[:find ?sym ?src
-                  :where
-                  [?t :seon.test/sym ?sym]
-                  [(get-else $ ?t :seon.test/source "") ?src]]})
-        in-scope (if ns-kw
-                   (filter (fn [[sym _]]
-                             (= (name ns-kw) (namespace (symbol sym))))
-                           rows)
-                   rows)]
-    [(set (map first in-scope))
-     (str/join "\n" (map second in-scope))]))
-
-(defn check-missing-test
-  "Public fns with no associated `:seon.test` — neither a `<sym>-test`
-   deftest nor any in-scope test whose source mentions the fn."
-  {:malli/schema [:=> [:cat ::check-request] ::check-response]}
-  [{:seon.db/keys [db] ns-kw :seon.warn/ns :as req}]
-  (let [[test-syms test-src] (test-index db ns-kw)]
-    (corpus-check
-      req :missing-test
-      (str "Fn has no test. Write a deftest named <fn>-test in the same "
-           "ns exercising at least the happy path — tested fns are the "
-           "ones other agents can safely reuse.")
-      (str "(deftest greet-test\n"
-           "  (is (= \"hi x\" (greet \"x\"))))")
-      (fn [{:keys [sym]}]
-        (let [simple (name (symbol sym))]
-          (when-not (or (contains? test-syms (str sym "-test"))
-                        (str/includes? test-src simple))
-            [{:seon.warn/sym sym}]))))))
+;; NOTE: there is deliberately NO "missing example/test" corpus check.
+;; A usage example (a `defn` with `:test` var-meta, B9) is OPT-IN — it
+;; is authored ONLY when the fn's `:malli/schema` + the ns's rendered
+;; schemas don't already make the call obvious. Most well-specced fns
+;; need NO example, so a blanket "this fn has no test" warning would nag
+;; every trivial fn and contradict the opt-in model (same reasoning as
+;; "identity is OPTIONAL — don't force/warn it"). A test that is
+;; currently FAILING is a real defect and DOES surface — see
+;; [[check-failing-tests]] (a runtime check on the eval/test log).
 
 ;; ============================================================
 ;; Runtime checks — current problems in the eval/test log. GLOBAL
@@ -893,7 +864,6 @@
    check-uses-maybe
    check-no-return-spec
    check-no-input-spec
-   check-missing-test
    check-parallel-attr
    check-unmarked-entity-kinds
    check-bad-ref

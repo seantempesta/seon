@@ -271,32 +271,58 @@
 ;; ============================================================
 
 (defn- resolve-test-fn
-  "Look up a fully-qualified test sym and return its :test body fn.
+  "Look up a fully-qualified test sym and return its `:test` body thunk —
+   the zero-arg fn that fires the example's `(is …)` assertions.
 
-   `deftest` defines two things on the var:
-     - the public fn (`foo-test`) whose body is `(test-var <var>)`.
-     - the test body itself, stored as `:test` meta on the Var (which
-       cljs.test sticks under the public fn as `cljs$lang$var`).
+   TWO authoring forms produce a `:test` thunk, emitted to DIFFERENT
+   runtime slots on the munged global (both LIVE-PROVEN 2026-06-17):
 
-   We want the BODY fn (`:test`), not the public fn — invoking the
-   public fn re-enters `test-var`'s bracketing (begin/end-test-var,
-   :test counter), which double-counts when we also bracket here.
-   Driving `:test` directly also lets us await the IAsyncTest CPS
-   object that `(async done …)` returns, instead of having
+     - `(deftest foo …)` → `cljs.test/deftest` expands to
+       `(def (vary-meta foo assoc :test (fn [] …)) (fn [] (test-var …)))`
+       (cljs.test.cljc:250). The compiler emits the test body as `:test`
+       META on the Var, which `:def-emits-var` exposes under the public
+       fn as `cljs$lang$var`. Path: `obj.cljs$lang$var → meta :test`.
+
+     - `(defn foo {:test (fn [] …)} […] …)` — a B9 usage example. The
+       compiler emits the var-meta `:test` thunk DIRECTLY onto the fn
+       object as the `cljs$lang$test` slot (NO `cljs$lang$var` on a plain
+       defn). Path: `obj.cljs$lang$test`.
+
+   INSTRUMENTATION UNWRAP (the live bug, 2026-06-17): a B9 example fn
+   carries `:malli/schema`, so the eval auto-instruments it — malli
+   REPLACES the global with a validating wrapper and stashes the real fn
+   at `malli$instrument$original` (malli/instrument.cljs:13,57). The
+   wrapper does NOT carry `cljs$lang$test`; the ORIGINAL does. So we must
+   unwrap to the malli original before reading the thunk — otherwise the
+   fallback runs the INSTRUMENTED IMPL at arity 0 (`(foo)`), which throws
+   `:malli.core/invalid-arity` instead of firing the example's `(is …)`.
+
+   We want the BODY thunk, NOT the public fn (`obj`): invoking the
+   public fn either re-enters `test-var`'s bracketing (deftest, double
+   counts) or runs the IMPLEMENTATION with wrong arity (a defn example).
+   Driving the `:test` thunk directly also lets us await the IAsyncTest
+   CPS object that `(async done …)` returns, instead of having
    `run-block` swallow it.
 
-   Returns nil if the symbol doesn't resolve."
+   `obj` itself is the last-resort fallback (a non-deftest, non-example
+   callable the caller explicitly asked us to run). Returns nil if the
+   symbol doesn't resolve to any global."
   [sym]
   (let [ns-part (some-> (namespace sym) (cljs.core/munge))
         nm-part (cljs.core/munge (name sym))]
     (when (and ns-part nm-part)
-      (let [obj (try (js/goog.getObjectByName (str ns-part "." nm-part))
-                     (catch :default _ nil))
-            v   (when obj (unchecked-get obj "cljs$lang$var"))]
-        ;; Prefer the :test body off the Var; fall back to the raw fn
-        ;; for non-deftest callables that the caller asked us to run.
+      (let [obj  (try (js/goog.getObjectByName (str ns-part "." nm-part))
+                      (catch :default _ nil))
+            ;; Unwrap malli instrumentation: the real fn (carrying the
+            ;; `cljs$lang$test` thunk) is stashed under the wrapper.
+            base (or (when obj (unchecked-get obj "malli$instrument$original"))
+                     obj)
+            v    (when base (unchecked-get base "cljs$lang$var"))]
+        ;; Prefer the deftest Var's `:test` meta, then the defn-example's
+        ;; `cljs$lang$test` slot, then the raw fn as a last resort.
         (or (some-> v meta :test)
-            obj)))))
+            (when base (unchecked-get base "cljs$lang$test"))
+            base)))))
 
 (defn- thenable?
   "Truthy if v looks like a Promise/A+: has a callable `.then` slot."

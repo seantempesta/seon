@@ -47,6 +47,8 @@
     [clojure.string :as str]
     [cljs.pprint :as pprint]
     [cljs.reader :as edn]
+    [cljs.tools.reader :as tools-reader]
+    [cljs.tools.reader.reader-types :as reader-types]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
@@ -847,10 +849,19 @@
     "\n"
     "THE NAMESPACES BELOW are real loaded code, ordered by RECENCY —\n"
     "most-recently-modified LAST, not dependency order; the runtime\n"
-    "loaded them correctly. Namespaces are workspaces: (ns\n"
-    "my.domain.thing) moves you there and your context follows your\n"
-    "namespace. Your code is my.*, your knowledge is my.kb.* (real\n"
-    "schemas per domain); the core is seon.* — call its fns, never\n"
+    "loaded them correctly. Each renders COMPACT: the (ns …) form, every\n"
+    "schema in FULL (the schemas ARE the contract), and each fn as its\n"
+    "real (defn …) with the BODY elided to `…` — signature + docstring +\n"
+    "attr-map, enough to CALL it without reading its guts. The ONE\n"
+    "exception is YOUR OWN current namespace, shown in FULL so you see\n"
+    "your complete working code. A fn's :test metadata, when present, IS\n"
+    "its usage example — one tight call + expected return — added only\n"
+    "where the :malli/schema doesn't already make the call obvious. To\n"
+    "read another ns's full bodies + tests on demand, call\n"
+    "(seon.ctx/render-namespace {:seon.ns/name :the.ns}). Namespaces are\n"
+    "workspaces: (ns my.domain.thing) moves you there and your context\n"
+    "follows your namespace. Your code is my.*, your knowledge is my.kb.*\n"
+    "(real schemas per domain); the core is seon.* — call its fns, never\n"
     "redefine them.\n"
     "\n"
     "STANDING TEACHINGS:\n"
@@ -867,6 +878,12 @@
     "  my.kb.<domain> schema, reference the shared :my.kb/* provenance\n"
     "  attrs, and transact the fact. Knowledge nobody stored is\n"
     "  research the next agent pays for again.\n"
+    "- Keep fns small and tight. Add ONE concise :test usage example to\n"
+    "  a new defn ONLY when its :malli/schema doesn't already make the\n"
+    "  call obvious (generic shapes like [:int]->:boolean):\n"
+    "  (defn f {:malli/schema … :test (fn [] (assert (= 4 (f 2 2))))}\n"
+    "    [a b] …). It is what the NEXT agent sees INSTEAD of your body, so\n"
+    "  it must be self-explanatory AND pass (a failing example surfaces).\n"
     "- A task with 2+ steps: mint one todo per step with\n"
     "  seon.agent.todo/add! BEFORE you start, and complete! each id as\n"
     "  the step lands. Your open todos render every turn with their\n"
@@ -901,16 +918,17 @@
 ;; boot indexer (`seon.client/ns-row`) is the ONE file-reader; this
 ;; section renders EVERY `:seon.ns/name` row — including SOURCELESS
 ;; rows (the tee's nested `{:seon.ns/name kw}` upsert mints those for
-;; a prior agent's register!/defines). Three depths, one render rule
+;; a prior agent's register!/defines). Two render outcomes, one rule
 ;; per row:
 ;;   - real file text persisted (full-source-ns?)   → rendered whole;
 ;;   - stub/sourceless but the ns OWNS member rows  → reconstituted
 ;;     from the program graph (ns form + each :seon.fn/:seon.schema/
 ;;     :seon.test source, tx-ordered) — agent-authored nses render as
 ;;     the real code they are, exactly what bulk-load resume replays;
-;;   - bare stub, no members (or seed provenance)   → the stub line
-;;     with a SELF-DESCRIBING "source not indexed" marker (a bare
-;;     stub has baited a fabricated quotation before).
+;;   - bare stub, no members (or seed provenance)   → OMITTED ENTIRELY
+;;     (no tag): a bare (ns x) line carries no source and has baited a
+;;     fabricated quotation before. Such a ns's members stay reachable
+;;     via the store query the header points at.
 ;; ============================================================
 
 (defn- ns-stub?
@@ -920,49 +938,187 @@
   (or (str/blank? src)
       (= (str/trim src) (str "(ns " ns-str ")"))))
 
-(defn- reconstituted-ns-source
-  "Rebuild an ns's source text from the program graph: the `(ns …)`
-   form (the stored stub — SYNTHESIZED by the caller when the ns row
-   is sourceless, the tee's nested `{:seon.ns/name kw}` upsert mints
-   exactly such rows) followed by every owned `:seon.fn` /
-   `:seon.schema` / `:seon.test` source in tx order — the same
-   reconstruction bulk-load resume evals (code-as-data: one mechanism,
-   two readers). A batch eval tees the SAME source string onto every
-   member it defined, so member sources dedupe (first tx wins).
-   Returns nil when the ns owns no member rows."
-  [db ns-kw stub]
-  (let [member-rows
-        (fn [src-attr ns-attr]
-          (db/query {:seon.db/db db
-                     :seon.db/query
-                     [:find '?src '?tx
-                      :where
-                      ['?n :seon.ns/name ns-kw]
-                      ['?m ns-attr '?n]
-                      ['?m src-attr '?src '?tx]]}))
-        rows (concat (member-rows :seon.fn/source     :seon.fn/ns)
-                     (member-rows :seon.schema/source :seon.schema/ns)
-                     (member-rows :seon.test/source   :seon.test/ns))]
-    (when (seq rows)
-      (str/join "\n\n"
-        (cons (str/trim stub)
-              (->> rows
-                   (sort-by second)
-                   (map (comp str/trim first))
-                   (distinct)))))))
+;; ============================================================
+;; elide-defn-body (B9) — render a fn as its REAL `defn` with the BODY
+;; replaced by `…`. NOT a synthetic `[fn …]` header: standard Clojure,
+;; verbatim from `:seon.fn/source` through the END of the arglist —
+;; keeping the `(defn ^meta name`, the docstring, the `{:malli/schema …
+;; :test …}` attr-map (so a `:test` USAGE EXAMPLE survives automatically),
+;; and the arglist vector. We slice the ORIGINAL source string (NOT
+;; pr-str of a read form, which drops `^:async`/`^:private` symbol
+;; metadata and reformats) by reading the form with an INDEXING reader
+;; and taking the arglist vector's `:end-line`/`:end-column`. Fail-soft:
+;; any read/locate failure shows the WHOLE source (verbose > wrong).
+;; ============================================================
+
+(defn- line-col->index
+  "Absolute 0-based string index of `line` (1-based)/`col` (1-based) in
+   `src`. Returns nil when the position is out of range."
+  [src line col]
+  (let [lines (str/split-lines src)]
+    (when (<= 1 line (count lines))
+      (let [;; chars in all lines BEFORE the target line, +1 per newline.
+            before (reduce + (map #(inc (count %)) (take (dec line) lines)))]
+        (+ before (dec col))))))
+
+(defn- read-defn-form
+  "Read the single leading form from `src` with an INDEXING reader so
+   collections carry `:line`/`:column`/`:end-line`/`:end-column` source
+   metadata. `cljs.core/*ns*` is bound to a placeholder so auto-resolved
+   `::keys`/`::foo-request` keywords (ubiquitous in seon fn sources)
+   read instead of throwing 'Invalid token: ::'. Returns the form, or
+   nil on any read failure."
+  [src]
+  (try
+    (binding [cljs.core/*ns* 'seon.ctx.elide-placeholder]
+      (let [rdr (reader-types/indexing-push-back-reader (str src))]
+        (tools-reader/read {:eof ::eof :read-cond :allow} rdr)))
+    (catch :default _ nil)))
+
+(defn- arglist-end-index
+  "0-based index in `src` of the char just AFTER the relevant arglist's
+   closing `]`. For a single-arity defn that's the first top-level
+   `vector?` element (the arglist). For a multi-arity defn (no top-level
+   arglist vector — arities are `([a] …)` lists) it's the END of the
+   LAST arity-list, so every arity's signature is preserved and only the
+   trailing close-paren is appended by the caller. Returns nil when no
+   arglist can be located (fail-soft → caller shows whole source)."
+  [src form]
+  (when (and (seq? form) (contains? '#{defn defn-} (first form)))
+    (let [end-of (fn [meta-carrier]
+                   (let [{:keys [end-line end-column]} (meta meta-carrier)]
+                     (when (and end-line end-column)
+                       ;; end-column is the col AFTER the closing char.
+                       (line-col->index src end-line end-column))))
+          top-vec (first (filter vector? form))
+          arities (filter #(and (seq? %) (vector? (first %))) form)]
+      (cond
+        top-vec (end-of top-vec)
+        (seq arities) (end-of (last arities))
+        :else nil))))
+
+(defn elide-defn-body
+  "Render `source` (a fn's `:seon.fn/source`) as its real `defn` with the
+   BODY elided to ` …)`: the original text through the end of the arglist,
+   then `\\n  …)`. Multi-arity keeps every arity SIGNATURE and appends a
+   single `…)`. Fail-soft: returns `source` UNCHANGED when it isn't a
+   locatable single `defn` (better verbose than wrong). Pure; no DB."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [source]
+  (let [src  (str source)
+        form (read-defn-form src)
+        end  (arglist-end-index src form)]
+    (if (and end (< end (count src)))
+      (str (str/trimr (subs src 0 end)) "\n  …)")
+      src)))
+
+;; ============================================================
+;; compact-ns-source (B9) — the COMPACT body for an included ns that is
+;; NOT the agent's current ns: the `(ns …)` form (its `:require` deps),
+;; every `:seon.schema` in FULL (the schemas ARE the contract the fns'
+;; `:malli/schema` metadata references — only fn BODIES elide), and each
+;; `:seon.fn` as its elided `defn` (signature + attr-map incl. any `:test`
+;; usage example, body → `…`). Standalone `:seon.test` (deftest) source
+;; is DROPPED from the prompt BODY entirely (full tests live in the
+;; on-demand `render-namespace` deep view). Keeps `<namespaces>` to a few
+;; KB instead of the full-source dump.
+;; ============================================================
+
+(defn- extract-ns-form
+  "The leading `(ns …)` form of `src` as a trimmed string (it carries the
+   ns's `:require` deps the agent needs to see), or the synthesized
+   `stub` when `src` has no readable `(ns …)` head. Slices the original
+   text via the indexing reader's end position — verbatim, no reformat."
+  [src stub]
+  (let [s (str src)]
+    (if (str/blank? s)
+      stub
+      (let [form (read-defn-form s)]
+        (if (and (seq? form) (= 'ns (first form)))
+          (let [{:keys [end-line end-column]} (meta form)
+                end (when (and end-line end-column)
+                      (line-col->index s end-line end-column))]
+            (if (and end (<= end (count s)))
+              (str/trim (subs s 0 end))
+              stub))
+          stub)))))
+
+(defn- schema-full-source
+  "The FULL definition text for one schema row: prefer the live registry
+   shape (`(seon.schema/register! <key> <shape>)`), fall back to the
+   persisted `:seon.schema/source`. Schemas render in full — they ARE the
+   contract fn `:malli/schema` metadata references."
+  [key source]
+  (let [shape (when (keyword? key)
+                (try (schema/schema-definition key) (catch :default _ nil)))]
+    (cond
+      shape (str "(seon.schema/register! " (pr-str key) "\n  " (pr-str shape) ")")
+      (not (str/blank? source)) (str/trim source)
+      :else (str "(seon.schema/register! " (pr-str key) " …)"))))
+
+(defn- compact-ns-source
+  "Compact body for `ns-kw`: ns form + every schema (full) + every fn
+   (elided defn). Standalone tests dropped. `stub` is the synthesized
+   `(ns x)` used when the ns row is sourceless. Returns nil when the ns
+   owns no schema/fn rows (a bare stub renders nothing useful)."
+  [db ns-kw src stub]
+  (let [;; schema KEYS + tx only — NO source in the join. A `get-else`
+        ;; clause over `:seon.schema/source` throws `Invalid entid` in
+        ;; datahike-cljs whenever that attr is registered-but-uninstalled
+        ;; (a store with only registry-shape, sourceless schema rows — the
+        ;; same uninstalled-attr trap namespaces-section documents below).
+        ;; Sources are joined SEPARATELY (a normal :where clause returns
+        ;; empty, never throws, on an uninstalled attr) and looked up in
+        ;; code, defaulting to "" so a sourceless row still renders.
+        schema-keys (db/query
+                      {:seon.db/db db
+                       :seon.db/query
+                       [:find '?key '?tx
+                        :where
+                        ['?n :seon.ns/name ns-kw]
+                        ['?s :seon.schema/ns '?n]
+                        ['?s :seon.schema/key '?key '?tx]]})
+        schema-srcs (into {}
+                      (db/query
+                        {:seon.db/db db
+                         :seon.db/query
+                         [:find '?key '?ssrc
+                          :where
+                          ['?n :seon.ns/name ns-kw]
+                          ['?s :seon.schema/ns '?n]
+                          ['?s :seon.schema/key '?key]
+                          ['?s :seon.schema/source '?ssrc]]}))
+        fn-rows     (db/query
+                      {:seon.db/db db
+                       :seon.db/query
+                       [:find '?sym '?fsrc '?tx
+                        :where
+                        ['?n :seon.ns/name ns-kw]
+                        ['?f :seon.fn/ns '?n]
+                        ['?f :seon.fn/sym '?sym]
+                        ['?f :seon.fn/source '?fsrc '?tx]]})]
+    (when (or (seq schema-keys) (seq fn-rows))
+      (let [schemas (->> schema-keys
+                         (sort-by second)
+                         (map (fn [[k _tx]] (schema-full-source k (get schema-srcs k ""))))
+                         distinct)
+            fns     (->> fn-rows
+                         (sort-by #(nth % 2))
+                         (map (fn [[_ s _]] (elide-defn-body s)))
+                         distinct)]
+        (str/join "\n\n"
+          (concat [(extract-ns-form src stub)] schemas fns))))))
 
 (def ^:private namespaces-header
-  (str ";; Real loaded code, most-recently-modified LAST. Namespaces showing\n"
-       ";; only their (ns …) form are STUBS: their source is NOT in this\n"
-       ";; prompt — never quote or summarize a stub's contents from memory.\n"
-       ";; A stub's members are rows in the store; read them, e.g.:\n"
+  (str ";; Real loaded code, most-recently-modified LAST. Core namespaces\n"
+       ";; not shown here live in the store — read any one by name, e.g.:\n"
        ";;   (seon.db/query {:seon.db/query '[:find ?sym ?src :where\n"
        ";;                                    [?n :seon.ns/name :seon.warn]\n"
        ";;                                    [?f :seon.fn/ns ?n]\n"
        ";;                                    [?f :seon.fn/sym ?sym]\n"
        ";;                                    [?f :seon.fn/source ?src]]})\n"
-       ";; (an empty result means the ns owns :seon.schema/:seon.test rows\n"
-       ";;  instead — query :seon.schema/ns / :seon.test/ns the same way)"))
+       ";; (swap :seon.fn/ns·sym·source for :seon.schema/ or :seon.test/\n"
+       ";;  to read that ns's schemas or tests the same way)"))
 
 (defn namespaces-section
   "One `<namespace name=\"…\">` tag per included ns ([[included-ns?]] —
@@ -970,17 +1126,35 @@
    RECENCY: most-recently-modified LAST (tx of the `:seon.ns/name`
    datom — bumped by the tee's nested upsert on every define), name as
    the tie-break, so the stable core set forms a stable cache
-   prefix and the churning ns sits nearest the tail. Render depth per
-   row is the ns-block comment's three-case rule; the stub branch
-   discriminates by TX PROVENANCE — a stub row asserted by the
-   `:core-seed` boot tx is compiled core (shallow tag: its
-   members are the boot-indexed `:seon.fn` rows of the WHOLE compiled
-   ns; inlining them re-creates the 200k+-char dump the depth rule
-   exists to avoid), while a stub row from any other tx is
-   agent-authored and reconstitutes. Never a render-time file read."
+   prefix and the churning ns sits nearest the tail.
+
+   Render depth per row (B9 body-size tiering):
+     - the agent's OWN CURRENT ns (from `:seon.agent/id` via
+       [[current-ns]]) renders FULL source — the agent sees its complete
+       working code. nil id (inspector / no-agent path) → no ns is
+       current → everything compact.
+     - every OTHER included ns renders COMPACT ([[compact-ns-source]]):
+       the `(ns …)` form + each schema in FULL + each fn as its elided
+       `defn` (signature + attr-map incl. any `:test` usage example, body
+       → `…`); standalone deftests DROPPED. This holds the body to a few
+       KB; full bodies + tests stay in the on-demand `render-namespace`.
+
+   The stub branch discriminates by TX PROVENANCE — a stub row asserted
+   by the `:core-seed` boot tx is compiled core (its members are the
+   boot-indexed `:seon.fn` rows of the WHOLE compiled ns; inlining them
+   re-creates the 200k+-char dump the tiering exists to avoid, so the
+   bare-stub seed row is OMITTED and its members stay queryable from the
+   store), while a stub row from any other tx is agent-authored and
+   renders compact; a non-seed stub with no members is likewise omitted.
+   Never a render-time file read."
   {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.db/keys [db]}]
-  (let [;; seed-provenance tx set queried SEPARATELY — `get-else` over a
+  [{:seon.db/keys [db] id :seon.agent/id}]
+  (let [;; The agent's current ns (latest successful eval's ns) → the ONE
+        ;; ns rendered FULL. nil id (inspector path) → nil → all compact.
+        cur-ns (when id
+                 (try (current-ns {:seon.agent/id id :seon.db/db db})
+                      (catch :default _ nil)))
+        ;; seed-provenance tx set queried SEPARATELY — `get-else` over a
         ;; tx-eid that carries NO meta datoms silently DROPS the row in
         ;; datahike-cljs (probed 2026-06-11; the open-issues get-else
         ;; trap), so membership is checked in code instead.
@@ -1016,29 +1190,45 @@
                          [?n :seon.ns/name ?nm ?tx]]})
                     (filter (fn [[nm _]] (included-ns? (name nm) prefixes)))
                     (sort-by (fn [[nm tx]] [tx (name nm)])))
-        blocks (for [[nm tx] rows]
-                 (let [ns-str (name nm)
-                       src    (get sources nm)
-                       seed?  (contains? seed-txs tx)
-                       stub   (str "(ns " ns-str ")")
-                       body   (if (ns-stub? ns-str src)
-                                (or (when-not seed?
-                                      (reconstituted-ns-source
-                                        db nm (if (str/blank? src) stub src)))
-                                    ;; genuinely bare stub — SELF-DESCRIBES
-                                    ;; so it can never pass for the ns's
-                                    ;; real (empty-looking) source: an
-                                    ;; agent has fabricated a quotation
-                                    ;; from a bare stub before.
-                                    (str stub
-                                         " ;; ⚠ stub — source not indexed"
-                                         " here; do NOT guess its contents;"
-                                         " its members are store rows"
-                                         " (see the query above)"))
-                                (str/trim src))]
-                   (str "<namespace name=\"" ns-str "\">\n"
-                        body
-                        "\n</namespace>")))]
+        blocks (keep
+                 (fn [[nm tx]]
+                   (let [ns-str   (name nm)
+                         src      (get sources nm)
+                         seed?    (contains? seed-txs tx)
+                         stub     (str "(ns " ns-str ")")
+                         current? (= nm cur-ns)
+                         ;; body is nil when the ns would fall through to a
+                         ;; bare stub — seed-provenance (compiled core, whose
+                         ;; members are the boot-indexed rows queryable from
+                         ;; the store) OR no member rows to render. A bare
+                         ;; stub renders nothing useful and has baited a
+                         ;; fabricated quotation before, so such a ns is
+                         ;; OMITTED ENTIRELY: no tag, no marker. Its members
+                         ;; remain discoverable via the store query the
+                         ;; header points at.
+                         ;;
+                         ;; The agent's CURRENT ns renders FULL source (its
+                         ;; complete working code); every OTHER ns renders
+                         ;; COMPACT (ns form + schemas full + fns elided,
+                         ;; tests dropped). A sourceless/stub current ns has
+                         ;; no full text to show, so it too renders compact.
+                         body
+                         (cond
+                           (and current? (not (ns-stub? ns-str src)))
+                           (str/trim src)
+
+                           (ns-stub? ns-str src)
+                           (when-not seed?
+                             (compact-ns-source
+                               db nm (if (str/blank? src) stub src) stub))
+
+                           :else
+                           (compact-ns-source db nm src stub))]
+                     (when-not (str/blank? body)
+                       (str "<namespace name=\"" ns-str "\">\n"
+                            body
+                            "\n</namespace>"))))
+                 rows)]
     (if (seq blocks)
       (str namespaces-header "\n\n" (str/join "\n\n" blocks))
       "")))
@@ -1471,7 +1661,7 @@
    docs/seon/concepts/reactive-context).
 
    The CORPUS checks (no-malli-schema, return-is-any, arg-is-any,
-   uses-maybe, no-return-spec, no-input-spec, missing-test) default to
+   uses-maybe, no-return-spec, no-input-spec) default to
    the agent's CURRENT ns so an agent isn't confused by other
    namespaces' defects. Override per-section via the `:seon.ctx` entity:
    `:seon.warn/ns <ns-kw>` scopes to that ns; `:seon.warn/ns
@@ -1492,6 +1682,48 @@
     (warn/render-warnings
       (cond-> {:seon.db/db db}
         (some? scope) (assoc :seon.warn/ns scope)))))
+
+(def ^:private inventory-header
+  (str ";; stored data — what this cluster holds RIGHT NOW, one line per\n"
+       ";; KIND (attr namespace), then each attr NAME with its live row\n"
+       ";; count. Consult this BEFORE researching or registering: a kind\n"
+       ";; that already exists means prior agents stored rows you can\n"
+       ";; query. Read any kind's rows with the LISTED attrs, e.g.:\n"
+       ";;   (seon.db/query {:seon.db/query\n"
+       ";;     '[:find ?v :where [?e :my.kb.codebase/answer ?v]]})\n"
+       ";; (post-bootstrap data only; the full system index is one call\n"
+       ";;  away — (seon.db/store-inventory {:seon.db/system? true}))"))
+
+(defn inventory-section
+  "The `<data-inventory>` discovery surface (always-changing volatile
+   tail): a CHEAP map of what the shared store holds RIGHT NOW, derived
+   from [[seon.db/store-inventory]] (user-domain kinds first). ONE line
+   per kind — the kind (attr namespace) is the line label, then
+   space-separated `attr-name count` pairs with the namespace stripped
+   off each attr name (the line label already carries it). Pure fn of
+   the db; stores nothing; recomputed each render so a newly-stored
+   kind appears next turn and a fully-retracted one vanishes (see
+   docs/seon/concepts/reactive-context).
+
+   REACTIVE: returns \"\" (composer drops the section) when the store
+   holds no post-bootstrap data — no empty shell. The whole section for
+   a typical store is only a few hundred chars (~300 tokens), so it
+   stays out of the cacheable prefix and rides near the prompt tail."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.db/keys [db]}]
+  (let [rows (db/store-inventory {:seon.db/db db})]
+    (if (seq rows)
+      (let [lines (map (fn [{kind :seon.db/kind attrs :seon.db/attrs}]
+                         (str (name kind) ": "
+                              (str/join " "
+                                (map (fn [[a c]] (str (name a) " " c))
+                                     attrs))))
+                       rows)]
+        (str "<data-inventory>\n"
+             inventory-header "\n\n"
+             (str/join "\n" lines)
+             "\n</data-inventory>"))
+      "")))
 
 (def transcript-char-budget
   "Total rendered-chars cap for the transcript section (~6k tokens at
@@ -1866,7 +2098,12 @@
                        terms overlap the open question, pointing back
                        at the full <findings> rows; derived, vanishes
                        when idle or when nothing overlaps
-    11. :prompt      — the §2.9 status line + clean REPL prompt
+    11. :inventory   — the cheap <data-inventory> map: one line per
+                       stored KIND with each attr's live row count
+                       (user-domain first); derived from
+                       seon.db/store-inventory, vanishes when the store
+                       holds no post-bootstrap data
+    12. :prompt      — the §2.9 status line + clean REPL prompt
                        (always changing — the volatile tail's end)
 
    The dead sections (capabilities, exemplars, schema-catalog,
@@ -1896,6 +2133,8 @@
     :seon.render/ai 'seon.agent.turns/turns-section}
    {:seon.ctx/name :findings-pointer :seon.ctx/priority 95
     :seon.render/ai 'seon.agent.findings/findings-pointer-section}
+   {:seon.ctx/name :inventory    :seon.ctx/priority 97
+    :seon.render/ai 'seon.ctx/inventory-section}
    {:seon.ctx/name :prompt       :seon.ctx/priority 99
     :seon.render/ai 'seon.ctx/prompt-section}])
 
