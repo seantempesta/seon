@@ -641,13 +641,26 @@
                   (some (partial truly-undeclared? compile-state) @warnings)
                   (let [{:keys [prefix suffix] :as w}
                         (first (filter (partial truly-undeclared? compile-state)
-                                       @warnings))]
+                                       @warnings))
+                        sym  (str prefix "/" suffix)
+                        kind (:seon.eval/warning-type w)
+                        ;; Crystal-clear: name the EXACT symbol + the EXACT
+                        ;; next action. A FRESH, confused LLM must know this
+                        ;; ran NOTHING and what to do about it.
+                        msg  (if (= kind :undeclared-ns)
+                               (str "`" sym "` — that NAMESPACE is not loaded "
+                                    "(typo, or you haven't required it). This "
+                                    "form ran NOTHING. Require it, or fix the "
+                                    "name, then re-eval.")
+                               (str "`" sym "` is not defined — you have not "
+                                    "defined it (or its defn failed earlier, "
+                                    "or it's a typo). This form ran NOTHING. "
+                                    "Define it first, then this runs."))]
                     (reject
-                      (ex-info (str "undeclared " (name (:seon.eval/warning-type w))
-                                    ": " prefix "/" suffix)
+                      (ex-info msg
                                {:seon.error/kind :compile
-                                :seon.eval/warning-type (:seon.eval/warning-type w)
-                                :seon.eval/undeclared (str prefix "/" suffix)
+                                :seon.eval/warning-type kind
+                                :seon.eval/undeclared sym
                                 :seon.eval/warning (dissoc w :seon.eval/warning-type)})))
 
                   error
@@ -1554,28 +1567,50 @@
         (or best' (:seon.error/message err) "")
         (recur (:seon.error/cause e) (inc depth) best')))))
 
-(defn render-error-string
-  "Produce the LEGIBLE, edn-SAFE string persisted as `:seon.eval/error`
-   for a failed eval. The raw `seon.error/->map` carries an opaque
-   `#error` instance under `:seon.error/raw`, a redundant
-   `:seon.error/ex-data`, and a multi-KB JS `:seon.error/stack`. pr-str'ing
-   the whole map (the old behavior) (a) buried the one useful line under
-   noise and (b) produced a string the agent-side reader couldn't decode
-   (the `#error` literal breaks `read-string`), so the renderer fell back
-   to dumping the noisy blob.
+(def ^:private known-error-kinds
+  "Error kinds whose `:seon.error/message` is already crystal-clear
+   guidance built by the thrower (db `:user-input`, compile, read,
+   schema-validation). For these, the message stands alone — no runtime
+   'errors are values' framing is added (it would be wrong: these are
+   not thrown values the agent adapts to, they are defects to FIX)."
+  #{:user-input :compile :read :seon.eval/repl-parity})
 
-   Instead we keep ONLY the legible parts at the persistence boundary: the
-   deepest real message + the structured `:seon.error/data` map (failing
-   attr, expected schema, db error kind, the registration hint). Both are
-   readable EDN. Stack + raw are dropped — the full value is still in the
-   live globalThis result stash via `(result :<id>)`. The structured
-   instrument envelope, when present, still lands separately in
-   `:seon.eval/error-data`."
+(defn render-error-string
+  "Produce the CRYSTAL-CLEAR, edn-SAFE string persisted as
+   `:seon.eval/error` for a failed eval — what the agent reads in the
+   transcript (rendered as `;; ⚠` lines by `seon.ctx/format-eval-row`).
+
+   It must tell a fresh, confused LLM the EXACT defect AND the exact next
+   action — never a stack trace, never a raw EDN dump. So we keep ONLY
+   the deepest real `:seon.error/message` (the throwers — `read-error-message`,
+   the undeclared-var message, the db user-input messages — build that
+   to be self-contained) and, for a GENUINE RUNTIME throw (no known
+   compile/read/db kind in `:seon.error/data`), append the standing
+   'errors are values — read it and adapt; nothing threw' framing so the
+   agent treats the failure as data, not a crash.
+
+   The raw `:seon.error/data` EDN is NOT dumped here (it merely duplicated
+   the prose and read like a stack trace); the structured data still
+   lands separately in `:seon.eval/error-data` for the Malli-instrument
+   path and stays in the live globalThis result stash via `(result :<id>)`.
+   `:seon.error/raw`/`stack` are dropped (opaque + unreadable to the
+   agent-side reader)."
   [err]
   (let [msg  (deepest-error-message err)
-        data (:seon.error/data err)]
-    (str msg
-         (when (seq data) (str "\n;;   detail: " (pr-str data))))))
+        ;; The kind may sit at the top level (the synthesized read/
+        ;; compile/parity error maps eval-batch! builds) OR in the
+        ;; flattened `:seon.error/data` (a thrown ex-info's ex-data).
+        kind (or (:seon.error/kind err)
+                 (:seon.error/kind (:seon.error/data err)))
+        ;; A runtime throw is anything NOT a known fix-this defect kind:
+        ;; the agent's own (throw …), a JS TypeError from calling a
+        ;; non-fn, etc. errors-are-values applies — frame it so.
+        runtime? (not (contains? known-error-kinds kind))]
+    (if runtime?
+      (str msg
+           "\n;;   errors are values — read it and adapt; nothing threw "
+           "at you (the failure is a value you can inspect and handle).")
+      msg)))
 
 (def result-row-cap
   "Row bound for a COLLECTION eval result rendered into
@@ -2133,6 +2168,13 @@
         ctx and self-corrects.
      3. duration-ms = 0 (no eval happened).
 
+   `:kind :comment` (trailing comment-preamble with no following form):
+     1. No source to eval — record a comment-only :seon.eval row
+        (blank source, ok? true) carrying just `:seon.eval/narration`,
+        so the agent's trailing `;;` thinking renders in the transcript
+        and is never lost. Counts as neither n-ok nor n-fail (no eval
+        happened); duration-ms = 0.
+
    Per-form work is wrapped in `(db/with-tx-context {…} f)` so every
    transact inside auto-tags with the causality bundle (agent-id +
    eval-id + origin). Callers that establish a wider scope first
@@ -2262,6 +2304,21 @@
                                                         (:error entry)
                                                         (:source entry))}}}))
                       (vswap! n-fail inc))))
+
+                ;; Comment-only entry (trailing `;;` lines / bare prose with
+                ;; no following form) — no source to eval. Record a
+                ;; comment-only row (blank source, ok? true) so the agent's
+                ;; trailing thinking renders in the transcript and is never
+                ;; lost. Not counted in n-ok/n-fail (nothing was evaluated).
+                (= :comment (:kind entry))
+                (await (record-eval! {:eval-id     eval-id
+                                      :turn-id     turn-id
+                                      :at          (js/Date.)
+                                      :duration-ms 0
+                                      :narration   (:narration entry)
+                                      :source      ""
+                                      :ns          @current-ns
+                                      :result      {:ok true :value nil}}))
 
                 ;; REPL-parity intercept (fix d) — in-ns / *ns* / *1 *2 *3
                 ;; get a legible translation INSTEAD of an opaque error or

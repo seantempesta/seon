@@ -16,6 +16,7 @@
   (:require
     #?(:clj  [clojure.test :as t :refer [deftest is testing]]
        :cljs [cljs.test    :as t :refer [deftest is testing]])
+    [clojure.string :as str]
     [seon.repair :as repair]
     [seon.repl.internal :as parse]))
 
@@ -196,7 +197,9 @@
         note (repair/repair-note {:seon.repair/changes (:seon.repair/changes res)
                                   :seon.repair/shape "2-key map"})]
     (is (string? note))
-    (is (re-find #"auto-repaired" note))
+    (is (re-find #"auto-balanced" note))
+    (is (str/starts-with? note "↻")
+        "leads with the ↻ breadcrumb glyph, no ;; prefix (renderer adds it)")
     (is (re-find #"delimiter" note))
     (is (re-find #"2-key map" note)
         "the structural-shape clause is present")

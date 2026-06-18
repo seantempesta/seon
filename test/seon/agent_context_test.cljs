@@ -349,10 +349,15 @@
                    (proves merge by :at, not message-block-then-eval-block)")
               (is (< i-failed i-success)
                   "failed eval (t13) before successful eval (t21)")
-              ;; V4-4: REPL-real prompt lines — the eval renders under its
-              ;; own ns prompt, not the old bare `> `.
-              (is (str/includes? ts "my.agent.ctx-260610=> (defn greet [] :hi)")
-                  "eval rows render as <ns>=> <form>"))))
+              ;; narration-unification: the form renders verbatim (NO
+              ;; `<ns>=>` prompt prefix), under a `;; in <ns>` marker
+              ;; that appears where the ns changes.
+              (is (str/includes? ts "(defn greet [] :hi)")
+                  "eval rows render the form verbatim")
+              (is (not (str/includes? ts "=> (defn greet"))
+                  "no <ns>=> history prompt prefix")
+              (is (str/includes? ts ";; in my.agent.ctx-260610")
+                  "ns shown via a ;; in <ns> marker on the ns change"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -814,33 +819,50 @@
     (is (str/includes? out "(result :<id>)")
         "no eid → generic placeholder, still actionable")))
 
-(deftest format-eval-row-pinned-glyph
-  ;; THE byte-level pin for the V4-4 result-var glyph (context-v4 §2.8
-  ;; DECIDE(build), decided here): `<ns>=> <form>` then
-  ;; `<value>  ; ⇒ (result :<id>) · <dur>ms`.
+(deftest format-eval-row-unified-stream
+  ;; THE byte-level pin for the narration-unification render
+  ;; (2026-06-18): ONE continuous comments+forms+results stream. No
+  ;; `<ns>=>` history prompt prefix (the live cursor lives once at the
+  ;; END of the context); the value is a `;; =>` line carrying the
+  ;; `(result :<id>)` pointer; errors are `;; ⚠` guidance lines.
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3" :seon.eval/id "sm0000001a"
-               :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin}
+               :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin
+               :seon.eval/narration "add 1 and 2"}
               false)]
-    (is (= "my.agent.pin=> (+ 1 2)\n3  ; ⇒ (result :sm0000001a) · 1ms" row)
-        "the pinned current-session glyph, byte-exact"))
+    (is (= (str ";; add 1 and 2\n"
+                "(+ 1 2)\n"
+                ";; => 3   ⟨(result :sm0000001a) · 1ms⟩")
+           row)
+        "the pinned current-session unified row, byte-exact")
+    (is (not (str/includes? row "=> (+ 1 2)"))
+        "no <ns>=> history prompt prefix on the form"))
   ;; prior-session rows render WITHOUT the result-var handle.
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3" :seon.eval/id "sm0000001a"
                :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin}
               true)]
-    (is (= "my.agent.pin=> (+ 1 2)\n3" row)
+    (is (= "(+ 1 2)\n;; => 3" row)
         "prior-session rows carry NO result-var handle"))
-  ;; errors keep a plain id footer — no derefable value exists.
+  ;; errors render as `;; ⚠` guidance — no form prompt, no value.
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(boom)" :seon.eval/ok? false
                :seon.eval/error "kaput" :seon.eval/id "er0000001a"
                :seon.eval/duration-ms 2 :seon.eval/ns :my.agent.pin}
               false)]
-    (is (= "my.agent.pin=> (boom)\n;; ERROR kaput  ; # er0000001a · 2ms" row)
-        "error rows carry the plain id footer, not a result var")))
+    (is (= "(boom)\n;; ⚠ kaput" row)
+        "error rows render the form then a crystal-clear ;; ⚠ guidance line"))
+  ;; a comment-only row (blank source) renders just its `;;` preamble.
+  (let [row (#'seon.ctx/format-eval-row
+              {:seon.eval/source "" :seon.eval/ok? true
+               :seon.eval/id "cm0000001a" :seon.eval/duration-ms 0
+               :seon.eval/ns :my.agent.pin
+               :seon.eval/narration "just a trailing thought"}
+              false)]
+    (is (= ";; just a trailing thought" row)
+        "comment-only row → only the ;; preamble, no form, no value")))
 
 ;; ---------------------------------------------------------------------------
 ;; C-19 — model-authored result-claim comments are NEUTRALIZED in the
@@ -896,18 +918,19 @@
 
 (deftest format-eval-row-neutralizes-fake-claims-keeps-real-results
   ;; fake `;; =>` in stored narration → rewritten in the rendered row;
-  ;; the runtime-owned value line is untouched, byte-exact.
+  ;; the runtime-owned `;; =>` value line is untouched (provenance gate:
+  ;; it's appended by the composer AFTER neutralize).
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3" :seon.eval/id "fk0000001a"
                :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin
                :seon.eval/narration ";; => {:fabricated 7}"}
               false)]
-    (is (= (str ctx/unverified-narration-marker "\n"
-                "my.agent.pin=> (+ 1 2)\n"
-                "3  ; ⇒ (result :fk0000001a) · 1ms")
+    (is (= (str ";; [unverified narration — not a real result]\n"
+                "(+ 1 2)\n"
+                ";; => 3   ⟨(result :fk0000001a) · 1ms⟩")
            row)
-        "fake claim neutralized; real result line byte-identical")
+        "fake claim neutralized; real value line is the runtime-owned ;; =>")
     (is (not (str/includes? row ":fabricated")) "claimed value absent"))
   ;; inline claim inside SOURCE is neutralized too — code survives.
   (let [row (#'seon.ctx/format-eval-row
@@ -915,11 +938,11 @@
                :seon.eval/result-edn "3" :seon.eval/id "fk0000002b"
                :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin}
               false)]
-    (is (str/includes? row "my.agent.pin=> (+ 1 2) ;; [unverified"))
+    (is (str/includes? row "(+ 1 2) ;; [unverified"))
     (is (not (str/includes? row "99")) "inline claimed value absent")
-    (is (str/includes? row "3  ; ⇒ (result :fk0000002b)")
+    (is (str/includes? row ";; => 3   ⟨(result :fk0000002b)")
         "real value line unaffected"))
-  ;; clean narration renders byte-identical — no false positives.
+  ;; clean narration renders the unified stream — no false positives.
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3" :seon.eval/id "cl0000003c"
@@ -927,8 +950,8 @@
                :seon.eval/narration ";; adding two numbers"}
               false)]
     (is (= (str ";; adding two numbers\n"
-                "my.agent.pin=> (+ 1 2)\n"
-                "3  ; ⇒ (result :cl0000003c) · 1ms")
+                "(+ 1 2)\n"
+                ";; => 3   ⟨(result :cl0000003c) · 1ms⟩")
            row)))
   ;; re-render is stable: a row whose stored narration already carries
   ;; the marker renders it ONCE, unchanged.
@@ -1178,15 +1201,15 @@
                :seon.eval/result-edn "nil" :seon.eval/output "hi\n"
                :seon.eval/id "pr0000001a" :seon.eval/duration-ms 1
                :seon.eval/ns :my.agent.pin})]
-    (is (str/includes? row "hi\nnil")
-        "captured output renders above the result, REPL-style"))
+    (is (str/includes? row "(println \"hi\")\nhi\n;; => nil")
+        "captured output renders above the ;; => value line, REPL-style"))
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3"
                :seon.eval/id "pr0000002b" :seon.eval/duration-ms 1
                :seon.eval/ns :my.agent.pin})]
-    (is (str/includes? row "my.agent.pin=> (+ 1 2)\n3")
-        "no output attr → row unchanged (no blank line injected)")))
+    (is (str/includes? row "(+ 1 2)\n;; => 3")
+        "no output attr → form then ;; => value, no blank line injected")))
 
 ;; ---------------------------------------------------------------------------
 ;; (l2) live-tile awareness section (live-tiles U5) — context-v4 only fixes

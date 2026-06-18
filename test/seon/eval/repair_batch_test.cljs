@@ -123,7 +123,7 @@
                                     :where [?e :seon.eval/id]
                                            [?e :seon.eval/narration ?n]]
                                   db*))]
-                  (is (re-find #"auto-repaired" (str narr))))))))
+                  (is (re-find #"auto-balanced" (str narr))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

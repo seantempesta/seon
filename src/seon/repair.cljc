@@ -147,10 +147,15 @@
        :seon.repair/changes   []})))
 
 (defn repair-note
-  "Compose the transparency `;;`-comment line that rides on a repaired
-   eval, derived from `:seon.repair/changes`. Names the count + kind of
+  "Compose the transparency breadcrumb line that rides on a repaired eval,
+   derived from `:seon.repair/changes`. Names the count + kind of
    delimiter edits and that the repaired form WAS auto-evaled, so the
    agent always sees the diff and can reject a wrong-but-valid repair.
+
+   Leads with the `↻` glyph and carries NO `;;` prefix — the transcript
+   renderer (`seon.ctx/format-eval-row`) emits it as a `;; ↻ …` comment
+   line in the unified stream, so a wrong-but-valid repair stays
+   catchable right above the form it changed.
 
    `:seon.repair/shape` (optional) is a short structural description of
    the repaired top-level form (e.g. \"2-key map\") the caller can cheaply
@@ -169,9 +174,8 @@
                    (pos? inserts)                      "inserted"
                    (pos? removes)                      "removed"
                    :else                               "adjusted")]
-    (str ";; auto-repaired your input and evaluated the result: "
+    (str "↻ auto-balanced your unparseable input and evaluated the result: "
          verb " " n " delimiter" (when (not= n 1) "s")
          (when (seq delims) (str " (" delims ")"))
-         "; form shape: <was unparseable>"
          (when (and shape (seq shape)) (str " → " shape))
          ". Verify this is what you intended; re-eval the whole form if not.")))

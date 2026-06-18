@@ -450,40 +450,102 @@
   [s]
   (str/replace s result-claim-re unverified-narration-marker))
 
+(defn- strip-comment-prefix
+  "Strip any leading `;`/`⚠`/`↻`/`=>` comment markers + whitespace from
+   one line, returning the bare text. Lets the renderer re-prefix a line
+   idempotently whether the stored text already carried a `;;` (a real
+   comment, the scratch-def note, the repair `↻` breadcrumb, a
+   `render-malli-error` `;;` line) or not (raw bare prose). The `↻`/`⚠`
+   glyphs and the `=>`/`⇒` arrows are re-emitted by the caller as the
+   line's role demands."
+  [line]
+  (-> (str line)
+      (str/replace #"^[\s;]*(?:[↻⚠]\s*)?" "")
+      str/trimr))
+
+(defn- comment-lines
+  "Render multi-line comment-preamble text `s` as literal `;;` lines —
+   one `;; <text>` per non-blank source line, leading comment markers
+   normalized away first (idempotent re-prefix). Returns a seq of
+   `;;`-prefixed strings (empty when `s` is blank). The repair `↻`
+   breadcrumb keeps its glyph: a line whose stripped text starts with a
+   non-`;;` marker is handled by the caller; here we re-add only `;;`."
+  [s]
+  (when (and (string? s) (not (str/blank? s)))
+    (->> (str/split-lines s)
+         (map str/trim)
+         (remove str/blank?)
+         (map (fn [line]
+                ;; The repair breadcrumb is stored with a leading `↻`;
+                ;; keep the glyph so a wrong-but-valid repair stays
+                ;; visible. Everything else becomes a plain `;;` line.
+                (if (str/starts-with? line "↻")
+                  (str ";; " line)
+                  (str ";; " (strip-comment-prefix line))))))))
+
+(defn- warn-lines
+  "Render an error/guidance body `s` into the unified stream: the FIRST
+   non-blank line as the `;; ⚠ <headline>` warning, every CONTINUATION
+   line as a plain `;;` comment (so a read-error's source slice + `^`
+   caret stay ALIGNED — only a leading `;`/`⚠`/`ERROR` marker is
+   stripped, never the interior indentation a caret depends on). One
+   crystal-clear guidance block, never a stack trace. Returns a single
+   newline-joined string (\"\" when blank)."
+  [s]
+  (let [strip-marker
+        (fn [line]
+          ;; Drop ONLY a leading comment marker / legacy `ERROR` keyword /
+          ;; prior `⚠`, plus the single following space — KEEP any deeper
+          ;; indentation (the caret + source-slice lines rely on it).
+          (-> (str line)
+              (str/replace #"^\s*;+[ \t]?" "")
+              (str/replace #"(?i)^ERROR[ \t]?" "")
+              (str/replace #"^⚠[ \t]?" "")))
+        lines (->> (str/split-lines (str s))
+                   (drop-while str/blank?))]
+    (if (empty? lines)
+      ""
+      (str/join "\n"
+        (cons (str ";; ⚠ " (strip-marker (first lines)))
+              (map #(str ";; " (strip-marker %)) (rest lines)))))))
+
 (defn- format-eval-row
-  "REPL-real render of one eval (context-v4 §2.8): the `<ns>=> <form>`
-   prompt line (narration `;;` comments above it, as written — except
-   result-claim comments, neutralized via
-   [[neutralize-result-claims]]), the
-   captured output, then the VALUE LINE carrying the eval's result-var
-   id — the pinned glyph:
+  "REPL-real render of one eval as part of the ONE continuous transcript
+   (narration-unification 2026-06-18): the form's comment-preamble as
+   literal `;;` lines, the form verbatim (or the parinfer-repaired
+   source), captured print output, then the value as a `;; =>` line (or
+   the error as `;; ⚠` guidance lines). NO `<ns>=>` history prompt
+   prefix — the live `<your-ns>=>` cursor lives once at the very END of
+   the context; the transcript reads as plain comments+forms+results, the
+   exact shape the system prompt teaches.
 
-     my.agent.kXQ=> (+ 1 2)
-     3  ; ⇒ (result :EVLabc-123) · 4ms
+     ;; add 1 and 2
+     (+ 1 2)
+     ;; => 3   ⟨(result :EVLabc-123) · 4ms⟩
 
-   The id is visible per eval and the suffix IS the retrieval call —
-   show-don't-tell for the result-var system. PRIOR-SESSION evals
-   (`prior?` true) render WITHOUT the result-var handle (their live
-   values did not survive the restart; the resume boundary marker
-   says so once). Errors render `;; ERROR …` with a plain `; # <id>`
-   footer — there is no value to dereference.
+   The `(result :<id>)` pointer rides the value line — show-don't-tell
+   for the result-var system. PRIOR-SESSION evals (`prior?` true) render
+   WITHOUT the handle (their live values did not survive the restart;
+   the resume boundary marker says so once).
+
+   ERRORS render as `;; ⚠` guidance lines (never a stack trace): the
+   pre-rendered legible `:seon.eval/error` string (read/compile/runtime —
+   crystal-clear at the source) or a Malli instrumentation envelope via
+   `render-malli-error`. A COMMENT-ONLY row (blank source — trailing
+   `;;` lines / bare prose the agent typed with no following form)
+   renders just its `;;` preamble, no form, no value.
 
    The rendered result/error body of an AGENT eval is capped at
-   `eval-render-cap` chars so one huge eval result can't dominate the
-   agent's context (context-SAFETY invariant — agent code can return
-   literally anything). A CORE-AUTHORED row
-   (`:seon.ctx/core-authored?` true, tagged by [[session-evals]]
-   from its promptless owning turn) renders at
-   [[core-eval-render-cap]] instead — our own scripted output is
-   well-controlled and must arrive whole (the inventory-clip defect).
-   Error rendering branches: a Malli instrumentation envelope renders
-   via `render-malli-error`; otherwise the pre-rendered legible
-   `:seon.eval/error` string.
+   `eval-render-cap` chars (context-SAFETY invariant — agent code can
+   return literally anything); a CORE-AUTHORED row
+   (`:seon.ctx/core-authored?` true) renders at [[core-eval-render-cap]].
 
-   On SUCCESS, a reactive 'won't persist' note (#7) is DERIVED from the
+   On SUCCESS a reactive 'won't persist' note (#7) is DERIVED from the
    eval's source via [[seon.eval/scratch-def-note]] and appended as a
    trailing `;;` line — pure, no stored attr, recomputed each render so
-   it FOLLOWS the form. Blank for everything but a bare `(def …)`."
+   it FOLLOWS the form. The repair `↻ auto-balanced …` breadcrumb (when
+   a span was parinfer-repaired) rides in the preamble, keeping a
+   wrong-but-valid repair catchable."
   ([row] (format-eval-row row false))
   ([{src        :seon.eval/source
      ok?        :seon.eval/ok?
@@ -494,48 +556,70 @@
      eid        :seon.eval/id
      dur        :seon.eval/duration-ms
      narr       :seon.eval/narration
-     eval-ns    :seon.eval/ns
      core? :seon.ctx/core-authored?}
     prior?]
-   (let [envelope (read-error-envelope err-data)
-         limit    (if core? core-eval-render-cap eval-render-cap)
-         body (cond
-                ok?
-                (cap-result-body (or res "nil") limit eid)
-
-                (einstrument/instrument-error? envelope)
-                (cap-result-body (einstrument/render-malli-error envelope)
-                                 limit eid)
-
-                (and (string? err) (not (str/blank? err)))
-                ;; `:seon.eval/error` is stored pre-rendered + legible
-                ;; (`seon.eval/render-error-string`) — prefix + plain-clip.
-                ;; NOT `cap-result-body`, whose "narrow your query" guide
-                ;; is for oversized RESULTS, nonsensical on an error.
-                (cap-result (str ";; ERROR " err) limit)
-
-                :else ";; <no result>")
-         dur-str (when dur (str " · " dur "ms"))
-         suffix  (cond
-                   prior? ""
-                   ok?    (str "  ; ⇒ (result :" eid ")" dur-str)
-                   :else  (str "  ; # " eid dur-str))
+   (let [envelope    (read-error-envelope err-data)
+         limit       (if core? core-eval-render-cap eval-render-cap)
+         comment-only? (str/blank? (str src))
+         dur-str     (when dur (str " · " dur "ms"))
+         ;; Comment-preamble — the agent's `;;`/prose thinking, neutralized
+         ;; against fabricated `;; =>` result-claims BEFORE we re-prefix.
+         preamble    (comment-lines
+                       (when (and narr (not (str/blank? narr)))
+                         (neutralize-result-claims narr)))
+         ;; The form, verbatim (or repaired) — neutralized for any inline
+         ;; `;; =>` claim, capped. Omitted for a comment-only row.
+         form-ln     (when-not comment-only?
+                       (cap-result (neutralize-result-claims src) limit))
          ;; Captured println/prn output — shown above the value like a
          ;; real REPL prints before returning. Bounded by the same cap.
-         out-ln (when (and (string? out) (not (str/blank? out)))
-                  (str (cap-result (str/trimr out) limit) "\n"))
+         out-ln      (when (and (string? out) (not (str/blank? out)))
+                       (cap-result (str/trimr out) limit))
+         ;; The result / error body, rendered into the unified stream.
+         result-ln
+         (cond
+           comment-only? nil
+
+           ok?
+           (let [v       (cap-result-body (or res "nil") limit eid)
+                 ;; The (result :<id>) pointer rides the value line so the
+                 ;; agent can fetch the live stored value. Prior-session
+                 ;; rows carry no handle (their values died with the
+                 ;; process). A `;; =>` value can be multi-line (a clipped
+                 ;; body carries its own `\n;;` guide) — prefix only the
+                 ;; FIRST line with `;; =>`, the rest stay as the body's
+                 ;; own `;;` lines.
+                 handle  (when-not prior?
+                           (str "   ⟨(result :" eid ")" dur-str "⟩"))
+                 lines   (str/split-lines v)]
+             (str ";; => " (first lines) handle
+                  (when (next lines)
+                    (str "\n" (str/join "\n" (rest lines))))))
+
+           (einstrument/instrument-error? envelope)
+           (cap-result-body
+             (warn-lines (einstrument/render-malli-error envelope)) limit eid)
+
+           (and (string? err) (not (str/blank? err)))
+           ;; `:seon.eval/error` is stored pre-rendered + crystal-clear
+           ;; (`seon.eval/render-error-string` / `read-error-message` /
+           ;; the undeclared-var message) — render as `;; ⚠` guidance,
+           ;; plain-clip (NOT the "narrow your query" result guide).
+           (cap-result (warn-lines err) limit)
+
+           :else ";; ⚠ <no result>")
          ;; Reactive 'won't persist' note (#7) — DERIVED from source, no
          ;; stored attr; recomputed each render so it follows the form.
-         ;; Appended AFTER neutralize-result-claims and carries no `=>`/
-         ;; `⇒`, so it never trips [[result-claim-re]].
-         note   (when ok? (seval/scratch-def-note src))]
-     (str (when (and narr (not (str/blank? narr)))
-            (str (neutralize-result-claims narr) "\n"))
-          (if eval-ns (name eval-ns) "?") "=> "
-          (cap-result (neutralize-result-claims src) limit) "\n"
-          out-ln
-          body suffix
-          (when (and note (not (str/blank? note))) (str "\n" note))))))
+         note   (when (and ok? (not comment-only?))
+                  (seval/scratch-def-note src))]
+     (->> [(when (seq preamble) (str/join "\n" preamble))
+           form-ln
+           out-ln
+           result-ln
+           (when (and note (not (str/blank? note)))
+             (str ";; " (strip-comment-prefix note)))]
+          (remove nil?)
+          (str/join "\n")))))
 
 ;; ------------------------------------------------------------
 ;; Read API — what the agent calls from its REPL to walk its own
@@ -1721,9 +1805,14 @@
   "The chronological TRANSCRIPT — the agent's messages and evals
    INTERLEAVED into a single oldest-first stream (context-v4 §2.8), so
    the agent reads ONE coherent REPL session: `user>`/`assistant>`
-   message events and `<ns>=> form` evals whose value lines carry the
-   result-var id. Reads `:seon.agent/n` from the ctx-entity if present
-   (caps EACH stream before the merge), else 50 messages + 50 evals.
+   message events and evals rendered as the unified comments+forms+
+   results stream ([[format-eval-row]]) — `;;` preamble, the form, a
+   `;; =>` value (or `;; ⚠` error guidance). A `;; in <ns>` marker is
+   injected ONLY where the eval ns changes, so ns switches stay visible
+   without a per-row prompt prefix (the live `<your-ns>=>` cursor lives
+   once at the very end of the context). Reads `:seon.agent/n` from the
+   ctx-entity if present (caps EACH stream before the merge), else 50
+   messages + 50 evals.
 
    SESSION RESUME: evals from PREVIOUS sessions render too
    ([[session-evals]] walks all sessions), separated by ONE
@@ -1753,10 +1842,11 @@
                       :seon.render/text (format-message-row m id)})
              msgs)
         eval-items
-        (loop [[e & more] es prev-sess ::none out []]
+        (loop [[e & more] es prev-sess ::none prev-ns ::none out []]
           (if (nil? e)
             out
             (let [sess   (:seon.agent.session/id-of-session e)
+                  ns-kw  (:seon.eval/ns e)
                   at     (transcript-item-at e)
                   prior? (and (some? cur-sess) (not= sess cur-sess))
                   marker (when (and (not= prev-sess ::none)
@@ -1765,10 +1855,20 @@
                             ;; just before its session's first eval
                             :seon.ctx/at   (dec at)
                             :seon.render/text resume-marker-line})
+                  ;; `;; in <ns>` marker ONLY when the ns changes (or the
+                  ;; first row) — keeps ns SWITCHES visible without a
+                  ;; per-row `<ns>=>` prompt prefix on every row. Rides
+                  ;; the eval row's own text so it never evicts apart from
+                  ;; its row.
+                  ns-marker (when (and (some? ns-kw) (not= prev-ns ns-kw))
+                              (str ";; in " (name ns-kw)))
+                  row-text  (let [r (format-eval-row e prior?)]
+                              (if ns-marker (str ns-marker "\n" r) r))
                   row    {:seon.ctx/kind :seon.ctx/eval
                           :seon.ctx/at   at
-                          :seon.render/text (format-eval-row e prior?)}]
-              (recur more sess (into out (if marker [marker row] [row]))))))
+                          :seon.render/text row-text}]
+              (recur more sess (or ns-kw prev-ns)
+                     (into out (if marker [marker row] [row]))))))
         items (->> (concat msg-items eval-items)
                    (sort-by :seon.ctx/at)
                    vec)]
