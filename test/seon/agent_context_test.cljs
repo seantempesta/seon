@@ -93,6 +93,15 @@
             ;; (seon.ctx/core-authored-turn?) — so the seeds must
             ;; look like real LLM turns for the clip tests to bite.
             :seon.agent.turn/prompt-chars 4321
+            ;; The wake that opened this turn — the human's message. The
+            ;; threaded transcript renders its content as the turn's
+            ;; <user> line. Turn 2 (below) carries NO woken-by, so its
+            ;; <user> line is omitted (boot/manual-turn case). A NESTED
+            ;; MAP sharing the message's IDENTITY (not a lookup ref):
+            ;; datahike unifies it with the same-tx component message,
+            ;; whereas a lookup ref to a same-tx tempid throws
+            ;; entity-id/missing (the message has no eid yet).
+            :seon.agent.turn/woken-by {:seon.agent.message/id "MSGctxtest0001"}
             :seon.agent.turn/messages
             [{:seon.agent.message/id "MSGctxtest0001"
               :seon.agent.message/from {:seon.user/id "user"}
@@ -310,7 +319,7 @@
               (is (str/includes? text "<namespace name=\"seon.agent.todo\">")
                   "namespace tags present")
               (is (str/includes? text "<your-entity>") "your-entity present")
-              (is (str/includes? text "<transcript>") "transcript present")
+              (is (str/includes? text "<transcript note=") "transcript present")
               (is (str/includes? text "<warnings>") "warnings present")
               ;; the dead sections (context-v4 falsification lines) —
               ;; LINE-anchored: rendered SOURCE CODE may legitimately
@@ -325,81 +334,115 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; (d2) transcript-section interleaves messages + evals chronologically.
+;; (d2) transcript-section threads turns: <turn id=… evals=N/M> blocks,
+;;      each carrying its woken-by <user> line + REPL-faithful evals.
 ;; ---------------------------------------------------------------------------
 
-(deftest transcript-interleaves-messages-and-evals-chronologically
+(deftest transcript-threads-turns-with-user-and-evals
   (async done
     (-> (with-seeded-conn
           (fn [conn]
             (let [db   @conn
                   ts   (agent/transcript-section
                          {:seon.db/db db :seon.agent/id agent-id})
-                  i-user      (str/index-of ts "user> build me a thing")
-                  i-assistant (str/index-of ts "assistant> on it")
-                  i-failed    (str/index-of ts "boom — bad query")
-                  i-success   (str/index-of ts "my.agent.ctx-260610/greet")]
-              (is (str/includes? ts "<transcript>") "transcript marker present")
-              (is (and i-user i-assistant i-failed i-success)
-                  "all four transcript items present (2 msgs + 2 evals)")
-              (is (< i-user i-assistant)
-                  "user message before assistant message")
-              (is (< i-assistant i-failed)
-                  "messages interleaved BEFORE the eval that followed them
-                   (proves merge by :at, not message-block-then-eval-block)")
-              (is (< i-failed i-success)
-                  "failed eval (t13) before successful eval (t21)")
-              ;; narration-unification: the form renders verbatim (NO
-              ;; `<ns>=>` prompt prefix), under a `;; in <ns>` marker
-              ;; that appears where the ns changes.
+                  i-t1     (str/index-of ts "<turn id=TRNctxtest0001")
+                  i-user   (str/index-of ts "<user>build me a thing</user>")
+                  i-failed (str/index-of ts "=> ✗ boom — bad query")
+                  i-t2     (str/index-of ts "<turn id=TRNctxtest0002")
+                  i-success (str/index-of ts "my.agent.ctx-260610/greet")]
+              (is (str/includes? ts "<transcript note=") "transcript envelope present")
+              (is (str/includes? ts "</transcript>") "transcript envelope closed")
+              (is (and i-t1 i-user i-failed i-t2 i-success)
+                  "both <turn> blocks, the <user> line, and both evals present")
+              ;; turn 1 opens, its <user> woken-by line is INSIDE it,
+              ;; then its failed eval; turn 2 follows with its success.
+              (is (< i-t1 i-user i-failed i-t2 i-success)
+                  "turn-1 (user + failed eval) renders before turn-2 (success)")
+              ;; evals=N/M summary — turn 1 has 1 eval, 0 ok; turn 2 has
+              ;; 1 eval, 1 ok (the success in this default seed).
+              (is (str/includes? ts "<turn id=TRNctxtest0001 evals=0/1>")
+                  "turn-1 summary: 0 ok of 1 total (the failed eval)")
+              (is (str/includes? ts "<turn id=TRNctxtest0002 evals=1/1>")
+                  "turn-2 summary: 1 ok of 1 total")
+              ;; turn 2 has NO woken-by → NO <user> line. There is exactly
+              ;; ONE <user> line in the whole transcript (turn 1's).
+              (is (= 1 (count (re-seq #"<user>" ts)))
+                  "the no-woken-by turn omits its <user> line")
+              ;; the form renders verbatim, under a `;; in <ns>` marker;
+              ;; NO `<ns>=>` prompt prefix on the form.
               (is (str/includes? ts "(defn greet [] :hi)")
                   "eval rows render the form verbatim")
               (is (not (str/includes? ts "=> (defn greet"))
                   "no <ns>=> history prompt prefix")
               (is (str/includes? ts ";; in my.agent.ctx-260610")
-                  "ns shown via a ;; in <ns> marker on the ns change"))))
+                  "ns shown via a ;; in <ns> marker on the ns change")
+              ;; the success value rides a `=>` OUTPUT line (NOT a `;;`
+              ;; comment) trailing its result/<id> handle.
+              (is (str/includes? ts "=> #'my.agent.ctx-260610/greet ;; result/EVLctxtestK001")
+                  "success value on a `=>` line with its result/<id> handle"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; (d3) transcript budget eviction NEVER drops messages — the S-12 live
-;;      defect. Messages are exempt; eval rows evict OLDEST-FIRST.
+;; (d3) transcript budget eviction is OLDEST-TURN-FIRST: the newest turns
+;;      stay whole, older turns drop with an elision note.
 ;; ---------------------------------------------------------------------------
 
-(defn- flood-eval
-  "One of N same-shaped big evals for the budget-eviction test — `i`
-   disambiguates id/at; the 2000-char result renders at the 1500-char
-   eval cap + clip guide, ≈1.8k chars/row. The +1h offset guarantees
-   the flood sorts AFTER every [[seed-tx]] item."
+(defn- flood-turn
+  "One of N same-shaped big TURNS for the budget-eviction test — `i`
+   disambiguates ids/at; each turn's single 2000-char-result eval renders
+   at the 1500-char eval cap + clip guide, ≈1.8k chars. The +1h offset
+   guarantees the flood sorts AFTER every [[seed-tx]] turn."
   [i]
-  {:seon.eval/id (str "EVLctxflood" (.padStart (str i) 3 "0"))
-   :seon.eval/at (js/Date. (+ (.getTime (js/Date.)) 3600000 i))
-   :seon.eval/duration-ms 4
-   :seon.eval/source (str "(flood " i ")")
-   :seon.eval/ok? true
-   :seon.eval/result-edn (apply str (repeat 2000 "y"))
-   :seon.eval/ns :my.agent.ctx-260610})
+  (let [pad (.padStart (str i) 3 "0")
+        at  (js/Date. (+ (.getTime (js/Date.)) 3600000 i))]
+    {:seon.agent.turn/id (str "TRNctxflood" pad)
+     :seon.agent.turn/at at
+     :seon.agent.turn/status :done
+     :seon.agent.turn/prompt-chars 4321
+     :seon.agent.turn/evals
+     [{:seon.eval/id (str "EVLctxflood" pad)
+       :seon.eval/at at
+       :seon.eval/duration-ms 4
+       :seon.eval/source (str "(flood " i ")")
+       :seon.eval/ok? true
+       :seon.eval/result-edn (apply str (repeat 2000 "y"))
+       :seon.eval/ns :my.agent.ctx-260610}]}))
 
-(deftest transcript-eviction-keeps-messages-under-eval-flood
+(deftest transcript-eviction-keeps-newest-turns-drops-oldest
   (async done
-    (-> (with-seeded-conn
-          (mapv flood-eval (range 1 21))      ; ~36k rendered eval chars
+    (-> (client/open-agent-conn!)
+        (.then
           (fn [conn]
-            (let [db @conn
-                  ts (agent/transcript-section
-                       {:seon.db/db db :seon.agent/id agent-id})]
-              (is (str/includes? ts "user> build me a thing")
-                  "the user's message SURVIVES the eval flood — the S-12
-                   'last message missing from the visible transcript' bug")
-              (is (str/includes? ts "assistant> on it")
-                  "the agent's own reply survives too")
-              (is (str/includes? ts "older eval item")
-                  "the elision note fired — the flood DID overflow the budget")
-              (is (not (str/includes? ts "boom — bad query"))
-                  "the OLDEST eval row was evicted FIRST — eviction still
-                   works, it just no longer takes messages with it")
-              (is (str/includes? ts "(flood 20)")
-                  "the newest eval row is kept"))))
+            (binding [db/*conn* conn]
+              (-> (db/with-tx-context {:seon.db/origin :core-seed}
+                    (fn []
+                      (db/transact! {:seon.db/conn conn
+                                     :seon.db/tx-data (boot-seed-tx)})))
+                  (.then (fn [_]
+                           ;; seed the two base turns…
+                           (db/transact! {:seon.db/conn conn
+                                          :seon.db/tx-data (seed-tx [])})))
+                  (.then (fn [_]
+                           ;; …then append 20 flood turns onto the session.
+                           (db/transact!
+                             {:seon.db/conn conn
+                              :seon.db/tx-data
+                              [{:seon.agent.session/id "SESctxtest0001"
+                                :seon.agent.session/turns
+                                (mapv flood-turn (range 1 21))}]})))
+                  (.then
+                    (fn [_]
+                      (binding [db/*conn* conn]
+                        (let [db @conn
+                              ts (agent/transcript-section
+                                   {:seon.db/db db :seon.agent/id agent-id})]
+                          (is (str/includes? ts "older turn")
+                              "the elision note fired — the flood overflowed the budget")
+                          (is (not (str/includes? ts "<turn id=TRNctxtest0001"))
+                              "the OLDEST turn was evicted FIRST")
+                          (is (str/includes? ts "(flood 20)")
+                              "the newest turn is kept whole")))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -784,8 +827,8 @@
                     "the big result was clipped with the LOUD size marker")
                 (is (str/includes? ts "live value is COMPLETE")
                     "the clip says the display, not the value, is clipped")
-                (is (str/includes? ts "(result :")
-                    "guide points the agent at the live full value"))))
+                (is (str/includes? ts "result/")
+                    "guide points the agent at the live full value var"))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
@@ -810,59 +853,100 @@
       (is (str/includes? out "⚠ TRUNCATED at 1500 of 5000 chars"))
       (is (str/includes? out "live value is COMPLETE"))
       (is (str/includes? out "Never summarize or quote beyond")))
-    (testing "guide points at the live full value via (result :<eid>)"
-      (is (str/includes? out "(result :hg0000abcd)")))))
+    (testing "guide points at the live full value via the result/<id> var"
+      (is (str/includes? out "result/hg0000abcd")))))
 
 (deftest cap-result-body-uses-placeholder-when-no-eid
   (let [huge (apply str (repeat 5000 "z"))
         out  (agent/cap-result-body huge)]
-    (is (str/includes? out "(result :<id>)")
+    (is (str/includes? out "result/<id>")
         "no eid → generic placeholder, still actionable")))
 
-(deftest format-eval-row-unified-stream
-  ;; THE byte-level pin for the narration-unification render
-  ;; (2026-06-18): ONE continuous comments+forms+results stream. No
-  ;; `<ns>=>` history prompt prefix (the live cursor lives once at the
-  ;; END of the context); the value is a `;; =>` line carrying the
-  ;; `(result :<id>)` pointer; errors are `;; ⚠` guidance lines.
+(deftest format-eval-row-repl-faithful-stream
+  ;; THE byte-level pin for the transcript-redesign render (2026-06-18):
+  ;; comments + form + a `=> value ;; result/<id>` OUTPUT line that is
+  ;; visually DISTINCT from `;;` comments. No `<ns>=>` history prompt
+  ;; prefix (the live cursor lives once at the END of the context).
+  ;; Failures render `=> ✗ <guidance>` with NO result/<id>.
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3" :seon.eval/id "sm0000001a"
-               :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin
+               :seon.eval/ns :my.agent.pin
                :seon.eval/narration "add 1 and 2"}
               false)]
     (is (= (str ";; add 1 and 2\n"
                 "(+ 1 2)\n"
-                ";; => 3   ⟨(result :sm0000001a) · 1ms⟩")
+                "=> 3 ;; result/sm0000001a")
            row)
-        "the pinned current-session unified row, byte-exact")
+        "the pinned current-session row, byte-exact")
     (is (not (str/includes? row "=> (+ 1 2)"))
-        "no <ns>=> history prompt prefix on the form"))
+        "no <ns>=> history prompt prefix on the form")
+    ;; the value line is REPL OUTPUT, not a comment: it starts with `=>`,
+    ;; not `;;`. This is the agents-confusing-output-for-comments fix.
+    (is (some #(str/starts-with? % "=> ") (str/split-lines row))
+        "the value rides a `=>` output line, distinct from `;;` comments"))
   ;; prior-session rows render WITHOUT the result-var handle.
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3" :seon.eval/id "sm0000001a"
-               :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin}
+               :seon.eval/ns :my.agent.pin}
               true)]
-    (is (= "(+ 1 2)\n;; => 3" row)
-        "prior-session rows carry NO result-var handle"))
-  ;; errors render as `;; ⚠` guidance — no form prompt, no value.
+    (is (= "(+ 1 2)\n=> 3" row)
+        "prior-session rows carry NO result/<id> handle"))
+  ;; errors render `=> ✗ <guidance>` — no result/<id> (no value to reuse).
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(boom)" :seon.eval/ok? false
                :seon.eval/error "kaput" :seon.eval/id "er0000001a"
-               :seon.eval/duration-ms 2 :seon.eval/ns :my.agent.pin}
+               :seon.eval/ns :my.agent.pin}
               false)]
-    (is (= "(boom)\n;; ⚠ kaput" row)
-        "error rows render the form then a crystal-clear ;; ⚠ guidance line"))
+    (is (= "(boom)\n=> ✗ kaput" row)
+        "failure rows render the form then a crystal-clear `=> ✗` line")
+    (is (not (str/includes? row "result/"))
+        "a FAILED eval gets NO result/<id> — there is no value to reuse"))
   ;; a comment-only row (blank source) renders just its `;;` preamble.
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "" :seon.eval/ok? true
-               :seon.eval/id "cm0000001a" :seon.eval/duration-ms 0
+               :seon.eval/id "cm0000001a"
                :seon.eval/ns :my.agent.pin
                :seon.eval/narration "just a trailing thought"}
               false)]
     (is (= ";; just a trailing thought" row)
         "comment-only row → only the ;; preamble, no form, no value")))
+
+(deftest format-eval-row-clipped-value-annotates-N-of-M
+  ;; a clipped value appends `(N of M)` to the result/<id> handle so the
+  ;; agent knows the shown display is a partial view of a live whole value.
+  (let [huge (apply str (repeat 5000 "z"))
+        row  (#'seon.ctx/format-eval-row
+               {:seon.eval/source "(big)" :seon.eval/ok? true
+                :seon.eval/result-edn huge :seon.eval/id "cp0000001a"
+                :seon.eval/ns :my.agent.pin}
+               false)]
+    (is (str/includes? row (str "result/cp0000001a (" agent/eval-render-cap " of 5000)"))
+        "the handle carries (shown of full) so the clip is unambiguous")
+    (is (str/includes? row "live value is COMPLETE")
+        "the size guide still fires for the clipped scalar")))
+
+(deftest format-eval-row-roundtrips-to-forms-and-comments
+  ;; round-trip: the rendered row re-parses to the SAME form + the `;;`
+  ;; comment preamble; the runtime annotations (`=>` / `;; result/`) are
+  ;; the only added lines (they read as comment/bare narration on re-parse).
+  (let [row   (#'seon.ctx/format-eval-row
+                {:seon.eval/source "(seon.db/transact! {:seon.db/tx-data []})"
+                 :seon.eval/ok? true :seon.eval/result-edn "{:seon.db/ok? true}"
+                 :seon.eval/id "rt0000001a" :seon.eval/ns :my.agent.pin
+                 :seon.eval/narration "store the rows"}
+                false)
+        lines (str/split-lines row)]
+    ;; the prose preamble came back as a `;;` comment, in position.
+    (is (= ";; store the rows" (first lines))
+        "narration prose re-renders as a `;;` comment line")
+    ;; the form line is verbatim and re-readable.
+    (is (some #(= "(seon.db/transact! {:seon.db/tx-data []})" %) lines)
+        "the form re-renders verbatim (re-parseable to the same form)")
+    ;; the value line is the runtime-owned `=>` annotation — distinct.
+    (is (some #(str/starts-with? % "=> ") lines)
+        "the value line is a `=>` annotation, not part of the agent's forms")))
 
 ;; ---------------------------------------------------------------------------
 ;; C-19 — model-authored result-claim comments are NEUTRALIZED in the
@@ -923,42 +1007,42 @@
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3" :seon.eval/id "fk0000001a"
-               :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin
+               :seon.eval/ns :my.agent.pin
                :seon.eval/narration ";; => {:fabricated 7}"}
               false)]
     (is (= (str ";; [unverified narration — not a real result]\n"
                 "(+ 1 2)\n"
-                ";; => 3   ⟨(result :fk0000001a) · 1ms⟩")
+                "=> 3 ;; result/fk0000001a")
            row)
-        "fake claim neutralized; real value line is the runtime-owned ;; =>")
+        "fake claim neutralized; real value line is the runtime-owned `=>`")
     (is (not (str/includes? row ":fabricated")) "claimed value absent"))
   ;; inline claim inside SOURCE is neutralized too — code survives.
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(+ 1 2) ;; => 99" :seon.eval/ok? true
                :seon.eval/result-edn "3" :seon.eval/id "fk0000002b"
-               :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin}
+               :seon.eval/ns :my.agent.pin}
               false)]
     (is (str/includes? row "(+ 1 2) ;; [unverified"))
     (is (not (str/includes? row "99")) "inline claimed value absent")
-    (is (str/includes? row ";; => 3   ⟨(result :fk0000002b)")
+    (is (str/includes? row "=> 3 ;; result/fk0000002b")
         "real value line unaffected"))
-  ;; clean narration renders the unified stream — no false positives.
+  ;; clean narration renders the stream — no false positives.
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3" :seon.eval/id "cl0000003c"
-               :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin
+               :seon.eval/ns :my.agent.pin
                :seon.eval/narration ";; adding two numbers"}
               false)]
     (is (= (str ";; adding two numbers\n"
                 "(+ 1 2)\n"
-                ";; => 3   ⟨(result :cl0000003c) · 1ms⟩")
+                "=> 3 ;; result/cl0000003c")
            row)))
   ;; re-render is stable: a row whose stored narration already carries
   ;; the marker renders it ONCE, unchanged.
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3" :seon.eval/id "id0000004d"
-               :seon.eval/duration-ms 1 :seon.eval/ns :my.agent.pin
+               :seon.eval/ns :my.agent.pin
                :seon.eval/narration ctx/unverified-narration-marker}
               false)]
     (is (= 1 (count (re-seq #"\[unverified narration" row)))
@@ -975,7 +1059,7 @@
     (testing "guiding message present, anchored to the row's own eid"
       (is (str/includes? row "⚠ TRUNCATED at 1500 of"))
       (is (str/includes? row "live value is COMPLETE"))
-      (is (str/includes? row "(result :hg0000002b)")))))
+      (is (str/includes? row "result/hg0000002b")))))
 
 (deftest format-eval-row-row-bounded-collection-preview-keeps-its-guide
   ;; A large collection is bounded UPSTREAM (render-result-edn) into a preview
@@ -1123,12 +1207,12 @@
                             "the resume boundary marker renders")
                         (is (= 1 (count (re-seq #"session resumed" ts)))
                             "ONE marker per resume")
-                        ;; prior-session evals: no result-var handle.
-                        (is (not (str/includes? ts "(result :EVLctxtestK001)"))
-                            "prior-session eval carries NO result-var handle")
+                        ;; prior-session evals: no result/<id> handle.
+                        (is (not (str/includes? ts "result/EVLctxtestK001"))
+                            "prior-session eval carries NO result/<id> handle")
                         ;; current-session eval keeps its handle.
-                        (is (str/includes? ts "(result :EVLctxtestN001)")
-                            "current-session eval keeps its result var")
+                        (is (str/includes? ts "result/EVLctxtestN001")
+                            "current-session eval keeps its result/<id> var")
                         ;; the marker sits between the two sessions' evals.
                         (is (< (str/index-of ts "(defn greet [] :hi)")
                                (str/index-of ts "session resumed")
@@ -1199,17 +1283,17 @@
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(println \"hi\")" :seon.eval/ok? true
                :seon.eval/result-edn "nil" :seon.eval/output "hi\n"
-               :seon.eval/id "pr0000001a" :seon.eval/duration-ms 1
+               :seon.eval/id "pr0000001a"
                :seon.eval/ns :my.agent.pin})]
-    (is (str/includes? row "(println \"hi\")\nhi\n;; => nil")
-        "captured output renders above the ;; => value line, REPL-style"))
+    (is (str/includes? row "(println \"hi\")\nhi\n=> nil ;; result/pr0000001a")
+        "captured output renders above the `=>` value line, REPL-style"))
   (let [row (#'seon.ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3"
-               :seon.eval/id "pr0000002b" :seon.eval/duration-ms 1
+               :seon.eval/id "pr0000002b"
                :seon.eval/ns :my.agent.pin})]
-    (is (str/includes? row "(+ 1 2)\n;; => 3")
-        "no output attr → form then ;; => value, no blank line injected")))
+    (is (str/includes? row "(+ 1 2)\n=> 3 ;; result/pr0000002b")
+        "no output attr → form then `=>` value, no blank line injected")))
 
 ;; ---------------------------------------------------------------------------
 ;; (l2) live-tile awareness section (live-tiles U5) — context-v4 only fixes

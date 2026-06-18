@@ -56,13 +56,27 @@
 ;; ------------------------------------------------------------
 
 (deftest selection-rules
-  ;; included-ns? — ALL seon.* + my.* EXCEPT *.internal. One rule.
+  ;; included-ns? — ALL seon.* + my.* EXCEPT *.internal and *-test. One rule.
   (doseq [n ["seon.db" "seon.eval" "seon.agent.search" "my.kb"
-             "my.agent.a1" "my.finance" "seon.agent.search-test"]]
+             "my.agent.a1" "my.finance"]]
     (is (true? (ctx/included-ns? n)) (str n " is included")))
   (doseq [n ["seon.db.internal" "seon.x.internal.y" "my.foo.internal"
-             "cljs.core" "datahike.api"]]
+             "cljs.core" "datahike.api"
+             ;; *-test namespaces are indexed but NEVER rendered into the
+             ;; agent prompt (their deftests are noise; the per-fn :test
+             ;; usage example rides the regular fn's compact head).
+             "seon.agent.search-test" "my.soul-test"
+             ;; debug capture lives under *.internal — dropped structurally,
+             ;; same rule as every other internal ns. No name-list.
+             "seon.debug.internal"]]
     (is (false? (ctx/included-ns? n)) (str n " is NOT included")))
+  ;; the *-test structural exclusion.
+  (doseq [n ["seon.agent.search-test" "my.soul-test"]]
+    (is (true? (ctx/test-ns-name? n)) (str n " is a test ns")))
+  (is (false? (ctx/test-ns-name? "seon.agent.search")) "non-test ns")
+  ;; debug capture is hidden via the structural *.internal rule, no name-list.
+  (is (true? (ctx/hidden-ns-name? "seon.debug.internal"))
+      "seon.debug.internal is hidden structurally")
   ;; hidden beats everything, even under my.*.
   (doseq [n ["seon.db.internal" "seon.agent.internal" "my.foo.internal"]]
     (is (true? (ctx/hidden-ns-name? n)) (str n " is hidden")))

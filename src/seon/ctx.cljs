@@ -3,8 +3,9 @@
    2026-06-11): the prompt IS a REPL session. One static `<system>`
    header, ALL the loaded namespaces as the body (`<namespace>` tags,
    recency-ordered), the agent's own entity as a map, what the human
-   currently sees, the reactive warnings/todos, ONE threaded
-   chronological transcript of messages and evals, and a status line +
+   currently sees, the reactive warnings/todos, the threaded
+   transcript of PAST turns (each `<turn>` carries its woken-by `<user>`
+   + REPL-faithful evals), and a status line +
    clean REPL prompt. Layout is ordered top→bottom = static→volatile:
    everything above `<warnings>` is the provider-cacheable prefix.
 
@@ -161,6 +162,18 @@
   (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
     (boolean (or (= s "my") (str/starts-with? s "my.")))))
 
+(defn test-ns-name?
+  "Rule 1b: a `*-test` namespace is indexed but NEVER rendered into the
+   agent prompt — its `deftest`s are noise to the working agent, and the
+   per-fn `:test` usage example already rides the regular fn's attr-map in
+   the compact head. Full tests stay reachable on demand via
+   [[render-namespace]]. STRUCTURAL, like [[hidden-ns-name?]]: the suffix
+   IS the filter. String/keyword/symbol tolerant."
+  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+  [ns-name]
+  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
+    (str/ends-with? s "-test")))
+
 ;; ------------------------------------------------------------
 ;; Included-prefix config — the customize-with-data row behind the
 ;; ONE selection rule. A downstream consumer (an unmodified-core
@@ -229,8 +242,9 @@
   "The ONE selection rule for the `<namespace>` tags (context-v4 §2.3,
    r2): every namespace under an included prefix (store-configured —
    [[included-prefixes]]; defaults `seon.*` + `my.*`) is included
-   EXCEPT `*.internal` ones (STRUCTURAL — applies to all prefixes). No
-   lists, no budgets — a new namespace auto-includes the moment its
+   EXCEPT `*.internal` ([[hidden-ns-name?]]) and `*-test`
+   ([[test-ns-name?]]) ones (both STRUCTURAL — apply to all prefixes).
+   No lists, no budgets — a new namespace auto-includes the moment its
    `:seon.ns` row exists; a downstream prefix auto-includes the moment
    its config row is transacted. Pass the per-render `prefixes` (the
    composer computes them ONCE per render from its db snapshot); the
@@ -243,6 +257,7 @@
   ([ns-name prefixes]
    (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
      (boolean (and (not (hidden-ns-name? s))
+                   (not (test-ns-name? s))
                    (some #(prefix-included? s %) prefixes))))))
 
 (defn- base-ns-name
@@ -366,24 +381,12 @@
        s))))
 
 (def message-render-cap
-  "Per-message rendered-content char cap for the transcript section.
-   Messages are EXEMPT from the transcript's budget eviction (the
-   conversation is never sacrificed for eval bulk — see
-   [[transcript-section]]), so each one must be individually bounded
-   or a single pasted blob could blow the context. 4000 (≈1k tokens)
-   keeps any realistic chat turn whole; the full content stays in the
-   db ((seon.agent/messages))."
+  "Per-message rendered-content char cap for a `<user>`/`<from>` line in
+   the threaded transcript: each woken-by message must be individually
+   bounded or a single pasted blob could blow the context. 4000 (≈1k
+   tokens) keeps any realistic chat turn whole; the full content stays in
+   the db ((seon.agent/messages))."
   4000)
-
-(defn- format-message-row
-  "Render one message as a REPL event for the interleaved transcript:
-   `user> …` / `assistant> …` / `agent-<id>> …`. The `<label>>` prefix
-   lines it up visually with eval `> form` lines so the merged stream
-   reads as one coherent REPL session. Content is capped at
-   [[message-render-cap]] (context-SAFETY invariant — messages are
-   never evicted from the transcript, so they must be bounded)."
-  [{from :seon.agent.message/from content :seon.agent.message/content} own-id]
-  (str (message-label from own-id) "> " (cap-result content message-render-cap)))
 
 (defn cap-result-body
   "Like `cap-result`, but for an eval RESULT body specifically: when the
@@ -398,15 +401,16 @@
    (`seon.eval/render-result-edn`), so their preview fits under the cap
    and no second guide fires here — no double-noising.
 
-   The full value is always available via `(result <id>)` (the live
-   globalThis stash); the clip is display-only."
+   The full value is always available as the live var `result/<id>`
+   (transcript-redesign-2026-06-18 — the agent references the var
+   directly, no `(result …)` call); the clip is display-only."
   ([s] (cap-result-body s eval-render-cap nil))
   ([s limit] (cap-result-body s limit nil))
   ([s limit eid]
    (let [s (str s)
          n (count s)]
      (if (> n limit)
-       (let [ref (if eid (str "(result :" eid ")") "(result :<id>)")]
+       (let [ref (if eid (str "result/" eid) "result/<id>")]
          (str (subs s 0 limit)
               " …⟨⚠ TRUNCATED at " limit " of " n " chars — the DISPLAY "
               "is clipped, the live value is COMPLETE⟩"
@@ -483,57 +487,64 @@
                   (str ";; " line)
                   (str ";; " (strip-comment-prefix line))))))))
 
-(defn- warn-lines
-  "Render an error/guidance body `s` into the unified stream: the FIRST
-   non-blank line as the `;; ⚠ <headline>` warning, every CONTINUATION
-   line as a plain `;;` comment (so a read-error's source slice + `^`
-   caret stay ALIGNED — only a leading `;`/`⚠`/`ERROR` marker is
-   stripped, never the interior indentation a caret depends on). One
+(defn- error-lines
+  "Render an error/guidance body `s` as the REPL FAILURE shape: the FIRST
+   non-blank line becomes the `=> ✗ <headline>` output line (visually
+   DISTINCT from `;;` comments — it is REPL output, not narration), every
+   CONTINUATION line a plain `;;` comment (so a read-error's source slice
+   + `^` caret stay ALIGNED — only a leading `;`/`⚠`/`ERROR`/`✗` marker is
+   stripped, never the interior indentation the caret depends on). One
    crystal-clear guidance block, never a stack trace. Returns a single
    newline-joined string (\"\" when blank)."
   [s]
   (let [strip-marker
         (fn [line]
           ;; Drop ONLY a leading comment marker / legacy `ERROR` keyword /
-          ;; prior `⚠`, plus the single following space — KEEP any deeper
-          ;; indentation (the caret + source-slice lines rely on it).
+          ;; prior `⚠`/`✗`, plus the single following space — KEEP any
+          ;; deeper indentation (the caret + source-slice lines rely on it).
           (-> (str line)
               (str/replace #"^\s*;+[ \t]?" "")
               (str/replace #"(?i)^ERROR[ \t]?" "")
-              (str/replace #"^⚠[ \t]?" "")))
+              (str/replace #"^[⚠✗][ \t]?" "")))
         lines (->> (str/split-lines (str s))
                    (drop-while str/blank?))]
     (if (empty? lines)
       ""
       (str/join "\n"
-        (cons (str ";; ⚠ " (strip-marker (first lines)))
+        (cons (str "=> ✗ " (strip-marker (first lines)))
               (map #(str ";; " (strip-marker %)) (rest lines)))))))
 
 (defn- format-eval-row
-  "REPL-real render of one eval as part of the ONE continuous transcript
-   (narration-unification 2026-06-18): the form's comment-preamble as
-   literal `;;` lines, the form verbatim (or the parinfer-repaired
-   source), captured print output, then the value as a `;; =>` line (or
-   the error as `;; ⚠` guidance lines). NO `<ns>=>` history prompt
-   prefix — the live `<your-ns>=>` cursor lives once at the very END of
-   the context; the transcript reads as plain comments+forms+results, the
-   exact shape the system prompt teaches.
+  "REPL-faithful render of one eval (transcript-redesign-2026-06-18):
+   the form's comment-preamble as literal `;;` lines, the form verbatim
+   (or the parinfer-repaired source), captured print output, then the
+   value as a `=> <value>` output line trailing ` ;; result/<id>` (or
+   the error as a `=> ✗ <guidance>` line). NO `<eval>` tag and NO
+   `<ns>=>` history prompt prefix — the live `<your-ns>=>` cursor lives
+   once at the very END of the context; each row reads as plain
+   comments + form + REPL output, the exact shape the system prompt
+   teaches.
 
      ;; add 1 and 2
      (+ 1 2)
-     ;; => 3   ⟨(result :EVLabc-123) · 4ms⟩
+     => 3 ;; result/EVLabc-123
 
-   The `(result :<id>)` pointer rides the value line — show-don't-tell
-   for the result-var system. PRIOR-SESSION evals (`prior?` true) render
-   WITHOUT the handle (their live values did not survive the restart;
-   the resume boundary marker says so once).
+   The `=>` line is visually DISTINCT from the `;;` comments (it starts
+   with `=>`, not semicolons) — fixing the agents-confusing-output-for-
+   comments bug (ari-2606180804). The trailing ` ;; result/<id>` is the
+   LIVE VAR HANDLE: the agent references `result/<id>` directly to reuse
+   the value. PRIOR-SESSION evals (`prior?` true) render the value
+   WITHOUT the handle (their vars died with the restart; the resume
+   boundary marker says so once). A clipped value appends `(N of M)` to
+   the handle so the agent knows the display is a partial view.
 
-   ERRORS render as `;; ⚠` guidance lines (never a stack trace): the
+   FAILURES render `=> ✗ <crystal-clear guidance>` (never a stack trace,
+   never a `;; result/<id>` — there is no value to reuse): the
    pre-rendered legible `:seon.eval/error` string (read/compile/runtime —
    crystal-clear at the source) or a Malli instrumentation envelope via
    `render-malli-error`. A COMMENT-ONLY row (blank source — trailing
    `;;` lines / bare prose the agent typed with no following form)
-   renders just its `;;` preamble, no form, no value.
+   renders just its `;;` preamble, no form, no output.
 
    The rendered result/error body of an AGENT eval is capped at
    `eval-render-cap` chars (context-SAFETY invariant — agent code can
@@ -554,60 +565,65 @@
      err        :seon.eval/error
      err-data   :seon.eval/error-data
      eid        :seon.eval/id
-     dur        :seon.eval/duration-ms
      narr       :seon.eval/narration
      core? :seon.ctx/core-authored?}
     prior?]
    (let [envelope    (read-error-envelope err-data)
          limit       (if core? core-eval-render-cap eval-render-cap)
          comment-only? (str/blank? (str src))
-         dur-str     (when dur (str " · " dur "ms"))
          ;; Comment-preamble — the agent's `;;`/prose thinking, neutralized
-         ;; against fabricated `;; =>` result-claims BEFORE we re-prefix.
+         ;; against fabricated result-claims BEFORE we re-prefix.
          preamble    (comment-lines
                        (when (and narr (not (str/blank? narr)))
                          (neutralize-result-claims narr)))
          ;; The form, verbatim (or repaired) — neutralized for any inline
-         ;; `;; =>` claim, capped. Omitted for a comment-only row.
+         ;; result-claim, capped. Omitted for a comment-only row.
          form-ln     (when-not comment-only?
                        (cap-result (neutralize-result-claims src) limit))
          ;; Captured println/prn output — shown above the value like a
          ;; real REPL prints before returning. Bounded by the same cap.
          out-ln      (when (and (string? out) (not (str/blank? out)))
                        (cap-result (str/trimr out) limit))
-         ;; The result / error body, rendered into the unified stream.
+         ;; The result / error body, rendered as REPL output.
          result-ln
          (cond
            comment-only? nil
 
            ok?
-           (let [v       (cap-result-body (or res "nil") limit eid)
-                 ;; The (result :<id>) pointer rides the value line so the
-                 ;; agent can fetch the live stored value. Prior-session
-                 ;; rows carry no handle (their values died with the
-                 ;; process). A `;; =>` value can be multi-line (a clipped
-                 ;; body carries its own `\n;;` guide) — prefix only the
-                 ;; FIRST line with `;; =>`, the rest stay as the body's
-                 ;; own `;;` lines.
+           (let [raw     (str (or res "nil"))
+                 full    (count raw)
+                 clipped? (> full limit)
+                 ;; The value body — clipped (with the size guide) when
+                 ;; huge. The guide carries its own `\n;;` lines (a
+                 ;; result/<id> dig hint), shown below the `=>` line.
+                 v       (cap-result-body raw limit eid)
+                 ;; The live VAR HANDLE rides the `=>` line as a trailing
+                 ;; `;; result/<id>`: the agent references `result/<id>`
+                 ;; directly. Prior-session rows carry NO handle (their
+                 ;; vars died with the process). A clip appends `(N of M)`
+                 ;; so the agent knows the shown value is partial.
                  handle  (when-not prior?
-                           (str "   ⟨(result :" eid ")" dur-str "⟩"))
+                           (str " ;; result/" eid
+                                (when clipped? (str " (" limit " of " full ")"))))
                  lines   (str/split-lines v)]
-             (str ";; => " (first lines) handle
+             ;; Prefix ONLY the first line with `=>` + handle; continuation
+             ;; lines (a clip's own `;;` guide) stay as the body wrote them.
+             (str "=> " (first lines) handle
                   (when (next lines)
                     (str "\n" (str/join "\n" (rest lines))))))
 
            (einstrument/instrument-error? envelope)
            (cap-result-body
-             (warn-lines (einstrument/render-malli-error envelope)) limit eid)
+             (error-lines (einstrument/render-malli-error envelope)) limit eid)
 
            (and (string? err) (not (str/blank? err)))
            ;; `:seon.eval/error` is stored pre-rendered + crystal-clear
            ;; (`seon.eval/render-error-string` / `read-error-message` /
-           ;; the undeclared-var message) — render as `;; ⚠` guidance,
-           ;; plain-clip (NOT the "narrow your query" result guide).
-           (cap-result (warn-lines err) limit)
+           ;; the undeclared-var message) — render as a `=> ✗` failure
+           ;; line, plain-clip (NOT the "narrow your query" result guide).
+           (cap-result (error-lines err) limit)
 
-           :else ";; ⚠ <no result>")
+           :else "=> ✗ <no result>")
          ;; Reactive 'won't persist' note (#7) — DERIVED from source, no
          ;; stored attr; recomputed each render so it follows the form.
          note   (when (and ok? (not comment-only?))
@@ -870,7 +886,10 @@
     "EVAL MECHANICS. Your reply is one or more Clojure forms, each\n"
     "preceded by ;; comment lines. There are no tool calls. Anything\n"
     "that is not a form or a ;; comment is a bug — bare prose HAS eaten\n"
-    "responses before.\n"
+    "responses before. The <transcript> below is READ-ONLY history: the\n"
+    "runtime adds each form's `=> result` line and the `;; result/<id>`\n"
+    "after it — never write a `=>`, `;; result/`, or any <tag> yourself.\n"
+    "Your reply is ONLY ;; comments and forms.\n"
     "\n"
     "  Correct shape:                 Wrong shape (don't do this):\n"
     "    ;; first, look around          Let me look around first.\n"
@@ -882,11 +901,12 @@
     "reasoning lives — what you are about to do and why. If you write a\n"
     "sentence, put ;; in front of every line of it.\n"
     "\n"
-    "RESULT VARS. Every eval's value is saved under the id shown on its\n"
-    "value line in the transcript; (result :<id>) returns the live\n"
-    "value. NEVER re-run what is already computed. A clipped display is\n"
-    "NOT a clipped value — dig into a big stored value with ordinary\n"
-    "Clojure (get-in, filter, count) instead of re-querying.\n"
+    "RESULT VARS. Every eval's value is a live var result/<id>, the id\n"
+    "shown after its `=>` in the transcript (e.g. `=> 42 ;; result/auC`).\n"
+    "Reference result/<id> directly to reuse it — never re-run a form you\n"
+    "already computed. A clipped display is NOT a clipped value: dig into\n"
+    "a big result with ordinary Clojure (get-in, filter, count) on its\n"
+    "result/<id> var instead of re-querying.\n"
     "\n"
     "ERRORS ARE VALUES. Core calls never throw at you — a failure\n"
     "comes back as data, e.g. {:seon.db/ok? false :seon.db/error …}.\n"
@@ -898,7 +918,10 @@
     "THE RENDERING SYSTEM. You show your human things with render\n"
     "twins: :seon.render/ai (text for you) + :seon.render/html (hiccup\n"
     "for their screen) — one render, two surfaces. Your live tile and\n"
-    "your context sections both ride this shape.\n"
+    "your context sections both ride this shape. A *section* (not just\n"
+    "the tile) can carry an :seon.render/html twin — that is where rich\n"
+    "panels (tables, images, SVG) go: the agent reads the :ai text, the\n"
+    "human sees the :html panel, one section row serving both.\n"
     "\n"
     "THE SHARED STORE. All agents are wired to ONE shared datahike\n"
     "(datomic-style) database; *conn* is ambient — your universe binds\n"
@@ -916,10 +939,8 @@
     "real (defn …) with the BODY elided to `…` — signature + docstring +\n"
     "attr-map, enough to CALL it without reading its guts. The ONE\n"
     "exception is YOUR OWN current namespace, shown in FULL so you see\n"
-    "your complete working code. A fn's :test metadata, when present, IS\n"
-    "its usage example — one tight call + expected return — added only\n"
-    "where the :malli/schema doesn't already make the call obvious. To\n"
-    "read another ns's full bodies + tests on demand, call\n"
+    "your complete working code. To read another ns's full bodies + tests\n"
+    "on demand, call\n"
     "(seon.ctx/render-namespace {:seon.ns/name :the.ns}). Namespaces are\n"
     "workspaces: (ns my.domain.thing) moves you there and your context\n"
     "follows your namespace. Your code is my.*, your knowledge is my.kb.*\n"
@@ -959,6 +980,18 @@
     "  the SAME response — your human sees NOTHING until reply! lands.\n"
     "  ONE reply per question: once it lands your wake is complete and\n"
     "  the loop stops; a new message will wake you if more is needed.\n"
+    "- Building tile or panel hiccup from a sequence: splice children\n"
+    "  with (into [:div …] children), never nest a bare seq as one\n"
+    "  child. Eval your render fn once at the REPL to eyeball the hiccup\n"
+    "  before you wire it onto a surface.\n"
+    "- Never write a result you have not evaluated. Your reply is REPL\n"
+    "  input, not a transcript — a `;; => 42` you typed yourself is\n"
+    "  fiction the next agent may trust. Eval it; the runtime writes the\n"
+    "  real value line.\n"
+    "- When you store a my.kb.* fact, grade it: record HOW you know it\n"
+    "  (a :my.kb/source) and HOW SURE you are (a :my.kb/confidence). A\n"
+    "  guess stored as fact is worse than no fact — the next agent\n"
+    "  cannot read your certainty from your phrasing.\n"
     "</system>"))
 
 (defn system-section
@@ -1061,19 +1094,51 @@
         (seq arities) (end-of (last arities))
         :else nil))))
 
+(defn- string->source-token
+  "The VERBATIM source-text form of string value `s` as it appears inside
+   Clojure source: wrapped in `\"`, with only `\\` and `\"` escaped — NEWLINES
+   STAY LITERAL (a multi-line docstring spans real newlines in the file, so
+   `pr-str` — which escapes `\\n` — does NOT match the source). This is the
+   token to find/replace in the original head slice."
+  [s]
+  (str \" (-> s (str/replace "\\" "\\\\") (str/replace "\"" "\\\"")) \"))
+
+(defn- clip-docstring-first-line
+  "In compact-head text `head` (the slice from char 0 through the arglist),
+   truncate a multi-line `defn` docstring to its FIRST LINE only. `form` is
+   the already-read defn form; the docstring is `(nth form 2)` when a
+   string. Finds the docstring's VERBATIM source token
+   ([[string->source-token]] — newlines literal, so it matches the file)
+   and replaces it with the first-line-only token. Fail-soft: any miss
+   (single-line doc, no doc, token not found) leaves `head` unchanged —
+   verbose > wrong. COMPACT-PATH ONLY; current-ns FULL and on-demand
+   render-namespace keep the whole docstring."
+  [head form]
+  (let [doc (when (and (seq? form) (> (count form) 2)) (nth form 2))]
+    (if (and (string? doc) (str/includes? doc "\n"))
+      (str/replace-first head
+                         (string->source-token doc)
+                         (string->source-token (first (str/split-lines doc))))
+      head)))
+
 (defn elide-defn-body
   "Render `source` (a fn's `:seon.fn/source`) as its real `defn` with the
    BODY elided to ` …)`: the original text through the end of the arglist,
    then `\\n  …)`. Multi-arity keeps every arity SIGNATURE and appends a
-   single `…)`. Fail-soft: returns `source` UNCHANGED when it isn't a
-   locatable single `defn` (better verbose than wrong). Pure; no DB."
+   single `…)`. Any multi-line docstring is CLIPPED to its first line
+   ([[clip-docstring-first-line]]). Fail-soft: returns `source` UNCHANGED
+   when it isn't a locatable single `defn` (better verbose than wrong).
+   Pure; no DB. COMPACT-PATH ONLY (the single call site is
+   [[compact-ns-source]]); the current-ns FULL branch and on-demand
+   render-namespace never call this, so they keep full bodies AND full
+   docstrings."
   {:malli/schema [:=> [:cat :string] :string]}
   [source]
   (let [src  (str source)
         form (read-defn-form src)
         end  (arglist-end-index src form)]
     (if (and end (< end (count src)))
-      (str (str/trimr (subs src 0 end)) "\n  …)")
+      (str (clip-docstring-first-line (str/trimr (subs src 0 end)) form) "\n  …)")
       src)))
 
 ;; ============================================================
@@ -1788,107 +1853,220 @@
    an elision note replaces them at the top."
   24000)
 
-(defn- transcript-item-at
-  "Wall-clock `:at` of a transcript item (a message or an eval), as
-   epoch-ms. Used to interleave the two streams chronologically."
-  [item]
-  (let [d (or (:seon.agent.message/at item) (:seon.eval/at item))]
-    (if d (.getTime ^js d) 0)))
-
 (def resume-marker-line
   "The session-resume boundary row (context-v4 §2.8): rendered ONCE per
-   resume, between the last eval of a previous process and the first of
+   resume, between the last turn of a previous process and the first of
    the next. Everything above it ran in a process that no longer
-   exists — its result vars are not dereferenceable."
-  (str ";; ── session resumed — the evals above ran in a previous process; "
-       "their result vars are gone (re-run a form to recompute a value) ──"))
+   exists — its `result/<id>` vars are not dereferenceable."
+  (str ";; ── session resumed — the turns above ran in a previous process; "
+       "their result/<id> vars are gone (re-run a form to recompute a value) ──"))
 
-(defn transcript-section
-  "The chronological TRANSCRIPT — the agent's messages and evals
-   INTERLEAVED into a single oldest-first stream (context-v4 §2.8), so
-   the agent reads ONE coherent REPL session: `user>`/`assistant>`
-   message events and evals rendered as the unified comments+forms+
-   results stream ([[format-eval-row]]) — `;;` preamble, the form, a
-   `;; =>` value (or `;; ⚠` error guidance). A `;; in <ns>` marker is
-   injected ONLY where the eval ns changes, so ns switches stay visible
-   without a per-row prompt prefix (the live `<your-ns>=>` cursor lives
-   once at the very end of the context). Reads `:seon.agent/n` from the
-   ctx-entity if present (caps EACH stream before the merge), else 50
-   messages + 50 evals.
+(def transcript-note
+  "The `note=` attribute on the `<transcript>` envelope: an in-band
+   disclaimer of the runtime-owned annotations (the `=> result` line +
+   the `;; result/<id>` handle). It tells the agent (a) these tags +
+   annotations are PAST history the runtime wrote, not its own output
+   shape, and (b) how to reuse a value — reference `result/<id>` as a
+   live var. Mimicry safety: the agent's own forms render with NO tags,
+   so there is nothing in its output shape to copy."
+  (str "These are your PAST turns. The runtime adds each form's "
+       "`=> result` line and the `;; result/<id>` after it — never write "
+       "`=>` or `;; result/` lines yourself. To reuse any result, "
+       "reference result/<id> directly; it is a live var."))
 
-   SESSION RESUME: evals from PREVIOUS sessions render too
-   ([[session-evals]] walks all sessions), separated by ONE
-   [[resume-marker-line]] per resume; prior-session evals render
-   WITHOUT result-var handles (their live values died with the
-   process — `(result <old-id>)` says so).
+(defn- session-turns
+  "ALL :seon.agent.turn entities for `agent-id`, oldest-first across ALL
+   sessions, each tagged with its owning `:seon.agent.session/id` and
+   `:seon.ctx/core-authored?` ([[core-authored-turn?]]) — the
+   turn-grouped transcript walk (context-v4 §2.8: prior-session turns
+   render too, behind a resume boundary). Walks agent → sessions →
+   turns. Each turn's `:seon.agent.turn/evals` ride along as the (lazy
+   datahike) ref vector. Optional `db` snapshot (the composer threads
+   its render db)."
+  [agent-id db]
+  (let [a (db/entity (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
+                       db (assoc :seon.db/db db)))]
+    (vec
+      (for [s (sort-by :seon.agent.session/at (:seon.agent/sessions a))
+            t (sort-by :seon.agent.turn/at (:seon.agent.session/turns s))]
+        {::turn                            t
+         :seon.agent.session/id-of-session (:seon.agent.session/id s)
+         ::core-authored?                  (core-authored-turn? t)}))))
 
-   Budget eviction applies to EVAL rows ONLY, oldest-first — message
-   rows and resume markers are ALWAYS kept, in chronological position.
-   Before this exemption a burst of worst-case eval rows pushed the
-   user's last message past the budget (S-12 KoQ turn
-   Ckz-2606101827). The conversation is never sacrificed for eval
-   bulk; each message is individually bounded by
-   [[message-render-cap]], each AGENT eval row by [[eval-render-cap]].
-   CORE-AUTHORED eval rows (the creation-turn tutorial — tagged
-   by [[session-evals]]) render at [[core-eval-render-cap]]
-   instead: our own scripted output arrives whole."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.agent/keys [id] db :seon.db/db :as input}]
-  (let [n        (or (:seon.agent/n (:seon.ctx/section input)) 50)
-        msgs     (messages {:seon.agent/n n :seon.agent/id id :seon.db/db db})
-        es       (vec (take-last n (session-evals id db)))
-        cur-sess (:seon.agent.session/id (current-session id db))
-        msg-items
-        (map (fn [m] {:seon.ctx/kind :seon.ctx/msg
-                      :seon.ctx/at   (transcript-item-at m)
-                      :seon.render/text (format-message-row m id)})
-             msgs)
-        eval-items
-        (loop [[e & more] es prev-sess ::none prev-ns ::none out []]
+(defn- sender-line
+  "The `<user>…</user>` (human) or `<from agent=<id>>…</from>` (agent) line
+   for a message's `from` ref (a pulled map carrying `:seon.user/id` /
+   `:seon.agent/id`) and `content` string — the ONE place a triggering
+   message becomes a transcript line, shared by [[woken-by-line]] (a
+   turn's wake) and the pending-inbound render (the not-yet-threaded
+   question). Content is bounded by [[message-render-cap]]."
+  [from content]
+  (let [body (cap-result content message-render-cap)]
+    (if (:seon.user/id from)
+      (str "<user>" body "</user>")
+      (str "<from agent=" (:seon.agent/id from) ">" body "</from>"))))
+
+(defn- woken-by-line
+  "The `<user>` (or `<from agent=…>`) line for a turn — the message whose
+   wake opened it: `:seon.agent.turn/woken-by` → `:seon.agent.message/content`,
+   with the tag chosen by the sender's ref kind (a `:seon.user/id` ref =
+   the human → `<user>`; an agent ref → `<from agent=…>`).
+   Returns nil when the turn has no woken-by (boot/manual turns get no
+   `<user>` line). The human → `<user>…</user>`; this agent itself or
+   another agent → `<from agent=<id>>…</from>` so a human vs agent
+   trigger is unambiguous. Content is bounded by [[message-render-cap]]."
+  [turn own-id]
+  (when-let [wb (:seon.agent.turn/woken-by turn)]
+    (when-let [content (:seon.agent.message/content wb)]
+      (sender-line (:seon.agent.message/from wb) content))))
+
+(defn- render-turn
+  "Render ONE turn as a `<turn id=… evals=N/M>` block: the woken-by
+   `<user>`/`<from>` line (omitted when absent), then each eval rendered
+   REPL-faithful by [[format-eval-row]] (a `;; in <ns>` marker injected
+   only where the eval ns changes, so ns switches stay visible without a
+   per-row prompt prefix). `evals=N/M` is ok-count / total. PRIOR-SESSION
+   turns (`prior?` true) render their evals WITHOUT `result/<id>` handles
+   (the vars died with the process). CORE-AUTHORED turns render their
+   eval bodies at [[core-eval-render-cap]] (tagged via `core?`)."
+  [{turn ::turn core? ::core-authored?} own-id prior?]
+  (let [evals  (->> (:seon.agent.turn/evals turn)
+                    (sort-by :seon.eval/at)
+                    (mapv #(assoc (into {} %) :seon.ctx/core-authored? core?)))
+        n-tot  (count evals)
+        n-ok   (count (filter :seon.eval/ok? evals))
+        tid    (:seon.agent.turn/id turn)
+        user-ln (woken-by-line turn own-id)
+        eval-rows
+        (loop [[e & more] evals prev-ns ::none out []]
           (if (nil? e)
             out
-            (let [sess   (:seon.agent.session/id-of-session e)
-                  ns-kw  (:seon.eval/ns e)
-                  at     (transcript-item-at e)
+            (let [ns-kw    (:seon.eval/ns e)
+                  ns-marker (when (and (some? ns-kw) (not= prev-ns ns-kw))
+                              (str ";; in " (name ns-kw)))
+                  r         (format-eval-row e prior?)
+                  row-text  (if ns-marker (str ns-marker "\n" r) r)]
+              (recur more (or ns-kw prev-ns) (conj out row-text)))))]
+    (->> [(str "<turn id=" tid " evals=" n-ok "/" n-tot ">")
+          user-ln
+          (when (seq eval-rows) (str/join "\n" eval-rows))
+          "</turn>"]
+         (remove nil?)
+         (str/join "\n"))))
+
+(defn- pending-inbound-line
+  "The PENDING inbound — the message the agent is being woken to answer
+   RIGHT NOW, rendered as a trailing `<user>`/`<from>` line so the agent
+   sees the question it must respond to. Load-bearing: a turn's prompt is
+   rendered BEFORE that turn opens (run-turn! does render-prompt → then
+   with-turn!), so the incoming message is NOT yet any turn's woken-by at
+   render time — without this line the agent would never see the question
+   it is answering (the old message-interleave surfaced every message;
+   the turn-grouped render only shows woken-by). Returns the line only
+   when the latest LIVE inbound (to ∋ me, from ≠ me, hops < `warn/hop-cap`)
+   is NOT already some turn's woken-by; nil otherwise (already threaded,
+   or no live inbound). One reactive query, nothing stored."
+  [db my-eid turns]
+  (when my-eid
+    (let [latest (->> (db/query
+                        {:seon.db/db db
+                         :seon.db/query
+                         '[:find ?m ?at ?content ?f
+                           :in $ ?me ?cap
+                           :where
+                           [?m :seon.agent.message/to ?me]
+                           [?m :seon.agent.message/from ?f]
+                           [(not= ?f ?me)]
+                           [(get-else $ ?m :seon.agent.message/hops 0) ?h]
+                           [(< ?h ?cap)]
+                           [?m :seon.agent.message/at ?at]
+                           [?m :seon.agent.message/content ?content]]
+                         :seon.db/args [my-eid warn/hop-cap]})
+                      (sort-by #(.getTime ^js (second %)))
+                      last)]
+      (when latest
+        (let [[m-eid _ content f-eid] latest
+              woken-eids (into #{}
+                               (keep #(:db/id (:seon.agent.turn/woken-by (::turn %))))
+                               turns)]
+          ;; Render only when this inbound has NOT yet opened a turn — i.e.
+          ;; it is the question the CURRENT (about-to-open) turn answers.
+          (when-not (contains? woken-eids m-eid)
+            (let [from (db/entity {:seon.db/db db :seon.db/ref f-eid})]
+              (sender-line {:seon.user/id (:seon.user/id from)
+                            :seon.agent/id (:seon.agent/id from)}
+                           content))))))))
+
+(defn transcript-section
+  "The THREADED TRANSCRIPT (transcript-redesign-2026-06-18) — the agent's
+   PAST turns, oldest-first, grouped by turn: one `<turn id=… evals=N/M>`
+   block per turn carrying the woken-by `<user>`/`<from>` line and the
+   turn's evals rendered REPL-faithful ([[format-eval-row]] — `;;`
+   preamble, the form, a `=> value ;; result/<id>` output line, or a
+   `=> ✗` failure line). The whole thing wraps in `<transcript note=…>`
+   ([[transcript-note]] disclaims the runtime annotations in-band).
+
+   Only ENVELOPE tags (`<transcript>`/`<turn>`/`<user>`/`<from>`) are
+   XML — the agent's own output renders as plain comments + forms +
+   REPL output, with NO `<eval>` tag, so there is nothing in its output
+   shape to mimic (the live `<your-ns>=>` cursor at the very END of the
+   context is the strongest 'type here' signal).
+
+   SESSION RESUME: turns from PREVIOUS sessions render too
+   ([[session-turns]] walks all sessions), separated by ONE
+   [[resume-marker-line]] per resume; prior-session turns render their
+   evals WITHOUT `result/<id>` handles (the vars died with the process).
+
+   Budget eviction is OLDEST-TURN-FIRST: the newest turns are kept whole
+   (always at least one); older turns drop beyond
+   [[transcript-char-budget]] and an elision note replaces them at the
+   top. Each AGENT eval row is bounded by [[eval-render-cap]];
+   CORE-AUTHORED turns (the creation-turn tutorial — tagged by
+   [[session-turns]]) render their evals at [[core-eval-render-cap]]."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.agent/keys [id] db :seon.db/db}]
+  (let [db       (or db @db/*conn*)
+        cur-sess (:seon.agent.session/id (current-session id db))
+        turns    (session-turns id db)
+        my-eid   (:db/id (db/entity {:seon.db/db db
+                                     :seon.db/ref [:seon.agent/id id]}))
+        ;; The question being answered NOW — not yet any turn's woken-by
+        ;; (the prompt renders BEFORE its turn opens). ALWAYS kept.
+        pending  (pending-inbound-line db my-eid turns)
+        ;; Build the rendered rows oldest-first; a resume marker rides as
+        ;; its own row just before a turn whose session differs from the
+        ;; previous turn's.
+        turn-items
+        (loop [[t & more] turns prev-sess ::none out []]
+          (if (nil? t)
+            out
+            (let [sess   (:seon.agent.session/id-of-session t)
                   prior? (and (some? cur-sess) (not= sess cur-sess))
                   marker (when (and (not= prev-sess ::none)
                                     (not= prev-sess sess))
                            {:seon.ctx/kind :seon.ctx/marker
-                            ;; just before its session's first eval
-                            :seon.ctx/at   (dec at)
                             :seon.render/text resume-marker-line})
-                  ;; `;; in <ns>` marker ONLY when the ns changes (or the
-                  ;; first row) — keeps ns SWITCHES visible without a
-                  ;; per-row `<ns>=>` prompt prefix on every row. Rides
-                  ;; the eval row's own text so it never evicts apart from
-                  ;; its row.
-                  ns-marker (when (and (some? ns-kw) (not= prev-ns ns-kw))
-                              (str ";; in " (name ns-kw)))
-                  row-text  (let [r (format-eval-row e prior?)]
-                              (if ns-marker (str ns-marker "\n" r) r))
-                  row    {:seon.ctx/kind :seon.ctx/eval
-                          :seon.ctx/at   at
-                          :seon.render/text row-text}]
-              (recur more sess (or ns-kw prev-ns)
-                     (into out (if marker [marker row] [row]))))))
-        items (->> (concat msg-items eval-items)
-                   (sort-by :seon.ctx/at)
-                   vec)]
+                  row    {:seon.ctx/kind :seon.ctx/turn
+                          :seon.render/text (render-turn t id prior?)}]
+              (recur more sess (into out (if marker [marker row] [row]))))))
+        ;; The pending-inbound line rides as an always-kept item at the END.
+        items (cond-> turn-items
+                pending (conj {:seon.ctx/kind :seon.ctx/pending
+                               :seon.render/text pending}))]
     (if (seq items)
       (let [rendered (mapv :seon.render/text items)
-            exempt?  (mapv #(not= :seon.ctx/eval (:seon.ctx/kind %)) items)
-            ;; Chars the always-kept rows consume up front.
+            ;; Resume markers are ALWAYS kept (they orient the agent); only
+            ;; TURN blocks are evictable.
+            exempt?  (mapv #(not= :seon.ctx/turn (:seon.ctx/kind %)) items)
             kept-chars (transduce
                          (keep-indexed
                            (fn [i s] (when (exempt? i) (+ (count s) 2))))
                          + 0 rendered)
-            ;; NEWEST-FIRST retention over the EVAL rows with whatever
-            ;; budget the exempt rows leave: walk from the end
-            ;; accumulating rendered chars; keep the newest eval rows
-            ;; WHOLE (always at least one), drop everything older —
-            ;; eviction is OLDEST-FIRST by construction.
-            kept-eval (loop [i (dec (count rendered)) acc kept-chars
-                             kept #{}]
+            ;; NEWEST-FIRST retention over the TURN blocks: walk from the
+            ;; end accumulating rendered chars; keep the newest turns WHOLE
+            ;; (always at least one), drop everything older — eviction is
+            ;; OLDEST-FIRST by construction.
+            kept-turn (loop [i (dec (count rendered)) acc kept-chars kept #{}]
                         (if (neg? i)
                           kept
                           (if (exempt? i)
@@ -1898,19 +2076,71 @@
                                        (> acc' transcript-char-budget))
                                 kept
                                 (recur (dec i) acc' (conj kept i)))))))
-            kept-idx (filterv #(or (exempt? %) (kept-eval %))
+            kept-idx (filterv #(or (exempt? %) (kept-turn %))
                               (range (count rendered)))
             elided   (- (count rendered) (count kept-idx))
             kept     (mapv rendered kept-idx)]
-        (str "<transcript>\n"
+        (str "<transcript note=\"" transcript-note "\">\n"
              (when (pos? elided)
-               (str ";; … " elided " older eval item" (when (not= 1 elided) "s")
+               (str ";; … " elided " older turn" (when (not= 1 elided) "s")
                     " elided (transcript capped at " transcript-char-budget
-                    " chars; messages are always kept; the full log is in "
-                    "the db — (seon.agent/messages) / (seon.agent/evals))\n\n"))
-             (str/join "\n\n" kept)
+                    " chars; the full log is in the db — "
+                    "(seon.agent/messages) / (seon.agent/evals))\n\n"))
+             (str/join "\n" kept)
              "\n</transcript>"))
       "")))
+
+(defn- turn-card-hiccup
+  "ONE turn rendered as a card (debug-view-section-twins-2026-06-18): the
+   `turn N` header + woken-by `<user>`/`<from>` line, then the turn's
+   evals as the REPL-faithful text [[render-turn]] already produces,
+   dropped into a `[:pre]`. Lifts the card framing from the inspector's
+   `card-block` (border-l rail, mono text). `prior?` strips result/<id>
+   handles for prior-session turns."
+  [{turn ::turn :as t} own-id prior? n]
+  (let [tid   (:seon.agent.turn/id turn)
+        evals (:seon.agent.turn/evals turn)
+        body  (render-turn t own-id prior?)]
+    [:div {:class "border-l-2 border-amber-700/40 pl-2 py-1 mb-1"}
+     [:div {:class "text-xs font-mono text-text-400"}
+      [:span {:class "font-semibold text-text-300"} (str "turn " n)]
+      [:span {:class "text-text-500"} (str "  id=" tid
+                                           "  evals=" (count evals))]]
+     [:pre {:class (str "mt-0.5 text-xs font-mono whitespace-pre-wrap "
+                        "break-all text-text-100")}
+      body]]))
+
+(defn transcript-section-html
+  "The HTML TWIN of [[transcript-section]] (debug-view-section-twins-
+   2026-06-18): the agent's OWN turns/evals/messages rendered as cards,
+   oldest-first (the same [[session-turns]] walk the text twin uses, so
+   it is STRUCTURALLY agent-scoped — core `:seon.test` index entities are
+   never in the agent's session turns and so never appear here). Render
+   order = the transcript's turn order. Returns the standard
+   `:seon.render/html-response` map (`{:seon.render/hiccup …}`); an empty
+   transcript renders a friendly placeholder card rather than vanishing.
+
+   This replaces the old per-entity last-64-by-tx-time right-pane window
+   (`render/visible-entities`), which flooded with the core's own test
+   captures and no longer mirrored the prompt."
+  {:malli/schema [:=> [:cat :map] :seon.render/html-response]}
+  [{:seon.agent/keys [id] db :seon.db/db :seon.ctx/keys [section]}]
+  (let [db       (or db @db/*conn*)
+        cur-sess (:seon.agent.session/id (current-session id db))
+        turns    (session-turns id db)
+        cards
+        (->> turns
+             (map-indexed
+               (fn [i t]
+                 (let [sess   (:seon.agent.session/id-of-session t)
+                       prior? (and (some? cur-sess) (not= sess cur-sess))]
+                   (turn-card-hiccup t id prior? (inc i)))))
+             vec)]
+    {:seon.render/hiccup
+     (if (seq cards)
+       (into [:div {:class "flex flex-col"}] cards)
+       [:div {:class "text-text-500 italic p-2 text-xs font-mono"}
+        "no turns yet — every turn this agent takes appears here live"])}))
 
 (defn inbox-count
   "Count of UNANSWERED inbound messages in `msgs` (the agent's derived
@@ -2068,6 +2298,18 @@
    [:seon.ctx/name :seon.ctx/name]
    [:seon.render/text :string]])
 
+;; The HTML TWIN of a rendered section (debug-view-section-twins-2026-06-18):
+;; the dormant `:seon.render/html` slot, resolved through
+;; `seon.render/html-render` + the throw-to-banner guard, paired with its
+;; section name. Hiccup is genuinely arbitrary agent-authored data at this
+;; boundary — `:seon.render.live-tile/hiccup` is the registered shallow
+;; bound (vector with keyword head); the deep walk happens at the render
+;; boundary, same as every `:seon.render/html-response`.
+(schema/register! :seon.ctx/section-html
+  [:map
+   [:seon.ctx/name :seon.ctx/name]
+   [:seon.render/hiccup :seon.render.live-tile/hiccup]])
+
 (schema/register! :seon.render/stable-text   :string)
 (schema/register! :seon.render/volatile-text :string)
 
@@ -2078,6 +2320,7 @@
    [:seon.render/volatile-text   :seon.render/volatile-text]
    [:seon.render/sections        :seon.render/sections]
    [:seon.render/section-texts   [:vector :seon.ctx/section-text]]
+   [:seon.render/section-html    [:vector :seon.ctx/section-html]]
    [:seon.render/token-estimate  :int]])
 
 (schema/register! :seon.render/split-response
@@ -2138,8 +2381,8 @@
                        :your-entity, before :warnings)
      5. :warnings    — current problems; reactive, vanishes when fixed
      6. :open-todos  — the agent's open work items; derived, vanishes
-     7. :transcript  — ONE threaded REPL stream: messages + evals
-                       chronological, append-only within a session
+     7. :transcript  — PAST turns, grouped <turn id=… evals=N/M>: the
+                       woken-by <user> + the turn's evals, REPL-faithful
      8. :turns       — the turn-budget countdown (one line, mid-task
                        only; derived, vanishes when idle) — just
                        above the prompt tail for salience
@@ -2171,7 +2414,8 @@
    {:seon.ctx/name :open-todos   :seon.ctx/priority 45
     :seon.render/ai 'seon.agent.todo/open-todos-section}
    {:seon.ctx/name :transcript   :seon.ctx/priority 50
-    :seon.render/ai 'seon.ctx/transcript-section}
+    :seon.render/ai 'seon.ctx/transcript-section
+    :seon.render/html 'seon.ctx/transcript-section-html}
    {:seon.ctx/name :turns        :seon.ctx/priority 90
     :seon.render/ai 'seon.agent.turns/turns-section}
    {:seon.ctx/name :inventory    :seon.ctx/priority 97
@@ -2275,6 +2519,29 @@
                                    "qualified symbol, got " (pr-str slot))))
       (catch :default e
         (render-error-line nm (or (.-message e) (str e)))))))
+
+(defn- render-section-html
+  "Resolve a section's `:seon.render/html` twin to hiccup via the EXISTING
+   `seon.render/html-render` (symbol | literal-hiccup | else), wrapped in
+   the SAME throw-to-banner guard `seon.render/render-entity-html` uses: a
+   throwing twin degrades to a legible banner naming the slot + message,
+   NEVER nil, NEVER vanish (vanish = banned). `base-in` is the composer's
+   shared render input ({:seon.db/db :seon.agent/id …}); the section is
+   assoc'd in as every section fn expects."
+  [base-in section]
+  (let [slot (:seon.render/html section)
+        nm   (:seon.ctx/name section :unnamed)]
+    (try
+      (:seon.render/hiccup
+        (render/html-render slot (assoc base-in :seon.ctx/section section)))
+      (catch :default e
+        [:div {:class (str "flex flex-col gap-1 p-3 border "
+                           "border-error/40 bg-error/10 rounded")}
+         [:div {:class "text-xs text-error font-mono font-bold"}
+          "⚠ render error"]
+         [:div {:class "text-xs font-mono text-text-300 break-all"}
+          (str (name nm) " (" (pr-str slot) ") threw: "
+               (or (.-message e) (str e)))]]))))
 
 (defn- apply-agent-budget
   "Enforce [[agent-section-char-budget]] over the rendered agent
@@ -2422,7 +2689,22 @@
                    (str/blank? stable-text)   volatile-text
                    (str/blank? volatile-text) stable-text
                    :else (str stable-text "\n\n" stable-boundary
-                              "\n\n" volatile-text))]
+                              "\n\n" volatile-text))
+        ;; HTML TWINS (debug-view-section-twins-2026-06-18): for each
+        ;; NON-BLANK rendered section (post-budget, in render order) that
+        ;; carries a :seon.render/html slot, resolve it through
+        ;; html-render + the banner guard. Sections without an html slot
+        ;; contribute no item — the right pane simply has no card for
+        ;; them. Not char-budgeted (html isn't counted against the
+        ;; agent's char budget); derived from the same post-budget vec so
+        ;; the twin mirrors whatever text the agent sees.
+        section-html
+        (->> rendered
+             (filter :seon.render/html)
+             (mapv (fn [section]
+                     {:seon.ctx/name       (:seon.ctx/name section)
+                      :seon.render/hiccup  (render-section-html base-in
+                                                                section)})))]
     {:seon.render/text           text
      :seon.render/stable-text    stable-text
      :seon.render/volatile-text  volatile-text
@@ -2435,5 +2717,6 @@
      :seon.render/section-texts  (mapv #(select-keys % [:seon.ctx/name
                                                         :seon.render/text])
                                        rendered)
+     :seon.render/section-html   section-html
      :seon.render/token-estimate (quot (count text) 4)}))
 
