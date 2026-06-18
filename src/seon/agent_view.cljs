@@ -27,7 +27,7 @@
      `seon.client/start-agent!` runs the seed inside the booting
      agent's `with-agent` scope, so they arrive agent-stamped. Without
      this clause every OTHER agent's filtered view loses the kind
-     schemas and `seon.render/visible-entities` returns nothing
+     schemas and `seon.render/render-entity-html` resolves no kind
      (2026-06-09 'no renderable entities' inspector bug — the seed
      datoms were fragmented across txs owned by DIFFERENT booting
      agents, so even the stamping agents saw only partial slices).

@@ -145,17 +145,37 @@
 
       (:vector :set)
       (let [inner (first (m/children child-schema))
-            inner-type (m/type inner)]
-        (when (contains? #{:vector :set :map} inner-type)
+            inner-type (m/type inner)
+            float-inner? (contains? #{:float :double float? double?} inner-type)
+            ;; A vector-of-floats is an EMBEDDING — a single homogeneous
+            ;; `:db.type/tuple` value (cardinality/one), NEVER 1536 separate
+            ;; cardinality-many scalar datoms. So the tuple shape is keyed off
+            ;; the float inner-type alone. `:db.secondary/only true` is an
+            ;; ORTHOGONAL property: when present the full value lives ONLY in
+            ;; the secondary (Proximum) index and the primary holds a content
+            ;; hash; when ABSENT the full vector persists in the primary AEVT
+            ;; (durable truth) and the secondary HNSW is a derived cache that
+            ;; datahike rebuilds from AEVT on conn open. For :seon/embedding we
+            ;; want the latter (durable + restore-safe), so we DO NOT set
+            ;; `:db.secondary/only`. (Locked use: :seon/embedding, the
+            ;; embeddings-fn-retrieval PRD.)
+            secondary-only? (boolean (or (:db.secondary/only entry-props)
+                                         (:db.secondary/only (m/properties child-schema))))]
+        (when (and (not float-inner?)
+                   (contains? #{:vector :set :map} inner-type))
           (throw (ex-info
                   (str "Nested collection not supported for attr " attr-key
                        " (inner type " inner-type "). Datahike cardinality-many "
                        "stores scalar values only.")
                   {:attr attr-key :inner-type inner-type})))
-        (let [inner-attr (schema->attr-partial attr-key nil inner)]
-          (merge inner-attr
-                 {:db/cardinality :db.cardinality/many}
-                 combined-seon-props)))
+        (if float-inner?
+          (cond-> {:db/valueType   :db.type/tuple
+                   :db/cardinality :db.cardinality/one}
+            secondary-only? (assoc :db.secondary/only true))
+          (let [inner-attr (schema->attr-partial attr-key nil inner)]
+            (merge inner-attr
+                   {:db/cardinality :db.cardinality/many}
+                   combined-seon-props))))
 
       :enum
       (let [values (m/children child-schema)

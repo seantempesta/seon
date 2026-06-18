@@ -106,9 +106,74 @@ NOT pod-side (Proximum is JVM-only, Java 22+). Embeddings come from an
   stable for identical source. *Gate: provider chosen (Q1).*
 - **2b — wire-server index:** add proximum dep + expose `src-secondary` on the
   `:writer` alias; declare the `:proximum` secondary index over
-  `:seon.fn/embedding`; embed-on-persist hook + boot backfill. *Gate: KNN over
+  `:seon/embedding`; embed-on-persist hook + boot backfill. *Gate: KNN over
   real fn vectors returns sensible neighbors (extend `tmp/datahike-sync`'s
   proximum proof with actual seon fn source).*
+
+### 2b FOUNDATION — BUILT (2026-06-18, synthetic-vector KNN proven live)
+
+The substrate for 2b is in place and proven on the live wire-server with
+synthetic normalized vectors (the Gemini embed pipeline is the remaining 2b
+work — see below). Locked facts:
+
+- **`:writer` alias (`deps.edn`):** added `:jvm-opts ["--add-modules"
+  "jdk.incubator.vector" "--enable-native-access=ALL-UNNAMED" "-XX:+UseG1GC"
+  "-Xmx2g"]`; appended `reference-code/datahike/src-secondary` to
+  `:extra-paths` (stable repo-relative path; the datahike submodule is pinned
+  to the same `:git/sha` `6cf05300` — a comment warns the two MUST stay
+  aligned); added `org.replikativ/proximum {:mvn/version "0.1.25"}` and
+  `com.google.genai/google-genai {:mvn/version "1.59.0"}` to `:extra-deps`.
+- **Malli→datahike bridge (BOTH siblings, byte-aligned):**
+  1. `system-attr?` (`seon.db.internal` cljs + `seon.db` clj) broadened from
+     "namespace == `db`" to "namespace == `db` OR starts-with `db.`" — so the
+     validation gate no longer rejects the `:db.secondary/*` family (datahike
+     treats the whole `:db.*` cluster as system attrs; see `schema.cljc`
+     `::schema-attribute` / `::secondary-index-attribute`).
+  2. `:db.secondary/only` bridge branch (`malli->datahike-attr` cljs +
+     `schema->attr-partial`/`malli-map->datahike-schema` clj): a
+     `[:vector {:db.secondary/only true} :float]` (or `:double`) emits a
+     SINGLE tuple value — `:db/valueType :db.type/tuple`,
+     `:db/cardinality :db.cardinality/one`, `:db.secondary/only true` —
+     instead of the cardinality-many a bare `[:vector X]` would give. Keyed off
+     the property + vector-of-float shape, NOT the literal attr keyword.
+- **`seon.embed` (`src/seon/embed.clj`, JVM/wire-server only):**
+  - registers `:seon/embedding` as `[:vector {:db.secondary/only true} :float]`.
+    **Locked attr name: `:seon/embedding`** (single-segment namespace,
+    deliberate — the attr is cross-cutting). Registration runs only from this
+    `.clj` ns; the pod's `:cljs`-gated `assert-multi-segment-namespace!` WOULD
+    reject `:seon/embedding`, so the pod must NOT register it (FLAG for 2c/2d
+    if the pod ever needs the attr registered).
+  - `install!` (idempotent) transacts the `:seon/embedding` attr decl (derived
+    via the bridge, not hand-written) + the **`:seon.embed/fn-index`**
+    `:proximum` secondary index over it: **dim 1536, distance `:cosine`,
+    capacity 10000**.
+  - **Index store backend = `:memory`** (deterministic `:id`), matching the
+    proven spike. *FLAG:* proximum's file backend is NOT boot-idempotent
+    (`create-index` always `create-store`s → throws "File store already exists"
+    on the second open; datahike's `restore-secondary-indices` re-calls
+    `create-index` with the same store-config every boot). With
+    `:db.secondary/only true` the raw vectors live ONLY in the secondary, so a
+    memory backend means embeddings are NOT durable across a wire-server
+    restart. Durability is 2b work; the likely answer is to DROP
+    `:db.secondary/only` so vectors persist in primary AEVT and datahike's
+    `build-secondary-index!` rebuilds the in-memory HNSW from AEVT on boot
+    (durable truth in datoms, HNSW graph as derived cache).
+- **Live KNN proof (synthetic, no Gemini):** on the live wire-server (socket
+  REPL 7891), `install!` → `{:seon.embed/installed? true}` (idempotent across
+  3 calls); transacted two one-hot 1536-d vectors as `:seon/embedding`; KNN via
+  `(sec/-slice-ordered (get-in (d/db conn) [:secondary-indices
+  :seon.embed/fn-index]) {:vector qv :k 2} …)` returned the correct nearest
+  entity with cosine distance ≈0 and the orthogonal one at 1.0. Note: the
+  wire-server transacts ALL writes as raw `d/transact` through its single conn
+  (it does NOT run `seon.db/transact!`), so `install!` and the proof transact
+  directly through that conn — the faithful equivalent of the "via
+  seon.db/transact!" wording in this PRD.
+
+**Still needed for 2b (Gemini write pipeline):** the embeddings provider +
+model decision (Q1) and the embed-on-persist hook (hash source → cache-miss →
+embed → store `:seon/embedding`) + boot backfill; resolve the durability FLAG
+(drop `:db.secondary/only` for AEVT-backed rebuild, or a proximum restore
+path). `google-genai` is already on the `:writer` classpath for the embed call.
 - **2c — wire verb:** `knn-fn-search` (server: embed query + KNN; pod: client +
   pull full source). *Gate: pod retrieves correct top-k eids over the wire.*
 - **2d — ctx integration:** budget-aware `<namespaces>` render swap. *Gate:

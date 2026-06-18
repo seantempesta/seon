@@ -7,9 +7,9 @@
      :seon.render/ai   'seon.handlers.message/render-ai
      :seon.render/html 'seon.handlers.message/render-html
 
-   `seon.render/visible-entities` walks every `:seon.render/ai` entity
-   in the agent's filtered view and the inspector calls these via
-   symbol-lookup.
+   The transcript section's html twin (`seon.ctx/transcript-section-html`)
+   resolves these per-message symbols (via `seon.render/render-entity-html`
+   / `render-entity-ai`) to render the agent's messages as right-pane cards.
 
    Labels resolve by `:seon.agent.message/from` REF KIND (from/to migration,
    unit 1.5): the user entity → `user`, the viewing agent itself →
@@ -18,7 +18,7 @@
 
    ## Ref resolution
 
-   `d/pull '[*]` (how `seon.render/renderable-entities` materializes
+   `d/pull '[*]` (how the transcript twin materializes message
    entities) returns refs as bare `{:db/id n}` maps — they carry NO
    `:seon.user/id`/`:seon.agent/id`, so `agent/message-label` on the
    raw pull said `unknown` for every message. `resolve-ref` re-pulls

@@ -14,6 +14,7 @@
    the keyword namespace tracks the OWNING DATA namespace (`seon.db`),
    not the file the code happens to live in."
   (:require
+    [clojure.string :as str]
     [datahike.api :as d]
     [malli.core :as m]
     [seon.db :as-alias db]
@@ -306,17 +307,30 @@
                                          ::db/attr attr-key})))
         props       (form-properties raw-form)
         outer-form  raw-form
-        cardinality (form->cardinality (resolve-malli-form outer-form))
         ;; For vectors/sets, the child is the value form; for scalars,
         ;; same as outer.
         value-form  (-> outer-form
                         resolve-malli-form
                         form->child-form
                         resolve-malli-form)
-        value-type  (form->datahike-value-type value-form)]
+        value-type  (form->datahike-value-type value-form)
+        ;; A `:db.secondary/only true` attr is a single tuple value (the
+        ;; whole vector lives ONLY in the secondary/vector index, never in
+        ;; the primary datahike indices). The vector wrapper that would
+        ;; otherwise read as cardinality/many is a tuple here, NOT a
+        ;; cardinality-many scalar. General rule: keyed off the
+        ;; `:db.secondary/only` property + a vector-of-numeric shape →
+        ;; tuple, cardinality/one. (Locked use: `:seon/embedding`,
+        ;; embeddings-fn-retrieval PRD.)
+        secondary-only? (boolean (:db.secondary/only props))
+        cardinality (if secondary-only?
+                      :db.cardinality/one
+                      (form->cardinality (resolve-malli-form outer-form)))]
     (cond-> {:db/ident       attr-key
              :db/valueType   value-type
              :db/cardinality cardinality}
+      secondary-only?            (assoc :db/valueType :db.type/tuple
+                                        :db.secondary/only true)
       (:seon.db/identity props)  (assoc :db/unique :db.unique/identity)
       (:seon.db/component props) (assoc :db/isComponent true))))
 
@@ -395,11 +409,14 @@
 ;; ---------------------------------------------------------------------------
 
 (defn system-attr?
-  "True for `:db/*` system attributes that drive datahike's own schema
-   layer and should not be validated against the seon Malli registry."
+  "True for datahike's own system attributes — the `:db/*` family AND the
+   `:db.*` sub-namespaces (`:db.secondary/*`, `:db.entity/*`, `:db.valid/*`,
+   …). These drive datahike's schema/secondary-index layer and are NOT
+   validated against the seon Malli registry (see datahike's
+   `schema.cljc` ::schema-attribute / ::secondary-index-attribute sets)."
   [k]
-  (and (keyword? k)
-       (= "db" (namespace k))))
+  (let [n (and (keyword? k) (namespace k))]
+    (boolean (and n (or (= n "db") (str/starts-with? n "db."))))))
 
 (declare ref-attr-arity)
 

@@ -371,3 +371,76 @@ Namespaces section: NO change — it already matches the spec exactly (metadata 
 schemas-in-full + fn heads with inline `:test`, standalone tests dropped, zero
 raw rows). `inventory` already satisfies no-raw-data (metadata-only,
 `db.cljs:812-898`).
+
+## Context clarity audit — what's useless
+
+Measured against the live EMZ-2606181326 fresh-seed render (210,050 chars / ~52.5K tokens).
+
+### 1. Context shape, one line
+
+**210,050 chars / ~52.5K tokens. The `namespaces` section is 197,713 chars = 94.1% of the entire context. Every other section combined is 12,337 chars = 5.9%.** Any token conversation that is not about `namespaces` is rounding error. And inside `namespaces`, the dominant cost is not code — it is **docstring prose (55%).**
+
+### 2. Per-section table (ranked by size)
+
+| Section | Chars | What it is (plain) | Verdict | The cut |
+|---|---|---|---|---|
+| namespaces | 197,713 | Compact dump of 56 namespaces: per-fn signature + `:malli/schema` + docstring (body elided to `…`), plus all `register!` schema rows. The agent's code corpus. | **bloated** | Truncate docstrings to first line (~93K), drop test/web/debug nses (~49K) |
+| system | 5,556 | The one universal `<system>` block (cached, identical every turn): 8 concept paragraphs (REPL model, live-context, eval mechanics, render-twin, store laws) + 5 standing teachings. | **useful** | Trim ~1,200: kill the 3x-repeated "consult stored knowledge first" + the duplicated `:test` example |
+| transcript | 3,267 | Recent eval history this session (reasoning comment + form + `=>` value). Fresh seed = 3 bootstrap evals. | **bloated** | Trim ~1,200 (other agent's lane): clamp the tx-report value dump |
+| live-tile | 932 | What the human sees on this agent's panel + how to take it over. | **useful** | Trim ~400: drop verbatim welcome-card copy + duplicated change-it paragraph |
+| inventory | 818 | Density map of stored data, one line per attr-namespace with row counts. Fresh seed = only the agent's own plumbing. | **useful** | Trim ~250: collapse header, de-dup vs system, hide agent's own seon.eval/turn plumbing |
+| your-entity | 742 | The agent's own entity map, re-pulled each turn + unset-purpose nudge. | **useful** | Trim ~150: drop `:db/id`, fold redundant aside |
+| warnings | 721 | Reactive defect surface. Fresh seed fires `[unmarked-entity-kinds]` against CORE schemas. | **bloated** | Cut entirely at agent boundary: it nags the agent to fix `seon.ctx`/`seon.handler` core schemas it was told never to touch |
+| prompt | 164 | Status line + REPL prompt. ALL per-turn-volatile bytes live here (cache boundary). | **essential** | Keep as-is |
+
+### 3. What's useless / wasteful — biggest first
+
+**1. Docstring prose: 106,781 chars (55% of namespaces, ~27K tokens). THE single biggest waste in the whole context.** Split: ns-docstrings 69,773 + fn-docstrings 37,008. 112 of 130 fn docstrings are multi-line; the biggest single docstrings run 1,300–2,838 chars EACH (e.g. `seon.db/store-inventory` doc = 2,838; `my.kb` ns-doc = 2,111; `my.kb.system` = 1,850). **Truncating every docstring >60 chars to its first line recovers ~93,338 chars (~23K tokens, 44% of the WHOLE context) with near-zero contract loss** — the Malli contracts are rendered separately as `register!` rows and `:malli/schema` lines. The prose is redundant with the schema.
+
+   The canonical waste, verbatim — `write-file`'s docstring restates in English exactly what its `register!` row already encodes in Malli:
+   ```
+   (defn write-file
+     "Write … Returns:
+        {:seon.agent.fs/ok? true :seon.agent.fs/path <p>}                          ; ok
+        {:seon.agent.fs/ok? false :seon.agent.fs/path <p> :seon.agent.fs/error <s>}"   ; ~250 chars of prose
+     {:malli/schema [:=> [:cat :seon.agent.fs/write-request] :seon.agent.fs/write-response]}  ; the GOOD line — references, doesn't inline
+     ...)
+   (seon.schema/register! :seon.agent.fs/write-response
+     [:map [:seon.agent.fs/ok? :boolean] [:seon.agent.fs/path :string] [:seon.agent.fs/error {:optional true} :string]])  ; same info, in Malli
+   ```
+   The waste is the prose, not the schema. This pattern repeats across ~130 fn docstrings.
+
+**2. Test namespaces leaking into every prompt: 15,703 chars (~3.9K tokens).** `seon.test.runner` (13,363), `seon.handlers.test` (978), `seon.db.envelope-test` (824), `seon.test` (538). **This is a bug:** `included-ns?` (`ctx.cljs:228-242`) excludes only `*.internal` (the regex at lines 153-154 checks `.internal` only). `-test` names are NOT filtered — even though the file already has a `strip-trailing-test` helper at line 253 proving the codebase knows about the suffix. `seon.db.envelope-test` is flat-out a test file in every agent's standing prompt. An agent writing app code does not need 13K chars of the test harness on every turn.
+
+**3. Web/UI rendering namespaces an agent never authors: ~28,148 chars (~7K tokens).** `seon.render.live-tile` (10,241), `seon.render` (5,905), `seon.web.brand` (4,370 — **a color palette**), `seon.render.chat` (4,285), `seon.render.default` (1,438), `seon.web.serve` (1,342), `seon.ui.html` (567). `seon.web.brand` is the Phosphor Terminal palette — zero value to an agent writing Clojure, pure dead weight. The rest is inspector/HTML machinery the agent does not author; surface on demand.
+
+**4. AI adapter internals: ~16K chars (~4K tokens).** `seon.ai` (7,936) + `seon.ai.openai-compat` (4,299) + `seon.ai.anthropic` (3,894). The agent calls one entry point, not the adapter guts.
+
+**5. `seon.debug`: 5,448 chars (~1.4K tokens).** Dev-only disk-write capture mode (behind `SEON_DEBUG_CAPTURE`). NOTE: the input data called this "untracked" — that is stale; it was committed in `52bc3b8`. Tracked or not, it is dev tooling, useless in standing agent context.
+
+**6. The `warnings` section is misfiring (721 chars of standing noise).** On the fresh seed it fires `[unmarked-entity-kinds]` against `:seon.ctx/config-id` and `:seon.handler/key` — both CORE `seon.*` kinds. The system block explicitly tells the agent "the core is `seon.*` — never redefine its fns." So the warning instructs the agent to re-register a core schema it was told not to touch, and closes "Please correct before moving on" — on a fresh seed with no task. It fires identically on every fresh-seed agent. The renderer is good (reactive, self-healing); the data feeding it is wrong. Fix at the source: mark the core `:map` schemas `{:seon.db/entity true}`, and exclude core `seon.*` from agent-facing warnings.
+
+**7. System block repeats itself (~1,200 cuttable chars).** "Consult stored knowledge FIRST" appears three times (system + inventory header + transcript). The `:test`/keep-fns-small example is stated twice (standing teachings AND the namespaces paragraph). Defensive asides ("a clipped display is NOT a clipped value", "telling your human something threw is wrong") are padding.
+
+**8. Transcript dumps a raw tx-report (~1,400 of 3,267 chars = 43%).** A 2-attribute `transact!` whose meaningful result is `{:seon.db/ok? true}` renders its ENTIRE raw datahike tx-report — full `:tx-data` datom vector, `:db-before`/`:db-after` with max-tx/max-eid, `:db/commitId` uuid, request-id, plus 9 internal datoms (txInstant, agent-id, session-id, turn-id, origin, eval-id, request-id) the agent never wrote. The other two evals render as `=> []` — proof the transact value just isn't being clamped. (Transcript renderer is another agent's lane — flag, don't edit.)
+
+**9. Inline-shape contract duplication: ~4,344 chars.** 56 fn-heads inline a `:catn`/`:map`/`:tuple` shape directly in `:malli/schema` AND that shape also exists as a `register!` row. The correct pattern (73 other defns, 3,101 chars) references the registered keyword. Small-scale, but real drift risk.
+
+### 4. Ranked cuts (pick from these)
+
+| # | Change | Savings | Risk | Lane |
+|---|---|---|---|---|
+| 1 | **Truncate every docstring (ns + fn) in namespaces-section to first line** (in `elide-defn-body` + `extract-ns-form`). Full docstring stays in on-demand `render-namespace`. | **~93,338 chars / ~23K tok (44% of whole context)** | Low — Malli contracts rendered in full separately; one-line keeps intent | ctx.cljs (ours) |
+| 2 | **Exclude `*-test` nses + test runner from `included-ns?`** — add a structural rule beside the `*.internal` exclusion (the `strip-trailing-test` helper already exists). | ~15,703 chars / ~3.9K tok | Very low — tests aren't agent surface; `envelope-test` is plainly a leak | ctx.cljs (ours) |
+| 3 | **Drop web/UI render nses from standing context** (`seon.web.brand`, `seon.render*`, `seon.web.serve`, `seon.ui.html`) via a render/web-prefix exclusion. | ~28,148 chars / ~7K tok | Low–medium — needed only if agent edits the inspector UI (exception; pull on demand). `seon.web.brand` unambiguously useless. | ctx.cljs (ours) |
+| 4 | **Compact AI adapter internals** to public entry signatures or exclude (`seon.ai.openai-compat`, `seon.ai.anthropic`). | ~6–12K chars / ~1.5–3K tok | Medium — verify which entry the agent actually calls first | ctx.cljs + maybe source |
+| 5 | **Drop `seon.debug` from standing context.** | ~5,448 chars / ~1.4K tok | Very low — dev tooling | ctx.cljs (ours) |
+| 6 | **Trim system block dedup** — collapse "consult stored knowledge" to one line, state `:test` example once, tighten asides. Target ~4,300 chars. | ~1,200 chars / ~300 tok | Low | system def (ours) |
+| 7 | **Trim live-tile / inventory / your-entity** default-state verbosity (drop verbatim welcome copy, collapse headers, drop `:db/id`, hide agent's own plumbing kinds). | ~800 chars / ~200 tok | Low | ctx.cljs (ours) |
+| 8 | **Replace 56 inline fn-head shapes with registered keyword refs.** | ~3–4K chars / ~1K tok | Medium — edits source fns' `:malli/schema`, only where a registered key exists | source fns (ours) |
+| W | **Fix `warnings` at the source** — mark core `:map` schemas `{:seon.db/entity true}`, exclude core `seon.*` from agent-facing warnings. | ~721 chars/turn + stops nagging | Low | warn + core schemas (ours) |
+| T | **Clamp transcript tx-report value** to `{:seon.db/ok? true …N datoms}`. | ~1,200 chars / ~300 tok | Low | **transcript renderer — ANOTHER AGENT'S LANE; flag, don't edit** |
+
+**Bottom line.** Cuts #1+#2+#3+#5 alone remove ~142,637 chars (~35.5K tokens) — they shrink the context from 210K to ~67K chars (~17K tokens), a **68% reduction**, with near-zero contract loss because the Malli schemas (the real contract) are rendered in full and untouched. Cut #1 is the headline: **half the context is docstring prose restating contracts the schema rows already encode.** Everything in tracks #4–#8 is incremental polish on top of that.
+
+All cuts except T are in our lane (`ctx.cljs`, the system def, `seon.warn`, and source fns). T touches the transcript renderer owned by another agent — flag it, do not edit.

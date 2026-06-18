@@ -25,7 +25,8 @@
 
    Positional args are intentional for drop-in compatibility -- this is
    the one namespace where map-in/map-out does not apply."
-  (:require [malli.core :as m]
+  (:require [clojure.string :as str]
+            [malli.core :as m]
             [seon.schema :as schema]
             [taoensso.timbre :as log]))
 
@@ -71,11 +72,13 @@
 ;;; --- Internal ---
 
 (defn- system-attr?
-  "Returns true for :db/* system attributes that should not be validated
-   against the Malli registry."
+  "Returns true for datahike's own system attributes — the `:db/*` family
+   AND the `:db.*` sub-namespaces (`:db.secondary/*`, `:db.entity/*`,
+   `:db.valid/*`, …). None are validated against the seon Malli registry
+   (see datahike's schema.cljc ::schema-attribute / ::secondary-index-attribute)."
   [k]
-  (and (keyword? k)
-       (= "db" (namespace k))))
+  (let [n (and (keyword? k) (namespace k))]
+    (boolean (and n (or (= n "db") (str/starts-with? n "db."))))))
 
 (defn- extract-tx-attrs
   "Extract all attribute keywords from tx-data.

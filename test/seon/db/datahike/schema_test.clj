@@ -117,6 +117,29 @@
                           (dhs/malli-map->datahike-schema
                            [:map [:foo/bad [:vector [:map [:x :string]]]]])))))
 
+(deftest bridge-secondary-only-tuple-test
+  (testing ":db.secondary/only on [:vector :float] → single tuple value"
+    (let [result (dhs/malli-map->datahike-schema
+                  [:map [:foo/embedding [:vector {:db.secondary/only true} :float]]])
+          attr (find-attr result :foo/embedding)]
+      ;; The vector wrapper is a TUPLE here, NOT cardinality-many — the
+      ;; whole vector lives only in the secondary/vector index.
+      (is (= :db.type/tuple (:db/valueType attr)))
+      (is (= :db.cardinality/one (:db/cardinality attr)))
+      (is (= true (:db.secondary/only attr)))))
+
+  (testing ":db.secondary/only also honored as type-level property"
+    (let [result (dhs/malli-map->datahike-schema
+                  [:map [:foo/embedding [:vector {:db.secondary/only true} :double]]])
+          attr (find-attr result :foo/embedding)]
+      (is (= :db.type/tuple (:db/valueType attr)))
+      (is (= :db.cardinality/one (:db/cardinality attr)))))
+
+  (testing ":db.secondary/only over a non-float vector is rejected"
+    (is (thrown-with-msg? Exception #"must be a vector of :float/:double"
+                          (dhs/malli-map->datahike-schema
+                           [:map [:foo/bad [:vector {:db.secondary/only true} :string]]])))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Seon DB props
 ;;; ---------------------------------------------------------------------------

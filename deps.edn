@@ -149,13 +149,31 @@
   ;; The RUNNING wire-server keeps its old deps until its next restart
   ;; (`bin/seon restart wire-server`) — verified to start + serve on a
   ;; throwaway store by `clj -M:replica-peer-jvm` (the Stage B peer oracle).
-  :writer {:extra-paths ["dev-resources/konserve-shim"]
+  ;; Embeddings/Proximum (PRD agent-runtime/embeddings-fn-retrieval, Phase-2):
+  ;; - reference-code/datahike/src-secondary exposes datahike's secondary-index
+  ;;   namespaces (incl. the :proximum integration shim) for the git-dep above.
+  ;;   This is a stable repo-relative path; its CONTENTS must stay byte-aligned
+  ;;   with the datahike :git/sha below. The reference-code/datahike submodule is
+  ;;   pinned to that exact sha (6cf05300) — IF YOU BUMP the datahike :git/sha,
+  ;;   bump the submodule to match or src-secondary will diverge from the dep.
+  ;; - proximum provides the HNSW vector index backing :db.secondary/type
+  ;;   :proximum. The jvm-opts (jdk.incubator.vector + native access) are
+  ;;   REQUIRED by proximum's SIMD distance kernels; G1GC + 2g heap keep the
+  ;;   mmap-heavy index comfortable.
+  ;; - google-genai is the embeddings client (used by the later 2b pipeline).
+  :writer {:jvm-opts ["--add-modules" "jdk.incubator.vector"
+                      "--enable-native-access=ALL-UNNAMED"
+                      "-XX:+UseG1GC" "-Xmx2g"]
+           :extra-paths ["dev-resources/konserve-shim"
+                         "reference-code/datahike/src-secondary"]
            :extra-deps {org.replikativ/datahike
                         {:git/url "https://github.com/seantempesta/datahike"
                          :git/sha "6cf053001580bd9008c75edf8399a4068a7e2742"}
                         com.cognitect/transit-clj {:mvn/version "1.0.333"}
                         com.fasterxml.jackson.dataformat/jackson-dataformat-cbor
-                        {:mvn/version "2.17.0"}}
+                        {:mvn/version "2.17.0"}
+                        org.replikativ/proximum {:mvn/version "0.1.25"}
+                        com.google.genai/google-genai {:mvn/version "1.59.0"}}
            :override-deps {org.replikativ/konserve
                            {:git/url "https://github.com/seantempesta/konserve"
                             :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}

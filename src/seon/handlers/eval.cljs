@@ -6,12 +6,13 @@
      :seon.render/ai   'seon.handlers.eval/render-ai
      :seon.render/html 'seon.handlers.eval/render-html
 
-   The inspector's `seon.render/visible-entities` walks every entity
-   carrying `:seon.render/ai` and the inspector calls each symbol via
-   `seon.eval/lookup-value`. Both panes derive from the SAME entity
-   set — there's no separate 'what the LLM sees' vs 'what the human
-   sees' store. Identical query, two render shapes. (The agent's prompt
-   TEXT comes from the one composer `seon.agent/assemble-context`.)
+   The transcript section's html twin (`seon.ctx/transcript-section-html`)
+   resolves these per-eval symbols (via `seon.render/render-entity-html` /
+   `render-entity-ai`, which call each symbol through
+   `seon.eval/lookup-value`) to render the agent's evals as right-pane
+   cards. One entity, two render shapes — no separate 'what the LLM sees'
+   vs 'what the human sees' store. (The agent's prompt TEXT comes from the
+   one composer `seon.agent/assemble-context`.)
 
    ## Display order
 

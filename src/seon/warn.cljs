@@ -478,15 +478,22 @@
    registration an id-carrying map is indistinguishable between
    unmarked-entity and legitimate envelope; once rows EXIST under the
    id-attr, an undeclared kind is a real defect. Derived at render,
-   self-heals the moment the kind is marked. GLOBAL — fires on
-   core and agents alike; :seon.warn/ns is ignored."
+   self-heals the moment the kind is marked. Fires GLOBALLY across
+   AGENT-authored kinds (:seon.warn/ns is ignored), but EXCLUDES
+   core-provenance kinds ([[seon.db/core-kinds]]) — agents can't and
+   shouldn't re-register the compiled core's :map schemas, so nagging
+   them about an unmarked core kind is a no-op task. (The fix for a
+   core kind is to mark its :map schema {:seon.db/entity true} at
+   source, which is a core change, not an agent one.)"
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
-  (let [marked (marked-entity-id-attrs)]
+  (let [marked (marked-entity-id-attrs)
+        core   (db/core-kinds db)]
     {:seon.warn/kind :unmarked-entity-kinds
      :seon.warn/affected
      (->> (identity-attrs db)
           (remove marked)
+          (remove #(contains? core (keyword (namespace %))))
           (filter #(pos? (attr-instance-count db %)))
           (sort-by str)
           (mapv (fn [attr]
