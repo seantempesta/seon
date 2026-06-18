@@ -1,11 +1,12 @@
 (ns seon.agent.inspect
   "Agent self-introspection: 'what am I seeing right now?'
 
-   Three verbs:
-     - `ctx-preview` — the assembled AI-context string an agent would
-       receive on its next render.
-     - `visible-entities` — the list of entity maps the agent sees, in
-       render order. Identical set to what `ctx-preview` walked.
+   Two verbs:
+     - `ctx-preview` — the assembled AI-context the agent would receive
+       on its next render: the exact prompt text, the per-section texts
+       (left pane), and the per-section html twins (right pane). Both
+       panes are derived from the ONE composer
+       (`seon.ctx/assemble-context`), so they cannot diverge.
      - `handlers` — the live handler registry visible to the agent
        (core + per-agent).
 
@@ -17,7 +18,6 @@
     [seon.ctx :as ctx]
     [seon.db :as db]
     [seon.handler :as handler]
-    [seon.render :as render]
     [seon.schema :as schema]))
 
 (schema/register! :seon.agent.inspect/request
@@ -35,12 +35,9 @@
 (schema/register! :seon.agent.inspect/ctx-response
   [:map
    [:seon.render/text :string]
-   [:seon.render/entities [:vector :any]]
    [:seon.render/section-texts [:vector :seon.agent.inspect/section-text]]
+   [:seon.render/section-html [:vector :seon.ctx/section-html]]
    [:seon.render/token-estimate :int]])
-
-(schema/register! :seon.agent.inspect/entities-response
-  [:map [:seon.render/entities [:vector :any]]])
 
 (schema/register! :seon.agent.inspect/handlers-response
   [:map [:seon.handler/list [:vector :map]]])
@@ -58,31 +55,20 @@
    — the EXACT bytes the LLM receives, via the ONE composer
    `seon.ctx/assemble-context` (the same fn the agent prompt path
    calls; divergence is impossible — the composer itself returns the
-   per-section texts, so the old duplicate per-section walk died with
-   V3-C). `:seon.render/entities` is the ordered set of entities BEHIND
-   that context (for drill-in), via `seon.render/visible-entities`.
+   per-section texts AND the per-section html twins, so the inspector's
+   left pane (`:seon.render/section-texts`) and right pane
+   (`:seon.render/section-html`) both mirror the same section set).
    Reads from the agent's filtered view so cross-agent tx are hidden."
   {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/ctx-response]}
   [{:seon.agent/keys [id]}]
   (let [id (resolve-id id)
         {:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id id})
-        {:seon.render/keys [text token-estimate section-texts]}
-        (ctx/assemble-context {:seon.agent/id id :seon.db/db db})
-        {:seon.render/keys [entities]}
-        (render/visible-entities {:seon.agent/id id :seon.db/db db})]
+        {:seon.render/keys [text token-estimate section-texts section-html]}
+        (ctx/assemble-context {:seon.agent/id id :seon.db/db db})]
     {:seon.render/text            text
-     :seon.render/entities        entities
      :seon.render/section-texts   section-texts
+     :seon.render/section-html    section-html
      :seon.render/token-estimate  token-estimate}))
-
-(defn visible-entities
-  "Return the entities the agent currently sees in its AI context, in
-   render order. Subset of `ctx-preview` (same entities, no rendered
-   strings)."
-  {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/entities-response]}
-  [{:seon.agent/keys [id]}]
-  (let [{:seon.render/keys [entities]} (ctx-preview {:seon.agent/id (resolve-id id)})]
-    {:seon.render/entities entities}))
 
 (defn handlers
   "Return the live handler registry visible to the agent (core

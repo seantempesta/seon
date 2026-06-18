@@ -1,12 +1,18 @@
 (ns seon.web.inspector
   "Agent inspector UI — what the agent sees, both as AI text and HTML.
 
-   Two columns per agent:
-     - LEFT  `:seon.render/ai`   — `(inspect/ctx-preview ...)` text, the
-       exact bytes the LLM would receive on its next render.
-     - RIGHT `:seon.render/html` — same set of entities; for each entity,
-       resolve its `:seon.render/html` slot and call it (or fall back to
-       the `:seon.render/ai` text wrapped in <pre>).
+   Two columns per agent — both derived from the ONE composer
+   (`inspect/ctx-preview` → `seon.ctx/assemble-context`), so they share
+   the section set and structurally cannot diverge
+   (debug-view-section-twins-2026-06-18):
+     - LEFT  `:seon.render/ai`   — the exact bytes the LLM would receive
+       on its next render, as per-section texts
+       (`:seon.render/section-texts`).
+     - RIGHT `:seon.render/html` — the same sections' html twins
+       (`:seon.render/section-html`): each section's `:seon.render/html`
+       slot rendered as one right-pane card, in render order. (The old
+       per-entity last-64-by-tx-time entity window — flooded with the
+       core's own `:seon.test` captures — is gone.)
 
    Reactive: a single tx-listener subscribes to every commit. For each
    tx-report we read `:seon.db/agent-id` from the tx eid in db-after.
@@ -133,161 +139,9 @@
    ::schema-count (count (d/q '[:find ?e :where [?e :seon.schema/key]] db))
    ::test-count   (count (d/q '[:find ?e :where [?e :seon.test/sym]] db))})
 
-(defn- entity-kind-label
-  "Best-effort kind label for an entity with no resolved renderer: the
-   most common keyword NAMESPACE among its attrs (`seon.eval`,
-   `my.kb.instruction`, ...). Returns a string, `\"entity\"` when nothing
-   namespaced is present."
-  [entity]
-  (or (->> (keys entity)
-           (keep #(when (keyword? %) (namespace %)))
-           (remove #(= "db" %))
-           frequencies
-           (sort-by (comp - val))
-           ffirst)
-      "entity"))
-
 (defn- truncate-val [v n]
   (let [s (pr-str v)]
     (if (> (count s) n) (str (subs s 0 n) " …") s)))
-
-(defn- unknown-entity-card
-  "Styled fallback for entities whose kind has no `:seon.render/html`
-   handler — a kind header + key/value table instead of a raw pr-str
-   blob. The right pane never shows XML-ish EDN dumps."
-  [entity]
-  (let [kind (entity-kind-label entity)
-        rows (->> (dissoc entity :db/id)
-                  (filter (fn [[k _]] (keyword? k)))
-                  (sort-by (comp str first)))]
-    [:div {:class "py-1"}
-     [:div {:class "flex items-baseline gap-2"}
-      [:span {:class "text-xs font-mono font-semibold text-text-300"} kind]
-      [:span {:class "text-xs text-text-500"} "(no renderer for this kind)"]]
-     (into [:table {:class "mt-0.5 text-xs font-mono"}]
-           (map (fn [[k v]]
-                  [:tr
-                   [:td {:class "pr-3 align-top text-text-400 whitespace-nowrap"}
-                    (pr-str k)]
-                   [:td {:class "text-text-100 break-all"}
-                    (truncate-val v 160)]]))
-           rows)]))
-
-(defn- render-entity-hiccup
-  "Render `entity` to hiccup. Resolves the render symbol via
-   `seon.render/render-entity-html` (per-entity override OR entity-kind
-   schema property — Phase 1 pattern, commit d7e3185). Falls back to a
-   styled key/value card (`unknown-entity-card`) when html resolution
-   yields nil — never a raw pr-str/EDN dump."
-  [db agent-id entity]
-  (let [input {:seon.db/db db
-               :seon.agent/id agent-id
-               :seon.render/entity entity}]
-    (or
-      (try
-        (render/render-entity-html input)
-        (catch :default e
-          [:div {:class "text-error text-xs font-mono"}
-           "render error: " (or (.-message e) (str e))]))
-      (unknown-entity-card entity))))
-
-;; ============================================================
-;; Static-vs-dynamic card discriminator + summaries (unit #24 item 1)
-;; ============================================================
-
-(defn- entity-creation-origin
-  "The `:seon.db/origin` of the tx that FIRST asserted anything on
-   `eid` (the creation tx). nil when the entity has no datoms or the
-   tx carries no origin."
-  [db eid]
-  (when eid
-    (when-let [txs (seq (map (fn [^js d] (.-tx d)) (d/datoms db :eavt eid)))]
-      (:seon.db/origin (d/entity db (apply min txs))))))
-
-(defn- static-entity?
-  "STATIC = collapsed-by-default in the right pane. Discriminator:
-   - `:seon.schema` kind rows (`:seon.schema/key` present);
-   - `:seon.fn` / `:seon.ns` / `:seon.test` cards whose CREATION tx
-     carries `:seon.db/origin :core-seed` (the core index,
-     seeded at boot — agent-AUTHORED fns/nses/tests have `:agent`
-     origin and stay expanded).
-   Everything else (messages, evals, agent-authored entities) is
-   DYNAMIC and renders expanded."
-  [db entity]
-  (boolean
-    (or (:seon.schema/key entity)
-        ;; Identity attrs per the registered schemas: :seon.fn/sym +
-        ;; :seon.test/sym (strings), :seon.ns/name (keyword). The #24
-        ;; version checked :seon.fn/name, which is not a registered
-        ;; attr — the fn clause was dead code (masked because
-        ;; window :seon.fn cards are subsumed out of the window).
-        (and (or (:seon.fn/sym entity)
-                 (:seon.ns/name entity)
-                 (:seon.test/sym entity))
-             (= :core-seed
-                (entity-creation-origin db (:db/id entity)))))))
-
-(defn- entity-summary-name
-  "Short identifying name for a collapsed card's summary line."
-  [entity]
-  (or (some-> (:seon.schema/key entity) pr-str)
-      (some-> (:seon.fn/sym entity) str)
-      (some-> (:seon.ns/name entity) pr-str)
-      (some-> (:seon.test/sym entity) str)
-      ""))
-
-(defn- entity-gist
-  "One-line gist for a collapsed card's summary: first line of the
-   doc/content, truncated to 80 chars."
-  [entity]
-  (let [s    (or (:seon.fn/doc entity)
-                 (:seon.agent.message/content entity)
-                 "")
-        line (or (first (str/split-lines s)) "")]
-    (if (> (count line) 80) (str (subs line 0 80) "…") line)))
-
-;; ============================================================
-;; Turn grouping (unit #24 item 2) — derive each card's turn from the
-;; `:seon.agent.session/turns` → `:seon.agent.turn/messages|evals` component refs.
-;; ============================================================
-
-(defn- hh-mm-ss
-  [at]
-  (if (instance? js/Date at)
-    (let [pad #(if (< % 10) (str "0" %) (str %))]
-      (str (pad (.getHours at)) ":" (pad (.getMinutes at))
-           ":" (pad (.getSeconds at))))
-    ""))
-
-(defn- turn-info-by-child
-  "Map of child eid (message/eval) → `{::turn-n <int> ::turn-at <Date>}`.
-   Turn NUMBER is the 1-based index of the turn within its session's
-   turns sorted by `:seon.agent.turn/at` — same derivation as the agent's
-   `turn N` prompt line. Entities not hanging off any turn (schema
-   rows, core index) are absent from the map and keep their
-   tx-time position in the card list."
-  [db]
-  (let [turn-rows  (d/q '[:find ?s ?turn ?tat
-                          :where
-                          [?s :seon.agent.session/turns ?turn]
-                          [?turn :seon.agent.turn/at ?tat]]
-                        db)
-        turn->info (into {}
-                         (for [[_s rows] (group-by first turn-rows)
-                               :let [sorted (sort-by (fn [[_ _ ^js at]] (.getTime at))
-                                                     rows)]
-                               [i [_ turn at]] (map-indexed vector sorted)]
-                           [turn {::turn-n (inc i) ::turn-at at}]))
-        child-rows (d/q '[:find ?turn ?c
-                          :where
-                          (or [?turn :seon.agent.turn/messages ?c]
-                              [?turn :seon.agent.turn/evals ?c])]
-                        db)]
-    (into {}
-          (keep (fn [[turn c]]
-                  (when-let [info (get turn->info turn)]
-                    [c info])))
-          child-rows)))
 
 (defn- snapshot
   "Compute one render snapshot for `agent-id`:
@@ -295,43 +149,37 @@
       :section-texts [{:seon.ctx/name … :seon.render/text …} ...]
       :token-est <int>
       :char-count <int>
-      :html-cards [<card-map> ...]  ; one per visible entity, in render order
+      :html-cards [<card-map> ...]  ; one per SECTION html twin, in render order
       :agent <pulled entity or nil>}
-   Each card-map: `{::hiccup ::static? ::kind ::name ::gist ::card-key
-   ::turn-n ::turn-at}` (turn keys absent for non-turn entities)."
+   Each card-map: `{::hiccup ::kind ::card-key}` — the section's html
+   twin, its name, and a stable card-key for idiomorph (the right pane
+   mirrors the left's section set, debug-view-section-twins-2026-06-18)."
   [agent-id]
   (let [{:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id agent-id})
         ;; ONE composer for the left-pane text (`seon.agent/assemble-context`,
-        ;; the exact bytes the agent receives) + the entity list behind it —
-        ;; both via `inspect/ctx-preview`, so the webview can NEVER diverge
-        ;; from what the LLM sees.
-        {:seon.render/keys [text entities token-estimate section-texts]}
+        ;; the exact bytes the agent receives) + the SECTION HTML TWINS
+        ;; behind it (debug-view-section-twins-2026-06-18) — both via
+        ;; `inspect/ctx-preview`, so the right pane MIRRORS the left: same
+        ;; section set, two surfaces, structurally cannot diverge. The old
+        ;; per-entity last-64-by-tx-time window (flooded with the core's own
+        ;; :seon.test captures) is gone.
+        {:seon.render/keys [text token-estimate section-texts section-html]}
         (inspect/ctx-preview {:seon.agent/id agent-id})
-        turn-info (turn-info-by-child db)
-        cards (->> entities
-                   (keep (fn [e]
-                           (when-let [h (render-entity-hiccup db agent-id e)]
-                             (merge
-                               {::hiccup   h
-                                ::static?  (static-entity? db e)
-                                ::kind     (entity-kind-label e)
-                                ::name     (entity-summary-name e)
-                                ::gist     (entity-gist e)
-                                ::card-key (str "card-" (:db/id e))}
-                               (when-let [d (:seon.eval/duration-ms e)]
-                                 {::dur d})
-                               (get turn-info (:db/id e))))))
-                   vec)
-        ;; Per-turn elapsed = Σ eval duration-ms within the turn. Powers
-        ;; the turn-separator badge + the header activity sparkline.
-        turn-durs (->> cards
-                       (filter ::turn-n)
-                       (group-by ::turn-n)
-                       (sort-by key)
-                       (mapv (fn [[n cs]] [n (reduce + 0 (keep ::dur cs))])))
+        ;; Each section twin → one right-pane card, in render order. The
+        ;; card-key is the section name so idiomorph preserves the node
+        ;; across SSE morphs.
+        cards (->> section-html
+                   (mapv (fn [{nm :seon.ctx/name h :seon.render/hiccup}]
+                           {::hiccup   h
+                            ::kind     (str nm)
+                            ::card-key (str "section-" (clojure.core/name nm))})))
+        ;; Section twins are not per-turn, so no turn-separator sparkline
+        ;; from the right pane (the header sparkline derives from the
+        ;; transcript text twin instead — see below).
+        turn-durs []
         ;; The agent's OWN tile (unit 1.4) — rendered explicitly (the
-        ;; agent entity is not part of `visible-entities`). Wired
-        ;; `:seon.render.live-tile/content` wins; default is
+        ;; agent entity is not a context section, so it has no section
+        ;; twin). Wired `:seon.render.live-tile/content` wins; default is
         ;; `seon.render.live-tile/welcome`.
         tile  (:seon.render/hiccup
                 (render/render-agent-tile {:seon.db/db db
@@ -344,10 +192,11 @@
      :token-est  (or token-estimate 0)
      :html-cards cards
      :turn-durs  turn-durs
-     ;; render-cap overflow (seon.render/renderable-entities) — rides
-     ;; as metadata on the entities vector so the response schema is
-     ;; unchanged. Surfaced as the "older elided" note in the pane.
-     :elided    (or (:seon.render/elided (meta entities)) 0)
+     ;; No render-cap elision on the right pane anymore — the section
+     ;; twins ARE the prompt sections (the transcript twin self-bounds via
+     ;; the composer's transcript-char-budget). Kept at 0 so the pane's
+     ;; existing elided-note branch is a no-op.
+     :elided    0
      :agent-tile tile
      :agent      agent
      :handler-count
@@ -412,9 +261,21 @@
      (activity-sparkline turn-durs)
      [:span {:class "text-xs text-text-500 ml-auto"}
       (str "~" token-est " tokens · " char-count " chars")]
+     ;; Inside the consumer page's debug OVERLAY iframe these links must
+     ;; NOT navigate the iframe (that loads the target INSIDE the still-open
+     ;; overlay — the reported "← chat doesn't work" bug). Mirror the Esc
+     ;; handler's dual mode (`window.self!==window.top`): in-overlay, "chat"
+     ;; closes the overlay (revealing the consumer/chat view beneath) and
+     ;; "all agents" drives the TOP window; standalone tab → plain nav. The
+     ;; href stays as the standalone fallback + middle-click target.
      [:a {:href (str "/agent/" agent-id)
+          :onclick (str "if(window.self!==window.top){event.preventDefault();"
+                        "try{window.parent.postMessage('seon-debug-close','*');}"
+                        "catch(err){}}")
           :class "text-xs text-amber-500 hover:text-amber-300"} "← chat"]
      [:a {:href "/agents"
+          :onclick (str "if(window.self!==window.top){event.preventDefault();"
+                        "window.top.location='/agents';}")
           :class "text-xs text-amber-500 hover:text-amber-300"} "← all agents"]]))
 
 (def ^:private open-ai-sections
@@ -472,66 +333,20 @@
                         "whitespace-pre-wrap text-text-100 bg-base-950")}
       ai-text])])
 
-(defn- card-block
-  "Render one card-map. STATIC cards wrap in a `<details>` collapsed by
-   default — summary = kind + name + one-line gist. DYNAMIC cards
-   render expanded, visually weighted for chat-first reading:
-   - `seon.agent.message` → the conversation. Full-width, no machinery rail.
-   - `seon.eval`    → the machinery. Indented + dimmer border, so the
-     eye follows the dialogue and the evals read as the agent's 'work
-     shown' underneath it.
-   Every dynamic card carries a stable `:id` (`card-<eid>`) so
-   idiomorph PRESERVES existing nodes across SSE morphs and only
-   genuinely-new cards get the `.animate-appear` first-paint
-   fade/drift (`@starting-style` in input.css — no JS)."
-  [{::keys [hiccup static? kind name gist card-key]}]
-  (let [wrap-class (case kind
-                     "seon.eval"
-                     "border-l-2 border-base-700/80 pl-2 py-1 mb-1 ml-3 opacity-90"
-                     "seon.agent.message"
-                     "py-1 mb-1"
-                     "border-l-2 border-amber-700/40 pl-2 py-1 mb-1")]
-    (if static?
-      [:details {:class "border-l-2 border-amber-700/40 pl-2 py-1 mb-1"
-                 :data-seon-key card-key}
-       [:summary {:class (str "cursor-pointer select-none text-xs font-mono "
-                              "text-text-400 hover:text-text-200")}
-        [:span {:class "font-semibold text-text-300"} kind]
-        (when (seq name)
-          [:span {:class "text-amber-500/80"} (str " " name)])
-        (when (seq gist)
-          [:span {:class "text-text-500"} (str " — " gist)])]
-       [:div {:class "mt-0.5"} hiccup]]
-      [:div {:id card-key :class (str wrap-class " animate-appear")} hiccup])))
-
-(defn- turn-separator
-  [turn-n turn-at dur]
-  [:div {:class "flex items-center gap-2 my-1 text-xs font-mono text-text-500"}
-   [:span {:class "flex-1 border-t border-base-800"}]
-   [:span (str "turn " turn-n
-               (let [t (hh-mm-ss turn-at)]
-                 (when (seq t) (str " · " t)))
-               (when (and dur (pos? dur))
-                 (str " · " (fmt-ms dur))))]
-   [:span {:class "flex-1 border-t border-base-800"}]])
-
-(defn- cards-with-separators
-  "Interleave turn-separator rows into the chronological card list: a
-   separator renders before the first card of each turn (with the
-   turn's Σ eval time from `turn-durs`). Cards without a turn keep
-   their tx-time position and never break a turn group."
-  [cards turn-durs]
-  (let [dur-by-turn (into {} turn-durs)]
-    (loop [out [] last-turn nil cards cards]
-      (if-let [{::keys [turn-n turn-at] :as card} (first cards)]
-        (let [new-turn? (and (some? turn-n) (not= turn-n last-turn))]
-          (recur (cond-> out
-                   new-turn? (conj (turn-separator turn-n turn-at
-                                                   (get dur-by-turn turn-n)))
-                   true      (conj (card-block card)))
-                 (if new-turn? turn-n last-turn)
-                 (rest cards)))
-        out))))
+(defn- section-card
+  "Render one SECTION HTML TWIN (debug-view-section-twins-2026-06-18) as a
+   right-pane card: a section-name label + the section's hiccup. Stable
+   `:id` (`section-<name>`) so idiomorph PRESERVES the node across SSE
+   morphs and only genuinely-new sections animate in. The hiccup is the
+   section's `:seon.render/html` twin (or a banner if it threw — the
+   composer's guard never hands us nil)."
+  [{::keys [hiccup kind card-key]}]
+  [:div {:id card-key
+         :class (str "border-l-2 border-amber-700/40 pl-2 py-1 "
+                     "animate-appear")}
+   [:div {:class "text-xs font-mono font-semibold text-text-400 mb-0.5"}
+    kind]
+   [:div {:class "mt-0.5"} hiccup]])
 
 (defn- thinking-bubble
   "Placeholder bubble pinned under the newest card while the agent is
@@ -578,10 +393,10 @@
          (str "… " elided " older " (if (= 1 elided) "entity" "entities")
               " elided")])
       (if (seq html-cards)
-        (into [:div {:class "flex flex-col"}]
-              (cards-with-separators html-cards turn-durs))
+        (into [:div {:class "flex flex-col gap-2"}]
+              (map section-card html-cards))
         [:div {:class "text-text-500 italic p-2"}
-         "ask this agent something ↓ — every message, eval, fn and schema it touches will appear here live"])
+         "ask this agent something ↓ — every section the agent sees renders its html twin here live"])
       (when running?
         (thinking-bubble (default/agent-turn-count agent)))]]))
 

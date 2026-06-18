@@ -182,48 +182,21 @@
     (default/pretty-html input-map)))
 
 ;; ============================================================
-;; tx-log-as-context (PRD docs/prds/agent-runtime/tx-log-as-context-v1.md).
+;; Entity-kind resolution (the `:seon.schema`-driven renderer dispatch).
 ;;
-;; Renderable entities are simply entities carrying a `:seon.render/ai`
-;; symbol. We don't curate a separate `:seon.ctx/*` namespace — the
-;; producer of the entity (eval recorder, message writer, user-message
-;; transactor) attaches the symbol directly.
+;; Renderable entity KINDS are `:seon.schema` rows carrying both an
+;; id-attr and a `:seon.schema/render-fn`. `entity-primary-kind` picks
+;; the most-specific kind whose required-attrs are all present on an
+;; entity; `entity-render-slot` / `render-entity-html` / `render-entity-ai`
+;; resolve a render symbol from that kind (or a per-entity override).
 ;;
-;; Per-agent scoping uses tx-meta `:seon.db/agent-id`: the query reads
-;; the agent-id stamped on each entity's most-recent assertion. Without
-;; an agent-id stamp the entity is core-wide (always visible).
-;;
-;; The window is "last N renderable entities by tx-time" with N
-;; defaulting to 64 (agent override: `:seon.agent/window-size`).
-;; (The `:seon.sticky` prefix-pinning machinery was DELETED 2026-06-10
-;; with the sticky preamble — `my.kb.instruction` rows rendered by the
-;; agent's `:instructions` context section superseded it.)
-;;
-;; Token budget is a coarse char-count heuristic for v0 (4 chars ≈ 1
-;; token). Replace with a real tokenizer when measured.
+;; This machinery is shared by the test-capture-as-data rendering
+;; (`render-entity-html` etc.). The legacy per-entity inspector window
+;; (`visible-entities` / `renderable-entities`) that also rode on it was
+;; deleted when the debug right pane switched to section html twins
+;; (debug-view-section-twins-2026-06-18) — the right pane now mirrors the
+;; left's section set rather than a last-N-by-tx-time entity window.
 ;; ============================================================
-
-(schema/register! :seon.agent/window-size [:int {:min 1 :max 512}])
-
-(def ^:private default-window-size 64)
-
-(defn- entity-last-tx
-  "Return the latest tx eid that asserted any attr on `eid`. Used to
-   sort renderable entities oldest-first by their newest assertion."
-  [db eid]
-  (->> (d/datoms db :eavt eid)
-       (map (fn [^js d] (.-tx d)))
-       (reduce max 0)))
-
-(def ^:private render-cap
-  "Hard bound on entities materialized (pulled '[*] + kind-matched)
-   per render. The inspector window shows at most
-   `default-window-size` (64) anyway — pulling EVERY entity on the
-   file-backed store made one render take 12-30s (observed live
-   2026-06-09). The newest `render-cap` win; older are elided (count
-   reported via `:seon.render/elided` metadata on the entities
-   vector)."
-  100)
 
 (defn- renderable-kinds
   "Datalog-driven enumeration of every RENDERABLE entity-shape
@@ -235,14 +208,13 @@
    core state instead of walking the in-memory
    `seon.schema/*schemas` atom.
 
-   The render-fn clause is load-bearing, not cosmetic: rows WITHOUT a
-   renderer were already dropped post-pull (`:when ai-sym` in
-   [[visible-entities]]), but their id-attrs still fed the
-   [[renderable-entities]] `d/datoms` scan — and `d/datoms` THROWS
-   (\"Bad entity attribute … not defined in current schema\") for any
-   registered-but-never-transacted id-attr, e.g. the request/response
-   envelopes the registry's id-attr derivation over-matches (context-v3
-   unit 2; same gate as `seon.agent/schema-catalog-section`).
+   The render-fn clause is load-bearing, not cosmetic: a row WITHOUT a
+   renderer has no symbol for `entity-render-slot` to resolve, and its
+   id-attr could still be registered-but-never-transacted — `d/datoms`
+   THROWS (\"Bad entity attribute … not defined in current schema\") on
+   such an attr, e.g. the request/response envelopes the registry's
+   id-attr derivation over-matches (context-v3 unit 2; same gate as
+   `seon.agent/schema-catalog-section`).
 
    `:seon.schema/render-html-fn` stays optional — a side query merged
    in Clojure rather than datahike-cljs's `get-else` (avoids
@@ -323,101 +295,6 @@
           (->> full
                (sort-by (juxt (comp - second) (comp str first)))
                ffirst))))))
-
-(def ^:private subsumed-kinds
-  "Kinds never shown in the chronological window — subsumed by the
-   `:seon.eval` card that created them (visible-entities step 5)."
-  #{:seon.fn :seon.schema :seon.ns})
-
-(defn- renderable-entities
-  "Enumerate the renderable entities visible to `agent-id`, bounded.
-
-   Phases (cheap-first so the expensive pull runs on few entities):
-     1. Walk `(d/datoms db :aevt <id-attr>)` per kind → candidate eids
-        (remembering WHICH kind's id-attr discovered each eid).
-     2. Per-eid last-tx + per-TX visibility verdict (memoized — a seed
-        tx covers hundreds of entities): visible when the tx is
-        unstamped (core), stamped with THIS agent, or carries
-        `:seon.db/origin :core-seed` (the boot seed runs inside
-        the booting agent's `with-agent` scope, so seed tx arrive
-        stamped with ANOTHER agent's id — same clause as
-        `seon.agent-view/core-or-mine?`; without it agents that
-        didn't run the seed lose every schema card).
-     3. Bound: eids discovered ONLY via subsumed-kind id-attrs are
-        dropped (visible-entities drops them post-pull anyway); newest
-        `render-cap` of the rest by last-tx win, older are counted as
-        elided.
-     4. Pull '[*] + primary-kind + ai-sym ONLY for kept rows.
-
-   Returns `{:seon.render/rows [<row> …] :seon.render/elided <int>}`
-   where each row is
-     {:eid <entity-id> :last-tx <tx-eid> :agent-id <string-or-nil>
-      :entity <pulled-entity-map> :kind <kw> :render/ai <sym>}
-
-   Per-entity override: if the pulled entity carries its own
-   `:seon.render/ai`, that wins over the kind's default."
-  [db agent-id]
-  (let [{:keys [kinds kinds-by-kw]} (kind-tables db)
-        ;; Belt + suspenders to the renderable-kinds render-fn gate:
-        ;; `d/datoms` THROWS on an attr the conn has never installed
-        ;; (registered-but-never-transacted), so only id-attrs present
-        ;; in the INSTALLED schema may reach the :aevt scan. The kind
-        ;; is simply absent until its first transact installs the attr
-        ;; — fail-soft, no error swallowed.
-        installed   (db/installed-schema db)
-        kinds       (filter #(contains? installed (:id-attr %)) kinds)
-        ;; 1. eid → set of discovery kinds (an entity could carry
-        ;; id-attrs for multiple kinds — Phase 1c).
-        eid->kinds  (reduce (fn [m {:keys [kind id-attr]}]
-                              (reduce (fn [m ^js d]
-                                        (update m (.-e d) (fnil conj #{}) kind))
-                                      m
-                                      (d/datoms db :aevt id-attr)))
-                            {} kinds)
-        ;; 2. Per-tx meta memo — agent-id + origin judged once per tx.
-        !tx-meta    (atom {})
-        tx-meta     (fn [tx]
-                      (or (get @!tx-meta tx)
-                          (let [ent (d/entity db tx)
-                                m   {:tx-aid (:seon.db/agent-id ent)
-                                     :origin (:seon.db/origin ent)}]
-                            (swap! !tx-meta assoc tx m)
-                            m)))
-        candidates  (for [[eid disc-kinds] eid->kinds
-                          :let [tx (entity-last-tx db eid)
-                                {:keys [tx-aid origin]} (tx-meta tx)]
-                          :when (or (nil? tx-aid)
-                                    (= tx-aid agent-id)
-                                    (= :core-seed origin))]
-                      {:eid eid :last-tx tx :tx-aid tx-aid
-                       :disc-kinds disc-kinds})
-        ;; 3. Bound.
-        window-cand (remove #(every? subsumed-kinds (:disc-kinds %))
-                            candidates)
-        newest      (take render-cap (sort-by (comp - :last-tx) window-cand))
-        elided      (- (count window-cand) (count newest))
-        ;; 4. Materialize only the kept rows.
-        rows (for [{:keys [eid last-tx tx-aid]} newest
-                   :let [ent    (d/pull db '[*] eid)
-                         kind   (entity-primary-kind db ent)
-                         k-info (get kinds-by-kw kind)
-                         ai-sym (or (some->> (:seon.render/ai ent)
-                                             (db/decode-edn-value
-                                               :seon.render/ai))
-                                    (:ai k-info))]
-                   :when ai-sym]
-               {:eid       eid
-                :last-tx   last-tx
-                :agent-id  tx-aid
-                :entity    ent
-                :kind      kind
-                :render/ai ai-sym})]
-    {:seon.render/rows   (vec rows)
-     :seon.render/elided elided}))
-
-(defn- sort-window
-  [rows]
-  (sort-by :last-tx rows))
 
 (defn- entity-render-slot
   "Resolve the render value for `entity` on `surface` (`:html` or
@@ -581,48 +458,3 @@
           (str "[render error — " sym " threw: "
                (or (.-message e) (str e)) "]"))))))
 
-(schema/register! :seon.render/visible-request
-  [:map
-   [:seon.agent/id          :string]
-   [:seon.db/db             {:optional true} :any]
-   [:seon.agent/window-size {:optional true} :seon.agent/window-size]])
-
-(schema/register! :seon.render/visible-response
-  [:map [:seon.render/entities [:vector :any]]])
-
-(defn visible-entities
-  "The ordered set of program-graph / message / eval entities visible to
-   `agent-id`, in render order — the entities BEHIND the agent's context
-   (the inspector's right-pane html cards drill into these). This is the
-   tx-log entity-selection machinery; it does NOT produce the agent's
-   prompt text. Prompt text is `seon.agent/assemble-context` (the ONE
-   composer; the inspector left pane and the agent both call it).
-
-   1. Query all entities carrying `:seon.render/ai` visible to the agent
-      (core or own tx).
-   2. Sort by tx-time (oldest first).
-   3. Take last N where N = `:seon.agent/window-size` (default 64).
-   4. Subsumed kinds (:seon.fn/:seon.schema/:seon.ns) drop from the window
-      (shown inside their :seon.eval card instead).
-
-   Returns `{:seon.render/entities [<entity-map> ...]}` in render order."
-  {:malli/schema [:=> [:cat :seon.render/visible-request]
-                       :seon.render/visible-response]}
-  [{:seon.agent/keys [id window-size] :seon.db/keys [db]}]
-  (let [db    (or db @db/*conn*)
-        n     (or window-size default-window-size)
-        {:seon.render/keys [rows elided]} (renderable-entities db id)
-        ;; Subsumption rule (Phase 1c): entities whose primary kind is
-        ;; :seon.fn / :seon.schema / :seon.ns are NOT shown in the
-        ;; chronological window — they're subsumed by the :seon.eval
-        ;; that created them (the (defn …) / (schema/register! …) /
-        ;; (ns …) source is already shown in the eval card).
-        window        (remove #(contains? subsumed-kinds (:kind %)) rows)
-        window-sorted (->> (or window []) sort-window vec)
-        window-tail   (vec (take-last n window-sorted))
-        ents          (mapv :entity window-tail)]
-    ;; `:seon.render/elided` rides as metadata so the response schema
-    ;; (a plain entities vector consumed by the agent-context path and
-    ;; the inspector alike) is unchanged; the inspector surfaces it as
-    ;; an "older elided" note.
-    {:seon.render/entities (with-meta ents {:seon.render/elided elided})}))
