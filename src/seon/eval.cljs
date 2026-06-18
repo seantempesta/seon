@@ -554,6 +554,46 @@
             :else
             (throw e)))))))
 
+(defn ^:async ^:private ensure-analyzer-ns!
+  "Idempotently guarantee `ns-sym` has a COMPLETE `:cljs.analyzer/namespaces`
+   entry in `compile-state` before a `def`/`defn` is evaluated into it.
+
+   Why this exists (root-caused + LIVE-PROVEN 2026-06-17): under
+   `:def-emits-var true`, `cljs.analyzer`'s `parse 'def` builds a
+   `:the-var` AST node via `var-ast`, which `(when-some [var-ns (:ns var)]
+   …)` — and `var-ast` returns nil when `resolve-var` yields a var with
+   `:ns nil`. That happens for ANY `def` whose TARGET ns has no
+   `::namespaces` entry: `get-namespace` (analyzer.cljc:592) returns the
+   entry, OR a minimal `{:name 'cljs.user}` for `cljs.user` ONLY, else
+   nil. A nil current-ns ⇒ `:ns nil` ⇒ `var-ast` nil ⇒ the emitted
+   `:the-var` node lacks `:sym`/`:meta` ⇒ `emit* :the-var`'s
+   `{:pre [(ana/ast? sym) (ana/ast? meta)]}` throws
+   `Assert failed: (ana/ast? sym)`. So `cljs.user` never fails but an
+   arbitrary `(ns my.new.thing)` / `(in-ns 'foo)` target that was never
+   set up does — intermittently looking like a compiler bug.
+
+   The robust, fork-free fix is to PRIME the entry the canonical way: a
+   real `(ns <ns-sym>)` eval runs the analyzer's `ns-side-effects`, which
+   builds the full entry. Idempotent: re-eval of `(ns x)` is
+   non-destructive of x's own defs (code-as-data doctrine), and we
+   no-op entirely when a complete entry already exists. A minimal hand-
+   rolled `::namespaces` map is NOT sufficient (missing internal keys —
+   PROVEN), so we go through the real path. `cljs.user` and any ns with a
+   `:name`-bearing entry are skipped. Best-effort: a prime failure is
+   swallowed (the subsequent eval surfaces the real error)."
+  [compile-state ns-sym]
+  (let [entry (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])]
+    (when-not (or (= 'cljs.user ns-sym)
+                  (and entry (:name entry)))
+      (await
+        (js/Promise.
+          (fn [resolve _reject]
+            (try
+              (cljs/eval-str compile-state (str "(ns " ns-sym ")") nil
+                {:eval cljs/js-eval :ns 'cljs.user :context :statement}
+                (fn [_] (resolve nil)))
+              (catch :default _ (resolve nil)))))))))
+
 (defn ^:async ^:private raw-eval
   "Internal — returns a Promise that resolves with {:value v :ns ns}
    or rejects with the error. The public `eval` catches both.
@@ -579,6 +619,9 @@
    strategy in `truly-undeclared?` (which suppresses
    `:macro-present? true`) is promoted to a `:compile`-kind error."
   [compile-state form-str ns-sym analyze-deps?]
+  ;; Prime the target ns's analyzer entry FIRST (idempotent) so a `def`
+  ;; into a never-set-up ns can't trip `var-ast`→nil→`(ana/ast? sym)`.
+  (await (ensure-analyzer-ns! compile-state ns-sym))
   (let [warnings (atom [])]
     (js/Promise.
       (fn [resolve reject]
