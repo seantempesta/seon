@@ -60,9 +60,28 @@ A short list of the people I'm explicitly indebted to. The longer list — Engel
 
 ## Quickstart
 
-Run the core, talk to an agent, watch it work. Requirements:
-Node 20+, Clojure CLI, a [DeepSeek](https://platform.deepseek.com)
-API key (the one required secret — other models later).
+### Requirements
+
+| Tool | Version | Why |
+|------|---------|-----|
+| **Java (JDK)** | **22+** | The wire-server (datahike writer) runs on the JVM; its Proximum vector index ships class-file 66.0 and uses the Foreign Memory API, both Java 22+ only. `bin/seon` auto-selects a 22+ JDK (macOS via `java_home`; Linux/WSL via `/usr/lib/jvm`, SDKMAN, or PATH) — or set `JAVA_HOME` yourself. |
+| **Clojure CLI** | 1.12+ | Builds the CLJS pod and runs the wire-server. |
+| **Babashka** (`bb`) | 1.x | Dev hooks, MCP servers, and datahike's build tasks. |
+| **Node.js** + npm | 22+ (24 recommended) | The agent pod is a long-running Node process. |
+| **Git** | 2.x | Resolves the datahike fork by `:git/sha`. |
+| **An LLM API key** | — | The one required secret — e.g. `DEEPSEEK_API_KEY` (other providers configurable). |
+
+Optional: **Caddy** 2.x (HTTPS reverse proxy), and the JVM dev seat
+(`bin/run`, nREPL 7888 — for development/orchestration, not needed to run
+agents). Platform: **macOS, Linux, and Windows via WSL** — the stack is all
+cross-platform (JVM, Node, Clojure, Babashka) and `bin/seon` selects a 22+
+JDK on each. The `reference-code/*` git submodules are vendored dependency
+source for reading when stuck — not needed to run, so a plain `git clone` is
+fine.
+
+### Run it
+
+Run the core, talk to an agent, watch it work:
 
 ```bash
 git clone https://github.com/seantempesta/seon && cd seon
