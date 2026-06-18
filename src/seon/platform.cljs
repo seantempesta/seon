@@ -82,3 +82,13 @@
   (if-let [root (runtime-root)]
     (str root "/" rel)
     rel))
+
+(defn env-val
+  "The `process.env` value for `var-name`, or nil when unset/blank (or
+   when there is no Node process env at all). The ONE env reader —
+   several namespaces (seon.ai, seon.debug, …) had private copies of
+   this exact body; per the shared-shape rule it lives here once."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [var-name]
+  (let [v (some-> (.. js/globalThis -process) (.-env) (aget var-name))]
+    (when (and (string? v) (not= "" (.trim v))) v)))

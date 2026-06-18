@@ -79,6 +79,7 @@
     [seon.client :as client]
     [seon.ctx :as ctx]
     [seon.db :as db]
+    [seon.debug :as debug]
     ;; World-parity (2026-06-10 deep audit): the :test build has no
     ;; :devtools preload slot, so without this require
     ;; `client/!indexed-test-vars` stays [] and `client/index-tests`
@@ -152,9 +153,10 @@
 ;;   = "the seeded reuse surface is actually visible".
 ;; :prompt-includes / :prompt-excludes / :prompt-every-turn — the
 ;;   referee's EYES (gym-upgrade PRD §2.1 / U1): assert against what
-;;   the agent ACTUALLY SAW. run-turn! persists every full prompt to
-;;   logs/prompts/<agent-id>/<turn-id>.txt (the turn datom carries
-;;   :seon.agent.turn/prompt-file); the driver collects the run's turns
+;;   the agent ACTUALLY SAW. run-turn! persists every full prompt (via
+;;   seon.debug capture, forced ON for gym runs) to
+;;   <debug-dir>/<agent-id>/<turn-idx>-<turn-id>/prompt.txt (the turn
+;;   datom carries :seon.agent.turn/prompt-file); the driver collects the run's turns
 ;;   from the post-run store and reads those blobs. :prompt-includes =
 ;;   SOME turn's prompt contains :text; :prompt-excludes = NO turn's
 ;;   prompt contains :text; :prompt-every-turn = EVERY turn's prompt
@@ -590,8 +592,9 @@
   "Evaluate one prompt-blob predicate (:prompt-includes /
    :prompt-excludes / :prompt-every-turn — gym-upgrade PRD §2.1/U1)
    against the prompts the agent ACTUALLY SAW: the blobs run-turn!
-   persisted to logs/prompts/<agent-id>/<turn-id>.txt, located via the
-   post-run store's :seon.agent.turn/prompt-file datoms. Returns
+   persisted (via seon.debug capture, forced ON for gym runs) to
+   <debug-dir>/<agent-id>/<turn-idx>-<turn-id>/prompt.txt, located via
+   the post-run store's :seon.agent.turn/prompt-file datoms. Returns
    [pass? actual]. Every blind spot is RED, never a silent pass: zero
    turns, an out-of-range :turn index, a turn with no prompt-file
    datom, an unreadable blob — each named in the actual.
@@ -619,7 +622,8 @@
                               :missing (str "turn " tid " has NO "
                                             ":seon.agent.turn/prompt-file — "
                                             "blob never written (expected "
-                                            "under logs/prompts/)")}
+                                            "under the debug-capture dir, "
+                                            "default logs/turns/)")}
                              (let [[status payload] (read-prompt-blob path)]
                                (if (= :ok status)
                                  {:tid tid :path path :text payload}
@@ -1238,6 +1242,13 @@
       (let [prev-conn    db/*conn*
             prev-fs      @sfs/!config
             keys-before  (schema/current-keys)]
+        ;; The gym's prompt-blob evidence (§6.6) IS debug capture — it
+        ;; reads back the verbatim prompt the agent saw. run-turn!'s
+        ;; capture is OFF by default (live pods don't want the disk
+        ;; growth), so the gym forces it ON for the run and restores the
+        ;; prior knob in `finally`. Without this the prompt-* predicates
+        ;; would silently lose their eyes (a turn with no prompt-file).
+        (debug/set-override! :on)
         (try
           (let [conn          (await (client/open-agent-conn!))
                 _             (set! db/*conn* conn)
@@ -1380,12 +1391,13 @@
                                  (pr-str (m/explain :seon.gym/scorecard card))})))
               card))
           (finally
-            ;; Restore the root conn + fs capability config + drop every
-            ;; schema key minted during the run (scenario registrations AND
-            ;; agent-eval register!s) so one scenario can't leak into the
-            ;; next (or into non-gym tests sharing the process).
+            ;; Restore the root conn + fs capability config + debug-capture
+            ;; knob + drop every schema key minted during the run (scenario
+            ;; registrations AND agent-eval register!s) so one scenario can't
+            ;; leak into the next (or into non-gym tests sharing the process).
             (set! db/*conn* prev-conn)
             (reset! sfs/!config prev-fs)
+            (debug/set-override! :env)
             (let [minted (remove keys-before (schema/current-keys))]
               (when (seq minted)
                 (swap! schema/*schemas #(apply dissoc % minted))))))))))

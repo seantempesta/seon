@@ -344,7 +344,8 @@
 
 ;; ---------------------------------------------------------------------------
 ;; PROMPT-BLOB PREDICATES (gym-upgrade PRD §2.1 / U1) — the referee's
-;; eyes. run-turn! persists every prompt to logs/prompts/<agent>/<turn>.txt;
+;; eyes. run-turn! persists every prompt (via seon.debug capture, forced
+;; ON for gym runs) to <debug-dir>/<agent>/<turn-idx>-<turn>/prompt.txt;
 ;; the new kinds read those blobs from the post-run store. Falsification
 ;; (per the PRD): the question text passes :prompt-every-turn; text NOT
 ;; in any prompt fails :prompt-includes WITH the blob path in the
@@ -412,7 +413,7 @@
                    (is (false? (:seon.gym.result/pass? r))
                        "text not in any prompt fails :prompt-includes")
                    (is (str/includes? (:seon.gym.result/actual r)
-                                      "logs/prompts/")
+                                      "logs/turns/")
                        (str "the failing actual names the blob path — "
                             (:seon.gym.result/actual r))))
                  ;; :prompt-excludes is the same observation, inverted.
@@ -432,7 +433,7 @@
                  ;; §6.6 evidence: the card carries the run's blob paths.
                  (let [pfs (:seon.gym.scorecard/prompt-files card)]
                    (is (seq pfs) "scorecard carries prompt-file evidence")
-                   (is (every? #(str/starts-with? % "logs/prompts/") pfs)))
+                   (is (every? #(str/starts-with? % "logs/turns/") pfs)))
                  (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

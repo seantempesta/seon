@@ -100,6 +100,7 @@
     [seon.agent.message :as msg]
     [seon.ctx :as ctx]
     [seon.db :as db]
+    [seon.debug :as debug]
     [seon.eval :as seval]
     [seon.log :as seon-log]
     [seon.render :as render]
@@ -265,6 +266,12 @@
 (schema/register! :seon.agent.turn/prompt-text  :string)
 (schema/register! :seon.agent.turn/prompt-chars :int)
 (schema/register! :seon.agent.turn/prompt-file  :string)
+;; In-memory plumbing key only (like :seon.agent.turn/prompt-text): the
+;; monotonic per-agent turn index, threaded run-turn! → ask-and-eval! →
+;; ask-and-eval-reply! so debug capture keys prompt + response into the
+;; SAME per-turn dir. Never reaches the DB (the turn-idx is derivable
+;; from session turns; storing would let it desync).
+(schema/register! :seon.agent.turn/turn-idx     :int)
 ;; Honest record of the bounded LLM retry (agent-robustness unit,
 ;; 2026-06-11): when the provider call failed TRANSPORT-shaped
 ;; (`:seon.ai/transport?` — fetch threw before any HTTP status) the
@@ -306,6 +313,7 @@
    [:seon.agent.turn/prompt-text  {:optional true} :seon.agent.turn/prompt-text]
    [:seon.agent.turn/prompt-chars {:optional true} :seon.agent.turn/prompt-chars]
    [:seon.agent.turn/prompt-file  {:optional true} :seon.agent.turn/prompt-file]
+   [:seon.agent.turn/debug-dir    {:optional true} :seon.agent.turn/debug-dir]
    [:seon.agent.turn/llm-retries  {:optional true} :seon.agent.turn/llm-retries]
    [:seon.agent.turn/llm-usage    {:optional true} :seon.agent.turn/llm-usage]
    [:seon.agent.turn/llm-meta     {:optional true} :seon.agent.turn/llm-meta]
@@ -975,7 +983,8 @@
                                                    :seon.agent.turn/status
                                                    :seon.agent.turn/llm-retries
                                                    :seon.agent.turn/llm-usage
-                                                   :seon.agent.turn/llm-meta]))
+                                                   :seon.agent.turn/llm-meta
+                                                   :seon.agent.turn/debug-dir]))
                        {:seon.agent/id id :seon.agent/state :idle}]}))]
       ;; A4: db/transact! returns an envelope, never throws. If the
       ;; combined close-tx FAILED (e.g. a folded telemetry attr won't
@@ -1006,9 +1015,20 @@
 
 (defn ^:async ^:private ask-and-eval-reply!
   "Internal — the successful-LLM-reply half of `ask-and-eval!`: parse
-   the reply, eval-batch the forms, fold the assistant self-message."
-  [resp id id-of-turn compile-state]
+   the reply, eval-batch the forms, fold the assistant self-message.
+
+   `id` / `turn-idx` / `id-of-turn` are LOCALS threaded down from
+   `run-turn!` (captured before the LLM await — NOT re-read from
+   AsyncLocalStorage post-await), so debug capture pairs this verbatim
+   reply with the same turn's prompt by construction. When capture is
+   ON, the returned map carries `:seon.agent.turn/debug-dir` (pointer)."
+  [resp id id-of-turn turn-idx compile-state]
   (let [reply-text (or (:text resp) "")
+        ;; Verbatim raw reply capture — response.txt (even when blank,
+        ;; closing the blank-output gap) + response.edn (the resp map,
+        ;; round-trips into a fixture). No-op + nil when capture is off.
+        debug-dir  (debug/capture-response! id turn-idx id-of-turn
+                                            reply-text resp)
         parsed     (repl/parse-forms reply-text)
         batch      (await (seval/eval-batch! compile-state parsed
                                              (home-ns id) id id-of-turn))]
@@ -1024,6 +1044,9 @@
       ;; the error; turns-cap still bounds a stuck agent.
       {:seon.agent/eval-count (+ (:seon.eval/n-ok batch)
                                  (:seon.eval/n-fail batch))}
+      ;; Debug capture pointer (projection only; the blob lives under
+      ;; the captured dir). Present ONLY when capture wrote — absent off.
+      debug-dir (assoc :seon.agent.turn/debug-dir debug-dir)
       ;; The turn-log record of the raw LLM output: a fully-formed
       ;; self→self message (from = to = this agent — appears in the
       ;; agent's own derived conversation, wakes nothing since the
@@ -1090,7 +1113,7 @@
    the conversation — derived from this turn record, nothing extra
    stored)."
   [{:seon.agent/keys [id llm-fn compile-state]
-    :seon.agent.turn/keys  [id-of-turn prompt-text]}]
+    :seon.agent.turn/keys  [id-of-turn turn-idx prompt-text]}]
   (let [resp    (await (call-llm! id id-of-turn llm-fn prompt-text))
         retries (:seon.agent.turn/llm-retries resp)
         ;; #25 tier-2: the provider's structured usage + unrecognized
@@ -1115,32 +1138,12 @@
            :seon.agent.message/at      (js/Date.)
            :seon.agent.message/hops    0}]}
         retries (assoc :seon.agent.turn/llm-retries retries))
-      (cond-> (await (ask-and-eval-reply! resp id id-of-turn compile-state))
+      (cond-> (await (ask-and-eval-reply! resp id id-of-turn turn-idx compile-state))
         retries     (assoc :seon.agent.turn/llm-retries retries)
         ;; EDN-stringified (mirrors llm-meta) — :map is unbridgeable, see
         ;; the :seon.agent.turn/llm-usage register! note above.
         (seq usage) (assoc :seon.agent.turn/llm-usage (pr-str usage))
         (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))))
-
-(defn- persist-prompt!
-  "Write the turn's full assembled prompt to
-   `logs/prompts/<agent-id>/<turn-id>.txt` (gitignored — `logs/` blob
-   tier; the DB datom is only the char-count projection +  this path).
-   Returns the relative path string, or nil on write failure (logged,
-   never throws — losing the prompt blob must not abort the turn)."
-  [agent-id turn-id text]
-  (try
-    (let [fs   (js/require "node:fs")
-          dir  (str "logs/prompts/" agent-id)
-          path (str dir "/" turn-id ".txt")]
-      (.mkdirSync fs dir #js {:recursive true})
-      (.writeFileSync fs path (str text) "utf8")
-      path)
-    (catch :default e
-      (js/console.warn
-        (str "seon.agent/persist-prompt!: could not write prompt blob for "
-             agent-id "/" turn-id " — " (or (.-message e) e)))
-      nil)))
 
 (defn ^:async run-turn!
   "v1.md §6.1 — one full turn end-to-end. Map-in / map-out.
@@ -1166,9 +1169,14 @@
         turn-id    (db/new-id!)
         turn-idx   (turn-index session-id)
         prompt     (render-prompt id)
-        ;; Blob tier — full prompt to disk; the turn datom carries only
-        ;; chars + this pointer (see :seon.agent.turn/prompt-chars note above).
-        prompt-file (persist-prompt! id turn-id prompt)]
+        ;; Blob tier — full prompt to disk, GATED behind the debug-capture
+        ;; flag (seon.debug). OFF by default (stops the unbounded
+        ;; logs/prompts growth); when ON, prompt.txt lands in the unified
+        ;; per-turn dir <SEON_DEBUG_CAPTURE_DIR>/<id>/<turn-idx>-<turn-id>/.
+        ;; The turn datom still carries chars + the pointer (prompt-file →
+        ;; the captured path) WHEN capturing — absent when off (gym opts
+        ;; in via debug/set-override! so its prompt-blob evidence survives).
+        prompt-file (debug/capture-prompt! id turn-idx turn-id prompt)]
     (log id turn-idx "open" turn-id "+" (count prompt) "ctx-chars")
     (try
       (let [result (await
@@ -1199,6 +1207,7 @@
                                                 :seon.agent/llm-fn        llm-fn
                                                 :seon.agent/compile-state compile-state
                                                 :seon.agent.turn/id-of-turn     turn-id
+                                                :seon.agent.turn/turn-idx       turn-idx
                                                 :seon.agent.turn/prompt-text    prompt})))))))
             n-ok (or (:seon.agent/eval-count result) 0)]
         (log id turn-idx (name (or (:seon.agent.turn/status result) :done)) n-ok
