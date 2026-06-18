@@ -1,0 +1,189 @@
+(ns seon.eval.result-var-test
+  "`result/<id>` vars (transcript-redesign-2026-06-18). Each SUCCESSFUL
+   eval auto-binds its value as the plain var `result/<id>` — the agent
+   references `result/auC-2606181147` directly, no `(result …)` call.
+
+   Pins the mechanisms:
+
+   - a recent eval's value resolves as `result/<id>` with NO
+     undeclared-var error (analyzer def + globalThis slot);
+   - an unknown / pruned `result/<id>` is a GRACEFUL MISS value, never a
+     raw `:undeclared-var` error (errors-are-values);
+   - the session cap prunes the OLDEST `result/*` past `result-vars-cap`,
+     keeping recent ones live;
+   - a FAILED eval binds NO `result/<id>` (no value to retrieve);
+   - the compat `(result …)` FN and the `result/<id>` VAR COEXIST in the
+     same ns (a `result` def would otherwise shadow the `result` ns —
+     `ensure-result-ns-alias!` forces top-level resolution).
+
+   Run via `bin/test-cljs`, or interactively:
+     (require 'seon.eval.result-var-test :reload)
+     (cljs.test/run-tests 'seon.eval.result-var-test)"
+  (:require
+    [cljs.test :refer [deftest is testing async]]
+    [clojure.string :as str]
+    [seon.agent :as agent]
+    [seon.client :as client]
+    [seon.db :as db]
+    [seon.eval :as seval]
+    [seon.repl :as repl]
+    [seon.repl.internal :as repl-int]))
+
+(def ^:private cap
+  "Mirror of `seon.eval/result-vars-cap` (private const) for the cap test."
+  (deref #'seval/result-vars-cap))
+
+(defn- value
+  "Read `result/<id>` in `ns-sym` on `cs`; returns the eval result map."
+  [cs ns-sym id]
+  (seval/eval cs (str "result/" id) {:ns ns-sym :analyze-deps? false}))
+
+(defn- run-batch
+  "Run `source` (one form) through eval-batch! in a fresh agent ns.
+   Returns a Promise of `#js {:cs … :hns … :result <eval-batch! map>}`."
+  [aid source]
+  (let [hns (agent/home-ns aid)
+        tid (db/new-id!)]
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then (fn [pair]
+                 (let [cs   (aget pair 0)
+                       conn (aget pair 1)]
+                   (-> (seval/setup-agent-ns! cs hns aid)
+                       (.then (fn [_]
+                                (binding [db/*conn* conn]
+                                  (seval/eval-batch!
+                                    cs (repl-int/parse-forms source) hns aid tid))))
+                       (.then (fn [r] #js {:cs cs :hns hns :result r})))))))))
+
+;; ---------------------------------------------------------------------------
+;; result-var-ref? — the bare-symbol predicate that drives :expr context +
+;; graceful-miss recognition. Pure, no compile-state needed.
+;; ---------------------------------------------------------------------------
+
+(deftest result-var-ref?-recognises-only-bare-result-symbols
+  (is (true?  (seval/result-var-ref? "result/auC-2606181147")))
+  (is (true?  (seval/result-var-ref? "  result/foe-2606181326  "))
+      "leading/trailing whitespace is trimmed")
+  (is (false? (seval/result-var-ref? "(result :auC-2606181147)"))
+      "the compat FN CALL is not a var ref")
+  (is (false? (seval/result-var-ref? "(+ 1 2)")))
+  (is (false? (seval/result-var-ref? "my.kb/something"))
+      "a different ns is not a result ref")
+  (is (false? (seval/result-var-ref? "result/a result/b"))
+      "two forms is not a single bare ref"))
+
+;; ---------------------------------------------------------------------------
+;; A recent eval's value resolves as result/<id> — no undeclared warning.
+;; ---------------------------------------------------------------------------
+
+(deftest recent-eval-value-resolves-as-result-var
+  (async done
+    (-> (run-batch "rv1-260618t" "(+ 40 2)")
+        (.then (fn [o]
+                 (let [cs (.-cs o) hns (.-hns o) r (.-result o)]
+                   (is (= 1 (:seon.eval/n-ok r)) "the eval succeeded")
+                   (-> (value cs hns (first (:seon.eval/ids r)))
+                       (.then (fn [r2]
+                                (is (:ok r2)
+                                    "result/<id> resolves — no undeclared-var error")
+                                (is (= 42 (:value r2))
+                                    "the value var reads the eval's value")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Unknown / pruned result/<id> → graceful miss VALUE, not a raw error.
+;; ---------------------------------------------------------------------------
+
+(deftest unknown-result-id-is-a-graceful-miss
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then (fn [cs]
+                 (-> (seval/eval cs "(ns probe.resultmiss)" {:ns 'cljs.user :analyze-deps? true})
+                     (.then (fn [_] (value cs 'probe.resultmiss "zzz-9999999999")))
+                     (.then (fn [r]
+                              (is (:ok r) "a miss is a VALUE, not a failed error")
+                              (is (string? (:value r)) "the miss value is the guidance string")
+                              (is (str/includes? (:value r) "isn't live")
+                                  "names the not-live condition")
+                              (is (str/includes? (:value r) "re-run its form")
+                                  "tells the agent the next action"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Session cap — bind cap+N synthetic ids; oldest pruned, recent live.
+;; ---------------------------------------------------------------------------
+
+(deftest cap-prunes-oldest-keeps-recent
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then (fn [cs]
+                 (-> (seval/eval cs "(ns probe.resultcap)" {:ns 'cljs.user :analyze-deps? true})
+                     (.then (fn [_]
+                              (reset! (deref #'seval/!result-var-ids) [])
+                              (let [n   (+ cap 5)
+                                    ids (mapv #(str "cz" (mod % 26) "-99999999" (+ 10 %)) (range n))]
+                                (doseq [[i id] (map-indexed vector ids)]
+                                  (seval/bind-result-var! cs id (* 100 i)))
+                                (is (= cap (count (deref (deref #'seval/!result-var-ids))))
+                                    "registry capped at result-vars-cap")
+                                (-> (js/Promise.all
+                                      #js [(value cs 'probe.resultcap (first ids))
+                                           (value cs 'probe.resultcap (nth ids 5))
+                                           (value cs 'probe.resultcap (last ids))])
+                                    (.then (fn [rs]
+                                             (testing "oldest pruned → graceful miss"
+                                               (is (:ok (aget rs 0)))
+                                               (is (string? (:value (aget rs 0))))
+                                               (is (str/includes? (:value (aget rs 0)) "isn't live")))
+                                             (testing "first survivor still resolves"
+                                               (is (= 500 (:value (aget rs 1)))))
+                                             (testing "newest resolves"
+                                               (is (= (* 100 (dec n)) (:value (aget rs 2))))))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Failed eval binds NO result/<id> — its id is a graceful miss.
+;; ---------------------------------------------------------------------------
+
+(deftest failed-eval-binds-no-result-var
+  (async done
+    (-> (run-batch "rv2-260618t" "(this-var-does-not-exist 1 2)")
+        (.then (fn [o]
+                 (let [cs (.-cs o) hns (.-hns o) r (.-result o)]
+                   (is (= 1 (:seon.eval/n-fail r)) "the eval failed")
+                   (-> (value cs hns (first (:seon.eval/ids r)))
+                       (.then (fn [r2]
+                                (is (:ok r2) "the read itself is a value")
+                                (is (string? (:value r2))
+                                    "a failed eval's id is a graceful miss — no value bound")
+                                (is (str/includes? (:value r2) "isn't live"))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Coexistence — the compat `(result …)` FN and the `result/<id>` VAR both
+;; work in the SAME ns (the `result` def must not shadow the `result` ns).
+;; ---------------------------------------------------------------------------
+
+(deftest compat-result-fn-and-result-var-coexist
+  (async done
+    (-> (run-batch "rv3-260618t" "(* 6 7)")
+        (.then (fn [o]
+                 (let [cs (.-cs o) hns (.-hns o)
+                       id (first (:seon.eval/ids (.-result o)))]
+                   (-> (js/Promise.all
+                         #js [(seval/eval cs (str "(result :" id ")")
+                                          {:ns hns :analyze-deps? false})
+                              (value cs hns id)])
+                       (.then (fn [rs]
+                                (testing "compat (result :id) FN still resolves"
+                                  (is (:ok (aget rs 0)))
+                                  (is (= 42 (:value (aget rs 0)))))
+                                (testing "result/<id> VAR resolves in the SAME ns"
+                                  (is (:ok (aget rs 1)))
+                                  (is (= 42 (:value (aget rs 1)))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

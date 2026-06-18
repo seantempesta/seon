@@ -596,6 +596,115 @@
                 (fn [_] (resolve nil)))
               (catch :default _ (resolve nil)))))))))
 
+;; ============================================================
+;; `result/<id>` vars (transcript-redesign-2026-06-18). Each
+;; SUCCESSFUL eval auto-binds its value as a PLAIN VAR `result/<id>`
+;; (the id shown after its `=>` in the transcript). The agent writes
+;; `result/auC-2606181147` directly — no `(result …)` call, no quotes.
+;;
+;; Two registrations make a bare `result/<id>` resolve with ZERO
+;; `:undeclared-var` warning — the SAME def-into-a-ns mechanism cljs.js
+;; uses for an agent's own `(defn …)`:
+;;
+;;   1. Runtime value: `globalThis.result.<munged-id>` = V, where
+;;      `<munged-id>` = `(cljs.core/munge <id>)` (hyphen→underscore,
+;;      matching how `lookup-value`/shadow emit JS names). `lookup-value`
+;;      and the analyzer's emitted `result.<munged-id>` read the same
+;;      slot.
+;;   2. Analyzer def: an entry at
+;;      `[:cljs.analyzer/namespaces 'result :defs <id-sym>]` (plus the
+;;      `result` ns's own `:name`) so `:def-emits-var`'s `var-ast`
+;;      resolves the ref and the analyzer never warns.
+;;
+;; The `result` ns is RESERVED (no real code namespace is named
+;; `result`; live-checked: `globalThis.result` is absent at boot). The
+;; agent's compat `(result …)` FN (set up by `setup-agent-ns!` as
+;; `<agent-ns>/result`) COEXISTS with the `result/` ns, but NOT for
+;; free: a `result` DEF in the home ns shadows the `result` NAMESPACE,
+;; so the analyzer resolves `result/<id>` as nested-property access on
+;; that var (LIVE-PROVEN 2026-06-18). `ensure-result-ns-alias!` registers
+;; `result` as a require-alias of the reading ns, forcing the correct
+;; top-level resolution. So both surfaces work.
+;;
+;; Session cap: keep the last `result-vars-cap` ids; prune older ones
+;; (undef from BOTH globalThis and the analyzer) so memory stays
+;; bounded. Resets on process restart — like the globalThis stash, the
+;; vars do not survive a new process. A reference to a pruned /
+;; prior-session id is a GRACEFUL MISS (see the `result/*` special-case
+;; in `raw-eval`), never a raw undeclared error.
+;;
+;; Constants + the reference predicate + the graceful-miss message
+;; live HERE (above `raw-eval`, which consumes them); the binding fns
+;; (`bind-result-var!`) live below, next to the eval pipeline.
+;; ============================================================
+
+(def result-ns-sym
+  "The reserved namespace that holds the `result/<id>` value vars."
+  'result)
+
+(def ^:private result-vars-cap
+  "Max live `result/<id>` vars kept per session. Older ids are pruned
+   (undef'd from globalThis + the analyzer) to bound memory."
+  200)
+
+;; Insertion-ordered vector of bound result ids (oldest first). Process-
+;; shared, defonce'd so it survives hot-reload of `seon.eval`.
+(defonce ^:private !result-var-ids (atom []))
+
+(defn result-var-ref?
+  "TRUE when `form-str` is a single bare `result/<id>` symbol reference —
+   the agent reading a prior eval's value var. Used to (a) eval such a
+   form in `:expr` context (a bare top-level var read emits NOTHING in
+   the default `:statement` context — see the file's REPL-semantics
+   gotcha), and (b) recognise the graceful-miss target. NOT a call, NOT
+   a multi-form string: exactly one symbol whose namespace is `result`."
+  {:malli/schema [:=> [:catn [::form-str :string]] :boolean]}
+  [form-str]
+  (let [s (str/trim (str form-str))]
+    (and (seq s)
+         (boolean
+           (try
+             (let [rdr  (reader-types/string-push-back-reader s)
+                   sym  (tools-reader/read {:eof ::eof :read-cond :allow} rdr)
+                   nxt  (tools-reader/read {:eof ::eof :read-cond :allow} rdr)]
+               ;; EXACTLY one form, a `result/<id>` symbol, nothing after.
+               ;; `=` (not `identical?`): the reader reconstructs the eof
+               ;; marker, so a value `=` to ::eof is the EOF, matching the
+               ;; `defn-form?`/`form-count` convention in this file.
+               (and (symbol? sym)
+                    (= "result" (namespace sym))
+                    (= ::eof nxt)))
+             (catch :default _ false))))))
+
+(defn result-miss-message
+  "The graceful-miss VALUE for a `result/<id>` reference whose var is no
+   longer live (pruned past the session cap, or from a PRIOR SESSION —
+   the process that held it is gone). Errors-are-values: a miss reads
+   this string instead of throwing a raw `:undeclared-var`."
+  {:malli/schema [:=> [:catn [::ref-sym :string]] :string]}
+  [ref-sym]
+  (str ref-sym " isn't live (a prior session, or pruned past the last "
+       result-vars-cap " results) — re-run its form to recompute it. "
+       "Only recent results stay referenceable as `result/<id>` vars."))
+
+(defn- ensure-result-ns-alias!
+  "Register `result` as a require-alias of `ns-sym` in the analyzer
+   (idempotent). Without this, a `result` DEF in the current ns (the
+   agent's compat `(result …)` fn) shadows the `result` NAMESPACE:
+   `cljs.analyzer/resolve-var`'s qualified-symbol branch takes the
+   relative-resolution path (emitting `<ns>.result.<id>`) instead of the
+   top-level `result.<id>`. A non-nil `resolve-ns-alias` for `result`
+   forces the correct top-level resolution (LIVE-PROVEN 2026-06-18). So
+   the `result/<id>` VAR and the `(result …)` FN coexist. Best-effort —
+   never throws; skipped for the `result` ns itself."
+  [compile-state ns-sym]
+  (when-not (= result-ns-sym ns-sym)
+    (try
+      (swap! compile-state assoc-in
+             [:cljs.analyzer/namespaces ns-sym :requires result-ns-sym]
+             result-ns-sym)
+      (catch :default _ nil))))
+
 (defn ^:async ^:private raw-eval
   "Internal — returns a Promise that resolves with {:value v :ns ns}
    or rejects with the error. The public `eval` catches both.
@@ -624,7 +733,19 @@
   ;; Prime the target ns's analyzer entry FIRST (idempotent) so a `def`
   ;; into a never-set-up ns can't trip `var-ast`→nil→`(ana/ast? sym)`.
   (await (ensure-analyzer-ns! compile-state ns-sym))
-  (let [warnings (atom [])]
+  (let [warnings   (atom [])
+        result-ref? (result-var-ref? form-str)
+        ;; transcript-redesign-2026-06-18: a bare top-level `result/<id>`
+        ;; read emits NOTHING in `:statement` context (a bare var read is
+        ;; a no-op statement — the file's REPL-semantics gotcha), so the
+        ;; value would never return. `:expr` context emits + returns the
+        ;; value (def/ns/defn all still work under `:expr`, live-proven).
+        ;; Scoped strictly to the `result/<id>` var read.
+        context    (if result-ref? :expr :statement)]
+    ;; Make `result` a known ns-alias of the target ns so `result/<id>`
+    ;; resolves top-level (`result.<id>`) instead of shadowing on the
+    ;; agent's compat `result` FN. See `ensure-result-ns-alias!`.
+    (when result-ref? (ensure-result-ns-alias! compile-state ns-sym))
     (js/Promise.
       (fn [resolve reject]
         (.run warnings-als warnings
@@ -633,11 +754,24 @@
               {:eval          cljs/js-eval
                :load          (partial guarded-load compile-state)
                :ns            ns-sym
-               :context       :statement
+               :context       context
                :def-emits-var true
                :analyze-deps  analyze-deps?}
               (fn [{:keys [error value ns]}]
                 (cond
+                  ;; transcript-redesign-2026-06-18: a bare `result/<id>`
+                  ;; reference whose var is no longer live (pruned past
+                  ;; the session cap, or from a PRIOR SESSION) is a
+                  ;; GRACEFUL MISS — resolve with the helpful re-run VALUE
+                  ;; (errors-are-values), never a raw `:undeclared-var`.
+                  ;; A LIVE `result/<id>` has its analyzer def + globalThis
+                  ;; slot, so `truly-undeclared?` never fires for it; only
+                  ;; misses reach this branch.
+                  (and result-ref?
+                       (some (partial truly-undeclared? compile-state) @warnings))
+                  (resolve {:value (result-miss-message (str/trim (str form-str)))
+                            :ns    ns-sym})
+
                   (some (partial truly-undeclared? compile-state) @warnings)
                   (let [{:keys [prefix suffix] :as w}
                         (first (filter (partial truly-undeclared? compile-state)
@@ -800,14 +934,100 @@
                 "resume marker shows the boundary). Re-run the form (its "
                 "source is on the eval's prompt line) to recompute it.")})))))
 
+;; ============================================================
+;; `result/<id>` vars — binding side. Constants + the reference
+;; predicate + the graceful-miss message live ABOVE `raw-eval` (it
+;; needs them); the actual binding fns live here, near the eval
+;; pipeline that calls them.
+;; ============================================================
+
+(defn- result-globalthis-obj
+  "The live `globalThis.result` object, creating it on first use."
+  []
+  (or (js/Reflect.get js/globalThis (str result-ns-sym))
+      (let [o #js {}]
+        (js/Reflect.set js/globalThis (str result-ns-sym) o)
+        o)))
+
+(defn- unbind-result-var!
+  "Remove a single `result/<id>` var — undef from globalThis AND the
+   analyzer `result` ns defs. Best-effort; never throws."
+  [compile-state id]
+  (let [munged (cljs.core/munge id)]
+    (try
+      (let [robj (js/Reflect.get js/globalThis (str result-ns-sym))]
+        (when robj (js/Reflect.deleteProperty robj munged)))
+      (catch :default _ nil))
+    (try
+      (swap! compile-state update-in
+             [:cljs.analyzer/namespaces result-ns-sym :defs]
+             dissoc (symbol id))
+      (catch :default _ nil))))
+
+(defn bind-result-var!
+  "Bind a successful eval's value `v` as the plain var `result/<id>`:
+   set `globalThis.result.<munged-id>` and register `<id>` in the
+   `result` ns's analyzer defs in `compile-state`, so a later bare
+   `result/<id>` resolves with no undeclared-var warning. Track the id
+   for the session cap and prune the oldest beyond `result-vars-cap`.
+
+   Failed evals never call this — there is no value to bind. Soft-fails
+   (logs + ignores) so a bind hiccup never breaks the eval pipeline."
+  {:malli/schema [:=> [:catn [::compile-state :any] [::id :string] [::value :any]]
+                  :nil]}
+  [compile-state id v]
+  (try
+    (let [munged (cljs.core/munge id)]
+      ;; 1. Runtime value at globalThis.result.<munged-id>.
+      (js/Reflect.set (result-globalthis-obj) munged v)
+      ;; 2. Analyzer def — same shape cljs.js writes for an agent `def`
+      ;;    (`:name` is the only key `var-ast` needs to emit a clean
+      ;;    `:the-var` node; we add `:result-var? true` as a marker).
+      (swap! compile-state
+             (fn [s]
+               (-> s
+                   (assoc-in [:cljs.analyzer/namespaces result-ns-sym :name]
+                             result-ns-sym)
+                   (assoc-in [:cljs.analyzer/namespaces result-ns-sym :defs
+                              (symbol id)]
+                             {:name (symbol (str result-ns-sym) id)
+                              :seon.eval/result-var? true}))))
+      ;; 3. Track + prune. Re-binding an existing id moves it to the
+      ;;    front (most-recent); the cap drops the oldest excess.
+      (let [pruned (volatile! [])]
+        (swap! !result-var-ids
+               (fn [ids]
+                 (let [ids* (conj (vec (remove #(= % id) ids)) id)
+                       over (max 0 (- (count ids*) result-vars-cap))]
+                   (vreset! pruned (subvec ids* 0 over))
+                   (subvec ids* over))))
+        (doseq [old @pruned]
+          (unbind-result-var! compile-state old))))
+    (catch :default e
+      (js/console.warn "[seon.eval/bind-result-var!] failed for"
+                       (pr-str id) "—" (error/->message e))))
+  nil)
+
 (defn ^:async setup-agent-ns!
   "Create + initialize the agent's home namespace. Returns the agent-ns
    symbol (for convenience — same as the input). Idempotent.
 
    After setup, agent code running in this ns has access to:
      (result id)  — looks up the live value of a prior eval, keyed by
-                    its 10-char id (string or keyword). Backed by
-                    globalThis so any value type round-trips.
+                    its 14-char id (string or keyword). Backed by
+                    globalThis so any value type round-trips. KEPT for
+                    compat; the taught surface is the `result/<id>` VAR
+                    (transcript-redesign-2026-06-18), populated by
+                    `bind-result-var!` on each successful eval.
+
+   The `result` FN and the `result/<id>` VAR namespace coexist via
+   `ensure-result-ns-alias!`: a `result` def in the home ns would
+   otherwise shadow the `result` NAMESPACE, making the analyzer resolve
+   `result/<id>` as nested-property access on that var (LIVE-PROVEN
+   2026-06-18). Registering `result` as a require-alias of the home ns
+   forces `resolve-ns-alias` non-nil, so the top-level `result.<id>`
+   resolution wins. `raw-eval` does this for every ns a `result/<id>`
+   read lands in.
 
    For the agent's own id, use `(seon.db/current-agent-id)` — the
    core provides it via the ALS dynvar bound at turn entry. The
@@ -2023,10 +2243,15 @@
               (vswap! failed-defs into def-syms))))
         ;; Live-value stash — direct js/Reflect.set on globalThis,
         ;; no eval-str round-trip (opaque values like datahike DB
-        ;; tagged literals don't break the stash). Agent reads
-        ;; via (result :id).
+        ;; tagged literals don't break the stash). Backs the legacy
+        ;; `(result :id)` lookup AND the `result/<id>` value var.
         (when (:ok result)
-          (stash-result-raw! eval-id (:value result)))
+          (stash-result-raw! eval-id (:value result))
+          ;; transcript-redesign-2026-06-18: bind the value as the plain
+          ;; var `result/<id>` (globalThis + analyzer def) so the agent
+          ;; references it directly, no `(result …)` call. Failed evals
+          ;; bind nothing — no value to retrieve.
+          (bind-result-var! compile-state eval-id (:value result)))
         ;; Detect-and-tee — only on success. Failed evals roll
         ;; back analyzer defs and never touch the schema registry,
         ;; so diff would be empty anyway; we still skip
@@ -2332,7 +2557,8 @@
                                         :seon.error/message (:seon.error/message pc)}}
                                {:ok true :value (:seon.eval/value pc)})]
                   (when (:ok result)
-                    (stash-result-raw! eval-id (:value result)))
+                    (stash-result-raw! eval-id (:value result))
+                    (bind-result-var! compile-state eval-id (:value result)))
                   (await (record-eval! {:eval-id     eval-id
                                         :turn-id     turn-id
                                         :at          (js/Date.)
