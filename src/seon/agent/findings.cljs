@@ -1,13 +1,15 @@
 (ns seon.agent.findings
-  "Stored findings as CONTEXT — the derived salience rung (`:findings`,
-   core-default-ctx priority 48): the CONTENT of every user-domain
-   row in the shared store, rendered into the prompt so agents read
-   stored knowledge instead of answering from priors or re-deriving it
-   from the repo. `seon.db/store-inventory` teaches what EXISTS (attr
-   names + counts); this section shows what it SAYS.
+  "Stored findings as CONTEXT — the question-adjacency POINTER rung
+   (`:findings-pointer`, core-default-ctx priority 95). It does NOT
+   render row content; rows reach the agent via the agent's OWN query.
+   `seon.db/store-inventory` teaches what EXISTS (attr names + counts);
+   the `<inventory>` section surfaces that. When a stored finding is
+   relevant to the open question, this pointer names the kind + the
+   shared distinctive terms + the read-back query, so the agent reads
+   the rows by QUERYING rather than from a raw dump in the prompt.
 
    STRUCTURAL, never a name-list (uniformity rule — one mechanism, no
-   `:my.kb` special case): a kind renders here iff
+   `:my.kb` special case): a kind is POINTER-ELIGIBLE iff
      (a) it is USER-DOMAIN — its attr namespace is NOT in
          `seon.db/core-kinds` (THE shared provenance derivation:
          a kind is core iff its `:seon.schema/key` row is a
@@ -19,31 +21,19 @@
          nothing to read; querying them is taught elsewhere).
 
    Reactive-context principle: a pure function of the render's db
-   value. Rows appear the render after they are transacted and vanish
-   the render after they are retracted — nothing stored, nothing to
-   acknowledge. No `:seon.agent/id` filter, deliberately: every agent
-   sees every agent's stored findings (cross-agent accumulation is the
-   point).
-
-   Core-authored context renders IN FULL; a pathological kind is
-   LOUDLY truncated (never a quiet clip — the observed failure mode is
-   an agent summarizing invented content from a silent clip) with the
-   exact query that reads the rest."
+   value. A kind becomes pointer-eligible the render after its rows are
+   transacted and drops out the render after they are retracted —
+   nothing stored, nothing to acknowledge. `user-domain-kinds` carries
+   no `:seon.agent/id` filter, deliberately: every agent's stored
+   findings are visible to every agent (cross-agent accumulation is the
+   point); the pointer itself is gated by the CALLING agent's open
+   question."
   (:require
-    [cljs.pprint :as pprint]
     [clojure.set :as cset]
     [clojure.string :as str]
     [seon.ctx :as ctx]
     [seon.db :as db]
     [seon.schema :as schema]))
-
-(def kind-render-cap
-  "Per-kind rendered-chars BACKSTOP, not a working limit — findings
-   are expected to fit whole far below it (same stance as
-   `seon.ctx/core-eval-render-cap`). Over it, the kind's tail is
-   replaced by a loud marker carrying the query that reads the
-   complete rows."
-  20000)
 
 (defn- kind-rows
   "Every row carrying at least one of `attr-ks`, pulled `[*]`, ordered
@@ -74,20 +64,21 @@
                     row))
             rows))))
 
-;; The renderable-kind entry shape — shared by [[findings-block]] (the
-;; agent's `:findings` context rung) and the inspector's findings pane
-;; (`seon.web.inspector`), so the dashboard and the prompt read ONE
-;; derivation (shared-shape rule — no twin query). `:seon.db/kind` /
-;; `:seon.db/attrs` are `store-inventory`'s own registered shapes,
-;; referenced, not re-inlined.
+;; The pointer-eligible-kind entry shape — shared by
+;; [[question-matches]] (the agent's `:findings-pointer` context rung)
+;; and the inspector's findings pane (`seon.web.inspector`), so the
+;; dashboard and the prompt read ONE derivation (shared-shape rule — no
+;; twin query). `:seon.db/kind` / `:seon.db/attrs` are
+;; `store-inventory`'s own registered shapes, referenced, not
+;; re-inlined.
 (schema/register! ::rows [:vector :map])
 (schema/register! ::kind-entry
   [:tuple :seon.db/kind :seon.db/attrs ::rows])
 
 (defn user-domain-kinds
-  "The renderable kinds of db value `db` — `[[kind attrs rows] …]`,
-   kind-name order (deterministic). Selection rules (a) + (b) from the
-   ns docstring. PUBLIC: the inspector findings pane derives its
+  "The pointer-eligible kinds of db value `db` — `[[kind attrs rows]
+   …]`, kind-name order (deterministic). Selection rules (a) + (b) from
+   the ns docstring. PUBLIC: the inspector findings pane derives its
    per-kind summary from this same fn (one truth for 'what has this
    cluster learned' — prompt and dashboard can never disagree)."
   {:malli/schema [:=> [:catn [::db :seon.db/db-val]]
@@ -103,12 +94,6 @@
          (sort-by (comp str first))
          vec)))
 
-(defn- render-row
-  "One pulled row as a pretty-printed map, keys sorted (byte-stable
-   output for a given db value)."
-  [row]
-  (str/trimr (with-out-str (pprint/pprint (into (sorted-map) row)))))
-
 (defn- read-query-hint
   "The copy-paste query reading a kind's complete rows, anchored on
    its most-populated attr (covers the most rows when rows are
@@ -117,68 +102,20 @@
   (str "(seon.db/query '[:find (pull ?e [*]) :where [?e "
        (key (apply max-key val attrs)) " _]])"))
 
-(defn- cap-kind
-  "[[kind-render-cap]] over one kind's rendered rows — pass-through
-   below it, LOUD truncation marker + the read-back query over it."
-  [body hint]
-  (let [n (count body)]
-    (if (<= n kind-render-cap)
-      body
-      (str (subs body 0 kind-render-cap)
-           "\n;; ⚠ TRUNCATED at " kind-render-cap " of " n
-           " chars — the DISPLAY is clipped, the stored rows are"
-           " COMPLETE. Read the rest yourself:\n"
-           ";;   " hint))))
-
-(defn findings-block
-  "The `<findings>` context block for db value `db`: every user-domain
-   kind's rows IN FULL, with their provenance attrs, deterministic
-   order (kinds by name, rows by `:db/id`). \"\" when the store holds
-   no user-domain content — the section vanishes (derived, nothing
-   stored, nothing to acknowledge)."
-  {:malli/schema [:=> [:catn [::db :seon.db/db-val]] :string]}
-  [db]
-  (let [kinds (user-domain-kinds db)]
-    (if (empty? kinds)
-      ""
-      (str "<findings>\n"
-           ";; STORED KNOWLEDGE — every user-domain row in the shared store,\n"
-           ";; rendered IN FULL as-of this render (other agents' writes\n"
-           ";; included; retracted rows vanish). CONSULT BEFORE RESEARCHING:\n"
-           ";; when a row below already answers the question, cite it — and\n"
-           ";; its provenance — instead of re-deriving it from the repo.\n"
-           (str/join "\n"
-             (map (fn [[kind attrs rows]]
-                    (let [hint (read-query-hint attrs)]
-                      (str "\n;; " kind " — " (count rows)
-                           (if (= 1 (count rows)) " row" " rows")
-                           "; re-read: " hint "\n"
-                           (cap-kind (str/join "\n" (map render-row rows))
-                                     hint))))
-                  kinds))
-           "\n</findings>"))))
-
-(defn findings-section
-  "Context-section fn (`:findings`, core-default-ctx priority 48):
-   [[findings-block]] over the render's db snapshot — absent
-   `:seon.db/db` defaults to the current conn, the same convention as
-   every sibling section fn."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.db/keys [db]}]
-  (findings-block (or db @db/*conn*)))
-
 ;; ============================================================
 ;; The question-adjacent pointer (`:findings-pointer`, priority 95 —
-;; after :turns at 90, before :prompt at 99). The L12 finding
-;; (opus-live-tests 2026-06-12 addendum 3): a stored finding rendered
-;; IN FULL in <findings> — ~2.2k lines into a ~125k-char prompt — and
-;; the agent STILL grepped the repo for an answer the section already
-;; held. Not a retrieval gap, a QUESTION-ADJACENT-BINDING gap. The fix
-;; is a one-to-three-line relevance pointer rendered near the prompt
-;; tail: which stored kinds share distinctive terms with the agent's
-;; open question. STRUCTURAL — term overlap only, no scenario's terms
-;; special-cased anywhere; scales as findings grow (relocating the
-;; whole section would not).
+;; after :turns at 90, before :prompt at 99) — the SOLE findings
+;; surface in the prompt. The L12 finding (opus-live-tests 2026-06-12
+;; addendum 3): a stored finding rendered IN FULL ~2.2k lines into a
+;; ~125k-char prompt and the agent STILL grepped the repo for an answer
+;; that dump already held. Not a retrieval gap, a
+;; QUESTION-ADJACENT-BINDING gap — AND that full dump cost ~8.7k chars
+;; duplicating the transcript. So the raw dump is gone; what remains is
+;; a one-to-three-line relevance pointer rendered near the prompt tail:
+;; which stored kinds share distinctive terms with the agent's open
+;; question, plus the query that reads their rows. STRUCTURAL — term
+;; overlap only, no scenario's terms special-cased anywhere; scales as
+;; findings grow.
 ;; ============================================================
 
 (def pointer-min-term-len
@@ -285,8 +222,9 @@
 (defn findings-pointer-block
   "The `<findings-pointer>` block for `agent-id` in db value `db`: one
    line per matched kind naming the ACTUAL shared terms and the
-   read-back query, pointing the agent at the full rows already
-   rendered in `<findings>` above. \"\" when the agent is idle (no
+   read-back query that reads the full rows (the agent reads them by
+   QUERYING — there is no row dump in the prompt). \"\" when the agent
+   is idle (no
    task in progress — `seon.ctx/task-in-progress?`, the same MID-TASK
    gate as `seon.agent.turns/turns-block`; the per-turn self-fold does
    NOT close it, so the pointer persists through a research wake —
@@ -318,9 +256,8 @@
                  (str/join "\n"
                    (for [[kind ts] grouped]
                      (str "Stored findings overlap your question — " kind
-                          " (terms: " (str/join ", " ts) "). Full rows"
-                          " are in <findings> above — consult them"
-                          " BEFORE researching; re-read: "
+                          " (terms: " (str/join ", " ts) "). Read them"
+                          " BEFORE researching: "
                           (read-query-hint (attrs-of kind)))))
                  "\n</findings-pointer>")))))))
 

@@ -927,12 +927,15 @@
     "redefine them.\n"
     "\n"
     "STANDING TEACHINGS:\n"
-    "- Consult stored knowledge FIRST: the <findings> section renders\n"
-    "  stored user-domain rows IN FULL — read them before any research;\n"
-    "  run (seon.db/store-inventory) — your creation turn already did —\n"
-    "  and datalog the existing attrs for anything not shown. It lists\n"
-    "  the data added AFTER bootstrap; the full system inventory — the\n"
-    "  core's own fn/schema/test index included — is one call away:\n"
+    "- Consult stored knowledge FIRST — it is DISCOVERABLE, not dumped:\n"
+    "  <inventory> lists every stored KIND + its attrs (run\n"
+    "  (seon.db/store-inventory) — your creation turn already did); when\n"
+    "  a stored finding is relevant to your task, <findings-pointer>\n"
+    "  names the kind + the query, so you READ the rows by QUERYING\n"
+    "  rather than from a wall of text. Datalog the existing attrs for\n"
+    "  anything you need. The inventory lists the data added AFTER\n"
+    "  bootstrap; the full system inventory — the core's own\n"
+    "  fn/schema/test index included — is one call away:\n"
     "  (seon.db/store-inventory {:seon.db/system? true})\n"
     "  Prior agents already answered many questions; re-deriving a\n"
     "  stored answer is wasted turns.\n"
@@ -2102,7 +2105,7 @@
    STABLE prefix (every section through :namespaces — byte-stable
    within a session given the deterministic rendering) and the
    VOLATILE tail (everything after: your-entity, live-tile, warnings,
-   open-todos, findings, transcript, turns, findings-pointer, prompt).
+   open-todos, transcript, turns, findings-pointer, prompt).
 
    In-band because the agent loop hands providers ONE assembled
    string (`llm-fn` is fn-of-ctx-string): [[split-context]] recovers
@@ -2150,25 +2153,24 @@
                        :your-entity, before :warnings)
      5. :warnings    — current problems; reactive, vanishes when fixed
      6. :open-todos  — the agent's open work items; derived, vanishes
-     7. :findings    — stored user-domain rows IN FULL (the salience
-                       rung — content, not just attr names); derived,
-                       vanishes when the store holds none
-     8. :transcript  — ONE threaded REPL stream: messages + evals
+     7. :transcript  — ONE threaded REPL stream: messages + evals
                        chronological, append-only within a session
-     9. :turns       — the turn-budget countdown (one line, mid-task
+     8. :turns       — the turn-budget countdown (one line, mid-task
                        only; derived, vanishes when idle) — just
                        above the prompt tail for salience
-    10. :findings-pointer — the question-adjacent relevance pointer
+     9. :findings-pointer — the question-adjacent relevance pointer
                        (L12): 1–3 lines naming the stored kinds whose
-                       terms overlap the open question, pointing back
-                       at the full <findings> rows; derived, vanishes
-                       when idle or when nothing overlaps
-    11. :inventory   — the cheap <data-inventory> map: one line per
+                       terms overlap the open question, plus the query
+                       that reads their rows (the agent reads stored
+                       findings by QUERYING — no raw row dump in the
+                       prompt); derived, vanishes when idle or when
+                       nothing overlaps
+    10. :inventory   — the cheap <data-inventory> map: one line per
                        stored KIND with each attr's live row count
                        (user-domain first); derived from
                        seon.db/store-inventory, vanishes when the store
                        holds no post-bootstrap data
-    12. :prompt      — the §2.9 status line + clean REPL prompt
+    11. :prompt      — the §2.9 status line + clean REPL prompt
                        (always changing — the volatile tail's end)
 
    The dead sections (capabilities, exemplars, schema-catalog,
@@ -2190,8 +2192,6 @@
     :seon.render/ai 'seon.ctx/warnings-section}
    {:seon.ctx/name :open-todos   :seon.ctx/priority 45
     :seon.render/ai 'seon.agent.todo/open-todos-section}
-   {:seon.ctx/name :findings     :seon.ctx/priority 48
-    :seon.render/ai 'seon.agent.findings/findings-section}
    {:seon.ctx/name :transcript   :seon.ctx/priority 50
     :seon.render/ai 'seon.ctx/transcript-section}
    {:seon.ctx/name :turns        :seon.ctx/priority 90

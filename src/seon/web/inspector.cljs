@@ -148,8 +148,8 @@
   "Per-KIND summary of the cluster's stored user-domain knowledge —
    `[{::kind ::row-count ::sample} …]`, derived via
    `seon.agent.findings/user-domain-kinds`: the SAME derivation the
-   agent's `:findings` context rung renders from, so the dashboard and
-   the prompt can never disagree (the legacy bare-ns `:finding/*`
+   agent's `:findings-pointer` context rung gates on, so the dashboard
+   and the prompt can never disagree (the legacy bare-ns `:finding/*`
    query read \"0 findings\" while agents SAW findings in context).
    Cross-agent BY DESIGN: no agent filter."
   [db]

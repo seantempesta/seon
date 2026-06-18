@@ -1,11 +1,13 @@
 (ns seon.agent.findings-test
-  "seon.agent.findings contract — the derived salience rung: stored
-   user-domain row CONTENT renders into context; core-seeded rows
-   never do; retraction makes the section vanish (reactive-context —
-   derived, nothing stored, nothing to clear); pathological content is
-   LOUDLY truncated, never quietly clipped. All on a boot-seeded
-   scratch `:memory` world (`client/open-agent-conn!` + `boot-seed!` —
-   the same provenance layout a pod boots into), never the live conn."
+  "seon.agent.findings contract — the question-adjacency POINTER rung:
+   `user-domain-kinds` selects pointer-eligible kinds (user-domain +
+   readable content); core-seeded rows never qualify; retraction drops
+   the kind (reactive-context — derived, nothing stored, nothing to
+   clear); the pointer names the kind + shared terms + the read-back
+   query (NO row dump — the agent reads rows by querying). All on a
+   boot-seeded scratch `:memory` world (`client/open-agent-conn!` +
+   `boot-seed!` — the same provenance layout a pod boots into), never
+   the live conn."
   (:require
     [cljs.test :refer [deftest is testing async]]
     [clojure.string :as str]
@@ -66,53 +68,14 @@
   [[:my.kb.scratch/question [:string {:seon.db/identity true}]]
    [:my.kb.scratch/claim :string]])
 
-(deftest boot-seeded-store-renders-nothing
-  (async done
-    (-> (with-world
-          (fn ^:async t [conn]
-            (is (= "" (findings/findings-block @conn))
-                "core-seeded rows (soul, kb.system singleton, user
-                 entity, program-graph index) NEVER render as findings —
-                 a fresh world has no section at all")))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest stored-rows-render-their-content-in-full
+(deftest retracted-rows-drop-the-kind
   (async done
     (-> (with-world
           (fn ^:async t [conn]
             (await (seed-scratch-kind! scratch-registrations scratch-rows))
-            (let [block (findings/findings-block @conn)]
-              (is (str/includes? block "<findings>"))
-              (is (str/includes? block ":my.kb.scratch — 2 rows")
-                  "the kind header carries name + row count")
-              (is (str/includes? block "it never rejects")
-                  "claim CONTENT renders — not just attr names (the #26
-                   salience defect)")
-              (is (str/includes? block
-                                 "the JVM wire-server is the sole writer")
-                  "EVERY row of the kind renders")
-              (is (and (str/includes? block ":my.kb/source-path")
-                       (str/includes? block ":my.kb/source-line-end")
-                       (str/includes? block "296"))
-                  "provenance attrs (incl. the line range) ride along")
-              (is (str/includes? block "re-read: (seon.db/query")
-                  "the header teaches the copy-paste read-back query")
-              (is (not (str/includes? block ":my.soul/text"))
-                  "the soul (core-seeded :my.* kind) is NOT
-                   re-injected through this section")
-              (is (= block (findings/findings-block @conn))
-                  "deterministic — byte-identical for one db value"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest retracted-rows-vanish
-  (async done
-    (-> (with-world
-          (fn ^:async t [conn]
-            (await (seed-scratch-kind! scratch-registrations scratch-rows))
-            (is (str/includes? (findings/findings-block @conn)
-                               ":my.kb.scratch"))
+            (is (some #(= :my.kb.scratch (first %))
+                      (findings/user-domain-kinds @conn))
+                "the seeded user-domain kind is pointer-eligible")
             (let [eids (map first
                             (db/query {:seon.db/query
                                        '[:find ?e :where
@@ -122,16 +85,16 @@
                            {:seon.db/tx-data
                             (vec (for [e eids] [:db/retractEntity e]))}))]
               (is (true? ok?) "retraction transact lands")
-              (is (= "" (findings/findings-block @conn))
-                  "rows retracted → section gone — derived, nothing
+              (is (= [] (findings/user-domain-kinds @conn))
+                  "rows retracted → kind gone — derived, nothing
                    stored, nothing to acknowledge"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 (deftest user-domain-kinds-is-the-shared-pane-derivation
-  ;; The inspector findings pane derives its per-kind summary from this
-  ;; PUBLIC fn — same derivation as findings-block (shared-shape rule,
-  ;; no twin query). Pins the [[kind attrs rows]] entry contract.
+  ;; The inspector findings pane AND the :findings-pointer rung derive
+  ;; from this PUBLIC fn — one derivation (shared-shape rule, no twin
+  ;; query). Pins the [[kind attrs rows]] entry contract.
   (async done
     (-> (with-world
           (fn ^:async t [conn]
@@ -159,8 +122,8 @@
             (await (seed-scratch-kind!
                      [[:my.tally.scratch/hits :int]]
                      [{:my.tally.scratch/hits 3}]))
-            (is (= "" (findings/findings-block @conn))
-                "a kind with no string content has nothing to render —
+            (is (= [] (findings/user-domain-kinds @conn))
+                "a kind with no string content is NOT pointer-eligible —
                  rule (b), structural, not a name list")))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -268,14 +231,15 @@
               (is (and (str/includes? block "acme-sync!")
                        (str/includes? block "quota"))
                   "the pointer shows the ACTUAL shared terms")
-              (is (str/includes? block "re-read: (seon.db/query")
-                  "the read-back query rides the pointer")
-              (is (str/includes? block "<findings> above")
-                  "points BACK at the full rows, never re-renders them")
+              (is (str/includes? block "Read them BEFORE researching: (seon.db/query")
+                  "the read-back query rides the pointer, no row dump")
+              (is (not (str/includes? block "<findings> above"))
+                  "the raw <findings> dump is GONE — the pointer points
+                   at the QUERY, not a prior section")
               (is (not (str/includes?
                          block "exponential"))
-                  "row CONTENT stays in <findings> — the pointer is
-                   terms + kind only")
+                  "row CONTENT is NOT in the pointer — terms + kind +
+                   query only; the agent reads rows by querying")
               (is (<= (count (str/split-lines block)) 5)
                   "tiny — tag lines + at most 3 match lines")
               (is (= block (findings/findings-pointer-block
@@ -401,25 +365,5 @@
                     (findings/findings-pointer-block @conn id)
                     ":my.acme.scratch")
                   "a new inbound re-arms the pointer"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest oversized-kind-truncates-loudly
-  (async done
-    (-> (with-world
-          (fn ^:async t [conn]
-            (let [big (apply str (repeat (+ findings/kind-render-cap 1000)
-                                         "x"))]
-              (await (seed-scratch-kind!
-                       scratch-registrations
-                       [{:my.kb.scratch/question "what is the big one?"
-                         :my.kb.scratch/claim    big}]))
-              (let [block (findings/findings-block @conn)]
-                (is (str/includes? block
-                                   (str "⚠ TRUNCATED at "
-                                        findings/kind-render-cap))
-                    "over the backstop → LOUD marker, never a quiet clip")
-                (is (str/includes? block "Read the rest yourself:")
-                    "the marker carries the read-back guidance")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
