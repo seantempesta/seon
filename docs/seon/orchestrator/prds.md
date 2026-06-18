@@ -21,6 +21,7 @@ All feature specifications live in `docs/prds/`. Each directory contains a `prd.
 | [[prds/datahike-migration/prd]] | active | Replace Datalevin with embedded Datahike: per-namespace DBs, file backend default, single in-process writer, git-friendly time-travel. **Phases 1+2 shipped, Phase 3 in flight.** See [[orchestrator/active]] for status. |  [[components/database]], [[components/schema-system]] |
 | [[prds/datahike-migration/phase-3-harness-migration]] | active | Phase 3 core: agent JVM as playground, `:seon.session` registry, harness DI, rendered LLM context. Demo target shipped 2026-04-25. | [[components/database]], [[components/agent-system]] |
 | [[prds/agent-runtime/substrate-asks-batch-2026-06-16]], [[prds/agent-runtime/overridable-substrate-2026-06-17]], [[prds/agent-runtime/research/simplification-audit-2026-06-17]], [[prds/agent-runtime/research/27-28-architecture-2026-06-16]] | active | Recent core-track PRDs + research on branch `feature/overridable-substrate`. | [[components/agent-system]] |
+| [[prds/agent-runtime/embeddings-fn-retrieval-prd-2026-06-18]] | draft | Embedding-based retrieval of full `:seon.fn` source into agent context via a Proximum vector secondary index on the wire-server. Phase 1 (datahike sync to upstream + Java 22) shipped; Phase 2 specced. | [[components/agent-system]], [[components/database]] |
 
 ## Completed PRDs
 
