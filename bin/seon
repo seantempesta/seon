@@ -179,7 +179,11 @@ process_command() {
     # out/'s location and would otherwise only see seon's node_modules).
     # SEON_EXTRA_SRC itself needs no mapping here: it inherits through
     # nohup to the pod, where the boot indexer's read-src-file probes it.
-    pod)         echo "npm run css:build && exec env SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1$(extra_npm_node_path) node out/client/main.js" ;;
+    # SEON_DEBUG_CAPTURE=1 — per-turn prompt+response capture ON by default for
+    # EVERY agent (logs/turns/<agent>/<turn-idx>-<id>/: prompt.txt, response.txt,
+    # response.edn). NOTE: currently UNBOUNDED — nothing calls seon.debug/prune!
+    # yet; add a per-agent keep-N cap before long-running production use.
+    pod)         echo "npm run css:build && exec env SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1 SEON_DEBUG_CAPTURE=1$(extra_npm_node_path) node out/client/main.js" ;;
     cljs-watch)  echo "clj$(extra_src_sdeps) -M:cljs watch client$(extra_preload_merge)" ;;
     jvm)         echo "./bin/run" ;;
     # V2 platform Host — JVM datahike wire-server (single-DB today).
