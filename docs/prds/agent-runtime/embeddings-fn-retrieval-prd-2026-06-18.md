@@ -12,12 +12,27 @@ tags: [prd, agent, database, schema, cljs]
 > (`7d25126`) with all completed eval/ctx work + the embedding FOUNDATION.
 > Work continues on `feature/embeddings`.
 >
+> **SCOPE: this embeds EVERYTHING, not just functions.** "fn retrieval" is the
+> originating use case; the substrate is general. First-class entity kinds:
+> **functions, the knowledge base (`my.kb.*` — high value, standing
+> instructions/knowledge), namespaces**, and arbitrary future kinds. Adding a
+> kind = (1) write `:seon/embedding` datoms for it, (2) add one `embed-text`
+> clause — NO schema/index change. **Build everything general from the start;
+> do NOT bake in fn-specificity.** Concretely: name the index
+> `:seon.embed/index` (NOT `fn-index` — P2-A's `seon.embed/install!` currently
+> says `:seon.embed/fn-index`, RENAME it), the wire verb `knn-search` (NOT
+> `knn-fn-search`), and `seon.embed/search` takes a kind-agnostic query. Add a
+> uniform **`:seon/kind`** keyword attr on every embeddable entity (e.g.
+> `:seon.fn` / `:seon.kb` / `:seon.ns`) — it drives both the `embed-text`
+> multimethod dispatch AND clean type-scoped filtering
+> (`:where [[?e :seon/kind :seon.kb]]`).
+>
 > **Locked design (do NOT re-litigate):**
 > - ONE shared attr `:seon/embedding` (vector of float, dim **1536**), ONE
 >   Proximum secondary index over it on the JVM wire-server, queried over the
 >   wire. Type-scoping via datalog `:where` → eid set → Proximum entity-filter
->   (any characteristic). New embeddable types need NO schema change — just
->   start writing `:seon/embedding` + an `embed-text` clause.
+>   (any characteristic, incl. `:seon/kind`). New embeddable kinds need NO
+>   schema change — just `:seon/embedding` datoms + an `embed-text` clause.
 > - Model: **`gemini-embedding-2`** (current GA, 8192-token, **no `task_type`** —
 >   put the retrieval instruction in the query text), **cosine**, L2-normalize.
 >   Called from the JVM wire-server via `com.google.genai:google-genai` 1.59.0
@@ -59,9 +74,19 @@ tags: [prd, agent, database, schema, cljs]
 > Confirm the exact failure mode live first (it's my read of the code + the
 > agent's report).
 >
-> **Then:** P2-B (embed-on-persist + `reindex!`, Gemini via java-genai, source-
-> hash cache, wire `install!` into boot) → P2-C (`knn-search` wire verb +
-> pod `seon.embed/search`) → P2-D (pod ctx top-k full source) → 2e gym A/B.
+> **Then (build general — fns AND KB are first-class, ns next):**
+> - **P2-B** write side: `embed-text` multimethod on `:seon/kind` with clauses
+>   for `:seon.fn` (ns/name+doc+source) AND `:seon.kb` (title+body) from the
+>   start; `ensure-embedding!`/`reindex!`; Gemini via java-genai; source-hash
+>   cache; embed BEFORE transact; wire `install!` into boot + backfill BOTH
+>   `:seon.fn` and `my.kb.*`.
+> - **P2-C** query side: `knn-search` wire verb (kind-agnostic) + pod
+>   `seon.embed/search`/`search-pull` with `:where` filtering (scope by
+>   `:seon/kind` or any attr).
+> - **P2-D** ctx integration — MULTI-CONSUMER, not just `<namespaces>`: retrieved
+>   fns feed the fns section, retrieved KB feeds a relevant-knowledge section,
+>   etc. Each ctx section that wants relevance calls `seon.embed/search` with its
+>   own `:where`. → 2e gym A/B (does retrieval beat the current static render).
 >
 > Java 22 is selected by `bin/seon` cross-platform (macOS/Linux/WSL).
 
