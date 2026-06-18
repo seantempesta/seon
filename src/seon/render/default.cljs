@@ -50,6 +50,34 @@
    [:pre {:class "p-3 text-xs font-mono bg-base-900 text-text-200 overflow-auto"}
     (pr-str input)]})
 
+(defn pending-html
+  "Calm IN-PROGRESS placeholder for a live tile whose content symbol
+   names an agent-authored render fn that ISN'T loaded in the runtime
+   right now (`seon.eval/lookup-value` returned nil). Mirrors the
+   `seon.render.live-tile/welcome` tile shape (compact + expanded,
+   muted text) so the human sees \"preparing this view…\", NOT an error
+   dump of the render-context map. Self-heals: the moment the fn is
+   (re)defined the symbol resolves and the real tile renders again."
+  {:malli/schema [:=> [:cat :symbol] :seon.render/html-response]}
+  [sym]
+  {:seon.render/hiccup
+   [:div {:class "seon-tile"}
+    [:div {:class "seon-tile-compact flex flex-col gap-1 p-3"}
+     [:div {:class "text-sm text-text-400 italic"} "Preparing this view…"]
+     [:div {:class "text-[10px] font-mono text-text-500"} (str sym)]]
+    [:div {:class "seon-tile-expanded flex flex-col gap-3 p-4"}
+     [:div {:class "text-sm text-text-400 italic"} "Preparing this view…"]
+     [:div {:class "text-xs text-text-500"}
+      "This panel points at a render fn that isn't loaded yet."]
+     [:div {:class "text-[10px] font-mono text-text-500"} (str sym)]]]
+   :seon.render/ai
+   (str "Your live tile points at " sym ", but that fn isn't loaded in "
+        "the runtime right now — so the human sees a calm "
+        "\"preparing this view…\" placeholder instead of your view. "
+        "(Re)define the fn (eval its defn) so the symbol resolves, or "
+        "point :seon.render.live-tile/content at a fn that exists "
+        "(or at literal hiccup).")})
+
 ;; ============================================================
 ;; DB query helpers — used by `view` and the inspector.
 ;; All synchronous; reads resolve against the input map's `:seon.db/db`

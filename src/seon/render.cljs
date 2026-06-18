@@ -171,7 +171,9 @@
   [slot input-map]
   (cond
     (qualified-symbol? slot)
-    ((or (eval/lookup-value slot) default/pretty-html) input-map)
+    (if-let [f (eval/lookup-value slot)]
+      (f input-map)
+      (default/pending-html slot))
 
     (vector? slot)
     {:seon.render/hiccup slot}

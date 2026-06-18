@@ -3,8 +3,8 @@
 
    A-2 green criteria:
      • html-render literal hiccup → wrapped in :seon.render/hiccup map
-     • html-render unresolvable symbol → pretty-html fallback
-     • html-render unqualified symbol → does not throw
+     • html-render unresolvable QUALIFIED symbol → pending-html placeholder
+     • html-render unqualified/nil/other slot → pretty-html fallback
      • ai-render unresolvable symbol → pretty-ai fallback
 
    Plus tests for `seon.eval/lookup-value` — the moved-out
@@ -25,8 +25,8 @@
     [seon.ui.html :as html]))
 
 ;; ============================================================
-;; html-render — literal hiccup short-circuits, missing symbol
-;; falls through to pretty-html, unqualified symbol doesn't throw.
+;; html-render — literal hiccup short-circuits, unresolvable qualified
+;; symbol → pending-html placeholder, unqualified/nil/other → pretty-html.
 ;; ============================================================
 
 (deftest html-render-literal-hiccup-wraps-as-is
@@ -42,12 +42,15 @@
                                  :seon.agent/id "x"})]
     (is (= {:seon.render/hiccup vec} out))))
 
-(deftest html-render-nonexistent-symbol-falls-through-to-pretty-html
+(deftest html-render-nonexistent-symbol-falls-through-to-pending-html
+  ;; A qualified symbol that doesn't resolve is the agent's own tile fn
+  ;; not (yet) loaded — render the calm `pending-html` placeholder, NOT a
+  ;; pretty-html dump of the whole render-context map.
   (let [input {:seon.db/db nil :seon.agent/id "x"}
         out   (render/html-render 'nonexistent/sym input)]
-    (is (= (default/pretty-html input) out))
+    (is (= (default/pending-html 'nonexistent/sym) out))
     (is (vector? (:seon.render/hiccup out)))
-    (is (= :pre (first (:seon.render/hiccup out))))))
+    (is (= :div (first (:seon.render/hiccup out))))))
 
 (deftest html-render-unqualified-symbol-does-not-throw
   ;; The resolver returns nil for unqualified symbols;

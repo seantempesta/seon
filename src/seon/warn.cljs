@@ -39,6 +39,7 @@
     [cljs.reader :as edn]
     [clojure.string :as str]
     [seon.db :as db]
+    [seon.eval :as eval]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -849,6 +850,52 @@
    :seon.warn/example
    "(seon.test.runner/run-vars {:seon.test.runner/vars ['my.ns/my-test]})"})
 
+(defn check-tile-unresolved
+  "Live tiles pointing at a fn symbol that ISN'T loaded in the runtime —
+   `:seon.render.live-tile/content` names a qualified fn symbol that
+   `seon.eval/lookup-value` can't resolve, so the human sees a calm
+   \"preparing this view…\" placeholder instead of the real view. Literal
+   hiccup tiles (vectors) and resolving symbols (incl. the welcome
+   default) produce nothing. DERIVED at render; self-heals the moment the
+   fn is (re)defined. GLOBAL — :seon.warn/ns is ignored."
+  {:malli/schema [:=> [:cat ::check-request] ::check-response]}
+  [{:seon.db/keys [db]}]
+  (let [rows (db/query
+               {:seon.db/db db
+                :seon.db/query
+                '[:find ?aid ?content
+                  :where
+                  [?e :seon.agent/id ?aid]
+                  [?e :seon.render.live-tile/content ?content]]})]
+    {:seon.warn/kind :tile-unresolved
+     :seon.warn/affected
+     (->> rows
+          (keep (fn [[aid content]]
+                  (let [decoded (db/decode-edn-value
+                                  :seon.render.live-tile/content content)]
+                    (when (and (qualified-symbol? decoded)
+                               (nil? (eval/lookup-value decoded)))
+                      {:seon.warn/sym   (str decoded)
+                       :seon.warn/where (str "live tile of " aid)}))))
+          (sort-by :seon.warn/sym)
+          vec)
+     :seon.warn/explain
+     (str "An agent's live tile (:seon.render.live-tile/content) names a "
+          "fn that isn't loaded in the runtime, so the human sees a "
+          "\"preparing this view…\" placeholder instead of the view. "
+          "(Re)define the fn so the symbol resolves (eval its defn), or "
+          "point the tile at a fn that exists (or at literal hiccup).")
+     :seon.warn/example
+     (str "(defn my-kb-tile\n"
+          "  {:malli/schema [:=> [:cat :seon.render/system-input]\n"
+          "                  :seon.render/html-response]}\n"
+          "  [{:seon.db/keys [db] :seon.agent/keys [id]}]\n"
+          "  {:seon.render/hiccup [:div {:class \"seon-tile\"} \"hi\"]})\n"
+          "(seon.db/transact!\n"
+          "  {:seon.db/tx-data\n"
+          "   [{:seon.agent/id \"<id>\"\n"
+          "     :seon.render.live-tile/content `my.agent.<id>/my-kb-tile}]})")}))
+
 ;; ============================================================
 ;; Registry + clustered renderer
 ;; ============================================================
@@ -872,7 +919,8 @@
    check-fs-denied
    check-hop-exhausted
    check-slow-evals
-   check-failing-tests])
+   check-failing-tests
+   check-tile-unresolved])
 
 (defn- check-name
   "Best-effort display name for a registry fn — the demunged compiled
