@@ -12,9 +12,9 @@
    - the session cap prunes the OLDEST `result/*` past `result-vars-cap`,
      keeping recent ones live;
    - a FAILED eval binds NO `result/<id>` (no value to retrieve);
-   - the compat `(result …)` FN and the `result/<id>` VAR COEXIST in the
-     same ns (a `result` def would otherwise shadow the `result` ns —
-     `ensure-result-ns-alias!` forces top-level resolution).
+   - `result/<id>` is the SOLE value-reuse surface — the home ns defs no
+     `result` symbol, so nothing shadows the reserved `result` ns and a
+     bare `result/<id>` resolves top-level with no require-alias.
 
    Run via `bin/test-cljs`, or interactively:
      (require 'seon.eval.result-var-test :reload)
@@ -164,26 +164,21 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; Coexistence — the compat `(result …)` FN and the `result/<id>` VAR both
-;; work in the SAME ns (the `result` def must not shadow the `result` ns).
+;; Sole surface — `result/<id>` is the ONLY value-reuse mechanism. The home
+;; ns defs no `result` symbol, so nothing shadows the reserved `result` ns:
+;; a bare `result/<id>` resolves top-level with no require-alias setup.
 ;; ---------------------------------------------------------------------------
 
-(deftest compat-result-fn-and-result-var-coexist
+(deftest result-var-resolves-with-no-result-fn-shadow
   (async done
     (-> (run-batch "rv3-260618t" "(* 6 7)")
         (.then (fn [o]
                  (let [cs (.-cs o) hns (.-hns o)
                        id (first (:seon.eval/ids (.-result o)))]
-                   (-> (js/Promise.all
-                         #js [(seval/eval cs (str "(result :" id ")")
-                                          {:ns hns :analyze-deps? false})
-                              (value cs hns id)])
-                       (.then (fn [rs]
-                                (testing "compat (result :id) FN still resolves"
-                                  (is (:ok (aget rs 0)))
-                                  (is (= 42 (:value (aget rs 0)))))
-                                (testing "result/<id> VAR resolves in the SAME ns"
-                                  (is (:ok (aget rs 1)))
-                                  (is (= 42 (:value (aget rs 1)))))))))))
+                   (-> (value cs hns id)
+                       (.then (fn [r]
+                                (testing "result/<id> VAR resolves — no shadow, no alias"
+                                  (is (:ok r))
+                                  (is (= 42 (:value r))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

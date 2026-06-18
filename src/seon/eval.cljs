@@ -600,7 +600,8 @@
 ;; `result/<id>` vars (transcript-redesign-2026-06-18). Each
 ;; SUCCESSFUL eval auto-binds its value as a PLAIN VAR `result/<id>`
 ;; (the id shown after its `=>` in the transcript). The agent writes
-;; `result/auC-2606181147` directly — no `(result …)` call, no quotes.
+;; `result/auC-2606181147` directly — this is the SOLE value-reuse
+;; surface (it subsumes a `(result …)` call and REPL `*1 *2 *3`).
 ;;
 ;; Two registrations make a bare `result/<id>` resolve with ZERO
 ;; `:undeclared-var` warning — the SAME def-into-a-ns mechanism cljs.js
@@ -618,13 +619,11 @@
 ;;
 ;; The `result` ns is RESERVED (no real code namespace is named
 ;; `result`; live-checked: `globalThis.result` is absent at boot). The
-;; agent's compat `(result …)` FN (set up by `setup-agent-ns!` as
-;; `<agent-ns>/result`) COEXISTS with the `result/` ns, but NOT for
-;; free: a `result` DEF in the home ns shadows the `result` NAMESPACE,
-;; so the analyzer resolves `result/<id>` as nested-property access on
-;; that var (LIVE-PROVEN 2026-06-18). `ensure-result-ns-alias!` registers
-;; `result` as a require-alias of the reading ns, forcing the correct
-;; top-level resolution. So both surfaces work.
+;; agent's home ns no longer defs any `result` symbol, so nothing
+;; shadows the `result` NAMESPACE — a bare `result/<id>` resolves
+;; top-level (`result.<id>`) with no alias setup (LIVE-PROVEN
+;; 2026-06-18: a fresh agent ns reads `result/<id>` cleanly with no
+;; require-alias).
 ;;
 ;; Session cap: keep the last `result-vars-cap` ids; prune older ones
 ;; (undef from BOTH globalThis and the analyzer) so memory stays
@@ -687,24 +686,6 @@
        result-vars-cap " results) — re-run its form to recompute it. "
        "Only recent results stay referenceable as `result/<id>` vars."))
 
-(defn- ensure-result-ns-alias!
-  "Register `result` as a require-alias of `ns-sym` in the analyzer
-   (idempotent). Without this, a `result` DEF in the current ns (the
-   agent's compat `(result …)` fn) shadows the `result` NAMESPACE:
-   `cljs.analyzer/resolve-var`'s qualified-symbol branch takes the
-   relative-resolution path (emitting `<ns>.result.<id>`) instead of the
-   top-level `result.<id>`. A non-nil `resolve-ns-alias` for `result`
-   forces the correct top-level resolution (LIVE-PROVEN 2026-06-18). So
-   the `result/<id>` VAR and the `(result …)` FN coexist. Best-effort —
-   never throws; skipped for the `result` ns itself."
-  [compile-state ns-sym]
-  (when-not (= result-ns-sym ns-sym)
-    (try
-      (swap! compile-state assoc-in
-             [:cljs.analyzer/namespaces ns-sym :requires result-ns-sym]
-             result-ns-sym)
-      (catch :default _ nil))))
-
 (defn ^:async ^:private raw-eval
   "Internal — returns a Promise that resolves with {:value v :ns ns}
    or rejects with the error. The public `eval` catches both.
@@ -742,10 +723,6 @@
         ;; value (def/ns/defn all still work under `:expr`, live-proven).
         ;; Scoped strictly to the `result/<id>` var read.
         context    (if result-ref? :expr :statement)]
-    ;; Make `result` a known ns-alias of the target ns so `result/<id>`
-    ;; resolves top-level (`result.<id>`) instead of shadowing on the
-    ;; agent's compat `result` FN. See `ensure-result-ns-alias!`.
-    (when result-ref? (ensure-result-ns-alias! compile-state ns-sym))
     (js/Promise.
       (fn [resolve reject]
         (.run warnings-als warnings
@@ -870,8 +847,10 @@
 ;; here — the value is the raw object.
 ;;
 ;; Key shape: "__seon_results_<eval-id>"
-;; Agent reads via `(my.agent.<id>/result :abc123)` which is
-;; set up by setup-agent-ns! to do the same js/Reflect.get lookup.
+;; This stash is the runtime VALUE backing each `result/<id>` var (the
+;; agent's value-reuse surface) and the internal `lookup-result` reader
+;; (e.g. seon.agent.message's batch-failure check). It is NOT itself an
+;; agent-facing call.
 ;; ============================================================
 
 (def ^:private results-key-prefix "__seon_results_")
@@ -894,8 +873,10 @@
 (defn lookup-result
   "The live value of a prior eval, keyed by the id on its value line
    in the transcript (string or keyword). Backed by the globalThis
-   stash, so any value type round-trips. This is what the per-agent
-   `(result <id>)` sugar calls.
+   stash, so any value type round-trips. INTERNAL reader — the agent's
+   value-reuse surface is the `result/<id>` var (same stash backing);
+   `lookup-result` is used by core code that needs an eval's live value
+   programmatically (e.g. seon.agent.message's batch-failure check).
 
    ERRORS ARE VALUES: a miss never throws — it returns an error map
    that says exactly why there is no value:
@@ -1012,22 +993,14 @@
   "Create + initialize the agent's home namespace. Returns the agent-ns
    symbol (for convenience — same as the input). Idempotent.
 
-   After setup, agent code running in this ns has access to:
-     (result id)  — looks up the live value of a prior eval, keyed by
-                    its 14-char id (string or keyword). Backed by
-                    globalThis so any value type round-trips. KEPT for
-                    compat; the taught surface is the `result/<id>` VAR
-                    (transcript-redesign-2026-06-18), populated by
-                    `bind-result-var!` on each successful eval.
-
-   The `result` FN and the `result/<id>` VAR namespace coexist via
-   `ensure-result-ns-alias!`: a `result` def in the home ns would
-   otherwise shadow the `result` NAMESPACE, making the analyzer resolve
-   `result/<id>` as nested-property access on that var (LIVE-PROVEN
-   2026-06-18). Registering `result` as a require-alias of the home ns
-   forces `resolve-ns-alias` non-nil, so the top-level `result.<id>`
-   resolution wins. `raw-eval` does this for every ns a `result/<id>`
-   read lands in.
+   The agent reuses a prior eval's value SOLELY as the live var
+   `result/<id>` (transcript-redesign-2026-06-18), populated by
+   `bind-result-var!` on each successful eval — the id is on its `=>`
+   line in the transcript. The home ns therefore defs NOTHING here: a
+   `result` def would shadow the reserved `result` NAMESPACE, so we
+   deliberately leave the ns clean and let `result/<id>` resolve
+   top-level (LIVE-PROVEN 2026-06-18 — a fresh agent ns reads
+   `result/<id>` cleanly with no require-alias).
 
    For the agent's own id, use `(seon.db/current-agent-id)` — the
    core provides it via the ALS dynvar bound at turn entry. The
@@ -1045,10 +1018,6 @@
   [compile-state agent-ns-sym _agent-id]
   (let [setup-src
         (str "(ns " agent-ns-sym ")"
-             ;; Delegates to the core so a MISS is a legible error
-             ;; VALUE (prior session / errored eval / unknown id) — see
-             ;; seon.eval/lookup-result.
-             "(defn result [id] (seon.eval/lookup-result id))"
              ":seon.eval/setup-ok")
         r (await (eval compile-state setup-src
                        {:ns 'cljs.user
@@ -1752,8 +1721,8 @@
    LLM never sees beyond the render cap anyway, so the extra headroom is
    purely for direct datom inspection/debugging while staying ~600x below
    the 9.7M blob that caused the OOM. The FULL value remains available
-   in-session via the globalThis live-result stash (`(result <id>)`,
-   `stash-result-raw!`) — that path is NOT capped."
+   in-session as the live var `result/<id>` (globalThis live-result
+   stash, `stash-result-raw!`) — that path is NOT capped."
   16384)
 
 (defn cap-edn
@@ -1812,8 +1781,7 @@
    The raw `:seon.error/data` EDN is NOT dumped here (it merely duplicated
    the prose and read like a stack trace); the structured data still
    lands separately in `:seon.eval/error-data` for the Malli-instrument
-   path and stays in the live globalThis result stash via `(result :<id>)`.
-   `:seon.error/raw`/`stack` are dropped (opaque + unreadable to the
+   path. `:seon.error/raw`/`stack` are dropped (opaque + unreadable to the
    agent-side reader)."
   [err]
   (let [msg  (deepest-error-message err)
@@ -1843,8 +1811,8 @@
    The guide is PREPENDED (not appended) so it survives the smaller
    downstream display cap (`seon.agent/eval-render-cap`, 1500) — the
    agent reads the clip-feedback even when the preview itself is later
-   trimmed. The FULL value is untouched in the globalThis live-result
-   stash (`(result <id>)`); the row cap is a render concern only."
+   trimmed. The FULL value is untouched as the live var `result/<id>`
+   (globalThis live-result stash); the row cap is a render concern only."
   50)
 
 (defn render-result-edn
@@ -1870,8 +1838,8 @@
             body    (str/join "\n " (map pr-str preview))]
         (str ";; … " total " rows; showing first " result-row-cap
              ", +" dropped " more clipped. Narrow your query: a tighter "
-             ":where, a :find aggregate, or take fewer; (result :" eval-id
-             ") holds the full value to drill with get-in/filter.\n"
+             ":where, a :find aggregate, or take fewer; result/" eval-id
+             " holds the full value to drill with get-in/filter.\n"
              "(" body ")"))
       (pr-str value))
     (catch :default _ (str value))))
@@ -2046,18 +2014,21 @@
 ;; REPL-parity intercepts (unit #23 fix d, per the plan's REPL-PARITY
 ;; CONTRACT). The agent's context mimics a real Clojure REPL, so its
 ;; reflexive moves must work — or fail with a translation that teaches
-;; the core equivalent. Three forms get a form-level pre-check
+;; the core equivalent. Two forms get a form-level pre-check
 ;; BEFORE eval (probed live 2026-06-09: `(in-ns 'foo)` fails with an
-;; opaque undeclared-var error; bare `*ns*` and `*1` both SILENTLY
-;; eval to nil — silent wrong answers, the worst kind):
+;; opaque undeclared-var error; bare `*ns*` SILENTLY evals to nil —
+;; a silent wrong answer, the worst kind):
 ;;
 ;;   (in-ns 'foo) → legible ERROR teaching (ns foo) — same effect.
 ;;   *ns*         → INTERCEPTED VALUE: the current ns symbol (honest —
 ;;                  it IS the ns this form runs in; teaching-only would
 ;;                  leave the silent nil in place).
-;;   *1 *2 *3     → legible ERROR teaching (result :<eval-id>) — the
-;;                  core's richer replacement (every value durable
-;;                  + addressable).
+;;
+;; There is NO `*1 *2 *3` intercept: every successful eval's value is a
+;; live, addressable `result/<id>` var (the id is on its `=>` line in the
+;; transcript), which subsumes REPL history. A bare `*1` is no longer
+;; intercepted — it falls through to a normal eval (and reads as an
+;; ordinary undeclared var if used).
 ;; ============================================================
 
 (defn parity-intercept
@@ -2084,15 +2055,7 @@
 
       (= s "*ns*")
       {:seon.eval/parity :value
-       :seon.eval/value  current-ns}
-
-      (contains? #{"*1" "*2" "*3"} s)
-      {:seon.eval/parity :error
-       :seon.error/message
-       (str s " is not maintained here — every eval's value is durable "
-            "and addressable instead: call (result :<eval-id>); the ids "
-            "are in your transcript on each eval's value line "
-            "(; ⇒ (result :<eval-id>)).")})))
+       :seon.eval/value  current-ns})))
 
 (defn- failed-def-syms
   "The symbols a `(def …)`/`(defn …)`/`(defn- …)` form would DEFINE,
@@ -2243,14 +2206,14 @@
               (vswap! failed-defs into def-syms))))
         ;; Live-value stash — direct js/Reflect.set on globalThis,
         ;; no eval-str round-trip (opaque values like datahike DB
-        ;; tagged literals don't break the stash). Backs the legacy
-        ;; `(result :id)` lookup AND the `result/<id>` value var.
+        ;; tagged literals don't break the stash). Backs the `result/<id>`
+        ;; value var AND the internal `lookup-result` reader.
         (when (:ok result)
           (stash-result-raw! eval-id (:value result))
           ;; transcript-redesign-2026-06-18: bind the value as the plain
           ;; var `result/<id>` (globalThis + analyzer def) so the agent
-          ;; references it directly, no `(result …)` call. Failed evals
-          ;; bind nothing — no value to retrieve.
+          ;; references it directly — the SOLE value-reuse surface. Failed
+          ;; evals bind nothing — no value to retrieve.
           (bind-result-var! compile-state eval-id (:value result)))
         ;; Detect-and-tee — only on success. Failed evals roll
         ;; back analyzer defs and never touch the schema registry,
@@ -2545,9 +2508,9 @@
                                       :ns          @current-ns
                                       :result      {:ok true :value nil}}))
 
-                ;; REPL-parity intercept (fix d) — in-ns / *ns* / *1 *2 *3
-                ;; get a legible translation INSTEAD of an opaque error or
-                ;; a silent nil. No eval runs; the record is the teaching.
+                ;; REPL-parity intercept (fix d) — in-ns / *ns* get a
+                ;; legible translation INSTEAD of an opaque error or a
+                ;; silent nil. No eval runs; the record is the teaching.
                 (some? (parity-intercept (:source entry) @current-ns))
                 (let [{:keys [narration source]} entry
                       pc     (parity-intercept source @current-ns)

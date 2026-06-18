@@ -526,10 +526,12 @@
       {::events events ::summary summary})))
 
 ;; ============================================================
-;; Stash — full run-result lives in the agent's ns, NOT the DB.
-;; The DB carries a pointer (:seon.test/last-run-id) the agent uses
-;; to fetch the blob via the existing (result <id>) helper that
-;; setup-agent-ns! defines.
+;; Stash — full run-result lives on globalThis (keyed by run-id), NOT
+;; the DB. The DB carries a pointer (:seon.test/last-run-id); the agent
+;; reads the most-recent run via `(seon.test.runner/last-result {})`,
+;; which resolves that pointer and fetches the blob with `fetch-run`.
+;; (This is a SEPARATE stash from the eval `result/<id>` vars — a test
+;; run is not an eval, so it has no `result/<id>` handle.)
 ;; ============================================================
 
 (def ^:private stash-key-prefix "__seon_test_run_")
@@ -544,10 +546,10 @@
 
 (defn stash-run!
   "Stash the full run-result on globalThis keyed by a fresh run-id.
-   Returns the run-id. The agent reaches the blob through the
-   `(result <run-id>)` helper that `seon.eval/setup-agent-ns!` wires
-   into the agent's home ns — which reads any `__seon_results_*` /
-   `__seon_test_run_*` key off globalThis.
+   Returns the run-id. The agent reaches the blob through
+   `(seon.test.runner/last-result {})` — it resolves the latest
+   `:seon.test/last-run-id` from the DB and fetches this stash with
+   `fetch-run` (the `__seon_test_run_*` key written here).
 
    Storing on globalThis (instead of the DB) is deliberate: huge
    event sequences would balloon datahike's transit cost on every
@@ -596,7 +598,7 @@
   "Transact the SURFACED projection for each test in `run-result`.
    The full data is NOT here — `stash-run!` put it on globalThis;
    the row carries `:seon.test/last-run-id` so the agent can fetch
-   the blob.
+   the blob via `(seon.test.runner/last-result {})`.
 
    Per-var DB fields:
      :seon.test/sym                    — \"agent.ns/my-test\"

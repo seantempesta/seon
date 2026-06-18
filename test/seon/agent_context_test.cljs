@@ -21,8 +21,8 @@
          once.
      (g) V4-4 — REPL-real eval rows (the pinned result-var glyph),
          the session-resume boundary marker, prior-session rows
-         without handles, `(result <old-id>)` prior-session wording,
-         oldest-first eval eviction with messages exempt.
+         without `result/<id>` handles, `lookup-result` prior-session
+         wording, oldest-first eval eviction with messages exempt.
      (h) V4-5 — the §2.9 status line is the ONLY timestamped line and
          carries ns/turn/since-user/inbox/agent-id.
 
@@ -953,8 +953,8 @@
 ;; transcript (two live fabrication incidents, F13/F14: an agent wrote
 ;; `;; => …` narration that later turns trusted as a real read). The
 ;; provenance gate: narration + source are rewritten BEFORE the composer
-;; appends the runtime-owned `; ⇒ (result :<id>)` value line, so real
-;; result lines never pass through the rewrite.
+;; appends the runtime-owned `=> <value> ;; result/<id>` value line, so
+;; real result lines never pass through the rewrite.
 ;; ---------------------------------------------------------------------------
 
 (deftest neutralize-result-claims-rewrites-claim-shapes
@@ -1170,7 +1170,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; (g2) V4-4 — session resume: the boundary marker, prior-session rendering,
-;;      and the (result <old-id>) wording.
+;;      and the lookup-result prior-session wording.
 ;; ---------------------------------------------------------------------------
 
 (deftest transcript-renders-resume-boundary-and-strips-prior-handles
@@ -1232,7 +1232,7 @@
                   unknown (seval/lookup-result "EVLnosuchideee")]
               (is (false? (:seon.eval/ok? prior)))
               (is (str/includes? (:seon.error/message prior) "prior session")
-                  "(result <old-id>) says PRIOR SESSION")
+                  "lookup-result of a prior-session id says PRIOR SESSION")
               (is (str/includes? (:seon.error/message errored) "ERRORED")
                   "an error eval's miss says it produced no value")
               (is (str/includes? (:seon.error/message unknown) "no eval")

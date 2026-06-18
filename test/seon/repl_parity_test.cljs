@@ -4,13 +4,16 @@
    translation that teaches the core equivalent.
 
    Probed live 2026-06-09 before this unit: `(in-ns 'foo)` failed with an
-   opaque `undeclared-var cljs.user/in-ns`; bare `*ns*` and `*1` both
-   SILENTLY evaluated to nil. `seon.eval/parity-intercept` is the
-   form-level pre-check in `eval-batch!` that replaces those outcomes:
+   opaque `undeclared-var cljs.user/in-ns`; bare `*ns*` SILENTLY evaluated
+   to nil. `seon.eval/parity-intercept` is the form-level pre-check in
+   `eval-batch!` that replaces those outcomes:
 
      (in-ns 'foo) → legible error teaching (ns foo)
      *ns*         → intercepted VALUE: the current ns symbol
-     *1 *2 *3     → legible error teaching (result :<eval-id>)
+
+   There is no `*1 *2 *3` intercept: every successful eval's value is a
+   live, addressable `result/<id>` var (subsuming REPL history), so a
+   bare `*1` is NOT intercepted — it falls through to a normal eval.
 
    These are pure unit tests on the intercept; the end-to-end path
    (record + transcript) was REPL-verified against a scratch conn and is
@@ -40,21 +43,19 @@
   (let [r (seval/parity-intercept " *ns* " 'other.ns)]
     (is (= 'other.ns (:seon.eval/value r)) "whitespace-trimmed")))
 
-(deftest star-1-2-3-teach-the-result-accessor
+(deftest star-1-2-3-are-not-intercepted
+  ;; *1 *2 *3 are gone — value reuse is the `result/<id>` var. A bare
+  ;; `*1` is NOT intercepted; it falls through to a normal eval.
   (doseq [s ["*1" "*2" "*3"]]
-    (let [r (seval/parity-intercept s 'my.agent.x)]
-      (is (= :error (:seon.eval/parity r)) (str s " intercepted"))
-      (is (str/includes? (:seon.error/message r) "(result :<eval-id>)")
-          (str s " teaches the durable replacement")))))
+    (is (nil? (seval/parity-intercept s 'my.agent.x))
+        (str s " is not intercepted — falls through to normal eval"))))
 
 (deftest normal-and-embedded-forms-are-not-intercepted
   (testing "ordinary forms pass through untouched"
     (is (nil? (seval/parity-intercept "(+ 1 2)" 'x)))
     (is (nil? (seval/parity-intercept "(ns foo.bar)" 'x)))
     (is (nil? (seval/parity-intercept "(seon.db/query {})" 'x))))
-  (testing "only the WHOLE bare form intercepts — embedded uses don't"
-    (is (nil? (seval/parity-intercept "(str *1)" 'x)))
+  (testing "only the WHOLE bare *ns* intercepts — embedded uses don't"
     (is (nil? (seval/parity-intercept "(prn *ns*)" 'x))))
   (testing "lookalike symbols don't false-positive"
-    (is (nil? (seval/parity-intercept "(in-ns-helper 1)" 'x)))
-    (is (nil? (seval/parity-intercept "*1-counter" 'x)))))
+    (is (nil? (seval/parity-intercept "(in-ns-helper 1)" 'x)))))

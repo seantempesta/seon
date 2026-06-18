@@ -447,9 +447,9 @@
    PROVENANCE GATE, not regex luck: this runs ONLY on the
    model-authored transcript channels — `:seon.eval/narration` and
    `:seon.eval/source` — BEFORE [[format-eval-row]] composes the row.
-   Real result lines (`<value>  ; ⇒ (result :<id>) · <n>ms`) are
-   appended by the composer itself AFTER this rewrite and never pass
-   through it. Idempotent: the marker doesn't match the claim shape."
+   Real result lines (`=> <value> ;; result/<id>`) are appended by the
+   composer itself AFTER this rewrite and never pass through it.
+   Idempotent: the marker doesn't match the claim shape."
   {:malli/schema [:=> [:cat :string] :string]}
   [s]
   (str/replace s result-claim-re unverified-narration-marker))

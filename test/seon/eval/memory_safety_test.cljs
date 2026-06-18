@@ -12,8 +12,9 @@
      longer flows through cap-edn — it persists WHOLE as a
      logs/prompts/<agent>/<turn>.txt blob with chars/file datom
      projections, 2026-06-09.)
-   - the FULL value still lives in the globalThis live-result stash, so
-     `(result <id>)` keeps returning the un-capped value in-session.
+   - the FULL value still lives in the globalThis live-result stash that
+     backs the `result/<id>` var, so the un-capped value stays available
+     in-session even when the persisted datom is bounded.
    - normal small results are stored verbatim (no spurious truncation).
 
    Run interactively via MCP eval:
@@ -72,8 +73,8 @@
 
 ;; ---------------------------------------------------------------------------
 ;; The live-result stash is SEPARATE from the persisted datom. Capping the
-;; datom must NOT break `(result <id>)`, which reads the raw value off
-;; globalThis via stash-result-raw!.
+;; datom must NOT break the `result/<id>` var, whose runtime value is the
+;; raw object read off globalThis (written by stash-result-raw!).
 ;; ---------------------------------------------------------------------------
 
 (deftest live-stash-returns-the-full-value-even-when-the-datom-would-be-capped
@@ -130,7 +131,7 @@
                    edn)))
     (testing "guide teaches narrowing and points at the live full value"
       (is (re-find #"Narrow your query" edn))
-      (is (re-find (re-pattern (str "\\(result :" eval-id "\\)")) edn)))
+      (is (re-find (re-pattern (str "result/" eval-id)) edn)))
     (testing "guide is PREPENDED so it survives the smaller display cap"
       (is (str/starts-with? edn ";; …")))
     (testing "only the first result-row-cap rows are previewed"
