@@ -50,6 +50,8 @@
             [seon.error :as error]
             [seon.error.instrument :as einstrument]
             [seon.platform :as platform]
+            [seon.repair :as repair]
+            [seon.repl.internal :as internal]
             [seon.schema :as schema]
             [seon.test.runner :as test-runner]))
 
@@ -1085,6 +1087,63 @@
            "survive")
       :else "")))
 
+(defn- form-shape
+  "A short structural description of a read top-level `form`, for the
+   A.2 repair note's `… → <shape>` clause so the agent can sanity-check
+   that a parinfer repair produced the structure it intended. Cheap,
+   best-effort; returns a human phrase like \"2-key map\", \"(defn …)\",
+   \"vector\". `form` may be nil (unreadable) → \"a form\"."
+  [form]
+  (cond
+    (map? form)    (str (count form) "-key map")
+    (vector? form) "vector"
+    (set? form)    "set"
+    (and (seq? form) (symbol? (first form)))
+    (str "(" (first form) " …)")
+    (seq? form)    "list"
+    (nil? form)    "a form"
+    :else          (str (type form))))
+
+(defn read-error-message
+  "Sharpen a rewrite-clj read-error message (A.3) for an UNREPAIRABLE
+   form. The form did not parse, so it DEFINED NOTHING — say so, name the
+   offending CLOSER + line:col (rewrite-clj's message carries the closer,
+   NOT the unmatched opener — we do NOT promise the opener), slice the
+   offending source line out and underline the column with a caret, and
+   give the one honest next action.
+
+   `raw` is rewrite-clj's message, e.g.
+   \"Unmatched delimiter: ] [at line 25, column 76]\". `source` is the
+   bad span. Falls back to the raw message when no `[at line N, column C]`
+   coordinate is present."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [raw source]
+  (let [m (re-find #"\[at line (\d+),?\s*column (\d+)\]" (str raw))
+        instruction
+        (str "This form did not parse, so it DEFINED NOTHING — do not "
+             "call or wire anything that depended on it; it does not "
+             "exist. Fix the delimiter and re-eval the whole form.")]
+    (if-not m
+      (str "READ ERROR — " raw "\n" instruction)
+      (let [line-no (js/parseInt (nth m 1) 10)
+            col-no  (js/parseInt (nth m 2) 10)
+            lines   (str/split-lines (str source))
+            ;; rewrite-clj line/col are 1-based.
+            src-ln  (when (and (pos? line-no) (<= line-no (count lines)))
+                      (nth lines (dec line-no)))
+            caret   (when (and src-ln (pos? col-no))
+                      (str (apply str (repeat (dec col-no) " ")) "^"))
+            ;; The leading token of the raw message ("Unmatched delimiter:
+            ;; ]") — keep it; it names the closer.
+            headline (-> (str raw)
+                         (str/replace #"\s*\[at line \d+,?\s*column \d+\]\s*$" ""))]
+        (str "READ ERROR — this form did not parse, so it DEFINED NOTHING.\n"
+             headline " at line " line-no ", col " col-no ":\n"
+             (when src-ln (str "    " src-ln "\n"))
+             (when caret  (str "    " caret "\n"))
+             "Do NOT call or wire anything that depended on this form — it "
+             "does not exist. Fix the delimiter and re-eval the whole form.")))))
+
 (defn- build-tee-entities
   "Return a vector of program-graph entity maps for everything `source`
    newly defined (def/defn → :seon.fn; schema/register! → :seon.schema;
@@ -1780,6 +1839,267 @@
             "are in your transcript on each eval's value line "
             "(; ⇒ (result :<eval-id>)).")})))
 
+(defn- failed-def-syms
+  "The symbols a `(def …)`/`(defn …)`/`(defn- …)` form would DEFINE,
+   given its source string. Used by the false-confidence guard (A.4):
+   when such a form's eval returns `ok? false`, its target symbol must
+   NOT be treated as resolvable for the rest of the batch — a later
+   `(get x :k)` against a failed-def `x` silently reads nil with
+   `ok? true` (the analyzer registered `x` in `:defs` even though its
+   init errored, so no `:undeclared-var` warning fires; live-falsified
+   2026-06-18). Returns a set of unqualified symbols (possibly empty).
+   Fail-closed on unreadable source (empty set)."
+  [source]
+  (let [forms (read-all-forms source)]
+    (->> forms
+         (keep (fn [f]
+                 (when (and (seq? f)
+                            (contains? '#{def defn defn-} (first f))
+                            (symbol? (second f)))
+                   (second f))))
+         set)))
+
+(defn- references-failed-def
+  "When `source` is a NON-defining form that references one of the
+   `failed-defs` symbols (unqualified or `<ns>/<sym>`-qualified), return
+   that symbol; else nil. The reference is escalated to an honest error
+   instead of the silent nil/`ok? true` of the episode (A.4). We skip
+   defining forms — redefining `x` after a failed def is legitimate
+   self-correction, not a stale read."
+  [source failed-defs]
+  (when (seq failed-defs)
+    (let [forms (read-all-forms source)
+          defining? (some (fn [f]
+                            (and (seq? f)
+                                 (contains? '#{def defn defn-} (first f))))
+                          forms)]
+      (when-not defining?
+        (let [names (->> failed-defs (map name) set)
+              all-syms (atom #{})
+              walk (fn walk [x]
+                     (cond
+                       (symbol? x) (swap! all-syms conj x)
+                       (coll? x)   (doseq [y x] (walk y))))]
+          (doseq [f forms] (walk f))
+          (some (fn [s] (when (contains? names (name s)) s))
+                @all-syms))))))
+
+(defn- ^:async eval-form-entry!
+  "The normal single-form eval path, extracted from `eval-batch!`'s
+   `:else` branch so a parinfer-REPAIRED form (A.2) can reuse the exact
+   same eval → auto-await → stash → detect-and-tee → record →
+   auto-instrument → auto-test-run pipeline. Behavior-preserving.
+
+   Mutates the caller's fold volatiles in place (a transient impl
+   detail inside one `eval-batch!` invocation, not shared state):
+   advances `current-ns` on a successful `(ns …)` switch, increments
+   `n-ok`/`n-fail`. Records failed-def provenance into `failed-defs`
+   (A.4): a `(def …)`/`(defn …)` whose eval returns `ok? false` adds its
+   target symbol so a LATER reference escalates instead of reading nil.
+
+   Map keys:
+     :compile-state   — the bootstrap compile-state.
+     :eval-id         — pre-minted id for this entry's :seon.eval row.
+     :turn-id         — owning turn id (component parent).
+     :current-ns      — volatile<symbol>, the fold accumulator ns.
+     :n-ok :n-fail    — volatile<int> counters.
+     :failed-defs     — volatile<set> of failed-def symbols this batch.
+     :outer-test-run? — skip auto-test-run when already inside one.
+     :narration       — narration to record (repaired forms prepend the
+                        repair note here so the diff is always visible).
+     :source          — the source string to eval (repaired or original)."
+  [{:keys [compile-state eval-id turn-id current-ns n-ok n-fail
+           failed-defs outer-test-run? narration source]}]
+  (let [at          (js/Date.)
+        start-ms    (.now js/Date)
+        ;; A.4 false-confidence guard: BEFORE eval, if this NON-defining
+        ;; form references a symbol whose def failed earlier this batch,
+        ;; escalate to an honest error instead of letting it read nil.
+        stale-ref   (references-failed-def source @failed-defs)]
+    (if stale-ref
+      (let [result {:ok false
+                    :error {:seon.error/kind :compile
+                            :seon.error/message
+                            (str "`" stale-ref "` does not exist — the def that "
+                                 "would create it failed to evaluate earlier this "
+                                 "turn (it defined NOTHING). A reference to it "
+                                 "reads nil, NOT a usable value. Fix and re-eval "
+                                 "the def first, then re-run this form.")}}]
+        (await (record-eval! {:eval-id     eval-id
+                              :turn-id     turn-id
+                              :at          at
+                              :duration-ms 0
+                              :narration   narration
+                              :source      source
+                              :ns          @current-ns
+                              :result      result}))
+        (vswap! n-fail inc))
+      (let [;; Snapshot analyzer + schema registry BEFORE eval
+            ;; so detect-and-tee (v1.md §2.2 / Phase B item 10)
+            ;; can diff after. Cheap reads — keyset extraction.
+            defs-before    (analyzer-info/snapshot-defs compile-state)
+            schemas-before (schema/current-keys)
+            ;; (fix f) println/prn capture — a REPL shows print
+            ;; output next to the result; *print-fn* routes to the
+            ;; pod's stdout (logs/pod.log), invisible to the agent.
+            ;; Capture for the span of eval + auto-await, persist
+            ;; as :seon.eval/output. KNOWN LIMIT: prints from other
+            ;; interleaved async work during this form's awaits land
+            ;; here too (single-agent: non-issue; multi-agent needs
+            ;; per-agent ALS print routing).
+            !out               (volatile! "")
+            prev-print-fn      *print-fn*
+            prev-print-err-fn  *print-err-fn*
+            _ (let [cap (fn [& xs] (vswap! !out str (apply str xs)))]
+                (set! *print-fn* cap)
+                (set! *print-err-fn* cap))
+            raw-result  (await (eval compile-state source
+                                     {:ns @current-ns
+                                      :analyze-deps? false}))
+            result
+            (cond
+              (not (:ok raw-result)) raw-result
+              :else (let [r2 (await (maybe-await-value (:value raw-result)))]
+                      (if (:ok r2)
+                        {:ok true :value (:value r2) :ns (:ns raw-result)}
+                        r2)))
+            ;; Restore BEFORE any further awaits — record/tee/
+            ;; auto-test prints belong to the pod log, not this
+            ;; eval's record. (`eval`/`maybe-await-value` never
+            ;; throw — A4 envelope — so this line always runs.)
+            _ (do (set! *print-fn* prev-print-fn)
+                  (set! *print-err-fn* prev-print-err-fn))
+            output      @!out
+            duration-ms (- (.now js/Date) start-ms)]
+        ;; Advance the accumulator on successful ns switch.
+        ;; Failed evals leave the accumulator untouched —
+        ;; the form ran in @current-ns and we record that
+        ;; value as the form's :seon.eval/ns.
+        (when (and (:ok result) (:ns raw-result))
+          (vreset! current-ns (:ns raw-result)))
+        ;; A.4: a DEFINING form whose eval failed registers its target
+        ;; symbol so a later reference escalates (see references-failed-def);
+        ;; a DEFINING form that SUCCEEDS clears its symbol (a redefinition
+        ;; that now works self-heals the guard).
+        (let [def-syms (failed-def-syms source)]
+          (when (seq def-syms)
+            (if (:ok result)
+              (vswap! failed-defs #(reduce disj % def-syms))
+              (vswap! failed-defs into def-syms))))
+        ;; Live-value stash — direct js/Reflect.set on globalThis,
+        ;; no eval-str round-trip (opaque values like datahike DB
+        ;; tagged literals don't break the stash). Agent reads
+        ;; via (result :id).
+        (when (:ok result)
+          (stash-result-raw! eval-id (:value result)))
+        ;; Detect-and-tee — only on success. Failed evals roll
+        ;; back analyzer defs and never touch the schema registry,
+        ;; so diff would be empty anyway; we still skip
+        ;; explicitly to keep the contract obvious.
+        (let [tee-entities (when (:ok result)
+                             (build-tee-entities
+                               {:compile-state  compile-state
+                                :defs-before    defs-before
+                                :schemas-before schemas-before
+                                :source         source
+                                :at             at}))
+              ;; Agent-no-override-core guard (db-is-the-running-
+              ;; system PRD; Sean): drop any tee'd :seon.fn row that
+              ;; would REDEFINE an existing compiled-core fn (a sym
+              ;; whose current source datom's tx is `:core-seed`), so
+              ;; the core display row stays intact and the override
+              ;; takes no ephemeral live effect. A NEW sym or an
+              ;; agent-origin sym is NOT removed — agents define and
+              ;; redefine freely in their OWN namespaces. `@db/*conn*`
+              ;; is the live db value here (same as `ns-requires-tx`).
+              tee-entities
+              (let [fn-syms (->> tee-entities
+                                 (keep #(when (map? %) (:seon.fn/sym %)))
+                                 vec)]
+                (if (and db/*conn* (seq fn-syms))
+                  (reject-core-overrides
+                    (vec tee-entities)
+                    (core-origin-fn-syms @db/*conn* fn-syms))
+                  tee-entities))
+              ;; Capture `:seon.ns/requires` for the ENDING ns on
+              ;; EVERY successful eval — not only `(ns …)` forms — so
+              ;; a re-eval'd ns form or a bare `(require '[x])` keeps
+              ;; the dep-edge index current (the one fix that unblocks
+              ;; DB-layer load; db-is-the-running-system PRD). Skip the
+              ;; transient eval-scaffolding nses (`cljs.user` /
+              ;; `seon.dynamic`) so we never mint a `:seon.ns` row for
+              ;; them. Diff-upsert against the live db value so the
+              ;; cardinality-many set tracks EXACTLY (add + retract);
+              ;; rides in record-eval!'s atomic tee tx.
+              ending-ns (when (:ok result) @current-ns)
+              req-tx    (when (and ending-ns
+                                   (symbol? ending-ns)
+                                   (not (contains? transient-ns-syms
+                                                   ending-ns))
+                                   db/*conn*)
+                          (ns-requires-tx
+                            @db/*conn*
+                            (keyword (str ending-ns))
+                            (analyzer-info/ns-requires
+                              compile-state ending-ns)))
+              tee (vec (concat tee-entities req-tx))]
+          ;; Durable record — always. :seon.eval/ns is the
+          ;; post-update accumulator (ending ns on success;
+          ;; unchanged ns on failure). Tee rides in the same tx.
+          (await (record-eval! {:eval-id      eval-id
+                                :turn-id      turn-id
+                                :at           at
+                                :duration-ms  duration-ms
+                                :narration    narration
+                                :source       source
+                                :ns           @current-ns
+                                :result       result
+                                :output       output
+                                :tee          tee}))
+          ;; Phase 3 (mvp-completion-plan 2026-05-27) —
+          ;; auto-instrument any newly-defined fn whose
+          ;; `:malli/schema` parsed cleanly. Runs AFTER the tee
+          ;; tx so the `:seon.fn` row is durable before we
+          ;; mutate the live var. Best-effort: a thrown
+          ;; instrument! aborts only this fn, not the batch.
+          (when (:ok result)
+            (try
+              (instrument-tee-fns!
+                (collect-instrument-targets compile-state defs-before))
+              (catch :default e
+                (js/console.warn
+                  "[seon.eval/eval-batch!] auto-instrument failed:"
+                  (or (.-message e) (str e)))))
+            ;; Phase 4 (mvp-completion-plan 2026-05-27) —
+            ;; auto-test-run. After the tee tx, any new
+            ;; `:seon.test` rows + any existing `:seon.test`
+            ;; rows whose source mentions a newly-tee'd fn-sym
+            ;; are re-run. Wrapped in :origin :test-run so the
+            ;; loop guard below short-circuits if a test body
+            ;; itself calls `eval-batch!`. Best-effort: thrown
+            ;; runner errors don't abort the batch.
+            (when-not outer-test-run?
+              (let [targets (collect-auto-test-targets
+                              compile-state defs-before)]
+                (when (seq targets)
+                  (try
+                    (await
+                      (db/with-tx-context
+                        {::db/origin :test-run}
+                        (fn ^:async run-auto-tests! []
+                          (await (test-runner/run!
+                                   {:seon.test.runner/vars    (vec targets)
+                                    :seon.test.runner/record? true
+                                    :seon.test.runner/trigger
+                                    :seon.test.runner/on-fn-redef})))))
+                    (catch :default e
+                      (js/console.warn
+                        "[seon.eval/eval-batch!] auto-test-run failed:"
+                        (or (.-message e) (str e))))))))))
+        (if (:ok result)
+          (vswap! n-ok   inc)
+          (vswap! n-fail inc))))))
+
 (defn ^:async eval-batch!
   "Execute a sequence of parsed entries as a REPL batch. Partial-
    failure: every entry gets its own try + record + stash; entry
@@ -1845,6 +2165,11 @@
         n-ok       (volatile! 0)
         n-fail     (volatile! 0)
         current-ns (volatile! agent-ns-sym)
+        ;; A.4 false-confidence guard: symbols whose `(def …)`/`(defn …)`
+        ;; eval FAILED this batch. A later non-defining reference to one
+        ;; of them escalates to an honest error instead of reading nil
+        ;; with `ok? true` (the episode's false-confidence trap).
+        failed-defs (volatile! #{})
         ;; Phase 4 (mvp-completion-plan 2026-05-27): capture origin
         ;; BEFORE the per-entry `with-tx-context` overwrites it with
         ;; `:agent`. If an outer scope (an auto-test-run's
@@ -1861,23 +2186,82 @@
           (db/with-tx-context tx-context
             (fn ^:async run-one-entry! []
               (cond
-                ;; Read-failure entry from seon.repl.internal — no eval, record
-                ;; directly as a failed :seon.eval. :seon.eval/ns =
-                ;; the unchanged accumulator (last-known-good ns).
+                ;; Read-failure entry from seon.repl.internal. A.2: attempt
+                ;; a PER-FORM parinfer indent-mode repair on the bad span
+                ;; (never the whole reply — that would mangle good forms
+                ;; around it). If the repaired span re-reads cleanly, eval
+                ;; the repaired form(s) through the normal path and record
+                ;; them ok? with a transparency note carrying the diff +
+                ;; structural-shape, so the agent always sees what changed.
+                ;; If repair fails, fall through to the sharpened :read
+                ;; error (A.3) — the form defined NOTHING.
                 (and (= :read (:kind entry)) (false? (:ok? entry)))
-                (do
-                  (await (record-eval!
-                           {:eval-id     eval-id
-                            :turn-id     turn-id
-                            :at          (js/Date.)
-                            :duration-ms 0
-                            :narration   (:narration entry)
-                            :source      (:source entry)
-                            :ns          @current-ns
-                            :result      {:ok false
-                                          :error {:seon.error/kind    :read
-                                                  :seon.error/message (:error entry)}}}))
-                  (vswap! n-fail inc))
+                (let [reads? (fn [s]
+                               (let [es (internal/parse-forms s)]
+                                 (and (seq es)
+                                      (every? #(not= :read (:kind %)) es))))
+                      rep    (repair/repair-source
+                               {:seon.repair/source (:source entry)
+                                :seon.repair/reads? reads?})]
+                  (if (:seon.repair/repaired? rep)
+                    ;; Repaired → re-parse the repaired span and eval each
+                    ;; resulting form through eval-form-entry!, recording the
+                    ;; repair note on the FIRST form so the diff is visible.
+                    (let [repaired-entries (internal/parse-forms
+                                             (:seon.repair/source rep))]
+                      (loop [es repaired-entries first? true]
+                        (when (seq es)
+                          (let [e    (first es)
+                                shape (form-shape (:form e))
+                                note (when first?
+                                       (repair/repair-note
+                                         {:seon.repair/changes
+                                          (:seon.repair/changes rep)
+                                          :seon.repair/shape shape}))
+                                narr (if (and first? note)
+                                       (str (when (seq (:narration entry))
+                                              (str (:narration entry) "\n"))
+                                            note)
+                                       (:narration e))
+                                ;; A fresh eval-id per repaired form after the
+                                ;; first (the first reuses this entry's id).
+                                eid  (if first? eval-id (db/new-id!))]
+                            (await
+                              (db/with-tx-context
+                                {:seon.db/agent-id agent-id
+                                 :seon.db/eval-id  eid
+                                 :seon.db/origin   :agent}
+                                (fn ^:async run-repaired! []
+                                  (await (eval-form-entry!
+                                           {:compile-state   compile-state
+                                            :eval-id         eid
+                                            :turn-id         turn-id
+                                            :current-ns      current-ns
+                                            :n-ok            n-ok
+                                            :n-fail          n-fail
+                                            :failed-defs     failed-defs
+                                            :outer-test-run? outer-test-run?
+                                            :narration       narr
+                                            :source          (:source e)})))))
+                            (when-not first? (vswap! eids conj eid))
+                            (recur (rest es) false)))))
+                    ;; Not repairable → sharpened read error (A.3).
+                    (do
+                      (await (record-eval!
+                               {:eval-id     eval-id
+                                :turn-id     turn-id
+                                :at          (js/Date.)
+                                :duration-ms 0
+                                :narration   (:narration entry)
+                                :source      (:source entry)
+                                :ns          @current-ns
+                                :result      {:ok false
+                                              :error {:seon.error/kind    :read
+                                                      :seon.error/message
+                                                      (read-error-message
+                                                        (:error entry)
+                                                        (:source entry))}}}))
+                      (vswap! n-fail inc))))
 
                 ;; REPL-parity intercept (fix d) — in-ns / *ns* / *1 *2 *3
                 ;; get a legible translation INSTEAD of an opaque error or
@@ -1904,167 +2288,22 @@
                     (vswap! n-ok   inc)
                     (vswap! n-fail inc)))
 
-                ;; Normal eval path.
+                ;; Normal eval path — delegate to the extracted helper so
+                ;; the parinfer-repaired path (above) shares the exact same
+                ;; eval → await → stash → tee → record → instrument → test
+                ;; pipeline.
                 :else
-                (let [{:keys [narration source]} entry
-                      at          (js/Date.)
-                      start-ms    (.now js/Date)
-                      ;; Snapshot analyzer + schema registry BEFORE eval
-                      ;; so detect-and-tee (v1.md §2.2 / Phase B item 10)
-                      ;; can diff after. Cheap reads — keyset extraction.
-                      defs-before    (analyzer-info/snapshot-defs compile-state)
-                      schemas-before (schema/current-keys)
-                      ;; (fix f) println/prn capture — a REPL shows print
-                      ;; output next to the result; *print-fn* routes to the
-                      ;; pod's stdout (logs/pod.log), invisible to the agent.
-                      ;; Capture for the span of eval + auto-await, persist
-                      ;; as :seon.eval/output. KNOWN LIMIT: prints from other
-                      ;; interleaved async work during this form's awaits land
-                      ;; here too (single-agent: non-issue; multi-agent needs
-                      ;; per-agent ALS print routing).
-                      !out               (volatile! "")
-                      prev-print-fn      *print-fn*
-                      prev-print-err-fn  *print-err-fn*
-                      _ (let [cap (fn [& xs] (vswap! !out str (apply str xs)))]
-                          (set! *print-fn* cap)
-                          (set! *print-err-fn* cap))
-                      raw-result  (await (eval compile-state source
-                                               {:ns @current-ns
-                                                :analyze-deps? false}))
-                      result
-                      (cond
-                        (not (:ok raw-result)) raw-result
-                        :else (let [r2 (await (maybe-await-value (:value raw-result)))]
-                                (if (:ok r2)
-                                  {:ok true :value (:value r2) :ns (:ns raw-result)}
-                                  r2)))
-                      ;; Restore BEFORE any further awaits — record/tee/
-                      ;; auto-test prints belong to the pod log, not this
-                      ;; eval's record. (`eval`/`maybe-await-value` never
-                      ;; throw — A4 envelope — so this line always runs.)
-                      _ (do (set! *print-fn* prev-print-fn)
-                            (set! *print-err-fn* prev-print-err-fn))
-                      output      @!out
-                      duration-ms (- (.now js/Date) start-ms)]
-                  ;; Advance the accumulator on successful ns switch.
-                  ;; Failed evals leave the accumulator untouched —
-                  ;; the form ran in @current-ns and we record that
-                  ;; value as the form's :seon.eval/ns.
-                  (when (and (:ok result) (:ns raw-result))
-                    (vreset! current-ns (:ns raw-result)))
-                  ;; Live-value stash — direct js/Reflect.set on globalThis,
-                  ;; no eval-str round-trip (opaque values like datahike DB
-                  ;; tagged literals don't break the stash). Agent reads
-                  ;; via (result :id).
-                  (when (:ok result)
-                    (stash-result-raw! eval-id (:value result)))
-                  ;; Detect-and-tee — only on success. Failed evals roll
-                  ;; back analyzer defs and never touch the schema registry,
-                  ;; so diff would be empty anyway; we still skip
-                  ;; explicitly to keep the contract obvious.
-                  (let [tee-entities (when (:ok result)
-                                       (build-tee-entities
-                                         {:compile-state  compile-state
-                                          :defs-before    defs-before
-                                          :schemas-before schemas-before
-                                          :source         source
-                                          :at             at}))
-                        ;; Agent-no-override-core guard (db-is-the-running-
-                        ;; system PRD; Sean): drop any tee'd :seon.fn row that
-                        ;; would REDEFINE an existing compiled-core fn (a sym
-                        ;; whose current source datom's tx is `:core-seed`), so
-                        ;; the core display row stays intact and the override
-                        ;; takes no ephemeral live effect. A NEW sym or an
-                        ;; agent-origin sym is NOT removed — agents define and
-                        ;; redefine freely in their OWN namespaces. `@db/*conn*`
-                        ;; is the live db value here (same as `ns-requires-tx`).
-                        tee-entities
-                        (let [fn-syms (->> tee-entities
-                                           (keep #(when (map? %) (:seon.fn/sym %)))
-                                           vec)]
-                          (if (and db/*conn* (seq fn-syms))
-                            (reject-core-overrides
-                              (vec tee-entities)
-                              (core-origin-fn-syms @db/*conn* fn-syms))
-                            tee-entities))
-                        ;; Capture `:seon.ns/requires` for the ENDING ns on
-                        ;; EVERY successful eval — not only `(ns …)` forms — so
-                        ;; a re-eval'd ns form or a bare `(require '[x])` keeps
-                        ;; the dep-edge index current (the one fix that unblocks
-                        ;; DB-layer load; db-is-the-running-system PRD). Skip the
-                        ;; transient eval-scaffolding nses (`cljs.user` /
-                        ;; `seon.dynamic`) so we never mint a `:seon.ns` row for
-                        ;; them. Diff-upsert against the live db value so the
-                        ;; cardinality-many set tracks EXACTLY (add + retract);
-                        ;; rides in record-eval!'s atomic tee tx.
-                        ending-ns (when (:ok result) @current-ns)
-                        req-tx    (when (and ending-ns
-                                             (symbol? ending-ns)
-                                             (not (contains? transient-ns-syms
-                                                             ending-ns))
-                                             db/*conn*)
-                                    (ns-requires-tx
-                                      @db/*conn*
-                                      (keyword (str ending-ns))
-                                      (analyzer-info/ns-requires
-                                        compile-state ending-ns)))
-                        tee (vec (concat tee-entities req-tx))]
-                    ;; Durable record — always. :seon.eval/ns is the
-                    ;; post-update accumulator (ending ns on success;
-                    ;; unchanged ns on failure). Tee rides in the same tx.
-                    (await (record-eval! {:eval-id      eval-id
-                                          :turn-id      turn-id
-                                          :at           at
-                                          :duration-ms  duration-ms
-                                          :narration    narration
-                                          :source       source
-                                          :ns           @current-ns
-                                          :result       result
-                                          :output       output
-                                          :tee          tee}))
-                    ;; Phase 3 (mvp-completion-plan 2026-05-27) —
-                    ;; auto-instrument any newly-defined fn whose
-                    ;; `:malli/schema` parsed cleanly. Runs AFTER the tee
-                    ;; tx so the `:seon.fn` row is durable before we
-                    ;; mutate the live var. Best-effort: a thrown
-                    ;; instrument! aborts only this fn, not the batch.
-                    (when (:ok result)
-                      (try
-                        (instrument-tee-fns!
-                          (collect-instrument-targets compile-state defs-before))
-                        (catch :default e
-                          (js/console.warn
-                            "[seon.eval/eval-batch!] auto-instrument failed:"
-                            (or (.-message e) (str e)))))
-                      ;; Phase 4 (mvp-completion-plan 2026-05-27) —
-                      ;; auto-test-run. After the tee tx, any new
-                      ;; `:seon.test` rows + any existing `:seon.test`
-                      ;; rows whose source mentions a newly-tee'd fn-sym
-                      ;; are re-run. Wrapped in :origin :test-run so the
-                      ;; loop guard below short-circuits if a test body
-                      ;; itself calls `eval-batch!`. Best-effort: thrown
-                      ;; runner errors don't abort the batch.
-                      (when-not outer-test-run?
-                        (let [targets (collect-auto-test-targets
-                                        compile-state defs-before)]
-                          (when (seq targets)
-                            (try
-                              (await
-                                (db/with-tx-context
-                                  {::db/origin :test-run}
-                                  (fn ^:async run-auto-tests! []
-                                    (await (test-runner/run!
-                                             {:seon.test.runner/vars    (vec targets)
-                                              :seon.test.runner/record? true
-                                              :seon.test.runner/trigger
-                                              :seon.test.runner/on-fn-redef})))))
-                              (catch :default e
-                                (js/console.warn
-                                  "[seon.eval/eval-batch!] auto-test-run failed:"
-                                  (or (.-message e) (str e))))))))))
-                  (if (:ok result)
-                    (vswap! n-ok   inc)
-                    (vswap! n-fail inc)))))))
+                (await (eval-form-entry!
+                         {:compile-state   compile-state
+                          :eval-id         eval-id
+                          :turn-id         turn-id
+                          :current-ns      current-ns
+                          :n-ok            n-ok
+                          :n-fail          n-fail
+                          :failed-defs     failed-defs
+                          :outer-test-run? outer-test-run?
+                          :narration       (:narration entry)
+                          :source          (:source entry)}))))))
         (vswap! eids conj eval-id)))
     {:seon.eval/ids    @eids
      :seon.eval/n-ok   @n-ok

@@ -245,3 +245,67 @@
     (is (= "about-to-fail" (:narration read-entry)))
     (is (some? form-entry))
     (is (= "about-next-good" (:narration form-entry)))))
+
+;; ============================================================
+;; A.1 — prose-vs-code classification. A reader THROW on a prose token
+;; (`80s`, `to:`, `detail:`, `v1.0`) must be DROPPED as narration, NOT
+;; recorded as a `:read` failure — UNLESS the failing span has a
+;; collection opener at its START (a genuinely broken FORM like
+;; `(+ 1 3x)`). The opener-at-START rule is what keeps inline-code
+;; prose ("I'll use (subs …) to format") classified as prose while
+;; keeping a real broken form as broken code.
+;; ============================================================
+
+(def prose-token-cases
+  [{:in "80s arcade/start screen."
+    :note "Invalid number `80s` in prose — dropped, NO :read failure (FHb)"
+    :entry-count 0}
+
+   {:in "to:\n1.  Register the schema."
+    :note "Invalid symbol `to:` in prose — dropped, NO :read failure (SpO)"
+    :form-count 0
+    :no-read? true}
+
+   {:in "detail: The user said \"have the interface update\"."
+    :note "Invalid symbol `detail:` in prose — dropped, NO :read failure (ZyJ)"
+    :no-read? true}
+
+   {:in "Version v1.0 shipped."
+    :note "Invalid token `v1.0` mid-prose — dropped, NO :read failure"
+    :no-read? true}
+
+   {:in "I'll use (subs (str (js/Date.)) 11 19) to format the time."
+    :note "(b) parenthetical-prose: opener MID-sentence → prose, NOT a :read failure [critique-flagged]"
+    :no-read? true}
+
+   {:in "(+ 1 3x)"
+    :note "opener AT START + Invalid number `3x` → genuinely broken CODE, recorded as :read"
+    :expected-kinds [:read]}
+
+   {:in "80s arcade/start screen.\nThis should include:\n- Neon colors.\n;; Define the tile\n(defn my-tile [_] {:seon.render/hiccup [:div]})"
+    :note "multi-line prose preamble dropped; comment narration kept; defn parses (episode turn-2)"
+    :form-count 1
+    :no-read? true
+    :first-narration "Define the tile"}])
+
+(deftest prose-tokens-dropped-not-read-failures
+  (doseq [{:keys [in note entry-count form-count no-read?
+                  expected-kinds first-narration]} prose-token-cases]
+    (testing (str note " — " (pr-str in))
+      (let [entries (parse/parse-forms in)
+            kinds   (mapv :kind entries)
+            forms   (filter #(= :form (:kind %)) entries)]
+        (when expected-kinds
+          (is (= expected-kinds kinds)
+              (str "kinds mismatch: got " (pr-str kinds))))
+        (when no-read?
+          (is (not-any? #(= :read %) kinds)
+              (str "a :read failure leaked for prose: " (pr-str kinds))))
+        (when entry-count
+          (is (= entry-count (count entries))
+              (str "entry-count mismatch: " (pr-str entries))))
+        (when form-count
+          (is (= form-count (count forms))
+              (str "form-count mismatch: " (pr-str kinds))))
+        (when first-narration
+          (is (= first-narration (:narration (first forms)))))))))

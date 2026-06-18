@@ -157,6 +157,61 @@
       (+ offset (str/index-of tail m) 1)  ; +1 to land on the anchor
       (count text))))
 
+(defn- next-newline-recovery
+  "Recovery point for a PROSE-classified failing span (A.1): the offset
+   just after the NEXT newline at/after `offset`, or `(count text)` if
+   none. Narrowing prose recovery to one line means a single stray
+   token (`80s`, `to:`, `detail:`) drops ONE line — the next line gets a
+   fresh parse attempt — instead of `find-recovery-point` swallowing the
+   whole multi-line paragraph into one `:read` failure."
+  [text offset]
+  (let [tail (subs text offset)
+        nl   (str/index-of tail "\n")]
+    (if nl
+      (+ offset nl 1)
+      (count text))))
+
+;; ============================================================
+;; Prose-vs-code classification (A.1) — a reader THROW on a token like
+;; `80s`, `to:`, `detail:`, `v1.0` reaches the `:error` branch before any
+;; sexpr exists, so `narration-atom?` (which only filters tokens that
+;; READ cleanly) never sees it. Without classification the whole prose
+;; paragraph is recorded as one failed eval the agent must explain. The
+;; rule below distinguishes that prose from genuinely broken CODE.
+;; ============================================================
+
+(def ^:private prose-error-re
+  ;; The reader messages emitted for prose tokens (`80s` → "Invalid
+  ;; number: 80s.", `to:` → "Invalid symbol: to:.", etc.). `^`-anchored;
+  ;; the trailing `.` rewrite-clj appends doesn't affect the prefix match.
+  #"^Invalid (number|symbol|keyword|token)")
+
+(defn- opener-at-start?
+  "True when the TRIMMED `span` begins with a collection opener
+   (`(` / `[` / `{`) — i.e. the failing span LOOKS like a form the agent
+   intended (a genuinely broken `(+ 1 3x)`), not inline-code prose
+   (\"I'll use (subs …) to format\" — opener mid-sentence).
+
+   Why START, not anywhere: real LLM narration quotes code inline. If the
+   check were opener-ANYWHERE, that narration would be misclassified as
+   broken code and recorded as a `:read` failure — the inverse of the bug
+   we are fixing. Requiring the opener at the start of the trimmed span
+   keeps `(+ 1 3x)` (opener at start) as broken code while letting
+   \"I'll use (subs …)\" (opener mid-line) classify as prose."
+  [span]
+  (let [t (str/triml (str span))]
+    (boolean (some #(str/starts-with? t %) ["(" "[" "{"]))))
+
+(defn- prose-failure?
+  "True when a failing span should be DROPPED as narration rather than
+   recorded as a `:read` failure: BOTH the reader error matches the
+   prose-token signature AND the span has no collection opener at the
+   START of its trimmed first line (the opener-at-START rule). `span` is
+   the bad text from `offset` to the narrowed recovery point."
+  [error span]
+  (and (re-find prose-error-re (str error))
+       (not (opener-at-start? span))))
+
 ;; ============================================================
 ;; Token-at-a-time scanner. rewrite-clj's parse-string parses ONE
 ;; top-level token (form / comment / whitespace) and stops; we walk
@@ -246,11 +301,24 @@
                                 :form      (:form token)})))
 
             :error
-            (let [recovery (find-recovery-point text offset)]
-              (recur recovery
-                     []
-                     (conj out {:kind  :read
-                                :ok?   false
-                                :narration (join-narration pending-narration)
-                                :source    (subs text offset recovery)
-                                :error     (:error token)})))))))))
+            ;; Classify the failing span as PROSE vs BROKEN CODE (A.1).
+            ;; For the classification we look at the narrowed (next-line)
+            ;; span — one stray token shouldn't drag in following lines.
+            (let [nl-recovery (next-newline-recovery text offset)
+                  prose-span  (subs text offset nl-recovery)]
+              (if (prose-failure? (:error token) prose-span)
+                ;; Prose narration tokenized as an invalid token — DROP it,
+                ;; recover at the next newline so the next line gets a fresh
+                ;; parse, and carry accumulated narration forward to the
+                ;; next real form (exactly like a bare narration-atom).
+                (recur nl-recovery pending-narration out)
+                ;; Broken code — record a :read failure and recover at the
+                ;; next column-0 anchor (form OR comment) as before.
+                (let [recovery (find-recovery-point text offset)]
+                  (recur recovery
+                         []
+                         (conj out {:kind  :read
+                                    :ok?   false
+                                    :narration (join-narration pending-narration)
+                                    :source    (subs text offset recovery)
+                                    :error     (:error token)})))))))))))
