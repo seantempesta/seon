@@ -99,6 +99,11 @@
     [clojure.string :as str]
     [seon.agent.message :as msg]
     [seon.ctx :as ctx]
+    [seon.ctx.namespaces :as ctx-namespaces]
+    [seon.ctx.prompt :as ctx-prompt]
+    [seon.ctx.transcript :as ctx-transcript]
+    [seon.ctx.warnings :as ctx-warnings]
+    [seon.ctx.your-entity :as ctx-your-entity]
     [seon.db :as db]
     [seon.debug :as debug]
     [seon.eval :as seval]
@@ -164,13 +169,15 @@
 (def cap-result ctx/cap-result)
 (def cap-result-body ctx/cap-result-body)
 (def system-section ctx/system-section)
-(def namespaces-section ctx/namespaces-section)
-(def your-entity-section ctx/your-entity-section)
+;; Per-section ctx fns moved to seon.ctx.<name> (ctx-sections-split-
+;; 2026-06-18). render-namespace + the shared read API stay in seon.ctx.
+(def namespaces-section ctx-namespaces/namespaces-section)
+(def your-entity-section ctx-your-entity/your-entity-section)
 (def render-namespace ctx/render-namespace)
-(def warnings-section ctx/warnings-section)
-(def transcript-char-budget ctx/transcript-char-budget)
-(def transcript-section ctx/transcript-section)
-(def prompt-section ctx/prompt-section)
+(def warnings-section ctx-warnings/warnings-section)
+(def transcript-char-budget ctx-transcript/transcript-char-budget)
+(def transcript-section ctx-transcript/transcript-section)
+(def prompt-section ctx-prompt/prompt-section)
 (def assemble-context ctx/assemble-context)
 (def core-default-ctx ctx/core-default-ctx)
 

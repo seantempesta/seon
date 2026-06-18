@@ -140,6 +140,19 @@
     ;; required so the build includes it; seon.ctx references it by
     ;; symbol only (late lookup-value resolution, no require cycle).
     [seon.agent.turns]
+    ;; The per-section ctx namespaces (ctx-sections-split-2026-06-18):
+    ;; each owns one section fn (+ html twin) that core-default-ctx
+    ;; wires by SYMBOL — required here so the build includes them and
+    ;; their munged symbols resolve via seon.eval/lookup-value at
+    ;; render time (no require cycle: the section nses require seon.ctx
+    ;; for the shared read API, seon.ctx names them only as symbols).
+    [seon.ctx.namespaces]
+    [seon.ctx.your-entity]
+    [seon.ctx.live-tile]
+    [seon.ctx.warnings]
+    [seon.ctx.transcript]
+    [seon.ctx.inventory]
+    [seon.ctx.prompt]
     [seon.platform]
     ;; Phase B item 9 — shared read-side wrapper over the analyzer
     ;; state. Required here so the build includes it; item 10's

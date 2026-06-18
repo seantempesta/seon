@@ -1318,7 +1318,7 @@
     (is (= 35 (:seon.ctx/priority lt))
         ":live-tile renders at 35 — after :your-entity (30), before
          :warnings (40)")
-    (is (= 'seon.ctx/live-tile-section (:seon.render/ai lt)))))
+    (is (= 'seon.ctx.live-tile/live-tile-section (:seon.render/ai lt)))))
 
 (deftest live-tile-section-quotes-the-welcome-twin-by-default
   (async done
@@ -1400,7 +1400,7 @@
   (async done
     (-> (with-seeded-conn
           (fn [conn]
-            (let [txt (seon.ctx/live-tile-section
+            (let [txt (seon.ctx.live-tile/live-tile-section
                         {:seon.db/db @conn
                          :seon.agent/id "AGTnoSuchAgent"})]
               (is (= "" txt)

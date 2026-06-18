@@ -72,6 +72,7 @@
     [seon.agent.fs :as sfs]
     [seon.client :as client]
     [seon.ctx :as ctx]
+    [seon.ctx.namespaces :as ctx-namespaces]
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.render.live-tile :as live-tile]
@@ -307,7 +308,7 @@
          vec)))
 
 (defn- header-examples [dbv]
-  (let [nss    (ctx/namespaces-section {:seon.db/db dbv})
+  (let [nss    (ctx-namespaces/namespaces-section {:seon.db/db dbv})
         cut    (or (str/index-of nss "<namespace") (count nss))
         header (subs nss 0 cut)]
     (vec (concat (surface-examples "seon.ctx/system-text" ctx/system-text)

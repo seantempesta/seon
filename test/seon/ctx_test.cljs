@@ -20,6 +20,8 @@
     [seon.agent :as agent]
     [seon.client :as client]
     [seon.ctx :as ctx]
+    [seon.ctx.inventory :as ctx-inventory]
+    [seon.ctx.namespaces :as ctx-namespaces]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -147,7 +149,7 @@
                                 :seon.fn/created-at (js/Date.)}]})))
                   (.then
                     (fn [_]
-                      (let [txt (ctx/namespaces-section {:seon.db/db @db/*conn*})]
+                      (let [txt (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})]
                         (reset! !before txt)
                         (is (str/includes? txt "<namespace name=\"seon.client\">")
                             "a stub ns with a member renders as a tag")
@@ -180,7 +182,7 @@
                   (.then
                     (fn [_]
                       (let [before @!before
-                            after  (ctx/namespaces-section
+                            after  (ctx-namespaces/namespaces-section
                                      {:seon.db/db @db/*conn*})
                             moved  "<namespace name=\"seon.client\">"]
                         (is (> (str/index-of after moved)
@@ -212,7 +214,7 @@
                            (ctx/included-prefixes @db/*conn*))
                         "no config row → built-in defaults")
                     (is (not (str/includes?
-                               (ctx/namespaces-section {:seon.db/db @db/*conn*})
+                               (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})
                                "acme.core"))
                         "unconfigured downstream prefix does not render")))
                 ;; the seed row (what ensure-ctx-config! transacts) …
@@ -232,7 +234,7 @@
                               :seon.ctx/included-prefixes ["acme."]}]})))
                 (.then
                   (fn [_]
-                    (let [txt (ctx/namespaces-section {:seon.db/db @db/*conn*})]
+                    (let [txt (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})]
                       (is (str/includes? txt "<namespace name=\"acme.core\">")
                           "ONE transact → downstream ns renders as a tag")
                       (is (str/includes? txt "<namespace name=\"seon.client\">")
@@ -244,7 +246,7 @@
                 (.then
                   (fn [_]
                     (is (not (str/includes?
-                               (ctx/namespaces-section {:seon.db/db @db/*conn*})
+                               (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})
                                "acme.core.internal"))
                         "*.internal never renders, configured prefix or not")))
                 ;; retract → gone next render.
@@ -255,7 +257,7 @@
                               :seon.ctx/included-prefixes "acme."]]})))
                 (.then
                   (fn [_]
-                    (let [txt (ctx/namespaces-section {:seon.db/db @db/*conn*})]
+                    (let [txt (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})]
                       (is (not (str/includes? txt "acme.core"))
                           "retracted prefix → tag gone next render")
                       (is (str/includes? txt "<namespace name=\"seon.client\">")
@@ -554,7 +556,7 @@
           (fn [_conn]
             ;; REACTIVE: a fresh conn has NO post-bootstrap data → the
             ;; section is suppressed (composer drops it), not an empty shell.
-            (is (= "" (ctx/inventory-section {:seon.db/db @db/*conn*}))
+            (is (= "" (ctx-inventory/inventory-section {:seon.db/db @db/*conn*}))
                 "no user-domain data → \"\" (reactive suppression)")
             (schema/register! :my.workout/date :string)
             (schema/register! :my.workout/type :keyword)
@@ -565,7 +567,7 @@
                     {:my.workout/date "2026-06-15" :my.workout/type :run}]})
                 (.then
                   (fn [_]
-                    (let [txt   (ctx/inventory-section {:seon.db/db @db/*conn*})
+                    (let [txt   (ctx-inventory/inventory-section {:seon.db/db @db/*conn*})
                           lines (str/split-lines txt)]
                       (is (str/includes? txt "<data-inventory>")
                           "rendered behind the <data-inventory> tag")
