@@ -963,9 +963,7 @@
    ns-doc only) but DO own a boot-indexed full-source `:seon.ns` row —
    they must join [[core-ns-set]] (replay-skip: re-evaling their
    shipped source would re-run register! forms) and get an
-   [[index-core!]] ns-row even though no fn-row names them.
-   `seon.ctx/full-source-roots` rides along for the same reason
-   (idempotent for roots that do own vars)."
+   [[index-core!]] ns-row even though no fn-row names them."
   #{"my.kb" "my.soul"})
 
 (defn core-ns-set
@@ -983,12 +981,11 @@
    A fn (not a def) because `!indexed-test-vars` is populated by the
    preload AFTER this ns loads; robust by construction either way — it's
    NOT tx-meta and NOT a hand-typed ns list, it's the live var-meta `:ns`
-   of the indexed vars. [[fn-less-compiled-roots]] + the full-source
-   roots join explicitly because a fn-less compiled root (`my.kb`) owns
-   an indexed full-source `:seon.ns` row without owning any var."
+   of the indexed vars. [[fn-less-compiled-roots]] joins explicitly
+   because a fn-less compiled root (`my.kb`) owns an indexed full-source
+   `:seon.ns` row without owning any var."
   []
-  (into (into #{} (map keyword)
-              (concat fn-less-compiled-roots ctx/full-source-roots))
+  (into (into #{} (map keyword) fn-less-compiled-roots)
         (map #(keyword (str (:ns (meta %)))))
         (concat core-vars @!indexed-test-vars @!extra-core-vars)))
 
@@ -1058,28 +1055,26 @@
 (defn- ns-row
   "Build the `:seon.ns` row for an owning ns name string.
 
-   FULL-SOURCE nses (`seon.ctx/full-source-ns?` — all `my.*` plus the
-   `seon.ctx/full-source-roots` set, children, and test siblings)
-   carry the REAL FULL FILE TEXT as `:seon.ns/source`: the boot
-   indexer is the ONE file-reader; the `:namespaces` context section
-   (and anything else downstream) renders that attr from the graph,
-   never re-reading files. Safe because core rows are
-   NOT loaded ([[agent-ns-set]] excludes any ns in `(core-ns-set)`
+   FULL-SOURCE nses (`seon.ctx/full-source-ns?` — all `my.*`, test
+   siblings included) carry the REAL FULL FILE TEXT as
+   `:seon.ns/source`: the boot indexer is the ONE file-reader; the
+   `:namespaces` context section (and anything else downstream) renders
+   that attr from the graph, never re-reading files. Safe because core
+   rows are NOT loaded ([[agent-ns-set]] excludes any ns in `(core-ns-set)`
    from the DB-layer load). A
    full-source ns whose file can't be read falls back to the stub and
    logs fail-loud — the corpus stays honest.
 
-   All OTHER core nses keep the minimal `(ns x)` stub — they
-   render as shallow existence tags (the `*.internal` split roadmap
-   shrinks files toward inlinable size; see full-source-roots) and the
-   stub keeps the no-replay invariant trivially cheap to reason about."
+   All OTHER core nses keep the minimal `(ns x)` stub — the
+   `:namespaces` section compact-renders them from their indexed
+   `:seon.fn`/`:seon.schema` member rows (API surface, bodies elided),
+   and the stub keeps the no-replay invariant trivially cheap to reason
+   about."
   [ns-sym-str]
   (let [stub (str "(ns " ns-sym-str ")")
         ;; Extra-core nses (downstream SEON_EXTRA_SRC code) are
         ;; full-source by rule, like my.* — closes the render-as-stubs
-        ;; gap for the extra root without touching ctx's
-        ;; full-source-roots set (whose store-row generalization is the
-        ;; reported seon-internal follow-up).
+        ;; gap for the extra root.
         src  (if (or (ctx/full-source-ns? ns-sym-str)
                      (contains? (extra-core-ns-strs) ns-sym-str))
                (or (read-src-file (ns-file-path ns-sym-str))
@@ -1257,8 +1252,7 @@
         ;; ns-doc only) still needs its full-source `:seon.ns` row,
         ;; since the :namespaces section renders from exactly these
         ;; datoms.
-        ns-syms (into (set (concat fn-less-compiled-roots
-                                   ctx/full-source-roots))
+        ns-syms (into (set fn-less-compiled-roots)
                       (map #(first (str/split (:seon.fn/sym %) #"/" 2)))
                       fn-rows)
         ns-rows (map ns-row (sort ns-syms))]
@@ -1359,11 +1353,10 @@
         have-fns  (into #{} (map first) (d/q '[:find ?sym :where [?f :seon.fn/sym ?sym]] db))
         ;; ns rows dedup on name AND source: a `:seon.ns` row re-emits when
         ;; its stored `:seon.ns/source` differs from the freshly-built one —
-        ;; this is what upgrades a pre-existing store's `(ns x)` stub to the
-        ;; real full file text for EXEMPLAR nses (context-focus-redesign E1)
-        ;; and keeps the stored source tracking the build thereafter.
-        ;; Identity upsert on `:seon.ns/name` means the re-emit lands as one
-        ;; `:seon.ns/source` re-assertion, never a duplicate entity.
+        ;; this keeps the stored source tracking the build (e.g. a my.*
+        ;; full-source ns whose file changed). Identity upsert on
+        ;; `:seon.ns/name` means the re-emit lands as one `:seon.ns/source`
+        ;; re-assertion, never a duplicate entity.
         have-nses (into {} (d/q '[:find ?nm ?src
                                   :where
                                   [?n :seon.ns/name ?nm]

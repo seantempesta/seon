@@ -273,7 +273,7 @@
                                                      [?tx :seon.db/agent-id ?aid]
                                                      (not [?tx :seon.db/origin :core-seed])]})]
                                   (is (= expected full-src)
-                                      "every relevant ns the boot indexes carries full source (the exemplar block set)")
+                                      "every full-source ns the boot indexes carries real file text (my.* only)")
                                   (is (= (count @client/!indexed-test-vars) test-rows)
                                       "one :seon.test row per pod-roster deftest var")
                                   (is (seq handler)

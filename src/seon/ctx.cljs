@@ -245,27 +245,6 @@
      (boolean (and (not (hidden-ns-name? s))
                    (some #(prefix-included? s %) prefixes))))))
 
-(def full-source-roots
-  "ROOT namespace names (strings) of the seon.* nses whose complete
-   FILE source is inlined into every prompt (children + `-test`
-   siblings ride along — see [[full-source-ns?]]); all `my.*` nses are
-   full-source by RULE, not by membership here. Why these two:
-   `seon.agent.search` is THE npm-package wrapper exemplar (register!
-   calls, map-in/map-out request/response schemas, error envelopes);
-   `seon.agent.todo` is THE store/retrieve + resume arc.
-
-   WHY THIS LIST STILL EXISTS (context-v4 §2.3 deviation, measured
-   2026-06-11): the decided rule — full source for ALL non-internal
-   nses — is 873 KB ≈ 218k tokens over the current index (seon.ctx
-   alone is 120 KB), beyond any provider window, because the big
-   core nses have not had their `*.internal` splits yet. Until
-   those splits land, non-full-source nses render as shallow
-   `(ns …)`-only tags (existence + the store read, not the body);
-   each split that lands shrinks a file toward inlinable size, and
-   when they are all done this list dies by flipping
-   [[full-source-ns?]] to [[included-ns?]]."
-  #{"seon.agent.search" "seon.agent.todo"})
-
 (defn- base-ns-name
   "The ns name with a trailing `-test` stripped — the SUBJECT ns a test
    sibling pairs with (`seon.agent.search-test` → `seon.agent.search`).
@@ -278,20 +257,19 @@
 (defn full-source-ns?
   "True when `ns-name` (string, symbol, or ns-name keyword) carries its
    REAL FULL FILE TEXT as `:seon.ns/source`: every `my.*` ns (the
-   human's world — always inlined), plus the [[full-source-roots]]
-   set, children, and `-test` siblings of either. Used by the boot
-   indexer (`seon.client/ns-row`) to decide which rows get the file
-   read; [[namespaces-section]] renders whatever depth the row has —
-   one rule, one writer, no drift."
+   human's world — always inlined), including `-test` siblings (the
+   `-test` suffix is stripped to the subject ns first). Used by the
+   boot indexer (`seon.client/ns-row`) to decide which rows get the
+   file read; [[namespaces-section]] renders whatever depth the row
+   has — one rule, one writer, no drift. Every other (non-`my.*`) ns
+   gets the minimal `(ns x)` stub at boot and compact-renders from its
+   indexed member rows."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
   [ns-name]
   (let [s    (if (keyword? ns-name) (name ns-name) (str ns-name))
         base (base-ns-name s)]
     (boolean (and (not (hidden-ns-name? s))
-                  (or (my-ns-name? base)
-                      (some #(or (= base %)
-                                 (str/starts-with? base (str % ".")))
-                            full-source-roots))))))
+                  (my-ns-name? base)))))
 
 ;; ------------------------------------------------------------
 ;; Pretty-print + truncation helpers.
@@ -1110,8 +1088,8 @@
           (concat [(extract-ns-form src stub)] schemas fns))))))
 
 (def ^:private namespaces-header
-  (str ";; Real loaded code, most-recently-modified LAST. Core namespaces\n"
-       ";; not shown here live in the store — read any one by name, e.g.:\n"
+  (str ";; Real loaded code, most-recently-modified LAST. Bodies are elided\n"
+       ";; here (API surface only) — read any fn's full source by name, e.g.:\n"
        ";;   (seon.db/query {:seon.db/query '[:find ?sym ?src :where\n"
        ";;                                    [?n :seon.ns/name :seon.warn]\n"
        ";;                                    [?f :seon.fn/ns ?n]\n"
@@ -1139,13 +1117,14 @@
        → `…`); standalone deftests DROPPED. This holds the body to a few
        KB; full bodies + tests stay in the on-demand `render-namespace`.
 
-   The stub branch discriminates by TX PROVENANCE — a stub row asserted
-   by the `:core-seed` boot tx is compiled core (its members are the
-   boot-indexed `:seon.fn` rows of the WHOLE compiled ns; inlining them
-   re-creates the 200k+-char dump the tiering exists to avoid, so the
-   bare-stub seed row is OMITTED and its members stay queryable from the
-   store), while a stub row from any other tx is agent-authored and
-   renders compact; a non-seed stub with no members is likewise omitted.
+   The stub branch renders COMPACT from member rows regardless of
+   provenance — a stub row asserted by the `:core-seed` boot tx is
+   compiled core whose members are the boot-indexed `:seon.fn`/
+   `:seon.schema` rows of the WHOLE compiled ns; `compact-ns-source`
+   ELIDES fn bodies, so this is the API surface (signatures + full
+   schemas), NOT the 200k+-char dump that on-demand full bodies would
+   be. An agent-authored stub renders the same way. A stub with no
+   member rows yields a blank body and is OMITTED (nothing to show).
    Never a render-time file read."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] id :seon.agent/id}]
@@ -1154,17 +1133,6 @@
         cur-ns (when id
                  (try (current-ns {:seon.agent/id id :seon.db/db db})
                       (catch :default _ nil)))
-        ;; seed-provenance tx set queried SEPARATELY — `get-else` over a
-        ;; tx-eid that carries NO meta datoms silently DROPS the row in
-        ;; datahike-cljs (probed 2026-06-11; the open-issues get-else
-        ;; trap), so membership is checked in code instead.
-        seed-txs (into #{}
-                       (map first)
-                       (db/query
-                         {:seon.db/db db
-                          :seon.db/query
-                          '[:find ?tx
-                            :where [?tx :seon.db/origin :core-seed]]}))
         ;; The configured prefix set, computed ONCE per render from the
         ;; SAME db snapshot every row is filtered against.
         prefixes (included-prefixes db)
@@ -1191,36 +1159,33 @@
                     (filter (fn [[nm _]] (included-ns? (name nm) prefixes)))
                     (sort-by (fn [[nm tx]] [tx (name nm)])))
         blocks (keep
-                 (fn [[nm tx]]
+                 (fn [[nm _tx]]
                    (let [ns-str   (name nm)
                          src      (get sources nm)
-                         seed?    (contains? seed-txs tx)
                          stub     (str "(ns " ns-str ")")
                          current? (= nm cur-ns)
-                         ;; body is nil when the ns would fall through to a
-                         ;; bare stub — seed-provenance (compiled core, whose
-                         ;; members are the boot-indexed rows queryable from
-                         ;; the store) OR no member rows to render. A bare
-                         ;; stub renders nothing useful and has baited a
-                         ;; fabricated quotation before, so such a ns is
-                         ;; OMITTED ENTIRELY: no tag, no marker. Its members
-                         ;; remain discoverable via the store query the
-                         ;; header points at.
-                         ;;
                          ;; The agent's CURRENT ns renders FULL source (its
                          ;; complete working code); every OTHER ns renders
                          ;; COMPACT (ns form + schemas full + fns elided,
-                         ;; tests dropped). A sourceless/stub current ns has
-                         ;; no full text to show, so it too renders compact.
+                         ;; tests dropped). A stub row — compiled core
+                         ;; (`:core-seed` provenance, members are boot-indexed
+                         ;; rows) OR agent-authored — compact-renders from its
+                         ;; member rows: `compact-ns-source` elides fn bodies,
+                         ;; so this is the API surface, not a dump. A
+                         ;; sourceless/stub current ns has no full text to
+                         ;; show, so it too renders compact. body is nil only
+                         ;; when there are no member rows to render — such a ns
+                         ;; is OMITTED ENTIRELY (nothing to show); its members
+                         ;; remain discoverable via the store query the header
+                         ;; points at.
                          body
                          (cond
                            (and current? (not (ns-stub? ns-str src)))
                            (str/trim src)
 
                            (ns-stub? ns-str src)
-                           (when-not seed?
-                             (compact-ns-source
-                               db nm (if (str/blank? src) stub src) stub))
+                           (compact-ns-source
+                             db nm (if (str/blank? src) stub src) stub)
 
                            :else
                            (compact-ns-source db nm src stub))]

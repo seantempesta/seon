@@ -77,13 +77,13 @@
       "*.internal exclusion applies to configured prefixes too")
   (is (false? (ctx/included-ns? "acmene.core" ["acme."]))
       "prefix matches on segment boundary, not substring")
-  ;; full-source depth: my.* by RULE + the seon exemplar roots +
-  ;; children + test siblings; big unsplit core stays shallow.
-  (doseq [n ["my.kb" "my.kb.system" "my.soul" "my.soul-test"
-             "seon.agent.search" "seon.agent.search-test"
-             "seon.agent.todo" "seon.agent.todo-test"]]
+  ;; full-source depth: my.* by RULE (test siblings ride along via the
+  ;; `-test` strip); every seon.* ns is COMPACT, never full-source.
+  (doseq [n ["my.kb" "my.kb.system" "my.soul" "my.soul-test"]]
     (is (true? (ctx/full-source-ns? n)) (str n " is full-source")))
   (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.db" "seon.ctx"
+             "seon.agent.search" "seon.agent.search-test"
+             "seon.agent.todo" "seon.agent.todo-test"
              "seon.agent.searcher" "my.foo.internal"]]
     (is (false? (ctx/full-source-ns? n)) (str n " is NOT full-source"))))
 

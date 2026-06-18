@@ -125,9 +125,10 @@
 
 (deftest emits-ns-rows-for-owning-nses
   ;; Each owning ns gets a :seon.ns row so the [:seon.ns/name kw] lookup-ref
-  ;; on :seon.fn/ns resolves. NON-exemplar core nses keep the minimal
-  ;; `(ns x)` stub; exemplar nses carry the real full file text (see the
-  ;; dedicated exemplar tests below).
+  ;; on :seon.fn/ns resolves. Every seon.* core ns keeps the minimal
+  ;; `(ns x)` stub — the :namespaces section compact-renders it from its
+  ;; indexed member rows; only my.* nses carry full file text (see the
+  ;; dedicated stub/compact tests below).
   (let [tx      (client/index-core!)
         ns-rows (filter :seon.ns/name tx)
         names   (set (map :seon.ns/name ns-rows))]
@@ -138,52 +139,44 @@
            (:seon.ns/source (first (filter #(= :seon.db (:seon.ns/name %)) ns-rows))))
         "non-exemplar ns source is the minimal (ns x) stub")))
 
-(deftest exemplar-ns-rows-carry-full-file-source
-  ;; Context-focus-redesign E1 (roots swapped fs→todo, context-v3 unit 2):
-  ;; the exemplar root set (seon.agent.search, seon.agent.todo) persists the REAL FULL
-  ;; FILE TEXT on :seon.ns/source — the :exemplars context section renders
-  ;; this attr from the graph, never re-reading files at render time. Safe
-  ;; to upgrade from the old stub because core rows are replay-skipped
-  ;; (Step 4).
+(deftest core-ns-rows-carry-the-minimal-stub
+  ;; The full-source-roots exemplar relic is gone (2026-06-17): no seon.*
+  ;; ns force-stores full file text. Every seon.* core ns — including the
+  ;; former exemplar roots seon.agent.search / seon.agent.todo — gets the
+  ;; minimal `(ns x)` stub; the :namespaces section compact-renders each
+  ;; from its indexed :seon.fn/:seon.schema member rows (API surface,
+  ;; bodies elided), never a render-time file read.
   (let [tx      (client/index-core!)
         ns-rows (filter :seon.ns/name tx)
         row-for (fn [k] (first (filter #(= k (:seon.ns/name %)) ns-rows)))
         search  (:seon.ns/source (row-for :seon.agent.search))
         todo    (:seon.ns/source (row-for :seon.agent.todo))
         fs      (:seon.ns/source (row-for :seon.agent.fs))]
-    (is (str/starts-with? search "(ns seon.agent.search")
-        "seon.agent.search source starts with the real ns form")
-    (is (> (count search) 10000)
-        "seon.agent.search source is the full file text, not the stub")
-    (is (str/includes? search "(defn ^:async grep")
-        "the full file carries grep's real defn")
-    (is (str/includes? search "schema/register!")
-        "the full file carries the register! exemplar shapes")
-    (is (str/starts-with? todo "(ns seon.agent.todo")
-        "seon.agent.todo source starts with the real ns form")
-    (is (> (count todo) 7000)
-        "seon.agent.todo source is the full file text, not the stub")
-    (is (str/includes? todo "(defn ^:async add!")
-        "the full file carries add!'s real defn")
+    (is (= "(ns seon.agent.search)" search)
+        "seon.agent.search source is the minimal (ns x) stub")
+    (is (= "(ns seon.agent.todo)" todo)
+        "seon.agent.todo source is the minimal (ns x) stub")
     (is (= "(ns seon.agent.fs)" fs)
-        "seon.agent.fs rotated OUT of the exemplar set — back to the minimal stub")))
+        "seon.agent.fs source is the minimal (ns x) stub")
+    ;; the members that drive compact rendering ARE indexed.
+    (let [syms (set (map :seon.fn/sym (filter :seon.fn/sym tx)))]
+      (is (contains? syms "seon.agent.search/grep")
+          "search's grep is an indexed :seon.fn member (drives compact render)")
+      (is (contains? syms "seon.agent.todo/add!")
+          "todo's add! is an indexed :seon.fn member"))))
 
-(deftest exemplar-test-sibling-carries-full-file-source
-  ;; The TEST SIBLING rule: seon.agent.search-test is not a name-child of
-  ;; seon.agent.search (no dot), so exemplar-ns? includes `-test` siblings
-  ;; explicitly. index-tests builds its :seon.ns row with the full test
-  ;; file text via the same ns-row mechanism.
+(deftest test-sibling-ns-rows-carry-the-minimal-stub
+  ;; Test siblings ride the same rule: no full-source relic, so a `-test`
+  ;; ns gets the minimal `(ns x)` stub from index-tests. Its deftest
+  ;; member rows live on the :seon.test rows; the on-demand
+  ;; render-namespace deep view reads full test bodies, not this section.
   (let [rows  (client/index-tests
                 [#'seon.agent.search-test/match-found-with-path-line-text])
         nsrow (first (filter #(= :seon.agent.search-test (:seon.ns/name %)) rows))
         src   (:seon.ns/source nsrow)]
     (is (some? nsrow) "an owning :seon.ns row is emitted for the test ns")
-    (is (str/starts-with? src "(ns seon.agent.search-test")
-        "test-sibling ns source starts with the real ns form")
-    (is (> (count src) 5000)
-        "test-sibling ns source is the full file text, not the stub")
-    (is (str/includes? src "(deftest match-found-with-path-line-text")
-        "the full test file carries real deftest bodies")))
+    (is (= "(ns seon.agent.search-test)" src)
+        "test-sibling ns source is the minimal (ns x) stub")))
 
 (deftest pure-index-emits-valid-refs
   ;; index-core! is a PURE builder: every :seon.fn/ns it emits is a
@@ -390,10 +383,11 @@
                   (done))))))
 
 (deftest core-index-tx-reasserts-drifted-ns-source
-  ;; E1's stub→full upgrade path: ns rows dedup on name AND source. A store
-  ;; whose :seon.ns/source for an exemplar ns differs from the freshly-built
-  ;; full file text (e.g. the pre-E1 `(ns x)` stub) gets exactly that ns row
-  ;; re-emitted; everything else stays a no-op.
+  ;; ns rows dedup on name AND source. A store whose :seon.ns/source for a
+  ;; full-source (my.*) ns differs from the freshly-built full file text
+  ;; (e.g. a regressed `(ns x)` stub, or a stale build) gets exactly that
+  ;; ns row re-emitted; everything else stays a no-op. (my.kb is a
+  ;; fn-less compiled root — its full file text is read at boot.)
   (async done
     (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
                              (db/tx-meta-datahike-schema)))
@@ -403,22 +397,26 @@
                 (.then (fn [first-tx]
                          (db/transact! {:seon.db/conn conn
                                         :seon.db/tx-data first-tx})))
-                ;; Regress seon.agent.search back to the pre-E1 stub — the shape an
-                ;; existing durable store carries before its first post-E1 boot.
+                ;; Regress my.kb to a bare stub — the shape an existing
+                ;; durable store carries before a re-boot with a fresher build.
                 (.then (fn [_]
                          (db/transact!
                            {:seon.db/conn conn
                             :seon.db/tx-data
-                            [{:seon.ns/name   :seon.agent.search
-                              :seon.ns/source "(ns seon.agent.search)"}]})))
+                            [{:seon.ns/name   :my.kb
+                              :seon.ns/source "(ns my.kb)"}]})))
                 (.then (fn [_] (client/core-index-tx conn)))
                 (.then
                   (fn [tx]
                     (let [ns-rows (filter :seon.ns/name tx)]
-                      (is (= [:seon.agent.search] (mapv :seon.ns/name ns-rows))
+                      (is (= [:my.kb] (mapv :seon.ns/name ns-rows))
                           "ONLY the drifted ns row re-emits (one assertion lands)")
-                      (is (> (count (:seon.ns/source (first ns-rows))) 10000)
+                      (is (str/starts-with? (:seon.ns/source (first ns-rows))
+                                            "(ns my.kb")
                           "re-emitted with the full file text, not the stub")
+                      (is (> (count (:seon.ns/source (first ns-rows)))
+                             (count "(ns my.kb)"))
+                          "the re-emitted source is the real file, longer than the stub")
                       (is (empty? (remove :seon.ns/name tx))
                           "no fn/schema/test rows ride along"))
                     (done))))))
