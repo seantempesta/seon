@@ -136,11 +136,6 @@
     ;; Work items (user→agent asks + agent notes-to-self) — required so
     ;; its register! calls run before the boot install of :seon.agent.todo/*.
     [seon.agent.todo]
-    ;; The :findings-pointer section (core-default-ctx) — required so
-    ;; the build includes it; seon.ctx references it by symbol only
-    ;; (late lookup-value resolution, no require cycle — findings itself
-    ;; requires seon.ctx for the inbox window).
-    [seon.agent.findings]
     ;; The <turns> countdown section (core-default-ctx :turns) —
     ;; required so the build includes it; seon.ctx references it by
     ;; symbol only (late lookup-value resolution, no require cycle).

@@ -22,8 +22,8 @@
 
 (defn ^:async with-world
   "Boot-seeded scratch world around `body` (fn [conn] → Promise) —
-   same harness as seon.agent.findings-test: real `:core-seed`
-   tx provenance, root conn + schema registry restored after."
+   real `:core-seed` tx provenance, root conn + schema registry
+   restored after."
   [body]
   (let [prev-conn   db/*conn*
         keys-before (schema/current-keys)]

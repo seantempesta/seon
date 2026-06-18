@@ -219,8 +219,8 @@
               (is (pos? (count text))
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
               (is (= [:system :namespaces :your-entity :live-tile
-                      :warnings :open-todos :findings :transcript :turns
-                      :findings-pointer :inventory :prompt]
+                      :warnings :open-todos :transcript :turns
+                      :inventory :prompt]
                      sections)
                   "the v4 core-default section names, in order
                    (static→volatile) — the catalogs, capabilities,
@@ -602,7 +602,7 @@
                     "the agent-authored fn row classifies data"))
               (is (contains? (db/core-kinds db) :seon.fn)
                   ":seon.fn was registered by the boot index →
-                   core kind (the ordering/findings filter)"))))
+                   core kind (the inventory ordering filter)"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

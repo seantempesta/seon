@@ -32,7 +32,6 @@
     [clojure.string :as str]
     [datahike.api :as d]
     [seon.agent-view :as agent-view]
-    [seon.agent.findings :as findings]
     [seon.db :as db]
     [seon.agent.inspect :as inspect]
     [seon.log :as log]
@@ -115,57 +114,6 @@
                      (assoc :seon.agent/completed-at
                             (:seon.agent/completed-at ent)))))))))
 
-(def ^:private sample-attr-preference
-  "Attr NAMES whose string value makes the best one-line sample for a
-   kind, in preference order — claim/title-ish first."
-  ["claim" "title" "question" "name" "text"])
-
-(defn- kind-sample
-  "A short sample string for one user-domain kind: the first live
-   string value under the kind's OWN attrs across `rows`, preferring
-   claim/title-ish attr names. Clipped at 140 chars (display only —
-   the stored rows are complete)."
-  [kind rows]
-  (let [knm (name kind)
-        own-strings
-        (fn [row]
-          (into {}
-                (keep (fn [[a v]]
-                        (when (and (keyword? a) (= knm (namespace a)))
-                          (cond
-                            (string? v) [(name a) v]
-                            (and (sequential? v) (some string? v))
-                            [(name a) (first (filter string? v))]))))
-                row))
-        m (some #(let [s (own-strings %)] (when (seq s) s)) rows)
-        s (when m
-            (or (some m sample-attr-preference)
-                (val (first (sort-by key m)))))]
-    (when s
-      (if (> (count s) 140) (str (subs s 0 140) "…") s))))
-
-(defn- findings-data
-  "Per-KIND summary of the cluster's stored user-domain knowledge —
-   `[{::kind ::row-count ::sample} …]`, derived via
-   `seon.agent.findings/user-domain-kinds`: the SAME derivation the
-   agent's `:findings-pointer` context rung gates on, so the dashboard
-   and the prompt can never disagree (the legacy bare-ns `:finding/*`
-   query read \"0 findings\" while agents SAW findings in context).
-   Cross-agent BY DESIGN: no agent filter."
-  [db]
-  (mapv (fn [[kind _attrs rows]]
-          (cond-> {::kind      kind
-                   ::row-count (count rows)}
-            (some? (kind-sample kind rows))
-            (assoc ::sample (kind-sample kind rows))))
-        (findings/user-domain-kinds db)))
-
-(defn- findings-row-total
-  "Total stored rows across the pane's kinds — the honest headline
-   number for the knowledge group summaries."
-  [findings]
-  (transduce (map ::row-count) + 0 findings))
-
 (declare data-scan)
 
 (defn- cluster-stats
@@ -174,8 +122,7 @@
    /data browser's DEFAULT row count — distinct post-bootstrap data
    rows via the SAME `data-scan` derivation (provenance from
    `seon.db/bootstrap-row-ids`), so the header chip and /data can
-   never disagree. Findings ARE facts here — the separate findings
-   chip died with the legacy bare-ns attr query. The datom/fn/schema/
+   never disagree. The datom/fn/schema/
    test counts back the `?system=1` machinery row."
   [db]
   {::agent-count  (count (d/q '[:find ?e :where [?e :seon.agent/id]] db))
@@ -185,24 +132,6 @@
    ::fn-count     (count (d/q '[:find ?e :where [?e :seon.fn/sym]] db))
    ::schema-count (count (d/q '[:find ?e :where [?e :seon.schema/key]] db))
    ::test-count   (count (d/q '[:find ?e :where [?e :seon.test/sym]] db))})
-
-(defn- kind-card
-  "One stored-knowledge KIND: dot+text header (kind · row count) plus a
-   sample claim/title string from its rows."
-  [{::keys [kind row-count sample]}]
-  [:div {:class (str "border border-base-800 rounded p-2 bg-base-900/60 "
-                     "animate-appear")}
-   [:div {:class "text-xs font-mono text-amber-400"}
-    (str "● " kind " · " row-count (if (= 1 row-count) " row" " rows"))]
-   (when (seq sample)
-     [:div {:class "text-xs text-text-100 leading-snug mt-1"} sample])])
-
-(defn- knowledge-cards
-  [findings]
-  (into [:div {:class "grid gap-2"
-               :style "grid-template-columns:repeat(auto-fill,minmax(320px,1fr));"}]
-        (map kind-card)
-        findings))
 
 (defn- entity-kind-label
   "Best-effort kind label for an entity with no resolved renderer: the
@@ -415,10 +344,6 @@
      :token-est  (or token-estimate 0)
      :html-cards cards
      :turn-durs  turn-durs
-     ;; Knowledge is CROSS-AGENT by design: read the UNFILTERED conn,
-     ;; not the agent-view FilteredDB — agent B must see agent A's
-     ;; findings (the demo money-shot is exactly that reuse).
-     :findings   (findings-data @db/*conn*)
      ;; render-cap overflow (seon.render/renderable-entities) — rides
      ;; as metadata on the entities vector so the response schema is
      ;; unchanged. Surfaced as the "older elided" note in the pane.
@@ -608,26 +533,6 @@
                  (rest cards)))
         out))))
 
-(defn- knowledge-group
-  "Collapsible 'cluster knowledge' group at the top of the right pane —
-   the money-shot surface. Open by default; the open-state guard
-   (`data-seon-key`) keeps the user's toggle across morphs. Renders
-   nothing when no findings exist yet — derived, self-healing."
-  [findings]
-  (when (seq findings)
-    [:details {:open true
-               :data-seon-key "cluster-knowledge"
-               :class (str "border border-amber-700/40 rounded p-1.5 mb-2 "
-                           "bg-amber-950/20")}
-     [:summary {:class (str "cursor-pointer select-none text-xs font-mono "
-                            "text-amber-400 hover:text-amber-300")}
-      (let [total (findings-row-total findings)]
-        (str "◆ what this cluster has learned — " total
-             (if (= 1 total) " row" " rows")
-             " across " (count findings)
-             (if (= 1 (count findings)) " kind" " kinds")))]
-     [:div {:class "mt-1.5"} (knowledge-cards findings)]]))
-
 (defn- thinking-bubble
   "Placeholder bubble pinned under the newest card while the agent is
    `:running` — it 'resolves' into the real cards on the next morph.
@@ -641,7 +546,7 @@
    (str "thinking — turn " (inc turns) " …")])
 
 (defn- html-pane-fragment
-  [agent-id {:keys [html-cards agent-tile elided findings turn-durs agent]}]
+  [agent-id {:keys [html-cards agent-tile elided turn-durs agent]}]
   (let [running? (= :running (:seon.agent/state agent))]
     [:div {:id (html-pane-id agent-id)
            :class "flex flex-col h-full overflow-hidden"}
@@ -665,8 +570,6 @@
         [:div {:class (str "border border-amber-700/60 rounded p-1 mb-2 "
                            "bg-base-900/60")}
          agent-tile])
-      ;; Cross-agent knowledge — any agent's findings render here.
-      (knowledge-group findings)
       ;; render-cap note — oldest entities beyond the bound are not
       ;; materialized at all (seon.render/render-cap); collapsed static
       ;; cards make them low-value, so say how many were skipped.
@@ -1206,7 +1109,7 @@
 
 (defn- agents-dash-fragment
   "The whole mission-control surface — ONE morph target (`#agents-dash`)
-   so the SSE listener re-renders strip + tiles + knowledge atomically.
+   so the SSE listener re-renders strip + tiles atomically.
    Derived 100% from the DB at render time.
 
    Header chips are USER-meaningful by default: AGENTS · TURNS
@@ -1228,7 +1131,6 @@
         {::keys [agent-count turn-count fact-count
                  datom-count fn-count schema-count test-count]}
         (cluster-stats db)
-        findings (findings-data db)
         b        (brand/info db)]
     [:div {:id "agents-dash" :class "flex flex-col gap-4"}
      [:div {:class "flex items-center gap-4 flex-wrap"}
@@ -1316,14 +1218,6 @@
              active)
        [:p {:class "text-text-500 italic text-xs"}
         "no active agents — boot one via the REPL and it will appear here live"])
-     (when (seq findings)
-       [:section
-        [:h2 {:class (str "text-xs font-semibold text-amber-400 uppercase "
-                          "tracking-wider mb-2 font-mono")}
-         (str "◆ what this cluster has learned · "
-              (findings-row-total findings) " rows · "
-              (count findings) " kinds")]
-        (knowledge-cards findings)])
      ;; Completed agents — queryable history, HIDDEN by default (task
      ;; #10 demo half). The `?completed=1` query param reveals them —
      ;; same view-state-in-the-URL pattern as `?system=1`. Not resumed

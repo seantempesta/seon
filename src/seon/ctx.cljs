@@ -929,10 +929,9 @@
     "STANDING TEACHINGS:\n"
     "- Consult stored knowledge FIRST — it is DISCOVERABLE, not dumped:\n"
     "  <inventory> lists every stored KIND + its attrs (run\n"
-    "  (seon.db/store-inventory) — your creation turn already did); when\n"
-    "  a stored finding is relevant to your task, <findings-pointer>\n"
-    "  names the kind + the query, so you READ the rows by QUERYING\n"
-    "  rather than from a wall of text. Datalog the existing attrs for\n"
+    "  (seon.db/store-inventory) — your creation turn already did), so\n"
+    "  you READ the rows by QUERYING rather than from a wall of text.\n"
+    "  Datalog the existing attrs for\n"
     "  anything you need. The inventory lists the data added AFTER\n"
     "  bootstrap; the full system inventory — the core's own\n"
     "  fn/schema/test index included — is one call away:\n"
@@ -1964,9 +1963,9 @@
    from the message log at render time — the per-turn self-fold
    (from = to = me) never closes the window, unlike [[inbox-count]]'s
    any-outbound window (opus-live-tests 2026-06-12 finding 1: gating
-   `<turns>`/`<findings-pointer>` on inbox-count made them
+   `<turns>` on inbox-count made it
    first-turn-only — dead exactly where the countdown matters). The
-   ONE gate both sections consume; nothing stored, nothing to clear
+   gate the turns section consumes; nothing stored, nothing to clear
    (docs/seon/concepts/reactive-context)."
   {:malli/schema [:=> [:cat :map] :boolean]}
   [{:seon.agent/keys [id] db :seon.db/db}]
@@ -1993,20 +1992,6 @@
                   (or (nil? reply-at)
                       (<= (.getTime ^js reply-at)
                           (.getTime ^js inbound-at)))))))
-
-(defn latest-inbound-text
-  "Content of the agent's MOST RECENT live inbound message, regardless
-   of fold/reply state — the question text source for
-   `seon.agent.findings/findings-pointer-block` (the pointer must name
-   the live question on EVERY turn of a wake, not just before the
-   first self-fold). \"\" when no live inbound exists."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.agent/keys [id] db :seon.db/db}]
-  (let [id     (resolve-id id)
-        db     (or db @db/*conn*)
-        my-eid (:db/id (db/entity {:seon.db/db db
-                                   :seon.db/ref [:seon.agent/id id]}))]
-    (or (second (when my-eid (latest-live-inbound db my-eid))) "")))
 
 (defn localized-now
   "The current wall-clock time rendered in the HUMAN'S timezone (the
@@ -2105,7 +2090,7 @@
    STABLE prefix (every section through :namespaces — byte-stable
    within a session given the deterministic rendering) and the
    VOLATILE tail (everything after: your-entity, live-tile, warnings,
-   open-todos, transcript, turns, findings-pointer, prompt).
+   open-todos, transcript, turns, inventory, prompt).
 
    In-band because the agent loop hands providers ONE assembled
    string (`llm-fn` is fn-of-ctx-string): [[split-context]] recovers
@@ -2158,19 +2143,12 @@
      8. :turns       — the turn-budget countdown (one line, mid-task
                        only; derived, vanishes when idle) — just
                        above the prompt tail for salience
-     9. :findings-pointer — the question-adjacent relevance pointer
-                       (L12): 1–3 lines naming the stored kinds whose
-                       terms overlap the open question, plus the query
-                       that reads their rows (the agent reads stored
-                       findings by QUERYING — no raw row dump in the
-                       prompt); derived, vanishes when idle or when
-                       nothing overlaps
-    10. :inventory   — the cheap <data-inventory> map: one line per
+     9. :inventory   — the cheap <data-inventory> map: one line per
                        stored KIND with each attr's live row count
                        (user-domain first); derived from
                        seon.db/store-inventory, vanishes when the store
                        holds no post-bootstrap data
-    11. :prompt      — the §2.9 status line + clean REPL prompt
+    10. :prompt      — the §2.9 status line + clean REPL prompt
                        (always changing — the volatile tail's end)
 
    The dead sections (capabilities, exemplars, schema-catalog,
@@ -2196,8 +2174,6 @@
     :seon.render/ai 'seon.ctx/transcript-section}
    {:seon.ctx/name :turns        :seon.ctx/priority 90
     :seon.render/ai 'seon.agent.turns/turns-section}
-   {:seon.ctx/name :findings-pointer :seon.ctx/priority 95
-    :seon.render/ai 'seon.agent.findings/findings-pointer-section}
    {:seon.ctx/name :inventory    :seon.ctx/priority 97
     :seon.render/ai 'seon.ctx/inventory-section}
    {:seon.ctx/name :prompt       :seon.ctx/priority 99

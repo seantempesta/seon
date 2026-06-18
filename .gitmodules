@@ -109,3 +109,9 @@
 [submodule "reference-code/proximum"]
 	path = reference-code/proximum
 	url = https://github.com/replikativ/proximum.git
+[submodule "reference-code/js-genai"]
+	path = reference-code/js-genai
+	url = https://github.com/googleapis/js-genai
+[submodule "reference-code/java-genai"]
+	path = reference-code/java-genai
+	url = https://github.com/googleapis/java-genai

@@ -792,10 +792,8 @@
    BOOTSTRAP row ([[bootstrap-row-ids]]) — kinds the compiled
    core's boot index registered, as opposed to agent-registered
    kinds. Used by [[store-inventory]] for its user-domain-first
-   ordering and by `seon.agent.findings` for its user-domain filter —
-   ONE derivation, shared (the prior findings-side twin query is
-   gone). The 2-arity takes a precomputed bootstrap set so one scan
-   serves both consumers."
+   ordering. The 2-arity takes a precomputed bootstrap set so one scan
+   can serve multiple consumers."
   {:malli/schema
    [:function
     [:=> [:catn [::db ::db-val]] ::kind-set]
