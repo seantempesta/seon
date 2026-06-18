@@ -213,12 +213,17 @@
   {:malli/schema [:=> [:catn [:conn :any]]
                   [:map [:seon.embed/installed? :boolean]]]}
   [conn]
-  (d/transact conn (embedding-attr-schema))
-  (when-not (index-live? conn)
-    ;; About to (re)instantiate via finalize-secondary-indices -> create-index.
-    ;; Clear any stale konserve store id so create-store does not collide. The
-    ;; store is a derived cache; deleting it loses nothing (vectors are in AEVT
-    ;; and re-index on the :building backfill).
-    (delete-index-store!)
-    (d/transact conn [(index-def)]))
+  (let [live? (index-live? conn)]
+    ;; When the index is on-schema but NOT live (fresh conn, or a reopened conn
+    ;; whose versioned restore failed), the FIRST tx below triggers
+    ;; `finalize-secondary-indices` -> `create-index`, which collides on any
+    ;; konserve store id left behind by the failed restore. Clear it FIRST so
+    ;; the (re)instantiation gets a clean store. The store is a derived cache;
+    ;; deleting it loses nothing — the vectors are in AEVT and the index
+    ;; backfills from them (:building -> :ready). No-op when already live.
+    (when-not live?
+      (delete-index-store!))
+    (d/transact conn (embedding-attr-schema))
+    (when-not (index-live? conn)
+      (d/transact conn [(index-def)])))
   {:seon.embed/installed? true})

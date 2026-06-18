@@ -63,10 +63,12 @@ NOT pod-side (Proximum is JVM-only, Java 22+). Embeddings come from an
    the rest compact (token-budgeted)
 ```
 
-- **Schema:** `:seon.fn/embedding` (a `:db.type/tuple` of floats) + a
-  `:db.secondary/type :proximum` index over it (declared via schema tx;
-  datahike backfills + maintains). Possibly `:db.secondary/only true` so the
-  raw vector lives only in the secondary, not the primary indices.
+- **Schema:** `:seon/embedding` (a `:db.type/tuple` of floats, cardinality/one)
+  + a `:db.secondary/type :proximum` index over it (declared via schema tx;
+  datahike backfills + maintains). **DECIDED (P2-A): NOT `:db.secondary/only`** —
+  the raw vector lives in the PRIMARY AEVT (durable truth) and the Proximum HNSW
+  is a derived cache datahike rebuilds from AEVT. See the 2b FOUNDATION note for
+  why `:db.secondary/only` is fatal here.
 - **Embed-on-persist:** hook the existing `:seon.fn` tee/persist path. Hash the
   source; if the hash is unchanged, skip (cache). Else call the embeddings API,
   store the vector. Embedding happens **on the wire-server** (owns the index +
@@ -129,51 +131,98 @@ work — see below). Locked facts:
      validation gate no longer rejects the `:db.secondary/*` family (datahike
      treats the whole `:db.*` cluster as system attrs; see `schema.cljc`
      `::schema-attribute` / `::secondary-index-attribute`).
-  2. `:db.secondary/only` bridge branch (`malli->datahike-attr` cljs +
-     `schema->attr-partial`/`malli-map->datahike-schema` clj): a
-     `[:vector {:db.secondary/only true} :float]` (or `:double`) emits a
-     SINGLE tuple value — `:db/valueType :db.type/tuple`,
-     `:db/cardinality :db.cardinality/one`, `:db.secondary/only true` —
-     instead of the cardinality-many a bare `[:vector X]` would give. Keyed off
-     the property + vector-of-float shape, NOT the literal attr keyword.
+  2. vector-of-floats tuple bridge branch (`schema->attr-partial` /
+     `malli-map->datahike-schema` clj — UPDATED P2-A): a `[:vector :float]`
+     (or `:double`), with or without `:db.secondary/only`, emits a SINGLE tuple
+     value — `:db/valueType :db.type/tuple`, `:db/cardinality
+     :db.cardinality/one` — instead of the cardinality-many a bare `[:vector
+     X]` of non-floats gives. Keyed off the FLOAT inner-type (an embedding is
+     one tuple, never N scalar datoms), NOT the literal attr keyword.
+     `:db.secondary/only` is now ORTHOGONAL: when present it is passed through
+     (and still requires a float inner — non-float `:db.secondary/only` throws);
+     when absent the tuple persists in the PRIMARY AEVT. `:seon/embedding` is
+     registered WITHOUT `:db.secondary/only` (durable + restore-safe). NOTE: the
+     `cljs` sibling (`seon.db.internal/malli->datahike-attr`) was left on the
+     original `:db.secondary/only`-keyed form — the pod does not register
+     `:seon/embedding` (single-segment ns is `:cljs`-gated out), so the
+     divergence is harmless; converge it if the pod ever needs a float tuple.
 - **`seon.embed` (`src/seon/embed.clj`, JVM/wire-server only):**
-  - registers `:seon/embedding` as `[:vector {:db.secondary/only true} :float]`.
-    **Locked attr name: `:seon/embedding`** (single-segment namespace,
-    deliberate — the attr is cross-cutting). Registration runs only from this
-    `.clj` ns; the pod's `:cljs`-gated `assert-multi-segment-namespace!` WOULD
-    reject `:seon/embedding`, so the pod must NOT register it (FLAG for 2c/2d
-    if the pod ever needs the attr registered).
-  - `install!` (idempotent) transacts the `:seon/embedding` attr decl (derived
-    via the bridge, not hand-written) + the **`:seon.embed/fn-index`**
-    `:proximum` secondary index over it: **dim 1536, distance `:cosine`,
-    capacity 10000**.
-  - **Index store backend = `:memory`** (deterministic `:id`), matching the
-    proven spike. *FLAG:* proximum's file backend is NOT boot-idempotent
-    (`create-index` always `create-store`s → throws "File store already exists"
-    on the second open; datahike's `restore-secondary-indices` re-calls
-    `create-index` with the same store-config every boot). With
-    `:db.secondary/only true` the raw vectors live ONLY in the secondary, so a
-    memory backend means embeddings are NOT durable across a wire-server
-    restart. Durability is 2b work; the likely answer is to DROP
-    `:db.secondary/only` so vectors persist in primary AEVT and datahike's
-    `build-secondary-index!` rebuilds the in-memory HNSW from AEVT on boot
-    (durable truth in datoms, HNSW graph as derived cache).
+  - registers `:seon/embedding` as `[:vector :float]` (NO `:db.secondary/only`
+    — see DURABILITY below). **Locked attr name: `:seon/embedding`**
+    (single-segment namespace, deliberate — the attr is cross-cutting).
+    Registration runs only from this `.clj` ns; the pod's `:cljs`-gated
+    `assert-multi-segment-namespace!` WOULD reject `:seon/embedding`, so the pod
+    must NOT register it (FLAG for 2c/2d if the pod ever needs it registered).
+  - `install!` (idempotent + restore-safe) transacts the `:seon/embedding` attr
+    decl (derived via the bridge, not hand-written) + the
+    **`:seon.embed/fn-index`** `:proximum` secondary index over it: **dim 1536,
+    distance `:cosine`, capacity 10000**. It only (re)instantiates when the
+    index is NOT live (`index-live?` checks `:secondary-indices`, not the
+    schema), clearing the stale konserve store id (`delete-index-store!`) FIRST
+    so `create-index` never collides.
+  - **DURABILITY — RESOLVED (P2-A): drop `:db.secondary/only`.** With it, the
+    primary indices hold only a content HASH and the full vector lives only in
+    the secondary; if the in-memory Proximum store fails to restore (it always
+    does — see RESTORE-ON-OPEN), the vector is unrecoverable, and even an AEVT
+    backfill would feed hashes, not vectors. So the vector now persists in the
+    PRIMARY AEVT (durable truth) and the HNSW is a pure derived cache.
+  - **RESTORE-ON-OPEN — RESOLVED + PROVEN.** Proximum `create-index`
+    unconditionally `create-store`s its konserve store (throws on a pre-existing
+    id). datahike's `restore-secondary-indices` runs the VERSIONED path
+    (proximum implements `IVersionedSecondaryIndex`): skeleton `create-store`,
+    then `-sec-restore` → `load-commit` connects looking for the flushed commit.
+    For a `:memory` store the commit is wiped on `d/release`, so `load-commit`
+    throws "Commit not found in storage", restore drops the index (leaking the
+    skeleton store). Fix: `install!` is the recovery point — on a reopened conn
+    it sees the index is not live, clears the leaked store, re-tx's the index
+    def; because the vectors are in AEVT, datahike's `instantiate-secondary`
+    marks it `:building` and the writer backfills the HNSW from AEVT
+    (`:building` → `:ready`). Backend stays `:memory` (deterministic `:id`); the
+    store is throwaway — deleting it loses nothing (vectors are in datoms).
+  - **PROVEN LIVE — 5/5 gate** (wire-server socket REPL 7891, file-backed
+    throwaway store, `tmp/embed-gate.clj`): (1) `install!` on a fresh
+    file-backed conn → `{:installed? true}`, index present; (2) two distinct
+    normalized 1536-float vectors transacted as `:seon/embedding` (eids 7, 8);
+    (3) KNN via `sec/-slice-ordered` → near-A `[[7 0.0000] [8 1.0000]]`, near-B
+    `[[8 0.0000] [7 1.0000]]` (cosine 0 at the match, 1.0 orthogonal); (4)
+    `install!` AGAIN → no throw, index still live, KNN still correct; (5) REOPEN
+    via `d/connect` on the same store → vectors persisted in AEVT (count 2),
+    restore drops the index (expected), `install!` rebuilds from AEVT → INDEX
+    PRESENT + KNN correct (`[[7 0.0000] [8 1.0000]]` / `[[8 0.0000] [7
+    1.0000]]`).
+  - **FLAG for P2-B — `ensure-db!` reopen vs the on-ensure hooks.** Reopen via
+    `seon.server.registry/ensure-db!` (the wire-server's real cluster-open path)
+    is NOT yet self-healing: the `::reactive`/`::raw-broadcast` on-ensure hook
+    (`boot.clj`) transacts the `:seon.subscription/id` schema DURING `ensure-db!`,
+    triggering `finalize-secondary-indices` → `create-index` on the store LEFT
+    BEHIND by the failed restore (before `install!` can run), re-throwing
+    "already exists" and wedging that tx. Proven: if the leaked store is cleared
+    before that first post-restore tx, the index self-heals from AEVT
+    (`tmp/hook-sim.clj`). Clean P2-B fixes: (a) the proximum secondary shim
+    should CONNECT-if-exists rather than always CREATE (root cause; fixes every
+    variant), or (b) clear the store + call `embed/install!` from a
+    `register-on-ensure-db-hook!` that runs BEFORE the reactive hook's schema tx.
 - **Live KNN proof (synthetic, no Gemini):** on the live wire-server (socket
-  REPL 7891), `install!` → `{:seon.embed/installed? true}` (idempotent across
-  3 calls); transacted two one-hot 1536-d vectors as `:seon/embedding`; KNN via
-  `(sec/-slice-ordered (get-in (d/db conn) [:secondary-indices
-  :seon.embed/fn-index]) {:vector qv :k 2} …)` returned the correct nearest
-  entity with cosine distance ≈0 and the orthogonal one at 1.0. Note: the
-  wire-server transacts ALL writes as raw `d/transact` through its single conn
-  (it does NOT run `seon.db/transact!`), so `install!` and the proof transact
-  directly through that conn — the faithful equivalent of the "via
+  REPL 7891), `install!` → `{:seon.embed/installed? true}` (genuinely idempotent
+  + restore-safe — see the 5/5 gate above); transacted two one-hot 1536-d
+  vectors as `:seon/embedding`; KNN via `(sec/-slice-ordered (get-in (d/db conn)
+  [:secondary-indices :seon.embed/fn-index]) {:vector qv :k 2} …)` returned the
+  correct nearest entity with cosine distance 0 and the orthogonal one at 1.0.
+  Note: the wire-server transacts ALL writes as raw `d/transact` through its
+  single conn (it does NOT run `seon.db/transact!`), so `install!` and the proof
+  transact directly through that conn — the faithful equivalent of the "via
   seon.db/transact!" wording in this PRD.
+
+**Durability + restore-on-open FLAG — RESOLVED (P2-A, proven 5/5 above):**
+dropped `:db.secondary/only` (vectors in AEVT) and made `install!` the
+restore-on-open recovery point (rebuild HNSW from AEVT). Remaining sub-item is
+the `ensure-db!`-hook self-heal (P2-B FLAG above).
 
 **Still needed for 2b (Gemini write pipeline):** the embeddings provider +
 model decision (Q1) and the embed-on-persist hook (hash source → cache-miss →
-embed → store `:seon/embedding`) + boot backfill; resolve the durability FLAG
-(drop `:db.secondary/only` for AEVT-backed rebuild, or a proximum restore
-path). `google-genai` is already on the `:writer` classpath for the embed call.
+embed → store `:seon/embedding`) + boot backfill (call `embed/install!` on each
+cluster conn open; resolve the `ensure-db!`-hook ordering — P2-B).
+`google-genai` is already on the `:writer` classpath for the embed call.
 - **2c — wire verb:** `knn-fn-search` (server: embed query + KNN; pod: client +
   pull full source). *Gate: pod retrieves correct top-k eids over the wire.*
 - **2d — ctx integration:** budget-aware `<namespaces>` render swap. *Gate:

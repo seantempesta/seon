@@ -31,6 +31,15 @@
    The wire-server is launched via `:writer` → `-m seon.server.boot` (deps.edn);
    `-main` delegates straight to `wire/-main`."
   (:require [datahike.api :as d]
+            ;; Register the :proximum secondary-index type with datahike's
+            ;; `datahike.index.secondary` multimethods BEFORE any cluster conn
+            ;; opens. seon.embed/install! bakes a :proximum index into a
+            ;; cluster store's schema; without this require, restoring that
+            ;; store on a fresh wire-server boot throws "Unknown secondary
+            ;; index type: :proximum" before any REPL/session can require it.
+            ;; Boot is the glue ns that owns the writer's full load path, so
+            ;; the require lives here (wire.clj stays secondary-index-free).
+            [datahike.index.secondary.proximum]
             [seon.server.wire :as wire]
             [seon.server.registry :as registry]
             [seon.server.broadcast :as bcast]

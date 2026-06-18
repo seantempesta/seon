@@ -161,6 +161,12 @@
             ;; embeddings-fn-retrieval PRD.)
             secondary-only? (boolean (or (:db.secondary/only entry-props)
                                          (:db.secondary/only (m/properties child-schema))))]
+        (when (and secondary-only? (not float-inner?))
+          (throw (ex-info
+                  (str ":db.secondary/only attr " attr-key
+                       " must be a vector of :float/:double; got inner type "
+                       inner-type)
+                  {:attr attr-key :inner-type inner-type})))
         (when (and (not float-inner?)
                    (contains? #{:vector :set :map} inner-type))
           (throw (ex-info
