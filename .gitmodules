@@ -1,117 +1,156 @@
 [submodule "reference-code/malli"]
 	path = reference-code/malli
 	url = https://github.com/metosin/malli.git
+	ignore = dirty
 [submodule "reference-code/gemini-mcp"]
 	path = reference-code/gemini-mcp
 	url = https://github.com/RLabs-Inc/gemini-mcp.git
+	ignore = dirty
 [submodule "reference-code/clj-kondo"]
 	path = reference-code/clj-kondo
 	url = https://github.com/clj-kondo/clj-kondo.git
+	ignore = dirty
 [submodule "reference-code/nrepl"]
 	path = reference-code/nrepl
 	url = https://github.com/nrepl/nrepl.git
+	ignore = dirty
 [submodule "reference-code/clj-reload"]
 	path = reference-code/clj-reload
 	url = https://github.com/tonsky/clj-reload.git
+	ignore = dirty
 [submodule "reference-code/clojure-mcp"]
 	path = reference-code/clojure-mcp
 	url = https://github.com/bhauman/clojure-mcp.git
+	ignore = dirty
 [submodule "reference-code/claude-agent-sdk-typescript"]
 	path = reference-code/claude-agent-sdk-typescript
 	url = https://github.com/anthropics/claude-agent-sdk-typescript
+	ignore = dirty
 [submodule "reference-code/claude-agent-sdk-demos"]
 	path = reference-code/claude-agent-sdk-demos
 	url = https://github.com/anthropics/claude-agent-sdk-demos
+	ignore = dirty
 [submodule "reference-code/babashka-process"]
 	path = reference-code/babashka-process
 	url = https://github.com/babashka/process
+	ignore = dirty
 [submodule "reference-code/datastar"]
 	path = reference-code/datastar
 	url = https://github.com/starfederation/datastar.git
+	ignore = dirty
 [submodule "reference-code/reveal"]
 	path = reference-code/reveal
 	url = https://github.com/vlaaad/reveal.git
+	ignore = dirty
 [submodule "reference-code/malli-datomic"]
 	path = reference-code/malli-datomic
 	url = https://github.com/Blasterai/malli-datomic
+	ignore = dirty
 [submodule "reference-code/spectomic"]
 	path = reference-code/spectomic
 	url = https://github.com/Provisdom/spectomic
+	ignore = dirty
 [submodule "reference-code/core.async"]
 	path = reference-code/core.async
 	url = https://github.com/clojure/core.async.git
+	ignore = dirty
 [submodule "reference-code/rewrite-clj"]
 	path = reference-code/rewrite-clj
 	url = https://github.com/clj-commons/rewrite-clj.git
+	ignore = dirty
 [submodule "reference-code/openclaw"]
 	path = reference-code/openclaw
 	url = https://github.com/openclaw/openclaw.git
+	ignore = dirty
 [submodule "reference-code/kaocha"]
 	path = reference-code/kaocha
 	url = https://github.com/lambdaisland/kaocha.git
+	ignore = dirty
 [submodule "reference-code/claude-code-lsps"]
 	path = reference-code/claude-code-lsps
 	url = https://github.com/boostvolt/claude-code-lsps.git
+	ignore = dirty
 [submodule "reference-code/integrant"]
 	path = reference-code/integrant
 	url = https://github.com/weavejester/integrant.git
+	ignore = dirty
 [submodule "reference-code/nippy"]
 	path = reference-code/nippy
 	url = https://github.com/taoensso/nippy.git
+	ignore = dirty
 [submodule "reference-code/test.check"]
 	path = reference-code/test.check
 	url = https://github.com/clojure/test.check.git
+	ignore = dirty
 [submodule "reference-code/expectations"]
 	path = reference-code/expectations
 	url = https://github.com/clojure-expectations/expectations.git
+	ignore = dirty
 [submodule "reference-code/obsidian-linter"]
 	path = reference-code/obsidian-linter
 	url = https://github.com/platers/obsidian-linter.git
+	ignore = dirty
 [submodule "reference-code/datahike"]
 	path = reference-code/datahike
 	url = https://github.com/seantempesta/datahike.git
+	ignore = dirty
 [submodule "reference-code/datahike-lmdb"]
 	path = reference-code/datahike-lmdb
 	url = https://github.com/replikativ/datahike-lmdb.git
+	ignore = dirty
 [submodule "reference-code/konserve-lmdb"]
 	path = reference-code/konserve-lmdb
 	url = https://github.com/replikativ/konserve-lmdb.git
+	ignore = dirty
 [submodule "reference-code/datastar-clojure"]
 	path = reference-code/datastar-clojure
 	url = https://github.com/starfederation/datastar-clojure.git
+	ignore = dirty
 [submodule "reference-code/hyperlith"]
 	path = reference-code/hyperlith
 	url = https://github.com/andersmurphy/hyperlith.git
+	ignore = dirty
 [submodule "reference-code/hermes-agent"]
 	path = reference-code/hermes-agent
 	url = https://github.com/nousresearch/hermes-agent
+	ignore = dirty
 [submodule "reference-code/posh"]
 	path = reference-code/posh
 	url = https://github.com/mpdairy/posh.git
+	ignore = dirty
 [submodule "reference-code/shadow-cljs"]
 	path = reference-code/shadow-cljs
 	url = https://github.com/thheller/shadow-cljs.git
+	ignore = dirty
 [submodule "reference-code/openai-node"]
 	path = reference-code/openai-node
 	url = https://github.com/openai/openai-node.git
+	ignore = dirty
 [submodule "reference-code/anthropic-sdk-typescript"]
 	path = reference-code/anthropic-sdk-typescript
 	url = https://github.com/anthropics/anthropic-sdk-typescript.git
+	ignore = dirty
 [submodule "reference-code/cider-nrepl"]
 	path = reference-code/cider-nrepl
 	url = https://github.com/clojure-emacs/cider-nrepl
+	ignore = dirty
 [submodule "reference-code/orchard"]
 	path = reference-code/orchard
 	url = https://github.com/clojure-emacs/orchard
+	ignore = dirty
 [submodule "reference-code/clojurescript"]
 	path = reference-code/clojurescript
 	url = https://github.com/clojure/clojurescript
+	ignore = dirty
 [submodule "reference-code/proximum"]
 	path = reference-code/proximum
 	url = https://github.com/replikativ/proximum.git
+	ignore = dirty
 [submodule "reference-code/js-genai"]
 	path = reference-code/js-genai
 	url = https://github.com/googleapis/js-genai
+	ignore = dirty
 [submodule "reference-code/java-genai"]
 	path = reference-code/java-genai
 	url = https://github.com/googleapis/java-genai
+	ignore = dirty
