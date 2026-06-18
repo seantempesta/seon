@@ -6,6 +6,65 @@ tags: [prd, agent, database, schema, cljs]
 
 # Embedding-based function retrieval (Proximum on the wire-server)
 
+> ## HANDOFF — read this first (2026-06-18 end of session)
+>
+> **Branch:** `feature/embeddings` (tracked on origin). `origin/main` is current
+> (`7d25126`) with all completed eval/ctx work + the embedding FOUNDATION.
+> Work continues on `feature/embeddings`.
+>
+> **Locked design (do NOT re-litigate):**
+> - ONE shared attr `:seon/embedding` (vector of float, dim **1536**), ONE
+>   Proximum secondary index over it on the JVM wire-server, queried over the
+>   wire. Type-scoping via datalog `:where` → eid set → Proximum entity-filter
+>   (any characteristic). New embeddable types need NO schema change — just
+>   start writing `:seon/embedding` + an `embed-text` clause.
+> - Model: **`gemini-embedding-2`** (current GA, 8192-token, **no `task_type`** —
+>   put the retrieval instruction in the query text), **cosine**, L2-normalize.
+>   Called from the JVM wire-server via `com.google.genai:google-genai` 1.59.0
+>   (the **Java** SDK; embedding co-located with the index). `GEMINI_API_KEY` is
+>   in env. Vendored: `reference-code/java-genai`, `reference-code/proximum`.
+> - Interface (proposed, confirmed): `seon.embed/search`/`search-pull`
+>   (^:async, map-in/out `:seon.embed/{query,k,where,eids}`), `install!`,
+>   `ensure-embedding!`/`reindex!`. See the "interface" discussion in the
+>   research docs.
+> - PROVEN live (3/3, clean margins): `tmp/embed-spike/` — standalone
+>   `proximum.core` AND through the datahike `:proximum` secondary index with
+>   real Gemini v2 embeddings on real Clojure fn source.
+>
+> **Foundation DONE (P2-A, committed `7d25126`, INERT — `install!` not yet
+> called on boot, no pipeline):** `deps.edn :writer` jvm-opts
+> (`--add-modules jdk.incubator.vector --enable-native-access=ALL-UNNAMED
+> -XX:+UseG1GC -Xmx2g`) + `src-secondary` path + proximum/google-genai deps;
+> `seon.db` `:db.secondary/*` bridge (`db/datahike/schema.clj`,
+> `db/internal.cljs`); `seon.embed/install!`; `boot.clj` requires the proximum
+> type. datahike fork pinned `@6cf05300` (4 sites) — already carries the shim
+> coerce(vector→float[]) + `:m`→`:M` patches.
+>
+> **★ NEXT TASK — the foundation's one real flaw (fix BEFORE the pipeline):**
+> The index currently **rebuilds from AEVT on every reopen** instead of
+> **restoring from its konserve store** — defeating Proximum's whole
+> persistence/versioning point. Root cause: the datahike→Proximum shim
+> (`reference-code/datahike/src-secondary/datahike/index/secondary/proximum.clj`)
+> implements `IVersionedSecondaryIndex` (`-sec-persist` via `proximum.sync!`,
+> `-sec-restore` via `load-commit`) BUT its `create-index` **eagerly creates a
+> fresh konserve store even for the reopen "skeleton"** (datahike calls
+> `create-index` with nil db → then `-sec-restore`), so the fresh store collides
+> with the one being restored. The P2-A agent worked around it by dropping
+> `:db.secondary/only` + rebuilding from AEVT — WRONG direction. Fix it at the
+> root in our fork: make open **restore-if-exists** (let `load-commit` populate;
+> don't allocate a store for the skeleton), re-enable `:db.secondary/only`
+> (vector lives only in Proximum's konserve store), verify a real reopen
+> RESTORES (instrument `load-commit` runs + no AEVT backfill), then
+> commit→push→bump (datahike fork `sync-upstream`, bump the 4 deps.edn shas).
+> Confirm the exact failure mode live first (it's my read of the code + the
+> agent's report).
+>
+> **Then:** P2-B (embed-on-persist + `reindex!`, Gemini via java-genai, source-
+> hash cache, wire `install!` into boot) → P2-C (`knn-search` wire verb +
+> pod `seon.embed/search`) → P2-D (pod ctx top-k full source) → 2e gym A/B.
+>
+> Java 22 is selected by `bin/seon` cross-platform (macOS/Linux/WSL).
+
 Implementation PRD. Phase 1 (datahike sync to upstream + Java 22) is DONE and
 live — this is Phase 2. Read the two research docs before coding:
 [[research/embeddings-fn-retrieval-2026-06-18]] (design + alternatives) and
