@@ -528,6 +528,139 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; Urgent broken-tile warning (Group C / §C.2). check-tile-unresolved is the
+;; one URGENT check: when a live tile points at a fn that isn't loaded, the
+;; human is staring at the calm "preparing this view…" placeholder RIGHT NOW.
+;; It is DERIVED (query the stored pointer + resolvability), self-heals, and
+;; renders FIRST with the louder ‼ URGENT template.
+;; ---------------------------------------------------------------------------
+
+(defn- with-tile-db
+  "Open a fresh conn, transact `tx`, call `body` with the post-tx db value.
+   Like with-seeded-db but with caller-supplied tx (the broken-tile tests
+   each need their own tile pointer). Returns a Promise."
+  [tx body]
+  (-> (client/open-agent-conn!)
+      (.then (fn [conn]
+               (binding [db/*conn* conn]
+                 (-> (db/transact! {:seon.db/conn conn :seon.db/tx-data tx})
+                     (.then (fn [env]
+                              (is (:seon.db/ok? env)
+                                  (str "tile tx lands — " (pr-str (:seon.db/error env))))
+                              (binding [db/*conn* conn]
+                                (body @conn))))))))))
+
+(deftest tile-unresolved-is-urgent-and-names-the-broken-tile
+  ;; tile points at an UNRESOLVABLE qualified symbol → fires, urgent? true,
+  ;; affected names the symbol + which agent's tile is dead.
+  (async done
+    (-> (with-tile-db
+          [{:seon.agent/id "warntst-tile01"
+            :seon.render.live-tile/content 'my.agent.warntst/missing-tile}]
+          (fn [db]
+            (let [r     (warn/check-tile-unresolved {:seon.db/db db})
+                  entry (first (:seon.warn/affected r))]
+              (is (= :tile-unresolved (:seon.warn/kind r)))
+              (is (true? (:seon.warn/urgent? r))
+                  "broken-tile is the URGENT tier")
+              (is (= #{"my.agent.warntst/missing-tile"} (affected-syms r))
+                  "names the exact unresolvable symbol")
+              (is (= "live tile of warntst-tile01" (:seon.warn/where entry))
+                  "names which agent's live tile is dead")
+              (is (str/includes? (:seon.warn/explain r) "BROKEN RIGHT NOW")
+                  "wording tells the agent the human is hitting this NOW"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest tile-unresolved-clean-when-symbol-resolves-or-is-literal
+  ;; a tile pointing at a fn that EXISTS (warn/render-warnings resolves) and a
+  ;; tile holding LITERAL hiccup both produce NOTHING — only genuinely
+  ;; unresolvable qualified symbols fire.
+  (async done
+    (-> (with-tile-db
+          [{:seon.agent/id "warntst-rslv01"
+            :seon.render.live-tile/content 'seon.warn/render-warnings}
+           {:seon.agent/id "warntst-hicc01"
+            :seon.render.live-tile/content [:div {:class "seon-tile"} "literal"]}]
+          (fn [db]
+            (let [r (warn/check-tile-unresolved {:seon.db/db db})]
+              (is (= [] (:seon.warn/affected r))
+                  "resolving symbol + literal hiccup → clean, no warning"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest tile-unresolved-self-heals-when-symbol-resolves
+  ;; the reactive guarantee: re-point the SAME agent's tile at a fn that
+  ;; exists and the warning vanishes — same db lineage, no acknowledgement,
+  ;; nothing stored to clear.
+  (async done
+    (-> (client/open-agent-conn!)
+        (.then (fn [conn]
+          (binding [db/*conn* conn]
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data
+                   [{:seon.agent/id "warntst-heal01"
+                     :seon.render.live-tile/content 'my.agent.warntst/not-yet-defined}]})
+                (.then (fn [env]
+                  (is (:seon.db/ok? env) "broken-tile tx lands")
+                  (let [r (warn/check-tile-unresolved {:seon.db/db @conn})]
+                    (is (= #{"my.agent.warntst/not-yet-defined"} (affected-syms r))
+                        "fires while the symbol is unresolvable"))
+                  ;; re-point the tile at a fn that resolves → self-heal
+                  (db/transact!
+                    {:seon.db/conn conn
+                     :seon.db/tx-data
+                     [{:seon.agent/id "warntst-heal01"
+                       :seon.render.live-tile/content 'seon.warn/render-warnings}]})))
+                (.then (fn [env]
+                  (is (:seon.db/ok? env) "re-point tx lands")
+                  (let [r2 (warn/check-tile-unresolved {:seon.db/db @conn})]
+                    (is (= [] (:seon.warn/affected r2))
+                        "symbol now resolves → warning vanished, same db lineage"))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest render-warnings-places-urgent-cluster-first
+  ;; an URGENT broken-tile defect co-occurring with a NON-urgent failed-eval
+  ;; defect → the urgent cluster renders at the TOP with the louder template,
+  ;; ahead of the ordinary cluster.
+  (async done
+    (let [now (js/Date.)
+          t   (fn [ms] (js/Date. (+ (.getTime now) ms)))]
+      (-> (with-tile-db
+            [;; URGENT: broken live tile
+             {:seon.agent/id "warntst-both01"
+              :seon.render.live-tile/content 'my.agent.warntst/missing-tile}
+             ;; NON-urgent: a failed eval after a user message
+             {:seon.agent.message/id "MSGwarnurg0001"           ; 14 chars
+              :seon.agent.message/from {:seon.user/id "user"}
+              :seon.agent.message/to [{:seon.agent/id "warntst-recv01"}]
+              :seon.agent.message/content "hi"
+              :seon.agent.message/at (t 0)
+              :seon.agent.message/hops 0}
+             {:seon.eval/id "EVLwarnURGFAIL"
+              :seon.eval/at (t 100)
+              :seon.eval/source "(boom)"
+              :seon.eval/ok? false
+              :seon.eval/error "boom — generic failure"}]
+            (fn [db]
+              (let [text     (warn/render-warnings {:seon.db/db db})
+                    urg-idx  (.indexOf text "‼ URGENT [tile-unresolved]")
+                    fail-idx (.indexOf text "[failed-evals]")]
+                (is (str/starts-with? text "<warnings>"))
+                (is (not (neg? urg-idx))
+                    "urgent broken-tile cluster renders with the loud banner")
+                (is (not (neg? fail-idx))
+                    "the co-occurring non-urgent failed-eval cluster renders too")
+                (is (< urg-idx fail-idx)
+                    "URGENT cluster comes FIRST, before the ordinary cluster")
+                (is (str/includes? text "FIX THIS IMMEDIATELY")
+                    "the urgent template is louder than the ordinary one"))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ---------------------------------------------------------------------------
 ;; Clustered renderer.
 ;; ---------------------------------------------------------------------------
 

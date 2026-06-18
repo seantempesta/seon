@@ -52,6 +52,7 @@
 (schema/register! :seon.warn/where   :string)
 (schema/register! :seon.warn/explain :string)
 (schema/register! :seon.warn/example :string)
+(schema/register! :seon.warn/urgent? :boolean)
 
 (schema/register! :seon.warn/affected-entry
   [:map
@@ -71,7 +72,11 @@
    [:seon.warn/kind     :seon.warn/kind]
    [:seon.warn/affected :seon.warn/affected]
    [:seon.warn/explain  :seon.warn/explain]
-   [:seon.warn/example  :seon.warn/example]])
+   [:seon.warn/example  :seon.warn/example]
+   ;; URGENCY tier: a check sets this true when its defect is one the
+   ;; human is hitting RIGHT NOW (e.g. a broken live tile). render-warnings
+   ;; renders urgent clusters FIRST with a louder template. Absent ≡ false.
+   [:seon.warn/urgent?  {:optional true} :seon.warn/urgent?]])
 
 ;; ============================================================
 ;; Corpus access + Malli-form walking helpers
@@ -868,6 +873,7 @@
                   [?e :seon.agent/id ?aid]
                   [?e :seon.render.live-tile/content ?content]]})]
     {:seon.warn/kind :tile-unresolved
+     :seon.warn/urgent? true
      :seon.warn/affected
      (->> rows
           (keep (fn [[aid content]]
@@ -880,11 +886,15 @@
           (sort-by :seon.warn/sym)
           vec)
      :seon.warn/explain
-     (str "An agent's live tile (:seon.render.live-tile/content) names a "
-          "fn that isn't loaded in the runtime, so the human sees a "
-          "\"preparing this view…\" placeholder instead of the view. "
-          "(Re)define the fn so the symbol resolves (eval its defn), or "
-          "point the tile at a fn that exists (or at literal hiccup).")
+     (str "Your live tile is BROKEN RIGHT NOW: "
+          ":seon.render.live-tile/content points at a fn that isn't loaded "
+          "in the runtime, so the human is staring at a calm \"preparing "
+          "this view…\" placeholder INSTEAD of your view — this very "
+          "render. The fn does not exist (most likely its defn failed to "
+          "parse/eval — check your failed evals above). FIX IT IMMEDIATELY: "
+          "define the named fn (eval its defn) and the tile auto-updates the "
+          "moment the symbol resolves — no re-pointing needed. (Or point the "
+          "tile at a fn that already exists, or at literal hiccup.)")
      :seon.warn/example
      (str "(defn my-kb-tile\n"
           "  {:malli/schema [:=> [:cat :seon.render/system-input]\n"
@@ -976,16 +986,37 @@
        (str/join ", " (map render-affected-entry affected))
        " (" (count affected) "). Please correct before moving on."))
 
+(defn- render-urgent-cluster
+  "A LOUD cluster for a `:seon.warn/urgent? true` check — something the
+   human is hitting THIS render (e.g. a broken live tile). Unmistakable
+   `‼ URGENT` banner, then the same explanation + fix example + affected
+   list. Rendered at the TOP of <warnings>, ahead of the ordinary
+   contract/runtime clusters."
+  [{:seon.warn/keys [kind affected explain example]}]
+  (str "‼ URGENT [" (name kind) "] " explain "\n"
+       "  Fix example:\n"
+       (str/join "\n" (map #(str "    " %) (str/split-lines example)))
+       "\n"
+       "  Affecting: "
+       (str/join ", " (map render-affected-entry affected))
+       " (" (count affected) "). FIX THIS IMMEDIATELY — it auto-resolves "
+       "the moment you do."))
+
 (defn render-warnings
   "Run the registry and render the non-clean checks as a single
-   `<warnings>` block, one cluster per kind. Empty string when clean.
-   Scope the corpus checks with `:seon.warn/ns`; omit it for the
-   whole-core overview."
+   `<warnings>` block. URGENT clusters (`:seon.warn/urgent? true`) render
+   FIRST with a louder template; the remaining clusters follow in registry
+   order, one cluster per kind. Empty string when clean. Scope the corpus
+   checks with `:seon.warn/ns`; omit it for the whole-core overview."
   {:malli/schema [:=> [:cat ::check-request] :string]}
   [req]
-  (let [clusters (run-checks req)]
+  (let [clusters         (run-checks req)
+        {urgent  true
+         ordinary false} (group-by (comp boolean :seon.warn/urgent?) clusters)]
     (if (seq clusters)
       (str "<warnings>\n"
-           (str/join "\n\n" (map render-cluster clusters))
+           (str/join "\n\n"
+                     (concat (map render-urgent-cluster urgent)
+                             (map render-cluster ordinary)))
            "\n</warnings>")
       "")))
