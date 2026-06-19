@@ -1,6 +1,6 @@
 ---
 type: component
-status: active
+status: draft
 tags: [component, agent, database]
 ---
 
@@ -11,6 +11,41 @@ indexed source is injected into the agent's per-turn context as the
 `<relevant-source>` section. The feature is OFF by default behind one env
 switch (`SEON_EMBED`); a consumer who does not opt in pays zero cost and gets
 byte-identical behavior.
+
+## Status — EXPERIMENTAL, unfinished, not thoroughly tested
+
+This feature is **unfinished** and **off by default**. The plumbing works
+end-to-end and the safety contract is solid, but the central question — does
+injecting retrieved source actually make agents *better*? — is **unmeasured**.
+Treat it as an experiment to opt into, not a proven capability.
+
+**Verified (bounded):**
+
+- The mechanism end-to-end — register → embed-on-write → durable Proximum index
+  → `knn-search` → pod `search-pull` → `<relevant-source>` injection — on
+  synthetic/small corpora with real Gemini, plus a few live spot-checks (a
+  matching query returns the right function; type-scoping works; the index
+  restores from konserve on reopen).
+- The OFF contract: `SEON_EMBED` unset → zero machinery, zero Gemini calls,
+  byte-identical prompts. Full CLJS suite green (565 tests).
+
+**NOT done / NOT validated:**
+
+- **The core hypothesis is unmeasured.** Whether full-source-top-k retrieval
+  beats the existing compact `<namespaces>` render on real agent tasks was never
+  A/B-tested. The gym scoring harness can't reach the wire-server's index (it
+  boots isolated `:memory` conns), so that A/B is blocked pending a way to embed
+  a scenario corpus into a test index.
+- **Relevance quality is unvalidated** on real tasks. The query is the raw latest
+  inbound message (a first cut, untuned); off-corpus queries return mediocre
+  neighbours (a distance cutoff is not yet applied).
+- **Knowledge base is disabled** — only functions are indexed; the kb is a
+  documented example, not a built workflow.
+- **Corpus coverage is partial** — the backfill is bounded (64/boot); whole-core
+  embedding (cost + Gemini batch-size handling) is not productionized.
+- **Latency/cost under load is unmeasured** — each retrieval-on turn adds a wire
+  round-trip + a Gemini query-embed (fail-soft, but not load-tested).
+- Not exercised in a real multi-agent production run.
 
 ## What it is
 
