@@ -312,10 +312,27 @@ deps_fingerprint() {
 }
 
 gitlibs_missing_sha() {
-  # True if any :git/sha pinned in deps.edn has no ~/.gitlibs checkout.
-  local sha
+  # True if any :git/sha pinned in deps.edn is NOT READY to use — either it has
+  # no ~/.gitlibs checkout at all, OR it is checked out but UNPREPPED (a
+  # :deps/prep-lib git dep, e.g. the datahike fork that compiles Java sources,
+  # is cloned but has no target/classes yet). The second case is the fresh-user
+  # hole: a prior `clojure -P`/`-Stree` clones the fork but prep never runs, so
+  # the checkout exists while the classpath still fails "libs must be prepared".
+  # Treating unprepped-but-cloned as "needs prep" makes auto-prep self-heal it.
+  local sha dir
   for sha in $(grep ':git/sha' deps.edn | grep -oE '[0-9a-f]{40}' | sort -u); do
-    ls -d "$HOME"/.gitlibs/libs/*/*/"$sha" >/dev/null 2>&1 || return 0
+    dir="$(ls -d "$HOME"/.gitlibs/libs/*/*/"$sha" 2>/dev/null | head -1)"
+    # no checkout → needs prep
+    [ -n "$dir" ] || return 0
+    # checkout present but declares :deps/prep-lib and has no prep output →
+    # needs prep. The marker is the prepped lib's :ensure dir (target/classes
+    # for the datahike/proximum-style Java-compiling forks); only enforce it
+    # when the dep actually declares :deps/prep-lib, so non-prep git deps
+    # (e.g. konserve) are not falsely flagged.
+    if grep -q ':deps/prep-lib' "$dir/deps.edn" 2>/dev/null \
+       && [ ! -d "$dir/target/classes" ]; then
+      return 0
+    fi
   done
   return 1
 }

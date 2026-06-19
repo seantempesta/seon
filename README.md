@@ -86,7 +86,7 @@ Run the core, talk to an agent, watch it work:
 ```bash
 git clone https://github.com/seantempesta/seon && cd seon
 npm install
-clojure -X:deps prep :aliases '[:writer]'   # one-time: datahike's java prep
+bin/seon prep             # one-time: clones + Java-preps the datahike fork (:writer + :cljs)
 export DEEPSEEK_API_KEY=sk-...
 bin/seon start all        # cljs build → wire-server → agent pod, ready-gated
 open http://localhost:7890/agents
