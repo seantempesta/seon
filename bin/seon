@@ -336,13 +336,16 @@ maybe_prep_deps() {
     return 0
   fi
   echo "  ▶ deps changed (or git libs unprepped) for $name — running"
-  echo "    clojure -P -M:$alias && clojure -X:deps prep :aliases '[:$alias]'"
+  echo "    clojure -X:deps prep :aliases '[:$alias]' && clojure -P -M:$alias"
   echo "    SYNCHRONOUSLY before spawn (a fresh git dep can take minutes)"
   echo "    progress: logs/$name.log"
   {
     echo "== [bin/seon] auto-prep :$alias started $(date -u +%FT%TZ) =="
-    clojure -P -M:"$alias" \
-      && clojure -X:deps prep :aliases "[:$alias]" \
+    # prep BEFORE -P: a prep-requiring git dep (e.g. datahike, which compiles
+    # Java sources) makes `clojure -P` fail with "libs must be prepared" — so
+    # prep must run first, else the && short-circuits and prep never happens.
+    clojure -X:deps prep :aliases "[:$alias]" \
+      && clojure -P -M:"$alias" \
       && echo "== [bin/seon] auto-prep :$alias done $(date -u +%FT%TZ) =="
   } >> "$(log_file "$name")" 2>&1 || {
     echo "  ✗ deps prep for :$alias FAILED — read: bin/seon logs $name" >&2
@@ -378,8 +381,9 @@ cmd_prep() {
   fi
   local a
   for a in $prep_aliases; do
-    echo "▶ prepping :$a — clojure -P -M:$a && clojure -X:deps prep :aliases '[:$a]'"
-    if ! { clojure -P -M:"$a" && clojure -X:deps prep :aliases "[:$a]"; }; then
+    echo "▶ prepping :$a — clojure -X:deps prep :aliases '[:$a]' && clojure -P -M:$a"
+    # prep first (see auto-prep note): -P fails on an unprepped prep-lib.
+    if ! { clojure -X:deps prep :aliases "[:$a]" && clojure -P -M:"$a"; }; then
       echo "✗ prep for :$a FAILED" >&2
       return 1
     fi
