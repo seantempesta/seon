@@ -157,6 +157,21 @@
    (-> (rpc sock (routed {"op" "schema"} opts))
        (then (fn [resp] (if (get resp "ok") (readT (get resp "result")) resp))))))
 
+(defn knn-search
+  "Embedding KNN over the wire (P2-C). The pod sends the NL `query` TEXT (plain
+   CBOR string — the wire-server prepends the retrieval instruction + embeds via
+   Gemini, both of which live on the JVM, never the pod) and `k`; `eids` is an
+   OPTIONAL type-scope (a coll of entity-ids the wire-server restricts KNN to,
+   sent as a Transit-JSON value payload like every other value field). Resolves
+   to the decoded hits vector `[{:seon.embed/eid e :seon.embed/distance d} …]`
+   (distance-ascending), or the raw not-ok envelope on error."
+  ([query k] (knn-search default-req-sock query k nil {}))
+  ([sock query k eids opts]
+   (-> (rpc sock (routed (cond-> {"op" "knn-search" "query" query "k" k}
+                           (seq eids) (assoc "eids" (T (vec eids))))
+                         opts))
+       (then (fn [resp] (if (get resp "ok") (readT (get resp "result")) resp))))))
+
 ;; ---------- raw tx feed (subscribe-tx / next-tx-event / unsubscribe-tx) ----------
 
 (defn subscribe-tx

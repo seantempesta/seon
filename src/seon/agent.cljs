@@ -101,11 +101,14 @@
     [seon.ctx :as ctx]
     [seon.ctx.namespaces :as ctx-namespaces]
     [seon.ctx.prompt :as ctx-prompt]
+    [seon.ctx.relevant :as ctx-relevant]
     [seon.ctx.transcript :as ctx-transcript]
     [seon.ctx.warnings :as ctx-warnings]
     [seon.ctx.your-entity :as ctx-your-entity]
     [seon.db :as db]
     [seon.debug :as debug]
+    [seon.embed :as embed]
+    [seon.embed.stash :as embed-stash]
     [seon.eval :as seval]
     [seon.log :as seon-log]
     [seon.render :as render]
@@ -901,6 +904,58 @@
       (let [input (ai-render-input slot @db/*conn* agent-id ent)]
         (or (:seon.render/text (render/ai-render slot input)) "")))))
 
+(defn embed-retrieval-on?
+  "True when the P2-D embedding-retrieval toggle is set — the env var
+   `SEON_EMBED_RETRIEVAL` is PRESENT (any value, incl. empty string). UNSET
+   ⇒ false ⇒ the prefetch never fires and `render-prompt` runs on the exact
+   pre-retrieval code path (the byte-identical-OFF contract)."
+  []
+  (some? (.. js/process -env -SEON_EMBED_RETRIEVAL)))
+
+(defn ^:async prefetch-and-render-prompt!
+  "Render this turn's prompt, OPTIONALLY prefetching embedding-retrieval hits
+   first. The async seam: the wire `knn-search` is awaited HERE (in the async
+   `run-turn!`), the hits stashed in a fiber-local store, then the SYNCHRONOUS
+   `render-prompt` runs inside that scope so the `:relevant-source` section
+   reads the hits without making the value-returning `assemble-context` async.
+
+   DEFAULT-OFF (byte-identical): when [[embed-retrieval-on?]] is false this is
+   exactly `(render-prompt agent-id)` — no wire call, no stash, no behavior
+   change. When ON: derive the query from the latest live inbound (sync), then
+   KNN over the WHOLE embedding index — NO `:where`/`:eids` scope, so the
+   wire-server runs unscoped KNN across EVERY embedded entity of ANY kind (fns,
+   KB, future). This is deliberately kind-GENERAL: 'the most relevant context
+   for your task', not 'the most relevant function'. (A `:where` scope is NOT
+   used because the only kind-agnostic 'has an embedding' marker — the
+   secondary-only `:seon/embedding` — does not resolve on the pod's local db,
+   and `:seon.embed/source-hash` is a JVM-write-side attr unregistered in the
+   pod's `seon.schema`, so `where->eids`→`db/query` would throw; unscoped is the
+   correct whole-index search and needs no local resolution.) `:seon.embed/db`
+   is still threaded so the hit-ENRICHMENT pulls each entity's display fields
+   (fn source / kb title+body / …) from the pod's LOCAL db. `k =
+   seon.ctx.relevant/top-k`, FAIL-SOFT to nil hits on any error (the section
+   then renders blank), render inside the stash."
+  [agent-id]
+  (if-not (embed-retrieval-on?)
+    (render-prompt agent-id)
+    (let [db    @db/*conn*
+          query (ctx/retrieval-query {:seon.db/db db :seon.agent/id agent-id})
+          hits  (if (str/blank? query)
+                  nil
+                  (-> (.then
+                        (embed/search-pull
+                          {:seon.embed/query query
+                           :seon.embed/k ctx-relevant/top-k
+                           :seon.embed/db db})
+                        (fn [{:seon.embed/keys [hits]}] hits))
+                      (.catch (fn [e]
+                                (js/console.warn
+                                  "[seon.agent] embed prefetch failed (fail-soft → no hits):"
+                                  (or (.-message e) (str e)))
+                                nil))))
+          hits  (await hits)]
+      (embed-stash/with-hits hits #(render-prompt agent-id)))))
+
 (declare with-turn-body!)
 
 (defn ^:async with-turn!
@@ -1175,7 +1230,12 @@
         session-id (:seon.agent.session/id session)
         turn-id    (db/new-id!)
         turn-idx   (turn-index session-id)
-        prompt     (render-prompt id)
+        ;; OPTIONAL embedding-retrieval prefetch (P2-D, env-gated default-OFF):
+        ;; when SEON_EMBED_RETRIEVAL is UNSET this is exactly `(render-prompt
+        ;; id)` — byte-identical to the pre-retrieval path. When set, the wire
+        ;; KNN is awaited here + stashed so the sync :relevant-source section
+        ;; reads it (the async seam — `assemble-context` stays sync).
+        prompt     (await (prefetch-and-render-prompt! id))
         ;; Blob tier — full prompt to disk, GATED behind the debug-capture
         ;; flag (seon.debug). OFF by default (stops the unbounded
         ;; logs/prompts growth); when ON, prompt.txt lands in the unified

@@ -55,24 +55,39 @@ tags: [prd, agent, database, schema, cljs]
 > type. datahike fork pinned `@6cf05300` (4 sites) — already carries the shim
 > coerce(vector→float[]) + `:m`→`:M` patches.
 >
-> **★ NEXT TASK — the foundation's one real flaw (fix BEFORE the pipeline):**
-> The index currently **rebuilds from AEVT on every reopen** instead of
-> **restoring from its konserve store** — defeating Proximum's whole
-> persistence/versioning point. Root cause: the datahike→Proximum shim
-> (`reference-code/datahike/src-secondary/datahike/index/secondary/proximum.clj`)
-> implements `IVersionedSecondaryIndex` (`-sec-persist` via `proximum.sync!`,
-> `-sec-restore` via `load-commit`) BUT its `create-index` **eagerly creates a
-> fresh konserve store even for the reopen "skeleton"** (datahike calls
-> `create-index` with nil db → then `-sec-restore`), so the fresh store collides
-> with the one being restored. The P2-A agent worked around it by dropping
-> `:db.secondary/only` + rebuilding from AEVT — WRONG direction. Fix it at the
-> root in our fork: make open **restore-if-exists** (let `load-commit` populate;
-> don't allocate a store for the skeleton), re-enable `:db.secondary/only`
-> (vector lives only in Proximum's konserve store), verify a real reopen
-> RESTORES (instrument `load-commit` runs + no AEVT backfill), then
-> commit→push→bump (datahike fork `sync-upstream`, bump the 4 deps.edn shas).
-> Confirm the exact failure mode live first (it's my read of the code + the
-> agent's report).
+> **★ P2-A.5 — DONE (restore-on-reopen + durable store + secondary-only),
+> proven live (2026-06-18). One PENDING orchestrator action: push + sha bump.**
+> The index now **RESTORES from its konserve store on reopen** (was: rebuilt
+> from AEVT). Fixed at the root in our datahike fork's `:proximum` shim
+> (`reference-code/datahike/src-secondary/datahike/index/secondary/proximum.clj`,
+> local commit `5f62d57f`): the factory is **connect-if-exists** — when its
+> konserve store already holds a committed index it returns a passive restore
+> SKELETON (no `create-store`, no `:index/config`/`:branches` write) so
+> `restore-secondary-indices` → `-sec-restore` → `load-commit` repopulates the
+> HNSW from durable storage. (Both datahike `create-index` call sites pass
+> `db=nil`, so existence — not db — is the discriminator; the recon's
+> "non-nil db on create" note was wrong, verified.) `seon.embed` now:
+> `:seon/embedding` is `:db.secondary/only` (vector lives ONLY in Proximum's
+> store; primary AEVT holds a hash); the index store is a DURABLE `:file`
+> backend sibling of the cluster's primary store (`<primary-parent>/embedding-index`,
+> derived from the conn); the index renamed `:seon.embed/fn-index` →
+> `:seon.embed/index`; the AEVT-rebuild workaround (`delete-index-store!`,
+> `index-live?` branch) DELETED; `install!` simplified to declare-once. CLJS
+> bridge brought to float-inner parity with CLJ. **Live proof** (synthetic
+> 1536-float vectors, standalone `:writer`-classpath harness
+> `tmp/embed-restore/`): GATE 1 — reopen restores (load-commit ran, status
+> `:ready`, index live immediately, primary holds only a HASH before+after,
+> KNN exact), 5/5; multi-reopen 4 cycles 20/20 (writes persist across cycles);
+> GATE 2 — 100 concurrent writes commit in 1.3s with NO `-sec-flush` deadlock.
+> **`-sec-flush` deadlock = NON-ISSUE on this runtime** (falsified): the
+> wire-server runs core.async 1.9 on Java 22 where go-blocks are VIRTUAL
+> threads (verified `Thread.isVirtual`), so the blocking `<!!` has no bounded
+> pool to exhaust — NO framework change made, shim comment documents the
+> condition. **PENDING (orchestrator): push the fork (`sync-upstream`) + bump
+> the 4 deps.edn `:git/sha` sites (:171/:194/:220/:309 from `6cf05300`) + the
+> `reference-code/datahike` submodule pointer.** Until then the shim runs from
+> the local `src-secondary` extra-path (no sha needed for it to take effect on
+> `:writer` restart); the framework was NOT touched.
 >
 > **Then (build general — fns AND KB are first-class, ns next):**
 > - **P2-B** write side: `embed-text` multimethod on `:seon/kind` with clauses
@@ -87,6 +102,38 @@ tags: [prd, agent, database, schema, cljs]
 >   fns feed the fns section, retrieved KB feeds a relevant-knowledge section,
 >   etc. Each ctx section that wants relevance calls `seon.embed/search` with its
 >   own `:where`. → 2e gym A/B (does retrieval beat the current static render).
+>
+> **★ P2-A.5-robustness — DONE (stale-orphan store + restore-failure guard),
+> proven live (2026-06-18).** The index store stays a SIBLING of the primary
+> store (it CANNOT be nested inside it: konserve's `:file` `-keys` enumerates
+> every first-level dir entry as a candidate key and routes unrecognized ones
+> through foreign-key migration — a nested proximum subdir crashes `k/keys` in
+> `migrate-file-v1` AND would be swept by `d/gc-storage!`; both falsified live).
+> The sibling layout's cost is that `bin/seon cluster reset` wipes only
+> `<cluster>/store` and orphans `<cluster>/embedding-index` — so a fresh
+> `install!` would declare the index against a committed-but-orphaned store, the
+> fork factory returns a restore-skeleton, and the next commit's `-sec-flush`
+> `bug!`-crashes. **Fix (seon-side only — NO fork/shim change, NO sha bump):**
+> `seon.embed/install!` now (1) on a FRESH declare, deletes a committed-but-
+> orphaned store first (`committed-index-store-exists?` mirrors the factory's
+> private `committed-index-exists?*`; `delete-index-store!` rm's the file store)
+> so the factory takes the CREATE path; (2) on a REOPEN where the index is
+> declared but did NOT restore (durable store missing/corrupt), throws LOUDLY
+> `:seon.embed/index-restore-failed` BEFORE any transact (no silent delete/
+> re-declare — that would lose secondary-only vectors). The shim's fail-loud
+> skeleton is UNCHANGED. NOTE: `delete-index-store!` + `index-live?` are BACK
+> (the earlier handoff said the AEVT-rebuild versions were deleted) — these are
+> re-introduced for the DIFFERENT stale-orphan/restore-guard purpose, not AEVT
+> rebuild. **Live proof** (standalone `:writer`-classpath harnesses under
+> `tmp/embed-restore/`, synthetic 1536-float vectors): `stale_store_gate.clj`
+> 17/17 (fresh / cluster-reset / repeated-reset, all KNN exact, NO skeleton
+> crash); `orphan_bug_control.clj` reproduces the pre-fix `-sec-flush` crash
+> with a RAW declare (proves the fix is load-bearing); `restore_fail_loud.clj`
+> 5/5 (declared-but-not-live throws the precise error, index left intact);
+> `gate_check.clj` UNCHANGED still 5/5 (reopen-restore not regressed);
+> `keyless_smoke.clj` UNCHANGED still 5/5; real-Gemini `p2b_gate.clj` still ALL
+> PASS (write side composes with the new install!). `subdir_probe.clj` /
+> `signal_probe.clj` are the falsification probes for the design choice.
 >
 > Java 22 is selected by `bin/seon` cross-platform (macOS/Linux/WSL).
 

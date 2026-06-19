@@ -228,14 +228,19 @@
               (is (pos? (count text))
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
               (is (= [:system :namespaces :your-entity :live-tile
-                      :warnings :open-todos :transcript :turns
-                      :inventory :prompt]
+                      :warnings :open-todos :relevant-source :transcript
+                      :turns :inventory :prompt]
                      sections)
                   "the v4 core-default section names, in order
                    (static→volatile) — the catalogs, capabilities,
                    exemplars, namespace-context, and seed sections are
                    all DEAD (context-v4); :inventory is the cheap
-                   <data-inventory> surface in the volatile tail"))))
+                   <data-inventory> surface in the volatile tail.
+                   :relevant-source (P2-D, env-gated default-OFF) is in
+                   the LAYOUT provenance even when it renders blank — its
+                   TEXT is dropped from the prompt (see ctx_test
+                   off-path-is-byte-identical), so the assembled prompt
+                   is unchanged when no retrieval stash is active"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

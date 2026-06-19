@@ -152,6 +152,7 @@
     [seon.ctx.warnings]
     [seon.ctx.transcript]
     [seon.ctx.inventory]
+    [seon.ctx.relevant]
     [seon.ctx.prompt]
     [seon.platform]
     ;; Phase B item 9 — shared read-side wrapper over the analyzer

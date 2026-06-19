@@ -153,12 +153,13 @@
             ;; the float inner-type alone. `:db.secondary/only true` is an
             ;; ORTHOGONAL property: when present the full value lives ONLY in
             ;; the secondary (Proximum) index and the primary holds a content
-            ;; hash; when ABSENT the full vector persists in the primary AEVT
-            ;; (durable truth) and the secondary HNSW is a derived cache that
-            ;; datahike rebuilds from AEVT on conn open. For :seon/embedding we
-            ;; want the latter (durable + restore-safe), so we DO NOT set
-            ;; `:db.secondary/only`. (Locked use: :seon/embedding, the
-            ;; embeddings-fn-retrieval PRD.)
+            ;; hash; when ABSENT the full vector persists in the primary AEVT.
+            ;; `:seon/embedding` SETS `:db.secondary/only true`: the durable
+            ;; home of the vector is Proximum's own konserve store, and datahike
+            ;; RESTORES the HNSW from it on conn open (the P2-A.5 connect-if-exists
+            ;; fork fix) — it is NOT rebuilt from AEVT (no vectors there, only a
+            ;; hash). (Locked use: :seon/embedding, the embeddings-fn-retrieval
+            ;; PRD.)
             secondary-only? (boolean (or (:db.secondary/only entry-props)
                                          (:db.secondary/only (m/properties child-schema))))]
         (when (and secondary-only? (not float-inner?))

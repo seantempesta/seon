@@ -1,43 +1,59 @@
 (ns seon.embed
   "Embedding-index FOUNDATION for the wire-server (JVM, sole datahike writer).
 
-   This namespace owns the LOCKED facts of the embedding-based fn-retrieval
-   feature (PRD agent-runtime/embeddings-fn-retrieval-2026-06-18, Phase-2):
+   This namespace owns the LOCKED facts of the embedding-based retrieval
+   substrate (PRD agent-runtime/embeddings-fn-retrieval-2026-06-18, Phase-2).
+   It is general over ANY indexable string — functions are the originating
+   use case, but the knowledge base (`my.kb.*`), namespaces, and arbitrary
+   future kinds all flow through the SAME single attr + single index:
 
      - the `:seon/embedding` attribute schema — a single tuple value
-       (`:db.type/tuple`, cardinality/one) holding the per-function source
-       embedding. The raw vector persists in the PRIMARY datahike indices
-       (AEVT) — that is the durable truth. We deliberately DO NOT set
-       `:db.secondary/only`: a secondary-only attr stores only a content hash
-       in the primary, so the real vector would be lost if the in-memory
-       Proximum index ever failed to restore (and the AEVT-backfill on boot
-       would feed hashes, not vectors, to the index). Keeping the vector in
-       AEVT makes the Proximum HNSW a pure DERIVED CACHE that datahike rebuilds
-       from datoms on every conn open.
-     - the `:seon.embed/fn-index` `:proximum` secondary index over it
+       (`:db.type/tuple`, cardinality/one) holding an entity's source/text
+       embedding. It is `:db.secondary/only`: the full vector lives ONLY in
+       Proximum's own durable konserve store; the primary datahike indices
+       (AEVT) hold a content hash, never the raw 1536 floats. The vector is
+       therefore RESTORED from Proximum's konserve store on conn open — never
+       rebuilt from AEVT (there are no vectors in AEVT to rebuild from). This
+       is the whole point of Proximum's CoW persistence/versioning.
+     - the `:seon.embed/index` `:proximum` secondary index over it
        (HNSW, cosine distance, dim 1536, capacity 10000).
 
-   `install!` declares both onto a datahike conn. It is idempotent: it skips
-   the index def entirely when a `:seon.embed/fn-index` secondary-index entry
-   already exists on the conn's current schema, and re-transacting the same
-   attr `:db/ident` is a harmless datahike upsert.
+   `install!` declares both onto a datahike conn. It is idempotent: re-running
+   it on a conn that already carries the attr + index on its schema is a
+   harmless datahike upsert.
 
-   RESTORE-ON-OPEN: datahike's `restore-secondary-indices` (writing.cljc)
-   re-instantiates every secondary index on every conn open by calling
-   `sec/create-index`, which for `:proximum` unconditionally creates a fresh
-   konserve store (`create-store-sync`). A *memory* store with a fixed id
-   collides on a second `create-index` within a JVM, the index is dropped, and
-   KNN stops working. `delete-index-store!` drops the store id from konserve's
-   registry; `install!` calls it, and any caller re-opening a conn in the SAME
-   JVM calls it before re-connecting so restore starts clean. A fresh JVM has a
-   clean registry, so the wire-server's normal restart path never collides. The
-   store is throwaway — the durable vectors live in AEVT and re-index on open.
+   RESTORE-ON-OPEN (the P2-A.5 fix): datahike's `restore-secondary-indices`
+   (writing.cljc) re-instantiates every secondary index on every conn open. For
+   a `:proximum` index it dispatches `-sec-restore`, which `load-commit`s the
+   committed HNSW from Proximum's konserve store. Our datahike fork's `:proximum`
+   factory (src-secondary/.../proximum.clj) is CONNECT-IF-EXISTS: when the
+   konserve store already exists it returns a passive restore-skeleton instead
+   of `create-store`-ing a fresh one — so `-sec-restore`→`load-commit` populates
+   the real index from durable storage. The durable konserve store therefore
+   must survive a JVM restart, so it is a FILE backend sibling of the cluster's
+   primary store (see `index-store-config`). No AEVT backfill, no delete-store
+   dance, no rebuild.
 
-   IMPORTANT — this is the FOUNDATION only. It does NOT embed text (no Gemini
-   call), does NOT add a wire verb, and does NOT touch ctx rendering. Those
-   are Phase-2 steps 2b/2c/2d. Embedding vectors are transacted by the caller
-   (later: the embed-on-persist pipeline); this ns only makes the substrate
-   ready to receive them.
+   P2-B — the embedding WRITE side (this ns, below the foundation). A
+   downstream consumer points the embedder at ANY string attribute (the
+   TRIGGER) via `register-embeddable!`; every entity carrying that attr is
+   embedded (Gemini `gemini-embedding-2`, dim 1536, L2-normalized) + indexed
+   automatically on transact, with a SHA-256 `:seon.embed/source-hash` cache so
+   an unchanged entity never pays a Gemini call. There is NO `:seon/kind` enum —
+   the attribute IS the type (idiomatic Datomic). Functions (`:seon.fn/source`)
+   and a knowledge base (`:my.kb/body`) are the two shipped registrations over
+   the SAME single `:seon/embedding` attr + single Proximum index.
+
+   The write-path integration is a SEAM: `seon.embed` installs an
+   `augment-tx-with-embeddings` tx-augmenter into `seon.server.wire` (loaded
+   here at the bottom of the ns) and an `::embed` on-ensure-db hook into the
+   registry (runs `install!` + a bounded `backfill!`). `wire.clj`/`registry.clj`
+   never require this ns — the dependency points the other way, so they still
+   load on the plain :test/:dev JVM without the Proximum/Gemini classpath.
+
+   The embedding query side (NL-query → KNN, retrieval-instruction prefix on the
+   query) is P2-C — `knn` here is the direct index access it (and the harness)
+   build on. DOCUMENTS get no prefix; only queries do (v2 has no taskType).
 
    Runs on the WIRE-SERVER classpath (the `:writer` alias), which exposes
    `reference-code/datahike/src-secondary` + the `org.replikativ/proximum`
@@ -46,15 +62,40 @@
    conn (it does NOT route through `seon.db/transact!`); `install!` follows
    the same convention — it transacts directly via `datahike.api/transact`."
   (:require
+    [clojure.java.io :as io]
+    [clojure.string :as str]
     [datahike.api :as d]
     ;; Loading this ns registers the :proximum secondary-index type with
     ;; datahike's `datahike.index.secondary` multimethods. Required before
     ;; any tx that declares a `:db.secondary/type :proximum` index.
     [datahike.index.secondary.proximum]
-    [konserve.memory :as km]
+    [datahike.index.secondary :as sec]
+    ;; entity-set: build the EntityBitSet entity-filter for type-scoped KNN
+    ;; (the pod resolves a :where to eids; the server restricts KNN to them).
+    [datahike.index.entity-set :as es]
+    ;; konserve.core + proximum.writing: read whether the Proximum konserve
+    ;; store at a derived path already holds a COMMITTED index, so install!'s
+    ;; stale-orphan-store cleanup uses the SAME definition of "committed store
+    ;; exists" the fork's :proximum factory does (committed-index-exists?*).
+    [konserve.core :as k]
+    [proximum.writing :as pwr]
     [seon.db.datahike.schema :as dh-schema]
-    [seon.schema :as schema])
-  (:import [java.util UUID]))
+    [seon.schema :as schema]
+    ;; The write-path SEAM points THIS way (embed -> wire/registry), never the
+    ;; reverse — so wire.clj/registry.clj stay loadable on the plain :test/:dev
+    ;; JVM (no Proximum/Gemini classpath). boot.clj requires seon.embed so these
+    ;; installs run on the :writer classpath.
+    [seon.server.wire :as wire]
+    [seon.server.registry :as registry]
+    ;; Transit-JSON value codec for the knn-search verb's value payloads
+    ;; (eids in, hits out) — same codec boot.clj's verbs use.
+    [seon.server.transit :as transit]
+    [taoensso.timbre :as log])
+  (:import [com.google.genai Client]
+           [com.google.genai.types EmbedContentConfig EmbedContentResponse]
+           [java.io File]
+           [java.security MessageDigest]
+           [java.util UUID]))
 
 ;;; --- Locked constants ------------------------------------------------------
 
@@ -65,8 +106,11 @@
   1536)
 
 (def ^:const index-ident
-  "`:db/ident` of the Proximum secondary index over `:seon/embedding`."
-  :seon.embed/fn-index)
+  "`:db/ident` of the Proximum secondary index over `:seon/embedding`. Kind-
+   agnostic: one index covers fns, the knowledge base, namespaces, and any
+   future embeddable entity (the originating name `:seon.embed/fn-index` was
+   renamed when the substrate generalized beyond fns)."
+  :seon.embed/index)
 
 (def ^:const distance
   "HNSW distance metric. MUST be `:cosine` — Proximum's `create-index`
@@ -81,149 +125,883 @@
 ;;; --- Schema ----------------------------------------------------------------
 ;;;
 ;;; `:seon/embedding` has a SINGLE-segment namespace (`seon`). This is
-;;; deliberate (the attr is cross-cutting — it hangs off any `:seon.fn`).
-;;; `seon.schema/register!`'s multi-segment-namespace assertion is `:cljs`-
-;;; gated only, so registering it from this `.clj` ns is fine. If the POD
-;;; ever needs to register `:seon/embedding`, that assertion WILL fire —
-;;; FLAG it then (out of scope here).
+;;; deliberate (the attr is cross-cutting — it hangs off any embeddable
+;;; entity, of any kind). `seon.schema/register!`'s multi-segment-namespace
+;;; assertion is `:cljs`-gated only, so registering it from this `.clj` ns is
+;;; fine. If the POD ever needs to register `:seon/embedding`, that assertion
+;;; WILL fire — FLAG it then (out of scope here).
 ;;;
-;;; A vector-of-floats is keyed by the bridge to emit a single tuple value
-;;; (`:db.type/tuple`, cardinality/one) — never a cardinality-many scalar
-;;; attr. We deliberately DO NOT set `:db.secondary/only`: see the namespace
-;;; docstring (durable vector lives in primary AEVT; HNSW is a derived cache).
-;;; See `seon.db.datahike.schema/schema->attr-partial` (clj) and
-;;; `seon.db.internal/malli->datahike-attr` (cljs).
+;;; A vector-of-floats carrying `:db.secondary/only true` is keyed by the
+;;; bridge to a single tuple value (`:db.type/tuple`, cardinality/one) whose
+;;; full vector lives ONLY in the Proximum secondary index; the primary
+;;; datahike indices (AEVT) hold a content hash. The HNSW is the durable home
+;;; of the vector — datahike RESTORES it from Proximum's konserve store on conn
+;;; open (the P2-A.5 connect-if-exists fix), never rebuilds it from AEVT. See
+;;; `seon.db.datahike.schema/schema->attr-partial` (clj — the `:db.secondary/only`
+;;; tuple branch) and the CLJS sibling `seon.db.internal/malli->datahike-attr`.
 
 (schema/register! :seon/embedding
-                  [:vector :float])
+                  [:vector {:db.secondary/only true} :float])
+
+;;; --- Source-hash cache attr ------------------------------------------------
+;;;
+;;; `:seon.embed/source-hash` is the SHA-256 (hex) of the COMPOSED document
+;;; string an entity's trigger-attr produced when its `:seon/embedding` was
+;;; last computed. It lives in the PRIMARY datahike store (a plain string,
+;;; queryable/pullable — unlike the secondary-only embedding), so the
+;;; embed-on-write path can read it back and SKIP the paid Gemini call when the
+;;; composed text is unchanged. A docstring/source/title edit changes the
+;;; composed string → changes the hash → re-embeds. One attr, shared by every
+;;; embeddable entity-kind (fns, kb rows, …), same as `:seon/embedding`.
+(schema/register! :seon.embed/source-hash :string)
 
 ;;; --- Index store config ----------------------------------------------------
 ;;;
-;;; STORE BACKEND — :memory, deterministic id, DELETED-BEFORE-CREATE.
+;;; STORE BACKEND — DURABLE FILE store, a SIBLING of the cluster's primary
+;;; datahike store.
 ;;;
-;;; RESOLVED (2026-06-18, P2-A). The Proximum konserve store is a pure DERIVED
-;;; CACHE: the durable embedding vectors live in the primary AEVT (we dropped
-;;; `:db.secondary/only`), and datahike re-indexes the HNSW from AEVT on every
-;;; conn open. So the store's *contents* never need to survive — only its
-;;; *creation* must not collide.
+;;; The `:seon/embedding` attr is `:db.secondary/only`: the full vector lives
+;;; ONLY in this Proximum konserve store, NOT in the primary AEVT. So the store
+;;; MUST survive a wire-server restart, or the vectors are lost. A `:file`
+;;; konserve store sibling of the primary LMDB store satisfies that with no
+;;; lock contention (separate directories, separate konserve backends).
 ;;;
-;;; The collision: `proximum/create-index` UNCONDITIONALLY calls
-;;; `create-store-sync` -> konserve `-create-store`, which THROWS when a store
-;;; with that id already exists (memory: JVM-global `memory-store-registry`;
-;;; file: the on-disk dir). datahike's `restore-secondary-indices` and
-;;; `finalize-secondary-indices` both call `create-index` with the SAME stored
-;;; `:store-config` (so a fixed id collides on any second `create-index` in a
-;;; JVM — a re-`install!`, or a same-JVM conn re-open). A fresh JVM has a clean
-;;; registry, so the wire-server's normal restart path never collides; only a
-;;; same-process re-open does.
+;;; The path is derived from the live conn's own primary `:store` config so the
+;;; index store always lands beside whichever cluster store the conn opened
+;;; (e.g. primary `data/clusters/default/store` →
+;;; `data/clusters/default/embedding-index`). A `:memory`-backed primary conn
+;;; (tests) falls back to a `:memory` index store whose `:id` mixes the index
+;;; ident WITH the conn's primary :memory store id — non-durable (tests don't
+;;; reopen), but COLLISION-FREE across conns in one JVM. (A bare per-index id
+;;; collided two memory conns in the same JVM on the JVM-global memory konserve
+;;; registry: the 2nd conn's `install!` saw the 1st's committed index, got a
+;;; restore-skeleton on a fresh-declare path, and the next commit's `-sec-flush`
+;;; threw "only -sec-restore should be called on a skeleton". Per-conn id fixes
+;;; it.)
 ;;;
-;;; Fix: a :memory backend with a deterministic id, plus `delete-index-store!`
-;;; which drops that id from konserve's registry. `install!` calls it before
-;;; transacting; callers that re-open a conn in the SAME JVM (e.g. the live
-;;; verification harness, or any in-process reconnect) call it before
-;;; re-connecting so restore's `create-index` starts from a clean slate. The
-;;; store is throwaway, so deleting it loses nothing — the vectors reload from
-;;; AEVT.
+;;; RESTORE: our datahike fork's `:proximum` factory is connect-if-exists, so a
+;;; reopen restores the committed HNSW from this store via `-sec-restore`→
+;;; `load-commit` (NO create-store collision, NO AEVT rebuild — there are no
+;;; vectors in AEVT). See the namespace docstring.
+;;;
+;;; SIBLING, NOT NESTED (the P2-A.5 robustness decision): the index store is a
+;;; SIBLING of — never a subdir INSIDE — the primary store dir. konserve's
+;;; `:file` `-keys` enumerates EVERY first-level dir entry as a candidate key
+;;; (only `.nfs*` is filtered), and unrecognized entries are routed through
+;;; foreign-key migration. A proximum store nested at `<primary>/embedding-index`
+;;; would therefore (a) crash `k/keys` (konserve tries to migrate the subdir as
+;;; an old-schema file — VERIFIED live, ClassCastException in migrate-file-v1),
+;;; and (b) be swept as a non-reachable key by `d/gc-storage!`. Sibling layout
+;;; keeps the two konserve keyspaces disjoint. The cost of the sibling layout —
+;;; `bin/seon cluster reset` wipes only `<cluster>/store`, leaving the sibling
+;;; `<cluster>/embedding-index` behind as a STALE orphan — is handled in
+;;; `install!`: a fresh declare against a committed-but-orphaned store deletes
+;;; the orphan before declaring (see `committed-index-store-exists?` /
+;;; `delete-index-store!` / `install!`).
 
 (defn index-store-id
   "Deterministic konserve store id (UUID) for the Proximum index, derived from
-   the index ident. Stable across opens so `delete-index-store!` can target it
-   without a live conn."
+   the index ident. Konserve namespaces stored data under this `:id`; deriving
+   it from the index ident keeps it stable across opens."
   {:malli/schema [:=> [:cat] :uuid]}
   []
   (UUID/nameUUIDFromBytes (.getBytes (str index-ident) "UTF-8")))
 
-(defn- index-store-config
-  "In-memory konserve store-config for the Proximum index, with a
-   deterministic `:id`. The store is a derived cache (see the section comment);
-   `delete-index-store!` clears it before each `create-index`."
-  []
-  {:backend :memory
-   :id      (index-store-id)})
+(defn- primary-store-path
+  "The on-disk path of `conn`'s primary `:file` datahike store, or nil when the
+   primary is not file-backed (e.g. a `:memory` test conn)."
+  [conn]
+  (let [store (get-in (d/db conn) [:config :store])]
+    (when (= :file (:backend store))
+      (:path store))))
 
-(defn delete-index-store!
-  "Drop the Proximum index's konserve memory store from the JVM-global
-   registry, so the NEXT `create-index` (via `install!` or a conn re-open's
-   `restore-secondary-indices`) does not collide on the existing id. Safe to
-   call when no store exists (returns `{:seon.embed/store-deleted? false}`).
-   Loses nothing durable — the vectors live in AEVT and re-index on open."
-  {:malli/schema [:=> [:cat] [:map [:seon.embed/store-deleted? :boolean]]]}
-  []
-  {:seon.embed/store-deleted?
-   (boolean (km/delete-mem-store (index-store-id)))})
+(defn index-store-config
+  "Durable konserve store-config for the Proximum index over `conn`'s embeddings.
+
+   File-backed (`:file`) at a directory SIBLING of `conn`'s primary store
+   (`<primary-parent>/embedding-index`), so the committed HNSW survives a
+   wire-server restart and `-sec-restore` can `load-commit` it on reopen. When
+   `conn`'s primary store is NOT file-backed (a `:memory` test conn), falls back
+   to a `:memory` store keyed by the index id (non-durable; tests don't reopen).
+   Deterministic `:id` either way."
+  {:malli/schema [:=> [:catn [:conn :any]] [:map-of :keyword :any]]}
+  [conn]
+  (let [id (index-store-id)]
+    (if-let [primary (primary-store-path conn)]
+      (let [parent (or (.getParent (File. ^String primary)) ".")
+            path   (str parent "/embedding-index")]
+        {:backend :file :path path :id id})
+      {:backend :memory :id id})))
 
 ;;; --- Schema/index tx forms -------------------------------------------------
 
 (defn embedding-attr-schema
-  "The datahike attr declaration for `:seon/embedding`, DERIVED from the
-   registered Malli schema via the bridge (never hand-written). Returns a
-   single-entry vector ready for `datahike.api/transact`."
+  "The datahike attr declarations for the embedding substrate's PRIMARY-store
+   attrs — `:seon/embedding` (secondary-only; AEVT holds the hash) AND
+   `:seon.embed/source-hash` (the plain-string cache key). Both DERIVED from
+   their registered Malli schemas via the bridge (never hand-written). Under
+   the wire-server's `:schema-flexibility :write` conn, the hash attr must be
+   declared before any embed-on-write tx asserts it. Returns a vector ready for
+   `datahike.api/transact`."
   {:malli/schema [:=> [:cat] [:vector [:map-of :keyword :any]]]}
   []
   (dh-schema/malli-map->datahike-schema
-    [:map [:seon/embedding :seon/embedding]]))
+    [:map
+     [:seon/embedding :seon/embedding]
+     [:seon.embed/source-hash :seon.embed/source-hash]]))
 
 (defn index-def
   "The `:proximum` secondary-index entity declaring an HNSW index over
-   `:seon/embedding`. `:dim`/`:distance`/`:capacity` are the locked constants;
-   `:store-config` is an in-memory konserve store (a derived cache — see the
-   store-config section comment)."
-  {:malli/schema [:=> [:cat] [:map-of :keyword :any]]}
-  []
+   `:seon/embedding` for `conn`. `:dim`/`:distance`/`:capacity` are the locked
+   constants; `:store-config` is the DURABLE file store sibling of `conn`'s
+   primary store (see `index-store-config`)."
+  {:malli/schema [:=> [:catn [:conn :any]] [:map-of :keyword :any]]}
+  [conn]
   {:db/ident            index-ident
    :db.secondary/type   :proximum
    :db.secondary/attrs  [:seon/embedding]
    :db.secondary/config {:dim          embedding-dim
                          :distance     distance
                          :capacity     capacity
-                         :store-config (index-store-config)}})
+                         :store-config (index-store-config conn)}})
+
+(defn index-declared?
+  "True iff `conn`'s current schema declares the `:seon.embed/index` secondary
+   index (the index entity has been transacted). A reopened conn restores the
+   index INSTANCE automatically from the durable konserve store (the P2-A.5
+   connect-if-exists fix), so a declared index is also a live one — `install!`
+   only needs to declare it once on a fresh store."
+  {:malli/schema [:=> [:catn [:conn :any]] :boolean]}
+  [conn]
+  (boolean (get-in (d/db conn) [:schema index-ident :db.secondary/type])))
 
 (defn index-live?
-  "True iff `conn`'s current db has a LIVE `:seon.embed/fn-index` instance in
-   `:secondary-indices` (not merely declared on the schema). A reopened conn
-   carries the index on its schema but NOT in `:secondary-indices` — its
-   versioned restore fails (the in-memory Proximum store is wiped on release),
-   so the instance must be rebuilt from AEVT (see `install!`)."
+  "True iff the `:seon.embed/index` Proximum index INSTANCE is live on `conn`'s
+   db (present in `:secondary-indices`). After a successful reopen-restore a
+   declared index is also live. A DECLARED-but-NOT-live index is the failure
+   signal: datahike's `restore-secondary-indices` could not `-sec-restore` the
+   committed HNSW (with `:db.secondary/only` ON that is data loss — the vectors
+   live ONLY in the konserve store)."
   {:malli/schema [:=> [:catn [:conn :any]] :boolean]}
   [conn]
   (boolean (get-in (d/db conn) [:secondary-indices index-ident])))
 
+;;; --- Stale-orphan konserve store handling (the P2-A.5 robustness fix) -------
+;;;
+;;; The index store is a SIBLING of the primary store (it cannot be nested —
+;;; see the index-store-config docstring). `bin/seon cluster reset` wipes only
+;;; the primary store dir, so it leaves the sibling proximum store behind. On
+;;; the next boot `install!` declares the index FRESH (the primary store, being
+;;; wiped, has no record of it) against that leftover COMMITTED store — and the
+;;; fork's connect-if-exists factory returns a passive restore-skeleton (it sees
+;;; a committed store, expects a `-sec-restore` that never comes on a declare).
+;;; The skeleton becomes the live index; the next commit's `-sec-flush` hits the
+;;; skeleton's `bug!` and CRASHES. So a fresh declare must first delete any
+;;; committed-but-orphaned store at the index's path.
+
+(defn committed-index-store-exists?
+  "True iff `store-config` points at a konserve store that ALREADY holds a
+   COMMITTED Proximum index (at least one branch). MIRRORS the fork factory's
+   private `committed-index-exists?*` (proximum.clj) so `install!`'s cleanup and
+   the factory agree on what 'a committed store' is: a store dir that merely
+   exists but has no committed branch is NOT a committed store (the factory
+   takes the CREATE path for it, no skeleton). Any backend error → false
+   (treat as not-committed; let the declare proceed and surface the real error).
+   No-op false for a `:memory` store-config (tests don't orphan a durable
+   store)."
+  {:malli/schema [:=> [:catn [:store-config [:map-of :keyword :any]]] :boolean]}
+  [store-config]
+  (boolean
+   (when (= :file (:backend store-config))
+     (try
+       (and (k/store-exists? store-config {:sync? true})
+            (let [store (pwr/connect-store-sync store-config)]
+              (seq (k/get store :branches nil {:sync? true}))))
+       (catch Throwable _ false)))))
+
+(defn delete-index-store!
+  "Delete the file-backed Proximum konserve store directory at `store-config`'s
+   `:path`. Used by `install!` to remove a STALE orphan store before a fresh
+   declare (the cluster-reset case). The store is a flat dir of `<uuid>.ksv`
+   files plus the `:branches` key — deleting the directory removes the whole
+   committed store so the factory takes the CREATE path on the follow-on
+   declare. No-op (returns `{:seon.embed/deleted? false}`) for a non-`:file`
+   store-config or a path that does not exist."
+  {:malli/schema [:=> [:catn [:store-config [:map-of :keyword :any]]]
+                  [:map [:seon.embed/deleted? :boolean]]]}
+  [store-config]
+  (if-let [path (when (= :file (:backend store-config)) (:path store-config))]
+    (let [dir (io/file path)]
+      (if (.exists dir)
+        (do
+          ;; konserve `:file` stores are a flat dir of <uuid>.ksv files (plus
+          ;; the :branches key) — recursive delete removes the whole store.
+          (doseq [^File f (reverse (file-seq dir))] (.delete f))
+          (log/warn "embed: deleted STALE orphan Proximum index store at" path
+                    "(committed store with no schema record — cluster-reset orphan)")
+          {:seon.embed/deleted? true})
+        {:seon.embed/deleted? false}))
+    {:seon.embed/deleted? false}))
+
 ;;; --- Install ---------------------------------------------------------------
 
 (defn install!
-  "Declare the `:seon/embedding` attr + ensure a LIVE `:seon.embed/fn-index`
-   Proximum index instance on datahike `conn` (a wire-server conn handle —
-   third-party datahike value, hence `:any`).
+  "Declare the `:seon/embedding` attr + the `:seon.embed/index` Proximum index
+   on datahike `conn` (a wire-server conn handle — third-party datahike value,
+   hence `:any`).
 
-   Genuinely idempotent AND restore-safe:
+   Idempotent, restore-safe, AND cluster-reset-safe by construction:
    - always upserts the `:seon/embedding` attr schema (harmless re-tx);
-   - when the index instance is already live (`index-live?`), does NOTHING else
-     — a no-op that neither re-instantiates nor re-`create-store`s the live
-     index, nor disturbs its konserve store;
-   - otherwise (first install, OR a freshly reopened conn whose versioned
-     restore failed), clears any stale konserve store id (`delete-index-store!`,
-     so `create-index` cannot collide) and transacts the index def. datahike's
-     `finalize-secondary-indices` then instantiates the index; because the
-     embedding vectors live in the primary AEVT (we dropped
-     `:db.secondary/only`), `instantiate-secondary` sees the datoms, marks the
-     index `:building`, and the writer backfills the HNSW from AEVT. This makes
-     `install!` the single restore-on-open recovery point: call it once per
-     conn open and KNN works whether the conn is brand-new or reopened.
+   - REOPEN (index already declared on the conn's schema): its instance was
+     restored from the durable konserve store by datahike's
+     `restore-secondary-indices` (our fork's connect-if-exists factory +
+     `-sec-restore`→`load-commit`). This is a true no-op — no re-create, no
+     AEVT rebuild. If restore FAILED (declared but not live), throw LOUDLY:
+     with `:db.secondary/only` ON the vectors live ONLY in the konserve store,
+     so silently re-declaring would lose them. Surface, never paper over.
+   - FRESH declare (index not yet on the conn's schema): if a committed-but-
+     ORPHANED Proximum store already exists at the index's sibling path (the
+     `bin/seon cluster reset` case — primary store wiped, sibling proximum
+     store left behind), DELETE that stale store first. Otherwise the fork's
+     connect-if-exists factory returns a passive restore-skeleton that becomes
+     the live index and crashes on the next commit's `-sec-flush`. With a clean
+     path (or after deleting the orphan) the declare creates a real index.
+
    Returns `{:seon.embed/installed? true}`."
   {:malli/schema [:=> [:catn [:conn :any]]
                   [:map [:seon.embed/installed? :boolean]]]}
   [conn]
-  (let [live? (index-live? conn)]
-    ;; When the index is on-schema but NOT live (fresh conn, or a reopened conn
-    ;; whose versioned restore failed), the FIRST tx below triggers
-    ;; `finalize-secondary-indices` -> `create-index`, which collides on any
-    ;; konserve store id left behind by the failed restore. Clear it FIRST so
-    ;; the (re)instantiation gets a clean store. The store is a derived cache;
-    ;; deleting it loses nothing — the vectors are in AEVT and the index
-    ;; backfills from them (:building -> :ready). No-op when already live.
-    (when-not live?
-      (delete-index-store!))
-    (d/transact conn (embedding-attr-schema))
-    (when-not (index-live? conn)
-      (d/transact conn [(index-def)])))
+  ;; The declared-but-not-live (restore-failed) check MUST come BEFORE any
+  ;; transact: the first commit would otherwise re-instantiate the declared
+  ;; index via the factory and crash on -sec-flush, masking the real cause. We
+  ;; want the precise :seon.embed/index-restore-failed signal, not the skeleton
+  ;; bug. (index-declared? reflects the durable primary schema, populated at
+  ;; connect — it is correct before the first install! transact.)
+  (when (and (index-declared? conn) (not (index-live? conn)))
+    ;; REOPEN with a declared index whose instance did NOT restore ⇒ the durable
+    ;; Proximum store is missing/corrupt. With :db.secondary/only the vectors
+    ;; live ONLY there, so re-declaring would lose them. Fail loud (do NOT
+    ;; silently delete the store or re-declare).
+    (throw (ex-info (str "seon.embed/install!: the :seon.embed/index secondary "
+                         "index is declared on this conn's schema but its instance "
+                         "did NOT restore from the durable Proximum konserve store. "
+                         "With :db.secondary/only ON the vectors live ONLY in that "
+                         "store, so the index cannot be silently re-declared (that "
+                         "would lose them). The konserve store is likely missing or "
+                         "corrupt at its configured path. Restore it from backup or, "
+                         "accepting vector loss, delete it AND retract the index "
+                         "declaration, then re-declare to rebuild.")
+                    {:seon.embed/error        :seon.embed/index-restore-failed
+                     :seon.embed/index-ident  index-ident
+                     :seon.embed/store-config (index-store-config conn)})))
+  (d/transact conn (embedding-attr-schema))
+  (when-not (index-declared? conn)
+    ;; FRESH declare: delete any committed-but-orphaned store first so the
+    ;; factory takes the CREATE path (not the restore-skeleton path that crashes
+    ;; on the next -sec-flush). committed-index-store-exists? mirrors the
+    ;; factory's own definition of "committed store", so the two agree. On a
+    ;; clean path this is a cheap store-exists? false.
+    (let [store-config (index-store-config conn)]
+      (when (committed-index-store-exists? store-config)
+        (delete-index-store! store-config))
+      (d/transact conn [(index-def conn)])))
   {:seon.embed/installed? true})
+
+;;; ===========================================================================
+;;; P2-B — the embedding WRITE side (general, attribute-anchored)
+;;; ===========================================================================
+;;;
+;;; The foundation above makes the substrate READY to receive vectors. This
+;;; half actually produces them: a downstream consumer points the embedder at
+;;; ANY string attribute (the TRIGGER), and every entity carrying that attr is
+;;; embedded (Gemini) + indexed (Proximum) automatically on transact, with a
+;;; SHA-256 source-hash cache so an unchanged entity never pays a Gemini call.
+;;;
+;;; There is NO `:seon/kind` enum — the TRIGGER IS the attribute (idiomatic
+;;; Datomic: attribute namespaces already classify entities). Functions and a
+;;; knowledge base are just two `register-embeddable!` registrations over the
+;;; same single `:seon/embedding` attr + single Proximum index.
+
+;;; --- Embeddable registry ---------------------------------------------------
+;;;
+;;; A trigger-attr → compose-fn map. The compose-fn `(fn [entity-map] -> str)`
+;;; produces the document string that gets embedded for an entity carrying that
+;;; trigger-attr. This is a genuine in-process runtime registry: it holds
+;;; compose-fn CODE (not derivable state), and it must be ENUMERABLE so the
+;;; tx-scan and the backfill know which attrs are triggers.
+
+(defonce ^:private !embeddables
+  ;; {trigger-attr (qualified-keyword) -> compose-fn (fn [entity-map] -> str)}
+  (atom {}))
+
+(schema/register! :seon.embed/trigger-attr :qualified-keyword)
+(schema/register! :seon.embed/compose-fn [:fn fn?])
+(schema/register! :seon.embed/register-embeddable!-request
+                  [:map
+                   [:seon.embed/trigger-attr :seon.embed/trigger-attr]
+                   [:seon.embed/compose-fn {:optional true} :seon.embed/compose-fn]])
+(schema/register! :seon.embed/register-embeddable!-response
+                  [:map [:seon.embed/trigger-attrs [:set :seon.embed/trigger-attr]]])
+
+(defn- default-compose
+  "Default compose-fn for a trigger-attr: the string value of that attr in the
+   entity map. Used when `register-embeddable!` is called without an explicit
+   compose-fn."
+  [trigger-attr]
+  (fn [entity-map]
+    (let [v (get entity-map trigger-attr)]
+      (when (some? v) (str v)))))
+
+(defn register-embeddable!
+  "Make every entity carrying `:seon.embed/trigger-attr` embeddable. The
+   optional `:seon.embed/compose-fn` `(fn [entity-map] -> str)` produces the
+   document string to embed for such an entity; when omitted it defaults to the
+   string value of the trigger-attr itself. Idempotent by trigger-attr —
+   re-registering replaces the compose-fn in place. Returns the current set of
+   registered trigger-attrs."
+  {:malli/schema [:=> [:cat :seon.embed/register-embeddable!-request]
+                  :seon.embed/register-embeddable!-response]}
+  [{:seon.embed/keys [trigger-attr compose-fn]}]
+  (let [compose (or compose-fn (default-compose trigger-attr))
+        m       (swap! !embeddables assoc trigger-attr compose)]
+    {:seon.embed/trigger-attrs (set (keys m))}))
+
+(defn trigger-attrs
+  "The current set of registered trigger-attrs. The tx-scan no-ops cheaply when
+   an incoming tx carries none of these."
+  {:malli/schema [:=> [:cat] [:set :seon.embed/trigger-attr]]}
+  []
+  (set (keys @!embeddables)))
+
+(defn ^:no-doc reset-embeddables!
+  "Test seam: drop all embeddable registrations."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (reset! !embeddables {})
+  nil)
+
+;;; --- Default registrations (fns + the kb example) --------------------------
+;;;
+;;; Two registrations ship by construction so "functions are searchable" and
+;;; "any consumer attribute is searchable" are the SAME mechanism, proven by
+;;; two registrations rather than one special case.
+;;;
+;;; `:seon.fn/sym` is the FQ identity string ("<ns>/<name>"), so it already
+;;; carries the ns+name anchor; compose name+doc+source (research §4).
+;;; `:my.kb/body` is the knowledge-base example body; compose title+body.
+
+(defn- compose-fn-doc
+  "Compose document for a `:seon.fn` entity: `<sym>\n<doc>\n<source>`. `sym` is
+   already the FQ `<ns>/<name>` identity, the semantic anchor (research §4).
+   Doc is optional; source is the retrieval payload."
+  [{:seon.fn/keys [sym source doc]}]
+  (str sym
+       (when (seq doc) (str "\n" doc))
+       (when (seq source) (str "\n" source))))
+
+;; The `my.kb` knowledge-base EXAMPLE schema. This is the proof that "any
+;; consumer indexes any attribute" — a downstream consumer (here, a toy
+;; knowledge base) registers its own attrs and points the embedder at one of
+;; them. `:my.kb/body` is the trigger; `:my.kb/title`/`:my.kb/id` are ordinary
+;; data. (Registered from this .clj ns alongside the fn trigger so the example
+;; is self-contained; a real consumer registers these in its own ns.)
+(schema/register! :my.kb/id    [:string {:seon.db/identity true}])
+(schema/register! :my.kb/title :string)
+(schema/register! :my.kb/body  :string)
+
+(defn- compose-kb-body
+  "Compose document for a `:my.kb` knowledge-base entry: `<title>\n<body>`."
+  [{:my.kb/keys [title body]}]
+  (str (when (seq title) (str title "\n")) body))
+
+(register-embeddable! {:seon.embed/trigger-attr :seon.fn/source
+                       :seon.embed/compose-fn    compose-fn-doc})
+(register-embeddable! {:seon.embed/trigger-attr :my.kb/body
+                       :seon.embed/compose-fn    compose-kb-body})
+
+;;; --- Gemini embedding (java-genai, on the wire-server) ---------------------
+;;;
+;;; Model `gemini-embedding-2`, outputDimensionality 1536, NO taskType (v2
+;;; dropped it — the retrieval instruction goes in the QUERY text, which is the
+;;; P2-C query side; DOCUMENTS get no prefix). The 1536 Matryoshka slice is NOT
+;;; pre-normalized, so L2-normalize client-side before cosine/HNSW
+;;; (research/gemini-embeddings-2026-06-18 + config-recommendation).
+
+(def ^:const ^String embedding-model
+  "Gemini embedding model id (free String arg). v2 is GA, 8192-token input, no
+   taskType (research 2026-06-18, proven live in tmp/embed-spike)."
+  "gemini-embedding-2")
+
+;;; The Gemini client is built LAZILY so merely LOADING this namespace never
+;;; reads GEMINI_API_KEY. A wire-server with no key boots and serves normally;
+;;; embedding is simply inactive (the write-path augmenter and the boot backfill
+;;; no-op below). The client is heavyweight + connection-pool-backed, so it is
+;;; built ONCE on the first real embed call when a key is present, then cached.
+(defonce ^:private !client (atom nil))
+
+(defn- gemini-client
+  "The shared Gemini client, or nil when GEMINI_API_KEY is unset/blank. Built
+   lazily + cached on the first call that finds a key — never at ns-load, so a
+   key-less wire-server boots fine."
+  ^Client []
+  (or @!client
+      (let [k (System/getenv "GEMINI_API_KEY")]
+        (when-not (str/blank? k)
+          (reset! !client (-> (Client/builder) (.apiKey ^String k) (.build)))))))
+
+;; Number of Gemini `embedContent` HTTP requests made this JVM. Lets the
+;; source-hash cache be PROVEN (the cache-skip test asserts this does not
+;; increment on an unchanged re-transact). One increment per `embed-texts`
+;; call, NOT per text (a batch is one request). `defonce` so a reload doesn't
+;; zero a live counter; the gate resets it explicitly. (defonce takes no
+;; docstring arg — keep the doc as a comment.)
+(defonce embed-call-count (atom 0))
+
+(defn- doc-config ^EmbedContentConfig []
+  ;; outputDimensionality 1536; no taskType (v2). Same config object every
+  ;; call — immutable, safe to reuse but cheap to rebuild.
+  (-> (EmbedContentConfig/builder)
+      (.outputDimensionality (Integer/valueOf (int embedding-dim)))
+      (.build)))
+
+(defn- l2-normalize
+  "L2-normalize a vector of doubles → vector of floats. Reduced-dim Matryoshka
+   slices (1536 < native 3072) are NOT pre-normalized, so this is required
+   before cosine/HNSW."
+  [v]
+  (let [n (Math/sqrt (reduce + (map #(* % %) v)))]
+    (mapv (fn [x] (float (if (zero? n) x (/ x n)))) v)))
+
+(defn- embedding->vec
+  "Extract one `ContentEmbedding` → an L2-normalized vector of floats."
+  [content-embedding]
+  (let [vals (-> content-embedding .values .get)]
+    (l2-normalize (mapv double vals))))
+
+(schema/register! :seon.embed/text [:string {:min 1}])
+(schema/register! :seon.embed/vector [:vector :float])
+(schema/register! :seon.embed/embed-texts-request
+                  [:map [:seon.embed/texts [:vector :seon.embed/text]]])
+(schema/register! :seon.embed/embed-texts-response
+                  [:map [:seon.embed/vectors [:vector :seon.embed/vector]]])
+(schema/register! :seon.embed/embed-text-request
+                  [:map [:seon.embed/text :seon.embed/text]])
+(schema/register! :seon.embed/embed-text-response
+                  [:map [:seon.embed/vector :seon.embed/vector]])
+
+(defn embed-texts
+  "Embed a batch of document strings with Gemini in ONE HTTP request. Returns
+   normalized `:seon.embed/vectors` aligned to input order (one float vector
+   per text, each L2-normalized, length `embedding-dim`). Increments
+   `embed-call-count` once for the whole batch."
+  {:malli/schema [:=> [:cat :seon.embed/embed-texts-request]
+                  :seon.embed/embed-texts-response]}
+  [{:seon.embed/keys [texts]}]
+  (let [client (or (gemini-client)
+                   (throw (ex-info "seon.embed: embedding requested but GEMINI_API_KEY is not set"
+                                   {:seon.embed/error :seon.embed/no-api-key})))
+        jtexts (java.util.ArrayList. ^java.util.Collection (vec texts))
+        ^EmbedContentResponse resp (.embedContent (.models client)
+                                                   embedding-model
+                                                   jtexts
+                                                   (doc-config))
+        _    (swap! embed-call-count inc)
+        embs (-> resp .embeddings .get)]
+    {:seon.embed/vectors (mapv (fn [i] (embedding->vec (.get embs i)))
+                               (range (.size embs)))}))
+
+(defn embed-text
+  "Embed a single document string with Gemini. Returns the normalized
+   `:seon.embed/vector`. Thin wrapper over `embed-texts` (one-element batch)."
+  {:malli/schema [:=> [:cat :seon.embed/embed-text-request]
+                  :seon.embed/embed-text-response]}
+  [{:seon.embed/keys [text]}]
+  {:seon.embed/vector (first (:seon.embed/vectors
+                              (embed-texts {:seon.embed/texts [text]})))})
+
+;;; --- Source-hash (the cache key) -------------------------------------------
+
+(defn- sha-256-hex [^String s]
+  (let [md (MessageDigest/getInstance "SHA-256")
+        bs (.digest md (.getBytes s "UTF-8"))]
+    (apply str (map #(format "%02x" (bit-and % 0xff)) bs))))
+
+(defn compose-doc
+  "Compose the document string for `entity-map` under `trigger-attr`, using the
+   registered compose-fn. Returns nil when no compose-fn is registered for the
+   attr or the composed string is blank (nothing to embed)."
+  [trigger-attr entity-map]
+  (when-let [compose (get @!embeddables trigger-attr)]
+    (let [s (compose entity-map)]
+      (when (and (string? s) (not (str/blank? s))) s))))
+
+;;; --- ensure-embedding! / reindex! (single-entity, off the write lock) ------
+;;;
+;;; These return TX-DATA (a vector of datahike forms asserting `:seon/embedding`
+;;; + `:seon.embed/source-hash`), they do NOT transact. The CALLER transacts —
+;;; so the Gemini network call happens BEFORE `d/transact`, never inside a tx
+;;; listener and never while holding the conn (research §8 + the locked
+;;; constraint). `ensure-embedding!` honors the hash cache; `reindex!` forces.
+
+(defn- entity-with-trigger
+  "The single registered trigger-attr present in `entity-map`, or nil. (An
+   entity with two trigger-attrs is degenerate; first-wins, deterministically
+   by sorted attr.)"
+  [entity-map]
+  (some (fn [a] (when (contains? entity-map a) a))
+        (sort (keys @!embeddables))))
+
+(defn- embedding-tx-for
+  "Given an entity's `:db/id` (or identity-bearing map), the composed `text`,
+   and its `hash`, embed `text` and return tx-data asserting `:seon/embedding`
+   + `:seon.embed/source-hash` onto `id-ref`. `id-ref` is whatever datahike
+   accepts to identify the entity in a follow-on map (a numeric eid, a tempid
+   string, or a lookup-ref vector)."
+  [id-ref text hash]
+  (let [v (:seon.embed/vector (embed-text {:seon.embed/text text}))]
+    [{:db/id              id-ref
+      :seon/embedding     v
+      :seon.embed/source-hash hash}]))
+
+(defn ensure-embedding!
+  "Return tx-data that brings `entity-map`'s `:seon/embedding` up to date for
+   its registered trigger-attr, embedding via Gemini ONLY when the composed
+   document's SHA-256 differs from `current-hash` (the entity's stored
+   `:seon.embed/source-hash`, nil when never embedded). When the hash matches,
+   returns `[]` (no Gemini call, no tx). `id-ref` identifies the target entity
+   in the returned assertion (numeric eid / tempid / lookup-ref).
+
+   Off the write lock by construction: it embeds and returns data; the caller
+   transacts."
+  {:malli/schema [:=> [:catn
+                       [:id-ref :any]
+                       [:entity-map [:map-of :keyword :any]]
+                       [:current-hash [:or :nil :string]]]
+                  [:vector :any]]}
+  [id-ref entity-map current-hash]
+  (if-let [attr (entity-with-trigger entity-map)]
+    (if-let [text (compose-doc attr entity-map)]
+      (let [hash (sha-256-hex text)]
+        (if (= hash current-hash)
+          []                                   ; unchanged — SKIP the paid call
+          (embedding-tx-for id-ref text hash)))
+      [])
+    []))
+
+(defn reindex!
+  "Like `ensure-embedding!` but FORCES a re-embed regardless of the stored
+   hash. Returns the asserting tx-data (or `[]` when the entity carries no
+   registered trigger-attr / composes to blank)."
+  {:malli/schema [:=> [:catn
+                       [:id-ref :any]
+                       [:entity-map [:map-of :keyword :any]]]
+                  [:vector :any]]}
+  [id-ref entity-map]
+  (if-let [attr (entity-with-trigger entity-map)]
+    (if-let [text (compose-doc attr entity-map)]
+      (embedding-tx-for id-ref text (sha-256-hex text))
+      [])
+    []))
+
+;;; --- augment-tx-with-embeddings (the wire-server write-path hook) ----------
+;;;
+;;; Scans an incoming tx-data vector for entity MAPS carrying a registered
+;;; trigger-attr whose composed-text hash CHANGED vs the entity's current
+;;; stored hash, embeds them (Gemini, BEFORE the d/transact), and APPENDS
+;;; assertion maps merging `:seon/embedding` + `:seon.embed/source-hash`.
+;;;
+;;; Cheap no-op when the tx carries no trigger attrs (the common case): one
+;;; set-intersection over the tx's attr keys, then return the tx untouched.
+;;;
+;;; Only entity-MAP tx items are considered (the shape the pod's tee emits and
+;;; the kb example uses). Vector forms ([:db/add ...]) are passed through
+;;; untouched — the embed pipeline is map-shaped.
+
+(defn- map-trigger-attr
+  "The registered trigger-attr present in a tx-item map, or nil."
+  [triggers item]
+  (when (map? item)
+    (some (fn [a] (when (contains? item a) a)) (sort triggers))))
+
+(defn- resolve-id-ref
+  "An id-ref the appended assertion can use to hit the SAME entity the tx-item
+   creates/updates. Prefers an explicit `:db/id`; else the entity's identity
+   attr as a lookup-ref `[ident-attr value]` (so the assertion upserts onto the
+   same entity datahike resolves the tx-item to). `db` supplies the live schema
+   to find identity attrs. Returns nil when neither is available (can't target
+   → skip, don't guess)."
+  [db item]
+  (or (:db/id item)
+      (let [schema (:schema db)]
+        (some (fn [[a v]]
+                (when (and (keyword? a)
+                           (= :db.unique/identity (get-in schema [a :db/unique])))
+                  [a v]))
+              item))))
+
+(defn- current-hash-for
+  "The entity's currently-stored `:seon.embed/source-hash` (nil when absent or
+   the entity doesn't exist yet). `id-ref` is a numeric eid or a lookup-ref."
+  [db id-ref]
+  (try
+    (:seon.embed/source-hash (d/pull db [:seon.embed/source-hash] id-ref))
+    (catch Throwable _ nil)))
+
+(defn augment-tx-with-embeddings
+  "Return `tx-data` with embedding assertions APPENDED for every entity-map item
+   carrying a registered trigger-attr whose composed-document hash differs from
+   the entity's stored hash. Embeds via Gemini BEFORE the caller's `d/transact`
+   (never inside a listener / under the conn). No-op (returns `tx-data`
+   unchanged, no Gemini call) when no item carries a trigger attr.
+
+   `db` is the conn's CURRENT db value (for the schema + stored-hash lookups).
+   `tx-data` is the raw incoming tx-data vector."
+  {:malli/schema [:=> [:catn [:db :any] [:tx-data [:vector :any]]]
+                  [:vector :any]]}
+  [db tx-data]
+  (let [triggers (trigger-attrs)]
+    ;; No triggers OR no GEMINI_API_KEY → embedding inactive: pass the tx through
+    ;; untouched. Writes never fail just because embedding is unavailable.
+    (if (or (empty? triggers) (nil? (gemini-client)))
+      tx-data
+      (let [;; collect {:id-ref :text :hash} for items that need (re)embedding
+            pending
+            (->> tx-data
+                 (keep (fn [item]
+                         (when-let [attr (map-trigger-attr triggers item)]
+                           (when-let [text (compose-doc attr item)]
+                             (let [hash    (sha-256-hex text)
+                                   id-ref  (resolve-id-ref db item)]
+                               (when (and id-ref
+                                          (not= hash (current-hash-for db id-ref)))
+                                 {:id-ref id-ref :text text :hash hash}))))))
+                 vec)]
+        (if (empty? pending)
+          tx-data
+          ;; ONE batch Gemini request for all changed docs (BEFORE transact).
+          (let [{:seon.embed/keys [vectors]}
+                (embed-texts {:seon.embed/texts (mapv :text pending)})
+                assertions
+                (mapv (fn [{:keys [id-ref hash]} v]
+                        {:db/id                  id-ref
+                         :seon/embedding         v
+                         :seon.embed/source-hash hash})
+                      pending vectors)]
+            (into (vec tx-data) assertions)))))))
+
+;;; --- Bounded backfill (boot) -----------------------------------------------
+;;;
+;;; On boot, embed entities that carry a registered trigger-attr but lack a
+;;; current `:seon/embedding` (no source-hash, or a stale one). BOUNDED: cap N
+;;; this pass, log what's deferred — never embed thousands synchronously at
+;;; boot (cost + latency). One batch Gemini request, one transact.
+
+(def ^:const backfill-cap
+  "Max entities embedded per backfill pass. Keeps boot bounded; the rest are
+   logged as deferred and picked up incrementally on their next write (or a
+   later backfill pass)."
+  64)
+
+(schema/register! :seon.embed/backfill!-response
+                  [:map
+                   [:seon.embed/embedded :int]
+                   [:seon.embed/deferred :int]])
+
+(defn- needs-embedding-eids
+  "Entity-ids carrying `trigger-attr` whose stored `:seon.embed/source-hash`
+   does NOT match the current composed-document hash (covers both never-embedded
+   and stale). Returns a vector of `[eid text hash]` for the rows that need work."
+  [db trigger-attr]
+  (let [rows (d/q '[:find ?e
+                    :in $ ?attr
+                    :where [?e ?attr]]
+                  db trigger-attr)]
+    (->> rows
+         (keep (fn [[eid]]
+                 (let [ent  (d/pull db '[*] eid)
+                       text (compose-doc trigger-attr ent)]
+                   (when text
+                     (let [hash (sha-256-hex text)]
+                       (when (not= hash (:seon.embed/source-hash ent))
+                         [eid text hash]))))))
+         vec)))
+
+(defn backfill!
+  "Embed up to `backfill-cap` entities (across ALL registered trigger-attrs)
+   that lack a current `:seon/embedding`, in ONE batch Gemini request + ONE
+   transact. Returns `{:seon.embed/embedded n :seon.embed/deferred m}` — m is
+   how many eligible entities were left for a later pass (the bound). A no-op
+   (0/0) when nothing needs embedding."
+  {:malli/schema [:=> [:catn [:conn :any]] :seon.embed/backfill!-response]}
+  [conn]
+  (let [db      (d/db conn)
+        triggers (trigger-attrs)
+        all     (vec (mapcat #(needs-embedding-eids db %) triggers))
+        total   (count all)
+        batch   (vec (take backfill-cap all))
+        deferred (max 0 (- total (count batch)))]
+    ;; Nothing to embed, OR no GEMINI_API_KEY (embedding inactive) → no-op.
+    (if (or (empty? batch) (nil? (gemini-client)))
+      {:seon.embed/embedded 0 :seon.embed/deferred 0}
+      (let [{:seon.embed/keys [vectors]}
+            (embed-texts {:seon.embed/texts (mapv second batch)})
+            tx (mapv (fn [[eid _text hash] v]
+                       {:db/id                  eid
+                        :seon/embedding         v
+                        :seon.embed/source-hash hash})
+                     batch vectors)]
+        (d/transact conn tx)
+        (when (pos? deferred)
+          (log/info "embed backfill bounded — embedded" (count batch)
+                    "deferred" deferred "(picked up on next write or later pass)"))
+        {:seon.embed/embedded (count batch) :seon.embed/deferred deferred}))))
+
+;;; --- KNN helper (direct, for harness + the query side) ---------------------
+;;;
+;;; The 3rd positional arg to Proximum's `-slice-ordered` is the ENTITY-FILTER:
+;;; an `EntityBitSet` (built from a seq of eids via `es/entity-bitset-from-longs`)
+;;; that the bridge tests each candidate against with `es/entity-bitset-contains?`
+;;; (proximum.clj:73-76 → `prox/search-filtered`). nil = no scoping (search the
+;;; whole index). This is the TYPE-SCOPING seam: the pod resolves a datalog
+;;; `:where` to an eid set on its LOCAL db and passes those eids; the server
+;;; restricts KNN to them. New scopes need no schema change — any `:where`.
+
+(defn knn
+  "K-nearest neighbours over the live Proximum index on `db` for an
+   already-normalized query `qvec` (a seq of floats, length `embedding-dim`).
+   Returns up to `k` `{:entity-id <eid> :distance <d>}` rows, distance-ascending
+   — an empty vector when the index has no neighbours. When `eids` is a non-empty
+   seq, the search is SCOPED to only those entity-ids (an `EntityBitSet`
+   entity-filter); nil/empty `eids` searches the whole index. Returns nil only
+   when the index isn't live on `db`."
+  {:malli/schema [:function
+                  [:=> [:catn [:db :any] [:qvec [:sequential :float]] [:k :int]]
+                   [:or :nil [:vector [:map-of :keyword :any]]]]
+                  [:=> [:catn [:db :any] [:qvec [:sequential :float]] [:k :int]
+                              [:eids [:or :nil [:sequential :int]]]]
+                   [:or :nil [:vector [:map-of :keyword :any]]]]]}
+  ([db qvec k] (knn db qvec k nil))
+  ([db qvec k eids]
+   (when-let [vt (get-in db [:secondary-indices index-ident])]
+     (let [entity-filter (when (seq eids) (es/entity-bitset-from-longs eids))]
+       (sec/-slice-ordered vt {:vector (float-array qvec) :k k}
+                           entity-filter nil :asc nil)))))
+
+;;; ===========================================================================
+;;; P2-C — the embedding QUERY side (NL query → KNN over the wire)
+;;; ===========================================================================
+;;;
+;;; The pod is READ-ONLY and has NO Proximum/Gemini — query embedding + KNN
+;;; happen HERE, on the wire-server (it owns the key + the index). The pod sends
+;;; query TEXT (+ an optional eid set for type-scoping); this side embeds the
+;;; query WITH a retrieval-instruction PREFIX (v2 has no taskType, so the
+;;; instruction goes in the text — DOCUMENTS get no prefix, only queries do),
+;;; runs KNN with the eid entity-filter, and returns `[{:eid :distance} …]`. The
+;;; pod pulls full source LOCALLY from those eids (reads are local lazy db
+;;; values). See `seon.embed` (CLJS sibling) for the pod-side `search`/
+;;; `search-pull`.
+
+(def ^:const ^String query-instruction-prefix
+  "The retrieval-instruction prefix prepended to a QUERY before embedding.
+   gemini-embedding-2 dropped taskType, so the retrieval instruction rides the
+   text itself. DOCUMENTS are embedded with NO prefix (see `embed-text`); only
+   queries get this, so the query and document live in compatible spaces while
+   the instruction nudges the query toward retrieval. (The shape p2b-gate proved
+   live.)"
+  "Retrieve the entry whose content best answers this request:\n")
+
+(defn query-vec
+  "Embed an NL query string for KNN: prepend `query-instruction-prefix`, then
+   embed via Gemini (same model/dim/normalize as documents). Returns the
+   normalized query `:seon.embed/vector`."
+  {:malli/schema [:=> [:cat :seon.embed/embed-text-request]
+                  :seon.embed/embed-text-response]}
+  [{:seon.embed/keys [text]}]
+  (embed-text {:seon.embed/text (str query-instruction-prefix text)}))
+
+;;; --- knn-search request/response shapes ------------------------------------
+
+(schema/register! :seon.embed/query :seon.embed/text)         ; NL query text
+(schema/register! :seon.embed/k [:int {:min 1}])
+(schema/register! :seon.embed/eid :int)
+(schema/register! :seon.embed/eids [:set :seon.embed/eid])
+(schema/register! :seon.embed/distance :double)
+(schema/register! :seon.embed/hit
+                  [:map
+                   [:seon.embed/eid :seon.embed/eid]
+                   [:seon.embed/distance :seon.embed/distance]])
+(schema/register! :seon.embed/hits [:vector :seon.embed/hit])
+
+(schema/register! :seon.embed/knn-search-request
+                  [:map
+                   [:seon.embed/query :seon.embed/query]
+                   [:seon.embed/k :seon.embed/k]
+                   [:seon.embed/eids {:optional true} :seon.embed/eids]])
+(schema/register! :seon.embed/knn-search-response
+                  [:map [:seon.embed/hits :seon.embed/hits]])
+
+(defn knn-search
+  "Embed the NL `:seon.embed/query` (with the retrieval prefix) and run KNN over
+   the live Proximum index on `db`, scoped to `:seon.embed/eids` when present.
+   Returns `{:seon.embed/hits [{:seon.embed/eid e :seon.embed/distance d} …]}`,
+   distance-ascending. The Gemini call happens HERE (the wire-server owns the
+   key); the pod sends only the query TEXT + the optional eid scope.
+
+   `db` is the conn's current db value (third-party datahike handle, hence
+   `:any`). An index that isn't live yields no hits (empty vector)."
+  {:malli/schema [:=> [:catn [:db :any] [:request :seon.embed/knn-search-request]]
+                  :seon.embed/knn-search-response]}
+  [db {:seon.embed/keys [query k eids]}]
+  (let [qvec (:seon.embed/vector (query-vec {:seon.embed/text query}))
+        rows (or (knn db qvec k eids) [])]
+    {:seon.embed/hits (mapv (fn [{:keys [entity-id distance]}]
+                              {:seon.embed/eid      (long entity-id)
+                               :seon.embed/distance (double distance)})
+                            rows)}))
+
+;;; --- wire verb: "knn-search" -----------------------------------------------
+;;;
+;;; The query-side SEAM, mirroring the write-side augmenter seam: `seon.embed`
+;;; requires `seon.server.wire` (never the reverse), so the verb is defined HERE
+;;; as a `wire/handle-op` defmethod — wire.clj stays Proximum/Gemini-free and
+;;; loadable on the plain :test/:dev JVM. The conn arrives PRE-RESOLVED
+;;; (handle-req resolves agent-id/db-name before dispatching handle-op). Value
+;;; payloads (eids in, hits out) ride Transit-JSON like every other verb.
+
+(defmethod wire/handle-op "knn-search" [conn req]
+  (let [query (get req "query")
+        k     (long (or (get req "k") 10))
+        eids  (transit/read-str (get req "eids"))
+        db    (d/db conn)
+        {:seon.embed/keys [hits]}
+        (knn-search db (cond-> {:seon.embed/query query :seon.embed/k k}
+                         (seq eids) (assoc :seon.embed/eids (set eids))))]
+    {"ok"     true
+     "result" (transit/write-str hits)}))
+
+;;; ===========================================================================
+;;; Write-path activation (the seams — run at ns load)
+;;; ===========================================================================
+;;;
+;;; Loading this ns (boot.clj requires it) installs the embed-on-write
+;;; augmenter into the wire-server's transact path AND registers the `::embed`
+;;; on-ensure-db hook. Both are idempotent across reloads (latest wins).
+
+;; 1. The wire-server transact seam: every "transact"/"transact-batch" runs
+;;    `augment-tx-with-embeddings` before `d/transact`.
+(wire/register-tx-augmenter! augment-tx-with-embeddings)
+
+;; 2. The on-ensure-db hook: install! the attr+index, then a BOUNDED backfill of
+;;    any already-stored embeddable entities. MUST fire BEFORE `::reactive`
+;;    (registration order = fire order in the registry): boot.clj requires
+;;    `seon.embed` BEFORE `seon.server.reactive`, so this ::embed registration
+;;    runs first. install!/backfill! are idempotent + restore-safe.
+(registry/register-on-ensure-db-hook!
+  {:seon.server.registry/hook-key ::embed
+   :seon.server.registry/hook-fn
+   (fn [conn _db-name]
+     (install! conn)
+     (try
+       (backfill! conn)
+       (catch Throwable t
+         (log/warn t "embed backfill failed on ensure-db — entities embed lazily on next write"))))})

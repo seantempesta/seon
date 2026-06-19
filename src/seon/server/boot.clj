@@ -42,6 +42,13 @@
             [datahike.index.secondary.proximum]
             [seon.server.wire :as wire]
             [seon.server.registry :as registry]
+            ;; seon.embed installs the embed-on-write tx-augmenter into
+            ;; wire.clj AND registers the ::embed on-ensure-db hook (install! +
+            ;; bounded backfill). It MUST be required BEFORE seon.server.reactive
+            ;; so the ::embed hook registers (and therefore FIRES) before
+            ;; ::reactive — embeddings are part of the write, reactive summaries
+            ;; derive from the post-write db. Registration order = fire order.
+            [seon.embed]
             [seon.server.broadcast :as bcast]
             [seon.server.transit :as transit]
             [seon.server.reactive :as reactive]

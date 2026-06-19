@@ -318,11 +318,25 @@
         ;; whole vector lives ONLY in the secondary/vector index, never in
         ;; the primary datahike indices). The vector wrapper that would
         ;; otherwise read as cardinality/many is a tuple here, NOT a
-        ;; cardinality-many scalar. General rule: keyed off the
-        ;; `:db.secondary/only` property + a vector-of-numeric shape →
-        ;; tuple, cardinality/one. (Locked use: `:seon/embedding`,
-        ;; embeddings-fn-retrieval PRD.)
+        ;; cardinality-many scalar. Keyed off the `:db.secondary/only`
+        ;; property + a vector-of-FLOAT shape → tuple, cardinality/one.
+        ;; (Locked use: `:seon/embedding`, embeddings-fn-retrieval PRD.)
+        ;; This MIRRORS the CLJ bridge `seon.db.datahike.schema/schema->attr-partial`
+        ;; (the `:vector` float-inner branch) — keep the two lanes in lockstep.
+        float-inner? (let [vt (cond
+                                (keyword? value-form) value-form
+                                (vector? value-form)  (first value-form)
+                                :else                 value-form)]
+                       (contains? #{:float :double 'float? 'double?} vt))
         secondary-only? (boolean (:db.secondary/only props))
+        _ (when (and secondary-only? (not float-inner?))
+            (throw (ex-info
+                    (str ":db.secondary/only attr " attr-key
+                         " must be a vector of :float/:double; got value form "
+                         (pr-str value-form))
+                    {::db/error :seon.db/secondary-only-non-float
+                     ::db/attr attr-key
+                     ::db/value-form value-form})))
         cardinality (if secondary-only?
                       :db.cardinality/one
                       (form->cardinality (resolve-malli-form outer-form)))]

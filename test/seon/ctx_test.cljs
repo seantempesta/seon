@@ -22,7 +22,9 @@
     [seon.ctx :as ctx]
     [seon.ctx.inventory :as ctx-inventory]
     [seon.ctx.namespaces :as ctx-namespaces]
+    [seon.ctx.relevant :as ctx-relevant]
     [seon.db :as db]
+    [seon.embed.stash :as embed-stash]
     [seon.schema :as schema]))
 
 (defn- fresh-conn
@@ -591,5 +593,155 @@
                       (is (= 1 (count (filter #(str/starts-with? % "my.workout: ")
                                               lines)))
                           "exactly one line per kind")))))))
+        (.then (fn [] (done)))
+        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+
+;; ------------------------------------------------------------
+;; relevant-source-section (P2-D) — the embedding-retrieval surface.
+;; PURE reader of the per-turn `seon.embed.stash`; no conn needed.
+;; ------------------------------------------------------------
+
+(deftest relevant-source-section-renders-stashed-hits
+  ;; NO stash active (the default-OFF / no-prefetch path) → "" so the
+  ;; composer drops the section. WITH a stash → the <relevant-source>
+  ;; tag, the hits' syms + source, top-k respected, per-hit char cap with
+  ;; a loud truncation marker, and the over-cap source NEVER leaks whole.
+  (let [in   {:seon.db/db {} :seon.agent/id "X"}
+        long-src (apply str (repeat (* 3 ctx-relevant/source-char-cap) "z"))
+        hits (vec
+               (for [i (range 8)]
+                 {:seon.embed/eid i :seon.embed/distance (* 0.1 i)
+                  :seon.embed/entity
+                  {:seon.fn/sym    (str "my.ns/fn" i)
+                   :seon.fn/source (if (zero? i) long-src
+                                       (str "(defn fn" i " [] " i ")"))}}))]
+    ;; (1) no stash → reactive blank.
+    (is (= "" (ctx-relevant/relevant-source-section in))
+        "no stash (default-OFF / no prefetch) → \"\" (reactive suppression)")
+    ;; (2) with a stash → full render.
+    (let [txt (embed-stash/with-hits hits
+                #(ctx-relevant/relevant-source-section in))]
+      (is (str/includes? txt "<relevant-source>")
+          "rendered behind the open tag")
+      (is (str/includes? txt "</relevant-source>")
+          "and the close tag")
+      ;; top-k respected: only the first `top-k` hits render.
+      (is (str/includes? txt "my.ns/fn0") "first hit's sym present")
+      (is (str/includes? txt (str "my.ns/fn" (dec ctx-relevant/top-k)))
+          "the k-th hit's sym present")
+      (is (not (str/includes? txt (str "my.ns/fn" ctx-relevant/top-k)))
+          "the (k+1)-th hit is dropped — top-k respected")
+      (is (str/includes? txt "(defn fn1 [] 1)") "a hit's source renders inline")
+      ;; per-hit char cap with a LOUD marker; the over-cap source is NOT
+      ;; rendered whole.
+      (is (str/includes? txt "TRUNCATED")
+          "over-cap source carries the loud truncation marker")
+      (is (not (str/includes? txt long-src))
+          "the full over-cap source NEVER leaks (capped)"))))
+
+(deftest relevant-source-section-renders-any-kind
+  ;; GENERALITY (P2-D): the section is kind-general — it renders the most
+  ;; relevant embedded ENTITY of ANY kind, dispatched by which display attrs
+  ;; the hit carries (the attribute IS the type; NO :seon/kind enum). A KB hit
+  ;; renders its title + body; a fn hit renders sym + source; an unknown kind
+  ;; renders an identity + its longest string attr — NEVER a blank `<unknown>`
+  ;; for a kind we DO know.
+  (let [in        {:seon.db/db {} :seon.agent/id "X"}
+        long-body (apply str (repeat (* 3 ctx-relevant/source-char-cap) "y"))
+        fn-hit    {:seon.embed/eid 17 :seon.embed/distance 0.1
+                   :seon.embed/entity
+                   {:db/id 17
+                    :seon.fn/sym    "seon.math/l2-normalize"
+                    :seon.fn/source "(defn l2-normalize [v] :normalized)"}}
+        kb-hit    {:seon.embed/eid 14 :seon.embed/distance 0.2
+                   :seon.embed/entity
+                   {:db/id 14
+                    :my.kb/id    "kb-wire-server"
+                    :my.kb/title "The wire-server is the sole datahike writer"
+                    :my.kb/body  "The CLJS pod forwards every write over a UDS."}}
+        kb-long   {:seon.embed/eid 15 :seon.embed/distance 0.3
+                   :seon.embed/entity
+                   {:db/id 15 :my.kb/id "kb-long"
+                    :my.kb/title "Long KB" :my.kb/body long-body}}
+        gen-hit   {:seon.embed/eid 99 :seon.embed/distance 0.4
+                   :seon.embed/entity
+                   {:db/id 99 :my.doc/id "doc-42"
+                    :my.doc/prose "the longest string attr is the embedded text here"}}
+        lost-hit  {:seon.embed/eid 7 :seon.embed/distance 0.5}   ; raced retraction → no entity
+        render    (fn [hits] (embed-stash/with-hits hits
+                               #(ctx-relevant/relevant-source-section in)))]
+    ;; KB renders TITLE + BODY (the old `;; <unknown>` bug is gone).
+    (let [txt (render [kb-hit])]
+      (is (str/includes? txt "The wire-server is the sole datahike writer")
+          "KB hit renders its title as the header")
+      (is (str/includes? txt "The CLJS pod forwards every write over a UDS.")
+          "KB hit renders its body inline")
+      (is (not (str/includes? txt "<unknown>"))
+          "a KB hit never renders the blank <unknown> placeholder"))
+    ;; fn renders sym + source, as before.
+    (let [txt (render [fn-hit])]
+      (is (str/includes? txt "seon.math/l2-normalize") "fn hit renders its sym")
+      (is (str/includes? txt "(defn l2-normalize [v] :normalized)")
+          "fn hit renders its source"))
+    ;; generic fallback: identity + longest string attr, never blank.
+    (let [txt (render [gen-hit])]
+      (is (str/includes? txt "doc-42") "generic hit renders its */id identity")
+      (is (str/includes? txt "the longest string attr is the embedded text here")
+          "generic hit renders its longest string attr as the body"))
+    ;; MIXED: one section with a fn + a kb + a generic, each rendered right.
+    (let [txt (render [fn-hit kb-hit gen-hit])]
+      (is (str/includes? txt "seon.math/l2-normalize") "mixed: fn present")
+      (is (str/includes? txt "The wire-server is the sole datahike writer")
+          "mixed: kb title present")
+      (is (str/includes? txt "doc-42") "mixed: generic identity present"))
+    ;; KB body honours the per-hit char cap with a loud marker; never leaks.
+    (let [txt (render [kb-long])]
+      (is (str/includes? txt "TRUNCATED") "over-cap KB body carries the marker")
+      (is (not (str/includes? txt long-body)) "over-cap KB body never leaks"))
+    ;; entity-less hit (lost eid) → header-only <unknown>, never throws/blank-tag.
+    (let [txt (render [lost-hit])]
+      (is (str/includes? txt "<unknown>")
+          "an entity-less hit renders a header-only <unknown> block")
+      (is (str/includes? txt "<relevant-source>") "and stays inside the tag"))))
+
+(deftest off-path-is-byte-identical
+  ;; THE SAFETY CONTRACT. With NO retrieval stash active (the default-OFF
+  ;; code path — `run-turn!` never calls `with-hits`), the :relevant-source
+  ;; section renders blank, the composer drops it, and the assembled prompt
+  ;; is byte-identical to a baseline assembled the same way. Prove BOTH:
+  ;; the section is absent from the render order, and assembling twice with
+  ;; no stash yields the identical string (no query-dependent drift).
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (-> (agent/create! {:seon.agent/id "AGTctxrel0001p"})
+                (.then
+                  (fn [_]
+                    (let [r1 (assemble "AGTctxrel0001p")
+                          r2 (assemble "AGTctxrel0001p")
+                          texts-of (fn [r]
+                                     (into {} (map (juxt :seon.ctx/name
+                                                         :seon.render/text))
+                                           (:seon.render/section-texts r)))]
+                      ;; :relevant-source IS in the LAYOUT provenance (every
+                      ;; merged section name, blank or not — assemble-context
+                      ;; docstring) ...
+                      (is (some #{:relevant-source}
+                                (:seon.render/sections r1))
+                          ":relevant-source is part of the core layout")
+                      ;; ... but with NO retrieval stash active (default-OFF —
+                      ;; run-turn! never called with-hits) it renders BLANK, so
+                      ;; it contributes NO :seon.render/section-texts entry and
+                      ;; NO text to the prompt — the composer drops it.
+                      (is (not (contains? (texts-of r1) :relevant-source))
+                          ":relevant-source contributes no text (blank → dropped)")
+                      (is (not (str/includes? (:seon.render/text r1)
+                                              "<relevant-source>"))
+                          "no <relevant-source> tag in the OFF-path prompt")
+                      ;; byte-identical across two assemblies (the section
+                      ;; is not pulling query-dependent content into the
+                      ;; prompt when off).
+                      (is (= (:seon.render/text r1) (:seon.render/text r2))
+                          "OFF-path prompt is stable / byte-identical")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))

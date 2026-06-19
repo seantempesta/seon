@@ -1325,6 +1325,38 @@
        (sort-by #(.getTime ^js (first %)))
        last))
 
+;; Mirrors `:seon.render/assemble-request` shapes — `:seon.db/db` (the
+;; registered `:any` db-value boundary, seon.render) + `:string` id — so the
+;; schema compiles regardless of cross-ns load order (referencing
+;; `:seon.agent/id`, registered later in seon.agent, would break a fresh build).
+(schema/register! :seon.ctx/retrieval-query-request
+                  [:map
+                   [:seon.db/db    :seon.db/db]
+                   [:seon.agent/id :string]])
+
+(defn retrieval-query
+  "Derive the text to embed for THIS turn's embedding retrieval: the latest
+   LIVE inbound message's content (to ∋ me, from ≠ me, hops < `warn/hop-cap` —
+   the same window the loop's cap policy uses, via [[latest-live-inbound]]),
+   falling back to the most-recent message of MY conversation. Returns \"\"
+   when I have no messages at all (the caller skips the wire call on blank).
+
+   SYNC — reads the live db value the caller threads in. Does NOT add the
+   retrieval-instruction prefix (the wire-server's `knn-search` adds it).
+   Called by `seon.agent/run-turn!` to build the prefetch query."
+  {:malli/schema [:=> [:cat :seon.ctx/retrieval-query-request] :string]}
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [my-eid (:db/id (db/entity {:seon.db/db db
+                                   :seon.db/ref [:seon.agent/id id]}))
+        live   (when my-eid (latest-live-inbound db my-eid))]
+    (cond
+      (some? live) (second live)
+      :else        (or (some-> (last (messages {:seon.agent/id id
+                                                :seon.agent/n 1
+                                                :seon.db/db db}))
+                               :seon.agent.message/content)
+                       ""))))
+
 (defn task-in-progress?
   "MID-TASK derivation — TRUE from a live inbound message until the
    agent REPLIES to it: the latest live inbound (to ∋ me, from ≠ me,
@@ -1458,6 +1490,12 @@
                        :your-entity, before :warnings)
      5. :warnings    — current problems; reactive, vanishes when fixed
      6. :open-todos  — the agent's open work items; derived, vanishes
+     6b. :relevant-source — env-gated (SEON_EMBED_RETRIEVAL, default-OFF):
+                       <relevant-source>, the top-k :seon.fn hits nearest
+                       this turn's query by embedding KNN, PREFETCHED in
+                       run-turn! + read from the per-turn stash. VOLATILE
+                       half (query-dependent → out of the cache prefix);
+                       reactive — blank when off or no hits (dropped)
      7. :transcript  — PAST turns, grouped <turn id=… evals=N/M>: the
                        woken-by <user> + the turn's evals, REPL-faithful
      8. :turns       — the turn-budget countdown (one line, mid-task
@@ -1490,6 +1528,8 @@
     :seon.render/ai 'seon.ctx.warnings/warnings-section}
    {:seon.ctx/name :open-todos   :seon.ctx/priority 45
     :seon.render/ai 'seon.agent.todo/open-todos-section}
+   {:seon.ctx/name :relevant-source :seon.ctx/priority 48
+    :seon.render/ai 'seon.ctx.relevant/relevant-source-section}
    {:seon.ctx/name :transcript   :seon.ctx/priority 50
     :seon.render/ai 'seon.ctx.transcript/transcript-section
     :seon.render/html 'seon.ctx.transcript/transcript-section-html}

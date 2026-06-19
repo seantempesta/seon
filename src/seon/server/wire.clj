@@ -195,6 +195,46 @@
        :else item))
    tx-data))
 
+;; ---------- Embed-on-write seam ----------
+;;
+;; A tx-augmenter `(fn [db tx-data] -> tx-data')` that `seon.embed` installs at
+;; load time (via `register-tx-augmenter!`) to embed-on-write any entity
+;; carrying a registered trigger-attr. It scans the incoming tx-data, embeds the
+;; changed docs through Gemini BEFORE this handler's `d/transact` (off the write
+;; lock — the per-conn request thread, not the listener), and appends
+;; `:seon/embedding` + `:seon.embed/source-hash` assertions.
+;;
+;; Kept as a seam (not a hard `seon.embed` require) so `wire.clj` still loads on
+;; the plain :test/:dev JVM WITHOUT the Proximum `--add-modules
+;; jdk.incubator.vector` classpath. On the :writer classpath, `seon.server.boot`
+;; loads `seon.embed`, which installs the real augmenter here. When absent, the
+;; default is identity — transact is unchanged. Exceptions in the augmenter are
+;; swallowed (embedding must never wedge a write): a failed embed falls back to
+;; the un-augmented tx so the primary write still commits.
+
+(defonce ^:private !tx-augmenter (atom (fn [_db tx-data] tx-data)))
+
+(defn register-tx-augmenter!
+  "Install the embed-on-write tx-augmenter `(fn [db tx-data] -> tx-data')`.
+   Idempotent — the latest registration wins (a reload of `seon.embed`
+   re-installs in place). Returns nil."
+  [augment-fn]
+  (reset! !tx-augmenter augment-fn)
+  nil)
+
+(defn- augment-tx
+  "Run the registered tx-augmenter over `tx*` with the conn's current db. Embed
+   failures fall back to the un-augmented tx so the primary write still
+   commits."
+  [conn tx*]
+  (try
+    (@!tx-augmenter (d/db conn) (vec tx*))
+    (catch Throwable t
+      (binding [*out* *err*]
+        (println "[embed] tx-augmenter failed; transacting un-augmented:"
+                 (.getMessage t)))
+      tx*)))
+
 ;; ---------- Filtered-db handle registry ----------
 
 (defonce ^:private filtered-dbs (atom {}))
@@ -356,7 +396,13 @@
         tx-meta-in (read-T (get req "tx-meta"))
         request-id (let [r (get req "request-id")] (when (and r (not= "" r)) r))
         schema     (schema-of conn)
-        tx*        (coerce-tx-data-for-schema schema tx)
+        tx0        (coerce-tx-data-for-schema schema tx)
+        ;; Embed-on-write: append :seon/embedding + :seon.embed/source-hash
+        ;; for entities carrying a registered trigger-attr whose composed-doc
+        ;; hash changed. Gemini call happens HERE (request thread, before
+        ;; d/transact), never inside the conn/listener. No-op when no trigger
+        ;; attrs present or no augmenter installed.
+        tx*        (augment-tx conn tx0)
         ;; Carry request-id through tx-meta so the per-conn ::raw-broadcast
         ;; listener emits it on the pub event (the listener fires on the
         ;; writer thread, after this request thread). ensure-db! seeds the
@@ -400,7 +446,11 @@
         schema       (schema-of conn)
         per-tx-report
         (fn [idx tx tx-meta-in request-id]
-          (let [tx*      (coerce-tx-data-for-schema schema tx)
+          (let [tx0      (coerce-tx-data-for-schema schema tx)
+                ;; Embed-on-write (per-tx in the batch): same seam as the
+                ;; single "transact" handler. Re-reads (d/db conn) each tx so
+                ;; an earlier batch tx's stored hash is visible to a later one.
+                tx*      (augment-tx conn tx0)
                 ;; Carry request-id through tx-meta so the per-conn
                 ;; ::raw-broadcast listener emits it on the pub event (it
                 ;; fires on the writer thread, after the request thread).
