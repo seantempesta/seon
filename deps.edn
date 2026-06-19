@@ -154,7 +154,7 @@
   ;;   namespaces (incl. the :proximum integration shim) for the git-dep above.
   ;;   This is a stable repo-relative path; its CONTENTS must stay byte-aligned
   ;;   with the datahike :git/sha below. The reference-code/datahike submodule is
-  ;;   pinned to that exact sha (6cf05300) — IF YOU BUMP the datahike :git/sha,
+  ;;   pinned to that exact sha (5f62d57f) — IF YOU BUMP the datahike :git/sha,
   ;;   bump the submodule to match or src-secondary will diverge from the dep.
   ;; - proximum provides the HNSW vector index backing :db.secondary/type
   ;;   :proximum. The jvm-opts (jdk.incubator.vector + native access) are
@@ -168,7 +168,7 @@
                          "reference-code/datahike/src-secondary"]
            :extra-deps {org.replikativ/datahike
                         {:git/url "https://github.com/seantempesta/datahike"
-                         :git/sha "6cf053001580bd9008c75edf8399a4068a7e2742"}
+                         :git/sha "5f62d57f745f0796fb6a5800cb8928acef4fd9a6"}
                         com.cognitect/transit-clj {:mvn/version "1.0.333"}
                         com.fasterxml.jackson.dataformat/jackson-dataformat-cbor
                         {:mvn/version "2.17.0"}
@@ -191,7 +191,7 @@
   {:replace-deps  {org.clojure/clojure {:mvn/version "1.12.0"}
                    org.replikativ/datahike
                    {:git/url "https://github.com/seantempesta/datahike"
-                    :git/sha "6cf053001580bd9008c75edf8399a4068a7e2742"}
+                    :git/sha "5f62d57f745f0796fb6a5800cb8928acef4fd9a6"}
                    ;; konserve header fix (2.2d Stage A): CLJS meta-size
                    ;; BE32 + legacy 1-byte sniff. The fork repo has no
                    ;; pushable remote (mvn 0.9.346 was deployed from it),
@@ -217,7 +217,7 @@
   {:replace-deps  {org.clojure/clojure {:mvn/version "1.12.0"}
                    org.replikativ/datahike
                    {:git/url "https://github.com/seantempesta/datahike"
-                    :git/sha "6cf053001580bd9008c75edf8399a4068a7e2742"}
+                    :git/sha "5f62d57f745f0796fb6a5800cb8928acef4fd9a6"}
                    org.replikativ/konserve
                    {:git/url "https://github.com/seantempesta/konserve"
                             :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}
@@ -306,7 +306,7 @@
          ;; PR-shaped pending upstream review.
          :override-deps {org.replikativ/datahike
                          {:git/url "https://github.com/seantempesta/datahike"
-                          :git/sha "6cf053001580bd9008c75edf8399a4068a7e2742"}
+                          :git/sha "5f62d57f745f0796fb6a5800cb8928acef4fd9a6"}
                          ;; konserve header fix (2.2d Stage A): CLJS
                          ;; meta-size BE32 at bytes 4-7 + legacy 1-byte
                          ;; sniff in parse-header, so JVM- and Node-written
