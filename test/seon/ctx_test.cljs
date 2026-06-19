@@ -640,12 +640,13 @@
           "the full over-cap source NEVER leaks (capped)"))))
 
 (deftest relevant-source-section-renders-any-kind
-  ;; GENERALITY (P2-D): the section is kind-general — it renders the most
-  ;; relevant embedded ENTITY of ANY kind, dispatched by which display attrs
-  ;; the hit carries (the attribute IS the type; NO :seon/kind enum). A KB hit
-  ;; renders its title + body; a fn hit renders sym + source; an unknown kind
-  ;; renders an identity + its longest string attr — NEVER a blank `<unknown>`
-  ;; for a kind we DO know.
+  ;; GENERALITY (P2-D): the section is kind-general + has NO hard-coded attr
+  ;; names — it renders the most relevant embedded ENTITY of ANY kind by a
+  ;; uniform rule (the attribute IS the type; NO :seon/kind enum): header = the
+  ;; entity's identity (its SHORTEST string attr, else :db/id), body = its
+  ;; LONGEST string attr (the embedded text). A fn renders sym + source; a KB
+  ;; row renders its id + body; an unknown kind renders its id + prose — NEVER a
+  ;; blank `<unknown>` for an entity that has any string attr.
   (let [in        {:seon.db/db {} :seon.agent/id "X"}
         long-body (apply str (repeat (* 3 ctx-relevant/source-char-cap) "y"))
         fn-hit    {:seon.embed/eid 17 :seon.embed/distance 0.1
@@ -670,12 +671,14 @@
         lost-hit  {:seon.embed/eid 7 :seon.embed/distance 0.5}   ; raced retraction → no entity
         render    (fn [hits] (embed-stash/with-hits hits
                                #(ctx-relevant/relevant-source-section in)))]
-    ;; KB renders TITLE + BODY (the old `;; <unknown>` bug is gone).
+    ;; KB renders IDENTITY (shortest string attr) + BODY (longest string attr),
+    ;; GENERICALLY — no hard-coded :my.kb/title dispatch (the attribute IS the
+    ;; type). For this row the shortest string is :my.kb/id "kb-wire-server".
     (let [txt (render [kb-hit])]
-      (is (str/includes? txt "The wire-server is the sole datahike writer")
-          "KB hit renders its title as the header")
+      (is (str/includes? txt "kb-wire-server")
+          "KB hit renders its shortest string attr (the id) as the header")
       (is (str/includes? txt "The CLJS pod forwards every write over a UDS.")
-          "KB hit renders its body inline")
+          "KB hit renders its body (longest string attr) inline")
       (is (not (str/includes? txt "<unknown>"))
           "a KB hit never renders the blank <unknown> placeholder"))
     ;; fn renders sym + source, as before.
@@ -691,8 +694,8 @@
     ;; MIXED: one section with a fn + a kb + a generic, each rendered right.
     (let [txt (render [fn-hit kb-hit gen-hit])]
       (is (str/includes? txt "seon.math/l2-normalize") "mixed: fn present")
-      (is (str/includes? txt "The wire-server is the sole datahike writer")
-          "mixed: kb title present")
+      (is (str/includes? txt "kb-wire-server")
+          "mixed: kb identity (shortest string attr) present")
       (is (str/includes? txt "doc-42") "mixed: generic identity present"))
     ;; KB body honours the per-hit char cap with a loud marker; never leaks.
     (let [txt (render [kb-long])]

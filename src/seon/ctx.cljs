@@ -1490,7 +1490,7 @@
                        :your-entity, before :warnings)
      5. :warnings    — current problems; reactive, vanishes when fixed
      6. :open-todos  — the agent's open work items; derived, vanishes
-     6b. :relevant-source — env-gated (SEON_EMBED_RETRIEVAL, default-OFF):
+     6b. :relevant-source — env-gated (SEON_EMBED, default-OFF):
                        <relevant-source>, the top-k :seon.fn hits nearest
                        this turn's query by embedding KNN, PREFETCHED in
                        run-turn! + read from the per-turn stash. VOLATILE

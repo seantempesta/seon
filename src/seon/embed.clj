@@ -34,6 +34,15 @@
    primary store (see `index-store-config`). No AEVT backfill, no delete-store
    dance, no rebuild.
 
+   SHIP CONFIG — OFF by default behind ONE switch. The whole feature is inert
+   unless `SEON_EMBED` is set in the wire-server's env (see
+   `embed-feature-enabled?`): with it UNSET the `::embed` on-ensure-db hook
+   installs NO index, the write-path augmenter is a pass-through, and
+   `backfill!` no-ops — a fresh consumer pays ZERO cost (no index, no Gemini
+   call, byte-identical behavior). Set `SEON_EMBED=1` (+ `GEMINI_API_KEY`)
+   before starting the wire-server to enable it. By default exactly ONE kind is
+   indexed: functions (`:seon.fn/source`).
+
    P2-B — the embedding WRITE side (this ns, below the foundation). A
    downstream consumer points the embedder at ANY string attribute (the
    TRIGGER) via `register-embeddable!`; every entity carrying that attr is
@@ -41,8 +50,10 @@
    automatically on transact, with a SHA-256 `:seon.embed/source-hash` cache so
    an unchanged entity never pays a Gemini call. There is NO `:seon/kind` enum —
    the attribute IS the type (idiomatic Datomic). Functions (`:seon.fn/source`)
-   and a knowledge base (`:my.kb/body`) are the two shipped registrations over
-   the SAME single `:seon/embedding` attr + single Proximum index.
+   are the only SHIPPED registration; the `my.kb` knowledge base below is a
+   documented, INACTIVE EXAMPLE of how a consumer adds their own kind (see
+   `docs/seon/components/embedding-retrieval.md`). Both flow through the SAME
+   single `:seon/embedding` attr + single Proximum index.
 
    The write-path integration is a SEAM: `seon.embed` installs an
    `augment-tx-with-embeddings` tx-augmenter into `seon.server.wire` (loaded
@@ -121,6 +132,35 @@
   "HNSW index capacity. Proximum defaults to 10,000,000 → a multi-GB mmap.
    Keep small; grow when the corpus warrants."
   10000)
+
+;;; --- Master feature switch (SHIP CONFIG: OFF by default) --------------------
+;;;
+;;; The WHOLE embedding-retrieval feature is OFF unless `SEON_EMBED` is set in
+;;; the wire-server's env. This is the load-bearing "zero cost when not opted
+;;; in" gate: with `SEON_EMBED` UNSET the `::embed` on-ensure-db hook does
+;;; NOTHING (no `install!`, no `backfill!`), so NO Proximum index is ever
+;;; declared on a fresh consumer's store; `augment-tx-with-embeddings` is a
+;;; pass-through; `backfill!` no-ops. No index, no embed-on-write, no Gemini
+;;; call — byte-identical to a wire-server without this ns's seams.
+;;;
+;;; TWO independent gates, deliberately split:
+;;;   - `embed-feature-enabled?` (the MASTER switch — `SEON_EMBED` presence):
+;;;     does the feature run AT ALL. The consumer opt-in.
+;;;   - `gemini-client` non-nil (GEMINI_API_KEY presence, checked at each embed
+;;;     site below): can actual embedding HAPPEN. Graceful no-key — the feature
+;;;     can be enabled with no key (index declared, writes still commit, embeds
+;;;     simply no-op) without erroring. Both must hold for vectors to be written.
+
+(defn embed-feature-enabled?
+  "True iff the embedding-retrieval feature is opted in — the `SEON_EMBED` env
+   var is PRESENT (any value, incl. empty string) on the wire-server. UNSET ⇒
+   the entire feature is inert: the `::embed` hook installs no index, the
+   write-path augmenter passes tx-data through untouched, and `backfill!`
+   no-ops. This is the master switch; the GEMINI_API_KEY check (`gemini-client`)
+   is the orthogonal can-embedding-actually-happen gate."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (some? (System/getenv "SEON_EMBED")))
 
 ;;; --- Schema ----------------------------------------------------------------
 ;;;
@@ -480,15 +520,16 @@
   (reset! !embeddables {})
   nil)
 
-;;; --- Default registrations (fns + the kb example) --------------------------
+;;; --- Default registration (functions only) ---------------------------------
 ;;;
-;;; Two registrations ship by construction so "functions are searchable" and
-;;; "any consumer attribute is searchable" are the SAME mechanism, proven by
-;;; two registrations rather than one special case.
+;;; SHIP CONFIG: exactly ONE kind is registered by default — functions
+;;; (`:seon.fn/source`). The knowledge base below is a DOCUMENTED, INACTIVE
+;;; EXAMPLE of how a downstream consumer adds their own embeddable kind; it is
+;;; deliberately NOT registered (no auto-embed, no Gemini cost for it). See
+;;; `docs/seon/components/embedding-retrieval.md` ("How to add a kind").
 ;;;
 ;;; `:seon.fn/sym` is the FQ identity string ("<ns>/<name>"), so it already
 ;;; carries the ns+name anchor; compose name+doc+source (research §4).
-;;; `:my.kb/body` is the knowledge-base example body; compose title+body.
 
 (defn- compose-fn-doc
   "Compose document for a `:seon.fn` entity: `<sym>\n<doc>\n<source>`. `sym` is
@@ -499,25 +540,53 @@
        (when (seq doc) (str "\n" doc))
        (when (seq source) (str "\n" source))))
 
-;; The `my.kb` knowledge-base EXAMPLE schema. This is the proof that "any
-;; consumer indexes any attribute" — a downstream consumer (here, a toy
-;; knowledge base) registers its own attrs and points the embedder at one of
-;; them. `:my.kb/body` is the trigger; `:my.kb/title`/`:my.kb/id` are ordinary
-;; data. (Registered from this .clj ns alongside the fn trigger so the example
-;; is self-contained; a real consumer registers these in its own ns.)
-(schema/register! :my.kb/id    [:string {:seon.db/identity true}])
-(schema/register! :my.kb/title :string)
-(schema/register! :my.kb/body  :string)
-
-(defn- compose-kb-body
-  "Compose document for a `:my.kb` knowledge-base entry: `<title>\n<body>`."
-  [{:my.kb/keys [title body]}]
-  (str (when (seq title) (str title "\n")) body))
-
+;; THE ONLY default registration: functions are searchable out of the box
+;; (when the feature is enabled). Any entity carrying `:seon.fn/source` is
+;; embedded on write + indexed.
 (register-embeddable! {:seon.embed/trigger-attr :seon.fn/source
                        :seon.embed/compose-fn    compose-fn-doc})
-(register-embeddable! {:seon.embed/trigger-attr :my.kb/body
-                       :seon.embed/compose-fn    compose-kb-body})
+
+;;; --- EXAMPLE (INACTIVE): adding a custom embeddable kind -------------------
+;;;
+;;; This `my.kb` knowledge base is the TEMPLATE a downstream consumer copies to
+;;; make their OWN attribute searchable. It is INACTIVE on purpose: the schema
+;;; below is NOT registered and the `register-embeddable!` call is in a
+;;; `comment` form, so nothing here embeds or costs a Gemini call by default. To
+;;; activate a kind in YOUR consumer ns, do exactly the two steps shown:
+;;;
+;;;   1. register your attribute schema(s), e.g.
+;;;        (schema/register! :my.kb/id    [:string {:seon.db/identity true}])
+;;;        (schema/register! :my.kb/title :string)
+;;;        (schema/register! :my.kb/body  :string)
+;;;
+;;;   2. point the embedder at the TRIGGER attribute, optionally with a
+;;;      compose-fn `(fn [entity-map] -> str)` that builds the document to embed
+;;;      (defaults to the string value of the trigger attr when omitted):
+;;;
+;;;        (defn compose-kb-body
+;;;          "Document for a :my.kb entry: <title>\n<body>."
+;;;          [{:my.kb/keys [title body]}]
+;;;          (str (when (seq title) (str title \"\\n\")) body))
+;;;
+;;;        (register-embeddable! {:seon.embed/trigger-attr :my.kb/body
+;;;                               :seon.embed/compose-fn    compose-kb-body})
+;;;
+;;; After that, any entity carrying `:my.kb/body` is embedded on write +
+;;; searchable; scope a search to only kb rows with
+;;; `:seon.embed/where [[?e :my.kb/body]]` (see `search`/`search-pull`). The
+;;; live, copy-pasteable form:
+(comment
+  (schema/register! :my.kb/id    [:string {:seon.db/identity true}])
+  (schema/register! :my.kb/title :string)
+  (schema/register! :my.kb/body  :string)
+
+  (defn compose-kb-body
+    "Compose document for a `:my.kb` knowledge-base entry: `<title>\n<body>`."
+    [{:my.kb/keys [title body]}]
+    (str (when (seq title) (str title "\n")) body))
+
+  (register-embeddable! {:seon.embed/trigger-attr :my.kb/body
+                         :seon.embed/compose-fn    compose-kb-body}))
 
 ;;; --- Gemini embedding (java-genai, on the wire-server) ---------------------
 ;;;
@@ -760,9 +829,12 @@
                   [:vector :any]]}
   [db tx-data]
   (let [triggers (trigger-attrs)]
-    ;; No triggers OR no GEMINI_API_KEY → embedding inactive: pass the tx through
-    ;; untouched. Writes never fail just because embedding is unavailable.
-    (if (or (empty? triggers) (nil? (gemini-client)))
+    ;; Feature OFF (SEON_EMBED unset) OR no triggers OR no GEMINI_API_KEY →
+    ;; embedding inactive: pass the tx through UNTOUCHED (byte-identical). Writes
+    ;; never fail, and never call Gemini, just because embedding is unavailable.
+    (if (or (not (embed-feature-enabled?))
+            (empty? triggers)
+            (nil? (gemini-client)))
       tx-data
       (let [;; collect {:id-ref :text :hash} for items that need (re)embedding
             pending
@@ -834,27 +906,30 @@
    (0/0) when nothing needs embedding."
   {:malli/schema [:=> [:catn [:conn :any]] :seon.embed/backfill!-response]}
   [conn]
-  (let [db      (d/db conn)
-        triggers (trigger-attrs)
-        all     (vec (mapcat #(needs-embedding-eids db %) triggers))
-        total   (count all)
-        batch   (vec (take backfill-cap all))
-        deferred (max 0 (- total (count batch)))]
-    ;; Nothing to embed, OR no GEMINI_API_KEY (embedding inactive) → no-op.
-    (if (or (empty? batch) (nil? (gemini-client)))
-      {:seon.embed/embedded 0 :seon.embed/deferred 0}
-      (let [{:seon.embed/keys [vectors]}
-            (embed-texts {:seon.embed/texts (mapv second batch)})
-            tx (mapv (fn [[eid _text hash] v]
-                       {:db/id                  eid
-                        :seon/embedding         v
-                        :seon.embed/source-hash hash})
-                     batch vectors)]
-        (d/transact conn tx)
-        (when (pos? deferred)
-          (log/info "embed backfill bounded — embedded" (count batch)
-                    "deferred" deferred "(picked up on next write or later pass)"))
-        {:seon.embed/embedded (count batch) :seon.embed/deferred deferred}))))
+  ;; Feature OFF (SEON_EMBED unset) → no-op before any db scan or Gemini call.
+  (if-not (embed-feature-enabled?)
+    {:seon.embed/embedded 0 :seon.embed/deferred 0}
+    (let [db      (d/db conn)
+          triggers (trigger-attrs)
+          all     (vec (mapcat #(needs-embedding-eids db %) triggers))
+          total   (count all)
+          batch   (vec (take backfill-cap all))
+          deferred (max 0 (- total (count batch)))]
+      ;; Nothing to embed, OR no GEMINI_API_KEY (embedding inactive) → no-op.
+      (if (or (empty? batch) (nil? (gemini-client)))
+        {:seon.embed/embedded 0 :seon.embed/deferred 0}
+        (let [{:seon.embed/keys [vectors]}
+              (embed-texts {:seon.embed/texts (mapv second batch)})
+              tx (mapv (fn [[eid _text hash] v]
+                         {:db/id                  eid
+                          :seon/embedding         v
+                          :seon.embed/source-hash hash})
+                       batch vectors)]
+          (d/transact conn tx)
+          (when (pos? deferred)
+            (log/info "embed backfill bounded — embedded" (count batch)
+                      "deferred" deferred "(picked up on next write or later pass)"))
+          {:seon.embed/embedded (count batch) :seon.embed/deferred deferred})))))
 
 ;;; --- KNN helper (direct, for harness + the query side) ---------------------
 ;;;
@@ -996,12 +1071,21 @@
 ;;    (registration order = fire order in the registry): boot.clj requires
 ;;    `seon.embed` BEFORE `seon.server.reactive`, so this ::embed registration
 ;;    runs first. install!/backfill! are idempotent + restore-safe.
+;;
+;;    THE LOAD-BEARING OFF-BY-DEFAULT GATE: when `SEON_EMBED` is UNSET the hook
+;;    does NOTHING — no `install!`, so NO Proximum `:seon.embed/index` is ever
+;;    declared on the cluster store, and no `backfill!`. A fresh consumer who
+;;    has not opted in gets ZERO embedding machinery on their store; the seam is
+;;    registered (so flipping `SEON_EMBED=1` and restarting the wire-server
+;;    activates it cleanly) but inert. The hook is still registered before
+;;    `::reactive` so the fire-order guarantee holds whenever it IS enabled.
 (registry/register-on-ensure-db-hook!
   {:seon.server.registry/hook-key ::embed
    :seon.server.registry/hook-fn
    (fn [conn _db-name]
-     (install! conn)
-     (try
-       (backfill! conn)
-       (catch Throwable t
-         (log/warn t "embed backfill failed on ensure-db — entities embed lazily on next write"))))})
+     (when (embed-feature-enabled?)
+       (install! conn)
+       (try
+         (backfill! conn)
+         (catch Throwable t
+           (log/warn t "embed backfill failed on ensure-db — entities embed lazily on next write")))))})

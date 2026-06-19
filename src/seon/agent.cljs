@@ -905,12 +905,14 @@
         (or (:seon.render/text (render/ai-render slot input)) "")))))
 
 (defn embed-retrieval-on?
-  "True when the P2-D embedding-retrieval toggle is set — the env var
-   `SEON_EMBED_RETRIEVAL` is PRESENT (any value, incl. empty string). UNSET
-   ⇒ false ⇒ the prefetch never fires and `render-prompt` runs on the exact
+  "True when the embedding-retrieval feature is enabled — the env var
+   `SEON_EMBED` is PRESENT (any value, incl. empty string). This is the SAME
+   single switch the wire-server reads (`seon.embed/embed-feature-enabled?`),
+   so one env var gates the whole feature across both processes. UNSET ⇒ false
+   ⇒ the prefetch never fires and `render-prompt` runs on the exact
    pre-retrieval code path (the byte-identical-OFF contract)."
   []
-  (some? (.. js/process -env -SEON_EMBED_RETRIEVAL)))
+  (some? (.. js/process -env -SEON_EMBED)))
 
 (defn ^:async prefetch-and-render-prompt!
   "Render this turn's prompt, OPTIONALLY prefetching embedding-retrieval hits
@@ -1231,7 +1233,7 @@
         turn-id    (db/new-id!)
         turn-idx   (turn-index session-id)
         ;; OPTIONAL embedding-retrieval prefetch (P2-D, env-gated default-OFF):
-        ;; when SEON_EMBED_RETRIEVAL is UNSET this is exactly `(render-prompt
+        ;; when SEON_EMBED is UNSET this is exactly `(render-prompt
         ;; id)` — byte-identical to the pre-retrieval path. When set, the wire
         ;; KNN is awaited here + stashed so the sync :relevant-source section
         ;; reads it (the async seam — `assemble-context` stays sync).

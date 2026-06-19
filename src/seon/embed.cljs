@@ -100,14 +100,13 @@
   10)
 
 (def default-pull-pattern
-  "Sensible default `search-pull` pattern: `:db/id` + the shipped embeddable
-   kinds' identity/payload attrs (fn source/doc/sym + the kb title/body/id).
-   `seon.db/pull` silently drops any of these the local conn hasn't installed
-   yet, so this pattern is safe across kinds — only the attrs an entity actually
-   carries come back. Pass your own `:seon.embed/pull-pattern` for other kinds."
-  '[:db/id
-    :seon.fn/sym :seon.fn/doc :seon.fn/source
-    :my.kb/id :my.kb/title :my.kb/body])
+  "Default `search-pull` pull pattern: the `[*]` WILDCARD — every attribute the
+   hit entity actually carries, of ANY kind. NO hard-coded attr names: a named
+   pattern THROWS when the local conn has never installed one of the attrs (a
+   fn-only store has no `:my.kb/*`), and bakes in which kinds exist. `[*]` is
+   kind-agnostic; `render-hit` dispatches on whatever attrs come back. Pass your
+   own `:seon.embed/pull-pattern` to narrow it."
+  '[*])
 
 ;; ---------------------------------------------------------------------------
 ;; :where → eids (LOCAL db resolution — the type-scope)
@@ -176,8 +175,8 @@
    LOCAL db (reads are local lazy db values). This is the agent-facing
    convenience — one call from NL query to ranked, source-bearing hits.
 
-   `:seon.embed/pull-pattern` overrides `default-pull-pattern` (which covers the
-   shipped fn + kb kinds). Resolves to
+   `:seon.embed/pull-pattern` overrides `default-pull-pattern` (the `[*]`
+   wildcard — kind-agnostic, covers whatever attrs a hit carries). Resolves to
    `{:seon.embed/hits [{:seon.embed/eid e :seon.embed/distance d
                         :seon.embed/entity {…}} …]}`, distance-ascending."
   {:malli/schema [:=> [:cat ::search-pull-request] :any]}

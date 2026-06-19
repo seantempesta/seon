@@ -11,7 +11,7 @@
    without making `assemble-context` async (which would ripple to the inspector
    + the gym). This section is a pure reader of the stash.
 
-   REACTIVE + default-OFF: when no prefetch ran (the `SEON_EMBED_RETRIEVAL`
+   REACTIVE + default-OFF: when no prefetch ran (the `SEON_EMBED`
    toggle is unset → `run-turn!` never calls `with-hits`), `(current-hits)` is
    nil and this returns \"\" — the composer drops the section, the assembled
    prompt is byte-identical to today. When the prefetch ran but produced no
@@ -33,9 +33,9 @@
   5)
 
 (def ^:const source-char-cap
-  "Per-hit cap on the rendered body (`:seon.fn/source`, `:my.kb/body`, or the
-   generic-fallback longest string attr). Worst case top-k * this ≈ 7.5k chars
-   — a core section, not charged to the agent's budget."
+  "Per-hit cap on the rendered body (the entity's longest string attr — the
+   embedded text). Worst case top-k * this ≈ 7.5k chars — a core section, not
+   charged to the agent's budget."
   1500)
 
 (def ^:private relevant-header
@@ -64,14 +64,12 @@
        (when body (cap-body body))))
 
 (defn- entity-identity
-  "Best-effort identity string for an entity of an UNKNOWN kind: a domain
-   `*/id` attr value (more meaningful to the agent than a raw eid), falling
-   back to `:db/id`, so the generic fallback never renders blank."
+  "Best-effort identity label for an entity of ANY kind — NO hard-coded attr
+   names: the SHORTEST string-valued attr (an id/sym/title is short; the payload
+   body is long), else `:db/id`, so a block is never header-less."
   [entity]
-  (let [id-val (or (some (fn [[k v]] (when (= "id" (name k)) v))
-                         (dissoc entity :db/id))
-                   (:db/id entity))]
-    (some-> id-val str)))
+  (or (->> (dissoc entity :db/id) vals (filter string?) (sort-by count) first)
+      (some-> (:db/id entity) str)))
 
 (defn- longest-string-attr
   "The longest string-valued attr value on `entity` — the best-effort 'the
@@ -84,32 +82,24 @@
        last))
 
 (defn- render-hit
-  "Render ONE hit by ENTITY-KIND, dispatched on which display attrs are PRESENT
-   (the attribute IS the type — no `:seon/kind` enum):
-     - `:seon.fn/sym`  → `;; <sym>` + char-capped `:seon.fn/source`.
-     - `:my.kb/body`   → `;; <title>` + char-capped `:my.kb/body`.
-     - else            → a generic fallback: the entity's identity (any `*/id`,
-                         else `:db/id`) + its longest string-valued attr, so a
-                         future embeddable kind never renders blank.
-   A hit whose entity lost its eid (raced retraction → no `:seon.embed/entity`)
-   renders a header-only `<unknown>` block — never blank, never throws."
+  "Render ONE hit GENERICALLY — NO hard-coded attr names (the attribute IS the
+   type, per the no-`:seon/kind` design): header = the entity's identity
+   ([[entity-identity]] — its shortest string attr, else `:db/id`); body = its
+   longest string-valued attr ([[longest-string-attr]], the embedded text). Works
+   for any indexable kind a consumer registers. A hit whose entity lost its eid
+   (raced retraction → no `:seon.embed/entity`) renders a header-only `<unknown>`
+   block — never blank, never throws."
   [{:seon.embed/keys [entity]}]
-  (cond
-    (:seon.fn/sym entity)
-    (block (:seon.fn/sym entity) (:seon.fn/source entity))
-
-    (:my.kb/body entity)
-    (block (or (:my.kb/title entity) (:my.kb/id entity)) (:my.kb/body entity))
-
-    :else
-    (block (entity-identity entity) (longest-string-attr entity))))
+  (let [title (entity-identity entity)
+        body  (longest-string-attr entity)]
+    (block title (when (not= title body) body))))
 
 (defn relevant-source-section
   "The `<relevant-source>` section. PURE reader of the per-turn retrieval
    stash ([[seon.embed.stash/current-hits]]) — renders the top-`top-k` hits,
-   each rendered by ENTITY-KIND ([[render-hit]]: fn / kb / generic fallback,
-   dispatched on which display attrs the hit's `:seon.embed/entity` carries)
-   behind a `<relevant-source>` tag.
+   each rendered GENERICALLY by [[render-hit]] (the entity's identity + its
+   longest string attr; any indexable kind, no hard-coded attr names) behind a
+   `<relevant-source>` tag.
 
    REACTIVE: returns \"\" when no hits are stashed (default-OFF — no prefetch
    ran — OR the prefetch found nothing), so the composer drops the section and
