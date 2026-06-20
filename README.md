@@ -99,12 +99,23 @@ backtick (or the ⚙ button) for the debug overlay: the exact context
 the agent sees each turn, because the prompt IS a REPL session over
 the shared database.
 
-You customize Seon with **data, not source edits**: the agent's
-identity is `SOUL.md` (seeded into the store, editable live by
-transact), standing instructions live in `my.kb.system` rows, and
-everything your agents build lands in `my.*` namespaces that survive
-restarts. `src/seon/` is the core — treat it like a runtime you
-installed, not a library you fork.
+You customize Seon with **a couple of files and some data, not source
+edits**:
+
+- **Identity → `SOUL.md`.** This is who your agent is. It is read
+  **live on every turn**, so editing it takes effect on the agent's
+  next reply — no restart, no rebuild, no transact. Drop an `AGENTS.md`
+  beside it (the cross-tool standard for repo/work instructions) and it
+  is read too; both are joined into the system prompt. Set
+  `SEON_SOUL_FILE=<path>` to use a different primary identity file.
+- **Standing instructions for all agents → `my.kb.system` rows.**
+- **Everything your agents build** — schemas, functions, knowledge —
+  lands in `my.*` namespaces that survive restarts.
+
+`src/seon/` is the core — treat it like a runtime you installed, not a
+library you fork. The universal agent mechanics (how the REPL-as-output
+works) are baked into the core's system prompt, so you can freely edit
+or even empty your identity files without breaking anything.
 
 The optional JVM seat (`bin/run`, nREPL 7888) is for development and
 orchestration, not required to run agents. `bin/seon status|tail|stop`
