@@ -1031,23 +1031,38 @@
    docstring parens don't unbalance. Returns nil if no `(` opens before EOF."
   [txt line-1based]
   (let [lines (vec (str/split-lines txt))
-        start (str/join "\n" (subvec lines (dec line-1based)))
-        n     (count start)]
-    (loop [i 0 depth 0 in-str? false esc? false started? false]
-      (if (>= i n)
-        (when started? start)
-        (let [c (nth start i)]
-          (cond
-            esc?                   (recur (inc i) depth in-str? false started?)
-            (and in-str? (= c \\)) (recur (inc i) depth in-str? true  started?)
-            in-str?                (recur (inc i) depth (not (= c \")) false started?)
-            (= c \")               (recur (inc i) depth true false started?)
-            (= c \()               (recur (inc i) (inc depth) in-str? false true)
-            (= c \))               (let [d (dec depth)]
-                                     (if (and started? (zero? d))
-                                       (subs start 0 (inc i))
-                                       (recur (inc i) d in-str? false started?)))
-            :else                  (recur (inc i) depth in-str? false started?)))))))
+        idx   (dec line-1based)]
+    (when (and (nat-int? idx) (< idx (count lines)))
+      (let [start (str/join "\n" (subvec lines idx))
+            n     (count start)]
+        (loop [i 0 depth 0 in-str? false esc? false started? false]
+          (if (>= i n)
+            (when started? start)
+            (let [c (nth start i)]
+              (cond
+                esc?                   (recur (inc i) depth in-str? false started?)
+                (and in-str? (= c \\)) (recur (inc i) depth in-str? true  started?)
+                in-str?                (recur (inc i) depth (not (= c \")) false started?)
+                (= c \")               (recur (inc i) depth true false started?)
+                (= c \()               (recur (inc i) (inc depth) in-str? false true)
+                (= c \))               (let [d (dec depth)]
+                                         (if (and started? (zero? d))
+                                           (subs start 0 (inc i))
+                                           (recur (inc i) d in-str? false started?)))
+                :else                  (recur (inc i) depth in-str? false started?)))))))))
+
+(defn- ghost-var?
+  "True when var-meta `txt`/`line` is the signature of a GHOST var: the file
+   is readable but `:line` points past its end (or is non-positive). That
+   happens when a `defn` is deleted from a hot-reloaded ns — shadow recompiles
+   the file but leaves the old var (carrying its stale `:line`) bound in the
+   running namespace object, so the compile-time roster keeps enumerating it.
+   Distinct from a genuinely-unreadable file (`txt` nil), which is a real
+   error. A ghost is pruned from the boot roster with a single :warn."
+  [txt line]
+  (and (some? txt)
+       (or (not (pos-int? line))
+           (>= (dec line) (count (str/split-lines txt))))))
 
 (defn- ns-file-path
   "Classpath-relative source file for a namespace name string —
@@ -1199,10 +1214,18 @@
         txt     (read-src-file (:file m))
         src     (when txt (extract-form-at-line txt (:line m)))]
     (if (nil? src)
-      (do (log/error-console!
-            "seon.client/var->fn-row"
-            (str "could not read real source for " sym
-                 " (file " (pr-str (:file m)) " line " (:line m) ") — OMITTING"))
+      (do (if (ghost-var? txt (:line m))
+            (log/warn!
+              {:seon.log/source  ::var->fn-row
+               :seon.log/message
+               (str "ghost var " sym " — `:line` " (:line m) " points past "
+                    "file " (pr-str (:file m)) " (a defn deleted from a "
+                    "hot-reloaded ns; shadow left the stale var bound). "
+                    "Pruned from the roster.")})
+            (log/error-console!
+              "seon.client/var->fn-row"
+              (str "could not read real source for " sym
+                   " (file " (pr-str (:file m)) " line " (:line m) ") — OMITTING")))
           nil)
       (cond-> {:seon.fn/sym        sym
                :seon.fn/ns         [:seon.ns/name ns-kw]
@@ -1316,10 +1339,18 @@
         txt (read-src-file (:file m))
         src (when txt (extract-form-at-line txt (:line m)))]
     (if (nil? src)
-      (do (log/error-console!
-            "seon.client/var->test-row"
-            (str "could not read real source for " sym
-                 " (file " (pr-str (:file m)) " line " (:line m) ") — OMITTING"))
+      (do (if (ghost-var? txt (:line m))
+            (log/warn!
+              {:seon.log/source  ::var->test-row
+               :seon.log/message
+               (str "ghost test var " sym " — `:line` " (:line m) " points "
+                    "past file " (pr-str (:file m)) " (a deftest deleted from "
+                    "a hot-reloaded ns; shadow left the stale var bound). "
+                    "Pruned from the roster.")})
+            (log/error-console!
+              "seon.client/var->test-row"
+              (str "could not read real source for " sym
+                   " (file " (pr-str (:file m)) " line " (:line m) ") — OMITTING")))
           nil)
       {:seon.test/sym        sym
        :seon.test/ns         [:seon.ns/name (keyword (str (:ns m)))]
