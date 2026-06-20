@@ -324,7 +324,7 @@
   (is (str/includes? ctx/system-text
                      "replies render as markdown"))
   (let [bullet-lines (->> (str/split-lines ctx/system-text)
-                          (drop-while #(not (str/includes? % "markdown")))
+                          (drop-while #(not (str/includes? % "replies render as markdown")))
                           (take 3))]
     (is (seq bullet-lines))
     (is (not-any? #(str/starts-with? (str/triml %) "(") bullet-lines)

@@ -1,11 +1,12 @@
 (ns my.soul-test
-  "my.soul contract — the store-resident system prompt: seeded at boot
-   from SOUL.md + the REPL mechanics, SEED-ONLY-IF-ABSENT (a runtime
-   edit survives reboot — the user-facing promise), priority-joined by
-   system-prompt-text, and read by the LLM call path
-   (seon.ai/effective-system-prompt → request-body's system
-   message). All on a FRESH :memory conn seeded like the pod boots —
-   never the live agent conn."
+  "my.soul contract — the store-resident IDENTITY: seeded at boot from
+   SOUL.md, SEED-ONLY-IF-ABSENT (a runtime edit survives reboot — the
+   user-facing promise), priority-joined by system-prompt-text, and
+   read by the LLM call path (seon.ai/effective-system-prompt →
+   request-body's system message). The universal REPL mechanics are NOT
+   a soul row — they are hardcoded in seon.ctx/system-text; this ns is
+   identity only. All on a FRESH :memory conn seeded like the pod boots
+   — never the live agent conn."
   (:require
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
@@ -56,14 +57,14 @@
     (when (seq tx)
       (db/transact! {:seon.db/tx-data tx}))))
 
-(deftest soul-seeds-soul-md-and-mechanics-once
+(deftest soul-seeds-soul-md-once
   (async done
     (-> (with-conn
           (fn [conn]
             (let [rows (soul/seed-tx-data @conn)]
-              (is (= ["identity" "repl-mechanics"]
-                     (map :my.soul/id rows))
-                  "fresh store → both shipped rows, priority order")
+              (is (= ["identity"] (map :my.soul/id rows))
+                  "fresh store → the identity row only (mechanics are hardcoded
+                   in seon.ctx/system-text, not a soul row)")
               (doseq [row rows]
                 (is (m/validate :my.soul/section row)
                     (str (:my.soul/id row) " validates")))
@@ -77,9 +78,6 @@
               (is (= (count (str/split-lines (:my.soul/text (first rows))))
                      (:my.kb/source-line-end (first rows)))
                   "line range is honest: 1..N of the SOUL.md text just read")
-              (is (re-find #"YOUR OUTPUT IS A REPL"
-                           (:my.soul/text (second rows)))
-                  "mechanics row carries the REPL contract")
               (-> (soul-seed! conn)
                   (.then (fn [{ok? :seon.db/ok?}]
                            (is (true? ok?) "seed transact lands")
@@ -87,9 +85,7 @@
                                "second boot on a seeded store re-seeds NOTHING")
                            (let [text (soul/system-prompt-text @conn)]
                              (is (str/starts-with? text "# SOUL.md")
-                                 "identity (priority 10) leads the joined prompt")
-                             (is (re-find #"YOUR OUTPUT IS A REPL" text)
-                                 "mechanics (priority 20) follows"))))))))
+                                 "identity leads the joined prompt"))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

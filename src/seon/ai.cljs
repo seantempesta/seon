@@ -327,10 +327,11 @@
 
 (def fallback-system-prompt
   "Minimal boot-edge fallback ONLY — used when the store has no
-   :my.soul rows yet (or the conn is not up). The REAL system
-   prompt lives in the store as :my.soul rows, seeded at boot from
-   the repo's SOUL.md + my.soul/mechanics-text and editable at
-   runtime by transact (see my.soul)."
+   :my.soul rows yet (or the conn is not up). The REAL identity lives
+   in the store as the :my.soul \"identity\" row, seeded at boot from
+   the repo's SOUL.md and editable at runtime by transact (see
+   my.soul); the universal REPL mechanics are hardcoded in the
+   `<system>` block (seon.ctx/system-text), not here."
   (str "You are Seon, a bonded Clojure agent. Your entire output is "
        "read and evaluated as ClojureScript source — act by emitting "
        "forms, narrate with ; line comments, no markdown fences."))
