@@ -484,24 +484,42 @@
                                     @conn)))))))
       done)))
 
-(deftest query-positional-bad-db-slot-named-error
-  ;; Wrong slot-1 (db not a db value) → instrumented invalid-input at ::db.
+(deftest query-positional-db-omitted-auto-injects
+  ;; NEW contract: the positional db slot is OPTIONAL. When the 2nd arg is
+  ;; NOT a db value (per internal/db-value?), the db auto-injects from
+  ;; *conn* and that arg is the first :in input — the read-side sibling of
+  ;; transact!'s auto-conn form. (Replaces the old "non-db slot-1 throws at
+  ;; ::db/db" test, which encoded the pre-auto-inject contract.)
   (async done
     (with-conn
-      (fn [_conn]
-        (let [ex (try (db/query '[:find ?e :where [?e :seon.db-test/name _]]
-                                :not-a-db)
-                      nil
-                      (catch :default e e))]
-          (is (some? ex) "bad positional db must throw (instrumented)")
-          (is (= [::db/db] (:seon.error.malli/explain-path (ex-data ex)))
-              "named slot ::db/db, not a positional index"))
-        ;; 3-arity bad db too
-        (let [ex (try (db/query '[:find ?e :in $ ?t :where [?e :seon.db-test/name ?t]]
-                                :not-a-db "x")
-                      nil
-                      (catch :default e e))]
-          (is (= [::db/db] (:seon.error.malli/explain-path (ex-data ex))))))
+      (fn [conn]
+        ;; db/*conn* MUST be bound INSIDE the .then callback: a dynamic
+        ;; `binding` frame does not survive the async hop — it has already
+        ;; unwound by the time the callback fires. The live pod set!s the
+        ;; ROOT *conn* at boot (which is why auto-inject works there); the
+        ;; test re-binds around the assertions to reproduce that ambient conn.
+        (.then (tx! conn [{::name "Alpha" ::rank 1}
+                          {::name "Seon" ::rank 2}])
+               (fn [_]
+                 (binding [db/*conn* conn]
+                   (testing "db OMITTED entirely → auto-inject, no inputs"
+                     (let [q '[:find ?n :where [?e :seon.db-test/name ?n]]]
+                       (is (= #{["Alpha"] ["Seon"]} (db/query q))
+                           "(db/query q) auto-injects db from *conn*")
+                       (is (= (db/query q @conn) (db/query q))
+                           "auto-inject agrees with explicit-db form")))
+                   (testing "db OMITTED, trailing arg is the first :in input"
+                     (let [q '[:find ?n :in $ ?target
+                               :where [?e :seon.db-test/name ?n] [(= ?n ?target)]]]
+                       (is (= #{["Seon"]} (db/query q "Seon"))
+                           "non-db 2nd arg binds to :in, db auto-injects")
+                       (is (= (db/query q @conn "Seon") (db/query q "Seon"))
+                           "auto-inject + input agrees with explicit-db form")))
+                   (testing "raw map-form query (no ::db/query) auto-injects"
+                     (is (= #{["Alpha"] ["Seon"]}
+                            (db/query '{:find [?n]
+                                        :where [[?e :seon.db-test/name ?n]]}))
+                         "map-form query is positional, not a request map"))))))
       done)))
 
 (deftest pull-positional-mirrors-datahike

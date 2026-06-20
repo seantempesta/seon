@@ -92,8 +92,8 @@
   (let [tx     (client/index-core!)
         pull   (by-sym tx "seon.db/pull")
         entity (by-sym tx "seon.db/entity")]
-    (is (= "([req] [db selector eid])" (:seon.fn/arglists pull))
-        "pull's two real arities recovered from multi-arity source")
+    (is (= "([req] [selector eid] [db selector eid])" (:seon.fn/arglists pull))
+        "pull's three real arities recovered from multi-arity source")
     (is (= "([req] [db eid])" (:seon.fn/arglists entity))
         "entity's two real arities recovered from multi-arity source")
     (is (not= "()" (:seon.fn/arglists pull))

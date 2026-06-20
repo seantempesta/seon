@@ -225,12 +225,21 @@
 ;; The agent's universe + fiber-local context scopes
 ;; ---------------------------------------------------------------------------
 
-(def ^:dynamic *conn*
-  "The runtime's datahike connection. Bound at session start; never
+(defonce ^{:dynamic true
+           :doc "The runtime's datahike connection. Bound at session start; never
    threaded through agent call sites. Reads default to `@*conn*` (a db
    value); writes route through this conn's writer. All sessions for
    the same user share this conn — sessions are entities in it, not
-   partitions of it."
+   partitions of it.
+
+   `defonce`, NOT `def`, is load-bearing: the conn is `set!` onto the
+   root at boot, and a reload of seon.db must NOT wipe it back to nil —
+   that orphans the live agent. Both reload paths re-evaluate top-level
+   forms (shadow hot-reload AND a manual `(require … :reload)`); `exists?`
+   makes defonce a no-op on every reload after the first, so the bound
+   conn survives. (seon.client/rearm-user-triggers! also re-asserts it on
+   `^:dev/after-load` as belt-and-suspenders.)"}
+  *conn*
   nil)
 
 (defn current-tx-context
@@ -335,6 +344,12 @@
    - positional, mirroring datahike `(d/q query db & inputs)`:
        (db/query '[:find ?n :where [?e ::name ?n]] <db>)
        (db/query '[:find ?n :in $ ?t :where …] <db> \"Alice\")
+   - positional, db OMITTED — auto-injects the db from `*conn*`
+     (the read-side sibling of [[transact!]]'s auto-conn form):
+       (db/query '[:find ?n :where [?e ::name ?n]])
+       (db/query '[:find ?n :in $ ?t :where …] \"Alice\")
+     The second arg is the explicit db only when it IS a db value
+     (`internal/db-value?`); otherwise it's the first `:in` input.
 
    GUARDED against silent typos (the sibling of [[pull]]'s guard): a
    `:where` clause naming an attribute that is neither installed on
@@ -343,23 +358,40 @@
    Registered attrs with no data yet behave exactly as datahike
    defines (empty result / get-else default)."
   ;; Pure-variadic body so CLJS malli.instrument wraps every arity.
+  ;; Positional arities overlap (query[+db?][+inputs?]) so they can't be
+  ;; enumerated as distinct fixed `:=>` arities (Malli would throw
+  ;; ::duplicate-arities). Encoding: arity-1 accepts EITHER the request
+  ;; map OR a bare query (vector / raw map-form datalog / string), since
+  ;; `(query '[…])` (db omitted, no inputs) is a 1-arg call; arity ≥2 is
+  ;; the varargs `:=>` (`[:+ :any]` forces ≥1 trailing arg, so it never
+  ;; collides with arity-1). The body distinguishes request-map vs bare
+  ;; query (`contains? ::query`) and explicit-db vs `:in` input
+  ;; (`internal/db-value?`).
   {:malli/schema
    [:function
-    [:=> [:cat ::query-request] :any]
+    [:=> [:cat [:or [:vector :any] :map :string]] :any]
     [:=> [:catn [::query [:or [:vector :any] :map :string]]
-                [::db    ::db-val]] :any]
-    [:=> [:catn [::query [:or [:vector :any] :map :string]]
-                [::db    ::db-val]
-                [::inputs [:+ :any]]] :any]]}
+                [::rest [:+ :any]]] :any]]}
   [& args]
-  (if (= 1 (count args))
-    (let [{::keys [query args db conn] :or {conn *conn* args []}} (first args)
-          db (or db @(internal/resolve-conn conn))]
-      (assert-known-query-attrs! db query)
-      (apply d/q query db args))
-    (let [[q db & inputs] args]
-      (assert-known-query-attrs! db q)
-      (apply d/q q db inputs))))
+  (let [a0 (first args)]
+    (if (and (map? a0) (contains? a0 ::query))
+      ;; map-in request: a map that CONTAINS ::query
+      (let [{::keys [query args db conn] :or {conn *conn* args []}} a0
+            db (or db @(internal/resolve-conn conn))]
+        (assert-known-query-attrs! db query)
+        (apply d/q query db args))
+      ;; positional: a0 IS the query (vector / string / raw map-form query).
+      ;; If the next arg is a db VALUE it's the explicit db; otherwise the
+      ;; db auto-injects from *conn* and all trailing args are :in inputs.
+      (let [q a0]
+        (if (internal/db-value? (second args))
+          (let [[_ db & inputs] args]
+            (assert-known-query-attrs! db q)
+            (apply d/q q db inputs))
+          (let [db     @(internal/resolve-conn *conn*)
+                inputs (rest args)]
+            (assert-known-query-attrs! db q)
+            (apply d/q q db inputs)))))))
 
 (defn installed-schema
   "The datahike schema map actually INSTALLED on `db` — attrs the conn
@@ -602,6 +634,8 @@
 
    - map-in:     (db/pull {::db/pull-pattern '[*] ::db/ref eid})
    - positional, mirroring datahike: (db/pull <db> selector eid)
+   - positional, db OMITTED — auto-injects from `*conn*` (arity
+     disambiguates): (db/pull selector eid)
 
    GUARDED against the lazy-install trap (see [[installed-schema]]):
    datahike installs an attr's schema at its first transact!, and
@@ -621,11 +655,14 @@
   {:malli/schema
    [:function
     [:=> [:cat ::pull-request] :any]
+    [:=> [:catn [::selector [:vector :any]] [::eid :any]] :any]
     [:=> [:catn [::db ::db-val] [::selector [:vector :any]] [::eid :any]] :any]]}
   ([req]
    (let [{::keys [pull-pattern ref db conn] :or {conn *conn*}} req
          db (or db @(internal/resolve-conn conn))]
      (guarded-pull db pull-pattern ref)))
+  ([selector eid]
+   (guarded-pull @(internal/resolve-conn *conn*) selector eid))
   ([db selector eid]
    (guarded-pull db selector eid)))
 
@@ -634,15 +671,22 @@
    entity (lazy map-like).
 
    - map-in:     (db/entity {::db/ref [::name \"Alpha\"]})
-   - positional, mirroring datahike: (db/entity <db> eid)"
+   - positional, mirroring datahike: (db/entity <db> eid)
+   - positional, db OMITTED — a bare eid/lookup-ref auto-injects the
+     db from `*conn*`: (db/entity eid)"
+  ;; The 1-arg arity accepts EITHER a request map OR a bare eid/lookup-ref
+  ;; (auto-inject from *conn*) — one arity-1 `:=>` (the body branches on
+  ;; map?); a separate eid-only `:=>` would collide with the request arity.
   {:malli/schema
    [:function
-    [:=> [:cat ::entity-request] :any]
+    [:=> [:cat [:or ::entity-request :any]] :any]
     [:=> [:catn [::db ::db-val] [::eid :any]] :any]]}
   ([req]
-   (let [{::keys [ref db conn] :or {conn *conn*}} req
-         db (or db @(internal/resolve-conn conn))]
-     (d/entity db ref)))
+   (if (map? req)
+     (let [{::keys [ref db conn] :or {conn *conn*}} req
+           db (or db @(internal/resolve-conn conn))]
+       (d/entity db ref))
+     (d/entity @(internal/resolve-conn *conn*) req)))
   ([db eid]
    (d/entity db eid)))
 

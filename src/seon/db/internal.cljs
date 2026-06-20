@@ -16,6 +16,7 @@
   (:require
     [clojure.string :as str]
     [datahike.api :as d]
+    [datahike.db.interface :as dbi]
     [malli.core :as m]
     [seon.db :as-alias db]
     [seon.error :as error]
@@ -742,6 +743,16 @@
    tell a positional conn slot apart from a stray request map / db value."
   [x]
   (and (satisfies? IDeref x) (not (map? x))))
+
+(defn db-value?
+  "True for a datahike db VALUE — any of DB / FilteredDB / HistoricalDB /
+   AsOfDB / SinceDB, all of which implement
+   `datahike.db.interface/IDB`. The read-path positional arities use this
+   to tell an explicit `db` argument apart from a Datalog `:in` input, so
+   the db can be auto-injected from `*conn*` when omitted (the read-side
+   sibling of `conn?`)."
+  [x]
+  (satisfies? dbi/IDB x))
 
 (defn normalize-transact-args
   "Normalize `transact!`'s variadic args into the canonical map-in
