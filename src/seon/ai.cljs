@@ -326,12 +326,11 @@
 ;; ============================================================
 
 (def fallback-system-prompt
-  "Minimal boot-edge fallback ONLY — used when the store has no
-   :my.soul rows yet (or the conn is not up). The REAL identity lives
-   in the store as the :my.soul \"identity\" row, seeded at boot from
-   the repo's SOUL.md and editable at runtime by transact (see
-   my.soul); the universal REPL mechanics are hardcoded in the
-   `<system>` block (seon.ctx/system-text), not here."
+  "Minimal boot-edge fallback ONLY — used when NO identity file exists
+   (no SOUL.md / AGENTS.md). The REAL identity is read LIVE from those
+   files every turn (my.soul/system-prompt-text); the universal REPL
+   mechanics are hardcoded in the `<system>` block
+   (seon.ctx/system-text), not here."
   (str "You are Seon, a bonded Clojure agent. Your entire output is "
        "read and evaluated as ClojureScript source — act by emitting "
        "forms, narrate with ; line comments, no markdown fences."))
@@ -341,11 +340,10 @@
 
 (defn effective-system-prompt
   "The system message content for a call: the request's explicit
-   `:seon.ai/system-prompt` override when given, else the
-   store-resident soul (`my.soul/system-prompt-text` — the
-   priority-ordered :my.soul rows, seeded at boot from SOUL.md and
-   runtime-editable by transact), else [[fallback-system-prompt]]
-   (store empty or unavailable). Never throws."
+   `:seon.ai/system-prompt` override when given, else the live identity
+   (`my.soul/system-prompt-text` — SOUL.md / AGENTS.md read fresh this
+   call), else [[fallback-system-prompt]] (no identity file). Never
+   throws."
   {:malli/schema [:=> [:cat ::prompt-request] ::system-prompt]}
   [{::keys [system-prompt]}]
   (or system-prompt

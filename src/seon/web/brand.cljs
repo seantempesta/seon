@@ -13,11 +13,11 @@
    ENV OWNS THE ROW. [[sync!]] (called from
    `seon.web.inspector/install!` at boot) syncs the row to the
    `SEON_BRAND_NAME` / `SEON_BRAND_TAGLINE` / `SEON_BRAND_THEME` env
-   vars: set → asserted, unset → retracted. This deliberately differs
-   from `my.soul`'s seed-only-if-absent — booting WITHOUT the env vars
-   must return the defaults (the brand is the deployment's
-   configuration, not the store's memory). A runtime edit survives
-   within a pod run; the next boot re-syncs from env.
+   vars: set → asserted, unset → retracted. Like `my.soul`'s live
+   file-read, the brand is deployment CONFIGURATION rather than the
+   store's memory — booting WITHOUT the env vars must return the
+   defaults. A runtime edit survives within a pod run; the next boot
+   re-syncs from env.
 
    `SEON_BRAND_CSS=<abs path>` is the stylesheet hook: [[css-text]]
    reads the file fresh per render and the inspector inlines it AFTER

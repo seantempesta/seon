@@ -49,7 +49,8 @@
    produce (so a teaching may rely on data an EARLIER teaching stores,
    exactly like the reader can):
 
-   1. `:my.soul/text` rows (the LLM system message — read first).
+   1. The live identity text (SOUL.md / AGENTS.md — the LLM system
+      message, read first).
    2. ns docstrings of every full-source `:seon.ns/source` row (the
       `<namespace>` tags' teaching docstrings).
    3. Section headers: `seon.ctx/system-text` + the namespaces-section
@@ -77,7 +78,8 @@
     [seon.eval :as seval]
     [seon.render.live-tile :as live-tile]
     [seon.repl :as repl]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [my.soul :as soul]))
 
 ;; ============================================================
 ;; Extraction — see the ns docstring for the convention.
@@ -281,16 +283,12 @@
 (defn- surface-examples [surface text]
   (mapv #(assoc % :seon.teachings/surface surface) (taught-examples text)))
 
-(defn- soul-examples [dbv]
-  (->> (db/query {:seon.db/db dbv
-                  :seon.db/query '[:find ?id ?text
-                                   :where
-                                   [?e :my.soul/id ?id]
-                                   [?e :my.soul/text ?text]]})
-       (sort-by first)
-       (mapcat (fn [[id text]]
-                 (surface-examples (str "my.soul row " (pr-str id)) text)))
-       vec))
+(defn- soul-examples [_dbv]
+  ;; The identity is read LIVE from SOUL.md / AGENTS.md (no store rows) —
+  ;; surface its examples straight from the live system-prompt text so a
+  ;; code block a user puts in the identity file is still validated.
+  (surface-examples "my.soul (live SOUL.md/AGENTS.md)"
+                    (soul/system-prompt-text)))
 
 (defn- ns-doc-examples [dbv]
   (let [prefixes (ctx/included-prefixes dbv)]

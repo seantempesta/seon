@@ -1,17 +1,18 @@
 (ns my.soul-test
-  "my.soul contract — the store-resident IDENTITY: seeded at boot from
-   SOUL.md, SEED-ONLY-IF-ABSENT (a runtime edit survives reboot — the
-   user-facing promise), priority-joined by system-prompt-text, and
-   read by the LLM call path (seon.ai/effective-system-prompt →
-   request-body's system message). The universal REPL mechanics are NOT
-   a soul row — they are hardcoded in seon.ctx/system-text; this ns is
-   identity only. All on a FRESH :memory conn seeded like the pod boots
-   — never the live agent conn."
+  "my.soul contract — the agent's IDENTITY read LIVE from disk: SOUL.md
+   (+ AGENTS.md when present) read FRESH on every call by
+   system-prompt-text, joined into the LLM `system` message by
+   seon.ai/effective-system-prompt. NO store, NO seed — a user's edit to
+   the file lands next turn for all agents. The universal REPL mechanics
+   are NOT here; they are hardcoded in seon.ctx/system-text.
+
+   The conn-bound test runs on a FRESH :memory conn seeded like the pod
+   boots (for the config request-params reads) — never the live agent
+   conn. The file reads hit the real repo SOUL.md (cwd = repo root)."
   (:require
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
     [datahike.api :as d]
-    [malli.core :as m]
     [seon.ai :as ai]
     [seon.ai.openai-compat :as openai]
     [seon.client :as client]
@@ -19,9 +20,7 @@
     [my.soul :as soul]))
 
 (defn- fresh-conn
-  "Promise of a fresh :memory conn with the pod's boot schema (which
-   includes the :my.soul/* attrs via client/agent-bootstrap-attrs) —
-   NO soul rows yet."
+  "Promise of a fresh :memory conn with the pod's boot schema."
   []
   (let [cfg {:store              {:backend :memory :id (random-uuid)}
              :schema-flexibility :write
@@ -48,90 +47,32 @@
                  (-> (js/Promise.resolve (body conn))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
 
-(defn- soul-seed!
-  "Seed the soul rows on the ambient conn exactly like the pod boots:
-   tx-data from the conn's current db (seed-only-if-absent). Promise
-   of the transact envelope (nil when nothing to seed)."
-  [conn]
-  (let [tx (soul/seed-tx-data @conn)]
-    (when (seq tx)
-      (db/transact! {:seon.db/tx-data tx}))))
+(deftest system-prompt-text-reads-identity-files-live
+  ;; The identity is the LIVE text of the on-disk identity files, read
+  ;; fresh every call — no conn, no store, no seed.
+  (is (= ["SOUL.md"] (soul/soul-files))
+      "only SOUL.md exists in-repo (no AGENTS.md) → one identity file")
+  (let [text (soul/system-prompt-text)]
+    (is (str/starts-with? text "# SOUL.md")
+        "the live system prompt IS the SOUL.md text, read from disk")
+    (is (re-find #"That is what it means to be Seon" text)
+        "identity content is present (read live, not seeded)")
+    (is (not (re-find #"YOUR OUTPUT IS A REPL" text))
+        "mechanics are NOT in the soul — they are hardcoded in
+         seon.ctx/system-text")))
 
-(deftest soul-seeds-soul-md-once
-  (async done
-    (-> (with-conn
-          (fn [conn]
-            (let [rows (soul/seed-tx-data @conn)]
-              (is (= ["identity"] (map :my.soul/id rows))
-                  "fresh store → the identity row only (mechanics are hardcoded
-                   in seon.ctx/system-text, not a soul row)")
-              (doseq [row rows]
-                (is (m/validate :my.soul/section row)
-                    (str (:my.soul/id row) " validates")))
-              (is (re-find #"That is what it means to be Seon"
-                           (:my.soul/text (first rows)))
-                  "identity row is SOUL.md (read from the repo)")
-              (is (= "SOUL.md" (:my.kb/source-path (first rows))))
-              (is (= 1 (:my.kb/source-line (first rows)))
-                  "the seed SHOWS the full provenance shape agents are
-                   taught to store (told-vs-shown)")
-              (is (= (count (str/split-lines (:my.soul/text (first rows))))
-                     (:my.kb/source-line-end (first rows)))
-                  "line range is honest: 1..N of the SOUL.md text just read")
-              (-> (soul-seed! conn)
-                  (.then (fn [{ok? :seon.db/ok?}]
-                           (is (true? ok?) "seed transact lands")
-                           (is (= [] (soul/seed-tx-data @conn))
-                               "second boot on a seeded store re-seeds NOTHING")
-                           (let [text (soul/system-prompt-text @conn)]
-                             (is (str/starts-with? text "# SOUL.md")
-                                 "identity leads the joined prompt"))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest soul-edit-survives-reseed-and-feeds-the-llm-call
-  (async done
-    (-> (with-conn
-          (fn [conn]
-            (-> (soul-seed! conn)
-                (.then (fn [_]
-                         ;; The runtime edit — one identity-upsert transact.
-                         (db/transact!
-                           {:seon.db/tx-data
-                            [{:my.soul/id   "identity"
-                              :my.soul/text "EDITED SOUL: serve the porpoise."}]})))
-                (.then (fn [{ok? :seon.db/ok?}]
-                         (is (true? ok?) "the edit is one transact")
-                         ;; "Reboot": run the boot seed again against the
-                         ;; edited store — it must emit NOTHING (no clobber).
-                         (is (= [] (soul/seed-tx-data @conn))
-                             "re-seeding an edited store emits no rows — the edit survives reboot")
-                         (let [text (soul/system-prompt-text @conn)]
-                           (is (str/starts-with? text "EDITED SOUL: serve the porpoise.")
-                               "next prompt reads the edited text")
-                           (is (not (re-find #"That is what it means to be Seon" text))
-                               "the shipped identity text is gone (last-write-wins)"))
-                         ;; The LLM call path reads the store: request-params'
-                         ;; system message IS the store text.
-                         (let [body (openai/request-params {:seon.ai/ctx "hi"})
-                               sys  (-> body :messages first :content)]
-                           (is (str/starts-with? sys "EDITED SOUL: serve the porpoise.")
-                               "the system message sent to the API is the store-resident soul")
-                           (is (= sys (soul/system-prompt-text @conn)))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest soul-fallback-when-store-has-no-rows
+(deftest live-identity-feeds-the-llm-call
   (async done
     (-> (with-conn
           (fn [_conn]
-            ;; conn has the boot schema but NO soul rows.
-            (is (= "" (soul/system-prompt-text @db/*conn*))
-                "no rows → empty string")
+            ;; The LLM call path reads the live identity: request-params'
+            ;; system message IS the live SOUL.md text.
             (let [body (openai/request-params {:seon.ai/ctx "hi"})
                   sys  (-> body :messages first :content)]
-              (is (= ai/fallback-system-prompt sys)
-                  "empty store → the minimal boot-edge fallback")
+              (is (= sys (soul/system-prompt-text))
+                  "the system message sent to the API is the live identity")
+              (is (str/starts-with? sys "# SOUL.md")
+                  "and it is the SOUL.md text")
               (is (= "OVERRIDE"
                      (-> (openai/request-params {:seon.ai/ctx "hi"
                                                  :seon.ai/system-prompt "OVERRIDE"})
@@ -139,3 +80,23 @@
                   "an explicit :seon.ai/system-prompt still wins"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest fallback-when-no-identity-file
+  ;; When NO identity file is readable, system-prompt-text is "" and the
+  ;; call path uses the minimal boot-edge fallback. Point SEON_SOUL_FILE
+  ;; at a nonexistent file (and the repo has no AGENTS.md) so soul-files
+  ;; resolves to nothing — restored after.
+  (let [orig (.. js/process -env -SEON_SOUL_FILE)]
+    (set! (.. js/process -env -SEON_SOUL_FILE) "does-not-exist-xyz.md")
+    (try
+      (is (= [] (soul/soul-files))
+          "no readable identity file → no soul files")
+      (is (= "" (soul/system-prompt-text))
+          "no identity file → empty identity text")
+      (is (= ai/fallback-system-prompt
+             (ai/effective-system-prompt {:seon.ai/system-prompt nil}))
+          "no override + no identity file → the minimal boot-edge fallback")
+      (finally
+        (if orig
+          (set! (.. js/process -env -SEON_SOUL_FILE) orig)
+          (js-delete (.. js/process -env) "SEON_SOUL_FILE"))))))

@@ -111,11 +111,10 @@
     ;; register! calls run before the boot install of :my.kb/* attrs.
     [my.kb]
     [my.kb.system]
-    ;; The store-resident system prompt (:my.soul rows — SOUL.md +
-    ;; REPL mechanics). Required so its register! calls run before the
-    ;; boot install of :my.soul/* attrs and so start-agent! can call
-    ;; my.soul/seed-tx-data (seed-only-if-absent — a user's runtime
-    ;; edit to the soul survives reboot).
+    ;; The agent's identity (my.soul/system-prompt-text — SOUL.md /
+    ;; AGENTS.md read LIVE every turn, never stored). Required so the ns
+    ;; is in the build closure and its :seon.ns row indexes for the
+    ;; namespaces section.
     [my.soul]
     ;; Core handler registration — `wake-on-message`. Required so
     ;; start-agent! can call `handler/register!` + `wake/bootstrap-schema!`
@@ -464,11 +463,8 @@
    :my.kb.system/instructions
    :my.kb.system/text
    :my.kb.system/at
-   ;; The store-resident system prompt (my.soul — seeded at boot
-   ;; from SOUL.md + the REPL mechanics, seed-only-if-absent).
-   :my.soul/id
-   :my.soul/text
-   :my.soul/priority
+   ;; (No :my.soul/* attrs — the agent's identity is read LIVE from
+   ;; SOUL.md / AGENTS.md every turn, never stored. See my.soul.)
 
    ;; --- Test (Phase 2 — test capture as data) ---
    :seon.test/sym
@@ -1697,14 +1693,15 @@
    world a pod boots into', shared verbatim by `start-agent!` (live
    boot) and the gym's `seed-scenario-world!` (scratch worlds), so the
    two can never drift again (the gym hand-mirrored this sequence and
-   drifted twice — most recently missing the `:soul-seed` step, so gym
-   prompts lacked the `:my.soul` rows live prompts carry).
+   drifted twice). The agent's identity is NOT seeded — it is read LIVE
+   from SOUL.md / AGENTS.md on every LLM call (my.soul/system-prompt-text),
+   so gym and live prompts get the same identity with no seed step.
 
    Steps, in boot order:
      1. Core handler SCHEMA — `h/bootstrap-schema!` +
         `wake/bootstrap-schema!` (raw `:db/ident` attr rows; never
         counted as data).
-     2. Under ONE `{:seon.db/origin :core-seed}` tx-context, five
+     2. Under ONE `{:seon.db/origin :core-seed}` tx-context, four
         transacts (each its own tx so the core prefix stays a
         stable sequence of tx-times):
           :wake-handler    — the ONE `:wake/on-message` handler entity
@@ -1718,10 +1715,6 @@
           :entity-schemas  — `schema/all-entity-schemas-tx-data`.
           :core-seed  — `seed-core!` (user entity +
                              my.kb.system instruction singleton).
-          :soul-seed       — `my.soul/seed-tx-data`, SEED-ONLY-IF-
-                             ABSENT (a user's runtime soul edit is
-                             never clobbered by reboot); skipped
-                             entirely when every row already exists.
           :core-index — `core-index-tx` (`:seon.ns` /
                              `:seon.fn` / `:seon.schema` / `:seon.test`
                              rows, conn-deduped so an Nth boot on the
@@ -1772,12 +1765,9 @@
                       (await (db/transact!
                                {:seon.db/conn conn
                                 :seon.db/tx-data (seed-core!)})))
-              (let [soul-tx (my.soul/seed-tx-data (await (d/db conn)))]
-                (when (seq soul-tx)
-                  (check! :soul-seed
-                          (await (db/transact!
-                                   {:seon.db/conn conn
-                                    :seon.db/tx-data soul-tx})))))
+              ;; No soul seed: the agent's identity is read LIVE from
+              ;; SOUL.md / AGENTS.md on every LLM call (my.soul/system-prompt-text),
+              ;; never seeded into the store.
               (check! :core-index
                       (await (db/transact!
                                {:seon.db/conn conn
