@@ -519,11 +519,14 @@
 ;; ============================================================
 
 (defn error-response
-  "Build the html-response for a tile fn that THREW: the human sees a
-   fallback card (NOT a blank — vanish is indistinguishable from
-   unwired, banned), the agent's twin carries the error so it sees
-   its own renderer is broken, and the full `:seon.error/*` envelope
-   rides on `:seon.render/error` for the awareness section."
+  "Build the html-response for a tile fn that THREW. THE HUMAN sees a calm,
+   nicely-formatted 'updating this panel' card — never a scary error, never a
+   blank (vanish is indistinguishable from unwired, banned). THE AGENT is told
+   the truth: the `:seon.render/ai` twin carries the failure (awareness
+   section) and the full `:seon.error/*` envelope rides on `:seon.render/error`
+   — and the tile path additionally posts the agent a message
+   (`seon.render.sci/notify-tile-error!`). So the human stays calm while the
+   agent is the one nudged to fix it."
   {:malli/schema [:=> [:cat ::error-request] :seon.render/html-response]}
   [{error :seon.db/error wired ::content}]
   (let [msg       (:seon.error/message error)
@@ -532,13 +535,15 @@
                     "literal hiccup on your entity")]
     {:seon.render/hiccup
      [:div {:class "seon-tile"}
-      [:div {:class "flex flex-col gap-1 p-3 border border-error/40 bg-error/10 rounded"}
-       [:div {:class "text-xs text-error font-mono font-bold"} "⚠ tile error"]
-       [:div {:class "text-xs text-text-300"}
-        "the agent has been shown the failure"]]]
+      [:div {:class "seon-tile-compact flex flex-col gap-1 p-3"}
+       [:div {:class "text-sm text-text-200"} "Updating this panel…"]]
+      [:div {:class "seon-tile-expanded flex flex-col gap-2 p-4"}
+       [:div {:class "text-base text-text-100"} "Updating this panel…"]
+       [:div {:class "text-xs text-text-400 italic"}
+        "I'm refining what I show here."]]]
      :seon.render/ai
      (str "YOUR LIVE TILE IS BROKEN — the wired renderer (" wired-str
-          ") threw: " msg ". Your human sees a fallback error card, not "
-          "your content. Fix the fn, or transact a working value onto "
-          ":seon.render.live-tile/content.")
+          ") threw: " msg ". Your human sees a calm 'updating this panel' "
+          "placeholder, not your content. Fix the fn, or transact a working "
+          "value onto :seon.render.live-tile/content.")
      :seon.render/error error}))

@@ -292,6 +292,16 @@
          :extra-deps    {org.clojure/clojurescript            {:mvn/version "1.12.145"}
                          org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}
                          thheller/shadow-cljs                 {:mvn/version "3.4.10"}
+                         ;; Small Clojure Interpreter — runs AGENT-authored
+                         ;; live-tile fns under a wall-clock :interrupt-fn so a
+                         ;; non-terminating tile (a sync (loop [] (recur)) / (while
+                         ;; true)) aborts in-process instead of freezing the single
+                         ;; pod thread. v0.13.53 is the release where
+                         ;; sci.interrupt/interrupt! (the un-catchable interrupt)
+                         ;; exists. Tile-isolation PRD Layer 1
+                         ;; (docs/prds/agent-runtime/tile-isolation-prd-2026-06-21.md).
+                         ;; NB distinct from the JVM-only 0.8.43 pin in :dev.
+                         org.babashka/sci                     {:mvn/version "0.13.53"}
                          org.replikativ/datahike              {:mvn/version "0.8.1681"}
                          org.replikativ/persistent-sorted-set {:mvn/version "0.4.122"}
                          ;; Transit-JSON for wire value payloads

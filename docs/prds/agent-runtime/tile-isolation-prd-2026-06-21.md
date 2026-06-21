@@ -153,6 +153,37 @@ Why the worker is still needed as Layer 2 — the honest gap SCI cannot close:
 
 ### Layer 1 — SCI-bounded tile render (primary, ship first)
 
+> **STATUS: IMPLEMENTED + live-verified (2026-06-21).** Ships in `src/seon/render/sci.cljs`;
+> `seon.render/render-agent-tile` routes AGENT-authored tile symbols through
+> `seon.render.sci/invoke-bounded` behind env flag `SEON_TILE_SCI` (default on). Dev (`:none`)
+> build compiles clean with `org.babashka/sci 0.13.53` on the `:cljs` classpath; the pod boots
+> clean. Live proofs + a reproduce-it recipe are in [[sci-interrupt-validation-2026-06-21]]
+> ("Test the feature"). Three refinements the implementation added beyond this section's original
+> sketch, all to satisfy the standing requirement *"SCI may fail but must never crash the pod, and
+> must never break a working tile"*:
+>
+> 1. **Pure safety net, never a correctness gate.** Only the wall-clock INTERRUPT triggers
+>    recovery. ANY other SCI outcome (no stored source, an env-reconstruction gap, even a genuine
+>    runtime throw) returns a `:seon.render.sci/fallthrough` marker → `render-agent-tile` renders
+>    the tile on the proven COMPILED `html-render` path. `invoke-bounded` is outer-guarded so it
+>    never throws. So bounding can only ever CATCH HANGS — it cannot turn a working tile into an
+>    error or crash the pod.
+> 2. **Lexical-environment reconstruction (so aliased tiles actually resolve).** The agent fn body
+>    must be INTERPRETED, so its `:seon.fn/source` is eval'd into a fresh per-render SCI ctx. Real
+>    tiles use ns-aliases (`db/query`), so the ctx rebuilds the env from the DB: `:as` aliases +
+>    `:refer`s parsed from the ns's stored `:seon.ns/source`, and each required `seon.*`/agent ns
+>    exposed as host vars by ENUMERATING its members from the `:seon.fn` index (code-as-data — the
+>    core is indexed) and resolving each via `eval/lookup-value`. `(in-ns agent-ns)` +
+>    `:ns-aliases` make both fully-qualified and aliased + own-ns-helper refs resolve. This is what
+>    lets "write a new fn and wire it the same turn" and "wire an existing fn symbol" keep working;
+>    a still-incomplete env just falls back to compiled (one-time warn).
+> 3. **Calm human card + active agent notification on any problem.** The human NEVER sees a scary
+>    error or a blank: a hang shows the `welcome` card (after reset), a throw shows a calm
+>    `error-response` "Updating this panel" card, a not-yet-resolvable symbol shows the `pending`
+>    card. The AGENT is told the truth out-of-band — a hang posts a deduped force'd message + resets
+>    the tile to welcome; a throw posts a deduped force'd message and KEEPS the tile (so a fix takes
+>    effect). The `:seon.render/ai` twin still carries the failure into the awareness section.
+
 Scope: ONLY the tile render call goes through SCI. The existing cljs.js agent
 REPL/corpus is untouched. This SCI-first / worker-backstop hybrid is justified
 from the source citations below (not from a research file — no research file

@@ -35,6 +35,7 @@
     [seon.eval :as eval]
     [seon.render.default :as default]
     [seon.render.live-tile :as live-tile]
+    [seon.render.sci :as render-sci]
     [seon.schema :as schema]
     [seon.ui.html :as html]))
 
@@ -403,7 +404,29 @@
                    :seon.agent/id      id
                    :seon.render/entity ent}]
         (try
-          (let [resp   (html-render value input)
+          (let [;; AGENT-authored tile fns run under an SCI wall-clock
+                ;; interrupt so a non-terminating tile (a sync loop/recur)
+                ;; aborts in-process instead of freezing the single pod thread
+                ;; (tile-isolation PRD Layer 1). The core `welcome`, core
+                ;; section fns, and literal hiccup stay on the fast compiled
+                ;; `html-render` path untouched.
+                resp   (if (and (render-sci/bounding-enabled?)
+                                (render-sci/agent-authored-sym? value))
+                         (let [r (render-sci/invoke-bounded value input)]
+                           (cond
+                             ;; deadline tripped — reset the tile to welcome +
+                             ;; warn the agent (async, deduped), and render the
+                             ;; known-good welcome for the human this turn.
+                             (:seon.render.sci/interrupt r)
+                             (do (render-sci/recover-hung-tile!
+                                   id value render-sci/default-budget-ms)
+                                 (html-render live-tile/welcome-sym input))
+                             ;; no stored source to interpret — use the normal
+                             ;; compiled path (no worse than today).
+                             (:seon.render.sci/fallthrough r)
+                             (html-render value input)
+                             :else r))
+                         (html-render value input))
                 hiccup (:seon.render/hiccup resp)]
             ;; SERIALIZATION joins the same guarded path as invocation
             ;; (serialization-boundary hardening): a structurally-broken hiccup (e.g. a
@@ -428,8 +451,20 @@
               ;;     the page render embedding this hiccup cannot throw
               ;;     on this tile.
               (html/->string hiccup))
+            ;; Reaching here = a HEALTHY agent-tile render. Clear any
+            ;; throwing-tile notification dedup so a LATER breakage re-notifies
+            ;; the agent (and the dedup set stays bounded — working tiles clear
+            ;; their own keys).
+            (when (render-sci/agent-authored-sym? value)
+              (render-sci/note-tile-ok! id value))
             resp)
           (catch :default e
+            ;; A broken tile must never crash the render and never show the
+            ;; human a scary error: actively notify the AGENT (deduped) and
+            ;; return the calm 'updating this panel' card for the human.
+            (when (render-sci/agent-authored-sym? value)
+              (render-sci/notify-tile-error!
+                id value (:seon.error/message (err/->map e))))
             (live-tile/error-response
               {:seon.db/error                 (err/->map e)
                :seon.render.live-tile/content value})))))))

@@ -14,4 +14,8 @@
  :builds {:spike
           {:target    :node-script
            :main      spike.core/main
-           :output-to "out/spike.js"}}}
+           :output-to "out/spike.js"}
+          :invoke
+          {:target    :node-script
+           :main      spike.invoke/main
+           :output-to "out/invoke.js"}}}

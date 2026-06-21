@@ -153,9 +153,13 @@
           {:seon.db/error                 env
            :seon.render.live-tile/content 'my.ns/broken-tile})]
     (is (tile/valid-hiccup? hiccup) "human sees a card, not a blank")
-    (is (some #(re-find #"tile error" %) (hiccup-strings hiccup)))
-    (is (some #(re-find #"the agent has been shown the failure" %)
-              (hiccup-strings hiccup)))
+    ;; The HUMAN sees a calm 'updating this panel' placeholder — never a scary
+    ;; error (tile-isolation Layer 1: always show a nice/in-progress tile on
+    ;; problems; the agent, not the human, is the one nudged to fix it).
+    (is (some #(re-find #"Updating this panel" %) (hiccup-strings hiccup))
+        "human sees the calm 'updating' placeholder")
+    (is (not (some #(re-find #"(?i)error" %) (hiccup-strings hiccup)))
+        "the human card carries NO scary error text — that goes to the agent twin")
     (is (= env error) "response carries the :seon.error/* envelope")
     (is (re-find #"my\.ns/broken-tile" ai)
         "twin names the wired value that broke")
@@ -402,9 +406,9 @@
                                  (render/render-agent-tile
                                    {:seon.db/db @conn
                                     :seon.agent/id "tileerr-000001"})]
-                             (is (some #(re-find #"tile error" %)
+                             (is (some #(re-find #"Updating this panel" %)
                                        (hiccup-strings hiccup))
-                                 "human sees the fallback card — NOT a vanish")
+                                 "human sees the calm placeholder card — NOT a vanish, NOT a scary error")
                              (is (re-find #"deliberate tile failure"
                                           (:seon.error/message error))
                                  "response carries the error envelope")
@@ -456,9 +460,9 @@
                 (let [{:seon.render/keys [hiccup ai error]}
                       (render/render-agent-tile
                         {:seon.db/db @conn :seon.agent/id agent-id})]
-                  (is (some #(re-find #"tile error" %)
+                  (is (some #(re-find #"Updating this panel" %)
                             (hiccup-strings hiccup))
-                      "human sees the banner card — the page never 500s")
+                      "human sees the calm placeholder card — the page never 500s")
                   (is (re-find re (:seon.error/message error))
                       "envelope carries the legible structure error")
                   (is (re-find re (str ai))
