@@ -37,18 +37,22 @@
   (str ";; ── session resumed — the turns above ran in a previous process; "
        "their result/<id> vars are gone (re-run a form to recompute a value) ──"))
 
-(def transcript-note
-  "The `note=` attribute on the `<transcript>` envelope: an in-band
-   disclaimer of the runtime-owned annotations (the `=> result` line +
-   the `;; result/<id>` handle). It tells the agent (a) these tags +
-   annotations are PAST history the runtime wrote, not its own output
-   shape, and (b) how to reuse a value — reference `result/<id>` as a
-   live var. Mimicry safety: the agent's own forms render with NO tags,
-   so there is nothing in its output shape to copy."
-  (str "These are your PAST turns. The runtime adds each form's "
-       "`=> result` line and the `;; result/<id>` after it — never write "
-       "`=>` or `;; result/` lines yourself. To reuse any result, "
-       "reference result/<id> directly; it is a live var."))
+(def transcript-header
+  "A VISIBLE in-band header rendered as the FIRST lines inside the
+   `<past-evals>` envelope (NOT an XML attribute — weak models skim
+   attributes). It disclaims the runtime-owned annotations (the
+   `=> value` line + the `;; result/<id>` handle): (a) these are PAST
+   evaluations the runtime produced, not the agent's own output shape,
+   and (b) the agent emits ONLY `;;` comments and forms, then STOPS and
+   waits for the runtime to produce the real result. Mimicry safety: the
+   agent's own forms render with NO tags, so there is nothing in its
+   output shape to copy."
+  (str ";; ↓↓ PAST EVALUATIONS — the runtime produced these `=> value` and\n"
+       ";; `;; result/<id>` lines. READ them; NEVER write a `=>`, `⇒`, or\n"
+       ";; `;; result/` line yourself — you emit ONLY ;; comments and forms,\n"
+       ";; then STOP and wait for the runtime to produce the real result.\n"
+       ";; To reuse any value, reference its result/<id> directly; it is a\n"
+       ";; live var."))
 
 (defn- session-turns
   "ALL :seon.agent.turn entities for `agent-id`, oldest-first across ALL
@@ -105,15 +109,22 @@
    PRIOR-SESSION turns (`prior?` true) render their evals WITHOUT
    `result/<id>` handles (the vars died with the process). CORE-AUTHORED
    turns render their eval bodies at [[seon.ctx/core-eval-render-cap]]
-   (tagged via `core?`)."
-  [{turn ::turn core? ::core-authored?} own-id prior?]
+   (tagged via `core?`).
+
+   `repeat-wake?` true ⇒ this turn was woken by the SAME message as the
+   PREVIOUS turn (the agent is taking multiple turns on ONE wake) — the
+   `<user>` line is SUPPRESSED so the question renders ONCE per wake, not
+   re-printed every continuation turn. Without this, a 5-turn answer
+   shows the question 5 times and a weak model reads it as 'asked 5
+   times' (live-observed 2026-06-21)."
+  [{turn ::turn core? ::core-authored?} own-id prior? repeat-wake?]
   (let [evals  (->> (:seon.agent.turn/evals turn)
                     (sort-by :seon.eval/at)
                     (mapv #(assoc (into {} %) :seon.ctx/core-authored? core?)))
         n-tot  (count evals)
         n-ok   (count (filter :seon.eval/ok? evals))
         tid    (:seon.agent.turn/id turn)
-        user-ln (woken-by-line turn own-id)
+        user-ln (when-not repeat-wake? (woken-by-line turn own-id))
         eval-rows
         (loop [[e & more] evals prev-ns ::none out []]
           (if (nil? e)
@@ -180,10 +191,11 @@
    block per turn carrying the woken-by `<user>`/`<from>` line and the
    turn's evals rendered REPL-faithful ([[seon.ctx/format-eval-row]] —
    `;;` preamble, the form, a `=> value ;; result/<id>` output line, or a
-   `=> ✗` failure line). The whole thing wraps in `<transcript note=…>`
-   ([[transcript-note]] disclaims the runtime annotations in-band).
+   `=> ✗` failure line). The whole thing wraps in `<past-evals>` with a
+   VISIBLE [[transcript-header]] as its first in-band lines (the disclaimer
+   is a header, not an attribute — weak models skim attributes).
 
-   Only ENVELOPE tags (`<transcript>`/`<turn>`/`<user>`/`<from>`) are
+   Only ENVELOPE tags (`<past-evals>`/`<turn>`/`<user>`/`<from>`) are
    XML — the agent's own output renders as plain comments + forms +
    REPL output, with NO `<eval>` tag, so there is nothing in its output
    shape to mimic (the live `<your-ns>=>` cursor at the very END of the
@@ -215,18 +227,24 @@
         ;; its own row just before a turn whose session differs from the
         ;; previous turn's.
         turn-items
-        (loop [[t & more] turns prev-sess ::none out []]
+        (loop [[t & more] turns prev-sess ::none prev-wb ::none out []]
           (if (nil? t)
             out
             (let [sess   (:seon.agent.session/id-of-session t)
                   prior? (and (some? cur-sess) (not= sess cur-sess))
+                  ;; The message-eid that woke this turn. When it matches
+                  ;; the previous turn's, this is a CONTINUATION of the same
+                  ;; wake (multiple turns on one question) — suppress the
+                  ;; repeated <user> line so the question renders once.
+                  wb     (:db/id (:seon.agent.turn/woken-by (::turn t)))
+                  repeat-wake? (and (some? wb) (= wb prev-wb))
                   marker (when (and (not= prev-sess ::none)
                                     (not= prev-sess sess))
                            {:seon.ctx/kind :seon.ctx/marker
                             :seon.render/text resume-marker-line})
                   row    {:seon.ctx/kind :seon.ctx/turn
-                          :seon.render/text (render-turn t id prior?)}]
-              (recur more sess (into out (if marker [marker row] [row]))))))
+                          :seon.render/text (render-turn t id prior? repeat-wake?)}]
+              (recur more sess wb (into out (if marker [marker row] [row]))))))
         ;; The pending-inbound line rides as an always-kept item at the END.
         items (cond-> turn-items
                 pending (conj {:seon.ctx/kind :seon.ctx/pending
@@ -258,14 +276,14 @@
                               (range (count rendered)))
             elided   (- (count rendered) (count kept-idx))
             kept     (mapv rendered kept-idx)]
-        (str "<transcript note=\"" transcript-note "\">\n"
+        (str "<past-evals>\n" transcript-header "\n"
              (when (pos? elided)
                (str ";; … " elided " older turn" (when (not= 1 elided) "s")
                     " elided (transcript capped at " transcript-char-budget
                     " chars; the full log is in the db — "
                     "(seon.agent/messages) / (seon.agent/evals))\n\n"))
              (str/join "\n" kept)
-             "\n</transcript>"))
+             "\n</past-evals>"))
       "")))
 
 (defn- turn-card-hiccup
@@ -275,10 +293,10 @@
    dropped into a `[:pre]`. Lifts the card framing from the inspector's
    `card-block` (border-l rail, mono text). `prior?` strips result/<id>
    handles for prior-session turns."
-  [{turn ::turn :as t} own-id prior? n]
+  [{turn ::turn :as t} own-id prior? n repeat-wake?]
   (let [tid   (:seon.agent.turn/id turn)
         evals (:seon.agent.turn/evals turn)
-        body  (render-turn t own-id prior?)]
+        body  (render-turn t own-id prior? repeat-wake?)]
     [:div {:class "border-l-2 border-amber-700/40 pl-2 py-1 mb-1"}
      [:div {:class "text-xs font-mono text-text-400"}
       [:span {:class "font-semibold text-text-300"} (str "turn " n)]
@@ -311,8 +329,13 @@
              (map-indexed
                (fn [i t]
                  (let [sess   (:seon.agent.session/id-of-session t)
-                       prior? (and (some? cur-sess) (not= sess cur-sess))]
-                   (turn-card-hiccup t id prior? (inc i)))))
+                       prior? (and (some? cur-sess) (not= sess cur-sess))
+                       wb     (:db/id (:seon.agent.turn/woken-by (::turn t)))
+                       prev-wb (when (pos? i)
+                                 (:db/id (:seon.agent.turn/woken-by
+                                           (::turn (nth turns (dec i))))))
+                       repeat-wake? (and (some? wb) (= wb prev-wb))]
+                   (turn-card-hiccup t id prior? (inc i) repeat-wake?))))
              vec)]
     {:seon.render/hiccup
      (if (seq cards)

@@ -582,12 +582,23 @@
                           "attr count is the live row count, namespace stripped")
                       (is (str/includes? txt "type 3")
                           "second attr counted the same")
-                      ;; attr NAMES appear WITHOUT their namespace prefix —
-                      ;; the line label already carries it.
-                      (is (not (str/includes? txt ":my.workout/date"))
-                          "attr namespace prefix is stripped from the pairs")
-                      (is (not (str/includes? txt "my.workout/date"))
-                          "no qualified attr name leaks into the pairs")
+                      ;; attr NAMES appear WITHOUT their namespace prefix on
+                      ;; the kind's OWN line — the line label already carries
+                      ;; it. (The schema-key values on the seon.schema line
+                      ;; legitimately ARE the qualified attr keywords now that
+                      ;; low-card identity values render inline, so scope the
+                      ;; check to the my.workout line.)
+                      (let [wline (first (filter #(str/starts-with? % "my.workout: ")
+                                                 lines))]
+                        (is (some? wline) "the my.workout kind line is present")
+                        (is (not (str/includes? wline ":my.workout/date"))
+                            "attr namespace prefix is stripped from the pairs")
+                        (is (not (str/includes? wline "my.workout/date"))
+                            "no qualified attr name leaks into the pairs")
+                        ;; the new value-surfacing: a low-card keyword attr
+                        ;; shows its DISTINCT members inline.
+                        (is (str/includes? wline "⟨:lift :run⟩")
+                            "low-cardinality categorical values render inline"))
                       ;; one-line-per-kind: exactly ONE body line mentions
                       ;; the kind (the header is ;; comments, not a kind line).
                       (is (= 1 (count (filter #(str/starts-with? % "my.workout: ")

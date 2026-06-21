@@ -444,22 +444,48 @@
    the RegExp with only the `g` flag, dropping `m`."
   #";+[ \t]*(?:=>|⇒)[^\n]*")
 
+(def ^:private bare-result-claim-re
+  "The DOMINANT fabrication shape — a BARE result line with NO leading
+   `;`: a line whose first non-space char is `=>` or `⇒`, e.g.
+   `=> #{...} ;; result/OKf` or `=> 61 ;; result/LFd`. This is how weak
+   models continue the transcript's `(form)` → `=> value ;; result/<id>`
+   adjacency, fabricating the value and the handle (6 captured response
+   files carried this shape vs 1 the commented `;; =>` shape).
+   `[[result-claim-re]] requires a leading `;` and is BLIND to it.
+
+   ANCHORED TO COLUMN 0 (`^` + optional indent): this is LOAD-BEARING.
+   It must NOT clobber `:=>` inside :malli/schema vectors
+   (`{:malli/schema [:=> [:cat …] …]}`) — those appear mid-line, always
+   preceded by `[`, never as `=>` at the start of a line. The `(?m)` flag
+   survives `str/replace` in this CLJS runtime (verified), and `[^\\n]*`
+   bounds each match to a single line so the anchor is what selects the
+   line, not the trailer."
+  #"(?m)^[ \t]*(?:=>|⇒)[^\n]*")
+
 (defn neutralize-result-claims
-  "Rewrite every model-authored result-claim comment in `s` to
+  "Rewrite every model-authored result-claim in `s` to
    [[unverified-narration-marker]], dropping the claimed value
    entirely (the claimed value is the poison: a later turn reads
-   `;; => {...}` as a real result and trusts data that was never
-   computed — two live fabrication incidents, F13/F14).
+   `;; => {...}` or a bare `=> 61` as a real result and trusts data that
+   was never computed — two live fabrication incidents, F13/F14, plus the
+   bare-`=>` headline case in gwM-2606211132).
+
+   TWO shapes: the bare line ([[bare-result-claim-re]], `=> value` at
+   column 0 — the DOMINANT fabrication) is rewritten FIRST, then the
+   commented line ([[result-claim-re]], `;; =>`/inline `;; => 3`). The
+   marker carries no `=>`/`⇒` so neither regex re-matches it — idempotent.
 
    PROVENANCE GATE, not regex luck: this runs ONLY on the
    model-authored transcript channels — `:seon.eval/narration` and
    `:seon.eval/source` — BEFORE [[format-eval-row]] composes the row.
    Real result lines (`=> <value> ;; result/<id>`) are appended by the
-   composer itself AFTER this rewrite and never pass through it.
-   Idempotent: the marker doesn't match the claim shape."
+   composer itself AFTER this rewrite and never pass through it, so the
+   bare-`=>` rule can never touch a genuine runtime-written result line."
   {:malli/schema [:=> [:cat :string] :string]}
   [s]
-  (str/replace s result-claim-re unverified-narration-marker))
+  (-> s
+      (str/replace bare-result-claim-re unverified-narration-marker)
+      (str/replace result-claim-re unverified-narration-marker)))
 
 (defn- strip-comment-prefix
   "Strip any leading `;`/`⚠`/`↻`/`=>` comment markers + whitespace from
@@ -897,10 +923,16 @@
     "EVAL MECHANICS. Your reply is one or more Clojure forms, each\n"
     "preceded by ;; comment lines. There are no tool calls. Anything\n"
     "that is not a form or a ;; comment is a bug — bare prose HAS eaten\n"
-    "responses before. The <transcript> below is READ-ONLY history: the\n"
+    "responses before. The <past-evals> below is READ-ONLY history: the\n"
     "runtime adds each form's `=> result` line and the `;; result/<id>`\n"
     "after it — never write a `=>`, `;; result/`, or any <tag> yourself.\n"
     "Your reply is ONLY ;; comments and forms.\n"
+    "\n"
+    "After your LAST form, STOP. Do not write what you think a result will\n"
+    "be — the runtime runs each form and shows you the real `=> value`\n"
+    "next. If a reply DEPENDS on a value you have not computed yet, query\n"
+    "this turn and reply from the REAL result on a later turn; never invent\n"
+    "the result to feed the reply.\n"
     "\n"
     "  Correct shape:                 Wrong shape (don't do this):\n"
     "    ;; first, look around          Let me look around first.\n"
@@ -918,10 +950,12 @@
     "— the :seon.db/tx-data key, never a backticked span. Markdown inside\n"
     "a reply! string is fine, though — that renders on your human's screen.\n"
     "\n"
-    "RESULT VARS. Every eval's value is a live var result/<id>, the id\n"
-    "shown after its `=>` in the transcript (e.g. `=> 42 ;; result/auC`).\n"
-    "Reference result/<id> directly to reuse it — never re-run a form you\n"
-    "already computed. A clipped display is NOT a clipped value: dig into\n"
+    "RESULT VARS. Every eval's value is a live var result/<id>, where the\n"
+    "id is the short handle the runtime prints on that form's result line\n"
+    "in the past-evals history. Reference result/<id> directly to reuse it\n"
+    "— never re-run a form you\n"
+    "already computed (the result/<id> handle is the runtime's, never one\n"
+    "you write). A clipped display is NOT a clipped value: dig into\n"
     "a big result with ordinary Clojure (get-in, filter, count) on its\n"
     "result/<id> var instead of re-querying. NEVER copy a printed `=>`\n"
     "value back as a new form: a map, set, list, or tx-report you paste is\n"
@@ -1044,8 +1078,12 @@
     "- Your replies render as markdown on your human's screen — use\n"
     "  structure when it helps (short headings, lists, code fences for\n"
     "  code or data); plain prose otherwise.\n"
-    "- A turn serving a question MUST end with (seon.agent/reply! …) in\n"
-    "  the SAME response — your human sees NOTHING until reply! lands.\n"
+    "- A question is not served until (seon.agent/reply! …) lands — your\n"
+    "  human sees NOTHING until it does. Reply in the SAME response WHEN\n"
+    "  you can answer from what's already present; but when you must\n"
+    "  evaluate to answer, emit the forms and let the REAL result come\n"
+    "  back — reply from it on a later turn. NEVER fabricate a result to\n"
+    "  satisfy \"reply this turn.\"\n"
     "  ONE reply per question: once it lands your wake is complete and\n"
     "  the loop stops; a new message will wake you if more is needed.\n"
     "  reply! (like every message!) is REFUSED when an earlier form THIS\n"
@@ -1057,10 +1095,15 @@
     "  (seon.agent/message! {:seon.agent.message/to [:seon.agent/id\n"
     "  \"<id>\"] :seon.agent.message/content \"…\"}).\n"
     "- TURNS ARE PRECIOUS — each turn is a full round-trip; don't spend\n"
-    "  one exploring when you can answer. If your human asks something\n"
-    "  you ALREADY know, REPLY IMMEDIATELY this turn — (seon.agent/reply!\n"
-    "  \"…\") FIRST, before any reading or exploring. Answering is the job;\n"
-    "  a turn spent looking around before a known answer is wasted.\n"
+    "  one exploring when the answer is already in front of you. If your\n"
+    "  context CLEARLY contains the answer (it's in the soul, an\n"
+    "  <inventory> row, a loaded ns, or the past-evals), REPLY this turn —\n"
+    "  (seon.agent/reply! \"…\") — don't re-research what you can already\n"
+    "  see. But if the answer is NOT plainly present — anything about\n"
+    "  stored knowledge, your human's data, the codebase, or specifics you\n"
+    "  haven't read this turn — QUERY FIRST (store-inventory + datalog),\n"
+    "  THEN reply from what you found. Guessing because replying is fast is\n"
+    "  the failure; a turn spent confirming a known answer is the waste.\n"
     "- Replying does NOT end your ability to act. After the reply lands\n"
     "  you can keep working THIS turn or on later turns — set/refresh a\n"
     "  live tile, do the other work they asked for, store what you\n"
@@ -1077,10 +1120,12 @@
     "  with (into [:div …] children), never nest a bare seq as one\n"
     "  child. Eval your render fn once at the REPL to eyeball the hiccup\n"
     "  before you wire it onto a surface.\n"
-    "- Never write a result you have not evaluated. Your reply is REPL\n"
-    "  input, not a transcript — a `;; => 42` you typed yourself is\n"
-    "  fiction the next agent may trust. Eval it; the runtime writes the\n"
-    "  real value line.\n"
+    "- NEVER write a result you have not evaluated. Your reply is REPL\n"
+    "  input, not a transcript — any result line you type yourself (a bare\n"
+    "  `=> 61`, a `;; => 42`, a `;; result/<id>`) is FICTION the next agent\n"
+    "  may trust, and acting on it — a count, a reply, a query result you\n"
+    "  invented — is the worst failure there is. Eval the form, WAIT, and\n"
+    "  let the runtime write the real value line.\n"
     "- When you store a my.kb.* fact, grade it: record HOW you know it\n"
     "  (a :my.kb/source) and HOW SURE you are (a :my.kb/confidence). A\n"
     "  guess stored as fact is worse than no fact — the next agent\n"

@@ -53,6 +53,14 @@
 (schema/register! :seon.warn/explain :string)
 (schema/register! :seon.warn/example :string)
 (schema/register! :seon.warn/urgent? :boolean)
+;; DEV-ONLY tier: a check sets this true when its defect is a
+;; schema-hygiene / display concern for the dev/inspector surface, NOT an
+;; agent task. render-warnings drops dev-only clusters from the agent
+;; render unless :seon.warn/include-dev? is passed (the dev surface opts
+;; in). Absent ≡ false (agent-actionable). Derived classification, nothing
+;; stored — consistent with the reactive-context model.
+(schema/register! :seon.warn/dev-only?    :boolean)
+(schema/register! :seon.warn/include-dev? :boolean)
 
 (schema/register! :seon.warn/affected-entry
   [:map
@@ -65,7 +73,10 @@
 (schema/register! ::check-request
   [:map
    [:seon.db/db   :seon.db/db]
-   [:seon.warn/ns {:optional true} :seon.warn/ns]])
+   [:seon.warn/ns {:optional true} :seon.warn/ns]
+   ;; When truthy, dev-only clusters are KEPT (the dev/inspector surface
+   ;; opts in). The agent render path passes nothing → dev-only suppressed.
+   [:seon.warn/include-dev? {:optional true} :seon.warn/include-dev?]])
 
 (schema/register! ::check-response
   [:map
@@ -76,7 +87,10 @@
    ;; URGENCY tier: a check sets this true when its defect is one the
    ;; human is hitting RIGHT NOW (e.g. a broken live tile). render-warnings
    ;; renders urgent clusters FIRST with a louder template. Absent ≡ false.
-   [:seon.warn/urgent?  {:optional true} :seon.warn/urgent?]])
+   [:seon.warn/urgent?  {:optional true} :seon.warn/urgent?]
+   ;; DEV-ONLY tier: a schema-hygiene/display concern for the dev surface,
+   ;; not an agent task — dropped from the agent render. Absent ≡ false.
+   [:seon.warn/dev-only? {:optional true} :seon.warn/dev-only?]])
 
 ;; ============================================================
 ;; Corpus access + Malli-form walking helpers
@@ -484,12 +498,23 @@
    shouldn't re-register the compiled core's :map schemas, so nagging
    them about an unmarked core kind is a no-op task. (The fix for a
    core kind is to mark its :map schema {:seon.db/entity true} at
-   source, which is a core change, not an agent one.)"
+   source, which is a core change, not an agent one.)
+
+   DEV-ONLY: this is the one check that is purely about the
+   entity-renderer marker — a dev/inspector display concern, not an agent
+   task (the rows ARE queryable and DO show in store-inventory, as the
+   explain text itself says). It is tagged `:seon.warn/dev-only? true` so
+   [[render-warnings]] drops it from the AGENT prompt (the agent is told to
+   store my.kb.* facts under identity attrs — nagging that a correct write
+   is \"invisible\" frames the right action as broken). The check still
+   runs globally and stays visible in the dev/inspector surface via
+   `:seon.warn/include-dev? true`."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
   (let [marked (marked-entity-id-attrs)
         core   (db/core-kinds db)]
     {:seon.warn/kind :unmarked-entity-kinds
+     :seon.warn/dev-only? true
      :seon.warn/affected
      (->> (identity-attrs db)
           (remove marked)
@@ -1014,10 +1039,19 @@
    `<warnings>` block. URGENT clusters (`:seon.warn/urgent? true`) render
    FIRST with a louder template; the remaining clusters follow in registry
    order, one cluster per kind. Empty string when clean. Scope the corpus
-   checks with `:seon.warn/ns`; omit it for the whole-core overview."
+   checks with `:seon.warn/ns`; omit it for the whole-core overview.
+
+   DEV-ONLY clusters (`:seon.warn/dev-only? true`, e.g.
+   [[check-unmarked-entity-kinds]]) are DROPPED unless the request carries
+   `:seon.warn/include-dev? true`. The AGENT render path (ctx/warnings.cljs)
+   passes nothing → dev-hygiene is hidden from agents; the dev/inspector
+   surface opts in to still see it. Derived classification + render-time
+   filter — nothing stored (reactive-context model)."
   {:malli/schema [:=> [:cat ::check-request] :string]}
   [req]
-  (let [clusters         (run-checks req)
+  (let [clusters         (cond->> (run-checks req)
+                           (not (:seon.warn/include-dev? req))
+                           (remove (comp boolean :seon.warn/dev-only?)))
         {urgent  true
          ordinary false} (group-by (comp boolean :seon.warn/urgent?) clusters)]
     (if (seq clusters)

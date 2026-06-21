@@ -26,6 +26,12 @@
    (failed-evals, bad-ref, slow-evals, failing-tests) are always global
    — cross-agent visibility is their point.
 
+   DEV-ONLY checks (`:seon.warn/dev-only? true`, e.g. unmarked-entity-kinds
+   — a schema-hygiene/display concern) are NOT surfaced to the agent: this
+   section passes no `:seon.warn/include-dev?`, so
+   [[seon.warn/render-warnings]] drops them. The dev/inspector surface opts
+   in to still see them.
+
    To add a warning kind, add a check fn to `seon.warn/checks`."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id] :as input}]

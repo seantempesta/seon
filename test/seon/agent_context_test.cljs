@@ -331,7 +331,7 @@
               (is (str/includes? text "<namespace name=\"seon.agent.todo\">")
                   "namespace tags present")
               (is (str/includes? text "<your-entity>") "your-entity present")
-              (is (str/includes? text "<transcript note=") "transcript present")
+              (is (str/includes? text "<past-evals>") "transcript present")
               (is (str/includes? text "<warnings>") "warnings present")
               ;; the dead sections (context-v4 falsification lines) —
               ;; LINE-anchored: rendered SOURCE CODE may legitimately
@@ -362,8 +362,8 @@
                   i-failed (str/index-of ts "=> ✗ boom — bad query")
                   i-t2     (str/index-of ts "<turn id=TRNctxtest0002")
                   i-success (str/index-of ts "my.agent.ctx-260610/greet")]
-              (is (str/includes? ts "<transcript note=") "transcript envelope present")
-              (is (str/includes? ts "</transcript>") "transcript envelope closed")
+              (is (str/includes? ts "<past-evals>") "transcript envelope present")
+              (is (str/includes? ts "</past-evals>") "transcript envelope closed")
               (is (and i-t1 i-user i-failed i-t2 i-success)
                   "both <turn> blocks, the <user> line, and both evals present")
               ;; turn 1 opens, its <user> woken-by line is INSIDE it,

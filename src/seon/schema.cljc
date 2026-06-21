@@ -172,16 +172,36 @@
   (when (vector? form)
     (some (fn [x] (when (map? x) x)) (rest form))))
 
-(defn- attr-has-identity?
+(defn identity-attr?
   "True when the registered attr schema for `attr-key` carries
    `{:seon.db/identity true}` directly or through one keyword
    indirection. Covers the three shapes Seon uses today:
      [:string  {:seon.db/identity true}]
      [:keyword {:seon.db/identity true}]
-     [:and {:seon.db/identity true} :seon.db/id]"
+     [:and {:seon.db/identity true} :seon.db/id]
+   PUBLIC: the single identity-attr predicate — callers (the inventory
+   section, etc.) reuse it rather than re-deriving the props lookup."
+  {:malli/schema [:=> [:cat :keyword] :boolean]}
   [attr-key]
   (let [form (get @*schemas attr-key)]
     (boolean (some-> form attr-form-properties :seon.db/identity))))
+
+(defn enum-members
+  "The members of a registered `:enum` attr schema; an EMPTY vector when
+   the attr is not an enum (absence = empty, never nil). Reads straight
+   from the schema form — NO db query. Strips an optional leading props
+   map (`[:enum {…} :a :b]`) before taking members. PUBLIC:
+   low-cardinality value surfaces (the inventory section) reuse it. The
+   member values are Malli-form contents (keywords/strings/ints) — a
+   third-party-structure boundary, hence `:any`."
+  {:malli/schema [:=> [:cat :keyword] [:vector :any]]}
+  [attr-key]
+  (let [form (get @*schemas attr-key)]
+    (if (and (vector? form) (= :enum (first form)))
+      (let [body (rest form)
+            body (if (and (seq body) (map? (first body))) (rest body) body)]
+        (vec body))
+      [])))
 
 (defn- map-shape?
   "True if `v` looks like a Malli `:map` schema form."
@@ -213,7 +233,7 @@
   (when (map-shape? v)
     (some (fn [entry]
             (when-let [k (and (vector? entry) (first entry))]
-              (when (attr-has-identity? k) k)))
+              (when (identity-attr? k) k)))
           (map-entries v))))
 
 (defn- derive-entity-id-attr
