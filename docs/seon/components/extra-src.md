@@ -58,7 +58,7 @@ it (mirrors `seon.dev.test-preload`):
             [seon.client :as client])
   (:require-macros [seon.indexing :refer [specced-fn-vars]]))
 
-(reset! client/!extra-substrate-vars
+(reset! client/!extra-core-vars
         ;; filter to OWN prefix: the macro's closure also sees the seon
         ;; surface (those dedup away at boot-index, but filtering keeps
         ;; the registration honest)
@@ -76,7 +76,7 @@ it (mirrors `seon.dev.test-preload`):
   (deep-merge CONCATS vectors — `seon.dev.test-preload` is kept). All
   env unset = byte-identical commands (`bin/seon print-cmd <name>`).
 - Boot indexer: registered extra vars get `:seon.fn` rows, their nses
-  get FULL-SOURCE `:seon.ns` rows, and they join `substrate-ns-set`
+  get FULL-SOURCE `:seon.ns` rows, and they join the core ns-set
   (replay-skipped — compiled code is never re-evaled from the store).
   `seon.indexing/first-party-file?` and `seon.client/read-src-file`
   both accept the extra root.
@@ -84,6 +84,13 @@ it (mirrors `seon.dev.test-preload`):
   "node_modules"]` entry in shadow-cljs.edn `:js-package-dirs`;
   runtime via `NODE_PATH=$SEON_EXTRA_NPM` exported by `bin/seon`'s pod
   command (the CJS bundle's `require("pkg")` resolves from `out/`).
+- Index → bound: a `:seon.fn/source` row does double duty. (1) the
+  agent SEES the fn (introspection); (2) because the tile-isolation SCI
+  bounding ([[components/renderer]]) interprets STORED source, an indexed
+  downstream tile fn becomes BOUNDABLE — an un-indexed compiled
+  downstream tile fn renders on the UNBOUNDED compiled path. This
+  index→bound link plus the override-flows-through path are covered
+  end-to-end by `seon.client.extra-core-test/downstream-fn-is-indexed-and-its-override-flows-through-a-late-bound-caller`.
 
 ## Rules and edges
 
@@ -106,9 +113,9 @@ it (mirrors `seon.dev.test-preload`):
 
 - `bin/seon` (injection helpers + `print-cmd`), `bin/test-cljs`,
   `bin/gym` (env-clean)
-- `src/seon/client.cljs` — `!extra-substrate-vars`, reserved-prefix
+- `src/seon/client.cljs` — `!extra-core-vars`, reserved-prefix
   guard, `read-src-file` extra roots, full-source ns-rows
 - `src/seon/indexing.clj` — `first-party-file?` extra root
 - `shadow-cljs.edn` — `:js-package-dirs` `#shadow/env` entry
-- Tests: `test/seon/client/extra_substrate_test.cljs` +
+- Tests: `test/seon/client/extra_core_test.cljs` +
   `test/acme/extra_fixture.cljs`

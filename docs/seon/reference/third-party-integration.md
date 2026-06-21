@@ -161,7 +161,73 @@ edit survives reboots).
   supplies the initial persona on a fresh store without forking the repo — same
   seed-once → DB-owns shape. (Ask if you need this prioritized.)
 
-## 6. Operating the pod
+## 6. Testing the 2026-06-21 updates (tile isolation + late-bound override)
+
+Concrete eval recipes for the work that just landed. Run them in the pod REPL
+against a live agent id.
+
+### 6.1 A hung tile no longer freezes the pod
+
+Wire a non-terminating fn as the agent's live-tile and confirm it aborts at the
+wall-clock budget instead of wedging the single pod thread:
+
+```clojure
+;; persist an interpreted fn + point the tile at it
+(seon.db/transact!
+  {:seon.db/tx-data [{:seon.fn/sym "my.t/hang"
+                      :seon.fn/source "(defn hang [m] (loop [] (recur)))"}
+                     {:seon.agent/id "<id>"
+                      :seon.render.live-tile/content 'my.t/hang}]})
+(seon.render/render-agent-tile {:seon.agent/id "<id>"})
+```
+
+Expect the `welcome` fallback within ~the budget (not a hang); `/agents` keeps
+answering; `:seon.render.live-tile/content` is retracted back to welcome; the
+agent is messaged once (deduped). A tile that THROWS instead shows the calm
+"Updating this panel" card and notifies the agent — no crash, content kept so a
+fix takes effect. Set `SEON_TILE_SCI=0` to disable bounding. Mechanism +
+caveats: [[components/renderer]].
+
+### 6.2 An override flows through a late-bound caller
+
+```clojure
+(seon.demo/greet-loudly)                       ;; => "hello from core!"
+(set! seon.demo/greeting (fn [] "x"))
+(seon.demo/greet-loudly)                       ;; => "x!"
+;; redefining via defn works the same:
+(defn seon.demo/greeting [] "y")
+(seon.demo/greet-loudly)                       ;; => "y!"
+```
+
+Both `set!` and `defn` redefinition route every existing caller to the new
+version — this is the agent-facing override surface (the §3 build-time override
+is the same late-binding mechanism applied at compile time).
+
+### 6.3 Your own compiled persona / tile fns
+
+A fn compiled from your source is NOT indexed by default (no `:seon.fn/source`
+row), so it renders on the UNBOUNDED compiled path. To make it agent-visible AND
+boundable, index it via `SEON_EXTRA_SRC` plus the `!extra-core-vars` preload
+registration — see [[components/extra-src]]. Verify the fn picked up a source
+row:
+
+```clojure
+(seon.client/index-core!)   ;; your fn now appears with :seon.fn/source
+```
+
+### 6.4 Caveats
+
+- Proven on the dev `:none` build (what the pod and the suite run).
+- `:advanced` is unsupported; `:simple` release is not yet validated — the
+  override-via-runtime-eval path is optimization-immune, but the core's
+  `globalThis` fn resolution under `:simple` is unverified (see
+  [[prds/agent-runtime/research/shadow-late-binding-and-extra-src-2026-06-21]]).
+- The native host-loop / ReDoS residual is not bounded (deferred Layer 2 —
+  killable worker).
+- The `reply!` `:malli/schema` was also fixed in this batch (no behavior
+  change).
+
+## 7. Operating the pod
 
 - `bin/seon status` — process states + the pod URL.
 - `bin/seon restart pod` / `restart cljs-watch` — restart after config/build

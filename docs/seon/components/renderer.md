@@ -22,6 +22,7 @@ Two output formats flow through the system: `:seon.render/html` (hiccup) and `:s
 | `seon.render.code` | `src/seon/render/code.clj` | Code/docs rendering from graph: compatible-functions, render-ns-docs, context-for-agent |
 | `seon.render.example` | `src/seon/render/example.clj` | Example: position renderer demonstrating the convention |
 | `seon.ns.view` | `src/seon/ns/view.clj` | Multimethod-based view system dispatching on `[format view-type]` metadata |
+| `seon.render.sci` | `src/seon/render/sci.cljs` | Wall-clock-bounded SCI invocation of agent-authored live-tile fns (`invoke-bounded`) |
 
 ## Public API Surface
 
@@ -142,6 +143,18 @@ A function becomes discoverable by following the naming convention:
 The scanner sees `:seon.render/html` in the output spec's contains-keys -> stores in graph -> `functions-with-output-key` finds it -> resolution matches by input keys.
 
 Namespace proximity tiebreaking ensures that `seon.health.workout.render/workout-view` is preferred over `seon.getting-started.render/generic-view` when rendering workout data, even if both match.
+
+### Bounded agent live-tiles (SCI safety net)
+
+An agent customizes its panel by wiring `:seon.render.live-tile/content` to a fn symbol; `render-agent-tile` invokes it. AGENT-authored tile fns (ns not `seon.*` / `clojure.*` / `cljs.*`) now run through `seon.render.sci/invoke-bounded`, which interprets the fn under SCI with a wall-clock `:interrupt-fn`. A non-terminating tile (`(loop [] (recur))`, `(while true)`, runaway interpreted recursion) ABORTS in-process at the deadline instead of freezing the single pod thread. The core `welcome`, core section fns, and literal hiccup stay on the fast compiled `html-render` path untouched — only agent-authored symbols go through SCI. Behind env `SEON_TILE_SCI` (default on; `=0` disables).
+
+**Pure safety net, never brittle.** ONLY the wall-clock interrupt triggers recovery. ANY other SCI outcome — no stored source, an env-reconstruction gap, a genuine throw — falls back to the compiled `html-render` path. `invoke-bounded` is outer-guarded so it never throws. Bounding can only ever CATCH HANGS; it never turns a working tile into an error and never crashes the pod.
+
+**Legible recovery, always a nice tile.** On a HANG, reset the tile to `welcome` (retract `:seon.render.live-tile/content`) and post the agent ONE deduped force'd message. On a THROW, show the calm "Updating this panel" card (not a scary error), KEEP the content (so a fix takes effect), and notify the agent once (deduped).
+
+**Bounding requires indexed source.** SCI bounds by INTERPRETING the tile fn's SOURCE, so bounding only applies when the source is available. Runtime agent-authored fns have it (teed to `:seon.fn/source`). A fn COMPILED from a source file is bounded only when it has been INDEXED (has a `:seon.fn/source` row) — otherwise it renders on the UNBOUNDED compiled path. See [[components/extra-src]] for how downstream compiled fns get indexed (and thus bounded). The lexical env (the ns's `:require` `:as` aliases / `:refer` / `:refer :all` + own-ns helpers) is reconstructed from the DB so aliased tiles resolve under SCI.
+
+**Caveats.** Covers INTERPRETED loops/recursion (the reproduced freeze). NOT covered (needs the deferred Layer-2 killable worker): a tile that calls a native host loop (compiled CLJS / JS `while(true)`) or a native regex (ReDoS) — the interrupt only fires on interpreted code. `:advanced` is unsupported (Closure DCE/inlining); `:simple` release is not yet validated (the pod runs dev `:none`). See the PRD [[prds/agent-runtime/tile-isolation-prd-2026-06-21]] and the validation/test doc [[prds/agent-runtime/sci-interrupt-validation-2026-06-21]].
 
 ## Design Decisions
 
