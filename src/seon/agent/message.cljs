@@ -338,9 +338,7 @@
      ;; map form when you need to override the batch-failure guard:
      (seon.agent/reply! {:seon.agent.message/content \"…\"
                          :seon.agent.message/force   true})"
-  {:malli/schema [:function
-                  [:=> [:cat :string] ::message-response]
-                  [:=> [:cat ::message-request] ::message-response]]}
+  {:malli/schema [:=> [:cat [:or :string ::message-request]] ::message-response]}
   [arg]
   (if (string? arg)
     (await (reply! {:seon.agent.message/content arg}))
