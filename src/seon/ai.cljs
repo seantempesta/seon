@@ -338,6 +338,22 @@
 (schema/register! ::prompt-request
   [:map [::system-prompt {:optional true} ::system-prompt]])
 
+;; Honest boundary between the two blocks every LLM call sends: the SOUL
+;; system message (block 1) and the assembled context (block 2). A reader
+;; of the debug text sees exactly where the system message ends and the
+;; context begins — the same two blocks the adapters wire (openai-compat
+;; `:messages [{:role "system" …}]`, anthropic `:system [{:type "text" …}]`).
+(def soul-boundary
+  "\n\n;; ──────── ↑ system message (soul)  │  ↓ context (:seon.ai/ctx) ────────\n\n")
+
+;; Request for [[debug-full-prompt]]: the assembled context (block 2) plus
+;; the same optional `::system-prompt` override `effective-system-prompt`
+;; honors, passed straight through.
+(schema/register! ::debug-prompt-request
+  [:map
+   [::ctx :string]
+   [::system-prompt {:optional true} ::system-prompt]])
+
 (defn effective-system-prompt
   "The system message content for a call: the request's explicit
    `:seon.ai/system-prompt` override when given, else the live identity
@@ -350,6 +366,21 @@
       (try (not-empty (soul/system-prompt-text))
            (catch :default _ nil))
       fallback-system-prompt))
+
+(defn debug-full-prompt
+  "The FULL prompt as the agent sees it — the live soul system block
+   ([[effective-system-prompt]]), a boundary, then the assembled context
+   (block 2). THE single source both the inspector preview
+   (`seon.agent.inspect/ctx-preview`) and the persisted per-turn log use,
+   so the two debug surfaces are byte-identical to each other and to what
+   the adapters wire. This is a DEBUG representation only — it is NEVER
+   sent to the LLM (the adapters add the system block themselves; sending
+   this would double the soul). `:seon.ai/ctx` is the assembled context;
+   an explicit `:seon.ai/system-prompt` override is honored (passed
+   through to [[effective-system-prompt]])."
+  {:malli/schema [:=> [:cat ::debug-prompt-request] :string]}
+  [{::keys [ctx] :as request}]
+  (str (effective-system-prompt request) soul-boundary ctx))
 
 ;; ============================================================
 ;; Shared error logging — a failed LLM call is NEVER silent.

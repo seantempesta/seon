@@ -1,16 +1,21 @@
 (ns seon.web.inspector
   "Agent inspector UI — what the agent sees, both as AI text and HTML.
 
-   Two columns per agent — both derived from the ONE composer
-   (`inspect/ctx-preview` → `seon.ctx/assemble-context`), so they share
-   the section set and structurally cannot diverge
-   (debug-view-section-twins-2026-06-18):
-     - LEFT  `:seon.render/ai`   — the exact bytes the LLM would receive
-       on its next render, as per-section texts
-       (`:seon.render/section-texts`).
-     - RIGHT `:seon.render/html` — the same sections' html twins
-       (`:seon.render/section-html`): each section's `:seon.render/html`
-       slot rendered as one right-pane card, in render order. (The old
+   Two columns per agent — both derived from `inspect/ctx-preview`
+   (soul system block via `seon.ai/effective-system-prompt` + the ONE
+   composer `seon.ctx/assemble-context`), so they share their sources
+   and structurally cannot diverge (debug-view-section-twins-2026-06-18):
+     - LEFT  `:seon.render/ai`   — the EXACT bytes the LLM would receive
+       on its next render: the live SOUL system block FIRST, then the
+       context sections, as per-section texts (`:seon.render/section-texts`,
+       led by the `:soul-system` section). `:ai-text`/char-count/token-est
+       all derive from `ctx-preview`'s full `:seon.render/text`.
+     - RIGHT `:seon.render/html` — the CONTEXT sections' html twins
+       (`:seon.render/section-html`): each context section's
+       `:seon.render/html` slot rendered as one right-pane card, in
+       render order. The soul is the system MESSAGE, not a context
+       section, so it has no html twin here (the rendered view is the
+       context surface; the full prompt text is the left pane). (The old
        per-entity last-64-by-tx-time entity window — flooded with the
        core's own `:seon.test` captures — is gone.)
 
@@ -156,11 +161,14 @@
    mirrors the left's section set, debug-view-section-twins-2026-06-18)."
   [agent-id]
   (let [{:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id agent-id})
-        ;; ONE composer for the left-pane text (`seon.agent/assemble-context`,
-        ;; the exact bytes the agent receives) + the SECTION HTML TWINS
-        ;; behind it (debug-view-section-twins-2026-06-18) — both via
-        ;; `inspect/ctx-preview`, so the right pane MIRRORS the left: same
-        ;; section set, two surfaces, structurally cannot diverge. The old
+        ;; `inspect/ctx-preview` returns the EXACT bytes the agent receives
+        ;; for the left-pane text (`:seon.render/text` = soul system block
+        ;; FIRST, then `seon.ctx/assemble-context`), the per-section texts
+        ;; (`:seon.render/section-texts`, led by the `:soul-system` section),
+        ;; and the CONTEXT-section HTML TWINS behind it
+        ;; (debug-view-section-twins-2026-06-18) for the right pane. `:ai-text`,
+        ;; `:char-count`, and `:token-est` all derive from the full text, so
+        ;; the counts include the soul. The old
         ;; per-entity last-64-by-tx-time window (flooded with the core's own
         ;; :seon.test captures) is gone.
         {:seon.render/keys [text token-estimate section-texts section-html]}
@@ -284,8 +292,11 @@
    warnings) is static bulk the user has already read; it collapses to
    a one-line summary. `:context` is the divergence-fallback pseudo-
    section carrying the whole joined text (see
-   `seon.agent.inspect/per-section-texts`) — must stay open."
-  #{:transcript :prompt :context})
+   `seon.agent.inspect/per-section-texts`) — must stay open.
+   `:soul-system` is the live SOUL system message (block 1 of every LLM
+   call) prepended by `inspect/ctx-preview` — kept open so the debug view
+   shows the soul the agent actually receives, not a collapsed summary."
+  #{:soul-system :transcript :prompt :context})
 
 (defn- fmt-chars
   "`3214` → `\"3,214\"` — comma-grouped char count for summaries."

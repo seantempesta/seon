@@ -46,6 +46,7 @@
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.agent.inspect :as inspect]
+    [seon.ai :as ai]
     [seon.schema :as schema]
     ;; The exemplar TEST SIBLINGS — required so the fixture can seed their
     ;; :seon.ns rows (full file text) via client/index-tests, the same
@@ -260,21 +261,27 @@
     (-> (with-seeded-conn
           (fn [conn]
             (let [db          @conn
-                  ;; render-prompt is what run-turn! persists as
-                  ;; :seon.agent.turn/prompt-text — assert that exact source.
+                  ;; render-prompt is BLOCK 2 (the ctx / LLM user message);
+                  ;; the adapters add the soul system block (BLOCK 1) at call
+                  ;; time. The debug surfaces (inspector + persisted log) show
+                  ;; the FULL prompt = soul + ctx via the ONE shared composer
+                  ;; `seon.ai/debug-full-prompt`.
                   agent-text  (strip-now (agent/render-prompt agent-id))
                   composer    (strip-now
                                 (:seon.render/text
                                   (agent/assemble-context
                                     {:seon.db/db db :seon.agent/id agent-id})))
+                  full        (strip-now
+                                (ai/debug-full-prompt
+                                  {:seon.ai/ctx (agent/render-prompt agent-id)}))
                   inspector   (strip-now
                                 (:seon.render/text
                                   (inspect/ctx-preview {:seon.agent/id agent-id})))]
               (is (pos? (count agent-text)) "agent path non-empty")
               (is (= agent-text composer)
-                  "render-prompt == assemble-context (same composer)")
-              (is (= agent-text inspector)
-                  "inspector left-pane text == agent prompt text — no divergence"))))
+                  "render-prompt == assemble-context (same composer, block 2)")
+              (is (= full inspector)
+                  "inspector left-pane == the FULL prompt the agent sees (soul + ctx) — no divergence"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

@@ -98,6 +98,7 @@
   (:require
     [clojure.string :as str]
     [seon.agent.message :as msg]
+    [seon.ai :as ai]
     [seon.ctx :as ctx]
     [seon.ctx.namespaces :as ctx-namespaces]
     [seon.ctx.prompt :as ctx-prompt]
@@ -1238,6 +1239,14 @@
         ;; KNN is awaited here + stashed so the sync :relevant-source section
         ;; reads it (the async seam — `assemble-context` stays sync).
         prompt     (await (prefetch-and-render-prompt! id))
+        ;; DEBUG representation = the FULL prompt the agent sees: soul
+        ;; system block + boundary + ctx, via the ONE shared composer
+        ;; (`ai/debug-full-prompt`) the inspector preview also uses. This
+        ;; feeds the disk capture and the persisted `prompt-chars`. It is
+        ;; NEVER sent to the LLM — `prompt` (block2/ctx) is; the adapters
+        ;; add the soul system block themselves. Decoupling these is what
+        ;; keeps the soul from DOUBLING in the real call.
+        full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt})
         ;; Blob tier — full prompt to disk, GATED behind the debug-capture
         ;; flag (seon.debug). OFF by default (stops the unbounded
         ;; logs/prompts growth); when ON, prompt.txt lands in the unified
@@ -1245,7 +1254,7 @@
         ;; The turn datom still carries chars + the pointer (prompt-file →
         ;; the captured path) WHEN capturing — absent when off (gym opts
         ;; in via debug/set-override! so its prompt-blob evidence survives).
-        prompt-file (debug/capture-prompt! id turn-idx turn-id prompt)]
+        prompt-file (debug/capture-prompt! id turn-idx turn-id full-prompt)]
     (log id turn-idx "open" turn-id "+" (count prompt) "ctx-chars")
     (try
       (let [result (await
@@ -1264,10 +1273,16 @@
                            (fn []
                              (with-turn!
                                (cond->
+                                 ;; DEBUG: with-turn! uses prompt-text ONLY
+                                 ;; to derive the stored `prompt-chars`
+                                 ;; projection — so it gets the FULL prompt
+                                 ;; (soul + boundary + ctx). It does NOT
+                                 ;; feed the LLM (ask-and-eval! below gets
+                                 ;; its OWN block2 `prompt`), so no doubling.
                                  {:seon.agent/id           id
                                   :seon.agent.session/id-of-session session-id
                                   :seon.agent.turn/id-of-turn    turn-id
-                                  :seon.agent.turn/prompt-text   prompt}
+                                  :seon.agent.turn/prompt-text   full-prompt}
                                  prompt-file
                                  (assoc :seon.agent.turn/prompt-file prompt-file)
                                  woken-by

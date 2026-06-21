@@ -2,11 +2,16 @@
   "Agent self-introspection: 'what am I seeing right now?'
 
    Two verbs:
-     - `ctx-preview` — the assembled AI-context the agent would receive
-       on its next render: the exact prompt text, the per-section texts
-       (left pane), and the per-section html twins (right pane). Both
-       panes are derived from the ONE composer
-       (`seon.ctx/assemble-context`), so they cannot diverge.
+     - `ctx-preview` — the FULL prompt the agent would receive on its
+       next render: the live SOUL system block FIRST (read via the SAME
+       fn the adapters call, `seon.ai/effective-system-prompt`), then
+       the assembled AI-context (`seon.ctx/assemble-context`). The
+       `:seon.render/text` is byte-identical to what the LLM receives
+       (system message + context), with an explicit boundary between
+       them. Per-section texts (left pane) lead with the soul block;
+       the per-section html twins (right pane) mirror the context
+       sections only. Soul + context derive from the same sources the
+       real call uses, so divergence is impossible.
      - `handlers` — the live handler registry visible to the agent
        (core + per-agent).
 
@@ -15,6 +20,7 @@
    scope work with no argument."
   (:require
     [seon.agent-view :as agent-view]
+    [seon.ai :as ai]
     [seon.ctx :as ctx]
     [seon.db :as db]
     [seon.handler :as handler]
@@ -51,24 +57,44 @@
                {:seon.agent.inspect/error :no-agent-id}))))
 
 (defn ctx-preview
-  "Return the assembled AI-context the agent would see on its next render
-   — the EXACT bytes the LLM receives, via the ONE composer
-   `seon.ctx/assemble-context` (the same fn the agent prompt path
-   calls; divergence is impossible — the composer itself returns the
-   per-section texts AND the per-section html twins, so the inspector's
-   left pane (`:seon.render/section-texts`) and right pane
-   (`:seon.render/section-html`) both mirror the same section set).
-   Reads from the agent's filtered view so cross-agent tx are hidden."
+  "Return the FULL prompt the agent would see on its next render — the
+   EXACT bytes the LLM receives: the live SOUL system block FIRST, then
+   the assembled context. The soul is read via the SAME fn the adapters
+   call (`seon.ai/effective-system-prompt` — live SOUL.md/AGENTS.md read
+   plus the no-identity fallback / explicit-override logic), so the
+   debug text is byte-identical to the real system message; the context
+   comes from the ONE composer `seon.ctx/assemble-context`. Divergence
+   is impossible — both surfaces derive from the same sources the real
+   call uses. `:seon.render/text` = soul + boundary + context.
+   `:seon.render/section-texts` leads with a `:soul-system` section (left
+   pane shows the soul too); `:seon.render/section-html` mirrors the
+   context section twins only (the soul is the system message, not a
+   context section). `:seon.render/token-estimate` counts the WHOLE
+   prompt (soul included). Reads from the agent's filtered view so
+   cross-agent tx are hidden."
   {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/ctx-response]}
   [{:seon.agent/keys [id]}]
   (let [id (resolve-id id)
         {:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id id})
-        {:seon.render/keys [text token-estimate section-texts section-html]}
-        (ctx/assemble-context {:seon.agent/id id :seon.db/db db})]
-    {:seon.render/text            text
-     :seon.render/section-texts   section-texts
+        {:seon.render/keys [text section-texts section-html]}
+        (ctx/assemble-context {:seon.agent/id id :seon.db/db db})
+        ;; Block 1 — the live soul system message, via the EXACT fn the
+        ;; adapters call (no re-implementation, no drift). No override is
+        ;; passed, so this returns the live SOUL.md/AGENTS.md text (or the
+        ;; no-identity fallback) — the normal call's system message.
+        soul          (ai/effective-system-prompt {})
+        ;; The FULL prompt via the ONE shared composer — same bytes the
+        ;; persisted per-turn log uses, so the two debug surfaces can't
+        ;; drift (boundary + assembly live in seon.ai now).
+        full-text     (ai/debug-full-prompt {:seon.ai/ctx text})]
+    {:seon.render/text            full-text
+     :seon.render/section-texts   (into [{:seon.ctx/name     :soul-system
+                                          :seon.render/text  soul}]
+                                        section-texts)
      :seon.render/section-html    section-html
-     :seon.render/token-estimate  token-estimate}))
+     ;; Estimate over the WHOLE prompt — same units as the composer
+     ;; (~4 chars/token), so the count grows by the soul length.
+     :seon.render/token-estimate  (quot (count full-text) 4)}))
 
 (defn handlers
   "Return the live handler registry visible to the agent (core
