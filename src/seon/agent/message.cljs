@@ -327,15 +327,27 @@
    message. Returns `message!`'s concise envelope — including its
    same-batch failure refusal (B3): when an earlier form of this batch
    failed, the reply is refused; pass `:seon.agent.message/force true`
-   to deliberately reply about the failures. The one-liner for both
-   user- and agent-conversations:
+   to deliberately reply about the failures.
 
-     (seon.agent/reply! {:seon.agent.message/content \"done — stored 2 rows\"})"
-  {:malli/schema [:=> [:cat ::message-request] ::message-response]}
-  [{:seon.agent.message/keys [content force]}]
-  (let [agent-id (db/current-agent-id)
-        woke-from (get-in (ctx/current-turn {:seon.agent/id agent-id})
-                          [:seon.agent.turn/woken-by :seon.agent.message/from :db/id])]
-    (await (message! (cond-> {:seon.agent.message/content content
-                              :seon.agent.message/to      (if woke-from [woke-from] [user-ref])}
-                       (some? force) (assoc :seon.agent.message/force force))))))
+   Accepts EITHER a plain string (the common case) OR the request map.
+   The string form just builds the canonical map and recurses, so there
+   is exactly one path to `message!`:
+
+     (seon.agent/reply! \"done — stored 2 rows\")
+     (seon.agent/reply! {:seon.agent.message/content \"done — stored 2 rows\"})
+     ;; map form when you need to override the batch-failure guard:
+     (seon.agent/reply! {:seon.agent.message/content \"…\"
+                         :seon.agent.message/force   true})"
+  {:malli/schema [:function
+                  [:=> [:cat :string] ::message-response]
+                  [:=> [:cat ::message-request] ::message-response]]}
+  [arg]
+  (if (string? arg)
+    (await (reply! {:seon.agent.message/content arg}))
+    (let [{:seon.agent.message/keys [content force]} arg
+          agent-id  (db/current-agent-id)
+          woke-from (get-in (ctx/current-turn {:seon.agent/id agent-id})
+                            [:seon.agent.turn/woken-by :seon.agent.message/from :db/id])]
+      (await (message! (cond-> {:seon.agent.message/content content
+                                :seon.agent.message/to      (if woke-from [woke-from] [user-ref])}
+                         (some? force) (assoc :seon.agent.message/force force)))))))
