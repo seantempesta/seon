@@ -154,3 +154,7 @@
 	path = reference-code/java-genai
 	url = https://github.com/googleapis/java-genai
 	ignore = dirty
+[submodule "reference-code/sci"]
+	path = reference-code/sci
+	url = https://github.com/babashka/sci.git
+	ignore = dirty

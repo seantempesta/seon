@@ -1,0 +1,17 @@
+;; Self-contained spike — does NOT touch the project's shared shadow-cljs.edn,
+;; the :client build, or the live pod. Run from THIS directory.
+;;
+;;   :none (dev/watch-equivalent — the build the pod uses):
+;;     clojure -M -m shadow.cljs.devtools.cli compile spike
+;;     node out/spike.js
+;;
+;;   :simple (release without :advanced's DCE/renaming):
+;;     add :compiler-options {:optimizations :simple} to the :spike build,
+;;     then:  clojure -M -m shadow.cljs.devtools.cli release spike
+;;            node out/spike.js
+{:deps   {:aliases []}
+ :nrepl  {:port 7999}
+ :builds {:spike
+          {:target    :node-script
+           :main      spike.core/main
+           :output-to "out/spike.js"}}}
