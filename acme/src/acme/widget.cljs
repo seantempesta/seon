@@ -25,7 +25,14 @@
 
 (defn dash
   "Acme dashboard live tile — derives everything from the db value at
-   render time (no stored hiccup). Calls the UNSPECCED `h/format-count`."
+   render time (no stored hiccup). Calls the UNSPECCED `h/format-count`.
+
+   SPECCED (welcome-tile contract) so it boot-indexes as a `:seon.fn`
+   row → its source is available to the SCI-bounding path, which is what
+   lets the tile exercise the unspecced-helper SCI fix (BUG A): the
+   bounded interpreter must resolve `h/format-count` from a required ns
+   even though that helper has no `:seon.fn` row of its own."
+  {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (let [n (if db (count (db/installed-schema db)) 0)]
     {:seon.render/hiccup
