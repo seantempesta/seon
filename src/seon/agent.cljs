@@ -1344,96 +1344,111 @@
 (schema/register! ::unanswered-live-inbound-request
   [:map [::id ::id]])
 
-(defn- latest-message-at
-  "ffirst of a `(max ?at)` message query — the latest `:at` or nil."
+(defn- query-count
+  "ffirst of a `(count ?x)` query — the row count (0 when empty)."
   [q args]
-  (ffirst (db/query {:seon.db/query q :seon.db/args args})))
+  (or (ffirst (db/query {:seon.db/query q :seon.db/args args})) 0))
 
-(defn- latest-inbound-at
-  "`:seon.agent.message/at` of the latest LIVE inbound message for
-   `my-eid` — to ∋ me, from ≠ me, hops < `warn/hop-cap`, origin ∉
-   {:core} (#43), handled? ≠ true (I-1). nil when `my-eid` is nil or no
-   such message exists. The ONE inbound query the stop-policy reads, so
-   its wake exclusions match `inbound-msg-datom?` exactly: a message
-   that does not WAKE must not ANCHOR the halt either (mirrors
-   seon.ctx/turns-since-inbound)."
+(defn- live-inbound-count
+  "How many LIVE inbound messages for `my-eid` are awaiting an answer —
+   to ∋ me, from ≠ me, hops < `warn/hop-cap`, origin ∉ {:core} (#43),
+   handled? ≠ true (I-1). 0 when `my-eid` is nil. The SAME exclusions
+   as the wake gate `inbound-msg-datom?`: a message that does not WAKE
+   must not be COUNTED here either (mirrors seon.ctx/turns-since-inbound).
+   These are the only messages the stop-policy treats as questions."
   [my-eid]
-  (when my-eid
-    (latest-message-at
-      '[:find (max ?at)
+  (if my-eid
+    (query-count
+      '[:find (count ?m)
         :in $ ?me ?cap
         :where
         [?m :seon.agent.message/to ?me]
         [?m :seon.agent.message/from ?f]
         [(not= ?f ?me)]
-        ;; hop-exhausted messages never wake a loop and must not
-        ;; anchor its reply window either (mirrors
-        ;; seon.ctx/turns-since-inbound).
+        ;; hop-exhausted messages never wake a loop and must not be
+        ;; counted as questions (mirrors seon.ctx/turns-since-inbound).
         [(get-else $ ?m :seon.agent.message/hops 0) ?h]
         [(< ?h ?cap)]
         ;; :core substrate nudges (tile recovery, sent FROM the
-        ;; user-ref) never wake a loop and must not move the halt
-        ;; baseline either (#43). Legacy rows have no origin ⇒ default
-        ;; to :human (those predate :core; all were human/agent).
+        ;; user-ref) never wake a loop and are not questions (#43).
+        ;; Legacy rows have no origin ⇒ default to :human (those
+        ;; predate :core; all were human/agent).
         [(get-else $ ?m :seon.agent.message/origin :human) ?o]
         [(not= ?o :core)]
         ;; I-1: a tx-hook-consumed message (handled? = true) neither
-        ;; wakes (inbound-msg-datom?) nor anchors the stop-policy.
+        ;; wakes (inbound-msg-datom?) nor counts as a question.
         [(get-else $ ?m :seon.agent.message/handled? false) ?handled]
-        [(not= ?handled true)]
-        [?m :seon.agent.message/at ?at]]
-      [my-eid warn/hop-cap])))
+        [(not= ?handled true)]]
+      [my-eid warn/hop-cap])
+    0))
 
-(defn- latest-outbound-at
-  "`:seon.agent.message/at` of the latest OUTBOUND message for
-   `my-eid` — from = me with at least one recipient ≠ me (a reply or a
-   consult; the per-turn assistant self-message is from = to = me and
-   never counts). nil when `my-eid` is nil or none exists."
+(defn- user-facing-reply-count
+  "How many USER-FACING replies `my-eid` has emitted — from = me with
+   at least one recipient ≠ me (a `reply!` or a `message!` consult) AND
+   origin ∉ {:core}. EXCLUDED so the count can't be skewed: assistant
+   self-notes (from = to = me — the per-turn thinking message, the
+   cap-hit note, and the empty-completion give-up line are all
+   from = to = me, dropped by the recipient ≠ me clause) and
+   :core-origin outbound nudges. 0 when `my-eid` is nil. One genuine
+   answer to a human/peer = one count."
   [my-eid]
-  (when my-eid
-    (latest-message-at
-      '[:find (max ?at)
+  (if my-eid
+    (query-count
+      '[:find (count ?m)
         :in $ ?me
         :where
         [?m :seon.agent.message/from ?me]
         [?m :seon.agent.message/to ?t]
         [(not= ?t ?me)]
-        [?m :seon.agent.message/at ?at]]
-      [my-eid])))
+        ;; :core outbound nudges are substrate, not answers. Genuine
+        ;; replies/consults have no origin (legacy/test) or :agent ⇒
+        ;; default to :agent so only :core is excluded.
+        [(get-else $ ?m :seon.agent.message/origin :agent) ?o]
+        [(not= ?o :core)]]
+      [my-eid])
+    0))
 
 (defn unanswered-live-inbound?
-  "THE loop stop-policy predicate — TRUE when there is a LIVE inbound
-   message awaiting an answer, so `run-agentic-loop!` must keep running.
-   A live inbound is the latest message with to ∋ me, from ≠ me, hops <
-   `warn/hop-cap`, origin ∉ {:core}, handled? ≠ true (see
-   [[latest-inbound-at]] — the SAME exclusions as the wake gate
-   `inbound-msg-datom?`). UNANSWERED means no OUTBOUND message (from =
-   me with a recipient ≠ me — a `reply!` or a `message!` consult; the
-   per-turn assistant self-message is from = to = me and never counts)
-   landed STRICTLY AFTER it.
+  "THE loop stop-policy predicate — TRUE when the agent owes at least
+   one more answer, so `run-agentic-loop!` must keep running. The test
+   is a COUNT comparison, NOT a timestamp comparison:
+
+     (count LIVE UNANSWERED inbounds) > (count user-facing REPLIES)
+
+   - INBOUNDS counted ([[live-inbound-count]]): to ∋ me, from ≠ me,
+     hops < `warn/hop-cap`, origin ∉ {:core}, handled? ≠ true — the
+     SAME exclusions as the wake gate `inbound-msg-datom?`.
+   - REPLIES counted ([[user-facing-reply-count]]): from = me to a
+     non-self recipient, origin ∉ {:core} — EXCLUDING self→self notes
+     (the per-turn thinking message, cap-hit note, empty-completion
+     give-up line are all from = to = me), :core nudges.
+
+   Why count, not timestamp: a timestamp comparison (`is there an
+   outbound STRICTLY AFTER the latest inbound?`) silently DROPS a
+   message — when a 2nd inbound arrives mid-wake and the reply to the
+   1st is emitted at a time AFTER the 2nd's timestamp, that one reply
+   reads as answering BOTH and the 2nd is lost forever (the live-acme
+   message-drop regression, 4/4 trials). Ordering by `:at` cannot tell
+   which inbound a given reply answered; counting can: each genuine
+   answer balances exactly one question.
 
    This is the ONE question the loop asks, and it subsumes every prior
    phrasing:
-     - not-yet-replied this wake — the wake message is live, no outbound
-       after it ⇒ true ⇒ recur.
-     - a NEW inbound arrived mid-wake (the old #49 'drain') — it is now
-       the latest live inbound and is unanswered ⇒ true ⇒ recur. No
-       separate baseline/latch bookkeeping: a message that landed during
-       the wake is simply a live unanswered inbound at the halt check.
-     - answered — an outbound landed after the latest live inbound ⇒
-       false ⇒ halt :replied.
+     - not-yet-replied this wake — 1 inbound, 0 replies ⇒ 1 > 0 ⇒ recur.
+     - a NEW inbound arrived mid-wake (the old #49 'drain') — 2 inbounds,
+       1 reply ⇒ 2 > 1 ⇒ recur; the agent answers it, 2 replies ⇒ 2 > 2
+       false ⇒ halt. No baseline/latch/drain bookkeeping — the unanswered
+       count keeps the loop alive, the balanced count stops it (no drop,
+       no duplicate).
+     - balanced — N inbounds answered by N replies ⇒ N > N false ⇒ halt
+       :replied. A long balanced conversation stays at 0 net ⇒ halts.
    Fully derived from the message log — nothing stored, nothing to clear
    (docs/seon/concepts/reactive-context)."
   {:malli/schema [:=> [:cat ::unanswered-live-inbound-request] :boolean]}
   [{::keys [id]}]
-  (let [my-eid      (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))
-        inbound-at  (latest-inbound-at my-eid)
-        outbound-at (latest-outbound-at my-eid)]
-    (boolean
-      (and inbound-at
-           (not (and outbound-at
-                     (> (.getTime ^js outbound-at)
-                        (.getTime ^js inbound-at))))))))
+  (let [my-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))]
+    (> (live-inbound-count my-eid)
+       (user-facing-reply-count my-eid))))
 
 (def max-empty-reprompts
   "Bound on CONSECUTIVE re-prompts after a turn that produced no
@@ -1477,15 +1492,17 @@
         guard so re-prompts (which consume turns) can never push past
         the cap.
      3. NOT [[unanswered-live-inbound?]] → halt `:replied`. ONE
-        predicate is the whole stop-policy: the latest LIVE inbound (to
-        ∋ me, from ≠ me, hops < cap, origin ∉ {:core}, handled? ≠ true)
-        has an outbound strictly after it, so the conversation ball is
-        in the other court. A new inbound re-wakes via the kick trigger;
-        a mid-wake arrival is itself an unanswered live inbound here (no
-        baseline/latch/drain bookkeeping — it is simply unanswered at
-        the halt check). SHARP EDGE: ANY outbound to a non-self
-        recipient ends the wake (a `message!` consult counts). Complete
-        the work, reply once. A replied agent that then emits an empty
+        predicate is the whole stop-policy, a COUNT comparison:
+        (count live unanswered inbounds) > (count user-facing replies).
+        When they balance, every question has an answer — the
+        conversation ball is in the other court. A new inbound re-wakes
+        via the kick trigger; a mid-wake arrival lifts the inbound count
+        above the reply count here and keeps the loop going until it too
+        is answered (no baseline/latch/drain bookkeeping — counting
+        subsumes it: each answer balances exactly one question, so
+        nothing is dropped and nothing is duplicated). SHARP EDGE: each
+        outbound to a non-self recipient (a `message!` consult counts)
+        balances one inbound. A replied agent that then emits an empty
         completion halts here and does NOT re-prompt.
      4. EMPTY-TURN GUARD (standalone — reached only with a live
         unanswered inbound; downstream ask 20): a turn that produced

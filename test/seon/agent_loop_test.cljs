@@ -137,6 +137,125 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; The COUNT regression (live-acme message-drop, 4/4 trials) — the bug a
+;; TIMESTAMP comparison cannot catch. Two inbounds arrive concurrently;
+;; the reply to the FIRST is emitted at a time AFTER the SECOND's
+;; timestamp. The old predicate (`is there an outbound STRICTLY AFTER
+;; the latest inbound?`) read that one reply as answering BOTH → halted
+;; → the 2nd was silently dropped forever. The count predicate (inbounds
+;; > replies) keeps the loop alive: 2 > 1 ⇒ recur; only when the 2nd
+;; reply balances it (2 > 2 false) does it halt — no drop, no duplicate.
+;; ---------------------------------------------------------------------------
+
+(deftest concurrent-inbounds-one-reply-keeps-loop-running
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [t0 (js/Date.)]
+              (await (db/transact!
+                       {:seon.db/tx-data
+                        [{:seon.user/id "user"}
+                         {:seon.agent/id agent-id
+                          :seon.agent/state :idle
+                          :seon.agent/sessions
+                          [{:seon.agent.session/id "SEScount000001"
+                            :seon.agent.session/at t0}]}]}))
+              ;; TWO concurrent inbounds, no replies yet
+              (await (db/transact!
+                       {:seon.db/tx-data
+                        [{:seon.agent.message/id "MSGcount000001"
+                          :seon.agent.message/from {:seon.user/id "user"}
+                          :seon.agent.message/to [{:seon.agent/id agent-id}]
+                          :seon.agent.message/content "q1"
+                          :seon.agent.message/at (t+ t0 10)
+                          :seon.agent.message/hops 0
+                          :seon.agent.message/origin :human}
+                         {:seon.agent.message/id "MSGcount000002"
+                          :seon.agent.message/from {:seon.user/id "user"}
+                          :seon.agent.message/to [{:seon.agent/id agent-id}]
+                          :seon.agent.message/content "q2"
+                          :seon.agent.message/at (t+ t0 20)
+                          :seon.agent.message/hops 0
+                          :seon.agent.message/origin :human}]}))
+              (testing "2 inbounds, 0 replies → TRUE (both unanswered)"
+                (is (true? (agent/unanswered-live-inbound?
+                             {:seon.agent/id agent-id}))))
+              ;; ONE reply, emitted at a time AFTER q2's timestamp — the
+              ;; exact shape the old timestamp policy mis-read as answering
+              ;; both (and so dropped q2).
+              (await (db/transact!
+                       {:seon.db/tx-data
+                        [{:seon.agent.message/id "MSGcount000003"
+                          :seon.agent.message/from {:seon.agent/id agent-id}
+                          :seon.agent.message/to [{:seon.user/id "user"}]
+                          :seon.agent.message/content "a1"
+                          :seon.agent.message/at (t+ t0 30)
+                          :seon.agent.message/hops 1
+                          :seon.agent.message/origin :agent}]}))
+              (testing "2 inbounds, 1 reply (emitted after q2's :at) → TRUE — recur, no drop"
+                (is (true? (agent/unanswered-live-inbound?
+                             {:seon.agent/id agent-id}))))
+              ;; the SECOND reply balances it
+              (await (db/transact!
+                       {:seon.db/tx-data
+                        [{:seon.agent.message/id "MSGcount000004"
+                          :seon.agent.message/from {:seon.agent/id agent-id}
+                          :seon.agent.message/to [{:seon.user/id "user"}]
+                          :seon.agent.message/content "a2"
+                          :seon.agent.message/at (t+ t0 40)
+                          :seon.agent.message/hops 1
+                          :seon.agent.message/origin :agent}]}))
+              (testing "2 inbounds, 2 replies → false — balanced, halt"
+                (is (false? (agent/unanswered-live-inbound?
+                              {:seon.agent/id agent-id}))))
+              ;; skew attempts: a self-note, a :core outbound, a :core
+              ;; inbound, a handled? inbound, a hop-exhausted inbound —
+              ;; NONE may change the balanced count.
+              (await (db/transact!
+                       {:seon.db/tx-data
+                        [{:seon.agent.message/id "MSGcount000005"
+                          :seon.agent.message/from {:seon.agent/id agent-id}
+                          :seon.agent.message/to [{:seon.agent/id agent-id}]
+                          :seon.agent.message/content "self note"
+                          :seon.agent.message/at (t+ t0 50)
+                          :seon.agent.message/hops 0
+                          :seon.agent.message/origin :agent}
+                         {:seon.agent.message/id "MSGcount000006"
+                          :seon.agent.message/from {:seon.agent/id agent-id}
+                          :seon.agent.message/to [{:seon.user/id "user"}]
+                          :seon.agent.message/content "core out"
+                          :seon.agent.message/at (t+ t0 55)
+                          :seon.agent.message/hops 0
+                          :seon.agent.message/origin :core}
+                         {:seon.agent.message/id "MSGcount000007"
+                          :seon.agent.message/from {:seon.user/id "user"}
+                          :seon.agent.message/to [{:seon.agent/id agent-id}]
+                          :seon.agent.message/content "core in"
+                          :seon.agent.message/at (t+ t0 60)
+                          :seon.agent.message/hops 0
+                          :seon.agent.message/origin :core}
+                         {:seon.agent.message/id "MSGcount000008"
+                          :seon.agent.message/from {:seon.user/id "user"}
+                          :seon.agent.message/to [{:seon.agent/id agent-id}]
+                          :seon.agent.message/content "handled in"
+                          :seon.agent.message/at (t+ t0 70)
+                          :seon.agent.message/hops 0
+                          :seon.agent.message/origin :human
+                          :seon.agent.message/handled? true}
+                         {:seon.agent.message/id "MSGcount000009"
+                          :seon.agent.message/from {:seon.user/id "user"}
+                          :seon.agent.message/to [{:seon.agent/id agent-id}]
+                          :seon.agent.message/content "hop dead"
+                          :seon.agent.message/at (t+ t0 80)
+                          :seon.agent.message/hops 99
+                          :seon.agent.message/origin :human}]}))
+              (testing "self/core/handled?/hop-exhausted do NOT skew the count → still false"
+                (is (false? (agent/unanswered-live-inbound?
+                              {:seon.agent/id agent-id})))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; #43 — a :core-origin message (a substrate nudge, e.g. tile recovery,
 ;; sent FROM the user-ref) must NEVER anchor the stop-policy. Without the
 ;; origin exclusion a broken-tile :core message arriving AFTER the reply
@@ -572,7 +691,18 @@
                   "the loop kept running for the new inbound and replied")
               (is (false? (agent/unanswered-live-inbound?
                             {:seon.agent/id agent-id}))
-                  "the mid-wake message is answered — nothing left unanswered")
+                  "balanced — every inbound has a reply, nothing left unanswered")
+              ;; BOTH the wake anchor (ping) AND the mid-wake inbound
+              ;; (q2-tail-window) must be answered — NOT just one. The
+              ;; count predicate balances at 2 inbounds = 2 replies; a
+              ;; single reply (the dropped-message bug) would leave it at
+              ;; 2 inbounds / 1 reply ⇒ still unanswered ⇒ NOT halted.
+              (let [me (:db/id (db/entity
+                                 {:seon.db/ref [:seon.agent/id agent-id]}))]
+                (is (= 2 (#'agent/live-inbound-count me))
+                    "both inbounds (ping + mid-wake q2) are live questions")
+                (is (= 2 (#'agent/user-facing-reply-count me))
+                    "BOTH inbounds answered — two user-facing replies, neither dropped"))
               (is (= :idle (:seon.agent/state
                              (db/entity {:seon.db/ref
                                          [:seon.agent/id agent-id]})))
