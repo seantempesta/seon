@@ -6,11 +6,10 @@
    `'seon.ctx.transcript/transcript-section-html`); loaded at boot so the
    symbols resolve for `seon.eval/lookup-value`.
 
-   Shared eval-row rendering + caps + the core-authored derivation stay
-   in the spine `seon.ctx` (`format-eval-row`, `cap-result`,
-   `message-render-cap`, `core-authored-turn?`, `current-session`) — this
-   ns owns only the turn-grouping walk, the per-turn block markup, and the
-   transcript-specific defs."
+   Shared eval-row rendering + caps stay in the spine `seon.ctx`
+   (`format-eval-row`, `cap-result`, `message-render-cap`,
+   `current-session`) — this ns owns only the turn-grouping walk, the
+   per-turn block markup, and the transcript-specific defs."
   (:require
     [clojure.string :as str]
     [seon.ctx :as ctx]
@@ -56,10 +55,9 @@
 
 (defn- session-turns
   "ALL :seon.agent.turn entities for `agent-id`, oldest-first across ALL
-   sessions, each tagged with its owning `:seon.agent.session/id` and
-   `:seon.ctx.transcript/core-authored?` ([[seon.ctx/core-authored-turn?]])
-   — the turn-grouped transcript walk (context-v4 §2.8: prior-session
-   turns render too, behind a resume boundary). Walks agent → sessions →
+   sessions, each tagged with its owning `:seon.agent.session/id` — the
+   turn-grouped transcript walk (context-v4 §2.8: prior-session turns
+   render too, behind a resume boundary). Walks agent → sessions →
    turns. Each turn's `:seon.agent.turn/evals` ride along as the (lazy
    datahike) ref vector. Optional `db` snapshot (the composer threads
    its render db)."
@@ -70,8 +68,7 @@
       (for [s (sort-by :seon.agent.session/at (:seon.agent/sessions a))
             t (sort-by :seon.agent.turn/at (:seon.agent.session/turns s))]
         {::turn                            t
-         :seon.agent.session/id-of-session (:seon.agent.session/id s)
-         ::core-authored?                  (ctx/core-authored-turn? t)}))))
+         :seon.agent.session/id-of-session (:seon.agent.session/id s)}))))
 
 (defn- sender-line
   "The `<user>…</user>` (human) or `<from agent=<id>>…</from>` (agent) line
@@ -107,9 +104,7 @@
    injected only where the eval ns changes, so ns switches stay visible
    without a per-row prompt prefix). `evals=N/M` is ok-count / total.
    PRIOR-SESSION turns (`prior?` true) render their evals WITHOUT
-   `result/<id>` handles (the vars died with the process). CORE-AUTHORED
-   turns render their eval bodies at [[seon.ctx/core-eval-render-cap]]
-   (tagged via `core?`).
+   `result/<id>` handles (the vars died with the process).
 
    `repeat-wake?` true ⇒ this turn was woken by the SAME message as the
    PREVIOUS turn (the agent is taking multiple turns on ONE wake) — the
@@ -117,10 +112,10 @@
    re-printed every continuation turn. Without this, a 5-turn answer
    shows the question 5 times and a weak model reads it as 'asked 5
    times' (live-observed 2026-06-21)."
-  [{turn ::turn core? ::core-authored?} own-id prior? repeat-wake?]
+  [{turn ::turn} own-id prior? repeat-wake?]
   (let [evals  (->> (:seon.agent.turn/evals turn)
                     (sort-by :seon.eval/at)
-                    (mapv #(assoc (into {} %) :seon.ctx/core-authored? core?)))
+                    (mapv #(into {} %)))
         n-tot  (count evals)
         n-ok   (count (filter :seon.eval/ok? evals))
         tid    (:seon.agent.turn/id turn)
@@ -209,10 +204,11 @@
    Budget eviction is OLDEST-TURN-FIRST: the newest turns are kept whole
    (always at least one); older turns drop beyond
    [[transcript-char-budget]] and an elision note replaces them at the
-   top. Each AGENT eval row is bounded by [[seon.ctx/eval-render-cap]];
-   CORE-AUTHORED turns (the creation-turn tutorial — tagged by
-   [[session-turns]]) render their evals at
-   [[seon.ctx/core-eval-render-cap]]."
+   top. Per-eval render caps SPLIT BY COMPONENT
+   ([[seon.ctx/format-eval-row]]): echoed source + stdout cap at
+   [[seon.ctx/eval-render-cap]] (1500); the citable result body caps at
+   [[seon.ctx/result-body-render-cap]] (16384, so a stored result
+   renders whole)."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.agent/keys [id] db :seon.db/db}]
   (let [db       (or db @db/*conn*)

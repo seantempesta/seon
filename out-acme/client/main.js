@@ -1871,6 +1871,7 @@ SHADOW_IMPORT("seon.dev.test_preload.js");
 SHADOW_IMPORT("seon.demo.js");
 SHADOW_IMPORT("acme.brand.js");
 SHADOW_IMPORT("acme.helpers.js");
+SHADOW_IMPORT("acme.notes.js");
 SHADOW_IMPORT("acme.overrides.js");
 SHADOW_IMPORT("acme.widget.js");
 SHADOW_IMPORT("acme.pod.js");

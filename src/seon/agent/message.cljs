@@ -47,6 +47,14 @@
 ;; a loop. Derived by default in message! from `from` (user ⇒ :human,
 ;; else :agent); :core is set explicitly by the substrate caller.
 (schema/register! :seon.agent.message/origin  [:enum :human :agent :core])
+;; #51 loop-veto opt-out: the agent's deliberate "I am replying ABOUT
+;; the failure" declaration. STORED only when true (absent = an
+;; ordinary reply — the over-claim veto reads `get-else … false`); a
+;; forced reply is NOT a user-facing-reply-to-protect, so the
+;; make-good-turn veto skips it. The request carries it
+;; (::message-request); message! persists it iff truthy. Never stored
+;; as false.
+(schema/register! :seon.agent.message/force   :boolean)
 
 ;; The user is a REAL entity — ONE `:seon.user/id` row seeded at boot
 ;; (identity upsert, idempotent — same pattern as agent entities). All
@@ -75,7 +83,10 @@
    [:seon.agent.message/content :seon.agent.message/content]
    [:seon.agent.message/at      :seon.agent.message/at]
    [:seon.agent.message/hops    :seon.agent.message/hops]
-   [:seon.agent.message/origin  :seon.agent.message/origin]])
+   [:seon.agent.message/origin  :seon.agent.message/origin]
+   ;; #51: present only on a deliberate "reply ABOUT the failure"
+   ;; (force = true). Optional/absent on every ordinary message.
+   [:seon.agent.message/force {:optional true} :seon.agent.message/force]])
 
 ;; ============================================================
 ;; message! / reply! — the SINGLE write entry point for messages.
@@ -99,9 +110,11 @@
    ;; narrowed). The reply is NEVER refused on a same-turn failure — it
    ;; always transacts + delivers; the protection is the loop's
    ;; make-good-turn veto (run-agentic-loop! + same-turn-overclaim?).
-   ;; `force` declares the over-claim is intentional. Request-only;
-   ;; never stored.
-   [:seon.agent.message/force {:optional true} :boolean]
+   ;; `force` declares the over-claim is intentional, so the veto skips
+   ;; it. Persisted on the stored row when true (message! stamps
+   ;; :seon.agent.message/force true), so the derivation that drives the
+   ;; veto (user-facing-reply-in-window?) can see it; absent otherwise.
+   [:seon.agent.message/force {:optional true} :seon.agent.message/force]
    ;; Provenance override (#43). Absent ⇒ DERIVED from `from` (user ⇒
    ;; :human, else :agent). A substrate-originated nudge (tile recovery)
    ;; passes :core explicitly so it can't wake an idle agent or move the
@@ -294,7 +307,7 @@
    request-only, never stored, accepted for backward-compat and as the
    loop-veto opt-out documented in the prompt."
   {:malli/schema [:=> [:cat ::message-request] ::message-response]}
-  [{:seon.agent.message/keys [content from to origin]}]
+  [{:seon.agent.message/keys [content from to origin force]}]
   (let [agent-id (db/current-agent-id)
         from     (or from (when agent-id [:seon.agent/id agent-id]))
         to       (cond
@@ -331,16 +344,20 @@
             ;; other send is :agent. Never stored as nil.
             origin (or origin (if from-user? :human :agent))
             msg-id (db/new-id!)
-            env    (await
-                     (db/transact!
-                       {:seon.db/tx-data
-                        [{:seon.agent.message/id      msg-id
-                          :seon.agent.message/from    from
-                          :seon.agent.message/to      to
-                          :seon.agent.message/content content
-                          :seon.agent.message/at      (js/Date.)
-                          :seon.agent.message/hops    hops
-                          :seon.agent.message/origin  origin}]}))]
+            ;; `force` is persisted ONLY when true (absent = ordinary
+            ;; reply, never stored as false) — the over-claim veto reads
+            ;; `get-else … false` and treats a forced reply as NOT a
+            ;; user-facing-reply-to-protect, so it skips the make-good
+            ;; turn for a deliberate "reply ABOUT the failure".
+            row    (cond-> {:seon.agent.message/id      msg-id
+                            :seon.agent.message/from    from
+                            :seon.agent.message/to      to
+                            :seon.agent.message/content content
+                            :seon.agent.message/at      (js/Date.)
+                            :seon.agent.message/hops    hops
+                            :seon.agent.message/origin  origin}
+                     force (assoc :seon.agent.message/force true))
+            env    (await (db/transact! {:seon.db/tx-data [row]}))]
         (if (:seon.db/ok? env)
           ;; concise success — the tx-report stays off the agent
           ;; surface; the id is the durable handle
@@ -403,7 +420,14 @@
    `[lo, hi)` — `lo` inclusive, `hi` exclusive (nil hi = open-ended,
    the just-run turn's window when no later turn exists yet). The
    per-turn assistant self-message (from = to = me) is NOT user-facing
-   and never matches. Derived from the message log."
+   and never matches. Derived from the message log.
+
+   A FORCED reply (`:seon.agent.message/force true`, the deliberate
+   #51 \"I am replying ABOUT the failure\" escape) is EXCLUDED — it is
+   the agent's declaration that the over-claim is intentional, so it is
+   not a user-facing-reply-to-protect and the make-good-turn veto skips
+   it. `get-else … false` defaults the absent flag on every ordinary
+   reply, so only an explicitly-forced reply is filtered out."
   [agent-id lo hi]
   (let [my-eid   (:db/id (db/entity {:seon.db/ref [:seon.agent/id agent-id]}))
         user-eid (:db/id (db/entity {:seon.db/ref user-ref}))]
@@ -411,19 +435,22 @@
       (when (and my-eid user-eid)
         (let [lo-ms (.getTime ^js lo)
               hi-ms (when hi (.getTime ^js hi))
-              ats   (db/query
+              rows  (db/query
                       {:seon.db/query
-                       '[:find ?at
+                       '[:find ?at ?force
                          :in $ ?me ?user
                          :where
                          [?m :seon.agent.message/from ?me]
                          [?m :seon.agent.message/to ?user]
-                         [?m :seon.agent.message/at ?at]]
+                         [?m :seon.agent.message/at ?at]
+                         [(get-else $ ?m :seon.agent.message/force false) ?force]]
                        :seon.db/args [my-eid user-eid]})]
-          (some (fn [[at]]
+          (some (fn [[at force]]
                   (let [t (.getTime ^js at)]
-                    (and (>= t lo-ms) (or (nil? hi-ms) (< t hi-ms)))))
-                ats))))))
+                    (and (not (true? force))
+                         (>= t lo-ms)
+                         (or (nil? hi-ms) (< t hi-ms)))))
+                rows))))))
 
 (defn turn-overclaim-lines
   "The envelope-failure lines for `turn` IF — and only if — `turn` is an

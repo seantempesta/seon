@@ -14,6 +14,7 @@
    omits it)."
   (:require [acme.brand]
             [acme.helpers]
+            [acme.notes]
             [acme.overrides]
             [acme.widget]
             [clojure.string :as str]

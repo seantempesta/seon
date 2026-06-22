@@ -441,11 +441,24 @@
                            {:seon.agent.message/from    agent/user-ref
                             :seon.agent.message/to      [[:seon.agent/id agent-id]]
                             :seon.agent.message/content text})
-                         (.then (fn [{ok? :seon.agent.message/ok? error :seon.db/error}]
+                         (.then (fn [{ok?     :seon.agent.message/ok?
+                                      msg-id  :seon.agent.message/id
+                                      hops    :seon.agent.message/hops
+                                      error   :seon.db/error}]
                                   (if ok?
                                     (do
                                       (log/info-console! "seon.web.serve" "POST /chat"
                                                          {:agent agent-id :text-len (count text)})
+                                      ;; #49 observability — a DISTINCT intake
+                                      ;; line per accepted message (the generic
+                                      ;; POST log above only records text-len).
+                                      ;; Carries the durable message id + hops so
+                                      ;; an intake can be correlated with the wake
+                                      ;; (or its drain) in logs/pod.log.
+                                      (log/info-console! "seon.web.serve" "INTAKE"
+                                                         {:agent    agent-id
+                                                          :msg-id   msg-id
+                                                          :hops     hops})
                                       (write-status! res 204 "text/plain; charset=utf-8" ""))
                                     (do
                                       (log/error-console! "seon.web.serve" "/chat message! refused"

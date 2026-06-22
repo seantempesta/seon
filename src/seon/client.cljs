@@ -573,6 +573,13 @@
 
 (declare core-ns-set)
 
+;; Forward decls: the SEON_EXTRA_SRC scanning helpers are defined far below
+;; (alongside `extra-src-env`, after the form/arglist parsers they reuse), but
+;; `core-ns-set`/`ns-row`/`index-core!` reference them. Fn-body references
+;; resolve at call time; the declare silences the compile-time :undeclared-var
+;; warning.
+(declare extra-src-ns-strs extra-fn-rows extra-src-ns->file)
+
 (defn ^:private agent-ns-set
   "The set of agent-authored namespace keywords in the DB layer — every
    `:seon.ns/name` row whose ns is NOT in `(core-ns-set)`. Core nses are
@@ -990,7 +997,14 @@
    because a fn-less compiled root (`my.kb`) owns an indexed full-source
    `:seon.ns` row without owning any var."
   []
-  (into (into #{} (map keyword) fn-less-compiled-roots)
+  (into (into (into #{} (map keyword) fn-less-compiled-roots)
+              ;; Whole-downstream-surface (SEON_EXTRA_SRC): every scanned
+              ;; downstream ns is COMPILED-into-the-bundle core (display-only,
+              ;; replay-skip) — including an unspecced-only ns (`acme.notes`)
+              ;; that owns no registered var. Without this its full-source
+              ;; `:seon.ns` row would be mistaken for agent-authored and
+              ;; re-eval'd on load.
+              (map keyword) (extra-src-ns-strs))
         (map #(keyword (str (:ns (meta %)))))
         (concat core-vars @!indexed-test-vars @!extra-core-vars)))
 
@@ -1020,32 +1034,44 @@
           (concat (map seon.platform/artifact-path ["src" "test" "guest-cljs/src"])
                   extra))))
 
-(defn- extract-form-at-line
-  "Return the exact text of the top-level form beginning at `line-1based` in
-   `txt` by paren-balancing (reader-free, so `::kw` / `#js` / reader-
+(defn- extract-form-from-string
+  "Return the exact text of the top-level form that begins at the FIRST `(` in
+   `start` by paren-balancing (reader-free, so `::kw` / `#js` / reader-
    conditionals pass through verbatim). Tracks string + escape state so
    docstring parens don't unbalance. Returns nil if no `(` opens before EOF."
+  [start]
+  (let [n (count start)]
+    (loop [i 0 depth 0 in-str? false esc? false started? false]
+      (if (>= i n)
+        (when started? start)
+        (let [c (nth start i)]
+          (cond
+            esc?                   (recur (inc i) depth in-str? false started?)
+            (and in-str? (= c \\)) (recur (inc i) depth in-str? true  started?)
+            in-str?                (recur (inc i) depth (not (= c \")) false started?)
+            (= c \")               (recur (inc i) depth true false started?)
+            (= c \()               (recur (inc i) (inc depth) in-str? false true)
+            (= c \))               (let [d (dec depth)]
+                                     (if (and started? (zero? d))
+                                       (subs start 0 (inc i))
+                                       (recur (inc i) d in-str? false started?)))
+            :else                  (recur (inc i) depth in-str? false started?)))))))
+
+(defn- extract-form-at-line
+  "Return the exact text of the top-level form beginning at `line-1based` in
+   `txt`. Reader-free paren-balancing (see [[extract-form-from-string]])."
   [txt line-1based]
   (let [lines (vec (str/split-lines txt))
         idx   (dec line-1based)]
     (when (and (nat-int? idx) (< idx (count lines)))
-      (let [start (str/join "\n" (subvec lines idx))
-            n     (count start)]
-        (loop [i 0 depth 0 in-str? false esc? false started? false]
-          (if (>= i n)
-            (when started? start)
-            (let [c (nth start i)]
-              (cond
-                esc?                   (recur (inc i) depth in-str? false started?)
-                (and in-str? (= c \\)) (recur (inc i) depth in-str? true  started?)
-                in-str?                (recur (inc i) depth (not (= c \")) false started?)
-                (= c \")               (recur (inc i) depth true false started?)
-                (= c \()               (recur (inc i) (inc depth) in-str? false true)
-                (= c \))               (let [d (dec depth)]
-                                         (if (and started? (zero? d))
-                                           (subs start 0 (inc i))
-                                           (recur (inc i) d in-str? false started?)))
-                :else                  (recur (inc i) depth in-str? false started?)))))))))
+      (extract-form-from-string (str/join "\n" (subvec lines idx))))))
+
+(defn- extract-form-at-index
+  "Return the exact text of the top-level form beginning at char `idx` in
+   `txt` (`idx` must point AT a `(`). Reader-free paren-balancing."
+  [txt idx]
+  (when (and (nat-int? idx) (< idx (count txt)))
+    (extract-form-from-string (subs txt idx))))
 
 (defn- ghost-var?
   "True when var-meta `txt`/`line` is the signature of a GHOST var: the file
@@ -1096,7 +1122,8 @@
         ;; full-source by rule, like my.* — closes the render-as-stubs
         ;; gap for the extra root.
         src  (if (or (ctx/full-source-ns? ns-sym-str)
-                     (contains? (extra-core-ns-strs) ns-sym-str))
+                     (contains? (extra-core-ns-strs) ns-sym-str)
+                     (contains? (extra-src-ns-strs) ns-sym-str))
                (or (read-src-file (ns-file-path ns-sym-str))
                    (do (log/error-console!
                          "seon.client/ns-row"
@@ -1244,6 +1271,229 @@
   (let [v (some-> (.. js/globalThis -process) (.-env) (aget "SEON_EXTRA_SRC"))]
     (when (and (string? v) (not= v "")) v)))
 
+;; --- WHOLE-DOWNSTREAM-SURFACE INDEXING (SEON_EXTRA_SRC) ---------------------
+;;
+;; The var-derived `:seon.fn` rows above come from the SPECCED vars a consumer
+;; registered into `!extra-core-vars`. That leaves two gaps for a third party's
+;; OWN code: (a) an UNSPECCED public fn gets no `:seon.fn` row (so the
+;; `<namespace>` renderer — which lists member rows — never shows it), and
+;; (b) a downstream ns owning ZERO specced fns gets no `:seon.ns` row at all
+;; (silently invisible to context + retrieval). A third party wants its WHOLE
+;; surface readable by its agents, not just the specced slice. So when
+;; SEON_EXTRA_SRC is set we scan that root's `*.cljs` files, index every ns
+;; (full-source row) and every public `(defn …)`/`(defn- …)` (a `:seon.fn`
+;; row, specced AND unspecced). Scoped to the extra root ONLY — seon's own
+;; core stays slim (var-derived, specced-only). The reserved-prefix guard
+;; (`seon.*`/`my.*`) still applies via the registered-var path; scanned nses
+;; that hit a reserved prefix are dropped here (a downstream root never owns
+;; them, and a stray match must not forge a core row).
+
+(defn- list-cljs-files
+  "Recursively collect `*.cljs` file paths under `root` (a directory). Returns
+   a vector of absolute-ish paths (root-prefixed). `[]` when `root` is missing
+   or unreadable — never throws."
+  [root]
+  (let [fs   (js/require "fs")
+        path (js/require "path")]
+    (letfn [(walk [dir acc]
+              (let [ents (try (.readdirSync fs dir #js {:withFileTypes true})
+                              (catch :default _ #js []))]
+                (reduce
+                  (fn [a ent]
+                    (let [full (.join path dir (.-name ent))]
+                      (cond
+                        (.isDirectory ent) (walk full a)
+                        (and (.isFile ent)
+                             (str/ends-with? (.-name ent) ".cljs")) (conj a full)
+                        :else a)))
+                  acc
+                  (array-seq ents))))]
+      (walk root []))))
+
+(defn- ns-name-from-source
+  "The ns NAME string parsed from a `.cljs` file's `(ns <name> …)` form, or
+   nil. Reader-free: skips leading whitespace/`;`-comments, requires the first
+   form to open `(ns `, then reads the symbol token. Robust to a shebang-free
+   leading docstring-bearing ns."
+  [txt]
+  (when (string? txt)
+    (when-let [m (re-find #"\(\s*ns\s+([A-Za-z0-9.*+!_?<>=$%&-]+)" txt)]
+      (second m))))
+
+(defn- sym-char?
+  "True when `c` may appear inside a CLJS symbol token (a defn name). Excludes
+   whitespace, delimiters, `^` (metadata marker), `\"`, `;`, `@`, `'`."
+  [c]
+  (not (or (= c \space) (= c \newline) (= c \tab) (= c \return) (= c \,)
+           (= c \() (= c \)) (= c \[) (= c \]) (= c \{) (= c \})
+           (= c \") (= c \^) (= c \;) (= c \@) (= c \'))))
+
+(defn- dnd-skip-ws
+  "Index of the first non-whitespace, non-`;`-comment char in `form` at/after
+   `i` (`n` = (count form))."
+  [form n i]
+  (loop [i i]
+    (cond
+      (>= i n) i
+      (let [c (nth form i)] (or (= c \space) (= c \newline) (= c \tab)
+                                (= c \return) (= c \,))) (recur (inc i))
+      (= \; (nth form i)) (recur (loop [j i] (if (or (>= j n) (= (nth form j) \newline)) j (recur (inc j)))))
+      :else i)))
+
+(defn- dnd-read-token
+  "Index just past the symbol token starting at `i` in `form`."
+  [form n i]
+  (loop [j i] (if (or (>= j n) (not (sym-char? (nth form j)))) j (recur (inc j)))))
+
+(defn- dnd-skip-meta
+  "Index just past ONE leading metadata token (`^:kw`, `^Type`, or `^{…}`) at
+   `i`, or `i` unchanged when `i` is not a `^`."
+  [form n i]
+  (if (and (< i n) (= \^ (nth form i)))
+    (if (and (< (inc i) n) (= \{ (nth form (inc i))))
+      (loop [j (+ i 2) d 1]
+        (cond (>= j n) j
+              (= \{ (nth form j)) (recur (inc j) (inc d))
+              (= \} (nth form j)) (if (= d 1) (inc j) (recur (inc j) (dec d)))
+              :else (recur (inc j) d)))
+      (dnd-read-token form n (inc i)))
+    i))
+
+(defn- defn-name+doc
+  "Parse `{:name <string-or-nil> :doc <string-or-nil>}` from a `(defn …)` /
+   `(defn- …)` form text. Reader-free token scan: consume `(`, the
+   `defn`/`defn-` head, SKIP any leading metadata (`^:async`, `^{…}`), read the
+   NAME symbol token, then capture an immediately-following docstring (the
+   `\"…\"` before the arg-vector). Robust to multi-meta and to no docstring."
+  [form]
+  (let [n  (count form)
+        i  (dnd-skip-ws form n 1)                 ; past '('
+        i  (dnd-read-token form n i)              ; past defn / defn-
+        i  (loop [i (dnd-skip-ws form n i)]        ; skip every leading meta
+             (let [i' (dnd-skip-meta form n i)]
+               (if (= i' i) i (recur (dnd-skip-ws form n i')))))
+        ne (dnd-read-token form n i)
+        nm (when (> ne i) (subs form i ne))
+        i2 (dnd-skip-ws form n ne)
+        doc (when (and (< i2 n) (= \" (nth form i2)))
+              (loop [j (inc i2) esc? false sb ""]
+                (cond (>= j n) sb
+                      esc? (recur (inc j) false (str sb (nth form j)))
+                      (= \\ (nth form j)) (recur (inc j) true sb)
+                      (= \" (nth form j)) sb
+                      :else (recur (inc j) false (str sb (nth form j))))))]
+    {:name nm :doc doc}))
+
+(defn- defn-rows-from-source
+  "Build a `:seon.fn` row for EVERY top-level `(defn …)`/`(defn- …)` in
+   `txt` (the full file text of `ns-sym-str`). Reader-free, paren-balanced
+   (reusing [[extract-form-at-line]] semantics inline): finds each top-level
+   form that opens with `(defn`/`(defn-`, grabs its exact text, and reads the
+   fn name + docstring + privacy off the source. SPECCED fns (those whose
+   source carries `:malli/schema`) and UNSPECCED ones alike get a row — the
+   point is the WHOLE downstream surface, so `:seon.fn/spec` is simply omitted
+   when no schema literal is present (mirrors [[var->fn-row]]'s present⇒specced
+   / absent⇒unspecced convention).
+
+   `:seon.fn/spec` is NOT extracted here (the registered-var path owns the
+   pure-data Malli form via `m/schema`/`m/form`; a downstream specced fn ALSO
+   has a var-derived row, which dedups in front of this one in [[index-core!]]
+   and carries the real spec). Returns a vector of rows (possibly empty)."
+  [ns-sym-str txt now]
+  (let [n     (count txt)
+        ns-kw (keyword ns-sym-str)]
+    (loop [i 0 rows []]
+      (if (>= i n)
+        rows
+        ;; Only top-level forms (column 0 paren) are candidates. Find the next
+        ;; '(' that begins a top-level form: track string/comment so a '(' in a
+        ;; docstring or comment is skipped.
+        (let [c (nth txt i)]
+          (cond
+            (= c \;) (let [eol (loop [j i] (if (or (>= j n) (= (nth txt j) \newline)) j (recur (inc j))))]
+                       (recur eol rows))
+            (= c \") (let [send (loop [j (inc i) esc? false]
+                                  (cond (>= j n) j
+                                        esc?     (recur (inc j) false)
+                                        (= (nth txt j) \\) (recur (inc j) true)
+                                        (= (nth txt j) \") (inc j)
+                                        :else    (recur (inc j) false)))]
+                       (recur send rows))
+            (= c \()
+            (let [form (extract-form-at-index txt i)]
+              (if (and form
+                       (re-find #"^\(\s*defn-?[\s\(]" form))
+                (let [{:keys [name doc]} (defn-name+doc form)
+                      nm   name
+                      priv (boolean (re-find #"^\(\s*defn-[\s\(]" form))
+                      row  (when (and nm (not (str/blank? nm)))
+                             {:seon.fn/sym        (str ns-sym-str "/" nm)
+                              :seon.fn/ns         [:seon.ns/name ns-kw]
+                              :seon.fn/source     form
+                              :seon.fn/fn-var?    true
+                              :seon.fn/arglists   (expand-local-auto-kws
+                                                    (arglists-from-source form)
+                                                    ns-sym-str)
+                              :seon.fn/doc        (or doc "")
+                              :seon.fn/private?   priv
+                              :seon.fn/created-at now})]
+                  (recur (+ i (count form)) (if row (conj rows row) rows)))
+                ;; Not a defn — skip the whole balanced form.
+                (recur (+ i (if form (count form) 1)) rows)))
+            :else (recur (inc i) rows)))))))
+
+(defn- extra-src-ns->file
+  "Map of `{ns-name-string file-path}` for every `*.cljs` under the
+   SEON_EXTRA_SRC `/src` + `/test` roots whose `(ns …)` parses AND whose ns is
+   NOT reserved (`seon.*`/`my.*` — a downstream root never owns those, and a
+   stray match must not forge a core row). `{}` when SEON_EXTRA_SRC is unset.
+   THIS is the authoritative downstream ns set — independent of which fns are
+   specced, so an unspecced-only ns (`acme.notes`) is included."
+  []
+  (if-let [root (extra-src-env)]
+    (let [fs    (js/require "fs")
+          files (mapcat list-cljs-files [(str root "/src") (str root "/test")])]
+      (reduce
+        (fn [m file]
+          (let [txt (try (.readFileSync fs file "utf8") (catch :default _ nil))
+                ns  (some-> txt ns-name-from-source)]
+            (if (and ns (empty? (reserved-extra-nses [ns])))
+              (assoc m ns file)
+              m)))
+        {}
+        files))
+    {}))
+
+(defn- extra-src-ns-strs
+  "The downstream ns NAME strings discovered by scanning SEON_EXTRA_SRC (see
+   [[extra-src-ns->file]]). A set; `#{}` when SEON_EXTRA_SRC is unset. Used to
+   (a) give EVERY downstream ns a full-source `:seon.ns` row, (b) replay-skip
+   them in [[core-ns-set]], and (c) drive [[extra-fn-rows]]."
+  []
+  (into #{} (keys (extra-src-ns->file))))
+
+(defn- extra-fn-rows
+  "`:seon.fn` rows for EVERY public `(defn …)`/`(defn- …)` across the
+   downstream SEON_EXTRA_SRC surface — specced AND unspecced. The whole-
+   surface counterpart to the specced-only var-derived rows: this is what
+   makes an unspecced helper (`acme.helpers/format-count`) and an
+   unspecced-only ns's fns (`acme.notes/*`) appear as indexed members in the
+   `<namespace>` render. `now` is the shared `:seon.fn/created-at` instant.
+
+   Each ns's file is read once; its defns parsed by [[defn-rows-from-source]].
+   Specced downstream fns ALSO get a var-derived row (with the real
+   `:seon.fn/spec`) — [[index-core!]] dedups by sym, keeping the var-derived
+   row in front so the spec is preserved."
+  [now]
+  (let [fs (js/require "fs")]
+    (into []
+          (mapcat (fn [[ns-str file]]
+                    (let [txt (try (.readFileSync fs file "utf8") (catch :default _ nil))]
+                      (if txt
+                        (defn-rows-from-source ns-str txt now)
+                        []))))
+          (extra-src-ns->file))))
+
 (defn- warn-if-extra-src-unregistered!
   "Observability for BUG B (silent total invisibility of a consumer's product
    source): when `SEON_EXTRA_SRC` is set but `extra-core-vars*` is empty, the
@@ -1312,13 +1562,25 @@
         extra   (extra-core-vars*)
         _       (assert-extra-vars-unreserved! extra)
         _       (warn-if-extra-src-unregistered! extra)
-        fn-rows (keep #(var->fn-row % now) (concat core-vars extra))
+        var-rows (keep #(var->fn-row % now) (concat core-vars extra))
+        ;; WHOLE-DOWNSTREAM-SURFACE (SEON_EXTRA_SRC): every public defn across
+        ;; the scanned downstream root — specced AND unspecced. Var-derived
+        ;; rows go FIRST so a specced downstream fn keeps its real
+        ;; `:seon.fn/spec`; the source-parsed row for the same sym dedups away.
+        have-syms (into #{} (map :seon.fn/sym) var-rows)
+        fn-rows  (into (vec var-rows)
+                       (remove #(contains? have-syms (:seon.fn/sym %)))
+                       (extra-fn-rows now))
         ;; Fn-less compiled roots are unioned in explicitly: a root
         ;; with no public fns of its own (`my.kb` — register! calls +
         ;; ns-doc only) still needs its full-source `:seon.ns` row,
         ;; since the :namespaces section renders from exactly these
-        ;; datoms.
-        ns-syms (into (set fn-less-compiled-roots)
+        ;; datoms. The scanned downstream nses join the same way — so an
+        ;; unspecced-ONLY downstream ns (`acme.notes`) still gets its row
+        ;; even though no fn-row's sym names it (it does now, via
+        ;; extra-fn-rows — but the union is belt-and-suspenders, and covers
+        ;; a downstream ns with literally zero defns).
+        ns-syms (into (into (set fn-less-compiled-roots) (extra-src-ns-strs))
                       (map #(first (str/split (:seon.fn/sym %) #"/" 2)))
                       fn-rows)
         ns-rows (map ns-row (sort ns-syms))]

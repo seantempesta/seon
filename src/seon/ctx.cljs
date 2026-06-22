@@ -306,23 +306,29 @@
    `:seon.eval/result-edn` blob is."
   1500)
 
-(def core-eval-render-cap
-  "Render cap for CORE-AUTHORED eval rows (the creation-turn
-   tutorial evals — tile wiring, store-inventory, the my.kb.system
-   read — and any future core-scripted eval). These are OUR
-   output: well-controlled, written by compiled core code, never
-   by an LLM — so they render IN FULL (user directive 2026-06-11:
-   'our own context should be well controlled… don't be cheap'). The
-   1500-char agent cap defeated the inventory's own purpose: the
-   per-attr result clipped BEFORE the user-domain rows rendered, so
-   agents never saw e.g. :my.workout. 50,000 is a runaway BACKSTOP
-   against a pathological store, not a working limit — core eval
-   results are expected to fit whole far below it. (Stored
-   `:seon.eval/result-edn` is itself bounded upstream at
-   `seon.eval/store-edn-cap`, 16,384, so in practice this cap never
-   bites.) AGENT evals keep [[eval-render-cap]] + the loud ⚠ clip —
-   they can return literally anything."
-  50000)
+(def result-body-render-cap
+  "Per-eval render cap for the CITABLE RESULT BODY — the `=> <value>`
+   line every successful eval renders (`cap-result-body`). The result
+   body alone gets this LARGER cap (vs `eval-render-cap` for echoed
+   source + stdout) because it is the one component that (a) is the #53
+   symptom — a stored ≤16384 value clipped mid-value at 1500 drove
+   needless re-queries; (b) carries a `result/<id>` escape, so an
+   over-cap body still points the agent at the whole live value; and
+   (c) is already row-capped at 50 elements upstream
+   (`seon.eval/render-result-edn`), so a 16384-char body is STRUCTURED,
+   not a wall of text.
+
+   16384 currently EQUALS `seon.eval/store-edn-cap`, so a stored result
+   renders WHOLE — but this is a CROSS-REFERENCE, NOT an alias. The
+   render cap (an LLM-facing read-time projection) and `store-edn-cap`
+   (the write-time per-datom anti-OOM RAM ceiling) are different
+   three-tier-storage tiers: this one is independently tunable down for
+   token economy WITHOUT moving the RAM ceiling, or store-edn-cap up
+   without enlarging the LLM-facing render. Echoed source (`form-ln`)
+   and captured stdout (`out-ln`) stay at the smaller [[eval-render-cap]]
+   — neither is dereferenceable via `result/<id>`, so a large one is
+   context-wasting noise that would crowd the 24000 transcript budget."
+  16384)
 
 (defn cap-result
   "Truncate a rendered eval-result string to `eval-render-cap`,
@@ -366,8 +372,14 @@
 
    The full value is always available as the live var `result/<id>`
    (transcript-redesign-2026-06-18 — the agent references the var
-   directly, no `(result …)` call); the clip is display-only."
-  ([s] (cap-result-body s eval-render-cap nil))
+   directly, no `(result …)` call); the clip is display-only.
+
+   The default cap is [[result-body-render-cap]] (16384, = the store
+   ceiling) so a stored result renders WHOLE — the result body is the
+   one citable, row-capped, `result/<id>`-dereferenceable component, so
+   it earns the larger cap (echoed source + stdout stay at the smaller
+   [[eval-render-cap]])."
+  ([s] (cap-result-body s result-body-render-cap nil))
   ([s limit] (cap-result-body s limit nil))
   ([s limit eid]
    (let [s (str s)
@@ -538,10 +550,15 @@
    `;;` lines / bare prose the agent typed with no following form)
    renders just its `;;` preamble, no form, no output.
 
-   The rendered result/error body of an AGENT eval is capped at
-   `eval-render-cap` chars (context-SAFETY invariant — agent code can
-   return literally anything); a CORE-AUTHORED row
-   (`:seon.ctx/core-authored?` true) renders at [[core-eval-render-cap]].
+   Render caps SPLIT BY COMPONENT (context-SAFETY invariant — agent
+   code can return literally anything): echoed source (`form-ln`) and
+   captured stdout (`out-ln`) cap at the smaller [[eval-render-cap]]
+   (1500 — neither is dereferenceable via `result/<id>`, so a large one
+   is just context-wasting noise), while the CITABLE RESULT BODY caps at
+   the larger [[result-body-render-cap]] (16384 = the store ceiling, so
+   a stored result renders WHOLE — it is the one row-capped,
+   `result/<id>`-dereferenceable component). Error/guidance bodies stay
+   at [[eval-render-cap]] (a failure has no value to cite).
 
    On SUCCESS a reactive 'won't persist' note (#7) is DERIVED from the
    eval's source via [[seon.eval/scratch-def-note]] and appended as a
@@ -557,11 +574,13 @@
      err        :seon.eval/error
      err-data   :seon.eval/error-data
      eid        :seon.eval/id
-     narr       :seon.eval/narration
-     core? :seon.ctx/core-authored?}
+     narr       :seon.eval/narration}
     prior?]
    (let [envelope    (read-error-envelope err-data)
-         limit       (if core? core-eval-render-cap eval-render-cap)
+         ;; Echoed source + stdout + error/guidance bodies cap at the
+         ;; smaller `eval-render-cap` (1500); only the citable result
+         ;; body below gets `result-body-render-cap` (16384).
+         limit       eval-render-cap
          comment-only? (str/blank? (str src))
          ;; Comment-preamble — the agent's `;;`/prose thinking, neutralized
          ;; against fabricated result-claims BEFORE we re-prefix.
@@ -587,13 +606,19 @@
            ;; `#datahike/Datom` dump is sanitized on render (re-read,
            ;; re-project, re-pr-str) WITHOUT a cluster reset. A clean
            ;; string (every post-fix row) returns untouched.
-           (let [raw     (str (seval/sanitize-result-edn (or res "nil")))
+           ;; The CITABLE RESULT BODY caps at `result-body-render-cap`
+           ;; (16384 = the store ceiling), NOT `limit` (1500) — so a
+           ;; stored ≤16384 result renders WHOLE (#53). It is the one
+           ;; component that is row-capped upstream AND dereferenceable
+           ;; via result/<id>, so it earns the larger cap.
+           (let [body-cap result-body-render-cap
+                 raw     (str (seval/sanitize-result-edn (or res "nil")))
                  full    (count raw)
-                 clipped? (> full limit)
+                 clipped? (> full body-cap)
                  ;; The value body — clipped (with the size guide) when
                  ;; huge. The guide carries its own `\n;;` lines (a
                  ;; result/<id> dig hint), shown below the `=>` line.
-                 v       (cap-result-body raw limit eid)
+                 v       (cap-result-body raw body-cap eid)
                  ;; The live VAR HANDLE rides the `=>` line as a trailing
                  ;; `;; result/<id>`: the agent references `result/<id>`
                  ;; directly. Prior-session rows carry NO handle (their
@@ -601,7 +626,7 @@
                  ;; so the agent knows the shown value is partial.
                  handle  (when-not prior?
                            (str " ;; result/" eid
-                                (when clipped? (str " (" limit " of " full ")"))))
+                                (when clipped? (str " (" body-cap " of " full ")"))))
                  lines   (str/split-lines v)]
              ;; Prefix ONLY the first line with `=>` + handle; continuation
              ;; lines (a clip's own `;;` guide) stay as the body wrote them.
@@ -705,38 +730,11 @@
          session (current-session id db)]
      (last (sort-by :seon.agent.turn/at (:seon.agent.session/turns session))))))
 
-(schema/register! ::core-authored? :boolean)
-
-(defn core-authored-turn?
-  "True when the turn was SCRIPTED BY THE CORE rather than
-   authored by the agent's LLM: it carries no prompt
-   (`:seon.agent.turn/prompt-chars` 0 or absent). An LLM turn is
-   CONSTITUTED by its prompt — `run-turn!` always renders one and
-   records its char count on the turn-open tx — so a promptless turn
-   means no model was consulted and every eval on it is
-   core-written tutorial code (`seon.client/creation-evals!`
-   passes prompt-text \"\"). Chosen over the other candidate markers
-   because it is structural and load-bearing: the eval txs' origin is
-   overwritten to `:agent` by `eval-batch!`'s per-form tx-context (and
-   the turn-open tx is `:system` for BOTH paths), and
-   `:seon.agent.turn/woken-by` is also absent on harness-driven LLM
-   turns. No name-lists, no flags to keep in sync.
-
-   `turn` is a pulled turn map OR a datahike Entity (the
-   [[session-evals]] walk hands entities) — `:any` is the third-party
-   boundary exception: Entity is a datahike deftype, not `map?`."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [turn]
-  (zero? (or (:seon.agent.turn/prompt-chars turn) 0)))
-
 (defn session-evals
   "ALL :seon.eval entries for `agent-id`, oldest-first across ALL
    sessions, each tagged with its owning `:seon.agent.session/id` —
    the transcript's cross-restart read (context-v4 §2.8: prior-session
-   evals render too, behind a resume boundary marker) — and with
-   `:seon.ctx/core-authored?` ([[core-authored-turn?]] on the
-   owning turn), which [[format-eval-row]] reads to render core
-   tutorial rows IN FULL while agent rows keep the eval cap. Walks
+   evals render too, behind a resume boundary marker). Walks
    agent → sessions → turns → evals. Optional `db` snapshot."
   [agent-id db]
   (let [a (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
@@ -747,9 +745,7 @@
             e (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
         (assoc (into {} e)
                :seon.agent.session/id-of-session
-               (:seon.agent.session/id s)
-               ::core-authored?
-               (core-authored-turn? t))))))
+               (:seon.agent.session/id s))))))
 
 (defn evals
   "Last N :seon.eval entries for the agent's current session,

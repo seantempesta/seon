@@ -410,8 +410,15 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; :force is the deliberate \"I am replying ABOUT the failure\" escape —
-;; the reply still transacts + delivers (as every reply now does).
-(deftest force-reply-delivers
+;; the reply still transacts + delivers (as every reply now does) AND it
+;; opts the turn OUT of the make-good-turn veto: a forced reply over an
+;; envelope-failure sibling is the agent declaring the over-claim is
+;; intentional, so same-turn-overclaim? does NOT fire (the loop would
+;; halt :replied, not recur). The unforced sibling test
+;; (envelope-failure-sibling-reply-delivers-and-vetoes) proves the SAME
+;; setup DOES veto without force — so the only difference here is the
+;; force flag, isolating the opt-out.
+(deftest force-reply-delivers-and-skips-the-veto
   (async done
     (-> (with-conn
           (fn [conn]
@@ -433,7 +440,12 @@
                   (fn [{ok? :seon.agent.message/ok?}]
                     (is (true? ok?) "force = a deliberate reply ABOUT the failure")
                     (is (= 1 (count (non-wake-msgs conn)))
-                        "the forced message IS stored"))))))
+                        "the forced message IS stored")
+                    (is (true? (:seon.agent.message/force
+                                 (first (non-wake-msgs conn))))
+                        "force IS persisted on the stored row (true)")
+                    (is (false? (veto? conn))
+                        "force opts OUT of the over-claim veto — the loop halts :replied, not recurs"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

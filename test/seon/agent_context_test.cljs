@@ -89,10 +89,10 @@
             :seon.agent.turn/at (t 10)
             :seon.agent.turn/status :done
             ;; LLM turns ALWAYS carry their prompt's char count
-            ;; (with-turn! records it on the open tx). A PROMPTLESS
-            ;; turn means core-scripted evals — rendered UNCAPPED
-            ;; (seon.ctx/core-authored-turn?) — so the seeds must
-            ;; look like real LLM turns for the clip tests to bite.
+            ;; (with-turn! records it on the open tx); seeded here so the
+            ;; turns look like real LLM turns. (Render caps no longer
+            ;; branch on turn provenance — cap-split-2026-06-22 — the
+            ;; result body caps at 16384 for every eval.)
             :seon.agent.turn/prompt-chars 4321
             ;; The wake that opened this turn — the human's message. The
             ;; threaded transcript renders its content as the turn's
@@ -406,8 +406,9 @@
 (defn- flood-turn
   "One of N same-shaped big TURNS for the budget-eviction test — `i`
    disambiguates ids/at; each turn's single 2000-char-result eval renders
-   at the 1500-char eval cap + clip guide, ≈1.8k chars. The +1h offset
-   guarantees the flood sorts AFTER every [[seed-tx]] turn."
+   WHOLE (under the 16384 result-body cap), ≈2k chars, so 20 turns
+   (~40k chars) overflow the 24k transcript budget and force eviction.
+   The +1h offset guarantees the flood sorts AFTER every [[seed-tx]] turn."
   [i]
   (let [pad (.padStart (str i) 3 "0")
         at  (js/Date. (+ (.getTime (js/Date.)) 3600000 i))]
@@ -857,7 +858,16 @@
     (is (= small (agent/cap-result-body small))
         "under the cap → verbatim, no marker")
     (is (not (str/includes? (agent/cap-result-body small) "TRUNCATED"))
-        "no guide on a small result — no false positive")))
+        "no guide on a small result — no false positive"))
+  ;; #53 fix: a result body between the OLD 1500 cap and the store
+  ;; ceiling now renders WHOLE under the default arity (the body cap is
+  ;; result-body-render-cap=16384, NOT eval-render-cap=1500). A
+  ;; store-inventory-sized (~2800-char) result no longer clips mid-value.
+  (let [mid (apply str (repeat 2800 "m"))]
+    (is (= mid (agent/cap-result-body mid))
+        "a 2800-char result (between 1500 and 16384) renders WHOLE")
+    (is (not (str/includes? (agent/cap-result-body mid) "TRUNCATED"))
+        "no clip below the 16384 body cap — the #53 mid-value clip is gone")))
 
 (deftest cap-result-body-clips-a-huge-scalar-with-a-guiding-message
   (let [huge (apply str (repeat 5000 "z"))
@@ -872,10 +882,16 @@
       (is (str/includes? out "result/hg0000abcd")))))
 
 (deftest cap-result-body-uses-placeholder-when-no-eid
-  (let [huge (apply str (repeat 5000 "z"))
+  ;; The default arity caps the citable result body at
+  ;; `result-body-render-cap` (16384), so the input must exceed THAT to
+  ;; clip — a 5000-char string now renders WHOLE (the #53 fix).
+  (let [huge (apply str (repeat (+ ctx/result-body-render-cap 1000) "z"))
         out  (agent/cap-result-body huge)]
     (is (str/includes? out "result/<id>")
-        "no eid → generic placeholder, still actionable")))
+        "no eid → generic placeholder, still actionable")
+    (is (str/includes? out
+                       (str "⚠ TRUNCATED at " ctx/result-body-render-cap " of"))
+        "the default body cap is result-body-render-cap (16384), not 1500")))
 
 (deftest format-eval-row-repl-faithful-stream
   ;; THE byte-level pin for the transcript-redesign render (2026-06-18):
@@ -931,13 +947,17 @@
 (deftest format-eval-row-clipped-value-annotates-N-of-M
   ;; a clipped value appends `(N of M)` to the result/<id> handle so the
   ;; agent knows the shown display is a partial view of a live whole value.
-  (let [huge (apply str (repeat 5000 "z"))
+  ;; The result body clips at `result-body-render-cap` (16384), so the
+  ;; value must exceed THAT to clip (a 5000-char value now renders whole).
+  (let [full (+ ctx/result-body-render-cap 5000)
+        huge (apply str (repeat full "z"))
         row  (#'seon.ctx/format-eval-row
                {:seon.eval/source "(big)" :seon.eval/ok? true
                 :seon.eval/result-edn huge :seon.eval/id "cp0000001a"
                 :seon.eval/ns :my.agent.pin}
                false)]
-    (is (str/includes? row (str "result/cp0000001a (" agent/eval-render-cap " of 5000)"))
+    (is (str/includes? row (str "result/cp0000001a ("
+                                ctx/result-body-render-cap " of " full ")"))
         "the handle carries (shown of full) so the clip is unambiguous")
     (is (str/includes? row "live value is COMPLETE")
         "the size guide still fires for the clipped scalar")))
@@ -1064,15 +1084,20 @@
         "no double-marking on re-render")))
 
 (deftest format-eval-row-huge-result-is-bounded-and-guided
-  (let [huge-edn (pr-str (apply str (repeat 5000 "z")))
+  ;; The CITABLE RESULT BODY caps at `result-body-render-cap` (16384 = the
+  ;; store ceiling), NOT `eval-render-cap` (1500): a stored ≤16384 result
+  ;; renders whole (#53), but a body LARGER than the store ceiling is still
+  ;; bounded + guided (the context-SAFETY invariant — agent code can return
+  ;; anything, e.g. the legacy 9.7M-char pull).
+  (let [huge-edn (pr-str (apply str (repeat (+ ctx/result-body-render-cap 5000) "z")))
         row      (#'seon.ctx/format-eval-row
                    {:seon.eval/source "(big-string)" :seon.eval/ok? true
                     :seon.eval/result-edn huge-edn :seon.eval/id "hg0000002b"
                     :seon.eval/duration-ms 7})]
     (testing "row is bounded regardless of how large the result is"
-      (is (< (count row) (+ agent/eval-render-cap 600))))
+      (is (< (count row) (+ ctx/result-body-render-cap 600))))
     (testing "guiding message present, anchored to the row's own eid"
-      (is (str/includes? row "⚠ TRUNCATED at 1500 of"))
+      (is (str/includes? row (str "⚠ TRUNCATED at " ctx/result-body-render-cap " of")))
       (is (str/includes? row "live value is COMPLETE"))
       (is (str/includes? row "result/hg0000002b")))))
 
@@ -1092,96 +1117,61 @@
     (is (< (count row) 1000) "preview row is bounded")))
 
 ;; ---------------------------------------------------------------------------
-;; (g3) Core-authored rows render IN FULL — the inventory-clip defect
-;;      (2026-06-11): the creation-turn store-inventory result clipped at
-;;      1500 chars BEFORE the user-domain rows rendered, so the surface
-;;      defeated its own purpose. Core-scripted evals (a promptless
-;;      owning turn — seon.ctx/core-authored-turn?) are OUR output and
-;;      render uncapped (50k runaway backstop); agent evals keep the loud
-;;      ⚠ clip (pinned by format-eval-row-huge-result-is-bounded-and-guided).
+;; (g3) Render caps are SPLIT BY COMPONENT (cap-split-2026-06-22): the
+;;      CITABLE RESULT BODY caps at result-body-render-cap (16384 = the
+;;      store ceiling), so a stored ≤16384 result renders WHOLE — fixing
+;;      both the #53 mid-value clip AND the original inventory-clip defect
+;;      (2026-06-11, where the store-inventory result clipped at 1500
+;;      BEFORE the user-domain rows). Echoed source (form-ln) and captured
+;;      stdout (out-ln) stay at eval-render-cap (1500) — neither is
+;;      dereferenceable via result/<id>, so a large one is context-wasting
+;;      noise. core-eval-render-cap + the :seon.ctx/core-authored? routing
+;;      are DELETED (dead by construction): one cap per component, no
+;;      provenance branch.
 ;; ---------------------------------------------------------------------------
 
-(deftest format-eval-row-core-row-renders-whole
-  (let [huge (pr-str (apply str (repeat 5000 "k")))
-        row  (#'seon.ctx/format-eval-row
-               {:seon.eval/source "(seon.db/store-inventory)"
-                :seon.eval/ok? true
-                :seon.eval/result-edn huge
-                :seon.eval/id "sb0000004d"
-                :seon.eval/duration-ms 3
-                :seon.eval/ns :my.agent.pin
-                :seon.ctx/core-authored? true}
-               false)]
-    (is (str/includes? row huge)
-        "the full 5000-char core result renders WHOLE")
+(deftest format-eval-row-result-body-renders-whole-to-the-store-ceiling
+  ;; The #53 fix: a result body up to result-body-render-cap (16384)
+  ;; renders WHOLE — no provenance flag, no core/agent branch.
+  (let [whole (pr-str (apply str (repeat 5000 "k")))   ; well under 16384
+        row   (#'seon.ctx/format-eval-row
+                {:seon.eval/source "(seon.db/store-inventory)"
+                 :seon.eval/ok? true
+                 :seon.eval/result-edn whole
+                 :seon.eval/id "sb0000004d"
+                 :seon.eval/duration-ms 3
+                 :seon.eval/ns :my.agent.pin}
+                false)]
+    (is (str/includes? row whole)
+        "a 5000-char result renders WHOLE (between the old 1500 cap and 16384)")
     (is (not (str/includes? row "TRUNCATED"))
-        "no clip marker on a core-authored row"))
-  ;; the 50k backstop still bites on a runaway core value.
-  (let [runaway (apply str (repeat 60000 "r"))
-        row     (#'seon.ctx/format-eval-row
-                  {:seon.eval/source "(seon.db/store-inventory)"
-                   :seon.eval/ok? true
-                   :seon.eval/result-edn runaway
-                   :seon.eval/id "sb0000005e"
-                   :seon.eval/duration-ms 3
-                   :seon.eval/ns :my.agent.pin
-                   :seon.ctx/core-authored? true}
-                  false)]
-    (is (str/includes? row "⚠ TRUNCATED at 50000 of 60000")
-        "the runaway backstop clips LOUDLY at 50k, never silently")))
+        "no clip below the 16384 body cap")))
 
-(deftest session-evals-tag-core-authorship-from-promptless-turns
-  (async done
-    (let [big (pr-str (apply str (repeat 5000 "k")))
-          at  (js/Date. (+ (.getTime (js/Date.)) 40))]
-      (-> (with-seeded-conn
-            (fn [conn]
-              ;; A creation-shaped turn: NO prompt-chars (creation-evals!
-              ;; passes prompt-text "" → with-turn! records 0; this seeds
-              ;; the attr ABSENT, the same promptless classification).
-              (-> (db/transact!
-                    {:seon.db/conn conn
-                     :seon.db/tx-data
-                     [{:seon.agent.session/id "SESctxtest0001"
-                       :seon.agent.session/turns
-                       [{:seon.agent.turn/id "TRNctxtest0003"
-                         :seon.agent.turn/at at
-                         :seon.agent.turn/status :done
-                         :seon.agent.turn/evals
-                         [{:seon.eval/id "EVLctxtestSUB1"
-                           :seon.eval/at at
-                           :seon.eval/duration-ms 2
-                           :seon.eval/source "(seon.db/store-inventory)"
-                           :seon.eval/ok? true
-                           :seon.eval/result-edn big
-                           :seon.eval/ns :my.agent.ctx-260610}]}]}]})
-                  (.then
-                    (fn [_]
-                      (let [db  @conn
-                            es  (seon.ctx/session-evals agent-id db)
-                            sub (->> es
-                                     (filter #(= "EVLctxtestSUB1"
-                                                 (:seon.eval/id %)))
-                                     first)
-                            agt (->> es
-                                     (filter #(= "EVLctxtestK001"
-                                                 (:seon.eval/id %)))
-                                     first)
-                            ts  (agent/transcript-section
-                                  {:seon.db/db db :seon.agent/id agent-id})]
-                        (is (true? (:seon.ctx/core-authored? sub))
-                            "promptless turn → core-authored eval")
-                        (is (false? (:seon.ctx/core-authored? agt))
-                            "prompted (LLM) turn → agent eval")
-                        (is (str/includes? ts big)
-                            "the core result is IN the rendered
-                             transcript, whole — agents see every
-                             inventory row")
-                        (is (not (str/includes?
-                                   ts (str "TRUNCATED at 1500 of")))
-                            "no agent-cap clip fired anywhere")))))))
-          (.then (fn [_] (done)))
-          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+(deftest format-eval-row-source-and-stdout-stay-at-1500
+  ;; The cap split's other half (Gemini's source-confirmed contribution):
+  ;; form-ln (echoed source) and out-ln (captured stdout) cap at the
+  ;; SMALLER eval-render-cap (1500), even when the result body itself is
+  ;; large — neither is citable via result/<id>, so a wall of it would
+  ;; crowd the 24000 transcript budget.
+  (let [big-src (str "(do " (apply str (repeat 3000 "x")) ")")
+        big-out (apply str (repeat 3000 "p"))
+        row     (#'seon.ctx/format-eval-row
+                  {:seon.eval/source big-src
+                   :seon.eval/output big-out
+                   :seon.eval/ok? true
+                   :seon.eval/result-edn "42"
+                   :seon.eval/id "sb0000004e"
+                   :seon.eval/duration-ms 3
+                   :seon.eval/ns :my.agent.pin}
+                  false)]
+    (is (= 2 (count (re-seq (re-pattern (str "⚠ TRUNCATED at "
+                                             agent/eval-render-cap " of 3"))
+                            row)))
+        "BOTH the echoed source AND the stdout clip at 1500 (two clips)")
+    (is (str/includes? row "=> 42 ;; result/sb0000004e")
+        "the small result body renders whole with its handle, no (N of M) clip")
+    (is (not (str/includes? row "result/sb0000004e ("))
+        "the result body itself was NOT clipped (handle carries no count)")))
 
 ;; ---------------------------------------------------------------------------
 ;; (g2) V4-4 — session resume: the boundary marker, prior-session rendering,
