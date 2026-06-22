@@ -398,6 +398,18 @@ overlapping `cljs.test/run-tests` in the live pod** — it wedges the shared
 async continuation; restart the pod (`bin/seon restart pod`) for a pristine
 run.
 
+**Third-party harness (Acme):** to reproduce/fix downstream-consumer bugs
+against a real third-party shape WITHOUT touching the live deployment, use
+`bin/acme` — a fully isolated second cluster (pod on 7980, wire-server REPL
+7981, store `data/clusters/acme`, its own bundle `out-acme/`, logs
+`logs/acme/`). The consumer's own code lives in `acme/` (compiled in via
+`SEON_EXTRA_SRC`). Boot: `bin/acme build && bin/acme start wire-server &&
+bin/acme start pod`. To verify a seon fix in acme, `bin/acme build` then
+`bin/acme restart pod` (the acme bundle is not watched). NEVER `bin/seon
+start/stop/restart` the live default cluster. Full guide — boot, isolation
+table, what it exercises, the fix→verify loop, inspection (HTTP 7980 / wire
+REPL 7981, not MCP), and warts: `docs/seon/components/acme-harness.md`.
+
 **`[JVM track — paused]`** tests run inside the running JVM via the REPL —
 never by spawning a separate process:
 
