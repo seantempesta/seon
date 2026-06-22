@@ -7,12 +7,15 @@
 # own ports, sockets, store, supervisor pid/lock namespace, and logs, plus the
 # downstream overlay (SEON_EXTRA_*) and branding (SEON_BRAND_*) wiring.
 #
+#   bin/acme up                    # build + start wire-server + pod + status
+#   bin/acme down                  # stop the whole cluster
+#   bin/acme build                 # one-off compile -> out-acme/client/main.js
 #   bin/acme start wire-server     # JVM writer on Acme's store + sockets (REPL 7981)
 #   bin/acme start pod             # Node pod on :7980, acme.* compiled in
 #   bin/acme status                # PIDs (from tmp/proc-acme)
 #   bin/acme tail pod              # logs/acme/pod.log
 #   bin/acme restart pod
-#   bin/acme stop
+#   bin/acme stop                  # stop the whole cluster (or `stop pod`)
 #   bin/acme cluster reset default # wipes data/clusters/acme/store, bounces both
 #
 # To reproduce BUG B (silent invisibility), comment out the (reset! …) in
@@ -65,6 +68,32 @@ case "${1:-}" in
         --config-merge "{:devtools {:preloads [$SEON_EXTRA_PRELOAD]}}"
     echo "● built $SEON_ROOT/$SEON_CLIENT_OUT (acme.* baked in)"
     exit 0
+    ;;
+  up)
+    # build + boot the whole isolated cluster: wire-server FIRST (sole writer;
+    # pod boot is gated on its socket), then the pod. Recurse through "$0" so
+    # each step gets the full Acme env block above.
+    "$0" build
+    "$0" start wire-server
+    "$0" start pod
+    "$0" status
+    exit 0
+    ;;
+  down)
+    # stop the whole cluster (pod first, then the writer).
+    "$SEON_ROOT/bin/seon" stop pod || true
+    "$SEON_ROOT/bin/seon" stop wire-server || true
+    exit 0
+    ;;
+  stop)
+    # `bin/acme stop` with NO process name stops the whole cluster (bin/seon
+    # alone errors "stop requires a process name"). `bin/acme stop pod` still
+    # delegates to the named form below.
+    if [ -z "${2:-}" ]; then
+      "$SEON_ROOT/bin/seon" stop pod || true
+      "$SEON_ROOT/bin/seon" stop wire-server || true
+      exit 0
+    fi
     ;;
 esac
 

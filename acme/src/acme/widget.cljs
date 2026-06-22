@@ -46,3 +46,14 @@
        (when id [:div {:class "text-[10px] font-mono text-text-500"} id])]]
      :seon.render/ai
      (str "Acme dashboard tile — the human sees " (h/format-count n "installed schema") ".")}))
+
+(defn broken-tile
+  "A DELIBERATELY-broken live tile — it throws when rendered. Wire it onto
+   an agent to prove `acme.overrides`' `set!` of
+   `seon.render.live-tile/error-response` is live: instead of seon's stock
+   'Updating this panel…' card, the human sees the calm Acme-branded
+   'Acme is preparing this view…' card. This is the override seam exercised
+   end to end — extend seon without forking it."
+  {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
+  [_in]
+  (throw (js/Error. "acme.widget/broken-tile: deliberately broken for the override demo")))

@@ -22,16 +22,39 @@ touching the live deployment**. The downstream's own code lives in `acme/`
 ```bash
 # optional: export GEMINI_API_KEY=...   (embeddings KNN)
 # optional: export SEON_AI_PROVIDER=deepseek DEEPSEEK_API_KEY=...  (live drives)
+bin/acme up                 # build + start wire-server + pod + status (one shot)
+bin/acme status
+bin/acme tail pod
+bin/acme down               # stop the whole cluster (pod + wire-server)
+```
+
+`bin/acme up` is the operator one-liner: it runs `build` (compile
+`:acme-client` → `out-acme/client/main.js`), then `start wire-server` (which
+BLOCKS until the writer's req socket is ACCEPTING — the pod boot is gated on
+it), then `start pod`, then `status`. The blocking wire-server start is why
+`up` is race-free; starting `wire-server` and `pod` back-to-back by hand in
+one shell line CAN race (the pod's 5-attempt ping fails in ~10s if the socket
+isn't up yet — it then exits, see logs/acme/pod.log).
+
+The granular verbs still work if you want them:
+
+```bash
 bin/acme build              # one-off compile :acme-client -> out-acme/client/main.js
 bin/acme start wire-server  # JVM writer FIRST (sole writer; pod boot is gated on it)
 bin/acme start pod          # Node pod on http://127.0.0.1:7980
-bin/acme status
-bin/acme tail pod
+bin/acme restart pod        # rebuild loop: bin/acme build && bin/acme restart pod
 ```
 
 Everything `bin/seon` does, `bin/acme` does for the acme cluster (it just
 exports the isolated env block, then `exec bin/seon "$@"`) — `start`,
-`stop <name>`, `status`, `tail`, `restart`, `cluster reset`.
+`stop <name>`, `status`, `tail`, `restart`, `cluster reset`. PLUS the three
+cluster-level convenience verbs `bin/acme` adds on top:
+
+| verb | what it does |
+|---|---|
+| `bin/acme up` | `build` + `start wire-server` + `start pod` + `status` |
+| `bin/acme down` | stop the whole cluster (pod first, then wire-server) |
+| `bin/acme stop` (no arg) | stop the whole cluster (`bin/seon stop` alone errors "needs a process name"); `bin/acme stop pod` still stops just one |
 
 ## Isolation — zero overlap with the live cluster
 
@@ -78,19 +101,30 @@ NEVER `bin/seon start/stop/restart` it or write to its store. Use **only**
 |---|---|
 | `acme/deps.edn` | the consumer's own project (`{:paths ["src"]}` + their deps) |
 | `acme/src/acme/pod.cljs` | entry ns; requires the surface + runs the `(reset! …)` |
-| `acme/src/acme/widget.cljs` | a specced product fn + a live-tile (`dash`) |
-| `acme/src/acme/helpers.cljs` | an UNSPECCED helper the tile calls (BUG-A repro) |
+| `acme/src/acme/widget.cljs` | specced product fn + live-tiles (`dash`, plus `broken-tile` to exercise the error-response override) |
+| `acme/src/acme/helpers.cljs` | a specced fn AND an UNSPECCED helper (`format-count`) the tile calls |
+| `acme/src/acme/notes.cljs` | an ENTIRELY-UNSPECCED ns — proves a downstream ns owning ZERO specced fns still gets a `:seon.ns` row + shows in context (the full-surface indexing case) |
 | `acme/src/acme/brand.cljs` | a second indexed ns (product copy) |
 | `acme/src/acme/overrides.cljs` | function overrides via `set!` (no seon-src edit) |
 | `acme/branding/acme.css` | custom CSS via `SEON_BRAND_CSS` |
 
 ## What it exercises
 
-- **Source indexing + context** — `acme.*` namespaces boot-index into the
-  acme store (queryable `:seon.fn/sym` rows starting `"acme."`) and render
-  into agent context. Reproduce the *silent-failure* bug by commenting out
-  the `(reset! …)` in `acme/src/acme/pod.cljs` and rebuilding: zero acme rows
-  index and a loud boot WARN fires (`warn-if-extra-src-unregistered!`).
+- **Full-surface source indexing + context** — `acme.*` namespaces boot-index
+  into the acme store and render into agent context. The indexing is now the
+  FULL surface: **every** `acme.*` ns gets a `:seon.ns` row (including the
+  entirely-unspecced `acme.notes`) and **every** public fn gets a `:seon.fn`
+  row — specced (`acme.widget/set-location!`, `acme.brand/tagline`) AND
+  unspecced (`acme.helpers/format-count`, `acme.notes/slugify`,
+  `acme.notes/note-line`, `acme.notes/word-count`). This is the client.cljs
+  fix: the indexer derives the downstream ns set from the SEON_EXTRA_SRC file
+  set, not from the specced-only `!extra-core-vars` (the old behavior gave an
+  all-unspecced ns no row at all — silently invisible). Verified on a clean
+  store: 6 acme nses + 8 acme fns indexed; a real DeepSeek-driven turn's
+  `<namespace name="acme.notes">` block carries all three unspecced fns.
+  Reproduce the *silent-failure* bug by commenting out the `(reset! …)` in
+  `acme/src/acme/pod.cljs` and rebuilding: zero acme rows index and a loud
+  boot WARN fires.
 - **Live tile via SCI** — `acme.widget/dash` is a specced tile that calls the
   unspecced `acme.helpers/format-count` through a required-ns alias. It
   renders under the SCI-bounded path (proven: "N installed schemas", no
@@ -129,8 +163,12 @@ bin/acme restart pod          # acme pod picks it up
 
 ## Known warts (non-blocking)
 
-- `bin/acme stop` with no arg errors — stop each process: `bin/acme stop pod`
-  then `bin/acme stop wire-server`.
+- `bin/acme start wire-server && bin/acme start pod` on ONE shell line can
+  race (the pod ping-fails in ~10s and exits if the writer socket isn't
+  accepting yet). Use `bin/acme up` — it blocks on wire-server readiness
+  between the two starts. After a bare `start pod` always poll
+  `curl -s 127.0.0.1:7980/agents` to HTTP 200 (the start command returns
+  before the pod is actually ready).
 - `tmp/seon-port` is a single shared path; an acme pod overwrites it, so
   `bin/seon status` may show the acme port until the live pod rewrites it
   (cosmetic; the live pod stays bound to 7890).
