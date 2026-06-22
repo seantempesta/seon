@@ -14,6 +14,10 @@ seams: the embedding-backed wire-server uberjar, the pod source OVERLAY via
 example throughout is the in-repo `acme/` overlay, which is verified green —
 see [[../components/acme-harness.md]] for booting it with `bin/acme`.
 
+The complete config surface — every env var Seon reads, with defaults and
+accepted values — is documented in `.env.example` at the repo root (there is
+no config file; Seon is configured entirely through env vars).
+
 The shape: two long-running processes per cluster.
 
 - **wire-server** — a JVM datahike WRITER (sole writer; embedding-backed). You
