@@ -449,8 +449,7 @@
                       ;; :core origin (#43) — a substrate nudge, NOT a human
                       ;; message: it must not wake an idle agent or move the
                       ;; halt baseline even though it sends from the user-ref.
-                      :seon.agent.message/origin  :core
-                      :seon.agent.message/force   true}))))
+                      :seon.agent.message/origin  :core}))))
         (.catch (fn [e]
                   (log/warn! {:seon.log/source  ::recover-hung-tile!
                               :seon.log/message

@@ -271,10 +271,10 @@
 ;; the turn entity carries the char count + file pointer. The old
 ;; `:seon.agent.turn/prompt-text` datom (silently capped at 16,406 chars by
 ;; cap-edn — truncated evidence for any long run) is RETIRED 2026-06-09.
-;; `:seon.agent.turn/prompt-text` stays registered ONLY as the in-memory
-;; plumbing key between run-turn!/with-turn!/ask-and-eval! — it is not
-;; in `agent-bootstrap-attrs` and never reaches the DB.
-(schema/register! :seon.agent.turn/prompt-text  :string)
+;; `:seon.agent.turn/prompt-text` is a PLAIN in-memory plumbing key
+;; between run-turn!/with-turn!/ask-and-eval! — NOT registered (never
+;; persisted, never in `agent-bootstrap-attrs`). Registering it bought
+;; nothing (no datom ever carried it); it stays a local binding only.
 (schema/register! :seon.agent.turn/prompt-chars :int)
 (schema/register! :seon.agent.turn/prompt-file  :string)
 ;; In-memory plumbing key only (like :seon.agent.turn/prompt-text): the
@@ -321,7 +321,6 @@
    [:seon.agent.turn/at           :seon.agent.turn/at]
    [:seon.agent.turn/status       :seon.agent.turn/status]
    [:seon.agent.turn/woken-by     {:optional true} :seon.agent.turn/woken-by]
-   [:seon.agent.turn/prompt-text  {:optional true} :seon.agent.turn/prompt-text]
    [:seon.agent.turn/prompt-chars {:optional true} :seon.agent.turn/prompt-chars]
    [:seon.agent.turn/prompt-file  {:optional true} :seon.agent.turn/prompt-file]
    [:seon.agent.turn/debug-dir    {:optional true} :seon.agent.turn/debug-dir]
@@ -571,7 +570,12 @@
   (and (= target my-eid)
        (let [msg (db/entity {:seon.db/db db :seon.db/ref eid})]
          (and (not= my-eid (:db/id (:seon.agent.message/from msg)))
-              (not= :core (:seon.agent.message/origin msg))))))
+              (not= :core (:seon.agent.message/origin msg))
+              ;; I-1: a tx-hook-consumed message (handled? = true) does
+              ;; NOT wake — a downstream deterministic chat-control sets
+              ;; handled? in the same tx that processes the command, so
+              ;; the agent isn't double-woken.
+              (not (true? (:seon.agent.message/handled? msg)))))))
 
 (defn- inbound-message-handler
   [{:seon.agent/keys [id] :as input}]
@@ -630,20 +634,21 @@
             ;; #49 fail-loud: a wake was SKIPPED. A silently-dropped wake
             ;; is the exact fail-loud violation the project forbids — name
             ;; WHY and what re-processes it. state=:running → the in-flight
-            ;; loop's next render reads the message via the derived
-            ;; conversation. latch held → the in-flight loop's drain-on-exit
-            ;; (undrained-inbound-since?) re-runs for it before releasing
-            ;; !kick-scheduled. Either way the message is NOT lost — but the
-            ;; skip is now observable, not invisible.
+            ;; loop's next halt check reads the message as an unanswered
+            ;; live inbound (unanswered-live-inbound?) and keeps running for
+            ;; it. latch held → a loop is scheduled-or-running for this id;
+            ;; the same halt check covers a message that lands while it runs.
+            ;; The skip is observable, not invisible.
             (js/console.warn
               (str "seon.agent: WAKE SKIPPED for agent " id
                    " — message " mid
                    (cond
                      (= :running state)
-                     " — state=:running (in-flight loop's next render picks it up)"
+                     (str " — state=:running (in-flight loop's next halt check"
+                          " sees it as an unanswered live inbound)")
                      (contains? @!kick-scheduled id)
-                     (str " — !kick-scheduled latch held (in-flight loop's"
-                          " drain-on-exit re-runs for it before releasing)")
+                     (str " — !kick-scheduled latch held (a loop is already"
+                          " scheduled-or-running for this id)")
                      :else " — guard failed (unexpected)")))))))))
 
 (defn install-user-trigger!
@@ -1336,7 +1341,7 @@
         {:seon.agent.turn/status :error
          :seon.error/data (str e)}))))
 
-(schema/register! ::replied-since-inbound-request
+(schema/register! ::unanswered-live-inbound-request
   [:map [::id ::id]])
 
 (defn- latest-message-at
@@ -1347,10 +1352,11 @@
 (defn- latest-inbound-at
   "`:seon.agent.message/at` of the latest LIVE inbound message for
    `my-eid` — to ∋ me, from ≠ me, hops < `warn/hop-cap`, origin ∉
-   {:core} (#43). nil when `my-eid` is nil or no such message exists.
-   The ONE inbound query; both `replied-since-inbound?` and the
-   drain-on-exit derivation read it, so the origin/hop gate can never
-   drift between them (mirrors seon.ctx/turns-since-inbound)."
+   {:core} (#43), handled? ≠ true (I-1). nil when `my-eid` is nil or no
+   such message exists. The ONE inbound query the stop-policy reads, so
+   its wake exclusions match `inbound-msg-datom?` exactly: a message
+   that does not WAKE must not ANCHOR the halt either (mirrors
+   seon.ctx/turns-since-inbound)."
   [my-eid]
   (when my-eid
     (latest-message-at
@@ -1367,12 +1373,14 @@
         [(< ?h ?cap)]
         ;; :core substrate nudges (tile recovery, sent FROM the
         ;; user-ref) never wake a loop and must not move the halt
-        ;; baseline either (#43) — else a broken-tile :core message
-        ;; would push the inbound side forward and keep the loop
-        ;; running. Legacy rows have no origin ⇒ default to :human
-        ;; (those predate :core; all were human/agent).
+        ;; baseline either (#43). Legacy rows have no origin ⇒ default
+        ;; to :human (those predate :core; all were human/agent).
         [(get-else $ ?m :seon.agent.message/origin :human) ?o]
         [(not= ?o :core)]
+        ;; I-1: a tx-hook-consumed message (handled? = true) neither
+        ;; wakes (inbound-msg-datom?) nor anchors the stop-policy.
+        [(get-else $ ?m :seon.agent.message/handled? false) ?handled]
+        [(not= ?handled true)]
         [?m :seon.agent.message/at ?at]]
       [my-eid warn/hop-cap])))
 
@@ -1393,77 +1401,36 @@
         [?m :seon.agent.message/at ?at]]
       [my-eid])))
 
-(defn replied-since-inbound?
-  "Loop-economy stop derivation (#35): TRUE when an OUTBOUND message
-   (from = me with at least one recipient ≠ me — a `reply!` to the
-   asker or a `message!` consult to another agent; the per-turn
-   assistant self-message is from = to = me and never counts) landed
-   strictly AFTER the latest live inbound message (to ∋ me, from ≠ me,
-   hops < `warn/hop-cap` — the same window `turns-since-inbound`
-   counts against). With no inbound on record the baseline is the
-   current session's start, so replies from prior wakes don't stop a
-   manually-driven loop. Fully derived from the message log — nothing
-   stored, nothing to clear (docs/seon/concepts/reactive-context).
-   A NEW inbound message arriving after the reply moves the inbound
-   side of the comparison forward, so the loop keeps running for it."
-  {:malli/schema [:=> [:cat ::replied-since-inbound-request] :boolean]}
+(defn unanswered-live-inbound?
+  "THE loop stop-policy predicate — TRUE when there is a LIVE inbound
+   message awaiting an answer, so `run-agentic-loop!` must keep running.
+   A live inbound is the latest message with to ∋ me, from ≠ me, hops <
+   `warn/hop-cap`, origin ∉ {:core}, handled? ≠ true (see
+   [[latest-inbound-at]] — the SAME exclusions as the wake gate
+   `inbound-msg-datom?`). UNANSWERED means no OUTBOUND message (from =
+   me with a recipient ≠ me — a `reply!` or a `message!` consult; the
+   per-turn assistant self-message is from = to = me and never counts)
+   landed STRICTLY AFTER it.
+
+   This is the ONE question the loop asks, and it subsumes every prior
+   phrasing:
+     - not-yet-replied this wake — the wake message is live, no outbound
+       after it ⇒ true ⇒ recur.
+     - a NEW inbound arrived mid-wake (the old #49 'drain') — it is now
+       the latest live inbound and is unanswered ⇒ true ⇒ recur. No
+       separate baseline/latch bookkeeping: a message that landed during
+       the wake is simply a live unanswered inbound at the halt check.
+     - answered — an outbound landed after the latest live inbound ⇒
+       false ⇒ halt :replied.
+   Fully derived from the message log — nothing stored, nothing to clear
+   (docs/seon/concepts/reactive-context)."
+  {:malli/schema [:=> [:cat ::unanswered-live-inbound-request] :boolean]}
   [{::keys [id]}]
-  (let [my-eid      (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))
-        inbound-at  (latest-inbound-at my-eid)
-        outbound-at (latest-outbound-at my-eid)
-        baseline    (or inbound-at
-                        (:seon.agent.session/at (current-session id)))]
-    (boolean (and outbound-at baseline
-                  (> (.getTime ^js outbound-at)
-                     (.getTime ^js baseline))))))
-
-(schema/register! ::baseline-at [:maybe :inst])
-
-(schema/register! ::undrained-inbound-request
-  [:map
-   [::id ::id]
-   ;; The latest LIVE inbound `:at` captured at loop ENTRY (nil when the
-   ;; loop opened with no inbound on record — a manual drive). Anchors
-   ;; "newer than the halt baseline" so the drain fires ONLY for a
-   ;; message that arrived during the wake, never for the message the
-   ;; wake already processed (which would loop a :cap-hit exit forever).
-   [::baseline-at ::baseline-at]])
-
-(defn undrained-inbound-since?
-  "Drain-on-exit liveness derivation (#49). TRUE when a LIVE inbound
-   message (the same origin-aware shape `replied-since-inbound?` reads —
-   to ∋ me, from ≠ me, hops < cap, origin ∉ {:core}) arrived STRICTLY
-   AFTER `baseline-at` AND has NOT been answered (no outbound strictly
-   after that newest inbound).
-
-   This closes the tail window: `:seon.agent/state` flips back to :idle
-   at the final turn's close-tx BEFORE `run-agentic-loop!` returns and
-   the kick handler's `.finally` clears `!kick-scheduled`. A /chat
-   message landing in that window passes the handler's `:idle` state
-   guard but is rejected by the still-held latch — so it never wakes a
-   loop. The loop re-queries this at exit and, while it is true, recurs
-   directly (the latch held ACROSS the drain), only returning — and thus
-   releasing the latch — once the message log shows nothing new to
-   drain. Pure derivation over the log; no stored pending-wake queue
-   (docs/seon/concepts/reactive-context).
-
-   `baseline-at` (captured at loop entry) is what keeps this from
-   re-firing on a terminal halt for the SAME message: at a :cap-hit /
-   :no-visible-output exit the only inbound IS the baseline, so
-   `> baseline-at` is false and the loop exits. Only a genuinely NEW
-   inbound (the tail-window race) clears the baseline and is unanswered."
-  {:malli/schema [:=> [:cat ::undrained-inbound-request] :boolean]}
-  [{::keys [id baseline-at]}]
   (let [my-eid      (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))
         inbound-at  (latest-inbound-at my-eid)
         outbound-at (latest-outbound-at my-eid)]
     (boolean
       (and inbound-at
-           ;; a NEW inbound arrived since the loop opened (or the loop
-           ;; opened with none and one has since landed)
-           (or (nil? baseline-at)
-               (> (.getTime ^js inbound-at) (.getTime ^js baseline-at)))
-           ;; …and it has NOT been answered (no reply strictly after it)
            (not (and outbound-at
                      (> (.getTime ^js outbound-at)
                         (.getTime ^js inbound-at))))))))
@@ -1500,110 +1467,55 @@
 
 (defn ^:async run-agentic-loop!
   "Per v1.md §6.2 — multi-turn driver. Calls `run-turn!` repeatedly
-   until a stop policy fires.
+   until a stop policy fires. The stop policy is ONE question —
+   [[unanswered-live-inbound?]] — plus three guards.
 
-   Default stop policies:
-     - Last turn errored.
-     - A reply landed during this wake and no newer inbound message
-       arrived (`replied-since-inbound?`) — the conversation ball is in
-       the other court; churning verification turns to the cap after
-       answering was the #35 loop-economy bug (3/5 paid P8 runs burned
-       ~15 turns post-answer). A new inbound message re-wakes the loop
-       via the kick trigger. Halt marker: `:seon.agent/halt :replied`.
-       SHARP EDGE: ANY outbound to a non-self recipient ends the wake —
-       including an interim \"I'm looking into it\" acknowledgement or a
-       `message!` consult to another agent. Complete the work first,
-       reply once; consults resume via the re-wake when the answer
-       arrives.
-     - `turns-since-inbound` reached `(turns-cap id)` — derived from
-       the message + turn log; see docs/seon/concepts/reactive-context.
-       Checked BEFORE the empty-turn guard so re-prompts (which consume
-       turns like any other) can never push past the cap.
-     - EMPTY-TURN GUARD (downstream ask 20): a turn that produced ZERO
-       evals while the agent has NOT replied since the inbound used to
-       end the wake silently (`done [0 \"ok\"]`) — observed with
-       deepseek thinking-mode completions that put every token in the
-       reasoning field and return EMPTY visible content; the agent
-       looked dead until a manual \"continue\". The guard watches the
-       TURN OUTCOME (provider-agnostic — an anthropic
-       thinking-blocks-only response trips it the same way): zero evals
-       also implies zero outbound messages (sends only happen through
-       evals, and any outbound would have fired the `:replied` branch
-       above). Instead of ending, it injects [[empty-completion-nudge]]
-       as a self→self transcript note and re-prompts — at most
-       [[max-empty-reprompts]] consecutive times (any turn with forms
-       resets the streak), then ends the wake by flipping the last turn
-       to `:seon.agent.turn/status :error` with a stored self-message
-       (the ask-6 LLM-error shape) so the human sees a `::system` chat
-       line instead of silence. Halt marker:
-       `:seon.agent/halt :no-visible-output`.
+   Stop policies (in cond order):
+     1. Last turn errored → halt `:error`.
+     2. `turns-since-inbound` reached `(turns-cap id)` → a self→self
+        cap note, then halt `:cap-hit`. Checked BEFORE the empty-turn
+        guard so re-prompts (which consume turns) can never push past
+        the cap.
+     3. NOT [[unanswered-live-inbound?]] → halt `:replied`. ONE
+        predicate is the whole stop-policy: the latest LIVE inbound (to
+        ∋ me, from ≠ me, hops < cap, origin ∉ {:core}, handled? ≠ true)
+        has an outbound strictly after it, so the conversation ball is
+        in the other court. A new inbound re-wakes via the kick trigger;
+        a mid-wake arrival is itself an unanswered live inbound here (no
+        baseline/latch/drain bookkeeping — it is simply unanswered at
+        the halt check). SHARP EDGE: ANY outbound to a non-self
+        recipient ends the wake (a `message!` consult counts). Complete
+        the work, reply once. A replied agent that then emits an empty
+        completion halts here and does NOT re-prompt.
+     4. EMPTY-TURN GUARD (standalone — reached only with a live
+        unanswered inbound; downstream ask 20): a turn that produced
+        ZERO evals (the deepseek/anthropic thinking-only shape — all
+        tokens in the reasoning field, empty visible content) injects
+        [[empty-completion-nudge]] as a self→self note and re-prompts,
+        at most [[max-empty-reprompts]] consecutive times (any turn with
+        forms resets the streak), then ends the wake by flipping the
+        last turn to `:seon.agent.turn/status :error` with a stored
+        self-message (the ask-6 LLM-error shape) so the human sees a
+        `::system` chat line instead of silence. Halt marker:
+        `:seon.agent/halt :no-visible-output`.
+     5. :else → recur (a turn with forms while a live inbound is still
+        unanswered; resets the empty streak).
 
-   The message-arrival stop policy is handled externally: the kick
-   handler's state-machine guard + scheduled-latch ensure a fresh
-   inbound message can't stack new loops on top of an in-flight one."
+   The double-wake guard is external: the kick handler's `:running`
+   state guard + `!kick-scheduled` latch ensure a fresh inbound can't
+   stack new loops on an in-flight one. A message that arrives mid-wake
+   while the loop is running is picked up at the next halt check (it is
+   an unanswered live inbound there)."
   [{:seon.agent/keys [id] :as input}]
-  ;; #49 drain-on-exit. The kick handler holds `!kick-scheduled` for the
-  ;; WHOLE loop (the double-loop guard — every inter-turn :idle gap is
-  ;; covered). The tail-window race: a /chat lands AFTER a terminal turn's
-  ;; close-tx flipped :idle but while the latch still holds id — the
-  ;; handler sees :idle but the latch DROPS the wake; the latch then clears
-  ;; at exit and nothing re-fires. To close it, every terminal halt
-  ;; re-queries the message log (`undrained-inbound-since?`) and, while a
-  ;; STRICTLY-newer-than-baseline UNANSWERED inbound exists, recurs instead
-  ;; of returning — the latch stays held ACROSS the drain and the message
-  ;; gets a turn. The latch releases (loop returns) only when the query is
-  ;; empty.
-  ;;
-  ;; `baseline-at` is a LOOP VARIABLE that ADVANCES on every drain to the
-  ;; latest inbound we just committed to giving a turn. This is what makes
-  ;; the drain terminate: a halt over the SAME message the loop already
-  ;; processed is `(not (> latest baseline))` → no drain; only a genuinely
-  ;; NEWER inbound clears the bar, and each drain pushes the bar forward
-  ;; (monotonic, bounded by the number of distinct messages). Without the
-  ;; advance, a perpetually-unanswered message would re-drain a :cap-hit /
-  ;; :no-visible-output halt forever (verified hazard). Initial baseline =
-  ;; the latest inbound at loop entry (the wake anchor); nil on a manual
-  ;; drive with no inbound, in which case any live unanswered inbound
-  ;; drains once.
-  (let [my-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))]
-   (loop [empty-streak 0
-          baseline-at  (latest-inbound-at my-eid)]
+  (loop [empty-streak 0]
     (let [result   (await (run-turn! input))
           since-in (turns-since-inbound {:seon.agent/id id})
           status   (:seon.agent.turn/status result)
           n-forms  (or (:seon.agent/eval-count result) 0)
-          turn-idx (turn-index (:seon.agent.session/id (current-session id)))
-          ;; Re-query fresh at the halt point. drain? = a new unanswered
-          ;; inbound past the current baseline; next-baseline = where to
-          ;; advance the bar so we never re-drain that same message.
-          drain?   (undrained-inbound-since? {::id id ::baseline-at baseline-at})
-          next-baseline (latest-inbound-at my-eid)]
+          turn-idx (turn-index (:seon.agent.session/id (current-session id)))]
       (cond
         (= :error status)
         result
-
-        (replied-since-inbound? {::id id})
-        ;; #51 loop-termination veto: a delivered reply normally halts the
-        ;; wake (#35), but when it landed in the SAME turn as a sibling
-        ;; form that returned a {*/ok? false} envelope VALUE — the
-        ;; structurally-invisible over-claim (eval succeeded, value says
-        ;; the write failed) — the human may hold a false confirmation.
-        ;; The reply already transacted + delivered; we VETO the terminal
-        ;; halt and force ONE more live turn so msg/overclaim-advisory-section
-        ;; lands where the agent sees it and can send a correction. Derived
-        ;; (msg/same-turn-overclaim? reads result's :seon.eval rows + the
-        ;; log) — by construction the make-good turn is NOT an over-claim
-        ;; turn, so this adds at most one turn; turns-cap still bounds it.
-        ;; No drain here: a tail-window inbound flips replied-since-inbound?
-        ;; false (newer inbound, no reply after it), so we never reach this
-        ;; branch with an undrained message; the make-good recur carries the
-        ;; baseline forward unchanged.
-        (if (msg/same-turn-overclaim? result id)
-          (do (log id turn-idx "overclaim veto"
-                   "reply cited a same-turn envelope failure — one make-good turn")
-              (recur 0 baseline-at))
-          (do (log id turn-idx "halt" "replied — wake complete")
-              (assoc result :seon.agent/halt :replied)))
 
         (>= since-in (turns-cap id))
         (do (await
@@ -1618,15 +1530,23 @@
                       " agentic turns since the last inbound message"
                       " without a final reply. Ask again or"
                       " narrow the question.]")}))
-            ;; #49 drain-on-exit: a genuinely-new unanswered inbound (past
-            ;; the advancing baseline) recurs under the held latch instead
-            ;; of stranding; the cap-anchor message itself is NOT past the
-            ;; baseline so the cap halt stands.
-            (if drain?
-              (do (log id turn-idx "drain" "new inbound at cap-hit — re-running")
-                  (recur 0 next-baseline))
-              (assoc result :seon.agent/halt :cap-hit)))
+            (assoc result :seon.agent/halt :cap-hit))
 
+        ;; THE stop-policy: once the latest live inbound has an answer
+        ;; (an outbound strictly after it), the wake is complete —
+        ;; regardless of this turn's output (a replied agent that then
+        ;; emits an empty completion does NOT re-prompt). A new inbound
+        ;; re-wakes via the kick trigger; a mid-wake arrival is an
+        ;; unanswered live inbound here and keeps the loop going.
+        (not (unanswered-live-inbound? {::id id}))
+        (do (log id turn-idx "halt" "replied — wake complete")
+            (assoc result :seon.agent/halt :replied))
+
+        ;; EMPTY-TURN GUARD — standalone (no replied interaction; we only
+        ;; reach it with a live unanswered inbound): zero forms ⇒ bump
+        ;; the streak + re-prompt; over the bound ⇒ halt
+        ;; :no-visible-output. A turn WITH forms falls through to the
+        ;; recur (it made progress on the still-unanswered inbound).
         (zero? n-forms)
         (if (< empty-streak max-empty-reprompts)
           (do (log id turn-idx "empty turn"
@@ -1637,7 +1557,7 @@
                        {:seon.agent.message/from    [:seon.agent/id id]
                         :seon.agent.message/to      [[:seon.agent/id id]]
                         :seon.agent.message/content empty-completion-nudge}))
-              (recur (inc empty-streak) baseline-at))
+              (recur (inc empty-streak)))
           (let [attempts (inc empty-streak)]
             (log id turn-idx "halt"
                  (str "no visible output after " attempts
@@ -1660,20 +1580,14 @@
                           (str "⚠ " (empty-completion-give-up-text attempts))
                           :seon.agent.message/at      (js/Date.)
                           :seon.agent.message/hops    0}]}]}))
-            ;; #49 drain-on-exit: only a genuinely-new unanswered inbound
-            ;; (past the advancing baseline) recurs; the empty wake's own
-            ;; anchor message is NOT past the baseline so the give-up stands
-            ;; (no infinite re-drain when the agent perpetually produces
-            ;; nothing — verified hazard).
-            (if drain?
-              (do (log id turn-idx "drain" "new inbound at give-up — re-running")
-                  (recur 0 next-baseline))
-              (assoc result
-                     :seon.agent.turn/status :error
-                     :seon.agent/halt :no-visible-output))))
+            (assoc result
+                   :seon.agent.turn/status :error
+                   :seon.agent/halt :no-visible-output)))
 
+        ;; A turn with forms while a live inbound is still unanswered →
+        ;; keep working (resets the empty streak).
         :else
-        (recur 0 baseline-at))))))
+        (recur 0)))))
 
 ;; ============================================================
 ;; v1 §5 render-side helpers + section fns + composer.

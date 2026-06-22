@@ -1829,7 +1829,7 @@
   "A fake LLM that demonstrates the REPL-as-harness response shape: a
    `;; narration` line then a real `seon.agent/reply!` form. The
    loop's reply-landed stop policy
-   (`seon.agent/replied-since-inbound?`, #35) ends the wake after this
+   (`seon.agent/unanswered-live-inbound?`, #35) ends the wake after this
    turn — the old extra `:seon.agent/state :idle` transact taught a
    non-mechanism (the loop never read mid-turn state) and burned turns
    to the cap (#22). Returns a Promise of {:text \"...\"}."

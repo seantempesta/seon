@@ -7,9 +7,8 @@
          default context — context is a pure function of the DB with a
          CODE-default section layout, never empty.
      (b) agent-path (`render-prompt`) ≡ inspector-path
-         (`inspect/ctx-preview`) ≡ the would-be persisted
-         `:seon.agent.turn/prompt-text` for the same (db,id) — ONE
-         composer, divergence impossible.
+         (`inspect/ctx-preview`) ≡ the full prompt text the agent sees
+         for the same (db,id) — ONE composer, divergence impossible.
      (c) each section fn renders non-blank given seeded data.
      (d) the composed context contains the v4 section markers; the
          transcript interleaves messages + evals chronologically.
@@ -229,7 +228,7 @@
               (is (pos? (count text))
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
               (is (= [:system :namespaces :your-entity :live-tile
-                      :warnings :reply-over-claim :open-todos
+                      :warnings :open-todos
                       :relevant-source :transcript
                       :turns :inventory :prompt]
                      sections)
@@ -238,8 +237,8 @@
                    exemplars, namespace-context, and seed sections are
                    all DEAD (context-v4); :inventory is the cheap
                    <data-inventory> surface in the volatile tail.
-                   :reply-over-claim (#51) is in the LAYOUT provenance
-                   even when it renders blank (no over-claim this turn).
+                   The :reply-over-claim advisory was REMOVED with the
+                   #51 veto cluster (stabilize-core 2026-06-22).
                    :relevant-source (P2-D, env-gated default-OFF) is in
                    the LAYOUT provenance even when it renders blank — its
                    TEXT is dropped from the prompt (see ctx_test

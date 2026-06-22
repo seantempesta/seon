@@ -1,26 +1,26 @@
 (ns seon.agent-loop-test
-  "Loop-economy stop policy (P21/#35 + #22): a reply landed during this
-   wake AND no newer inbound message arrived → `run-agentic-loop!`
-   STOPS instead of churning verification turns to the 20-turn cap
-   (3/5 paid P8 runs answered by turn ~3 then burned ~15 turns). Pins:
+  "Loop stop-policy — ONE predicate, `unanswered-live-inbound?` (the
+   stabilized core, 2026-06-22). The loop keeps running while a LIVE
+   inbound message (to ∋ me, from ≠ me, hops < cap, origin ∉ {:core},
+   handled? ≠ true) has NO outbound strictly after it; it halts
+   `:replied` the moment one does. This subsumes the old
+   not-yet-replied / drain / empty-retry phrasings — a message that
+   arrives mid-wake is simply an unanswered live inbound at the next
+   halt check, with no baseline/latch/drain bookkeeping. Pins:
 
-     - `replied-since-inbound?` — the pure derivation: outbound (from =
-       me, ∃ recipient ≠ me) strictly after the latest live inbound
-       (to ∋ me, from ≠ me, hops < cap). Assistant self-messages
-       (from = to = me) never count; a NEW inbound after the reply
-       re-opens the window.
-     - the loop halts with `:seon.agent/halt :replied` after the turn
-       whose eval landed a `reply!` — even when the LLM would keep
-       emitting forms every turn (the churn shape).
-     - the EMPTY-TURN guard (downstream ask 20): a turn with zero
-       evals while the agent has NOT replied since the inbound (the
-       deepseek thinking-mode shape — all tokens in the reasoning
-       field, visible content empty) re-prompts with a core nudge
-       instead of ending the wake silently; bounded at
-       `agent/max-empty-reprompts` consecutive re-prompts, then ends
-       with a chat-visible system line (turn :error + self-message —
-       the ask-6 shape). A replied agent's wake still ends normally;
-       the turns-cap still bounds re-prompts.
+     - `unanswered-live-inbound?` — the pure derivation: TRUE when a
+       live inbound exists with no outbound (from = me, ∃ recipient ≠
+       me) strictly after it. Assistant self-messages (from = to = me)
+       never count; :core nudges and handled? messages never anchor it.
+     - the loop halts `:replied` after the turn whose eval landed a
+       `reply!` — even when the LLM keeps emitting forms (the churn
+       shape the #35 economy fights).
+     - the EMPTY-TURN guard: a turn with zero evals WHILE a live inbound
+       is still unanswered re-prompts with a core nudge, bounded at
+       `agent/max-empty-reprompts`, then ends with a chat-visible system
+       line (turn :error + self-message). A replied agent's empty
+       completion halts :replied (no re-prompt); the turns-cap still
+       bounds re-prompts.
 
    Tests open a FRESH `:memory` conn (via `seon.client/open-agent-conn!`,
    the same boot helper the pod uses) — nothing here touches the live
@@ -58,9 +58,11 @@
 
 ;; ---------------------------------------------------------------------------
 ;; The derivation itself — seeded messages with controlled timestamps.
+;; `unanswered-live-inbound?` is the inverse of "replied": TRUE while
+;; work remains (a live inbound with no outbound after it).
 ;; ---------------------------------------------------------------------------
 
-(deftest replied-since-inbound?-derivation
+(deftest unanswered-live-inbound?-derivation
   (async done
     (-> (with-conn
           (fn ^:async run []
@@ -73,8 +75,8 @@
                           :seon.agent/sessions
                           [{:seon.agent.session/id "SESlooptest001"
                             :seon.agent.session/at t0}]}]}))
-              (testing "no messages at all → false"
-                (is (false? (agent/replied-since-inbound?
+              (testing "no messages at all → false (nothing to answer)"
+                (is (false? (agent/unanswered-live-inbound?
                               {:seon.agent/id agent-id}))))
               (await (db/transact!
                        {:seon.db/tx-data
@@ -84,9 +86,9 @@
                           :seon.agent.message/content "what is 1+1?"
                           :seon.agent.message/at (t+ t0 10)
                           :seon.agent.message/hops 0}]}))
-              (testing "inbound only, no reply yet → false"
-                (is (false? (agent/replied-since-inbound?
-                              {:seon.agent/id agent-id}))))
+              (testing "inbound only, no reply yet → TRUE (keep working)"
+                (is (true? (agent/unanswered-live-inbound?
+                             {:seon.agent/id agent-id}))))
               (await (db/transact!
                        {:seon.db/tx-data
                         [{:seon.agent.message/id "MSGlooptest002"
@@ -95,9 +97,9 @@
                           :seon.agent.message/content ";; thinking out loud"
                           :seon.agent.message/at (t+ t0 20)
                           :seon.agent.message/hops 0}]}))
-              (testing "assistant SELF-message (from = to = me) never counts"
-                (is (false? (agent/replied-since-inbound?
-                              {:seon.agent/id agent-id}))))
+              (testing "assistant SELF-message (from = to = me) is not an answer"
+                (is (true? (agent/unanswered-live-inbound?
+                             {:seon.agent/id agent-id}))))
               (await (db/transact!
                        {:seon.db/tx-data
                         [{:seon.agent.message/id "MSGlooptest003"
@@ -106,9 +108,9 @@
                           :seon.agent.message/content "2"
                           :seon.agent.message/at (t+ t0 30)
                           :seon.agent.message/hops 1}]}))
-              (testing "outbound reply after the inbound → true (stop)"
-                (is (true? (agent/replied-since-inbound?
-                             {:seon.agent/id agent-id}))))
+              (testing "outbound reply after the inbound → false (halt :replied)"
+                (is (false? (agent/unanswered-live-inbound?
+                              {:seon.agent/id agent-id}))))
               (await (db/transact!
                        {:seon.db/tx-data
                         [{:seon.agent.message/id "MSGlooptest004"
@@ -117,9 +119,9 @@
                           :seon.agent.message/content "and 2+2?"
                           :seon.agent.message/at (t+ t0 40)
                           :seon.agent.message/hops 0}]}))
-              (testing "NEW inbound after the reply re-opens the window → false"
-                (is (false? (agent/replied-since-inbound?
-                              {:seon.agent/id agent-id}))))
+              (testing "NEW inbound after the reply → TRUE again (mid-wake subsumed)"
+                (is (true? (agent/unanswered-live-inbound?
+                             {:seon.agent/id agent-id}))))
               (await (db/transact!
                        {:seon.db/tx-data
                         [{:seon.agent.message/id "MSGlooptest005"
@@ -128,21 +130,21 @@
                           :seon.agent.message/content "4"
                           :seon.agent.message/at (t+ t0 50)
                           :seon.agent.message/hops 1}]}))
-              (testing "second reply after the second inbound → true again"
-                (is (true? (agent/replied-since-inbound?
-                             {:seon.agent/id agent-id})))))))
+              (testing "second reply after the second inbound → false again"
+                (is (false? (agent/unanswered-live-inbound?
+                              {:seon.agent/id agent-id})))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
 ;; #43 — a :core-origin message (a substrate nudge, e.g. tile recovery,
-;; sent FROM the user-ref) must NEVER move the halt baseline. Without the
+;; sent FROM the user-ref) must NEVER anchor the stop-policy. Without the
 ;; origin exclusion a broken-tile :core message arriving AFTER the reply
-;; would push the inbound side past the reply and re-open the window,
-;; re-arming the loop. A real :human follow-up still re-opens it.
+;; would re-open the window and re-arm the loop. A real :human follow-up
+;; still re-opens it.
 ;; ---------------------------------------------------------------------------
 
-(deftest replied-since-inbound?-ignores-core-origin
+(deftest unanswered-live-inbound?-ignores-core-origin
   (async done
     (-> (with-conn
           (fn ^:async run []
@@ -171,9 +173,9 @@
                           :seon.agent.message/at (t+ t0 20)
                           :seon.agent.message/hops 1
                           :seon.agent.message/origin :agent}]}))
-              (testing "after the reply the loop halts → true"
-                (is (true? (agent/replied-since-inbound?
-                             {:seon.agent/id agent-id}))))
+              (testing "after the reply the loop halts → false"
+                (is (false? (agent/unanswered-live-inbound?
+                              {:seon.agent/id agent-id}))))
               ;; a :core nudge lands AFTER the reply (sent from the user-ref)
               (await (db/transact!
                        {:seon.db/tx-data
@@ -184,9 +186,9 @@
                           :seon.agent.message/at (t+ t0 30)
                           :seon.agent.message/hops 0
                           :seon.agent.message/origin :core}]}))
-              (testing ":core message does NOT move the baseline → still true"
-                (is (true? (agent/replied-since-inbound?
-                             {:seon.agent/id agent-id}))))
+              (testing ":core message does NOT re-open the window → still false"
+                (is (false? (agent/unanswered-live-inbound?
+                              {:seon.agent/id agent-id}))))
               ;; a real :human follow-up DOES re-open the window
               (await (db/transact!
                        {:seon.db/tx-data
@@ -197,24 +199,20 @@
                           :seon.agent.message/at (t+ t0 40)
                           :seon.agent.message/hops 0
                           :seon.agent.message/origin :human}]}))
-              (testing ":human follow-up re-opens the window → false"
-                (is (false? (agent/replied-since-inbound?
-                              {:seon.agent/id agent-id})))))))
+              (testing ":human follow-up re-opens the window → true"
+                (is (true? (agent/unanswered-live-inbound?
+                             {:seon.agent/id agent-id})))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; #49 drain-on-exit derivation — `undrained-inbound-since?`. Closes the
-;; tail window: a /chat that landed after the final turn's close-tx
-;; flipped :idle but while the kick latch still held id is DROPPED by the
-;; handler; the loop must re-query the log at exit and recur (latch held
-;; across the drain) while a STRICTLY-newer-than-baseline UNANSWERED
-;; inbound exists. The baseline (latest inbound AT LOOP ENTRY) is what
-;; keeps the SAME message the wake processed from re-draining forever
-;; (the :cap-hit infinite-loop hazard).
+;; I-1 — a `handled?` (tx-hook-consumed) message neither wakes nor
+;; anchors the stop-policy. A downstream deterministic chat-control sets
+;; handled? in the same tx that processes the command, so the agent is
+;; not double-woken and the message does not hold the loop open.
 ;; ---------------------------------------------------------------------------
 
-(deftest undrained-inbound-since?-derivation
+(deftest handled?-suppresses-wake-and-stop-policy
   (async done
     (-> (with-conn
           (fn ^:async run []
@@ -225,93 +223,42 @@
                          {:seon.agent/id agent-id
                           :seon.agent/state :idle
                           :seon.agent/sessions
-                          [{:seon.agent.session/id "SESdrain00001"
-                            :seon.agent.session/at (t+ t0 -1000)}]}
-                         ;; inbound #1 at t0 — the wake anchor / baseline
-                         {:seon.agent.message/id "MSGdrain000001"
-                          :seon.agent.message/from {:seon.user/id "user"}
-                          :seon.agent.message/to [{:seon.agent/id agent-id}]
-                          :seon.agent.message/content "q1"
-                          :seon.agent.message/at t0
-                          :seon.agent.message/hops 0
-                          :seon.agent.message/origin :human}]}))
-              ;; baseline = latest inbound at loop ENTRY = inbound#1's :at
-              (testing "the same baseline message is NOT undrained (no :cap-hit spin)"
-                (is (false? (agent/undrained-inbound-since?
-                              {:seon.agent/id agent-id
-                               :seon.agent/baseline-at t0}))))
-              ;; agent replies to inbound#1
+                          [{:seon.agent.session/id "SEShandled0001"
+                            :seon.agent.session/at t0}]}]}))
+              ;; an ordinary live inbound holds the loop open
               (await (db/transact!
                        {:seon.db/tx-data
-                        [{:seon.agent.message/id "MSGdrain000002"
-                          :seon.agent.message/from {:seon.agent/id agent-id}
-                          :seon.agent.message/to [{:seon.user/id "user"}]
-                          :seon.agent.message/content "a1"
+                        [{:seon.agent.message/id "MSGhandled0001"
+                          :seon.agent.message/from {:seon.user/id "user"}
+                          :seon.agent.message/to [{:seon.agent/id agent-id}]
+                          :seon.agent.message/content "do a thing"
                           :seon.agent.message/at (t+ t0 10)
-                          :seon.agent.message/hops 1}]}))
-              (testing "replied, nothing new → not undrained"
-                (is (false? (agent/undrained-inbound-since?
-                              {:seon.agent/id agent-id
-                               :seon.agent/baseline-at t0}))))
-              ;; THE TAIL WINDOW: a NEW inbound lands after the reply,
-              ;; strictly after the baseline, unanswered.
-              (await (db/transact!
-                       {:seon.db/tx-data
-                        [{:seon.agent.message/id "MSGdrain000003"
-                          :seon.agent.message/from {:seon.user/id "user"}
-                          :seon.agent.message/to [{:seon.agent/id agent-id}]
-                          :seon.agent.message/content "q2"
-                          :seon.agent.message/at (t+ t0 20)
                           :seon.agent.message/hops 0
                           :seon.agent.message/origin :human}]}))
-              (testing "NEW unanswered inbound after baseline → UNDRAINED (recur)"
-                (is (true? (agent/undrained-inbound-since?
-                             {:seon.agent/id agent-id
-                              :seon.agent/baseline-at t0}))))
-              ;; agent replies to the new inbound → drained
+              (testing "live inbound → unanswered (loop keeps running)"
+                (is (true? (agent/unanswered-live-inbound?
+                             {:seon.agent/id agent-id}))))
+              ;; a tx-hook consumes the SAME message: handled? true
               (await (db/transact!
                        {:seon.db/tx-data
-                        [{:seon.agent.message/id "MSGdrain000004"
-                          :seon.agent.message/from {:seon.agent/id agent-id}
-                          :seon.agent.message/to [{:seon.user/id "user"}]
-                          :seon.agent.message/content "a2"
-                          :seon.agent.message/at (t+ t0 30)
-                          :seon.agent.message/hops 1}]}))
-              (testing "new inbound now answered → not undrained"
-                (is (false? (agent/undrained-inbound-since?
-                              {:seon.agent/id agent-id
-                               :seon.agent/baseline-at t0}))))
-              ;; a :core substrate nudge after baseline must NOT count (#43)
-              (await (db/transact!
-                       {:seon.db/tx-data
-                        [{:seon.agent.message/id "MSGdrain000005"
-                          :seon.agent.message/from {:seon.user/id "user"}
-                          :seon.agent.message/to [{:seon.agent/id agent-id}]
-                          :seon.agent.message/content "tile broke (substrate)"
-                          :seon.agent.message/at (t+ t0 40)
-                          :seon.agent.message/hops 0
-                          :seon.agent.message/origin :core}]}))
-              (testing ":core nudge never re-drains (origin gating preserved)"
-                (is (false? (agent/undrained-inbound-since?
-                              {:seon.agent/id agent-id
-                               :seon.agent/baseline-at t0}))))
-              ;; nil baseline (a manual drive opened with no inbound):
-              ;; ANY live unanswered inbound is undrained. Here inbound#3
-              ;; was answered, so still false; assert the nil-baseline path
-              ;; works by checking the unanswered-inbound case directly.
-              (testing "nil baseline + unanswered inbound → undrained"
-                (await (db/transact!
-                         {:seon.db/tx-data
-                          [{:seon.agent.message/id "MSGdrain000006"
-                            :seon.agent.message/from {:seon.user/id "user"}
-                            :seon.agent.message/to [{:seon.agent/id agent-id}]
-                            :seon.agent.message/content "q3"
-                            :seon.agent.message/at (t+ t0 50)
-                            :seon.agent.message/hops 0
-                            :seon.agent.message/origin :human}]}))
-                (is (true? (agent/undrained-inbound-since?
-                             {:seon.agent/id agent-id
-                              :seon.agent/baseline-at nil})))))))
+                        [{:seon.agent.message/id "MSGhandled0001"
+                          :seon.agent.message/handled? true}]}))
+              (testing "handled? = true → NOT an anchor (does not hold the loop)"
+                (is (false? (agent/unanswered-live-inbound?
+                              {:seon.agent/id agent-id}))))
+              ;; and a handled? message does not WAKE the agent either
+              (let [my-eid (:db/id (db/entity
+                                     {:seon.db/ref [:seon.agent/id agent-id]}))
+                    m-eid  (:db/id (db/entity
+                                     {:seon.db/ref [:seon.agent.message/id
+                                                    "MSGhandled0001"]}))]
+                (testing "handled? message does NOT wake (inbound-msg-datom? false)"
+                  (is (false?
+                        (boolean
+                          (#'agent/inbound-msg-datom?
+                            @db/*conn*
+                            {:seon.db/e m-eid :seon.db/v my-eid}
+                            my-eid)))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -415,9 +362,9 @@
                              (db/entity {:seon.db/ref
                                          [:seon.agent/id agent-id]})))
                   "agent ends :idle — ready for the next wake")
-              (is (true? (agent/replied-since-inbound?
-                           {:seon.agent/id agent-id}))
-                  "the reply row is live-observable in the message log"))))
+              (is (false? (agent/unanswered-live-inbound?
+                            {:seon.agent/id agent-id}))
+                  "the reply row is live-observable — nothing left unanswered"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -427,7 +374,8 @@
 ;; the reasoning field) yields 0 forms; pre-fix the loop closed
 ;; `done [0 "ok"]` and the wake ended with NO reply — the agent looked
 ;; dead until a manual "continue". Now: nudge + re-prompt (bounded),
-;; then a chat-visible system line.
+;; then a chat-visible system line. Standalone — only reached while a
+;; live inbound is still unanswered.
 ;; ---------------------------------------------------------------------------
 
 (defn- nudge-count
@@ -563,16 +511,13 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; #49 drain-on-exit through the REAL loop. The tail-window race: a /chat
-;; lands AFTER the final turn's close-tx flipped :idle but while the kick
-;; latch still held id — the handler drops the wake. The loop must catch
-;; that dropped message at its terminal halt and recur (latch held across
-;; the drain) so the message gets a turn, then halt normally once
-;; answered. We simulate the tail-window arrival by transacting a NEW
-;; inbound during the wake (a side-effect of the give-up turn's llm call —
-;; the SAME relative ordering the dropped /chat lands in), then asserting
-;; the loop did NOT halt :no-visible-output but ran a make-good turn and
-;; ended :replied with the new message answered.
+;; Mid-wake inbound through the REAL loop — the old #49 drain, now plain.
+;; A NEW inbound that arrives during the wake is an unanswered live
+;; inbound at the next halt check, so the loop keeps running and answers
+;; it; nothing special is needed. We simulate the arrival as a
+;; side-effect of an empty-completion turn's llm call (the same relative
+;; ordering a tail-window /chat lands in), then assert the loop ran a
+;; make-good turn and ended :replied with the new message answered.
 ;; ---------------------------------------------------------------------------
 
 (defn- inbound-content-count
@@ -587,26 +532,23 @@
                              [?f :seon.user/id _]]
             :seon.db/args  [content]})))
 
-(defn- drain-injecting-llm
+(defn- midwake-injecting-llm
   "ctx -> Promise<{:text …}> (the same non-async, Promise-returning shape
-   as `scripted-llm` — the llm-fn contract). Empty completions drive the
-   loop to its empty-turn give-up; the FIRST call also transacts a NEW
-   inbound (`q2-tail-window`, unanswered, :at strictly after the wake
-   anchor) — simulating a /chat that races the tail window. Call
-   sequence: calls 0..max-reprompts → \"\"; the final call → a reply that
-   answers q2. The transact resolves before the {:text} so the new
-   inbound is live by the time the give-up's drain re-queries the log."
-  [_compile-state]
-  (let [!n      (atom -1)
-        n-empty (inc agent/max-empty-reprompts)]   ; 1 + reprompts → give-up
+   as `scripted-llm`). Empty completions while the first call also
+   transacts a NEW inbound (`q2-tail-window`, unanswered, :at strictly
+   after the wake anchor) — simulating a /chat that races the tail
+   window. Call sequence: empty until the new inbound is live, then a
+   reply that answers it. The transact resolves before the {:text} so
+   the new inbound is live when the loop's halt check re-queries."
+  []
+  (let [!n (atom -1)]
     (fn llm [_ctx]
-      (let [i (swap! !n inc)
-            resp {:text (if (< i n-empty) "" reply-form)}]
+      (let [i    (swap! !n inc)
+            resp {:text (if (< i 1) "" reply-form)}]
         (if (zero? i)
-          ;; tail-window arrival on the first turn, resolved before resp.
           (-> (db/transact!
                 {:seon.db/tx-data
-                 [{:seon.agent.message/id      "MSGdraininj001"
+                 [{:seon.agent.message/id      "MSGmidwakeinj1"
                    :seon.agent.message/from    {:seon.user/id "user"}
                    :seon.agent.message/to      [{:seon.agent/id agent-id}]
                    :seon.agent.message/content "q2-tail-window"
@@ -616,24 +558,21 @@
               (.then (fn [_] resp)))
           (js/Promise.resolve resp))))))
 
-(deftest drain-on-exit-reruns-for-a-tail-window-message
+(deftest midwake-inbound-keeps-the-loop-running-then-replies
   (async done
     (-> (with-conn
           (fn ^:async run []
             (let [compile-state (await (repl/ensure-bootstrap!))
                   mid (await (boot-loop-agent! compile-state "ping"))
                   result (await (drive-loop! compile-state mid
-                                             (drain-injecting-llm compile-state)))]
+                                             (midwake-injecting-llm)))]
               (is (= 1 (inbound-content-count "q2-tail-window"))
-                  "the tail-window inbound landed exactly once")
-              (is (not= :no-visible-output (:seon.agent/halt result))
-                  "the loop did NOT strand the new message at the give-up —
-                   drain-on-exit recurred instead of halting silently")
+                  "the mid-wake inbound landed exactly once")
               (is (= :replied (:seon.agent/halt result))
-                  "after draining, the make-good turn replied → :replied")
-              (is (true? (agent/replied-since-inbound?
-                           {:seon.agent/id agent-id}))
-                  "the tail-window message is answered — log shows the reply")
+                  "the loop kept running for the new inbound and replied")
+              (is (false? (agent/unanswered-live-inbound?
+                            {:seon.agent/id agent-id}))
+                  "the mid-wake message is answered — nothing left unanswered")
               (is (= :idle (:seon.agent/state
                              (db/entity {:seon.db/ref
                                          [:seon.agent/id agent-id]})))
@@ -642,70 +581,12 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; #49 drain-on-exit MUST TERMINATE. The drain baseline ADVANCES on every
-;; drain to the message just committed to a turn — so a halt over the SAME
-;; message the wake already processed never re-drains. Without the advance,
-;; a NEVER-answered new inbound would re-drain a give-up (or :cap-hit) halt
-;; forever (verified runaway hazard). Here the agent injects a tail-window
-;; message but NEVER replies: the loop must drain it ONCE (one make-good
-;; pass), then halt :no-visible-output — finite turns, not a spin.
-;; ---------------------------------------------------------------------------
-
-(defn- never-reply-injecting-llm
-  "ctx -> Promise<{:text \"\"}> — ALWAYS empty (never replies); the first
-   call also injects a NEW unanswered inbound. Drives the give-up→drain
-   path with a message that is never answered, to prove termination."
-  []
-  (let [!n (atom -1)]
-    (fn llm [_ctx]
-      (let [i (swap! !n inc)]
-        (if (zero? i)
-          (-> (db/transact!
-                {:seon.db/tx-data
-                 [{:seon.agent.message/id      "MSGdrainhaz001"
-                   :seon.agent.message/from    {:seon.user/id "user"}
-                   :seon.agent.message/to      [{:seon.agent/id agent-id}]
-                   :seon.agent.message/content "q-hazard"
-                   :seon.agent.message/at      (js/Date.)
-                   :seon.agent.message/hops    0
-                   :seon.agent.message/origin  :human}]})
-              (.then (fn [_] {:text ""})))
-          (js/Promise.resolve {:text ""}))))))
-
-(deftest drain-on-exit-terminates-on-a-never-answered-message
-  (async done
-    (-> (with-conn
-          (fn ^:async run []
-            (let [compile-state (await (repl/ensure-bootstrap!))
-                  mid (await (boot-loop-agent! compile-state "ping"))
-                  result (await (drive-loop! compile-state mid
-                                             (never-reply-injecting-llm)))]
-              (is (= 1 (inbound-content-count "q-hazard"))
-                  "the never-answered inbound landed once")
-              (is (= :no-visible-output (:seon.agent/halt result))
-                  "the loop TERMINATED (advancing baseline stops the
-                   re-drain) — it did not spin forever")
-              ;; 1+max-reprompts for the anchor → drain → 1+max-reprompts
-              ;; for q-hazard → give-up (baseline now = q-hazard, no
-              ;; re-drain). Bounded: exactly two give-up passes.
-              (is (= (* 2 (inc agent/max-empty-reprompts))
-                     (session-turn-count))
-                  "exactly two give-up passes (anchor + one drained message)")
-              (is (= :idle (:seon.agent/state
-                             (db/entity {:seon.db/ref
-                                         [:seon.agent/id agent-id]})))
-                  "agent ends :idle"))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-;; ---------------------------------------------------------------------------
 ;; #49 fail-loud observability — a SKIPPED wake must never be silent. The
 ;; inbound trigger handler fires SYNCHRONOUSLY during the message's
-;; transact. With the !kick-scheduled latch pre-held (the tail-window
-;; condition), the handler skips scheduling a loop — and must emit a
-;; loud console.warn naming the reason (latch held) and the recovery
-;; (drain-on-exit re-runs for it). We pre-hold the latch, transact an
-;; inbound, and assert the warn fired with the latch reason.
+;; transact. With the !kick-scheduled latch pre-held, the handler skips
+;; scheduling a loop — and must emit a loud console.warn naming the skip
+;; and the latch reason. We pre-hold the latch, transact an inbound, and
+;; assert the warn fired.
 ;; ---------------------------------------------------------------------------
 
 (deftest dropped-wake-is-fail-loud
@@ -748,9 +629,7 @@
                   (is (re-find #"WAKE SKIPPED" w)
                       "the warn names the skip explicitly")
                   (is (re-find #"latch" w)
-                      "the warn names the latch as the reason")
-                  (is (re-find #"drain-on-exit" w)
-                      "the warn names the drain-on-exit recovery")))))
+                      "the warn names the latch as the reason")))))
           (.then (fn [_] (set! js/console.warn orig-warn) (done)))
           (.catch (fn [e]
                     (set! js/console.warn orig-warn)

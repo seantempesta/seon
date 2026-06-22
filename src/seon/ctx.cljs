@@ -820,7 +820,7 @@
                      [(< ?h ?cap)]
                      ;; :core substrate nudges (tile recovery) must not
                      ;; extend the loop either (#43) — mirrors the wake gate
-                     ;; and replied-since-inbound?. Legacy rows have no
+                     ;; and unanswered-live-inbound?. Legacy rows have no
                      ;; origin ⇒ default :human.
                      [(get-else $ ?m :seon.agent.message/origin :human) ?o]
                      [(not= ?o :core)]
@@ -1062,14 +1062,9 @@
     "  the loop stops; a new message will wake you if more is needed.\n"
     "  reply! ALWAYS lands and is delivered. But errors-are-VALUES: a\n"
     "  transact can SUCCEED as an eval yet return {:seon.db/ok? false} —\n"
-    "  the write did NOT happen. If you reply in the SAME turn as a form\n"
-    "  that returned such a failure envelope, your human gets a possibly-\n"
-    "  false confirmation, so you are given ONE more turn with a\n"
-    "  <reply-over-claim-warning> to re-read the failure and send a\n"
-    "  correction. So: confirm each write's envelope is {:seon.db/ok?\n"
-    "  true} BEFORE you claim it landed; reply as a CLEAN final step. When\n"
-    "  you are deliberately replying ABOUT a failure, pass\n"
-    "  :seon.agent.message/force true.\n"
+    "  the write did NOT happen. Confirm each write's envelope is\n"
+    "  {:seon.db/ok? true} BEFORE you claim it landed; reply as a CLEAN\n"
+    "  final step.\n"
     "  reply! answers whoever woke you; to message a SPECIFIC target use\n"
     "  (seon.agent/message! {:seon.agent.message/to [:seon.agent/id\n"
     "  \"<id>\"] :seon.agent.message/content \"…\"}).\n"
@@ -1472,7 +1467,7 @@
    agent REPLIES to it: the latest live inbound (to ∋ me, from ≠ me,
    hops < `warn/hop-cap`) has no LATER outbound to a NON-SELF
    recipient. Mirrors the loop's own stop semantics
-   (`seon.agent/replied-since-inbound?`, halt `:replied`) read-only
+   (`seon.agent/unanswered-live-inbound?`, halt `:replied`) read-only
    from the message log at render time — the per-turn self-fold
    (from = to = me) never closes the window, unlike [[inbox-count]]'s
    any-outbound window (opus-live-tests 2026-06-12 finding 1: gating
@@ -1599,11 +1594,6 @@
                        this layout only fixes its slot: after
                        :your-entity, before :warnings)
      5. :warnings    — current problems; reactive, vanishes when fixed
-     5b. :reply-over-claim — #51 advisory: fires ONLY when a user-facing
-                       reply landed in the prior turn alongside a sibling
-                       form that returned a {*/ok? false} envelope value
-                       (the loop forced this make-good turn). Derived,
-                       vanishes once the agent moves on
      6. :open-todos  — the agent's open work items; derived, vanishes
      6b. :relevant-source — env-gated (SEON_EMBED, default-OFF):
                        <relevant-source>, the top-k :seon.fn hits nearest
@@ -1641,8 +1631,6 @@
     :seon.render/ai 'seon.ctx.live-tile/live-tile-section}
    {:seon.ctx/name :warnings     :seon.ctx/priority 40
     :seon.render/ai 'seon.ctx.warnings/warnings-section}
-   {:seon.ctx/name :reply-over-claim :seon.ctx/priority 42
-    :seon.render/ai 'seon.agent.message/overclaim-advisory-section}
    {:seon.ctx/name :open-todos   :seon.ctx/priority 45
     :seon.render/ai 'seon.agent.todo/open-todos-section}
    {:seon.ctx/name :relevant-source :seon.ctx/priority 48
