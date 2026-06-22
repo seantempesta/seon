@@ -701,9 +701,12 @@
                   "seon.agent.search (framework bulk) is NOT a full-source tag")
               (is (str/includes? txt "<namespace name=\"seon.db\" kind=\"signatures\">")
                   "seon.db is a SIGNATURES tag in the manifest")
-              (is (str/includes? txt "(seon.db/query ")
-                  "seon.db's public fn signatures (e.g. query) are shown")
-              (is (str/includes? txt "(seon.db/transact! ")
+              ;; The signature tags now come from the ONE renderer
+              ;; (seon.ctx/fn-block-ai at :signature detail): each public fn
+              ;; is `[fn <sym>]  (<sym> <arglist>)` with the body elided.
+              (is (str/includes? txt "[fn query]")
+                  "seon.db's public fn signatures (e.g. query) are shown via fn-block-ai")
+              (is (str/includes? txt "[fn transact!]")
                   "seon.db/transact! shows as a signature — the API is visible")
               ;; SIGNATURES, not bodies: the fn HEAD (name + arglist) is shown
               ;; but no fn BODY leaks. `normalize-transact-args` lives in

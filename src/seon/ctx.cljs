@@ -1118,30 +1118,39 @@
 
 (defn- fn-block-ai
   "One fn rendered for the :ai form: `(sym arglists)` header, clipped
-   doc, and full source only when small. Reuses the conventional
-   signature shape via `seon.handlers.fn/render-ai` is overkill here
-   (that fn also runs test-status queries); we render flat + bounded."
-  [{:seon.fn/keys [sym arglists doc source private? spec schema-error]}]
-  (let [sig    (when (and arglists (not (str/blank? arglists)))
-                 (let [a (str/trim arglists)]
-                   (if (and (str/starts-with? a "(") (str/ends-with? a ")"))
-                     (str "(" sym " " (subs a 1 (dec (count a))) ")")
-                     (str "(" sym " " a ")"))))
-        flags  (cond-> []
-                 private?      (conj ":private")
-                 (some? spec)  (conj (str ":spec " (clip spec 80)))
-                 (nil? spec)   (conj ":unspecced")
-                 schema-error  (conj (str ":schema-error " (clip schema-error 80))))
-        header (str "[fn " sym "]"
-                    (when sig (str "  " sig))
-                    (when (seq flags) (str "  " (str/join " " flags))))
-        small? (and source (<= (count source) fn-source-inline-threshold))
-        lines  (cond-> [header]
-                 (and doc (not (str/blank? doc)))
-                 (conj (str ";; " (clip (first (str/split-lines doc)) member-doc-clip)))
-                 small?
-                 (conj (str/trim source)))]
-    (str/join "\n" lines)))
+   doc, and (at `:full` detail) full source only when small. Reuses the
+   conventional signature shape via `seon.handlers.fn/render-ai` is
+   overkill here (that fn also runs test-status queries); we render flat
+   + bounded.
+
+   `detail` (default `:full`) selects how much body to show:
+     - `:full`      — header + clipped first-doc-line + full source when
+                      small (the original whole-ns behavior, unchanged).
+     - `:signature` — header + flags + clipped first-doc-line; the body
+                      is NEVER inlined (the API-surface manifest view)."
+  ([f] (fn-block-ai f :full))
+  ([{:seon.fn/keys [sym arglists doc source private? spec schema-error]} detail]
+   (let [sig    (when (and arglists (not (str/blank? arglists)))
+                  (let [a (str/trim arglists)]
+                    (if (and (str/starts-with? a "(") (str/ends-with? a ")"))
+                      (str "(" sym " " (subs a 1 (dec (count a))) ")")
+                      (str "(" sym " " a ")"))))
+         flags  (cond-> []
+                  private?      (conj ":private")
+                  (some? spec)  (conj (str ":spec " (clip spec 80)))
+                  (nil? spec)   (conj ":unspecced")
+                  schema-error  (conj (str ":schema-error " (clip schema-error 80))))
+         header (str "[fn " sym "]"
+                     (when sig (str "  " sig))
+                     (when (seq flags) (str "  " (str/join " " flags))))
+         small? (and (= detail :full)
+                     source (<= (count source) fn-source-inline-threshold))
+         lines  (cond-> [header]
+                  (and doc (not (str/blank? doc)))
+                  (conj (str ";; " (clip (first (str/split-lines doc)) member-doc-clip)))
+                  small?
+                  (conj (str/trim source)))]
+     (str/join "\n" lines))))
 
 (defn- schema-block-ai
   "One schema rendered for the :ai form: `[schema :ns/key]  <malli form>`.
@@ -1170,26 +1179,47 @@
 
 (defn- render-one-ns-ai
   "Render a single namespace block to text. `ns-kw` is the namespace
-   keyword; `data` is the `pull-ns-data` result (or nil = not in db)."
-  [ns-kw data]
-  (if (nil? data)
-    (str ";; requires: " (name ns-kw) " (not in db)")
-    (let [src     (:seon.ns/source data)
-          fns     (->> (:seon.fn/_ns data)     (sort-by :seon.fn/sym))
-          schemas (->> (:seon.schema/_ns data) (sort-by (comp str :seon.schema/key)))
-          tests   (->> (:seon.test/_ns data)   (sort-by :seon.test/sym))
-          body    (cond-> []
-                    (and src (not (str/blank? src)))
-                    (conj (str/trim src))
-                    (seq fns)
-                    (into (map fn-block-ai fns))
-                    (seq schemas)
-                    (into (map schema-block-ai schemas))
-                    (seq tests)
-                    (into (map test-block-ai tests)))]
-      (str "<namespace name=\"" (name ns-kw) "\">\n"
-           (if (seq body) (str/join "\n\n" body) ";; (no recorded source/fns/schemas)")
-           "\n</namespace>"))))
+   keyword; `data` is the `pull-ns-data` result (or nil = not in db).
+
+   `detail` (default `:full`) selects the depth of each fn body and the
+   shape of the whole block:
+     - `:full`      — the ns's `(ns …)` SOURCE plus every fn (full source
+                      when small), schema, and test. The whole-ns view —
+                      the agent's own / my.* / acme / current code.
+     - `:signature` — a `kind=\"signatures\"` tag carrying ONLY each fn's
+                      SIGNATURE (header + flags + one-line doc, bodies
+                      elided). No ns source, no schemas, no tests — the
+                      public-API manifest view of a framework ns."
+  ([ns-kw data] (render-one-ns-ai ns-kw data :full))
+  ([ns-kw data detail]
+   (if (nil? data)
+     (str ";; requires: " (name ns-kw) " (not in db)")
+     (let [src     (:seon.ns/source data)
+           fns     (->> (:seon.fn/_ns data)     (sort-by :seon.fn/sym))
+           schemas (->> (:seon.schema/_ns data) (sort-by (comp str :seon.schema/key)))
+           tests   (->> (:seon.test/_ns data)   (sort-by :seon.test/sym))]
+       (if (= detail :signature)
+         ;; manifest view: public fn signatures only, bodies elided.
+         (let [pub  (remove :seon.fn/private? fns)
+               sigs (map #(fn-block-ai % :signature) pub)]
+           (str "<namespace name=\"" (name ns-kw) "\" kind=\"signatures\">\n"
+                (if (seq sigs)
+                  (str/join "\n\n" sigs)
+                  ";; (no public fns indexed yet — query by name)")
+                "\n</namespace>"))
+         ;; full view: ns source + every member.
+         (let [body (cond-> []
+                      (and src (not (str/blank? src)))
+                      (conj (str/trim src))
+                      (seq fns)
+                      (into (map #(fn-block-ai % :full) fns))
+                      (seq schemas)
+                      (into (map schema-block-ai schemas))
+                      (seq tests)
+                      (into (map test-block-ai tests)))]
+           (str "<namespace name=\"" (name ns-kw) "\">\n"
+                (if (seq body) (str/join "\n\n" body) ";; (no recorded source/fns/schemas)")
+                "\n</namespace>")))))))
 
 (defn- render-one-ns-html
   "Render a single namespace block to hiccup. Reuses the per-kind
@@ -1253,12 +1283,14 @@
 
 (schema/register! :seon.render/depth :int)
 (schema/register! :seon.render/format [:enum :ai :html])
+(schema/register! :seon.render/detail [:enum :full :signature])
 
 (schema/register! ::render-namespace-request
   [:map
    [:seon.ns/name        :seon.ns/name]
    [:seon.render/depth   {:optional true} :seon.render/depth]
    [:seon.render/format  {:optional true} :seon.render/format]
+   [:seon.render/detail  {:optional true} :seon.render/detail]
    [:seon.db/db          {:optional true} :seon.db/db]])
 
 (schema/register! ::render-namespace-response
@@ -1286,18 +1318,26 @@
      {:seon.ns/name <keyword>
       :seon.render/depth  <int, default 1>
       :seon.render/format <:ai | :html, default :ai>
+      :seon.render/detail <:full | :signature, default :full>
       :seon.db/db <db value, optional — defaults to @*conn*>}
 
    → {:seon.render/text <string>}     for :ai
    → {:seon.render/hiccup <hiccup>}   for :html
 
+   `:seon.render/detail` (`:ai` form only) selects how much of each fn
+   shows: `:full` (default) renders the ns SOURCE + every member with
+   small fn bodies inlined — the whole-ns view; `:signature` renders a
+   `kind=\"signatures\"` tag of public fn signatures only (bodies elided)
+   — the API-surface manifest view. The default is byte-identical to the
+   pre-detail render, so every existing caller is unaffected.
+
    This is the foundation of every agent's default context; the section
    that surfaces the agent's namespaces resolves to it (T5)."
   {:malli/schema [:=> [:cat ::render-namespace-request] ::render-namespace-response]}
   [{ns-name :seon.ns/name
-    :seon.render/keys [depth format]
+    :seon.render/keys [depth format detail]
     :seon.db/keys [db]
-    :or {depth 1 format :ai}}]
+    :or {depth 1 format :ai detail :full}}]
   (let [db    (or db @db/*conn*)
         ns-kw (if (keyword? ns-name) ns-name (keyword (str ns-name)))
         [order data-by-kw] (collect-ns-order db ns-kw (max 0 depth))]
@@ -1308,7 +1348,7 @@
                (render-one-ns-html db k (data-by-kw k))))}
       {:seon.render/text
        (str/join "\n\n" (for [k order]
-                          (render-one-ns-ai k (data-by-kw k))))})))
+                          (render-one-ns-ai k (data-by-kw k) detail)))})))
 (defn- latest-live-inbound
   "The latest LIVE inbound message for `my-eid` in db value `db` as
    [at content] — to ∋ me, from ≠ me, hops < `warn/hop-cap` (the same

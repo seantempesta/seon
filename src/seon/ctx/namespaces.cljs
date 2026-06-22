@@ -171,83 +171,21 @@
         (full-source-ns? nm)
         (third-party-ns? nm))))
 
-(defn- fn-signature
-  "ONE public fn rendered as a SIGNATURE line — `(sym arglist)` with the
-   body ELIDED, optionally a trailing `; first-docstring-line`. Reuses the
-   conventional signature shape from `seon.ctx/fn-block-ai`: `:seon.fn/sym`
-   + `:seon.fn/arglists` (a `pr-str`'d string like `\"([a b] [a b c])\"`)
-   build the head; `:seon.fn/doc`'s first line is the one-line comment. NO
-   source parse — the indexed projections already carry name+arglist+doc,
-   so the API surface is assembled, never re-derived from the body."
-  [{:seon.fn/keys [sym arglists doc]}]
-  (let [a    (when arglists (str/trim arglists))
-        head (cond
-               (or (nil? a) (str/blank? a))
-               (str "(" sym " …)")
-               ;; `([a b] [a b c])` → multi-arity: keep the wrapping parens.
-               (and (str/starts-with? a "(") (str/ends-with? a ")"))
-               (str "(" sym " " (subs a 1 (dec (count a))) ")")
-               :else
-               (str "(" sym " " a ")"))
-        d1   (when (and doc (not (str/blank? doc)))
-               (str/trim (first (str/split-lines doc))))]
-    (if d1
-      (str head "  ; " d1)
-      head)))
-
-(defn- manifest-block
-  "The ONE signature-manifest block for the `seon.*` framework bulk: a `;;`
-   pointer header, then ONE `<namespace name=… kind=\"signatures\">` tag per
-   framework ns whose body is its PUBLIC fns rendered as SIGNATURES
-   ([[fn-signature]] — name + arglist + one-line docstring, BODIES ELIDED).
-   Private (`defn-`) fns are skipped — they stay indexed/retrievable, but
-   the API view is the public surface.
-
-   `manifest-names` is the full sorted list of framework ns-name keywords in
-   the manifest; `ns->fns` maps an ns-name keyword to its already-filtered
-   PUBLIC fn maps (`:seon.fn/sym`/`/arglists`/`/doc`), in display order. An
-   ns WITH public fns becomes a signatures tag; an ns with NONE (no indexed
-   fns, or all private) is still NAMED in a trailing `;;` line so it stays
-   discoverable + queryable. Returns nil when `manifest-names` is empty
-   (nothing to manifest → no block)."
-  [manifest-names ns->fns]
-  (when (seq manifest-names)
-    (let [pointer
-          (str ";; other seon framework namespaces — PUBLIC fn signatures only\n"
-               ";; (bodies elided). Query a fn's FULL source by name when you\n"
-               ";; need it, e.g.:\n"
-               ";;   (seon.db/query '[:find ?sym ?src :where\n"
-               ";;                    [?n :seon.ns/name :seon.warn]\n"
-               ";;                    [?f :seon.fn/ns ?n]\n"
-               ";;                    [?f :seon.fn/sym ?sym]\n"
-               ";;                    [?f :seon.fn/source ?src]])\n"
-               ";; (swap :seon.fn/ns·sym·source for :seon.schema/ or :seon.test/\n"
-               ";;  to read that ns's schemas or tests the same way; or call\n"
-               ";;  (seon.ctx/render-namespace {:seon.ns/name :the.ns}) for a\n"
-               ";;  whole-ns view incl. private helpers).")
-          tags
-          (keep (fn [nm]
-                  (let [sigs (->> (get ns->fns nm)
-                                  (map fn-signature)
-                                  (remove str/blank?))]
-                    (when (seq sigs)
-                      (str "<namespace name=\"" (name nm) "\" kind=\"signatures\">\n"
-                           (str/join "\n" sigs)
-                           "\n</namespace>"))))
-                manifest-names)
-          ;; nses with no public fns to show — still NAMED so they stay
-          ;; discoverable + queryable, just without a signature tag.
-          bare   (remove (fn [nm]
-                           (seq (->> (get ns->fns nm)
-                                     (map fn-signature)
-                                     (remove str/blank?))))
-                         manifest-names)
-          bare-line (when (seq bare)
-                      (str ";; (no public fns indexed yet — query by name): "
-                           (str/join ", " (map name bare))))
-          blocks (cond-> (cons pointer tags)
-                   bare-line (concat [bare-line]))]
-      (str/join "\n\n" blocks))))
+(def ^:private manifest-pointer
+  "The `;;` header that precedes the signature-manifest tags: tells the
+   agent the framework bulk shows PUBLIC fn signatures only and how to
+   fetch any fn's FULL source — the same `render-namespace` the section
+   itself delegates to (one renderer, named in the pointer)."
+  (str ";; other seon framework namespaces — PUBLIC fn signatures only\n"
+       ";; (bodies elided). Read a fn's FULL source (or a whole ns incl.\n"
+       ";; private helpers) on demand with render-namespace, e.g.:\n"
+       ";;   (seon.ctx/render-namespace {:seon.ns/name :seon.db})\n"
+       ";; or query a single fn's source by name:\n"
+       ";;   (seon.db/query '[:find ?sym ?src :where\n"
+       ";;                    [?n :seon.ns/name :seon.warn]\n"
+       ";;                    [?f :seon.fn/ns ?n]\n"
+       ";;                    [?f :seon.fn/sym ?sym]\n"
+       ";;                    [?f :seon.fn/source ?src]])"))
 
 (def ^:private namespaces-header
   (str ";; Real loaded code. The few namespaces you USE or OWN are shown in\n"
@@ -258,29 +196,57 @@
        ";; fn's full source by name on demand. Full namespaces are ordered\n"
        ";; by RECENCY: most-recently-modified LAST."))
 
+(defn- render-one
+  "Render ONE included ns through the SINGLE renderer
+   ([[seon.ctx/render-namespace]]) at the chosen detail LEVEL, flat (depth
+   0 — no require-recursion; the section renders each ns once). `:full`
+   yields the whole-ns view (real file source + members); `:signature`
+   yields the `kind=\"signatures\"` API-surface tag. Returns the rendered
+   text, or nil when render-namespace produces nothing (empty-store edge:
+   a full ns with blank source and no members)."
+  [db nm detail]
+  (let [txt (-> (ctx/render-namespace
+                  {:seon.ns/name      nm
+                   :seon.render/depth 0
+                   :seon.render/detail detail
+                   :seon.db/db        db})
+                :seon.render/text
+                str/trim)]
+    ;; render-namespace emits a `<namespace>` tag even for an empty body
+    ;; (`;; (no recorded source/fns/schemas)`); a FULL ns with nothing real
+    ;; to show is omitted from the section (the boot indexer guarantees real
+    ;; text for every full row, so this is only the empty-store edge).
+    (when-not (or (str/blank? txt)
+                  (and (= detail :full)
+                       (str/includes? txt "(no recorded source/fns/schemas)")))
+      txt)))
+
 (defn namespaces-section
-  "CURATED `<namespace>` body (curated-namespaces 2026-06-21). One
-   `<namespace name=\"…\">` tag per FULL-rendered ns ([[render-full?]]:
-   every `my.*` ns, every THIRD-PARTY `acme` ns, the agent's CURRENT ns,
-   and the curated [[full-source-whitelist]] seon.* whitelist), each
-   carrying its REAL FULL FILE SOURCE — NO clipping. Every OTHER `seon.*`
-   framework ns ([[included-ns?]] minus the full set) collapses into ONE
-   [[manifest-block]] at the end: per-ns PUBLIC fn SIGNATURES (name +
-   arglist + one-line doc, BODIES ELIDED — see [[fn-signature]]), with a
-   clear query-for-full-source pointer. Private fns are skipped (the API
-   view is the public surface; private helpers stay retrievable on demand).
+  "CURATED `<namespace>` body (curated-namespaces 2026-06-21). Routes EVERY
+   included ns through the SINGLE renderer [[seon.ctx/render-namespace]] —
+   no parallel hand-rolled paths. The per-ns DETAIL LEVEL is the only
+   choice the section makes ([[render-full?]]):
+
+     - FULL (`:seon.render/detail :full`) for every `my.*` ns, every
+       THIRD-PARTY `acme` ns, the agent's CURRENT ns, and the curated
+       [[full-source-whitelist]] seon.* tools — each a `<namespace name=…>`
+       tag carrying its REAL FULL FILE SOURCE (+ any member rows), unclipped.
+     - SIGNATURE (`:seon.render/detail :signature`) for every OTHER `seon.*`
+       framework ns — a `<namespace name=… kind=\"signatures\">` tag of
+       PUBLIC fn signatures (name + arglist + one-line doc, BODIES ELIDED).
+       Private fns are skipped; they stay retrievable via the same renderer.
 
    The full tags are ordered by RECENCY (tx of the `:seon.ns/name` datom —
    bumped by the tee's nested upsert on every define), name as the
    tie-break, so the stable core forms a stable cache prefix and the
-   churning ns sits nearest the tail. The manifest is name-sorted and
-   sits LAST (it changes only when the framework roster changes).
+   churning ns sits nearest the tail. The signature tags are name-sorted
+   and sit LAST after a [[manifest-pointer]] (they change only when the
+   framework roster changes).
 
-   `*.internal` and `*-test` nses are excluded outright
-   ([[included-ns?]]). A full-source ns whose stored source is
-   blank renders nothing (omitted); the boot indexer guarantees real text
-   for every full row, so this is only the empty-store edge. NEVER a
-   render-time file read — the boot indexer is the one reader."
+   `*.internal` and `*-test` nses are excluded outright ([[included-ns?]]).
+   A full ns whose stored source/members are all empty renders nothing
+   (omitted). NEVER a render-time file read — the boot indexer is the one
+   reader; render-namespace reads only indexed rows."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] id :seon.agent/id}]
   (let [;; The agent's current ns (latest successful eval's ns) → rendered
@@ -289,20 +255,9 @@
         cur-ns (when id
                  (try (ctx/current-ns {:seon.agent/id id :seon.db/db db})
                       (catch :default _ nil)))
-        ;; Sources joined SEPARATELY from the name rows (requiring
-        ;; :seon.ns/source in the join silently drops sourceless rows; a
-        ;; plain :where on a registered-but-uninstalled attr returns empty,
-        ;; never throws). Looked up in code below.
-        sources (into {}
-                      (db/query
-                        {:seon.db/db db
-                         :seon.db/query
-                         '[:find ?nm ?src
-                           :where
-                           [?n :seon.ns/name ?nm]
-                           [?n :seon.ns/source ?src]]}))
         ;; EVERY included ns row, recency-ordered, partitioned into the
-        ;; FULL set (rendered as tags) and the framework bulk (manifest).
+        ;; FULL set (rendered as full tags) and the framework bulk
+        ;; (signature tags). One :seon.ns/name datom per ns carries its tx.
         rows   (->> (db/query
                       {:seon.db/db db
                        :seon.db/query
@@ -313,52 +268,16 @@
                     (sort-by (fn [[nm tx]] [tx (name nm)])))
         {full-rows true manifest-rows false}
         (group-by (fn [[nm _tx]] (render-full? nm cur-ns)) rows)
-        ;; The manifest nses get PUBLIC fn signatures, not bare names. One
-        ;; join (fn → its ns name) pulls every public fn's sym/arglists/doc;
-        ;; private fns (`:seon.fn/private? true`) are excluded outright — the
-        ;; manifest is the API view. `:seon.fn/arglists`/`/doc` are OPTIONAL
-        ;; projections (absent for some rows), so they are looked up per-row
-        ;; below rather than required in the :where (which would silently
-        ;; drop arg-less/doc-less fns). Grouped ns-name → seq of fn maps.
-        manifest-ns-set (into #{} (map first) manifest-rows)
-        ns->fns (when (seq manifest-ns-set)
-                  (->> (db/query
-                         {:seon.db/db db
-                          :seon.db/query
-                          '[:find ?nm ?priv (pull ?f [:seon.fn/sym
-                                                      :seon.fn/arglists
-                                                      :seon.fn/doc])
-                            :where
-                            [?n :seon.ns/name ?nm]
-                            [?f :seon.fn/ns ?n]
-                            [?f :seon.fn/sym _]
-                            [(get-else $ ?f :seon.fn/private? false) ?priv]]})
-                       (filter (fn [[nm priv _m]]
-                                 (and (contains? manifest-ns-set nm)
-                                      (not priv))))
-                       (group-by first)
-                       (reduce-kv
-                         (fn [acc nm rows*]
-                           (assoc acc nm
-                                  (->> rows*
-                                       (map (fn [[_nm _priv m]] m))
-                                       (sort-by :seon.fn/sym))))
-                         {})))
-        ;; FULL tags — real file source, trimmed, NO clipping. A blank
-        ;; source (empty-store edge) yields no tag.
-        tags   (keep
-                 (fn [[nm _tx]]
-                   (let [src (str/trim (str (get sources nm)))]
-                     (when-not (str/blank? src)
-                       (str "<namespace name=\"" (name nm) "\">\n"
-                            src
-                            "\n</namespace>"))))
-                 full-rows)
-        ;; The framework bulk → ONE signature manifest block (per-ns public
-        ;; fn signatures, name-sorted; fn-less nses still named).
-        manifest (manifest-block (sort manifest-ns-set) ns->fns)
-        blocks (cond-> (vec tags)
-                 manifest (conj manifest))]
+        ;; FULL tags — whole-ns view via the ONE renderer, recency-ordered.
+        full-tags (keep (fn [[nm _tx]] (render-one db nm :full)) full-rows)
+        ;; SIGNATURE tags — public-API view via the SAME renderer,
+        ;; name-sorted, behind the query-for-source pointer.
+        sig-tags  (keep (fn [nm] (render-one db nm :signature))
+                        (sort (map first manifest-rows)))
+        manifest  (when (seq sig-tags)
+                    (str/join "\n\n" (cons manifest-pointer sig-tags)))
+        blocks    (cond-> (vec full-tags)
+                    manifest (conj manifest))]
     (if (seq blocks)
       (str namespaces-header "\n\n" (str/join "\n\n" blocks))
       "")))
