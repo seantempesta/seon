@@ -204,26 +204,27 @@
     ns-str))
 
 (def exemplar-nses
-  "The CURATED exemplar set — the few seon/`my.*` namespaces shown to
-   every agent IN FULL as worked patterns to imitate (curated-inventory
-   2026-06-21). Each teaches one thing:
-     - `:seon.agent.todo` — the store/retrieve EXEMPLAR: `register!` per
-       attr, three map-in/map-out `:malli/schema` fn shapes, error-as-value
-       envelopes.
-     - `:my.kb`           — the schema/provenance design (shared `:my.kb/*`
-       shapes, register-once).
-     - `:my.kb-test`      — the `deftest` idiom (fresh `:memory` conn, async).
-   A `*-test` exemplar is the ONE place the *-test render-exclusion is
-   OVERRIDDEN ([[exemplar-ns?]] beats [[test-ns-name?]]). Shared by the
-   boot indexer (which stores their real file source — see
+  "The CURATED whitelist of `seon.*` FRAMEWORK namespaces shown to every
+   agent IN FULL (curated-namespaces 2026-06-21) — the few seon.* tools an
+   agent actually USES, worth their whole source. Start it here; this is
+   the clear EDITABLE def to extend.
+     - `:seon.agent.todo` — the store/retrieve EXEMPLAR an agent calls
+       directly: `register!` per attr, three map-in/map-out `:malli/schema`
+       fn shapes, error-as-value envelopes, the todo tools the system
+       prompt teaches by name.
+   `my.*` nses (`my.kb`, `my.soul`, agent-authored code) are ALREADY
+   rendered full by the `my.*` rule in [[full-source-ns?]] — they do NOT
+   belong here; this whitelist is ONLY for the seon.* framework tools.
+   Shared by the boot indexer (which stores their real file source — see
    `seon.client/ns-row`) and [[seon.ctx.namespaces/namespaces-section]]
-   (which renders them FULL while the rest of the framework is a manifest)."
-  #{:seon.agent.todo :my.kb :my.kb-test})
+   (which renders them FULL while the rest of the framework is a name
+   manifest)."
+  #{:seon.agent.todo})
 
 (defn exemplar-ns?
   "True when `ns-name` (string, keyword, or symbol) is one of the curated
-   [[exemplar-nses]]. String/keyword/symbol tolerant — the indexer hands a
-   string, the renderer a keyword."
+   seon.* framework [[exemplar-nses]]. String/keyword/symbol tolerant —
+   the indexer hands a string, the renderer a keyword."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
   [ns-name]
   (contains? exemplar-nses
@@ -234,20 +235,22 @@
    REAL FULL FILE TEXT as `:seon.ns/source`: every `my.*` ns (the
    human's world — always inlined), including `-test` siblings (the
    `-test` suffix is stripped to the subject ns first), AND every curated
-   [[exemplar-ns?]] (so a seon-framework exemplar like `:seon.agent.todo`
-   gets its REAL body stored, not a reconstructed-from-members stub that
-   would drop private helpers/comments). Used by the boot indexer
-   (`seon.client/ns-row`) to decide which rows get the file read;
-   [[seon.ctx.namespaces/namespaces-section]] renders whatever depth the
-   row has — one rule, one writer, no drift. Every other ns gets the
-   minimal `(ns x)` stub at boot and is named in the manifest."
+   [[exemplar-ns?]] seon.* tool (so a framework exemplar like
+   `:seon.agent.todo` gets its REAL body stored — private helpers and
+   comments included). Used by the boot indexer (`seon.client/ns-row`) to
+   decide which rows get the file read; the SAME rule decides which rows
+   [[seon.ctx.namespaces/namespaces-section]] renders FULL — one rule,
+   one writer, no drift. Third-party (`acme`) roots are full-source too,
+   gated separately by `seon.client/extra-src-ns-strs` (the same file
+   read). Every other ns gets the minimal `(ns x)` stub at boot and is
+   named in the manifest."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
   [ns-name]
   (let [s    (if (keyword? ns-name) (name ns-name) (str ns-name))
         base (base-ns-name s)]
     (boolean (and (not (hidden-ns-name? s))
                   (or (my-ns-name? base)
-                      (exemplar-ns? s))))))
+                      (exemplar-ns? base))))))
 
 ;; ------------------------------------------------------------
 ;; Pretty-print + truncation helpers.
@@ -1008,20 +1011,19 @@
     "  ;; nested maps (recursively); a PLAIN ref comes back as {:db/id N}.\n"
     "  ;; Pull a plain ref's fields by NAMING it: '[* {:my.kb.doc/author [*]}].\n"
     "\n"
-    "THE NAMESPACES BELOW are real loaded code, ordered by RECENCY —\n"
-    "most-recently-modified LAST, not dependency order; the runtime\n"
-    "loaded them correctly. Each renders COMPACT: the (ns …) form, every\n"
-    "schema in FULL (the schemas ARE the contract), and each fn as its\n"
-    "real (defn …) with the BODY elided to `…` — signature + docstring +\n"
-    "attr-map, enough to CALL it without reading its guts. The ONE\n"
-    "exception is YOUR OWN current namespace, shown in FULL so you see\n"
-    "your complete working code. To read another ns's full bodies + tests\n"
-    "on demand, call\n"
-    "(seon.ctx/render-namespace {:seon.ns/name :the.ns}). Namespaces are\n"
-    "workspaces: (ns my.domain.thing) moves you there and your context\n"
-    "follows your namespace. Your code is my.*, your knowledge is my.kb.*\n"
-    "(real schemas per domain); the core is seon.* — call its fns, never\n"
-    "redefine them.\n"
+    "THE NAMESPACES BELOW are real loaded code, CURATED to what you use:\n"
+    "shown in FULL are your own my.* code, the third-party business code,\n"
+    "YOUR current namespace, and a small set of seon.* tools you call\n"
+    "directly — each its whole file. The rest of the seon framework is NOT\n"
+    "dumped; it is listed by NAME in a manifest at the end. Full namespaces\n"
+    "are ordered by RECENCY — most-recently-modified LAST, not dependency\n"
+    "order; the runtime loaded them correctly. To read any manifested ns —\n"
+    "its fns, schemas, or tests — query it by name (the manifest shows the\n"
+    "exact query), or call (seon.ctx/render-namespace {:seon.ns/name\n"
+    ":the.ns}) for a whole-ns view. Namespaces are workspaces: (ns\n"
+    "my.domain.thing) moves you there and your context follows your\n"
+    "namespace. Your code is my.*, your knowledge is my.kb.* (real schemas\n"
+    "per domain); the core is seon.* — call its fns, never redefine them.\n"
     "\n"
     "STANDING TEACHINGS:\n"
     "- Consult stored knowledge FIRST — it is DISCOVERABLE, not dumped:\n"

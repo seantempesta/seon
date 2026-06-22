@@ -665,106 +665,85 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; (l) namespaces-section in the assembled context (B9 compact tiering) —
-;;     every included ns renders COMPACT (ns form + schemas full + fns as
-;;     elided defns, standalone tests DROPPED); the agent's OWN CURRENT ns
-;;     renders full ONLY when it has real persisted source (this seed's own
-;;     ns is a stub, so it too renders compact). Compiled-core stubs (e.g.
-;;     seon.db) render COMPACT from their indexed member rows — PRESENT,
-;;     bodies elided. A stub with NO member rows is omitted (nothing to show).
+;; (l) namespaces-section in the assembled context (CURATED render
+;;     2026-06-21) — FULL nses (my.* + the curated seon.* whitelist
+;;     :seon.agent.todo + the current ns) render their WHOLE source as a
+;;     tag, UNCLIPPED; every OTHER seon.* framework ns (seon.db,
+;;     seon.agent.search, …) collapses into ONE name-only manifest block.
 ;; ---------------------------------------------------------------------------
 
-(deftest namespaces-render-compact-with-elided-fn-bodies
+(deftest namespaces-render-curated-full-and-manifest
   (async done
     (-> (with-seeded-conn
           (fn [conn]
             (let [db    @conn
                   input {:seon.db/db db :seon.agent/id agent-id}
                   txt   (agent/namespaces-section input)]
-              ;; The ns form renders (its :require deps are the dependency map).
-              (is (str/includes? txt "(ns seon.agent.search")
-                  "seon.agent.search's real ns form renders")
-              ;; A fn renders as its real `defn` HEAD (signature + attr-map),
-              ;; with the BODY elided to `…)` — not the full implementation.
-              (is (str/includes? txt "(defn ^:async grep")
-                  "grep renders as its real defn head")
+              ;; FULL: the curated seon.* whitelist (:seon.agent.todo) shows
+              ;; its WHOLE source — ns form + full bodies, unclipped.
+              (is (str/includes? txt "<namespace name=\"seon.agent.todo\">")
+                  "the whitelisted seon.agent.todo renders as a full tag")
               (is (str/includes? txt "(defn ^:async add!")
-                  "seon.agent.todo's add! renders its defn head")
-              (is (str/includes? txt "\n  …)")
-                  "fn bodies are elided to `…)` (the B9 compact form)")
-              ;; Standalone deftests are DROPPED from the prompt BODY (they
-              ;; live in the on-demand render-namespace deep view).
-              (is (not (str/includes? txt "(deftest match-found-with-path-line-text"))
-                  "search's test sibling is DROPPED from the compact body")
+                  "seon.agent.todo's add! renders (full source)")
+              (is (not (str/includes? txt "\n  …)"))
+                  "NOTHING is elided — full source, no `…)` body clip")
+              ;; FULL: my.* nses render their whole source.
               (is (str/includes? txt "(ns my.kb\n")
-                  "my.kb renders its ns form (my.* rule)")
+                  "my.kb renders its full source (my.* rule)")
               (is (str/includes? txt "(ns my.kb.system")
-                  "my.kb.system (the system-wide instruction home) renders")
-              ;; compiled-core stubs render COMPACT from their indexed
-              ;; member rows — PRESENT (a tag), bodies elided (API surface).
-              (is (str/includes? txt "<namespace name=\"seon.db\">")
-                  "seon.db (a compiled-core stub) renders compact — has a tag")
-              (is (str/includes? txt "(defn ^:async transact!")
-                  "seon.db's transact! renders as an elided defn head")
+                  "my.kb.system (the system-wide instruction home) renders full")
+              ;; MANIFEST: a framework ns is NAMED only — no tag, no body.
+              (is (not (str/includes? txt "<namespace name=\"seon.db\">"))
+                  "seon.db (framework bulk) is NOT a full tag")
+              (is (not (str/includes? txt "<namespace name=\"seon.agent.search\">"))
+                  "seon.agent.search (framework bulk) is NOT a full tag")
+              (is (str/includes? txt "seon.db")
+                  "seon.db is NAMED in the manifest")
+              (is (str/includes? txt "seon.agent.search")
+                  "seon.agent.search is NAMED in the manifest")
               (is (not (str/includes? txt "normalize-transact-args"))
-                  "seon.db's transact! BODY is elided — not inlined")
-              ;; the agent's own current ns renders compact here (its seed
-              ;; source is a bare stub — no full text to show); its member
-              ;; fn `greet` shows as an elided defn head.
+                  "no framework fn BODY leaks (manifest is names only)")
+              ;; the manifest carries a query-for-source pointer.
+              (is (str/includes? txt ":seon.ns/name")
+                  "the manifest points at the query to fetch source")
+              ;; the agent's OWN CURRENT ns renders full (its seed source is
+              ;; a bare `(ns …)` stub, so the tag carries just that line).
               (is (str/includes? txt "<namespace name=\"my.agent.ctx-260610\">")
-                  "own ns is a tag like any other")
-              (is (str/includes? txt "(defn greet []")
-                  "own ns renders its member fn as an elided defn head"))))
+                  "the agent's current ns renders as a full tag"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest sourceless-tee-ns-reconstitutes-and-stub-core-renders-compact
-  ;; fix-everything A3 (S-21 root): the tee's nested `{:seon.ns/name kw}`
-  ;; upsert mints SOURCELESS ns rows for a prior agent's register! calls;
-  ;; requiring `:seon.ns/source` in the section's join silently dropped
-  ;; them — the agent could not see the domain anywhere. A ns that owns
-  ;; member rows RECONSTITUTES from them regardless of provenance: a
-  ;; compiled-core stub (seon.db) renders COMPACT from its indexed
-  ;; member rows (PRESENT, bodies elided), and a sourceless agent-minted
-  ;; ns renders its members the same way. Only a stub with NO member
-  ;; rows yields a blank body and is omitted (nothing to show).
+(deftest my-ns-renders-full-from-stored-source
+  ;; CURATED render: a `my.*` ns renders its STORED full source verbatim
+  ;; (the boot indexer reads the file; nothing is reconstructed from member
+  ;; rows anymore). A framework ns stays name-manifested even when it owns
+  ;; member rows — the manifest is names only.
   (async done
     (-> (with-seeded-conn
           (fn [conn]
             (-> (db/transact!
                   {:seon.db/conn conn
                    :seon.db/tx-data
-                   ;; tee-shaped register! row: NO :seon.ns/source anywhere.
-                   [{:seon.schema/key :my.kb.zztest/note
-                     :seon.schema/source
-                     "(seon.schema/register! :my.kb.zztest/note :string)"
-                     :seon.schema/created-at (js/Date.)
-                     :seon.schema/ns {:seon.ns/name :my.kb.zztest}}]})
+                   ;; a my.* ns row carrying REAL full source.
+                   [{:seon.ns/name   :my.kb.zztest
+                     :seon.ns/source "(ns my.kb.zztest)\n(def note \"hi\")"}]})
                 (.then
                   (fn [_]
                     (let [txt (agent/namespaces-section
                                 {:seon.db/db @conn :seon.agent/id agent-id})]
                       (is (str/includes? txt
                                          "<namespace name=\"my.kb.zztest\">")
-                          "a SOURCELESS tee-minted ns renders a tag")
-                      (is (str/includes? txt "(ns my.kb.zztest)")
-                          "its ns form is synthesized from the name")
-                      (is (str/includes?
-                            txt
-                            "(seon.schema/register! :my.kb.zztest/note :string)")
-                          "a prior agent's register! source reconstitutes
-                           from member rows alone")
-                      (is (str/includes?
-                            txt "<namespace name=\"seon.db\">")
-                          "a compiled-core ns (stub source) renders compact
-                           from its member rows — PRESENT")
-                      (is (str/includes? txt "(defn ^:async transact!")
-                          "seon.db's transact! shows as an elided defn head")
-                      (is (not (str/includes? txt "source not indexed"))
-                          "the old self-describing stub marker is gone")
+                          "a my.* ns renders as a full tag")
+                      (is (str/includes? txt "(def note \"hi\")")
+                          "its full source is shown verbatim, unclipped")
+                      ;; framework ns stays name-manifested (no tag, no body).
+                      (is (not (str/includes? txt
+                                              "<namespace name=\"seon.db\">"))
+                          "a framework ns is name-manifested, not a tag")
+                      (is (str/includes? txt "seon.db")
+                          "seon.db appears as a NAME in the manifest")
                       (is (not (str/includes? txt "normalize-transact-args"))
-                          "seon.db's fn BODIES stay elided — never
-                           inlined")))))))
+                          "no framework fn body leaks into the manifest")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -789,13 +768,13 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 (deftest turn0-context-respects-the-budget-ceiling
-  ;; The v4 layout's turn-0 total stays bounded. my.* render full source;
-  ;; every other included ns (incl. compiled core like seon.db) renders
-  ;; COMPACT — ns form + full schemas + elided fn heads, bodies dropped.
-  ;; The whole compiled core is now visible compact (~200k here): the
-  ;; dominant cost is fn-head docstrings + :malli/schema attr-maps, not
-  ;; bodies. Guard at 250k — if this grows, something ported scar tissue
-  ;; or a huge ns started inlining full BODIES, not the compact surface.
+  ;; The v4 layout's turn-0 total stays bounded. CURATED render
+  ;; (2026-06-21): only the few FULL nses (my.* + the curated seon.*
+  ;; whitelist + the current ns + any third-party) carry source; the seon
+  ;; framework BULK is a name-only manifest, NOT a compact body dump. This
+  ;; is far smaller than the old render-everything-compact surface. Guard
+  ;; at 250k — if this grows, something started inlining the framework
+  ;; bulk again instead of manifesting it by name.
   (async done
     (-> (with-seeded-conn
           (fn [conn]
@@ -829,9 +808,9 @@
                     ;; the other sections. Far below the 5 MB blob.
                     ceil  50000
                     ;; The full prompt additionally carries the byte-stable
-                    ;; namespace payload — a deliberate static cost (the whole
-                    ;; compiled core, compact: fn heads + schemas, bodies
-                    ;; elided), not result blow-up.
+                    ;; namespace payload — a deliberate static cost (the
+                    ;; CURATED full nses + the framework name manifest), not
+                    ;; result blow-up.
                     full-ceil (+ ceil 200000)]
                 (is (< (count ts) ceil)
                     (str "transcript bounded despite " big-n

@@ -102,13 +102,18 @@
   (doseq [n ["seon.db.internal" "seon.agent.internal" "my.foo.internal"
              "acme.widget.internal"]]
     (is (true? (ctx/hidden-ns-name? n)) (str n " is hidden")))
-  ;; full-source depth: my.* by RULE (test siblings ride along via the
-  ;; `-test` strip); every seon.* ns is COMPACT, never full-source.
-  (doseq [n ["my.kb" "my.kb.system" "my.soul" "my.soul-test"]]
+  ;; full-source depth (curated-namespaces 2026-06-21): full-source ⇔ every
+  ;; my.* ns by RULE (test siblings ride along via the `-test` strip) PLUS
+  ;; the curated seon.* whitelist (exemplar-nses = :seon.agent.todo). Its
+  ;; `-test` sibling rides along too (the `-test` strip → :seon.agent.todo,
+  ;; an exemplar). Every OTHER seon.* framework ns is a name-manifest stub,
+  ;; NEVER full-source.
+  (doseq [n ["my.kb" "my.kb.system" "my.soul" "my.soul-test"
+             ;; the curated seon.* whitelist + its test sibling.
+             "seon.agent.todo" "seon.agent.todo-test"]]
     (is (true? (ctx/full-source-ns? n)) (str n " is full-source")))
   (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.db" "seon.ctx"
              "seon.agent.search" "seon.agent.search-test"
-             "seon.agent.todo" "seon.agent.todo-test"
              "seon.agent.searcher" "my.foo.internal"]]
     (is (false? (ctx/full-source-ns? n)) (str n " is NOT full-source"))))
 
@@ -122,81 +127,85 @@
     {:seon.db/tx-data [{:seon.ns/name   (keyword nm)
                         :seon.ns/source (str "(ns " nm ")")}]}))
 
-(defn- transact-ns-with-member!
-  "An ns stub row PLUS one fn member, so the ns reconstitutes and renders
-   (a bare stub with no members is omitted entirely from the section)."
-  [nm]
-  (-> (transact-ns-row! nm)
-      (.then (fn [_]
-               (db/transact!
-                 {:seon.db/tx-data
-                  [{:seon.fn/sym        (str nm "/probe")
-                    :seon.fn/ns         [:seon.ns/name (keyword nm)]
-                    :seon.fn/source     "(defn probe [] :p)"
-                    :seon.fn/fn-var?    true
-                    :seon.fn/created-at (js/Date.)}]})))))
+(defn- transact-full-ns!
+  "An ns row carrying REAL full source (a `(ns …)` line + a def body) —
+   the shape the boot indexer stores for a full-rendered ns (my.*,
+   third-party, or the curated seon.* whitelist). Used to prove the FULL
+   render path: the whole source appears in the tag, unclipped."
+  [nm body]
+  (db/transact!
+    {:seon.db/tx-data [{:seon.ns/name   (keyword nm)
+                        :seon.ns/source (str "(ns " nm ")\n" body)}]}))
 
-(deftest namespaces-section-tags-hiding-reconstitution-recency
+(deftest namespaces-section-curated-full-vs-manifest-recency
+  ;; CURATED render (curated-namespaces 2026-06-21): FULL nses (my.*,
+  ;; third-party acme.*, the curated seon.* whitelist, the current ns)
+  ;; render their WHOLE source as a tag, UNCLIPPED; every OTHER seon.*
+  ;; framework ns collapses into ONE name-only manifest block.
   (async done
     (let [!before (atom nil)]
       (-> (with-conn
             (fn [_conn]
-              ;; seon.client: stub row + a fn member → it RECONSTITUTES
-              ;; (a bare stub with NO members would be omitted entirely).
-              (-> (transact-ns-with-member! "seon.client")
+              ;; my.agent.a1 (my.* → FULL tag) with a real body.
+              (-> (transact-full-ns! "my.agent.a1" "(def helper 1)")
+                  ;; a third-party acme ns (non-seon, non-my → FULL tag).
+                  (.then (fn [_] (transact-full-ns! "acme.widget" "(def w 2)")))
+                  ;; framework nses → NAME-MANIFEST only (stub source, no
+                  ;; body shown). seon.client carries a faux body to PROVE
+                  ;; the body is never rendered for a manifested ns.
+                  (.then (fn [_] (transact-full-ns! "seon.client" "(def never-shown 3)")))
+                  (.then (fn [_] (transact-ns-row! "seon.warn")))
+                  ;; *.internal is excluded outright.
                   (.then (fn [_] (transact-ns-row! "seon.db.internal")))
-                  (.then (fn [_] (transact-ns-row! "my.agent.a1")))
-                  ;; agent-authored ns: stub row + a fn member → must
-                  ;; RECONSTITUTE (ns form + fn source), no config.
-                  (.then (fn [_]
-                           (db/transact!
-                             {:seon.db/tx-data
-                              [{:seon.fn/sym     "my.agent.a1/helper"
-                                :seon.fn/ns      [:seon.ns/name :my.agent.a1]
-                                :seon.fn/source  "(defn helper [] 1)"
-                                :seon.fn/fn-var? true
-                                :seon.fn/created-at (js/Date.)}]})))
                   (.then
                     (fn [_]
                       (let [txt (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})]
                         (reset! !before txt)
-                        (is (str/includes? txt "<namespace name=\"seon.client\">")
-                            "a stub ns with a member renders as a tag")
+                        ;; FULL: my.* renders its whole source, unclipped.
                         (is (str/includes? txt "<namespace name=\"my.agent.a1\">")
-                            "a runtime-defined ns appears with NO config change")
-                        ;; B9 compact: a sourceless ns's fn member renders
-                        ;; as its elided defn head (body → `…)`), not the
-                        ;; full source. No id in this input → all compact.
-                        (is (str/includes? txt "(defn helper []")
-                            "stub ns with members renders the member's defn head")
-                        (is (not (str/includes? txt "(defn helper [] 1)"))
-                            "the member BODY is elided in the compact form")
+                            "a my.* ns renders as a full tag")
+                        (is (str/includes? txt "(def helper 1)")
+                            "the my.* ns body is shown FULL (no clipping)")
+                        ;; FULL: third-party acme renders its whole source.
+                        (is (str/includes? txt "<namespace name=\"acme.widget\">")
+                            "a third-party acme ns renders as a full tag")
+                        (is (str/includes? txt "(def w 2)")
+                            "the acme body is shown FULL (no clipping)")
+                        ;; MANIFEST: a framework ns appears ONLY as a name,
+                        ;; never a tag, never its body.
+                        (is (not (str/includes? txt "<namespace name=\"seon.client\">"))
+                            "a non-whitelisted framework ns is NOT a tag")
+                        (is (not (str/includes? txt "(def never-shown 3)"))
+                            "a manifested ns's body is NEVER rendered")
+                        (is (str/includes? txt "seon.client")
+                            "the framework ns appears as a NAME in the manifest")
+                        (is (str/includes? txt "seon.warn")
+                            "another framework ns is named in the same manifest")
+                        ;; the manifest carries a query-for-source pointer.
+                        (is (str/includes? txt ":seon.ns/name")
+                            "the manifest points at the query to fetch source")
+                        ;; *.internal never appears anywhere.
                         (is (not (str/includes? txt "seon.db.internal"))
                             "*.internal never appears")
                         (is (not (str/includes? txt "<exemplar"))
                             "the <exemplars> wrapper is dead")
-                        ;; recency: my.agent.a1's member was upserted LAST
-                        ;; (bumps its name datom) → renders last; seon.client
-                        ;; was touched earlier → renders before it.
-                        (is (> (str/index-of txt "<namespace name=\"my.agent.a1\">")
-                               (str/index-of txt "<namespace name=\"seon.client\">"))
-                            "most-recently-modified renders LAST"))))
-                  ;; modify seon.client between turns → it moves LAST and
+                        ;; recency among FULL tags: acme.widget's row was
+                        ;; written AFTER my.agent.a1 → renders later.
+                        (is (> (str/index-of txt "<namespace name=\"acme.widget\">")
+                               (str/index-of txt "<namespace name=\"my.agent.a1\">"))
+                            "most-recently-modified full tag renders LAST"))))
+                  ;; modify my.agent.a1 → it moves LAST among full tags and
                   ;; the prefix ABOVE the moved tag is byte-identical.
-                  (.then (fn [_]
-                           (db/transact!
-                             {:seon.db/tx-data
-                              [{:seon.ns/name   :seon.client
-                                :seon.ns/source "(ns seon.client) (def touched 1)"}]})))
+                  (.then (fn [_] (transact-full-ns! "my.agent.a1" "(def helper 99)")))
                   (.then
                     (fn [_]
                       (let [before @!before
                             after  (ctx-namespaces/namespaces-section
                                      {:seon.db/db @db/*conn*})
-                            moved  "<namespace name=\"seon.client\">"]
+                            moved  "<namespace name=\"my.agent.a1\">"]
                         (is (> (str/index-of after moved)
-                               (str/index-of after "<namespace name=\"my.agent.a1\">"))
-                            "modified ns moved LAST")
+                               (str/index-of after "<namespace name=\"acme.widget\">"))
+                            "modified full ns moved LAST among tags")
                         (is (= (subs before 0 (str/index-of before moved))
                                (subs after 0 (str/index-of before moved)))
                             "prefix above the moved tag's old position is byte-identical")))))))
@@ -224,31 +233,38 @@
                     :seon.test/source     "(deftest probe-test (is true))"
                     :seon.test/created-at (js/Date.)}]})))))
 
-(deftest renders-all-indexed-code-internal-excluded
-  ;; A fresh conn, NO config row anywhere: downstream `acme.widget`,
-  ;; seon.*, and my.* all render as `<namespace>` tags purely because
-  ;; their :seon.ns rows exist; `acme.widget.internal` (*.internal) and
-  ;; `acme.widget-test` (*-test) are excluded by the structural rules.
+(deftest renders-curated-code-internal-and-test-excluded
+  ;; A fresh conn, NO config row anywhere: downstream `acme.widget`
+  ;; (third-party) and `my.kb` (my.*) render as FULL `<namespace>` tags
+  ;; purely because their :seon.ns rows exist; a non-whitelisted seon.*
+  ;; framework ns (`seon.client`) is NAME-MANIFESTED, not a tag;
+  ;; `acme.widget.internal` (*.internal) and `acme.widget-test` (*-test)
+  ;; are excluded by the structural rules.
   (async done
     (-> (with-conn
           (fn [_conn]
-            (-> (transact-ns-with-member! "acme.widget")
-                (.then (fn [_] (transact-ns-with-member! "seon.client")))
-                (.then (fn [_] (transact-ns-with-member! "my.kb")))
-                (.then (fn [_] (transact-ns-with-member! "acme.widget.internal")))
+            (-> (transact-full-ns! "acme.widget" "(def w 1)")
+                (.then (fn [_] (transact-full-ns! "seon.client" "(def c 2)")))
+                (.then (fn [_] (transact-full-ns! "my.kb" "(def k 3)")))
+                (.then (fn [_] (transact-ns-row! "acme.widget.internal")))
                 (.then (fn [_] (transact-ns-with-test-member! "acme.widget-test")))
                 (.then
                   (fn [_]
                     (let [txt (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})]
-                      ;; downstream code renders with NO config transact.
+                      ;; third-party code renders FULL with NO config transact.
                       (is (str/includes? txt "<namespace name=\"acme.widget\">")
-                          "downstream acme.widget renders with NO config")
-                      (is (str/includes? txt "<namespace name=\"seon.client\">")
-                          "seon.* renders")
+                          "downstream acme.widget renders FULL with NO config")
+                      (is (str/includes? txt "(def w 1)")
+                          "the acme body is shown FULL")
+                      ;; my.* renders FULL.
                       (is (str/includes? txt "<namespace name=\"my.kb\">")
-                          "my.* renders")
-                      ;; *.internal never renders (it has a member, so its
-                      ;; absence is attributable ONLY to the *.internal rule).
+                          "my.* renders FULL")
+                      ;; a non-whitelisted framework ns is manifested, not a tag.
+                      (is (not (str/includes? txt "<namespace name=\"seon.client\">"))
+                          "a framework ns is NOT a full tag")
+                      (is (str/includes? txt "seon.client")
+                          "the framework ns is NAMED in the manifest")
+                      ;; *.internal never renders.
                       (is (not (str/includes? txt "acme.widget.internal"))
                           "*.internal is excluded structurally, no allow-list needed")
                       ;; *-test never renders into the agent prompt.
@@ -471,7 +487,9 @@
       (-> (with-conn
             (fn [_conn]
               (-> (agent/create! {:seon.agent/id "AGTctxtest00d1"})
-                  (.then (fn [_] (transact-ns-with-member! "seon.client")))
+                  ;; a my.* ns → rendered FULL as a `<namespace>` tag in the
+                  ;; STABLE half (a framework ns would only be name-manifested).
+                  (.then (fn [_] (transact-full-ns! "my.client" "(def x 1)")))
                   (.then
                     (fn [_]
                       (let [db @db/*conn*
@@ -486,7 +504,7 @@
                         (is (not (str/blank? (:seon.render/stable-text a1)))
                             "stable block is non-blank (system + namespaces)")
                         (is (str/includes? (:seon.render/stable-text a1)
-                                           "<namespace name=\"seon.client\">")
+                                           "<namespace name=\"my.client\">")
                             "the namespaces body lives in the STABLE half")
                         (is (not (str/includes? (:seon.render/stable-text a1)
                                                 ctx/stable-boundary))

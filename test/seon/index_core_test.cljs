@@ -139,13 +139,14 @@
            (:seon.ns/source (first (filter #(= :seon.db (:seon.ns/name %)) ns-rows))))
         "non-exemplar ns source is the minimal (ns x) stub")))
 
-(deftest core-ns-rows-carry-the-minimal-stub
-  ;; The full-source-roots exemplar relic is gone (2026-06-17): no seon.*
-  ;; ns force-stores full file text. Every seon.* core ns — including the
-  ;; former exemplar roots seon.agent.search / seon.agent.todo — gets the
-  ;; minimal `(ns x)` stub; the :namespaces section compact-renders each
-  ;; from its indexed :seon.fn/:seon.schema member rows (API surface,
-  ;; bodies elided), never a render-time file read.
+(deftest core-ns-rows-stub-bulk-full-source-whitelist
+  ;; Curated render (curated-namespaces 2026-06-21): the seon.* FRAMEWORK
+  ;; BULK keeps the minimal `(ns x)` stub (it is name-manifested, never
+  ;; rendered as a body), while the curated seon.* whitelist
+  ;; (seon.ctx/exemplar-nses = :seon.agent.todo) force-stores its REAL FULL
+  ;; FILE TEXT (it renders FULL, so the boot indexer reads the file — the
+  ;; same seon.ctx/full-source-ns? rule the renderer uses, one writer no
+  ;; drift). seon.agent.search / seon.agent.fs are framework bulk → stub.
   (let [tx      (client/index-core!)
         ns-rows (filter :seon.ns/name tx)
         row-for (fn [k] (first (filter #(= k (:seon.ns/name %)) ns-rows)))
@@ -153,15 +154,20 @@
         todo    (:seon.ns/source (row-for :seon.agent.todo))
         fs      (:seon.ns/source (row-for :seon.agent.fs))]
     (is (= "(ns seon.agent.search)" search)
-        "seon.agent.search source is the minimal (ns x) stub")
-    (is (= "(ns seon.agent.todo)" todo)
-        "seon.agent.todo source is the minimal (ns x) stub")
+        "seon.agent.search (framework bulk) source is the minimal (ns x) stub")
     (is (= "(ns seon.agent.fs)" fs)
-        "seon.agent.fs source is the minimal (ns x) stub")
-    ;; the members that drive compact rendering ARE indexed.
+        "seon.agent.fs (framework bulk) source is the minimal (ns x) stub")
+    ;; the WHITELISTED tool carries its REAL full file source, not a stub.
+    (is (not= "(ns seon.agent.todo)" todo)
+        "seon.agent.todo (whitelist) source is NOT the minimal stub")
+    (is (and (str/starts-with? (str/triml todo) "(ns seon.agent.todo")
+             (str/includes? todo "defn"))
+        "seon.agent.todo source is its REAL full file text (ns form + defns)")
+    ;; the members are still indexed (the bulk renders via the manifest's
+    ;; query; the whitelist via its full source).
     (let [syms (set (map :seon.fn/sym (filter :seon.fn/sym tx)))]
       (is (contains? syms "seon.agent.search/grep")
-          "search's grep is an indexed :seon.fn member (drives compact render)")
+          "search's grep is an indexed :seon.fn member")
       (is (contains? syms "seon.agent.todo/add!")
           "todo's add! is an indexed :seon.fn member"))))
 
