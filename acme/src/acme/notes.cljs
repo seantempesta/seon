@@ -21,3 +21,11 @@
   "Count words in a string. Unspecced."
   [s]
   (if (empty? s) 0 (count (clojure.string/split s #"\s+"))))
+
+(defn- secret-helper
+  "A PRIVATE (defn-) helper. Unspecced, private — the BUG-D reproduction
+   case: a useful downstream helper that is private is an API-signature
+   concern, NOT a 'hide the code' concern. It must still be indexed (a
+   `:seon.fn` row with `:seon.fn/private? true`) and shown in agent context."
+  [x]
+  (str "secret:" x))
