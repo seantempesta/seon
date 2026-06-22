@@ -6,9 +6,10 @@
    SCI's `expose-ns` cannot enumerate today — it only reads the
    `:seon.fn` index, which holds SPECCED fns only. That gap is why a tile
    requiring this ns falls off the SCI-bounded path onto the unbounded
-   compiled path (BUG A — aria's live `Unable to resolve symbol:
-   insp/classified-rows`). `greet` is specced, so this ns still owns a
-   full-source `:seon.ns` row and shows in context.")
+   compiled path (BUG A — the downstream's live `Unable to resolve symbol`
+   when a tile calls an unspecced helper in a required ns). `greet` is
+   specced, so this ns still owns a full-source `:seon.ns` row and shows
+   in context.")
 
 (defn format-count
   "Unspecced helper — render a count with its noun, pluralized. The tile

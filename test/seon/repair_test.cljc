@@ -112,7 +112,7 @@
        "  {:seon.render/hiccup\n"
        "   [:div {:style {:gap \"12px\"}}\n"
        "    [:h1 {:style {:fw \"900\"}}\n"
-       "     \"ARIA SYSTEMS\"]\n"
+       "     \"ACME SYSTEMS\"]\n"
        "    [:div {:style {:fs \"0.9rem\"}}\n"
        "     \"KNOWLEDGE BASE v1.0\"]\n"
        "    [:div {:style {:fs \"0.6rem\"}}\n"

@@ -28,7 +28,7 @@ passes, assuming no QuickJS-incompat surprises.
 
 ## EdgeJS vs wasm-rquickjs — what's the lineage?
 
-Both clones exist under `~/src/orchestro.ai/reference/`. Quick history:
+Both clones exist under a local reference checkout. Quick history:
 
 - **EdgeJS** (`wasmerio/edgejs`, HEAD 2026-05-10) — Wasmer's CLI tool that
   runs any JS engine (V8, JavaScriptCore, QuickJS) with optional WASM
