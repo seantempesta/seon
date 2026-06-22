@@ -928,8 +928,41 @@
           (d/transact conn tx)
           (when (pos? deferred)
             (log/info "embed backfill bounded — embedded" (count batch)
-                      "deferred" deferred "(picked up on next write or later pass)"))
+                      "deferred" deferred "(picked up on next drain pass)"))
           {:seon.embed/embedded (count batch) :seon.embed/deferred deferred})))))
+
+(def ^:const drain-pass-cap
+  "Hard cap on `drain-backfill!` passes, so a pathological or actively-growing
+   corpus can never spin boot forever. At `backfill-cap` (64) entities/pass this
+   covers 64*`drain-pass-cap` entities — far beyond any realistic seed corpus;
+   anything still deferred after that logs and waits for the next boot."
+  256)
+
+(defn drain-backfill!
+  "Run `backfill!` repeatedly until nothing is deferred (or `drain-pass-cap`
+   passes elapse) so the WHOLE embeddable corpus becomes searchable at boot, not
+   just the first `backfill-cap` entities. Each pass is still ONE bounded Gemini
+   batch + ONE transact (the per-pass bound `backfill!` enforces); draining just
+   keeps issuing passes until coverage is complete. This is the 'later pass' the
+   single-pass `backfill!` defers to — static seed fns are written once and never
+   rewritten, so without an explicit drain the deferred remainder would never be
+   embedded and stays invisible to retrieval. Returns the cumulative
+   `{:seon.embed/embedded n :seon.embed/deferred m}` (m = still-deferred after the
+   pass cap, normally 0). No-op (0/0) when the feature is off or nothing needs
+   embedding."
+  {:malli/schema [:=> [:catn [:conn :any]] :seon.embed/backfill!-response]}
+  [conn]
+  (loop [pass 0 total-embedded 0]
+    (let [{:seon.embed/keys [embedded deferred]} (backfill! conn)
+          embedded' (+ total-embedded embedded)]
+      (if (and (pos? embedded) (pos? deferred) (< (inc pass) drain-pass-cap))
+        (recur (inc pass) embedded')
+        (do
+          (when (pos? deferred)
+            (log/warn "embed drain-backfill! hit pass cap" drain-pass-cap
+                      "— embedded" embedded' "still deferred" deferred
+                      "(picked up on next boot)"))
+          {:seon.embed/embedded embedded' :seon.embed/deferred deferred})))))
 
 ;;; --- KNN helper (direct, for harness + the query side) ---------------------
 ;;;
@@ -1086,6 +1119,11 @@
      (when (embed-feature-enabled?)
        (install! conn)
        (try
-         (backfill! conn)
+         ;; DRAIN (not a single bounded pass): static seed fns are written once
+         ;; and never rewritten, so a single `backfill!` would leave everything
+         ;; past `backfill-cap` deferred FOREVER (invisible to retrieval). Each
+         ;; pass is still one bounded Gemini batch; drain keeps issuing passes
+         ;; until the whole corpus is searchable.
+         (drain-backfill! conn)
          (catch Throwable t
            (log/warn t "embed backfill failed on ensure-db — entities embed lazily on next write")))))})
