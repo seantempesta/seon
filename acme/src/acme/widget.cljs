@@ -17,6 +17,38 @@
   (:require [acme.helpers :as h]
             [seon.db :as db]))
 
+(def grounded-dims
+  "A top-level NON-fn data constant (a set). The `dims` tile below references
+   it by simple name from its OWN ns body — the exact case SCI's member
+   enumeration missed: `expose-ns` exposed own-ns FNS but not own-ns NON-fn
+   `(def …)` data vars, so a tile reading `grounded-dims` threw 'Unable to
+   resolve symbol' under SCI and fell to the UNBOUNDED compiled path. With
+   `ns-data-members` merged into the SCI ns map, the constant resolves and the
+   tile stays interrupt-bounded."
+  #{:a :b :c})
+
+(defn dims
+  "Live tile that reads the own-ns `grounded-dims` data constant — the BUG
+   reproduction + fix proof. Renders `(count grounded-dims)` (3). It must
+   render via the SCI-BOUNDED path (no 'could not run under SCI bounding'
+   warn), proving own-ns non-fn vars resolve under SCI.
+
+   SPECCED (welcome-tile contract) so it boot-indexes as a `:seon.fn` row,
+   making its source available to the SCI-bounding reconstruction path."
+  {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
+  [_in]
+  (let [n (count grounded-dims)]
+    {:seon.render/hiccup
+     [:div {:class "seon-tile"}
+      [:div {:class "seon-tile-compact flex flex-col gap-1 p-3"}
+       [:div {:class "text-sm text-text-100"} "Acme grounded dims"]
+       [:div {:class "text-xs text-text-300"} (str n " dims")]]
+      [:div {:class "seon-tile-expanded flex flex-col gap-3 p-4"}
+       [:div {:class "text-lg text-text-50"} "Acme grounded dims"]
+       [:div {:class "text-sm text-text-200"} (str "grounded-dims has " n " members")]]]
+     :seon.render/ai
+     (str "Acme grounded-dims tile — " n " dims (" (pr-str grounded-dims) ").")}))
+
 (defn set-location!
   "Specced product fn — the index/context proof."
   {:malli/schema [:=> [:cat :string] :string]}

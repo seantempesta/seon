@@ -361,6 +361,46 @@
       {})
     (catch :default _ {})))
 
+(defn ns-data-members
+  "Enumerate the COMPILED NON-function members of namespace `ns-name` (a string
+   like \"acme.helpers\") from its LIVE ns object on `js/globalThis`, as
+   `{simple-symbol <value>}`. The data-const twin of [[ns-fn-members]]: that
+   keeps own enumerable props that ARE functions; this keeps the ones that are
+   NOT — a top-level `(def grounded-dims #{:a :b :c})` data constant (set, map,
+   vector, string, number, keyword), demunging each property name the SAME way
+   (`grounded_dims` → `grounded-dims`) via the ONE munge scheme
+   ([[lookup-ns-object]]).
+
+   Why this exists: `seon.render.sci`'s `expose-ns` exposes a tile's own-ns
+   (and required-ns) FN members so SCI can resolve them, but a tile that
+   references an own-ns NON-fn `(def …)` data value found no entry under SCI
+   → 'Unable to resolve symbol' → the tile fell to the UNBOUNDED compiled path.
+   Merging these into the SCI namespace map alongside the fns resolves the
+   constant so the tile stays interrupt-bounded.
+
+   `nil`-valued props are dropped (a SCI namespace map shouldn't carry a nil
+   binding; `nil` reads identically whether bound or absent, and absence is the
+   convention here). Compiler-internal own props (none are non-fn data on a
+   normal CLJS ns object) would be demunged like any other key — harmless: a
+   spurious binding is never referenced by a tile body, and the whole path is
+   fail-soft (degrades to compiled on any error).
+
+   Returns `{}` when the ns isn't on `globalThis` (never-loaded / core stub) or
+   on any failure. Never throws."
+  {:malli/schema [:=> [:catn [::ns-name :string]] :map]}
+  [ns-name]
+  (try
+    (if-let [ns-obj (lookup-ns-object ns-name)]
+      (reduce (fn [m k]
+                (let [v (gobj/get ns-obj k)]
+                  (if (or (fn? v) (nil? v))
+                    m
+                    (assoc m (symbol (cljs.core/demunge k)) v))))
+              {}
+              (js/Object.keys ns-obj))
+      {})
+    (catch :default _ {})))
+
 (defn- truly-undeclared?
   "Decide whether an `:undeclared-var` / `:undeclared-ns` analyzer
    warning is REAL (the symbol resolves nowhere) vs. a benign

@@ -250,18 +250,24 @@
     (catch :default _ {:aliases {} :nses #{} :refers {} :refer-all #{}})))
 
 (defn- expose-ns
-  "`{simple-sym <compiled-fn>}` for namespace `ns-sym`, UNIONing two sources:
+  "`{simple-sym <value>}` for namespace `ns-sym`, UNIONing three sources:
 
-   1. the COMPILED members of the ns's LIVE object on `js/globalThis`
+   1. the COMPILED FN members of the ns's LIVE object on `js/globalThis`
       (`seon.eval/ns-fn-members`) — every own enumerable fn, INCLUDING unspecced
-      helpers the `:seon.fn` index can't see; and
-   2. the `:seon.fn` index members, resolved via `lookup-value`.
+      helpers the `:seon.fn` index can't see;
+   2. the COMPILED NON-FN data members of that same live object
+      (`seon.eval/ns-data-members`) — every own enumerable `(def …)` data
+      constant (set/map/vector/string/number/keyword); and
+   3. the `:seon.fn` index members, resolved via `lookup-value`.
 
-   (1) is the fix for the downstream live failure: a tile fn that calls an
-   aliased UNSPECCED helper (`h/format-count`) found no entry when `expose-ns`
-   enumerated only the SPECCED index, so SCI threw 'Unable to resolve symbol'
-   and the tile fell to the UNBOUNDED compiled path. The union resolves the
-   helper under SCI so the tile stays interrupt-bounded.
+   (1) fixed the unspecced-helper miss: a tile fn calling an aliased UNSPECCED
+   helper (`h/format-count`) found no entry when `expose-ns` enumerated only the
+   SPECCED index, so SCI threw 'Unable to resolve symbol' and the tile fell to
+   the UNBOUNDED compiled path. (2) fixes the SAME class for NON-fn own-ns vars:
+   a tile referencing an own-ns `(def grounded-dims #{…})` data constant likewise
+   found no entry (fns-only enumeration) and fell off the bounded path. Both
+   unions resolve the member under SCI so the tile stays interrupt-bounded — and
+   both reuse the SAME globalThis munge/demunge machinery as the index lookups.
 
    `exclude` is a set of full-sym strings to skip (the tile fn itself —
    re-defined via the eval). Returns nil when the ns has no resolvable members
@@ -273,12 +279,23 @@
           nm     (name ns-sym)
           ;; COMPILED members from the live ns object — keep everything not in
           ;; `exclude` (matched by full-sym string, the same shape `exclude`
-          ;; carries). These include unspecced helpers absent from the index.
+          ;; carries). FNS include unspecced helpers absent from the index; the
+          ;; DATA members are own-ns `(def …)` constants (sets/maps/vectors/…)
+          ;; that a tile body references by simple name. Both come from the same
+          ;; live globalThis object via the one munge/demunge scheme; fns are
+          ;; merged on TOP of data so a name collision keeps the fn (a tile that
+          ;; both defs and shadows a name is degenerate, but fn-wins matches the
+          ;; index merge below).
           compiled (reduce-kv (fn [m simple-sym v]
                                 (if (contains? exclude (str nm "/" simple-sym))
                                   m
                                   (assoc m simple-sym v)))
-                              {} (seval/ns-fn-members nm))
+                              (reduce-kv (fn [m simple-sym v]
+                                           (if (contains? exclude (str nm "/" simple-sym))
+                                             m
+                                             (assoc m simple-sym v)))
+                                         {} (seval/ns-data-members nm))
+                              (seval/ns-fn-members nm))
           syms  (map first
                   (db/query {:seon.db/db    db
                              :seon.db/query '[:find ?s :in $ ?nm :where

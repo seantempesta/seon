@@ -126,6 +126,103 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; BUG A-2 — own-ns NON-fn DATA constant resolves under SCI bounding.
+;;
+;; The same class as BUG A, one layer deeper: `expose-ns` enumerated own-ns
+;; (and required-ns) members ONLY as FNS (`ns-fn-members` filters on `fn?`)
+;; plus the SPECCED index. A tile fn that references a top-level NON-fn
+;; `(def grounded-dims #{…})` data constant in its OWN ns found no entry, SCI
+;; threw 'Unable to resolve symbol', and the tile fell to the UNBOUNDED
+;; compiled path. The fix adds `seon.eval/ns-data-members` (the data twin of
+;; `ns-fn-members`, same globalThis munge/demunge scheme) and merges it into
+;; the SCI ns map, so the data const resolves under SCI.
+;;
+;;   BEFORE fix → invoke-bounded ⇒ {:seon.render.sci/fallthrough true}
+;;   AFTER  fix → invoke-bounded ⇒ a real render map (:seon.render/hiccup)
+;;
+;; data.tile — one ns, no requires: a top-level `(def grounded-dims #{…})` in
+;;   :seon.ns/source (NO :seon.fn row — it is not a fn) and a SPECCED-shape
+;;   `dims` fn (a :seon.fn row WITH source) that reads `grounded-dims` by
+;;   simple name and renders `(count grounded-dims)`.
+;; ---------------------------------------------------------------------------
+
+(def ^:private data-tile-ns-source
+  ;; The own-ns NON-fn data const + the tile fn live in ONE ns. The const has
+  ;; NO :seon.fn row; replay evals the whole ns source so the const lands as a
+  ;; non-fn own member on globalThis (the exact case ns-data-members captures).
+  (str "(ns data.tile)\n"
+       "(def grounded-dims #{:a :b :c})"))
+
+(def ^:private dims-source
+  ;; Reads the own-ns data const by simple name — the shape that broke pre-fix.
+  (str "(defn dims [in]\n"
+       "  {:seon.render/hiccup [:div (count grounded-dims)]\n"
+       "   :seon.render/ai \"data dims\"})"))
+
+(defn- seed-data-tile!
+  "Transact the data.tile ns row (carrying the `grounded-dims` def in its
+   source) + the `dims` :seon.fn row."
+  []
+  (db/transact!
+    {:seon.db/tx-data
+     [{:seon.ns/name   :data.tile
+       :seon.ns/source data-tile-ns-source}
+      {:seon.fn/sym        "data.tile/dims"
+       :seon.fn/ns         {:seon.ns/name :data.tile}
+       :seon.fn/source     dims-source
+       :seon.fn/created-at (js/Date.)}]}))
+
+(deftest sci-bounds-tile-reading-own-ns-data-const
+  (async done
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then
+          (fn [res]
+            (let [cs   (aget res 0)
+                  conn (aget res 1)]
+              (binding [db/*conn* conn]
+                (-> (seed-data-tile!)
+                    (.then
+                      (fn [_]
+                        ;; Replay evals data.tile onto globalThis (grounded-dims
+                        ;; lands as a NON-fn own member there).
+                        (client/replay-program-graph!
+                          {:conn conn :compile-state cs
+                           :agent-id "sci-data-const-test"})))
+                    (.then
+                      (fn [stats]
+                        (testing "the data.tile ns replays cleanly"
+                          (is (= 0 (:seon.client/replay-n-fail stats))
+                              (str "replay had failures — " (pr-str stats))))
+                        (testing "the data const IS on globalThis as a NON-fn member"
+                          (is (= #{:a :b :c}
+                                 (seval/lookup-value 'data.tile/grounded-dims))
+                              "grounded-dims resolves via the globalThis walk")
+                          (is (contains? (seval/ns-data-members "data.tile")
+                                         'grounded-dims)
+                              "ns-data-members enumerates the non-fn const")
+                          (is (not (contains? (seval/ns-fn-members "data.tile")
+                                              'grounded-dims))
+                              "ns-fn-members (fns only) does NOT — the gap the fix closes"))
+                        (testing "the tile fn itself IS resolvable + has stored source"
+                          (is (fn? (seval/lookup-value 'data.tile/dims))))
+                        ;; THE ASSERTION — post-fix, invoke-bounded returns a
+                        ;; REAL render map (not fallthrough), because expose-ns
+                        ;; now merges the own-ns NON-fn data const.
+                        (let [r (sci/invoke-bounded 'data.tile/dims
+                                                    {:seon.db/db @conn})]
+                          (testing "invoke-bounded returns a real render map (NOT fallthrough)"
+                            (is (not (:seon.render.sci/fallthrough r))
+                                (str "fell through — the own-ns data const did "
+                                     "not resolve under SCI: " (pr-str r)))
+                            (is (contains? r :seon.render/hiccup)
+                                (str "expected a :seon.render/hiccup render map, got "
+                                     (pr-str r)))
+                            (is (= [:div 3] (:seon.render/hiccup r))
+                                "grounded-dims resolved under SCI → (count …) = 3"))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; BUG B — loud warn fires when SEON_EXTRA_SRC is set but no extras registered.
 ;;
 ;; index-core! is synchronous + builds tx-data; the warn is a fire-and-forget
