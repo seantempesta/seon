@@ -669,7 +669,8 @@
 ;;     2026-06-21) — FULL nses (my.* + the curated seon.* whitelist
 ;;     :seon.agent.todo + the current ns) render their WHOLE source as a
 ;;     tag, UNCLIPPED; every OTHER seon.* framework ns (seon.db,
-;;     seon.agent.search, …) collapses into ONE name-only manifest block.
+;;     seon.agent.search, …) renders as a SIGNATURES tag in the manifest
+;;     (public fn signatures — name + arglist + one-line doc, bodies elided).
 ;; ---------------------------------------------------------------------------
 
 (deftest namespaces-render-curated-full-and-manifest
@@ -692,20 +693,26 @@
                   "my.kb renders its full source (my.* rule)")
               (is (str/includes? txt "(ns my.kb.system")
                   "my.kb.system (the system-wide instruction home) renders full")
-              ;; MANIFEST: a framework ns is NAMED only — no tag, no body.
+              ;; MANIFEST: a framework ns is a SIGNATURES tag (public fn
+              ;; signatures, bodies elided) — NOT a full-source tag.
               (is (not (str/includes? txt "<namespace name=\"seon.db\">"))
-                  "seon.db (framework bulk) is NOT a full tag")
+                  "seon.db (framework bulk) is NOT a full-source tag")
               (is (not (str/includes? txt "<namespace name=\"seon.agent.search\">"))
-                  "seon.agent.search (framework bulk) is NOT a full tag")
-              (is (str/includes? txt "seon.db")
-                  "seon.db is NAMED in the manifest")
-              (is (str/includes? txt "seon.agent.search")
-                  "seon.agent.search is NAMED in the manifest")
+                  "seon.agent.search (framework bulk) is NOT a full-source tag")
+              (is (str/includes? txt "<namespace name=\"seon.db\" kind=\"signatures\">")
+                  "seon.db is a SIGNATURES tag in the manifest")
+              (is (str/includes? txt "(seon.db/query ")
+                  "seon.db's public fn signatures (e.g. query) are shown")
+              (is (str/includes? txt "(seon.db/transact! ")
+                  "seon.db/transact! shows as a signature — the API is visible")
+              ;; SIGNATURES, not bodies: the fn HEAD (name + arglist) is shown
+              ;; but no fn BODY leaks. `normalize-transact-args` lives in
+              ;; seon.db.internal (excluded), so it never appears.
               (is (not (str/includes? txt "normalize-transact-args"))
-                  "no framework fn BODY leaks (manifest is names only)")
+                  "no *.internal fn leaks (internal nses excluded)")
               ;; the manifest carries a query-for-source pointer.
               (is (str/includes? txt ":seon.ns/name")
-                  "the manifest points at the query to fetch source")
+                  "the manifest points at the query to fetch full source")
               ;; the agent's OWN CURRENT ns renders full (its seed source is
               ;; a bare `(ns …)` stub, so the tag carries just that line).
               (is (str/includes? txt "<namespace name=\"my.agent.ctx-260610\">")
@@ -716,8 +723,8 @@
 (deftest my-ns-renders-full-from-stored-source
   ;; CURATED render: a `my.*` ns renders its STORED full source verbatim
   ;; (the boot indexer reads the file; nothing is reconstructed from member
-  ;; rows anymore). A framework ns stays name-manifested even when it owns
-  ;; member rows — the manifest is names only.
+  ;; rows anymore). A framework ns stays in the SIGNATURES manifest even
+  ;; when it owns member rows — public fn signatures, bodies elided.
   (async done
     (-> (with-seeded-conn
           (fn [conn]
@@ -736,14 +743,15 @@
                           "a my.* ns renders as a full tag")
                       (is (str/includes? txt "(def note \"hi\")")
                           "its full source is shown verbatim, unclipped")
-                      ;; framework ns stays name-manifested (no tag, no body).
+                      ;; framework ns is a SIGNATURES tag (not full-source).
                       (is (not (str/includes? txt
                                               "<namespace name=\"seon.db\">"))
-                          "a framework ns is name-manifested, not a tag")
-                      (is (str/includes? txt "seon.db")
-                          "seon.db appears as a NAME in the manifest")
+                          "a framework ns is not a full-source tag")
+                      (is (str/includes? txt
+                                         "<namespace name=\"seon.db\" kind=\"signatures\">")
+                          "seon.db is a SIGNATURES tag in the manifest")
                       (is (not (str/includes? txt "normalize-transact-args"))
-                          "no framework fn body leaks into the manifest")))))))
+                          "no *.internal fn leaks into the manifest")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -771,10 +779,11 @@
   ;; The v4 layout's turn-0 total stays bounded. CURATED render
   ;; (2026-06-21): only the few FULL nses (my.* + the curated seon.*
   ;; whitelist + the current ns + any third-party) carry source; the seon
-  ;; framework BULK is a name-only manifest, NOT a compact body dump. This
-  ;; is far smaller than the old render-everything-compact surface. Guard
-  ;; at 250k — if this grows, something started inlining the framework
-  ;; bulk again instead of manifesting it by name.
+  ;; framework BULK is a SIGNATURES manifest (public fn name + arglist +
+  ;; one-line doc, bodies elided), NOT a full body dump. This is far
+  ;; smaller than the old render-everything-compact surface. Guard at 250k —
+  ;; if this grows, something started inlining the framework bulk's BODIES
+  ;; again instead of eliding them to signatures.
   (async done
     (-> (with-seeded-conn
           (fn [conn]
@@ -809,8 +818,8 @@
                     ceil  50000
                     ;; The full prompt additionally carries the byte-stable
                     ;; namespace payload — a deliberate static cost (the
-                    ;; CURATED full nses + the framework name manifest), not
-                    ;; result blow-up.
+                    ;; CURATED full nses + the framework signature manifest),
+                    ;; not result blow-up.
                     full-ceil (+ ceil 200000)]
                 (is (< (count ts) ceil)
                     (str "transcript bounded despite " big-n
