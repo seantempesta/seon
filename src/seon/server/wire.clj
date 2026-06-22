@@ -44,6 +44,10 @@
       "--req-sock"  (recur (assoc acc :req-sock (second xs)) (drop 2 xs))
       "--pub-sock"  (recur (assoc acc :pub-sock (second xs)) (drop 2 xs))
       "--repl-port" (recur (assoc acc :repl-port (Long/parseLong (second xs))) (drop 2 xs))
+      ;; --preflight: a flag (no value). boot/-main intercepts it and runs the
+      ;; embedding self-check BEFORE starting the server. parse-args records it
+      ;; so the default "Unknown arg" branch no longer exit-2s on it.
+      "--preflight" (recur (assoc acc :preflight? true) (drop 1 xs))
       nil acc
       (do (println "Unknown arg:" (first xs)) (System/exit 2)))))
 

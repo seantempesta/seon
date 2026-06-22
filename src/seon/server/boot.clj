@@ -251,7 +251,16 @@
 (defn -main
   "Boot the wire-server. Loading this ns registered the raw tx-feed +
    query-subscription `handle-op` defmethods, the reactive `::reactive`
-   on-ensure-db hook, and both reactive + raw-broadcast schemas. Delegates to
-   `wire/-main`."
+   on-ensure-db hook, and both reactive + raw-broadcast schemas.
+
+   `--preflight`: instead of starting the server, run the embedding-feature
+   self-check (`seon.embed.preflight/run-preflight!`) and System/exit with its code (0 =
+   all green; distinct non-zero per failure mode). This is the loud gate a
+   third party scripts against — see the preflight ns. Otherwise delegates to
+   `wire/-main` to start serving."
   [& args]
-  (apply wire/-main args))
+  (if (some #{"--preflight"} args)
+    (let [code ((requiring-resolve 'seon.embed.preflight/run-preflight!))]
+      (flush)
+      (System/exit code))
+    (apply wire/-main args)))
