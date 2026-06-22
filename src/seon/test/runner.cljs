@@ -628,7 +628,10 @@
       (await (db/transact!
                (cond-> {:seon.db/tx-data tx-data}
                  conn (assoc :seon.db/conn conn))))
-      {:seon.db/ok? true :seon.db/tx-report {:tx-data []}})))
+      ;; No test outcomes to record — return a no-op compact envelope
+      ;; matching seon.db/transact!'s success shape (#40).
+      {:seon.db/ok? true :seon.db/tempids {} :seon.db/tx-count 0
+       :seon.db/added 0 :seon.db/retracted 0})))
 
 (defn ^:async run-and-record!
   "Convenience: run vars, stash the full result, record the projection.

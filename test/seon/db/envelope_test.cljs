@@ -108,14 +108,17 @@
                          {:seon.db/tx-data [{::name        "run"
                                              ::distance-km 5.2}]
                           :seon.db/conn    conn}))
-                     (.then (fn [{ok?       :seon.db/ok?
-                                  tx-report :seon.db/tx-report
-                                  error     :seon.db/error}]
+                     (.then (fn [{ok?      :seon.db/ok?
+                                  tx       :seon.db/tx
+                                  tx-count :seon.db/tx-count
+                                  error    :seon.db/error}]
                               (is (true? ok?)
                                   (str ":double transact must succeed — "
                                        (:seon.error/message error)))
-                              (is (some? tx-report)
-                                  "success keeps the tx-report field")
+                              (is (int? tx)
+                                  "compact success envelope carries the tx id")
+                              (is (pos? tx-count)
+                                  "compact envelope carries the datom count")
                               (is (= #{[5.2]}
                                      (set
                                        (db/query

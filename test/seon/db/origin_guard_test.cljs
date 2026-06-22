@@ -51,8 +51,11 @@
               (db/with-tx-context
                 {:seon.db/origin :core-seed}
                 (fn []
-                  (db/transact! {:seon.db/tx-data [{::name "x"}]
-                                 :seon.db/conn    conn}))))]
+                  ;; return-report? to read the raw report's :tx-data
+                  ;; (the tx eid) below — the compact envelope omits it.
+                  (db/transact! {:seon.db/tx-data        [{::name "x"}]
+                                 :seon.db/conn           conn
+                                 :seon.db/return-report? true}))))]
     (if agent-id
       (db/with-agent agent-id run)
       (run))))

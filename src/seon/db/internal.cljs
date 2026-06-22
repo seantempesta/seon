@@ -1105,6 +1105,40 @@
     (when (seq entries)
       (await (d/transact! conn (vec entries))))))
 
+(defn transact-success-envelope
+  "Build the agent-visible success envelope from a raw datahike tx-report
+   (#40). COMPACT BY DEFAULT: the agent sees a small data summary, never
+   the raw report's `:db-before`/`:db-after` db-value echo or the full
+   per-datom `:tx-data` (a bulk seed = thousands of datoms — dumping them
+   into the eval value bloats every `<past-evals>` render).
+
+     {:seon.db/ok? true
+      :seon.db/tempids   <report :tempids>   ; LOAD-BEARING — tempid→eid
+      :seon.db/tx        <max-tx of :db-after — the committed tx id>
+      :seon.db/tx-count  <count of :tx-data>
+      :seon.db/added     <datoms added>
+      :seon.db/retracted <datoms retracted>}
+
+   The wire success report's shape (confirmed live 2026-06-21): `:db-after`
+   (a datahike DB value whose `:max-tx` IS the committed tx id), `:tx-data`
+   (a vector of Datoms, each `:added` true/false), `:tempids`, `:tx-meta`.
+
+   The FULL raw report is included at `:seon.db/tx-report` ONLY when the
+   caller passes `:seon.db/return-report? true` (escape hatch for code that
+   needs `:db-after` / `:db-before`). Listeners are UNAFFECTED — they
+   project off the raw report independently via [[build-handler-input]],
+   and the wire's `tx-report->ok-map` stays on the raw report."
+  [report return-report?]
+  (let [datoms (:tx-data report)
+        added  (count (filter :added datoms))]
+    (cond-> {::db/ok?        true
+             ::db/tempids    (or (:tempids report) {})
+             ::db/tx         (:max-tx (:db-after report))
+             ::db/tx-count   (count datoms)
+             ::db/added      added
+             ::db/retracted  (- (count datoms) added)}
+      return-report? (assoc ::db/tx-report report))))
+
 (defn ^:async transact!*
   "The map-in commit body. `seon.db/transact!` normalizes its variadic
    args (map-in OR positional) into the canonical request map, runs the
@@ -1119,12 +1153,13 @@
    ([[ensure-datahike-attrs!]]), and the datahike commit itself — is
    caught HERE and converted by [[commit-error-envelope]] into the
    `{::ok? false …}` failure envelope the agent reads as a VALUE.
-   Success returns `{::ok? true ::tx-report …}`. The only failures the
+   Success returns the COMPACT envelope ([[transact-success-envelope]]).
+   The only failures the
    `seon.db/transact!` face still catches are PRE-normalization ones
    (malformed call shape, before this fn is reached)."
   [arg]
   (try
-    (let [{::db/keys [tx-data opts conn]} arg
+    (let [{::db/keys [tx-data opts conn return-report?]} arg
           c           (resolve-conn conn)
           ;; The taught `{:seon.db/ref <eid|lookup-ref> …}` entity-key
           ;; shorthand becomes datahike's native `:db/id` slot HERE, so
@@ -1152,7 +1187,7 @@
       (let [arg-map (merge {:tx-data (encode-edn-slot-values tx-data)}
                            merged-opts)
             report  (await (d/transact! c arg-map))]
-        {::db/ok? true ::db/tx-report report}))
+        (transact-success-envelope report return-report?)))
     (catch :default e
       ;; Validation-gate / schema-install / datahike commit failure.
       ;; Translation rewrites the known cryptic messages and retags

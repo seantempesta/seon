@@ -382,37 +382,71 @@ cmd_prep() {
   # seon's own start paths; this verb lets a downstream launcher shell
   # out (`bin/seon prep`) instead of rediscovering the incantation.
   #
-  # Idempotent + fast no-op: same fingerprint scheme as auto-prep
-  # (deps.edn :git/url+:git/sha hash + ~/.gitlibs presence). On a real
-  # prep it also refreshes the per-process fingerprints so the next
-  # `start wire-server` / `start cljs-watch` skips its own auto-prep.
+  # Two distinct jobs, gated differently (consumer ask 37):
+  #
+  #  1. git-dep prep (`clojure -X:deps prep`) — the EXPENSIVE step that
+  #     downloads + compiles prep-requiring git deps (the datahike fork's
+  #     Java sources, etc). Gated on the git-dep fingerprint scheme
+  #     (deps.edn :git/url+:git/sha hash + ~/.gitlibs presence) so it's a
+  #     true no-op once those are in place.
+  #
+  #  2. classpath WARM (`clojure -P -M:<alias>`) — runs UNCONDITIONALLY,
+  #     on EVERY prep, even the git-fingerprint-match path. This is the
+  #     ask-37 fix: the Clojure CLI's cpcache staleness check is
+  #     mtime-based (deps.edn newer than the cached :writer/:cljs basis ⇒
+  #     refresh), so a deps.edn edit that touches NO git-dep (a maven dep,
+  #     a :paths, an alias, or a seon SHA bump that only changes source)
+  #     leaves the git fingerprint unchanged while the cpcache goes STALE.
+  #     If prep no-op'd there, the downstream's `clojure -M:writer` would
+  #     have to refresh the cache in its fragile pre-`exec` make-classpath2
+  #     window (death there ⇒ empty wire.log, "died during startup").
+  #     `-P` is a ~1s no-op on an already-warm tree but does the refresh
+  #     loudly + synchronously when stale — so on return the classpath is
+  #     GUARANTEED warm. (Measured: ~0.95s :writer + ~0.78s :cljs warm.)
+  #
+  # On a real git-dep prep it also refreshes the per-process fingerprints
+  # so the next `start wire-server` / `start cljs-watch` skips auto-prep.
   local prep_aliases="writer cljs"
-  local fp_file current stored
+  local fp_file current stored need_git_prep
   ensure_state prep
   fp_file="$(state_dir prep)/deps-fingerprint"
   current="$(deps_fingerprint)"
   stored="$(cat "$fp_file" 2>/dev/null || true)"
   if [ "$current" = "$stored" ] && ! gitlibs_missing_sha; then
-    echo "● deps already prepped for aliases: $prep_aliases (no-op)"
-    return 0
+    need_git_prep=0
+    echo "● git deps already prepped — warming classpath for: $prep_aliases"
+  else
+    need_git_prep=1
   fi
   local a
   for a in $prep_aliases; do
-    echo "▶ prepping :$a — clojure -X:deps prep :aliases '[:$a]' && clojure -P -M:$a"
-    # prep first (see auto-prep note): -P fails on an unprepped prep-lib.
-    if ! { clojure -X:deps prep :aliases "[:$a]" && clojure -P -M:"$a"; }; then
-      echo "✗ prep for :$a FAILED" >&2
+    if [ "$need_git_prep" = 1 ]; then
+      echo "▶ prepping :$a — clojure -X:deps prep :aliases '[:$a]'"
+      # prep first (see auto-prep note): -P fails on an unprepped prep-lib.
+      if ! clojure -X:deps prep :aliases "[:$a]"; then
+        echo "✗ git-dep prep for :$a FAILED" >&2
+        return 1
+      fi
+    fi
+    # ALWAYS warm the classpath (the ask-37 staleness fix).
+    echo "▶ warming :$a — clojure -P -M:$a"
+    if ! clojure -P -M:"$a"; then
+      echo "✗ classpath warm for :$a FAILED" >&2
       return 1
     fi
   done
-  echo "$current" > "$fp_file"
-  # Keep the per-process auto-prep fingerprints in sync so the next
-  # start doesn't redo the work this verb just did.
-  for a in wire-server cljs-watch; do
-    ensure_state "$a"
-    echo "$current" > "$(state_dir "$a")/deps-fingerprint"
-  done
-  echo "● deps prepped for aliases: $prep_aliases"
+  if [ "$need_git_prep" = 1 ]; then
+    echo "$current" > "$fp_file"
+    # Keep the per-process auto-prep fingerprints in sync so the next
+    # start doesn't redo the work this verb just did.
+    for a in wire-server cljs-watch; do
+      ensure_state "$a"
+      echo "$current" > "$(state_dir "$a")/deps-fingerprint"
+    done
+    echo "● deps prepped + classpath warm for aliases: $prep_aliases"
+  else
+    echo "● classpath warm for aliases: $prep_aliases"
+  fi
 }
 
 # ============================================================

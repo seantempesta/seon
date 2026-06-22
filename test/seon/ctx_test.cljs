@@ -2,10 +2,12 @@
   "Contract tests for `seon.ctx` — the v4 composer
    (context-v4-repl-realism 2026-06-11).
 
-   Pins: the ONE namespace-selection rule (included-ns? — all seon.* +
-   my.* minus *.internal) and the full-source depth rule; the
+   Pins: the ONE namespace-selection rule (included-ns? — EVERY indexed
+   :seon.ns row minus *.internal and *-test, no prefix allow-list) and
+   the full-source depth rule; the
    `<namespace>` tags (internal never renders, an agent-authored ns
-   appears with NO config change, recency = most-recently-modified
+   appears with NO config change, downstream code renders with NO config,
+   recency = most-recently-modified
    LAST with a byte-identical prefix above the moved tag); the
    `:seon.agent/purpose` entity seed + `<your-entity>` render;
    merge/override-by-name semantics; the render guard; the per-agent
@@ -18,6 +20,7 @@
     [clojure.string :as str]
     [datahike.api :as d]
     [seon.agent :as agent]
+    [seon.analyzer-info :as ai]
     [seon.client :as client]
     [seon.ctx :as ctx]
     [seon.ctx.inventory :as ctx-inventory]
@@ -60,41 +63,45 @@
 ;; ------------------------------------------------------------
 
 (deftest selection-rules
-  ;; included-ns? — ALL seon.* + my.* EXCEPT *.internal and *-test. One rule.
+  ;; included-ns? — EVERY indexed :seon.ns row EXCEPT *.internal and
+  ;; *-test. ONE structural rule, no prefix allow-list: seon.*, my.*,
+  ;; AND downstream code (acme.*) all render the same way (the library
+  ;; gate lives on the INDEX side — only first-party/SEON_EXTRA_SRC code
+  ;; ever gets a :seon.ns row, so cljs.core/datahike.api never reach this
+  ;; predicate at render time).
   (doseq [n ["seon.db" "seon.eval" "seon.agent.search" "my.kb"
-             "my.agent.a1" "my.finance"]]
+             "my.agent.a1" "my.finance"
+             ;; downstream product code: NO prefix allow-list, so it is
+             ;; included structurally just like seon/my code.
+             "acme.widget" "acme.persona" "acme"]]
     (is (true? (ctx/included-ns? n)) (str n " is included")))
-  (doseq [n ["seon.db.internal" "seon.x.internal.y" "my.foo.internal"
-             "cljs.core" "datahike.api"
+  ;; the no-prefix downstream case stated explicitly.
+  (is (true? (ctx/included-ns? "acme.widget"))
+      "downstream code is included with NO prefix allow-list")
+  (doseq [n [;; *.internal — STRUCTURAL exclusion, applies to seon/my/
+             ;; downstream alike.
+             "seon.db.internal" "seon.x.internal.y" "my.foo.internal"
+             "acme.widget.internal"
              ;; *-test namespaces are indexed but NEVER rendered into the
              ;; agent prompt (their deftests are noise; the per-fn :test
-             ;; usage example rides the regular fn's compact head).
-             "seon.agent.search-test" "my.soul-test"
+             ;; usage example rides the regular fn's compact head). Applies
+             ;; to downstream code too.
+             "seon.agent.search-test" "my.soul-test" "acme.widget-test"
              ;; debug capture lives under *.internal — dropped structurally,
              ;; same rule as every other internal ns. No name-list.
              "seon.debug.internal"]]
     (is (false? (ctx/included-ns? n)) (str n " is NOT included")))
   ;; the *-test structural exclusion.
-  (doseq [n ["seon.agent.search-test" "my.soul-test"]]
+  (doseq [n ["seon.agent.search-test" "my.soul-test" "acme.widget-test"]]
     (is (true? (ctx/test-ns-name? n)) (str n " is a test ns")))
   (is (false? (ctx/test-ns-name? "seon.agent.search")) "non-test ns")
   ;; debug capture is hidden via the structural *.internal rule, no name-list.
   (is (true? (ctx/hidden-ns-name? "seon.debug.internal"))
       "seon.debug.internal is hidden structurally")
-  ;; hidden beats everything, even under my.*.
-  (doseq [n ["seon.db.internal" "seon.agent.internal" "my.foo.internal"]]
+  ;; hidden beats everything, even under my.* and downstream code.
+  (doseq [n ["seon.db.internal" "seon.agent.internal" "my.foo.internal"
+             "acme.widget.internal"]]
     (is (true? (ctx/hidden-ns-name? n)) (str n " is hidden")))
-  ;; 2-arity: a configured downstream prefix includes its root + children;
-  ;; the *.internal exclusion is STRUCTURAL — it applies to every prefix.
-  (is (true? (ctx/included-ns? "acme.core" ["seon." "my." "acme."])))
-  (is (true? (ctx/included-ns? "acme" ["acme."]))
-      "a prefix includes its bare root ns")
-  (is (false? (ctx/included-ns? "acme.core" ["seon." "my."]))
-      "unconfigured prefix is NOT included")
-  (is (false? (ctx/included-ns? "acme.core.internal" ["acme."]))
-      "*.internal exclusion applies to configured prefixes too")
-  (is (false? (ctx/included-ns? "acmene.core" ["acme."]))
-      "prefix matches on segment boundary, not substring")
   ;; full-source depth: my.* by RULE (test siblings ride along via the
   ;; `-test` strip); every seon.* ns is COMPACT, never full-source.
   (doseq [n ["my.kb" "my.kb.system" "my.soul" "my.soul-test"]]
@@ -197,75 +204,84 @@
           (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done)))))))
 
 ;; ------------------------------------------------------------
-;; Downstream prefix extensibility — the customize-with-data row.
-;; A downstream consumer adds its ns prefix by ONE transact onto the
-;; config entity; the next render carries the tags; a retract removes
-;; them. Defaults seed-if-absent ([[ctx/ensure-ctx-config!]] via the
-;; composer); reads fall back to the defaults until then.
+;; No prefix allow-list — ALL indexed code renders (downstream `acme.*`
+;; included with NO config), *.internal + *-test structurally excluded.
+;; The library gate is on the INDEX side (only first-party/SEON_EXTRA_SRC
+;; code gets a :seon.ns row), so render-time selection is structural only.
 ;; ------------------------------------------------------------
 
-(deftest included-prefix-extensibility
+(defn- transact-ns-with-test-member!
+  "An ns stub row PLUS one `:seon.test` (deftest) member only — a *-test
+   ns's natural shape. The ns is still excluded by the *-test structural
+   rule regardless; the member just makes it a real (non-bare-stub) row."
+  [nm]
+  (-> (transact-ns-row! nm)
+      (.then (fn [_]
+               (db/transact!
+                 {:seon.db/tx-data
+                  [{:seon.test/sym        (str nm "/probe-test")
+                    :seon.test/ns         [:seon.ns/name (keyword nm)]
+                    :seon.test/source     "(deftest probe-test (is true))"
+                    :seon.test/created-at (js/Date.)}]})))))
+
+(deftest renders-all-indexed-code-internal-excluded
+  ;; A fresh conn, NO config row anywhere: downstream `acme.widget`,
+  ;; seon.*, and my.* all render as `<namespace>` tags purely because
+  ;; their :seon.ns rows exist; `acme.widget.internal` (*.internal) and
+  ;; `acme.widget-test` (*-test) are excluded by the structural rules.
   (async done
     (-> (with-conn
           (fn [_conn]
-            (-> (transact-ns-with-member! "acme.core")
+            (-> (transact-ns-with-member! "acme.widget")
                 (.then (fn [_] (transact-ns-with-member! "seon.client")))
-                (.then
-                  (fn [_]
-                    (is (= (vec (sort ctx/default-included-prefixes))
-                           (ctx/included-prefixes @db/*conn*))
-                        "no config row → built-in defaults")
-                    (is (not (str/includes?
-                               (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})
-                               "acme.core"))
-                        "unconfigured downstream prefix does not render")))
-                ;; the seed row (what ensure-ctx-config! transacts) …
-                (.then (fn [_]
-                         (db/transact!
-                           {:seon.db/tx-data
-                            [{:seon.ctx/config-id "core"
-                              :seon.ctx/included-prefixes
-                              ctx/default-included-prefixes}]})))
-                ;; … then the downstream's ONE transact (identity upsert +
-                ;; cardinality-many ADD — the defaults are never restated
-                ;; or clobbered).
-                (.then (fn [_]
-                         (db/transact!
-                           {:seon.db/tx-data
-                            [{:seon.ctx/config-id "core"
-                              :seon.ctx/included-prefixes ["acme."]}]})))
+                (.then (fn [_] (transact-ns-with-member! "my.kb")))
+                (.then (fn [_] (transact-ns-with-member! "acme.widget.internal")))
+                (.then (fn [_] (transact-ns-with-test-member! "acme.widget-test")))
                 (.then
                   (fn [_]
                     (let [txt (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})]
-                      (is (str/includes? txt "<namespace name=\"acme.core\">")
-                          "ONE transact → downstream ns renders as a tag")
+                      ;; downstream code renders with NO config transact.
+                      (is (str/includes? txt "<namespace name=\"acme.widget\">")
+                          "downstream acme.widget renders with NO config")
                       (is (str/includes? txt "<namespace name=\"seon.client\">")
-                          "defaults still render alongside"))))
-                ;; the *.internal exclusion stays structural — give it a
-                ;; member so its absence is attributable ONLY to the
-                ;; *.internal rule, not to bare-stub omission.
-                (.then (fn [_] (transact-ns-with-member! "acme.core.internal")))
-                (.then
-                  (fn [_]
-                    (is (not (str/includes?
-                               (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})
-                               "acme.core.internal"))
-                        "*.internal never renders, configured prefix or not")))
-                ;; retract → gone next render.
-                (.then (fn [_]
-                         (db/transact!
-                           {:seon.db/tx-data
-                            [[:db/retract ctx/config-ref
-                              :seon.ctx/included-prefixes "acme."]]})))
-                (.then
-                  (fn [_]
-                    (let [txt (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})]
-                      (is (not (str/includes? txt "acme.core"))
-                          "retracted prefix → tag gone next render")
-                      (is (str/includes? txt "<namespace name=\"seon.client\">")
-                          "defaults unaffected by the retract")))))))
+                          "seon.* renders")
+                      (is (str/includes? txt "<namespace name=\"my.kb\">")
+                          "my.* renders")
+                      ;; *.internal never renders (it has a member, so its
+                      ;; absence is attributable ONLY to the *.internal rule).
+                      (is (not (str/includes? txt "acme.widget.internal"))
+                          "*.internal is excluded structurally, no allow-list needed")
+                      ;; *-test never renders into the agent prompt.
+                      (is (not (str/includes? txt "acme.widget-test"))
+                          "*-test is excluded structurally")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+
+(deftest defs-since-skips-result-vars
+  ;; INDEX-SIDE pin (the load-bearing leak guard): the allow-list was the
+  ;; only thing hiding the synthetic `result/<id>` vars that
+  ;; seon.eval/bind-result-var! registers under the reserved `result` ns
+  ;; with `:seon.eval/result-var? true`. With the allow-list gone,
+  ;; defs-since MUST still drop them so they never tee as bogus :seon.fn
+  ;; rows + a sourceless {:seon.ns/name :result} row.
+  (let [before {}
+        cs     (atom {:cljs.analyzer/namespaces
+                      {'result {:name 'result
+                                :defs {'OKf {:name 'result/OKf
+                                             :seon.eval/result-var? true}}}
+                       'my.ns  {:defs {'real-fn
+                                        {:meta {:doc "a real fn"}
+                                         :fn-var true
+                                         :arglists '(quote ([x]))}}}}})
+        new    (ai/defs-since before cs)
+        nses   (set (map :ns new))
+        syms   (set (map :sym new))]
+    (is (not (contains? nses 'result))
+        "the reserved result ns must not produce a new-def entry")
+    (is (not (contains? syms 'OKf))
+        "the synthetic result var must be skipped")
+    (is (contains? syms 'real-fn)
+        "a genuine agent-authored def is still teed")))
 
 ;; ------------------------------------------------------------
 ;; Composer: purpose-as-entity-data, your-entity, merge, verbs.

@@ -116,7 +116,9 @@
                         (is (= "hello agent A" (:seon.agent.message/content m)))
                         (is (some? (:seon.agent.message/at m)))
                         (is (= 0 (:seon.agent.message/hops m))
-                            "from = the user ⇒ hops 0"))))))))
+                            "from = the user ⇒ hops 0")
+                        (is (= :human (:seon.agent.message/origin m))
+                            "from = the user ⇒ origin :human (#43)"))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -139,7 +141,9 @@
                              (mapv :seon.user/id (:seon.agent.message/to m)))
                           "to defaulted to THE user")
                       (is (= 1 (:seon.agent.message/hops m))
-                          "agent-originated, no waking msg ⇒ hops 0+1")))))))
+                          "agent-originated, no waking msg ⇒ hops 0+1")
+                      (is (= :agent (:seon.agent.message/origin m))
+                          "agent-originated ⇒ origin :agent (#43)")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

@@ -7,8 +7,8 @@
    symbol resolves for `seon.eval/lookup-value`.
 
    Owns the COMPACT ns-render machinery (elide-defn-body + the indexing
-   reader helpers + compact-ns-source). The SELECTION rules
-   (`included-ns?` / `included-prefixes`) and the agent's current-ns
+   reader helpers + compact-ns-source). The SELECTION rule
+   (`included-ns?`) and the agent's current-ns
    derivation stay in the spine `seon.ctx`; the on-demand whole-namespace
    render (`seon.ctx/render-namespace`, the agent-callable capability the
    system prompt documents) also stays in the spine.
@@ -258,7 +258,8 @@
 
 (defn namespaces-section
   "One `<namespace name=\"…\">` tag per included ns ([[seon.ctx/included-ns?]] —
-   ALL seon.* + my.* minus *.internal; ONE rule, no lists), ordered by
+   EVERY indexed :seon.ns row minus *.internal and *-test; ONE structural
+   rule, no allow-list), ordered by
    RECENCY: most-recently-modified LAST (tx of the `:seon.ns/name`
    datom — bumped by the tee's nested upsert on every define), name as
    the tie-break, so the stable core set forms a stable cache
@@ -291,9 +292,6 @@
         cur-ns (when id
                  (try (ctx/current-ns {:seon.agent/id id :seon.db/db db})
                       (catch :default _ nil)))
-        ;; The configured prefix set, computed ONCE per render from the
-        ;; SAME db snapshot every row is filtered against.
-        prefixes (ctx/included-prefixes db)
         ;; EVERY ns row, sourced or not — the tee's nested
         ;; `{:seon.ns/name kw}` upsert mints SOURCELESS rows (a prior
         ;; agent's register!/defines), and requiring `:seon.ns/source`
@@ -314,7 +312,7 @@
                        '[:find ?nm ?tx
                          :where
                          [?n :seon.ns/name ?nm ?tx]]})
-                    (filter (fn [[nm _]] (ctx/included-ns? (name nm) prefixes)))
+                    (filter (fn [[nm _]] (ctx/included-ns? nm)))
                     (sort-by (fn [[nm tx]] [tx (name nm)])))
         blocks (keep
                  (fn [[nm _tx]]

@@ -742,7 +742,7 @@
                                   [(= ?ns "seon.agent.message")]
                                   [(name ?a) ?n]]
      :seon.gym.predicate/expect [:every-in ["id" "from" "to" "content"
-                                            "at" "hops"]]}
+                                            "at" "hops" "origin"]]}
     {:seon.gym.predicate/id        :judge-mock
      :seon.gym.predicate/kind      :llm-judge
      :seon.gym.predicate/axis      :replies-honestly

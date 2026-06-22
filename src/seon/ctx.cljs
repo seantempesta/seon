@@ -20,10 +20,10 @@
        by one priority sort (override-by-name). Render guard (a broken
        section renders an inline error line, never breaks assembly)
        and the per-agent section char budget live here.
-     - the selection rules: [[included-ns?]] (ALL nses under the
-       store-configured [[included-prefixes]] — defaults seon.* + my.*
-       — minus *.internal; the ONE rule, no lists; downstreams extend
-       by one transact onto [[config-ref]]) and [[full-source-ns?]]
+     - the selection rules: [[included-ns?]] (the ONE structural rule —
+       EVERY indexed `:seon.ns` row renders EXCEPT *.internal and *-test
+       ones; no prefix allow-list, the library gate lives on the INDEX
+       side — `seon.indexing/first-party-file?`) and [[full-source-ns?]]
        (which rows the boot indexer inlines real file text for).
      - the `:system` section (system-text / system-section — kept here
        as a byte-stable shared artifact) and the derived read API every
@@ -122,8 +122,8 @@
   ([agent-id] (turns-cap agent-id nil))
   ([agent-id db]
    (or (:seon.agent/turns-cap
-         (db/entity (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
-                      db (assoc :seon.db/db db))))
+         (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
+                           db (assoc :seon.db/db db))))
        default-turns-cap)))
 
 (defn home-ns
@@ -140,8 +140,8 @@
    from, never reach back to the live conn mid-render."
   ([agent-id] (current-session agent-id nil))
   ([agent-id db]
-   (let [a (db/entity (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
-                        db (assoc :seon.db/db db)))]
+   (let [a (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
+                             db (assoc :seon.db/db db)))]
      (last (sort-by :seon.agent.session/at (:seon.agent/sessions a))))))
 
 ;; ============================================================
@@ -181,91 +181,18 @@
   (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
     (str/ends-with? s "-test")))
 
-;; ------------------------------------------------------------
-;; Included-prefix config — the customize-with-data row behind the
-;; ONE selection rule. A downstream consumer (an unmodified-core
-;; product) extends the prefix set by ONE transact:
-;;
-;;   (seon.db/transact!
-;;     {:seon.db/tx-data [{:seon.ctx/config-id "core"
-;;                         :seon.ctx/included-prefixes ["acme."]}]})
-;;
-;; and its `acme.*` namespaces render as `<namespace>` tags for every
-;; agent on the next render; `[:db/retract <eid>
-;; :seon.ctx/included-prefixes "acme."]` removes it again
-;; (cardinality-many — adds accumulate, never clobber the defaults).
-;; The `*.internal` exclusion stays STRUCTURAL: it applies to every
-;; prefix, configured or default.
-;; ------------------------------------------------------------
-
-(schema/register! :seon.ctx/config-id [:string {:seon.db/identity true}])
-(schema/register! :seon.ctx/included-prefixes [:vector :string])
-
-(def config-ref
-  "Lookup ref of THE core ctx-config entity — the carrier of
-   `:seon.ctx/included-prefixes` (and any future composer config rows).
-   Seeded if absent by the composer ([[assemble-context]])."
-  [:seon.ctx/config-id "core"])
-
-(def default-included-prefixes
-  "The built-in prefix set: the core (`seon.*`) and the human's
-   world (`my.*`). Seeded onto the config entity at first render;
-   downstreams ADD to the row, they never need to restate these."
-  ["seon." "my."])
-
-(defn included-prefixes
-  "The CURRENT included-prefix set — the config entity's
-   `:seon.ctx/included-prefixes` rows when present (sorted vector;
-   cardinality-many reads back as a set), else
-   [[default-included-prefixes]]. Optional `db` snapshot (the composer
-   threads its render db); the no-arg arity reads the live conn and
-   falls back to the defaults when no conn is bound (pure-name tests).
-   The `installed-schema` gate is load-bearing: datahike throws on a
-   lookup ref whose attr the conn never installed (installs are lazy,
-   at first transact)."
-  {:malli/schema [:function
-                  [:=> [:cat] [:vector :string]]
-                  [:=> [:cat :seon.db/db-val] [:vector :string]]]}
-  ([] (if-let [db (some-> db/*conn* deref)]
-        (included-prefixes db)
-        (vec (sort default-included-prefixes))))
-  ([db]
-   (->> (or (when (contains? (db/installed-schema db) :seon.ctx/config-id)
-              (seq (:seon.ctx/included-prefixes
-                     (db/entity {:seon.db/db db :seon.db/ref config-ref}))))
-            default-included-prefixes)
-        sort
-        vec)))
-
-(defn- prefix-included?
-  "True when ns string `s` falls under config prefix `p`: `\"acme.\"`
-   matches the bare root `acme` and every `acme.*` child (the same
-   root-or-child rule the hardwired seon/my checks used)."
-  [s p]
-  (let [root (if (str/ends-with? p ".") (subs p 0 (dec (count p))) p)]
-    (boolean (or (= s root) (str/starts-with? s (str root "."))))))
-
 (defn included-ns?
-  "The ONE selection rule for the `<namespace>` tags (context-v4 §2.3,
-   r2): every namespace under an included prefix (store-configured —
-   [[included-prefixes]]; defaults `seon.*` + `my.*`) is included
-   EXCEPT `*.internal` ([[hidden-ns-name?]]) and `*-test`
-   ([[test-ns-name?]]) ones (both STRUCTURAL — apply to all prefixes).
-   No lists, no budgets — a new namespace auto-includes the moment its
-   `:seon.ns` row exists; a downstream prefix auto-includes the moment
-   its config row is transacted. Pass the per-render `prefixes` (the
-   composer computes them ONCE per render from its db snapshot); the
-   1-arity reads the live conn."
-  {:malli/schema [:function
-                  [:=> [:cat [:or :string :keyword :symbol]] :boolean]
-                  [:=> [:cat [:or :string :keyword :symbol]
-                        [:vector :string]] :boolean]]}
-  ([ns-name] (included-ns? ns-name (included-prefixes)))
-  ([ns-name prefixes]
-   (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
-     (boolean (and (not (hidden-ns-name? s))
-                   (not (test-ns-name? s))
-                   (some #(prefix-included? s %) prefixes))))))
+  "The ONE selection rule for the `<namespace>` tags: EVERY indexed
+   :seon.ns row renders EXCEPT *.internal (hidden-ns-name?) and *-test
+   (test-ns-name?) ones — both STRUCTURAL naming conventions that apply
+   to seon, my.*, and downstream code alike. No prefix allow-list: the
+   library gate lives on the INDEX side (only first-party + SEON_EXTRA_SRC
+   code ever gets a :seon.ns row — seon.indexing/first-party-file?)."
+  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+  [ns-name]
+  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
+    (boolean (and (not (hidden-ns-name? s))
+                  (not (test-ns-name? s))))))
 
 (defn- base-ns-name
   "The ns name with a trailing `-test` stripped — the SUBJECT ns a test
@@ -276,22 +203,51 @@
     (subs ns-str 0 (- (count ns-str) 5))
     ns-str))
 
+(def exemplar-nses
+  "The CURATED exemplar set — the few seon/`my.*` namespaces shown to
+   every agent IN FULL as worked patterns to imitate (curated-inventory
+   2026-06-21). Each teaches one thing:
+     - `:seon.agent.todo` — the store/retrieve EXEMPLAR: `register!` per
+       attr, three map-in/map-out `:malli/schema` fn shapes, error-as-value
+       envelopes.
+     - `:my.kb`           — the schema/provenance design (shared `:my.kb/*`
+       shapes, register-once).
+     - `:my.kb-test`      — the `deftest` idiom (fresh `:memory` conn, async).
+   A `*-test` exemplar is the ONE place the *-test render-exclusion is
+   OVERRIDDEN ([[exemplar-ns?]] beats [[test-ns-name?]]). Shared by the
+   boot indexer (which stores their real file source — see
+   `seon.client/ns-row`) and [[seon.ctx.namespaces/namespaces-section]]
+   (which renders them FULL while the rest of the framework is a manifest)."
+  #{:seon.agent.todo :my.kb :my.kb-test})
+
+(defn exemplar-ns?
+  "True when `ns-name` (string, keyword, or symbol) is one of the curated
+   [[exemplar-nses]]. String/keyword/symbol tolerant — the indexer hands a
+   string, the renderer a keyword."
+  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+  [ns-name]
+  (contains? exemplar-nses
+             (if (keyword? ns-name) ns-name (keyword (str ns-name)))))
+
 (defn full-source-ns?
   "True when `ns-name` (string, symbol, or ns-name keyword) carries its
    REAL FULL FILE TEXT as `:seon.ns/source`: every `my.*` ns (the
    human's world — always inlined), including `-test` siblings (the
-   `-test` suffix is stripped to the subject ns first). Used by the
-   boot indexer (`seon.client/ns-row`) to decide which rows get the
-   file read; [[namespaces-section]] renders whatever depth the row
-   has — one rule, one writer, no drift. Every other (non-`my.*`) ns
-   gets the minimal `(ns x)` stub at boot and compact-renders from its
-   indexed member rows."
+   `-test` suffix is stripped to the subject ns first), AND every curated
+   [[exemplar-ns?]] (so a seon-framework exemplar like `:seon.agent.todo`
+   gets its REAL body stored, not a reconstructed-from-members stub that
+   would drop private helpers/comments). Used by the boot indexer
+   (`seon.client/ns-row`) to decide which rows get the file read;
+   [[seon.ctx.namespaces/namespaces-section]] renders whatever depth the
+   row has — one rule, one writer, no drift. Every other ns gets the
+   minimal `(ns x)` stub at boot and is named in the manifest."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
   [ns-name]
   (let [s    (if (keyword? ns-name) (name ns-name) (str ns-name))
         base (base-ns-name s)]
     (boolean (and (not (hidden-ns-name? s))
-                  (my-ns-name? base)))))
+                  (or (my-ns-name? base)
+                      (exemplar-ns? s))))))
 
 ;; ------------------------------------------------------------
 ;; Pretty-print + truncation helpers.
@@ -623,7 +579,12 @@
            comment-only? nil
 
            ok?
-           (let [raw     (str (or res "nil"))
+           ;; READ-SIDE projection net (#41, D4): a legacy row whose
+           ;; stored `:seon.eval/result-edn` holds a raw `#datahike/DB`/
+           ;; `#datahike/Datom` dump is sanitized on render (re-read,
+           ;; re-project, re-pr-str) WITHOUT a cluster reset. A clean
+           ;; string (every post-fix row) returns untouched.
+           (let [raw     (str (seval/sanitize-result-edn (or res "nil")))
                  full    (count raw)
                  clipped? (> full limit)
                  ;; The value body — clipped (with the size guide) when
@@ -710,8 +671,8 @@
   ([{:seon.agent/keys [n id] db :seon.db/db :or {n 50}}]
    (let [id     (resolve-id id)
          db     (or db @db/*conn*)
-         my-eid (:db/id (db/entity {:seon.db/db db
-                                    :seon.db/ref [:seon.agent/id id]}))
+         my-eid (:db/id (db/entity-lazy {:seon.db/db db
+                                         :seon.db/ref [:seon.agent/id id]}))
          rows   (when my-eid
                   (db/query
                     {:seon.db/db db
@@ -775,8 +736,8 @@
    tutorial rows IN FULL while agent rows keep the eval cap. Walks
    agent → sessions → turns → evals. Optional `db` snapshot."
   [agent-id db]
-  (let [a (db/entity (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
-                       db (assoc :seon.db/db db)))]
+  (let [a (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
+                            db (assoc :seon.db/db db)))]
     (vec
       (for [s (sort-by :seon.agent.session/at (:seon.agent/sessions a))
             t (sort-by :seon.agent.turn/at (:seon.agent.session/turns s))
@@ -814,8 +775,8 @@
          ;; All evals across all sessions, latest first.
          all-evals
          (for [s (:seon.agent/sessions
-                   (db/entity (cond-> {:seon.db/ref [:seon.agent/id id]}
-                                db (assoc :seon.db/db db))))
+                   (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id id]}
+                                     db (assoc :seon.db/db db))))
                t (:seon.agent.session/turns s)
                e (:seon.agent.turn/evals t)
                :when (true? (:seon.eval/ok? e))]
@@ -826,8 +787,9 @@
 (defn turns-since-inbound
   "Count of :seon.agent.turn entities in the agent's current session whose
    :seon.agent.turn/at is strictly after the latest INBOUND message's :at —
-   a message with to ∋ me AND from ≠ me (sender-agnostic: the user and
-   other agents both reset the window). Drives `run-agentic-loop!`'s
+   a message with to ∋ me AND from ≠ me with a waking origin (∈
+   {:human :agent} — the user and other agents both reset the window; a
+   :core substrate nudge does NOT, #43). Drives `run-agentic-loop!`'s
    cap policy. Derived from the message + turn log; nothing stored.
    See docs/seon/concepts/reactive-context."
   ([] (turns-since-inbound {}))
@@ -838,8 +800,8 @@
          turns   (:seon.agent.session/turns session)
          ;; lookup refs are NOT auto-resolved in query args — bind the
          ;; eid explicitly so the ref-valued ?me joins work.
-         my-eid  (:db/id (db/entity {:seon.db/db db
-                                     :seon.db/ref [:seon.agent/id id]}))
+         my-eid  (:db/id (db/entity-lazy {:seon.db/db db
+                                          :seon.db/ref [:seon.agent/id id]}))
          latest-inbound-at
          (when my-eid
            (->> (db/query
@@ -857,6 +819,12 @@
                      ;; gates loop STARTS, not in-flight loops).
                      [(get-else $ ?m :seon.agent.message/hops 0) ?h]
                      [(< ?h ?cap)]
+                     ;; :core substrate nudges (tile recovery) must not
+                     ;; extend the loop either (#43) — mirrors the wake gate
+                     ;; and replied-since-inbound?. Legacy rows have no
+                     ;; origin ⇒ default :human.
+                     [(get-else $ ?m :seon.agent.message/origin :human) ?o]
+                     [(not= ?o :core)]
                      [?m :seon.agent.message/at ?at]]
                    :seon.db/args [my-eid warn/hop-cap]})
                 ffirst))]
@@ -958,10 +926,13 @@
     "you write). A clipped display is NOT a clipped value: dig into\n"
     "a big result with ordinary Clojure (get-in, filter, count) on its\n"
     "result/<id> var instead of re-querying. NEVER copy a printed `=>`\n"
-    "value back as a new form: a map, set, list, or tx-report you paste is\n"
-    "read as CODE and the reader runs it — a bare list calls its head, a\n"
-    "tx-report's #datahike/DB tags fail to read, and the form errors.\n"
-    "Reach for the result/<id> var, never the printed value.\n"
+    "value back as a new form: a map, set, or list you paste is read as\n"
+    "CODE and the reader runs it — a bare list calls its head and the form\n"
+    "errors. A printed value is also a SUMMARY, not the live object: a\n"
+    "datahike db/datom/entity in a result shows as a small placeholder\n"
+    "(e.g. {:seon.eval/opaque \"datahike/DB\" …} or {:seon.eval/datom […]})\n"
+    "— the real handle lives in result/<id>. Reach for the result/<id>\n"
+    "var, never the printed value.\n"
     "\n"
     "STATE ACROSS TURNS. A (defn …) and an atom def like (def !x (atom\n"
     "0)) persist in your namespace — define a helper now, call it next\n"
@@ -1028,7 +999,7 @@
     "\n"
     "  ;; PULL / ENTITY — by lookup ref [identity-attr value] or :db/id.\n"
     "  (seon.db/pull '[*] [:my.kb.doc/id \"d1\"])   ; {:db/id … :my.kb.doc/title …}\n"
-    "  (seon.db/entity [:my.kb.doc/id \"d1\"])      ; lazy, map-like\n"
+    "  (seon.db/entity [:my.kb.doc/id \"d1\"])      ; plain map: :db/id + attrs\n"
     "\n"
     "  ;; WILDCARD + COMPONENTS — '[*] inlines COMPONENT children as full\n"
     "  ;; nested maps (recursively); a PLAIN ref comes back as {:db/id N}.\n"
@@ -1211,7 +1182,7 @@
    Guarded by an `entity` existence check first: `db/pull` throws on an
    unresolved lookup-ref, so we confirm presence before pulling."
   [db ns-kw]
-  (when (db/entity {:seon.db/db db :seon.db/ref [:seon.ns/name ns-kw]})
+  (when (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.ns/name ns-kw]})
     (let [core (db/pull {:seon.db/db db
                          :seon.db/ref [:seon.ns/name ns-kw]
                          :seon.db/pull-pattern
@@ -1477,8 +1448,8 @@
    Called by `seon.agent/run-turn!` to build the prefetch query."
   {:malli/schema [:=> [:cat :seon.ctx/retrieval-query-request] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [my-eid (:db/id (db/entity {:seon.db/db db
-                                   :seon.db/ref [:seon.agent/id id]}))
+  (let [my-eid (:db/id (db/entity-lazy {:seon.db/db db
+                                        :seon.db/ref [:seon.agent/id id]}))
         live   (when my-eid (latest-live-inbound db my-eid))]
     (cond
       (some? live) (second live)
@@ -1505,8 +1476,8 @@
   [{:seon.agent/keys [id] db :seon.db/db}]
   (let [id     (resolve-id id)
         db     (or db @db/*conn*)
-        my-eid (:db/id (db/entity {:seon.db/db db
-                                   :seon.db/ref [:seon.agent/id id]}))
+        my-eid (:db/id (db/entity-lazy {:seon.db/db db
+                                        :seon.db/ref [:seon.agent/id id]}))
         [inbound-at _] (when my-eid (latest-live-inbound db my-eid))
         reply-at
         (when my-eid
@@ -1835,32 +1806,6 @@
                   s))
               rendered)))))
 
-(defonce ^:private !config-seed-attempted?
-  ;; Once-per-process latch for the lazy config seed below — the row is
-  ;; identity-upserted, so a lost race is harmless; the latch just stops
-  ;; every render from re-checking after the first.
-  (atom false))
-
-(defn- ensure-ctx-config!
-  "Seed THE ctx-config entity ([[config-ref]]) with
-   [[default-included-prefixes]] IF ABSENT — fire-and-forget (transact!
-   is safe-by-default), at most one attempt per process. Reads presence
-   from the render snapshot `db`; readers fall back to the defaults
-   until the row lands, so a lost write costs nothing but the
-   downstream's read-modify convenience."
-  [db]
-  (let [present? (and (contains? (db/installed-schema db)
-                                 :seon.ctx/config-id)
-                      (some? (db/entity {:seon.db/db db
-                                         :seon.db/ref config-ref})))]
-    (when (and (not present?)
-               (compare-and-set! !config-seed-attempted? false true))
-      (db/transact!
-        {:seon.db/tx-data
-         [{:seon.ctx/config-id "core"
-           :seon.ctx/included-prefixes default-included-prefixes}]}))
-    nil))
-
 (defn assemble-context
   "Compose the LLM context — the ONE composer, called by BOTH the agent
    prompt path (`seon.agent/render-prompt`) and the inspector, so
@@ -1897,7 +1842,6 @@
   {:malli/schema [:=> [:cat :seon.render/assemble-request]
                        :seon.render/assemble-response]}
   [{:seon.db/keys [db] :seon.agent/keys [id] :as input}]
-  (ensure-ctx-config! db)
   (let [entity   (db/pull {:seon.db/db db
                            :seon.db/pull-pattern
                            ;; Registered-but-uninstalled attrs (e.g. the

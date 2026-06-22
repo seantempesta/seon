@@ -698,6 +698,11 @@
   (or (:ambient-db-name @state) "default"))
 
 (defn -main [& args]
+  ;; VERY FIRST statement (consumer ask 37): a breadcrumb before any other
+  ;; work, so even a pre-`-main` death (e.g. a make-classpath2 hiccup in the
+  ;; downstream launcher's pre-exec window) is distinguishable from a writer
+  ;; that never started — an empty wire.log means we died BEFORE this line.
+  (println "[writer] booting pid=" (.pid (java.lang.ProcessHandle/current)))
   (let [opts (parse-args args)
         cfg  (store/config-for (opts->config-for-request opts))
         _    (println "[writer] starting with" opts)

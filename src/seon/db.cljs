@@ -58,6 +58,7 @@
     [clojure.string :as str]
     [cljs.reader :as reader]
     [datahike.api :as d]
+    [datahike.impl.entity :as dentity]
     [seon.db.internal :as internal]
     [seon.schema :as schema]))
 
@@ -69,13 +70,18 @@
 (schema/register! ::opts :map)
 (schema/register! ::conn :any)
 (schema/register! ::tx-meta :map)   ; positional 3-arity convenience slot
+(schema/register! ::return-report? :boolean)
 
 (schema/register!
   ::transact-request
   [:map
    [::tx-data ::tx-data]
-   [::opts    {:optional true} ::opts]
-   [::conn    {:optional true} ::conn]])
+   [::opts           {:optional true} ::opts]
+   [::conn           {:optional true} ::conn]
+   ;; Escape hatch: include the raw datahike tx-report at
+   ;; `::tx-report` in the success envelope. OFF by default — the
+   ;; agent value stays the compact data summary (#40).
+   [::return-report? {:optional true} ::return-report?]])
 
 (schema/register!
   ::error
@@ -88,12 +94,25 @@
    [:seon.error/raw     {:optional true} :any]
    [:seon.error/truncated {:optional true} :boolean]])
 
+;; The success envelope is COMPACT DATA (#40): a small summary the agent
+;; reads as a value, never the raw datahike report (no `:db-before`/
+;; `:db-after` db-value echo, no full per-datom `:tx-data`). `::tempids`
+;; is load-bearing — callers resolve tempid→eid. The raw report rides at
+;; `::tx-report` ONLY when the request set `::return-report? true`.
 (schema/register!
   ::transact-response
   [:or
    [:map
-    [::ok?       [:= true]]
-    [::tx-report :any]]
+    [::ok?        [:= true]]
+    [::tempids    [:map-of :any :int]]
+    [::tx         :int]
+    [::tx-count   :int]
+    [::added      :int]
+    [::retracted  :int]
+    ;; Escape hatch — present only under `::return-report? true`. `:any`
+    ;; because the raw report carries datahike db-value handles (a
+    ;; third-party boundary; the no-:any rule's documented exception).
+    [::tx-report  {:optional true} :any]]
    [:map
     [::ok?       [:= false]]
     [::error     ::error]
@@ -296,12 +315,21 @@
    Both shapes resolve to the SAME envelope. SAFE BY DEFAULT: this
    never throws into your eval — every failure (bad invocation shape,
    unregistered attr, value fails its schema, datahike commit
-   explosion) returns as data:
+   explosion) returns as data. SUCCESS is COMPACT DATA, never the raw
+   datahike report (#40):
 
-     {::db/ok? true  ::db/tx-report <datahike report>}   ; success
+     {::db/ok? true                ; success — a small data summary:
+      ::db/tempids   {…}           ;   tempid→eid map (resolve your refs)
+      ::db/tx        <tx-id>       ;   the committed tx (max-tx)
+      ::db/tx-count  <n>           ;   datoms in the tx
+      ::db/added <n> ::db/retracted <m>}
      {::db/ok? false ::db/error <error map>}             ; failure
      ;; + ::db/raw-error <original message> when the core
      ;; translated a cryptic datahike error into a guiding one
+
+   Pass `::db/return-report? true` to ALSO get the raw datahike report at
+   `::db/tx-report` (escape hatch — needs `:db-after`/`:db-before`); the
+   default omits it so the agent value stays small.
 
    The error's `:seon.error/data` carries `:seon.error/kind` —
    `:user-input` (fix tx-data and retry) vs `:core-bug` (the pod
@@ -666,17 +694,14 @@
   ([db selector eid]
    (guarded-pull db selector eid)))
 
-(defn entity
-  "Look up an entity by eid or lookup-ref. Sync. Returns a datahike
-   entity (lazy map-like).
+(defn entity-lazy
+  "INTERNAL: look up an entity and return the RAW datahike Entity (lazy,
+   map-like). Ref attrs navigate lazily to nested Entities — the render
+   hot-path (`seon.ctx.transcript/session-turns` walks agent → sessions →
+   turns → evals) depends on this lazy traversal, so it MUST NOT touch.
 
-   - map-in:     (db/entity {::db/ref [::name \"Alpha\"]})
-   - positional, mirroring datahike: (db/entity <db> eid)
-   - positional, db OMITTED — a bare eid/lookup-ref auto-injects the
-     db from `*conn*`: (db/entity eid)"
-  ;; The 1-arg arity accepts EITHER a request map OR a bare eid/lookup-ref
-  ;; (auto-inject from *conn*) — one arity-1 `:=>` (the body branches on
-  ;; map?); a separate eid-only `:=>` would collide with the request arity.
+   Not part of the agent-taught surface — agents call [[entity]] (which
+   returns a plain touched map) or [[pull]]. Same call shapes as [[entity]]."
   {:malli/schema
    [:function
     [:=> [:cat [:or ::entity-request :any]] :any]
@@ -689,6 +714,39 @@
      (d/entity @(internal/resolve-conn *conn*) req)))
   ([db eid]
    (d/entity db eid)))
+
+(defn- touch->map
+  "Touch a datahike Entity and return a PLAIN map — `:db/id` plus every
+   loaded attr. nil-safe (an unresolved ref → nil). Ref values stay as
+   datahike's loaded form (nested Entity / set of Entities), which prints
+   as `{:db/id N}` — readable, and the agent drills via the eid + a
+   follow-up `entity`/`pull` rather than walking lazily."
+  [e]
+  (when e
+    (dentity/touch e)
+    (into {:db/id (:db/id e)} e)))
+
+(defn entity
+  "Look up an entity by eid or lookup-ref. Sync. Returns a PLAIN MAP —
+   `:db/id` plus every attr on the entity (a TOUCHED snapshot), nil if the
+   ref doesn't resolve. The agent reads data, never a lazy datahike handle
+   (#40/P2) — a raw Entity prints opaquely and re-reads as `[object
+   Object]`. Drill into a ref attr with a follow-up `entity`/`pull` on its
+   `:db/id`.
+
+   - map-in:     (db/entity {::db/ref [::name \"Alpha\"]})
+   - positional, mirroring datahike: (db/entity <db> eid)
+   - positional, db OMITTED — a bare eid/lookup-ref auto-injects the
+     db from `*conn*`: (db/entity eid)"
+  ;; The 1-arg arity accepts EITHER a request map OR a bare eid/lookup-ref
+  ;; (auto-inject from *conn*) — one arity-1 `:=>` (the body branches on
+  ;; map?); a separate eid-only `:=>` would collide with the request arity.
+  {:malli/schema
+   [:function
+    [:=> [:cat [:or ::entity-request :any]] :any]
+    [:=> [:catn [::db ::db-val] [::eid :any]] :any]]}
+  ([req]      (touch->map (entity-lazy req)))
+  ([db eid]   (touch->map (entity-lazy db eid))))
 
 ;; ---------------------------------------------------------------------------
 ;; Listeners

@@ -215,6 +215,35 @@
     (is (re-find #"invalid tag" structure-message))
     (is (re-find #"123" structure-message) "quotes the offending value")))
 
+(deftest structure-error-locates-misplaced-attrs
+  ;; #42 — the unambiguous displaced-attrs case: the 2nd slot is a
+  ;; non-map child AND an attrs-looking map sits at child index ≥ 1, so
+  ;; the serializer reads it as garbage content instead of attrs.
+  (let [{:seon.render.live-tile/keys [structure-path structure-message]}
+        (tile/hiccup-structure-error [:div "title" {:class "c"} "body"])]
+    (is (= [2] structure-path) "the misplaced map's vector index")
+    (is (re-find #"misplaced attrs map" structure-message))
+    (is (re-find #"SECOND element" structure-message)
+        "the message names the attrs-position rule")
+    (is (re-find #"child index 1" structure-message)
+        "the message names the offending child index")
+    (is (re-find #"\{:class" structure-message) "quotes the offending map"))
+  (testing "nested — the path descends into the offending child"
+    (let [{:seon.render.live-tile/keys [structure-path]}
+          (tile/hiccup-structure-error [:div [:span "a" {:k 1}]])]
+      (is (= [1 2] structure-path))))
+  (testing "CONSERVATIVE — valid tiles never trip the misplaced-attrs rule"
+    ;; correct attrs in 2nd position
+    (is (nil? (tile/hiccup-structure-error [:div {:k 1} "x"])))
+    ;; no map at all
+    (is (nil? (tile/hiccup-structure-error [:h3 "x"])))
+    (is (nil? (tile/hiccup-structure-error [:div [:h3 "x"] [:p "y"]])))
+    ;; bare tag
+    (is (nil? (tile/hiccup-structure-error [:hr])))
+    ;; a raw map as content is fine (raw? excluded)
+    (is (nil? (tile/hiccup-structure-error
+                [:div "txt" (html/raw "<b>x</b>")])))))
+
 ;; ============================================================
 ;; Pure-data platform law (sci-not-available regression, 2026-06-11):
 ;; registered schema forms must survive the form round-trip —

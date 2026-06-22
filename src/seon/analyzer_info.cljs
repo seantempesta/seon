@@ -124,7 +124,13 @@
    Filters out `:declared true` entries (`(declare …)` produces a
    skeleton var-map with no body/arglists; tee'ing it would persist
    noise and overwrite a subsequent real defn's projection if the
-   declare came after — A7)."
+   declare came after — A7). Also filters out the synthetic result vars
+   (`:seon.eval/result-var? true`): `seon.eval/bind-result-var!`
+   registers each eval's value under the reserved `result` ns, and
+   without this guard those would tee as bogus `:seon.fn` rows + a
+   sourceless `{:seon.ns/name :result}` row (the prefix allow-list was
+   the only thing hiding them — once it's gone they leak into the
+   `<namespace>` inventory)."
   {:malli/schema [:=> [:cat ::defs-snapshot ::compile-state] [:sequential ::new-def]]}
   [before-snapshot compile-state]
   {:pre [(map? before-snapshot) (some? compile-state)]}
@@ -139,8 +145,13 @@
           ;;   {:methods …}}}). They carry no :name / :arglists and
           ;;   would tee as junk.
           ;; - :declared filters (declare …) skeletons (A7).
+          ;; - :seon.eval/result-var? filters the synthetic eval-result
+          ;;   vars (bound under the reserved `result` ns by
+          ;;   seon.eval/bind-result-var!) — they are not defs the agent
+          ;;   wrote and must never tee into the program graph.
           :when (and (simple-symbol? sym)
                      (not (true? (:declared var-map)))
+                     (not (true? (:seon.eval/result-var? var-map)))
                      (not= before-digest now-digest))]
       {:ns ns-sym :sym sym :var-map var-map})))
 

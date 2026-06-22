@@ -134,6 +134,75 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; #43 — a :core-origin message (a substrate nudge, e.g. tile recovery,
+;; sent FROM the user-ref) must NEVER move the halt baseline. Without the
+;; origin exclusion a broken-tile :core message arriving AFTER the reply
+;; would push the inbound side past the reply and re-open the window,
+;; re-arming the loop. A real :human follow-up still re-opens it.
+;; ---------------------------------------------------------------------------
+
+(deftest replied-since-inbound?-ignores-core-origin
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [t0 (js/Date.)]
+              (await (db/transact!
+                       {:seon.db/tx-data
+                        [{:seon.user/id "user"}
+                         {:seon.agent/id agent-id
+                          :seon.agent/state :idle
+                          :seon.agent/sessions
+                          [{:seon.agent.session/id "SEScoretest001"
+                            :seon.agent.session/at t0}]}
+                         ;; human asks
+                         {:seon.agent.message/id "MSGcore0000001"
+                          :seon.agent.message/from {:seon.user/id "user"}
+                          :seon.agent.message/to [{:seon.agent/id agent-id}]
+                          :seon.agent.message/content "what is 1+1?"
+                          :seon.agent.message/at (t+ t0 10)
+                          :seon.agent.message/hops 0
+                          :seon.agent.message/origin :human}
+                         ;; agent replies
+                         {:seon.agent.message/id "MSGcore0000002"
+                          :seon.agent.message/from {:seon.agent/id agent-id}
+                          :seon.agent.message/to [{:seon.user/id "user"}]
+                          :seon.agent.message/content "2"
+                          :seon.agent.message/at (t+ t0 20)
+                          :seon.agent.message/hops 1
+                          :seon.agent.message/origin :agent}]}))
+              (testing "after the reply the loop halts → true"
+                (is (true? (agent/replied-since-inbound?
+                             {:seon.agent/id agent-id}))))
+              ;; a :core nudge lands AFTER the reply (sent from the user-ref)
+              (await (db/transact!
+                       {:seon.db/tx-data
+                        [{:seon.agent.message/id "MSGcore0000003"
+                          :seon.agent.message/from {:seon.user/id "user"}
+                          :seon.agent.message/to [{:seon.agent/id agent-id}]
+                          :seon.agent.message/content "your tile broke (substrate)"
+                          :seon.agent.message/at (t+ t0 30)
+                          :seon.agent.message/hops 0
+                          :seon.agent.message/origin :core}]}))
+              (testing ":core message does NOT move the baseline → still true"
+                (is (true? (agent/replied-since-inbound?
+                             {:seon.agent/id agent-id}))))
+              ;; a real :human follow-up DOES re-open the window
+              (await (db/transact!
+                       {:seon.db/tx-data
+                        [{:seon.agent.message/id "MSGcore0000004"
+                          :seon.agent.message/from {:seon.user/id "user"}
+                          :seon.agent.message/to [{:seon.agent/id agent-id}]
+                          :seon.agent.message/content "and 2+2?"
+                          :seon.agent.message/at (t+ t0 40)
+                          :seon.agent.message/hops 0
+                          :seon.agent.message/origin :human}]}))
+              (testing ":human follow-up re-opens the window → false"
+                (is (false? (agent/replied-since-inbound?
+                              {:seon.agent/id agent-id})))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; ensure-session! — session scope is the POD PROCESS, not the DB.
 ;; A session present in the store but opened by a previous pod run
 ;; (simulated by transacting it directly — it's never in

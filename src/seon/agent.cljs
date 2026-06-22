@@ -557,15 +557,21 @@
 
 (defn- inbound-msg-datom?
   "True iff this added `:seon.agent.message/to` datom targets `my-eid` from a
-   DIFFERENT sender. The to-check is load-bearing: every agent installs
-   this listener, so without it ONE message wakes EVERY agent's loop —
-   each stray wake is a wasted LLM call (observed live 2026-06-09).
-   The from-check (`from ≠ me`) is what stops an agent's own writes —
-   including its per-turn assistant message — from re-kicking itself."
+   DIFFERENT sender with a WAKING origin (∈ {:human :agent}). The to-check
+   is load-bearing: every agent installs this listener, so without it ONE
+   message wakes EVERY agent's loop — each stray wake is a wasted LLM call
+   (observed live 2026-06-09). The from-check (`from ≠ me`) stops an agent's
+   own writes — including its per-turn assistant message — from re-kicking
+   itself. The origin-check (#43) is what stops a :core substrate nudge (a
+   tile-recovery message, sent FROM the user-ref) from waking an idle agent:
+   only a real :human message or an :agent↔peer consult wakes a loop. Legacy
+   rows have no origin attr — treat absent origin as waking (those predate
+   :core and were all human/agent)."
   [db {eid :seon.db/e target :seon.db/v} my-eid]
   (and (= target my-eid)
        (let [msg (db/entity {:seon.db/db db :seon.db/ref eid})]
-         (not= my-eid (:db/id (:seon.agent.message/from msg))))))
+         (and (not= my-eid (:db/id (:seon.agent.message/from msg)))
+              (not= :core (:seon.agent.message/origin msg))))))
 
 (defn- inbound-message-handler
   [{:seon.agent/keys [id] :as input}]
@@ -1347,6 +1353,14 @@
               ;; seon.ctx/turns-since-inbound).
               [(get-else $ ?m :seon.agent.message/hops 0) ?h]
               [(< ?h ?cap)]
+              ;; :core substrate nudges (tile recovery, sent FROM the
+              ;; user-ref) never wake a loop and must not move the halt
+              ;; baseline either (#43) — else a broken-tile :core message
+              ;; would push the inbound side forward and keep the loop
+              ;; running. Legacy rows have no origin ⇒ default to :human
+              ;; (those predate :core; all were human/agent).
+              [(get-else $ ?m :seon.agent.message/origin :human) ?o]
+              [(not= ?o :core)]
               [?m :seon.agent.message/at ?at]]
             [my-eid warn/hop-cap]))
         outbound-at

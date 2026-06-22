@@ -64,8 +64,8 @@
    datahike) ref vector. Optional `db` snapshot (the composer threads
    its render db)."
   [agent-id db]
-  (let [a (db/entity (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
-                       db (assoc :seon.db/db db)))]
+  (let [a (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
+                            db (assoc :seon.db/db db)))]
     (vec
       (for [s (sort-by :seon.agent.session/at (:seon.agent/sessions a))
             t (sort-by :seon.agent.turn/at (:seon.agent.session/turns s))]
@@ -180,7 +180,7 @@
           ;; Render only when this inbound has NOT yet opened a turn — i.e.
           ;; it is the question the CURRENT (about-to-open) turn answers.
           (when-not (contains? woken-eids m-eid)
-            (let [from (db/entity {:seon.db/db db :seon.db/ref f-eid})]
+            (let [from (db/entity-lazy {:seon.db/db db :seon.db/ref f-eid})]
               (sender-line {:seon.user/id (:seon.user/id from)
                             :seon.agent/id (:seon.agent/id from)}
                            content))))))))
@@ -218,8 +218,8 @@
   (let [db       (or db @db/*conn*)
         cur-sess (:seon.agent.session/id (ctx/current-session id db))
         turns    (session-turns id db)
-        my-eid   (:db/id (db/entity {:seon.db/db db
-                                     :seon.db/ref [:seon.agent/id id]}))
+        my-eid   (:db/id (db/entity-lazy {:seon.db/db db
+                                          :seon.db/ref [:seon.agent/id id]}))
         ;; The question being answered NOW — not yet any turn's woken-by
         ;; (the prompt renders BEFORE its turn opens). ALWAYS kept.
         pending  (pending-inbound-line db my-eid turns)

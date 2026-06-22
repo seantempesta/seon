@@ -37,6 +37,16 @@
 ;; whose hops reached `seon.warn/hop-cap` so two agents can't auto-bill
 ;; an infinite reply chain.
 (schema/register! :seon.agent.message/hops    :int)
+;; Provenance (#43): WHO authored this message, deterministic for the
+;; wake/halt gates. :human = the one human (HTTP/user adapter); :agent =
+;; an agent's own send/consult/reply; :core = a substrate-originated
+;; nudge (e.g. tile-recovery) that must NEVER wake an idle agent NOR move
+;; the halt baseline. Anchoring the wake gate (inbound-msg-datom?) and
+;; the halt side (replied-since-inbound?) to origin ∈ {:human :agent} ∧
+;; from ≠ me means a :core message can't masquerade as human and re-arm
+;; a loop. Derived by default in message! from `from` (user ⇒ :human,
+;; else :agent); :core is set explicitly by the substrate caller.
+(schema/register! :seon.agent.message/origin  [:enum :human :agent :core])
 
 ;; The user is a REAL entity — ONE `:seon.user/id` row seeded at boot
 ;; (identity upsert, idempotent — same pattern as agent entities). All
@@ -64,7 +74,8 @@
    [:seon.agent.message/to      :seon.agent.message/to]
    [:seon.agent.message/content :seon.agent.message/content]
    [:seon.agent.message/at      :seon.agent.message/at]
-   [:seon.agent.message/hops    :seon.agent.message/hops]])
+   [:seon.agent.message/hops    :seon.agent.message/hops]
+   [:seon.agent.message/origin  :seon.agent.message/origin]])
 
 ;; ============================================================
 ;; message! / reply! — the SINGLE write entry point for messages.
@@ -89,7 +100,13 @@
    ;; unless the caller passes force — a deliberate "I have seen the
    ;; failures and am replying about them anyway". Request-only; never
    ;; stored.
-   [:seon.agent.message/force {:optional true} :boolean]])
+   [:seon.agent.message/force {:optional true} :boolean]
+   ;; Provenance override (#43). Absent ⇒ DERIVED from `from` (user ⇒
+   ;; :human, else :agent). A substrate-originated nudge (tile recovery)
+   ;; passes :core explicitly so it can't wake an idle agent or move the
+   ;; halt baseline. The HTTP/user adapter relies on the derived :human;
+   ;; agent sends/consults/replies on the derived :agent.
+   [:seon.agent.message/origin {:optional true} :seon.agent.message/origin]])
 
 ;; Concise success / standard error envelope (#26, A3 applied): the raw
 ;; transact tx-report is OFF the agent surface — ~1.5k transcript chars
@@ -254,7 +271,7 @@
    agent composed before its batch's results existed is the same false
    claim as a user-facing reply."
   {:malli/schema [:=> [:cat ::message-request] ::message-response]}
-  [{:seon.agent.message/keys [content from to force]}]
+  [{:seon.agent.message/keys [content from to force origin]}]
   (let [agent-id (db/current-agent-id)
         from     (or from (when agent-id [:seon.agent/id agent-id]))
         to       (cond
@@ -297,9 +314,14 @@
                  "\nVerify each failure, then reply about what ACTUALLY "
                  "happened — or pass :seon.agent.message/force true to "
                  "send this text anyway.")}}
-          (let [hops   (if (user-entity? from)
+          (let [from-user? (user-entity? from)
+                hops   (if from-user?
                          0
                          (inc (waking-hops agent-id)))
+                ;; Provenance (#43): explicit :origin wins (a :core nudge);
+                ;; otherwise derived — a user-ref send is :human, every
+                ;; other send is :agent. Never stored as nil.
+                origin (or origin (if from-user? :human :agent))
                 msg-id (db/new-id!)
                 env    (await
                          (db/transact!
@@ -309,7 +331,8 @@
                               :seon.agent.message/to      to
                               :seon.agent.message/content content
                               :seon.agent.message/at      (js/Date.)
-                              :seon.agent.message/hops    hops}]}))]
+                              :seon.agent.message/hops    hops
+                              :seon.agent.message/origin  origin}]}))]
             (if (:seon.db/ok? env)
               ;; concise success — the tx-report stays off the agent
               ;; surface; the id is the durable handle

@@ -451,20 +451,16 @@
               ;;     the page render embedding this hiccup cannot throw
               ;;     on this tile.
               (html/->string hiccup))
-            ;; Reaching here = a HEALTHY agent-tile render. Clear any
-            ;; throwing-tile notification dedup so a LATER breakage re-notifies
-            ;; the agent (and the dedup set stays bounded — working tiles clear
-            ;; their own keys).
-            (when (render-sci/agent-authored-sym? value)
-              (render-sci/note-tile-ok! id value))
             resp)
           (catch :default e
             ;; A broken tile must never crash the render and never show the
-            ;; human a scary error: actively notify the AGENT (deduped) and
-            ;; return the calm 'updating this panel' card for the human.
-            (when (render-sci/agent-authored-sym? value)
-              (render-sci/notify-tile-error!
-                id value (:seon.error/message (err/->map e))))
+            ;; human a scary error: return the calm 'updating this panel' card
+            ;; for the human. The agent is NOT actively pushed a message (#43 /
+            ;; D2 — a forged self-message wakes + defeats the halt); breakage
+            ;; is a DERIVED surface: error-response's :seon.render/ai twin
+            ;; ("YOUR LIVE TILE IS BROKEN …") is re-derived into the agent's
+            ;; live-tile context section every turn, self-healing on the next
+            ;; clean render. No stored flag, no notification.
             (live-tile/error-response
               {:seon.db/error                 (err/->map e)
                :seon.render.live-tile/content value})))))))

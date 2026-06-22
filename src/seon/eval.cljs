@@ -1540,10 +1540,14 @@
     (vec (concat upsert retracts))))
 
 ;; Namespaces the requires-tee SKIPS — transient eval scaffolding, never
-;; a real program-graph ns: `cljs.user` (REPL default home) and
-;; `seon.dynamic` (the `cljs.js/eval-str` target). A real agent/core ns
-;; (`seon.*`, `my.*`, a data ns) gets a `:seon.ns` row; these do not.
-(def ^:private transient-ns-syms #{'cljs.user 'seon.dynamic})
+;; a real program-graph ns: `cljs.user` (REPL default home),
+;; `seon.dynamic` (the `cljs.js/eval-str` target), and `result` (the
+;; reserved ns holding the synthetic `result/<id>` value vars from
+;; bind-result-var! — belt-and-suspenders alongside the
+;; analyzer-info/defs-since `:seon.eval/result-var?` filter). A real
+;; agent/core ns (`seon.*`, `my.*`, a data ns) gets a `:seon.ns` row;
+;; these do not.
+(def ^:private transient-ns-syms #{'cljs.user 'seon.dynamic 'result})
 
 ;; ----------------------------------------------------------------------------
 ;; Agent-no-override-core guard (db-is-the-running-system PRD; Sean: agents
@@ -1815,33 +1819,185 @@
    (globalThis live-result stash); the row cap is a render concern only."
   50)
 
-(defn render-result-edn
-  "Stringify an eval's success VALUE for `:seon.eval/result-edn`.
+;; --- agent-safe projection ---------------------------------------------
+;; The transcript shows a CLIPPED, READER-SAFE summary of each eval value,
+;; never a raw dump. A datahike DB/Datom/Entity (or any runtime handle,
+;; record, or raw JS object) dumped verbatim into `<past-evals>` is both
+;; noise (a multi-KB index blob) AND a self-inflicted trap: the agent
+;; reads its OWN committed work back as `#datahike/DB {…}` and, even when
+;; the tag IS reader-registered, gets an opaque `[object Object]` instead
+;; of data. The fix (#41) is structural — project every such node to a
+;; small, plain-data summary BEFORE it becomes a string. The RAW value is
+;; untouched as `result/<id>` (the projection is display-only).
+;;
+;; The walk recurses through plain collections only. A datahike DB is also
+;; `map?`/`coll?`, so the OPAQUE test runs FIRST — `(map? x)` recursion is
+;; gated on `(not (record? x))` (datahike DB/Datom/Entity and any Clojure
+;; record are records or custom types, never plain maps). #inst/#uuid and
+;; every plain Clojure scalar survive verbatim.
 
-   Collection guard: when `value` is a counted collection with more than
-   `result-row-cap` rows, render a bounded preview (first `result-row-cap`
-   rows) and PREPEND a guiding clip message — a broad query result becomes
-   actionable feedback instead of a char-clipped giant set. Otherwise
-   pr-str normally (the size cap `cap-edn` still backstops huge scalars).
+(defn- datahike-handle?
+  "True when `x` is a datahike runtime handle that prints as an opaque /
+   bloated tagged form — a DB value (any temporal variant), a Connection,
+   or a lazy Entity. Detected by ILookup probes that are cheap and don't
+   force a full index walk: a DB carries `:max-tx`, an Entity carries
+   `:db/id` but is neither a plain map nor a record. Datom is handled
+   separately (it has its own e/a/v projection)."
+  [x]
+  (or
+    ;; DB / FilteredDB / HistoricalDB / AsOfDB / SinceDB — records whose
+    ;; ILookup answers :max-tx; a plain map could too, but a plain map is
+    ;; not a record, and we only reach here for the record/custom-type
+    ;; branch.
+    (and (record? x) (some? (:max-tx x)))
+    ;; Entity — custom type (neither map nor record nor seqable coll),
+    ;; ILookup answers :db/id.
+    (and (not (map? x)) (not (record? x)) (not (seqable? x))
+         (some? (:db/id x)))))
+
+(defn- opaque-summary
+  "A reader-safe summary datum for a non-plain value. Datahike Datom →
+   `{:seon.eval/datom [e a v]}`. A datahike DB/Entity/Connection or any
+   tagged record / raw JS object → `{:seon.eval/opaque <label>
+   :seon.eval/summary <clipped-printout>}`. Never throws — a summary is a
+   best-effort label, not a faithful round-trip."
+  [x]
+  (try
+    (cond
+      ;; datahike Datom — `coll? false`/`record? false`, ILookup answers
+      ;; :e (int eid) / :a (keyword attr) / :v. `contains?` THROWS on a
+      ;; Datom (no IAssociative), so detect by the eid+keyword-attr shape.
+      (and (not (coll? x)) (not (record? x))
+           (number? (:e x)) (keyword? (:a x)))
+      {:seon.eval/datom [(:e x) (:a x) (:v x)]}
+
+      (and (record? x) (some? (:max-tx x)))
+      {:seon.eval/opaque "datahike/DB"
+       :seon.eval/summary (str "max-tx=" (:max-tx x) " max-eid=" (:max-eid x))}
+
+      (and (not (map? x)) (not (record? x)) (some? (:db/id x)))
+      {:seon.eval/opaque "datahike/Entity"
+       :seon.eval/summary (str ":db/id=" (:db/id x))}
+
+      (record? x)
+      {:seon.eval/opaque (or (some-> (type x) pr-str) "record")
+       :seon.eval/summary (subs (str (pr-str x)) 0 (min 200 (count (pr-str x))))}
+
+      (object? x)
+      {:seon.eval/opaque "js/Object"
+       :seon.eval/summary (let [s (str (pr-str x))]
+                            (subs s 0 (min 200 (count s))))}
+
+      :else
+      {:seon.eval/opaque "unknown"
+       :seon.eval/summary (let [s (str x)] (subs s 0 (min 200 (count s))))})
+    (catch :default _
+      {:seon.eval/opaque "unknown" :seon.eval/summary "<unprintable>"})))
+
+(defn project-agent-safe
+  "Recursively project an eval VALUE into a reader-safe, plain-data shape
+   for the transcript (#41). Plain Clojure scalars (incl. #inst/#uuid),
+   keywords, symbols, and strings survive verbatim. Plain collections are
+   walked element-wise. Any node that is NOT plain data — a datahike
+   Datom/DB/Entity, a tagged record, a raw JS object — becomes a small
+   summary datum (see [[opaque-summary]]). Applied per-node, so an opaque
+   value nested inside a query result is sanitized too, not just a
+   top-level one. Pure; never throws (a walk failure degrades to the
+   opaque summary for that node)."
+  [x]
+  (try
+    (cond
+      ;; Opaque handles / records FIRST — a datahike DB is also map?/coll?.
+      (datahike-handle? x) (opaque-summary x)
+      (record? x)          (opaque-summary x)
+
+      ;; A datahike Datom (eid+keyword-attr shape) or any non-coll opaque
+      ;; leaf — JS object, fn. `contains?` throws on a Datom, so the Datom
+      ;; test mirrors opaque-summary's (number eid + keyword attr).
+      (and (not (coll? x))
+           (or (object? x)
+               (fn? x)
+               (and (number? (:e x)) (keyword? (:a x)))))
+      (opaque-summary x)
+
+      ;; Plain map — recurse over keys AND values.
+      (map? x)
+      (reduce-kv (fn [m k v]
+                   (assoc m (project-agent-safe k) (project-agent-safe v)))
+                 {} x)
+
+      ;; Plain vector/set/list/seq — recurse element-wise, preserving the
+      ;; collection kind (lazy/seq → vector for a counted preview later).
+      (coll? x)
+      (if (seq? x)
+        (mapv project-agent-safe x)
+        (into (empty x) (map project-agent-safe) x))
+
+      :else x)
+    (catch :default _ (opaque-summary x))))
+
+(defn sanitize-result-edn
+  "READ-SIDE net for the agent-safe projection (#41, decision D4). A row
+   written BEFORE the write-side projection landed still holds a raw
+   `#datahike/DB {…}` / `#datahike/Datom […]` (or other opaque-tagged)
+   dump in its stored `:seon.eval/result-edn` string. Re-read it with
+   `cljs.reader` (whose tag table reconstructs the datahike/record handles
+   as real objects), re-[[project-agent-safe]], and re-pr-str — so legacy
+   transcript rows sanitize on render WITHOUT a cluster reset.
+
+   Cheap-cases-fast: only the substring-screen (`#datahike/` / `#js ` /
+   `#object`) triggers the read+reproject; an already-clean string (the
+   common case, and every row written post-fix) is returned untouched.
+   Never throws — an unreadable string is returned verbatim (the value the
+   agent already sees today)."
+  [s]
+  (if (and (string? s)
+           (or (str/includes? s "#datahike/")
+               (str/includes? s "#js ")
+               (str/includes? s "#object")))
+    (try
+      (pr-str (project-agent-safe (reader/read-string s)))
+      (catch :default _ s))
+    s))
+
+(defn render-result-edn
+  "Stringify an eval's success VALUE for `:seon.eval/result-edn`, as an
+   AGENT-SAFE PROJECTION (#41).
+
+   Every value first passes through [[project-agent-safe]] — a recursive
+   walk that replaces any datahike runtime handle (DB/Datom/Entity), tagged
+   record, or raw JS object with a small reader-safe summary datum, so the
+   agent never reads its own committed work back as a `#datahike/DB {…}`
+   blob or an opaque `[object Object]`. Plain data (incl. #inst/#uuid) is
+   untouched. The projection is DISPLAY-ONLY: the raw value is stashed
+   independently as `result/<id>`.
+
+   Collection guard: when the projected value is a counted collection with
+   more than `result-row-cap` rows, render a bounded preview (first
+   `result-row-cap` rows) and PREPEND a guiding clip message — a broad
+   query result becomes actionable feedback instead of a char-clipped
+   giant set. Otherwise pr-str normally (the size cap `cap-edn` still
+   backstops huge scalars).
 
    Operates on the RAW value (pre-pr-str) — this is the only point in the
    pipeline where the original row count is known. Pure: stores nothing,
    does not touch the live-result stash. Never throws."
   [eval-id value]
   (try
-    (if (and (coll? value)
-             (counted? value)
-             (> (count value) result-row-cap))
-      (let [total   (count value)
-            preview (take result-row-cap value)
-            dropped (- total result-row-cap)
-            body    (str/join "\n " (map pr-str preview))]
-        (str ";; … " total " rows; showing first " result-row-cap
-             ", +" dropped " more clipped. Narrow your query: a tighter "
-             ":where, a :find aggregate, or take fewer; result/" eval-id
-             " holds the full value to drill with get-in/filter.\n"
-             "(" body ")"))
-      (pr-str value))
+    (let [value (project-agent-safe value)]
+      (if (and (coll? value)
+               (counted? value)
+               (> (count value) result-row-cap))
+        (let [total   (count value)
+              preview (take result-row-cap value)
+              dropped (- total result-row-cap)
+              body    (str/join "\n " (map pr-str preview))]
+          (str ";; … " total " rows; showing first " result-row-cap
+               ", +" dropped " more clipped. Narrow your query: a tighter "
+               ":where, a :find aggregate, or take fewer; result/" eval-id
+               " holds the full value to drill with get-in/filter.\n"
+               "(" body ")"))
+        (pr-str value)))
     (catch :default _ (str value))))
 
 (defn ^:async record-eval!

@@ -422,6 +422,10 @@
                      {:seon.agent.message/from    [:seon.user/id "user"]
                       :seon.agent.message/to       [[:seon.agent/id agent-id]]
                       :seon.agent.message/content (warning-text sym budget-ms)
+                      ;; :core origin (#43) — a substrate nudge, NOT a human
+                      ;; message: it must not wake an idle agent or move the
+                      ;; halt baseline even though it sends from the user-ref.
+                      :seon.agent.message/origin  :core
                       :seon.agent.message/force   true}))))
         (.catch (fn [e]
                   (log/warn! {:seon.log/source  ::recover-hung-tile!
@@ -431,53 +435,15 @@
         (.finally (fn [] (swap! !recovering disj agent-id)))))
   nil)
 
-(def ^:private !error-notified
-  "\"agent-id|sym\" pairs already notified of a throwing tile (dedupe), so a
-   tile that throws every render notifies the agent ONCE, not every frame. The
-   key is CLEARED by [[note-tile-ok!]] when that same tile next renders cleanly
-   — so a tile that breaks, gets fixed, then breaks again re-notifies, and the
-   set doesn't grow without bound (working tiles clear their own keys). The
-   `:seon.render/ai` twin still surfaces an ONGOING breakage every turn (the
-   awareness section), so the agent is never blind to a still-broken tile."
-  (atom #{}))
-
-(defn note-tile-ok!
-  "Record that agent `agent-id`'s tile `sym` rendered cleanly — clears any
-   throwing-tile notification dedup for it, so a future breakage re-notifies
-   and the dedup set stays bounded. Returns nil."
-  {:malli/schema [:=> [:catn [::agent-id [:maybe :string]] [::sym :any]] :nil]}
-  [agent-id sym]
-  (when agent-id
-    (swap! !error-notified disj (str agent-id "|" sym)))
-  nil)
-
-(defn notify-tile-error!
-  "Actively tell agent `agent-id` that its tile fn `sym` threw (so the human
-   is seeing the calm 'updating this panel' placeholder, not its content).
-   Async, fire-and-forget, deduped per (agent,sym) until [[note-tile-ok!]]
-   clears it. Does NOT reset the tile — the agent keeps its wired fn so a fix
-   takes effect. Returns nil. Never throws (the user's rule: a tile problem
-   must not crash the pod)."
-  {:malli/schema [:=> [:catn [::agent-id [:maybe :string]] [::sym :symbol]
-                       [::error-message [:maybe :string]]] :nil]}
-  [agent-id sym error-message]
-  (let [k (str agent-id "|" sym)]
-    (when (and agent-id (not (contains? @!error-notified k)))
-      (swap! !error-notified conj k)
-      (-> (js/Promise.resolve)
-          (.then (fn [_]
-                   (when-let [message! (seval/lookup-value 'seon.agent.message/message!)]
-                     (message!
-                       {:seon.agent.message/from    [:seon.user/id "user"]
-                        :seon.agent.message/to       [[:seon.agent/id agent-id]]
-                        :seon.agent.message/content
-                        (str "Your live tile fn `" sym "` threw an error, so your "
-                             "human is seeing a calm placeholder panel instead of "
-                             "your content. Error: " (or error-message "(unknown)")
-                             ". Tile fns must return {:seon.render/hiccup … "
-                             ":seon.render/ai …} from a few terminating DB queries — "
-                             "fix the fn or re-wire :seon.render.live-tile/content "
-                             "with a working value.")
-                        :seon.agent.message/force   true}))))
-          (.catch (fn [_] nil)))))
-  nil)
+;; The active tile-error PUSH was DROPPED (#43 / D2, 2026-06-21). A
+;; forged message wakes the agent — and the old notify-tile-error! sent
+;; FROM the user-ref with :force, indistinguishable from a human message,
+;; so a broken tile re-armed the wake loop AND defeated the halt. There is
+;; no active intervention now: a broken tile is a DERIVED surface. The
+;; `:seon.render/ai` twin in seon.render.live-tile/error-response carries
+;; "YOUR LIVE TILE IS BROKEN — …" and the :seon.ctx.live-tile/live-tile-
+;; section re-derives it from the db value EVERY turn (a pure fn of state,
+;; no stored error flag, self-healing when the tile renders clean again).
+;; The agent learns of breakage by reading its own context, not by being
+;; woken. The dedup atom + note-tile-ok! that existed only to throttle the
+;; push went with it — a derived surface needs no dedup.

@@ -180,10 +180,11 @@
     (with-conn
       (fn [conn]
         (.then (tx! conn [{::name "Alpha" ::rank 1}])
-               (fn [{::db/keys [ok? tx-report]}]
+               ;; Compact success envelope (#40): no raw report by default.
+               (fn [{::db/keys [ok? tx tx-count]}]
                  (is ok?)
-                 (is (some? tx-report))
-                 (is (pos? (count (:tx-data tx-report)))))))
+                 (is (int? tx) "envelope carries the committed tx id")
+                 (is (pos? tx-count) "envelope carries the datom count"))))
       done)))
 
 (deftest transact!-returns-envelope-on-unregistered-attr
@@ -314,10 +315,10 @@
     (with-conn
       (fn [conn]
         (.then (db/transact! conn [{::name "PosAlpha" ::rank 7}])
-               (fn [{::db/keys [ok? tx-report]}]
+               (fn [{::db/keys [ok? tx tx-count]}]
                  (is (true? ok?) "positional (conn tx-data) → ok? true envelope")
-                 (is (some? tx-report))
-                 (is (pos? (count (:tx-data tx-report))))
+                 (is (int? tx) "compact envelope carries the tx id")
+                 (is (pos? tx-count) "compact envelope carries the datom count")
                  ;; committed datom is queryable
                  (let [rows (db/query {::db/query '[:find ?n :where [?e ::name ?n]]
                                        ::db/conn  conn})]
@@ -349,17 +350,28 @@
 
 (deftest transact!-positional-3-arity-attaches-tx-meta
   ;; (transact! conn tx-data tx-meta) → tx-meta rides into the arg-map under
-  ;; :tx-meta and is reflected in the returned tx-report.
+  ;; :tx-meta and reaches the db. The COMPACT success envelope (#40) omits
+  ;; the raw report, so to inspect :tx-meta we ask for it explicitly via
+  ;; the map-in shape with `::db/return-report? true` (the 3rd-positional
+  ;; arg → `::opts {:tx-meta …}` normalization is unit-pinned separately in
+  ;; envelope-test). First prove the positional 3-arity COMMITS, then read
+  ;; the echoed :tx-meta through the report-bearing map-in call.
   (async done
     (with-conn
       (fn [conn]
-        (.then (db/transact! conn
-                             [{::name "Metaed" ::rank 3}]
-                             {:seon.db-test/source :import})
-               (fn [{::db/keys [ok? tx-report]}]
-                 (is (true? ok?))
-                 (is (= :import (:seon.db-test/source (:tx-meta tx-report)))
-                     "tx-meta from the 3rd positional arg lands in the report"))))
+        (-> (db/transact! conn
+                          [{::name "Metaed" ::rank 3}]
+                          {:seon.db-test/source :import})
+            (.then (fn [{::db/keys [ok?]}]
+                     (is (true? ok?) "positional 3-arity commits")
+                     (db/transact! {::db/tx-data        [{::name "Metaed2" ::rank 4}]
+                                    ::db/conn           conn
+                                    ::db/opts           {:tx-meta {:seon.db-test/source :import}}
+                                    ::db/return-report? true})))
+            (.then (fn [{::db/keys [ok? tx-report]}]
+                     (is (true? ok?))
+                     (is (= :import (:seon.db-test/source (:tx-meta tx-report)))
+                         "tx-meta lands in the report under return-report?")))))
       done)))
 
 (deftest transact!-positional-bad-conn-returns-envelope
@@ -434,7 +446,11 @@
   (async done
     (with-conn
       (fn [conn]
-        (.then (tx! conn [{::name "Alpha"}])
+        ;; return-report? to read the raw report's :db-after — the
+        ;; compact success envelope omits it (#40).
+        (.then (db/transact! {::db/tx-data [{::name "Alpha"}]
+                              ::db/conn conn
+                              ::db/return-report? true})
                (fn [{::db/keys [tx-report]}]
                  (let [db-after (:db-after tx-report)]
                    (is (= #{["Alpha"]}

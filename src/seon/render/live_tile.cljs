@@ -204,7 +204,17 @@
    nil. Fatal = exactly what makes ->string THROW: a vector element
    whose tag slot isn't a keyword/symbol/string. Everything the
    serializer tolerates (nil/false, raw, seqs, stringifiable scalars)
-   passes."
+   passes.
+
+   ATTRS-POSITION RULE (#42): in a hiccup element [tag attrs? & children]
+   the attrs map MUST be the SECOND element (immediately after the tag),
+   before any children. The serializer reads attrs ONLY in that position;
+   a map placed later among the children silently degrades to garbage
+   content. This walk reports that one unambiguous misplaced-attrs case
+   — the 2nd slot is a non-map child AND a (non-raw) map sits at child
+   index ≥ 1 — as a specific ::structure-message. It deliberately does
+   NOT flag the genuinely-ambiguous shapes (a single map that COULD be
+   intended as the attrs: [:div {…}] is correct; [:h3 \"x\"] has no map)."
   [x path]
   (cond
     (or (nil? x) (false? x)) nil
@@ -234,11 +244,39 @@
               attrs?    (and (map? (first body))
                              (not (html/raw? (first body))))
               children  (if attrs? (rest body) body)
-              offset    (if attrs? 2 1)]
-          (some identity
-                (map-indexed
-                  (fn [i c] (structure-error-at c (conj path (+ offset i))))
-                  children)))))
+              offset    (if attrs? 2 1)
+              ;; MISPLACED-ATTRS (#42): the unambiguous case — the 2nd
+              ;; slot is a NON-map child (so it's read as content, not
+              ;; attrs) yet an attrs-looking map sits LATER among the
+              ;; children. The serializer reads attrs only in 2nd
+              ;; position, so this map silently becomes garbage content.
+              ;; CONSERVATIVE on purpose: fires ONLY when the 2nd slot is
+              ;; already a non-map child AND a (non-raw) map appears at
+              ;; child index ≥ 1 — never on a valid tile ([:h3 "x"] has no
+              ;; map; [:div {:k 1} "x"] has the map in correct 2nd
+              ;; position so attrs? is true and this branch is skipped).
+              misplaced-i (when (and (seq body) (not attrs?))
+                            (first
+                              (keep-indexed
+                                (fn [i c]
+                                  (when (and (pos? i)
+                                             (map? c)
+                                             (not (html/raw? c)))
+                                    i))
+                                children)))]
+          (if misplaced-i
+            {::structure-path (conj path (+ offset misplaced-i))
+             ::structure-message
+             (str "misplaced attrs map — the attrs map must be the SECOND "
+                  "element (immediately after the tag), before any children; "
+                  "got a map at child index " misplaced-i " ("
+                  (pr-str-bounded (nth children misplaced-i))
+                  "). Move it to the second slot, e.g. [" (pr-str (nth x 0))
+                  " {…} child …], or drop it if it was meant as content.")}
+            (some identity
+                  (map-indexed
+                    (fn [i c] (structure-error-at c (conj path (+ offset i))))
+                    children))))))
 
     (seq? x)
     (some identity
@@ -523,10 +561,14 @@
    nicely-formatted 'updating this panel' card — never a scary error, never a
    blank (vanish is indistinguishable from unwired, banned). THE AGENT is told
    the truth: the `:seon.render/ai` twin carries the failure (awareness
-   section) and the full `:seon.error/*` envelope rides on `:seon.render/error`
-   — and the tile path additionally posts the agent a message
-   (`seon.render.sci/notify-tile-error!`). So the human stays calm while the
-   agent is the one nudged to fix it."
+   section) and the full `:seon.error/*` envelope rides on `:seon.render/error`.
+   Breakage is a DERIVED surface only (#43 / D2) — the
+   `:seon.ctx.live-tile/live-tile-section` re-derives this twin into the
+   agent's context EVERY turn (a pure fn of state, no stored flag,
+   self-healing on the next clean render). There is NO active push: a forged
+   self-message would wake the agent and defeat the loop's halt. So the human
+   stays calm while the agent learns of the breakage by reading its own
+   context."
   {:malli/schema [:=> [:cat ::error-request] :seon.render/html-response]}
   [{error :seon.db/error wired ::content}]
   (let [msg       (:seon.error/message error)

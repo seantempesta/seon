@@ -291,19 +291,18 @@
                     (soul/system-prompt-text)))
 
 (defn- ns-doc-examples [dbv]
-  (let [prefixes (ctx/included-prefixes dbv)]
-    (->> (db/query {:seon.db/db dbv
-                    :seon.db/query '[:find ?nm ?src
-                                     :where
-                                     [?n :seon.ns/name ?nm]
-                                     [?n :seon.ns/source ?src]]})
-         (filter (fn [[nm _]] (and (ctx/included-ns? (name nm) prefixes)
-                                   (ctx/full-source-ns? (name nm)))))
-         (sort-by (comp name first))
-         (mapcat (fn [[nm src]]
-                   (surface-examples (str "ns docstring of " (name nm))
-                                     (ns-docstring src))))
-         vec)))
+  (->> (db/query {:seon.db/db dbv
+                  :seon.db/query '[:find ?nm ?src
+                                   :where
+                                   [?n :seon.ns/name ?nm]
+                                   [?n :seon.ns/source ?src]]})
+       (filter (fn [[nm _]] (and (ctx/included-ns? nm)
+                                 (ctx/full-source-ns? (name nm)))))
+       (sort-by (comp name first))
+       (mapcat (fn [[nm src]]
+                 (surface-examples (str "ns docstring of " (name nm))
+                                   (ns-docstring src))))
+       vec))
 
 (defn- header-examples [dbv]
   (let [nss    (ctx-namespaces/namespaces-section {:seon.db/db dbv})
