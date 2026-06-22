@@ -34,6 +34,7 @@
    [datahike.datom :as dd]
    [datahike.writer :as w]
    [seon.store.internal.wire-node :as wire]
+   [seon.platform :as platform]
    [seon.log :as log]
    [seon.schema :as schema]))
 
@@ -55,14 +56,23 @@
 ;; ---------------------------------------------------------------------------
 
 (def default-sock-path
-  "The default cluster's UDS request socket (matches bin/seon's
-   wire-server launch args + seon.store.internal.wire-node/default-req-sock)."
+  "The cluster's UDS request socket — inherits `wire/default-req-sock`,
+   which is itself cluster-isolation-aware (reads `SEON_REQ_SOCK`, falls
+   back to the live-default constant). Matches bin/seon's wire-server
+   --req-sock for the default cluster and bin/acme's exported override."
   wire/default-req-sock)
 
 (def default-store-path
-  "The default cluster's konserve `:file` store dir (matches bin/seon's
-   wire-server `--path`)."
-  "data/clusters/default/store")
+  "The cluster's konserve `:file` store dir. Cluster-isolation-aware: reads
+   `SEON_CLUSTER_DIR` from the pod's environment first (set+exported by an
+   isolated launcher like `bin/acme`) as `$SEON_CLUSTER_DIR/store`, falling
+   back to the live-default constant when unset/blank. Under the default
+   deployment (`bin/seon`, which does NOT export `SEON_CLUSTER_DIR`) it
+   resolves byte-identically to the old constant. Matches the wire-server's
+   `--path $SEON_CLUSTER_DIR/store`."
+  (if-let [dir (platform/env-val "SEON_CLUSTER_DIR")]
+    (str dir "/store")
+    "data/clusters/default/store"))
 
 (defn store-id
   "The cluster store's konserve `:id`, replicated from the JVM side:

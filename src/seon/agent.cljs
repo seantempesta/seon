@@ -1465,8 +1465,23 @@
         result
 
         (replied-since-inbound? {::id id})
-        (do (log id turn-idx "halt" "replied — wake complete")
-            (assoc result :seon.agent/halt :replied))
+        ;; #51 loop-termination veto: a delivered reply normally halts the
+        ;; wake (#35), but when it landed in the SAME turn as a sibling
+        ;; form that returned a {*/ok? false} envelope VALUE — the
+        ;; structurally-invisible over-claim (eval succeeded, value says
+        ;; the write failed) — the human may hold a false confirmation.
+        ;; The reply already transacted + delivered; we VETO the terminal
+        ;; halt and force ONE more live turn so msg/overclaim-advisory-section
+        ;; lands where the agent sees it and can send a correction. Derived
+        ;; (msg/same-turn-overclaim? reads result's :seon.eval rows + the
+        ;; log) — by construction the make-good turn is NOT an over-claim
+        ;; turn, so this adds at most one turn; turns-cap still bounds it.
+        (if (msg/same-turn-overclaim? result id)
+          (do (log id turn-idx "overclaim veto"
+                   "reply cited a same-turn envelope failure — one make-good turn")
+              (recur 0))
+          (do (log id turn-idx "halt" "replied — wake complete")
+              (assoc result :seon.agent/halt :replied)))
 
         (>= since-in (turns-cap id))
         (do (await

@@ -1,0 +1,23 @@
+/* Acme brand stylesheet.
+ *
+ * Loaded via SEON_BRAND_CSS (set by bin/acme) and inlined by the inspector
+ * AFTER seon's output.css, so these token overrides win. This is how a
+ * third party controls their own CSS without forking seon — proof that the
+ * branding seam works end to end.
+ *
+ * Seon's theme tokens are CSS custom properties (--color-*). Remap the
+ * accent from amber to cyan so an Acme deployment is visibly its own. */
+
+:root,
+[data-theme="phosphor"] {
+  --color-amber-300: #6ee7ff;
+  --color-amber-400: #38bdf8;
+  --color-amber-500: #0ea5e9;
+  --color-signal:    #38bdf8;
+}
+
+/* A targeted rule on seon's tile markup, to prove selector-level control
+ * (not just token overrides) reaches the rendered UI. */
+.seon-tile-compact {
+  border-left: 2px solid #38bdf8;
+}

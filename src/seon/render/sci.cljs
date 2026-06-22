@@ -250,13 +250,35 @@
     (catch :default _ {:aliases {} :nses #{} :refers {} :refer-all #{}})))
 
 (defn- expose-ns
-  "`{simple-sym <compiled-fn>}` for namespace `ns-sym`, enumerating its members
-   from the `:seon.fn` index and resolving each via `lookup-value`. `exclude`
-   is a set of full-sym strings to skip (the tile fn itself). Returns nil when
-   the ns has no resolvable members (or on any failure)."
+  "`{simple-sym <compiled-fn>}` for namespace `ns-sym`, UNIONing two sources:
+
+   1. the COMPILED members of the ns's LIVE object on `js/globalThis`
+      (`seon.eval/ns-fn-members`) — every own enumerable fn, INCLUDING unspecced
+      helpers the `:seon.fn` index can't see; and
+   2. the `:seon.fn` index members, resolved via `lookup-value`.
+
+   (1) is the fix for the downstream live failure: a tile fn that calls an
+   aliased UNSPECCED helper (`h/format-count`) found no entry when `expose-ns`
+   enumerated only the SPECCED index, so SCI threw 'Unable to resolve symbol'
+   and the tile fell to the UNBOUNDED compiled path. The union resolves the
+   helper under SCI so the tile stays interrupt-bounded.
+
+   `exclude` is a set of full-sym strings to skip (the tile fn itself —
+   re-defined via the eval). Returns nil when the ns has no resolvable members
+   (an indexed-but-unloaded ns: no globalThis object, no index hits) or on any
+   failure — caller degrades the SCI surface, never throws."
   [db ns-sym exclude]
   (try
-    (let [ns-kw (keyword ns-sym)
+    (let [ns-kw  (keyword ns-sym)
+          nm     (name ns-sym)
+          ;; COMPILED members from the live ns object — keep everything not in
+          ;; `exclude` (matched by full-sym string, the same shape `exclude`
+          ;; carries). These include unspecced helpers absent from the index.
+          compiled (reduce-kv (fn [m simple-sym v]
+                                (if (contains? exclude (str nm "/" simple-sym))
+                                  m
+                                  (assoc m simple-sym v)))
+                              {} (seval/ns-fn-members nm))
           syms  (map first
                   (db/query {:seon.db/db    db
                              :seon.db/query '[:find ?s :in $ ?nm :where
@@ -264,15 +286,17 @@
                                               [?f :seon.fn/ns ?ns]
                                               [?f :seon.fn/sym ?s]]
                              :seon.db/args  [ns-kw]}))
+          ;; Index members on top — same fn objects for shared keys; index hits
+          ;; that the live enumeration somehow missed still land.
           m (reduce (fn [m s]
                       (let [qs (symbol s)]
                         (if (and (not (contains? exclude s))
-                                 (= (namespace qs) (name ns-sym)))
+                                 (= (namespace qs) nm))
                           (if-let [v (seval/lookup-value qs)]
                             (assoc m (symbol (name qs)) v)
                             m)
                           m)))
-                    {} syms)]
+                    compiled syms)]
       (when (seq m) m))
     (catch :default _ nil)))
 

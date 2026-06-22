@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# bin/acme — boot a fully ISOLATED "Acme" third-party cluster alongside the
+# live seon dev cluster, then delegate to bin/seon. Acme is the codename for a
+# downstream consumer; NEVER put a real product name in this repo.
+#
+# This wrapper is pure env composition — ZERO seon-src edits. It gives Acme its
+# own ports, sockets, store, supervisor pid/lock namespace, and logs, plus the
+# downstream overlay (SEON_EXTRA_*) and branding (SEON_BRAND_*) wiring.
+#
+#   bin/acme start wire-server     # JVM writer on Acme's store + sockets (REPL 7981)
+#   bin/acme start pod             # Node pod on :7980, acme.* compiled in
+#   bin/acme status                # PIDs (from tmp/proc-acme)
+#   bin/acme tail pod              # logs/acme/pod.log
+#   bin/acme restart pod
+#   bin/acme stop
+#   bin/acme cluster reset default # wipes data/clusters/acme/store, bounces both
+#
+# To reproduce BUG B (silent invisibility), comment out the (reset! …) in
+# acme/src/acme/pod.cljs and restart the pod: acme.* indexes ZERO rows.
+set -euo pipefail
+SEON_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# --- isolation: distinct from the live default (7890/7891, data/clusters/default,
+#     tmp/seon-cluster-default-*.sock, tmp/proc, logs/). Ports use ${...:-} so a
+#     shell override (SEON_PORT=… SEON_WRITER_REPL_PORT=… bin/acme …) can dodge a
+#     MACHINE-level collision without editing this file. Acme defaults are
+#     7980/7981 — verified free on this machine (7990/7991 collided with an
+#     unrelated downstream deployment already holding those ports). ---
+export SEON_PORT="${SEON_PORT:-7980}"
+export SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-7981}"
+export SEON_CLUSTER_DIR=data/clusters/acme
+export SEON_REQ_SOCK=tmp/acme-cluster-req.sock
+export SEON_PUB_SOCK=tmp/acme-cluster-pub.sock
+export SEON_PROC_DIR=tmp/proc-acme          # own supervisor pid/lock namespace
+export SEON_LOG_DIR=logs/acme               # own logs (bin/acme tail reads here)
+
+# --- embeddings: on by default; export GEMINI_API_KEY in your shell for KNN ---
+export SEON_EMBED="${SEON_EMBED:-1}"
+
+# --- the third-party overlay (Path B — docs/seon/components/extra-src.md) ---
+export SEON_EXTRA_SRC="$SEON_ROOT/acme"
+export SEON_EXTRA_PRELOAD=acme.pod
+
+# --- acme's OWN pod bundle: the :acme-client shadow build writes
+#     out-acme/client/main.js; SEON_CLIENT_OUT makes bin/seon's pod run THAT
+#     bundle instead of the live cluster's out/client/main.js. ---
+export SEON_CLIENT_OUT=out-acme/client/main.js
+
+# --- branding / CSS control (existing seon seams; no fork) ---
+export SEON_BRAND_NAME="${SEON_BRAND_NAME:-Acme}"
+export SEON_BRAND_TAGLINE="${SEON_BRAND_TAGLINE:-Acme — the third-party harness}"
+export SEON_BRAND_CSS="$SEON_ROOT/acme/branding/acme.css"
+
+# --- build/compile: a ONE-OFF acme compile (NOT a second watch — two shadow
+#     watch servers would collide on nREPL :7889). Injects SEON_EXTRA_SRC +
+#     SEON_EXTRA_PRELOAD exactly as bin/seon's cljs-watch does for :client,
+#     but targets :acme-client → out-acme/client/main.js. Run this once before
+#     `bin/acme start pod`; re-run after editing acme/src. ---
+case "${1:-}" in
+  build|compile)
+    cd "$SEON_ROOT"
+    echo "▶ compiling acme-client (SEON_EXTRA_SRC=$SEON_EXTRA_SRC, preload=$SEON_EXTRA_PRELOAD)"
+    clj -Sdeps "{:deps {seon.extra/src {:local/root \"$SEON_EXTRA_SRC\"}}}" \
+        -M:cljs compile acme-client \
+        --config-merge "{:devtools {:preloads [$SEON_EXTRA_PRELOAD]}}"
+    echo "● built $SEON_ROOT/$SEON_CLIENT_OUT (acme.* baked in)"
+    exit 0
+    ;;
+esac
+
+exec "$SEON_ROOT/bin/seon" "$@"

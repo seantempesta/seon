@@ -1,0 +1,8 @@
+;; Acme — a third-party Seon consumer's OWN deps.edn project.
+;; bin/acme points SEON_EXTRA_SRC here; bin/seon injects it as a
+;; :local/root dep so acme/src joins the pod build classpath and acme.*
+;; compiles INTO the pod bundle (Path B — docs/seon/components/extra-src.md).
+;; Add the third party's own mvn/git/npm deps here; no seon dep is needed
+;; (seon supplies the classpath via the injection).
+{:paths ["src"]
+ :deps  {}}

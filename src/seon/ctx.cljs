@@ -469,10 +469,13 @@
          (map str/trim)
          (remove str/blank?)
          (map (fn [line]
-                ;; The repair breadcrumb is stored with a leading `↻`;
-                ;; keep the glyph so a wrong-but-valid repair stays
-                ;; visible. Everything else becomes a plain `;;` line.
-                (if (str/starts-with? line "↻")
+                ;; The repair breadcrumb (`↻`) and the demoted-data-literal
+                ;; warning (`⚠`, seon.repl.internal/demoted-literal-warning)
+                ;; are stored with a leading glyph; keep it so the
+                ;; breadcrumb / warning stays visible. Everything else
+                ;; becomes a plain `;;` line.
+                (if (or (str/starts-with? line "↻")
+                        (str/starts-with? line "⚠"))
                   (str ";; " line)
                   (str ";; " (strip-comment-prefix line))))))))
 
@@ -889,12 +892,17 @@
     "next REPL input.\n"
     "\n"
     "EVAL MECHANICS. Your reply is one or more Clojure forms, each\n"
-    "preceded by ;; comment lines. There are no tool calls. Anything\n"
-    "that is not a form or a ;; comment is a bug — bare prose HAS eaten\n"
-    "responses before. The <past-evals> below is READ-ONLY history: the\n"
+    "preceded by ;; comment lines. There are no tool calls. A form RUNS\n"
+    "only if it starts with ( on a new line — (foo …), and the reader\n"
+    "shorthands @x '(…) #(…) #'x. Everything else is treated as a NOTE,\n"
+    "not run: a sentence, a bare value, AND a bare data literal you paste\n"
+    "({…}, […], #{…}) — these do NOT evaluate and produce NO result. To\n"
+    "use a value, wrap it in a form: (def x {…}) or (identity {…}). NEVER\n"
+    "paste a printed `=>` value back as a new line — reference its\n"
+    "result/<id> var. The <past-evals> below is READ-ONLY history: the\n"
     "runtime adds each form's `=> result` line and the `;; result/<id>`\n"
     "after it — never write a `=>`, `;; result/`, or any <tag> yourself.\n"
-    "Your reply is ONLY ;; comments and forms.\n"
+    "Your reply is ONLY ;; comments and (-forms.\n"
     "\n"
     "After your LAST form, STOP. Do not write what you think a result will\n"
     "be — the runtime runs each form and shows you the real `=> value`\n"
@@ -926,9 +934,8 @@
     "you write). A clipped display is NOT a clipped value: dig into\n"
     "a big result with ordinary Clojure (get-in, filter, count) on its\n"
     "result/<id> var instead of re-querying. NEVER copy a printed `=>`\n"
-    "value back as a new form: a map, set, or list you paste is read as\n"
-    "CODE and the reader runs it — a bare list calls its head and the form\n"
-    "errors. A printed value is also a SUMMARY, not the live object: a\n"
+    "value back as a new form — reference its result/<id> var instead. A\n"
+    "printed value is also a SUMMARY, not the live object: a\n"
     "datahike db/datom/entity in a result shows as a small placeholder\n"
     "(e.g. {:seon.eval/opaque \"datahike/DB\" …} or {:seon.eval/datom […]})\n"
     "— the real handle lives in result/<id>. Reach for the result/<id>\n"
@@ -1057,11 +1064,16 @@
     "  satisfy \"reply this turn.\"\n"
     "  ONE reply per question: once it lands your wake is complete and\n"
     "  the loop stops; a new message will wake you if more is needed.\n"
-    "  reply! (like every message!) is REFUSED when an earlier form THIS\n"
-    "  turn failed or returned an error envelope ({:seon.db/ok? false}) —\n"
-    "  so confirm your reads landed, then reply as a CLEAN final step. If\n"
-    "  something failed, read it and say what ACTUALLY happened (or pass\n"
-    "  :seon.agent.message/force true to reply about the failure).\n"
+    "  reply! ALWAYS lands and is delivered. But errors-are-VALUES: a\n"
+    "  transact can SUCCEED as an eval yet return {:seon.db/ok? false} —\n"
+    "  the write did NOT happen. If you reply in the SAME turn as a form\n"
+    "  that returned such a failure envelope, your human gets a possibly-\n"
+    "  false confirmation, so you are given ONE more turn with a\n"
+    "  <reply-over-claim-warning> to re-read the failure and send a\n"
+    "  correction. So: confirm each write's envelope is {:seon.db/ok?\n"
+    "  true} BEFORE you claim it landed; reply as a CLEAN final step. When\n"
+    "  you are deliberately replying ABOUT a failure, pass\n"
+    "  :seon.agent.message/force true.\n"
     "  reply! answers whoever woke you; to message a SPECIFIC target use\n"
     "  (seon.agent/message! {:seon.agent.message/to [:seon.agent/id\n"
     "  \"<id>\"] :seon.agent.message/content \"…\"}).\n"
@@ -1591,6 +1603,11 @@
                        this layout only fixes its slot: after
                        :your-entity, before :warnings)
      5. :warnings    — current problems; reactive, vanishes when fixed
+     5b. :reply-over-claim — #51 advisory: fires ONLY when a user-facing
+                       reply landed in the prior turn alongside a sibling
+                       form that returned a {*/ok? false} envelope value
+                       (the loop forced this make-good turn). Derived,
+                       vanishes once the agent moves on
      6. :open-todos  — the agent's open work items; derived, vanishes
      6b. :relevant-source — env-gated (SEON_EMBED, default-OFF):
                        <relevant-source>, the top-k :seon.fn hits nearest
@@ -1628,6 +1645,8 @@
     :seon.render/ai 'seon.ctx.live-tile/live-tile-section}
    {:seon.ctx/name :warnings     :seon.ctx/priority 40
     :seon.render/ai 'seon.ctx.warnings/warnings-section}
+   {:seon.ctx/name :reply-over-claim :seon.ctx/priority 42
+    :seon.render/ai 'seon.agent.message/overclaim-advisory-section}
    {:seon.ctx/name :open-todos   :seon.ctx/priority 45
     :seon.render/ai 'seon.agent.todo/open-todos-section}
    {:seon.ctx/name :relevant-source :seon.ctx/priority 48

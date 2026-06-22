@@ -95,11 +95,12 @@
    ;; THE user. Storage is always the normalized vector.
    [:seon.agent.message/to {:optional true}
     [:or :seon.db/ref [:vector :seon.db/ref]]]
-   ;; Override for the batch-failure guard (fix-everything B3): a send
-   ;; composed in the same batch as a FAILED earlier form is refused
-   ;; unless the caller passes force — a deliberate "I have seen the
-   ;; failures and am replying about them anyway". Request-only; never
-   ;; stored.
+   ;; The deliberate "I am replying ABOUT the failure" escape (#51
+   ;; narrowed). The reply is NEVER refused on a same-turn failure — it
+   ;; always transacts + delivers; the protection is the loop's
+   ;; make-good-turn veto (run-agentic-loop! + same-turn-overclaim?).
+   ;; `force` declares the over-claim is intentional. Request-only;
+   ;; never stored.
    [:seon.agent.message/force {:optional true} :boolean]
    ;; Provenance override (#43). Absent ⇒ DERIVED from `from` (user ⇒
    ;; :human, else :agent). A substrate-originated nudge (tile recovery)
@@ -158,13 +159,23 @@
         0)))
 
 ;; ------------------------------------------------------------
-;; Batch-failure guard (fix-everything-prd-2026-06-11 §1 ROOT-3 / B3).
-;; The blind same-batch reply: research+register+transact+verify+reply
-;; composed as ONE batch, every form failed, and the reply still told
-;; the user "logged it" — the reply text was composed BEFORE any result
-;; existed, and envelope failures (errors-as-values, eval-ok? TRUE)
-;; correctly don't abort batches. The guard closes the gap at SEND
-;; time, deriving batch state instead of storing any:
+;; Same-turn envelope-failure derivation (#51 narrowed,
+;; reliability-49-53-deepdive-2026-06-22 §"#51"). The original B3 gate
+;; REFUSED a send composed in a batch where an earlier form failed; the
+;; refusal is now GONE — the reply ALWAYS transacts and is delivered
+;; (blocking the write was the post-answer churn the loop economy
+;; fights). What survives is the LOOP-TERMINATION VETO: when a
+;; user-facing reply lands in the SAME turn as a sibling form that
+;; returned a `{*/ok? false}` ENVELOPE VALUE — an `:seon.eval/ok? true`
+;; row that "succeeded" but returned a failure value, the
+;; structurally-INVISIBLE case the real #26/B3 incident hinged on — the
+;; loop forces ONE more live turn so the advisory render lands in a turn
+;; the agent actually sees (a dead next-turn advisory was the flaw the
+;; dissent + Gemini proved). The eval-ERROR half was DROPPED: a genuine
+;; `:seon.eval/ok? false` error is advisory after #50.
+;;
+;; All derived, nothing stored — `envelope-failure-lines` reads the
+;; current turn's recorded :seon.eval rows:
 ;;   - eval-batch! runs forms sequentially and AWAITS record-eval!
 ;;     before the next form, so every EARLIER form of the current batch
 ;;     is a durable :seon.eval row under the current turn;
@@ -173,7 +184,7 @@
 ;;     merges) — (db/current-tx-context) names the turn;
 ;;   - ok-eval values live in the globalThis stash (seval/lookup-result).
 ;; Outside a batch (HTTP adapter, tests, boot) there is no turn-id in
-;; scope and the guard is inert.
+;; scope and the derivation is empty.
 ;; ------------------------------------------------------------
 
 (defn- envelope-failure?
@@ -205,39 +216,50 @@
   (let [s (str/replace (str s) #"\s+" " ")]
     (if (> (count s) n) (str (subs s 0 n) "…") s)))
 
-(defn- batch-failure-lines
-  "One legible line per FAILED earlier form of the current batch, [] when
-   none (or outside a batch scope). Derived at send time — the current
-   turn's recorded :seon.eval rows, oldest-first; the in-flight form
-   (the one calling us) is not yet recorded, so every row is an EARLIER
-   form. A failure is an eval error (:seon.eval/ok? false — includes
-   read failures) OR an ok eval whose live value is an error envelope
-   (the errors-as-values case the s21 blobs proved decisive). An ok
-   eval whose live value can't be found is also flagged — unverifiable
-   is not verified."
+(defn turn-envelope-failure-lines
+  "One legible line per eval row of `turn` whose live value is an
+   ENVELOPE-VALUE FAILURE — an `:seon.eval/ok? true` row (the eval
+   succeeded) whose stashed value carries a `*/ok? false` key
+   (errors-as-values: a transact that returned `{:seon.db/ok? false …}`).
+   [] when none. Oldest-first.
+
+   NARROW by design (#51, reliability-49-53-deepdive-2026-06-22): the
+   eval-ERROR half was DROPPED — after #50 a genuine `:seon.eval/ok?
+   false` error is ADVISORY (it counts toward the loop's eval-count,
+   the loop grants a next turn, and the error renders crystal-clear in
+   the transcript), so blocking a legit reply on an exploratory throw
+   is the post-answer churn the loop economy fights. Only the
+   envelope-value case survives — the structurally-INVISIBLE failure
+   (eval succeeded, returned a failure VALUE) the real #26/B3 incident
+   hinged on. A lookup MISS returns nil and is DROPPED (not flagged):
+   `keep` over `(when (envelope-failure? live) …)`."
+  [turn]
+  (let [evals (sort-by #(.getTime ^js (:seon.eval/at %))
+                       (:seon.agent.turn/evals turn))]
+    (vec
+      (keep
+        (fn [e]
+          (when (true? (:seon.eval/ok? e))
+            (let [id   (:seon.eval/id e)
+                  src  (clip (:seon.eval/source e) 60)
+                  live (seval/lookup-result id)]
+              (when (envelope-failure? live)
+                (str "eval " id " «" src "» — returned an error envelope"
+                     (when-let [m (envelope-error-message live)]
+                       (str ": " (clip m 160))))))))
+        evals))))
+
+(defn envelope-failure-lines
+  "[[turn-envelope-failure-lines]] for the CURRENT batch's turn — resolved
+   from `(db/current-tx-context)`'s `:seon.db/turn-id`. [] outside a batch
+   scope (HTTP adapter, tests, boot — no turn-id). The in-flight form
+   (the one composing the reply) is not yet recorded, so every row is an
+   EARLIER form of the batch."
   []
   (if-let [turn-id (:seon.db/turn-id (db/current-tx-context))]
-    (let [turn  (try (db/entity {:seon.db/ref [:seon.agent.turn/id turn-id]})
-                     (catch :default _ nil))
-          evals (sort-by #(.getTime ^js (:seon.eval/at %))
-                         (:seon.agent.turn/evals turn))]
-      (vec
-        (keep
-          (fn [e]
-            (let [id  (:seon.eval/id e)
-                  src (clip (:seon.eval/source e) 60)]
-              (cond
-                (false? (:seon.eval/ok? e))
-                (str "eval " id " «" src "» — eval ERROR: "
-                     (clip (or (:seon.eval/error e) "(see its transcript line)") 160))
-
-                (true? (:seon.eval/ok? e))
-                (let [live (seval/lookup-result id)]
-                  (when (envelope-failure? live)
-                    (str "eval " id " «" src "» — returned an error envelope"
-                         (when-let [m (envelope-error-message live)]
-                           (str ": " (clip m 160)))))))))
-          evals)))
+    (let [turn (try (db/entity {:seon.db/ref [:seon.agent.turn/id turn-id]})
+                    (catch :default _ nil))]
+      (turn-envelope-failure-lines turn))
     []))
 
 (defn ^:async message!
@@ -260,18 +282,19 @@
    messages were a recurring live defect (runs 3 + 6); since every
    message write routes through here, the guard kills the class.
 
-   Same-batch failure guard (B3): when an EARLIER form of the current
-   batch failed (eval error OR an error-envelope value — see
-   [[batch-failure-lines]]), the send is REFUSED with a legible
-   envelope naming the failed forms; the refusal lands in the eval log
-   so the agent sees it next turn and replies honestly. Pass
-   `:seon.agent.message/force true` to send anyway (a deliberate reply
-   ABOUT the failures). The guard lives here — not only in `reply!` —
-   because message! is THE single write path: a fan-out to another
-   agent composed before its batch's results existed is the same false
-   claim as a user-facing reply."
+   Same-turn envelope-failure (B3, #51 narrowed): the send is NO LONGER
+   refused on a same-turn failure — the reply ALWAYS transacts and is
+   delivered (the human gets the answer). The protection moved to a
+   LOOP-TERMINATION VETO: when a user-facing reply lands in the same
+   turn as a sibling form that returned a `{*/ok? false}` envelope
+   VALUE, `run-agentic-loop!` forces ONE more live turn so the advisory
+   render lands in a turn the agent sees (see [[envelope-failure-lines]]
+   + seon.agent/same-turn-overclaim?). `:seon.agent.message/force` is the
+   agent's deliberate \"I am replying ABOUT the failure\" escape —
+   request-only, never stored, accepted for backward-compat and as the
+   loop-veto opt-out documented in the prompt."
   {:malli/schema [:=> [:cat ::message-request] ::message-response]}
-  [{:seon.agent.message/keys [content from to force origin]}]
+  [{:seon.agent.message/keys [content from to origin]}]
   (let [agent-id (db/current-agent-id)
         from     (or from (when agent-id [:seon.agent/id agent-id]))
         to       (cond
@@ -299,58 +322,45 @@
              "pass from explicitly or call inside (seon.db/with-agent …).")}}
 
       :else
-      (let [failures (when-not force (batch-failure-lines))]
-        (if (seq failures)
-          ;; Same-batch failure guard (B3) — refuse legibly; the refusal
-          ;; is itself a value the agent sees on its next wake.
-          {:seon.db/ok? false
-           :seon.db/error
-           {:seon.error/message
-            (str "message! REFUSED: " (count failures)
-                 " earlier form(s) in this batch FAILED — this message was "
-                 "composed before those results existed, so sending it "
-                 "would claim success the transcript contradicts. Failed:\n  "
-                 (str/join "\n  " failures)
-                 "\nVerify each failure, then reply about what ACTUALLY "
-                 "happened — or pass :seon.agent.message/force true to "
-                 "send this text anyway.")}}
-          (let [from-user? (user-entity? from)
-                hops   (if from-user?
-                         0
-                         (inc (waking-hops agent-id)))
-                ;; Provenance (#43): explicit :origin wins (a :core nudge);
-                ;; otherwise derived — a user-ref send is :human, every
-                ;; other send is :agent. Never stored as nil.
-                origin (or origin (if from-user? :human :agent))
-                msg-id (db/new-id!)
-                env    (await
-                         (db/transact!
-                           {:seon.db/tx-data
-                            [{:seon.agent.message/id      msg-id
-                              :seon.agent.message/from    from
-                              :seon.agent.message/to      to
-                              :seon.agent.message/content content
-                              :seon.agent.message/at      (js/Date.)
-                              :seon.agent.message/hops    hops
-                              :seon.agent.message/origin  origin}]}))]
-            (if (:seon.db/ok? env)
-              ;; concise success — the tx-report stays off the agent
-              ;; surface; the id is the durable handle
-              ;; ([:seon.agent.message/id msg-id]).
-              {:seon.agent.message/ok?  true
-               :seon.agent.message/id   msg-id
-               :seon.agent.message/hops hops}
-              env)))))))
+      (let [from-user? (user-entity? from)
+            hops   (if from-user?
+                     0
+                     (inc (waking-hops agent-id)))
+            ;; Provenance (#43): explicit :origin wins (a :core nudge);
+            ;; otherwise derived — a user-ref send is :human, every
+            ;; other send is :agent. Never stored as nil.
+            origin (or origin (if from-user? :human :agent))
+            msg-id (db/new-id!)
+            env    (await
+                     (db/transact!
+                       {:seon.db/tx-data
+                        [{:seon.agent.message/id      msg-id
+                          :seon.agent.message/from    from
+                          :seon.agent.message/to      to
+                          :seon.agent.message/content content
+                          :seon.agent.message/at      (js/Date.)
+                          :seon.agent.message/hops    hops
+                          :seon.agent.message/origin  origin}]}))]
+        (if (:seon.db/ok? env)
+          ;; concise success — the tx-report stays off the agent
+          ;; surface; the id is the durable handle
+          ;; ([:seon.agent.message/id msg-id]).
+          {:seon.agent.message/ok?  true
+           :seon.agent.message/id   msg-id
+           :seon.agent.message/hops hops}
+          env)))))
 
 (defn ^:async reply!
   "Reply to whoever woke the current turn: `message!` with `to` := the
    `:seon.agent.message/from` of the current turn's `:seon.agent.turn/woken-by`
    message (derived — the core knows who's talking to you; no
    target atom). Falls back to the user when the turn wasn't woken by a
-   message. Returns `message!`'s concise envelope — including its
-   same-batch failure refusal (B3): when an earlier form of this batch
-   failed, the reply is refused; pass `:seon.agent.message/force true`
-   to deliberately reply about the failures.
+   message. Returns `message!`'s concise envelope — the reply ALWAYS
+   transacts and is delivered (#51 narrowed). When the reply lands in
+   the same turn as a sibling form that returned a `{*/ok? false}`
+   envelope VALUE, the loop forces ONE more live turn for the advisory
+   (see [[envelope-failure-lines]]); pass `:seon.agent.message/force
+   true` to declare a deliberate reply ABOUT the failure.
 
    Accepts EITHER a plain string (the common case) OR the request map.
    The string form just builds the canonical map and recurses, so there
@@ -358,7 +368,7 @@
 
      (seon.agent/reply! \"done — stored 2 rows\")
      (seon.agent/reply! {:seon.agent.message/content \"done — stored 2 rows\"})
-     ;; map form when you need to override the batch-failure guard:
+     ;; map form when replying deliberately ABOUT a same-turn failure:
      (seon.agent/reply! {:seon.agent.message/content \"…\"
                          :seon.agent.message/force   true})"
   {:malli/schema [:=> [:cat [:or :string ::message-request]] ::message-response]}
@@ -372,3 +382,113 @@
       (await (message! (cond-> {:seon.agent.message/content content
                                 :seon.agent.message/to      (if woke-from [woke-from] [user-ref])}
                          (some? force) (assoc :seon.agent.message/force force)))))))
+
+;; ============================================================
+;; Same-turn overclaim derivation (#51 loop-termination veto).
+;;
+;; A user-facing reply that landed in the SAME turn as a sibling form
+;; whose live value was a `{*/ok? false}` envelope failure is the
+;; structurally-INVISIBLE over-claim the gate exists to catch (the eval
+;; "succeeded", so the loop's eval-count grants it nothing; reply! halts
+;; the loop first). Pure derivation over the turn's :seon.eval rows + the
+;; message log — nothing stored, nothing to clear
+;; (docs/seon/concepts/reactive-context). Shared by the loop veto
+;; ([[seon.agent/run-agentic-loop!]] forces one make-good turn) and the
+;; advisory render ([[overclaim-advisory-section]]).
+;; ============================================================
+
+(defn- user-facing-reply-in-window?
+  "True iff `agent-id` sent an outbound USER-FACING reply (from = me,
+   to ∋ THE user entity) whose `:seon.agent.message/at` falls in
+   `[lo, hi)` — `lo` inclusive, `hi` exclusive (nil hi = open-ended,
+   the just-run turn's window when no later turn exists yet). The
+   per-turn assistant self-message (from = to = me) is NOT user-facing
+   and never matches. Derived from the message log."
+  [agent-id lo hi]
+  (let [my-eid   (:db/id (db/entity {:seon.db/ref [:seon.agent/id agent-id]}))
+        user-eid (:db/id (db/entity {:seon.db/ref user-ref}))]
+    (boolean
+      (when (and my-eid user-eid)
+        (let [lo-ms (.getTime ^js lo)
+              hi-ms (when hi (.getTime ^js hi))
+              ats   (db/query
+                      {:seon.db/query
+                       '[:find ?at
+                         :in $ ?me ?user
+                         :where
+                         [?m :seon.agent.message/from ?me]
+                         [?m :seon.agent.message/to ?user]
+                         [?m :seon.agent.message/at ?at]]
+                       :seon.db/args [my-eid user-eid]})]
+          (some (fn [[at]]
+                  (let [t (.getTime ^js at)]
+                    (and (>= t lo-ms) (or (nil? hi-ms) (< t hi-ms)))))
+                ats))))))
+
+(defn turn-overclaim-lines
+  "The envelope-failure lines for `turn` IF — and only if — `turn` is an
+   OVER-CLAIM turn: a sibling form returned a `{*/ok? false}` envelope
+   VALUE AND a user-facing reply landed in `turn`'s window. [] otherwise.
+   `hi` is the next turn's `:seon.agent.turn/at` (exclusive upper bound on
+   the reply window), or nil for the just-run/most-recent turn (open
+   window). Pure derivation — the loop veto and the advisory both call
+   this so they see the SAME truth."
+  [turn agent-id hi]
+  (let [lines (turn-envelope-failure-lines turn)]
+    (if (and (seq lines)
+             (user-facing-reply-in-window?
+               agent-id (:seon.agent.turn/at turn) hi))
+      lines
+      [])))
+
+(defn same-turn-overclaim?
+  "Loop-termination veto (#51): does the JUST-RUN turn carry a
+   user-facing over-claim? `turn` is the closed turn entity the loop
+   holds (run-turn!'s result, pulled with its evals inlined). True when a
+   sibling form returned a `{*/ok? false}` envelope VALUE AND a
+   user-facing reply landed in this turn. The just-run turn is the
+   most-recent turn at loop-check time, so its reply window is OPEN
+   (hi = nil). When true the loop forces ONE more live turn so
+   [[overclaim-advisory-section]] lands where the agent sees it. Fully
+   derived — by construction the make-good turn (a fresh turn) is NOT an
+   over-claim turn, so this fires at most once per offending turn; no
+   stored flag, nothing to clear."
+  [turn agent-id]
+  (boolean (seq (turn-overclaim-lines turn agent-id nil))))
+
+(defn overclaim-advisory-section
+  "Pure section fn (#51 advisory render, TIGHTEST scope per DECISION
+   §5.2): fires ONLY when an outbound user-facing reply landed in the
+   IMMEDIATELY-PRIOR turn as a sibling form that returned a
+   `{*/ok? false}` envelope VALUE — the over-claim case. Returns \"\"
+   (the section is then dropped) for every other turn, including
+   exploratory eval-errors (those are advisory by construction after
+   #50 — surfacing them here is the weak-model anxiety noise Lens B
+   warned against).
+
+   It renders on the MAKE-GOOD turn the loop forced: the offending turn
+   is the prior turn (now :done), this turn is the current running one.
+   Reading the prior turn (hi = the running turn's `at`) keeps the
+   advisory correlated with the actual over-claim risk. Reactive — a
+   pure fn of the turn + message log; nothing stored, vanishes once the
+   agent moves on."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.agent/keys [id] db :seon.db/db}]
+  (let [turns   (sort-by #(.getTime ^js (:seon.agent.turn/at %))
+                         (:seon.agent.session/turns (ctx/current-session id db)))
+        running (last turns)
+        prior   (last (butlast turns))]
+    (if (and prior running)
+      (let [lines (turn-overclaim-lines prior id (:seon.agent.turn/at running))]
+        (if (seq lines)
+          (str "<reply-over-claim-warning>\n"
+               "You replied to your human THIS just-passed turn, but a form "
+               "in that same turn returned a FAILURE envelope ({*/ok? false}) "
+               "— the eval \"succeeded\" yet its VALUE says the write did not "
+               "land. Your human may have a false confirmation. Re-read each "
+               "failure, then send a correcting reply with what ACTUALLY "
+               "happened:\n  "
+               (str/join "\n  " lines)
+               "\n</reply-over-claim-warning>")
+          ""))
+      "")))

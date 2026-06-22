@@ -1236,6 +1236,43 @@
         ;; PRESENT ⇒ specced (exact contract in corpus); ABSENT ⇒ unspecced.
         (some? spec) (assoc :seon.fn/spec spec)))))
 
+(defn- extra-src-env
+  "The `SEON_EXTRA_SRC` env value, or nil when unset/empty. Read the SAME way
+   `read-src-file` does (off `js/globalThis.process.env`) so the warn keys on
+   the EXACT signal that joins acme's source onto the build classpath."
+  []
+  (let [v (some-> (.. js/globalThis -process) (.-env) (aget "SEON_EXTRA_SRC"))]
+    (when (and (string? v) (not= v "")) v)))
+
+(defn- warn-if-extra-src-unregistered!
+  "Observability for BUG B (silent total invisibility of a consumer's product
+   source): when `SEON_EXTRA_SRC` is set but `extra-core-vars*` is empty, the
+   consumer wired the source root onto the classpath but their
+   SEON_EXTRA_PRELOAD entry ns never ran the `(reset! !extra-core-vars …)` —
+   so ZERO downstream rows index, with no error. Emit ONE loud, actionable
+   `:seon.log` warn naming SEON_EXTRA_SRC + the exact one-liner the entry ns
+   must run. Observability only — does NOT change indexing. Returns nil."
+  [extra]
+  (when-let [src (extra-src-env)]
+    (when (empty? extra)
+      (log/warn!
+        {:seon.log/source  ::index-core!
+         :seon.log/message
+         (str "SEON_EXTRA_SRC=" src " is set but NO extra-core vars are "
+              "registered — your consumer's product source will NOT be indexed "
+              "(invisible to agent context + retrieval, with no further error). "
+              "Your SEON_EXTRA_PRELOAD entry ns must run, at load time:\n"
+              "  (reset! seon.client/!extra-core-vars\n"
+              "          (filterv #(clojure.string/starts-with? "
+              "(str (:ns (meta %))) \"<prefix>.\")\n"
+              "                   (specced-fn-vars)))\n"
+              "where <prefix> is your source root prefix (e.g. \"acme\"), and "
+              "the entry ns needs "
+              "(:require-macros [seon.indexing :refer [specced-fn-vars]]) "
+              "so the macro expands in YOUR ns (whose require closure sees your "
+              "vars — a seon-side helper could not).")})))
+  nil)
+
 (defn index-core!
   "Tx-data for core `:seon.ns` + `:seon.fn` rows, built by REAL runtime
    introspection over `core-vars` (file-read at var-meta `:file`/`:line`
@@ -1274,6 +1311,7 @@
         ;; research §e.
         extra   (extra-core-vars*)
         _       (assert-extra-vars-unreserved! extra)
+        _       (warn-if-extra-src-unregistered! extra)
         fn-rows (keep #(var->fn-row % now) (concat core-vars extra))
         ;; Fn-less compiled roots are unioned in explicitly: a root
         ;; with no public fns of its own (`my.kb` — register! calls +

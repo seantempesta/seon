@@ -76,6 +76,34 @@
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
 
+  ;; Acme (third-party harness) pod bundle. A BYTE-FOR-BYTE MIRROR of
+  ;; :client EXCEPT :output-to → "out-acme/client/main.js" (its own
+  ;; output dir, so the live :client watch's "out/client/main.js" is
+  ;; never clobbered). bin/acme `build` runs a one-off COMPILE of this
+  ;; build (not a second watch) — that sidesteps the shadow nREPL :7889
+  ;; clash two watch servers would hit — injecting SEON_EXTRA_SRC (acme/)
+  ;; + SEON_EXTRA_PRELOAD (acme.pod) exactly as cljs-watch does for
+  ;; :client. The acme.* surface compiles INTO this bundle; bin/acme's
+  ;; pod runs it via SEON_CLIENT_OUT=out-acme/client/main.js.
+  ;;
+  ;; The running :client watcher IGNORES unwatched builds, so adding this
+  ;; block is safe for the live cluster. Keep it in sync with :client if
+  ;; :client's :devtools/:compiler-options ever change.
+  :acme-client
+  {:target           :node-script
+   :output-to        "out-acme/client/main.js"
+   :main             seon.client/-main
+   ;; `acme.pod` is listed DIRECTLY in :preloads (not only via bin/acme's
+   ;; --config-merge) so acme's registration ALWAYS runs at boot — no
+   ;; doubt about whether deep-merge concats vs replaces the preload
+   ;; vector. acme.pod is on the classpath whenever :acme-client builds
+   ;; (bin/acme injects SEON_EXTRA_SRC=acme/ as a :local/root dep), so
+   ;; this is safe. The :client build is left untouched (no acme there).
+   :devtools         {:enabled  true
+                      :preloads [seon.dev.test-preload seon.demo acme.pod]}
+   :compiler-options {:warnings-as-errors false
+                      :externs           ["externs/node_fs.js"]}}
+
   ;; Multi-runtime MCP-eval probe build (go/no-go for "N agents you can
   ;; REPL into by id"). ONE :node-script build, run as N Node processes →
   ;; N distinct shadow runtimes under one worker. `:devtools {:enabled true}`

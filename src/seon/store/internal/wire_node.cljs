@@ -25,12 +25,15 @@
    run: `node out/wire-node/main.js`."
   (:require [cognitect.transit :as t]
             [seon.store.internal.cbor :as cbor]
+            ;; canonical env reader (zero-require host-sniff ns) — used to make
+            ;; `default-req-sock` cluster-isolation-aware (SEON_REQ_SOCK).
+            [seon.platform :as platform]
             ;; MCP runtime-addressing probe — this runtime answers
             ;; `(seon.dev.runtime-id/hosted)` with [\"proc:<name>\"]
             ;; (default \"proc:wire\"; the `proc:` grammar marks non-agent
             ;; infrastructure runtimes — mcp-agent-id-unification PRD §2.1).
-            ;; Zero-require ns by design; the slim :wire-node build stays
-            ;; transit/cbor-only otherwise.
+            ;; Otherwise transit/cbor-only by design; the slim :wire-node build
+            ;; stays minimal.
             [seon.dev.runtime-id :as runtime-id]))
 
 (def ^js net (js/require "node:net"))
@@ -47,7 +50,16 @@
 (defn- writer [] (or @!writer (reset! !writer (t/writer :json))))
 (defn- reader [] (or @!reader (reset! !reader (t/reader :json))))
 
-(def default-req-sock "tmp/seon-cluster-default-req.sock")
+(def default-req-sock
+  "The cluster wire-server's UDS request socket — the default `sock-path`
+   for EVERY wire op below. Cluster-isolation-aware: reads `SEON_REQ_SOCK`
+   from the pod's environment first (set+exported by an isolated launcher
+   like `bin/acme`), falling back to the live-default constant when the env
+   var is unset/blank. Under the default deployment (`bin/seon`, which does
+   NOT export this var) it resolves byte-identically to the old constant.
+   Mirrors bin/seon's `SEON_REQ_SOCK` default + the wire-server's --req-sock."
+  (or (platform/env-val "SEON_REQ_SOCK")
+      "tmp/seon-cluster-default-req.sock"))
 
 ;; ---------- value codec ----------
 

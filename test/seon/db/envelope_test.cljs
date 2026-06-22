@@ -51,6 +51,9 @@
 ;; Identity attr — lookup-ref target for the A1 bug-1 pin (the taught
 ;; `{:seon.db/ref [<identity-attr> v] …}` entity-key transact).
 (schema/register! ::code [:string {:seon.db/identity true}])
+;; Typed scalar — feeds the #46 compact-failure-envelope tests (a value
+;; that fails its Malli schema produces the validation-failure envelope).
+(schema/register! ::score :int)
 
 (defn- fresh-conn
   "Promise of a fresh :memory datahike conn (schema-on-write, no
@@ -391,6 +394,230 @@
                   [{::name "x" ::blob {:a "b"}}])]
       (is (not (contains? attrs :a)))
       (is (contains? attrs ::blob)))))
+
+;; ---------------------------------------------------------------------------
+;; 4d. #48 — the prompted fn-registration footgun: an agent writes a
+;;     namespace identity as a QUOTED SYMBOL (`{:seon.ns/name 'my.agent.foo}`)
+;;     because a namespace IS a symbol everywhere else, but the attr is
+;;     `[:keyword {:seon.db/identity true}]`. The validation gate coerces
+;;     symbol→keyword for keyword-typed IDENTITY idents at the boundary so
+;;     the natural shape persists; the KEYWORD stays the stored canonical.
+;; ---------------------------------------------------------------------------
+
+;; A local keyword-typed identity attr — same shape as :seon.ns/name —
+;; proves the coercion is DATA-DRIVEN (fires for any kw-typed identity
+;; attr, not a hardcoded :seon.ns/name special case).
+(schema/register! ::ident-kw [:keyword {:seon.db/identity true}])
+
+(deftest keyword-identity-ident?-scope
+  (testing "fires ONLY for registered, non-system, keyword-typed identity attrs"
+    (is (true?  (internal/keyword-identity-ident? :seon.ns/name)))
+    (is (true?  (internal/keyword-identity-ident? :seon.schema/key)))
+    (is (true?  (internal/keyword-identity-ident? ::ident-kw)))
+    ;; string-identity, NOT keyword-typed → no coercion
+    (is (false? (internal/keyword-identity-ident? :seon.fn/sym)))
+    (is (false? (internal/keyword-identity-ident? ::code)))
+    ;; keyword but NOT an identity attr → no coercion
+    (is (false? (internal/keyword-identity-ident? ::name)))
+    ;; system attr / unregistered → no coercion
+    (is (false? (internal/keyword-identity-ident? :db/id)))
+    (is (false? (internal/keyword-identity-ident? :seon.totally/unregistered)))))
+
+(deftest coerce-identity-symbol-idents-unit
+  (testing "entity-map value: symbol → keyword"
+    (is (= [{:seon.ns/name :my.agent.foo :seon.ns/source "x"}]
+           (internal/coerce-identity-symbol-idents
+             [{:seon.ns/name 'my.agent.foo :seon.ns/source "x"}]))))
+  (testing "a keyword value passes through UNCHANGED"
+    (let [tx [{:seon.ns/name :my.agent.foo :seon.ns/source "x"}]]
+      (is (= tx (internal/coerce-identity-symbol-idents tx)))))
+  (testing "nested entity under a ref slot is coerced too"
+    (is (= [{::name "f" ::pet {:seon.ns/name :my.agent.bar}}]
+           (internal/coerce-identity-symbol-idents
+             [{::name "f" ::pet {:seon.ns/name 'my.agent.bar}}]))))
+  (testing "lookup-ref tuple in a ref-slot value: symbol → keyword"
+    (is (= [{::name "g" ::friend [:seon.ns/name :my.agent.baz]}]
+           (internal/coerce-identity-symbol-idents
+             [{::name "g" ::friend [:seon.ns/name 'my.agent.baz]}]))))
+  (testing "lookup-ref symbol in a [:db/retract e a v] e-slot"
+    (is (= [[:db/retract [:seon.ns/name :my.agent.q] :seon.ns/source "x"]]
+           (internal/coerce-identity-symbol-idents
+             [[:db/retract [:seon.ns/name 'my.agent.q] :seon.ns/source "x"]]))))
+  (testing "a :db/id lookup-ref symbol is coerced"
+    (is (= [{:db/id [:seon.ns/name :my.agent.r] ::label "t"}]
+           (internal/coerce-identity-symbol-idents
+             [{:db/id [:seon.ns/name 'my.agent.r] ::label "t"}]))))
+  (testing "a [:db/add e :seon.ns/name 'sym] v-slot symbol is coerced"
+    (is (= [[:db/add 1 :seon.ns/name :my.agent.direct]]
+           (internal/coerce-identity-symbol-idents
+             [[:db/add 1 :seon.ns/name 'my.agent.direct]]))))
+  (testing "a symbol on a NON-keyword-identity attr is left alone"
+    ;; ::label is a plain string — a symbol there is a real Malli failure,
+    ;; NOT this footgun; the coercion must not touch it.
+    (let [tx [{::name "x" ::label 'not-coerced}]]
+      (is (= tx (internal/coerce-identity-symbol-idents tx))))))
+
+(deftest ns-name-symbol-coerces-and-round-trips
+  ;; The exact prompted shape: `{:seon.ns/name 'my.agent.test-coerce …}`.
+  ;; It must SUCCEED and the stored value must be the KEYWORD.
+  (async done
+    (-> (fresh-conn)
+        (.then (fn [conn]
+                 (-> (never-reject!
+                       (db/transact!
+                         {:seon.db/tx-data
+                          [{:seon.ns/name   'my.agent.test-coerce
+                            :seon.ns/source "(ns my.agent.test-coerce)"}]
+                          :seon.db/conn conn}))
+                     (.then (fn [{ok?   :seon.db/ok?
+                                  error :seon.db/error}]
+                              (is (true? ok?)
+                                  (str "symbol-valued :seon.ns/name must "
+                                       "persist (coerced) — "
+                                       (:seon.error/message error)))
+                              ;; stored canonical value is the KEYWORD
+                              (is (= #{[:my.agent.test-coerce]}
+                                     (set
+                                       (db/query
+                                         {:seon.db/query
+                                          '[:find ?n
+                                            :where [_ :seon.ns/name ?n]]
+                                          :seon.db/conn conn})))
+                                  "stored :seon.ns/name is the KEYWORD, not the symbol")
+                              ;; the keyword is queryable / lookup-resolvable
+                              (let [ent (db/pull
+                                          {:seon.db/pull-pattern '[*]
+                                           :seon.db/ref [:seon.ns/name
+                                                         :my.agent.test-coerce]
+                                           :seon.db/conn conn})]
+                                (is (= :my.agent.test-coerce
+                                       (:seon.ns/name ent))
+                                    "lookup-ref by the keyword resolves the entity")
+                                (is (keyword? (:seon.ns/name ent))
+                                    "the stored value is a keyword")))))))
+        (.then done))))
+
+(deftest ns-name-keyword-still-works-unchanged
+  ;; The system's own tee always writes the keyword — that path must be
+  ;; byte-for-byte unaffected by the coercion.
+  (async done
+    (-> (fresh-conn)
+        (.then (fn [conn]
+                 (-> (never-reject!
+                       (db/transact!
+                         {:seon.db/tx-data
+                          [{:seon.ns/name   :my.agent.kw-path
+                            :seon.ns/source "(ns my.agent.kw-path)"}]
+                          :seon.db/conn conn}))
+                     (.then (fn [{ok?   :seon.db/ok?
+                                  error :seon.db/error}]
+                              (is (true? ok?)
+                                  (str "keyword-valued :seon.ns/name path "
+                                       "unchanged — "
+                                       (:seon.error/message error)))
+                              (is (= #{[:my.agent.kw-path]}
+                                     (set
+                                       (db/query
+                                         {:seon.db/query
+                                          '[:find ?n
+                                            :where [_ :seon.ns/name ?n]]
+                                          :seon.db/conn conn})))
+                                  "keyword stored verbatim"))))))
+        (.then done))))
+
+;; ---------------------------------------------------------------------------
+;; 4c. #46 — a FAILED transact! returns ONE concise envelope. The
+;;     downstream report: a trivial type mismatch ballooned to ~3600 chars
+;;     because the same Malli explanation echoed across :seon.error/message,
+;;     :seon.error/ex-data, :seon.error/data, and :seon.db/malli-explanation,
+;;     plus a multi-kb :seon.error/stack and the opaque :seon.error/raw —
+;;     tripping the agent-display truncation. [[internal/compact-error-map]]
+;;     keeps the guiding message + a SHORT path/expected/got and drops the
+;;     redundant copies.
+;; ---------------------------------------------------------------------------
+
+(def ^:private display-truncation-limit
+  "The agent-display truncation the bloated envelope tripped (#46). A
+   failure envelope must serialize well under this."
+  1500)
+
+(deftest validation-failure-envelope-is-compact
+  (async done
+    (-> (fresh-conn)
+        (.then (fn [conn]
+                 (never-reject!
+                   (db/transact! {:seon.db/tx-data [{::score "not-an-int"}]
+                                  :seon.db/conn    conn}))))
+        (.then (fn [{ok?   :seon.db/ok?
+                     error :seon.db/error :as env}]
+                 (is (false? ok?) "resolves to ok? false")
+                 (let [total (count (pr-str env))
+                       data  (:seon.error/data error)]
+                   ;; bounded — well under the display truncation limit
+                   (is (< total display-truncation-limit)
+                       (str "envelope must be compact, was " total " chars"))
+                   ;; the duplicated/verbose keys are GONE
+                   (is (not (contains? error :seon.error/ex-data))
+                       ":seon.error/ex-data (a dup of :seon.error/data) dropped")
+                   (is (not (contains? error :seon.error/raw))
+                       ":seon.error/raw (opaque, re-prints everything) dropped")
+                   (is (not (contains? error :seon.error/stack))
+                       ":seon.error/stack (noise for :user-input) dropped")
+                   (is (not (contains? data :seon.db/malli-explanation))
+                       ":seon.db/malli-explanation (dup of the message) dropped")
+                   ;; …but enough detail to act survives
+                   (is (string? (:seon.error/message error)))
+                   (is (re-find #"::score|/score" (:seon.error/message error))
+                       "message names the offending attr")
+                   (is (= ::score (:seon.db/attr data))
+                       "structured data still names WHICH attr failed")
+                   (is (= :int (:seon.db/expected-schema data))
+                       "structured data still carries the expected schema")
+                   (is (= :user-input (:seon.error/kind data))
+                       "kind classification preserved"))))
+        (.then done))))
+
+(deftest huge-bad-value-stays-bounded
+  ;; A multi-kb bad value must NOT balloon the envelope — :seon.db/actual-value
+  ;; is truncated. Pins that the bound holds for arbitrary value size.
+  (async done
+    (-> (fresh-conn)
+        (.then (fn [conn]
+                 (never-reject!
+                   (db/transact!
+                     {:seon.db/tx-data [{::score (apply str (repeat 5000 "x"))}]
+                      :seon.db/conn    conn}))))
+        (.then (fn [{ok?   :seon.db/ok?
+                     error :seon.db/error :as env}]
+                 (is (false? ok?))
+                 (is (< (count (pr-str env)) display-truncation-limit)
+                     "a 5000-char bad value still yields a compact envelope")
+                 (is (<= (count (str (:seon.db/actual-value
+                                       (:seon.error/data error))))
+                         110)
+                     ":seon.db/actual-value is truncated, not echoed in full")))
+        (.then done))))
+
+(deftest translated-error-stays-compact-and-keeps-raw
+  ;; Compaction runs AFTER translation: the guiding message + the raw
+  ;; datahike text at :seon.db/raw-error both survive, and the envelope is
+  ;; still bounded (no stack / no ex-data dup).
+  (let [{ok?       :seon.db/ok?
+         error     :seon.db/error
+         raw-error :seon.db/raw-error :as env}
+        (internal/commit-error-envelope
+          (ex-info (str "Bad entity attribute :seon.nope/x at "
+                        "{:db/id 1, :seon.nope/x 1}, not defined in "
+                        "current schema")
+                   {:attribute :seon.nope/x}))]
+    (is (false? ok?))
+    (is (< (count (pr-str env)) display-truncation-limit)
+        "translated failure envelope is compact")
+    (is (re-find #"seon\.schema/register!" (:seon.error/message error))
+        "guiding message survives compaction")
+    (is (some? raw-error) "raw datahike text survives compaction")
+    (is (not (contains? error :seon.error/stack)))
+    (is (not (contains? error :seon.error/ex-data)))))
 
 ;; ---------------------------------------------------------------------------
 ;; 5. register!-time gate — invalid Malli forms fail legibly.

@@ -229,7 +229,8 @@
               (is (pos? (count text))
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
               (is (= [:system :namespaces :your-entity :live-tile
-                      :warnings :open-todos :relevant-source :transcript
+                      :warnings :reply-over-claim :open-todos
+                      :relevant-source :transcript
                       :turns :inventory :prompt]
                      sections)
                   "the v4 core-default section names, in order
@@ -237,6 +238,8 @@
                    exemplars, namespace-context, and seed sections are
                    all DEAD (context-v4); :inventory is the cheap
                    <data-inventory> surface in the volatile tail.
+                   :reply-over-claim (#51) is in the LAYOUT provenance
+                   even when it renders blank (no over-claim this turn).
                    :relevant-source (P2-D, env-gated default-OFF) is in
                    the LAYOUT provenance even when it renders blank — its
                    TEXT is dropped from the prompt (see ctx_test

@@ -285,6 +285,20 @@
   [path]
   (some? (js/goog.getObjectByName path)))
 
+(defn lookup-ns-object
+  "The live JS namespace object for `ns-name` (a dotted string like
+   \"seon.db\" / \"acme.helpers\") on `js/globalThis`, or nil. THE ONE munge
+   scheme: splits on `.`, munges each segment via `cljs.core/munge`, and walks
+   `gobj/get` from `js/globalThis` — exactly the path-prefix [[lookup-value]]
+   uses before its final member read, factored out so member resolution and
+   member enumeration ([[ns-fn-members]]) share one scheme. Never throws."
+  {:malli/schema [:=> [:catn [::ns-name :string]] [:maybe :any]]}
+  [ns-name]
+  (reduce (fn [obj seg]
+            (when obj (gobj/get obj (cljs.core/munge seg))))
+          js/globalThis
+          (str/split ns-name #"\.")))
+
 (defn lookup-value
   "Resolve a fully-qualified symbol to its runtime value, or nil if
    unresolvable. The CLJS-bootstrap equivalent of JVM's
@@ -313,13 +327,39 @@
   {:malli/schema [:=> [:cat :any] [:maybe :any]]}
   [sym]
   (when (qualified-symbol? sym)
-    (let [ns-parts (str/split (namespace sym) #"\.")
-          ns-obj   (reduce (fn [obj seg]
-                             (when obj (gobj/get obj (cljs.core/munge seg))))
-                           js/globalThis
-                           ns-parts)]
-      (when ns-obj
-        (gobj/get ns-obj (cljs.core/munge (name sym)))))))
+    (when-let [ns-obj (lookup-ns-object (namespace sym))]
+      (gobj/get ns-obj (cljs.core/munge (name sym))))))
+
+(defn ns-fn-members
+  "Enumerate the COMPILED function members of namespace `ns-name` (a string
+   like \"acme.helpers\") from its LIVE ns object on `js/globalThis`, as
+   `{simple-symbol <compiled-fn>}`. The inverse of [[lookup-value]]: that walks
+   the munged path to ONE member; this resolves the ns object the SAME way
+   ([[lookup-ns-object]] — one munge scheme) and reads back EVERY own enumerable
+   property that is a function, demunging each property name to its CLJS simple
+   symbol (`format_count` → `format-count`).
+
+   This surfaces UNSPECCED helpers that the `:seon.fn` index can't (the index
+   holds only `:malli/schema`-carrying vars), which is why `seon.render.sci`
+   unions this with the index — an aliased call to an unspecced compiled helper
+   (`h/format-count`) must resolve under SCI or the tile falls to the unbounded
+   compiled path.
+
+   Returns `{}` when the ns isn't on `globalThis` (never-loaded / core stub) or
+   on any failure. Never throws."
+  {:malli/schema [:=> [:catn [::ns-name :string]] :map]}
+  [ns-name]
+  (try
+    (if-let [ns-obj (lookup-ns-object ns-name)]
+      (reduce (fn [m k]
+                (let [v (gobj/get ns-obj k)]
+                  (if (fn? v)
+                    (assoc m (symbol (cljs.core/demunge k)) v)
+                    m)))
+              {}
+              (js/Object.keys ns-obj))
+      {})
+    (catch :default _ {})))
 
 (defn- truly-undeclared?
   "Decide whether an `:undeclared-var` / `:undeclared-ns` analyzer

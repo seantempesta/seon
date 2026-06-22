@@ -15,6 +15,7 @@
     [cljs.test :refer [deftest is testing async]]
     [datahike.api :as d]
     [seon.agent :as agent]
+    [seon.agent.message :as msg]
     [seon.client :as client]
     [seon.db :as db]
     [seon.eval :as seval]))
@@ -257,14 +258,16 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; Same-batch failure guard (fix-everything B3): a reply!/message! form
-;; in a batch where an EARLIER form failed — eval error OR an
-;; `*/ok? false` error-envelope VALUE (errors-as-values, eval-ok? TRUE)
-;; — is refused with a legible envelope; :seon.agent.message/force true
-;; overrides. Earlier-batch state is DERIVED: the tx-context's
-;; :seon.db/turn-id → the turn's recorded :seon.eval rows + the
-;; globalThis live-value stash. No tx-context turn-id ⇒ guard inert
-;; (every test above runs without one and still passes).
+;; #51 NARROWED — reply ALWAYS transacts + delivers; the protection is a
+;; LOOP-TERMINATION VETO, not a write block (reliability-49-53-deepdive
+;; 2026-06-22). The gate no longer REFUSES a same-turn send. What
+;; survives is `msg/same-turn-overclaim?` (the loop forces ONE make-good
+;; turn) + `msg/overclaim-advisory-section` (the render the agent sees),
+;; firing ONLY for the envelope-VALUE over-claim: a user-facing reply
+;; landed in the same turn as a sibling form whose live value was a
+;; `{*/ok? false}` failure envelope (eval-ok? TRUE). A genuine eval ERROR
+;; is advisory after #50 and does NOT veto. All derived from the turn's
+;; :seon.eval rows + the message log — nothing stored, nothing to clear.
 ;; ---------------------------------------------------------------------------
 
 (def ^:private turn-id "TRNmsgtest0001")
@@ -303,7 +306,24 @@
   (->> (pulled-msgs conn)
        (remove #(= "MSGmsgtestWAKE" (:seon.agent.message/id %)))))
 
-(deftest batch-guard-refuses-after-an-eval-error
+(defn- the-turn
+  "The seeded turn entity (TRNmsgtest0001), evals inlined — what the loop
+   veto reads (run-turn!'s result)."
+  [conn]
+  (db/entity {:seon.db/db @conn :seon.db/ref [:seon.agent.turn/id turn-id]}))
+
+(defn- veto?
+  "Would the loop force a make-good turn for the seeded turn? Reads the
+   turn entity + message log, exactly as run-agentic-loop! does. The
+   seeded turn is the most-recent turn, so the reply window is open."
+  [conn]
+  (msg/same-turn-overclaim? (the-turn conn) a-id))
+
+;; An EVAL ERROR (ok? false) sibling no longer blocks the reply — after
+;; #50 a genuine error is advisory, the loop grants a next turn, and the
+;; error renders crystal-clear. The reply DELIVERS and the veto does NOT
+;; fire (dropping the eval-error half was the whole point).
+(deftest eval-error-sibling-reply-delivers-no-veto
   (async done
     (-> (with-conn
           (fn [conn]
@@ -318,28 +338,23 @@
                          (reply-in-batch!
                            {:seon.agent.message/content "logged it — all stored"})))
                 (.then
-                  (fn [{ok? :seon.db/ok? error :seon.db/error}]
-                    (is (false? ok?) "eval error earlier in the batch → refusal")
-                    (let [m (:seon.error/message error)]
-                      (is (re-find #"REFUSED" m))
-                      (is (re-find #"EVLmsgtstERR1" m)
-                          "refusal NAMES the failed form")
-                      (is (re-find #"undeclared var" m)
-                          "refusal carries the failure's error text")
-                      (is (re-find #":seon.agent.message/force" m)
-                          "refusal teaches the override"))
-                    (is (empty? (non-wake-msgs conn))
-                        "nothing was sent to the user"))))))
+                  (fn [{ok? :seon.agent.message/ok?}]
+                    (is (true? ok?) "reply ALWAYS transacts — no write block")
+                    (is (= 1 (count (non-wake-msgs conn)))
+                        "the reply IS delivered to the user")
+                    (is (false? (veto? conn))
+                        "eval-error sibling does NOT veto the halt — advisory only"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest batch-guard-refuses-on-an-error-envelope-value
+;; The decisive #26/B3 case: the transact REJECTION is an eval-ok? TRUE
+;; VALUE (errors-as-values). The reply DELIVERS (the human gets the
+;; answer) AND the loop forces one make-good turn so the advisory lands
+;; where the agent sees it.
+(deftest envelope-failure-sibling-reply-delivers-and-vetoes
   (async done
     (-> (with-conn
           (fn [conn]
-            ;; The decisive s21 case: the transact REJECTION is an
-            ;; eval-ok? TRUE value (errors-as-values) — the guard must
-            ;; count the `*/ok? false` envelope as a failure.
             (-> (seed-woken-turn! conn {:seon.user/id "user"} 0)
                 (.then (fn [_]
                          (seed-turn-eval!
@@ -354,18 +369,49 @@
                          (reply-in-batch!
                            {:seon.agent.message/content "stored as run-1"})))
                 (.then
-                  (fn [{ok? :seon.db/ok? error :seon.db/error}]
-                    (is (false? ok?) "envelope failure (eval-ok? true) → refusal")
-                    (let [m (:seon.error/message error)]
-                      (is (re-find #"EVLmsgtstENV1" m))
-                      (is (re-find #"error envelope" m))
-                      (is (re-find #"unregistered attr" m)
-                          "refusal surfaces the envelope's error message"))
-                    (is (empty? (non-wake-msgs conn))))))))
+                  (fn [{ok? :seon.agent.message/ok?}]
+                    (is (true? ok?) "the reply transacts + delivers, never blocked")
+                    (is (= 1 (count (non-wake-msgs conn)))
+                        "the human gets the answer")
+                    (is (true? (veto? conn))
+                        "envelope-value over-claim → loop forces one make-good turn")
+                    (let [lines (msg/turn-overclaim-lines (the-turn conn) a-id nil)]
+                      (is (= 1 (count lines)))
+                      (is (re-find #"EVLmsgtstENV1" (first lines)))
+                      (is (re-find #"error envelope" (first lines)))
+                      (is (re-find #"unregistered attr" (first lines))
+                          "the advisory line surfaces the envelope's message")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest batch-guard-force-sends-despite-failures
+;; A same-turn envelope failure with NO user-facing reply (e.g. an
+;; agent-to-agent consult that failed) is NOT an over-claim — the veto is
+;; scoped to the user-facing reply (TIGHTEST scope, DECISION §5.2).
+(deftest envelope-failure-without-reply-does-not-veto
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (seed-woken-turn! conn {:seon.user/id "user"} 0)
+                (.then (fn [_]
+                         (seed-turn-eval!
+                           conn {:eval-id "EVLmsgtstNR1"
+                                 :source  "(db/transact! …)"
+                                 :ok?     true
+                                 :stash   {:seon.db/ok? false
+                                           :seon.db/error
+                                           {:seon.error/message "rejected"}}})))
+                ;; no reply sent this turn
+                (.then (fn [_]
+                         (is (seq (msg/turn-envelope-failure-lines (the-turn conn)))
+                             "the envelope failure is detected")
+                         (is (false? (veto? conn))
+                             "but with no user-facing reply, no over-claim → no veto"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; :force is the deliberate \"I am replying ABOUT the failure\" escape —
+;; the reply still transacts + delivers (as every reply now does).
+(deftest force-reply-delivers
   (async done
     (-> (with-conn
           (fn [conn]
@@ -385,13 +431,15 @@
                             :seon.agent.message/force true})))
                 (.then
                   (fn [{ok? :seon.agent.message/ok?}]
-                    (is (true? ok?) "force = a deliberate reply ABOUT the failures")
+                    (is (true? ok?) "force = a deliberate reply ABOUT the failure")
                     (is (= 1 (count (non-wake-msgs conn)))
                         "the forced message IS stored"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest batch-guard-all-green-batch-sends-normally
+;; All-green batch — a SUCCESS envelope ({*/ok? true}) is not a failure.
+;; The reply delivers and the veto stays silent.
+(deftest all-green-batch-reply-delivers-no-veto
   (async done
     (-> (with-conn
           (fn [conn]
@@ -414,8 +462,10 @@
                            {:seon.agent.message/content "done — stored 1 row"})))
                 (.then
                   (fn [{ok? :seon.agent.message/ok?}]
-                    (is (true? ok?) "all-green batch → reply sends unchanged")
-                    (is (= 1 (count (non-wake-msgs conn)))))))))
+                    (is (true? ok?) "all-green batch → reply delivers unchanged")
+                    (is (= 1 (count (non-wake-msgs conn))))
+                    (is (false? (veto? conn))
+                        "no failure → no over-claim → no veto"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

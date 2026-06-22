@@ -592,6 +592,120 @@
               :else datum))
           tx-data)))
 
+;; ---------------------------------------------------------------------------
+;; Identity-ident symbol→keyword coercion (#48).
+;;
+;; The documented/prompted "persist a tool" path leads an agent to write a
+;; namespace identity as a QUOTED SYMBOL — `{:seon.ns/name 'my.agent.foo …}`
+;; — because a namespace IS a symbol everywhere else in Clojure. But the
+;; attr's registered schema is `[:keyword {:seon.db/identity true}]`, so the
+;; natural shape fails the value-validation gate ([[validate-values!]]) and
+;; the fn is defined-in-session but NEVER persisted. The system's own tee
+;; (eval.cljs) always writes the keyword `(keyword (str ns))`; only the
+;; hand-written agent path hits the symbol footgun.
+;;
+;; FIX (precise scope, per the asks triage 2026-06-22): coerce symbol→keyword
+;; ONLY for KEYWORD-TYPED IDENTITY idents — the `:seon.ns/name`-class attrs.
+;; A symbol arriving at a keyword-typed identity slot is unambiguously this
+;; footgun (there is no legitimate symbol value for a keyword identity attr),
+;; so the coercion is conservative AND data-driven: it fires for whatever
+;; keyword-typed identity attrs the registry holds (today `:seon.ns/name`
+;; and `:seon.schema/key`), never for string-identity attrs (`:seon.fn/sym`),
+;; ref-identity attrs (`:seon.agent/id` → `:seon.db/id`), or non-identity
+;; keyword attrs (`:seon.ctx/name`). The KEYWORD stays the stored canonical
+;; value — we coerce on the way IN and never loosen the stored schema — so
+;; datahike lookup-refs / identity resolution keep working.
+;;
+;; The coercion mirrors [[normalize-entity-ref-keys]]: same entity-map +
+;; ref-slot recursion + `[:db/add|:db/retract e a v]` tuple handling, and it
+;; ALSO rewrites lookup-ref tuples `[ident-attr 'sym]` (in `:db/id`, ref
+;; values, and tuple e-/v-slots) since a symbol there fails `:seon.db/ref`
+;; the same way. Runs BEFORE the ref-key normalizer + the validation gate.
+;; ---------------------------------------------------------------------------
+
+(defn keyword-identity-ident?
+  "True when `attr` is a registered, non-system IDENTITY attr whose
+   resolved value type is `:keyword` — the `:seon.ns/name`-class idents
+   an agent naturally writes as a quoted symbol (#48). These are the ONLY
+   attrs [[coerce-identity-symbol-idents]] coerces symbol→keyword for."
+  [attr]
+  (and (keyword? attr)
+       (not (system-attr? attr))
+       (schema/registered? attr)
+       (schema/identity-attr? attr)
+       (let [base (-> (schema/schema-definition attr)
+                      resolve-malli-form
+                      form->child-form
+                      resolve-malli-form
+                      form-head)]
+         (= :keyword base))))
+
+(defn coerce-lookup-ref-symbol
+  "If `v` is a lookup-ref tuple `[ident-attr value]` whose `ident-attr` is
+   a [[keyword-identity-ident?]] and whose `value` is a symbol, coerce the
+   value to a keyword. Anything else passes through unchanged."
+  [v]
+  (if (and (vector? v)
+           (= 2 (count v))
+           (keyword-identity-ident? (first v))
+           (symbol? (second v)))
+    [(first v) (keyword (second v))]
+    v))
+
+(defn coerce-identity-symbol-idents
+  "Walk `tx-data` and coerce symbol values to keywords for every
+   [[keyword-identity-ident?]] slot — entity-map values, nested entities
+   under ref slots, lookup-ref tuples (in `:db/id`, ref values, and the
+   e-/v-slots of `[:db/add|:db/retract e a v]` tuples). The KEYWORD is the
+   stored canonical value (#48)."
+  [tx-data]
+  (letfn [(coerce-entity [ent]
+            (reduce-kv
+              (fn [acc k v]
+                (assoc acc k
+                       (cond
+                         ;; The footgun: a symbol where a keyword identity
+                         ;; value is required → coerce to keyword.
+                         (and (keyword-identity-ident? k) (symbol? v))
+                         (keyword v)
+                         ;; A `:db/id` lookup-ref carrying a symbol value.
+                         (= :db/id k) (coerce-lookup-ref-symbol v)
+                         ;; Recurse only into ref-slot values (entity maps
+                         ;; / lookup-refs legally appear there); other map
+                         ;; values are opaque (mirrors the ref-key walker).
+                         (ref-slot? k) (coerce-ref-value v)
+                         :else v)))
+              {} ent))
+          (coerce-ref-value [v]
+            (cond
+              (map? v)        (coerce-entity v)
+              (vector? v)     (coerce-lookup-ref-symbol v)
+              (sequential? v) (mapv coerce-ref-value v)
+              :else           v))]
+    (mapv (fn [datum]
+            (cond
+              (map? datum)
+              (coerce-entity datum)
+
+              ;; `[:db/add|:db/retract e a v]` — coerce a lookup-ref symbol
+              ;; in the e-slot, and the v-slot when `a` is a ref slot
+              ;; (nested entity / lookup-ref) OR `a` is itself a
+              ;; keyword-identity ident written with a symbol value.
+              (and (vector? datum)
+                   (>= (count datum) 3)
+                   (#{:db/add :db/retract} (first datum)))
+              (let [a (nth datum 2)]
+                (cond-> (update datum 1 coerce-lookup-ref-symbol)
+                  (and (>= (count datum) 4) (ref-slot? a))
+                  (update 3 coerce-ref-value)
+                  (and (>= (count datum) 4)
+                       (keyword-identity-ident? a)
+                       (symbol? (nth datum 3)))
+                  (update 3 keyword)))
+
+              :else datum))
+          tx-data)))
+
 (defn ref-attr-arity
   "If the attr's resolved Malli schema describes a ref slot, returns
    `:one` (single ref) or `:many` (container of refs). Returns `nil`
@@ -979,6 +1093,59 @@
         emap (assoc emap :seon.error/data (assoc data :seon.error/kind kind))]
     {::db/ok? false ::db/error emap}))
 
+(def ^:private verbose-data-keys
+  "Keys dropped from the failure envelope's `:seon.error/data` (#46). The
+   surviving message ALREADY states attr/expected/got in one line, so the
+   full Malli explanation is pure duplication; the expected-schema /
+   actual-value structured fields stay (short, machine-readable — they
+   name WHICH attr/value failed). `:seon.db/malli-explanation` is the
+   `{:schema … :value … :errors …}` blob that ballooned the envelope to
+   ~3600 chars and re-stated message content a third time."
+  [:seon.db/malli-explanation])
+
+(defn compact-error-map
+  "Collapse a `(error/->map e)` failure into ONE concise envelope (#46).
+   A downstream-reported transact! validation failure echoed the SAME
+   explanation across four keys — `:seon.error/message`,
+   `:seon.error/ex-data`, `:seon.error/data`, and the embedded
+   `:seon.db/malli-explanation` — plus a multi-kb `:seon.error/stack` and
+   the opaque `:seon.error/raw` error instance (which re-prints
+   message+ex-data on pr-str), tripping the 1500-char agent-display
+   truncation on a trivial type mismatch.
+
+   This keeps exactly what an agent needs to act — the guiding
+   `:seon.error/message`, and a SHORT `:seon.error/data` carrying
+   `:seon.error/kind`, the `:seon.db/error` tag, plus the
+   attr / expected-schema / (truncated) actual-value naming WHICH attr
+   and value failed — and drops the redundant copies:
+
+     - `:seon.error/ex-data`  — byte-identical to `:seon.error/data`.
+     - `:seon.error/raw`      — opaque error object; pr-str re-emits the
+                                whole message + ex-data again.
+     - `:seon.error/stack`    — a JS stack is noise for a `:user-input`
+                                fault; the message says what to fix.
+     - `:seon.db/malli-explanation` (inside data) — the
+                                `{:schema/:value/:errors}` blob the
+                                message already summarizes in one line.
+
+   `:seon.db/actual-value` is truncated to its `pr-str` (it can be an
+   arbitrarily large bad value — a giant string, a deep map — and the
+   validators store it UN-truncated; the message already carries the
+   truncated form). Other keys pass through, so cryptic-error translation
+   ([[translate-cryptic-error]]) — which reads message + ex-data BEFORE
+   this runs — and the `:seon.db/raw-error` it sets are unaffected."
+  [error-map]
+  (let [data  (:seon.error/data error-map)
+        data' (when (map? data)
+                (cond-> (apply dissoc data verbose-data-keys)
+                  (contains? data :seon.db/actual-value)
+                  (update :seon.db/actual-value truncate-value)))]
+    (cond-> (dissoc error-map
+                    :seon.error/ex-data
+                    :seon.error/raw
+                    :seon.error/stack)
+      (some? data') (assoc :seon.error/data data'))))
+
 (defn translate-cryptic-error
   "A4: rewrite the two known cryptic datahike commit errors inside a
    failure envelope into guiding, agent-actionable messages. The raw
@@ -1026,11 +1193,16 @@
       :else envelope)))
 
 (defn commit-error-envelope
-  "Failure envelope + cryptic-message translation. Every catch in the
-   transact path routes through this so the agent always sees the
-   guiding message (with the raw one preserved)."
+  "Failure envelope + cryptic-message translation, then COMPACTION (#46).
+   Every catch in the transact path routes through this so the agent
+   always sees the guiding message (with the raw one preserved at
+   `:seon.db/raw-error`). Order is load-bearing: translation runs on the
+   FULL error map (it reads `:seon.error/message` + `:seon.error/ex-data`),
+   THEN [[compact-error-map]] drops the duplicated/verbose keys so the
+   final envelope stays well under the agent-display truncation limit."
   [e]
-  (translate-cryptic-error (error-envelope e)))
+  (let [envelope (translate-cryptic-error (error-envelope e))]
+    (update envelope ::db/error compact-error-map)))
 
 ;; ---------------------------------------------------------------------------
 ;; Runtime datahike-schema install + the commit body.
@@ -1161,6 +1333,12 @@
   (try
     (let [{::db/keys [tx-data opts conn return-report?]} arg
           c           (resolve-conn conn)
+          ;; A symbol written where a keyword-typed IDENTITY value belongs
+          ;; (`{:seon.ns/name 'my.agent.foo …}`, the prompted fn-registration
+          ;; footgun) is coerced to the canonical keyword HERE, before the
+          ;; validation gate, so the natural agent shape persists instead of
+          ;; failing Malli (#48). The KEYWORD is the stored canonical value.
+          tx-data     (coerce-identity-symbol-idents tx-data)
           ;; The taught `{:seon.db/ref <eid|lookup-ref> …}` entity-key
           ;; shorthand becomes datahike's native `:db/id` slot HERE, so
           ;; `:seon.db/ref` never reaches the store as a junk attr

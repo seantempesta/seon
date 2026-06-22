@@ -12,46 +12,46 @@
    Each vector entry is one of:
 
        {:kind :form
-        :narration string     ; the COMMENT-PREAMBLE for this form: every
-                              ; `;` comment AND every span of bare prose
-                              ; that preceded it, collapsed to one comment
-                              ; per line, `;` stripped (the renderer re-adds
-                              ; `;;`). NOTHING is dropped — bare prose
-                              ; \"raw thinking\" is captured as \"raw thinking\"
-                              ; so it round-trips back to `;; raw thinking`.
+        :narration string     ; the `;;` COMMENT-PREAMBLE for this form:
+                              ; the real `;` comment lines that preceded it,
+                              ; `;` stripped, one per line (the renderer
+                              ; re-adds `;;`). Bare prose is NOT captured —
+                              ; it is DROPPED (see below).
         :source string        ; BYTE-FAITHFUL — what the agent typed, char-
                               ; for-char (load-bearing for resume re-eval)
-        :form any}            ; the read sexpr value
+        :form any}            ; the read sexpr value (always a list/seq)
 
        {:kind :read
         :ok? false
-        :narration string     ; same accumulation rule
+        :narration string     ; same `;;`-comment accumulation rule
         :source string        ; the bad span (offset → recovery point)
         :error string}        ; rewrite-clj's parser message
 
        {:kind :comment
-        :narration string}    ; trailing comment-preamble with NO following
-                              ; form (end-of-reply `;` lines or bare prose) —
-                              ; an entry of its own so nothing is lost; the
-                              ; renderer shows it as `;;` lines, no form.
+        :narration string}    ; either trailing `;;` comment lines with NO
+                              ; following form, OR the one-line
+                              ; `demoted-literal-warning` for a top-level
+                              ; data literal (`{…}`/`[…]`/`#{…}`) that was
+                              ; demoted to prose. The renderer shows it as
+                              ; `;;` lines, no form.
 
-   ## Narration capture — nothing dropped, nothing invented
+   ## Forms-and-prose-only — what evaluates, what is dropped (#50/#52)
 
-   The format the system prompt teaches is ONE continuous REPL
-   transcript: `;` comment lines interleaved with forms. So this parser
-   keeps EVERY non-form span as comment-preamble:
+   A top-level read form is a `:kind :form` entry (EVALUATED) iff it is a
+   LIST/SEQ — `(…)` plus the reader-macros that read as seqs (`@x`/`'x`/
+   `#(…)`/`` `(…) ``/`#'x`). EVERYTHING else is prose:
 
-     - a real `;`/`;;` comment → its text (`;` stripped);
-     - a span of BARE PROSE (`raw text thinking`) that tokenizes into bare
-       atoms (see `narration-atom?`) → captured VERBATIM as one comment
-       line, NOT evaluated;
-     - a PROSE-classified unreadable span (A.1 — a token like `80s` the
-       reader THROWS on) → also captured as a comment line, not dropped.
+     - real `;`/`;;` comments → kept as narration (the taught reasoning
+       channel — these are NOT the trap);
+     - bare atoms / sentences / a bare `=>` echo / tagged literals
+       (`#inst`/`#uuid`/`#js`/`#?(…)`) / an A.1 unreadable token (`80s`)
+       → DROPPED (not echoed as `;;` — that echo was the `;;`-imitation
+       trap that taught agents to write `;;` when they meant data);
+     - a top-level DATA LITERAL (`{…}`/`[…]`/`#{…}`) → DROPPED (a
+       fabricated `=> {…}` echo would otherwise self-evaluate into a real
+       `result/<id>`, #52) but emits ONE `demoted-literal-warning`.
 
-   The renderer prefixes each line with `;;`, so the agent sees its own
-   thinking reflected back in the exact shape the system prompt teaches.
-   Code (`(...)`/`[...]`/`{...}`/reader-macro) still evaluates; only
-   non-form text becomes comment-preamble.
+   See `prose-token?` / `data-literal?` for the cut.
 
    ## Per-form error isolation
 
@@ -103,41 +103,91 @@
   (str/replace text fence-line-re ""))
 
 ;; ============================================================
-;; Narration filter — the format contract the system prompt teaches
-;; is that a form is `(...)`, `[...]`, `{...}`, or a reader-macro
-;; form (`@x`, `'x`, `#{...}`, `#(...)` — all collection/list-shaped
-;; after read). Top-level BARE ATOMS — symbols, numbers, strings,
-;; keywords, booleans, nil, chars — only occur when the LLM emits
-;; unescaped prose between forms: a sentence tokenizes into bare
-;; symbols, `24 minutes` yields the number 24, a quote character in
-;; prose swallows text into a string literal (`", felt good…"`).
-;; Evaluating those pollutes the eval log and can eat real intent
-;; (observed live: a consult intent split into `24` + a giant string
-;; eval). We enforce the contract at parse time: bare atoms are NOT
-;; evaluated — but instead of being DROPPED (the old behavior, which
-;; silently lost the agent's prose thinking) they are CAPTURED as
-;; comment-preamble (the raw prose span, verbatim), so the renderer
-;; reflects them back as `;;` lines. Nothing is lost; nothing invented.
+;; Prose-vs-form classification — the FORMS-AND-PROSE-ONLY rule
+;; (#50/#52, LOCKED 2026-06-22).
 ;;
-;; Special symbols (`do`, `if`, …) are atoms too — a bare top-level
-;; `do` is the English word, not a form. Collection literals stay
-;; legal: an echoed result map `{...}` still evals (harmless
-;; identity), exactly matching the taught contract.
+;; A top-level READ form is EVALUATED iff it is a LIST/SEQ; EVERYTHING
+;; else is prose. The reader's sexpr makes this a clean cut:
+;;
+;;   EVALUATE — these all read as seqs and ARE genuine forms:
+;;     `(foo …)`        → :list          → (foo …)
+;;     `#(+ % 1)`       → :fn            → (fn* …)
+;;     `@x`             → :deref         → (clojure.core/deref x)
+;;     `'x`             → :quote         → (quote x)
+;;     `` `(a b) ``     → :syntax-quote  → (quote (a b))
+;;     `#'x`            → :var           → (var x)
+;;     `~x` / `~@x`     → :unquote*      → (unquote …) / (unquote-splicing …)
+;;
+;;   PROSE — never evaluated:
+;;     - bare ATOMS — symbols (incl. `do`/`if`), numbers, strings,
+;;       keywords, booleans, nil, chars, AND a bare `=>`/`⇒` echo token
+;;       (a symbol): LLM prose tokenized by the reader, or a fabricated
+;;       REPL echo arrow;
+;;     - DATA LITERALS — a top-level `{…}` / `[…]` / `#{…}` (`:map` /
+;;       `:vector` / `:set`): a fabricated `=> {:role :admin}` echo
+;;       self-evaluates into a real `result/<id>` via the stash/record
+;;       path (#52) — the exact bug. The READER groups a whole `(…)` as
+;;       one top-level form regardless of indentation, so a MULTILINE
+;;       `(db/transact!\n  {…})` is one `:list` form (evaluates) while a
+;;       bare multiline `{…}` is one `:map` datum (prose);
+;;     - TAGGED LITERALS — `#inst`, `#uuid`, `#js`, `#?(…)` (tag
+;;       `:reader-macro`): these sexpr to a SEQ (`(read-string "#inst …")`)
+;;       so `seq?` alone would mis-evaluate them; the `:reader-macro`
+;;       TAG is the discriminator, so the prose decision is made at the
+;;       token level (`prose-token?`) where the tag is in hand.
+;;
+;; Prose is DROPPED — NOT echoed back as a `;;` comment-preamble. That
+;; echo was the `;;`-imitation trap: agents saw their bare prose
+;; reflected as `;;` and began writing `;;` when they meant to use data.
+;; The ONE exception is a demoted DATA LITERAL, which emits a single
+;; concise WARNING (see `demoted-literal-warning`) so the agent learns
+;; to wrap a value it means to run.
 ;; ============================================================
 
-(defn- narration-atom?
-  "True if `form` is a top-level bare atom — symbol (incl. special
-   symbols), number, string, keyword, boolean, nil, or char — i.e.
-   LLM prose tokenized by the reader rather than a form the format
-   contract permits."
+(defn- prose-token?
+  "True if a parsed top-level token is PROSE (not evaluated). `form` is
+   the read sexpr; `tag` is the rewrite-clj node tag. The form/prose cut
+   is `(seq? form)` — a list/seq evaluates — with ONE refinement: a
+   `:reader-macro` tagged literal (`#inst`/`#uuid`/`#js`/`#?(…)`) sexprs
+   to a seq (`(read-string …)`) but is a DATUM, not a form, so it is
+   prose. Everything that is not a seq (scalars, symbols, `{…}`/`[…]`/
+   `#{…}`) is prose."
+  [form tag]
+  (or (= tag :reader-macro)
+      (not (seq? form))))
+
+(defn- data-literal?
+  "True if `form` is a top-level DATA LITERAL — a map, vector, or set.
+   These are the demotions that warrant the one-line warning (a strong
+   signal the agent meant to USE a value): a bare `{…}`/`[…]`/`#{…}` is
+   read as a NOTE, not run. Concrete-type checks only — `map?`/`vector?`/
+   `set?`, never `coll?`/`sequential?`."
   [form]
-  (or (symbol? form)
-      (number? form)
-      (string? form)
-      (keyword? form)
-      (boolean? form)
-      (nil? form)
-      (char? form)))
+  (or (map? form) (vector? form) (set? form)))
+
+(defn- literal-shape
+  "A short structural description of a demoted data literal for the
+   warning (`3-key map`, `vector`, `set`). Concrete types only."
+  [form]
+  (cond
+    (map? form)    (str (count form) "-key map")
+    (vector? form) "vector"
+    (set? form)    "set"
+    :else          "value"))
+
+(defn- demoted-literal-warning
+  "The ONE concise, idempotent warning fired when a top-level DATA
+   LITERAL (map/vector/set) is demoted to prose. A pure function of the
+   demoted `form` — recomputed every parse, stored nowhere as a flag
+   (reactive-context: when the agent stops typing bare literals the
+   warning stops appearing). Leads with `⚠` (the renderer preserves the
+   glyph). Tells the agent the cut (only `(`-forms evaluate) and the fix
+   (wrap the value)."
+  [form]
+  (str "⚠ Read as a note, not code: " (literal-shape form) ". Only forms "
+       "beginning with ( are evaluated — bare maps/vectors/sets are treated "
+       "as text. To use a value, wrap it in a form: (def x …) or "
+       "(identity …)."))
 
 ;; ============================================================
 ;; rewrite-clj node helpers
@@ -158,17 +208,6 @@
    destructuring is predictable)."
   [parts]
   (str/trim (str/join "\n" parts)))
-
-(defn- prose->comment-lines
-  "Turn a captured bare-prose span into comment-preamble line(s): trim
-   the whole span, then split on newlines and drop blank lines, so a
-   multi-line prose paragraph becomes one comment line per non-blank
-   text line (the renderer prefixes each with `;;`). Returns a (possibly
-   empty) seq of strings — empty when the span was only whitespace."
-  [span]
-  (->> (str/split-lines (str/trim (str span)))
-       (map str/trim)
-       (remove str/blank?)))
 
 ;; ============================================================
 ;; Error recovery — when one form fails to parse, advance to the next
@@ -210,10 +249,16 @@
 ;; ============================================================
 ;; Prose-vs-code classification (A.1) — a reader THROW on a token like
 ;; `80s`, `to:`, `detail:`, `v1.0` reaches the `:error` branch before any
-;; sexpr exists, so `narration-atom?` (which only filters tokens that
+;; sexpr exists, so `prose-token?` (which only classifies tokens that
 ;; READ cleanly) never sees it. Without classification the whole prose
 ;; paragraph is recorded as one failed eval the agent must explain. The
-;; rule below distinguishes that prose from genuinely broken CODE.
+;; rule below distinguishes that prose from a genuinely broken CALL FORM.
+;;
+;; Under forms-and-prose-only, the ONLY shape that signals "the agent
+;; meant a runnable form" is a LIST `(`. A throwing span that starts with
+;; `{`/`[` is a broken data literal — and data literals are PROSE — so it
+;; is DROPPED, not recorded as a `:read` failure (matching the clean-read
+;; data-literal demotion).
 ;; ============================================================
 
 (def ^:private prose-error-re
@@ -223,27 +268,31 @@
   #"^Invalid (number|symbol|keyword|token)")
 
 (defn- opener-at-start?
-  "True when the TRIMMED `span` begins with a collection opener
-   (`(` / `[` / `{`) — i.e. the failing span LOOKS like a form the agent
-   intended (a genuinely broken `(+ 1 3x)`), not inline-code prose
-   (\"I'll use (subs …) to format\" — opener mid-sentence).
+  "True when the TRIMMED `span` begins with a LIST opener `(` — i.e. the
+   failing span LOOKS like a runnable form the agent intended (a genuinely
+   broken `(+ 1 3x)`), not inline-code prose (\"I'll use (subs …) to
+   format\" — opener mid-sentence) and not a broken data literal
+   (`{:a 3x}` — a datum, which is prose).
+
+   Why `(` ONLY (not `{`/`[`): under forms-and-prose-only only a list
+   evaluates, so only a list start signals intended code. A `{`/`[` start
+   is a data literal → prose → dropped, never a `:read` failure.
 
    Why START, not anywhere: real LLM narration quotes code inline. If the
    check were opener-ANYWHERE, that narration would be misclassified as
    broken code and recorded as a `:read` failure — the inverse of the bug
-   we are fixing. Requiring the opener at the start of the trimmed span
-   keeps `(+ 1 3x)` (opener at start) as broken code while letting
-   \"I'll use (subs …)\" (opener mid-line) classify as prose."
+   we are fixing. Requiring `(` at the start of the trimmed span keeps
+   `(+ 1 3x)` (opener at start) as broken code while letting \"I'll use
+   (subs …)\" (opener mid-line) classify as prose."
   [span]
-  (let [t (str/triml (str span))]
-    (boolean (some #(str/starts-with? t %) ["(" "[" "{"]))))
+  (str/starts-with? (str/triml (str span)) "("))
 
 (defn- prose-failure?
-  "True when a failing span should be DROPPED as narration rather than
-   recorded as a `:read` failure: BOTH the reader error matches the
-   prose-token signature AND the span has no collection opener at the
-   START of its trimmed first line (the opener-at-START rule). `span` is
-   the bad text from `offset` to the narrowed recovery point."
+  "True when a failing span should be DROPPED rather than recorded as a
+   `:read` failure: BOTH the reader error matches the prose-token
+   signature AND the span has no LIST opener `(` at the START of its
+   trimmed first line (the opener-at-START rule). `span` is the bad text
+   from `offset` to the narrowed recovery point."
   [error span]
   (and (re-find prose-error-re (str error))
        (not (opener-at-start? span))))
@@ -261,10 +310,14 @@
   "Attempt to parse exactly one rewrite-clj token starting at `offset`.
    Returns one of:
 
-     {:kind :form       :source <byte-faithful> :form <sexpr> :end <int>}
+     {:kind :form  :source <byte-faithful> :form <sexpr> :tag <kw> :end <int>}
      {:kind :comment    :text <stripped>                      :end <int>}
      {:kind :whitespace                                       :end <int>}
-     {:kind :error      :error <message>}                     ; caller recovers"
+     {:kind :error      :error <message>}                     ; caller recovers
+
+   `:tag` is the rewrite-clj node tag (`:list`, `:map`, `:reader-macro`,
+   …) — `prose-token?` needs it to tell a `#inst` datum (sexprs to a seq
+   yet is prose) from a genuine list/reader-macro form."
   [text offset]
   (try
     (let [chunk (subs text offset)
@@ -284,7 +337,7 @@
         {:kind :whitespace :end end}
 
         :else
-        {:kind :form :source src :form (rcn/sexpr node) :end end}))
+        {:kind :form :source src :form (rcn/sexpr node) :tag tag :end end}))
     (catch #?(:clj Exception :cljs :default) e
       {:kind :error :error (#?(:clj .getMessage :cljs .-message) e)})))
 
@@ -293,102 +346,107 @@
 ;; ============================================================
 
 (defn parse-forms
-  "Read `text` top-to-bottom, pairing each form with the comment-preamble
-   that precedes it. See the namespace docstring for the entry-shape
-   contract.
+  "Read `text` top-to-bottom, pairing each evaluable form with the `;;`
+   comment-preamble that precedes it. See the namespace docstring for the
+   entry-shape contract.
 
-   NOTHING is dropped. A `;` comment, a span of bare prose (LLM thinking
-   tokenized into bare atoms — see `narration-atom?`), and an A.1
-   prose-classified unreadable token (`80s`) ALL become comment-preamble
-   captured VERBATIM and attached to the next form's `:narration` (the
-   renderer re-adds `;;`). Trailing comment-preamble with no following
-   form is emitted as a `:kind :comment` entry so it survives too.
+   FORMS-AND-PROSE-ONLY (#50/#52): a top-level read form is a `:kind
+   :form` entry (EVALUATED) iff it is a LIST/SEQ — `(…)` and the
+   reader-macros that read as seqs (`@x`/`'x`/`#(…)`/`` `(…) ``/`#'x`).
+   EVERYTHING else is prose and is DROPPED (NOT echoed back as a `;;`
+   line — that echo was the `;;`-imitation trap). Prose covers: bare
+   atoms (symbols incl. `do`/`if`, numbers, strings, keywords, a bare
+   `=>`/`⇒`), TAGGED literals (`#inst`/`#uuid`/`#js`/`#?(…)`), an A.1
+   unreadable prose token (`80s`/`to:`), and — the load-bearing #52 fix —
+   a top-level DATA LITERAL (`{…}`/`[…]`/`#{…}`). A demoted data literal
+   does NOT silently vanish: it emits a `:kind :comment` entry whose
+   narration is the one-line `demoted-literal-warning` (a strong signal
+   the agent meant to USE a value). The reader groups a whole `(…)` as
+   one top-level form regardless of indentation, so a multiline
+   `(db/transact!\n  {…})` is ONE evaluated form while a bare multiline
+   `{…}` is ONE demoted datum.
 
-   Code still evaluates: a `(...)`/`[...]`/`{...}`/reader-macro form is a
-   `:form` entry. Read errors do NOT halt the parse — each genuinely
-   broken span becomes a `:kind :read :ok? false` entry and parsing
-   continues, so a reader error mid-prose never poisons adjacent forms.
+   Real `;;` comments are the taught reasoning channel and still attach
+   as `:narration` to the following form (or emit as a trailing `:kind
+   :comment` entry). Dropped prose between a comment and its form does
+   NOT break that attachment — `;; intent\\nokay\\n(foo)` attaches
+   `intent` to `(foo)` and drops `okay`.
+
+   Read errors do NOT halt the parse: a genuinely broken FORM (opener at
+   the start of its span — `(+ 1 3x)`) becomes a `:kind :read :ok? false`
+   entry and parsing continues; a prose-token throw (`80s`) is dropped.
 
    Markdown code-fence lines (` ``` `, ` ```clojure `, ` ~~~ `, …)
    are stripped before reading — see `strip-code-fences`."
   [text]
   (let [text (strip-code-fences text)]
-    ;; `pending` accumulates comment-preamble lines (`;` stripped).
-    ;; `prose-from`/`prose-to` track the byte span of the CURRENT
-    ;; contiguous bare-prose run (nil = no run open); whitespace
-    ;; advances `offset` without closing the run, so `raw text thinking`
-    ;; (three bare-atom tokens) coalesces into ONE comment line. A real
-    ;; comment or form FLUSHES the prose run first.
-    (loop [offset     0
-           pending    []
-           prose-from nil
-           prose-to   nil
-           out        []]
-      (let [flush (fn [pending]
-                    (if prose-from
-                      (into pending (prose->comment-lines
-                                      (subs text prose-from prose-to)))
-                      pending))]
-        (if (>= offset (count text))
-          (let [pending (flush pending)]
-            ;; Trailing comment-preamble with no following form: emit a
-            ;; comment-only entry so end-of-reply `;;` lines / prose are
-            ;; never lost.
-            (if (seq pending)
-              (conj out {:kind :comment :narration (join-narration pending)})
-              out))
-          (let [token (try-parse-one-token text offset)]
-            (case (:kind token)
-              :whitespace
-              (recur (:end token) pending prose-from prose-to out)
+    ;; `pending` accumulates REAL `;;` comment lines (`;` stripped) — the
+    ;; taught reasoning preamble. Bare prose is DROPPED, not accumulated,
+    ;; so there is no prose-run to track; `pending` carries THROUGH
+    ;; dropped prose so a `;;` comment still attaches to the next form.
+    (loop [offset  0
+           pending []
+           out     []]
+      (if (>= offset (count text))
+        ;; Trailing `;;` comment lines with no following form survive as a
+        ;; comment-only entry; dropped prose leaves nothing behind.
+        (if (seq pending)
+          (conj out {:kind :comment :narration (join-narration pending)})
+          out)
+        (let [token (try-parse-one-token text offset)]
+          (case (:kind token)
+            :whitespace
+            (recur (:end token) pending out)
 
-              :comment
+            :comment
+            (recur (:end token) (conj pending (:text token)) out)
+
+            :form
+            (cond
+              ;; A genuine form (list/seq, not a tagged literal) — emit,
+              ;; carrying any accumulated `;;` preamble as narration.
+              (not (prose-token? (:form token) (:tag token)))
               (recur (:end token)
-                     (conj (flush pending) (:text token))
-                     nil nil out)
+                     []
+                     (conj out {:kind      :form
+                                :narration (join-narration pending)
+                                :source    (:source token)
+                                :form      (:form token)}))
 
-              :form
-              (if (narration-atom? (:form token))
-                ;; LLM prose tokenized as a bare atom — CAPTURE its raw
-                ;; source into the open prose run (extend `prose-to`),
-                ;; carry forward; do not evaluate.
-                (recur (:end token)
-                       pending
-                       (or prose-from offset)
-                       (:end token)
-                       out)
-                ;; A real form — flush any open prose run as preamble.
-                (recur (:end token)
-                       []
-                       nil nil
-                       (conj out {:kind :form
-                                  :narration (join-narration (flush pending))
-                                  :source    (:source token)
-                                  :form      (:form token)})))
+              ;; A demoted DATA LITERAL (`{…}`/`[…]`/`#{…}`) — DROP the
+              ;; eval, but emit ONE warning so the agent learns to wrap a
+              ;; value it means to run. Any `;;` preamble rides along.
+              (data-literal? (:form token))
+              (recur (:end token)
+                     []
+                     (conj out {:kind :comment
+                                :narration
+                                (join-narration
+                                  (conj pending
+                                        (demoted-literal-warning (:form token))))}))
 
-              :error
-              ;; Classify the failing span as PROSE vs BROKEN CODE (A.1).
-              ;; For the classification we look at the narrowed (next-line)
-              ;; span — one stray token shouldn't drag in following lines.
-              (let [nl-recovery (next-newline-recovery text offset)
-                    prose-span  (subs text offset nl-recovery)]
-                (if (prose-failure? (:error token) prose-span)
-                  ;; Prose narration tokenized as an invalid token — CAPTURE
-                  ;; the span into the open prose run (not dropped), recover
-                  ;; at the next newline so the next line gets a fresh parse.
-                  (recur nl-recovery
-                         pending
-                         (or prose-from offset)
-                         nl-recovery
-                         out)
-                  ;; Broken code — record a :read failure and recover at the
-                  ;; next column-0 anchor (form OR comment) as before.
-                  (let [recovery (find-recovery-point text offset)]
-                    (recur recovery
-                           []
-                           nil nil
-                           (conj out {:kind  :read
-                                      :ok?   false
-                                      :narration (join-narration (flush pending))
-                                      :source    (subs text offset recovery)
-                                      :error     (:error token)}))))))))))))
+              ;; Ordinary prose tokenized as an atom / tagged literal —
+              ;; DROP it; carry `pending` so a real comment still lands.
+              :else
+              (recur (:end token) pending out))
+
+            :error
+            ;; PROSE vs BROKEN CODE (A.1). Classify on the narrowed
+            ;; (next-line) span so one stray token never drags in the
+            ;; following lines.
+            (let [nl-recovery (next-newline-recovery text offset)
+                  prose-span  (subs text offset nl-recovery)]
+              (if (prose-failure? (:error token) prose-span)
+                ;; Prose tokenized as an invalid token — DROP it; recover
+                ;; at the next newline; carry `pending`.
+                (recur nl-recovery pending out)
+                ;; Broken code — record a :read failure; recover at the
+                ;; next column-0 anchor (form OR comment).
+                (let [recovery (find-recovery-point text offset)]
+                  (recur recovery
+                         []
+                         (conj out {:kind      :read
+                                    :ok?       false
+                                    :narration (join-narration pending)
+                                    :source    (subs text offset recovery)
+                                    :error     (:error token)})))))))))))

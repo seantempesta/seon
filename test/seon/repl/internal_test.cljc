@@ -85,17 +85,13 @@
     :expected-source "(seon.db/transact!\n  {:seon.db/tx-data\n   [{:foo/bar 1}]})"
     :note "preserves indentation across multi-line maps"}
 
-   {:in "#{:a :b :c}"
-    :expected-source "#{:a :b :c}"
-    :note "set literal"}
-
    {:in "@!atom-ref"
     :expected-source "@!atom-ref"
-    :note "reader macro"}
+    :note "reader macro (deref) — reads as a seq, stays a form"}
 
    {:in "(let [x #(+ % 1)] (x 41))"
     :expected-source "(let [x #(+ % 1)] (x 41))"
-    :note "fn literal"}])
+    :note "fn literal nested in a list form"}])
 
 (deftest source-is-byte-faithful
   (doseq [{:keys [in expected-source note]} byte-faithful-cases]
@@ -105,103 +101,192 @@
         (is (= expected-source (:source (first entries))))))))
 
 ;; ============================================================
-;; Narration-atom capture — the format contract: a form is `(...)`,
-;; `[...]`, `{...}`, or a reader-macro form. Top-level bare atoms
-;; (symbols, numbers, strings, keywords) are LLM prose tokenized by
-;; the reader — NARRATION, never EVALUATED, but CAPTURED as
-;; comment-preamble (the verbatim prose span), never dropped. Shapes
-;; below include the exact mangles observed live
+;; Forms-and-prose-only (#50/#52) — a top-level read form is EVALUATED
+;; (`:kind :form`) iff it is a LIST/SEQ. Everything else is PROSE and is
+;; DROPPED (no entry) — NOT echoed back as a `;;` line (that echo was the
+;; `;;`-imitation trap). The ONE exception is a demoted top-level DATA
+;; LITERAL (`{…}`/`[…]`/`#{…}`), which emits a single `:kind :comment`
+;; warning entry. Real `;;` comments still attach as narration to the
+;; following form. Shapes below include the live mangles
 ;; (context-blind-spots-2026-06-11): `24`, `88.`, the `", felt good…"`
-;; quote-fragment string, prose sentences, echoed-prompt symbol lines.
-;; The `:prose-as-narration` key, when set, pins the captured text.
+;; quote-fragment, prose sentences, echoed-prompt symbol lines, and the
+;; fabricated `=> {…}` echo (#52).
 ;; ============================================================
 
 (def prose-cases
+  ;; Each case: :in, :form-count (evaluated :kind :form entries),
+  ;; optional :entry-count (total entries), :first-form, :first-narration,
+  ;; :warned? (a demoted-literal `⚠` warning is present).
   [{:in "Let me think (+ 1 2)"
-    :note "prose before form — bare symbols captured as preamble, form kept"
+    :note "prose before form — bare symbols DROPPED, form kept, NO narration"
     :form-count 1
+    :entry-count 1
     :first-form '(+ 1 2)
-    :first-narration "Let me think"}
+    :first-narration ""}
 
    {:in "thinking thinking (+ 1 2)"
-    :note "multiple bare symbols coalesce into ONE preamble line"
+    :note "multiple bare symbols dropped, form kept"
     :form-count 1
-    :first-form '(+ 1 2)
-    :first-narration "thinking thinking"}
+    :entry-count 1
+    :first-form '(+ 1 2)}
 
    {:in "(+ 1 2)\nokay\n(+ 3 4)"
-    :note "bare symbol between forms — both real forms kept; prose → next form's preamble"
-    :form-count 2}
+    :note "bare symbol between forms — both real forms kept; prose dropped"
+    :form-count 2
+    :entry-count 2}
 
    {:in ";; thinking\nokay (+ 1 2)"
-    :note "comment + bare-prose both captured, in order, on the next form"
+    :note "real `;;` comment attaches; bare-prose `okay` dropped"
     :form-count 1
-    :first-narration "thinking\nokay"}
+    :entry-count 1
+    :first-narration "thinking"}
 
    {:in "24"
-    :note "bare top-level number captured as comment (not an eval) (observed: s21 sweep-3)"
+    :note "bare top-level number — DROPPED, no entry (observed: s21 sweep-3)"
     :form-count 0
-    :entry-count 1}
+    :entry-count 0}
 
    {:in "88."
-    :note "number with trailing dot captured as comment (observed: s32 sweep-1)"
+    :note "number with trailing dot — DROPPED (observed: s32 sweep-1)"
     :form-count 0
-    :entry-count 1}
+    :entry-count 0}
 
    {:in "\", felt good. Before I design a schema, I need to check whether a workout schema already exists\""
-    :note "quote-fragment swallowed into a string literal captured as comment (the once-eaten consult intent)"
+    :note "quote-fragment swallowed into a string literal — DROPPED"
     :form-count 0
-    :entry-count 1}
+    :entry-count 0}
 
    {:in "I ran this morning - 24 minutes, felt good."
-    :note "whole prose sentence — captured as ONE comment-only entry, NOTHING dropped"
+    :note "whole prose sentence — DROPPED, no entry, no warning"
     :form-count 0
-    :entry-count 1
-    :first-narration "I ran this morning - 24 minutes, felt good."}
+    :entry-count 0}
 
    {:in ":ok"
-    :note "bare top-level keyword captured as comment"
+    :note "bare top-level keyword — DROPPED"
     :form-count 0
-    :entry-count 1}
+    :entry-count 0}
 
    {:in "do it now"
-    :note "special symbols (`do`) are atoms too — bare `do` is the English word, captured"
+    :note "special symbols (`do`) are atoms — bare `do` is the English word, DROPPED"
     :form-count 0
-    :entry-count 1}
+    :entry-count 0}
 
    {:in "my.agent.RnA-2606111546=>"
-    :note "echoed prompt line tokenizes to a symbol — captured as comment"
+    :note "echoed prompt line tokenizes to a symbol — DROPPED"
     :form-count 0
-    :entry-count 1}
+    :entry-count 0}
 
    {:in "The plan:\n(+ 1 2)\nThat should work"
-    :note "legitimate form sandwiched between prose lines — exactly one eval, both prose spans kept"
+    :note "legitimate form sandwiched between prose — exactly one eval, prose dropped"
     :form-count 1
+    :entry-count 1
     :first-form '(+ 1 2)
-    :first-narration "The plan:"}
+    :first-narration ""}
 
    {:in "{:seon.eval/ok? true, :seon.eval/result 3}"
-    :note "echoed result map is a legal `{...}` form — still evals (harmless identity)"
-    :form-count 1
-    :first-form {:seon.eval/ok? true, :seon.eval/result 3}}])
+    :note "echoed result map is a DATA LITERAL — DROPPED + warning, NOT evaluated (#52)"
+    :form-count 0
+    :entry-count 1
+    :warned? true}
 
-(deftest narration-atoms-captured-not-dropped
+   {:in "[1 2 3]"
+    :note "bare vector literal — DROPPED + warning, NOT evaluated"
+    :form-count 0
+    :entry-count 1
+    :warned? true}
+
+   {:in "#{:a :b}"
+    :note "bare set literal — DROPPED + warning, NOT evaluated"
+    :form-count 0
+    :entry-count 1
+    :warned? true}
+
+   {:in "(grants) => {:role :admin :ok true}"
+    :note "#52: list runs (harmless), `=>` is prose, `{…}` demoted + warned, NO eval/result"
+    :form-count 1
+    :first-form '(grants)
+    :warned? true}
+
+   {:in "#inst \"2020-01-01\""
+    :note "tagged literal (#inst) sexprs to a seq but is a DATUM — DROPPED, no warning"
+    :form-count 0
+    :entry-count 0}
+
+   {:in "#uuid \"00000000-0000-0000-0000-000000000000\""
+    :note "tagged literal (#uuid) — DROPPED, no warning"
+    :form-count 0
+    :entry-count 0}])
+
+(deftest forms-and-prose-only
   (doseq [{:keys [in note form-count entry-count
-                  first-form first-narration]} prose-cases]
+                  first-form first-narration warned?]} prose-cases]
     (testing (str note " — " (pr-str in))
       (let [entries (parse/parse-forms in)
-            forms   (filter #(= :form (:kind %)) entries)]
+            forms   (filter #(= :form (:kind %)) entries)
+            warning? (some #(and (= :comment (:kind %))
+                                 (str/includes? (str (:narration %)) "⚠"))
+                           entries)]
         (is (= form-count (count forms))
-            (str "form-count mismatch for " (pr-str in)))
+            (str "form-count mismatch for " (pr-str in)
+                 " — got " (pr-str entries)))
         (when entry-count
           (is (= entry-count (count entries))
               (str "entry-count mismatch for " (pr-str in)
                    " — got " (pr-str entries))))
         (when first-form
           (is (= first-form (:form (first forms)))))
-        (when first-narration
-          ;; the first non-blank entry carries the captured preamble
-          (is (= first-narration (:narration (first entries)))))))))
+        (when (some? first-narration)
+          (is (= first-narration (:narration (first forms)))))
+        (when (some? warned?)
+          (is (= warned? (boolean warning?))
+              (str "demoted-literal warning expected=" warned?
+                   " for " (pr-str in) " — got " (pr-str entries))))))))
+
+;; ============================================================
+;; Reader-macro forms — `@x`/`'x`/`#(…)`/`#'x`/`` `(…) `` all read as
+;; SEQS, so they EVALUATE (`:kind :form`); they are NOT prose. This is
+;; the seq?-not-coll? cut: a list and any seq-shaped reader macro stay
+;; forms, while maps/vectors/sets are prose.
+;; ============================================================
+
+(def reader-macro-cases
+  [{:in "@!atom-ref"       :form '(clojure.core/deref !atom-ref)}
+   {:in "'x"               :form '(quote x)}
+   {:in "#(+ % 1)"         :form '(fn* [%1] (+ %1 1))}
+   {:in "#'some-var"       :form '(var some-var)}
+   {:in "`(a b)"           :form '(quote (a b))}])
+
+(deftest reader-macros-evaluate
+  (doseq [{:keys [in form]} reader-macro-cases]
+    (testing (str "reader macro evaluates — " (pr-str in))
+      (let [entries (parse/parse-forms in)]
+        (is (= 1 (count entries)))
+        (is (= :form (:kind (first entries))))
+        ;; fn-literal gensyms differ; compare structurally where exact,
+        ;; else just assert it's a seq form.
+        (when (not (str/starts-with? in "#("))
+          (is (= form (:form (first entries)))))
+        (is (seq? (:form (first entries))))))))
+
+;; ============================================================
+;; Multiline / indented forms are indent-safe — the reader groups a
+;; whole `(…)` as one top-level form regardless of indentation, while a
+;; bare multiline data literal stays ONE demoted datum.
+;; ============================================================
+
+(deftest multiline-form-is-one-eval
+  (let [entries (parse/parse-forms
+                  "(seon.db/transact!\n  {:seon.db/tx-data\n   [{:foo/bar 1}]})")]
+    (is (= 1 (count entries)))
+    (is (= :form (:kind (first entries))))
+    (is (= '(seon.db/transact! {:seon.db/tx-data [{:foo/bar 1}]})
+           (:form (first entries)))))
+  ;; A bare multiline map is ONE demoted datum (NOT a form), with a warning.
+  (let [entries (parse/parse-forms "{:a 1\n :b 2\n :c 3}")]
+    (is (= 1 (count entries)))
+    (is (= :comment (:kind (first entries))))
+    (is (str/includes? (str (:narration (first entries))) "⚠"))
+    (is (empty? (filter #(= :form (:kind %)) entries)))))
 
 ;; ============================================================
 ;; Read-error recovery — bad form becomes a :read entry; subsequent
@@ -267,20 +352,19 @@
 
 ;; ============================================================
 ;; A.1 — prose-vs-code classification. A reader THROW on a prose token
-;; (`80s`, `to:`, `detail:`, `v1.0`) must be CAPTURED as comment
-;; narration, NOT recorded as a `:read` failure — UNLESS the failing
-;; span has a collection opener at its START (a genuinely broken FORM
-;; like `(+ 1 3x)`). The opener-at-START rule is what keeps inline-code
-;; prose ("I'll use (subs …) to format") classified as prose while
-;; keeping a real broken form as broken code. The KEY invariant here is
-;; `:no-read?` — a prose token never becomes a `:read` failure; the
-;; prose itself is now KEPT as comment-preamble (not dropped).
+;; (`80s`, `to:`, `detail:`, `v1.0`) must be DROPPED, NOT recorded as a
+;; `:read` failure — UNLESS the failing span has a LIST opener `(` at its
+;; START (a genuinely broken FORM like `(+ 1 3x)`). The opener-at-START
+;; rule (now `(`-only) keeps inline-code prose ("I'll use (subs …) to
+;; format") classified as prose while keeping a real broken list form as
+;; broken code. The KEY invariant here is `:no-read?` — a prose token
+;; never becomes a `:read` failure; the prose is DROPPED (not echoed).
 ;; ============================================================
 
 (def prose-token-cases
   [{:in "80s arcade/start screen."
-    :note "Invalid number `80s` in prose — captured as a comment, NO :read failure (FHb)"
-    :entry-count 1
+    :note "Invalid number `80s` in prose — DROPPED, NO :read failure (FHb)"
+    :entry-count 0
     :no-read? true}
 
    {:in "to:\n1.  Register the schema."
@@ -305,12 +389,12 @@
     :expected-kinds [:read]}
 
    {:in "80s arcade/start screen.\nThis should include:\n- Neon colors.\n;; Define the tile\n(defn my-tile [_] {:seon.render/hiccup [:div]})"
-    :note "multi-line prose preamble KEPT; comment narration kept; defn parses (episode turn-2)"
+    :note "bare-prose preamble DROPPED; real `;;` comment kept; defn parses (episode turn-2)"
     :form-count 1
     :no-read? true
-    :narration-includes ["80s arcade" "Define the tile"]}])
+    :narration-includes ["Define the tile"]}])
 
-(deftest prose-tokens-captured-not-read-failures
+(deftest prose-tokens-dropped-not-read-failures
   (doseq [{:keys [in note entry-count form-count no-read?
                   expected-kinds narration-includes]} prose-token-cases]
     (testing (str note " — " (pr-str in))
@@ -324,10 +408,11 @@
           (is (not-any? #(= :read %) kinds)
               (str "a :read failure leaked for prose: " (pr-str kinds))))
         (when narration-includes
-          (let [narr (:narration (first entries))]
+          ;; The real `;;` comment attaches to the form it precedes.
+          (let [narr (str/join "\n" (keep :narration entries))]
             (doseq [frag narration-includes]
-              (is (clojure.string/includes? (str narr) frag)
-                  (str "captured preamble must include " (pr-str frag)
+              (is (clojure.string/includes? narr frag)
+                  (str "narration must include " (pr-str frag)
                        " — got " (pr-str narr))))))
         (when entry-count
           (is (= entry-count (count entries))
@@ -337,36 +422,36 @@
               (str "form-count mismatch: " (pr-str kinds))))))))
 
 ;; ============================================================
-;; Narration-unification round-trip — the transcript the agent reads is
-;; ONE continuous `;;`-comments + forms stream. Re-rendering an entry's
-;; captured preamble as `;;` lines above its source and RE-PARSING it
-;; must recover the SAME forms and the SAME comment text — nothing lost,
-;; bare prose comes back as a `;;` comment. This is the parse-level half
-;; of the round-trip (the full format-eval-row render round-trip lives in
-;; the ctx test).
+;; Round-trip — under forms-and-prose-only, re-rendering an entry's `;;`
+;; comment-preamble above its source and RE-PARSING it must recover the
+;; SAME forms and the SAME real-comment text. Bare prose does NOT
+;; round-trip — it was DROPPED on the first parse, so the rendered stream
+;; never contains it. This is the parse-level half (the full
+;; format-eval-row render round-trip lives in the ctx test).
 ;; ============================================================
 
 (defn- render-entry
   "Re-render one parse entry as the unified stream fragment: its
-   comment-preamble as `;;` lines, then (for a form/read) the source."
+   `;;` comment-preamble as `;;` lines, then (for a form/read) the source.
+   A demoted-literal warning (`⚠`) entry is a comment, so it round-trips
+   as a `;;` line — but it is NOT a form, so it never re-evaluates."
   [{:keys [kind narration source]}]
   (let [pre (when (and narration (not (str/blank? narration)))
               (->> (str/split-lines narration)
-                   (map #(str ";; " %))
+                   (map #(str ";; " (str/replace % #"^[\s;]+" "")))
                    (str/join "\n")))]
     (str pre
          (when (and pre (#{:form :read} kind)) "\n")
          (when (#{:form :read} kind) source))))
 
 (def round-trip-cases
-  ;; the S1 user example + the prose-heavy shapes — every span must survive
+  ;; forms + real `;;` comments survive; bare prose is dropped on parse 1
   ["raw text thinking\n;; writing a function to add 1 + 1\n(+ 1 1)\nforgot to put comments here\n(correct-working-fn correct-args)"
    ";; first\n(a)\n;; second\n(b)"
    "The plan:\n(+ 1 2)\nThat should work"
-   "I ran this morning - 24 minutes, felt good."
    ";; just a trailing thought"])
 
-(deftest narration-unification-round-trips
+(deftest narration-round-trips
   (doseq [in round-trip-cases]
     (testing (str "round-trip — " (pr-str in))
       (let [entries  (parse/parse-forms in)
@@ -376,15 +461,14 @@
         (is (= (mapv :form (filter #(= :form (:kind %)) entries))
                (mapv :form (filter #(= :form (:kind %)) reparsed)))
             (str "forms changed across round-trip — " (pr-str rendered)))
-        ;; every captured narration line re-appears as a `;;` line in the
-        ;; rendered text — prose comes back as a comment, nothing dropped
+        ;; every real `;;` comment line re-appears as a `;;` line
         (doseq [e entries
                 ln (when (:narration e) (str/split-lines (:narration e)))
                 :when (not (str/blank? ln))]
-          (is (str/includes? rendered (str ";; " ln))
-              (str "preamble line " (pr-str ln) " missing from "
+          (is (str/includes? rendered (str ";; " (str/replace ln #"^[\s;]+" "")))
+              (str "comment line " (pr-str ln) " missing from "
                    (pr-str rendered))))
-        ;; re-parsed narration text equals the original (idempotent)
+        ;; re-parsed narration equals the original (idempotent)
         (is (= (mapv :narration entries) (mapv :narration reparsed))
             (str "narration drifted across round-trip — got "
                  (pr-str (mapv :narration reparsed))))))))

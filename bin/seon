@@ -86,8 +86,12 @@ if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/java" ]; then
   export JAVA_CMD="${JAVA_HOME}/bin/java"
 fi
 
-PROC_DIR="tmp/proc"
-LOG_DIR="logs"
+# PROC_DIR/LOG_DIR default to today's baked-in paths (byte-identical for
+# seon's own usage) but are env-overridable so a SECOND isolated cluster
+# (e.g. bin/acme) gets its OWN supervisor pid/lock namespace + logs and can
+# never bounce or clobber the live default cluster's pod/wire-server.
+PROC_DIR="${SEON_PROC_DIR:-tmp/proc}"
+LOG_DIR="${SEON_LOG_DIR:-logs}"
 mkdir -p "$PROC_DIR" "$LOG_DIR"
 
 # ============================================================
@@ -183,7 +187,7 @@ process_command() {
     # EVERY agent (logs/turns/<agent>/<turn-idx>-<id>/: prompt.txt, response.txt,
     # response.edn). NOTE: currently UNBOUNDED — nothing calls seon.debug/prune!
     # yet; add a per-agent keep-N cap before long-running production use.
-    pod)         echo "npm run css:build && exec env SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1 SEON_DEBUG_CAPTURE=1$(extra_npm_node_path) node out/client/main.js" ;;
+    pod)         echo "npm run css:build && exec env SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1 SEON_DEBUG_CAPTURE=1$(extra_npm_node_path) node \"${SEON_CLIENT_OUT:-out/client/main.js}\"" ;;
     cljs-watch)  echo "clj$(extra_src_sdeps) -M:cljs watch client$(extra_preload_merge)" ;;
     jvm)         echo "./bin/run" ;;
     # V2 platform Host — JVM datahike wire-server (single-DB today).
