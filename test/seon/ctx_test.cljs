@@ -74,9 +74,9 @@
              ;; downstream product code: NO prefix allow-list, so it is
              ;; included structurally just like seon/my code.
              "acme.widget" "acme.persona" "acme"]]
-    (is (true? (ctx/included-ns? n)) (str n " is included")))
+    (is (true? (ctx-namespaces/included-ns? n)) (str n " is included")))
   ;; the no-prefix downstream case stated explicitly.
-  (is (true? (ctx/included-ns? "acme.widget"))
+  (is (true? (ctx-namespaces/included-ns? "acme.widget"))
       "downstream code is included with NO prefix allow-list")
   (doseq [n [;; *.internal — STRUCTURAL exclusion, applies to seon/my/
              ;; downstream alike.
@@ -90,32 +90,32 @@
              ;; debug capture lives under *.internal — dropped structurally,
              ;; same rule as every other internal ns. No name-list.
              "seon.debug.internal"]]
-    (is (false? (ctx/included-ns? n)) (str n " is NOT included")))
+    (is (false? (ctx-namespaces/included-ns? n)) (str n " is NOT included")))
   ;; the *-test structural exclusion.
   (doseq [n ["seon.agent.search-test" "my.soul-test" "acme.widget-test"]]
-    (is (true? (ctx/test-ns-name? n)) (str n " is a test ns")))
-  (is (false? (ctx/test-ns-name? "seon.agent.search")) "non-test ns")
+    (is (true? (ctx-namespaces/test-ns-name? n)) (str n " is a test ns")))
+  (is (false? (ctx-namespaces/test-ns-name? "seon.agent.search")) "non-test ns")
   ;; debug capture is hidden via the structural *.internal rule, no name-list.
-  (is (true? (ctx/hidden-ns-name? "seon.debug.internal"))
+  (is (true? (ctx-namespaces/hidden-ns-name? "seon.debug.internal"))
       "seon.debug.internal is hidden structurally")
   ;; hidden beats everything, even under my.* and downstream code.
   (doseq [n ["seon.db.internal" "seon.agent.internal" "my.foo.internal"
              "acme.widget.internal"]]
-    (is (true? (ctx/hidden-ns-name? n)) (str n " is hidden")))
+    (is (true? (ctx-namespaces/hidden-ns-name? n)) (str n " is hidden")))
   ;; full-source depth (curated-namespaces 2026-06-21): full-source ⇔ every
   ;; my.* ns by RULE (test siblings ride along via the `-test` strip) PLUS
-  ;; the curated seon.* whitelist (exemplar-nses = :seon.agent.todo). Its
-  ;; `-test` sibling rides along too (the `-test` strip → :seon.agent.todo,
-  ;; an exemplar). Every OTHER seon.* framework ns is a name-manifest stub,
+  ;; the curated seon.* whitelist (full-source-whitelist = :seon.agent.todo).
+  ;; Its `-test` sibling rides along too (the `-test` strip → :seon.agent.todo,
+  ;; a whitelisted ns). Every OTHER seon.* framework ns is a name-manifest stub,
   ;; NEVER full-source.
   (doseq [n ["my.kb" "my.kb.system" "my.soul" "my.soul-test"
              ;; the curated seon.* whitelist + its test sibling.
              "seon.agent.todo" "seon.agent.todo-test"]]
-    (is (true? (ctx/full-source-ns? n)) (str n " is full-source")))
+    (is (true? (ctx-namespaces/full-source-ns? n)) (str n " is full-source")))
   (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.db" "seon.ctx"
              "seon.agent.search" "seon.agent.search-test"
              "seon.agent.searcher" "my.foo.internal"]]
-    (is (false? (ctx/full-source-ns? n)) (str n " is NOT full-source"))))
+    (is (false? (ctx-namespaces/full-source-ns? n)) (str n " is NOT full-source"))))
 
 ;; ------------------------------------------------------------
 ;; namespaces-section — tags, hiding, reconstitution, recency.

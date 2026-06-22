@@ -12,9 +12,9 @@
              `SEON_EXTRA_SRC` `acme` business logic the agent needs whole);
          (c) the agent's CURRENT ns    — its complete working code;
          (d) a small curated whitelist of `seon.*` framework tools
-             ([[seon.ctx/exemplar-nses]] — `:seon.agent.todo`).
+             ([[full-source-whitelist]] — `:seon.agent.todo`).
        The FULL-source decision is one shared rule:
-       [[seon.ctx/full-source-ns?]] already covers (a) + (d); (b) is the
+       [[full-source-ns?]] already covers (a) + (d); (b) is the
        not-`seon.` structural fall-through; (c) is the current-ns check.
      - NAME-MANIFEST for every OTHER `seon.*` framework ns: one block
        listing just the names + a pointer to fetch any one's source on
@@ -27,7 +27,7 @@
    The section NEVER re-reads files at render time (code-as-data): the
    boot indexer (`seon.client/ns-row`) is the ONE file-reader, and it
    stores the REAL full file text for exactly the nses rendered full
-   (the same [[seon.ctx/full-source-ns?]] rule + the extra-src roots),
+   (the same [[full-source-ns?]] rule + the extra-src roots),
    leaving the framework bulk a `(ns x)` stub — which this section never
    renders as a body, only as a NAME in the manifest. So the full rows
    here are always real file source, never a reconstructed stub."
@@ -36,11 +36,119 @@
     [seon.ctx :as ctx]
     [seon.db :as db]))
 
+;; ============================================================
+;; The namespace-display selection rules — the ONE home for which
+;; indexed :seon.ns rows render, and which render in FULL. Shared by
+;; the boot indexer (`seon.client/ns-row`, the one file reader) and
+;; [[namespaces-section]] (the curated `<namespaces>` prompt body):
+;; one rule, one writer, no drift. Pure string/keyword/symbol fns —
+;; no dependency on anything in `seon.ctx`.
+;; ============================================================
+
+(defn hidden-ns-name?
+  "Rule 1: a `*.internal` namespace (or any of its children) is
+   indexed but NEVER rendered — the V3-A naming convention IS the
+   filter. String/keyword/symbol tolerant."
+  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+  [ns-name]
+  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
+    (boolean (or (str/ends-with? s ".internal")
+                 (str/includes? s ".internal.")))))
+
+(defn my-ns-name?
+  "Rule 2: `my.*` is the human's world — always shown, provenance not
+   consulted (one name rule, no special cases)."
+  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+  [ns-name]
+  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
+    (boolean (or (= s "my") (str/starts-with? s "my.")))))
+
+(defn test-ns-name?
+  "Rule 1b: a `*-test` namespace is indexed but NEVER rendered into the
+   agent prompt — its `deftest`s are noise to the working agent, and the
+   per-fn `:test` usage example already rides the regular fn's attr-map in
+   the compact head. Full tests stay reachable on demand via
+   [[seon.ctx/render-namespace]]. STRUCTURAL, like [[hidden-ns-name?]]: the
+   suffix IS the filter. String/keyword/symbol tolerant."
+  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+  [ns-name]
+  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
+    (str/ends-with? s "-test")))
+
+(defn included-ns?
+  "The ONE selection rule for the `<namespace>` tags: EVERY indexed
+   :seon.ns row renders EXCEPT *.internal (hidden-ns-name?) and *-test
+   (test-ns-name?) ones — both STRUCTURAL naming conventions that apply
+   to seon, my.*, and downstream code alike. No prefix allow-list: the
+   library gate lives on the INDEX side (only first-party + SEON_EXTRA_SRC
+   code ever gets a :seon.ns row — seon.indexing/first-party-file?)."
+  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+  [ns-name]
+  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
+    (boolean (and (not (hidden-ns-name? s))
+                  (not (test-ns-name? s))))))
+
+(defn- base-ns-name
+  "The ns name with a trailing `-test` stripped — the SUBJECT ns a test
+   sibling pairs with (`seon.agent.search-test` → `seon.agent.search`).
+   Non-test names pass through unchanged."
+  [ns-str]
+  (if (str/ends-with? ns-str "-test")
+    (subs ns-str 0 (- (count ns-str) 5))
+    ns-str))
+
+(def full-source-whitelist
+  "The CURATED whitelist of `seon.*` FRAMEWORK namespaces shown to every
+   agent IN FULL (curated-namespaces 2026-06-21) — the few seon.* tools an
+   agent actually USES, worth their whole source. Start it here; this is
+   the clear EDITABLE def to extend.
+     - `:seon.agent.todo` — the store/retrieve reference an agent calls
+       directly: `register!` per attr, three map-in/map-out `:malli/schema`
+       fn shapes, error-as-value envelopes, the todo tools the system
+       prompt teaches by name.
+   `my.*` nses (`my.kb`, `my.soul`, agent-authored code) are ALREADY
+   rendered full by the `my.*` rule in [[full-source-ns?]] — they do NOT
+   belong here; this whitelist is ONLY for the seon.* framework tools.
+   Shared by the boot indexer (which stores their real file source — see
+   `seon.client/ns-row`) and [[namespaces-section]] (which renders them
+   FULL while the rest of the framework is a name manifest)."
+  #{:seon.agent.todo})
+
+(defn in-full-source-whitelist?
+  "True when `ns-name` (string, keyword, or symbol) is one of the curated
+   seon.* framework [[full-source-whitelist]] nses. String/keyword/symbol
+   tolerant — the indexer hands a string, the renderer a keyword."
+  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+  [ns-name]
+  (contains? full-source-whitelist
+             (if (keyword? ns-name) ns-name (keyword (str ns-name)))))
+
+(defn full-source-ns?
+  "True when `ns-name` (string, symbol, or ns-name keyword) carries its
+   REAL FULL FILE TEXT as `:seon.ns/source`: every `my.*` ns (the
+   human's world — always inlined), including `-test` siblings (the
+   `-test` suffix is stripped to the subject ns first), AND every curated
+   [[in-full-source-whitelist?]] seon.* tool (so a framework tool like
+   `:seon.agent.todo` gets its REAL body stored — private helpers and
+   comments included). Used by the boot indexer (`seon.client/ns-row`) to
+   decide which rows get the file read; the SAME rule decides which rows
+   [[namespaces-section]] renders FULL — one rule, one writer, no drift.
+   Third-party (`acme`) roots are full-source too, gated separately by
+   `seon.client/extra-src-ns-strs` (the same file read). Every other ns
+   gets the minimal `(ns x)` stub at boot and is named in the manifest."
+  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
+  [ns-name]
+  (let [s    (if (keyword? ns-name) (name ns-name) (str ns-name))
+        base (base-ns-name s)]
+    (boolean (and (not (hidden-ns-name? s))
+                  (or (my-ns-name? base)
+                      (in-full-source-whitelist? base))))))
+
 (defn- third-party-ns?
   "A render-time structural rule: an included ns that is NEITHER `seon.*`
    framework NOR `my.*` is THIRD-PARTY business logic (the `acme`
    `SEON_EXTRA_SRC` code) — rendered FULL, no clipping. `my.*` is full via
-   [[seon.ctx/full-source-ns?]] already; this catches the remaining
+   [[full-source-ns?]] already; this catches the remaining
    non-seon roots. String/keyword tolerant."
   [ns-name]
   (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
@@ -49,15 +157,15 @@
 (defn- render-full?
   "True when ns `nm` (a keyword) renders its FULL source in the body:
      (a) it is the agent's CURRENT ns (`cur-ns`); OR
-     (b) [[seon.ctx/full-source-ns?]] — every `my.*` ns + the curated
-         seon.* whitelist ([[seon.ctx/exemplar-nses]]); OR
+     (b) [[full-source-ns?]] — every `my.*` ns + the curated
+         seon.* whitelist ([[full-source-whitelist]]); OR
      (c) [[third-party-ns?]] — a non-seon, non-my root (the `acme`
          business logic).
    Everything else is a `seon.*` framework ns → NAME-MANIFEST only."
   [nm cur-ns]
   (boolean
     (or (= nm cur-ns)
-        (ctx/full-source-ns? nm)
+        (full-source-ns? nm)
         (third-party-ns? nm))))
 
 (defn- manifest-block
@@ -93,9 +201,9 @@
   "CURATED `<namespace>` body (curated-namespaces 2026-06-21). One
    `<namespace name=\"…\">` tag per FULL-rendered ns ([[render-full?]]:
    every `my.*` ns, every THIRD-PARTY `acme` ns, the agent's CURRENT ns,
-   and the curated [[seon.ctx/exemplar-nses]] seon.* whitelist), each
+   and the curated [[full-source-whitelist]] seon.* whitelist), each
    carrying its REAL FULL FILE SOURCE — NO clipping. Every OTHER `seon.*`
-   framework ns ([[seon.ctx/included-ns?]] minus the full set) collapses
+   framework ns ([[included-ns?]] minus the full set) collapses
    into ONE name-only [[manifest-block]] at the end, with a clear
    query-for-source pointer.
 
@@ -106,7 +214,7 @@
    sits LAST (it changes only when the framework roster changes).
 
    `*.internal` and `*-test` nses are excluded outright
-   ([[seon.ctx/included-ns?]]). A full-source ns whose stored source is
+   ([[included-ns?]]). A full-source ns whose stored source is
    blank renders nothing (omitted); the boot indexer guarantees real text
    for every full row, so this is only the empty-store edge. NEVER a
    render-time file read — the boot indexer is the one reader."
@@ -138,7 +246,7 @@
                        '[:find ?nm ?tx
                          :where
                          [?n :seon.ns/name ?nm ?tx]]})
-                    (filter (fn [[nm _]] (ctx/included-ns? nm)))
+                    (filter (fn [[nm _]] (included-ns? nm)))
                     (sort-by (fn [[nm tx]] [tx (name nm)])))
         {full-rows true manifest-rows false}
         (group-by (fn [[nm _tx]] (render-full? nm cur-ns)) rows)

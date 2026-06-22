@@ -296,8 +296,8 @@
                                    :where
                                    [?n :seon.ns/name ?nm]
                                    [?n :seon.ns/source ?src]]})
-       (filter (fn [[nm _]] (and (ctx/included-ns? nm)
-                                 (ctx/full-source-ns? (name nm)))))
+       (filter (fn [[nm _]] (and (ctx-namespaces/included-ns? nm)
+                                 (ctx-namespaces/full-source-ns? (name nm)))))
        (sort-by (comp name first))
        (mapcat (fn [[nm src]]
                  (surface-examples (str "ns docstring of " (name nm))

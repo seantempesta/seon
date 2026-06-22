@@ -137,15 +137,16 @@
     (is (contains? names :seon.test.runner) ":seon.test.runner ns row emitted")
     (is (= "(ns seon.db)"
            (:seon.ns/source (first (filter #(= :seon.db (:seon.ns/name %)) ns-rows))))
-        "non-exemplar ns source is the minimal (ns x) stub")))
+        "non-whitelisted ns source is the minimal (ns x) stub")))
 
 (deftest core-ns-rows-stub-bulk-full-source-whitelist
   ;; Curated render (curated-namespaces 2026-06-21): the seon.* FRAMEWORK
   ;; BULK keeps the minimal `(ns x)` stub (it is name-manifested, never
   ;; rendered as a body), while the curated seon.* whitelist
-  ;; (seon.ctx/exemplar-nses = :seon.agent.todo) force-stores its REAL FULL
+  ;; (seon.ctx.namespaces/full-source-whitelist = :seon.agent.todo)
+  ;; force-stores its REAL FULL
   ;; FILE TEXT (it renders FULL, so the boot indexer reads the file — the
-  ;; same seon.ctx/full-source-ns? rule the renderer uses, one writer no
+  ;; same seon.ctx.namespaces/full-source-ns? rule the renderer uses, one writer no
   ;; drift). seon.agent.search / seon.agent.fs are framework bulk → stub.
   (let [tx      (client/index-core!)
         ns-rows (filter :seon.ns/name tx)

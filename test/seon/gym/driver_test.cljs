@@ -19,7 +19,7 @@
     [malli.core :as m]
     [seon.agent :as agent]
     [seon.client :as client]
-    [seon.ctx :as ctx]
+    [seon.ctx.namespaces :as ctx-namespaces]
     [seon.db :as db]
     [seon.gym.driver :as gym]
     [seon.schema :as schema]
@@ -240,7 +240,7 @@
                                 (let [dbv      @conn
                                       expected (->> (client/core-ns-set)
                                                     (map name)
-                                                    (filter ctx/full-source-ns?)
+                                                    (filter ctx-namespaces/full-source-ns?)
                                                     set)
                                       full-src (->> (db/query
                                                       {:seon.db/db dbv
@@ -250,7 +250,7 @@
                                                          [?n :seon.ns/name ?nm]
                                                          [?n :seon.ns/source ?src]]})
                                                     (keep (fn [[nm src]]
-                                                            (when (and (ctx/full-source-ns? (name nm))
+                                                            (when (and (ctx-namespaces/full-source-ns? (name nm))
                                                                        (not= (str/trim src)
                                                                              (str "(ns " (name nm) ")")))
                                                               (name nm))))

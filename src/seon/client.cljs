@@ -55,7 +55,7 @@
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
     [seon.agent :as agent]
-    [seon.ctx :as ctx]
+    [seon.ctx]
     [seon.ai :as ai]
     [seon.ai.anthropic :as anthropic]
     [seon.ai.openai-compat :as openai]
@@ -145,7 +145,7 @@
     ;; their munged symbols resolve via seon.eval/lookup-value at
     ;; render time (no require cycle: the section nses require seon.ctx
     ;; for the shared read API, seon.ctx names them only as symbols).
-    [seon.ctx.namespaces]
+    [seon.ctx.namespaces :as nss]
     [seon.ctx.your-entity]
     [seon.ctx.live-tile]
     [seon.ctx.warnings]
@@ -1101,7 +1101,7 @@
 (defn- ns-row
   "Build the `:seon.ns` row for an owning ns name string.
 
-   FULL-SOURCE nses (`seon.ctx/full-source-ns?` — all `my.*`, test
+   FULL-SOURCE nses (`seon.ctx.namespaces/full-source-ns?` — all `my.*`, test
    siblings included) carry the REAL FULL FILE TEXT as
    `:seon.ns/source`: the boot indexer is the ONE file-reader; the
    `:namespaces` context section (and anything else downstream) renders
@@ -1121,7 +1121,7 @@
         ;; Extra-core nses (downstream SEON_EXTRA_SRC code) are
         ;; full-source by rule, like my.* — closes the render-as-stubs
         ;; gap for the extra root.
-        src  (if (or (ctx/full-source-ns? ns-sym-str)
+        src  (if (or (nss/full-source-ns? ns-sym-str)
                      (contains? (extra-core-ns-strs) ns-sym-str)
                      (contains? (extra-src-ns-strs) ns-sym-str))
                (or (read-src-file (ns-file-path ns-sym-str))
