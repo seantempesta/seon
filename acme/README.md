@@ -40,7 +40,7 @@ the place we iterate on the "consume Seon without forking it" story.
 # (optional) export GEMINI_API_KEY=...   for embeddings KNN
 bin/acme build                 # one-off compile → out-acme/client/main.js (acme.* baked in)
 bin/acme start wire-server     # JVM writer first (sole writer; pod boot is gated on it)
-bin/acme start pod             # Node pod on http://127.0.0.1:7990
+bin/acme start pod             # Node pod on http://127.0.0.1:7980
 bin/acme status
 bin/acme tail pod
 ```
@@ -60,8 +60,8 @@ bin/acme cluster reset default   # wipes data/clusters/acme/store, bounces both
 
 | | live default | acme |
 |---|---|---|
-| pod HTTP | 7890 | 7990 |
-| wire-server REPL | 7891 | 7991 |
+| pod HTTP | 7890 | 7980 |
+| wire-server REPL | 7891 | 7981 |
 | store | `data/clusters/default` | `data/clusters/acme` |
 | req/pub sockets | `tmp/seon-cluster-default-*.sock` | `tmp/acme-cluster-*.sock` |
 | supervisor state | `tmp/proc` | `tmp/proc-acme` |
