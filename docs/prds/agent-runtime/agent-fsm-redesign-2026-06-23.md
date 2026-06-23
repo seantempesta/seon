@@ -55,6 +55,88 @@ bootstrap, expressed in the new format. See §5 for the exact consolidation map.
    old-model instruction corpus to migrate. Standing guidance = SOUL.md +
    `system-text` + the turn-0 bootstrap demo only.
 
+## 0. Foundations — module layout, naming, state (start fresh, no baggage)
+
+Audit (workflow w1odvsl6w) findings: only ONE fragile coordination atom exists
+(`!kick-scheduled`) — everything else is genuine runtime state the project's rules
+sanction. The two ALS scopes are ALREADY ergonomic-defaults-only. The real baggage
+is naming drift (three "is this agent alive?" vocabularies, three "stop the loop"
+concepts) and the 93KB / 1820-line everything-namespace.
+
+Four layout rules: **subnamespaces per concern**; a **`.internal` sibling** for
+dense wiring so the public ns reads as the *what*; **no file near 2000 lines**;
+**readable by reading the namespaces**. Every change is an in-place move/rename or a
+delete — never a `*-v2` or a parallel ns.
+
+### Module layout (split the 1820-line agent.cljs along real seams)
+
+- `seon.agent` — **FACADE** (thin): requires fsm/turn/message/entity; re-exports the
+  verbs the agent calls (`wait` / `complete` / `terminate`, `create!` / `boot!`). The
+  agent's `agent/` alias points here.
+- `seon.agent.entity` — the agent record: `:seon.agent/*` schemas (id/purpose/state/
+  wake/parent/max-turns-per-loop), `create!` / `boot!`, state helpers (`current-state`,
+  `set-state!`, `fresh-wake!`). Leaf (requires db + schema); everyone requires it.
+- `seon.agent.fsm` (+ `.internal`) — the FSM: `install-wake-trigger!` + `wake-handler`,
+  `run-loop!`, the lifecycle verbs (`wait` / `complete` / `terminate` — they ARE
+  transitions), the halt policy. `.internal` = wake-id recheck mechanics, per-loop
+  count query, the release/finally.
+- `seon.agent.turn` (+ `.internal`) — one turn: `run-turn!`, `open-turn!` /
+  `close-turn!`, `ask-and-eval!`, `call-llm!`. `.internal` = the eval-fold + debug
+  capture plumbing.
+- `seon.agent.message` — stays: `message!` + `message/user` + `message/agent` + schemas.
+- DELETE `seon.agent.turns` (folds into the transcript readline).
+- `seon.ctx.transcript` — rewritten in place, absorbs prompt + turns (§2). DELETE
+  `seon.ctx.prompt`. Extract `system-text` to `seon.ctx.system` (ctx.cljs is itself
+  >2k — split system-text + the shared read API out; the rest of the ctx split is
+  flagged, out of FSM scope).
+
+Dependency direction (no cycles): facade → {fsm, turn, message, entity}; fsm →
+{entity, turn}; turn → {entity, ctx, eval, message}; message → db; entity → {db, schema}.
+
+### ALS — unify, rename, keep ergonomic-defaults-only
+
+Merge the two ALS instances (`agent-id-als` + `tx-context`) into ONE fiber-local
+store in `seon.db.internal` carrying ONLY the default bundle
+(`:seon.db/agent-id/session-id/turn-id/origin`). Rename the public face
+`with-tx-context` → **`with-tx-meta` / `current-tx-meta`** (it is the tx-meta
+bundle, not a general "context bag"); keep `with-agent` / `current-agent-id`. It must
+NEVER carry FSM state (state/wake/loop-count) — those live on the agent record.
+(`warnings-als` is a separate eval-internal ALS — leave it in seon.eval.)
+
+### State model
+
+- DELETE: `!kick-scheduled` → DB `:seon.agent/state :active` + `:seon.agent/wake`.
+- KEEP (genuine runtime artifacts): DB conns, the ALS instance(s), compile-state +
+  version stamps, the `result/<id>` ring buffer, the wire de-dup set
+  (`!own-request-ids`), SCI tile guards, per-call let-accumulators, `!boot-sessions`
+  (rename → `!sessions-opened-this-run`).
+- FLAG (out of scope): `!fallback-warned` (warn-once dedupe → should be a derived
+  surface) — leave a note, not part of this rebuild.
+
+### Rename table (all in place, same patch as the touching unit)
+
+| Old | New |
+|-----|-----|
+| `:seon.agent/state` `:idle`/`:running` | `:idle :active :waiting :completed :terminated` |
+| `!kick-scheduled` atom + `:running` guard | DELETE → `:seon.agent/wake` + recheck |
+| `:seon.agent.turn/woken-by` | DELETE → `:seon.agent/wake` (episode key) |
+| `reply!` | DELETE → `message/user`, `message/agent` |
+| `run-agentic-loop!` | `run-loop!` (fsm) |
+| `install-user-trigger!` / `inbound-message-handler` | `install-wake-trigger!` / `wake-handler` |
+| `live-agent-ids` / `all-running-agents` / `resumable-agent-ids` | one `armable-agent-ids` (state ≠ `:terminated`) |
+| `turns-cap` / `default-turns-cap` | `max-turns-per-loop` (`:seon.agent/max-turns-per-loop`, env `SEON_MAX_TURNS_PER_LOOP`) |
+| `with-turn!` / `with-turn-body!` / `ensure-idle!` | `open-turn!` / `close-turn!` (failsafe → loop finally) |
+| `complete!` (lifecycle stamp) | `complete` (repurposed terminal verb) |
+| `unanswered-live-inbound?` / `live-inbound-count` / `user-facing-reply-count` / `query-count` / `task-in-progress?` / `inbox-count` | DELETE (no rename) |
+| `transcript-section` / `render-turn` / `woken-by-line` / `pending-inbound-line` | `transcript` / `turn-header` / `inbound-line` (rewritten) |
+| `prompt-section` | DELETE → readline in `transcript` |
+| `with-tx-context` / `current-tx-context` | `with-tx-meta` / `current-tx-meta` |
+| `empty-completion-nudge` / `give-up-text` / `max-empty-reprompts` | DELETE (steering → readline; bare `(< empty-streak 2)` recur) |
+
+The module split is realized **incrementally** as each build unit (§6) lands its
+module — no big-bang refactor. The ALS-unify + the `:running→:active` enum rename +
+its ripple (client / inspector / render.default) ride in Unit 1 (the enum's home).
+
 ## 1. The finite state machine
 
 `:seon.agent/state` is a registered enum on the agent record — the SINGLE source
