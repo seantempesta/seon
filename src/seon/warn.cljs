@@ -1006,40 +1006,45 @@
   (if where (str sym " (" where ")") sym))
 
 (defn- render-cluster
-  "ONE cluster: [kind] explanation, ONE fix example, then the affected
-   list with specific locations. The explanation appears once per kind,
-   never once per fn."
+  "ONE cluster as a `;;` comment-block (agent-fsm-redesign-2026-06-23 §2):
+   `;;; [kind] explanation`, ONE fix example as `;;` lines, then the
+   affected list with specific locations. Positive-framing: it names what
+   TO do (the fix), and these warnings DERIVE from current state — each
+   vanishes the moment you correct it. The explanation appears once per
+   kind, never once per fn."
   [{:seon.warn/keys [kind affected explain example]}]
-  (str "[" (name kind) "] " explain "\n"
-       "  Fix example:\n"
-       (str/join "\n" (map #(str "    " %) (str/split-lines example)))
+  (str ";;; [" (name kind) "] " explain "\n"
+       ";; Fix it like this:\n"
+       (str/join "\n" (map #(str ";;   " %) (str/split-lines example)))
        "\n"
-       "  Affecting: "
+       ";; Affecting: "
        (str/join ", " (map render-affected-entry affected))
-       " (" (count affected) "). Please correct before moving on."))
+       " (" (count affected) "). Correct these and this note clears itself."))
 
 (defn- render-urgent-cluster
   "A LOUD cluster for a `:seon.warn/urgent? true` check — something the
    human is hitting THIS render (e.g. a broken live tile). Unmistakable
-   `‼ URGENT` banner, then the same explanation + fix example + affected
-   list. Rendered at the TOP of <warnings>, ahead of the ordinary
-   contract/runtime clusters."
+   `‼ URGENT` banner as a `;;;` line, then the same explanation + fix
+   example + affected list. Rendered at the TOP of the WARNINGS block,
+   ahead of the ordinary contract/runtime clusters."
   [{:seon.warn/keys [kind affected explain example]}]
-  (str "‼ URGENT [" (name kind) "] " explain "\n"
-       "  Fix example:\n"
-       (str/join "\n" (map #(str "    " %) (str/split-lines example)))
+  (str ";;; ‼ URGENT [" (name kind) "] " explain "\n"
+       ";; Fix it like this:\n"
+       (str/join "\n" (map #(str ";;   " %) (str/split-lines example)))
        "\n"
-       "  Affecting: "
+       ";; Affecting: "
        (str/join ", " (map render-affected-entry affected))
-       " (" (count affected) "). FIX THIS IMMEDIATELY — it auto-resolves "
-       "the moment you do."))
+       " (" (count affected) "). Fix this now — it auto-resolves the "
+       "moment you do."))
 
 (defn render-warnings
   "Run the registry and render the non-clean checks as a single
-   `<warnings>` block. URGENT clusters (`:seon.warn/urgent? true`) render
-   FIRST with a louder template; the remaining clusters follow in registry
-   order, one cluster per kind. Empty string when clean. Scope the corpus
-   checks with `:seon.warn/ns`; omit it for the whole-core overview.
+   comment-block (agent-fsm-redesign-2026-06-23 §2): a `;;; ── WARNINGS ──`
+   heading, then one `;;` cluster per kind. URGENT clusters
+   (`:seon.warn/urgent? true`) render FIRST with a louder template; the
+   remaining clusters follow in registry order. Empty string when clean.
+   Scope the corpus checks with `:seon.warn/ns`; omit it for the
+   whole-core overview.
 
    DEV-ONLY clusters (`:seon.warn/dev-only? true`, e.g.
    [[check-unmarked-entity-kinds]]) are DROPPED unless the request carries
@@ -1055,9 +1060,8 @@
         {urgent  true
          ordinary false} (group-by (comp boolean :seon.warn/urgent?) clusters)]
     (if (seq clusters)
-      (str "<warnings>\n"
+      (str ";;; ── WARNINGS ─────────────────────────────────────────────\n"
            (str/join "\n\n"
                      (concat (map render-urgent-cluster urgent)
-                             (map render-cluster ordinary)))
-           "\n</warnings>")
+                             (map render-cluster ordinary))))
       "")))

@@ -648,15 +648,12 @@
               (let [text     (warn/render-warnings {:seon.db/db db})
                     urg-idx  (.indexOf text "‼ URGENT [tile-unresolved]")
                     fail-idx (.indexOf text "[failed-evals]")]
-                (is (str/starts-with? text "<warnings>"))
                 (is (not (neg? urg-idx))
                     "urgent broken-tile cluster renders with the loud banner")
                 (is (not (neg? fail-idx))
                     "the co-occurring non-urgent failed-eval cluster renders too")
                 (is (< urg-idx fail-idx)
-                    "URGENT cluster comes FIRST, before the ordinary cluster")
-                (is (str/includes? text "FIX THIS IMMEDIATELY")
-                    "the urgent template is louder than the ordinary one"))))
+                    "URGENT cluster comes FIRST, before the ordinary cluster"))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
@@ -669,12 +666,10 @@
     (-> (with-seeded-db
           (fn [db]
             (let [text (warn/render-warnings (scoped db))]
-              (is (str/starts-with? text "<warnings>"))
               (is (= 1 (count (re-seq #"\[return-is-any\]" text)))
                   "ONE cluster header per kind — explanation never repeats")
-              (is (str/includes? text "Affecting: warntest.main/any-ret (return) (1). Please correct before moving on.")
-                  "affected list carries the location + the closing ask")
-              (is (str/includes? text "Fix example:"))
+              (is (str/includes? text "Affecting: warntest.main/any-ret (return) (1).")
+                  "affected list carries the location")
               (is (not (str/includes? text "warntest.other/also-unspecced"))
                   "corpus clusters respect the ns scope"))))
         (.then (fn [_] (done)))

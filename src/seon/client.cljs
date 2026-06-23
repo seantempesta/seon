@@ -366,8 +366,10 @@
    ;; silently cap-edn-truncated at 16,406 chars — useless evidence).
    :seon.agent.turn/prompt-chars
    :seon.agent.turn/prompt-file
-   :seon.agent.turn/woken-by
-   :seon.agent.turn/messages
+   ;; :seon.agent.turn/woken-by + :seon.agent.turn/messages DELETED
+   ;; (agent-fsm redesign 2026-06-23, §5). Turns now stamp
+   ;; :seon.agent.turn/wake (the wake-episode token) instead.
+   :seon.agent.turn/wake
    :seon.agent.turn/evals
 
    ;; --- Message (from/to refs since unit 1.5 — role/agent retired) ---
@@ -1827,21 +1829,19 @@
 
 (defn- stub-llm
   "A fake LLM that demonstrates the REPL-as-harness response shape: a
-   `;; narration` line then a real `seon.agent/reply!` form. The
-   loop's reply-landed stop policy
-   (`seon.agent/unanswered-live-inbound?`, #35) ends the wake after this
-   turn — the old extra `:seon.agent/state :idle` transact taught a
-   non-mechanism (the loop never read mid-turn state) and burned turns
-   to the cap (#22). Returns a Promise of {:text \"...\"}."
+   `;; narration` line then a real `(message/user …)` form (agent-fsm
+   redesign U2 — the verb that says something to the human; `reply!` is
+   deleted). The FSM halt policy ends the wake when no actionable forms
+   remain. Returns a Promise of {:text \"...\"}."
   [ctx]
   (let [text (str
                ";; stub LLM here — the real one needs DEEPSEEK_API_KEY\n"
-               ";; reply to whoever woke this turn — replying ends the wake\n"
-               "(seon.agent/reply!\n"
-               "  {:seon.agent.message/content "
+               ";; say hello to your human via the message/user verb\n"
+               "(message/user\n"
+               "  "
                (pr-str (str "hello from the stub LLM — saw "
                             (count ctx) " chars of ctx"))
-               "})\n")]
+               ")\n")]
     (.then (.resolve js/Promise nil) (fn [_] {:text text}))))
 
 (defn- current-llm-fn
@@ -2116,7 +2116,7 @@
                      :seon.db/turn-id    turn-id
                      :seon.db/origin     :system}
                     (fn []
-                      (agent/with-turn!
+                      (agent/open-turn!
                         {:seon.agent/id                    id
                          :seon.agent.session/id-of-session session-id
                          :seon.agent.turn/id-of-turn       turn-id

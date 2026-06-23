@@ -8,16 +8,20 @@
      - `message!` — fully-formed storage, boundary defaulting, the
        blank-content refusal, hop derivation (`waking-hops`), the
        concise success envelope
-     - `reply!`   — woken-by targeting (derived from the current turn)
+     - the two agent-facing verbs (agent-fsm redesign U2), thin wrappers
+       over `message!` — the agent reaches them through the `message/`
+       alias on its home ns (`(message/user …)` / `(message/agent …)`):
+         `user`  — from = me (the ALS agent), to = the one human user
+         `agent` — from = me, to = [agent-id]; REFUSES `to = me` (loud
+                   error, no row). No self→self messaging, ever (§1).
 
-   The WAKE side (the inbound-message trigger + the hop-cap refusal at
-   wake) stays in `seon.agent` — it drives `run-agentic-loop!` and
-   would cycle here. `seon.agent` re-exports `message!`/`reply!`/
-   `user-ref` on the face; the agent-taught call surface is unchanged
-   (`seon.agent/reply!` …)."
+   The deleted `reply!` (1:1 woken-by targeting) is REPLACED by these —
+   no parallel path. The WAKE side (the inbound-message trigger + the
+   hop-cap refusal at wake) stays in `seon.agent` — it drives the loop
+   and would cycle here. `seon.agent` re-exports `message!`/`user-ref`
+   on the face."
   (:require
     [clojure.string :as str]
-    [seon.ctx :as ctx]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -88,10 +92,11 @@
    [:seon.agent.message/handled? {:optional true} :seon.agent.message/handled?]])
 
 ;; ============================================================
-;; message! / reply! — the SINGLE write entry point for messages.
-;; Presence of attributes IS the intent; the DB holds only FULLY-
-;; FORMED messages (from + to + content + at + id + hops). All
-;; defaulting is a message!-boundary liberty, never a storage shape.
+;; message! — the SINGLE write entry point for messages (the verbs
+;; `user`/`agent` below are thin wrappers over it). Presence of
+;; attributes IS the intent; the DB holds only FULLY-FORMED messages
+;; (from + to + content + at + id + hops). All defaulting is a
+;; message!-boundary liberty, never a storage shape.
 ;; ============================================================
 
 (schema/register! ::message-request
@@ -181,11 +186,11 @@
    messages were a recurring live defect (runs 3 + 6); since every
    message write routes through here, the guard kills the class.
 
-   A reply ALWAYS transacts and is delivered — there is no same-turn
+   A message ALWAYS transacts and is delivered — there is no same-turn
    refusal and no make-good-turn veto. Errors are values: if a sibling
    form in the same turn returned a `{*/ok? false}` envelope the agent
    may over-claim, but that is visible in the transcript and a human
-   follow-up re-wakes the agent. Nothing here blocks a reply."
+   follow-up re-wakes the agent. Nothing here blocks a send."
   {:malli/schema [:=> [:cat ::message-request] ::message-response]}
   [{:seon.agent.message/keys [content from to origin]}]
   (let [agent-id (db/current-agent-id)
@@ -241,27 +246,51 @@
            :seon.agent.message/hops hops}
           env)))))
 
-(defn ^:async reply!
-  "Reply to whoever woke the current turn: `message!` with `to` := the
-   `:seon.agent.message/from` of the current turn's `:seon.agent.turn/woken-by`
-   message (derived — the core knows who's talking to you; no
-   target atom). Falls back to the user when the turn wasn't woken by a
-   message. Returns `message!`'s concise envelope — the reply ALWAYS
-   transacts and is delivered.
+;; ============================================================
+;; The two agent-facing verbs (agent-fsm redesign U2). Thin wrappers
+;; over `message!` — `from` defaults to the ALS agent inside `message!`,
+;; so these only fix `to`. The agent reaches them through the `message/`
+;; alias on its home ns: `(message/user "…")` / `(message/agent id "…")`.
+;; No self→self messaging, ever: `agent` refuses `to = me` (§1, the wake
+;; gate already ignores `from = me`; this makes it a hard prohibition at
+;; the verb). `^:async` fns are not runtime-instrumented, so the
+;; `:malli/schema` is the only contract — both reuse `::message-response`.
+;; ============================================================
 
-   Accepts EITHER a plain string (the common case) OR the request map.
-   The string form just builds the canonical map and recurses, so there
-   is exactly one path to `message!`:
+(defn ^:async user
+  "Send a message to your human — `message!` with `to` := THE one user.
+   `from` is you (the ALS agent). Returns `message!`'s concise envelope.
+   This is how you say something to the human watching your REPL:
 
-     (seon.agent/reply! \"done — stored 2 rows\")
-     (seon.agent/reply! {:seon.agent.message/content \"done — stored 2 rows\"})"
-  {:malli/schema [:=> [:cat [:or :string ::message-request]] ::message-response]}
-  [arg]
-  (if (string? arg)
-    (await (reply! {:seon.agent.message/content arg}))
-    (let [{:seon.agent.message/keys [content]} arg
-          agent-id  (db/current-agent-id)
-          woke-from (get-in (ctx/current-turn {:seon.agent/id agent-id})
-                            [:seon.agent.turn/woken-by :seon.agent.message/from :db/id])]
+     (message/user \"done — stored 2 rows\")"
+  {:malli/schema [:=> [:catn [::content :string]] ::message-response]}
+  [content]
+  (await (message! {:seon.agent.message/content content
+                    :seon.agent.message/to      [user-ref]})))
+
+(defn ^:async agent
+  "Send a message to a PEER agent by id — `message!` with `to` :=
+   `[[:seon.agent/id agent-id]]`. `from` is you (the ALS agent). Returns
+   `message!`'s concise envelope:
+
+     (message/agent \"Kpx-2605232138\" \"heads up: foo depends on qux\")
+
+   REFUSES sending to YOURSELF (the ALS agent in scope): a self-message
+   returns a loud error envelope and transacts NO row — an agent's
+   notes-to-itself are `;;` comments in its turn, never a stored
+   self→self message. Errors are values — branch on `:seon.db/ok?`."
+  {:malli/schema [:=> [:catn [::to-id :string] [::content :string]]
+                  ::message-response]}
+  [to-id content]
+  (let [me (db/current-agent-id)]
+    (if (and me (= to-id me))
+      {:seon.db/ok? false
+       :seon.db/error
+       {:seon.error/message
+        (str "message/agent: refused — you cannot message YOURSELF ("
+             (pr-str to-id) "). No self→self messages exist anywhere; a "
+             "note to yourself is a ;; comment in your turn. To message a "
+             "PEER, pass that agent's id; to say something to your human, "
+             "use (message/user \"…\").")}}
       (await (message! {:seon.agent.message/content content
-                        :seon.agent.message/to      (if woke-from [woke-from] [user-ref])})))))
+                        :seon.agent.message/to      [[:seon.agent/id to-id]]})))))

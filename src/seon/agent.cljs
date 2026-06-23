@@ -18,17 +18,20 @@
      - `run-turn!`          — one full turn end-to-end (v1.md §6.1).
                               Thin orchestrator: composes
                               `ensure-session!` + `render-prompt` +
-                              `with-turn!` + `ask-and-eval!` under one
+                              `open-turn!` + `ask-and-eval!` under one
                               outer `seon.db/with-tx-context` scope
                               so every tx auto-tags with the causality
                               bundle
-     - `with-turn!`         — bracketing combinator: opens a turn with
-                              prompt-text attached, runs a body thunk,
-                              folds its result into the close-tx (so
-                              one open-tx + one close-tx covers the
-                              whole turn-level write surface; eval
-                              batch adds its own per-form txs)
-     - `ask-and-eval!`      — body of `with-turn!`: LLM call + parse
+     - `open-turn!`         — bracketing combinator (formerly
+                              `with-turn!`): opens a turn with
+                              prompt-text + the agent's current
+                              `:seon.agent/wake` stamped on it, runs a
+                              body thunk, folds its result into the
+                              close-tx via `close-turn!` (so one open-tx
+                              + one close-tx covers the whole turn-level
+                              write surface; eval batch adds its own
+                              per-form txs)
+     - `ask-and-eval!`      — body of `open-turn!`: LLM call + parse
                               + eval-batch; returns the assistant msg
                               and `:seon.agent/eval-count` for the
                               loop's stop policy
@@ -289,11 +292,15 @@
 (schema/register! :seon.agent.turn/id           [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.agent.turn/at           :inst)
 (schema/register! :seon.agent.turn/status       [:enum :running :done :error])
-;; The message whose wake opened this turn (optional — boot/manual turns
-;; have none). `reply!` reads the CURRENT turn's woken-by → its
-;; `:seon.agent.message/from` = the reply target. Derived + deterministic; no
-;; reply-target atom anywhere.
-(schema/register! :seon.agent.turn/woken-by     :seon.db/ref)
+;; The wake-episode this turn belongs to (agent-fsm redesign 2026-06-23,
+;; §1). Each turn-open STAMPS the agent's current `:seon.agent/wake` here, so
+;; the per-loop count (`count turns where wake = my-wake`) is derivable. STORED
+;; — it is coordination metadata, not derivable. References the canonical id
+;; shape (single source of truth in seon.schema); never inline. REPLACES the
+;; deleted `:seon.agent.turn/woken-by` attr (NOT carried alongside): a turn no
+;; longer points at the message that woke it (`reply!` is deleted) — it points
+;; at the wake EPISODE, which the loop uses for the sliding cap.
+(schema/register! :seon.agent.turn/wake         :seon.db/id)
 ;; The assembled prompt is NOT persisted as a datom (three-tier storage
 ;; rule: datoms hold projections, blobs hold full content). run-turn!
 ;; writes the full prompt to logs/prompts/<agent-id>/<turn-id>.txt and
@@ -335,7 +342,9 @@
 ;; or when the provider returns neither — optional-is-absent.
 (schema/register! :seon.agent.turn/llm-usage    :string)
 (schema/register! :seon.agent.turn/llm-meta     :string)
-(schema/register! :seon.agent.turn/messages     [:vector {:seon.db/component true} :seon.db/ref])
+;; :seon.agent.turn/messages DELETED (agent-fsm redesign 2026-06-23, §5):
+;; the per-turn self→self note (from = to = me) is gone — an agent's notes to
+;; itself are eval narration (:seon.eval/narration), never a message row.
 (schema/register! :seon.agent.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
 
 (schema/register! :seon.agent.session
@@ -349,14 +358,13 @@
    [:seon.agent.turn/id           :seon.agent.turn/id]
    [:seon.agent.turn/at           :seon.agent.turn/at]
    [:seon.agent.turn/status       :seon.agent.turn/status]
-   [:seon.agent.turn/woken-by     {:optional true} :seon.agent.turn/woken-by]
+   [:seon.agent.turn/wake         {:optional true} :seon.agent.turn/wake]
    [:seon.agent.turn/prompt-chars {:optional true} :seon.agent.turn/prompt-chars]
    [:seon.agent.turn/prompt-file  {:optional true} :seon.agent.turn/prompt-file]
    [:seon.agent.turn/debug-dir    {:optional true} :seon.agent.turn/debug-dir]
    [:seon.agent.turn/llm-retries  {:optional true} :seon.agent.turn/llm-retries]
    [:seon.agent.turn/llm-usage    {:optional true} :seon.agent.turn/llm-usage]
    [:seon.agent.turn/llm-meta     {:optional true} :seon.agent.turn/llm-meta]
-   [:seon.agent.turn/messages     {:optional true} :seon.agent.turn/messages]
    [:seon.agent.turn/evals        {:optional true} :seon.agent.turn/evals]])
 
 (schema/register! :seon.agent/sessions    [:vector {:seon.db/component true} :seon.db/ref])
@@ -716,9 +724,11 @@
         (let [state (:seon.agent/state
                       (db/entity {:seon.db/db db
                                   :seon.db/ref [:seon.agent/id id]}))
-              ;; The waking message — recorded on every turn this loop
-              ;; run opens (:seon.agent.turn/woken-by) so reply! can derive
-              ;; its target with no atom.
+              ;; The waking message id — surfaced in the WAKE SKIPPED log
+              ;; below. (`:seon.agent.turn/woken-by` is DELETED, agent-fsm
+              ;; §5: turns now stamp `:seon.agent.turn/wake` from the
+              ;; agent's wake-episode token; `reply!`'s target-derivation
+              ;; from woken-by is gone with `reply!`.)
               mid   (:seon.agent.message/id
                       (db/entity {:seon.db/db db
                                   :seon.db/ref (:seon.db/e (first waking))}))]
@@ -733,9 +743,7 @@
                 (fn []
                   (-> (js/Promise.resolve
                         (db/with-agent id
-                          #(run-agentic-loop!
-                             (assoc input :seon.agent.turn/woken-by
-                                    [:seon.agent.message/id mid]))))
+                          #(run-agentic-loop! input)))
                       (.finally (fn [] (swap! !kick-scheduled disj id)))))
                 0))
             ;; #49 fail-loud: a wake was SKIPPED. A silently-dropped wake
@@ -871,18 +879,17 @@
          :seon.agent/ns agent-ns}))))
 
 ;; ============================================================
-;; message! / reply! — moved to seon.agent.message (P6 split,
-;; 2026-06-10) so the keyword namespace matches the code namespace.
-;; Re-exported on the face: the agent-taught call surface IS
-;; seon.agent/message! + reply! (the capabilities text,
-;; my.kb.instruction, the HTTP /chat adapter, the gym driver all say
-;; seon.agent/…). Same caveat as the ctx aliases above — a def alias
-;; captures the fn value at load time (pre-instrumentation); call
-;; seon.agent.message/* directly for the validated entry point.
+;; message! — moved to seon.agent.message (P6 split, 2026-06-10) so the
+;; keyword namespace matches the code namespace. Re-exported on the face
+;; (the agent-taught call surface is seon.agent/message!). `reply!` is
+;; DELETED (agent-fsm redesign U2) — the agent-facing messaging verbs are
+;; now seon.agent.message/user + /agent via the `message/` alias. Same
+;; caveat as the ctx aliases above — a def alias captures the fn value at
+;; load time (pre-instrumentation); call seon.agent.message/* directly for
+;; the validated entry point.
 ;; ============================================================
 
 (def message! msg/message!)
-(def reply! msg/reply!)
 (def user-ref msg/user-ref)
 
 ;; ============================================================
@@ -956,17 +963,18 @@
 ;; ============================================================
 ;; v1 §6 — turn lifecycle.
 ;;
-;; Composition: three small ^:async helpers + a `with-turn!`
+;; Composition: three small ^:async helpers + an `open-turn!`
 ;; bracketing combinator + a `run-turn!` orchestrator. Every transact
 ;; in the pipeline runs inside ONE outer `with-tx-context` scope that
 ;; carries agent/session/turn/origin — no manual `:tx-meta` plumbing
 ;; at any call site (auto-merged via `seon.db/transact!`'s
 ;; `merge-tx-context-into-opts`).
 ;;
-;; Two transacts per turn instead of four: `with-turn!` folds the
-;; prompt-text into the open-tx and the assistant message into the
-;; close-tx. Eval-batch's per-form txs stay (each form is its own
-;; tx for partial-failure semantics — v1.md §4.4).
+;; Two transacts per turn instead of four: `open-turn!` folds the
+;; prompt-text + the agent's current `:seon.agent/wake` into the
+;; open-tx and the close-tx (`close-turn!`) folds the turn's telemetry.
+;; Eval-batch's per-form txs stay (each form is its own tx for
+;; partial-failure semantics — v1.md §4.4).
 ;;
 ;; The named-inline `(fn ^:async name [] …)` is the one CLJS shape
 ;; that propagates `:async` correctly across `(.run als-instance …
@@ -1094,22 +1102,25 @@
           hits  (await hits)]
       (embed-stash/with-hits hits #(render-prompt agent-id)))))
 
-(declare with-turn-body!)
+(declare close-turn!)
 
-(defn ^:async with-turn!
-  "Bracketing combinator. Opens a `:seon.agent.turn` on the given session
-   with `prompt-text` already attached, flips agent state to
-   `:running`, then awaits `body-fn` (a plain 0-arg thunk that returns
-   a Promise<map>). On success, closes the turn with `:status :done`,
-   folds in any `:seon.agent.turn/messages` from the body's result map, and
-   flips agent state back to `:idle`. On throw, flips the turn to
-   `:status :error` and re-throws so callers see the failure shape.
+(defn ^:async open-turn!
+  "Bracketing combinator (formerly `with-turn!`). Opens a
+   `:seon.agent.turn` on the given session with `prompt-text` already
+   attached and the agent's current `:seon.agent/wake` STAMPED on
+   `:seon.agent.turn/wake` (so the turn records which wake-episode it
+   belongs to — the loop's sliding cap derives its per-loop count from
+   it). Flips agent state to `:active`, then awaits `body-fn` (a plain
+   0-arg thunk that returns a Promise<map>) via `close-turn!`, which
+   closes the turn `:status :done` and flips agent state back to
+   `:idle`. On throw, `close-turn!` flips the turn to `:status :error`
+   and re-throws so callers see the failure shape.
 
    Returns whatever `body-fn` returned, so the caller can read e.g.
    `:seon.agent/eval-count` for stop-policy decisions."
   [{:seon.agent/keys [id]
     :seon.agent.session/keys [id-of-session]
-    :seon.agent.turn/keys [id-of-turn prompt-text prompt-file woken-by]}
+    :seon.agent.turn/keys [id-of-turn prompt-text prompt-file]}
    body-fn]
   ;; Short-circuit on open-turn failure (task 9b finding 3). If the
   ;; open-tx returns `{::ok? false}`, there is NO turn entity in the
@@ -1117,7 +1128,9 @@
   ;; trace, and the close-tx + error-tx below would silently fail
   ;; against the missing entity. Bail with the envelope so the caller
   ;; sees the same shape it sees from any other transact failure.
-  (let [open-result
+  (let [wake (:seon.agent/wake
+               (db/entity {:seon.db/ref [:seon.agent/id id]}))
+        open-result
         (await
           (db/transact!
             {:seon.db/tx-data
@@ -1134,12 +1147,13 @@
                    :seon.agent.turn/prompt-chars (count (str prompt-text))}
                   ;; nil when the file write failed (logged) — chars survive.
                   prompt-file (assoc :seon.agent.turn/prompt-file prompt-file)
-                  ;; The waking message — reply!'s derivation source.
-                  woken-by (assoc :seon.agent.turn/woken-by woken-by))]}
+                  ;; The wake-episode this turn belongs to (agent-fsm §1).
+                  ;; Absent when the agent has no wake yet (boot/manual turn).
+                  wake (assoc :seon.agent.turn/wake wake))]}
               {:seon.agent/id id :seon.agent/state :active}]}))]
     (if (false? (:seon.db/ok? open-result))
       open-result
-      (with-turn-body! id id-of-turn body-fn))))
+      (close-turn! id id-of-turn body-fn))))
 
 (defn ^:async ^:private ensure-idle!
   "Failsafe state-reset for `id` (errors-are-values, never throws). The
@@ -1165,13 +1179,14 @@
         (str "seon.agent/ensure-idle!: state reset THREW for " id
              " — agent may stay deaf to new messages. " (or (.-message e) e))))))
 
-(defn ^:async ^:private with-turn-body!
-  "Internal — the body of `with-turn!` after the open-tx succeeded.
-   Split out so the open-tx envelope short-circuit at the call site
-   stays readable. await body-fn, close the turn on success, flip to
-   :error on throw. CRITICAL: state ALWAYS returns to :idle on EVERY
-   exit (close success OR close FAILURE OR throw) — a missed reset
-   leaves the wake guard permanently blocked and the agent deaf."
+(defn ^:async ^:private close-turn!
+  "Internal — the body of `open-turn!` after the open-tx succeeded
+   (formerly `with-turn-body!`). Split out so the open-tx envelope
+   short-circuit at the call site stays readable. await body-fn, close
+   the turn on success, flip to :error on throw. CRITICAL: state ALWAYS
+   returns to :idle on EVERY exit (close success OR close FAILURE OR
+   throw) — a missed reset leaves the wake guard permanently blocked and
+   the agent deaf."
   [id id-of-turn body-fn]
   (try
     (let [result (await (body-fn))
@@ -1179,8 +1194,7 @@
                    (db/transact!
                      {:seon.db/tx-data
                       [(merge {:seon.agent.turn/id id-of-turn :seon.agent.turn/status :done}
-                              (select-keys result [:seon.agent.turn/messages
-                                                   :seon.agent.turn/status
+                              (select-keys result [:seon.agent.turn/status
                                                    :seon.agent.turn/llm-retries
                                                    :seon.agent.turn/llm-usage
                                                    :seon.agent.turn/llm-meta
@@ -1194,7 +1208,7 @@
       ;; recovers (the failure is logged loudly for diagnosis).
       (when (false? (:seon.db/ok? close))
         (js/console.error
-          (str "seon.agent/with-turn-body!: turn close-tx FAILED for "
+          (str "seon.agent/close-turn!: turn close-tx FAILED for "
                id " turn " id-of-turn " — forcing :idle. "
                (pr-str (:seon.db/error close))))
         (await (ensure-idle! id)))
@@ -1215,7 +1229,11 @@
 
 (defn ^:async ^:private ask-and-eval-reply!
   "Internal — the successful-LLM-reply half of `ask-and-eval!`: parse
-   the reply, eval-batch the forms, fold the assistant self-message.
+   the reply and eval-batch the forms. The raw reply is NOT folded into a
+   self→self message anymore (agent-fsm redesign 2026-06-23, §5: an
+   agent's notes to itself are eval narration — :seon.eval/narration on
+   the per-form evals — never a message row; the verbatim raw text still
+   lands on disk via debug capture below).
 
    `id` / `turn-idx` / `id-of-turn` are LOCALS threaded down from
    `run-turn!` (captured before the LLM await — NOT re-read from
@@ -1246,21 +1264,7 @@
                                  (:seon.eval/n-fail batch))}
       ;; Debug capture pointer (projection only; the blob lives under
       ;; the captured dir). Present ONLY when capture wrote — absent off.
-      debug-dir (assoc :seon.agent.turn/debug-dir debug-dir)
-      ;; The turn-log record of the raw LLM output: a fully-formed
-      ;; self→self message (from = to = this agent — appears in the
-      ;; agent's own derived conversation, wakes nothing since the
-      ;; trigger requires from ≠ me, and never reads as user-directed).
-      ;; Blank output stores NOTHING — the empty-assistant-message
-      ;; defect (runs 3 + 6) ends at this boundary too.
-      (not (str/blank? reply-text))
-      (assoc :seon.agent.turn/messages
-             [{:seon.agent.message/id      (db/new-id!)
-               :seon.agent.message/from    [:seon.agent/id id]
-               :seon.agent.message/to      [[:seon.agent/id id]]
-               :seon.agent.message/content reply-text
-               :seon.agent.message/at      (js/Date.)
-               :seon.agent.message/hops    0}]))))
+      debug-dir (assoc :seon.agent.turn/debug-dir debug-dir))))
 
 (def llm-transport-retry-backoff-ms
   "Backoff before the single transport-error LLM retry (see
@@ -1300,18 +1304,17 @@
                :seon.agent.turn/llm-retries 1)))))
 
 (defn ^:async ask-and-eval!
-  "Body of `with-turn!`. Calls the LLM with `prompt-text` (via
+  "Body of `open-turn!`. Calls the LLM with `prompt-text` (via
    [[call-llm!]] — one bounded retry on transport-shaped provider
    failures, recorded as `:seon.agent.turn/llm-retries`), parses the
    reply, eval-batches the forms (each as a `:seon.agent.turn/evals`
    component via Platform's eval-batch!), and returns
-   `{:seon.agent.turn/messages [<assistant>] :seon.agent/eval-count n-ok}`
-   for `with-turn!` to fold into the close-tx. An LLM-call failure
+   `{:seon.agent/eval-count n}` (plus optional telemetry) for
+   `open-turn!` to fold into the close-tx. An LLM-call failure
    (`:seon.ai/error` on the response) NEVER closes `done [0 ok]` — it
-   stores a visible error self-message and closes the turn :error
-   (which seon.render.chat surfaces to the human as a system line in
-   the conversation — derived from this turn record, nothing extra
-   stored)."
+   closes the turn `:status :error` (the turn record carries the error
+   signal; render derives a system line from the :error status — no
+   self→self message row, agent-fsm §5). The failure is logged loudly."
   [{:seon.agent/keys [id llm-fn compile-state]
     :seon.agent.turn/keys  [id-of-turn turn-idx prompt-text]}]
   (let [resp    (await (call-llm! id id-of-turn llm-fn prompt-text))
@@ -1324,20 +1327,18 @@
         usage   (:seon.ai/usage raw)
         pfields (:seon.ai/provider-fields raw)]
     (if-let [err (:seon.ai/error resp)]
-      (cond->
-        {:seon.agent/eval-count 0
-         :seon.agent.turn/status      :error
-         :seon.agent.turn/messages
-         [{:seon.agent.message/id      (db/new-id!)
-           :seon.agent.message/from    [:seon.agent/id id]
-           :seon.agent.message/to      [[:seon.agent/id id]]
-           :seon.agent.message/content (str "⚠ LLM call failed"
-                                            (when retries
-                                              (str " (after " retries " retry)"))
-                                            " — " (:seon.ai/msg err))
-           :seon.agent.message/at      (js/Date.)
-           :seon.agent.message/hops    0}]}
-        retries (assoc :seon.agent.turn/llm-retries retries))
+      (do
+        ;; Fail-loud: an LLM-call failure no longer leaves a self→self
+        ;; message row — the turn closes :error (the render derives the
+        ;; human-visible line from that). Name WHY here so a silent
+        ;; provider failure is never invisible in the logs.
+        (log id turn-idx "llm error — turn :error"
+             (str (when retries (str "(after " retries " retry) "))
+                  (:seon.ai/msg err)))
+        (cond->
+          {:seon.agent/eval-count 0
+           :seon.agent.turn/status :error}
+          retries (assoc :seon.agent.turn/llm-retries retries)))
       (cond-> (await (ask-and-eval-reply! resp id id-of-turn turn-idx compile-state))
         retries     (assoc :seon.agent.turn/llm-retries retries)
         ;; EDN-stringified (mirrors llm-meta) — :map is unbridgeable, see
@@ -1362,8 +1363,7 @@
    11), plus `:seon.agent/eval-count`. On catastrophic error (LLM
    throw, eval engine crash) returns
    `{:seon.agent.turn/status :error :seon.error/data <str>}`."
-  [{:seon.agent/keys [id llm-fn compile-state]
-    :seon.agent.turn/keys  [woken-by]}]
+  [{:seon.agent/keys [id llm-fn compile-state]}]
   (let [session    (await (ensure-session! id))
         session-id (:seon.agent.session/id session)
         turn-id    (db/new-id!)
@@ -1406,22 +1406,22 @@
                             :seon.db/turn-id    turn-id
                             :seon.db/origin     :system}
                            (fn []
-                             (with-turn!
+                             (open-turn!
                                (cond->
-                                 ;; DEBUG: with-turn! uses prompt-text ONLY
+                                 ;; DEBUG: open-turn! uses prompt-text ONLY
                                  ;; to derive the stored `prompt-chars`
                                  ;; projection — so it gets the FULL prompt
                                  ;; (soul + boundary + ctx). It does NOT
                                  ;; feed the LLM (ask-and-eval! below gets
                                  ;; its OWN block2 `prompt`), so no doubling.
+                                 ;; open-turn! reads the agent's current
+                                 ;; :seon.agent/wake itself and stamps it.
                                  {:seon.agent/id           id
                                   :seon.agent.session/id-of-session session-id
                                   :seon.agent.turn/id-of-turn    turn-id
                                   :seon.agent.turn/prompt-text   full-prompt}
                                  prompt-file
-                                 (assoc :seon.agent.turn/prompt-file prompt-file)
-                                 woken-by
-                                 (assoc :seon.agent.turn/woken-by woken-by))
+                                 (assoc :seon.agent.turn/prompt-file prompt-file))
                                #(ask-and-eval! {:seon.agent/id            id
                                                 :seon.agent/llm-fn        llm-fn
                                                 :seon.agent/compile-state compile-state
@@ -1432,8 +1432,7 @@
         (log id turn-idx (name (or (:seon.agent.turn/status result) :done)) n-ok
              (if (:seon.agent.turn/status result) "llm-error" "ok"))
         (assoc (db/pull {:seon.db/pull-pattern
-                         '[* {:seon.agent.turn/messages [*]
-                              :seon.agent.turn/evals    [*]}]
+                         '[* {:seon.agent.turn/evals [*]}]
                          :seon.db/ref [:seon.agent.turn/id turn-id]})
                :seon.agent/eval-count n-ok))
       (catch :default e
@@ -1683,25 +1682,18 @@
           (let [attempts (inc empty-streak)]
             (log id turn-idx "halt"
                  (str "no visible output after " attempts
-                      " attempts — system line + wake end"))
-            ;; Flip THIS turn to the ask-6 LLM-error shape (status
-            ;; :error + stored self-message) — the one shape
-            ;; seon.render.chat derives a chat-visible `::system` line
-            ;; from. Nothing new stored per-view; the turn record
-            ;; honestly says this wake's final turn produced nothing.
+                      " attempts — wake end"))
+            ;; Flip THIS turn to :error so render derives a chat-visible
+            ;; `::system` line from the turn record. The give-up self→self
+            ;; MESSAGE is DELETED (agent-fsm §5: `:seon.agent.turn/messages`
+            ;; attr removed; an agent's notes-to-self are eval narration,
+            ;; never a message row). U4 replaces this whole halt branch with
+            ;; a clean `:idle` (no `:error`); until then the turn-status flip
+            ;; preserves the existing chat-surfacing.
             (await (db/transact!
                      {:seon.db/tx-data
-                      [{:seon.agent.turn/id
-                        (:seon.agent.turn/id result)
-                        :seon.agent.turn/status :error
-                        :seon.agent.turn/messages
-                        [{:seon.agent.message/id      (db/new-id!)
-                          :seon.agent.message/from    [:seon.agent/id id]
-                          :seon.agent.message/to      [[:seon.agent/id id]]
-                          :seon.agent.message/content
-                          (str "⚠ " (empty-completion-give-up-text attempts))
-                          :seon.agent.message/at      (js/Date.)
-                          :seon.agent.message/hops    0}]}]}))
+                      [{:seon.agent.turn/id     (:seon.agent.turn/id result)
+                        :seon.agent.turn/status :error}]}))
             (assoc result
                    :seon.agent.turn/status :error
                    :seon.agent/halt :no-visible-output)))
