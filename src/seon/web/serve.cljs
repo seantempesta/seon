@@ -383,26 +383,23 @@
                                      (str "create agent failed: " err)))))))))
 
 (defn- handle-complete-agent!
-  "POST /agent/<id>/complete — stamp `:seon.agent/completed-at` via
-   `seon.agent/complete!` (the ONE 'done' verb). Confirm-free: it's
-   reversible by an explicit retract (see complete!'s docstring). The
-   completed agent drops out of the mission-control default grid on
-   the SSE re-morph; 200 + id on success, 404 with the envelope's
-   error for an unknown id."
+  "POST /agent/<id>/complete — external control: set the agent's state to
+   `:completed` via `seon.agent/set-state!`. 200 + id on success, 500 with
+   the store error otherwise."
   [_req res agent-id]
-  (-> (agent/complete! {:seon.agent/id agent-id})
-      (.then (fn [{ok? :seon.agent/ok? id :seon.agent/id
-                   error :seon.agent/error}]
+  (-> (agent/set-state! {:seon.agent/id agent-id :seon.agent/state :completed})
+      (.then (fn [{ok? :seon.db/ok? :as env}]
                (if ok?
                  (do (log/info-console! "seon.web.serve"
                                         "POST /agent/<id>/complete OK"
-                                        {:agent id})
+                                        {:agent agent-id})
                      (write-status! res 200 "text/plain; charset=utf-8"
-                                    (str id)))
-                 (do (log/error-console! "seon.web.serve"
-                                         "/agent/<id>/complete refused" error)
-                     (write-status! res 404 "text/plain; charset=utf-8"
-                                    (str error))))))
+                                    (str agent-id)))
+                 (let [error (get-in env [:seon.db/error :seon.error/message])]
+                   (log/error-console! "seon.web.serve"
+                                       "/agent/<id>/complete refused" error)
+                   (write-status! res 500 "text/plain; charset=utf-8"
+                                  (str error))))))
       (.catch (fn [err]
                 (log/error-console! "seon.web.serve"
                                     "/agent/<id>/complete threw" err)

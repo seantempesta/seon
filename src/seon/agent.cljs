@@ -159,11 +159,14 @@
 ;; Note surfaced to monitoring agents while parked (optional; set by
 ;; `(agent/wait …)`).
 (schema/register! :seon.agent/wait-note      :string)
-;; Lifecycle (P3.5/#31, 2026-06-10): ABSENT = active. A booting pod
-;; resumes every agent entity WITHOUT this attr; `complete!` stamps it;
-;; un-complete is an explicit `[:db/retract …]` (mirrors
-;; `seon.agent.todo/completed-at` — one vocabulary). Completed agents
-;; stay queryable history: never resumed, never triggered.
+;; ORPHANED by the FSM: lifecycle is now `:seon.agent/state`
+;; (`armable-agent-ids` keys on state ≠ `:terminated`), and `complete`
+;; no longer stamps this attr. Nothing in `seon.agent` writes or reads it.
+;; The registration stays only because out-of-lane readers still pull it
+;; (FLAGGED for the enum-ripple / U6 sweep): `seon.web.serve`
+;; (`/agent/<id>/complete` still calls the removed `agent/complete!`),
+;; `seon.web.inspector` (the completed-grid grouping), `seon.client`,
+;; `seon.ctx`. Those should move to the state enum; delete this attr after.
 (schema/register! :seon.agent/completed-at  :inst)
 ;; v0 :seon.agent/turn-count, :seon.agent/turns-since-inbound,
 ;; :seon.agent/interrupted? attrs deleted 2026-05-22. turn-count
@@ -893,72 +896,55 @@
 (def user-ref msg/user-ref)
 
 ;; ============================================================
-;; complete! — agent lifecycle end-stamp (P3.5/#31). Same vocabulary as
-;; seon.agent.todo/complete!: stamp `completed-at`, unknown id → fail
-;; envelope, already-completed → idempotent success. A completed agent
-;; is HISTORY: the booting pod's resume query skips it, no trigger is
-;; armed, the mission-control page groups it collapsed at the bottom.
+;; Lifecycle verbs — wait / complete / terminate (the agent-facing
+;; terminal transitions, reached through the `agent/` alias). Each is a
+;; small state transact reading the calling agent from the ALS scope; it
+;; returns the new `:seon.agent/state` keyword (the value the transcript
+;; shows). `^:async` fns aren't runtime-instrumented — the schema is the
+;; contract. No verb ever writes a self→self message.
 ;; ============================================================
 
-(schema/register! ::ok?    :boolean)
-(schema/register! ::error  :string)
+(defn ^:async wait
+  "Park the calling agent: state → :waiting, with a note surfaced to
+   monitoring agents. The agent resumes (→ :active) the moment a message
+   arrives — the wake gate handles that."
+  {:malli/schema [:=> [:catn [::note :string]] :seon.agent/state]}
+  [note]
+  (let [id (db/current-agent-id)]
+    (await (db/transact!
+             {:seon.db/tx-data [{:seon.agent/id        id
+                                 :seon.agent/state     :waiting
+                                 :seon.agent/wait-note note}]}))
+    :waiting))
 
-(schema/register! ::complete-request
-  [:map
-   ;; default: the calling agent from the ALS scope (like reply!).
-   [::id {:optional true} ::id]])
+(defn ^:async complete
+  "Finish the calling agent's work: state → :completed (still wakeable —
+   a new message resumes it). If `:seon.agent/parent` is set, send the
+   result to the parent (which wakes it via the normal inbound gate); no
+   parent → the result is for the human (already said via message/user)."
+  {:malli/schema [:=> [:catn [::result :string]] :seon.agent/state]}
+  [result]
+  (let [id     (db/current-agent-id)
+        ent    (when id (db/entity {:seon.db/ref [:seon.agent/id id]}))
+        parent (:seon.agent/parent ent)]
+    (await (db/transact!
+             {:seon.db/tx-data [{:seon.agent/id    id
+                                 :seon.agent/state :completed}]}))
+    (when parent
+      (await (msg/message! {:seon.agent.message/content result
+                            :seon.agent.message/to      parent})))
+    :completed))
 
-(schema/register! ::complete-response
-  [:map
-   [::ok?   ::ok?]
-   [::id    {:optional true} ::id]
-   [::error {:optional true} ::error]])
-
-(defn ^:async complete!
-  "Mark an agent's work finished, stamping `:seon.agent/completed-at`.
-   Map-in / envelope-out; `:seon.agent/id` defaults to the calling agent
-   from the ALS scope (like `reply!`); an explicit id completes another
-   agent. Unknown id → fail envelope; already-completed is idempotent
-   success. Mirrors `seon.agent.todo/complete!` semantics exactly — one
-   vocabulary for 'done'.
-
-   A completed agent is not resumed at pod boot and its user-message
-   trigger is not re-armed — it remains queryable history. Un-complete
-   is an explicit retract (absent = active, nil is never stored):
-
-     (seon.db/transact!
-       {:seon.db/tx-data
-        [[:db/retract [:seon.agent/id id] :seon.agent/completed-at]]})
-
-   …after which the next pod boot resumes it again."
-  {:malli/schema [:=> [:cat ::complete-request] ::complete-response]}
-  [{::keys [id]}]
-  (let [id  (or id (db/current-agent-id))
-        ent (when id (db/entity {:seon.db/ref [:seon.agent/id id]}))]
-    (cond
-      (nil? id)
-      {::ok? false
-       ::error (str "complete!: no :seon.agent/id and no agent in scope — "
-                    "pass an id or call inside (seon.db/with-agent …).")}
-
-      (nil? (:seon.agent/id ent))
-      {::ok? false
-       ::error (str "complete!: no agent " (pr-str id)
-                    " — query [?a :seon.agent/id ?id] for the live ids.")}
-
-      (some? (:seon.agent/completed-at ent))
-      {::ok? true ::id id}
-
-      :else
-      (let [env (await (db/transact!
-                         {:seon.db/tx-data
-                          [{:seon.agent/id           id
-                            :seon.agent/completed-at (js/Date.)}]}))]
-        (if (:seon.db/ok? env)
-          {::ok? true ::id id}
-          {::ok? false
-           ::error (str "complete!: store failed — "
-                        (get-in env [:seon.db/error :seon.error/message]))})))))
+(defn ^:async terminate
+  "Kill an agent: state → :terminated — the one UNWAKEABLE state (a
+   message will not start a loop). Orchestrator-only; an agent does not
+   terminate itself."
+  {:malli/schema [:=> [:catn [::id ::id]] :seon.agent/state]}
+  [id]
+  (await (db/transact!
+           {:seon.db/tx-data [{:seon.agent/id    id
+                               :seon.agent/state :terminated}]}))
+  :terminated)
 
 ;; ============================================================
 ;; v1 §6 — turn lifecycle.
@@ -1777,6 +1763,11 @@
   [:map
    [:seon.ctx/name :seon.ctx/name]
    [:seon.agent/id {:optional true} :seon.agent/id]])
+
+;; Shared response shapes for the section verbs (add-section! /
+;; remove-section!), referenced by ::section-response below.
+(schema/register! ::ok?   :boolean)
+(schema/register! ::error :string)
 
 (schema/register! ::section-response
   [:or
