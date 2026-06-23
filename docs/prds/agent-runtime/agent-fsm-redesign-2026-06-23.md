@@ -70,28 +70,38 @@ delete — never a `*-v2` or a parallel ns.
 
 ### Module layout (split the 1820-line agent.cljs along real seams)
 
-- `seon.agent` — **FACADE** (thin): requires fsm/turn/message/entity; re-exports the
-  verbs the agent calls (`wait` / `complete` / `terminate`, `create!` / `boot!`). The
-  agent's `agent/` alias points here.
-- `seon.agent.entity` — the agent record: `:seon.agent/*` schemas (id/purpose/state/
-  wake/parent/max-turns-per-loop), `create!` / `boot!`, state helpers (`current-state`,
-  `set-state!`, `fresh-wake!`). Leaf (requires db + schema); everyone requires it.
-- `seon.agent.fsm` (+ `.internal`) — the FSM: `install-wake-trigger!` + `wake-handler`,
-  `run-loop!`, the lifecycle verbs (`wait` / `complete` / `terminate` — they ARE
-  transitions), the halt policy. `.internal` = wake-id recheck mechanics, per-loop
-  count query, the release/finally.
+Schemas co-locate with **the namespace whose name the keyword carries** (the rule),
+which is also each record's data-owner. `:seon.agent/*` → `seon.agent`;
+`:seon.agent.turn/*` → `seon.agent.turn`; `:seon.agent.message/*` →
+`seon.agent.message`; `:seon.eval/*` stays in `seon.eval`. The fsm is a *processor*
+of `:seon.agent/state`/`wake` but does not own those keywords — no facade needed, no
+cycle (the verbs that write state and the loop that reads it don't call each other —
+the loop just re-reads the state the verbs transacted).
+
+- `seon.agent` — the agent RECORD + the agent-facing verbs (the readable core): the
+  `:seon.agent/*` schemas (id/purpose/state/wake/parent/max-turns-per-loop +
+  entity map), `create!` / `boot!`, state helpers (`current-state` / `set-state!` /
+  `fresh-wake!`), and the lifecycle verbs `wait` / `complete` / `terminate` (each a
+  small state transact). The agent's `agent/` alias points here. Requires db +
+  schema only — NOT fsm/turn, so nothing cycles. (~450 lines)
+- `seon.agent.fsm` (+ `.internal`) — the loop machinery: `install-wake-trigger!` +
+  `wake-handler`, `run-loop!`, the halt/cap policy. Requires `seon.agent` (schemas +
+  state helpers) + `seon.agent.turn` (calls `run-turn!`). `.internal` = wake-id
+  recheck, the per-loop count + effective-cap queries, the release/finally.
 - `seon.agent.turn` (+ `.internal`) — one turn: `run-turn!`, `open-turn!` /
-  `close-turn!`, `ask-and-eval!`, `call-llm!`. `.internal` = the eval-fold + debug
-  capture plumbing.
-- `seon.agent.message` — stays: `message!` + `message/user` + `message/agent` + schemas.
+  `close-turn!`, `ask-and-eval!`, `call-llm!`. Requires `seon.agent` (schemas) + ctx
+  + eval + message. `.internal` = the eval-fold + debug capture plumbing.
+- `seon.agent.message` — stays: `message!` + `message/user` + `message/agent`
+  (refuses `to = me`) + the `:seon.agent.message/*` schemas. Requires db.
 - DELETE `seon.agent.turns` (folds into the transcript readline).
 - `seon.ctx.transcript` — rewritten in place, absorbs prompt + turns (§2). DELETE
   `seon.ctx.prompt`. Extract `system-text` to `seon.ctx.system` (ctx.cljs is itself
   >2k — split system-text + the shared read API out; the rest of the ctx split is
   flagged, out of FSM scope).
 
-Dependency direction (no cycles): facade → {fsm, turn, message, entity}; fsm →
-{entity, turn}; turn → {entity, ctx, eval, message}; message → db; entity → {db, schema}.
+Dependency direction (acyclic): fsm → {seon.agent, turn}; turn → {seon.agent, ctx,
+eval, message}; seon.agent → {db, schema}; message → {db}. The boot path (client)
+requires fsm to `install-wake-trigger!`.
 
 ### ALS — unify, rename, keep ergonomic-defaults-only
 
@@ -290,7 +300,41 @@ There is ONE bottom section — an append-only, eval'able REPL transcript that
   `(in-ns 'x)` flips it to `x=>`, so the agent sees which ns the next form evals in.
   Derivable from the `in-ns` history; the eval'able export is forms + comments.
 
-The agent writes ONLY `(forms)` and `;;`. It never writes `;;;`, `;;=>`, or `ns=>`.
+The agent writes two things: `(forms)` and `;;` comments. The `;;;` headers, the
+`;;=>` results, and the `ns=>` prompt are the runtime's — it adds them around the
+agent's forms so the agent can read what happened.
+
+### Framing rule — positive-only, reinforce live-and-current (LOAD-BEARING)
+
+A KNOWN failure: when results were shown with a `;;=>`-style marker, agents began
+WRITING `;;=>` lines themselves (treating them as a way to store values) and then
+referenced those fabricated values. The fix is FRAMING, and the framing has rules:
+
+- **Lead with what TO do, never with a prohibition.** Tell the agent "you write
+  forms and `;;` comments; the runtime shows each form's value on the next line as
+  `;;=>` — that's how your results arrive, on the turn after you write the form."
+  Do NOT lead with "never write `;;=>`" — a negative example primes the very
+  behavior it forbids (standing owner rule). Show only the right shape; explain
+  what the agent is seeing.
+- **Reinforce that this REPL is LIVE and ALWAYS CURRENT** — it re-derives from the
+  DB every turn, so it is never a stale transcript being replayed. The agent's
+  prior training prepped it for static files/notebooks; this is different, and the
+  masthead names that difference plainly.
+- **The substrate must NEVER break its own format rules.** If we ever emit a shape
+  we told the agent only the runtime emits, the contract is broken and the agent
+  will mimic it. The render is the single source; keep it consistent every turn.
+
+The masthead (the first lines of the transcript, rendered every turn) carries this:
+
+```
+;;; ═══════════════ seon · my.agent.seon · live REPL ═══════════════════════
+;;; This is your live REPL — a Clojure session backed by the database. The
+;;; history below is real and ALWAYS current: it re-derives from the DB every
+;;; turn, so it is never stale. You write Clojure forms and ;; comments. After
+;;; each form the runtime evaluates it and shows the value on the next line as
+;;; `;;=> …` — that is how your results arrive, on the turn after you write the
+;;; form. So just write the form; read its `;;=>` next turn. Append below.
+```
 
 ### The folded readline carries the status
 
@@ -446,34 +490,77 @@ DECISION on `:seon.agent.turn/status` (`agent.cljs:262`, `[:running :done :error
 keep it turn-level and distinct from the agent FSM (a turn is running/done/error; an
 agent is idle/active/…). Document the distinction; do not rename.
 
-## 6. Build order — fastest path to a live DeepSeek test
+## 6. Build order — units, dependencies, parallel vs sequential
 
-DeepSeek live drives are pre-authorized. Get a WORKING slice, test live, iterate the
-format BEFORE hardening tests (a lot of tests pin exact output, painful while
-iterating). For each unit, run a targeted check; full `bin/test-cljs` only after the
-format stabilizes.
+DeepSeek live drives are pre-authorized. The target is a WORKING slice, live-tested,
+then iterate the format. Each unit below has a concrete **deliverable** and a
+**verify** (a REPL/live check, not a test suite). Tests are deferred (see bottom).
 
-1. **FSM core** — `:seon.agent/state` 5-value + the recheck wake + the §1 loop;
-   delete answer-accounting + the atom; enum-ripple sites. Pod boots; an agent wakes,
-   loops, halts on no-forms/cap.
-2. **Messaging verbs** — `message/user` + `message/agent` (+ schemas); delete
-   `reply!`; fix `stub-llm`.
-3. **Lifecycle verbs** — repurpose `complete`, add `agent/wait` + `terminate` (+
-   schemas, descoped parent).
-4. **Transcript + folded readline** — rewrite `seon.ctx.transcript` to §2; merge in
-   prompt/turns; `format-eval-row` → `;;=>`; rewrite `system-text`; emit turn 0 as
-   the bootstrap.
-5. **→ LIVE TEST with DeepSeek.** Drive idle→active→wait→active→complete; a batch of
-   messages answered with one; confirm the transcript reads clean in every state.
-   Iterate the format here.
-6. **After the format is proven:** prose policy (§4), live-tile = todo queue, then
-   fresh FSM tests + gym (the old-model tests are DELETED in their units as dead
-   code, not rewritten mid-iteration).
+### Dependency graph
 
-Tests: **delete** the namespaces that pin the dead model as part of each deletion
-unit (`agent_loop_test` whole-ns, the `reply!`/XML/`:running` assertions) — they
-encode a model we removed (no-legacy). Do NOT write replacements until the format
-stabilizes; rely on live DeepSeek drives + targeted REPL evals until then.
+```
+U1 schema+state ──┬──> U2 messaging  ─┐
+ (FOUNDATION,     ├──> U3 lifecycle   ─┤
+  do first)       ├──> U5 turn ──> U4 loop ─┐
+                  └──> U6 transcript ───────┴──> LIVE TEST ──> U7 prose · U8 tile
+ (parallel, anytime after nothing): U0 ALS-unify+rename · enum-ripple (needs U1's enum)
+```
+
+**Sequential backbone (critical path):** U1 → U5 → U4 → LIVE TEST. The loop (U4)
+calls `run-turn!` (U5); the turn needs the schema (U1).
+**Parallel off U1:** U2 (messaging), U3 (lifecycle verbs), U6 (transcript) — different
+files, no dependency on the loop. U6 can be built alongside U4; the live test needs
+both. **Independent anytime:** U0 (ALS unify/rename) + the enum-ripple rename (gated
+only on U1 defining `:active`). Per the one-live-cluster rule, FILE edits parallelize
+but pod-affecting **verification is serialized** (one pod).
+
+### Units
+
+- **U1 — schema + state helpers** (`seon.agent`). FOUNDATION, do first. The 5-value
+  enum + `wake`/`max-turns-per-loop`/`parent`/`wait-note` schemas + entity map;
+  `current-state`/`set-state!`/`fresh-wake!`; update `create!`/`boot!` to seed `:idle`.
+  *Verify:* REPL — `create!` an agent, read `:seon.agent/state :idle`, `set-state!`
+  round-trips, `fresh-wake!` mints a distinct id.
+- **U2 — messaging verbs** (`seon.agent.message`). `message/user` + `message/agent`
+  (refuses `to = me`, loud) + schemas; DELETE `reply!`; fix `stub-llm`. *Verify:* REPL
+  — `message/user` writes one row from=me to=user; `message/agent` to a peer writes a
+  row; `message/agent` to self → error envelope, no row.
+- **U3 — lifecycle verbs** (`seon.agent`). `wait`/`complete`/`terminate` as state
+  transacts (`complete` repurposes `complete!`; parent-delivery is the thin
+  conditional). *Verify:* REPL — each verb sets the right `state` (+ `wait-note` for
+  wait); no self-message emitted.
+- **U5 — turn execution** (`seon.agent.turn`). `run-turn!` + `open-turn!`/`close-turn!`
+  (stamp `:seon.agent.turn/wake`); DELETE the self→self fold + `woken-by` + the
+  `messages` attr. *Verify:* REPL — one turn opens/closes, stamps wake, records evals,
+  flips turn-status `:done`; no self→self message row exists.
+- **U4 — loop + wake** (`seon.agent.fsm`). `wake-handler` + `install-wake-trigger!`,
+  `run-loop!`, halt/cap/`effective-cap`/recheck; DELETE `!kick-scheduled` +
+  answer-accounting. *Verify (live pod):* a message wakes an idle agent → one loop;
+  a deliberate double-wake → exactly one loop survives (recheck); halt on no-forms;
+  halt on cap; an orchestrator writing `:terminated` stops it.
+- **U6 — transcript + readline** (`seon.ctx.transcript` + `seon.ctx.system`). The §2
+  comment-block render (masthead, `;;;` turn headers, `;;=>` results via
+  `format-eval-row`, `;;; ◀` inbound head-lines, the live readline); rewrite
+  `system-text`; DELETE `ctx/prompt` + `agent/turns`; emit turn 0 as the bootstrap.
+  *Verify:* render a driven agent's transcript and eyeball EVERY state (active, waiting,
+  resumed, batch, at-cap) — it reads clean, no XML, no fabricated `;;=>`.
+- **LIVE TEST (DeepSeek)** — drive idle→active→wait→active→complete; send a batch of 3
+  and confirm one targeted reply suffices (no cap-spin); a peer message to an idle
+  agent starts a loop, to an at-cap agent bumps the cap; confirm the agent never
+  writes `;;=>` itself. **Iterate the format here.**
+- **U7 — prose policy** (`repl/internal.cljc`, §4) and **U8 — live-tile = todo queue**
+  — independent, AFTER the format is proven.
+- **U0 — ALS unify + rename** (`seon.db`, anytime) — merge the two ALS instances,
+  `with-tx-context → with-tx-meta`. Mechanical; not on the critical path.
+
+### Tests — deferred wholesale (owner directive)
+
+Do NOT rewrite tests after each change while we're still proving the format — they
+pin exact output and we WILL discover issues in flight. Each deletion unit just
+**deletes** the dead-model test namespaces (`agent_loop_test` whole-ns, the
+`reply!`/XML/`:running` assertions) so the build compiles — no replacements. Rely on
+the per-unit REPL verifies + the live DeepSeek drive. Fresh FSM tests + gym come only
+once the system is confirmed to be what we wanted.
 
 ## 7. What we are explicitly NOT doing
 
