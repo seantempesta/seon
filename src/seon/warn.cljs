@@ -314,7 +314,7 @@
 (defn agent-registered-attrs
   "PUBLIC: the `seon.ctx/context-model` classifier consumes this as its
    `:seon.ctx/agent-attrs` leg — ONE provenance query for the attr
-   surface, shared by domain-attrs and the classifier (V3-C).
+   surface, shared by domain-attrs and the classifier.
 
    The set of attr keywords whose `:seon.schema/key` row landed in a tx
    that does NOT carry `:seon.db/origin :core-seed` — i.e. attrs
@@ -326,14 +326,12 @@
    `{:seon.db/origin :core-seed}` tx-context, forge-guarded in
    `seon.db`).
 
-   This PROVENANCE rule replaces the old keyword-namespace blanket
-   `(db|seon)(\\..*)?` — which wrongly hid agent-authored `seon.*` data
-   domains (the live store's `:my.workout/*`) from the whole reuse
-   surface (gym S-21 root cause, 2026-06-10). Provenance stays correct
-   as the core grows with NO list to maintain: new core
-   registrations arrive via the boot seed (seed origin → hidden), and
-   anything an agent registers is teed in its own tx (→ visible),
-   whatever keyword namespace it picks."
+   Provenance — not a keyword-namespace pattern — is the rule, so
+   agent-authored `seon.*` data domains (e.g. `:my.workout/*`) stay
+   visible on the reuse surface. It stays correct as the core grows with
+   NO list to maintain: new core registrations arrive via the boot seed
+   (seed origin → hidden), and anything an agent registers is teed in its
+   own tx (→ visible), whatever keyword namespace it picks."
   [db]
   (let [seed-txs (into #{}
                        (map first)
@@ -543,7 +541,7 @@
           "   …])")}))
 
 ;; NOTE: there is deliberately NO "missing example/test" corpus check.
-;; A usage example (a `defn` with `:test` var-meta, B9) is OPT-IN — it
+;; A usage example (a `defn` with `:test` var-meta) is OPT-IN — it
 ;; is authored ONLY when the fn's `:malli/schema` + the ns's rendered
 ;; schemas don't already make the call obvious. Most well-specced fns
 ;; need NO example, so a blanket "this fn has no test" warning would nag
@@ -700,7 +698,7 @@
    SUCCEEDS), so this scans `:seon.eval/result-edn`, not
    `:seon.eval/error`. Marker filtering happens in Clojure, not in a
    :where predicate (datahike-cljs string predicates in :where are a
-   known trap — see the gym S-12 note in seon.agent)."
+   known trap)."
   [db]
   (let [cutoff (latest-user-at db)
         rows   (db/query
@@ -721,9 +719,9 @@
 
 (defn check-fs-denied
   "fs calls DENIED by the capability allowlist since the latest user
-   message — the grant-mismatch shape observed live 2026-06-11: an
-   agent INFERRED its grant from a CWD listing (wrongly — the granted
-   root was an ancestor) instead of reading the configured truth via
+   message — the grant-mismatch shape where an agent INFERRED its grant
+   from a CWD listing (wrongly — the granted root was an ancestor)
+   instead of reading the configured truth via
    `(seon.agent.fs/grants)`. DERIVED from the eval log at render time;
    self-heals when a new user message lands and subsequent fs calls
    stay in scope. GLOBAL — :seon.warn/ns is ignored."
@@ -974,7 +972,7 @@
 (defn- check-error-cluster
   "Synthetic ::check-response for a registry check that THREW instead
    of returning a cluster — the section degrades PER CHECK, loudly,
-   instead of one broken check killing the whole <warnings> block.
+   instead of one broken check killing the whole WARNINGS block.
    Self-heals: renders only while the check keeps throwing."
   [check e]
   (let [nm (check-name check)]
@@ -1006,7 +1004,7 @@
   (if where (str sym " (" where ")") sym))
 
 (defn- render-cluster
-  "ONE cluster as a `;;` comment-block (agent-fsm-redesign-2026-06-23 §2):
+  "ONE cluster as a `;;` comment-block:
    `;;; [kind] explanation`, ONE fix example as `;;` lines, then the
    affected list with specific locations. Positive-framing: it names what
    TO do (the fix), and these warnings DERIVE from current state — each
@@ -1039,7 +1037,7 @@
 
 (defn render-warnings
   "Run the registry and render the non-clean checks as a single
-   comment-block (agent-fsm-redesign-2026-06-23 §2): a `;;; ── WARNINGS ──`
+   comment-block: a `;;; ── WARNINGS ──`
    heading, then one `;;` cluster per kind. URGENT clusters
    (`:seon.warn/urgent? true`) render FIRST with a louder template; the
    remaining clusters follow in registry order. Empty string when clean.

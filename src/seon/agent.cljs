@@ -32,7 +32,7 @@
 
    ## State machine
 
-   `:seon.agent/state` values (agent-fsm redesign 2026-06-23):
+   `:seon.agent/state` values:
      :idle       — neutral / between work; wakeable → :active
      :active     — a loop is running; new inbounds are picked up by the
                    running loop's sliding cap, not a fresh wake (the
@@ -46,32 +46,25 @@
 
    ## Prompt assembly
 
-   v1.md §5 — the LLM ctx is built via the render dispatch:
+   The LLM ctx is built via the render dispatch:
 
      agent entity → :seon.render/ai slot → eval/lookup-value → call → text
 
-   Default symbol: `'seon.agent/assemble-context` (a transitional alias
-   of `seon.ctx/assemble-context` — the ONE composer, V3-C). The
-   core section LAYOUT is CODE (`seon.ctx/core-default-ctx`);
-   the agent's own `:seon.agent/ctx` section maps MERGE with it by one
-   priority sort (override-by-name). Each section's `:seon.render/ai`
-   slot is a verbatim string or a fn symbol resolved late via
-   `seon.eval/lookup-value`.
+   Default symbol: `'seon.agent/assemble-context` (an alias of
+   `seon.ctx/assemble-context` — the ONE composer). The core section LAYOUT
+   is CODE (`seon.ctx/core-default-ctx`); the agent's own `:seon.agent/ctx`
+   section maps MERGE with it by one priority sort (override-by-name). Each
+   section's `:seon.render/ai` slot is a verbatim string or a fn symbol
+   resolved late via `seon.eval/lookup-value`.
 
-   Core defaults (`core-default-ctx`): nine sections —
-   `system`, `capabilities`, `exemplars`, `schema-catalog`,
-   `functions-catalog`, `namespace-context`, `warnings`, `transcript`,
-   `prompt`.
-   The agent customizes by transacting different
-   `:seon.ctx` entities into `:seon.agent/ctx` (use `update-ctx!`)
-   or by transacting a completely different symbol onto the agent's
-   `:seon.render/ai` slot."
+   The agent customizes by transacting different `:seon.ctx` entities into
+   `:seon.agent/ctx` (use `update-ctx!`) or by transacting a completely
+   different symbol onto the agent's `:seon.render/ai` slot."
   (:require
     [clojure.string :as str]
     [seon.agent.message :as msg]
     [seon.ctx :as ctx]
     [seon.ctx.namespaces :as ctx-namespaces]
-    [seon.ctx.prompt :as ctx-prompt]
     [seon.ctx.transcript :as ctx-transcript]
     [seon.ctx.warnings :as ctx-warnings]
     [seon.ctx.your-entity :as ctx-your-entity]
@@ -79,17 +72,14 @@
     [seon.schema :as schema]))
 
 ;; ============================================================
-;; Schemas — every shape the agent reads or writes.
-;;
-;; Per spec-05 §22.5 the entity lives at `:seon.agent/*` (formerly
-;; `:seon.agent.session/*`). The agent-ns is dropped from the entity — it's
-;; deterministic from the id via `home-ns`.
+;; Schemas — every shape the agent reads or writes. The agent-ns is not
+;; stored on the entity — it's deterministic from the id via `home-ns`.
 ;; ============================================================
 
 (schema/register! :seon.agent/id            [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.agent/purpose       :string)
-;; The FSM coordination truth (agent-fsm redesign 2026-06-23, §1). STORED
-;; on the agent record, re-read each loop iteration:
+;; The FSM coordination truth. STORED on the agent record, re-read each
+;; loop iteration:
 ;;   :idle       neutral / between work — wakeable → :active
 ;;   :active     a loop is running — NOT wakeable (the running loop picks
 ;;               up new inbounds via the sliding cap)
@@ -98,16 +88,15 @@
 ;;   :terminated orchestrator kill — UNWAKEABLE (change state first)
 (schema/register! :seon.agent/state         [:enum :idle :active :waiting :completed :terminated])
 ;; The current wake-episode token (reuses the canonical id shape, single
-;; source of truth in seon.schema). STORED. Replaces the deleted
-;; `!kick-scheduled` atom + `:seon.agent.turn/woken-by` attr: each wake
-;; mints a fresh id, the loop re-reads it and bails if a newer wake
-;; superseded it (optimistic concurrency via the DB, no atom/CAS).
+;; source of truth in seon.schema). STORED. Each wake mints a fresh id; the
+;; loop re-reads it and bails if a newer wake superseded it (optimistic
+;; concurrency via the DB — no atom, no CAS).
 (schema/register! :seon.agent/wake          :seon.db/id)
 ;; Base per-loop turn cap (optional; env SEON_MAX_TURNS_PER_LOOP / 20 when
 ;; absent). The effective cap is a sliding window — every inbound during a
 ;; wake grants +1 turn (derived, not stored).
 (schema/register! :seon.agent/max-turns-per-loop :int)
-;; Subagent → parent (optional; delivery descoped to a thin conditional in
+;; Subagent → parent (optional; delivery is a thin conditional in
 ;; `complete` — no spawn path sets this yet). References the canonical ref
 ;; shape; never inline.
 (schema/register! :seon.agent/parent        :seon.db/ref)
@@ -115,42 +104,28 @@
 ;; `(agent/wait …)`).
 (schema/register! :seon.agent/wait-note      :string)
 ;; ORPHANED: lifecycle is `:seon.agent/state` now — nothing writes
-;; `:seon.agent/completed-at`. Registered only so the inspector / client /
-;; ctx readers that still key on it (migration tracked, #16) keep compiling;
-;; delete this attr once they move to the state enum.
+;; `:seon.agent/completed-at`. Registered only so any remaining reader keeps
+;; compiling; a follow-up deletes the attr.
 (schema/register! :seon.agent/completed-at  :inst)
-;; v0 :seon.agent/turn-count, :seon.agent/turns-since-inbound,
-;; :seon.agent/interrupted? attrs deleted 2026-05-22. turn-count
-;; was a holdover that always read 0; turns-since-inbound moved to
-;; :seon.agent.session; interrupted? was registered but never written.
-
-;; Cap on consecutive agentic turns per user message. Lives on the
-;; agent entity (overridable via transact); defaults to 20 when the
-;; attr is absent. Reading from the entity instead of a hardcoded
-;; constant makes the cap discoverable + tunable from the agent's
-;; own eval.
+;; ORPHANED: superseded by `:seon.agent/max-turns-per-loop` (the FSM reads
+;; that). Registered only so any remaining reader keeps compiling; a
+;; follow-up deletes the attr.
 (schema/register! :seon.agent/turns-cap :int)
 ;; ============================================================
-;; TRANSITIONAL aliases — the context machinery moved to `seon.ctx`
-;; (V3-C, 2026-06-10). These keep (a) the agent-TAUGHT read surface
-;; (`seon.agent/messages` …) resolving via seon.eval/lookup-value,
-;; (b) stored `:seon.render/ai` slots pointing at
-;; 'seon.agent/assemble-context working, and (c) existing callers and
-;; tests compiling. The P6 agent.cljs split re-points callers and
-;; deletes this block. NOTE: an alias captures the fn value at load
-;; time (pre-instrumentation) — call `seon.ctx/*` directly when you
+;; Aliases — the context machinery lives in `seon.ctx`. These keep (a) the
+;; agent-TAUGHT read surface (`seon.agent/messages` …) resolving via
+;; seon.eval/lookup-value, and (b) stored `:seon.render/ai` slots pointing at
+;; 'seon.agent/assemble-context working. An alias captures the fn value at
+;; load time (pre-instrumentation) — call `seon.ctx/*` directly when you
 ;; want the validated entry point.
 ;; ============================================================
 
-(def default-turns-cap ctx/default-turns-cap)
-(def turns-cap ctx/turns-cap)
 (def home-ns ctx/home-ns)
 (def current-session ctx/current-session)
 (def messages ctx/messages)
 (def current-turn ctx/current-turn)
 (def evals ctx/evals)
 (def current-ns ctx/current-ns)
-(def turns-since-inbound ctx/turns-since-inbound)
 (def ctx-entities ctx/ctx-entities)
 (def host-timezone ctx/host-timezone)
 (def truncate-edn ctx/truncate-edn)
@@ -159,107 +134,87 @@
 (def cap-result ctx/cap-result)
 (def cap-result-body ctx/cap-result-body)
 (def system-section ctx/system-section)
-;; Per-section ctx fns moved to seon.ctx.<name> (ctx-sections-split-
-;; 2026-06-18). render-namespace + the shared read API stay in seon.ctx.
 (def namespaces-section ctx-namespaces/namespaces-section)
 (def your-entity-section ctx-your-entity/your-entity-section)
 (def render-namespace ctx/render-namespace)
 (def warnings-section ctx-warnings/warnings-section)
 (def transcript-char-budget ctx-transcript/transcript-char-budget)
 (def transcript-section ctx-transcript/transcript-section)
-(def prompt-section ctx-prompt/prompt-section)
 (def assemble-context ctx/assemble-context)
 (def core-default-ctx ctx/core-default-ctx)
 
 (schema/register! :seon.eval/id          [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.eval/at          :inst)
 ;; Wall-clock duration of the eval in milliseconds. Populated by
-;; seon.eval/eval-batch! per form. Source of truth for slow-eval
-;; warnings (v1.md §5.2) without walking evals or computing :at deltas.
+;; seon.eval/eval-batch! per form. Source of truth for slow-eval warnings
+;; without walking evals or computing :at deltas.
 (schema/register! :seon.eval/duration-ms :int)
 (schema/register! :seon.eval/narration   :string)
 (schema/register! :seon.eval/source      :string)
 (schema/register! :seon.eval/ok?         :boolean)
 (schema/register! :seon.eval/result-edn  :string)
-;; println/prn output captured during the eval span (unit #23 fix f —
-;; *print-fn* otherwise routes to the pod's stdout, invisible to the
-;; agent; a REPL shows print output next to the result). Written by
-;; record-eval! only when something printed; absent = no output.
+;; println/prn output captured during the eval span (*print-fn* otherwise
+;; routes to the pod's stdout, invisible to the agent; a REPL shows print
+;; output next to the result). Written by record-eval! only when something
+;; printed; absent = no output.
 (schema/register! :seon.eval/output      :string)
 (schema/register! :seon.eval/error       :string)
-;; Phase A item 8 — structured envelope alongside the rendered string.
+;; Structured instrumentation envelope alongside the rendered error string.
 ;; Populated by record-eval! when the failure carries an instrumentation
 ;; envelope (i.e. (:seon.error/data error) satisfies
-;; seon.error.instrument/instrument-error?). Programmatic readers
-;; (renderers, agents) branch on this; absent for non-instrumentation
-;; failures (timeouts, generic throws).
-;;
+;; seon.error.instrument/instrument-error?). Programmatic readers branch on
+;; this; absent for non-instrumentation failures (timeouts, generic throws).
 ;; Stored as :string (pr-str at write, read-string at read) because the
-;; seon.db Malli→datahike bridge has no :db.type/map entry today; the
-;; envelope itself is a map per seon.error.instrument/explain-payload.
-;; Bridge enhancement to support :map natively is a follow-up.
+;; seon.db Malli→datahike bridge has no :db.type/map entry.
 (schema/register! :seon.eval/error-data  :string)
-;; The namespace the eval ended in (v1.md:236). Written by eval-batch!'s
-;; per-form reduce from the (:ns raw-result) of cljs.js/eval-str. For
-;; failed forms (read or eval), carries the unchanged current-ns
-;; accumulator — the last-known-good ns the form WOULD have run in.
-;; Always populated; never nil. Cross-batch derivation of "the agent's
-;; current ns" reads this attribute on the latest successful eval.
+;; The namespace the eval ended in. Written by eval-batch!'s per-form reduce
+;; from the (:ns raw-result) of cljs.js/eval-str. For failed forms (read or
+;; eval), carries the unchanged current-ns accumulator — the last-known-good
+;; ns the form WOULD have run in. Always populated; never nil. Cross-batch
+;; derivation of "the agent's current ns" reads this attribute on the latest
+;; successful eval.
 (schema/register! :seon.eval/ns          :keyword)
-;; :seon.eval/agent and :seon.eval/turn deleted 2026-05-23 — evals
-;; now land as component-many children of :seon.agent.turn/evals (v1.md
-;; §2.1). Agent ref is reachable via the component chain (agent →
-;; sessions → turns → evals); the standalone back-refs were noise.
 
-;; The :seon.agent.session/* + :seon.agent.turn/* schemas + the turn
-;; machinery moved to [[seon.agent.turn]] (its data-owner) in the agent-fsm
-;; carve (U4). :seon.agent/sessions stays here (it is a :seon.agent/* attr —
-;; the agent record owns the ref TO its sessions; the sessions own their
-;; turns).
+;; :seon.agent/sessions — the agent record owns the ref TO its sessions; the
+;; sessions own their turns (the session/turn schemas live in
+;; [[seon.agent.turn]], their data-owner).
 (schema/register! :seon.agent/sessions    [:vector {:seon.db/component true} :seon.db/ref])
 
 ;; The agent's OWN context sections — a component vector of
-;; :seon.ctx/section maps (see seon.ctx). MERGED with the core
-;; defaults by one priority sort at render time (override-by-name);
-;; the old stored-ctx-REPLACES-defaults semantics died with the
-;; self-context spec (2026-06-10). :seon.ctx/fn is DEAD — the one
-;; slot attr is :seon.render/ai.
+;; :seon.ctx/section maps (see seon.ctx). MERGED with the core defaults by
+;; one priority sort at render time (override-by-name). The one slot attr is
+;; :seon.render/ai.
 (schema/register! :seon.agent/ctx    [:vector {:seon.db/component true} :seon.db/ref])
 
 ;; ============================================================
-;; v1 §2.2 — program graph. :seon.ns owns the namespace source;
-;; :seon.fn / :seon.schema reference their ns via child→parent
-;; plain refs (NOT component — a fn does not own its ns). Identity
-;; attrs upsert on redefine; history retains prior :source values.
+;; Program graph. :seon.ns owns the namespace source; :seon.fn /
+;; :seon.schema reference their ns via child→parent plain refs (NOT
+;; component — a fn does not own its ns). Identity attrs upsert on redefine;
+;; history retains prior :source values. Core fns/schemas/nses seed from the
+;; indexed codebase at boot; agent-defined entities populate via
+;; detect-and-tee in eval-batch!.
 ;;
-;; Core fns/schemas/nses populate via bootstrap.edn on first
-;; boot (§7.3); agent-defined entities populate via detect-and-tee
-;; in eval-batch! (§4.2 step 7).
+;; :seon.ns/name + :seon.ns/source live in seon.ctx (its render-namespace
+;; schemas reference them and seon.ctx loads first).
 ;; ============================================================
-
-;; :seon.ns/name + :seon.ns/source registrations moved to seon.ctx
-;; (V3-C) — ctx's render-namespace schemas reference them and seon.ctx
-;; loads first.
 
 (schema/register! :seon.fn/sym        [:string {:seon.db/identity true}])
 (schema/register! :seon.fn/ns         :seon.db/ref)
 (schema/register! :seon.fn/source     :string)
-;; Projections from the analyzer's var-map (v1.md §2.2 / Phase B item 10).
-;; Re-derived on every detect-and-tee + on bulk-load resume.
+;; Projections from the analyzer's var-map. Re-derived on every
+;; detect-and-tee + on bulk-load resume.
 (schema/register! :seon.fn/fn-var?    :boolean)
 (schema/register! :seon.fn/arglists   :string)
 (schema/register! :seon.fn/doc        :string)
 (schema/register! :seon.fn/private?   :boolean)
 ;; The fn's contract: `(pr-str (m/form <the fn's :malli/schema>))`.
 ;; PRESENT ⇒ specced (the exact contract is in the corpus); ABSENT ⇒
-;; unspecced. Replaces the old boolean specced flag — the form carries
-;; strictly more information than a bare flag.
+;; unspecced.
 (schema/register! :seon.fn/spec       :string)
 ;; Set when `:malli/schema` metadata is present but the value fails to
-;; parse via `malli.core/schema`. Orthogonal to `:seon.fn/spec` — when
-;; this is set, the schema is present but unparseable, so we omit
-;; `:seon.fn/spec` and will not instrument the fn. Phase 3 of
-;; mvp-completion-plan.
+;; parse via `malli.core/schema`. Orthogonal to `:seon.fn/spec` — when this
+;; is set, the schema is present but unparseable, so we omit `:seon.fn/spec`
+;; and will not instrument the fn.
 (schema/register! :seon.fn/schema-error :string)
 (schema/register! :seon.fn/created-at :inst)
 
@@ -281,16 +236,15 @@
 ;; at render time (no per-row stamping).
 ;;
 ;; These are intentionally MINIMAL — they exist so the renderer's
-;; discovery loop has a schema to consult. Full per-attr lists with
-;; `{:optional true}` flags are a Phase 1b/1c follow-up.
+;; discovery loop has a schema to consult.
 ;; ============================================================
 
 ;; Required attrs reflect what every writer of the kind populates
-;; unconditionally — derived empirically from the write sites:
+;; unconditionally — derived from the write sites:
 ;;   :seon.eval   — `record-eval!` (eval.cljs)
 ;;   :seon.agent.message — `message!` (the single write entry point,
 ;;                         seon.agent.message — its entity-kind :map
-;;                         schema lives there too, P6 split)
+;;                         schema lives there too)
 ;;   :seon.fn     — `build-tee-entities` (eval.cljs)
 ;;   :seon.schema — `build-tee-entities` (eval.cljs)
 ;;   :seon.ns     — `build-tee-entities` (eval.cljs)
@@ -355,22 +309,17 @@
    [:seon.ns/name   :seon.ns/name]
    [:seon.ns/source :seon.ns/source]])
 
-;; :seon.agent — the agent's OWN entity-kind (unit 1.4). The
-;; `:seon.render/html` property makes `seon.render.default/view` the
-;; DEFAULT tile renderer via the same kind-lookup every other kind
-;; uses; an agent OVERRIDES by transacting `:seon.render/html
-;; '<its-own-fn-sym>` onto its own entity (per-entity override wins in
-;; `seon.render/entity-html-sym`). No `:seon.render/ai` property —
-;; the agent entity must NOT enter the chronological ai window.
-;; Required attrs (id + state) mirror `create!`, the one writer that
-;; runs unconditionally; everything else arrives lazily.
-;; Entity map = §1 of the agent-fsm redesign: id (req) + state (req) +
-;; the optional config/coordination attrs. The render slots
-;; (props `:seon.render/html` + the optional :seon.render/ai/html attrs)
-;; are KEPT — they're the live agent-tile surface (U6 territory), not
-;; data the FSM owns. `completed-at`/`sessions`/`turns-cap`/`ctx` keep
-;; their own register! (still transactable/queryable) but leave the
-;; entity declaration: they're no longer part of the FSM record shape.
+;; :seon.agent — the agent's OWN entity-kind. The `:seon.render/html`
+;; property makes `seon.render.default/view` the DEFAULT tile renderer via
+;; the same kind-lookup every other kind uses; an agent OVERRIDES by
+;; transacting `:seon.render/html '<its-own-fn-sym>` onto its own entity
+;; (per-entity override wins in `seon.render/entity-html-sym`). No
+;; `:seon.render/ai` property in the props — the agent entity must NOT enter
+;; the chronological ai window. Required attrs (id + state) mirror `create!`,
+;; the one writer that runs unconditionally; everything else arrives lazily.
+;; The entity map is the FSM record: id (req) + state (req) + the optional
+;; config/coordination attrs. `sessions`/`ctx` keep their own register!
+;; (still transactable/queryable) but stay out of the record shape.
 (schema/register! :seon.agent
   [:map {:seon.db/entity   true
          :seon.render/html 'seon.render.default/view}
@@ -385,11 +334,11 @@
    [:seon.render/html {:optional true} :seon.render/html]])
 
 ;; ============================================================
-;; FSM state helpers (agent-fsm redesign 2026-06-23, U1). The agent
-;; record's `:seon.agent/state` + `:seon.agent/wake` are the loop's
-;; coordination truth — re-read each iteration, externally controllable.
-;; These are the thin read/write seam over `seon.db`; the lifecycle verbs
-;; (wait/complete/terminate, U3) and the loop (U4) build on them.
+;; FSM state helpers. The agent record's `:seon.agent/state` +
+;; `:seon.agent/wake` are the loop's coordination truth — re-read each
+;; iteration, externally controllable. These are the thin read/write seam
+;; over `seon.db`; the lifecycle verbs (wait/complete/terminate) and the
+;; loop ([[seon.agent.fsm]]) build on them.
 ;; ============================================================
 
 (schema/register! ::current-state-request [:map [:seon.agent/id :seon.agent/id]])
@@ -433,13 +382,11 @@
 (defn armable-agent-ids
   "Agent ids whose triggers should be ARMED — every agent NOT in the
    terminal `:terminated` state (the single source of truth for 'this
-   agent can still be woken'). Replaces the old three vocabularies
-   (`live-agent-ids` / `all-running-agents` / `resumable-agent-ids`):
-   a `:waiting`/`:completed` agent must still get a trigger so a new
-   message wakes it; only an orchestrator-`:terminated` agent is armless.
-   Derived from the db value at call time (reactive-context: no stored
-   registry). Sorted asc for deterministic boot logs. Map-in; `:seon.db/db`
-   optional (defaults to `*conn*`'s db via `db/query`)."
+   agent can still be woken'). A `:waiting`/`:completed` agent must still
+   get a trigger so a new message wakes it; only a `:terminated` agent is
+   armless. Derived from the db value at call time (reactive-context: no
+   stored registry). Sorted asc for deterministic boot logs. Map-in;
+   `:seon.db/db` optional (defaults to `*conn*`'s db via `db/query`)."
   {:malli/schema [:=> [:cat ::armable-agent-ids-request] ::armable-agent-ids-response]}
   [{:seon.db/keys [db]}]
   (let [q '[:find ?aid
@@ -467,7 +414,7 @@
    DIFFERENT sender with a WAKING origin (∈ {:human :agent}). The to-check is
    load-bearing: every agent installs the wake listener, so without it ONE
    message wakes EVERY agent's loop. The from-check (`from ≠ me`) stops an
-   agent's own writes from re-waking itself. The origin-check (#43) stops a
+   agent's own writes from re-waking itself. The origin-check stops a
    :core substrate nudge from waking an idle agent. A tx-hook-consumed
    message (`handled? = true`) does not wake. Legacy rows have no origin attr
    — treat absent origin as waking (those predate :core, all human/agent)."
@@ -487,25 +434,20 @@
    resets state to :idle (transact is upsert-by-unique-id) and NEVER
    re-seeds — a resumed agent keeps its own purpose and sections. A
    GENUINELY NEW entity gets `:seon.agent/purpose` ONLY when the human
-   stated one; otherwise the attr stays ABSENT (optional = absent)
-   until the agent derives a purpose and transacts it — the
-   derive-your-purpose teaching lives in the `<your-entity>` context
-   render (seon.ctx/your-entity-section), NEVER in the stored value:
-   the welcome tile shows purpose verbatim to the CUSTOMER, so
-   agent-directed instruction text must not masquerade as data
-   (chat-surface task #29, a23). Purpose is ENTITY DATA rendered by
-   the `<your-entity>` section (context-v4 §2.5 — the old
-   `:purpose`/`:your-sections` seed sections died with it).
-   `:seon.agent/turns-cap`, when given, is transacted onto the entity
-   (it only WORKS as entity data — see `seon.ctx/turns-cap`); absent
-   leaves the stored cap unchanged.
+   stated one; otherwise the attr stays ABSENT (optional = absent) until
+   the agent derives a purpose and transacts it. Purpose is ENTITY DATA
+   rendered by the your-entity context section, never agent-directed
+   instruction text — the welcome tile shows it verbatim to the customer.
+   `:seon.agent/max-turns-per-loop`, when given, is transacted onto the
+   entity (the FSM loop reads it as the base per-loop cap); absent leaves
+   the stored cap unchanged.
 
    Returns `{:seon.agent/id id}` on success; on a FAILED transact the
    db error envelope (`{:seon.db/ok? false :seon.db/error …}`) comes
    back as-is — errors are values, the same contract as
    `seon.agent.message/message!`. A failed create means NO agent
    entity; callers must branch instead of chasing a ghost."
-  [{:seon.agent/keys [id purpose turns-cap]}]
+  [{:seon.agent/keys [id purpose max-turns-per-loop]}]
   (let [fresh? (nil? (db/entity {:seon.db/ref [:seon.agent/id id]}))
         res    (await (db/transact!
                         {:seon.db/tx-data
@@ -515,8 +457,8 @@
                                  (string? purpose)
                                  (not (str/blank? purpose)))
                             (assoc :seon.agent/purpose purpose)
-                            (some? turns-cap)
-                            (assoc :seon.agent/turns-cap turns-cap))]}))]
+                            (some? max-turns-per-loop)
+                            (assoc :seon.agent/max-turns-per-loop max-turns-per-loop))]}))]
     (if (false? (:seon.db/ok? res))
       ;; Surface-errors-loudly AND return the failure: a success-shaped
       ;; map after a failed transact is a dishonest record.
@@ -527,15 +469,11 @@
       {:seon.agent/id id})))
 
 ;; ============================================================
-;; Boot. The single entry point seon.client calls at startup.
-;;
-;; V0 hardcoded `default-id` / `default-ns` removed 2026-05-24 (audit P1
-;; — see docs/prds/agent-runtime/research/schema-state-architecture-audit
-;; -2026-05-23.md §2). Multi-agent v1 needs agent identity to flow via
-;; the `seon.db/agent-id-als` core, not via process-global atoms.
-;; Callers (seon.client/start-agent!) now mint the id locally and wrap
-;; the boot pipeline in `(seon.db/with-agent id …)`. The home-ns stays
-;; deterministic via `(home-ns id)`.
+;; Boot. The single entry point seon.client calls at startup. Agent
+;; identity flows via the `seon.db/agent-id-als` scope, not process-global
+;; atoms: the caller (seon.client/start-agent!) mints the id locally and
+;; wraps the boot pipeline in `(seon.db/with-agent id …)`. The home-ns
+;; stays deterministic via `(home-ns id)`.
 ;; ============================================================
 
 (defn ^:async boot!
@@ -567,14 +505,12 @@
          :seon.agent/ns (home-ns id)}))))
 
 ;; ============================================================
-;; message! — moved to seon.agent.message (P6 split, 2026-06-10) so the
-;; keyword namespace matches the code namespace. Re-exported on the face
-;; (the agent-taught call surface is seon.agent/message!). `reply!` is
-;; DELETED (agent-fsm redesign U2) — the agent-facing messaging verbs are
-;; now seon.agent.message/user + /agent via the `message/` alias. Same
-;; caveat as the ctx aliases above — a def alias captures the fn value at
-;; load time (pre-instrumentation); call seon.agent.message/* directly for
-;; the validated entry point.
+;; message! lives in [[seon.agent.message]] (the keyword namespace matches
+;; the code namespace). Re-exported here so `seon.agent/message!` resolves;
+;; the agent-facing messaging verbs are `seon.agent.message/user` + `/agent`
+;; via the `message/` alias. Same caveat as the ctx aliases above — a def
+;; alias captures the fn value at load time (pre-instrumentation); call
+;; `seon.agent.message/*` directly for the validated entry point.
 ;; ============================================================
 
 (def message! msg/message!)
@@ -656,8 +592,8 @@
 ;; Layout verbs — reset-ctx! restores core defaults; update-ctx!
 ;; threads f over the current :seon.agent/ctx and retract-then-adds
 ;; the result. Component-cardinality-many means the retract is needed
-;; to drop the old ctx entities before transacting new ones (per
-;; v1.md §5.4 — cardinality-many ref attrs accumulate on upsert).
+;; to drop the old ctx entities before transacting new ones (cardinality-
+;; many ref attrs accumulate on upsert).
 ;; ------------------------------------------------------------
 
 
@@ -668,8 +604,7 @@
    `assemble-context` falls back to the CODE default
    (`core-default-ctx`) — so the agent tracks every future layout
    change automatically instead of freezing a stored copy of today's
-   default (the pre-2026-06-10 behavior, which left prior agents on
-   stale layouts whenever the default evolved)."
+   default."
   [agent-id]
   (await (db/transact!
            {:seon.db/tx-data
@@ -691,14 +626,12 @@
                 :seon.agent/ctx new-ctx}]}))))
 
 ;; ============================================================
-;; Self-context verbs (agent-self-context spec, 2026-06-10) — the
-;; validated path onto YOUR OWN `:seon.agent/ctx` sections. Same
-;; envelope discipline as seon.agent.todo: errors are values; blank
-;; text is refused with a guiding message; unknown name on remove
-;; names the current section list. Default scope = the calling agent;
-;; explicit :seon.agent/id allowed (a human or another agent can
-;; configure an agent — it is all just transacts; the verb is the
-;; validated path).
+;; Self-context verbs — the validated path onto YOUR OWN
+;; `:seon.agent/ctx` sections. Errors are values; blank text is refused
+;; with a guiding message; unknown name on remove names the current
+;; section list. Default scope = the calling agent; explicit
+;; :seon.agent/id allowed (a human or another agent can configure an
+;; agent — it is all just transacts; the verb is the validated path).
 ;; ============================================================
 
 (schema/register! ::add-section-request
@@ -833,9 +766,9 @@
 
 (defn ^:async set-purpose!
   "Pin or update why you exist — sugar over a one-attr transact to
-   your own entity (`:seon.agent/purpose`, rendered every turn in
-   `<your-entity>`). Equivalent to the lookup-ref transact the
-   creation tutorial demonstrates."
+   your own entity (`:seon.agent/purpose`, rendered every turn in your
+   entity section). Equivalent to the lookup-ref transact the creation
+   tutorial demonstrates."
   {:malli/schema [:=> [:cat [:map
                              [:seon.render/ai :string]
                              [:seon.agent/id {:optional true} :string]]]

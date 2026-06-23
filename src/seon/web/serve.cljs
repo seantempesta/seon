@@ -191,14 +191,13 @@
                                :remaining (count @!sse-connections)})))))
 
 ;; ============================================================
-;; POST /chat — inject a :user message into the named agent's log.
-;; The agent's user-message trigger (seon.agent/install-user-trigger!)
-;; fires on the resulting tx, run-agentic-loop! starts, the LLM
-;; responds, broadcast morphs the tile via SSE.
+;; POST /chat — inject a user message into the named agent's log.
+;; The message tx wakes the agent's loop; it runs a turn, the LLM
+;; responds, and the inspector morphs the view via SSE.
 ;;
 ;; Body is application/x-www-form-urlencoded (Datastar's
 ;; `@post('/chat', {contentType:'form'})` posts FormData). `agent` is
-;; in the query string (defaults to "seon").
+;; in the query string.
 ;; ============================================================
 
 (defn- read-body
@@ -446,7 +445,7 @@
                                     (do
                                       (log/info-console! "seon.web.serve" "POST /chat"
                                                          {:agent agent-id :text-len (count text)})
-                                      ;; #49 observability — a DISTINCT intake
+                                      ;; A DISTINCT intake
                                       ;; line per accepted message (the generic
                                       ;; POST log above only records text-len).
                                       ;; Carries the durable message id + hops so

@@ -12,12 +12,11 @@
     [seon.db :as db]))
 
 (defn your-entity-section
-  "The agent's OWN entity as a pretty-printed MAP (context-v4 §2.5):
-   purpose, tile wiring, registered sections, lifecycle attrs, and any
-   self-instructions the agent has written to itself. Replaces the
-   `:purpose` and `:your-sections` seed sections — identity is data
-   you look at, and editing it is a transact to the map you are
-   looking at (the startup evals demonstrate the lookup-ref move).
+  "The agent's OWN entity as a pretty-printed MAP: purpose, tile wiring,
+   registered sections, lifecycle attrs, and any self-instructions the
+   agent has written to itself. Identity is data you look at, and editing
+   it is a transact to the map you are looking at (the startup evals
+   demonstrate the lookup-ref move).
 
    Renders the ONCE-pulled composer entity (`:seon.agent/entity` in
    the section input) with the render slots and ctx sections
@@ -35,7 +34,7 @@
                     (update :seon.render.live-tile/content
                             #(db/decode-edn-value
                                :seon.render.live-tile/content %)))]
-      (str "<your-entity>\n"
+      (str ";; ── your entity ──\n"
            ";; YOUR OWN ENTITY in the shared store, re-pulled every turn.\n"
            ";; Transact to it by lookup ref — e.g.\n"
            ";;   (seon.db/transact! [{:seon.db/ref [:seon.agent/id \"" id "\"]\n"
@@ -44,13 +43,12 @@
            ";; standing instructions to yourself here; this map IS you.\n"
            ;; Derive-your-purpose teaching — CONTEXT, not stored data:
            ;; the welcome tile renders :seon.agent/purpose verbatim to
-           ;; the customer, so the instruction lives here and only
-           ;; while the attr is absent (self-healing: the agent's own
-           ;; transact makes this line vanish). Chat-surface #29, a23.
+           ;; the human, so the instruction lives here and only while the
+           ;; attr is absent (self-healing: the agent's own transact makes
+           ;; this line vanish).
            (when (nil? (:seon.agent/purpose entity))
              (str ";; Your :seon.agent/purpose is UNSET. Derive it from your\n"
                   ";; human's first messages, then transact it onto your own\n"
                   ";; entity (the lookup-ref move above) so you keep your\n"
                   ";; direction — your human sees it as your tile's headline.\n"))
-           (str/trimr (with-out-str (pprint/pprint decoded)))
-           "\n</your-entity>"))))
+           (str/trimr (with-out-str (pprint/pprint decoded)))))))

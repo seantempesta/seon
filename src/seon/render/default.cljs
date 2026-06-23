@@ -12,12 +12,8 @@
    - Read helpers (`recent-messages`, `recent-errors`) used by `view`
      and the inspector.
 
-   The agent's PROMPT is NOT composed here: the live default
-   `:seon.render/ai` path is `seon.agent/assemble-context`, whose
-   section layout is `seon.agent/core-default-ctx`. The old `ctx`
-   composer and its fragment helpers were deleted 2026-06-09 (unit 1.3)
-   after their teaching content was folded into the live sections
-   (`seon.agent/system-section`, `seon.agent/prompt-section`).
+   This namespace renders the tile and reads the message log; it does
+   NOT compose the agent's prompt (that is `seon.ctx`'s job).
 
    ## Independent of seon.agent
 
@@ -106,11 +102,7 @@
    - `→ agent-<id>`   — this agent → a peer (outgoing peer)
 
    Rows from me whose `to` contains NEITHER the user NOR another agent
-   (i.e. agent → self) are the per-turn transcript SELF-messages — raw
-   LLM output logged for the turn record, not conversation — and are
-   EXCLUDED here (observed live 2026-06-11, kXQ root tile: a self
-   row of raw eval source rendered as the agent's \"last reply\"
-   because the pre-fix query ignored `to` entirely)."
+   (i.e. agent → self) are not conversation and are EXCLUDED here."
   ([db id] (recent-messages db id 20))
   ([db id n]
    (let [;; All reads via QUERY, not d/entity — the inspector hands
@@ -130,10 +122,8 @@
          ;; The from-ref's KIND resolves in Clojure against these two
          ;; eid→id maps, NOT via datalog `get-else` — on datahike-cljs
          ;; get-else's default branch never fires (rows whose ?f lacks
-         ;; the attr are DROPPED, not defaulted), which silently
-         ;; filtered every agent-from message out of the conversation
-         ;; (observed live 2026-06-11, live-tiles U2: assistant replies
-         ;; existed in the store but never rendered).
+         ;; the attr are DROPPED, not defaulted), which would silently
+         ;; filter every agent-from message out of the conversation.
          users  (into {} (q '[:find ?f ?uid :where [?f :seon.user/id ?uid]]))
          agents (into {} (q '[:find ?f ?aid :where [?f :seon.agent/id ?aid]]))
          rows   (when my-eid
@@ -150,8 +140,8 @@
          ;; to-refs per message eid — `to` is cardinality-many, so this
          ;; query yields one row per (message, to-ref); fold into sets.
          ;; Direction needs it: from=me alone can't tell a real reply
-         ;; (to ∋ user) from transcript self-narration (to = [me]) from
-         ;; an outgoing peer send (to ∋ other agent).
+         ;; (to ∋ user) from an agent → self row (to = [me]) from an
+         ;; outgoing peer send (to ∋ other agent).
          tos    (when (seq rows)
                   (reduce (fn [acc [m t]] (update acc m (fnil conj #{}) t))
                           {}
@@ -209,10 +199,8 @@
 (defn ^:no-doc agent-turn-count
   "Derived turn count for an agent ENTITY: the number of
    `:seon.agent.session/turns` in its most-recent session (by
-   `:seon.agent.session/at`). The stored `:seon.agent/turn-count` attr was
-   retired 2026-05-22 — this mirrors how `seon.agent/prompt-section`
-   derives `turn N` (count of current-session turns), without
-   requiring `seon.agent` (would close the dependency cycle)."
+   `:seon.agent.session/at`). Derived here rather than requiring
+   `seon.agent` (which would close the dependency cycle)."
   [ent]
   (let [session (last (sort-by :seon.agent.session/at (:seon.agent/sessions ent)))]
     (count (:seon.agent.session/turns session))))
@@ -249,8 +237,7 @@
       ;; `(for …)` lazy seqs — `seon.render.live-tile/valid-hiccup?`
       ;; (the render-boundary validator) accepts only
       ;; string/int/nil/vector children, so a lazy-seq child makes
-      ;; instrumentation reject the whole tile (2026-06-09 inspector
-      ;; tile-missing bug).
+      ;; instrumentation reject the whole tile.
       (when (seq errs)
         (into [:section {:class "flex flex-col gap-1 border border-error/40 bg-error/10 rounded p-2"}]
               (map (fn [e]

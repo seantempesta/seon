@@ -1,52 +1,47 @@
 (ns seon.ctx
-  "Context generation — the v4 composer (context-v4-repl-realism
-   2026-06-11): the prompt IS a REPL session. One static `<system>`
-   header, ALL the loaded namespaces as the body (`<namespace>` tags,
-   recency-ordered), the agent's own entity as a map, what the human
-   currently sees, the reactive warnings/todos, the threaded
-   transcript of PAST turns (each `<turn>` carries its woken-by `<user>`
-   + REPL-faithful evals), and a status line +
-   clean REPL prompt. Layout is ordered top→bottom = static→volatile:
-   everything above `<warnings>` is the provider-cacheable prefix.
+  "Context generation — the ONE composer. The prompt IS a REPL session:
+   a static system header, the loaded namespaces as the body, the
+   agent's own entity as a map, what the human currently sees, the
+   reactive warnings/todos, and the comment-block transcript of past
+   turns + the live readline. Layout is ordered top→bottom =
+   static→volatile: everything through `:namespaces` is the
+   provider-cacheable prefix.
 
    This namespace owns:
      - the `:seon.ctx/*` section schemas (`:seon.ctx/name`,
        `:seon.ctx/priority`, the `:seon.ctx/section` map shape). The
        one slot attr is `:seon.render/ai` (string = verbatim doctrine,
        symbol = late-bound section fn); `:seon.render/html` is the
-       optional debug-view twin (§2.8b).
-     - `assemble-context` — the ONE composer. Core default
-       sections MERGED with the agent's own `:seon.agent/ctx` sections
-       by one priority sort (override-by-name). Render guard (a broken
-       section renders an inline error line, never breaks assembly)
-       and the per-agent section char budget live here.
+       optional debug-view twin.
+     - `assemble-context` — the ONE composer. Core default sections
+       MERGED with the agent's own `:seon.agent/ctx` sections by one
+       priority sort (override-by-name). Render guard (a broken section
+       renders an inline error line, never breaks assembly) and the
+       per-agent section char budget live here.
      - the namespace-display selection rules live in their rightful
-       home [[seon.ctx.namespaces]] now:
+       home [[seon.ctx.namespaces]]:
        [[seon.ctx.namespaces/included-ns?]] (the ONE structural rule —
        EVERY indexed `:seon.ns` row renders EXCEPT *.internal and *-test
-       ones; no prefix allow-list, the library gate lives on the INDEX
-       side — `seon.indexing/first-party-file?`) and
+       ones; the library gate lives on the INDEX side) and
        [[seon.ctx.namespaces/full-source-ns?]] (which rows the boot
        indexer inlines real file text for).
-     - the `:system` section (system-text / system-section — kept here
-       as a byte-stable shared artifact) and the derived read API every
+     - the `:system` section (system-text / system-section — a
+       byte-stable shared artifact) and the derived read API every
        section shares (messages / evals / session-evals / current-ns /
-       turns-since-inbound / format-eval-row / the eval-render caps /
-       …) — every read takes the composer's `:seon.db/db` snapshot so
-       one render is one db view. The OTHER core sections now live in
-       their own `seon.ctx.<name>` nses (ctx-sections-split-2026-06-18):
-       :namespaces → `seon.ctx.namespaces`, :your-entity →
-       `seon.ctx.your-entity`, :live-tile → `seon.ctx.live-tile`,
-       :warnings → `seon.ctx.warnings`, :transcript →
-       `seon.ctx.transcript`, :inventory → `seon.ctx.inventory`,
-       :prompt → `seon.ctx.prompt`; `core-default-ctx` wires them by
-       SYMBOL (late lookup-value resolution), so this ns does NOT
-       require them — they require this ns for the shared read API.
+       effective-cap / format-eval-row / the eval-render caps / …) —
+       every read takes the composer's `:seon.db/db` snapshot so one
+       render is one db view. The other core sections live in their own
+       `seon.ctx.<name>` nses: :namespaces → `seon.ctx.namespaces`,
+       :your-entity → `seon.ctx.your-entity`, :live-tile →
+       `seon.ctx.live-tile`, :warnings → `seon.ctx.warnings`,
+       :inventory → `seon.ctx.inventory`, :relevant-source →
+       `seon.ctx.relevant`, :transcript → `seon.ctx.transcript`;
+       `core-default-ctx` wires them by SYMBOL (late lookup-value
+       resolution), so this ns does NOT require them — they require this
+       ns for the shared read API.
      - `render-namespace` — the standalone whole-namespace render
        (ns + fns + schemas + tests, :ai or :html), an agent-callable
-       core capability the `<system>` prompt documents by name; kept
-       here (not in `seon.ctx.namespaces`) so `seon.ctx/render-namespace`
-       stays the stable entry point.
+       core capability the system prompt documents by name.
 
    Section fns receive ONE map:
      {:seon.db/db        <db value>
@@ -55,9 +50,8 @@
       :seon.ctx/section  <this section's map>} ; per-section overrides
    and return a string; \"\" suppresses the section.
 
-   seon.agent requires this ns and re-exports the agent-taught read
-   API (seon.agent/messages …) as transitional aliases; the P6
-   agent.cljs split finishes the relocation."
+   seon.agent requires this ns and re-exports the agent-facing read API
+   (seon.agent/messages …)."
   (:require
     [clojure.string :as str]
     [cljs.reader :as edn]
@@ -114,20 +108,73 @@
    [:seon.render/ai    :seon.render/ai]
    [:seon.render/html  {:optional true} :seon.render/html]])
 
-(def default-turns-cap 20)
+(def default-max-turns-per-loop
+  "Base per-loop turn cap when the agent has no
+   `:seon.agent/max-turns-per-loop` attr and `SEON_MAX_TURNS_PER_LOOP`
+   is unset. Mirrors `seon.agent.fsm/default-max-turns-per-loop`."
+  20)
 
-(defn turns-cap
-  "Read `:seon.agent/turns-cap` from the agent entity. Returns the
-   configured cap or `default-turns-cap` when the attr is absent.
-   Use this at every cap-check site so the agent can override the
-   default by transacting its own value. Optional `db` value (the
-   composer's snapshot); defaults to the live conn."
-  ([agent-id] (turns-cap agent-id nil))
+(defn effective-cap
+  "The ENFORCED sliding-window per-loop cap the readline/turn-headers
+   display — base cap + every inbound (human or peer) that has landed
+   this wake. Mirrors `seon.agent.fsm/effective-cap`, recomputed here
+   from the composer's db value (requiring `seon.agent.fsm` would cycle:
+   fsm → seon.agent → seon.ctx). Base = `:seon.agent/max-turns-per-loop`
+   on the entity, else env `SEON_MAX_TURNS_PER_LOOP`, else
+   [[default-max-turns-per-loop]]. Optional `db` snapshot.
+
+   The inbound window is bounded by the first turn stamped with the
+   current wake (`:seon.agent.turn/wake`); before any turn this wake the
+   window is empty and the cap is the base alone."
+  ([agent-id] (effective-cap agent-id nil))
   ([agent-id db]
-   (or (:seon.agent/turns-cap
-         (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
-                           db (assoc :seon.db/db db))))
-       default-turns-cap)))
+   (let [db    (or db @db/*conn*)
+         a     (db/entity-lazy {:seon.db/db db
+                                :seon.db/ref [:seon.agent/id agent-id]})
+         base  (or (:seon.agent/max-turns-per-loop a)
+                   (some-> (.. js/process -env -SEON_MAX_TURNS_PER_LOOP)
+                           js/parseInt
+                           (#(when-not (js/isNaN %) %)))
+                   default-max-turns-per-loop)
+         wake  (:seon.agent/wake a)
+         my-eid (:db/id a)
+         since (when (and wake my-eid)
+                 (->> (db/query
+                        {:seon.db/db db
+                         :seon.db/query
+                         '[:find ?at
+                           :in $ ?aid ?wake
+                           :where
+                           [?a :seon.agent/id ?aid]
+                           [?a :seon.agent/sessions ?s]
+                           [?s :seon.agent.session/turns ?t]
+                           [?t :seon.agent.turn/wake ?wake]
+                           [?t :seon.agent.turn/at ?at]]
+                         :seon.db/args [agent-id wake]})
+                      (map first)
+                      (sort-by #(.getTime ^js %))
+                      first))
+         inbounds (if (and my-eid since)
+                    (or (ffirst
+                          (db/query
+                            {:seon.db/db db
+                             :seon.db/query
+                             '[:find (count ?m)
+                               :in $ ?me ?cap ?since
+                               :where
+                               [?m :seon.agent.message/to ?me]
+                               [?m :seon.agent.message/from ?f]
+                               [(not= ?f ?me)]
+                               [(get-else $ ?m :seon.agent.message/hops 0) ?h]
+                               [(< ?h ?cap)]
+                               [(get-else $ ?m :seon.agent.message/origin :human) ?o]
+                               [(not= ?o :core)]
+                               [?m :seon.agent.message/at ?at]
+                               [(>= (.getTime ?at) (.getTime ?since))]]
+                             :seon.db/args [my-eid warn/hop-cap since]}))
+                        0)
+                    0)]
+     (+ base inbounds))))
 
 (defn home-ns
   "Return the deterministic home-ns symbol for an agent id.
@@ -138,9 +185,9 @@
 (defn current-session
   "Most-recent `:seon.agent.session` entity for `agent-id`. Returns nil if
    the agent has no sessions yet (fresh boot before `start-session!`).
-   Optional `db` value (the composer's snapshot) — the run-3 bug class
-   fix: section fns must read the SAME db value the composer renders
-   from, never reach back to the live conn mid-render."
+   Optional `db` value (the composer's snapshot): section fns read the
+   SAME db value the composer renders from, never reaching back to the
+   live conn mid-render."
   ([agent-id] (current-session agent-id nil))
   ([agent-id db]
    (let [a (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
@@ -201,37 +248,38 @@
          (catch :default _ nil))))
 
 (def eval-render-cap
-  "Per-eval rendered-result char cap for the transcript context section.
-   Context-SAFETY invariant: no single eval's result may dominate the
-   agent's whole context. One 9.7M-char `pull` result used to blow
-   render-prompt to ~9.8M chars; capping each rendered result here keeps
-   `transcript-section` bounded regardless of how large any individual
-   `:seon.eval/result-edn` blob is."
-  1500)
+  "Char cap for the echoed SOURCE and captured STDOUT components of one
+   eval row — neither is dereferenceable via `result/<id>`, so a large one
+   is context-wasting noise. The citable RESULT BODY gets the larger
+   [[result-body-render-cap]] instead. Context-SAFETY invariant: no single
+   eval component may dominate the agent's whole context (one 9.7M-char
+   `pull` result once blew the prompt to ~9.8M chars). Override via env
+   SEON_EVAL_RENDER_CAP."
+  (or (some-> (.. js/process -env -SEON_EVAL_RENDER_CAP)
+              js/parseInt
+              (#(when-not (js/isNaN %) %)))
+      1500))
 
 (def result-body-render-cap
-  "Per-eval render cap for the CITABLE RESULT BODY — the `=> <value>`
-   line every successful eval renders (`cap-result-body`). The result
-   body alone gets this LARGER cap (vs `eval-render-cap` for echoed
-   source + stdout) because it is the one component that (a) is the #53
-   symptom — a stored ≤16384 value clipped mid-value at 1500 drove
-   needless re-queries; (b) carries a `result/<id>` escape, so an
-   over-cap body still points the agent at the whole live value; and
-   (c) is already row-capped at 50 elements upstream
-   (`seon.eval/render-result-edn`), so a 16384-char body is STRUCTURED,
-   not a wall of text.
+  "Render cap for the CITABLE RESULT BODY — the `;;=> <value>` line every
+   successful eval renders (`cap-result-body`). The result body alone gets
+   this LARGER cap (vs [[eval-render-cap]] for echoed source + stdout)
+   because it is the one component that (a) carries a `result/<id>`
+   escape, so an over-cap body still points the agent at the whole live
+   value; and (b) is already row-capped at 50 elements upstream
+   (`seon.eval/render-result-edn`), so a body this size is STRUCTURED, not
+   a wall of text.
 
    16384 currently EQUALS `seon.eval/store-edn-cap`, so a stored result
-   renders WHOLE — but this is a CROSS-REFERENCE, NOT an alias. The
-   render cap (an LLM-facing read-time projection) and `store-edn-cap`
-   (the write-time per-datom anti-OOM RAM ceiling) are different
-   three-tier-storage tiers: this one is independently tunable down for
-   token economy WITHOUT moving the RAM ceiling, or store-edn-cap up
-   without enlarging the LLM-facing render. Echoed source (`form-ln`)
-   and captured stdout (`out-ln`) stay at the smaller [[eval-render-cap]]
-   — neither is dereferenceable via `result/<id>`, so a large one is
-   context-wasting noise that would crowd the 24000 transcript budget."
-  16384)
+   renders WHOLE — but this is a CROSS-REFERENCE, NOT an alias. The render
+   cap (an LLM-facing read-time projection) and `store-edn-cap` (the
+   write-time per-datom anti-OOM RAM ceiling) are different tiers: this
+   one is independently tunable down for token economy WITHOUT moving the
+   RAM ceiling. Override via env SEON_RESULT_BODY_RENDER_CAP."
+  (or (some-> (.. js/process -env -SEON_RESULT_BODY_RENDER_CAP)
+              js/parseInt
+              (#(when-not (js/isNaN %) %)))
+      16384))
 
 (defn cap-result
   "Truncate a rendered eval-result string to `eval-render-cap`,
@@ -253,12 +301,15 @@
        s))))
 
 (def message-render-cap
-  "Per-message rendered-content char cap for a `<user>`/`<from>` line in
-   the threaded transcript: each woken-by message must be individually
-   bounded or a single pasted blob could blow the context. 4000 (≈1k
-   tokens) keeps any realistic chat turn whole; the full content stays in
-   the db ((seon.agent/messages))."
-  4000)
+  "Per-message rendered-content char cap for a `;;; ◀ from X` inbound line
+   in the transcript: each inbound message must be individually bounded or
+   a single pasted blob could blow the context. 4000 (≈1k tokens) keeps
+   any realistic chat turn whole; the full content stays in the db
+   ((seon.agent/messages)). Override via env SEON_MESSAGE_RENDER_CAP."
+  (or (some-> (.. js/process -env -SEON_MESSAGE_RENDER_CAP)
+              js/parseInt
+              (#(when-not (js/isNaN %) %)))
+      4000))
 
 (defn cap-result-body
   "Like `cap-result`, but for an eval RESULT body specifically: when the
@@ -422,13 +473,13 @@
               (map #(str ";; " (strip-marker %)) (rest lines)))))))
 
 (defn format-eval-row
-  "REPL-faithful render of one eval (agent-fsm-redesign-2026-06-23 §2):
-   the form's comment-preamble as literal `;;` lines, the form verbatim
-   (or the parinfer-repaired source), captured print output, then the
-   value as a `;;=> <value>` COMMENTED output line trailing ` ;; result/<id>`
-   (or the error as a `;;=> ✗ <guidance>` line). NO `<eval>` tag and NO
-   `<ns>=>` history prompt prefix — the live `<your-ns>=>` cursor lives
-   once at the very END of the context; each row reads as plain
+  "REPL-faithful render of one eval: the form's comment-preamble as
+   literal `;;` lines, the form verbatim (or the parinfer-repaired
+   source), captured print output, then the value as a `;;=> <value>`
+   COMMENTED output line trailing ` ;; result/<id>` (or the error as a
+   `;;=> ✗ <guidance>` line). NO history prompt prefix — the live
+   `<your-ns>=>` cursor lives once at the very END of the context; each
+   row reads as plain
    comments + form + commented REPL output, the exact shape the system
    prompt teaches.
 
@@ -457,19 +508,19 @@
    Render caps SPLIT BY COMPONENT (context-SAFETY invariant — agent
    code can return literally anything): echoed source (`form-ln`) and
    captured stdout (`out-ln`) cap at the smaller [[eval-render-cap]]
-   (1500 — neither is dereferenceable via `result/<id>`, so a large one
-   is just context-wasting noise), while the CITABLE RESULT BODY caps at
-   the larger [[result-body-render-cap]] (16384 = the store ceiling, so
-   a stored result renders WHOLE — it is the one row-capped,
+   (neither is dereferenceable via `result/<id>`, so a large one is just
+   context-wasting noise), while the CITABLE RESULT BODY caps at the
+   larger [[result-body-render-cap]] (the store ceiling, so a stored
+   result renders WHOLE — it is the one row-capped,
    `result/<id>`-dereferenceable component). Error/guidance bodies stay
    at [[eval-render-cap]] (a failure has no value to cite).
 
-   On SUCCESS a reactive 'won't persist' note (#7) is DERIVED from the
-   eval's source via [[seon.eval/scratch-def-note]] and appended as a
-   trailing `;;` line — pure, no stored attr, recomputed each render so
-   it FOLLOWS the form. The repair `↻ auto-balanced …` breadcrumb (when
-   a span was parinfer-repaired) rides in the preamble, keeping a
-   wrong-but-valid repair catchable."
+   On SUCCESS a reactive 'won't persist' note is DERIVED from the eval's
+   source via [[seon.eval/scratch-def-note]] and appended as a trailing
+   `;;` line — pure, no stored attr, recomputed each render so it FOLLOWS
+   the form. The repair `↻ auto-balanced …` breadcrumb (when a span was
+   parinfer-repaired) rides in the preamble, keeping a wrong-but-valid
+   repair catchable."
   ([row] (format-eval-row row false))
   ([{src        :seon.eval/source
      ok?        :seon.eval/ok?
@@ -593,14 +644,12 @@
 (defn messages
   "Last N messages of MY conversation, oldest-first. The conversation
    is DERIVED — `from = me OR to ∋ me` — never stored as a membership
-   attr (the retired per-message agent back-ref). Queries the
-   message log DIRECTLY, not via :seon.agent.session/turns → :seon.agent.turn/
-   messages (the turn-walk was the run-3 demo killer: standalone
-   inbound messages never attach to a turn). The from/to refs are
-   pulled with their id attrs so transcript labeling resolves by ref
-   kind. Default {:seon.agent/n 50}. Optional `:seon.db/db` — the
-   composer threads its render snapshot here so every section reads
-   the SAME db value (the run-3 bug class fix)."
+   attr. Queries the message log DIRECTLY (standalone inbound messages
+   never attach to a turn, so a turn-walk would miss them). The from/to
+   refs are pulled with their id attrs so transcript labeling resolves by
+   ref kind. Default {:seon.agent/n 50}. Optional `:seon.db/db` — the
+   composer threads its render snapshot here so every section reads the
+   SAME db value."
   ([] (messages {}))
   ([{:seon.agent/keys [n id] db :seon.db/db :or {n 50}}]
    (let [id     (resolve-id id)
@@ -639,9 +688,9 @@
 (defn session-evals
   "ALL :seon.eval entries for `agent-id`, oldest-first across ALL
    sessions, each tagged with its owning `:seon.agent.session/id` —
-   the transcript's cross-restart read (context-v4 §2.8: prior-session
-   evals render too, behind a resume boundary marker). Walks
-   agent → sessions → turns → evals. Optional `db` snapshot."
+   the transcript's cross-restart read (prior-session evals render too,
+   behind a resume boundary marker). Walks agent → sessions → turns →
+   evals. Optional `db` snapshot."
   [agent-id db]
   (let [a (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
                             db (assoc :seon.db/db db)))]
@@ -655,8 +704,7 @@
 
 (defn evals
   "Last N :seon.eval entries for the agent's current session,
-   oldest-first. Walks :seon.agent.session/turns → :seon.agent.turn/evals (Platform
-   migrated eval storage to this shape in commit 5786247).
+   oldest-first. Walks :seon.agent.session/turns → :seon.agent.turn/evals.
    Default {:seon.agent/n 20}. Optional `:seon.db/db` snapshot."
   ([] (evals {}))
   ([{:seon.agent/keys [n id] db :seon.db/db :or {n 20}}]
@@ -689,57 +737,6 @@
          latest (last (sort-by :seon.eval/at all-evals))]
      (or (:seon.eval/ns latest) (home-ns id)))))
 
-(defn turns-since-inbound
-  "Count of :seon.agent.turn entities in the agent's current session whose
-   :seon.agent.turn/at is strictly after the latest INBOUND message's :at —
-   a message with to ∋ me AND from ≠ me with a waking origin (∈
-   {:human :agent} — the user and other agents both reset the window; a
-   :core substrate nudge does NOT, #43). Drives `run-agentic-loop!`'s
-   cap policy. Derived from the message + turn log; nothing stored.
-   See docs/seon/concepts/reactive-context."
-  ([] (turns-since-inbound {}))
-  ([{:seon.agent/keys [id] db :seon.db/db}]
-   (let [id      (resolve-id id)
-         db      (or db @db/*conn*)
-         session (current-session id db)
-         turns   (:seon.agent.session/turns session)
-         ;; lookup refs are NOT auto-resolved in query args — bind the
-         ;; eid explicitly so the ref-valued ?me joins work.
-         my-eid  (:db/id (db/entity-lazy {:seon.db/db db
-                                          :seon.db/ref [:seon.agent/id id]}))
-         latest-inbound-at
-         (when my-eid
-           (->> (db/query
-                  {:seon.db/db db
-                   :seon.db/query
-                   '[:find (max ?at)
-                     :in $ ?me ?cap
-                     :where
-                     [?m :seon.agent.message/to ?me]
-                     [?m :seon.agent.message/from ?f]
-                     [(not= ?f ?me)]
-                     ;; hop-exhausted messages must NOT extend the loop:
-                     ;; without this filter two live agent loops reset
-                     ;; each other's window forever (the wake guard only
-                     ;; gates loop STARTS, not in-flight loops).
-                     [(get-else $ ?m :seon.agent.message/hops 0) ?h]
-                     [(< ?h ?cap)]
-                     ;; :core substrate nudges (tile recovery) must not
-                     ;; extend the loop either (#43) — mirrors the wake gate
-                     ;; and unanswered-live-inbound?. Legacy rows have no
-                     ;; origin ⇒ default :human.
-                     [(get-else $ ?m :seon.agent.message/origin :human) ?o]
-                     [(not= ?o :core)]
-                     [?m :seon.agent.message/at ?at]]
-                   :seon.db/args [my-eid warn/hop-cap]})
-                ffirst))]
-     (count
-       (if latest-inbound-at
-         (filter #(> (.getTime ^js (:seon.agent.turn/at %))
-                     (.getTime ^js latest-inbound-at))
-                 turns)
-         turns)))))
-
 (defn ctx-entities
   "Pull the agent's :seon.agent/ctx vector with each :seon.ctx entity
    inlined. Sorted by :seon.ctx/priority. Useful for inspection
@@ -763,20 +760,18 @@
 ;; ------------------------------------------------------------
 
 (def system-text
-  "The ONE universal `<system>` block (context-v4 §2.1) — the concept
-   paragraphs (a–h) plus the four standing behavioral teachings, and
-   nothing else. Usage teaching lives in the rendered namespace
-   sources (docstrings + `;;` comments) and the startup tutorial
-   evals, never here.
+  "The ONE universal system block — the concept paragraphs plus the
+   standing behavioral teachings, and nothing else. Usage teaching lives
+   in the rendered namespace sources (docstrings + `;;` comments) and the
+   startup tutorial evals, never here.
 
-   BYTE-IDENTICAL for every agent and every turn — a `def`, not a fn
-   of the agent: the agent id lives in the status line at the very
-   END of the prompt (§2.9), so this block is one shared cacheable
-   artifact across the whole cluster. CACHE-PREFIX invariant: no
-   timestamps, no ids, no counts — anything volatile lives in
-   `prompt-section`. PROVIDER-NEUTRAL: no model or vendor words, ever."
+   BYTE-IDENTICAL for every agent and every turn — a `def`, not a fn of
+   the agent: the agent id lives in the transcript readline at the very
+   END of the prompt, so this block is one shared cacheable artifact
+   across the whole cluster. CACHE-PREFIX invariant: no timestamps, no
+   ids, no counts. PROVIDER-NEUTRAL: no model or vendor words, ever."
   (str
-    "<system>\n"
+    ";; ── system ───────────────────────────────────────────────────\n"
     "You are at a live Clojure REPL on one human's runtime. The REPL is\n"
     "your only tool: everything you do — read, compute, store, reply,\n"
     "render — is a Clojure form evaluated here. It is ClojureScript in a\n"
@@ -908,7 +903,7 @@
     "                   :where [?e :my.kb.doc/id ?id] [?e :my.kb.doc/title ?t]] \"d1\")\n"
     "  ;; Logic vars (?e ?t) stay symbols ONLY inside the quoted '[…]\n"
     "  ;; vector; an empty #{} usually means a misspelled attr — copy the\n"
-    "  ;; keyword EXACTLY from <inventory> or the register! form.\n"
+    "  ;; keyword EXACTLY from the stored-data inventory or the register! form.\n"
     "\n"
     "  ;; PULL / ENTITY — by lookup ref [identity-attr value] or :db/id.\n"
     "  (seon.db/pull '[*] [:my.kb.doc/id \"d1\"])   ; {:db/id … :my.kb.doc/title …}\n"
@@ -934,7 +929,7 @@
     "\n"
     "STANDING TEACHINGS:\n"
     "- Consult stored knowledge FIRST — it is DISCOVERABLE, not dumped:\n"
-    "  <inventory> lists every stored KIND + its attrs (run\n"
+    "  the stored-data inventory lists every stored KIND + its attrs (run\n"
     "  (seon.db/store-inventory) — your creation turn already did), so\n"
     "  you READ the rows by QUERYING rather than from a wall of text.\n"
     "  Datalog the existing attrs for\n"
@@ -957,7 +952,7 @@
     "- A task with 2+ steps: mint one todo per step with\n"
     "  seon.agent.todo/add! BEFORE you start, and complete! each id as\n"
     "  the step lands. Your open todos render every turn with their\n"
-    "  ids; an empty <open-todos> section is your done-signal.\n"
+    "  ids; once none remain, that section vanishes — your done-signal.\n"
     "- Your messages render as markdown on your human's screen — use\n"
     "  structure when it helps (short headings, lists, code fences for\n"
     "  code or data); plain prose otherwise.\n"
@@ -1015,10 +1010,10 @@
     "  (a :my.kb/source) and HOW SURE you are (a :my.kb/confidence). A\n"
     "  guess stored as fact is worse than no fact — the next agent\n"
     "  cannot read your certainty from your phrasing.\n"
-    "</system>"))
+    ";; ─────────────────────────────────────────────────────────────"))
 
 (defn system-section
-  "The universal `<system>` header — returns [[system-text]] verbatim.
+  "The universal system header — returns [[system-text]] verbatim.
    A fn only because sections render through the symbol slot; it takes
    the standard section input and ignores it (byte-identical for every
    agent and turn — the whole point)."
@@ -1192,13 +1187,15 @@
 
    `detail` (default `:full`) selects the depth of each fn body and the
    shape of the whole block:
-     - `:full`      — the ns's `(ns …)` SOURCE plus every fn (full source
-                      when small), schema, and test. The whole-ns view —
-                      the agent's own / my.* / acme / current code.
-     - `:signature` — a `kind=\"signatures\"` tag carrying ONLY each fn's
-                      SIGNATURE (header + flags + one-line doc, bodies
-                      elided). No ns source, no schemas, no tests — the
-                      public-API manifest view of a framework ns."
+     - `:full`      — a `;; ── namespace x ──` header, the ns's `(ns …)`
+                      SOURCE plus every fn (full source when small),
+                      schema, and test. The whole-ns view — the agent's
+                      own / my.* / acme / current code.
+     - `:signature` — a `;; ── namespace x (signatures) ──` header
+                      carrying ONLY each fn's SIGNATURE (header + flags +
+                      one-line doc, bodies elided). No ns source, no
+                      schemas, no tests — the public-API manifest view of
+                      a framework ns."
   ([ns-kw data] (render-one-ns-ai ns-kw data :full))
   ([ns-kw data detail]
    (if (nil? data)
@@ -1211,11 +1208,10 @@
          ;; manifest view: public fn signatures only, bodies elided.
          (let [pub  (remove :seon.fn/private? fns)
                sigs (map #(fn-block-ai % :signature) pub)]
-           (str "<namespace name=\"" (name ns-kw) "\" kind=\"signatures\">\n"
+           (str ";; ── namespace " (name ns-kw) " (signatures) ──\n"
                 (if (seq sigs)
                   (str/join "\n\n" sigs)
-                  ";; (no public fns indexed yet — query by name)")
-                "\n</namespace>"))
+                  ";; (no public fns indexed yet — query by name)")))
          ;; full view: ns source + every member.
          (let [body (cond-> []
                       (and src (not (str/blank? src)))
@@ -1226,9 +1222,8 @@
                       (into (map schema-block-ai schemas))
                       (seq tests)
                       (into (map test-block-ai tests)))]
-           (str "<namespace name=\"" (name ns-kw) "\">\n"
-                (if (seq body) (str/join "\n\n" body) ";; (no recorded source/fns/schemas)")
-                "\n</namespace>")))))))
+           (str ";; ── namespace " (name ns-kw) " ──\n"
+                (if (seq body) (str/join "\n\n" body) ";; (no recorded source/fns/schemas)"))))))))
 
 (defn- render-one-ns-html
   "Render a single namespace block to hiccup. Reuses the per-kind
@@ -1336,12 +1331,11 @@
    `:seon.render/detail` (`:ai` form only) selects how much of each fn
    shows: `:full` (default) renders the ns SOURCE + every member with
    small fn bodies inlined — the whole-ns view; `:signature` renders a
-   `kind=\"signatures\"` tag of public fn signatures only (bodies elided)
-   — the API-surface manifest view. The default is byte-identical to the
-   pre-detail render, so every existing caller is unaffected.
+   `;; ── namespace x (signatures) ──` block of public fn signatures only
+   (bodies elided) — the API-surface manifest view.
 
    This is the foundation of every agent's default context; the section
-   that surfaces the agent's namespaces resolves to it (T5)."
+   that surfaces the agent's namespaces resolves to it."
   {:malli/schema [:=> [:cat ::render-namespace-request] ::render-namespace-response]}
   [{ns-name :seon.ns/name
     :seon.render/keys [depth format detail]
@@ -1361,8 +1355,7 @@
 (defn- latest-live-inbound
   "The latest LIVE inbound message for `my-eid` in db value `db` as
    [at content] — to ∋ me, from ≠ me, hops < `warn/hop-cap` (the same
-   window [[turns-since-inbound]] and the loop's cap policy count
-   against). nil when none."
+   window the loop's cap policy counts against). nil when none."
   [db my-eid]
   (->> (db/query
          {:seon.db/db db
@@ -1413,44 +1406,6 @@
                                :seon.agent.message/content)
                        ""))))
 
-(defn task-in-progress?
-  "MID-TASK derivation — TRUE from a live inbound message until the
-   agent REPLIES to it: the latest live inbound (to ∋ me, from ≠ me,
-   hops < `warn/hop-cap`) has no LATER outbound to a NON-SELF
-   recipient. Mirrors the loop's own stop semantics
-   (`seon.agent/unanswered-live-inbound?`, halt `:replied`) read-only
-   from the message log at render time — the per-turn self-fold
-   (from = to = me) never closes the window, unlike [[inbox-count]]'s
-   any-outbound window (opus-live-tests 2026-06-12 finding 1: gating
-   `<turns>` on inbox-count made it
-   first-turn-only — dead exactly where the countdown matters). The
-   gate the turns section consumes; nothing stored, nothing to clear
-   (docs/seon/concepts/reactive-context)."
-  {:malli/schema [:=> [:cat :map] :boolean]}
-  [{:seon.agent/keys [id] db :seon.db/db}]
-  (let [id     (resolve-id id)
-        db     (or db @db/*conn*)
-        my-eid (:db/id (db/entity-lazy {:seon.db/db db
-                                        :seon.db/ref [:seon.agent/id id]}))
-        [inbound-at _] (when my-eid (latest-live-inbound db my-eid))
-        reply-at
-        (when my-eid
-          (ffirst
-            (db/query
-              {:seon.db/db db
-               :seon.db/query
-               '[:find (max ?at)
-                 :in $ ?me
-                 :where
-                 [?m :seon.agent.message/from ?me]
-                 [?m :seon.agent.message/to ?t]
-                 [(not= ?t ?me)]
-                 [?m :seon.agent.message/at ?at]]
-               :seon.db/args [my-eid]})))]
-    (boolean (and inbound-at
-                  (or (nil? reply-at)
-                      (<= (.getTime ^js reply-at)
-                          (.getTime ^js inbound-at)))))))
 (schema/register! :seon.render/sections [:vector :seon.ctx/name])
 
 (schema/register! :seon.render/assemble-request
@@ -1498,15 +1453,14 @@
    STABLE prefix (every section through :namespaces — byte-stable
    within a session given the deterministic rendering) and the
    VOLATILE tail (everything after: your-entity, live-tile, warnings,
-   open-todos, transcript, turns, inventory, prompt).
+   open-todos, relevant-source, inventory, transcript).
 
    In-band because the agent loop hands providers ONE assembled
    string (`llm-fn` is fn-of-ctx-string): [[split-context]] recovers
-   the two halves on the provider side, so the Anthropic adapter can
-   put the stable prefix in a cache_control'd system block and send
-   only the volatile tail as the user message (task #34 — cache
-   coverage was 5.4k of ~38k input tokens). Built by concatenation so
-   the marker can never appear verbatim in rendered source text."
+   the two halves on the provider side, so an adapter can put the stable
+   prefix in a cached system block and send only the volatile tail as the
+   user message. Built by concatenation so the marker can never appear
+   verbatim in rendered source text."
   (str ";; ──── ctx cache boundary — everything above this line is the "
        "byte-stable" " prefix; everything below changes per turn ────"))
 
@@ -1530,47 +1484,35 @@
        :seon.render/volatile-text (subs text (+ i (count stable-boundary-delim)))})))
 (defn core-default-ctx
   "The default :seon.ctx section layout that ships with every fresh
-   agent — the context-v4 layout (§2), ordered top→bottom =
-   static→volatile (the provider-cache contract, §1):
+   agent — ordered top→bottom = static→volatile (the provider-cache
+   contract): everything through :namespaces is the cacheable prefix.
 
      1. :system      — the universal concept paragraphs + standing
-                       teachings; byte-identical for every agent and
-                       turn (the agent id lives in the status line)
-     2. :namespaces  — THE BODY: one <namespace> tag per included ns
-                       (ALL seon.* + my.* minus *.internal),
-                       recency-ordered most-recently-modified LAST
+                       teachings; byte-identical for every agent and turn
+                       (the agent id lives in the transcript readline)
+     2. :namespaces  — THE BODY: one `;; ── namespace x ──` block per
+                       included ns, recency-ordered (most-recently-
+                       modified LAST), curated full/signature per ns
      3. :your-entity — the agent's own entity as a pretty-printed map
                        (purpose, tile wiring, sections, self-notes)
-     4. :live-tile   — what your human currently sees (tiles-PRD U5;
-                       this layout only fixes its slot: after
-                       :your-entity, before :warnings)
+     4. :live-tile   — what your human currently sees
      5. :warnings    — current problems; reactive, vanishes when fixed
      6. :open-todos  — the agent's open work items; derived, vanishes
-     6b. :relevant-source — env-gated (SEON_EMBED, default-OFF):
-                       <relevant-source>, the top-k :seon.fn hits nearest
-                       this turn's query by embedding KNN, PREFETCHED in
-                       run-turn! + read from the per-turn stash. VOLATILE
-                       half (query-dependent → out of the cache prefix);
-                       reactive — blank when off or no hits (dropped)
-     7. :transcript  — PAST turns, grouped <turn id=… evals=N/M>: the
-                       woken-by <user> + the turn's evals, REPL-faithful
-     8. :turns       — the turn-budget countdown (one line, mid-task
-                       only; derived, vanishes when idle) — just
-                       above the prompt tail for salience
-     9. :inventory   — the cheap <data-inventory> map: one line per
-                       stored KIND with each attr's live row count
-                       (user-domain first); derived from
-                       seon.db/store-inventory, vanishes when the store
-                       holds no post-bootstrap data
-    10. :prompt      — the §2.9 status line + clean REPL prompt
-                       (always changing — the volatile tail's end)
+     6b. :relevant-source — env-gated (SEON_EMBED, default-OFF): the
+                       top-k entities nearest this turn's query by
+                       embedding KNN, PREFETCHED in run-turn! + read from
+                       the per-turn stash. VOLATILE half; blank when off
+                       or no hits (dropped)
+     9. :inventory   — the cheap stored-data map: one line per stored
+                       KIND with each attr's live row count (user-domain
+                       first); vanishes when the store holds no
+                       post-bootstrap data
+    10. :transcript  — the comment-block REPL: the masthead, PAST turns,
+                       and the folded live readline — the whole bottom of
+                       the context (absorbs the old prompt/turns/status
+                       sections)
 
-   The dead sections (capabilities, exemplars, schema-catalog,
-   functions-catalog, namespace-context, the :purpose/:your-sections
-   seeds) dissolved into code (docstrings, the rendered namespace
-   sources), data (the agent's own entity), or the startup tutorial
-   evals (store-inventory, my.kb.system/instructions) — context-v4
-   §§2.2–2.4, 3b. Smallest priority renders first."
+   Smallest priority renders first."
   []
   [{:seon.ctx/name :system       :seon.ctx/priority 10
     :seon.render/ai 'seon.ctx/system-section}
@@ -1589,11 +1531,9 @@
    {:seon.ctx/name :inventory    :seon.ctx/priority 97
     :seon.render/ai 'seon.ctx.inventory/inventory-section}
    ;; The transcript is the WHOLE bottom of the context (priority 100,
-   ;; LAST): the §2 comment-block REPL with the masthead at its head and
-   ;; the folded live readline at its very end — it ABSORBS the old
-   ;; prompt + turns + status sections (no separate sections; their fns
-   ;; stay in ctx/prompt + agent/turns as a tracked later cleanup, but are
-   ;; NO LONGER COMPOSED here).
+   ;; LAST): the comment-block REPL with the masthead at its head and the
+   ;; folded live readline at its very end — it ABSORBS the prompt + turns
+   ;; + status into ONE steering surface (no separate sections).
    {:seon.ctx/name :transcript   :seon.ctx/priority 100
     :seon.render/ai 'seon.ctx.transcript/transcript-section
     :seon.render/html 'seon.ctx.transcript/transcript-section-html}])
@@ -1783,7 +1723,7 @@
    the full prompt with the boundary line joined in-band between the
    halves; `:seon.render/stable-text` / `:seon.render/volatile-text`
    carry the halves separately (and [[split-context]] recovers them
-   from the joined string — the provider-cache contract, task #34).
+   from the joined string — the provider-cache contract).
    An agent section with priority below :namespaces' lands in the
    stable half — it must render byte-stably (verbatim strings do).
 
@@ -1805,7 +1745,7 @@
                            ;; silently filtered by the pull guard — safe.
                            '[:db/id :seon.agent/id :seon.agent/state
                              :seon.agent/purpose
-                             :seon.agent/turns-cap :seon.agent/completed-at
+                             :seon.agent/wake :seon.agent/max-turns-per-loop
                              :seon.render/ai :seon.render/html
                              :seon.render.live-tile/content
                              {:seon.agent/ctx [*]}]

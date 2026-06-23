@@ -1,7 +1,5 @@
 (ns seon.agent.fsm
-  "The agent FINITE STATE MACHINE — the wake trigger + the loop (agent-fsm
-   redesign 2026-06-23, U4). Carved out of seon.agent so the loop machinery
-   reads as its own namespace.
+  "The agent FINITE STATE MACHINE — the wake trigger + the loop.
 
    The loop is the WHOLE stop policy: each iteration re-reads `{state wake}`
    from the agent record and halts on any of —
@@ -143,8 +141,8 @@
 
 ;; ============================================================
 ;; The loop — re-reads the agent record each iteration; the WHOLE stop
-;; policy is the cond below (§1 pseudocode). Finally: if still :active and
-;; my-wake still owns it, set :idle (absorbs the old ensure-idle! failsafe).
+;; policy is the cond below. Finally: if still :active and my-wake still owns
+;; it, set :idle.
 ;; ============================================================
 
 (defn ^:async run-loop!
@@ -304,9 +302,9 @@
      :seon.agent/llm-fn          ctx-string -> Promise<{:text \"…\"}>
      :seon.agent/compile-state   bootstrap compile-state"
   [{:seon.agent/keys [id] :as input}]
-  ;; Keep the historical listener key so re-arming REPLACES the listener the
-  ;; old `seon.agent/install-user-trigger!` installed (the carve must not
-  ;; leave two listeners firing for one agent across a hot reload).
+  ;; One stable listener key per agent so re-arming REPLACES the prior
+  ;; listener (a hot reload must not leave two listeners firing for one
+  ;; agent).
   (let [k [:seon.agent/user-message-trigger id]]
     (try (db/unlisten! {:seon.db/key k}) (catch :default _ nil))
     (db/listen!

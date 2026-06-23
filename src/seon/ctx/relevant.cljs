@@ -1,6 +1,7 @@
 (ns seon.ctx.relevant
-  "The `<relevant-source>` context section — the top-k embedding-retrieval
-   hits for THIS turn's query, surfaced as source the agent can read inline.
+  "The `:relevant-source` context section — the top-k embedding-retrieval
+   hits for THIS turn's query, surfaced (as a `;; ── relevant context ──`
+   comment-block) as source the agent can read inline.
    Symbol-wired into the composer layout (`seon.ctx/core-default-ctx`) as
    `'seon.ctx.relevant/relevant-source-section` at priority 48 (the VOLATILE
    half — query-dependent content must stay out of the cacheable stable prefix).
@@ -95,11 +96,11 @@
     (block title (when (not= title body) body))))
 
 (defn relevant-source-section
-  "The `<relevant-source>` section. PURE reader of the per-turn retrieval
+  "The `:relevant-source` section. PURE reader of the per-turn retrieval
    stash ([[seon.embed.stash/current-hits]]) — renders the top-`top-k` hits,
    each rendered GENERICALLY by [[render-hit]] (the entity's identity + its
-   longest string attr; any indexable kind, no hard-coded attr names) behind a
-   `<relevant-source>` tag.
+   longest string attr; any indexable kind, no hard-coded attr names) under a
+   `;; ── relevant context ──` comment-block header.
 
    REACTIVE: returns \"\" when no hits are stashed (default-OFF — no prefetch
    ran — OR the prefetch found nothing), so the composer drops the section and
@@ -111,8 +112,7 @@
       (let [blocks (->> hits
                         (take top-k)
                         (map render-hit))]
-        (str "<relevant-source>\n"
+        (str ";; ── relevant context ──\n"
              relevant-header "\n\n"
-             (str/join "\n\n" blocks)
-             "\n</relevant-source>"))
+             (str/join "\n\n" blocks)))
       "")))

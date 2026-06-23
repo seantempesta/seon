@@ -517,12 +517,12 @@
 (defn normalize-entity-ref-keys
   "Rewrite the taught entity-identity shorthand — an entity map keyed by
    `:seon.db/ref` (`{:seon.db/ref [:seon.agent/id \"…\"] :attr v}`, the
-   <your-entity> transact pattern) — into datahike's native `:db/id`
+   transact-onto-your-entity pattern) — into datahike's native `:db/id`
    slot, recursively through nested entity maps and tx vectors.
 
-   WHY (fix-everything A1, 2026-06-11): `:seon.db/ref` is a registered
-   Malli SHAPE, not an installed datahike attribute. Left in the entity
-   map it reaches the store as a junk attr — the wire store rejects the
+   `:seon.db/ref` is a registered Malli SHAPE, not an installed datahike
+   attribute. Left in the entity map it reaches the store as a junk attr
+   — the wire store rejects the
    whole tx (\"Bad entity attribute :seon.db/ref …\"), and a conn that
    somehow had it installed would silently assert a junk datom on a
    junk entity. Datahike already resolves eids / tempids / lookup-refs
@@ -906,7 +906,7 @@
       a0
 
       ;; 1-arg tx-data shape: `(transact! [{…} …])` — the taught
-      ;; <your-entity> form. The conn defaults to `*conn*` at the face.
+      ;; transact form. The conn defaults to `*conn*` at the face.
       ;; Unambiguous: tx-data is sequential, a conn is a non-map IDeref,
       ;; a request map is `map?` — no shape collides.
       (and (= 1 (count args)) (sequential? a0))
@@ -1278,11 +1278,11 @@
       (await (d/transact! conn (vec entries))))))
 
 (defn transact-success-envelope
-  "Build the agent-visible success envelope from a raw datahike tx-report
-   (#40). COMPACT BY DEFAULT: the agent sees a small data summary, never
-   the raw report's `:db-before`/`:db-after` db-value echo or the full
-   per-datom `:tx-data` (a bulk seed = thousands of datoms — dumping them
-   into the eval value bloats every `<past-evals>` render).
+  "Build the agent-visible success envelope from a raw datahike tx-report.
+   COMPACT BY DEFAULT: the agent sees a small data summary, never the raw
+   report's `:db-before`/`:db-after` db-value echo or the full per-datom
+   `:tx-data` (a bulk seed = thousands of datoms — dumping them into the
+   eval value bloats every past-eval render).
 
      {:seon.db/ok? true
       :seon.db/tempids   <report :tempids>   ; LOAD-BEARING — tempid→eid
@@ -1291,7 +1291,7 @@
       :seon.db/added     <datoms added>
       :seon.db/retracted <datoms retracted>}
 
-   The wire success report's shape (confirmed live 2026-06-21): `:db-after`
+   The wire success report's shape: `:db-after`
    (a datahike DB value whose `:max-tx` IS the committed tx id), `:tx-data`
    (a vector of Datoms, each `:added` true/false), `:tempids`, `:tx-meta`.
 

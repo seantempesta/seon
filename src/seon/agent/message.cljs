@@ -1,35 +1,31 @@
 (ns seon.agent.message
-  "Message model — THE single write path for `:seon.agent.message` rows
-   (unit 1.5, split out of seon.agent in the P6 reorg so the keyword
-   namespace matches the code namespace). Owns:
+  "Message model — THE single write path for `:seon.agent.message` rows.
+   The keyword namespace matches the code namespace. Owns:
      - the `:seon.agent.message/*` attr + entity-kind schemas
      - the `:seon.user` entity schema + `user-ref` (the default `to`
        target — seeded at boot by seon.client)
      - `message!` — fully-formed storage, boundary defaulting, the
        blank-content refusal, hop derivation (`waking-hops`), the
        concise success envelope
-     - the two agent-facing verbs (agent-fsm redesign U2), thin wrappers
-       over `message!` — the agent reaches them through the `message/`
-       alias on its home ns (`(message/user …)` / `(message/agent …)`):
+     - the two agent-facing verbs, thin wrappers over `message!` — the
+       agent reaches them through the `message/` alias on its home ns
+       (`(message/user …)` / `(message/agent …)`):
          `user`  — from = me (the ALS agent), to = the one human user
          `agent` — from = me, to = [agent-id]; REFUSES `to = me` (loud
-                   error, no row). No self→self messaging, ever (§1).
+                   error, no row). No self→self messaging, ever.
 
-   The deleted `reply!` (1:1 woken-by targeting) is REPLACED by these —
-   no parallel path. The WAKE side (the inbound-message trigger + the
-   hop-cap refusal at wake) stays in `seon.agent` — it drives the loop
-   and would cycle here. `seon.agent` re-exports `message!`/`user-ref`
-   on the face."
+   The WAKE side (the inbound-message trigger + the hop-cap refusal at
+   wake) stays in `seon.agent` — it drives the loop and would cycle
+   here. `seon.agent` re-exports `message!`/`user-ref` on the face."
   (:require
     [clojure.string :as str]
     [seon.db :as db]
     [seon.schema :as schema]))
 
-;; Messaging codified (unit 1.5, 2026-06-09): every stored message is
-;; FULLY FORMED — from + to + content + at + id + hops. Identity is the
-;; ref (`:seon.agent.message/from` points at the sender entity — a
-;; `:seon.user/id` or `:seon.agent/id` entity); `role` and `agent` are
-;; RETIRED. "My conversation" is DERIVED: from = me OR to ∋ me.
+;; Every stored message is FULLY FORMED — from + to + content + at + id
+;; + hops. Identity is the ref (`:seon.agent.message/from` points at the
+;; sender entity — a `:seon.user/id` or `:seon.agent/id` entity).
+;; "My conversation" is DERIVED: from = me OR to ∋ me.
 (schema/register! :seon.agent.message/id      [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.agent.message/content :string)
 (schema/register! :seon.agent.message/from    :seon.db/ref)
@@ -40,23 +36,20 @@
 ;; whose hops reached `seon.warn/hop-cap` so two agents can't auto-bill
 ;; an infinite reply chain.
 (schema/register! :seon.agent.message/hops    :int)
-;; Provenance (#43): WHO authored this message, deterministic for the
-;; wake/halt gates. :human = the one human (HTTP/user adapter); :agent =
-;; an agent's own send/consult/reply; :core = a substrate-originated
-;; nudge (e.g. tile-recovery) that must NEVER wake an idle agent NOR move
-;; the halt baseline. Anchoring the wake gate (inbound-msg-datom?) and
-;; the halt side (unanswered-live-inbound?) to origin ∈ {:human :agent} ∧
-;; from ≠ me means a :core message can't masquerade as human and re-arm
-;; a loop. Derived by default in message! from `from` (user ⇒ :human,
-;; else :agent); :core is set explicitly by the substrate caller.
+;; Provenance: WHO authored this message, deterministic for the wake
+;; gate. :human = the one human (HTTP/user adapter); :agent = an agent's
+;; own send; :core = a substrate-originated nudge (e.g. tile-recovery)
+;; that must NEVER wake an idle agent. Anchoring the wake gate
+;; (inbound-msg-datom?) to origin ∈ {:human :agent} ∧ from ≠ me means a
+;; :core message can't masquerade as human and re-arm a loop. Derived by
+;; default in message! from `from` (user ⇒ :human, else :agent); :core is
+;; set explicitly by the substrate caller.
 (schema/register! :seon.agent.message/origin  [:enum :human :agent :core])
-;; Consumed marker (I-1): a tx-hook (e.g. a downstream deterministic
+;; Consumed marker: a tx-hook (e.g. a downstream deterministic
 ;; chat-control like `/persona`) sets this `true` IN THE SAME TX that
-;; processes the command, so the message does NOT wake the agent and
-;; does NOT anchor the loop's stop-policy. STORED only when true (absent
-;; = a live, unconsumed message); never stored as false. Reversible —
-;; retract the attr to un-consume. Parallel to `:seon.agent.message/origin`
-;; on the wake/halt gates (inbound-msg-datom? + latest-inbound-at).
+;; processes the command, so the message does NOT wake the agent. STORED
+;; only when true (absent = a live, unconsumed message); never stored as
+;; false. Reversible — retract the attr to un-consume.
 (schema/register! :seon.agent.message/handled? :boolean)
 
 ;; The user is a REAL entity — ONE `:seon.user/id` row seeded at boot
@@ -87,7 +80,7 @@
    [:seon.agent.message/at      :seon.agent.message/at]
    [:seon.agent.message/hops    :seon.agent.message/hops]
    [:seon.agent.message/origin  :seon.agent.message/origin]
-   ;; I-1: present only on a tx-hook-consumed message (handled? = true).
+   ;; Present only on a tx-hook-consumed message (handled? = true).
    ;; Optional/absent on every live message.
    [:seon.agent.message/handled? {:optional true} :seon.agent.message/handled?]])
 
@@ -110,19 +103,18 @@
    ;; THE user. Storage is always the normalized vector.
    [:seon.agent.message/to {:optional true}
     [:or :seon.db/ref [:vector :seon.db/ref]]]
-   ;; Provenance override (#43). Absent ⇒ DERIVED from `from` (user ⇒
-   ;; :human, else :agent). A substrate-originated nudge (tile recovery)
-   ;; passes :core explicitly so it can't wake an idle agent or move the
-   ;; halt baseline. The HTTP/user adapter relies on the derived :human;
-   ;; agent sends/consults/replies on the derived :agent.
+   ;; Provenance override. Absent ⇒ DERIVED from `from` (user ⇒ :human,
+   ;; else :agent). A substrate-originated nudge (tile recovery) passes
+   ;; :core explicitly so it can't wake an idle agent. The HTTP/user
+   ;; adapter relies on the derived :human; agent sends on the derived
+   ;; :agent.
    [:seon.agent.message/origin {:optional true} :seon.agent.message/origin]])
 
-;; Concise success / standard error envelope (#26, A3 applied): the raw
-;; transact tx-report is OFF the agent surface — ~1.5k transcript chars
-;; per reply taught nothing and carried a misdirected "narrow your
-;; query" hint. Success answers the three things a sender can act on:
-;; did it store, which message, at what hop depth. Failure stays the
-;; core-standard error envelope (errors are values).
+;; Concise success / standard error envelope: the raw transact tx-report
+;; is OFF the agent surface — it taught nothing and carried a misdirected
+;; "narrow your query" hint. Success answers the three things a sender
+;; can act on: did it store, which message, at what hop depth. Failure
+;; stays the core-standard error envelope (errors are values).
 (schema/register! ::message-response
   [:or
    [:map
@@ -140,13 +132,13 @@
 
 (defn- waking-hops
   "Hops of the NEWEST inbound message (to ∋ me, from ≠ me), or 0 when
-   none. This — not the turn's woken-by — is the hops base for
-   agent-originated sends: a long-running loop keeps replying while new
-   inbound messages arrive, and deriving from the loop's ORIGINAL
-   waking message would pin hops constant forever (observed live
-   2026-06-09: two stub agents ping-ponged at hops 2↔3 indefinitely,
-   the cap never reached). The latest inbound climbs with the chain, so
-   replies carry climbing hops and the guard actually bites."
+   none. This — not the loop's original waking message — is the hops
+   base for agent-originated sends: a long-running loop keeps replying
+   while new inbound messages arrive, and deriving from the ORIGINAL
+   waking message would pin hops constant forever (two agents would
+   ping-pong at a fixed hop count and never reach the cap). The latest
+   inbound climbs with the chain, so replies carry climbing hops and the
+   guard actually bites."
   [agent-id]
   (let [my-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id agent-id]}))]
     (or (when my-eid
@@ -182,15 +174,15 @@
                           message's hops + 1 (ping-pong guard — the wake
                           trigger refuses past `seon.warn/hop-cap`).
 
-   Blank content is REJECTED with an error envelope — empty assistant
-   messages were a recurring live defect (runs 3 + 6); since every
-   message write routes through here, the guard kills the class.
+   Blank content is REJECTED with an error envelope — an empty message
+   carries nothing; since every message write routes through here, the
+   guard kills the class.
 
    A message ALWAYS transacts and is delivered — there is no same-turn
-   refusal and no make-good-turn veto. Errors are values: if a sibling
-   form in the same turn returned a `{*/ok? false}` envelope the agent
-   may over-claim, but that is visible in the transcript and a human
-   follow-up re-wakes the agent. Nothing here blocks a send."
+   refusal. Errors are values: if a sibling form in the same turn
+   returned a `{*/ok? false}` envelope the agent may over-claim, but that
+   is visible in the transcript and a human follow-up re-wakes the agent.
+   Nothing here blocks a send."
   {:malli/schema [:=> [:cat ::message-request] ::message-response]}
   [{:seon.agent.message/keys [content from to origin]}]
   (let [agent-id (db/current-agent-id)
@@ -224,7 +216,7 @@
             hops   (if from-user?
                      0
                      (inc (waking-hops agent-id)))
-            ;; Provenance (#43): explicit :origin wins (a :core nudge);
+            ;; Provenance: explicit :origin wins (a :core nudge);
             ;; otherwise derived — a user-ref send is :human, every
             ;; other send is :agent. Never stored as nil.
             origin (or origin (if from-user? :human :agent))
@@ -247,14 +239,14 @@
           env)))))
 
 ;; ============================================================
-;; The two agent-facing verbs (agent-fsm redesign U2). Thin wrappers
-;; over `message!` — `from` defaults to the ALS agent inside `message!`,
-;; so these only fix `to`. The agent reaches them through the `message/`
-;; alias on its home ns: `(message/user "…")` / `(message/agent id "…")`.
-;; No self→self messaging, ever: `agent` refuses `to = me` (§1, the wake
-;; gate already ignores `from = me`; this makes it a hard prohibition at
-;; the verb). `^:async` fns are not runtime-instrumented, so the
-;; `:malli/schema` is the only contract — both reuse `::message-response`.
+;; The two agent-facing verbs. Thin wrappers over `message!` — `from`
+;; defaults to the ALS agent inside `message!`, so these only fix `to`.
+;; The agent reaches them through the `message/` alias on its home ns:
+;; `(message/user "…")` / `(message/agent id "…")`. No self→self
+;; messaging, ever: `agent` refuses `to = me` (the wake gate already
+;; ignores `from = me`; this makes it a hard prohibition at the verb).
+;; `^:async` fns are not runtime-instrumented, so the `:malli/schema` is
+;; the only contract — both reuse `::message-response`.
 ;; ============================================================
 
 (defn ^:async user

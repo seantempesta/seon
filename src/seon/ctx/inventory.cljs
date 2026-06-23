@@ -1,7 +1,8 @@
 (ns seon.ctx.inventory
-  "The `<data-inventory>` context section — a cheap, reactive map of what
-   the shared store holds RIGHT NOW (one line per stored KIND with each
-   attr's live row count). Symbol-wired into the composer layout
+  "The stored-data inventory context section — a cheap, reactive map of
+   what the shared store holds RIGHT NOW (one line per stored KIND with
+   each attr's live row count), rendered as a `;; ── stored data
+   inventory ──` comment-block. Symbol-wired into the composer layout
    (`seon.ctx/core-default-ctx`) as `'seon.ctx.inventory/inventory-section`;
    loaded at boot so the symbol resolves for `seon.eval/lookup-value`."
   (:require
@@ -138,8 +139,8 @@
       (str (name a) " " c))))
 
 (defn inventory-section
-  "The `<data-inventory>` discovery surface (always-changing volatile
-   tail): a CHEAP map of what the shared store holds RIGHT NOW, derived
+  "The stored-data discovery surface (always-changing volatile tail): a
+   CHEAP map of what the shared store holds RIGHT NOW, derived
    from [[seon.db/store-inventory]] (user-domain kinds first). ONE line
    per kind — the kind (attr namespace) is the line label, then
    space-separated `attr-name count` pairs with the namespace stripped
@@ -171,8 +172,7 @@
                                 (map (fn [[a c]] (attr-token db boot-ids a c))
                                      attrs))))
                        rows)]
-        (str "<data-inventory>\n"
+        (str ";; ── stored data inventory ──\n"
              inventory-header "\n\n"
-             (str/join "\n" lines)
-             "\n</data-inventory>"))
+             (str/join "\n" lines)))
       "")))

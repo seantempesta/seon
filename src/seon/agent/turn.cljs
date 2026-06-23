@@ -1,8 +1,6 @@
 (ns seon.agent.turn
   "One agentic TURN, end-to-end — the unit the FSM loop ([[seon.agent.fsm]])
-   drives once per LLM completion. Carved out of seon.agent (agent-fsm
-   redesign 2026-06-23, U4) so the loop, the turn, and the agent record each
-   read as their own namespace.
+   drives once per LLM completion.
 
    A turn = open a `:seon.agent.turn` (stamping the agent's current
    `:seon.agent/wake` so the loop's sliding cap can count it) → render the
@@ -40,11 +38,11 @@
     [seon.schema :as schema]))
 
 ;; ============================================================
-;; v1 causality graph — :seon.agent.session + :seon.agent.turn entities
-;; (v1.md §2.1). One pod run = one :seon.agent.session. Each render → LLM →
-;; eval-batch cycle = one :seon.agent.turn. Both ride as component refs on
-;; their parents (cascade-retract on parent retract). ALL counters are
-;; DERIVED, never persisted (reactive-context).
+;; Causality graph — :seon.agent.session + :seon.agent.turn entities. One
+;; pod run = one :seon.agent.session. Each render → LLM → eval-batch cycle =
+;; one :seon.agent.turn. Both ride as component refs on their parents
+;; (cascade-retract on parent retract). ALL counters are DERIVED, never
+;; persisted (reactive-context).
 ;;
 ;; Identity attrs reference the canonical :seon.db/id shape (single source of
 ;; truth in seon.schema). The [:and {…} :seon.db/id] wrapping adds
@@ -55,7 +53,7 @@
 (schema/register! :seon.agent.session/at    :inst)
 ;; :db/isComponent on the ref vectors — retracting a session/turn
 ;; cascade-retracts its child entities, and one nested pull on the agent
-;; walks the whole causality chain inline (v1.md §2.1).
+;; walks the whole causality chain inline.
 (schema/register! :seon.agent.session/turns [:vector {:seon.db/component true} :seon.db/ref])
 
 (schema/register! :seon.agent.turn/id           [:and {:seon.db/identity true} :seon.db/id])
@@ -63,11 +61,10 @@
 ;; A turn is running/done/error — DISTINCT from the agent FSM state
 ;; (idle/active/…): a turn is a single completion, the agent is the actor.
 (schema/register! :seon.agent.turn/status       [:enum :running :done :error])
-;; The wake-episode this turn belongs to (agent-fsm redesign 2026-06-23, §1).
-;; Each turn-open STAMPS the agent's current `:seon.agent/wake` here, so the
-;; per-loop count (`count turns where wake = my-wake`) is derivable. STORED —
-;; coordination metadata, not derivable. References the canonical id shape;
-;; never inline. REPLACES the deleted `:seon.agent.turn/woken-by` attr.
+;; The wake-episode this turn belongs to. Each turn-open STAMPS the agent's
+;; current `:seon.agent/wake` here, so the per-loop count (`count turns where
+;; wake = my-wake`) is derivable. STORED — coordination metadata, not
+;; derivable. References the canonical id shape; never inline.
 (schema/register! :seon.agent.turn/wake         :seon.db/id)
 ;; Three-tier storage: the datom carries the prompt's char count + a file
 ;; pointer (blob tier); the full prompt is never a datom.
@@ -78,9 +75,9 @@
 ;; Honest record of the bounded LLM transport retry (always 1 when present;
 ;; ABSENT = no retry — optional-is-absent).
 (schema/register! :seon.agent.turn/llm-retries  :int)
-;; #25 tier-2 provider telemetry, EDN-stringified (:map is unbridgeable —
-;; a :map close-tx fails the schema bridge): the usage map + the
-;; unrecognized top-level provider fields. Both ABSENT on a stub-LLM turn.
+;; Tier-2 provider telemetry, EDN-stringified (:map is unbridgeable — a :map
+;; close-tx fails the schema bridge): the usage map + the unrecognized
+;; top-level provider fields. Both ABSENT on a stub-LLM turn.
 (schema/register! :seon.agent.turn/llm-usage    :string)
 (schema/register! :seon.agent.turn/llm-meta     :string)
 (schema/register! :seon.agent.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
@@ -323,7 +320,7 @@
 ;; ============================================================
 ;; The LLM call + eval. ask-and-eval-reply! parses the reply and
 ;; eval-batches the forms — the raw reply is NEVER folded into a self→self
-;; message (agent-fsm §5: notes-to-self are eval narration, not message rows).
+;; message (notes-to-self are eval narration, not message rows).
 ;; ============================================================
 
 (defn ^:async ^:private ask-and-eval-reply!
@@ -383,7 +380,7 @@
    returns `{:seon.agent/eval-count n}` (plus optional telemetry) for
    `open-turn!` to fold into the close-tx. An LLM-call failure
    (`:seon.ai/error`) closes the turn `:status :error` (render derives a
-   system line from the status — no self→self message row, §5)."
+   system line from the status — no self→self message row)."
   [{:seon.agent/keys [id llm-fn compile-state]
     :seon.agent.turn/keys  [id-of-turn turn-idx prompt-text]}]
   (let [resp    (await (call-llm! id id-of-turn llm-fn prompt-text))

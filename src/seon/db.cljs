@@ -80,7 +80,7 @@
    [::conn           {:optional true} ::conn]
    ;; Escape hatch: include the raw datahike tx-report at
    ;; `::tx-report` in the success envelope. OFF by default — the
-   ;; agent value stays the compact data summary (#40).
+   ;; agent value stays the compact data summary.
    [::return-report? {:optional true} ::return-report?]])
 
 (schema/register!
@@ -94,7 +94,7 @@
    [:seon.error/raw     {:optional true} :any]
    [:seon.error/truncated {:optional true} :boolean]])
 
-;; The success envelope is COMPACT DATA (#40): a small summary the agent
+;; The success envelope is COMPACT DATA: a small summary the agent
 ;; reads as a value, never the raw datahike report (no `:db-before`/
 ;; `:db-after` db-value echo, no full per-datom `:tx-data`). `::tempids`
 ;; is load-bearing — callers resolve tempid→eid. The raw report rides at
@@ -316,7 +316,7 @@
    never throws into your eval — every failure (bad invocation shape,
    unregistered attr, value fails its schema, datahike commit
    explosion) returns as data. SUCCESS is COMPACT DATA, never the raw
-   datahike report (#40):
+   datahike report:
 
      {::db/ok? true                ; success — a small data summary:
       ::db/tempids   {…}           ;   tempid→eid map (resolve your refs)
@@ -482,8 +482,8 @@
     (and a-ns (or (= a-ns "db") (str/starts-with? a-ns "db.")))))
 
 ;; --- query attr guard --------------------------------------------------
-;; The sibling of the pull guard below (65dfc90), adapted to what
-;; datalog actually does (probed live 2026-06-11): d/q NEVER throws on
+;; The sibling of the pull guard below, adapted to what
+;; datalog actually does: d/q NEVER throws on
 ;; an uninstalled attr — a never-installed attr in any clause shape
 ;; (pattern, get-else, or-join, not) yields the correct empty/default
 ;; result. So the only failure mode at this boundary is the SILENT
@@ -730,8 +730,8 @@
   "Look up an entity by eid or lookup-ref. Sync. Returns a PLAIN MAP —
    `:db/id` plus every attr on the entity (a TOUCHED snapshot), nil if the
    ref doesn't resolve. The agent reads data, never a lazy datahike handle
-   (#40/P2) — a raw Entity prints opaquely and re-reads as `[object
-   Object]`. Drill into a ref attr with a follow-up `entity`/`pull` on its
+   — a raw Entity prints opaquely and re-reads as `[object Object]`. Drill
+   into a ref attr with a follow-up `entity`/`pull` on its
    `:db/id`.
 
    - map-in:     (db/entity {::db/ref [::name \"Alpha\"]})

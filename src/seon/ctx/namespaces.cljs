@@ -1,9 +1,7 @@
 (ns seon.ctx.namespaces
-  "The `:namespaces` context section — THE BODY of the prompt
-   (context-v4 §2.3): CURATED, not render-everything (curated-namespaces
-   2026-06-21). The old render dumped EVERY seon.* framework ns as a
-   compact `(ns …)` + `register!` + elided-defn surface — 70+ tags of
-   mostly-noise the agent never calls. That render is GONE. Now:
+  "The `:namespaces` context section — THE BODY of the prompt: CURATED,
+   not render-everything. Each rendered ns is a `;; ── namespace x ──`
+   (full) or `;; ── namespace x (signatures) ──` (manifest) comment-block:
 
      - FULL source (whole file, NO clipping) for the few nses an agent
        actually USES or OWNS:
@@ -43,15 +41,15 @@
 ;; The namespace-display selection rules — the ONE home for which
 ;; indexed :seon.ns rows render, and which render in FULL. Shared by
 ;; the boot indexer (`seon.client/ns-row`, the one file reader) and
-;; [[namespaces-section]] (the curated `<namespaces>` prompt body):
+;; [[namespaces-section]] (the curated namespaces prompt body):
 ;; one rule, one writer, no drift. Pure string/keyword/symbol fns —
 ;; no dependency on anything in `seon.ctx`.
 ;; ============================================================
 
 (defn hidden-ns-name?
   "Rule 1: a `*.internal` namespace (or any of its children) is
-   indexed but NEVER rendered — the V3-A naming convention IS the
-   filter. String/keyword/symbol tolerant."
+   indexed but NEVER rendered — the naming convention IS the filter.
+   String/keyword/symbol tolerant."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
   [ns-name]
   (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
@@ -102,9 +100,8 @@
 
 (def full-source-whitelist
   "The CURATED whitelist of `seon.*` FRAMEWORK namespaces shown to every
-   agent IN FULL (curated-namespaces 2026-06-21) — the few seon.* tools an
-   agent actually USES, worth their whole source. Start it here; this is
-   the clear EDITABLE def to extend.
+   agent IN FULL — the few seon.* tools an agent actually USES, worth
+   their whole source. This is the clear EDITABLE def to extend.
      - `:seon.agent.todo` — the store/retrieve reference an agent calls
        directly: `register!` per attr, three map-in/map-out `:malli/schema`
        fn shapes, error-as-value envelopes, the todo tools the system
@@ -201,7 +198,7 @@
    ([[seon.ctx/render-namespace]]) at the chosen detail LEVEL, flat (depth
    0 — no require-recursion; the section renders each ns once). `:full`
    yields the whole-ns view (real file source + members); `:signature`
-   yields the `kind=\"signatures\"` API-surface tag. Returns the rendered
+   yields the `(signatures)` API-surface block. Returns the rendered
    text, or nil when render-namespace produces nothing (empty-store edge:
    a full ns with blank source and no members)."
   [db nm detail]
@@ -212,34 +209,35 @@
                    :seon.db/db        db})
                 :seon.render/text
                 str/trim)]
-    ;; render-namespace emits a `<namespace>` tag even for an empty body
-    ;; (`;; (no recorded source/fns/schemas)`); a FULL ns with nothing real
-    ;; to show is omitted from the section (the boot indexer guarantees real
-    ;; text for every full row, so this is only the empty-store edge).
+    ;; render-namespace emits a `;; ── namespace x ──` header even for an
+    ;; empty body (`;; (no recorded source/fns/schemas)`); a FULL ns with
+    ;; nothing real to show is omitted from the section (the boot indexer
+    ;; guarantees real text for every full row, so this is only the
+    ;; empty-store edge).
     (when-not (or (str/blank? txt)
                   (and (= detail :full)
                        (str/includes? txt "(no recorded source/fns/schemas)")))
       txt)))
 
 (defn namespaces-section
-  "CURATED `<namespace>` body (curated-namespaces 2026-06-21). Routes EVERY
-   included ns through the SINGLE renderer [[seon.ctx/render-namespace]] —
-   no parallel hand-rolled paths. The per-ns DETAIL LEVEL is the only
-   choice the section makes ([[render-full?]]):
+  "CURATED namespaces body. Routes EVERY included ns through the SINGLE
+   renderer [[seon.ctx/render-namespace]] — no parallel hand-rolled paths.
+   The per-ns DETAIL LEVEL is the only choice the section makes
+   ([[render-full?]]):
 
      - FULL (`:seon.render/detail :full`) for every `my.*` ns, every
        THIRD-PARTY `acme` ns, the agent's CURRENT ns, and the curated
-       [[full-source-whitelist]] seon.* tools — each a `<namespace name=…>`
-       tag carrying its REAL FULL FILE SOURCE (+ any member rows), unclipped.
+       [[full-source-whitelist]] seon.* tools — each a `;; ── namespace x ──`
+       block carrying its REAL FULL FILE SOURCE (+ any member rows), unclipped.
      - SIGNATURE (`:seon.render/detail :signature`) for every OTHER `seon.*`
-       framework ns — a `<namespace name=… kind=\"signatures\">` tag of
-       PUBLIC fn signatures (name + arglist + one-line doc, BODIES ELIDED).
+       framework ns — a `;; ── namespace x (signatures) ──` block of PUBLIC
+       fn signatures (name + arglist + one-line doc, BODIES ELIDED).
        Private fns are skipped; they stay retrievable via the same renderer.
 
-   The full tags are ordered by RECENCY (tx of the `:seon.ns/name` datom —
+   The full blocks are ordered by RECENCY (tx of the `:seon.ns/name` datom —
    bumped by the tee's nested upsert on every define), name as the
    tie-break, so the stable core forms a stable cache prefix and the
-   churning ns sits nearest the tail. The signature tags are name-sorted
+   churning ns sits nearest the tail. The signature blocks are name-sorted
    and sit LAST after a [[manifest-pointer]] (they change only when the
    framework roster changes).
 

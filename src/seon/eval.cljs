@@ -1,16 +1,16 @@
 (ns seon.eval
-  "Agent eval surface (spec-02 §2.5 / spec-03 H-1a). SAFE BY DEFAULT —
-   `eval` returns {:ok true :value v} or {:ok false :error <error-map>}.
-   A throw, compile error, or async rejection — all return as values.
-   The agent session continues.
+  "Agent eval surface. SAFE BY DEFAULT — `eval` returns
+   {:ok true :value v} or {:ok false :error <error-map>}. A throw,
+   compile error, or async rejection — all return as values. The agent
+   session continues.
 
-   The unadorned name `eval` is the safe one; we do NOT ship a public
-   strict variant. Callers that want raw throw semantics can drop down
-   to `cljs.js/eval-str` themselves.
+   The unadorned name `eval` is the safe one; there is no public strict
+   variant. Callers that want raw throw semantics drop down to
+   `cljs.js/eval-str` themselves.
 
    `eval` shadows clojure.core/eval inside this namespace. That's
    deliberate — agents type `(seon.eval/eval ...)` from outside this
-   ns. seon internals that need clojure.core's `eval` should import as
+   ns. seon internals that need clojure.core's `eval` import it as
    `core/eval`.
 
    ## REPL semantics
@@ -23,15 +23,14 @@
    `(ns other-ns)` switches affect subsequent forms. Smart REPL default:
    unqualified vars resolve in the current ns.
 
-   ## Probe-confirmed gotchas (cljs.js + bootstrap target)
+   ## Bootstrap gotchas (cljs.js + bootstrap target)
 
    - **Bare value-def reads don't resolve across eval-str calls.**
      `(def x 42)` then `x` returns nil. Use atoms instead:
      `(def !x (atom 42))` + `@!x` works. Fns are unaffected — they
-     cross namespaces fine. (Historically the agent's home ns held
-     a `!session-id` atom for this reason; that was dropped 2026-05-25
-     in favor of the core-provided `(seon.db/current-agent-id)`
-     which reads from the turn-scoped ALS dynvar.)
+     cross namespaces fine. For the agent's own id, use
+     `(seon.db/current-agent-id)` (the core provides it via a
+     turn-scoped ALS dynvar).
    - **`(in-ns 'foo)` is not bootstrapped.** Use `(ns foo)` to switch."
   (:refer-clojure :exclude [eval])
   (:require [cljs.analyzer :as ana]
@@ -54,6 +53,14 @@
             [seon.repl.internal :as internal]
             [seon.schema :as schema]
             [seon.test.runner :as test-runner]))
+
+(defn- env-int
+  "Read `env-name` from `process.env` as a positive int, or `default`
+   when unset/blank/non-numeric. The ONE knob reader for this ns's
+   SEON_* caps — every clip/limit below is overridable this way."
+  [env-name default]
+  (let [v (some-> (platform/env-val env-name) js/parseInt)]
+    (if (and (number? v) (not (js/isNaN v)) (pos? v)) v default)))
 
 ;; ============================================================
 ;; Per-form wall-clock timeout. Stability guard, not a security
@@ -723,8 +730,9 @@
 
 (def ^:private result-vars-cap
   "Max live `result/<id>` vars kept per session. Older ids are pruned
-   (undef'd from globalThis + the analyzer) to bound memory."
-  200)
+   (undef'd from globalThis + the analyzer) to bound memory. Override
+   with SEON_RESULT_VARS_CAP."
+  (env-int "SEON_RESULT_VARS_CAP" 200))
 
 ;; Insertion-ordered vector of bound result ids (oldest first). Process-
 ;; shared, defonce'd so it survives hot-reload of `seon.eval`.
@@ -1073,39 +1081,52 @@
   "Create + initialize the agent's home namespace. Returns the agent-ns
    symbol (for convenience — same as the input). Idempotent.
 
-   The agent reuses a prior eval's value SOLELY as the live var
-   `result/<id>` (transcript-redesign-2026-06-18), populated by
-   `bind-result-var!` on each successful eval — the id is on its `=>`
-   line in the transcript. The home ns therefore defs NOTHING here: a
-   `result` def would shadow the reserved `result` NAMESPACE, so we
-   deliberately leave the ns clean and let `result/<id>` resolve
-   top-level (LIVE-PROVEN 2026-06-18 — a fresh agent ns reads
-   `result/<id>` cleanly with no require-alias).
+   The home ns is set up with the verb aliases the context teaches, so
+   the agent's reflexive `(message/user …)` / `(message/agent …)` /
+   `(agent/wait …)` / bare `(wait …)` / `(complete …)` / `(terminate …)`
+   forms resolve without fully-qualifying:
 
-   For the agent's own id, use `(seon.db/current-agent-id)` — the
-   core provides it via the ALS dynvar bound at turn entry. The
-   prior `!session-id` atom + `(session-id)` accessor were dropped
-   2026-05-25: the agent IS the session, and identity lives in one
-   place (the ALS dynvar). No per-agent home-ns duplicate.
+     (ns <home>
+       (:require [seon.agent.message :as message]
+                 [seon.agent :as agent :refer [wait complete terminate]]))
 
-   `:current-ns` is derived at read time from the latest
-   :seon.eval/ns datom (seon.agent/current-ns + reactive-context
-   principle). No home-ns atom.
+   The home ns defs NOTHING beyond these requires: a `result` def would
+   shadow the reserved `result` NAMESPACE that holds the `result/<id>`
+   value vars, so the ns stays clean and `result/<id>` resolves
+   top-level (a fresh agent ns reads `result/<id>` with no alias).
+
+   For the agent's own id, use `(seon.db/current-agent-id)` — the core
+   provides it via the ALS dynvar bound at turn entry.
+
+   `:current-ns` is derived at read time from the latest :seon.eval/ns
+   datom (seon.agent/current-ns + reactive-context principle).
 
    Uses `:analyze-deps? true` so the `(ns …)` form analyzes cljs.core's
    refer map and wires up implicit macro refers (defn, str, atom, etc.)
-   for subsequent forms in the new ns."
+   for subsequent forms in the new ns.
+
+   `seon.agent` / `seon.agent.message` are host-bundled, so a `:refer`
+   against them produces a benign `:undeclared-var` warning that flips
+   the eval `:ok` to false EVEN THOUGH the alias/refer map wires up and
+   the vars resolve at runtime (live-proven). So we do NOT trust the
+   eval `:ok`; we verify success by PROBING that the refer'd `complete`
+   resolves to a fn in the home ns, and only throw when that probe fails."
   [compile-state agent-ns-sym _agent-id]
   (let [setup-src
-        (str "(ns " agent-ns-sym ")"
-             ":seon.eval/setup-ok")
-        r (await (eval compile-state setup-src
-                       {:ns 'cljs.user
-                        :analyze-deps? true}))]
-    (when-not (:ok r)
-      (throw (ex-info "setup-agent-ns! failed"
-                      {:agent-ns agent-ns-sym
-                       :error    (:error r)})))
+        (str "(ns " agent-ns-sym
+             " (:require [seon.agent.message :as message]"
+             " [seon.agent :as agent :refer [wait complete terminate]]))")]
+    (await (eval compile-state setup-src
+                 {:ns 'cljs.user :analyze-deps? true}))
+    ;; The benign refer-warning makes the ns form report :ok false, so the
+    ;; home ns is verified by probing the wiring directly: `complete` (a
+    ;; refer'd verb) must resolve to a fn in the new ns.
+    (let [probe (await (eval compile-state "(fn? complete)"
+                             {:ns agent-ns-sym :analyze-deps? false}))]
+      (when-not (and (:ok probe) (true? (:value probe)))
+        (throw (ex-info "setup-agent-ns! failed — home ns verb aliases did not wire"
+                        {:agent-ns agent-ns-sym
+                         :probe    probe}))))
     agent-ns-sym))
 
 ;; ============================================================
@@ -1789,10 +1810,8 @@
 
 (def store-edn-cap
   "Store-time char cap for any pr-str'd string persisted as a datom
-   (`:seon.eval/result-edn`, `:seon.eval/error`). (The turn prompt no
-   longer flows through here — it persists whole as a
-   logs/prompts/<agent>/<turn>.txt blob with `:seon.agent.turn/prompt-chars`
-   + `:seon.agent.turn/prompt-file` datom projections, 2026-06-09.)
+   (`:seon.eval/result-edn`, `:seon.eval/error`). Override with
+   SEON_STORE_EDN_CAP.
 
    MEMORY-SAFETY invariant: the DB must never hold a multi-MB blob in a
    single datom. A 9.7M-char `pull [*]` result once landed verbatim as
@@ -1801,13 +1820,11 @@
    (losing the in-RAM `:memory` DB). This cap bounds each persisted
    string so a whole-DB scan stays bounded by `N * store-edn-cap`.
 
-   16k is ~10x the render cap (`seon.agent/eval-render-cap`, 1500) — the
-   LLM never sees beyond the render cap anyway, so the extra headroom is
-   purely for direct datom inspection/debugging while staying ~600x below
-   the 9.7M blob that caused the OOM. The FULL value remains available
-   in-session as the live var `result/<id>` (globalThis live-result
-   stash, `stash-result-raw!`) — that path is NOT capped."
-  16384)
+   16k is generous headroom for direct datom inspection/debugging while
+   staying ~600x below the 9.7M blob that caused the OOM. The FULL value
+   remains available in-session as the live var `result/<id>` (globalThis
+   live-result stash, `stash-result-raw!`) — that path is NOT capped."
+  (env-int "SEON_STORE_EDN_CAP" 16384))
 
 (defn cap-edn
   "Truncate an already-stringified (pr-str'd) value to `store-edn-cap`,
@@ -1891,23 +1908,48 @@
    whole set and then char-clipping it mid-token produces an ugly,
    unhelpful blob. Instead we preview the first `result-row-cap` rows and
    prepend a one-line GUIDING message teaching the agent to narrow.
+   Override with SEON_RESULT_ROW_CAP.
 
-   The guide is PREPENDED (not appended) so it survives the smaller
-   downstream display cap (`seon.agent/eval-render-cap`, 1500) — the
-   agent reads the clip-feedback even when the preview itself is later
-   trimmed. The FULL value is untouched as the live var `result/<id>`
-   (globalThis live-result stash); the row cap is a render concern only."
-  50)
+   The guide is PREPENDED (not appended) so it survives any smaller
+   downstream display cap — the agent reads the clip-feedback even when
+   the preview itself is later trimmed. The FULL value is untouched as
+   the live var `result/<id>` (globalThis live-result stash); the row
+   cap is a render concern only."
+  (env-int "SEON_RESULT_ROW_CAP" 50))
+
+(def result-body-render-cap
+  "Char cap for the rendered `:seon.eval/result-edn` BODY of one eval —
+   the clip applied to the projected/pr-str'd value string before it is
+   persisted. Any value (a giant scalar, a wide map, a long string)
+   clips here to a well-formed string that names `result/<id>` for the
+   full live value. Override with SEON_RESULT_BODY_RENDER_CAP."
+  (env-int "SEON_RESULT_BODY_RENDER_CAP" 16384))
+
+(defn clip-result-body
+  "Clip a rendered result-body STRING to `result-body-render-cap`,
+   appending a one-line pointer to the full value's `result/<id>` live
+   var. Under the cap → returned unchanged. Names the id so the agent
+   always knows where the untruncated value lives. Pure; nil-safe."
+  {:malli/schema [:=> [:catn [::eval-id :string] [::body :string]] :string]}
+  [eval-id body]
+  (let [s (str body)
+        n (count s)]
+    (if (> n result-body-render-cap)
+      (str (subs s 0 result-body-render-cap)
+           "\n;; … +" (- n result-body-render-cap) " chars clipped; the full "
+           "value is the live var result/" eval-id " — drill it with "
+           "get-in/filter/subs.")
+      s)))
 
 ;; --- agent-safe projection ---------------------------------------------
 ;; The transcript shows a CLIPPED, READER-SAFE summary of each eval value,
 ;; never a raw dump. A datahike DB/Datom/Entity (or any runtime handle,
-;; record, or raw JS object) dumped verbatim into `<past-evals>` is both
+;; record, or raw JS object) dumped verbatim into the transcript is both
 ;; noise (a multi-KB index blob) AND a self-inflicted trap: the agent
 ;; reads its OWN committed work back as `#datahike/DB {…}` and, even when
 ;; the tag IS reader-registered, gets an opaque `[object Object]` instead
-;; of data. The fix (#41) is structural — project every such node to a
-;; small, plain-data summary BEFORE it becomes a string. The RAW value is
+;; of data. The fix is structural — project every such node to a small,
+;; plain-data summary BEFORE it becomes a string. The RAW value is
 ;; untouched as `result/<id>` (the projection is display-only).
 ;;
 ;; The walk recurses through plain collections only. A datahike DB is also
@@ -2056,29 +2098,38 @@
    more than `result-row-cap` rows, render a bounded preview (first
    `result-row-cap` rows) and PREPEND a guiding clip message — a broad
    query result becomes actionable feedback instead of a char-clipped
-   giant set. Otherwise pr-str normally (the size cap `cap-edn` still
-   backstops huge scalars).
+   giant set. Otherwise pr-str normally.
 
-   Operates on the RAW value (pre-pr-str) — this is the only point in the
-   pipeline where the original row count is known. Pure: stores nothing,
-   does not touch the live-result stash. Never throws."
+   Every branch — preview, plain pr-str, AND the never-throws fallback —
+   routes through [[clip-result-body]], so ANY value (a wide map, a long
+   string, an unprintable object) clips to a well-formed string that
+   names `result/<id>` for the full live value. Operates on the RAW value
+   (pre-pr-str) — the only point in the pipeline where the original row
+   count is known. Pure: stores nothing, does not touch the live-result
+   stash. Never throws."
   [eval-id value]
-  (try
-    (let [value (project-agent-safe value)]
-      (if (and (coll? value)
-               (counted? value)
-               (> (count value) result-row-cap))
-        (let [total   (count value)
-              preview (take result-row-cap value)
-              dropped (- total result-row-cap)
-              body    (str/join "\n " (map pr-str preview))]
-          (str ";; … " total " rows; showing first " result-row-cap
-               ", +" dropped " more clipped. Narrow your query: a tighter "
-               ":where, a :find aggregate, or take fewer; result/" eval-id
-               " holds the full value to drill with get-in/filter.\n"
-               "(" body ")"))
-        (pr-str value)))
-    (catch :default _ (str value))))
+  (clip-result-body
+    eval-id
+    (try
+      (let [value (project-agent-safe value)]
+        (if (and (coll? value)
+                 (counted? value)
+                 (> (count value) result-row-cap))
+          (let [total   (count value)
+                preview (take result-row-cap value)
+                dropped (- total result-row-cap)
+                body    (str/join "\n " (map pr-str preview))]
+            (str ";; … " total " rows; showing first " result-row-cap
+                 ", +" dropped " more clipped. Narrow your query: a tighter "
+                 ":where, a :find aggregate, or take fewer; result/" eval-id
+                 " holds the full value to drill with get-in/filter.\n"
+                 "(" body ")"))
+          (pr-str value)))
+      (catch :default _
+        ;; Unprintable value — name where the live value lives instead of
+        ;; a bare (str value) that could itself be a giant/opaque blob.
+        (str ";; <value could not be rendered as data; the live value is "
+             "result/" eval-id ">")))))
 
 (defn ^:async record-eval!
   "Transact one :seon.eval entity as a component child of its owning
@@ -2138,10 +2189,13 @@
                           :seon.eval/ns          (if (keyword? ns)
                                                    ns
                                                    (keyword (str ns)))}
-                   ;; Cap the PERSISTED string (`cap-edn`) so the DB never
-                   ;; holds a multi-MB blob (MEMORY-SAFETY). The FULL value
-                   ;; is already in the globalThis live-result stash (set by
-                   ;; eval-batch! before this call) and is NOT capped.
+                   ;; `render-result-edn` already clips the body to
+                   ;; `result-body-render-cap` and names `result/<id>` for the
+                   ;; full value. `cap-edn` (store-edn-cap) is the additional
+                   ;; MEMORY-SAFETY backstop so the DB never holds a multi-MB
+                   ;; blob even if the render cap is raised; a no-op when the
+                   ;; render cap ≤ the store cap. The FULL value is in the
+                   ;; globalThis live-result stash (set before this call).
                    (:ok result)
                    (assoc :seon.eval/result-edn
                           (cap-edn
@@ -2602,8 +2656,8 @@
    Per-form work is wrapped in `(db/with-tx-context {…} f)` so every
    transact inside auto-tags with the causality bundle (agent-id +
    eval-id + origin). Callers that establish a wider scope first
-   (e.g. agent.cljs/run-turn! adding turn-id) get those keys layered
-   in via with-tx-context's merge.
+   (the turn runner adding turn-id) get those keys layered in via
+   with-tx-context's merge.
 
    Args:
      compile-state — the bootstrap compile-state (defonce'd at boot)
@@ -2618,9 +2672,8 @@
              :seon.eval/n-ok   <int>        ; successful evals
              :seon.eval/n-fail <int>}`     ; failed (eval-throw + read)
 
-   The caller (run-agentic-loop! stop-policy logic) reads :n-ok for
-   'progress made this turn' and :n-fail to surface to the agent's
-   warnings tile."
+   The caller reads :n-ok for 'progress made this turn' and :n-fail to
+   surface to the agent's warnings tile."
   [compile-state parsed agent-ns-sym agent-id turn-id]
   (let [;; Fold-step local accumulators. Volatile! is a transient
         ;; mutation impl detail inside this one fn; not shared state.

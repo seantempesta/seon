@@ -1,6 +1,6 @@
 (ns seon.ctx.transcript
   "The `:transcript` context section + its `:seon.render/html` twin — the
-   WHOLE bottom of the agent's context (agent-fsm-redesign-2026-06-23 §2).
+   WHOLE bottom of the agent's context.
 
    ONE eval'able REPL transcript: `;;` comments + forms + `;;=>`-commented
    results + `;;;` runtime-structure lines + a live `ns=>` readline. No
@@ -26,27 +26,29 @@
 
 (def transcript-char-budget
   "Total rendered-chars cap for the transcript section (~6k tokens at
-   chars/4). Why 24,000: the audit measured an UNBOUNDED transcript at
-   90,468 chars by turn 58 — 83% of a 27k-token context, dominating
-   both spend and the model's attention. 24k keeps the newest ~15
-   worst-case eval rows (≤1.6KB each via `eval-render-cap`) or several
-   dozen typical items whole — comfortably more than the 2–4 turns most
-   questions need — while bounding context ≈ static sections + 6k tok.
-   Retention is NEWEST-FIRST: oldest items drop beyond the budget and
-   an elision note replaces them at the top."
-  24000)
+   chars/4) — bounds an otherwise-unbounded transcript that would
+   dominate both spend and the model's attention as turns accrue. Keeps
+   the newest several dozen typical items (or ~15 worst-case eval rows)
+   whole — comfortably more than the 2–4 turns most questions need.
+   Retention is NEWEST-FIRST: oldest items drop beyond the budget and an
+   elision note replaces them at the top. Override via env
+   SEON_TRANSCRIPT_CHAR_BUDGET."
+  (or (some-> (.. js/process -env -SEON_TRANSCRIPT_CHAR_BUDGET)
+              js/parseInt
+              (#(when-not (js/isNaN %) %)))
+      24000))
 
 ;; ------------------------------------------------------------
-;; Masthead — the positive-framing opener (§2). Rendered every turn as
-;; the FIRST lines of the transcript. It teaches the live-and-current
-;; REPL by LEADING WITH WHAT TO DO (never a `don't write ;;=>`
-;; prohibition — a negative example primes the very mimicry it forbids,
-;; standing owner rule). The `{ns}` slot is the only volatile byte; it
-;; rides the masthead so the agent sees its own session name.
+;; Masthead — the positive-framing opener. Rendered every turn as the
+;; FIRST lines of the transcript. It teaches the live-and-current REPL by
+;; LEADING WITH WHAT TO DO (never a `don't write ;;=>` prohibition — a
+;; negative example primes the very mimicry it forbids, standing owner
+;; rule). The ns slot is the only volatile byte; it rides the masthead so
+;; the agent sees its own session name.
 ;; ------------------------------------------------------------
 
 (defn masthead
-  "The transcript masthead (§2) for namespace label `ns-str` — the
+  "The transcript masthead for namespace label `ns-str` — the
    positive-framing opener, rendered every turn. Single source: the agent
    never sees a `;;=>` shape it isn't told the RUNTIME writes, so there is
    nothing in its own output to mimic. LEADS with what to do; reinforces
@@ -64,7 +66,7 @@
          ";;; next turn. Append below.")))
 
 (def resume-marker-line
-  "The session-resume boundary (§2): rendered ONCE per resume, between the
+  "The session-resume boundary: rendered ONCE per resume, between the
    last turn of a previous process and the first of the next, as a `;;;`
    runtime-structure comment. Everything above it ran in a process that no
    longer exists — its `result/<id>` vars are not dereferenceable
@@ -72,16 +74,15 @@
   ";;; ── session resumed — the turns above ran in a previous process; their result/<id> vars are gone (re-run a form to recompute) ──")
 
 ;; ------------------------------------------------------------
-;; Inbound gate — the SAME predicate as the wake (§2), so a `:core`
-;; substrate nudge never renders as a fake inbound.
+;; Inbound gate — the SAME predicate as the wake, so a `:core` substrate
+;; nudge never renders as a fake inbound.
 ;;
-;; FALLBACK (hazard #1): the canonical gate is
-;; `seon.agent/inbound-msg-datom?`, but `seon.agent` REQUIRES this ns
-;; (agent.cljs:109 → seon.ctx.transcript), so requiring it back here is a
-;; shadow-cljs require CYCLE. Compiling clean beats a cycle, so we keep a
-;; small LOCAL predicate over the same four conditions.
+;; FALLBACK: the canonical gate is `seon.agent/inbound-msg-datom?`, but
+;; `seon.agent` REQUIRES this ns, so requiring it back here is a require
+;; CYCLE. Compiling clean beats a cycle, so we keep a small LOCAL
+;; predicate over the same conditions.
 ;; TODO unify with seon.agent/inbound-msg-datom? once the shared gate
-;; moves to a cycle-free ns (planned for message.cljs in U2).
+;; moves to a cycle-free ns.
 ;; ------------------------------------------------------------
 
 (defn- inbound-msg?
@@ -150,7 +151,7 @@
 
 (defn- inbound-line
   "ONE inbound message as a `;;; ◀ from X @ time — \"…\"` runtime-structure
-   line (§2). `new?` marks a message that arrived mid-LLM-call (it landed
+   line. `new?` marks a message that arrived mid-LLM-call (it landed
    after the prior turn but before this one closed) — rendered with a
    `(NEW — arrived while you were working)` note so the agent knows it is
    acting on it for the first time. Content bounded by
@@ -163,7 +164,7 @@
 
 (defn- turn-header
   "The `;;; ── turn N · <time> · loop K/cap · <ns> ──` opener for ONE
-   turn (§2) — the runtime-structure channel (`;;;`). `n` is the
+   turn — the runtime-structure channel (`;;;`). `n` is the
    monotonic display turn number (derived position across all sessions),
    `loop-k`/`cap` the sliding-window per-loop count (turns sharing this
    turn's `:seon.agent.turn/wake`), `ns-str` the ns the turn ran in."
@@ -174,7 +175,7 @@
          " · " ns-str " " pad)))
 
 (defn- render-turn
-  "Render ONE turn as a comment-block (§2): the `;;; ── turn N · … ──`
+  "Render ONE turn as a comment-block: the `;;; ── turn N · … ──`
    header, then any `;;; ◀` inbound head-lines for messages this turn
    first sees, then each eval rendered REPL-faithful by
    [[seon.ctx/format-eval-row]] (a `;; in <ns>` marker injected only where
@@ -225,11 +226,11 @@
          :seon.agent.session/id-of-session (:seon.agent.session/id s)}))))
 
 (defn readline
-  "The folded live readline (§2) — DERIVED every render, never stored. The
+  "The folded live readline — DERIVED every render, never stored. The
    very-bottom of the transcript: the cursor (`ns=>` current ns) plus this
    turn's status/steering as a `;;;` line (turn · time · loop K/cap ·
-   state · any cap-pressure steering). Replaces the old prompt + turns +
-   status sections — ONE steering surface. Always present.
+   state · any cap-pressure steering) — ONE steering surface. Always
+   present.
 
    Pressure steering escalates toward the per-loop cap — positive-framing:
    it tells the agent what to DO (finish, park, message), never just that
@@ -248,7 +249,7 @@
                        (filter #(= wake (:seon.agent.turn/wake %)))
                        count)
                   n-turns)
-        cap     (ctx/turns-cap id db)
+        cap     (ctx/effective-cap id db)
         ;; localized full date+tz so the agent can judge what's expensive.
         now     (let [tz (ctx/host-timezone)]
                   (str (try (.toLocaleString (js/Date.) "sv-SE" #js {:timeZone tz})
@@ -270,7 +271,7 @@
          ns-str "=> ")))
 
 (defn transcript-section
-  "The WHOLE bottom of the context (agent-fsm-redesign-2026-06-23 §2): the
+  "The WHOLE bottom of the context: the
    [[masthead]], then the agent's PAST turns oldest-first as comment-blocks
    ([[render-turn]] — `;;; ── turn N · … ──` header, `;;; ◀` inbound
    head-lines, then `;;` comments + forms + `;;=>` results via
@@ -288,8 +289,8 @@
    WITHOUT `result/<id>` handles. Budget eviction is OLDEST-TURN-FIRST;
    the masthead + readline are ALWAYS kept (they orient the agent).
    Per-eval caps SPLIT BY COMPONENT ([[seon.ctx/format-eval-row]]): echoed
-   source + stdout at [[seon.ctx/eval-render-cap]] (1500); the citable
-   result body at [[seon.ctx/result-body-render-cap]] (16384)."
+   source + stdout at [[seon.ctx/eval-render-cap]]; the citable result
+   body at [[seon.ctx/result-body-render-cap]]."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.agent/keys [id] db :seon.db/db :as input}]
   (let [db       (or db @db/*conn*)
@@ -297,7 +298,7 @@
         a        (agent-rec id db)
         my-eid   (:db/id a)
         wake     (:seon.agent/wake a)
-        cap      (ctx/turns-cap id db)
+        cap      (ctx/effective-cap id db)
         cur-ns   (ctx/current-ns {:seon.agent/id id :seon.db/db db})
         ns-str   (if (keyword? cur-ns) (name cur-ns) (str cur-ns))
         turns    (session-turns id db)
@@ -377,8 +378,8 @@
       (str head "\n\n" tail))))
 
 (defn- turn-card-hiccup
-  "ONE turn rendered as a card (debug-view-section-twins-2026-06-18): the
-   `turn N` header, then the turn's evals as the comment-block text
+  "ONE turn rendered as a card: the `turn N` header, then the turn's
+   evals as the comment-block text
    [[render-turn]] produces, in a `[:pre]`. `prior?` strips result/<id>
    handles for prior-session turns."
   [{turn ::turn :as enriched} prior? n]
@@ -395,8 +396,8 @@
       body]]))
 
 (defn transcript-section-html
-  "The HTML TWIN of [[transcript-section]] (debug-view-section-twins-
-   2026-06-18): the agent's OWN turns/evals rendered as cards, oldest-first
+  "The HTML TWIN of [[transcript-section]]: the agent's OWN turns/evals
+   rendered as cards, oldest-first
    (the same [[session-turns]] walk the text twin uses — structurally
    agent-scoped). Returns the standard `:seon.render/html-response` map; an
    empty transcript renders a friendly placeholder."

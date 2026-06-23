@@ -97,10 +97,10 @@
                     :seon.db/args  [agent-id]}))))
 
 (defn- list-agents-data
-  "Pull `[id state turn-count completed-at?]` rows for every
-   `:seon.agent/id` entity. Sorted by id asc. `:seon.agent/completed-at`
-   is present only when the agent is completed (absent = active — see
-   `seon.agent/complete!`); the dashboard groups on it."
+  "Pull `[id state turn-count]` rows for every `:seon.agent/id` entity,
+   sorted by id asc. The dashboard groups on `:seon.agent/state` — a
+   `:completed` agent moves to the collapsed history grid; everything
+   else stays active. Turn count is derived from the session log."
   []
   (let [conn db/*conn*
         db   @conn
@@ -115,15 +115,9 @@
          (mapv (fn [id]
                  (let [ent (db/entity {:seon.db/db db
                                        :seon.db/ref [:seon.agent/id id]})]
-                   (cond->
-                     {:seon.agent/id         id
-                      :seon.agent/state      (or (:seon.agent/state ent) :unknown)
-                      ;; :seon.agent/turn-count the ATTR was retired
-                      ;; 2026-05-22 — derived from the session log now.
-                      :seon.agent/turn-count (default/agent-turn-count ent)}
-                     (some? (:seon.agent/completed-at ent))
-                     (assoc :seon.agent/completed-at
-                            (:seon.agent/completed-at ent)))))))))
+                   {:seon.agent/id         id
+                    :seon.agent/state      (or (:seon.agent/state ent) :unknown)
+                    :seon.agent/turn-count (default/agent-turn-count ent)}))))))
 
 (declare data-scan)
 
@@ -868,7 +862,7 @@
    `seon.render.live-tile/welcome` (the ONE default — live-tiles PRD
    §8.4); nil hiccup only for a nonexistent entity, which the grid
    (derived from live agent rows) never hands it."
-  [db {:seon.agent/keys [id turn-count completed-at]}]
+  [db {:seon.agent/keys [id turn-count state]}]
   (let [tile (:seon.render/hiccup
                (render/render-agent-tile {:seon.db/db db
                                           :seon.agent/id id}))]
@@ -900,16 +894,14 @@
      [:a {:href (str "/agent/" id)
           :aria-label (str "open agent " id)
           :class "absolute inset-0"}]
-     ;; ✓ complete — stamps :seon.agent/completed-at via the POST
-     ;; endpoint (seon.agent/complete!). Confirm-free: reversible by
-     ;; an explicit retract (see complete!'s docstring); the SSE
-     ;; re-morph drops the card from the default grid on commit.
-     ;; Pinned to the card's upper-right corner (absolute) so it reads
-     ;; as a real control, not footer decoration (Sean couldn't find it
-     ;; in the action row). `relative z-10` is needed AFTER the inset-0
+     ;; ✓ complete — POSTs to the /complete endpoint, which sets
+     ;; :seon.agent/state to :completed. The SSE re-morph then moves the
+     ;; card into the collapsed completed grid. Pinned to the card's
+     ;; upper-right corner (absolute) so it reads as a real control, not
+     ;; footer decoration. `relative z-10` is needed AFTER the inset-0
      ;; overlay anchor so this button — not the navigate link — receives
-     ;; the click.
-     (when-not completed-at
+     ;; the click. Hidden once the agent is already completed.
+     (when-not (= :completed state)
        [:button
         {:type "button"
          :title "mark agent completed"
@@ -951,11 +943,12 @@
   [system? completed?]
   (let [db   @db/*conn*
         rows (list-agents-data)
-        ;; Lifecycle split (P3.5/#31): completed agents (stamped via
-        ;; seon.agent/complete!) are HISTORY — grouped collapsed at the
-        ;; bottom, never resumed, never triggered. Active = absent attr.
-        active    (vec (remove :seon.agent/completed-at rows))
-        completed (vec (filter :seon.agent/completed-at rows))
+        ;; Lifecycle split: `:completed` agents are HISTORY — grouped
+        ;; collapsed at the bottom. They remain wakeable (a new message
+        ;; resumes them), so this is a display grouping, not a halt.
+        completed-row? (fn [r] (= :completed (:seon.agent/state r)))
+        active    (vec (remove completed-row? rows))
+        completed (vec (filter completed-row? rows))
         {::keys [agent-count turn-count fact-count
                  datom-count fn-count schema-count test-count]}
         (cluster-stats db)
@@ -1046,11 +1039,10 @@
              active)
        [:p {:class "text-text-500 italic text-xs"}
         "no active agents — boot one via the REPL and it will appear here live"])
-     ;; Completed agents — queryable history, HIDDEN by default (task
-     ;; #10 demo half). The `?completed=1` query param reveals them —
-     ;; same view-state-in-the-URL pattern as `?system=1`. Not resumed
-     ;; at boot, no trigger armed; un-complete is an explicit retract
-     ;; of :seon.agent/completed-at (see seon.agent/complete!).
+     ;; Completed agents — queryable history, HIDDEN by default. The
+     ;; `?completed=1` query param reveals them — same view-state-in-the-
+     ;; URL pattern as `?system=1`. `:completed` is wakeable: a new
+     ;; message resumes the agent and it returns to the active grid.
      (when (seq completed)
        [:section {:class "mt-2"}
         [:a {:href (agents-url system? (not completed?))

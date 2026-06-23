@@ -55,10 +55,10 @@
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
     [seon.agent :as agent]
-    ;; The FSM loop + wake trigger (agent-fsm carve, U4): the client boot
-    ;; path ARMS the wake trigger (seon.agent does NOT, to stay acyclic).
+    ;; The FSM loop + wake trigger: the client boot path ARMS the wake
+    ;; trigger (seon.agent does NOT, to stay acyclic).
     [seon.agent.fsm :as fsm]
-    ;; One turn — the bootstrap turn-0 (creation evals) opens it directly.
+    ;; One turn — the bootstrap turn-0 opens a turn directly.
     [seon.agent.turn :as turn]
     [seon.ctx]
     [seon.ai :as ai]
@@ -73,9 +73,8 @@
     ;; needed.
     [seon.render]
     [seon.render.default]
-    ;; The canonical creation-time tile wiring form (live-tiles U4) —
-    ;; `creation-evals!` evals live-tile/wiring-source AS the new agent.
-    [seon.render.live-tile :as live-tile]
+    ;; Live-tile render namespace — required so the build includes it.
+    [seon.render.live-tile]
     ;; Iteration surface — owns the canonical `!compile-state`
     ;; defonce (in `seon.repl`). start-agent! reads through
     ;; `seon.repl/ensure-bootstrap!` rather than holding a second
@@ -125,7 +124,7 @@
     ;; start-agent! can call `handler/register!` + `wake/bootstrap-schema!`
     ;; at boot. Without this, the inspector header shows "0 handlers"
     ;; and the core has no wake-on-message responder beyond the
-    ;; per-agent `install-user-trigger!` already wired by agent/boot!.
+    ;; per-agent wake trigger the client boot path arms.
     [seon.handler :as h]
     [seon.handlers.wake :as wake]
     ;; Local-machine capability surface — A-9. Required so the agent
@@ -140,10 +139,6 @@
     ;; Work items (user→agent asks + agent notes-to-self) — required so
     ;; its register! calls run before the boot install of :seon.agent.todo/*.
     [seon.agent.todo]
-    ;; The <turns> countdown section (core-default-ctx :turns) —
-    ;; required so the build includes it; seon.ctx references it by
-    ;; symbol only (late lookup-value resolution, no require cycle).
-    [seon.agent.turns]
     ;; The per-section ctx namespaces (ctx-sections-split-2026-06-18):
     ;; each owns one section fn (+ html twin) that core-default-ctx
     ;; wires by SYMBOL — required here so the build includes them and
@@ -157,7 +152,6 @@
     [seon.ctx.transcript]
     [seon.ctx.inventory]
     [seon.ctx.relevant]
-    [seon.ctx.prompt]
     [seon.platform]
     ;; Phase B item 9 — shared read-side wrapper over the analyzer
     ;; state. Required here so the build includes it; item 10's
@@ -206,19 +200,19 @@
   (log/info-console! "seon.client" "reloading…")
   (stop-heartbeat!))
 
-(declare rearm-user-triggers!)
+(declare rearm-wake-triggers!)
 
 (defn ^:dev/after-load after-reload []
   (swap! !state update :reload-count inc)
   (log/info-console! "seon.client"
                      (str "reload #" (:reload-count @!state)
                           " — booted " (:boot-at @!state)))
-  ;; Hot-reload hygiene: re-install the per-agent user-message
-  ;; triggers so tx-listener closures run the just-reloaded code.
+  ;; Hot-reload hygiene: re-install the per-agent wake trigger so
+  ;; tx-listener closures run the just-reloaded code.
   ;; Async fire-and-forget — logs the re-armed ids / errors.
   ;; (seon.web.inspector re-arms its own ::inspector listener via its
   ;; own ^:dev/after-load — not duplicated here.)
-  (rearm-user-triggers!)
+  (rearm-wake-triggers!)
   (start-heartbeat!))
 
 ;; ---------------------------------------------------------------------------
@@ -303,7 +297,7 @@
 ;; at the var root, and hands off to seon.agent/boot!.
 ;;
 ;; Idempotent: re-calling start-agent! reuses the existing conn (stored in
-;; !agent-conn) and overwrites the kick listener. Useful during dev hot-
+;; !agent-conn) and re-arms the wake trigger. Useful during dev hot-
 ;; reload where the watcher rebuilds client.cljs.
 ;; ---------------------------------------------------------------------------
 
@@ -336,11 +330,14 @@
    ;; docs/seon/concepts/reactive-context.
    :seon.agent/id
    :seon.agent/state
-   ;; lifecycle end-stamp (P3.5/#31) — absent = active; boot resumes
-   ;; only agents WITHOUT it (see seon.agent/complete!).
-   :seon.agent/completed-at
+   ;; Wake-episode token (id) — stamped on each loop wake; the turn copies
+   ;; it onto :seon.agent.turn/wake so the loop's sliding cap derives its
+   ;; per-loop turn count.
+   :seon.agent/wake
    :seon.agent/sessions
-   :seon.agent/turns-cap
+   ;; Per-loop turn cap (env SEON_MAX_TURNS_PER_LOOP, default 20). The loop
+   ;; enforces effective-cap = this + inbounds-arrived-this-wake.
+   :seon.agent/max-turns-per-loop
    :seon.agent/ctx
 
    ;; --- Render slots (A-6) — symbol-only at storage. ---
@@ -353,10 +350,7 @@
    :seon.ctx/name
    :seon.ctx/priority
 
-   ;; --- Session (v1.md §2.1) ---
-   ;; turns-since-inbound is DERIVED from the count of :seon.agent.turn
-   ;; entities with :seon.agent.turn/at > the latest inbound message's :at.
-   ;; See seon.agent/turns-since-inbound.
+   ;; --- Session ---
    :seon.agent.session/id
    :seon.agent.session/at
    :seon.agent.session/turns
@@ -371,9 +365,8 @@
    ;; silently cap-edn-truncated at 16,406 chars — useless evidence).
    :seon.agent.turn/prompt-chars
    :seon.agent.turn/prompt-file
-   ;; :seon.agent.turn/woken-by + :seon.agent.turn/messages DELETED
-   ;; (agent-fsm redesign 2026-06-23, §5). Turns now stamp
-   ;; :seon.agent.turn/wake (the wake-episode token) instead.
+   ;; The wake-episode token a turn was opened under — the loop's
+   ;; sliding cap derives its per-loop turn count from it.
    :seon.agent.turn/wake
    :seon.agent.turn/evals
 
@@ -538,7 +531,7 @@
         THE WIRE to the JVM writer; idempotent `:db/ident` upserts, so
         re-booting against the populated store re-asserts no-ops.
      4. listen adapter — foreign writers' txs fire this conn's native
-        listeners (user-message triggers + inspector SSE)."
+        listeners (wake triggers + inspector SSE)."
   []
   (await (store.wire/ping!))
   (let [conn (await (d/connect (store.wire/cluster-config)))]
@@ -823,9 +816,9 @@
 
 (defn seed-core!
   "Tx-data for THE user entity plus the EMPTY system-wide instruction
-   singleton (`my.kb.system/seed-tx-data` — context-v4 §2.2 home 3;
-   agents and the user APPEND rows at runtime, read back via
-   `(my.kb.system/instructions)` in the creation-turn tutorial).
+   singleton (`my.kb.system/seed-tx-data`); agents and the user APPEND
+   rows at runtime, read back via `(my.kb.system/instructions)` in the
+   bootstrap turn.
 
    The user row is the ONE `:seon.user/id` entity every
    `:seon.agent.message/from`/`to` user-ref resolves to (identity upsert,
@@ -1834,10 +1827,9 @@
 
 (defn- stub-llm
   "A fake LLM that demonstrates the REPL-as-harness response shape: a
-   `;; narration` line then a real `(message/user …)` form (agent-fsm
-   redesign U2 — the verb that says something to the human; `reply!` is
-   deleted). The FSM halt policy ends the wake when no actionable forms
-   remain. Returns a Promise of {:text \"...\"}."
+   `;; narration` line then a real `(message/user …)` form — the verb
+   that says something to the human. The FSM halt policy ends the wake
+   when no actionable forms remain. Returns a Promise of {:text \"...\"}."
   [ctx]
   (let [text (str
                ";; stub LLM here — the real one needs DEEPSEEK_API_KEY\n"
@@ -1872,17 +1864,14 @@
       (openai/agent-adapter)
       stub-llm)))
 
-;; `live-agent-ids` / `resumable-agent-ids` folded into the one
-;; `seon.agent/armable-agent-ids` (state ≠ :terminated) — single source
-;; of truth for "this agent can still be woken" (agent-fsm redesign U1).
+;; `seon.agent/armable-agent-ids` (state ≠ :terminated) is the single
+;; source of truth for "this agent can still be woken".
 
-(defn- rearm-user-triggers!
-  "Hot-reload hygiene (work-plan 1.2): re-install the per-agent
-   user-message trigger for every live agent so handler fixes take
-   effect on hot reload. Without this, the registered tx-listener
-   closures keep running pre-reload code (observed live 2026-06-09:
-   the trigger-scoping fix in seon.agent/user-msg-for-agent? did not
-   reach live agents until a manual install-user-trigger! per agent).
+(defn- rearm-wake-triggers!
+  "Hot-reload hygiene: re-install the per-agent wake trigger for every
+   armable agent so handler fixes take effect on hot reload. Without
+   this, the registered tx-listener closures keep running pre-reload
+   code.
 
    Everything is derived, nothing stored: agent ids from the DB
    (`seon.agent/armable-agent-ids`), compile-state from the idempotent
@@ -1918,13 +1907,13 @@
                      :seon.agent/llm-fn        llm-fn
                      :seon.agent/compile-state compile-state}))
                 (log/info-console! "seon.client"
-                                   "reload: user-message triggers re-armed"
+                                   "reload: wake triggers re-armed"
                                    {:seon.client/reinstalled ids})
                 ids)))
           (.catch
             (fn [err]
               (log/error-console! "seon.client"
-                                  "reload: user-message trigger re-arm FAILED"
+                                  "reload: wake trigger re-arm FAILED"
                                   err)))))
     (js/Promise.resolve [])))
 
@@ -2058,12 +2047,11 @@
         (set! db/*conn* prev-conn)))))
 
 (def inventory-read-source
-  "The creation-turn `store-inventory` eval (context-v4 §2.4/§3.1,
-   V4-3): the catalogs died as sections; the inventory is a core
-   fn the creation turn demonstrably RUNS — the fn's source is visible
-   in the rendered `seon.db` namespace tag, the CALL is visible here,
-   the RESULT is the value line, and re-running the fn is how you get
-   fresh numbers. The `;;` comments ride as the eval's narration."
+  "The bootstrap-turn `store-inventory` eval: the inventory is a core fn
+   turn 0 demonstrably RUNS — the fn's source is visible in the rendered
+   `seon.db` namespace, the CALL is visible here, the RESULT is the
+   value line, and re-running the fn is how you get fresh numbers. The
+   `;;` comments ride as the eval's narration."
   (str
     ";; What's already in the shared store? Other agents stored knowledge\n"
     ";; here before me — checking BEFORE researching is how I avoid paying\n"
@@ -2072,52 +2060,65 @@
     "(seon.db/store-inventory)\n"))
 
 (def instructions-read-source
-  "The creation-turn READ of the system-wide instructions (context-v4
-   PRD §3.1 tutorial register, V4-0): the fn's source is visible in
-   the rendered `my.kb.system` namespace, the CALL is visible in the
-   transcript, the RESULT is the value line — and re-running the fn is
-   how the agent gets the current set. The `;;` comments ride as the
-   eval's narration via `parse-forms`."
+  "The bootstrap-turn READ of the system-wide instructions: the fn's
+   source is visible in the rendered `my.kb.system` namespace, the CALL
+   is visible in the transcript, the RESULT is the value line — and
+   re-running the fn is how the agent gets the current set. The `;;`
+   comments ride as the eval's narration via `parse-forms`."
   (str
     ";; Next: the system-wide instructions — standing guidance for ALL\n"
     ";; agents in this cluster. Anyone (my human, another agent, me) can\n"
     ";; append a row; I re-read when I want the current set.\n"
     "(my.kb.system/instructions)\n"))
 
-(defn ^:async creation-evals!
-  "The startup eval block a NEWLY MINTED agent runs as its first
-   logged act (live-tiles PRD 2026-06-11 §6 U4 + context-v4 §3.1):
-   real evals, AS the agent, through the same `eval-batch!` path every
-   turn uses — (1) the tile welcome wiring
-   (`seon.render.live-tile/wiring-source`), whose tutorial `;;`
-   comments ride as the eval's narration, and (2) the
-   `(my.kb.system/instructions)` read ([[instructions-read-source]],
-   V4-0) so the system-wide instruction rows land in the transcript as
-   a demonstrated query. The wiring eval transacts
-   `:seon.render.live-tile/content` onto the agent's own entity by
-   lookup ref; the datom is durable, so a pod restart resumes the
-   wiring with no re-seed. CREATION ONLY — resumed agents are never
-   retro-wired (their unwired state falls back to welcome at render
-   via `seon.render.live-tile/wired-content`).
+(def hello-source
+  "The bootstrap-turn hello: turn 0 greets the human via `message/user`
+   — the verb that says something to your one human (they see it now).
+   The `;;` comment rides as the eval's narration."
+  (str
+    ";; I'm up. Saying hello to my human and parking until they have work.\n"
+    "(message/user\n"
+    "  \"Hi — I'm up and connected to the shared store. What should I work on?\")\n"))
 
-   Opens the agent's first session + a creation turn so the eval
-   lands where every eval lands (sessions → turns → evals) and the
-   agent re-reads it in its own transcript. Returns the eval-batch!
-   summary map; failures are logged LOUDLY but never abort the boot —
-   a missing wiring datom only means the welcome fallback."
+(def park-source
+  "The bootstrap-turn park: turn 0 ends by parking via `agent/wait` —
+   state → :waiting, wakeable the moment a message arrives. The `;;`
+   comment rides as the eval's narration."
+  (str
+    ";; Park: I resume the instant a message lands.\n"
+    "(agent/wait \"awaiting first task\")\n"))
+
+(defn ^:async bootstrap-turn!
+  "Turn 0: the bootstrap a NEWLY MINTED agent runs as its first logged
+   act — real evals, AS the agent, through the same `eval-batch!` path
+   every turn uses, so they land where every eval lands (sessions →
+   turns → evals) and the agent re-reads them in its own transcript.
+
+   The forms, in order: read the shared-store inventory
+   ([[inventory-read-source]]), read the system-wide instructions
+   ([[instructions-read-source]]), greet the human via `message/user`
+   ([[hello-source]]), then park via `agent/wait` ([[park-source]]) so
+   the agent is `:waiting`, wakeable the moment a message arrives. The
+   `;;` comments ride as each eval's narration.
+
+   MINT ONLY — a resumed agent already has its turn 0 in the store.
+   Returns the eval-batch! summary map; failures are logged LOUDLY but
+   never abort the boot."
   [{:seon.agent/keys [id compile-state]}]
   (await
     (db/with-agent id
-      (fn ^:async run-creation-evals! []
+      (fn ^:async run-bootstrap-turn! []
         (try
           (let [session    (await (turn/ensure-session! id))
                 session-id (:seon.agent.session/id session)
                 turn-id    (db/new-id!)
-                source     (str (live-tile/wiring-source id)
+                source     (str inventory-read-source
                                 "\n"
-                                inventory-read-source
+                                instructions-read-source
                                 "\n"
-                                instructions-read-source)
+                                hello-source
+                                "\n"
+                                park-source)
                 batch
                 (await
                   (db/with-tx-context
@@ -2131,7 +2132,7 @@
                          :seon.agent.session/id-of-session session-id
                          :seon.agent.turn/id-of-turn       turn-id
                          :seon.agent.turn/prompt-text      ""}
-                        (fn ^:async creation-turn-body! []
+                        (fn ^:async bootstrap-turn-body! []
                           (await (seval/eval-batch!
                                    compile-state
                                    (repl/parse-forms source)
@@ -2139,31 +2140,31 @@
                                    id turn-id)))))))]
             (when (pos? (or (:seon.eval/n-fail batch) 0))
               (log/error-console!
-                "seon.client/creation-evals!"
-                "creation wiring eval FAILED — tile falls back to welcome at render"
+                "seon.client/bootstrap-turn!"
+                "bootstrap turn-0 eval FAILED"
                 {:seon.agent/id id :seon.eval/batch batch}))
             batch)
           (catch :default e
             (log/error-console!
-              "seon.client/creation-evals!"
-              "creation eval block THREW — tile falls back to welcome at render"
+              "seon.client/bootstrap-turn!"
+              "bootstrap turn-0 THREW"
               e)
             {:seon.eval/ids [] :seon.eval/n-ok 0 :seon.eval/n-fail 1}))))))
 
 (defn ^:async start-agent!
   "Bring up the pod's agents: open conn, init bootstrap-CLJS, then
-   RESUME every active agent in the cluster store — the agent entities
-   WITHOUT `:seon.agent/completed-at` (see `seon.agent/complete!`) —
-   re-arming each one's user-message trigger. A fresh agent is minted
-   ONLY when the store has zero resumable agents (genuine first boot)
-   or on the explicit create path (`:mint? true` — POST /agents/new).
+   RESUME every armable agent in the cluster store — the agents whose
+   `:seon.agent/state` is not `:terminated` (`armable-agent-ids`) —
+   arming each one's wake trigger. A fresh agent is minted ONLY when
+   the store has zero armable agents (genuine first boot) or on the
+   explicit create path (`:mint? true` — POST /agents/new).
    Identity is durable: restarting the pod does NOT accumulate agents.
 
      :llm-fn — fn of ctx-string returning a Promise of {:text \"...\"}.
                Optional; defaults to stub-llm for verification without
                an API key. Pass (seon.ai.openai-compat/agent-adapter)
                for the real thing.
-     :mint?  — force-mint a NEW agent even when resumable agents exist
+     :mint?  — force-mint a NEW agent even when armable agents exist
                (they are already armed from boot). The /agents/new path.
 
    Returns a Promise resolving to
@@ -2173,12 +2174,12 @@
       :seon.client/minted-ids  [...]
       :seon.web/port _ :seon.web/port-file _}.
    Subsequent (seon.agent/message! …) calls (or POST /chat) drive the
-   loop via the kick listener."
+   loop via the wake trigger."
   [& [{:keys [llm-fn mint? purpose] :or {llm-fn stub-llm}}]]
   (let [conn          (or @!agent-conn (await (open-cluster-conn!)))
         _             (reset! !agent-conn conn)
         ;; Bind the conn as the root *conn* so seon.db calls + the
-        ;; kick listener resolve without per-call threading.
+        ;; wake trigger resolve without per-call threading.
         _             (set! db/*conn* conn)
         ;; v1.md §7.1 boot preconditions. Throws cleanly if the conn
         ;; was opened without :keep-history? OR if the seon.db tx-meta
@@ -2232,7 +2233,7 @@
                 _             (log/info-console!
                                 "seon.client/start-agent!"
                                 (str "replay: " (pr-str replay-stats)))
-                ;; Per-agent boots — home ns + entity + kick listener +
+                ;; Per-agent boots — home ns + entity + wake trigger +
                 ;; MCP hosting, one at a time (boot transacts must not
                 ;; interleave). The primary's result feeds the return map.
                 results       (let [!acc (volatile! [])]
@@ -2249,12 +2250,10 @@
                                                      ;; an existing entity).
                                                      (some #{aid} minted-ids)
                                                      (assoc :seon.agent/purpose purpose)))))
-                                  ;; U4: the startup eval block —
-                                  ;; CREATION ONLY (a resumed agent is
-                                  ;; never retro-wired; unwired falls
-                                  ;; back to welcome at render).
+                                  ;; Turn 0 — MINT ONLY (a resumed agent
+                                  ;; already has its turn 0 in the store).
                                   (when (some #{aid} minted-ids)
-                                    (await (creation-evals!
+                                    (await (bootstrap-turn!
                                              {:seon.agent/id            aid
                                               :seon.agent/compile-state compile-state}))))
                                 @!acc)

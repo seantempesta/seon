@@ -1,16 +1,15 @@
 (ns seon.ctx.live-tile
-  "The `:live-tile` context section — \"what your human currently sees\"
-   (live-tiles U5). Symbol-wired into the composer layout
-   (`seon.ctx/core-default-ctx`) as
+  "The `:live-tile` context section — \"what your human currently sees\",
+   rendered as a `;; ── live tile ──` comment-block. Symbol-wired into the
+   composer layout (`seon.ctx/core-default-ctx`) as
    `'seon.ctx.live-tile/live-tile-section`; loaded at boot so the symbol
    resolves for `seon.eval/lookup-value`.
 
-   Kills the false belief a live T2 proof caught: a DeepSeek agent
-   replied \"My tile is currently blank — I haven't set it up yet\" while
-   its tile showed the core welcome. The agent sees the SAME wired value
-   the human surfaces render — derived every turn, nothing stored
-   (reactive-context doctrine). Self-contained: no spine read API, just
-   the tile renderer + wired-content provenance."
+   The agent sees the SAME wired value the human's surfaces render —
+   derived every turn, nothing stored (reactive-context doctrine), so the
+   agent can never believe its tile is blank when the human sees content.
+   Self-contained: no spine read API, just the tile renderer +
+   wired-content provenance."
   (:require
     [seon.db :as db]
     [seon.render :as render]
@@ -80,12 +79,11 @@
                                      :seon.db/ref [:seon.agent/id id]}))
                     entity)
             wired (live-tile/wired-content {:seon.render/entity ent})]
-        (str "<live-tile>\n"
+        (str ";; ── live tile ──\n"
              ";; Your live tile — what your human currently sees (as-of this\n"
              ";; turn's render; the human's view live-updates between turns).\n"
              "Wired: " (live-tile/wired-label wired) "\n\n"
              body "\n\n"
              "To change it: redefine the wired fn, or transact a new value\n"
              "(a qualified fn symbol or literal hiccup) onto\n"
-             ":seon.render.live-tile/content on your agent entity.\n"
-             "</live-tile>")))))
+             ":seon.render.live-tile/content on your agent entity.")))))

@@ -1,17 +1,15 @@
 (ns seon.ctx-test
-  "Contract tests for `seon.ctx` — the v4 composer
-   (context-v4-repl-realism 2026-06-11).
+  "Contract tests for `seon.ctx` — the ONE composer.
 
    Pins: the ONE namespace-selection rule (included-ns? — EVERY indexed
    :seon.ns row minus *.internal and *-test, no prefix allow-list) and
-   the full-source depth rule; the
-   `<namespace>` tags (internal never renders, an agent-authored ns
-   appears with NO config change, downstream code renders with NO config,
-   recency = most-recently-modified
-   LAST with a byte-identical prefix above the moved tag); the
-   `:seon.agent/purpose` entity seed + `<your-entity>` render;
-   merge/override-by-name semantics; the render guard; the per-agent
-   section budget; and the mixed-:or slot storage roundtrip.
+   the full-source depth rule; the `;; ── namespace x ──` blocks
+   (internal never renders, an agent-authored ns appears with NO config
+   change, downstream code renders with NO config, recency =
+   most-recently-modified LAST with a byte-identical prefix above the
+   moved block); the `:seon.agent/purpose` entity seed + your-entity
+   render; merge/override-by-name semantics; the render guard; the
+   per-agent section budget; and the mixed-:or slot storage roundtrip.
 
    All on a FRESH :memory conn seeded like the pod boots — never the
    live agent conn."
@@ -184,20 +182,20 @@
                       (let [txt (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})]
                         (reset! !before txt)
                         ;; FULL: my.* renders its whole source, unclipped.
-                        (is (str/includes? txt "<namespace name=\"my.agent.a1\">")
-                            "a my.* ns renders as a full tag")
+                        (is (str/includes? txt ";; ── namespace my.agent.a1 ──")
+                            "a my.* ns renders as a full block")
                         (is (str/includes? txt "(def helper 1)")
                             "the my.* ns body is shown FULL (no clipping)")
                         ;; FULL: third-party acme renders its whole source.
-                        (is (str/includes? txt "<namespace name=\"acme.widget\">")
-                            "a third-party acme ns renders as a full tag")
+                        (is (str/includes? txt ";; ── namespace acme.widget ──")
+                            "a third-party acme ns renders as a full block")
                         (is (str/includes? txt "(def w 2)")
                             "the acme body is shown FULL (no clipping)")
                         ;; MANIFEST: a framework ns with NO indexed fns (this
                         ;; seed) appears ONLY as a NAME in the fn-less line —
-                        ;; never a full-source tag, never its body.
-                        (is (not (str/includes? txt "<namespace name=\"seon.client\">"))
-                            "a non-whitelisted framework ns is NOT a full-source tag")
+                        ;; never a full-source block, never its body.
+                        (is (not (str/includes? txt ";; ── namespace seon.client ──"))
+                            "a non-whitelisted framework ns is NOT a full-source block")
                         (is (not (str/includes? txt "(def never-shown 3)"))
                             "a manifested ns's body is NEVER rendered")
                         (is (str/includes? txt "seon.client")
@@ -208,8 +206,8 @@
                         ;; them as a signatures tag — name + arglist + one-line
                         ;; doc, body ELIDED, private fn omitted.
                         (is (str/includes? txt
-                                           "<namespace name=\"seon.frob\" kind=\"signatures\">")
-                            "a framework ns with public fns is a signatures tag")
+                                           ";; ── namespace seon.frob (signatures) ──")
+                            "a framework ns with public fns is a signatures block")
                         (is (str/includes? txt "(seon.frob/widget [a b])  ; Frobnicate a and b.")
                             "the public fn shows name + arglist + first doc line")
                         (is (not (str/includes? txt "(+ a b)"))
@@ -224,13 +222,11 @@
                         ;; *.internal never appears anywhere.
                         (is (not (str/includes? txt "seon.db.internal"))
                             "*.internal never appears")
-                        (is (not (str/includes? txt "<exemplar"))
-                            "the <exemplars> wrapper is dead")
-                        ;; recency among FULL tags: acme.widget's row was
+                        ;; recency among FULL blocks: acme.widget's row was
                         ;; written AFTER my.agent.a1 → renders later.
-                        (is (> (str/index-of txt "<namespace name=\"acme.widget\">")
-                               (str/index-of txt "<namespace name=\"my.agent.a1\">"))
-                            "most-recently-modified full tag renders LAST"))))
+                        (is (> (str/index-of txt ";; ── namespace acme.widget ──")
+                               (str/index-of txt ";; ── namespace my.agent.a1 ──"))
+                            "most-recently-modified full block renders LAST"))))
                   ;; modify my.agent.a1 → it moves LAST among full tags and
                   ;; the prefix ABOVE the moved tag is byte-identical.
                   (.then (fn [_] (transact-full-ns! "my.agent.a1" "(def helper 99)")))
@@ -239,10 +235,10 @@
                       (let [before @!before
                             after  (ctx-namespaces/namespaces-section
                                      {:seon.db/db @db/*conn*})
-                            moved  "<namespace name=\"my.agent.a1\">"]
+                            moved  ";; ── namespace my.agent.a1 ──"]
                         (is (> (str/index-of after moved)
-                               (str/index-of after "<namespace name=\"acme.widget\">"))
-                            "modified full ns moved LAST among tags")
+                               (str/index-of after ";; ── namespace acme.widget ──"))
+                            "modified full ns moved LAST among blocks")
                         (is (= (subs before 0 (str/index-of before moved))
                                (subs after 0 (str/index-of before moved)))
                             "prefix above the moved tag's old position is byte-identical")))))))
@@ -272,9 +268,9 @@
 
 (deftest renders-curated-code-internal-and-test-excluded
   ;; A fresh conn, NO config row anywhere: downstream `acme.widget`
-  ;; (third-party) and `my.kb` (my.*) render as FULL `<namespace>` tags
-  ;; purely because their :seon.ns rows exist; a non-whitelisted seon.*
-  ;; framework ns (`seon.client`) is NAME-MANIFESTED, not a tag;
+  ;; (third-party) and `my.kb` (my.*) render as FULL `;; ── namespace x ──`
+  ;; blocks purely because their :seon.ns rows exist; a non-whitelisted
+  ;; seon.* framework ns (`seon.client`) is NAME-MANIFESTED, not a block;
   ;; `acme.widget.internal` (*.internal) and `acme.widget-test` (*-test)
   ;; are excluded by the structural rules.
   (async done
@@ -289,16 +285,16 @@
                   (fn [_]
                     (let [txt (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})]
                       ;; third-party code renders FULL with NO config transact.
-                      (is (str/includes? txt "<namespace name=\"acme.widget\">")
+                      (is (str/includes? txt ";; ── namespace acme.widget ──")
                           "downstream acme.widget renders FULL with NO config")
                       (is (str/includes? txt "(def w 1)")
                           "the acme body is shown FULL")
                       ;; my.* renders FULL.
-                      (is (str/includes? txt "<namespace name=\"my.kb\">")
+                      (is (str/includes? txt ";; ── namespace my.kb ──")
                           "my.* renders FULL")
-                      ;; a non-whitelisted framework ns is manifested, not a tag.
-                      (is (not (str/includes? txt "<namespace name=\"seon.client\">"))
-                          "a framework ns is NOT a full tag")
+                      ;; a non-whitelisted framework ns is manifested, not a block.
+                      (is (not (str/includes? txt ";; ── namespace seon.client ──"))
+                          "a framework ns is NOT a full block")
                       (is (str/includes? txt "seon.client")
                           "the framework ns is NAMED in the manifest")
                       ;; *.internal never renders.
@@ -410,14 +406,14 @@
                     (let [{:seon.render/keys [sections]} (assemble "AGTctxtest00p1")
                           ent-txt (section-text "AGTctxtest00p1" :your-entity)]
                       (is (some #{:your-entity} sections)
-                          "minted agent renders <your-entity>")
+                          "minted agent renders the your-entity section")
                       (is (str/includes? (str ent-txt) "watch the ledger")
                           "stated purpose is entity data, rendered in the map")
-                      (is (str/includes? (str ent-txt) "<your-entity>")
-                          "tag wrapper present")
+                      (is (str/includes? (str ent-txt) ";; ── your entity ──")
+                          "your-entity header present")
                       (is (some #{:system} sections)
                           "core defaults merged in")
-                      (is (some #{:prompt} sections))
+                      (is (some #{:transcript} sections))
                       (is (not-any? #{:purpose} sections)
                           "the :purpose seed section is dead")
                       (is (not-any? #{:your-sections} sections)
@@ -489,7 +485,7 @@
                     (let [{:seon.render/keys [text sections]} (assemble "AGTctxtest00g1")]
                       (is (str/includes? text "[broken] render failed:")
                           "broken symbol → inline error line")
-                      (is (some #{:prompt} sections)
+                      (is (some #{:transcript} sections)
                           "assembly continues past the broken section"))))
                 ;; budget: one huge agent section truncates loudly.
                 (.then (fn [_]
@@ -524,8 +520,9 @@
       (-> (with-conn
             (fn [_conn]
               (-> (agent/create! {:seon.agent/id "AGTctxtest00d1"})
-                  ;; a my.* ns → rendered FULL as a `<namespace>` tag in the
-                  ;; STABLE half (a framework ns would only be name-manifested).
+                  ;; a my.* ns → rendered FULL as a `;; ── namespace x ──`
+                  ;; block in the STABLE half (a framework ns would only be
+                  ;; name-manifested).
                   (.then (fn [_] (transact-full-ns! "my.client" "(def x 1)")))
                   (.then
                     (fn [_]
@@ -541,7 +538,7 @@
                         (is (not (str/blank? (:seon.render/stable-text a1)))
                             "stable block is non-blank (system + namespaces)")
                         (is (str/includes? (:seon.render/stable-text a1)
-                                           "<namespace name=\"my.client\">")
+                                           ";; ── namespace my.client ──")
                             "the namespaces body lives in the STABLE half")
                         (is (not (str/includes? (:seon.render/stable-text a1)
                                                 ctx/stable-boundary))
@@ -620,7 +617,7 @@
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
 ;; ------------------------------------------------------------
-;; inventory-section — the cheap <data-inventory> discovery surface.
+;; inventory-section — the cheap stored-data discovery surface.
 ;; ------------------------------------------------------------
 
 (deftest inventory-section-renders-stored-kinds-compact
@@ -642,8 +639,8 @@
                   (fn [_]
                     (let [txt   (ctx-inventory/inventory-section {:seon.db/db @db/*conn*})
                           lines (str/split-lines txt)]
-                      (is (str/includes? txt "<data-inventory>")
-                          "rendered behind the <data-inventory> tag")
+                      (is (str/includes? txt ";; ── stored data inventory ──")
+                          "rendered under the stored-data inventory header")
                       ;; ONE line per kind: the kind name is the line label,
                       ;; written ONCE, then bare attr-name count pairs.
                       (is (str/includes? txt "my.workout: ")
@@ -685,9 +682,9 @@
 
 (deftest relevant-source-section-renders-stashed-hits
   ;; NO stash active (the default-OFF / no-prefetch path) → "" so the
-  ;; composer drops the section. WITH a stash → the <relevant-source>
-  ;; tag, the hits' syms + source, top-k respected, per-hit char cap with
-  ;; a loud truncation marker, and the over-cap source NEVER leaks whole.
+  ;; composer drops the section. WITH a stash → the relevant-context
+  ;; header, the hits' syms + source, top-k respected, per-hit char cap
+  ;; with a loud truncation marker, and the over-cap source NEVER leaks.
   (let [in   {:seon.db/db {} :seon.agent/id "X"}
         long-src (apply str (repeat (* 3 ctx-relevant/source-char-cap) "z"))
         hits (vec
@@ -703,10 +700,8 @@
     ;; (2) with a stash → full render.
     (let [txt (embed-stash/with-hits hits
                 #(ctx-relevant/relevant-source-section in))]
-      (is (str/includes? txt "<relevant-source>")
-          "rendered behind the open tag")
-      (is (str/includes? txt "</relevant-source>")
-          "and the close tag")
+      (is (str/includes? txt ";; ── relevant context ──")
+          "rendered under the relevant-context header")
       ;; top-k respected: only the first `top-k` hits render.
       (is (str/includes? txt "my.ns/fn0") "first hit's sym present")
       (is (str/includes? txt (str "my.ns/fn" (dec ctx-relevant/top-k)))
@@ -787,7 +782,8 @@
     (let [txt (render [lost-hit])]
       (is (str/includes? txt "<unknown>")
           "an entity-less hit renders a header-only <unknown> block")
-      (is (str/includes? txt "<relevant-source>") "and stays inside the tag"))))
+      (is (str/includes? txt ";; ── relevant context ──")
+          "and stays under the section header"))))
 
 (deftest off-path-is-byte-identical
   ;; THE SAFETY CONTRACT. With NO retrieval stash active (the default-OFF
@@ -821,8 +817,8 @@
                       (is (not (contains? (texts-of r1) :relevant-source))
                           ":relevant-source contributes no text (blank → dropped)")
                       (is (not (str/includes? (:seon.render/text r1)
-                                              "<relevant-source>"))
-                          "no <relevant-source> tag in the OFF-path prompt")
+                                              ";; ── relevant context ──"))
+                          "no relevant-context header in the OFF-path prompt")
                       ;; byte-identical across two assemblies (the section
                       ;; is not pulling query-dependent content into the
                       ;; prompt when off).
