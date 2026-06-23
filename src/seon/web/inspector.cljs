@@ -192,8 +192,10 @@
         tile  (:seon.render/hiccup
                 (render/render-agent-tile {:seon.db/db db
                                            :seon.agent/id agent-id}))
-        ent   (default/all-running-agents db)
-        agent (some #(when (= agent-id (:seon.agent/id %)) %) ent)]
+        ;; Just the ONE agent entity — the pane only reads its
+        ;; :seon.agent/state. (Was a whole-roster scan via the deleted
+        ;; default/all-running-agents.)
+        agent (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]})]
     {:ai-text   (or text "")
      :section-texts (or section-texts [])
      :char-count (count (or text ""))
@@ -256,7 +258,7 @@
     [:header {:id (header-id agent-id)
               :class "flex items-center gap-3 p-2 border-b border-base-800 bg-base-900"}
      [:span {:class "text-xs font-mono text-text-200"} "agent " agent-id]
-     (if (= :running state)
+     (if (= :active state)
        ;; The live "the agent is thinking RIGHT NOW" pulse — resolves
        ;; back to the plain status dot on the next morph when the turn
        ;; completes.
@@ -361,7 +363,7 @@
 
 (defn- thinking-bubble
   "Placeholder bubble pinned under the newest card while the agent is
-   `:running` — it 'resolves' into the real cards on the next morph.
+   `:active` — it 'resolves' into the real cards on the next morph.
    No stable id ON PURPOSE: every morph treats it as a fresh node, so
    it re-animates while real cards stay put."
   [turns]
@@ -373,7 +375,7 @@
 
 (defn- html-pane-fragment
   [agent-id {:keys [html-cards agent-tile elided turn-durs agent]}]
-  (let [running? (= :running (:seon.agent/state agent))]
+  (let [running? (= :active (:seon.agent/state agent))]
     [:div {:id (html-pane-id agent-id)
            :class "flex flex-col h-full overflow-hidden"}
      [:div {:class "px-2 py-1 text-xs font-mono text-text-400 bg-base-900 border-b border-base-800"}
@@ -723,7 +725,7 @@
     [:header {:id (chat-header-id agent-id)
               :class "flex items-center gap-3 px-4 py-3 border-b border-base-800 bg-base-900"}
      [:span {:class "text-sm font-mono text-text-100"} (str "agent " agent-id)]
-     (if (= :running state)
+     (if (= :active state)
        [:span {:class "inline-flex items-center gap-1.5 text-xs font-mono text-amber-400"}
         [:span {:class "w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"}]
         "thinking …"]

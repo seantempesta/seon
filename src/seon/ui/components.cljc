@@ -44,6 +44,7 @@
   {:running     {:dot "bg-signal"   :text "text-signal"   :pulse? true}
    :active      {:dot "bg-info"     :text "text-info"     :pulse? true}
    :idle        {:dot "bg-text-500" :text "text-text-500" :pulse? false}
+   :waiting     {:dot "bg-warning"  :text "text-warning"  :pulse? false}
    :done        {:dot "bg-success"  :text "text-success"  :pulse? false}
    :completed   {:dot "bg-success"  :text "text-success"  :pulse? false}
    :stuck       {:dot "bg-warning"  :text "text-warning"  :pulse? false}

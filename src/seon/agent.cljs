@@ -63,15 +63,18 @@
 
    ## State machine
 
-   `:seon.agent/state` values:
-     :idle      — no turn running; ready to be triggered
-     :running   — turn in flight; new user messages queue silently
-                  (handler sees :running and skips)
+   `:seon.agent/state` values (agent-fsm redesign 2026-06-23):
+     :idle       — no loop running; wakeable → :active
+     :active     — a loop is running; new inbounds are picked up by the
+                   running loop's sliding cap, not a fresh wake (handler
+                   sees :active and skips)
+     :waiting    — parked via (agent/wait …); wakeable → :active
+     :completed  — finished via (complete …) / no-forms; wakeable → :active
+     :terminated — orchestrator kill; UNWAKEABLE (change state first)
 
-   The handler flips :idle → :running before starting a turn, and
-   back to :idle when the turn ends. Concurrent kicks during a turn
-   no-op — the next kick after the turn ends picks up any messages
-   that landed during it.
+   The handler flips :idle → :active before starting a loop, and back to
+   :idle when the loop ends. Concurrent kicks during a loop no-op — the
+   running loop's sliding cap picks up any messages that landed during it.
 
    ## Prompt assembly
 
@@ -126,7 +129,33 @@
 ;; ============================================================
 
 (schema/register! :seon.agent/id            [:and {:seon.db/identity true} :seon.db/id])
-(schema/register! :seon.agent/state         [:enum :idle :running])
+(schema/register! :seon.agent/purpose       :string)
+;; The FSM coordination truth (agent-fsm redesign 2026-06-23, §1). STORED
+;; on the agent record, re-read each loop iteration:
+;;   :idle       neutral / between work — wakeable → :active
+;;   :active     a loop is running — NOT wakeable (the running loop picks
+;;               up new inbounds via the sliding cap)
+;;   :waiting    parked via (agent/wait …) — wakeable → :active
+;;   :completed  finished via (complete …) / no-forms — wakeable → :active
+;;   :terminated orchestrator kill — UNWAKEABLE (change state first)
+(schema/register! :seon.agent/state         [:enum :idle :active :waiting :completed :terminated])
+;; The current wake-episode token (reuses the canonical id shape, single
+;; source of truth in seon.schema). STORED. Replaces the deleted
+;; `!kick-scheduled` atom + `:seon.agent.turn/woken-by` attr: each wake
+;; mints a fresh id, the loop re-reads it and bails if a newer wake
+;; superseded it (optimistic concurrency via the DB, no atom/CAS).
+(schema/register! :seon.agent/wake          :seon.db/id)
+;; Base per-loop turn cap (optional; env SEON_MAX_TURNS_PER_LOOP / 20 when
+;; absent). The effective cap is a sliding window — every inbound during a
+;; wake grants +1 turn (derived, not stored).
+(schema/register! :seon.agent/max-turns-per-loop :int)
+;; Subagent → parent (optional; delivery descoped to a thin conditional in
+;; `complete` — no spawn path sets this yet). References the canonical ref
+;; shape; never inline.
+(schema/register! :seon.agent/parent        :seon.db/ref)
+;; Note surfaced to monitoring agents while parked (optional; set by
+;; `(agent/wait …)`).
+(schema/register! :seon.agent/wait-note      :string)
 ;; Lifecycle (P3.5/#31, 2026-06-10): ABSENT = active. A booting pod
 ;; resumes every agent entity WITHOUT this attr; `complete!` stamps it;
 ;; un-complete is an explicit `[:db/retract …]` (mirrors
@@ -478,17 +507,95 @@
 ;; the agent entity must NOT enter the chronological ai window.
 ;; Required attrs (id + state) mirror `create!`, the one writer that
 ;; runs unconditionally; everything else arrives lazily.
+;; Entity map = §1 of the agent-fsm redesign: id (req) + state (req) +
+;; the optional config/coordination attrs. The render slots
+;; (props `:seon.render/html` + the optional :seon.render/ai/html attrs)
+;; are KEPT — they're the live agent-tile surface (U6 territory), not
+;; data the FSM owns. `completed-at`/`sessions`/`turns-cap`/`ctx` keep
+;; their own register! (still transactable/queryable) but leave the
+;; entity declaration: they're no longer part of the FSM record shape.
 (schema/register! :seon.agent
   [:map {:seon.db/entity   true
          :seon.render/html 'seon.render.default/view}
-   [:seon.agent/id    :seon.agent/id]
-   [:seon.agent/state :seon.agent/state]
-   [:seon.agent/completed-at {:optional true} :seon.agent/completed-at]
-   [:seon.agent/sessions  {:optional true} :seon.agent/sessions]
-   [:seon.agent/turns-cap {:optional true} :seon.agent/turns-cap]
-   [:seon.agent/ctx       {:optional true} :seon.agent/ctx]
+   [:seon.agent/id      :seon.agent/id]
+   [:seon.agent/purpose            {:optional true} :seon.agent/purpose]
+   [:seon.agent/state   :seon.agent/state]
+   [:seon.agent/wake               {:optional true} :seon.agent/wake]
+   [:seon.agent/max-turns-per-loop {:optional true} :seon.agent/max-turns-per-loop]
+   [:seon.agent/parent             {:optional true} :seon.agent/parent]
+   [:seon.agent/wait-note          {:optional true} :seon.agent/wait-note]
    [:seon.render/ai   {:optional true} :seon.render/ai]
    [:seon.render/html {:optional true} :seon.render/html]])
+
+;; ============================================================
+;; FSM state helpers (agent-fsm redesign 2026-06-23, U1). The agent
+;; record's `:seon.agent/state` + `:seon.agent/wake` are the loop's
+;; coordination truth — re-read each iteration, externally controllable.
+;; These are the thin read/write seam over `seon.db`; the lifecycle verbs
+;; (wait/complete/terminate, U3) and the loop (U4) build on them.
+;; ============================================================
+
+(schema/register! ::current-state-request [:map [:seon.agent/id :seon.agent/id]])
+(schema/register! ::set-state-request
+  [:map [:seon.agent/id :seon.agent/id] [:seon.agent/state :seon.agent/state]])
+(schema/register! ::fresh-wake-request    [:map [:seon.agent/id :seon.agent/id]])
+
+(defn current-state
+  "The agent's current `:seon.agent/state` keyword (sync read from the
+   local db value), nil if the agent entity doesn't resolve. Map-in."
+  {:malli/schema [:=> [:cat ::current-state-request]
+                  [:maybe :seon.agent/state]]}
+  [{:seon.agent/keys [id]}]
+  (:seon.agent/state
+    (db/entity {:seon.db/ref [:seon.agent/id id]})))
+
+(defn ^:async set-state!
+  "Transact a new `:seon.agent/state` for the agent (upsert by id).
+   Returns the transact-response promise. Map-in. `^:async` fns aren't
+   runtime-instrumented — the schema is the contract."
+  {:malli/schema [:=> [:cat ::set-state-request] :seon.db/transact-response]}
+  [{:seon.agent/keys [id state]}]
+  (await (db/transact!
+           {:seon.db/tx-data [{:seon.agent/id id :seon.agent/state state}]})))
+
+(defn ^:async fresh-wake!
+  "Mint a fresh wake-episode id, transact it onto `:seon.agent/wake`, and
+   return the minted id. Each wake gets a new token so the loop can
+   re-read it and bail when a newer wake supersedes it (optimistic
+   concurrency via the DB — no atom, no CAS). Map-in. `^:async`."
+  {:malli/schema [:=> [:cat ::fresh-wake-request] :seon.db/id]}
+  [{:seon.agent/keys [id]}]
+  (let [wake (db/new-id!)]
+    (await (db/transact!
+             {:seon.db/tx-data [{:seon.agent/id id :seon.agent/wake wake}]}))
+    wake))
+
+(schema/register! ::armable-agent-ids-request [:map [:seon.db/db {:optional true} :seon.db/db-val]])
+(schema/register! ::armable-agent-ids-response [:vector :seon.db/id])
+
+(defn armable-agent-ids
+  "Agent ids whose triggers should be ARMED — every agent NOT in the
+   terminal `:terminated` state (the single source of truth for 'this
+   agent can still be woken'). Replaces the old three vocabularies
+   (`live-agent-ids` / `all-running-agents` / `resumable-agent-ids`):
+   a `:waiting`/`:completed` agent must still get a trigger so a new
+   message wakes it; only an orchestrator-`:terminated` agent is armless.
+   Derived from the db value at call time (reactive-context: no stored
+   registry). Sorted asc for deterministic boot logs. Map-in; `:seon.db/db`
+   optional (defaults to `*conn*`'s db via `db/query`)."
+  {:malli/schema [:=> [:cat ::armable-agent-ids-request] ::armable-agent-ids-response]}
+  [{:seon.db/keys [db]}]
+  (let [q '[:find ?aid
+            :where
+            [?a :seon.agent/id ?aid]
+            [?a :seon.agent/state ?state]
+            [(not= :terminated ?state)]]]
+    (->> (if db
+           (db/query {:seon.db/db db :seon.db/query q})
+           (db/query {:seon.db/query q}))
+         (map first)
+         sort
+         vec)))
 
 ;; ============================================================
 ;; Turn loop — was seon.agent.session.cljs, now consolidated here.
@@ -615,7 +722,7 @@
               mid   (:seon.agent.message/id
                       (db/entity {:seon.db/db db
                                   :seon.db/ref (:seon.db/e (first waking))}))]
-          (if (and (not= :running state)
+          (if (and (not= :active state)
                    (not (contains? @!kick-scheduled id)))
             (do
               (swap! !kick-scheduled conj id)
@@ -643,8 +750,8 @@
               (str "seon.agent: WAKE SKIPPED for agent " id
                    " — message " mid
                    (cond
-                     (= :running state)
-                     (str " — state=:running (in-flight loop's next halt check"
+                     (= :active state)
+                     (str " — state=:active (in-flight loop's next halt check"
                           " sees it as an unanswered live inbound)")
                      (contains? @!kick-scheduled id)
                      (str " — !kick-scheduled latch held (a loop is already"
@@ -673,8 +780,6 @@
 ;; ============================================================
 ;; Agent creation. Allocates an id, transacts the entity.
 ;; ============================================================
-
-(schema/register! :seon.agent/purpose :string)
 
 (defn ^:async create!
   "Allocate an agent entity. Idempotent: re-calling with the same id
@@ -1031,14 +1136,14 @@
                   prompt-file (assoc :seon.agent.turn/prompt-file prompt-file)
                   ;; The waking message — reply!'s derivation source.
                   woken-by (assoc :seon.agent.turn/woken-by woken-by))]}
-              {:seon.agent/id id :seon.agent/state :running}]}))]
+              {:seon.agent/id id :seon.agent/state :active}]}))]
     (if (false? (:seon.db/ok? open-result))
       open-result
       (with-turn-body! id id-of-turn body-fn))))
 
 (defn ^:async ^:private ensure-idle!
   "Failsafe state-reset for `id` (errors-are-values, never throws). The
-   wake guard `(not= :running state)` in inbound-message-handler means a
+   wake guard `(not= :active state)` in inbound-message-handler means a
    single missed `:idle` reset leaves the agent permanently DEAF (the
    deaf-after-one-message bug, 2026-06-17: a close-tx that failed the
    schema bridge for an unbridgeable folded attr left state :running

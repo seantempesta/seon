@@ -1867,38 +1867,9 @@
       (openai/agent-adapter)
       stub-llm)))
 
-(defn- live-agent-ids
-  "Agent ids whose `:seon.agent/state` is `:idle` or `:running` AND
-   that are not completed (`:seon.agent/completed-at` absent = active —
-   see `seon.agent/complete!`) — the agents whose user-message triggers
-   must exist. Derived from the DB at call time (reactive-context: no
-   stored agent registry)."
-  [db]
-  (->> (db/query {:seon.db/query '[:find ?aid
-                                   :where
-                                   [?a :seon.agent/id ?aid]
-                                   [?a :seon.agent/state ?state]
-                                   [(contains? #{:idle :running} ?state)]
-                                   (not [?a :seon.agent/completed-at _])]
-                  :seon.db/db db})
-       (mapv first)))
-
-(defn resumable-agent-ids
-  "Agent ids a booting pod RESUMES: every `:seon.agent/id` entity in db
-   value `db` WITHOUT `:seon.agent/completed-at` (absent = active — see
-   `seon.agent/complete!`). Sorted asc for deterministic boot logs.
-   Empty = genuine first boot → `start-agent!` mints a fresh agent."
-  {:malli/schema [:=> [:catn [:seon.db/db-val :seon.db/db-val]]
-                  [:vector :seon.db/id]]}
-  [db]
-  (->> (db/query {:seon.db/query '[:find ?aid
-                                   :where
-                                   [?a :seon.agent/id ?aid]
-                                   (not [?a :seon.agent/completed-at _])]
-                  :seon.db/db db})
-       (map first)
-       sort
-       vec))
+;; `live-agent-ids` / `resumable-agent-ids` folded into the one
+;; `seon.agent/armable-agent-ids` (state ≠ :terminated) — single source
+;; of truth for "this agent can still be woken" (agent-fsm redesign U1).
 
 (defn- rearm-user-triggers!
   "Hot-reload hygiene (work-plan 1.2): re-install the per-agent
@@ -1909,7 +1880,7 @@
    reach live agents until a manual install-user-trigger! per agent).
 
    Everything is derived, nothing stored: agent ids from the DB
-   (`live-agent-ids`), compile-state from the idempotent
+   (`seon.agent/armable-agent-ids`), compile-state from the idempotent
    `repl/ensure-bootstrap!`, llm-fn rebuilt via `current-llm-fn`.
    `agent/install-user-trigger!` is itself idempotent (unlistens the
    prior key), so re-running per reload is safe.
@@ -1929,7 +1900,7 @@
       (-> (repl/ensure-bootstrap!)
           (.then
             (fn [compile-state]
-              (let [ids    (live-agent-ids @conn)
+              (let [ids    (agent/armable-agent-ids {:seon.db/db @conn})
                     llm-fn (current-llm-fn)]
                 (doseq [id ids]
                   ;; Re-host so a hot-reloaded pod stays MCP-addressable
@@ -2212,7 +2183,7 @@
         compile-state (await (repl/ensure-bootstrap!))
         ;; RESUME, DON'T MINT (P3.5/#31): the store is the identity
         ;; source. Mint only on genuine first boot or explicit create.
-        resumed-ids   (if mint? [] (resumable-agent-ids @conn))
+        resumed-ids   (if mint? [] (agent/armable-agent-ids {:seon.db/db @conn}))
         minted-ids    (if (empty? resumed-ids) [(db/new-id!)] [])
         agent-ids     (into resumed-ids minted-ids)
         ;; The PRIMARY agent (return-shape + shared-boot tx scope):

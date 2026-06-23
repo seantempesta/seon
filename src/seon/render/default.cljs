@@ -9,8 +9,8 @@
    - `view` — the default `:seon.render/html` agent tile (status dot,
      turn count, error banner, recent messages). Agents repoint their
      tile by transacting a different symbol onto the slot.
-   - Read helpers (`recent-messages`, `recent-errors`,
-     `all-running-agents`) used by `view` and the inspector.
+   - Read helpers (`recent-messages`, `recent-errors`) used by `view`
+     and the inspector.
 
    The agent's PROMPT is NOT composed here: the live default
    `:seon.render/ai` path is `seon.agent/assemble-context`, whose
@@ -217,22 +217,9 @@
   (let [session (last (sort-by :seon.agent.session/at (:seon.agent/sessions ent)))]
     (count (:seon.agent.session/turns session))))
 
-(defn ^:no-doc all-running-agents
-  "Return every agent entity whose `:seon.agent/state` is `:idle` or
-   `:running`. Used by the inspector to iterate live agents. Pure
-   read; safe from any thread."
-  [db]
-  (let [query '[:find ?aid
-                :in $
-                :where
-                [?a :seon.agent/id ?aid]
-                [?a :seon.agent/state ?state]
-                [(contains? #{:idle :running} ?state)]]
-        rows  (if db
-                (db/query {:seon.db/db db :seon.db/query query})
-                (db/query {:seon.db/query query}))]
-    (for [[aid] rows]
-      (pulled-agent db aid))))
+;; `all-running-agents` deleted (agent-fsm redesign U1) — the inspector
+;; pulls the one agent entity it needs directly; the armable-roster query
+;; lives once in `seon.agent/armable-agent-ids` (state ≠ :terminated).
 
 ;; ============================================================
 ;; VIEW — the default :seon.render/html. Agent-tile dashboard:
