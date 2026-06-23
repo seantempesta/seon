@@ -139,13 +139,53 @@ its ripple (client / inspector / render.default) ride in Unit 1 (the enum's home
 
 ## 1. The finite state machine
 
-`:seon.agent/state` is a registered enum on the agent record — the SINGLE source
-of liveness truth. No atoms.
+**Everything is DB state** — the agent record, sessions, turns, evals, messages are
+all entities. The distinction: the agent record's `state` + `wake` are the FSM
+*coordination* truth (the loop's stop/go); turns/evals/messages are the *history*
+(the log). The loop reads coordination each iteration and derives the rest.
+
+### Schema
 
 ```clojure
-(schema/register! :seon.agent/state
-  [:enum :idle :active :waiting :completed :terminated])
+;; --- agent record: identity + config + the FSM coordination truth ---
+(schema/register! :seon.agent/id      [:string {:seon.db/identity true}])
+(schema/register! :seon.agent/purpose :string)
+(schema/register! :seon.agent/state   [:enum :idle :active :waiting :completed :terminated]) ; STORED (coordination)
+(schema/register! :seon.agent/wake    :seon.db/id)            ; STORED — current wake-episode token (reuses id shape)
+(schema/register! :seon.agent/max-turns-per-loop :int)        ; STORED optional — base per-loop cap (else env/20)
+(schema/register! :seon.agent/parent  :seon.db/ref)           ; STORED optional — subagent→parent (delivery descoped)
+(schema/register! :seon.agent/wait-note :string)              ; STORED optional — surfaced to monitoring agents
+(schema/register! :seon.agent
+  [:map {:seon.db/entity true}
+   [:seon.agent/id]
+   [:seon.agent/purpose            {:optional true}]
+   [:seon.agent/state]
+   [:seon.agent/wake               {:optional true}]
+   [:seon.agent/max-turns-per-loop {:optional true}]
+   [:seon.agent/parent             {:optional true}]
+   [:seon.agent/wait-note          {:optional true}]])
+
+;; --- turn: history + the per-loop episode key ---
+(schema/register! :seon.agent.turn/wake :seon.db/id)          ; STORED — which wake-episode this turn belongs to
+;; KEEP: :seon.agent.turn/id (identity) :at (inst) :status [:running :done :error]
+;;       :seon.agent.turn/evals (component vector) :prompt-text :prompt-file
+;; DELETE: :seon.agent.turn/woken-by (→ wake), :seon.agent.turn/messages (self→self note gone)
 ```
+
+KEEP unchanged: `:seon.agent.session`, `:seon.eval`, `:seon.agent.message`
+(incl. `origin [:enum :human :agent :core]` + `handled?` — the wake gate).
+
+### Store-vs-derive (the rule: derive by default; store only if expensive OR useful to others)
+
+- **STORED** (coordination / not derivable): `:seon.agent/state`, `:seon.agent/wake`,
+  `:seon.agent.turn/wake`. Plus config (`max-turns-per-loop`, `parent`) and
+  `:seon.agent/wait-note` — stored because it's surfaced to *monitoring* agents
+  (a parent watching its subagents), so it earns a slot even though it's cheap.
+- **DERIVED** (cheap queries, never stored): the monotonic turn number (position in
+  the `:at`-ordered walk across all sessions — accumulates from 0, never resets,
+  survives resume); the per-loop count (`count turns where wake = my-wake`); the
+  effective cap (below); the NEW-message flag (inbound `:at` > prior turn `:at`); all
+  transcript text.
 
 | State | Meaning | Wakeable? | Looping? |
 |-------|---------|-----------|----------|
@@ -185,7 +225,7 @@ NOT a parallel attr (see §5).
       (not= :active state)                 :halt-external      ; orchestrator changed state
       (not= wake my-wake)                  :halt-superseded    ; a newer wake owns the agent
       (>= (turns-this-wake id my-wake)
-          (max-turns-per-loop id))         (do (cap-note!) :halt-cap)
+          (effective-cap id my-wake))      :halt-cap   ; base + inbounds-this-wake; NO self-note
       :else
       (let [r (await (run-turn! input))]
         (cond
@@ -198,17 +238,31 @@ NOT a parallel attr (see §5).
 ;; finally: if still :active and my-wake still owns it, set :idle.
 ```
 
-### Counters — DERIVED, not stored
+### The per-loop cap is a SLIDING WINDOW that every message extends
 
-- **Monotonic turn number** — derived at turn-open as `(inc (max :seon.agent.turn/n
-  across ALL the agent's turns))`; per-AGENT so it survives resume. Turn 0 = the
-  bootstrap turn; turn 1 = the first real turn. (Stored as a stamped identity like a
-  tx id — written once at open, never a maintained counter.)
-- **Per-loop count** — derived: `(count turns where :seon.agent.turn/wake = my-wake)`.
-  Cap when `≥ max-turns-per-loop` (`:seon.agent/max-turns-per-loop` on the record
-  else `SEON_MAX_TURNS_PER_LOOP` env else 20). No separate counter attr.
-- **NEW-message flag** — derived: inbound `:at` > the agent's previous turn `:at`.
-  No answered/unanswered tracking.
+Turn numbers accumulate from 0 forever (the display number, derived). The CAP is a
+window measured from THIS wake's start — `turns-this-wake` vs an **effective cap**,
+all derived:
+
+```
+effective-cap = (max-turns-per-loop id) + (inbounds-during-this-wake id my-wake)
+inbounds-during-this-wake = count messages to-me, from ≠ me, origin ∈ {:human :agent},
+                            :at ≥ the first turn of this wake
+```
+
+So **every inbound (human OR peer) grants +1 turn** — guaranteeing the agent gets a
+turn to SEE and respond to a message that landed mid-LLM-call before the cap can
+bite. A purely autonomous run (no inbounds) still stops at the base cap. No stored
+grant, no `cap-note` message (steering lives in the derived readline). Agent↔agent
+floods are already bounded by the hop-cap, so the bump needs no extra ceiling.
+
+### No self-messaging, ever
+
+`message/agent` REFUSES `to = me` (loud error). `message/user` only ever targets the
+one human. There are no self→self messages anywhere — the per-turn note, nudges, and
+cap/give-up notes are all DELETED; an agent's "notes to itself" are just `;;` comments
+in its turn (eval narration), and steering is the derived readline. The wake gate
+already ignores `from = me`; this makes it a hard prohibition at the verb.
 
 ### External control + recovery
 
