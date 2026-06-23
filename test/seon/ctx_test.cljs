@@ -20,6 +20,7 @@
     [clojure.string :as str]
     [datahike.api :as d]
     [seon.agent :as agent]
+    [seon.agent.turn :as turn]
     [seon.analyzer-info :as ai]
     [seon.client :as client]
     [seon.ctx :as ctx]
@@ -556,7 +557,7 @@
                             "split-context recovers exactly the two halves"))))
                   ;; volatile-only change: a NEW TURN ROW on a fresh
                   ;; session — transcript/turns are volatile sections.
-                  (.then (fn [_] (agent/start-session! "AGTctxtest00d1")))
+                  (.then (fn [_] (turn/start-session! "AGTctxtest00d1")))
                   (.then (fn [sess]
                            (db/transact!
                              {:seon.db/tx-data

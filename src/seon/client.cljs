@@ -55,6 +55,11 @@
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
     [seon.agent :as agent]
+    ;; The FSM loop + wake trigger (agent-fsm carve, U4): the client boot
+    ;; path ARMS the wake trigger (seon.agent does NOT, to stay acyclic).
+    [seon.agent.fsm :as fsm]
+    ;; One turn — the bootstrap turn-0 (creation evals) opens it directly.
+    [seon.agent.turn :as turn]
     [seon.ctx]
     [seon.ai :as ai]
     [seon.ai.anthropic :as anthropic]
@@ -1882,7 +1887,7 @@
    Everything is derived, nothing stored: agent ids from the DB
    (`seon.agent/armable-agent-ids`), compile-state from the idempotent
    `repl/ensure-bootstrap!`, llm-fn rebuilt via `current-llm-fn`.
-   `agent/install-user-trigger!` is itself idempotent (unlistens the
+   `fsm/install-wake-trigger!` is itself idempotent (unlistens the
    prior key), so re-running per reload is safe.
 
    Fire-and-forget from `after-reload` (which is sync): returns a
@@ -1908,7 +1913,7 @@
                   ;; but re-hosting is idempotent and keeps the two
                   ;; rosters trivially in sync).
                   (runtime-id/host! id)
-                  (agent/install-user-trigger!
+                  (fsm/install-wake-trigger!
                     {:seon.agent/id            id
                      :seon.agent/llm-fn        llm-fn
                      :seon.agent/compile-state compile-state}))
@@ -1925,11 +1930,12 @@
 
 (defn- ^:async boot-one-agent!
   "The per-agent slice of the boot path: prime the agent's home
-   namespace (atoms + accessors), create/refresh its entity + arm the
-   kick listener (`agent/boot!`), and `runtime-id/host!` the id so
-   `mcp__seon_cljs__eval agent_id=<id>` pins this pod. Runs inside its
-   own `with-agent` scope so every transact carries the right agent-id.
-   Returns boot!'s `{:seon.agent/id _ :seon.agent/ns _}`."
+   namespace (atoms + accessors), create/refresh its entity (`agent/boot!`),
+   ARM the wake trigger (`fsm/install-wake-trigger!` — the client owns this so
+   seon.agent stays acyclic), and `runtime-id/host!` the id so
+   `mcp__seon_cljs__eval agent_id=<id>` pins this pod. Runs inside its own
+   `with-agent` scope so every transact carries the right agent-id. Returns
+   boot!'s `{:seon.agent/id _ :seon.agent/ns _}`."
   [{:seon.agent/keys [id llm-fn compile-state purpose]}]
   (await
     (db/with-agent id
@@ -1944,7 +1950,7 @@
                              (assoc :seon.agent/purpose purpose))))]
           ;; boot! propagates create!'s db error envelope (task #21 —
           ;; errors are values). A failed create means NO agent entity:
-          ;; don't host the id for MCP addressing, hand the envelope up.
+          ;; don't arm a trigger, don't host the id, hand the envelope up.
           (if (false? (:seon.db/ok? res))
             (do (log/error-console!
                   "seon.client/boot-one-agent!"
@@ -1952,7 +1958,11 @@
                        " — no entity; propagating the error envelope")
                   res)
                 res)
-            (do (runtime-id/host! id)
+            (do (fsm/install-wake-trigger!
+                  {:seon.agent/id            id
+                   :seon.agent/llm-fn        llm-fn
+                   :seon.agent/compile-state compile-state})
+                (runtime-id/host! id)
                 res)))))))
 
 (schema/register! ::seeded? [:= true])
@@ -2100,7 +2110,7 @@
     (db/with-agent id
       (fn ^:async run-creation-evals! []
         (try
-          (let [session    (await (agent/ensure-session! id))
+          (let [session    (await (turn/ensure-session! id))
                 session-id (:seon.agent.session/id session)
                 turn-id    (db/new-id!)
                 source     (str (live-tile/wiring-source id)
@@ -2116,7 +2126,7 @@
                      :seon.db/turn-id    turn-id
                      :seon.db/origin     :system}
                     (fn []
-                      (agent/open-turn!
+                      (turn/open-turn!
                         {:seon.agent/id                    id
                          :seon.agent.session/id-of-session session-id
                          :seon.agent.turn/id-of-turn       turn-id

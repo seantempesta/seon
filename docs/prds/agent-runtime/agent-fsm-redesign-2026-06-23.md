@@ -533,11 +533,22 @@ but pod-affecting **verification is serialized** (one pod).
   (stamp `:seon.agent.turn/wake`); DELETE the self→self fold + `woken-by` + the
   `messages` attr. *Verify:* REPL — one turn opens/closes, stamps wake, records evals,
   flips turn-status `:done`; no self→self message row exists.
-- **U4 — loop + wake** (`seon.agent.fsm`). `wake-handler` + `install-wake-trigger!`,
-  `run-loop!`, halt/cap/`effective-cap`/recheck; DELETE `!kick-scheduled` +
-  answer-accounting. *Verify (live pod):* a message wakes an idle agent → one loop;
-  a deliberate double-wake → exactly one loop survives (recheck); halt on no-forms;
-  halt on cap; an orchestrator writing `:terminated` stops it.
+- **U4 — loop + wake** (`seon.agent.fsm`) — DONE 2026-06-23. `wake-handler` +
+  `install-wake-trigger!`, `run-loop!`, halt/cap/`effective-cap`/recheck; DELETED
+  `!kick-scheduled` + all answer-accounting + the self→self halt-notes +
+  `empty-completion`/`give-up`/`max-empty-reprompts`. Carved `agent.cljs` into
+  `seon.agent.turn` (the turn machinery + `:seon.agent.session/*`/`:seon.agent.turn/*`
+  schemas) + `seon.agent.fsm` (loop + wake) + a slimmed `seon.agent` (record +
+  verbs + `inbound-msg-datom?` gate). The wake trigger moved out of `agent/boot!`
+  into the client boot path (`boot-one-agent!` + `rearm-user-triggers!`), so
+  `seon.agent` requires NEITHER fsm NOR turn (acyclic). KEY FIX: the turn no longer
+  touches `:seon.agent/state` — the LOOP owns it (sets `:active` at wake, `:idle` in
+  its finally); a per-turn `:idle` reset had halted the loop after one turn.
+  *Verified live (stub-driven, OgT-2606231721):* wake → one loop; double-wake → ONE
+  survivor (loser `halt superseded`, ran 0 turns); no-forms → 3 turns (empty-streak
+  guard) then `halt no actionable forms → :idle (clean)`; cap=5 → exactly 5 turns
+  then `halt cap — 5/5`; `:terminated` → 0 LLM calls (unwakeable). Shadow 0 warnings,
+  no circular dependency. (DeepSeek end-to-end drive is the orchestrator's clean-boot test.)
 - **U6 — transcript + readline** (`seon.ctx.transcript` + `seon.ctx.system`). The §2
   comment-block render (masthead, `;;;` turn headers, `;;=>` results via
   `format-eval-row`, `;;; ◀` inbound head-lines, the live readline); rewrite
