@@ -103,14 +103,6 @@
 ;; Note surfaced to monitoring agents while parked (optional; set by
 ;; `(agent/wait …)`).
 (schema/register! :seon.agent/wait-note      :string)
-;; ORPHANED: lifecycle is `:seon.agent/state` now — nothing writes
-;; `:seon.agent/completed-at`. Registered only so any remaining reader keeps
-;; compiling; a follow-up deletes the attr.
-(schema/register! :seon.agent/completed-at  :inst)
-;; ORPHANED: superseded by `:seon.agent/max-turns-per-loop` (the FSM reads
-;; that). Registered only so any remaining reader keeps compiling; a
-;; follow-up deletes the attr.
-(schema/register! :seon.agent/turns-cap :int)
 ;; ============================================================
 ;; Aliases — the context machinery lives in `seon.ctx`. These keep (a) the
 ;; agent-TAUGHT read surface (`seon.agent/messages` …) resolving via
