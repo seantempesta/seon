@@ -114,14 +114,10 @@
 ;; Note surfaced to monitoring agents while parked (optional; set by
 ;; `(agent/wait …)`).
 (schema/register! :seon.agent/wait-note      :string)
-;; ORPHANED by the FSM: lifecycle is now `:seon.agent/state`
-;; (`armable-agent-ids` keys on state ≠ `:terminated`), and `complete`
-;; no longer stamps this attr. Nothing in `seon.agent` writes or reads it.
-;; The registration stays only because out-of-lane readers still pull it
-;; (FLAGGED for the enum-ripple / U6 sweep): `seon.web.serve`
-;; (`/agent/<id>/complete` still calls the removed `agent/complete!`),
-;; `seon.web.inspector` (the completed-grid grouping), `seon.client`,
-;; `seon.ctx`. Those should move to the state enum; delete this attr after.
+;; ORPHANED: lifecycle is `:seon.agent/state` now — nothing writes
+;; `:seon.agent/completed-at`. Registered only so the inspector / client /
+;; ctx readers that still key on it (migration tracked, #16) keep compiling;
+;; delete this attr once they move to the state enum.
 (schema/register! :seon.agent/completed-at  :inst)
 ;; v0 :seon.agent/turn-count, :seon.agent/turns-since-inbound,
 ;; :seon.agent/interrupted? attrs deleted 2026-05-22. turn-count
@@ -596,44 +592,57 @@
 (defn ^:async wait
   "Park the calling agent: state → :waiting, with a note surfaced to
    monitoring agents. The agent resumes (→ :active) the moment a message
-   arrives — the wake gate handles that."
-  {:malli/schema [:=> [:catn [::note :string]] :seon.agent/state]}
+   arrives — the wake gate handles that. Returns :waiting on success, a loud
+   error envelope on a failed transact or no agent in scope."
+  {:malli/schema [:=> [:catn [::note :string]]
+                  [:or :seon.agent/state :seon.db/transact-response]]}
   [note]
-  (let [id (db/current-agent-id)]
-    (await (db/transact!
-             {:seon.db/tx-data [{:seon.agent/id        id
-                                 :seon.agent/state     :waiting
-                                 :seon.agent/wait-note note}]}))
-    :waiting))
+  (if-let [id (db/current-agent-id)]
+    (let [env (await (db/transact!
+                       {:seon.db/tx-data [{:seon.agent/id        id
+                                           :seon.agent/state     :waiting
+                                           :seon.agent/wait-note note}]}))]
+      (if (:seon.db/ok? env) :waiting env))
+    {:seon.db/ok? false
+     :seon.db/error {:seon.error/message
+                     "wait: no agent in scope — call inside (seon.db/with-agent …)."}}))
 
 (defn ^:async complete
   "Finish the calling agent's work: state → :completed (still wakeable —
    a new message resumes it). If `:seon.agent/parent` is set, send the
    result to the parent (which wakes it via the normal inbound gate); no
    parent → the result is for the human (already said via message/user)."
-  {:malli/schema [:=> [:catn [::result :string]] :seon.agent/state]}
+  {:malli/schema [:=> [:catn [::result :string]]
+                  [:or :seon.agent/state :seon.db/transact-response]]}
   [result]
-  (let [id     (db/current-agent-id)
-        ent    (when id (db/entity {:seon.db/ref [:seon.agent/id id]}))
-        parent (:seon.agent/parent ent)]
-    (await (db/transact!
-             {:seon.db/tx-data [{:seon.agent/id    id
-                                 :seon.agent/state :completed}]}))
-    (when parent
-      (await (msg/message! {:seon.agent.message/content result
-                            :seon.agent.message/to      parent})))
-    :completed))
+  (if-let [id (db/current-agent-id)]
+    (let [ent    (db/entity {:seon.db/ref [:seon.agent/id id]})
+          parent (:db/id (:seon.agent/parent ent))
+          env    (await (db/transact!
+                          {:seon.db/tx-data [{:seon.agent/id    id
+                                              :seon.agent/state :completed}]}))]
+      (if (:seon.db/ok? env)
+        (do (when parent
+              (await (msg/message! {:seon.agent.message/content result
+                                    :seon.agent.message/to      [parent]})))
+            :completed)
+        env))
+    {:seon.db/ok? false
+     :seon.db/error {:seon.error/message
+                     "complete: no agent in scope — call inside (seon.db/with-agent …)."}}))
 
 (defn ^:async terminate
   "Kill an agent: state → :terminated — the one UNWAKEABLE state (a
    message will not start a loop). Orchestrator-only; an agent does not
-   terminate itself."
-  {:malli/schema [:=> [:catn [::id ::id]] :seon.agent/state]}
+   terminate itself. Returns :terminated on success, the error envelope on a
+   failed transact."
+  {:malli/schema [:=> [:catn [::id ::id]]
+                  [:or :seon.agent/state :seon.db/transact-response]]}
   [id]
-  (await (db/transact!
-           {:seon.db/tx-data [{:seon.agent/id    id
-                               :seon.agent/state :terminated}]}))
-  :terminated)
+  (let [env (await (db/transact!
+                     {:seon.db/tx-data [{:seon.agent/id    id
+                                         :seon.agent/state :terminated}]}))]
+    (if (:seon.db/ok? env) :terminated env)))
 
 ;; ============================================================
 ;; The agent's ctx-LAYOUT editing surface — read-only against the DB except
