@@ -43,6 +43,16 @@ consumer-specific references in `src/`, `docs/`, or `pod-host/`.
 
 ---
 
+## Token Reporting
+
+Always report context/prompt sizes in **tokens**, not characters. The estimate is
+`chars / 4` — the `:seon.render/token-estimate` convention (`seon.ctx` / `seon.agent.inspect`).
+There is **no dedicated tokenizer dependency**; if one is ever added, update this note. The
+`seon.ai` config row carries `::max-tokens` (the LLM *output* cap) — a *context-window* limit is
+a separate concern. Applies to all size reporting, everywhere.
+
+---
+
 ## Image Generation Policy
 
 For tasks requiring UI design, mockup assets, or visual demonstrations, the agent can use the built-in `generate_image` tool. Avoid using generic image placeholders—generate working demonstration assets instead.
