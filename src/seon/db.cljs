@@ -68,7 +68,7 @@
 ;;;
 ;;; FIND shapes — pick by what you want back:
 ;;;   relation    [:find ?n :where [?e ::name ?n]]            ;=> #{["A"] ["B"]}
-;;;   scalar  `.` [:find (count ?e) . :where [?e ::name]]     ;=> 224   (one value)
+;;;   scalar  `.` [:find (count ?e) . :where [?e ::name]]     ;=> «one scalar — a count»
 ;;;   collection  [:find [?n ...] :where [?e ::name ?n]]      ;=> ["A" "B"]
 ;;;   tuple       [:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]] ;=> ["A" 1]
 ;;;
@@ -87,7 +87,7 @@
 ;;; GROUPED AGGREGATE — pull the group's name in the SAME query (group var must
 ;;; be a NAME, not a ref-eid, or you can't read the result):
 ;;;   [:find ?nm (count ?t) :where [?t :seon.test/ns ?n] [?n :seon.ns/name ?nm]]
-;;;   ;=> #{[:seon.db-test 39] [:seon.render-test 20] ...}   (then sort/max in Clojure)
+;;;   ;=> «set of [ns-name count] tuples»   (then sort/max in Clojure)
 ;;;
 ;;; LOOKUP-REF — address an entity by an identity attr instead of a raw eid.
 ;;; The value must be the STORED type. :seon.fn/sym is a :string, so use the
@@ -98,6 +98,11 @@
 ;;; (count …)/aggregate, not a list. Empty #{} on a query that should match?
 ;;; The attr keyword is almost certainly misspelled — copy it exactly from a
 ;;; rendered ns source or (keys (installed-schema @*conn*)).
+;;;
+;;; REPORT WHAT YOU COMPUTED. Every `;=>` below is a SHAPE, not an answer —
+;;; the numbers belong to a different db than yours. State only the value your
+;;; LAST eval returned; if a count matters, re-eval and read it back. Never
+;;; quote a number you remember or saw in source/an example.
 ;;; ──────────────────────────────────────────────────────────────────────
 
 ;; ---------------------------------------------------------------------------
@@ -457,26 +462,27 @@
    full idiom set):
 
      ;; scalar count — when you only need a number, COUNT, don't list
-     ;; (results are clipped ~50 rows):
-     (db/query '[:find (count ?e) . :where [?e :seon.fn/sym]])         ;=> 224
+     ;; (results are clipped ~50 rows). The `;=>` is a SHAPE; report the
+     ;; number YOUR eval returns, not the one written here:
+     (db/query '[:find (count ?e) . :where [?e :seon.fn/sym]])  ;=> «a scalar count»
      ;; registered-schema count — ONE :seon.schema/key row per registered
-     ;; schema; this IS the count of registered schemas. Trust it:
-     (db/query '[:find (count ?e) . :where [?e :seon.schema/key]])     ;=> 435
+     ;; schema; this IS the count of registered schemas. Read it back live:
+     (db/query '[:find (count ?e) . :where [?e :seon.schema/key]]) ;=> «a scalar count»
      ;; collection — one value per row:
-     (db/query '[:find [?n ...] :where [?e :seon.ns/name ?n]])         ;=> [:seon.db ...]
+     (db/query '[:find [?n ...] :where [?e :seon.ns/name ?n]]) ;=> «vector of ns-name keywords»
      ;; predicate + binding-expr:
      (db/query '[:find ?s :where [?e :seon.fn/doc ?d] [(count ?d) ?l]
                                  [(> ?l 400)] [?e :seon.fn/sym ?s]])
      ;; REF-JOIN — :seon.fn/ns is a ref (stores an eid); match the target
      ;; by joining through its name, NOT by putting the keyword in the slot:
      (db/query '[:find (count ?e) . :where [?e :seon.fn/ns ?n]
-                                           [?n :seon.ns/name :seon.db]]) ;=> 15
+                                           [?n :seon.ns/name :seon.db]]) ;=> «a scalar count»
      ;;   (the keyword form [?e :seon.fn/ns :seon.db] THROWS.)
      ;; GROUPED AGGREGATE with the name pulled in the SAME query, so the
      ;; group is readable (a bare ref-eid is not):
      (db/query '[:find ?nm (count ?t)
                  :where [?t :seon.test/ns ?n] [?n :seon.ns/name ?nm]])
-     ;;   ;=> #{[:seon.db-test 39] ...}   then (sort-by second > …) in Clojure
+     ;;   ;=> «set of [ns-name count] tuples»   then (sort-by second > …) in Clojure
 
    GUARDED against silent typos (the sibling of [[pull]]'s guard): a
    `:where` clause naming an attribute that is neither installed on
@@ -1083,13 +1089,14 @@
    row is a bootstrap row — derived per call from tx provenance,
    never a name-list).
 
-   ;; what has this cluster stored? (post-bootstrap rows only)
+   ;; what has this cluster stored? (post-bootstrap rows only) — the SHAPE,
+   ;; report the kinds/counts YOUR call returns:
    (seon.db/store-inventory)
    ;; => [{:seon.db/kind :my.kb.codebase            ; user domains first
-   ;;      :seon.db/attrs {:my.kb.codebase/answer 14
-   ;;                      :my.kb.codebase/question 14}}
+   ;;      :seon.db/attrs {:my.kb.codebase/answer «n»
+   ;;                      :my.kb.codebase/question «n»}}
    ;;     {:seon.db/kind :my.workout              ; agent-registered
-   ;;      :seon.db/attrs {:my.workout/date 3, :my.workout/type 3}}
+   ;;      :seon.db/attrs {:my.workout/date «n», :my.workout/type «n»}}
    ;;     …
    ;;     {:seon.db/kind :seon.agent …}]            ; core last
 
