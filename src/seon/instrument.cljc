@@ -31,10 +31,12 @@
     #?@(:clj  [[cljs.analyzer.api :as ana]
                [clojure.java.io :as io]
                [clojure.string :as str]]
-        :cljs [[clojure.string :as str]
+        :cljs [[cljs.reader :as reader]
+               [clojure.string :as str]
                [goog.object :as gobj]
                [malli.core :as m]
                [malli.instrument :as mi]
+               [seon.db :as db]
                [seon.error.instrument :as ei]])))
 
 (def skip-syms
@@ -296,48 +298,60 @@
            (m/-register-function-schema! ns-sym fn-sym schema-form
                                          {:scope #{:input}} :cljs identity))))))
 
+
 #?(:cljs
-   (defn install!
-     "Instrument every fn CURRENTLY in the `:cljs` function-schema registry
-      (input+output; async fns validate output on Promise resolution).
+   (defn async-fn?
+     "True when `f` is a JS async function (the runtime shape `^:async`
+      compiles to). Lets [[instrument-from-db!]] route async wrappers
+      without the analyzer's `:async` flag — the live var carries the fact."
+     [f]
+     (and (fn? f) (= "AsyncFunction" (.. f -constructor -name)))))
 
-      MUST be paired with a `(collect!)` call FIRST — and that `(collect!)`
-      MUST be expanded from the pod ENTRY ns (`seon.client`), NOT from a
-      leaf ns. `collect!` bakes its scan of `ana/all-ns` at macroexpand
-      time; expanded from a leaf it sees a near-empty analyzer and registers
-      almost nothing (clean build → 3 nses). Expanded from the entry ns —
-      compiled last, after its whole transitive closure — it sees every
-      first-party ns. See issue
-      `instrumentation-collect-clean-build-empty`.
+#?(:cljs
+   (defn instrument-from-db!
+     "Instrument every fn the PROGRAM GRAPH knows about — the robust,
+      ordering-independent replacement for the compile-time `collect!`
+      scan (issue instrumentation-collect-clean-build-empty).
 
-      Runtime/agent-defined fns are NOT on the compile-time roster; they
-      register + instrument through the eval-tee path instead.
+      Queries `db` for all `:seon.fn/sym` + `:seon.fn/spec` rows (the
+      canonical index of EVERY core + agent-authored fn — `index-core!`
+      seeds core fns, the eval-tee seeds agent fns), resolves each live JS
+      var, reads its spec, and routes it through [[register-target!]]
+      (async detected from the var via [[async-fn?]]; [[skip-syms]]
+      honored), then `mi/instrument!` once.
 
-      No-op when [[enabled?]] is false (`SEON_INSTRUMENT` kill-switch).
+      Runs at boot AFTER the core is indexed. The eval-tee path keeps
+      instrumenting newly-defined fns inline between boots. No-op when
+      [[enabled?]] is false. Returns a stats map.
 
-      Returns
-        {:seon.instrument/enabled? <bool>
-         :seon.instrument/n-registered <int>
-         :seon.instrument/n-instrumented <int>}.
-
-      Idempotent: re-instruments (replaces the wrapper)."
-     []
+      `:no-var` counts rows whose var isn't live (a prior session's fn);
+      `:bad-spec` counts unreadable spec strings — both are skipped, not
+      fatal."
+     [db]
      (if-not (enabled?)
-       {:seon.instrument/enabled?        false
-        :seon.instrument/n-registered    0
-        :seon.instrument/n-instrumented  0}
-       (let [n-inst (reduce + (map count (vals (m/function-schemas :cljs))))]
-         ;; `mi/instrument!` returns nil (not a count) — it mutates each
-         ;; registered fn's var-binding in place to install the validating
-         ;; wrapper. n == the registry size since instrument! reads the
-         ;; same atom collect! populated.
-         ;;
-         ;; Reporter — default is `m/-fail!` (a generic ex-info); we hand
-         ;; in `ei/report-fn` so failures throw with the structured
-         ;; envelope as ex-data, which seon.error/->map flattens into
-         ;; :seon.error/data and record-eval! persists as
-         ;; :seon.eval/error-data.
+       {:seon.instrument/enabled?       false
+        :seon.instrument/n-instrumented 0}
+       (let [rows  (db/query '[:find ?sym ?spec
+                               :where [?e :seon.fn/sym ?sym]
+                                      [?e :seon.fn/spec ?spec]]
+                             db)
+             stats (volatile! {:registered 0 :skipped 0 :no-var 0 :bad-spec 0})]
+         (doseq [[sym-str spec-str] rows
+                 :let [slash (str/index-of (str sym-str) "/")]
+                 :when slash]
+           (let [ns-sym (symbol (subs sym-str 0 slash))
+                 fn-sym (symbol (subs sym-str (inc slash)))
+                 the-fn (-find-js-var ns-sym fn-sym)
+                 schema (try (reader/read-string spec-str)
+                             (catch :default _ ::bad))]
+             (cond
+               (nil? the-fn)    (vswap! stats update :no-var inc)
+               (= ::bad schema) (vswap! stats update :bad-spec inc)
+               (skip? ns-sym fn-sym) (vswap! stats update :skipped inc)
+               :else (do (register-target! ns-sym fn-sym schema (async-fn? the-fn))
+                         (vswap! stats update :registered inc)))))
          (mi/instrument! {:report ei/report-fn})
-         {:seon.instrument/enabled?       true
-          :seon.instrument/n-registered   n-inst
-          :seon.instrument/n-instrumented n-inst}))))
+         (assoc @stats
+                :seon.instrument/enabled? true
+                :seon.instrument/n-instrumented
+                (reduce + (map count (vals (m/function-schemas :cljs)))))))))

@@ -47,15 +47,10 @@
     ;; `:seon.fn/spec` string in index-core! (the runtime-introspection
     ;; core indexer — coherent-bootstrap-indexing Step 2).
     [malli.core :as m]
-    ;; Phase A item 7 — seon-native collector that walks the analyzer
-    ;; at compile time for :malli/schema metadata and registers with
-    ;; malli.core/-function-schemas*. Bridges the JVM/CLJS gap where
-    ;; mi/collect! is JVM-only. `collect!` is referred as a MACRO and
-    ;; expanded HERE (the entry ns, compiled last) so its `ana/all-ns`
-    ;; scan sees the full first-party closure — expanding it from a leaf
-    ;; ns scans a near-empty analyzer (issue
-    ;; instrumentation-collect-clean-build-empty).
-    [seon.instrument :as instrument :refer-macros [collect!]]
+    ;; Instrumentation. `instrument-from-db!` (called in start-agent! after
+    ;; the core is indexed) reads the program graph to wrap every fn; the
+    ;; eval path instruments newly-defined fns inline.
+    [seon.instrument :as instrument]
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
     [seon.agent :as agent]
@@ -2253,6 +2248,17 @@
                 _             (log/info-console!
                                 "seon.client/start-agent!"
                                 (str "replay: " (pr-str replay-stats)))
+                ;; Install Malli instrumentation from the PROGRAM GRAPH —
+                ;; the DB now holds every core fn (index-core! via boot-seed!)
+                ;; plus every replayed agent fn, each with its `:seon.fn/spec`.
+                ;; This is the complete, ordering-independent source (issue
+                ;; instrumentation-collect-clean-build-empty). Agent fns were
+                ;; already wrapped inline by the eval-tee during replay; this
+                ;; adds the compiled core fns (idempotent re-wrap otherwise).
+                instr-stats   (instrument/instrument-from-db! (await (d/db conn)))
+                _             (log/info-console!
+                                "seon.client/start-agent!"
+                                (str "instrumentation: " (pr-str instr-stats)))
                 ;; Per-agent boots — home ns + entity + wake trigger +
                 ;; MCP hosting, one at a time (boot transacts must not
                 ;; interleave). The primary's result feeds the return map.
@@ -2374,26 +2380,11 @@
   (log/quiet-library-logs!)
   (install-process-safety-net!)
   (log/info-console! "seon.client" "-main boot" {:boot-at (:boot-at @!state)})
-  ;; Phase A item 7+8 — install Malli instrumentation. Collects every
-  ;; seon.* fn with :malli/schema metadata, registers with
-  ;; -function-schemas*, and wraps each var with input+output
-  ;; validation (Sean's decision #7). Runs after all seon.* nses have
-  ;; loaded (CLJS module-load is eager and happens before -main fires)
-  ;; and before any agent eval that would call them.
-  (try
-    ;; `collect!` MUST expand here (the entry ns) so its compile-time
-    ;; `ana/all-ns` scan is complete; `install!` then wraps whatever was
-    ;; registered. Gated so a disabled run registers nothing.
-    (when (instrument/enabled?) (collect!))
-    (let [stats (instrument/install!)]
-      (log/info-console! "seon.client"
-                         (if (:seon.instrument/enabled? stats)
-                           "instrumentation installed"
-                           "instrumentation DISABLED (SEON_INSTRUMENT)")
-                         stats))
-    (catch :default e
-      (log/error-console! "seon.client" "instrumentation install failed"
-                          {:msg (.-message e)})))
+  ;; Malli instrumentation is installed from the PROGRAM GRAPH inside
+  ;; `start-agent!` (`instrument/instrument-from-db!`), AFTER the core is
+  ;; indexed — the DB is the complete, ordering-independent source of every
+  ;; fn + spec (issue instrumentation-collect-clean-build-empty). The
+  ;; eval-tee path instruments newly-defined fns inline between boots.
   (-> (datahike-smoke-test!)
       (.then (fn [result]
                (case (:status result)

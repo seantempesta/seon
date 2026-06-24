@@ -9,18 +9,30 @@ severity: critical
 
 ## Resolution (2026-06-24)
 
-Fixed by expanding `collect!` from the entry ns. `seon.instrument/install!`
-no longer calls `collect!`; instead `seon.client` refers `collect!` as a
-macro (`:refer-macros [collect!]`) and calls `(when (enabled?) (collect!))`
-in `-main` before `(install!)`. Because `seon.client` is compiled last
-(after its whole transitive closure), the `ana/all-ns` scan is complete.
+Replaced the compile-time scan with a **runtime scan of the program graph**
+— the DB is the complete, ordering-independent source of every fn + spec
+(`code as data`). `seon.instrument/instrument-from-db!` queries all
+`:seon.fn/sym` + `:seon.fn/spec` rows, resolves each live var, detects
+async from the var (`AsyncFunction` ctor), routes through `register-target!`
+(skip-syms honored), and `mi/instrument!`s once. Called in `start-agent!`
+AFTER `index-core!` indexes core fns (and after replay tees agent fns).
+`install!` + the boot use of the `collect!` macro are gone.
+
+Why the DB beats the macro: `index-core!` already writes a `:seon.fn` row
+with `:seon.fn/spec` (= `m/form` of the schema) for every PUBLIC schema'd
+core fn; the eval-tee writes the same for every agent fn. So the DB has the
+COMPLETE set independent of compile order — no entry-ns caveat, no macro.
 
 Verified on a **clean** build (`rm -rf .shadow-cljs/builds/client`):
-instrumentation went from 3 nses / 25 fns → **48 nses / 205 fns**;
-`seon.eval/result-var-ref?` is instrumented again; verbs still skipped;
-agent replay 14/14. Caveat (documented in `install!`): a first-party ns
-NOT in `seon.client`'s transitive closure would still be missed — fine for
-the pod (everything that runs is reachable from the entry).
+boot logs `instrumentation: {:registered 204 :skipped 18 :no-var 0
+:bad-spec 0}` (was 3 nses / 25 fns); `seon.eval/result-var-ref?`
+instrumented; verbs skipped; replay 14/14; `bin/test-cljs` green.
+
+(An interim fix expanded `collect!` from the entry ns `seon.client` — it
+worked too, 48 nses / 205, but still leaned on the compile-time macro and a
+"must be in the entry's closure" caveat. The DB scan supersedes it. The
+`collect!` macro is retained only as a compile-time test utility for
+`db_test`, which has no DB.)
 
 ---
 
