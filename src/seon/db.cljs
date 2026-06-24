@@ -465,6 +465,10 @@
      ;; (results are clipped ~50 rows). The `;=>` is a SHAPE; report the
      ;; number YOUR eval returns, not the one written here:
      (db/query '[:find (count ?e) . :where [?e :seon.fn/sym]])  ;=> «a scalar count»
+     ;; CLIPPED results — when a render shows a banner like «N rows; showing
+     ;; first 50, +M more clipped», that N IS the total; READ it. Do NOT
+     ;; recount the printed rows, and do NOT re-narrow the query to fit. Need
+     ;; only the count? COUNT in the query (above), don't list-then-count.
      ;; registered-schema count — ONE :seon.schema/key row per registered
      ;; schema; this IS the count of registered schemas. Read it back live:
      (db/query '[:find (count ?e) . :where [?e :seon.schema/key]]) ;=> «a scalar count»
