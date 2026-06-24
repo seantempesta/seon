@@ -477,6 +477,54 @@ This work decomposes into pillars, each a facet of the one system:
 - **Add** `seon.agent/prune-renderable!` / `unprune!` verbs + a `:seon.render/hidden?` boolean PROPERTY on the renderable, honored in the root render fn (`~ctx.cljs:1762`). Hidden renderable contributes neither `:ai` nor tokens; its row is untouched; its id shows in a one-line "N pruned — (unprune …) to restore" note. **REFUSES** pruning a message renderable whose origin is `:human` (mirror the inbound gate at `transcript.cljs:88`). Does NOT duplicate `add-section!`/`remove-section!`/`update-ctx!` (`agent.cljs:577-660`) — those edit agent-AUTHORED `:seon.agent/ctx` sections; prune operates on core-DERIVED renderables. MUST be a property, not a 2nd registry.
 - **Add** `src/seon/agent/data.cljs` (sibling to `seon.agent.search`; registered `::request`/`::response`, namespaced keys, errors-as-values, NOT throwing). Three pure sync fns: `search` (tree-seq walk → `[path value]` hits), `pull` (validated `get-in`), `prune` (subtree removal via a hand-rolled 6-line `dissoc-in`). NO new dep — `tree-seq`/`get-in`/`update-in` are all in cljs.core + the bootstrap-CLJS eval engine (`eval.cljs:37`). specter/meander confirmed ABSENT — rejected. Whitelist `:seon.agent.data`.
 
+### Clipping system (cross-cutting)
+
+**The problem.** Today there are five scattered magic numbers with no stated rationale:
+
+| Name | Value | Location | Purpose |
+|------|-------|----------|---------|
+| `store-edn-cap` | 16384 chars | `eval.cljs:1846` | Max chars stored in DB per eval result (write-time ceiling) |
+| `result-body-render-cap` | 16384 chars | `eval.cljs:1945` AND `ctx.cljs:263` | Max chars shown to agent for a result body (DUPLICATED) |
+| `eval-render-cap` | 1500 chars | `ctx.cljs:250` | Max chars for source + stdout blocks |
+| `result-row-cap` | 50 rows | `eval.cljs:1923` | Max collection rows shown before clipping |
+| `message-render-cap` | 4000 chars | `ctx.cljs:303` | Max chars per inbound/outbound message |
+
+16384 = 4096 tokens × 4 chars/token. The number is not random — it equals one-quarter of a 16k-token model context — but this derivation is NOWHERE stated, the duplicate definition in two files guarantees drift, and the row-cap and char-cap are disconnected mechanisms that can interact badly (50 rows of complex maps can still produce 16384+ chars of garbage before the char cap kicks in).
+
+**The design.** One function, `clip-value`, lives in `seon.eval` (the write-time projection point) and handles every data shape uniformly:
+
+- **Scalar (string, number, keyword, bool):** pass through; the char cap applies at the outer call site.
+- **Top-level sequential (vector, list, seq):** if `(count coll) > result-row-cap`, show first N rows with a clip message naming the `result/<id>` for full access.
+- **Top-level map:** walk values; any value that is a sequential with `count > result-row-cap` gets the same row-cap treatment in place. This handles search/grep envelope responses (`{:ok? true :matches [...N...] :match-count N}`) correctly — the envelope is preserved, only the oversized inner collection is clipped.
+- **Nested (map of maps, vector of maps):** same recursive walk, one level deep. Do NOT recursively walk arbitrarily deep — that produces confusing half-materialized structures. The rule: one level of map-value descent for collections; deeper structures get the row-cap at the top level if they overflow.
+- **After structural clipping**, apply the char cap (`result-body-render-cap`) as a backstop on the final `pr-str` output. This is the safety net for deeply nested structures that survive the row cap.
+
+**The consolidation.** `result-body-render-cap` must be defined ONCE in `eval.cljs` and imported by `ctx.cljs` — no duplicate. The current `ctx.cljs:263` definition is a bug waiting to diverge. All cap constants move to one block in `eval.cljs` with explicit token-derived comments:
+
+```clojure
+;; All caps derived from token budget: chars-per-token = 4 (seon.ai.tokens/chars-per-token)
+(def result-row-cap      50)     ;; 50 rows — empirically readable; fits in ~4k tokens worst case
+(def result-body-render-cap                   ;; 4096 tokens × 4 chars/token
+  (or (some-> js/process.env.SEON_RESULT_BODY_RENDER_CAP js/parseInt) 16384))
+(def store-edn-cap                            ;; same ceiling at write time
+  (or (some-> js/process.env.SEON_STORE_EDN_CAP js/parseInt) 16384))
+(def eval-render-cap                          ;; source + stdout: 375 tokens × 4
+  (or (some-> js/process.env.SEON_EVAL_RENDER_CAP js/parseInt) 1500))
+```
+
+`ctx.cljs` imports and uses `eval/result-body-render-cap` and `eval/result-row-cap` directly — no re-definition. The message cap stays in `ctx.cljs` (it is a render-only concern, not a write-time one):
+
+```clojure
+(def message-render-cap                       ;; 1000 tokens × 4 chars/token
+  (or (some-> js/process.env.SEON_MESSAGE_RENDER_CAP js/parseInt) 4000))
+```
+
+**The `:seon.render/clip` renderable attr** (already registered at the top of this doc) is the per-section escape hatch. A renderable can carry `:seon.render/clip :none` to opt out of clipping entirely (e.g. the transcript until the sliding window lands), or an int to override the cap for that section, or a map `{:seon.render/ai N :seon.render/html M}` for per-view overrides. The clip value is checked by the section renderer before invoking the clip function — it never touches `clip-value` directly.
+
+**Research task before implementing.** Before replacing the current scattered caps with `clip-value`, drive a live agent on DeepSeek with several large result shapes (60-match grep, 200-row db query, deeply nested pull, large string scalar) and measure the char counts that actually land in the context. The current caps were set without this data. The refactor should CONFIRM the numbers are sane at those real-world sizes, adjust if needed, and RECORD the justification as a comment beside each constant. Do not keep numbers that were made up; replace them with numbers that were measured.
+
+**Scope.** This is a P7-adjacent cross-cutting refactor — small in lines-of-code terms but requires touching `eval.cljs`, `ctx.cljs`, and adding a test that drives each structural case (scalar / top-level-seq / map-envelope / char-backstop). It is NOT a blocker for P1 through P6, but the duplicate `result-body-render-cap` definition should be fixed as a bug in the next commit that touches either file.
+
 ### Per-section adaptation map
 
 Current sections = the SOUL (block-1, outside the composer) + the entries of `core-default-ctx` (`ctx.cljs:1523-1545`). For each: what it is now, its STABILITY (static-priority intuition — lower = more stable = higher up), and the concrete adaptation.
