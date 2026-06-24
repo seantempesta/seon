@@ -106,13 +106,17 @@
        directly: `register!` per attr, three map-in/map-out `:malli/schema`
        fn shapes, error-as-value envelopes, the todo tools the system
        prompt teaches by name.
+     - `:seon.db` — the database API every agent uses for arbitrary reads
+       and writes: the datalog cheat sheet, per-fn worked examples
+       (query/pull/entity/transact!/store-inventory), the lookup-ref and
+       ref-join idioms. Its real source IS the db manual.
    `my.*` nses (`my.kb`, `my.soul`, agent-authored code) are ALREADY
    rendered full by the `my.*` rule in [[full-source-ns?]] — they do NOT
    belong here; this whitelist is ONLY for the seon.* framework tools.
    Shared by the boot indexer (which stores their real file source — see
    `seon.client/ns-row`) and [[namespaces-section]] (which renders them
    FULL while the rest of the framework is a name manifest)."
-  #{:seon.agent.todo})
+  #{:seon.agent.todo :seon.db})
 
 (defn in-full-source-whitelist?
   "True when `ns-name` (string, keyword, or symbol) is one of the curated

@@ -97,9 +97,29 @@ precedent exists at `scratchpad/nodeaf_probe.cljs` (same skeleton, stub llm-fn).
 - **Never open a second writer conn on the live pod.** `nodeaf_probe.cljs` opens
   its own conn — fine for an isolated probe, but on the live pod it contends on
   the single wire-server writer. Reuse `@seon.client/!agent-conn`.
-- **Drive synchronously.** Run the whole drive in ONE awaited eval; do not rely
-  on the async wake trigger (setTimeout-based, racy, breaks the ALS scope, and
-  overlapping loops wedge the shared async continuation).
+- **`await` / `^:async` are ILLEGAL in MCP REPL evals.** Verified: a top-level
+  `(await …)` or an `^:async fn` evaluated through `mcp__seon_cljs__eval` throws
+  `ReferenceError: await$ is not defined` (the self-hosted REPL has no async
+  transpile context). Drive the whole sequence via PROMISE `.then` chaining
+  instead — Node's AsyncLocalStorage propagates across `.then`, so a
+  `(seon.db/with-agent aid (fn [] (-> (js/Promise.resolve nil) (.then step1)
+  (.then step2) …)))` keeps the agent scope intact. Capture the final result
+  into an atom (`(reset! !out …)`) and read it back in a SECOND eval — the MCP
+  eval returns the Promise object, not its resolution.
+- **Use `(seon.db/new-id!)` for every id you store.** Verified: id attrs
+  (`:seon.db/id`, the message/todo/etc. ids) are `[:string {:min 14 :max 14}]`,
+  so a custom string like `"todo-001"` or `(str "MSG-" aid)` FAILS Malli value
+  validation and the tx returns `:seon.db/ok? false`. Mint ids with `new-id!`.
+- **Give scratch agents a constant DB-assistant `:seon.agent/purpose`.** Without
+  a purpose a fresh agent onboards/greets the human instead of doing the db
+  work. Set a fixed role (a DB assistant — NOT db-skill coaching, which would
+  leak the answers): e.g. `:seon.agent/purpose "You are a database assistant.
+  Do exactly what the human asks against the cluster store and report the
+  result."` Same string for every battery task; it is role, not a hint.
+- **Drive synchronously (one logical sequence, `.then`-chained).** Run the whole
+  drive as one chained Promise; do not rely on the async wake trigger
+  (setTimeout-based, racy, breaks the ALS scope, and overlapping loops wedge the
+  shared async continuation).
 - **`:seon.fn/ns` is a REF, not a keyword.** Verified: `[?e :seon.fn/ns
   :seon.db]` THROWS "Nothing found for entity id :seon.db". Join through the ns
   entity: `[?e :seon.fn/ns ?n] [?n :seon.ns/name :seon.db]`. This is itself a
@@ -122,23 +142,50 @@ precedent exists at `scratchpad/nodeaf_probe.cljs` (same skeleton, stub llm-fn).
    `(seon.db/query '[:find (count ?n) . :where [?n :seon.ns/name]])` > 0 and
    `(seon.ctx.namespaces/full-source-ns? :seon.db)` is now `true`.
 
-4. **Deliver task + drive, in ONE awaited eval** (timeout_ms 300000):
+4. **Deliver task + drive, via `.then` chaining** (timeout_ms 300000; NO
+   `await`/`^:async` — see the wiring hazard). Define each phase as a fn taking
+   the prior result and RETURNING a Promise, then chain them; stash the final
+   record in an atom and read it back in step 5.
 
    - `(set! seon.db/*conn* @seon.client/!agent-conn)`
    - `(def aid (str "DRVdb-" (.getTime (js/Date.))))` — fresh scratch id, never
      collides with the live roster.
-   - `(def cs (await (seon.repl/ensure-bootstrap!)))`
    - `(def llm (seon.ai.openai-compat/agent-adapter {:seon.ai/temperature 0}))`
      — DeepSeek, deterministic; provider already `:deepseek`, `DEEPSEEK_API_KEY`
      present.
-   - Create the agent inside its scope:
-     `(await (seon.db/with-agent aid (fn ^:async [] (await (seon.eval/setup-agent-ns! cs (seon.ctx/home-ns aid) aid)) (await (seon.agent/create! {:seon.agent/id aid :seon.agent/max-turns-per-loop 5})))))`
-   - Deliver the task as the human (the real message seam):
-     `(await (seon.db/transact! {:seon.db/tx-data [{:seon.agent.message/id (str "MSG-" aid) :seon.agent.message/from {:seon.user/id "user"} :seon.agent.message/to [{:seon.agent/id aid}] :seon.agent.message/content "<TASK>" :seon.agent.message/at (js/Date.) :seon.agent.message/hops 0 :seon.agent.message/origin :human}]}))`
-     (origin `:human`, hops 0 — the wake gate `inbound-msg-datom?` requires
-     `from != me` and origin in `{:human :agent}`).
-   - Drive N turns synchronously:
-     `(def halt (await (seon.db/with-agent aid (fn ^:async [] (let [w (await (seon.agent/fresh-wake! {:seon.agent/id aid}))] (await (seon.agent/set-state! {:seon.agent/id aid :seon.agent/state :active})) (await (seon.agent.fsm/run-loop! {:seon.agent/id aid :seon.agent/llm-fn llm :seon.agent/compile-state cs} w)))))))`
+   - `(def !out (atom :pending))`
+   - Chain bootstrap → setup-ns → create → deliver → drive, all inside the
+     agent scope, ids from `new-id!`, a constant DB-assistant purpose:
+
+     ```clojure
+     (seon.db/with-agent aid
+       (fn []
+         (-> (seon.repl/ensure-bootstrap!)
+             (.then (fn [cs]
+               (-> (seon.eval/setup-agent-ns! cs (seon.ctx/home-ns aid) aid)
+                   (.then (fn [_]
+                     (seon.agent/create! {:seon.agent/id aid
+                                          :seon.agent/purpose "You are a database assistant. Do exactly what the human asks against the cluster store and report the result."
+                                          :seon.agent/max-turns-per-loop 5})))
+                   (.then (fn [_]
+                     (seon.db/transact!
+                       {:seon.db/tx-data
+                        [{:seon.agent.message/id (seon.db/new-id!)   ; NOT a custom string
+                          :seon.agent.message/from {:seon.user/id "user"}
+                          :seon.agent.message/to [{:seon.agent/id aid}]
+                          :seon.agent.message/content "<TASK>"
+                          :seon.agent.message/at (js/Date.)
+                          :seon.agent.message/hops 0
+                          :seon.agent.message/origin :human}]})))   ; origin :human, hops 0 — wake gate
+                   (.then (fn [_] (seon.agent/fresh-wake! {:seon.agent/id aid})))
+                   (.then (fn [w]
+                     (-> (seon.agent/set-state! {:seon.agent/id aid :seon.agent/state :active})
+                         (.then (fn [_]
+                           (seon.agent.fsm/run-loop! {:seon.agent/id aid
+                                                      :seon.agent/llm-fn llm
+                                                      :seon.agent/compile-state cs} w))))))
+                   (.then (fn [halt] (reset! !out {:halt halt})))))))))
+     ```
 
 5. **Capture.** With `*conn*` still bound:
 
@@ -179,21 +226,21 @@ oracle — do not hardcode these numbers into the agent's task.
 | id | kind | instruction | expected shape | ground-truth | difficulty |
 | --- | --- | --- | --- | --- | --- |
 | db-q-count-fns | query | How many functions are indexed in this cluster's program graph? | `(db/query '[:find (count ?e) . :where [?e :seon.fn/sym]])` | 224 (scalar) | basic |
-| db-q-count-schemas | query | How many registered schemas are in the store? | `(db/query '[:find (count ?e) . :where [?e :seon.schema/key]])` | 432 | basic |
+| db-q-count-schemas | query | How many registered schemas are in the store? | `(db/query '[:find (count ?e) . :where [?e :seon.schema/key]])` | 435 (live 2026-06-23; ONE `:seon.schema/key` row per registered schema, equals `(count (seon.schema/registered-schemas))`; shifts with the codebase — verify at drive time) | basic |
 | db-q-list-ns-names | query | List the names of every namespace in the store. | `(db/query '[:find [?n ...] :where [?e :seon.ns/name ?n]])` | 82 ns-name keywords (collection form) | basic |
-| db-q-pull-fn | query | Pull the indexed entry for the function `seon.db/query` — show its arglists and docstring. | `(db/pull '[:seon.fn/sym :seon.fn/arglists :seon.fn/doc] [:seon.fn/sym 'seon.db/query])` | map with `:seon.fn/sym seon.db/query`, arglists `[[& args]]`, doc starting "Run a Datalog query." | basic |
+| db-q-pull-fn | query | Pull the indexed entry for the function `seon.db/query` — show its arglists and docstring. | `(db/pull '[:seon.fn/sym :seon.fn/arglists :seon.fn/doc] [:seon.fn/sym "seon.db/query"])` (STRING lookup value — `:seon.fn/sym` is a :string; the quoted-symbol form `'seon.db/query` THROWS "Cannot compare String to Symbol") | map with `:seon.fn/sym "seon.db/query"`, arglists string `"([& args])"`, doc starting "Run a Datalog query." | basic |
 | db-q-find-by-attr | query | Which namespaces have a recorded `:seon.ns/source` (real file text)? Return their names. | `(db/query '[:find ?n :where [?e :seon.ns/name ?n] [?e :seon.ns/source _]])` | 69 namespaces (presence-of-attr filter) | intermediate |
 | db-q-predicate-doc | query | Find functions whose docstring is longer than 400 characters; return the symbol. | `(db/query '[:find ?s :where [?e :seon.fn/sym ?s] [?e :seon.fn/doc ?d] [(count ?d) ?l] [(> ?l 400)]])` | a small set; exercises a binding-expr + predicate | intermediate |
 | db-q-ref-join | query | How many functions live in the `seon.db` namespace? (`:seon.fn/ns` is a ref — join through the ns entity.) | `(db/query '[:find (count ?e) . :where [?e :seon.fn/ns ?n] [?n :seon.ns/name :seon.db]])` | 15 | intermediate |
 | db-q-distinct-via-set | query | What distinct namespaces own at least one test? | `(db/query '[:find ?nm :where [?e :seon.test/ns ?n] [?n :seon.ns/name ?nm]])` | set of ns-name keywords (datalog `:find` dedupes) | intermediate |
-| db-q-lookup-ref-entity | query | Using a lookup ref on the identity attribute, get the arglists of `seon.db/transact!` without first finding its numeric eid. | `(db/pull '[:seon.fn/arglists] [:seon.fn/sym 'seon.db/transact!])` or `(db/entity {:seon.db/ref [:seon.fn/sym 'seon.db/transact!]})` | arglists `[[& call-args]]` via lookup-ref, not a raw eid | intermediate |
+| db-q-lookup-ref-entity | query | Using a lookup ref on the identity attribute, get the arglists of `seon.db/transact!` without first finding its numeric eid. | `(db/pull '[:seon.fn/arglists] [:seon.fn/sym "seon.db/transact!"])` or `(db/entity {:seon.db/ref [:seon.fn/sym "seon.db/transact!"]})` (STRING lookup value, never `'seon.db/transact!`) | arglists string `"([& call-args])"` via lookup-ref, not a raw eid | intermediate |
 | db-q-aggregate-group | query | Count how many tests each namespace owns; return the top namespace by test count. | `(db/query '[:find ?nm (count ?e) :where [?e :seon.test/ns ?n] [?n :seon.ns/name ?nm]])` then max | `[:seon.db-test 39]` is the top group | advanced |
 | db-q-multi-where | query | Find functions that have BOTH a docstring AND a `:seon.fn/spec`; return the count. | `(db/query '[:find (count ?e) . :where [?e :seon.fn/sym _] [?e :seon.fn/doc _] [?e :seon.fn/spec _]])` | 222 (2 of 224 lack a spec) | advanced |
 | db-q-provenance | query | The store records eval provenance: how many `:seon.eval` rows exist? | `(db/query '[:find (count ?e) . :where [?e :seon.eval/id]])` | 4 (from the live session — shifts with activity; verify at drive time) | advanced |
-| db-tx-add-todo | transaction | Store a new todo titled "Audit db battery" with status `:open` and a fresh string id. | `(db/transact! {:seon.db/tx-data [{:seon.agent.todo/id "todo-001" :seon.agent.todo/title "Audit db battery" :seon.agent.todo/status :open}]})` | `:seon.db/ok? true`; read-back pull returns title + `:open`. `:seon.agent.todo/id` registered, 0 todo rows now — clean target. `:seon.agent.todo/status` is `[:enum :open :done]`. | basic |
-| db-tx-upsert-by-identity | transaction | Re-store the same todo "todo-001" with status `:done`; do NOT create a second entity. | `(db/transact! {:seon.db/tx-data [{:seon.agent.todo/id "todo-001" :seon.agent.todo/status :done}]})` | todo count stays 1 (identity upsert); read-back status `:done`; title untouched (omitted = unchanged) | intermediate |
-| db-tx-retract-attr | transaction | Clear the title on todo "todo-001", leaving the rest intact. | `(db/transact! {:seon.db/tx-data [[:db/retract [:seon.agent.todo/id "todo-001"] :seon.agent.todo/title]]})` | `:seon.db/retracted 1`; read-back of `:seon.agent.todo/title` is nil; entity still resolves. Demonstrates `[:db/retract eid attr]`, not omission. | intermediate |
-| db-tx-multi-entity-kb | transaction | Store two `:my.kb.system` facts in ONE transaction, each with id/text/at. | `(db/transact! {:seon.db/tx-data [{:my.kb.system/id "kb-net" :my.kb.system/text "..." :my.kb.system/at (js/Date.)} {:my.kb.system/id "kb-read" :my.kb.system/text "..." :my.kb.system/at (js/Date.)}]})` | `:seon.db/ok? true`; read-back count of `:my.kb.system/id` grows by 2. `my.kb.system/{id,text,at}` registered (1 row exists now). | advanced |
+| db-tx-add-todo | transaction | Store a new todo titled "Audit db battery" with status `:open` and a fresh id. | `(let [tid (db/new-id!)] (db/transact! {:seon.db/tx-data [{:seon.agent.todo/id tid :seon.agent.todo/title "Audit db battery" :seon.agent.todo/status :open}]}))` (`:seon.agent.todo/id` is a 14-char `:seon.db/id` — a custom string like `"todo-001"` FAILS Malli; mint with `new-id!`) | `:seon.db/ok? true`; read-back pull returns title + `:open`. 0 todo rows now — clean target. `:seon.agent.todo/status` is `[:enum :open :done]`. | basic |
+| db-tx-upsert-by-identity | transaction | Re-store the SAME todo (its `new-id!` id) with status `:done`; do NOT create a second entity. | `(db/transact! {:seon.db/tx-data [{:seon.agent.todo/id <tid> :seon.agent.todo/status :done}]})` (reuse the id minted above) | todo count stays 1 (identity upsert); read-back status `:done`; title untouched (omitted = unchanged) | intermediate |
+| db-tx-retract-attr | transaction | Clear the title on that todo, leaving the rest intact. | `(db/transact! {:seon.db/tx-data [[:db/retract [:seon.agent.todo/id <tid>] :seon.agent.todo/title]]})` (reuse the id) | `:seon.db/ok? true`; SCORE BY READ-BACK: `(:seon.agent.todo/title (db/entity {:seon.db/ref [:seon.agent.todo/id <tid>]}))` is nil while status survives; entity still resolves. NOTE: the envelope's `:seon.db/retracted` reads 0 here (the wire success report's `:tx-data` summary doesn't carry the user retraction datom — known quirk; do NOT score on `:retracted`). Demonstrates `[:db/retract eid attr]`, not omission. | intermediate |
+| db-tx-multi-entity-kb | transaction | Store two `:my.kb.system` facts in ONE transaction, each with id/text/at. | `(db/transact! {:seon.db/tx-data [{:my.kb.system/id (db/new-id!) :my.kb.system/text "..." :my.kb.system/at (js/Date.)} {:my.kb.system/id (db/new-id!) :my.kb.system/text "..." :my.kb.system/at (js/Date.)}]})` (`:my.kb.system/id` is an unconstrained `:string` so any value works, but `new-id!` is the uniform habit) | `:seon.db/ok? true`; read-back count of `:my.kb.system/id` grows by 2. `my.kb.system/{id,text,at}` registered. | advanced |
 
 Coverage: count/aggregate scalar, collection + relation + scalar `:find`
 shapes, pull (wildcard subset + lookup-ref eid), presence-of-attr filter,

@@ -62,6 +62,44 @@
     [seon.db.internal :as internal]
     [seon.schema :as schema]))
 
+;;; ──────────────────────────────────────────────────────────────────────
+;;; Datalog cheat sheet — the minimal idiom set. Copy a shape, swap attrs.
+;;; (`db` is OMITTED everywhere — it auto-injects from *conn*.)
+;;;
+;;; FIND shapes — pick by what you want back:
+;;;   relation    [:find ?n :where [?e ::name ?n]]            ;=> #{["A"] ["B"]}
+;;;   scalar  `.` [:find (count ?e) . :where [?e ::name]]     ;=> 224   (one value)
+;;;   collection  [:find [?n ...] :where [?e ::name ?n]]      ;=> ["A" "B"]
+;;;   tuple       [:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]] ;=> ["A" 1]
+;;;
+;;; PREDICATE — filter inside :where:  [(> ?l 400)]
+;;;   [:find ?s :where [?e ::doc ?d] [(count ?d) ?l] [(> ?l 400)] [?e ::sym ?s]]
+;;;   (binding-expr `[(count ?d) ?l]` binds, predicate `[(> ?l 400)]` filters)
+;;;
+;;; :in PARAM — inputs come AFTER the query (db is implicit, $ is first):
+;;;   (query '[:find ?n :in $ ?min :where [?e ::rank ?r] [(>= ?r ?min)] [?e ::name ?n]] 5)
+;;;
+;;; REF-JOIN — a ref attr stores an EID, not the target's value. To match by
+;;; the target's name, JOIN through it; do NOT put the keyword in the ref slot:
+;;;   GOOD [:find (count ?e) . :where [?e :seon.fn/ns ?n] [?n :seon.ns/name :seon.db]]
+;;;   BAD  [:find ?e :where [?e :seon.fn/ns :seon.db]]   ;THROWS "Nothing found for entity id :seon.db"
+;;;
+;;; GROUPED AGGREGATE — pull the group's name in the SAME query (group var must
+;;; be a NAME, not a ref-eid, or you can't read the result):
+;;;   [:find ?nm (count ?t) :where [?t :seon.test/ns ?n] [?n :seon.ns/name ?nm]]
+;;;   ;=> #{[:seon.db-test 39] [:seon.render-test 20] ...}   (then sort/max in Clojure)
+;;;
+;;; LOOKUP-REF — address an entity by an identity attr instead of a raw eid.
+;;; The value must be the STORED type. :seon.fn/sym is a :string, so use the
+;;; STRING, never a quoted symbol ('seon.db/query THROWS String-vs-Symbol):
+;;;   (pull '[*] [:seon.fn/sym "seon.db/query"])
+;;;
+;;; Results are CLIPPED (~50 rows) for context. Want only a number? Use
+;;; (count …)/aggregate, not a list. Empty #{} on a query that should match?
+;;; The attr keyword is almost certainly misspelled — copy it exactly from a
+;;; rendered ns source or (keys (installed-schema @*conn*)).
+;;; ──────────────────────────────────────────────────────────────────────
+
 ;; ---------------------------------------------------------------------------
 ;; Schemas — every request/response shape, registered at namespace load.
 ;; ---------------------------------------------------------------------------
@@ -220,9 +258,13 @@
   (if (< n 10) (str "0" n) (str n)))
 
 (defn new-id!
-  "Fresh 14-char LLM-readable id, `<3-letter-random>-<YYMMDDHHmm>`,
-   e.g. `Kpx-2605232138`. Datahike's tx-id remains the canonical
-   creation order for sub-minute sorting."
+  "Fresh 14-char LLM-readable id, `<3-letter-random>-<YYMMDDHHmm>`.
+   USE THIS for every id you store — id attrs are `[:string {:min 14
+   :max 14}]`, so a hand-written string fails validation. Datahike's
+   tx-id remains the canonical creation order for sub-minute sorting.
+
+     (db/new-id!)   ;=> \"Kpx-2605232138\"
+     (db/transact! {::db/tx-data [{::my-id (db/new-id!) ::title \"…\"}]})"
   []
   (let [d        (js/Date.)
         time-str (str (id-pad-2 (mod (.getFullYear d) 100))
@@ -272,7 +314,9 @@
 (defn current-agent-id
   "The active agent-id (string), or nil outside a [[with-agent]] scope.
    Fiber-local across awaits. The standard accessor for any code that
-   needs to know whose universe it's running in."
+   needs to know whose universe it's running in.
+
+     (db/current-agent-id)   ;=> \"iCg-2606101519\"   (your own id)"
   []
   (internal/current-agent-id))
 
@@ -280,7 +324,11 @@
   "Establish an agent-id scope for the dynamic extent of `f` (a 0-arg
    fn). Inside `f` — including across `await`s and any Promises it
    returns — `(current-agent-id)` returns `agent-id`. Nesting: the
-   inner scope wins, the outer restores on exit."
+   inner scope wins, the outer restores on exit. The loop sets this for
+   you; you rarely call it — your own writes are already tagged.
+
+     (db/with-agent agent-id
+       (fn [] (db/transact! {::db/tx-data [...]})))   ; tx tagged with agent-id"
   [agent-id f]
   (internal/run-with-agent agent-id f))
 
@@ -337,7 +385,33 @@
 
    Before committing it validates shape, attrs, and values; installs
    datahike schema for any newly-registered attr; and auto-merges the
-   active [[with-tx-context]] / [[with-agent]] context into `:tx-meta`."
+   active [[with-tx-context]] / [[with-agent]] context into `:tx-meta`.
+
+   Worked examples (entity maps; every key namespaced, id from new-id!):
+
+     ;; ADD — and ALWAYS check the envelope: an eval can succeed yet the
+     ;; write did NOT happen (ok? false). Read it.
+     (let [{::db/keys [ok? error]}
+           (await (db/transact! {::db/tx-data [{::doc-id (db/new-id!)
+                                                ::title \"Intro\"}]}))]
+       (if ok? :saved error))
+
+     ;; UPSERT BY IDENTITY — same identity value ⇒ same entity, no
+     ;; duplicate. OMITTED keys are LEFT UNCHANGED (not cleared):
+     (db/transact! {::db/tx-data [{::doc-id \"d1\" ::title \"Intro v2\"}]})
+
+     ;; CLEAR one field — explicit retract, NOT omission:
+     (db/transact! {::db/tx-data [[:db/retract [::doc-id \"d1\"] ::title]]})
+     ;; verify by read-back (the title key is now absent):
+     (db/entity {::db/ref [::doc-id \"d1\"]})
+
+     ;; DELETE the whole entity:
+     (db/transact! {::db/tx-data [[:db.fn/retractEntity [::doc-id \"d1\"]]]})
+
+     ;; LINK new entities in ONE tx via shared tempid strings (lookup-refs
+     ;; do NOT resolve against not-yet-committed entities):
+     (db/transact! {::db/tx-data [{:db/id \"p1\" ::person-id \"alice\"}
+                                  {::doc-id \"d2\" ::author \"p1\"}]})"
   ;; NOTE: ^:async fns are skipped by instrumentation today, so this
   ;; schema is the discoverable contract; the internal guards enforce.
   {:malli/schema
@@ -378,6 +452,31 @@
        (db/query '[:find ?n :in $ ?t :where …] \"Alice\")
      The second arg is the explicit db only when it IS a db value
      (`internal/db-value?`); otherwise it's the first `:in` input.
+
+   Worked examples (db omitted; see the cheat sheet at top of ns for the
+   full idiom set):
+
+     ;; scalar count — when you only need a number, COUNT, don't list
+     ;; (results are clipped ~50 rows):
+     (db/query '[:find (count ?e) . :where [?e :seon.fn/sym]])         ;=> 224
+     ;; registered-schema count — ONE :seon.schema/key row per registered
+     ;; schema; this IS the count of registered schemas. Trust it:
+     (db/query '[:find (count ?e) . :where [?e :seon.schema/key]])     ;=> 435
+     ;; collection — one value per row:
+     (db/query '[:find [?n ...] :where [?e :seon.ns/name ?n]])         ;=> [:seon.db ...]
+     ;; predicate + binding-expr:
+     (db/query '[:find ?s :where [?e :seon.fn/doc ?d] [(count ?d) ?l]
+                                 [(> ?l 400)] [?e :seon.fn/sym ?s]])
+     ;; REF-JOIN — :seon.fn/ns is a ref (stores an eid); match the target
+     ;; by joining through its name, NOT by putting the keyword in the slot:
+     (db/query '[:find (count ?e) . :where [?e :seon.fn/ns ?n]
+                                           [?n :seon.ns/name :seon.db]]) ;=> 15
+     ;;   (the keyword form [?e :seon.fn/ns :seon.db] THROWS.)
+     ;; GROUPED AGGREGATE with the name pulled in the SAME query, so the
+     ;; group is readable (a bare ref-eid is not):
+     (db/query '[:find ?nm (count ?t)
+                 :where [?t :seon.test/ns ?n] [?n :seon.ns/name ?nm]])
+     ;;   ;=> #{[:seon.db-test 39] ...}   then (sort-by second > …) in Clojure
 
    GUARDED against silent typos (the sibling of [[pull]]'s guard): a
    `:where` clause naming an attribute that is neither installed on
@@ -441,7 +540,18 @@
    ILookup — `(:schema db)` THROWS; the schema is conn-level (a filter
    can't change it), so read through to the wrapped db. Returns `{}`
    for a nil/schema-less db. `:any` input — the db value is a datahike
-   runtime handle (third-party boundary)."
+   runtime handle (third-party boundary).
+
+   This is the \"what attrs exist on this db, exactly?\" tool. It lists
+   EVERY installed attr — including REGISTERED-BUT-DATALESS kinds that
+   [[store-inventory]] omits (it shows only kinds with live rows). Check
+   here before inventing a new attr — a kind you'd reach for may already
+   exist with zero rows:
+
+     (filter #(= \"seon.agent.todo\" (namespace %))
+             (keys (db/installed-schema @db/*conn*)))
+     ;;=> (:seon.agent.todo/id :seon.agent.todo/title :seon.agent.todo/status …)
+     ;;   — registered, queryable, just no rows yet. Reuse it; don't fork."
   {:malli/schema [:=> [:catn [::db :any]] :map]}
   [db]
   (or (try (:schema db)
@@ -665,6 +775,15 @@
    - positional, db OMITTED — auto-injects from `*conn*` (arity
      disambiguates): (db/pull selector eid)
 
+   The `ref` is a raw eid OR a LOOKUP-REF `[identity-attr value]` — use
+   the lookup-ref so you never hand-find a numeric eid. The value must be
+   the attr's STORED type: :seon.fn/sym is a :string, so pass the STRING
+   — a quoted symbol THROWS (\"Cannot compare String to Symbol\"):
+
+     (db/pull '[:seon.fn/sym :seon.fn/arglists :seon.fn/doc]
+              [:seon.fn/sym \"seon.db/query\"])     ; STRING value, not 'sym
+     ;; wildcard everything: (db/pull '[*] [:seon.fn/sym \"seon.db/query\"])
+
    GUARDED against the lazy-install trap (see [[installed-schema]]):
    datahike installs an attr's schema at its first transact!, and
    raw `d/pull` THROWS a cryptic resolve-datom error when an explicit
@@ -737,7 +856,14 @@
    - map-in:     (db/entity {::db/ref [::name \"Alpha\"]})
    - positional, mirroring datahike: (db/entity <db> eid)
    - positional, db OMITTED — a bare eid/lookup-ref auto-injects the
-     db from `*conn*`: (db/entity eid)"
+     db from `*conn*`: (db/entity eid)
+
+   `ref` is a raw eid OR a LOOKUP-REF `[identity-attr value]` whose value
+   is the attr's STORED type. :seon.fn/sym is a :string ⇒ pass the STRING
+   (a quoted symbol THROWS \"Cannot compare String to Symbol\"):
+
+     (db/entity {::db/ref [:seon.fn/sym \"seon.db/transact!\"]})
+     ;;=> {:db/id N :seon.fn/sym \"seon.db/transact!\" :seon.fn/arglists \"…\" …}"
   ;; The 1-arg arity accepts EITHER a request map OR a bare eid/lookup-ref
   ;; (auto-inject from *conn*) — one arity-1 `:=>` (the body branches on
   ;; map?); a separate eid-only `:=>` would collide with the request arity.
@@ -938,6 +1064,16 @@
    (datalog the listed attrs directly — the attr names here are the
    exact keywords to put in your :where clauses), and a shape that
    already exists must be REUSED, never forked in parallel.
+
+   THIS SURFACE OMITS REGISTERED-BUT-DATALESS KINDS (it's existence +
+   sparsity, not the schema catalog). To find EVERY registered kind —
+   including ones with zero rows you'd otherwise re-invent — pair it
+   with [[installed-schema]]:
+
+     (->> (keys (db/installed-schema @db/*conn*))
+          (keep namespace) distinct sort)
+     ;; every attr-namespace the conn knows; a hit here means it's
+     ;; already registered — reuse it instead of minting :my.new.thing.
 
    ORDERING serves that consult-first read: USER-DOMAIN kinds — the
    ones agents created for THIS human, the rows you came to consult —
