@@ -50,6 +50,22 @@ Seon already has 80% of the substrate for the owner's vision; the missing
 The rest of this doc gives the registry mechanics with code, a concrete
 design for (a)-(e), and preserves the raw Gemini answer in an appendix.
 
+> **SUPERSEDED in part by the settled decision (see
+> `context-as-living-system-prd-2026-06-23.md` §D1).** This report's framing —
+> a *registry-wide catalog decoupled from the namespace blocks*, with the
+> recommendation in §5 to "drop schemas from the ns block, single catalog
+> source" — is the OPPOSITE of what was settled. The settled decision is:
+> schemas are **COLOCATED** inside each namespace block as real `register!`
+> forms, rendered **deps-before-dependents (topo order) ABOVE the functions
+> that reference them**, and the repetition across blocks is a **FEATURE**
+> (at high context, long-range *distance* degrades comprehension more than
+> volume, so keeping every reference local is the win). The mechanics this
+> report nails down — `*schemas` enumeration, `dep-closure`, `topo-order`,
+> the ranked-coherent packer — are all still correct and reused; only the
+> "put it all in one global catalog and drop it from the ns block"
+> *presentation recommendation* is superseded. Read the per-section notes
+> below for exactly which paragraphs are overridden.
+
 ---
 
 ## 1. How Malli's registry + form/walk works, and what Seon does today
@@ -221,6 +237,15 @@ calls in source; it reads the enumerated catalog instead. The calls remain
 inline (colocation is a feature — schema lives with its data per CLAUDE.md)
 but are no longer the *discovery* mechanism.
 
+> **SUPERSEDED (§D1):** the settled decision is that the COLOCATED `register!`
+> forms ARE the agent's read surface — the render emits them, deps-first,
+> inside each namespace block. The enumeration helpers (`all-schemas`,
+> `schemas-by-namespace`, `dep-closure`, `topo-order`) are still built and
+> used; they are what *drives* the colocated render (look up a fn's
+> `:malli/schema`, close over deps, topo-sort, emit above the fn). What is
+> overridden is the idea that the catalog *replaces* the inline forms as the
+> discovery mechanism — colocated forms are the discovery mechanism.
+
 ### (b) Compact TEXT rendering for the LLM
 
 **Format: the `register!` forms themselves, grouped by namespace under
@@ -258,13 +283,20 @@ Example output (real seon attrs):
 
 ```clojure
 ;; ── seon.db ──
+;; ORDER IS LOAD-BEARING: a referenced schema appears BEFORE the schema that
+;; references it (deps before dependents, topo order). :seon.db/ref references
+;; :seon.db/lookup-ref-value, so lookup-ref-value is registered FIRST. This
+;; matches the real source (schema.cljc:104 then :121).
 (register! :seon.db/id [:string {:min 14 :max 14}])
-(register! :seon.db/ref [:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]])
 (register! :seon.db/lookup-ref-value [:or :string :uuid :keyword :int])
+(register! :seon.db/ref [:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]])
 
 ;; ── seon.agent ──
+;; Scalars first; the entity :map LAST, so every keyword it references is
+;; already defined above it (:seon.agent/id, /state, /purpose).
 (register! :seon.agent/id [:and {:seon.db/identity true} :seon.db/id])
-(register! :seon.agent/state [:enum :idle :active :waiting :complete :terminated])
+(register! :seon.agent/state [:enum :idle :active :waiting :completed :terminated])
+(register! :seon.agent/purpose :string)
 (register! :seon.agent
   [:map {:seon.db/entity true}
    [:seon.agent/id :seon.agent/id]
@@ -503,10 +535,22 @@ All of this is additive read-only layering on existing mechanisms. No
    composer (decouple from `full-source-ns?` — schemas show for ALL
    namespaces now). Add the html twin to the inspector right pane (mirrors
    the existing section-twin pattern, `render.cljs:196`).
+   > **SUPERSEDED (§D1):** do NOT wire a separate `<schemas>` catalog section
+   > decoupled from the ns blocks. Instead, render each ns's schemas
+   > COLOCATED inside that ns's block (deps-first, above its fns), and EXPAND
+   > the `full-source-ns?` whitelist rather than escaping it. (Also: section
+   > headers are comment-block `;; ── schemas ──`, not the XML `<schemas>`
+   > tag — the whole context is eval'able Clojure per the FSM north star.)
+   > The dep-closure/topo helpers from unit 1 still drive this; they just
+   > feed the per-ns block instead of a global section.
 4. **(Later) embeddable schemas** — `register-embeddable!` on
    `:seon.schema/source`; index `:seon.schema` rows in Proximum; flip the
    `<schemas>` section from "all" to "top-k for the current task" when the
    registry outgrows the budget.
+   > **NOTE (§D1):** ranked retrieval still applies — but to which
+   > *namespaces* / fn-sets to colocate, with each retrieved root still
+   > closure-expanded. The `pack-ranked` invariant (never emit a root
+   > without its full topo-ordered dep closure) is unchanged.
 
 **Live proof to demand at each unit:** eval `(schema/all-schemas)` against
 the live pod and read back the count; eval `(schema/dep-closure
@@ -534,6 +578,16 @@ legible eval'able Clojure, not token-optimized noise.
   but duplicated) or drop them there and rely on the catalog. Recommend:
   drop from the ns block, single catalog source (don't show the same
   schema twice).
+  > **SUPERSEDED (§D1) — this recommendation is REVERSED.** The settled
+  > decision is the colocated path: KEEP schemas in each ns block (rendered
+  > deps-before-dependents, above the fns that reference them) and EXPAND
+  > the whitelist; do NOT drop them in favor of a single global catalog.
+  > The duplication is intentional ("repetition is a FEATURE" — it removes
+  > long-range lookup, the thing that degrades at high context). The
+  > "single catalog" shrinks at most to an orphan-list of schemas no shown
+  > ns references, or vanishes entirely as the whitelist grows. So fix
+  > `schema-block-ai` to render the topo-ordered dep-closure, do not delete
+  > it.
 - **Cycle handling.** Malli `:ref`/`:schema`/`:recursion` can make the dep
   graph cyclic. `topo-order` degrades to sorted output on a cycle rather
   than throwing (display must never crash). Seon's current attr schemas

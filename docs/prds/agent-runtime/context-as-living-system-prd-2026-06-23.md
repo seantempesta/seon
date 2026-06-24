@@ -30,10 +30,14 @@ teaches the DB better than any prose file.
 ## Decisions (settled in conversation 2026-06-23)
 
 ### D1 — Schemas COLOCATED, as real `register!` forms. Do NOT cut them.
-For each namespace shown, render its functions AND, right under them, the
-schemas those functions reference — as the actual `(register! :x <shape>)`
-forms. The `register!` calls are the *write-API lesson* (how you add/change a
-schema; re-define = upsert); deleting them to "save space" deletes the teaching.
+For each namespace shown, render the schemas its functions reference FIRST — as
+the actual `(register! :x <shape>)` forms, deps before dependents (topo order:
+scalars, then entity maps) — THEN the functions. ORDER IS LOAD-BEARING: a fn's
+`:malli/schema` names those schemas, so they must be defined ABOVE it (eval-order
+correct when the block is pasted/run) AND the reader sees the data shape before
+the code that operates on it. The `register!` calls are the *write-API lesson*
+(how you add/change a schema; re-define = upsert); deleting them to "save space"
+deletes the teaching.
 **Many agents will want to cut the register! calls as clutter — resist; that's
 the show-don't-tell.** Pull the dependency CLOSURE into the block
 (`:seon.db/ref` → `:seon.db/lookup-ref-value` appear right there) so each block
@@ -86,6 +90,25 @@ prefix, not per-turn tokens). Add `:seon.ctx/cache-tier ∈ {:cluster-static
 :agent-stable :live}`; place the cache boundary after the last non-`:live`
 section programmatically; enforce a byte-identity test on the prefix. NO
 counts/timestamps/ids above the boundary (they silently bust the whole cache).
+
+### D6 — GENERATE the namespace render from DB rows + a curation config.
+The render is DYNAMIC, derived from the indexed-code DB rows — not the raw source
+string. Everything needed is already stored (verified against `agent.cljs:193-216`):
+`:seon.fn` rows (`/sym` `/ns`-ref `/source` `/arglists` `/doc` `/spec` = the fn's
+`:malli/schema` as a form-string), `:seon.ns` (`/name` `/source` `/requires`),
+`:seon.schema` (`/key` `/ns`-ref `/source` = the `register!` form). So per shown ns:
+join ns → its fns → walk each fn's `:seon.fn/spec` for REGISTERED schema keywords
+(use the `immediate-deps` walker over the live `*schemas` atom — `m/form` can inline
+refs, so don't trust the stored form alone) → `dep-closure` + `topo-order` → render
+the schemas deps-FIRST, THEN the (curated) fns (D1 ordering). This dynamic join is
+what makes CURATION possible: filter which `:seon.fn` rows show and the schema set
+follows EXACTLY. CONFIG — a per-ns render mode `{:full | :signatures |
+:curated-fn-subset}`, **defaulting to EVERYTHING when no config is present** (the
+third-party case: show their whole world); seon curates its own teaching set (the
+fns/tests/schemas worth showing). This generalizes the existing all-or-nothing
+`seon.ctx.namespaces/full-source-ns?` whitelist into a render-mode config — expand +
+curate, don't escape it. (Gap to handle, not a blocker: walk the spec form for raw
+referenced keywords rather than trusting an inlined `m/form`.)
 
 ## Method / build approach
 Thin slice FIRST: take ONE namespace (e.g. `seon.db`), render it fully colocated

@@ -282,6 +282,18 @@ literally the namespace's source, and it documents the requires the agent can
 rely on. (This is the "code IS the database" principle — the catalog renders
 the analyzer's stored source, which begins with the real `(ns …)`.)
 
+> **SETTLED ORDERING RULE (§D1 of `context-as-living-system-prd-2026-06-23.md`).**
+> Inside a namespace block the schemas its fns reference render FIRST, as real
+> `(register! …)` forms, **deps before dependents (topo order: scalars, then
+> entity maps)**, and only THEN the fns. ORDER IS LOAD-BEARING: a fn's
+> `:malli/schema` names those schemas, so they MUST appear above it (eval-order
+> correct when pasted, and the reader sees the data shape before the code).
+> Pull each fn's dependency CLOSURE into the block (`:seon.db/ref` drags in
+> `:seon.db/lookup-ref-value`). Repetition of a schema across blocks is a
+> FEATURE (kills long-range lookup, the thing that degrades at high context),
+> not waste. The §5 sketch below shows this. Do NOT render a fn with
+> `{:malli/schema …}` above its referenced `register!` forms.
+
 So the rule is **semantic, not stylistic**: `(ns …)` where a block *defines* a
 namespace; `(in-ns …)` where a block *switches into* an already-defined one.
 
@@ -436,8 +448,11 @@ caching contract.
 - **`core-default-ctx`** (line ~1485) — sections are **priority-ordered
   top→bottom = static→volatile**: `:system` (10) → `:namespaces` (20) →
   `:your-entity` (30) → `:live-tile` (35) → `:warnings` (40) → `:open-todos`
-  (45) → `:relevant-source` (48) → `:inventory` → `:transcript` (the live
-  bottom). The cache boundary is dropped after `:namespaces`.
+  (45) → `:relevant-source` (48) → `:inventory` (97) → `:transcript` (100, the
+  live bottom). The cache boundary is dropped after `:namespaces`. (Verified
+  against `ctx.cljs:1517-1535` — `:inventory` is priority 97, NOT adjacent to
+  `:relevant-source`; the big gap is intentional headroom for future
+  sections.)
 
 So the architecture the user describes is **already the shipped design**. The
 demarcation work in this report must *respect and reinforce* this, not fight it.
@@ -555,10 +570,19 @@ and the line the cache boundary sits after.
 ;;; ┌─ namespaces (the loaded core you can call) ────────────────────────────
 (ns seon.db
   "Sole DB API. ...")
-(defn query "..." {:malli/schema ...} [db q] ...)
-;; (full real source of each loaded ns — these ARE loaded and callable)
+;; Schemas COLOCATED, deps-before-dependents (topo order) — every schema a
+;; fn's :malli/schema names is registered ABOVE that fn, so the block is
+;; eval-order-correct when pasted AND you read the data shape before the code.
+(register! :seon.db/lookup-ref-value [:or :string :uuid :keyword :int])
+(register! :seon.db/ref [:or :int :string [:tuple :keyword :seon.db/lookup-ref-value]])
+(register! ::query-request  [:map [::db ::db] [::q ::q]])
+(register! ::query-response [:vector :vector])
+(defn query "..." {:malli/schema [:=> [:cat ::query-request] ::query-response]} [db q] ...)
+;; (full real source of each loaded ns — these ARE loaded and callable; its
+;;  colocated register! forms render first, then its fns)
 (ns my.kb.system "...")
-(defn instructions "..." [] ...)
+(register! :my.kb/text :string)
+(defn instructions "..." {:malli/schema [:=> [:cat] [:vector [:map [:my.kb/text :my.kb/text]]]]} [] ...)
 ;;; └─ end namespaces ──────────────────────────────────────────────────────
 
 ;;; ┌─ store (large data elided to handles) ─────────────────────────────────
