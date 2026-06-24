@@ -568,3 +568,19 @@ Each step compiles clean on its own; no `*-v2` parallel path at any point.
   READ-side over the local pod db value.
 - Re-introducing a kick-atom, wake flag, reply-accounting, or per-message
   processed flag — all deleted; this spec only finishes the consolidation.
+
+## Pre-existing FSM smells to fix in this pass
+
+The loop rewrite is the natural time to clear these older flagged items — they
+all live in the FSM / wake / state path:
+
+- **`set-state!` ghost-creates an agent on an unknown id** (no existence guard) —
+  add the guard so a stray id can't mint a phantom agent entity (`agent.cljs`
+  `set-state!`).
+- **Premature-park** — an agent parking before it should. Re-check against the
+  simplified stop policy (the `(not= :active after)` halt + the `empty-streak < 2`
+  no-forms guard) so it doesn't go idle with work still pending.
+- **`woken-by` → `wake` naming** (the gym/test path) — align the wake terminology
+  with the live `db/listen!` wake; no two names for one mechanism.
+
+Verify each on a live `(complete …)` / wake drive after the state-model collapse lands.

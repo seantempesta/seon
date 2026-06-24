@@ -510,7 +510,7 @@ New sections this work adds:
 8. **P6 first-turn bootstrap** — the first-turn dynamic renderable. (The loop activity-log it pairs with — tx-meta cause/reason stamping, the derived timeline, the dormant-registry resolution, the inbound-predicate dedup — sequences in `agent-loop.md`.)
 9. **P7 remainder** — `usage-section`, `:seon.ai/context-window`, the warn check, `prune-renderable!`/`:seon.render/hidden?`, `seon.agent.data`.
 
-Each step: design → drive on DeepSeek → measure → `bin/test-cljs` once at the checkpoint → commit. The checkpoint gate: GREEN suite AND a drive no-worse than baseline on the P1-relevant ranked problems (task-forgotten, inline-backtick, `result/<id>` deref); on regression, revert the atomic unit. Exact-output assertions (`24000`, `8000`, the inline chars/4, the turn-weave, the warn-checks count) UPDATED in place, never `*-v2`'d; disable only dead-format ones.
+Each step: design → drive on DeepSeek → measure → `bin/test-cljs` once at the checkpoint → commit. The checkpoint gate: GREEN suite AND a drive no-worse than baseline on the P1-relevant ranked problems (task-forgotten, inline-backtick, `result/<id>` deref); on regression, revert the atomic unit. Exact-output assertions (`24000`, `8000`, the inline chars/4, the turn-weave, the warn-checks count) UPDATED in place, never `*-v2`'d; disable only dead-format ones. Once the transcript event-log format settles (P1), RESTORE the `agent_context` invariant tests (a/b/e) that were parked pending the format change.
 
 ### Pre-implementation checks (verify in the live system before building)
 
