@@ -100,15 +100,23 @@ string. Everything needed is already stored (verified against `agent.cljs:193-21
 join ns → its fns → walk each fn's `:seon.fn/spec` for REGISTERED schema keywords
 (use the `immediate-deps` walker over the live `*schemas` atom — `m/form` can inline
 refs, so don't trust the stored form alone) → `dep-closure` + `topo-order` → render
-the schemas deps-FIRST, THEN the (curated) fns (D1 ordering). This dynamic join is
-what makes CURATION possible: filter which `:seon.fn` rows show and the schema set
-follows EXACTLY. CONFIG — a per-ns render mode `{:full | :signatures |
-:curated-fn-subset}`, **defaulting to EVERYTHING when no config is present** (the
-third-party case: show their whole world); seon curates its own teaching set (the
-fns/tests/schemas worth showing). This generalizes the existing all-or-nothing
-`seon.ctx.namespaces/full-source-ns?` whitelist into a render-mode config — expand +
-curate, don't escape it. (Gap to handle, not a blocker: walk the spec form for raw
-referenced keywords rather than trusting an inlined `m/form`.)
+the schemas deps-FIRST, THEN the (curated) fns (D1 ordering). CONFIG is plain DATA — a per-ns set/map of which fn-syms (and test names) to show
+(whatever's cleanest: `{ns #{fn-syms}}`, or a render-mode `:full`/`:signatures`/
+`:curated`), **defaulting to EVERYTHING when no config (the third-party case: show
+their whole world)**; seon curates its own teaching set.
+
+**CRITICAL — generate from the schema GRAPH, never the indexed file.** Do NOT dump
+`:seon.ns/source`. For each shown fn, read its `:seon.fn/spec`, walk down, and pull
+in every referenced schema (the dep-closure), emitting them deps-FIRST right above
+the fn. This is WHY we can't lean on the file: the all-or-nothing
+`seon.ctx.namespaces/full-source-ns?` whitelist dumps a whole file in its file
+order, which neither lets you show *some* fns nor guarantees a schema sits above the
+fn that uses it. The graph gives BOTH — granular curation AND guaranteed
+colocation/ordering — so colocation is a property of the GENERATOR, not an accident
+of how the source file happened to be laid out. The file/`:seon.ns/source` stays
+only as the durable reconstitution record, not the render source. (Gap, not a
+blocker: walk the spec form for raw referenced keywords rather than trusting an
+inlined `m/form`.)
 
 ## Method / build approach
 Thin slice FIRST: take ONE namespace (e.g. `seon.db`), render it fully colocated
