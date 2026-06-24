@@ -18,4 +18,4 @@ if [ -f .cpcache/*/classpath ]; then
     fi
 fi
 
-exec clj -M:dev:run "$@"
+exec clj -M:fork-deps:dev:run "$@"

@@ -73,7 +73,50 @@
         io.netty/netty-buffer {:mvn/version "4.1.119.Final"}}
 
  :aliases
- {:dev {:extra-paths ["env/dev/clj" "env/dev/resources" "test"]
+ {;; ---------------------------------------------------------------------------
+  ;; Shared building blocks for the datahike fork (de-dup; compose, never copy).
+  ;;
+  ;; :fork-deps — the {datahike fork + konserve fork} pair. datahike is the
+  ;;   seantempesta/datahike@sync-upstream tip (proximum/secondary retain+restore
+  ;;   + query fixes + selective-Promise CLJS api). konserve is the header-fix
+  ;;   fork (CLJS meta-size BE32 + legacy 1-byte sniff), supplied via
+  ;;   :override-deps so it wins over any transitive konserve. The mvn upstream
+  ;;   datahike must appear NOWHERE — every JVM consumer composes :fork-deps.
+  ;;   IF YOU BUMP either sha, bump the reference-code/datahike submodule to the
+  ;;   matching datahike sha (src-secondary contents must stay byte-aligned).
+  ;;
+  ;; :simd — the launch surface proximum needs: jdk.incubator.vector + native
+  ;;   access + G1GC/2g heap (proximum's SIMD distance kernels; class v66 ⇒
+  ;;   JDK 22+), plus the two repo-relative paths that expose the secondary-index
+  ;;   namespaces to a git/local datahike dep — src-secondary (the fork's :paths
+  ;;   EXCLUDES it, so it is unreachable via normal resolution) and the
+  ;;   konserve-shim (a fake META-INF pom.properties so datahike's version-check
+  ;;   sees a konserve version for the non-jar git dep, nil otherwise).
+  ;;
+  ;; Compose: `clojure -M:simd:fork-deps:writer`, `-M:simd:fork-deps:test`, etc.
+  ;; ---------------------------------------------------------------------------
+  :fork-deps
+  {:extra-deps {org.replikativ/datahike
+                {:git/url "https://github.com/seantempesta/datahike"
+                 :git/sha "7ef2b5de2cea2c94b93ffb181e471b9887f1c403"}}
+   :override-deps {org.replikativ/konserve
+                   {:git/url "https://github.com/seantempesta/konserve"
+                    :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}}
+
+  :simd
+  {:jvm-opts ["--add-modules" "jdk.incubator.vector"
+              "--enable-native-access=ALL-UNNAMED"
+              "-XX:+UseG1GC" "-Xmx2g"]
+   :extra-paths ["dev-resources/konserve-shim"
+                 "reference-code/datahike/src-secondary"]}
+
+  ;; The dev JVM (paused track) runs embedded datahike. Compose the fork:
+  ;;   clj -M:fork-deps:dev:nrepl   /   clj -M:fork-deps:dev:run
+  ;; konserve-shim lives here (not via :simd) so dev keeps its own heap/GC opts
+  ;; and skips the JDK-22 SIMD jvm-opts (dev doesn't load the proximum index);
+  ;; it gives datahike's version-check a konserve version for the non-jar fork.
+  :dev {:extra-paths ["env/dev/clj" "env/dev/resources" "test"
+                      "dev-resources/konserve-shim"]
         :extra-deps {integrant/repl {:mvn/version "0.4.0"}
                      djblue/portal {:mvn/version "0.57.3"}
                      org.clojure/tools.namespace {:mvn/version "1.5.0"}
@@ -85,9 +128,6 @@
                      com.aayushatharva.brotli4j/native-osx-x86_64 {:mvn/version "1.18.0"}
                      com.aayushatharva.brotli4j/native-osx-aarch64 {:mvn/version "1.18.0"}
                      com.aayushatharva.brotli4j/native-linux-aarch64 {:mvn/version "1.18.0"}
-                     ;; Datahike — Embedded Datalog on konserve; file backend
-                     ;; for git time-travel. Sole database since chunk M-2.
-                     org.replikativ/datahike {:mvn/version "0.8.1671"}
                      ;; Durable atom for agent *ctx* persistence
                      duratom/duratom {:mvn/version "0.5.9"}
                      ;; Small Clojure Interpreter (sandbox evaluation)
@@ -95,6 +135,14 @@
 
   :prod {:extra-paths ["env/prod/clj" "env/prod/resources"]}
 
+  ;; The kaocha suite includes the embedding/secondary-index tests, which need
+  ;; the SAME fork datahike + proximum the live wire-server runs (the mvn
+  ;; upstream had neither, so tests used to run against DIFFERENT code than
+  ;; production). Compose the fork + native launch surface:
+  ;;   clojure -M:simd:fork-deps:test -m kaocha.runner unit
+  ;; :simd supplies src-secondary + konserve-shim + the JDK-22 SIMD jvm-opts;
+  ;; :fork-deps supplies the datahike + konserve forks. proximum + transit + the
+  ;; embeddings client are test-only here (the secondary-index nses need them).
   :test {:extra-paths ["env/dev/clj" "env/dev/resources" "test"]
          :extra-deps {org.clojure/test.check {:mvn/version "1.1.3"}
                       lambdaisland/kaocha {:mvn/version "1.91.1392"}
@@ -104,9 +152,11 @@
                       expound/expound {:mvn/version "0.9.0"}
                       ;; nREPL for orchestrator tests
                       nrepl/nrepl {:mvn/version "1.3.0"}
-                      ;; Datahike (sole database since chunk M-2)
-                      org.replikativ/datahike {:mvn/version "0.8.1671"}}
-         :jvm-opts []}
+                      ;; Secondary-index backing for the embedding tests
+                      ;; (datahike + konserve forks come from :fork-deps).
+                      org.replikativ/proximum {:mvn/version "0.1.25"}
+                      com.cognitect/transit-clj {:mvn/version "1.0.333"}
+                      com.google.genai/google-genai {:mvn/version "1.59.0"}}}
 
 
   ;; Standalone runner (no nREPL, just Integrant system with console logging)
@@ -132,83 +182,26 @@
   ;; socket, and broadcasts tx events over a UDS pub socket. Prints
   ;; `[writer] ready`. See seon.server.boot.
   ;;
-  ;; Self-contained on purpose: the wire-server's core deps (datahike,
-  ;; transit-clj for value payloads, jackson-dataformat-cbor for the
-  ;; control envelope) are pinned here rather than relied on transitively,
-  ;; so the launch is reproducible regardless of base-dep churn. datahike
-  ;; version mirrors :test (0.8.1671). `src` + `resources` give the
-  ;; seon.server.* sources and seed resources; konserve-jdbc / sqlite-jdbc
-  ;; come from the base :deps.
-  ;; 2.2d Stage B sha alignment (PREPARED, not flipped): datahike moved from
-  ;; mvn 0.8.1671 to the SAME fork sha the pod's :cljs alias runs
-  ;; (seantempesta/datahike@7ef2b5de), killing the reader-newer version-skew
-  ;; flag, and konserve is the Stage A header-fix fork (:local/root — no
-  ;; pushable remote; see :replica-probe-jvm's note). dev-resources/
-  ;; konserve-shim gives datahike's version-check a konserve version for the
-  ;; :local/root dep (reads nil from a non-jar classpath entry otherwise).
-  ;; The RUNNING wire-server keeps its old deps until its next restart
-  ;; (`bin/seon restart wire-server`) — verified to start + serve on a
-  ;; throwaway store by `clj -M:replica-peer-jvm` (the Stage B peer oracle).
-  ;; Embeddings/Proximum (PRD agent-runtime/embeddings-fn-retrieval, Phase-2):
-  ;; - reference-code/datahike/src-secondary exposes datahike's secondary-index
-  ;;   namespaces (incl. the :proximum integration shim) for the git-dep above.
-  ;;   This is a stable repo-relative path; its CONTENTS must stay byte-aligned
-  ;;   with the datahike :git/sha below. The reference-code/datahike submodule is
-  ;;   pinned to that exact sha (7ef2b5de) — IF YOU BUMP the datahike :git/sha,
-  ;;   bump the submodule to match or src-secondary will diverge from the dep.
-  ;;   7ef2b5de (the Proximum HNSW post-sync retain fix) lives entirely in
-  ;;   src-secondary; the core git-dep tree is byte-identical to 5f62d57f, so
-  ;;   this bump is for sha/submodule CONSISTENCY + remote reachability. The sha
-  ;;   is the tip of seantempesta/datahike@sync-upstream AND tagged
-  ;;   seon-pin-2026-06-22 (immutable, GC-proof).
-  ;; - proximum provides the HNSW vector index backing :db.secondary/type
-  ;;   :proximum. The jvm-opts (jdk.incubator.vector + native access) are
-  ;;   REQUIRED by proximum's SIMD distance kernels; G1GC + 2g heap keep the
-  ;;   mmap-heavy index comfortable.
-  ;; - google-genai is the embeddings client (used by the later 2b pipeline).
-  :writer {:jvm-opts ["--add-modules" "jdk.incubator.vector"
-                      "--enable-native-access=ALL-UNNAMED"
-                      "-XX:+UseG1GC" "-Xmx2g"]
-           :extra-paths ["dev-resources/konserve-shim"
-                         "reference-code/datahike/src-secondary"]
-           :extra-deps {org.replikativ/datahike
-                        {:git/url "https://github.com/seantempesta/datahike"
-                         :git/sha "7ef2b5de2cea2c94b93ffb181e471b9887f1c403"}
-                        com.cognitect/transit-clj {:mvn/version "1.0.333"}
-                        com.fasterxml.jackson.dataformat/jackson-dataformat-cbor
-                        {:mvn/version "2.17.0"}
+  ;; The wire-server owns the single datahike connection. It COMPOSES the
+  ;; shared fork + native launch surface — invoked as:
+  ;;   clojure -M:simd:fork-deps:writer --backend file --path … --req-sock … …
+  ;; :simd supplies the SIMD jvm-opts + src-secondary + konserve-shim paths;
+  ;; :fork-deps supplies the datahike + konserve forks. Here we add only the
+  ;; wire-server's OWN deps: transit-clj (Transit value payloads — the sole
+  ;; control codec since the CBOR-envelope removal), proximum (HNSW vector
+  ;; index backing :db.secondary/type :proximum), google-genai (embeddings
+  ;; client). `src` + `resources` give the seon.server.* sources + seed
+  ;; resources; konserve-jdbc / sqlite-jdbc come from the base :deps.
+  :writer {:extra-deps {com.cognitect/transit-clj {:mvn/version "1.0.333"}
                         org.replikativ/proximum {:mvn/version "0.1.25"}
                         com.google.genai/google-genai {:mvn/version "1.59.0"}}
-           :override-deps {org.replikativ/konserve
-                           {:git/url "https://github.com/seantempesta/konserve"
-                            :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}
            :main-opts ["-m" "seon.server.boot"]}
 
-  ;; :server-wire-test — run the 8 server-wire test nses against the SAME
-  ;; fork-datahike + proximum the live wire-server loads. The mvn 0.8.1671
-  ;; datahike in `:test` has NO secondary/proximum, so those nses can't load
-  ;; under `:test` alone; this alias supplies the fork sha + src-secondary +
-  ;; proximum + the jdk.incubator.vector jvm-opts. Combine with `:test` (kaocha
-  ;; + test paths); the git-sha datahike here wins over `:test`'s mvn coord.
-  ;; No :main-opts — so kaocha's `-m kaocha.runner` runs (unlike `:writer`,
-  ;; whose boot main-opts would swallow the kaocha args). Requires JDK 22+.
-  ;; Usage:
-  ;;   clojure -M:test:server-wire-test -m kaocha.runner unit --focus seon.server.wire-types-test ...
-  :server-wire-test
-  {:jvm-opts ["--add-modules" "jdk.incubator.vector"
-              "--enable-native-access=ALL-UNNAMED"
-              "-XX:+UseG1GC" "-Xmx2g"]
-   :extra-paths ["dev-resources/konserve-shim"
-                 "reference-code/datahike/src-secondary"]
-   :extra-deps {org.replikativ/datahike
-                {:git/url "https://github.com/seantempesta/datahike"
-                 :git/sha "7ef2b5de2cea2c94b93ffb181e471b9887f1c403"}
-                com.cognitect/transit-clj {:mvn/version "1.0.333"}
-                org.replikativ/proximum {:mvn/version "0.1.25"}
-                com.google.genai/google-genai {:mvn/version "1.59.0"}}
-   :override-deps {org.replikativ/konserve
-                   {:git/url "https://github.com/seantempesta/konserve"
-                    :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}}
+  ;; The server-wire test nses load against the fork datahike + proximum via
+  ;; the shared :simd + :fork-deps + :test (kaocha + proximum + transit + genai
+  ;; + test paths) — there is no separate :server-wire-test alias anymore.
+  ;; Usage (JDK 22+):
+  ;;   clojure -M:simd:fork-deps:test -m kaocha.runner unit --focus seon.server.wire-types-test …
 
   ;; 2.2c DIS-replica probe — JVM writer side. Self-contained on purpose
   ;; (`:replace-deps`/`:replace-paths`): runs the SAME datahike fork sha the

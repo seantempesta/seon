@@ -195,7 +195,7 @@ process_command() {
     # layout (P1); they're CLI args, not code identifiers. The --repl-port
     # opens a loopback-only socket REPL on 127.0.0.1 for diagnostics, and
     # the chosen port is written to tmp/seon-writer-repl-port.
-    wire-server) echo "clojure -M:writer --backend file --path $SEON_CLUSTER_DIR/store --req-sock $SEON_REQ_SOCK --pub-sock $SEON_PUB_SOCK --repl-port $SEON_WRITER_REPL_PORT" ;;
+    wire-server) echo "clojure -M:simd:fork-deps:writer --backend file --path $SEON_CLUSTER_DIR/store --req-sock $SEON_REQ_SOCK --pub-sock $SEON_PUB_SOCK --repl-port $SEON_WRITER_REPL_PORT" ;;
     *) return 1 ;;
   esac
 }
@@ -345,11 +345,13 @@ maybe_prep_deps() {
   local name="$1"
   local alias
   case "$name" in
-    wire-server) alias="writer" ;;
+    wire-server) alias="simd:fork-deps:writer" ;;
     cljs-watch)  alias="cljs" ;;
     *) return 0 ;;
   esac
-  local fp_file current stored
+  local fp_file current stored prep_vec
+  # Colon-joined alias GROUP → prep :aliases vector ([:simd :fork-deps :writer]).
+  prep_vec="[:${alias//:/ :}]"
   fp_file="$(state_dir "$name")/deps-fingerprint"
   current="$(deps_fingerprint)"
   stored="$(cat "$fp_file" 2>/dev/null || true)"
@@ -357,7 +359,7 @@ maybe_prep_deps() {
     return 0
   fi
   echo "  ▶ deps changed (or git libs unprepped) for $name — running"
-  echo "    clojure -X:deps prep :aliases '[:$alias]' && clojure -P -M:$alias"
+  echo "    clojure -X:deps prep :aliases '$prep_vec' && clojure -P -M:$alias"
   echo "    SYNCHRONOUSLY before spawn (a fresh git dep can take minutes)"
   echo "    progress: logs/$name.log"
   {
@@ -365,7 +367,7 @@ maybe_prep_deps() {
     # prep BEFORE -P: a prep-requiring git dep (e.g. datahike, which compiles
     # Java sources) makes `clojure -P` fail with "libs must be prepared" — so
     # prep must run first, else the && short-circuits and prep never happens.
-    clojure -X:deps prep :aliases "[:$alias]" \
+    clojure -X:deps prep :aliases "$prep_vec" \
       && clojure -P -M:"$alias" \
       && echo "== [bin/seon] auto-prep :$alias done $(date -u +%FT%TZ) =="
   } >> "$(log_file "$name")" 2>&1 || {
@@ -380,7 +382,7 @@ cmd_prep() {
   # Explicit git-dep prep verb for DOWNSTREAM supervisors (consumer ask 7):
   # after a git-dep repin, aliases that pull prep-requiring git deps
   # fail with "libs must be prepared" until
-  #   clojure -X:deps prep :aliases '[:writer]'
+  #   clojure -X:deps prep :aliases '[:simd :fork-deps :writer]'
   # runs — plain `clojure -X:deps prep` is NOT enough (the fork only
   # enters the classpath via the alias). bin/seon's auto-prep covers
   # seon's own start paths; this verb lets a downstream launcher shell
@@ -401,7 +403,7 @@ cmd_prep() {
   #     refresh), so a deps.edn edit that touches NO git-dep (a maven dep,
   #     a :paths, an alias, or a seon SHA bump that only changes source)
   #     leaves the git fingerprint unchanged while the cpcache goes STALE.
-  #     If prep no-op'd there, the downstream's `clojure -M:writer` would
+  #     If prep no-op'd there, the downstream's `clojure -M:simd:fork-deps:writer` would
   #     have to refresh the cache in its fragile pre-`exec` make-classpath2
   #     window (death there ⇒ empty wire.log, "died during startup").
   #     `-P` is a ~1s no-op on an already-warm tree but does the refresh
@@ -410,7 +412,10 @@ cmd_prep() {
   #
   # On a real git-dep prep it also refreshes the per-process fingerprints
   # so the next `start wire-server` / `start cljs-watch` skips auto-prep.
-  local prep_aliases="writer cljs"
+  # Each entry is an alias GROUP composed at the command line (colon-joined);
+  # the fork git deps live in the shared :fork-deps alias, so the wire-server
+  # group must list it for prep + warm to see them.
+  local prep_aliases="simd:fork-deps:writer cljs"
   local fp_file current stored need_git_prep
   ensure_state prep
   fp_file="$(state_dir prep)/deps-fingerprint"
@@ -424,10 +429,13 @@ cmd_prep() {
   fi
   local a
   for a in $prep_aliases; do
+    # An alias GROUP may be colon-joined (e.g. simd:fork-deps:writer); turn it
+    # into a prep :aliases vector ([:simd :fork-deps :writer]).
+    local prep_vec="[:${a//:/ :}]"
     if [ "$need_git_prep" = 1 ]; then
-      echo "▶ prepping :$a — clojure -X:deps prep :aliases '[:$a]'"
+      echo "▶ prepping :$a — clojure -X:deps prep :aliases '$prep_vec'"
       # prep first (see auto-prep note): -P fails on an unprepped prep-lib.
-      if ! clojure -X:deps prep :aliases "[:$a]"; then
+      if ! clojure -X:deps prep :aliases "$prep_vec"; then
         echo "✗ git-dep prep for :$a FAILED" >&2
         return 1
       fi
@@ -868,7 +876,7 @@ Processes (registered in script):
   pod          node out/client/main.js
   cljs-watch   clj -M:cljs watch client
   jvm          ./bin/run
-  wire-server  clojure -M:writer ... (V2 platform Host: single-DB datahike
+  wire-server  clojure -M:simd:fork-deps:writer ... (V2 platform Host: single-DB datahike
                wire-server; loopback REPL on 127.0.0.1:7891)
 
 Examples:
