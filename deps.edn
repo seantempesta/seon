@@ -87,7 +87,8 @@
   ;;
   ;; :simd — the launch surface proximum needs: jdk.incubator.vector + native
   ;;   access + G1GC/2g heap (proximum's SIMD distance kernels; class v66 ⇒
-  ;;   JDK 22+), plus the two repo-relative paths that expose the secondary-index
+  ;;   JDK 22+ hard floor, builds pinned to JDK 25 via bin/_java-home-resolver),
+  ;;   plus the two repo-relative paths that expose the secondary-index
   ;;   namespaces to a git/local datahike dep — src-secondary (the fork's :paths
   ;;   EXCLUDES it, so it is unreachable via normal resolution) and the
   ;;   konserve-shim (a fake META-INF pom.properties so datahike's version-check
@@ -113,7 +114,7 @@
   ;; The dev JVM (paused track) runs embedded datahike. Compose the fork:
   ;;   clj -M:fork-deps:dev:nrepl   /   clj -M:fork-deps:dev:run
   ;; konserve-shim lives here (not via :simd) so dev keeps its own heap/GC opts
-  ;; and skips the JDK-22 SIMD jvm-opts (dev doesn't load the proximum index);
+  ;; and skips the JDK-25 SIMD jvm-opts (dev doesn't load the proximum index);
   ;; it gives datahike's version-check a konserve version for the non-jar fork.
   :dev {:extra-paths ["env/dev/clj" "env/dev/resources" "test"
                       "dev-resources/konserve-shim"]
@@ -140,7 +141,7 @@
   ;; upstream had neither, so tests used to run against DIFFERENT code than
   ;; production). Compose the fork + native launch surface:
   ;;   clojure -M:simd:fork-deps:test -m kaocha.runner unit
-  ;; :simd supplies src-secondary + konserve-shim + the JDK-22 SIMD jvm-opts;
+  ;; :simd supplies src-secondary + konserve-shim + the JDK-25 SIMD jvm-opts;
   ;; :fork-deps supplies the datahike + konserve forks. proximum + transit + the
   ;; embeddings client are test-only here (the secondary-index nses need them).
   :test {:extra-paths ["env/dev/clj" "env/dev/resources" "test"]
@@ -200,7 +201,7 @@
   ;; The server-wire test nses load against the fork datahike + proximum via
   ;; the shared :simd + :fork-deps + :test (kaocha + proximum + transit + genai
   ;; + test paths) — there is no separate :server-wire-test alias anymore.
-  ;; Usage (JDK 22+):
+  ;; Usage (JDK 25+, pinned via bin/_java-home-resolver):
   ;;   clojure -M:simd:fork-deps:test -m kaocha.runner unit --focus seon.server.wire-types-test …
 
   ;; 2.2c DIS-replica probe — JVM writer side. Self-contained on purpose

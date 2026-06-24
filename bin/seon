@@ -46,44 +46,23 @@ set -euo pipefail
 SEON_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$SEON_ROOT"
 
-# Java 22+ for every JVM process this supervisor launches. The wire-server's
-# Proximum secondary index (HNSW vector search) ships class-file 66.0 + uses
-# the Foreign Memory API, both Java 22+ only; a Java-21 runtime throws
-# UnsupportedClassVersionError. Select a 22+ JDK cross-platform (macOS, Linux,
-# and WSL — which is Linux). Honors an already-good JAVA_HOME first.
-_java_ge22() { [ -x "$1" ] && "$1" -version 2>&1 | grep -qE '"(2[2-9]|[3-9][0-9])[.+"]'; }
+# Pin the JDK for every JVM process this supervisor launches via the shared
+# resolver (single source of truth — selects JDK 25). The resolver exports
+# JAVA_HOME + JAVA_CMD and prepends $JAVA_HOME/bin to PATH (the `clojure` CLI
+# resolves the JVM from `java` on PATH, not from JAVA_HOME).
+source "$SEON_ROOT/bin/_java-home-resolver"
 
-if ! _java_ge22 "${JAVA_HOME:-}/bin/java"; then
-  _jh=""
-  if command -v /usr/libexec/java_home >/dev/null 2>&1; then
-    # macOS: java_home knows where JDKs live.
-    _jh="$(/usr/libexec/java_home -v 22 2>/dev/null || true)"
-  fi
-  if ! _java_ge22 "${_jh:-}/bin/java"; then
-    # Linux / WSL: scan common JDK install roots + SDKMAN.
-    _jh=""
-    for _c in /usr/lib/jvm/*/bin/java "$HOME"/.sdkman/candidates/java/*/bin/java /opt/*/bin/java; do
-      if _java_ge22 "$_c"; then _jh="$(cd "$(dirname "$_c")/.." && pwd)"; break; fi
-    done
-  fi
-  # Last resort: a 22+ `java` already on PATH (any platform).
-  if [ -z "${_jh:-}" ] && _java_ge22 "$(command -v java 2>/dev/null)"; then
-    _jp="$(command -v java)"; _jr="$(readlink -f "$_jp" 2>/dev/null || echo "$_jp")"
-    _jh="$(cd "$(dirname "$_jr")/.." && pwd)"
-  fi
-  if [ -n "${_jh:-}" ]; then
-    export JAVA_HOME="$_jh"
-  else
-    echo "⚠ bin/seon: no Java 22+ JDK found — JVM processes (wire-server) will fail." >&2
-    echo "  Install a JDK 22+ and/or set JAVA_HOME. macOS: brew install openjdk@22 ·" >&2
-    echo "  Debian/Ubuntu/WSL: apt install openjdk-22-jdk · or use SDKMAN: sdk install java 22-open" >&2
-  fi
-fi
-# The `clojure` CLI resolves the JVM from `java` on PATH, NOT from JAVA_HOME —
-# so prepend it (and export JAVA_CMD belt-and-braces).
-if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/java" ]; then
-  export PATH="${JAVA_HOME}/bin:${PATH}"
-  export JAVA_CMD="${JAVA_HOME}/bin/java"
+# Hard floor: the wire-server's Proximum secondary index (HNSW vector search)
+# ships class-file 66.0 + uses the Foreign Memory API — both Java 22+ only; a
+# Java-21 runtime throws UnsupportedClassVersionError. We SELECT 25 above, but
+# keep this >=22 assert as the safety net (e.g. resolver fell back to an old
+# `java` on PATH). Loud warning, not a hard exit, so non-JVM subcommands
+# (status/tail/logs) still work on a misconfigured box.
+_java_ge22() { [ -x "$1" ] && "$1" -version 2>&1 | grep -qE '"(2[2-9]|[3-9][0-9])[.+"]'; }
+if ! _java_ge22 "$(command -v java 2>/dev/null)"; then
+  echo "⚠ bin/seon: java on PATH is < 22 — JVM processes (wire-server) will fail." >&2
+  echo "  Proximum (class v66 + Foreign Memory API) needs Java 22+; bin/_java-home-resolver pins 25." >&2
+  echo "  Install a JDK 25. macOS: brew install openjdk@25 · Debian/WSL: apt install openjdk-25-jdk" >&2
 fi
 
 # PROC_DIR/LOG_DIR default to today's baked-in paths (byte-identical for

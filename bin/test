@@ -12,6 +12,10 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# Pin the JDK via the shared resolver (single source of truth) so the cold
+# test JVM runs under the same JDK as the rest of the stack.
+source bin/_java-home-resolver
+
 MODE=""
 FOCUS_NS=()
 
