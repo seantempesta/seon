@@ -101,19 +101,21 @@
   (doseq [n ["seon.db.internal" "seon.agent.internal" "my.foo.internal"
              "acme.widget.internal"]]
     (is (true? (ctx-namespaces/hidden-ns-name? n)) (str n " is hidden")))
-  ;; full-source depth (curated-namespaces 2026-06-21): full-source ⇔ every
-  ;; my.* ns by RULE (test siblings ride along via the `-test` strip) PLUS
-  ;; the curated seon.* whitelist (full-source-whitelist = :seon.agent.todo).
-  ;; Its `-test` sibling rides along too (the `-test` strip → :seon.agent.todo,
-  ;; a whitelisted ns). Every OTHER seon.* framework ns renders in the
-  ;; SIGNATURES manifest (public fn signatures, bodies elided), NEVER
-  ;; full-source.
+  ;; full-source depth (curated-namespaces): full-source ⇔ every my.* ns by
+  ;; RULE (test siblings ride along via the `-test` strip) PLUS the curated
+  ;; seon.* whitelist (full-source-whitelist =
+  ;; #{:seon.agent.todo :seon.db :seon.agent.search}). Each whitelisted ns's
+  ;; `-test` sibling rides along too (the `-test` strip lands on the
+  ;; whitelisted base, e.g. seon.agent.search-test → seon.agent.search).
+  ;; Every OTHER seon.* framework ns renders in the SIGNATURES manifest
+  ;; (public fn signatures, bodies elided), NEVER full-source.
   (doseq [n ["my.kb" "my.kb.system" "my.soul" "my.soul-test"
-             ;; the curated seon.* whitelist + its test sibling.
-             "seon.agent.todo" "seon.agent.todo-test"]]
+             ;; the curated seon.* whitelist + each one's test sibling.
+             "seon.agent.todo" "seon.agent.todo-test"
+             "seon.db" "seon.db-test"
+             "seon.agent.search" "seon.agent.search-test"]]
     (is (true? (ctx-namespaces/full-source-ns? n)) (str n " is full-source")))
-  (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.db" "seon.ctx"
-             "seon.agent.search" "seon.agent.search-test"
+  (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.ctx"
              "seon.agent.searcher" "my.foo.internal"]]
     (is (false? (ctx-namespaces/full-source-ns? n)) (str n " is NOT full-source"))))
 
@@ -208,8 +210,15 @@
                         (is (str/includes? txt
                                            ";; ── namespace seon.frob (signatures) ──")
                             "a framework ns with public fns is a signatures block")
-                        (is (str/includes? txt "(seon.frob/widget [a b])  ; Frobnicate a and b.")
-                            "the public fn shows name + arglist + first doc line")
+                        ;; the signature line carries the fn tag + the callable
+                        ;; (sym [arglist]) shape + its spec marker; the first
+                        ;; doc line rides on the NEXT line as a `;;` comment
+                        ;; (no-bare-prose unit — the manifest reads as eval'able
+                        ;; Clojure), bodies elided.
+                        (is (str/includes? txt "(seon.frob/widget [a b])")
+                            "the public fn shows name + arglist (callable shape)")
+                        (is (str/includes? txt ";; Frobnicate a and b.")
+                            "first doc line rides as a `;;` comment under the sig")
                         (is (not (str/includes? txt "(+ a b)"))
                             "the fn BODY is elided in the signature manifest")
                         (is (not (str/includes? txt "More detail here."))
@@ -669,10 +678,13 @@
                         (is (not (str/includes? wline "my.workout/date"))
                             "no qualified attr name leaks into the pairs")
                         ;; the new value-surfacing: a low-card keyword attr
-                        ;; shows its DISTINCT members inline, ASCII-bracketed
-                        ;; (no glyphs that would break the reader).
-                        (is (str/includes? wline "[:lift :run]")
-                            "low-cardinality categorical values render inline"))
+                        ;; shows its DISTINCT members inline as an ILLUSTRATIVE
+                        ;; SAMPLE in «…» guillemets (NOT [..]) — the de-literaled
+                        ;; convention marks them as example filter keys to query,
+                        ;; never an authoritative readout. The whole line is a
+                        ;; `;;` comment so the glyphs never break the reader.
+                        (is (str/includes? wline "«:lift :run»")
+                            "low-cardinality categorical values render inline as a «…» sample"))
                       ;; one-line-per-kind: exactly ONE body line mentions
                       ;; the kind (the header is ;; comments, not a kind line).
                       (is (= 1 (count (filter #(str/starts-with? % ";; my.workout: ")
