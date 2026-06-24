@@ -2,6 +2,8 @@
 
 **Every Claude instance reads this file** — orchestrator, seon agents, and Claude Code subagents. Keep it universal. Role-specific instructions live in `ORCHESTRATOR.md` and `AGENT.md`.
 
+**If you were spawned as a subagent (via the Task/Agent tool), you EXECUTE your assigned task directly — you do NOT launch, delegate to, or spawn other agents.** Only the single top-level orchestrator delegates. If your task is too large, report back to the orchestrator to re-scope; never decompose by spawning sub-agents. (This prevents runaway multi-level agent recursion. Guidance below about "delegating" / "launching agents" / research-agent policy is ORCHESTRATOR-only.)
+
 ## Current focus — two tracks, the CLJS pod is active
 
 **The active work is the CLJS pod + datahike-on-JVM (the `wire-server`

@@ -213,7 +213,7 @@ When pushing back, provide a **complexity description** the orchestrator can act
 3. **What order they should be done in** — dependencies between the pieces
 4. **What you completed** — if you made partial progress, say exactly what's done and tested
 
-This pattern is recursive. If the orchestrator decomposes and launches a sub-agent, that sub-agent can push back further. Each level of decomposition adds clarity about where the real complexity lives. The goal is to keep breaking down until each piece is straightforward to complete fully.
+Push this complexity description **back UP to the orchestrator** — that is how decomposition happens. **You do NOT spawn, launch, or delegate to other agents yourself; only the single top-level orchestrator launches agents.** Your job is to either complete your task fully, or report exactly what's hard so the orchestrator can re-scope and re-dispatch. Keep breaking the problem down in your DESCRIPTION, never by spawning sub-agents (that causes runaway multi-level agent recursion).
 
 **There is no punishment for not completing a task.** Doing half the work well and describing the remaining complexity honestly is far more valuable than rushing through everything and leaving hidden breakage.
 
