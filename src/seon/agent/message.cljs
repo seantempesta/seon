@@ -263,9 +263,10 @@
 (defn ^:async agent
   "Send a message to a PEER agent by id — `message!` with `to` :=
    `[[:seon.agent/id agent-id]]`. `from` is you (the ALS agent). Returns
-   `message!`'s concise envelope:
+   `message!`'s concise envelope. The peer must already exist — find live
+   ids with `(db/query '[:find [?id ...] :where [?e :seon.agent/id ?id]])`:
 
-     (message/agent \"Kpx-2605232138\" \"heads up: foo depends on qux\")
+     (message/agent <peer-agent-id> \"heads up: foo depends on qux\")
 
    REFUSES sending to YOURSELF (the ALS agent in scope): a self-message
    returns a loud error envelope and transacts NO row — an agent's

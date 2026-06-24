@@ -392,13 +392,19 @@
    datahike schema for any newly-registered attr; and auto-merges the
    active [[with-tx-context]] / [[with-agent]] context into `:tx-meta`.
 
-   Worked examples (entity maps; every key namespaced, id from new-id!):
+   Worked examples — REGISTER your attrs first, then transact (every key
+   namespaced). NO `await`: an `^:async` call is auto-awaited for you, so
+   you get the ENVELOPE directly — writing `await` is an error.
+
+     ;; register what these examples store (an identity attr to upsert by,
+     ;; plus a plain field) — `::foo` here is your own home-ns kind:
+     (schema/register! ::doc-id [:string {:seon.db/identity true}])
+     (schema/register! ::title :string)
 
      ;; ADD — and ALWAYS check the envelope: an eval can succeed yet the
      ;; write did NOT happen (ok? false). Read it.
      (let [{::db/keys [ok? error]}
-           (await (db/transact! {::db/tx-data [{::doc-id (db/new-id!)
-                                                ::title \"Intro\"}]}))]
+           (db/transact! {::db/tx-data [{::doc-id \"d1\" ::title \"Intro\"}]})]
        (if ok? :saved error))
 
      ;; UPSERT BY IDENTITY — same identity value ⇒ same entity, no
@@ -407,14 +413,17 @@
 
      ;; CLEAR one field — explicit retract, NOT omission:
      (db/transact! {::db/tx-data [[:db/retract [::doc-id \"d1\"] ::title]]})
-     ;; verify by read-back (the title key is now absent):
-     (db/entity {::db/ref [::doc-id \"d1\"]})
+     ;; verify by read-back — the title is gone, so this returns no rows:
+     (db/query {::db/query '[:find ?t :where [?e ::doc-id \"d1\"] [?e ::title ?t]]})
 
      ;; DELETE the whole entity:
      (db/transact! {::db/tx-data [[:db.fn/retractEntity [::doc-id \"d1\"]]]})
 
      ;; LINK new entities in ONE tx via shared tempid strings (lookup-refs
-     ;; do NOT resolve against not-yet-committed entities):
+     ;; do NOT resolve against not-yet-committed entities). ::author is a
+     ;; REF, so the tempid \"p1\" in its slot resolves to the new person:
+     (schema/register! ::person-id [:string {:seon.db/identity true}])
+     (schema/register! ::author :seon.db/ref)
      (db/transact! {::db/tx-data [{:db/id \"p1\" ::person-id \"alice\"}
                                   {::doc-id \"d2\" ::author \"p1\"}]})"
   ;; NOTE: ^:async fns are skipped by instrumentation today, so this
