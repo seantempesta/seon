@@ -160,10 +160,17 @@
                              {:seon.agent/id "chips-done-001"
                               :seon.agent/state :idle}]}))]
               (is ok? "two agent rows land"))
-            (let [{done? :seon.agent/ok?}
-                  (await (agent/complete!
-                           {:seon.agent/id "chips-done-001"}))]
-              (is done? "complete! stamps :seon.agent/completed-at"))
+            ;; Completion is now a STATE transition (FSM rebuild): the
+            ;; inspector groups on :seon.agent/state = :completed, not a
+            ;; stamped :seon.agent/completed-at (deleted — derived from
+            ;; state). The agent-facing verb `agent/complete` is positional
+            ;; + ALS-scoped; to complete a SPECIFIC agent by id from a test,
+            ;; set its state directly (the same transact the verb performs).
+            (let [{ok? :seon.db/ok?}
+                  (await (agent/set-state!
+                           {:seon.agent/id "chips-done-001"
+                            :seon.agent/state :completed}))]
+              (is ok? "completed agent gets :seon.agent/state :completed"))
             (let [hidden (dash-html false false)
                   shown  (dash-html false true)]
               (is (str/includes? hidden "/agent/chips-active-1\"")
