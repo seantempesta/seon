@@ -94,6 +94,13 @@
 ;;; STRING, never a quoted symbol ('seon.db/query THROWS String-vs-Symbol):
 ;;;   (pull '[*] [:seon.fn/sym "seon.db/query"])
 ;;;
+;;; UPSERT — re-transacting an entity with the SAME identity-attr value
+;;; UPDATES it in place; it does NOT create a duplicate. Add/overwrite a
+;;; field on an existing entity by addressing it via a lookup-ref:
+;;;   GOOD (transact! [{:my.kb.doc/id "d1" :my.kb.doc/title "New Title"}])
+;;;        ;; d1 already exists → :title is updated, no second :id "d1" row
+;;;   (omit attrs you don't want changed; absent ≠ retract — see retract above)
+;;;
 ;;; Results are CLIPPED (~50 rows) for context. Want only a number? Use
 ;;; (count …)/aggregate, not a list. Empty #{} on a query that should match?
 ;;; The attr keyword is almost certainly misspelled — copy it exactly from a
@@ -806,6 +813,9 @@
      (db/pull '[:seon.fn/sym :seon.fn/arglists :seon.fn/doc]
               [:seon.fn/sym \"seon.db/query\"])     ; STRING value, not 'sym
      ;; wildcard everything: (db/pull '[*] [:seon.fn/sym \"seon.db/query\"])
+     ;; follow a ref and see the full story of what it points at — pull
+     ;; the whole entity AND expand its ref'd owner inline:
+     (db/pull '[* {:owner [*]}] id)   ; {:db/id N … :owner {:db/id M …}}
 
    GUARDED against the lazy-install trap (see [[installed-schema]]):
    datahike installs an attr's schema at its first transact!, and

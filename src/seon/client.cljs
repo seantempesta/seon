@@ -1085,17 +1085,28 @@
        (or (not (pos-int? line))
            (>= (dec line) (count (str/split-lines txt))))))
 
-(defn- ns-file-path
-  "Classpath-relative source file for a namespace name string —
-   `seon.agent.search` → `seon/agent/search.cljs`, `seon.agent.search-test` →
-   `seon/agent/search_test.cljs` (munged like the compiler: dots → dirs,
-   dashes → underscores). `read-src-file` probes the source roots
-   (src, test, guest-cljs/src), so test siblings resolve too."
+(defn- ns-file-paths
+  "Classpath-relative source file CANDIDATES for a namespace name string,
+   most-specific extension first — `seon.agent.search` →
+   [\"seon/agent/search.cljs\" \"seon/agent/search.cljc\"],
+   `seon.agent.search-test` → [\"seon/agent/search_test.cljs\" …] (munged
+   like the compiler: dots → dirs, dashes → underscores). Both `.cljs` and
+   `.cljc` are probed so portable `.cljc` nses (e.g. `seon.schema`) resolve
+   to their REAL source, not the stub. `read-src-file` probes the source
+   roots (src, test, guest-cljs/src) per candidate, so test siblings and
+   `.cljc` nses both resolve."
   [ns-sym-str]
-  (str (-> ns-sym-str
-           (str/replace "." "/")
-           (str/replace "-" "_"))
-       ".cljs"))
+  (let [base (-> ns-sym-str
+                 (str/replace "." "/")
+                 (str/replace "-" "_"))]
+    [(str base ".cljs") (str base ".cljc")]))
+
+(defn- read-ns-source
+  "Read the REAL full source for a full-source ns name string, probing the
+   `.cljs` then `.cljc` candidate ([[ns-file-paths]]). Returns the file
+   text or nil if no candidate is readable under any source root."
+  [ns-sym-str]
+  (some read-src-file (ns-file-paths ns-sym-str)))
 
 (defn- ns-row
   "Build the `:seon.ns` row for an owning ns name string.
@@ -1111,10 +1122,10 @@
    logs fail-loud — the corpus stays honest.
 
    All OTHER core nses keep the minimal `(ns x)` stub — the
-   `:namespaces` section compact-renders them from their indexed
-   `:seon.fn`/`:seon.schema` member rows (API surface, bodies elided),
-   and the stub keeps the no-replay invariant trivially cheap to reason
-   about."
+   `:namespaces` section no longer renders these (only the curated full
+   set is shown); the stub keeps the `:seon.ns/name` row + lookup-ref
+   target for indexed members and the on-demand `render-namespace` path,
+   and keeps the no-replay invariant trivially cheap to reason about."
   [ns-sym-str]
   (let [stub (str "(ns " ns-sym-str ")")
         ;; Extra-core nses (downstream SEON_EXTRA_SRC code) are
@@ -1123,11 +1134,11 @@
         src  (if (or (nss/full-source-ns? ns-sym-str)
                      (contains? (extra-core-ns-strs) ns-sym-str)
                      (contains? (extra-src-ns-strs) ns-sym-str))
-               (or (read-src-file (ns-file-path ns-sym-str))
+               (or (read-ns-source ns-sym-str)
                    (do (log/error-console!
                          "seon.client/ns-row"
                          (str "full-source ns " ns-sym-str " source file "
-                              (pr-str (ns-file-path ns-sym-str))
+                              (pr-str (ns-file-paths ns-sym-str))
                               " unreadable — falling back to the (ns x) stub"))
                        stub))
                stub)]

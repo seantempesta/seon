@@ -126,29 +126,30 @@
 (deftest emits-ns-rows-for-owning-nses
   ;; Each owning ns gets a :seon.ns row so the [:seon.ns/name kw] lookup-ref
   ;; on :seon.fn/ns resolves. A seon.* FRAMEWORK BULK ns keeps the minimal
-  ;; `(ns x)` stub — the :namespaces section name-manifests it from its
-  ;; indexed member rows; my.* nses AND the curated full-source whitelist
-  ;; (:seon.agent.todo / :seon.db / :seon.agent.search) carry full file text
-  ;; (see the dedicated stub/compact tests below).
+  ;; `(ns x)` stub — it is DROPPED from the :namespaces section (still
+  ;; indexed via its member rows); my.* nses AND the curated full-source
+  ;; whitelist carry full file text (see the dedicated stub/full tests below).
   (let [tx      (client/index-core!)
         ns-rows (filter :seon.ns/name tx)
         names   (set (map :seon.ns/name ns-rows))]
     (is (contains? names :seon.db) ":seon.db ns row emitted")
     (is (contains? names :seon.schema) ":seon.schema ns row emitted")
     (is (contains? names :seon.test.runner) ":seon.test.runner ns row emitted")
-    (is (= "(ns seon.schema)"
-           (:seon.ns/source (first (filter #(= :seon.schema (:seon.ns/name %)) ns-rows))))
+    (is (= "(ns seon.warn)"
+           (:seon.ns/source (first (filter #(= :seon.warn (:seon.ns/name %)) ns-rows))))
         "a non-whitelisted framework-bulk ns source is the minimal (ns x) stub")))
 
 (deftest core-ns-rows-stub-bulk-full-source-whitelist
-  ;; Curated render (curated-namespaces): the seon.* FRAMEWORK BULK keeps the
-  ;; minimal `(ns x)` stub (it is name-manifested, never rendered as a body),
+  ;; Curated render (de-stub 2026-06-24): the seon.* FRAMEWORK BULK keeps the
+  ;; minimal `(ns x)` stub (it is DROPPED from render, never shown as a body),
   ;; while EACH curated seon.* whitelist member
   ;; (seon.ctx.namespaces/full-source-whitelist =
-  ;; #{:seon.agent.todo :seon.db :seon.agent.search}) force-stores its REAL
-  ;; FULL FILE TEXT (it renders FULL, so the boot indexer reads the file — the
-  ;; same seon.ctx.namespaces/full-source-ns? rule the renderer uses, one
-  ;; writer no drift). seon.agent.fs / seon.schema are framework bulk → stub.
+  ;; #{:seon.agent.todo :seon.db :seon.agent.search :seon.agent.fs
+  ;;   :seon.agent.message :seon.schema :seon.render}) force-stores its REAL
+  ;; FULL FILE TEXT (it renders FULL, so the boot indexer reads the file —
+  ;; probing .cljs then .cljc — the same seon.ctx.namespaces/full-source-ns?
+  ;; rule the renderer uses, one writer no drift). seon.warn / seon.eval are
+  ;; framework bulk → stub.
   (let [tx      (client/index-core!)
         ns-rows (filter :seon.ns/name tx)
         row-for (fn [k] (first (filter #(= k (:seon.ns/name %)) ns-rows)))
@@ -156,21 +157,26 @@
                           (and (not= (str "(ns " (name k) ")") s)
                                (str/starts-with? (str/triml s) (str "(ns " (name k)))
                                (str/includes? s "defn"))))
-        fs      (:seon.ns/source (row-for :seon.agent.fs))
-        schema  (:seon.ns/source (row-for :seon.schema))]
-    (is (= "(ns seon.agent.fs)" fs)
-        "seon.agent.fs (framework bulk) source is the minimal (ns x) stub")
-    (is (= "(ns seon.schema)" schema)
-        "seon.schema (framework bulk) source is the minimal (ns x) stub")
-    ;; EVERY whitelisted tool carries its REAL full file source, not a stub.
+        warn    (:seon.ns/source (row-for :seon.warn))
+        eval-ns (:seon.ns/source (row-for :seon.eval))]
+    (is (= "(ns seon.warn)" warn)
+        "seon.warn (framework bulk) source is the minimal (ns x) stub")
+    (is (= "(ns seon.eval)" eval-ns)
+        "seon.eval (framework bulk) source is the minimal (ns x) stub")
+    ;; EVERY whitelisted tool carries its REAL full file source, not a stub —
+    ;; including the .cljc (seon.schema) one (extension-probed at read time).
     (is (full? :seon.agent.todo)
         "seon.agent.todo (whitelist) source is its REAL full file text")
     (is (full? :seon.db)
         "seon.db (whitelist) source is its REAL full file text")
     (is (full? :seon.agent.search)
         "seon.agent.search (whitelist) source is its REAL full file text")
-    ;; the members are still indexed (the bulk renders via the manifest's
-    ;; query; the whitelist via its full source).
+    (is (full? :seon.agent.fs)
+        "seon.agent.fs (whitelist) source is its REAL full file text")
+    (is (full? :seon.schema)
+        "seon.schema (.cljc whitelist) source is its REAL full file text")
+    ;; the members are still indexed (dropped nses via member rows; the
+    ;; whitelist via its full source).
     (let [syms (set (map :seon.fn/sym (filter :seon.fn/sym tx)))]
       (is (contains? syms "seon.agent.search/grep")
           "search's grep is an indexed :seon.fn member")
@@ -186,7 +192,7 @@
   ;;       bodies on hand;
   ;;   (b) a `-test` sibling of a NON-whitelisted, non-my.* base
   ;;       (seon.index-core-test → seon.index-core) gets the minimal `(ns x)`
-  ;;       stub from index-tests — name-manifested only.
+  ;;       stub from index-tests — dropped from render, indexed only.
   ;; Either way the deftest member rows live on the :seon.test rows.
   (let [;; (a) whitelisted base → FULL source.
         srows (client/index-tests

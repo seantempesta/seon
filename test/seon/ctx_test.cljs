@@ -104,18 +104,22 @@
   ;; full-source depth (curated-namespaces): full-source ⇔ every my.* ns by
   ;; RULE (test siblings ride along via the `-test` strip) PLUS the curated
   ;; seon.* whitelist (full-source-whitelist =
-  ;; #{:seon.agent.todo :seon.db :seon.agent.search}). Each whitelisted ns's
+  ;; #{:seon.agent.todo :seon.db :seon.agent.search :seon.agent.fs
+  ;;   :seon.agent.message :seon.schema :seon.render}). Each whitelisted ns's
   ;; `-test` sibling rides along too (the `-test` strip lands on the
   ;; whitelisted base, e.g. seon.agent.search-test → seon.agent.search).
-  ;; Every OTHER seon.* framework ns renders in the SIGNATURES manifest
-  ;; (public fn signatures, bodies elided), NEVER full-source.
+  ;; Every OTHER seon.* framework ns is DROPPED from the rendered section
+  ;; (still indexed + searchable), NEVER full-source.
   (doseq [n ["my.kb" "my.kb.system" "my.soul" "my.soul-test"
              ;; the curated seon.* whitelist + each one's test sibling.
              "seon.agent.todo" "seon.agent.todo-test"
              "seon.db" "seon.db-test"
-             "seon.agent.search" "seon.agent.search-test"]]
+             "seon.agent.search" "seon.agent.search-test"
+             "seon.agent.fs" "seon.agent.message"
+             "seon.schema" "seon.render"]]
     (is (true? (ctx-namespaces/full-source-ns? n)) (str n " is full-source")))
   (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.ctx"
+             "seon.warn" "seon.ai"
              "seon.agent.searcher" "my.foo.internal"]]
     (is (false? (ctx-namespaces/full-source-ns? n)) (str n " is NOT full-source"))))
 
@@ -139,13 +143,12 @@
     {:seon.db/tx-data [{:seon.ns/name   (keyword nm)
                         :seon.ns/source (str "(ns " nm ")\n" body)}]}))
 
-(deftest namespaces-section-curated-full-vs-manifest-recency
-  ;; CURATED render (curated-namespaces 2026-06-21): FULL nses (my.*,
-  ;; third-party acme.*, the curated seon.* whitelist, the current ns)
-  ;; render their WHOLE source as a tag, UNCLIPPED; every OTHER seon.*
-  ;; framework ns renders in the SIGNATURES manifest (public fn signatures,
-  ;; bodies elided) — or, when it has no indexed fns (this seed), is NAMED
-  ;; in the manifest's fn-less line.
+(deftest namespaces-section-curated-full-only-recency
+  ;; CURATED render (de-stub 2026-06-24): ONLY full nses (my.*, third-party
+  ;; acme.*, the curated seon.* whitelist, the current ns) render — each its
+  ;; WHOLE source as a tag, UNCLIPPED. Every OTHER seon.* framework ns is
+  ;; DROPPED from the rendered section entirely (no block, no body, no
+  ;; signature manifest) — it stays indexed + searchable, just not shown.
   (async done
     (let [!before (atom nil)]
       (-> (with-conn
@@ -154,14 +157,14 @@
               (-> (transact-full-ns! "my.agent.a1" "(def helper 1)")
                   ;; a third-party acme ns (non-seon, non-my → FULL tag).
                   (.then (fn [_] (transact-full-ns! "acme.widget" "(def w 2)")))
-                  ;; framework nses → NAME-MANIFEST only (stub source, no
-                  ;; body shown). seon.client carries a faux body to PROVE
-                  ;; the body is never rendered for a manifested ns.
+                  ;; framework nses → DROPPED entirely. seon.client carries a
+                  ;; faux body to PROVE the body is never rendered for a
+                  ;; dropped ns.
                   (.then (fn [_] (transact-full-ns! "seon.client" "(def never-shown 3)")))
                   (.then (fn [_] (transact-ns-row! "seon.warn")))
-                  ;; a framework ns WITH a public fn → SIGNATURES tag (the
-                  ;; new manifest API view: name + arglist + one-line doc,
-                  ;; BODY elided). A `defn-` private sibling must NOT show.
+                  ;; a framework ns WITH a public fn — STILL dropped (no
+                  ;; signature manifest anymore). A `defn-` private sibling
+                  ;; obviously must not show either.
                   (.then (fn [_] (transact-ns-row! "seon.frob")))
                   (.then
                     (fn [_]
@@ -193,41 +196,30 @@
                             "a third-party acme ns renders as a full block")
                         (is (str/includes? txt "(def w 2)")
                             "the acme body is shown FULL (no clipping)")
-                        ;; MANIFEST: a framework ns with NO indexed fns (this
-                        ;; seed) appears ONLY as a NAME in the fn-less line —
-                        ;; never a full-source block, never its body.
+                        ;; DROPPED: a non-whitelisted framework ns is absent
+                        ;; entirely — no block, no body, no name.
                         (is (not (str/includes? txt ";; ── namespace seon.client ──"))
                             "a non-whitelisted framework ns is NOT a full-source block")
                         (is (not (str/includes? txt "(def never-shown 3)"))
-                            "a manifested ns's body is NEVER rendered")
-                        (is (str/includes? txt "seon.client")
-                            "the framework ns appears as a NAME in the manifest")
-                        (is (str/includes? txt "seon.warn")
-                            "another framework ns is named in the same manifest")
-                        ;; SIGNATURES: a framework ns WITH public fns shows
-                        ;; them as a signatures tag — name + arglist + one-line
-                        ;; doc, body ELIDED, private fn omitted.
-                        (is (str/includes? txt
-                                           ";; ── namespace seon.frob (signatures) ──")
-                            "a framework ns with public fns is a signatures block")
-                        ;; the signature line carries the fn tag + the callable
-                        ;; (sym [arglist]) shape + its spec marker; the first
-                        ;; doc line rides on the NEXT line as a `;;` comment
-                        ;; (no-bare-prose unit — the manifest reads as eval'able
-                        ;; Clojure), bodies elided.
-                        (is (str/includes? txt "(seon.frob/widget [a b])")
-                            "the public fn shows name + arglist (callable shape)")
-                        (is (str/includes? txt ";; Frobnicate a and b.")
-                            "first doc line rides as a `;;` comment under the sig")
+                            "a dropped ns's body is NEVER rendered")
+                        (is (not (str/includes? txt "seon.client"))
+                            "a dropped framework ns does not appear at all")
+                        (is (not (str/includes? txt "seon.warn"))
+                            "another dropped framework ns is absent")
+                        ;; DROPPED: a framework ns WITH public fns is STILL
+                        ;; absent — there is no signature manifest anymore.
+                        (is (not (str/includes? txt "(signatures)"))
+                            "there is NO signatures manifest block anywhere")
+                        (is (not (str/includes? txt "seon.frob"))
+                            "a framework ns with public fns is dropped, not signatured")
+                        (is (not (str/includes? txt "(seon.frob/widget [a b])"))
+                            "no signature line for a dropped ns's fn")
+                        (is (not (str/includes? txt "Frobnicate a and b."))
+                            "no doc line for a dropped ns's fn")
                         (is (not (str/includes? txt "(+ a b)"))
-                            "the fn BODY is elided in the signature manifest")
-                        (is (not (str/includes? txt "More detail here."))
-                            "only the FIRST docstring line is shown")
+                            "a dropped fn BODY is never rendered")
                         (is (not (str/includes? txt "seon.frob/secret"))
-                            "a private (defn-) fn is omitted from the API view")
-                        ;; the manifest carries a query-for-source pointer.
-                        (is (str/includes? txt ":seon.ns/name")
-                            "the manifest points at the query to fetch source")
+                            "a private (defn-) fn never appears")
                         ;; *.internal never appears anywhere.
                         (is (not (str/includes? txt "seon.db.internal"))
                             "*.internal never appears")
@@ -279,9 +271,9 @@
   ;; A fresh conn, NO config row anywhere: downstream `acme.widget`
   ;; (third-party) and `my.kb` (my.*) render as FULL `;; ── namespace x ──`
   ;; blocks purely because their :seon.ns rows exist; a non-whitelisted
-  ;; seon.* framework ns (`seon.client`) is NAME-MANIFESTED, not a block;
-  ;; `acme.widget.internal` (*.internal) and `acme.widget-test` (*-test)
-  ;; are excluded by the structural rules.
+  ;; seon.* framework ns (`seon.client`) is DROPPED entirely (no block, no
+  ;; name); `acme.widget.internal` (*.internal) and `acme.widget-test`
+  ;; (*-test) are excluded by the structural rules.
   (async done
     (-> (with-conn
           (fn [_conn]
@@ -301,11 +293,11 @@
                       ;; my.* renders FULL.
                       (is (str/includes? txt ";; ── namespace my.kb ──")
                           "my.* renders FULL")
-                      ;; a non-whitelisted framework ns is manifested, not a block.
+                      ;; a non-whitelisted framework ns is dropped entirely.
                       (is (not (str/includes? txt ";; ── namespace seon.client ──"))
                           "a framework ns is NOT a full block")
-                      (is (str/includes? txt "seon.client")
-                          "the framework ns is NAMED in the manifest")
+                      (is (not (str/includes? txt "seon.client"))
+                          "the framework ns is DROPPED entirely (not even named)")
                       ;; *.internal never renders.
                       (is (not (str/includes? txt "acme.widget.internal"))
                           "*.internal is excluded structurally, no allow-list needed")
@@ -533,8 +525,8 @@
             (fn [_conn]
               (-> (agent/create! {:seon.agent/id "AGTctxtest00d1"})
                   ;; a my.* ns → rendered FULL as a `;; ── namespace x ──`
-                  ;; block in the STABLE half (a framework ns would only be
-                  ;; name-manifested).
+                  ;; block in the STABLE half (a non-whitelisted framework ns
+                  ;; would be dropped entirely).
                   (.then (fn [_] (transact-full-ns! "my.client" "(def x 1)")))
                   (.then
                     (fn [_]

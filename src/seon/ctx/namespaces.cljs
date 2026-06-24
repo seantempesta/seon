@@ -1,7 +1,7 @@
 (ns seon.ctx.namespaces
   "The `:namespaces` context section — THE BODY of the prompt: CURATED,
    not render-everything. Each rendered ns is a `;; ── namespace x ──`
-   (full) or `;; ── namespace x (signatures) ──` (manifest) comment-block:
+   full-source comment-block. ONLY the curated set renders:
 
      - FULL source (whole file, NO clipping) for the few nses an agent
        actually USES or OWNS:
@@ -10,16 +10,17 @@
              `SEON_EXTRA_SRC` `acme` business logic the agent needs whole);
          (c) the agent's CURRENT ns    — its complete working code;
          (d) a small curated whitelist of `seon.*` framework tools
-             ([[full-source-whitelist]] — `:seon.agent.todo`).
+             ([[full-source-whitelist]]).
        The FULL-source decision is one shared rule:
        [[full-source-ns?]] already covers (a) + (d); (b) is the
        not-`seon.` structural fall-through; (c) is the current-ns check.
-     - SIGNATURE-MANIFEST for every OTHER `seon.*` framework ns: one block
-       per ns listing its PUBLIC fns as SIGNATURES —
-       `(fn-name [arglist] \"first docstring line\")`, BODIES ELIDED —
-       plus a pointer to fetch any one's full source on demand. No bodies,
-       no `register!` dump, no private helpers (they stay indexed +
-       retrievable, but the API view is the public surface).
+     - Every OTHER `seon.*` framework ns is DROPPED from the rendered
+       section — it is NOT shown here at all. It stays INDEXED (its
+       `:seon.ns/name` + `:seon.fn` / `:seon.schema` / `:seon.test` rows)
+       and SEARCHABLE — discoverable via `seon.agent.search` (ripgrep) or
+       readable on demand via [[seon.ctx/render-namespace]]. There is no
+       signature manifest: passive name-listing is replaced by active
+       grep/query, taught in the `<system>` prose.
 
    Symbol-wired into the composer layout (`seon.ctx/core-default-ctx`) as
    `'seon.ctx.namespaces/namespaces-section`; loaded at boot so the
@@ -30,8 +31,9 @@
    stores the REAL full file text for exactly the nses rendered full
    (the same [[full-source-ns?]] rule + the extra-src roots),
    leaving the framework bulk a `(ns x)` stub — which this section never
-   renders as a body, only as a NAME in the manifest. So the full rows
-   here are always real file source, never a reconstructed stub."
+   renders (those nses are dropped from the body; the stub still feeds the
+   on-demand `render-namespace` path). So the full rows here are always
+   real file source, never a reconstructed stub."
   (:require
     [clojure.string :as str]
     [seon.ctx :as ctx]
@@ -115,13 +117,32 @@
        agents guessing the call/response shape (e.g. expecting a `:hits`
        key); the real body carries the worked `grep` example, the
        `:seon.agent.search/matches` envelope, and the search→read idiom.
+     - `:seon.agent.fs` — the read+write half of search→read; the agent's
+       eyes and hands on disk behind a default-deny allowlist
+       (`read-file`/`write-file`/`list-dir`/`walk-dir`/`stat`/`grants`).
+       `grep` returns paths that feed `read-file`; the body teaches the
+       default-deny-envelope-is-PASS vs thrown-error-is-FAIL distinction.
+     - `:seon.agent.message` — the conversation verbs, the agent's only way
+       to talk to its human or peers (`user`/`agent` over `message!`):
+       fan-out (`to` = vector of refs), the hop guard, the `{:ok? …}`
+       envelope, the loud self→self refusal.
+     - `:seon.schema` — `register!` is the SINGLE SOURCE OF TRUTH for
+       attribute schemas; the discovery reads (`registered?`,
+       `registered-schemas`, `schemas-in-namespace`, `enum-members`)
+       let the agent see existing shapes before inventing one.
+     - `:seon.render` — the render CORE: how sections and renderables are
+       resolved and the dual-surface (`ai`/`html`) model — what every
+       rendered block the agent reads is built from.
    `my.*` nses (`my.kb`, `my.soul`, agent-authored code) are ALREADY
    rendered full by the `my.*` rule in [[full-source-ns?]] — they do NOT
    belong here; this whitelist is ONLY for the seon.* framework tools.
    Shared by the boot indexer (which stores their real file source — see
    `seon.client/ns-row`) and [[namespaces-section]] (which renders them
-   FULL while the rest of the framework is a name manifest)."
-  #{:seon.agent.todo :seon.db :seon.agent.search})
+   FULL while the rest of the framework is DROPPED from the rendered
+   section — still indexed + searchable via seon.agent.search /
+   render-namespace)."
+  #{:seon.agent.todo :seon.db :seon.agent.search
+    :seon.agent.fs :seon.agent.message :seon.schema :seon.render})
 
 (defn in-full-source-whitelist?
   "True when `ns-name` (string, keyword, or symbol) is one of the curated
@@ -144,7 +165,8 @@
    [[namespaces-section]] renders FULL — one rule, one writer, no drift.
    Third-party (`acme`) roots are full-source too, gated separately by
    `seon.client/extra-src-ns-strs` (the same file read). Every other ns
-   gets the minimal `(ns x)` stub at boot and is named in the manifest."
+   gets the minimal `(ns x)` stub at boot and is DROPPED from the rendered
+   section (still indexed + searchable)."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
   [ns-name]
   (let [s    (if (keyword? ns-name) (name ns-name) (str ns-name))
@@ -170,37 +192,21 @@
          seon.* whitelist ([[full-source-whitelist]]); OR
      (c) [[third-party-ns?]] — a non-seon, non-my root (the `acme`
          business logic).
-   Everything else is a `seon.*` framework ns → NAME-MANIFEST only."
+   Everything else is a `seon.*` framework ns → DROPPED from the rendered
+   section (still indexed + searchable)."
   [nm cur-ns]
   (boolean
     (or (= nm cur-ns)
         (full-source-ns? nm)
         (third-party-ns? nm))))
 
-(def ^:private manifest-pointer
-  "The `;;` header that precedes the signature-manifest tags: tells the
-   agent the framework bulk shows PUBLIC fn signatures only and how to
-   fetch any fn's FULL source — the same `render-namespace` the section
-   itself delegates to (one renderer, named in the pointer)."
-  (str ";; other seon framework namespaces — PUBLIC fn signatures only\n"
-       ";; (bodies elided). Read a fn's FULL source (or a whole ns incl.\n"
-       ";; private helpers) on demand with render-namespace, e.g.:\n"
-       ";;   (seon.ctx/render-namespace {:seon.ns/name :seon.db})\n"
-       ";; or query a single fn's source by name:\n"
-       ";;   (seon.db/query '[:find ?sym ?src :where\n"
-       ";;                    [?n :seon.ns/name :seon.warn]\n"
-       ";;                    [?f :seon.fn/ns ?n]\n"
-       ";;                    [?f :seon.fn/sym ?sym]\n"
-       ";;                    [?f :seon.fn/source ?src]])"))
-
 (def ^:private namespaces-header
-  (str ";; Real loaded code. The few namespaces you USE or OWN are shown in\n"
-       ";; FULL (your my.* code, third-party business code, your current\n"
-       ";; namespace, and a curated seon.* tool set); the rest of the seon\n"
-       ";; framework is shown as PUBLIC fn SIGNATURES (name + arglist +\n"
-       ";; one-line doc, bodies elided) in a manifest at the end — query any\n"
-       ";; fn's full source by name on demand. Full namespaces are ordered\n"
-       ";; by RECENCY: most-recently-modified LAST."))
+  (str ";; Real loaded code, CURATED: the few namespaces you USE or OWN are\n"
+       ";; shown in FULL (your my.* code, third-party business code, your\n"
+       ";; current namespace, and a curated seon.* tool set) — each its whole\n"
+       ";; file. The rest of the seon framework is NOT shown here; query any\n"
+       ";; ns or fn by name (it stays indexed + searchable). Full namespaces\n"
+       ";; are ordered by RECENCY: most-recently-modified LAST."))
 
 (defn- render-one
   "Render ONE included ns through the SINGLE renderer
@@ -238,17 +244,15 @@
        THIRD-PARTY `acme` ns, the agent's CURRENT ns, and the curated
        [[full-source-whitelist]] seon.* tools — each a `;; ── namespace x ──`
        block carrying its REAL FULL FILE SOURCE (+ any member rows), unclipped.
-     - SIGNATURE (`:seon.render/detail :signature`) for every OTHER `seon.*`
-       framework ns — a `;; ── namespace x (signatures) ──` block of PUBLIC
-       fn signatures (name + arglist + one-line doc, BODIES ELIDED).
-       Private fns are skipped; they stay retrievable via the same renderer.
+     - Every OTHER `seon.*` framework ns is DROPPED from the rendered
+       section — not shown here at all. It stays INDEXED and SEARCHABLE
+       (via `seon.agent.search`) and readable on demand via
+       [[seon.ctx/render-namespace]].
 
    The full blocks are ordered by RECENCY (tx of the `:seon.ns/name` datom —
    bumped by the tee's nested upsert on every define), name as the
    tie-break, so the stable core forms a stable cache prefix and the
-   churning ns sits nearest the tail. The signature blocks are name-sorted
-   and sit LAST after a [[manifest-pointer]] (they change only when the
-   framework roster changes).
+   churning ns sits nearest the tail.
 
    `*.internal` and `*-test` nses are excluded outright ([[included-ns?]]).
    A full ns whose stored source/members are all empty renders nothing
@@ -262,9 +266,8 @@
         cur-ns (when id
                  (try (ctx/current-ns {:seon.agent/id id :seon.db/db db})
                       (catch :default _ nil)))
-        ;; EVERY included ns row, recency-ordered, partitioned into the
-        ;; FULL set (rendered as full tags) and the framework bulk
-        ;; (signature tags). One :seon.ns/name datom per ns carries its tx.
+        ;; EVERY included ns row, recency-ordered. One :seon.ns/name datom
+        ;; per ns carries its tx.
         rows   (->> (db/query
                       {:seon.db/db db
                        :seon.db/query
@@ -273,18 +276,13 @@
                          [?n :seon.ns/name ?nm ?tx]]})
                     (filter (fn [[nm _]] (included-ns? nm)))
                     (sort-by (fn [[nm tx]] [tx (name nm)])))
-        {full-rows true manifest-rows false}
-        (group-by (fn [[nm _tx]] (render-full? nm cur-ns)) rows)
-        ;; FULL tags — whole-ns view via the ONE renderer, recency-ordered.
-        full-tags (keep (fn [[nm _tx]] (render-one db nm :full)) full-rows)
-        ;; SIGNATURE tags — public-API view via the SAME renderer,
-        ;; name-sorted, behind the query-for-source pointer.
-        sig-tags  (keep (fn [nm] (render-one db nm :signature))
-                        (sort (map first manifest-rows)))
-        manifest  (when (seq sig-tags)
-                    (str/join "\n\n" (cons manifest-pointer sig-tags)))
-        blocks    (cond-> (vec full-tags)
-                    manifest (conj manifest))]
+        ;; ONLY curated-full nses render: current ns, full-source-ns?
+        ;; (my.* + the seon.* full-source-whitelist), and third-party
+        ;; (acme) roots. Every OTHER seon.* framework ns is DROPPED from
+        ;; the rendered section — it stays indexed + grep-able via
+        ;; seon.agent.search, just not dumped here.
+        full-rows (filter (fn [[nm _tx]] (render-full? nm cur-ns)) rows)
+        blocks    (keep (fn [[nm _tx]] (render-one db nm :full)) full-rows)]
     (if (seq blocks)
       (str namespaces-header "\n\n" (str/join "\n\n" blocks))
       "")))
