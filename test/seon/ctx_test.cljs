@@ -27,6 +27,7 @@
     [seon.ctx.relevant :as ctx-relevant]
     [seon.db :as db]
     [seon.embed.stash :as embed-stash]
+    [seon.render :as render]
     [seon.schema :as schema]))
 
 (defn- fresh-conn
@@ -338,8 +339,26 @@
 ;; ------------------------------------------------------------
 
 (defn- assemble
+  "The assembled context as a map, derived from the keystone ONE-render
+   (`context-root` + `render` + `ctx-sections`) — the shape the old
+   `assemble-context` returned, rebuilt from the new system so these tests
+   keep asserting against the agent's real context."
   [id]
-  (ctx/assemble-context {:seon.db/db @db/*conn* :seon.agent/id id}))
+  (let [ctx   {:seon.db/db @db/*conn* :seon.agent/id id}
+        root  (ctx/context-root ctx)
+        text  (or (render/render :seon.render/ai ctx root) "")
+        split (ctx/split-context text)
+        {:seon.render/keys [section-texts section-html]} (ctx/ctx-sections ctx)]
+    {:seon.render/text           text
+     :seon.render/stable-text    (:seon.render/stable-text split)
+     :seon.render/volatile-text  (:seon.render/volatile-text split)
+     ;; LAYOUT PROVENANCE — every child section name in render order
+     ;; (including ones that rendered blank this turn), the same shape the
+     ;; old assemble-context's :seon.render/sections carried.
+     :seon.render/sections       (mapv :seon.ctx/name (:seon.ctx/children root))
+     :seon.render/section-texts  section-texts
+     :seon.render/section-html   section-html
+     :seon.render/token-estimate (quot (count text) 4)}))
 
 (defn- section-text
   [id nm]
@@ -413,8 +432,9 @@
                           "minted agent renders the your-entity section")
                       (is (str/includes? (str ent-txt) "watch the ledger")
                           "stated purpose is entity data, rendered in the map")
-                      (is (str/includes? (str ent-txt) ";; ── your entity ──")
-                          "your-entity header present")
+                      ;; The `;; ── your entity ──` header was REMOVED
+                      ;; (keystone): the section renderer's bracket demarcates
+                      ;; the section now.
                       (is (some #{:system} sections)
                           "core defaults merged in")
                       (is (some #{:transcript} sections))
@@ -530,11 +550,8 @@
                   (.then (fn [_] (transact-full-ns! "my.client" "(def x 1)")))
                   (.then
                     (fn [_]
-                      (let [db @db/*conn*
-                            a1 (ctx/assemble-context {:seon.db/db db
-                                                      :seon.agent/id "AGTctxtest00d1"})
-                            a2 (ctx/assemble-context {:seon.db/db db
-                                                      :seon.agent/id "AGTctxtest00d1"})]
+                      (let [a1 (assemble "AGTctxtest00d1")
+                            a2 (assemble "AGTctxtest00d1")]
                         (reset! !first a1)
                         (is (= (:seon.render/stable-text a1)
                                (:seon.render/stable-text a2))
@@ -571,9 +588,7 @@
                                   :seon.agent.turn/prompt-chars 1}]}]})))
                   (.then
                     (fn [_]
-                      (let [after (ctx/assemble-context
-                                    {:seon.db/db @db/*conn*
-                                     :seon.agent/id "AGTctxtest00d1"})]
+                      (let [after (assemble "AGTctxtest00d1")]
                         (is (= (:seon.render/stable-text @!first)
                                (:seon.render/stable-text after))
                             "a volatile-only change (new turn row) leaves the stable block untouched")))))))
@@ -643,8 +658,9 @@
                   (fn [_]
                     (let [txt   (ctx-inventory/inventory-section {:seon.db/db @db/*conn*})
                           lines (str/split-lines txt)]
-                      (is (str/includes? txt ";; ── stored data inventory ──")
-                          "rendered under the stored-data inventory header")
+                      ;; The `;; ── stored data inventory ──` header was REMOVED
+                      ;; (keystone): the section renderer's bracket now
+                      ;; demarcates the section; the body is header-less.
                       ;; ONE line per kind: the kind name is the line label,
                       ;; written ONCE, then bare attr-name count pairs. The
                       ;; whole body rides as `;;` comments (no-bare-prose
@@ -710,8 +726,8 @@
     ;; (2) with a stash → full render.
     (let [txt (embed-stash/with-hits hits
                 #(ctx-relevant/relevant-source-section in))]
-      (is (str/includes? txt ";; ── relevant context ──")
-          "rendered under the relevant-context header")
+      ;; The `;; ── relevant context ──` header was REMOVED (keystone): the
+      ;; section renderer's bracket demarcates the section now.
       ;; top-k respected: only the first `top-k` hits render.
       (is (str/includes? txt "my.ns/fn0") "first hit's sym present")
       (is (str/includes? txt (str "my.ns/fn" (dec ctx-relevant/top-k)))
@@ -791,9 +807,7 @@
     ;; entity-less hit (lost eid) → header-only <unknown>, never throws/blank-tag.
     (let [txt (render [lost-hit])]
       (is (str/includes? txt "<unknown>")
-          "an entity-less hit renders a header-only <unknown> block")
-      (is (str/includes? txt ";; ── relevant context ──")
-          "and stays under the section header"))))
+          "an entity-less hit renders a header-only <unknown> block"))))
 
 (deftest off-path-is-byte-identical
   ;; THE SAFETY CONTRACT. With NO retrieval stash active (the default-OFF

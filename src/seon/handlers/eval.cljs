@@ -73,9 +73,10 @@
   "One eval row for the LLM ctx. Source first (what the agent typed),
    result/error as a short tagged summary. See ns docstring for the
    display contract."
-  {:malli/schema [:=> [:cat :map] :seon.render/ai-response]}
-  [{:seon.render/keys [entity]}]
-  (let [eid       (:seon.eval/id entity)
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [{:seon.render/keys [node entity]}]
+  (let [entity    (or node entity)
+        eid       (:seon.eval/id entity)
         narration (:seon.eval/narration entity)
         src       (or (:seon.eval/source entity) "")
         ok?       (boolean (:seon.eval/ok? entity))
@@ -96,7 +97,7 @@
                     true (conj header)
                     true (conj (truncate (str/trim src) source-truncate))
                     tail (conj tail))]
-    {:seon.render/ai (str/join "\n" lines)}))
+    (str/join "\n" lines)))
 
 (defn render-html
   "Hiccup card for the inspector's HTML pane.
@@ -108,9 +109,10 @@
    - On :ok — a single `=> <short>` line in dim amber.
    - On :error — short summary inline + a collapsible `<details>` with
      the full pr-str'd error map for forensics."
-  {:malli/schema [:=> [:cat :map] :seon.render/html-response]}
-  [{:seon.render/keys [entity]}]
-  (let [eid       (:seon.eval/id entity)
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  [{:seon.render/keys [node entity]}]
+  (let [entity    (or node entity)
+        eid       (:seon.eval/id entity)
         narration (:seon.eval/narration entity)
         src       (or (:seon.eval/source entity) "")
         ok?       (boolean (:seon.eval/ok? entity))
@@ -118,38 +120,37 @@
         err-str   (:seon.eval/error entity)
         dur       (:seon.eval/duration-ms entity)
         status-class (if ok? "text-amber-400" "text-error")]
-    {:seon.render/hiccup
-     [:div {:class "py-1"}
-      ;; Narration is markdown emitted by the agent (`## heading`,
-      ;; `**bold**`, lists). marked.js + the inspector-shell's
-      ;; MutationObserver expand `[data-markdown]` to real HTML on
-      ;; load and after every SSE morph. AI pane keeps it raw — LLMs
-      ;; read markdown fine as text.
-      (when (and narration (not (str/blank? narration)))
-        [:div {:class "markdown mb-0.5"
-               :data-markdown (str/trim narration)}])
-      [:div {:class "flex items-baseline gap-2"}
-       [:span {:class "text-xs font-mono font-semibold text-amber-500"}
-        (str "eval " eid)]
-       (when dur
-         [:span {:class "text-xs text-text-500"} (str dur "ms")])
-       [:span {:class (str "text-xs font-mono " status-class)}
-        (if ok? ":ok" ":error")]]
-      [:pre {:class "text-xs whitespace-pre-wrap mt-0.5 rounded bg-base-900 p-1.5 overflow-x-auto"}
-       [:code {:class "language-clojure hljs"} (str/trim src)]]
-      (cond
-        ok?
-        (when-let [r (short-result res-edn)]
-          [:div {:class "text-xs font-mono text-amber-300/70 mt-1"}
-           (str "=> " r)])
+    [:div {:class "py-1"}
+     ;; Narration is markdown emitted by the agent (`## heading`,
+     ;; `**bold**`, lists). marked.js + the inspector-shell's
+     ;; MutationObserver expand `[data-markdown]` to real HTML on
+     ;; load and after every SSE morph. AI pane keeps it raw — LLMs
+     ;; read markdown fine as text.
+     (when (and narration (not (str/blank? narration)))
+       [:div {:class "markdown mb-0.5"
+              :data-markdown (str/trim narration)}])
+     [:div {:class "flex items-baseline gap-2"}
+      [:span {:class "text-xs font-mono font-semibold text-amber-500"}
+       (str "eval " eid)]
+      (when dur
+        [:span {:class "text-xs text-text-500"} (str dur "ms")])
+      [:span {:class (str "text-xs font-mono " status-class)}
+       (if ok? ":ok" ":error")]]
+     [:pre {:class "text-xs whitespace-pre-wrap mt-0.5 rounded bg-base-900 p-1.5 overflow-x-auto"}
+      [:code {:class "language-clojure hljs"} (str/trim src)]]
+     (cond
+       ok?
+       (when-let [r (short-result res-edn)]
+         [:div {:class "text-xs font-mono text-amber-300/70 mt-1"}
+          (str "=> " r)])
 
-        (string? err-str)
-        [:details {:class "mt-1"}
-         [:summary {:class "text-xs font-mono text-error cursor-pointer"}
-          (str ":error " (short-error err-str))]
-         [:pre {:class "text-xs font-mono whitespace-pre-wrap text-error/80 mt-1 p-1.5 rounded bg-base-900"}
-          err-str]]
+       (string? err-str)
+       [:details {:class "mt-1"}
+        [:summary {:class "text-xs font-mono text-error cursor-pointer"}
+         (str ":error " (short-error err-str))]
+        [:pre {:class "text-xs font-mono whitespace-pre-wrap text-error/80 mt-1 p-1.5 rounded bg-base-900"}
+         err-str]]
 
-        :else
-        [:div {:class "text-xs font-mono text-error mt-1"}
-         ":error <no detail>"])]}))
+       :else
+       [:div {:class "text-xs font-mono text-error mt-1"}
+        ":error <no detail>"])]))

@@ -112,7 +112,6 @@
       (let [blocks (->> hits
                         (take top-k)
                         (map render-hit))]
-        (str ";; ── relevant context ──\n"
-             relevant-header "\n\n"
+        (str relevant-header "\n\n"
              (str/join "\n\n" blocks)))
       "")))

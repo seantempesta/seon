@@ -67,9 +67,10 @@
   "Compact one-line summary with counts and short names:
 
      [ns my.agent.XAR-...]  fns: add, sub  schemas: :answer, :id"
-  {:malli/schema [:=> [:cat :map] :seon.render/ai-response]}
-  [{:seon.db/keys [db] :seon.render/keys [entity]}]
-  (let [n      (:seon.ns/name entity)
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [{:seon.db/keys [db] :seon.render/keys [node entity]}]
+  (let [entity (or node entity)
+        n      (:seon.ns/name entity)
         {:keys [fns schemas]} (ns-contents db n)
         fn-list (->> fns (map (comp short-name :sym)) (str/join ", "))
         sc-list (->> schemas (map short-name) (str/join ", "))
@@ -80,7 +81,7 @@
                   (conj (str "schemas(" (count schemas) "): " sc-list))
                   (and (empty? fns) (empty? schemas))
                   (conj "(empty)"))]
-    {:seon.render/ai (str/join "  " parts)}))
+    (str/join "  " parts)))
 
 (defn- anchor-id
   "Stable in-page anchor id for a fn/schema entity card. Keep in
@@ -93,41 +94,41 @@
   "Interactive card. Header line + collapsible `<details>` per group
    (fns / schemas). Each name is an in-page anchor link — clicking
    `add` jumps to the `:seon.fn` entity card further down the pane."
-  {:malli/schema [:=> [:cat :map] :seon.render/html-response]}
-  [{:seon.db/keys [db] :seon.render/keys [entity]}]
-  (let [n (:seon.ns/name entity)
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  [{:seon.db/keys [db] :seon.render/keys [node entity]}]
+  (let [entity (or node entity)
+        n (:seon.ns/name entity)
         {:keys [fns schemas]} (ns-contents db n)]
-    {:seon.render/hiccup
-     [:div {:class "py-1"}
-      [:div {:class "flex items-baseline gap-2 flex-wrap"}
-       [:span {:class "text-xs font-mono font-semibold text-amber-400"} "ns"]
-       [:span {:class "text-xs font-mono text-text-100"} (name n)]
-       [:span {:class "text-xs text-text-500"}
-        (str (count fns) " fns · " (count schemas) " schemas")]]
-      (when (seq fns)
-        [:details {:class "mt-1" :open true}
-         [:summary {:class "text-xs font-mono text-amber-300/80 cursor-pointer"}
-          (str "fns (" (count fns) ")")]
-         (into [:ul {:class "mt-0.5 ml-2"}]
-               (for [{:keys [sym private? doc]} fns]
-                 [:li {:class "text-xs font-mono flex items-baseline gap-2"}
-                  [:a {:href  (str "#" (anchor-id "fn" sym))
-                       :class "text-text-100 hover:text-amber-300"}
-                   (short-name sym)]
-                  (when private?
-                    [:span {:class "text-text-500"} "(private)"])
-                  (when (and doc (not (str/blank? doc)))
-                    [:span {:class "text-text-400 italic"}
-                     (first (str/split-lines doc))])]))])
-      (when (seq schemas)
-        [:details {:class "mt-1" :open true}
-         [:summary {:class "text-xs font-mono text-amber-300/80 cursor-pointer"}
-          (str "schemas (" (count schemas) ")")]
-         (into [:ul {:class "mt-0.5 ml-2"}]
-               (for [k schemas]
-                 [:li {:class "text-xs font-mono"}
-                  [:a {:href  (str "#" (anchor-id "schema" k))
-                       :class "text-text-100 hover:text-amber-300"}
-                   (pr-str k)]]))])
-      (when (and (empty? fns) (empty? schemas))
-        [:div {:class "text-xs text-text-500 italic mt-0.5"} "(empty)"])]}))
+    [:div {:class "py-1"}
+     [:div {:class "flex items-baseline gap-2 flex-wrap"}
+      [:span {:class "text-xs font-mono font-semibold text-amber-400"} "ns"]
+      [:span {:class "text-xs font-mono text-text-100"} (name n)]
+      [:span {:class "text-xs text-text-500"}
+       (str (count fns) " fns · " (count schemas) " schemas")]]
+     (when (seq fns)
+       [:details {:class "mt-1" :open true}
+        [:summary {:class "text-xs font-mono text-amber-300/80 cursor-pointer"}
+         (str "fns (" (count fns) ")")]
+        (into [:ul {:class "mt-0.5 ml-2"}]
+              (for [{:keys [sym private? doc]} fns]
+                [:li {:class "text-xs font-mono flex items-baseline gap-2"}
+                 [:a {:href  (str "#" (anchor-id "fn" sym))
+                      :class "text-text-100 hover:text-amber-300"}
+                  (short-name sym)]
+                 (when private?
+                   [:span {:class "text-text-500"} "(private)"])
+                 (when (and doc (not (str/blank? doc)))
+                   [:span {:class "text-text-400 italic"}
+                    (first (str/split-lines doc))])]))])
+     (when (seq schemas)
+       [:details {:class "mt-1" :open true}
+        [:summary {:class "text-xs font-mono text-amber-300/80 cursor-pointer"}
+         (str "schemas (" (count schemas) ")")]
+        (into [:ul {:class "mt-0.5 ml-2"}]
+              (for [k schemas]
+                [:li {:class "text-xs font-mono"}
+                 [:a {:href  (str "#" (anchor-id "schema" k))
+                      :class "text-text-100 hover:text-amber-300"}
+                  (pr-str k)]]))])
+     (when (and (empty? fns) (empty? schemas))
+       [:div {:class "text-xs text-text-500 italic mt-0.5"} "(empty)"])]))

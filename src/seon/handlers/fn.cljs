@@ -106,9 +106,10 @@
 
    The glyph is the FIRST char of line 2 so it lands in the LLM's
    peripheral vision; the agent can scan a long ctx for ✗/⚠ quickly."
-  {:malli/schema [:=> [:cat :map] :seon.render/ai-response]}
-  [{:seon.db/keys [db] :seon.render/keys [entity]}]
-  (let [sym       (or (:seon.fn/sym entity) "?")
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [{:seon.db/keys [db] :seon.render/keys [node entity]}]
+  (let [entity    (or node entity)
+        sym       (or (:seon.fn/sym entity) "?")
         arglists  (:seon.fn/arglists entity)
         doc       (:seon.fn/doc entity)
         priv      (boolean (:seon.fn/private? entity))
@@ -138,7 +139,7 @@
         lines     (cond-> [header status-line]
                     spec-line (conj spec-line)
                     doc-line (conj doc-line))]
-    {:seon.render/ai (str/join "\n" lines)}))
+    (str/join "\n" lines)))
 
 (defn- pill
   "Tiny status pill — green dot when on, gray dot when off."
@@ -167,9 +168,10 @@
    this fn (substring heuristic; matches P4 auto-test-run discovery).
    When `:seon.fn/schema-error` is set, the schema-error badge replaces
    the `tested` row with a red one-line warning."
-  {:malli/schema [:=> [:cat :map] :seon.render/html-response]}
-  [{:seon.db/keys [db] :seon.render/keys [entity]}]
-  (let [sym      (or (:seon.fn/sym entity) "?")
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  [{:seon.db/keys [db] :seon.render/keys [node entity]}]
+  (let [entity   (or node entity)
+        sym      (or (:seon.fn/sym entity) "?")
         arglists (:seon.fn/arglists entity)
         doc      (:seon.fn/doc entity)
         priv     (boolean (:seon.fn/private? entity))
@@ -181,29 +183,28 @@
         long?    (> (count src) source-inline-threshold)
         anchor   (str "seon-fn-" (str/replace (str sym) #"[^A-Za-z0-9_-]" "_"))
         {:keys [tested? test-passing? failure-summary]} (test-status db sym)]
-    {:seon.render/hiccup
-     [:div {:id anchor :class "py-1"}
-      [:div {:class "flex items-baseline gap-2 flex-wrap"}
-       [:span {:class "text-xs font-mono font-semibold text-amber-400"} "fn"]
-       [:span {:class "text-xs font-mono text-text-100"} sym]
-       (status-pill "specced" (if specced :ok :warn))
-       (when priv (pill "private" true))
-       (status-pill "tested" (if tested? :ok :warn))
-       (when tested?
-         (status-pill "test-passing" (if test-passing? :ok :err)))]
-      (when schema-err
-        [:div {:class "mt-1 text-xs font-mono text-error rounded bg-base-900 px-1.5 py-1"}
-         (str "✗ schema error: " schema-err)])
-      (when (and tested? (false? test-passing?) failure-summary)
-        [:div {:class "mt-1 text-xs font-mono text-error/80 rounded bg-base-900 px-1.5 py-1"}
-         (str "✗ " failure-summary)])
-      (when sig
-        [:div {:class "text-xs font-mono text-amber-200/80 mt-0.5"} sig])
-      (when-let [d (short-doc doc)]
-        [:div {:class "text-xs text-text-300 italic mt-0.5"} d])
-      (when (not (str/blank? src))
-        [:details {:class "mt-1" :open (not long?)}
-         [:summary {:class "text-xs font-mono text-text-500 cursor-pointer"}
-          (if long? "source ▾" "source")]
-         [:pre {:class "text-xs whitespace-pre-wrap mt-0.5 rounded bg-base-900 p-1.5 overflow-x-auto"}
-          [:code {:class "language-clojure hljs"} (str/trim src)]]])]}))
+    [:div {:id anchor :class "py-1"}
+     [:div {:class "flex items-baseline gap-2 flex-wrap"}
+      [:span {:class "text-xs font-mono font-semibold text-amber-400"} "fn"]
+      [:span {:class "text-xs font-mono text-text-100"} sym]
+      (status-pill "specced" (if specced :ok :warn))
+      (when priv (pill "private" true))
+      (status-pill "tested" (if tested? :ok :warn))
+      (when tested?
+        (status-pill "test-passing" (if test-passing? :ok :err)))]
+     (when schema-err
+       [:div {:class "mt-1 text-xs font-mono text-error rounded bg-base-900 px-1.5 py-1"}
+        (str "✗ schema error: " schema-err)])
+     (when (and tested? (false? test-passing?) failure-summary)
+       [:div {:class "mt-1 text-xs font-mono text-error/80 rounded bg-base-900 px-1.5 py-1"}
+        (str "✗ " failure-summary)])
+     (when sig
+       [:div {:class "text-xs font-mono text-amber-200/80 mt-0.5"} sig])
+     (when-let [d (short-doc doc)]
+       [:div {:class "text-xs text-text-300 italic mt-0.5"} d])
+     (when (not (str/blank? src))
+       [:details {:class "mt-1" :open (not long?)}
+        [:summary {:class "text-xs font-mono text-text-500 cursor-pointer"}
+         (if long? "source ▾" "source")]
+        [:pre {:class "text-xs whitespace-pre-wrap mt-0.5 rounded bg-base-900 p-1.5 overflow-x-auto"}
+         [:code {:class "language-clojure hljs"} (str/trim src)]]])]))

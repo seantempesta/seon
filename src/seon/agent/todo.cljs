@@ -236,8 +236,7 @@
                 (open-todos db oe))]
     (if (empty? todos)
       ""
-      (str ";; ── open todos ──\n"
-           ";; Your open work items — close one with\n"
+      (str ";; Your open work items — close one with\n"
            ";;   (seon.agent.todo/complete! {:seon.agent.todo/id \"<id>\"})\n"
            ";; when finished:\n"
            (str/join "\n"

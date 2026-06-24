@@ -44,16 +44,14 @@
 
    ## Prompt assembly
 
-   The LLM ctx is built via the render dispatch:
-
-     agent entity → :seon.render/ai slot → eval/lookup-value → call → text
-
-   Default symbol: `'seon.agent/assemble-context` (an alias of
-   `seon.ctx/assemble-context` — the ONE composer). The core section LAYOUT
-   is CODE (`seon.ctx/core-default-ctx`); the agent's own `:seon.agent/ctx`
-   section maps MERGE with it by one priority sort (override-by-name). Each
-   section's `:seon.render/ai` slot is a verbatim string or a fn symbol
-   resolved late via `seon.eval/lookup-value`.
+   The LLM ctx is ONE recursive render of the ROOT renderable
+   (`seon.ctx/context-root`): `seon.agent.turn/render-prompt` calls
+   `(seon.render/render :seon.render/ai ctx (seon.ctx/context-root ctx))`,
+   shared byte-for-byte with the inspector (`seon.agent.inspect/ctx-preview`).
+   The core section LAYOUT is CODE (`seon.ctx/core-default-ctx`); the agent's
+   own `:seon.agent/ctx` section maps MERGE with it by one priority sort
+   (override-by-id). Each section's `:seon.render/ai` slot is a verbatim
+   string or a fn symbol resolved late via `seon.eval/lookup-value`.
 
    The agent customizes by transacting different `:seon.ctx` entities into
    `:seon.agent/ctx` (use `update-ctx!`) or by transacting a completely
@@ -130,7 +128,7 @@
 (def warnings-section ctx-warnings/warnings-section)
 (def transcript-char-budget ctx-transcript/transcript-char-budget)
 (def transcript-section ctx-transcript/transcript-section)
-(def assemble-context ctx/assemble-context)
+(def context-root ctx/context-root)
 (def core-default-ctx ctx/core-default-ctx)
 
 (schema/register! :seon.eval/id          [:and {:seon.db/identity true} :seon.db/id])

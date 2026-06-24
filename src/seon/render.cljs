@@ -29,6 +29,8 @@
    bundle) AND agent-defined fns (written by `cljs.js/eval-str` at the
    same munged paths). Single path, no boot-time wire-up needed."
   (:require
+    [cljs.pprint :as pprint]
+    [clojure.string :as str]
     [datahike.api :as d]
     [seon.db :as db]
     [seon.error :as err]
@@ -86,31 +88,31 @@
 ;; compilability guard rejects forward references.
 (schema/register! :seon.render/html :seon.render.live-tile/content)
 
-;; Renderer return shapes — map-in / map-out per seon house rule.
-;;
-;; TWIN-KEY CONVERGENCE (PRD live-tiles §8.2, producer sweep done
-;; 2026-06-11): the text twin of a render is `:seon.render/ai` —
-;; every renderer producer (the six `seon.handlers.*` render-ai fns,
-;; `seon.render.default/pretty-ai`, section twins, the tile twin) now
-;; emits it. The SECOND arm below exists for the ONE remaining
-;; `:seon.render/text` producer: the ctx prompt-composer family
-;; (`seon.ctx/assemble-context`'s response, which `ai-render`
-;; dispatches when it is the agent's prompt slot). That family's
-;; rename rides the V4 composer rewrite (seon.ctx is out of the
-;; render-sweep fence); delete the arm with it.
-;; Expressed as PURE DATA (an :or of maps — registered forms must not
-;; embed fns; see the platform-law comment in seon.render.live-tile):
-;; first arm requires :ai, second requires :text; both arms spec the
-;; other key as optional so a present-but-wrong-typed value never
-;; slips through an open map.
+;; ── render-CONTROL attrs (context-render keystone) — all OPTIONAL; ANY
+;; entity (a domain row OR a section) may carry them. A renderable is a
+;; DOMAIN ENTITY rendered by its schema — there is NO stored render kind,
+;; NO render id (the handle is the entity's own id), NO render timestamp
+;; (time is the :db/txInstant), NO ordinal, NO churn attr.
+(schema/register! :seon.render/clip
+  ;; per-item / per-view clip override — an int cap, a per-view map, or
+  ;; :none to opt the section out of clipping (e.g. the transcript).
+  [:or :int
+       [:map [:seon.render/ai   {:optional true} :int]
+             [:seon.render/html {:optional true} :int]]
+       [:enum :none]])
+(schema/register! :seon.render/hidden? :boolean)        ;; self-prune: drop from render, keep the row
+(schema/register! :seon.render/children
+  [:vector {:seon.db/component true} :seon.db/ref])      ;; OPTIONAL authored nesting; derived sections query instead
+
+;; The `:seon.render/ai-response` envelope — the LIVE-TILE / default
+;; slot-primitive return shape (`ai-render` → `seon.render.default/pretty-ai`
+;; and `seon.render.chat`). The old `:seon.render/text` second arm was
+;; DELETED with the V4 composer rewrite (context-render keystone): the ONE
+;; producer of it (`seon.ctx/assemble-context`) is gone, and the keystone's
+;; CONVERTERS return BARE Strings (not this envelope). One key, one meaning.
 (schema/register! :seon.render/ai-response
-  [:or
-   [:map
-    [:seon.render/ai   :string]
-    [:seon.render/text {:optional true} :string]]
-   [:map
-    [:seon.render/text :string]
-    [:seon.render/ai   {:optional true} :string]]])
+  [:map
+   [:seon.render/ai :string]])
 
 ;; The error envelope a failed render carries (live-tiles U1) — the
 ;; standard `:seon.error/*` shape, registered in seon.db.
@@ -320,25 +322,35 @@
 (defn render-entity-html
   "Render `entity` to hiccup via its resolved `:seon.render/html` symbol.
    Per-entity override wins; else falls back to the entity-kind schema's
-   default html symbol (Phase 1 schema-property pattern). Returns nil
-   when no symbol resolves OR the resolved fn returns nil.
+   default html symbol. Returns nil when no symbol resolves OR the
+   resolved fn returns nil.
 
-   A renderer that THROWS does NOT vanish (same posture as the live
-   tile's `error-response`): the card becomes a legible error banner
-   naming the fn + message, siblings render untouched, the page stays
-   200. The old `(catch … nil)` swallow made a broken agent-authored
-   renderer indistinguishable from \"no renderer\" — banned.
+   The kind's html symbol IS a converter (`seon.handlers.*/render-html`)
+   that returns BARE hiccup, called with the entity under
+   `:seon.render/node`. A renderer that THROWS does NOT vanish (same
+   posture as the live tile's `error-response`): the card becomes a
+   legible error banner naming the fn + message, siblings render
+   untouched, the page stays 200.
 
    `input` is the system-input shape every render fn receives:
      {:seon.db/db    <db>
       :seon.agent/id <agent-id>
-      :seon.render/entity <entity-map>}"
+      :seon.render/node <entity-map>}
+   (`:seon.render/entity` is tolerated as the node key for older callers.)"
   {:malli/schema [:=> [:cat :map] [:maybe :any]]}
-  [{:seon.db/keys [db] :seon.render/keys [entity] :as input}]
-  (let [db (or db @db/*conn*)]
+  [{:seon.db/keys [db] :seon.render/keys [entity node] :as input}]
+  (let [db     (or db @db/*conn*)
+        entity (or node entity)]
     (when-let [sym (entity-render-slot db entity :html)]
       (try
-        (:seon.render/hiccup (html-render sym input))
+        (let [f (eval/lookup-value sym)
+              r (when f (f (assoc input :seon.render/node entity)))]
+          ;; Converters return BARE hiccup; tolerate a per-entity renderer
+          ;; (agent-authored, test fixture) still returning the old
+          ;; {:seon.render/hiccup h} envelope.
+          (if (and (map? r) (contains? r :seon.render/hiccup))
+            (:seon.render/hiccup r)
+            r))
         (catch :default e
           [:div {:class (str "flex flex-col gap-1 p-3 border "
                              "border-error/40 bg-error/10 rounded")}
@@ -469,23 +481,180 @@
   "Render `entity` to text via its resolved `:seon.render/ai` symbol.
    Per-entity override wins; else schema property for the entity's
    primary kind. Returns nil if no symbol resolves OR the fn returns
-   nil. Mirror of `render-entity-html` for the AI path."
+   nil. Mirror of `render-entity-html` for the AI path.
+
+   The kind's ai symbol IS a converter (`seon.handlers.*/render-ai`)
+   returning a BARE String, called with the entity under
+   `:seon.render/node` (`:seon.render/entity` tolerated)."
   {:malli/schema [:=> [:cat :map] [:maybe :string]]}
-  [{:seon.db/keys [db] :seon.render/keys [entity] :as input}]
-  (let [db (or db @db/*conn*)]
+  [{:seon.db/keys [db] :seon.render/keys [entity node] :as input}]
+  (let [db     (or db @db/*conn*)
+        entity (or node entity)]
     (when-let [sym (entity-render-slot db entity :ai)]
       (try
-        ;; Twin-key convergence (PRD §8.2): all core producers
-        ;; emit :seon.render/ai (sweep 2026-06-11). The :text read
-        ;; stays as READER tolerance for agent-authored renderer fns
-        ;; already in live stores that learned the old key — drop it
-        ;; with the ctx-family rename (V4 composer rewrite).
-        (let [out (ai-render sym input)]
-          (or (:seon.render/ai out) (:seon.render/text out)))
+        (let [f (eval/lookup-value sym)
+              r (when f (f (assoc input :seon.render/node entity)))]
+          ;; Converters return a BARE String; tolerate a per-entity renderer
+          ;; still returning the old {:seon.render/ai s} envelope.
+          (if (and (map? r) (contains? r :seon.render/ai))
+            (:seon.render/ai r)
+            r))
         ;; A throwing AI renderer is LEGIBLE, never nil-vanished — the
         ;; agent reading its context sees its own renderer is broken
         ;; (mirror of the html banner above / the tile's error twin).
         (catch :default e
           (str "[render error — " sym " threw: "
                (or (.-message e) (str e)) "]"))))))
+
+;; ============================================================
+;; The recursive render (context-render keystone).
+;;
+;; `render` is the WHOLE system: one walker, two views. It takes a VIEW
+;; (`:seon.render/ai` → a String, `:seon.render/html` → hiccup), the injected
+;; context, and a NODE (a renderable — a domain entity OR a section), and
+;; returns the rendered value. It injects a `:seon.render/render` handle bound
+;; to the same view so a SECTION renders its children through the same dispatch
+;; — never re-walking. There is NO stored render kind/id/at/ordinal: the handle
+;; is the node's own id, time is the :db/txInstant.
+;; ============================================================
+
+(def render-control-attrs
+  "The OPTIONAL render-control attrs ANY renderable may carry — stripped by
+   the generic default so a data dump shows only domain attrs."
+  [:seon.render/ai :seon.render/html :seon.render/clip
+   :seon.render/hidden? :seon.render/children :seon.ctx/priority])
+
+(defn renderable-id
+  "A node's stable HANDLE — its own identity attr (dispatch by presence), or a
+   section's name. Shown in the transcript / inspector so the agent can
+   reference or override it. Never a stored :seon.render/id."
+  [node]
+  (or (:seon.agent.message/id node)
+      (:seon.eval/id node)
+      (:seon.agent.todo/id node)
+      (:seon.ctx/name node)
+      (:db/id node)))
+
+(defn renderable-inst
+  "A node's TIME for sorting + relative display — the :db/txInstant the store
+   stamped when the row was first asserted (UNIVERSAL; no per-kind :at attr).
+   Per-node fallback for an arbitrary pulled entity (the events query joins it
+   in once for the whole list)."
+  [db node]
+  (when-let [eid (:db/id node)]
+    (ffirst (db/query {:seon.db/db db
+                       :seon.db/query '[:find (min ?t) :in $ ?e :where
+                                        [?e _ _ ?tx] [?tx :db/txInstant ?t]]
+                       :seon.db/args [eid]}))))
+
+(declare render)
+
+(defn- generic-default-renderer
+  "The GENERIC default — renders ANY structure when there is no slot and no
+   schema match. AI: readable Clojure (id header + pprint, control attrs
+   stripped). HTML: a monospace edn dump (the recursive data-tree is a P2
+   refinement). This is what makes \"all data is viewable by both\" free."
+  [view]
+  (case view
+    :seon.render/ai
+    (fn [{:seon.render/keys [node]}]
+      (str ";; " (renderable-id node) "\n"
+           (str/trimr
+             (with-out-str
+               (pprint/pprint (apply dissoc node render-control-attrs))))))
+    :seon.render/html
+    (fn [{:seon.render/keys [node]}]
+      [:pre {:class "p-2 text-xs font-mono bg-base-900 text-text-200 overflow-auto"}
+       (with-out-str (pprint/pprint (apply dissoc node render-control-attrs)))])))
+
+(defn- schema-default-renderer
+  "resolve-slot step 4 — the renderer the node's primary `:seon.schema` kind
+   registers (or a per-entity slot override), via the existing
+   `entity-render-slot` / `entity-primary-kind` dispatch. Calls the resolved
+   converter symbol (bare value); nil when no kind matches."
+  [view node input]
+  (let [db (or (:seon.db/db input) @db/*conn*)
+        in (assoc input :seon.db/db db :seon.render/node node)]
+    (case view
+      :seon.render/html (render-entity-html in)
+      (render-entity-ai in))))
+
+(defn- missing-slot-render
+  "A legible, self-healing line for a slot symbol that resolves NOWHERE
+   (neither SCI source nor a compiled var). Surfaces loudly instead of
+   silently dropping the section — the agent sees what to fix; defining the
+   fn self-heals the section next render. nil hiccup for the html view."
+  [view id sym]
+  (when (= view :seon.render/ai)
+    (str "[" (name (or id :unnamed)) "] render failed: fn " sym
+         " does not resolve — define it (or fix the symbol) and this "
+         "section self-heals next render")))
+
+(defn- resolve-slot
+  "The render fn for `node` in `view`:
+     1. read the slot (already decoded — DB-pulled sections are slot-decoded
+        before they become nodes; in-memory sections carry literal values);
+     2. string → verbatim; shallow-hiccup vector → verbatim;
+     3. fn-symbol → the fn. An AGENT-authored symbol is invoked SCI-BOUNDED
+        (a runaway agent fn must not freeze the single-threaded pod);
+        a core symbol calls direct (fast, trusted);
+     4. absent → the schema-default (the node's primary kind's converter);
+     5. none → the GENERIC default (any data → Clojure / a dump)."
+  [view node]
+  (let [slot (get node view)]
+    (cond
+      (string? slot) (fn [_] slot)
+      (vector? slot) (fn [_] slot)
+      (symbol? slot)
+      (if (render-sci/agent-authored-sym? slot)
+        (fn [in]
+          (let [r (render-sci/invoke-bounded slot in view)]
+            (cond
+              ;; deadline tripped → render nothing (a section never crashes
+              ;; its siblings; the recovery path warns the agent).
+              (and (map? r) (:seon.render.sci/interrupt r)) nil
+              ;; SCI could not run it — fall back to the COMPILED fn (the SCI
+              ;; env was just incomplete). If the symbol resolves nowhere, it
+              ;; is a genuinely-missing slot → a legible self-heal line.
+              (and (map? r) (:seon.render.sci/fallthrough r))
+              (if-let [f (eval/lookup-value slot)]
+                (f in)
+                (missing-slot-render view (renderable-id node) slot))
+              :else r)))
+        (let [f (eval/lookup-value slot)]
+          (if f f (fn [_] (missing-slot-render view (renderable-id node) slot)))))
+      ;; no explicit slot: try the node's schema-kind converter; if no kind
+      ;; matches (nil), fall to the generic any-data default.
+      :else (fn [input]
+              (or (schema-default-renderer view node input)
+                  ((generic-default-renderer view) input))))))
+
+(defn render
+  "Render ONE node in `view`, recursively + guarded. The fn receives the full
+   injected context PLUS the node and a view-bound recursion handle
+   (`:seon.render/render`) so a section renders its children through the same
+   dispatch. Returns a String (`:seon.render/ai`) or hiccup
+   (`:seon.render/html`). A hidden node contributes a one-line prune note (ai)
+   or nothing (html); a throwing fn renders a legible error, never crashes."
+  [view ctx node]
+  (if (:seon.render/hidden? node)
+    (when (= view :seon.render/ai)
+      (str ";; (1 pruned — " (renderable-id node)
+           "; (seon.agent/unprune! …) to restore)"))
+    (let [f  (resolve-slot view node)
+          in (assoc ctx :seon.render/node   node
+                        :seon.render/render  #(render view ctx %))]
+      (try
+        (let [r (f in)]
+          ;; INTERIM TOLERANCE: a not-yet-converted section html twin may
+          ;; still return the old `{:seon.render/hiccup h}` envelope — unwrap
+          ;; it to bare hiccup so the recursive walker sees one shape.
+          (if (and (= view :seon.render/html) (map? r)
+                   (contains? r :seon.render/hiccup))
+            (:seon.render/hiccup r)
+            r))
+        (catch :default e
+          (if (= view :seon.render/ai)
+            (str ";; ⚠ [" (renderable-id node) "] render failed: " (ex-message e))
+            [:div.render-error "⚠ " (str (renderable-id node)) " — " (ex-message e)]))))))
 

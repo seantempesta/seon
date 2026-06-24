@@ -81,9 +81,11 @@
    :seon.test/source "(deftest t-none (is true))"})
 
 (deftest render-ai-shows-sym-source-and-status
-  (let [pass (:seon.render/ai (h-test/render-ai {:seon.render/entity ent-pass}))
-        fail (:seon.render/ai (h-test/render-ai {:seon.render/entity ent-fail}))
-        none (:seon.render/ai (h-test/render-ai {:seon.render/entity ent-none}))]
+  ;; The handler is a CONVERTER now — render-ai returns a BARE String
+  ;; (keystone), called with the entity under :seon.render/node.
+  (let [pass (h-test/render-ai {:seon.render/node ent-pass})
+        fail (h-test/render-ai {:seon.render/node ent-fail})
+        none (h-test/render-ai {:seon.render/node ent-none})]
     (is (str/includes? pass "[test demo.ns/t-pass]") "header carries the sym")
     (is (str/includes? pass "(deftest t-pass") "source rendered")
     (is (str/includes? pass "✓ test passing") "passing glyph for a passed run")
@@ -93,7 +95,8 @@
         "no-run glyph when no last-* present")))
 
 (deftest render-html-is-valid-card
-  (let [hiccup (:seon.render/hiccup (h-test/render-html {:seon.render/entity ent-fail}))]
+  ;; render-html returns BARE hiccup now (keystone), node under :seon.render/node.
+  (let [hiccup (h-test/render-html {:seon.render/node ent-fail})]
     (is (vector? hiccup) "html form is a hiccup vector")
     (is (= :div (first hiccup)) "outer container is a :div")
     (is (tile/valid-hiccup? hiccup) "passes valid-hiccup?")

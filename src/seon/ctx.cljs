@@ -1249,21 +1249,20 @@
           schemas (->> (:seon.schema/_ns data) (sort-by (comp str :seon.schema/key)))
           tests   (->> (:seon.test/_ns data)   (sort-by :seon.test/sym))
           ns-ent  {:seon.ns/name ns-kw}]
+      ;; The handlers are CONVERTERS now — they return BARE hiccup (keystone),
+      ;; called with the entity under :seon.render/node.
       (into
         [:section {:class "py-1 border-l-2 border-base-700 pl-2"}
-         (:seon.render/hiccup (h-ns/render-html {:seon.db/db db :seon.render/entity ns-ent}))]
+         (h-ns/render-html {:seon.db/db db :seon.render/node ns-ent})]
         (concat
           (for [f fns]
-            (:seon.render/hiccup
-              (h-fn/render-html {:seon.db/db db :seon.render/entity f})))
+            (h-fn/render-html {:seon.db/db db :seon.render/node f}))
           (for [s schemas]
-            (:seon.render/hiccup
-              (h-schema/render-html {:seon.db/db db :seon.render/entity s})))
+            (h-schema/render-html {:seon.db/db db :seon.render/node s}))
           ;; Tests rendered via the per-kind handler — same `test-status`
           ;; source as the AI path, so the pass/fail pill never diverges.
           (for [t tests]
-            (:seon.render/hiccup
-              (h-test/render-html {:seon.db/db db :seon.render/entity t}))))))))
+            (h-test/render-html {:seon.db/db db :seon.render/node t})))))))
 
 (defn- collect-ns-order
   "Compute the ordered, deduped list of namespace keywords to render —
@@ -1386,10 +1385,10 @@
        (sort-by #(.getTime ^js (first %)))
        last))
 
-;; Mirrors `:seon.render/assemble-request` shapes — `:seon.db/db` (the
-;; registered `:any` db-value boundary, seon.render) + `:string` id — so the
-;; schema compiles regardless of cross-ns load order (referencing
-;; `:seon.agent/id`, registered later in seon.agent, would break a fresh build).
+;; `:seon.db/db` (the registered `:any` db-value boundary, seon.render) +
+;; `:string` id — so the schema compiles regardless of cross-ns load order
+;; (referencing `:seon.agent/id`, registered later in seon.agent, would break
+;; a fresh build).
 (schema/register! :seon.ctx/retrieval-query-request
                   [:map
                    [:seon.db/db    :seon.db/db]
@@ -1418,18 +1417,6 @@
                                :seon.agent.message/content)
                        ""))))
 
-(schema/register! :seon.render/sections [:vector :seon.ctx/name])
-
-(schema/register! :seon.render/assemble-request
-  [:map
-   [:seon.db/db    :seon.db/db]
-   [:seon.agent/id :string]])
-
-(schema/register! :seon.ctx/section-text
-  [:map
-   [:seon.ctx/name :seon.ctx/name]
-   [:seon.render/text :string]])
-
 ;; The HTML TWIN of a rendered section (debug-view-section-twins-2026-06-18):
 ;; the dormant `:seon.render/html` slot, resolved through
 ;; `seon.render/html-render` + the throw-to-banner guard, paired with its
@@ -1444,16 +1431,6 @@
 
 (schema/register! :seon.render/stable-text   :string)
 (schema/register! :seon.render/volatile-text :string)
-
-(schema/register! :seon.render/assemble-response
-  [:map
-   [:seon.render/text            :string]
-   [:seon.render/stable-text     :seon.render/stable-text]
-   [:seon.render/volatile-text   :seon.render/volatile-text]
-   [:seon.render/sections        :seon.render/sections]
-   [:seon.render/section-texts   [:vector :seon.ctx/section-text]]
-   [:seon.render/section-html    [:vector :seon.ctx/section-html]]
-   [:seon.render/token-estimate  :int]])
 
 (schema/register! :seon.render/split-response
   [:map
@@ -1601,11 +1578,23 @@
        (sort-by :seon.ctx/priority)
        vec))
 
-(defn- merge-sections
-  "Core defaults ∪ the agent's own sections, ONE priority sort.
-   Name collisions = override-by-name (the agent's entry wins — the
-   deliberate escape hatch). Ties sort core-first, then by name,
-   for byte-stable output."
+;; ── section gathering (subsumes the old merge-sections) ─────────────────
+;; The ROOT renderable's children = core defaults ∪ the agent's own sections,
+;; ONE priority sort. Name collisions = override-by-id (the agent's entry
+;; wins — the deliberate escape hatch). The core's `:soul` block is NOT a
+;; child here (it stays the adapter's system message — P3 moves it in).
+
+(def stable-priority-max
+  "Sections with priority ≤ this are the byte-stable cacheable PREFIX (soul
+   → :system → :namespaces); the cache breakpoint falls at the transition to
+   the volatile tail. Matches the old `.indexOf :namespaces` heuristic
+   (:namespaces has priority 20)."
+  20)
+
+(defn- gather-sections
+  "Core defaults ∪ the agent's own sections, one priority sort. Name
+   collisions = override-by-id (agent wins). Ties sort core-first, then by
+   name, for byte-stable output."
   [defaults agent-sects]
   (let [agent-names (into #{} (map :seon.ctx/name) agent-sects)
         kept        (remove #(contains? agent-names (:seon.ctx/name %))
@@ -1617,59 +1606,14 @@
                         (comp str :seon.ctx/name))
                   tagged))))
 
-(defn- render-error-line
-  "The guard's inline one-liner for a broken section."
-  [section-name detail]
-  (str "[" (name section-name) "] render failed: " detail))
-
-(defn- render-section
-  "Render ONE section map against `input`. String slot → verbatim;
-   qualified symbol → resolve via seon.eval/lookup-value and call with
-   `(assoc input :seon.ctx/section section)`. Missing fn or throw →
-   the one-line error string (guard — assembly never breaks)."
-  [input section]
-  (let [slot (:seon.render/ai section)
-        nm   (:seon.ctx/name section :unnamed)]
-    (try
-      (cond
-        (string? slot)
-        slot
-
-        (qualified-symbol? slot)
-        (if-let [f (seval/lookup-value slot)]
-          (str (f (assoc input :seon.ctx/section section)))
-          (render-error-line nm (str "fn " slot " does not resolve — "
-                                     "define it (or fix the symbol) and "
-                                     "this section self-heals next render")))
-
-        :else
-        (render-error-line nm (str ":seon.render/ai must be a string or a "
-                                   "qualified symbol, got " (pr-str slot))))
-      (catch :default e
-        (render-error-line nm (or (.-message e) (str e)))))))
-
-(defn- render-section-html
-  "Resolve a section's `:seon.render/html` twin to hiccup via the EXISTING
-   `seon.render/html-render` (symbol | literal-hiccup | else), wrapped in
-   the SAME throw-to-banner guard `seon.render/render-entity-html` uses: a
-   throwing twin degrades to a legible banner naming the slot + message,
-   NEVER nil, NEVER vanish (vanish = banned). `base-in` is the composer's
-   shared render input ({:seon.db/db :seon.agent/id …}); the section is
-   assoc'd in as every section fn expects."
-  [base-in section]
-  (let [slot (:seon.render/html section)
-        nm   (:seon.ctx/name section :unnamed)]
-    (try
-      (:seon.render/hiccup
-        (render/html-render slot (assoc base-in :seon.ctx/section section)))
-      (catch :default e
-        [:div {:class (str "flex flex-col gap-1 p-3 border "
-                           "border-error/40 bg-error/10 rounded")}
-         [:div {:class "text-xs text-error font-mono font-bold"}
-          "⚠ render error"]
-         [:div {:class "text-xs font-mono text-text-300 break-all"}
-          (str (name nm) " (" (pr-str slot) ") threw: "
-               (or (.-message e) (str e)))]]))))
+(defn- section-bracket-ai
+  "The ai-view bracket the ROOT section renderer wraps each child in — the
+   self-demarcating boundary that REPLACES the old per-section `;; ── x ──`
+   headers. The agent can fold the left inspector pane on these lines."
+  [section-name body]
+  (str ";;; ┌─ " (name section-name) " ─\n"
+       body
+       "\n;;; └─ end " (name section-name) " ─"))
 
 (defn- apply-agent-budget
   "Enforce [[agent-section-char-budget]] over the rendered agent
@@ -1714,110 +1658,136 @@
                   s))
               rendered)))))
 
-(defn assemble-context
-  "Compose the LLM context — the ONE composer, called by BOTH the agent
-   prompt path (`seon.agent/render-prompt`) and the inspector, so
-   divergence is impossible.
+(defn- pull-agent-entity
+  "The agent entity, pulled ONCE (sans the session log — the transcript
+   section walks that separately; a bare `[*]` pull would inline every
+   turn/eval component). Rides in the injected ctx so every section fn
+   reads it without re-pulling. Registered-but-uninstalled attrs (e.g. the
+   tile slot on a store predating it) are silently filtered by the pull
+   guard — safe."
+  [db id]
+  (db/pull {:seon.db/db db
+            :seon.db/pull-pattern
+            '[:db/id :seon.agent/id :seon.agent/state
+              :seon.agent/purpose
+              :seon.agent/wake :seon.agent/max-turns-per-loop
+              :seon.render/ai :seon.render/html
+              :seon.render.live-tile/content
+              {:seon.agent/ctx [*]}]
+            :seon.db/ref [:seon.agent/id id]}))
 
-   Sections = core defaults ([[core-default-ctx]]) MERGED
-   with the agent's own `:seon.agent/ctx` section maps by one priority
-   sort (override-by-name; merge-never-replace — core evolution
-   always flows through, agent customization layers on top). The agent
-   entity is pulled ONCE (sans the session log — the transcript section
-   walks that separately; a bare `[*]` pull would inline every
-   turn/eval component) and rides in the input map every section fn
-   receives.
+(defn context-root
+  "The ROOT renderable. Its children = the core section renderables
+   ([[core-default-ctx]]) UNIONed with the agent's `:seon.agent/ctx`
+   overrides (override-by-id) and any derived rows, sorted by static
+   `:seon.ctx/priority` (subsumes the old merge-sections override-by-name).
+   The agent entity is pulled once and assoc'd into ctx so every child
+   reads it without re-pulling.
 
-   The render splits at [[stable-boundary]]: every section through
-   :namespaces (by merged render order) is the STABLE prefix —
-   byte-stable within a session given the deterministic rendering —
-   and everything after is the VOLATILE tail. `:seon.render/text` is
-   the full prompt with the boundary line joined in-band between the
-   halves; `:seon.render/stable-text` / `:seon.render/volatile-text`
-   carry the halves separately (and [[split-context]] recovers them
-   from the joined string — the provider-cache contract).
-   An agent section with priority below :namespaces' lands in the
-   stable half — it must render byte-stably (verbatim strings do).
+   Producing the prompt is rendering the root per view — there is no
+   bespoke composer:
+     (seon.render/render :seon.render/ai   ctx (context-root ctx))  ; String
+     (seon.render/render :seon.render/html ctx (context-root ctx))  ; hiccup
 
-   Returns
-     `{:seon.render/text \"…\"
-       :seon.render/stable-text \"…\"
-       :seon.render/volatile-text \"…\"
-       :seon.render/sections [<section-name> …]      ; render order
-       :seon.render/section-texts [{:seon.ctx/name _
-                                    :seon.render/text _} …]
-       :seon.render/token-estimate <int>}`"
-  {:malli/schema [:=> [:cat :seon.render/assemble-request]
-                       :seon.render/assemble-response]}
-  [{:seon.db/keys [db] :seon.agent/keys [id] :as input}]
-  (let [entity   (db/pull {:seon.db/db db
-                           :seon.db/pull-pattern
-                           ;; Registered-but-uninstalled attrs (e.g. the
-                           ;; tile slot on a store predating it) are
-                           ;; silently filtered by the pull guard — safe.
-                           '[:db/id :seon.agent/id :seon.agent/state
-                             :seon.agent/purpose
-                             :seon.agent/wake :seon.agent/max-turns-per-loop
-                             :seon.render/ai :seon.render/html
-                             :seon.render.live-tile/content
-                             {:seon.agent/ctx [*]}]
-                           :seon.db/ref [:seon.agent/id id]})
-        sections (merge-sections (core-default-ctx)
-                                 (agent-sections entity))
-        base-in  (assoc input :seon.agent/entity entity)
-        rendered (->> sections
-                      (map (fn [section]
-                             (assoc section :seon.render/text
-                                    (render-section base-in section))))
-                      (remove (comp str/blank? :seon.render/text))
-                      vec
-                      apply-agent-budget)
-        ;; Stable/volatile boundary: everything through :namespaces in
-        ;; merged render order is the stable prefix (see docstring).
-        ;; Names are unique post-merge, so the stable set is a prefix
-        ;; of `rendered` (which preserves merged order).
-        names    (mapv :seon.ctx/name sections)
-        stable?  (set (take (inc (.indexOf names :namespaces)) names))
-        stable-text   (->> rendered
-                           (filter (comp stable? :seon.ctx/name))
-                           (map :seon.render/text)
-                           (str/join "\n\n"))
-        volatile-text (->> rendered
-                           (remove (comp stable? :seon.ctx/name))
-                           (map :seon.render/text)
-                           (str/join "\n\n"))
-        text     (cond
-                   (str/blank? stable-text)   volatile-text
-                   (str/blank? volatile-text) stable-text
-                   :else (str stable-text "\n\n" stable-boundary
-                              "\n\n" volatile-text))
-        ;; HTML TWINS (debug-view-section-twins-2026-06-18): for each
-        ;; NON-BLANK rendered section (post-budget, in render order) that
-        ;; carries a :seon.render/html slot, resolve it through
-        ;; html-render + the banner guard. Sections without an html slot
-        ;; contribute no item — the right pane simply has no card for
-        ;; them. Not char-budgeted (html isn't counted against the
-        ;; agent's char budget); derived from the same post-budget vec so
-        ;; the twin mirrors whatever text the agent sees.
-        section-html
-        (->> rendered
-             (filter :seon.render/html)
-             (mapv (fn [section]
-                     {:seon.ctx/name       (:seon.ctx/name section)
-                      :seon.render/hiccup  (render-section-html base-in
-                                                                section)})))]
-    {:seon.render/text           text
-     :seon.render/stable-text    stable-text
-     :seon.render/volatile-text  volatile-text
-     ;; :seon.render/sections is LAYOUT PROVENANCE — every merged
-     ;; section name in render order, including ones whose fn rendered
-     ;; blank this turn (a suppressed section is still part of the
-     ;; layout). :seon.render/section-texts carries only the non-blank
-     ;; contributions (what the inspector shows).
-     :seon.render/sections       names
-     :seon.render/section-texts  (mapv #(select-keys % [:seon.ctx/name
-                                                        :seon.render/text])
-                                       rendered)
-     :seon.render/section-html   section-html
-     :seon.render/token-estimate (quot (count text) 4)}))
+   The root carries the agent entity + a stash of its sorted children;
+   the root's slot fns ([[render-context-ai]] / [[render-context-html]])
+   render each child through the injected recursion handle."
+  [{:seon.db/keys [db] :seon.agent/keys [id] :as ctx}]
+  (let [entity   (pull-agent-entity db id)
+        children (gather-sections (core-default-ctx) (agent-sections entity))]
+    {:seon.ctx/name          :context
+     :seon.agent/entity      entity
+     :seon.ctx/children      children
+     :seon.render/ai         'seon.ctx/render-context-ai
+     :seon.render/html       'seon.ctx/render-context-html}))
+
+(defn- render-child-text
+  "Render ONE child section to its ai text via the injected handle, carrying
+   its name / agent? / priority forward for budgeting + the cache split."
+  [render child]
+  {:seon.ctx/name     (:seon.ctx/name child)
+   :seon.ctx/agent?   (boolean (:seon.ctx/agent? child))
+   :seon.ctx/priority (:seon.ctx/priority child)
+   :seon.render/text  (or (render child) "")})
+
+(defn- rendered-section-texts
+  "Render each child to its ai text via `render`, drop blanks, apply the
+   per-agent char budget — the post-budget per-section vector shared by the
+   joined prompt ([[render-context-ai]]) and the inspector ([[ctx-sections]])
+   so the two can never disagree on what each section contributes."
+  [render children]
+  (->> children
+       (map #(render-child-text render %))
+       (remove (comp str/blank? :seon.render/text))
+       vec
+       apply-agent-budget))
+
+(defn render-context-ai
+  "The ROOT renderable's :ai slot — the section renderer. Renders each child
+   via the injected `:seon.render/render` handle, drops blanks, applies the
+   per-agent char budget, brackets each section (self-demarcating — replaces
+   the old `;; ── x ──` headers), and joins with the in-band [[stable-boundary]]
+   inserted at the static stable→volatile `:seon.ctx/priority` transition
+   (priority ≤ [[stable-priority-max]] = the cacheable prefix). [[split-context]]
+   recovers the two halves on the provider side."
+  [{:seon.render/keys [node render]}]
+  (let [rendered  (rendered-section-texts render (:seon.ctx/children node))
+        bracketed (mapv (fn [s]
+                          (assoc s :seon.render/bracketed
+                                 (section-bracket-ai (:seon.ctx/name s)
+                                                     (:seon.render/text s))))
+                        rendered)
+        stable   (->> bracketed
+                      (filter #(<= (or (:seon.ctx/priority %) 999)
+                                   stable-priority-max))
+                      (map :seon.render/bracketed)
+                      (str/join "\n\n"))
+        volatile (->> bracketed
+                      (remove #(<= (or (:seon.ctx/priority %) 999)
+                                   stable-priority-max))
+                      (map :seon.render/bracketed)
+                      (str/join "\n\n"))]
+    (cond
+      (str/blank? stable)   volatile
+      (str/blank? volatile) stable
+      :else (str stable "\n\n" stable-boundary "\n\n" volatile))))
+
+(defn render-context-html
+  "The ROOT renderable's :html slot — renders each child's html twin via the
+   injected handle, one card per renderable (eval cards short, per-item — NOT
+   a section-level dump), in render order."
+  [{:seon.render/keys [node render]}]
+  (into [:div {:class "flex flex-col gap-2"}]
+        (->> (:seon.ctx/children node)
+             (keep (fn [child]
+                     (when-let [h (render child)]
+                       [:section {:data-section (clojure.core/name
+                                                  (:seon.ctx/name child :unnamed))}
+                        h]))))))
+
+(defn ctx-sections
+  "Structured per-section breakdown for the INSPECTOR — one entry per
+   non-blank section, each carrying its name + the exact ai text it
+   contributes (left pane, foldable) + its html twin (right pane, one card
+   per renderable). Derives from the SAME `context-root` + `render` the
+   prompt uses, so the debug view can never drift from the agent's context."
+  [{:as ctx}]
+  (let [root     (context-root ctx)
+        children (:seon.ctx/children root)
+        ctx*     (assoc ctx :seon.agent/entity (:seon.agent/entity root))
+        rh       #(render/render :seon.render/html ctx* %)
+        ra       #(render/render :seon.render/ai   ctx* %)
+        ;; Post-budget per-section texts — the SAME path the joined prompt
+        ;; takes, so the inspector's left pane shows exactly what each
+        ;; section contributes (TRUNCATED markers included).
+        texts    (->> (rendered-section-texts ra children)
+                      (mapv #(select-keys % [:seon.ctx/name :seon.render/text])))
+        htmls    (->> children
+                      (keep (fn [c]
+                              (when-let [h (rh c)]
+                                {:seon.ctx/name      (:seon.ctx/name c)
+                                 :seon.render/hiccup h})))
+                      vec)]
+    {:seon.render/section-texts texts
+     :seon.render/section-html  htmls}))
 

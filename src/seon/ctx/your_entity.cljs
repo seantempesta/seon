@@ -34,8 +34,7 @@
                     (update :seon.render.live-tile/content
                             #(db/decode-edn-value
                                :seon.render.live-tile/content %)))]
-      (str ";; ── your entity ──\n"
-           ";; YOUR OWN ENTITY in the shared store, re-pulled every turn —\n"
+      (str ";; YOUR OWN ENTITY in the shared store, re-pulled every turn —\n"
            ";; the value of:\n"
            ";;   (seon.db/pull '[*] [:seon.agent/id \"" id "\"])\n"
            ";; Transact to it by lookup ref — e.g.\n"

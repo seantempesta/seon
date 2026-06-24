@@ -185,7 +185,6 @@
                                 (map (fn [[a c]] (attr-token db boot-ids a c))
                                      attrs))))
                        rows)]
-        (str ";; ── stored data inventory ──\n"
-             inventory-header "\n\n"
+        (str inventory-header "\n\n"
              (str/join "\n" lines)))
       "")))

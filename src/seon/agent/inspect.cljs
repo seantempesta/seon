@@ -24,6 +24,7 @@
     [seon.ctx :as ctx]
     [seon.db :as db]
     [seon.handler :as handler]
+    [seon.render :as render]
     [seon.schema :as schema]))
 
 (schema/register! :seon.agent.inspect/request
@@ -74,18 +75,25 @@
    cross-agent tx are hidden."
   {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/ctx-response]}
   [{:seon.agent/keys [id]}]
-  (let [id (resolve-id id)
+  (let [id  (resolve-id id)
         {:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id id})
-        {:seon.render/keys [text section-texts section-html]}
-        (ctx/assemble-context {:seon.agent/id id :seon.db/db db})
+        ctx {:seon.agent/id id :seon.db/db db}
+        ;; THE SAME render call the prompt path uses (`render-prompt`):
+        ;; render the ROOT renderable → a bare String. One render, two
+        ;; consumers — the LLM prompt and this human inspector — so they
+        ;; can never diverge.
+        text          (or (render/render :seon.render/ai ctx (ctx/context-root ctx)) "")
+        ;; Per-section breakdown for the panes, derived from the SAME root +
+        ;; render (left pane folds per section; right pane one html card per
+        ;; renderable).
+        {:seon.render/keys [section-texts section-html]} (ctx/ctx-sections ctx)
         ;; Block 1 — the live soul system message, via the EXACT fn the
         ;; adapters call (no re-implementation, no drift). No override is
         ;; passed, so this returns the live SOUL.md/AGENTS.md text (or the
         ;; no-identity fallback) — the normal call's system message.
         soul          (ai/effective-system-prompt {})
-        ;; The FULL prompt via the ONE shared composer — same bytes the
-        ;; persisted per-turn log uses, so the two debug surfaces can't
-        ;; drift (boundary + assembly live in seon.ai now).
+        ;; The FULL prompt = soul + boundary + context, via the SAME fn the
+        ;; adapters call so the two debug surfaces can't drift.
         full-text     (ai/debug-full-prompt {:seon.ai/ctx text})]
     {:seon.render/text            full-text
      :seon.render/section-texts   (into [{:seon.ctx/name     :soul-system

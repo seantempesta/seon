@@ -88,8 +88,7 @@
             body-comment (->> (str/split-lines body)
                               (map #(str ";; " %))
                               (str/join "\n"))]
-        (str ";; ── live tile ──\n"
-             ";; Your live tile — what your human currently sees (as-of this\n"
+        (str ";; Your live tile — what your human currently sees (as-of this\n"
              ";; turn's render; the human's view live-updates between turns).\n"
              ";; Wired: " (live-tile/wired-label wired) "\n"
              ";;\n"

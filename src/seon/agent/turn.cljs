@@ -112,25 +112,6 @@
     (str "turn " turn-n " ▸ " stage)
     (if (= 1 (count info)) (first info) (vec info))))
 
-(defn- per-agent-shape?
-  "True when `sym` is in the agent's own home namespace. Per-agent fns get
-   the per-agent input shape (entity pre-pulled under a namespaced key);
-   everything else gets the system shape (`:seon.agent/id` + DB)."
-  [sym agent-id]
-  (and (qualified-symbol? sym)
-       (str/starts-with? (namespace sym)
-                         (str "my.agent." agent-id))))
-
-(defn- ai-render-input
-  "Build the input map for the agent's `:seon.render/ai` dispatch. Two
-   shapes, picked by symbol namespace."
-  [sym db agent-id ent]
-  (if (per-agent-shape? sym agent-id)
-    {:seon.db/db                                 db
-     (keyword (str "my.agent." agent-id) "ctx") ent}
-    {:seon.db/db    db
-     :seon.agent/id agent-id}))
-
 ;; ============================================================
 ;; Sessions — one per pod run for a resumed agent.
 ;; ============================================================
@@ -189,19 +170,30 @@
 ;; ============================================================
 
 (defn render-prompt
-  "Sync — resolve the agent's `:seon.render/ai` slot (default
-   `seon.agent/assemble-context`) and call it. A STRING slot renders
-   verbatim; a symbol is resolved and called. Returns the prompt string
-   (empty when the symbol can't be resolved)."
+  "Sync — the agent's full LLM context, rendered as a bare String.
+
+   DEFAULT: render the ROOT renderable ([[seon.ctx/context-root]]) in the
+   `:seon.render/ai` view — ONE recursive render shared with the inspector
+   (`seon.agent.inspect/ctx-preview`), so the human's debug view and the
+   model's prompt can never diverge.
+
+   A per-agent OVERRIDE on the agent entity's `:seon.render/ai` slot wins: a
+   STRING renders verbatim; a SYMBOL is rendered through the same
+   [[seon.render/render]] (a custom prompt fn returning a bare String)."
   [agent-id]
-  (let [ent  (db/entity {:seon.db/ref [:seon.agent/id agent-id]})
-        slot (or (some->> (:seon.render/ai ent)
-                          (db/decode-edn-value :seon.render/ai))
-                 'seon.agent/assemble-context)]
-    (if (string? slot)
-      slot
-      (let [input (ai-render-input slot @db/*conn* agent-id ent)]
-        (or (:seon.render/text (render/ai-render slot input)) "")))))
+  (let [db   @db/*conn*
+        ent  (db/entity {:seon.db/ref [:seon.agent/id agent-id]})
+        slot (some->> (:seon.render/ai ent)
+                      (db/decode-edn-value :seon.render/ai))
+        ctx  {:seon.db/db db :seon.agent/id agent-id}]
+    (cond
+      (string? slot) slot
+      (symbol? slot) (or (render/render :seon.render/ai ctx
+                                        {:seon.ctx/name :prompt :seon.render/ai slot})
+                         "")
+      :else          (or (render/render :seon.render/ai ctx
+                                        (ctx/context-root ctx))
+                         ""))))
 
 (defn embed-retrieval-on?
   "True when embedding-retrieval is enabled — the env var `SEON_EMBED` is
