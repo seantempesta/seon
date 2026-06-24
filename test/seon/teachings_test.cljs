@@ -305,8 +305,17 @@
        vec))
 
 (defn- header-examples [dbv]
+  ;; The namespaces-section HEADER is the prose ABOVE the first rendered
+  ;; namespace block; everything from the first `;; ── namespace …` marker
+  ;; on is REAL framework/my source (rendered full), validated by
+  ;; ns-doc/fn-doc-examples, NOT by re-running whole fn bodies (which use
+  ;; framework-internal aliases like `internal/…`). The old `<namespace`
+  ;; marker no longer exists (the section switched to `── namespace`
+  ;; comment markers), so the cut silently grabbed the entire 130 KB of
+  ;; full source — every framework `(defn …)`/`(schema/register! …)` body
+  ;; became a spurious "taught example". Cut at the real boundary.
   (let [nss    (ctx-namespaces/namespaces-section {:seon.db/db dbv})
-        cut    (or (str/index-of nss "<namespace") (count nss))
+        cut    (or (str/index-of nss "── namespace") (count nss))
         header (subs nss 0 cut)]
     (vec (concat (surface-examples "seon.ctx/system-text" ctx/system-text)
                  (surface-examples "namespaces-section header" header)))))
@@ -366,23 +375,31 @@
 
 (defn- free-local-undeclared?
   "True when eval result `res` failed ONLY on an undeclared free local
-   in the eval ns (a metavariable like `id` in a shape example) — a
-   shape, not a lie. Any other undeclared (bad alias, typo'd core
-   fn) stays red."
-  [res]
+   in the EVAL ns `eval-ns` (a metavariable like `id` in a shape
+   example) — a shape, not a lie. Any other undeclared (bad alias,
+   typo'd core fn) stays red. Examples run in the agent's HOME ns (the
+   real agent environment), so a free local resolves under that ns."
+  [res eval-ns]
   (let [und (get-in res [:error :seon.error/data :seon.eval/undeclared])]
-    (boolean (and und (str/starts-with? und "cljs.user/")))))
+    (boolean (and und (str/starts-with? und (str eval-ns "/"))))))
 
 (defn ^:async run-example!
   "Run one taught example in the world; resolves to nil (green),
    {:seon.teachings/skip …}, or the red map naming surface + line."
   [compile-state agent-id {:seon.teachings/keys [src promise surface line]
                            :as ex}]
-  (let [red  (fn [why] (assoc ex :seon.teachings/why why))
-        res  (await (db/with-agent agent-id
-                      (fn [] (seval/eval compile-state src {:ns 'cljs.user}))))]
+  (let [red     (fn [why] (assoc ex :seon.teachings/why why))
+        ;; Examples run in the agent's HOME ns — the REAL agent
+        ;; environment, with the `message`/`agent`/`schema`/`db` aliases
+        ;; `setup-agent-ns!` wires — so the SHORT-aliased taught forms
+        ;; (`schema/register!`, `db/query`, `::db/…`) resolve exactly as
+        ;; they do for the agent reading the prompt. Running in `cljs.user`
+        ;; (no aliases) made every short-alias teaching a false red.
+        eval-ns (agent/home-ns agent-id)
+        res     (await (db/with-agent agent-id
+                         (fn [] (seval/eval compile-state src {:ns eval-ns}))))]
     (if-not (:ok res)
-      (if (free-local-undeclared? res)
+      (if (free-local-undeclared? res eval-ns)
         {:seon.teachings/skip (str surface " line " line " — shape (free local)")}
         (red (str "eval error: "
                   (or (get-in res [:error :seon.error/message])

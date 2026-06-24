@@ -336,10 +336,14 @@
 ;; ::system — turn-level provider failures become chat-visible
 ;; (agent-robustness unit, 2026-06-11: a transient provider `fetch
 ;; failed` ended the wake with NO user-visible notice).
+;;
+;; Post-FSM-rebuild: a turn records ONLY `:seon.agent.turn/status` (the
+;; deleted `:seon.agent.turn/messages` carried no surviving error text).
+;; The ::system bubble is DERIVED from `:seon.agent.turn/status :error`
+;; alone, and the human-facing line is SYNTHESIZED (the turn stores no
+;; error string of its own) — so the test seeds the status-only turn log
+;; and asserts the synthesized notice, not a recorded error message.
 ;; ============================================================
-
-(def ^:private err-content
-  "⚠ LLM call failed (after 1 retry) — DeepSeek fetch failed: fetch failed")
 
 (deftest provider-failure-renders-a-system-line
   (async done
@@ -353,10 +357,10 @@
                      :seon.agent.message/content "are you there?"})
                   (.then
                     (fn [_]
-                      ;; the turn log exactly as seon.agent writes it: an
-                      ;; :error turn carrying its error self-message, and
-                      ;; a healthy :done turn with its transcript
-                      ;; self-message — only the former may surface.
+                      ;; The turn log exactly as seon.agent.turn writes it:
+                      ;; an :error turn and a healthy :done turn, each a
+                      ;; status-only record on the session — only the
+                      ;; :error turn may surface as a ::system bubble.
                       ;; RAW d/transact! like the fixture itself — the
                       ;; fixture's 16-char agent ids predate the 14-char
                       ;; :seon.db/id gate, so db/transact!'s validation
@@ -369,26 +373,12 @@
                            [{:seon.agent.session/id "SESchattest001"
                              :seon.agent.session/at t0
                              :seon.agent.session/turns
-                             [{:seon.agent.turn/id "TRNchatterr001"
-                               :seon.agent.turn/at (t+ 100)
-                               :seon.agent.turn/status :error
-                               :seon.agent.turn/messages
-                               [{:seon.agent.message/id   "MSGchatterr001"
-                                 :seon.agent.message/from [:seon.agent/id a-id]
-                                 :seon.agent.message/to   [[:seon.agent/id a-id]]
-                                 :seon.agent.message/content err-content
-                                 :seon.agent.message/at   (t+ 100)
-                                 :seon.agent.message/hops 0}]}
-                              {:seon.agent.turn/id "TRNchattdone01"
-                               :seon.agent.turn/at (t+ 200)
-                               :seon.agent.turn/status :done
-                               :seon.agent.turn/messages
-                               [{:seon.agent.message/id   "MSGchattdone01"
-                                 :seon.agent.message/from [:seon.agent/id a-id]
-                                 :seon.agent.message/to   [[:seon.agent/id a-id]]
-                                 :seon.agent.message/content ";; all good"
-                                 :seon.agent.message/at   (t+ 200)
-                                 :seon.agent.message/hops 0}]}]}]}]})))
+                             [{:seon.agent.turn/id     "TRNchatterr001"
+                               :seon.agent.turn/at     (t+ 100)
+                               :seon.agent.turn/status :error}
+                              {:seon.agent.turn/id     "TRNchattdone01"
+                               :seon.agent.turn/at     (t+ 200)
+                               :seon.agent.turn/status :done}]}]}]})))
                   (.then
                     (fn [_]
                       (let [{::chat/keys [messages]}
@@ -398,11 +388,11 @@
                                          messages)]
                         (is (= 1 (count sys))
                             (str "exactly the :error turn surfaces — the"
-                                 " :done turn's self-message never does"))
+                                 " :done turn never does"))
                         (let [{::chat/keys [label content at]} (first sys)]
                           (is (= "system" label))
-                          (is (str/includes? content err-content)
-                              "the turn's recorded error IS the notice")
+                          (is (str/includes? content "turn failed")
+                              "the synthesized notice names the failure")
                           (is (str/includes? content
                                              "resume on your next message")
                               "tells the human how to wake the agent")

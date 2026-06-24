@@ -620,6 +620,49 @@
     (is (not (contains? error :seon.error/ex-data)))))
 
 ;; ---------------------------------------------------------------------------
+;; 4e. #16 — a successful `[:db/retract …]` reports an HONEST add/retract
+;;     split. The bug: `retracted = tx-count - added` subtraction. A
+;;     retraction tx adds tx-meta datoms (:db/txInstant + :seon.db/request-id)
+;;     whose ADD count equals the whole tx-data count when the user's
+;;     retraction datom comes back over the wire flagged :added true — so
+;;     subtraction reported retracted 0 even though a fact was retracted.
+;;     The envelope now reads the sole writer's honest counts
+;;     (:datoms-added / :datoms-retracted on the report) when present, else
+;;     counts the datoms' :added flags directly. NEVER subtraction.
+;; ---------------------------------------------------------------------------
+
+(deftest retraction-envelope-counts-are-honest
+  (testing "wire path — JVM-supplied :datoms-added/:datoms-retracted win"
+    ;; The exact live repro: 3 datoms, ALL flagged :added true (the
+    ;; retraction's flag was lost on the wire), but the sole writer
+    ;; carried the honest split. Subtraction would give retracted 0.
+    (let [report {:tempids {} :db-after {:max-tx 9}
+                  :datoms-added 2 :datoms-retracted 1
+                  :tx-data [{:a :db/txInstant :added true}
+                            {:a :seon.db/request-id :added true}
+                            {:a ::name :added true}]}
+          env    (internal/transact-success-envelope report false)]
+      (is (= 2 (:seon.db/added env)) "added = the writer's count")
+      (is (= 1 (:seon.db/retracted env))
+          "retracted = the writer's count, NOT (tx-count - added) = 0")
+      (is (= 3 (:seon.db/tx-count env)))))
+  (testing "local path — no writer counts, count the real :added flags"
+    (let [report {:tempids {} :db-after {:max-tx 5}
+                  :tx-data [{:a :db/txInstant :added true}
+                            {:a ::name :added false}]}
+          env    (internal/transact-success-envelope report false)]
+      (is (= 1 (:seon.db/added env)))
+      (is (= 1 (:seon.db/retracted env))
+          "retracted counted off the :added false datom, not subtracted")
+      (is (= 2 (:seon.db/tx-count env)))))
+  (testing "pure-add tx — every datom added, nothing retracted"
+    (let [report {:tempids {} :db-after {:max-tx 3}
+                  :tx-data [{:added true} {:added true} {:added true}]}
+          env    (internal/transact-success-envelope report false)]
+      (is (= 3 (:seon.db/added env)))
+      (is (zero? (:seon.db/retracted env))))))
+
+;; ---------------------------------------------------------------------------
 ;; 5. register!-time gate — invalid Malli forms fail legibly.
 ;; ---------------------------------------------------------------------------
 

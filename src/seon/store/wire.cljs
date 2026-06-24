@@ -257,7 +257,17 @@
                      (put! p (cond-> {:db-after db
                                       :tx-data  (wire-datoms->datoms
                                                  (get resp "tx-data"))
-                                      :tempids  (or tempids {})}
+                                      :tempids  (or tempids {})
+                                      ;; The sole writer (JVM wire-server)
+                                      ;; computes the honest added/retracted
+                                      ;; split over the REAL :added flags
+                                      ;; (`tx-report->ok-map`). Carry those
+                                      ;; counts on the synthesized report so
+                                      ;; `transact-success-envelope` reports
+                                      ;; them verbatim instead of re-deriving
+                                      ;; from reconstituted datoms.
+                                      :datoms-added     (get resp "datoms-added")
+                                      :datoms-retracted (get resp "datoms-retracted")}
                                (some? tx-meta) (assoc :tx-meta tx-meta)
                                (get resp "basis-t-before")
                                (assoc :db-before

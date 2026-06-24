@@ -1293,7 +1293,16 @@
 
    The wire success report's shape: `:db-after`
    (a datahike DB value whose `:max-tx` IS the committed tx id), `:tx-data`
-   (a vector of Datoms, each `:added` true/false), `:tempids`, `:tx-meta`.
+   (a vector of Datoms, each `:added` true/false), `:tempids`, `:tx-meta`,
+   and — on the wire path — `:datoms-added` / `:datoms-retracted`, the
+   honest add/retract split the sole writer computed over the REAL `:added`
+   flags (`seon.server.wire/tx-report->ok-map`).
+
+   The counts are taken from `:datoms-added` / `:datoms-retracted` when the
+   report carries them (the wire path), else counted directly off the
+   datoms' `:added` flags. NEVER inferred by `tx-count - added`
+   subtraction — a single `[:db/retract …]` adds tx-meta datoms whose count
+   masks the retraction, so subtraction reports retracted 0 (#16).
 
    The FULL raw report is included at `:seon.db/tx-report` ONLY when the
    caller passes `:seon.db/return-report? true` (escape hatch for code that
@@ -1301,14 +1310,17 @@
    project off the raw report independently via [[build-handler-input]],
    and the wire's `tx-report->ok-map` stays on the raw report."
   [report return-report?]
-  (let [datoms (:tx-data report)
-        added  (count (filter :added datoms))]
+  (let [datoms    (:tx-data report)
+        added     (or (:datoms-added report)
+                      (count (filter :added datoms)))
+        retracted (or (:datoms-retracted report)
+                      (count (remove :added datoms)))]
     (cond-> {::db/ok?        true
              ::db/tempids    (or (:tempids report) {})
              ::db/tx         (:max-tx (:db-after report))
              ::db/tx-count   (count datoms)
              ::db/added      added
-             ::db/retracted  (- (count datoms) added)}
+             ::db/retracted  retracted}
       return-report? (assoc ::db/tx-report report))))
 
 (defn ^:async transact!*

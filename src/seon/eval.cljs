@@ -1081,14 +1081,19 @@
   "Create + initialize the agent's home namespace. Returns the agent-ns
    symbol (for convenience — same as the input). Idempotent.
 
-   The home ns is set up with the verb aliases the context teaches, so
-   the agent's reflexive `(message/user …)` / `(message/agent …)` /
-   `(agent/wait …)` / bare `(wait …)` / `(complete …)` / `(terminate …)`
-   forms resolve without fully-qualifying:
+   The home ns is set up with the verb + data aliases the context
+   teaches, so the agent's reflexive `(message/user …)` /
+   `(message/agent …)` / `(agent/wait …)` / bare `(wait …)` /
+   `(complete …)` / `(terminate …)` forms — AND the `(schema/register! …)`
+   / `(db/query …)` / `(db/transact! …)` / `::db/…` data forms the
+   namespaces section + fn docstrings teach in their SHORT-aliased shape —
+   all resolve without fully-qualifying:
 
      (ns <home>
        (:require [seon.agent.message :as message]
-                 [seon.agent :as agent :refer [wait complete terminate]]))
+                 [seon.agent :as agent :refer [wait complete terminate]]
+                 [seon.schema :as schema]
+                 [seon.db :as db]))
 
    The home ns defs NOTHING beyond these requires: a `result` def would
    shadow the reserved `result` NAMESPACE that holds the `result/<id>`
@@ -1115,7 +1120,9 @@
   (let [setup-src
         (str "(ns " agent-ns-sym
              " (:require [seon.agent.message :as message]"
-             " [seon.agent :as agent :refer [wait complete terminate]]))")]
+             " [seon.agent :as agent :refer [wait complete terminate]]"
+             " [seon.schema :as schema]"
+             " [seon.db :as db]))")]
     (await (eval compile-state setup-src
                  {:ns 'cljs.user :analyze-deps? true}))
     ;; The benign refer-warning makes the ns form report :ok false, so the
