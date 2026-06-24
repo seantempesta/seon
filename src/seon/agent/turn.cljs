@@ -1,5 +1,5 @@
 (ns seon.agent.turn
-  "One agentic TURN, end-to-end — the unit the FSM loop ([[seon.agent.fsm]])
+  "One agentic TURN, end-to-end — the unit the loop ([[seon.agent.loop]])
    drives once per LLM completion.
 
    A turn = open a `:seon.agent.turn` (stamping the agent's current
@@ -20,7 +20,7 @@
    Dependency direction (acyclic): it references `:seon.agent/*` keywords
    (state/wake — global registry, no require) and transacts via `seon.db`
    directly, so it does NOT require `seon.agent` (which would cycle:
-   `seon.agent` re-exports nothing from here, and `seon.agent.fsm` requires
+   `seon.agent` re-exports nothing from here, and `seon.agent.loop` requires
    both). It MAY require ctx / eval / message / render."
   (:require
     [clojure.string :as str]
@@ -244,7 +244,7 @@
 ;; The turn bracket — open-turn! folds the prompt projection + the agent's
 ;; current :seon.agent/wake into the open-tx; close-turn! folds telemetry.
 ;; The turn manages ONLY `:seon.agent.turn/status` — the agent's FSM
-;; `:seon.agent/state` is the LOOP's concern ([[seon.agent.fsm/run-loop!]]
+;; `:seon.agent/state` is the LOOP's concern ([[seon.agent.loop/run-loop!]]
 ;; sets :active before the first turn and :idle in its finally), so the turn
 ;; must leave state UNTOUCHED (a per-turn :idle reset would halt the loop
 ;; after one turn). A turn run OUTSIDE a loop (the creation-evals bootstrap)
