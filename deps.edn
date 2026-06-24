@@ -184,6 +184,32 @@
                             :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}
            :main-opts ["-m" "seon.server.boot"]}
 
+  ;; :server-wire-test — run the 8 server-wire test nses against the SAME
+  ;; fork-datahike + proximum the live wire-server loads. The mvn 0.8.1671
+  ;; datahike in `:test` has NO secondary/proximum, so those nses can't load
+  ;; under `:test` alone; this alias supplies the fork sha + src-secondary +
+  ;; proximum + the jdk.incubator.vector jvm-opts. Combine with `:test` (kaocha
+  ;; + test paths); the git-sha datahike here wins over `:test`'s mvn coord.
+  ;; No :main-opts — so kaocha's `-m kaocha.runner` runs (unlike `:writer`,
+  ;; whose boot main-opts would swallow the kaocha args). Requires JDK 22+.
+  ;; Usage:
+  ;;   clojure -M:test:server-wire-test -m kaocha.runner unit --focus seon.server.wire-types-test ...
+  :server-wire-test
+  {:jvm-opts ["--add-modules" "jdk.incubator.vector"
+              "--enable-native-access=ALL-UNNAMED"
+              "-XX:+UseG1GC" "-Xmx2g"]
+   :extra-paths ["dev-resources/konserve-shim"
+                 "reference-code/datahike/src-secondary"]
+   :extra-deps {org.replikativ/datahike
+                {:git/url "https://github.com/seantempesta/datahike"
+                 :git/sha "7ef2b5de2cea2c94b93ffb181e471b9887f1c403"}
+                com.cognitect/transit-clj {:mvn/version "1.0.333"}
+                org.replikativ/proximum {:mvn/version "0.1.25"}
+                com.google.genai/google-genai {:mvn/version "1.59.0"}}
+   :override-deps {org.replikativ/konserve
+                   {:git/url "https://github.com/seantempesta/konserve"
+                    :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}}
+
   ;; 2.2c DIS-replica probe — JVM writer side. Self-contained on purpose
   ;; (`:replace-deps`/`:replace-paths`): runs the SAME datahike fork sha the
   ;; pod's :cljs alias overrides to (seantempesta/datahike@7ef2b5de), so the
