@@ -2206,7 +2206,23 @@
     (await
       (db/with-agent primary
         (fn ^:async boot-with-agent! []
-          (let [;; Boot-index GC — MUST run before replay: a DELETED
+          (let [;; THE core boot seed — handlers + the four seed
+                ;; transacts, extracted to [[boot-seed!]] so the gym's
+                ;; scenario worlds run the boot's OWN code path (one
+                ;; mechanism — the hand-mirrored copy drifted twice).
+                ;; MUST run BEFORE the per-agent bootstrap turn 0 (#9):
+                ;; `bootstrap-turn!` evals `(message/user "hello")`, whose
+                ;; default `to` ref is `[:seon.user/id "user"]` — the user
+                ;; entity `seed-core!` creates. Seeding first means turn 0's
+                ;; hello resolves against an existing user instead of failing
+                ;; with "Nothing found for entity id [:seon.user/id user]".
+                ;; Safe to run before prune/replay: the freshly-seeded
+                ;; `:core-seed` rows are all in prune's freshly-built `fresh`
+                ;; set (same pure builders), so prune never treats them as
+                ;; ghosts; replay excludes (core-ns-set), so it never touches
+                ;; them either. boot-seed! pins its own *conn* and tx-context.
+                _             (await (boot-seed! {:seon.db/conn conn}))
+                ;; Boot-index GC — MUST run before replay: a DELETED
                 ;; core ns falls out of (core-ns-set), so its
                 ;; ghost rows would be misclassified as agent corpus and
                 ;; replayed back into the live compile-state (the
@@ -2275,11 +2291,6 @@
                 ;; this for the dev iteration loop.
                 {:seon.web/keys [port port-file]}
                 (await (web.serve/start!))
-                ;; THE core boot seed — handlers + the four seed
-                ;; transacts, extracted to [[boot-seed!]] so the gym's
-                ;; scenario worlds run the boot's OWN code path (one
-                ;; mechanism — the hand-mirrored copy drifted twice).
-                _ (await (boot-seed! {:seon.db/conn conn}))
                 ;; C-18: sync the :seon.ai/config row to the SEON_AI_*
                 ;; env vars (env owns the row across boots). Fire-and-
                 ;; forget — sync! never rejects, logs its own failures.
