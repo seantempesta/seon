@@ -227,7 +227,7 @@
   (let [datoms (report->datoms report)
         db (:db-after report)
         basis-t (:max-tx db)
-        request-id (:seon.db/request-id (:tx-meta report))   ; nil until M3 wires it
+        request-id (:seon.store.wire/write-id (:tx-meta report))   ; nil until M3 wires it
         snapshot @state
         ;; internal: [sub-id new-result] tuples for the subs whose result moved
         changed (reduce
