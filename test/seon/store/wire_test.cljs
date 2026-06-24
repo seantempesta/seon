@@ -46,10 +46,10 @@
             (fn [_sock-path _req _opts]
               (if (< (swap! !calls inc) 3)
                 (js/Promise.reject (js/Error. "connect ECONNREFUSED (stub)"))
-                (js/Promise.resolve {"ok" true})))
+                (js/Promise.resolve {:seon.store.wire/ok true})))
             (fn [] (store.wire/ping!)))
           (.then (fn [resp]
-                   (is (true? (get resp "ok"))
+                   (is (true? (:seon.store.wire/ok resp))
                        "resolves to the reply map once an attempt succeeds")
                    (is (= 3 @!calls)
                        "two failed attempts consumed, third succeeded")))

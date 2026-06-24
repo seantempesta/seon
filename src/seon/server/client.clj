@@ -31,8 +31,8 @@
     ch))
 
 (defn call!
-  "Send one CBOR-encoded request on `ch`, wait for one response. Both are
-   maps with string keys per PROTOCOL.md."
+  "Send one Transit-JSON request on `ch`, wait for one response. Both are
+   maps with `:seon.store.wire/*` keyword keys and native values."
   [^java.nio.channels.SocketChannel ch req]
   (let [in  (Channels/newInputStream ch)
         out (Channels/newOutputStream ch)]
@@ -77,32 +77,32 @@
         _ (start-pub-reader! (:pub-sock opts))
         ch (connect (:req-sock opts))]
 
-    (print-step "ping" (call! ch {"op" "ping"}))
+    (print-step "ping" (call! ch {:seon.store.wire/op "ping"}))
 
     ;; Install a tiny schema
     (print-step "schema install"
-                (call! ch {"op" "transact"
-                           "tx-data"
-                           "[{:db/ident :person/name :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
-                              {:db/ident :person/age  :db/valueType :db.type/long   :db/cardinality :db.cardinality/one}]"}))
+                (call! ch {:seon.store.wire/op "transact"
+                           :seon.store.wire/tx-data
+                           [{:db/ident :person/name :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+                            {:db/ident :person/age  :db/valueType :db.type/long   :db/cardinality :db.cardinality/one}]}))
 
     ;; Add a person
     (print-step "transact alice"
-                (call! ch {"op" "transact"
-                           "tx-data"
-                           "[{:person/name \"alice\" :person/age 33}]"}))
+                (call! ch {:seon.store.wire/op "transact"
+                           :seon.store.wire/tx-data
+                           [{:person/name "alice" :person/age 33}]}))
 
     ;; Query
     (print-step "q alice"
-                (call! ch {"op" "q"
-                           "query" "[:find ?e ?n ?a :where [?e :person/name ?n] [?e :person/age ?a]]"
-                           "args"  []}))
+                (call! ch {:seon.store.wire/op "q"
+                           :seon.store.wire/query '[:find ?e ?n ?a :where [?e :person/name ?n] [?e :person/age ?a]]
+                           :seon.store.wire/args  []}))
 
     ;; Pull by lookup ref
     (print-step "pull alice"
-                (call! ch {"op" "pull"
-                           "selector" "[:db/id :person/name :person/age]"
-                           "eid"      "[:person/name \"alice\"]"}))
+                (call! ch {:seon.store.wire/op "pull"
+                           :seon.store.wire/selector [:db/id :person/name :person/age]
+                           :seon.store.wire/eid      [:person/name "alice"]}))
 
     ;; Wait briefly to let pub events flush
     (Thread/sleep 200)

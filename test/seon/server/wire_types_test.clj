@@ -20,18 +20,15 @@
    declared :db.type/double accepts an integer on the wire and stores it
    as a Double; the query result comes back as a Double."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [seon.server.test-util :as tu]
-            [seon.server.transit :as transit]))
+            [seon.server.test-util :as tu]))
 
 (set! *warn-on-reflection* true)
 
 (use-fixtures :each tu/with-fresh-writer)
 
-(defn- T [v] (transit/write-str v))
-
 (defn- req! [op extra] (tu/req! op extra))
 
-(defn- result-of [resp] (transit/read-str (get resp "result")))
+(defn- result-of [resp] (:seon.store.wire/result resp))
 
 ;; ---------- Schema ----------
 
@@ -40,42 +37,41 @@
    one value per entity, keyed by `:thing/id` (string identity)."
   []
   (req! "transact"
-        {"tx-data"
-         (T
-          [{:db/ident :thing/id
-            :db/valueType :db.type/string
-            :db/cardinality :db.cardinality/one
-            :db/unique :db.unique/identity}
-           {:db/ident :thing/kw
-            :db/valueType :db.type/keyword
-            :db/cardinality :db.cardinality/one}
-           {:db/ident :thing/str
-            :db/valueType :db.type/string
-            :db/cardinality :db.cardinality/one}
-           {:db/ident :thing/int
-            :db/valueType :db.type/long
-            :db/cardinality :db.cardinality/one}
-           {:db/ident :thing/dbl
-            :db/valueType :db.type/double
-            :db/cardinality :db.cardinality/one}
-           {:db/ident :thing/at
-            :db/valueType :db.type/instant
-            :db/cardinality :db.cardinality/one}
-           {:db/ident :thing/flag
-            :db/valueType :db.type/boolean
-            :db/cardinality :db.cardinality/one}])}))
+        {:seon.store.wire/tx-data
+         [{:db/ident :thing/id
+           :db/valueType :db.type/string
+           :db/cardinality :db.cardinality/one
+           :db/unique :db.unique/identity}
+          {:db/ident :thing/kw
+           :db/valueType :db.type/keyword
+           :db/cardinality :db.cardinality/one}
+          {:db/ident :thing/str
+           :db/valueType :db.type/string
+           :db/cardinality :db.cardinality/one}
+          {:db/ident :thing/int
+           :db/valueType :db.type/long
+           :db/cardinality :db.cardinality/one}
+          {:db/ident :thing/dbl
+           :db/valueType :db.type/double
+           :db/cardinality :db.cardinality/one}
+          {:db/ident :thing/at
+           :db/valueType :db.type/instant
+           :db/cardinality :db.cardinality/one}
+          {:db/ident :thing/flag
+           :db/valueType :db.type/boolean
+           :db/cardinality :db.cardinality/one}]}))
 
 (defn- put!
   "Transact one entity carrying a single attr's value."
   [id attr v]
-  (req! "transact" {"tx-data" (T [{:thing/id id attr v}])}))
+  (req! "transact" {:seon.store.wire/tx-data [{:thing/id id attr v}]}))
 
 (defn- get-attr [id attr]
   (result-of
-    (req! "q" {"query" (T '[:find ?v . :in $ ?id ?a :where
-                            [?e :thing/id ?id]
-                            [?e ?a ?v]])
-               "args"  [(T id) (T attr)]})))
+    (req! "q" {:seon.store.wire/query '[:find ?v . :in $ ?id ?a :where
+                                        [?e :thing/id ?id]
+                                        [?e ?a ?v]]
+               :seon.store.wire/args  [id attr]})))
 
 ;; ---------- Tests: per-type roundtrips ----------
 
@@ -143,12 +139,12 @@
             string coercion at the boundary."
     (install-typed-schema!)
     (req! "transact"
-          {"tx-data" (T [{:thing/id "a" :thing/kw :urgent}
-                          {:thing/id "b" :thing/kw :calm}])})
-    (let [r (req! "q" {"query" (T '[:find ?id . :in $ ?p :where
-                                    [?e :thing/kw ?p]
-                                    [?e :thing/id ?id]])
-                       "args"  [(T :urgent)]})]
+          {:seon.store.wire/tx-data [{:thing/id "a" :thing/kw :urgent}
+                                     {:thing/id "b" :thing/kw :calm}]})
+    (let [r (req! "q" {:seon.store.wire/query '[:find ?id . :in $ ?p :where
+                                                [?e :thing/kw ?p]
+                                                [?e :thing/id ?id]]
+                       :seon.store.wire/args  [:urgent]})]
       (is (= "a" (result-of r))
           "keyword arg :urgent matched the keyword-typed datom"))))
 
@@ -157,14 +153,14 @@
     (install-typed-schema!)
     (let [t (java.util.Date.)]
       (req! "transact"
-            {"tx-data" (T [{:thing/id "p"
-                            :thing/kw :seon/marker
-                            :thing/dbl 2.5
-                            :thing/at  t
-                            :thing/int 7
-                            :thing/flag true}])})
-      (let [r (req! "pull" {"selector" (T '[:thing/kw :thing/dbl :thing/at :thing/int :thing/flag])
-                            "eid"      (T [:thing/id "p"])})
+            {:seon.store.wire/tx-data [{:thing/id "p"
+                                        :thing/kw :seon/marker
+                                        :thing/dbl 2.5
+                                        :thing/at  t
+                                        :thing/int 7
+                                        :thing/flag true}]})
+      (let [r (req! "pull" {:seon.store.wire/selector '[:thing/kw :thing/dbl :thing/at :thing/int :thing/flag]
+                            :seon.store.wire/eid      [:thing/id "p"]})
             m (result-of r)]
         (is (= :seon/marker (:thing/kw m)))
         (is (instance? Double (:thing/dbl m)))
@@ -174,16 +170,16 @@
         (is (= 7 (:thing/int m)))
         (is (= true (:thing/flag m)))))))
 
-(deftest test-payload-field-decodes-to-tx-report
-  (testing "the `payload` field on a transact response is a single Transit
-            string decoding to the full Clojure tx-report map"
+(deftest test-transact-response-carries-tx-report-fields
+  (testing "a transact response carries the native tx-report fields directly
+            (no separate `payload` field under the uniform Transit frame)"
     (install-typed-schema!)
     (let [r (req! "transact"
-                  {"tx-data" (T [{:thing/id "p" :thing/kw :seon/alpha}])})
-          payload (transit/read-str (get r "payload"))]
-      (is (map? payload))
-      (is (keyword? (some-> payload :tx-meta keys first))
-          (str "tx-meta should have keyword keys, got: " (pr-str payload)))
-      (is (contains? (:tx-meta payload) :db/txInstant))
-      (is (contains? (:tx-meta payload) :db/commitId))
-      (is (pos? (:datoms-added payload))))))
+                  {:seon.store.wire/tx-data [{:thing/id "p" :thing/kw :seon/alpha}]})
+          tx-meta (:seon.store.wire/tx-meta r)]
+      (is (map? tx-meta))
+      (is (keyword? (some-> tx-meta keys first))
+          (str "tx-meta should have keyword keys, got: " (pr-str tx-meta)))
+      (is (contains? tx-meta :db/txInstant))
+      (is (contains? tx-meta :db/commitId))
+      (is (pos? (:seon.store.wire/datoms-added r))))))

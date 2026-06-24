@@ -140,9 +140,9 @@
 (defn ^:async ^:private ping-once!
   "One ping rpc. Resolves to the reply map; throws on not-ok/transport."
   []
-  (let [resp (await (wire/rpc default-sock-path {"op" "ping"}
+  (let [resp (await (wire/rpc default-sock-path {:seon.store.wire/op "ping"}
                               {:timeout-ms ping-timeout-ms}))]
-    (when-not (get resp "ok")
+    (when-not (:seon.store.wire/ok resp)
       (throw (ex-info "wire-server ping returned not-ok"
                       {::resp resp})))
     resp))
@@ -177,14 +177,15 @@
     1)))
 
 ;; ---------------------------------------------------------------------------
-;; Wire datom decode — server datom shape is [e a-transit v-transit t op]
-;; (seon.server.wire/datom->wire). Reconstituted as REAL datahike Datoms
-;; so tx-reports / handler inputs are contract-faithful.
+;; Wire datom decode — server datom shape is the native 5-vector [e a v t op]
+;; (seon.server.wire/datom->wire). Under the uniform Transit frame a/v arrive
+;; native (keyword attr, any value), so we reconstitute REAL datahike Datoms
+;; directly — no inner decode.
 ;; ---------------------------------------------------------------------------
 
 (defn- wire-datoms->datoms [wire-data]
   (mapv (fn [[e a v t added]]
-          (dd/datom e (wire/readT a) (wire/readT v) t added))
+          (dd/datom e a v t added))
         wire-data))
 
 ;; ---------------------------------------------------------------------------
@@ -237,30 +238,30 @@
               tx-data    (if (map? arg-map) (:tx-data arg-map) arg-map)
               tx-meta    (when (map? arg-map) (:tx-meta arg-map))
               write-id   (str (random-uuid))
-              req        (cond-> {"op"         "transact"
-                                  "tx-data"    (wire/T tx-data)
-                                  "request-id" write-id}
-                           (seq tx-meta) (assoc "tx-meta" (wire/T tx-meta)))]
+              req        (cond-> {:seon.store.wire/op       "transact"
+                                  :seon.store.wire/tx-data  tx-data
+                                  :seon.store.wire/write-id write-id}
+                           (seq tx-meta) (assoc :seon.store.wire/tx-meta tx-meta))]
           (swap! !own-write-ids conj write-id)
           (-> (wire/rpc sock-path req {:timeout-ms transact-timeout-ms})
               (.then
                (fn [resp]
-                 (if-not (get resp "ok")
+                 (if-not (:seon.store.wire/ok resp)
                    (put! p (ex-info (str "wire transact failed: "
-                                         (get resp "error"))
-                                    {::error-kind (get resp "error-kind")
+                                         (:seon.store.wire/error resp))
+                                    {::error-kind (:seon.store.wire/error-kind resp)
                                      :seon.error/kind :user-input}))
                    ;; RYOW: resolve only once a local deref is at/past
                    ;; the ack'd basis-t. The synthesized report carries
                    ;; the MATERIALIZED post-tx db value, so straight-line
                    ;; transact!-then-read code just works.
-                   (let [bt      (get resp "basis-t")
+                   (let [bt      (:seon.store.wire/basis-t resp)
                          db      (ryow-deref! conn bt)
-                         tempids (wire/readT (get resp "tempids"))
-                         tx-meta (wire/readT (get resp "tx-meta"))]
+                         tempids (:seon.store.wire/tempids resp)
+                         tx-meta (:seon.store.wire/tx-meta resp)]
                      (put! p (cond-> {:db-after db
                                       :tx-data  (wire-datoms->datoms
-                                                 (get resp "tx-data"))
+                                                 (:seon.store.wire/tx-data resp))
                                       :tempids  (or tempids {})
                                       ;; The sole writer (JVM wire-server)
                                       ;; computes the honest added/retracted
@@ -270,12 +271,12 @@
                                       ;; `transact-success-envelope` reports
                                       ;; them verbatim instead of re-deriving
                                       ;; from reconstituted datoms.
-                                      :datoms-added     (get resp "datoms-added")
-                                      :datoms-retracted (get resp "datoms-retracted")}
+                                      :datoms-added     (:seon.store.wire/datoms-added resp)
+                                      :datoms-retracted (:seon.store.wire/datoms-retracted resp)}
                                (some? tx-meta) (assoc :tx-meta tx-meta)
-                               (get resp "basis-t-before")
+                               (:seon.store.wire/basis-t-before resp)
                                (assoc :db-before
-                                      (d/as-of db (get resp "basis-t-before")))))))))
+                                      (d/as-of db (:seon.store.wire/basis-t-before resp)))))))))
               (.catch
                (fn [e]
                  (put! p (if (instance? js/Error e)
@@ -326,9 +327,9 @@
                          "listener threw:" (str e))))))
 
 (defn- handle-feed-event! [conn ev]
-  (let [wid  (get ev "request-id")
+  (let [wid  (:seon.store.wire/write-id ev)
         own? (boolean (and wid (contains? @!own-write-ids wid)))
-        bt   (get ev "basis-t")]
+        bt   (:seon.store.wire/basis-t ev)]
     (if own?
       ;; Own tx already fired the native listeners via writer/transact!;
       ;; just advance the consecutive-values chain + drop the id.
@@ -338,20 +339,20 @@
                                (assoc :last-db (ryow-deref! conn bt)))))
       (let [db-before (or (:last-db @!adapter) @conn)
             db        (ryow-deref! conn bt)
-            tx-meta   (wire/readT (get ev "tx-meta"))
+            tx-meta   (:seon.store.wire/tx-meta ev)
             report    (cond-> {:db-after  db
                                :db-before db-before
                                :tx-data   (wire-datoms->datoms
-                                           (get ev "tx-data"))}
+                                           (:seon.store.wire/tx-data ev))}
                         (some? tx-meta) (assoc :tx-meta tx-meta))]
         (swap! !adapter assoc :last-db db)
         (fire-native-listeners! conn report)))))
 
 (defn ^:async ^:private subscribe! [sock-path]
   (let [sub (await (wire/subscribe-tx sock-path {}))]
-    (when-not (get sub "ok")
+    (when-not (:seon.store.wire/ok sub)
       (throw (ex-info "seon.store.wire: subscribe-tx failed" {::resp sub})))
-    (get sub "handle")))
+    (:seon.store.wire/handle sub)))
 
 (defn ^:async start-listen-adapter!
   "Subscribe to the wire tx feed and pump FOREIGN tx events into the
@@ -373,8 +374,8 @@
          (try
            (let [ev (await (wire/next-tx-event sock-path (:handle @!adapter)))]
              (cond
-               (get ev "ok")                   (handle-feed-event! conn ev)
-               (= "no-event" (get ev "error")) nil
+               (:seon.store.wire/ok ev)                   (handle-feed-event! conn ev)
+               (= "no-event" (:seon.store.wire/error ev)) nil
                :else (throw (ex-info "tx-feed event error" {::event ev}))))
            (catch :default e
              (log/error-console!

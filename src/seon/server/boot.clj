@@ -50,7 +50,6 @@
             ;; derive from the post-write db. Registration order = fire order.
             [seon.embed]
             [seon.server.broadcast :as bcast]
-            [seon.server.transit :as transit]
             [seon.server.reactive :as reactive]
             [taoensso.timbre :as log])
   (:import [java.util.concurrent ConcurrentLinkedQueue]
@@ -67,9 +66,8 @@
 ;; guest's loop expects (it swallows the `no-event` timeout and re-loops).
 ;;
 ;; The event delivered is the SAME map `seon.server.wire`'s broadcaster builds
-;; (`ok-event-from-report`): string keys, `tx-data` as [e a-transit v-transit
-;; t op], `tx-meta`/`request-id` carried through. The guest decodes the Transit
-;; a/v fields itself.
+;; (`ok-event-from-report`): `:seon.store.wire/*` keyword keys, `tx-data` as
+;; native 5-vectors [e a v t op], `tx-meta`/`write-id` carried through.
 ;; ---------------------------------------------------------------------------
 
 ;; handle -> {:db-name str :sub-id <bcast-sub-id> :queue ConcurrentLinkedQueue}
@@ -89,8 +87,8 @@
    `::raw-broadcast` listener tags events with (keyword db-names are stringified
    without the leading colon, matching `raw-broadcast-listener-fn`)."
   [req]
-  (let [agent-id (let [a (get req "agent-id")] (when (and a (not= "" a)) a))
-        db-name  (some-> (get req "db-name") keyword)
+  (let [agent-id (let [a (:seon.store.wire/agent-id req)] (when (and a (not= "" a)) a))
+        db-name  (some-> (:seon.store.wire/db-name req) keyword)
         kw->str  (fn [kw] (if (keyword? kw) (subs (str kw) 1) (str kw)))
         resolved (registry/resolve-conn
                   (cond-> {}
@@ -121,11 +119,13 @@
                    (.incrementAndGet qsize)))]
     (swap! !tx-subs assoc handle {:db-name db-name :sub-id sub-id
                                   :queue queue :qsize qsize})
-    ;; The wire control envelope is plain CBOR; handle is an int.
-    {"ok" true "handle" handle "db-name" db-name}))
+    ;; handle is an int; db-name a string. Uniform Transit, keyword keys.
+    {:seon.store.wire/ok true
+     :seon.store.wire/handle handle
+     :seon.store.wire/db-name db-name}))
 
 (defmethod wire/handle-op "next-tx-event" [_conn req]
-  (let [handle (long (get req "handle"))]
+  (let [handle (long (:seon.store.wire/handle req))]
     (if-let [{:keys [^ConcurrentLinkedQueue queue]} (get @!tx-subs handle)]
       ;; Bounded wait: poll up to ~50ms for an event so the guest's loop
       ;; doesn't hot-spin. On timeout, a typed "no-event" protocol error —
@@ -133,18 +133,24 @@
       (let [deadline (+ (System/currentTimeMillis) 50)]
         (loop []
           (if-let [ev (.poll queue)]
-            (assoc ev "ok" true)
+            (assoc ev :seon.store.wire/ok true)
             (if (< (System/currentTimeMillis) deadline)
               (do (Thread/sleep 5) (recur))
-              {"ok" false "error" "no-event" "error-kind" "not-found"}))))
-      {"ok" false "error" (str "unknown tx-sub handle: " handle) "error-kind" "not-found"})))
+              {:seon.store.wire/ok false
+               :seon.store.wire/error "no-event"
+               :seon.store.wire/error-kind "not-found"}))))
+      {:seon.store.wire/ok false
+       :seon.store.wire/error (str "unknown tx-sub handle: " handle)
+       :seon.store.wire/error-kind "not-found"})))
 
 (defmethod wire/handle-op "unsubscribe-tx" [_conn req]
-  (let [handle (long (get req "handle"))]
+  (let [handle (long (:seon.store.wire/handle req))]
     (when-let [{:keys [db-name sub-id]} (get @!tx-subs handle)]
       (bcast/unsubscribe! db-name sub-id)
       (swap! !tx-subs dissoc handle))
-    {"ok" true "handle" handle "unsubscribed" true}))
+    {:seon.store.wire/ok true
+     :seon.store.wire/handle handle
+     :seon.store.wire/unsubscribed true}))
 
 ;; ---------------------------------------------------------------------------
 ;; Query subscriptions (the reactive engine) — register/unregister + the
@@ -212,39 +218,39 @@
                     :state state
                     :emit! (fn [ev]
                              ;; tag the changed-summaries event with the
-                             ;; db-name for pub routing, ship the body as
-                             ;; a Transit-JSON payload (it carries
-                             ;; keywords/rows that CBOR can't represent).
+                             ;; db-name for pub routing; the reactive map
+                             ;; (keywords/rows) rides natively under the
+                             ;; uniform Transit frame — no inner encode.
                              (bcast/broadcast!
-                              {"event"   "changed-summaries"
-                               "db-name" db-name-str
-                               "basis-t" (:seon.server.reactive/basis-t ev)
-                               "payload" (transit/write-str ev)}))}
+                              {:seon.store.wire/event   "changed-summaries"
+                               :seon.store.wire/db-name db-name-str
+                               :seon.store.wire/basis-t (:seon.server.reactive/basis-t ev)
+                               :seon.store.wire/payload ev}))}
                    report)))))})
 
 (defmethod wire/handle-op "register-subscription" [conn req]
-  (let [sub-id (get req "sub-id")
-        query  (get req "query")            ; SOURCE STRING (code-as-data)
+  (let [sub-id (:seon.store.wire/sub-id req)
+        query  (:seon.store.wire/query req)   ; SOURCE STRING (code-as-data)
         db-name (db-name-for-req req)
         state   (engine-for db-name)
         resp    (reactive/register-subscription
                  state conn
                  {:seon.server.reactive/sub-id sub-id
                   :seon.server.reactive/query  query})]
-    {"ok" true
-     "sub-id"  (:seon.subscription/id resp)
-     "basis-t" (:seon.server.reactive/basis-t resp)
-     "payload" (transit/write-str resp)}))
+    {:seon.store.wire/ok true
+     :seon.store.wire/sub-id  (:seon.subscription/id resp)
+     :seon.store.wire/basis-t (:seon.server.reactive/basis-t resp)
+     :seon.store.wire/payload resp}))
 
 (defmethod wire/handle-op "unregister-subscription" [conn req]
-  (let [sub-id (get req "sub-id")
+  (let [sub-id (:seon.store.wire/sub-id req)
         db-name (db-name-for-req req)
         state   (engine-for db-name)
         resp    (reactive/unregister-subscription
                  state conn {:seon.server.reactive/sub-id sub-id})]
-    {"ok" true
-     "sub-id" (:seon.subscription/id resp)
-     "payload" (transit/write-str resp)}))
+    {:seon.store.wire/ok true
+     :seon.store.wire/sub-id (:seon.subscription/id resp)
+     :seon.store.wire/payload resp}))
 
 ;; ---------------------------------------------------------------------------
 

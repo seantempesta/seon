@@ -98,9 +98,6 @@
     ;; installs run on the :writer classpath.
     [seon.server.wire :as wire]
     [seon.server.registry :as registry]
-    ;; Transit-JSON value codec for the knn-search verb's value payloads
-    ;; (eids in, hits out) — same codec boot.clj's verbs use.
-    [seon.server.transit :as transit]
     [taoensso.timbre :as log])
   (:import [com.google.genai Client]
            [com.google.genai.types EmbedContentConfig EmbedContentResponse]
@@ -1077,15 +1074,15 @@
 ;;; payloads (eids in, hits out) ride Transit-JSON like every other verb.
 
 (defmethod wire/handle-op "knn-search" [conn req]
-  (let [query (get req "query")
-        k     (long (or (get req "k") 10))
-        eids  (transit/read-str (get req "eids"))
+  (let [query (:seon.store.wire/query req)
+        k     (long (or (:seon.store.wire/k req) 10))
+        eids  (:seon.store.wire/eids req)
         db    (d/db conn)
         {:seon.embed/keys [hits]}
         (knn-search db (cond-> {:seon.embed/query query :seon.embed/k k}
                          (seq eids) (assoc :seon.embed/eids (set eids))))]
-    {"ok"     true
-     "result" (transit/write-str hits)}))
+    {:seon.store.wire/ok     true
+     :seon.store.wire/result hits}))
 
 ;;; ===========================================================================
 ;;; Write-path activation (the seams — run at ns load)

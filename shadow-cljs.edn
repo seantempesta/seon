@@ -131,9 +131,9 @@
   ;; shadow runtime (the CLJ-pivot's missing transport piece). Built OUTSIDE
   ;; :client — its own :node-script build, its own :main. `:devtools {:enabled
   ;; true}` so the process registers as a shadow runtime addressable over MCP
-  ;; (`mcp__seon_cljs__eval` agent_id "proc:wire"). Reuses the SAME Transit codec
-  ;; (seon.client-runtime.transit) the WASM guest uses; CBOR framing in
-  ;; seon.store.internal.cbor.
+  ;; (`mcp__seon_cljs__eval` agent_id "proc:wire"). Uses the uniform
+  ;; Transit-JSON frame codec + length framing inlined in
+  ;; seon.store.internal.wire-node (matches seon.server.codec).
   ;;
   ;; Build:  clj -M:cljs watch wire-node
   ;; Run:    node out/wire-node/main.js --process-name wire
