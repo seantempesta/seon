@@ -34,6 +34,7 @@
   (:require
     [cljs.test :refer [deftest is testing async]]
     [seon.agent :as agent]
+    [seon.agent.lifecycle :as lifecycle]
     [seon.agent.loop :as fsm]
     [seon.client :as client]
     [seon.ctx :as ctx]
@@ -73,7 +74,7 @@
             (await (seed-agents!))
             (testing "wait parks the SCOPED agent → :waiting"
               (let [r (await (db/with-agent "aaa-2606101200"
-                               (fn ^:async w [] (await (agent/wait "need an answer")))))]
+                               (fn ^:async w [] (await (lifecycle/wait "need an answer")))))]
                 (is (= :waiting r) "wait returns the new state keyword")
                 (is (= :waiting (:seon.agent/state
                                   (db/entity {:seon.db/ref [:seon.agent/id "aaa-2606101200"]})))
@@ -84,17 +85,17 @@
                     "the note rides along for monitoring agents")))
             (testing "complete finishes the SCOPED agent → :completed"
               (let [r (await (db/with-agent "bbb-2606101200"
-                               (fn ^:async c [] (await (agent/complete "done")))))]
+                               (fn ^:async c [] (await (lifecycle/complete "done")))))]
                 (is (= :completed r))
                 (is (= :completed (:seon.agent/state
                                     (db/entity {:seon.db/ref [:seon.agent/id "bbb-2606101200"]}))))))
             (testing "terminate kills an agent by id → :terminated (the one unwakeable state)"
-              (let [r (await (agent/terminate "aaa-2606101200"))]
+              (let [r (await (lifecycle/terminate "aaa-2606101200"))]
                 (is (= :terminated r))
                 (is (= :terminated (:seon.agent/state
                                      (db/entity {:seon.db/ref [:seon.agent/id "aaa-2606101200"]}))))))
             (testing "wait with no agent in scope → loud error envelope (errors are values)"
-              (let [env (await (agent/wait "orphan"))]
+              (let [env (await (lifecycle/wait "orphan"))]
                 (is (false? (:seon.db/ok? env)))
                 (is (string? (:seon.error/message (:seon.db/error env))))))))
         (.then (fn [_] (done)))
@@ -123,7 +124,7 @@
                      (agent/armable-agent-ids {:seon.db/db @db/*conn*}))
                   "neither :waiting nor :completed drops from the roster"))
             (testing "only :terminated is excluded — the unwakeable state"
-              (await (agent/terminate "aaa-2606101200"))
+              (await (lifecycle/terminate "aaa-2606101200"))
               (is (= ["bbb-2606101200"]
                      (agent/armable-agent-ids {:seon.db/db @db/*conn*}))
                   "the terminated agent is NOT resumed (history, not roster)"))

@@ -126,6 +126,9 @@
        to talk to its human or peers (`user`/`agent` over `message!`):
        fan-out (`to` = vector of refs), the hop guard, the `{:ok? …}`
        envelope, the loud self→self refusal.
+     - `:seon.agent.lifecycle` — the terminal-transition verbs
+       (`wait`/`complete`/`terminate`); how the agent parks, finishes, or
+       is killed — each a small `:seon.agent/state` transact, errors-as-values.
      - `:seon.schema` — `register!` is the SINGLE SOURCE OF TRUTH for
        attribute schemas; the discovery reads (`registered?`,
        `registered-schemas`, `schemas-in-namespace`, `enum-members`)
@@ -142,7 +145,8 @@
    section — still indexed + searchable via seon.agent.search /
    render-namespace)."
   #{:seon.agent.todo :seon.db :seon.agent.search
-    :seon.agent.fs :seon.agent.message :seon.schema :seon.render})
+    :seon.agent.fs :seon.agent.message :seon.schema :seon.render
+    :seon.agent.lifecycle})
 
 (defn in-full-source-whitelist?
   "True when `ns-name` (string, keyword, or symbol) is one of the curated

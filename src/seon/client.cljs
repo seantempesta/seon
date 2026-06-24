@@ -54,6 +54,9 @@
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
     [seon.agent :as agent]
+    ;; Lifecycle verbs (wait/complete/terminate) — host-bundled so the agent
+    ;; home ns can `:refer` them; required here so the build includes the ns.
+    [seon.agent.lifecycle]
     ;; The agent loop + wake trigger: the client boot path ARMS the wake
     ;; trigger (seon.agent does NOT, to stay acyclic).
     [seon.agent.loop :as fsm]
@@ -2091,12 +2094,12 @@
     "  \"Hi — I'm up and connected to the shared store. What should I work on?\")\n"))
 
 (def park-source
-  "The bootstrap-turn park: turn 0 ends by parking via `agent/wait` —
+  "The bootstrap-turn park: turn 0 ends by parking via `wait` —
    state → :waiting, wakeable the moment a message arrives. The `;;`
    comment rides as the eval's narration."
   (str
     ";; Park: I resume the instant a message lands.\n"
-    "(agent/wait \"awaiting first task\")\n"))
+    "(wait \"awaiting first task\")\n"))
 
 (defn ^:async bootstrap-turn!
   "Turn 0: the bootstrap a NEWLY MINTED agent runs as its first logged
@@ -2107,7 +2110,7 @@
    The forms, in order: read the shared-store inventory
    ([[inventory-read-source]]), read the system-wide instructions
    ([[instructions-read-source]]), greet the human via `message/user`
-   ([[hello-source]]), then park via `agent/wait` ([[park-source]]) so
+   ([[hello-source]]), then park via `wait` ([[park-source]]) so
    the agent is `:waiting`, wakeable the moment a message arrives. The
    `;;` comments ride as each eval's narration.
 

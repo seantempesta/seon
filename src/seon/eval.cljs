@@ -1084,15 +1084,16 @@
 
    The home ns is set up with the verb + data aliases the context
    teaches, so the agent's reflexive `(message/user …)` /
-   `(message/agent …)` / `(agent/wait …)` / bare `(wait …)` /
-   `(complete …)` / `(terminate …)` forms — AND the `(schema/register! …)`
+   `(message/agent …)` / `(wait …)` / `(complete …)` /
+   `(terminate …)` forms — AND the `(schema/register! …)`
    / `(db/query …)` / `(db/transact! …)` / `::db/…` data forms the
    namespaces section + fn docstrings teach in their SHORT-aliased shape —
    all resolve without fully-qualifying:
 
      (ns <home>
        (:require [seon.agent.message :as message]
-                 [seon.agent :as agent :refer [wait complete terminate]]
+                 [seon.agent :as agent]
+                 [seon.agent.lifecycle :refer [wait complete terminate]]
                  [seon.schema :as schema]
                  [seon.db :as db]))
 
@@ -1111,8 +1112,8 @@
    refer map and wires up implicit macro refers (defn, str, atom, etc.)
    for subsequent forms in the new ns.
 
-   `seon.agent` / `seon.agent.message` are host-bundled, so a `:refer`
-   against them produces a benign `:undeclared-var` warning that flips
+   `seon.agent.lifecycle` / `seon.agent.message` are host-bundled, so a
+   `:refer` against them produces a benign `:undeclared-var` warning that flips
    the eval `:ok` to false EVEN THOUGH the alias/refer map wires up and
    the vars resolve at runtime (live-proven). So we do NOT trust the
    eval `:ok`; we verify success by PROBING that the refer'd `complete`
@@ -1121,7 +1122,8 @@
   (let [setup-src
         (str "(ns " agent-ns-sym
              " (:require [seon.agent.message :as message]"
-             " [seon.agent :as agent :refer [wait complete terminate]]"
+             " [seon.agent :as agent]"
+             " [seon.agent.lifecycle :refer [wait complete terminate]]"
              " [seon.schema :as schema]"
              " [seon.db :as db]))")]
     (await (eval compile-state setup-src
@@ -2128,19 +2130,40 @@
   (clip-result-body
     eval-id
     (try
-      (let [value (project-agent-safe value)]
-        (if (and (coll? value)
-                 (counted? value)
-                 (> (count value) result-row-cap))
-          (let [total   (count value)
-                preview (take result-row-cap value)
-                dropped (- total result-row-cap)
-                body    (str/join "\n " (map pr-str preview))]
-            (str ";; … " total " rows; showing first " result-row-cap
-                 ", +" dropped " more clipped. Narrow your query: a tighter "
-                 ":where, a :find aggregate, or take fewer; result/" eval-id
-                 " holds the full value to drill with get-in/filter.\n"
-                 "(" body ")"))
+      (let [value (project-agent-safe value)
+            row-capped-str
+            (fn [total coll]
+              (let [preview (take result-row-cap coll)
+                    dropped (- total result-row-cap)
+                    body    (str/join "\n " (map pr-str preview))]
+                (str ";; … " total " rows; showing first " result-row-cap
+                     ", +" dropped " more clipped. Narrow your query: a tighter "
+                     ":where, a :find aggregate, or take fewer; result/" eval-id
+                     " holds the full value to drill with get-in/filter.\n"
+                     "(" body ")")))]
+        (cond
+          ;; Top-level collection with too many rows (e.g. db/query result set).
+          (and (coll? value)
+               (not (map? value))
+               (counted? value)
+               (> (count value) result-row-cap))
+          (row-capped-str (count value) value)
+
+          ;; Map envelope whose VALUES contain a large collection (e.g. a
+          ;; grep/search response {:ok? true :matches [... 60 items ...]}). Cap
+          ;; each oversized value in-place so the whole map stays readable.
+          (and (map? value)
+               (some (fn [v] (and (coll? v) (counted? v) (> (count v) result-row-cap)))
+                     (vals value)))
+          (pr-str (reduce-kv
+                    (fn [m k v]
+                      (assoc m k (if (and (coll? v) (counted? v) (> (count v) result-row-cap))
+                                   (row-capped-str (count v) v)
+                                   v)))
+                    {}
+                    value))
+
+          :else
           (pr-str value)))
       (catch :default _
         ;; Unprintable value — name where the live value lives instead of

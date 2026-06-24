@@ -259,7 +259,7 @@
         (cond
           (>= loop-k (max 1 (- cap 2)))
           (str ";;; loop " loop-k "/" cap " — you are near the per-loop cap. "
-               "Wrap up: (complete \"…\") to finish, or (agent/wait \"note\") to "
+               "Wrap up: (complete \"…\") to finish, or (wait \"note\") to "
                "park until the next message.\n")
           (>= loop-k (quot cap 2))
           (str ";;; loop " loop-k "/" cap " — past halfway through this loop. "
