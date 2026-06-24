@@ -158,3 +158,12 @@
 	path = reference-code/sci
 	url = https://github.com/babashka/sci.git
 	ignore = dirty
+[submodule "reference-code/transit-clj"]
+	path = reference-code/transit-clj
+	url = https://github.com/cognitect/transit-clj.git
+[submodule "reference-code/transit-cljs"]
+	path = reference-code/transit-cljs
+	url = https://github.com/cognitect/transit-cljs.git
+[submodule "reference-code/transit-js"]
+	path = reference-code/transit-js
+	url = https://github.com/cognitect/transit-js.git
