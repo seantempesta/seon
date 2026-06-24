@@ -15,7 +15,7 @@
      synthesizes the tx-report from the ack + a local RYOW re-deref.
      The JVM is the SOLE writer on the store.
    - CHANGE NOTIFICATION: `start-listen-adapter!` subscribes to the
-     wire tx feed; on each FOREIGN tx event (own request-ids skipped —
+     wire tx feed; on each FOREIGN tx event (own write-ids skipped —
      own txs already fire the conn's native listeners via
      `datahike.writer/transact!`) it re-derefs and fires the conn's
      NATIVE `d/listen` listeners with a synthesized raw tx-report. So
@@ -211,10 +211,14 @@
 ;; returns a promise-chan the writer go-loop consumes.
 ;; ---------------------------------------------------------------------------
 
-(def !own-request-ids
-  "request-ids of txs THIS pod dispatched — the listen adapter skips
-   their feed events (own txs already fire the conn's native listeners
-   via datahike.writer/transact!)."
+(def !own-write-ids
+  "write-ids of txs THIS pod dispatched — the wire-protocol per-write
+   ECHO-SUPPRESSION set. The pod mints a UUID per forwarded write; the
+   wire-server threads it into the committed tx-meta under
+   `:seon.store.wire/write-id` and echoes it back on the broadcast feed.
+   The listen adapter skips a feed event whose write-id is in this set
+   (own txs already fired the conn's native listeners via
+   `datahike.writer/transact!`)."
   (atom #{}))
 
 (def ^:private transact-timeout-ms
@@ -232,12 +236,12 @@
         (let [arg-map    (first args)
               tx-data    (if (map? arg-map) (:tx-data arg-map) arg-map)
               tx-meta    (when (map? arg-map) (:tx-meta arg-map))
-              request-id (str (random-uuid))
+              write-id   (str (random-uuid))
               req        (cond-> {"op"         "transact"
                                   "tx-data"    (wire/T tx-data)
-                                  "request-id" request-id}
+                                  "request-id" write-id}
                            (seq tx-meta) (assoc "tx-meta" (wire/T tx-meta)))]
-          (swap! !own-request-ids conj request-id)
+          (swap! !own-write-ids conj write-id)
           (-> (wire/rpc sock-path req {:timeout-ms transact-timeout-ms})
               (.then
                (fn [resp]
@@ -322,13 +326,13 @@
                          "listener threw:" (str e))))))
 
 (defn- handle-feed-event! [conn ev]
-  (let [rid  (get ev "request-id")
-        own? (boolean (and rid (contains? @!own-request-ids rid)))
+  (let [wid  (get ev "request-id")
+        own? (boolean (and wid (contains? @!own-write-ids wid)))
         bt   (get ev "basis-t")]
     (if own?
       ;; Own tx already fired the native listeners via writer/transact!;
       ;; just advance the consecutive-values chain + drop the id.
-      (do (swap! !own-request-ids disj rid)
+      (do (swap! !own-write-ids disj wid)
           (swap! !adapter #(-> %
                                (update :own-skips (fnil inc 0))
                                (assoc :last-db (ryow-deref! conn bt)))))

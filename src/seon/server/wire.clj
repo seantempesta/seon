@@ -73,12 +73,17 @@
 
 (defn- seed-base-schema!
   "Install wire-server base-schema attrs that every conn needs regardless of
-   the agent's domain schema. Currently just `:seon.db/request-id` — required
-   so `:schema-flexibility :write` accepts request-id in tx-meta (the channel
-   that carries it to the ::raw-broadcast listener thread). Idempotent: a
-   re-seed transacts the same :db/ident, a no-op datahike upsert."
+   the agent's domain schema. Currently just `:seon.store.wire/write-id` — the
+   wire-protocol per-write ECHO-SUPPRESSION id: the pod mints a UUID per
+   forwarded write, the wire-server threads it into the committed tx-meta under
+   this attr, and the pod recognizes its own tx on the broadcast feed and skips
+   re-firing local listeners. Declared here so `:schema-flexibility :write`
+   accepts it in tx-meta (the channel that carries it to the ::raw-broadcast
+   listener thread). This is a wire-protocol field, NOT a seon.db Malli-domain
+   attr — the writer uses RAW datahike schema, so this seed IS its declaration.
+   Idempotent: a re-seed transacts the same :db/ident, a no-op datahike upsert."
   [conn]
-  (d/transact conn [{:db/ident       :seon.db/request-id
+  (d/transact conn [{:db/ident       :seon.store.wire/write-id
                      :db/valueType   :db.type/string
                      :db/cardinality :db.cardinality/one}]))
 
@@ -294,7 +299,7 @@
          "result"  (T result)})))
 
 (defn- tx-report->ok-map
-  [report request-id]
+  [report write-id]
   (let [db        (:db-after report)
         db-before (:db-before report)
         tx-data   (:tx-data report)
@@ -305,22 +310,24 @@
         bt-before (basis-t-of db-before)
         tempids   (dissoc (:tempids report) :db/current-tx)
         tx-meta   (:tx-meta report)]
-    {:wire-data  wire-data
-     :added      added
-     :retracted  retracted
-     :bt         bt
-     :bt-before  bt-before
-     :tempids    tempids
-     :tx-meta    tx-meta
-     :request-id request-id}))
+    {:wire-data wire-data
+     :added     added
+     :retracted retracted
+     :bt        bt
+     :bt-before bt-before
+     :tempids   tempids
+     :tx-meta   tx-meta
+     :write-id  write-id}))
 
 (defn- ok-event-from-report
   "Build the raw `tx` broadcast event. `db-name` is the committing conn's real
-   db-name string (no more hardcoded \"default\"). `request-id` comes from the
-   commit's tx-meta (`:seon.db/request-id`) so it survives the async hop to the
-   `::raw-broadcast` listener thread — the listener, not the request handler,
-   emits the event now (see `raw-broadcast-listener-fn`)."
-  [db-name {:keys [wire-data added retracted bt bt-before tx-meta request-id]}]
+   db-name string (no more hardcoded \"default\"). `write-id` comes from the
+   commit's tx-meta (`:seon.store.wire/write-id`) so it survives the async hop to
+   the `::raw-broadcast` listener thread — the listener, not the request handler,
+   emits the event now (see `raw-broadcast-listener-fn`). It rides the broadcast
+   event under the `\"request-id\"` wire-envelope key (the on-wire transport key),
+   which the pod matches for echo suppression."
+  [db-name {:keys [wire-data added retracted bt bt-before tx-meta write-id]}]
   (cond-> {"event" "tx"
            "basis-t" bt
            "basis-t-before" bt-before
@@ -329,7 +336,7 @@
            "datoms-added" added
            "datoms-retracted" retracted
            "tx-meta" (T tx-meta)}
-    request-id (assoc "request-id" request-id)))
+    write-id (assoc "request-id" write-id)))
 
 ;; ---------- ::raw-broadcast listener (the P1 hook) ----------
 ;;
@@ -337,8 +344,9 @@
 ;; carries a `d/listen!`-registered `::raw-broadcast` callback that fires
 ;; synchronously on every commit and emits the db-name-tagged `tx` event. This
 ;; is the seam the reactive engine plugs a SECOND listener (`::reactive`) into
-;; — distinct keys, both fire off the same TxReport. request-id rides tx-meta
-;; (`:seon.db/request-id`) because the listener runs on the writer thread.
+;; — distinct keys, both fire off the same TxReport. The wire write-id rides
+;; tx-meta (`:seon.store.wire/write-id`) because the listener runs on the writer
+;; thread.
 
 (defn raw-broadcast-listener-fn
   "Return a `d/listen!` callback `(fn [tx-report])` that emits the raw
@@ -349,8 +357,8 @@
   (let [db-name-str (if (keyword? db-name) (subs (str db-name) 1) (str db-name))]
     (fn [report]
       (try
-        (let [request-id (:seon.db/request-id (:tx-meta report))
-              r          (assoc (tx-report->ok-map report nil) :request-id request-id)]
+        (let [write-id (:seon.store.wire/write-id (:tx-meta report))
+              r        (assoc (tx-report->ok-map report nil) :write-id write-id)]
           (bcast/broadcast! (ok-event-from-report db-name-str r)))
         (catch Throwable _)))))
 
@@ -370,7 +378,7 @@
     (d/listen conn ::raw-broadcast (raw-broadcast-listener-fn db-name)))})
 
 (defn- ok-response-from-report [{:keys [wire-data added retracted bt bt-before
-                                        tempids tx-meta request-id]}]
+                                        tempids tx-meta write-id]}]
   ;; Two forms in one envelope:
   ;; - Structured fields (basis-t, tx-data, etc.) for tests and the Rust
   ;;   host's pub/cache machinery that needs to read basis-t, datoms-added,
@@ -392,13 +400,13 @@
                        :datoms-added      added
                        :datoms-retracted  retracted
                        :tx-meta           tx-meta}
-                request-id (assoc :request-id request-id)))}
-    request-id (assoc "request-id" request-id)))
+                write-id (assoc :request-id write-id)))}
+    write-id (assoc "request-id" write-id)))
 
 (defmethod handle-op "transact" [conn req]
   (let [tx         (read-T (get req "tx-data"))
         tx-meta-in (read-T (get req "tx-meta"))
-        request-id (let [r (get req "request-id")] (when (and r (not= "" r)) r))
+        write-id   (let [r (get req "request-id")] (when (and r (not= "" r)) r))
         schema     (schema-of conn)
         tx0        (coerce-tx-data-for-schema schema tx)
         ;; Embed-on-write: append :seon/embedding + :seon.embed/source-hash
@@ -407,16 +415,17 @@
         ;; d/transact), never inside the conn/listener. No-op when no trigger
         ;; attrs present or no augmenter installed.
         tx*        (augment-tx conn tx0)
-        ;; Carry request-id through tx-meta so the per-conn ::raw-broadcast
-        ;; listener emits it on the pub event (the listener fires on the
-        ;; writer thread, after this request thread). ensure-db! seeds the
-        ;; :seon.db/request-id attr so :schema-flexibility :write accepts it.
+        ;; Carry the wire write-id through tx-meta so the per-conn
+        ;; ::raw-broadcast listener emits it on the pub event (the listener
+        ;; fires on the writer thread, after this request thread). seed-base-schema!
+        ;; declares the :seon.store.wire/write-id attr so :schema-flexibility
+        ;; :write accepts it.
         tx-meta*   (cond-> (or tx-meta-in {})
-                     request-id (assoc :seon.db/request-id request-id))
+                     write-id (assoc :seon.store.wire/write-id write-id))
         report     (if (seq tx-meta*)
                      (d/transact conn {:tx-data tx* :tx-meta tx-meta*})
                      (d/transact conn tx*))
-        r          (tx-report->ok-map report request-id)]
+        r          (tx-report->ok-map report write-id)]
     ;; Broadcast is NOT imperative here anymore: the per-conn
     ;; `::raw-broadcast` `d/listen!` (installed by the on-ensure-db hook /
     ;; start-req-server!) fires synchronously on commit and emits the
@@ -427,7 +436,7 @@
   "Plain Clojure value of a tx report, for embedding in :reports inside the
    Transit-encoded payload. Keeps native keywords/instants/etc. — Transit
    handles them on the wire."
-  [{:keys [bt bt-before tempids added retracted tx-meta request-id]
+  [{:keys [bt bt-before tempids added retracted tx-meta write-id]
     :as r}]
   (let [tx-data (->> (:tx-data-raw r)
                      (mapv (fn [^datahike.datom.Datom d]
@@ -440,7 +449,7 @@
              :tx-meta          tx-meta
              :datoms-added     added
              :datoms-retracted retracted}
-      request-id (assoc :request-id request-id))))
+      write-id (assoc :request-id write-id))))
 
 (defmethod handle-op "transact-batch" [conn req]
   (let [tx-data-list (mapv read-T (get req "tx-data-list"))
@@ -449,24 +458,24 @@
         n            (count tx-data-list)
         schema       (schema-of conn)
         per-tx-report
-        (fn [idx tx tx-meta-in request-id]
+        (fn [idx tx tx-meta-in write-id]
           (let [tx0      (coerce-tx-data-for-schema schema tx)
                 ;; Embed-on-write (per-tx in the batch): same seam as the
                 ;; single "transact" handler. Re-reads (d/db conn) each tx so
                 ;; an earlier batch tx's stored hash is visible to a later one.
                 tx*      (augment-tx conn tx0)
-                ;; Carry request-id through tx-meta so the per-conn
+                ;; Carry the wire write-id through tx-meta so the per-conn
                 ;; ::raw-broadcast listener emits it on the pub event (it
                 ;; fires on the writer thread, after the request thread).
                 tx-meta* (cond-> (or tx-meta-in {})
-                           request-id (assoc :seon.db/request-id request-id))
+                           write-id (assoc :seon.store.wire/write-id write-id))
                 report   (if (seq tx-meta*)
                            (d/transact conn {:tx-data tx* :tx-meta tx-meta*})
                            (d/transact conn tx*))
-                r        (assoc (tx-report->ok-map report request-id)
+                r        (assoc (tx-report->ok-map report write-id)
                                 :tx-data-raw (:tx-data report))]
             ;; Broadcast is NOT imperative here — the ::raw-broadcast listener
-            ;; fires per commit. Response-side request-id flows via r.
+            ;; fires per commit. Response-side write-id flows via r.
             {:wire (assoc (ok-response-from-report r) "index" idx)
              :clj  (assoc (report->clj r) :index idx)}))]
     (loop [idx 0 wire-reports (transient []) clj-reports (transient [])]
@@ -479,10 +488,10 @@
                "payload" (T {:applied idx :total n :reports creps})}))
         (let [tx         (nth tx-data-list idx)
               tx-meta-in (some-> tx-meta-list (nth idx nil))
-              request-id (let [r (some-> request-ids (nth idx nil))]
+              write-id   (let [r (some-> request-ids (nth idx nil))]
                            (when (and r (not= "" r)) r))]
           (let [result (try
-                         {:ok (per-tx-report idx tx tx-meta-in request-id)}
+                         {:ok (per-tx-report idx tx tx-meta-in write-id)}
                          (catch clojure.lang.ExceptionInfo e
                            {:err {:kind "datahike"
                                   :msg  (str (.getMessage e) " " (pr-str (ex-data e)))}})
