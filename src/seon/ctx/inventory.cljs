@@ -47,10 +47,12 @@
        ";; query. Read any kind's rows with the LISTED attrs, e.g.:\n"
        ";;   (seon.db/query {:seon.db/query\n"
        ";;     '[:find ?v :where [?e :my.kb.codebase/answer ?v]]})\n"
-       ";;   [v v ...] after a count = the DISTINCT values that attr HOLDS\n"
-       ";;   (a low-cardinality identity/enum/category column) — these are\n"
-       ";;   the EXACT keys to filter on; query them, never guess others.\n"
-       ";;   Attrs with no [..] are payload (refs, timestamps, free text);\n"
+       ";;   «v v ...» after a count = an ILLUSTRATIVE SAMPLE of the\n"
+       ";;   DISTINCT values that attr holds (a low-cardinality identity/\n"
+       ";;   enum/category column) — these are example filter KEYS, not the\n"
+       ";;   authoritative value: NEVER quote them as the stored answer.\n"
+       ";;   Query for the actual value before stating or acting on it.\n"
+       ";;   Attrs with no «..» are payload (refs, timestamps, free text);\n"
        ";;   query them to see their values.\n"
        ";; (post-bootstrap data only; the full system index is one call\n"
        ";;  away — (seon.db/store-inventory {:seon.db/system? true}))"))
@@ -130,13 +132,17 @@
       :else nil)))
 
 (defn- attr-token
-  "Render ONE `attr count [v v ...]` token for the inventory line — the
-   `[..]` value list is appended only when [[value-tokens]] returns some.
-   ASCII brackets (no glyphs) so the commented line reads cleanly."
+  "Render ONE `attr count «v v ...»` token for the inventory line — the
+   `«..»` value list is appended only when [[value-tokens]] returns some.
+   The GUILLEMETS (not `[..]`) mark the values as an ILLUSTRATIVE SAMPLE,
+   not an authoritative readout — the same de-literaled convention the rest
+   of the context uses — so an agent treats them as example filter keys to
+   query, never as the stored answer to quote. The whole line is a `;;`
+   comment, so the glyphs never break the reader."
   [db boot-ids a c]
   (let [vs (value-tokens db boot-ids a c)]
     (if (seq vs)
-      (str (name a) " " c " [" (str/join " " vs) "]")
+      (str (name a) " " c " «" (str/join " " vs) "»")
       (str (name a) " " c))))
 
 (defn inventory-section
@@ -146,9 +152,11 @@
    per kind — the kind (attr namespace) is the line label, then
    space-separated `attr-name count` pairs with the namespace stripped
    off each attr name (the line label already carries it). LOW-CARDINALITY
-   identity/enum attrs also get their DISTINCT values inline as
-   `attr count [v v ...]` ([[value-tokens]]) so an honest query lands on
-   real keys instead of a guessed-then-empty ident — enum members come
+   identity/enum attrs also get an ILLUSTRATIVE SAMPLE of their DISTINCT
+   values inline as `attr count «v v ...»` ([[value-tokens]]) so an honest
+   query lands on real keys instead of a guessed-then-empty ident; the
+   guillemets mark the sample as non-authoritative (query for the actual
+   value, never quote the sample) — enum members come
    from the schema (no query), identity values from ONE capped distinct
    query when the count is ≤ [[value-cardinality-threshold]]. Pure fn of
    the db; stores nothing; recomputed each render so a newly-stored

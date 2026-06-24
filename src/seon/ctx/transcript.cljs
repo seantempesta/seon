@@ -267,7 +267,7 @@
           :else "")]
     (str steer
          ";;; ── " ns-str " · turn " n-turns " · loop " loop-k "/" cap
-         " · " (name state) " · " now " · agent " id " ──\n"
+         " · " (name (or state :idle)) " · " now " · agent " id " ──\n"
          ns-str "=> ")))
 
 (defn transcript-section

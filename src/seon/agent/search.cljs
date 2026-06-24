@@ -270,8 +270,15 @@
    Worked example — search → read precisely (top-level call, no await:
    the REPL resolves the returned Promise for you):
 
-     (seon.agent.search/grep {:seon.agent.search/pattern \"transact!\"
-                              :seon.agent.search/glob    \"*.md\"})
+     (seon.agent.search/grep {:seon.agent.search/pattern \"message/user\"})
+     ;; => {:seon.agent.search/ok? true
+     ;;     :seon.agent.search/matches
+     ;;     [{:seon.agent.search/path        \"«abs path of the hit»\"
+     ;;       :seon.agent.search/line-number «int»
+     ;;       :seon.agent.search/line-text   \"«the matching line»\"} …]
+     ;;     :seon.agent.search/match-count «int» :seon.agent.search/truncated? false}
+     ;; the hits live under :seon.agent.search/matches (NOT :hits); the
+     ;; count is :seon.agent.search/match-count.
      ;; pick a hit, then:
      (seon.agent.fs/read-file {:seon.agent.fs/path \"<:seon.agent.search/path of the hit>\"})
      ;; jump to its :seon.agent.search/line-number in the content.
