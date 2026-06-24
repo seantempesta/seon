@@ -53,21 +53,20 @@ keywords by construction, so you'd Transit-encode keys inside CBOR = strictly ug
 no upside now Rust is gone. **C** (namespaced string keys) — cosmetic, the
 stringly-typed model the user rejected; this is what was reverted.
 
-## OPEN DECISIONS (need owner sign-off — see below)
+## DECISIONS (RESOLVED by owner 2026-06-24)
 
-1. **Namespace home for transport control keys.** The plan's `:seon.wire/*` has NO
-   backing code ns (the code is `seon.store.wire` + `seon.server.wire`), which
-   violates the "keyword namespace = real code namespace" rule. Options:
-   (a) **create a shared `seon.wire` .cljc protocol ns** (defines the keys/op vocab,
-   required by both sides) → `:seon.wire/*` becomes legitimate + gives the protocol a
-   canonical home [RECOMMENDED]; (b) reuse `:seon.store.wire/*` (the persisted write-id
-   attr already uses it); (c) `:seon.wire/*` with no backing ns [rule violation —
-   rejected].
-2. **Unify the transport echo key.** Today transport `"request-id"` (string) ≠
-   persisted attr `:seon.store.wire/write-id` (keyword). Recommend ONE keyword
-   end-to-end (`:seon.store.wire/write-id`) for consistency — but it's the
-   highest-risk rename (8 echo-suppression sites). Alternative: keep a distinct
-   transport key to minimize blast radius.
+- **Serialization: Transit-JSON (compact)** for the whole wire (envelope + values).
+  msgpack is OFF (not implemented in transit-js/cljs — proven from vendored source).
+  Datahike-consistent by layer: Fressian = persistence (disk), Transit = transport
+  (its Cognitect sibling). Correctness-first; perf is a non-factor on a localhost
+  socket moving small control frames.
+- **Key namespace: `:seon.store.wire/*`** for ALL wire keys (op, ok, basis-t, db-name,
+  tx-data, tx-meta, etc.). No new ns — `seon.store.wire` is the real protocol-owning
+  ns; the JVM `seon.server.wire` consumes that vocabulary. (The earlier `:seon.wire/*`
+  proposal is rejected — no backing ns.)
+- **Echo id UNIFIED: `:seon.store.wire/write-id`** end-to-end — the wire transport key
+  == the persisted Datahike attr (one id, transport + storage). Highest-risk rename
+  (8 coupled sites — see Echo-suppression symmetry); all in one commit.
 
 ## File + key map (Option A)
 
