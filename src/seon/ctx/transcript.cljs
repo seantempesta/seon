@@ -374,8 +374,19 @@
                     "(seon.agent/messages) / (seon.agent/evals))\n\n"))
              (str/join "\n\n" kept)
              "\n\n" tail))
-      ;; No turns yet — masthead + readline still orient a fresh agent.
-      (str head "\n\n" tail))))
+      ;; No turns yet (a fresh agent's first wake). Any pending inbound has
+      ;; NO turn to attach to — without surfacing it here the agent sees an
+      ;; empty REPL and onboards/greets instead of working the task already
+      ;; in its inbox. Render every pending inbound as a `;;; ◀` line flagged
+      ;; NEW (by definition unseen — no turn has acted on it) between the
+      ;; masthead and the readline, so the task sits right above the cursor.
+      ;; Idle case preserved: no pending inbound → no `◀` lines → masthead +
+      ;; readline exactly as before, so a fresh agent with nothing pending
+      ;; still greets its human.
+      (let [in-lns (mapv #(inbound-line % true) inbounds)]
+        (if (seq in-lns)
+          (str head "\n\n" (str/join "\n" in-lns) "\n\n" tail)
+          (str head "\n\n" tail))))))
 
 (defn- turn-card-hiccup
   "ONE turn rendered as a card: the `turn N` header, then the turn's
