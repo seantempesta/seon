@@ -38,21 +38,51 @@
                [seon.error.instrument :as ei]])))
 
 (def skip-syms
-  "FQ `[ns-sym fn-sym]` pairs whose fns OPT OUT of instrumentation: they
-   validate their own args and return errors AS DATA, so an instrumentation
-   THROW on bad input would break a documented/tested contract.
+  "Fns that OPT OUT of instrumentation because they are the agent-facing
+   'errors are values' surface: every call RESOLVES to an envelope
+   (`{::ok? true/false …}`), never throws. A throwing validator on their
+   input would break that contract — agents are taught to branch on
+   `::ok?`, so a throw (even one the eval boundary catches as data) aborts
+   their in-eval code instead of returning the envelope it expects.
 
-   `seon.db/transact!` is SAFE BY DEFAULT — `assert-invocation-shape!`
-   returns an error ENVELOPE (`{::db/ok? false}`) for a bad call, never
-   throws (tested in `db-test`). Its schema stays the discoverable
-   contract; its own guards enforce.
+   These fns own their own validation / degrade-to-envelope; the
+   instrumentation is redundant for them. Instrumentation stays ON for
+   INTERNAL fns (where it earns its keep — it caught `result-var-ref?`).
+
+   Two entry shapes:
+     - a bare `ns-sym` skips EVERY public fn in that ns (use for the pure
+       capability-wrapper namespaces — by the wrapper doctrine, all their
+       public fns are envelope verbs).
+     - a `[ns-sym fn-sym]` pair skips one fn (use in a MIXED ns that also
+       has internal/render fns which SHOULD stay instrumented).
 
    The opt-out lives here (a symbol set), NOT as fn metadata or a schema
-   property, because the CLJS analyzer strips both from the `:malli/schema`
-   value the `collect!` macro reads. A FQ-symbol match needs nothing from
-   the analyzer. The fn carries a comment pointing back to this set.
+   property: the CLJS analyzer strips both from the `:malli/schema` value
+   the `collect!` macro reads, so only a FQ-symbol match is reliable. Each
+   verb fn/ns carries a comment pointing back here. New capability wrappers
+   add themselves (see the wrapper doctrine in `seon.agent.search`).
    Plain `.cljc` so the compile-time macro and the runtime tee path agree."
-  #{['seon.db 'transact!]})
+  #{;; Pure capability-wrapper namespaces — all public fns are verbs.
+    'seon.agent.search                 ; grep
+    'seon.agent.fs                     ; read-file/write-file/list-dir/stat/…
+    'seon.agent.message                ; message!/user/agent
+    ;; Mixed ns — skip the envelope verbs; its open-todos-* RENDER fns stay
+    ;; instrumented.
+    ['seon.agent.todo 'add!]
+    ['seon.agent.todo 'complete!]
+    ['seon.agent.todo 'reopen!]
+    ['seon.agent.todo 'list-open]
+    ;; Safe-by-default core write — assert-invocation-shape! returns an
+    ;; envelope; tested in db-test. (seon.db has many non-verb read fns
+    ;; that DO stay instrumented, so this is fn-level.)
+    ['seon.db 'transact!]})
+
+(defn skip?
+  "True when `[ns-sym fn-sym]` is opted out of instrumentation — either its
+   whole ns is in [[skip-syms]] or the specific pair is."
+  [ns-sym fn-sym]
+  (or (contains? skip-syms ns-sym)
+      (contains? skip-syms [ns-sym fn-sym])))
 
 #?(:clj
    (defn- first-party-file?
@@ -253,7 +283,7 @@
       installs each wrapper in place."
      [ns-sym fn-sym schema-form async?]
      (cond
-       (contains? skip-syms [ns-sym fn-sym]) nil
+       (skip? ns-sym fn-sym) nil
        (not async?)
        (m/-register-function-schema! ns-sym fn-sym schema-form {} :cljs identity)
        :else
@@ -268,12 +298,20 @@
 
 #?(:cljs
    (defn install!
-     "Boot-time call. Runs the compile-time-expanded `collect!` to
-      register every first-party `:malli/schema` fn (via
-      [[register-target!]], which picks the right wrapper per fn), then
-      calls `malli.instrument/instrument!` to install the wrappers in
-      place. Validates inputs + outputs on all public fns (async fns
-      validate output on Promise resolution).
+     "Instrument every fn CURRENTLY in the `:cljs` function-schema registry
+      (input+output; async fns validate output on Promise resolution).
+
+      MUST be paired with a `(collect!)` call FIRST — and that `(collect!)`
+      MUST be expanded from the pod ENTRY ns (`seon.client`), NOT from a
+      leaf ns. `collect!` bakes its scan of `ana/all-ns` at macroexpand
+      time; expanded from a leaf it sees a near-empty analyzer and registers
+      almost nothing (clean build → 3 nses). Expanded from the entry ns —
+      compiled last, after its whole transitive closure — it sees every
+      first-party ns. See issue
+      `instrumentation-collect-clean-build-empty`.
+
+      Runtime/agent-defined fns are NOT on the compile-time roster; they
+      register + instrument through the eval-tee path instead.
 
       No-op when [[enabled?]] is false (`SEON_INSTRUMENT` kill-switch).
 
@@ -282,27 +320,17 @@
          :seon.instrument/n-registered <int>
          :seon.instrument/n-instrumented <int>}.
 
-      Idempotent: re-calling re-registers (no-op; same keys + values)
-      and re-instruments (replaces the wrapper)."
+      Idempotent: re-instruments (replaces the wrapper)."
      []
      (if-not (enabled?)
        {:seon.instrument/enabled?        false
         :seon.instrument/n-registered    0
         :seon.instrument/n-instrumented  0}
-       ;; ONE structural collect (V3-C): every first-party def — the
-       ;; core plus the compiled my.* scaffold — by source-file
-       ;; location, no name prefixes. Runtime-authored my.* fns aren't on
-       ;; the compile-time roster (the analyzer can't see them); they
-       ;; validate through the eval path instead.
-       ;; `collect!` returns its roster size, but [[register-target!]]
-       ;; skips [[skip-syms]] fns, so the ACTUAL registry is smaller —
-       ;; count it directly for an honest number.
-       (let [_      (collect!)
-             n-inst (reduce + (map count (vals (m/function-schemas :cljs))))]
+       (let [n-inst (reduce + (map count (vals (m/function-schemas :cljs))))]
          ;; `mi/instrument!` returns nil (not a count) — it mutates each
          ;; registered fn's var-binding in place to install the validating
          ;; wrapper. n == the registry size since instrument! reads the
-         ;; same atom collect! just populated.
+         ;; same atom collect! populated.
          ;;
          ;; Reporter — default is `m/-fail!` (a generic ex-info); we hand
          ;; in `ei/report-fn` so failures throw with the structured

@@ -50,8 +50,12 @@
     ;; Phase A item 7 — seon-native collector that walks the analyzer
     ;; at compile time for :malli/schema metadata and registers with
     ;; malli.core/-function-schemas*. Bridges the JVM/CLJS gap where
-    ;; mi/collect! is JVM-only.
-    [seon.instrument :as instrument]
+    ;; mi/collect! is JVM-only. `collect!` is referred as a MACRO and
+    ;; expanded HERE (the entry ns, compiled last) so its `ana/all-ns`
+    ;; scan sees the full first-party closure — expanding it from a leaf
+    ;; ns scans a near-empty analyzer (issue
+    ;; instrumentation-collect-clean-build-empty).
+    [seon.instrument :as instrument :refer-macros [collect!]]
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
     [seon.agent :as agent]
@@ -2377,6 +2381,10 @@
   ;; loaded (CLJS module-load is eager and happens before -main fires)
   ;; and before any agent eval that would call them.
   (try
+    ;; `collect!` MUST expand here (the entry ns) so its compile-time
+    ;; `ana/all-ns` scan is complete; `install!` then wraps whatever was
+    ;; registered. Gated so a disabled run registers nothing.
+    (when (instrument/enabled?) (collect!))
     (let [stats (instrument/install!)]
       (log/info-console! "seon.client"
                          (if (:seon.instrument/enabled? stats)

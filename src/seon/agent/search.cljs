@@ -26,6 +26,12 @@
       default-deny). Never reimplement the allowlist, never bypass it.
    5. Lazy `js/require` of the package inside a try — a missing binary
       is an envelope, not a load-time crash.
+   6. OPT OUT OF INSTRUMENTATION. Because every public fn returns errors AS
+      DATA, a throwing Malli validator would break that contract (the agent
+      branches on `::ok?`, not a throw). Add the wrapper's ns (or its verb
+      fns) to `seon.instrument/skip-syms`. The fns still carry full
+      `:malli/schema` as the discoverable contract; they just self-report
+      failures instead of being externally validated.
 
    ## What this ns wraps
 

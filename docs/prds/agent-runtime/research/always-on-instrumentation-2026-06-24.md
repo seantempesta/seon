@@ -53,10 +53,28 @@ the schema's properties — the **CLJS analyzer strips both** from the
 `:malli/schema` value the `collect!` macro reads (verified: a
 `[:function {:seon.instrument/skip true} …]` schema came back property-less
 from the registry even after a clean two-pass rebuild). A FQ-symbol set
-needs nothing from the analyzer. Related gotcha: `collect!` reads global
-`ana/all-ns` at expansion time, so changing a CORE fn's schema needs
-client.cljs re-expanded (touch it / clean rebuild) for boot instrumentation
-to reflect it — incremental builds leave the expansion stale.
+needs nothing from the analyzer.
+
+### CRITICAL: clean-build instrumentation gap (found + fixed)
+
+`collect!` reads global `ana/all-ns` at macroexpand time, and it was being
+expanded inside `install!` in the LEAF ns `seon.instrument.cljc` — which
+compiles early, when almost nothing is analyzed. In a **clean build** that
+registered only **3 nses / 25 fns** (`seon.db`, `seon.schema`,
+`seon.test.runner`); everything else (incl. all of `seon.eval`,
+`seon.agent`, `seon.ctx`…) got NO boot instrumentation. Incremental
+`cljs-watch` rebuilds masked it by accumulating analyzer state (→ ~188), so
+it looked fine in dev but was effectively OFF in production / after a
+cluster reset.
+
+Fixed by expanding `collect!` from the ENTRY ns (`seon.client`, compiled
+last, full transitive closure): `install!` no longer calls `collect!`;
+`seon.client` does `(when (enabled?) (collect!))` before `(install!)` via
+`:refer-macros [collect!]`. Clean-build result: **48 nses / 205 fns**;
+`result-var-ref?` instrumented again. Full writeup +
+reproduction: issue `instrumentation-collect-clean-build-empty`. Malli's
+own CLJS `collect!` defaults to `{:ns *ns*}` (per-ns self-registration) —
+the seon global-scan deviated, which is what made it ordering-fragile.
 
 ## TL;DR
 
