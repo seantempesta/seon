@@ -27,7 +27,8 @@ Implemented + live-verified on the pod (branch `feature/agent-fsm`):
   read by both `install!` (boot) and `eval.cljs/instrument-tee-fns!`
   (runtime/agent/REPL defs). `0`/`false`/`off`/`no` disables. Verified:
   boot logs "instrumentation DISABLED", 0 instrumented, pod healthy.
-- Boot: **224 fns instrumented**, agent resume replay **13/13 OK**.
+- Boot: **205 fns instrumented** (transact! excluded via skip-syms), agent
+  resume replay **13/13 OK**. `bin/test-cljs` green.
 - Surfaced + fixed one **real latent bug**: `seon.eval/result-var-ref?`
   declared `:boolean` but returned `nil` for empty input
   (`(and (seq s) …)` → nil) — broke resume once async/empty-source paths
