@@ -111,14 +111,14 @@
 (def default-max-turns-per-loop
   "Base per-loop turn cap when the agent has no
    `:seon.agent/max-turns-per-loop` attr and `SEON_MAX_TURNS_PER_LOOP`
-   is unset. Mirrors `seon.agent.fsm/default-max-turns-per-loop`."
+   is unset. Mirrors `seon.agent.loop/default-max-turns-per-loop`."
   20)
 
 (defn effective-cap
   "The ENFORCED sliding-window per-loop cap the readline/turn-headers
    display — base cap + every inbound (human or peer) that has landed
-   this wake. Mirrors `seon.agent.fsm/effective-cap`, recomputed here
-   from the composer's db value (requiring `seon.agent.fsm` would cycle:
+   this wake. Mirrors `seon.agent.loop/effective-cap`, recomputed here
+   from the composer's db value (requiring `seon.agent.loop` would cycle:
    fsm → seon.agent → seon.ctx). Base = `:seon.agent/max-turns-per-loop`
    on the entity, else env `SEON_MAX_TURNS_PER_LOOP`, else
    [[default-max-turns-per-loop]]. Optional `db` snapshot.

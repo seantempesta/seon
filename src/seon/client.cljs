@@ -54,9 +54,9 @@
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
     [seon.agent :as agent]
-    ;; The FSM loop + wake trigger: the client boot path ARMS the wake
+    ;; The agent loop + wake trigger: the client boot path ARMS the wake
     ;; trigger (seon.agent does NOT, to stay acyclic).
-    [seon.agent.fsm :as fsm]
+    [seon.agent.loop :as fsm]
     ;; One turn — the bootstrap turn-0 opens a turn directly.
     [seon.agent.turn :as turn]
     [seon.ctx]

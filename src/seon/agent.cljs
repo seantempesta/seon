@@ -1,6 +1,6 @@
 (ns seon.agent
   "The agent RECORD + the agent-facing verbs — 'what an agent IS' (the loop
-   that runs it lives in [[seon.agent.fsm]], one turn in [[seon.agent.turn]]).
+   that runs it lives in [[seon.agent.loop]], one turn in [[seon.agent.turn]]).
 
    The agent operates as a real REPL: bootstrap-CLJS evaluates its forms,
    results land in a per-agent home namespace (`my.agent.<id>`) as live
@@ -15,10 +15,10 @@
        `:seon.agent.session/*` + `:seon.agent.turn/*` in
        [[seon.agent.turn]], `:seon.ctx/*` in [[seon.ctx]])
      - state helpers: `current-state` / `set-state!` / `fresh-wake!` /
-       `armable-agent-ids` (the FSM coordination seam over seon.db)
+       `armable-agent-ids` (the loop coordination seam over seon.db)
      - the lifecycle verbs `wait` / `complete` / `terminate` — each a small
        state transact (the verbs SET state; the loop only READS it)
-     - `inbound-msg-datom?` — the wake gate ([[seon.agent.fsm]]'s trigger
+     - `inbound-msg-datom?` — the wake gate ([[seon.agent.loop]]'s trigger
        and the transcript head-render both reuse it)
      - `create!` / `boot!` — allocate the agent entity (boot! does NOT arm
        the wake trigger — that's the client boot path, which requires fsm)
@@ -42,7 +42,7 @@
      :terminated — orchestrator kill; UNWAKEABLE (change state first)
 
    The wake handler flips a wakeable agent → :active and starts a loop; the
-   loop resets it to :idle on a clean exit (see [[seon.agent.fsm/run-loop!]]).
+   loop resets it to :idle on a clean exit (see [[seon.agent.loop/run-loop!]]).
 
    ## Prompt assembly
 
@@ -330,7 +330,7 @@
 ;; `:seon.agent/wake` are the loop's coordination truth — re-read each
 ;; iteration, externally controllable. These are the thin read/write seam
 ;; over `seon.db`; the lifecycle verbs (wait/complete/terminate) and the
-;; loop ([[seon.agent.fsm]]) build on them.
+;; loop ([[seon.agent.loop]]) build on them.
 ;; ============================================================
 
 (schema/register! ::current-state-request [:map [:seon.agent/id :seon.agent/id]])
@@ -394,10 +394,10 @@
          vec)))
 
 ;; ============================================================
-;; The wake GATE — the one predicate the FSM trigger ([[seon.agent.fsm]])
+;; The wake GATE — the one predicate the loop trigger ([[seon.agent.loop]])
 ;; and the transcript head-render both reuse so a message wakes (and renders
 ;; as an inbound) under exactly ONE rule. The loop + the trigger themselves
-;; live in seon.agent.fsm; this gate stays here (the agent owns 'what counts
+;; live in seon.agent.loop; this gate stays here (the agent owns 'what counts
 ;; as a message TO me').
 ;; ============================================================
 
@@ -479,8 +479,8 @@
      :seon.agent/compile-state  defonce'd bootstrap compile-state (idem)
 
    Does NOT arm the wake trigger — that is the CLIENT boot path's job
-   (`seon.agent.fsm/install-wake-trigger!`), so `seon.agent` need not depend
-   on `seon.agent.fsm` (acyclic). Returns `{:seon.agent/id _ :seon.agent/ns _}`.
+   (`seon.agent.loop/install-wake-trigger!`), so `seon.agent` need not depend
+   on `seon.agent.loop` (acyclic). Returns `{:seon.agent/id _ :seon.agent/ns _}`.
    On a FAILED create! the db error envelope propagates as-is (errors are
    values): there is NO agent entity, so the caller must not arm a trigger."
   [{:seon.agent/keys [id purpose]}]

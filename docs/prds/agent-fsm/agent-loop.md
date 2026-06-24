@@ -28,6 +28,18 @@ transcript renders this loop's event stream, and the activity-log
 RENDERABLE is described render-side there; the activity-log DERIVATION (the
 history query + the tx-meta it joins) is described loop-side here.
 
+**NS RENAME (locked, Decision 8): `seon.agent.fsm` → `seon.agent.loop`**
+(`src/seon/agent/fsm.cljs` → `src/seon/agent/loop.cljs`). `run-loop!` is the
+heart, this doc + the activity log all speak of "the loop", and the 5→3
+state collapse de-emphasizes "state machine" — so the honest name is `loop`,
+which also makes the new `:seon.agent.loop/cause` / `:seon.agent.loop/stop-reason`
+attrs match their owning code ns (the "keyword namespace = real code namespace"
+rule). The `fsm.cljs:NNN` references throughout THIS doc describe the current
+code in the file BEING RENAMED to `loop.cljs`; treat every `fsm.cljs` /
+`seon.agent.fsm` mention below as `loop.cljs` / `seon.agent.loop` post-rename.
+The rename is a standalone atomic patch (Sequence step 1) — file rename + all
+requires + the `seon.client` boot require — landing before the loop changes.
+
 The one design change this spec asks for: **the state model is over-built.**
 Five states (`:idle :active :waiting :completed :terminated`) collapse to
 three BEHAVIORAL classes the loop and wake actually distinguish — running /
@@ -508,7 +520,13 @@ Changed (the state-model collapse + tx-meta stamping):
 
 ## Sequence (never leaves a parallel system)
 
-1. **Add the tx-meta attrs** (`:seon.agent.loop/cause`,
+1. **Rename `seon.agent.fsm` → `seon.agent.loop`** (Decision 8) — `fsm.cljs` →
+   `loop.cljs`, the `(ns …)` form, every `require`/alias across `src/`, and the
+   `seon.client` boot require. Pure rename, no behavior change; compiles clean;
+   `bin/seon cluster reset default` not needed (no data shape change). Lands
+   FIRST so all subsequent `:seon.agent.loop/*` attrs and steps reference the
+   real ns. (Renumber the steps below as 2–8.)
+2. **Add the tx-meta attrs** (`:seon.agent.loop/cause`,
    `:seon.agent.loop/stop-reason`) — register in seon.db, wire into the
    transition call sites. (Pure addition; nothing reads them yet.)
 2. **Delete `:seon.agent.message/handled?`** — schema + the two gate clauses
@@ -551,6 +569,12 @@ Each step compiles clean on its own; no `*-v2` parallel path at any point.
 7. **`clock` foot-gun (`transcript.cljs:110`):** replace the silent
    `(or inst (js/Date.))` with a guard that fails loud if no stored `:at` — fix
    in P1 (a stray live clock in transcript text would break byte-stability).
+8. **NS rename `seon.agent.fsm` → `seon.agent.loop`** (`fsm.cljs` →
+   `loop.cljs`): the honest name (`run-loop!` is the heart; the 5→3 collapse
+   de-emphasizes "state machine"), and it makes the new `:seon.agent.loop/*`
+   tx-meta attrs match their owning code ns. Standalone atomic patch, lands
+   first (Sequence step 1). The `fsm.cljs:NNN` references in this doc describe
+   pre-rename code.
 
 ## Non-goals
 

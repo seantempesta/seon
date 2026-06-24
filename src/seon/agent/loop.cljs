@@ -1,5 +1,5 @@
-(ns seon.agent.fsm
-  "The agent FINITE STATE MACHINE — the wake trigger + the loop.
+(ns seon.agent.loop
+  "The agent LOOP — the wake trigger + the loop.
 
    The loop is the WHOLE stop policy: each iteration re-reads `{state wake}`
    from the agent record and halts on any of —
@@ -37,7 +37,7 @@
 
 (defn- log [agent-id stage & info]
   (seon-log/info-console!
-    (str "seon.agent.fsm/" agent-id)
+    (str "seon.agent.loop/" agent-id)
     stage
     (if (= 1 (count info)) (first info) (vec info))))
 
@@ -253,7 +253,7 @@
       (doseq [{eid :seon.db/e} exhausted]
         (let [msg (db/entity {:seon.db/db db :seon.db/ref eid})]
           (js/console.error
-            (str "seon.agent.fsm: WAKE REFUSED for agent " id
+            (str "seon.agent.loop: WAKE REFUSED for agent " id
                  " — message " (:seon.agent.message/id msg)
                  " hops=" (:seon.agent.message/hops msg)
                  " reached hop-cap " warn/hop-cap
@@ -286,7 +286,7 @@
                             (await (run-loop! input wake))))))
                     (.catch (fn [e]
                               (js/console.error
-                                (str "seon.agent.fsm: wake loop threw for "
+                                (str "seon.agent.loop: wake loop threw for "
                                      id ": " (or (.-message e) e)))))))
               0)))))))
 

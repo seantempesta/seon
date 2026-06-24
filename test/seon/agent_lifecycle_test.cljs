@@ -34,7 +34,7 @@
   (:require
     [cljs.test :refer [deftest is testing async]]
     [seon.agent :as agent]
-    [seon.agent.fsm :as fsm]
+    [seon.agent.loop :as fsm]
     [seon.client :as client]
     [seon.ctx :as ctx]
     [seon.db :as db]
