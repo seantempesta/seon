@@ -2378,7 +2378,11 @@
   ;; and before any agent eval that would call them.
   (try
     (let [stats (instrument/install!)]
-      (log/info-console! "seon.client" "instrumentation installed" stats))
+      (log/info-console! "seon.client"
+                         (if (:seon.instrument/enabled? stats)
+                           "instrumentation installed"
+                           "instrumentation DISABLED (SEON_INSTRUMENT)")
+                         stats))
     (catch :default e
       (log/error-console! "seon.client" "instrumentation install failed"
                           {:msg (.-message e)})))

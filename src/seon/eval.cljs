@@ -48,6 +48,7 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.error.instrument :as einstrument]
+            [seon.instrument :as instrument]
             [seon.platform :as platform]
             [seon.repair :as repair]
             [seon.repl.internal :as internal]
@@ -748,8 +749,8 @@
   {:malli/schema [:=> [:catn [::form-str :string]] :boolean]}
   [form-str]
   (let [s (str/trim (str form-str))]
-    (and (seq s)
-         (boolean
+    (boolean
+      (and (seq s)
            (try
              (let [rdr  (reader-types/string-push-back-reader s)
                    sym  (tools-reader/read {:eof ::eof :read-cond :allow} rdr)
@@ -1220,13 +1221,17 @@
    Idempotent: re-registering same key is last-write-wins; re-running
    `mi/instrument!` against an already-wrapped var replaces the wrapper.
 
-   `targets` — seq of `[ns-sym fn-sym schema-form]` triples."
+   Async fns route through [[seon.instrument/register-target!]] — simple
+   fixed-arity fns get input+output (output on Promise resolution),
+   variadic/multi-arity get input+arity. No-op when instrumentation is
+   disabled via the `SEON_INSTRUMENT` kill-switch.
+
+   `targets` — seq of `[ns-sym fn-sym schema-form async?]` tuples."
   [targets]
-  (when (seq targets)
-    (doseq [[ns-sym fn-sym schema-form] targets]
-      (m/-register-function-schema! ns-sym fn-sym schema-form {}
-                                    :cljs identity))
-    (let [target-set (set (map (fn [[n s _]] [n s]) targets))]
+  (when (and (seq targets) (instrument/enabled?))
+    (doseq [[ns-sym fn-sym schema-form async?] targets]
+      (instrument/register-target! ns-sym fn-sym schema-form async?))
+    (let [target-set (set (map (fn [[n s _ _]] [n s]) targets))]
       (mi/instrument! {:report  einstrument/report-fn
                        :filters [(fn [n s _d] (contains? target-set [n s]))]}))))
 
@@ -1282,15 +1287,20 @@
 
 (defn- collect-instrument-targets
   "From the snapshot diff used by `build-tee-entities`, return the seq of
-   `[ns-sym fn-sym schema-form]` triples for newly-defined fns whose
-   `:malli/schema` metadata parsed cleanly (Phase 3)."
+   `[ns-sym fn-sym schema-form async?]` tuples for newly-defined fns whose
+   `:malli/schema` metadata parsed cleanly (Phase 3). `async?` (from the
+   var-map's `:async` meta) routes the fn to the await-then-validate
+   wrapper in [[instrument-tee-fns!]] instead of malli's stock synchronous
+   wrapper, which would false-fail on the Promise return."
   [compile-state defs-before]
   (for [{:keys [ns sym var-map]} (analyzer-info/defs-since defs-before compile-state)
-        :let [schema-form (:malli/schema (:meta var-map))]
+        :let [schema-form (:malli/schema (:meta var-map))
+              async?      (boolean (:async (:meta var-map)))]
+        ;; Opt-out (seon.instrument/skip-syms) is applied in register-target!.
         :when (and schema-form
                    (try (m/schema schema-form) true
                         (catch :default _ false)))]
-    [ns sym schema-form]))
+    [ns sym schema-form async?]))
 
 (defn- ns-form-name
   "If `source` parses as an `(ns NAME …)` form, return NAME as a

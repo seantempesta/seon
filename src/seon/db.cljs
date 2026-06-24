@@ -426,8 +426,12 @@
      (schema/register! ::author :seon.db/ref)
      (db/transact! {::db/tx-data [{:db/id \"p1\" ::person-id \"alice\"}
                                   {::doc-id \"d2\" ::author \"p1\"}]})"
-  ;; NOTE: ^:async fns are skipped by instrumentation today, so this
-  ;; schema is the discoverable contract; the internal guards enforce.
+  ;; Opted OUT of instrumentation — listed in `seon.instrument/skip-syms`.
+  ;; SAFE BY DEFAULT means a bad invocation shape returns an error ENVELOPE
+  ;; (`assert-invocation-shape!`), never throws; an instrumentation throw on
+  ;; bad input would break that tested contract. The opt-out lives in
+  ;; skip-syms (a FQ-symbol set) because the analyzer strips schema/metadata
+  ;; markers. This schema stays the discoverable contract; guards enforce.
   {:malli/schema
    [:function
     [:=> [:cat ::transact-request] ::transact-response]
