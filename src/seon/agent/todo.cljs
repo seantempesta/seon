@@ -7,7 +7,7 @@
 
    WHEN: any task with two or more steps. Mint one todo per step BEFORE you
    start — title = the step, from = the asker's ref — then complete! each id
-   as that step lands. Your open items render in the <open-todos> section
+   as that step lands. Your open items render in the open-todos section
    every turn, each line carrying its id, so a resumed or distracted you
    always sees what is left; an empty section is the done-signal. Nothing
    to clear, nothing to remember across turns.
@@ -25,7 +25,7 @@
 
    In ordinary turn-by-turn work you rarely need the .then: add! on its own
    line prints its envelope on the value line — read the id there, or off
-   the <open-todos> section next turn, and pass it to complete! when the
+   the open-todos section next turn, and pass it to complete! when the
    step is done. reopen! flips a done item back to open. When you reply
    mid-task, include how many items are still open so your human knows
    where you are."
@@ -224,9 +224,11 @@
                      []))}))))   ; unknown owner = no items, derived view
 
 (defn open-todos-block
-  "Context-section text for `owner`'s open todos in db value `db` — one
-   `<id> [<age>] <title>` line, oldest first; \"\" when none (the section
-   vanishes when the work is done — nothing stored, nothing to acknowledge)."
+  "Context-section text for `owner`'s open todos in db value `db` — a
+   `;; ── open todos ──` comment-block, one `;; <id> [<age>] <title>` line
+   per item, oldest first; \"\" when none (the section vanishes when the
+   work is done — nothing stored, nothing to acknowledge). Rides as `;;`
+   comments so the whole context reads as eval'able Clojure."
   {:malli/schema [:=> [:catn [::db :seon.db/db-val] [::owner :seon.db/ref]]
                   :string]}
   [db owner]
@@ -234,11 +236,13 @@
                 (open-todos db oe))]
     (if (empty? todos)
       ""
-      (str "Your open work items — (seon.agent.todo/complete! {:seon.agent.todo/id <id>}) "
-           "when finished:\n"
+      (str ";; ── open todos ──\n"
+           ";; Your open work items — close one with\n"
+           ";;   (seon.agent.todo/complete! {:seon.agent.todo/id \"<id>\"})\n"
+           ";; when finished:\n"
            (str/join "\n"
                      (map (fn [{::keys [id title created-at]}]
-                            (str id " [" (age-str created-at) "] " title))
+                            (str ";; " id " [" (age-str created-at) "] " title))
                           todos))))))
 
 (defn open-todos-section

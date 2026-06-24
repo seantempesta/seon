@@ -9,7 +9,7 @@
    single source of truth and are freely user-editable.
 
    This is identity ONLY. The universal your-output-is-a-REPL MECHANICS
-   are hardcoded in the `<system>` block (`seon.ctx/system-text`), not
+   are hardcoded in the system section (`seon.ctx/system-text`), not
    here — so the user can edit or even empty SOUL.md/AGENTS.md without
    breaking the core: the load-bearing teaching lives in the core, the
    files only add who-this-agent-is on top. When no identity file

@@ -130,7 +130,7 @@
    without this guard those would tee as bogus `:seon.fn` rows + a
    sourceless `{:seon.ns/name :result}` row (the prefix allow-list was
    the only thing hiding them — once it's gone they leak into the
-   `<namespace>` inventory)."
+   namespace inventory)."
   {:malli/schema [:=> [:cat ::defs-snapshot ::compile-state] [:sequential ::new-def]]}
   [before-snapshot compile-state]
   {:pre [(map? before-snapshot) (some? compile-state)]}

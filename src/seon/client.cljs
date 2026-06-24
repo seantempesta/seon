@@ -1276,7 +1276,7 @@
 ;; The var-derived `:seon.fn` rows above come from the SPECCED vars a consumer
 ;; registered into `!extra-core-vars`. That leaves two gaps for a third party's
 ;; OWN code: (a) an UNSPECCED public fn gets no `:seon.fn` row (so the
-;; `<namespace>` renderer — which lists member rows — never shows it), and
+;; namespace renderer — which lists member rows — never shows it), and
 ;; (b) a downstream ns owning ZERO specced fns gets no `:seon.ns` row at all
 ;; (silently invisible to context + retrieval). A third party wants its WHOLE
 ;; surface readable by its agents, not just the specced slice. So when
@@ -1478,7 +1478,7 @@
    surface counterpart to the specced-only var-derived rows: this is what
    makes an unspecced helper (`acme.helpers/format-count`) and an
    unspecced-only ns's fns (`acme.notes/*`) appear as indexed members in the
-   `<namespace>` render. `now` is the shared `:seon.fn/created-at` instant.
+   namespace render. `now` is the shared `:seon.fn/created-at` instant.
 
    Each ns's file is read once; its defns parsed by [[defn-rows-from-source]].
    Specced downstream fns ALSO get a var-derived row (with the real

@@ -11,6 +11,7 @@
    Self-contained: no spine read API, just the tile renderer +
    wired-content provenance."
   (:require
+    [clojure.string :as str]
     [seon.db :as db]
     [seon.render :as render]
     [seon.render.live-tile :as live-tile]))
@@ -78,12 +79,22 @@
                                      '[:seon.render.live-tile/content]
                                      :seon.db/ref [:seon.agent/id id]}))
                     entity)
-            wired (live-tile/wired-content {:seon.render/entity ent})]
+            wired (live-tile/wired-content {:seon.render/entity ent})
+            ;; The body is a render twin (:ai text, or hiccup pr-str, or
+            ;; an error envelope) — arbitrary content the human's tile
+            ;; shows. It rides this comment-block as `;;` lines so the
+            ;; whole section reads as eval'able Clojure (the context IS one
+            ;; live REPL); the agent reads the value, it never evaluates.
+            body-comment (->> (str/split-lines body)
+                              (map #(str ";; " %))
+                              (str/join "\n"))]
         (str ";; ── live tile ──\n"
              ";; Your live tile — what your human currently sees (as-of this\n"
              ";; turn's render; the human's view live-updates between turns).\n"
-             "Wired: " (live-tile/wired-label wired) "\n\n"
-             body "\n\n"
-             "To change it: redefine the wired fn, or transact a new value\n"
-             "(a qualified fn symbol or literal hiccup) onto\n"
-             ":seon.render.live-tile/content on your agent entity.")))))
+             ";; Wired: " (live-tile/wired-label wired) "\n"
+             ";;\n"
+             body-comment "\n"
+             ";;\n"
+             ";; To change it: redefine the wired fn, or transact a new value\n"
+             ";; (a qualified fn symbol or literal hiccup) onto\n"
+             ";; :seon.render.live-tile/content on your agent entity.")))))

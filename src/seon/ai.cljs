@@ -329,7 +329,7 @@
   "Minimal boot-edge fallback ONLY — used when NO identity file exists
    (no SOUL.md / AGENTS.md). The REAL identity is read LIVE from those
    files every turn (my.soul/system-prompt-text); the universal REPL
-   mechanics are hardcoded in the `<system>` block
+   mechanics are hardcoded in the system section
    (seon.ctx/system-text), not here."
   (str "You are Seon, a bonded Clojure agent. Your entire output is "
        "read and evaluated as ClojureScript source — act by emitting "

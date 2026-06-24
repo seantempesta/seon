@@ -40,7 +40,7 @@
    every call (see `my.soul`), joined by
    `seon.ai/effective-system-prompt` with a minimal fallback when no
    identity file exists. The universal REPL mechanics are hardcoded in
-   the `<system>` block (`seon.ctx/system-text`).
+   the system section (`seon.ctx/system-text`).
 
    Streaming: we ASK for a stream (`.stream` + `.finalChatCompletion`)
    and the SDK buffers it into one assembled ChatCompletion object —

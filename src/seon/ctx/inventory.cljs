@@ -18,7 +18,7 @@
   12)
 
 (def ^:private value-sample-cap
-  "Max distinct values rendered inline per attr (a `…` token is appended
+  "Max distinct values rendered inline per attr (a `...` token is appended
    inside the brackets when the set was larger)."
   8)
 
@@ -47,10 +47,10 @@
        ";; query. Read any kind's rows with the LISTED attrs, e.g.:\n"
        ";;   (seon.db/query {:seon.db/query\n"
        ";;     '[:find ?v :where [?e :my.kb.codebase/answer ?v]]})\n"
-       ";;   ⟨…⟩ after a count = the DISTINCT values that attr HOLDS (a\n"
-       ";;   low-cardinality identity/enum/category column) — these are\n"
+       ";;   [v v ...] after a count = the DISTINCT values that attr HOLDS\n"
+       ";;   (a low-cardinality identity/enum/category column) — these are\n"
        ";;   the EXACT keys to filter on; query them, never guess others.\n"
-       ";;   Attrs with no ⟨…⟩ are payload (refs, timestamps, free text);\n"
+       ";;   Attrs with no [..] are payload (refs, timestamps, free text);\n"
        ";;   query them to see their values.\n"
        ";; (post-bootstrap data only; the full system index is one call\n"
        ";;  away — (seon.db/store-inventory {:seon.db/system? true}))"))
@@ -85,7 +85,7 @@
 
 (defn- distinct-values
   "The POST-BOOTSTRAP distinct values of `attr` against `db`, sorted by
-   printed form and capped at [[value-sample-cap]] (a trailing `…` marks
+   printed form and capped at [[value-sample-cap]] (a trailing `...` marks
    truncation). Scopes OUT boot-index rows (`boot-ids`,
    [[seon.db/bootstrap-row-ids]]) so the value set matches
    [[seon.db/store-inventory]]'s post-bootstrap count — a global query
@@ -109,7 +109,7 @@
         toks   (mapv pr-str shown)]
     (when (every? #(<= (count %) value-token-char-cap) toks)
       (cond-> toks
-        (> (count sorted) value-sample-cap) (conj "…")))))
+        (> (count sorted) value-sample-cap) (conj "...")))))
 
 (defn- value-tokens
   "The distinct VALUES to render after an attr's count, or nil when the
@@ -130,12 +130,13 @@
       :else nil)))
 
 (defn- attr-token
-  "Render ONE `attr count ⟨v v …⟩` token for the inventory line — the
-   `⟨…⟩` value list is appended only when [[value-tokens]] returns some."
+  "Render ONE `attr count [v v ...]` token for the inventory line — the
+   `[..]` value list is appended only when [[value-tokens]] returns some.
+   ASCII brackets (no glyphs) so the commented line reads cleanly."
   [db boot-ids a c]
   (let [vs (value-tokens db boot-ids a c)]
     (if (seq vs)
-      (str (name a) " " c " ⟨" (str/join " " vs) "⟩")
+      (str (name a) " " c " [" (str/join " " vs) "]")
       (str (name a) " " c))))
 
 (defn inventory-section
@@ -146,7 +147,7 @@
    space-separated `attr-name count` pairs with the namespace stripped
    off each attr name (the line label already carries it). LOW-CARDINALITY
    identity/enum attrs also get their DISTINCT values inline as
-   `attr count ⟨v v …⟩` ([[value-tokens]]) so an honest query lands on
+   `attr count [v v ...]` ([[value-tokens]]) so an honest query lands on
    real keys instead of a guessed-then-empty ident — enum members come
    from the schema (no query), identity values from ONE capped distinct
    query when the count is ≤ [[value-cardinality-threshold]]. Pure fn of
@@ -166,8 +167,12 @@
             ;; post-bootstrap (matching store-inventory's counts), so a
             ;; low-card identity query excludes boot-index entities.
             boot-ids (db/bootstrap-row-ids db)
+            ;; Each kind row rides as a `;;` comment so the whole section
+            ;; reads as eval'able Clojure (the context IS one live REPL) —
+            ;; the agent reads the row, queries the named attrs, never
+            ;; evaluates this line.
             lines (map (fn [{kind :seon.db/kind attrs :seon.db/attrs}]
-                         (str (name kind) ": "
+                         (str ";; " (name kind) ": "
                               (str/join " "
                                 (map (fn [[a c]] (attr-token db boot-ids a c))
                                      attrs))))

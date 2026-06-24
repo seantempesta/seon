@@ -77,7 +77,7 @@
     (str/ends-with? s "-test")))
 
 (defn included-ns?
-  "The ONE selection rule for the `<namespace>` tags: EVERY indexed
+  "The ONE selection rule for the namespace sections: EVERY indexed
    :seon.ns row renders EXCEPT *.internal (hidden-ns-name?) and *-test
    (test-ns-name?) ones — both STRUCTURAL naming conventions that apply
    to seon, my.*, and downstream code alike. No prefix allow-list: the

@@ -357,9 +357,10 @@
                     (let [txt (str (section-text "AGTctxtest00p2"
                                                  :your-entity))]
                       ;; The header's example transact contains the
-                      ;; literal `:seon.agent/purpose "…"` — exclude it:
-                      ;; a REAL value is any other string after the attr.
-                      (is (not (re-find #":seon\.agent/purpose \"(?!…)" txt))
+                      ;; literal `:seon.agent/purpose "..."` (ASCII
+                      ;; placeholder, no glyphs — no-bare-prose unit) —
+                      ;; exclude it: a REAL value is any other string.
+                      (is (not (re-find #":seon\.agent/purpose \"(?!\.\.\.)" txt))
                           "no purpose VALUE rendered — the attr is absent")
                       (is (str/includes? txt "purpose is UNSET")
                           "unset purpose → the derive teaching renders")
@@ -384,16 +385,18 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 (deftest system-text-teaches-markdown-replies
-  ;; Chat-surface task #29 (a21 writing teaching): one prose-shaped
-  ;; standing teaching — no parens-leading lines for the extractor.
+  ;; Chat-surface task #29 (a21 writing teaching): the markdown-replies
+  ;; teaching is present, and (no-bare-prose unit) it rides as `;;;`
+  ;; runtime-voice comment lines so the whole system block reads as
+  ;; eval'able Clojure — the B1 extractor sees only comments here.
   (is (str/includes? ctx/system-text
-                     "replies render as markdown"))
+                     "messages render as markdown"))
   (let [bullet-lines (->> (str/split-lines ctx/system-text)
-                          (drop-while #(not (str/includes? % "replies render as markdown")))
+                          (drop-while #(not (str/includes? % "messages render as markdown")))
                           (take 3))]
     (is (seq bullet-lines))
-    (is (not-any? #(str/starts-with? (str/triml %) "(") bullet-lines)
-        "prose-shaped — the B1 extractor must not eval it")))
+    (is (every? #(str/starts-with? (str/triml %) ";;") bullet-lines)
+        "comment-shaped — the no-bare-prose unit makes every line a `;;`/`;;;` comment")))
 
 (deftest purpose-entity-and-your-entity-and-verbs
   (async done
@@ -642,9 +645,11 @@
                       (is (str/includes? txt ";; ── stored data inventory ──")
                           "rendered under the stored-data inventory header")
                       ;; ONE line per kind: the kind name is the line label,
-                      ;; written ONCE, then bare attr-name count pairs.
-                      (is (str/includes? txt "my.workout: ")
-                          "kind is the line label (namespace written once)")
+                      ;; written ONCE, then bare attr-name count pairs. The
+                      ;; whole body rides as `;;` comments (no-bare-prose
+                      ;; unit — the context reads as eval'able Clojure).
+                      (is (str/includes? txt ";; my.workout: ")
+                          "kind is the line label (namespace written once), commented")
                       ;; count is correct (3 rows, both attrs present on each).
                       (is (str/includes? txt "date 3")
                           "attr count is the live row count, namespace stripped")
@@ -656,7 +661,7 @@
                       ;; legitimately ARE the qualified attr keywords now that
                       ;; low-card identity values render inline, so scope the
                       ;; check to the my.workout line.)
-                      (let [wline (first (filter #(str/starts-with? % "my.workout: ")
+                      (let [wline (first (filter #(str/starts-with? % ";; my.workout: ")
                                                  lines))]
                         (is (some? wline) "the my.workout kind line is present")
                         (is (not (str/includes? wline ":my.workout/date"))
@@ -664,12 +669,13 @@
                         (is (not (str/includes? wline "my.workout/date"))
                             "no qualified attr name leaks into the pairs")
                         ;; the new value-surfacing: a low-card keyword attr
-                        ;; shows its DISTINCT members inline.
-                        (is (str/includes? wline "⟨:lift :run⟩")
+                        ;; shows its DISTINCT members inline, ASCII-bracketed
+                        ;; (no glyphs that would break the reader).
+                        (is (str/includes? wline "[:lift :run]")
                             "low-cardinality categorical values render inline"))
                       ;; one-line-per-kind: exactly ONE body line mentions
                       ;; the kind (the header is ;; comments, not a kind line).
-                      (is (= 1 (count (filter #(str/starts-with? % "my.workout: ")
+                      (is (= 1 (count (filter #(str/starts-with? % ";; my.workout: ")
                                               lines)))
                           "exactly one line per kind")))))))
         (.then (fn [] (done)))
