@@ -26,7 +26,6 @@
     [seon.ai.tokens :as tokens]
     [seon.ctx :as ctx]
     [seon.db :as db]
-    [seon.handler :as handler]
     [seon.render :as render]
     [seon.schema :as schema]))
 
@@ -48,9 +47,6 @@
    [:seon.render/section-texts [:vector :seon.agent.inspect/section-text]]
    [:seon.render/section-html [:vector :seon.ctx/section-html]]
    [:seon.render/token-estimate :int]])
-
-(schema/register! :seon.agent.inspect/handlers-response
-  [:map [:seon.handler/list [:vector :map]]])
 
 (defn- resolve-id
   [id]
@@ -108,13 +104,3 @@
      ;; (~4 chars/token, via seon.ai.tokens), so the count grows by the
      ;; system-block length.
      :seon.render/token-estimate  (tokens/estimate full-text)}))
-
-(defn handlers
-  "Return the live handler registry visible to the agent (core
-   handlers + the agent's own, if any), sorted by priority desc."
-  {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/handlers-response]}
-  [{:seon.agent/keys [id]}]
-  (let [id (resolve-id id)
-        {:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id id})
-        hs (handler/query-handlers {:seon.agent/id id :seon.db/db db})]
-    {:seon.handler/list hs}))

@@ -56,6 +56,26 @@
 ;; :no-forms / :turn-cap / :turn-error (implicit loop exits).
 (schema/register! :seon.agent.loop/stop-reason :keyword)
 
+;; ---- Activity log (DERIVED timeline) request/response shapes --------------
+;; One row per loop-provenance transition. `:seon.agent/state` is the value
+;; AS-OF that transition's tx (reconstructed from the state-datom history, so
+;; the idle→idle wait/complete txs — which write NO state datom — still carry
+;; the right state). `cause` is the waking message's content summary (present
+;; on :idle→:active wakes); `stop-reason` names why a loop ended (present on
+;; exits). Either may be absent on a given row, never both.
+(schema/register! :seon.agent.loop/activity-request
+  [:map [:seon.agent/id :string]])
+
+(schema/register! :seon.agent.loop/activity-entry
+  [:map
+   [:seon.agent.loop/at          :inst]
+   [:seon.agent/state            :seon.agent/state]
+   [:seon.agent.loop/stop-reason {:optional true} :keyword]
+   [:seon.agent.loop/cause       {:optional true} :string]])
+
+(schema/register! :seon.agent.loop/activity-response
+  [:map [:seon.agent.loop/entries [:vector :seon.agent.loop/activity-entry]]])
+
 (defn- log [agent-id stage & info]
   (seon-log/info-console!
     (str "seon.agent.loop/" agent-id)
@@ -361,3 +381,71 @@
     (db/listen!
       {:seon.db/key     k
        :seon.db/handler (wake-handler input)})))
+
+;; ============================================================
+;; Activity log — a DERIVED timeline over the agent's loop-provenance
+;; tx-meta. Nothing is stored that isn't already a datom: each loop
+;; transition stamps `:seon.agent.loop/cause` (wake) or
+;; `:seon.agent.loop/stop-reason` (exit) on its tx, alongside the
+;; auto-stamped `:seon.db/agent-id` + `:db/txInstant`. We find THOSE txs
+;; (NOT state-change datoms — a wait/complete on an already-:idle agent
+;; writes tx-meta but NO new `:seon.agent/state` datom, so deriving from
+;; state datoms alone would drop those stop-reasons) and join the meta.
+;; The state value per row is reconstructed from the state-datom history
+;; (latest assertion at-or-before the tx), so the idle→idle txs still
+;; report the right state.
+;; ============================================================
+
+(defn activity-log
+  "Return the agent's activity log — the DERIVED timeline of its loop
+   transitions, ordered by `:db/txInstant`. Map-in, map-out.
+
+   Each entry: `:seon.agent.loop/at` (txInstant), `:seon.agent/state`
+   (the state as-of that tx), and — whichever the transition carried —
+   `:seon.agent.loop/stop-reason` (a loop exit: :wait/:complete/
+   :terminate/:no-forms/:turn-cap/:turn-error) and/or
+   `:seon.agent.loop/cause` (the waking message's content, on an
+   :idle→:active wake). A function of the DB; no stored log to clear."
+  {:malli/schema [:=> [:cat :seon.agent.loop/activity-request]
+                       :seon.agent.loop/activity-response]}
+  [{:seon.agent/keys [id]}]
+  (let [agent-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))]
+    (if-not agent-eid
+      {:seon.agent.loop/entries []}
+      (let [;; Full state-assertion history, ordered by tx — used to
+            ;; reconstruct the state AS-OF any transition tx.
+            state-hist (->> (db/query '[:find ?st ?tx ?added
+                                        :in $ ?e
+                                        :where [?e :seon.agent/state ?st ?tx ?added]]
+                                      (db/history) agent-eid)
+                            (filter #(nth % 2))
+                            (sort-by second))
+            state-as-of (fn [tx]
+                          (->> state-hist
+                               (filter #(<= (second %) tx))
+                               last
+                               first))
+            ;; Loop-provenance transitions for this agent: txs carrying a
+            ;; stop-reason OR a cause, with their txInstant.
+            txs (->> (db/query '[:find ?tx ?inst
+                                 :in $ ?aid
+                                 :where
+                                 [?tx :seon.db/agent-id ?aid]
+                                 [?tx :db/txInstant ?inst]
+                                 (or [?tx :seon.agent.loop/stop-reason _]
+                                     [?tx :seon.agent.loop/cause _])]
+                               id)
+                     (sort-by second))]
+        {:seon.agent.loop/entries
+         (mapv (fn [[tx inst]]
+                 (let [reason (:seon.agent.loop/stop-reason
+                                (db/pull '[:seon.agent.loop/stop-reason] tx))
+                       cause  (get-in
+                                (db/pull '[{:seon.agent.loop/cause
+                                            [:seon.agent.message/content]}] tx)
+                                [:seon.agent.loop/cause :seon.agent.message/content])]
+                   (cond-> {:seon.agent.loop/at    inst
+                            :seon.agent/state      (or (state-as-of tx) :idle)}
+                     reason (assoc :seon.agent.loop/stop-reason reason)
+                     cause  (assoc :seon.agent.loop/cause cause))))
+               txs)}))))

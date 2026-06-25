@@ -43,6 +43,7 @@
     [clojure.string :as str]
     [datahike.api :as d]
     [seon.agent-view :as agent-view]
+    [seon.agent.loop :as agent-loop]
     [seon.ai.tokens :as tokens]
     [seon.ctx :as ctx]
     [seon.ctx.usage :as ctx-usage]
@@ -311,10 +312,7 @@
      ;; existing elided-note branch is a no-op.
      :elided    0
      :agent-tile tile
-     :agent      agent
-     :handler-count
-     (count (try (:seon.handler/list (inspect/handlers {:seon.agent/id agent-id}))
-                 (catch :default _ [])))}))
+     :agent      agent}))
 
 ;; ============================================================
 ;; Page rendering — full page (for initial GET) AND morph fragments
@@ -354,7 +352,7 @@
             last12))))
 
 (defn- header-fragment
-  [agent-id {:keys [agent token-est handler-count turn-durs]}]
+  [agent-id {:keys [agent token-est turn-durs]}]
   (let [state (or (:seon.agent/state agent) :unknown)
         ;; Derived — the :seon.agent/turn-count attr was retired.
         turns (default/agent-turn-count agent)]
@@ -370,7 +368,6 @@
         (str "thinking — turn " (inc turns))]
        (comp/status-dot state))
      [:span {:class "text-xs text-text-400"} (str "turn " turns)]
-     [:span {:class "text-xs text-text-400"} (str handler-count " handlers")]
      (activity-sparkline turn-durs)
      [:span {:class "text-xs text-text-500 ml-auto"}
       (str "~" token-est " tokens")]
@@ -1154,17 +1151,21 @@
   [system? completed?]
   (let [db   @db/*conn*
         rows (list-agents-data)
-        ;; Lifecycle split: completed agents WERE grouped collapsed at the
-        ;; bottom via the (now-removed) `:completed` state. DORMANT after the
-        ;; 5→3 collapse — completion is now a :seon.agent.loop/stop-reason
-        ;; :complete tx-meta in history, not a state value, so this predicate
-        ;; never matches and every agent renders in the active grid. The
-        ;; history-grid grouping is rebuilt from stop-reason history by the
-        ;; activity-log derivation (context-render.md). Kept (not deleted) so
-        ;; the grouping plumbing is here when that lands.
-        completed-row? (fn [r] (= :completed (:seon.agent/state r)))
-        active    (vec (remove completed-row? rows))
-        completed (vec (filter completed-row? rows))
+        ;; Lifecycle split: completion is a :seon.agent.loop/stop-reason
+        ;; (:complete / :terminate) in tx-meta history, NOT a state value
+        ;; (the 5→3 collapse removed the `:completed` state). An agent is
+        ;; "finished" when the LATEST entry of its activity-log timeline
+        ;; ended on :complete or :terminate. Self-healing: a new message
+        ;; wakes the agent, its latest entry becomes a :cause wake (no
+        ;; stop-reason), and it returns to the active grid automatically.
+        finished? (fn [r]
+                    (let [entries (:seon.agent.loop/entries
+                                    (agent-loop/activity-log
+                                      {:seon.agent/id (:seon.agent/id r)}))]
+                      (contains? #{:complete :terminate}
+                                 (:seon.agent.loop/stop-reason (last entries)))))
+        active    (vec (remove finished? rows))
+        completed (vec (filter finished? rows))
         {::keys [agent-count turn-count fact-count
                  datom-count fn-count schema-count test-count]}
         (cluster-stats db)

@@ -117,13 +117,6 @@
     ;; register! calls run before the boot install of :my.kb/* attrs.
     [my.kb]
     [my.kb.shared]
-    ;; Core handler registration — `wake-on-message`. Required so
-    ;; start-agent! can call `handler/register!` + `wake/bootstrap-schema!`
-    ;; at boot. Without this, the inspector header shows "0 handlers"
-    ;; and the core has no wake-on-message responder beyond the
-    ;; per-agent wake trigger the client boot path arms.
-    [seon.handler :as h]
-    [seon.handlers.wake :as wake]
     ;; Local-machine capability surface — A-9. Required so the agent
     ;; can call (seon.agent.fs/read-file ...) + (seon.platform/host) from
     ;; bootstrap-CLJS eval.
@@ -1987,21 +1980,9 @@
    (`seon.ctx/file-section`), so gym and live prompts get the same
    identity with no seed step.
 
-   Steps, in boot order:
-     1. Core handler SCHEMA — `h/bootstrap-schema!` +
-        `wake/bootstrap-schema!` (raw `:db/ident` attr rows; never
-        counted as data).
-     2. Under ONE `{:seon.db/origin :core-seed}` tx-context, four
-        transacts (each its own tx so the core prefix stays a
-        stable sequence of tx-times):
-          :wake-handler    — the ONE `:wake/on-message` handler entity
-                             (idempotent upsert; data-only — registering
-                             arms no dispatcher). INSIDE the seed
-                             context so its row carries `:core-seed`
-                             provenance — a fresh world boots with
-                             FACTS=0 (machinery rows are never the
-                             cluster's data; demo-polish fix
-                             2026-06-12).
+   Steps, in boot order, under ONE `{:seon.db/origin :core-seed}`
+   tx-context — three transacts (each its own tx so the core prefix
+   stays a stable sequence of tx-times):
           :entity-schemas  — `schema/all-entity-schemas-tx-data`.
           :core-seed  — `seed-core!` (user entity +
                              my.kb.shared instruction singleton).
@@ -2010,8 +1991,8 @@
                              rows, conn-deduped so an Nth boot on the
                              same store re-seeds nothing).
 
-   Pins the root `db/*conn*` to `conn` for the duration (the handler
-   bootstrap fns read it), restoring in `finally`. ENVELOPE CONTRACT
+   Pins the root `db/*conn*` to `conn` for the duration, restoring in
+   `finally`. ENVELOPE CONTRACT
    (A4): `db/transact!` never rejects, so every step checks the
    envelope and THROWS (surface-errors-loudly) — a silent partial seed
    is far worse than a crashed boot."
@@ -2020,8 +2001,6 @@
   (let [prev-conn db/*conn*]
     (set! db/*conn* conn)
     (try
-      (await (h/bootstrap-schema!))
-      (await (wake/bootstrap-schema!))
       (let [index-tx (await (core-index-tx conn))
             check!   (fn [step {ok?   :seon.db/ok?
                                 error :seon.db/error}]
@@ -2036,16 +2015,6 @@
           (db/with-tx-context
             {:seon.db/origin :core-seed}
             (fn ^:async seed! []
-              (let [{registered? :seon.handler/registered?}
-                    (await (h/register!
-                             {:seon.handler/name      :wake/on-message
-                              :seon.handler/match     {:seon.handler.match/attr
-                                                       :seon.agent.message/to}
-                              :seon.handler/fn        'seon.handlers.wake/wake-on-message
-                              :seon.handler/on-origin #{:user :agent}}))]
-                (when-not registered?
-                  (throw (ex-info "boot seed transact failed at :wake-handler"
-                                  {:seon.client/seed-step :wake-handler}))))
               (check! :entity-schemas
                       (await (db/transact!
                                {:seon.db/conn conn
