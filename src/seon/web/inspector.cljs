@@ -8,7 +8,7 @@
      - LEFT  `:seon.render/ai`   — the EXACT bytes the LLM would receive
        on its next render: the live SOUL system block FIRST, then the
        context sections, as per-section texts (`:seon.render/section-texts`,
-       led by the `:soul-system` section). `:ai-text`/char-count/token-est
+       led by the `:soul-system` section). `:ai-text`/token-est
        all derive from `ctx-preview`'s full `:seon.render/text`.
      - RIGHT `:seon.render/html` — the CONTEXT sections' html twins
        (`:seon.render/section-html`): each context section's
@@ -165,6 +165,42 @@
    after the LAST of these in render order. Mirrors `core-default-ctx`."
   #{:soul-system :system :namespaces})
 
+(defn- stable-section?
+  "True when section `nm` belongs to the byte-stable cacheable prefix —
+   one of [[stable-section-names]], OR any per-namespace split entry
+   (`:namespaces/seon.db`), since the whole :namespaces body is part of
+   the prefix."
+  [nm]
+  (or (contains? stable-section-names nm)
+      (= "namespaces" (namespace nm))))
+
+(defn- ns-section-name
+  "Display name for one namespace block of the :namespaces section:
+   `;; ── namespace seon.db ──` → `:namespaces/seon.db`. nil for a chunk
+   with no namespace header (the section's preamble line)."
+  [block]
+  (when-let [m (re-find #";; ── namespace (\S+)" block)]
+    (keyword "namespaces" (second m))))
+
+(defn- expand-namespaces-section
+  "Display-only: explode the single `:namespaces` section into ONE entry
+   per namespace block, so the debug view lists each ns separately instead
+   of one giant `:namespaces` blob. The LLM prompt is untouched — this only
+   reshapes the per-section breakdown both panes + the context bar consume.
+   Every other section passes through unchanged, in render order."
+  [section-texts]
+  (into []
+        (mapcat
+          (fn [{nm :seon.ctx/name txt :seon.render/text :as sec}]
+            (if (= nm :namespaces)
+              (->> (str/split (or txt "") #"(?=;; ── namespace )")
+                   (remove str/blank?)
+                   (map (fn [chunk]
+                          {:seon.ctx/name    (or (ns-section-name chunk) :namespaces)
+                           :seon.render/text chunk})))
+              [sec])))
+        section-texts))
+
 (defn- context-bar-data
   "Derive the context-bar model for `agent-id` from the SAME per-section
    texts the LLM prompt is built from (`section-texts`):
@@ -182,7 +218,7 @@
                          {::name    nm
                           ::chars   (count t)
                           ::tokens  (tokens/estimate t)
-                          ::stable? (contains? stable-section-names nm)}))
+                          ::stable? (stable-section? nm)}))
                      section-texts)
         total  (reduce + 0 (map ::tokens segs))
         ;; Structural cache-line = cumulative tokens of every section up to
@@ -212,7 +248,6 @@
      {:ai-text <string>
       :section-texts [{:seon.ctx/name … :seon.render/text …} ...]
       :token-est <int>
-      :char-count <int>
       :html-cards [<card-map> ...]  ; one per SECTION html twin, in render order
       :agent <pulled entity or nil>}
    Each card-map: `{::hiccup ::kind ::card-key}` — the section's html
@@ -226,12 +261,18 @@
         ;; (`:seon.render/section-texts`, led by the `:soul-system` section),
         ;; and the CONTEXT-section HTML TWINS behind it
         ;; (debug-view-section-twins-2026-06-18) for the right pane. `:ai-text`,
-        ;; `:char-count`, and `:token-est` all derive from the full text, so
+        ;; `:token-est` all derive from the full text, so
         ;; the counts include the soul. The old
         ;; per-entity last-64-by-tx-time window (flooded with the core's own
         ;; :seon.test captures) is gone.
         {:seon.render/keys [text token-estimate section-texts section-html]}
         (inspect/ctx-preview {:seon.agent/id agent-id})
+        ;; Display-only: the single 49k-token :namespaces blob dwarfs every
+        ;; other section into an unreadable sliver — split it into one entry
+        ;; per ns so the breakdown (both panes + the bottom bar) shows the
+        ;; real per-ns distribution. The LLM prompt + token-estimate are
+        ;; unchanged (they derive from `text`).
+        section-texts (expand-namespaces-section (or section-texts []))
         ;; Each section twin → one right-pane card, in render order. The
         ;; card-key is the section name so idiomorph preserves the node
         ;; across SSE morphs.
@@ -257,7 +298,6 @@
         agent (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]})]
     {:ai-text   (or text "")
      :section-texts (or section-texts [])
-     :char-count (count (or text ""))
      :token-est  (or token-estimate 0)
      ;; The bottom context-bar audit instrument — per-section tokens +
      ;; structural cache-line + live cached extent, all derived from the
@@ -314,7 +354,7 @@
             last12))))
 
 (defn- header-fragment
-  [agent-id {:keys [agent char-count token-est handler-count turn-durs]}]
+  [agent-id {:keys [agent token-est handler-count turn-durs]}]
   (let [state (or (:seon.agent/state agent) :unknown)
         ;; Derived — the :seon.agent/turn-count attr was retired.
         turns (default/agent-turn-count agent)]
@@ -333,7 +373,7 @@
      [:span {:class "text-xs text-text-400"} (str handler-count " handlers")]
      (activity-sparkline turn-durs)
      [:span {:class "text-xs text-text-500 ml-auto"}
-      (str "~" token-est " tokens · " char-count " chars")]
+      (str "~" token-est " tokens")]
      ;; Inside the consumer page's debug OVERLAY iframe these links must
      ;; NOT navigate the iframe (that loads the target INSIDE the still-open
      ;; overlay — the reported "← chat doesn't work" bug). Mirror the Esc
@@ -363,8 +403,8 @@
    shows the soul the agent actually receives, not a collapsed summary."
   #{:soul-system :transcript :prompt :context})
 
-(defn- fmt-chars
-  "`3214` → `\"3,214\"` — comma-grouped char count for summaries."
+(defn- fmt-int
+  "`3214` → `\"3,214\"` — comma-grouped integer for summaries."
   [n]
   (let [s (str n)]
     (->> (reverse s)
@@ -383,7 +423,7 @@
                 open? (assoc :open true))
      [:summary {:class (str "cursor-pointer select-none text-xs font-mono "
                             "text-text-400 hover:text-text-200 py-0.5")}
-      (str (name sec-name) " (" (fmt-chars (count sec-text)) " chars)")]
+      (str (name sec-name) " (" (fmt-int (tokens/estimate sec-text)) " tokens)")]
      [:pre {:class "whitespace-pre-wrap text-xs font-mono text-text-100 mt-0.5"}
       sec-text]]))
 
@@ -493,7 +533,7 @@
    (∝ tokens). Stable-prefix sections read amber (the cached prefix);
    volatile-tail sections read cooler. The section name + token count
    show inline when the segment is wide enough; always in the title."
-  [{::keys [name tokens chars stable?]} total]
+  [{::keys [name tokens stable?]} total]
   (let [pct (if (pos? total) (* 100.0 (/ tokens total)) 0)
         wide? (>= pct 6)]
     [:div {:class (str "relative h-full flex items-center justify-center "
@@ -502,8 +542,7 @@
                          "bg-amber-800/60 hover:bg-amber-700/70 "
                          "bg-base-700/70 hover:bg-base-600/80 "))
            :style (str "flex: " (max 0.01 tokens) " 1 0; min-width: 2px;")
-           :title (str (clojure.core/name name) " · ~" tokens " tok · "
-                       (fmt-chars chars) " chars · "
+           :title (str (clojure.core/name name) " · ~" (fmt-int tokens) " tok · "
                        (.toFixed pct 1) "%"
                        (when stable? " · cached prefix"))}
      (when wide?
