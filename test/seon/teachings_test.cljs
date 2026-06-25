@@ -71,6 +71,7 @@
     [clojure.string :as str]
     [seon.agent :as agent]
     [seon.agent.fs :as sfs]
+    [seon.agent.fs.internal :as sfs-int]
     [seon.client :as client]
     [seon.ctx :as ctx]
     [seon.ctx.namespaces :as ctx-namespaces]
@@ -445,7 +446,7 @@
    read-only, root conn/fs/registry restored after."
   [body]
   (let [prev-conn   db/*conn*
-        prev-fs     @sfs/!config
+        prev-fs     @sfs-int/!config
         keys-before (schema/current-keys)]
     (try
       (let [conn (await (client/open-agent-conn!))]
@@ -466,7 +467,7 @@
           (await (body conn compile-state agent-id))))
       (finally
         (set! db/*conn* prev-conn)
-        (reset! sfs/!config prev-fs)
+        (reset! sfs-int/!config prev-fs)
         (let [minted (remove keys-before (schema/current-keys))]
           (when (seq minted)
             (swap! schema/*schemas #(apply dissoc % minted))))))))

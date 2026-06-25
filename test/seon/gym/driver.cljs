@@ -91,6 +91,7 @@
     [seon.dev.test-preload]
     [seon.eval :as seval]
     [seon.agent.fs :as sfs]
+    [seon.agent.fs.internal :as sfs-int]
     [seon.log :as slog]
     [seon.repl :as repl]
     [seon.schema :as schema]
@@ -1240,7 +1241,7 @@
 
       :else
       (let [prev-conn    db/*conn*
-            prev-fs      @sfs/!config
+            prev-fs      @sfs-int/!config
             keys-before  (schema/current-keys)]
         ;; The gym's prompt-blob evidence (§6.6) IS debug capture — it
         ;; reads back the verbatim prompt the agent saw. run-turn!'s
@@ -1396,7 +1397,7 @@
             ;; registrations AND agent-eval register!s) so one scenario can't
             ;; leak into the next (or into non-gym tests sharing the process).
             (set! db/*conn* prev-conn)
-            (reset! sfs/!config prev-fs)
+            (reset! sfs-int/!config prev-fs)
             (debug/set-override! :env)
             (let [minted (remove keys-before (schema/current-keys))]
               (when (seq minted)

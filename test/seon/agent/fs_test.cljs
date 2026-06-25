@@ -26,7 +26,8 @@
   (:require
     [clojure.string :as str]
     [cljs.test :refer [deftest is testing use-fixtures]]
-    [seon.agent.fs :as fs]))
+    [seon.agent.fs :as fs]
+    [seon.agent.fs.internal :as fs-int]))
 
 (def ^:private !saved (atom nil))
 (def ^:private !saved-lock (atom nil))
@@ -38,12 +39,12 @@
 
 (use-fixtures :each
   {:before (fn []
-             (reset! !saved @fs/!config)
+             (reset! !saved @fs-int/!config)
              (reset! !saved-lock (.. js/process -env -SEON_FS_LOCK))
              ;; tests assume an unlocked baseline; lock tests opt in
              (set-lock-env! nil))
    :after  (fn []
-             (reset! fs/!config @!saved)
+             (reset! fs-int/!config @!saved)
              (set-lock-env! @!saved-lock))})
 
 (deftest grants-returns-the-configured-truth
@@ -58,7 +59,7 @@
       "grants reads back the CONFIGURED roots + flag — never an inference"))
 
 (deftest grants-default-deny-is-empty-roots
-  (reset! fs/!config {})
+  (reset! fs-int/!config {})
   (is (= {:seon.agent.fs/allowed-roots []
           :seon.agent.fs/read-only?    false
           :seon.agent.fs/locked?       false}

@@ -95,7 +95,7 @@
   "The seon.agent.fs allowed roots — the default search scope (\"search
    everything the agent may read\")."
   []
-  (vec (:seon.agent.fs/allowed-roots @fs/!config)))
+  (vec (:seon.agent.fs/allowed-roots (fs/grants))))
 
 (defn gate-path
   "nil when `path` is readable per seon.agent.fs; otherwise the ok?-false

@@ -27,6 +27,7 @@
     [cljs.test :as t :refer [deftest is testing async use-fixtures]]
     [clojure.string :as str]
     [seon.agent.fs :as fs]
+    [seon.agent.fs.internal :as fs-int]
     [seon.agent.search :as search]))
 
 ;; ---------------------------------------------------------------------------
@@ -49,7 +50,7 @@
   (.writeFileSync nfs many-path
                   (str/join "\n" (map #(str "dup-needle line " %) (range 20))))
   ;; Save the live config, then scope the allowlist to the fixture dir.
-  (reset! !saved-fs-config @fs/!config)
+  (reset! !saved-fs-config @fs-int/!config)
   (fs/configure! {:seon.agent.fs/allowed-roots [fixture-dir]
                   :seon.agent.fs/read-only?    true}))
 
