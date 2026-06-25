@@ -488,7 +488,7 @@
 
    [[guarded-load]]: a ns missing from the bootstrap bundle's index but
    live here is HOST-BUNDLED (compiled into out/client/main.js — `my.kb`,
-   `seon.db`, `my.kb.system`): store-indexed and rendered into the
+   `seon.db`, `my.kb.shared`): store-indexed and rendered into the
    agent's prompt as code, but absent from shadow's `:bootstrap
    :entries`, so a bare `boot/load` throws `ns X not available`. Live ⇒
    no-op the load (empty `:js`) — the JS is already loaded. (This branch

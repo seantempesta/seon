@@ -1647,7 +1647,9 @@
                             :seon.ctx/name :soul :seon.ctx/priority 5})
              (file-section {:seon.ctx/file-path agents-file-path
                             :seon.ctx/name :agents :seon.ctx/priority 8})])
-   [{:seon.ctx/name :namespaces   :seon.ctx/priority 20
+   [{:seon.ctx/name :shared-instructions :seon.ctx/priority 10
+     :seon.render/ai 'my.kb.shared/instructions-section}
+    {:seon.ctx/name :namespaces   :seon.ctx/priority 20
      :seon.render/ai 'seon.ctx.namespaces/namespaces-section}
     {:seon.ctx/name :your-entity  :seon.ctx/priority 30
      :seon.render/ai 'seon.ctx.your-entity/your-entity-section}

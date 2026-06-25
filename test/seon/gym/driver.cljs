@@ -1088,7 +1088,7 @@
    Boot parity (context-v4): after create!, the agent runs the SAME
    `seon.client/creation-evals!` block a live minted agent runs — the
    tile wiring, the `(seon.db/store-inventory)` startup eval, and the
-   `(my.kb.system/instructions)` read — so its transcript carries the
+   `(my.kb.shared/instructions)` read — so its transcript carries the
    v4 tutorial/consult evidence exactly like a live agent's. (The
    creation turn has no `:seon.agent.turn/woken-by`; eval- and
    prompt-shaped predicates exclude it — see [[eval-at+source]].)

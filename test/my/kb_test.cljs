@@ -1,6 +1,6 @@
 (ns my.kb-test
   "my.kb scaffold contract: the four shared provenance shapes are
-   registered ONCE; my.kb.system (the system-wide instruction
+   registered ONCE; my.kb.shared (the cluster-wide instruction
    singleton, context-v4 V4-0) seeds EMPTY and idempotent; rows are
    APPENDED by transact (nested component maps under the many-ref) and
    read back in append order via the `instructions` fn; re-seeding
@@ -13,11 +13,11 @@
     [seon.db :as db]
     [seon.schema :as schema]
     [my.kb]
-    [my.kb.system :as kb-system]))
+    [my.kb.shared :as kb-shared]))
 
 (defn- fresh-conn
   "Promise of a fresh :memory conn with the pod's boot schema + the
-   shipped my.kb.system seed (the same row seon.client seeds at boot)."
+   shipped my.kb.shared seed (the same row seon.client seeds at boot)."
   []
   (let [cfg {:store              {:backend :memory :id (random-uuid)}
              :schema-flexibility :write
@@ -32,7 +32,7 @@
                                        (db/tx-meta-datahike-schema))})
                      (.then (fn [_]
                               (d/transact! conn
-                                {:tx-data (kb-system/seed-tx-data)})))
+                                {:tx-data (kb-shared/seed-tx-data)})))
                      (.then (fn [_] conn))))))))
 
 (defn- with-conn
@@ -58,44 +58,44 @@
          (schema/schema-definition :my.kb/confidence))
       "confidence is the shared enum — domains reference it, never inline it"))
 
-(deftest system-seed-is-the-empty-singleton
-  (let [rows (kb-system/seed-tx-data)]
-    (is (= [{:my.kb.system/id "system"}] rows)
+(deftest shared-seed-is-the-empty-singleton
+  (let [rows (kb-shared/seed-tx-data)]
+    (is (= [{:my.kb.shared/id "shared"}] rows)
         "the seed is ONE empty identity row — the four behavioral
          teachings live in the system prompt (V4-0), never here")))
 
-(deftest system-instructions-read-empty-then-ordered-after-appends
+(deftest shared-instructions-read-empty-then-ordered-after-appends
   (async done
     (-> (with-conn
           (fn [_conn]
-            (is (= [] (kb-system/instructions))
+            (is (= [] (kb-shared/instructions))
                 "fresh store → no rows → [] (the zero state)")
             (-> (db/transact!
                   {:seon.db/tx-data
-                   [{:my.kb.system/id "system"
-                     :my.kb.system/instructions
-                     [{:my.kb.system/text "Always store provenance with findings."
-                       :my.kb.system/at   (js/Date. 1000)}]}]})
+                   [{:my.kb.shared/id "shared"
+                     :my.kb.shared/instructions
+                     [{:my.kb.shared/text "Always store provenance with findings."
+                       :my.kb.shared/at   (js/Date. 1000)}]}]})
                 (.then
                   (fn [{ok? :seon.db/ok?}]
                     (is (true? ok?) "an append is ONE nested-map transact")
                     (db/transact!
                       {:seon.db/tx-data
-                       [{:my.kb.system/id "system"
-                         :my.kb.system/instructions
-                         [{:my.kb.system/text "Prefer editing an existing schema."
-                           :my.kb.system/at   (js/Date. 2000)}]}]})))
+                       [{:my.kb.shared/id "shared"
+                         :my.kb.shared/instructions
+                         [{:my.kb.shared/text "Prefer editing an existing schema."
+                           :my.kb.shared/at   (js/Date. 2000)}]}]})))
                 (.then
                   (fn [{ok? :seon.db/ok?}]
                     (is (true? ok?) "a second agent's append is the same move")
                     (is (= ["Always store provenance with findings."
                             "Prefer editing an existing schema."]
-                           (kb-system/instructions))
+                           (kb-shared/instructions))
                         "re-read shows BOTH rows, oldest append first"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest system-instructions-append-by-transact
+(deftest shared-instructions-append-by-transact
   ;; The reseed-safety contract: appending a row and then re-running
   ;; the boot seed leaves the appended row intact (the seed carries no
   ;; ::instructions value — identity upsert, zero clobber).
@@ -104,16 +104,16 @@
           (fn [conn]
             (-> (db/transact!
                   {:seon.db/tx-data
-                   [{:my.kb.system/id "system"
-                     :my.kb.system/instructions
-                     [{:my.kb.system/text "Survives the reseed."
-                       :my.kb.system/at   (js/Date.)}]}]})
+                   [{:my.kb.shared/id "shared"
+                     :my.kb.shared/instructions
+                     [{:my.kb.shared/text "Survives the reseed."
+                       :my.kb.shared/at   (js/Date.)}]}]})
                 (.then (fn [_]
                          ;; the pod-restart move: re-transact the seed
-                         (d/transact! conn {:tx-data (kb-system/seed-tx-data)})))
+                         (d/transact! conn {:tx-data (kb-shared/seed-tx-data)})))
                 (.then (fn [_]
                          (is (= ["Survives the reseed."]
-                                (kb-system/instructions))
+                                (kb-shared/instructions))
                              "re-seeding never clobbers appended rows"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

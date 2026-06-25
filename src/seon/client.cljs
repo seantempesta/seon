@@ -112,11 +112,11 @@
     [seon.handlers.schema]
     [seon.handlers.ns]
     ;; The my.* scaffold — shared provenance shapes (my.kb) + the
-    ;; system-wide instruction singleton (my.kb.system) that
+    ;; system-wide instruction singleton (my.kb.shared) that
     ;; `seed-core!` below transacts. Required here so their
     ;; register! calls run before the boot install of :my.kb/* attrs.
     [my.kb]
-    [my.kb.system]
+    [my.kb.shared]
     ;; Core handler registration — `wake-on-message`. Required so
     ;; start-agent! can call `handler/register!` + `wake/bootstrap-schema!`
     ;; at boot. Without this, the inspector header shows "0 handlers"
@@ -456,17 +456,17 @@
    ;; --- my.kb (knowledge-base scaffold, 2026-06-10). ---
    ;; The shared provenance shapes (registered in my.kb) installed at
    ;; boot so agent-designed my.kb.<domain> schemas can reference them
-   ;; before any kb tx lands, plus the my.kb.system system-wide
+   ;; before any kb tx lands, plus the my.kb.shared system-wide
    ;; instruction singleton (empty entity seeded by seed-core!;
    ;; rows are appended at runtime by agents and the user).
    :my.kb/source-path
    :my.kb/source-line
    :my.kb/verified-at
    :my.kb/confidence
-   :my.kb.system/id
-   :my.kb.system/instructions
-   :my.kb.system/text
-   :my.kb.system/at
+   :my.kb.shared/id
+   :my.kb.shared/instructions
+   :my.kb.shared/text
+   :my.kb.shared/at
    ;; (No identity attrs — the agent's identity is read LIVE from
    ;; SOUL.md / AGENTS.md every turn as file-sections, never stored. See
    ;; seon.ctx/file-section.)
@@ -804,14 +804,14 @@
 ;;
 ;; Per docs/prds/agent-runtime/mvp-completion-plan-2026-05-27.md §Phase 2
 ;; + research/repl-session-context-template-2026-05-26.md §5: the core
-;; transacts the user entity + the my.kb.system instruction singleton plus an
+;; transacts the user entity + the my.kb.shared instruction singleton plus an
 ;; introspection-indexed set of core fns at boot, BEFORE any agent turn —
 ;; so replay-from-tx-0 starts on a fully-seeded core, not mid-air.
 ;;
 ;; Tx-ordering at boot (in start-agent!):
 ;;   1. Entity-schema decomposition (schema/all-entity-schemas-tx-data)
 ;;      — already shipped, Item 4 commit 35035d8.
-;;   2. seed-core!    — user entity + my.kb.system singleton
+;;   2. seed-core!    — user entity + my.kb.shared singleton
 ;;   3. index-core!   — :seon.ns + :seon.fn rows from REAL runtime
 ;;                           introspection (var meta + source file-read)
 ;;
@@ -821,14 +821,14 @@
 
 (defn seed-core!
   "Tx-data for THE user entity plus the EMPTY system-wide instruction
-   singleton (`my.kb.system/seed-tx-data`); agents and the user APPEND
-   rows at runtime, read back via `(my.kb.system/instructions)` in the
+   singleton (`my.kb.shared/seed-tx-data`); agents and the user APPEND
+   rows at runtime, read back via `(my.kb.shared/instructions)` in the
    bootstrap turn.
 
    The user row is the ONE `:seon.user/id` entity every
    `:seon.agent.message/from`/`to` user-ref resolves to (identity upsert,
    idempotent — same pattern as agent entities; one human for now).
-   The instruction singleton identity-upserts on `:my.kb.system/id`
+   The instruction singleton identity-upserts on `:my.kb.shared/id`
    carrying NO rows — re-running asserts zero new datoms and never
    clobbers runtime appends.
 
@@ -836,7 +836,7 @@
    `:seon.db/origin :core-seed`."
   []
   (into [{:seon.user/id "user"}]
-        (my.kb.system/seed-tx-data)))
+        (my.kb.shared/seed-tx-data)))
 
 ;; ---------------------------------------------------------------------------
 ;; index-core! — runtime introspection of compiled core fns
@@ -2001,7 +2001,7 @@
                              2026-06-12).
           :entity-schemas  — `schema/all-entity-schemas-tx-data`.
           :core-seed  — `seed-core!` (user entity +
-                             my.kb.system instruction singleton).
+                             my.kb.shared instruction singleton).
           :core-index — `core-index-tx` (`:seon.ns` /
                              `:seon.fn` / `:seon.schema` / `:seon.test`
                              rows, conn-deduped so an Nth boot on the
@@ -2078,7 +2078,7 @@
 
 (def instructions-read-source
   "The bootstrap-turn READ of the system-wide instructions: the fn's
-   source is visible in the rendered `my.kb.system` namespace, the CALL
+   source is visible in the rendered `my.kb.shared` namespace, the CALL
    is visible in the transcript, the RESULT is the value line — and
    re-running the fn is how the agent gets the current set. The `;;`
    comments ride as the eval's narration via `parse-forms`."
@@ -2086,7 +2086,7 @@
     ";; Next: the system-wide instructions — standing guidance for ALL\n"
     ";; agents in this cluster. Anyone (my human, another agent, me) can\n"
     ";; append a row; I re-read when I want the current set.\n"
-    "(my.kb.system/instructions)\n"))
+    "(my.kb.shared/instructions)\n"))
 
 (def hello-source
   "The bootstrap-turn hello: turn 0 greets the human via `message/user`

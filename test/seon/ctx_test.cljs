@@ -113,7 +113,7 @@
   ;; whitelisted base, e.g. seon.agent.search-test → seon.agent.search).
   ;; Every OTHER seon.* framework ns is DROPPED from the rendered section
   ;; (still indexed + searchable), NEVER full-source.
-  (doseq [n ["my.kb" "my.kb.system" "my.notes" "my.notes-test"
+  (doseq [n ["my.kb" "my.kb.shared" "my.notes" "my.notes-test"
              ;; the curated seon.* whitelist + each one's test sibling.
              "seon.agent.todo" "seon.agent.todo-test"
              "seon.db" "seon.db-test"
