@@ -160,3 +160,51 @@ slots `file-section-ai`/`file-section-html`, plus `identity-files-text`);
 and `test/my/soul_test.cljs` are DELETED; no namespace or file named
 soul/SOUL/AGENTS/doc remains. Part B (this unification) is the
 owner-reviewed follow-up and is NOT executed here.
+
+---
+
+## EXECUTION MAP (complete inventory + OWNER-LOCKED convention, 2026-06-25)
+
+Exhaustive read-only sweep found **13** quoting mechanisms (the original survey's
+10 + `live-tile`, `relevant-source`, and split header/body cases).
+
+**LOCKED convention (owner decision — overrides the `;;`-body proposal above):**
+- **Body lines = SINGLE `;`** (owner chose single over `;;` for token-minimal).
+- **Section header/footer = `;;; ┌─ <name> ─` / `;;; └─ end <name> ─`** — the ONE
+  demarcation primitive (today's `section-bracket-ai`, ctx.cljs:1753).
+- **ONE public body primitive in `seon.ctx`** (`quote-lines` → single `;`,
+  blank → bare `;` no trailing space for byte-stability, optional `:strip-markers?`
+  to drop leading `;`/`⚠`/`↻`/`=>`); everything routes through it.
+
+| # | Mechanism | file:fn | now | disposition (single-`;` convention) |
+|---|---|---|---|---|
+| 1 | `comment-markdown` | ctx.cljs:160 | `;;` body, blank-preserving | PROMOTE → public `quote-lines`, switch to single `;` |
+| 2 | `comment-lines`+`strip-comment-prefix` | ctx.cljs:550 | `;;`, DROPS blanks | DELETE → merge into `quote-lines` (adopt blank-preserve) |
+| 3 | `error-lines` | ctx.cljs:586 | `;;`+`;;=>` | KEEP thin → `quote-lines` + the `;=>` result headline |
+| 4 | `section-bracket-ai` | ctx.cljs:1753 | `;;; ┌─/└─` | KEEP — THE canonical demarcation |
+| 5 | `system-text` literal | ctx.cljs:900-1163 | hand-typed `;;;` per line | **CONVERT to single `;` body** (owner called this out — NOT keep) + bracket for demarcation |
+| 6 | `namespaces-header` | namespaces.cljs:210 | `;;` body | route → `quote-lines` (single `;`) |
+| 6b | `render-one-ns-ai` labels | ctx.cljs:1352,1366 | `;; ── x ──` | DELETE (redundant with #4) |
+| 7 | `inventory-section` body | ctx/inventory.cljs:183 | inline `(str ";; " …)` | route → `quote-lines` |
+| 8 | `your-entity-section` body | ctx/your_entity.cljs:58 | inline `(map #(str ";; " %))` | route → `quote-lines` |
+| 9 | `render-warnings` | warn.cljs:1006,1022,1061 | mixed `;;;`/`;;` + `── WARNINGS ──` | DELETE the label; route body → `quote-lines` |
+| 10 | `transcript-section` | ctx/transcript.cljs:86,316-317,… | `;;;`/`;;`/`;;=>` + in-body `── x ──` | DELETE 5 in-body labels; route body → `quote-lines`; turn/session markers → bracket or single-`;` |
+| 11 | `live-tile-section` body | ctx/live_tile.cljs:88 | inline `(map #(str ";; " %))` | route → `quote-lines` |
+| 12 | `relevant-source-section` body | ctx/relevant.cljs:42,64 | inline `(str ";; " …)` | route → `quote-lines` |
+
+**The 5 redundant in-body `── x ──` demarcation labels to DELETE** (Convention B,
+superseded by the `;;; ┌─/└─` bracket): ctx.cljs:1352, ctx.cljs:1366,
+warn.cljs:1061, transcript.cljs:316-317, transcript.cljs:86.
+
+**Inconsistencies to fix:** blank-line handling (#1 preserves as bare comment, #2
+DROPS — adopt preserve, byte-stable); marker-stripping (3 different regex sets →
+one `:strip-markers?` option); the duplicate inline `(str ";; " …)` /
+`(map #(str ";; " %))` patterns (#7,#8,#11,#12 → all call `quote-lines`).
+
+**`render`-side note:** the section renderer (`section-bracket-ai`) already brackets
+EVERY section uniformly at render time — so the per-section in-body labels are pure
+duplication. Keep the bracket, delete the labels.
+
+NOTE the `transcript.cljs` line refs may have shifted (P1 rewrote it); the #22
+executor greps for the real sites. system-text is the owner's headline gripe —
+convert it to single `;` body.
