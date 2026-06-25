@@ -55,8 +55,11 @@
   (let [text (soul/system-prompt-text)]
     (is (str/starts-with? text "# SOUL.md")
         "the live system prompt IS the SOUL.md text, read from disk")
-    (is (re-find #"That is what it means to be Seon" text)
-        "identity content is present (read live, not seeded)")
+    (is (< 200 (count text))
+        "identity content is present and substantial (read live from disk,
+         not the empty fallback) — NOT pinning any phrase: the soul carries
+         NO load-bearing content, only identity, so its wording is free to
+         change without breaking the contract")
     (is (not (re-find #"YOUR OUTPUT IS A REPL" text))
         "mechanics are NOT in the soul — they are hardcoded in
          seon.ctx/system-text")))
