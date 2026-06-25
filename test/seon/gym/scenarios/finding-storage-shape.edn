@@ -4,7 +4,7 @@
 ;; :finding/* fork), reference the SHARED :my.kb/* provenance attrs
 ;; (core-registered — never re-invented per domain), store with
 ;; full provenance, reply AFTER the store. Runs end-to-end through the
-;; real eval pipeline (register! tee → transact → reply!), so a
+;; real eval pipeline (register! tee → transact → message/user), so a
 ;; context/teaching change that breaks the convention shows up as a
 ;; failed predicate, not a burned live run.
 {:seon.gym.scenario/id     :finding-storage-shape
@@ -18,7 +18,7 @@
    :seon.gym.turn/llm-script
    [";; design the domain schema FIRST — multi-segment namespace; the\n;; shared :my.kb/* provenance attrs are already registered\n(seon.schema/register! :my.kb.codebase.fn/name [:string {:seon.db/identity true}])\n(seon.schema/register! :my.kb.codebase.fn/claim :string)\n"
     ";; store the fact with full provenance (shared :my.kb/* attrs)\n(seon.db/transact! {:seon.db/tx-data [{:my.kb.codebase.fn/name \"seon.db/transact!\" :my.kb.codebase.fn/claim \"transact! Malli-validates every entity before the tx reaches datahike\" :my.kb/source-path \"src/seon/db.cljs\" :my.kb/source-line 630 :my.kb/confidence :verified}]})\n"
-    ";; reply AFTER the verified store\n(seon.agent/reply! {:seon.agent.message/content \"Stored 1 finding with provenance (src/seon/db.cljs:630): transact! Malli-validates every entity before the tx reaches datahike.\"})\n"]}]
+    ";; reply AFTER the verified store\n(message/user \"Stored 1 finding with provenance (src/seon/db.cljs:630): transact! Malli-validates every entity before the tx reaches datahike.\")\n"]}]
  :seon.gym.scenario/predicates
  [{:seon.gym.predicate/id     :knowledge-row-with-full-provenance
    :seon.gym.predicate/kind   :datalog

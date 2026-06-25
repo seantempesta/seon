@@ -37,7 +37,7 @@
                  simulated-provider-failure fixture.
      :paid     — costs real money. The driver wires the ACTIVE
                  provider's agent adapter (`seon.ai/provider` —
-                 anthropic or deepseek) through `run-agentic-loop!`
+                 anthropic or deepseek) through `seon.agent.loop/run-loop!`
                  (awaits the loop's own termination = idle), but
                  REFUSES to run unless the caller passes
                  `:seon.gym/allow-paid? true` AND the active
@@ -77,6 +77,8 @@
     [seon.ai.anthropic :as anthropic]
     [seon.ai.openai-compat :as openai]
     [seon.client :as client]
+    [seon.agent.turn :as turn]
+    [seon.agent.loop :as aloop]
     [seon.ctx :as ctx]
     [seon.db :as db]
     [seon.debug :as debug]
@@ -243,8 +245,8 @@
 ;; required before S-31 (function reuse) is encoded.
 (schema/register! :seon.gym.scenario/fixture-sources [:vector :string])
 ;; Per-scenario llm-fn injection (catalog §7), stub tier only:
-;;   :scripted-replay — drive run-agentic-loop! (the REAL trigger-style
-;;     loop) with an llm-fn replaying the turn's :llm-script entries in
+;;   :scripted-replay — drive seon.agent.loop/run-loop! (the REAL
+;;     agentic loop) with an llm-fn replaying the turn's :llm-script entries in
 ;;     order; once exhausted it answers prose-only, so the loop's
 ;;     zero-forms stop policy terminates it.
 ;;   :rejecting — an llm-fn whose Promise REJECTS after 100ms
@@ -310,14 +312,19 @@
 ;; the AGENT — no layout predicate, no section-name coupling, nothing
 ;; here affects the scorecard verdict (user r2, 2026-06-11).
 (schema/register! :seon.gym.profile/agent :seon.gym.turn/agent)
+;; Section names in render order (the non-blank contributions from
+;; ctx-sections' :seon.render/section-texts). The carve retired
+;; :seon.render/sections (its old producer assemble-context is gone), so
+;; the profile carries its own gym-local copy.
+(schema/register! :seon.gym.profile/sections [:vector :seon.ctx/name])
 ;; [section-name rendered-char-count] in render order — only the
-;; non-blank contributions (assemble-context's :seon.render/section-texts).
+;; non-blank contributions (ctx-sections' :seon.render/section-texts).
 (schema/register! :seon.gym.profile/section-chars
   [:vector [:tuple :seon.ctx/name :int]])
 (schema/register! :seon.gym/turn-profile
   [:map
    [:seon.gym.profile/agent         :seon.gym.profile/agent]
-   [:seon.render/sections           :seon.render/sections]
+   [:seon.gym.profile/sections      :seon.gym.profile/sections]
    [:seon.gym.profile/section-chars :seon.gym.profile/section-chars]])
 (schema/register! :seon.gym.scorecard/turn-profiles
   [:vector :seon.gym/turn-profile])
@@ -498,16 +505,18 @@
     :else false))
 
 (defn- eval-at+source
-  "All [at source] eval pairs from MESSAGE-DRIVEN turns (turns with a
-   `:seon.agent.turn/woken-by` datom), chronological. With `agent-id`,
+  "All [at source] eval pairs from WAKE-DRIVEN turns (turns with a
+   `:seon.agent.turn/wake` datom), chronological. With `agent-id`,
    scoped to that agent's evals via agent → sessions → turns → evals;
    nil = the whole scratch store (single-agent scenarios).
 
-   The woken-by clause excludes the CREATION turn's tutorial evals
-   (tile wiring + store-inventory + instructions read — boot parity,
-   context-v4): eval-shaped predicates measure the agent's behavior IN
-   RESPONSE TO MESSAGES; the boot tutorial is core-scripted, not
-   behavior, and would otherwise be every scenario's 'first eval'."
+   The wake clause excludes the BOOTSTRAP turn's tutorial evals (turn 0
+   hello + park — boot parity): a bootstrap turn runs before any wake is
+   minted, so it carries no `:seon.agent.turn/wake`, while every
+   message-driven turn the loop runs is stamped with the wake it owns.
+   Eval-shaped predicates measure the agent's behavior IN RESPONSE TO
+   MESSAGES; the boot tutorial is core-scripted, not behavior, and would
+   otherwise be every scenario's 'first eval'."
   [dbv agent-id]
   (->> (if agent-id
          (db/query {:seon.db/query '[:find ?at ?src ?ev
@@ -516,7 +525,7 @@
                                      [?ag :seon.agent/id ?aid]
                                      [?ag :seon.agent/sessions ?s]
                                      [?s :seon.agent.session/turns ?t]
-                                     [?t :seon.agent.turn/woken-by _]
+                                     [?t :seon.agent.turn/wake _]
                                      [?t :seon.agent.turn/evals ?ev]
                                      [?ev :seon.eval/at ?at]
                                      [?ev :seon.eval/source ?src]]
@@ -524,7 +533,7 @@
                     :seon.db/db   dbv})
          (db/query {:seon.db/query '[:find ?at ?src ?ev
                                      :where
-                                     [?t :seon.agent.turn/woken-by _]
+                                     [?t :seon.agent.turn/wake _]
                                      [?t :seon.agent.turn/evals ?ev]
                                      [?ev :seon.eval/at ?at]
                                      [?ev :seon.eval/source ?src]]
@@ -544,10 +553,10 @@
 
 (defn- turn-prompt-files
   "Chronological [turn-id prompt-file-or-nil] pairs for every
-   MESSAGE-DRIVEN turn (`:seon.agent.turn/woken-by` present — the
-   creation turn renders no prompt, so prompt predicates range over
-   the turns the agent was actually prompted on) in the post-run
-   store — optionally scoped to one agent's turns via agent →
+   WAKE-DRIVEN turn (`:seon.agent.turn/wake` present — the bootstrap
+   turn runs before any wake and renders no prompt, so prompt predicates
+   range over the turns the agent was actually prompted on) in the
+   post-run store — optionally scoped to one agent's turns via agent →
    sessions → turns. A nil prompt-file means the blob was never
    written (persist-prompt! failure, or a seeded turn without one) —
    prompt-predicate callers MUST treat that as RED."
@@ -559,14 +568,14 @@
                                      [?ag :seon.agent/id ?aid]
                                      [?ag :seon.agent/sessions ?s]
                                      [?s :seon.agent.session/turns ?t]
-                                     [?t :seon.agent.turn/woken-by _]
+                                     [?t :seon.agent.turn/wake _]
                                      [?t :seon.agent.turn/id ?tid]
                                      [?t :seon.agent.turn/at ?at]]
                     :seon.db/args [agent-id]
                     :seon.db/db   dbv})
          (db/query {:seon.db/query '[:find ?at ?tid ?t
                                      :where
-                                     [?t :seon.agent.turn/woken-by _]
+                                     [?t :seon.agent.turn/wake _]
                                      [?t :seon.agent.turn/id ?tid]
                                      [?t :seon.agent.turn/at ?at]]
                     :seon.db/db dbv}))
@@ -759,16 +768,18 @@
 (defn- capture-turn-profile
   "One `:seon.gym/turn-profile` for the turn about to run — section
    names in render order + per-section char counts from
-   [[ctx/assemble-context]] against the pre-turn db value."
+   [[ctx/ctx-sections]] (the SAME post-budget per-section path the prompt
+   and the inspector take) against the pre-turn db value."
   [dbv agent-id designator]
-  (let [r (ctx/assemble-context {:seon.db/db dbv
-                                 :seon.agent/id agent-id})]
-    {:seon.gym.profile/agent designator
-     :seon.render/sections   (:seon.render/sections r)
+  (let [texts (:seon.render/section-texts
+                (ctx/ctx-sections {:seon.db/db dbv
+                                   :seon.agent/id agent-id}))]
+    {:seon.gym.profile/agent    designator
+     :seon.gym.profile/sections (mapv :seon.ctx/name texts)
      :seon.gym.profile/section-chars
      (mapv (fn [{nm :seon.ctx/name txt :seon.render/text}]
              [nm (count txt)])
-           (:seon.render/section-texts r))}))
+           texts)}))
 
 ;; ===========================================================================
 ;; LLM-judge — rubric + reference facts + the agent's verbatim reply →
@@ -791,8 +802,14 @@
        "\"one short paragraph naming exactly what matched or failed\"}"))
 
 (defn- agent-reply-text
-  "All messages the designated agent sent TO the user, chronological,
-   joined — the judge's 'verbatim reply'.
+  "The messages the designated agent sent TO the user IN RESPONSE TO the
+   scenario's question(s), chronological, joined — the judge's 'verbatim
+   reply'. EXCLUDES the bootstrap greeting: turn 0 (`bootstrap-turn!`,
+   boot parity) sends `(message/user \"Hi — I'm up …\")` BEFORE any
+   question lands, so a reply is one whose `:seon.agent.message/at` is at
+   or after the earliest user→agent question — anything earlier is the
+   pre-question hello, not an answer (it would otherwise pollute the
+   judge's view of what the agent actually answered).
 
    Deliberately fetch-then-filter in CLJS rather than one datalog join:
    the datahike-cljs engine MIS-BINDS queries that join TWO
@@ -814,10 +831,19 @@
                                               [?m :seon.agent.message/at ?at]
                                               [?m :seon.agent.message/content ?c]]
                              :seon.db/db dbv})
+        ms        (fn [^js at] (.getTime at))
+        ;; earliest question time = first user→this-agent message; replies
+        ;; before it are the bootstrap greeting, not answers.
+        q-from    (->> rows
+                       (filter (fn [[_ f t _ _]] (and (= f user-eid)
+                                                      (= t agent-eid))))
+                       (map (fn [[_ _ _ at _]] (ms at)))
+                       (reduce min js/Infinity))
         mine      (->> rows
-                       (filter (fn [[_ f t _ _]]
-                                 (and (= f agent-eid) (= t user-eid))))
-                       (sort-by (fn [[_ _ _ at _]] (.getTime ^js at)))
+                       (filter (fn [[_ f t at _]]
+                                 (and (= f agent-eid) (= t user-eid)
+                                      (>= (ms at) q-from))))
+                       (sort-by (fn [[_ _ _ at _]] (ms at)))
                        (map (fn [[_ _ _ _ c]] c)))]
     (if (seq mine)
       (str/join "\n\n" mine)
@@ -1039,9 +1065,11 @@
 
 (defn ^:async ^:private send-user-message!
   "Land the scenario question as a real user message (the same
-   `message!` entry point POST /chat uses). Returns the message id —
-   the turn's `:seon.agent.turn/woken-by` anchor. Fails loud on a non-ok
-   envelope: a scenario whose question never landed must not score."
+   `message!` entry point POST /chat uses). Returns the message id. On a
+   live boot this inbound datom would trip the wake trigger; the gym
+   drives the loop explicitly instead ([[drive-loop!]] mints the wake),
+   so the trigger is never armed here. Fails loud on a non-ok envelope: a
+   scenario whose question never landed must not score."
   [agent-id text]
   (let [env (await (agent/message!
                      {:seon.agent.message/content text
@@ -1051,33 +1079,58 @@
       (throw (ex-info "gym: user message! failed" env)))
     (:seon.agent.message/id env)))
 
+(defn ^:async ^:private wake-active!
+  "Mint a fresh wake-episode + flip the agent to :active, the same
+   `fresh-wake! → set-state! :active` pair the live `wake-handler` runs
+   before a loop — so every turn driven afterward carries
+   `:seon.agent.turn/wake` (the marker eval/prompt predicates scope on,
+   distinguishing message-driven turns from the bootstrap turn). Returns
+   the minted wake id."
+  [agent-id]
+  (let [wake (await (agent/fresh-wake! {:seon.agent/id agent-id}))]
+    (await (agent/set-state! {:seon.agent/id    agent-id
+                              :seon.agent/state :active}))
+    wake))
+
 (defn ^:async ^:private drive-stub-turns!
-  "Drive one `run-turn!` per scripted LLM response — woken by `mid`."
-  [agent-id compile-state mid scripts]
+  "Drive one `turn/run-turn!` per scripted LLM response. Mints a wake
+   first ([[wake-active!]]) so each turn carries `:seon.agent.turn/wake`,
+   then resets the agent to :idle when the scripts are exhausted (unless
+   a lifecycle verb in a script already moved it off :active — the
+   bootstrap park leaves it :idle and the loop owns state live, so a
+   forced :idle here only mirrors the loop's clean exit)."
+  [agent-id compile-state scripts]
+  (await (wake-active! agent-id))
   (loop [scripts scripts]
     (when-let [[text & more] (seq scripts)]
       (await (db/with-agent agent-id
                (fn []
-                 (agent/run-turn!
+                 (turn/run-turn!
                    {:seon.agent/id            agent-id
                     :seon.agent/llm-fn        (scripted-llm text)
-                    :seon.agent/compile-state compile-state
-                    :seon.agent.turn/woken-by       [:seon.agent.message/id mid]}))))
-      (recur more))))
+                    :seon.agent/compile-state compile-state}))))
+      (recur more)))
+  (when (= :active (:seon.agent/state
+                     (db/entity {:seon.db/ref [:seon.agent/id agent-id]})))
+    (await (agent/set-state! {:seon.agent/id    agent-id
+                              :seon.agent/state :idle}))))
 
 (defn ^:async ^:private drive-loop!
-  "Drive `run-agentic-loop!` (the REAL multi-turn driver) with the
-   given llm-fn. The loop's own stop policies (zero forms / error /
-   cap) are the awaits-idle signal — when the promise resolves, the
-   agent is idle."
-  [agent-id compile-state mid llm-fn]
+  "Drive `seon.agent.loop/run-loop!` (the REAL multi-turn driver) with
+   the given llm-fn. Mints a fresh wake + flips :active ([[wake-active!]])
+   exactly as the live `wake-handler` does, then hands that wake to
+   `run-loop!`. The loop's own stop policies (zero forms / error / cap /
+   lifecycle verb) are the awaits-idle signal — when the promise
+   resolves the agent is :idle (or :terminated)."
+  [agent-id compile-state llm-fn]
   (await (db/with-agent agent-id
-           (fn []
-             (agent/run-agentic-loop!
-               {:seon.agent/id            agent-id
-                :seon.agent/llm-fn        llm-fn
-                :seon.agent/compile-state compile-state
-                :seon.agent.turn/woken-by       [:seon.agent.message/id mid]})))))
+           (fn ^:async drive! []
+             (let [wake (await (wake-active! agent-id))]
+               (await (aloop/run-loop!
+                        {:seon.agent/id            agent-id
+                         :seon.agent/llm-fn        llm-fn
+                         :seon.agent/compile-state compile-state}
+                        wake)))))))
 
 (defn ^:async ^:private ensure-agent!
   "Lazily create the agent behind a turn DESIGNATOR (:a, :b, …) on the
@@ -1085,12 +1138,12 @@
    order and every drive awaits idle, so 'boot A → await idle → boot
    B on the same store' falls out of the sequential doseq.
 
-   Boot parity (context-v4): after create!, the agent runs the SAME
-   `seon.client/creation-evals!` block a live minted agent runs — the
-   tile wiring, then the hello + park — so its transcript carries the
-   creation-turn evidence exactly like a live agent's. (The
-   creation turn has no `:seon.agent.turn/woken-by`; eval- and
-   prompt-shaped predicates exclude it — see [[eval-at+source]].)
+   Boot parity: after create!, the agent runs the SAME
+   `seon.client/bootstrap-turn!` (turn 0) a live minted agent runs — the
+   hello + park — so its transcript carries the bootstrap-turn evidence
+   exactly like a live agent's. (Turn 0 runs before any wake is minted,
+   so it has no `:seon.agent.turn/wake`; eval- and prompt-shaped
+   predicates exclude it — see [[eval-at+source]].)
 
    `pre-id` (optional) pins the minted agent's id — run-scenario!
    mints :a's id BEFORE seeding so the seed txs can carry it, then
@@ -1109,7 +1162,7 @@
                                           (agent/home-ns agent-id)
                                           agent-id))
             (await (agent/create! {:seon.agent/id agent-id})))))
-      (await (client/creation-evals!
+      (await (client/bootstrap-turn!
                {:seon.agent/id            agent-id
                 :seon.agent/compile-state compile-state}))
       (swap! !agents assoc designator agent-id)
@@ -1304,7 +1357,7 @@
             (doseq [{:seon.gym.turn/keys [message llm-script agent]} turns]
               (let [agent-id (await (ensure-agent! !agents compile-state
                                                    (or agent :a)))
-                    mid      (await (send-user-message! agent-id message))]
+                    _mid     (await (send-user-message! agent-id message))]
                 ;; Context telemetry against the PRE-TURN db value —
                 ;; the message has landed, the turn hasn't run; the exact
                 ;; db the turn's prompt renders from. Informational only.
@@ -1312,16 +1365,14 @@
                        (capture-turn-profile @conn agent-id (or agent :a)))
                 (case (or llm (if (= :stub tier) :per-turn-script :paid))
                   :per-turn-script
-                  (await (drive-stub-turns! agent-id compile-state mid
-                                            llm-script))
+                  (await (drive-stub-turns! agent-id compile-state llm-script))
                   :scripted-replay
-                  (await (drive-loop! agent-id compile-state mid
+                  (await (drive-loop! agent-id compile-state
                                       (replay-llm llm-script)))
                   :rejecting
-                  (await (drive-loop! agent-id compile-state mid
-                                      rejecting-llm))
+                  (await (drive-loop! agent-id compile-state rejecting-llm))
                   :paid
-                  (await (drive-loop! agent-id compile-state mid
+                  (await (drive-loop! agent-id compile-state
                                       (paid-adapter))))))
             ;; Mechanical scoring against the post-run store + transcript;
             ;; judge predicates score on the SEPARATE judge axis.

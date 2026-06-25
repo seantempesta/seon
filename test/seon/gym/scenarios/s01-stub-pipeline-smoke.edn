@@ -1,7 +1,7 @@
 ;; S-01 (catalog §4) — stub pipeline smoke: message → wake → turn → idle.
 ;; Proves the harness itself with ZERO spend, through the REAL agentic
-;; loop (:scripted-replay llm injection): turn 1 evals a reply!, turn 2
-;; is prose-only so the loop's zero-forms stop policy terminates.
+;; loop (:scripted-replay llm injection): turn 1 evals (message/user …),
+;; turn 2 is prose-only so the loop's zero-forms stop policy terminates.
 ;;
 ;; NOTE: the catalog's "expected RED until §7 item 4" applies to the
 ;; POD's built-in stub llm (which always emits forms and burns to the
@@ -18,7 +18,7 @@
  :seon.gym.scenario/turns
  [{:seon.gym.turn/message "ping"
    :seon.gym.turn/llm-script
-   ["(seon.agent/reply! {:seon.agent.message/content \"pong\"})\n"]}]
+   ["(message/user \"pong\")\n"]}]
  :seon.gym.scenario/predicates
  [{:seon.gym.predicate/id     :message-row-landed-fully-formed
    :seon.gym.predicate/kind   :datalog
@@ -33,19 +33,26 @@
   {:seon.gym.predicate/id     :agent-woke-on-the-message-and-finished
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :sees-question
+   ;; The carved FSM replaced the turn→message `:woken-by` ref with a
+   ;; per-wake `:seon.agent.turn/wake` stamp (no direct turn→message
+   ;; link). "Woke and finished" = a wake-driven turn (wake present —
+   ;; excludes bootstrap turn 0) closed :done.
    :seon.gym.predicate/query  [:find ?t
                                :where
-                               [?m :seon.agent.message/content "ping"]
-                               [?t :seon.agent.turn/woken-by ?m]
+                               [?t :seon.agent.turn/wake _]
                                [?t :seon.agent.turn/status :done]]
    :seon.gym.predicate/expect :non-empty}
-  {:seon.gym.predicate/id     :terminates-within-three-turns
+  {:seon.gym.predicate/id     :bounded-wake-driven-turns
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :terminates
+   ;; Loop stop policy: one productive turn (message/user), then the
+   ;; zero-forms halt fires after the empty-streak<2 thinking-mode guard.
+   ;; Bounds the loop well below the 20-turn cap without pinning the
+   ;; exact streak constant.
    :seon.gym.predicate/query  [:find ?t
                                :where
-                               [?t :seon.agent.turn/id ?tid]]
-   :seon.gym.predicate/expect [:count<= 3]}
+                               [?t :seon.agent.turn/wake _]]
+   :seon.gym.predicate/expect [:count<= 5]}
   {:seon.gym.predicate/id     :agent-ends-idle
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :terminates

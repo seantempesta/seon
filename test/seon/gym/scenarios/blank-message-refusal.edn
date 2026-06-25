@@ -4,14 +4,14 @@
 ;; error envelope. This scenario pins both halves: the refusal is a VALUE
 ;; the agent can read, and no blank message row ever lands.
 {:seon.gym.scenario/id     :blank-message-refusal
- :seon.gym.scenario/doc    "reply! with blank content must be refused with a guiding error envelope; no blank :seon.agent.message/content row may be stored. Runs 3+6 regression (message-content hygiene)."
+ :seon.gym.scenario/doc    "(message/user \"\") with blank content must be refused with a guiding error envelope; no blank :seon.agent.message/content row may be stored. Runs 3+6 regression (message-content hygiene)."
  :seon.gym.scenario/tier   :stub
  :seon.gym.scenario/status :active
  :seon.gym.scenario/axes   [:replies-honestly :terminates]
  :seon.gym.scenario/turns
  [{:seon.gym.turn/message "Please acknowledge this message."
    :seon.gym.turn/llm-script
-   [";; reply with nothing to say — the boundary must refuse it\n(seon.agent/reply! {:seon.agent.message/content \"\"})\n"]}]
+   [";; reply with nothing to say — the boundary must refuse it\n(message/user \"\")\n"]}]
  :seon.gym.scenario/predicates
  [{:seon.gym.predicate/id     :no-blank-message-stored
    :seon.gym.predicate/kind   :datalog
