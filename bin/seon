@@ -34,6 +34,9 @@
 #   adopt <name>       Register a manually-started process by PID
 #   prep               Idempotent git-dep prep for :writer/:cljs aliases
 #                      (downstream supervisors shell out to this)
+#   nuke --yes         DESTRUCTIVE full clean slate: stop everything, wipe
+#                      ALL cluster stores + transient data, clear ALL logs,
+#                      restart the default stack fresh. No undo.
 #
 # State per process: tmp/proc/<name>/{pid,cmd,started-at,lock/}
 # Logs:              logs/<name>.log (truncated on fresh start)
@@ -100,6 +103,12 @@ SEON_CLUSTER_DIR="${SEON_CLUSTER_DIR:-data/clusters/default}"
 SEON_REQ_SOCK="${SEON_REQ_SOCK:-tmp/seon-cluster-default-req.sock}"
 SEON_PUB_SOCK="${SEON_PUB_SOCK:-tmp/seon-cluster-default-pub.sock}"
 SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-7891}"
+
+# Embeddings (Proximum HNSW semantic search) — default ON for the default
+# cluster, matching bin/acme. Read by the wire-server (declares the index +
+# backfills) and the pod (per-turn predictive retrieval). Set SEON_EMBED= (empty)
+# to disable. Recover/rebuild: the index is DERIVED — re-ingest from source.
+export SEON_EMBED="${SEON_EMBED:-1}"
 
 # ============================================================
 # SEON_EXTRA_SRC — downstream CLJS source roots (task #36; spec:
@@ -780,6 +789,79 @@ cluster_reset() {
   fi
 }
 
+cmd_nuke() {
+  # DESTRUCTIVE clean slate. `cluster reset` wipes ONE cluster's store and
+  # bounces the default stack; `nuke` goes further — it tears the whole world
+  # down to bare metal: stop EVERY managed process (incl. jvm), wipe EVERY
+  # cluster store + all transient runtime data, and clear ALL logs — then
+  # bring the default stack back up fresh (pod boot re-seeds the core).
+  #
+  # What it deletes (unrecoverable — agent fns, soul edits, chat, findings,
+  # the indexed corpus all live in the cluster stores):
+  #   - data/clusters/*/store      every cluster's durable datahike store
+  #   - data/seon-pod/* data/sessions/* data/embeddings/*   transient runtime
+  #   - logs/*                     every log file + turns/agents/prompts/archive
+  #   - the default cluster's UDS sockets + tmp/seon-port
+  # What it KEEPS: out*/ (CLJS build output — rebuilt incrementally anyway),
+  #   data/dev-hook (the dev hook's own tooling state, not seon runtime data),
+  #   the git tree.
+  #
+  # NOTE on acme: this wipes data/clusters/acme/store too. If a bin/acme
+  # cluster is LIVE, stop it first (bin/acme stop pod && bin/acme stop
+  # wire-server) — nuke does not manage acme's processes, only its store.
+  #
+  # Guarded: requires --yes/-y (or an interactive "yes") because there is no
+  # undo. Usage: bin/seon nuke --yes
+  local confirmed=0
+  case "${1:-}" in
+    -y|--yes) confirmed=1 ;;
+  esac
+
+  if [ "$confirmed" != 1 ]; then
+    echo "▶ bin/seon nuke — DESTRUCTIVE full reset" >&2
+    echo "  wipes ALL cluster stores, ALL transient data, and ALL logs," >&2
+    echo "  then restarts the default stack fresh. There is NO undo." >&2
+    printf "  Type 'yes' to proceed: " >&2
+    local reply
+    read -r reply || reply=""
+    [ "$reply" = "yes" ] && confirmed=1
+  fi
+  if [ "$confirmed" != 1 ]; then
+    echo "✗ aborted (nothing changed)" >&2
+    exit 1
+  fi
+
+  echo "▶ nuke: tearing the world down"
+
+  # 1. Stop every managed process (jvm included — full clean slate, unlike
+  #    `start/stop all` which excludes it). Idempotent no-ops if not running.
+  for name in pod wire-server cljs-watch jvm; do
+    cmd_stop "$name"
+  done
+
+  # 2. Drop the default cluster's stale UDS sockets + the published port file
+  #    (recreated on the fresh start).
+  rm -f "$SEON_REQ_SOCK" "$SEON_PUB_SOCK" tmp/seon-port 2>/dev/null || true
+
+  # 3. Wipe every cluster store + transient runtime data. The store dirs are
+  #    the durable home of everything agents authored — gone for good.
+  rm -rf data/clusters/*/store 2>/dev/null || true
+  rm -rf data/seon-pod/* data/sessions/* data/embeddings/* 2>/dev/null || true
+  echo "✗ wiped all cluster stores + transient runtime data"
+
+  # 4. Clear ALL logs (files + subdirs: turns/, agents/, prompts/, archive/).
+  #    Recreate the bare dir; processes recreate their own logs on boot.
+  rm -rf "$LOG_DIR"/* 2>/dev/null || true
+  mkdir -p "$LOG_DIR"
+  echo "✗ cleared all logs"
+
+  # 5. Bring the default stack back up fresh — pod boot re-seeds the core
+  #    from the indexed codebase, same as `cluster reset`.
+  echo "▶ restarting the default stack fresh"
+  start_all
+  echo "▶ nuke complete — fresh world, core re-seeded on pod boot"
+}
+
 cmd_adopt() {
   # Use case: process started manually in a terminal (e.g. node out/client/main.js
   # in a watched tab) and the supervisor should now track it.
@@ -817,6 +899,7 @@ case "${1:-help}" in
   # eyeball their injected invocation.
   print-cmd) shift; process_command "${1:?print-cmd requires a process name}" ;;
   cluster) shift; cmd_cluster "$@" ;;
+  nuke)    shift; cmd_nuke "$@" ;;
   help|--help|-h|*)
     cat <<'EOF'
 Usage: bin/seon <command> [process] [args...]
@@ -850,6 +933,12 @@ Commands:
   cluster reset [n]  DESTRUCTIVE: stop pod+wire-server, wipe
                      data/clusters/<n>/store (default "default"),
                      restart both — fresh DB, core re-seeds
+  nuke --yes         DESTRUCTIVE (full clean slate): stop EVERY process
+                     (jvm too), wipe ALL cluster stores + transient data,
+                     clear ALL logs, restart the default stack fresh.
+                     Requires --yes (or interactive 'yes'); no undo —
+                     erases every agent fn/soul edit/chat/finding. Wipes
+                     acme's store too (stop bin/acme first if it's live).
 
 Processes (registered in script):
   pod          node out/client/main.js
