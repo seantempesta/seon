@@ -80,7 +80,8 @@
    [::id          ::id]
    [::title       ::title]
    [::created-at  ::created-at]
-   [::description {:optional true} ::description]])
+   [::description {:optional true} ::description]
+   [::message     {:optional true} ::message]])
 
 (schema/register! ::todos [:vector ::todo])
 

@@ -396,6 +396,9 @@
    :seon.agent.todo/completed-at
    :seon.agent.todo/owner
    :seon.agent.todo/from
+   ;; Back-ref to the inbound :human message an address-todo tracks
+   ;; (auto-minted in message!; the render half links id+age+title).
+   :seon.agent.todo/message
 
    ;; --- Eval ---
    ;; Evals are component-many on :seon.agent.turn/evals — no standalone

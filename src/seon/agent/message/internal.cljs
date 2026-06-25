@@ -13,7 +13,23 @@
    so `::foo` would expand WRONG. Every helper references the owning ns's
    attrs fully-qualified (`:seon.agent.message/from`, never `::from`)."
   (:require
+    [clojure.string :as str]
     [seon.db :as db]))
+
+(defn clip-title
+  "A SHORT single-line preview of message `content` for an address-todo
+   title: internal newlines collapsed to spaces, trimmed, clipped to ~80
+   chars with a trailing `…` when cut. Never blank (the todo title schema
+   demands min 1) — falls back to a placeholder for whitespace-only input
+   (message! already refuses blank content, so this is belt-and-braces)."
+  [content]
+  (let [one-line (-> (str content)
+                     (str/replace #"\s+" " ")
+                     str/trim)]
+    (cond
+      (str/blank? one-line) "(message)"
+      (<= (count one-line) 80) one-line
+      :else (str (subs one-line 0 80) "…"))))
 
 (defn user-entity?
   "Does `ref` resolve to THE user entity?"
