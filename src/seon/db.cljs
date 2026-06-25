@@ -920,6 +920,62 @@
   ([db eid]   (touch->map (entity-lazy db eid))))
 
 ;; ---------------------------------------------------------------------------
+;; Temporal — derive a db VALUE at another point in time. Reads normally run
+;; against the db injected from *conn*; these let you make your OWN db value
+;; (history / as-of / since) and pass it positionally to query/pull/entity.
+;; Datomic/datahike shape: db in, db out.
+;; ---------------------------------------------------------------------------
+
+;; A datahike time-point: a tx-id (int), a Date, or a txInstant. `:any`
+;; because it is a datahike-domain value, not seon-authored data (the
+;; documented third-party-boundary exception to the no-:any rule).
+(schema/register! ::time-point :any)
+
+(defn history
+  "A db value spanning ALL of time — every assertion AND retraction ever,
+   not just the now-true view. Read it with a 5-tuple `:where` so the tx and
+   the add/retract flag bind. The db is injected from your one connection;
+   omit it:
+
+     (db/query '[:find ?v ?tx ?added
+                 :where [?e ::title ?v ?tx ?added]]
+               (db/history))               ; ?added = true add, false retract
+
+   Pass an explicit db to branch history off a snapshot you already hold."
+  {:malli/schema [:function
+                  [:=> [:cat] :any]
+                  [:=> [:catn [::db ::db-val]] :any]]}
+  ([]   (history @(internal/resolve-conn *conn*)))
+  ([db] (d/history db)))
+
+(defn as-of
+  "A db value as it was AT `t` (a tx-id, Date, or txInstant) — time-travel
+   for reads. query/pull/entity against it see only what was true then:
+
+     (db/query '[:find ?title :where [?e ::doc-id \"d1\"] [?e ::title ?title]]
+               (db/as-of last-week-tx))    ; db omitted ⇒ your *conn* at t
+
+   2-arity rewinds an explicit db you already hold: (db/as-of db t)."
+  {:malli/schema [:function
+                  [:=> [:cat ::time-point] :any]
+                  [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]}
+  ([t]    (as-of @(internal/resolve-conn *conn*) t))
+  ([db t] (d/as-of db t)))
+
+(defn since
+  "The complement of [[as-of]]: a db value reflecting only datoms added
+   AFTER `t`. Diff \"what changed since\" a tx you remembered:
+
+     (db/query '[:find ?e :where [?e ::status :done]] (db/since last-seen-tx))
+
+   2-arity takes an explicit db: (db/since db t)."
+  {:malli/schema [:function
+                  [:=> [:cat ::time-point] :any]
+                  [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]}
+  ([t]    (since @(internal/resolve-conn *conn*) t))
+  ([db t] (d/since db t)))
+
+;; ---------------------------------------------------------------------------
 ;; Listeners
 ;; ---------------------------------------------------------------------------
 
