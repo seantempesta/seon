@@ -47,6 +47,11 @@
 ;; Fixture — fresh conn + a corpus of defective and clean rows.
 ;; ---------------------------------------------------------------------------
 
+;; The slow eval's seeded duration — ONE constant feeds both the fixture row
+;; and the assertion, so the test pins the `(str dur "ms")` GENERATION in
+;; warn/check-slow-evals (the formatting), not a hardcoded "1500ms" literal.
+(def ^:private slow-eval-duration-ms 1500)
+
 (defn- seed-tx []
   (let [now (js/Date.)
         t   (fn [ms] (js/Date. (+ (.getTime now) ms)))]
@@ -157,7 +162,7 @@
      ;; slow eval after the cutoff window start
      {:seon.eval/id "EVLwarnSLOW001"
       :seon.eval/at (t 220)
-      :seon.eval/duration-ms 1500
+      :seon.eval/duration-ms slow-eval-duration-ms
       :seon.eval/source "(slow)"
       :seon.eval/ok? true}
      ;; ── fs allowlist denials (check-fs-denied) ───────────────────
@@ -521,8 +526,10 @@
             (let [slow (warn/check-slow-evals {:seon.db/db db})
                   ftst (warn/check-failing-tests {:seon.db/db db})]
               (is (= #{"EVLwarnSLOW001"} (affected-syms slow)))
-              (is (= "1500ms" (:seon.warn/where
-                                (first (:seon.warn/affected slow)))))
+              ;; pins the GENERATION (str dur "ms"), not a "1500ms" literal:
+              ;; the `where` is the seeded duration formatted with the "ms" unit.
+              (is (= (str slow-eval-duration-ms "ms")
+                     (:seon.warn/where (first (:seon.warn/affected slow)))))
               (is (= #{"warntest.main/broken-test"} (affected-syms ftst))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -648,12 +655,15 @@
               (let [text     (warn/render-warnings {:seon.db/db db})
                     urg-idx  (.indexOf text "‼ URGENT [tile-unresolved]")
                     fail-idx (.indexOf text "[failed-evals]")]
+                (is (str/starts-with? text "<warnings>"))
                 (is (not (neg? urg-idx))
                     "urgent broken-tile cluster renders with the loud banner")
                 (is (not (neg? fail-idx))
                     "the co-occurring non-urgent failed-eval cluster renders too")
                 (is (< urg-idx fail-idx)
-                    "URGENT cluster comes FIRST, before the ordinary cluster"))))
+                    "URGENT cluster comes FIRST, before the ordinary cluster")
+                (is (str/includes? text "FIX THIS IMMEDIATELY")
+                    "the urgent template is louder than the ordinary one"))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
@@ -666,10 +676,12 @@
     (-> (with-seeded-db
           (fn [db]
             (let [text (warn/render-warnings (scoped db))]
+              (is (str/starts-with? text "<warnings>"))
               (is (= 1 (count (re-seq #"\[return-is-any\]" text)))
                   "ONE cluster header per kind — explanation never repeats")
-              (is (str/includes? text "Affecting: warntest.main/any-ret (return) (1).")
-                  "affected list carries the location")
+              (is (str/includes? text "Affecting: warntest.main/any-ret (return) (1). Please correct before moving on.")
+                  "affected list carries the location + the closing ask")
+              (is (str/includes? text "Fix example:"))
               (is (not (str/includes? text "warntest.other/also-unspecced"))
                   "corpus clusters respect the ns scope"))))
         (.then (fn [_] (done)))

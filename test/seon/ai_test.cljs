@@ -178,37 +178,44 @@
                      (.finally (fn [] (set! db/*conn* orig)))))))))
 
 (deftest current-empty-then-seeded-then-persists
-  (async done
-    (-> (with-conn
-          (fn [conn]
-            ;; 1. Empty store → {} — adapters fall back to their defaults.
-            (is (= {} (ai/current @conn))
-                "absent env + absent row → no overrides")
-            ;; 2. "Boot with env on a fresh store": seed the row.
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   (ai/sync-tx-data
-                     {::ai/env {::ai/provider :anthropic
-                                ::ai/thinking "true"
-                                ::ai/max-tokens 2048}})})
-                (.then (fn [{ok? :seon.db/ok?}]
-                         (is (true? ok?) "config seed transact lands")
-                         (let [c (ai/current @conn)]
-                           (is (= :anthropic (::ai/provider c)))
-                           (is (= 2048 (::ai/max-tokens c)))
-                           (is (true? (ai/thinking-mode c))))
-                         ;; 3. "Reboot WITHOUT env": the row is configured, so
-                         ;;    seed is a NO-OP (nothing retracted) → the config
-                         ;;    PERSISTS. The DB owns the row.
-                         (is (= [] (ai/sync-tx-data
-                                     {::ai/row {::ai/provider :anthropic
-                                                ::ai/thinking "true"
-                                                ::ai/max-tokens 2048}
-                                      ::ai/env {}}))
-                             "configured row + no env → no-op seed (no retract)")
-                         (let [c (ai/current @conn)]
-                           (is (= :anthropic (::ai/provider c))
-                               "reboot WITHOUT env → row PERSISTS (DB owns)")
-                           (is (= 2048 (::ai/max-tokens c)))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+  ;; `max-tokens` is NOT a provider constant — it is arbitrary fixture data the
+  ;; test SEEDS via env, asserting the round-trip (env → sync-tx-data → DB →
+  ;; current) returns the SAME int. ONE binding feeds the seed AND the
+  ;; assertions, so the contract is round-trip fidelity, not a 2048 literal.
+  (let [seeded-max-tokens 2048]
+    (async done
+      (-> (with-conn
+            (fn [conn]
+              ;; 1. Empty store → {} — adapters fall back to their defaults.
+              (is (= {} (ai/current @conn))
+                  "absent env + absent row → no overrides")
+              ;; 2. "Boot with env on a fresh store": seed the row.
+              (-> (db/transact!
+                    {:seon.db/tx-data
+                     (ai/sync-tx-data
+                       {::ai/env {::ai/provider :anthropic
+                                  ::ai/thinking "true"
+                                  ::ai/max-tokens seeded-max-tokens}})})
+                  (.then (fn [{ok? :seon.db/ok?}]
+                           (is (true? ok?) "config seed transact lands")
+                           (let [c (ai/current @conn)]
+                             (is (= :anthropic (::ai/provider c)))
+                             (is (= seeded-max-tokens (::ai/max-tokens c))
+                                 "the seeded max-tokens round-trips env → DB → current")
+                             (is (true? (ai/thinking-mode c))))
+                           ;; 3. "Reboot WITHOUT env": the row is configured, so
+                           ;;    seed is a NO-OP (nothing retracted) → the config
+                           ;;    PERSISTS. The DB owns the row.
+                           (is (= [] (ai/sync-tx-data
+                                       {::ai/row {::ai/provider :anthropic
+                                                  ::ai/thinking "true"
+                                                  ::ai/max-tokens seeded-max-tokens}
+                                        ::ai/env {}}))
+                               "configured row + no env → no-op seed (no retract)")
+                           (let [c (ai/current @conn)]
+                             (is (= :anthropic (::ai/provider c))
+                                 "reboot WITHOUT env → row PERSISTS (DB owns)")
+                             (is (= seeded-max-tokens (::ai/max-tokens c))
+                                 "the persisted max-tokens survives a no-op reboot seed")))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

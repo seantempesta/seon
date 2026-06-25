@@ -18,6 +18,7 @@
   (:require
     [cljs.reader :as reader]
     [cljs.test :refer [deftest is testing async]]
+    [clojure.string :as str]
     [malli.core :as m]
     [seon.agent :as agent]
     [seon.client :as client]
@@ -153,18 +154,24 @@
           {:seon.db/error                 env
            :seon.render.live-tile/content 'my.ns/broken-tile})]
     (is (tile/valid-hiccup? hiccup) "human sees a card, not a blank")
-    ;; The HUMAN sees a calm 'updating this panel' placeholder — never a scary
-    ;; error (tile-isolation Layer 1: always show a nice/in-progress tile on
-    ;; problems; the agent, not the human, is the one nudged to fix it).
-    (is (some #(re-find #"Updating this panel" %) (hiccup-strings hiccup))
-        "human sees the calm 'updating' placeholder")
-    (is (not (some #(re-find #"(?i)error" %) (hiccup-strings hiccup)))
-        "the human card carries NO scary error text — that goes to the agent twin")
-    (is (= env error) "response carries the :seon.error/* envelope")
-    (is (re-find #"my\.ns/broken-tile" ai)
+    ;; ISOLATION CONTRACT (tile-isolation Layer 1), asserted as MECHANISM not
+    ;; placeholder wording: the failure is partitioned to the agent-facing
+    ;; channels (the :seon.render/ai twin + the :seon.render/error envelope)
+    ;; and NEVER leaks into the human hiccup. So the human card is structurally
+    ;; a normal .seon-tile, indistinguishable from a healthy tile, while the
+    ;; twin + envelope carry the SAME message the human never sees.
+    (let [human-strings (hiccup-strings hiccup)]
+      (is (= "seon-tile" (:class (second hiccup)))
+          "the human card is a normal .seon-tile — a failure is indistinguishable from a healthy tile")
+      (is (not-any? #(str/includes? % (:seon.error/message env)) human-strings)
+          "the wired fn's failure message is ABSENT from the human card")
+      (is (not-any? #(re-find #"(?i)error" %) human-strings)
+          "no error text leaks to the human — the error is routed to the agent twin"))
+    (is (= env error) "response carries the :seon.error/* envelope verbatim")
+    (is (str/includes? ai "my.ns/broken-tile")
         "twin names the wired value that broke")
-    (is (re-find #"boom from tile fn" ai)
-        "twin carries the exception's message")))
+    (is (str/includes? ai (:seon.error/message env))
+        "the SAME envelope message the human never sees rides the agent twin")))
 
 ;; ============================================================
 ;; hiccup-structure-error — serializer-faithful, NOT valid-hiccup?:
@@ -325,10 +332,18 @@
             (let [{:seon.render/keys [hiccup ai]}
                   (render/render-agent-tile {:seon.db/db @conn
                                              :seon.agent/id "tilewlc-000001"})]
+              ;; DISPATCH MECHANISM, not the greeting prose: an unwired agent
+              ;; resolves to the welcome renderable, which ALWAYS returns the
+              ;; html-response twin pair. Assert the twin is present and
+              ;; non-blank, and that it's the WELCOME twin specifically — its
+              ;; stable contract is naming how to repoint the tile
+              ;; (:seon.render.live-tile/content), not any time-of-day wording.
               (is (= "seon-tile" (:class (second hiccup)))
-                  "unwired agent gets the core welcome")
-              (is (re-find #"Good (morning|afternoon|evening|night)" (str ai))
-                  "welcome's twin rides the response"))))
+                  "unwired agent dispatches to the core welcome renderable")
+              (is (and (string? ai) (seq ai))
+                  "the welcome twin (the ai-format string) rides the response")
+              (is (str/includes? ai ":seon.render.live-tile/content")
+                  "the welcome twin teaches HOW to repoint the tile — its stable contract"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
