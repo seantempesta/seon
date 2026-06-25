@@ -843,11 +843,16 @@ cmd_nuke() {
   #    (recreated on the fresh start).
   rm -f "$SEON_REQ_SOCK" "$SEON_PUB_SOCK" tmp/seon-port 2>/dev/null || true
 
-  # 3. Wipe every cluster store + transient runtime data. The store dirs are
-  #    the durable home of everything agents authored — gone for good.
-  rm -rf data/clusters/*/store 2>/dev/null || true
+  # 3. Wipe every cluster dir wholesale (store/ AND its siblings — the
+  #    embedding-index/ HNSW store, any future per-cluster artifacts) plus
+  #    transient runtime data. Wiping the whole dir — not just store/ — is
+  #    what makes this a true clean slate: leaving embedding-index/ behind
+  #    forces the wire-server to detect+delete it as a cluster-reset orphan
+  #    on boot (a self-heal that shouldn't be load-bearing). Gone for good:
+  #    everything agents authored lives in these dirs.
+  rm -rf data/clusters/* 2>/dev/null || true
   rm -rf data/seon-pod/* data/sessions/* data/embeddings/* 2>/dev/null || true
-  echo "✗ wiped all cluster stores + transient runtime data"
+  echo "✗ wiped all cluster dirs (store + embedding-index) + transient data"
 
   # 4. Clear ALL logs (files + subdirs: turns/, agents/, prompts/, archive/).
   #    Recreate the bare dir; processes recreate their own logs on boot.
