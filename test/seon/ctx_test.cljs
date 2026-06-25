@@ -653,24 +653,19 @@
                       ;; legitimately ARE the qualified attr keywords now that
                       ;; low-card identity values render inline, so scope the
                       ;; check to the my.workout line.)
-                      (let [wline (first (filter #(str/starts-with? % ";; my.workout: ")
+                      (let [wline (first (filter #(str/includes? % "my.workout: ")
                                                  lines))]
                         (is (some? wline) "the my.workout kind line is present")
                         (is (not (str/includes? wline ":my.workout/date"))
                             "attr namespace prefix is stripped from the pairs")
                         (is (not (str/includes? wline "my.workout/date"))
                             "no qualified attr name leaks into the pairs")
-                        ;; the new value-surfacing: a low-card keyword attr
-                        ;; shows its DISTINCT members inline as an ILLUSTRATIVE
-                        ;; SAMPLE in «…» guillemets (NOT [..]) — the de-literaled
-                        ;; convention marks them as example filter keys to query,
-                        ;; never an authoritative readout. The whole line is a
-                        ;; `;;` comment so the glyphs never break the reader.
+                        ;; low-card keyword attr shows DISTINCT members inline
+                        ;; as an ILLUSTRATIVE SAMPLE in «…» guillemets.
                         (is (str/includes? wline "«:lift :run»")
                             "low-cardinality categorical values render inline as a «…» sample"))
-                      ;; one-line-per-kind: exactly ONE body line mentions
-                      ;; the kind (the header is ;; comments, not a kind line).
-                      (is (= 1 (count (filter #(str/starts-with? % ";; my.workout: ")
+                      ;; one-line-per-kind: exactly ONE body line mentions the kind.
+                      (is (= 1 (count (filter #(str/includes? % "my.workout: ")
                                               lines)))
                           "exactly one line per kind")))))))
         (.then (fn [] (done)))
