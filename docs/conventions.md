@@ -798,8 +798,17 @@ decoration — it carries meaning, and the rule is fixed:
   ABOVE a form in real source (the standard Clojure block-comment level). Code
   keeps `;;` for these; do NOT downgrade real-code block comments to `;`.
 - **`;;;` (triple)** — reserved for runtime-STRUCTURE demarcation in the
-  rendered context (the section-bracket `;;; ┌─ <name> ─ … └─ end <name> ─` and
-  the transcript's `;;; ◀`/`;;; ▶` event lines), not for body text.
+  rendered context, not for body text. Each top-level section is wrapped by a
+  start/stop bracket (`seon.ctx/section-bracket-ai`):
+
+  ```clojure
+  ;;; ┌─ <section-name> ─
+  …section body…
+  ;;; └─ end <section-name> ─
+  ```
+
+  The transcript's per-event lines (`;;; ◀` inbound / `;;; ▶` outbound) are the
+  other `;;;` runtime-structure use. Body text inside a section is never `;;;`.
 
 The practical test: **prose → `;`, block-comment-before-code → `;;`, inline
 comment → `;`.** Prose rendered into context uses single `;` precisely so it
