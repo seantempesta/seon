@@ -32,12 +32,19 @@
                       :block-on-fail false}}
 
  ;; AI review (Gemini gemini-3.5-flash) — runs bb-DIRECT in the hook via `agy`,
- ;; runtime-independent (no JVM, no pod): fires for .clj/.cljs/.cljc/.md on the
- ;; edited file + docs/conventions.md rubric. Rate-limited by interval-seconds
- ;; via a file timestamp (tmp/.last-review). Non-blocking: an agy failure/timeout
- ;; is logged (REVIEW_* in logs/hook-debug.log) and the edit proceeds. For
- ;; .clj/.cljc it defers to the in-JVM review only when a JVM nREPL is reachable
- ;; (no double Gemini call).
+ ;; runtime-independent (no JVM, no pod): fires for .clj/.cljs/.cljc/.md.
+ ;; BATCH-since-last-review: every reviewable edit is appended (deduped) to a
+ ;; file accumulator (tmp/.pending-review). A review fires at most once per
+ ;; :interval-seconds; when it fires it covers the WHOLE pending batch (all
+ ;; reviewable files edited since the last review, content re-slurped fresh) in
+ ;; ONE agy call against the docs/conventions.md rubric, then clears the
+ ;; accumulator. Edits made during the interval pause stay pending for the next
+ ;; review — none are lost. Rate-limiting timestamp lives in tmp/.last-review.
+ ;; Non-blocking: an agy failure/timeout is logged (REVIEW_* in
+ ;; logs/hook-debug.log) and the edit proceeds; the batch stays pending and is
+ ;; retried next interval (bounded by an internal max-pending-files cap so a
+ ;; permatimeout can't grow it unbounded). For .clj/.cljc it defers to the
+ ;; in-JVM review only when a JVM nREPL is reachable (no double Gemini call).
  :review {:enabled true
           ;; Minimum time between reviews (prevents review spam)
           :interval-seconds 60
