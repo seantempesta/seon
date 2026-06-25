@@ -845,8 +845,16 @@
                           "no relevant-context header in the OFF-path prompt")
                       ;; byte-identical across two assemblies (the section
                       ;; is not pulling query-dependent content into the
-                      ;; prompt when off).
-                      (is (= (:seon.render/text r1) (:seon.render/text r2))
-                          "OFF-path prompt is stable / byte-identical")))))))
+                      ;; prompt when off). The byte-stability contract is the
+                      ;; CACHEABLE PREFIX (`stable-text`), NOT the full prompt:
+                      ;; the volatile tail's readline carries the ONE
+                      ;; legitimate live `now` (current-time line, below the
+                      ;; cache breakpoint), which ticks between two calls that
+                      ;; cross a second boundary — by design (context-render
+                      ;; "Time and the as-of cache-diff"). Asserting the full
+                      ;; text was a latent flake; the prefix is the contract.
+                      (is (= (:seon.render/stable-text r1)
+                             (:seon.render/stable-text r2))
+                          "OFF-path cacheable prefix is byte-identical")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))

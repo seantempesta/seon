@@ -114,11 +114,19 @@
 ;;     `#(+ % 1)`       → :fn            → (fn* …)
 ;;     `@x`             → :deref         → (clojure.core/deref x)
 ;;     `'x`             → :quote         → (quote x)
-;;     `` `(a b) ``     → :syntax-quote  → (quote (a b))
 ;;     `#'x`            → :var           → (var x)
-;;     `~x` / `~@x`     → :unquote*      → (unquote …) / (unquote-splicing …)
 ;;
 ;;   PROSE — never evaluated:
+;;     - INLINE-BACKTICK code — a top-level `:syntax-quote`
+;;       (`` `(subs s 0 5) ``), `:unquote` (`~x`) or `:unquote-splicing`
+;;       (`~@x`): these sexpr to seqs so `seq?` alone would EVALUATE them,
+;;       but at the agent REPL a leading backtick is ALWAYS inline prose
+;;       (`I'll use \`(subs s 0 5)\` to format`) — never intentional
+;;       macro-quoting. The live damage was a "backtick cascade": one
+;;       inline `\`(form)\`` shredded into multiple junk evals plus bare
+;;       `42`-style atoms, all recorded as real `result/<id>` history
+;;       (the agent's own turn-4 message diagnosed it). Classifying the
+;;       backtick reader-macros as prose stops the cascade at its root.
 ;;     - bare ATOMS — symbols (incl. `do`/`if`), numbers, strings,
 ;;       keywords, booleans, nil, chars, AND a bare `=>`/`⇒` echo token
 ;;       (a symbol): LLM prose tokenized by the reader, or a fabricated
@@ -144,16 +152,27 @@
 ;; to wrap a value it means to run.
 ;; ============================================================
 
+(def ^:private inline-backtick-tags
+  "rewrite-clj tags whose tokens sexpr to a SEQ (so `seq?` alone would
+   EVALUATE them) but are ALWAYS inline-backtick prose at the agent REPL,
+   never intentional macro-quoting — a leading `` ` ``/`~`/`~@`. Treated as
+   prose to stop the inline-backtick cascade (see the classification
+   comment above)."
+  #{:syntax-quote :unquote :unquote-splicing})
+
 (defn- prose-token?
   "True if a parsed top-level token is PROSE (not evaluated). `form` is
    the read sexpr; `tag` is the rewrite-clj node tag. The form/prose cut
-   is `(seq? form)` — a list/seq evaluates — with ONE refinement: a
+   is `(seq? form)` — a list/seq evaluates — with TWO refinements: a
    `:reader-macro` tagged literal (`#inst`/`#uuid`/`#js`/`#?(…)`) sexprs
    to a seq (`(read-string …)`) but is a DATUM, not a form, so it is
-   prose. Everything that is not a seq (scalars, symbols, `{…}`/`[…]`/
-   `#{…}`) is prose."
+   prose; and an inline-backtick reader-macro
+   ([[inline-backtick-tags]] — `` `(…) ``/`~x`/`~@x`) likewise sexprs to a
+   seq but is inline prose, not code. Everything that is not a seq
+   (scalars, symbols, `{…}`/`[…]`/`#{…}`) is prose."
   [form tag]
   (or (= tag :reader-macro)
+      (contains? inline-backtick-tags tag)
       (not (seq? form))))
 
 (defn- data-literal?

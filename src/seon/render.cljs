@@ -645,14 +645,7 @@
           in (assoc ctx :seon.render/node   node
                         :seon.render/render  #(render view ctx %))]
       (try
-        (let [r (f in)]
-          ;; INTERIM TOLERANCE: a not-yet-converted section html twin may
-          ;; still return the old `{:seon.render/hiccup h}` envelope — unwrap
-          ;; it to bare hiccup so the recursive walker sees one shape.
-          (if (and (= view :seon.render/html) (map? r)
-                   (contains? r :seon.render/hiccup))
-            (:seon.render/hiccup r)
-            r))
+        (f in)                                  ;; converters return bare String / hiccup
         (catch :default e
           (if (= view :seon.render/ai)
             (str ";; ⚠ [" (renderable-id node) "] render failed: " (ex-message e))

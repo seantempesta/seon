@@ -243,18 +243,24 @@
                    " for " (pr-str in) " — got " (pr-str entries))))))))
 
 ;; ============================================================
-;; Reader-macro forms — `@x`/`'x`/`#(…)`/`#'x`/`` `(…) `` all read as
-;; SEQS, so they EVALUATE (`:kind :form`); they are NOT prose. This is
-;; the seq?-not-coll? cut: a list and any seq-shaped reader macro stay
-;; forms, while maps/vectors/sets are prose.
+;; Reader-macro forms — `@x`/`'x`/`#(…)`/`#'x` all read as SEQS, so they
+;; EVALUATE (`:kind :form`); they are NOT prose. This is the seq?-not-coll?
+;; cut: a list and these seq-shaped reader macros stay forms, while
+;; maps/vectors/sets are prose.
+;;
+;; The INLINE-BACKTICK reader macros — `` `(…) `` (syntax-quote), `~x`
+;; (unquote), `~@x` (unquote-splicing) — ALSO read as seqs but are now
+;; PROSE (dropped): at the agent REPL a leading backtick is always inline
+;; narration (`I'll use \`(subs s 0 5)\``), never intentional
+;; macro-quoting — the "backtick cascade" bug. See `inline-backtick-prose`
+;; below.
 ;; ============================================================
 
 (def reader-macro-cases
   [{:in "@!atom-ref"       :form '(clojure.core/deref !atom-ref)}
    {:in "'x"               :form '(quote x)}
    {:in "#(+ % 1)"         :form '(fn* [%1] (+ %1 1))}
-   {:in "#'some-var"       :form '(var some-var)}
-   {:in "`(a b)"           :form '(quote (a b))}])
+   {:in "#'some-var"       :form '(var some-var)}])
 
 (deftest reader-macros-evaluate
   (doseq [{:keys [in form]} reader-macro-cases]
@@ -267,6 +273,30 @@
         (when (not (str/starts-with? in "#("))
           (is (= form (:form (first entries)))))
         (is (seq? (:form (first entries))))))))
+
+;; ============================================================
+;; Inline-backtick prose — `` `(…) ``/`~x`/`~@x` are DROPPED, never
+;; evaluated. The live "backtick cascade": one inline `` `(form) `` in
+;; LLM narration ("I'll use `(subs s 0 5)` to format") used to shred into
+;; multiple junk `:syntax-quote` evals plus bare-atom prose, all recorded
+;; as real `result/<id>` history. Classifying the backtick reader-macros
+;; as prose stops the cascade at its root.
+;; ============================================================
+
+(deftest inline-backtick-prose
+  (testing "a top-level syntax-quote is prose (dropped), not a form"
+    (is (= [] (parse/parse-forms "`(a b)"))))
+  (testing "unquote / unquote-splicing are prose (dropped)"
+    (is (= [] (parse/parse-forms "~x")))
+    (is (= [] (parse/parse-forms "~@xs"))))
+  (testing "the cascade shape: inline-backtick narration extracts NO forms"
+    (is (= [] (parse/parse-forms "I'll use `(subs s 0 5)` to format."))))
+  (testing "a real bare form after dropped backtick prose still evaluates"
+    ;; `;;` comment carries through the dropped syntax-quote to the form.
+    (let [entries (parse/parse-forms ";; using a quote\n`(noise)\n(+ 1 2)")
+          forms   (filter #(= :form (:kind %)) entries)]
+      (is (= 1 (count forms)))
+      (is (= '(+ 1 2) (:form (first forms)))))))
 
 ;; ============================================================
 ;; Multiline / indented forms are indent-safe — the reader groups a
