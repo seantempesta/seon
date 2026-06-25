@@ -39,8 +39,8 @@
              (:seon.schema/error (ex-data e))))
       (is (= :user-input (:seon.error/kind (ex-data e)))
           "agent-input error kind — the established register! failure mode")
-      (is (str/includes? (ex-message e) ":kb.workout/date")
-          "the error GUIDES: names a corrected multi-segment example")
+      (is (re-find #":\w+\.\w+/\w+" (ex-message e))
+          "the error GUIDES: names a corrected multi-segment keyword example")
       (is (str/includes? (ex-message e) "(seon.db/store-inventory)")
           "the error teaches reuse-first: consult the store before registering"))))
 

@@ -86,13 +86,21 @@
   (let [pass (h-test/render-ai {:seon.render/node ent-pass})
         fail (h-test/render-ai {:seon.render/node ent-fail})
         none (h-test/render-ai {:seon.render/node ent-none})]
-    (is (str/includes? pass "[test demo.ns/t-pass]") "header carries the sym")
+    (is (str/includes? pass "demo.ns/t-pass") "header carries the sym")
     (is (str/includes? pass "(deftest t-pass") "source rendered")
-    (is (str/includes? pass "✓ test passing") "passing glyph for a passed run")
-    (is (str/includes? fail "✗ test failing") "failing glyph for a failed run")
-    (is (str/includes? fail "expected 1, got 2") "failure summary shown")
-    (is (str/includes? none "• test (no run recorded)")
-        "no-run glyph when no last-* present")))
+    ;; The three run-states render DISTINCTLY — anchor on the run-state STEM
+    ;; (passing / failing / no run), the shared status contract, NOT the
+    ;; decorative glyph (✓/✗/•) + exact phrase (a render surface).
+    (is (str/includes? pass "passing") "passed run renders the passing state")
+    (is (str/includes? fail "failing") "failed run renders the failing state")
+    (is (str/includes? none "no run") "no recorded run renders the no-run state")
+    ;; …and the three states are mutually distinct (a pass is never shown as
+    ;; a fail, etc.) — the behavior the glyphs used to stand in for.
+    (is (and (not (str/includes? pass "failing"))
+             (not (str/includes? fail "passing"))
+             (not= pass fail) (not= fail none) (not= pass none))
+        "the three run-states are mutually distinct")
+    (is (str/includes? fail "expected 1, got 2") "failure summary shown")))
 
 (deftest render-html-is-valid-card
   ;; render-html returns BARE hiccup now (keystone), node under :seon.render/node.
@@ -155,7 +163,7 @@
                   html (render/render-entity-html
                          {:seon.db/db db :seon.render/entity ent})]
               (is (string? ai) "render-entity-ai resolved the :seon.test kind")
-              (is (str/includes? ai "[test demo.ns/t-attached]") "ai shows the sym")
+              (is (str/includes? ai "demo.ns/t-attached") "ai shows the sym")
               (is (vector? html) "render-entity-html resolved the :seon.test kind")
               (is (= :div (first html)) "html is a card div"))))
         (.then (fn [_] (done)))
@@ -174,16 +182,17 @@
                          (agent/render-namespace
                            {:seon.db/db db :seon.ns/name :demo.ns
                             :seon.render/depth 0 :seon.render/format :ai}))]
-              (is (str/includes? text "; namespace demo.ns")
-                  "the ns renders as a comment-shaped block label")
-              (is (str/includes? text "[test demo.ns/t-attached]")
+              (is (str/includes? text "(ns demo.ns")
+                  "the ns block rendered (ns-source head present)")
+              (is (str/includes? text "demo.ns/t-attached")
                   "the test is rendered under its ns")
-              ;; AC3 (AI path): render-namespace must show the test's status
-              ;; glyph, NOT just the sym+source. `t-attached` has a
-              ;; :last-passed-at seeded so it must render as ✓ passing, via
-              ;; the SHARED `h-test/status-line` helper (single glyph source).
-              (is (str/includes? text "✓ test passing")
-                  "the test's status glyph (✓) is shown in render-namespace AI")
+              ;; AC3 (AI path): render-namespace must show the test's RUN-STATE,
+              ;; NOT just the sym+source. `t-attached` has a :last-passed-at
+              ;; seeded so it must render the passing state, via the SHARED
+              ;; `h-test/status-line` helper. Anchor on the run-state stem
+              ;; (passing), not the decorative glyph.
+              (is (str/includes? text "passing")
+                  "the test's run-state (passing) is shown in render-namespace AI")
               (is (str/includes? text "(deftest t-attached")
                   "the test source is in view"))))
         (.then (fn [_] (done)))

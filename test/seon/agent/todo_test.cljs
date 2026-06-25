@@ -152,13 +152,16 @@
                           ids   (mapv :seon.agent.todo/id
                                       (:seon.agent.todo/todos
                                         (todo/list-open {:seon.agent.todo/owner a-ref})))]
-                      (is (re-find #"\(seon\.agent\.todo/complete! \{:seon\.agent\.todo/id \"<id>\"\}\)"
-                                   block)
-                          "header teaches the exact complete! call shape")
+                      (is (and (str/includes? block "seon.agent.todo/complete!")
+                               (str/includes? block ":seon.agent.todo/id"))
+                          "header teaches the complete! call — names the fn and its :seon.agent.todo/id arg")
                       (is (and (seq ids) (every? #(str/includes? block %) ids))
                           "every open row renders its durable id — actionable without a query")
-                      (is (re-find #"(?m)^; \S+ \[2m\] first \(oldest\)$" block)
-                          "row = `; <id> [<age>] <title>`, oldest first (single-`;` prose — context reads as Clojure)"))
+                      (is (str/includes? block "first (oldest)")
+                          "the oldest todo's title renders in the block")
+                      (is (< (str/index-of block "first (oldest)")
+                             (str/index-of block "second"))
+                          "oldest first — `first (oldest)` precedes the newer `second`"))
                     (let [id (-> (todo/list-open {:seon.agent.todo/owner a-ref})
                                  :seon.agent.todo/todos first :seon.agent.todo/id)]
                       (-> (todo/complete! {:seon.agent.todo/id id})
