@@ -1,6 +1,6 @@
 (ns seon.ctx.namespaces
   "The `:namespaces` context section — THE BODY of the prompt: CURATED,
-   not render-everything. Each rendered ns is a `;; ── namespace x ──`
+   not render-everything. Each rendered ns is a `; namespace x`
    full-source comment-block. ONLY the curated set renders:
 
      - FULL source (whole file, NO clipping) for the few nses an agent
@@ -129,16 +129,13 @@
      - `:seon.agent.lifecycle` — the terminal-transition verbs
        (`wait`/`complete`/`terminate`); how the agent parks, finishes, or
        is killed — each a small `:seon.agent/state` transact, errors-as-values.
-     - `:seon.schema` — `register!` is the SINGLE SOURCE OF TRUTH for
-       attribute schemas; the discovery reads (`registered?`,
-       `registered-schemas`, `schemas-in-namespace`, `enum-members`)
-       let the agent see existing shapes before inventing one.
-     - `:seon.render` — the render CORE: how sections and renderables are
-       resolved and the dual-surface (`ai`/`html`) model — what every
-       rendered block the agent reads is built from.
-     - `:seon.ai.tokens` — the `chars/4` token estimate (`estimate` /
-       `estimate-chars`); the ONE place the no-tokenizer heuristic lives,
-       so the agent reading about its own context size sees the source.
+   Deliberately NOT whitelisted (curated OUT — every shown line must earn
+   its tokens): `:seon.schema` (its body is registry WIRING; the `register!`
+   pattern is demonstrated by the kept nses' own `register!` calls + `my.kb`,
+   and the modeling skill is taught there, not in the registry internals),
+   `:seon.render` (the renderer ENGINE — agents consume rendered output, they
+   don't author against it), `:seon.ai.tokens` (a `chars/4` one-liner). These
+   stay indexed + grep-able via `seon.agent.search`, just not dumped in full.
    `my.*` nses (`my.kb`, agent-authored code) are ALREADY
    rendered full by the `my.*` rule in [[full-source-ns?]] — they do NOT
    belong here; this whitelist is ONLY for the seon.* framework tools.
@@ -148,8 +145,7 @@
    section — still indexed + searchable via seon.agent.search /
    render-namespace)."
   #{:seon.agent.todo :seon.db :seon.agent.search
-    :seon.agent.fs :seon.agent.message :seon.schema :seon.render
-    :seon.agent.lifecycle :seon.ai.tokens})
+    :seon.agent.fs :seon.agent.message :seon.agent.lifecycle})
 
 (defn in-full-source-whitelist?
   "True when `ns-name` (string, keyword, or symbol) is one of the curated
@@ -208,12 +204,12 @@
         (third-party-ns? nm))))
 
 (def ^:private namespaces-header
-  (str ";; Real loaded code, CURATED: the few namespaces you USE or OWN are\n"
-       ";; shown in FULL (your my.* code, third-party business code, your\n"
-       ";; current namespace, and a curated seon.* tool set) — each its whole\n"
-       ";; file. The rest of the seon framework is NOT shown here; query any\n"
-       ";; ns or fn by name (it stays indexed + searchable). Full namespaces\n"
-       ";; are ordered by RECENCY: most-recently-modified LAST."))
+  (str "; Real loaded code, CURATED: the few namespaces you USE or OWN are\n"
+       "; shown in FULL (your my.* code, third-party business code, your\n"
+       "; current namespace, and a curated seon.* tool set) — each its whole\n"
+       "; file. The rest of the seon framework is NOT shown here; query any\n"
+       "; ns or fn by name (it stays indexed + searchable). Full namespaces\n"
+       "; are ordered by RECENCY: most-recently-modified LAST."))
 
 (defn- render-one
   "Render ONE included ns through the SINGLE renderer
@@ -231,7 +227,7 @@
                    :seon.db/db        db})
                 :seon.render/text
                 str/trim)]
-    ;; render-namespace emits a `;; ── namespace x ──` header even for an
+    ;; render-namespace emits a `; namespace x` label even for an
     ;; empty body (`;; (no recorded source/fns/schemas)`); a FULL ns with
     ;; nothing real to show is omitted from the section (the boot indexer
     ;; guarantees real text for every full row, so this is only the
@@ -249,7 +245,7 @@
 
      - FULL (`:seon.render/detail :full`) for every `my.*` ns, every
        THIRD-PARTY `acme` ns, the agent's CURRENT ns, and the curated
-       [[full-source-whitelist]] seon.* tools — each a `;; ── namespace x ──`
+       [[full-source-whitelist]] seon.* tools — each a `; namespace x`
        block carrying its REAL FULL FILE SOURCE (+ any member rows), unclipped.
      - Every OTHER `seon.*` framework ns is DROPPED from the rendered
        section — not shown here at all. It stays INDEXED and SEARCHABLE

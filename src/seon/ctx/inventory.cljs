@@ -1,8 +1,8 @@
 (ns seon.ctx.inventory
   "The stored-data inventory context section — a cheap, reactive map of
    what the shared store holds RIGHT NOW (one line per stored KIND with
-   each attr's live row count), rendered as a `;; ── stored data
-   inventory ──` comment-block. Symbol-wired into the composer layout
+   each attr's live row count), rendered as a single-`;` comment-block
+   (one line per kind). Symbol-wired into the composer layout
    (`seon.ctx/core-default-ctx`) as `'seon.ctx.inventory/inventory-section`;
    loaded at boot so the symbol resolves for `seon.eval/lookup-value`."
   (:require
@@ -40,11 +40,11 @@
   #{:string :keyword :boolean :symbol})
 
 (def ^:private inventory-header
-  (str ";; stored data — what this cluster holds NOW (post-bootstrap rows).\n"
-       ";; One line per KIND: each attr NAME, its live count, and «sample\n"
-       ";; values» for low-card lookup columns. The «..» are ILLUSTRATIVE\n"
-       ";; keys to query by — never quote one as the answer; query for the\n"
-       ";; real value. Consult BEFORE researching or registering."))
+  (str "; stored data — what this cluster holds NOW (post-bootstrap rows).\n"
+       "; One line per KIND: each attr NAME, its live count, and «sample\n"
+       "; values» for low-card lookup columns. The «..» are ILLUSTRATIVE\n"
+       "; keys to query by — never quote one as the answer; query for the\n"
+       "; real value. Consult BEFORE researching or registering."))
 
 (defn- lookup-attr?
   "True when `attr`'s registered schema is a LOOKUP/FILTER type whose
@@ -126,7 +126,7 @@
    The GUILLEMETS (not `[..]`) mark the values as an ILLUSTRATIVE SAMPLE,
    not an authoritative readout — the same de-literaled convention the rest
    of the context uses — so an agent treats them as example filter keys to
-   query, never as the stored answer to quote. The whole line is a `;;`
+   query, never as the stored answer to quote. The whole line is a `;`
    comment, so the glyphs never break the reader."
   [db boot-ids a c]
   (let [vs (value-tokens db boot-ids a c)]
@@ -176,12 +176,12 @@
             ;; post-bootstrap (matching store-inventory's counts), so a
             ;; low-card identity query excludes boot-index entities.
             boot-ids (db/bootstrap-row-ids db)
-            ;; Each kind row rides as a `;;` comment so the whole section
+            ;; Each kind row rides as a `;` comment so the whole section
             ;; reads as eval'able Clojure (the context IS one live REPL) —
             ;; the agent reads the row, queries the named attrs, never
             ;; evaluates this line.
             lines (map (fn [{kind :seon.db/kind attrs :seon.db/attrs}]
-                         (str ";; " (name kind) ": "
+                         (str "; " (name kind) ": "
                               (str/join " "
                                 (map (fn [[a c]] (attr-token db boot-ids a c))
                                      attrs))))
