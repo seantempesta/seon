@@ -21,7 +21,7 @@ When every function has:
 
 - **Namespaced keys** → Agents can query "what accepts `:seon.agent.search/pattern`?" instead of guessing
 - **Malli schemas** → Contracts are machine-readable. Property tests validate automatically. Every schema'd fn is instrumented at runtime.
-- **Map-in/map-out (preferred for APIs)** → Extensible APIs. Adding an optional field doesn't break callers. Positional public fns are allowed too, when every slot is named and specced via `:catn`.
+- **Fully spec'd args (the hard rule)** → Contracts are complete. Map-in/map-out helps API *accretion* (add an optional field without breaking callers); fully-spec'd positional (`:catn`) is often the better shape for utilities. Pick by fit; the invariant is that every arg is named, spec'd, and validated.
 - **Registered schemas** → A queryable database of all data shapes in the system. `schema/register!` derives the datahike attribute schema for free.
 
 The result: agents can discover, compose, and validate code without
@@ -36,8 +36,11 @@ boundary**. The current pod ↔ wire-server split is the seed of this model.
 
 - **JVM / server (`.clj`)** — the server and heavy processing. The
   **authoritative DB writer** (today the `wire-server` process). Heavy compute,
-  durable storage, and the sole write path live here. Uses `core.async.flow` as
-  the routing backbone where applicable.
+  durable storage, and the sole write path live here. In practice the live JVM
+  side today is **basically just the datahike writer** — most of the broader
+  `.clj` app (Integrant system, the `core.async.flow` routing backbone) is
+  **paused**, kept for when JVM core-systems integration resumes. Treat
+  `core.async.flow` as a parked JVM-track concern, not an active one.
 - **On-device / pod (`.cljs`)** — runs on device (a long-running Node process
   today). Holds a **read-only replica of the DB** (local lazy db values; memory
   ∝ working set) and does **local function execution** (the agent loop, eval,
@@ -88,7 +91,7 @@ schemas plus the verb fns.
 All public APIs use Malli schemas for contract specification. This enables:
 
 - **Always-on instrumentation** — every public fn with `:malli/schema` is validated at runtime (see [Always-On Instrumentation](#always-on-instrumentation)).
-- Generative testing via `mg/sample` + `m/validate`
+- Generative testing via `mg/sample` + `m/validate` (JVM-track; see Testing Strategy)
 - Self-documenting APIs for agents
 - **Function discovery** — "What functions return `::grep-response`?" is a database query.
 
@@ -191,23 +194,27 @@ Define separate schemas for requests and responses with namespaced keys:
 
 ### Public Function Pattern
 
-Every public function must **fully spec and validate ALL its arguments and its
-return value** via `:malli/schema`. Two argument shapes are sanctioned:
+**The hard rule: every public function must fully spec and validate ALL its
+arguments and its return value** via `:malli/schema`. That is the only
+invariant. Two argument shapes are sanctioned; choose by fit, not by default:
 
-1. **Map-in / map-out** — one namespaced-keyword map in, one out.
-   **Preferred for API-like functions** (discoverable, extensible,
-   self-documenting). Adding an optional field never breaks callers.
+1. **Map-in / map-out** — one namespaced-keyword map in, one out. Reach for it
+   when the function is an **API surface you expect to accrete** — adding an
+   optional field never breaks callers, and the named request/response schemas
+   are self-documenting and discoverable.
 2. **Named positional** — each argument is a fully-namespaced-keyword-spec'd
    slot via Malli `:catn` (named positional), inside a `:=>`/`:function`
-   schema. Fine for ordinary data-processing functions and for mimicking a
-   well-known API (e.g. datahike).
+   schema. Often the **better shape for utilities** and for mirroring a
+   well-known API (e.g. datahike). A 2-arg data transform reads more naturally
+   positional than map-wrapped.
 
-The invariant: every argument is **named, specced, and validated** — whether it
-sits in a map or in a positional slot. The violation is an *unspecced* or
-*bare-keyword* argument, NOT a positional one. The contract is completeness of
-specs, not map-wrapping.
+The invariant is **completeness of specs, not map-wrapping**: every argument is
+named, spec'd, and validated, whether it sits in a map or a positional slot.
+The violation is an *unspecced* or *bare-keyword* argument — NOT a positional
+one. Do not flag a fully-spec'd positional public fn; that is a sanctioned
+shape, not a smell.
 
-#### Shape (a): map-in / map-out — preferred for APIs
+#### Shape (a): map-in / map-out — for accreting API surfaces
 
 ```clojure
 (defn ^:async grep
@@ -225,7 +232,15 @@ specs, not map-wrapping.
      ::error       - on failure, a guiding message"
   {:malli/schema [:=> [:cat ::grep-request] ::grep-response]}
   [{::keys [pattern paths max-results]}]
-  (in/run-grep pattern paths max-results))
+  (let [max-results (or max-results in/default-max-results)]   ; explicit or, not :or
+    (try
+      (let [roots (if (seq paths) (vec paths) (in/default-roots))]
+        (cond
+          (str/blank? pattern) (in/fail "::pattern is required and non-blank")
+          (empty? roots)       (in/fail "nothing searchable — grant a root")
+          :else                (in/success-from (in/exec-rg pattern roots max-results))))
+      (catch :default e
+        (in/fail (str "search failed — " e))))))
 ```
 
 #### Shape (b): named positional via `:catn`
@@ -247,8 +262,9 @@ positions; the return is still fully specced.
 
 Multi-arity is allowed when **every** arity is fully specced — use a
 `:function` schema wrapping one `:=>` per arity (see `seon.db/transact!`, which
-has a map-in arity AND two datahike-shaped positional arities). Prefer
-map-in/map-out for API surfaces you expect to extend.
+has a map-in arity AND two datahike-shaped positional arities). Use map-in/map-out
+when you expect the surface to accrete optional fields; positional is fine — and
+often clearer — for utilities and well-known-API mirrors.
 
 ### Private Helper Pattern
 
@@ -397,7 +413,10 @@ retraction.
 ## Schema Composition Across Namespaces
 
 Provider namespaces extend base namespaces by referencing their schemas. This is
-the EAV pattern: entities are bags of namespaced attributes.
+the EAV pattern: entities are bags of namespaced attributes. (The `seon.ai` /
+`seon.ai.claude` example below is real **JVM-track** code — `.clj`, currently
+paused. On the active CLJS pod the provider adapters are `seon.ai.anthropic` /
+`seon.ai.openai-compat`. The schema-composition *pattern* is track-independent.)
 
 ### Base + Provider Pattern
 
@@ -485,7 +504,8 @@ Test namespaces (`*_test.cljs` / `*_test.clj`) are exempt from most conventions:
 Conventions that **do** apply in tests:
 
 - **Namespaced keys when calling production functions** — match the real API
-- **Both example and generative tests** — see Testing Strategy
+- **Example tests at minimum** — generative tests where the schema is the unit
+  (JVM-track); see Testing Strategy
 - **Meaningful test names** — `grep-finds-matches-test`, not `test1`
 
 ---
@@ -493,8 +513,8 @@ Conventions that **do** apply in tests:
 ## Converter Functions (Map-In Pattern)
 
 When converting external data (SDK messages, raw JS payloads) to internal
-entities, prefer the map-in pattern so you can add optional context later
-without changing the signature:
+entities, the map-in pattern fits well when you expect to add optional context
+later without changing the signature:
 
 ```clojure
 (defn sdk-message->entity
@@ -527,6 +547,13 @@ converters you expect to grow new optional inputs.
 ---
 
 ## Provider Multimethod Pattern
+
+(The `seon.ai.agent` / `seon.ai.claude` multimethods shown here are real
+**JVM-track** code — `.clj`, currently paused; `:claude` is the live dispatch
+value there. The active CLJS pod uses the simpler adapter-fn shape in
+`seon.ai.anthropic` / `seon.ai.openai-compat` rather than this multimethod
+registry. The pattern is documented because it's the sanctioned way to build an
+extensible provider surface when one is needed.)
 
 For extensible provider systems (like AI providers), use multimethods with
 keyword dispatch. This allows adding new providers without modifying existing
@@ -584,10 +611,15 @@ code.
 
 Tests serve two purposes:
 
-1. **Example tests** — document intended usage, show how functions compose
-2. **Generative tests** — find edge cases, validate schema contracts
+1. **Example tests** — document intended usage, show how functions compose.
+   The bread-and-butter of the active CLJS suite.
+2. **Generative tests** — find edge cases, validate schema contracts. A
+   **JVM-track** idiom today (`mg/sample` + `m/validate` in `.clj` tests); the
+   CLJS pod relies on always-on instrumentation for runtime contract checks.
 
-**Write both.** Generative tests alone don't show real-world usage patterns.
+On the CLJS side, write example tests; reach for generative tests on the JVM
+where the schema is the unit under test. (Example tests alone don't prove the
+schema's edges; generative tests alone don't show real-world usage.)
 
 ### Running tests
 
@@ -607,25 +639,60 @@ See the `/clojure-testing` skill for fixtures, generators, and debugging.
 
 ### Example Tests (Documentation + Integration)
 
-Show the intended workflow — executable documentation. Use the current test
-fixtures for DB-backed tests (see `/clojure-testing` and `/datahike`; there is
-no `with-test-datalevin` — the store is datahike):
+Show the intended workflow — executable documentation. For a behavior that
+doesn't touch the DB, a plain `cljs.test/async` test is enough — the
+capability verbs return Promises, so await them (`<p!` / `.then`) and read the
+envelope:
 
 ```clojure
 (deftest grep-finds-matches-test
   (testing "grep returns a matches envelope for a real pattern"
-    (let [{::search/keys [ok? matches]}
-          (<p! (search/grep {::search/pattern "defn ^:async"
-                             ::search/max-results 5}))]
-      (is (true? ok?))
-      (is (vector? matches)))))
+    (async done
+      (-> (search/grep {::search/pattern "defn ^:async" ::search/max-results 5})
+          (.then (fn [{::search/keys [ok? matches]}]
+                   (is (true? ok?))
+                   (is (vector? matches))
+                   (done)))))))
+```
+
+**DB-backed CLJS tests** open a fresh **in-memory datahike** conn per test and
+`set!` it as the root `db/*conn*` (CLJS has no `binding` across async hops, so
+`set!` the root, not `binding`). There is no shared `with-test-db` fixture on
+the CLJS side — `with-test-db` / `with-test-node` live in `seon.test-utils`
+(`.clj`, JVM track). Each CLJS test ns defines a small local helper; the
+canonical shape (see `test/seon/db_test.cljs` `fresh-conn` and
+`test/seon/ctx_test.cljs`):
+
+```clojure
+(defn- fresh-conn []                                  ; returns a Promise of a conn
+  (let [cfg {:store {:backend :memory :id (random-uuid)}
+             :schema-flexibility :write}]
+    (-> (d/create-database cfg)
+        (.then (fn [_] (d/connect cfg {:sync? false}))))))
+
+(deftest reads-back-a-row-test
+  (async done
+    (-> (fresh-conn)
+        (.then (fn [conn]
+                 (set! db/*conn* conn)                ; root set!, not binding
+                 (schema/register! ::name :string)
+                 (-> (db/transact! {::db/tx-data [{::name "Alpha"}]})
+                     (.then (fn [_]
+                              (is (= #{["Alpha"]}
+                                     (db/query {::db/query '[:find ?n :where [_ ::name ?n]]})))
+                              (done)))))))))
 ```
 
 ### Generative Tests (Contract Validation)
 
-Find edge cases the schema allows but you didn't think of:
+**JVM-track idiom.** Generative tests over registered schemas — `mg/sample`
+to enumerate valid shapes, `m/validate` to check them — run on the JVM (`.clj`
+tests); the CLJS suite doesn't currently use them. Frame contract-checking as a
+JVM-side concern and lean on always-on instrumentation for runtime validation
+on the pod.
 
 ```clojure
+;; .clj test (JVM): find edge cases the schema allows but you didn't think of
 (deftest grep-request-generative-test
   (testing "every valid request shape round-trips through the schema"
     (doseq [request (mg/sample ::search/grep-request {:size 20})]
@@ -662,11 +729,11 @@ Find edge cases the schema allows but you didn't think of:
 (defn process [{::keys [model] :or {model "default"}}]
   ...)  ; doesn't apply when {::model nil} is passed
 
-;; BAD: only generative tests, no example tests
+;; BAD (JVM-track): only generative tests, no example tests
 (deftest foo-test
   (doseq [input (mg/sample ::input)]
     (is (m/validate ::output (foo input)))))
-;; Missing: tests showing intended usage patterns!
+;; Missing: example tests showing intended usage patterns!
 
 ;; BAD: touching datahike.api directly outside src/seon/db/
 (d/transact conn tx-data)   ; use seon.db/transact!
