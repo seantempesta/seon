@@ -183,7 +183,7 @@ Severity: **P0** blocks the build wave / governance · **P1** correctness ·
 ### Build wave — embeddings (serialize; #18 needs owner go)
 
 1. **#18 Vertex switch (FOUNDATION, governance-critical).** `bin/seon` env
-   (`GOOGLE_GENAI_USE_VERTEXAI=true`, `GOOGLE_CLOUD_PROJECT=seon-vertex-11392`,
+   (`GOOGLE_GENAI_USE_VERTEXAI=true`, `GOOGLE_CLOUD_PROJECT=<GCP_PROJECT>`,
    `GOOGLE_CLOUD_LOCATION=global`, `GOOGLE_APPLICATION_CREDENTIALS=`the SA key;
    UNSET `GEMINI_API_KEY`) + `embed.clj` Vertex-mode client + model
    `gemini-embedding-2` + `embedContent` + **one-text-per-request rework**
@@ -235,10 +235,10 @@ Severity: **P0** blocks the build wave / governance · **P1** correctness ·
 ## Key facts to not lose
 
 ### Vertex / GCP (provisioned + verified)
-- Project **`seon-vertex-11392`** (display name "seon"); billing working
+- Project **`<GCP_PROJECT>`** (display name "seon"); billing working
   (paid 200); Vertex API enabled.
-- SA **`seon-embed@seon-vertex-11392.iam.gserviceaccount.com`**
-  (`roles/aiplatform.user`); key **`~/.config/gcloud/seon-vertex-sa.json`**
+- SA **`<vertex-sa>@<GCP_PROJECT>.iam.gserviceaccount.com`**
+  (`roles/aiplatform.user`); key **`~/.config/gcloud/<vertex-sa-key>.json`**
   (chmod 600).
 - Model **`gemini-embedding-2`** on Vertex **GLOBAL** endpoint +
   **`:embedContent`** method (us-central1 / `:predict` → 404).
@@ -249,7 +249,7 @@ Severity: **P0** blocks the build wave / governance · **P1** correctness ·
 - Auth = ADC via google-auth-library-oauth2-http 1.33.0 (transitive in
   google-genai 1.59.0) — no token code.
 - env for Vertex mode: `GOOGLE_GENAI_USE_VERTEXAI=true`,
-  `GOOGLE_CLOUD_PROJECT=seon-vertex-11392`, `GOOGLE_CLOUD_LOCATION=global`,
+  `GOOGLE_CLOUD_PROJECT=<GCP_PROJECT>`, `GOOGLE_CLOUD_LOCATION=global`,
   `GOOGLE_APPLICATION_CREDENTIALS=`the SA key path; UNSET `GEMINI_API_KEY`.
 
 ### Constants / locations

@@ -47,7 +47,7 @@ the checklist at the end.
 
 ### A.1 What the Vertex surface actually accepts for `gemini-embedding-2`
 
-All tested live against `projects/seon-vertex-11392/.../global/.../gemini-embedding-2`
+All tested live against `projects/<GCP_PROJECT>/.../global/.../gemini-embedding-2`
 with the service-account token.
 
 | Request form | Result |
@@ -362,9 +362,9 @@ Auth (throwaway SA config; never touches the live pipeline):
 
 ```bash
 export CLOUDSDK_CONFIG=<scratch>/sa-batch
-gcloud auth activate-service-account --key-file="$HOME/.config/gcloud/seon-vertex-sa.json"
+gcloud auth activate-service-account --key-file="$HOME/.config/gcloud/<vertex-sa-key>.json"
 TOKEN=$(gcloud auth print-access-token)
-EC="https://aiplatform.googleapis.com/v1beta1/projects/seon-vertex-11392/locations/global/publishers/google/models/gemini-embedding-2:embedContent"
+EC="https://aiplatform.googleapis.com/v1beta1/projects/<GCP_PROJECT>/locations/global/publishers/google/models/gemini-embedding-2:embedContent"
 ```
 
 - Single: `curl -X POST "$EC" -d '{"content":{"parts":[{"text":"…"}]},"outputDimensionality":1536}'` → 200, 1536-vec.

@@ -12,7 +12,7 @@ Hard-won, LIVE-VERIFIED facts (2026-06-25). Don't lose these. Supersedes guesses
 
 - **Model:** `gemini-embedding-2` — GA (Apr 2026), natively **multimodal** (text/image/video/audio/documents → ONE unified vector space), MRL-scalable dims.
 - **Endpoint:** the **GLOBAL** location, NOT a region. `us-central1` → 404. Correct:
-  `POST https://aiplatform.googleapis.com/v1beta1/projects/seon-vertex-11392/locations/global/publishers/google/models/gemini-embedding-2:embedContent`
+  `POST https://aiplatform.googleapis.com/v1beta1/projects/<GCP_PROJECT>/locations/global/publishers/google/models/gemini-embedding-2:embedContent`
 - **Method:** `:embedContent` (the Gemini surface), NOT the legacy `:predict`.
 - **Request:** `{"content":{"parts":[{"text":"..."}]}}` (+ `outputDimensionality` for MRL).
 - **Output:** **3072 dims** by default; MRL down to **1536** (matches the existing seon HNSW index) or 768. Live proof: a text call returned a 3072-float vector.
@@ -21,9 +21,9 @@ Hard-won, LIVE-VERIFIED facts (2026-06-25). Don't lose these. Supersedes guesses
 
 ## GCP project (created + verified this session)
 
-- Project `seon-vertex-11392` (display "seon"), **billing linked + working** (a paid Vertex call returned 200), **Vertex AI API enabled**.
-- Service account `seon-embed@seon-vertex-11392.iam.gserviceaccount.com`, role `roles/aiplatform.user`.
-- Key: `~/.config/gcloud/seon-vertex-sa.json` (chmod 600, outside repo).
+- Project `<GCP_PROJECT>` (display "seon"), **billing linked + working** (a paid Vertex call returned 200), **Vertex AI API enabled**.
+- Service account `<vertex-sa>@<GCP_PROJECT>.iam.gserviceaccount.com`, role `roles/aiplatform.user`.
+- Key: `~/.config/gcloud/<vertex-sa-key>.json` (chmod 600, outside repo).
 
 ## Governance (answers "same protections?")
 
@@ -33,9 +33,9 @@ YES — same as any GA model on the Gemini Enterprise Agent Platform (Vertex): *
 
 ```
 GOOGLE_GENAI_USE_VERTEXAI=true
-GOOGLE_CLOUD_PROJECT=seon-vertex-11392
+GOOGLE_CLOUD_PROJECT=<GCP_PROJECT>
 GOOGLE_CLOUD_LOCATION=global          # gemini-embedding-2 is Global, not us-central1
-GOOGLE_APPLICATION_CREDENTIALS=/Users/sean/.config/gcloud/seon-vertex-sa.json
+GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/<vertex-sa-key>.json
 # and UNSET GEMINI_API_KEY so the SDK can't silently fall back to the consumer endpoint
 ```
 

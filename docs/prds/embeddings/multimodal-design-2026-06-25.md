@@ -10,7 +10,7 @@ Live-verified design for ingesting and indexing **all five modalities** (text,
 image, audio, video, PDF/document) into seon's single embedding vector space via
 `gemini-embedding-2` on Vertex. Every claim below was tested DIRECTLY against the
 Vertex API (curl + a standalone JVM-Clojure harness) on 2026-06-25, project
-`seon-vertex-11392`, NOT through the seon pipeline. Pairs with
+`<GCP_PROJECT>`, NOT through the seon pipeline. Pairs with
 [[docs/prds/embeddings/vertex-usage-reference-2026-06-25]] (auth + text baseline).
 
 ## TL;DR (measured)
@@ -175,12 +175,12 @@ cheshire/cheshire {:mvn/version "5.13.0"}
                         HttpResponse$BodyHandlers])
 
 (def endpoint
-  (str "https://aiplatform.googleapis.com/v1beta1/projects/seon-vertex-11392"
+  (str "https://aiplatform.googleapis.com/v1beta1/projects/<GCP_PROJECT>"
        "/locations/global/publishers/google/models/gemini-embedding-2:embedContent"))
 
 (defn access-token []
   (let [c (-> (GoogleCredentials/fromStream
-               (java.io.FileInputStream. "/Users/sean/.config/gcloud/seon-vertex-sa.json"))
+               (java.io.FileInputStream. "~/.config/gcloud/<vertex-sa-key>.json"))
               (.createScoped ["https://www.googleapis.com/auth/cloud-platform"]))]
     (.refreshIfExpired c)
     (.. c getAccessToken getTokenValue)))           ; auto-refreshes; cache & reuse
