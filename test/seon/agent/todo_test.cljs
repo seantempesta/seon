@@ -10,7 +10,8 @@
     [datahike.api :as d]
     [seon.client :as client]
     [seon.db :as db]
-    [seon.agent.todo :as todo]))
+    [seon.agent.todo :as todo]
+    [seon.agent.todo.internal :as todo-int]))
 
 (def ^:private a-id "todotest-agent-a")
 (def ^:private b-id "todotest-agent-b")
@@ -147,7 +148,7 @@
                     (is (= ["first (oldest)" "second" "b's item"]
                            (open-titles (todo/list-open {:seon.agent.todo/all? true})))
                         "all? widens across owners")
-                    (let [block (todo/open-todos-block @conn a-ref)
+                    (let [block (todo-int/open-todos-block @conn a-ref)
                           ids   (mapv :seon.agent.todo/id
                                       (:seon.agent.todo/todos
                                         (todo/list-open {:seon.agent.todo/owner a-ref})))]
@@ -201,9 +202,9 @@
   (async done
     (-> (with-conn
           (fn [conn]
-            (is (= "" (todo/open-todos-block @conn a-ref))
+            (is (= "" (todo-int/open-todos-block @conn a-ref))
                 "no open items → empty block, the section vanishes")
-            (is (= "" (todo/open-todos-block @conn [:seon.agent/id "ghost"]))
+            (is (= "" (todo-int/open-todos-block @conn [:seon.agent/id "ghost"]))
                 "unknown owner → empty block, not a throw")))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -223,14 +224,14 @@
                 (.then
                   (fn [_]
                     (is (re-find #"live item"
-                                 (todo/open-todos-section
+                                 (todo-int/open-todos-section
                                    {:seon.db/db @conn :seon.agent/id a-id}))
                         "db present → renders against that snapshot")
                     (is (re-find #"live item"
-                                 (todo/open-todos-section
+                                 (todo-int/open-todos-section
                                    {:seon.agent/id a-id}))
                         "db absent → defaults to the current conn, no throw")
-                    (is (= "" (todo/open-todos-section
+                    (is (= "" (todo-int/open-todos-section
                                 {:seon.agent/id b-id}))
                         "other agent, no items → empty, section vanishes"))))))
         (.then (fn [_] (done)))
