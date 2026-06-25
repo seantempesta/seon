@@ -8,6 +8,31 @@ tags: [prd, agent]
 
 Design assessment, branch `feature/agent-fsm`, 2026-06-25. Read-only. Governs the context-tuning loop; applies [[feedback_test_behavior_not_exact_strings]] to the eval harness. Pairs with [[docs/prds/embeddings/state-and-activation-2026-06-25]].
 
+## Implementation status (2026-06-25)
+
+- **Done — re-enabled + FSM-aligned + green.** `driver_test.cljs` +
+  `paid_test.cljs` are back (no longer `.disabled`); the driver drives
+  `seon.agent.turn/run-turn!` + `seon.agent.loop/run-loop!`, mints a wake
+  per drive (mirrors the live `wake-handler`), boots via
+  `client/bootstrap-turn!`, and scopes eval/prompt predicates on the new
+  `:seon.agent.turn/wake` marker (the retired `:woken-by` is gone). Full
+  CLJS suite: 0 failures, 0 errors.
+- **Done — judge is a trustworthy signal.** Added `calibrate-judge!` +
+  calibration tests (good→PASS, bad→FAIL, `discriminates?`). Live DeepSeek
+  calibration discriminates (good 100 / bad 0). The judge ctx now EXCLUDES
+  the bootstrap greeting (every agent greets at boot) so the judge grades
+  the answer, not the hello.
+- **Done — condition-A baseline.** X1 (subscriptions SUM/MAX), X3 (expense
+  reuse-no-fork + category SUM), X12 (negative over-retrieval) wired +
+  run paid on DeepSeek: **x12 PASS / x1 + x3 FAIL — cond-A 1/3** (honest
+  reds: B announced intent then echoed its transcript / hallucinated the
+  total instead of querying; caught by both the discovery leg + the judge).
+- **Left:** the rest of the §3 catalog (X2/X4–X11), condition-B
+  (embeddings) lift scaffold, and the §6 loader lints. A recurring
+  DeepSeek failure pattern — "announce intent, echo transcript, never
+  emit the query form" — is a real agent-behavior finding for the
+  context-tuning loop, not a harness bug.
+
 ## TL;DR
 
 - **Right bones, wrong status.** `test/seon/gym/driver.cljs` (1412 ln) is ALREADY outcome-based: mechanical datalog/eval/domain-attr predicates over the post-run store + a SEPARATE LLM-judge axis, and the r2 directive (2026-06-11) already deleted the fragile layout/cache gates. But the gym is **dormant on this branch** — `driver_test.cljs.disabled` + `paid_test.cljs.disabled` (since `e313add`, the FSM carve). **Step one is re-activation against the FSM, not a rewrite.**
