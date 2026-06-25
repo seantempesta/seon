@@ -204,7 +204,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). All contributions are accepted under AGP
 
 ## Contact
 
-For licensing inquiries, partnership questions, or anything that doesn't fit the issue tracker: sean.tempesta@gmail.com.
+For licensing inquiries, partnership questions, contracting opportunities, or anything that doesn't fit the issue tracker: sean@tempesta.io.
 
 ---
 

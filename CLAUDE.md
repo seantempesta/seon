@@ -270,6 +270,32 @@ seon/
 
 See `docs/conventions.md` "Database Access" for patterns.
 
+### Embeddings / Semantic Search (Vertex)
+
+Semantic search runs on Google **Vertex AI** `gemini-embedding-2` (GA, natively
+multimodal — text/image/audio/video/PDF into ONE unified vector space; 3072-dim
+default, Matryoshka-truncatable to 1536 to match the HNSW index). The wire-server
+calls the **global** endpoint with `:embedContent` (NOT a region, NOT the legacy
+`:predict`). Governed: inputs are **not used to train Google's models** (Cloud
+Service Terms §17).
+
+Auth is **ADC via a service account** — no token code (the GenAI SDK +
+`google-auth-library`, already on the classpath, fetch and auto-refresh the OAuth2
+token). Wire it via env; **never hardcode or commit credentials or the project id**:
+
+```
+GOOGLE_GENAI_USE_VERTEXAI=true
+GOOGLE_CLOUD_PROJECT=<your-gcp-project-id>
+GOOGLE_CLOUD_LOCATION=global              # gemini-embedding-2 is Global, not a region
+GOOGLE_APPLICATION_CREDENTIALS=<path to the SA key JSON, OUTSIDE the repo>
+# unset GEMINI_API_KEY so the SDK can't fall back to the consumer endpoint
+```
+
+The service-account key lives outside the repo (e.g. `~/.config/gcloud/`) and is
+git-ignored by location; it is never committed. The whole feature is gated by
+`SEON_EMBED`. Full verified usage, pricing, and the content-addressed cache/archive
+design: `docs/prds/embeddings/vertex-usage-reference-2026-06-25.md`.
+
 ### Flow Topology (routing backbone) `[JVM track — paused]`
 
 In the JVM app, all cross-boundary calls — namespace function calls, database writes, REPL eval — route through `topology/request!` (core.async.flow): register promise → inject → step-fn → reply-router → deliver promise. See `docs/prds/unified-flow/design.md`. The **pod is core.async-free** — it uses native CLJS `^:async`/`await` instead.
