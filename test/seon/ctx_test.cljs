@@ -106,21 +106,15 @@
     (is (true? (ctx-namespaces/hidden-ns-name? n)) (str n " is hidden")))
   ;; full-source depth (curated-namespaces): full-source ⇔ every my.* ns by
   ;; RULE (test siblings ride along via the `-test` strip) PLUS the curated
-  ;; seon.* whitelist (full-source-whitelist =
-  ;; #{:seon.agent.todo :seon.db :seon.agent.search :seon.agent.fs
-  ;;   :seon.agent.message :seon.schema :seon.render}). Each whitelisted ns's
-  ;; `-test` sibling rides along too (the `-test` strip lands on the
-  ;; whitelisted base, e.g. seon.agent.search-test → seon.agent.search).
-  ;; Every OTHER seon.* framework ns is DROPPED from the rendered section
-  ;; (still indexed + searchable), NEVER full-source.
-  (doseq [n ["my.kb" "my.kb.shared" "my.notes" "my.notes-test"
-             ;; the curated seon.* whitelist + each one's test sibling.
-             "seon.agent.todo" "seon.agent.todo-test"
-             "seon.db" "seon.db-test"
-             "seon.agent.search" "seon.agent.search-test"
-             "seon.agent.fs" "seon.agent.message"
-             "seon.schema" "seon.render"]]
+  ;; seon.* whitelist. The whitelist CONTENTS are not mirrored here (that
+  ;; drifts every prune) — derive the expected set from the source of truth
+  ;; so the RULE is tested, not a hand-copy of the membership.
+  (doseq [n ["my.kb" "my.kb.shared" "my.notes" "my.notes-test"]]
     (is (true? (ctx-namespaces/full-source-ns? n)) (str n " is full-source")))
+  (doseq [kw ctx-namespaces/full-source-whitelist
+          n  [(name kw) (str (name kw) "-test")]]
+    (is (true? (ctx-namespaces/full-source-ns? n))
+        (str n " (whitelist member / its -test sibling) is full-source")))
   (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.ctx"
              "seon.warn" "seon.ai"
              "seon.agent.searcher" "my.foo.internal"]]

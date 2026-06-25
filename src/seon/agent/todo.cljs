@@ -46,6 +46,7 @@
 (schema/register! ::completed-at :inst)
 (schema/register! ::owner :seon.db/ref)  ; the agent this item belongs to
 (schema/register! ::from :seon.db/ref)   ; who asked (the user or an agent)
+(schema/register! ::message :seon.db/ref) ; the inbound message this address-todo tracks
 
 ;; --- Request/response schemas. ::ok? is the envelope discriminator;
 ;; --- failures carry a guiding ::error (errors are values — branch, don't catch).

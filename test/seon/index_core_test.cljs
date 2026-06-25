@@ -173,8 +173,6 @@
         "seon.agent.search (whitelist) source is its REAL full file text")
     (is (full? :seon.agent.fs)
         "seon.agent.fs (whitelist) source is its REAL full file text")
-    (is (full? :seon.schema)
-        "seon.schema (.cljc whitelist) source is its REAL full file text")
     ;; the members are still indexed (dropped nses via member rows; the
     ;; whitelist via its full source).
     (let [syms (set (map :seon.fn/sym (filter :seon.fn/sym tx)))]

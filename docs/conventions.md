@@ -783,6 +783,30 @@ sections). For the current model see
 [[docs/prds/agent-fsm/context-render.md]] (P3). Don't pin specifics here while
 it's in flux.
 
+### Comment levels — prose vs code
+
+The rendered agent context is meant to read as one eval'able Clojure source:
+every non-form line is a comment. Which comment marker you use is NOT
+decoration — it carries meaning, and the rule is fixed:
+
+- **`;` (single)** — **prose**. Rendered agent-facing prose blocks (the
+  `system-text` body, the soul/AGENTS sections, the inventory header, warnings
+  prose, the open-todos guidance, any narrative the model reads) AND ordinary
+  trailing inline code comments. If a line is words-for-a-reader, it is a single
+  `;`.
+- **`;;` (double)** — **code block comments**. A standalone comment sitting
+  ABOVE a form in real source (the standard Clojure block-comment level). Code
+  keeps `;;` for these; do NOT downgrade real-code block comments to `;`.
+- **`;;;` (triple)** — reserved for runtime-STRUCTURE demarcation in the
+  rendered context (the section-bracket `;;; ┌─ <name> ─ … └─ end <name> ─` and
+  the transcript's `;;; ◀`/`;;; ▶` event lines), not for body text.
+
+The practical test: **prose → `;`, block-comment-before-code → `;;`, inline
+comment → `;`.** Prose rendered into context uses single `;` precisely so it
+reads as a comment to the Clojure reader while staying visually distinct from
+real-code `;;` block comments. One shared `seon.ctx/quote-lines` primitive emits
+the prose `;` lines; don't hand-roll a `(str ";; " …)` prefixer in a section fn.
+
 ---
 
 ## SSE Patterns
