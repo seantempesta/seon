@@ -25,8 +25,10 @@
     [seon.client :as client]
     [seon.ctx :as ctx]
     [seon.ctx.inventory :as ctx-inventory]
+    [seon.ctx.live-tile :as ctx-live-tile]
     [seon.ctx.namespaces :as ctx-namespaces]
     [seon.ctx.relevant :as ctx-relevant]
+    [seon.ctx.your-entity :as ctx-your-entity]
     [seon.db :as db]
     [seon.embed.stash :as embed-stash]
     [seon.render :as render]
@@ -382,6 +384,69 @@
                           "the derive teaching vanished — section shrank once purpose is set")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest live-tile-section-stable-on-composer-input
+  ;; REGRESSION GUARD (live-tile-nil-entity-render-failed): the composer
+  ;; injects ONLY {:seon.db/db … :seon.agent/id …} — it does NOT pass
+  ;; :seon.agent/entity. The section must resolve the agent entity from
+  ;; the db by id itself; it must NEVER surface a bare "⚠ render failed"
+  ;; or a swallowed malli code, on a fresh store or a broken tile.
+  (async done
+    (-> (with-conn
+         (fn [_conn]
+           (-> (agent/create! {:seon.agent/id "AGTctxtile00p1"})
+               (.then
+                 (fn [_]
+                   ;; (a) the EXACT composer input shape — db + id, no entity.
+                   (let [out (str (ctx-live-tile/live-tile-section
+                                    {:seon.db/db    @db/*conn*
+                                     :seon.agent/id "AGTctxtile00p1"}))]
+                     (is (seq out) "section renders content, never blank")
+                     (is (not (str/includes? out "⚠"))
+                         "no bare ⚠ render-failed placeholder")
+                     (is (not (str/includes? out "malli"))
+                         "no swallowed malli code in the agent's context")
+                     (is (str/includes? out "Wired:")
+                         "the wired-label header resolves (welcome by default)"))
+                   ;; (a2) the sibling F1 case: your-entity must ALSO resolve
+                   ;; its entity from the db under the bare composer ctx —
+                   ;; never silently return "" (it must always show the agent
+                   ;; its own entity). Pure fn of db, no injected entity.
+                   (let [ye (str (ctx-your-entity/your-entity-section
+                                   {:seon.db/db    @db/*conn*
+                                    :seon.agent/id "AGTctxtile00p1"}))]
+                     (is (seq ye) "your-entity renders under bare composer ctx")
+                     (is (str/includes? ye "YOUR OWN ENTITY")
+                         "your-entity resolves the entity from db, not nil"))
+                   ;; (b) the REAL prompt path (render-context-ai, NOT the
+                   ;; inspector's ctx-sections) must also be render-failure-free.
+                   (let [ctx  {:seon.db/db @db/*conn* :seon.agent/id "AGTctxtile00p1"}
+                         text (str (render/render :seon.render/ai ctx
+                                                  (ctx/context-root ctx)))]
+                     (is (not (str/includes? text "render failed"))
+                         "the assembled prompt has no render-failed section"))))
+               ;; (c) a broken tile (a symbol that resolves nowhere) must
+               ;; degrade to a CLEAR, actionable message — never a stack,
+               ;; never a malli keyword — and name the broken fn.
+               (.then (fn [_]
+                        (db/transact!
+                          {:seon.db/tx-data
+                           [{:seon.db/ref [:seon.agent/id "AGTctxtile00p1"]
+                             :seon.render.live-tile/content
+                             'my.broken/does-not-exist}]})))
+               (.then
+                 (fn [_]
+                   (let [out (str (ctx-live-tile/live-tile-section
+                                    {:seon.db/db    @db/*conn*
+                                     :seon.agent/id "AGTctxtile00p1"}))]
+                     (is (not (str/includes? out "⚠"))
+                         "broken tile: no bare ⚠ placeholder")
+                     (is (not (str/includes? out "malli"))
+                         "broken tile: no swallowed malli code")
+                     (is (str/includes? out "my.broken/does-not-exist")
+                         "broken tile: the agent is told WHICH fn is wired")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 (deftest system-text-has-no-bare-margin-prose
   ;; system-text reads as eval'able Clojure by MIXING single-`;` prose

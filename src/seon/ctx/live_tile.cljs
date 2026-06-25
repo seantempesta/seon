@@ -46,53 +46,78 @@
    the section is always present; the unwired branch is the
    correctness floor."
   {:malli/schema [:=> [:cat :map] :string]}
-  [{:seon.db/keys [db] :seon.agent/keys [id] entity :seon.agent/entity}]
-  (let [{:seon.render/keys [hiccup ai error]}
-        (render/render-agent-tile {:seon.agent/id id :seon.db/db db})
-        body (cond
-               ;; Renderer threw: the twin says it's broken; the
-               ;; envelope (sans the raw js error / 4KB stack — the
-               ;; message + flattened ex-data are the agent-actionable
-               ;; parts) says what the exception said.
-               (some? error)
-               (str ai "\n"
-                    (pr-str (select-keys error [:seon.error/message
-                                                :seon.error/data
-                                                :seon.error/ex-data])))
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (try
+    (let [{:seon.render/keys [hiccup ai error]}
+          ;; The ONE tile entry point — SCI wall-clock-bounded for
+          ;; agent-authored tile fns, and on ANY throw it returns the
+          ;; legible `error-response` (never throws past here). This is
+          ;; the safety the live tile rides; the body below is always a
+          ;; clean twin, an error twin, or the welcome card — never raw.
+          (render/render-agent-tile {:seon.agent/id id :seon.db/db db})
+          body (cond
+                 ;; Renderer threw: the twin says it's broken; the
+                 ;; envelope (sans the raw js error / 4KB stack — the
+                 ;; message + flattened ex-data are the agent-actionable
+                 ;; parts) says what the exception said.
+                 (some? error)
+                 (str ai "\n"
+                      (pr-str (select-keys error [:seon.error/message
+                                                  :seon.error/data
+                                                  :seon.error/ex-data])))
 
-               (some? ai)     ai
-               (some? hiccup) (pr-str hiccup))]
-    (if (nil? body)
-      ""
-      ;; Provenance for the header. The composer's entity pull cannot
-      ;; name :seon.render.live-tile/content explicitly — datahike
-      ;; THROWS on pulling an attr the conn never installed (installs
-      ;; are lazy, at first transact), and a store predating the tile
-      ;; key must still assemble context — so the slot is read here
-      ;; behind the same `seon.db/installed-schema` gate
-      ;; `live-tile/user-name` uses (load-bearing, not defensive fluff).
-      (let [ent   (if (contains? (db/installed-schema db)
-                                 :seon.render.live-tile/content)
-                    (merge entity
-                           (db/pull {:seon.db/db db
-                                     :seon.db/pull-pattern
-                                     '[:seon.render.live-tile/content]
-                                     :seon.db/ref [:seon.agent/id id]}))
-                    entity)
-            wired (live-tile/wired-content {:seon.render/entity ent})
-            ;; The body is a render twin (:ai text, or hiccup pr-str, or
-            ;; an error envelope) — arbitrary content the human's tile
-            ;; shows. It rides this comment-block as `;` lines (via
-            ;; [[seon.ctx/quote-lines]]) so the whole section reads as
-            ;; eval'able Clojure (the context IS one live REPL); the agent
-            ;; reads the value, it never evaluates.
-            body-comment (ctx/quote-lines body)]
-        (str "; Your live tile — what your human currently sees (as-of this\n"
-             "; turn's render; the human's view live-updates between turns).\n"
-             "; Wired: " (live-tile/wired-label wired) "\n"
-             ";\n"
-             body-comment "\n"
-             ";\n"
-             "; To change it: redefine the wired fn, or transact a new value\n"
-             "; (a qualified fn symbol or literal hiccup) onto\n"
-             "; :seon.render.live-tile/content on your agent entity.")))))
+                 (some? ai)     ai
+                 (some? hiccup) (pr-str hiccup))]
+      (if (nil? body)
+        ""
+        ;; Provenance for the header. Resolve the agent entity from the
+        ;; db by `:seon.agent/id` (the composer injects :seon.db/db +
+        ;; :seon.agent/id, NOT the entity itself). The tile slot is read
+        ;; behind the same `seon.db/installed-schema` gate
+        ;; `live-tile/user-name` uses: datahike THROWS on pulling an attr
+        ;; the conn never installed (installs are lazy, at first
+        ;; transact), so a fresh store predating any tile transact must
+        ;; resolve to `{}` → the core welcome (load-bearing, not
+        ;; defensive fluff). `wired-content` needs a map; never a nil.
+        (let [ent   (if (contains? (db/installed-schema db)
+                                   :seon.render.live-tile/content)
+                      (or (db/pull {:seon.db/db db
+                                    :seon.db/pull-pattern
+                                    '[:seon.render.live-tile/content]
+                                    :seon.db/ref [:seon.agent/id id]})
+                          {})
+                      {})
+              wired (live-tile/wired-content {:seon.render/entity ent})
+              ;; The body is a render twin (:ai text, or hiccup pr-str, or
+              ;; an error envelope) — arbitrary content the human's tile
+              ;; shows. It rides this comment-block as `;` lines (via
+              ;; [[seon.ctx/quote-lines]]) so the whole section reads as
+              ;; eval'able Clojure (the context IS one live REPL); the agent
+              ;; reads the value, it never evaluates.
+              body-comment (ctx/quote-lines body)]
+          (str "; Your live tile — what your human currently sees (as-of this\n"
+               "; turn's render; the human's view live-updates between turns).\n"
+               "; Wired: " (live-tile/wired-label wired) "\n"
+               ";\n"
+               body-comment "\n"
+               ";\n"
+               "; To change it: redefine the wired fn, or transact a new value\n"
+               "; (a qualified fn symbol or literal hiccup) onto\n"
+               "; :seon.render.live-tile/content on your agent entity."))))
+    ;; CONTRACT: this section NEVER vanishes and NEVER surfaces a bare
+    ;; ⚠/malli code. `render-agent-tile` is already throw-safe, so this
+    ;; backstop only fires on an UNEXPECTED failure (e.g. a db read) —
+    ;; and even then the agent reads a clear, actionable safe-state, not
+    ;; a swallowed error keyword. Self-heals on the next clean render.
+    (catch :default e
+      (str "; Your live tile — loading (safe-state placeholder this turn).\n"
+           "; The per-turn tile derivation hit an unexpected error and\n"
+           "; degraded gracefully; your human sees the calm core welcome\n"
+           "; card, never a broken panel. This is a transient render\n"
+           "; hiccup that self-heals next turn.\n"
+           ";\n"
+           "; Diagnostic: " (ex-message e) "\n"
+           ";\n"
+           "; To (re)wire your tile, transact a qualified fn symbol or\n"
+           "; literal hiccup onto :seon.render.live-tile/content on your\n"
+           "; agent entity."))))
