@@ -2063,31 +2063,6 @@
       (finally
         (set! db/*conn* prev-conn)))))
 
-(def inventory-read-source
-  "The bootstrap-turn `store-inventory` eval: the inventory is a core fn
-   turn 0 demonstrably RUNS — the fn's source is visible in the rendered
-   `seon.db` namespace, the CALL is visible here, the RESULT is the
-   value line, and re-running the fn is how you get fresh numbers. The
-   `;;` comments ride as the eval's narration."
-  (str
-    ";; What's already in the shared store? Other agents stored knowledge\n"
-    ";; here before me — checking BEFORE researching is how I avoid paying\n"
-    ";; for answers that already exist. (An ordinary query; I re-run it\n"
-    ";; whenever I need current numbers.)\n"
-    "(seon.db/store-inventory)\n"))
-
-(def instructions-read-source
-  "The bootstrap-turn READ of the system-wide instructions: the fn's
-   source is visible in the rendered `my.kb.shared` namespace, the CALL
-   is visible in the transcript, the RESULT is the value line — and
-   re-running the fn is how the agent gets the current set. The `;;`
-   comments ride as the eval's narration via `parse-forms`."
-  (str
-    ";; Next: the system-wide instructions — standing guidance for ALL\n"
-    ";; agents in this cluster. Anyone (my human, another agent, me) can\n"
-    ";; append a row; I re-read when I want the current set.\n"
-    "(my.kb.shared/instructions)\n"))
-
 (def hello-source
   "The bootstrap-turn hello: turn 0 greets the human via `message/user`
    — the verb that says something to your one human (they see it now).
@@ -2111,12 +2086,14 @@
    every turn uses, so they land where every eval lands (sessions →
    turns → evals) and the agent re-reads them in its own transcript.
 
-   The forms, in order: read the shared-store inventory
-   ([[inventory-read-source]]), read the system-wide instructions
-   ([[instructions-read-source]]), greet the human via `message/user`
+   The forms, in order: greet the human via `message/user`
    ([[hello-source]]), then park via `wait` ([[park-source]]) so
    the agent is `:idle`, wakeable the moment a message arrives. The
-   `;;` comments ride as each eval's narration.
+   `;;` comments ride as each eval's narration. The agent's first turn
+   is its first real ACTIONS — it does NOT re-read the inventory or the
+   shared instructions here; those are standing context sections
+   (`:inventory`, `:shared-instructions`), always current every turn, so
+   re-reading them would only freeze a stale snapshot into the transcript.
 
    MINT ONLY — a resumed agent already has its turn 0 in the store.
    Returns the eval-batch! summary map; failures are logged LOUDLY but
@@ -2129,11 +2106,7 @@
           (let [session    (await (turn/ensure-session! id))
                 session-id (:seon.agent.session/id session)
                 turn-id    (db/new-id!)
-                source     (str inventory-read-source
-                                "\n"
-                                instructions-read-source
-                                "\n"
-                                hello-source
+                source     (str hello-source
                                 "\n"
                                 park-source)
                 batch

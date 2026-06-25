@@ -351,9 +351,6 @@
 ;; failed` ended the wake with NO user-visible notice).
 ;; ============================================================
 
-(def ^:private err-content
-  "⚠ LLM call failed (after 1 retry) — DeepSeek fetch failed: fetch failed")
-
 (deftest provider-failure-renders-a-system-line
   (async done
     (-> (with-conn
@@ -366,14 +363,15 @@
                      :seon.agent.message/content "are you there?"})
                   (.then
                     (fn [_]
-                      ;; the turn log exactly as seon.agent writes it: an
-                      ;; :error turn carrying its error self-message, and
-                      ;; a healthy :done turn with its transcript
-                      ;; self-message — only the former may surface.
-                      ;; RAW d/transact! like the fixture itself — the
-                      ;; fixture's 16-char agent ids predate the 14-char
-                      ;; :seon.db/id gate, so db/transact!'s validation
-                      ;; would reject any tx-map carrying :seon.agent/id.
+                      ;; the turn log exactly as seon.agent writes it: turns
+                      ;; record STATUS only (the error notice is synthesized
+                      ;; downstream from the status — turns store no message
+                      ;; of their own). Only the :error turn may surface; the
+                      ;; :done turn never does. RAW d/transact! like the
+                      ;; fixture itself — the fixture's 16-char agent ids
+                      ;; predate the 14-char :seon.db/id gate, so
+                      ;; db/transact!'s validation would reject any tx-map
+                      ;; carrying :seon.agent/id.
                       (d/transact!
                         db/*conn*
                         {:tx-data
@@ -384,24 +382,10 @@
                              :seon.agent.session/turns
                              [{:seon.agent.turn/id "TRNchatterr001"
                                :seon.agent.turn/at (t+ 100)
-                               :seon.agent.turn/status :error
-                               :seon.agent.turn/messages
-                               [{:seon.agent.message/id   "MSGchatterr001"
-                                 :seon.agent.message/from [:seon.agent/id a-id]
-                                 :seon.agent.message/to   [[:seon.agent/id a-id]]
-                                 :seon.agent.message/content err-content
-                                 :seon.agent.message/at   (t+ 100)
-                                 :seon.agent.message/hops 0}]}
+                               :seon.agent.turn/status :error}
                               {:seon.agent.turn/id "TRNchattdone01"
                                :seon.agent.turn/at (t+ 200)
-                               :seon.agent.turn/status :done
-                               :seon.agent.turn/messages
-                               [{:seon.agent.message/id   "MSGchattdone01"
-                                 :seon.agent.message/from [:seon.agent/id a-id]
-                                 :seon.agent.message/to   [[:seon.agent/id a-id]]
-                                 :seon.agent.message/content ";; all good"
-                                 :seon.agent.message/at   (t+ 200)
-                                 :seon.agent.message/hops 0}]}]}]}]})))
+                               :seon.agent.turn/status :done}]}]}]})))
                   (.then
                     (fn [_]
                       (let [{::chat/keys [messages]}
@@ -414,11 +398,9 @@
                                  " :done turn's self-message never does"))
                         (let [{::chat/keys [label content at]} (first sys)]
                           (is (= "system" label))
-                          (is (str/includes? content err-content)
-                              "the turn's recorded error IS the notice")
                           (is (str/includes? content
                                              "resume on your next message")
-                              "tells the human how to wake the agent")
+                              "the synthesized notice tells the human how to wake the agent")
                           (is (instance? js/Date at)))
                         (testing "merged into the stream in time order"
                           (is (= [::chat/human ::chat/system]

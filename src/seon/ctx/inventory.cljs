@@ -40,22 +40,11 @@
   #{:string :keyword :boolean :symbol})
 
 (def ^:private inventory-header
-  (str ";; stored data — what this cluster holds RIGHT NOW, one line per\n"
-       ";; KIND (attr namespace), then each attr NAME with its live row\n"
-       ";; count. Consult this BEFORE researching or registering: a kind\n"
-       ";; that already exists means prior agents stored rows you can\n"
-       ";; query. Read any kind's rows with the LISTED attrs, e.g.:\n"
-       ";;   (seon.db/query {:seon.db/query\n"
-       ";;     '[:find ?v :where [?e :my.kb.codebase/answer ?v]]})\n"
-       ";;   «v v ...» after a count = an ILLUSTRATIVE SAMPLE of the\n"
-       ";;   DISTINCT values that attr holds (a low-cardinality identity/\n"
-       ";;   enum/category column) — these are example filter KEYS, not the\n"
-       ";;   authoritative value: NEVER quote them as the stored answer.\n"
-       ";;   Query for the actual value before stating or acting on it.\n"
-       ";;   Attrs with no «..» are payload (refs, timestamps, free text);\n"
-       ";;   query them to see their values.\n"
-       ";; (post-bootstrap data only; the full system index is one call\n"
-       ";;  away — (seon.db/store-inventory {:seon.db/system? true}))"))
+  (str ";; stored data — what this cluster holds NOW (post-bootstrap rows).\n"
+       ";; One line per KIND: each attr NAME, its live count, and «sample\n"
+       ";; values» for low-card lookup columns. The «..» are ILLUSTRATIVE\n"
+       ";; keys to query by — never quote one as the answer; query for the\n"
+       ";; real value. Consult BEFORE researching or registering."))
 
 (defn- lookup-attr?
   "True when `attr`'s registered schema is a LOOKUP/FILTER type whose
@@ -169,7 +158,19 @@
    stays out of the cacheable prefix and rides near the prompt tail."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db]}]
-  (let [rows (db/store-inventory {:seon.db/db db})]
+  (let [;; Show DOMAIN KNOWLEDGE only — `my.*` and any third-party (acme)
+        ;; kinds the human/agents stored. The framework's own runtime
+        ;; exhaust (`seon.agent`, `seon.eval`, `seon.ns`, `seon.agent.turn`,
+        ;; …) is post-bootstrap too, but it is machinery, not knowledge to
+        ;; consult before researching — the transcript already shows the
+        ;; agent's evals, the roster shows agents. Filtering it out is what
+        ;; makes this surface answer "what KNOWLEDGE exists?" instead of
+        ;; drowning the one `my.kb` line under bookkeeping. Empty after the
+        ;; filter → "" → the section reactively vanishes (a fresh cluster
+        ;; with no stored knowledge shows no inventory).
+        rows (->> (db/store-inventory {:seon.db/db db})
+                  (remove (fn [{kind :seon.db/kind}]
+                            (str/starts-with? (name kind) "seon."))))]
     (if (seq rows)
       (let [;; ONE shared bootstrap-scope scan per render — values must be
             ;; post-bootstrap (matching store-inventory's counts), so a

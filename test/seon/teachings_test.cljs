@@ -326,12 +326,6 @@
   [agent-id]
   [{:seon.teachings/surface "tutorial seon.render.live-tile/wiring-source"
     :seon.teachings/src     (live-tile/wiring-source agent-id)
-    :seon.teachings/line    1}
-   {:seon.teachings/surface "tutorial seon.client/inventory-read-source"
-    :seon.teachings/src     client/inventory-read-source
-    :seon.teachings/line    1}
-   {:seon.teachings/surface "tutorial seon.client/instructions-read-source"
-    :seon.teachings/src     client/instructions-read-source
     :seon.teachings/line    1}])
 
 (defn- fn-doc-examples [dbv]
