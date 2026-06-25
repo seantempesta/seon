@@ -208,3 +208,16 @@ duplication. Keep the bracket, delete the labels.
 NOTE the `transcript.cljs` line refs may have shifted (P1 rewrote it); the #22
 executor greps for the real sites. system-text is the owner's headline gripe —
 convert it to single `;` body.
+
+## CONVENTION REFINEMENT (owner, 2026-06-25) — single `;` is PROSE-ONLY
+
+The single-`;` rule applies ONLY to PROSE sections (pure teaching/comment text:
+system-text prose, soul, inventory header, warnings prose). REAL CLOJURE keeps
+STANDARD conventions — `;;` for a standalone comment preceding code, `;` for an
+inline/trailing comment — so the rendered source still teaches idiomatic style:
+- **namespaces section** = actual ns SOURCE → keep its standard `;;`/`;` verbatim
+  (do NOT re-prefix real code to single `;`).
+- **transcript eval code** + the **COMMON DB OPS forms inside system-text** = real
+  Clojure → standard `;;`/`;`.
+- `quote-lines` (single `;`) is the PROSE quoter, not a blanket rule.
+- Demarcation `;;; ┌─/└─` unchanged.
