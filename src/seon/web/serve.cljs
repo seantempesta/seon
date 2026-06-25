@@ -382,11 +382,14 @@
                                      (str "create agent failed: " err)))))))))
 
 (defn- handle-complete-agent!
-  "POST /agent/<id>/complete — external control: set the agent's state to
-   `:completed` via `seon.agent/set-state!`. 200 + id on success, 500 with
-   the store error otherwise."
+  "POST /agent/<id>/complete — external control: park the agent at `:idle`
+   (the single wakeable parked state) via `seon.agent/set-state!`, tagged with
+   a `:seon.agent.loop/stop-reason :complete` tx-meta (same provenance as the
+   `complete` verb). set-state! fails loud on an unknown id (no phantom). 200 +
+   id on success, 500 with the store error otherwise."
   [_req res agent-id]
-  (-> (agent/set-state! {:seon.agent/id agent-id :seon.agent/state :completed})
+  (-> (agent/set-state! {:seon.agent/id agent-id :seon.agent/state :idle
+                         :seon.db/opts {:tx-meta {:seon.agent.loop/stop-reason :complete}}})
       (.then (fn [{ok? :seon.db/ok? :as env}]
                (if ok?
                  (do (log/info-console! "seon.web.serve"

@@ -30,16 +30,19 @@
 
    ## State machine
 
-   `:seon.agent/state` values:
-     :idle       — neutral / between work; wakeable → :active
-     :active     — a loop is running; new inbounds are picked up by the
+   `:seon.agent/state` is THREE behavioral classes — running / wakeable /
+   dead:
+     :active     — a loop is RUNNING; new inbounds are picked up by the
                    running loop's sliding cap, not a fresh wake (the
                    handler sees :active and skips)
-     :waiting    — parked via (agent/wait …); wakeable → :active
-     :completed  — finished via (complete …) / no-forms; wakeable → :active
-     :terminated — orchestrator kill; UNWAKEABLE (change state first)
+     :idle       — WAKEABLE; not running, a message wakes it → :active.
+                   The single parked state — `(agent/wait …)`,
+                   `(complete …)`, no-forms, and cap all land here; WHY it
+                   parked is the `:seon.agent.loop/stop-reason` tx-meta + the
+                   `:seon.agent/wait-note` field, not a distinct state value
+     :terminated — DEAD; orchestrator kill, UNWAKEABLE (change state first)
 
-   The wake handler flips a wakeable agent → :active and starts a loop; the
+   The wake handler flips an :idle agent → :active and starts a loop; the
    loop resets it to :idle on a clean exit (see [[seon.agent.loop/run-loop!]]).
 
    ## Prompt assembly
@@ -74,15 +77,17 @@
 
 (schema/register! :seon.agent/id            [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.agent/purpose       :string)
-;; The FSM coordination truth. STORED on the agent record, re-read each
-;; loop iteration:
-;;   :idle       neutral / between work — wakeable → :active
-;;   :active     a loop is running — NOT wakeable (the running loop picks
+;; The loop coordination truth — THREE behavioral classes (running /
+;; wakeable / dead). STORED on the agent record, re-read each loop
+;; iteration:
+;;   :active     a loop is RUNNING — NOT wakeable (the running loop picks
 ;;               up new inbounds via the sliding cap)
-;;   :waiting    parked via (agent/wait …) — wakeable → :active
-;;   :completed  finished via (complete …) / no-forms — wakeable → :active
-;;   :terminated orchestrator kill — UNWAKEABLE (change state first)
-(schema/register! :seon.agent/state         [:enum :idle :active :waiting :completed :terminated])
+;;   :idle       WAKEABLE — not running, a message wakes it → :active. The
+;;               single parked state: wait / complete / no-forms / cap all
+;;               land here; the REASON is the :seon.agent.loop/stop-reason
+;;               tx-meta (+ :seon.agent/wait-note), not a separate value.
+;;   :terminated DEAD — orchestrator kill, UNWAKEABLE (change state first)
+(schema/register! :seon.agent/state         [:enum :active :idle :terminated])
 ;; The current wake-episode token (reuses the canonical id shape, single
 ;; source of truth in seon.schema). STORED. Each wake mints a fresh id; the
 ;; loop re-reads it and bails if a newer wake superseded it (optimistic
@@ -330,8 +335,14 @@
 ;; ============================================================
 
 (schema/register! ::current-state-request [:map [:seon.agent/id :seon.agent/id]])
+;; Optional `:seon.db/opts` carries a per-transition tx-meta map (the
+;; loop stamps :seon.agent.loop/cause / :stop-reason on a transition); it
+;; is the standard transact! opts slot, passed through verbatim.
 (schema/register! ::set-state-request
-  [:map [:seon.agent/id :seon.agent/id] [:seon.agent/state :seon.agent/state]])
+  [:map
+   [:seon.agent/id    :seon.agent/id]
+   [:seon.agent/state :seon.agent/state]
+   [:seon.db/opts     {:optional true} :seon.db/opts]])
 (schema/register! ::fresh-wake-request    [:map [:seon.agent/id :seon.agent/id]])
 
 (defn current-state
@@ -344,13 +355,30 @@
     (db/entity {:seon.db/ref [:seon.agent/id id]})))
 
 (defn ^:async set-state!
-  "Transact a new `:seon.agent/state` for the agent (upsert by id).
-   Returns the transact-response promise. Map-in. `^:async` fns aren't
+  "Transact a new `:seon.agent/state` for an EXISTING agent (lookup by id).
+   Returns the transact-response. set-state! NEVER mints an agent — `create!`
+   is the sole minter. If no agent with `id` exists it FAILS LOUD (a
+   console.error + an error envelope) instead of upserting a phantom entity
+   carrying only id+state (`:seon.agent/id` is an identity attr, so a bare
+   upsert WOULD ghost-create — a stray id reaching here is a bug, surface it).
+   Optional `:seon.db/opts` (a `{:tx-meta {…}}` map) is passed through to
+   `transact!` so the loop can stamp `:seon.agent.loop/cause` / `:stop-reason`
+   provenance on the transition. Map-in. `^:async` fns aren't
    runtime-instrumented — the schema is the contract."
   {:malli/schema [:=> [:cat ::set-state-request] :seon.db/transact-response]}
-  [{:seon.agent/keys [id state]}]
-  (await (db/transact!
-           {:seon.db/tx-data [{:seon.agent/id id :seon.agent/state state}]})))
+  [{:seon.agent/keys [id state] opts :seon.db/opts}]
+  (if (nil? (db/entity {:seon.db/ref [:seon.agent/id id]}))
+    (do (js/console.error
+          (str "seon.agent/set-state!: no agent " id
+               " — refusing to mint a phantom entity (state=" state
+               "). create! is the only agent minter."))
+        {:seon.db/ok? false
+         :seon.db/error {:seon.error/message
+                         (str "set-state! on unknown agent " id
+                              " — no entity to transition (create! first).")}})
+    (await (db/transact!
+             (cond-> {:seon.db/tx-data [{:seon.agent/id id :seon.agent/state state}]}
+               (some? opts) (assoc :seon.db/opts opts))))))
 
 (defn ^:async fresh-wake!
   "Mint a fresh wake-episode id, transact it onto `:seon.agent/wake`, and
@@ -370,9 +398,9 @@
 (defn armable-agent-ids
   "Agent ids whose triggers should be ARMED — every agent NOT in the
    terminal `:terminated` state (the single source of truth for 'this
-   agent can still be woken'). A `:waiting`/`:completed` agent must still
-   get a trigger so a new message wakes it; only a `:terminated` agent is
-   armless. Derived from the db value at call time (reactive-context: no
+   agent can still be woken'). An `:idle` agent must still get a trigger so
+   a new message wakes it; only a `:terminated` agent is armless. Derived
+   from the db value at call time (reactive-context: no
    stored registry). Sorted asc for deterministic boot logs. Map-in;
    `:seon.db/db` optional (defaults to `*conn*`'s db via `db/query`)."
   {:malli/schema [:=> [:cat ::armable-agent-ids-request] ::armable-agent-ids-response]}
@@ -401,17 +429,15 @@
   "True iff this added `:seon.agent.message/to` datom targets `my-eid` from a
    DIFFERENT sender with a WAKING origin (∈ {:human :agent}). The to-check is
    load-bearing: every agent installs the wake listener, so without it ONE
-   message wakes EVERY agent's loop. The from-check (`from ≠ me`) stops an
-   agent's own writes from re-waking itself. The origin-check stops a
-   :core substrate nudge from waking an idle agent. A tx-hook-consumed
-   message (`handled? = true`) does not wake. Legacy rows have no origin attr
-   — treat absent origin as waking (those predate :core, all human/agent)."
+   message wakes EVERY agent's loop. The from/origin rule is the shared
+   [[seon.agent.message/waking-inbound?]] — ONE source of truth with the
+   transcript head-render. This datom adapter pulls the message entity, then
+   delegates. Hop-exhausted messages still pass here; the wake handler
+   partitions them out to refuse loudly (see [[seon.agent.loop/wake-handler]])."
   [db {eid :seon.db/e target :seon.db/v} my-eid]
   (and (= target my-eid)
-       (let [msg (db/entity {:seon.db/db db :seon.db/ref eid})]
-         (and (not= my-eid (:db/id (:seon.agent.message/from msg)))
-              (not= :core (:seon.agent.message/origin msg))
-              (not (true? (:seon.agent.message/handled? msg)))))))
+       (msg/waking-inbound? (db/entity {:seon.db/db db :seon.db/ref eid})
+                            my-eid)))
 
 ;; ============================================================
 ;; Agent creation. Allocates an id, transacts the entity.

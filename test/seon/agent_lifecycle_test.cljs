@@ -12,9 +12,9 @@
        (the value the transcript shows). `wait` with no agent in scope
        returns a loud error envelope (errors are values).
      - the RESUME query is `agent/armable-agent-ids` — every agent NOT in
-       the terminal `:terminated` state (so :idle / :waiting / :completed
-       all stay wakeable), sorted; empty store = [] (genuine first boot);
-       a `:terminated` agent is excluded until its state changes.
+       the terminal `:terminated` state (so :idle and :active both stay
+       armable), sorted; empty store = [] (genuine first boot); a
+       `:terminated` agent is excluded until its state changes.
      - `agent/create!` roundtrips `:seon.agent/max-turns-per-loop` (the base
        per-loop cap the FSM reads via `fsm/max-turns-per-loop`); purpose is
        never defaulted; a failed transact returns the db error envelope.
@@ -72,23 +72,23 @@
     (-> (with-conn
           (fn ^:async run []
             (await (seed-agents!))
-            (testing "wait parks the SCOPED agent → :waiting"
+            (testing "wait parks the SCOPED agent → :idle (the single wakeable parked state)"
               (let [r (await (db/with-agent "aaa-2606101200"
                                (fn ^:async w [] (await (lifecycle/wait "need an answer")))))]
-                (is (= :waiting r) "wait returns the new state keyword")
-                (is (= :waiting (:seon.agent/state
-                                  (db/entity {:seon.db/ref [:seon.agent/id "aaa-2606101200"]})))
-                    "the entity's state is :waiting")
+                (is (= :idle r) "wait returns the new state keyword")
+                (is (= :idle (:seon.agent/state
+                               (db/entity {:seon.db/ref [:seon.agent/id "aaa-2606101200"]})))
+                    "the entity's state is :idle")
                 (is (= "need an answer"
                        (:seon.agent/wait-note
                          (db/entity {:seon.db/ref [:seon.agent/id "aaa-2606101200"]})))
-                    "the note rides along for monitoring agents")))
-            (testing "complete finishes the SCOPED agent → :completed"
+                    "the note rides along — the wait INTENT lives in data, not a distinct state")))
+            (testing "complete finishes the SCOPED agent → :idle (intent = stop-reason tx-meta)"
               (let [r (await (db/with-agent "bbb-2606101200"
                                (fn ^:async c [] (await (lifecycle/complete "done")))))]
-                (is (= :completed r))
-                (is (= :completed (:seon.agent/state
-                                    (db/entity {:seon.db/ref [:seon.agent/id "bbb-2606101200"]}))))))
+                (is (= :idle r))
+                (is (= :idle (:seon.agent/state
+                               (db/entity {:seon.db/ref [:seon.agent/id "bbb-2606101200"]}))))))
             (testing "terminate kills an agent by id → :terminated (the one unwakeable state)"
               (let [r (await (lifecycle/terminate "aaa-2606101200"))]
                 (is (= :terminated r))
@@ -103,8 +103,9 @@
 
 ;; ============================================================
 ;; armable-agent-ids — THE resume query. Every agent NOT :terminated is
-;; resumable (idle/waiting/completed all stay wakeable); state-derived,
-;; nothing stored. Empty store = genuine first boot.
+;; resumable (the single wakeable parked state is :idle; :active is the
+;; running state — both stay armable); state-derived, nothing stored.
+;; Empty store = genuine first boot.
 ;; ============================================================
 
 (deftest armable-skips-terminated-and-tracks-state-live
@@ -117,12 +118,14 @@
             (testing "both idle agents are armable, sorted asc"
               (is (= ["aaa-2606101200" "bbb-2606101200"]
                      (agent/armable-agent-ids {:seon.db/db @db/*conn*}))))
-            (testing ":waiting + :completed stay armable (a message resumes them)"
-              (await (agent/set-state! {:seon.agent/id "aaa-2606101200" :seon.agent/state :waiting}))
-              (await (agent/set-state! {:seon.agent/id "bbb-2606101200" :seon.agent/state :completed}))
+            (testing ":idle + :active both stay armable (only :terminated drops)"
+              ;; :idle is the single wakeable parked state; :active is the
+              ;; running state — armable means "not :terminated", so both stay.
+              (await (agent/set-state! {:seon.agent/id "aaa-2606101200" :seon.agent/state :idle}))
+              (await (agent/set-state! {:seon.agent/id "bbb-2606101200" :seon.agent/state :active}))
               (is (= ["aaa-2606101200" "bbb-2606101200"]
                      (agent/armable-agent-ids {:seon.db/db @db/*conn*}))
-                  "neither :waiting nor :completed drops from the roster"))
+                  "neither :idle nor :active drops from the roster"))
             (testing "only :terminated is excluded — the unwakeable state"
               (await (lifecycle/terminate "aaa-2606101200"))
               (is (= ["bbb-2606101200"]

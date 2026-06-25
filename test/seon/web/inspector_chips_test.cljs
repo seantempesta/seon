@@ -144,7 +144,17 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest completed-agents-hidden-by-default-toggle-reveals
+;; DISABLED by the agent-fsm 5→3 state collapse (2026-06-25): this test
+;; pins the inspector's "completed agents → hidden history grid" grouping,
+;; which keyed off the now-REMOVED `:seon.agent/state :completed` value.
+;; Completion is now a `:seon.agent.loop/stop-reason :complete` tx-meta in
+;; history, not a state value — `set-state! :completed` now returns an error
+;; envelope (schema reject). The history-grid grouping is rebuilt render-side
+;; from stop-reason history by the activity-log derivation
+;; (docs/prds/agent-fsm/context-render.md); re-enable + rewrite this test
+;; against that derivation when it lands. `#_`-discarded (not deleted) so the
+;; intent + the assertions survive for the rewrite.
+#_(deftest completed-agents-hidden-by-default-toggle-reveals
   ;; Task #10 demo half (demo-polish 2026-06-12): completed agents are
   ;; HISTORY — the default grid hides them entirely; the `?completed=1`
   ;; query-param toggle (same pattern as ?system) reveals them. Active

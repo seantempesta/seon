@@ -33,10 +33,10 @@
    converter renders the REPL-comment `;;; ◀ from X` / `;;; ▶ to X` line."
   (:require
     [clojure.string :as str]
+    [seon.agent.message :as msg]
     [seon.ctx :as ctx]
     [seon.db :as db]
-    [seon.render :as render]
-    [seon.warn :as warn]))
+    [seon.render :as render]))
 
 (def transcript-char-budget
   "Total rendered-chars cap for the transcript section (~6k tokens at
@@ -114,30 +114,24 @@
        (catch :default _ (subs (.toISOString ^js inst) 11 19))))
 
 ;; ------------------------------------------------------------
-;; Inbound gate — the SAME predicate as the wake, so a `:core` substrate
-;; nudge never renders as a fake inbound.
-;;
-;; FALLBACK: the canonical gate is `seon.agent/inbound-msg-datom?`, but
-;; `seon.agent` REQUIRES this ns, so requiring it back here is a require
-;; CYCLE. Compiling clean beats a cycle, so we keep a small LOCAL
-;; predicate over the same conditions.
+;; Inbound gate — the SAME rule as the wake. The shared boolean lives in
+;; `seon.agent.message` ([[seon.agent.message/waking-inbound?]] +
+;; [[seon.agent.message/hop-live?]]) — ONE source of truth, no hand-copy.
+;; (`seon.agent.message` does not require this ns, so there is no cycle;
+;; the OLD copy existed only to dodge `seon.agent`, which DOES require us.)
+;; The transcript drops dead-chain (hop-exhausted) messages too, so it
+;; composes both clauses.
 ;; ------------------------------------------------------------
 
 (defn- inbound-msg?
   "True iff message map `m` (pulled with its `from` ref carrying
-   `:seon.user/id`/`:seon.agent/id`) is a WAKING inbound for the agent
-   whose eid is `my-eid`: from ≠ me, origin ∈ {:human :agent} (absent
-   origin = legacy human/agent, waking), handled? ≠ true, hops < hop-cap.
-   Mirrors seon.agent/inbound-msg-datom? + the hop-cap clause — ONE gate
-   so a `:core` nudge never renders as a fake inbound."
+   `:seon.user/id`/`:seon.agent/id`) is a WAKING, hop-live inbound for the
+   agent whose eid is `my-eid`. Delegates to the shared wake rule so a
+   `:core` nudge never renders as a fake inbound and a dead-chain message
+   never renders as a live one."
   [m my-eid]
-  (let [from   (:seon.agent.message/from m)
-        origin (:seon.agent.message/origin m)
-        hops   (or (:seon.agent.message/hops m) 0)]
-    (and (not= my-eid (:db/id from))
-         (not= :core origin)
-         (not (true? (:seon.agent.message/handled? m)))
-         (< hops warn/hop-cap))))
+  (and (msg/waking-inbound? m my-eid)
+       (msg/hop-live? m)))
 
 ;; ------------------------------------------------------------
 ;; Converters — bare-String render fns, the schema-default for an event.
@@ -201,9 +195,9 @@
     (->> (db/query
            {:seon.db/db db
             :seon.db/query
-            ;; Wildcard pull: an attr with zero datoms (e.g. handled?
-            ;; before consumption) is simply ABSENT (pulling it explicitly
-            ;; THROWS). The gate reads absent handled? as "not handled".
+            ;; Wildcard pull: an attr with zero datoms (e.g. origin on a
+            ;; legacy row) is simply ABSENT (pulling it explicitly THROWS).
+            ;; The gate treats absent origin as waking.
             '[:find (pull ?m [* {:seon.agent.message/from
                                  [:db/id :seon.user/id :seon.agent/id]
                                  :seon.agent.message/to

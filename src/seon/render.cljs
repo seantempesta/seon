@@ -45,13 +45,9 @@
 ;; Schemas — every shape this surface reads or writes (spec-05 §15.1).
 ;; ============================================================
 
-;; Datahike db snapshot + conn handle — both opaque to validation
-;; (genuinely runtime-opaque values; `:any` is the canonical Malli
-;; idiom for "I am a runtime handle, validate by presence only").
-;; Registered in ONE place so every reference is `:seon.db/db` or
-;; `:seon.db/conn` instead of inlined `:any`.
-(schema/register! :seon.db/db   :any)
-(schema/register! :seon.db/conn :any)
+;; `:seon.db/db` + `:seon.db/conn` (the runtime db/conn handles) are
+;; registered in their owning ns `seon.db` (loaded before this ns via the
+;; require above) — a reference here just resolves them, no inline `:any`.
 
 ;; Hiccup has exactly ONE schema representation:
 ;; `:seon.render.live-tile/hiccup` — the registered pure-data shallow

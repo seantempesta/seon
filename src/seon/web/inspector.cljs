@@ -894,13 +894,17 @@
      [:a {:href (str "/agent/" id)
           :aria-label (str "open agent " id)
           :class "absolute inset-0"}]
-     ;; ✓ complete — POSTs to the /complete endpoint, which sets
-     ;; :seon.agent/state to :completed. The SSE re-morph then moves the
-     ;; card into the collapsed completed grid. Pinned to the card's
-     ;; upper-right corner (absolute) so it reads as a real control, not
-     ;; footer decoration. `relative z-10` is needed AFTER the inset-0
-     ;; overlay anchor so this button — not the navigate link — receives
-     ;; the click. Hidden once the agent is already completed.
+     ;; ✓ complete — POSTs to the /complete endpoint, which now parks the
+     ;; agent at :idle with a :seon.agent.loop/stop-reason :complete tx-meta
+     ;; (the 5→3 state collapse removed the :completed state). NOTE: the
+     ;; collapsed "completed grid" grouping below keys off the OLD :completed
+     ;; value and is therefore DORMANT until the activity-log derivation
+     ;; (context-render.md) reconstructs "completed" from the stop-reason
+     ;; history. Pinned to the card's upper-right corner (absolute) so it
+     ;; reads as a real control. `relative z-10` is needed AFTER the inset-0
+     ;; overlay anchor so this button — not the navigate link — receives the
+     ;; click. (The `:completed` test never matches now → the button always
+     ;; shows; harmless.)
      (when-not (= :completed state)
        [:button
         {:type "button"
@@ -943,9 +947,14 @@
   [system? completed?]
   (let [db   @db/*conn*
         rows (list-agents-data)
-        ;; Lifecycle split: `:completed` agents are HISTORY — grouped
-        ;; collapsed at the bottom. They remain wakeable (a new message
-        ;; resumes them), so this is a display grouping, not a halt.
+        ;; Lifecycle split: completed agents WERE grouped collapsed at the
+        ;; bottom via the (now-removed) `:completed` state. DORMANT after the
+        ;; 5→3 collapse — completion is now a :seon.agent.loop/stop-reason
+        ;; :complete tx-meta in history, not a state value, so this predicate
+        ;; never matches and every agent renders in the active grid. The
+        ;; history-grid grouping is rebuilt from stop-reason history by the
+        ;; activity-log derivation (context-render.md). Kept (not deleted) so
+        ;; the grouping plumbing is here when that lands.
         completed-row? (fn [r] (= :completed (:seon.agent/state r)))
         active    (vec (remove completed-row? rows))
         completed (vec (filter completed-row? rows))

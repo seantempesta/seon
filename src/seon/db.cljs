@@ -205,6 +205,18 @@
 ;; the law bans); the quoted symbol is what the registry resolves.
 (schema/register! ::db-val 'map?)
 
+;; Datahike db snapshot + conn handle — both opaque to validation
+;; (genuinely runtime-opaque values; `:any` is the canonical Malli idiom
+;; for "I am a runtime handle, validate by presence only"). Registered
+;; HERE — `:seon.db/*` keywords live in their owning code ns — so they
+;; are available the moment `seon.db` loads, before any ns that references
+;; them (e.g. `seon.warn/check-request`'s `:seon.db/db` slot). `::db-val`
+;; (`'map?`) above is the STRICTER positional-arg shape; these looser
+;; `:any` handles are for request/response map slots that just carry a
+;; runtime db/conn through.
+(schema/register! :seon.db/db   :any)
+(schema/register! :seon.db/conn :any)
+
 (schema/register!
   ::datom
   [:map

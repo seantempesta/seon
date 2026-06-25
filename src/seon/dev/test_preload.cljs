@@ -31,8 +31,9 @@
     [seon.boot.preconditions-test]
     ;; T7 clip guardrail: store-cap + row-count guard (memory-safety).
     ;; (seon.agent-context-test DELETED — agent-fsm redesign 2026-06-23,
-    ;; U5: pinned the old turn shape woken-by/messages + XML transcript;
-    ;; the transcript is rewritten in U6 with fresh tests after.)
+    ;; U5: pinned the old turn shape (the per-turn wake anchor, now
+    ;; :seon.agent.turn/wake) + XML transcript; the transcript is rewritten
+    ;; in U6 with fresh tests after.)
     [seon.eval.memory-safety-test]
     ;; Run-4 root-cause fix (2026-06-09): data-ns schema tee upsert +
     ;; record-eval! never silently loses the eval row.

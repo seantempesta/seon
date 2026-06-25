@@ -20,7 +20,8 @@
   (:require
     [clojure.string :as str]
     [seon.db :as db]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.warn :as warn]))
 
 ;; Every stored message is FULLY FORMED — from + to + content + at + id
 ;; + hops. Identity is the ref (`:seon.agent.message/from` points at the
@@ -45,12 +46,6 @@
 ;; default in message! from `from` (user ⇒ :human, else :agent); :core is
 ;; set explicitly by the substrate caller.
 (schema/register! :seon.agent.message/origin  [:enum :human :agent :core])
-;; Consumed marker: a tx-hook (e.g. a downstream deterministic
-;; chat-control like `/persona`) sets this `true` IN THE SAME TX that
-;; processes the command, so the message does NOT wake the agent. STORED
-;; only when true (absent = a live, unconsumed message); never stored as
-;; false. Reversible — retract the attr to un-consume.
-(schema/register! :seon.agent.message/handled? :boolean)
 
 ;; The user is a REAL entity — ONE `:seon.user/id` row seeded at boot
 ;; (identity upsert, idempotent — same pattern as agent entities). All
@@ -79,10 +74,45 @@
    [:seon.agent.message/content :seon.agent.message/content]
    [:seon.agent.message/at      :seon.agent.message/at]
    [:seon.agent.message/hops    :seon.agent.message/hops]
-   [:seon.agent.message/origin  :seon.agent.message/origin]
-   ;; Present only on a tx-hook-consumed message (handled? = true).
-   ;; Optional/absent on every live message.
-   [:seon.agent.message/handled? {:optional true} :seon.agent.message/handled?]])
+   [:seon.agent.message/origin  :seon.agent.message/origin]])
+
+;; ============================================================
+;; The waking-inbound RULE — ONE source of truth for "this message wakes
+;; (and renders as an inbound) for the agent whose eid is `my-eid`". Both
+;; the wake gate ([[seon.agent/inbound-msg-datom?]], which adapts a datom)
+;; and the transcript head-render ([[seon.ctx.transcript]], which has the
+;; pulled map already) call this so a message wakes under exactly the same
+;; rule it renders under — no drift. Lives HERE (the message-data owner)
+;; rather than `seon.agent`, which `seon.ctx.transcript` requires (a cycle
+;; back to it would not compile).
+;; ============================================================
+
+(defn waking-inbound?
+  "True iff message map `m` (a pull with its `from` ref carrying `:db/id`)
+   is a WAKING inbound for the agent whose eid is `my-eid`:
+     from ≠ me        — an agent's own writes never re-wake it
+     origin ∉ {:core} — a substrate nudge never wakes an idle agent
+                        (absent origin = legacy human/agent ⇒ waking).
+   The to-check (to ∋ me) is the CALLER's job — the datom adapter and the
+   query that produces `m` each already scope to messages TO me. The
+   HOP-CAP guard is NOT folded in here on purpose: the wake side
+   ([[seon.agent.loop/wake-handler]]) needs hop-exhausted messages to still
+   pass this gate so it can partition them out and refuse LOUDLY; the
+   transcript adds the hop-cap clause itself (a dead-chain message must not
+   render as a live inbound). See [[hop-live?]]."
+  [m my-eid]
+  (and (not= my-eid (:db/id (:seon.agent.message/from m)))
+       (not= :core (:seon.agent.message/origin m))))
+
+(defn hop-live?
+  "True iff message map `m`'s hop count is still under `seon.warn/hop-cap`
+   (absent hops = 0 ⇒ live). The ping-pong guard, factored out of
+   [[waking-inbound?]] so the wake side can keep the loud hop-exhausted
+   refusal (it must SEE the exhausted message to refuse it) while the
+   transcript can compose `(and (waking-inbound? …) (hop-live? …))` to drop
+   a dead-chain message from the rendered log."
+  [m]
+  (< (or (:seon.agent.message/hops m) 0) warn/hop-cap))
 
 ;; ============================================================
 ;; message! — the SINGLE write entry point for messages (the verbs

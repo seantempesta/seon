@@ -342,6 +342,13 @@
    :seon.agent/max-turns-per-loop
    :seon.agent/ctx
 
+   ;; --- Loop tx-meta (provenance on state-transition txs) ---
+   ;; Stamped EXPLICITLY per-transition (NOT in seon.db tx-meta-attrs).
+   ;; Listed here so their datahike schema reaches the wire-server writer
+   ;; at boot — tx-meta attrs never install lazily via the tx-data path.
+   :seon.agent.loop/cause
+   :seon.agent.loop/stop-reason
+
    ;; --- Render slots (A-6) — symbol-only at storage. ---
    :seon.render/ai
    :seon.render/html
@@ -2095,8 +2102,8 @@
 
 (def park-source
   "The bootstrap-turn park: turn 0 ends by parking via `wait` —
-   state → :waiting, wakeable the moment a message arrives. The `;;`
-   comment rides as the eval's narration."
+   state → :idle (the single wakeable parked state), wakeable the moment a
+   message arrives. The `;;` comment rides as the eval's narration."
   (str
     ";; Park: I resume the instant a message lands.\n"
     "(wait \"awaiting first task\")\n"))
@@ -2111,7 +2118,7 @@
    ([[inventory-read-source]]), read the system-wide instructions
    ([[instructions-read-source]]), greet the human via `message/user`
    ([[hello-source]]), then park via `wait` ([[park-source]]) so
-   the agent is `:waiting`, wakeable the moment a message arrives. The
+   the agent is `:idle`, wakeable the moment a message arrives. The
    `;;` comments ride as each eval's narration.
 
    MINT ONLY — a resumed agent already has its turn 0 in the store.
