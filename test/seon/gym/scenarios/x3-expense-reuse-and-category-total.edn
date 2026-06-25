@@ -1,0 +1,74 @@
+;; X3 (gym-v2 §3 Group II) — cross-session reuse (no fork) + category SUM.
+;; Agent A logs a week of expenses under a NEW :my.expense/* schema. Fresh
+;; agent B (same store, cold) is asked a category-scoped total: it must
+;; DISCOVER the kind, filter to :dining, and SUM (=106) — WITHOUT forking a
+;; parallel spelling for the same shape. Mechanical legs: discovery
+;; (op-family), the seeded rows are visible, and NO new domain attr was
+;; minted (the generic no-fork check, provenance-anchored not vocabulary-
+;; anchored). The exact dining total lives ONLY on the judge axis.
+;;
+;; PAID — refused without {:seon.gym/allow-paid? true} + the provider key.
+{:seon.gym.scenario/id     :x3-expense-reuse-and-category-total
+ :seon.gym.scenario/doc    "A logs 5 expenses (new :my.expense/* schema; 3 are :dining summing to 106). Fresh B, cold, must discover the kind, filter to dining, SUM (=106), and reply — reusing A's attrs, forking nothing."
+ :seon.gym.scenario/tier   :paid
+ :seon.gym.scenario/status :active
+ :seon.gym.scenario/axes   [:consults-findings :reuses-schemas
+                            :replies-honestly :terminates]
+ :seon.gym.scenario/schema-registrations
+ [[:my.expense/merchant :string]
+  [:my.expense/amount-usd :int]
+  [:my.expense/category :keyword]]
+ :seon.gym.scenario/fixtures
+ [{:my.expense/merchant "Thai Place"    :my.expense/amount-usd 28 :my.expense/category :dining}
+  {:my.expense/merchant "Sushi Bar"     :my.expense/amount-usd 52 :my.expense/category :dining}
+  {:my.expense/merchant "Cafe Luna"     :my.expense/amount-usd 26 :my.expense/category :dining}
+  {:my.expense/merchant "Shell"         :my.expense/amount-usd 40 :my.expense/category :transport}
+  {:my.expense/merchant "Trader Joe's"  :my.expense/amount-usd 73 :my.expense/category :groceries}]
+ :seon.gym.scenario/turns
+ [{:seon.gym.turn/agent   :a
+   :seon.gym.turn/message "Log this week's spending for me: $28 at the Thai Place, $52 at the corner sushi spot, and $26 at the little cafe were all eating out; $40 at the gas station; and $73 at the grocery store."}
+  {:seon.gym.turn/agent   :b
+   :seon.gym.turn/message "How much did I spend eating out this week?"}]
+ :seon.gym.scenario/predicates
+ [{:seon.gym.predicate/id     :expenses-seeded-visible
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :consults-findings
+   :seon.gym.predicate/query  [:find ?e :where [?e :my.expense/amount-usd _]]
+   :seon.gym.predicate/expect [:count>= 5]}
+  {:seon.gym.predicate/id      :b-discovery-reads-store-first
+   :seon.gym.predicate/kind    :first-eval-matches
+   :seon.gym.predicate/agent   :b
+   :seon.gym.predicate/axis    :consults-findings
+   :seon.gym.predicate/pattern "seon\\.db/(query|pull|entity|store-inventory)"}
+  ;; NO FORK (generic, provenance-anchored): every agent-domain attr in the
+  ;; post-run store is one of A's seeded :my.expense/* attrs — B reused the
+  ;; shape and minted no parallel spelling (e.g. :my.dining/* or :spend/*).
+  {:seon.gym.predicate/id     :no-attr-fork-for-the-expense-shape
+   :seon.gym.predicate/kind   :domain-attrs
+   :seon.gym.predicate/axis   :reuses-schemas
+   :seon.gym.predicate/expect [:every-in [":my.expense/merchant"
+                                          ":my.expense/amount-usd"
+                                          ":my.expense/category"]]}
+  {:seon.gym.predicate/id     :b-replied-to-the-user
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :replies-honestly
+   :seon.gym.predicate/args   [:seon.gym.agent/b]
+   :seon.gym.predicate/query  [:find ?m
+                               :in $ ?bid
+                               :where
+                               [?ag :seon.agent/id ?bid]
+                               [?m :seon.agent.message/from ?ag]
+                               [?m :seon.agent.message/hops ?h]
+                               [(pos? ?h)]]
+   :seon.gym.predicate/expect :non-empty}
+  {:seon.gym.predicate/id     :both-agents-end-idle
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?a :where [?a :seon.agent/state :idle]]
+   :seon.gym.predicate/expect [:count 2]}
+  {:seon.gym.predicate/id        :judge-dining-total
+   :seon.gym.predicate/kind      :llm-judge
+   :seon.gym.predicate/agent     :b
+   :seon.gym.predicate/axis      :replies-honestly
+   :seon.gym.predicate/rubric    "PASS only if the reply states the dining / eating-out total as 106 USD (allow 105-107 for rounding). FAIL if it reports a different number, sums the wrong category, or includes the gas/grocery spend in the eating-out figure."
+   :seon.gym.predicate/reference "Dining rows: Thai Place 28 + Sushi Bar 52 + Cafe Luna 26 = 106. The non-dining rows (Shell 40 transport, Trader Joe's 73 groceries) must be EXCLUDED. 106 is knowable only by reading the stored rows and filtering on the dining category."}]}

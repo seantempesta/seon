@@ -849,6 +849,19 @@
       (str/join "\n\n" mine)
       "(the agent sent NO reply to the user)")))
 
+(defn- format-judge-ctx
+  "The judge's grading-context STRING — question(s), the verbatim reply,
+   the rubric, the reference facts. ONE formatter shared by the live
+   judge path ([[judge-ctx]]) and the calibration probe
+   ([[calibrate-judge!]]) so a calibrated judge grades the byte-identical
+   shape it sees in a real run."
+  [questions reply rubric reference]
+  (str "== Question(s) the user asked the agent ==\n"
+       (str/join "\n---\n" questions)
+       "\n\n== Agent's reply (verbatim) ==\n" reply
+       "\n\n== Rubric ==\n" rubric
+       "\n\n== Reference facts (ground truth) ==\n" reference))
+
 (defn- judge-ctx
   "Assemble the grading context for one :llm-judge predicate: the
    designated agent's question(s), its verbatim reply, the rubric, the
@@ -860,14 +873,11 @@
                         (filter #(= designator
                                     (or (:seon.gym.turn/agent %) :a)))
                         (map :seon.gym.turn/message))]
-    (str "== Question(s) the user asked the agent ==\n"
-         (str/join "\n---\n" questions)
-         "\n\n== Agent's reply (verbatim) ==\n"
-         (if agent-id
-           (agent-reply-text dbv agent-id)
-           "(no such agent ran in this scenario)")
-         "\n\n== Rubric ==\n" rubric
-         "\n\n== Reference facts (ground truth) ==\n" reference)))
+    (format-judge-ctx questions
+                      (if agent-id
+                        (agent-reply-text dbv agent-id)
+                        "(no such agent ran in this scenario)")
+                      rubric reference)))
 
 (defn- parse-judge-verdict
   "Parse the judge LLM's JSON verdict into a judge-result fragment.
@@ -925,6 +935,84 @@
    (str "judge SKIPPED — needs an injected :seon.gym/judge-fn (tests) "
         "or :seon.gym/allow-paid? true + DEEPSEEK_API_KEY (live "
         "grading); recorded as a fail, never a silent pass")})
+
+;; ===========================================================================
+;; JUDGE CALIBRATION — before trusting the judge as the PRIMARY signal, prove
+;; it DISCRIMINATES: feed it a known-GOOD reply (must PASS) and a known-BAD /
+;; fabricated reply (must FAIL) for the SAME rubric + reference facts, through
+;; the SAME judge-fn + the SAME ctx format a real run uses. A judge that
+;; passes both (or fails both) is noise — a rubric/structure bug to fix, NOT a
+;; signal to trust. `discriminates?` = good PASS ∧ bad FAIL.
+;; ===========================================================================
+
+(schema/register! :seon.gym.calib/question   :string)
+(schema/register! :seon.gym.calib/rubric     :string)
+(schema/register! :seon.gym.calib/reference  :string)
+(schema/register! :seon.gym.calib/good-reply :string)
+(schema/register! :seon.gym.calib/bad-reply  :string)
+(schema/register! :seon.gym.calib/request
+  [:map
+   [:seon.gym.calib/question   :seon.gym.calib/question]
+   [:seon.gym.calib/rubric     :seon.gym.calib/rubric]
+   [:seon.gym.calib/reference  :seon.gym.calib/reference]
+   [:seon.gym.calib/good-reply :seon.gym.calib/good-reply]
+   [:seon.gym.calib/bad-reply  :seon.gym.calib/bad-reply]
+   [:seon.gym/judge-fn    {:optional true} :seon.gym/judge-fn]
+   [:seon.gym/allow-paid? {:optional true} :seon.gym/allow-paid?]])
+(schema/register! :seon.gym.calib/verdict
+  [:map
+   [:seon.gym.judge/pass?         :seon.gym.judge/pass?]
+   [:seon.gym.judge/score         :seon.gym.judge/score]
+   [:seon.gym.judge/justification :seon.gym.judge/justification]])
+(schema/register! :seon.gym.calib/discriminates? :boolean)
+(schema/register! :seon.gym.calib/response
+  [:map
+   [:seon.gym.calib/good          :seon.gym.calib/verdict]
+   [:seon.gym.calib/bad           :seon.gym.calib/verdict]
+   [:seon.gym.calib/discriminates? :seon.gym.calib/discriminates?]])
+
+(defn ^:async calibrate-judge!
+  "Run the judge twice on the SAME rubric + reference facts — once with a
+   known-GOOD reply, once with a known-BAD/fabricated reply — and report
+   whether it discriminated. Uses the injected `:seon.gym/judge-fn`, or
+   the real DeepSeek judge under `:seon.gym/allow-paid? true` +
+   DEEPSEEK_API_KEY; with neither, both verdicts record the explicit
+   SKIP fail (so `discriminates?` is false, never a silent pass).
+
+   Returns Promise<:seon.gym.calib/response>:
+   `{:seon.gym.calib/good <verdict> :seon.gym.calib/bad <verdict>
+     :seon.gym.calib/discriminates? (good-PASS ∧ bad-FAIL)}`."
+  {:malli/schema [:=> [:cat :seon.gym.calib/request] :seon.gym.calib/response]}
+  [{:seon.gym.calib/keys [question rubric reference good-reply bad-reply]
+    judge-fn :seon.gym/judge-fn allow-paid? :seon.gym/allow-paid?}]
+  (let [judge-fn (or judge-fn
+                     (when (and allow-paid?
+                                (.. js/process -env -DEEPSEEK_API_KEY))
+                       (default-judge-fn)))
+        grade    (fn ^:async grade-reply [reply]
+                   (if-not judge-fn
+                     {:seon.gym.judge/pass? false :seon.gym.judge/score 0
+                      :seon.gym.judge/justification
+                      (str "judge SKIPPED — inject :seon.gym/judge-fn or set "
+                           ":seon.gym/allow-paid? true + DEEPSEEK_API_KEY")}
+                     (let [resp (try (await (judge-fn (format-judge-ctx
+                                                        [question] reply
+                                                        rubric reference)))
+                                     (catch :default e {:text "" :seon.ai/error
+                                                        {:seon.ai/msg (str e)}}))]
+                       (if (:seon.ai/error resp)
+                         {:seon.gym.judge/pass? false :seon.gym.judge/score 0
+                          :seon.gym.judge/justification
+                          (str "judge LLM call failed: "
+                               (truncate-actual (pr-str (:seon.ai/error resp))))}
+                         (parse-judge-verdict (:text resp))))))
+        good     (await (grade good-reply))
+        bad      (await (grade bad-reply))]
+    {:seon.gym.calib/good           good
+     :seon.gym.calib/bad            bad
+     :seon.gym.calib/discriminates?
+     (boolean (and (:seon.gym.judge/pass? good)
+                   (not (:seon.gym.judge/pass? bad))))}))
 
 (defn ^:async ^:private judge-predicates!
   "Run every :llm-judge predicate sequentially through `judge-fn` and

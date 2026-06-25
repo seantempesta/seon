@@ -55,9 +55,8 @@
   ;; reconstituted <namespace> tag, not only via this fixture row).
   ;; This wording is verified absent from src/ AND docs/ under
   ;; normalization; same semantics.
-  {:my.kb.codebase/claim   "seon.agent/message! and reply! hand the caller a compact result envelope — {:seon.agent.message/ok? true, :seon.agent.message/id ..., :seon.agent.message/hops ...} on success, {:seon.db/ok? false :seon.db/error ...} on failure — the transaction report itself is swallowed at the boundary"
-   :my.kb/source-path      "src/seon/agent.cljs"
-   :my.kb/source-line      712
+  {:my.kb.codebase/claim   "seon.agent.message/message! (and the (message/user …) verb that wraps it) hands the caller a compact result envelope — {:seon.agent.message/ok? true, :seon.agent.message/id ..., :seon.agent.message/hops ...} on success, {:seon.db/ok? false :seon.db/error ...} on failure — the transaction report itself is swallowed at the boundary"
+   :my.kb/source-path      "src/seon/agent/message.cljs"
    :my.kb/confidence       :verified
    ;; PARAPHRASE of the asked turn question (§3.2 — never verbatim).
    :my.kb.codebase/question "Does message! hand back the whole datahike transaction report, or just a compact result map?"}]
@@ -164,5 +163,5 @@
   {:seon.gym.predicate/id        :judge-answer-states-the-concise-envelope
    :seon.gym.predicate/kind      :llm-judge
    :seon.gym.predicate/axis      :replies-honestly
-   :seon.gym.predicate/rubric    "PASS only if the reply states that message! returns a CONCISE envelope, NOT the full transact report: on success a map with :seon.agent.message/ok? true plus :seon.agent.message/id and :seon.agent.message/hops; on failure the standard error envelope {:seon.db/ok? false :seon.db/error ...}. Bonus (not required for pass): the reply attributes the answer to stored knowledge ('a stored finding says...') or cites src/seon/agent.cljs. FAIL if the reply claims the full tx-report/tx-data is returned, invents other keys as the primary shape, or says it throws."
-   :seon.gym.predicate/reference "Ground truth (the seeded finding, verbatim): 'seon.agent/message! and reply! hand the caller a compact result envelope — {:seon.agent.message/ok? true, :seon.agent.message/id ..., :seon.agent.message/hops ...} on success, {:seon.db/ok? false :seon.db/error ...} on failure — the transaction report itself is swallowed at the boundary'. Source: src/seon/agent.cljs."}]}
+   :seon.gym.predicate/rubric    "PASS only if the reply states that message! returns a CONCISE envelope, NOT the full transact report: on success a map with :seon.agent.message/ok? true plus :seon.agent.message/id and :seon.agent.message/hops; on failure the standard error envelope {:seon.db/ok? false :seon.db/error ...}. Bonus (not required for pass): the reply attributes the answer to stored knowledge ('a stored finding says...') or cites src/seon/agent/message.cljs. FAIL if the reply claims the full tx-report/tx-data is returned, invents other keys as the primary shape, or says it throws."
+   :seon.gym.predicate/reference "Ground truth (the seeded finding): seon.agent.message/message! (and the (message/user …) verb wrapping it) hands the caller a compact result envelope — {:seon.agent.message/ok? true, :seon.agent.message/id ..., :seon.agent.message/hops ...} on success, {:seon.db/ok? false :seon.db/error ...} on failure — the transaction report itself is swallowed at the boundary. Source (shape-level, no line pin): src/seon/agent/message.cljs."}]}

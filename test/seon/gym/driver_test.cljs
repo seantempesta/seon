@@ -34,7 +34,10 @@
    "test/seon/gym/scenarios/s32-consult-before-research.edn"
    "test/seon/gym/scenarios/s21-log-workout-existing-schema.edn"
    "test/seon/gym/scenarios/todo-prompt-thin.edn"
-   "test/seon/gym/scenarios/todo-multistep-tracking.edn"])
+   "test/seon/gym/scenarios/todo-multistep-tracking.edn"
+   "test/seon/gym/scenarios/x1-subscriptions-total-and-max.edn"
+   "test/seon/gym/scenarios/x3-expense-reuse-and-category-total.edn"
+   "test/seon/gym/scenarios/x12-narrow-question-no-over-retrieval.edn"])
 
 (defn- load-first [path]
   (first (:seon.gym/scenarios (gym/load-scenarios! {:seon.gym/path path}))))
@@ -898,6 +901,69 @@
                        (-> card :seon.gym.scorecard/judge-results first
                            :seon.gym.judge/justification)
                        "SKIPPED"))
+                 (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; JUDGE CALIBRATION wiring (free, mocked). Before trusting the judge as
+;; the PRIMARY signal, the harness proves it DISCRIMINATES good from bad
+;; for the same rubric+reference. These tests prove the calibration
+;; primitive's wiring with a mock; the real DeepSeek discrimination
+;; evidence is the paid-tier calibration (seon.gym.paid-test).
+;; ---------------------------------------------------------------------------
+
+(def ^:private calib-base
+  {:seon.gym.calib/question  "Where does seon validate a value's type at transact?"
+   :seon.gym.calib/rubric    "PASS only if the reply names per-value Malli validation in src/seon/db/internal.cljs and the {:seon.db/ok? false ...} error VALUE. FAIL on a fabricated file or a thrown-to-caller claim."
+   :seon.gym.calib/reference "validate-entity-values! in src/seon/db/internal.cljs Malli-validates each value; seon.db/transact! catches and returns {:seon.db/ok? false :seon.db/error ...} — the caller's promise resolves, never throws."
+   :seon.gym.calib/good-reply "seon.db/transact! runs validate-entity-values! (src/seon/db/internal.cljs), which Malli-checks every value; a non-conforming value comes back as the VALUE {:seon.db/ok? false :seon.db/error ...} — the caller never sees a throw."
+   :seon.gym.calib/bad-reply  "transact! throws a Java SchemaException from src/seon/validation/core.clj straight to the caller, who must wrap it in try/catch."})
+
+(deftest judge-calibration-discriminates-good-from-bad-with-mock
+  ;; A discriminating mock (PASS the good reply, FAIL the bad) → the
+  ;; calibration reports discriminates? true and the two verdicts split.
+  (async done
+    (let [judge-fn (fn [ctx]
+                     (js/Promise.resolve
+                       {:text (if (str/includes? ctx "never sees a throw")
+                                "{\"pass\": true, \"score\": 92, \"justification\": \"names internal.cljs + the error value\"}"
+                                "{\"pass\": false, \"score\": 8, \"justification\": \"fabricated file + caller-facing throw\"}")}))]
+      (-> (gym/calibrate-judge! (assoc calib-base :seon.gym/judge-fn judge-fn))
+          (.then (fn [resp]
+                   (is (m/validate :seon.gym.calib/response resp))
+                   (is (true? (:seon.gym.calib/discriminates? resp))
+                       "good PASS ∧ bad FAIL = a discriminating judge")
+                   (is (true? (get-in resp [:seon.gym.calib/good
+                                            :seon.gym.judge/pass?])))
+                   (is (false? (get-in resp [:seon.gym.calib/bad
+                                             :seon.gym.judge/pass?])))
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest judge-calibration-flags-a-nondiscriminating-judge
+  ;; FALSIFICATION: a rubber-stamp judge that PASSES even the fabricated
+  ;; reply is NOT a trustworthy signal — discriminates? must be false.
+  (async done
+    (let [yes-judge (fn [_ctx]
+                      (js/Promise.resolve
+                        {:text "{\"pass\": true, \"score\": 75, \"justification\": \"looks fine\"}"}))]
+      (-> (gym/calibrate-judge! (assoc calib-base :seon.gym/judge-fn yes-judge))
+          (.then (fn [resp]
+                   (is (false? (:seon.gym.calib/discriminates? resp))
+                       "a judge that passes the BAD reply fails calibration")
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest judge-calibration-without-judge-is-an-explicit-skip
+  ;; No judge-fn + no allow-paid? → both verdicts are the explicit SKIP
+  ;; fail, so discriminates? is false (never a silent pass).
+  (async done
+    (-> (gym/calibrate-judge! calib-base)
+        (.then (fn [resp]
+                 (is (false? (:seon.gym.calib/discriminates? resp)))
+                 (is (str/includes? (get-in resp [:seon.gym.calib/good
+                                                  :seon.gym.judge/justification])
+                                    "SKIPPED"))
                  (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
