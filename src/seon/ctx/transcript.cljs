@@ -10,8 +10,9 @@
    NOT containers — there are no per-turn headers; the only structural
    marker is the session-resume boundary, interleaved by time.
 
-   It reads as an eval'able REPL transcript: `;;` comments + forms +
-   `;;=>`-commented results + `;;;` runtime-structure lines + a live `ns=>`
+   It reads as an eval'able REPL transcript: `;` comments + forms +
+   `;=>`-commented results + `;;;`-bracketed sections / `;;; ◀`/`;;; ▶`
+   message lines + a live `ns=>`
    readline. Re-evaluating the forms (comments pass through) reproduces the
    agent's state — the context IS a replayable program (the north star).
 
@@ -52,7 +53,7 @@
 ;; ------------------------------------------------------------
 ;; Masthead — the positive-framing opener. Rendered every turn as the
 ;; FIRST lines of the transcript. It teaches the live-and-current REPL by
-;; LEADING WITH WHAT TO DO (never a `don't write ;;=>` prohibition — a
+;; LEADING WITH WHAT TO DO (never a `don't write ;=>` prohibition — a
 ;; negative example primes the very mimicry it forbids, standing owner
 ;; rule). The ns slot is the only volatile byte; it rides the masthead so
 ;; the agent sees its own session name.
@@ -61,29 +62,28 @@
 (defn masthead
   "The transcript masthead for namespace label `ns-str` — the
    positive-framing opener, rendered every turn. Single source: the agent
-   never sees a `;;=>` shape it isn't told the RUNTIME writes, so there is
+   never sees a `;=>` shape it isn't told the RUNTIME writes, so there is
    nothing in its own output to mimic. LEADS with what to do; reinforces
    the REPL is LIVE and ALWAYS CURRENT (re-derived from the DB every turn,
    never a stale replay)."
   [ns-str]
-  (let [bar (apply str (repeat 24 "═"))]
-    (str ";;; " bar " seon · " ns-str " · live REPL " bar "\n"
-         ";;; This is your live REPL — a Clojure session backed by the database.\n"
-         ";;; The history below is real and ALWAYS current: it re-derives from the\n"
-         ";;; DB every turn, so it is never stale. It is a flat, time-ordered log of\n"
-         ";;; events — your messages and your evals, oldest-first. You write Clojure\n"
-         ";;; forms and ;; comments. After each form the runtime evaluates it and\n"
-         ";;; shows the value on the next line as `;;=> …` — that is how your results\n"
-         ";;; arrive, on the turn after you write the form. So just write the form;\n"
-         ";;; read its `;;=>` next turn. Append below.")))
+  (str "; seon · " ns-str " · live REPL\n"
+       "; This is your live REPL — a Clojure session backed by the database.\n"
+       "; The history below is real and ALWAYS current: it re-derives from the\n"
+       "; DB every turn, so it is never stale. It is a flat, time-ordered log of\n"
+       "; events — your messages and your evals, oldest-first. You write Clojure\n"
+       "; forms and ; comments. After each form the runtime evaluates it and\n"
+       "; shows the value on the next line as `;=> …` — that is how your results\n"
+       "; arrive, on the turn after you write the form. So just write the form;\n"
+       "; read its `;=>` next turn. Append below."))
 
 (def resume-marker-line
   "The session-resume boundary: rendered ONCE per resume, between the
-   last event of a previous process and the first of the next, as a `;;;`
-   runtime-structure comment. Everything above it ran in a process that no
-   longer exists — its `result/<id>` vars are not dereferenceable
+   last event of a previous process and the first of the next, as a single
+   `;` runtime-structure comment. Everything above it ran in a process that
+   no longer exists — its `result/<id>` vars are not dereferenceable
    (re-run a form to recompute a value)."
-  ";;; ── session resumed — the events above ran in a previous process; their result/<id> vars are gone (re-run a form to recompute) ──")
+  "; session resumed — the events above ran in a previous process; their result/<id> vars are gone (re-run a form to recompute)")
 
 ;; ------------------------------------------------------------
 ;; Time — every displayed event time derives from the event's FIXED
@@ -264,7 +264,7 @@
         (if (= :eval (::kind ev))
           (let [ek (:seon.eval/ns (::entity ev))
                 marker (when (and (some? ek) (not= prev-ns ek))
-                         (str ";; in " (name ek)))]
+                         (str "; in " (name ek)))]
             [(conj out (assoc ev ::ns-marker marker)) (or ek prev-ns)])
           [(conj out ev) prev-ns]))
       [[] ::none]
@@ -305,16 +305,16 @@
         steer
         (cond
           (>= loop-k (max 1 (- cap 2)))
-          (str ";;; loop " loop-k "/" cap " — you are near the per-loop cap. "
+          (str "; loop " loop-k "/" cap " — you are near the per-loop cap. "
                "Wrap up: (complete \"…\") to finish, or (wait \"note\") to "
                "park until the next message.\n")
           (>= loop-k (quot cap 2))
-          (str ";;; loop " loop-k "/" cap " — past halfway through this loop. "
+          (str "; loop " loop-k "/" cap " — past halfway through this loop. "
                "If you have what you need, (complete \"…\") or message the result.\n")
           :else "")]
     (str steer
-         ";;; ── " ns-str " · turn " n-turns " · loop " loop-k "/" cap
-         " · " (name (or state :idle)) " · " now " · agent " id " ──\n"
+         "; " ns-str " · turn " n-turns " · loop " loop-k "/" cap
+         " · " (name (or state :idle)) " · " now " · agent " id "\n"
          ns-str "=> ")))
 
 (defn- ordered-events

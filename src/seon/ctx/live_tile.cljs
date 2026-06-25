@@ -11,7 +11,7 @@
    Self-contained: no spine read API, just the tile renderer +
    wired-content provenance."
   (:require
-    [clojure.string :as str]
+    [seon.ctx :as ctx]
     [seon.db :as db]
     [seon.render :as render]
     [seon.render.live-tile :as live-tile]))
@@ -82,18 +82,17 @@
             wired (live-tile/wired-content {:seon.render/entity ent})
             ;; The body is a render twin (:ai text, or hiccup pr-str, or
             ;; an error envelope) — arbitrary content the human's tile
-            ;; shows. It rides this comment-block as `;;` lines so the
-            ;; whole section reads as eval'able Clojure (the context IS one
-            ;; live REPL); the agent reads the value, it never evaluates.
-            body-comment (->> (str/split-lines body)
-                              (map #(str ";; " %))
-                              (str/join "\n"))]
-        (str ";; Your live tile — what your human currently sees (as-of this\n"
-             ";; turn's render; the human's view live-updates between turns).\n"
-             ";; Wired: " (live-tile/wired-label wired) "\n"
-             ";;\n"
+            ;; shows. It rides this comment-block as `;` lines (via
+            ;; [[seon.ctx/quote-lines]]) so the whole section reads as
+            ;; eval'able Clojure (the context IS one live REPL); the agent
+            ;; reads the value, it never evaluates.
+            body-comment (ctx/quote-lines body)]
+        (str "; Your live tile — what your human currently sees (as-of this\n"
+             "; turn's render; the human's view live-updates between turns).\n"
+             "; Wired: " (live-tile/wired-label wired) "\n"
+             ";\n"
              body-comment "\n"
-             ";;\n"
-             ";; To change it: redefine the wired fn, or transact a new value\n"
-             ";; (a qualified fn symbol or literal hiccup) onto\n"
-             ";; :seon.render.live-tile/content on your agent entity.")))))
+             ";\n"
+             "; To change it: redefine the wired fn, or transact a new value\n"
+             "; (a qualified fn symbol or literal hiccup) onto\n"
+             "; :seon.render.live-tile/content on your agent entity.")))))

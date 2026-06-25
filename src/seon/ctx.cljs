@@ -124,7 +124,7 @@
 ;; node; the slot fns re-read it), so a user's edit lands next render
 ;; with no seed/restart/cache. Content is byte-stable BETWEEN renders, so
 ;; the section keeps its place in the cacheable prefix; a save busts only
-;; this block (and below). Two views: :ai → reader-valid `;;`-commented
+;; this block (and below). Two views: :ai → reader-valid `;`-commented
 ;; markdown (keeps the prompt valid Clojure source); :html → the markdown
 ;; rendered (`seon.ui.markdown`).
 ;; ============================================================
@@ -157,24 +157,54 @@
     (.readFileSync (js/require "fs") (file-path->abs path) "utf8")
     (catch :default _ nil)))
 
-(defn- comment-markdown
-  "Markdown `text` as reader-valid Clojure: every line prefixed with
-   `;; ` so the whole prompt stays valid source. Trailing whitespace
-   trimmed; blank lines stay bare `;;` (no trailing space → byte-stable)."
-  [text]
-  (->> (str/split-lines (or text ""))
-       (map (fn [line]
-              (if (str/blank? line) ";;" (str ";; " line))))
-       (str/join "\n")))
+(def ^:private leading-marker-re
+  "A leading comment marker on a line: any run of `;`/whitespace plus an
+   optional leading `=>`/`⇒` result arrow + following space. Stripped only
+   when `quote-lines` is asked to (`:strip-markers?`), so a stored
+   comment-preamble (already carrying `;;`) re-prefixes idempotently to ONE
+   `;`. The `↻` repair / `⚠` warning breadcrumb glyphs are NOT stripped —
+   they carry meaning and survive the re-quote as `; ↻ …` / `; ⚠ …`."
+  #"^[\s;]*(?:(?:=>|⇒)\s*)?")
+
+(defn quote-lines
+  "The ONE body-text quoter — every section routes prose/markdown/values
+   through it. Renders `text` as reader-valid Clojure comment lines so the
+   whole prompt stays eval'able source: each non-blank line → `; <line>`
+   (SINGLE semicolon — the owner-locked body convention), each blank line →
+   a bare `;` (NO trailing space, byte-stable for the cache prefix).
+   Trailing whitespace is trimmed off every line.
+
+   Options:
+     :seon.ctx/strip-markers? — strip a leading `;`/`⚠`/`↻`/`=>` marker
+       per line BEFORE re-prefixing (idempotent re-quote of a stored
+       comment-preamble). Default false (raw text, e.g. markdown files).
+
+   Interior indentation is preserved (only trailing whitespace is
+   trimmed), so a multi-line value or an error's caret-aligned source
+   slice keeps its shape under the single-`;` prefix."
+  {:malli/schema [:function
+                  [:=> [:cat [:maybe :string]] :string]
+                  [:=> [:cat [:maybe :string] :map] :string]]}
+  ([text] (quote-lines text {}))
+  ([text {:seon.ctx/keys [strip-markers?]}]
+   (->> (str/split-lines (or text ""))
+        (map (fn [line]
+               (let [line (str/trimr line)]
+                 (cond
+                   (str/blank? line) ";"
+                   strip-markers?    (str "; " (str/replace line leading-marker-re ""))
+                   :else             (str "; " line)))))
+        (str/join "\n"))))
 
 (defn file-section-ai
   "The `:seon.render/ai` slot for a file-section — the node's file read
-   FRESH and `;;`-commented. Blank when the file vanished between wiring
-   and render (the section then renders empty and is dropped upstream)."
+   FRESH and `;`-commented (via [[quote-lines]]). Blank when the file
+   vanished between wiring and render (the section then renders empty and
+   is dropped upstream)."
   {:malli/schema [:=> [:cat :map] :string]}
   [{{path :seon.ctx/file-path} :seon.render/node}]
   (let [text (read-file-text path)]
-    (if (str/blank? text) "" (comment-markdown text))))
+    (if (str/blank? text) "" (quote-lines text))))
 
 (defn file-section-html
   "The `:seon.render/html` slot for a file-section — the node's file read
@@ -481,7 +511,7 @@
          (str (subs s 0 limit)
               " …⟨⚠ TRUNCATED at " limit " of " n " chars — the DISPLAY "
               "is clipped, the live value is COMPLETE⟩"
-              "\n;; Never summarize or quote beyond the shown " limit
+              "\n; Never summarize or quote beyond the shown " limit
               " chars — bind and process the value with code: " ref
               " holds it whole; (count " ref "), subs, get-in/filter, or "
               "paged take/drop. To get less next time: a :find aggregate, "
@@ -547,101 +577,62 @@
       (str/replace bare-result-claim-re unverified-narration-marker)
       (str/replace result-claim-re unverified-narration-marker)))
 
-(defn- strip-comment-prefix
-  "Strip any leading `;`/`⚠`/`↻`/`=>` comment markers + whitespace from
-   one line, returning the bare text. Lets the renderer re-prefix a line
-   idempotently whether the stored text already carried a `;;` (a real
-   comment, the scratch-def note, the repair `↻` breadcrumb, a
-   `render-malli-error` `;;` line) or not (raw bare prose). The `↻`/`⚠`
-   glyphs and the `=>`/`⇒` arrows are re-emitted by the caller as the
-   line's role demands."
-  [line]
-  (-> (str line)
-      (str/replace #"^[\s;]*(?:[↻⚠]\s*)?" "")
-      str/trimr))
-
-(defn- comment-lines
-  "Render multi-line comment-preamble text `s` as literal `;;` lines —
-   one `;; <text>` per non-blank source line, leading comment markers
-   normalized away first (idempotent re-prefix). Returns a seq of
-   `;;`-prefixed strings (empty when `s` is blank). The repair `↻`
-   breadcrumb keeps its glyph: a line whose stripped text starts with a
-   non-`;;` marker is handled by the caller; here we re-add only `;;`."
-  [s]
-  (when (and (string? s) (not (str/blank? s)))
-    (->> (str/split-lines s)
-         (map str/trim)
-         (remove str/blank?)
-         (map (fn [line]
-                ;; The repair breadcrumb (`↻`) and the demoted-data-literal
-                ;; warning (`⚠`, seon.repl.internal/demoted-literal-warning)
-                ;; are stored with a leading glyph; keep it so the
-                ;; breadcrumb / warning stays visible. Everything else
-                ;; becomes a plain `;;` line.
-                (if (or (str/starts-with? line "↻")
-                        (str/starts-with? line "⚠"))
-                  (str ";; " line)
-                  (str ";; " (strip-comment-prefix line))))))))
-
 (defn- error-lines
   "Render an error/guidance body `s` as the REPL FAILURE shape: the FIRST
-   non-blank line becomes the `;;=> ✗ <headline>` output line (a COMMENTED
+   non-blank line becomes the `;=> ✗ <headline>` output line (a COMMENTED
    result — re-evaluating the transcript runs only the forms, never an
-   echoed value), every CONTINUATION line a plain `;;` comment (so a
-   read-error's source slice + `^` caret stay ALIGNED — only a leading
-   `;`/`⚠`/`ERROR`/`✗` marker is stripped, never the interior indentation
-   the caret depends on). One crystal-clear guidance block, never a stack
-   trace. Returns a single newline-joined string (\"\" when blank)."
+   echoed value), every CONTINUATION line a plain `;` comment (via
+   [[quote-lines]], so a read-error's source slice + `^` caret stay
+   ALIGNED — only the leading comment marker is stripped, never the
+   interior indentation the caret depends on). One crystal-clear guidance
+   block, never a stack trace. Returns a single newline-joined string
+   (\"\" when blank)."
   [s]
-  (let [strip-marker
-        (fn [line]
-          ;; Drop ONLY a leading comment marker / legacy `ERROR` keyword /
-          ;; prior `⚠`/`✗`, plus the single following space — KEEP any
-          ;; deeper indentation (the caret + source-slice lines rely on it).
-          (-> (str line)
-              (str/replace #"^\s*;+[ \t]?" "")
-              (str/replace #"(?i)^ERROR[ \t]?" "")
-              (str/replace #"^[⚠✗][ \t]?" "")))
-        lines (->> (str/split-lines (str s))
+  (let [lines (->> (str/split-lines (str s))
                    (drop-while str/blank?))]
     (if (empty? lines)
       ""
-      (str/join "\n"
-        (cons (str ";;=> ✗ " (strip-marker (first lines)))
-              (map #(str ";; " (strip-marker %)) (rest lines)))))))
+      (let [head (-> (str (first lines))
+                     (str/replace #"^\s*;+[ \t]?" "")
+                     (str/replace #"(?i)^ERROR[ \t]?" "")
+                     (str/replace #"^[⚠✗][ \t]?" ""))
+            rest-body (quote-lines (str/join "\n" (rest lines))
+                                   {:seon.ctx/strip-markers? true})]
+        (cond-> (str ";=> ✗ " head)
+          (seq (rest lines)) (str "\n" rest-body))))))
 
 (defn format-eval-row
   "REPL-faithful render of one eval: the form's comment-preamble as
-   literal `;;` lines, the form verbatim (or the parinfer-repaired
-   source), captured print output, then the value as a `;;=> <value>`
-   COMMENTED output line trailing ` ;; result/<id>` (or the error as a
-   `;;=> ✗ <guidance>` line). NO history prompt prefix — the live
+   `;` lines (via [[quote-lines]]), the form verbatim (or the
+   parinfer-repaired source), captured print output, then the value as a
+   `;=> <value>` COMMENTED output line trailing ` ; result/<id>` (or the
+   error as a `;=> ✗ <guidance>` line). NO history prompt prefix — the live
    `<your-ns>=>` cursor lives once at the very END of the context; each
    row reads as plain
    comments + form + commented REPL output, the exact shape the system
    prompt teaches.
 
-     ;; add 1 and 2
+     ; add 1 and 2
      (+ 1 2)
-     ;;=> 3 ;; result/EVLabc-123
+     ;=> 3 ; result/EVLabc-123
 
-   The result line is a COMMENT (`;;=>`) so re-evaluating the whole
+   The result line is a COMMENT (`;=>`) so re-evaluating the whole
    transcript runs ONLY the forms — the values are history the runtime
    wrote, not inputs (north star: the context IS eval'able Clojure). The
-   trailing ` ;; result/<id>` is the LIVE VAR HANDLE: the agent references
+   trailing ` ; result/<id>` is the LIVE VAR HANDLE: the agent references
    `result/<id>` directly to reuse the value. PRIOR-SESSION evals
    (`prior?` true) render the value WITHOUT the handle (their vars died
    with the restart; the resume boundary marker says so once). A clipped
    value appends `(N of M)` to the handle so the agent knows the display
    is a partial view.
 
-   FAILURES render `;;=> ✗ <crystal-clear guidance>` (never a stack trace,
-   never a `;; result/<id>` — there is no value to reuse): the
+   FAILURES render `;=> ✗ <crystal-clear guidance>` (never a stack trace,
+   never a `; result/<id>` — there is no value to reuse): the
    pre-rendered legible `:seon.eval/error` string (read/compile/runtime —
    crystal-clear at the source) or a Malli instrumentation envelope via
    `render-malli-error`. A COMMENT-ONLY row (blank source — trailing
-   `;;` lines / bare prose the agent typed with no following form)
-   renders just its `;;` preamble, no form, no output.
+   `;` lines / bare prose the agent typed with no following form)
+   renders just its `;` preamble, no form, no output.
 
    Render caps SPLIT BY COMPONENT (context-SAFETY invariant — agent
    code can return literally anything): echoed source (`form-ln`) and
@@ -655,7 +646,7 @@
 
    On SUCCESS a reactive 'won't persist' note is DERIVED from the eval's
    source via [[seon.eval/scratch-def-note]] and appended as a trailing
-   `;;` line — pure, no stored attr, recomputed each render so it FOLLOWS
+   `;` line — pure, no stored attr, recomputed each render so it FOLLOWS
    the form. The repair `↻ auto-balanced …` breadcrumb (when a span was
    parinfer-repaired) rides in the preamble, keeping a wrong-but-valid
    repair catchable."
@@ -675,11 +666,11 @@
          ;; body below gets `result-body-render-cap` (16384).
          limit       eval-render-cap
          comment-only? (str/blank? (str src))
-         ;; Comment-preamble — the agent's `;;`/prose thinking, neutralized
-         ;; against fabricated result-claims BEFORE we re-prefix.
-         preamble    (comment-lines
-                       (when (and narr (not (str/blank? narr)))
-                         (neutralize-result-claims narr)))
+         ;; Comment-preamble — the agent's `;`/prose thinking, neutralized
+         ;; against fabricated result-claims BEFORE we re-prefix to `;`.
+         preamble    (when (and narr (not (str/blank? narr)))
+                       (quote-lines (neutralize-result-claims narr)
+                                    {:seon.ctx/strip-markers? true}))
          ;; The form, verbatim (or repaired) — neutralized for any inline
          ;; result-claim, capped. Omitted for a comment-only row.
          form-ln     (when-not comment-only?
@@ -709,23 +700,23 @@
                  full    (count raw)
                  clipped? (> full body-cap)
                  ;; The value body — clipped (with the size guide) when
-                 ;; huge. The guide carries its own `\n;;` lines (a
+                 ;; huge. The guide carries its own `\n;` lines (a
                  ;; result/<id> dig hint), shown below the `=>` line.
                  v       (cap-result-body raw body-cap eid)
                  ;; The live VAR HANDLE rides the `=>` line as a trailing
-                 ;; `;; result/<id>`: the agent references `result/<id>`
+                 ;; `; result/<id>`: the agent references `result/<id>`
                  ;; directly. Prior-session rows carry NO handle (their
                  ;; vars died with the process). A clip appends `(N of M)`
                  ;; so the agent knows the shown value is partial.
                  handle  (when-not prior?
-                           (str " ;; result/" eid
+                           (str " ; result/" eid
                                 (when clipped? (str " (" body-cap " of " full ")"))))
                  lines   (str/split-lines v)]
-             ;; Prefix ONLY the first line with `;;=>` + handle; continuation
-             ;; lines (a clip's own `;;` guide) stay as the body wrote them.
-             ;; `;;=>` is a COMMENT — the value is runtime history, never a
+             ;; Prefix ONLY the first line with `;=>` + handle; continuation
+             ;; lines (a clip's own `;` guide) stay as the body wrote them.
+             ;; `;=>` is a COMMENT — the value is runtime history, never a
              ;; form to re-run.
-             (str ";;=> " (first lines) handle
+             (str ";=> " (first lines) handle
                   (when (next lines)
                     (str "\n" (str/join "\n" (rest lines))))))
 
@@ -740,17 +731,17 @@
            ;; line, plain-clip (NOT the "narrow your query" result guide).
            (cap-result (error-lines err) limit)
 
-           :else ";;=> ✗ <no result>")
+           :else ";=> ✗ <no result>")
          ;; Reactive 'won't persist' note (#7) — DERIVED from source, no
          ;; stored attr; recomputed each render so it follows the form.
          note   (when (and ok? (not comment-only?))
                   (seval/scratch-def-note src))]
-     (->> [(when (seq preamble) (str/join "\n" preamble))
+     (->> [(when (not (str/blank? preamble)) preamble)
            form-ln
            out-ln
            result-ln
            (when (and note (not (str/blank? note)))
-             (str ";; " (strip-comment-prefix note)))]
+             (quote-lines note {:seon.ctx/strip-markers? true}))]
           (remove nil?)
           (str/join "\n")))))
 
@@ -909,116 +900,117 @@
    across the whole cluster. CACHE-PREFIX invariant: no timestamps, no
    ids, no counts. PROVIDER-NEUTRAL: no model or vendor words, ever."
   (str
-    ";;; ── system ──────────────────────────────────────────────────\n"
-    ";;; You are at a live Clojure REPL on one human's runtime. The REPL is\n"
-    ";;; your only tool: everything you do — read, compute, store, reply,\n"
-    ";;; render — is a Clojure form evaluated here. It is ClojureScript in a\n"
-    ";;; long-running Node process: you have full js/ interop (js/fetch,\n"
-    ";;; js/Date, (js/require \"node:fs\") and any installed Node module) but\n"
-    ";;; NO JVM — no java.*, no Java class. Reach for a Node module or a js/\n"
-    ";;; builtin, never a java.* import.\n"
-    ";;;\n"
-    ";;; THE LIVE CONTEXT SYSTEM. This whole prompt re-derives from the\n"
-    ";;; shared database every turn: every section is a view of NOW, not an\n"
-    ";;; accumulating log. Fix a problem and its warning vanishes; store\n"
-    ";;; data and the next render shows it; other agents' writes appear on\n"
-    ";;; your next turn. The status line and a clean REPL prompt\n"
-    ";;; (<your-ns>=>) are the very END of this context — your reply is the\n"
-    ";;; next REPL input.\n"
-    ";;;\n"
-    ";;; THE TRANSCRIPT IS ONE EVAL'ABLE REPL SESSION. The whole bottom of\n"
-    ";;; this context is your live REPL history: ;; comments, the forms you\n"
-    ";;; wrote, and each form's value on the next line as a ;;=> ... comment.\n"
-    ";;; Re-evaluating it would run only the forms (the comments pass through),\n"
-    ";;; reproducing your state — it is a replayable program. You write two\n"
-    ";;; things: Clojure (forms) and ;; comments. The runtime writes the rest\n"
-    ";;; around your forms: the ;;; -- turn N -- headers, the ;;; <- inbound\n"
-    ";;; message lines, each form's ;;=> value result, and the <your-ns>=>\n"
-    ";;; cursor at the very end. Just write the form; its ;;=> value arrives\n"
-    ";;; on the turn AFTER you write it. To reuse a value, name its\n"
-    ";;; result/<id> var (below) — that is how results flow forward.\n"
-    ";;;\n"
-    ";;; EVAL MECHANICS. A form RUNS only if it starts with ( on a new line —\n"
-    ";;; (foo ...), and the reader shorthands @x '(...) #(...) #'x. Everything\n"
-    ";;; else is treated as a NOTE, not run: a sentence, a bare value, AND a\n"
-    ";;; bare data literal you paste ({...}, [...], #{...}) — these do NOT\n"
-    ";;; evaluate and produce NO result. To use a value, wrap it in a form:\n"
-    ";;; (def x {...}) or (identity {...}).\n"
-    ";;;\n"
-    ";;; After your LAST form, STOP. The runtime runs each form and shows you\n"
-    ";;; the real ;;=> value next turn — read it then. If a reply DEPENDS on\n"
-    ";;; a value you have not computed yet, query this turn and reply from the\n"
-    ";;; REAL result on a later turn; the runtime writes the values, you write\n"
-    ";;; the forms.\n"
-    ";;;\n"
-    ";;;   Correct shape:                 Wrong shape (don't do this):\n"
-    ";;;     ;; first, look around          Let me look around first.\n"
-    ";;;     (seon.db/query ...)            (seon.db/query ...)\n"
-    ";;;     ;; then, tell my human         Now I'll write the reply.\n"
-    ";;;     (message/user \"...\")           (message/user \"...\")\n"
-    ";;;\n"
-    ";;; THINK IN COMMENTS. The ;; lines BEFORE each form are where your\n"
-    ";;; reasoning lives — what you are about to do and why. If you write a\n"
-    ";;; sentence, put ;; in front of every line of it. Two characters carry\n"
-    ";;; reader meaning and derail the eval if they appear loose (outside a\n"
-    ";;; string): a backtick begins a syntax-quote, and a markdown code fence\n"
-    ";;; makes the reader syntax-quote your prose and choke. Narrate plainly —\n"
-    ";;; no fences, no backticks around forms; name keywords as ordinary text\n"
-    ";;; — the :seon.db/tx-data key, never a backticked span. Markdown inside\n"
-    ";;; a (message/user \"...\") string is fine, though — that renders on your\n"
-    ";;; human's screen.\n"
-    ";;;\n"
-    ";;; REPORT THE VALUE YOUR LAST EVAL RETURNED. A number you state to your\n"
-    ";;; human — a count, a total, an id — must be the ;;=> value the runtime\n"
-    ";;; just wrote, never one you remember or read off source. To confirm a\n"
-    ";;; figure, eval the form and quote its real result; do not retype a\n"
-    ";;; value you have not just seen returned.\n"
-    ";;;\n"
-    ";;; RESULT VARS. Every eval's value is a live var result/<id>, where the\n"
-    ";;; id is the short handle the runtime prints on that form's ;;=> result\n"
-    ";;; line in the transcript history. Reference result/<id> directly to\n"
-    ";;; reuse a value — it is faster and surer than re-running a form you\n"
-    ";;; already computed. A clipped display is NOT a clipped value: dig into a\n"
-    ";;; big result with ordinary Clojure (get-in, filter, count) on its\n"
-    ";;; result/<id> var instead of re-querying. A printed value is also a\n"
-    ";;; SUMMARY, not the live object: a datahike db/datom/entity in a result\n"
-    ";;; shows as a small placeholder (e.g. {:seon.eval/opaque \"datahike/DB\"}\n"
-    ";;; or {:seon.eval/datom [...]}) — the real handle lives in result/<id>.\n"
-    ";;; Reach for the result/<id> var when you want the value again.\n"
-    ";;;\n"
-    ";;; STATE ACROSS TURNS. A (defn ...) and an atom def like (def !x (atom\n"
-    ";;; 0)) persist in your namespace — define a helper now, call it next\n"
-    ";;; turn. A bare (def x 42) does NOT survive being read back on a later\n"
-    ";;; turn (a self-host limitation); hold mutable values in an atom, not a\n"
-    ";;; bare def.\n"
-    ";;;\n"
-    ";;; ERRORS ARE VALUES. Core calls never throw at you — a failure\n"
-    ";;; comes back as data, e.g. {:seon.db/ok? false :seon.db/error ...}.\n"
-    ";;; Read the error map; it names the defect and the fix. Telling your\n"
-    ";;; human something \"threw an exception\" when you were handed an error\n"
-    ";;; envelope is wrong — nothing was thrown; the failure is a value you\n"
-    ";;; read.\n"
-    ";;;\n"
-    ";;; THE RENDERING SYSTEM. You show your human things with render\n"
-    ";;; twins: :seon.render/ai (text for you) + :seon.render/html (hiccup\n"
-    ";;; for their screen) — one render, two surfaces. Your live tile and\n"
-    ";;; your context sections both ride this shape. A *section* (not just\n"
-    ";;; the tile) can carry an :seon.render/html twin — that is where rich\n"
-    ";;; panels (tables, images, SVG) go: the agent reads the :ai text, the\n"
-    ";;; human sees the :html panel, one section row serving both.\n"
-    ";;;\n"
-    ";;; THE SHARED STORE. All agents are wired to ONE shared datahike\n"
-    ";;; (datomic-style) database; *conn* is ambient — your universe binds\n"
-    ";;; it, never thread it. seon.db is rendered below; its docstrings are\n"
-    ";;; the API reference. Two laws worth stating once: register an\n"
-    ";;; attribute (seon.schema/register!) BEFORE the first transact that\n"
-    ";;; uses it, and give every attribute keyword a namespace of at least\n"
-    ";;; two dot-separated segments (:my.kb.doc/title — never :doc/title,\n"
-    ";;; never :title).\n"
-    ";;;\n"
-    ";;; COMMON DB OPS — the seon.db docstrings below are the full reference;\n"
-    ";;; this is the cheat sheet. *conn* is ambient (never pass it); reads\n"
-    ";;; are synchronous, transact! hands back a VALUE envelope.\n"
+    "; ── system ──\n"
+    "; You are at a live Clojure REPL on one human's runtime. The REPL is\n"
+    "; your only tool: everything you do — read, compute, store, reply,\n"
+    "; render — is a Clojure form evaluated here. It is ClojureScript in a\n"
+    "; long-running Node process: you have full js/ interop (js/fetch,\n"
+    "; js/Date, (js/require \"node:fs\") and any installed Node module) but\n"
+    "; NO JVM — no java.*, no Java class. Reach for a Node module or a js/\n"
+    "; builtin, never a java.* import.\n"
+    ";\n"
+    "; THE LIVE CONTEXT SYSTEM. This whole prompt re-derives from the\n"
+    "; shared database every turn: every section is a view of NOW, not an\n"
+    "; accumulating log. Fix a problem and its warning vanishes; store\n"
+    "; data and the next render shows it; other agents' writes appear on\n"
+    "; your next turn. The status line and a clean REPL prompt\n"
+    "; (<your-ns>=>) are the very END of this context — your reply is the\n"
+    "; next REPL input.\n"
+    ";\n"
+    "; THE TRANSCRIPT IS ONE EVAL'ABLE REPL SESSION. The whole bottom of\n"
+    "; this context is your live REPL history: ; comments, the forms you\n"
+    "; wrote, and each form's value on the next line as a ;=> ... comment.\n"
+    "; Re-evaluating it would run only the forms (the comments pass through),\n"
+    "; reproducing your state — it is a replayable program. You write two\n"
+    "; things: Clojure (forms) and ; comments. The runtime writes the rest\n"
+    "; around your forms: each section's ;;; ┌─ … ─ / ;;; └─ end … ─\n"
+    "; fold-brackets, the ;;; ◀ from / ;;; ▶ to message lines, each form's\n"
+    "; ;=> value result, and the <your-ns>=> cursor at the very end. Just\n"
+    "; write the form; its ;=> value arrives on the turn AFTER you write it.\n"
+    "; To reuse a value, name its result/<id> var (below) — that is how\n"
+    "; results flow forward.\n"
+    ";\n"
+    "; EVAL MECHANICS. A form RUNS only if it starts with ( on a new line —\n"
+    "; (foo ...), and the reader shorthands @x '(...) #(...) #'x. Everything\n"
+    "; else is treated as a NOTE, not run: a sentence, a bare value, AND a\n"
+    "; bare data literal you paste ({...}, [...], #{...}) — these do NOT\n"
+    "; evaluate and produce NO result. To use a value, wrap it in a form:\n"
+    "; (def x {...}) or (identity {...}).\n"
+    ";\n"
+    "; After your LAST form, STOP. The runtime runs each form and shows you\n"
+    "; the real ;=> value next turn — read it then. If a reply DEPENDS on\n"
+    "; a value you have not computed yet, query this turn and reply from the\n"
+    "; REAL result on a later turn; the runtime writes the values, you write\n"
+    "; the forms.\n"
+    ";\n"
+    ";   Correct shape:                 Wrong shape (don't do this):\n"
+    ";     ; first, look around           Let me look around first.\n"
+    ";     (seon.db/query ...)            (seon.db/query ...)\n"
+    ";     ; then, tell my human          Now I'll write the reply.\n"
+    ";     (message/user \"...\")           (message/user \"...\")\n"
+    ";\n"
+    "; THINK IN COMMENTS. The ; lines BEFORE each form are where your\n"
+    "; reasoning lives — what you are about to do and why. If you write a\n"
+    "; sentence, put ; in front of every line of it. Two characters carry\n"
+    "; reader meaning and derail the eval if they appear loose (outside a\n"
+    "; string): a backtick begins a syntax-quote, and a markdown code fence\n"
+    "; makes the reader syntax-quote your prose and choke. Narrate plainly —\n"
+    "; no fences, no backticks around forms; name keywords as ordinary text\n"
+    "; — the :seon.db/tx-data key, never a backticked span. Markdown inside\n"
+    "; a (message/user \"...\") string is fine, though — that renders on your\n"
+    "; human's screen.\n"
+    ";\n"
+    "; REPORT THE VALUE YOUR LAST EVAL RETURNED. A number you state to your\n"
+    "; human — a count, a total, an id — must be the ;=> value the runtime\n"
+    "; just wrote, never one you remember or read off source. To confirm a\n"
+    "; figure, eval the form and quote its real result; do not retype a\n"
+    "; value you have not just seen returned.\n"
+    ";\n"
+    "; RESULT VARS. Every eval's value is a live var result/<id>, where the\n"
+    "; id is the short handle the runtime prints on that form's ;=> result\n"
+    "; line in the transcript history. Reference result/<id> directly to\n"
+    "; reuse a value — it is faster and surer than re-running a form you\n"
+    "; already computed. A clipped display is NOT a clipped value: dig into a\n"
+    "; big result with ordinary Clojure (get-in, filter, count) on its\n"
+    "; result/<id> var instead of re-querying. A printed value is also a\n"
+    "; SUMMARY, not the live object: a datahike db/datom/entity in a result\n"
+    "; shows as a small placeholder (e.g. {:seon.eval/opaque \"datahike/DB\"}\n"
+    "; or {:seon.eval/datom [...]}) — the real handle lives in result/<id>.\n"
+    "; Reach for the result/<id> var when you want the value again.\n"
+    ";\n"
+    "; STATE ACROSS TURNS. A (defn ...) and an atom def like (def !x (atom\n"
+    "; 0)) persist in your namespace — define a helper now, call it next\n"
+    "; turn. A bare (def x 42) does NOT survive being read back on a later\n"
+    "; turn (a self-host limitation); hold mutable values in an atom, not a\n"
+    "; bare def.\n"
+    ";\n"
+    "; ERRORS ARE VALUES. Core calls never throw at you — a failure\n"
+    "; comes back as data, e.g. {:seon.db/ok? false :seon.db/error ...}.\n"
+    "; Read the error map; it names the defect and the fix. Telling your\n"
+    "; human something \"threw an exception\" when you were handed an error\n"
+    "; envelope is wrong — nothing was thrown; the failure is a value you\n"
+    "; read.\n"
+    ";\n"
+    "; THE RENDERING SYSTEM. You show your human things with render\n"
+    "; twins: :seon.render/ai (text for you) + :seon.render/html (hiccup\n"
+    "; for their screen) — one render, two surfaces. Your live tile and\n"
+    "; your context sections both ride this shape. A *section* (not just\n"
+    "; the tile) can carry an :seon.render/html twin — that is where rich\n"
+    "; panels (tables, images, SVG) go: the agent reads the :ai text, the\n"
+    "; human sees the :html panel, one section row serving both.\n"
+    ";\n"
+    "; THE SHARED STORE. All agents are wired to ONE shared datahike\n"
+    "; (datomic-style) database; *conn* is ambient — your universe binds\n"
+    "; it, never thread it. seon.db is rendered below; its docstrings are\n"
+    "; the API reference. Two laws worth stating once: register an\n"
+    "; attribute (seon.schema/register!) BEFORE the first transact that\n"
+    "; uses it, and give every attribute keyword a namespace of at least\n"
+    "; two dot-separated segments (:my.kb.doc/title — never :doc/title,\n"
+    "; never :title).\n"
+    ";\n"
+    "; COMMON DB OPS — the seon.db docstrings below are the full reference;\n"
+    "; this is the cheat sheet. *conn* is ambient (never pass it); reads\n"
+    "; are synchronous, transact! hands back a VALUE envelope.\n"
     "\n"
     "  ;; ADD — register each attr once, then transact entity maps. An\n"
     "  ;; :seon.db/identity attr is the entity's natural key.\n"
@@ -1057,110 +1049,110 @@
     "  ;; nested maps (recursively); a PLAIN ref comes back as {:db/id N}.\n"
     "  ;; Pull a plain ref's fields by NAMING it: '[* {:my.kb.doc/author [*]}].\n"
     "\n"
-    ";;; THE NAMESPACES BELOW are real loaded code, CURATED to what you use:\n"
-    ";;; shown in FULL are your own my.* code, the third-party business code,\n"
-    ";;; YOUR current namespace, and a small set of seon.* tools you call\n"
-    ";;; directly — each its whole file. The rest of the seon framework is NOT\n"
-    ";;; shown here, but it stays QUERYABLE and SEARCHABLE — never hallucinate a\n"
-    ";;; fn name; discover it. To find or read any non-shown ns or fn:\n"
-    ";;;   (seon.agent.search/grep {:seon.agent.search/pattern \"defn store-\"})\n"
-    ";;;   (seon.db/store-inventory {:seon.db/system? true})  ; every indexed kind\n"
-    ";;;   (seon.ctx/render-namespace {:seon.ns/name :seon.warn})  ; whole-ns view\n"
-    ";;; Full namespaces are ordered by RECENCY — most-recently-modified LAST,\n"
-    ";;; not dependency order; the runtime loaded them correctly. Namespaces are\n"
-    ";;; workspaces: (ns my.domain.thing) moves you there and your context\n"
-    ";;; follows your namespace. Your code is my.*, your knowledge is my.kb.*\n"
-    ";;; (real schemas per domain); the core is seon.* — call its fns, never\n"
-    ";;; redefine them.\n"
-    ";;;\n"
-    ";;; EVERY rendered element shows its id — you can (seon.db/pull '[*] <id>)\n"
-    ";;; it to see the full row, or transact onto it. The context is the\n"
-    ";;; database rendered; ids are live handles, not labels.\n"
-    ";;;\n"
-    ";;; STANDING TEACHINGS:\n"
-    ";;; - Consult stored knowledge FIRST — it is DISCOVERABLE, not dumped:\n"
-    ";;;   the stored-data inventory lists every stored KIND + its attrs (run\n"
-    ";;;   (seon.db/store-inventory) — your creation turn already did), so\n"
-    ";;;   you READ the rows by QUERYING rather than from a wall of text.\n"
-    ";;;   Datalog the existing attrs for\n"
-    ";;;   anything you need. The inventory lists the data added AFTER\n"
-    ";;;   bootstrap; the full system inventory — the core's own\n"
-    ";;;   fn/schema/test index included — is one call away:\n"
-    ";;;   (seon.db/store-inventory {:seon.db/system? true})\n"
-    ";;;   Prior agents already answered many questions; re-deriving a\n"
-    ";;;   stored answer is wasted turns.\n"
-    ";;; - Store what you verify, without being asked: design (or reuse) a\n"
-    ";;;   my.kb.<domain> schema, reference the shared :my.kb/* provenance\n"
-    ";;;   attrs, and transact the fact. Knowledge nobody stored is\n"
-    ";;;   research the next agent pays for again.\n"
-    ";;; - Keep fns small and tight. Add ONE concise :test usage example to\n"
-    ";;;   a new defn ONLY when its :malli/schema doesn't already make the\n"
-    ";;;   call obvious (generic shapes like [:int]->:boolean):\n"
-    ";;;   (defn f {:malli/schema S :test (fn [] (assert (= 4 (f 2 2))))}\n"
-    ";;;     [a b] ...). It is what the NEXT agent sees INSTEAD of your body, so\n"
-    ";;;   it must be self-explanatory AND pass (a failing example surfaces).\n"
-    ";;; - A task with 2+ steps: mint one todo per step with\n"
-    ";;;   seon.agent.todo/add! BEFORE you start, and complete! each id as\n"
-    ";;;   the step lands. Your open todos render every turn with their\n"
-    ";;;   ids; once none remain, that section vanishes — your done-signal.\n"
-    ";;; - Your messages render as markdown on your human's screen — use\n"
-    ";;;   structure when it helps (short headings, lists, code fences for\n"
-    ";;;   code or data); plain prose otherwise.\n"
-    ";;;\n"
-    ";;; MESSAGING + LIFECYCLE. You talk to people and you end your work with\n"
-    ";;; explicit verbs — all plain Clojure, all through the DB:\n"
-    ";;;   (message/user \"...\")            ; tell your one human — they see it now\n"
-    ";;;   (message/agent \"<id>\" \"...\")    ; tell a specific peer agent\n"
-    ";;;   (wait \"note\")                   ; park; you resume when a message arrives\n"
-    ";;;   (complete \"result\")             ; finish this work cleanly\n"
-    ";;; - TELL YOUR HUMAN with (message/user \"...\"). They see exactly what you\n"
-    ";;;   send, when you send it — so send the answer when you have it, and a\n"
-    ";;;   SHORT progress note when a longer task is still running. You can\n"
-    ";;;   message every turn when they need to stay informed; silence across\n"
-    ";;;   many turns is the failure, a one-line update is cheap.\n"
-    ";;; - TALK TO A PEER with (message/agent \"<agent-id>\" \"...\"). Messaging\n"
-    ";;;   YOURSELF is refused — your notes-to-self are just ;; comments in\n"
-    ";;;   your turn.\n"
-    ";;; - WHEN YOU ARE DONE, say so with a verb. (complete \"result\") marks\n"
-    ";;;   the work finished. (wait \"what you're waiting for\") parks you\n"
-    ";;;   until the next message wakes you — use it after you've asked a\n"
-    ";;;   question and need their answer to continue. If you simply have\n"
-    ";;;   nothing more to do this loop, emit NO forms — the loop ends cleanly\n"
-    ";;;   and you go idle until the next message. You stay wakeable in every\n"
-    ";;;   one of these states: a new message always brings you back.\n"
-    ";;; - A message is REAL once it lands — but errors-are-VALUES: a transact\n"
-    ";;;   can SUCCEED as an eval yet return {:seon.db/ok? false} (the write\n"
-    ";;;   did NOT happen). Confirm an envelope is {:seon.db/ok? true} before\n"
-    ";;;   you tell your human it landed.\n"
-    ";;; - TURNS ARE PRECIOUS — each turn is a full round-trip; don't spend one\n"
-    ";;;   exploring when the answer is already in front of you. If your\n"
-    ";;;   context CLEARLY contains the answer (it's in the soul, the\n"
-    ";;;   inventory, a loaded ns, or the transcript above), ANSWER this turn —\n"
-    ";;;   (message/user \"...\") — don't re-research what you can already see. But\n"
-    ";;;   if the answer is NOT plainly present — anything about stored\n"
-    ";;;   knowledge, your human's data, the codebase, or specifics you haven't\n"
-    ";;;   read this turn — QUERY FIRST (store-inventory + datalog), THEN answer\n"
-    ";;;   from what you found.\n"
-    ";;; - THE PER-LOOP CAP IS A SLIDING WINDOW. A loop runs up to a base cap\n"
-    ";;;   of turns, and EVERY message you receive (from your human or a peer)\n"
-    ";;;   grants one MORE turn — so a fresh message always buys you a turn to\n"
-    ";;;   see and respond to it. The readline shows loop K/cap. As you near\n"
-    ";;;   the cap, wrap up: (complete \"...\") or (wait \"...\").\n"
-    ";;; - Building tile or panel hiccup from a sequence: splice children\n"
-    ";;;   with (into [:div ...] children), never nest a bare seq as one\n"
-    ";;;   child. Eval your render fn once at the REPL to eyeball the hiccup\n"
-    ";;;   before you wire it onto a surface.\n"
-    ";;; - WRITE FORMS; READ VALUES. You write Clojure forms and ;; comments;\n"
-    ";;;   the runtime writes each form's value on the next line as ;;=> ...,\n"
-    ";;;   next turn. So to learn a count, a reply, or a query result: write\n"
-    ";;;   the form this turn, read its ;;=> value next turn, and act on the\n"
-    ";;;   REAL value. That is the whole loop — the values are the runtime's to\n"
-    ";;;   write, always real, always current.\n"
-    ";;; - When you store a my.kb.* fact, grade it: record HOW you know it\n"
-    ";;;   (a :my.kb/source) and HOW SURE you are (a :my.kb/confidence). A\n"
-    ";;;   guess stored as fact is worse than no fact — the next agent\n"
-    ";;;   cannot read your certainty from your phrasing.\n"
-    ";;; ─────────────────────────────────────────────────────────────"))
+    "; THE NAMESPACES BELOW are real loaded code, CURATED to what you use:\n"
+    "; shown in FULL are your own my.* code, the third-party business code,\n"
+    "; YOUR current namespace, and a small set of seon.* tools you call\n"
+    "; directly — each its whole file. The rest of the seon framework is NOT\n"
+    "; shown here, but it stays QUERYABLE and SEARCHABLE — never hallucinate a\n"
+    "; fn name; discover it. To find or read any non-shown ns or fn:\n"
+    ";   (seon.agent.search/grep {:seon.agent.search/pattern \"defn store-\"})\n"
+    ";   (seon.db/store-inventory {:seon.db/system? true})  ; every indexed kind\n"
+    ";   (seon.ctx/render-namespace {:seon.ns/name :seon.warn})  ; whole-ns view\n"
+    "; Full namespaces are ordered by RECENCY — most-recently-modified LAST,\n"
+    "; not dependency order; the runtime loaded them correctly. Namespaces are\n"
+    "; workspaces: (ns my.domain.thing) moves you there and your context\n"
+    "; follows your namespace. Your code is my.*, your knowledge is my.kb.*\n"
+    "; (real schemas per domain); the core is seon.* — call its fns, never\n"
+    "; redefine them.\n"
+    ";\n"
+    "; EVERY rendered element shows its id — you can (seon.db/pull '[*] <id>)\n"
+    "; it to see the full row, or transact onto it. The context is the\n"
+    "; database rendered; ids are live handles, not labels.\n"
+    ";\n"
+    "; STANDING TEACHINGS:\n"
+    "; - Consult stored knowledge FIRST — it is DISCOVERABLE, not dumped:\n"
+    ";   the stored-data inventory lists every stored KIND + its attrs (run\n"
+    ";   (seon.db/store-inventory) — your creation turn already did), so\n"
+    ";   you READ the rows by QUERYING rather than from a wall of text.\n"
+    ";   Datalog the existing attrs for\n"
+    ";   anything you need. The inventory lists the data added AFTER\n"
+    ";   bootstrap; the full system inventory — the core's own\n"
+    ";   fn/schema/test index included — is one call away:\n"
+    ";   (seon.db/store-inventory {:seon.db/system? true})\n"
+    ";   Prior agents already answered many questions; re-deriving a\n"
+    ";   stored answer is wasted turns.\n"
+    "; - Store what you verify, without being asked: design (or reuse) a\n"
+    ";   my.kb.<domain> schema, reference the shared :my.kb/* provenance\n"
+    ";   attrs, and transact the fact. Knowledge nobody stored is\n"
+    ";   research the next agent pays for again.\n"
+    "; - Keep fns small and tight. Add ONE concise :test usage example to\n"
+    ";   a new defn ONLY when its :malli/schema doesn't already make the\n"
+    ";   call obvious (generic shapes like [:int]->:boolean):\n"
+    ";   (defn f {:malli/schema S :test (fn [] (assert (= 4 (f 2 2))))}\n"
+    ";     [a b] ...). It is what the NEXT agent sees INSTEAD of your body, so\n"
+    ";   it must be self-explanatory AND pass (a failing example surfaces).\n"
+    "; - A task with 2+ steps: mint one todo per step with\n"
+    ";   seon.agent.todo/add! BEFORE you start, and complete! each id as\n"
+    ";   the step lands. Your open todos render every turn with their\n"
+    ";   ids; once none remain, that section vanishes — your done-signal.\n"
+    "; - Your messages render as markdown on your human's screen — use\n"
+    ";   structure when it helps (short headings, lists, code fences for\n"
+    ";   code or data); plain prose otherwise.\n"
+    ";\n"
+    "; MESSAGING + LIFECYCLE. You talk to people and you end your work with\n"
+    "; explicit verbs — all plain Clojure, all through the DB:\n"
+    ";   (message/user \"...\")            ; tell your one human — they see it now\n"
+    ";   (message/agent \"<id>\" \"...\")    ; tell a specific peer agent\n"
+    ";   (wait \"note\")                   ; park; you resume when a message arrives\n"
+    ";   (complete \"result\")             ; finish this work cleanly\n"
+    "; - TELL YOUR HUMAN with (message/user \"...\"). They see exactly what you\n"
+    ";   send, when you send it — so send the answer when you have it, and a\n"
+    ";   SHORT progress note when a longer task is still running. You can\n"
+    ";   message every turn when they need to stay informed; silence across\n"
+    ";   many turns is the failure, a one-line update is cheap.\n"
+    "; - TALK TO A PEER with (message/agent \"<agent-id>\" \"...\"). Messaging\n"
+    ";   YOURSELF is refused — your notes-to-self are just ; comments in\n"
+    ";   your turn.\n"
+    "; - WHEN YOU ARE DONE, say so with a verb. (complete \"result\") marks\n"
+    ";   the work finished. (wait \"what you're waiting for\") parks you\n"
+    ";   until the next message wakes you — use it after you've asked a\n"
+    ";   question and need their answer to continue. If you simply have\n"
+    ";   nothing more to do this loop, emit NO forms — the loop ends cleanly\n"
+    ";   and you go idle until the next message. You stay wakeable in every\n"
+    ";   one of these states: a new message always brings you back.\n"
+    "; - A message is REAL once it lands — but errors-are-VALUES: a transact\n"
+    ";   can SUCCEED as an eval yet return {:seon.db/ok? false} (the write\n"
+    ";   did NOT happen). Confirm an envelope is {:seon.db/ok? true} before\n"
+    ";   you tell your human it landed.\n"
+    "; - TURNS ARE PRECIOUS — each turn is a full round-trip; don't spend one\n"
+    ";   exploring when the answer is already in front of you. If your\n"
+    ";   context CLEARLY contains the answer (it's in the soul, the\n"
+    ";   inventory, a loaded ns, or the transcript above), ANSWER this turn —\n"
+    ";   (message/user \"...\") — don't re-research what you can already see. But\n"
+    ";   if the answer is NOT plainly present — anything about stored\n"
+    ";   knowledge, your human's data, the codebase, or specifics you haven't\n"
+    ";   read this turn — QUERY FIRST (store-inventory + datalog), THEN answer\n"
+    ";   from what you found.\n"
+    "; - THE PER-LOOP CAP IS A SLIDING WINDOW. A loop runs up to a base cap\n"
+    ";   of turns, and EVERY message you receive (from your human or a peer)\n"
+    ";   grants one MORE turn — so a fresh message always buys you a turn to\n"
+    ";   see and respond to it. The readline shows loop K/cap. As you near\n"
+    ";   the cap, wrap up: (complete \"...\") or (wait \"...\").\n"
+    "; - Building tile or panel hiccup from a sequence: splice children\n"
+    ";   with (into [:div ...] children), never nest a bare seq as one\n"
+    ";   child. Eval your render fn once at the REPL to eyeball the hiccup\n"
+    ";   before you wire it onto a surface.\n"
+    "; - WRITE FORMS; READ VALUES. You write Clojure forms and ; comments;\n"
+    ";   the runtime writes each form's value on the next line as ;=> ...,\n"
+    ";   next turn. So to learn a count, a reply, or a query result: write\n"
+    ";   the form this turn, read its ;=> value next turn, and act on the\n"
+    ";   REAL value. That is the whole loop — the values are the runtime's to\n"
+    ";   write, always real, always current.\n"
+    "; - When you store a my.kb.* fact, grade it: record HOW you know it\n"
+    ";   (a :my.kb/source) and HOW SURE you are (a :my.kb/confidence). A\n"
+    ";   guess stored as fact is worse than no fact — the next agent\n"
+    ";   cannot read your certainty from your phrasing.\n"
+    "; ── end system ──"))
 
 
 ;; ============================================================
@@ -1292,7 +1284,7 @@
                      source (<= (count source) fn-source-inline-threshold))
          lines  (cond-> [header]
                   (and doc (not (str/blank? doc)))
-                  (conj (str ";; " (clip (first (str/split-lines doc)) member-doc-clip)))
+                  (conj (str "; " (clip (first (str/split-lines doc)) member-doc-clip)))
                   small?
                   (conj (str/trim source)))]
      (str/join "\n" lines))))
@@ -1328,19 +1320,23 @@
 
    `detail` (default `:full`) selects the depth of each fn body and the
    shape of the whole block:
-     - `:full`      — a `;; ── namespace x ──` header, the ns's `(ns …)`
+     - `:full`      — a `; namespace x` label, the ns's `(ns …)`
                       SOURCE plus every fn (full source when small),
                       schema, and test. The whole-ns view — the agent's
                       own / my.* / acme / current code.
-     - `:signature` — a `;; ── namespace x (signatures) ──` header
+     - `:signature` — a `; namespace x (signatures)` label
                       carrying ONLY each fn's SIGNATURE (header + flags +
                       one-line doc, bodies elided). No ns source, no
                       schemas, no tests — the public-API manifest view of
-                      a framework ns."
+                      a framework ns.
+
+   The label is a single-`;` comment carrying the ns NAME (load-bearing —
+   it says WHICH file each block is); the box-drawing `── ── ` decoration
+   was retired in favour of the render-side `;;; ┌─/└─` section bracket."
   ([ns-kw data] (render-one-ns-ai ns-kw data :full))
   ([ns-kw data detail]
    (if (nil? data)
-     (str ";; requires: " (name ns-kw) " (not in db)")
+     (str "; requires: " (name ns-kw) " (not in db)")
      (let [src     (:seon.ns/source data)
            fns     (->> (:seon.fn/_ns data)     (sort-by :seon.fn/sym))
            schemas (->> (:seon.schema/_ns data) (sort-by (comp str :seon.schema/key)))
@@ -1349,10 +1345,10 @@
          ;; manifest view: public fn signatures only, bodies elided.
          (let [pub  (remove :seon.fn/private? fns)
                sigs (map #(fn-block-ai % :signature) pub)]
-           (str ";; ── namespace " (name ns-kw) " (signatures) ──\n"
+           (str "; namespace " (name ns-kw) " (signatures)\n"
                 (if (seq sigs)
                   (str/join "\n\n" sigs)
-                  ";; (no public fns indexed yet — query by name)")))
+                  "; (no public fns indexed yet — query by name)")))
          ;; full view: ns source + every member.
          (let [body (cond-> []
                       (and src (not (str/blank? src)))
@@ -1363,8 +1359,8 @@
                       (into (map schema-block-ai schemas))
                       (seq tests)
                       (into (map test-block-ai tests)))]
-           (str ";; ── namespace " (name ns-kw) " ──\n"
-                (if (seq body) (str/join "\n\n" body) ";; (no recorded source/fns/schemas)"))))))))
+           (str "; namespace " (name ns-kw) "\n"
+                (if (seq body) (str/join "\n\n" body) "; (no recorded source/fns/schemas)"))))))))
 
 (defn- render-one-ns-html
   "Render a single namespace block to hiccup. Reuses the per-kind
@@ -1579,7 +1575,7 @@
    prefix in a cached system block and send only the volatile tail as the
    user message. Built by concatenation so the marker can never appear
    verbatim in rendered source text."
-  (str ";; ──── ctx cache boundary — everything above this line is the "
+  (str "; ──── ctx cache boundary — everything above this line is the "
        "byte-stable" " prefix; everything below changes per turn ────"))
 
 (def ^:private stable-boundary-delim
@@ -1658,7 +1654,7 @@
     {:seon.ctx/name :warnings     :seon.ctx/priority 40
      :seon.render/ai 'seon.ctx.warnings/warnings-section}
     {:seon.ctx/name :open-todos   :seon.ctx/priority 45
-     :seon.render/ai 'seon.agent.todo/open-todos-section}
+     :seon.render/ai 'seon.agent.todo.internal/open-todos-section}
     {:seon.ctx/name :relevant-source :seon.ctx/priority 48
      :seon.render/ai 'seon.ctx.relevant/relevant-source-section}
     {:seon.ctx/name :inventory    :seon.ctx/priority 97
@@ -1794,7 +1790,7 @@
                 (if-let [keep (and (:seon.ctx/agent? s) (get cuts nm))]
                   (assoc s :seon.render/text
                          (str (subs txt 0 keep)
-                              "\n;; ⚠ [" (name nm) "] TRUNCATED — your agent "
+                              "\n; ⚠ [" (name nm) "] TRUNCATED — your agent "
                               "sections exceed the " agent-section-char-budget
                               "-char budget (this section was "
                               (count txt) " chars). Trim it with "

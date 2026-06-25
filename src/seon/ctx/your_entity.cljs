@@ -34,28 +34,27 @@
                     (update :seon.render.live-tile/content
                             #(db/decode-edn-value
                                :seon.render.live-tile/content %)))]
-      (str ";; YOUR OWN ENTITY in the shared store, re-pulled every turn —\n"
-           ";; the value of:\n"
-           ";;   (seon.db/pull '[*] [:seon.agent/id \"" id "\"])\n"
-           ";; Transact to it by lookup ref — e.g.\n"
-           ";;   (seon.db/transact! [{:seon.db/ref [:seon.agent/id \"" id "\"]\n"
-           ";;                        :seon.agent/purpose \"...\"}])\n"
-           ";; — and the change appears here next turn. Write notes and\n"
-           ";; standing instructions to yourself here; this map IS you.\n"
+      (str "; YOUR OWN ENTITY in the shared store, re-pulled every turn —\n"
+           "; the value of:\n"
+           ";   (seon.db/pull '[*] [:seon.agent/id \"" id "\"])\n"
+           "; Transact to it by lookup ref — e.g.\n"
+           ";   (seon.db/transact! [{:seon.db/ref [:seon.agent/id \"" id "\"]\n"
+           ";                        :seon.agent/purpose \"...\"}])\n"
+           "; — and the change appears here next turn. Write notes and\n"
+           "; standing instructions to yourself here; this map IS you.\n"
            ;; Derive-your-purpose teaching — CONTEXT, not stored data:
            ;; the welcome tile renders :seon.agent/purpose verbatim to
            ;; the human, so the instruction lives here and only while the
            ;; attr is absent (self-healing: the agent's own transact makes
            ;; this line vanish).
            (when (nil? (:seon.agent/purpose entity))
-             (str ";; Your :seon.agent/purpose is UNSET. Derive it from your\n"
-                  ";; human's first messages, then transact it onto your own\n"
-                  ";; entity (the lookup-ref move above) so you keep your\n"
-                  ";; direction — your human sees it as your tile's headline.\n"))
-           ;; The pulled map rides as `;;` comment lines so the whole
-           ;; section reads as eval'able Clojure (the context IS one live
-           ;; REPL). It is a VALUE you read, not a form to run.
-           (->> (str/split-lines
-                  (str/trimr (with-out-str (pprint/pprint decoded))))
-                (map #(str ";; " %))
-                (str/join "\n"))))))
+             (str "; Your :seon.agent/purpose is UNSET. Derive it from your\n"
+                  "; human's first messages, then transact it onto your own\n"
+                  "; entity (the lookup-ref move above) so you keep your\n"
+                  "; direction — your human sees it as your tile's headline.\n"))
+           ;; The pulled map rides as `;` comment lines (via
+           ;; [[seon.ctx/quote-lines]]) so the whole section reads as
+           ;; eval'able Clojure (the context IS one live REPL). It is a
+           ;; VALUE you read, not a form to run.
+           (ctx/quote-lines
+             (str/trimr (with-out-str (pprint/pprint decoded))))))))

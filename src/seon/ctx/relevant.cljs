@@ -1,6 +1,6 @@
 (ns seon.ctx.relevant
   "The `:relevant-source` context section — the top-k embedding-retrieval
-   hits for THIS turn's query, surfaced (as a `;; ── relevant context ──`
+   hits for THIS turn's query, surfaced (as a single-`;` `relevant context`
    comment-block) as source the agent can read inline.
    Symbol-wired into the composer layout (`seon.ctx/core-default-ctx`) as
    `'seon.ctx.relevant/relevant-source-section` at priority 48 (the VOLATILE
@@ -40,12 +40,12 @@
   1500)
 
 (def ^:private relevant-header
-  (str ";; relevant context — the top-" top-k " ENTITIES nearest your latest\n"
-       ";; request by embedding similarity (KNN over the embedding index — any\n"
-       ";; indexable kind: functions, knowledge-base entries, …). These are\n"
-       ";; CANDIDATES surfaced for THIS turn; read them, reuse what fits.\n"
-       ";; Long bodies are truncated — pull the full row with\n"
-       ";;   (seon.db/pull '[*] <the entity's identity>)"))
+  (str "; relevant context — the top-" top-k " ENTITIES nearest your latest\n"
+       "; request by embedding similarity (KNN over the embedding index — any\n"
+       "; indexable kind: functions, knowledge-base entries, …). These are\n"
+       "; CANDIDATES surfaced for THIS turn; read them, reuse what fits.\n"
+       "; Long bodies are truncated — pull the full row with\n"
+       ";   (seon.db/pull '[*] <the entity's identity>)"))
 
 (defn- cap-body
   "Truncate a body string to `source-char-cap` with a loud marker so the cut
@@ -53,15 +53,15 @@
   [body]
   (if (> (count body) source-char-cap)
     (str (subs body 0 source-char-cap)
-         "\n;; … TRUNCATED (" (count body) " chars total) — pull the full row")
+         "\n; … TRUNCATED (" (count body) " chars total) — pull the full row")
     body))
 
 (defn- block
-  "A rendered hit block: a `;; <title>` header + a char-capped body. `title` may
+  "A rendered hit block: a `; <title>` header + a char-capped body. `title` may
    be nil (the generic fallback falls back to `<unknown>` so a block is never
    header-less); a nil `body` renders header-only — never blank, never throws."
   [title body]
-  (str ";; " (or title "<unknown>") "\n"
+  (str "; " (or title "<unknown>") "\n"
        (when body (cap-body body))))
 
 (defn- entity-identity
@@ -100,7 +100,7 @@
    stash ([[seon.embed.stash/current-hits]]) — renders the top-`top-k` hits,
    each rendered GENERICALLY by [[render-hit]] (the entity's identity + its
    longest string attr; any indexable kind, no hard-coded attr names) under a
-   `;; ── relevant context ──` comment-block header.
+   single-`;` `relevant context` comment-block header.
 
    REACTIVE: returns \"\" when no hits are stashed (default-OFF — no prefetch
    ran — OR the prefetch found nothing), so the composer drops the section and
