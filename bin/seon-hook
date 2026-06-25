@@ -455,7 +455,11 @@
   ([file-path content opts]
    (build-review-prompt [{:path file-path :content content}] opts))
   ([files {:keys [max-code-length max-conventions-length]
-           :or {max-code-length 12000 max-conventions-length 4000}}]
+           ;; The conventions rubric is the STANDARD being checked — the review
+           ;; must see ALL of it (a conformance check on 13% of the rules is
+           ;; useless). gemini-3.5-flash has a huge context window, so send the
+           ;; whole doc; the cap is pure safety headroom over its current ~30K.
+           :or {max-code-length 12000 max-conventions-length 60000}}]
    (let [conventions (load-conventions max-conventions-length)
          files (vec files)
          ;; Keep the most-recent files (tail) when the batch overflows the total
