@@ -600,7 +600,26 @@ _stop_unlocked() {
 
   if kill -0 "$pid" 2>/dev/null; then
     kill -9 "$pid" 2>/dev/null || true
-    echo "○ $name killed (SIGKILL, was pid $pid)"
+    # CONFIRM the process is ACTUALLY gone before returning. `kill -9` only
+    # *sends* SIGKILL — the kernel may still be tearing the process down
+    # (the wire-server flushing LMDB, releasing its UDS socket). Callers
+    # that immediately wipe the store (cluster reset / nuke) MUST NOT race
+    # that teardown, or they rm-rf a store dir a dying writer is still
+    # writing → corruption. Block (bounded) until the pid disappears.
+    local j
+    for j in 1 2 3 4 5 6 7 8 9 10; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.5
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      # Pathological — a normal JVM/node never ignores SIGKILL. Fail LOUD
+      # rather than let a caller wipe the store under a live writer.
+      echo "✗ $name (pid $pid) survived SIGKILL after 5s — NOT confirmed dead" >&2
+      echo "  a store wipe now could corrupt a live writer; investigate the pid" >&2
+      rm -f "$(pid_file "$name")"
+      return 1
+    fi
+    echo "○ $name killed (SIGKILL, confirmed dead, was pid $pid)"
   else
     echo "○ $name stopped (was pid $pid)"
   fi
