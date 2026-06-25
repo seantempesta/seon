@@ -194,11 +194,27 @@
   (or (:file_path tool-input)
       (:filePath tool-input)))
 
-(defn- seon-source-file?
-  "Check if file is a Seon source or test file (in src/seon/ or test/seon/)."
+(defn- jvm-loadable?
+  "True only for files the JVM can actually require/reload/test: .clj and .cljc.
+
+   .cljs is the CLJS-pod track — the JVM cannot load it, and its .clj sibling
+   (if any) is a DIFFERENT namespace owned by the JVM track. Running the JVM
+   reload/test/review pipeline on a .cljs edit would reload+test the wrong
+   sibling and spuriously block. CLJS files are handled by cljs-watch +
+   bin/test-cljs; the bb-side PreToolUse syntax gate still covers their syntax."
   [file-path]
-  (and file-path
-       (codebase/clojure-file? {::codebase/file-path file-path})
+  (boolean
+   (and file-path
+        (let [lower (str/lower-case file-path)]
+          (or (str/ends-with? lower ".clj")
+              (str/ends-with? lower ".cljc"))))))
+
+(defn- seon-source-file?
+  "Check if file is a JVM-loadable Seon source or test file
+   (.clj/.cljc under src/seon/ or test/seon/). Gates the PostToolUse
+   reload/test/review pipeline, which is JVM-only — .cljs is excluded."
+  [file-path]
+  (and (jvm-loadable? file-path)
        (or (str/includes? file-path "src/seon/")
            (str/includes? file-path "test/seon/"))))
 

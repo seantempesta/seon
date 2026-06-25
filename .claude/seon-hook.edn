@@ -6,7 +6,11 @@
 ;; - Generative testing (Malli schema validation)
 ;; - AI-assisted code review (Gemini with bounded window model)
 ;;
-;; All state (functions, errors, edit history) is stored in XTDB.
+;; Hook state (recent edits + last-review timestamp, used only for review
+;; rate-limiting within a dev session) lives in in-memory atoms in
+;; seon.dev.context. It is ephemeral and resets when the Seon nREPL restarts.
+;; All processing runs inside the Seon JVM via nREPL (bin/seon-hook is the
+;; thin bencode client); the PreToolUse syntax gate runs in-process in bb.
 
 {;; PreToolUse validation - blocks edits BEFORE they're applied
  ;; Catches syntax errors (unbalanced delimiters) before file is modified
@@ -19,9 +23,8 @@
           :revert-on-fail true}
 
  ;; Test execution
- ;; NOTE: generative block-on-fail temporarily disabled due to pre-existing issue where
- ;; ::xtdb-node schema generates nil, causing all context.clj functions to fail.
- ;; TODO: Fix by adding proper generator for ::xtdb-node or skipping DB-dependent fns
+ ;; Generative tests are non-blocking (feedback only): a schema-generation
+ ;; gap should surface as advice, not stop an edit.
  :tests {:unit {:enabled true
                 :block-on-fail true}
          :generative {:enabled true
@@ -29,9 +32,9 @@
                       :block-on-fail false}}
 
  ;; AI review (Gemini) with rate limiting
- ;; - Edits are recorded as immutable facts (never deleted)
+ ;; - Recent edits are tracked in an in-memory atom (seon.dev.context)
  ;; - Reviews are rate-limited by interval-seconds
- ;; - Query only looks at recent edits (bounded window)
+ ;; - Each review covers edits since the last review (bounded window)
  :review {:enabled true
           ;; Minimum time between reviews (prevents review spam)
           :interval-seconds 60

@@ -118,22 +118,11 @@
         session-id))
     session-id))
 
-(defn- get-port-for-session [session-id]
-  (let [seon-session-id (lookup-seon-session session-id)]
-    (if (or (nil? seon-session-id)
-            (= seon-session-id "orchestrator")
-            (= seon-session-id ""))
-      orchestrator-port
-      (let [code (format
-                  "(do (require 'seon.orchestrator.session)
-                       (:seon.orchestrator.session/nrepl-port
-                         (seon.orchestrator.session/get-session-port
-                           {:seon.orchestrator.session/node (user/xtdb-node)
-                            :seon.orchestrator.session/id %s})))"
-                  (pr-str seon-session-id))
-            result (nrepl-eval orchestrator-port code)]
-        (or (when result (try (edn/read-string result) (catch Exception _ nil)))
-            orchestrator-port)))))
+(defn- get-port-for-session [_session-id]
+  ;; All sessions route to the single Seon nREPL. The per-session multi-port
+  ;; routing (seon.orchestrator.session/get-session-port) was XTDB-era
+  ;; JVM-orchestrator machinery and has been retired — there is one nREPL.
+  orchestrator-port)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Response Formatting
