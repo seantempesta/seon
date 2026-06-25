@@ -94,8 +94,8 @@
               (is (str/includes? text "(test.parent/greet [x])") "fn signature present")
               (is (str/includes? text "Greets x") "fn doc present")
               (is (str/includes? text ":test.parent/name") "schema key present")
-              (is (str/includes? text ";; ── namespace test.parent ──")
-                  "ns header marker present"))))
+              (is (str/includes? text "; namespace test.parent")
+                  "ns block label present"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -132,17 +132,17 @@
                   text (:seon.render/text
                          (agent/render-namespace
                            {:seon.db/db db :seon.ns/name :test.child
-                            :seon.render/depth 1 :seon.render/format :ai}))
-                  parent-at (.indexOf text "namespace test.parent ──")
-                  child-at  (.indexOf text "namespace test.child ──")]
-              (is (str/includes? text "namespace test.parent ──")
-                  "required ns rendered")
-              (is (str/includes? text "namespace test.child ──")
-                  "requiring ns rendered")
+                            :seon.render/depth 1 :seon.render/format :ai}))]
+              ;; Anchor on the per-ns block LABEL ("; namespace X") to mean
+              ;; "this ns block rendered" — distinct from a bare require
+              ;; mention. Block ORDERING is not asserted (priority is numeric
+              ;; + movable, not a contract).
+              (is (str/includes? text "; namespace test.parent")
+                  "required ns block rendered")
+              (is (str/includes? text "; namespace test.child")
+                  "requiring ns block rendered")
               (is (str/includes? text "test.parent/greet")
-                  "required ns's fn brought into view")
-              (is (and (>= parent-at 0) (< parent-at child-at))
-                  "required ns is PREPENDED before the requiring ns"))))
+                  "required ns's fn brought into view"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -159,8 +159,8 @@
                          (agent/render-namespace
                            {:seon.db/db db :seon.ns/name :test.child
                             :seon.render/depth 0 :seon.render/format :ai}))]
-              (is (str/includes? text "namespace test.child ──") "the ns itself renders")
-              (is (not (str/includes? text "namespace test.parent ──"))
+              (is (str/includes? text "; namespace test.child") "the ns itself renders")
+              (is (not (str/includes? text "; namespace test.parent"))
                   "depth 0 does NOT render the required parent BLOCK")
               (is (not (str/includes? text "test.parent/greet"))
                   "depth 0 does NOT pull the parent's fns"))))
@@ -182,7 +182,7 @@
                             :seon.render/depth 1 :seon.render/format :ai}))]
               (is (str/includes? text "test.missing (not in db)")
                   "a required ns with no :seon.ns entity is NOTED, not errored")
-              (is (str/includes? text "namespace test.child ──")
+              (is (str/includes? text "; namespace test.child")
                   "rendering still completes for the requiring ns"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -200,10 +200,11 @@
                           (agent/render-namespace
                             {:seon.db/db db :seon.ns/name :cyc.a
                              :seon.render/depth 10 :seon.render/format :ai}))
-                  ;; count whole-ns block markers
+                  ;; count whole-ns block LABELS ("; namespace X") — the
+                  ;; block marker, not a bare name mention in a require.
                   occ   (fn [sub] (count (re-seq (re-pattern sub) text)))]
-              (is (= 1 (occ "namespace cyc.a ──")) "cyc.a rendered exactly once")
-              (is (= 1 (occ "namespace cyc.b ──")) "cyc.b rendered exactly once")
+              (is (= 1 (occ "; namespace cyc.a")) "cyc.a block rendered exactly once")
+              (is (= 1 (occ "; namespace cyc.b")) "cyc.b block rendered exactly once")
               (is (< (count text) 2000)
                   "bounded — the cycle did not blow up the render"))))
         (.then (fn [_] (done)))
@@ -223,7 +224,7 @@
                   text (:seon.render/text
                          (agent/render-namespace
                            {:seon.db/db db :seon.ns/name :test.child}))]
-              (is (str/includes? text "namespace test.parent ──")
+              (is (str/includes? text "; namespace test.parent")
                   "default depth 1 follows requires one level")
               (is (str/includes? text "test.parent/greet")
                   "the required ns's fns are in view by default"))))

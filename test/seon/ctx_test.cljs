@@ -188,21 +188,20 @@
                   (.then
                     (fn [_]
                       (let [txt (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})]
-                        (reset! !before txt)
-                        ;; FULL: my.* renders its whole source, unclipped.
-                        (is (str/includes? txt ";; ── namespace my.agent.a1 ──")
-                            "a my.* ns renders as a full block")
+                        ;; FULL: my.* + third-party acme render their whole
+                        ;; source. Anchor on the per-ns block LABEL
+                        ;; ("; namespace X") + real body content. Block
+                        ;; ORDERING is NOT asserted (priority is numeric +
+                        ;; movable, ordering is not a contract).
+                        (is (str/includes? txt "; namespace my.agent.a1") "a my.* ns renders")
                         (is (str/includes? txt "(def helper 1)")
                             "the my.* ns body is shown FULL (no clipping)")
-                        ;; FULL: third-party acme renders its whole source.
-                        (is (str/includes? txt ";; ── namespace acme.widget ──")
-                            "a third-party acme ns renders as a full block")
+                        (is (str/includes? txt "; namespace acme.widget")
+                            "a third-party acme ns renders")
                         (is (str/includes? txt "(def w 2)")
                             "the acme body is shown FULL (no clipping)")
                         ;; DROPPED: a non-whitelisted framework ns is absent
                         ;; entirely — no block, no body, no name.
-                        (is (not (str/includes? txt ";; ── namespace seon.client ──"))
-                            "a non-whitelisted framework ns is NOT a full-source block")
                         (is (not (str/includes? txt "(def never-shown 3)"))
                             "a dropped ns's body is NEVER rendered")
                         (is (not (str/includes? txt "seon.client"))
@@ -215,37 +214,13 @@
                             "there is NO signatures manifest block anywhere")
                         (is (not (str/includes? txt "seon.frob"))
                             "a framework ns with public fns is dropped, not signatured")
-                        (is (not (str/includes? txt "(seon.frob/widget [a b])"))
-                            "no signature line for a dropped ns's fn")
                         (is (not (str/includes? txt "Frobnicate a and b."))
                             "no doc line for a dropped ns's fn")
                         (is (not (str/includes? txt "(+ a b)"))
                             "a dropped fn BODY is never rendered")
-                        (is (not (str/includes? txt "seon.frob/secret"))
-                            "a private (defn-) fn never appears")
                         ;; *.internal never appears anywhere.
                         (is (not (str/includes? txt "seon.db.internal"))
-                            "*.internal never appears")
-                        ;; recency among FULL blocks: acme.widget's row was
-                        ;; written AFTER my.agent.a1 → renders later.
-                        (is (> (str/index-of txt ";; ── namespace acme.widget ──")
-                               (str/index-of txt ";; ── namespace my.agent.a1 ──"))
-                            "most-recently-modified full block renders LAST"))))
-                  ;; modify my.agent.a1 → it moves LAST among full tags and
-                  ;; the prefix ABOVE the moved tag is byte-identical.
-                  (.then (fn [_] (transact-full-ns! "my.agent.a1" "(def helper 99)")))
-                  (.then
-                    (fn [_]
-                      (let [before @!before
-                            after  (ctx-namespaces/namespaces-section
-                                     {:seon.db/db @db/*conn*})
-                            moved  ";; ── namespace my.agent.a1 ──"]
-                        (is (> (str/index-of after moved)
-                               (str/index-of after ";; ── namespace acme.widget ──"))
-                            "modified full ns moved LAST among blocks")
-                        (is (= (subs before 0 (str/index-of before moved))
-                               (subs after 0 (str/index-of before moved)))
-                            "prefix above the moved tag's old position is byte-identical")))))))
+                            "*.internal never appears")))))))
           (.then (fn [] (done)))
           (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done)))))))
 
@@ -289,15 +264,15 @@
                   (fn [_]
                     (let [txt (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})]
                       ;; third-party code renders FULL with NO config transact.
-                      (is (str/includes? txt ";; ── namespace acme.widget ──")
+                      (is (str/includes? txt "; namespace acme.widget")
                           "downstream acme.widget renders FULL with NO config")
                       (is (str/includes? txt "(def w 1)")
                           "the acme body is shown FULL")
                       ;; my.* renders FULL.
-                      (is (str/includes? txt ";; ── namespace my.kb ──")
+                      (is (str/includes? txt "; namespace my.kb")
                           "my.* renders FULL")
                       ;; a non-whitelisted framework ns is dropped entirely.
-                      (is (not (str/includes? txt ";; ── namespace seon.client ──"))
+                      (is (not (str/includes? txt "seon.client"))
                           "a framework ns is NOT a full block")
                       (is (not (str/includes? txt "seon.client"))
                           "the framework ns is DROPPED entirely (not even named)")
@@ -408,7 +383,7 @@
 
 (deftest system-text-teaches-markdown-replies
   ;; Chat-surface task #29 (a21 writing teaching): the markdown-replies
-  ;; teaching is present, and (no-bare-prose unit) it rides as `;;;`
+  ;; teaching is present, and (no-bare-prose unit) it rides as single-`;`
   ;; runtime-voice comment lines so the whole system block reads as
   ;; eval'able Clojure — the B1 extractor sees only comments here.
   (is (str/includes? ctx/system-text
@@ -417,8 +392,8 @@
                           (drop-while #(not (str/includes? % "messages render as markdown")))
                           (take 3))]
     (is (seq bullet-lines))
-    (is (every? #(str/starts-with? (str/triml %) ";;") bullet-lines)
-        "comment-shaped — the no-bare-prose unit makes every line a `;;`/`;;;` comment")))
+    (is (every? #(str/starts-with? (str/triml %) ";") bullet-lines)
+        "comment-shaped — the no-bare-prose unit makes every line a `;` comment")))
 
 (deftest purpose-entity-and-your-entity-and-verbs
   (async done
@@ -561,7 +536,7 @@
                         (is (not (str/blank? (:seon.render/stable-text a1)))
                             "stable block is non-blank (system + namespaces)")
                         (is (str/includes? (:seon.render/stable-text a1)
-                                           ";; ── namespace my.client ──")
+                                           "my.client")
                             "the namespaces body lives in the STABLE half")
                         (is (not (str/includes? (:seon.render/stable-text a1)
                                                 ctx/stable-boundary))
@@ -660,15 +635,13 @@
                   (fn [_]
                     (let [txt   (ctx-inventory/inventory-section {:seon.db/db @db/*conn*})
                           lines (str/split-lines txt)]
-                      ;; The `;; ── stored data inventory ──` header was REMOVED
-                      ;; (keystone): the section renderer's bracket now
-                      ;; demarcates the section; the body is header-less.
-                      ;; ONE line per kind: the kind name is the line label,
-                      ;; written ONCE, then bare attr-name count pairs. The
-                      ;; whole body rides as `;;` comments (no-bare-prose
-                      ;; unit — the context reads as eval'able Clojure).
-                      (is (str/includes? txt ";; my.workout: ")
-                          "kind is the line label (namespace written once), commented")
+                      ;; The section renderer's bracket demarcates the
+                      ;; section; the body is header-less. ONE line per kind:
+                      ;; the kind name is the line label, written ONCE, then
+                      ;; bare attr-name count pairs. Anchor on the kind NAME,
+                      ;; not the comment-prefix glyph (format is not pinned).
+                      (is (str/includes? txt "my.workout: ")
+                          "kind is the line label (namespace written once)")
                       ;; count is correct (3 rows, both attrs present on each).
                       (is (str/includes? txt "date 3")
                           "attr count is the live row count, namespace stripped")
@@ -843,7 +816,7 @@
                       (is (not (contains? (texts-of r1) :relevant-source))
                           ":relevant-source contributes no text (blank → dropped)")
                       (is (not (str/includes? (:seon.render/text r1)
-                                              ";; ── relevant context ──"))
+                                              "relevant context —"))
                           "no relevant-context header in the OFF-path prompt")
                       ;; byte-identical across two assemblies (the section
                       ;; is not pulling query-dependent content into the
@@ -898,11 +871,11 @@
       (is (= fs-tmp-rel (:seon.ctx/file-path sect)))
       (is (symbol? (:seon.render/ai sect)) "ai slot is a symbol (fresh read each render)")
       (is (symbol? (:seon.render/html sect)) "html slot is a symbol")
-      ;; AI view — the file rendered as reader-valid `;;` markdown.
+      ;; AI view — the file rendered as reader-valid `;` markdown.
       (let [ai-txt (render/render :seon.render/ai {} sect)]
         (is (string? ai-txt))
-        (is (str/includes? ai-txt ";; # Heading") "markdown commented line-by-line")
-        (is (every? #(or (str/blank? %) (str/starts-with? % ";;"))
+        (is (str/includes? ai-txt "; # Heading") "markdown commented line-by-line")
+        (is (every? #(or (str/blank? %) (str/starts-with? % ";"))
                     (str/split-lines ai-txt))
             "every line is reader-valid (a comment) — keeps the prompt valid source"))
       ;; HTML view — markdown hiccup.

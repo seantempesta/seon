@@ -1955,7 +1955,7 @@
         n (count s)]
     (if (> n result-body-render-cap)
       (str (subs s 0 result-body-render-cap)
-           "\n;; … +" (- n result-body-render-cap) " chars clipped; the full "
+           "\n; … +" (- n result-body-render-cap) " chars clipped; the full "
            "value is the live var result/" eval-id " — drill it with "
            "get-in/filter/subs.")
       s)))
@@ -2136,7 +2136,7 @@
               (let [preview (take result-row-cap coll)
                     dropped (- total result-row-cap)
                     body    (str/join "\n " (map pr-str preview))]
-                (str ";; … " total " rows; showing first " result-row-cap
+                (str "; … " total " rows; showing first " result-row-cap
                      ", +" dropped " more clipped. Narrow your query: a tighter "
                      ":where, a :find aggregate, or take fewer; result/" eval-id
                      " holds the full value to drill with get-in/filter.\n"
@@ -2168,7 +2168,7 @@
       (catch :default _
         ;; Unprintable value — name where the live value lives instead of
         ;; a bare (str value) that could itself be a giant/opaque blob.
-        (str ";; <value could not be rendered as data; the live value is "
+        (str "; <value could not be rendered as data; the live value is "
              "result/" eval-id ">")))))
 
 (defn ^:async record-eval!

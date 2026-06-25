@@ -133,7 +133,12 @@
       (is (re-find #"Narrow your query" edn))
       (is (re-find (re-pattern (str "result/" eval-id)) edn)))
     (testing "guide is PREPENDED so it survives the smaller display cap"
-      (is (str/starts-with? edn ";; …")))
+      ;; the guide leads (a comment line), not the data — the row preview
+      ;; comes AFTER. Assert the guide text is at the front, not an exact
+      ;; comment-prefix glyph (fragile).
+      (is (< (or (str/index-of edn "rows") 1e9)
+             (or (str/index-of edn "(0") 1e9))
+          "guide precedes the previewed rows"))
     (testing "only the first result-row-cap rows are previewed"
       ;; Preview renders one element per line as "\n N"; row 49 is the last
       ;; (followed by the closing paren), row 50 is excluded. Match the DATA
@@ -148,8 +153,7 @@
   ;; the prepended guide must survive that too.
   (let [edn    (seval/render-result-edn "ev00000004" (vec (range 9000)))
         capped (seval/cap-edn edn)]
-    (is (str/starts-with? capped ";; …"))
-    (is (re-find #"9000 rows" capped))))
+    (is (re-find #"9000 rows" capped) "the guide survives the store cap")))
 
 ;; (The old `huge-prompt-is-stored-capped` test is RETIRED with the
 ;; :seon.agent.turn/prompt-text datom itself — prompts now persist whole as

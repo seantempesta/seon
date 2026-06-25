@@ -174,8 +174,8 @@
                          (agent/render-namespace
                            {:seon.db/db db :seon.ns/name :demo.ns
                             :seon.render/depth 0 :seon.render/format :ai}))]
-              (is (str/includes? text ";; ── namespace demo.ns ──")
-                  "the ns renders as a comment-shaped block header")
+              (is (str/includes? text "; namespace demo.ns")
+                  "the ns renders as a comment-shaped block label")
               (is (str/includes? text "[test demo.ns/t-attached]")
                   "the test is rendered under its ns")
               ;; AC3 (AI path): render-namespace must show the test's status
