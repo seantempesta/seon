@@ -96,7 +96,7 @@
 
 (defn clock
   "An `HH:mm:ss` wall-clock time in the host (human's) timezone for a
-   stored `#inst` `inst`. The short time the `;;;` event lines carry (the
+   stored `#inst` `inst`. The short time the `;;;` message lines carry (the
    readline carries the full localized date+tz). sv-SE → ISO-like
    `HH:mm:ss`.
 
@@ -167,7 +167,7 @@
    carries the fabrication-guard ([[seon.ctx/neutralize-result-claims]])
    and the component caps ([[seon.ctx/eval-render-cap]] /
    [[seon.ctx/result-body-render-cap]]) forward. A `::ns-marker?` true
-   event prepends a `;; in <ns>` line (emitted only where the eval ns
+   event prepends a `; in <ns>` line (emitted only where the eval ns
    changes from the prior eval). PRIOR-SESSION evals (`::prior?` true)
    render their value WITHOUT the `result/<id>` handle (their vars died
    with the restart; the resume marker says so once)."
@@ -254,7 +254,7 @@
                     db (assoc :seon.db/db db))))
 
 (defn- with-ns-markers
-  "Thread a `;; in <ns>` marker into each EVAL event whose ns differs from
+  "Thread a `; in <ns>` marker into each EVAL event whose ns differs from
    the prior eval's (only evals carry an ns; message events pass through).
    A pure left-to-right pass over the already-time-sorted events."
   [events]
@@ -273,7 +273,7 @@
 (defn readline
   "The folded live readline — DERIVED every render, never stored. The
    very-bottom of the transcript: the cursor (`ns=>` current ns) plus this
-   turn's status/steering as a `;;;` line (turn · time · loop K/cap ·
+   turn's status/steering as a `;` line (turn · time · loop K/cap ·
    state · any cap-pressure steering) — ONE steering surface. Always
    present. This is the ONLY line in the whole transcript that reads the
    live `now` (below the cache breakpoint — busting here is free).
@@ -319,7 +319,7 @@
 
 (defn- ordered-events
   "The agent's full flat event stream — messages + evals UNIONed, sorted
-   by FIXED stored `:at` (byte-stable), with `;; in <ns>` markers threaded
+   by FIXED stored `:at` (byte-stable), with `; in <ns>` markers threaded
    into evals where the ns changes. Ties (same `:at`) sort messages before
    evals for stable output. `last-event-at` (the newest event's `:at`)
    lets the caller flag any message that arrived AFTER it as NEW."

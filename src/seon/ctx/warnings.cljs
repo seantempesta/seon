@@ -1,6 +1,6 @@
 (ns seon.ctx.warnings
   "The `:warnings` context section — current problems rendered as a
-   `;;; ── WARNINGS ──` comment-block via the `seon.warn` check registry.
+   single-`;` `WARNINGS` comment-block via the `seon.warn` check registry.
    Symbol-wired into the composer (`seon.ctx/core-default-ctx`) as
    `'seon.ctx.warnings/warnings-section`."
   (:require
@@ -8,7 +8,7 @@
     [seon.warn :as warn]))
 
 (defn warnings-section
-  "Current problems as a `;;; ── WARNINGS ──` comment-block (one
+  "Current problems as a single-`;` `WARNINGS` comment-block (one
    explanation + fix example per kind, then affected locations), or empty
    when clean — derived from live state, never stored, so a warning
    vanishes the moment its cause does. Corpus (spec-hygiene) checks scope

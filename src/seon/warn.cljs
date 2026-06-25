@@ -1004,41 +1004,41 @@
   (if where (str sym " (" where ")") sym))
 
 (defn- render-cluster
-  "ONE cluster as a `;;` comment-block:
-   `;;; [kind] explanation`, ONE fix example as `;;` lines, then the
+  "ONE cluster as a single-`;` comment-block:
+   `; [kind] explanation`, ONE fix example as `;` lines, then the
    affected list with specific locations. Positive-framing: it names what
    TO do (the fix), and these warnings DERIVE from current state — each
    vanishes the moment you correct it. The explanation appears once per
    kind, never once per fn."
   [{:seon.warn/keys [kind affected explain example]}]
-  (str ";;; [" (name kind) "] " explain "\n"
-       ";; Fix it like this:\n"
-       (str/join "\n" (map #(str ";;   " %) (str/split-lines example)))
+  (str "; [" (name kind) "] " explain "\n"
+       "; Fix it like this:\n"
+       (str/join "\n" (map #(str ";   " %) (str/split-lines example)))
        "\n"
-       ";; Affecting: "
+       "; Affecting: "
        (str/join ", " (map render-affected-entry affected))
        " (" (count affected) "). Correct these and this note clears itself."))
 
 (defn- render-urgent-cluster
   "A LOUD cluster for a `:seon.warn/urgent? true` check — something the
    human is hitting THIS render (e.g. a broken live tile). Unmistakable
-   `‼ URGENT` banner as a `;;;` line, then the same explanation + fix
+   `‼ URGENT` banner as a single-`;` line, then the same explanation + fix
    example + affected list. Rendered at the TOP of the WARNINGS block,
    ahead of the ordinary contract/runtime clusters."
   [{:seon.warn/keys [kind affected explain example]}]
-  (str ";;; ‼ URGENT [" (name kind) "] " explain "\n"
-       ";; Fix it like this:\n"
-       (str/join "\n" (map #(str ";;   " %) (str/split-lines example)))
+  (str "; ‼ URGENT [" (name kind) "] " explain "\n"
+       "; Fix it like this:\n"
+       (str/join "\n" (map #(str ";   " %) (str/split-lines example)))
        "\n"
-       ";; Affecting: "
+       "; Affecting: "
        (str/join ", " (map render-affected-entry affected))
        " (" (count affected) "). Fix this now — it auto-resolves the "
        "moment you do."))
 
 (defn render-warnings
   "Run the registry and render the non-clean checks as a single
-   comment-block: a `;;; ── WARNINGS ──`
-   heading, then one `;;` cluster per kind. URGENT clusters
+   comment-block: a single-`;` `WARNINGS`
+   heading, then one `;` cluster per kind. URGENT clusters
    (`:seon.warn/urgent? true`) render FIRST with a louder template; the
    remaining clusters follow in registry order. Empty string when clean.
    Scope the corpus checks with `:seon.warn/ns`; omit it for the
@@ -1058,7 +1058,7 @@
         {urgent  true
          ordinary false} (group-by (comp boolean :seon.warn/urgent?) clusters)]
     (if (seq clusters)
-      (str ";;; ── WARNINGS ─────────────────────────────────────────────\n"
+      (str "; WARNINGS\n"
            (str/join "\n\n"
                      (concat (map render-urgent-cluster urgent)
                              (map render-cluster ordinary))))
