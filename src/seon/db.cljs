@@ -58,6 +58,7 @@
     [clojure.string :as str]
     [cljs.reader :as reader]
     [datahike.api :as d]
+    [datahike.db.interface :as dbi]
     [datahike.impl.entity :as dentity]
     [seon.db.internal :as internal]
     [seon.schema :as schema]))
@@ -578,10 +579,17 @@
    not defensive fluff. ([[pull]] gates its own patterns with this
    automatically.)
 
-   FilteredDB (the inspector's per-agent view) doesn't implement
-   ILookup — `(:schema db)` THROWS; the schema is conn-level (a filter
-   can't change it), so read through to the wrapped db. Returns `{}`
-   for a nil/schema-less db. `:any` input — the db value is a datahike
+   The wrapper db values — FilteredDB (the inspector's per-agent view),
+   AsOfDB/SinceDB/HistoricalDB (the time-travel values) — don't
+   implement ILookup, so `(:schema db)` THROWS on them. Schema is
+   conn-level (a filter or time-point can't change which attrs are
+   installed), and every db type implements the `dbi/-schema` protocol
+   method, which reads through to the underlying current db. Use it
+   uniformly instead of the record field — that's what makes an
+   explicit-pattern [[pull]] on an as-of/since value see the same
+   installed attrs as the current db (otherwise it wrongly judged them
+   uninstalled and silently dropped them). Returns `{}` for a
+   nil/schema-less db. `:any` input — the db value is a datahike
    runtime handle (third-party boundary).
 
    This is the \"what attrs exist on this db, exactly?\" tool. It lists
@@ -596,9 +604,8 @@
      ;;   — registered, queryable, just no rows yet. Reuse it; don't fork."
   {:malli/schema [:=> [:catn [::db :any]] :map]}
   [db]
-  (or (try (:schema db)
-           (catch :default _
-             (:schema (.-unfiltered-db ^js db))))
+  (or (when (some? db)
+        (try (dbi/-schema db) (catch :default _ nil)))
       {}))
 
 ;; --- pull-pattern guard -----------------------------------------------------
