@@ -176,10 +176,10 @@
 
 (defn- ns-section-name
   "Display name for one namespace block of the :namespaces section:
-   `;; ── namespace seon.db ──` → `:namespaces/seon.db`. nil for a chunk
+   `; namespace seon.db` → `:namespaces/seon.db`. nil for a chunk
    with no namespace header (the section's preamble line)."
   [block]
-  (when-let [m (re-find #";; ── namespace (\S+)" block)]
+  (when-let [m (re-find #"(?m)^; namespace (\S+)" block)]
     (keyword "namespaces" (second m))))
 
 (defn- expand-namespaces-section
@@ -193,7 +193,7 @@
         (mapcat
           (fn [{nm :seon.ctx/name txt :seon.render/text :as sec}]
             (if (= nm :namespaces)
-              (->> (str/split (or txt "") #"(?=;; ── namespace )")
+              (->> (str/split (or txt "") #"(?m)(?=^; namespace )")
                    (remove str/blank?)
                    (map (fn [chunk]
                           {:seon.ctx/name    (or (ns-section-name chunk) :namespaces)
