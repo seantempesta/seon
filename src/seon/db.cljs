@@ -938,7 +938,7 @@
    omit it:
 
      (db/query '[:find ?v ?tx ?added
-                 :where [?e ::title ?v ?tx ?added]]
+                 :where [?e :seon.ns/name ?v ?tx ?added]]
                (db/history))               ; ?added = true add, false retract
 
    Pass an explicit db to branch history off a snapshot you already hold."
