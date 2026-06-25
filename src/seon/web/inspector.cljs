@@ -43,6 +43,9 @@
     [clojure.string :as str]
     [datahike.api :as d]
     [seon.agent-view :as agent-view]
+    [seon.ai.tokens :as tokens]
+    [seon.ctx :as ctx]
+    [seon.ctx.usage :as ctx-usage]
     [seon.db :as db]
     [seon.agent.inspect :as inspect]
     [seon.log :as log]
@@ -142,6 +145,68 @@
   (let [s (pr-str v)]
     (if (> (count s) n) (str (subs s 0 n) " …") s)))
 
+;; ============================================================
+;; Context bar — the per-section token + cache-line audit instrument
+;; (token-usage-pipeline-2026-06-24). DISPLAY-ONLY, all DERIVED at render
+;; time: per-section estimated tokens (seon.ai.tokens/estimate over the
+;; SAME section-texts the LLM prompt is built from — one render, two
+;; consumers), the STRUCTURAL cache breakpoint (end of the byte-stable
+;; prefix = after :namespaces, the sections the composer caches), and the
+;; LIVE cached extent (exact, read off the last turn's persisted
+;; :seon.agent.turn/llm-usage). The divergence between the two markers is
+;; the point — e.g. a provider's cache MINIMUM/block granularity means the
+;; actually-cached count can over- or under-shoot the structural line.
+;; ============================================================
+
+(def ^:private stable-section-names
+  "Section names that form the byte-stable cacheable PREFIX (the composer
+   caches sections with `:seon.ctx/priority` ≤ `seon.ctx/stable-priority-max`
+   = soul → :system → :namespaces). The structural cache-line falls right
+   after the LAST of these in render order. Mirrors `core-default-ctx`."
+  #{:soul-system :system :namespaces})
+
+(defn- context-bar-data
+  "Derive the context-bar model for `agent-id` from the SAME per-section
+   texts the LLM prompt is built from (`section-texts`):
+
+     {::segments [{::name ::tokens ::chars ::stable?} …]  ; render order
+      ::total-tokens N
+      ::cache-line-tokens N        ; structural breakpoint (end of prefix)
+      ::live-cached-tokens N|nil   ; exact, from last turn's usage
+      ::provider-shape kw|nil}
+
+   `::live-cached-tokens` is nil when no turn has run / usage is absent."
+  [agent-id section-texts]
+  (let [segs   (mapv (fn [{nm :seon.ctx/name txt :seon.render/text}]
+                       (let [t (or txt "")]
+                         {::name    nm
+                          ::chars   (count t)
+                          ::tokens  (tokens/estimate t)
+                          ::stable? (contains? stable-section-names nm)}))
+                     section-texts)
+        total  (reduce + 0 (map ::tokens segs))
+        ;; Structural cache-line = cumulative tokens of every section up to
+        ;; AND INCLUDING the last stable one, in render order. (Sections
+        ;; sort static→volatile, so the stable prefix is contiguous.)
+        last-stable-idx (->> (map-indexed vector segs)
+                             (filter (comp ::stable? second))
+                             (map first)
+                             (reduce max -1))
+        cache-line (->> segs
+                        (take (inc last-stable-idx))
+                        (map ::tokens)
+                        (reduce + 0))
+        usage  (try
+                 (ctx-usage/extract
+                   (:seon.agent.turn/llm-usage
+                     (ctx/current-turn {:seon.agent/id agent-id})))
+                 (catch :default _ nil))]
+    {::segments           segs
+     ::total-tokens       total
+     ::cache-line-tokens  cache-line
+     ::live-cached-tokens (some-> usage :seon.ctx.usage/cached)
+     ::provider-shape     (some-> usage :seon.ctx.usage/provider-shape)}))
+
 (defn- snapshot
   "Compute one render snapshot for `agent-id`:
      {:ai-text <string>
@@ -194,6 +259,10 @@
      :section-texts (or section-texts [])
      :char-count (count (or text ""))
      :token-est  (or token-estimate 0)
+     ;; The bottom context-bar audit instrument — per-section tokens +
+     ;; structural cache-line + live cached extent, all derived from the
+     ;; SAME section-texts the prompt is built from.
+     :context-bar (context-bar-data agent-id (or section-texts []))
      :html-cards cards
      :turn-durs  turn-durs
      ;; No render-cap elision on the right pane anymore — the section
@@ -406,6 +475,104 @@
          "ask this agent something ↓ — every section the agent sees renders its html twin here live"])
       (when running?
         (thinking-bubble (default/agent-turn-count agent)))]]))
+
+;; ============================================================
+;; The context bar — per-section token + cache-line viz, full-width
+;; along the bottom of the debug inspector. A horizontal stacked bar:
+;; one segment per rendered section (width ∝ estimated tokens), the
+;; STRUCTURAL cache breakpoint as one marker, the LIVE cached extent as
+;; a second marker, so the divergence is visible. Phosphor Terminal,
+;; dense, monospace. Display-only — re-rendered every SSE push (stable
+;; id so idiomorph preserves it).
+;; ============================================================
+
+(defn- context-bar-id [agent-id] (str "inspect-ctxbar-" agent-id))
+
+(defn- bar-segment
+  "One section segment of the stacked bar. Width is a flex-grow weight
+   (∝ tokens). Stable-prefix sections read amber (the cached prefix);
+   volatile-tail sections read cooler. The section name + token count
+   show inline when the segment is wide enough; always in the title."
+  [{::keys [name tokens chars stable?]} total]
+  (let [pct (if (pos? total) (* 100.0 (/ tokens total)) 0)
+        wide? (>= pct 6)]
+    [:div {:class (str "relative h-full flex items-center justify-center "
+                       "overflow-hidden border-r border-base-950 "
+                       (if stable?
+                         "bg-amber-800/60 hover:bg-amber-700/70 "
+                         "bg-base-700/70 hover:bg-base-600/80 "))
+           :style (str "flex: " (max 0.01 tokens) " 1 0; min-width: 2px;")
+           :title (str (clojure.core/name name) " · ~" tokens " tok · "
+                       (fmt-chars chars) " chars · "
+                       (.toFixed pct 1) "%"
+                       (when stable? " · cached prefix"))}
+     (when wide?
+       [:span {:class (str "px-1 truncate text-[10px] font-mono "
+                           (if stable? "text-amber-50" "text-text-200"))}
+        (str (clojure.core/name name) " " tokens)])]))
+
+(defn- cache-marker
+  "An absolutely-positioned vertical marker over the bar at `pct` of the
+   total width, labeled above. `kind` = :structural (dashed amber, the
+   composer breakpoint) or :live (solid green, the provider's actual
+   cached extent)."
+  [pct kind label]
+  (let [structural? (= kind :structural)]
+    [:div {:class "absolute top-0 bottom-0 pointer-events-none z-10"
+           :style (str "left: " (min 100.0 (max 0.0 pct)) "%;")}
+     [:div {:class (str "absolute top-0 bottom-0 w-px "
+                        (if structural?
+                          "bg-amber-300"
+                          "bg-emerald-400"))
+            :style (when structural? "background-image:repeating-linear-gradient(to bottom,#fcd34d 0 3px,transparent 3px 6px);")}]
+     [:div {:class (str "absolute -top-4 whitespace-nowrap text-[10px] "
+                        "font-mono px-1 rounded "
+                        (if structural?
+                          "text-amber-200 bg-base-900/80 -translate-x-1/2 left-0"
+                          "text-emerald-300 bg-base-900/80 -translate-x-1/2 left-0"))}
+      label]]))
+
+(defn- context-bar-fragment
+  "The bottom context bar for the debug inspector. Stacked per-section
+   token segments + structural cache-line + live cached overlay. Stable
+   `:id` so SSE morphs preserve it."
+  [agent-id {:keys [context-bar]}]
+  (let [{::keys [segments total-tokens cache-line-tokens
+                 live-cached-tokens provider-shape]} context-bar
+        struct-pct (if (pos? total-tokens)
+                     (* 100.0 (/ cache-line-tokens total-tokens)) 0)
+        live-pct   (when (and live-cached-tokens (pos? total-tokens))
+                     (* 100.0 (/ live-cached-tokens total-tokens)))]
+    [:div {:id (context-bar-id agent-id)
+           :class (str "shrink-0 border-t border-base-800 bg-base-900 "
+                       "px-2 pt-5 pb-1.5")}
+     ;; Headline — total + cache-line summary, monospace.
+     [:div {:class "flex items-center gap-3 mb-1 text-[10px] font-mono text-text-400"}
+      [:span {:class "text-text-200"} "context"]
+      [:span {:class "text-amber-400"}
+       (str "~" total-tokens " tok total")]
+      [:span {:class "text-amber-200"}
+       (str "cache-line ~" cache-line-tokens " tok (after :namespaces)")]
+      (if live-cached-tokens
+        [:span {:class "text-emerald-300"}
+         (str "live cached " live-cached-tokens " tok"
+              (when provider-shape (str " · " (clojure.core/name provider-shape))))]
+        [:span {:class "text-text-600 italic"} "no live usage yet"])
+      [:span {:class "ml-auto text-text-600"} "stable prefix amber · volatile tail grey"]]
+     ;; The stacked bar — segments fill by token weight; markers overlay.
+     [:div {:class "relative h-6 w-full flex rounded-sm overflow-visible bg-base-950 border border-base-800"}
+      (if (seq segments)
+        (into [:div {:class "flex w-full h-full rounded-sm overflow-hidden"}]
+              (map #(bar-segment % total-tokens) segments))
+        [:div {:class "flex items-center px-2 text-[10px] font-mono text-text-600"}
+         "no context yet"])
+      ;; Structural breakpoint (composer's cacheable-prefix end).
+      (cache-marker struct-pct :structural
+                    (str "▏ cache-line " cache-line-tokens))
+      ;; Live cached extent (exact, from provider usage) — only when known.
+      (when live-pct
+        (cache-marker live-pct :live
+                      (str "live " live-cached-tokens " ▏")))]]))
 
 (defn- chat-bar-fragment
   "Sticky bottom bar spanning both panes. Submits as a regular
@@ -659,6 +826,7 @@
                  :style "grid-template-columns: 1fr 1fr;"}
            (ai-pane-fragment   agent-id snap)
            (html-pane-fragment agent-id snap)]
+          (context-bar-fragment agent-id snap)
           (chat-bar-fragment agent-id)
           [:div {:class (str "shrink-0 px-2 py-0.5 text-right text-[10px] "
                              "font-mono text-text-500 bg-base-900 "
@@ -1399,7 +1567,8 @@
   [agent-id snap]
   (str (patch-fragment (header-fragment agent-id snap))
        (patch-fragment (ai-pane-fragment agent-id snap))
-       (patch-fragment (html-pane-fragment agent-id snap))))
+       (patch-fragment (html-pane-fragment agent-id snap))
+       (patch-fragment (context-bar-fragment agent-id snap))))
 
 (defn- consumer-payloads
   "The consumer view's three morph fragments (header + bubbles + tile)

@@ -21,6 +21,7 @@
   (:require
     [seon.agent-view :as agent-view]
     [seon.ai :as ai]
+    [seon.ai.tokens :as tokens]
     [seon.ctx :as ctx]
     [seon.db :as db]
     [seon.handler :as handler]
@@ -101,8 +102,9 @@
                                         section-texts)
      :seon.render/section-html    section-html
      ;; Estimate over the WHOLE prompt — same units as the composer
-     ;; (~4 chars/token), so the count grows by the soul length.
-     :seon.render/token-estimate  (quot (count full-text) 4)}))
+     ;; (~4 chars/token, via seon.ai.tokens), so the count grows by the
+     ;; soul length.
+     :seon.render/token-estimate  (tokens/estimate full-text)}))
 
 (defn handlers
   "Return the live handler registry visible to the agent (core
