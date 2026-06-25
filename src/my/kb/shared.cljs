@@ -94,7 +94,7 @@
         (mapv second))))
 
 (defn instructions-section
-  "The `;;; ── SHARED INSTRUCTIONS ──` context block — cluster-wide
+  "The single-`;` `SHARED INSTRUCTIONS` context block — cluster-wide
    standing guidance shown to EVERY agent, every turn. This is the SHARED
    knowledge-base surface, NOT the hardcoded system prompt
    (`seon.ctx/system-text`) — it never overrides those mechanics, it adds
@@ -110,11 +110,11 @@
   (let [items (instructions db)]
     (if (empty? items)
       ""
-      (str ";;; ── SHARED INSTRUCTIONS ─────────────────────────────────\n"
-           ";;; Standing guidance for ALL agents in this cluster (the shared\n"
-           ";;; KB, not the system prompt). When your human gives a durable\n"
-           ";;; instruction, append a row so every agent — present and\n"
-           ";;; future — sees it here.\n"
+      (str "; SHARED INSTRUCTIONS\n"
+           "; Standing guidance for ALL agents in this cluster (the shared\n"
+           "; KB, not the system prompt). When your human gives a durable\n"
+           "; instruction, append a row so every agent — present and\n"
+           "; future — sees it here.\n"
            (str/join "\n"
-                     (map-indexed (fn [i t] (str ";;;   " (inc i) ". " t))
+                     (map-indexed (fn [i t] (str ";   " (inc i) ". " t))
                                   items))))))

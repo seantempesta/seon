@@ -92,23 +92,23 @@
 
    ## Who calls what
 
-   `seon.render/render-agent-tile` is the one entry point: it calls
-   [[wired-content]] to resolve WHICH value is wired
-   (`::content` → [[welcome]]), invokes it
-   through `seon.render/html-render` (the ONE value-or-fn dispatch),
-   and on a throw builds the legible [[error-response]] — a broken
-   tile must never silently vanish (vanish = indistinguishable from
-   unwired; banned)."
+   `seon.render/render-agent-tile` is the one entry point: it resolves
+   WHICH value is wired (`::content` → [[welcome]]), invokes it through
+   `seon.render/html-render` (the ONE value-or-fn dispatch), and on a
+   throw builds a legible error card — a broken tile must never silently
+   vanish (vanish = indistinguishable from unwired; banned). The
+   validation / resolution / error-card PLUMBING this teaching ns
+   describes lives in `seon.render.live-tile.internal` (framework-only,
+   not shown to agents); THIS ns is the authoring tutorial + the
+   [[welcome]] worked example + [[wiring-source]]."
   (:require
     [seon.db :as db]
     [seon.render.chat :as chat]
-    [seon.schema :as schema]
-    [seon.ui.html :as html]))
+    [seon.schema :as schema]))
 
 ;; ============================================================
-;; The hiccup predicate + the canonical value-or-fn shape.
-;;
-;; This ns loads BEFORE seon.render (which requires it), and
+;; The canonical value-or-fn shape — the wiring VOCABULARY an agent
+;; uses. This ns loads BEFORE seon.render (which requires it), and
 ;; register!'s compilability guard rejects forward references — so
 ;; the ONE definition of the value-or-fn slot shape lives here, and
 ;; `:seon.render/html` is registered in seon.render BY REFERENCE to
@@ -117,185 +117,11 @@
 ;;
 ;; PLATFORM LAW (2026-06-11, sci-not-available incident): registered
 ;; schema forms must be PURE DATA — no `[:fn]`, no function objects,
-;; nothing whose form needs evaluation to reconstruct. Registered
-;; forms round-trip as forms (boot index → :seon.schema/source →
-;; re-read), and the pod has no sci: a fn in a registered form
-;; serializes as a symbol or `#object[...]` and dies (or degrades to
-;; garbage) on every subsequent read. Deep-structure validation that
-;; needs a predicate belongs at a FN boundary (instrumentation on a
-;; compiled fn never round-trips as a form) — see [[valid-hiccup?]].
-;;
-;; `::hiccup` below is therefore the PRAGMATIC STRUCTURAL BOUND
-;; (option b): a hiccup element = a vector with a keyword head.
-;; Option (a) — a recursive ref-based registered schema — was tested
-;; and REJECTED twice over: register!'s compilability guard throws
-;; `:malli.core/invalid-ref` on self-reference, and a recursive seqex
-;; trips `:malli.core/potentially-recursive-seqex` inside any
-;; instrumented fn schema. Deep validation runs at the render
-;; boundary instead, where [[valid-hiccup?]] stays a PLAIN fn.
+;; nothing whose form needs evaluation to reconstruct. So `::hiccup`
+;; below is the PRAGMATIC STRUCTURAL BOUND (a hiccup element = a vector
+;; with a keyword head); deep validation runs at the render boundary in
+;; a PLAIN fn (`seon.render.live-tile.internal/valid-hiccup?`).
 ;; ============================================================
-
-(declare valid-hiccup?)
-
-(defn valid-hiccup-elem?
-  "True if `x` is a valid hiccup ELEMENT — string, int, nil, or a
-   nested vector that starts with a keyword."
-  {:malli/schema [:=> [:catn [::elem :any]] :boolean]}
-  [x]
-  (or (string? x)
-      (int? x)
-      (nil? x)
-      (valid-hiccup? x)))
-
-(defn valid-hiccup?
-  "True if `x` is a valid hiccup VECTOR: starts with a keyword tag,
-   optional second-position attrs map, zero or more children where
-   each child is a valid hiccup element. Non-recursive Malli idiom —
-   handles arbitrary-depth nesting without
-   :malli.core/potentially-recursive-seqex.
-
-   A PLAIN fn for render-boundary checks and fn instrumentation —
-   deliberately NOT inside any `register!` form (registered schema
-   forms must be pure data; see the platform-law comment above).
-   `::content` / `:seon.render/html-response` carry the shallow
-   `::hiccup` data shape instead. (`:any` input — this IS the
-   validator for arbitrary values.)"
-  {:malli/schema [:=> [:catn [::x :any]] :boolean]}
-  [x]
-  (and (vector? x)
-       (keyword? (first x))
-       (let [rest-x (rest x)
-             [_maybe-attrs children]
-             (if (map? (first rest-x))
-               [(first rest-x) (rest rest-x)]
-               [nil rest-x])]
-         (every? valid-hiccup-elem? children))))
-
-;; ============================================================
-;; Serialization-boundary structural check (serialization-boundary
-;; hardening): [[valid-hiccup?]] above is the strict
-;; AUTHORING shape, deliberately narrower than what the serializer
-;; accepts (seqs, numbers, raw, stringifiable values all render fine
-;; via seon.ui.html/->string) — so it CANNOT gate the render path
-;; without falsely erroring legitimate tiles. The fns below mirror
-;; the SERIALIZER's acceptance exactly and return the FIRST fatal
-;; defect with its path, so a broken tile degrades to
-;; [[error-response]] with a legible message instead of throwing
-;; later at page serialization and 500ing /agent/<id> + the grid.
-;; ============================================================
-
-(schema/register! ::structure-path [:vector :int])
-(schema/register! ::structure-message :string)
-(schema/register! ::structure-error
-  [:map
-   [::structure-path    ::structure-path]
-   [::structure-message ::structure-message]])
-
-(defn- pr-str-bounded
-  "pr-str `x` clipped to ~120 chars — error messages quote the
-   offending node without dumping a whole hiccup tree."
-  [x]
-  (let [s (pr-str x)]
-    (if (> (count s) 120) (str (subs s 0 120) "…") s)))
-
-(defn- structure-error-at
-  "Walk `x` the way seon.ui.html renders it; return the first fatal
-   structural defect as {::structure-path ::structure-message}, or
-   nil. Fatal = exactly what makes ->string THROW: a vector element
-   whose tag slot isn't a keyword/symbol/string. Everything the
-   serializer tolerates (nil/false, raw, seqs, stringifiable scalars)
-   passes.
-
-   ATTRS-POSITION RULE (#42): in a hiccup element [tag attrs? & children]
-   the attrs map MUST be the SECOND element (immediately after the tag),
-   before any children. The serializer reads attrs ONLY in that position;
-   a map placed later among the children silently degrades to garbage
-   content. This walk reports that one unambiguous misplaced-attrs case
-   — the 2nd slot is a non-map child AND a (non-raw) map sits at child
-   index ≥ 1 — as a specific ::structure-message. It deliberately does
-   NOT flag the genuinely-ambiguous shapes (a single map that COULD be
-   intended as the attrs: [:div {…}] is correct; [:h3 \"x\"] has no map)."
-  [x path]
-  (cond
-    (or (nil? x) (false? x)) nil
-    (html/raw? x)            nil
-
-    (vector? x)
-    (let [tag (nth x 0 nil)]
-      (cond
-        (vector? tag)
-        {::structure-path path
-         ::structure-message
-         (str "vector-of-vectors child — the element at this path is a "
-              "vector whose first slot is itself a vector ("
-              (pr-str-bounded tag) "). Splice the children into the "
-              "parent vector, or emit them as a seq — "
-              "(list [:div …] [:div …]) — never a nested vector of "
-              "elements.")}
-
-        (not (or (keyword? tag) (symbol? tag) (string? tag)))
-        {::structure-path path
-         ::structure-message
-         (str "invalid tag — must be a keyword, symbol, or string; got "
-              (pr-str-bounded tag))}
-
-        :else
-        (let [body      (rest x)
-              attrs?    (and (map? (first body))
-                             (not (html/raw? (first body))))
-              children  (if attrs? (rest body) body)
-              offset    (if attrs? 2 1)
-              ;; MISPLACED-ATTRS (#42): the unambiguous case — the 2nd
-              ;; slot is a NON-map child (so it's read as content, not
-              ;; attrs) yet an attrs-looking map sits LATER among the
-              ;; children. The serializer reads attrs only in 2nd
-              ;; position, so this map silently becomes garbage content.
-              ;; CONSERVATIVE on purpose: fires ONLY when the 2nd slot is
-              ;; already a non-map child AND a (non-raw) map appears at
-              ;; child index ≥ 1 — never on a valid tile ([:h3 "x"] has no
-              ;; map; [:div {:k 1} "x"] has the map in correct 2nd
-              ;; position so attrs? is true and this branch is skipped).
-              misplaced-i (when (and (seq body) (not attrs?))
-                            (first
-                              (keep-indexed
-                                (fn [i c]
-                                  (when (and (pos? i)
-                                             (map? c)
-                                             (not (html/raw? c)))
-                                    i))
-                                children)))]
-          (if misplaced-i
-            {::structure-path (conj path (+ offset misplaced-i))
-             ::structure-message
-             (str "misplaced attrs map — the attrs map must be the SECOND "
-                  "element (immediately after the tag), before any children; "
-                  "got a map at child index " misplaced-i " ("
-                  (pr-str-bounded (nth children misplaced-i))
-                  "). Move it to the second slot, e.g. [" (pr-str (nth x 0))
-                  " {…} child …], or drop it if it was meant as content.")}
-            (some identity
-                  (map-indexed
-                    (fn [i c] (structure-error-at c (conj path (+ offset i))))
-                    children))))))
-
-    (seq? x)
-    (some identity
-          (map-indexed (fn [i c] (structure-error-at c (conj path i)))
-                       x))
-
-    :else nil))
-
-(defn hiccup-structure-error
-  "Serializer-faithful structural check for a tile's hiccup. Returns
-   nil when `seon.ui.html/->string` would serialize `x` cleanly, or
-   `{::structure-path […] ::structure-message \"…\"}` locating the
-   FIRST fatal defect (e.g. a vector-of-vectors child). A PLAIN fn at
-   the render boundary, like [[valid-hiccup?]] — never inside a
-   registered form. (`:any` input — this IS the validator for
-   arbitrary values.)"
-  {:malli/schema [:=> [:catn [::x :any]] [:maybe ::structure-error]]}
-  [x]
-  (structure-error-at x []))
 
 ;; The PURE-DATA hiccup bound: a vector with a keyword head. Shallow
 ;; on purpose — children are `:any` (sanctioned: arbitrary hiccup
@@ -320,19 +146,6 @@
 ;; key now means ONLY the generic entity-card render slot.)
 (schema/register! ::source [:enum ::content ::welcome])
 
-(schema/register! ::wired-request
-  [:map [:seon.render/entity :map]])
-
-(schema/register! ::wired-response
-  [:map
-   [::source ::source]
-   [::value  ::content]])
-
-(schema/register! ::error-request
-  [:map
-   [:seon.db/error :seon.db/error]
-   [::content {:optional true} ::content]])
-
 (schema/register! ::hour [:int {:min 0 :max 23}])
 
 (schema/register! ::user-name :string)
@@ -349,52 +162,15 @@
   [:map [::user-name {:optional true} ::user-name]])
 
 ;; ============================================================
-;; Resolution — which value is wired.
+;; The core default tile.
 ;; ============================================================
 
 (def welcome-sym
   "The core default tile — [[welcome]], late-resolved like any
-   other wired symbol (the default eats the same dogfood)."
+   other wired symbol (the default eats the same dogfood). The
+   resolution that selects it (when no `::content` is wired) lives in
+   `seon.render.live-tile.internal/wired-content`."
   'seon.render.live-tile/welcome)
-
-(defn wired-content
-  "Resolve WHICH value is the agent's live tile, with provenance.
-
-   Resolution on the pulled agent `:seon.render/entity`:
-   `:seon.render.live-tile/content` (THE tile key) when present, else
-   [[welcome-sym]] (the core welcome). Neither the per-entity
-   `:seon.render/html` nor the `:seon.agent` KIND default is consulted
-   — that key means ONLY the generic entity-card render slot (one key,
-   one meaning; the legacy tile fallback was deleted per PRD
-   live-tiles-prd-2026-06-11 §8.1).
-
-   Values arrive pr-str-encoded from the mixed-:or bridge; the attr
-   read decodes via `seon.db/decode-edn-value`."
-  {:malli/schema [:=> [:cat ::wired-request] ::wired-response]}
-  [{:seon.render/keys [entity]}]
-  (let [content (some->> (::content entity)
-                         (db/decode-edn-value ::content))]
-    (if (some? content)
-      {::source ::content ::value content}
-      {::source ::welcome ::value welcome-sym})))
-
-(defn wired-label
-  "The awareness-section header identity for a [[wired-content]]
-   result — the wired fn's fully-qualified name (its source is one
-   `:seon.fn`/catalog lookup away) or \"literal hiccup on your
-   entity\", with provenance (legacy slot / core default), so
-   the agent reading the section always sees HOW to change the
-   display."
-  {:malli/schema [:=> [:cat ::wired-response] :string]}
-  [{::keys [source value]}]
-  (case source
-    ::content
-    (if (symbol? value)
-      (str value " (a fn on your entity)")
-      "literal hiccup on your entity")
-
-    ::welcome
-    (str value " (the core default — wire your own)")))
 
 ;; ============================================================
 ;; The welcome — the default tile every uncustomized agent shows.
