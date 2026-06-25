@@ -44,7 +44,8 @@
   "The resume projection of one open item — `[*]`-pulled then trimmed.
    (Not a pull PATTERN: naming a never-yet-transacted attr there throws.)"
   [:seon.agent.todo/id :seon.agent.todo/title
-   :seon.agent.todo/created-at :seon.agent.todo/description])
+   :seon.agent.todo/created-at :seon.agent.todo/description
+   :seon.agent.todo/message])
 
 (defn open-todos
   "Open todos in db value `db`, oldest first; `owner-eid` nil = all owners."
@@ -69,22 +70,24 @@
           :else      (str (quot m 1440) "d"))))
 
 (defn open-todos-block
-  "Context-section text for `owner`'s open todos in db value `db` — a
-   `;; ── open todos ──` comment-block, one `;; <id> [<age>] <title>` line
-   per item, oldest first; \"\" when none (the section vanishes when the
-   work is done — nothing stored, nothing to acknowledge). Rides as `;;`
-   comments so the whole context reads as eval'able Clojure."
+  "Context-section text for `owner`'s open todos in db value `db` — single-`;`
+   prose guidance + one `; <id> [<age>] <title>` line per item, oldest first;
+   a `✉` marker leads items auto-minted from one of your human's messages (a
+   memory aid, not an obligation — `complete!` it once you've addressed them).
+   \"\" when none (the section vanishes when the work is done — nothing stored,
+   nothing to acknowledge). Rides as `;` comments so the whole context reads
+   as eval'able Clojure."
   [db owner]
   (let [todos (when-let [oe (:db/id (db/entity db owner))]
                 (open-todos db oe))]
     (if (empty? todos)
       ""
-      (str ";; Your open work items — close one with\n"
-           ";;   (seon.agent.todo/complete! {:seon.agent.todo/id \"<id>\"})\n"
-           ";; when finished:\n"
+      (str "; Your open work items — a memory aid, not an obligation. Close one with\n"
+           ";   (seon.agent.todo/complete! {:seon.agent.todo/id \"<id>\"})\n"
+           "; once addressed. A ✉ item tracks a message from your human.\n"
            (str/join "\n"
-                     (map (fn [{:seon.agent.todo/keys [id title created-at]}]
-                            (str ";; " id " [" (age-str created-at) "] " title))
+                     (map (fn [{:seon.agent.todo/keys [id title created-at message]}]
+                            (str "; " (when message "✉ ") id " [" (age-str created-at) "] " title))
                           todos))))))
 
 (defn open-todos-section

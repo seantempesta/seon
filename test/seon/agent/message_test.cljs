@@ -18,6 +18,7 @@
     [cljs.test :refer [deftest is testing async]]
     [datahike.api :as d]
     [seon.agent :as agent]
+    [seon.agent.todo :as todo]
     [seon.client :as client]
     [seon.db :as db]))
 
@@ -212,6 +213,113 @@
                                     (agent/messages {:seon.agent/id a-id}))]
                       (is (= ["MSGmsgtestIN01" "MSGmsgtestOUT1"] ids)
                           "from = me OR to ∋ me — B's unrelated message excluded")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; The message ↔ todo safety net (P4): a :human inbound auto-mints ONE
+;; address-todo per agent recipient, ATOMIC in the message's tx, linked via
+;; :seon.agent.todo/message. "Addressed" DERIVES from the linked todo's
+;; completion — no stored handled? flag.
+;; ---------------------------------------------------------------------------
+
+(defn- todos-for
+  "Address-todos owned by agent `aid`, message back-ref pulled."
+  [conn aid]
+  (->> (d/q '[:find (pull ?t [* {:seon.agent.todo/owner   [:seon.agent/id]
+                                 :seon.agent.todo/from    [:seon.user/id :seon.agent/id]
+                                 :seon.agent.todo/message [:seon.agent.message/id]}])
+              :in $ ?aid
+              :where
+              [?o :seon.agent/id ?aid]
+              [?t :seon.agent.todo/owner ?o]]
+            @conn aid)
+       (map first)
+       vec))
+
+(deftest human-message-auto-mints-a-linked-address-todo
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (agent/message!
+                  {:seon.agent.message/from    agent/user-ref
+                   :seon.agent.message/to      [:seon.agent/id a-id]
+                   :seon.agent.message/content "please audit the schemas\nthen tell me what you find"})
+                (.then
+                  (fn [{mid :seon.agent.message/id}]
+                    (let [ts (todos-for conn a-id)
+                          t  (first ts)]
+                      (is (= 1 (count ts)) "exactly ONE address-todo minted")
+                      (is (= :open (:seon.agent.todo/status t)) "minted open")
+                      (is (= a-id (get-in t [:seon.agent.todo/owner :seon.agent/id]))
+                          "owned by the agent recipient")
+                      (is (= "user" (get-in t [:seon.agent.todo/from :seon.user/id]))
+                          "from = the human sender")
+                      (is (= mid (get-in t [:seon.agent.todo/message :seon.agent.message/id]))
+                          "linked to the SAME-TX message via :seon.agent.todo/message")
+                      (is (= "please audit the schemas then tell me what you find"
+                             (:seon.agent.todo/title t))
+                          "title = clipped single-line preview (newline collapsed)")
+                      (is (empty? (todos-for conn b-id))
+                          "no todo for an un-addressed agent")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest clipped-title-is-bounded-with-ellipsis
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (agent/message!
+                  {:seon.agent.message/from    agent/user-ref
+                   :seon.agent.message/to      [:seon.agent/id a-id]
+                   :seon.agent.message/content (apply str (repeat 200 "x"))})
+                (.then
+                  (fn [_]
+                    (let [title (:seon.agent.todo/title (first (todos-for conn a-id)))]
+                      (is (= 81 (count title)) "clipped to ~80 chars + the … glyph")
+                      (is (re-find #"…$" title) "trailing ellipsis marks the cut")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest agent-message-mints-no-todo
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (db/with-agent b-id
+                  (fn []
+                    (agent/message!
+                      {:seon.agent.message/to      [:seon.agent/id a-id]
+                       :seon.agent.message/content "heads up: foo depends on qux"})))
+                (.then
+                  (fn [{mid :seon.agent.message/id}]
+                    (let [[m] (filter #(= mid (:seon.agent.message/id %)) (pulled-msgs conn))]
+                      (is (= :agent (:seon.agent.message/origin m))
+                          "agent-originated ⇒ origin :agent"))
+                    (is (empty? (todos-for conn a-id))
+                        "agent→agent message mints NO address-todo"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest addressed-derives-from-the-linked-todos-completion
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (agent/message!
+                  {:seon.agent.message/from    agent/user-ref
+                   :seon.agent.message/to      [:seon.agent/id a-id]
+                   :seon.agent.message/content "fix the failing test"})
+                (.then
+                  (fn [{mid :seon.agent.message/id}]
+                    (let [t (first (todos-for conn a-id))]
+                      (is (= :open (:seon.agent.todo/status t)) "unaddressed ⇒ linked todo open")
+                      (todo/complete! {:seon.agent.todo/id (:seon.agent.todo/id t)}))))
+                (.then
+                  (fn [_]
+                    (let [t2 (first (todos-for conn a-id))]
+                      (is (= :done (:seon.agent.todo/status t2))
+                          "completing the todo ⇒ the message is addressed (derived)")
+                      (is (string? (get-in t2 [:seon.agent.todo/message :seon.agent.message/id]))
+                          "still linked to its message after completion")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
