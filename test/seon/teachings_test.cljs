@@ -289,7 +289,7 @@
   ;; surface its examples straight from the live system-prompt text so a
   ;; code block a user puts in the identity file is still validated.
   (surface-examples "my.soul (live SOUL.md/AGENTS.md)"
-                    (soul/system-prompt-text)))
+                    (soul/identity-text)))
 
 (defn- ns-doc-examples [dbv]
   (->> (db/query {:seon.db/db dbv

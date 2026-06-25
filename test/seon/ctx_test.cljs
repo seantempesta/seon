@@ -435,7 +435,7 @@
                       ;; The `;; ── your entity ──` header was REMOVED
                       ;; (keystone): the section renderer's bracket demarcates
                       ;; the section now.
-                      (is (some #{:system} sections)
+                      (is (some #{:namespaces} sections)
                           "core defaults merged in")
                       (is (some #{:transcript} sections))
                       (is (not-any? #{:purpose} sections)

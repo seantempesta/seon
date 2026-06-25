@@ -35,11 +35,16 @@
 
    This ns also owns the shared `:seon.ai/*` schema vocabulary (the
    errors-are-values envelope, request/response field shapes) and the
-   provider-agnostic system-prompt resolution — both providers send
-   the same store-resident soul."
+   provider-agnostic system-prompt resolution. The LLM `system` role
+   message is the HARDCODED, system-specific seon mechanics
+   ([[seon.ctx/system-text]] — REPL doctrine, environment orientation,
+   common DB ops, standing teachings); both providers send the same one.
+   It is decoupled from SOUL.md / AGENTS.md, which are FILE-LOADED
+   CONTEXT sections (`seon.ctx.doc/doc-section`), not the system
+   message."
   (:require [clojure.string :as str]
             [cljs.reader :as reader]
-            [my.soul :as soul]
+            [seon.ctx :as ctx]
             [seon.db :as db]
             [seon.log :as log]
             [seon.schema :as schema]))
@@ -321,30 +326,28 @@
       :deepseek))
 
 ;; ============================================================
-;; Shared system-prompt resolution — both providers send the same
-;; store-resident soul.
+;; Shared system-prompt resolution — the HARDCODED, system-specific seon
+;; mechanics. Both providers send the same one.
+;;
+;; The system role message is NOT the soul and NOT any file: it is the
+;; environment orientation + REPL doctrine + common DB ops + standing
+;; teachings hardcoded in `seon.ctx/system-text`. SOUL.md / AGENTS.md are
+;; FILE-LOADED CONTEXT sections (`seon.ctx.doc/doc-section`), wired into
+;; `seon.ctx/core-default-ctx` — they ride the user-message context, not
+;; here. There is NO file read and NO fallback in this path.
 ;; ============================================================
-
-(def fallback-system-prompt
-  "Minimal boot-edge fallback ONLY — used when NO identity file exists
-   (no SOUL.md / AGENTS.md). The REAL identity is read LIVE from those
-   files every turn (my.soul/system-prompt-text); the universal REPL
-   mechanics are hardcoded in the system section
-   (seon.ctx/system-text), not here."
-  (str "You are Seon, a bonded Clojure agent. Your entire output is "
-       "read and evaluated as ClojureScript source — act by emitting "
-       "forms, narrate with ; line comments, no markdown fences."))
 
 (schema/register! ::prompt-request
   [:map [::system-prompt {:optional true} ::system-prompt]])
 
-;; Honest boundary between the two blocks every LLM call sends: the SOUL
-;; system message (block 1) and the assembled context (block 2). A reader
-;; of the debug text sees exactly where the system message ends and the
-;; context begins — the same two blocks the adapters wire (openai-compat
-;; `:messages [{:role "system" …}]`, anthropic `:system [{:type "text" …}]`).
-(def soul-boundary
-  "\n\n;; ──────── ↑ system message (soul)  │  ↓ context (:seon.ai/ctx) ────────\n\n")
+;; Honest boundary between the two blocks every LLM call sends: the
+;; hardcoded SYSTEM message (block 1) and the assembled context (block 2).
+;; A reader of the debug text sees exactly where the system message ends
+;; and the context begins — the same two blocks the adapters wire
+;; (openai-compat `:messages [{:role "system" …}]`, anthropic
+;; `:system [{:type "text" …}]`).
+(def system-boundary
+  "\n\n;; ──────── ↑ system message  │  ↓ context (:seon.ai/ctx) ────────\n\n")
 
 ;; Request for [[debug-full-prompt]]: the assembled context (block 2) plus
 ;; the same optional `::system-prompt` override `effective-system-prompt`
@@ -356,31 +359,29 @@
 
 (defn effective-system-prompt
   "The system message content for a call: the request's explicit
-   `:seon.ai/system-prompt` override when given, else the live identity
-   (`my.soul/system-prompt-text` — SOUL.md / AGENTS.md read fresh this
-   call), else [[fallback-system-prompt]] (no identity file). Never
-   throws."
+   `:seon.ai/system-prompt` override when given, else the HARDCODED
+   system-specific seon mechanics (`seon.ctx/system-text` — byte-stable,
+   the same for every agent and turn, so it caches as the system block).
+   This is NOT the soul and NOT a file — SOUL.md / AGENTS.md are context
+   sections, decoupled from the system message. Never throws."
   {:malli/schema [:=> [:cat ::prompt-request] ::system-prompt]}
   [{::keys [system-prompt]}]
-  (or system-prompt
-      (try (not-empty (soul/system-prompt-text))
-           (catch :default _ nil))
-      fallback-system-prompt))
+  (or system-prompt ctx/system-text))
 
 (defn debug-full-prompt
-  "The FULL prompt as the agent sees it — the live soul system block
+  "The FULL prompt as the agent sees it — the hardcoded system block
    ([[effective-system-prompt]]), a boundary, then the assembled context
    (block 2). THE single source both the inspector preview
    (`seon.agent.inspect/ctx-preview`) and the persisted per-turn log use,
    so the two debug surfaces are byte-identical to each other and to what
    the adapters wire. This is a DEBUG representation only — it is NEVER
    sent to the LLM (the adapters add the system block themselves; sending
-   this would double the soul). `:seon.ai/ctx` is the assembled context;
-   an explicit `:seon.ai/system-prompt` override is honored (passed
-   through to [[effective-system-prompt]])."
+   this would double it). `:seon.ai/ctx` is the assembled context; an
+   explicit `:seon.ai/system-prompt` override is honored (passed through
+   to [[effective-system-prompt]])."
   {:malli/schema [:=> [:cat ::debug-prompt-request] :string]}
   [{::keys [ctx] :as request}]
-  (str (effective-system-prompt request) soul-boundary ctx))
+  (str (effective-system-prompt request) system-boundary ctx))
 
 ;; ============================================================
 ;; Shared error logging — a failed LLM call is NEVER silent.

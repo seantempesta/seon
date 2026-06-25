@@ -126,7 +126,6 @@
 (def eval-render-cap ctx/eval-render-cap)
 (def cap-result ctx/cap-result)
 (def cap-result-body ctx/cap-result-body)
-(def system-section ctx/system-section)
 (def namespaces-section ctx-namespaces/namespaces-section)
 (def your-entity-section ctx-your-entity/your-entity-section)
 (def render-namespace ctx/render-namespace)

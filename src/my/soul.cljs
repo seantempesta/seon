@@ -1,26 +1,29 @@
 (ns my.soul
-  "The agent's API-level SYSTEM-PROMPT IDENTITY, read LIVE from disk.
+  "The agent's IDENTITY files, read LIVE from disk.
 
    The identity is the text of the user's identity files — SOUL.md and
-   AGENTS.md — read FRESH on every LLM call ([[system-prompt-text]],
-   which seon.ai/effective-system-prompt joins into the `system`
-   message). NO store, NO seed, NO restart: a user's edit to SOUL.md or
-   AGENTS.md lands on the NEXT turn for every agent. The files are the
-   single source of truth and are freely user-editable.
+   AGENTS.md — read FRESH on demand. NO store, NO seed, NO restart: a
+   user's edit to either file is reflected on the next read, for every
+   agent. The files are the single source of truth and are freely
+   user-editable.
 
-   This is identity ONLY. The universal your-output-is-a-REPL MECHANICS
-   are hardcoded in the system section (`seon.ctx/system-text`), not
-   here — so the user can edit or even empty SOUL.md/AGENTS.md without
-   breaking the core: the load-bearing teaching lives in the core, the
-   files only add who-this-agent-is on top. When no identity file
-   exists, [[system-prompt-text]] is \"\" and the caller falls back to a
-   minimal boot-edge prompt (see seon.ai/fallback-system-prompt).
+   These files are surfaced to the agent as generic CONTEXT sections via
+   `seon.ctx.doc/doc-section` (wired in `seon.ctx/core-default-ctx`) —
+   each present file is its own section, an absent file is no section
+   (NO fallback). They are NOT the LLM `system` message: that is the
+   hardcoded, system-specific seon mechanics (`seon.ctx/system-text`,
+   sent by `seon.ai/effective-system-prompt`). Identity (these files) and
+   mechanics (the system message) are kept strictly separate.
+
+   This ns is the thin LIVE-read helper the teachings validator uses to
+   surface + validate code blocks a user places in the identity files
+   ([[identity-text]]); it stores nothing.
 
    FILE RESOLUTION ([[soul-files]]): the primary identity file
    (`SEON_SOUL_FILE` override, else `SOUL.md`) followed by `AGENTS.md`,
    each read when it exists, joined with a blank line. AGENTS.md is the
    cross-tool standard for repo/work instructions; SOUL.md is seon's
-   identity file — both ride into the prompt."
+   identity file."
   (:require
     [clojure.string :as str]))
 
@@ -63,8 +66,8 @@
     (catch :default _ nil)))
 
 (defn soul-files
-  "The identity files read LIVE into the system prompt, in order: the
-   primary identity file (`SEON_SOUL_FILE` override, else SOUL.md) then
+  "The identity files that currently exist, in order: the primary
+   identity file (`SEON_SOUL_FILE` override, else SOUL.md) then
    AGENTS.md — only those that currently exist, deduped (so an
    SEON_SOUL_FILE pointing at AGENTS.md is not read twice). A user
    adding, editing, or removing either file is reflected on the next
@@ -77,14 +80,12 @@
        distinct
        vec))
 
-(defn system-prompt-text
-  "The agent's IDENTITY system message: the live text of every
-   [[soul-files]] entry, read FRESH on each call and joined with a blank
-   line. \"\" when none exist (the caller falls back — see
-   seon.ai/effective-system-prompt). Read every turn so a user's edit to
-   SOUL.md / AGENTS.md lands next turn for ALL agents — no seed, no
-   restart. The universal REPL mechanics are NOT here; they are
-   hardcoded in seon.ctx/system-text."
+(defn identity-text
+  "The LIVE text of every [[soul-files]] entry, read FRESH on each call
+   and joined with a blank line. \"\" when none exist. Used by the
+   teachings validator to surface + validate code blocks a user places
+   in the identity files. This is NOT the LLM system message — that is
+   the hardcoded mechanics in `seon.ctx/system-text`."
   {:malli/schema [:=> [:cat] :string]}
   []
   (->> (soul-files)

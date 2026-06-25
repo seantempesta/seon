@@ -25,9 +25,12 @@
        ones; the library gate lives on the INDEX side) and
        [[seon.ctx.namespaces/full-source-ns?]] (which rows the boot
        indexer inlines real file text for).
-     - the `:system` section (system-text / system-section — a
-       byte-stable shared artifact) and the derived read API every
-       section shares (messages / evals / session-evals / current-ns /
+     - `system-text` — the byte-stable, system-specific seon mechanics
+       sent as the LLM `system` role message (via
+       `seon.ai/effective-system-prompt`); NOT a context section (the
+       soul/agents files are context sections via `seon.ctx.doc`) — and
+       the derived read API every section shares (messages / evals /
+       session-evals / current-ns /
        effective-cap / format-eval-row / the eval-render caps / …) —
        every read takes the composer's `:seon.db/db` snapshot so one
        render is one db view. The other core sections live in their own
@@ -55,6 +58,7 @@
   (:require
     [clojure.string :as str]
     [cljs.reader :as edn]
+    [seon.ctx.doc :as doc]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
@@ -1024,15 +1028,6 @@
     ";;;   cannot read your certainty from your phrasing.\n"
     ";;; ─────────────────────────────────────────────────────────────"))
 
-(defn system-section
-  "The universal system header — returns [[system-text]] verbatim.
-   A fn only because sections render through the symbol slot; it takes
-   the standard section input and ignores it (byte-identical for every
-   agent and turn — the whole point)."
-  {:malli/schema [:=> [:cat :map] :string]}
-  [_input]
-  system-text)
-
 
 ;; ============================================================
 ;; render-namespace — the foundational whole-namespace render.
@@ -1476,9 +1471,11 @@
    agent — ordered top→bottom = static→volatile (the provider-cache
    contract): everything through :namespaces is the cacheable prefix.
 
-     1. :system      — the universal concept paragraphs + standing
-                       teachings; byte-identical for every agent and turn
-                       (the agent id lives in the transcript readline)
+     1. :soul/:agents — SOUL.md + AGENTS.md as generic doc-sections
+                       (present file → its own section, absent → none).
+                       These are CONTEXT, not the system message — the
+                       hardcoded system-specific mechanics ride the
+                       system role (`seon.ai/effective-system-prompt`).
      2. :namespaces  — THE BODY: one `;; ── namespace x ──` block per
                        included ns, recency-ordered (most-recently-
                        modified LAST), curated full/signature per ns
@@ -1503,29 +1500,40 @@
 
    Smallest priority renders first."
   []
-  [{:seon.ctx/name :system       :seon.ctx/priority 10
-    :seon.render/ai 'seon.ctx/system-section}
-   {:seon.ctx/name :namespaces   :seon.ctx/priority 20
-    :seon.render/ai 'seon.ctx.namespaces/namespaces-section}
-   {:seon.ctx/name :your-entity  :seon.ctx/priority 30
-    :seon.render/ai 'seon.ctx.your-entity/your-entity-section}
-   {:seon.ctx/name :live-tile    :seon.ctx/priority 35
-    :seon.render/ai 'seon.ctx.live-tile/live-tile-section}
-   {:seon.ctx/name :warnings     :seon.ctx/priority 40
-    :seon.render/ai 'seon.ctx.warnings/warnings-section}
-   {:seon.ctx/name :open-todos   :seon.ctx/priority 45
-    :seon.render/ai 'seon.agent.todo/open-todos-section}
-   {:seon.ctx/name :relevant-source :seon.ctx/priority 48
-    :seon.render/ai 'seon.ctx.relevant/relevant-source-section}
-   {:seon.ctx/name :inventory    :seon.ctx/priority 97
-    :seon.render/ai 'seon.ctx.inventory/inventory-section}
-   ;; The transcript is the WHOLE bottom of the context (priority 100,
-   ;; LAST): the comment-block REPL with the masthead at its head and the
-   ;; folded live readline at its very end — it ABSORBS the prompt + turns
-   ;; + status into ONE steering surface (no separate sections).
-   {:seon.ctx/name :transcript   :seon.ctx/priority 100
-    :seon.render/ai 'seon.ctx.transcript/transcript-section
-    :seon.render/html 'seon.ctx.transcript/transcript-section-html}])
+  (into
+   ;; SOUL.md + AGENTS.md as generic doc-sections — a present file → its
+   ;; own context section, absent → nothing (NO fallback). These are
+   ;; CONTEXT sections (user message), NOT the LLM system message: the
+   ;; system role carries the hardcoded system-specific mechanics
+   ;; ([[system-text]] via `seon.ai/effective-system-prompt`), kept
+   ;; strictly separate from these files. `:soul` (5) / `:agents` (8) sit
+   ;; at the top of the cacheable prefix; an edit busts only their block.
+   (filterv some?
+            [(doc/doc-section {:seon.ctx.doc/path "SOUL.md"
+                               :seon.ctx/name :soul :seon.ctx/priority 5})
+             (doc/doc-section {:seon.ctx.doc/path "AGENTS.md"
+                               :seon.ctx/name :agents :seon.ctx/priority 8})])
+   [{:seon.ctx/name :namespaces   :seon.ctx/priority 20
+     :seon.render/ai 'seon.ctx.namespaces/namespaces-section}
+    {:seon.ctx/name :your-entity  :seon.ctx/priority 30
+     :seon.render/ai 'seon.ctx.your-entity/your-entity-section}
+    {:seon.ctx/name :live-tile    :seon.ctx/priority 35
+     :seon.render/ai 'seon.ctx.live-tile/live-tile-section}
+    {:seon.ctx/name :warnings     :seon.ctx/priority 40
+     :seon.render/ai 'seon.ctx.warnings/warnings-section}
+    {:seon.ctx/name :open-todos   :seon.ctx/priority 45
+     :seon.render/ai 'seon.agent.todo/open-todos-section}
+    {:seon.ctx/name :relevant-source :seon.ctx/priority 48
+     :seon.render/ai 'seon.ctx.relevant/relevant-source-section}
+    {:seon.ctx/name :inventory    :seon.ctx/priority 97
+     :seon.render/ai 'seon.ctx.inventory/inventory-section}
+    ;; The transcript is the WHOLE bottom of the context (priority 100,
+    ;; LAST): the comment-block REPL with the masthead at its head and the
+    ;; folded live readline at its very end — it ABSORBS the prompt + turns
+    ;; + status into ONE steering surface (no separate sections).
+    {:seon.ctx/name :transcript   :seon.ctx/priority 100
+     :seon.render/ai 'seon.ctx.transcript/transcript-section
+     :seon.render/html 'seon.ctx.transcript/transcript-section-html}]))
 
 ;; ============================================================
 ;; Composer — merge semantics + render guard + budget (the

@@ -61,11 +61,14 @@
     ;; Required here so the deftest-vars roster carries my.kb-test and
     ;; its full source renders as the exemplar test sibling.
     [my.kb-test]
-    ;; my.soul (2026-06-11): the store-resident system prompt —
-    ;; seed-from-SOUL.md, seed-only-if-absent (edits survive reboot),
-    ;; LLM call path reads the store. NOT a my.kb child (and so not an
-    ;; exemplar test sibling) — see the my.soul ns doc.
+    ;; my.soul: the thin LIVE-read helper over the identity files
+    ;; (SOUL.md / AGENTS.md) the teachings validator uses — and the
+    ;; decoupling contract (system message is hardcoded, NOT the soul).
     [my.soul-test]
+    ;; seon.ctx.doc: the generic markdown-file → context-section loader
+    ;; (doc-section) — present file → section (both views), absent → nil
+    ;; (no fallback), generic for any path.
+    [seon.ctx.doc-test]
     ;; Boot-time test indexing (unit #23 fix b): this preload's require
     ;; closure IS the pod's test roster, so the deftest-vars macro below
     ;; can see every deftest var — seon.client (compiled before the test

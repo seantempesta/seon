@@ -117,10 +117,11 @@
     ;; register! calls run before the boot install of :my.kb/* attrs.
     [my.kb]
     [my.kb.system]
-    ;; The agent's identity (my.soul/system-prompt-text — SOUL.md /
-    ;; AGENTS.md read LIVE every turn, never stored). Required so the ns
-    ;; is in the build closure and its :seon.ns row indexes for the
-    ;; namespaces section.
+    ;; The agent's identity files (SOUL.md / AGENTS.md) — read LIVE as
+    ;; context sections every render (seon.ctx.doc/doc-section), never
+    ;; stored. my.soul is the thin live-read helper for teachings
+    ;; validation; required so the ns is in the build closure and its
+    ;; :seon.ns row indexes for the namespaces section.
     [my.soul]
     ;; Core handler registration — `wake-on-message`. Required so
     ;; start-agent! can call `handler/register!` + `wake/bootstrap-schema!`
@@ -1983,9 +1984,10 @@
    world a pod boots into', shared verbatim by `start-agent!` (live
    boot) and the gym's `seed-scenario-world!` (scratch worlds), so the
    two can never drift again (the gym hand-mirrored this sequence and
-   drifted twice). The agent's identity is NOT seeded — it is read LIVE
-   from SOUL.md / AGENTS.md on every LLM call (my.soul/system-prompt-text),
-   so gym and live prompts get the same identity with no seed step.
+   drifted twice). The agent's identity is NOT seeded — SOUL.md /
+   AGENTS.md are read LIVE as context sections every render
+   (`seon.ctx.doc/doc-section`), so gym and live prompts get the same
+   identity with no seed step.
 
    Steps, in boot order:
      1. Core handler SCHEMA — `h/bootstrap-schema!` +
@@ -2056,8 +2058,8 @@
                                {:seon.db/conn conn
                                 :seon.db/tx-data (seed-core!)})))
               ;; No soul seed: the agent's identity is read LIVE from
-              ;; SOUL.md / AGENTS.md on every LLM call (my.soul/system-prompt-text),
-              ;; never seeded into the store.
+              ;; SOUL.md / AGENTS.md as context sections every render
+              ;; (seon.ctx.doc/doc-section), never seeded into the store.
               (check! :core-index
                       (await (db/transact!
                                {:seon.db/conn conn
