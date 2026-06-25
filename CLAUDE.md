@@ -228,6 +228,13 @@ The corollary: don't re-parse source with rewrite-clj when the analyzer already 
 
 Full principle + the five mechanisms + cross-agent publish gate + recursive-bootstrap use case: [[docs/seon/concepts/code-as-data-runtime]].
 
+**Comment levels carry meaning** (the context renders as eval'able Clojure):
+**`;` (single) = prose** — rendered agent-facing prose blocks AND inline code
+comments; **`;;` (double) = code block comments** standing above a form;
+**`;;;` (triple) = runtime-structure demarcation** (section brackets, transcript
+event lines). Prose → `;`, block-comment-before-code → `;;`, inline → `;`. Full
+rule in `docs/conventions.md` "Comment levels — prose vs code".
+
 ---
 
 ## Architecture
