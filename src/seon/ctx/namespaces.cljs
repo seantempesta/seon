@@ -139,11 +139,7 @@
      - `:seon.ai.tokens` — the `chars/4` token estimate (`estimate` /
        `estimate-chars`); the ONE place the no-tokenizer heuristic lives,
        so the agent reading about its own context size sees the source.
-     - `:seon.ctx.doc` — the GENERIC markdown-file → context-section
-       loader (`doc-section`): how SOUL.md / AGENTS.md (and any file the
-       agent points at) become their own context sections, so the agent
-       sees the one mechanism for file-backed sections.
-   `my.*` nses (`my.kb`, `my.soul`, agent-authored code) are ALREADY
+   `my.*` nses (`my.kb`, agent-authored code) are ALREADY
    rendered full by the `my.*` rule in [[full-source-ns?]] — they do NOT
    belong here; this whitelist is ONLY for the seon.* framework tools.
    Shared by the boot indexer (which stores their real file source — see
@@ -153,7 +149,7 @@
    render-namespace)."
   #{:seon.agent.todo :seon.db :seon.agent.search
     :seon.agent.fs :seon.agent.message :seon.schema :seon.render
-    :seon.agent.lifecycle :seon.ai.tokens :seon.ctx.doc})
+    :seon.agent.lifecycle :seon.ai.tokens})
 
 (defn in-full-source-whitelist?
   "True when `ns-name` (string, keyword, or symbol) is one of the curated

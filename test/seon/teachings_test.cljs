@@ -79,8 +79,7 @@
     [seon.eval :as seval]
     [seon.render.live-tile :as live-tile]
     [seon.repl :as repl]
-    [seon.schema :as schema]
-    [my.soul :as soul]))
+    [seon.schema :as schema]))
 
 ;; ============================================================
 ;; Extraction — see the ns docstring for the convention.
@@ -286,10 +285,10 @@
 
 (defn- soul-examples [_dbv]
   ;; The identity is read LIVE from SOUL.md / AGENTS.md (no store rows) —
-  ;; surface its examples straight from the live system-prompt text so a
+  ;; surface its examples straight from the live identity-file text so a
   ;; code block a user puts in the identity file is still validated.
-  (surface-examples "my.soul (live SOUL.md/AGENTS.md)"
-                    (soul/identity-text)))
+  (surface-examples "identity files (live SOUL.md/AGENTS.md)"
+                    (ctx/identity-files-text)))
 
 (defn- ns-doc-examples [dbv]
   (->> (db/query {:seon.db/db dbv

@@ -12,7 +12,7 @@
        them. Per-section texts (left pane) lead with the system block;
        the per-section html twins (right pane) mirror the context
        sections only (which now include the SOUL.md / AGENTS.md
-       doc-sections). System block + context derive from the same
+       file-sections). System block + context derive from the same
        sources the real call uses, so divergence is impossible.
      - `handlers` — the live handler registry visible to the agent
        (core + per-agent).
@@ -68,7 +68,7 @@
    seon mechanics, NOT the soul/any file; explicit-override logic), so
    the debug text is byte-identical to the real system message; the
    context comes from `seon.ctx/context-root` → render (and now CARRIES
-   the SOUL.md / AGENTS.md doc-sections). Divergence is impossible — both
+   the SOUL.md / AGENTS.md file-sections). Divergence is impossible — both
    surfaces derive from the same sources the real call uses.
    `:seon.render/text` = system + boundary + context.
    `:seon.render/section-texts` leads with a `:system` section (left pane

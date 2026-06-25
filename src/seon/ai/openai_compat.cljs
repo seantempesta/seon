@@ -36,11 +36,12 @@
    env-seeded via SEON_AI_*, runtime-tunable by transact). Precedence:
    explicit request opt > config row > the shipped defaults below.
 
-   The system prompt's IDENTITY is read LIVE from SOUL.md / AGENTS.md on
-   every call (see `my.soul`), joined by
-   `seon.ai/effective-system-prompt` with a minimal fallback when no
-   identity file exists. The universal REPL mechanics are hardcoded in
-   the system section (`seon.ctx/system-text`).
+   The `system` role message is the HARDCODED system-specific seon
+   mechanics (`seon.ctx/system-text` via
+   `seon.ai/effective-system-prompt`), byte-stable for every agent and
+   turn — NO file read, NO fallback. The agent's IDENTITY (SOUL.md /
+   AGENTS.md) rides the user-message CONTEXT as file-sections
+   (`seon.ctx/file-section`), decoupled from the system message.
 
    Streaming: we ASK for a stream (`.stream` + `.finalChatCompletion`)
    and the SDK buffers it into one assembled ChatCompletion object —

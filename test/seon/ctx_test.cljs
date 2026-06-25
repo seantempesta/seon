@@ -19,6 +19,8 @@
     [datahike.api :as d]
     [seon.agent :as agent]
     [seon.agent.turn :as turn]
+    [seon.ai :as llm]
+    [seon.ai.openai-compat :as openai]
     [seon.analyzer-info :as ai]
     [seon.client :as client]
     [seon.ctx :as ctx]
@@ -86,13 +88,13 @@
              ;; agent prompt (their deftests are noise; the per-fn :test
              ;; usage example rides the regular fn's compact head). Applies
              ;; to downstream code too.
-             "seon.agent.search-test" "my.soul-test" "acme.widget-test"
+             "seon.agent.search-test" "my.notes-test" "acme.widget-test"
              ;; debug capture lives under *.internal — dropped structurally,
              ;; same rule as every other internal ns. No name-list.
              "seon.debug.internal"]]
     (is (false? (ctx-namespaces/included-ns? n)) (str n " is NOT included")))
   ;; the *-test structural exclusion.
-  (doseq [n ["seon.agent.search-test" "my.soul-test" "acme.widget-test"]]
+  (doseq [n ["seon.agent.search-test" "my.notes-test" "acme.widget-test"]]
     (is (true? (ctx-namespaces/test-ns-name? n)) (str n " is a test ns")))
   (is (false? (ctx-namespaces/test-ns-name? "seon.agent.search")) "non-test ns")
   ;; debug capture is hidden via the structural *.internal rule, no name-list.
@@ -111,7 +113,7 @@
   ;; whitelisted base, e.g. seon.agent.search-test → seon.agent.search).
   ;; Every OTHER seon.* framework ns is DROPPED from the rendered section
   ;; (still indexed + searchable), NEVER full-source.
-  (doseq [n ["my.kb" "my.kb.system" "my.soul" "my.soul-test"
+  (doseq [n ["my.kb" "my.kb.system" "my.notes" "my.notes-test"
              ;; the curated seon.* whitelist + each one's test sibling.
              "seon.agent.todo" "seon.agent.todo-test"
              "seon.db" "seon.db-test"
@@ -858,3 +860,124 @@
                           "OFF-path cacheable prefix is byte-identical")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+
+;; ------------------------------------------------------------
+;; file-section — the GENERIC markdown-file → context-section UTILITY
+;; folded into seon.ctx. The mechanism, not any file's prose:
+;;   - a PRESENT file → a renderable section (both views: ai = `;;`
+;;     markdown, html = markdown hiccup);
+;;   - an ABSENT file → NO section (nil — NO fallback);
+;;   - it is GENERIC — any path, not soul/agents-specific.
+;; File reads hit cwd = repo root; the present-file cases write a temp
+;; file under tmp/ (no dependency on any particular repo file's wording).
+;; ------------------------------------------------------------
+
+(def ^:private fs-tmp-rel "tmp/seon-ctx-file-section-test.md")
+(def ^:private fs-absent-rel "tmp/seon-ctx-file-section-DOES-NOT-EXIST.md")
+(def ^:private fs-fixture-text "# Heading\n\nA paragraph with `(some code)` inside.\n")
+
+(defn- fs-abs [rel] (str (.cwd js/process) "/" rel))
+
+(defn- write-fs-fixture! []
+  (let [fs (js/require "fs")]
+    (.mkdirSync fs (fs-abs "tmp") #js {:recursive true})
+    (.writeFileSync fs (fs-abs fs-tmp-rel) fs-fixture-text "utf8")))
+
+(defn- rm-fs-fixture! []
+  (try (.unlinkSync (js/require "fs") (fs-abs fs-tmp-rel)) (catch :default _ nil)))
+
+(deftest file-section-present-file-yields-section-both-views
+  (write-fs-fixture!)
+  (try
+    (let [sect (ctx/file-section {:seon.ctx/file-path fs-tmp-rel
+                                  :seon.ctx/name :fixture
+                                  :seon.ctx/priority 5})]
+      (is (map? sect) "a present file → a section map")
+      (is (= :fixture (:seon.ctx/name sect)))
+      (is (= 5 (:seon.ctx/priority sect)))
+      (is (= fs-tmp-rel (:seon.ctx/file-path sect)))
+      (is (symbol? (:seon.render/ai sect)) "ai slot is a symbol (fresh read each render)")
+      (is (symbol? (:seon.render/html sect)) "html slot is a symbol")
+      ;; AI view — the file rendered as reader-valid `;;` markdown.
+      (let [ai-txt (render/render :seon.render/ai {} sect)]
+        (is (string? ai-txt))
+        (is (str/includes? ai-txt ";; # Heading") "markdown commented line-by-line")
+        (is (every? #(or (str/blank? %) (str/starts-with? % ";;"))
+                    (str/split-lines ai-txt))
+            "every line is reader-valid (a comment) — keeps the prompt valid source"))
+      ;; HTML view — markdown hiccup.
+      (let [html (render/render :seon.render/html {} sect)]
+        (is (vector? html) "html view is hiccup")
+        (is (= :div (first html)))))
+    (finally (rm-fs-fixture!))))
+
+(deftest file-section-absent-file-yields-no-section-no-fallback
+  (is (nil? (ctx/file-section {:seon.ctx/file-path fs-absent-rel
+                               :seon.ctx/name :missing
+                               :seon.ctx/priority 5}))
+      "an absent file → nil → no section (NO fallback)"))
+
+(deftest file-section-is-generic-any-path
+  ;; The SAME mechanism produces a section for an unrelated path/name —
+  ;; nothing soul-specific is hardcoded.
+  (write-fs-fixture!)
+  (try
+    (let [a (ctx/file-section {:seon.ctx/file-path fs-tmp-rel
+                               :seon.ctx/name :alpha :seon.ctx/priority 1})
+          b (ctx/file-section {:seon.ctx/file-path fs-tmp-rel
+                               :seon.ctx/name :beta :seon.ctx/priority 9})]
+      (is (= :alpha (:seon.ctx/name a)))
+      (is (= :beta (:seon.ctx/name b)))
+      (is (= (:seon.render/ai a) (:seon.render/ai b))
+          "same generic render fn regardless of name/priority"))
+    (finally (rm-fs-fixture!))))
+
+;; ------------------------------------------------------------
+;; The system-message DECOUPLING contract (moved here from the deleted
+;; my.soul-test): the LLM `system` role message is the HARDCODED
+;; system-specific mechanics (seon.ctx/system-text), NOT the soul, NOT a
+;; file, NO fallback; the identity files (SOUL.md / AGENTS.md) ride the
+;; user-message context as file-sections; identity-files-text reads them
+;; live (used by the teachings validator).
+;; ------------------------------------------------------------
+
+(deftest identity-files-text-reads-files-live
+  ;; The identity is the LIVE text of the on-disk identity files — no
+  ;; conn, no store, no seed. We pin the MECHANISM (files read, joined),
+  ;; not any wording.
+  (let [text (ctx/identity-files-text)]
+    (is (string? text) "identity-files-text returns a string")))
+
+(deftest system-message-is-hardcoded-mechanics-not-the-soul
+  ;; THE decoupling: the LLM system message is the hardcoded mechanics.
+  (is (= ctx/system-text (llm/effective-system-prompt {}))
+      "system message = the hardcoded seon mechanics (seon.ctx/system-text)")
+  (is (= ctx/system-text (llm/effective-system-prompt {:seon.ai/system-prompt nil}))
+      "no override → still the hardcoded mechanics (no fallback const)")
+  (is (= "OVERRIDE" (llm/effective-system-prompt {:seon.ai/system-prompt "OVERRIDE"}))
+      "an explicit override still wins")
+  ;; The system message is NOT the identity-file text (decoupled).
+  (when (not (str/blank? (ctx/identity-files-text)))
+    (is (not= (ctx/identity-files-text) (llm/effective-system-prompt {}))
+        "the system message is NOT the identity-file text"))
+  ;; No dead fallback const survives.
+  (is (not (contains? (ns-publics 'seon.ai) 'fallback-system-prompt))
+      "fallback-system-prompt is DELETED — no fallback path"))
+
+(deftest llm-call-system-message-is-the-hardcoded-mechanics
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            ;; The adapter's system message IS the hardcoded mechanics —
+            ;; NOT the live identity text, NOT a fallback.
+            (let [body (openai/request-params {:seon.ai/ctx "hi"})
+                  sys  (-> body :messages first :content)]
+              (is (= sys ctx/system-text)
+                  "the system message sent to the API is the hardcoded mechanics")
+              (is (= "OVERRIDE"
+                     (-> (openai/request-params {:seon.ai/ctx "hi"
+                                                 :seon.ai/system-prompt "OVERRIDE"})
+                         :messages first :content))
+                  "an explicit :seon.ai/system-prompt still wins"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

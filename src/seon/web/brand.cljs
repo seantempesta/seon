@@ -13,8 +13,9 @@
    ENV OWNS THE ROW. [[sync!]] (called from
    `seon.web.inspector/install!` at boot) syncs the row to the
    `SEON_BRAND_NAME` / `SEON_BRAND_TAGLINE` / `SEON_BRAND_THEME` env
-   vars: set → asserted, unset → retracted. Like `my.soul`'s live
-   file-read, the brand is deployment CONFIGURATION rather than the
+   vars: set → asserted, unset → retracted. Like the identity files'
+   live read (`seon.ctx/identity-files-text`), the brand is deployment
+   CONFIGURATION rather than the
    store's memory — booting WITHOUT the env vars must return the
    defaults. A runtime edit survives within a pod run; the next boot
    re-syncs from env.

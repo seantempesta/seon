@@ -28,7 +28,7 @@
      - `system-text` — the byte-stable, system-specific seon mechanics
        sent as the LLM `system` role message (via
        `seon.ai/effective-system-prompt`); NOT a context section (the
-       soul/agents files are context sections via `seon.ctx.doc`) — and
+       soul/agents files are context sections via [[file-section]]) — and
        the derived read API every section shares (messages / evals /
        session-evals / current-ns /
        effective-cap / format-eval-row / the eval-render caps / …) —
@@ -58,7 +58,6 @@
   (:require
     [clojure.string :as str]
     [cljs.reader :as edn]
-    [seon.ctx.doc :as doc]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
@@ -68,6 +67,7 @@
     [seon.handlers.test :as h-test]
     [seon.render :as render]
     [seon.schema :as schema]
+    [seon.ui.markdown :as md]
     [seon.warn :as warn]))
 
 ;; ============================================================
@@ -111,6 +111,140 @@
    [:seon.ctx/priority :seon.ctx/priority]
    [:seon.render/ai    :seon.render/ai]
    [:seon.render/html  {:optional true} :seon.render/html]])
+
+;; ============================================================
+;; File-section utility — the ONE mechanism for turning an on-disk
+;; markdown file into a renderable context section. GENERIC: it takes a
+;; file PATH (not soul, not agents — any `.md`), returns a section when
+;; the file currently exists, else nil (REACTIVE: an absent file is no
+;; section, NO fallback). SOUL.md and AGENTS.md are two `file-section`s
+;; wired in `core-default-ctx`; a third party adds another the same way.
+;;
+;; The file is read FRESH on every render (the path lives on the section
+;; node; the slot fns re-read it), so a user's edit lands next render
+;; with no seed/restart/cache. Content is byte-stable BETWEEN renders, so
+;; the section keeps its place in the cacheable prefix; a save busts only
+;; this block (and below). Two views: :ai → reader-valid `;;`-commented
+;; markdown (keeps the prompt valid Clojure source); :html → the markdown
+;; rendered (`seon.ui.markdown`).
+;; ============================================================
+
+;; The on-disk path a file-section reads (relative to the pod's cwd =
+;; repo root). Carried on the section node so the slot render fns re-read
+;; it fresh each render.
+(schema/register! :seon.ctx/file-path [:string {:min 1}])
+
+(defn- file-path->abs
+  "Absolute path for repo-relative `path` (cwd = repo root, the pod
+   convention). Returns nil when there is no Node process (non-pod
+   runtime)."
+  [path]
+  (some-> (.. js/globalThis -process) .cwd (str "/" path)))
+
+(defn- file-exists?
+  "True when `path` (resolved against cwd) is a readable file. Never
+   throws — a missing fs/file just answers false."
+  [path]
+  (try
+    (.existsSync (js/require "fs") (file-path->abs path))
+    (catch :default _ false)))
+
+(defn- read-file-text
+  "Live text of file `path` (resolved against cwd), or nil when
+   unreadable (missing file). Never throws."
+  [path]
+  (try
+    (.readFileSync (js/require "fs") (file-path->abs path) "utf8")
+    (catch :default _ nil)))
+
+(defn- comment-markdown
+  "Markdown `text` as reader-valid Clojure: every line prefixed with
+   `;; ` so the whole prompt stays valid source. Trailing whitespace
+   trimmed; blank lines stay bare `;;` (no trailing space → byte-stable)."
+  [text]
+  (->> (str/split-lines (or text ""))
+       (map (fn [line]
+              (if (str/blank? line) ";;" (str ";; " line))))
+       (str/join "\n")))
+
+(defn file-section-ai
+  "The `:seon.render/ai` slot for a file-section — the node's file read
+   FRESH and `;;`-commented. Blank when the file vanished between wiring
+   and render (the section then renders empty and is dropped upstream)."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{{path :seon.ctx/file-path} :seon.render/node}]
+  (let [text (read-file-text path)]
+    (if (str/blank? text) "" (comment-markdown text))))
+
+(defn file-section-html
+  "The `:seon.render/html` slot for a file-section — the node's file read
+   FRESH and rendered as markdown hiccup. Empty `[:div]` when the file
+   vanished."
+  {:malli/schema [:=> [:cat :map] :seon.render.live-tile/content]}
+  [{{path :seon.ctx/file-path} :seon.render/node}]
+  (md/md->hiccup (or (read-file-text path) "")))
+
+(defn file-section
+  "A renderable context SECTION backed by the markdown file at
+   `:seon.ctx/file-path`, named `:seon.ctx/name`, ordered at
+   `:seon.ctx/priority` — when the file currently exists; else `nil`
+   (REACTIVE, NO fallback: absent file → no section).
+
+   The returned section carries the path + a SYMBOL slot per view; the
+   slot fns ([[file-section-ai]] / [[file-section-html]]) re-read the file
+   fresh on every render so a user's edit lands next turn with no
+   seed/restart. GENERIC: any markdown file is a section — SOUL.md and
+   AGENTS.md are two `file-section`s wired in [[core-default-ctx]],
+   nothing file-name-specific lives here."
+  {:malli/schema [:=> [:cat [:map
+                             [:seon.ctx/file-path :seon.ctx/file-path]
+                             [:seon.ctx/name :keyword]
+                             [:seon.ctx/priority :int]]]
+                  [:maybe [:map
+                           [:seon.ctx/name :keyword]
+                           [:seon.ctx/priority :int]
+                           [:seon.ctx/file-path :seon.ctx/file-path]
+                           [:seon.render/ai :symbol]
+                           [:seon.render/html :symbol]]]]}
+  [{path :seon.ctx/file-path :seon.ctx/keys [name priority]}]
+  (when (file-exists? path)
+    {:seon.ctx/name      name
+     :seon.ctx/priority  priority
+     :seon.ctx/file-path path
+     :seon.render/ai     'seon.ctx/file-section-ai
+     :seon.render/html   'seon.ctx/file-section-html}))
+
+;; The repo-relative identity files surfaced to every agent as
+;; file-sections in [[core-default-ctx]]. The primary file is
+;; `SEON_SOUL_FILE` (override) else `SOUL.md`; AGENTS.md is the cross-tool
+;; standard repo/work-instructions file, read alongside it. They are
+;; CONTEXT, NOT the LLM system message — that is the hardcoded mechanics
+;; ([[system-text]] via `seon.ai/effective-system-prompt`).
+(def soul-file-path
+  "Repo-relative path of the primary identity file: `SEON_SOUL_FILE`
+   override, else `SOUL.md`."
+  (or (some-> (.. js/globalThis -process) .-env (aget "SEON_SOUL_FILE")
+              (#(when-not (str/blank? %) %)))
+      "SOUL.md"))
+
+(def agents-file-path
+  "Repo-relative path of the cross-tool repo/work-instructions file."
+  "AGENTS.md")
+
+(defn identity-files-text
+  "The LIVE text of every CURRENTLY-PRESENT identity file
+   ([[soul-file-path]] then [[agents-file-path]], deduped), read FRESH on
+   each call and joined with a blank line. `\"\"` when none exist. Used by
+   the teachings validator to surface + validate code blocks a user places
+   in the identity files. This is NOT the LLM system message — that is the
+   hardcoded mechanics in [[system-text]]."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (->> [soul-file-path agents-file-path]
+       distinct
+       (filter file-exists?)
+       (keep read-file-text)
+       (str/join "\n\n")))
 
 (def default-max-turns-per-loop
   "Base per-loop turn cap when the agent has no
@@ -1471,7 +1605,7 @@
    agent — ordered top→bottom = static→volatile (the provider-cache
    contract): everything through :namespaces is the cacheable prefix.
 
-     1. :soul/:agents — SOUL.md + AGENTS.md as generic doc-sections
+     1. :soul/:agents — SOUL.md + AGENTS.md as generic file-sections
                        (present file → its own section, absent → none).
                        These are CONTEXT, not the system message — the
                        hardcoded system-specific mechanics ride the
@@ -1501,7 +1635,7 @@
    Smallest priority renders first."
   []
   (into
-   ;; SOUL.md + AGENTS.md as generic doc-sections — a present file → its
+   ;; SOUL.md + AGENTS.md as generic file-sections — a present file → its
    ;; own context section, absent → nothing (NO fallback). These are
    ;; CONTEXT sections (user message), NOT the LLM system message: the
    ;; system role carries the hardcoded system-specific mechanics
@@ -1509,10 +1643,10 @@
    ;; strictly separate from these files. `:soul` (5) / `:agents` (8) sit
    ;; at the top of the cacheable prefix; an edit busts only their block.
    (filterv some?
-            [(doc/doc-section {:seon.ctx.doc/path "SOUL.md"
-                               :seon.ctx/name :soul :seon.ctx/priority 5})
-             (doc/doc-section {:seon.ctx.doc/path "AGENTS.md"
-                               :seon.ctx/name :agents :seon.ctx/priority 8})])
+            [(file-section {:seon.ctx/file-path soul-file-path
+                            :seon.ctx/name :soul :seon.ctx/priority 5})
+             (file-section {:seon.ctx/file-path agents-file-path
+                            :seon.ctx/name :agents :seon.ctx/priority 8})])
    [{:seon.ctx/name :namespaces   :seon.ctx/priority 20
      :seon.render/ai 'seon.ctx.namespaces/namespaces-section}
     {:seon.ctx/name :your-entity  :seon.ctx/priority 30

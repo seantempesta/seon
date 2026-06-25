@@ -117,12 +117,6 @@
     ;; register! calls run before the boot install of :my.kb/* attrs.
     [my.kb]
     [my.kb.system]
-    ;; The agent's identity files (SOUL.md / AGENTS.md) — read LIVE as
-    ;; context sections every render (seon.ctx.doc/doc-section), never
-    ;; stored. my.soul is the thin live-read helper for teachings
-    ;; validation; required so the ns is in the build closure and its
-    ;; :seon.ns row indexes for the namespaces section.
-    [my.soul]
     ;; Core handler registration — `wake-on-message`. Required so
     ;; start-agent! can call `handler/register!` + `wake/bootstrap-schema!`
     ;; at boot. Without this, the inspector header shows "0 handlers"
@@ -473,8 +467,9 @@
    :my.kb.system/instructions
    :my.kb.system/text
    :my.kb.system/at
-   ;; (No :my.soul/* attrs — the agent's identity is read LIVE from
-   ;; SOUL.md / AGENTS.md every turn, never stored. See my.soul.)
+   ;; (No identity attrs — the agent's identity is read LIVE from
+   ;; SOUL.md / AGENTS.md every turn as file-sections, never stored. See
+   ;; seon.ctx/file-section.)
 
    ;; --- Test (Phase 2 — test capture as data) ---
    :seon.test/sym
@@ -986,7 +981,7 @@
    they must join [[core-ns-set]] (replay-skip: re-evaling their
    shipped source would re-run register! forms) and get an
    [[index-core!]] ns-row even though no fn-row names them."
-  #{"my.kb" "my.soul"})
+  #{"my.kb"})
 
 (defn core-ns-set
   "The set of namespace keywords owned by the COMPILED core, derived
@@ -1986,7 +1981,7 @@
    two can never drift again (the gym hand-mirrored this sequence and
    drifted twice). The agent's identity is NOT seeded — SOUL.md /
    AGENTS.md are read LIVE as context sections every render
-   (`seon.ctx.doc/doc-section`), so gym and live prompts get the same
+   (`seon.ctx/file-section`), so gym and live prompts get the same
    identity with no seed step.
 
    Steps, in boot order:
@@ -2059,7 +2054,7 @@
                                 :seon.db/tx-data (seed-core!)})))
               ;; No soul seed: the agent's identity is read LIVE from
               ;; SOUL.md / AGENTS.md as context sections every render
-              ;; (seon.ctx.doc/doc-section), never seeded into the store.
+              ;; (seon.ctx/file-section), never seeded into the store.
               (check! :core-index
                       (await (db/transact!
                                {:seon.db/conn conn

@@ -19,10 +19,11 @@
    whole surface is one transact and one read.
 
    The OTHER instruction homes (don't mix them up): per-agent standing
-   orders go on the agent's OWN entity; identity/personality lives in
-   `my.soul` (the API-level system message); static behavioral defaults
-   are in the system prompt itself. This ns is only the cluster-wide,
-   all-agents home."
+   orders go on the agent's OWN entity; identity/personality lives in the
+   SOUL.md / AGENTS.md files (read LIVE as context file-sections —
+   `seon.ctx/file-section`); static behavioral defaults are the hardcoded
+   system prompt (`seon.ctx/system-text`). This ns is only the
+   cluster-wide, all-agents home."
   (:require
     [my.kb]
     [seon.db :as db]
