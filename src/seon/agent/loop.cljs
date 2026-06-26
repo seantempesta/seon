@@ -51,6 +51,22 @@
     (if (= 1 (count info)) (first info) (vec info))))
 
 ;; ============================================================
+;; Process-local loop-input registry — agent-id → the `input` map
+;; (`:seon.agent/id` / `:seon.agent/llm-fn` / `:seon.agent/compile-state`) the
+;; wake trigger was (re)armed with. `install-wake-trigger!` (re)stamps it on
+;; EVERY arm, so it stays exactly as fresh as the live wake-handler closure (a
+;; hot reload re-arms with a freshly-resolved llm-fn). A genuinely stateful
+;; runtime artifact — the llm-fn is a closure and compile-state is the live
+;; bootstrap, neither DB-derivable — so a registry is the right home (same
+;; class as `seon.agent.run/!runs-this-process`, not a derivable-state store).
+;; `drive-run!` reads it to RE-ENTER the loop on RESUME (the loop exits on
+;; :pause; resume must re-drive the still-open run). `defonce` survives a hot
+;; reload; the re-arm repopulates it regardless.
+;; ============================================================
+
+(defonce ^:private !loop-input (atom {}))
+
+;; ============================================================
 ;; The loop — a fold of fsm/transition over run-derived events. Each
 ;; iteration re-reads the run; :turn-ok runs a turn, the bounds close the
 ;; run, verb closes / supersede are already settled.
@@ -119,7 +135,15 @@
           (do
             (await (run/beat! {:seon.agent/id id :seon.agent.run/id run-id}))
             (let [r      (await (turn/run-turn! (assoc input :seon.agent.run/id run-id)))
-                  errored? (= :error (:seon.agent.turn/status r))]
+                  ;; A turn that errored (LLM error / failed open / catastrophic)
+                  ;; OR a result that created NO turn (no `:seon.agent.turn/id` —
+                  ;; e.g. a failed open-tx that left no entity) closes the run
+                  ;; `:error`. The id-absence clause is the structural guarantee:
+                  ;; a failed open can NEVER masquerade as a successful no-op turn
+                  ;; (which would recur `:turn-ok` forever — a retry storm).
+                  errored? (or (= :error (:seon.agent.turn/status r))
+                               (false? (:seon.db/ok? r))
+                               (nil? (:seon.agent.turn/id r)))]
               (if errored?
                 (do (log id "halt" "turn :error → close run :error")
                     (await (run/close-run!
@@ -250,6 +274,47 @@
                                      id ": " (or (.-message e) e)))))))
               0)))))))
 
+;; ============================================================
+;; Re-drive — RESUME re-enters the loop. The loop EXITS on :pause (the run
+;; stays open + paused); `seon.agent.run/resume!` clears `paused-at` and
+;; re-extends the deadline, flipping derived state back to :running — but
+;; nothing would drive turns again without this. `drive-run!` re-enters
+;; `run-loop!` on the agent's STILL-OPEN run, using the loop input the wake
+;; trigger was armed with (the process-local registry), via the SAME
+;; setTimeout(0) + `with-agent` re-scope the wake `:idle` branch uses
+;; (setTimeout breaks the ALS scope, so the loop's downstream
+;; db/current-agent-id needs the scope re-entered).
+;; ============================================================
+
+(defn drive-run!
+  "Re-enter [[run-loop!]] for `id`'s CURRENTLY-OPEN run — the re-drive entry
+   shared by RESUME (paused-at cleared) and any future external kick. Looks up
+   the loop `input` this process armed the wake trigger with (refreshed on
+   every [[install-wake-trigger!]], so as fresh as the live wake handler),
+   then kicks `run-loop!` on the open run. Fire-and-forget: schedules the
+   drive on the macrotask queue and returns. A loud no-op when the agent was
+   never armed in THIS process (no input — e.g. resume before a hot-reload
+   re-arm) or has no open run."
+  [{:seon.agent/keys [id]}]
+  (if-let [input (get @!loop-input id)]
+    (js/setTimeout
+      (fn []
+        (-> (js/Promise.resolve
+              (db/with-agent id
+                (fn ^:async redrive! []
+                  (when-let [cur (run/current-run {:seon.agent/id id})]
+                    (await (run-loop! input (:seon.agent.run/id cur)))))))
+            (.catch (fn [e]
+                      (js/console.error
+                        (str "seon.agent.loop: drive-run! threw for "
+                             id ": " (or (.-message e) e)))))))
+      0)
+    (js/console.warn
+      (str "seon.agent.loop: drive-run! — no live loop input for agent " id
+           " (the wake trigger was never armed in this process); cannot "
+           "re-drive the resumed run. A hot-reload re-arm or boot installs "
+           "it."))))
+
 (defn install-wake-trigger!
   "Register the inbound-message trigger for this agent — wakes a run via
    [[wake-handler]] when a message lands with to ∋ me AND from ≠ me AND a
@@ -262,6 +327,10 @@
      :seon.agent/llm-fn          ctx-string -> Promise<{:text \"…\"}>
      :seon.agent/compile-state   bootstrap compile-state"
   [{:seon.agent/keys [id] :as input}]
+  ;; Stamp the loop input so RESUME can re-drive the open run with this
+  ;; agent's live llm-fn / compile-state (refreshed on every re-arm — see the
+  ;; !loop-input block comment). Same staleness profile as the wake handler.
+  (swap! !loop-input assoc id input)
   ;; One stable listener key per agent so re-arming REPLACES the prior
   ;; listener (a hot reload must not leave two listeners firing for one
   ;; agent).

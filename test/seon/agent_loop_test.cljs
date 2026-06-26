@@ -24,7 +24,8 @@
     [seon.ctx :as ctx]
     [seon.db :as db]
     [seon.eval :as seval]
-    [seon.repl :as repl]))
+    [seon.repl :as repl]
+    [seon.warn :as warn]))
 
 (defn- with-conn
   [body]
@@ -65,6 +66,66 @@
                    [?t :seon.agent.turn/run ?run]]
                  :seon.db/args [run-id]})
       0))
+
+;; ============================================================
+;; Wake-path helpers — the wake handler is fire-and-forget (setTimeout(0)),
+;; so the tests transact an inbound datom then POLL the macrotask queue until
+;; the handler's open-run!/run-loop! (or renew!) has settled.
+;; ============================================================
+
+(defn- runs-for
+  "The run-ids of every run belonging to agent `id` (any status)."
+  [id]
+  (or (db/query {:seon.db/query
+                 '[:find [?r ...] :in $ ?aid
+                   :where
+                   [?a :seon.agent/id ?aid]
+                   [?run :seon.agent.run/agent ?a]
+                   [?run :seon.agent.run/id ?r]]
+                 :seon.db/args [id]})
+      []))
+
+(defn- turns-for
+  "The turn-ids of every turn the agent drove (across all its runs)."
+  [id]
+  (or (db/query {:seon.db/query
+                 '[:find [?t ...] :in $ ?aid
+                   :where
+                   [?a :seon.agent/id ?aid]
+                   [?run :seon.agent.run/agent ?a]
+                   [?t :seon.agent.turn/run ?run]]
+                 :seon.db/args [id]})
+      []))
+
+(defn ^:async wait-until
+  "Poll `pred` (0-arg → truthy) on the macrotask queue every `step-ms` up to
+   `max-ms`. Resolves true once pred holds, false on timeout — letting the
+   wake-handler's setTimeout(0) re-drive (open-run! + run-loop! / renew!) run
+   before the test asserts. Recursive (not loop/recur) so the await transform
+   is unambiguous."
+  [pred max-ms step-ms]
+  (if (pred)
+    true
+    (if (<= max-ms 0)
+      false
+      (do
+        (await (js/Promise. (fn [res] (js/setTimeout res step-ms))))
+        (await (wait-until pred (- max-ms step-ms) step-ms))))))
+
+(defn ^:async send-inbound!
+  "Transact a fully-formed inbound message row DIRECTLY (bypassing
+   `message!`'s defaulting + todo-minting, so the test controls from / hops /
+   origin). `to` is the recipient agent-id; `from` a resolving lookup-ref."
+  [from to-agent-id content hops origin]
+  (await (db/transact!
+           {:seon.db/tx-data
+            [{:seon.agent.message/id      (db/new-id!)
+              :seon.agent.message/from    from
+              :seon.agent.message/to      [[:seon.agent/id to-agent-id]]
+              :seon.agent.message/content content
+              :seon.agent.message/at      (js/Date.)
+              :seon.agent.message/hops    hops
+              :seon.agent.message/origin  origin}]})))
 
 ;; ============================================================
 ;; A trigger opens a run → :running; (complete …) closes it → :idle.
@@ -187,5 +248,113 @@
                          (run/snapshot {:seon.agent.run/id run-id})))
                   "renew! bumped the work bound to 3 (the sliding window)")))
           )
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; WAKE PATH — `install-wake-trigger!` is the agent's real entry point; an
+;; inbound datom fires the tx-listener which (fire-and-forget) opens+drives a
+;; run on :idle, renews on :running, and refuses a hop-exhausted message.
+;; These drive the trigger end to end (transact a message, await the tick).
+;; ============================================================
+
+(deftest wake-idle-opens-and-drives-a-run-with-cause
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [cs (await (boot-agent!))]
+              (loop/install-wake-trigger!
+                {:seon.agent/id            agent-id
+                 :seon.agent/llm-fn        (scripted-llm "(complete \"ok\")")
+                 :seon.agent/compile-state cs})
+              (testing "no run before any message; agent is derived :idle"
+                (is (= [] (runs-for agent-id)))
+                (is (= :idle (derived agent-id))))
+              (await (send-inbound! [:seon.user/id "user"] agent-id "wake up" 0 :human))
+              ;; the handler schedules setTimeout(0) → open-run! + run-loop!;
+              ;; the scripted (complete …) closes the run on turn 1.
+              (let [ok? (await (wait-until
+                                 (fn []
+                                   (let [rs (runs-for agent-id)]
+                                     (and (seq rs)
+                                          (= :closed (:seon.agent.run/status
+                                                       (run/snapshot {:seon.agent.run/id (first rs)}))))))
+                                 8000 25))
+                    rids (runs-for agent-id)]
+                (testing "the wake opened EXACTLY ONE run, trigger :message"
+                  (is ok? "the wake-driven run opened and closed within the window")
+                  (is (= 1 (count rids)))
+                  (is (= :message (:seon.agent.run/trigger
+                                    (run/snapshot {:seon.agent.run/id (first rids)})))))
+                (testing "the run's CAUSE ref points at the waking message"
+                  (let [run-ent (db/entity {:seon.db/ref [:seon.agent.run/id (first rids)]})
+                        cause   (some-> (:db/id (:seon.agent.run/cause run-ent)) db/entity)]
+                    (is (= "wake up" (:seon.agent.message/content cause))
+                        "cause = the inbound message that woke the run")))
+                (testing "the loop actually drove a turn and completed → :idle"
+                  (is (pos? (count (turns-for agent-id))))
+                  (is (= :completed (:seon.agent.run/closed-reason
+                                      (run/snapshot {:seon.agent.run/id (first rids)}))))
+                  (is (= :idle (derived agent-id))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest wake-running-renews-without-opening-a-second-run
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [cs (await (boot-agent!))]
+              (loop/install-wake-trigger!
+                {:seon.agent/id            agent-id
+                 :seon.agent/llm-fn        (scripted-llm "(+ 1 1)")
+                 :seon.agent/compile-state cs})
+              ;; Put the agent in :running by OPENING a run manually (nothing
+              ;; drives it — the :running wake branch only renews the lease).
+              (let [opened (await (run/open-run! {:seon.agent/id agent-id
+                                                  :seon.agent.run/trigger :message
+                                                  :seon.agent.run/turn-limit 5}))
+                    run-id (:seon.agent.run/id opened)]
+                (is (= :running (derived agent-id)))
+                (is (= 5 (:seon.agent.run/turn-limit
+                           (run/snapshot {:seon.agent.run/id run-id}))))
+                (await (send-inbound! [:seon.user/id "user"] agent-id "more please" 0 :human))
+                (let [ok? (await (wait-until
+                                   (fn [] (= 6 (:seon.agent.run/turn-limit
+                                                 (run/snapshot {:seon.agent.run/id run-id}))))
+                                   3000 25))]
+                  (testing "the running agent RENEWED (work bound bumped), no new run"
+                    (is ok? "renew! bumped the work bound (the sliding window)")
+                    (is (= [run-id] (runs-for agent-id))
+                        "still exactly ONE run — :running wakes renew, never open")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest wake-refuses-hop-exhausted-but-wakes-a-fresh-chain
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [cs (await (boot-agent!))]
+              ;; a peer agent entity so the hop-exhausted sender's `from`
+              ;; lookup-ref resolves (no trigger installed for it).
+              (await (db/transact! {:seon.db/tx-data [{:seon.agent/id "AGTpeerrun0001"}]}))
+              (loop/install-wake-trigger!
+                {:seon.agent/id            agent-id
+                 :seon.agent/llm-fn        (scripted-llm "(complete \"ok\")")
+                 :seon.agent/compile-state cs})
+              (testing "a hop-CAP message wakes NOTHING (loud refusal, no run)"
+                (await (send-inbound! [:seon.agent/id "AGTpeerrun0001"] agent-id
+                                      "ping-pong" warn/hop-cap :agent))
+                ;; the exhausted branch schedules NO setTimeout; a short poll
+                ;; confirms no run materialized on the macrotask queue either.
+                (await (wait-until (constantly false) 200 25))
+                (is (= [] (runs-for agent-id))
+                    "hop-exhausted ⇒ refused at wake; no run opened")
+                (is (= :idle (derived agent-id))))
+              (testing "a fresh hops=0 human message DOES wake (opens + drives)"
+                (await (send-inbound! [:seon.user/id "user"] agent-id "fresh start" 0 :human))
+                (let [ok? (await (wait-until (fn [] (seq (runs-for agent-id))) 8000 25))]
+                  (is ok? "the hops=0 message opened a run")
+                  (is (= 1 (count (runs-for agent-id)))
+                      "exactly the one fresh run (the exhausted message opened none)"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

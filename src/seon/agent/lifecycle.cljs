@@ -30,6 +30,7 @@
    contract."
   (:require
     [seon.agent.internal :as internal]
+    [seon.agent.loop :as loop]
     [seon.agent.message :as msg]
     [seon.agent.run :as run]
     [seon.db :as db]
@@ -108,17 +109,23 @@
     (internal/no-agent-error "pause")))
 
 (defn ^:async resume
-  "Wake a paused run: clear `paused-at` (→ derived `:running`) and re-extend
-   the deadline by the banked remaining-ms (Gemini fix #1 — a long pause never
-   instantly blows the clock bound). Returns `:running` on success, the error
-   envelope on a failed transact, no agent in scope, or no open run."
+  "Wake a paused run: clear `paused-at` (→ derived `:running`), re-extend the
+   deadline by the banked remaining-ms (a long pause never instantly blows the
+   clock bound), and RE-ENTER the drive loop on the still-open run — the loop
+   EXITED on :pause, so resume must re-drive or the run is derived `:running`
+   with nothing folding turns. Returns `:running` on success, the error
+   envelope on a failed transact (incl. a not-actually-paused run), no agent in
+   scope, or no open run."
   {:malli/schema [:=> [:catn] [:or :seon.agent.fsm/state :seon.db/transact-response]]}
   []
   (if-let [id (db/current-agent-id)]
     (if-let [r (run/current-run {:seon.agent/id id})]
       (let [env (await (run/resume! {:seon.agent/id     id
                                      :seon.agent.run/id (:seon.agent.run/id r)}))]
-        (if (:seon.db/ok? env) :running env))
+        (if (:seon.db/ok? env)
+          (do (loop/drive-run! {:seon.agent/id id})
+              :running)
+          env))
       (no-open-run-error "resume" id))
     (internal/no-agent-error "resume")))
 

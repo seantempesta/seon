@@ -106,4 +106,31 @@ Revert point if the experiment goes sideways: `c84e8fc`.
   rewrite before it can drive agents again (`wake-active!`/`wake-idle!` →
   `open-run!`/`close-run!`). Two gym tests `.disabled`-parked with reasons.
 - **Struck from architecture.md open-risks:** pause-vs-absolute-deadline (fixed here).
+- **Commit:** `b15faef`
+
+### Pass 3.5 — adversarial review of the keystone + repair
+
+- **Move:** test/prove (adversarial) then repair. A 4-lens ultracode workflow reviewed
+  the cutover diff (`b15faef`) — **10 raised, 7 real (4 major)**. The happy-path live
+  proof (`message→wait`) structurally couldn't catch these; the review did.
+- **Bugs found + fixed (one repair pass):**
+  - **(MAJOR) resume didn't re-drive the loop** — `pause` exits `run-loop!`; `resume!`
+    only cleared `paused-at`+re-extended the deadline, so a resumed agent was derived
+    `:running` but UNDRIVEN + leaked an open run. Fix: a process-local `!loop-input`
+    registry (stashed at trigger-arm time — same staleness as the wake closure, the
+    llm-fn is a genuine runtime artifact) + `loop/drive-run!`; `lifecycle/resume`
+    re-enters `run-loop!` on the still-open run via the same `setTimeout(0)+with-agent`.
+  - **(MAJOR) failed turn-open masqueraded as a no-op success** → loop hot-spins to
+    deadline under a wire write outage (turn-count never advances). Fix: `run-turn!`
+    surfaces an open-tx failure as an `:error` turn; loop's `errored?` also treats a
+    no-turn-created result (nil `:seon.agent.turn/id`) as error.
+  - **(MAJOR) wake-handler lost all test coverage** — added 3 deftests (install the
+    real trigger + transact inbound): `:idle` opens+drives w/ cause, `:running`
+    renews (no 2nd run), hop-cap message refused / fresh chain wakes.
+  - **(MINOR) resume! paused-guard; ms-remaining pause-freeze; remaining-ms test.**
+- **Live proof (orchestrator, on the fixed build):** opened a run on the live agent →
+  `pause` → derived `:paused`, budget **frozen** (`ms-remaining` = banked 599786, not
+  decaying) → `resume` → `:running` + the loop **re-drove** (`total-turns` 2→10, run
+  closed `:waited`) → agent settled `:idle`, bounded (no runaway). `bin/test-cljs`
+  **PASS (67s)** (covers the turn-fail, wake, banking, paused-guard fixes).
 - **Commit:** (this pass)

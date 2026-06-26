@@ -365,18 +365,28 @@
    [:seon.agent.run/id :seon.agent.run/id]])
 
 (defn ^:async resume!
-  "Resume a paused run: RETRACT `paused-at` (⇒ derived state back to
+  "Resume a PAUSED run: RETRACT `paused-at` (⇒ derived state back to
    `:running`) and re-extend `deadline` to now + the banked `remaining-ms`
-   (Gemini fix #1). Fencing-guarded. `^:async`."
+   (a long pause never instantly blows the clock bound). GUARDED on
+   `paused-at`: a run that is NOT paused has no banked budget, so resume! is
+   a loud no-op (the error envelope) rather than an accidental deadline
+   overwrite with the default window. Fencing-guarded too. `^:async`."
   {:malli/schema [:=> [:cat ::resume-request] :seon.db/transact-response]}
   [{id :seon.agent/id run-id :seon.agent.run/id}]
   (if-not (owns-run? {:seon.agent/id id :seon.agent.run/id run-id})
     (fencing-error run-id)
-    (let [r      (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})
-          remain (or (:seon.agent.run/remaining-ms r) default-deadline-ms)
-          new-dl (js/Date. (+ (.getTime (js/Date.)) remain))]
-      (await (db/transact!
-               {:seon.db/tx-data
-                [{:seon.agent.run/id       run-id
-                  :seon.agent.run/deadline new-dl}
-                 [:db/retract [:seon.agent.run/id run-id] :seon.agent.run/paused-at]]})))))
+    (let [r (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})]
+      (if-not (:seon.agent.run/paused-at r)
+        {:seon.db/ok? false
+         :seon.db/error
+         {:seon.error/message
+          (str "resume!: run " (pr-str run-id) " is not paused "
+               "(no :seon.agent.run/paused-at) — nothing to resume.")}}
+        (let [remain (or (:seon.agent.run/remaining-ms r) default-deadline-ms)
+              new-dl (js/Date. (+ (.getTime (js/Date.)) remain))]
+          (await (db/transact!
+                   {:seon.db/tx-data
+                    [{:seon.agent.run/id       run-id
+                      :seon.agent.run/deadline new-dl}
+                     [:db/retract [:seon.agent.run/id run-id]
+                      :seon.agent.run/paused-at]]})))))))

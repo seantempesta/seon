@@ -380,14 +380,25 @@
                                                 :seon.agent/compile-state compile-state
                                                 :seon.agent.turn/id-of-turn     turn-id
                                                 :seon.agent.turn/turn-idx       turn-idx
-                                                :seon.agent.turn/prompt-text    prompt})))))))
-            n-ok (or (:seon.agent/eval-count result) 0)]
-        (log id turn-idx (name (or (:seon.agent.turn/status result) :done)) n-ok
-             (if (:seon.agent.turn/status result) "llm-error" "ok"))
-        (assoc (db/pull {:seon.db/pull-pattern
-                         '[* {:seon.agent.turn/evals [*]}]
-                         :seon.db/ref [:seon.agent.turn/id turn-id]})
-               :seon.agent/eval-count n-ok))
+                                                :seon.agent.turn/prompt-text    prompt})))))))]
+        (if (false? (:seon.db/ok? result))
+          ;; The open-tx FAILED — there is NO turn entity to pull (the
+          ;; lookup-ref is unresolvable). Return the same `:error` shape the
+          ;; catch returns, so the loop closes the run `:error` instead of
+          ;; pulling nil → `{:seon.agent/eval-count 0}` (no status) and
+          ;; recur-ing `:turn-ok` forever (a tight retry storm on a write
+          ;; outage). run-turn! ALWAYS carries a status on its error paths.
+          (do (log id turn-idx "open-turn! failed → turn :error"
+                   (pr-str (:seon.db/error result)))
+              {:seon.agent.turn/status :error
+               :seon.error/data        (pr-str (:seon.db/error result))})
+          (let [n-ok (or (:seon.agent/eval-count result) 0)]
+            (log id turn-idx (name (or (:seon.agent.turn/status result) :done)) n-ok
+                 (if (:seon.agent.turn/status result) "llm-error" "ok"))
+            (assoc (db/pull {:seon.db/pull-pattern
+                             '[* {:seon.agent.turn/evals [*]}]
+                             :seon.db/ref [:seon.agent.turn/id turn-id]})
+                   :seon.agent/eval-count n-ok))))
       (catch :default e
         ;; Catastrophic turn failure → return the :error shape. State is the
         ;; loop's concern (its finally resets :idle); the turn never touches it.

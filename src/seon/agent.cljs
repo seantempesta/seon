@@ -508,7 +508,13 @@
                        :seon.agent.run/turns-remaining (max 0 (- turn-limit turn-cnt)))
           last-beat (assoc :seon.agent.run/last-beat-at last-beat)
           deadline  (assoc :seon.agent.run/ms-remaining
-                           (- (.getTime ^js deadline) (.getTime ^js now))))))))
+                           (if paused-at
+                             ;; Paused: the wall clock is FROZEN — surface the
+                             ;; budget banked at pause time (`remaining-ms`),
+                             ;; not deadline−now (which keeps decaying / goes
+                             ;; negative while the run is held).
+                             (or (:seon.agent.run/remaining-ms cur) 0)
+                             (- (.getTime ^js deadline) (.getTime ^js now)))))))))
 
 ;; ============================================================
 ;; The wake GATE — the one predicate the loop trigger ([[seon.agent.loop]])

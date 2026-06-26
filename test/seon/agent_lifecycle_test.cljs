@@ -103,6 +103,52 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
+;; pause/resume budget — pause BANKS deadline−now on :remaining-ms; resume
+;; re-extends the deadline by the BANKED budget (not the default window), and
+;; the paused state-snapshot surfaces the frozen budget (not deadline−now).
+;; ============================================================
+
+(deftest pause-banks-remaining-ms-and-resume-re-extends-by-it
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (await (db/transact! {:seon.db/tx-data [{:seon.agent/id "ccc-2606101200"}]}))
+            (testing "pause banks deadline−now; resume re-extends by the BANKED budget"
+              (let [deadline (js/Date. (+ (.getTime (js/Date.)) 60000)) ; ~1 min out
+                    opened   (await (run/open-run!
+                                      {:seon.agent/id           "ccc-2606101200"
+                                       :seon.agent.run/trigger  :message
+                                       :seon.agent.run/deadline deadline}))
+                    run-id   (:seon.agent.run/id opened)]
+                (await (db/with-agent "ccc-2606101200"
+                         (fn ^:async pz [] (await (lifecycle/pause)))))
+                (let [r      (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})
+                      banked (:seon.agent.run/remaining-ms r)]
+                  (testing "pause banked remaining-ms ≈ deadline − now"
+                    (is (number? banked) "remaining-ms was banked at pause")
+                    (is (<= 55000 banked 60000)
+                        "banked ≈ 60s budget (allowing test execution slack)"))
+                  (testing "the paused snapshot surfaces the FROZEN budget (FIX D)"
+                    (let [snap (agent/state-snapshot {:seon.agent/id "ccc-2606101200"})]
+                      (is (= banked (:seon.agent.run/ms-remaining snap))
+                          "ms-remaining = banked budget while paused, not deadline−now")))
+                  (testing "resume re-extends by the banked budget, NOT the 10-min default"
+                    (let [before (.getTime (js/Date.))]
+                      (await (db/with-agent "ccc-2606101200"
+                               (fn ^:async rz [] (await (lifecycle/resume)))))
+                      (let [r2     (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})
+                            new-dl (.getTime ^js (:seon.agent.run/deadline r2))
+                            ext    (- new-dl before)]
+                        (is (nil? (:seon.agent.run/paused-at r2)) "paused-at cleared")
+                        (is (<= (- banked 5000) ext (+ banked 5000))
+                            "deadline re-extended by the BANKED remaining-ms (~60s)")
+                        (is (< ext 120000)
+                            "NOT default-deadline-ms (600000) — a resume! that
+                             re-extended by the default window FAILS this")))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
 ;; armable-agent-ids — derived :idle (not terminated AND no open run).
 ;; ============================================================
 
