@@ -58,6 +58,21 @@ A short list of the people I'm explicitly indebted to. The longer list — Engel
 - **Neal Stephenson** (*The Diamond Age*, 1995). The Young Lady's Illustrated Primer is the design-fiction reference point for what a bonded AI ought to do for the person it serves.
 - **Rich Sutton** ("[The Bitter Lesson](http://www.incompleteideas.net/IncIdeas/BitterLesson.html)", 2019). Seventy years of AI research collapsed into one usable principle. Seon's "language, not tools" bet is one version of his thesis applied to agent harness design.
 
+## Acknowledgements
+
+Seon is built on open-source work it owes directly, across two layers.
+
+The data and language foundation:
+
+- **datahike** (the replikativ team, EPL-1.0). The open-source, Datomic-compatible Datalog database — plus the Proximum HNSW vector index — that Seon runs as its store. It implements the EAV-with-bitemporal-time data model of Datomic, on the Clojure language — both designed by **Rich Hickey**, whose deeper influence (immutable data, schemas as data, time as a queryable dimension) is credited under Inspirations above.
+
+The real-time UI:
+
+- **Datastar** (Star Federation, MIT). The hypermedia framework behind Seon's SSE-driven live tiles — declarative `data-*` attributes, one connection up, the server streams HTML and the DOM patches itself.
+- **[hyperlith](https://github.com/andersmurphy/hyperlith)** (Anders Murphy, MIT). The render-loop design Seon's live-feed layer adopts: render the view as a pure function of state, stream the compressed result, let the client apply it — no client-side state machine. Anders's "send the whole render down and diff on arrival" approach (and his poor-man's-datastar experiment) shaped how Seon builds composable feeds and interactive tiles.
+
+These licenses (EPL and MIT) are permissive; where Seon ports their code, the upstream copyright and permission notices travel with it.
+
 ## Quickstart
 
 ### Requirements

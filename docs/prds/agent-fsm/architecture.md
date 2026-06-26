@@ -172,6 +172,12 @@ black screen. Seon already serves per-region SSE (`/agent/<id>/sse`, `/debug/sse
 …). New: a feed registry, pod-side compression (Node zlib; JVM has brotli),
 HTTP/2 via Caddy to lift the ~6-connection cap for large walls.
 
+The full feed/interaction/time-travel design — the poor-man's-datastar client
+(a `data-action`→POST tile, no agent-facing datastar), composable hiccup+Tailwind
+regions, `as-of` time-travel ("apps" = saved cursors), and the streaming-effect
+volatile tier — is [[interactive-feeds]]. It builds on the `:seon.render/html` twin
+and lands after the loop work.
+
 **The renderer is a ROLE, not a single process.** "Single front door" means
 *units never serve the browser and untrusted code never runs in the renderer* —
 not "one OS process." A feed is `subscribe → derive → hash → push`, and both
@@ -453,6 +459,10 @@ first. (Marked *needs baking* at their mention.)
 - [[agent-runtime-spec]] — full schema + the run model + the FSM table.
 - [[single-render-path-design-2026-06-25]] — one render → twin → transact →
   reactive inspector.
+- [[interactive-feeds]] — the UI/view successor: composable live feeds, the
+  poor-man's `data-action`→POST client (no agent-facing datastar), `as-of`
+  time-travel + saved-cursor "apps", the streaming-effect volatile tier, and the
+  decoupled rebuild-the-views POC. Builds on the `:seon.render/html` twin.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset
   (db is a value, only values cross the wire, CAS-as-assertion, basis-t caching,
   where to read in the fork). Read before touching the loop.
