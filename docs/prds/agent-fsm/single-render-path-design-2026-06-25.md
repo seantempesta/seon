@@ -6,8 +6,17 @@ tags: [prd, agent, render, flow, web]
 
 # Single Context Render Path — Design (2026-06-25)
 
-One render path producing the twin (ai + html) in a single pass, stored on
-the turn record, and viewed reactively by the inspector (no recompute).
+> **Correction (supersedes the storage half):** renders are **derived, never
+> stored** — see `architecture.md` *One render path*. The DB holds only facts +
+> the turn's tx-basis `t`; the web renderer derives the view from `db-as-of(t)`
+> on demand (in-memory cache, not DB rows). The parts below that STAND: the
+> single render fn, the ai+html twin, deriving inputs from the db (the F2 cure),
+> byte-identity by construction, tests via the same fn. The parts SUPERSEDED:
+> transacting the render result onto the turn, `render-file`/`prompt-file`
+> blobs, the inspector reading a stored render.
+
+One render path producing the twin (ai + html) in a single pass, ~~stored on
+the turn record~~, and viewed reactively by the inspector (no stored render).
 Resolves the F2 divergence (prompt path lacked `:seon.agent/entity`; the
 inspector path injected it). Source: a read-only design pass against the live
 code. Owner directives folded in: DB-backed + reactive for everything; the

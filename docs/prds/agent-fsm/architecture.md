@@ -71,15 +71,30 @@ distributed: each unit renders its own fragment and transacts it; the edge fans
 DB changes to the browser. This is the existing inspector/serve layer, with the
 render *producers* moved into isolated units.
 
-### One render path
+### One render path — derived, never stored
 
-A single render of `context-root` produces, per section, the **twin**:
+A single render fn over `context-root` produces, per section, the **twin**:
 `:seon.render/ai` (text, for the loop's prompt) **and** `:seon.render/html`
-(hiccup, for the inspector) in one pass. Entity/inputs are derived from the db
-(no injected ctx keys to diverge). The structured result is transacted onto the
-turn record → the edge renders it reactively. The prompt the model sees and the
-inspector's left pane are byte-identical **by construction**; tests assert via
-the same render fn (no hand-built ctx). See the single-render-path design doc.
+(hiccup, for the view) in one pass. Inputs derive from the db (no injected ctx
+keys to diverge).
+
+**Renders are projections of data — we never write them to the DB.** Only
+*facts* are stored (incl. one scalar per turn: the **tx-basis `t`** the agent
+rendered against). The view is derived on demand:
+
+- The **web renderer** is a component that reads DB state, renders, and hosts
+  its own HTTP server. Renders are ephemeral; it may memoize in its *own process
+  memory* (perf escape hatch — not a DB row) and re-derive reactively on `tx`.
+- **"What the agent saw at turn N"** = re-render from **`db-as-of(t)`**. The
+  bitemporal DB *is* the storage; no render blob.
+- **Prompt == view, byte-identical by construction** — both are the *same* fn
+  over the *same* DB value (`as-of` the turn's `t`). Nothing stored. Tests assert
+  via that fn (no hand-built ctx).
+
+Drop the `render-file`/`prompt-file` blobs (ephemeral projections). *Caveat:* a
+re-derived historical view uses the *current* renderer (today's view of
+yesterday's data), not the literal bytes sent — fine for inspection; store the
+prompt text only as a deliberate exception if strict audit is ever needed.
 
 ## Isolation — two tiers
 
@@ -203,10 +218,11 @@ no loader shim. Tier-2 microVMs mount the store read-only via virtio-fs.
   listener must not halt the pump and stall every agent's wakes.
 - **Reconnect replay** — `subscribe-tx` needs a `since-t` basis, or a UDS drop
   silently loses wake messages → an agent sits `:idle` with unread mail.
-- **Offload prompt *render* to the worker too** (not just `eval-batch!`) — a big
-  context render blocks the main event loop / SSE.
+- **Offload the agent's prompt render to its worker** (not just `eval-batch!`) —
+  a big context render shouldn't block the main event loop. (The *view* render is
+  the web-renderer component's job, already off the agent's hot path.)
 
-**Design tensions needing a call:**
+**Design tension needing a call:**
 
 - **Sliding cap: derive vs. store.** The spec's `renew!` writes `turn-limit` +
   `deadline` on *every* inbound message; the current code *derives* the window
@@ -214,9 +230,9 @@ no loader shim. Tier-2 microVMs mount the store read-only via virtio-fs.
   hybrid:** derive the default window (base + inbound count — no writes), store
   an explicit override *only* when a process actually bumps/stops it (rare). Keeps
   "other processes can extend it" without per-message churn.
-- **Render storage: blob, not inline datoms.** Persist the render twin in a
-  content-addressed blob store (hash in the DB), not as datoms every turn —
-  avoids bitemporal bloat on the write-bottlenecked DB.
+
+  (Render storage is no longer a tension — renders are derived, never stored;
+  see *One render path*.)
 
 **Minor / later:** heartbeat cadence (start per-turn); `default-deadline-ms`
 value + whether deadline-less runs are allowed; `parent`/`llm-meta` disposition;
