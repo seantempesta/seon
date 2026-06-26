@@ -306,13 +306,13 @@
 
 (defn- header-examples [dbv]
   ;; The namespaces-section HEADER is the prose ABOVE the first rendered
-  ;; namespace block; everything from the first `; namespace …` label on is
-  ;; REAL framework/my source (rendered full), validated by
+  ;; namespace block; everything from the first `;;; ┌─ namespace …` begin
+  ;; bracket on is REAL framework/my source (rendered full), validated by
   ;; ns-doc/fn-doc-examples, NOT by re-running whole fn bodies (which use
   ;; framework-internal aliases like `internal/…`). Cut at the real
   ;; boundary so the cut does not grab the full source as taught examples.
   (let [nss    (ctx-namespaces/namespaces-section {:seon.db/db dbv})
-        cut    (or (str/index-of nss "; namespace ") (count nss))
+        cut    (or (str/index-of nss ";;; ┌─ namespace ") (count nss))
         header (subs nss 0 cut)]
     (vec (concat (surface-examples "seon.ctx/system-text" ctx/system-text)
                  (surface-examples "namespaces-section header" header)))))

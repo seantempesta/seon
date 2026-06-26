@@ -1037,11 +1037,13 @@
     "  ;; nested maps (recursively); a PLAIN ref comes back as {:db/id N}.\n"
     "  ;; Pull a plain ref's fields by NAMING it: '[* {:my.kb.doc/author [*]}].\n"
     "\n"
-    "; THE NAMESPACES BELOW are real loaded code. YOUR OWN namespace renders\n"
-    "; in FULL — your live workspace, the most important thing here. Two\n"
-    "; set-up tools come with you as EXAMPLES, already aliased: db (the\n"
-    "; database) and todo (your work list). The rest of the seon framework is\n"
-    "; deliberately NOT dumped — it stays QUERYABLE and SEARCHABLE, one search\n"
+    "; THE NAMESPACES BELOW are real loaded code, each delimited by its own\n"
+    "; ;;; ┌─ namespace X ─ / ;;; └─ end namespace X ─ brackets. YOUR OWN\n"
+    "; namespace renders in FULL — your live workspace, the most important\n"
+    "; thing here. Two set-up tools come with you as EXAMPLES, already\n"
+    "; aliased: db (the database) and todo (your work list). The rest of the\n"
+    "; seon framework is deliberately NOT dumped — it stays QUERYABLE and\n"
+    "; SEARCHABLE, one search\n"
     "; away, so you are not buried in code you don't need. Never hallucinate a\n"
     "; fn name — discover it. To find or read any non-shown ns or fn:\n"
     ";   (seon.agent.search/grep {:seon.agent.search/pattern \"defn store-\"})\n"
@@ -1312,25 +1314,47 @@
        (when (and source (not (str/blank? source)))
          (str "\n" (clip (str/trim source) fn-source-inline-threshold)))))
 
+(defn ns-demarc
+  "Wrap a rendered namespace BODY in the per-ns begin/end demarcation
+   brackets — the `;;;` runtime-structure convention, nesting one level
+   under the section-level `;;; ┌─/└─` brackets. A `;;; ┌─ namespace X ─`
+   begin line sits above the body and a `;;; └─ end namespace X ─` end
+   line below it, so every ns in the `:namespaces` section is clearly
+   delimited; a truly-empty ns (begin immediately followed by end) is
+   glaring, no longer silent poison. `suffix` (optional) rides the begin
+   line — e.g. \"(signatures)\" for the manifest view. The ONE site
+   ns blocks are bracketed: [[render-one-ns-ai]] (every detail) and the
+   home-ns workspace stub ([[seon.ctx.namespaces/cur-ns-workspace-stub]])
+   both route through it, so the demarcation is uniform."
+  {:malli/schema [:function
+                  [:=> [:catn [::ns-kw [:or :keyword :symbol]] [::body :string]] :string]
+                  [:=> [:catn [::ns-kw [:or :keyword :symbol]] [::body :string]
+                        [::suffix [:maybe :string]]] :string]]}
+  ([ns-kw body] (ns-demarc ns-kw body nil))
+  ([ns-kw body suffix]
+   (str ";;; ┌─ namespace " (name ns-kw)
+        (when (and suffix (not (str/blank? suffix))) (str " " suffix)) " ─\n"
+        body
+        "\n;;; └─ end namespace " (name ns-kw) " ─")))
+
 (defn- render-one-ns-ai
   "Render a single namespace block to text. `ns-kw` is the namespace
    keyword; `data` is the `pull-ns-data` result (or nil = not in db).
 
-   `detail` (default `:full`) selects the depth of each fn body and the
-   shape of the whole block:
-     - `:full`      — a `; namespace x` label, the ns's `(ns …)`
-                      SOURCE plus every fn (full source when small),
-                      schema, and test. The whole-ns view — the agent's
-                      own / my.* / acme / current code.
-     - `:signature` — a `; namespace x (signatures)` label
-                      carrying ONLY each fn's SIGNATURE (header + flags +
-                      one-line doc, bodies elided). No ns source, no
-                      schemas, no tests — the public-API manifest view of
-                      a framework ns.
+   Every block is delimited by the per-ns `;;; ┌─ namespace X ─` /
+   `;;; └─ end namespace X ─` brackets ([[ns-demarc]]) — the runtime-
+   structure convention that makes each ns boundary explicit and an empty
+   one glaring.
 
-   The label is a single-`;` comment carrying the ns NAME (load-bearing —
-   it says WHICH file each block is); the box-drawing `── ── ` decoration
-   was retired in favour of the render-side `;;; ┌─/└─` section bracket."
+   `detail` (default `:full`) selects the depth of each fn body and the
+   shape of the bracketed body:
+     - `:full`      — the ns's `(ns …)` SOURCE plus every fn (full source
+                      when small), schema, and test. The whole-ns view —
+                      the agent's own / my.* / acme / current code.
+     - `:signature` — a `(signatures)`-tagged begin line carrying ONLY
+                      each fn's SIGNATURE (header + flags + one-line doc,
+                      bodies elided). No ns source, no schemas, no tests —
+                      the public-API manifest view of a framework ns."
   ([ns-kw data] (render-one-ns-ai ns-kw data :full))
   ([ns-kw data detail]
    (if (nil? data)
@@ -1343,10 +1367,11 @@
          ;; manifest view: public fn signatures only, bodies elided.
          (let [pub  (remove :seon.fn/private? fns)
                sigs (map #(fn-block-ai % :signature) pub)]
-           (str "; namespace " (name ns-kw) " (signatures)\n"
-                (if (seq sigs)
-                  (str/join "\n\n" sigs)
-                  "; (no public fns indexed yet — query by name)")))
+           (ns-demarc ns-kw
+                      (if (seq sigs)
+                        (str/join "\n\n" sigs)
+                        "; (no public fns indexed yet — query by name)")
+                      "(signatures)"))
          ;; full view: when the ns carries its REAL full file SOURCE, that
          ;; source IS the authoritative body — every defn/register! is already
          ;; in it, so re-emitting per-member [fn …]/[schema …] blocks would be
@@ -1375,15 +1400,15 @@
                                 (when (and last-failure-summary
                                            (not (str/blank? last-failure-summary)))
                                   (str ": " (clip last-failure-summary 120))))))]
-             (str "; namespace " (name ns-kw) "\n"
-                  (str/trim src)
-                  (when (seq notes) (str "\n\n" (str/join "\n" notes)))))
+             (ns-demarc ns-kw
+                        (str (str/trim src)
+                             (when (seq notes) (str "\n\n" (str/join "\n" notes))))))
            (let [body (cond-> []
                         (seq fns)     (into (map #(fn-block-ai % :full) fns))
                         (seq schemas) (into (map schema-block-ai schemas))
                         (seq tests)   (into (map test-block-ai tests)))]
-             (str "; namespace " (name ns-kw) "\n"
-                  (if (seq body) (str/join "\n\n" body) "; (no recorded source/fns/schemas)")))))))))
+             (ns-demarc ns-kw
+                        (if (seq body) (str/join "\n\n" body) "; (no recorded source/fns/schemas)")))))))))
 
 (defn- render-one-ns-html
   "Render a single namespace block to hiccup. Reuses the per-kind
@@ -1629,9 +1654,9 @@
                        These are CONTEXT, not the system message — the
                        hardcoded system-specific mechanics ride the
                        system role (`seon.ai/effective-system-prompt`).
-     2. :namespaces  — THE BODY: one `;; ── namespace x ──` block per
-                       included ns, recency-ordered (most-recently-
-                       modified LAST), curated full/signature per ns
+     2. :namespaces  — THE BODY: one `;;; ┌─ namespace x ─ … ─ end ─`
+                       bracketed block per included ns, recency-ordered
+                       (most-recently-modified LAST), curated full per ns
      3. :your-entity — the agent's own entity as a pretty-printed map
                        (purpose, tile wiring, sections, self-notes)
      4. :live-tile   — what your human currently sees

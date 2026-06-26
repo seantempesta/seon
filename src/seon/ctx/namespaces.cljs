@@ -1,7 +1,8 @@
 (ns seon.ctx.namespaces
   "The `:namespaces` context section — THE BODY of the prompt: CURATED,
-   not render-everything. Each rendered ns is a `; namespace x`
-   full-source comment-block. ONLY the curated set renders:
+   not render-everything. Each rendered ns is a full-source comment-block
+   delimited by per-ns `;;; ┌─ namespace x ─` / `;;; └─ end namespace x ─`
+   brackets ([[seon.ctx/ns-demarc]]). ONLY the curated set renders:
 
      - FULL source (whole file, NO clipping) for the few nses an agent
        actually USES or OWNS:
@@ -214,9 +215,10 @@
                   (str "(ns " (name nm) "\n  (:require "
                        (str/join " " (map name reqs)) "))")
                   (str "(ns " (name nm) ")"))]
-    (str "; namespace " (name nm) "\n"
-         ns-form "\n"
-         "; (your workspace — nothing defined here yet; define schemas + fns and they appear here)")))
+    (ctx/ns-demarc
+      nm
+      (str ns-form "\n"
+           "; (your workspace — nothing defined here yet; define schemas + fns and they appear here)"))))
 
 (defn- render-one
   "Render ONE included ns through the SINGLE renderer
@@ -238,8 +240,8 @@
                       :seon.db/db        db})
                    :seon.render/text
                    str/trim)
-        ;; render-namespace emits a `; namespace x` label even for an empty
-        ;; body: `; (no recorded source/fns/schemas)` (entity present, no
+        ;; render-namespace brackets even an empty ns, whose body is then
+        ;; `; (no recorded source/fns/schemas)` (entity present, no
         ;; source/members) or `; requires: x (not in db)` (the home ns —
         ;; a :seon.ns/name row whose sparse pull returns nil). Both mean
         ;; "nothing real to show."
@@ -262,7 +264,8 @@
 
      - FULL (`:seon.render/detail :full`) for every `my.*` ns, every
        THIRD-PARTY `acme` ns, the agent's CURRENT ns, and the curated
-       [[full-source-whitelist]] seon.* tools — each a `; namespace x`
+       [[full-source-whitelist]] seon.* tools — each a
+       `;;; ┌─ namespace x ─` / `;;; └─ end namespace x ─` bracketed
        block carrying its REAL FULL FILE SOURCE (+ any member rows), unclipped.
      - Every OTHER `seon.*` framework ns is DROPPED from the rendered
        section — not shown here at all. It stays INDEXED and SEARCHABLE

@@ -301,8 +301,14 @@
                   (fn [_]
                     (let [txt (ctx-namespaces/namespaces-section
                                 {:seon.db/db @db/*conn* :seon.agent/id "wtest"})]
-                      (is (str/includes? txt "; namespace my.agent.wtest")
-                          "the empty current ns renders as a block")
+                      ;; The empty home ns renders inside the per-ns
+                      ;; begin/end demarcation brackets (the `;;;`
+                      ;; runtime-structure convention) — so a truly-empty
+                      ;; workspace is clearly framed, not silent poison.
+                      (is (str/includes? txt ";;; ┌─ namespace my.agent.wtest ─")
+                          "the empty current ns renders inside a begin bracket")
+                      (is (str/includes? txt ";;; └─ end namespace my.agent.wtest ─")
+                          "and a matching end bracket — the ns is demarcated")
                       (is (not (str/includes? txt "not in db"))
                           "no misleading 'not in db' for the indexed home ns")
                       (is (str/includes? txt "(ns my.agent.wtest")
