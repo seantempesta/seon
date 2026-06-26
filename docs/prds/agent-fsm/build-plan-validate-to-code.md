@@ -114,6 +114,22 @@ pristine.
    `/call` route + **namespace-as-route into the owning agent's sandbox** to the pod
    (replace the JVM `seon.*` prefix-whitelist). Live proof: an agent-authored button
    round-trips through `/call` → sandbox → transact → reactive push.
+   - **IMPLEMENTED + in-process tests pass** (`bin/test-cljs`, 543 tests / 0 fail):
+     `seon.web.reactive.transform` (cljs) rewrites fn-call / fn-ref handler slots →
+     standard `@post('/call?fn=…&args=…')` (args transit in the query, apostrophe-safe);
+     `seon.web.reactive.call` resolves the owning agent from the fn's `my.agent.<id>`
+     namespace + capability-checks it is a GRANTED `:seon.fn` in that home ns, then
+     invokes via the agent's own `seon.eval/eval` (same path as eval) → transact →
+     existing inspector `listen!` push. Wired into `serve.cljs` (`POST /call`) +
+     `render.cljs` (agent-tile hiccup rewrite). Tests: the rewrite (call+ref),
+     the capability REFUSAL (fs/core/cross-agent/non-granted → no invoke), and a
+     granted invoke that transacts (datom written). **PENDING**: the live browser
+     `/call` round-trip drive (orchestrator).
+   - **Bounded/flagged**: handlers must live in the agent's home ns `my.agent.<id>`
+     (the unambiguous owner). Bare handler symbols qualify to the tile fn's authoring
+     ns; a fn in a shared domain ns (`my.workouts/…`) resolves to no owning agent and
+     is refused. Generalizing to domain-ns handlers needs an agent→ns ownership map
+     (does not exist yet).
 
 6. **Feeds**: one-SSE-per-feed + a feed registry; one feed crashing = one dead tile.
 
@@ -130,7 +146,9 @@ Each must become a passing, re-runnable test:
 - pause past deadline → resume does NOT insta-kill.
 - prompt bytes == inspector left-pane bytes (same fn, same db value).
 - a section/tile that throws → clean fallback, never `⚠`/malli code.
-- a `/call` with a non-granted fn is refused (capability surface).
+- a `/call` with a non-granted fn is refused (capability surface). **[test passes]**
+  — `seon.web.reactive.call-test`: fs/core/cross-agent/non-granted → refused envelope,
+  never invoked; a granted home-ns fn resolves + invokes + transacts.
 - reconnect after a UDS drop replays missed wakes (no silent `:idle`).
 
 ## Done

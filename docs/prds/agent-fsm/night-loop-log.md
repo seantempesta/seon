@@ -215,4 +215,32 @@ Revert point if the experiment goes sideways: `c84e8fc`.
   `db-as-of(t)` re-render of "what the agent saw at turn N" is future); `inspector/snapshot`
   still uses the filtered `agent-view` for the tile/state (equivalent today — own entity);
   `prompt-file` kept (the sanctioned audit-exception / gym evidence hook).
+- **Commit:** `2b9a9c4`
+
+### Pass 7 — interactivity: /call + namespace-as-route into the owning sandbox
+
+- **Move:** build/port (the THIRD door of the one exec service — eval = render = interaction).
+- **Did:** ported the JVM-track `web/reactive/transform.clj` + `ns/routes.clj` to the pod.
+  - `web/reactive/transform.cljs` — render-time postwalk: a handler slot holding a fn-**call**
+    `(cancel-order! "o-1")` (args bound at render) or a fn-**ref** `submit-order!` (args from
+    click signals) → ONE standard datastar `@post('/call?fn=…&args=…')`. Browser sees only
+    standard datastar. Wired into `render.cljs` for agent-authored tiles.
+  - `web/reactive/call.cljs` + `POST /call` in `serve.cljs` — **namespace-as-route** (replaces
+    the JVM `seon.*` prefix-whitelist): resolve the owning agent from the fn symbol's ns
+    (`my.agent.<id>/foo`→`<id>` iff a live agent row exists), **capability-check** (the fn must
+    be a granted `:seon.fn` in the agent's home ns — refuse otherwise, never invoke),
+    Malli-validate, then **invoke via `seon.eval/eval`** in the agent's home ns (the SAME eval
+    path — "an interaction is an eval authored as hiccup, routed by namespace") → transact →
+    the existing `listen!`→render→SSE feed pushes.
+  - Datastar v1 adaptation: the `{:fn,:args}` descriptor rides the URL query (v1 `@post`'s 2nd
+    arg is fetch options; the body carries signals) — args transit-serialized, apostrophe-escaped.
+- **Live proof (orchestrator, real `/call` route):** the **capability gate refuses** —
+  `fs/readFileSync` (no owning agent) → **403**, `seon.client/start-agent!` (core) → **403**,
+  `my.agent.<id>/nonexistent` (home ns, ungranted) → **403** with a precise message. Granted-fn
+  invoke→transact is test-proven (`call-invokes-granted-fn-and-it-transacts`). `bin/test-cljs`
+  **543/2487/0/0** incl. the new transform + capability-gate tests.
+- **Flagged:** home-ns-only handlers (deliberate security narrowing — domain-ns handlers would
+  need an agent→ns ownership map, deferred); minor `read-body`/`query-val` dup (a `seon.web.http`
+  util would dedup — cycle blocks reuse today); `bin/test-cljs` footer grep over-matches
+  expected-error log lines (verdict-by-exit-code is correct).
 - **Commit:** (this pass)

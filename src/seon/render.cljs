@@ -39,7 +39,8 @@
     [seon.render.live-tile :as live-tile]
     [seon.render.sci :as render-sci]
     [seon.schema :as schema]
-    [seon.ui.html :as html]))
+    [seon.ui.html :as html]
+    [seon.web.reactive.transform :as transform]))
 
 ;; ============================================================
 ;; Schemas — every shape this surface reads or writes (spec-05 §15.1).
@@ -435,6 +436,20 @@
                              (html-render value input)
                              :else r))
                          (html-render value input))
+                ;; INTERACTIVITY: rewrite agent fn-call / fn-ref handler slots
+                ;; in AGENT-authored hiccup into standard Datastar
+                ;; `@post('/call?…')` (seon.web.reactive.transform). Bare
+                ;; handler symbols qualify to the tile fn's namespace; /call
+                ;; routes by that namespace into the owning agent's sandbox.
+                ;; No-op on core hiccup + hiccup with no interactive handlers.
+                resp   (if (render-sci/agent-authored-sym? value)
+                         (update resp :seon.render/hiccup
+                                 (fn [h]
+                                   (if h
+                                     (transform/transform-hiccup
+                                       (symbol (namespace value)) h)
+                                     h)))
+                         resp)
                 hiccup (:seon.render/hiccup resp)]
             ;; SERIALIZATION joins the same guarded path as invocation
             ;; (serialization-boundary hardening): a structurally-broken hiccup (e.g. a

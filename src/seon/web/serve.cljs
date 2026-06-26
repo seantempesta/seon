@@ -49,7 +49,8 @@
     [seon.db :as db]
     [seon.log :as log]
     [seon.platform :as platform]
-    [seon.web.inspector :as inspector]))
+    [seon.web.inspector :as inspector]
+    [seon.web.reactive.call :as call]))
 
 ;; ============================================================
 ;; Process-lifetime state
@@ -496,6 +497,7 @@
                                                                    (str "Not found: " url)))
         "POST" (cond
                  (= path "/chat")                   (handle-chat! req res)
+                 (= path "/call")                   (call/handle! req res)
                  (= path "/agents/new")             (handle-create-agent! req res)
                  (complete-path->agent-id path)     (handle-complete-agent!
                                                       req res
