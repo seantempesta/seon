@@ -63,17 +63,26 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
 ### Now — UI/UX (U)
 
 - **Decoupled interactive-feeds POC** (spec: [[interactive-feeds]]). Building the
-  feed/view layer against landed `seon.derive` + the `since-t` feed — pure read,
-  no writes/CAS. Scope:
-  - Generalize the SSE connection registry (`!sse-by-agent`) → a keyed `!feeds`
-    model + a `feed` shell with **region-targeted** patches (one SSE per region,
-    independent retry).
-  - A tiny **packetstar-style** client asset (`data-action`→POST, region replace;
-    morph as the per-region upgrade) — no agent-facing datastar.
-  - Rebuild the views — **agent grid, agent tile, debug, data** — as pure
-    `(db-value) → hiccup` over `seon.derive`, Phosphor Terminal theme.
-  - **Time-travel**: live⇄pinned cursor via `db/as-of`; lazy history filmstrip
-    (history + tx-provenance, pure read; frame = distinct fingerprint).
+  tile layer against landed `seon.derive` + the `since-t` feed — pure read, no
+  writes/CAS.
+- **Locked model (owner):** *everything is a tile* — one composable primitive
+  (region + feed + view + interactions). The agent's main render is just the HERO
+  tile; commentary (demoted chat), status, todos, debug, data are each their own
+  tile. Default layout **~2/3 hero + ~1/3 rail of tiles**, with a **fullscreen
+  toggle**; an "app" = a named arrangement of tiles. UI is **tile-primary,
+  chat → commentary** (not chat-bubbles). Naming: developer surface is **debug**
+  (retiring "inspector").
+- **Scope (build the tile primitive once, then compose):**
+  - Generalize the live SSE seam — `inspector.cljs` `schedule-push!`'s hardcoded
+    render `case` (`:1693-1708`) + `!sse-by-agent` (`:68`) → a feed-key→render-thunk
+    **`!feeds` registry**; reuse the on-tx listener (`:1715`) + `patch-fragment`
+    (`:1596`, already region-targeted via `datastar-patch-elements` morph-by-id).
+  - A tiny **packetstar-style** client asset in `resources/public/js/` (auto-served
+    by `serve.cljs`) — EventSource per tile + `data-action`→POST; no agent-facing
+    datastar.
+  - The tile views — hero (agent render), commentary, status, todos, debug, data —
+    each pure `(db-value) → hiccup` over `seon.derive`, Phosphor Terminal theme.
+  - **Time-travel**: live⇄pinned cursor via `db/as-of`; lazy filmstrip.
   - **Streaming effect** demo via the in-process volatile tier (no runtime change).
 - **Files (my lane):** `src/seon/web/serve.cljs`, `src/seon/web/inspector.cljs`,
   `src/seon/web/reactive/*`, a new feeds ns + client/CSS assets under `web/`;

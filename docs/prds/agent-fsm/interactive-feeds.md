@@ -60,26 +60,33 @@ their **core.async mult** to our `db/listen!` tx feed, and their **manual
 client-vs-server simplicity but make patches **region-targeted** (not whole-body)
 so feeds compose — see *Composability*.
 
-## The composability primitives
+## The composability primitives — everything is a tile
 
-A page is a **static shell of named regions**; each region is filled by one feed.
-This is the unit of composition — independent render paths side by side, each with
-the browser behavior it needs.
+**One primitive: the tile.** A *tile* is a composable live section — a region
+bound to a feed rendering a view, optionally interactive. There is **no special
+"the live tile"** standing apart from hardcoded widgets: the agent's main render,
+the running commentary (demoted chat), status, todos, debug, and the data browser
+are **all tiles** — differing only in which view they render and how much space
+they take. A page is a **shell of tiles**; an **app** is a named arrangement of
+them (a layout + each tile's time cursor). Proving that every surface is the same
+composable primitive is the point of the feature.
 
-- **Shell** — the boot HTML: loads the tiny client, declares the regions, opens
-  each region's stream. Written once; never by an agent.
-- **Region** — a DOM element with a stable `id` (`#feed-<key>`). A patch targets a
-  region, not the body, so one region updating never disturbs a sibling.
-- **Feed** — `subscribe → derive → render → stream` for one region. Independent SSE
-  connection (one dead feed = one dead tile, auto-retried), independent cadence,
-  independent live/pinned cursor. This is the architecture's
-  *feeds-as-processes* role at region granularity.
-- **View fn** — pure `(db-value) → hiccup`, Tailwind classes inline. No client
-  concepts. This is just the `:seon.render/html` twin from [[context-render]].
-- **Action fn** — plain Clojure, POST-invoked, ends in a `transact!`. No return
-  HTML needed; the resulting tx re-renders the feeds.
-- **Input region** — a region the server **never overwrites**; the user owns it. It
-  POSTs on submit. This is how we keep native browser behavior (see below).
+A tile is assembled from these parts (the build-once primitives):
+
+- **Region** — the tile's DOM element with a stable `id` (`#tile-<key>`). A patch
+  targets one region, so a tile updating never disturbs a sibling.
+- **Feed** — the tile's transport: `subscribe → derive → render → stream`.
+  Independent SSE connection (one dead tile is one dead tile, auto-retried),
+  independent cadence, independent live/pinned cursor. The architecture's
+  *feeds-as-processes* role at tile granularity.
+- **View fn** — the tile's render: pure `(db-value) → hiccup`, Tailwind inline, no
+  client concepts. Just the `:seon.render/html` twin from [[context-render]].
+- **Action fn** — the tile's interactions: plain Clojure, POST-invoked via `/call`,
+  ends in a `transact!`; the resulting tx re-renders the affected tiles.
+- **Input tile** — a tile the server **never overwrites**; the user owns it and it
+  POSTs on submit. How native browser behavior is preserved (see below).
+- **Shell** — the boot HTML: loads the tiny client, declares the tiles, opens each
+  tile's stream. Written once; never by an agent.
 
 ```clojure
 ;; a view fn is just hiccup + tailwind — nothing else
@@ -94,10 +101,21 @@ the browser behavior it needs.
 
 ```
 
-## Keeping native browser interactions — the chat input + live tile
+### Default layout — tiles all the way down
 
-The owner's concrete target: a **chat input bar the user types in** while the
-**tile renders live** beside it. The naive whole-region-replace would wipe the
+The product surface is **~2/3 hero tile + ~1/3 rail of tiles**. The agent's main
+render is the hero — **the primary communication medium** (the inversion: the tile
+leads, chat is demoted to a *commentary* tile in the rail, a live-updating ticker,
+not the main surface). The rail stacks other tiles (commentary, status, todos),
+each a first-class tile, not a special-cased widget. A **fullscreen toggle**
+expands the hero to the whole canvas — the immersive mode for when the user trusts
+the agent and wants only its surface. Because every slot is a tile, the layout is
+just data: resize, swap, add, or save an arrangement as a named app.
+
+## Keeping native browser interactions — the input tile beside the live hero
+
+The owner's concrete target: an **input tile the user types in** while the **hero
+tile renders live** beside it. The naive whole-region-replace would wipe the
 user's half-typed text and cursor on every tile update. The structural fix is
 **region isolation**, not a fancier client:
 
@@ -140,10 +158,13 @@ A feed does the same: it renders against a **basis-t**.
   the fn is `:seon.fn/source`, itself a datom on the timeline). Both inputs are
   immutable, so the frame is byte-identical forever — compute once, cache, never
   invalidate. Only HEAD re-renders.
-- **An "app" = a saved cursor.** A small `:seon.view` entity
-  (`{:seon.view/name :seon.view/region <ref> :seon.view/basis-t :seon.view/render-fn}`)
-  is a named (frame, renderer) coordinate the user flips between. Branching = fork
-  the cursor. This is the only new schema, and it is tiny.
+- **An "app" = a saved arrangement of tiles.** Each tile's saved cursor is a small
+  `:seon.view` entity with proper values, e.g.
+  `{:seon.view/name "morning" :seon.view/tile <tile-ref> :seon.view/basis-t 4821}`
+  (omit `:seon.view/basis-t` ⇒ live HEAD; add `:seon.view/render-fn 'my.view/variant`
+  for a variant renderer). An app is a named list of these + a layout; flipping
+  between apps moves the cursors. Branching = fork the arrangement. This is the
+  only new schema, and it is tiny.
 
 ### Caching discipline (datahike-grounded)
 
