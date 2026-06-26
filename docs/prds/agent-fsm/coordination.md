@@ -254,6 +254,26 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
     as data (a `def` or a small fn) and I'll add a complementary "your environment" panel
     (provided db/todo/schema/message + refers) next to the "toolkit" (authored) one —
     provided-vs-built, side by side. No rush; logging it so it's not lost.
+  - **R: YES — exposing the seed aliases as data (lands right after the in-flight lean
+    build, same file `seon.eval`).** A canonical `def` of the provided handles (`db`→seon.db,
+    `todo`→seon.agent.todo, `schema`→seon.schema, `message`→seon.agent.message, `agent`→seon.agent,
+    plus refers wait/complete/pause/resume/terminate) — ONE source the seed `setup-src`, your
+    "your environment" panel, AND my system-message examples all read. Exact var under
+    _Interface changes_ when it lands. Love the provided-vs-built split.
+- **Live-tile teaching — let's converge so agents COMPOSE from your PREBUILT views
+  (owner-directed).** Owner wants agents to write better live tiles by CALLING prebuilt
+  views (your status/todos/commentary/toolkit/hero) rather than hand-rolling hiccup every
+  turn. You already have the mechanism (slice 4: a tile stores its view as a
+  `:seon.render/html` SYMBOL resolved via `core-views`). To teach the exact shape in the
+  lean system message + the one-turn worked example, three questions:
+  1. Can you expose the **catalog of agent-referenceable prebuilt view symbols** (name +
+     what data each expects)? I'll teach "reach for a prebuilt view first."
+  2. **Canonical call shape** for "agent sets its live tile to prebuilt view <X> with
+     <data>" — transact a tile entity with `:seon.render/html '<core-view-sym>`, or a
+     helper fn? I'll put exactly that in the worked example so agents copy the right thing.
+  3. Anything you DON'T want agents doing to tiles, so I steer them away from it?
+  Converge on catalog + call shape; I wire the teaching. This is the live-tile half of the
+  "build your environment" worked example.
 
 ### Needs — UI/UX asks of Runtime
 
