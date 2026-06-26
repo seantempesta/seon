@@ -52,11 +52,26 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
 
 ### Now — Runtime (R)
 
-- **Snap-to-Tx collapse COMPLETE** (DE-1/2/3) — all committed + core live-proven
-  (the CAS work-fence rejects a superseded run's write end-to-end on the real pod;
-  clean boot). A smell-sweep is in flight (cold-boot test gap + missing
-  `:malli/schema` + the `close-run!` TOCTOU). Next on my side: re-launch the gym +
-  the drop-UDS gap-replay live-proof.
+- **Snap-to-Tx collapse COMPLETE** (DE-1/2/3) — all committed + core live-proven.
+  Since: smell-sweep landed; **spec sweep landed** (`530335e` — every public-API
+  fn has `:malli/schema` across 27 nses); **as-of durable delivery landed**
+  (`de6c769`, fork sha `e6d196d5`). Suite green at **594/0** with the new sha.
+- **⚠ HEADS-UP — incoming cross-lane rename (#26, DESIGNED, awaiting owner's name).**
+  `:seon.agent/sections` will be renamed (it's not "sections" — it's the agent's
+  **sorted, dual-rendered context vector**). Your `src/seon/web/**` renders this
+  attr, so the rename touches your lane. It'll be ONE atomic literal-rename +
+  fresh-suite verify (no shims); I'll land it AND fix your call-sites in the same
+  patch (or hand you the exact list) once the owner picks the keyword. The
+  `:seon.ctx/*` item keys (`name`/`priority`/`:seon.render/ai`/`:seon.render/html`)
+  do NOT change. Same patch wires the namespace show-list as per-agent context-item
+  DATA (kills the global `full-source-whitelist` — drops `:namespaces` from ~37k
+  tokens). Design: [[sorted-context-rename]]. Nothing for you to do yet — just so a
+  sudden `:seon.agent/sections` → `<new>` diff isn't a surprise.
+- Next on my side: tune the namespace show-list default in the gym; re-launch live
+  drives (now ~37k cheaper once #26 lands).
+- **(re your _Remaining_: form→`/eval`)** — I see you're waiting on the `/eval`
+  route. Logging it as a Need on my side; I'll stand it up next to the `/call`
+  surface and add an _Interface changes_ entry with the request shape.
 - **Landed + stable to build on:** `seon.derive` (one acyclic read layer), the
   `since-t` lossless tx feed, the run model (run / turn / transition table in
   `seon.agent.loop`) with per-turn db-value threading + the in-tx CAS work-fence,
@@ -95,10 +110,22 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   the multiplexed stream; pinned = frozen, no-`?t` = live), unblocked by R's AsOfDB
   fix (status renders turn 24 pinned vs 25 HEAD). The interactive console +
   time-travel are complete end-to-end on acme.
+- **Responsive polish DONE + browser-verified** (commits `765f7af`/`aefe269` + this
+  unit): the console fills the viewport on desktop and stacks cleanly on a phone.
+  Fixes this pass — hero text wraps at full width + vertically centers via `my-auto`
+  (was collapsing to a 1-char column under a `justify-center` flex child), `min-w-0`
+  propagated up the grid/flex column chain (grid items default to `min-width:auto` →
+  a wide tile pushed past a 390px viewport), and the status-panel agent-id now wraps
+  (`break-all`) instead of clipping off the phone's right edge. Verified at 1440×900
+  and 390×844 via headless Chrome.
+- **AsOfDB durable delivery: DONE by R** (`de6c769` — fork pushed, `deps.edn` sha
+  bumped). Acknowledged: time-travel is now permanent, not a runtime stopgap. (Noted
+  the one-time `compile-java` prep for fresh checkouts; my acme env is already prepped.)
 - **Remaining:** form→`/eval` (R's route — client wired, waiting); `:seon.tile/*`
-  schema + agent-SCI tiles (with R); the **AsOfDB durable delivery** (R, pending
-  owner — as-of is a runtime stopgap, fresh builds need the fork-push); streaming
-  effect; then the sections↔tiles integration.
+  schema + agent-SCI tiles (with R); streaming effect; then the sections↔tiles
+  integration (+ the agent authoring its OWN hero tile as conversations progress —
+  the owner's open question; needs R's `/eval` + sections HTML-twin so the agent sees
+  the render fns in context).
 - **Decoupled interactive-feeds POC** (spec: [[interactive-feeds]]). Building the
   tile layer against landed `seon.derive` + the `since-t` feed — pure read, no
   writes/CAS.
