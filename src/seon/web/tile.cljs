@@ -60,12 +60,17 @@
                   (let [cs (vec (remove #(= (:id %) conn-id) (get m k)))]
                     (if (seq cs) (assoc m k cs) (dissoc m k))))))
 
-(defn- open-tile-ids []
-  (set (keys @!tiles)))
-
 (defn- clip [s n]
   (let [s (str s)]
     (if (> (count s) n) (str (subs s 0 n) "…") s)))
+
+(defn- agent-eid
+  "The agent's entity id via a QUERY (works on an `as-of` db; `db/entity`/
+   lookup-refs do NOT — `-lookup is not supported on AsOfDB`). Time-travel-safe."
+  [db agent-id]
+  (db/query {:seon.db/db db
+             :seon.db/query '[:find ?e . :in $ ?a :where [?e :seon.agent/id ?a]]
+             :seon.db/args [agent-id]}))
 
 ;; ============================================================
 ;; Prewritten view fns — referenced by SYMBOL from tile entities. Each takes the
@@ -91,7 +96,7 @@
 (defn commentary-view
   "The shared REPL transcript (demoted chat) — recent messages to/from the agent."
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [me     (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
+  (let [me     (agent-eid db id)          ; query-based → time-travel-safe
         rows   (when me
                  (db/query {:seon.db/db db
                             :seon.db/query
@@ -121,7 +126,7 @@
 (defn todos-view
   "The agent's todos — open first."
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [me   (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
+  (let [me   (agent-eid db id)            ; query-based → time-travel-safe
         rows (when me
                (db/query {:seon.db/db db
                           :seon.db/query
@@ -211,6 +216,22 @@
       (let [console (first (str/split tile-id #":"))]
         (first (filter #(= tile-id (:seon.tile/id %)) (default-tiles console)))))))
 
+(defn- agent-frames
+  "The agent's recent tx basis-points (the time-travel filmstrip) — distinct
+   tx eids stamped with this agent's `:seon.db/agent-id`, newest last. Each tx
+   eid is a valid `as-of` basis-t. Pure read."
+  [db agent-id n]
+  (->> (try (db/query {:seon.db/db db
+                       :seon.db/query
+                       '[:find ?tx ?inst :in $ ?a :where
+                         [?tx :seon.db/agent-id ?a]
+                         [?tx :db/txInstant ?inst]]
+                       :seon.db/args [agent-id]})
+            (catch :default _ nil))
+       (sort-by second)
+       (take-last n)
+       (mapv (fn [[tx inst]] {:seon.tile/t tx :seon.tile/inst inst}))))
+
 ;; ============================================================
 ;; Render — resolve the tile's stored `:seon.render/html` symbol to hiccup.
 ;; ============================================================
@@ -231,12 +252,12 @@
     :else [:div {:class "text-text-500 text-xs"} (str "unrenderable tile slot: " (pr-str slot))]))
 
 (defn- render-tile
-  "Render a tile MAP to hiccup at HEAD. Per-tile fault isolation: a throwing
-   view becomes an error card, never a hung region."
-  [tile]
+  "Render a tile MAP to hiccup against `db` (HEAD or an `as-of` value — that is
+   how a tile time-travels). Per-tile fault isolation: a throwing view becomes an
+   error card, never a hung region."
+  [db tile]
   (try
-    (let [db      @db/*conn*
-          subject (:seon.tile/console tile)
+    (let [subject (:seon.tile/console tile)
           input   {:seon.db/db db :seon.agent/id subject :seon.tile/entity tile}]
       (resolve-view (:seon.render/html tile) input))
     (catch :default e
@@ -254,15 +275,20 @@
 
 (defn- push-tile! [tile-id]
   (try
-    (let [tile    (find-tile @db/*conn* tile-id)
-          hiccup  (if tile
-                    (render-tile tile)
-                    [:div {:class "text-text-500 text-xs"} (str "no tile " tile-id)])
-          payload (region-event hiccup)]
-      (doseq [{:keys [res]} (get @!tiles tile-id)]
-        (try (.write res payload)
-             (catch :default e
-               (log/error-console! "seon.web.tile" "write failed" e)))))
+    ;; PINNED conns (a `:basis-t`) are frozen — they rendered their as-of frame
+    ;; at open and never update; only LIVE conns re-render on a tx.
+    (let [live (remove :basis-t (get @!tiles tile-id))]
+      (when (seq live)
+        (let [db      @db/*conn*
+              tile    (find-tile db tile-id)
+              hiccup  (if tile
+                        (render-tile db tile)
+                        [:div {:class "text-text-500 text-xs"} (str "no tile " tile-id)])
+              payload (region-event hiccup)]
+          (doseq [{:keys [res]} live]
+            (try (.write res payload)
+                 (catch :default e
+                   (log/error-console! "seon.web.tile" "write failed" e)))))))
     (catch :default e
       (log/error-console! "seon.web.tile" "push! threw" e))))
 
@@ -279,9 +305,11 @@
         100))))
 
 (defn- on-tx
-  "Any commit re-renders every open tile (the client drops no-ops)."
+  "Any commit re-renders every tile that has a LIVE conn (the client drops
+   no-ops). Tiles watched only by pinned conns are skipped — they stay frozen."
   [_]
-  (doseq [k (open-tile-ids)]
+  (doseq [[k conns] @!tiles
+          :when (some #(nil? (:basis-t %)) conns)]
     (schedule-push! k)))
 
 ;; ============================================================
@@ -315,6 +343,17 @@
   (.writeHead res code #js {"Content-Type"  "text/html; charset=utf-8"
                             "Cache-Control" "no-store, no-cache, must-revalidate"})
   (.end res body))
+
+(defn- query-t
+  "The `?t=<basis-t>` time-travel cursor from the raw request url, or nil (live)."
+  [^js req]
+  (when-let [m (re-find #"[?&]t=([0-9]+)" (or (.-url req) ""))]
+    (js/parseInt (second m) 10)))
+
+(defn- db-at
+  "The db value a cursor renders against — `as-of t` when pinned, else HEAD."
+  [t]
+  (if t (db/as-of @db/*conn* t) @db/*conn*))
 
 (defn- redirect! [^js res location]
   (.writeHead res 302 #js {"Location" location "Cache-Control" "no-store"})
@@ -380,17 +419,19 @@
                            "Connection"        "keep-alive"
                            "X-Accel-Buffering" "no"})
   (.write res ": connected\n\n")
-  (let [conn {:id (random-uuid) :res res :opened-at (js/Date.)}]
+  (let [t    (query-t req)               ; nil = live (tracks HEAD); set = pinned as-of
+        db   (db-at t)
+        conn {:id (random-uuid) :res res :basis-t t :opened-at (js/Date.)}]
     (add-conn! tile-id conn)
     (log/info-console! "seon.web.tile" "SSE OPEN"
-                       {:tile tile-id :conn-id (str (:id conn))
+                       {:tile tile-id :basis-t t :conn-id (str (:id conn))
                         :total (count (get @!tiles tile-id))})
     (.on req "close"
          (fn []
            (remove-conn! tile-id (:id conn))
            (log/info-console! "seon.web.tile" "SSE CLOSE" {:conn-id (str (:id conn))})))
-    (try (when-let [tile (find-tile @db/*conn* tile-id)]
-           (.write res (region-event (render-tile tile))))
+    (try (when-let [tile (find-tile db tile-id)]
+           (.write res (region-event (render-tile db tile))))
          (catch :default e
            (log/error-console! "seon.web.tile" "initial render failed" e)))))
 
@@ -408,6 +449,14 @@
     (re-matches #"/tile/console/[^/]+" path)
     (let [id (second (re-matches #"/tile/console/([^/]+)" path))]
       (write-html! res 200 (console-shell id (console-tiles @db/*conn* id)))
+      true)
+
+    (re-matches #"/tile/frames/[^/]+" path)
+    (let [id     (second (re-matches #"/tile/frames/([^/]+)" path))
+          frames (agent-frames @db/*conn* id 30)]
+      (.writeHead res 200 #js {"Content-Type" "application/json" "Cache-Control" "no-store"})
+      (.end res (js/JSON.stringify
+                  (clj->js (mapv (fn [f] {:t (:seon.tile/t f) :inst (str (:seon.tile/inst f))}) frames))))
       true)
 
     (re-matches #"/tile/t/[^/]+/sse" path)
