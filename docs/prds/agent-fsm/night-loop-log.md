@@ -243,4 +243,35 @@ Revert point if the experiment goes sideways: `c84e8fc`.
   need an agent→ns ownership map, deferred); minor `read-body`/`query-val` dup (a `seon.web.http`
   util would dedup — cycle blocks reuse today); `bin/test-cljs` footer grep over-matches
   expected-error log lines (verdict-by-exit-code is correct).
+- **Commit:** `5b047b1`
+
+### Pass 7.5 — adversarial review of /call → caught a SHIPPED RCE → fixed
+
+- **Move:** test/prove (adversarial, security lens) then repair. A 3-lens ultracode review
+  (capability-bypass / arg-injection / rewrite) of `5b047b1` raised 9, **7 real (3 blockers)**.
+- **The hole (BLOCKER, RCE):** the capability gate validated only the fn SYMBOL, but `invoke!`
+  `pr-str`-spliced the args into the eval'd form — and transit decodes `["~#list",…]` into a
+  real list that `pr-str` renders as EXECUTABLE code. So `POST /call?fn=<any-granted-fn>&args=`
+  with a transit list `[(js/require "child_process" …)]` ran arbitrary host code BEFORE the
+  gated fn (granted fn-syms are public in the rendered UI). Same via the fn-REF signals path.
+  Plus: no CSRF/Origin guard (cross-origin no-cors POST reachable), and a malformed-args hang.
+- **Fix:** `invoke!` is now **resolve-and-apply** — resolve the capability-approved symbol to
+  its value via `seon.eval/lookup-value` and `(apply f args)` with args as DATA (the
+  eval-of-string sink is DELETED); `decode-args` is a recursive **data-only whitelist** (rejects
+  symbol/list/tagged transit → `:user-input`); a **same-origin guard** wraps every state-changing
+  POST (`/call`,`/chat`,`/agents/new`,`/clear`,`/complete`); malformed `?args=` → a written 422,
+  no hang. Three independent defenses now (whitelist + apply-as-data + gate).
+- **Live proof (orchestrator):** `decode-args` refuses the malicious transit list (`:user-input`);
+  a `js/eval` marker payload **never executed** (global stayed nil) after BOTH the decode attempt
+  and a real HTTP `POST /call` exploit; cross-origin `Origin` → **403**, same-origin passes the
+  guard; no hang. Pure-data args still decode + the granted-fn happy path is intact (resolve-and-
+  apply, agent's probe test).
+- **CRITICAL infra bug uncovered:** `bin/test-cljs` silently **drops every test ns sorting after
+  `seon.web.inspector-chips-test`** — so `seon.web.reactive.*` + `seon.web.serve-test` NEVER ran.
+  That's why the RCE shipped under a "543/0/0 PASS" — a FALSE GREEN. (Run-model/ticker/correctness/
+  render tests all sort BEFORE `seon.web.*`, so THOSE greens were real.) Captured as a task — the
+  next pass; until fixed, late-sorting tests can't be trusted via `bin/test-cljs`.
+- **Op note:** the shadow `.shadow-cljs/builds/client` output + nREPL port got wiped during the
+  truncation investigation → the pod crash-looped + the cljs MCP dropped; recovered with
+  `bin/seon restart cljs-watch` (full recompile, port restored) — the auto-reconnect path works.
 - **Commit:** (this pass)

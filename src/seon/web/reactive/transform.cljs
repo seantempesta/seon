@@ -60,12 +60,48 @@
   [args]
   (t/write (t/writer :json) (vec args)))
 
+(defn- data-value?
+  "True when `v` is PURE DATA — a scalar (nil / boolean / number / string /
+   keyword / inst / uuid) or a vector/set/map recursively of pure data. A
+   SYMBOL, a LIST/SEQ (non-vector), or a transit TaggedValue is NOT pure data.
+   This is the whitelist [[decode-args]] enforces: the render-time args of a
+   `/call` are VALUES, never code. Transit-JSON decodes `[\"~#list\",[…]]` into
+   a real seq and `\"~$sym\"` into a real symbol — both are refused here so a
+   code-shaped arg can never enter the invoke path (belt-and-suspenders behind
+   the resolve-and-apply gate in `seon.web.reactive.call`)."
+  [v]
+  (cond
+    (nil? v)     true
+    (boolean? v) true
+    (number? v)  true
+    (string? v)  true
+    (keyword? v) true
+    (inst? v)    true                          ; transit ~t → js/Date — a value
+    (uuid? v)    true                          ; transit ~u → UUID — a value
+    (vector? v)  (every? data-value? v)
+    (set? v)     (every? data-value? v)
+    (map? v)     (reduce-kv (fn [acc k val] (and acc (data-value? k) (data-value? val)))
+                            true v)
+    :else        false))                       ; symbol, seq/list, TaggedValue, fn, obj
+
 (defn decode-args
-  "Inverse of [[encode-args]] — read a transit-JSON `s` back to the args
-   vector. `s` is the already-URL-decoded query value (third-party input)."
-  {:malli/schema [:=> [:catn [::s :string]] :any]}
+  "Inverse of [[encode-args]] — read a transit-JSON `s` (the already-URL-decoded
+   query value, third-party input) back to the args vector. DATA-ONLY: the
+   decoded value must be a VECTOR whose elements are pure data
+   ([[data-value?]]). A non-vector, a symbol, a list/seq, or a tagged value is
+   REFUSED with an `ex-info` (`:seon.error/kind :user-input`) BEFORE it can
+   reach the invoke path — render-time args are values, never code. Callers run
+   this inside a try/catch and surface a refusal envelope."
+  {:malli/schema [:=> [:catn [::s :string]] [:vector :any]]}
   [s]
-  (t/read (t/reader :json) s))
+  (let [decoded (t/read (t/reader :json) s)]
+    (when-not (vector? decoded)
+      (throw (ex-info "args must be a transit-encoded vector of data"
+                      {:seon.error/kind :user-input})))
+    (when-not (every? data-value? decoded)
+      (throw (ex-info "args must be pure data — a symbol/list/tagged value is refused"
+                      {:seon.error/kind :user-input})))
+    decoded))
 
 ;; ============================================================
 ;; URL encoding — encodeURIComponent plus an apostrophe escape so the

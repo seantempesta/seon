@@ -44,6 +44,7 @@
     ["node:fs" :as fs]
     ["node:path" :as path]
     [clojure.string :as str]
+    [goog.object :as gobj]
     [seon.agent :as agent]
     [seon.agent.run :as run]
     [seon.db :as db]
@@ -480,6 +481,41 @@
                     (write-status! res 500 "text/plain; charset=utf-8" (str err))
                     (catch :default _ nil)))))))
 
+;; ============================================================
+;; CSRF / same-origin guard for state-changing POSTs. Loopback BINDING is not
+;; protection — a page on any site the human visits can `no-cors` POST to
+;; 127.0.0.1. A browser attaches an `Origin` header on such cross-site
+;; requests, so we refuse any POST whose Origin is present and NOT loopback.
+;; ============================================================
+
+(def ^:private loopback-hosts
+  ;; A same-origin fetch from the pod's own loopback UI carries one of these
+  ;; hostnames; a cross-site Origin (any internet page) will not. The fallback
+  ;; allow when no Host header is available to compare against.
+  #{"127.0.0.1" "localhost" "[::1]" "::1"})
+
+(defn same-origin?
+  "True (ALLOW) when no `Origin` header is present (curl / the agent / any
+   non-browser caller) OR the request is genuinely same-origin; false (REFUSE)
+   when an Origin IS present and is cross-site — the CSRF case.
+
+   Same-origin is decided by matching the Origin's host to the request's own
+   `Host` header (so it holds for loopback dev AND a Caddy/Tauri front that
+   preserves Host). When no Host is available we fall back to allowing loopback
+   origins only. `req` is an opaque Node IncomingMessage (Ring-style boundary,
+   no Malli schema — same as the /call, inspector, and serve handlers)."
+  [^js req]
+  (let [headers (.-headers req)
+        origin  (when headers (gobj/get headers "origin"))]
+    (boolean
+      (or (str/blank? origin)
+          (try
+            (let [o-host (.-host (js/URL. origin))            ; host[:port] of Origin
+                  h-host (when headers (gobj/get headers "host"))]
+              (or (and h-host (= o-host h-host))               ; genuine same-origin
+                  (contains? loopback-hosts (.-hostname (js/URL. origin)))))
+            (catch :default _ false))))))
+
 (defn- handler [req res]
   (let [url    (or (.-url req) "/")
         ;; Strip query string for routing match
@@ -495,17 +531,23 @@
                  (inspector/route? path)            (inspector/handle! req res path)
                  :else                              (write-status! res 404 "text/plain; charset=utf-8"
                                                                    (str "Not found: " url)))
-        "POST" (cond
-                 (= path "/chat")                   (handle-chat! req res)
-                 (= path "/call")                   (call/handle! req res)
-                 (= path "/agents/new")             (handle-create-agent! req res)
-                 (complete-path->agent-id path)     (handle-complete-agent!
-                                                      req res
-                                                      (complete-path->agent-id path))
-                 (= path "/clear")                  (handle-clear! req res)
-                 (= path "/log")                    (handle-log! req res)
-                 :else                              (write-status! res 404 "text/plain; charset=utf-8"
-                                                                   (str "Not found: " url)))
+        "POST" (if-not (same-origin? req)
+                 (do
+                   (log/info-console! "seon.web.serve" "POST cross-origin REFUSED"
+                                      {:path path})
+                   (write-status! res 403 "text/plain; charset=utf-8"
+                                  "cross-origin POST refused"))
+                 (cond
+                   (= path "/chat")                   (handle-chat! req res)
+                   (= path "/call")                   (call/handle! req res)
+                   (= path "/agents/new")             (handle-create-agent! req res)
+                   (complete-path->agent-id path)     (handle-complete-agent!
+                                                        req res
+                                                        (complete-path->agent-id path))
+                   (= path "/clear")                  (handle-clear! req res)
+                   (= path "/log")                    (handle-log! req res)
+                   :else                              (write-status! res 404 "text/plain; charset=utf-8"
+                                                                     (str "Not found: " url))))
         (write-status! res 405 "text/plain; charset=utf-8" "Method not allowed"))
       (catch :default e
         (log/error-console! "seon.web.serve" "handler error" e)

@@ -35,17 +35,25 @@
    symbol simply doesn't resolve) — but as an explicit, queryable pre-invoke
    gate, because for an interaction the refusal IS the security claim.
 
-   Args are Malli-validated by the always-on instrumentation when the granted
-   fn is invoked (the fn's own `:malli/schema` is the contract — no second
-   validator to drift). A validation failure surfaces as a value (422), not a
-   crash, because the invoke goes through `seon.eval/eval` (safe by default)."
+   ## Invoke = resolve-and-apply (args stay DATA, never recompiled)
+
+   A granted call is NOT synthesized into a source string and eval'd — that
+   would let an attacker-controlled arg expression execute (an arg printed into
+   source then re-read as code is the classic break-out). Instead [[invoke!]]
+   resolves the granted symbol to its COMPILED runtime value
+   (`seon.eval/lookup-value`) and `(apply f args)` with the args as VALUES. The
+   resolved `f` is still the always-on-instrumented var, so its own
+   `:malli/schema` is enforced (no second validator to drift); a bad arg or a
+   throw surfaces as a value (422), not a crash, because [[invoke!]] catches it.
+   The `?args=` query is additionally decoded DATA-ONLY
+   (`seon.web.reactive.transform/decode-args`) so a symbol/list/tagged value is
+   refused before invoke — belt-and-suspenders behind resolve-and-apply."
   (:require
     [clojure.string :as str]
     [seon.ctx :as ctx]
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.log :as log]
-    [seon.repl :as repl]
     [seon.web.reactive.transform :as transform]))
 
 ;; ============================================================
@@ -112,38 +120,51 @@
 ;; reactive feed updates. NOT a parallel executor.
 ;; ============================================================
 
+(defn- err->msg [e]
+  (or (ex-message e) (str e)))
+
 (defn ^:async invoke!
   "Invoke the (already capability-checked) granted `fn-sym` for `agent-id`
-   with `args`, by synthesizing the fn-call form and routing it through the
-   agent's eval in its home ns. Returns a Promise of
-   `{::ok? true ::value v}` or
-   `{::ok? false ::error <message>}` — errors are
-   values (the eval is safe by default; an arg-validation failure from the
-   fn's instrumentation arrives here as an error, never a crash). An async
-   fn (one that returns a Promise — e.g. a `db/transact!`) is awaited so the
-   committed effect is visible before we respond."
+   with `args` by RESOLVE-AND-APPLY: resolve the symbol to its compiled runtime
+   value (`seon.eval/lookup-value`) and `(apply f args)` with the args passed
+   as VALUES — never printed into source, never re-read as code, so a
+   list/symbol arg is inert. Runs inside the agent's `with-agent` +
+   `with-tx-context` scope so `(current-agent-id)` resolves and the transact is
+   agent-tagged. Returns a Promise of `{::ok? true ::value v}` or
+   `{::ok? false ::error <message>}` — errors are values: a throw from the fn
+   (incl. a Malli arg-validation failure from its own instrumentation) is
+   caught and returned, never crashes. An async fn (one that returns a Promise
+   — e.g. a `db/transact!`) is awaited so the committed effect is visible
+   before we respond. If `lookup-value` cannot resolve the (capability-approved)
+   symbol — e.g. its program graph isn't compiled — that is a clean error
+   envelope, not a crash."
   {:malli/schema [:=> [:catn [::agent-id :string] [::fn-sym :symbol]
                        [::args [:sequential :any]]]
                   :any]}
   [agent-id fn-sym args]
-  (let [cs   (await (repl/ensure-bootstrap!))
-        home (ctx/home-ns agent-id)
-        form (str "(" fn-sym
-                  (when (seq args) (str " " (str/join " " (map pr-str args))))
-                  ")")
-        r    (await
-               (db/with-agent agent-id
-                 (fn []
-                   (db/with-tx-context {:seon.db/origin   :agent
-                                        :seon.db/agent-id agent-id}
-                     (fn [] (seval/eval cs form {:ns home}))))))]
-    (if (:ok r)
-      (let [v  (:value r)
-            v* (if (instance? js/Promise v) (await v) v)]
-        {::ok? true ::value v*})
-      {::ok?   false
-       ::error (or (:seon.error/message (:error r))
-                   (str (:error r)))})))
+  (await
+    (db/with-agent agent-id
+      (fn []
+        (db/with-tx-context {:seon.db/origin   :agent
+                             :seon.db/agent-id agent-id}
+          (fn []
+            (let [f (seval/lookup-value fn-sym)]
+              (if-not (fn? f)
+                (js/Promise.resolve
+                  {::ok?   false
+                   ::error (str "could not resolve granted fn `" fn-sym
+                                "` to a runtime value — its program graph may "
+                                "not be compiled")})
+                ;; `(apply f args)` runs SYNCHRONOUSLY inside this with-agent
+                ;; thunk (so (current-agent-id) reads the scope before f's first
+                ;; await). A sync throw escapes to the outer catch; a returned
+                ;; Promise (async transact!) is awaited via .then/.catch.
+                (try
+                  (-> (js/Promise.resolve (apply f args))
+                      (.then  (fn [v] {::ok? true ::value v}))
+                      (.catch (fn [e] {::ok? false ::error (err->msg e)})))
+                  (catch :default e
+                    (js/Promise.resolve {::ok? false ::error (err->msg e)})))))))))))
 
 ;; ============================================================
 ;; HTTP handler — POST /call. Opaque (req,res), like the inspector +
@@ -182,12 +203,15 @@
 (defn ^:async handle!
   "POST /call — parse the call descriptor, capability-check, and (only if
    granted) invoke. The fn symbol rides `?fn=`; the fn-CALL case carries its
-   render-time args in `?args=` (transit), the fn-REF case takes the POST
-   body's Datastar signals as a single map argument. Responses: 200
-   `{ok? true}` on success; 403 with the refusal reason when the capability
-   gate denies the fn (never invoked); 422 with the error when the invoked fn
-   fails; 400 for a missing fn. The UI update is the reactive feed's job — the
-   invoked fn's transact fans out via the inspector tx-listener."
+   render-time args in `?args=` (transit, decoded DATA-ONLY), the fn-REF case
+   takes the POST body's Datastar signals as a single map argument. Responses:
+   200 `{ok? true}` on success; 403 with the refusal reason when the capability
+   gate denies the fn (never invoked); 422 when the invoked fn fails OR when
+   `?args=` is malformed / non-data (refused before invoke); 400 for a missing
+   fn. Every path through here writes exactly one response — a bad `?args=`
+   decode is caught inside the promise chain, never a hung request. The UI
+   update is the reactive feed's job — the invoked fn's transact fans out via
+   the inspector tx-listener."
   [^js req ^js res]
   (let [fn-str (query-val req "fn")]
     (if (str/blank? fn-str)
@@ -204,27 +228,40 @@
           (let [agent-id (::agent-id cap)
                 args-q   (query-val req "args")]
             (-> (if (some? args-q)
-                  ;; fn-CALL — render-time args, transit-decoded from ?args=
-                  (js/Promise.resolve (vec (transform/decode-args args-q)))
+                  ;; fn-CALL — render-time args, transit-decoded DATA-ONLY from
+                  ;; ?args=. Decode INSIDE the chain (in a try): a malformed or
+                  ;; non-data ?args= becomes a written 422, never a synchronous
+                  ;; throw that escapes the chain into a hung request.
+                  (js/Promise.resolve
+                    (try {::args (transform/decode-args args-q)}
+                         (catch :default e {::arg-error (err->msg e)})))
                   ;; fn-REF — args from click-time signals (the POST body),
-                  ;; passed as a single map argument
+                  ;; passed as a single map argument (js->clj data, not code).
                   (.then (read-body req)
                          (fn [body]
                            (let [sigs (parse-signals body)]
-                             (if (seq sigs) [sigs] [])))))
-                (.then (fn [args] (invoke! agent-id fn-sym args)))
-                (.then (fn [{ok?  ::ok?
-                             err  ::error}]
-                         (if ok?
-                           (do
-                             (log/info-console! "seon.web.reactive.call" "/call OK"
-                                                {:fn fn-str :agent agent-id})
-                             (write-json! res 200 {::ok? true}))
-                           (do
-                             (log/error-console! "seon.web.reactive.call"
-                                                 "/call invoke error" (str err))
-                             (write-json! res 422 {::ok?    false
-                                                   ::error  (str err)})))))
+                             {::args (if (seq sigs) [sigs] [])}))))
+                (.then
+                  (fn [{args ::args arg-error ::arg-error}]
+                    (if arg-error
+                      (do
+                        (log/info-console! "seon.web.reactive.call" "/call BAD ARGS"
+                                           {:fn fn-str :error arg-error})
+                        (write-json! res 422 {::ok?   false
+                                              ::error (str "bad args: " arg-error)}))
+                      (-> (invoke! agent-id fn-sym args)
+                          (.then
+                            (fn [{ok? ::ok? err ::error}]
+                              (if ok?
+                                (do
+                                  (log/info-console! "seon.web.reactive.call" "/call OK"
+                                                     {:fn fn-str :agent agent-id})
+                                  (write-json! res 200 {::ok? true}))
+                                (do
+                                  (log/error-console! "seon.web.reactive.call"
+                                                      "/call invoke error" (str err))
+                                  (write-json! res 422 {::ok?   false
+                                                        ::error (str err)})))))))))
                 (.catch (fn [e]
                           (log/error-console! "seon.web.reactive.call" "/call threw" e)
                           (write-json! res 500 {::ok?   false

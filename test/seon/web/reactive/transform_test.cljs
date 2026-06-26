@@ -109,3 +109,33 @@
 (deftest args-codec-round-trips
   (let [args [{:seon.x/a 1} "two" 3 :four [5 6]]]
     (is (= args (transform/decode-args (transform/encode-args args))))))
+
+;; ---------------------------------------------------------------------------
+;; Security — decode-args is DATA-ONLY (the /call RCE regression).
+;; Transit-JSON decodes ["~#list",[…]] into a real seq and "~$sym" into a real
+;; symbol. In the old synthesize-a-form-and-eval path a list arg pr-str'd as
+;; EVALUABLE code, so a crafted ?args= broke out of the capability gate and ran
+;; arbitrary code (RCE). The decoder now refuses any code-shaped arg before it
+;; can reach the invoke path — belt-and-suspenders behind resolve-and-apply.
+;; ---------------------------------------------------------------------------
+
+(deftest decode-args-refuses-a-list-arg
+  ;; The PoC shape: a vector whose element is a transit LIST holding a symbol —
+  ;; `[(js/require "child_process")]`. Refused, never returned as args.
+  (let [payload "[[\"~#list\",[\"~$js/require\",\"child_process\"]]]"]
+    (is (thrown? :default (transform/decode-args payload))
+        "a list arg (the RCE break-out shape) must be refused, not decoded")))
+
+(deftest decode-args-refuses-a-symbol-arg
+  (let [payload (transform/encode-args [(symbol "evil")])]
+    (is (thrown? :default (transform/decode-args payload))
+        "a bare symbol arg must be refused")))
+
+(deftest decode-args-refuses-a-non-vector-top-level
+  ;; A top-level transit list (not wrapped in a vector) is refused too.
+  (is (thrown? :default (transform/decode-args "[\"~#list\",[1,2]]"))))
+
+(deftest decode-args-allows-pure-data
+  ;; The happy path stays open: scalars, vectors, maps, sets, keywords decode.
+  (let [args [{:seon.x/a 1} "two" 3 :four [5 6] #{7 8} true]]
+    (is (= args (transform/decode-args (transform/encode-args args))))))

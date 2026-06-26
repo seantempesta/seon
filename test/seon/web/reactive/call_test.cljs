@@ -13,6 +13,7 @@
        / :seon.fn rows + replay-program-graph! + invoke!), the same harness
        the SCI tile tests use — no live pod."
   (:require
+    [clojure.string :as str]
     [cljs.test :refer [deftest is testing async]]
     [seon.client :as client]
     [seon.ctx :as ctx]
@@ -133,3 +134,80 @@
                                      @conn agent-id)))))))))))
           (.then (fn [_] (finish)))
           (.catch (fn [e] (is false (str "threw — " e)) (finish)))))))
+
+;; ---------------------------------------------------------------------------
+;; (d) HTTP boundary — the /call RCE is neutralized + malformed args never hang.
+;; The PoC: POST /call?fn=<granted>&args=<transit that decodes to a LIST>. In
+;; the old synthesize-and-eval invoke!, the list spliced in as code and ran
+;; (`(js/require "child_process")` etc.). Now the ?args= decode is DATA-ONLY
+;; and invoke! is resolve-and-apply — the injected expression can never run.
+;; ---------------------------------------------------------------------------
+
+(defn- mock-res
+  "A minimal Node `res` capturing the written `{:code …, :body …, :ended? …}`."
+  []
+  (let [state (atom {})]
+    {::state state
+     ::res   #js {:writeHead (fn [code _headers] (swap! state assoc :code code))
+                  :end       (fn [body] (swap! state assoc :body body :ended? true))}}))
+
+(defn- call-req
+  "A mock POST /call req carrying ?fn= and (optional) ?args= url-encoded, as
+   handle! reads them via query-val."
+  [fn-sym args-str]
+  (let [base (str "/call?fn=" (js/encodeURIComponent (str fn-sym)))]
+    #js {:method "POST"
+         :url    (if args-str
+                   (str base "&args=" (js/encodeURIComponent args-str))
+                   base)}))
+
+(defn- with-seeded-conn
+  "Open a fresh agent conn, seed!, run `(f conn)` (a Promise), restore *conn*."
+  [f]
+  (let [prev db/*conn*]
+    (-> (client/open-agent-conn!)
+        (.then (fn [conn]
+                 (set! db/*conn* conn)
+                 (-> (seed!) (.then (fn [_] (f conn))))))
+        (.finally (fn [] (set! db/*conn* prev))))))
+
+(deftest call-refuses-injected-list-arg-and-never-invokes
+  ;; A granted fn (capability passes) called with the list-shaped ?args=. The
+  ;; data-only whitelist refuses it with a 422 "bad args" BEFORE invoke!, so the
+  ;; injected expression never executes and the granted fn never runs.
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [{state ::state res ::res} (mock-res)
+                  payload "[[\"~#list\",[\"~$js/require\",\"child_process\"]]]"]
+              (-> (call/handle! (call-req granted-sym payload) res)
+                  (.then
+                    (fn [_]
+                      (testing "refused with a 422 bad-args envelope (before invoke)"
+                        (is (= 422 (:code @state)))
+                        (is (str/includes? (str (:body @state)) "bad args")))
+                      (testing "the granted fn was NEVER invoked — no purpose datom"
+                        (is (nil? (ffirst
+                                    (db/query
+                                      '[:find ?p :in $ ?id :where
+                                        [?a :seon.agent/id ?id]
+                                        [?a :seon.agent/purpose ?p]]
+                                      @conn agent-id)))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest call-malformed-args-writes-response-not-hang
+  ;; Garbage ?args= (not valid transit) → a written 422, not an uncaught
+  ;; rejection / hung request. handle! resolves and the response is ended.
+  (async done
+    (-> (with-seeded-conn
+          (fn [_conn]
+            (let [{state ::state res ::res} (mock-res)]
+              (-> (call/handle! (call-req granted-sym "not-valid-transit-%%%") res)
+                  (.then
+                    (fn [_]
+                      (testing "handle! writes a 422 and ends the response (no hang)"
+                        (is (true? (:ended? @state)))
+                        (is (= 422 (:code @state))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
