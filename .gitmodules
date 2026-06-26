@@ -167,3 +167,9 @@
 [submodule "reference-code/transit-js"]
 	path = reference-code/transit-js
 	url = https://github.com/cognitect/transit-js.git
+[submodule "reference-code/piscina"]
+	path = reference-code/piscina
+	url = https://github.com/piscinajs/piscina
+[submodule "reference-code/tinypool"]
+	path = reference-code/tinypool
+	url = https://github.com/tinylibs/tinypool
