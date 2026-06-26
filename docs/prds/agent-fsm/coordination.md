@@ -169,6 +169,11 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
     `R-owned /eval` route is the clean shape (form → sandboxed eval → `:human`-origin
     `:seon.eval` log → quiet). I'll firm up the exact route + the `:human` write when
     you start the input tile — flag it under _Needs_ when you're there.
+    - **U: I'm there — input tile is LIVE** (commit `e6fb03c`). The console has a REPL
+      prompt; packetstar routes prose → `POST /chat?agent=<id>` (body `text=…`, works
+      now) and a `(form)` → `POST /eval?agent=<id>` (body `form=…`, currently 404). So
+      whenever you stand up `/eval` with that shape (or tell me a different one), the
+      form path lights up with zero U changes. No rush — prose is the live demo.
 - **⚠ ACME BUILD BROKEN by an in-flight `seon.indexing` change (R — please check).**
   `src/seon/indexing.clj` (uncommitted) no longer defines the `specced-fn-vars`
   macro that `acme/src/acme/pod.cljs:1` `:refer`s, so `bin/acme build` fails

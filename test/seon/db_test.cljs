@@ -596,6 +596,84 @@
       done)))
 
 ;; ---------------------------------------------------------------------------
+;; Temporal — as-of reads against a wrapper db value (AsOfDB). Regression:
+;; datahike's CLJS wrapper dbs overrode ILookup to THROW, so the query
+;; planner's `(:eavt op-db)` fast-path probe blew up ("-lookup is not
+;; supported on AsOfDB") for any query that reached it — aggregates and
+;; multi-clause ref-joins in particular — which is what the inspector's
+;; time-travel render issues. The fork now returns field-or-nil from -lookup
+;; (JVM defrecord parity: a wrapper has no :eavt field ⇒ nil ⇒ the planner
+;; routes it through the temporal/search-context path). Assert BOTH no-throw
+;; AND the correct as-of value (the t1 frame, not HEAD).
+;; ---------------------------------------------------------------------------
+
+(def ^:private history-schema
+  (conj smoke-schema
+        {:db/ident       ::owner
+         :db/cardinality :db.cardinality/one
+         :db/valueType   :db.type/ref}))
+
+(defn- fresh-history-conn
+  "Like [[fresh-conn]] but `:keep-history? true` (as-of needs history) and
+   with a ref attr (`::owner`) so the ref-join shape can be exercised."
+  []
+  (let [cfg {:store              {:backend :memory :id (random-uuid)}
+             :schema-flexibility :write
+             :keep-history?      true}]
+    (-> (d/create-database cfg)
+        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [conn]
+                 (.then (d/transact! conn history-schema)
+                        (fn [_] conn)))))))
+
+(deftest as-of-entity+aggregate-see-the-past-frame
+  ;; p starts at rank 1 (t1), changes to rank 2 (t2). An as-of-t1 db value must
+  ;; read 1 via entity AND via an aggregate/ref-join query (the shape that threw
+  ;; -lookup), while HEAD reads 2.
+  (async done
+    (-> (fresh-history-conn)
+        (.then
+          (fn [conn]
+            (.then
+              ;; t1: person p rank 1, group g owns p
+              (db/transact! {::db/tx-data [{:db/id "pp" ::name "p" ::rank 1}
+                                           {::name "g" ::owner "pp"}]
+                             ::db/conn conn})
+              (fn [r1]
+                (let [t1 (::db/tx r1)]
+                  (.then
+                    ;; t2: p rank -> 2 (upsert by identity ::name)
+                    (db/transact! {::db/tx-data [{::name "p" ::rank 2}] ::db/conn conn})
+                    (fn [_]
+                      (let [head  @conn
+                            asof1 (db/as-of head t1)]
+                        ;; entity by lookup-ref on the as-of value sees t1
+                        (is (= 1 (::rank (db/entity {::db/db asof1 ::db/ref [::name "p"]})))
+                            "as-of entity reads the t1 frame")
+                        (is (= 2 (::rank (db/entity {::db/db head ::db/ref [::name "p"]})))
+                            "HEAD entity reads the latest frame")
+                        ;; aggregate over a ref-join — the exact shape that threw
+                        ;; "-lookup is not supported on AsOfDB" before the fork fix
+                        (is (= 1 (db/query {::db/db    asof1
+                                            ::db/query '[:find (count ?m) . :in $ ?gn
+                                                         :where [?g ::name ?gn] [?g ::owner ?m]]
+                                            ::db/args  ["g"]}))
+                            "as-of aggregate ref-join no longer throws")
+                        ;; the CHANGED attr, read through the ref-join: t1 = 1
+                        (is (= 1 (db/query {::db/db    asof1
+                                            ::db/query '[:find ?r . :in $ ?gn
+                                                         :where [?g ::name ?gn] [?g ::owner ?m] [?m ::rank ?r]]
+                                            ::db/args  ["g"]}))
+                            "as-of ref-join reads the t1 frame")
+                        (is (= 2 (db/query {::db/db    head
+                                            ::db/query '[:find ?r . :in $ ?gn
+                                                         :where [?g ::name ?gn] [?g ::owner ?m] [?m ::rank ?r]]
+                                            ::db/args  ["g"]}))
+                            "HEAD ref-join reads the latest frame")))))))))
+        (.catch (fn [e] (is false (str "as-of test chain threw/rejected — " e))))
+        (.then (fn [_] (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; Listener — handler input shape, multi-key independence, replacement
 ;; semantics, unlisten
 ;; ---------------------------------------------------------------------------
