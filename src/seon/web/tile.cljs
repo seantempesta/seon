@@ -32,6 +32,7 @@
     [seon.derive :as derive]
     [seon.log :as log]
     [seon.render :as render]
+    [seon.render.sci :as render-sci]
     [seon.ui.components :as comp]
     [seon.ui.html :as html]))
 
@@ -201,11 +202,12 @@
   "The tiles for a console — the DB `:seon.tile/*` entities for `agent-id`,
    ordered by `:seon.ctx/priority`; the prewritten default when none exist."
   [db agent-id]
-  (let [eids (try (db/query {:seon.db/db db
-                             :seon.db/query
-                             '[:find [?t ...] :in $ ?c :where [?t :seon.tile/console ?c]]
-                             :seon.db/args [agent-id]})
-                  (catch :default _ nil))   ; attr not installed yet → default layout
+  (let [eids (when (contains? (db/installed-schema db) :seon.tile/console)
+               (try (db/query {:seon.db/db db
+                               :seon.db/query
+                               '[:find [?t ...] :in $ ?c :where [?t :seon.tile/console ?c]]
+                               :seon.db/args [agent-id]})
+                    (catch :default _ nil)))   ; not installed yet → default layout
         rows (when (seq eids)
                (map #(db/entity {:seon.db/db db :seon.db/ref %}) eids))]
     (sort-by #(or (:seon.ctx/priority %) 0)
@@ -215,8 +217,9 @@
   "Resolve a tile-id to its tile map — the DB entity, or the matching default
    spec (default ids are `<console>:<kind>`)."
   [db tile-id]
-  (let [ent (try (db/entity {:seon.db/db db :seon.db/ref [:seon.tile/id tile-id]})
-                 (catch :default _ nil))]   ; attr not installed yet → default spec
+  (let [ent (when (contains? (db/installed-schema db) :seon.tile/id)
+              (try (db/entity {:seon.db/db db :seon.db/ref [:seon.tile/id tile-id]})
+                   (catch :default _ nil)))]   ; not installed yet → default spec
     (if (:seon.tile/id ent)
       ent
       (let [console (first (str/split tile-id #":"))]
@@ -250,11 +253,17 @@
     (vector? slot) slot
     (symbol? slot)
     (if-let [f (get core-views slot)]
-      (f input)
-      ;; Agent-authored view symbols (SCI-bounded) are a follow-up integration;
-      ;; the HERO tile is already agent-modifiable via `render-agent-tile`, which
-      ;; SCI-bounds the agent's own tile fn internally.
-      [:div {:class "text-text-500 text-xs"} (str "view not available (agent SCI tiles pending): " slot)])
+      (f input)                                 ; a core view — direct call
+      ;; an AGENT-authored view symbol → SCI-bounded (a runaway agent fn must not
+      ;; freeze the single-threaded pod). This is how the agent renders its OWN
+      ;; tile views; the hero already does it via `render-agent-tile`.
+      (if (and (render-sci/bounding-enabled?) (render-sci/agent-authored-sym? slot))
+        (let [r (render-sci/invoke-bounded slot input)]
+          (cond
+            (:seon.render.sci/interrupt r)   [:div {:class "text-warning text-xs"} "tile interrupted"]
+            (:seon.render.sci/fallthrough r) [:div {:class "text-text-500 text-xs"} "no tile source"]
+            :else r))
+        [:div {:class "text-error text-xs"} (str "unknown view: " slot)]))
     :else [:div {:class "text-text-500 text-xs"} (str "unrenderable tile slot: " (pr-str slot))]))
 
 (defn- render-tile
