@@ -89,15 +89,18 @@
 (defn status-view
   "The agent's status tile."
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [a     (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
-        state (derive/derive-state db id)
-        turns (derive/agent-turn-count db id)]
+  (let [state   (derive/derive-state db id)
+        turns   (derive/agent-turn-count db id)
+        ;; query (not a lookup-ref) so the tile time-travels on an as-of db.
+        purpose (db/query {:seon.db/db db
+                           :seon.db/query '[:find ?p . :in $ ?a :where
+                                            [?e :seon.agent/id ?a] [?e :seon.agent/purpose ?p]]
+                           :seon.db/args [id]})]
     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
      [:div {:class "flex items-center justify-between mb-2"}
       (comp/status-dot state)
       [:span {:class "text-xs text-text-500 tabular-nums"} (str "turn " turns)]]
-     [:div {:class "text-sm text-text-50 font-medium leading-tight"}
-      (or (:seon.agent/purpose a) "—")]
+     [:div {:class "text-sm text-text-50 font-medium leading-tight"} (or purpose "—")]
      [:div {:class "text-2xs text-text-500 mt-1"} id]]))
 
 (defn commentary-view
@@ -124,10 +127,10 @@
                                         "text-text-500"))}
                    (case origin :human "›you" :agent "‹agent" "·core")]
                   [:span {:class "text-text-200"} (clip content 120)]])]
-    [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
-     [:div {:class "text-2xs uppercase tracking-wider text-text-400 mb-2"} "commentary"]
+    [:div {:class "rounded border border-base-700 bg-base-850 p-3 h-full flex flex-col min-h-0"}
+     [:div {:class "text-2xs uppercase tracking-wider text-text-400 mb-2 shrink-0"} "commentary"]
      (if (seq recent)
-       (into [:div {:class "flex flex-col gap-1"}] (map line recent))
+       (into [:div {:class "flex flex-col gap-1 flex-1 overflow-auto min-h-0"}] (map line recent))
        [:div {:class "text-xs text-text-500"} "no messages yet"])]))
 
 (defn todos-view
@@ -417,10 +420,11 @@
    [:div {:class "text-text-500 text-xs"} "connecting…"]])
 
 (defn- console-region
-  "A tile region patched by the console's MULTIPLEXED stream (no own SSE) — just
-   a stable `#tile-<id>` the patch protocol targets by id."
-  [tile-id]
-  [:div {:id (str "tile-" tile-id) :class "min-h-0"}
+  "A tile region patched by the console's MULTIPLEXED stream (no own SSE) — a
+   stable `#tile-<id>` the patch protocol targets by id. `extra` carries the
+   per-slot flex sizing (fill vs content-height)."
+  [tile-id extra]
+  [:div {:id (str "tile-" tile-id) :class (str "min-h-0 flex flex-col " extra)}
    [:div {:class "text-text-500 text-xs"} "connecting…"]])
 
 (defn- scrubber
@@ -478,17 +482,29 @@
    tile. The two-column arrangement is the prewritten strategy over that data."
   [agent-id tiles t]
   (let [span   (fn [x] (or (:seon.tile/span x) 1))
-        hero   (into [:div {:class "col-span-2 flex flex-col gap-3 min-h-0"}]
-                     (map #(console-region (:seon.tile/id %)) (filter #(>= (span %) 2) tiles)))
-        rail   (into [:div {:class "col-span-1 flex flex-col gap-3 min-h-0 overflow-auto"}]
-                     (map #(console-region (:seon.tile/id %)) (remove #(>= (span %) 2) tiles)))
-        grid   [:div {:class "grid grid-cols-3 gap-3 flex-1 min-h-0"} hero rail]
-        ;; the multiplexed stream carries ?t so a pinned console renders + freezes
-        ;; every tile as-of that frame (one connection for N tiles).
+        rails  (vec (remove #(>= (span %) 2) tiles))
+        last-i (dec (count rails))
+        ;; hero column: span-2 tiles, each fills (big min-height on phones).
+        hero   (into [:div {:class "lg:col-span-2 flex flex-col gap-2 sm:gap-3 lg:min-h-0"}]
+                     (map #(console-region (:seon.tile/id %)
+                                           "min-h-[42vh] lg:min-h-0 lg:flex-1")
+                          (filter #(>= (span %) 2) tiles)))
+        ;; rail column: span-1 tiles stack; the LAST (commentary) fills the rest.
+        rail   (into [:div {:class "lg:col-span-1 flex flex-col gap-2 sm:gap-3 lg:min-h-0"}]
+                     (map-indexed (fn [i tl]
+                                    (console-region (:seon.tile/id tl)
+                                                    (if (= i last-i) "lg:flex-1 lg:min-h-0" "shrink-0")))
+                                  rails))
+        ;; ONE col on phones (stacks + scrolls); 3 cols filling the viewport on
+        ;; desktop. The multiplexed stream carries ?t so a pinned console freezes
+        ;; every tile as-of that frame.
+        grid   [:div {:class "grid grid-cols-1 lg:grid-cols-3 gap-2 sm:gap-3 lg:flex-1 lg:min-h-0"}
+                hero rail]
         stream (str "/tile/console/" agent-id "/sse" (when t (str "?t=" t)))
         page   [:html {:lang "en"}
                 (head (str "console · " agent-id))
-                [:body {:class "bg-base-950 text-text-200 font-mono p-3 h-screen flex flex-col"
+                [:body {:class (str "bg-base-950 text-text-200 font-mono p-2 sm:p-3 gap-2 sm:gap-3 "
+                                    "min-h-screen lg:h-screen flex flex-col")
                         :data-console stream}
                  (header-bar agent-id t)
                  grid
