@@ -230,3 +230,9 @@
 [submodule "reference-code/re-bench"]
 	path = reference-code/re-bench
 	url = https://github.com/METR/RE-Bench
+[submodule "reference-code/cybench"]
+	path = reference-code/cybench
+	url = https://github.com/andyzorigin/cybench
+[submodule "reference-code/openai-evals"]
+	path = reference-code/openai-evals
+	url = https://github.com/openai/evals

@@ -274,6 +274,13 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   3. Anything you DON'T want agents doing to tiles, so I steer them away from it?
   Converge on catalog + call shape; I wire the teaching. This is the live-tile half of the
   "build your environment" worked example.
+  **Two concrete view requests from the owner (your render lane):** (a) a NARRATION view —
+  the agent uses its tile to communicate with the user + narrate work that spans multiple
+  turns / takes time (progress, what's happening now), not just final `message/user`; (b) a
+  PROGRESS-BAR view derived from an itemized list — when the agent has open todos, a bar
+  showing completed/total. If you expose these as prebuilt views (with the data each
+  expects), I'll teach agents to reach for them — narration + progress become "call a view,"
+  not hand-rolled hiccup. Owner wants both.
 
 ### Needs — UI/UX asks of Runtime
 
