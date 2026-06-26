@@ -31,25 +31,47 @@ reactive projection of data.
    WEB RENDERER (the edge) ───────────────────┐  the only browser-facing HTTP/SSE
         │  listen! → derive → hash → push      │  (today: seon.web.serve/inspector)
         ▼                                      │
-   WIRE-SERVER (JVM) ── single-writer datahike ┘  the bus + aggregation point
-        ▲ ▲ ▲   each unit is a wire client (reads its replica, writes its output)
-        │ │ │
-   ┌────┴─┴─┴──────── isolated compute (private network) ────────────────┐
-   │  agent-A   agent-B   live-tile   debug-overlay   chat   …            │
-   │  Tier 1: worker_threads + SCI   |   Tier 2 (opt-in): microVM         │
-   └─────────────────────────────────────────────────────────────────────┘
+   JVM SERVER (same process) ── single-writer datahike + render/serve + Integrant
+        ▲ ▲ ▲   the bus + aggregation point; handles only DATA, never agent code
+        │ │ │   (wire + DB-as-bus: transact a /call → agent reacts → result back)
+   ┌────┴─┴─┴──────── CLJS agents — isolated executors (private network) ─────────┐
+   │  agent-A   agent-B   …   each runs the ONE exec service: eval / render-fns /  │
+   │  interactions → returns DATA (hiccup/result/tx).  Tier 1 worker+SCI | Tier 2 microVM │
+   └──────────────────────────────────────────────────────────────────────────────┘
+   (live-tile / debug / chat are FEEDS the JVM renders from agent data, not units)
 ```
 
-- **Server tier** — the JVM **wire-server** (datahike, the sole authoritative
-  writer, durable + bitemporal), the **agent runtime** (isolated execution), and
-  **heavy processing** (embeddings, LLM calls, indexing). Agents run here.
-- **The wire is the boundary.** Single writer, many readers. The same property
-  that makes worker isolation clean makes the device just another reader.
+- **The JVM is "the server" — several roles, infra for free.** One JVM hosts the
+  **wire-server** (datahike, the sole authoritative writer, durable + bitemporal),
+  the **web renderer / edge** (hiccup→html, datastar, SSE, the `/call` route — the
+  existing `seon.web` code, mostly as-is), **heavy processing** (embeddings, LLM,
+  indexing), and **Integrant lifecycle + logging**. It handles only *data* — it
+  never executes untrusted agent code.
+- **CLJS agents are the isolated executors.** The one sandboxed-execution service
+  (eval / render-fn / interaction) runs *here* (worker+SCI, or microVM). The key
+  split: **executing an agent's fn is the dangerous part; its output is just data**
+  (hiccup, a result, a transaction). Isolate the *execution* in CLJS; move the
+  *data* to the trusted JVM, which renders/hashes/serves it. Untrusted code never
+  reaches the JVM — so the JVM render code is safe to run as-is.
+- **JVM↔CLJS is the wire + the DB — no flow.** The boundary is the existing
+  transit-over-the-socket + the DB-as-bus: a `/call` transacts a request → the
+  owning agent's `listen!` fires → it executes (sandboxed) → transacts the
+  result/hiccup → the renderer's `listen!` fires → renders + pushes. We already
+  have `listen!`, transit, and the socket; flow was the over-complicated version
+  of "react to a datom."
+- **The wire is the boundary.** Single writer, many readers — the property that
+  makes worker isolation clean makes the device just another reader.
 - **Edge node (Tauri, desktop + phone)** — secure transport into the system,
   native device-data capture (the phone is the data goldmine), the view, and
-  (convergence endpoint) an on-device read replica + local fns. Agents and heavy
-  lifting stay server-side; the device is reader + data-source + presence.
-  Privacy lever: process the most sensitive data on-device so it never leaves.
+  (convergence endpoint) an on-device read replica + local fns. The device is
+  reader + data-source + presence. Privacy lever: process the most sensitive data
+  on-device so it never leaves.
+- **Deployment: same box now, decouple later.** Now: one box, JVM server + CLJS
+  agents (pragmatic — free infra). The JVM is a ship-to-users non-starter, so the
+  endgame decouples to a **Node-only user box** (CLJS agents in light VMs) with
+  the writer/server either **remote** (a home server reached over Tailscale/VPN —
+  the user's data stays on their own box) or re-homed to Node. Cost: the JVM
+  render/serve we lean on now becomes a future Node port — acceptable, not today.
 
 ## Coordination & rendering — the DB is the bus
 
@@ -73,12 +95,14 @@ write only *facts* to the DB. The **web renderer** is the single front door: it
 owns the SSE connections and derives every fragment from DB state on demand —
 `listen! → render → fast-hash → push-only-when-changed`, caching `{fragment →
 hash}` in its own process memory (most re-renders hash-equal → no push → no
-churn). It never persists a render. Untrusted render fns (agent tiles/
-components) run in the **render worker pool** (SCI + `terminate()`); a hang/throw
-→ a fallback for *that* fragment only — so one bad render can't take the page
-down (datastar merges per element; a renderer crash → supervisor restart →
-re-derive from DB → re-push; the Tauri webview never runs render code). This
-generalizes the existing inspector/serve layer.
+churn). It never persists a render. Trusted/core fragments render on the JVM directly;
+an **agent-authored render fn executes in the owning CLJS agent's sandbox** (the
+one exec service) and returns hiccup *data*, which the JVM renders — so untrusted
+code never runs in the renderer. A hang/throw → a fallback for *that* fragment
+only, so one bad render can't take the page down (datastar merges per element; a
+renderer crash → supervisor restart → re-derive from DB → re-push; the Tauri
+webview never runs render code). This generalizes the existing inspector/serve
+layer.
 
 ### One render path — derived, never stored
 
