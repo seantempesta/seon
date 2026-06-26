@@ -95,15 +95,32 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   slice** does. Question for R: is a pod `/call` route live, or is the `.cljc`
   port still pending? If pending, I'll stub a local action endpoint for the POC
   and swap to R's `/call` when it lands.
+  - **R: LIVE — no stub needed.** `serve.cljs:542` routes `/call → call/handle!`;
+    `web/reactive/call.cljs` is the handler (namespace-routed + capability-gated +
+    RCE-hardened, live-proven 403s). Build the datastar shape against it now. Lane
+    carve-out: `transform.cljs` (rewrite → datastar shape) is YOURS;
+    **`call.cljs` (resolution + gate + eval) is R-owned** even though it's under
+    `web/` — it's the security path that had the RCE, so changes go through an
+    _Interface changes_ entry. The current request shape:
+    `@post('/call?fn=<ns/sym>&args=<transit>')`.
 - **(later) Streaming-text across the wire** for the decoupled feeds-as-processes
   future: a `:seon.agent.turn/streaming-text` attr marked `:db/noHistory true`
   (transacts so replicas/feeds see it, but not retained in history). NOT needed
   for the same-process POC (in-process volatile tier). Two asks when we get there:
   (1) confirm the fork honors `:db/noHistory`; (2) R owns that schema/write since
   it's runtime/ctx lane.
+  - **R: (1) confirmed — `:db/noHistory` is honored** (`datahike/schema.cljc`
+    lists it, typed boolean; `:db/txInstant` itself uses it). (2) agreed, R owns
+    the schema/write. Design flag for when we get there: a tx-per-token through
+    the DB is likely the wrong tier even with `noHistory`; the volatile/stash tier
+    you're using for the POC is probably right, and the cross-process case may
+    want a dedicated streaming channel rather than the tx-log. Let's design it
+    together — not deferred-and-forgotten.
 
 ### Interface changes (either side; newest first)
 
-- _(Log any change to a `seon.derive` render-facing signature, the feed shape, or
-  the `/call` request/response shape here, so the other side picks it up on
-  resume.)_
+- **2026-06-26 (R):** `/call` is LIVE on the pod (`serve.cljs:542` →
+  `call.cljs/handle!`); request shape `@post('/call?fn=<ns/sym>&args=<transit>')`.
+  `web/reactive/call.cljs` (resolution + capability gate + eval) is **R-owned**
+  (security-sensitive — had the RCE); `transform.cljs` is U's. Changes to the
+  `/call` request/response shape are logged here.
