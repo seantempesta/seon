@@ -57,19 +57,28 @@ Units are isolated in **compute**, but share one **DB**. So "pull together data
 from all of them" = read the one DB they all write to — there are no silos to
 aggregate. The reactive loop, end to end:
 
-1. Browser action → `POST` to the edge → edge writes a datom.
-2. Wire-server commits → fans the tx out to every subscriber (units + edge).
-3. The relevant unit's `listen!` fires → it computes → writes its result
-   (a render fragment, agent output, state) back to the DB.
-4. Wire-server commits → fans out → the **edge's** `listen!` fires → it pushes
-   the keyed fragment over the one SSE stream (datastar `merge-fragment`).
+1. Browser action → `POST` to the edge → edge writes a datom (a fact).
+2. Wire-server commits → fans the tx out to every subscriber (units + the web
+   renderer).
+3. The relevant unit's `listen!` fires → it computes → writes its **facts**
+   (agent output, eval results, state) back to the DB. *Never a render* — see
+   *One render path*.
+4. Wire-server commits → fans out → the **web renderer's** `listen!` fires → it
+   re-derives the affected fragment from DB state, **fast-hashes** it, and pushes
+   via datastar `merge-fragment` **only if the hash changed**.
 5. Browser patches that part of the DOM.
 
-**Units never serve HTTP to the browser and never talk to each other** — only
-to the DB. The edge is the single front door + a dumb relay. Rendering is
-distributed: each unit renders its own fragment and transacts it; the edge fans
-DB changes to the browser. This is the existing inspector/serve layer, with the
-render *producers* moved into isolated units.
+**Units never serve HTTP to the browser and never talk to each other** — they
+write only *facts* to the DB. The **web renderer** is the single front door: it
+owns the SSE connections and derives every fragment from DB state on demand —
+`listen! → render → fast-hash → push-only-when-changed`, caching `{fragment →
+hash}` in its own process memory (most re-renders hash-equal → no push → no
+churn). It never persists a render. Untrusted render fns (agent tiles/
+components) run in the **render worker pool** (SCI + `terminate()`); a hang/throw
+→ a fallback for *that* fragment only — so one bad render can't take the page
+down (datastar merges per element; a renderer crash → supervisor restart →
+re-derive from DB → re-push; the Tauri webview never runs render code). This
+generalizes the existing inspector/serve layer.
 
 ### One render path — derived, never stored
 
@@ -107,11 +116,27 @@ prompt text only as a deliberate exception if strict audit is ever needed.
 | on macOS | native | libkrun (HVF) / Apple `container` (not Firecracker — KVM/Linux) |
 | use for | reactive readers, UI, the trusted single-user agent | untrusted/dangerous code; the future multi-tenant case |
 
-**Two safety layers, not one:** SCI catches the common interpreted runaway
-in-process (~0.2ms); `worker.terminate()` is the CPU-proof backstop for the
-residual SCI can't (native loop, ReDoS) and the deadline-watchdog's only real
-kill. We keep the bootstrap `cljs.js` compiler (agents author code at runtime);
-SCI is the cheap cage, the worker is the boundary.
+**Three isolation axes — and `worker_threads` are NOT a security boundary:**
+
+- **Fault** (a hang/crash can't take down others) → worker_threads +
+  `terminate()`. SCI catches the common interpreted runaway in-process (~0.2ms);
+  `terminate()` is the CPU-proof backstop for what SCI can't (native loop,
+  ReDoS) and the deadline-watchdog's only real kill.
+- **Capability** (*what* code may do) → the **SCI curated surface**. Agent code
+  runs in SCI exposing only GRANTED fns (`db/query`, `message!`, the wire
+  capabilities); `fs`/`child_process`/`net`/`require` aren't in scope, so a
+  worker can't format the disk — the symbol doesn't resolve. A bare worker has
+  *full* process perms and `terminate()` can't stop an instant `fs` call, so
+  **untrusted agent code MUST go through SCI**; the bootstrap `cljs.js` compiler
+  is only for *our* trusted code. (CLAUDE.md: "isolation comes from process
+  boundaries + the wire capability surface" — SCI is that surface.)
+- **Resource** (runaway memory/CPU) → worker `resourceLimits` / Tier-2 microVM.
+
+Tier-1 (worker + SCI) covers fault + capability-by-grant + resource for the
+single-user, non-adversarial case. **Tier-2 microVM** is the *kernel* boundary
+for genuinely untrusted/multi-tenant code or defense-in-depth against an SCI
+escape: a guest can format its own disk but not the host's; fs/network governed
+by VM config.
 
 **Worker pool shape** (from the piscina/tinypool dive): warm `min 4 / max 8`
 pre-bootstrapped SCI cages; `concurrentTasksPerWorker 1`; recycle = terminate +
@@ -124,10 +149,16 @@ The agent record is the root of its context and its loop control; everything
 else is reachable from it or derived. Full schema:
 [[agent-runtime-spec]]. In brief:
 
-- **agent** (`:seon.agent/*`) — `state {:idle/:running/:paused/:terminated}`,
-  `run` → current run (fencing pointer), `sections[]` (the agent's own context
-  sections), `sessions[]` → runs/turns, `schedules[]` (self-managed cron maps,
-  each with the fn to call), `default-turn-limit`, `purpose`, `parent`, tile.
+- **agent** (`:seon.agent/*`) — `run` → current run (fencing pointer + the spine
+  of derived state); runs link back via `:seon.agent.run/agent`, turns via
+  `:seon.agent.turn/run` (a **run** replaces the old "session" — there is no
+  session concept). Plus `sections[]` (its own context sections), `schedules[]`
+  (self-managed cron maps, each with its fn), `default-turn-limit`, `purpose`,
+  `parent`, `terminated-at?`, tile. **State is derived, not stored** —
+  `:terminated` if `terminated-at` exists, else `:idle` if no open run, else
+  `:paused` if the open run has a `paused-at` marker, else `:running`. Every
+  primitive (the open run, `paused-at`, `terminated-at`) is its own control axis;
+  state is just their projection.
 - **run** (`:seon.agent.run/*`) — the bounded unit of work a trigger opens:
   `started-at`, `trigger {:message/:schedule}`, `cause`, **two bounds**
   `turn-limit` (work quantity, bumpable) + `deadline` (wall clock), `status`,
@@ -147,9 +178,11 @@ parts worth borrowing: a **defined initial state, one transition function, the
 FSM as data** (no channels: CLJS channels are single-threaded, so they buy no
 parallelism; isolation is the worker tier).
 
-- **Transitions are a data table** (`{state {event → next-state}}`) — the
-  machine is inspectable/renderable, and the loop is a fold of `transition` over
-  events derived from the run's data each iteration.
+- **Transitions are a data table** (`{state {event → mutation}}`) — each
+  transition mutates a primitive (open/close/pause a run, set `terminated-at`);
+  the agent's state is *derived* from those primitives, never stored. The machine
+  is inspectable/renderable, and the loop is a fold of `transition` over events
+  derived from the run's data each iteration.
 - **Triggering is reactive:** a wake (an inbound message, or a due schedule via
   the ticker) opens a run if the agent is `:idle`; if already `:running`, the
   new data is absorbed by the running run's window. Fencing (run-id) means two

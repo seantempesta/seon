@@ -44,7 +44,9 @@ liveness, history, fleet view — is a **query** over the bitemporal DB.
 | `seon.ctx` | the **section** shape + composer | `render-context`, the composer |
 | `seon.render.live-tile` | the **tile** | tile resolution/render |
 
-(See **Open decisions** for `seon.agent.session` — likely subsumed by `run`.)
+(There is no `session` — a **run** is the wake-episode grouping. Runs link back
+to the agent via `:seon.agent.run/agent`; turns to their run via
+`:seon.agent.turn/run`.)
 
 ## Schema — fully-namespaced, by owning namespace
 
@@ -52,9 +54,9 @@ liveness, history, fleet view — is a **query** over the bitemporal DB.
 
 ```clojure
 (schema/register! :seon.agent/id      [:and {:seon.db/identity true} :seon.db/id])
-(schema/register! :seon.agent/state   [:enum :idle :running :paused :terminated])
-(schema/register! :seon.agent/run     :seon.db/ref)   ; → the CURRENT run (fencing pointer)
-(schema/register! :seon.agent/sessions [:vector {:seon.db/component true} :seon.db/ref]) ; OPEN: → runs?
+(schema/register! :seon.agent/run     :seon.db/ref)   ; → the CURRENT run (fencing pointer; spine of derived state)
+(schema/register! :seon.agent/terminated-at :inst)    ; presence ⇒ derived state :terminated
+(schema/register! :seon.agent/state   [:enum :idle :running :paused :terminated]) ; DERIVED shape — computed, NEVER transacted
 (schema/register! :seon.agent/sections [:vector {:seon.db/component true} :seon.db/ref]) ; the agent's OWN ctx sections (was :seon.agent/ctx)
 (schema/register! :seon.agent/schedules [:vector {:seon.db/component true} :seon.db/ref]) ; self-managed cron maps (0..N)
 (schema/register! :seon.agent/purpose  :string)        ; optional; renders into context
@@ -65,10 +67,12 @@ liveness, history, fleet view — is a **query** over the bitemporal DB.
 (schema/register! :seon.render.live-tile/content ...)
 ```
 
-`:seon.agent/state` — the FSM (transition table below). `:idle` is the only
-triggerable state; `:running` ⟺ `:seon.agent/run` points at an `:open` run;
-`:paused` is "held, not killed" (flow's start-paused/resume); `:terminated` is
-dead.
+**State is DERIVED, never stored** (the data primitives ARE the state):
+`:terminated` if `:seon.agent/terminated-at` exists; else `:idle` if no open
+run; else `:paused` if the open run carries `:seon.agent.run/paused-at`; else
+`:running`. `:idle` is the only triggerable state. The transition table below
+maps each event to the primitive MUTATION (open/close/pause a run, set
+`terminated-at`); the state label is just their projection.
 
 ### `seon.agent.run` — the run entity (NEW)
 
@@ -284,11 +288,13 @@ bitemporal, reactive DB. We have one, so:
 
 ## Open decisions (flagged, not decided unilaterally)
 
-1. **`session` vs `run`** — a `:seon.agent.session/*` is today a grouping of
-   turns; a `run` is a grouping of turns by wake. These look like the same
-   concept at the same granularity. **Recommend: `run` REPLACES `session`**
-   (`:seon.agent/runs [ref]` component → turns), dropping `seon.agent.session`.
-   Confirm before locking (it touches `turns-this-wake`'s join).
+1. **`session` vs `run`** — RESOLVED: `run` REPLACES `session`. There is no
+   `seon.agent.session`; runs link back to the agent via `:seon.agent.run/agent`,
+   turns to their run via `:seon.agent.turn/run`. (Touches `turns-this-wake`'s
+   join → `turns-this-run`.)
+1b. **`state` stored vs derived** — RESOLVED: state is DERIVED, never stored
+   (`:terminated`←`terminated-at`, `:idle`←no open run, `:paused`←`run/paused-at`,
+   else `:running`). The presence/absence of primitives IS the state.
 2. **`schedules`** — RESOLVED: a self-managed vector of schedule maps on the
    agent (`:seon.agent/schedules`), each carrying cron + the fn to call +
    timezone/concurrency. The firing mechanism (ticker vs flow process) is held
