@@ -2707,15 +2707,45 @@
      agent-id      — the owning agent's id
      turn-id       — the owning :seon.agent.turn/id string (eval lands as a
                      component child of this turn via :seon.agent.turn/evals)
+     run-id        — the OPEN run this turn belongs to (§8b WORK FENCE), or
+                     nil. When present, the batch LEADS with one in-tx CAS
+                     ([[seon.db/cas-assert]]) asserting the agent still owns
+                     run-id; a superseded/watchdog-closed run (the pointer
+                     moved or was retracted DURING the LLM call, before the
+                     batch) is rejected — the whole batch is SKIPPED, no
+                     zombie eval rows land. The fence is at batch START (not
+                     per-form): a run's own lifecycle verb (wait/complete/
+                     terminate) retracts the pointer MID-batch, and that
+                     verb's eval must still record — the start-fence has
+                     already passed by then, so self-close records honestly.
+                     Mid-batch supersession is caught by the loop's next-turn
+                     re-read (§8c); full per-write atomic isolation is the
+                     Phase-2 worker-buffer keystone.
 
    Returns `{:seon.eval/ids    [<id> ...]   ; ordered, one per entry
              :seon.eval/n-ok   <int>        ; successful evals
-             :seon.eval/n-fail <int>}`     ; failed (eval-throw + read)
+             :seon.eval/n-fail <int>         ; failed (eval-throw + read)
+             :seon.eval/fenced? true}`      ; ONLY when the start-fence lost
+                                            ; (batch skipped — run superseded)
 
    The caller reads :n-ok for 'progress made this turn' and :n-fail to
    surface to the agent's warnings tile."
-  [compile-state parsed agent-ns-sym agent-id turn-id]
-  (let [;; Fold-step local accumulators. Volatile! is a transient
+  [compile-state parsed agent-ns-sym agent-id turn-id run-id]
+  (let [;; §8b WORK FENCE — assert, in ONE atomic tx at the writer, that the
+        ;; agent STILL owns run-id BEFORE any work. A supersede/watchdog-close
+        ;; that landed DURING the LLM call moved/retracted the pointer, so this
+        ;; CAS aborts → fence-lost? true → the doseq is skipped (no zombie eval
+        ;; rows) and the return carries :seon.eval/fenced?. Skipped (nil) when
+        ;; run-id is absent (a runless eval path) or there's no conn.
+        fence-lost?
+        (when (and run-id db/*conn*)
+          (false? (:seon.db/ok?
+                    (await (db/transact!
+                             {:seon.db/tx-data
+                              [(db/cas-assert [:seon.agent/id agent-id]
+                                              :seon.agent/run
+                                              [:seon.agent.run/id run-id])]})))))
+        ;; Fold-step local accumulators. Volatile! is a transient
         ;; mutation impl detail inside this one fn; not shared state.
         ;; current-ns is the per-form fold value: starts at agent
         ;; home-ns, advances on each successful `(ns …)` eval, stays
@@ -2736,7 +2766,9 @@
         ;; calls `eval-batch!`) already established `:test-run`, the
         ;; inner batch must skip auto-test-run to avoid recursion.
         outer-test-run? (= :test-run (::db/origin (db/current-tx-context)))]
-    (doseq [entry parsed]
+    ;; Fence lost ⇒ iterate over nil (zero entries) — the batch is skipped, the
+    ;; volatiles stay at their empty seed, and the return below flags :fenced?.
+    (doseq [entry (when-not fence-lost? parsed)]
       (let [eval-id    (db/new-id!)
             tx-context {:seon.db/agent-id agent-id
                         :seon.db/eval-id  eval-id
@@ -2880,6 +2912,7 @@
                           :narration       (:narration entry)
                           :source          (:source entry)}))))))
         (vswap! eids conj eval-id)))
-    {:seon.eval/ids    @eids
-     :seon.eval/n-ok   @n-ok
-     :seon.eval/n-fail @n-fail}))
+    (cond-> {:seon.eval/ids    @eids
+             :seon.eval/n-ok   @n-ok
+             :seon.eval/n-fail @n-fail}
+      fence-lost? (assoc :seon.eval/fenced? true))))

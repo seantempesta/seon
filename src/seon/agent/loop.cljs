@@ -6,7 +6,8 @@
    A trigger (an inbound message) opens a RUN ([[seon.agent.run/open-run!]]);
    `run-loop!` then drives turns until a bound fires or a verb closes the run:
 
-     each iteration `next-event` derives the event from the run:
+     each iteration re-reads ONE frozen db value (§8a) and `next-event` derives
+     the event from it:
        - run already :closed (a verb ran inside a turn) → :wait / :complete /
          :terminate (from the run's closed-reason) — the verb owns the close
        - the agent's `:seon.agent/run` points at a DIFFERENT run → :superseded
@@ -20,8 +21,12 @@
        and supersede are already handled (no re-close). The loop ends when the
        state leaves :running.
 
-   The RUN-ID is the fencing token: a turn from a superseded run answers
-   `owns-run?` false and bails :superseded (the new run owns the agent).
+   The RUN-ID is the fencing token, enforced IN-TX (§8b): `beat!`/`run-turn!`
+   each LEAD their work tx with a CAS asserting the agent's `:seon.agent/run`
+   STILL names this run. A superseded run's beat returns `ok? false` (lost
+   authority → terminate); its turn-open is rejected at commit. Between turns
+   the next iteration re-reads the latest db and `next-event` sees the moved
+   pointer → :superseded (§8c).
 
    Wake = read-derived-then-open. An inbound datom fires the per-tx listener;
    the handler derives the agent's state from the local db snapshot. If :idle
@@ -124,38 +129,42 @@
   3)
 
 (defn- next-event
-  "Derive the loop event from the run's current data + the consecutive
-   empty-turn `streak` (no side effects). One of :wait/:complete/:terminate
-   (verb closed the run inside a turn), :superseded (a newer run owns the
-   agent), :pause, :turn-limit, :deadline, :no-forms (the LLM produced zero
+  "Derive the loop event from the run's data over the FROZEN db value `db`
+   (§8a — one basis-t per turn) + the consecutive empty-turn `streak` (no side
+   effects). One of :wait/:complete/:terminate (a verb closed the run inside a
+   turn), :superseded (a newer run owns the agent OR the pointer was
+   retracted), :pause, :turn-limit, :deadline, :no-forms (the LLM produced zero
    actionable forms for [[no-forms-streak-limit]] turns running), or :turn-ok
    (run another turn)."
-  [id run-id streak]
-  (let [snap   (run/snapshot {:seon.agent.run/id run-id})
-        status (:seon.agent.run/status snap)
-        reason (:seon.agent.run/closed-reason snap)]
+  [db id run-id streak]
+  (let [r      (db/entity {:seon.db/db db :seon.db/ref [:seon.agent.run/id run-id]})
+        status (:seon.agent.run/status r)
+        reason (:seon.agent.run/closed-reason r)
+        cur    (derive/current-run db id)]
     (cond
       (= :closed status)
       (case reason
         :waited     :wait
         :completed  :complete
         :terminated :terminate
-        :superseded :superseded
         ;; a bound the loop already closed on (turn-limit/deadline/error/
-        ;; no-forms) — nothing left to do.
+        ;; no-forms) or a supersede/crash cleanup — nothing left to do.
         :superseded)
 
-      (not (run/owns-run? {:seon.agent/id id :seon.agent.run/id run-id}))
+      ;; The agent's CURRENT open run is no longer THIS run — a newer run owns
+      ;; it (supersede) or the pointer was retracted (watchdog). The in-tx CAS
+      ;; on `beat!`/`run-turn!` would reject our work anyway, so bail first.
+      (not= run-id (:seon.agent.run/id cur))
       :superseded
 
-      (:seon.agent.run/paused-at snap)
+      (:seon.agent.run/paused-at r)
       :pause
 
-      (run/turn-limit-reached? (derive/run-turn-count @db/*conn* run-id)
-                               (:seon.agent.run/turn-limit snap))
+      (run/turn-limit-reached? (derive/run-turn-count db run-id)
+                               (:seon.agent.run/turn-limit r))
       :turn-limit
 
-      (run/deadline-passed? (:seon.agent.run/deadline snap) (js/Date.))
+      (run/deadline-passed? (:seon.agent.run/deadline r) (js/Date.))
       :deadline
 
       ;; The empty-streak guard: the LLM has produced no actionable forms for a
@@ -181,36 +190,56 @@
   [{:seon.agent/keys [id] :as input} run-id]
   (await
     (loop [state :running streak 0]
-      (let [event (next-event id run-id streak)]
+      (let [db    @db/*conn*               ; §8a — ONE frozen basis-t per turn
+            event (next-event db id run-id streak)]
         (cond
           (= :turn-ok event)
-          (do
-            (await (run/beat! {:seon.agent/id id :seon.agent.run/id run-id}))
-            (let [r      (await (turn/run-turn! (assoc input :seon.agent.run/id run-id)))
-                  ;; A turn that errored (LLM error / failed open / catastrophic)
-                  ;; OR a result that created NO turn (no `:seon.agent.turn/id` —
-                  ;; e.g. a failed open-tx that left no entity) closes the run
-                  ;; `:error`. The id-absence clause is the structural guarantee:
-                  ;; a failed open can NEVER masquerade as a successful no-op turn
-                  ;; (which would recur `:turn-ok` forever — a retry storm).
-                  errored? (or (= :error (:seon.agent.turn/status r))
-                               (false? (:seon.db/ok? r))
-                               (nil? (:seon.agent.turn/id r)))]
-              (if errored?
-                (do (log id "halt" "turn :error → close run :error")
-                    (await (run/close-run!
-                             {:seon.agent.run/id            run-id
-                              :seon.agent.run/closed-reason :error}))
-                    (transition state :error))
-                ;; A productive turn (any actionable form ⇒ eval-count > 0)
-                ;; resets the streak; a turn with zero forms extends it
-                ;; (next-event halts at the cap). eval-count counts ATTEMPTED
-                ;; forms (ok + failed), so a turn whose forms all ERRORED is NOT
-                ;; empty — it yields a next turn that shows the error.
-                (recur (transition state :turn-ok)
-                       (if (zero? (or (:seon.agent/eval-count r) 0))
-                         (inc streak)
-                         0)))))
+          (let [beat (await (run/beat! {:seon.agent/id id :seon.agent.run/id run-id}))]
+            (if (false? (:seon.db/ok? beat))
+              ;; §8c — the beat's leading CAS aborted: a watchdog/newer run
+              ;; moved (or retracted) the pointer between next-event and now.
+              ;; Authority lost; terminate cleanly (no re-close — the new owner
+              ;; / watchdog owns the run).
+              (do (log id "halt" "beat fence lost — superseded; loop terminates")
+                  (transition state :superseded))
+              (let [r      (await (turn/run-turn!
+                                    (assoc input :seon.agent.run/id run-id :seon.db/db db)))
+                    ;; A turn that errored (LLM error / catastrophic) OR a result
+                    ;; that created NO turn (no `:seon.agent.turn/id` — e.g. a
+                    ;; fenced/failed open-tx that left no entity) is NOT a no-op
+                    ;; success. The id-absence clause is the structural
+                    ;; guarantee: a failed/fenced open can NEVER masquerade as a
+                    ;; successful no-op turn (which would recur `:turn-ok`
+                    ;; forever — a retry storm).
+                    errored? (or (= :error (:seon.agent.turn/status r))
+                                 (false? (:seon.db/ok? r))
+                                 (nil? (:seon.agent.turn/id r)))]
+                (if errored?
+                  ;; §8c — distinguish LOST AUTHORITY (the turn's leading CAS
+                  ;; aborted: open-turn! rejected because the run was
+                  ;; superseded/watchdog-closed mid-LLM) from a genuine turn
+                  ;; error. Re-derive over the LATEST db (streak 0 — purely to
+                  ;; classify): a stop event means the run is no longer ours to
+                  ;; close → route there; otherwise the loop owns the :error
+                  ;; close.
+                  (let [ev (next-event @db/*conn* id run-id 0)]
+                    (if (contains? #{:superseded :wait :complete :terminate} ev)
+                      (do (log id "halt" (str "turn rejected/closed — " (name ev)))
+                          (transition state ev))
+                      (do (log id "halt" "turn :error → close run :error")
+                          (await (run/close-run!
+                                   {:seon.agent.run/id            run-id
+                                    :seon.agent.run/closed-reason :error}))
+                          (transition state :error))))
+                  ;; A productive turn (any actionable form ⇒ eval-count > 0)
+                  ;; resets the streak; a turn with zero forms extends it
+                  ;; (next-event halts at the cap). eval-count counts ATTEMPTED
+                  ;; forms (ok + failed), so a turn whose forms all ERRORED is
+                  ;; NOT empty — it yields a next turn that shows the error.
+                  (recur (transition state :turn-ok)
+                         (if (zero? (or (:seon.agent/eval-count r) 0))
+                           (inc streak)
+                           0))))))
 
           (= :no-forms event)
           (do (log id "halt"

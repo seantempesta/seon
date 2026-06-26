@@ -119,7 +119,6 @@
 
 (schema/register! ::tx-data [:vector :any])
 (schema/register! ::opts :map)
-(schema/register! ::conn :any)
 (schema/register! ::tx-meta :map)   ; positional 3-arity convenience slot
 (schema/register! ::return-report? :boolean)
 
@@ -372,6 +371,34 @@
 ;; ---------------------------------------------------------------------------
 ;; Write path
 ;; ---------------------------------------------------------------------------
+
+(schema/register! ::cas-ref   :any)   ; lookup-ref or eid (third-party boundary)
+(schema/register! ::cas-attr  :keyword)
+(schema/register! ::cas-value :any)   ; lookup-ref, eid, or scalar
+(schema/register! ::cas-op    [:vector :any])
+
+(defn cas-assert
+  "Build a no-op compare-and-swap op (pure DATA) asserting `ref`'s `attr` is
+   STILL `value` — `old == new == value`. LEAD a work-tx with this and the tx
+   commits IFF the assertion holds; if `attr` moved to another value or was
+   retracted the WHOLE tx aborts (`:transact/cas`) and the bundled work is
+   rejected — surfacing as the `{::ok? false …}` envelope (errors are values).
+
+   This is the in-tx WORK FENCE: the database, not a pre-read predicate, tells
+   the writer it has lost authority. `ref` / `value` may be lookup-refs (they
+   resolve against EXISTING entities in the same tx). The canonical fence is
+   the agent's run pointer:
+
+     (db/transact!
+       {::db/tx-data
+        (into [(db/cas-assert [:seon.agent/id id] :seon.agent/run
+                              [:seon.agent.run/id run-id])]
+              work-tx)})"
+  {:malli/schema [:=> [:catn [::cas-ref ::cas-ref] [::cas-attr ::cas-attr]
+                             [::cas-value ::cas-value]]
+                  ::cas-op]}
+  [ref attr value]
+  [:db.fn/cas ref attr value value])
 
 (defn ^:async transact!
   "Commit tx-data. Two call shapes:

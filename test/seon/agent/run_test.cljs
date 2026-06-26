@@ -1,9 +1,11 @@
 (ns seon.agent.run-test
   "Lifecycle tests for seon.agent.run on a FRESH :memory conn seeded like the
    pod boots (never the live agent conn). Covers open-run! (bounds + the
-   fencing pointer + derived :running), the fencing (owns-run?), close-run!
+   fencing pointer + derived :running), the in-tx WORK FENCE (a superseded
+   run's beat/renew is rejected AT COMMIT — the leading CAS aborts the tx,
+   lands no datom; the current run's write commits), close-run!
    (retract-pointer-when-owned → derived :idle), renew! (bump both bounds,
-   fencing-guarded), beat!, and seeding turn-limit from the agent default."
+   fenced), beat!, and seeding turn-limit from the agent default."
   (:require
     [cljs.test :refer [deftest is async]]
     [datahike.api :as d]
@@ -91,23 +93,33 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest owns-run?-fences-a-superseded-run
+(deftest work-fence-rejects-a-superseded-runs-write-at-commit
+  ;; The in-tx CAS IS the fence (no owns-run? predicate): a write from a
+  ;; superseded run aborts the WHOLE tx at the writer and lands NO datom; the
+  ;; current run's write commits.
   (async done
     (-> (with-conn
-          (fn [_]
-            (-> (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :message})
-                (.then
-                  (fn [snap1]
-                    (let [r1 (:seon.agent.run/id snap1)]
-                      (is (true? (run/owns-run? {:seon.agent/id a-id :seon.agent.run/id r1})))
-                      (-> (supersede! :schedule)
-                          (.then
-                            (fn [snap2]
-                              (let [r2 (:seon.agent.run/id snap2)]
-                                (is (false? (run/owns-run? {:seon.agent/id a-id :seon.agent.run/id r1}))
-                                    "the older run no longer owns the agent")
-                                (is (true? (run/owns-run? {:seon.agent/id a-id :seon.agent.run/id r2}))
-                                    "the newer run does")))))))))) )
+          (fn ^:async fence-test [_]
+            (let [r1    (:seon.agent.run/id
+                          (await (run/open-run! {:seon.agent/id a-id
+                                                 :seon.agent.run/trigger :message})))
+                  beat1 (await (run/beat! {:seon.agent/id a-id :seon.agent.run/id r1}))]
+              (is (:seon.db/ok? beat1) "the owning run's beat commits")
+              (let [hb1   (:seon.agent.run/last-beat-at
+                            (db/entity {:seon.db/ref [:seon.agent.run/id r1]}))
+                    r2    (:seon.agent.run/id (await (supersede! :schedule)))
+                    ;; r1 no longer owns the agent — its beat's leading CAS
+                    ;; fails, aborting the whole tx.
+                    res-old (await (run/beat! {:seon.agent/id a-id :seon.agent.run/id r1}))]
+                (is (inst? hb1) "the owning beat landed a heartbeat")
+                (is (false? (:seon.db/ok? res-old))
+                    "a superseded run's beat is REJECTED at commit (CAS abort)")
+                (is (= hb1 (:seon.agent.run/last-beat-at
+                             (db/entity {:seon.db/ref [:seon.agent.run/id r1]})))
+                    "the rejected tx landed NO datom — r1's heartbeat is unchanged")
+                (let [res-cur (await (run/beat! {:seon.agent/id a-id :seon.agent.run/id r2}))]
+                  (is (:seon.db/ok? res-cur)
+                      "the CURRENT run's beat commits — fencing rejects only the loser"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

@@ -60,7 +60,8 @@
                                   (internal/parse-forms source)
                                   'my.agent.test
                                   "rb-agent-2606"
-                                  turn-id)))))
+                                  turn-id
+                                  nil)))))   ; runless eval path — no work fence
 
 (defn- eval-rows
   "All recorded eval rows in `db*`, as a vector of

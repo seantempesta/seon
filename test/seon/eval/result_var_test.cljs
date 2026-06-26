@@ -52,7 +52,7 @@
                        (.then (fn [_]
                                 (binding [db/*conn* conn]
                                   (seval/eval-batch!
-                                    cs (repl-int/parse-forms source) hns aid tid))))
+                                    cs (repl-int/parse-forms source) hns aid tid nil))))
                        (.then (fn [r] #js {:cs cs :hns hns :result r})))))))))
 
 ;; ---------------------------------------------------------------------------

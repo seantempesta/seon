@@ -294,9 +294,10 @@
                                              :seon.agent.run/trigger :message}))
                     a-id (:seon.agent.run/id a)
                     _ (await (supersede! agent-id))]
-                (testing "run A no longer owns the agent (B does)"
-                  (is (false? (run/owns-run? {:seon.agent/id agent-id
-                                              :seon.agent.run/id a-id}))))
+                (testing "run A is no longer the agent's current run (B is)"
+                  (is (not= a-id (:seon.agent.run/id
+                                   (run/current-run {:seon.agent/id agent-id})))
+                      "the agent's pointer moved to the newer run B"))
                 (let [final (await (db/with-agent agent-id
                                      (fn ^:async drive []
                                        (await (loop/run-loop!
@@ -309,6 +310,58 @@
                   (testing "the fence held — run A ran ZERO turns"
                     (is (= 0 (turn-count a-id))))))))
             )
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; WORK FENCE (§8b) — eval-batch! LEADS with an in-tx CAS; a superseded run's
+;; batch is rejected at the START (skipped, nothing recorded); the CURRENT
+;; run's batch commits. This is the F14 closure: the unit of WORK is fenced,
+;; not just lifecycle bookkeeping.
+;; ============================================================
+
+(deftest superseded-runs-eval-batch-is-fenced-current-runs-commits
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [cs (await (boot-agent!))
+                  r1 (:seon.agent.run/id
+                       (await (run/open-run! {:seon.agent/id agent-id
+                                              :seon.agent.run/trigger :message})))
+                  ;; supersede: r2 owns the agent now; r1 is orphaned (open, but
+                  ;; the pointer moved).
+                  r2 (:seon.agent.run/id (await (supersede! agent-id)))]
+              (testing "no eval rows exist before either batch"
+                (is (empty? (db/query {:seon.db/query
+                                       '[:find [?e ...] :where [?e :seon.eval/id _]]}))))
+              ;; eval-batch! for the OLD run r1 — the leading CAS fails (pointer
+              ;; → r2), so the whole batch is SKIPPED.
+              (let [fenced (await (db/with-agent agent-id
+                                    (fn ^:async eb []
+                                      (await (seval/eval-batch!
+                                               cs (repl/parse-forms "(def fenced-marker 42)")
+                                               (ctx/home-ns agent-id)
+                                               agent-id (db/new-id!) r1)))))]
+                (testing "the superseded run's batch is fenced — skipped, nothing recorded"
+                  (is (true? (:seon.eval/fenced? fenced)))
+                  (is (= 0 (:seon.eval/n-ok fenced)))
+                  (is (empty? (:seon.eval/ids fenced)))
+                  (is (empty? (db/query {:seon.db/query
+                                         '[:find [?e ...] :where [?e :seon.eval/id _]]}))
+                      "the fenced batch landed ZERO :seon.eval datoms")))
+              ;; eval-batch! for the CURRENT run r2 commits normally.
+              (let [ok-batch (await (db/with-agent agent-id
+                                      (fn ^:async eb2 []
+                                        (await (seval/eval-batch!
+                                                 cs (repl/parse-forms "(+ 1 1)")
+                                                 (ctx/home-ns agent-id)
+                                                 agent-id (db/new-id!) r2)))))]
+                (testing "the CURRENT run's batch is NOT fenced — it commits"
+                  (is (nil? (:seon.eval/fenced? ok-batch)))
+                  (is (= 1 (:seon.eval/n-ok ok-batch)))
+                  (is (= 1 (count (db/query {:seon.db/query
+                                             '[:find [?e ...] :where [?e :seon.eval/id _]]})))
+                      "exactly the current run's one eval row landed"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

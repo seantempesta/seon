@@ -6,13 +6,17 @@
    (`deadline`, an absolute instant) — whichever first.
 
    The run-id is the FENCING TOKEN: the agent's `:seon.agent/run` points at
-   the current run, and `owns-run?` rejects a write from a superseded or
-   timed-out run (a different run-id). New messages `renew!` the lease (bump
-   both bounds — the sliding window); `beat!` writes a heartbeat per turn.
+   the current run, and every WORK tx LEADS with an in-tx CAS
+   ([[seon.db/cas-assert]]) asserting the pointer STILL names this run — a
+   write from a superseded or timed-out run (a different run-id, or a
+   retracted pointer) aborts the whole tx at the single writer (the database,
+   not a pre-read predicate, reports the lost authority). New messages
+   `renew!` the lease (bump both bounds — the sliding window); `beat!` writes
+   a heartbeat per turn.
 
    This namespace OWNS the `:seon.agent.run/*` schemas and the lifecycle:
    `open-run!` / `close-run!` / `renew!` / `beat!` / `current-run` /
-   `owns-run?` / `snapshot` / `turn-limit-reached?` / `deadline-passed?` /
+   `snapshot` / `turn-limit-reached?` / `deadline-passed?` /
    `close-overdue-runs!` — the deadline WATCHDOG, the wall-clock half of the
    one ticker ([[seon.agent.loop/install-ticker!]]; the schedule half is
    `seon.agent.schedule/fire-due-schedules!`).
@@ -164,22 +168,6 @@
   [{id :seon.agent/id}]
   (derive/current-run @db/*conn* id))
 
-(schema/register! ::owns-run-request
-  [:map
-   [:seon.agent/id     :seon.db/id]
-   [:seon.agent.run/id :seon.agent.run/id]])
-
-(defn owns-run?
-  "Fencing predicate: does the agent's current `:seon.agent/run` point at
-   THIS run-id? A write from a superseded/timed-out run (a different run-id)
-   answers false and must be rejected by the caller."
-  {:malli/schema [:=> [:cat ::owns-run-request] :boolean]}
-  [{id :seon.agent/id run-id :seon.agent.run/id}]
-  (let [a        (db/entity {:seon.db/ref [:seon.agent/id id]})
-        cur-eid  (:db/id (:seon.agent/run a))
-        this-eid (:db/id (db/entity {:seon.db/ref [:seon.agent.run/id run-id]}))]
-    (boolean (and cur-eid this-eid (= cur-eid this-eid)))))
-
 (defn turn-limit-reached?
   "Work bound: has `turn-count` reached `turn-limit`? Pure — the caller
    passes the derived current-turn count, so this is wall-clock-free."
@@ -199,19 +187,20 @@
   (> (.getTime now) (.getTime deadline)))
 
 ;; ============================================================
-;; Writes — fencing-guarded lifecycle. Errors are VALUES (the seon.db error
-;; envelope), never throws.
+;; Writes — fencing-guarded lifecycle. Each WORK tx LEADS with an in-tx CAS
+;; ([[seon.db/cas-assert]]) asserting the agent's `:seon.agent/run` STILL names
+;; this run-id; if it moved (superseded) or was retracted (watchdog-closed /
+;; timed-out) the whole tx aborts at the writer — the CAS-fail envelope IS the
+;; fencing error (no pre-read predicate). Errors are VALUES, never throws.
 ;; ============================================================
 
-(defn- fencing-error
-  "The error envelope a fenced write returns — the agent's current run is no
-   longer `run-id` (superseded/timed-out)."
-  [run-id]
-  {:seon.db/ok? false
-   :seon.db/error
-   {:seon.error/message
-    (str "run fencing: the agent's current :seon.agent/run is not "
-         (pr-str run-id) " — a superseded or timed-out run cannot write.")}})
+(defn- run-fence
+  "The leading work-fence CAS op (DATA): assert the agent `id`'s
+   `:seon.agent/run` pointer STILL names `run-id`. Lead a work-tx with this and
+   the tx commits iff the pointer is unchanged; a moved/retracted pointer aborts
+   the WHOLE tx (`:transact/cas`) → the `{:seon.db/ok? false}` envelope."
+  [id run-id]
+  (db/cas-assert [:seon.agent/id id] :seon.agent/run [:seon.agent.run/id run-id]))
 
 (schema/register! ::open-run-request
   [:map
@@ -302,8 +291,14 @@
        :seon.db/error {:seon.error/message (str "close-run!: no run " (pr-str run-id) ".")}}
       (let [agent-eid (:db/id (:seon.agent.run/agent r))
             agent-id  (:seon.agent/id (db/entity agent-eid))
+            ;; OWNS? = the agent's current open run IS this run (read over the
+            ;; live db value via the derive leaf). When owned, retract the
+            ;; pointer in the SAME tx so derived state falls to :idle; when a
+            ;; DIFFERENT run owns the agent (a superseded run being cleaned up),
+            ;; mark this run closed but leave the live pointer untouched.
             owns?     (and agent-id
-                           (owns-run? {:seon.agent/id agent-id :seon.agent.run/id run-id}))]
+                           (= run-id (:seon.agent.run/id
+                                       (derive/current-run @db/*conn* agent-id))))]
         (await (db/transact!
                  {:seon.db/tx-data
                   (cond-> [{:seon.agent.run/id            run-id
@@ -321,24 +316,24 @@
 
 (defn ^:async renew!
   "Renew the lease (the sliding window): bump `turn-limit` by +1 and push
-   `deadline` out to now + extension. Fencing-guarded — a write from a
-   non-owned run returns the fencing error. `^:async`."
+   `deadline` out to now + extension. The tx LEADS with the [[run-fence]] CAS —
+   a write from a superseded/timed-out run aborts at the writer and returns the
+   CAS-fail envelope (no pre-read predicate). `^:async`."
   {:malli/schema [:=> [:cat ::renew-request] :seon.db/transact-response]}
   [{id :seon.agent/id run-id :seon.agent.run/id
     ext :seon.agent.run/deadline-extension-ms}]
-  (if-not (owns-run? {:seon.agent/id id :seon.agent.run/id run-id})
-    (fencing-error run-id)
-    (let [r      (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})
-          a      (db/entity {:seon.db/ref [:seon.agent/id id]})
-          now    (js/Date.)
-          ext    (or ext (:seon.agent/default-deadline-ms a) default-deadline-ms)
-          new-tl (inc (:seon.agent.run/turn-limit r))
-          new-dl (js/Date. (+ (.getTime now) ext))]
-      (await (db/transact!
-               {:seon.db/tx-data
-                [{:seon.agent.run/id         run-id
-                  :seon.agent.run/turn-limit new-tl
-                  :seon.agent.run/deadline   new-dl}]})))))
+  (let [r      (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})
+        a      (db/entity {:seon.db/ref [:seon.agent/id id]})
+        now    (js/Date.)
+        ext    (or ext (:seon.agent/default-deadline-ms a) default-deadline-ms)
+        new-tl (inc (:seon.agent.run/turn-limit r))
+        new-dl (js/Date. (+ (.getTime now) ext))]
+    (await (db/transact!
+             {:seon.db/tx-data
+              [(run-fence id run-id)
+               {:seon.agent.run/id         run-id
+                :seon.agent.run/turn-limit new-tl
+                :seon.agent.run/deadline   new-dl}]}))))
 
 (schema/register! ::beat-request
   [:map
@@ -346,14 +341,16 @@
    [:seon.agent.run/id :seon.agent.run/id]])
 
 (defn ^:async beat!
-  "Heartbeat: write `last-beat-at` = now. Fencing-guarded. `^:async`."
+  "Heartbeat: write `last-beat-at` = now. The tx LEADS with the [[run-fence]]
+   CAS, so a beat from a superseded/closed run aborts and returns the CAS-fail
+   envelope — the loop reads `ok? false` as 'lost authority' and stops.
+   `^:async`."
   {:malli/schema [:=> [:cat ::beat-request] :seon.db/transact-response]}
   [{id :seon.agent/id run-id :seon.agent.run/id}]
-  (if-not (owns-run? {:seon.agent/id id :seon.agent.run/id run-id})
-    (fencing-error run-id)
-    (await (db/transact!
-             {:seon.db/tx-data
-              [{:seon.agent.run/id run-id :seon.agent.run/last-beat-at (js/Date.)}]}))))
+  (await (db/transact!
+           {:seon.db/tx-data
+            [(run-fence id run-id)
+             {:seon.agent.run/id run-id :seon.agent.run/last-beat-at (js/Date.)}]})))
 
 (schema/register! ::pause-request
   [:map
@@ -364,20 +361,20 @@
   "Pause the open run: stamp `paused-at` = now (⇒ derived state `:paused`) and
    BANK the remaining wall-clock budget on `remaining-ms` (`deadline − now`,
    floored at 0). [[resume!]] re-extends `deadline` by it, so a long pause
-   never instantly blows the clock bound. Fencing-guarded. `^:async`."
+   never instantly blows the clock bound. The tx LEADS with the [[run-fence]]
+   CAS. `^:async`."
   {:malli/schema [:=> [:cat ::pause-request] :seon.db/transact-response]}
   [{id :seon.agent/id run-id :seon.agent.run/id}]
-  (if-not (owns-run? {:seon.agent/id id :seon.agent.run/id run-id})
-    (fencing-error run-id)
-    (let [r        (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})
-          now      (js/Date.)
-          deadline (:seon.agent.run/deadline r)
-          remain   (max 0 (- (.getTime deadline) (.getTime now)))]
-      (await (db/transact!
-               {:seon.db/tx-data
-                [{:seon.agent.run/id           run-id
-                  :seon.agent.run/paused-at    now
-                  :seon.agent.run/remaining-ms remain}]})))))
+  (let [r        (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})
+        now      (js/Date.)
+        deadline (:seon.agent.run/deadline r)
+        remain   (max 0 (- (.getTime deadline) (.getTime now)))]
+    (await (db/transact!
+             {:seon.db/tx-data
+              [(run-fence id run-id)
+               {:seon.agent.run/id           run-id
+                :seon.agent.run/paused-at    now
+                :seon.agent.run/remaining-ms remain}]}))))
 
 (schema/register! ::resume-request
   [:map
@@ -390,26 +387,26 @@
    (a long pause never instantly blows the clock bound). GUARDED on
    `paused-at`: a run that is NOT paused has no banked budget, so resume! is
    a loud no-op (the error envelope) rather than an accidental deadline
-   overwrite with the default window. Fencing-guarded too. `^:async`."
+   overwrite with the default window. The tx LEADS with the [[run-fence]] CAS
+   too. `^:async`."
   {:malli/schema [:=> [:cat ::resume-request] :seon.db/transact-response]}
   [{id :seon.agent/id run-id :seon.agent.run/id}]
-  (if-not (owns-run? {:seon.agent/id id :seon.agent.run/id run-id})
-    (fencing-error run-id)
-    (let [r (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})]
-      (if-not (:seon.agent.run/paused-at r)
-        {:seon.db/ok? false
-         :seon.db/error
-         {:seon.error/message
-          (str "resume!: run " (pr-str run-id) " is not paused "
-               "(no :seon.agent.run/paused-at) — nothing to resume.")}}
-        (let [remain (or (:seon.agent.run/remaining-ms r) default-deadline-ms)
-              new-dl (js/Date. (+ (.getTime (js/Date.)) remain))]
-          (await (db/transact!
-                   {:seon.db/tx-data
-                    [{:seon.agent.run/id       run-id
-                      :seon.agent.run/deadline new-dl}
-                     [:db/retract [:seon.agent.run/id run-id]
-                      :seon.agent.run/paused-at]]})))))))
+  (let [r (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})]
+    (if-not (:seon.agent.run/paused-at r)
+      {:seon.db/ok? false
+       :seon.db/error
+       {:seon.error/message
+        (str "resume!: run " (pr-str run-id) " is not paused "
+             "(no :seon.agent.run/paused-at) — nothing to resume.")}}
+      (let [remain (or (:seon.agent.run/remaining-ms r) default-deadline-ms)
+            new-dl (js/Date. (+ (.getTime (js/Date.)) remain))]
+        (await (db/transact!
+                 {:seon.db/tx-data
+                  [(run-fence id run-id)
+                   {:seon.agent.run/id       run-id
+                    :seon.agent.run/deadline new-dl}
+                   [:db/retract [:seon.agent.run/id run-id]
+                    :seon.agent.run/paused-at]]}))))))
 
 ;; ============================================================
 ;; The deadline WATCHDOG — the wall-clock half of the one ticker
@@ -418,7 +415,8 @@
 ;; checks. This scan IS that check — the EXTERNAL enforcement of the clock
 ;; bound (a stalled LLM burns the clock and can't self-detect). A run whose
 ;; async turn overran its deadline is closed here; when the await returns the
-;; loop's `owns-run?`/`next-event` sees it closed and bails. (A truly-SYNC
+;; loop's `next-event` (re-read over the latest db) sees it closed and bails,
+;; and any in-flight work tx's leading CAS aborts. (A truly-SYNC
 ;; runaway needs worker termination — Phase 2, not here.)
 ;; ============================================================
 

@@ -122,9 +122,12 @@
    delegate to [[seon.ctx/render-context]] (the SINGLE producer the human
    inspector `seon.agent.inspect/ctx-preview` also routes through, so the
    debug view and the model's prompt are byte-identical by construction).
-   Renders against `@*conn*` — the live cluster db the loop runs on."
-  [agent-id]
-  (ctx/render-context {:seon.agent/id agent-id}))
+   Renders against the frozen `db` value the loop pinned for this TURN (the
+   one basis-t the bound-checks + render share, §8a); defaults to `@*conn*`
+   when called without one."
+  ([agent-id] (render-prompt agent-id @db/*conn*))
+  ([agent-id db]
+   (ctx/render-context {:seon.agent/id agent-id :seon.db/db db})))
 
 (defn embed-retrieval-on?
   "True when embedding-retrieval is enabled — the env var `SEON_EMBED` is
@@ -135,18 +138,19 @@
   (some? (.. js/process -env -SEON_EMBED)))
 
 (defn ^:async prefetch-and-render-prompt!
-  "Render this turn's prompt, OPTIONALLY prefetching embedding-retrieval hits
-   first. DEFAULT-OFF (byte-identical): when [[embed-retrieval-on?]] is false
-   this is exactly `(render-prompt agent-id)`. When ON: derive the query from
-   the latest live inbound, KNN over the WHOLE embedding index (kind-general),
-   stash the hits, then run the SYNC `render-prompt` inside that scope so the
-   `:relevant-source` section reads them without making `assemble-context`
-   async. FAIL-SOFT to nil hits on any error (section renders blank)."
-  [agent-id]
+  "Render this turn's prompt over the frozen `db` value (the basis-t the loop
+   pinned for the turn), OPTIONALLY prefetching embedding-retrieval hits first.
+   DEFAULT-OFF (byte-identical): when [[embed-retrieval-on?]] is false this is
+   exactly `(render-prompt agent-id db)`. When ON: derive the query from the
+   frozen db's latest live inbound, KNN over the WHOLE embedding index
+   (kind-general), stash the hits, then run the SYNC `render-prompt` over the
+   SAME db inside that scope so the `:relevant-source` section reads them
+   without making `assemble-context` async. FAIL-SOFT to nil hits on any error
+   (section renders blank)."
+  [agent-id db]
   (if-not (embed-retrieval-on?)
-    (render-prompt agent-id)
-    (let [db    @db/*conn*
-          query (ctx/retrieval-query {:seon.db/db db :seon.agent/id agent-id})
+    (render-prompt agent-id db)
+    (let [query (ctx/retrieval-query {:seon.db/db db :seon.agent/id agent-id})
           hits  (if (str/blank? query)
                   nil
                   (-> (.then
@@ -161,7 +165,7 @@
                                   (or (.-message e) (str e)))
                                 nil))))
           hits  (await hits)]
-      (embed-stash/with-hits hits #(render-prompt agent-id)))))
+      (embed-stash/with-hits hits #(render-prompt agent-id db)))))
 
 ;; ============================================================
 ;; The turn bracket — open-turn! folds the prompt projection + the current
@@ -179,24 +183,36 @@
    derived current-turn count counts it). Awaits `body-fn` (a 0-arg thunk
    returning Promise<map>) via `close-turn!`. Returns whatever `body-fn`
    returned, so the caller can read `:seon.agent/eval-count`. Touches NO agent
-   state — the run lifecycle is the loop's / the verbs' concern. If the
-   open-tx fails there is NO turn entity — returns the error envelope (no LLM
+   state — the run lifecycle is the loop's / the verbs' concern.
+
+   When `id-of-run` is present the open-tx LEADS with the WORK FENCE
+   ([[seon.db/cas-assert]] on `:seon.agent/id`'s `:seon.agent/run`): a
+   turn-open for a superseded/watchdog-closed run (the pointer moved or was
+   retracted before the LLM call) aborts at the writer — no zombie turn entity
+   lands, and the caller sees `ok? false`. If the open-tx fails (fence or
+   otherwise) there is NO turn entity — returns the error envelope (no LLM
    call)."
   [{:seon.agent/keys [id]
     :seon.agent.run/keys [id-of-run]
     :seon.agent.turn/keys [id-of-turn prompt-text prompt-file]}
    body-fn]
-  (let [open-result
+  (let [turn-row
+        (cond->
+          {:seon.agent.turn/id           id-of-turn
+           :seon.agent.turn/at           (js/Date.)
+           :seon.agent.turn/status       :running
+           :seon.agent.turn/prompt-chars (count (str prompt-text))}
+          prompt-file (assoc :seon.agent.turn/prompt-file prompt-file)
+          id-of-run  (assoc :seon.agent.turn/run [:seon.agent.run/id id-of-run]))
+        open-result
         (await
           (db/transact!
             {:seon.db/tx-data
-             [(cond->
-                {:seon.agent.turn/id           id-of-turn
-                 :seon.agent.turn/at           (js/Date.)
-                 :seon.agent.turn/status       :running
-                 :seon.agent.turn/prompt-chars (count (str prompt-text))}
-                prompt-file (assoc :seon.agent.turn/prompt-file prompt-file)
-                id-of-run  (assoc :seon.agent.turn/run [:seon.agent.run/id id-of-run]))]}))]
+             (if id-of-run
+               [(db/cas-assert [:seon.agent/id id] :seon.agent/run
+                               [:seon.agent.run/id id-of-run])
+                turn-row]
+               [turn-row])}))]
     (if (false? (:seon.db/ok? open-result))
       open-result
       (close-turn! id id-of-turn body-fn))))
@@ -245,13 +261,13 @@
    LOCALS threaded down from `run-turn!` (captured before the LLM await), so
    debug capture pairs this verbatim reply with the same turn's prompt. When
    capture is ON, the returned map carries `:seon.agent.turn/debug-dir`."
-  [resp id id-of-turn turn-idx compile-state]
+  [resp id id-of-turn turn-idx compile-state run-id]
   (let [reply-text (or (:text resp) "")
         debug-dir  (debug/capture-response! id turn-idx id-of-turn
                                             reply-text resp)
         parsed     (repl/parse-forms reply-text)
         batch      (await (seval/eval-batch! compile-state parsed
-                                             (ctx/home-ns id) id id-of-turn))]
+                                             (ctx/home-ns id) id id-of-turn run-id))]
     (cond->
       ;; ATTEMPTED forms (ok + failed), not just n-ok: the loop's zero-forms
       ;; halt means "no actionable forms" — NOT "every form errored". A
@@ -298,6 +314,7 @@
    (`:seon.ai/error`) closes the turn `:status :error` (render derives a
    system line from the status — no self→self message row)."
   [{:seon.agent/keys [id llm-fn compile-state]
+    run-id :seon.agent.run/id
     :seon.agent.turn/keys  [id-of-turn turn-idx prompt-text]}]
   (let [resp    (await (call-llm! id id-of-turn llm-fn prompt-text))
         retries (:seon.agent.turn/llm-retries resp)
@@ -313,7 +330,7 @@
           {:seon.agent/eval-count 0
            :seon.agent.turn/status :error}
           retries (assoc :seon.agent.turn/llm-retries retries)))
-      (cond-> (await (ask-and-eval-reply! resp id id-of-turn turn-idx compile-state))
+      (cond-> (await (ask-and-eval-reply! resp id id-of-turn turn-idx compile-state run-id))
         retries     (assoc :seon.agent.turn/llm-retries retries)
         (seq usage) (assoc :seon.agent.turn/llm-usage (pr-str usage))
         (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))))
@@ -327,16 +344,21 @@
      :seon.agent/compile-state  bootstrap compile-state
      :seon.agent.run/id         the OPEN run this turn belongs to (the loop
                                 passes its run-id; stamped on the turn)
+     :seon.db/db                the FROZEN db value the loop pinned for this
+                                turn (§8a — the prompt render + the loop's
+                                bound-checks share ONE basis-t); defaults to
+                                `@*conn*` when absent (gym/bootstrap callers)
 
    Wraps the pipeline in a `with-tx-context` scope so every transact (incl.
    the per-form txs inside `eval-batch!`) auto-tags with the causality
    bundle. Returns the closed turn entity pulled with evals inlined, plus
    `:seon.agent/eval-count`. On catastrophic error returns
    `{:seon.agent.turn/status :error :seon.error/data <str>}`."
-  [{:seon.agent/keys [id llm-fn compile-state] run-id :seon.agent.run/id}]
-  (let [turn-id    (db/new-id!)
+  [{:seon.agent/keys [id llm-fn compile-state] run-id :seon.agent.run/id db :seon.db/db}]
+  (let [db         (or db @db/*conn*)
+        turn-id    (db/new-id!)
         turn-idx   (turn-index id)
-        prompt     (await (prefetch-and-render-prompt! id))
+        prompt     (await (prefetch-and-render-prompt! id db))
         full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt})
         prompt-file (debug/capture-prompt! id turn-idx turn-id full-prompt)]
     (log id turn-idx "open" turn-id "+" (count prompt) "ctx-chars")
@@ -360,6 +382,7 @@
                                #(ask-and-eval! {:seon.agent/id            id
                                                 :seon.agent/llm-fn        llm-fn
                                                 :seon.agent/compile-state compile-state
+                                                :seon.agent.run/id        run-id
                                                 :seon.agent.turn/id-of-turn     turn-id
                                                 :seon.agent.turn/turn-idx       turn-idx
                                                 :seon.agent.turn/prompt-text    prompt})))))))]
