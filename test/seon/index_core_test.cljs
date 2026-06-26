@@ -30,7 +30,7 @@
     [seon.schema :as schema]
     ;; The exemplar TEST SIBLING — required so its deftest vars are
     ;; available as #'-literals for the test-sibling full-source guard.
-    [seon.agent.search-test]))
+    [seon.agent.todo-test]))
 
 ;; index-core! / index-schemas are PURE, DETERMINISTIC builders that do full
 ;; runtime introspection (file-read + paren-parse over the whole build
@@ -176,16 +176,15 @@
         "a non-whitelisted framework-bulk ns source is the minimal (ns x) stub")))
 
 (deftest core-ns-rows-stub-bulk-full-source-whitelist
-  ;; Curated render (de-stub 2026-06-24): the seon.* FRAMEWORK BULK keeps the
+  ;; Curated render (LEAN whitelist): the seon.* FRAMEWORK BULK keeps the
   ;; minimal `(ns x)` stub (it is DROPPED from render, never shown as a body),
   ;; while EACH curated seon.* whitelist member
-  ;; (seon.ctx.namespaces/full-source-whitelist =
-  ;; #{:seon.agent.todo :seon.db :seon.agent.search :seon.agent.fs
-  ;;   :seon.agent.message :seon.schema :seon.render}) force-stores its REAL
-  ;; FULL FILE TEXT (it renders FULL, so the boot indexer reads the file —
-  ;; probing .cljs then .cljc — the same seon.ctx.namespaces/full-source-ns?
-  ;; rule the renderer uses, one writer no drift). seon.warn / seon.eval are
-  ;; framework bulk → stub.
+  ;; (seon.ctx.namespaces/full-source-whitelist = #{:seon.db :seon.agent.todo})
+  ;; force-stores its REAL FULL FILE TEXT (it renders FULL, so the boot
+  ;; indexer reads the file — probing .cljs then .cljc — the same
+  ;; seon.ctx.namespaces/full-source-ns? rule the renderer uses, one writer no
+  ;; drift). seon.warn / seon.eval / seon.agent.search / seon.agent.fs are all
+  ;; framework bulk → stub (search/fs are NO LONGER whitelisted — lean set).
   (let [tx      @core-tx
         ns-rows (filter :seon.ns/name tx)
         row-for (fn [k] (first (filter #(= k (:seon.ns/name %)) ns-rows)))
@@ -199,16 +198,17 @@
         "seon.warn (framework bulk) source is the minimal (ns x) stub")
     (is (= "(ns seon.eval)" eval-ns)
         "seon.eval (framework bulk) source is the minimal (ns x) stub")
-    ;; EVERY whitelisted tool carries its REAL full file source, not a stub —
-    ;; including the .cljc (seon.schema) one (extension-probed at read time).
-    (is (full? :seon.agent.todo)
-        "seon.agent.todo (whitelist) source is its REAL full file text")
+    ;; EVERY whitelisted tool carries its REAL full file source, not a stub.
     (is (full? :seon.db)
         "seon.db (whitelist) source is its REAL full file text")
-    (is (full? :seon.agent.search)
-        "seon.agent.search (whitelist) source is its REAL full file text")
-    (is (full? :seon.agent.fs)
-        "seon.agent.fs (whitelist) source is its REAL full file text")
+    (is (full? :seon.agent.todo)
+        "seon.agent.todo (whitelist) source is its REAL full file text")
+    ;; LEAN: search + fs are NO LONGER whitelisted — they drop to the minimal
+    ;; (ns x) stub (still indexed via their member rows below).
+    (is (= "(ns seon.agent.search)" (:seon.ns/source (row-for :seon.agent.search)))
+        "seon.agent.search (de-whitelisted) source is the minimal (ns x) stub")
+    (is (= "(ns seon.agent.fs)" (:seon.ns/source (row-for :seon.agent.fs)))
+        "seon.agent.fs (de-whitelisted) source is the minimal (ns x) stub")
     ;; the members are still indexed (dropped nses via member rows; the
     ;; whitelist via its full source).
     (let [syms (set (map :seon.fn/sym (filter :seon.fn/sym tx)))]
@@ -220,8 +220,8 @@
 (deftest test-sibling-ns-rows-ride-their-base-full-source-rule
   ;; Test siblings ride the SAME full-source rule as their subject ns (the
   ;; `-test` suffix is stripped to the base — seon.ctx.namespaces/full-source-ns?):
-  ;;   (a) a `-test` sibling of a WHITELISTED base (seon.agent.search-test →
-  ;;       seon.agent.search, a full-source-whitelist member) carries its REAL
+  ;;   (a) a `-test` sibling of a WHITELISTED base (seon.agent.todo-test →
+  ;;       seon.agent.todo, a full-source-whitelist member) carries its REAL
   ;;       FULL FILE TEXT, so the deep render-namespace view has the real test
   ;;       bodies on hand;
   ;;   (b) a `-test` sibling of a NON-whitelisted, non-my.* base
@@ -230,8 +230,8 @@
   ;; Either way the deftest member rows live on the :seon.test rows.
   (let [;; (a) whitelisted base → FULL source.
         srows (client/index-tests
-                [#'seon.agent.search-test/match-found-with-path-line-text])
-        srow  (first (filter #(= :seon.agent.search-test (:seon.ns/name %)) srows))
+                [#'seon.agent.todo-test/add-stores-a-fully-formed-open-todo])
+        srow  (first (filter #(= :seon.agent.todo-test (:seon.ns/name %)) srows))
         ssrc  (:seon.ns/source srow)
         ;; (b) non-whitelisted base → minimal stub. Any deftest in THIS ns
         ;; works (its base seon.index-core is not whitelisted); use one
@@ -240,8 +240,8 @@
         irow  (first (filter #(= :seon.index-core-test (:seon.ns/name %)) irows))
         isrc  (:seon.ns/source irow)]
     (is (some? srow) "an owning :seon.ns row is emitted for the whitelisted test ns")
-    (is (and (not= "(ns seon.agent.search-test)" ssrc)
-             (str/starts-with? (str/triml ssrc) "(ns seon.agent.search-test")
+    (is (and (not= "(ns seon.agent.todo-test)" ssrc)
+             (str/starts-with? (str/triml ssrc) "(ns seon.agent.todo-test")
              (str/includes? ssrc "deftest"))
         "a whitelisted-base test sibling carries its REAL full file text")
     (is (some? irow) "an owning :seon.ns row is emitted for the non-whitelisted test ns")

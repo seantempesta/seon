@@ -101,52 +101,31 @@
     ns-str))
 
 (def full-source-whitelist
-  "The CURATED whitelist of `seon.*` FRAMEWORK namespaces shown to every
-   agent IN FULL — the few seon.* tools an agent actually USES, worth
-   their whole source. This is the clear EDITABLE def to extend.
-     - `:seon.agent.todo` — the store/retrieve reference an agent calls
-       directly: `register!` per attr, three map-in/map-out `:malli/schema`
-       fn shapes, error-as-value envelopes, the todo tools the system
-       prompt teaches by name.
+  "The LEAN whitelist of `seon.*` FRAMEWORK namespaces shown to every agent
+   IN FULL — kept deliberately tiny so the agent is not buried in framework
+   code. Just two set-up tools, shown as EXAMPLES (both already aliased in
+   the agent's home ns), not an exhaustive API dump. This is the clear
+   EDITABLE def to extend.
      - `:seon.db` — the database API every agent uses for arbitrary reads
        and writes: the datalog cheat sheet, per-fn worked examples
        (query/pull/entity/transact!/store-inventory), the lookup-ref and
        ref-join idioms. Its real source IS the db manual.
-     - `:seon.agent.search` — ripgrep wrapped as a capability; the
-       search→read recipe an agent runs constantly. Signatures-only left
-       agents guessing the call/response shape (e.g. expecting a `:hits`
-       key); the real body carries the worked `grep` example, the
-       `:seon.agent.search/matches` envelope, and the search→read idiom.
-     - `:seon.agent.fs` — the read+write half of search→read; the agent's
-       eyes and hands on disk behind a default-deny allowlist
-       (`read-file`/`write-file`/`list-dir`/`walk-dir`/`stat`/`grants`).
-       `grep` returns paths that feed `read-file`; the body teaches the
-       default-deny-envelope-is-PASS vs thrown-error-is-FAIL distinction.
-     - `:seon.agent.message` — the conversation verbs, the agent's only way
-       to talk to its human or peers (`user`/`agent` over `message!`):
-       fan-out (`to` = vector of refs), the hop guard, the `{:ok? …}`
-       envelope, the loud self→self refusal.
-     - `:seon.agent.lifecycle` — the run-lifecycle verbs
-       (`wait`/`complete`/`pause`/`resume`/`terminate`); how the agent parks,
-       finishes, holds, or is killed — each a small run mutation (derived
-       state), errors-as-values.
-   Deliberately NOT whitelisted (curated OUT — every shown line must earn
-   its tokens): `:seon.schema` (its body is registry WIRING; the `register!`
-   pattern is demonstrated by the kept nses' own `register!` calls + `my.kb`,
-   and the modeling skill is taught there, not in the registry internals),
-   `:seon.render` (the renderer ENGINE — agents consume rendered output, they
-   don't author against it), `:seon.ai.tokens` (a `chars/4` one-liner). These
-   stay indexed + grep-able via `seon.agent.search`, just not dumped in full.
-   `my.*` nses (`my.kb`, agent-authored code) are ALREADY
-   rendered full by the `my.*` rule in [[full-source-ns?]] — they do NOT
-   belong here; this whitelist is ONLY for the seon.* framework tools.
-   Shared by the boot indexer (which stores their real file source — see
-   `seon.client/ns-row`) and [[namespaces-section]] (which renders them
+     - `:seon.agent.todo` — the work-list tool an agent calls directly:
+       `register!` per attr, map-in/map-out `:malli/schema` fn shapes,
+       error-as-value envelopes, the todo verbs the system prompt teaches
+       by name.
+   EVERYTHING ELSE in the framework is curated OUT — the rest of `seon.*`
+   (search, fs, message, lifecycle, schema, render, …) is NOT dumped here.
+   It stays INDEXED and grep-able via `seon.agent.search` and readable on
+   demand via [[seon.ctx/render-namespace]] — one search away, never a wall
+   of code the agent must wade through. `my.*` nses (`my.kb`, agent-authored
+   code) are ALREADY rendered full by the `my.*` rule in [[full-source-ns?]]
+   — they do NOT belong here; this whitelist is ONLY for the seon.* example
+   tools. Shared by the boot indexer (which stores their real file source —
+   see `seon.client/ns-row`) and [[namespaces-section]] (which renders them
    FULL while the rest of the framework is DROPPED from the rendered
-   section — still indexed + searchable via seon.agent.search /
-   render-namespace)."
-  #{:seon.agent.todo :seon.db :seon.agent.search
-    :seon.agent.fs :seon.agent.message :seon.agent.lifecycle})
+   section — still indexed + searchable)."
+  #{:seon.db :seon.agent.todo})
 
 (defn in-full-source-whitelist?
   "True when `ns-name` (string, keyword, or symbol) is one of the curated
@@ -205,12 +184,13 @@
         (third-party-ns? nm))))
 
 (def ^:private namespaces-header
-  (str "; Real loaded code, CURATED: the few namespaces you USE or OWN are\n"
-       "; shown in FULL (your my.* code, third-party business code, your\n"
-       "; current namespace, and a curated seon.* tool set) — each its whole\n"
-       "; file. The rest of the seon framework is NOT shown here; query any\n"
-       "; ns or fn by name (it stays indexed + searchable). Full namespaces\n"
-       "; are ordered by RECENCY: most-recently-modified LAST."))
+  (str "; Real loaded code. Shown in FULL: YOUR OWN namespace (your live\n"
+       "; workspace — the most important), and a couple of set-up tools as\n"
+       "; EXAMPLES — db (the database) and todo (your work list), both\n"
+       "; already aliased in your namespace. The rest of the framework is\n"
+       "; NOT dumped here on purpose — it stays indexed and one search away,\n"
+       "; so you are not buried in code you don't need. Full namespaces are\n"
+       "; ordered by recency (most-recently-modified last)."))
 
 (defn- render-one
   "Render ONE included ns through the SINGLE renderer

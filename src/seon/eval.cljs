@@ -1108,7 +1108,8 @@
                  [seon.agent :as agent]
                  [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
                  [seon.schema :as schema]
-                 [seon.db :as db]))
+                 [seon.db :as db]
+                 [seon.agent.todo :as todo]))
 
    The home ns defs NOTHING beyond these requires: a `result` def would
    shadow the reserved `result` NAMESPACE that holds the `result/<id>`
@@ -1140,7 +1141,8 @@
              " [seon.agent :as agent]"
              " [seon.agent.lifecycle :refer [wait complete pause resume terminate]]"
              " [seon.schema :as schema]"
-             " [seon.db :as db]))")]
+             " [seon.db :as db]"
+             " [seon.agent.todo :as todo]))")]
     (await (eval compile-state setup-src
                  {:ns 'cljs.user :analyze-deps? true}))
     ;; The benign refer-warning makes the ns form report :ok false, so the
