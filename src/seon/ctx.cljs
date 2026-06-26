@@ -1806,6 +1806,43 @@
      :seon.render/ai         'seon.ctx/render-context-ai
      :seon.render/html       'seon.ctx/render-context-html}))
 
+(schema/register! ::render-context-request
+  [:map
+   [:seon.agent/id :string]
+   [:seon.db/db    {:optional true} :seon.db/db]])
+
+(defn render-context
+  "THE agent's full LLM context, as a bare String — the SINGLE producer
+   the prompt path ([[seon.agent.turn/render-prompt]]) AND the human
+   inspector ([[seon.agent.inspect/ctx-preview]]) both route through. Both
+   render the `:seon.render/ai` side of ONE render ([[seon.render/render]])
+   over the SAME `context-root` over the SAME db value, so the model's
+   prompt and the inspector's context pane are byte-identical BY
+   CONSTRUCTION (the only per-render-moment difference is the single live
+   `now` in the transcript readline).
+
+   Renders [[context-root]] in the `:seon.render/ai` view UNLESS the agent
+   carries a per-agent `:seon.render/ai` OVERRIDE on its entity: a STRING
+   renders verbatim, a SYMBOL renders through the same render (a custom
+   prompt fn returning a bare String). `:seon.db/db` is the render snapshot
+   (defaults to `@*conn*`); pass the SAME db to both consumers to keep them
+   byte-identical."
+  {:malli/schema [:=> [:cat ::render-context-request] :string]}
+  [{:seon.agent/keys [id] :seon.db/keys [db]}]
+  (let [db   (or db @db/*conn*)
+        ent  (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
+        slot (some->> (:seon.render/ai ent)
+                      (db/decode-edn-value :seon.render/ai))
+        ctx  {:seon.db/db db :seon.agent/id id}]
+    (cond
+      (string? slot) slot
+      (symbol? slot) (or (render/render :seon.render/ai ctx
+                                        {:seon.ctx/name :prompt :seon.render/ai slot})
+                         "")
+      :else          (or (render/render :seon.render/ai ctx
+                                        (context-root ctx))
+                         ""))))
+
 (defn- render-child-text
   "Render ONE child section to its ai text via the injected handle, carrying
    its name / agent? / priority forward for budgeting + the cache split."

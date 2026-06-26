@@ -6,7 +6,9 @@
        next render: the HARDCODED system block FIRST (read via the SAME
        fn the adapters call, `seon.ai/effective-system-prompt` — the
        system-specific mechanics, NOT the soul/any file), then the
-       assembled AI-context (`seon.ctx/context-root` → render). The
+       assembled AI-context via `seon.ctx/render-context` — the SINGLE
+       producer the loop's prompt path (`seon.agent.turn/render-prompt`)
+       also routes through, over the SAME unfiltered `@*conn*`. The
        `:seon.render/text` is byte-identical to what the LLM receives
        (system message + context), with an explicit boundary between
        them. Per-section texts (left pane) lead with the system block;
@@ -21,12 +23,10 @@
    `(seon.db/current-agent-id)` so REPL calls from inside an agent
    scope work with no argument."
   (:require
-    [seon.agent-view :as agent-view]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.ctx :as ctx]
     [seon.db :as db]
-    [seon.render :as render]
     [seon.schema :as schema]))
 
 (schema/register! :seon.agent.inspect/request
@@ -71,18 +71,24 @@
    shows the system message too); `:seon.render/section-html` mirrors the
    context section twins only (the system block is the system message,
    not a context section). `:seon.render/token-estimate` counts the WHOLE
-   prompt (system included). Reads from the agent's filtered view so
-   cross-agent tx are hidden."
+   prompt (system included). Renders against the live `@*conn*` — the SAME
+   unfiltered db value the loop renders the prompt over — so the two are
+   byte-identical (no per-agent `d/filter` divergence)."
   {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/ctx-response]}
   [{:seon.agent/keys [id]}]
   (let [id  (resolve-id id)
-        {:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id id})
+        ;; THE SAME db the prompt path renders against — the live cluster
+        ;; conn, UNFILTERED. The loop renders the prompt over `@*conn*`
+        ;; ([[seon.ctx/render-context]] / `render-prompt`); the inspector
+        ;; must use the SAME db value or it would not be byte-identical (and
+        ;; the old per-agent `d/filter` actively DROPPED inbound peer-message
+        ;; content whose datom lived in the peer's tx — the inspector lied).
+        db  @db/*conn*
         ctx {:seon.agent/id id :seon.db/db db}
-        ;; THE SAME render call the prompt path uses (`render-prompt`):
-        ;; render the ROOT renderable → a bare String. One render, two
-        ;; consumers — the LLM prompt and this human inspector — so they
-        ;; can never diverge.
-        text          (or (render/render :seon.render/ai ctx (ctx/context-root ctx)) "")
+        ;; THE SAME single producer the prompt path uses — both route
+        ;; through `seon.ctx/render-context`, so the LLM prompt and this
+        ;; human inspector are byte-identical by construction.
+        text          (ctx/render-context ctx)
         ;; Per-section breakdown for the panes, derived from the SAME root +
         ;; render (left pane folds per section; right pane one html card per
         ;; renderable).

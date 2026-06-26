@@ -189,4 +189,30 @@ Revert point if the experiment goes sideways: `c84e8fc`.
   keystone worker-write buffering (Phase 2). Pre-existing smells flagged (this-process-run?/
   drive-run!/ping! missing `:malli/schema`; `!own-write-ids` `def` vs `defonce`).
 - **Struck from architecture.md open-risks:** crash-recovery, atomic-wake, async-listener.
+- **Commit:** `a83160e`
+
+### Pass 6 — single render path (prompt == view, byte-identical by construction)
+
+- **Move:** refine + prove (kill a divergence, lock the claim). The render machinery was
+  ALREADY one fn (`render` over `ctx/context-root`) — but the prompt and inspector entry
+  points passed DIVERGENT db values, so bytes matched only by coincidence.
+- **Found + fixed (a real bug):** the prompt rendered over `@*conn*` (full); the inspector
+  rendered over a `d/filter`ed `agent-view` that DROPS peer txs — so a message **from a
+  peer** showed in the prompt but was FILTERED OUT of the inspector (it lied about what the
+  agent saw). Unified: new single producer `ctx/render-context` (map-in, honors the per-agent
+  `:seon.render/ai` override, db defaults to `@*conn*`); `turn/render-prompt` is now a thin
+  delegate to it; `inspect/ctx-preview` renders via it over the SAME `@*conn*`. Bytes
+  unchanged — unified WHO calls the renderer + over WHICH db, not the rendering.
+- **Derived-never-stored confirmed:** the prompt is not a datom (only `prompt-chars` count +
+  an optional off-by-default debug `prompt-file`); rendering writes ZERO datoms (tested).
+- **Live proof (orchestrator, real pod):** `(turn/render-prompt id)` ≡ `(ctx/render-context
+  {…id})` byte-identical (154 294 B / ~38k tok, `prompt==producer true`); the inspector full
+  text (169 402 B = system block + context, ~42k tok) **ends-with the prompt byte-for-byte**
+  (`inspector-ends-with-prompt? true`). Sample prompt is clean reader-valid `;`-comment prose
+  (system head → cache boundary → self-demarcating section brackets → one live readline).
+  `bin/test-cljs` **PASS (73s)** incl. the new `prompt-and-inspector-are-byte-identical` test.
+- **Flagged follow-ups (minor/forward):** turn has no tx-basis `t` yet (so exact
+  `db-as-of(t)` re-render of "what the agent saw at turn N" is future); `inspector/snapshot`
+  still uses the filtered `agent-view` for the tile/state (equivalent today — own entity);
+  `prompt-file` kept (the sanctioned audit-exception / gym evidence hook).
 - **Commit:** (this pass)

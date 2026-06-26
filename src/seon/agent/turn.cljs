@@ -33,7 +33,6 @@
     [seon.embed.stash :as embed-stash]
     [seon.eval :as seval]
     [seon.log :as seon-log]
-    [seon.render :as render]
     [seon.repl :as repl]
     [seon.schema :as schema]))
 
@@ -119,30 +118,13 @@
 ;; ============================================================
 
 (defn render-prompt
-  "Sync — the agent's full LLM context, rendered as a bare String.
-
-   DEFAULT: render the ROOT renderable ([[seon.ctx/context-root]]) in the
-   `:seon.render/ai` view — ONE recursive render shared with the inspector
-   (`seon.agent.inspect/ctx-preview`), so the human's debug view and the
-   model's prompt can never diverge.
-
-   A per-agent OVERRIDE on the agent entity's `:seon.render/ai` slot wins: a
-   STRING renders verbatim; a SYMBOL is rendered through the same
-   [[seon.render/render]] (a custom prompt fn returning a bare String)."
+  "Sync — the agent's full LLM context, rendered as a bare String. Thin
+   delegate to [[seon.ctx/render-context]] (the SINGLE producer the human
+   inspector `seon.agent.inspect/ctx-preview` also routes through, so the
+   debug view and the model's prompt are byte-identical by construction).
+   Renders against `@*conn*` — the live cluster db the loop runs on."
   [agent-id]
-  (let [db   @db/*conn*
-        ent  (db/entity {:seon.db/ref [:seon.agent/id agent-id]})
-        slot (some->> (:seon.render/ai ent)
-                      (db/decode-edn-value :seon.render/ai))
-        ctx  {:seon.db/db db :seon.agent/id agent-id}]
-    (cond
-      (string? slot) slot
-      (symbol? slot) (or (render/render :seon.render/ai ctx
-                                        {:seon.ctx/name :prompt :seon.render/ai slot})
-                         "")
-      :else          (or (render/render :seon.render/ai ctx
-                                        (ctx/context-root ctx))
-                         ""))))
+  (ctx/render-context {:seon.agent/id agent-id}))
 
 (defn embed-retrieval-on?
   "True when embedding-retrieval is enabled — the env var `SEON_EMBED` is

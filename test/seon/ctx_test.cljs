@@ -18,7 +18,9 @@
     [clojure.string :as str]
     [datahike.api :as d]
     [seon.agent :as agent]
+    [seon.agent.inspect :as inspect]
     [seon.agent.run :as run]
+    [seon.agent.turn :as turn]
     [seon.ai :as llm]
     [seon.ai.openai-compat :as openai]
     [seon.analyzer-info :as ai]
@@ -895,6 +897,68 @@
                       (is (= (:seon.render/stable-text r1)
                              (:seon.render/stable-text r2))
                           "OFF-path cacheable prefix is byte-identical")))))))
+        (.then (fn [] (done)))
+        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+
+;; ------------------------------------------------------------
+;; THE single render path — prompt == view, byte-identical by
+;; construction. The model's prompt (the loop's `render-prompt`) and the
+;; human inspector's context pane (`ctx-preview`) both route through the
+;; ONE producer `seon.ctx/render-context` over the SAME unfiltered db, so
+;; the `:ai` side is byte-identical by construction. Asserted THROUGH the
+;; real fns — never a hand-built ctx string (the trap that let the old
+;; tests lie). The only per-render-moment difference is the single live
+;; `now` in the transcript readline; normalize that one line away.
+;; ------------------------------------------------------------
+
+(defn- strip-readline-now
+  "Normalize the ONE wall-clock line in a rendered context — the transcript
+   readline status line (`; <ns> · turn N · loop K/cap · <state> · <now> ·
+   agent <id>`), the only render output that depends on `now` rather than
+   the db (transcript ns docstring). Everything else is a pure fn of the db
+   value and must be byte-identical across the prompt + inspector paths."
+  [s]
+  (str/replace s #"(?m)^;[^\n]* · loop [^\n]*$" "; <READLINE NOW NORMALIZED>"))
+
+(deftest prompt-and-inspector-are-byte-identical
+  ;; THE headline property. `render-context` is the SINGLE producer; the
+  ;; loop's `render-prompt` and the inspector's `ctx-preview` both call it
+  ;; over the SAME `@*conn*`. Prove: (1) render-prompt IS render-context;
+  ;; (2) the inspector's full prompt text ENDS WITH the exact prompt bytes
+  ;; (system + boundary + context, the context byte-identical); (3) every
+  ;; per-section `:ai` twin appears verbatim in the prompt (one render, two
+  ;; consumers); (4) derived-never-stored — rendering writes NO datoms.
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (-> (agent/create! {:seon.agent/id "AGTbyteid00001"})
+                (.then (fn [_] (transact-full-ns! "my.client" "(def x 1)")))
+                (.then
+                  (fn [_]
+                    (let [id      "AGTbyteid00001"
+                          loop-txt (strip-readline-now (turn/render-prompt id))
+                          prod-txt (strip-readline-now
+                                     (ctx/render-context {:seon.agent/id id}))
+                          preview  (inspect/ctx-preview {:seon.agent/id id})
+                          full     (strip-readline-now (:seon.render/text preview))]
+                      (is (pos? (count prod-txt)) "the prompt is non-empty")
+                      (is (= loop-txt prod-txt)
+                          "render-prompt IS render-context (the loop routes through the one producer)")
+                      (is (str/ends-with? full prod-txt)
+                          "inspector context pane is byte-identical to the prompt (full = system + boundary + the EXACT context bytes)")
+                      (doseq [{nm  :seon.ctx/name
+                               txt :seon.render/text} (:seon.render/section-texts preview)
+                              :when (not= nm :system)]
+                        (is (str/includes? prod-txt (strip-readline-now txt))
+                            (str "section " nm " :ai twin appears verbatim in the prompt")))
+                      (let [before (count (d/datoms @db/*conn* :eavt))]
+                        (turn/render-prompt id)
+                        (inspect/ctx-preview {:seon.agent/id id})
+                        (ctx/render-context {:seon.agent/id id})
+                        (is (= before (count (d/datoms @db/*conn* :eavt)))
+                            "rendering wrote NO datoms — derived, never stored"))
+                      (is (not (str/includes? prod-txt "malli"))
+                          "no swallowed malli code leaks into the prompt")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
