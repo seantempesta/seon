@@ -38,6 +38,7 @@
     [seon.agent :as agent]
     [seon.agent.fsm :as fsm]
     [seon.agent.run :as run]
+    [seon.agent.schedule :as schedule]
     [seon.agent.turn :as turn]
     [seon.db :as db]
     [seon.log :as seon-log]
@@ -339,6 +340,75 @@
     (db/listen!
       {:seon.db/key     k
        :seon.db/handler (wake-handler input)})))
+
+;; ============================================================
+;; The ONE ticker — the only active machinery. The DB is passive about
+;; wall-clock: a `deadline` is past or a cron is due in the world, but nothing
+;; fires until something CHECKS. This single `setInterval` is that check —
+;; each tick (1) closes overdue runs ([[seon.agent.run/close-overdue-runs!]],
+;; the deadline watchdog) then (2) fires due schedules
+;; ([[seon.agent.schedule/fire-due-schedules!]]), DRIVING each opened run via
+;; [[drive-run!]] (injected so seon.agent.schedule need not require this ns).
+;; Idempotent + single-instance (the `!ticker` atom holds the interval id;
+;; re-install clears the prior). A throw in one tick is logged, never fatal —
+;; the timer keeps running. Wired at client boot beside `install-wake-trigger!`
+;; and re-armed idempotently on hot reload.
+;; ============================================================
+
+(defonce ^:private !ticker (atom nil))
+
+(def default-tick-ms
+  "Ticker cadence (ms) when SEON_TICK_MS is unset. Coarse on purpose — the
+   watchdog need only catch an overrun within ~one cadence, and every tick is
+   cheap DB reads plus at most a few transacts."
+  30000)
+
+(defn- env-tick-ms
+  "The `SEON_TICK_MS` env cadence override (parsed positive int), or nil when
+   unset / unparseable / non-positive."
+  []
+  (some-> (.. js/process -env -SEON_TICK_MS)
+          js/parseInt
+          (#(when (and (not (js/isNaN %)) (pos? %)) %))))
+
+(defn- run-tick!
+  "ONE ticker pass at `now`: close overdue runs, then fire due schedules
+   (driving each opened run). Returns a Promise; a throw anywhere is caught +
+   logged so the interval survives."
+  [now]
+  (-> (js/Promise.resolve
+        (run/close-overdue-runs! {:seon.agent/now now}))
+      (.then (fn [_]
+               (schedule/fire-due-schedules!
+                 {:seon.agent/now             now
+                  :seon.agent.schedule/drive! drive-run!})))
+      (.catch (fn [e]
+                (seon-log/error-console!
+                  "seon.agent.loop/run-tick!"
+                  (str "tick failed (timer continues): " (or (.-message e) e)))))))
+
+(defn install-ticker!
+  "Install the ONE periodic ticker (idempotent, single instance): clear any
+   prior interval, then `setInterval` [[run-tick!]] every SEON_TICK_MS ms
+   (default [[default-tick-ms]]). Returns the interval id. Wired at client
+   boot beside [[install-wake-trigger!]]; safe to re-run on hot reload — it
+   clears the prior interval first, so reloads never stack timers."
+  []
+  (when-let [id @!ticker] (js/clearInterval id))
+  (let [ms (or (env-tick-ms) default-tick-ms)
+        id (js/setInterval (fn [] (run-tick! (js/Date.))) ms)]
+    (reset! !ticker id)
+    (seon-log/info-console! "seon.agent.loop/install-ticker!"
+                            "ticker installed" {:seon.agent.loop/tick-ms ms})
+    id))
+
+(defn uninstall-ticker!
+  "Stop the periodic ticker (clearInterval + drop the stored id). For tests +
+   clean reload."
+  []
+  (when-let [id @!ticker]
+    (js/clearInterval id)
+    (reset! !ticker nil)))
 
 ;; ============================================================
 ;; Activity log — a DERIVED timeline over the agent's RUNS. One row per run,

@@ -12,9 +12,10 @@
 
    This namespace OWNS the `:seon.agent.run/*` schemas and the lifecycle:
    `open-run!` / `close-run!` / `renew!` / `beat!` / `current-run` /
-   `owns-run?` / `snapshot` / `turn-limit-reached?` / `deadline-passed?`.
-   (The ticker actions — `close-overdue-runs!` / `fire-due-schedules!` —
-   land in a later pass.)
+   `owns-run?` / `snapshot` / `turn-limit-reached?` / `deadline-passed?` /
+   `close-overdue-runs!` — the deadline WATCHDOG, the wall-clock half of the
+   one ticker ([[seon.agent.loop/install-ticker!]]; the schedule half is
+   `seon.agent.schedule/fire-due-schedules!`).
 
    Dependency direction (acyclic): it transacts via `seon.db` directly and
    references `:seon.agent/*` keywords from the global registry (no require —
@@ -390,3 +391,47 @@
                       :seon.agent.run/deadline new-dl}
                      [:db/retract [:seon.agent.run/id run-id]
                       :seon.agent.run/paused-at]]})))))))
+
+;; ============================================================
+;; The deadline WATCHDOG — the wall-clock half of the one ticker
+;; ([[seon.agent.loop/install-ticker!]]). The DB is passive about wall-clock:
+;; `now > deadline` is true in the world, but nothing fires until something
+;; checks. This scan IS that check — the EXTERNAL enforcement of the clock
+;; bound (a stalled LLM burns the clock and can't self-detect). A run whose
+;; async turn overran its deadline is closed here; when the await returns the
+;; loop's `owns-run?`/`next-event` sees it closed and bails. (A truly-SYNC
+;; runaway needs worker termination — Phase 2, not here.)
+;; ============================================================
+
+(schema/register! ::close-overdue-request  [:map [:seon.agent/now :inst]])
+(schema/register! ::close-overdue-response
+  [:map [:seon.agent.run/closed [:vector :seon.agent.run/id]]])
+
+(defn ^:async close-overdue-runs!
+  "Close every OPEN, non-PAUSED run whose `deadline` is past `now`, with
+   `:deadline-exceeded` — clearing the agent's `:seon.agent/run` pointer (via
+   [[close-run!]]'s owned-retract) so derived state falls to `:idle`. Returns
+   the run-ids it closed (map-out). IDEMPOTENT: a re-run finds the now-`:closed`
+   runs gone from the scan. A PAUSED run (carrying `:seon.agent.run/paused-at`)
+   is SKIPPED — `paused-at` froze the clock and its absolute `deadline` is
+   stale until [[resume!]] re-extends it, so it must never be deadline-killed.
+   Fencing is automatic (each close goes through [[close-run!]]). `^:async`."
+  {:malli/schema [:=> [:cat ::close-overdue-request] ::close-overdue-response]}
+  [{now :seon.agent/now}]
+  (let [overdue (->> (db/query
+                       {:seon.db/query
+                        '[:find ?rid ?deadline
+                          :where
+                          [?r :seon.agent.run/status :open]
+                          [?r :seon.agent.run/id ?rid]
+                          [?r :seon.agent.run/deadline ?deadline]
+                          (not [?r :seon.agent.run/paused-at _])]})
+                     (filter (fn [[_ deadline]]
+                               (> (.getTime now) (.getTime deadline))))
+                     (mapv first))]
+    (loop [[rid & more] overdue]
+      (when rid
+        (await (close-run! {:seon.agent.run/id            rid
+                            :seon.agent.run/closed-reason :deadline-exceeded}))
+        (recur more)))
+    {:seon.agent.run/closed overdue}))

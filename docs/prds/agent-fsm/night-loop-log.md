@@ -133,4 +133,31 @@ Revert point if the experiment goes sideways: `c84e8fc`.
   decaying) → `resume` → `:running` + the loop **re-drove** (`total-turns` 2→10, run
   closed `:waited`) → agent settled `:idle`, bounded (no runaway). `bin/test-cljs`
   **PASS (67s)** (covers the turn-fail, wake, banking, paused-guard fixes).
+- **Commit:** `9186577`
+
+### Pass 4 — the one ticker (deadline watchdog + schedule firing) — Phase 1 COMPLETE
+
+- **Move:** build (additive; completes Phase 1's one active piece — the DB is passive
+  about wall-clock, so nothing enforces `deadline` or fires a cron until the ticker checks).
+- **Did:** `run/close-overdue-runs!` (scans `:open` runs, closes `now>deadline` as
+  `:deadline-exceeded`; SKIPS paused runs — their deadline is frozen). `schedule/
+  fire-due-schedules!` (idle-gated, opens+drives a `:schedule` run for a due cron;
+  per-agent same-minute double-fire guard). `loop/install-ticker!` — ONE idempotent
+  `js/setInterval` (`SEON_TICK_MS`, default 30s), each tick runs watchdog then
+  schedule-fire, error-wrapped so a throw isn't fatal. Boot-wired in client.cljs;
+  added the missing `:seon.agent.schedule/*` bootstrap attrs. Loop↔schedule require
+  cycle broken by **injecting** `drive-run!` (schedule needs run, not loop).
+- **Live proof (orchestrator, fresh world, `SEON_TICK_MS=4000`):**
+  - watchdog: backdated a run's deadline → the 4s ticker **autonomously** closed it
+    `:deadline-exceeded` → agent `:idle` (confirmed I did NOT call the fn).
+  - schedule: added a `* * * * *` cron to the idle agent → the ticker **autonomously**
+    opened exactly ONE `:schedule`-triggered run (double-fire guard held across ~10 ticks).
+  - `bin/test-cljs` **PASS (75s)**, 0 warnings.
+- **Deferred (flagged, by design):** schedule `:fn` sandboxed execution (needs the
+  one-exec-service pass — firing today = "wake on schedule"); `concurrency-policy :allow`
+  (worker-isolation concern; all policies are idle-gated today).
+- **Test-method note for future passes:** in the POD, `db/transact!` does NOT accept the
+  `:seon` keyword conn (that's `query`-only) — use the map-in shape
+  `(db/transact! {:seon.db/tx-data [...]})`. (Cost me two false-alarm "watchdog broken"
+  reads before I spotted my own bad call.)
 - **Commit:** (this pass)

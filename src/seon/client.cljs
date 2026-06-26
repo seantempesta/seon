@@ -62,6 +62,10 @@
     [seon.agent.loop :as fsm]
     ;; The run lifecycle — the bootstrap turn-0 opens a run for its turn.
     [seon.agent.run :as run]
+    ;; Cron-as-data — required so its `:seon.agent.schedule/*` register! calls
+    ;; run before `agent-bootstrap-attrs` installs them, and so the ticker's
+    ;; `fire-due-schedules!` is in the build.
+    [seon.agent.schedule]
     ;; One turn — the bootstrap turn-0 opens a turn directly.
     [seon.agent.turn :as turn]
     [seon.ctx]
@@ -205,6 +209,9 @@
   ;; (seon.web.inspector re-arms its own ::inspector listener via its
   ;; own ^:dev/after-load — not duplicated here.)
   (rearm-wake-triggers!)
+  ;; Re-arm the ONE ticker so a hot reload doesn't stack timers and the tick
+  ;; body runs just-reloaded code (idempotent — clears the prior interval).
+  (fsm/install-ticker!)
   (start-heartbeat!))
 
 ;; ---------------------------------------------------------------------------
@@ -331,6 +338,14 @@
    :seon.agent/default-deadline-ms
    :seon.agent/schedules
    :seon.agent/sections
+
+   ;; --- Schedule (seon.agent.schedule — the cron maps an agent owns via
+   ;; :seon.agent/schedules; the ticker's fire-due-schedules! reads these) ---
+   :seon.agent.schedule/id
+   :seon.agent.schedule/cron
+   :seon.agent.schedule/fn
+   :seon.agent.schedule/timezone
+   :seon.agent.schedule/concurrency-policy
 
    ;; --- Render slots (A-6) — symbol-only at storage. ---
    :seon.render/ai
@@ -2280,7 +2295,11 @@
                 _ (ai/sync!)
                 ;; Install the per-agent inspector tx-listener. Pushes
                 ;; morphs for the agent-view inspector page (/agent/<id>).
-                _ (seon.web.inspector/install!)]
+                _ (seon.web.inspector/install!)
+                ;; The ONE ticker — the only active machinery (deadline
+                ;; watchdog + schedule firing). Single instance + idempotent;
+                ;; re-armed on hot reload (after-reload above).
+                _ (fsm/install-ticker!)]
             (log/info-console! "seon.client" "agents started"
                                {:resumed resumed-ids :minted minted-ids
                                 :port port :port-file port-file})
