@@ -146,7 +146,9 @@
                                         "text-text-500"))}
                    (case origin :human "›you" :agent "‹agent" "·core")]
                   [:span {:class "text-text-200"} (clip content 120)]])]
-    [:div {:class "rounded border border-base-700 bg-base-850 p-3 h-full flex flex-col min-h-0"}
+    ;; `max-h-[55vh]` (not `h-full`) so this bounds itself + scrolls internally
+    ;; inside the now-scrolling rail, instead of trying to fill the whole column.
+    [:div {:class "rounded border border-base-700 bg-base-850 p-3 max-h-[55vh] flex flex-col min-h-0"}
      [:div {:class "text-2xs uppercase tracking-wider text-text-400 mb-2 shrink-0"} "commentary"]
      (if (seq recent)
        (into [:div {:class "flex flex-col gap-1 flex-1 overflow-auto min-h-0"}] (map line recent))
@@ -809,7 +811,6 @@
   [agent-id tiles t open-debug?]
   (let [span   (fn [x] (or (:seon.tile/span x) 1))
         rails  (vec (remove #(>= (span %) 2) tiles))
-        last-i (dec (count rails))
         ;; hero column: span-2 tiles, each fills (big min-height on phones).
         ;; `min-w-0` lets this GRID ITEM shrink below content width (grid items
         ;; default to min-width:auto) — without it a wide tile overflows a phone.
@@ -817,13 +818,15 @@
                      (map #(console-region (:seon.tile/id %)
                                            "min-h-[42vh] lg:min-h-0 lg:flex-1")
                           (filter #(>= (span %) 2) tiles)))
-        ;; rail column: span-1 tiles stack; the LAST (commentary) fills the rest.
-        ;; `min-w-0` (as on the hero column) lets this grid item shrink on a phone.
-        rail   (into [:div {:class "min-w-0 lg:col-span-1 flex flex-col gap-2 sm:gap-3 lg:min-h-0"}]
-                     (map-indexed (fn [i tl]
-                                    (console-region (:seon.tile/id tl)
-                                                    (if (= i last-i) "lg:flex-1 lg:min-h-0" "shrink-0")))
-                                  rails))
+        ;; rail column: span-1 tiles stack at NATURAL height; the column itself
+        ;; SCROLLS (`lg:overflow-y-auto`) when they exceed the viewport, instead of
+        ;; spilling off-page. (`_` unused — every rail tile is `shrink-0` now; the
+        ;; old last-tile-fills behaviour fought the scroll.) `min-w-0` lets the grid
+        ;; item shrink on a phone.
+        rail   (into [:div {:class (str "min-w-0 lg:col-span-1 flex flex-col gap-2 sm:gap-3 "
+                                        "lg:min-h-0 lg:overflow-y-auto")}]
+                     (map (fn [tl] (console-region (:seon.tile/id tl) "shrink-0"))
+                          rails))
         ;; ONE col on phones (stacks + scrolls); 3 cols filling the viewport on
         ;; desktop. The multiplexed stream carries ?t so a pinned console freezes
         ;; every tile as-of that frame.
