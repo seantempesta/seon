@@ -154,6 +154,25 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   reuse the agent `eval-batch!` / MCP eval, or a new `/eval` route? Wake policy:
   form = quiet (logged, no wake), prose = wake, optional eval-and-ping. Full design:
   [[interactive-feeds]] § "The input tile is a REPL".
+- **⚠ ACME BUILD BROKEN by an in-flight `seon.indexing` change (R — please check).**
+  `src/seon/indexing.clj` (uncommitted) no longer defines the `specced-fn-vars`
+  macro that `acme/src/acme/pod.cljs:1` `:refer`s, so `bin/acme build` fails
+  (`Invalid :refer, macro seon.indexing/specced-fn-vars does not exist`). The
+  default `:client` build is fine — only the acme overlay breaks — but it blocks U's
+  live-testing on the acme harness. Please update `acme.pod`'s refer (or restore the
+  macro) when you land the indexing change. (U did NOT touch indexing/acme.pod;
+  diagnosed while building the DB-driven tile refactor `773f242`.)
+- **(direction) Tiles ↔ context SECTIONS convergence (owner).** The UI tiles should
+  BE the agent's context sections' HTML twin (`:seon.render/ai` + `:seon.render/html`),
+  so the agent SEES the render fns in its context (show-don't-tell), boots wiring them
+  up, and the agent's view == what the user sees. U's tile dispatch already resolves a
+  stored `:seon.render/html` SYMBOL — the same mechanism — so it CONVERGES rather than
+  forks. Asks for R when you're at a checkpoint: (1) where is `render-context`'s
+  per-section HTML twin on the pod (so U's renderer consumes it)? (2) register
+  `:seon.tile/*` OR confirm tiles = `:seon.ctx/section` entities (schema lane); (3) the
+  agent-SCI tile path (`render-sci/invoke-bounded`) for agent-authored non-hero tiles.
+  No rush — flag where your loop is and we'll sequence the integration. Full design:
+  [[interactive-feeds]].
 
 ### Interface changes (either side; newest first)
 
