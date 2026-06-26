@@ -161,11 +161,11 @@
     ;; the pod `host!`s every agent id it resumes/mints/re-arms so
     ;; `mcp__seon_cljs__eval agent_id=<id>` pins THIS runtime.
     [seon.dev.runtime-id :as runtime-id])
-  ;; Compile-time enumeration of the build's specced public fns —
-  ;; `core-vars` below = curated unspecced base + this macro's
-  ;; whole-closure roster (unit #23 fix b: index the WHOLE package
-  ;; surface, never hand-list hundreds of vars).
-  (:require-macros [seon.indexing :refer [specced-fn-vars]]))
+  ;; Compile-time enumeration of the build's PUBLIC fns — `core-vars`
+  ;; below IS this macro's whole-closure roster: every public first-party
+  ;; fn the build loads, specced or not (owner directive — 'just index
+  ;; everything'; never hand-list vars).
+  (:require-macros [seon.indexing :refer [public-fn-vars]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -875,48 +875,22 @@
 ;;
 ;; This produces a `:seon.fn` row IDENTICAL in shape to a detect-and-tee row
 ;; (eval.cljs/build-tee-entities) — downstream readers never branch on origin.
-;; The agent extends the indexed surface by transacting its own fns; grow
-;; `core-vars` to widen the seeded set.
+;; The agent extends the indexed surface by transacting its own fns; the core
+;; surface auto-widens — `core-vars` is the `public-fn-vars` macro roster, so
+;; a new public first-party defn is seeded the moment the build loads it.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private curated-core-vars
-  "Hand-curated `#'`-literal vars indexed REGARDLESS of `:malli/schema` —
-   the honestly-unspecced core surface (`register!`, the fs read fns) the
-   auto roster below can't see, plus a few thin core fns pinned for
-   guaranteed inclusion. MUST be `#'`-literals (self-host `resolve` is a
-   compile-time macro)."
-  [#'db/transact!
-   #'db/query
-   #'db/pull
-   #'db/entity
-   #'db/listen!
-   #'db/current-agent-id
-   #'schema/register!
-   ;; Read surface on the user's machine (allowlist-gated, see seon.agent.fs).
-   ;; Indexed so the functions catalog teaches the SEARCH→READ recipe.
-   #'seon.agent.fs/read-file
-   #'seon.agent.fs/list-dir
-   #'seon.agent.fs/stat
-   #'seon.agent.fs/walk-dir
-   #'seon.agent.fs/home-dir
-   #'seon.agent.search/grep
-   #'seon.test.runner/run!])
-
 (def ^:private core-vars
-  "Every var indexed into the corpus at boot: the curated unspecced base
-   PLUS the compile-time roster of every PUBLIC `:malli/schema`-carrying fn
-   across the build's whole `seon.*` require closure
-   (`seon.indexing/specced-fn-vars` — unit #23 fix b: 'all of the schemas,
-   functions and tests in the cljs package should be present in the
-   database'). Deduped by fully-qualified sym, curated entries first."
-  (->> (into curated-core-vars (specced-fn-vars))
-       (reduce (fn [[seen out] v]
-                 (let [k (str (:ns (meta v)) "/" (:name (meta v)))]
-                   (if (contains? seen k)
-                     [seen out]
-                     [(conj seen k) (conj out v)])))
-               [#{} []])
-       second))
+  "Every var indexed into the corpus at boot: the compile-time roster of
+   EVERY public first-party fn across the build's whole require closure
+   (`seon.indexing/public-fn-vars` — owner directive 'just index
+   everything': all functions in the cljs package become `:seon.fn` rows,
+   specced or not). No hand-curated inclusion list — the macro IS the
+   roster; a new public fn is indexed the moment it loads. Each var's
+   spec/doc/source is read by [[var->fn-row]]; an unspecced fn simply omits
+   `:seon.fn/spec` (honestly unspecced). Macro output is already
+   sym-unique, so no dedup pass is needed."
+  (public-fn-vars))
 
 ;; Deftest vars the pod build loads, populated at load time by
 ;; `seon.dev.test-preload` (the ONE ns whose require closure contains the
@@ -933,7 +907,7 @@
 ;;
 ;;   (reset! client/!extra-core-vars
 ;;           (filterv #(str/starts-with? (str (:ns (meta %))) "acme.")
-;;                    (seon.indexing/specced-fn-vars)))
+;;                    (seon.indexing/public-fn-vars)))
 ;;
 ;; The boot indexers consume it alongside `core-vars`: fn-rows +
 ;; FULL-SOURCE ns-rows in [[index-core!]], replay-skip membership in
@@ -942,7 +916,7 @@
 
 (defn- extra-core-vars*
   "The registered extra vars MINUS any whose fully-qualified sym is
-   already in `core-vars` — a downstream entry's `specced-fn-vars`
+   already in `core-vars` — a downstream entry's `public-fn-vars`
    expansion sees the seon surface its require closure pulls in, and
    those must dedup away silently (no duplicate rows, no reserved-prefix
    refusal) rather than double-index."
@@ -1057,27 +1031,36 @@
                   extra))))
 
 (defn- extract-form-from-string
-  "Return the exact text of the top-level form that begins at the FIRST `(` in
-   `start` by paren-balancing (reader-free, so `::kw` / `#js` / reader-
-   conditionals pass through verbatim). Tracks string + escape state so
-   docstring parens don't unbalance. Returns nil if no `(` opens before EOF."
+  "Return the exact text of the form that begins at the FIRST `(` in `start`
+   by paren-balancing (reader-free, so `::kw` / `#js` / reader-conditionals
+   pass through verbatim). Tracks string + escape state so docstring parens
+   don't unbalance. Any leading whitespace/indentation before that first `(`
+   is DROPPED — so a `defn` nested in a `#?(:cljs …)` reader conditional
+   (whose `:line` points at the indented inner form, column > 1) still yields
+   source that starts at `(defn`, not at the indentation. Returns nil if no
+   `(` opens before EOF."
   [start]
   (let [n (count start)]
-    (loop [i 0 depth 0 in-str? false esc? false started? false]
+    (loop [i 0 depth 0 in-str? false esc? false s0 nil]
       (if (>= i n)
-        (when started? start)
+        ;; unbalanced-to-EOF fallback: return from the first `(` we saw
+        (when s0 (subs start s0))
         (let [c (nth start i)]
           (cond
-            esc?                   (recur (inc i) depth in-str? false started?)
-            (and in-str? (= c \\)) (recur (inc i) depth in-str? true  started?)
-            in-str?                (recur (inc i) depth (not (= c \")) false started?)
-            (= c \")               (recur (inc i) depth true false started?)
-            (= c \()               (recur (inc i) (inc depth) in-str? false true)
+            ;; pre-form: skip leading indentation/whitespace until the first `(`
+            (nil? s0)              (if (= c \()
+                                     (recur (inc i) 1 false false i)
+                                     (recur (inc i) 0 false false nil))
+            esc?                   (recur (inc i) depth in-str? false s0)
+            (and in-str? (= c \\)) (recur (inc i) depth in-str? true  s0)
+            in-str?                (recur (inc i) depth (not (= c \")) false s0)
+            (= c \")               (recur (inc i) depth true false s0)
+            (= c \()               (recur (inc i) (inc depth) in-str? false s0)
             (= c \))               (let [d (dec depth)]
-                                     (if (and started? (zero? d))
-                                       (subs start 0 (inc i))
-                                       (recur (inc i) d in-str? false started?)))
-            :else                  (recur (inc i) depth in-str? false started?)))))))
+                                     (if (zero? d)
+                                       (subs start s0 (inc i))
+                                       (recur (inc i) d in-str? false s0)))
+            :else                  (recur (inc i) depth in-str? false s0)))))))
 
 (defn- extract-form-at-line
   "Return the exact text of the top-level form beginning at `line-1based` in
@@ -1269,7 +1252,8 @@
                          nil)))
         txt     (read-src-file (:file m))
         src     (when txt (extract-form-at-line txt (:line m)))]
-    (if (nil? src)
+    (cond
+      (nil? src)
       (do (if (ghost-var? txt (:line m))
             (log/warn!
               {:seon.log/source  ::var->fn-row
@@ -1283,6 +1267,16 @@
               (str "could not read real source for " sym
                    " (file " (pr-str (:file m)) " line " (:line m) ") — OMITTING")))
           nil)
+
+      ;; Not a plain `(defn …)`: a `defrecord`/`deftype`-generated factory
+      ;; fn (`->X` / `map->X`) or other synthesized fn-var whose `:line`
+      ;; points at the type form, not a hand-written function. OMIT — the
+      ;; corpus stays "real defns only" (the no-stub-source-anywhere
+      ;; invariant). Expected (every record yields factories), so silent.
+      (not (str/starts-with? src "(defn"))
+      nil
+
+      :else
       (cond-> {:seon.fn/sym        sym
                :seon.fn/ns         [:seon.ns/name ns-kw]
                :seon.fn/source     src
@@ -1548,10 +1542,10 @@
               "  (reset! seon.client/!extra-core-vars\n"
               "          (filterv #(clojure.string/starts-with? "
               "(str (:ns (meta %))) \"<prefix>.\")\n"
-              "                   (specced-fn-vars)))\n"
+              "                   (public-fn-vars)))\n"
               "where <prefix> is your source root prefix (e.g. \"acme\"), and "
               "the entry ns needs "
-              "(:require-macros [seon.indexing :refer [specced-fn-vars]]) "
+              "(:require-macros [seon.indexing :refer [public-fn-vars]]) "
               "so the macro expands in YOUR ns (whose require closure sees your "
               "vars — a seon-side helper could not).")})))
   nil)

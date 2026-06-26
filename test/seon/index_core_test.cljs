@@ -251,12 +251,15 @@
   ;; [:seon.ns/name <kw>] lookup-ref (a single :seon.db/ref), NEVER a bare
   ;; keyword — the malformed value the Run-3 findings traced to the second boot.
   ;;
-  ;; DERIVED expectations (unit #23): the roster is now the curated base +
-  ;; the compile-time `seon.indexing/specced-fn-vars` macro over the WHOLE
-  ;; build closure — never assert a hardcoded count (the old `= 14` broke
-  ;; on every roster change). Instead: the curated core surface must be
-  ;; present, the set must be substantially wider than the old curated 14,
-  ;; and every row must be structurally valid + unique.
+  ;; DERIVED expectations: the roster is now the compile-time
+  ;; `seon.indexing/public-fn-vars` macro over EVERY public first-party fn
+  ;; in the whole build closure — specced OR not (owner directive 'just
+  ;; index everything'; the hand-curated inclusion list is gone). Never
+  ;; assert a hardcoded count (the old `= 14` broke on every roster
+  ;; change). Instead: the known core surface (incl. honestly-unspecced fns
+  ;; like register!/read-file/grep) must be present, the set must be
+  ;; substantially wider than the old curated 14, and every row must be
+  ;; structurally valid + unique.
   (let [tx   @core-tx
         fns  (filter :seon.fn/sym tx)
         syms (map :seon.fn/sym fns)]
