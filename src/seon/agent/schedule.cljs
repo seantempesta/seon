@@ -227,11 +227,12 @@
 ;; only open+drive a `:schedule` run. No bespoke fn-runner.
 ;;
 ;; concurrency-policy: the default :forbid ("don't open a 2nd run on a
-;; :running agent") is satisfied because we fire ONLY when the agent is :idle.
-;; :allow (a concurrent run on a :running agent) is DEFERRED — single-threaded
-;; CLJS + [[seon.agent.run/open-run!]]'s supersede-the-pointer semantics make
-;; a second concurrent run a worker-isolation concern; today every policy is
-;; effectively idle-gated.
+;; :running agent") is satisfied because we fire ONLY when the agent is :idle
+;; AND [[seon.agent.run/open-run!]] is itself CAS-guarded (it refuses to open
+;; when a run is already open — the atomic backstop for the agent-idle? check
+;; racing a message wake). :allow (a concurrent run on a :running agent) is
+;; DEFERRED — a second concurrent run is a worker-isolation concern; today
+;; every policy is effectively idle-gated.
 ;;
 ;; Double-fire guard: a 5-field cron is `due?` for the WHOLE minute and the
 ;; ticker fires more than once per minute, so we skip an agent that already
@@ -334,11 +335,18 @@
                                 {:seon.agent/id          id
                                  :seon.agent.run/trigger :schedule}))]
               (if (false? (:seon.db/ok? snap))
-                (do (js/console.error
+                (do
+                  ;; open-run! is CAS-guarded (atomic idle→running). A failure
+                  ;; here is usually BENIGN: a message woke the agent between
+                  ;; agent-idle? above and this open (the wake race), so the
+                  ;; CAS lost. If a run now exists that's the cause — skip
+                  ;; quietly. Otherwise it's a real failure worth surfacing.
+                  (when-not (run/current-run {:seon.agent/id id})
+                    (js/console.error
                       (str "seon.agent.schedule/fire-due-schedules!: open-run! "
                            "FAILED for " id ": "
-                           (:seon.error/message (:seon.db/error snap))))
-                    (recur more fired))
+                           (:seon.error/message (:seon.db/error snap)))))
+                  (recur more fired))
                 (do
                   ;; Inject-driven kick (same as a wake). FLAG: running the
                   ;; schedule's :seon.agent.schedule/fn in the agent sandbox

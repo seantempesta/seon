@@ -319,12 +319,25 @@
       (some? own-skips) (assoc ::own-skips own-skips))))
 
 (defn- fire-native-listeners! [conn report]
+  ;; Dispatch each listener on its OWN macrotask (`setTimeout 0`) so the
+  ;; tx-feed pump never blocks on a single slow/heavy listener (a big
+  ;; inspector layout, a wake-handler doing real work inline) — the pump must
+  ;; keep draining events for ALL agents. The `report` is an immutable
+  ;; snapshot (fully built in handle-feed-event! before this fires), safe to
+  ;; defer. Ordering that matters is preserved: handle-feed-event! fires these
+  ;; in commit order and Node runs same-delay timers in scheduling order, so
+  ;; per-listener FIFO across txs holds. The throw guard stays INSIDE the
+  ;; deferred fn so a thrown callback can't crash the pump and is logged
+  ;; (the wrapped seon.db handlers already guard too — this is belt-and-braces).
   (doseq [[k callback] (some-> (:listeners (meta conn)) deref)]
-    (try
-      (callback report)
-      (catch :default e
-        (js/console.warn "[seon.store.wire adapter]" (pr-str k)
-                         "listener threw:" (str e))))))
+    (js/setTimeout
+      (fn []
+        (try
+          (callback report)
+          (catch :default e
+            (js/console.warn "[seon.store.wire adapter]" (pr-str k)
+                             "listener threw:" (str e)))))
+      0)))
 
 (defn- handle-feed-event! [conn ev]
   (let [wid  (:seon.store.wire/write-id ev)

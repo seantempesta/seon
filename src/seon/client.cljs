@@ -2163,7 +2163,8 @@
    Subsequent (seon.agent/message! …) calls (or POST /chat) drive the
    loop via the wake trigger."
   [& [{:keys [llm-fn mint? purpose] :or {llm-fn stub-llm}}]]
-  (let [conn          (or @!agent-conn (await (open-cluster-conn!)))
+  (let [existing-conn @!agent-conn
+        conn          (or existing-conn (await (open-cluster-conn!)))
         _             (reset! !agent-conn conn)
         ;; Bind the conn as the root *conn* so seon.db calls + the
         ;; wake trigger resolve without per-call threading.
@@ -2174,6 +2175,24 @@
         ;; registries before the agent starts writing txs that would
         ;; silently lose their causality bundle.
         _             (db/assert-preconditions! {:seon.db/conn conn})
+        ;; CRASH RECOVERY (Gemini #4): close any run orphaned by a prior pod
+        ;; crash — an :open run + :seon.agent/run pointer with no loop
+        ;; driving it (derived :running, so unwakeable). MUST run BEFORE
+        ;; armable-agent-ids below: a recovered agent then reads :idle and
+        ;; JOINS the resume roster (else it's derived :running → never armed
+        ;; → permanent deadlock). Gated on GENUINE BOOT (nil existing-conn):
+        ;; NEVER on a /agents/new mint in a LIVE process (that would close
+        ;; currently-RUNNING agents' open runs). Idempotent + a no-op when
+        ;; no runs are open.
+        _             (when (nil? existing-conn)
+                        (let [{closed :seon.agent.run/closed}
+                              (await (run/recover-crashed-runs!))]
+                          (when (seq closed)
+                            (log/info-console!
+                              "seon.client/start-agent!"
+                              (str "crash recovery: closed " (count closed)
+                                   " orphaned run(s) :crashed")
+                              {:seon.agent.run/closed closed}))))
         ;; Bootstrap-CLJS init via the shared iteration-surface atom.
         ;; Version-stamped — a hot-reload of seon.eval rotates the
         ;; gensym so the next call rebuilds the state. Idempotent

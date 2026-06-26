@@ -23,13 +23,14 @@
    The RUN-ID is the fencing token: a turn from a superseded run answers
    `owns-run?` false and bails :superseded (the new run owns the agent).
 
-   Wake = read-derived-then-open (no atom, no CAS). An inbound datom fires the
-   per-tx listener; the handler derives the agent's state from the local db
-   snapshot. If :idle → `open-run!` ({trigger :message, cause the message})
-   then `run-loop!` on that run. If already :running → `renew!` (the new
-   message extends the lease — the sliding window is now lease renewal). Two
-   simultaneous idle wakes both open a run; the loser's run is orphaned-open
-   (closed by a later ticker/crash-recovery pass — DEFERRED).
+   Wake = read-derived-then-open. An inbound datom fires the per-tx listener;
+   the handler derives the agent's state from the local db snapshot. If :idle
+   → `open-run!` ({trigger :message, cause the message}) then `run-loop!` on
+   that run. If already :running → `renew!` (the new message extends the lease
+   — the sliding window is now lease renewal). The idle→running open is ATOMIC
+   (a CAS on `:seon.agent/run` being absent — [[seon.agent.run/open-run!]]):
+   two simultaneous idle wakes can't both open, the loser's open returns the
+   db error envelope and it RENEWS the winner's run instead (no orphaned run).
 
    Requires `seon.agent` (the wake gate `inbound-msg-datom?` + derived-state),
    `seon.agent.run` (the run lifecycle), `seon.agent.turn` (`run-turn!`). The
@@ -178,12 +179,25 @@
           (do (log id "halt" (str "verb — " (name event)))
               (fsm/transition state event)))))))
 
+(defn ^:async ^:private renew-current-run!
+  "Renew the agent's CURRENT open run's lease — the new message extends both
+   bounds (the sliding window). Shared by the :running wake branch and the
+   :idle CAS-loss path (a wake that lost the atomic open race). A no-op when
+   the agent has no open run. Caller establishes the `with-agent` scope."
+  [id]
+  (when-let [cur (run/current-run {:seon.agent/id id})]
+    (await (run/renew! {:seon.agent/id     id
+                        :seon.agent.run/id (:seon.agent.run/id cur)}))))
+
 ;; ============================================================
 ;; Wake — the per-tx listener fires on every transact; we filter for new
 ;; INBOUND messages (to ∋ me, from ≠ me, waking origin — agent/inbound-msg-datom?)
 ;; and, if the agent's derived state is :idle, OPEN A RUN and start the loop.
 ;; An already-:running agent RENEWS its open run's lease (the new message
-;; extends both bounds — the sliding window).
+;; extends both bounds — the sliding window). The idle→running open is
+;; ATOMIC (a CAS in [[seon.agent.run/open-run!]]): if a concurrent wake won
+;; the race, this wake's open returns the db error envelope and we RENEW the
+;; winner's run instead (same effect as the :running branch).
 ;;
 ;; Hop guard lives HERE (at wake): a message whose hops reached warn/hop-cap
 ;; wakes nothing — loud console.error + the clustered check-hop-exhausted
@@ -195,7 +209,8 @@
    that passes [[seon.agent/inbound-msg-datom?]], derive the agent's state
    from the local db snapshot; if :idle → open a `:message` run (cause = the
    waking message) and start `run-loop!`; if :running → `renew!` the open
-   run's lease. No atom — the run-id fence settles any race."
+   run's lease. The idle open is CAS-guarded; a wake that loses the race
+   renews the winner's run instead of opening a second."
   [{:seon.agent/keys [id] :as input}]
   (fn [{:seon.db/keys [db attr-index]}]
     (let [my-eid  (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
@@ -240,12 +255,7 @@
             (js/setTimeout
               (fn []
                 (-> (js/Promise.resolve
-                      (db/with-agent id
-                        (fn ^:async renew! []
-                          (when-let [cur (run/current-run {:seon.agent/id id})]
-                            (await (run/renew!
-                                     {:seon.agent/id     id
-                                      :seon.agent.run/id (:seon.agent.run/id cur)}))))))
+                      (db/with-agent id (fn ^:async renew! [] (await (renew-current-run! id)))))
                     (.catch (fn [e]
                               (js/console.error
                                 (str "seon.agent.loop: wake renew threw for "
@@ -264,11 +274,23 @@
                                                 {:seon.agent/id           id
                                                  :seon.agent.run/trigger  :message
                                                  :seon.agent.run/cause    cause-eid}))]
-                            (if (false? (:seon.db/ok? opened))
+                            (cond
+                              ;; Opened a fresh run (the snapshot has no
+                              ;; :seon.db/ok? key) — drive it.
+                              (not (false? (:seon.db/ok? opened)))
+                              (await (run-loop! input (:seon.agent.run/id opened)))
+
+                              ;; Open FAILED but a run now exists ⇒ we LOST the
+                              ;; atomic open race (a concurrent message/schedule
+                              ;; won the CAS). The agent IS running; absorb this
+                              ;; message by renewing the winner's lease.
+                              (run/current-run {:seon.agent/id id})
+                              (await (renew-current-run! id))
+
+                              :else
                               (js/console.error
                                 (str "seon.agent.loop: open-run! FAILED for " id
-                                     ": " (:seon.error/message (:seon.db/error opened))))
-                              (await (run-loop! input (:seon.agent.run/id opened))))))))
+                                     ": " (:seon.error/message (:seon.db/error opened)))))))))
                     (.catch (fn [e]
                               (js/console.error
                                 (str "seon.agent.loop: wake loop threw for "

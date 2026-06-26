@@ -58,6 +58,15 @@
 (defn- derived [id]
   (:seon.agent/state (agent/state-snapshot {:seon.agent/id id})))
 
+(defn ^:async supersede!
+  "Open a fresh CURRENT run for `id`, leaving the prior run OPEN but no longer
+   pointed-at (a 'superseded' run). open-run! is CAS-guarded on an ABSENT
+   pointer — a plain second open while a run is pointed-at FAILS — so
+   supersede = retract the pointer, then open. Returns the new run's snapshot."
+  [id]
+  (await (db/transact! {:seon.db/tx-data [[:db/retract [:seon.agent/id id] :seon.agent/run]]}))
+  (await (run/open-run! {:seon.agent/id id :seon.agent.run/trigger :message})))
+
 (defn- turn-count [run-id]
   (or (db/query {:seon.db/query
                  '[:find (count ?t) . :in $ ?r
@@ -202,13 +211,13 @@
     (-> (with-conn
           (fn ^:async run []
             (let [cs (await (boot-agent!))]
-              ;; open run A, then open run B — B becomes the agent's current
-              ;; run (the fencing pointer), orphaning A open.
+              ;; open run A, then supersede it (retract pointer + open B, since
+              ;; open-run! is CAS-guarded) — B becomes the agent's current run
+              ;; (the fencing pointer), orphaning A open.
               (let [a (await (run/open-run! {:seon.agent/id agent-id
                                              :seon.agent.run/trigger :message}))
                     a-id (:seon.agent.run/id a)
-                    _ (await (run/open-run! {:seon.agent/id agent-id
-                                             :seon.agent.run/trigger :message}))]
+                    _ (await (supersede! agent-id))]
                 (testing "run A no longer owns the agent (B does)"
                   (is (false? (run/owns-run? {:seon.agent/id agent-id
                                               :seon.agent.run/id a-id}))))

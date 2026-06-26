@@ -59,6 +59,16 @@
                  (-> (js/Promise.resolve (body conn))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
 
+(defn ^:async supersede!
+  "Open a fresh CURRENT run for agent A, leaving the prior run OPEN but no
+   longer pointed-at (a 'superseded' run for the fencing tests). open-run! is
+   now CAS-guarded on an ABSENT pointer — a plain second open while a run is
+   pointed-at FAILS — so supersede = retract the pointer, then open. Returns
+   the new run's snapshot."
+  [trigger]
+  (await (d/transact! db/*conn* {:tx-data [[:db/retract a-ref :seon.agent/run]]}))
+  (await (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger trigger})))
+
 (deftest open-run!-opens-a-bounded-run-and-derives-running
   (async done
     (-> (with-conn
@@ -90,7 +100,7 @@
                   (fn [snap1]
                     (let [r1 (:seon.agent.run/id snap1)]
                       (is (true? (run/owns-run? {:seon.agent/id a-id :seon.agent.run/id r1})))
-                      (-> (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :schedule})
+                      (-> (supersede! :schedule)
                           (.then
                             (fn [snap2]
                               (let [r2 (:seon.agent.run/id snap2)]
@@ -142,7 +152,7 @@
                                 (is (> (.getTime (:seon.agent.run/deadline r)) dl-bef)
                                     "deadline pushed out"))
                               ;; supersede, then renew the OLD run → fenced
-                              (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :schedule})))
+                              (supersede! :schedule)))
                           (.then
                             (fn [_]
                               (run/renew! {:seon.agent/id a-id :seon.agent.run/id rid})))
@@ -168,7 +178,7 @@
                               (is (inst? (:seon.agent.run/last-beat-at
                                            (db/entity @conn [:seon.agent.run/id rid])))
                                   "heartbeat stamped")
-                              (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :schedule})))
+                              (supersede! :schedule)))
                           (.then (fn [_] (run/beat! {:seon.agent/id a-id :seon.agent.run/id rid})))
                           (.then
                             (fn [res]
@@ -185,5 +195,68 @@
                 (.then (fn [snap]
                          (is (= 3 (:seon.agent.run/turn-limit snap))
                              "turn-limit seeded from :seon.agent/default-turn-limit"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ── FIX 1: crash recovery — close runs orphaned by a prior pod crash ───────
+
+(deftest recover-crashed-runs!-closes-orphaned-runs-and-is-idempotent
+  (async done
+    (let [!rid (atom nil)]
+      (-> (with-conn
+            (fn [_]
+              (-> (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :message})
+                  (.then (fn [snap]
+                           (reset! !rid (:seon.agent.run/id snap))
+                           ;; an open run with no loop driving it IS the
+                           ;; post-crash state: derived :running, unwakeable.
+                           (is (= :running (:seon.agent/state
+                                             (agent/state-snapshot {:seon.agent/id a-id})))
+                               "open run, no driver ⇒ derived :running (crash state)")
+                           (run/recover-crashed-runs!)))
+                  (.then (fn [res]
+                           (is (= [@!rid] (:seon.agent.run/closed res))
+                               "the orphaned run was recovered")
+                           (let [r (db/entity {:seon.db/ref [:seon.agent.run/id @!rid]})]
+                             (is (= :closed (:seon.agent.run/status r)))
+                             (is (= :crashed (:seon.agent.run/closed-reason r))
+                                 "closed with the boot-recovery reason"))
+                           (is (nil? (run/current-run {:seon.agent/id a-id})) "pointer cleared")
+                           (is (= :idle (:seon.agent/state
+                                          (agent/state-snapshot {:seon.agent/id a-id})))
+                               "the recovered agent is wakeable (:idle)")
+                           (run/recover-crashed-runs!)))
+                  (.then (fn [res2]
+                           (is (= [] (:seon.agent.run/closed res2))
+                               "idempotent — a clean second pass closes nothing"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ── FIX 2: atomic wake — two concurrent opens yield exactly ONE open run ───
+
+(deftest concurrent-opens-yield-exactly-one-open-run
+  (async done
+    (-> (with-conn
+          (fn [_]
+            ;; Fire two opens WITHOUT awaiting the first: both read the agent
+            ;; idle (no pointer), then the writer serializes their txs — the
+            ;; second's CAS sees the first's pointer and its whole tx fails.
+            (let [p1 (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :message})
+                  p2 (run/open-run! {:seon.agent/id a-id :seon.agent.run/trigger :schedule})]
+              (-> (js/Promise.all #js [p1 p2])
+                  (.then (fn [results]
+                           (let [rs         [(aget results 0) (aget results 1)]
+                                 ok-count   (count (remove #(false? (:seon.db/ok? %)) rs))
+                                 fail-count (count (filter #(false? (:seon.db/ok? %)) rs))
+                                 open-runs  (db/query {:seon.db/query
+                                                       '[:find [?rid ...]
+                                                         :where
+                                                         [?r :seon.agent.run/status :open]
+                                                         [?r :seon.agent.run/id ?rid]]})]
+                             (is (= 1 ok-count) "exactly one open succeeded")
+                             (is (= 1 fail-count) "the other LOST the CAS (error envelope)")
+                             (is (= 1 (count open-runs))
+                                 "exactly ONE :open run in the db — no duplicate")
+                             (is (= :running (:seon.agent/state (agent/state-snapshot {:seon.agent/id a-id})))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

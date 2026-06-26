@@ -317,14 +317,6 @@ no loader shim. Tier-2 microVMs mount the store read-only via virtio-fs.
   (agent eval can `transact!` without an `owns-run?` check) and the *in-flight
   split-brain* (a terminated worker leaving a half-committed write). Single most
   important structural decision.
-- **Crash recovery on boot** — boot must scan `:running` agents, reset them to
-  `:idle`, and close their orphaned runs `:crashed`. This *is* the promised
-  "restart to known-good state"; without it a crash deadlocks the agent.
-- **Atomic wake** — idle→running + run-creation as ONE tx asserting prior
-  `:idle`, so a message + a cron firing together can't spawn two runs (one
-  orphaned).
-- **Async listener dispatch** in the tx-feed pump (`wire.cljs`) — one slow
-  listener must not halt the pump and stall every agent's wakes.
 - **Reconnect replay** — `subscribe-tx` needs a `since-t` basis, or a UDS drop
   silently loses wake messages → an agent sits `:idle` with unread mail.
 - **Offload the agent's prompt render to its worker** (not just `eval-batch!`) —
@@ -334,6 +326,14 @@ no loader shim. Tier-2 microVMs mount the store read-only via virtio-fs.
 **Pause vs. absolute deadline — RESOLVED** (build pass 3): `pause` banks
 `remaining-ms = deadline − now`; `resume` re-extends the absolute `deadline` by it,
 so a long pause no longer insta-kills on resume.
+
+**Crash-recovery / atomic-wake / async-listener — RESOLVED** (build pass 5; see
+[[night-loop-log]]): boot runs `run/recover-crashed-runs!` (first-boot-gated, closes
+orphaned `:open` runs `:crashed` → `:idle`, live-proven via `kill -9`); `open-run!`
+ends with a `[:db.fn/cas … :seon.agent/run nil …]` so a second concurrent wake's tx
+aborts (single-writer serialized); `store/wire.cljs` fires each tx-feed listener on its
+own `setTimeout 0`. Still open: **reconnect-since-t replay** + the **keystone worker-write
+buffer** (Phase 2).
 
 **Resolved decisions** (no longer open): sliding cap is **derived** (window =
 `default-turn-limit` + inbound-count; stored `turn-limit-override` only on an

@@ -79,3 +79,27 @@
                     (is (= :core-bug (:seon.error/kind (ex-data e)))
                         "error kind unchanged")))
           (.finally done)))))
+
+;; ── FIX 3: the tx-feed pump dispatches each listener ASYNCHRONOUSLY ────────
+;; so one slow/throwing listener can't block the pump for all the others.
+;; A fake conn carries its listeners exactly where `d/listen` puts them —
+;; an atom in the conn's `:listeners` metadata — which fire-native-listeners!
+;; reads. We prove: (1) callbacks do NOT run inline (deferred to a later
+;; macrotask), and (2) a throwing listener doesn't stop another from firing
+;; (the per-listener throw guard is preserved).
+
+(deftest fire-native-listeners!-dispatches-async-and-survives-a-throwing-listener
+  (async done
+    (let [fired    (atom #{})
+          throw-cb (fn [_report] (throw (js/Error. "boom — a slow/bad listener")))
+          ok-cb    (fn [_report] (swap! fired conj :ok))
+          conn     (with-meta {} {:listeners (atom {:k1 throw-cb :k2 ok-cb})})]
+      (#'store.wire/fire-native-listeners! conn {:tx-data []})
+      (is (empty? @fired)
+          "listeners are dispatched on a later macrotask, NOT inline (pump never blocks)")
+      (js/setTimeout
+        (fn []
+          (is (contains? @fired :ok)
+              "the non-throwing listener still ran — a throwing one doesn't block it")
+          (done))
+        25))))

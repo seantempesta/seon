@@ -80,13 +80,23 @@ pristine.
 
 2. **Correctness fixes** (each a test + a live proof — from the Gemini validation):
    - **Buffer worker writes, commit on main atomically** (keystone — closes
-     fencing-bypass + in-flight split-brain).
-   - **Crash-recovery on boot**: boot resets `:running` agents → `:idle`, closes
-     orphaned runs `:crashed`.
+     fencing-bypass + in-flight split-brain). [Phase 2 — worker isolation.]
+   - **Crash-recovery on boot**: boot closes orphaned runs `:crashed`, clearing the
+     pointer → derived `:idle` (so a crash-stuck `:running` agent is wakeable again).
+     DONE — `seon.agent.run/recover-crashed-runs!`, wired into `seon.client`
+     start-agent! before `armable-agent-ids` (gated on genuine first boot). Test:
+     `recover-crashed-runs!-closes-orphaned-runs-and-is-idempotent`.
    - **Atomic wake**: idle→running + run-create as ONE tx asserting prior `:idle`
-     (no double-run from message+cron).
+     (no double-run from message+cron). DONE — `open-run!` uses `:db.fn/cas` on
+     `:seon.agent/run` being absent; a CAS-loss wake renews the winner's run instead.
+     Test: `concurrent-opens-yield-exactly-one-open-run`.
    - **Pause vs. absolute deadline**: pause stores `remaining-ms`, resume re-extends.
-   - **Async listener dispatch** in the tx-feed pump; **reconnect `since-t` replay**.
+     DONE (run model `pause!`/`resume!`).
+   - **Async listener dispatch** in the tx-feed pump. DONE —
+     `seon.store.wire/fire-native-listeners!` schedules each callback on its own
+     macrotask (`setTimeout 0`), guard preserved. Test:
+     `fire-native-listeners!-dispatches-async-and-survives-a-throwing-listener`.
+     **Reconnect `since-t` replay** — DEFERRED (two-sided protocol change).
 
 3. **Phase 2 — Tier-1 worker isolation**: offload SCI `eval-batch!` to a warm pool
    (`min 4/max 8`, `concurrentTasksPerWorker 1`); terminate-on-deadline; recycle =

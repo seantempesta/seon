@@ -220,12 +220,18 @@
 
 (defn ^:async open-run!
   "Open a run for an EXISTING agent and point `:seon.agent/run` at it in the
-   SAME tx (the fencing pointer). Seeds `turn-limit` from
-   `:seon.agent/default-turn-limit` (else [[default-turn-limit]]) and
-   `deadline` from now + `:seon.agent/default-deadline-ms` (else
-   [[default-deadline-ms]]); explicit seeds in the request win. Does NOT flip
-   any stored state — state is derived. Returns the run's [[snapshot]] on
-   success, or the db error envelope (errors are values). `^:async`."
+   SAME tx — ATOMICALLY, via a compare-and-swap that asserts the agent had NO
+   open run (the `:seon.agent/run` attr ABSENT). Idle→running is one
+   serialized step: when two wakes (a message + a schedule fire, or two
+   messages) race, the wire-server serializes the txs and the SECOND CAS sees
+   the first's pointer, so its WHOLE tx fails — no duplicate `:open` run is
+   ever committed (the loser gets the db error envelope; the wake handler
+   renews instead). Seeds `turn-limit` from `:seon.agent/default-turn-limit`
+   (else [[default-turn-limit]]) and `deadline` from now +
+   `:seon.agent/default-deadline-ms` (else [[default-deadline-ms]]); explicit
+   seeds in the request win. Does NOT flip any stored state — state is
+   derived. Returns the run's [[snapshot]] on success, or the db error
+   envelope — a CAS-loss included (errors are values). `^:async`."
   {:malli/schema [:=> [:cat ::open-run-request]
                   [:or :seon.agent.run/snapshot :seon.db/transact-response]]}
   [{id :seon.agent/id trigger :seon.agent.run/trigger cause :seon.agent.run/cause
@@ -255,10 +261,20 @@
             res        (await (db/transact!
                                 {:seon.db/tx-data
                                  [run-row
-                                  ;; Same-tx tempid link: point the agent at
-                                  ;; the just-created run (lookup-refs don't
-                                  ;; resolve to an uncommitted entity).
-                                  {:seon.agent/id id :seon.agent/run "run"}]}))]
+                                  ;; ATOMIC WAKE GUARD: point the agent at the
+                                  ;; just-created run ONLY IF it has no open run
+                                  ;; — a CAS with old-value nil ("the
+                                  ;; :seon.agent/run attr is ABSENT", which is
+                                  ;; exactly derived-:idle). The run-row above
+                                  ;; is processed first in THIS tx, so the
+                                  ;; lookup-ref resolves against the just-added
+                                  ;; run entity (a tempid is not resolvable in a
+                                  ;; CAS new-value slot). A racing second open
+                                  ;; sees the pointer set and the whole tx
+                                  ;; fails — no second :open run is committed.
+                                  [:db.fn/cas [:seon.agent/id id]
+                                   :seon.agent/run nil
+                                   [:seon.agent.run/id run-id]]]}))]
         (if (false? (:seon.db/ok? res))
           res
           (do (swap! !runs-this-process conj run-id)
@@ -435,3 +451,46 @@
                             :seon.agent.run/closed-reason :deadline-exceeded}))
         (recur more)))
     {:seon.agent.run/closed overdue}))
+
+;; ============================================================
+;; Boot CRASH-RECOVERY — the "restart to a known-good state" the run model
+;; promises. A process crash mid-turn leaves an agent derived `:running` (an
+;; `:open` run + the `:seon.agent/run` pointer set) but with NO loop driving
+;; it: on reboot, arming wake triggers does NOT reconcile the orphan, so the
+;; agent ignores every message (it is not `:idle`) — a deadlock the deadline
+;; watchdog only breaks once the run is PAST deadline (a deadline-less run:
+;; never). This scan closes EVERY open run at boot — by definition nothing is
+;; driving any of them yet — clearing each owned agent's pointer so derived
+;; state falls to `:idle` and it becomes wakeable. Reuses `::close-overdue-
+;; response` (same map-out shape). The boot path calls it BEFORE arming
+;; triggers / the ticker; it must NOT run on a mint in a LIVE process (that
+;; would kill currently-running agents) — `seon.client` gates it on first boot.
+;; ============================================================
+
+(defn ^:async recover-crashed-runs!
+  "Close EVERY `:open` run whose agent is NOT terminated, with `:crashed` —
+   clearing each owned agent's `:seon.agent/run` pointer (via [[close-run!]])
+   so its derived state falls to `:idle` and it can be woken. The boot
+   reconciliation for runs orphaned by a pod crash (an `:open` run + pointer
+   with no loop driving it). Takes NO time arg: at boot nothing is driving any
+   open run, so ALL are closed — INCLUDING paused ones (a paused run's resume
+   loop died with the process too). IDEMPOTENT + safe on every boot — a clean
+   boot with no open runs closes nothing. Returns the run-ids it closed
+   (map-out). `^:async`."
+  {:malli/schema [:=> [:cat] ::close-overdue-response]}
+  []
+  (let [open-runs (->> (db/query
+                         {:seon.db/query
+                          '[:find [?rid ...]
+                            :where
+                            [?r :seon.agent.run/status :open]
+                            [?r :seon.agent.run/id ?rid]
+                            [?r :seon.agent.run/agent ?a]
+                            (not [?a :seon.agent/terminated-at _])]})
+                       vec)]
+    (loop [[rid & more] open-runs]
+      (when rid
+        (await (close-run! {:seon.agent.run/id            rid
+                            :seon.agent.run/closed-reason :crashed}))
+        (recur more)))
+    {:seon.agent.run/closed open-runs}))

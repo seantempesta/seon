@@ -160,4 +160,33 @@ Revert point if the experiment goes sideways: `c84e8fc`.
   `:seon` keyword conn (that's `query`-only) — use the map-in shape
   `(db/transact! {:seon.db/tx-data [...]})`. (Cost me two false-alarm "watchdog broken"
   reads before I spotted my own bad call.)
+- **Commit:** `2d25aad`
+
+### Pass 5 — correctness cluster (crash-recovery, atomic-wake, async-listener)
+
+- **Move:** repair (the remaining Gemini-validation correctness fixes; reconnect-since-t
+  deferred to its own two-sided pass).
+- **Did:**
+  - **Crash-recovery (Gemini #4):** `run/recover-crashed-runs!` (closes ALL `:open` runs
+    of non-terminated agents `:crashed`), wired in `client.cljs` boot AFTER `*conn*`,
+    BEFORE the resume roster — **gated to genuine first-boot** so `/agents/new` in a live
+    process can't clobber running agents.
+  - **Atomic-wake (Gemini #3):** `open-run!` tx now ends with `[:db.fn/cas [:seon.agent/id id]
+    :seon.agent/run nil [run-ref]]` — datahike CAS with nil old-value = "succeed only if
+    the pointer is ABSENT" (= derived `:idle`). Single-writer serialization makes the 2nd
+    concurrent opener's whole tx abort → never a second `:open` run. Loser renews the
+    winner's run. (Agent read the datahike source + verified the 5-elt CAS op survives the
+    wire passthrough.)
+  - **Async-listener (Gemini #8):** `store/wire.cljs/fire-native-listeners!` schedules each
+    callback on its own `setTimeout 0` (per-callback try/catch preserved) so one slow
+    listener can't stall the tx-feed pump for all agents.
+- **Live proof (orchestrator, fresh world):** opened a run on the agent (open-run! +CAS
+  works live) → derived `:running` → **`kill -9` the pod** (wire-server, the separate
+  store process, survives) → restart → boot log: *"crash recovery: closed 1 orphaned
+  run(s) :crashed [zNQ-…]"*, agent **resumed** → derived `:idle`, run `:closed`/`:crashed`,
+  no open run. Concurrent-opens + async-dispatch test-proven. `bin/test-cljs` **PASS (73s)**.
+- **Deferred (own passes):** reconnect-since-t replay (Gemini #9, two-sided protocol);
+  keystone worker-write buffering (Phase 2). Pre-existing smells flagged (this-process-run?/
+  drive-run!/ping! missing `:malli/schema`; `!own-write-ids` `def` vs `defonce`).
+- **Struck from architecture.md open-risks:** crash-recovery, atomic-wake, async-listener.
 - **Commit:** (this pass)
