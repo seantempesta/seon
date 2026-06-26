@@ -568,6 +568,7 @@
 
 (defn fetch-run
   "Look up a stashed run-result by id. Returns nil if absent."
+  {:malli/schema [:=> [:cat :string] :any]}
   [run-id]
   (js/Reflect.get js/globalThis (str stash-key-prefix run-id)))
 
@@ -816,6 +817,7 @@
   "Return the vector of fully-qualified test syms whose
    `:seon.test/source` mentions `fn-sym` (string or symbol). Pure DB
    read — safe to call inside an eval-batch! tx scope."
+  {:malli/schema [:=> [:cat :any] [:vector :symbol]]}
   [fn-sym]
   (let [needle (str fn-sym)
         rows   (db/query

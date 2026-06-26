@@ -126,6 +126,9 @@
    Renders against the frozen `db` value the loop pinned for this TURN (the
    one basis-t the bound-checks + render share, §8a); defaults to `@*conn*`
    when called without one."
+  {:malli/schema [:function
+                  [:=> [:catn [:seon.agent/id :seon.db/id]] :string]
+                  [:=> [:catn [:seon.agent/id :seon.db/id] [:seon.db/db :any]] :string]]}
   ([agent-id] (render-prompt agent-id @db/*conn*))
   ([agent-id db]
    (ctx/render-context {:seon.agent/id agent-id :seon.db/db db})))
@@ -149,6 +152,7 @@
    SAME db inside that scope so the `:relevant-source` section reads them
    without making `assemble-context` async. FAIL-SOFT to nil hits on any error
    (section renders blank)."
+  {:malli/schema [:=> [:catn [:seon.agent/id :seon.db/id] [:seon.db/db :any]] :string]}
   [agent-id db]
   (if-not (embed-retrieval-on?)
     (render-prompt agent-id db)
@@ -194,6 +198,7 @@
    lands, and the caller sees `ok? false`. If the open-tx fails (fence or
    otherwise) there is NO turn entity — returns the error envelope (no LLM
    call)."
+  {:malli/schema [:=> [:catn [:turn-input :map] [:body-fn :any]] :any]}
   [{:seon.agent/keys [id]
     :seon.agent.run/keys [id-of-run]
     :seon.agent.turn/keys [id-of-turn prompt-text prompt-file]}
@@ -315,6 +320,7 @@
    `open-turn!` to fold into the close-tx. An LLM-call failure
    (`:seon.ai/error`) closes the turn `:status :error` (render derives a
    system line from the status — no self→self message row)."
+  {:malli/schema [:=> [:catn [:input :map]] :map]}
   [{:seon.agent/keys [id llm-fn compile-state]
     run-id :seon.agent.run/id
     :seon.agent.turn/keys  [id-of-turn turn-idx prompt-text]}]
@@ -356,6 +362,7 @@
    bundle. Returns the closed turn entity pulled with evals inlined, plus
    `:seon.agent/eval-count`. On catastrophic error returns
    `{:seon.agent.turn/status :error :seon.error/data <str>}`."
+  {:malli/schema [:=> [:catn [:input :map]] :map]}
   [{:seon.agent/keys [id llm-fn compile-state] run-id :seon.agent.run/id db :seon.db/db}]
   (let [db         (or db @db/*conn*)
         turn-id    (db/new-id!)

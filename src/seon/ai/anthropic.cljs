@@ -74,6 +74,9 @@
 
 (schema/register! :seon.ai.anthropic/stop-reason :string)
 
+;; agent-adapter request-option overrides (e.g. {:seon.ai/max-tokens 2048}).
+(schema/register! :seon.ai.anthropic/opts :map)
+
 (schema/register!
   :seon.ai.anthropic/complete-response
   [:map
@@ -366,6 +369,10 @@
    `:seon.ai/error` (see the `:seon.ai/error` schema) when the call
    failed (timeout, fetch error, HTTP error, unparseable body,
    refusal)."
+  {:malli/schema
+   [:function
+    [:=> [:cat] :any]
+    [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
   ([opts]
    (fn [ctx-text] (complete+wrap opts ctx-text))))

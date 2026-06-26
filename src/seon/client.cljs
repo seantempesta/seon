@@ -180,6 +180,7 @@
   "Holds the Node event loop open with a minute-cadence heartbeat. The
    real V0 client will keep the loop alive via pending agent-loop work;
    for now this is the simplest 'process stays open' contract."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (let [id (js/setInterval
              (fn []
@@ -187,18 +188,24 @@
              60000)]
     (swap! !state assoc :heartbeat-id id)))
 
-(defn stop-heartbeat! []
+(defn stop-heartbeat!
+  {:malli/schema [:=> [:cat] :any]}
+  []
   (when-let [id (:heartbeat-id @!state)]
     (js/clearInterval id)
     (swap! !state assoc :heartbeat-id nil)))
 
-(defn ^:dev/before-load before-reload []
+(defn ^:dev/before-load before-reload
+  {:malli/schema [:=> [:cat] :any]}
+  []
   (log/info-console! "seon.client" "reloading…")
   (stop-heartbeat!))
 
 (declare rearm-wake-triggers!)
 
-(defn ^:dev/after-load after-reload []
+(defn ^:dev/after-load after-reload
+  {:malli/schema [:=> [:cat] :any]}
+  []
   (swap! !state update :reload-count inc)
   (log/info-console! "seon.client"
                      (str "reload #" (:reload-count @!state)
@@ -249,6 +256,7 @@
 
    REPL usage:
      (.then (datahike-smoke-test!) println)"
+  {:malli/schema [:=> [:cat] :any]}
   []
   (let [cfg {:store              {:backend :memory
                                   :id (random-uuid)}
@@ -274,6 +282,9 @@
 (defn ^:async mem-db
   "REPL convenience — open a fresh :memory datahike-cljs DB with optional
    schema. Returns a Promise resolving to a conn atom."
+  {:malli/schema [:function
+                  [:=> [:cat] :any]
+                  [:=> [:catn [::schema :any]] :any]]}
   ([] (mem-db []))
   ([schema]
    (let [cfg {:store              {:backend :memory
@@ -529,6 +540,7 @@
    boots on the shared cluster store via [[open-cluster-conn!]].
    Isolated-by-construction: tests that build agents on this conn can
    never touch the cluster store."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (let [cfg {:store              {:backend :memory
                                   :id      (random-uuid)}
@@ -553,6 +565,7 @@
         re-booting against the populated store re-asserts no-ops.
      4. listen adapter — foreign writers' txs fire this conn's native
         listeners (wake triggers + inspector SSE)."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (await (store.wire/ping!))
   (let [conn (await (d/connect (store.wire/cluster-config)))]
@@ -606,6 +619,7 @@
    `:seon.ns/name` row whose ns is NOT in `(core-ns-set)`. Core nses are
    COMPILED (present in the bundle, indexed for DISPLAY only); only the
    agent-authored DB layer is LOADED on boot. Read against the db value."
+  {:malli/schema [:=> [:catn [::db :any]] :any]}
   [db]
   (let [all (into #{}
                   (map first)
@@ -621,6 +635,7 @@
    are satisfied on-demand by the compiled bundle via the DB load-fn
    (`seon.eval/guarded-load`) DURING each ns's eval. An agent ns with no
    stored requires (or only core deps) has an empty edge set."
+  {:malli/schema [:=> [:catn [::db :any] [::agent-nses :any]] :any]}
   [db agent-nses]
   (into {}
         (map (fn [ns-kw]
@@ -643,6 +658,7 @@
    is skipped) so this always terminates; cljs.js then detects the actual
    circular dep and errors that ns during its per-ns eval (user
    directive: broken input just errors that ns and moves on)."
+  {:malli/schema [:=> [:catn [::edges :any]] :any]}
   [edges]
   (let [!order   (volatile! [])
         !seen    (volatile! #{})
@@ -668,6 +684,7 @@
    …)` tee) — boot-indexed shape literals are rebuilt from the registry.
    Returns each fully-qualified registration call; eval'd from
    `cljs.user` (the key carries its own namespace)."
+  {:malli/schema [:=> [:catn [::db :any]] :any]}
   [db]
   (->> (db/query '[:find ?src
                    :where
@@ -707,6 +724,7 @@
        (last)))
 
 (defn ^:async ^:private log-replay-failure!
+  {:malli/schema [:=> [:catn [::agent-id :any] [::ns-kw :any] [::err-map :any]] :any]}
   [agent-id ns-kw {:keys [error stack]}]
   (await
     (log/warn! {:seon.log/source  ::log-replay-failure!
@@ -723,6 +741,7 @@
    message ([[error-chain-message]]); `:stack` the deepest cause's stack
    — chosen so a load-failure warn names the actual defect, not cljs.js's
    \"ERROR\" wrapper."
+  {:malli/schema [:=> [:catn [::err :any]] :any]}
   [err]
   {:error (or (some-> err error-chain-message not-empty)
               (some-> err .-message)
@@ -767,6 +786,7 @@
      - Boot path in start-agent!, before per-agent setup.
      - REPL probe via the same-pod-session test pattern — see
        research/resume-findings-2026-05-23.md §'Same-pod-session test'."
+  {:malli/schema [:=> [:catn [::args :any]] :any]}
   [{:keys [conn compile-state agent-id]}]
   (db/with-tx-context
     {:seon.db/origin   :replay
@@ -850,6 +870,7 @@
 
    Pure fn. Caller transacts via `db/transact!` with
    `:seon.db/origin :core-seed`."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (into [{:seon.user/id "user"}]
         (my.kb.shared/seed-tx-data)))
@@ -992,6 +1013,7 @@
    of the indexed vars. [[fn-less-compiled-roots]] joins explicitly
    because a fn-less compiled root (`my.kb`) owns an indexed full-source
    `:seon.ns` row without owning any var."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (into (into (into #{} (map keyword) fn-less-compiled-roots)
               ;; Whole-downstream-surface (SEON_EXTRA_SRC): every scanned
@@ -1580,6 +1602,7 @@
    Fns whose source can't be read are OMITTED, not stubbed — the corpus stays
    honest. Returns the tx-data vector; caller transacts under
    `:seon.db/origin :core-seed`."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (let [now     (js/Date.)
         ;; Downstream extra-core vars join the roster after the
@@ -1632,6 +1655,7 @@
    keys already present on the conn, so an agent's own
    `(seon.schema/register! …)` tee row (whose :source is the replayable
    call form) is NEVER overwritten by the boot index."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (let [now (js/Date.)]
     (into []
@@ -1686,6 +1710,9 @@
    every deftest the pod build loads). Same shape the detect-and-tee path
    writes, so downstream readers never branch on origin. Pure tx-data
    builder; [[core-index-tx]] dedups against the conn."
+  {:malli/schema [:function
+                  [:=> [:cat] :any]
+                  [:=> [:catn [::vars :any]] :any]]}
   ([] (index-tests @!indexed-test-vars))
   ([vars]
    (let [now     (js/Date.)
@@ -1708,6 +1735,7 @@
    re-index never re-transacts a core row against the populated store —
    removing the re-seed interaction that the Run-3 findings traced to a
    malformed `:seon.fn/ns` value. Returns a Promise of the tx-data vector."
+  {:malli/schema [:=> [:catn [::conn :any]] :any]}
   [conn]
   (let [all       (concat (index-core!)
                           (index-schemas)
@@ -1793,6 +1821,7 @@
    Idempotent: pruned rows are gone, so the second boot finds zero
    candidates. Loud: one `:seon.log` info names every pruned row and why.
    Returns a Promise of `{:seon.client/pruned [[kind ident] …]}`."
+  {:malli/schema [:=> [:catn [::conn :any]] :any]}
   [conn]
   (let [idx    (index-core!)
         tsts   (index-tests)
@@ -2085,6 +2114,7 @@
    MINT ONLY — a resumed agent already has its turn 0 in the store.
    Returns the eval-batch! summary map; failures are logged LOUDLY but
    never abort the boot."
+  {:malli/schema [:=> [:catn [::args :any]] :any]}
   [{:seon.agent/keys [id compile-state]}]
   (await
     (db/with-agent id
@@ -2157,6 +2187,7 @@
       :seon.web/port _ :seon.web/port-file _}.
    Subsequent (seon.agent/message! …) calls (or POST /chat) drive the
    loop via the wake trigger."
+  {:malli/schema [:=> [:cat [:* :any]] :any]}
   [& [{:keys [llm-fn mint? purpose] :or {llm-fn stub-llm}}]]
   (let [existing-conn @!agent-conn
         conn          (or existing-conn (await (open-cluster-conn!)))
@@ -2327,12 +2358,14 @@
 (defn start-agent-with-stub!
   "Bring up the V0 agent with the canned stub LLM. Useful for verifying
    the full loop without a deepseek API key. Returns a channel."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (start-agent!))
 
 (defn start-agent-with-deepseek!
   "Bring up the V0 agent against the real deepseek API. Requires
    DEEPSEEK_API_KEY in process.env. Returns a channel."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (start-agent! {:llm-fn (openai/agent-adapter)}))
 
@@ -2378,7 +2411,9 @@
          (log/error-console! "seon.client" "uncaught exception"
                              (or (.-message err) err)))))
 
-(defn -main [& _args]
+(defn -main
+  {:malli/schema [:=> [:cat [:* :any]] :any]}
+  [& _args]
   ;; FIRST: gate datahike-cljs/konserve trace+debug (per-index-node
   ;; `:datahike/index-access` traces flooded pod.log to 813 MB on one
   ;; cold-store inspector render, 2026-06-09). Must run before the

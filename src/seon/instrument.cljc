@@ -82,6 +82,7 @@
 (defn skip?
   "True when `[ns-sym fn-sym]` is opted out of instrumentation — either its
    whole ns is in [[skip-syms]] or the specific pair is."
+  {:malli/schema [:=> [:cat :symbol :symbol] :boolean]}
   [ns-sym fn-sym]
   (or (contains? skip-syms ns-sym)
       (contains? skip-syms [ns-sym fn-sym])))
@@ -168,6 +169,7 @@
       structured errors are valuable, so default-on is the intended
       posture; the var exists only to bail out if a wrapper ever
       destabilizes the pod."
+     {:malli/schema [:=> [:cat] :boolean]}
      []
      (let [v (some-> js/process .-env .-SEON_INSTRUMENT str str/lower-case)]
        (not (contains? #{"0" "false" "off" "no"} v)))))
@@ -214,6 +216,7 @@
       `identity` transformer) makes malli's stock `mi/instrument!` reuse
       ALL its var-surgery and simply call this `-instrument-f` — no custom
       registry, no var-install code of our own."
+     {:malli/schema [:=> [:cat :any] :any]}
      [inner-form]
      (let [s (m/schema inner-form)]
        (reify
@@ -283,6 +286,7 @@
 
       `mi/instrument!` (called once afterward) reads this registry and
       installs each wrapper in place."
+     {:malli/schema [:=> [:cat :symbol :symbol :any :boolean] :any]}
      [ns-sym fn-sym schema-form async?]
      (cond
        (skip? ns-sym fn-sym) nil
@@ -304,6 +308,7 @@
      "True when `f` is a JS async function (the runtime shape `^:async`
       compiles to). Lets [[instrument-from-db!]] route async wrappers
       without the analyzer's `:async` flag — the live var carries the fact."
+     {:malli/schema [:=> [:cat :any] :boolean]}
      [f]
      (and (fn? f) (= "AsyncFunction" (.. f -constructor -name)))))
 
@@ -327,6 +332,7 @@
       `:no-var` counts rows whose var isn't live (a prior session's fn);
       `:bad-spec` counts unreadable spec strings — both are skipped, not
       fatal."
+     {:malli/schema [:=> [:cat :any] :map]}
      [db]
      (if-not (enabled?)
        {:seon.instrument/enabled?       false

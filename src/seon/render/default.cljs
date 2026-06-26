@@ -95,6 +95,9 @@
 
    Rows from me whose `to` contains NEITHER the user NOR another agent
    (i.e. agent → self) are not conversation and are EXCLUDED here."
+  {:malli/schema [:function
+                  [:=> [:cat :any :string] :any]
+                  [:=> [:cat :any :string :int] :any]]}
   ([db id] (recent-messages db id 20))
   ([db id n]
    (let [;; All reads via QUERY, not d/entity — the inspector hands
@@ -182,6 +185,9 @@
    agent `id`, newest-first. Reads the active `seon.log` file
    (NOT the DB — log entries are no longer persisted as datoms; see
    seon.log ns docstring). Returns `()` when none."
+  {:malli/schema [:function
+                  [:=> [:cat :any :string] :any]
+                  [:=> [:cat :any :string :int] :any]]}
   ([_db id] (recent-errors _db id 10))
   ([_db id n]
    (log/tail {:seon.log/n     n

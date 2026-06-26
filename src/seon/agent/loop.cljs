@@ -187,6 +187,9 @@
    empty turns close the run :no-forms (an unresponsive/looping LLM never spins
    to the turn-limit). Returns the final FSM state. Errors are values — never
    throws into the trigger."
+  {:malli/schema [:=> [:catn [:input [:map [:seon.agent/id :seon.db/id]]]
+                             [:run-id :seon.agent.run/id]]
+                  :seon.derive/state]}
   [{:seon.agent/keys [id] :as input} run-id]
   (await
     (loop [state :running streak 0]
@@ -307,6 +310,7 @@
    waking message) and start `run-loop!`; if :running → `renew!` the open
    run's lease. The idle open is CAS-guarded; a wake that loses the race
    renews the winner's run instead of opening a second."
+  {:malli/schema [:=> [:catn [:input [:map [:seon.agent/id :seon.db/id]]]] :any]}
   [{:seon.agent/keys [id] :as input}]
   (fn [{:seon.db/keys [db attr-index]}]
     (let [my-eid  (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
@@ -414,6 +418,7 @@
    drive on the macrotask queue and returns. A loud no-op when the agent was
    never armed in THIS process (no input — e.g. resume before a hot-reload
    re-arm) or has no open run."
+  {:malli/schema [:=> [:catn [:input [:map [:seon.agent/id :seon.db/id]]]] :any]}
   [{:seon.agent/keys [id]}]
   (if-let [input (get @!loop-input id)]
     (js/setTimeout
@@ -445,6 +450,7 @@
      :seon.agent/id              the agent's id string
      :seon.agent/llm-fn          ctx-string -> Promise<{:text \"…\"}>
      :seon.agent/compile-state   bootstrap compile-state"
+  {:malli/schema [:=> [:catn [:input [:map [:seon.agent/id :seon.db/id]]]] :any]}
   [{:seon.agent/keys [id] :as input}]
   ;; Stamp the loop input so RESUME can re-drive the open run with this
   ;; agent's live llm-fn / compile-state (refreshed on every re-arm — see the
@@ -511,6 +517,7 @@
    (default [[default-tick-ms]]). Returns the interval id. Wired at client
    boot beside [[install-wake-trigger!]]; safe to re-run on hot reload — it
    clears the prior interval first, so reloads never stack timers."
+  {:malli/schema [:=> [:catn] :any]}
   []
   (when-let [id @!ticker] (js/clearInterval id))
   (let [ms (or (env-tick-ms) default-tick-ms)
@@ -523,6 +530,7 @@
 (defn uninstall-ticker!
   "Stop the periodic ticker (clearInterval + drop the stored id). For tests +
    clean reload."
+  {:malli/schema [:=> [:catn] :any]}
   []
   (when-let [id @!ticker]
     (js/clearInterval id)

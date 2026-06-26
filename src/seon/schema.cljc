@@ -119,6 +119,20 @@
 (defonce ^:private _schema-render-html-fn
   (swap! *schemas assoc :seon.schema/render-html-fn :symbol))
 
+;; Positional-arg slot shapes for this ns's register/introspection fns — each
+;; named-positional `:catn` slot in a `:malli/schema` below references one of
+;; these (db.cljs's `::conn`/`::tx-data` slot-schema pattern). `:seon.schema/form`
+;; (a Malli schema DEFINITION) is a recursive, heterogeneous structure —
+;; genuinely opaque, hence `:any` (the documented third-party-shape exception).
+(defonce ^:private _registry-key-type
+  (swap! *schemas assoc :seon.schema/registry-key :keyword))
+(defonce ^:private _form-type
+  (swap! *schemas assoc :seon.schema/form :any))
+(defonce ^:private _namespace-name-type
+  (swap! *schemas assoc :seon.schema/namespace-name :string))
+(defonce ^:private _kvs-type
+  (swap! *schemas assoc :seon.schema/kvs [:vector :any]))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Registration API
 ;;; ---------------------------------------------------------------------------
@@ -202,6 +216,7 @@
        ;; stored props {:seon.db/entity true
        ;;               :seon.render/ai 'foo
        ;;               :seon.entity/id-attr :seon.eval/id}"
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key] [::form ::form]] ::registry-key]}
   [k v]
   ;; CLJS-only until the JVM's legacy `:form/*` registrations are renamed.
   #?(:cljs (internal/assert-multi-segment-namespace! k)
@@ -220,6 +235,7 @@
   "Snapshot of all currently-registered schema keywords. Used by
    detect-and-tee in eval-batch! for atom-diff schema detection (before vs
    after an eval reveals what the form registered)."
+  {:malli/schema [:=> [:cat] [:set :keyword]]}
   []
   (set (keys @*schemas)))
 
@@ -233,7 +249,10 @@
        ::user-id    :uuid
        ::user-name  [:string {:min 1}]
        ::user-email [:string {:min 5}])"
+  {:malli/schema [:=> [:catn [::kvs [:* :any]]] [:set :keyword]]}
   [& kvs]
+  ;; NOTE: each kv pair is a [registry-key form] pair; the variadic slot
+  ;; can't enumerate them, hence `[:* :any]`.
   (assert (even? (count kvs)) "register-all! requires pairs of [key schema]")
   (let [pairs (partition 2 kvs)]
     (doseq [[k v] pairs]
@@ -266,6 +285,7 @@
    Caller transacts via `seon.db/transact!`. Side-effect: caches the
    required-count in `*schema-required-counts`. Returns `nil` when `k`
    does not refer to an entity-shape :map (no id-attr derivable)."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
   [k]
   (let [v (get @*schemas k)]
     (when (and v (internal/map-shape? v))
@@ -295,6 +315,7 @@
   "Snapshot of every registered keyword pointing at an entity-shape `:map`
    schema (one with a derived `:seon.entity/id-attr`), sorted. Used by
    `seon.client/start-agent!` to seed `:seon.schema` entities at boot."
+  {:malli/schema [:=> [:cat] [:vector :keyword]]}
   []
   (->> @*schemas
        (keep (fn [[k v]]
@@ -309,6 +330,7 @@
    Concatenates `entity-schema-tx-data` over `entity-schema-keys`.
    Idempotent — identity-attr upsert on `:seon.schema/key` replaces prior
    decompositions in place."
+  {:malli/schema [:=> [:cat] [:vector :any]]}
   []
   (into [] (mapcat entity-schema-tx-data) (entity-schema-keys)))
 
@@ -316,6 +338,7 @@
   "The cached required-attr count for `k`, or nil if `k` was never
    decomposed (e.g. not an entity-shape :map). Populated as a side-effect
    of `entity-schema-tx-data`."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
   [k]
   (get @*schema-required-counts k))
 
@@ -325,22 +348,26 @@
 
 (defn registered-schemas
   "A map of all registered domain schemas (Malli's built-ins excluded)."
+  {:malli/schema [:=> [:cat] :map]}
   []
   @*schemas)
 
 (defn registered?
   "Check if a schema keyword is registered."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :boolean]}
   [k]
   (contains? @*schemas k))
 
 (defn schema-definition
   "The raw definition for a registered schema, or nil if not registered."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
   [k]
   (get @*schemas k))
 
 (defn schemas-in-namespace
   "The {keyword definition} map of schemas registered under namespace
    `ns-name` (a string, e.g. \"seon.ai.gemini\")."
+  {:malli/schema [:=> [:catn [::namespace-name ::namespace-name]] :map]}
   [ns-name]
   (into {}
         (filter (fn [[k _]] (= (namespace k) ns-name)))
@@ -352,6 +379,7 @@
 
 (defn clear-all!
   "Clear all registered schemas. USE WITH CAUTION — only for testing."
+  {:malli/schema [:=> [:cat] :map]}
   []
   (reset! *schemas {}))
 

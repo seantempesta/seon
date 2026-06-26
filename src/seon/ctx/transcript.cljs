@@ -68,6 +68,7 @@
    nothing in its own output to mimic. LEADS with what to do; reinforces
    the REPL is LIVE and ALWAYS CURRENT (re-derived from the DB every turn,
    never a stale replay)."
+  {:malli/schema [:=> [:catn [::ns-str :string]] :string]}
   [ns-str]
   (str "; seon · " ns-str " · live REPL\n"
        "; This is your live REPL — a Clojure session backed by the database.\n"
@@ -106,6 +107,7 @@
    MUST come from a fixed stored `:at` so the rendered prefix stays
    byte-stable across turns. A nil here means a caller lost an event's
    stored time — surface it, never paper over it with a live clock."
+  {:malli/schema [:=> [:catn [::inst :any]] :string]}
   [inst]
   (when-not (instance? js/Date inst)
     (throw (ex-info (str "seon.ctx.transcript/clock: missing stored time — "
@@ -282,6 +284,7 @@
    Pressure steering escalates toward the per-loop cap — positive-framing:
    it tells the agent what to DO (finish, park, message), never just that
    something is wrong."
+  {:malli/schema [:=> [:catn [::input :map]] :string]}
   [{:seon.agent/keys [id] db :seon.db/db}]
   (let [db      (or db @db/*conn*)
         state   (derive/derive-state db id)

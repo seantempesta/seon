@@ -364,6 +364,7 @@
    transcript head-render. This datom adapter pulls the message entity, then
    delegates. Hop-exhausted messages still pass here; the wake handler
    partitions them out to refuse loudly (see [[seon.agent.loop/wake-handler]])."
+  {:malli/schema [:=> [:catn [:db :any] [:datom :any] [:my-eid :any]] :any]}
   [db {eid :seon.db/e target :seon.db/v} my-eid]
   (and (= target my-eid)
        (msg/waking-inbound? (db/entity {:seon.db/db db :seon.db/ref eid})
@@ -372,6 +373,23 @@
 ;; ============================================================
 ;; Agent creation. Allocates an id, transacts the entity.
 ;; ============================================================
+
+;; purpose / default-turn-limit are :any (not their stored :string / :int):
+;; create! folds them in UNCONDITIONALLY, so a caller (boot!) that has no
+;; purpose passes an EXPLICIT nil — :any tolerates the absent-or-nil request
+;; slot without throwing (the cond-> guards what actually reaches the tx).
+(schema/register! ::create-request
+  [:map
+   [:seon.agent/id                  :seon.db/id]
+   [:seon.agent/purpose             {:optional true} :any]
+   [:seon.agent/default-turn-limit  {:optional true} :any]])
+
+;; Success = `{:seon.agent/id id}`; a FAILED transact returns the db error
+;; envelope as-is (errors are values).
+(schema/register! ::create-response
+  [:or
+   [:map [:seon.agent/id :seon.db/id]]
+   :seon.db/transact-response])
 
 (defn ^:async create!
   "Allocate an agent entity (just its `:seon.agent/id` — state is DERIVED, a
@@ -391,6 +409,7 @@
    back as-is — errors are values, the same contract as
    `seon.agent.message/message!`. A failed create means NO agent
    entity; callers must branch instead of chasing a ghost."
+  {:malli/schema [:=> [:cat ::create-request] ::create-response]}
   [{:seon.agent/keys [id purpose default-turn-limit]}]
   (let [fresh? (nil? (db/entity {:seon.db/ref [:seon.agent/id id]}))
         res    (await (db/transact!
@@ -419,6 +438,22 @@
 ;; stays deterministic via `(home-ns id)`.
 ;; ============================================================
 
+;; The input map ALSO carries :seon.agent/llm-fn + :seon.agent/compile-state
+;; (kept in the signature for the caller, unused here) — :map is open, so the
+;; extra runtime slots pass. purpose is :any (absent-or-nil tolerant).
+(schema/register! ::boot-request
+  [:map
+   [:seon.agent/id      :seon.db/id]
+   [:seon.agent/purpose {:optional true} :any]])
+
+;; Success = `{:seon.agent/id _ :seon.agent/ns <home-ns symbol>}`; on a failed
+;; create! the db error envelope propagates as-is. :seon.agent/ns is :any (the
+;; home-ns symbol — an opaque derived value, not a stored attr).
+(schema/register! ::boot-response
+  [:or
+   [:map [:seon.agent/id :seon.db/id] [:seon.agent/ns :any]]
+   :seon.db/transact-response])
+
 (defn ^:async boot!
   "Create the agent entity. Map-in / map-out.
 
@@ -434,6 +469,7 @@
    on `seon.agent.loop` (acyclic). Returns `{:seon.agent/id _ :seon.agent/ns _}`.
    On a FAILED create! the db error envelope propagates as-is (errors are
    values): there is NO agent entity, so the caller must not arm a trigger."
+  {:malli/schema [:=> [:cat ::boot-request] ::boot-response]}
   [{:seon.agent/keys [id purpose]}]
   (let [res (await (create! {:seon.agent/id id :seon.agent/purpose purpose}))]
     (if (false? (:seon.db/ok? res))
@@ -492,6 +528,7 @@
    (`core-default-ctx`) — so the agent tracks every future layout
    change automatically instead of freezing a stored copy of today's
    default."
+  {:malli/schema [:=> [:catn [:seon.agent/id :seon.db/id]] :seon.db/transact-response]}
   [agent-id]
   (await (db/transact!
            {:seon.db/tx-data
@@ -503,6 +540,7 @@
    (component-inlined via pull) and returns a vector of ctx maps.
    Use to add/remove sections or change priorities without blowing
    away the whole layout."
+  {:malli/schema [:=> [:catn [:seon.agent/id :seon.db/id] [:f :any]] :seon.db/transact-response]}
   [agent-id f]
   (let [current (ctx-entities {:seon.agent/id agent-id})
         new-ctx (vec (f current))]

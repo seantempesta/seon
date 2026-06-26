@@ -62,6 +62,7 @@
 (defn page-header
   "Consistent page header — title (`text-lg`) + optional subtitle
    (`text-xs`)."
+  {:malli/schema [:=> [:cat :any :any] :any]}
   [title subtitle]
   [:div {:class "mb-4"}
    [:h1 {:class "text-lg font-semibold tracking-tight"} title]
@@ -71,12 +72,14 @@
 (defn section-header
   "Uppercase section label used in dashboard cards. `text-xs`,
    uppercase, wider letter-spacing."
+  {:malli/schema [:=> [:cat :any] :any]}
   [text]
   [:h2 {:class "text-xs font-semibold text-text-400 uppercase tracking-wider mb-2"}
    text])
 
 (defn card
   "Card container — `bg-base-850` with `p-3` padding, rounded corners."
+  {:malli/schema [:=> [:cat [:* :any]] :any]}
   [& children]
   (into [:div {:class "bg-base-850 rounded p-3"}] children))
 
@@ -90,6 +93,9 @@
 
    status — keyword from `status-styles`
    label  — optional display override (defaults to status name)"
+  {:malli/schema [:function
+                  [:=> [:cat :any] :any]
+                  [:=> [:cat :any :any] :any]]}
   ([status] (status-dot status nil))
   ([status label]
    (let [{:keys [dot text pulse?]}
@@ -109,6 +115,9 @@
 
    text         — header text
    right-align? — align text right (for numeric columns)"
+  {:malli/schema [:function
+                  [:=> [:cat :any] :any]
+                  [:=> [:cat :any :any] :any]]}
   ([text] (table-header text false))
   ([text right-align?]
    [:th {:class (str "text-left py-1.5 px-3 text-xs font-medium "
@@ -121,6 +130,9 @@
 
    content — cell content
    opts    — `{:right-align? :mono? :muted?}`. `:mono?` defaults true."
+  {:malli/schema [:function
+                  [:=> [:cat :any] :any]
+                  [:=> [:cat :any :any] :any]]}
   ([content] (table-cell content {}))
   ([content {:keys [right-align? mono? muted?] :or {mono? true}}]
    [:td {:class (str "py-2 px-3 text-sm"
@@ -145,6 +157,7 @@
 
    entry — `{:timestamp :type :details}` for parsed lines, or
            `{:raw \"...\"}` for unparsed."
+  {:malli/schema [:=> [:cat :map] :any]}
   [{:keys [timestamp type details raw]}]
   (let [type-class      (or (get type-colors type) "text-text-400")
         emphasis?       (contains? #{"LAUNCH" "COMPLETE" "ERROR"} type)
@@ -175,6 +188,9 @@
 
    lines      — seq of log entry maps
    max-height — CSS max-height (default \"70vh\")"
+  {:malli/schema [:function
+                  [:=> [:cat :any] :any]
+                  [:=> [:cat :any :any] :any]]}
   ([lines] (log-container lines "70vh"))
   ([lines max-height]
    [:div {:class "bg-base-900 rounded overflow-hidden"}
@@ -193,6 +209,9 @@
 
    message  — primary text
    subtitle — optional secondary text"
+  {:malli/schema [:function
+                  [:=> [:cat :any] :any]
+                  [:=> [:cat :any :any] :any]]}
   ([message] (empty-state message nil))
   ([message subtitle]
    [:div {:class "py-8 px-4 text-center text-text-500"}
@@ -210,6 +229,7 @@
    label    — button text
    active?  — currently active?
    on-click — Datastar `data-on-click` handler string"
+  {:malli/schema [:=> [:cat :any :any :any] :any]}
   [label active? on-click]
   [:button {:class (str "px-2 py-1 text-xs font-mono rounded border "
                         "transition-colors "
@@ -225,6 +245,9 @@
    label    — button text
    on-click — Datastar `data-on-click` handler string
    variant  — `:primary` | `:secondary`"
+  {:malli/schema [:function
+                  [:=> [:cat :any :any] :any]
+                  [:=> [:cat :any :any :any] :any]]}
   ([label on-click] (action-button label on-click :secondary))
   ([label on-click variant]
    (let [class (case variant

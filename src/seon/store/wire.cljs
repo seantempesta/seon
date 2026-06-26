@@ -53,6 +53,9 @@
 
 (schema/register! ::sock-path [:string {:min 1}])
 (schema/register! ::store-path [:string {:min 1}])
+;; The pod's datahike conn handle the listen adapter subscribes for — an
+;; opaque runtime value (third-party boundary), hence :any.
+(schema/register! ::conn :any)
 
 (schema/register! ::store-id-request [:map [::sock-path ::sock-path]])
 ;; A datahike config map — third-party boundary shape.
@@ -159,6 +162,9 @@
    worst case: 5 × 2s rpc timeout, 500ms backoff between attempts).
    Resolves to the reply map on success; throws a clear, actionable
    error once the budget is exhausted."
+  ;; Resolves to the wire-server reply map (a wire/rpc return — third-party
+  ;; boundary), hence the :any return.
+  {:malli/schema [:=> [:cat] :any]}
   []
   (await
    ((fn ^:async attempt [n]
@@ -410,6 +416,8 @@
 
    Map-in: `{::conn <conn> ::sock-path <path>?}`. Returns a Promise of
    the initial subscription handle (or nil if already started)."
+  {:malli/schema [:=> [:cat [:map [::conn ::conn]
+                                  [::sock-path {:optional true} ::sock-path]]] :any]}
   [{::keys [conn sock-path] :or {sock-path default-sock-path}}]
   (if (:started? @!adapter)
     (do (log/info-console! "seon.store.wire"

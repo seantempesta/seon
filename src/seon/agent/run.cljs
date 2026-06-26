@@ -122,6 +122,7 @@
   "True iff `run-id` was opened by THIS pod process (its `result/<id>` eval
    vars are live in the current runtime). False for a run reconstructed from
    the store on a prior boot."
+  {:malli/schema [:=> [:catn [:seon.agent.run/id :seon.agent.run/id]] :boolean]}
   [run-id]
   (contains? @!runs-this-process run-id))
 

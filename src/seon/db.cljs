@@ -355,6 +355,12 @@
   []
   (internal/current-agent-id))
 
+;; Slot shapes for the two scope fns below (named-positional :catn slots
+;; reference a registered shape). `::thunk` is the 0-arg fn run within the
+;; scope — an opaque closure, hence :any.
+(schema/register! ::thunk      :any)
+(schema/register! ::tx-context :map)
+
 (defn with-agent
   "Establish an agent-id scope for the dynamic extent of `f` (a 0-arg
    fn). Inside `f` — including across `await`s and any Promises it
@@ -364,6 +370,7 @@
 
      (db/with-agent agent-id
        (fn [] (db/transact! {::db/tx-data [...]})))   ; tx tagged with agent-id"
+  {:malli/schema [:=> [:catn [::agent-id :string] [::thunk ::thunk]] :any]}
   [agent-id f]
   (internal/run-with-agent agent-id f))
 
@@ -376,6 +383,7 @@
      (db/with-tx-context
        {::db/origin :agent ::db/agent-id agent-id}
        (fn [] (db/transact! {::db/tx-data [...]})))   ; auto-tagged"
+  {:malli/schema [:=> [:catn [::tx-context ::tx-context] [::thunk ::thunk]] :any]}
   [ctx-map f]
   (internal/run-with-tx-context ctx-map f))
 
@@ -1081,6 +1089,7 @@
 
 (defn tx-meta-datahike-schema
   "Datahike schema entries for the 7 `:seon.db/*` tx-meta attrs."
+  {:malli/schema [:=> [:cat] [:vector :any]]}
   []
   (internal/tx-meta-datahike-schema))
 
@@ -1101,6 +1110,10 @@
 (defn assert-preconditions!
   "Validate boot preconditions (conn has `:keep-history? true`; tx-meta
    attrs registered). Throws ex-info on failure. Called at agent boot."
+  {:malli/schema
+   [:function
+    [:=> [:cat] :boolean]
+    [:=> [:catn [::opts [:map [::conn {:optional true} ::conn]]]] :boolean]]}
   ([] (assert-preconditions! {}))
   ([{::keys [conn] :or {conn *conn*}}]
    (internal/assert-preconditions! conn)))

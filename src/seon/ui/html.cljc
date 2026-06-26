@@ -76,11 +76,13 @@
    pre-serialized HTML, inline `<script>` bodies, inline `<style>`,
    etc. ANY caller-supplied content wrapped in `raw` becomes an XSS
    surface — the wrapping signals 'I have escaped this myself'."
+  {:malli/schema [:=> [:cat :any] :any]}
   [s]
   (->Raw (str s)))
 
 (defn raw?
   "True iff `x` was produced by `raw`."
+  {:malli/schema [:=> [:cat :any] :boolean]}
   [x]
   (instance? Raw x))
 
@@ -106,6 +108,7 @@
 
 (defn ^:no-doc escape-html
   "Escape the five HTML-special characters in `s`. Returns a string."
+  {:malli/schema [:=> [:cat :any] :string]}
   [s]
   (str/escape (str s) text-escapes))
 
@@ -287,6 +290,7 @@
 (defn ^:no-doc render-content
   "Render a single child node OR seq-of-children. Returns the
    HTML-string fragment."
+  {:malli/schema [:=> [:cat :any] :string]}
   [x]
   (cond
     (or (nil? x) (false? x))  ""
@@ -306,6 +310,7 @@
 
 (defn ^:no-doc render-element
   "Render a single hiccup vector to an HTML string."
+  {:malli/schema [:=> [:cat :any] :string]}
   [[tag & body]]
   (let [parsed             (parse-tag tag)
         [attrs children]   (if (attrs-map? (first body))

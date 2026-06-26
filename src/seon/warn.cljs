@@ -332,6 +332,7 @@
    NO list to maintain: new core registrations arrive via the boot seed
    (seed origin → hidden), and anything an agent registers is teed in its
    own tx (→ visible), whatever keyword namespace it picks."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]] [:set :keyword]]}
   [db]
   (let [seed-txs (into #{}
                        (map first)

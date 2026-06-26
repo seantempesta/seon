@@ -89,6 +89,7 @@
 
 (defn instrument-error?
   "True when `env` looks like an envelope produced by `report-fn`."
+  {:malli/schema [:=> [:cat :any] :boolean]}
   [env]
   (and (map? env)
        (contains? kind-set (:seon.error/kind env))))
@@ -103,6 +104,7 @@
    which broke the renderer's read-string back to a map. Walking and
    stubbing fns at write-time means we don't depend on the reader's
    tag-handling and we get a faithful round-trip."
+  {:malli/schema [:=> [:cat :any] :string]}
   [v]
   (pr-str
     (walk/postwalk
@@ -179,6 +181,7 @@
   "Convert Malli reporter payload (`type` + `data` map per malli.dev's
    reporter contract) into the agent-facing envelope. Pure data;
    no side effects."
+  {:malli/schema [:=> [:cat :any :map] :map]}
   [report-type {:keys [input output args value schema fn-name arity arities]
                 :as _data}]
   (let [[explain-schema explain-value kind]
@@ -242,6 +245,7 @@
    an ex-info whose ex-data IS the envelope, so the throw flows
    through cljs.js → raw-eval reject → eval catch → seon.error/->map
    flattening, landing under `:seon.error/data` in the eval result."
+  {:malli/schema [:=> [:cat :any :any] :any]}
   [type data]
   (throw (ex-info (str type) (explain-payload type data))))
 
@@ -259,6 +263,7 @@
   "Format the envelope into the multi-line ;; ERROR block. Returns
    a string (no trailing newline). Renders missing keys gracefully —
    if a column's source key is absent, that line is omitted."
+  {:malli/schema [:=> [:cat :map] :string]}
   [{kind   :seon.error/kind
     fn-sym :seon.error.malli/fn-sym
     arg-i  :seon.error.malli/arg-index

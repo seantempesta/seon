@@ -292,6 +292,9 @@
    `:at` — walks the agent's runs (reverse ref `:seon.agent.run/_agent`) →
    their turns (reverse ref `:seon.agent.turn/_run`). Replaces the old
    sessions→turns walk; nothing is stored. Optional `db` snapshot."
+  {:malli/schema [:function
+                  [:=> [:catn [::agent-id :string]] [:vector :any]]
+                  [:=> [:catn [::agent-id :string] [::db :any]] [:vector :any]]]}
   ([agent-id] (agent-turns agent-id nil))
   ([agent-id db]
    (let [a (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
@@ -304,6 +307,7 @@
 (defn home-ns
   "Return the deterministic home-ns symbol for an agent id.
    `(home-ns \"seon\") => 'my.agent.seon`."
+  {:malli/schema [:=> [:catn [::agent-id :string]] :symbol]}
   [agent-id]
   (symbol (str "my.agent." agent-id)))
 
@@ -318,6 +322,7 @@
 
 (defn host-timezone
   "IANA tz string for the running pod, or 'UTC' if Intl is unavailable."
+  {:malli/schema [:=> [:cat] :string]}
   []
   (try
     (or (some-> (js/Intl.DateTimeFormat.) .resolvedOptions .-timeZone) "UTC")
@@ -327,6 +332,9 @@
   "pr-str a value, truncate to ~2 KB for display in the eval log
    (v1.md §1's three-tier storage rule: DB datoms hold projections,
    not full content)."
+  {:malli/schema [:function
+                  [:=> [:catn [::v :any]] :string]
+                  [:=> [:catn [::v :any] [::limit :int]] :string]]}
   ([v] (truncate-edn v 2048))
   ([v limit]
    (let [s (pr-str v)
@@ -342,6 +350,7 @@
    map carrying `:seon.user/id` / `:seon.agent/id`), resolved by REF
    KIND: the user → `user`, this agent itself → `assistant`, any other
    agent → `agent-<id>`."
+  {:malli/schema [:=> [:catn [::from :any] [::own-id :string]] :string]}
   [from own-id]
   (cond
     (:seon.user/id from)             "user"
@@ -402,6 +411,9 @@
    silently-clipped render. Operates on the ALREADY-stringified result
    (`:seon.eval/result-edn` is a pr-str string), so no re-quoting.
    Nil-safe."
+  {:malli/schema [:function
+                  [:=> [:catn [::s :any]] :string]
+                  [:=> [:catn [::s :any] [::limit :int]] :string]]}
   ([s] (cap-result s eval-render-cap))
   ([s limit]
    (let [s (str s)
@@ -446,6 +458,10 @@
    one citable, row-capped, `result/<id>`-dereferenceable component, so
    it earns the larger cap (echoed source + stdout stay at the smaller
    [[eval-render-cap]])."
+  {:malli/schema [:function
+                  [:=> [:catn [::s :any]] :string]
+                  [:=> [:catn [::s :any] [::limit :int]] :string]
+                  [:=> [:catn [::s :any] [::limit :int] [::eid :any]] :string]]}
   ([s] (cap-result-body s result-body-render-cap nil))
   ([s limit] (cap-result-body s limit nil))
   ([s limit eid]
@@ -595,6 +611,9 @@
    the form. The repair `↻ auto-balanced …` breadcrumb (when a span was
    parinfer-repaired) rides in the preamble, keeping a wrong-but-valid
    repair catchable."
+  {:malli/schema [:function
+                  [:=> [:catn [::row :map]] :string]
+                  [:=> [:catn [::row :map] [::prior? :boolean]] :string]]}
   ([row] (format-eval-row row false))
   ([{src        :seon.eval/source
      ok?        :seon.eval/ok?
@@ -724,6 +743,13 @@
    ref kind. Default {:seon.agent/n 50}. Optional `:seon.db/db` — the
    composer threads its render snapshot here so every section reads the
    SAME db value."
+  {:malli/schema [:function
+                  [:=> [:cat] [:vector :any]]
+                  [:=> [:catn [::opts [:map
+                                       [:seon.agent/n  {:optional true} :int]
+                                       [:seon.agent/id {:optional true} :string]
+                                       [:seon.db/db    {:optional true} :any]]]]
+                   [:vector :any]]]}
   ([] (messages {}))
   ([{:seon.agent/keys [n id] db :seon.db/db :or {n 50}}]
    (let [id     (resolve-id id)
@@ -753,6 +779,12 @@
 (defn current-turn
   "Most-recent :seon.agent.turn the agent owns — the latest by `:at`
    (the one that's :running, or the last :done if no turn is open)."
+  {:malli/schema [:function
+                  [:=> [:cat] :any]
+                  [:=> [:catn [::opts [:map
+                                       [:seon.agent/id {:optional true} :string]
+                                       [:seon.db/db    {:optional true} :any]]]]
+                   :any]]}
   ([] (current-turn {}))
   ([{:seon.agent/keys [id] db :seon.db/db}]
    (let [id (resolve-id id)]
@@ -764,6 +796,7 @@
    cross-run read (evals from a run opened by a PRIOR pod process render
    behind a resume boundary). Walks agent → runs → turns → evals. Optional
    `db` snapshot."
+  {:malli/schema [:=> [:catn [::agent-id :string] [::db :any]] [:vector :map]]}
   [agent-id db]
   (vec
     (for [t (agent-turns agent-id db)
@@ -776,6 +809,13 @@
   "Last N :seon.eval entries for the agent, oldest-first. Walks the agent's
    turns → :seon.agent.turn/evals. Default {:seon.agent/n 20}. Optional
    `:seon.db/db` snapshot."
+  {:malli/schema [:function
+                  [:=> [:cat] [:vector :any]]
+                  [:=> [:catn [::opts [:map
+                                       [:seon.agent/n  {:optional true} :int]
+                                       [:seon.agent/id {:optional true} :string]
+                                       [:seon.db/db    {:optional true} :any]]]]
+                   [:vector :any]]]}
   ([] (evals {}))
   ([{:seon.agent/keys [n id] db :seon.db/db :or {n 20}}]
    (let [id (resolve-id id)
@@ -791,6 +831,12 @@
    ns (via `(ns …)`) shows up here on the next call. See
    docs/seon/concepts/reactive-context. Optional `:seon.db/db`
    snapshot (the composer threads its render db here)."
+  {:malli/schema [:function
+                  [:=> [:cat] :any]
+                  [:=> [:catn [::opts [:map
+                                       [:seon.agent/id {:optional true} :string]
+                                       [:seon.db/db    {:optional true} :any]]]]
+                   :any]]}
   ([] (current-ns {}))
   ([{:seon.agent/keys [id] db :seon.db/db}]
    (let [id (resolve-id id)
@@ -807,6 +853,11 @@
   "Pull the agent's :seon.agent/sections vector with each :seon.ctx entity
    inlined. Sorted by :seon.ctx/priority. Useful for inspection
    and for the agent's layout-editing flow."
+  {:malli/schema [:function
+                  [:=> [:cat] [:vector :map]]
+                  [:=> [:catn [::opts [:map
+                                       [:seon.agent/id {:optional true} :string]]]]
+                   [:vector :map]]]}
   ([] (ctx-entities {}))
   ([{:seon.agent/keys [id]}]
    (let [id (resolve-id id)]
@@ -1571,6 +1622,7 @@
                        sections)
 
    Smallest priority renders first."
+  {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (into
    ;; SOUL.md + AGENTS.md as generic file-sections — a present file → its
@@ -1644,6 +1696,7 @@
    bridge's EDN-string storage encoding). Code-default sections pass
    through unchanged. Public: `seon.ctx.your-entity` calls it to render
    the agent's own ctx vector."
+  {:malli/schema [:=> [:catn [::section :map]] :map]}
   [section]
   (cond-> section
     (contains? section :seon.render/ai)
@@ -1654,6 +1707,7 @@
 (defn agent-sections
   "The agent's OWN section maps from its pulled entity — slot-decoded,
    sorted by priority. `entity` is the once-pulled agent entity map."
+  {:malli/schema [:=> [:catn [::entity :map]] [:vector :map]]}
   [entity]
   (->> (:seon.agent/sections entity)
        (map decode-section)
@@ -1773,6 +1827,7 @@
    The root carries the agent entity + a stash of its sorted children;
    the root's slot fns ([[render-context-ai]] / [[render-context-html]])
    render each child through the injected recursion handle."
+  {:malli/schema [:=> [:catn [::ctx :map]] :map]}
   [{:seon.db/keys [db] :seon.agent/keys [id] :as ctx}]
   (let [entity   (pull-agent-entity db id)
         children (gather-sections (core-default-ctx) (agent-sections entity))]
@@ -1848,6 +1903,7 @@
    inserted at the static stable→volatile `:seon.ctx/priority` transition
    (priority ≤ [[stable-priority-max]] = the cacheable prefix). [[split-context]]
    recovers the two halves on the provider side."
+  {:malli/schema [:=> [:catn [::input :map]] :string]}
   [{:seon.render/keys [node render]}]
   (let [rendered  (rendered-section-texts render (:seon.ctx/children node))
         bracketed (mapv (fn [s]
@@ -1874,6 +1930,7 @@
   "The ROOT renderable's :html slot — renders each child's html twin via the
    injected handle, one card per renderable (eval cards short, per-item — NOT
    a section-level dump), in render order."
+  {:malli/schema [:=> [:catn [::input :map]] :seon.render.live-tile/hiccup]}
   [{:seon.render/keys [node render]}]
   (into [:div {:class "flex flex-col gap-2"}]
         (->> (:seon.ctx/children node)
@@ -1889,6 +1946,7 @@
    contributes (left pane, foldable) + its html twin (right pane, one card
    per renderable). Derives from the SAME `context-root` + `render` the
    prompt uses, so the debug view can never drift from the agent's context."
+  {:malli/schema [:=> [:catn [::ctx :map]] :map]}
   [{:as ctx}]
   (let [root     (context-root ctx)
         children (:seon.ctx/children root)

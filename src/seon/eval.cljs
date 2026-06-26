@@ -239,6 +239,7 @@
    `init-bootstrap!` after the cljs.js loader's analyzer setup
    completes. Safe to call repeatedly; only reinstalls after a
    hot-reload (when `init-version` has rotated)."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (when (not= @!warning-dispatcher-version init-version)
     (set! ana/*cljs-warning-handlers*
@@ -265,6 +266,7 @@
    Callers (`seon.repl/ensure-bootstrap!`, `seon.client/start-agent!`)
    pair the result with `init-version` to detect stale-after-reload
    state; see [[seon.repl/!init-version]]."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (let [state          (cljs/empty-state)
         ;; SEON_RUNTIME_ROOT-aware: a downstream pod running from its
@@ -905,10 +907,10 @@
    A form that hangs on a never-resolving Promise returns
      {:ok false :error {:seon.error/message \"eval timed out after Nms\" …}}
    The underlying form keeps running — see `race-timeout` docstring."
-  ;; UNSPECCED on purpose: `compile-state` is the opaque cljs.js bootstrap
-  ;; runtime handle, and the return is the bare-keyword REPL result map
-  ;; (`:ok`/`:value`/`:ns`/`:error`) — no namespaced-data contract to spec
-  ;; (the no-:any rule's documented runtime-handle boundary exception).
+  {:malli/schema
+   [:function
+    [:=> [:catn [::compile-state :any] [::form-str :any]] :any]
+    [:=> [:catn [::compile-state :any] [::form-str :any] [::opts :any]] :any]]}
   ([compile-state form-str]
    (eval compile-state form-str nil))
   ([compile-state form-str {:keys [ns analyze-deps? timeout-ms]
@@ -960,8 +962,7 @@
   "Stash a raw value (any type) on globalThis keyed by the eval-id.
    No pr-str round-trip — value-type-agnostic. Soft-fails on impossible
    sets (logs + ignores)."
-  ;; UNSPECCED on purpose: `value` is any runtime value (datahike DB handles,
-  ;; JS objects) — value-type-agnostic by design; a runtime-value boundary.
+  {:malli/schema [:=> [:catn [::eval-id :any] [::value :any]] :any]}
   [eval-id value]
   (try
     (js/Reflect.set js/globalThis (result-key eval-id) value)
@@ -986,8 +987,7 @@
      resume boundary in the transcript marks where that history ends;
    - the eval ERRORED (it never produced a value);
    - no such eval id exists (typo)."
-  ;; UNSPECCED on purpose: returns the prior eval's live VALUE (any runtime
-  ;; type) or an error map — an opaque-value boundary, not a data contract.
+  {:malli/schema [:=> [:catn [::id :any]] :any]}
   [id]
   (let [id-str (if (keyword? id) (name id) (str id))
         k      (result-key id-str)]
@@ -1131,8 +1131,8 @@
    the vars resolve at runtime (live-proven). So we do NOT trust the
    eval `:ok`; we verify success by PROBING that the refer'd `complete`
    resolves to a fn in the home ns, and only throw when that probe fails."
-  ;; UNSPECCED on purpose: `compile-state` is the opaque cljs.js bootstrap
-  ;; runtime handle (the no-:any rule's documented boundary exception).
+  {:malli/schema
+   [:=> [:catn [::compile-state :any] [::agent-ns-sym :any] [::agent-id :any]] :any]}
   [compile-state agent-ns-sym _agent-id]
   (let [setup-src
         (str "(ns " agent-ns-sym
@@ -1865,6 +1865,10 @@
    appending an elision marker reporting how many chars were dropped.
    Nil-safe. Mirrors `seon.agent/cap-result` but applies the larger
    store-time cap at the persistence boundary."
+  {:malli/schema
+   [:function
+    [:=> [:catn [::s :any]] :string]
+    [:=> [:catn [::s :any] [::limit :int]] :string]]}
   ([s] (cap-edn s store-edn-cap))
   ([s limit]
    (let [s (str s)
@@ -1918,6 +1922,7 @@
    lands separately in `:seon.eval/error-data` for the Malli-instrument
    path. `:seon.error/raw`/`stack` are dropped (opaque + unreadable to the
    agent-side reader)."
+  {:malli/schema [:=> [:catn [::err :any]] :string]}
   [err]
   (let [msg  (deepest-error-message err)
         ;; The kind may sit at the top level (the synthesized read/
@@ -2060,6 +2065,7 @@
    value nested inside a query result is sanitized too, not just a
    top-level one. Pure; never throws (a walk failure degrades to the
    opaque summary for that node)."
+  {:malli/schema [:=> [:catn [::x :any]] :any]}
   [x]
   (try
     (cond
@@ -2106,6 +2112,7 @@
    common case, and every row written post-fix) is returned untouched.
    Never throws — an unreadable string is returned verbatim (the value the
    agent already sees today)."
+  {:malli/schema [:=> [:catn [::s :any]] :any]}
   [s]
   (if (and (string? s)
            (or (str/includes? s "#datahike/")
@@ -2141,6 +2148,7 @@
    (pre-pr-str) — the only point in the pipeline where the original row
    count is known. Pure: stores nothing, does not touch the live-result
    stash. Never throws."
+  {:malli/schema [:=> [:catn [::eval-id :string] [::value :any]] :string]}
   [eval-id value]
   (clip-result-body
     eval-id
@@ -2221,6 +2229,7 @@
    `(seon.db/current-tx-context)` (eval-batch! opens the per-eval
    scope with `:seon.db/agent-id` + `:seon.db/eval-id` + `:seon.db/
    origin :agent`, plus whatever the caller layered above)."
+  {:malli/schema [:=> [:catn [::record-request :map]] :any]}
   [{:keys [eval-id turn-id at narration source result duration-ms ns tee output]}]
   (let [conn     db/*conn*
         eval-map (cond-> {:seon.eval/id          eval-id
@@ -2387,6 +2396,7 @@
    `*1` inside a larger form, or `(do *ns*)` wrapping) are NOT
    intercepted; they fail or silently nil out on their own (known
    parity boundary) and the taught replacement covers them too."
+  {:malli/schema [:=> [:catn [::source :any] [::current-ns :any]] :any]}
   [source current-ns]
   (let [s (str/trim (or source ""))]
     (cond
@@ -2745,6 +2755,14 @@
 
    The caller reads :n-ok for 'progress made this turn' and :n-fail to
    surface to the agent's warnings tile."
+  {:malli/schema
+   [:=> [:catn [::compile-state :any]
+               [::parsed :any]
+               [::agent-ns-sym :any]
+               [::agent-id :string]
+               [::turn-id :string]
+               [::run-id :any]]
+        :map]}
   [compile-state parsed agent-ns-sym agent-id turn-id run-id]
   (let [;; §8b WORK FENCE — assert, in ONE atomic tx at the writer, that the
         ;; agent STILL owns run-id BEFORE any work. A supersede/watchdog-close

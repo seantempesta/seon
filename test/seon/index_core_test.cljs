@@ -87,13 +87,15 @@
         "query is specced → :seon.fn/spec present")
     (is (some? (:seon.fn/spec cai))
         "current-agent-id is specced (-> [:maybe :string]) → :seon.fn/spec present")
-    ;; register! has NO :malli/schema → no spec key (honestly unspecced; `v` is a
-    ;; Malli FORM, not a fixed data shape — the stable unspecced exemplar).
-    (is (not (contains? register :seon.fn/spec))
-        "register! is honestly unspecced → :seon.fn/spec ABSENT")
-    ;; but it still gets real source (file-read, not stub).
+    ;; register! is now specced too — the spec-everything sweep gave every public
+    ;; fn a :malli/schema (register!'s `v` slot is :any: a Malli FORM, not a fixed
+    ;; data shape). So :seon.fn/spec is PRESENT (it was the unspecced exemplar
+    ;; before the sweep; "spec what we can, :any where opaque").
+    (is (some? (:seon.fn/spec register))
+        "register! is specced (spec-everything) → :seon.fn/spec present")
+    ;; and it still gets real source (file-read, not stub).
     (is (str/starts-with? (:seon.fn/source register) "(defn register!")
-        "register! still gets REAL source despite being unspecced")))
+        "register! gets REAL source (file-read, not stub)")))
 
 (deftest real-arglists-not-mangled
   ;; The parser recovers arglists from the REAL source, not the

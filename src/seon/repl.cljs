@@ -95,6 +95,7 @@
    init runs. That solves KI-2 — hot-reloads of `seon.eval` rotate
    the version, so the core-iteration loop doesn't have to
    manually nil the atom."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (if (and @!compile-state
            (identical? @!init-version seval/init-version))

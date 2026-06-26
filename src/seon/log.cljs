@@ -152,12 +152,19 @@
   "stderr log line — boot errors, request failures, anything you want
    in `logs/pod.log` but NOT in the structured file (this skips
    [[error!]] entirely)."
+  {:malli/schema [:=> [:cat :any :any [:* :any]] :any]}
   [source msg & extra]
   (apply console! :error source msg extra))
 
-(defn warn-console!  [source msg & extra] (apply console! :warn  source msg extra))
-(defn info-console!  [source msg & extra] (apply console! :info  source msg extra))
-(defn debug-console! [source msg & extra] (apply console! :debug source msg extra))
+(defn warn-console!
+  {:malli/schema [:=> [:cat :any :any [:* :any]] :any]}
+  [source msg & extra] (apply console! :warn  source msg extra))
+(defn info-console!
+  {:malli/schema [:=> [:cat :any :any [:* :any]] :any]}
+  [source msg & extra] (apply console! :info  source msg extra))
+(defn debug-console!
+  {:malli/schema [:=> [:cat :any :any [:* :any]] :any]}
+  [source msg & extra] (apply console! :debug source msg extra))
 
 ;; ============================================================
 ;; Schemas
@@ -348,9 +355,15 @@
                   :any]}
   [data] (log! :error data))
 
-(defn warn!  [data] (log! :warn data))
-(defn info!  [data] (log! :info data))
-(defn debug! [data] (log! :debug data))
+(defn warn!
+  {:malli/schema [:=> [:cat :map] :any]}
+  [data] (log! :warn data))
+(defn info!
+  {:malli/schema [:=> [:cat :map] :any]}
+  [data] (log! :info data))
+(defn debug!
+  {:malli/schema [:=> [:cat :map] :any]}
+  [data] (log! :debug data))
 
 ;; ============================================================
 ;; tail — read the file. No ring, no magic. The same bytes the agent

@@ -83,6 +83,9 @@
    [:seon.ai/tool-calls                 {:optional true} :seon.ai/tool-calls]
    [:seon.ai/provider-fields            {:optional true} :seon.ai/provider-fields]])
 
+;; agent-adapter request-option overrides (e.g. {:seon.ai/temperature 0.2}).
+(schema/register! :seon.ai.openai-compat/opts :map)
+
 ;; ============================================================
 ;; Config — the shipped defaults. The :seon.ai/config row (read per
 ;; call) overrides these; explicit request opts override the row.
@@ -414,6 +417,10 @@
    `{:text \"…\" :seon.ai/raw <full response>}` — plus a top-level
    `:seon.ai/error` (see the `:seon.ai/error` schema) when the call
    failed (timeout, connection error, HTTP error, parse error)."
+  {:malli/schema
+   [:function
+    [:=> [:cat] :any]
+    [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
   ([opts]
    (fn [ctx-text] (complete+wrap opts ctx-text))))

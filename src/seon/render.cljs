@@ -539,6 +539,7 @@
   "A node's stable HANDLE — its own identity attr (dispatch by presence), or a
    section's name. Shown in the transcript / inspector so the agent can
    reference or override it. Never a stored :seon.render/id."
+  {:malli/schema [:=> [:cat :any] :any]}
   [node]
   (or (:seon.agent.message/id node)
       (:seon.eval/id node)
@@ -551,6 +552,7 @@
    stamped when the row was first asserted (UNIVERSAL; no per-kind :at attr).
    Per-node fallback for an arbitrary pulled entity (the events query joins it
    in once for the whole list)."
+  {:malli/schema [:=> [:cat :any :any] :any]}
   [db node]
   (when-let [eid (:db/id node)]
     (ffirst (db/query {:seon.db/db db
@@ -647,6 +649,7 @@
    dispatch. Returns a String (`:seon.render/ai`) or hiccup
    (`:seon.render/html`). A hidden node contributes a one-line prune note (ai)
    or nothing (html); a throwing fn renders a legible error, never crashes."
+  {:malli/schema [:=> [:cat :keyword :map :any] :any]}
   [view ctx node]
   (if (:seon.render/hidden? node)
     (when (= view :seon.render/ai)

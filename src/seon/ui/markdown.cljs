@@ -201,6 +201,9 @@
   "Render `text` as a vector of hiccup blocks. Returns a `[:div ...]`
    wrapper so it drops into any parent layout. Pass `:wrap-class` to
    override the outer div's classes."
+  {:malli/schema [:function
+                  [:=> [:cat :any] :any]
+                  [:=> [:cat :any :any] :any]]}
   ([text] (md->hiccup text nil))
   ([text {:keys [wrap-class] :or {wrap-class "text-xs"}}]
    (let [text   (or text "")

@@ -35,6 +35,7 @@
   "The hits vector stashed by the active `with-hits` scope, or nil outside any
    scope (the default-OFF path — no prefetch ran, nothing called `with-hits`).
    `seon.ctx.relevant/relevant-source-section` reads this synchronously."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (let [store (.getStore retrieval-als)]
     ;; Outside a `.run` the JS getStore returns undefined → nil in CLJS. Be
@@ -46,5 +47,6 @@
    stashes `hits` (the `:seon.embed/hits` vector from `embed/search-pull`, or
    nil on a fail-soft prefetch) so `(current-hits)` returns it across every
    await inside `f`. Returns whatever `f` returns."
+  {:malli/schema [:=> [:cat :any :any] :any]}
   [hits f]
   (.run retrieval-als hits f))

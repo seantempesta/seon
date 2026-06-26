@@ -27,6 +27,7 @@
    `render-ai`/`render-html` AND `seon.agent/test-block-ai`
    (whole-namespace render) derive their glyph/pill from it, so the
    `last-passed-at`/`last-failed-at` → ✓/✗/• logic lives in ONE place."
+  {:malli/schema [:=> [:cat :map] :map]}
   [{:seon.test/keys [last-passed-at last-failed-at last-failure-summary]}]
   (cond
     (and (nil? last-passed-at) (nil? last-failed-at))
@@ -45,6 +46,7 @@
    place the ✓/✗/• literals are defined. `✓` last run passed, `✗` last
    run failed, `•` no run recorded. Used by this ns's renderers and by
    `seon.agent`'s whole-namespace render so the two never diverge."
+  {:malli/schema [:=> [:cat :map] :string]}
   [entity]
   (let [{:keys [ran? passing?]} (test-status entity)]
     (cond
@@ -58,6 +60,7 @@
    `;; • test (no run recorded)`. Built on `status-glyph` so the glyph
    literals stay single-sourced; shared by `render-ai` here and
    `seon.agent/test-block-ai`."
+  {:malli/schema [:=> [:cat :map] :string]}
   [entity]
   (let [{:keys [ran? passing? failure-summary]} (test-status entity)
         glyph (status-glyph entity)]
