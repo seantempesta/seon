@@ -89,19 +89,29 @@
 (defn status-view
   "The agent's status tile."
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [state   (derive/derive-state db id)
+  (let [q       (fn [query] (db/query {:seon.db/db db :seon.db/query query :seon.db/args [id]}))
+        state   (derive/derive-state db id)
         turns   (derive/agent-turn-count db id)
-        ;; query (not a lookup-ref) so the tile time-travels on an as-of db.
-        purpose (db/query {:seon.db/db db
-                           :seon.db/query '[:find ?p . :in $ ?a :where
-                                            [?e :seon.agent/id ?a] [?e :seon.agent/purpose ?p]]
-                           :seon.db/args [id]})]
+        ;; queries (not lookup-refs) so the panel time-travels on an as-of db.
+        purpose (q '[:find ?p . :in $ ?a :where [?e :seon.agent/id ?a] [?e :seon.agent/purpose ?p]])
+        todos   (or (q '[:find (count ?td) . :in $ ?a :where
+                         [?e :seon.agent/id ?a]
+                         [?td :seon.agent.todo/owner ?e] [?td :seon.agent.todo/status :open]]) 0)
+        msgs    (or (q '[:find (count ?m) . :in $ ?a :where
+                         [?e :seon.agent/id ?a]
+                         (or [?m :seon.agent.message/to ?e] [?m :seon.agent.message/from ?e])]) 0)
+        metric  (fn [label v]
+                  [:div [:div {:class "text-text-500"} label]
+                   [:div {:class "text-sm text-text-100 tabular-nums"} v]])]
     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
      [:div {:class "flex items-center justify-between mb-2"}
       (comp/status-dot state)
-      [:span {:class "text-xs text-text-500 tabular-nums"} (str "turn " turns)]]
-     [:div {:class "text-sm text-text-50 font-medium leading-tight"} (or purpose "—")]
-     [:div {:class "text-2xs text-text-500 mt-1"} id]]))
+      [:span {:class "text-2xs text-text-500"} id]]
+     [:div {:class "text-sm text-text-50 font-medium leading-tight mb-3 break-words"} (or purpose "—")]
+     [:div {:class "grid grid-cols-3 gap-2 text-2xs"}
+      (metric "turns" turns)
+      (metric "todos" todos)
+      (metric "msgs" msgs)]]))
 
 (defn commentary-view
   "The shared REPL transcript (demoted chat) — recent messages to/from the agent."
@@ -167,10 +177,15 @@
   "The hero — the agent's OWN live tile (welcome default or wired content),
    itself DB-driven + SCI-bounded by `seon.render/render-agent-tile`."
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  [:div {:class "rounded border border-base-700 bg-base-850 p-4 h-full overflow-auto"}
-   (or (:seon.render/hiccup
-         (render/render-agent-tile {:seon.db/db db :seon.agent/id id}))
-       [:div {:class "text-text-500 text-xs"} "no tile"])])
+  ;; center the (often-sparse) agent render so a tall hero looks intentional, and
+  ;; constrain width (min-w-0 / break-words / overflow-x-hidden) so nothing clips
+  ;; off the right edge on a phone.
+  [:div {:class (str "rounded border border-base-700 bg-base-850 p-4 sm:p-6 h-full "
+                     "flex flex-col justify-center overflow-y-auto overflow-x-hidden")}
+   [:div {:class "min-w-0 max-w-full break-words"}
+    (or (:seon.render/hiccup
+          (render/render-agent-tile {:seon.db/db db :seon.agent/id id}))
+        [:div {:class "text-text-500 text-xs"} "no tile"])]])
 
 ;; The core views resolvable by SYMBOL. Core symbols map here (direct, fast);
 ;; AGENT-authored symbols resolve via SCI (`render-sci`). This is the resolution
@@ -442,7 +457,10 @@
                 [:a {:class "text-amber-400 hover:text-amber-300" :href href} label]
                 [:span {:class "text-text-500 opacity-30"} label]))]
     [:div {:class "flex items-center gap-2 text-2xs"}
-     (a "◀" (when (and idx (pos? idx)) (url (nth ts (dec idx)))))
+     (a "◀" (cond
+              (nil? t)             (when (seq ts) (url (last ts)))   ; live → pause at latest frame
+              (and idx (pos? idx)) (url (nth ts (dec idx)))
+              :else                nil))
      (if (nil? t)
        [:span {:class "inline-flex items-center gap-1 text-success"}
         [:span {:class "w-1.5 h-1.5 rounded-full bg-success animate-pulse"}] "live"]
