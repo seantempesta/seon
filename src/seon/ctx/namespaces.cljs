@@ -107,10 +107,13 @@
    code. Just two set-up tools, shown as EXAMPLES (both already aliased in
    the agent's home ns), not an exhaustive API dump. This is the clear
    EDITABLE def to extend.
-     - `:seon.db` — the database API every agent uses for arbitrary reads
-       and writes: the datalog cheat sheet, per-fn worked examples
-       (query/pull/entity/transact!/store-inventory), the lookup-ref and
-       ref-join idioms. Its real source IS the db manual.
+     - `:seon.db.examples` — the runnable DB manual every agent copies from:
+       worked recipes (schema/register!, transact!, query, pull/entity,
+       store-inventory) over a neutral demo domain, all 100% AMBIENT (no call
+       threads conn). It is the agent-facing API reference. The raw `seon.db`
+       source is deliberately NOT dumped — it stays indexed + grep-able, but
+       its internal API threads `:seon.db/conn`/`:seon.db/db`, which agents
+       must never copy; the worked-example layer shows only the ambient form.
      - `:seon.agent.todo` — the work-list tool an agent calls directly:
        `register!` per attr, map-in/map-out `:malli/schema` fn shapes,
        error-as-value envelopes, the todo verbs the system prompt teaches
@@ -126,7 +129,7 @@
    see `seon.client/ns-row`) and [[namespaces-section]] (which renders them
    FULL while the rest of the framework is DROPPED from the rendered
    section — still indexed + searchable)."
-  #{:seon.db :seon.agent.todo})
+  #{:seon.db.examples :seon.agent.todo})
 
 (defn in-full-source-whitelist?
   "True when `ns-name` (string, keyword, or symbol) is one of the curated
@@ -186,9 +189,9 @@
 
 (def ^:private namespaces-header
   (str "; Real loaded code. Shown in FULL: YOUR OWN namespace (your live\n"
-       "; workspace — the most important), and a couple of set-up tools as\n"
-       "; EXAMPLES — db (the database) and todo (your work list), both\n"
-       "; already aliased in your namespace. The rest of the framework is\n"
+       "; workspace — the most important), and a couple of set-up examples —\n"
+       "; a runnable DB manual (db.examples, copyable recipes using your db\n"
+       "; alias) and your work list (todo). The rest of the framework is\n"
        "; NOT dumped here on purpose — it stays indexed and one search away,\n"
        "; so you are not buried in code you don't need. Full namespaces are\n"
        "; ordered by recency (most-recently-modified last)."))

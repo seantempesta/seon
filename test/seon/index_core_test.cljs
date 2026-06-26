@@ -179,7 +179,7 @@
   ;; Curated render (LEAN whitelist): the seon.* FRAMEWORK BULK keeps the
   ;; minimal `(ns x)` stub (it is DROPPED from render, never shown as a body),
   ;; while EACH curated seon.* whitelist member
-  ;; (seon.ctx.namespaces/full-source-whitelist = #{:seon.db :seon.agent.todo})
+  ;; (seon.ctx.namespaces/full-source-whitelist = #{:seon.db.examples :seon.agent.todo})
   ;; force-stores its REAL FULL FILE TEXT (it renders FULL, so the boot
   ;; indexer reads the file — probing .cljs then .cljc — the same
   ;; seon.ctx.namespaces/full-source-ns? rule the renderer uses, one writer no
@@ -199,10 +199,15 @@
     (is (= "(ns seon.eval)" eval-ns)
         "seon.eval (framework bulk) source is the minimal (ns x) stub")
     ;; EVERY whitelisted tool carries its REAL full file source, not a stub.
-    (is (full? :seon.db)
-        "seon.db (whitelist) source is its REAL full file text")
+    (is (full? :seon.db.examples)
+        "seon.db.examples (whitelist — the runnable DB manual) source is its REAL full file text")
     (is (full? :seon.agent.todo)
         "seon.agent.todo (whitelist) source is its REAL full file text")
+    ;; seon.db itself is DE-whitelisted — the raw db source is no longer
+    ;; dumped; it drops to the minimal (ns x) stub (still indexed via its
+    ;; member rows). The worked-example layer (seon.db.examples) replaces it.
+    (is (= "(ns seon.db)" (:seon.ns/source (row-for :seon.db)))
+        "seon.db (de-whitelisted) source is the minimal (ns x) stub")
     ;; LEAN: search + fs are NO LONGER whitelisted — they drop to the minimal
     ;; (ns x) stub (still indexed via their member rows below).
     (is (= "(ns seon.agent.search)" (:seon.ns/source (row-for :seon.agent.search)))

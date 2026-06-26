@@ -121,7 +121,7 @@
         (str n " (whitelist member / its -test sibling) is full-source")))
   (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.ctx"
              "seon.warn" "seon.ai" "seon.agent.search" "seon.agent.fs"
-             "seon.agent.searcher" "my.foo.internal"]]
+             "seon.agent.searcher" "seon.db" "my.foo.internal"]]
     (is (false? (ctx-namespaces/full-source-ns? n)) (str n " is NOT full-source"))))
 
 ;; ------------------------------------------------------------
