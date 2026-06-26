@@ -440,11 +440,51 @@
        (js/JSON.stringify #js {:id tile-id :html (html/->string hiccup)})
        "\n\n"))
 
+(defn- latest-eval-summary
+  "The agent's most recent eval source (what it just ran), one-lined + clipped —
+   the 'what it's doing' detail for the activity indicator. nil if it has run
+   nothing in its own ns."
+  [db id]
+  (let [ns-kw (keyword (str "my.agent." id))
+        rows  (db/query {:seon.db/db db
+                         :seon.db/query
+                         '[:find ?src ?at :in $ ?ns :where
+                           [?e :seon.eval/ns ?ns]
+                           [?e :seon.eval/source ?src]
+                           [?e :seon.eval/at ?at]]
+                         :seon.db/args [ns-kw]})
+        latest (last (sort-by #(.getTime ^js (second %)) rows))
+        src    (some-> latest first str str/trim)]
+    (when (and src (seq src)) (clip (str/replace src #"\s+" " ") 52))))
+
+(defn- activity-view
+  "Always-visible 'what the agent is doing NOW', derived live: a state dot +
+   the current turn + (when active) the latest thing it ran. This is the
+   AGENT-activity signal — distinct from the scrubber's live/pinned, which is
+   about time-travel, not what the agent is doing. Rendered into the header's
+   `#tile-<id>:activity` region and patched on every tx via `console-payload`."
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [state   (derive/derive-state db id)
+        turns   (derive/agent-turn-count db id)
+        active? (not= :idle state)
+        detail  (when active? (latest-eval-summary db id))]
+    [:div {:class "flex items-center gap-2 text-2xs min-w-0"}
+     (comp/status-dot state)
+     [:span {:class "text-text-500 shrink-0"} (str "turn " turns)]
+     (when detail
+       [:span {:class "text-eval truncate min-w-0 font-mono"} (str "· " detail)])]))
+
+(defn- activity-region-id [agent-id] (str agent-id ":activity"))
+
 (defn- console-payload
-  "All of a console's tiles as one stream of patches (rendered against `db`)."
+  "All of a console's tiles as one stream of patches (rendered against `db`),
+   PLUS the always-visible header activity region — so 'what the agent is doing'
+   updates live on every tx alongside the tiles."
   [db console-id]
-  (apply str (map (fn [t] (tile-patch (:seon.tile/id t) (render-tile db t)))
-                  (console-tiles db console-id))))
+  (str (tile-patch (activity-region-id console-id)
+                   (activity-view {:seon.db/db db :seon.agent/id console-id}))
+       (apply str (map (fn [t] (tile-patch (:seon.tile/id t) (render-tile db t)))
+                       (console-tiles db console-id)))))
 
 ;; ============================================================
 ;; The DEBUG overlay — a developer view of the agent's CONTEXT, three
@@ -776,9 +816,12 @@
               (nil? t)             (when (seq ts) (url (last ts)))   ; live → pause at latest frame
               (and idx (pos? idx)) (url (nth ts (dec idx)))
               :else                nil))
+     ;; "now" (viewing the current frame), a STEADY dim dot — the pulse is
+     ;; reserved for the agent-activity indicator (header left), so the two
+     ;; aren't confused (this is time-travel state, not what the agent is doing).
      (if (nil? t)
-       [:span {:class "inline-flex items-center gap-1 text-success"}
-        [:span {:class "w-1.5 h-1.5 rounded-full bg-success animate-pulse"}] "live"]
+       [:span {:class "inline-flex items-center gap-1 text-text-400"}
+        [:span {:class "w-1.5 h-1.5 rounded-full bg-text-500"}] "now"]
        [:span {:class "text-warning"} (str "⏸ " (if idx (inc idx) "·") "/" n)])
      (a "▶" (cond (nil? t)                  nil
                   (and idx (< idx (dec n))) (url (nth ts (inc idx)))
@@ -786,11 +829,18 @@
      (when t [:a {:class "text-text-400 hover:text-text-200 ml-1" :href (url nil)} "live"])]))
 
 (defn- header-bar [agent-id t]
-  [:div {:class "flex items-center justify-between mb-3 pb-2 border-b border-base-800"}
-   [:div {:class "flex items-baseline gap-2"}
-    [:span {:class "text-sm font-semibold text-text-50"} "seon"]
-    [:span {:class "text-2xs text-text-500"} agent-id]]
-   [:div {:class "flex items-center gap-3"}
+  [:div {:class "flex items-center justify-between gap-3 mb-3 pb-2 border-b border-base-800"}
+   [:div {:class "flex items-center gap-3 min-w-0"}
+    [:div {:class "flex items-baseline gap-2 shrink-0"}
+     [:span {:class "text-sm font-semibold text-text-50"} "seon"]
+     [:span {:class "text-2xs text-text-500"} agent-id]]
+    ;; ALWAYS-VISIBLE live agent activity — what it's doing right NOW (state ·
+    ;; turn · latest action). A patchable region (`tile-<id>:activity`) the
+    ;; console multiplex re-renders on every tx (see `console-payload`).
+    [:div {:id (str "tile-" (activity-region-id agent-id))
+           :class "min-w-0 flex items-center border-l border-base-800 pl-3"}
+     (activity-view {:seon.db/db @db/*conn* :seon.agent/id agent-id})]]
+   [:div {:class "flex items-center gap-3 shrink-0"}
     (scrubber agent-id t)
     ;; Opens the DEBUG overlay (the agent's context, three regions) over the
     ;; console without a URL change — packetstar toggles `#seon-debug-overlay`
