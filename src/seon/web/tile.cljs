@@ -175,6 +175,41 @@
              (map row (sort-by #(if (= :open (first %)) 0 1) rows)))
        [:div {:class "text-xs text-text-500"} "no todos"])]))
 
+(defn toolkit-view
+  "The agent's OWN toolkit — the fns it has authored in its namespace, so the
+   human watches the harness GROW as a first-class panel. Pure read over the
+   `:seon.fn` rows whose `:seon.ns` is the agent's `my.agent.<id>` namespace."
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [nsname (keyword (str "my.agent." id))
+        rows   (when (contains? (db/installed-schema db) :seon.fn/sym)
+                 (db/query {:seon.db/db db
+                            :seon.db/query
+                            '[:find ?sym ?doc
+                              :in $ ?nsname
+                              :where
+                              [?n :seon.ns/name ?nsname]
+                              [?e :seon.fn/ns ?n]
+                              [?e :seon.fn/sym ?sym]
+                              [(get-else $ ?e :seon.fn/doc "") ?doc]]
+                            :seon.db/args [nsname]}))
+        tools  (sort-by first rows)
+        short  (fn [sym] (let [s (str sym) i (str/index-of s "/")] (if i (subs s (inc i)) s)))
+        row    (fn [[sym doc]]
+                 [:div {:class "text-xs leading-tight flex items-start gap-1.5"}
+                  [:span {:class "text-eval shrink-0"} "ƒ"]
+                  [:div {:class "min-w-0"}
+                   [:span {:class "text-text-100 font-medium"} (short sym)]
+                   (when (seq doc)
+                     [:span {:class "text-text-500 ml-1 break-words"} (clip doc 64)])]])]
+    [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
+     [:div {:class "flex items-center justify-between mb-2"}
+      [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "toolkit"]
+      [:span {:class "text-2xs text-text-500"}
+       (str (count tools) (if (= 1 (count tools)) " tool" " tools"))]]
+     (if (seq tools)
+       (into [:div {:class "flex flex-col gap-1"}] (map row tools))
+       [:div {:class "text-xs text-text-500"} "no tools yet — the agent builds its own"])]))
+
 (defn hero-view
   "The hero — the agent's OWN live tile (welcome default or wired content),
    itself DB-driven + SCI-bounded by `seon.render/render-agent-tile`."
@@ -204,6 +239,7 @@
   {'seon.web.tile/hero-view       hero-view
    'seon.web.tile/status-view     status-view
    'seon.web.tile/todos-view      todos-view
+   'seon.web.tile/toolkit-view    toolkit-view
    'seon.web.tile/commentary-view commentary-view})
 
 ;; ============================================================
@@ -221,6 +257,8 @@
     :seon.render/html 'seon.web.tile/status-view :seon.ctx/priority 20 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":todos") :seon.tile/console agent-id
     :seon.render/html 'seon.web.tile/todos-view :seon.ctx/priority 30 :seon.tile/span 1}
+   {:seon.tile/id (str agent-id ":toolkit") :seon.tile/console agent-id
+    :seon.render/html 'seon.web.tile/toolkit-view :seon.ctx/priority 35 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":commentary") :seon.tile/console agent-id
     :seon.render/html 'seon.web.tile/commentary-view :seon.ctx/priority 40 :seon.tile/span 1}])
 
@@ -498,7 +536,10 @@
   [agent-id]
   [:form {:data-send "1" :data-agent agent-id :class "mt-3 flex gap-2 shrink-0"}
    [:input {:name "text" :type "text" :autocomplete "off"
-            :placeholder "talk to your agent…  —  a (clojure form) evals · prose wakes"
+            ;; The example uses the agent's REAL home-ns alias (`todo`, not
+            ;; `seon.agent.todo`) — agents copy what they see, so the UI teaches
+            ;; the friendly aliases (coordination: R's lean-context ask #1).
+            :placeholder "talk to your agent…  —  prose wakes · a form evals, e.g. (todo/list-open {})"
             :class (str "flex-1 bg-base-900 border border-base-700 rounded px-3 py-1.5 "
                         "text-xs text-text-50 placeholder:text-text-500 focus:border-amber-600 outline-none")}]
    [:button {:type "submit"
