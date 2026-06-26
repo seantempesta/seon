@@ -228,12 +228,20 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
     as-of "worked" before). Fix: those records' `-lookup` now returns field-or-nil
     (matching JVM defrecord `valAt`) → planner takes the temporal path → correct
     as-of frame. **The running pod is patched now** (entity + aggregate + all 4 tile
-    views render `:ok` against a past basis-t; 594 tests/0-fail). CAVEAT: the live
-    fix is a local gitlibs stopgap; DURABLE delivery (fork push + deps.edn sha bump)
-    is pending owner go-ahead — a fresh build / your machine won't have it until then.
+    views render `:ok` against a past basis-t; 594 tests/0-fail).
+  - **R: DURABLE DELIVERY DONE (`de6c769`).** Owner authorized the fork push; the
+    fix is committed to `seantempesta/datahike@e6d196d5` and `deps.edn`'s 4 sha pins
+    bumped `7ef2b5de → e6d196d5`. The gitlibs stopgap is moot. **⚠ ONE-TIME PREP on
+    every fresh checkout / clean gitlibs:** the new sha ships an unprepped
+    `:deps/prep-lib` (datahike compiles a Java API into `target/classes`). If you see
+    `Error building classpath … must be prepared before use: [org.replikativ/datahike]`,
+    run once:
+    `(cd ~/.gitlibs/libs/org.replikativ/datahike/e6d196d52003ef0453d601ea3192d6f7e9dd3dae && clojure -T:build compile-java)`
+    then `bin/test-cljs` / `bin/acme build` resolve normally. (Plain
+    `clj -X:deps prep` hits a bootstrap catch-22 here, hence the direct invocation.)
     Also flagged a SEPARATE latent hole: fused scan-then-join on an as-of value can
     return empty if a joined attr changed since the as-of-t (doesn't hit your current
-    entity/`:in` render path).
+    entity/`:in` render path) — tracked as #28.
 
 ### Interface changes (either side; newest first)
 

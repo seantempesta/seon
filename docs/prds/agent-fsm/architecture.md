@@ -317,8 +317,8 @@ parallelism; isolation is the worker tier).
   `seon.derive/derive-state`, never stored. The machine is inspectable/renderable,
   and the loop is a fold of `transition` over events derived from the run's data
   each iteration.
-- **The turn is a value-transform — "Snap-to-Tx"** *(derive leaf + this model
-  landed; per-turn threading + work-fence = Unit 2, in progress).* Each turn
+- **The turn is a value-transform — "Snap-to-Tx"** *(derive leaf, per-turn
+  threading, and in-tx work-fence all landed — Units 1+2 live-proven).* Each turn
   threads ONE frozen db value (re-read once at the top) through `next-event` +
   the prompt render + the bound checks, so the LLM reasons over a single
   consistent basis-t; the next turn re-reads the latest store (single writer ⇒ it
