@@ -1,27 +1,31 @@
 (ns seon.web.tile
-  "The tile system — the decoupled interactive-feeds POC (spec:
-   docs/prds/agent-fsm/interactive-feeds.md).
+  "The tile system — DB-DRIVEN interactive feeds (spec:
+   docs/prds/agent-fsm/interactive-feeds.md, [[context-render]]).
 
-   ONE composable primitive: a *tile* is a region bound to a feed rendering a
-   pure view over `seon.derive` / the local db value. Everything the human sees
-   is a tile — the agent's hero render, commentary, status, todos — differing
-   only in which view they render and how big they are. A page is a shell of
-   tiles; the `console` lays out ~2/3 hero + ~1/3 rail of tiles.
+   ONE composable primitive: a *tile* is a region bound to a feed that renders a
+   view resolved FROM DATA. Two things are data, not hardcoded:
 
-   PURE READ — it consumes `seon.derive` + reads the local db value and never
-   writes. Writes (interactions, the REPL) route through the R-owned `/call`
-   family.
+   - DISPATCH: a tile carries a `:seon.render/html` SYMBOL; render time resolves
+     it — a core symbol calls direct, an AGENT-authored symbol runs SCI-bounded.
+     So the agent (or a downstream consumer) changes what a tile renders by
+     TRANSACTING a symbol — no code change. (The hero already works this way via
+     `render-agent-tile` resolving the agent's `:seon.render.live-tile/content`.)
+   - LAYOUT: `/tile/console/<agent>` renders by QUERYING `:seon.tile/*` entities
+     (which tiles, order via `:seon.ctx/priority`, width via `:seon.tile/span`).
+     Transact a different set → a totally different UI. Absent any tile data, a
+     PREWRITTEN default layout applies (prewritten fns referenced by symbol — not
+     hardcoded dispatch), so it works out-of-box and is overridable by data.
 
-   Client contract: the browser loads `resources/public/js/packetstar.js` — one
-   `EventSource` per tile region (NOT datastar), `innerHTML`-replace on each
-   message, `data-action`→POST for interactions. The SSE payload is just the
-   tile's inner HTML (the target is implicit in which stream the client opened).
+   PURE READ at render time — consumes `seon.derive` / the local db value and the
+   stored symbols; never writes. Writing tile entities (composing a UI) and the
+   boot-seed are the agent's / a consumer's job (via `/call` / eval) — not this ns.
 
-   Decoupled from the live `seon.web.inspector` transport on purpose (NEW
-   `/tile/*` routes). At integration this SUPERSEDES the inspector transport —
-   one engine driving every surface; not two transports permanently.
+   Client contract: `resources/public/js/packetstar.js` — one `EventSource` per
+   tile region (NOT datastar), innerHTML-replace per message, `data-action`→POST.
 
-   A tile-key is `[kind agent-id]` (e.g. `[:agent-render \"vKt-…\"]`)."
+   Schema note (flagged to R): `:seon.tile/*` is UI-data schema registered here by
+   convention (schema colocated with the data it shapes); the boot-seed is R/agent
+   lane. See coordination.md _Interface changes_."
   (:require
     [clojure.string :as str]
     [seon.db :as db]
@@ -32,7 +36,16 @@
     [seon.ui.html :as html]))
 
 ;; ============================================================
-;; Connection registry — tile-key -> [{:id :res :opened-at}].
+;; Tile-config entities (`:seon.tile/*`) drive the layout when present. The
+;; schema is registered by R (schema lane) at integration — see coordination.md
+;; _Needs_. Until then `console-tiles` falls back to the prewritten default, and
+;; the queries tolerate the un-installed attrs (try/catch). The render DISPATCH
+;; is already DB-driven: each tile stores its view as a `:seon.render/html`
+;; SYMBOL, resolved at render time (core via `core-views`, agent via SCI later).
+;; ============================================================
+
+;; ============================================================
+;; Connection registry — tile-id -> [{:id :res :opened-at}].
 ;; ============================================================
 
 (defonce ^:private !tiles (atom {}))
@@ -41,13 +54,13 @@
   (swap! !tiles update k (fnil conj []) conn))
 
 (defn- remove-conn! [k conn-id]
-  ;; Drop the key entirely when its last connection closes, so `on-tx` never
-  ;; re-renders a tile nobody is watching (avoids unbounded dead-key DB reads).
+  ;; Drop the key when its last connection closes, so `on-tx` never re-renders a
+  ;; tile nobody is watching.
   (swap! !tiles (fn [m]
                   (let [cs (vec (remove #(= (:id %) conn-id) (get m k)))]
                     (if (seq cs) (assoc m k cs) (dissoc m k))))))
 
-(defn- open-tile-keys []
+(defn- open-tile-ids []
   (set (keys @!tiles)))
 
 (defn- clip [s n]
@@ -55,63 +68,60 @@
     (if (> (count s) n) (str (subs s 0 n) "…") s)))
 
 ;; ============================================================
-;; Tile views — pure (db-value) -> hiccup. Time-travels for free (pass
-;; (db/as-of db t)). Phosphor Terminal theme; classes are LITERAL so Tailwind's
-;; source scan keeps them in output.css.
+;; Prewritten view fns — referenced by SYMBOL from tile entities. Each takes the
+;; injected input map {:seon.db/db :seon.agent/id} and returns hiccup. An
+;; agent-authored view (its own symbol) follows the same convention, SCI-bounded.
+;; Phosphor Terminal theme; classes are LITERAL (Tailwind source scan).
 ;; ============================================================
 
-(defn agent-tile
-  "The agent's status tile — pure (db, agent-id) -> hiccup over the explicit-db
-   `seon.derive` reads (NOT `derive-status`, which reads HEAD internally)."
-  [db agent-id]
-  (let [a     (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]})
-        state (derive/derive-state db agent-id)
-        turns (derive/agent-turn-count db agent-id)]
+(defn status-view
+  "The agent's status tile."
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [a     (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
+        state (derive/derive-state db id)
+        turns (derive/agent-turn-count db id)]
     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
      [:div {:class "flex items-center justify-between mb-2"}
       (comp/status-dot state)
       [:span {:class "text-xs text-text-500 tabular-nums"} (str "turn " turns)]]
      [:div {:class "text-sm text-text-50 font-medium leading-tight"}
       (or (:seon.agent/purpose a) "—")]
-     [:div {:class "text-2xs text-text-500 mt-1"} agent-id]]))
+     [:div {:class "text-2xs text-text-500 mt-1"} id]]))
 
-(defn commentary-tile
-  "The shared REPL transcript (demoted chat) — the agent's recent messages, a
-   running log. Pure read: a Datalog query for messages to/from the agent."
-  [db agent-id]
-  (let [me   (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]}))
-        rows (when me
-               (db/query {:seon.db/db db
-                          :seon.db/query
-                          '[:find ?at ?origin ?content
-                            :in $ ?me
-                            :where
-                            (or [?m :seon.agent.message/to ?me]
-                                [?m :seon.agent.message/from ?me])
-                            [?m :seon.agent.message/at ?at]
-                            [?m :seon.agent.message/origin ?origin]
-                            [?m :seon.agent.message/content ?content]]
-                          :seon.db/args [me]}))
-        recent (->> rows (sort-by #(.getTime ^js (first %))) (take-last 8))]
+(defn commentary-view
+  "The shared REPL transcript (demoted chat) — recent messages to/from the agent."
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [me     (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
+        rows   (when me
+                 (db/query {:seon.db/db db
+                            :seon.db/query
+                            '[:find ?at ?origin ?content
+                              :in $ ?me
+                              :where
+                              (or [?m :seon.agent.message/to ?me]
+                                  [?m :seon.agent.message/from ?me])
+                              [?m :seon.agent.message/at ?at]
+                              [?m :seon.agent.message/origin ?origin]
+                              [?m :seon.agent.message/content ?content]]
+                            :seon.db/args [me]}))
+        recent (->> rows (sort-by #(.getTime ^js (first %))) (take-last 8))
+        line   (fn [[_ origin content]]
+                 [:div {:class "text-xs leading-tight"}
+                  [:span {:class (str "mr-1 font-medium "
+                                      (case origin :human "text-info" :agent "text-eval"
+                                        "text-text-500"))}
+                   (case origin :human "›you" :agent "‹agent" "·core")]
+                  [:span {:class "text-text-200"} (clip content 120)]])]
     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
      [:div {:class "text-2xs uppercase tracking-wider text-text-400 mb-2"} "commentary"]
      (if (seq recent)
-       (into [:div {:class "flex flex-col gap-1"}]
-             (for [[_ origin content] recent]
-               [:div {:class "text-xs leading-tight"}
-                [:span {:class (str "mr-1 font-medium "
-                                    (case origin
-                                      :human "text-info"
-                                      :agent "text-eval"
-                                      "text-text-500"))}
-                 (case origin :human "›you" :agent "‹agent" "·core")]
-                [:span {:class "text-text-200"} (clip content 120)]]))
+       (into [:div {:class "flex flex-col gap-1"}] (map line recent))
        [:div {:class "text-xs text-text-500"} "no messages yet"])]))
 
-(defn todos-tile
-  "The agent's todos — pure Datalog read by owner. Open first."
-  [db agent-id]
-  (let [me   (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]}))
+(defn todos-view
+  "The agent's todos — open first."
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [me   (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
         rows (when me
                (db/query {:seon.db/db db
                           :seon.db/query
@@ -122,70 +132,134 @@
                             [?t :seon.agent.todo/status ?status]
                             [?t :seon.agent.todo/title ?title]]
                           :seon.db/args [me]}))
-        open (count (filter #(= :open (first %)) rows))]
+        open (count (filter #(= :open (first %)) rows))
+        row  (fn [[status title]]
+               [:div {:class "text-xs leading-tight flex items-start gap-1.5"}
+                [:span {:class (if (= :open status) "text-warning" "text-success")}
+                 (if (= :open status) "☐" "☑")]
+                [:span {:class (if (= :open status) "text-text-200" "text-text-500 line-through")}
+                 (clip title 80)]])]
     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
      [:div {:class "flex items-center justify-between mb-2"}
       [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "todos"]
       [:span {:class "text-2xs text-text-500"} (str open " open")]]
      (if (seq rows)
        (into [:div {:class "flex flex-col gap-1"}]
-             (for [[status title] (sort-by #(if (= :open (first %)) 0 1) rows)]
-               [:div {:class "text-xs leading-tight flex items-start gap-1.5"}
-                [:span {:class (if (= :open status) "text-warning" "text-success")}
-                 (if (= :open status) "☐" "☑")]
-                [:span {:class (if (= :open status)
-                                 "text-text-200"
-                                 "text-text-500 line-through")}
-                 (clip title 80)]]))
+             (map row (sort-by #(if (= :open (first %)) 0 1) rows)))
        [:div {:class "text-xs text-text-500"} "no todos"])]))
 
-(defn- hero-tile
+(defn hero-view
   "The hero — the agent's OWN live tile (welcome default or wired content),
-   rendered SCI-bounded by `seon.render/render-agent-tile`. That returns a
-   `:seon.render/html-response` map; take its `:seon.render/hiccup`."
-  [db agent-id]
+   itself DB-driven + SCI-bounded by `seon.render/render-agent-tile`."
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
   [:div {:class "rounded border border-base-700 bg-base-850 p-4 h-full overflow-auto"}
    (or (:seon.render/hiccup
-         (render/render-agent-tile {:seon.db/db db :seon.agent/id agent-id}))
+         (render/render-agent-tile {:seon.db/db db :seon.agent/id id}))
        [:div {:class "text-text-500 text-xs"} "no tile"])])
 
+;; The core views resolvable by SYMBOL. Core symbols map here (direct, fast);
+;; AGENT-authored symbols resolve via SCI (`render-sci`). This is the resolution
+;; table, not a renderer registry — tiles still STORE their view as a symbol;
+;; this only turns a known core symbol into its fn without dragging the bootstrap
+;; compiler (`seon.eval`) into the web require closure.
+(def ^:private core-views
+  {'seon.web.tile/hero-view       hero-view
+   'seon.web.tile/status-view     status-view
+   'seon.web.tile/todos-view      todos-view
+   'seon.web.tile/commentary-view commentary-view})
+
+;; ============================================================
+;; The DB-driven layout — tile entities (or the prewritten default).
+;; ============================================================
+
+(defn- default-tiles
+  "The prewritten default console for `agent-id` — data, not hardcoded dispatch.
+   Each tile names a core view SYMBOL; the agent/consumer overrides by
+   transacting `:seon.tile/*` entities for this console."
+  [agent-id]
+  [{:seon.tile/id (str agent-id ":hero") :seon.tile/console agent-id
+    :seon.render/html 'seon.web.tile/hero-view :seon.ctx/priority 10 :seon.tile/span 2}
+   {:seon.tile/id (str agent-id ":status") :seon.tile/console agent-id
+    :seon.render/html 'seon.web.tile/status-view :seon.ctx/priority 20 :seon.tile/span 1}
+   {:seon.tile/id (str agent-id ":todos") :seon.tile/console agent-id
+    :seon.render/html 'seon.web.tile/todos-view :seon.ctx/priority 30 :seon.tile/span 1}
+   {:seon.tile/id (str agent-id ":commentary") :seon.tile/console agent-id
+    :seon.render/html 'seon.web.tile/commentary-view :seon.ctx/priority 40 :seon.tile/span 1}])
+
+(defn- console-tiles
+  "The tiles for a console — the DB `:seon.tile/*` entities for `agent-id`,
+   ordered by `:seon.ctx/priority`; the prewritten default when none exist."
+  [db agent-id]
+  (let [eids (try (db/query {:seon.db/db db
+                             :seon.db/query
+                             '[:find [?t ...] :in $ ?c :where [?t :seon.tile/console ?c]]
+                             :seon.db/args [agent-id]})
+                  (catch :default _ nil))   ; attr not installed yet → default layout
+        rows (when (seq eids)
+               (map #(db/entity {:seon.db/db db :seon.db/ref %}) eids))]
+    (sort-by #(or (:seon.ctx/priority %) 0)
+             (if (seq rows) rows (default-tiles agent-id)))))
+
+(defn- find-tile
+  "Resolve a tile-id to its tile map — the DB entity, or the matching default
+   spec (default ids are `<console>:<kind>`)."
+  [db tile-id]
+  (let [ent (try (db/entity {:seon.db/db db :seon.db/ref [:seon.tile/id tile-id]})
+                 (catch :default _ nil))]   ; attr not installed yet → default spec
+    (if (:seon.tile/id ent)
+      ent
+      (let [console (first (str/split tile-id #":"))]
+        (first (filter #(= tile-id (:seon.tile/id %)) (default-tiles console)))))))
+
+;; ============================================================
+;; Render — resolve the tile's stored `:seon.render/html` symbol to hiccup.
+;; ============================================================
+
+(defn- resolve-view
+  "Resolve a `:seon.render/html` slot to hiccup. Shallow-hiccup vector →
+   verbatim; SYMBOL → its fn (agent-authored SCI-bounded, core direct)."
+  [slot input]
+  (cond
+    (vector? slot) slot
+    (symbol? slot)
+    (if-let [f (get core-views slot)]
+      (f input)
+      ;; Agent-authored view symbols (SCI-bounded) are a follow-up integration;
+      ;; the HERO tile is already agent-modifiable via `render-agent-tile`, which
+      ;; SCI-bounds the agent's own tile fn internally.
+      [:div {:class "text-text-500 text-xs"} (str "view not available (agent SCI tiles pending): " slot)])
+    :else [:div {:class "text-text-500 text-xs"} (str "unrenderable tile slot: " (pr-str slot))]))
+
 (defn- render-tile
-  "Render a tile-key `[kind agent-id]` to hiccup at HEAD. Per-tile fault
-   isolation: a throwing view becomes an error card, never a hung region."
-  [tile-key]
+  "Render a tile MAP to hiccup at HEAD. Per-tile fault isolation: a throwing
+   view becomes an error card, never a hung region."
+  [tile]
   (try
-    (let [[kind arg] tile-key
-          db @db/*conn*]
-      (case kind
-        :agent        (agent-tile db arg)
-        :agent-render (hero-tile db arg)
-        :commentary   (commentary-tile db arg)
-        :todos        (todos-tile db arg)
-        [:div {:class "text-text-500 text-xs"} (str "unknown tile " (pr-str tile-key))]))
+    (let [db      @db/*conn*
+          subject (:seon.tile/console tile)
+          input   {:seon.db/db db :seon.agent/id subject :seon.tile/entity tile}]
+      (resolve-view (:seon.render/html tile) input))
     (catch :default e
       [:div {:class "rounded border border-error bg-base-850 p-3 text-xs text-error"}
        (str "render error: " (ex-message e))])))
 
 ;; ============================================================
 ;; SSE payload — one EventSource per region, target implicit; payload is the
-;; tile's inner HTML as a default `message` event (packetstar does
-;; `el.innerHTML = e.data`).
+;; tile's inner HTML (packetstar does `el.innerHTML = e.data`).
 ;; ============================================================
 
 (defn- region-event [hiccup]
   (let [s (html/->string hiccup)]
     (str "data: " (str/replace s "\n" "\ndata: ") "\n\n")))
 
-;; ============================================================
-;; Push pipeline — inspector's SHAPE (per-key 100ms trailing coalescer +
-;; db/listen! tx-listener), generalized to tile-keys. No server-side change-hash
-;; in the POC: re-render all open tiles on each tx; the client absorbs no-ops.
-;; ============================================================
-
-(defn- push-tile! [tile-key]
+(defn- push-tile! [tile-id]
   (try
-    (let [payload (region-event (render-tile tile-key))]
-      (doseq [{:keys [res]} (get @!tiles tile-key)]
+    (let [tile    (find-tile @db/*conn* tile-id)
+          hiccup  (if tile
+                    (render-tile tile)
+                    [:div {:class "text-text-500 text-xs"} (str "no tile " tile-id)])
+          payload (region-event hiccup)]
+      (doseq [{:keys [res]} (get @!tiles tile-id)]
         (try (.write res payload)
              (catch :default e
                (log/error-console! "seon.web.tile" "write failed" e)))))
@@ -194,25 +268,24 @@
 
 (defonce ^:private !pending (atom {}))
 
-(defn- schedule-push! [tile-key]
-  (let [was-pending? (get @!pending tile-key)]
-    (swap! !pending assoc tile-key true)
+(defn- schedule-push! [tile-id]
+  (let [was-pending? (get @!pending tile-id)]
+    (swap! !pending assoc tile-id true)
     (when-not was-pending?
       (js/setTimeout
         (fn []
-          (swap! !pending dissoc tile-key)
-          (push-tile! tile-key))
+          (swap! !pending dissoc tile-id)
+          (push-tile! tile-id))
         100))))
 
 (defn- on-tx
-  "Any commit re-renders every open tile (client drops no-ops). Per-tile
-   basis-t / fingerprint dedup is a later slice."
+  "Any commit re-renders every open tile (the client drops no-ops)."
   [_]
-  (doseq [k (open-tile-keys)]
+  (doseq [k (open-tile-ids)]
     (schedule-push! k)))
 
 ;; ============================================================
-;; Lifecycle — db/listen! IS the refresh signal. Distinct key from inspector.
+;; Lifecycle — db/listen! IS the refresh signal.
 ;; ============================================================
 
 (defonce ^:private !installed? (atom false))
@@ -235,14 +308,17 @@
   (try (install!) (catch :default _ nil)))
 
 ;; ============================================================
-;; HTTP — page shells + per-tile SSE streams on NEW /tile/* routes. serve.cljs
-;; delegates via route?/handle!.
+;; HTTP — page shells + per-tile SSE streams on /tile/* routes.
 ;; ============================================================
 
 (defn- write-html! [^js res code body]
   (.writeHead res code #js {"Content-Type"  "text/html; charset=utf-8"
                             "Cache-Control" "no-store, no-cache, must-revalidate"})
   (.end res body))
+
+(defn- redirect! [^js res location]
+  (.writeHead res 302 #js {"Location" location "Cache-Control" "no-store"})
+  (.end res ""))
 
 (defn- head [title]
   [:head
@@ -253,27 +329,12 @@
    [:script {:src "/js/packetstar.js" :defer true}]])
 
 (defn- region
-  "A tile region: a stable-id element whose `data-tile` points at its SSE
-   stream. packetstar opens the stream and innerHTML-replaces it per message."
-  [id stream-url]
-  [:div {:id id :data-tile stream-url :class "min-h-0"}
+  "A tile region: a stable-id element whose `data-tile` points at its SSE stream."
+  [tile-id]
+  [:div {:id (str "tile-" tile-id) :data-tile (str "/tile/t/" tile-id "/sse") :class "min-h-0"}
    [:div {:class "text-text-500 text-xs"} "connecting…"]])
 
-(defn- shell
-  "Single-tile page (the agent status tile)."
-  [agent-id]
-  (str "<!DOCTYPE html>"
-       (html/->string
-         [:html {:lang "en"}
-          (head (str "tile · " agent-id))
-          [:body {:class "bg-base-950 text-text-200 font-mono p-3"}
-           [:div {:class "max-w-md"}
-            (region (str "tile-agent-" agent-id) (str "/tile/agent/" agent-id "/sse"))]]])))
-
-(defn- header-bar
-  "The console masthead — identity + a global live indicator + a fullscreen
-   link to the hero alone."
-  [agent-id]
+(defn- header-bar [agent-id]
   [:div {:class "flex items-center justify-between mb-3 pb-2 border-b border-base-800"}
    [:div {:class "flex items-baseline gap-2"}
     [:span {:class "text-sm font-semibold text-text-50"} "seon"]
@@ -285,65 +346,51 @@
          :href  (str "/tile/agent/" agent-id "/full")} "⛶ fullscreen"]]])
 
 (defn- console-shell
-  "The console — masthead + ~2/3 hero tile + ~1/3 rail of tiles. Every slot is a
-   tile (the composability the feature exists to prove)."
-  [agent-id]
-  (str "<!DOCTYPE html>"
-       (html/->string
-         [:html {:lang "en"}
-          (head (str "console · " agent-id))
-          [:body {:class "bg-base-950 text-text-200 font-mono p-3"}
-           (header-bar agent-id)
-           [:div {:class "grid grid-cols-3 gap-3"
-                  :style "height: calc(100vh - 4rem)"}
-            ;; hero — 2/3
-            [:div {:class "col-span-2 min-h-0"}
-             (region (str "tile-hero-" agent-id) (str "/tile/agent/" agent-id "/render/sse"))]
-            ;; rail — 1/3, stacked tiles
-            [:div {:class "col-span-1 flex flex-col gap-3 min-h-0 overflow-auto"}
-             (region (str "tile-status-" agent-id) (str "/tile/agent/" agent-id "/sse"))
-             (region (str "tile-todos-" agent-id) (str "/tile/agent/" agent-id "/todos/sse"))
-             (region (str "tile-commentary-" agent-id) (str "/tile/agent/" agent-id "/commentary/sse"))]]]])))
+  "The console — masthead + a layout DERIVED from the console's tiles. Span-2
+   tiles form the hero column; span-1 tiles stack in the rail. The tile list,
+   order, and spans are DATA; the two-column arrangement is the prewritten
+   strategy over that data."
+  [agent-id tiles]
+  (let [span    (fn [t] (or (:seon.tile/span t) 1))
+        hero    (into [:div {:class "col-span-2 flex flex-col gap-3 min-h-0"}]
+                      (map #(region (:seon.tile/id %)) (filter #(>= (span %) 2) tiles)))
+        rail    (into [:div {:class "col-span-1 flex flex-col gap-3 min-h-0 overflow-auto"}]
+                      (map #(region (:seon.tile/id %)) (remove #(>= (span %) 2) tiles)))
+        grid    [:div {:class "grid grid-cols-3 gap-3" :style "height: calc(100vh - 4rem)"}
+                 hero rail]
+        page    [:html {:lang "en"}
+                 (head (str "console · " agent-id))
+                 [:body {:class "bg-base-950 text-text-200 font-mono p-3"}
+                  (header-bar agent-id)
+                  grid]]]
+    (str "<!DOCTYPE html>" (html/->string page))))
 
 (defn- hero-shell
-  "The fullscreen hero — the agent's tile alone, full-bleed (the immersive
-   mode for when the user trusts the agent and wants only its surface)."
+  "The fullscreen hero — the agent's tile alone, full-bleed."
   [agent-id]
-  (str "<!DOCTYPE html>"
-       (html/->string
-         [:html {:lang "en"}
-          (head (str "tile · " agent-id))
-          [:body {:class "bg-base-950 text-text-200 font-mono p-3"}
-           [:div {:class "h-screen"}
-            (region (str "tile-hero-" agent-id) (str "/tile/agent/" agent-id "/render/sse"))]]])))
+  (let [page [:html {:lang "en"}
+              (head (str "tile · " agent-id))
+              [:body {:class "bg-base-950 text-text-200 font-mono p-3"}
+               [:div {:class "h-screen"} (region (str agent-id ":hero"))]]]]
+    (str "<!DOCTYPE html>" (html/->string page))))
 
-(defn- tile-key
-  "Path kind segment -> a tile-key. Absent kind = the status tile."
-  [agent-id kind]
-  [(case kind
-     nil          :agent
-     "render"     :agent-render
-     "commentary" :commentary
-     "todos"      :todos
-     (keyword kind))
-   agent-id])
-
-(defn- open-tile-sse! [^js req ^js res tk]
+(defn- open-tile-sse! [^js req ^js res tile-id]
   (.writeHead res 200 #js {"Content-Type"      "text/event-stream"
                            "Cache-Control"     "no-cache"
                            "Connection"        "keep-alive"
                            "X-Accel-Buffering" "no"})
   (.write res ": connected\n\n")
   (let [conn {:id (random-uuid) :res res :opened-at (js/Date.)}]
-    (add-conn! tk conn)
+    (add-conn! tile-id conn)
     (log/info-console! "seon.web.tile" "SSE OPEN"
-                       {:tile tk :conn-id (str (:id conn))
-                        :total (count (get @!tiles tk))})
+                       {:tile tile-id :conn-id (str (:id conn))
+                        :total (count (get @!tiles tile-id))})
     (.on req "close"
          (fn []
-           (remove-conn! tk (:id conn))
+           (remove-conn! tile-id (:id conn))
            (log/info-console! "seon.web.tile" "SSE CLOSE" {:conn-id (str (:id conn))})))
-    (try (.write res (region-event (render-tile tk)))
+    (try (when-let [tile (find-tile @db/*conn* tile-id)]
+           (.write res (region-event (render-tile tile))))
          (catch :default e
            (log/error-console! "seon.web.tile" "initial render failed" e)))))
 
@@ -359,20 +406,23 @@
   (ensure-installed!)
   (cond
     (re-matches #"/tile/console/[^/]+" path)
-    (do (write-html! res 200 (console-shell (second (re-matches #"/tile/console/([^/]+)" path))))
-        true)
+    (let [id (second (re-matches #"/tile/console/([^/]+)" path))]
+      (write-html! res 200 (console-shell id (console-tiles @db/*conn* id)))
+      true)
+
+    (re-matches #"/tile/t/[^/]+/sse" path)
+    (let [tid (second (re-matches #"/tile/t/([^/]+)/sse" path))]
+      (open-tile-sse! req res tid)
+      true)
 
     (re-matches #"/tile/agent/[^/]+/full" path)
-    (do (write-html! res 200 (hero-shell (second (re-matches #"/tile/agent/([^/]+)/full" path))))
-        true)
-
-    (re-matches #"/tile/agent/[^/]+(?:/[^/]+)?/sse" path)
-    (let [[_ id kind] (re-matches #"/tile/agent/([^/]+)(?:/([^/]+))?/sse" path)]
-      (open-tile-sse! req res (tile-key id kind))
+    (let [id (second (re-matches #"/tile/agent/([^/]+)/full" path))]
+      (write-html! res 200 (hero-shell id))
       true)
 
     (re-matches #"/tile/agent/[^/]+" path)
-    (do (write-html! res 200 (shell (second (re-matches #"/tile/agent/([^/]+)" path))))
-        true)
+    (let [id (second (re-matches #"/tile/agent/([^/]+)" path))]
+      (redirect! res (str "/tile/console/" id))
+      true)
 
     :else false))
