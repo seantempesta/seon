@@ -1355,9 +1355,16 @@
          ;; attention: a fn whose :malli/schema failed to compile
          ;; (:seon.fn/schema-error) and a test whose last recorded run FAILED —
          ;; each a compact one-line ⚠ note. When there is NO stored source
-         ;; (runtime-created nses that hold only schemas/fns), the per-member
-         ;; blocks ARE the content, rendered in full as before.
-         (if (and src (not (str/blank? src)))
+         ;; (runtime-created nses that hold only schemas/fns) — OR only the
+         ;; indexer's bare `(ns x)` STUB (a non-full-source framework ns: its
+         ;; members live only in the index rows, NOT in that one-line source) —
+         ;; the per-member blocks ARE the content, rendered in full. The stub
+         ;; guard below is load-bearing for the on-demand `render-namespace`
+         ;; capability the system prompt teaches by name: without it, rendering
+         ;; a dropped framework ns (e.g. :seon.warn) would yield just `(ns x)`,
+         ;; erasing its whole API.
+         (if (and src (not (str/blank? src))
+                  (not= (str/trim src) (str "(ns " (name ns-kw) ")")))
            (let [notes (concat
                          (for [{:seon.fn/keys [sym schema-error]} fns
                                :when (and schema-error (not (str/blank? schema-error)))]

@@ -139,8 +139,16 @@
                             (db/transact!
                               {:seon.db/conn conn
                                :seon.db/tx-data
+                               ;; A REALISTIC full-file source — a body form
+                               ;; PAST the (ns …) head, NOT the bare
+                               ;; `(ns demo.ns)` the indexer writes as the STUB
+                               ;; for a non-full-source ns. render-namespace's
+                               ;; GI-1 member-suppression fires only for REAL
+                               ;; full source (≠ the bare stub); a stub-shaped
+                               ;; source instead renders the member blocks so a
+                               ;; dropped framework ns's API survives on demand.
                                [{:seon.ns/name :demo.ns
-                                 :seon.ns/source "(ns demo.ns)"}
+                                 :seon.ns/source "(ns demo.ns)\n\n(defn demo-fn []\n  :ok)"}
                                 {:seon.test/sym "demo.ns/t-attached"
                                  :seon.test/ns [:seon.ns/name :demo.ns]
                                  :seon.test/source
