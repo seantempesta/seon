@@ -1035,9 +1035,9 @@
 ;; ---------------------------------------------------------------------------
 ;; Origin-forge guard (verifier rec, 2026-06-09). An AGENT-scoped tx that
 ;; claims `:seon.db/origin :core-seed` is forging core
-;; provenance — `seon.agent-view` trusts that origin to widen the tx's
-;; visibility across EVERY agent's filtered view, so a forging agent
-;; could inject context into all of its peers.
+;; provenance — the inspector's `on-tx` fan-out trusts that origin to
+;; push the tx to EVERY watching agent's pane, so a forging agent could
+;; spuriously wake all of its peers' renders.
 ;;
 ;; The intended enforcement is to OVERRIDE the origin to `:agent` (the
 ;; honest value) and log. But TODAY the legitimate boot-seed path

@@ -2313,7 +2313,7 @@
                 ;; forget — sync! never rejects, logs its own failures.
                 _ (ai/sync!)
                 ;; Install the per-agent inspector tx-listener. Pushes
-                ;; morphs for the agent-view inspector page (/agent/<id>).
+                ;; morphs for the per-agent inspector page (/agent/<id>).
                 _ (seon.web.inspector/install!)
                 ;; The ONE ticker — the only active machinery (deadline
                 ;; watchdog + schedule firing). Single instance + idempotent;

@@ -305,4 +305,21 @@ Revert point if the experiment goes sideways: `c84e8fc`.
 - **Flagged (deeper, deferred):** the single-process `:node-test` runner's `^:async`-under-load
   fragility remains — a fuller fix = per-ns process isolation or lightening inspector-chips-test's
   4× `boot-seed!`. The backstop+retry make the tool trustworthy + green meanwhile.
+- **Commit:** `eda4856`
+
+### Pass 9 — render follow-up: delete the divergent filtered-db (`agent-view`)
+
+- **Move:** refine (the "one mechanism" north star — kill the last divergent db source).
+- **Did:** rewired `inspector/snapshot` from the `d/filter`ed `agent-view` to the one unfiltered
+  `@db/*conn*` (the tile/state read the agent's OWN entity — behavior unchanged, but now ONE db
+  source matching the loop + the context pane). **DELETED `src/seon/agent_view.cljs`** (grep
+  confirmed zero remaining callers — it was the only divergent-db mechanism left). Retargeted 3
+  stale comments (inspector `on-tx`, client, db/internal) that named the deleted ns.
+- **Live proof:** `bin/test-cljs` **"all 61 ran PASS (89s)"** (the fixed runner's tail-retry
+  recovered a stall again — meta-confirming the infra fix); pod still serves the inspector
+  (`GET /agents` → 200) after the hot-reload. Codebase is smaller by one ns.
+- **Flagged (pre-existing, separate cleanups):** `inspector.cljs` uses `datahike.api` directly
+  (`d/q`/`d/datoms`/`d/entity`) in violation of the "only inside `src/seon/db/`" rule — clean
+  swap to `db/query`/`db/entity` later; the origin-forge guard (`warn-on-seed-origin-forge!`) is
+  now lower-value (agent-view's peer-injection vector is gone) — revisit.
 - **Commit:** (this pass)

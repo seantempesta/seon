@@ -42,7 +42,6 @@
   (:require
     [clojure.string :as str]
     [datahike.api :as d]
-    [seon.agent-view :as agent-view]
     [seon.agent.loop :as agent-loop]
     [seon.ai.tokens :as tokens]
     [seon.ctx :as ctx]
@@ -254,7 +253,7 @@
    twin, its name, and a stable card-key for idiomorph (the right pane
    mirrors the left's section set, debug-view-section-twins-2026-06-18)."
   [agent-id]
-  (let [{:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id agent-id})
+  (let [db @db/*conn*
         ;; `inspect/ctx-preview` returns the EXACT bytes the agent receives
         ;; for the left-pane text (`:seon.render/text` = soul system block
         ;; FIRST, then `seon.ctx/assemble-context`), the per-section texts
@@ -1717,9 +1716,9 @@
    - core tx (no `:seon.db/agent-id`) → ALL watching agents;
    - `:seon.db/origin :core-seed` → ALL watching agents EVEN
      when agent-stamped (the boot-seed runs inside the booting agent's
-     `with-agent` scope today, but `agent-view` shows seed tx to every
-     agent — without this clause the OTHER agents' panes went stale on
-     every boot);
+     `with-agent` scope today, but seed tx is core data every agent's
+     render shows — without this clause the OTHER agents' panes went
+     stale on every boot);
    - otherwise → only the stamping agent.
    All datoms in one commit share the tx, so the first datom's tx eid
    is the commit's."
