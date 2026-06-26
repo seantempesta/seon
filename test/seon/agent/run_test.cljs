@@ -272,3 +272,40 @@
                              (is (= :running (:seon.agent/state (agent/derive-status {:seon.agent/id a-id})))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ── close-run! TOCTOU — the owned retract is in-tx FENCED ───────────────────
+
+(deftest close-run!-fence-protects-the-new-owners-pointer-in-the-toctou-window
+  ;; close-run! reads owns? then, in ONE tx, conditionally retracts the agent's
+  ;; :seon.agent/run pointer. A supersede landing in that read→commit window must
+  ;; NOT retract the NEW owner's pointer. The owned retract-tx now LEADS with a
+  ;; CAS asserting the pointer STILL names this run (run-fence); if it moved, the
+  ;; whole tx aborts. This reproduces the window deterministically: build the
+  ;; EXACT owned-branch tx close-run! commits for r1, supersede to r2 IN THE
+  ;; WINDOW, THEN commit the stale tx — and assert r2's pointer survives. (Sans
+  ;; the leading CAS, the bare [:db/retract] would yank r2's live pointer →
+  ;; orphan it → wrongly idle the agent; this test discriminates the fix.)
+  (async done
+    (-> (with-conn
+          (fn ^:async toctou [_]
+            (let [r1 (:seon.agent.run/id
+                       (await (run/open-run! {:seon.agent/id a-id
+                                              :seon.agent.run/trigger :message})))
+                  ;; the exact owned-branch tx close-run! builds for r1:
+                  stale-close [(db/cas-assert a-ref :seon.agent/run [:seon.agent.run/id r1])
+                               {:seon.agent.run/id            r1
+                                :seon.agent.run/status        :closed
+                                :seon.agent.run/closed-reason :completed}
+                               [:db/retract a-ref :seon.agent/run]]
+                  ;; ── the supersede lands IN THE WINDOW (r2 now owns the agent) ──
+                  r2  (:seon.agent.run/id (await (supersede! :schedule)))
+                  ;; now commit r1's stale, pre-built close-tx:
+                  res (await (db/transact! {:seon.db/tx-data stale-close}))]
+              (is (false? (:seon.db/ok? res))
+                  "the fenced close aborts — the pointer no longer names r1")
+              (is (= r2 (:seon.agent.run/id (run/current-run {:seon.agent/id a-id})))
+                  "the NEW owner r2 still owns the agent — its pointer was NOT retracted")
+              (is (= :running (:seon.agent/state (agent/derive-status {:seon.agent/id a-id})))
+                  "the agent stays :running on r2 (never wrongly idled by the stale close)"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

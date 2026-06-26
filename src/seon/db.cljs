@@ -296,6 +296,7 @@
 
      (db/new-id!)   ;=> \"Kpx-2605232138\"
      (db/transact! {::db/tx-data [{::my-id (db/new-id!) ::title \"…\"}]})"
+  {:malli/schema [:=> [:cat] :seon.db/id]}
   []
   (let [d        (js/Date.)
         time-str (str (id-pad-2 (mod (.getFullYear d) 100))
@@ -309,6 +310,7 @@
 (defn id->time-str
   "Extract the YYMMDDHHmm portion of an id for time sorting /
    comparison. Returns nil if the id doesn't match the expected shape."
+  {:malli/schema [:=> [:catn [::id [:maybe :string]]] [:maybe :string]]}
   [id]
   (when (and (string? id) (= 14 (count id)) (= \- (nth id 3)))
     (subs id 4)))
@@ -339,6 +341,7 @@
    scope. Fiber-local across awaits (AsyncLocalStorage), safe under
    concurrent agents. Auto-merged into every `transact!`'s `:tx-meta`;
    explicit call-site `:tx-meta` keys win per-key."
+  {:malli/schema [:=> [:cat] [:maybe :map]]}
   []
   (internal/current-tx-context))
 
@@ -348,6 +351,7 @@
    needs to know whose universe it's running in.
 
      (db/current-agent-id)   ;=> \"iCg-2606101519\"   (your own id)"
+  {:malli/schema [:=> [:cat] [:maybe :string]]}
   []
   (internal/current-agent-id))
 
@@ -1071,6 +1075,7 @@
   "Derive datahike attr declarations from seon.schema registrations.
    You normally never need this — `transact!` installs schema for
    registered attrs automatically."
+  {:malli/schema [:=> [:catn [::attr-keys [:sequential :keyword]]] [:vector :any]]}
   [attr-keys]
   (internal/malli->datahike-schema attr-keys))
 

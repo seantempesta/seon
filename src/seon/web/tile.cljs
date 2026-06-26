@@ -108,6 +108,37 @@
                 [:span {:class "text-text-200"} (clip content 120)]]))
        [:div {:class "text-xs text-text-500"} "no messages yet"])]))
 
+(defn todos-tile
+  "The agent's todos — pure Datalog read by owner. Open first."
+  [db agent-id]
+  (let [me   (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]}))
+        rows (when me
+               (db/query {:seon.db/db db
+                          :seon.db/query
+                          '[:find ?status ?title
+                            :in $ ?me
+                            :where
+                            [?t :seon.agent.todo/owner ?me]
+                            [?t :seon.agent.todo/status ?status]
+                            [?t :seon.agent.todo/title ?title]]
+                          :seon.db/args [me]}))
+        open (count (filter #(= :open (first %)) rows))]
+    [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
+     [:div {:class "flex items-center justify-between mb-2"}
+      [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "todos"]
+      [:span {:class "text-2xs text-text-500"} (str open " open")]]
+     (if (seq rows)
+       (into [:div {:class "flex flex-col gap-1"}]
+             (for [[status title] (sort-by #(if (= :open (first %)) 0 1) rows)]
+               [:div {:class "text-xs leading-tight flex items-start gap-1.5"}
+                [:span {:class (if (= :open status) "text-warning" "text-success")}
+                 (if (= :open status) "☐" "☑")]
+                [:span {:class (if (= :open status)
+                                 "text-text-200"
+                                 "text-text-500 line-through")}
+                 (clip title 80)]]))
+       [:div {:class "text-xs text-text-500"} "no todos"])]))
+
 (defn- hero-tile
   "The hero — the agent's OWN live tile (welcome default or wired content),
    rendered SCI-bounded by `seon.render/render-agent-tile`. That returns a
@@ -129,6 +160,7 @@
         :agent        (agent-tile db arg)
         :agent-render (hero-tile db arg)
         :commentary   (commentary-tile db arg)
+        :todos        (todos-tile db arg)
         [:div {:class "text-text-500 text-xs"} (str "unknown tile " (pr-str tile-key))]))
     (catch :default e
       [:div {:class "rounded border border-error bg-base-850 p-3 text-xs text-error"}
@@ -238,24 +270,52 @@
            [:div {:class "max-w-md"}
             (region (str "tile-agent-" agent-id) (str "/tile/agent/" agent-id "/sse"))]]])))
 
+(defn- header-bar
+  "The console masthead — identity + a global live indicator + a fullscreen
+   link to the hero alone."
+  [agent-id]
+  [:div {:class "flex items-center justify-between mb-3 pb-2 border-b border-base-800"}
+   [:div {:class "flex items-baseline gap-2"}
+    [:span {:class "text-sm font-semibold text-text-50"} "seon"]
+    [:span {:class "text-2xs text-text-500"} agent-id]]
+   [:div {:class "flex items-center gap-3"}
+    [:span {:class "inline-flex items-center gap-1 text-2xs text-success"}
+     [:span {:class "w-1.5 h-1.5 rounded-full bg-success animate-pulse"}] "live"]
+    [:a {:class "text-2xs text-amber-400 hover:text-amber-300"
+         :href  (str "/tile/agent/" agent-id "/full")} "⛶ fullscreen"]]])
+
 (defn- console-shell
-  "The console — ~2/3 hero tile + ~1/3 rail of tiles. Every slot is a tile
-   (the composability the feature exists to prove)."
+  "The console — masthead + ~2/3 hero tile + ~1/3 rail of tiles. Every slot is a
+   tile (the composability the feature exists to prove)."
   [agent-id]
   (str "<!DOCTYPE html>"
        (html/->string
          [:html {:lang "en"}
           (head (str "console · " agent-id))
           [:body {:class "bg-base-950 text-text-200 font-mono p-3"}
+           (header-bar agent-id)
            [:div {:class "grid grid-cols-3 gap-3"
-                  :style "height: calc(100vh - 1.5rem)"}
+                  :style "height: calc(100vh - 4rem)"}
             ;; hero — 2/3
             [:div {:class "col-span-2 min-h-0"}
              (region (str "tile-hero-" agent-id) (str "/tile/agent/" agent-id "/render/sse"))]
             ;; rail — 1/3, stacked tiles
-            [:div {:class "col-span-1 flex flex-col gap-3 min-h-0"}
+            [:div {:class "col-span-1 flex flex-col gap-3 min-h-0 overflow-auto"}
              (region (str "tile-status-" agent-id) (str "/tile/agent/" agent-id "/sse"))
+             (region (str "tile-todos-" agent-id) (str "/tile/agent/" agent-id "/todos/sse"))
              (region (str "tile-commentary-" agent-id) (str "/tile/agent/" agent-id "/commentary/sse"))]]]])))
+
+(defn- hero-shell
+  "The fullscreen hero — the agent's tile alone, full-bleed (the immersive
+   mode for when the user trusts the agent and wants only its surface)."
+  [agent-id]
+  (str "<!DOCTYPE html>"
+       (html/->string
+         [:html {:lang "en"}
+          (head (str "tile · " agent-id))
+          [:body {:class "bg-base-950 text-text-200 font-mono p-3"}
+           [:div {:class "h-screen"}
+            (region (str "tile-hero-" agent-id) (str "/tile/agent/" agent-id "/render/sse"))]]])))
 
 (defn- tile-key
   "Path kind segment -> a tile-key. Absent kind = the status tile."
@@ -264,6 +324,7 @@
      nil          :agent
      "render"     :agent-render
      "commentary" :commentary
+     "todos"      :todos
      (keyword kind))
    agent-id])
 
@@ -299,6 +360,10 @@
   (cond
     (re-matches #"/tile/console/[^/]+" path)
     (do (write-html! res 200 (console-shell (second (re-matches #"/tile/console/([^/]+)" path))))
+        true)
+
+    (re-matches #"/tile/agent/[^/]+/full" path)
+    (do (write-html! res 200 (hero-shell (second (re-matches #"/tile/agent/([^/]+)/full" path))))
         true)
 
     (re-matches #"/tile/agent/[^/]+(?:/[^/]+)?/sse" path)

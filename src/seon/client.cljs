@@ -881,9 +881,10 @@
 
 (def ^:private curated-core-vars
   "Hand-curated `#'`-literal vars indexed REGARDLESS of `:malli/schema` —
-   the honestly-unspecced core surface (`register!`, `current-agent-id`,
-   the fs read fns) that the auto roster below can't see. MUST be
-   `#'`-literals (self-host `resolve` is a compile-time macro)."
+   the honestly-unspecced core surface (`register!`, the fs read fns) the
+   auto roster below can't see, plus a few thin core fns pinned for
+   guaranteed inclusion. MUST be `#'`-literals (self-host `resolve` is a
+   compile-time macro)."
   [#'db/transact!
    #'db/query
    #'db/pull

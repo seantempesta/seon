@@ -110,6 +110,7 @@
   "The agent's NEXT turn number — `count` of every `:seon.agent.turn` the
    agent owns (walked agent → runs → turns). Used for debug-capture file
    names + log lines (uniqueness, not run-position). Derived, not persisted."
+  {:malli/schema [:=> [:catn [:seon.agent/id :seon.db/id]] :int]}
   [agent-id]
   (count (ctx/agent-turns agent-id nil)))
 
@@ -134,6 +135,7 @@
    PRESENT (any value). The SAME single switch the wire-server reads, so one
    env var gates the feature across both processes. UNSET ⇒ the prefetch
    never fires and `render-prompt` runs the byte-identical-OFF path."
+  {:malli/schema [:=> [:cat] :boolean]}
   []
   (some? (.. js/process -env -SEON_EMBED)))
 

@@ -109,6 +109,48 @@ kill -9 "$LISTPID" 2>/dev/null || true
 wait "$LISTPID" 2>/dev/null || true
 DISCOVERED=$(grep -acE '^Namespace:' "$LISTLOG" 2>/dev/null); : "${DISCOVERED:=0}"
 
+# ---------------------------------------------------------------------------
+# COLD-BOOT LOAD GATE — a successfully-COMPILED bundle that throws at module
+# load (`require`) time, before any test runs. The `--list` cold load above
+# already exercised real, fresh-process registration order; if it produced
+# ZERO namespaces AND emitted a load error, the bundle failed to LOAD.
+#
+# The dominant cause is a SCHEMA REGISTRATION-ORDER break: a
+# `seon.schema/register!` whose form references another schema keyword not yet
+# registered in cold-boot order — malli rejects it eagerly
+# (`:malli.core/invalid-schema`, "register that keyword first"), which aborts
+# the namespace's top-level load and crashes the whole bundle. The warm
+# dev-hook reload MASKS this (the prior registration survives in the defonce
+# `*schemas` atom), so ONLY a fresh process — this run, or a cold pod boot —
+# catches it. We diagnose it HERE, crisply, instead of falling through to the
+# verdict's TRUNCATED path, which assumes a hung async `done` (a STALL) and so
+# misreports a load crash as an async-runner stall.
+# ---------------------------------------------------------------------------
+if [ "$DISCOVERED" -eq 0 ] && \
+   grep -qaE 'SHADOW import error|malli\.core/invalid-schema|register that keyword first|is not a valid Malli schema' "$LISTLOG"; then
+  cat "$LISTLOG" >> "$TMPOUT" 2>/dev/null || true
+  echo ""
+  echo "========================================"
+  echo "FAIL — BUNDLE FAILED TO LOAD (cold-boot schema registration order)"
+  echo ""
+  echo "The compiled test bundle threw at module load (require), before any"
+  echo "test ran — so NOTHING was exercised (this is NOT an async-runner stall)."
+  echo "Almost always a schema load-order break: a seon.schema/register! form"
+  echo "references another schema keyword not registered yet in cold-boot order."
+  echo "Register the referent FIRST (in the SAME ns, ABOVE the referrer)."
+  echo ""
+  echo "The warm dev-hook reload MASKS this — the prior registration survives in"
+  echo "the defonce registry; only a fresh process (this run / a cold pod boot)"
+  echo "exercises real registration order. Load error:"
+  grep -aE 'is not a valid Malli schema|malli\.core/invalid-schema|SHADOW import error' "$LISTLOG" \
+    | head -3 | cut -c1-400 | sed 's/^/  /'
+  echo "========================================"
+  rm -f "$LISTLOG"
+  ln -sf "$(basename "$TMPOUT")" tmp/test-cljs-latest.log 2>/dev/null || true
+  echo "Full output: $TMPOUT (or tmp/test-cljs-latest.log)"
+  exit 1
+fi
+
 echo ""
 echo "== Running tests (node out/test/test.js) =="
 node out/test/test.js 2>&1 | tee -a "$TMPOUT"

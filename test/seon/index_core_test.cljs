@@ -82,15 +82,16 @@
         query    (by-sym tx "seon.db/query")
         register (by-sym tx "seon.schema/register!")
         cai      (by-sym tx "seon.db/current-agent-id")]
-    ;; query IS specced → spec present, exact form.
+    ;; query + current-agent-id ARE specced → :seon.fn/spec present.
     (is (some? (:seon.fn/spec query))
         "query is specced → :seon.fn/spec present")
-    ;; register! and current-agent-id have NO :malli/schema → no spec key.
+    (is (some? (:seon.fn/spec cai))
+        "current-agent-id is specced (-> [:maybe :string]) → :seon.fn/spec present")
+    ;; register! has NO :malli/schema → no spec key (honestly unspecced; `v` is a
+    ;; Malli FORM, not a fixed data shape — the stable unspecced exemplar).
     (is (not (contains? register :seon.fn/spec))
         "register! is honestly unspecced → :seon.fn/spec ABSENT")
-    (is (not (contains? cai :seon.fn/spec))
-        "current-agent-id is honestly unspecced → :seon.fn/spec ABSENT")
-    ;; but both still get real source (file-read, not stub).
+    ;; but it still gets real source (file-read, not stub).
     (is (str/starts-with? (:seon.fn/source register) "(defn register!")
         "register! still gets REAL source despite being unspecced")))
 

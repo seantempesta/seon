@@ -83,6 +83,7 @@
 
 (defn set-timeout-ms!
   "Replace the per-form wall-clock timeout. Returns the new value."
+  {:malli/schema [:=> [:catn [::ms :int]] :int]}
   [ms]
   (reset! !timeout-ms ms))
 
@@ -111,6 +112,10 @@
 
    ;; turn 2 — uses the default 10s again
    (regular-op)"
+  ;; `inner` + the return are `:any` on purpose: `inner` is the agent form's
+  ;; already-evaluated value (a Promise / any runtime value), returned
+  ;; unchanged — a runtime-value boundary. Only `ms` carries a data contract.
+  {:malli/schema [:=> [:catn [::ms :int] [::inner :any]] :any]}
   [ms inner]
   (reset! !next-budget-ms ms)
   inner)
@@ -900,6 +905,10 @@
    A form that hangs on a never-resolving Promise returns
      {:ok false :error {:seon.error/message \"eval timed out after Nms\" …}}
    The underlying form keeps running — see `race-timeout` docstring."
+  ;; UNSPECCED on purpose: `compile-state` is the opaque cljs.js bootstrap
+  ;; runtime handle, and the return is the bare-keyword REPL result map
+  ;; (`:ok`/`:value`/`:ns`/`:error`) — no namespaced-data contract to spec
+  ;; (the no-:any rule's documented runtime-handle boundary exception).
   ([compile-state form-str]
    (eval compile-state form-str nil))
   ([compile-state form-str {:keys [ns analyze-deps? timeout-ms]
@@ -951,6 +960,8 @@
   "Stash a raw value (any type) on globalThis keyed by the eval-id.
    No pr-str round-trip — value-type-agnostic. Soft-fails on impossible
    sets (logs + ignores)."
+  ;; UNSPECCED on purpose: `value` is any runtime value (datahike DB handles,
+  ;; JS objects) — value-type-agnostic by design; a runtime-value boundary.
   [eval-id value]
   (try
     (js/Reflect.set js/globalThis (result-key eval-id) value)
@@ -975,6 +986,8 @@
      resume boundary in the transcript marks where that history ends;
    - the eval ERRORED (it never produced a value);
    - no such eval id exists (typo)."
+  ;; UNSPECCED on purpose: returns the prior eval's live VALUE (any runtime
+  ;; type) or an error map — an opaque-value boundary, not a data contract.
   [id]
   (let [id-str (if (keyword? id) (name id) (str id))
         k      (result-key id-str)]
@@ -1118,6 +1131,8 @@
    the vars resolve at runtime (live-proven). So we do NOT trust the
    eval `:ok`; we verify success by PROBING that the refer'd `complete`
    resolves to a fn in the home ns, and only throw when that probe fails."
+  ;; UNSPECCED on purpose: `compile-state` is the opaque cljs.js bootstrap
+  ;; runtime handle (the no-:any rule's documented boundary exception).
   [compile-state agent-ns-sym _agent-id]
   (let [setup-src
         (str "(ns " agent-ns-sym
