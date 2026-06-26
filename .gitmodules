@@ -173,3 +173,6 @@
 [submodule "reference-code/tinypool"]
 	path = reference-code/tinypool
 	url = https://github.com/tinylibs/tinypool
+[submodule "reference-code/mvm"]
+	path = reference-code/mvm
+	url = https://github.com/tinylabscom/mvm.git
