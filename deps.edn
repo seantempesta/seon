@@ -99,7 +99,7 @@
   :fork-deps
   {:extra-deps {org.replikativ/datahike
                 {:git/url "https://github.com/seantempesta/datahike"
-                 :git/sha "7ef2b5de2cea2c94b93ffb181e471b9887f1c403"}}
+                 :git/sha "e6d196d52003ef0453d601ea3192d6f7e9dd3dae"}}
    :override-deps {org.replikativ/konserve
                    {:git/url "https://github.com/seantempesta/konserve"
                     :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}}
@@ -206,7 +206,7 @@
 
   ;; 2.2c DIS-replica probe — JVM writer side. Self-contained on purpose
   ;; (`:replace-deps`/`:replace-paths`): runs the SAME datahike fork sha the
-  ;; pod's :cljs alias overrides to (seantempesta/datahike@7ef2b5de), so the
+  ;; pod's :cljs alias overrides to (seantempesta/datahike@e6d196d5), so the
   ;; probe falsifies fressian/store compat WITHOUT version skew and WITHOUT
   ;; touching the main JVM deps the dev JVM / wire-server resolve
   ;; (:writer runs the SAME fork sha since 156a53e — converged).
@@ -216,7 +216,7 @@
   {:replace-deps  {org.clojure/clojure {:mvn/version "1.12.0"}
                    org.replikativ/datahike
                    {:git/url "https://github.com/seantempesta/datahike"
-                    :git/sha "7ef2b5de2cea2c94b93ffb181e471b9887f1c403"}
+                    :git/sha "e6d196d52003ef0453d601ea3192d6f7e9dd3dae"}
                    ;; konserve header fix (2.2d Stage A): CLJS meta-size
                    ;; BE32 + legacy 1-byte sniff. The fork repo has no
                    ;; pushable remote (mvn 0.9.346 was deployed from it),
@@ -242,7 +242,7 @@
   {:replace-deps  {org.clojure/clojure {:mvn/version "1.12.0"}
                    org.replikativ/datahike
                    {:git/url "https://github.com/seantempesta/datahike"
-                    :git/sha "7ef2b5de2cea2c94b93ffb181e471b9887f1c403"}
+                    :git/sha "e6d196d52003ef0453d601ea3192d6f7e9dd3dae"}
                    org.replikativ/konserve
                    {:git/url "https://github.com/seantempesta/konserve"
                             :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}
@@ -341,7 +341,7 @@
          ;; PR-shaped pending upstream review.
          :override-deps {org.replikativ/datahike
                          {:git/url "https://github.com/seantempesta/datahike"
-                          :git/sha "7ef2b5de2cea2c94b93ffb181e471b9887f1c403"}
+                          :git/sha "e6d196d52003ef0453d601ea3192d6f7e9dd3dae"}
                          ;; konserve header fix (2.2d Stage A): CLJS
                          ;; meta-size BE32 at bytes 4-7 + legacy 1-byte
                          ;; sniff in parse-header, so JVM- and Node-written
