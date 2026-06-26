@@ -274,4 +274,35 @@ Revert point if the experiment goes sideways: `c84e8fc`.
 - **Op note:** the shadow `.shadow-cljs/builds/client` output + nREPL port got wiped during the
   truncation investigation → the pod crash-looped + the cljs MCP dropped; recovered with
   `bin/seon restart cljs-watch` (full recompile, port restored) — the auto-reconnect path works.
+- **Commit:** `70026ba`
+
+### Pass 8 — INFRA: cure the bin/test-cljs false-green (the truncation that hid the RCE)
+
+- **Move:** repair the TOOLING (the user: "your tools are as important as the system"). This
+  false-green is what let the /call RCE ship under "543/0/0".
+- **Root cause (observed, not inferred):** `bin/test-cljs` derived PASS from node's exit code
+  alone. shadow `:node-test` calls `process.exit` ONLY from cljs.test's `:end-run-tests`, which
+  fires only after the WHOLE suite completes — cljs.test chains every test as ONE async
+  continuation (each `(async done)` must call `done`). `seon.web.inspector-chips-test` (4 tests
+  each running a full `client/boot-seed!` inside an async block) intermittently fails to settle
+  under cumulative in-process load (~ns 58); the chain breaks → `:end-run-tests` never fires →
+  node drains + **exits 0** → every ns sorting after it silently skipped. Proof: direct
+  `node out/test/test.js` ran all 61 ns / 550 tests; `bin/test-cljs` truncated 4/4 at exactly
+  `inspector-chips-test`, dropping `call-test`/`transform-test`/`serve-test` (the RCE+CSRF regressions).
+- **Fix (bin/test-cljs only — a test-level fix can't catch an under-load async stall):**
+  (1) **Backstop** — verdict = exit-code + **ran-count vs discovered (`--list`=61)** + end-summary
+  presence + cljs.test's own `FAIL/ERROR in (` reports (not a bare grep that over-matched log
+  lines). A truncated/short run **FAILs loudly (exit 1) and NAMES the dropped nses** — false-green
+  is now impossible. (2) **Tail-retry** — on a clean-exit truncation with zero real failures,
+  re-run the un-completed nses in a FRESH process (no cumulative pressure → they pass) + merge;
+  real failures are never retried away, a re-stall still FAILs. (+ a `grep -c || echo 0`
+  double-print bash bug fixed.)
+- **Live proof:** final `bin/test-cljs` → pass-1 truncated at ns 58 → retry re-ran the 4 cleanly →
+  **"namespaces: all 61 ran (after tail-retry) … PASS (86s)"**; the security nses now execute —
+  explicit run: **16 tests / 49 assertions / 0 fail / 0 err** (`call-refuses-injected-list-arg`,
+  `decode-args-refuses-*`, `same-origin-*` — so the RCE fix is now test-proven too, not just live).
+  (Orchestrator re-running it independently to confirm the intermittent recovery is reliable.)
+- **Flagged (deeper, deferred):** the single-process `:node-test` runner's `^:async`-under-load
+  fragility remains — a fuller fix = per-ns process isolation or lightening inspector-chips-test's
+  4× `boot-seed!`. The backstop+retry make the tool trustworthy + green meanwhile.
 - **Commit:** (this pass)

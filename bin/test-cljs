@@ -75,30 +75,177 @@ if [ ! -f "out/test/test.js" ]; then
   exit 2
 fi
 
+# ---------------------------------------------------------------------------
+# Truncation backstop, part 1 — DISCOVER how many test namespaces the runner
+# will iterate. This is the runner's OWN view (`env/get-test-namespaces`, what
+# `--list` prints), which is the authority because it INCLUDES probe nses that
+# register `deftest`s but don't match the `-test$` discovery regexp (e.g.
+# seon.test.*-probes). The compiled `_test.js` import set UNDER-counts those.
+#
+# `--list` never calls `js/process.exit` (shadow.test.node only exits from the
+# :end-run-tests report), so it would hang — we poll until the printed count
+# stabilises (~3s unchanged), then kill. A short/incomplete --list only WEAKENS
+# the ran<discovered cross-check; it can never false-FAIL a good run (the
+# summary-presence gate below is the hard stall detector, and an undercounted
+# DISCOVERED keeps RAN >= DISCOVERED).
+# ---------------------------------------------------------------------------
+LISTLOG="tmp/test-cljs-list-$$.log"
+: > "$LISTLOG"
+node out/test/test.js --list > "$LISTLOG" 2>&1 &
+LISTPID=$!
+PREV=-1; STABLE=0
+for _ in $(seq 1 90); do
+  sleep 1
+  kill -0 "$LISTPID" 2>/dev/null || break
+  CUR=$(grep -acE '^Namespace:' "$LISTLOG" 2>/dev/null); : "${CUR:=0}"
+  if [ "$CUR" -gt 0 ] && [ "$CUR" -eq "$PREV" ]; then
+    STABLE=$((STABLE + 1)); [ "$STABLE" -ge 3 ] && break
+  else
+    STABLE=0
+  fi
+  PREV=$CUR
+done
+kill -9 "$LISTPID" 2>/dev/null || true
+wait "$LISTPID" 2>/dev/null || true
+DISCOVERED=$(grep -acE '^Namespace:' "$LISTLOG" 2>/dev/null); : "${DISCOVERED:=0}"
+
 echo ""
 echo "== Running tests (node out/test/test.js) =="
 node out/test/test.js 2>&1 | tee -a "$TMPOUT"
-EXIT_CODE=${PIPESTATUS[0]}
+NODE_EXIT=${PIPESTATUS[0]}
+
+# ---------------------------------------------------------------------------
+# Verdict — based on EXIT CODE + RAN-COUNT + SUMMARY-PRESENCE + cljs.test's own
+# "FAIL in ("/"ERROR in (" reports, never a bare FAIL|ERROR log grep.
+#
+# WHY exit 0 alone is NOT a pass: the :node-test runner sequences EVERY test
+# as one async block (cljs.test/run-block). An async test that never calls its
+# `done` continuation breaks the chain — finish-test-run never runs, so the
+# :summary / :end-run-tests reports never fire, `js/process.exit` is never
+# called, node's event loop drains, and node exits 0. Every namespace sorted
+# after the staller is then silently skipped: a FALSE GREEN (this is exactly
+# how a /call RCE once shipped "green").
+#
+# A COMPLETE run always prints cljs.test's summary ("Ran N tests containing M
+# assertions." + "F failures, E errors.") — emitted only by finish-test-run
+# after the LAST block fn. Its PRESENCE proves the run reached the end; its
+# ABSENCE proves truncation. We additionally require RAN == DISCOVERED. Real
+# failures are counted from cljs.test's own "FAIL in ("/"ERROR in (" report
+# lines (anchored, so datahike log lines / inline tx-data blobs that merely
+# contain the word "error" are not mistaken for failures).
+# ---------------------------------------------------------------------------
+# NOTE: `grep -c` already prints the count (0 when no match), it just exits 1
+# in that case — so NO `|| echo 0` (that would print a SECOND 0, yielding the
+# multi-line "0\n0" that breaks `[ "$x" -eq 0 ]`). Empty (missing file) →
+# callers default with `: "${VAR:=0}"`.
+parse_ran()     { grep -acE '^Testing ' "$1" 2>/dev/null; }
+parse_summary() { grep -aE '^Ran [0-9]+ tests containing' "$1" | tail -1; }
+parse_realfail(){ grep -acE '^(FAIL|ERROR) in \(' "$1" 2>/dev/null; }
+parse_counts()  { grep -aE '^[0-9]+ failures, [0-9]+ errors\.' "$1" | tail -1; }
+
+RAN=$(parse_ran "$TMPOUT"); : "${RAN:=0}"
+SUMMARY_LINE=$(parse_summary "$TMPOUT")
+COUNTS_LINE=$(parse_counts "$TMPOUT")
+REAL_FAILS=$(parse_realfail "$TMPOUT"); : "${REAL_FAILS:=0}"
+
+TRUNCATED=0
+[ -z "$SUMMARY_LINE" ] && TRUNCATED=1
+[ "$DISCOVERED" -gt 0 ] && [ "$RAN" -lt "$DISCOVERED" ] && TRUNCATED=1
+
+# ---------------------------------------------------------------------------
+# Tail-retry — recover an INTERMITTENT async-runner stall (NOT failures).
+#
+# The single-process :node-test runner is fragile under load: heavyweight
+# `^:async`/await tests near the END of the suite (peak event-loop pressure,
+# made worse by the preceding `compile test`) intermittently wedge the shared
+# run-block continuation, dropping every later namespace. The DROPPED
+# namespaces pass cleanly when run on their own (no cumulative pressure), so
+# when — and ONLY when — the run truncated with the clean-exit signature (node
+# exit 0, no summary) and ZERO real failures so far, re-run the un-completed
+# namespaces (the missing ones + the last one to start, which stalled mid-way)
+# in a FRESH process and merge. A real failure is never retried away; a stall
+# that re-stalls is reported. This is recovery, not green-washing — the
+# backstop above still fails the build if the retry doesn't fully complete.
+# ---------------------------------------------------------------------------
+RESCUED=0
+RETRY_NOTE=""
+if [ "$TRUNCATED" -ne 0 ] && [ "$REAL_FAILS" -eq 0 ] && [ "$NODE_EXIT" -eq 0 ] && [ "$DISCOVERED" -gt 0 ]; then
+  LAST_STARTED=$(grep -aE '^Testing ' "$TMPOUT" | tail -1 | sed -E 's/^Testing *//')
+  MISSING=$(comm -23 \
+    <(grep -aE '^Namespace:' "$LISTLOG" | sed -E 's/^Namespace: *//' | sort -u) \
+    <(grep -aE '^Testing '   "$TMPOUT"  | sed -E 's/^Testing *//'   | sort -u))
+  RETRY_NSES=$(printf '%s\n%s\n' "$MISSING" "$LAST_STARTED" | sed '/^$/d' | sort -u)
+  RETRY_CSV=$(printf '%s' "$RETRY_NSES" | tr '\n' ',' | sed 's/,$//')
+  RETRY_N=$(printf '%s\n' "$RETRY_NSES" | grep -c .)
+  if [ -n "$RETRY_CSV" ]; then
+    echo ""
+    echo "== Truncation detected — re-running ${RETRY_N} un-completed namespace(s) in a fresh process =="
+    echo "   ${RETRY_CSV}"
+    RETRYLOG="tmp/test-cljs-retry-$$.log"; : > "$RETRYLOG"
+    node out/test/test.js --test="$RETRY_CSV" > "$RETRYLOG" 2>&1 &
+    RP=$!
+    for _ in $(seq 1 180); do sleep 1; kill -0 "$RP" 2>/dev/null || break; done
+    if kill -0 "$RP" 2>/dev/null; then kill -9 "$RP" 2>/dev/null; RETRY_EXIT=137; else wait "$RP"; RETRY_EXIT=$?; fi
+    grep -aE '^Testing |^Ran [0-9]+ tests containing|^[0-9]+ failures, [0-9]+ errors\.|^(FAIL|ERROR) in \(' "$RETRYLOG" | cut -c1-200
+    cat "$RETRYLOG" >> "$TMPOUT"
+    RETRY_RAN=$(parse_ran "$RETRYLOG"); : "${RETRY_RAN:=0}"
+    RETRY_SUMMARY=$(parse_summary "$RETRYLOG")
+    RETRY_RF=$(parse_realfail "$RETRYLOG"); : "${RETRY_RF:=0}"
+    if [ -n "$RETRY_SUMMARY" ] && [ "$RETRY_EXIT" -eq 0 ] && [ "$RETRY_RAN" -ge "$RETRY_N" ] && [ "$RETRY_RF" -eq 0 ]; then
+      RESCUED=1; TRUNCATED=0
+      RETRY_NOTE="recovered: ${RETRY_RAN} un-completed namespace(s) re-ran cleanly in a fresh process (intermittent :node-test runner stall)"
+    else
+      RETRY_NOTE="retry did NOT recover — still truncated or now failing"
+      REAL_FAILS=$((REAL_FAILS + RETRY_RF))
+    fi
+    rm -f "$RETRYLOG"
+  fi
+fi
+
+VERDICT_FAIL=0
+[ "$NODE_EXIT" -ne 0 ] && VERDICT_FAIL=1
+[ "$TRUNCATED" -ne 0 ] && VERDICT_FAIL=1
+[ "$REAL_FAILS" -ne 0 ] && VERDICT_FAIL=1
 
 END=$(date +%s)
 ELAPSED=$((END - START))
 
 echo ""
 echo "========================================"
-if [ $EXIT_CODE -eq 0 ]; then
+if [ "$RESCUED" -ne 0 ]; then
+  echo "namespaces: all ${DISCOVERED} ran (after tail-retry; node exit ${NODE_EXIT})"
+else
+  echo "namespaces: ran ${RAN} of ${DISCOVERED} discovered  (node exit ${NODE_EXIT})"
+fi
+[ -n "$SUMMARY_LINE" ] && echo "first pass: ${SUMMARY_LINE}  ${COUNTS_LINE}"
+[ -n "$RETRY_NOTE" ] && echo "tail-retry: ${RETRY_NOTE}"
+if [ "$VERDICT_FAIL" -eq 0 ]; then
   echo "PASS (${ELAPSED}s)"
 else
   echo "FAIL (${ELAPSED}s)"
-  echo ""
-  echo "Failing assertions:"
-  # cut guards against MB-sized single lines (datahike tx blobs inline
-  # whole tx-data - opus-live-tests 2026-06-12 limitation 10): without
-  # it one matched line can print megabytes into the footer.
-  grep -E "FAIL|ERROR" "$TMPOUT" | cut -c1-400 | head -20 || true
+  if [ "$TRUNCATED" -ne 0 ]; then
+    echo ""
+    echo "TRUNCATED: the run did not complete every namespace (no end-of-run"
+    echo "summary, or ran < discovered). A test stalled the shared async"
+    echo ":node-test runner (a hung async \`done\`) and the tail-retry did not"
+    echo "recover it. Namespaces that never completed:"
+    comm -23 \
+      <(grep -aE '^Namespace:' "$LISTLOG" | sed -E 's/^Namespace: *//' | sort -u) \
+      <(grep -aE '^Testing '   "$TMPOUT"  | sed -E 's/^Testing *//'   | sort -u) \
+      | sed 's/^/  - /'
+  fi
+  if [ "$REAL_FAILS" -ne 0 ]; then
+    echo ""
+    echo "Failures/errors (cljs.test reports only):"
+    # cut guards against MB-sized single lines (datahike tx blobs inline whole
+    # tx-data). Anchored to cljs.test's own "FAIL in ("/"ERROR in (".
+    grep -aE '^(FAIL|ERROR) in \(' "$TMPOUT" | cut -c1-400 | head -40 || true
+  fi
 fi
 echo "========================================"
 
+rm -f "$LISTLOG"
 ln -sf "$(basename "$TMPOUT")" tmp/test-cljs-latest.log
 echo "Full output: $TMPOUT (or tmp/test-cljs-latest.log)"
 
-exit $EXIT_CODE
+if [ "$VERDICT_FAIL" -eq 0 ]; then exit 0; else exit 1; fi
