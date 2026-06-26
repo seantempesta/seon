@@ -22,6 +22,11 @@ corrupt each other, and restart cleanly from the DB (which is itself
 reversible). The loop is data; the context is a render of data; the UI is a
 reactive projection of data.
 
+It is **dual-track** — a CLJ **JVM server** (DB writer + render/serve + Integrant
+lifecycle, data-only) and CLJS **agent executors** (isolated), sharing `.cljc`
+(schema, `derive-state`, the transition table). This **revives the JVM** as the
+convergence always intended; it is not a CLJS-only effort.
+
 ## Deployment topology
 
 ```
