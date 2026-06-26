@@ -322,4 +322,26 @@ Revert point if the experiment goes sideways: `c84e8fc`.
   (`d/q`/`d/datoms`/`d/entity`) in violation of the "only inside `src/seon/db/`" rule — clean
   swap to `db/query`/`db/entity` later; the origin-forge guard (`warn-on-seed-origin-forge!`) is
   now lower-value (agent-view's peer-injection vector is gone) — revisit.
+- **Commit:** `6471402`
+
+### Pass 10 — gym live-drive harness rewritten to the run model
+
+- **Move:** repair (un-orphan the casualty the cutover created — the live-drive eval harness).
+- **Did:** `test/seon/gym/driver.cljs` rewired wake/session → run: drive fns `run/open-run!` a
+  `:message` run (cause = the waking msg) → drive `run-turn!`/`run-loop!` → `close-run! :completed`;
+  marker queries walk `agent ← run ← turn` filtered on `:seon.agent.run/cause` (caused runs =
+  message-driven, so the no-cause `bootstrap-turn!` run-0 is excluded — the discriminator that
+  replaced the old `wake` clause). Re-enabled `driver_test.cljs` (off `.disabled`) + rewrote the
+  `s01` scenario (it must now `(wait)` to close its run — see the zero-forms flag below).
+  **`paid_test` kept `.disabled`** (paid-provider drives; its scenarios still carry old-model attrs;
+  cautious default — one env-var from a money-burning run otherwise).
+- **Live proof:** `bin/test-cljs` **576/2635/0/0, "ran 62 of 62 discovered" PASS (138s)**;
+  `seon.gym.driver-test` RAN; the `:s01-stub-pipeline-smoke` scorecard **`pass? true`** (all 5
+  predicates green) — the scripted-replay loop drove a real agent through the run model end to end.
+- **Flagged (decisions for the owner):** (1) **`run-loop!` has NO zero-forms halt** — the old
+  wake-loop stopped after a streak of no-actionable-forms turns; the new loop runs to
+  turn-limit/deadline/verb, so an unresponsive LLM spins to the cap. `turn.cljs:256-258` still
+  claims the halt exists (stale). Decide: re-add an empty-streak halt, or rely on verbs+bounds +
+  delete the comment. (2) **8 paid/todo scenario EDNs carry old-model attrs** — need run-model
+  conversion (+ a terminal verb per scenario, given #1) before the next paid sweep.
 - **Commit:** (this pass)

@@ -26,14 +26,16 @@
 
    Budget tiers:
      :stub     — FREE. The scenario scripts the LLM responses
-                 (`:seon.gym.turn/llm-script`, one text per turn) and
-                 the driver drives ONE `run-turn!` per script entry —
-                 deliberately NOT the trigger-driven loop, because the
-                 stub self-wake bug (PRD §4) burns trigger-driven stub
-                 loops to the turn cap. Set `:seon.gym.scenario/llm` to
-                 `:scripted-replay` to drive the REAL agentic loop with
-                 a replaying llm-fn instead (terminates via the loop's
-                 zero-forms stop policy), or `:rejecting` for the
+                 (`:seon.gym.turn/llm-script`, one text per turn) and the
+                 driver opens a `:message` run then drives ONE `run-turn!`
+                 per script entry — deliberately NOT the trigger-driven
+                 loop, because a stub script that never emits a terminal
+                 verb would otherwise drive the loop to its run turn-limit.
+                 Set `:seon.gym.scenario/llm` to `:scripted-replay` to
+                 drive the REAL agentic loop with a replaying llm-fn instead
+                 (the script's last entry must close the run — e.g.
+                 `(wait …)` — since the loop runs until a bound or verb
+                 closes the run), or `:rejecting` for the
                  simulated-provider-failure fixture.
      :paid     — costs real money. The driver wires the ACTIVE
                  provider's agent adapter (`seon.ai/provider` —
@@ -78,6 +80,7 @@
     [seon.ai.openai-compat :as openai]
     [seon.client :as client]
     [seon.agent.turn :as turn]
+    [seon.agent.run :as run]
     [seon.agent.loop :as aloop]
     [seon.ctx :as ctx]
     [seon.db :as db]
@@ -246,13 +249,14 @@
 (schema/register! :seon.gym.scenario/fixture-sources [:vector :string])
 ;; Per-scenario llm-fn injection (catalog §7), stub tier only:
 ;;   :scripted-replay — drive seon.agent.loop/run-loop! (the REAL
-;;     agentic loop) with an llm-fn replaying the turn's :llm-script entries in
-;;     order; once exhausted it answers prose-only, so the loop's
-;;     zero-forms stop policy terminates it.
+;;     agentic loop) with an llm-fn replaying the turn's :llm-script
+;;     entries in order; the script's last entry must close the run (a
+;;     lifecycle verb like `(wait …)`) since the loop runs until a bound
+;;     or verb closes the run.
 ;;   :rejecting — an llm-fn whose Promise REJECTS after 100ms
 ;;     (simulated provider failure; catalog F-llm-reject / S-08).
 ;; Absent on a stub scenario = the one-run-turn!-per-script-entry
-;; driver (see ns docstring on the stub self-wake bug).
+;; driver (see ns docstring — opens a `:message` run, no trigger loop).
 (schema/register! :seon.gym.scenario/llm [:enum :scripted-replay :rejecting])
 (schema/register! :seon.gym.scenario/turns [:vector :seon.gym/turn])
 (schema/register! :seon.gym.scenario/predicates
@@ -505,27 +509,28 @@
     :else false))
 
 (defn- eval-at+source
-  "All [at source] eval pairs from WAKE-DRIVEN turns (turns with a
-   `:seon.agent.turn/wake` datom), chronological. With `agent-id`,
-   scoped to that agent's evals via agent → sessions → turns → evals;
-   nil = the whole scratch store (single-agent scenarios).
+  "All [at source] eval pairs from RUN-DRIVEN turns (turns stamped with a
+   `:seon.agent.turn/run` whose run carries a `:seon.agent.run/cause` — a
+   message-triggered run), chronological. With `agent-id`, scoped to that
+   agent's evals via agent ← run ← turn ← evals; nil = the whole scratch
+   store (single-agent scenarios).
 
-   The wake clause excludes the BOOTSTRAP turn's tutorial evals (turn 0
-   hello + park — boot parity): a bootstrap turn runs before any wake is
-   minted, so it carries no `:seon.agent.turn/wake`, while every
-   message-driven turn the loop runs is stamped with the wake it owns.
-   Eval-shaped predicates measure the agent's behavior IN RESPONSE TO
-   MESSAGES; the boot tutorial is core-scripted, not behavior, and would
-   otherwise be every scenario's 'first eval'."
+   The cause clause excludes the BOOTSTRAP turn's tutorial evals (turn 0
+   hello + park — boot parity): `seon.client/bootstrap-turn!` opens its run
+   with NO cause, while every message-driven run the gym opens carries the
+   waking message as its `:seon.agent.run/cause`. Eval-shaped predicates
+   measure the agent's behavior IN RESPONSE TO MESSAGES; the boot tutorial
+   is core-scripted, not behavior, and would otherwise be every scenario's
+   'first eval'."
   [dbv agent-id]
   (->> (if agent-id
          (db/query {:seon.db/query '[:find ?at ?src ?ev
                                      :in $ ?aid
                                      :where
                                      [?ag :seon.agent/id ?aid]
-                                     [?ag :seon.agent/sessions ?s]
-                                     [?s :seon.agent.session/turns ?t]
-                                     [?t :seon.agent.turn/wake _]
+                                     [?r :seon.agent.run/agent ?ag]
+                                     [?r :seon.agent.run/cause _]
+                                     [?t :seon.agent.turn/run ?r]
                                      [?t :seon.agent.turn/evals ?ev]
                                      [?ev :seon.eval/at ?at]
                                      [?ev :seon.eval/source ?src]]
@@ -533,7 +538,8 @@
                     :seon.db/db   dbv})
          (db/query {:seon.db/query '[:find ?at ?src ?ev
                                      :where
-                                     [?t :seon.agent.turn/wake _]
+                                     [?r :seon.agent.run/cause _]
+                                     [?t :seon.agent.turn/run ?r]
                                      [?t :seon.agent.turn/evals ?ev]
                                      [?ev :seon.eval/at ?at]
                                      [?ev :seon.eval/source ?src]]
@@ -552,30 +558,31 @@
   (second (first (eval-at+source dbv agent-id))))
 
 (defn- turn-prompt-files
-  "Chronological [turn-id prompt-file-or-nil] pairs for every
-   WAKE-DRIVEN turn (`:seon.agent.turn/wake` present — the bootstrap
-   turn runs before any wake and renders no prompt, so prompt predicates
-   range over the turns the agent was actually prompted on) in the
-   post-run store — optionally scoped to one agent's turns via agent →
-   sessions → turns. A nil prompt-file means the blob was never
-   written (persist-prompt! failure, or a seeded turn without one) —
-   prompt-predicate callers MUST treat that as RED."
+  "Chronological [turn-id prompt-file-or-nil] pairs for every RUN-DRIVEN
+   turn (stamped with a `:seon.agent.turn/run` whose run carries a
+   `:seon.agent.run/cause` — the bootstrap turn's run has no cause and
+   renders no prompt, so prompt predicates range over the turns the agent
+   was actually prompted on) in the post-run store — optionally scoped to
+   one agent's turns via agent ← run ← turn. A nil prompt-file means the
+   blob was never written (capture failure, or a seeded turn without one)
+   — prompt-predicate callers MUST treat that as RED."
   [dbv agent-id]
   (->> (if agent-id
          (db/query {:seon.db/query '[:find ?at ?tid ?t
                                      :in $ ?aid
                                      :where
                                      [?ag :seon.agent/id ?aid]
-                                     [?ag :seon.agent/sessions ?s]
-                                     [?s :seon.agent.session/turns ?t]
-                                     [?t :seon.agent.turn/wake _]
+                                     [?r :seon.agent.run/agent ?ag]
+                                     [?r :seon.agent.run/cause _]
+                                     [?t :seon.agent.turn/run ?r]
                                      [?t :seon.agent.turn/id ?tid]
                                      [?t :seon.agent.turn/at ?at]]
                     :seon.db/args [agent-id]
                     :seon.db/db   dbv})
          (db/query {:seon.db/query '[:find ?at ?tid ?t
                                      :where
-                                     [?t :seon.agent.turn/wake _]
+                                     [?r :seon.agent.run/cause _]
+                                     [?t :seon.agent.turn/run ?r]
                                      [?t :seon.agent.turn/id ?tid]
                                      [?t :seon.agent.turn/at ?at]]
                     :seon.db/db dbv}))
@@ -1154,10 +1161,11 @@
 (defn ^:async ^:private send-user-message!
   "Land the scenario question as a real user message (the same
    `message!` entry point POST /chat uses). Returns the message id. On a
-   live boot this inbound datom would trip the wake trigger; the gym
-   drives the loop explicitly instead ([[drive-loop!]] mints the wake),
-   so the trigger is never armed here. Fails loud on a non-ok envelope: a
-   scenario whose question never landed must not score."
+   live boot this inbound datom would trip the wake trigger; the gym drives
+   explicitly instead ([[drive-loop!]] / [[drive-stub-turns!]] open the run
+   themselves, cause = this message), so the trigger is never armed here.
+   Fails loud on a non-ok envelope: a scenario whose question never landed
+   must not score."
   [agent-id text]
   (let [env (await (agent/message!
                      {:seon.agent.message/content text
@@ -1167,58 +1175,64 @@
       (throw (ex-info "gym: user message! failed" env)))
     (:seon.agent.message/id env)))
 
-(defn ^:async ^:private wake-active!
-  "Mint a fresh wake-episode + flip the agent to :active, the same
-   `fresh-wake! → set-state! :active` pair the live `wake-handler` runs
-   before a loop — so every turn driven afterward carries
-   `:seon.agent.turn/wake` (the marker eval/prompt predicates scope on,
-   distinguishing message-driven turns from the bootstrap turn). Returns
-   the minted wake id."
-  [agent-id]
-  (let [wake (await (agent/fresh-wake! {:seon.agent/id agent-id}))]
-    (await (agent/set-state! {:seon.agent/id    agent-id
-                              :seon.agent/state :active}))
-    wake))
-
 (defn ^:async ^:private drive-stub-turns!
-  "Drive one `turn/run-turn!` per scripted LLM response. Mints a wake
-   first ([[wake-active!]]) so each turn carries `:seon.agent.turn/wake`,
-   then resets the agent to :idle when the scripts are exhausted (unless
-   a lifecycle verb in a script already moved it off :active — the
-   bootstrap park leaves it :idle and the loop owns state live, so a
-   forced :idle here only mirrors the loop's clean exit)."
-  [agent-id compile-state scripts]
-  (await (wake-active! agent-id))
-  (loop [scripts scripts]
-    (when-let [[text & more] (seq scripts)]
-      (await (db/with-agent agent-id
-               (fn []
-                 (turn/run-turn!
-                   {:seon.agent/id            agent-id
-                    :seon.agent/llm-fn        (scripted-llm text)
-                    :seon.agent/compile-state compile-state}))))
-      (recur more)))
-  (when (= :active (:seon.agent/state
-                     (db/entity {:seon.db/ref [:seon.agent/id agent-id]})))
-    (await (agent/set-state! {:seon.agent/id    agent-id
-                              :seon.agent/state :idle}))))
+  "Drive one `turn/run-turn!` per scripted LLM response under a freshly
+   OPENED `:message` run (cause = the waking user message), so each turn
+   carries `:seon.agent.turn/run` and the run carries a cause — the marker
+   eval/prompt predicates scope on caused runs, distinguishing
+   message-driven turns from the bootstrap turn 0 (whose run has no cause).
+   Closes the run `:completed` when the scripts are exhausted — unless a
+   lifecycle verb in a script already closed it (a script `(wait …)` /
+   `(complete …)` leaves the agent :idle, so `current-run` is nil and we
+   skip). Deliberately NOT the trigger-driven loop: a stub script that
+   never emits a terminal verb would otherwise drive the loop to its run
+   turn-limit. Fails loud if the run never opened — a scenario whose turns
+   were never stamped must not silently score."
+  [agent-id compile-state cause scripts]
+  (let [opened (await (run/open-run! {:seon.agent/id          agent-id
+                                      :seon.agent.run/trigger :message
+                                      :seon.agent.run/cause   cause}))]
+    (when (false? (:seon.db/ok? opened))
+      (throw (ex-info "gym: drive-stub-turns! open-run! failed" opened)))
+    (let [run-id (:seon.agent.run/id opened)]
+      (loop [scripts scripts]
+        (when-let [[text & more] (seq scripts)]
+          (await (db/with-agent agent-id
+                   (fn []
+                     (turn/run-turn!
+                       {:seon.agent/id            agent-id
+                        :seon.agent/llm-fn        (scripted-llm text)
+                        :seon.agent/compile-state compile-state
+                        :seon.agent.run/id        run-id}))))
+          (recur more)))
+      (when (run/current-run {:seon.agent/id agent-id})
+        (await (run/close-run! {:seon.agent.run/id            run-id
+                                :seon.agent.run/closed-reason :completed}))))))
 
 (defn ^:async ^:private drive-loop!
-  "Drive `seon.agent.loop/run-loop!` (the REAL multi-turn driver) with
-   the given llm-fn. Mints a fresh wake + flips :active ([[wake-active!]])
-   exactly as the live `wake-handler` does, then hands that wake to
-   `run-loop!`. The loop's own stop policies (zero forms / error / cap /
-   lifecycle verb) are the awaits-idle signal — when the promise
-   resolves the agent is :idle (or :terminated)."
-  [agent-id compile-state llm-fn]
-  (await (db/with-agent agent-id
-           (fn ^:async drive! []
-             (let [wake (await (wake-active! agent-id))]
-               (await (aloop/run-loop!
-                        {:seon.agent/id            agent-id
-                         :seon.agent/llm-fn        llm-fn
-                         :seon.agent/compile-state compile-state}
-                        wake)))))))
+  "Drive `seon.agent.loop/run-loop!` (the REAL multi-turn driver) under a
+   freshly OPENED `:message` run (cause = the waking user message), exactly
+   as the live `wake-handler` :idle branch does: open the run, then hand
+   its run-id to `run-loop!`. The loop's own stop policies (turn-limit /
+   deadline / error / a lifecycle verb closing the run) are the awaits-idle
+   signal — when the promise resolves the agent is :idle (or :terminated).
+   Because the loop runs until a bound or verb closes the run, a
+   `:scripted-replay` script's last entry must close the run (e.g.
+   `(wait …)`). Fails loud if the run never opened."
+  [agent-id compile-state cause llm-fn]
+  (await
+    (db/with-agent agent-id
+      (fn ^:async drive! []
+        (let [opened (await (run/open-run! {:seon.agent/id          agent-id
+                                            :seon.agent.run/trigger :message
+                                            :seon.agent.run/cause   cause}))]
+          (if (false? (:seon.db/ok? opened))
+            (throw (ex-info "gym: drive-loop! open-run! failed" opened))
+            (await (aloop/run-loop!
+                     {:seon.agent/id            agent-id
+                      :seon.agent/llm-fn        llm-fn
+                      :seon.agent/compile-state compile-state}
+                     (:seon.agent.run/id opened)))))))))
 
 (defn ^:async ^:private ensure-agent!
   "Lazily create the agent behind a turn DESIGNATOR (:a, :b, …) on the
@@ -1229,9 +1243,9 @@
    Boot parity: after create!, the agent runs the SAME
    `seon.client/bootstrap-turn!` (turn 0) a live minted agent runs — the
    hello + park — so its transcript carries the bootstrap-turn evidence
-   exactly like a live agent's. (Turn 0 runs before any wake is minted,
-   so it has no `:seon.agent.turn/wake`; eval- and prompt-shaped
-   predicates exclude it — see [[eval-at+source]].)
+   exactly like a live agent's. (Turn 0's run is opened with NO
+   `:seon.agent.run/cause`; eval- and prompt-shaped predicates scope on
+   caused runs and so exclude it — see [[eval-at+source]].)
 
    `pre-id` (optional) pins the minted agent's id — run-scenario!
    mints :a's id BEFORE seeding so the seed txs can carry it, then
@@ -1445,7 +1459,14 @@
             (doseq [{:seon.gym.turn/keys [message llm-script agent]} turns]
               (let [agent-id (await (ensure-agent! !agents compile-state
                                                    (or agent :a)))
-                    _mid     (await (send-user-message! agent-id message))]
+                    mid      (await (send-user-message! agent-id message))
+                    ;; The waking message is the run's cause (the live
+                    ;; wake-handler stamps the inbound datom's eid; the gym
+                    ;; opens the run itself with the same message via its
+                    ;; identity lookup-ref). The cause is what distinguishes
+                    ;; a message-driven run from the bootstrap run (no cause)
+                    ;; in the marker queries.
+                    cause    [:seon.agent.message/id mid]]
                 ;; Context telemetry against the PRE-TURN db value —
                 ;; the message has landed, the turn hasn't run; the exact
                 ;; db the turn's prompt renders from. Informational only.
@@ -1453,14 +1474,15 @@
                        (capture-turn-profile @conn agent-id (or agent :a)))
                 (case (or llm (if (= :stub tier) :per-turn-script :paid))
                   :per-turn-script
-                  (await (drive-stub-turns! agent-id compile-state llm-script))
+                  (await (drive-stub-turns! agent-id compile-state cause
+                                            llm-script))
                   :scripted-replay
-                  (await (drive-loop! agent-id compile-state
+                  (await (drive-loop! agent-id compile-state cause
                                       (replay-llm llm-script)))
                   :rejecting
-                  (await (drive-loop! agent-id compile-state rejecting-llm))
+                  (await (drive-loop! agent-id compile-state cause rejecting-llm))
                   :paid
-                  (await (drive-loop! agent-id compile-state
+                  (await (drive-loop! agent-id compile-state cause
                                       (paid-adapter))))))
             ;; Mechanical scoring against the post-run store + transcript;
             ;; judge predicates score on the SEPARATE judge axis.

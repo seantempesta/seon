@@ -86,7 +86,7 @@
 
 (deftest s01-stub-pipeline-smoke-scenario-passes
   ;; S-01 drives the REAL seon.agent.loop/run-loop! via the
-  ;; :scripted-replay llm injection — message → wake → done turn → idle.
+  ;; :scripted-replay llm injection — message → run → done turn → idle.
   (async done
     (run-and-expect-pass!
       "test/seon/gym/scenarios/s01-stub-pipeline-smoke.edn" done)))
@@ -444,18 +444,24 @@
   ;; turn prompt does contain the asserted text.
   (async done
     (let [phantom (str "logs/prompts/gym-missing/" (db/new-id!) ".txt")
+          run-id  (db/new-id!)
           scenario
           (-> (prompt-blob-scenario)
               (assoc :seon.gym.scenario/id :gymtest-prompt-blob-missing
                      :seon.gym.scenario/fixtures
-                     ;; the fixture turn carries a wake stamp — prompt
-                     ;; predicates range over WAKE-DRIVEN turns only (the
-                     ;; bootstrap turn 0 runs before any wake and renders
-                     ;; no prompt, so it is deliberately out of scope).
-                     [{:seon.agent.turn/id          (db/new-id!)
+                     ;; A seeded CAUSED run + a turn stamped to it — prompt
+                     ;; predicates range over caused-run turns only (the
+                     ;; bootstrap turn 0's run has no cause and renders no
+                     ;; prompt, so it is deliberately out of scope). The
+                     ;; cause is the boot-seeded human (:seon.user/id "user"
+                     ;; lands before fixtures); the run map comes first so
+                     ;; the turn's lookup-ref resolves in-tx.
+                     [{:seon.agent.run/id    run-id
+                       :seon.agent.run/cause [:seon.user/id "user"]}
+                      {:seon.agent.turn/id          (db/new-id!)
                        :seon.agent.turn/at          (js/Date.)
                        :seon.agent.turn/status      :done
-                       :seon.agent.turn/wake        (db/new-id!)
+                       :seon.agent.turn/run         [:seon.agent.run/id run-id]
                        :seon.agent.turn/prompt-file phantom}]
                      :seon.gym.scenario/predicates
                      [{:seon.gym.predicate/id   :every-turn-red-on-missing-blob
