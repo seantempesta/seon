@@ -48,10 +48,8 @@
                               (d/transact!
                                 conn
                                 {:tx-data [{:seon.user/id "user"}
-                                           {:seon.agent/id a-id
-                                            :seon.agent/state :idle}
-                                           {:seon.agent/id b-id
-                                            :seon.agent/state :idle}]})))
+                                           {:seon.agent/id a-id}
+                                           {:seon.agent/id b-id}]})))
                      (.then (fn [_] conn))))))))
 
 (defn- with-conn

@@ -22,6 +22,7 @@
    seon.agent → seon.render → seon.render.default is the one-way
    arrow; we do not close it."
   (:require
+    [seon.agent.fsm :as fsm]
     [seon.db :as db]
     [seon.log :as log]
     [seon.ui.components :as comp]))
@@ -80,15 +81,6 @@
 ;; when present, else fall back to `@seon.db/*conn*`.
 ;; ============================================================
 
-(defn- pulled-agent
-  "Pull the agent entity for `id`. Returns nil if missing."
-  [db id]
-  (let [entity (if db
-                 (db/entity {:seon.db/db db
-                             :seon.db/ref [:seon.agent/id id]})
-                 (db/entity {:seon.db/ref [:seon.agent/id id]}))]
-    (when (:seon.agent/id entity)
-      entity)))
 
 (defn ^:no-doc recent-messages
   "Return the most-recent `n` messages of agent `id`'s conversation
@@ -197,13 +189,21 @@
               :seon.log/agent id})))
 
 (defn ^:no-doc agent-turn-count
-  "Derived turn count for an agent ENTITY: the number of
-   `:seon.agent.session/turns` in its most-recent session (by
-   `:seon.agent.session/at`). Derived here rather than requiring
-   `seon.agent` (which would close the dependency cycle)."
-  [ent]
-  (let [session (last (sort-by :seon.agent.session/at (:seon.agent/sessions ent)))]
-    (count (:seon.agent.session/turns session))))
+  "Derived turn count for an agent: the number of turns across ALL its runs —
+   queries agent ← run (`:seon.agent.run/agent`) ← turn (`:seon.agent.turn/run`)
+   against `db`. Query-based (not reverse-ref nav) so it works on the plain
+   pulled/touched agent maps the callers hold. Derived here rather than
+   requiring `seon.agent` (which would close the dependency cycle)."
+  [db id]
+  (or (db/query {:seon.db/db db
+                 :seon.db/query
+                 '[:find (count ?t) . :in $ ?aid
+                   :where
+                   [?a :seon.agent/id ?aid]
+                   [?r :seon.agent.run/agent ?a]
+                   [?t :seon.agent.turn/run ?r]]
+                 :seon.db/args [id]})
+      0))
 
 ;; `all-running-agents` deleted (agent-fsm redesign U1) — the inspector
 ;; pulls the one agent entity it needs directly; the armable-roster query
@@ -215,6 +215,22 @@
 ;; Phosphor Terminal palette via seon.ui.components.
 ;; ============================================================
 
+(defn ^:no-doc derived-state
+  "The agent's DERIVED FSM state (:idle/:running/:paused/:terminated) from a
+   lazy entity against `db` — projects terminated-at / open run / paused-at via
+   [[seon.agent.fsm/derive-state]]. Local here to keep the seon.agent cycle
+   open (the inspector + tile share this read; mirrors `seon.ctx/derived-state`)."
+  [db id]
+  (let [a     (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
+        run   (:seon.agent/run a)
+        open? (= :open (:seon.agent.run/status run))]
+    (fsm/derive-state
+      (cond-> {:seon.agent.run/open? open?}
+        (:seon.agent/terminated-at a) (assoc :seon.agent/terminated-at
+                                             (:seon.agent/terminated-at a))
+        (:seon.agent.run/paused-at run) (assoc :seon.agent.run/paused-at
+                                               (:seon.agent.run/paused-at run))))))
+
 (defn view
   "Default :seon.render/html renderer. System fn → takes system input
    shape (`:seon.db/db` + `:seon.agent/id`). Pulls the entity, renders
@@ -222,9 +238,8 @@
    Returns `{:seon.render/hiccup [...]}`."
   {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [ent   (pulled-agent db id)
-        state (or (:seon.agent/state ent) :unknown)
-        turns (agent-turn-count ent)
+  (let [state (derived-state db id)
+        turns (agent-turn-count db id)
         msgs  (recent-messages db id 5)
         errs  (recent-errors db id 5)]
     {:seon.render/hiccup

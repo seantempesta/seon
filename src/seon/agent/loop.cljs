@@ -1,80 +1,48 @@
 (ns seon.agent.loop
-  "The agent LOOP — the wake trigger + the loop.
+  "The agent LOOP — the wake trigger + the run-driven fold.
 
-   The loop is the WHOLE stop policy: each iteration re-reads `{state wake}`
-   from the agent record and halts on any of —
-     - state ≠ :active                  → external (orchestrator changed it)
-     - wake ≠ my-wake                   → superseded (a newer wake owns it)
-     - turns-this-wake ≥ effective-cap  → cap (base + inbounds this wake)
-     - turn :error                      → error → :idle
-     - post-turn state ≠ :active        → a verb (wait/complete → :idle;
-                                           terminate → :terminated) or an
-                                           external reset fired; halt at once
-     - zero actionable forms (with empty-streak < 2 thinking guard) → :idle CLEAN
-     - else                             → recur.
-   Finally: if still :active and my-wake still owns it, set :idle (stamped
-   with the implicit-exit :seon.agent.loop/stop-reason — cap/error/no-forms).
+   The loop is a FOLD of [[seon.agent.fsm/transition]] over events derived
+   from the RUN's data. A trigger (an inbound message) opens a RUN
+   ([[seon.agent.run/open-run!]]); `run-loop!` then drives turns until a
+   bound fires or a verb closes the run:
 
-   Wake = read-then-write-with-recheck (no atom, no CAS). An inbound datom
-   fires the per-tx listener; the handler reads the agent's state from the
-   local db snapshot. If wakeable (state = :idle — the complement of
-   {:active :terminated}), it mints a fresh wake-id, transacts `:active` +
-   that wake-id (stamped with :seon.agent.loop/cause = the waking message),
-   then starts the loop stamped with it. Two simultaneous idle wakes both
-   write :active + their wake-id; last-writer-wins; the losing loop re-reads
-   a different wake and bails. No double loop, no atom.
+     each iteration `next-event` derives the event from the run:
+       - run already :closed (a verb ran inside a turn) → :wait / :complete /
+         :terminate (from the run's closed-reason) — the verb owns the close
+       - the agent's `:seon.agent/run` points at a DIFFERENT run → :superseded
+       - the run carries :paused-at                       → :pause
+       - turn-count ≥ turn-limit (the WORK bound)         → :turn-limit
+       - now > deadline (the WALL-CLOCK bound)            → :deadline
+       - else                                             → :turn-ok
+     `(fsm/transition state event)` gives the next state; the EFFECT of
+       :turn-ok is `beat!` + `run-turn!`; the LOOP closes the run on
+       :turn-limit/:deadline/:error (the bounds it owns), while verb closes
+       and supersede are already handled (no re-close). The loop ends when the
+       state leaves :running.
 
-   The per-loop cap is a SLIDING WINDOW: `effective-cap = max-turns-per-loop +
-   inbounds-during-this-wake`, so every inbound (human OR peer) grants +1
-   turn — the agent always gets a turn to SEE and answer a message that
-   landed mid-LLM-call. All DERIVED (no stored grant, no cap-note message).
+   The RUN-ID is the fencing token: a turn from a superseded run answers
+   `owns-run?` false and bails :superseded (the new run owns the agent).
 
-   Requires `seon.agent` (the record schemas + state helpers + the wake gate
-   `inbound-msg-datom?`) and `seon.agent.turn` (`run-turn!`). The boot path
-   (`seon.client`) requires THIS ns to `install-wake-trigger!`."
+   Wake = read-derived-then-open (no atom, no CAS). An inbound datom fires the
+   per-tx listener; the handler derives the agent's state from the local db
+   snapshot. If :idle → `open-run!` ({trigger :message, cause the message})
+   then `run-loop!` on that run. If already :running → `renew!` (the new
+   message extends the lease — the sliding window is now lease renewal). Two
+   simultaneous idle wakes both open a run; the loser's run is orphaned-open
+   (closed by a later ticker/crash-recovery pass — DEFERRED).
+
+   Requires `seon.agent` (the wake gate `inbound-msg-datom?` + derived-state),
+   `seon.agent.run` (the run lifecycle), `seon.agent.turn` (`run-turn!`). The
+   boot path (`seon.client`) requires THIS ns to `install-wake-trigger!`."
   (:require
     [seon.agent :as agent]
+    [seon.agent.fsm :as fsm]
+    [seon.agent.run :as run]
     [seon.agent.turn :as turn]
     [seon.db :as db]
     [seon.log :as seon-log]
     [seon.schema :as schema]
     [seon.warn :as warn]))
-
-;; ============================================================
-;; Loop tx-meta — provenance stamped EXPLICITLY on state-transition
-;; transacts (never auto-merged into `tx-meta-attrs`; these are
-;; per-transition values, not ambient). Read back via `d/history` for the
-;; activity log. Both must ship in `seon.client/agent-bootstrap-attrs` so
-;; their datahike schema reaches the wire-server writer (tx-meta attrs do
-;; NOT install lazily via the tx-data path).
-;; ============================================================
-
-;; What caused a transition — e.g. the waking message entity on the
-;; :idle→:active wake. References the canonical ref shape; never inline.
-(schema/register! :seon.agent.loop/cause       :seon.db/ref)
-;; Why a loop ended: :complete / :terminate / :wait (verbs) or
-;; :no-forms / :turn-cap / :turn-error (implicit loop exits).
-(schema/register! :seon.agent.loop/stop-reason :keyword)
-
-;; ---- Activity log (DERIVED timeline) request/response shapes --------------
-;; One row per loop-provenance transition. `:seon.agent/state` is the value
-;; AS-OF that transition's tx (reconstructed from the state-datom history, so
-;; the idle→idle wait/complete txs — which write NO state datom — still carry
-;; the right state). `cause` is the waking message's content summary (present
-;; on :idle→:active wakes); `stop-reason` names why a loop ended (present on
-;; exits). Either may be absent on a given row, never both.
-(schema/register! :seon.agent.loop/activity-request
-  [:map [:seon.agent/id :string]])
-
-(schema/register! :seon.agent.loop/activity-entry
-  [:map
-   [:seon.agent.loop/at          :inst]
-   [:seon.agent/state            :seon.agent/state]
-   [:seon.agent.loop/stop-reason {:optional true} :keyword]
-   [:seon.agent.loop/cause       {:optional true} :string]])
-
-(schema/register! :seon.agent.loop/activity-response
-  [:map [:seon.agent.loop/entries [:vector :seon.agent.loop/activity-entry]]])
 
 (defn- log [agent-id stage & info]
   (seon-log/info-console!
@@ -83,205 +51,114 @@
     (if (= 1 (count info)) (first info) (vec info))))
 
 ;; ============================================================
-;; Per-loop cap = SLIDING WINDOW (all DERIVED). turns-this-wake counts the
-;; turns stamped with this wake-episode; effective-cap is the base cap plus
-;; every inbound (human or peer) that landed since this wake's first turn —
-;; so a message that arrives mid-LLM-call always earns a turn to be seen.
+;; The loop — a fold of fsm/transition over run-derived events. Each
+;; iteration re-reads the run; :turn-ok runs a turn, the bounds close the
+;; run, verb closes / supersede are already settled.
 ;; ============================================================
 
-(def default-max-turns-per-loop
-  "Base per-loop turn cap when the agent has no `:seon.agent/max-turns-per-loop`
-   attr and `SEON_MAX_TURNS_PER_LOOP` is unset."
-  20)
-
-(defn max-turns-per-loop
-  "The agent's BASE per-loop cap — `:seon.agent/max-turns-per-loop` on the
-   entity, else env `SEON_MAX_TURNS_PER_LOOP`, else
-   [[default-max-turns-per-loop]]."
-  [id]
-  (or (:seon.agent/max-turns-per-loop
-        (db/entity {:seon.db/ref [:seon.agent/id id]}))
-      (some-> (.. js/process -env -SEON_MAX_TURNS_PER_LOOP)
-              js/parseInt
-              (#(when-not (js/isNaN %) %)))
-      default-max-turns-per-loop))
-
-(defn turns-this-wake
-  "How many turns belong to this wake-episode — `count turns where
-   :seon.agent.turn/wake = my-wake`. Derived; nothing stored."
-  [id my-wake]
-  (or (ffirst
-        (db/query
-          {:seon.db/query
-           '[:find (count ?t)
-             :in $ ?aid ?wake
-             :where
-             [?a :seon.agent/id ?aid]
-             [?a :seon.agent/sessions ?s]
-             [?s :seon.agent.session/turns ?t]
-             [?t :seon.agent.turn/wake ?wake]]
-           :seon.db/args [id my-wake]}))
+(defn- run-turn-count
+  "How many turns are stamped with this run (the run's derived current-turn)."
+  [run-eid]
+  (or (db/query {:seon.db/query
+                 '[:find (count ?t) . :in $ ?run
+                   :where [?t :seon.agent.turn/run ?run]]
+                 :seon.db/args [run-eid]})
       0))
 
-(defn first-turn-at-this-wake
-  "The `:at` of the FIRST turn stamped with this wake-episode, or nil when no
-   turn has run yet this wake. Bounds the inbound window for the sliding cap."
-  [id my-wake]
-  (->> (db/query
-         {:seon.db/query
-          '[:find ?at
-            :in $ ?aid ?wake
-            :where
-            [?a :seon.agent/id ?aid]
-            [?a :seon.agent/sessions ?s]
-            [?s :seon.agent.session/turns ?t]
-            [?t :seon.agent.turn/wake ?wake]
-            [?t :seon.agent.turn/at ?at]]
-          :seon.db/args [id my-wake]})
-       (map first)
-       (sort-by #(.getTime ^js %))
-       first))
+(defn- next-event
+  "Derive the loop event from the run's current data (no side effects).
+   One of :wait/:complete/:terminate (verb closed the run inside a turn),
+   :superseded (a newer run owns the agent), :pause, :turn-limit, :deadline,
+   or :turn-ok (run another turn)."
+  [id run-id]
+  (let [snap   (run/snapshot {:seon.agent.run/id run-id})
+        status (:seon.agent.run/status snap)
+        reason (:seon.agent.run/closed-reason snap)]
+    (cond
+      (= :closed status)
+      (case reason
+        :waited     :wait
+        :completed  :complete
+        :terminated :terminate
+        :superseded :superseded
+        ;; a bound the loop already closed on (turn-limit/deadline/error) —
+        ;; nothing left to do.
+        :superseded)
 
-(defn inbounds-during-this-wake
-  "Count of inbound messages that grant +1 turn this wake: to ∋ me, from ≠
-   me, origin ∈ {:human :agent} (the wake gate's set), hops < `warn/hop-cap`,
-   `:at ≥` the first turn of this wake. Before the first turn lands there is
-   no window yet ⇒ 0 (the base cap alone bounds the very first turns)."
-  [id my-wake]
-  (let [my-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))
-        since  (first-turn-at-this-wake id my-wake)]
-    (if (and my-eid since)
-      (or (ffirst
-            (db/query
-              {:seon.db/query
-               '[:find (count ?m)
-                 :in $ ?me ?cap ?since
-                 :where
-                 [?m :seon.agent.message/to ?me]
-                 [?m :seon.agent.message/from ?f]
-                 [(not= ?f ?me)]
-                 [(get-else $ ?m :seon.agent.message/hops 0) ?h]
-                 [(< ?h ?cap)]
-                 ;; origin ∈ {:human :agent} — :core nudges never grant a
-                 ;; turn (legacy rows have no origin ⇒ default :human).
-                 [(get-else $ ?m :seon.agent.message/origin :human) ?o]
-                 [(not= ?o :core)]
-                 [?m :seon.agent.message/at ?at]
-                 [(>= (.getTime ?at) (.getTime ?since))]]
-               :seon.db/args [my-eid warn/hop-cap since]}))
-          0)
-      0)))
+      (not (run/owns-run? {:seon.agent/id id :seon.agent.run/id run-id}))
+      :superseded
 
-(defn effective-cap
-  "The sliding-window per-loop cap: base [[max-turns-per-loop]] +
-   [[inbounds-during-this-wake]]. Every inbound (human or peer) extends the
-   window so the agent gets a turn to see and answer it."
-  [id my-wake]
-  (+ (max-turns-per-loop id)
-     (inbounds-during-this-wake id my-wake)))
+      (:seon.agent.run/paused-at snap)
+      :pause
 
-;; ============================================================
-;; The loop — re-reads the agent record each iteration; the WHOLE stop
-;; policy is the cond below. Finally: if still :active and my-wake still owns
-;; it, set :idle.
-;; ============================================================
+      (run/turn-limit-reached? (run-turn-count
+                                 (:db/id (db/entity
+                                           {:seon.db/ref [:seon.agent.run/id run-id]})))
+                               (:seon.agent.run/turn-limit snap))
+      :turn-limit
+
+      (run/deadline-passed? (:seon.agent.run/deadline snap) (js/Date.))
+      :deadline
+
+      :else :turn-ok)))
 
 (defn ^:async run-loop!
-  "Run agentic turns for `id`, stamped with `my-wake`, until a stop policy
-   fires (see the ns doc). `my-wake` is the wake-episode this loop owns; the
-   loop bails the moment a newer wake supersedes it. On exit, if the agent is
-   still :active under my-wake, it is reset to :idle (so a no-forms/cap halt
-   leaves a clean neutral state). Errors are values — never throws into the
-   trigger."
-  [{:seon.agent/keys [id] :as input} my-wake]
-  ;; The implicit-exit stop-reason — set by whichever halt branch fired, read
-  ;; by the `finally` reset so the :idle write carries WHY (the activity log
-  ;; reads it from history). nil = a verb/external transition already owns the
-  ;; state write + its own stop-reason; the finally then leaves it alone.
-  (let [!stop (atom nil)]
-    (try
-      (await
-        (loop [empty-streak 0]
-          (let [ent   (db/entity {:seon.db/ref [:seon.agent/id id]})
-                state (:seon.agent/state ent)
-                wake  (:seon.agent/wake ent)]
-            (cond
-              (not= :active state)
-              (do (log id "halt" (str "external — state=" state)) :halt-external)
+  "Drive agentic turns for `run-id` until the FSM leaves :running. `input`
+   carries `:seon.agent/id` / `:seon.agent/llm-fn` / `:seon.agent/compile-state`.
+   A fold of [[seon.agent.fsm/transition]] over [[next-event]]: :turn-ok beats
+   + runs a turn; the loop closes the run on the bounds it owns (:turn-limit /
+   :deadline / :error); verb closes (:wait/:complete/:terminate) and
+   :superseded are already settled (no re-close). Returns the final FSM state.
+   Errors are values — never throws into the trigger."
+  [{:seon.agent/keys [id] :as input} run-id]
+  (await
+    (loop [state :running]
+      (let [event (next-event id run-id)]
+        (cond
+          (= :turn-ok event)
+          (do
+            (await (run/beat! {:seon.agent/id id :seon.agent.run/id run-id}))
+            (let [r      (await (turn/run-turn! (assoc input :seon.agent.run/id run-id)))
+                  errored? (= :error (:seon.agent.turn/status r))]
+              (if errored?
+                (do (log id "halt" "turn :error → close run :error")
+                    (await (run/close-run!
+                             {:seon.agent.run/id            run-id
+                              :seon.agent.run/closed-reason :error}))
+                    (fsm/transition state :error))
+                (recur (fsm/transition state :turn-ok)))))
 
-              (not= wake my-wake)
-              (do (log id "halt" "superseded — a newer wake owns the agent")
-                  :halt-superseded)
+          (= :turn-limit event)
+          (do (log id "halt" "turn-limit reached → close run")
+              (await (run/close-run!
+                       {:seon.agent.run/id            run-id
+                        :seon.agent.run/closed-reason :turn-limit}))
+              (fsm/transition state :turn-limit))
 
-              (>= (turns-this-wake id my-wake)
-                  (effective-cap id my-wake))
-              (do (log id "halt"
-                       (str "cap — " (turns-this-wake id my-wake) "/"
-                            (effective-cap id my-wake) " turns this wake"))
-                  (reset! !stop :turn-cap)
-                  :halt-cap)
+          (= :deadline event)
+          (do (log id "halt" "deadline passed → close run")
+              (await (run/close-run!
+                       {:seon.agent.run/id            run-id
+                        :seon.agent.run/closed-reason :deadline-exceeded}))
+              (fsm/transition state :deadline))
 
-              :else
-              (let [r      (await (turn/run-turn! input))
-                    status (:seon.agent.turn/status r)
-                    ;; State AFTER the turn. The turn never writes
-                    ;; :seon.agent/state (the loop owns it), so a normal turn
-                    ;; leaves it :active; a lifecycle verb (wait/complete/
-                    ;; terminate) inside the eval flips it OFF :active (to
-                    ;; :idle or :terminated, each with its OWN stop-reason
-                    ;; tx-meta already stamped). Any non-:active after the
-                    ;; turn halts IMMEDIATELY — verb-park, external reset, or
-                    ;; terminate all caught here in one branch.
-                    after  (:seon.agent/state
-                             (db/entity {:seon.db/ref [:seon.agent/id id]}))
-                    forms  (or (:seon.agent/eval-count r) 0)]
-                (cond
-                  (= :error status)
-                  (do (log id "halt" "turn :error → :idle")
-                      (reset! !stop :turn-error)
-                      :halt-error)
+          (= :superseded event)
+          (do (log id "halt" "superseded — a newer run owns the agent")
+              (fsm/transition state :superseded))
 
-                  ;; A lifecycle verb (wait/complete/terminate) — or an
-                  ;; external reset — left state off :active. It owns its own
-                  ;; transition + stop-reason; the loop just stops (leave
-                  ;; !stop nil so the finally does not overwrite that state).
-                  (not= :active after)
-                  (do (log id "halt" (str "verb/external — state=" after))
-                      :halt-verb)
-
-                  (zero? forms)
-                  (if (< empty-streak 2)
-                    (recur (inc empty-streak)) ; thinking-mode guard
-                    (do (log id "halt" "no actionable forms → :idle (clean)")
-                        (reset! !stop :no-forms)
-                        :halt-quiet))
-
-                  :else
-                  (recur 0)))))))
-      (catch :default e
-        (log id "loop error" (str e))
-        (reset! !stop :turn-error)
-        :halt-throw)
-      (finally
-        ;; If still :active under MY wake, this loop owns the reset to :idle,
-        ;; stamped with the implicit-exit stop-reason (cap/error/no-forms).
-        ;; A superseded loop leaves the winner's :active alone (its wake ≠
-        ;; my-wake); a verb/external halt already moved state off :active and
-        ;; stamped its own reason — the guard below skips it (!stop stays nil).
-        (let [ent (db/entity {:seon.db/ref [:seon.agent/id id]})]
-          (when (and (= :active (:seon.agent/state ent))
-                     (= my-wake (:seon.agent/wake ent)))
-            (await (agent/set-state!
-                     (cond-> {:seon.agent/id id :seon.agent/state :idle}
-                       (some? @!stop)
-                       (assoc :seon.db/opts
-                              {:tx-meta {:seon.agent.loop/stop-reason @!stop}}))))))))))
+          ;; :wait / :complete / :terminate / :pause — the run is already
+          ;; closed/paused by the verb; the loop just stops, recording the
+          ;; FSM state the verb moved to.
+          :else
+          (do (log id "halt" (str "verb — " (name event)))
+              (fsm/transition state event)))))))
 
 ;; ============================================================
 ;; Wake — the per-tx listener fires on every transact; we filter for new
 ;; INBOUND messages (to ∋ me, from ≠ me, waking origin — agent/inbound-msg-datom?)
-;; and, if the agent is wakeable, mint a fresh wake-id, flip to :active, and
-;; start a loop stamped with it. NO atom: optimistic concurrency via the DB.
+;; and, if the agent's derived state is :idle, OPEN A RUN and start the loop.
+;; An already-:running agent RENEWS its open run's lease (the new message
+;; extends both bounds — the sliding window).
 ;;
 ;; Hop guard lives HERE (at wake): a message whose hops reached warn/hop-cap
 ;; wakes nothing — loud console.error + the clustered check-hop-exhausted
@@ -290,15 +167,13 @@
 
 (defn wake-handler
   "Return the tx-listener handler for `input`'s agent. On an inbound datom
-   that passes [[seon.agent/inbound-msg-datom?]], read the agent's state from
-   the local db snapshot; if wakeable (state ∉ {:active :terminated}), mint a
-   fresh wake, flip to :active, and start `run-loop!` stamped with that wake.
-   No atom — two idle wakes race in the DB and the losing loop re-reads a
-   different wake and bails."
+   that passes [[seon.agent/inbound-msg-datom?]], derive the agent's state
+   from the local db snapshot; if :idle → open a `:message` run (cause = the
+   waking message) and start `run-loop!`; if :running → `renew!` the open
+   run's lease. No atom — the run-id fence settles any race."
   [{:seon.agent/keys [id] :as input}]
   (fn [{:seon.db/keys [db attr-index]}]
-    (let [my-eid  (:db/id (db/entity {:seon.db/db db
-                                      :seon.db/ref [:seon.agent/id id]}))
+    (let [my-eid  (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
           inbound (when my-eid
                     (->> (:seon.agent.message/to attr-index)
                          (filter :seon.db/added?)
@@ -322,39 +197,53 @@
                  " (agent↔agent ping-pong guard). A human message"
                  " resets the chain (hops 0)."))))
       (when (seq waking)
-        (let [state (:seon.agent/state
-                      (db/entity {:seon.db/db db
-                                  :seon.db/ref [:seon.agent/id id]}))
-              ;; The message that caused this wake — stamped as
-              ;; :seon.agent.loop/cause on the :idle→:active transition so the
-              ;; activity log can show "idle→active ◀ msg". The first waking
-              ;; datom's eid (the others, if any, are absorbed by the same
-              ;; loop's sliding cap).
+        (let [state (agent/derive-agent-state {:seon.agent/id id :seon.db/db db})
+              ;; The message that caused this wake (the run's cause ref on an
+              ;; :idle open). The first waking datom's eid — the others, if
+              ;; any, are absorbed by the same run's lease.
               cause-eid (:seon.db/e (first waking))]
-          (if (contains? #{:active :terminated} state)
-            ;; Not wakeable — :active = a loop is already running (its sliding
-            ;; cap covers this message); :terminated = dead, change state
-            ;; first. (:idle is the only wakeable state, the complement.)
-            (log id "wake skipped"
-                 (str "state=" state " — "
-                      (if (= :active state)
-                        "running loop covers it"
-                        "terminated; change state first")))
-            ;; Wakeable (:idle): mint a fresh wake, flip to :active stamped
-            ;; with the cause, start the loop. setTimeout breaks the ALS scope
-            ;; — re-enter `with-agent` so the loop's downstream calls see
-            ;; (db/current-agent-id).
+          (case state
+            :terminated
+            (log id "wake skipped" "terminated — change state first")
+
+            :paused
+            (log id "wake skipped" "paused — resume first")
+
+            :running
+            ;; A run is already driving turns; renew its lease so the new
+            ;; message extends both bounds (the sliding window).
+            (js/setTimeout
+              (fn []
+                (-> (js/Promise.resolve
+                      (db/with-agent id
+                        (fn ^:async renew! []
+                          (when-let [cur (run/current-run {:seon.agent/id id})]
+                            (await (run/renew!
+                                     {:seon.agent/id     id
+                                      :seon.agent.run/id (:seon.agent.run/id cur)}))))))
+                    (.catch (fn [e]
+                              (js/console.error
+                                (str "seon.agent.loop: wake renew threw for "
+                                     id ": " (or (.-message e) e)))))))
+              0)
+
+            ;; :idle — open a fresh run and drive it. setTimeout breaks the
+            ;; ALS scope, so re-enter `with-agent` for the loop's downstream
+            ;; calls (db/current-agent-id).
             (js/setTimeout
               (fn []
                 (-> (js/Promise.resolve
                       (db/with-agent id
                         (fn ^:async wake! []
-                          (let [wake (await (agent/fresh-wake! {:seon.agent/id id}))]
-                            (await (agent/set-state!
-                                     {:seon.agent/id    id
-                                      :seon.agent/state :active
-                                      :seon.db/opts {:tx-meta {:seon.agent.loop/cause cause-eid}}}))
-                            (await (run-loop! input wake))))))
+                          (let [opened (await (run/open-run!
+                                                {:seon.agent/id           id
+                                                 :seon.agent.run/trigger  :message
+                                                 :seon.agent.run/cause    cause-eid}))]
+                            (if (false? (:seon.db/ok? opened))
+                              (js/console.error
+                                (str "seon.agent.loop: open-run! FAILED for " id
+                                     ": " (:seon.error/message (:seon.db/error opened))))
+                              (await (run-loop! input (:seon.agent.run/id opened))))))))
                     (.catch (fn [e]
                               (js/console.error
                                 (str "seon.agent.loop: wake loop threw for "
@@ -362,7 +251,7 @@
               0)))))))
 
 (defn install-wake-trigger!
-  "Register the inbound-message trigger for this agent — wakes a loop via
+  "Register the inbound-message trigger for this agent — wakes a run via
    [[wake-handler]] when a message lands with to ∋ me AND from ≠ me AND a
    waking origin. Idempotent: unlistens any prior handler for the same
    agent-id first, so hot-reload doesn't leave stale closures wired to the
@@ -383,69 +272,65 @@
        :seon.db/handler (wake-handler input)})))
 
 ;; ============================================================
-;; Activity log — a DERIVED timeline over the agent's loop-provenance
-;; tx-meta. Nothing is stored that isn't already a datom: each loop
-;; transition stamps `:seon.agent.loop/cause` (wake) or
-;; `:seon.agent.loop/stop-reason` (exit) on its tx, alongside the
-;; auto-stamped `:seon.db/agent-id` + `:db/txInstant`. We find THOSE txs
-;; (NOT state-change datoms — a wait/complete on an already-:idle agent
-;; writes tx-meta but NO new `:seon.agent/state` datom, so deriving from
-;; state datoms alone would drop those stop-reasons) and join the meta.
-;; The state value per row is reconstructed from the state-datom history
-;; (latest assertion at-or-before the tx), so the idle→idle txs still
-;; report the right state.
+;; Activity log — a DERIVED timeline over the agent's RUNS. One row per run,
+;; ordered by `:seon.agent.run/started-at`: the wake (trigger + cause-message
+;; content) and, when the run is closed, its `closed-reason` as the
+;; stop-reason. A function of the DB; nothing stored that isn't already a run
+;; datom (the inspector's lifecycle split reads the latest row's stop-reason).
 ;; ============================================================
 
-(defn activity-log
-  "Return the agent's activity log — the DERIVED timeline of its loop
-   transitions, ordered by `:db/txInstant`. Map-in, map-out.
+(schema/register! :seon.agent.loop/activity-request
+  [:map [:seon.agent/id :string]])
 
-   Each entry: `:seon.agent.loop/at` (txInstant), `:seon.agent/state`
-   (the state as-of that tx), and — whichever the transition carried —
-   `:seon.agent.loop/stop-reason` (a loop exit: :wait/:complete/
-   :terminate/:no-forms/:turn-cap/:turn-error) and/or
-   `:seon.agent.loop/cause` (the waking message's content, on an
-   :idle→:active wake). A function of the DB; no stored log to clear."
+(schema/register! :seon.agent.loop/activity-entry
+  [:map
+   [:seon.agent.loop/at          :inst]
+   [:seon.agent/state            :seon.agent.fsm/state]
+   [:seon.agent.loop/stop-reason {:optional true} :seon.agent.run/closed-reason]
+   [:seon.agent.loop/cause       {:optional true} :string]])
+
+(schema/register! :seon.agent.loop/activity-response
+  [:map [:seon.agent.loop/entries [:vector :seon.agent.loop/activity-entry]]])
+
+(defn activity-log
+  "Return the agent's activity log — the DERIVED timeline of its RUNS, ordered
+   by `:seon.agent.run/started-at`. Map-in, map-out.
+
+   Each entry: `:seon.agent.loop/at` (the run's started-at), `:seon.agent/state`
+   (the run's projected state — :terminated when closed :terminated, :running
+   while open, else :idle), the run's `:seon.agent.loop/stop-reason`
+   (= `:seon.agent.run/closed-reason` when closed), and — when the run was a
+   `:message` trigger — `:seon.agent.loop/cause` (the waking message's content).
+   A function of the DB; no stored log to clear."
   {:malli/schema [:=> [:cat :seon.agent.loop/activity-request]
                        :seon.agent.loop/activity-response]}
   [{:seon.agent/keys [id]}]
   (let [agent-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))]
     (if-not agent-eid
       {:seon.agent.loop/entries []}
-      (let [;; Full state-assertion history, ordered by tx — used to
-            ;; reconstruct the state AS-OF any transition tx.
-            state-hist (->> (db/query '[:find ?st ?tx ?added
-                                        :in $ ?e
-                                        :where [?e :seon.agent/state ?st ?tx ?added]]
-                                      (db/history) agent-eid)
-                            (filter #(nth % 2))
-                            (sort-by second))
-            state-as-of (fn [tx]
-                          (->> state-hist
-                               (filter #(<= (second %) tx))
-                               last
-                               first))
-            ;; Loop-provenance transitions for this agent: txs carrying a
-            ;; stop-reason OR a cause, with their txInstant.
-            txs (->> (db/query '[:find ?tx ?inst
-                                 :in $ ?aid
-                                 :where
-                                 [?tx :seon.db/agent-id ?aid]
-                                 [?tx :db/txInstant ?inst]
-                                 (or [?tx :seon.agent.loop/stop-reason _]
-                                     [?tx :seon.agent.loop/cause _])]
-                               id)
-                     (sort-by second))]
+      (let [rows (->> (db/query {:seon.db/query
+                                 '[:find ?r ?started
+                                   :in $ ?aid
+                                   :where
+                                   [?a :seon.agent/id ?aid]
+                                   [?r :seon.agent.run/agent ?a]
+                                   [?r :seon.agent.run/started-at ?started]]
+                                 :seon.db/args [id]})
+                      (sort-by #(.getTime ^js (second %))))]
         {:seon.agent.loop/entries
-         (mapv (fn [[tx inst]]
-                 (let [reason (:seon.agent.loop/stop-reason
-                                (db/pull '[:seon.agent.loop/stop-reason] tx))
-                       cause  (get-in
-                                (db/pull '[{:seon.agent.loop/cause
-                                            [:seon.agent.message/content]}] tx)
-                                [:seon.agent.loop/cause :seon.agent.message/content])]
-                   (cond-> {:seon.agent.loop/at    inst
-                            :seon.agent/state      (or (state-as-of tx) :idle)}
+         (mapv (fn [[run-eid started]]
+                 (let [r        (db/entity run-eid)
+                       reason   (:seon.agent.run/closed-reason r)
+                       open?    (= :open (:seon.agent.run/status r))
+                       cause    (some-> (:db/id (:seon.agent.run/cause r))
+                                        db/entity
+                                        :seon.agent.message/content)
+                       state    (cond
+                                  (= reason :terminated) :terminated
+                                  open?                  :running
+                                  :else                  :idle)]
+                   (cond-> {:seon.agent.loop/at    started
+                            :seon.agent/state      state}
                      reason (assoc :seon.agent.loop/stop-reason reason)
                      cause  (assoc :seon.agent.loop/cause cause))))
-               txs)}))))
+               rows)}))))

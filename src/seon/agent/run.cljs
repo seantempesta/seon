@@ -41,6 +41,10 @@
 ;; Pause marker: presence on the OPEN run ⇒ derived state :paused (read by
 ;; seon.agent.fsm/derive-state via the agent's state-snapshot).
 (schema/register! :seon.agent.run/paused-at  :inst)
+;; Wall-clock budget banked at pause time (deadline − now). `resume!` re-extends
+;; `deadline` by this so a long pause never blows the clock bound the instant
+;; you wake the run (Gemini fix #1 — pause vs absolute deadline).
+(schema/register! :seon.agent.run/remaining-ms :int)
 (schema/register! :seon.agent.run/status     [:enum :open :closed])
 ;; Present iff :closed. :crashed = a boot-recovery close of a run orphaned by
 ;; a pod crash (architecture crash-recovery), beyond the spec's clean reasons.
@@ -63,6 +67,7 @@
    [:seon.agent.run/cause         {:optional true} :seon.agent.run/cause]
    [:seon.agent.run/last-beat-at  {:optional true} :seon.agent.run/last-beat-at]
    [:seon.agent.run/paused-at     {:optional true} :seon.agent.run/paused-at]
+   [:seon.agent.run/remaining-ms  {:optional true} :seon.agent.run/remaining-ms]
    [:seon.agent.run/closed-reason {:optional true} :seon.agent.run/closed-reason]])
 
 ;; Slot schemas for the positional predicates below (registered so the
@@ -83,6 +88,32 @@
    `:seon.agent/default-deadline-ms`. Generous on purpose — the turn-limit is
    the usual stopper; the deadline catches a stalled LLM."
   (* 10 60 1000))
+
+(defn- env-turn-limit
+  "The `SEON_DEFAULT_TURN_LIMIT` env work-bound override (parsed int), or nil
+   when unset/unparseable. The run-model successor to the old
+   `SEON_MAX_TURNS_PER_LOOP` knob (which the deleted wake-token loop read)."
+  []
+  (some-> (.. js/process -env -SEON_DEFAULT_TURN_LIMIT)
+          js/parseInt
+          (#(when-not (js/isNaN %) %))))
+
+;; ============================================================
+;; Process-run set — the run-ids THIS pod process opened. `defonce` so a
+;; hot reload (same process) keeps it; empty on a fresh Node boot. The
+;; transcript marks evals from runs NOT in this set as `::prior?` (their
+;; in-memory `result/<id>` vars died with the previous process) — the
+;; run-grained successor to the old `!sessions-opened-this-run`.
+;; ============================================================
+
+(defonce ^:private !runs-this-process (atom #{}))
+
+(defn this-process-run?
+  "True iff `run-id` was opened by THIS pod process (its `result/<id>` eval
+   vars are live in the current runtime). False for a run reconstructed from
+   the store on a prior boot."
+  [run-id]
+  (contains? @!runs-this-process run-id))
 
 ;; ============================================================
 ;; Reads — sync over the local db value.
@@ -205,7 +236,8 @@
                        (str "open-run!: no agent " (pr-str id)
                             " — create the agent first.")}}
       (let [now        (js/Date.)
-            turn-limit (or tl (:seon.agent/default-turn-limit a) default-turn-limit)
+            turn-limit (or tl (:seon.agent/default-turn-limit a)
+                           (env-turn-limit) default-turn-limit)
             deadline   (or dl (js/Date. (+ (.getTime now)
                                            (or (:seon.agent/default-deadline-ms a)
                                                default-deadline-ms))))
@@ -228,7 +260,8 @@
                                   {:seon.agent/id id :seon.agent/run "run"}]}))]
         (if (false? (:seon.db/ok? res))
           res
-          (snapshot {:seon.agent.run/id run-id}))))))
+          (do (swap! !runs-this-process conj run-id)
+              (snapshot {:seon.agent.run/id run-id})))))))
 
 (schema/register! ::close-run-request
   [:map
@@ -301,3 +334,49 @@
     (await (db/transact!
              {:seon.db/tx-data
               [{:seon.agent.run/id run-id :seon.agent.run/last-beat-at (js/Date.)}]}))))
+
+(schema/register! ::pause-request
+  [:map
+   [:seon.agent/id     :seon.db/id]
+   [:seon.agent.run/id :seon.agent.run/id]])
+
+(defn ^:async pause!
+  "Pause the open run: stamp `paused-at` = now (⇒ derived state `:paused`) and
+   BANK the remaining wall-clock budget on `remaining-ms` (`deadline − now`,
+   floored at 0). [[resume!]] re-extends `deadline` by it, so a long pause
+   never instantly blows the clock bound. Fencing-guarded. `^:async`."
+  {:malli/schema [:=> [:cat ::pause-request] :seon.db/transact-response]}
+  [{id :seon.agent/id run-id :seon.agent.run/id}]
+  (if-not (owns-run? {:seon.agent/id id :seon.agent.run/id run-id})
+    (fencing-error run-id)
+    (let [r        (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})
+          now      (js/Date.)
+          deadline (:seon.agent.run/deadline r)
+          remain   (max 0 (- (.getTime deadline) (.getTime now)))]
+      (await (db/transact!
+               {:seon.db/tx-data
+                [{:seon.agent.run/id           run-id
+                  :seon.agent.run/paused-at    now
+                  :seon.agent.run/remaining-ms remain}]})))))
+
+(schema/register! ::resume-request
+  [:map
+   [:seon.agent/id     :seon.db/id]
+   [:seon.agent.run/id :seon.agent.run/id]])
+
+(defn ^:async resume!
+  "Resume a paused run: RETRACT `paused-at` (⇒ derived state back to
+   `:running`) and re-extend `deadline` to now + the banked `remaining-ms`
+   (Gemini fix #1). Fencing-guarded. `^:async`."
+  {:malli/schema [:=> [:cat ::resume-request] :seon.db/transact-response]}
+  [{id :seon.agent/id run-id :seon.agent.run/id}]
+  (if-not (owns-run? {:seon.agent/id id :seon.agent.run/id run-id})
+    (fencing-error run-id)
+    (let [r      (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})
+          remain (or (:seon.agent.run/remaining-ms r) default-deadline-ms)
+          new-dl (js/Date. (+ (.getTime (js/Date.)) remain))]
+      (await (db/transact!
+               {:seon.db/tx-data
+                [{:seon.agent.run/id       run-id
+                  :seon.agent.run/deadline new-dl}
+                 [:db/retract [:seon.agent.run/id run-id] :seon.agent.run/paused-at]]})))))

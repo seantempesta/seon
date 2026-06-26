@@ -45,6 +45,7 @@
     ["node:path" :as path]
     [clojure.string :as str]
     [seon.agent :as agent]
+    [seon.agent.run :as run]
     [seon.db :as db]
     [seon.log :as log]
     [seon.platform :as platform]
@@ -382,14 +383,17 @@
                                      (str "create agent failed: " err)))))))))
 
 (defn- handle-complete-agent!
-  "POST /agent/<id>/complete — external control: park the agent at `:idle`
-   (the single wakeable parked state) via `seon.agent/set-state!`, tagged with
-   a `:seon.agent.loop/stop-reason :complete` tx-meta (same provenance as the
-   `complete` verb). set-state! fails loud on an unknown id (no phantom). 200 +
-   id on success, 500 with the store error otherwise."
+  "POST /agent/<id>/complete — external control: CLOSE the agent's open run
+   `:completed` (derived state falls to `:idle`, the single wakeable parked
+   state — a new message opens a fresh run). Same effect as the agent's own
+   `complete` verb. When the agent has no open run it is already idle → 200
+   no-op. 200 + id on success, 500 with the store error otherwise."
   [_req res agent-id]
-  (-> (agent/set-state! {:seon.agent/id agent-id :seon.agent/state :idle
-                         :seon.db/opts {:tx-meta {:seon.agent.loop/stop-reason :complete}}})
+  (-> (js/Promise.resolve
+        (if-let [r (run/current-run {:seon.agent/id agent-id})]
+          (run/close-run! {:seon.agent.run/id            (:seon.agent.run/id r)
+                           :seon.agent.run/closed-reason :completed})
+          {:seon.db/ok? true}))
       (.then (fn [{ok? :seon.db/ok? :as env}]
                (if ok?
                  (do (log/info-console! "seon.web.serve"

@@ -43,6 +43,7 @@
    `:text` (text color), `:pulse?` (animate)."
   {:running     {:dot "bg-signal"   :text "text-signal"   :pulse? true}
    :active      {:dot "bg-info"     :text "text-info"     :pulse? true}
+   :paused      {:dot "bg-warning"  :text "text-warning"  :pulse? false}
    :idle        {:dot "bg-text-500" :text "text-text-500" :pulse? false}
    :waiting     {:dot "bg-warning"  :text "text-warning"  :pulse? false}
    :done        {:dot "bg-success"  :text "text-success"  :pulse? false}

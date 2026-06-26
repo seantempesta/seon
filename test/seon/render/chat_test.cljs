@@ -168,10 +168,8 @@
                               (d/transact!
                                 conn
                                 {:tx-data [{:seon.user/id "user"}
-                                           {:seon.agent/id a-id
-                                            :seon.agent/state :idle}
-                                           {:seon.agent/id b-id
-                                            :seon.agent/state :idle}]})))
+                                           {:seon.agent/id a-id}
+                                           {:seon.agent/id b-id}]})))
                      (.then (fn [_] conn))))))))
 
 (defn- with-conn
@@ -372,20 +370,29 @@
                       ;; predate the 14-char :seon.db/id gate, so
                       ;; db/transact!'s validation would reject any tx-map
                       ;; carrying :seon.agent/id.
+                      ;; Run model: turns are STANDALONE entities that point
+                      ;; UP to a run (`:seon.agent.turn/run`), the run UP to the
+                      ;; agent (`:seon.agent.run/agent`). The `run` tempid links
+                      ;; them in one tx.
                       (d/transact!
                         db/*conn*
                         {:tx-data
-                         [{:seon.agent/id a-id
-                           :seon.agent/sessions
-                           [{:seon.agent.session/id "SESchattest001"
-                             :seon.agent.session/at t0
-                             :seon.agent.session/turns
-                             [{:seon.agent.turn/id "TRNchatterr001"
-                               :seon.agent.turn/at (t+ 100)
-                               :seon.agent.turn/status :error}
-                              {:seon.agent.turn/id "TRNchattdone01"
-                               :seon.agent.turn/at (t+ 200)
-                               :seon.agent.turn/status :done}]}]}]})))
+                         [{:db/id "run"
+                           :seon.agent.run/id "RUNchattest001"
+                           :seon.agent.run/agent [:seon.agent/id a-id]
+                           :seon.agent.run/started-at t0
+                           :seon.agent.run/trigger :message
+                           :seon.agent.run/status :open
+                           :seon.agent.run/turn-limit 20
+                           :seon.agent.run/deadline (t+ 9999999)}
+                          {:seon.agent.turn/id "TRNchatterr001"
+                           :seon.agent.turn/at (t+ 100)
+                           :seon.agent.turn/status :error
+                           :seon.agent.turn/run "run"}
+                          {:seon.agent.turn/id "TRNchattdone01"
+                           :seon.agent.turn/at (t+ 200)
+                           :seon.agent.turn/status :done
+                           :seon.agent.turn/run "run"}]})))
                   (.then
                     (fn [_]
                       (let [{::chat/keys [messages]}

@@ -2,26 +2,26 @@
   "One agentic TURN, end-to-end — the unit the loop ([[seon.agent.loop]])
    drives once per LLM completion.
 
-   A turn = open a `:seon.agent.turn` (stamping the agent's current
-   `:seon.agent/wake` so the loop's sliding cap can count it) → render the
-   prompt → call the LLM → parse → eval-batch the forms → close the turn. The
-   per-form eval isolation (every form runs; errors are envelopes) lives in
-   [[seon.eval]]; `eval-count = n-ok + n-fail`.
+   A turn = open a `:seon.agent.turn` (stamping the agent's current run on
+   `:seon.agent.turn/run` so the run's derived current-turn count can count
+   it) → render the prompt → call the LLM → parse → eval-batch the forms →
+   close the turn. The per-form eval isolation (every form runs; errors are
+   envelopes) lives in [[seon.eval]]; `eval-count = n-ok + n-fail`.
 
-   This namespace owns the `:seon.agent.session/*` + `:seon.agent.turn/*`
-   schemas (their data-owner), and these fns:
+   This namespace owns the `:seon.agent.turn/*` schema (its data-owner — a
+   turn is a STANDALONE entity that points UP to its run; there is no
+   session), and these fns:
      - `run-turn!`      — one full turn (the loop calls this)
      - `open-turn!` / `close-turn!` — the turn bracket (open-tx + close-tx)
      - `ask-and-eval!`  — LLM call + parse + eval-batch
      - `call-llm!`      — `(llm-fn prompt)` with one bounded transport retry
      - `render-prompt` / `prefetch-and-render-prompt!` — ctx assembly
-     - `current-session` / `ensure-session!` / `start-session!` / `turn-index`
+     - `turn-index`     — the agent's running turn number (debug-file naming)
 
-   Dependency direction (acyclic): it references `:seon.agent/*` keywords
-   (state/wake — global registry, no require) and transacts via `seon.db`
-   directly, so it does NOT require `seon.agent` (which would cycle:
-   `seon.agent` re-exports nothing from here, and `seon.agent.loop` requires
-   both). It MAY require ctx / eval / message / render."
+   Dependency direction (acyclic): it references `:seon.agent.run/*` keywords
+   (global registry, no require) and transacts via `seon.db` directly, so it
+   does NOT require `seon.agent` (which would cycle: `seon.agent.loop`
+   requires both). It MAY require ctx / eval / message / render."
   (:require
     [clojure.string :as str]
     [seon.ai :as ai]
@@ -38,10 +38,11 @@
     [seon.schema :as schema]))
 
 ;; ============================================================
-;; Causality graph — :seon.agent.session + :seon.agent.turn entities. One
-;; pod run = one :seon.agent.session. Each render → LLM → eval-batch cycle =
-;; one :seon.agent.turn. Both ride as component refs on their parents
-;; (cascade-retract on parent retract). ALL counters are DERIVED, never
+;; Causality graph — the :seon.agent.turn entity. Each render → LLM →
+;; eval-batch cycle = one :seon.agent.turn, a STANDALONE entity that points
+;; UP to its run via `:seon.agent.turn/run` (there is no session — a RUN is
+;; the wake-episode grouping). Evals ride as component refs on the turn
+;; (cascade-retract on turn retract). ALL counters are DERIVED, never
 ;; persisted (reactive-context).
 ;;
 ;; Identity attrs reference the canonical :seon.db/id shape (single source of
@@ -49,27 +50,16 @@
 ;; {:seon.db/identity true} so the bridge writes :db.unique/identity.
 ;; ============================================================
 
-(schema/register! :seon.agent.session/id    [:and {:seon.db/identity true} :seon.db/id])
-(schema/register! :seon.agent.session/at    :inst)
-;; :db/isComponent on the ref vectors — retracting a session/turn
-;; cascade-retracts its child entities, and one nested pull on the agent
-;; walks the whole causality chain inline.
-(schema/register! :seon.agent.session/turns [:vector {:seon.db/component true} :seon.db/ref])
-
 (schema/register! :seon.agent.turn/id           [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.agent.turn/at           :inst)
 ;; A turn is running/done/error — DISTINCT from the agent FSM state
-;; (idle/active/…): a turn is a single completion, the agent is the actor.
+;; (idle/running/…): a turn is a single completion, the agent is the actor.
 (schema/register! :seon.agent.turn/status       [:enum :running :done :error])
-;; The wake-episode this turn belongs to. Each turn-open STAMPS the agent's
-;; current `:seon.agent/wake` here, so the per-loop count (`count turns where
-;; wake = my-wake`) is derivable. STORED — coordination metadata, not
-;; derivable. References the canonical id shape; never inline.
-(schema/register! :seon.agent.turn/wake         :seon.db/id)
-;; The RUN this turn belongs to (run-model — additive alongside `wake`, which
-;; the live wake-token loop still stamps). A ref to the `:seon.agent.run`
-;; entity; `count turns where :seon.agent.turn/run = run-eid` is the run's
-;; derived current-turn. References the canonical ref shape; never inline.
+;; The RUN this turn belongs to. Each turn-open STAMPS the agent's current
+;; open run here, so the run's derived current-turn (`count turns where
+;; :seon.agent.turn/run = run-eid`) is derivable. STORED — the spine that
+;; links a turn back to its run → agent. References the canonical ref shape;
+;; never inline.
 (schema/register! :seon.agent.turn/run          :seon.db/ref)
 ;; Three-tier storage: the datom carries the prompt's char count + a file
 ;; pointer (blob tier); the full prompt is never a datom.
@@ -87,18 +77,11 @@
 (schema/register! :seon.agent.turn/llm-meta     :string)
 (schema/register! :seon.agent.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
 
-(schema/register! :seon.agent.session
-  [:map {:seon.db/entity true}
-   [:seon.agent.session/id    :seon.agent.session/id]
-   [:seon.agent.session/at    :seon.agent.session/at]
-   [:seon.agent.session/turns {:optional true} :seon.agent.session/turns]])
-
 (schema/register! :seon.agent.turn
   [:map {:seon.db/entity true}
    [:seon.agent.turn/id           :seon.agent.turn/id]
    [:seon.agent.turn/at           :seon.agent.turn/at]
    [:seon.agent.turn/status       :seon.agent.turn/status]
-   [:seon.agent.turn/wake         {:optional true} :seon.agent.turn/wake]
    [:seon.agent.turn/run          {:optional true} :seon.agent.turn/run]
    [:seon.agent.turn/prompt-chars {:optional true} :seon.agent.turn/prompt-chars]
    [:seon.agent.turn/prompt-file  {:optional true} :seon.agent.turn/prompt-file]
@@ -119,57 +102,17 @@
     (if (= 1 (count info)) (first info) (vec info))))
 
 ;; ============================================================
-;; Sessions — one per pod run for a resumed agent.
+;; Turn index — the agent's running turn number, for debug-file naming +
+;; logging. Derived: count of ALL the agent's turns (across every run).
+;; Monotonic + unique-per-turn; nothing stored.
 ;; ============================================================
 
-(defn current-session
-  "The agent's current `:seon.agent.session` entity (latest by `:at`), or
-   nil if none yet. Re-export of [[seon.ctx/current-session]]."
-  [agent-id]
-  (ctx/current-session agent-id))
-
 (defn turn-index
-  "Zero-indexed next turn slot for the session — derived from the current
-   count of `:seon.agent.session/turns`. Not persisted (storing would let it
-   desync from reality)."
-  [session-id]
-  (count (:seon.agent.session/turns
-           (db/entity {:seon.db/ref [:seon.agent.session/id session-id]}))))
-
-(defonce ^:private !sessions-opened-this-run
-  ;; Session ids opened by THIS pod process. `defonce` — survives hot reload
-  ;; (a reload is the same pod run), empty on a fresh Node boot. A pod
-  ;; restart always opens a FRESH session for a resumed agent: the agent
-  ;; entity, purpose, and messages persist (messages are global), but evals
-  ;; are session-scoped — the intended resume shape.
-  (atom #{}))
-
-(defn ^:async start-session!
-  "Open a new `:seon.agent.session` for `agent-id` and append to
-   `:seon.agent/sessions`. Records the id in `!sessions-opened-this-run`.
-   Returns the new session entity."
+  "The agent's NEXT turn number — `count` of every `:seon.agent.turn` the
+   agent owns (walked agent → runs → turns). Used for debug-capture file
+   names + log lines (uniqueness, not run-position). Derived, not persisted."
   [agent-id]
-  (let [session-id (db/new-id!)]
-    (await (db/transact!
-             {:seon.db/tx-data
-              [{:seon.agent/id agent-id
-                :seon.agent/sessions
-                [{:seon.agent.session/id session-id
-                  :seon.agent.session/at (js/Date.)}]}]}))
-    (swap! !sessions-opened-this-run conj session-id)
-    (db/entity {:seon.db/ref [:seon.agent.session/id session-id]})))
-
-(defn ^:async ensure-session!
-  "Return the agent's current session, opening one if THIS pod process
-   hasn't opened one yet. Idempotent within a pod run; a session found in
-   the DB but opened by a previous pod run is NOT reused — every pod boot
-   starts a fresh session for a resumed agent."
-  [agent-id]
-  (let [sess (current-session agent-id)]
-    (if (and sess
-             (contains? @!sessions-opened-this-run (:seon.agent.session/id sess)))
-      sess
-      (await (start-session! agent-id)))))
+  (count (ctx/agent-turns agent-id nil)))
 
 ;; ============================================================
 ;; Prompt assembly (sync, with an optional async embedding prefetch).
@@ -239,46 +182,39 @@
       (embed-stash/with-hits hits #(render-prompt agent-id)))))
 
 ;; ============================================================
-;; The turn bracket — open-turn! folds the prompt projection + the agent's
-;; current :seon.agent/wake into the open-tx; close-turn! folds telemetry.
-;; The turn manages ONLY `:seon.agent.turn/status` — the agent's FSM
-;; `:seon.agent/state` is the LOOP's concern ([[seon.agent.loop/run-loop!]]
-;; sets :active before the first turn and :idle in its finally), so the turn
-;; must leave state UNTOUCHED (a per-turn :idle reset would halt the loop
-;; after one turn). A turn run OUTSIDE a loop (the creation-evals bootstrap)
-;; therefore leaves state at whatever it was (:idle), which is correct.
+;; The turn bracket — open-turn! folds the prompt projection + the current
+;; run ref (:seon.agent.turn/run) into the open-tx; close-turn! folds
+;; telemetry. The turn manages ONLY `:seon.agent.turn/status` — the agent's
+;; DERIVED state is a projection of its RUN (opened/closed by the loop and the
+;; lifecycle verbs), so a turn never touches agent state; it just runs.
 ;; ============================================================
 
 (declare close-turn!)
 
 (defn ^:async open-turn!
-  "Open a `:seon.agent.turn` on the given session with `prompt-text` attached
-   and the agent's current `:seon.agent/wake` STAMPED on
-   `:seon.agent.turn/wake` (the loop's sliding cap derives its per-loop count
-   from it). Awaits `body-fn` (a 0-arg thunk returning Promise<map>) via
-   `close-turn!`. Returns whatever `body-fn` returned, so the caller can read
-   `:seon.agent/eval-count`. Does NOT touch `:seon.agent/state` — that is the
-   loop's. If the open-tx fails there is NO turn entity — returns the error
-   envelope (no LLM call)."
+  "Open a STANDALONE `:seon.agent.turn` entity with `prompt-text` attached and
+   the agent's current run STAMPED on `:seon.agent.turn/run` (the run's
+   derived current-turn count counts it). Awaits `body-fn` (a 0-arg thunk
+   returning Promise<map>) via `close-turn!`. Returns whatever `body-fn`
+   returned, so the caller can read `:seon.agent/eval-count`. Touches NO agent
+   state — the run lifecycle is the loop's / the verbs' concern. If the
+   open-tx fails there is NO turn entity — returns the error envelope (no LLM
+   call)."
   [{:seon.agent/keys [id]
-    :seon.agent.session/keys [id-of-session]
+    :seon.agent.run/keys [id-of-run]
     :seon.agent.turn/keys [id-of-turn prompt-text prompt-file]}
    body-fn]
-  (let [wake (:seon.agent/wake
-               (db/entity {:seon.db/ref [:seon.agent/id id]}))
-        open-result
+  (let [open-result
         (await
           (db/transact!
             {:seon.db/tx-data
-             [{:seon.agent.session/id id-of-session
-               :seon.agent.session/turns
-               [(cond->
-                  {:seon.agent.turn/id           id-of-turn
-                   :seon.agent.turn/at           (js/Date.)
-                   :seon.agent.turn/status       :running
-                   :seon.agent.turn/prompt-chars (count (str prompt-text))}
-                  prompt-file (assoc :seon.agent.turn/prompt-file prompt-file)
-                  wake (assoc :seon.agent.turn/wake wake))]}]}))]
+             [(cond->
+                {:seon.agent.turn/id           id-of-turn
+                 :seon.agent.turn/at           (js/Date.)
+                 :seon.agent.turn/status       :running
+                 :seon.agent.turn/prompt-chars (count (str prompt-text))}
+                prompt-file (assoc :seon.agent.turn/prompt-file prompt-file)
+                id-of-run  (assoc :seon.agent.turn/run [:seon.agent.run/id id-of-run]))]}))]
     (if (false? (:seon.db/ok? open-result))
       open-result
       (close-turn! id id-of-turn body-fn))))
@@ -287,7 +223,7 @@
   "Internal — the body of `open-turn!` after the open-tx succeeded. await
    body-fn, close the turn `:status :done` on success, flip it to `:error` on
    throw (then re-throw so the loop sees the failure). Touches ONLY the turn
-   status; the agent's `:seon.agent/state` is the loop's concern."
+   status; the agent's derived state follows its RUN, never the turn."
   [id id-of-turn body-fn]
   (try
     (let [result (await (body-fn))
@@ -407,17 +343,17 @@
      :seon.agent/id             agent id string
      :seon.agent/llm-fn         ctx-string -> Promise<{:text \"…\"}>
      :seon.agent/compile-state  bootstrap compile-state
+     :seon.agent.run/id         the OPEN run this turn belongs to (the loop
+                                passes its run-id; stamped on the turn)
 
    Wraps the pipeline in a `with-tx-context` scope so every transact (incl.
    the per-form txs inside `eval-batch!`) auto-tags with the causality
    bundle. Returns the closed turn entity pulled with evals inlined, plus
    `:seon.agent/eval-count`. On catastrophic error returns
    `{:seon.agent.turn/status :error :seon.error/data <str>}`."
-  [{:seon.agent/keys [id llm-fn compile-state]}]
-  (let [session    (await (ensure-session! id))
-        session-id (:seon.agent.session/id session)
-        turn-id    (db/new-id!)
-        turn-idx   (turn-index session-id)
+  [{:seon.agent/keys [id llm-fn compile-state] run-id :seon.agent.run/id}]
+  (let [turn-id    (db/new-id!)
+        turn-idx   (turn-index id)
         prompt     (await (prefetch-and-render-prompt! id))
         full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt})
         prompt-file (debug/capture-prompt! id turn-idx turn-id full-prompt)]
@@ -428,14 +364,13 @@
                        (fn []
                          (db/with-tx-context
                            {:seon.db/agent-id   id
-                            :seon.db/session-id session-id
                             :seon.db/turn-id    turn-id
                             :seon.db/origin     :system}
                            (fn []
                              (open-turn!
                                (cond->
                                  {:seon.agent/id           id
-                                  :seon.agent.session/id-of-session session-id
+                                  :seon.agent.run/id-of-run run-id
                                   :seon.agent.turn/id-of-turn    turn-id
                                   :seon.agent.turn/prompt-text   full-prompt}
                                  prompt-file

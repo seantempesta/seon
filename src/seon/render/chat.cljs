@@ -137,8 +137,8 @@
        :in $ ?id
        :where
        [?me :seon.agent/id ?id]
-       [?me :seon.agent/sessions ?s]
-       [?s :seon.agent.session/turns ?t]
+       [?r :seon.agent.run/agent ?me]
+       [?t :seon.agent.turn/run ?r]
        [?t :seon.agent.turn/status :error]
        [?t :seon.agent.turn/at ?at]]
      :seon.db/args [id]}))

@@ -323,8 +323,6 @@ no loader shim. Tier-2 microVMs mount the store read-only via virtio-fs.
 - **Atomic wake** — idle→running + run-creation as ONE tx asserting prior
   `:idle`, so a message + a cron firing together can't spawn two runs (one
   orphaned).
-- **Pause vs. absolute deadline** — on pause store `remaining-ms`, re-extend the
-  absolute `deadline` on resume (else a long pause insta-kills on resume).
 - **Async listener dispatch** in the tx-feed pump (`wire.cljs`) — one slow
   listener must not halt the pump and stall every agent's wakes.
 - **Reconnect replay** — `subscribe-tx` needs a `since-t` basis, or a UDS drop
@@ -332,6 +330,10 @@ no loader shim. Tier-2 microVMs mount the store read-only via virtio-fs.
 - **Offload the agent's prompt render to its worker** (not just `eval-batch!`) —
   a big context render shouldn't block the main event loop. (The *view* render is
   the web-renderer component's job, already off the agent's hot path.)
+
+**Pause vs. absolute deadline — RESOLVED** (build pass 3): `pause` banks
+`remaining-ms = deadline − now`; `resume` re-extends the absolute `deadline` by it,
+so a long pause no longer insta-kills on resume.
 
 **Resolved decisions** (no longer open): sliding cap is **derived** (window =
 `default-turn-limit` + inbound-count; stored `turn-limit-override` only on an

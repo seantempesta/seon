@@ -102,9 +102,10 @@
 
 (defn- list-agents-data
   "Pull `[id state turn-count]` rows for every `:seon.agent/id` entity,
-   sorted by id asc. The dashboard groups on `:seon.agent/state` — a
-   `:completed` agent moves to the collapsed history grid; everything
-   else stays active. Turn count is derived from the session log."
+   sorted by id asc. The dashboard groups on the DERIVED state — a finished
+   agent (latest run closed :completed/:terminated) moves to the collapsed
+   history grid; everything else stays active. Turn count is derived from the
+   agent's runs."
   []
   (let [conn db/*conn*
         db   @conn
@@ -117,11 +118,9 @@
          (map first)
          sort
          (mapv (fn [id]
-                 (let [ent (db/entity {:seon.db/db db
-                                       :seon.db/ref [:seon.agent/id id]})]
-                   {:seon.agent/id         id
-                    :seon.agent/state      (or (:seon.agent/state ent) :unknown)
-                    :seon.agent/turn-count (default/agent-turn-count ent)}))))))
+                 {:seon.agent/id         id
+                  :seon.agent/state      (default/derived-state db id)
+                  :seon.agent/turn-count (default/agent-turn-count db id)})))))
 
 (declare data-scan)
 
@@ -293,11 +292,16 @@
         tile  (:seon.render/hiccup
                 (render/render-agent-tile {:seon.db/db db
                                            :seon.agent/id agent-id}))
-        ;; Just the ONE agent entity — the pane only reads its
-        ;; :seon.agent/state. (Was a whole-roster scan via the deleted
+        ;; Just the ONE agent entity. State is DERIVED (no stored enum), so
+        ;; the snapshot carries the projected state + turn count the header
+        ;; fragments render. (Was a whole-roster scan via the deleted
         ;; default/all-running-agents.)
-        agent (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]})]
+        agent (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]})
+        state (default/derived-state db agent-id)
+        turn-count (default/agent-turn-count db agent-id)]
     {:ai-text   (or text "")
+     :agent-state state
+     :agent-turn-count turn-count
      :section-texts (or section-texts [])
      :token-est  (or token-estimate 0)
      ;; The bottom context-bar audit instrument — per-section tokens +
@@ -352,14 +356,14 @@
             last12))))
 
 (defn- header-fragment
-  [agent-id {:keys [agent token-est turn-durs]}]
-  (let [state (or (:seon.agent/state agent) :unknown)
-        ;; Derived — the :seon.agent/turn-count attr was retired.
-        turns (default/agent-turn-count agent)]
+  [agent-id {:keys [agent-state agent-turn-count token-est turn-durs]}]
+  (let [state (or agent-state :unknown)
+        ;; Derived (run model): turns across all runs, projected state.
+        turns (or agent-turn-count 0)]
     [:header {:id (header-id agent-id)
               :class "flex items-center gap-3 p-2 border-b border-base-800 bg-base-900"}
      [:span {:class "text-xs font-mono text-text-200"} "agent " agent-id]
-     (if (= :active state)
+     (if (= :running state)
        ;; The live "the agent is thinking RIGHT NOW" pulse — resolves
        ;; back to the plain status dot on the next morph when the turn
        ;; completes.
@@ -474,8 +478,8 @@
    (str "thinking — turn " (inc turns) " …")])
 
 (defn- html-pane-fragment
-  [agent-id {:keys [html-cards agent-tile elided turn-durs agent]}]
-  (let [running? (= :active (:seon.agent/state agent))]
+  [agent-id {:keys [html-cards agent-tile elided turn-durs agent-state agent-turn-count]}]
+  (let [running? (= :running agent-state)]
     [:div {:id (html-pane-id agent-id)
            :class "flex flex-col h-full overflow-hidden"}
      [:div {:class "px-2 py-1 text-xs font-mono text-text-400 bg-base-900 border-b border-base-800"}
@@ -511,7 +515,7 @@
         [:div {:class "text-text-500 italic p-2"}
          "ask this agent something ↓ — every section the agent sees renders its html twin here live"])
       (when running?
-        (thinking-bubble (default/agent-turn-count agent)))]]))
+        (thinking-bubble (or agent-turn-count 0)))]]))
 
 ;; ============================================================
 ;; The context bar — per-section token + cache-line viz, full-width
@@ -905,7 +909,9 @@
   (let [db  @db/*conn*
         ent (db/entity {:seon.db/db db
                         :seon.db/ref [:seon.agent/id agent-id]})]
-    {:agent    ent
+    {:agent       ent
+     :agent-state (default/derived-state db agent-id)
+     :agent-turn-count (default/agent-turn-count db agent-id)
      :tile     (:seon.render/hiccup
                  (render/render-agent-tile {:seon.db/db db
                                             :seon.agent/id agent-id}))
@@ -917,13 +923,13 @@
   "Consumer-view header — breathing room over density (PRD §5): the
    agent's id + live status, the `⚙ debug` cross-link. Morph target
    (the thinking pulse resolves on the next push)."
-  [agent-id {:keys [agent]}]
-  (let [state (or (:seon.agent/state agent) :unknown)
-        turns (default/agent-turn-count agent)]
+  [agent-id {:keys [agent-state agent-turn-count]}]
+  (let [state (or agent-state :unknown)
+        turns (or agent-turn-count 0)]
     [:header {:id (chat-header-id agent-id)
               :class "flex items-center gap-3 px-4 py-3 border-b border-base-800 bg-base-900"}
      [:span {:class "text-sm font-mono text-text-100"} (str "agent " agent-id)]
-     (if (= :active state)
+     (if (= :running state)
        [:span {:class "inline-flex items-center gap-1.5 text-xs font-mono text-amber-400"}
         [:span {:class "w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"}]
         "thinking …"]
@@ -1098,17 +1104,15 @@
      [:a {:href (str "/agent/" id)
           :aria-label (str "open agent " id)
           :class "absolute inset-0"}]
-     ;; ✓ complete — POSTs to the /complete endpoint, which now parks the
-     ;; agent at :idle with a :seon.agent.loop/stop-reason :complete tx-meta
-     ;; (the 5→3 state collapse removed the :completed state). NOTE: the
-     ;; collapsed "completed grid" grouping below keys off the OLD :completed
-     ;; value and is therefore DORMANT until the activity-log derivation
-     ;; (context-render.md) reconstructs "completed" from the stop-reason
-     ;; history. Pinned to the card's upper-right corner (absolute) so it
-     ;; reads as a real control. `relative z-10` is needed AFTER the inset-0
-     ;; overlay anchor so this button — not the navigate link — receives the
-     ;; click. (The `:completed` test never matches now → the button always
-     ;; shows; harmless.)
+     ;; ✓ complete — POSTs to the /complete endpoint, which CLOSES the agent's
+     ;; open run :completed (derived state → :idle); the lifecycle split's
+     ;; finished? (latest run closed :completed/:terminated) then moves it to
+     ;; the collapsed history grid on the next render. Pinned to the card's
+     ;; upper-right corner (absolute) so it reads as a real control. `relative
+     ;; z-10` is needed AFTER the inset-0 overlay anchor so this button — not
+     ;; the navigate link — receives the click. The derived state is never
+     ;; literally :completed, so this guard always shows the button (harmless —
+     ;; an already-finished agent isn't in this active grid).
      (when-not (= :completed state)
        [:button
         {:type "button"
@@ -1151,18 +1155,17 @@
   [system? completed?]
   (let [db   @db/*conn*
         rows (list-agents-data)
-        ;; Lifecycle split: completion is a :seon.agent.loop/stop-reason
-        ;; (:complete / :terminate) in tx-meta history, NOT a state value
-        ;; (the 5→3 collapse removed the `:completed` state). An agent is
-        ;; "finished" when the LATEST entry of its activity-log timeline
-        ;; ended on :complete or :terminate. Self-healing: a new message
-        ;; wakes the agent, its latest entry becomes a :cause wake (no
-        ;; stop-reason), and it returns to the active grid automatically.
+        ;; Lifecycle split: completion is DERIVED from the latest run's
+        ;; closed-reason (the activity-log timeline over runs), NOT a stored
+        ;; state. An agent is "finished" when its most-recently-started run
+        ;; closed `:completed` or `:terminated`. Self-healing: a new message
+        ;; opens a fresh run whose latest entry has no closed-reason, and the
+        ;; agent returns to the active grid automatically.
         finished? (fn [r]
                     (let [entries (:seon.agent.loop/entries
                                     (agent-loop/activity-log
                                       {:seon.agent/id (:seon.agent/id r)}))]
-                      (contains? #{:complete :terminate}
+                      (contains? #{:completed :terminated}
                                  (:seon.agent.loop/stop-reason (last entries)))))
         active    (vec (remove finished? rows))
         completed (vec (filter finished? rows))

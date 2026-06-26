@@ -18,9 +18,8 @@
 
 ;; ── Shared enums (register ONCE here; referenced by [[transition]],
 ;;    [[derive-state]], and seon.agent/state-snapshot). The DERIVED state enum
-;;    is `:idle/:running/:paused/:terminated` — distinct from the live
-;;    wake-token loop's STORED `:seon.agent/state` (`:active/:idle/:terminated`),
-;;    which keeps its own schema until the FSM cutover. ──
+;;    is `:idle/:running/:paused/:terminated` — there is no stored agent
+;;    state; it is a pure projection of the run/terminated-at primitives. ──
 (schema/register! :seon.agent.fsm/state
   [:enum :idle :running :paused :terminated])
 

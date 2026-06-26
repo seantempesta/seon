@@ -1093,7 +1093,7 @@
      (ns <home>
        (:require [seon.agent.message :as message]
                  [seon.agent :as agent]
-                 [seon.agent.lifecycle :refer [wait complete terminate]]
+                 [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
                  [seon.schema :as schema]
                  [seon.db :as db]))
 
@@ -1123,7 +1123,7 @@
         (str "(ns " agent-ns-sym
              " (:require [seon.agent.message :as message]"
              " [seon.agent :as agent]"
-             " [seon.agent.lifecycle :refer [wait complete terminate]]"
+             " [seon.agent.lifecycle :refer [wait complete pause resume terminate]]"
              " [seon.schema :as schema]"
              " [seon.db :as db]))")]
     (await (eval compile-state setup-src

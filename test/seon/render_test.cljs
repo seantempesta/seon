@@ -163,8 +163,7 @@
                  (-> (db/transact!
                        {:seon.db/tx-data
                         (into (vec (schema/entity-schema-tx-data :seon.agent))
-                              [{:seon.agent/id    agent-id
-                                :seon.agent/state :idle}])})
+                              [{:seon.agent/id    agent-id}])})
                      (.then (fn [_]
                               (binding [db/*conn* conn]
                                 (body conn))))))))))

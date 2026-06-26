@@ -38,19 +38,20 @@
             (when (and db id)
               (db/pull {:seon.db/db db
                         :seon.db/pull-pattern
-                        '[:db/id :seon.agent/id :seon.agent/state
+                        '[:db/id :seon.agent/id
                           :seon.agent/purpose
-                          :seon.agent/wake :seon.agent/max-turns-per-loop
+                          :seon.agent/default-turn-limit
+                          :seon.agent/default-deadline-ms
                           :seon.render/ai :seon.render/html
                           :seon.render.live-tile/content
-                          {:seon.agent/ctx [*]}]
+                          {:seon.agent/sections [*]}]
                         :seon.db/ref [:seon.agent/id id]})))]
     (if (nil? entity)
       ""
       (let [decoded (cond-> (ctx/decode-section (into {} entity))
-                      (seq (:seon.agent/ctx entity))
-                      (assoc :seon.agent/ctx
-                             (mapv ctx/decode-section (:seon.agent/ctx entity)))
+                      (seq (:seon.agent/sections entity))
+                      (assoc :seon.agent/sections
+                             (mapv ctx/decode-section (:seon.agent/sections entity)))
                       (contains? entity :seon.render.live-tile/content)
                       (update :seon.render.live-tile/content
                               #(db/decode-edn-value

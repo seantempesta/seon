@@ -18,7 +18,7 @@
     [clojure.string :as str]
     [datahike.api :as d]
     [seon.agent :as agent]
-    [seon.agent.turn :as turn]
+    [seon.agent.run :as run]
     [seon.ai :as llm]
     [seon.ai.openai-compat :as openai]
     [seon.analyzer-info :as ai]
@@ -619,19 +619,19 @@
                                 (:seon.render/volatile-text a1)}
                                (ctx/split-context (:seon.render/text a1)))
                             "split-context recovers exactly the two halves"))))
-                  ;; volatile-only change: a NEW TURN ROW on a fresh
-                  ;; session — transcript/turns are volatile sections.
-                  (.then (fn [_] (turn/start-session! "AGTctxtest00d1")))
-                  (.then (fn [sess]
+                  ;; volatile-only change: a NEW TURN ROW under a fresh run —
+                  ;; transcript/turns are volatile sections.
+                  (.then (fn [_] (run/open-run! {:seon.agent/id "AGTctxtest00d1"
+                                                 :seon.agent.run/trigger :message})))
+                  (.then (fn [opened]
                            (db/transact!
                              {:seon.db/tx-data
-                              [{:seon.agent.session/id
-                                (:seon.agent.session/id sess)
-                                :seon.agent.session/turns
-                                [{:seon.agent.turn/id (db/new-id!)
-                                  :seon.agent.turn/at (js/Date.)
-                                  :seon.agent.turn/status :running
-                                  :seon.agent.turn/prompt-chars 1}]}]})))
+                              [{:seon.agent.turn/id (db/new-id!)
+                                :seon.agent.turn/at (js/Date.)
+                                :seon.agent.turn/status :running
+                                :seon.agent.turn/prompt-chars 1
+                                :seon.agent.turn/run
+                                [:seon.agent.run/id (:seon.agent.run/id opened)]}]})))
                   (.then
                     (fn [_]
                       (let [after (assemble "AGTctxtest00d1")]
@@ -666,10 +666,10 @@
                                      secs)
                           raw  (db/pull
                                  {:seon.db/pull-pattern
-                                  '[{:seon.agent/ctx [*]}]
+                                  '[{:seon.agent/sections [*]}]
                                   :seon.db/ref [:seon.agent/id "AGTctxtest00s1"]})
                           raw-tile (some #(when (= :tile (:seon.ctx/name %)) %)
-                                         (:seon.agent/ctx raw))]
+                                         (:seon.agent/sections raw))]
                       (is (= 'my.x/view-section (:seon.render/ai tile))
                           "symbol slot decodes back to a symbol")
                       (is (= [:div "static badge"] (:seon.render/html tile))

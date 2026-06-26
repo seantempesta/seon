@@ -73,4 +73,37 @@ Revert point if the experiment goes sideways: `c84e8fc`.
 - **Carry-over for pass 3 (cutover):** throwaway agents left in the store (inert;
   `bin/seon nuke` before cutover, which needs a fresh world for the renames anyway);
   pre-existing `turn.cljs` public fns lacking `:malli/schema` (Gemini-flagged, not ours).
+- **Commit:** `f3fdd79`
+
+### Pass 3 — KEYSTONE cutover: wake-token loop → run-model + FSM + derived state
+
+- **Move:** rebuild (atomic in-place swap — the new engine replaces the old; nothing
+  dual-pathed left behind). 17 src files + tests, ~849+/982− (heavy deletion).
+- **Did:** `run-loop!` is now a fold of `fsm/transition` over a run-derived
+  `next-event`; `wake-handler` `open-run!`s an `:idle` agent (or `renew!`s a
+  `:running` one — the sliding lease). DELETED the stored `:seon.agent/state`, `wake`/
+  `fresh-wake!`, `max-turns-per-loop`, `wait-note`, the whole **session** entity +
+  `start-session!`/`ensure-session!` (turns are now standalone, run-stamped, and
+  persist as history). RENAMED `ctx`→`sections`. Lifecycle verbs → run mutations;
+  ADDED `pause`/`resume` with `remaining-ms` banking (**this is Gemini fix #1**,
+  pause-vs-absolute-deadline — folded in). State is DERIVED everywhere via
+  `fsm/derive-state` / `state-snapshot`. Context/render/inspector re-keyed
+  session→run.
+- **Live proof (orchestrator-run on a FRESH world — the agent couldn't, pod was down):**
+  - Clean boot on the new schema: program-graph replay **9/9 ok**, instrumentation
+    **224 fns / 0 bad-spec**, agent settles `:idle` (no dangling run).
+  - **Full E2E loop:** `POST /chat` (real user message) → `wake-handler` →
+    `open-run!` → derived **`:running`** (run `xig-…`, trigger `:message`, turn 1/20)
+    → real DeepSeek turn → `wait` verb → `close-run! :waited` → derived **`:idle`**,
+    pointer cleared. The FSM path `idle→trigger→running→wait→idle` ran live.
+  - `bin/test-cljs` re-run independently: **PASS (69s)**. Build green, 0 warnings.
+- **Deferred (correctly, per spec — own passes):** atomic-wake CAS (#3), the ticker
+  (#4: `fire-due-schedules!`/`close-overdue-runs!`), crash-recovery on boot (#5).
+  Consequence noted: two racing `:idle` wakes leave the loser's run orphaned-open
+  until a ticker/crash pass closes it.
+- **Casualty captured as a task:** `seon.gym.driver` (the live DeepSeek-drive harness)
+  references deleted wake/session vars — orphaned from the suite, needs a run-model
+  rewrite before it can drive agents again (`wake-active!`/`wake-idle!` →
+  `open-run!`/`close-run!`). Two gym tests `.disabled`-parked with reasons.
+- **Struck from architecture.md open-risks:** pause-vs-absolute-deadline (fixed here).
 - **Commit:** (this pass)

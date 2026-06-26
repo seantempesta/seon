@@ -35,6 +35,7 @@
   (:require
     [clojure.string :as str]
     [seon.agent.message :as msg]
+    [seon.agent.run :as run]
     [seon.ctx :as ctx]
     [seon.db :as db]
     [seon.render :as render]))
@@ -227,24 +228,23 @@
                   :seon.render/ai 'seon.ctx.transcript/message->renderable})))))))
 
 (defn- eval-events
-  "ALL of the agent's evals as transcript events across ALL sessions,
-   oldest-first, each `{::at ::kind :eval ::entity ::session-id ::prior?
-   :seon.render/ai 'eval->renderable}`. Walks agent → sessions → turns →
-   evals (the only path; standalone evals don't exist). `::session-id`
-   tags each so the section can interleave a resume marker at session
-   boundaries; `::prior?` marks evals from a session other than the
-   current one (their `result/<id>` vars died)."
-  [db agent cur-sess]
+  "ALL of the agent's evals as transcript events across ALL its turns,
+   oldest-first, each `{::at ::kind :eval ::entity ::run-id ::prior?
+   :seon.render/ai 'eval->renderable}`. Walks agent → runs → turns → evals
+   (via [[seon.ctx/agent-turns]]). `::run-id` tags each so the section can
+   interleave the resume marker at the process boundary; `::prior?` marks
+   evals from a run opened by a PREVIOUS pod process — its `result/<id>`
+   vars died ([[seon.agent.run/this-process-run?]])."
+  [db id]
   (vec
-    (for [s (sort-by :seon.agent.session/at (:seon.agent/sessions agent))
-          t (sort-by :seon.agent.turn/at (:seon.agent.session/turns s))
+    (for [t (ctx/agent-turns id db)
           e (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
-      (let [sid (:seon.agent.session/id s)]
-        {::at         (:seon.eval/at e)
-         ::kind       :eval
-         ::entity     (into {} e)
-         ::session-id sid
-         ::prior?     (and (some? cur-sess) (not= sid cur-sess))
+      (let [rid (:seon.agent.run/id (:seon.agent.turn/run t))]
+        {::at      (:seon.eval/at e)
+         ::kind    :eval
+         ::entity  (into {} e)
+         ::run-id  rid
+         ::prior?  (and (some? rid) (not (run/this-process-run? rid)))
          :seon.render/ai 'seon.ctx.transcript/eval->renderable}))))
 
 (defn- agent-rec
@@ -283,19 +283,21 @@
    something is wrong."
   [{:seon.agent/keys [id] db :seon.db/db}]
   (let [db      (or db @db/*conn*)
-        a       (agent-rec id db)
-        state   (:seon.agent/state a)
+        state   (ctx/derived-state id db)
         cur-ns  (ctx/current-ns {:seon.agent/id id :seon.db/db db})
         ns-str  (if (keyword? cur-ns) (name cur-ns) (str cur-ns))
-        sess    (ctx/current-session id db)
-        n-turns (count (:seon.agent.session/turns sess))
-        wake    (:seon.agent/wake a)
-        loop-k  (if wake
-                  (->> (:seon.agent.session/turns sess)
-                       (filter #(= wake (:seon.agent.turn/wake %)))
-                       count)
-                  n-turns)
-        cap     (ctx/effective-cap id db)
+        turns   (ctx/agent-turns id db)
+        n-turns (count turns)
+        run     (ctx/current-run id db)
+        run-eid (:db/id run)
+        ;; loop-k = turns stamped with the CURRENT open run (the run's
+        ;; derived current-turn); 0 when idle. cap = the run's bumpable
+        ;; turn-limit (renew! grows it), else the default when idle.
+        loop-k  (if run-eid
+                  (count (filter #(= run-eid (:db/id (:seon.agent.turn/run %)))
+                                 turns))
+                  0)
+        cap     (or (:seon.agent.run/turn-limit run) ctx/default-turn-limit)
         ;; localized full date+tz so the agent can judge what's expensive.
         ;; This is the ONE legitimate live `now` in the transcript.
         now     (let [tz (ctx/host-timezone)]
@@ -323,9 +325,9 @@
    into evals where the ns changes. Ties (same `:at`) sort messages before
    evals for stable output. `last-event-at` (the newest event's `:at`)
    lets the caller flag any message that arrived AFTER it as NEW."
-  [db agent my-eid own-id cur-sess]
+  [db own-id my-eid]
   (let [msgs (or (message-events db my-eid own-id) [])
-        evs  (eval-events db agent cur-sess)
+        evs  (eval-events db own-id)
         kind-rank {:message 0 :eval 1}
         sorted (sort-by (juxt #(.getTime ^js (::at %))
                               #(kind-rank (::kind %) 9))
@@ -359,7 +361,6 @@
         a        (agent-rec id db)
         my-eid   (:db/id a)
         own-id   id
-        cur-sess (:seon.agent.session/id (ctx/current-session id db))
         cur-ns   (ctx/current-ns {:seon.agent/id id :seon.db/db db})
         ns-str   (if (keyword? cur-ns) (name cur-ns) (str cur-ns))
         ;; Render handle: the recursive walker injects `:seon.render/render`
@@ -368,7 +369,7 @@
         ;; is no injected handle — fall back to a local ai render so the
         ;; same code path produces the same String.
         render*  (or render-fn #(render/render :seon.render/ai input %))
-        events   (ordered-events db a my-eid own-id cur-sess)
+        events   (ordered-events db own-id my-eid)
         last-at  (some-> (last events) ::at)
         ;; Flag any INBOUND message that arrived after the newest event as
         ;; NEW (it landed mid-LLM-call, the agent acts on it for the first
@@ -382,22 +383,22 @@
                            (assoc ev ::new? true)
                            ev))
                        events)
-        ;; Render each event, interleaving a resume marker before the first
-        ;; event of a session that differs from the prior event's session.
+        ;; Render each event, interleaving the resume marker ONCE at the
+        ;; process boundary — before the first THIS-PROCESS eval that follows
+        ;; a PRIOR-process eval (its `result/<id>` vars are gone).
         body
         (->> (reduce
-               (fn [[rows prev-sid] ev]
-                 (let [sid    (::session-id ev)
+               (fn [[rows prev-prior?] ev]
+                 (let [prior? (::prior? ev)
                        marker (when (and (= :eval (::kind ev))
-                                         (some? prev-sid)
-                                         (some? sid)
-                                         (not= prev-sid sid))
+                                         (true? prev-prior?)
+                                         (false? prior?))
                                 resume-marker-line)
                        text   (render* ev)
                        rows'  (cond-> rows
                                 marker (conj marker)
                                 true   (conj text))]
-                   [rows' (if (= :eval (::kind ev)) sid prev-sid)]))
+                   [rows' (if (= :eval (::kind ev)) prior? prev-prior?)]))
                [[] nil]
                events*)
              first
@@ -430,8 +431,7 @@
         a        (agent-rec id db)
         my-eid   (:db/id a)
         own-id   id
-        cur-sess (:seon.agent.session/id (ctx/current-session id db))
-        events   (ordered-events db a my-eid own-id cur-sess)
+        events   (ordered-events db own-id my-eid)
         cards
         (->> events
              (keep

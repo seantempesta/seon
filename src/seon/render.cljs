@@ -366,14 +366,14 @@
 
 (def ^:private tile-entity-pattern
   "What tile rendering READS of the agent entity — the wired slot
-   (wired-content), the welcome's purpose/id, and state. Deliberately
-   NOT '[*]: the full pull inlined the agent's whole
-   `:seon.agent/sessions` component tree per tile render (T5's
-   amplifier finding, open-issues 2026-06-11). Tile fns needing more
-   get `:seon.db/db` in their input and query for it."
+   (wired-content), the welcome's purpose/id, and the run pointer (derived
+   state). Deliberately NOT '[*]: the full pull would inline the agent's whole
+   component tree per tile render (T5's amplifier finding, open-issues
+   2026-06-11). Tile fns needing more get `:seon.db/db` in their input and
+   query for it."
   [:db/id
    :seon.agent/id
-   :seon.agent/state
+   :seon.agent/run
    :seon.agent/purpose
    :seon.render.live-tile/content])
 

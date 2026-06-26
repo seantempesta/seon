@@ -126,9 +126,10 @@
        to talk to its human or peers (`user`/`agent` over `message!`):
        fan-out (`to` = vector of refs), the hop guard, the `{:ok? …}`
        envelope, the loud self→self refusal.
-     - `:seon.agent.lifecycle` — the terminal-transition verbs
-       (`wait`/`complete`/`terminate`); how the agent parks, finishes, or
-       is killed — each a small `:seon.agent/state` transact, errors-as-values.
+     - `:seon.agent.lifecycle` — the run-lifecycle verbs
+       (`wait`/`complete`/`pause`/`resume`/`terminate`); how the agent parks,
+       finishes, holds, or is killed — each a small run mutation (derived
+       state), errors-as-values.
    Deliberately NOT whitelisted (curated OUT — every shown line must earn
    its tokens): `:seon.schema` (its body is registry WIRING; the `register!`
    pattern is demonstrated by the kept nses' own `register!` calls + `my.kb`,

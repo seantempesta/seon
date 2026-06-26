@@ -14,7 +14,7 @@
        symbol = late-bound section fn); `:seon.render/html` is the
        optional debug-view twin.
      - `assemble-context` — the ONE composer. Core default sections
-       MERGED with the agent's own `:seon.agent/ctx` sections by one
+       MERGED with the agent's own `:seon.agent/sections` sections by one
        priority sort (override-by-name). Render guard (a broken section
        renders an inline error line, never breaks assembly) and the
        per-agent section char budget live here.
@@ -31,7 +31,7 @@
        soul/agents files are context sections via [[file-section]]) — and
        the derived read API every section shares (messages / evals /
        session-evals / current-ns /
-       effective-cap / format-eval-row / the eval-render caps / …) —
+       format-eval-row / the eval-render caps / …) —
        every read takes the composer's `:seon.db/db` snapshot so one
        render is one db view. The other core sections live in their own
        `seon.ctx.<name>` nses: :namespaces → `seon.ctx.namespaces`,
@@ -58,6 +58,7 @@
   (:require
     [clojure.string :as str]
     [cljs.reader :as edn]
+    [seon.agent.fsm :as fsm]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
@@ -73,7 +74,7 @@
 ;; ============================================================
 ;; Section schemas. A section is a plain map — the SAME shape whether
 ;; it lives in code (core defaults) or as a component entity on
-;; the agent's :seon.agent/ctx vector.
+;; the agent's :seon.agent/sections vector.
 ;; ============================================================
 
 (declare decode-section core-default-ctx)
@@ -276,91 +277,59 @@
        (keep read-file-text)
        (str/join "\n\n")))
 
-(def default-max-turns-per-loop
-  "Base per-loop turn cap when the agent has no
-   `:seon.agent/max-turns-per-loop` attr and `SEON_MAX_TURNS_PER_LOOP`
-   is unset. Mirrors `seon.agent.loop/default-max-turns-per-loop`."
+(def default-turn-limit
+  "Work-bound shown by the readline when the agent has NO open run (the
+   run-model default a new run would seed). Mirrors
+   `seon.agent.run/default-turn-limit`."
   20)
 
-(defn effective-cap
-  "The ENFORCED sliding-window per-loop cap the readline/turn-headers
-   display — base cap + every inbound (human or peer) that has landed
-   this wake. Mirrors `seon.agent.loop/effective-cap`, recomputed here
-   from the composer's db value (requiring `seon.agent.loop` would cycle:
-   fsm → seon.agent → seon.ctx). Base = `:seon.agent/max-turns-per-loop`
-   on the entity, else env `SEON_MAX_TURNS_PER_LOOP`, else
-   [[default-max-turns-per-loop]]. Optional `db` snapshot.
-
-   The inbound window is bounded by the first turn stamped with the
-   current wake (`:seon.agent.turn/wake`); before any turn this wake the
-   window is empty and the cap is the base alone."
-  ([agent-id] (effective-cap agent-id nil))
+(defn current-run
+  "The agent's CURRENT OPEN run entity (lazy) — navigates `:seon.agent/run`
+   and returns it only when it resolves to an `:open` run, else nil. Optional
+   `db` value (the composer's snapshot)."
+  ([agent-id] (current-run agent-id nil))
   ([agent-id db]
-   (let [db    (or db @db/*conn*)
-         a     (db/entity-lazy {:seon.db/db db
-                                :seon.db/ref [:seon.agent/id agent-id]})
-         base  (or (:seon.agent/max-turns-per-loop a)
-                   (some-> (.. js/process -env -SEON_MAX_TURNS_PER_LOOP)
-                           js/parseInt
-                           (#(when-not (js/isNaN %) %)))
-                   default-max-turns-per-loop)
-         wake  (:seon.agent/wake a)
-         my-eid (:db/id a)
-         since (when (and wake my-eid)
-                 (->> (db/query
-                        {:seon.db/db db
-                         :seon.db/query
-                         '[:find ?at
-                           :in $ ?aid ?wake
-                           :where
-                           [?a :seon.agent/id ?aid]
-                           [?a :seon.agent/sessions ?s]
-                           [?s :seon.agent.session/turns ?t]
-                           [?t :seon.agent.turn/wake ?wake]
-                           [?t :seon.agent.turn/at ?at]]
-                         :seon.db/args [agent-id wake]})
-                      (map first)
-                      (sort-by #(.getTime ^js %))
-                      first))
-         inbounds (if (and my-eid since)
-                    (or (ffirst
-                          (db/query
-                            {:seon.db/db db
-                             :seon.db/query
-                             '[:find (count ?m)
-                               :in $ ?me ?cap ?since
-                               :where
-                               [?m :seon.agent.message/to ?me]
-                               [?m :seon.agent.message/from ?f]
-                               [(not= ?f ?me)]
-                               [(get-else $ ?m :seon.agent.message/hops 0) ?h]
-                               [(< ?h ?cap)]
-                               [(get-else $ ?m :seon.agent.message/origin :human) ?o]
-                               [(not= ?o :core)]
-                               [?m :seon.agent.message/at ?at]
-                               [(>= (.getTime ?at) (.getTime ?since))]]
-                             :seon.db/args [my-eid warn/hop-cap since]}))
-                        0)
-                    0)]
-     (+ base inbounds))))
+   (let [a (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
+                             db (assoc :seon.db/db db)))
+         r (:seon.agent/run a)]
+     (when (and r (= :open (:seon.agent.run/status r))) r))))
+
+(defn derived-state
+  "The agent's DERIVED FSM state (:idle/:running/:paused/:terminated) via
+   [[seon.agent.fsm/derive-state]] over its primitives — `terminated-at`,
+   whether it has an OPEN run, and that run's `paused-at`. The ONE reader the
+   readline / inspector / loop-gate share. Optional `db` snapshot."
+  ([agent-id] (derived-state agent-id nil))
+  ([agent-id db]
+   (let [a   (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
+                               db (assoc :seon.db/db db)))
+         run (current-run agent-id db)]
+     (fsm/derive-state
+       (cond-> {:seon.agent.run/open? (some? run)}
+         (:seon.agent/terminated-at a) (assoc :seon.agent/terminated-at
+                                              (:seon.agent/terminated-at a))
+         (:seon.agent.run/paused-at run) (assoc :seon.agent.run/paused-at
+                                                (:seon.agent.run/paused-at run)))))))
+
+(defn agent-turns
+  "ALL `:seon.agent.turn` entities (lazy) the agent owns, oldest-first by
+   `:at` — walks the agent's runs (reverse ref `:seon.agent.run/_agent`) →
+   their turns (reverse ref `:seon.agent.turn/_run`). Replaces the old
+   sessions→turns walk; nothing is stored. Optional `db` snapshot."
+  ([agent-id] (agent-turns agent-id nil))
+  ([agent-id db]
+   (let [a (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
+                             db (assoc :seon.db/db db)))]
+     (->> (:seon.agent.run/_agent a)
+          (mapcat :seon.agent.turn/_run)
+          (sort-by #(.getTime ^js (:seon.agent.turn/at %)))
+          vec))))
 
 (defn home-ns
   "Return the deterministic home-ns symbol for an agent id.
    `(home-ns \"seon\") => 'my.agent.seon`."
   [agent-id]
   (symbol (str "my.agent." agent-id)))
-
-(defn current-session
-  "Most-recent `:seon.agent.session` entity for `agent-id`. Returns nil if
-   the agent has no sessions yet (fresh boot before `start-session!`).
-   Optional `db` value (the composer's snapshot): section fns read the
-   SAME db value the composer renders from, never reaching back to the
-   live conn mid-render."
-  ([agent-id] (current-session agent-id nil))
-  ([agent-id db]
-   (let [a (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
-                             db (assoc :seon.db/db db)))]
-     (last (sort-by :seon.agent.session/at (:seon.agent/sessions a))))))
 
 ;; The namespace-display selection rules (hidden-ns-name?,
 ;; included-ns?, full-source-whitelist, full-source-ns?, …) live in
@@ -806,42 +775,37 @@
      (vec (take-last n msgs)))))
 
 (defn current-turn
-  "Most-recent :seon.agent.turn on the agent's current session — the one
-   that's :running, or the last :done if no turn is open."
+  "Most-recent :seon.agent.turn the agent owns — the latest by `:at`
+   (the one that's :running, or the last :done if no turn is open)."
   ([] (current-turn {}))
   ([{:seon.agent/keys [id] db :seon.db/db}]
-   (let [id      (resolve-id id)
-         session (current-session id db)]
-     (last (sort-by :seon.agent.turn/at (:seon.agent.session/turns session))))))
+   (let [id (resolve-id id)]
+     (last (agent-turns id db)))))
 
 (defn session-evals
-  "ALL :seon.eval entries for `agent-id`, oldest-first across ALL
-   sessions, each tagged with its owning `:seon.agent.session/id` —
-   the transcript's cross-restart read (prior-session evals render too,
-   behind a resume boundary marker). Walks agent → sessions → turns →
-   evals. Optional `db` snapshot."
+  "ALL :seon.eval entries for `agent-id`, oldest-first across ALL its turns,
+   each tagged with its owning `:seon.agent.run/id-of-run` — the transcript's
+   cross-run read (evals from a run opened by a PRIOR pod process render
+   behind a resume boundary). Walks agent → runs → turns → evals. Optional
+   `db` snapshot."
   [agent-id db]
-  (let [a (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
-                            db (assoc :seon.db/db db)))]
-    (vec
-      (for [s (sort-by :seon.agent.session/at (:seon.agent/sessions a))
-            t (sort-by :seon.agent.turn/at (:seon.agent.session/turns s))
-            e (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
-        (assoc (into {} e)
-               :seon.agent.session/id-of-session
-               (:seon.agent.session/id s))))))
+  (vec
+    (for [t (agent-turns agent-id db)
+          e (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
+      (assoc (into {} e)
+             :seon.agent.run/id-of-run
+             (:seon.agent.run/id (:seon.agent.turn/run t))))))
 
 (defn evals
-  "Last N :seon.eval entries for the agent's current session,
-   oldest-first. Walks :seon.agent.session/turns → :seon.agent.turn/evals.
-   Default {:seon.agent/n 20}. Optional `:seon.db/db` snapshot."
+  "Last N :seon.eval entries for the agent, oldest-first. Walks the agent's
+   turns → :seon.agent.turn/evals. Default {:seon.agent/n 20}. Optional
+   `:seon.db/db` snapshot."
   ([] (evals {}))
   ([{:seon.agent/keys [n id] db :seon.db/db :or {n 20}}]
-   (let [id      (resolve-id id)
-         session (current-session id db)
-         es      (for [t (sort-by :seon.agent.turn/at (:seon.agent.session/turns session))
-                       e (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
-                   e)]
+   (let [id (resolve-id id)
+         es (for [t (agent-turns id db)
+                  e (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
+              e)]
      (vec (take-last n es)))))
 
 (defn current-ns
@@ -854,12 +818,9 @@
   ([] (current-ns {}))
   ([{:seon.agent/keys [id] db :seon.db/db}]
    (let [id (resolve-id id)
-         ;; All evals across all sessions, latest first.
+         ;; All evals across all the agent's turns, successful only.
          all-evals
-         (for [s (:seon.agent/sessions
-                   (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id id]}
-                                     db (assoc :seon.db/db db))))
-               t (:seon.agent.session/turns s)
+         (for [t (agent-turns id db)
                e (:seon.agent.turn/evals t)
                :when (true? (:seon.eval/ok? e))]
            e)
@@ -867,15 +828,15 @@
      (or (:seon.eval/ns latest) (home-ns id)))))
 
 (defn ctx-entities
-  "Pull the agent's :seon.agent/ctx vector with each :seon.ctx entity
+  "Pull the agent's :seon.agent/sections vector with each :seon.ctx entity
    inlined. Sorted by :seon.ctx/priority. Useful for inspection
    and for the agent's layout-editing flow."
   ([] (ctx-entities {}))
   ([{:seon.agent/keys [id]}]
    (let [id (resolve-id id)]
-     (->> (db/pull {:seon.db/pull-pattern '[{:seon.agent/ctx [*]}]
+     (->> (db/pull {:seon.db/pull-pattern '[{:seon.agent/sections [*]}]
                     :seon.db/ref [:seon.agent/id id]})
-          :seon.agent/ctx
+          :seon.agent/sections
           (map decode-section)
           (sort-by :seon.ctx/priority)
           vec))))
@@ -1677,7 +1638,7 @@
 ;; agent-self-context spec, 2026-06-10):
 ;;
 ;;   sections = sort-by priority (core defaults ∪ agent's
-;;              :seon.agent/ctx)   — MERGE, never replace; a name
+;;              :seon.agent/sections)   — MERGE, never replace; a name
 ;;              collision means override-by-name (deliberate, visible
 ;;              as data).
 ;;   input    = {db, id, entity (pulled ONCE), section, model}
@@ -1695,7 +1656,7 @@
 
 (def agent-section-char-budget
   "Total rendered-chars budget shared by the agent's OWN sections
-   (everything in :seon.agent/ctx — strings and computed alike).
+   (everything in :seon.agent/sections — strings and computed alike).
    Core default sections are not charged. Over budget, the
    LOWEST-priority (largest number, renders last) agent sections
    truncate first, each with a loud marker line."
@@ -1718,7 +1679,7 @@
   "The agent's OWN section maps from its pulled entity — slot-decoded,
    sorted by priority. `entity` is the once-pulled agent entity map."
   [entity]
-  (->> (:seon.agent/ctx entity)
+  (->> (:seon.agent/sections entity)
        (map decode-section)
        (sort-by :seon.ctx/priority)
        vec))
@@ -1804,26 +1765,25 @@
               rendered)))))
 
 (defn- pull-agent-entity
-  "The agent entity, pulled ONCE (sans the session log — the transcript
-   section walks that separately; a bare `[*]` pull would inline every
-   turn/eval component). Rides in the injected ctx so every section fn
-   reads it without re-pulling. Registered-but-uninstalled attrs (e.g. the
-   tile slot on a store predating it) are silently filtered by the pull
-   guard — safe."
+  "The agent entity, pulled ONCE (the run/turn history is walked separately
+   by the transcript; a bare `[*]` pull would inline every turn/eval
+   component). Rides in the injected ctx so every section fn reads it without
+   re-pulling. Registered-but-uninstalled attrs (e.g. the tile slot on a
+   store predating it) are silently filtered by the pull guard — safe."
   [db id]
   (db/pull {:seon.db/db db
             :seon.db/pull-pattern
-            '[:db/id :seon.agent/id :seon.agent/state
+            '[:db/id :seon.agent/id
               :seon.agent/purpose
-              :seon.agent/wake :seon.agent/max-turns-per-loop
+              :seon.agent/default-turn-limit
               :seon.render/ai :seon.render/html
               :seon.render.live-tile/content
-              {:seon.agent/ctx [*]}]
+              {:seon.agent/sections [*]}]
             :seon.db/ref [:seon.agent/id id]}))
 
 (defn context-root
   "The ROOT renderable. Its children = the core section renderables
-   ([[core-default-ctx]]) UNIONed with the agent's `:seon.agent/ctx`
+   ([[core-default-ctx]]) UNIONed with the agent's `:seon.agent/sections`
    overrides (override-by-id) and any derived rows, sorted by static
    `:seon.ctx/priority` (subsumes the old merge-sections override-by-name).
    The agent entity is pulled once and assoc'd into ctx so every child

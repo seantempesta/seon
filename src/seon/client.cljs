@@ -60,6 +60,8 @@
     ;; The agent loop + wake trigger: the client boot path ARMS the wake
     ;; trigger (seon.agent does NOT, to stay acyclic).
     [seon.agent.loop :as fsm]
+    ;; The run lifecycle — the bootstrap turn-0 opens a run for its turn.
+    [seon.agent.run :as run]
     ;; One turn — the bootstrap turn-0 opens a turn directly.
     [seon.agent.turn :as turn]
     [seon.ctx]
@@ -314,28 +316,21 @@
   "The full set of registered seon attr keywords whose datahike schema the
    agent conn needs. Public so tests can build an isolated `:memory` conn with
    the same schema the pod boots against (see index-core-test)."
-  [;; --- Agent ---
+  [;; --- Agent (state is DERIVED — no stored :seon.agent/state) ---
    ;; :seon.agent/current-ns deleted 2026-05-23 — derived from the
    ;; latest successful eval's :seon.eval/ns. See
    ;; docs/seon/concepts/reactive-context.
    :seon.agent/id
-   :seon.agent/state
-   ;; Wake-episode token (id) — stamped on each loop wake; the turn copies
-   ;; it onto :seon.agent.turn/wake so the loop's sliding cap derives its
-   ;; per-loop turn count.
-   :seon.agent/wake
-   :seon.agent/sessions
-   ;; Per-loop turn cap (env SEON_MAX_TURNS_PER_LOOP, default 20). The loop
-   ;; enforces effective-cap = this + inbounds-arrived-this-wake.
-   :seon.agent/max-turns-per-loop
-   :seon.agent/ctx
-
-   ;; --- Loop tx-meta (provenance on state-transition txs) ---
-   ;; Stamped EXPLICITLY per-transition (NOT in seon.db tx-meta-attrs).
-   ;; Listed here so their datahike schema reaches the wire-server writer
-   ;; at boot — tx-meta attrs never install lazily via the tx-data path.
-   :seon.agent.loop/cause
-   :seon.agent.loop/stop-reason
+   ;; Derived-state primitives: the CURRENT run pointer (fencing token +
+   ;; spine of derived state) and the terminate marker. Plus the run-bound
+   ;; seeds (env SEON_DEFAULT_TURN_LIMIT overrides default-turn-limit) and the
+   ;; self-managed cron vector. The agent's section overrides.
+   :seon.agent/run
+   :seon.agent/terminated-at
+   :seon.agent/default-turn-limit
+   :seon.agent/default-deadline-ms
+   :seon.agent/schedules
+   :seon.agent/sections
 
    ;; --- Render slots (A-6) — symbol-only at storage. ---
    :seon.render/ai
@@ -347,12 +342,22 @@
    :seon.ctx/name
    :seon.ctx/priority
 
-   ;; --- Session ---
-   :seon.agent.session/id
-   :seon.agent.session/at
-   :seon.agent.session/turns
+   ;; --- Run (seon.agent.run — the wake-episode grouping; turns point UP
+   ;; to it via :seon.agent.turn/run, it points UP to the agent) ---
+   :seon.agent.run/id
+   :seon.agent.run/agent
+   :seon.agent.run/started-at
+   :seon.agent.run/trigger
+   :seon.agent.run/cause
+   :seon.agent.run/turn-limit
+   :seon.agent.run/deadline
+   :seon.agent.run/last-beat-at
+   :seon.agent.run/paused-at
+   :seon.agent.run/remaining-ms
+   :seon.agent.run/status
+   :seon.agent.run/closed-reason
 
-   ;; --- Turn (v1.md §2.1) ---
+   ;; --- Turn (a standalone entity that points UP to its run) ---
    :seon.agent.turn/id
    :seon.agent.turn/at
    :seon.agent.turn/status
@@ -362,9 +367,9 @@
    ;; silently cap-edn-truncated at 16,406 chars — useless evidence).
    :seon.agent.turn/prompt-chars
    :seon.agent.turn/prompt-file
-   ;; The wake-episode token a turn was opened under — the loop's
-   ;; sliding cap derives its per-loop turn count from it.
-   :seon.agent.turn/wake
+   ;; The run this turn belongs to (its derived current-turn = count turns
+   ;; with this run).
+   :seon.agent.turn/run
    :seon.agent.turn/evals
 
    ;; --- Message (from/to refs since unit 1.5 — role/agent retired) ---
@@ -2075,8 +2080,14 @@
     (db/with-agent id
       (fn ^:async run-bootstrap-turn! []
         (try
-          (let [session    (await (turn/ensure-session! id))
-                session-id (:seon.agent.session/id session)
+          (let [;; Turn-0 belongs to a RUN (a turn points UP to its run, and
+                ;; the run to the agent — there is no session). Open one for
+                ;; the bootstrap; the `(wait …)` form inside the eval closes
+                ;; it :waited, parking the agent :idle.
+                opened     (await (run/open-run!
+                                    {:seon.agent/id          id
+                                     :seon.agent.run/trigger :message}))
+                run-id     (:seon.agent.run/id opened)
                 turn-id    (db/new-id!)
                 source     (str hello-source
                                 "\n"
@@ -2084,14 +2095,13 @@
                 batch
                 (await
                   (db/with-tx-context
-                    {:seon.db/agent-id   id
-                     :seon.db/session-id session-id
-                     :seon.db/turn-id    turn-id
-                     :seon.db/origin     :system}
+                    {:seon.db/agent-id id
+                     :seon.db/turn-id  turn-id
+                     :seon.db/origin   :system}
                     (fn []
                       (turn/open-turn!
-                        {:seon.agent/id                    id
-                         :seon.agent.session/id-of-session session-id
+                        {:seon.agent/id             id
+                         :seon.agent.run/id-of-run  run-id
                          :seon.agent.turn/id-of-turn       turn-id
                          :seon.agent.turn/prompt-text      ""}
                         (fn ^:async bootstrap-turn-body! []
@@ -2116,8 +2126,8 @@
 (defn ^:async start-agent!
   "Bring up the pod's agents: open conn, init bootstrap-CLJS, then
    RESUME every armable agent in the cluster store — the agents whose
-   `:seon.agent/state` is not `:terminated` (`armable-agent-ids`) —
-   arming each one's wake trigger. A fresh agent is minted ONLY when
+   DERIVED state is `:idle` (not terminated, no open run — `armable-agent-ids`)
+   — arming each one's wake trigger. A fresh agent is minted ONLY when
    the store has zero armable agents (genuine first boot) or on the
    explicit create path (`:mint? true` — POST /agents/new).
    Identity is durable: restarting the pod does NOT accumulate agents.

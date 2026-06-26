@@ -8,42 +8,38 @@
    `:seon.eval` entities. The agent calls the real `seon.db/*` APIs directly.
 
    This namespace owns:
-     - the `:seon.agent/*` schemas (id/purpose/state/wake/parent/
-       max-turns-per-loop + the entity map), plus the `:seon.eval/*`,
-       `:seon.ns/*`, `:seon.fn/*`, `:seon.schema/*` corpus schemas
-       (`:seon.agent.message/*` lives in [[seon.agent.message]],
-       `:seon.agent.session/*` + `:seon.agent.turn/*` in
-       [[seon.agent.turn]], `:seon.ctx/*` in [[seon.ctx]])
-     - state helpers: `current-state` / `set-state!` / `fresh-wake!` /
-       `armable-agent-ids` (the loop coordination seam over seon.db)
+     - the `:seon.agent/*` schemas (id/purpose/run/terminated-at/parent/
+       default-turn-limit/default-deadline-ms/schedules/sections + the entity
+       map), plus the `:seon.eval/*`, `:seon.ns/*`, `:seon.fn/*`,
+       `:seon.schema/*` corpus schemas (`:seon.agent.message/*` lives in
+       [[seon.agent.message]], `:seon.agent.turn/*` in [[seon.agent.turn]],
+       `:seon.agent.run/*` in [[seon.agent.run]], `:seon.ctx/*` in [[seon.ctx]])
+     - `derive-agent-state` / `armable-agent-ids` — the DERIVED-state seam:
+       state is a projection of the run/terminated-at primitives, never stored
+     - `state-snapshot` — the agent fingerprint (full derived state in one map)
      - `inbound-msg-datom?` — the wake gate ([[seon.agent.loop]]'s trigger
        and the transcript head-render both reuse it)
      - `create!` / `boot!` — allocate the agent entity (boot! does NOT arm
-       the wake trigger — that's the client boot path, which requires fsm)
+       the wake trigger — that's the client boot path)
      - `message!` / `user-ref` — re-exported from [[seon.agent.message]]
      - `add-section!` / `remove-section!` / `reset-ctx!` / `update-ctx!` —
-       the agent's ctx-layout editing surface
+       the agent's section-layout editing surface (over `:seon.agent/sections`)
 
    Agent-id resolution: read APIs take `:seon.agent/id` and fall back to
    `(seon.db/current-agent-id)` when unset (the boot/run path wraps calls in
    `(seon.db/with-agent id …)`).
 
-   ## State machine
+   ## State is DERIVED (the run model)
 
-   `:seon.agent/state` is THREE behavioral classes — running / wakeable /
-   dead:
-     :active     — a loop is RUNNING; new inbounds are picked up by the
-                   running loop's sliding cap, not a fresh wake (the
-                   handler sees :active and skips)
-     :idle       — WAKEABLE; not running, a message wakes it → :active.
-                   The single parked state — `(agent/wait …)`,
-                   `(complete …)`, no-forms, and cap all land here; WHY it
-                   parked is the `:seon.agent.loop/stop-reason` tx-meta + the
-                   `:seon.agent/wait-note` field, not a distinct state value
-     :terminated — DEAD; orchestrator kill, UNWAKEABLE (change state first)
-
-   The wake handler flips an :idle agent → :active and starts a loop; the
-   loop resets it to :idle on a clean exit (see [[seon.agent.loop/run-loop!]]).
+   There is no stored `:seon.agent/state`. The agent's FSM state is a pure
+   projection of its primitives via [[seon.agent.fsm/derive-state]]:
+     :terminated — `:seon.agent/terminated-at` present (UNWAKEABLE)
+     :idle       — no OPEN run (WAKEABLE; a message opens a run → :running)
+     :paused     — the open run carries `:seon.agent.run/paused-at`
+     :running    — an open run, not paused (the loop is driving turns)
+   A trigger (inbound message / due schedule) opens a RUN
+   ([[seon.agent.run/open-run!]]); the loop drives turns until a bound fires
+   or a verb closes the run (see [[seon.agent.loop/run-loop!]]).
 
    ## Prompt assembly
 
@@ -52,12 +48,12 @@
    `(seon.render/render :seon.render/ai ctx (seon.ctx/context-root ctx))`,
    shared byte-for-byte with the inspector (`seon.agent.inspect/ctx-preview`).
    The core section LAYOUT is CODE (`seon.ctx/core-default-ctx`); the agent's
-   own `:seon.agent/ctx` section maps MERGE with it by one priority sort
+   own `:seon.agent/sections` section maps MERGE with it by one priority sort
    (override-by-id). Each section's `:seon.render/ai` slot is a verbatim
    string or a fn symbol resolved late via `seon.eval/lookup-value`.
 
    The agent customizes by transacting different `:seon.ctx` entities into
-   `:seon.agent/ctx` (use `update-ctx!`) or by transacting a completely
+   `:seon.agent/sections` (use `update-ctx!`) or by transacting a completely
    different symbol onto the agent's `:seon.render/ai` slot."
   (:require
     [clojure.string :as str]
@@ -79,43 +75,19 @@
 
 (schema/register! :seon.agent/id            [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.agent/purpose       :string)
-;; The loop coordination truth — THREE behavioral classes (running /
-;; wakeable / dead). STORED on the agent record, re-read each loop
-;; iteration:
-;;   :active     a loop is RUNNING — NOT wakeable (the running loop picks
-;;               up new inbounds via the sliding cap)
-;;   :idle       WAKEABLE — not running, a message wakes it → :active. The
-;;               single parked state: wait / complete / no-forms / cap all
-;;               land here; the REASON is the :seon.agent.loop/stop-reason
-;;               tx-meta (+ :seon.agent/wait-note), not a separate value.
-;;   :terminated DEAD — orchestrator kill, UNWAKEABLE (change state first)
-(schema/register! :seon.agent/state         [:enum :active :idle :terminated])
-;; The current wake-episode token (reuses the canonical id shape, single
-;; source of truth in seon.schema). STORED. Each wake mints a fresh id; the
-;; loop re-reads it and bails if a newer wake superseded it (optimistic
-;; concurrency via the DB — no atom, no CAS).
-(schema/register! :seon.agent/wake          :seon.db/id)
-;; Base per-loop turn cap (optional; env SEON_MAX_TURNS_PER_LOOP / 20 when
-;; absent). The effective cap is a sliding window — every inbound during a
-;; wake grants +1 turn (derived, not stored).
-(schema/register! :seon.agent/max-turns-per-loop :int)
 ;; Subagent → parent (optional; delivery is a thin conditional in
 ;; `complete` — no spawn path sets this yet). References the canonical ref
 ;; shape; never inline.
 (schema/register! :seon.agent/parent        :seon.db/ref)
-;; Note surfaced to monitoring agents while parked (optional; set by
-;; `(agent/wait …)`).
-(schema/register! :seon.agent/wait-note      :string)
 
-;; ── Run-model additive attrs (the FSM build) ──────────────────────────────
-;; These are the DERIVED-STATE primitives the FSM cutover will read; the live
-;; wake-token loop above (`:seon.agent/state` + `:seon.agent/wake`) is
-;; untouched. `:seon.agent/run` points at the CURRENT run (the fencing pointer
-;; + the spine of derived state — see [[seon.agent.run]] / [[seon.agent.fsm]]);
-;; `terminated-at` presence ⇒ derived state :terminated; the default-* attrs
-;; seed a new run's two bounds (`:seon.agent/default-turn-limit` is the
-;; run-model successor to `:seon.agent/max-turns-per-loop`, which the live loop
-;; still reads until cutover); `schedules` is the self-managed cron vector
+;; ── DERIVED-STATE primitives (the run model) ──────────────────────────────
+;; There is NO stored state — the FSM state is a projection of these via
+;; [[seon.agent.fsm/derive-state]]. `:seon.agent/run` points at the CURRENT
+;; run (the fencing pointer + the spine of derived state — see
+;; [[seon.agent.run]] / [[seon.agent.fsm]]); `terminated-at` presence ⇒
+;; derived state :terminated; the default-* attrs seed a new run's two bounds
+;; (`default-turn-limit` is the work bound, `default-deadline-ms` the
+;; wall-clock bound); `schedules` is the self-managed cron vector
 ;; ([[seon.agent.schedule]]). All reference the canonical shapes; never inline.
 (schema/register! :seon.agent/run                :seon.db/ref)
 (schema/register! :seon.agent/terminated-at      :inst)
@@ -133,7 +105,6 @@
 ;; ============================================================
 
 (def home-ns ctx/home-ns)
-(def current-session ctx/current-session)
 (def messages ctx/messages)
 (def current-turn ctx/current-turn)
 (def evals ctx/evals)
@@ -186,16 +157,12 @@
 ;; successful eval.
 (schema/register! :seon.eval/ns          :keyword)
 
-;; :seon.agent/sessions — the agent record owns the ref TO its sessions; the
-;; sessions own their turns (the session/turn schemas live in
-;; [[seon.agent.turn]], their data-owner).
-(schema/register! :seon.agent/sessions    [:vector {:seon.db/component true} :seon.db/ref])
-
 ;; The agent's OWN context sections — a component vector of
 ;; :seon.ctx/section maps (see seon.ctx). MERGED with the core defaults by
 ;; one priority sort at render time (override-by-name). The one slot attr is
-;; :seon.render/ai.
-(schema/register! :seon.agent/ctx    [:vector {:seon.db/component true} :seon.db/ref])
+;; :seon.render/ai. (Turns are NOT owned here — a turn points UP to its run;
+;; runs point UP to the agent via :seon.agent.run/agent.)
+(schema/register! :seon.agent/sections    [:vector {:seon.db/component true} :seon.db/ref])
 
 ;; ============================================================
 ;; Program graph. :seon.ns owns the namespace source; :seon.fn /
@@ -326,22 +293,17 @@
 ;; transacting `:seon.render/html '<its-own-fn-sym>` onto its own entity
 ;; (per-entity override wins in `seon.render/entity-html-sym`). No
 ;; `:seon.render/ai` property in the props — the agent entity must NOT enter
-;; the chronological ai window. Required attrs (id + state) mirror `create!`,
-;; the one writer that runs unconditionally; everything else arrives lazily.
-;; The entity map is the FSM record: id (req) + state (req) + the optional
-;; config/coordination attrs. `sessions`/`ctx` keep their own register!
-;; (still transactable/queryable) but stay out of the record shape.
+;; the chronological ai window. The ONLY required attr is `id` (the one thing
+;; `create!` always writes); state is DERIVED (no stored enum), and every
+;; other attr arrives lazily. `sections` keeps its own register! (still
+;; transactable/queryable) but stays out of the record shape's required set.
 (schema/register! :seon.agent
   [:map {:seon.db/entity   true
          :seon.render/html 'seon.render.default/view}
    [:seon.agent/id      :seon.agent/id]
    [:seon.agent/purpose            {:optional true} :seon.agent/purpose]
-   [:seon.agent/state   :seon.agent/state]
-   [:seon.agent/wake               {:optional true} :seon.agent/wake]
-   [:seon.agent/max-turns-per-loop {:optional true} :seon.agent/max-turns-per-loop]
    [:seon.agent/parent             {:optional true} :seon.agent/parent]
-   [:seon.agent/wait-note          {:optional true} :seon.agent/wait-note]
-   ;; run-model additive primitives (derived state + run bounds + cron)
+   ;; derived-state primitives + run bounds + cron
    [:seon.agent/run                {:optional true} :seon.agent/run]
    [:seon.agent/terminated-at      {:optional true} :seon.agent/terminated-at]
    [:seon.agent/default-turn-limit {:optional true} :seon.agent/default-turn-limit]
@@ -351,89 +313,47 @@
    [:seon.render/html {:optional true} :seon.render/html]])
 
 ;; ============================================================
-;; FSM state helpers. The agent record's `:seon.agent/state` +
-;; `:seon.agent/wake` are the loop's coordination truth — re-read each
-;; iteration, externally controllable. These are the thin read/write seam
-;; over `seon.db`; the lifecycle verbs (wait/complete/terminate) and the
-;; loop ([[seon.agent.loop]]) build on them.
+;; DERIVED state — there is no stored `:seon.agent/state`. The FSM state is a
+;; projection of the agent's primitives (terminated-at / open run / paused-at)
+;; via [[seon.agent.fsm/derive-state]]. `derive-agent-state` is the lean
+;; hot-path read the loop + wake gate use; `state-snapshot` (below) is the
+;; full fingerprint. Both delegate to [[seon.ctx/derived-state]] over a db
+;; value (so the wake handler can derive from the listener's tx snapshot).
 ;; ============================================================
 
-(schema/register! ::current-state-request [:map [:seon.agent/id :seon.agent/id]])
-;; Optional `:seon.db/opts` carries a per-transition tx-meta map (the
-;; loop stamps :seon.agent.loop/cause / :stop-reason on a transition); it
-;; is the standard transact! opts slot, passed through verbatim.
-(schema/register! ::set-state-request
+(schema/register! ::derive-agent-state-request
   [:map
-   [:seon.agent/id    :seon.agent/id]
-   [:seon.agent/state :seon.agent/state]
-   [:seon.db/opts     {:optional true} :seon.db/opts]])
-(schema/register! ::fresh-wake-request    [:map [:seon.agent/id :seon.agent/id]])
+   [:seon.agent/id  :seon.agent/id]
+   [:seon.db/db     {:optional true} :seon.db/db-val]])
 
-(defn current-state
-  "The agent's current `:seon.agent/state` keyword (sync read from the
-   local db value), nil if the agent entity doesn't resolve. Map-in."
-  {:malli/schema [:=> [:cat ::current-state-request]
-                  [:maybe :seon.agent/state]]}
-  [{:seon.agent/keys [id]}]
-  (:seon.agent/state
-    (db/entity {:seon.db/ref [:seon.agent/id id]})))
-
-(defn ^:async set-state!
-  "Transact a new `:seon.agent/state` for an EXISTING agent (lookup by id).
-   Returns the transact-response. set-state! NEVER mints an agent — `create!`
-   is the sole minter. If no agent with `id` exists it FAILS LOUD (a
-   console.error + an error envelope) instead of upserting a phantom entity
-   carrying only id+state (`:seon.agent/id` is an identity attr, so a bare
-   upsert WOULD ghost-create — a stray id reaching here is a bug, surface it).
-   Optional `:seon.db/opts` (a `{:tx-meta {…}}` map) is passed through to
-   `transact!` so the loop can stamp `:seon.agent.loop/cause` / `:stop-reason`
-   provenance on the transition. Map-in. `^:async` fns aren't
-   runtime-instrumented — the schema is the contract."
-  {:malli/schema [:=> [:cat ::set-state-request] :seon.db/transact-response]}
-  [{:seon.agent/keys [id state] opts :seon.db/opts}]
-  (if (nil? (db/entity {:seon.db/ref [:seon.agent/id id]}))
-    (do (js/console.error
-          (str "seon.agent/set-state!: no agent " id
-               " — refusing to mint a phantom entity (state=" state
-               "). create! is the only agent minter."))
-        {:seon.db/ok? false
-         :seon.db/error {:seon.error/message
-                         (str "set-state! on unknown agent " id
-                              " — no entity to transition (create! first).")}})
-    (await (db/transact!
-             (cond-> {:seon.db/tx-data [{:seon.agent/id id :seon.agent/state state}]}
-               (some? opts) (assoc :seon.db/opts opts))))))
-
-(defn ^:async fresh-wake!
-  "Mint a fresh wake-episode id, transact it onto `:seon.agent/wake`, and
-   return the minted id. Each wake gets a new token so the loop can
-   re-read it and bail when a newer wake supersedes it (optimistic
-   concurrency via the DB — no atom, no CAS). Map-in. `^:async`."
-  {:malli/schema [:=> [:cat ::fresh-wake-request] :seon.db/id]}
-  [{:seon.agent/keys [id]}]
-  (let [wake (db/new-id!)]
-    (await (db/transact!
-             {:seon.db/tx-data [{:seon.agent/id id :seon.agent/wake wake}]}))
-    wake))
+(defn derive-agent-state
+  "The agent's DERIVED FSM state (:idle/:running/:paused/:terminated) — a pure
+   projection of `terminated-at`, whether it has an OPEN run, and that run's
+   `paused-at`. The hot-path read the loop + wake gate use. Optional
+   `:seon.db/db` (defaults to `*conn*`'s db) lets a caller derive from a
+   specific tx snapshot. Map-in."
+  {:malli/schema [:=> [:cat ::derive-agent-state-request] :seon.agent.fsm/state]}
+  [{:seon.agent/keys [id] db :seon.db/db}]
+  (ctx/derived-state id db))
 
 (schema/register! ::armable-agent-ids-request [:map [:seon.db/db {:optional true} :seon.db/db-val]])
 (schema/register! ::armable-agent-ids-response [:vector :seon.db/id])
 
 (defn armable-agent-ids
-  "Agent ids whose triggers should be ARMED — every agent NOT in the
-   terminal `:terminated` state (the single source of truth for 'this
-   agent can still be woken'). An `:idle` agent must still get a trigger so
-   a new message wakes it; only a `:terminated` agent is armless. Derived
-   from the db value at call time (reactive-context: no
-   stored registry). Sorted asc for deterministic boot logs. Map-in;
-   `:seon.db/db` optional (defaults to `*conn*`'s db via `db/query`)."
+  "Agent ids whose DERIVED state is `:idle` — not `:terminated` AND with no
+   OPEN run. These are the agents a trigger can WAKE (open a fresh run for);
+   a running/paused agent is mid-run, a terminated agent is dead. The boot
+   resume roster + the wake re-arm both read this. Derived from the db value
+   at call time (reactive-context: no stored registry). Sorted asc for
+   deterministic boot logs. Map-in; `:seon.db/db` optional."
   {:malli/schema [:=> [:cat ::armable-agent-ids-request] ::armable-agent-ids-response]}
   [{:seon.db/keys [db]}]
   (let [q '[:find ?aid
             :where
             [?a :seon.agent/id ?aid]
-            [?a :seon.agent/state ?state]
-            [(not= :terminated ?state)]]]
+            (not [?a :seon.agent/terminated-at _])
+            (not [?a :seon.agent/run ?r]
+                 [?r :seon.agent.run/status :open])]]
     (->> (if db
            (db/query {:seon.db/db db :seon.db/query q})
            (db/query {:seon.db/query q}))
@@ -442,26 +362,26 @@
          vec)))
 
 ;; ============================================================
-;; Derived state-snapshot — the agent FINGERPRINT (run-model). ONE call
-;; returns the whole derived state from the record + cheap queries. State is
-;; DERIVED via [[seon.agent.fsm/derive-state]] over the primitives
-;; (terminated-at / the current open run / the run's paused-at), NOT the
-;; stored `:seon.agent/state` (that enum stays the live wake-token loop's
-;; truth until cutover) — hence the snapshot's `:seon.agent/state` field
-;; carries the DERIVED `:seon.agent.fsm/state` enum (:idle/:running/:paused/
+;; Derived state-snapshot — the agent FINGERPRINT. ONE call returns the whole
+;; derived state from the record + cheap queries. State is DERIVED via
+;; [[seon.agent.fsm/derive-state]] over the primitives (terminated-at / the
+;; current open run / the run's paused-at) — there is NO stored state. The
+;; snapshot's `:seon.agent/state` field is just the response-map key carrying
+;; that DERIVED `:seon.agent.fsm/state` enum (:idle/:running/:paused/
 ;; :terminated). Run/turn/todo counts derive per call; a field whose source
 ;; doesn't exist yet is OMITTED (optional = absent, never nil).
 ;; ============================================================
 
 (defn- total-turns
-  "Count of every turn under the agent's sessions (ever-increasing)."
+  "Count of every turn the agent owns across all its runs (ever-increasing).
+   Walks agent ← run (:seon.agent.run/agent) ← turn (:seon.agent.turn/run)."
   [id]
   (or (db/query {:seon.db/query
                  '[:find (count ?t) . :in $ ?aid
                    :where
                    [?a :seon.agent/id ?aid]
-                   [?a :seon.agent/sessions ?s]
-                   [?s :seon.agent.session/turns ?t]]
+                   [?r :seon.agent.run/agent ?a]
+                   [?t :seon.agent.turn/run ?r]]
                  :seon.db/args [id]})
       0))
 
@@ -617,35 +537,34 @@
 ;; ============================================================
 
 (defn ^:async create!
-  "Allocate an agent entity. Idempotent: re-calling with the same id
-   resets state to :idle (transact is upsert-by-unique-id) and NEVER
-   re-seeds — a resumed agent keeps its own purpose and sections. A
-   GENUINELY NEW entity gets `:seon.agent/purpose` ONLY when the human
-   stated one; otherwise the attr stays ABSENT (optional = absent) until
-   the agent derives a purpose and transacts it. Purpose is ENTITY DATA
-   rendered by the your-entity context section, never agent-directed
-   instruction text — the welcome tile shows it verbatim to the customer.
-   `:seon.agent/max-turns-per-loop`, when given, is transacted onto the
-   entity (the FSM loop reads it as the base per-loop cap); absent leaves
-   the stored cap unchanged.
+  "Allocate an agent entity (just its `:seon.agent/id` — state is DERIVED, a
+   fresh agent with no open run is `:idle`). Idempotent: re-calling with the
+   same id is a no-op upsert that NEVER re-seeds — a resumed agent keeps its
+   own purpose and sections. A GENUINELY NEW entity gets `:seon.agent/purpose`
+   ONLY when the human stated one; otherwise the attr stays ABSENT (optional =
+   absent) until the agent derives a purpose and transacts it. Purpose is
+   ENTITY DATA rendered by the your-entity context section, never
+   agent-directed instruction text — the welcome tile shows it verbatim to the
+   customer. `:seon.agent/default-turn-limit`, when given, is transacted onto
+   the entity (it seeds a new run's WORK bound); absent leaves the stored value
+   unchanged.
 
    Returns `{:seon.agent/id id}` on success; on a FAILED transact the
    db error envelope (`{:seon.db/ok? false :seon.db/error …}`) comes
    back as-is — errors are values, the same contract as
    `seon.agent.message/message!`. A failed create means NO agent
    entity; callers must branch instead of chasing a ghost."
-  [{:seon.agent/keys [id purpose max-turns-per-loop]}]
+  [{:seon.agent/keys [id purpose default-turn-limit]}]
   (let [fresh? (nil? (db/entity {:seon.db/ref [:seon.agent/id id]}))
         res    (await (db/transact!
                         {:seon.db/tx-data
-                         [(cond-> {:seon.agent/id    id
-                                   :seon.agent/state :idle}
+                         [(cond-> {:seon.agent/id id}
                             (and fresh?
                                  (string? purpose)
                                  (not (str/blank? purpose)))
                             (assoc :seon.agent/purpose purpose)
-                            (some? max-turns-per-loop)
-                            (assoc :seon.agent/max-turns-per-loop max-turns-per-loop))]}))]
+                            (some? default-turn-limit)
+                            (assoc :seon.agent/default-turn-limit default-turn-limit))]}))]
     (if (false? (:seon.db/ok? res))
       ;; Surface-errors-loudly AND return the failure: a success-shaped
       ;; map after a failed transact is a dishonest record.
@@ -704,10 +623,11 @@
 (def user-ref msg/user-ref)
 
 ;; ============================================================
-;; Lifecycle verbs — wait / complete / terminate — live in
+;; Lifecycle verbs — wait / complete / pause / resume / terminate — live in
 ;; [[seon.agent.lifecycle]] (a lean, whitelisted teaching ns). They are the
-;; agent-facing terminal transitions; each SETS `:seon.agent/state` (the
-;; loop only READS it). The agent home ns `:refer`s them directly.
+;; agent-facing run-lifecycle verbs; each MUTATES the agent's RUN (close /
+;; pause / set terminated-at), and the derived state follows. The agent home
+;; ns `:refer`s them directly.
 ;; ============================================================
 
 ;; ============================================================
@@ -720,7 +640,7 @@
 
 ;; ------------------------------------------------------------
 ;; Layout verbs — reset-ctx! restores core defaults; update-ctx!
-;; threads f over the current :seon.agent/ctx and retract-then-adds
+;; threads f over the current :seon.agent/sections and retract-then-adds
 ;; the result. Component-cardinality-many means the retract is needed
 ;; to drop the old ctx entities before transacting new ones (cardinality-
 ;; many ref attrs accumulate on upsert).
@@ -729,7 +649,7 @@
 
 (defn ^:async reset-ctx!
   "Restore the core-default ctx layout for `agent-id` by RETRACTING
-   the stored :seon.agent/ctx override (cascade-retracts the existing
+   the stored :seon.agent/sections override (cascade-retracts the existing
    :seon.ctx entities via component semantics). With no stored ctx,
    `assemble-context` falls back to the CODE default
    (`core-default-ctx`) — so the agent tracks every future layout
@@ -738,7 +658,7 @@
   [agent-id]
   (await (db/transact!
            {:seon.db/tx-data
-            [[:db/retract [:seon.agent/id agent-id] :seon.agent/ctx]]})))
+            [[:db/retract [:seon.agent/id agent-id] :seon.agent/sections]]})))
 
 (defn ^:async update-ctx!
   "Apply `f` to the current ctx vector for `agent-id`; transact the
@@ -751,13 +671,13 @@
         new-ctx (vec (f current))]
     (await (db/transact!
              {:seon.db/tx-data
-              [[:db/retract [:seon.agent/id agent-id] :seon.agent/ctx]
+              [[:db/retract [:seon.agent/id agent-id] :seon.agent/sections]
                {:seon.agent/id agent-id
-                :seon.agent/ctx new-ctx}]}))))
+                :seon.agent/sections new-ctx}]}))))
 
 ;; ============================================================
 ;; Self-context verbs — the validated path onto YOUR OWN
-;; `:seon.agent/ctx` sections. Errors are values; blank text is refused
+;; `:seon.agent/sections` sections. Errors are values; blank text is refused
 ;; with a guiding message; unknown name on remove names the current
 ;; section list. Default scope = the calling agent; explicit
 ;; :seon.agent/id allowed (a human or another agent can configure an
@@ -799,7 +719,7 @@
 
 (defn ^:async add-section!
   "Add or update ONE section of your own context — upsert-by-name
-   within your `:seon.agent/ctx` vector (re-adding a name replaces that
+   within your `:seon.agent/sections` vector (re-adding a name replaces that
    entry, so iterating on a section doesn't accumulate copies). A name
    that collides with a core default OVERRIDES it (deliberate,
    visible as data). `:seon.render/ai` is a string (rendered verbatim —
@@ -849,9 +769,9 @@
             res     (await
                       (db/transact!
                         {:seon.db/tx-data
-                         [[:db/retract [:seon.agent/id id] :seon.agent/ctx]
+                         [[:db/retract [:seon.agent/id id] :seon.agent/sections]
                           {:seon.agent/id  id
-                           :seon.agent/ctx new-ctx}]}))]
+                           :seon.agent/sections new-ctx}]}))]
         (if (false? (:seon.db/ok? res))
           {::ok? false
            ::error (str "add-section! transact failed: "
@@ -884,10 +804,10 @@
                           (db/transact!
                             {:seon.db/tx-data
                              (into [[:db/retract [:seon.agent/id id]
-                                     :seon.agent/ctx]]
+                                     :seon.agent/sections]]
                                    (when (seq new-ctx)
                                      [{:seon.agent/id  id
-                                       :seon.agent/ctx new-ctx}]))}))]
+                                       :seon.agent/sections new-ctx}]))}))]
             (if (false? (:seon.db/ok? res))
               {::ok? false
                ::error (str "remove-section! transact failed: "
