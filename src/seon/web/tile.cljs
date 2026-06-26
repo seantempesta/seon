@@ -36,7 +36,8 @@
     [seon.render :as render]
     [seon.render.sci :as render-sci]
     [seon.ui.components :as comp]
-    [seon.ui.html :as html]))
+    [seon.ui.html :as html]
+    [seon.ui.markdown :as md]))
 
 ;; ============================================================
 ;; Tile-config entities (`:seon.tile/*`) drive the layout when present. The
@@ -216,6 +217,54 @@
        (into [:div {:class "flex flex-col gap-1"}] (map row tools))
        [:div {:class "text-xs text-text-500"} "no tools yet — the agent builds its own"])]))
 
+(defn- decode-section-text
+  "Render an agent-authored `:seon.render/ai` robustly. `add-section!` stores the
+   string verbatim, so an agent that over-escapes (passes a pr-str'd string —
+   wrapped in literal quotes, `\\n` instead of newlines) gets stored that way and
+   reads ugly in BOTH its own context AND here. Defensively unwrap + unescape so
+   the markdown still renders (flagged to R as a STEERING issue — the lean-context
+   examples should show passing RAW markdown, not pr-str'd)."
+  [s]
+  (let [s (str s)
+        s (if (and (>= (count s) 2) (str/starts-with? s "\"") (str/ends-with? s "\""))
+            (subs s 1 (dec (count s)))
+            s)]
+    (-> s (str/replace "\\n" "\n") (str/replace "\\\"" "\""))))
+
+(defn context-view
+  "The sections↔tiles convergence: the agent's OWN pinned context — the sections
+   it `add-section!`'d to KEEP — rendered nicely from each section's markdown
+   `:seon.render/ai` twin via `md->hiccup` (the dual-render lean: the agent writes
+   markdown text, the user sees it as HTML). So anything the agent pins to its
+   context auto-appears here as a first-class tile. Agent's view == user's view."
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [secs    (db/query {:seon.db/db db
+                           :seon.db/query
+                           '[:find ?nm ?pri ?ai
+                             :in $ ?a
+                             :where
+                             [?e :seon.agent/id ?a]
+                             [?e :seon.agent/sections ?s]
+                             [?s :seon.ctx/name ?nm]
+                             [?s :seon.ctx/priority ?pri]
+                             [(get-else $ ?s :seon.render/ai "") ?ai]]
+                           :seon.db/args [id]})
+        ordered (sort-by second secs)
+        card    (fn [[nm _ ai]]
+                  [:div {:class "border-l-2 border-amber-700/40 pl-2 py-1"}
+                   [:div {:class "text-2xs font-mono uppercase tracking-wider text-text-400 mb-1"}
+                    (name nm)]
+                   (md/md->hiccup (decode-section-text ai)
+                                  {:wrap-class "markdown text-xs text-text-200"})])]
+    [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
+     [:div {:class "flex items-center justify-between mb-2"}
+      [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "context"]
+      [:span {:class "text-2xs text-text-500"} (str (count secs) " pinned")]]
+     (if (seq ordered)
+       (into [:div {:class "flex flex-col gap-3"}] (map card ordered))
+       [:div {:class "text-xs text-text-500"}
+        "nothing pinned yet — the agent uses add-section! to keep things here"])]))
+
 (defn hero-view
   "The hero — the agent's OWN live tile (welcome default or wired content),
    itself DB-driven + SCI-bounded by `seon.render/render-agent-tile`."
@@ -246,6 +295,7 @@
    'seon.web.tile/status-view     status-view
    'seon.web.tile/todos-view      todos-view
    'seon.web.tile/toolkit-view    toolkit-view
+   'seon.web.tile/context-view    context-view
    'seon.web.tile/commentary-view commentary-view})
 
 ;; ============================================================
@@ -265,6 +315,8 @@
     :seon.render/html 'seon.web.tile/todos-view :seon.ctx/priority 30 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":toolkit") :seon.tile/console agent-id
     :seon.render/html 'seon.web.tile/toolkit-view :seon.ctx/priority 35 :seon.tile/span 1}
+   {:seon.tile/id (str agent-id ":context") :seon.tile/console agent-id
+    :seon.render/html 'seon.web.tile/context-view :seon.ctx/priority 37 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":commentary") :seon.tile/console agent-id
     :seon.render/html 'seon.web.tile/commentary-view :seon.ctx/priority 40 :seon.tile/span 1}])
 
