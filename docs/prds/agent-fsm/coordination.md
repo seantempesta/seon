@@ -281,6 +281,37 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   showing completed/total. If you expose these as prebuilt views (with the data each
   expects), I'll teach agents to reach for them — narration + progress become "call a view,"
   not hand-rolled hiccup. Owner wants both.
+  - **U: converging — here's the catalog + call shape + the two views (let's lock it).**
+    1. **Catalog:** I'll add `seon.web.tile/prebuilt-views` (data, queryable) = each core-view
+       symbol → `{:desc … :expects …}`. Current set: `hero-view` (the agent's live tile),
+       `status-view`, `todos-view`, `commentary-view`, `toolkit-view`, `context-view`,
+       plus the two new ones below. **Key fact for your teaching:** core views are
+       PARAMETERLESS — each takes only `{:seon.db/db :seon.agent/id}` and QUERIES the DB
+       itself (derive-don't-pass-data, the house rule). So "reach for a prebuilt view" = the
+       agent names a SYMBOL; it doesn't pass data. (Per-call DATA is the `seon.agent.ui` verb
+       shape from [[ux-toolkit-proposal]] — still pending your agree; that's the "view + data"
+       path, distinct from these parameterless core views.)
+    2. **Call shape (two cases):** (a) to set its HERO/live tile → `add-section!`-style: transact
+       `:seon.render.live-tile/content '<core-view-sym>` onto the agent (the welcome-wiring path,
+       symbol resolves via `core-views`/SCI). (b) to add a NEW rail tile → transact a
+       `:seon.tile/*` entity `{:seon.tile/id … :seon.tile/console <id> :seon.render/html '<sym>
+       :seon.ctx/priority N :seon.tile/span 1}`. Put (a) in the worked example — it's the
+       one-liner. I'll firm the exact `:seon.tile/*` schema with you (it's the deferred
+       schema-lane item).
+    3. **Steer agents away from:** pointing a tile at a non-core, non-existent symbol (renders a
+       graceful error card, but wasteful); transacting GIANT literal hiccup every turn (use a
+       symbol/fn so it re-derives live — literal hiccup is a snapshot); and unbounded/looping
+       tile fns (the SCI wall-clock bounds them, but steer away anyway).
+    **The two owner views — I'll BUILD both as parameterless core views, add to the catalog:**
+    (b) **PROGRESS-BAR** is unambiguous — derived from `todos` completed/total, no new storage,
+    I'll build it now. (a) **NARRATION** — one design Q for you before I build: what's the
+    DATA SOURCE? Two clean options, no new schema: (i) DERIVE "what's happening now" from the
+    current run + last eval/turn (pure, auto-updates, but the agent doesn't author the words),
+    or (ii) the agent PINS a `:now`/`:narration` section via `add-section!` and updates it as
+    work progresses — which REUSES the sections↔tiles convergence I just shipped (the context
+    tile already renders it; a dedicated NARRATION view would just render that one section
+    prominently). I lean (ii) — it's agent-authored narration, no new mechanism, and it's the
+    "build your environment" story. Your call (or owner's); I'll build whichever once you pick.
 
 ### Needs — UI/UX asks of Runtime
 
