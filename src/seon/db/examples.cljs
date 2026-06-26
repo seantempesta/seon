@@ -62,30 +62,40 @@
 ;;; ───────────────────────────────────────────────────────────────────────
 
 (defn seed-readings!
-  "ADD entity maps. Refs link in ONE tx via shared `:db/id` tempid strings
-   (lookup-refs don't resolve against not-yet-committed entities) — the
-   readings name the author tempid in their `:my.reading/author` ref slot.
-   `:my.reading/notes` is a component ref, so its child entity is created
-   inline from the nested map. Returns the transact! envelope Promise."
+  "ADD entity maps, linking two refs each the idiomatic way:
+
+   - SAME-TX link (the author doesn't exist yet): give the author a
+     `:db/id` TEMPID and put that SAME tempid in the reading's
+     `:my.reading/author` ref slot — datahike resolves both to one new
+     entity. A tempid is an arbitrary label (here `\"author-alice\"`,
+     deliberately NOT the `\"alice\"` identity value, so it's clear the
+     ref slot carries the tempid, not a data value). Lookup-refs do NOT
+     resolve against not-yet-committed entities. To link to an
+     ALREADY-COMMITTED author instead, put a lookup-ref
+     `[:my.reading.author/id \"alice\"]` in the slot — never a bare value.
+   - INLINE COMPONENT (`:my.reading/notes`): a component ref's child is
+     built from the nested map — no tempid needed.
+
+   Returns the transact! envelope Promise."
   {:malli/schema [:=> [:cat] :any]}
   []
   (db/transact!
     {::db/tx-data
-     [;; authors — :db/id tempids the readings reference below
-      {:db/id "alice" :my.reading.author/id "alice" :my.reading.author/name "Alice Munro"}
-      {:db/id "basho" :my.reading.author/id "basho" :my.reading.author/name "Matsuo Basho"}
-      ;; readings
+     [;; authors — arbitrary :db/id tempid labels the readings link to below
+      {:db/id "author-alice" :my.reading.author/id "alice" :my.reading.author/name "Alice Munro"}
+      {:db/id "author-basho" :my.reading.author/id "basho" :my.reading.author/name "Matsuo Basho"}
+      ;; readings — :my.reading/author holds the author's TEMPID (same tx)
       {:my.reading/id "r1" :my.reading/title "Lives of Girls and Women"
        :my.reading/rating 5 :my.reading/tags [:fiction :canlit]
-       :my.reading/author "alice"
+       :my.reading/author "author-alice"
        :my.reading/notes [{:my.reading.note/id "n1"
                            :my.reading.note/body "Re-read the opening chapter."}]}
       {:my.reading/id "r2" :my.reading/title "Dance of the Happy Shades"
        :my.reading/rating 4 :my.reading/tags [:fiction :short-stories]
-       :my.reading/author "alice"}
+       :my.reading/author "author-alice"}
       {:my.reading/id "r3" :my.reading/title "The Narrow Road to the Deep North"
        :my.reading/rating 5 :my.reading/tags [:poetry :travel]
-       :my.reading/author "basho"}]}))
+       :my.reading/author "author-basho"}]}))
 
 (defn rename-reading!
   "UPSERT by identity: transacting the SAME `:my.reading/id` updates that
@@ -103,16 +113,18 @@
   (db/transact! {::db/tx-data [[:db/retract [:my.reading/id id] :my.reading/rating]]}))
 
 (defn replace-tags!
-  "Replace a cardinality-many attr. Transacting tags only ADDS them, so a
-   true replace = retract the current values, then add the new set (a
-   read-modify-write). Returns the transact! envelope Promise."
+  "Replace a cardinality-many attr. Transacting tags only ADDS to the
+   set — to REPLACE you must clear the old values first. A value-less
+   retract `[:db/retract ref attr]` retracts EVERY current value of the
+   attr; bundle it BEFORE the add-map in ONE tx. tx-data is applied in
+   order, so the old set is gone before the new set lands — correct even
+   when the sets overlap (the surviving value is retracted, then re-added).
+   Returns the transact! envelope Promise."
   {:malli/schema [:=> [:catn [::id :string] [::tags [:vector :keyword]]] :any]}
   [id tags]
-  (let [current  (db/query '[:find [?t ...] :in $ ?id
-                             :where [?e :my.reading/id ?id] [?e :my.reading/tags ?t]]
-                           id)
-        retracts (mapv (fn [t] [:db/retract [:my.reading/id id] :my.reading/tags t]) current)]
-    (db/transact! {::db/tx-data (conj retracts {:my.reading/id id :my.reading/tags tags})})))
+  (db/transact!
+    {::db/tx-data [[:db/retract [:my.reading/id id] :my.reading/tags]
+                   {:my.reading/id id :my.reading/tags tags}]}))
 
 (defn delete-reading!
   "Delete the whole entity (component children go with it).
