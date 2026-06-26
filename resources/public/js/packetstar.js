@@ -45,8 +45,38 @@
     connect();
   }
 
+  // A [data-console] element opens ONE EventSource for a whole console; each
+  // "patch" event carries {id, html} and updates #tile-<id>. One connection for
+  // N tiles → the HTTP/1.1 pool stays free for POSTs (no starvation).
+  function openConsole(el) {
+    var url = el.getAttribute("data-console");
+    if (!url) return;
+    var backoff = RETRY_MIN;
+
+    function connect() {
+      var es = new EventSource(url);
+      es.onopen = function () { backoff = RETRY_MIN; };
+      es.addEventListener("patch", function (e) {
+        try {
+          var p = JSON.parse(e.data);
+          var t = document.getElementById("tile-" + p.id);
+          if (t) t.innerHTML = p.html;
+        } catch (err) { /* ignore a malformed patch */ }
+      });
+      es.onerror = function () {
+        es.close();
+        setTimeout(connect, backoff);
+        backoff = Math.min(backoff * 2, RETRY_MAX);
+      };
+    }
+
+    connect();
+  }
+
   function openAll(root) {
-    (root || document).querySelectorAll("[data-tile]").forEach(openTile);
+    var r = root || document;
+    r.querySelectorAll("[data-tile]").forEach(openTile);
+    r.querySelectorAll("[data-console]").forEach(openConsole);
   }
 
   // Interactions: a bare data-action URL is POSTed; the tile re-renders over SSE.

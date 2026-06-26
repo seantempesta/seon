@@ -36,7 +36,10 @@
 (defn- register-test-schemas! []
   (schema/register! ::name :string)
   (schema/register! ::rank :int)
-  (schema/register! ::tags [:vector :keyword]))
+  (schema/register! ::tags [:vector :keyword])
+  ;; ref attr for the as-of ref-join test; `db/transact!`'s gate needs it
+  ;; registered (installation as :db.type/ref comes from `history-schema`).
+  (schema/register! ::owner :seon.db/ref))
 
 (use-fixtures :once
   {:before (fn []

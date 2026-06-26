@@ -48,17 +48,23 @@
 ;; Connection registry — tile-id -> [{:id :res :opened-at}].
 ;; ============================================================
 
+;; Two registries. `!tiles` keys per-tile streams (the /full hero, direct access);
+;; `!consoles` keys the MULTIPLEXED console stream — ONE SSE per console page
+;; carrying patches for ALL its tiles, so a console of N tiles costs ONE browser
+;; connection (not N) and never starves the HTTP/1.1 pool that POSTs need.
 (defonce ^:private !tiles (atom {}))
+(defonce ^:private !consoles (atom {}))
 
-(defn- add-conn! [k conn]
-  (swap! !tiles update k (fnil conj []) conn))
+(defn- reg-add! [reg k conn]
+  (swap! reg update k (fnil conj []) conn))
 
-(defn- remove-conn! [k conn-id]
-  ;; Drop the key when its last connection closes, so `on-tx` never re-renders a
-  ;; tile nobody is watching.
-  (swap! !tiles (fn [m]
-                  (let [cs (vec (remove #(= (:id %) conn-id) (get m k)))]
-                    (if (seq cs) (assoc m k cs) (dissoc m k))))))
+(defn- reg-remove! [reg k conn-id]
+  (swap! reg (fn [m]
+               (let [cs (vec (remove #(= (:id %) conn-id) (get m k)))]
+                 (if (seq cs) (assoc m k cs) (dissoc m k))))))
+
+(defn- add-conn! [k conn]    (reg-add! !tiles k conn))
+(defn- remove-conn! [k cid]  (reg-remove! !tiles k cid))
 
 (defn- clip [s n]
   (let [s (str s)]
@@ -269,9 +275,25 @@
 ;; tile's inner HTML (packetstar does `el.innerHTML = e.data`).
 ;; ============================================================
 
-(defn- region-event [hiccup]
+(defn- region-event
+  "A single-tile SSE frame — `el.innerHTML = e.data` (per-tile streams)."
+  [hiccup]
   (let [s (html/->string hiccup)]
     (str "data: " (str/replace s "\n" "\ndata: ") "\n\n")))
+
+(defn- tile-patch
+  "A multiplexed SSE patch — `event: patch`, data = JSON `{id, html}`. The
+   console client applies it to `#tile-<id>`. JSON keeps it one `data:` line."
+  [tile-id hiccup]
+  (str "event: patch\ndata: "
+       (js/JSON.stringify #js {:id tile-id :html (html/->string hiccup)})
+       "\n\n"))
+
+(defn- console-payload
+  "All of a console's tiles as one stream of patches (rendered against `db`)."
+  [db console-id]
+  (apply str (map (fn [t] (tile-patch (:seon.tile/id t) (render-tile db t)))
+                  (console-tiles db console-id))))
 
 (defn- push-tile! [tile-id]
   (try
@@ -292,25 +314,37 @@
     (catch :default e
       (log/error-console! "seon.web.tile" "push! threw" e))))
 
+(defn- push-console! [console-id]
+  (try
+    (let [live (remove :basis-t (get @!consoles console-id))]
+      (when (seq live)
+        (let [payload (console-payload @db/*conn* console-id)]
+          (doseq [{:keys [res]} live]
+            (try (.write res payload)
+                 (catch :default e (log/error-console! "seon.web.tile" "console write failed" e)))))))
+    (catch :default e (log/error-console! "seon.web.tile" "push-console! threw" e))))
+
 (defonce ^:private !pending (atom {}))
 
-(defn- schedule-push! [tile-id]
-  (let [was-pending? (get @!pending tile-id)]
-    (swap! !pending assoc tile-id true)
-    (when-not was-pending?
+(defn- schedule!
+  "Coalesce a push for `[kind id]` (`:tile` or `:console`) into a 100ms trailing
+   timer."
+  [kind id]
+  (let [k [kind id]]
+    (when-not (get @!pending k)
+      (swap! !pending assoc k true)
       (js/setTimeout
         (fn []
-          (swap! !pending dissoc tile-id)
-          (push-tile! tile-id))
+          (swap! !pending dissoc k)
+          (case kind :tile (push-tile! id) :console (push-console! id)))
         100))))
 
 (defn- on-tx
-  "Any commit re-renders every tile that has a LIVE conn (the client drops
-   no-ops). Tiles watched only by pinned conns are skipped — they stay frozen."
+  "Any commit re-renders every per-tile + console stream that has a LIVE conn
+   (the client drops no-ops). Streams watched only by pinned conns stay frozen."
   [_]
-  (doseq [[k conns] @!tiles
-          :when (some #(nil? (:basis-t %)) conns)]
-    (schedule-push! k)))
+  (doseq [[id conns] @!tiles    :when (some #(nil? (:basis-t %)) conns)] (schedule! :tile id))
+  (doseq [[id conns] @!consoles :when (some #(nil? (:basis-t %)) conns)] (schedule! :console id)))
 
 ;; ============================================================
 ;; Lifecycle — db/listen! IS the refresh signal.
@@ -368,9 +402,16 @@
    [:script {:src "/js/packetstar.js" :defer true}]])
 
 (defn- region
-  "A tile region: a stable-id element whose `data-tile` points at its SSE stream."
+  "A self-streaming tile region (its own per-tile SSE) — for single-tile pages."
   [tile-id]
   [:div {:id (str "tile-" tile-id) :data-tile (str "/tile/t/" tile-id "/sse") :class "min-h-0"}
+   [:div {:class "text-text-500 text-xs"} "connecting…"]])
+
+(defn- console-region
+  "A tile region patched by the console's MULTIPLEXED stream (no own SSE) — just
+   a stable `#tile-<id>` the patch protocol targets by id."
+  [tile-id]
+  [:div {:id (str "tile-" tile-id) :class "min-h-0"}
    [:div {:class "text-text-500 text-xs"} "connecting…"]])
 
 (defn- header-bar [agent-id]
@@ -405,13 +446,16 @@
   [agent-id tiles]
   (let [span (fn [t] (or (:seon.tile/span t) 1))
         hero (into [:div {:class "col-span-2 flex flex-col gap-3 min-h-0"}]
-                   (map #(region (:seon.tile/id %)) (filter #(>= (span %) 2) tiles)))
+                   (map #(console-region (:seon.tile/id %)) (filter #(>= (span %) 2) tiles)))
         rail (into [:div {:class "col-span-1 flex flex-col gap-3 min-h-0 overflow-auto"}]
-                   (map #(region (:seon.tile/id %)) (remove #(>= (span %) 2) tiles)))
+                   (map #(console-region (:seon.tile/id %)) (remove #(>= (span %) 2) tiles)))
         grid [:div {:class "grid grid-cols-3 gap-3 flex-1 min-h-0"} hero rail]
         page [:html {:lang "en"}
               (head (str "console · " agent-id))
-              [:body {:class "bg-base-950 text-text-200 font-mono p-3 h-screen flex flex-col"}
+              ;; ONE multiplexed stream for the whole console (data-console) — N
+              ;; tiles, one connection, so POSTs aren't starved of the HTTP/1.1 pool.
+              [:body {:class "bg-base-950 text-text-200 font-mono p-3 h-screen flex flex-col"
+                      :data-console (str "/tile/console/" agent-id "/sse")}
                (header-bar agent-id)
                grid
                (input-form agent-id)]]]
@@ -448,6 +492,29 @@
          (catch :default e
            (log/error-console! "seon.web.tile" "initial render failed" e)))))
 
+(defn- open-console-sse!
+  "The MULTIPLEXED console stream — ONE SSE carrying patches for every tile in
+   the console (so the page costs one browser connection, not N)."
+  [^js req ^js res console-id]
+  (.writeHead res 200 #js {"Content-Type"      "text/event-stream"
+                           "Cache-Control"     "no-cache"
+                           "Connection"        "keep-alive"
+                           "X-Accel-Buffering" "no"})
+  (.write res ": connected\n\n")
+  (let [t    (query-t req)
+        db   (db-at t)
+        conn {:id (random-uuid) :res res :basis-t t :opened-at (js/Date.)}]
+    (reg-add! !consoles console-id conn)
+    (log/info-console! "seon.web.tile" "CONSOLE SSE OPEN"
+                       {:console console-id :basis-t t :conn-id (str (:id conn))})
+    (.on req "close"
+         (fn []
+           (reg-remove! !consoles console-id (:id conn))
+           (log/info-console! "seon.web.tile" "CONSOLE SSE CLOSE" {:conn-id (str (:id conn))})))
+    (try (.write res (console-payload db console-id))
+         (catch :default e
+           (log/error-console! "seon.web.tile" "console initial render failed" e)))))
+
 (defn route?
   "True iff `path` is a tile route. `seon.web.serve` delegates here."
   [path]
@@ -459,6 +526,11 @@
   [^js req ^js res path]
   (ensure-installed!)
   (cond
+    (re-matches #"/tile/console/[^/]+/sse" path)
+    (let [id (second (re-matches #"/tile/console/([^/]+)/sse" path))]
+      (open-console-sse! req res id)
+      true)
+
     (re-matches #"/tile/console/[^/]+" path)
     (let [id (second (re-matches #"/tile/console/([^/]+)" path))]
       (write-html! res 200 (console-shell id (console-tiles @db/*conn* id)))
