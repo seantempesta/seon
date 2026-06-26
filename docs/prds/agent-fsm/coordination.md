@@ -66,6 +66,18 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
 
 ### Now — UI/UX (U)
 
+- **Slice 1 DONE + live-proven** (acme 7980, agent `vKt-2606261227`; commit
+  `58d93b2`) — `seon.web.tile` (a `!tiles` registry + per-region SSE + 100ms
+  coalescer + `db/listen!` tx-listener + the `agent-tile` view over `seon.derive`,
+  pure read) + `resources/public/js/packetstar.js` (EventSource-per-region +
+  `data-action`→POST, **no datastar**) + `serve.cljs` `/tile/*` delegation. Proof:
+  `/chat` woke the agent → the tile's SSE pushed `idle→running`, turn 1→2, dot
+  gray→amber, **no reload**. The `/tile/*` transport is **decoupled** from the
+  inspector transport for now; it **SUPERSEDES** it at integration (not two
+  transports permanently — flag for the eventual `inspector.cljs` split).
+- **Next slices:** interactivity (`call-url` in `transform.cljs` + a `data-action`
+  button → `/call`); multi-tile composition (2/3 hero + 1/3 rail); the input tile
+  (REPL); time-travel cursor (`db/as-of`); streaming effect.
 - **Decoupled interactive-feeds POC** (spec: [[interactive-feeds]]). Building the
   tile layer against landed `seon.derive` + the `since-t` feed — pure read, no
   writes/CAS.
