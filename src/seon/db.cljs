@@ -119,6 +119,13 @@
 
 (schema/register! ::tx-data [:vector :any])
 (schema/register! ::opts :map)
+;; LOAD-BEARING, registered early on purpose: `::transact-request` (just below)
+;; references `:seon.db/conn`, and the schema load-order guard needs the referent
+;; registered first. This is the CANONICAL `:seon.db/conn` registration; the
+;; db/conn handle block further down registers only `:seon.db/db`. Do NOT "dedup"
+;; this away — removing it breaks cold pod boot (the suite won't catch it; tests
+;; reload into a warm registry).
+(schema/register! ::conn :any)
 (schema/register! ::tx-meta :map)   ; positional 3-arity convenience slot
 (schema/register! ::return-report? :boolean)
 
@@ -213,9 +220,9 @@
 ;; them (e.g. `seon.warn/check-request`'s `:seon.db/db` slot). `::db-val`
 ;; (`'map?`) above is the STRICTER positional-arg shape; these looser
 ;; `:any` handles are for request/response map slots that just carry a
-;; runtime db/conn through.
+;; runtime db through. (`:seon.db/conn` is registered EARLIER — `::transact-request`
+;; references it and loads before this block — so only `:seon.db/db` is here.)
 (schema/register! :seon.db/db   :any)
-(schema/register! :seon.db/conn :any)
 
 (schema/register!
   ::datom
