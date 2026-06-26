@@ -102,6 +102,30 @@ source" = add the keyword to `:seon.ctx/show-source`. The framework tools it
 is NOT currently using stay indexed + searchable (`seon.agent.search`,
 `render-namespace`) — one grep away, just not dumped.
 
+### The indexer must "index everything" so the show-list can show any of it
+
+A subtlety surfaced building this (flag for owner): today the boot indexer
+(`seon.client/ns-row` via `full-source-ns?`) stores FULL source
+(`:seon.ns/source`) ONLY for the 6 whitelist nses + `my.*` + `acme`; every other
+seon.* ns gets a stub `(ns x)`. So if the show-list is per-agent and an agent adds
+`:seon.render` to its list, the renderer has **no stored full source** to show —
+and a render-time file read is banned (the boot indexer is the single reader, by
+invariant). So **"index everything, show subset" requires decoupling**:
+
+- **Indexer (storage):** store full source for EVERY first-party ns (all of
+  `seon.*`, `my.*`, `acme`), not just the whitelist. The whole code corpus lives in the
+  DB (consistent with "the runtime IS the database" / code-as-data). This is the
+  owner's literal "index everything."
+- **Renderer (selection):** the per-agent show-list selects which of those
+  stored-full nses get DUMPED into the prompt. Render still reads only indexed
+  rows — no file read, invariant intact.
+
+Cost to flag: every cluster store now carries the full seon.* source at rest
+(bigger boot index, bigger store). Given "index everything" is an explicit owner
+directive and the DB is meant to be the corpus, Option 1 (index all full) is the
+consistent choice — but the storage growth is the one thing to confirm. The
+ALTERNATIVE (lazy back-fill on first add) would break the single-reader invariant.
+
 ### Open: the DEFAULT show-list (gym tuning, not a blocker)
 
 Candidates: (a) `#{:seon.db}` only (the one API every agent uses; everything
