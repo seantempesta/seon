@@ -52,6 +52,38 @@ cause?* Run the same 4 scenarios with a lean whitelist, compare. A directional
 recovery is empirical proof for #26's bloat fix; no change means look elsewhere.
 Result appended below.
 
-## Hypothesis-test result
+## n=2 result — the METRIC is too noisy to attribute behavior (the real finding)
 
-_(pending — appended after the lean-prompt sweep)_
+Before testing lean-vs-fat, I re-ran the SAME 4 scenarios at the SAME fat prompt
+(n=2) to check the n=1 signal wasn't DeepSeek noise. It largely was:
+
+| Scenario (axis) | n=1 | n=2 |
+|---|---|---|
+| s21 (`reuses-schemas`) | ✗ | ✓ |
+| s32 (`consults-findings`) | ✗ | ✗ |
+| x12 (`consults-findings`) | ✗ | ✓ |
+| todo (`stores-proactively`) | ✗ | ✗ |
+
+**2 of 4 flipped between identical runs.** Same prompt, opposite verdict. So the
+single-run behavioral pass/fail is HIGH-VARIANCE — the n=1 "bloat is drowning the
+signal" read was over-interpretation. Suite green + clean exit both times; this is
+purely a metric-trust finding, not a runtime bug.
+
+**Conclusion (the owner's "wrong metric → cliff" made concrete):** a single sweep
+is NOT a trustworthy signal for these behavioral axes. Attributing a behavior
+change to context SHAPE needs pass-RATES over k reps, not one verdict. s32 and todo
+failed both times (candidate stable-fails); s21/x12 are variable.
+
+**Implications:**
+
+- #26's bloat fix stays justified on TOKEN ECONOMY alone — `:namespaces` is 84 % of
+  the prompt objectively; cheaper + faster inference regardless of behavior. That
+  does not need the gym to prove.
+- To use the gym to prove a BEHAVIORAL win (lean → better), we need a reps/pass-rate
+  mode (run each scenario k times, compare rates fat-vs-lean). Current baseline at
+  n=5 (fat) is accumulating — appended below.
+
+## n=5 baseline pass-rates (fat prompt) — pending
+
+_(appended when the rep accumulation finishes — establishes the variance band per
+scenario at the current fat default, the baseline a future lean run compares to)_
