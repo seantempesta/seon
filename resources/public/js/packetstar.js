@@ -61,6 +61,30 @@
     }).catch(function () { /* the SSE stream is the source of truth */ });
   });
 
+  // Input tile (the REPL prompt): a [data-send] form POSTs its text on submit.
+  // A value starting with "(" is a Clojure FORM → /eval (introspective, quiet);
+  // anything else is prose → /chat (a message that wakes the agent). The input is
+  // never server-overwritten, so focus/typing survive live updates around it.
+  document.addEventListener("submit", function (ev) {
+    var form = ev.target.closest("[data-send]");
+    if (!form) return;
+    ev.preventDefault();
+    var input = form.querySelector("[name=text]");
+    if (!input) return;
+    var text = input.value;
+    if (!text.trim()) return;
+    var agent = encodeURIComponent(form.getAttribute("data-agent") || "");
+    var isForm = text.trim().charAt(0) === "(";
+    var url = (isForm ? "/eval?agent=" : "/chat?agent=") + agent;
+    var field = isForm ? "form" : "text";
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: field + "=" + encodeURIComponent(text)
+    }).catch(function () { /* the tiles reflect the result over SSE */ });
+    input.value = "";
+  });
+
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", function () { openAll(); });
   } else {

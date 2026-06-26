@@ -384,24 +384,37 @@
     [:a {:class "text-2xs text-amber-400 hover:text-amber-300"
          :href  (str "/tile/agent/" agent-id "/full")} "⛶ fullscreen"]]])
 
+(defn- input-form
+  "The input tile — the human's REPL prompt. A user-OWNED region the server never
+   streams into (so focus/typing survive live updates). On submit packetstar
+   routes a `(clojure form)` → `/eval` (quiet) and prose → `/chat` (wakes)."
+  [agent-id]
+  [:form {:data-send "1" :data-agent agent-id :class "mt-3 flex gap-2 shrink-0"}
+   [:input {:name "text" :type "text" :autocomplete "off"
+            :placeholder "talk to your agent…  —  a (clojure form) evals · prose wakes"
+            :class (str "flex-1 bg-base-900 border border-base-700 rounded px-3 py-1.5 "
+                        "text-xs text-text-50 placeholder:text-text-500 focus:border-amber-600 outline-none")}]
+   [:button {:type "submit"
+             :class "px-3 py-1.5 text-xs text-amber-400 hover:text-amber-300 border border-base-700 rounded"}
+    "send ⏎"]])
+
 (defn- console-shell
-  "The console — masthead + a layout DERIVED from the console's tiles. Span-2
-   tiles form the hero column; span-1 tiles stack in the rail. The tile list,
-   order, and spans are DATA; the two-column arrangement is the prewritten
-   strategy over that data."
+  "The console — masthead + a layout DERIVED from the console's tiles (span-2 →
+   hero column, span-1 → rail; the tile list/order/spans are DATA) + the input
+   tile. The two-column arrangement is the prewritten strategy over that data."
   [agent-id tiles]
-  (let [span    (fn [t] (or (:seon.tile/span t) 1))
-        hero    (into [:div {:class "col-span-2 flex flex-col gap-3 min-h-0"}]
-                      (map #(region (:seon.tile/id %)) (filter #(>= (span %) 2) tiles)))
-        rail    (into [:div {:class "col-span-1 flex flex-col gap-3 min-h-0 overflow-auto"}]
-                      (map #(region (:seon.tile/id %)) (remove #(>= (span %) 2) tiles)))
-        grid    [:div {:class "grid grid-cols-3 gap-3" :style "height: calc(100vh - 4rem)"}
-                 hero rail]
-        page    [:html {:lang "en"}
-                 (head (str "console · " agent-id))
-                 [:body {:class "bg-base-950 text-text-200 font-mono p-3"}
-                  (header-bar agent-id)
-                  grid]]]
+  (let [span (fn [t] (or (:seon.tile/span t) 1))
+        hero (into [:div {:class "col-span-2 flex flex-col gap-3 min-h-0"}]
+                   (map #(region (:seon.tile/id %)) (filter #(>= (span %) 2) tiles)))
+        rail (into [:div {:class "col-span-1 flex flex-col gap-3 min-h-0 overflow-auto"}]
+                   (map #(region (:seon.tile/id %)) (remove #(>= (span %) 2) tiles)))
+        grid [:div {:class "grid grid-cols-3 gap-3 flex-1 min-h-0"} hero rail]
+        page [:html {:lang "en"}
+              (head (str "console · " agent-id))
+              [:body {:class "bg-base-950 text-text-200 font-mono p-3 h-screen flex flex-col"}
+               (header-bar agent-id)
+               grid
+               (input-form agent-id)]]]
     (str "<!DOCTYPE html>" (html/->string page))))
 
 (defn- hero-shell
