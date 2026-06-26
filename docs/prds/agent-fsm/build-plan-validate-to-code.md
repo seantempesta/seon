@@ -27,22 +27,36 @@ always meant. Build across three lanes:
 They meet at the wire. The web/render is **not** "ported to CLJS" — it's revived on
 the JVM and wired to delegate untrusted EXECUTION to the CLJS sandboxes.
 
-## The loop (each iteration)
+## The loop (each iteration — the agent's judgment, not a fixed recipe)
 
-1. **Pick the next target** from the de-risk order below (smallest shippable unit).
-2. **Build real code** for it (in-place, no `*-v2`; CLAUDE.md "don't be a dumbass").
-3. **Write/append tests** that pin the BEHAVIOR (not exact strings) — re-runnable.
-4. **Run** the affected tests; then **confirm LIVE** (eval against the running pod /
-   REPL — a datom read back, a render, a kill observed) — live proof, not inference.
-5. **Commit** the unit (message says what was validated + the live proof).
-6. **Update `architecture.md`/spec to match built reality** (it's a living doc — fix
-   any drift between the map and the territory the moment it appears).
-7. **Adversarially verify** (ultracode): fan out agents to find bugs / refute the
-   claim / test edge cases before believing it's done.
+Each pass, decide what **most de-risks or improves the design right now**. The
+move is NOT always "write a test." The candidates — pick the one that helps most:
 
-Cadence: full `bin/test-cljs` ONCE per unit at the natural checkpoint (not per edit;
-concurrent runs collide on `out/test/`). Fresh world via `bin/seon nuke --yes` when
-state must be pristine.
+- **Refine** — make a concept clearer, simpler, more composable.
+- **Repair** — fix something wrong (including a design assumption that didn't
+  survive contact with code).
+- **Rebuild** — once you learn a better way, *overwrite* the old one. Don't be
+  precious: in-place, no `*-v2`. A clean rewrite beats a patched mess.
+- **Optimize** — when a measure (latency, write-churn, memory) says to.
+- **Test / prove** — lock in a behavior or de-risk an assumption with a
+  re-runnable test + a LIVE proof (eval the running system; observe it).
+- **Lock in an idea** — when something's settled, encode it so it can't drift (a
+  test, a schema, a clean abstraction).
+
+Then: **confirm live** (observed, not inferred); **commit at a clean point**
+(working + coherent); and if a pass didn't actually make things better, **revert
+it** — progress only counts when it's real. Update the design doc to match reality
+the moment they diverge. Adversarially verify (ultracode workflows) before
+believing something is done.
+
+**North star:** each pass should leave the design *simpler and more composable*;
+concepts should come to feel *natural and universal* — one mechanism serving many
+uses, not bolted-on special cases. If a piece feels special-cased or awkward,
+*that* is the next thing to refine. **Friction is the signal.**
+
+Cadence: full `bin/test-cljs` ONCE per checkpoint (not per edit; concurrent runs
+collide on `out/test/`). Fresh world via `bin/seon nuke --yes` when state must be
+pristine.
 
 ## De-risk order (each item ends in passing tests + a live proof)
 
