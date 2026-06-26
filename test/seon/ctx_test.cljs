@@ -284,6 +284,34 @@
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
+(deftest cur-ns-always-renders-empty-workspace-stub
+  ;; GI-2: the agent's CURRENT ns ALWAYS renders, even before anything is
+  ;; defined in it — keeping the prompt's promise that YOUR OWN namespace
+  ;; renders in full. A fresh home ns (a :seon.ns/name row, no stored source,
+  ;; no fns/schemas) would otherwise be omitted as an empty full block;
+  ;; instead it shows a reconstructed `(ns …)` form + a one-line workspace
+  ;; note. This also exercises the symbol→keyword cur-ns normalization: a
+  ;; fresh agent has no successful evals, so current-ns falls back to the
+  ;; home-ns SYMBOL, which must still match the keyword ns row.
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (-> (db/transact! {:seon.db/tx-data [{:seon.ns/name :my.agent.wtest}]})
+                (.then
+                  (fn [_]
+                    (let [txt (ctx-namespaces/namespaces-section
+                                {:seon.db/db @db/*conn* :seon.agent/id "wtest"})]
+                      (is (str/includes? txt "; namespace my.agent.wtest")
+                          "the empty current ns renders as a block")
+                      (is (not (str/includes? txt "not in db"))
+                          "no misleading 'not in db' for the indexed home ns")
+                      (is (str/includes? txt "(ns my.agent.wtest")
+                          "shows the reconstructed (ns …) form")
+                      (is (str/includes? txt "nothing defined here yet")
+                          "carries the empty-workspace note")))))))
+        (.then (fn [] (done)))
+        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+
 (deftest defs-since-skips-result-vars
   ;; INDEX-SIDE pin (the load-bearing leak guard): the allow-list was the
   ;; only thing hiding the synthetic `result/<id>` vars that

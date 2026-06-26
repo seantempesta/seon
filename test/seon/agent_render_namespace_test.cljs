@@ -42,8 +42,17 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private seed-tx
+  ;; test.parent carries its REAL full file SOURCE (the shape the boot
+  ;; indexer stores for a full-rendered ns): the `(ns …)` line PLUS the
+  ;; actual `(defn greet …)` and `(register! …)` forms. The separate
+  ;; :seon.fn / :seon.schema member entities are seeded too (the analyzer
+  ;; produces both), so GI-1 can be proven: with full source present those
+  ;; member blocks are NOT re-appended (they're already in the source).
   [{:seon.ns/name :test.parent
-    :seon.ns/source "(ns test.parent)"}
+    :seon.ns/source
+    (str "(ns test.parent)\n\n"
+         "(defn greet\n  \"Greets x with a friendly prefix.\"\n  [x]\n  (str \"hi \" x))\n\n"
+         "(seon.schema/register! :test.parent/name :string)")}
    {:seon.fn/sym "test.parent/greet"
     :seon.fn/ns [:seon.ns/name :test.parent]
     :seon.fn/arglists "([x])"
@@ -79,7 +88,11 @@
 ;; :ai form — renders the ns + its members, non-blank, with the right shapes.
 ;; ---------------------------------------------------------------------------
 
-(deftest ai-render-of-ns-lists-fns-and-schemas
+(deftest full-source-ns-shows-source-not-duplicate-members
+  ;; GI-1: when an ns carries its REAL full file SOURCE, that source IS the
+  ;; authoritative body — the per-member `[fn …]` / `[schema …]` blocks are
+  ;; NOT re-appended (they're already in the source). The agent sees each
+  ;; def ONCE, in the source, not twice.
   (async done
     (-> (with-seeded-conn
           (fn [conn]
@@ -90,15 +103,49 @@
                   text (:seon.render/text res)]
               (is (string? text) ":ai form is a string")
               (is (pos? (count text)) "non-blank")
-              (is (str/includes? text "test.parent/greet") "fn sym present")
-              (is (str/includes? text "(test.parent/greet [x])") "fn signature present")
-              (is (str/includes? text "Greets x") "fn doc present")
-              (is (str/includes? text ":test.parent/name") "schema key present")
-              ;; Anchor "this ns BLOCK rendered" on the rendered ns-source
-              ;; HEAD `(ns X` (real content in every full block) — NOT the
-              ;; decorative label glyph (a churny render surface).
+              ;; the fn + schema appear — IN THE SOURCE.
               (is (str/includes? text "(ns test.parent")
-                  "the ns block rendered (ns-source head present)"))))
+                  "the ns block rendered (ns-source head present)")
+              (is (str/includes? text "(defn greet")
+                  "the fn is shown — in the rendered source")
+              (is (str/includes? text "Greets x")
+                  "the fn doc is shown — in the rendered source")
+              (is (str/includes? text ":test.parent/name")
+                  "the schema is shown — in the rendered source")
+              ;; …but NOT a second time as redundant member blocks (GI-1).
+              (is (not (str/includes? text "[fn test.parent/greet]"))
+                  "no duplicate [fn …] member block under full source")
+              (is (not (str/includes? text "[schema :test.parent/name]"))
+                  "no duplicate [schema …] member block under full source"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest sourceless-ns-lists-its-members
+  ;; The complement of GI-1: a runtime-created ns with NO stored source
+  ;; (only schema/fn member entities — e.g. a `my.*` ns built by transact)
+  ;; STILL renders its members as `[fn …]` / `[schema …]` blocks, since the
+  ;; source isn't there to carry them.
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (binding [db/*conn* conn]
+              (-> (db/transact!
+                    {:seon.db/tx-data
+                     [{:seon.ns/name :test.runtime}
+                      {:seon.fn/sym "test.runtime/go" :seon.fn/ns [:seon.ns/name :test.runtime]
+                       :seon.fn/arglists "([a])" :seon.fn/source "(defn go [a] a)"}
+                      {:seon.schema/key :test.runtime/id :seon.schema/ns [:seon.ns/name :test.runtime]
+                       :seon.schema/source "(seon.schema/register! :test.runtime/id :string)"}]})
+                  (.then
+                    (fn [_]
+                      (let [text (:seon.render/text
+                                   (agent/render-namespace
+                                     {:seon.db/db @conn :seon.ns/name :test.runtime
+                                      :seon.render/depth 0 :seon.render/format :ai}))]
+                        (is (str/includes? text "[fn test.runtime/go]")
+                            "a sourceless ns lists its fn members")
+                        (is (str/includes? text "[schema :test.runtime/id]")
+                            "a sourceless ns lists its schema members"))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -145,8 +192,8 @@
                   "required ns block rendered")
               (is (str/includes? text "(ns test.child")
                   "requiring ns block rendered")
-              (is (str/includes? text "test.parent/greet")
-                  "required ns's fn brought into view"))))
+              (is (str/includes? text "(defn greet")
+                  "required ns's fn brought into view (in its source)"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -236,7 +283,7 @@
                            {:seon.db/db db :seon.ns/name :test.child}))]
               (is (str/includes? text "(ns test.parent")
                   "default depth 1 follows requires one level")
-              (is (str/includes? text "test.parent/greet")
-                  "the required ns's fns are in view by default"))))
+              (is (str/includes? text "(defn greet")
+                  "the required ns's fns are in view by default (in its source)"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

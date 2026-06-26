@@ -1347,18 +1347,36 @@
                 (if (seq sigs)
                   (str/join "\n\n" sigs)
                   "; (no public fns indexed yet — query by name)")))
-         ;; full view: ns source + every member.
-         (let [body (cond-> []
-                      (and src (not (str/blank? src)))
-                      (conj (str/trim src))
-                      (seq fns)
-                      (into (map #(fn-block-ai % :full) fns))
-                      (seq schemas)
-                      (into (map schema-block-ai schemas))
-                      (seq tests)
-                      (into (map test-block-ai tests)))]
-           (str "; namespace " (name ns-kw) "\n"
-                (if (seq body) (str/join "\n\n" body) "; (no recorded source/fns/schemas)"))))))))
+         ;; full view: when the ns carries its REAL full file SOURCE, that
+         ;; source IS the authoritative body — every defn/register! is already
+         ;; in it, so re-emitting per-member [fn …]/[schema …] blocks would be
+         ;; pure duplication (GI-1). We render the source ALONE, surfacing only
+         ;; the member facts NOT visible in the source and worth the agent's
+         ;; attention: a fn whose :malli/schema failed to compile
+         ;; (:seon.fn/schema-error) and a test whose last recorded run FAILED —
+         ;; each a compact one-line ⚠ note. When there is NO stored source
+         ;; (runtime-created nses that hold only schemas/fns), the per-member
+         ;; blocks ARE the content, rendered in full as before.
+         (if (and src (not (str/blank? src)))
+           (let [notes (concat
+                         (for [{:seon.fn/keys [sym schema-error]} fns
+                               :when (and schema-error (not (str/blank? schema-error)))]
+                           (str "; ⚠ " sym ": schema-error " (clip schema-error 120)))
+                         (for [{:seon.test/keys [sym last-failure-summary] :as t} tests
+                               :when (false? (:passing? (h-test/test-status t)))]
+                           (str "; ⚠ test " sym " failing"
+                                (when (and last-failure-summary
+                                           (not (str/blank? last-failure-summary)))
+                                  (str ": " (clip last-failure-summary 120))))))]
+             (str "; namespace " (name ns-kw) "\n"
+                  (str/trim src)
+                  (when (seq notes) (str "\n\n" (str/join "\n" notes)))))
+           (let [body (cond-> []
+                        (seq fns)     (into (map #(fn-block-ai % :full) fns))
+                        (seq schemas) (into (map schema-block-ai schemas))
+                        (seq tests)   (into (map test-block-ai tests)))]
+             (str "; namespace " (name ns-kw) "\n"
+                  (if (seq body) (str/join "\n\n" body) "; (no recorded source/fns/schemas)")))))))))
 
 (defn- render-one-ns-html
   "Render a single namespace block to hiccup. Reuses the per-kind

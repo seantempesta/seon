@@ -192,31 +192,67 @@
        "; so you are not buried in code you don't need. Full namespaces are\n"
        "; ordered by recency (most-recently-modified last)."))
 
+(defn- cur-ns-workspace-stub
+  "The never-omit block for the agent's CURRENT ns when it has no members
+   defined yet (GI-2). A fresh home ns (`my.agent.<id>`) carries a
+   `:seon.ns/name` + `:seon.ns/requires` row but no stored `:seon.ns/source`
+   and no fns/schemas, so [[seon.ctx/render-namespace]] yields an empty body
+   that would be omitted — breaking the system prompt's promise that YOUR
+   OWN namespace renders in full. This stub keeps that promise: it shows the
+   reconstructed `(ns …)` require form (from the stored `:seon.ns/requires`,
+   cardinality-many → pulled as a vector) so the agent sees what's wired into
+   its workspace, plus a one-line note that the workspace is empty. `nm` is a
+   ns-name keyword that already has a `:seon.ns/name` row (the caller only
+   reaches this for an included, current-ns row)."
+  [db nm]
+  (let [reqs    (-> (db/pull {:seon.db/db db
+                              :seon.db/ref [:seon.ns/name nm]
+                              :seon.db/pull-pattern '[:seon.ns/requires]})
+                    :seon.ns/requires
+                    sort)
+        ns-form (if (seq reqs)
+                  (str "(ns " (name nm) "\n  (:require "
+                       (str/join " " (map name reqs)) "))")
+                  (str "(ns " (name nm) ")"))]
+    (str "; namespace " (name nm) "\n"
+         ns-form "\n"
+         "; (your workspace — nothing defined here yet; define schemas + fns and they appear here)")))
+
 (defn- render-one
   "Render ONE included ns through the SINGLE renderer
    ([[seon.ctx/render-namespace]]) at the chosen detail LEVEL, flat (depth
    0 — no require-recursion; the section renders each ns once). `:full`
    yields the whole-ns view (real file source + members); `:signature`
-   yields the `(signatures)` API-surface block. Returns the rendered
-   text, or nil when render-namespace produces nothing (empty-store edge:
-   a full ns with blank source and no members)."
-  [db nm detail]
-  (let [txt (-> (ctx/render-namespace
-                  {:seon.ns/name      nm
-                   :seon.render/depth 0
-                   :seon.render/detail detail
-                   :seon.db/db        db})
-                :seon.render/text
-                str/trim)]
-    ;; render-namespace emits a `; namespace x` label even for an
-    ;; empty body (`;; (no recorded source/fns/schemas)`); a FULL ns with
-    ;; nothing real to show is omitted from the section (the boot indexer
-    ;; guarantees real text for every full row, so this is only the
-    ;; empty-store edge).
-    (when-not (or (str/blank? txt)
-                  (and (= detail :full)
-                       (str/includes? txt "(no recorded source/fns/schemas)")))
-      txt)))
+   yields the `(signatures)` API-surface block.
+
+   The agent's CURRENT ns (`cur-ns`) ALWAYS renders, even when empty: an
+   empty current ns becomes a [[cur-ns-workspace-stub]] (GI-2) so the
+   prompt's 'YOUR OWN namespace renders in full' promise holds. Every OTHER
+   full ns with nothing real to show is omitted (nil) — the empty-store
+   edge; the boot indexer guarantees real text for every other full row."
+  [db nm detail cur-ns]
+  (let [txt    (-> (ctx/render-namespace
+                     {:seon.ns/name      nm
+                      :seon.render/depth 0
+                      :seon.render/detail detail
+                      :seon.db/db        db})
+                   :seon.render/text
+                   str/trim)
+        ;; render-namespace emits a `; namespace x` label even for an empty
+        ;; body: `; (no recorded source/fns/schemas)` (entity present, no
+        ;; source/members) or `; requires: x (not in db)` (the home ns —
+        ;; a :seon.ns/name row whose sparse pull returns nil). Both mean
+        ;; "nothing real to show."
+        empty? (or (str/blank? txt)
+                   (and (= detail :full)
+                        (or (str/includes? txt "(no recorded source/fns/schemas)")
+                            (str/includes? txt "(not in db)"))))]
+    (cond
+      (= nm cur-ns) (if (and (= detail :full) empty?)
+                      (cur-ns-workspace-stub db nm)
+                      txt)
+      empty?        nil
+      :else         txt)))
 
 (defn namespaces-section
   "CURATED namespaces body. Routes EVERY included ns through the SINGLE
@@ -248,7 +284,13 @@
         ;; FULL even if it is a framework ns. nil id (inspector path) →
         ;; nil → no ns is forced current.
         cur-ns (when id
-                 (try (ctx/current-ns {:seon.agent/id id :seon.db/db db})
+                 (try (when-let [c (ctx/current-ns {:seon.agent/id id :seon.db/db db})]
+                        ;; current-ns yields a KEYWORD from a recorded eval but
+                        ;; a SYMBOL from the (home-ns id) fallback (a fresh agent
+                        ;; with no successful evals yet) — normalize to a keyword
+                        ;; so the `(= nm cur-ns)` match against the keyword ns
+                        ;; rows holds in BOTH cases (GI-2 fires even on turn 0).
+                        (keyword (name c)))
                       (catch :default _ nil)))
         ;; EVERY included ns row, recency-ordered. One :seon.ns/name datom
         ;; per ns carries its tx.
@@ -266,7 +308,7 @@
         ;; the rendered section — it stays indexed + grep-able via
         ;; seon.agent.search, just not dumped here.
         full-rows (filter (fn [[nm _tx]] (render-full? nm cur-ns)) rows)
-        blocks    (keep (fn [[nm _tx]] (render-one db nm :full)) full-rows)]
+        blocks    (keep (fn [[nm _tx]] (render-one db nm :full cur-ns)) full-rows)]
     (if (seq blocks)
       (str namespaces-header "\n\n" (str/join "\n\n" blocks))
       "")))
