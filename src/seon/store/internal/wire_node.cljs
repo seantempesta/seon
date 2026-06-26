@@ -202,11 +202,18 @@
 ;; ---------- raw tx feed (subscribe-tx / next-tx-event / unsubscribe-tx) ----------
 
 (defn subscribe-tx
-  "Open a raw tx-feed subscription. Returns a promise of the reply map (carries
-   :seon.store.wire/ok + :seon.store.wire/handle)."
+  "Open a raw tx-feed subscription. `opts` may carry `:since-t` (a basis-t):
+   when present the wire-server replays every committed tx with basis-t >
+   since-t — in commit order, ahead of live events — so a RECONNECTING
+   subscriber recovers the gap instead of dropping a wake (DE-2). A fresh
+   subscriber omits it. Returns a promise of the reply map (carries
+   :seon.store.wire/ok + :seon.store.wire/handle, plus :seon.store.wire/replayed
+   when a since-t replay ran)."
   ([] (subscribe-tx default-req-sock {}))
   ([sock opts]
-   (-> (rpc sock (routed {:seon.store.wire/op "subscribe-tx"} opts))
+   (-> (rpc sock (routed (cond-> {:seon.store.wire/op "subscribe-tx"}
+                           (:since-t opts) (assoc :seon.store.wire/since-t (:since-t opts)))
+                         opts))
        (then (fn [resp] resp)))))
 
 (defn next-tx-event

@@ -312,6 +312,101 @@
            :seon.store.wire/tx-meta tx-meta}
     write-id (assoc :seon.store.wire/write-id write-id)))
 
+;; ---------- since-t replay (the DE-2 lossless-wake fix) ----------
+;;
+;; The tx FEED is a polled per-handle bounded queue: a dropped/missed event is
+;; harmless for RENDERING (the subscriber re-reads latest) but FATAL for the
+;; WAKE edge (the event IS the trigger to act — drop it and an idle agent sits
+;; with unread mail). On UDS reconnect the old subscription handle is gone, so
+;; the gap is lost. `replay-tx-events` makes the wake edge lossless: a
+;; reconnecting subscriber passes its last-applied basis-t as `since-t`, and the
+;; writer replays every tx committed after it — reconstructed from the
+;; bitemporal tx-log — shaped EXACTLY like a live `tx` event. Per-subscriber by
+;; construction: it is a pure function of (conn, db-name, since-t), so any
+;; number of independent feed processes (loop, live-tile, debug, chat) each
+;; recover their OWN gap. No pod-singleton assumption.
+
+(def ^:private max-replay-txs
+  "Upper bound on how many missed txs one `subscribe-tx` replay materializes. A
+   reconnect gap is normally a few txs; this caps a pathological gap (a
+   subscriber gone a very long time) so one replay can't build an unbounded
+   event list. On overflow only the most RECENT `max-replay-txs` are replayed
+   and the dropped older range is logged LOUDLY — a dropped wake IS a
+   correctness hazard, so it is surfaced, never silent."
+  50000)
+
+(defn replay-tx-events
+  "Replay committed tx events for `conn` whose basis-t is strictly greater than
+   `since-t`, up to the conn's current basis-t, in ascending commit order. Each
+   event is shaped EXACTLY like the live `::raw-broadcast` `tx` event
+   (`ok-event-from-report`/`datom->wire`) so a reconnecting subscriber applies
+   replayed and live events through ONE code path: `:seon.store.wire/event
+   \"tx\"`, native 5-vector `tx-data`, `tx-meta`/`write-id` recovered from the
+   committing tx entity.
+
+   Source: the bitemporal tx-log via `(d/since (d/history db) since-t)`. Datoms
+   (assertions AND retractions) are grouped by their committing tx — retraction
+   datoms carry a NEGATIVE tx, so we group by its absolute value but keep the
+   signed tx verbatim in the wire vector (byte-identical to a live retraction).
+   The committing tx's own datoms (`:db/txInstant` + any seon tx-meta attrs such
+   as `:seon.store.wire/write-id` and provenance) carry the tx-meta. NB: a
+   card-one upsert's IMPLICIT old-value retraction shows up here (history is
+   complete) even when the live `d/transact` report omitted it — replay is a
+   superset, never a subset, of what landed; the extra retraction datom is
+   `:added false` so it never falsely fires a wake.
+
+   `db-name` tags each event for the subscriber's broadcast routing. Returns a
+   vector of events (empty when nothing to replay). Bounded by `max-replay-txs`
+   (keep newest + loud-log the dropped older range on overflow)."
+  [conn db-name since-t]
+  (let [db        (d/db conn)
+        current-t (long (or (basis-t-of db) 0))
+        since-t   (long since-t)]
+    (if (>= since-t current-t)
+      []
+      (let [datoms (-> db d/history (d/since since-t) (d/datoms :eavt))
+            txid   (fn [^datahike.datom.Datom d] (Math/abs (long (.-tx d))))
+            by-tx  (->> datoms
+                        (filter (fn [d] (let [t (txid d)]
+                                          (and (> t since-t) (<= t current-t)))))
+                        (group-by txid))
+            tx-ids (sort (keys by-tx))
+            n      (count tx-ids)
+            ;; cap: keep the most recent max-replay-txs; LOUD-log the dropped
+            ;; older range (a dropped wake is a correctness hazard — surface it).
+            kept   (if (> n max-replay-txs)
+                     (let [drop-n  (- n max-replay-txs)
+                           dropped (take drop-n tx-ids)]
+                       (binding [*out* *err*]
+                         (println (str "[wire replay] db-name=" db-name " since-t="
+                                       since-t " gap of " n " txs exceeds max-replay-txs="
+                                       max-replay-txs " — DROPPING the oldest " drop-n
+                                       " (basis-t " (first dropped) ".." (last dropped)
+                                       "); subscriber will only see basis-t > "
+                                       (last dropped) ". A dropped wake is a correctness hazard.")))
+                       (drop drop-n tx-ids))
+                     tx-ids)]
+        (:events
+         (reduce
+          (fn [{:keys [events prev-bt]} tx-id]
+            (let [ds        (get by-tx tx-id)
+                  tx-meta   (into {} (map (fn [^datahike.datom.Datom d] [(.-a d) (.-v d)]))
+                                  (filter (fn [^datahike.datom.Datom d] (= (.-e d) tx-id)) ds))
+                  added     (count (filter :added ds))
+                  retracted (count (remove :added ds))
+                  ev (ok-event-from-report
+                      db-name
+                      {:wire-data (tx-data->wire ds)
+                       :added     added
+                       :retracted retracted
+                       :bt        tx-id
+                       :bt-before prev-bt
+                       :tx-meta   (not-empty tx-meta)
+                       :write-id  (:seon.store.wire/write-id tx-meta)})]
+              {:events (conj events ev) :prev-bt tx-id}))
+          {:events [] :prev-bt since-t}
+          kept))))))
+
 ;; ---------- ::raw-broadcast listener (the P1 hook) ----------
 ;;
 ;; Broadcast is no longer imperative at the transact call sites. Each conn

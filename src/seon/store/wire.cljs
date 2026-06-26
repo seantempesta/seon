@@ -21,6 +21,13 @@
      NATIVE `d/listen` listeners with a synthesized raw tx-report. So
      every `seon.db/listen!` handler (user-message triggers, inspector
      SSE) fires identically for own and foreign writes.
+   - LOSSLESS WAKE (DE-2): the feed is a polled queue, so a UDS drop
+     would lose a wake (the event IS the trigger to act). The adapter
+     tracks the last-applied basis-t watermark and, on RE-subscribe
+     (reconnect), passes it as `since-t` so the wire-server replays
+     every missed tx — in commit order, ahead of live events. Feed
+     application is idempotent on the watermark (a tx ≤ it is a no-op),
+     so the replay↔live overlap fires each listener at most once.
 
    Proven off-pod by the Stage A/B regression pair
    (`clj -M:replica-probe-jvm` 10/10, `clj -M:replica-peer-jvm` 14/14);
@@ -306,17 +313,24 @@
 ;; ---------------------------------------------------------------------------
 
 (defonce ^:private !adapter
-  ;; {:started? bool :handle int :last-db <db> :own-skips int}
+  ;; {:started? bool :handle int :last-db <db> :own-skips int
+  ;;  :last-applied-t int}
+  ;; :last-applied-t is the basis-t watermark — the highest tx basis-t already
+  ;; applied (own or foreign). Drives BOTH the reconnect since-t replay (we
+  ;; re-subscribe from it) and feed idempotency (a tx ≤ it is a no-op).
   (atom {:started? false}))
 
 (defn adapter-status
-  "Live adapter state for diagnostics: `{::started? ::handle ::own-skips}`."
+  "Live adapter state for diagnostics:
+   `{::started? ::handle ::own-skips ::last-applied-t}`. `::last-applied-t` is
+   the basis-t watermark the reconnect path replays from (DE-2)."
   {:malli/schema [:=> [:cat] [:map [::started? :boolean]]]}
   []
-  (let [{:keys [started? handle own-skips]} @!adapter]
+  (let [{:keys [started? handle own-skips last-applied-t]} @!adapter]
     (cond-> {::started? (boolean started?)}
-      (some? handle)    (assoc ::handle handle)
-      (some? own-skips) (assoc ::own-skips own-skips))))
+      (some? handle)         (assoc ::handle handle)
+      (some? own-skips)      (assoc ::own-skips own-skips)
+      (some? last-applied-t) (assoc ::last-applied-t last-applied-t))))
 
 (defn- fire-native-listeners! [conn report]
   ;; Dispatch each listener on its OWN macrotask (`setTimeout 0`) so the
@@ -340,16 +354,32 @@
       0)))
 
 (defn- handle-feed-event! [conn ev]
-  (let [wid  (:seon.store.wire/write-id ev)
-        own? (boolean (and wid (contains? @!own-write-ids wid)))
-        bt   (:seon.store.wire/basis-t ev)]
-    (if own?
+  (let [wid          (:seon.store.wire/write-id ev)
+        bt           (:seon.store.wire/basis-t ev)
+        last-applied (:last-applied-t @!adapter)]
+    (cond
+      ;; IDEMPOTENT: a tx at or below the last-applied basis-t was already
+      ;; applied — a no-op. This makes the since-t reconnect replay safe: the
+      ;; replay↔live boundary can deliver a tx by BOTH paths (same basis-t), and
+      ;; any duplicate/overlap is dropped here without re-firing listeners.
+      ;; Events arrive in commit order (replay ascending, then live ascending),
+      ;; so a monotonic basis-t watermark is sufficient — no per-tx dedup set.
+      (and (some? bt) (some? last-applied) (<= bt last-applied))
+      nil
+
       ;; Own tx already fired the native listeners via writer/transact!;
-      ;; just advance the consecutive-values chain + drop the id.
+      ;; just advance the watermark + chain, drop the id.
+      (boolean (and wid (contains? @!own-write-ids wid)))
       (do (swap! !own-write-ids disj wid)
           (swap! !adapter #(-> %
                                (update :own-skips (fnil inc 0))
-                               (assoc :last-db (ryow-deref! conn bt)))))
+                               (assoc :last-db (ryow-deref! conn bt)
+                                      :last-applied-t bt))))
+
+      ;; FOREIGN tx (another agent / a human message — incl. every tx that
+      ;; landed during a feed gap, since the pod can't write while the UDS is
+      ;; down): synthesize the raw report and fire the conn's native listeners.
+      :else
       (let [db-before (or (:last-db @!adapter) @conn)
             db        (ryow-deref! conn bt)
             tx-meta   (:seon.store.wire/tx-meta ev)
@@ -358,11 +388,15 @@
                                :tx-data   (wire-datoms->datoms
                                            (:seon.store.wire/tx-data ev))}
                         (some? tx-meta) (assoc :tx-meta tx-meta))]
-        (swap! !adapter assoc :last-db db)
+        (swap! !adapter assoc :last-db db :last-applied-t bt)
         (fire-native-listeners! conn report)))))
 
-(defn ^:async ^:private subscribe! [sock-path]
-  (let [sub (await (wire/subscribe-tx sock-path {}))]
+(defn ^:async ^:private subscribe! [sock-path since-t]
+  ;; `since-t` (the last-applied basis-t, or nil for a fresh subscribe): when
+  ;; non-nil the wire-server replays every tx committed after it — in commit
+  ;; order, ahead of live events — so a reconnect recovers its gap (DE-2). A
+  ;; fresh subscribe passes nil (no replay; the agent reads latest directly).
+  (let [sub (await (wire/subscribe-tx sock-path (if (some? since-t) {:since-t since-t} {})))]
     (when-not (:seon.store.wire/ok sub)
       (throw (ex-info "seon.store.wire: subscribe-tx failed" {::resp sub})))
     (:seon.store.wire/handle sub)))
@@ -381,8 +415,12 @@
     (do (log/info-console! "seon.store.wire"
                            "listen adapter already started — no-op")
         nil)
-    (let [handle (await (subscribe! sock-path))]
-      (swap! !adapter assoc :started? true :handle handle :last-db @conn)
+    (let [handle (await (subscribe! sock-path nil))]
+      ;; Seed the basis-t watermark at the current store basis-t: a FRESH
+      ;; subscribe never replays history (the agent reads latest directly); only
+      ;; a RE-subscribe (reconnect, below) replays the gap from this watermark.
+      (swap! !adapter assoc :started? true :handle handle
+             :last-db @conn :last-applied-t (:max-tx @conn))
       ((fn ^:async pump []
          (try
            (let [ev (await (wire/next-tx-event sock-path (:handle @!adapter)))]
@@ -397,10 +435,14 @@
                    ") — re-subscribing in 2s"))
              (await (sleep 2000))
              (try
-               (let [h (await (subscribe! sock-path))]
+               ;; RE-subscribe with the last-applied basis-t so the wire-server
+               ;; replays every tx missed during the gap (DE-2 lossless wake) —
+               ;; ahead of live events, deduped by the watermark above.
+               (let [since-t (:last-applied-t @!adapter)
+                     h       (await (subscribe! sock-path since-t))]
                  (swap! !adapter assoc :handle h)
                  (log/info-console! "seon.store.wire"
-                                    (str "tx-feed re-subscribed, handle " h)))
+                                    (str "tx-feed re-subscribed (since-t " since-t "), handle " h)))
                (catch :default e2
                  (log/error-console!
                   "seon.store.wire"
