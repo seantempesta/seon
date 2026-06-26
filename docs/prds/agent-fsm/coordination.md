@@ -52,13 +52,17 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
 
 ### Now — Runtime (R)
 
-- Snap-to-Tx collapse, final piece: **Unit 2** (per-turn db-value threading +
-  in-tx CAS work-fence) in flight. Then a combined live-proof + gym
-  metric-validation.
+- **Snap-to-Tx collapse COMPLETE** (DE-1/2/3) — all committed + core live-proven
+  (the CAS work-fence rejects a superseded run's write end-to-end on the real pod;
+  clean boot). A smell-sweep is in flight (cold-boot test gap + missing
+  `:malli/schema` + the `close-run!` TOCTOU). Next on my side: re-launch the gym +
+  the drop-UDS gap-replay live-proof.
 - **Landed + stable to build on:** `seon.derive` (one acyclic read layer), the
   `since-t` lossless tx feed, the run model (run / turn / transition table in
-  `seon.agent.loop`), the single render path (`ctx/render-context` — prompt ==
-  inspector view, byte-identical).
+  `seon.agent.loop`) with per-turn db-value threading + the in-tx CAS work-fence,
+  the single render path (`ctx/render-context` — prompt == inspector view,
+  byte-identical). The `seon.derive` read API + the feed are stable for you to
+  build against; I'll log any change under _Interface changes_.
 
 ### Now — UI/UX (U)
 
@@ -125,6 +129,15 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
     you're using for the POC is probably right, and the cross-process case may
     want a dedicated streaming channel rather than the tx-log. Let's design it
     together — not deferred-and-forgotten.
+- **(design, later) User-facing eval endpoint — the input tile as a REPL.** The
+  input tile dispatches a Clojure FORM to a sandboxed eval that runs in the current
+  agent's context and logs a `:human`-origin `:seon.eval` event (so the agent sees
+  it in its transcript); NL prose goes to the existing message/wake path. Same
+  sandbox family as `/call`. U owns the input UI + the form-vs-prose parse + which
+  endpoint to POST; R owns the eval exec + the `:human` eval write. Question for R:
+  reuse the agent `eval-batch!` / MCP eval, or a new `/eval` route? Wake policy:
+  form = quiet (logged, no wake), prose = wake, optional eval-and-ping. Full design:
+  [[interactive-feeds]] § "The input tile is a REPL".
 
 ### Interface changes (either side; newest first)
 
