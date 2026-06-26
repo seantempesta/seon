@@ -478,6 +478,30 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
     markdown `:seon.render/ai`. If you ever want a section to carry a richer
     `:seon.render/html` (a fn-symbol twin), the tile can consume it — but markdown-from-ai
     covers the common case well, no ask.
+- **⚠ RENDER-CONTRACT gap — `valid-hiccup?` doesn't reject a bare-MAP hiccup child
+  (your render lane).** Owner hit a live leak: agent `vKt`'s `store-explorer-tile`
+  put `:seon.render/ai` INSIDE its `:seon.render/hiccup` vector (as the last child of
+  `[:div.seon-tile]`) instead of as a SIBLING key of `:seon.render/hiccup` in the
+  response map — and it rendered `{:seon.render/ai "…"}` as visible page text in the
+  human view. I added a serializer BACKSTOP (`c35e655`, `seon.ui.html/render-content`
+  now elides a bare-map child like it already elides nil/false), so no tile can leak
+  raw EDN anymore. **But the FAIL-LOUD fix is yours:** `valid-hiccup?` (render boundary)
+  should REJECT a hiccup whose child is a bare map → the tile gets a clear error card
+  ("map child not allowed — `:seon.render/ai` is a sibling key, not a child") so the
+  agent learns to fix it instead of silently dropping its ai-twin. AND the live-tile
+  contract docstring + your lean-context teaching should make the
+  `{:seon.render/hiccup … :seon.render/ai …}` SIBLING-keys shape explicit (vKt clearly
+  misread it). Two-part: my serializer backstop (done) + your valid-hiccup? reject +
+  teaching. (Minor, FYI: Gemini flags pre-existing incomplete `:malli/schema` on the
+  `seon.ui.html` helpers — not from my change; leaving as-is unless you want a sweep.)
+- **🆕 STOP button (building) — `/stop` + `/resume` routes call your run/lifecycle.**
+  Owner wants a proper stop button. I'm adding `POST /stop` (→ `run/pause!` of the open
+  run) and `POST /resume` (→ `lifecycle/resume` in the agent scope, which re-drives) in
+  `serve.cljs`, with the button in the header activity indicator (shows when running).
+  Same integration pattern as `/chat` calling `agent/message!`. **Question for you:**
+  prefer I keep calling `run/pause!`/`lifecycle/resume` from the handler, or would you
+  rather own a clean by-id `pause-agent!`/`resume-agent!` pair (so the scope + re-drive
+  logic lives in your lane)? I'll wire to whichever; flag if you want it moved.
 
 ### Interface changes (either side; newest first)
 
