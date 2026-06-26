@@ -70,13 +70,19 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
 - **⚡ ACTIVE (owner pivot) — LEAN CONTEXT + FRIENDLY NAMESPACE experiment.** Owner
   wants the agent prompt stripped way down to improve gym performance + push agents
   to BUILD their own environment. My lane (ctx/eval/agent):
-  - `:namespaces` lean show-list = `{db, todo}` full + `my.*` (mechanism B, data-driven
-    default) — drops search/fs/message/lifecycle full render (still indexed + grep-able).
-  - NEW `:your-runtime` steering section (frames WHY source is shown: "these are your
-    set-up tools, shown as examples; everything else is indexed + one search away, not
-    dumped" — owner: agents were overwhelmed + unclear why).
-  - **Friendly agent ns:** seed ns pre-aliases `[seon.db :as db]` + `[seon.agent.todo
-    :as todo]` so agents write `(db/query …)`. system-text framing aligned to the aliases.
+  - `:namespaces` lean show-list = `full-source-whitelist` leaned to `{:seon.db
+    :seon.agent.todo}` (one-line tune — owner wants minimal tweak surface; cur-ns + `my.*`
+    stay full). Drops search/fs/message/lifecycle full render (still indexed + grep-able).
+    Full per-agent data-driven show-list (mechanism B) DEFERRED — not needed for the experiment.
+  - **Steering goes in the SYSTEM MESSAGE** (`ctx/system-text`), NOT a new section (owner:
+    it's core, belongs in the system prompt so we update one place). Frames WHY source is
+    shown (your own ns full = most important; db/todo as examples; rest indexed + searchable,
+    not dumped) + a "BUILD YOUR ENVIRONMENT" block (create namespaces for your data, colocate
+    fns, build tools).
+  - **Friendly agent ns:** `db`/`schema`/`message`/`agent` are ALREADY aliased in the seed ns
+    (`eval.cljs:1107`); the bug is system-text TAUGHT the long `(seon.db/…)` form so agents
+    copied it. Fix = ALIGN system-text examples to the short aliases + ADD `[seon.agent.todo
+    :as todo]` to the seed.
   - **SOUL.md / AGENTS.md mechanism UNCHANGED** (owner: keep the show-if-present plugin
     points for third parties). The experiment makes soul absent via the `SEON_SOUL_FILE`
     lever, NOT by deleting the section.
@@ -215,7 +221,26 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
 
 ### Needs — Runtime asks of UI/UX
 
-- _(none yet)_
+- **Align the UI with the LEAN-CONTEXT + FRIENDLY-ALIAS change (R landing now).** The
+  agent prompt is going lean — system message rewritten, `:namespaces` cut to `{db,
+  todo}` full (cur-ns + `my.*` still full), soul absent via env — and the home ns is
+  friendly-aliased. Three asks so your lane stays in sync (nothing breaks today):
+  1. **Use the agent's REAL aliases in any agent-facing example code the UI shows**
+     (input-tile REPL placeholder/hints, tile snippets, "try this" affordances). The
+     home-ns aliases are `db` (seon.db), `todo` (seon.agent.todo — newly added),
+     `schema` (seon.schema), `message` (seon.agent.message), plus refers
+     `wait`/`complete`/`pause`/`resume`/`terminate`. Show `(db/query …)`, never
+     `(seon.db/query …)` — agents copy what they see (that's the bug we're fixing).
+  2. **Expect the agent's rendered context to be MUCH smaller** — any tile that renders
+     the agent's context/sections will show far less source (the `:namespaces` body
+     drops ~37k tokens). Intended, not a regression.
+  3. **One source of truth for "what's set up for the agent":** the canonical seed-ns
+     aliases live in `seon.eval` (the home-ns `setup-src`, ~L1137). If you surface
+     "your tools / your environment" in the UI, derive from that set rather than
+     hardcoding a parallel list — ping me under _UI/UX asks of Runtime_ and I'll
+     extract a shared `def` if that's cleaner for you. (Owner: "nice things set up
+     especially with the UI" is your half; the runtime aliases are mine — this keeps
+     the two consistent.)
 
 ### Needs — UI/UX asks of Runtime
 
