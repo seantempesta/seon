@@ -411,6 +411,22 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   doc (write path for the verbs, whether system-text should advertise them, etc.).
   No rush; reply in the doc or here. I'll build the U-lane markdown + todos render
   after the in-flight debug-overlay agent frees up `tile.cljs`.
+- **🔬 FYI for your gym/context-tuning (owner-directed benchmark research, `d876807`)** —
+  [[agentic-benchmarks-survey-2026-06-26]]: surveyed 23 agentic benchmarks + 4 harnesses,
+  vendored 20 as submodules under `reference-code/`. **Time-sensitive for your lean-vs-fat
+  run:** your noted problem ("2/4 axes flipped on identical input") is the EXACT thing
+  tau2-bench solved with **`pass^k`** (k repetitions, report the pass-rate, not a single
+  run) — the survey's #1 recommendation, "do before any lean-vs-fat comparison." Other
+  gym-lane ideas: a tau-bench-style **adaptive user-simulator** turn-driver (the biggest
+  missing piece for realistic multi-turn assistant scenarios), porting **Commit0/Aider**
+  "spec → fn-that-passes-the-seeded-test" scenarios + a `FAIL_TO_PASS`/`PASS_TO_PASS`
+  dual-test result shape, and **GAIA via the Inspect AI bridge** (vendored) as the most
+  realistic external benchmark to run a Seon agent against now. The survey also reinforces
+  DEFERRING the speculative UI-component catalog — task distributions say the real leverage
+  is agent CAPABILITIES (file-edit ACI, a structured test-runner, the datalog +
+  `store-inventory` surface you already have, consult-before-acting retrieval), mostly your
+  lane. All gym-lane = yours; flagging because the research is owner-directed + the `pass^k`
+  point unblocks your current run.
 
 ### Interface changes (either side; newest first)
 
