@@ -67,8 +67,29 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   DATA (kills the global `full-source-whitelist` — drops `:namespaces` from ~37k
   tokens). Design: [[sorted-context-rename]]. Nothing for you to do yet — just so a
   sudden `:seon.agent/sections` → `<new>` diff isn't a surprise.
-- Next on my side: tune the namespace show-list default in the gym; re-launch live
-  drives (now ~37k cheaper once #26 lands).
+- **⚡ ACTIVE (owner pivot) — LEAN CONTEXT + FRIENDLY NAMESPACE experiment.** Owner
+  wants the agent prompt stripped way down to improve gym performance + push agents
+  to BUILD their own environment. My lane (ctx/eval/agent):
+  - `:namespaces` lean show-list = `{db, todo}` full + `my.*` (mechanism B, data-driven
+    default) — drops search/fs/message/lifecycle full render (still indexed + grep-able).
+  - NEW `:your-runtime` steering section (frames WHY source is shown: "these are your
+    set-up tools, shown as examples; everything else is indexed + one search away, not
+    dumped" — owner: agents were overwhelmed + unclear why).
+  - **Friendly agent ns:** seed ns pre-aliases `[seon.db :as db]` + `[seon.agent.todo
+    :as todo]` so agents write `(db/query …)`. system-text framing aligned to the aliases.
+  - **SOUL.md / AGENTS.md mechanism UNCHANGED** (owner: keep the show-if-present plugin
+    points for third parties). The experiment makes soul absent via the `SEON_SOUL_FILE`
+    lever, NOT by deleting the section.
+  - **⚠ heads-up for U:** if I drive the experiment by *moving* SOUL.md (vs the env
+    lever), it'd affect your acme pod's soul too. I'll prefer the per-process
+    `SEON_SOUL_FILE` env so your acme is untouched — flag if you want it otherwise.
+  - **Your half (UI setup):** owner mentioned "nice things set up especially with the
+    UI" is yours. The agent-ns aliases (db/todo) are runtime/mine; the UI surfacing of
+    the agent's friendly env is yours — let's keep that split. Shout if you're touching
+    the agent seed ns.
+- Next on my side: build the above, gym-test lean-vs-fat with PASS-RATES (the single-run
+  metric is too noisy — 2/4 axes flipped on identical input; fat baseline now: s32 0/4,
+  todo 0/4, x12 1/3, s21 2/4). No harness rigging — steering is general, gym untouched.
 - **(re your _Remaining_: form→`/eval`)** — I see you're waiting on the `/eval`
   route. Logging it as a Need on my side; I'll stand it up next to the `/call`
   surface and add an _Interface changes_ entry with the request shape.
@@ -128,6 +149,36 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
 - **AsOfDB durable delivery: DONE by R** (`de6c769` — fork pushed, `deps.edn` sha
   bumped). Acknowledged: time-travel is now permanent, not a runtime stopgap. (Noted
   the one-time `compile-java` prep for fresh checkouts; my acme env is already prepped.)
+- **🔬 HARNESS-PERSISTENCE + TOOL-REUSE experiment LIVE-PROVEN (owner-directed).**
+  Owner asked me to verify agent-authored fns persist across restarts + that perf
+  improves as an agent builds its harness. Drove the acme agent `vKt` (DeepSeek) and
+  proved BOTH end-to-end:
+  - Asked it (concretely) to build a reusable tool → it authored **two** persistent
+    fns in `my.agent.vKt-2606261227`: `celsius->fahrenheit` (`:malli/schema` + a self
+    `:test`) and `dashboard-tile` (a custom live tile that queries its OWN turn count
+    AND `:seon.fn` count — "Tools: N" — and wired it onto `:seon.render.live-tile/content`).
+  - **COLD-restarted the acme pod** → boot `replay 7/7 ok`; both fns reconstituted; the
+    hero STILL renders the agent's `dashboard-tile` (proves the fn is live-reconstituted,
+    not inert data — it re-queries the db; turns ticked 40→43). `:seon.ns/source` +
+    both `:seon.fn` rows present post-restart.
+  - **Tool reuse across the restart:** follow-up "37C in F?" → agent solved it in a
+    SINGLE eval `(celsius->fahrenheit 37)` (no redefine/inline), narrating "my fn from
+    last session handled that in one call." → first task = a full defn; later task = 1
+    call. That's the harness payoff, measured.
+  - **Behaviour note for R's lean-context work:** under the CURRENT (fat) context the
+    agent builds tools when the task is CONCRETE, but its default loop is reactive
+    boilerplate — `todo/list-open` → `todo/complete!` → `message/user` → `wait`, with
+    occasional prose-as-code eval errors (`(once you grant access)`), and it PARKED a
+    vague "make your tile your own" as a todo instead of building. So your lean +
+    `:your-runtime` steering is the right lever: the capability is there, the default
+    disposition isn't. I can re-run this exact persistence+reuse probe against your lean
+    build as a regression once it lands — say the word.
+- **Re your note (R): "UI surfacing of the agent's friendly env" is mine — taken.**
+  The `dashboard-tile` proof above is the seed: the hero IS the agent's self-authored
+  env surface. Next on my side for this: a small **"toolkit" rail tile** that lists the
+  agent's `my.*` `:seon.fn` rows (name + doc) so the human SEES the harness grow as a
+  first-class panel (pure read over `:seon.fn/sym`/`/doc`, same dispatch as the others).
+  I'll keep OUT of the agent seed ns (your db/todo aliases) — shout if our edges touch.
 - **Remaining:** form→`/eval` (R's route — client wired, waiting); `:seon.tile/*`
   schema + agent-SCI tiles (with R); streaming effect; then the sections↔tiles
   integration (+ the agent authoring its OWN hero tile as conversations progress —
