@@ -61,7 +61,9 @@
    different symbol onto the agent's `:seon.render/ai` slot."
   (:require
     [clojure.string :as str]
+    [seon.agent.fsm :as fsm]
     [seon.agent.message :as msg]
+    [seon.agent.run :as run]
     [seon.ctx :as ctx]
     [seon.ctx.namespaces :as ctx-namespaces]
     [seon.ctx.transcript :as ctx-transcript]
@@ -104,6 +106,23 @@
 ;; Note surfaced to monitoring agents while parked (optional; set by
 ;; `(agent/wait …)`).
 (schema/register! :seon.agent/wait-note      :string)
+
+;; ── Run-model additive attrs (the FSM build) ──────────────────────────────
+;; These are the DERIVED-STATE primitives the FSM cutover will read; the live
+;; wake-token loop above (`:seon.agent/state` + `:seon.agent/wake`) is
+;; untouched. `:seon.agent/run` points at the CURRENT run (the fencing pointer
+;; + the spine of derived state — see [[seon.agent.run]] / [[seon.agent.fsm]]);
+;; `terminated-at` presence ⇒ derived state :terminated; the default-* attrs
+;; seed a new run's two bounds (`:seon.agent/default-turn-limit` is the
+;; run-model successor to `:seon.agent/max-turns-per-loop`, which the live loop
+;; still reads until cutover); `schedules` is the self-managed cron vector
+;; ([[seon.agent.schedule]]). All reference the canonical shapes; never inline.
+(schema/register! :seon.agent/run                :seon.db/ref)
+(schema/register! :seon.agent/terminated-at      :inst)
+(schema/register! :seon.agent/default-turn-limit :int)
+(schema/register! :seon.agent/default-deadline-ms :int)
+(schema/register! :seon.agent/schedules
+                  [:vector {:seon.db/component true} :seon.db/ref])
 ;; ============================================================
 ;; Aliases — the context machinery lives in `seon.ctx`. These keep (a) the
 ;; agent-TAUGHT read surface (`seon.agent/messages` …) resolving via
@@ -322,6 +341,12 @@
    [:seon.agent/max-turns-per-loop {:optional true} :seon.agent/max-turns-per-loop]
    [:seon.agent/parent             {:optional true} :seon.agent/parent]
    [:seon.agent/wait-note          {:optional true} :seon.agent/wait-note]
+   ;; run-model additive primitives (derived state + run bounds + cron)
+   [:seon.agent/run                {:optional true} :seon.agent/run]
+   [:seon.agent/terminated-at      {:optional true} :seon.agent/terminated-at]
+   [:seon.agent/default-turn-limit {:optional true} :seon.agent/default-turn-limit]
+   [:seon.agent/default-deadline-ms {:optional true} :seon.agent/default-deadline-ms]
+   [:seon.agent/schedules          {:optional true} :seon.agent/schedules]
    [:seon.render/ai   {:optional true} :seon.render/ai]
    [:seon.render/html {:optional true} :seon.render/html]])
 
@@ -415,6 +440,155 @@
          (map first)
          sort
          vec)))
+
+;; ============================================================
+;; Derived state-snapshot — the agent FINGERPRINT (run-model). ONE call
+;; returns the whole derived state from the record + cheap queries. State is
+;; DERIVED via [[seon.agent.fsm/derive-state]] over the primitives
+;; (terminated-at / the current open run / the run's paused-at), NOT the
+;; stored `:seon.agent/state` (that enum stays the live wake-token loop's
+;; truth until cutover) — hence the snapshot's `:seon.agent/state` field
+;; carries the DERIVED `:seon.agent.fsm/state` enum (:idle/:running/:paused/
+;; :terminated). Run/turn/todo counts derive per call; a field whose source
+;; doesn't exist yet is OMITTED (optional = absent, never nil).
+;; ============================================================
+
+(defn- total-turns
+  "Count of every turn under the agent's sessions (ever-increasing)."
+  [id]
+  (or (db/query {:seon.db/query
+                 '[:find (count ?t) . :in $ ?aid
+                   :where
+                   [?a :seon.agent/id ?aid]
+                   [?a :seon.agent/sessions ?s]
+                   [?s :seon.agent.session/turns ?t]]
+                 :seon.db/args [id]})
+      0))
+
+(defn- open-todo-count
+  "Count of the agent's OPEN todos (the work still owed)."
+  [id]
+  (or (db/query {:seon.db/query
+                 '[:find (count ?todo) . :in $ ?aid
+                   :where
+                   [?a :seon.agent/id ?aid]
+                   [?todo :seon.agent.todo/owner ?a]
+                   [?todo :seon.agent.todo/status :open]]
+                 :seon.db/args [id]})
+      0))
+
+(defn- run-turn-count
+  "Count of turns stamped with this run (the run's DERIVED current-turn).
+   Gated on the `:seon.agent.turn/run` attr being installed — it carries no
+   data until the loop cutover stamps it, so an idle/just-opened run reads 0."
+  [run-eid]
+  (let [db @db/*conn*]
+    (if (contains? (db/installed-schema db) :seon.agent.turn/run)
+      (or (db/query {:seon.db/query
+                     '[:find (count ?t) . :in $ ?run
+                       :where [?t :seon.agent.turn/run ?run]]
+                     :seon.db/args [run-eid]})
+          0)
+      0)))
+
+(defn- last-human-inbound-at
+  "The `:at` of the latest inbound `:human`-origin message to the agent, or
+   nil when none."
+  [id]
+  (let [my-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))]
+    (when my-eid
+      (->> (db/query {:seon.db/query
+                      '[:find ?at :in $ ?me
+                        :where
+                        [?m :seon.agent.message/to ?me]
+                        [?m :seon.agent.message/origin :human]
+                        [?m :seon.agent.message/at ?at]]
+                      :seon.db/args [my-eid]})
+           (map first)
+           (sort-by #(.getTime ^js %))
+           last))))
+
+(defn- last-closed-reason
+  "The `closed-reason` of the agent's most-recently-STARTED closed run, or nil
+   when none. Gated on the attr being installed."
+  [id]
+  (let [db @db/*conn*]
+    (when (contains? (db/installed-schema db) :seon.agent.run/closed-reason)
+      (->> (db/query {:seon.db/query
+                      '[:find ?reason ?started :in $ ?aid
+                        :where
+                        [?a :seon.agent/id ?aid]
+                        [?r :seon.agent.run/agent ?a]
+                        [?r :seon.agent.run/closed-reason ?reason]
+                        [?r :seon.agent.run/started-at ?started]]
+                      :seon.db/args [id]})
+           (sort-by #(.getTime ^js (second %)))
+           last
+           first))))
+
+(schema/register! ::state-snapshot-request
+  [:map
+   [:seon.agent/id  :seon.db/id]
+   ;; optional explicit wall-clock for ms-remaining (defaults to (js/Date.))
+   [:seon.agent/now {:optional true} :inst]])
+
+(schema/register! :seon.agent/state-snapshot
+  [:map
+   [:seon.agent/state                 :seon.agent.fsm/state]   ; DERIVED enum
+   [:seon.agent/total-turns           :int]
+   [:seon.agent.todo/open-count       :int]
+   [:seon.agent.run/status        {:optional true} :seon.agent.run/status]
+   [:seon.agent.run/trigger       {:optional true} :seon.agent.run/trigger]
+   [:seon.agent.run/turn-limit    {:optional true} :seon.agent.run/turn-limit]
+   [:seon.agent.run/deadline      {:optional true} :seon.agent.run/deadline]
+   [:seon.agent.run/last-beat-at  {:optional true} :seon.agent.run/last-beat-at]
+   [:seon.agent.run/closed-reason {:optional true} :seon.agent.run/closed-reason]
+   [:seon.agent.run/turn            {:optional true} :int]   ; derived current-turn
+   [:seon.agent.run/turns-remaining {:optional true} :int]
+   [:seon.agent.run/ms-remaining    {:optional true} :int]
+   [:seon.agent.message/last-human-at {:optional true} :inst]])
+
+(defn state-snapshot
+  "The agent's full DERIVED state in one map (map-in / map-out). State comes
+   from [[seon.agent.fsm/derive-state]] over the primitives; run/turn/todo
+   fields derive from cheap queries. Run-scoped fields are present only while
+   there IS an open run; `:seon.agent/now` (optional) fixes the clock for
+   `ms-remaining`. A pure function of the DB — nothing stored."
+  {:malli/schema [:=> [:cat ::state-snapshot-request] :seon.agent/state-snapshot]}
+  [{id :seon.agent/id now :seon.agent/now}]
+  (let [now           (or now (js/Date.))
+        a             (db/entity {:seon.db/ref [:seon.agent/id id]})
+        terminated-at (:seon.agent/terminated-at a)
+        cur           (run/current-run {:seon.agent/id id})
+        paused-at     (:seon.agent.run/paused-at cur)
+        state         (fsm/derive-state
+                        (cond-> {:seon.agent.run/open? (some? cur)}
+                          terminated-at (assoc :seon.agent/terminated-at terminated-at)
+                          paused-at     (assoc :seon.agent.run/paused-at paused-at)))
+        last-human    (last-human-inbound-at id)
+        last-closed   (last-closed-reason id)
+        base          (cond-> {:seon.agent/state           state
+                               :seon.agent/total-turns     (total-turns id)
+                               :seon.agent.todo/open-count (open-todo-count id)}
+                        last-human  (assoc :seon.agent.message/last-human-at last-human)
+                        last-closed (assoc :seon.agent.run/closed-reason last-closed))]
+    (if-not cur
+      base
+      (let [run-eid    (:db/id cur)
+            turn-cnt   (run-turn-count run-eid)
+            turn-limit (:seon.agent.run/turn-limit cur)
+            deadline   (:seon.agent.run/deadline cur)
+            last-beat  (:seon.agent.run/last-beat-at cur)]
+        (cond-> (assoc base
+                       :seon.agent.run/status          (:seon.agent.run/status cur)
+                       :seon.agent.run/trigger         (:seon.agent.run/trigger cur)
+                       :seon.agent.run/turn-limit      turn-limit
+                       :seon.agent.run/deadline        deadline
+                       :seon.agent.run/turn            turn-cnt
+                       :seon.agent.run/turns-remaining (max 0 (- turn-limit turn-cnt)))
+          last-beat (assoc :seon.agent.run/last-beat-at last-beat)
+          deadline  (assoc :seon.agent.run/ms-remaining
+                           (- (.getTime ^js deadline) (.getTime ^js now))))))))
 
 ;; ============================================================
 ;; The wake GATE — the one predicate the loop trigger ([[seon.agent.loop]])

@@ -66,6 +66,11 @@
 ;; wake = my-wake`) is derivable. STORED — coordination metadata, not
 ;; derivable. References the canonical id shape; never inline.
 (schema/register! :seon.agent.turn/wake         :seon.db/id)
+;; The RUN this turn belongs to (run-model — additive alongside `wake`, which
+;; the live wake-token loop still stamps). A ref to the `:seon.agent.run`
+;; entity; `count turns where :seon.agent.turn/run = run-eid` is the run's
+;; derived current-turn. References the canonical ref shape; never inline.
+(schema/register! :seon.agent.turn/run          :seon.db/ref)
 ;; Three-tier storage: the datom carries the prompt's char count + a file
 ;; pointer (blob tier); the full prompt is never a datom.
 (schema/register! :seon.agent.turn/prompt-chars :int)
@@ -94,6 +99,7 @@
    [:seon.agent.turn/at           :seon.agent.turn/at]
    [:seon.agent.turn/status       :seon.agent.turn/status]
    [:seon.agent.turn/wake         {:optional true} :seon.agent.turn/wake]
+   [:seon.agent.turn/run          {:optional true} :seon.agent.turn/run]
    [:seon.agent.turn/prompt-chars {:optional true} :seon.agent.turn/prompt-chars]
    [:seon.agent.turn/prompt-file  {:optional true} :seon.agent.turn/prompt-file]
    [:seon.agent.turn/debug-dir    {:optional true} :seon.agent.turn/debug-dir]

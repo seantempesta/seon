@@ -202,8 +202,14 @@ scattered `cond` becomes a transition table you can read, render, and
 fingerprint. (We do NOT adopt flow's channels — single-threaded in CLJS, no
 parallelism; isolation is the separate worker layer below.)
 
-**The FSM as data** (`:seon.agent.loop/transitions` — the whole machine in one
-value; `event → next-state`, with the guard/effect named):
+**The FSM as data** lives in **`seon.agent.fsm` (`.cljc`, dual-track shared)** —
+`transitions` (the whole machine in one value; `event → next-state`),
+`transition`, and the pure `derive-state` projection. (Built additively in
+build-pass 2 — see [[night-loop-log]]; it supersedes the original
+`:seon.agent.loop/transitions` placement so both the CLJS loop and the CLJ
+renderer read one table. `derive-state` takes a boolean `:seon.agent.run/open?`
+primitive so the ns stays pure with no dependency on the run/agent attr
+registrations.) The table:
 
 ```clojure
 (def transitions
