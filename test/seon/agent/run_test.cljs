@@ -291,12 +291,10 @@
             (let [r1 (:seon.agent.run/id
                        (await (run/open-run! {:seon.agent/id a-id
                                               :seon.agent.run/trigger :message})))
-                  ;; the exact owned-branch tx close-run! builds for r1:
-                  stale-close [(db/cas-assert a-ref :seon.agent/run [:seon.agent.run/id r1])
-                               {:seon.agent.run/id            r1
-                                :seon.agent.run/status        :closed
-                                :seon.agent.run/closed-reason :completed}
-                               [:db/retract a-ref :seon.agent/run]]
+                  ;; the REAL owned-branch tx close-run! commits for r1 — built
+                  ;; via close-run!'s own builder, so dropping the fence breaks
+                  ;; THIS test (the bare [:db/retract] would yank r2's pointer):
+                  stale-close (#'run/close-tx-data true a-id r1 :completed)
                   ;; ── the supersede lands IN THE WINDOW (r2 now owns the agent) ──
                   r2  (:seon.agent.run/id (await (supersede! :schedule)))
                   ;; now commit r1's stale, pre-built close-tx:
@@ -309,3 +307,18 @@
                   "the agent stays :running on r2 (never wrongly idled by the stale close)"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest close-tx-data-fences-the-owned-retract
+  ;; Pure guard on close-run!'s tx-builder: the OWNED close must LEAD with the
+  ;; work-fence CAS on the agent's run pointer (then close + retract), and the
+  ;; UNOWNED close must be the close-row alone (never touch another run's
+  ;; pointer). No db/async — a function of its args.
+  (let [owned   (#'run/close-tx-data true  a-id "Kpx-2606010000" :completed)
+        unowned (#'run/close-tx-data false a-id "Kpx-2606010000" :superseded)
+        retract? (fn [tx] (some #(and (vector? %) (= :db/retract (first %))) tx))]
+    (is (= :db.fn/cas (ffirst owned)) "owned close LEADS with the work-fence CAS")
+    (is (= :seon.agent/run (nth (first owned) 2)) "the CAS fences the agent's run pointer")
+    (is (retract? owned) "owned close retracts the pointer (in the same fenced tx)")
+    (is (= 1 (count unowned)) "unowned close is the close-row ALONE — no CAS, no retract")
+    (is (nil? (retract? unowned))
+        "unowned close never retracts a pointer it does not own")))

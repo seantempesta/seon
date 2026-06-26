@@ -277,6 +277,24 @@
    [:seon.agent.run/id            :seon.agent.run/id]
    [:seon.agent.run/closed-reason :seon.agent.run/closed-reason]])
 
+(defn- close-tx-data
+  "The tx-data [[close-run!]] commits: always the close-row (status :closed +
+   reason). When the agent still OWNS this run, ALSO lead with the work-fence
+   CAS ([[run-fence]] — assert the pointer STILL names this run) and retract the
+   pointer, all in ONE tx — so a supersede landing in the owns?-read→commit
+   window aborts the whole tx instead of retracting the NEW owner's pointer
+   (the pointer only moves off this run via a concurrent close, which already
+   closed it). Pure (no db read) so the fence wiring is unit-testable."
+  [owns? agent-id run-id reason]
+  (let [close-row {:seon.agent.run/id            run-id
+                   :seon.agent.run/status        :closed
+                   :seon.agent.run/closed-reason reason}]
+    (if owns?
+      [(run-fence agent-id run-id)
+       close-row
+       [:db/retract [:seon.agent/id agent-id] :seon.agent/run]]
+      [close-row])))
+
 (defn ^:async close-run!
   "Close a run (`:status :closed` + `closed-reason`). When the agent still
    OWNS this run, also retract its `:seon.agent/run` pointer so derived state
@@ -309,20 +327,9 @@
             ;; mark this run closed but leave the live pointer untouched.
             owns?     (and agent-id
                            (= run-id (:seon.agent.run/id
-                                       (derive/current-run @db/*conn* agent-id))))
-            close-row {:seon.agent.run/id            run-id
-                       :seon.agent.run/status        :closed
-                       :seon.agent.run/closed-reason reason}]
+                                       (derive/current-run @db/*conn* agent-id))))]
         (await (db/transact!
-                 {:seon.db/tx-data
-                  (if owns?
-                    ;; OWNED — fence the retract IN THIS TX so a supersede that
-                    ;; landed since the owns? read can't make us retract the new
-                    ;; owner's pointer (the CAS asserts it STILL names this run).
-                    [(run-fence agent-id run-id)
-                     close-row
-                     [:db/retract [:seon.agent/id agent-id] :seon.agent/run]]
-                    [close-row])}))))))
+                 {:seon.db/tx-data (close-tx-data owns? agent-id run-id reason)}))))))
 
 (schema/register! ::renew-request
   [:map
