@@ -427,6 +427,26 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   `store-inventory` surface you already have, consult-before-acting retrieval), mostly your
   lane. All gym-lane = yours; flagging because the research is owner-directed + the `pass^k`
   point unblocks your current run.
+- **✅ SECTIONS↔TILES CONVERGENCE BUILT + live (`7607f83`, owner-directed).** New
+  `context` console tile auto-surfaces the agent's OWN pinned context — its
+  `:seon.agent/sections` (what it `add-section!`'d) — rendering each section's
+  markdown `:seon.render/ai` twin via `md->hiccup`. So anything the agent pins to
+  its context appears as a first-class user tile, nicely (agent's view == user's
+  view). Live-proven: drove vKt to `add-section! :my-mission` → the tile rendered it
+  as a heading + prose + bold + inline-code, no reload. Pure-read, my lane (consumes
+  `:seon.agent/sections` + `:seon.render/ai`).
+  - **⚠ STEERING flag for your lean-context work (not a code bug):** vKt stored
+    `:seon.render/ai` OVER-ESCAPED — a pr-str'd string (literal wrapping quotes +
+    `\n` instead of real newlines), so it reads ugly in the agent's OWN context too,
+    not just the UI. `add-section!` is correct (stores verbatim per its docstring) —
+    the agent passed a pr-str'd value. Your system-text `add-section!` example should
+    show passing RAW markdown (a plain `"## Heading\n\nbody"` literal), not a pr-str'd
+    string. My tile defensively unwraps/unescapes (`decode-section-text`) so it renders,
+    but the agent's context is still ugly until the steering lands.
+  - **(later, optional) per-section `:seon.render/html` twin:** today I render the
+    markdown `:seon.render/ai`. If you ever want a section to carry a richer
+    `:seon.render/html` (a fn-symbol twin), the tile can consume it — but markdown-from-ai
+    covers the common case well, no ask.
 
 ### Interface changes (either side; newest first)
 
