@@ -115,10 +115,59 @@
     input.value = "";
   });
 
+  // Debug overlay: a full-viewport layer over the console (an iframe onto
+  // /tile/debug/<id>). Toggled by the header "⚙ debug" button or backtick
+  // (focus-guarded — never while typing in the input); Esc, the ✕ button, or
+  // a click on the dim backdrop (outside the iframe panel) closes it. Opening
+  // points the iframe at its data-src (its own live SSE inside); closing
+  // resets it to about:blank so that stream tears down.
+  function debugOverlay(open) {
+    var o = document.getElementById("seon-debug-overlay");
+    if (!o) return;
+    var f = document.getElementById("seon-debug-frame");
+    var isOpen = o.classList.contains("open");
+    if (open === undefined) open = !isOpen;
+    if (open === isOpen) return;
+    if (open) {
+      if (f) f.src = f.getAttribute("data-src");
+      o.classList.add("open");
+    } else {
+      o.classList.remove("open");
+      if (f) f.src = "about:blank";
+    }
+  }
+
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest ? e.target.closest("#seon-debug-toggle") : null;
+    if (t) { e.preventDefault(); debugOverlay(); return; }
+    if (e.target.closest && e.target.closest("#seon-debug-close")) {
+      e.preventDefault(); debugOverlay(false); return;
+    }
+    // A click on the overlay element ITSELF (the dim backdrop, not the iframe
+    // panel inside its padding) closes it.
+    if (e.target && e.target.id === "seon-debug-overlay") debugOverlay(false);
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { debugOverlay(false); return; }
+    if (e.key === "`") {
+      var a = document.activeElement, tag = a && a.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
+          (a && a.isContentEditable)) return;
+      e.preventDefault();
+      debugOverlay();
+    }
+  });
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", function () { openAll(); });
+    document.addEventListener("DOMContentLoaded", function () {
+      openAll();
+      // Deep-link / screenshot: #debug auto-opens the overlay on load.
+      if (location.hash === "#debug") debugOverlay(true);
+    });
   } else {
     openAll();
+    if (location.hash === "#debug") debugOverlay(true);
   }
 
   // Expose for tiles added after first paint (a future composer/app-loader).

@@ -28,6 +28,8 @@
    lane. See coordination.md _Interface changes_."
   (:require
     [clojure.string :as str]
+    [seon.agent.inspect :as inspect]
+    [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.log :as log]
@@ -55,6 +57,10 @@
 ;; connection (not N) and never starves the HTTP/1.1 pool that POSTs need.
 (defonce ^:private !tiles (atom {}))
 (defonce ^:private !consoles (atom {}))
+;; `!debugs` keys the per-agent DEBUG-overlay multiplexed stream — ONE SSE
+;; per open debug overlay carrying patches for its three regions (exact /
+;; rendered / breakdown bar). Same multiplexed pattern as `!consoles`.
+(defonce ^:private !debugs (atom {}))
 
 (defn- reg-add! [reg k conn]
   (swap! reg update k (fnil conj []) conn))
@@ -368,6 +374,180 @@
   (apply str (map (fn [t] (tile-patch (:seon.tile/id t) (render-tile db t)))
                   (console-tiles db console-id))))
 
+;; ============================================================
+;; The DEBUG overlay — a developer view of the agent's CONTEXT, three
+;; regions: LEFT the EXACT bytes the LLM receives, RIGHT the rendered html
+;; twin, BOTTOM a per-section token breakdown bar. PURE READ — derives from
+;; the db value + the captured prompt blob; never writes (nothing rendered
+;; is persisted). The left pane is FAITHFUL by construction: it shows the
+;; CAPTURED turn blob (`:seon.agent.turn/prompt-file`, written verbatim by
+;; `seon.debug` when SEON_DEBUG_CAPTURE is on) when present, else a LIVE
+;; re-render via the SAME single producer the turn uses
+;; (`seon.agent.inspect/ctx-preview` → `seon.ctx/render-context` +
+;; `seon.ai/debug-full-prompt`). The bottom bar partitions THAT SAME exact
+;; text, so its tokens derive from the same bytes the left pane shows.
+;; ============================================================
+
+(def ^:private stable-debug-sections
+  "Section names of the byte-stable cacheable PREFIX (the composer caches
+   sections with `:seon.ctx/priority` ≤ stable-priority-max): the system
+   block + soul → agents → shared-instructions → namespaces. Rendered amber
+   on the breakdown bar; the volatile tail reads grey."
+  #{:system :soul :agents :shared-instructions :namespaces})
+
+(defn- stable-debug? [nm] (contains? stable-debug-sections nm))
+
+(defn- read-text-file
+  "UTF-8 text of `path`, or nil when unreadable. Never throws (a missing
+   capture blob just falls back to the live re-render)."
+  [path]
+  (try (.readFileSync (js/require "node:fs") path "utf8")
+       (catch :default _ nil)))
+
+(defn- latest-turn-prompt-file
+  "The `:seon.agent.turn/prompt-file` of the agent's most-recent turn that
+   captured one (by `:at`), or nil. That blob is the EXACT prompt bytes the
+   agent's LLM received that turn. Pure read; degrades to nil (→ live
+   re-render) if capture is off or the run/turn attrs are absent."
+  [db agent-id]
+  (->> (try (db/query {:seon.db/db db
+                       :seon.db/query
+                       '[:find ?at ?file :in $ ?aid :where
+                         [?a :seon.agent/id ?aid]
+                         [?r :seon.agent.run/agent ?a]
+                         [?t :seon.agent.turn/run ?r]
+                         [?t :seon.agent.turn/at ?at]
+                         [?t :seon.agent.turn/prompt-file ?file]]
+                       :seon.db/args [agent-id]})
+            (catch :default _ nil))
+       (sort-by first)
+       last
+       second))
+
+(defn- split-exact-sections
+  "Partition the EXACT prompt bytes `full` into labeled segments for the
+   breakdown bar — the SAME bytes the left pane shows. The system block
+   (everything before the first section) is one `:system` segment; each
+   context section is one segment delimited by the `;;; ┌─ <name> ─`
+   fold-brackets `seon.ctx/render-context-ai` emits. Every byte is assigned
+   to exactly one segment, so the segment tokens sum to the total.
+
+   The bracket match is LINE-ANCHORED (`^…` with the `m` flag, via `.exec`
+   so the CLJS `str/split` m-flag-drop doesn't bite): the real brackets sit
+   at column 0, while the system block DOCUMENTS the bracket syntax
+   mid-sentence — anchoring keeps that prose inside the `:system` segment."
+  [full]
+  (let [full (or full "")
+        re   (js/RegExp. "^;;; ┌─ (\\S+) ─" "gm")
+        ms   (loop [acc []]
+               (if-let [m (.exec re full)]
+                 (recur (conj acc [(.-index m) (aget m 1)]))
+                 acc))
+        idxs (mapv first ms)]
+    (if (empty? ms)
+      [{::sname :prompt ::stext full}]
+      (let [system (subs full 0 (first idxs))
+            secs   (map-indexed
+                     (fn [k [i nm]]
+                       {::sname (keyword nm)
+                        ::stext (subs full i (or (get idxs (inc k)) (count full)))})
+                     ms)]
+        (into (if (str/blank? system) [] [{::sname :system ::stext system}])
+              secs)))))
+
+(defn- debug-snapshot
+  "One pure-read debug render snapshot for `agent-id` against HEAD.
+   `::exact` is the faithful left-pane text (captured blob → live re-render),
+   `::source` :captured|:live; `::sections` partitions that exact text for
+   the bar; `::section-html` is the live html twin for the right pane (never
+   captured); `::token-est` is chars/4 over the WHOLE exact text."
+  [agent-id]
+  (let [db       @db/*conn*
+        preview  (inspect/ctx-preview {:seon.agent/id agent-id})
+        file     (latest-turn-prompt-file db agent-id)
+        captured (when file (read-text-file file))
+        [exact source] (if (and captured (not (str/blank? captured)))
+                         [captured :captured]
+                         [(or (:seon.render/text preview) "") :live])]
+    {::exact        exact
+     ::source       source
+     ::token-est    (tokens/estimate exact)
+     ::sections     (split-exact-sections exact)
+     ::section-html (or (:seon.render/section-html preview) [])}))
+
+(defn- debug-rendered-inner
+  "The right-pane inner content — one card per context section html twin, in
+   render order. `.seon-agent-content` (input.css) gives the agent-authored
+   hiccup Phosphor element styling despite Tailwind preflight."
+  [section-html]
+  (if (seq section-html)
+    (into [:div {:class "flex flex-col gap-2"}]
+          (map (fn [{nm :seon.ctx/name h :seon.render/hiccup}]
+                 [:div {:class "border-l-2 border-amber-700/40 pl-2 py-1"}
+                  [:div {:class (str "text-[10px] font-mono font-semibold text-text-400 "
+                                     "mb-0.5 uppercase tracking-wider")}
+                   (name nm)]
+                  [:div {:class "mt-0.5"} h]]))
+          section-html)
+    [:div {:class "text-text-500 italic text-xs p-2"} "no rendered sections yet"]))
+
+(defn- debug-bar-segment
+  "One section segment of the breakdown bar — width is a flex weight ∝ its
+   estimated tokens; stable-prefix sections read amber, the volatile tail
+   grey. The name + token count show inline when the segment is wide enough,
+   always in the hover title."
+  [{::keys [sname stext]} total]
+  (let [tok     (tokens/estimate stext)
+        pct     (if (pos? total) (* 100.0 (/ tok total)) 0)
+        stable? (stable-debug? sname)
+        wide?   (>= pct 5)]
+    [:div {:class (str "relative h-full flex items-center justify-center overflow-hidden "
+                       "border-r border-base-950 "
+                       (if stable?
+                         "bg-amber-800/60 hover:bg-amber-700/70 "
+                         "bg-base-700/70 hover:bg-base-600/80 "))
+           :style (str "flex: " (max 0.01 tok) " 1 0; min-width: 2px;")
+           :title (str (name sname) " · ~" tok " tok · " (.toFixed pct 1) "%"
+                       (when stable? " · cached prefix"))}
+     (when wide?
+       [:span {:class (str "px-1 truncate text-[10px] font-mono "
+                           (if stable? "text-amber-50" "text-text-200"))}
+        (str (name sname) " " tok)])]))
+
+(defn- debug-bar-inner
+  "The bottom breakdown bar inner content — a headline (total tokens +
+   legend) over a horizontal stacked bar, one segment per context section
+   weighted by its tokens. `total` (sum of segment tokens) drives the
+   widths; `token-est` (chars/4 of the whole exact text) is the headline."
+  [sections token-est]
+  (let [segs  (vec sections)
+        total (reduce + 0 (map #(tokens/estimate (::stext %)) segs))]
+    [:div {:class "flex flex-col gap-1"}
+     [:div {:class "flex items-center gap-3 text-[10px] font-mono text-text-400"}
+      [:span {:class "text-text-200"} "context budget"]
+      [:span {:class "text-amber-400"} (str "~" token-est " tok total")]
+      [:span {:class "text-text-600"} (str (count segs) " sections")]
+      [:span {:class "ml-auto text-text-600"} "stable prefix amber · volatile tail grey"]]
+     [:div {:class (str "relative h-6 w-full flex rounded-sm overflow-hidden "
+                        "bg-base-950 border border-base-800")}
+      (if (seq segs)
+        (into [:div {:class "flex w-full h-full"}]
+              (map #(debug-bar-segment % total) segs))
+        [:div {:class "flex items-center px-2 text-[10px] font-mono text-text-600"}
+         "no context yet"])]]))
+
+(defn- debug-region-id [region agent-id] (str "dbg-" region "-" agent-id))
+
+(defn- debug-payload
+  "All three debug regions as one stream of multiplexed patches (rendered
+   against HEAD). The exact pane payload is the raw text (escaped by
+   `tile-patch` → set as the `<pre>`'s innerHTML, so its scroll survives)."
+  [agent-id]
+  (let [{::keys [exact sections section-html token-est]} (debug-snapshot agent-id)]
+    (str (tile-patch (debug-region-id "exact" agent-id) exact)
+         (tile-patch (debug-region-id "rendered" agent-id) (debug-rendered-inner section-html))
+         (tile-patch (debug-region-id "bar" agent-id) (debug-bar-inner sections token-est)))))
+
 (defn- push-tile! [tile-id]
   (try
     ;; PINNED conns (a `:basis-t`) are frozen — they rendered their as-of frame
@@ -397,6 +577,16 @@
                  (catch :default e (log/error-console! "seon.web.tile" "console write failed" e)))))))
     (catch :default e (log/error-console! "seon.web.tile" "push-console! threw" e))))
 
+(defn- push-debug! [agent-id]
+  (try
+    (let [live (get @!debugs agent-id)]
+      (when (seq live)
+        (let [payload (debug-payload agent-id)]
+          (doseq [{:keys [res]} live]
+            (try (.write res payload)
+                 (catch :default e (log/error-console! "seon.web.tile" "debug write failed" e)))))))
+    (catch :default e (log/error-console! "seon.web.tile" "push-debug! threw" e))))
+
 (defonce ^:private !pending (atom {}))
 
 (defn- schedule!
@@ -409,7 +599,10 @@
       (js/setTimeout
         (fn []
           (swap! !pending dissoc k)
-          (case kind :tile (push-tile! id) :console (push-console! id)))
+          (case kind
+            :tile    (push-tile! id)
+            :console (push-console! id)
+            :debug   (push-debug! id)))
         100))))
 
 (defn- on-tx
@@ -417,7 +610,8 @@
    (the client drops no-ops). Streams watched only by pinned conns stay frozen."
   [_]
   (doseq [[id conns] @!tiles    :when (some #(nil? (:basis-t %)) conns)] (schedule! :tile id))
-  (doseq [[id conns] @!consoles :when (some #(nil? (:basis-t %)) conns)] (schedule! :console id)))
+  (doseq [[id conns] @!consoles :when (some #(nil? (:basis-t %)) conns)] (schedule! :console id))
+  (doseq [[id conns] @!debugs   :when (seq conns)]                       (schedule! :debug id)))
 
 ;; ============================================================
 ;; Lifecycle — db/listen! IS the refresh signal.
@@ -526,6 +720,14 @@
     [:span {:class "text-2xs text-text-500"} agent-id]]
    [:div {:class "flex items-center gap-3"}
     (scrubber agent-id t)
+    ;; Opens the DEBUG overlay (the agent's context, three regions) over the
+    ;; console without a URL change — packetstar toggles `#seon-debug-overlay`
+    ;; (⚙ / backtick, Esc/backdrop closes). Document-delegated click, so the
+    ;; button survives any future morph.
+    [:button {:id "seon-debug-toggle" :type "button"
+              :class (str "text-2xs text-amber-400 hover:text-amber-300 cursor-pointer "
+                          "bg-transparent border-0 p-0")}
+     "⚙ debug"]
     [:a {:class "text-2xs text-amber-400 hover:text-amber-300"
          :href  (str "/tile/agent/" agent-id "/full")} "⛶ fullscreen"]]])
 
@@ -549,8 +751,10 @@
 (defn- console-shell
   "The console — masthead + a layout DERIVED from the console's tiles (span-2 →
    hero column, span-1 → rail; the tile list/order/spans are DATA) + the input
-   tile. The two-column arrangement is the prewritten strategy over that data."
-  [agent-id tiles t]
+   tile. The two-column arrangement is the prewritten strategy over that data.
+   `open-debug?` server-renders the debug overlay already open (the `?debug=1`
+   deep-link — also what the headless screenshot uses)."
+  [agent-id tiles t open-debug?]
   (let [span   (fn [x] (or (:seon.tile/span x) 1))
         rails  (vec (remove #(>= (span %) 2) tiles))
         last-i (dec (count rails))
@@ -581,7 +785,84 @@
                         :data-console stream}
                  (header-bar agent-id t)
                  grid
-                 (input-form agent-id)]]]
+                 (input-form agent-id)
+                 ;; The full-viewport debug overlay — an iframe onto the
+                 ;; standalone /tile/debug/<id> page (its own live SSE inside).
+                 ;; packetstar toggles `.open` + sets the iframe src on demand.
+                 ;; Reuses `#seon-debug-overlay` (input.css); `.tile` gives the
+                 ;; inset-panel + dim-backdrop variant so a backdrop click
+                 ;; closes it. `open-debug?` (?debug=1) renders it already open
+                 ;; with the iframe src set (deep-link + deterministic shot).
+                 [:div {:id "seon-debug-overlay" :class (if open-debug? "tile open" "tile")}
+                  [:button {:id "seon-debug-close" :type "button" :title "close (Esc)"} "✕"]
+                  [:iframe (cond-> {:id "seon-debug-frame"
+                                    :title (str "debug · " agent-id)
+                                    :data-src (str "/tile/debug/" agent-id)}
+                             open-debug? (assoc :src (str "/tile/debug/" agent-id)))]]]]]
+    (str "<!DOCTYPE html>" (html/->string page))))
+
+(defn- debug-source-badge
+  "Honest provenance chip for the exact pane: captured turn bytes
+   (guaranteed faithful) vs a live re-render at current db (faithful to the
+   prompt the agent WOULD see now, via the same producer)."
+  [source]
+  (if (= source :captured)
+    [:span {:class "text-2xs text-emerald-400" :title "the captured prompt blob the agent's LLM received"}
+     "● captured turn bytes"]
+    [:span {:class "text-2xs text-amber-400"
+            :title "no capture blob — re-rendered now via the same producer the turn uses"}
+     "● live re-render @ head"]))
+
+(defn- debug-shell
+  "The standalone debug page (`/tile/debug/<id>`, loaded inside the console
+   overlay iframe): LEFT the EXACT context the agent's LLM receives (a
+   scrollable `<pre>`, whitespace preserved), RIGHT the rendered html twin,
+   BOTTOM the per-section token breakdown bar. Live via its own multiplexed
+   SSE (`data-console`); the three regions are patched by `#tile-<region>`."
+  [agent-id]
+  (let [{::keys [exact source sections section-html token-est]} (debug-snapshot agent-id)
+        page
+        [:html {:lang "en"}
+         (head (str "debug · " agent-id))
+         [:body {:class (str "bg-base-950 text-text-200 font-mono h-screen flex flex-col "
+                             "overflow-hidden")
+                 :data-console (str "/tile/debug/" agent-id "/sse")}
+          ;; masthead
+          [:div {:class (str "shrink-0 flex items-center justify-between px-3 py-2 "
+                             "border-b border-base-800 bg-base-900")}
+           [:div {:class "flex items-baseline gap-2"}
+            [:span {:class "text-sm font-semibold text-text-50"} "debug"]
+            [:span {:class "text-2xs text-text-500"} agent-id]
+            (debug-source-badge source)]
+           [:a {:class "text-2xs text-amber-400 hover:text-amber-300"
+                :href (str "/tile/console/" agent-id)} "← console"]]
+          ;; the two panes — exact left, rendered right
+          [:div {:class "flex-1 grid min-h-0" :style "grid-template-columns: 45% 55%;"}
+           ;; LEFT — the exact bytes
+           [:div {:class "flex flex-col min-h-0 border-r border-base-800"}
+            [:div {:class (str "shrink-0 px-2 py-1 text-2xs font-mono text-text-400 "
+                               "bg-base-900 border-b border-base-800")}
+             ":seon.render/text — the exact bytes the LLM receives"]
+            ;; The `<pre>` IS the patched region (stable id), so its scrollTop
+            ;; survives each live patch. `whitespace-pre` preserves the exact
+            ;; whitespace; long lines scroll horizontally (overflow-auto).
+            [:pre {:id (str "tile-" (debug-region-id "exact" agent-id))
+                   :class (str "flex-1 overflow-auto whitespace-pre text-[11px] "
+                               "leading-snug text-text-100 bg-base-950 p-3 m-0")}
+             exact]]
+           ;; RIGHT — the rendered html twin
+           [:div {:class "flex flex-col min-h-0"}
+            [:div {:class (str "shrink-0 px-2 py-1 text-2xs font-mono text-text-400 "
+                               "bg-base-900 border-b border-base-800")}
+             ":seon.render/html — the rendered context"]
+            [:div {:id (str "tile-" (debug-region-id "rendered" agent-id))
+                   :class (str "seon-agent-content flex-1 overflow-auto text-xs "
+                               "bg-base-950 p-2")}
+             (debug-rendered-inner section-html)]]]
+          ;; BOTTOM — the per-section token breakdown bar
+          [:div {:class "shrink-0 border-t border-base-800 bg-base-900 px-3 py-2"}
+           [:div {:id (str "tile-" (debug-region-id "bar" agent-id))}
+            (debug-bar-inner sections token-est)]]]]]
     (str "<!DOCTYPE html>" (html/->string page))))
 
 (defn- hero-shell
@@ -638,6 +919,28 @@
          (catch :default e
            (log/error-console! "seon.web.tile" "console initial render failed" e)))))
 
+(defn- open-debug-sse!
+  "The MULTIPLEXED debug-overlay stream — ONE SSE carrying patches for the
+   three debug regions (exact / rendered / bar) of `agent-id`, re-rendered
+   live on every commit. Always tracks HEAD (no time-travel)."
+  [^js req ^js res agent-id]
+  (.writeHead res 200 #js {"Content-Type"      "text/event-stream"
+                           "Cache-Control"     "no-cache"
+                           "Connection"        "keep-alive"
+                           "X-Accel-Buffering" "no"})
+  (.write res ": connected\n\n")
+  (let [conn {:id (random-uuid) :res res :opened-at (js/Date.)}]
+    (reg-add! !debugs agent-id conn)
+    (log/info-console! "seon.web.tile" "DEBUG SSE OPEN"
+                       {:agent agent-id :conn-id (str (:id conn))})
+    (.on req "close"
+         (fn []
+           (reg-remove! !debugs agent-id (:id conn))
+           (log/info-console! "seon.web.tile" "DEBUG SSE CLOSE" {:conn-id (str (:id conn))})))
+    (try (.write res (debug-payload agent-id))
+         (catch :default e
+           (log/error-console! "seon.web.tile" "debug initial render failed" e)))))
+
 (defn route?
   "True iff `path` is a tile route. `seon.web.serve` delegates here."
   [path]
@@ -655,9 +958,20 @@
       true)
 
     (re-matches #"/tile/console/[^/]+" path)
-    (let [id (second (re-matches #"/tile/console/([^/]+)" path))
-          t  (query-t req)]
-      (write-html! res 200 (console-shell id (console-tiles @db/*conn* id) t))
+    (let [id     (second (re-matches #"/tile/console/([^/]+)" path))
+          t      (query-t req)
+          debug? (boolean (re-find #"[?&]debug=1" (or (.-url req) "")))]
+      (write-html! res 200 (console-shell id (console-tiles @db/*conn* id) t debug?))
+      true)
+
+    (re-matches #"/tile/debug/[^/]+/sse" path)
+    (let [id (second (re-matches #"/tile/debug/([^/]+)/sse" path))]
+      (open-debug-sse! req res id)
+      true)
+
+    (re-matches #"/tile/debug/[^/]+" path)
+    (let [id (second (re-matches #"/tile/debug/([^/]+)" path))]
+      (write-html! res 200 (debug-shell id))
       true)
 
     (re-matches #"/tile/frames/[^/]+" path)

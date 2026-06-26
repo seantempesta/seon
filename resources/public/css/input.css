@@ -368,6 +368,40 @@ details.tool-call-details[open] .tool-preview {
   border: 0;
 }
 
+/* Tile-console variant: an inset panel over a DIM backdrop (the console
+   shows through the padding, so a backdrop click — the overlay element
+   itself, outside the iframe — closes it). The inspector's full-bleed
+   variant (no `.tile` class) keeps the base rule above untouched. */
+#seon-debug-overlay.tile {
+  background: rgba(8, 8, 7, 0.84);
+  padding: 2.5vh 2.5vw;
+}
+#seon-debug-overlay.tile iframe {
+  border-radius: 8px;
+  border: 1px solid var(--color-base-800, #2a2a28);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+}
+#seon-debug-close {
+  position: fixed;
+  top: calc(2.5vh - 13px);
+  right: calc(2.5vw - 13px);
+  z-index: 60;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: var(--color-base-900, #161614);
+  color: var(--color-signal, #f5a623);
+  border: 1px solid var(--color-base-700, #3a3a37);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+#seon-debug-close:hover { background: var(--color-base-800, #2a2a28); }
+
 /* ============================================================
    BASE CONTENT LAYER — semantic HTML inside agent-rendered
    containers. Tailwind's preflight strips ALL element styling, so
