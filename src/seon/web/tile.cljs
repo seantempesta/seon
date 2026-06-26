@@ -414,14 +414,38 @@
   [:div {:id (str "tile-" tile-id) :class "min-h-0"}
    [:div {:class "text-text-500 text-xs"} "connecting…"]])
 
-(defn- header-bar [agent-id]
+(defn- scrubber
+  "The whole-screen time-travel control — ◀ step back · ● live / ⏸ frame i/n ·
+   ▶ step forward · live. A link reloads the console at `?t=<basis-t>` (pins all
+   tiles `as-of` that frame via the multiplexed stream); no `?t` = live HEAD.
+   Frames are the agent's tx basis-points (always from HEAD)."
+  [agent-id t]
+  (let [ts  (mapv :seon.tile/t (agent-frames @db/*conn* agent-id 40))
+        n   (count ts)
+        idx (when t (first (keep-indexed (fn [i x] (when (= x t) i)) ts)))
+        url (fn [tt] (str "/tile/console/" agent-id (when tt (str "?t=" tt))))
+        a   (fn [label href]
+              (if href
+                [:a {:class "text-amber-400 hover:text-amber-300" :href href} label]
+                [:span {:class "text-text-500 opacity-30"} label]))]
+    [:div {:class "flex items-center gap-2 text-2xs"}
+     (a "◀" (when (and idx (pos? idx)) (url (nth ts (dec idx)))))
+     (if (nil? t)
+       [:span {:class "inline-flex items-center gap-1 text-success"}
+        [:span {:class "w-1.5 h-1.5 rounded-full bg-success animate-pulse"}] "live"]
+       [:span {:class "text-warning"} (str "⏸ " (if idx (inc idx) "·") "/" n)])
+     (a "▶" (cond (nil? t)                  nil
+                  (and idx (< idx (dec n))) (url (nth ts (inc idx)))
+                  :else                     (url nil)))
+     (when t [:a {:class "text-text-400 hover:text-text-200 ml-1" :href (url nil)} "live"])]))
+
+(defn- header-bar [agent-id t]
   [:div {:class "flex items-center justify-between mb-3 pb-2 border-b border-base-800"}
    [:div {:class "flex items-baseline gap-2"}
     [:span {:class "text-sm font-semibold text-text-50"} "seon"]
     [:span {:class "text-2xs text-text-500"} agent-id]]
    [:div {:class "flex items-center gap-3"}
-    [:span {:class "inline-flex items-center gap-1 text-2xs text-success"}
-     [:span {:class "w-1.5 h-1.5 rounded-full bg-success animate-pulse"}] "live"]
+    (scrubber agent-id t)
     [:a {:class "text-2xs text-amber-400 hover:text-amber-300"
          :href  (str "/tile/agent/" agent-id "/full")} "⛶ fullscreen"]]])
 
@@ -443,22 +467,23 @@
   "The console — masthead + a layout DERIVED from the console's tiles (span-2 →
    hero column, span-1 → rail; the tile list/order/spans are DATA) + the input
    tile. The two-column arrangement is the prewritten strategy over that data."
-  [agent-id tiles]
-  (let [span (fn [t] (or (:seon.tile/span t) 1))
-        hero (into [:div {:class "col-span-2 flex flex-col gap-3 min-h-0"}]
-                   (map #(console-region (:seon.tile/id %)) (filter #(>= (span %) 2) tiles)))
-        rail (into [:div {:class "col-span-1 flex flex-col gap-3 min-h-0 overflow-auto"}]
-                   (map #(console-region (:seon.tile/id %)) (remove #(>= (span %) 2) tiles)))
-        grid [:div {:class "grid grid-cols-3 gap-3 flex-1 min-h-0"} hero rail]
-        page [:html {:lang "en"}
-              (head (str "console · " agent-id))
-              ;; ONE multiplexed stream for the whole console (data-console) — N
-              ;; tiles, one connection, so POSTs aren't starved of the HTTP/1.1 pool.
-              [:body {:class "bg-base-950 text-text-200 font-mono p-3 h-screen flex flex-col"
-                      :data-console (str "/tile/console/" agent-id "/sse")}
-               (header-bar agent-id)
-               grid
-               (input-form agent-id)]]]
+  [agent-id tiles t]
+  (let [span   (fn [x] (or (:seon.tile/span x) 1))
+        hero   (into [:div {:class "col-span-2 flex flex-col gap-3 min-h-0"}]
+                     (map #(console-region (:seon.tile/id %)) (filter #(>= (span %) 2) tiles)))
+        rail   (into [:div {:class "col-span-1 flex flex-col gap-3 min-h-0 overflow-auto"}]
+                     (map #(console-region (:seon.tile/id %)) (remove #(>= (span %) 2) tiles)))
+        grid   [:div {:class "grid grid-cols-3 gap-3 flex-1 min-h-0"} hero rail]
+        ;; the multiplexed stream carries ?t so a pinned console renders + freezes
+        ;; every tile as-of that frame (one connection for N tiles).
+        stream (str "/tile/console/" agent-id "/sse" (when t (str "?t=" t)))
+        page   [:html {:lang "en"}
+                (head (str "console · " agent-id))
+                [:body {:class "bg-base-950 text-text-200 font-mono p-3 h-screen flex flex-col"
+                        :data-console stream}
+                 (header-bar agent-id t)
+                 grid
+                 (input-form agent-id)]]]
     (str "<!DOCTYPE html>" (html/->string page))))
 
 (defn- hero-shell
@@ -532,8 +557,9 @@
       true)
 
     (re-matches #"/tile/console/[^/]+" path)
-    (let [id (second (re-matches #"/tile/console/([^/]+)" path))]
-      (write-html! res 200 (console-shell id (console-tiles @db/*conn* id)))
+    (let [id (second (re-matches #"/tile/console/([^/]+)" path))
+          t  (query-t req)]
+      (write-html! res 200 (console-shell id (console-tiles @db/*conn* id) t))
       true)
 
     (re-matches #"/tile/frames/[^/]+" path)
