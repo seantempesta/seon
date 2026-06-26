@@ -26,6 +26,7 @@
   (is (= :idle       (fsm/transition :running :deadline)))
   (is (= :idle       (fsm/transition :running :superseded)))
   (is (= :idle       (fsm/transition :running :error)))
+  (is (= :idle       (fsm/transition :running :no-forms)) "empty-streak halt closes clean")
   (is (= :paused     (fsm/transition :running :pause)))
   (is (= :terminated (fsm/transition :running :terminate)))
   (is (= :running    (fsm/transition :paused :resume)))

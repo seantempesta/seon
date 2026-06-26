@@ -81,7 +81,7 @@
                     (is (= 20 (:seon.agent.run/turn-limit snap)) "default turn-limit")
                     (is (inst? (:seon.agent.run/deadline snap)) "wall-clock bound set")
                     (let [cur  (run/current-run {:seon.agent/id a-id})
-                          snap2 (agent/state-snapshot {:seon.agent/id a-id})]
+                          snap2 (agent/derive-status {:seon.agent/id a-id})]
                       (is (= (:seon.agent.run/id snap) (:seon.agent.run/id cur))
                           "the agent's pointer resolves to this open run")
                       (is (= :running (:seon.agent/state snap2)) "derived state")
@@ -124,11 +124,11 @@
                   (fn [res]
                     (is (:seon.db/ok? res))
                     (is (nil? (run/current-run {:seon.agent/id a-id})) "pointer retracted")
-                    (is (= :idle (:seon.agent/state (agent/state-snapshot {:seon.agent/id a-id})))
+                    (is (= :idle (:seon.agent/state (agent/derive-status {:seon.agent/id a-id})))
                         "derived state falls to idle")
                     (is (= :completed
                            (:seon.agent.run/closed-reason
-                             (agent/state-snapshot {:seon.agent/id a-id})))
+                             (agent/derive-status {:seon.agent/id a-id})))
                         "last closed-reason surfaces in the snapshot"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -211,7 +211,7 @@
                            ;; an open run with no loop driving it IS the
                            ;; post-crash state: derived :running, unwakeable.
                            (is (= :running (:seon.agent/state
-                                             (agent/state-snapshot {:seon.agent/id a-id})))
+                                             (agent/derive-status {:seon.agent/id a-id})))
                                "open run, no driver ⇒ derived :running (crash state)")
                            (run/recover-crashed-runs!)))
                   (.then (fn [res]
@@ -223,7 +223,7 @@
                                  "closed with the boot-recovery reason"))
                            (is (nil? (run/current-run {:seon.agent/id a-id})) "pointer cleared")
                            (is (= :idle (:seon.agent/state
-                                          (agent/state-snapshot {:seon.agent/id a-id})))
+                                          (agent/derive-status {:seon.agent/id a-id})))
                                "the recovered agent is wakeable (:idle)")
                            (run/recover-crashed-runs!)))
                   (.then (fn [res2]
@@ -257,6 +257,6 @@
                              (is (= 1 fail-count) "the other LOST the CAS (error envelope)")
                              (is (= 1 (count open-runs))
                                  "exactly ONE :open run in the db — no duplicate")
-                             (is (= :running (:seon.agent/state (agent/state-snapshot {:seon.agent/id a-id})))))))))))
+                             (is (= :running (:seon.agent/state (agent/derive-status {:seon.agent/id a-id})))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

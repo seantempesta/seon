@@ -101,7 +101,7 @@
                              (is (= :deadline-exceeded (:seon.agent.run/closed-reason r))))
                            (is (nil? (run/current-run {:seon.agent/id a-id})) "run pointer cleared")
                            (is (= :idle (:seon.agent/state
-                                          (agent/state-snapshot {:seon.agent/id a-id})))
+                                          (agent/derive-status {:seon.agent/id a-id})))
                                "derived state falls to idle"))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

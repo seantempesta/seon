@@ -43,6 +43,18 @@
   [text]
   (fn [_ctx] (js/Promise.resolve {:text text})))
 
+(defn- scripted-llm-seq
+  "ctx-string -> Promise<{:text text}> — replays each text in `texts` in turn,
+   then repeats the LAST one for every later call (a deterministic multi-turn
+   script)."
+  [texts]
+  (let [!i (atom 0)
+        v  (vec texts)]
+    (fn [_ctx]
+      (let [i (min @!i (dec (count v)))]
+        (swap! !i inc)
+        (js/Promise.resolve {:text (nth v i)})))))
+
 (defn ^:async ^:private boot-agent!
   "Fresh-conn world: user entity + home ns + agent entity. Returns the
    compile-state."
@@ -56,7 +68,7 @@
     cs))
 
 (defn- derived [id]
-  (:seon.agent/state (agent/state-snapshot {:seon.agent/id id})))
+  (:seon.agent/state (agent/derive-status {:seon.agent/id id})))
 
 (defn ^:async supersede!
   "Open a fresh CURRENT run for `id`, leaving the prior run OPEN but no longer
@@ -199,6 +211,70 @@
                                        (run/snapshot {:seon.agent.run/id run-id})))))
                 (testing "the agent ends derived :idle"
                   (is (= :idle (derived agent-id))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; The EMPTY-STREAK bound — an LLM that emits zero actionable forms for a
+;; streak of turns closes the run :no-forms (not a spin to the turn-limit).
+;; A single empty turn must NOT halt (the streak guard tolerates thinking).
+;; ============================================================
+
+(deftest empty-forms-streak-closes-the-run-no-forms
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [cs (await (boot-agent!))]
+              ;; turn-limit well above the streak limit, so the EMPTY-STREAK
+              ;; guard is the stopper (not the work bound); the LLM replies
+              ;; with no parseable forms (empty text) every turn.
+              (let [opened (await (run/open-run! {:seon.agent/id agent-id
+                                                  :seon.agent.run/trigger :message
+                                                  :seon.agent.run/turn-limit 20}))
+                    run-id (:seon.agent.run/id opened)
+                    final  (await (db/with-agent agent-id
+                                    (fn ^:async drive []
+                                      (await (loop/run-loop!
+                                               {:seon.agent/id            agent-id
+                                                :seon.agent/llm-fn        (scripted-llm "")
+                                                :seon.agent/compile-state cs}
+                                               run-id)))))]
+                (testing "the loop halts on the empty-streak and returns :idle"
+                  (is (= :idle final)))
+                (testing "exactly the streak length of empty turns ran (NOT to turn-limit 20)"
+                  (is (= loop/no-forms-streak-limit (turn-count run-id))))
+                (testing "the run closed :no-forms and the agent is derived :idle"
+                  (is (= :no-forms (:seon.agent.run/closed-reason
+                                     (run/snapshot {:seon.agent.run/id run-id}))))
+                  (is (= :idle (derived agent-id))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest single-empty-turn-then-productive-does-not-halt-no-forms
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [cs (await (boot-agent!))]
+              (let [opened (await (run/open-run! {:seon.agent/id agent-id
+                                                  :seon.agent.run/trigger :message
+                                                  :seon.agent.run/turn-limit 20}))
+                    run-id (:seon.agent.run/id opened)
+                    ;; one empty (thinking) turn, THEN a productive (complete …)
+                    final  (await (db/with-agent agent-id
+                                    (fn ^:async drive []
+                                      (await (loop/run-loop!
+                                               {:seon.agent/id            agent-id
+                                                :seon.agent/llm-fn        (scripted-llm-seq ["" "(complete \"done\")"])
+                                                :seon.agent/compile-state cs}
+                                               run-id)))))]
+                (testing "a single empty turn does NOT trip the streak guard"
+                  (is (= :idle final)))
+                (testing "the productive turn closed the run :completed, NOT :no-forms"
+                  (is (= :completed (:seon.agent.run/closed-reason
+                                      (run/snapshot {:seon.agent.run/id run-id})))))
+                (testing "exactly two turns ran — the empty one then the completing one"
+                  (is (= 2 (turn-count run-id))))
+                (is (= :idle (derived agent-id)))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

@@ -17,7 +17,7 @@
   (:require [seon.schema :as schema]))
 
 ;; ── Shared enums (register ONCE here; referenced by [[transition]],
-;;    [[derive-state]], and seon.agent/state-snapshot). The DERIVED state enum
+;;    [[derive-state]], and seon.agent/derive-status). The DERIVED state enum
 ;;    is `:idle/:running/:paused/:terminated` — there is no stored agent
 ;;    state; it is a pure projection of the run/terminated-at primitives. ──
 (schema/register! :seon.agent.fsm/state
@@ -25,7 +25,7 @@
 
 (schema/register! :seon.agent.fsm/event
   [:enum :trigger :turn-ok :wait :complete :turn-limit :deadline
-         :superseded :error :pause :terminate :resume])
+         :superseded :error :no-forms :pause :terminate :resume])
 
 (def transitions
   "The whole FSM as data — `{state {event → next-state}}`. A wake (`:trigger`)
@@ -36,7 +36,7 @@
   {:idle       {:trigger :running}
    :running    {:turn-ok    :running :wait     :idle :complete   :idle
                 :turn-limit :idle    :deadline :idle :superseded :idle
-                :error      :idle    :pause    :paused
+                :error      :idle    :no-forms :idle :pause      :paused
                 :terminate  :terminated}
    :paused     {:resume :running :terminate :terminated}
    :terminated {}})

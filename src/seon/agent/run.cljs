@@ -21,7 +21,7 @@
    references `:seon.agent/*` keywords from the global registry (no require —
    the id slot is typed `:seon.db/id`, not `:seon.agent/id`, so this ns has NO
    load-time dependency on seon.agent). seon.agent requires THIS ns for its
-   state-snapshot, so the edge runs agent → run, never the reverse."
+   derive-status, so the edge runs agent → run, never the reverse."
   (:require
     [seon.db :as db]
     [seon.schema :as schema]))
@@ -40,18 +40,21 @@
 (schema/register! :seon.agent.run/deadline   :inst)          ; WALL-CLOCK bound (absolute)
 (schema/register! :seon.agent.run/last-beat-at :inst)        ; heartbeat (liveness; per turn)
 ;; Pause marker: presence on the OPEN run ⇒ derived state :paused (read by
-;; seon.agent.fsm/derive-state via the agent's state-snapshot).
+;; seon.agent.fsm/derive-state via the agent's derive-status).
 (schema/register! :seon.agent.run/paused-at  :inst)
 ;; Wall-clock budget banked at pause time (deadline − now). `resume!` re-extends
 ;; `deadline` by this so a long pause never blows the clock bound the instant
 ;; you wake the run (Gemini fix #1 — pause vs absolute deadline).
 (schema/register! :seon.agent.run/remaining-ms :int)
 (schema/register! :seon.agent.run/status     [:enum :open :closed])
-;; Present iff :closed. :crashed = a boot-recovery close of a run orphaned by
-;; a pod crash (architecture crash-recovery), beyond the spec's clean reasons.
+;; Present iff :closed. :no-forms = the loop's empty-streak halt (the LLM
+;; produced no actionable forms for a streak of turns — a clean close to
+;; :idle, NOT a bound overrun). :crashed = a boot-recovery close of a run
+;; orphaned by a pod crash (architecture crash-recovery), beyond the spec's
+;; clean reasons.
 (schema/register! :seon.agent.run/closed-reason
                   [:enum :completed :waited :turn-limit :deadline-exceeded
-                         :terminated :superseded :error :crashed])
+                         :terminated :superseded :error :no-forms :crashed])
 
 ;; Stored entity kind — required attrs reflect what `open-run!` writes
 ;; unconditionally; everything conditional is {:optional true} (absent = no

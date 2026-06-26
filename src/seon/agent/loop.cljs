@@ -74,6 +74,17 @@
 ;; run, verb closes / supersede are already settled.
 ;; ============================================================
 
+(def no-forms-streak-limit
+  "Consecutive empty turns (an LLM completion that produced ZERO actionable
+   forms — pure prose/thinking) that close a run `:no-forms`. A STREAK guard,
+   not a single-turn trip: a turn or two of planning-before-acting is normal,
+   so the run only halts once the LLM has gone this many turns RUNNING without
+   emitting a single form. The run-model successor to the deleted wake-token
+   loop's empty-streak guard (which tolerated two 'thinking' turns and halted
+   on the third) — without it an unresponsive/looping LLM spins to the
+   turn-limit cap."
+  3)
+
 (defn- run-turn-count
   "How many turns are stamped with this run (the run's derived current-turn)."
   [run-eid]
@@ -84,11 +95,13 @@
       0))
 
 (defn- next-event
-  "Derive the loop event from the run's current data (no side effects).
-   One of :wait/:complete/:terminate (verb closed the run inside a turn),
-   :superseded (a newer run owns the agent), :pause, :turn-limit, :deadline,
-   or :turn-ok (run another turn)."
-  [id run-id]
+  "Derive the loop event from the run's current data + the consecutive
+   empty-turn `streak` (no side effects). One of :wait/:complete/:terminate
+   (verb closed the run inside a turn), :superseded (a newer run owns the
+   agent), :pause, :turn-limit, :deadline, :no-forms (the LLM produced zero
+   actionable forms for [[no-forms-streak-limit]] turns running), or :turn-ok
+   (run another turn)."
+  [id run-id streak]
   (let [snap   (run/snapshot {:seon.agent.run/id run-id})
         status (:seon.agent.run/status snap)
         reason (:seon.agent.run/closed-reason snap)]
@@ -99,8 +112,8 @@
         :completed  :complete
         :terminated :terminate
         :superseded :superseded
-        ;; a bound the loop already closed on (turn-limit/deadline/error) —
-        ;; nothing left to do.
+        ;; a bound the loop already closed on (turn-limit/deadline/error/
+        ;; no-forms) — nothing left to do.
         :superseded)
 
       (not (run/owns-run? {:seon.agent/id id :seon.agent.run/id run-id}))
@@ -118,6 +131,12 @@
       (run/deadline-passed? (:seon.agent.run/deadline snap) (js/Date.))
       :deadline
 
+      ;; The empty-streak guard: the LLM has produced no actionable forms for a
+      ;; full streak of turns — halt the spin (the run's still within both
+      ;; bounds, so nothing else would stop it short of the turn-limit cap).
+      (>= streak no-forms-streak-limit)
+      :no-forms
+
       :else :turn-ok)))
 
 (defn ^:async run-loop!
@@ -125,13 +144,17 @@
    carries `:seon.agent/id` / `:seon.agent/llm-fn` / `:seon.agent/compile-state`.
    A fold of [[seon.agent.fsm/transition]] over [[next-event]]: :turn-ok beats
    + runs a turn; the loop closes the run on the bounds it owns (:turn-limit /
-   :deadline / :error); verb closes (:wait/:complete/:terminate) and
-   :superseded are already settled (no re-close). Returns the final FSM state.
-   Errors are values — never throws into the trigger."
+   :deadline / :error / :no-forms); verb closes (:wait/:complete/:terminate)
+   and :superseded are already settled (no re-close). The consecutive empty-turn
+   STREAK is folded alongside the state: a turn with zero actionable forms
+   increments it, a productive turn resets it, and [[no-forms-streak-limit]]
+   empty turns close the run :no-forms (an unresponsive/looping LLM never spins
+   to the turn-limit). Returns the final FSM state. Errors are values — never
+   throws into the trigger."
   [{:seon.agent/keys [id] :as input} run-id]
   (await
-    (loop [state :running]
-      (let [event (next-event id run-id)]
+    (loop [state :running streak 0]
+      (let [event (next-event id run-id streak)]
         (cond
           (= :turn-ok event)
           (do
@@ -152,7 +175,24 @@
                              {:seon.agent.run/id            run-id
                               :seon.agent.run/closed-reason :error}))
                     (fsm/transition state :error))
-                (recur (fsm/transition state :turn-ok)))))
+                ;; A productive turn (any actionable form ⇒ eval-count > 0)
+                ;; resets the streak; a turn with zero forms extends it
+                ;; (next-event halts at the cap). eval-count counts ATTEMPTED
+                ;; forms (ok + failed), so a turn whose forms all ERRORED is NOT
+                ;; empty — it yields a next turn that shows the error.
+                (recur (fsm/transition state :turn-ok)
+                       (if (zero? (or (:seon.agent/eval-count r) 0))
+                         (inc streak)
+                         0)))))
+
+          (= :no-forms event)
+          (do (log id "halt"
+                   (str "no actionable forms for " no-forms-streak-limit
+                        " turns → close run :no-forms"))
+              (await (run/close-run!
+                       {:seon.agent.run/id            run-id
+                        :seon.agent.run/closed-reason :no-forms}))
+              (fsm/transition state :no-forms))
 
           (= :turn-limit event)
           (do (log id "halt" "turn-limit reached → close run")

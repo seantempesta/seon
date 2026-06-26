@@ -51,7 +51,7 @@
                        {:seon.agent/id "bbb-2606101200"}]}))
 
 (defn- derived [id]
-  (:seon.agent/state (agent/state-snapshot {:seon.agent/id id})))
+  (:seon.agent/state (agent/derive-status {:seon.agent/id id})))
 
 ;; ============================================================
 ;; Lifecycle verbs — wait / complete / pause / resume / terminate MUTATE the
@@ -105,7 +105,7 @@
 ;; ============================================================
 ;; pause/resume budget — pause BANKS deadline−now on :remaining-ms; resume
 ;; re-extends the deadline by the BANKED budget (not the default window), and
-;; the paused state-snapshot surfaces the frozen budget (not deadline−now).
+;; the paused derive-status surfaces the frozen budget (not deadline−now).
 ;; ============================================================
 
 (deftest pause-banks-remaining-ms-and-resume-re-extends-by-it
@@ -129,7 +129,7 @@
                     (is (<= 55000 banked 60000)
                         "banked ≈ 60s budget (allowing test execution slack)"))
                   (testing "the paused snapshot surfaces the FROZEN budget (FIX D)"
-                    (let [snap (agent/state-snapshot {:seon.agent/id "ccc-2606101200"})]
+                    (let [snap (agent/derive-status {:seon.agent/id "ccc-2606101200"})]
                       (is (= banked (:seon.agent.run/ms-remaining snap))
                           "ms-remaining = banked budget while paused, not deadline−now")))
                   (testing "resume re-extends by the banked budget, NOT the 10-min default"

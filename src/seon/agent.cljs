@@ -16,7 +16,7 @@
        `:seon.agent.run/*` in [[seon.agent.run]], `:seon.ctx/*` in [[seon.ctx]])
      - `derive-agent-state` / `armable-agent-ids` — the DERIVED-state seam:
        state is a projection of the run/terminated-at primitives, never stored
-     - `state-snapshot` — the agent fingerprint (full derived state in one map)
+     - `derive-status` — the agent fingerprint (full derived state in one map)
      - `inbound-msg-datom?` — the wake gate ([[seon.agent.loop]]'s trigger
        and the transcript head-render both reuse it)
      - `create!` / `boot!` — allocate the agent entity (boot! does NOT arm
@@ -316,7 +316,7 @@
 ;; DERIVED state — there is no stored `:seon.agent/state`. The FSM state is a
 ;; projection of the agent's primitives (terminated-at / open run / paused-at)
 ;; via [[seon.agent.fsm/derive-state]]. `derive-agent-state` is the lean
-;; hot-path read the loop + wake gate use; `state-snapshot` (below) is the
+;; hot-path read the loop + wake gate use; `derive-status` (below) is the
 ;; full fingerprint. Both delegate to [[seon.ctx/derived-state]] over a db
 ;; value (so the wake handler can derive from the listener's tx snapshot).
 ;; ============================================================
@@ -362,11 +362,12 @@
          vec)))
 
 ;; ============================================================
-;; Derived state-snapshot — the agent FINGERPRINT. ONE call returns the whole
-;; derived state from the record + cheap queries. State is DERIVED via
+;; Derived status — the agent FINGERPRINT. ONE call returns the whole derived
+;; state from the record + cheap queries. It is a pure DERIVED READ (no
+;; writes), NOT a captured snapshot. State is DERIVED via
 ;; [[seon.agent.fsm/derive-state]] over the primitives (terminated-at / the
 ;; current open run / the run's paused-at) — there is NO stored state. The
-;; snapshot's `:seon.agent/state` field is just the response-map key carrying
+;; status map's `:seon.agent/state` field is just the response-map key carrying
 ;; that DERIVED `:seon.agent.fsm/state` enum (:idle/:running/:paused/
 ;; :terminated). Run/turn/todo counts derive per call; a field whose source
 ;; doesn't exist yet is OMITTED (optional = absent, never nil).
@@ -446,13 +447,13 @@
            last
            first))))
 
-(schema/register! ::state-snapshot-request
+(schema/register! ::derive-status-request
   [:map
    [:seon.agent/id  :seon.db/id]
    ;; optional explicit wall-clock for ms-remaining (defaults to (js/Date.))
    [:seon.agent/now {:optional true} :inst]])
 
-(schema/register! :seon.agent/state-snapshot
+(schema/register! :seon.agent/derive-status
   [:map
    [:seon.agent/state                 :seon.agent.fsm/state]   ; DERIVED enum
    [:seon.agent/total-turns           :int]
@@ -468,13 +469,14 @@
    [:seon.agent.run/ms-remaining    {:optional true} :int]
    [:seon.agent.message/last-human-at {:optional true} :inst]])
 
-(defn state-snapshot
-  "The agent's full DERIVED state in one map (map-in / map-out). State comes
-   from [[seon.agent.fsm/derive-state]] over the primitives; run/turn/todo
-   fields derive from cheap queries. Run-scoped fields are present only while
-   there IS an open run; `:seon.agent/now` (optional) fixes the clock for
-   `ms-remaining`. A pure function of the DB — nothing stored."
-  {:malli/schema [:=> [:cat ::state-snapshot-request] :seon.agent/state-snapshot]}
+(defn derive-status
+  "The agent's full DERIVED status in one map (map-in / map-out). A pure
+   DERIVED READ — no writes; the name 'snapshot' wrongly implied captured
+   state. State comes from [[seon.agent.fsm/derive-state]] over the primitives;
+   run/turn/todo fields derive from cheap queries. Run-scoped fields are
+   present only while there IS an open run; `:seon.agent/now` (optional) fixes
+   the clock for `ms-remaining`. A pure function of the DB — nothing stored."
+  {:malli/schema [:=> [:cat ::derive-status-request] :seon.agent/derive-status]}
   [{id :seon.agent/id now :seon.agent/now}]
   (let [now           (or now (js/Date.))
         a             (db/entity {:seon.db/ref [:seon.agent/id id]})
