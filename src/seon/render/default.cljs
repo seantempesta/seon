@@ -22,8 +22,8 @@
    seon.agent → seon.render → seon.render.default is the one-way
    arrow; we do not close it."
   (:require
-    [seon.agent.fsm :as fsm]
     [seon.db :as db]
+    [seon.derive :as derive]
     [seon.log :as log]
     [seon.ui.components :as comp]))
 
@@ -188,48 +188,17 @@
               :seon.log/level :error
               :seon.log/agent id})))
 
-(defn ^:no-doc agent-turn-count
-  "Derived turn count for an agent: the number of turns across ALL its runs —
-   queries agent ← run (`:seon.agent.run/agent`) ← turn (`:seon.agent.turn/run`)
-   against `db`. Query-based (not reverse-ref nav) so it works on the plain
-   pulled/touched agent maps the callers hold. Derived here rather than
-   requiring `seon.agent` (which would close the dependency cycle)."
-  [db id]
-  (or (db/query {:seon.db/db db
-                 :seon.db/query
-                 '[:find (count ?t) . :in $ ?aid
-                   :where
-                   [?a :seon.agent/id ?aid]
-                   [?r :seon.agent.run/agent ?a]
-                   [?t :seon.agent.turn/run ?r]]
-                 :seon.db/args [id]})
-      0))
-
-;; `all-running-agents` deleted (agent-fsm redesign U1) — the inspector
-;; pulls the one agent entity it needs directly; the armable-roster query
-;; lives once in `seon.agent/armable-agent-ids` (state ≠ :terminated).
+;; Turn-count + derived-state are the [[seon.derive]] leaf — `view` (and the
+;; inspector) call `seon.derive/agent-turn-count` / `seon.derive/derive-state`
+;; with the db value they hold. They were duplicated here only to dodge the
+;; seon.agent require cycle; the armable-roster lives once in
+;; `seon.derive/armable-agent-ids` (state = :idle).
 
 ;; ============================================================
 ;; VIEW — the default :seon.render/html. Agent-tile dashboard:
 ;; status dot + agent id + turn count + error banner + recent msgs.
 ;; Phosphor Terminal palette via seon.ui.components.
 ;; ============================================================
-
-(defn ^:no-doc derived-state
-  "The agent's DERIVED FSM state (:idle/:running/:paused/:terminated) from a
-   lazy entity against `db` — projects terminated-at / open run / paused-at via
-   [[seon.agent.fsm/derive-state]]. Local here to keep the seon.agent cycle
-   open (the inspector + tile share this read; mirrors `seon.ctx/derived-state`)."
-  [db id]
-  (let [a     (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
-        run   (:seon.agent/run a)
-        open? (= :open (:seon.agent.run/status run))]
-    (fsm/derive-state
-      (cond-> {:seon.agent.run/open? open?}
-        (:seon.agent/terminated-at a) (assoc :seon.agent/terminated-at
-                                             (:seon.agent/terminated-at a))
-        (:seon.agent.run/paused-at run) (assoc :seon.agent.run/paused-at
-                                               (:seon.agent.run/paused-at run))))))
 
 (defn view
   "Default :seon.render/html renderer. System fn → takes system input
@@ -238,8 +207,8 @@
    Returns `{:seon.render/hiccup [...]}`."
   {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [state (derived-state db id)
-        turns (agent-turn-count db id)
+  (let [state (derive/derive-state db id)
+        turns (derive/agent-turn-count db id)
         msgs  (recent-messages db id 5)
         errs  (recent-errors db id 5)]
     {:seon.render/hiccup

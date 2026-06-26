@@ -47,6 +47,7 @@
     [seon.ctx :as ctx]
     [seon.ctx.usage :as ctx-usage]
     [seon.db :as db]
+    [seon.derive :as derive]
     [seon.agent.inspect :as inspect]
     [seon.log :as log]
     [seon.render :as render]
@@ -118,8 +119,8 @@
          sort
          (mapv (fn [id]
                  {:seon.agent/id         id
-                  :seon.agent/state      (default/derived-state db id)
-                  :seon.agent/turn-count (default/agent-turn-count db id)})))))
+                  :seon.agent/state      (derive/derive-state db id)
+                  :seon.agent/turn-count (derive/agent-turn-count db id)})))))
 
 (declare data-scan)
 
@@ -296,8 +297,8 @@
         ;; fragments render. (Was a whole-roster scan via the deleted
         ;; default/all-running-agents.)
         agent (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]})
-        state (default/derived-state db agent-id)
-        turn-count (default/agent-turn-count db agent-id)]
+        state (derive/derive-state db agent-id)
+        turn-count (derive/agent-turn-count db agent-id)]
     {:ai-text   (or text "")
      :agent-state state
      :agent-turn-count turn-count
@@ -909,8 +910,8 @@
         ent (db/entity {:seon.db/db db
                         :seon.db/ref [:seon.agent/id agent-id]})]
     {:agent       ent
-     :agent-state (default/derived-state db agent-id)
-     :agent-turn-count (default/agent-turn-count db agent-id)
+     :agent-state (derive/derive-state db agent-id)
+     :agent-turn-count (derive/agent-turn-count db agent-id)
      :tile     (:seon.render/hiccup
                  (render/render-agent-tile {:seon.db/db db
                                             :seon.agent/id agent-id}))

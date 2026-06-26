@@ -1,6 +1,6 @@
 (ns seon.agent-loop-test
   "The RUN-MODEL loop — `seon.agent.loop/run-loop!` as a fold of
-   `fsm/transition` over events derived from the run's data. Drives the REAL
+   `seon.agent.loop/transition` over events derived from the run's data. Drives the REAL
    loop (real eval-batch, real run mutations — nothing mocked but the LLM
    text) and pins:
 
@@ -443,3 +443,28 @@
                       "exactly the one fresh run (the exhausted message opened none)"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ── The FSM transition table — pure, no db. It lives WITH the loop that
+;;    folds it ([[seon.agent.loop/transition]]). ──
+
+(deftest transition-follows-the-table
+  (is (= :running    (loop/transition :idle :trigger)))
+  (is (= :running    (loop/transition :running :turn-ok)))
+  (is (= :idle       (loop/transition :running :wait)))
+  (is (= :idle       (loop/transition :running :complete)))
+  (is (= :idle       (loop/transition :running :turn-limit)))
+  (is (= :idle       (loop/transition :running :deadline)))
+  (is (= :idle       (loop/transition :running :superseded)))
+  (is (= :idle       (loop/transition :running :error)))
+  (is (= :idle       (loop/transition :running :no-forms)) "empty-streak halt closes clean")
+  (is (= :paused     (loop/transition :running :pause)))
+  (is (= :terminated (loop/transition :running :terminate)))
+  (is (= :running    (loop/transition :paused :resume)))
+  (is (= :terminated (loop/transition :paused :terminate))))
+
+(deftest unknown-event-leaves-the-state-unchanged
+  (is (= :running    (loop/transition :running :resume)) "resume isn't valid in running")
+  (is (= :idle       (loop/transition :idle :complete)) "complete isn't valid in idle")
+  (is (= :paused     (loop/transition :paused :turn-ok)) "turn-ok isn't valid in paused")
+  (is (= :terminated (loop/transition :terminated :trigger)) "terminal absorbs everything")
+  (is (= :terminated (loop/transition :terminated :resume))))

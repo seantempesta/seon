@@ -1,10 +1,10 @@
 (ns seon.agent.loop
   "The agent LOOP — the wake trigger + the run-driven fold.
 
-   The loop is a FOLD of [[seon.agent.fsm/transition]] over events derived
-   from the RUN's data. A trigger (an inbound message) opens a RUN
-   ([[seon.agent.run/open-run!]]); `run-loop!` then drives turns until a
-   bound fires or a verb closes the run:
+   The loop is a FOLD of [[transition]] (the FSM transition table, which lives
+   HERE with the loop that folds it) over events derived from the RUN's data.
+   A trigger (an inbound message) opens a RUN ([[seon.agent.run/open-run!]]);
+   `run-loop!` then drives turns until a bound fires or a verb closes the run:
 
      each iteration `next-event` derives the event from the run:
        - run already :closed (a verb ran inside a turn) → :wait / :complete /
@@ -14,7 +14,7 @@
        - turn-count ≥ turn-limit (the WORK bound)         → :turn-limit
        - now > deadline (the WALL-CLOCK bound)            → :deadline
        - else                                             → :turn-ok
-     `(fsm/transition state event)` gives the next state; the EFFECT of
+     `(transition state event)` gives the next state; the EFFECT of
        :turn-ok is `beat!` + `run-turn!`; the LOOP closes the run on
        :turn-limit/:deadline/:error (the bounds it owns), while verb closes
        and supersede are already handled (no re-close). The loop ends when the
@@ -32,16 +32,17 @@
    two simultaneous idle wakes can't both open, the loser's open returns the
    db error envelope and it RENEWS the winner's run instead (no orphaned run).
 
-   Requires `seon.agent` (the wake gate `inbound-msg-datom?` + derived-state),
-   `seon.agent.run` (the run lifecycle), `seon.agent.turn` (`run-turn!`). The
-   boot path (`seon.client`) requires THIS ns to `install-wake-trigger!`."
+   Requires `seon.agent` (the wake gate `inbound-msg-datom?`), `seon.derive`
+   (the one derived-state/turn-count leaf), `seon.agent.run` (the run
+   lifecycle), `seon.agent.turn` (`run-turn!`). The boot path (`seon.client`)
+   requires THIS ns to `install-wake-trigger!`."
   (:require
     [seon.agent :as agent]
-    [seon.agent.fsm :as fsm]
     [seon.agent.run :as run]
     [seon.agent.schedule :as schedule]
     [seon.agent.turn :as turn]
     [seon.db :as db]
+    [seon.derive :as derive]
     [seon.log :as seon-log]
     [seon.schema :as schema]
     [seon.warn :as warn]))
@@ -51,6 +52,43 @@
     (str "seon.agent.loop/" agent-id)
     stage
     (if (= 1 (count info)) (first info) (vec info))))
+
+;; ============================================================
+;; The FSM transition table — the whole machine as one value. It lives WITH
+;; the loop that folds it: [[run-loop!]] reads the RUN's data, derives an
+;; event, and folds [[transition]] over the run state. The derived STATE enum
+;; (:idle/:running/:paused/:terminated) is `:seon.derive/state` — a pure
+;; projection of the run/terminated-at primitives ([[seon.derive/derive-state]]),
+;; never stored.
+;; ============================================================
+
+(schema/register! :seon.agent.loop/event
+  [:enum :trigger :turn-ok :wait :complete :turn-limit :deadline
+         :superseded :error :no-forms :pause :terminate :resume])
+
+(def transitions
+  "The whole FSM as data — `{state {event → next-state}}`. A wake (`:trigger`)
+   opens a run (`:idle`→`:running`); verbs/bounds/fences close it back to
+   `:idle`; `:pause`/`:resume` hold without killing; `:terminate` is terminal.
+   An event absent from a state's row leaves the state unchanged (see
+   [[transition]])."
+  {:idle       {:trigger :running}
+   :running    {:turn-ok    :running :wait     :idle :complete   :idle
+                :turn-limit :idle    :deadline :idle :superseded :idle
+                :error      :idle    :no-forms :idle :pause      :paused
+                :terminate  :terminated}
+   :paused     {:resume :running :terminate :terminated}
+   :terminated {}})
+
+(defn transition
+  "The single transition function: `(state, event) → next-state`. An event
+   that is not in `state`'s row leaves the state unchanged (e.g. `:resume`
+   while `:running`, or anything while `:terminated`)."
+  {:malli/schema [:=> [:catn [:seon.derive/state :seon.derive/state]
+                             [:seon.agent.loop/event :seon.agent.loop/event]]
+                  :seon.derive/state]}
+  [state event]
+  (get-in transitions [state event] state))
 
 ;; ============================================================
 ;; Process-local loop-input registry — agent-id → the `input` map
@@ -69,7 +107,7 @@
 (defonce ^:private !loop-input (atom {}))
 
 ;; ============================================================
-;; The loop — a fold of fsm/transition over run-derived events. Each
+;; The loop — a fold of [[transition]] over run-derived events. Each
 ;; iteration re-reads the run; :turn-ok runs a turn, the bounds close the
 ;; run, verb closes / supersede are already settled.
 ;; ============================================================
@@ -84,15 +122,6 @@
    on the third) — without it an unresponsive/looping LLM spins to the
    turn-limit cap."
   3)
-
-(defn- run-turn-count
-  "How many turns are stamped with this run (the run's derived current-turn)."
-  [run-eid]
-  (or (db/query {:seon.db/query
-                 '[:find (count ?t) . :in $ ?run
-                   :where [?t :seon.agent.turn/run ?run]]
-                 :seon.db/args [run-eid]})
-      0))
 
 (defn- next-event
   "Derive the loop event from the run's current data + the consecutive
@@ -122,9 +151,7 @@
       (:seon.agent.run/paused-at snap)
       :pause
 
-      (run/turn-limit-reached? (run-turn-count
-                                 (:db/id (db/entity
-                                           {:seon.db/ref [:seon.agent.run/id run-id]})))
+      (run/turn-limit-reached? (derive/run-turn-count @db/*conn* run-id)
                                (:seon.agent.run/turn-limit snap))
       :turn-limit
 
@@ -142,7 +169,7 @@
 (defn ^:async run-loop!
   "Drive agentic turns for `run-id` until the FSM leaves :running. `input`
    carries `:seon.agent/id` / `:seon.agent/llm-fn` / `:seon.agent/compile-state`.
-   A fold of [[seon.agent.fsm/transition]] over [[next-event]]: :turn-ok beats
+   A fold of [[seon.agent.transition]] over [[next-event]]: :turn-ok beats
    + runs a turn; the loop closes the run on the bounds it owns (:turn-limit /
    :deadline / :error / :no-forms); verb closes (:wait/:complete/:terminate)
    and :superseded are already settled (no re-close). The consecutive empty-turn
@@ -174,13 +201,13 @@
                     (await (run/close-run!
                              {:seon.agent.run/id            run-id
                               :seon.agent.run/closed-reason :error}))
-                    (fsm/transition state :error))
+                    (transition state :error))
                 ;; A productive turn (any actionable form ⇒ eval-count > 0)
                 ;; resets the streak; a turn with zero forms extends it
                 ;; (next-event halts at the cap). eval-count counts ATTEMPTED
                 ;; forms (ok + failed), so a turn whose forms all ERRORED is NOT
                 ;; empty — it yields a next turn that shows the error.
-                (recur (fsm/transition state :turn-ok)
+                (recur (transition state :turn-ok)
                        (if (zero? (or (:seon.agent/eval-count r) 0))
                          (inc streak)
                          0)))))
@@ -192,32 +219,32 @@
               (await (run/close-run!
                        {:seon.agent.run/id            run-id
                         :seon.agent.run/closed-reason :no-forms}))
-              (fsm/transition state :no-forms))
+              (transition state :no-forms))
 
           (= :turn-limit event)
           (do (log id "halt" "turn-limit reached → close run")
               (await (run/close-run!
                        {:seon.agent.run/id            run-id
                         :seon.agent.run/closed-reason :turn-limit}))
-              (fsm/transition state :turn-limit))
+              (transition state :turn-limit))
 
           (= :deadline event)
           (do (log id "halt" "deadline passed → close run")
               (await (run/close-run!
                        {:seon.agent.run/id            run-id
                         :seon.agent.run/closed-reason :deadline-exceeded}))
-              (fsm/transition state :deadline))
+              (transition state :deadline))
 
           (= :superseded event)
           (do (log id "halt" "superseded — a newer run owns the agent")
-              (fsm/transition state :superseded))
+              (transition state :superseded))
 
           ;; :wait / :complete / :terminate / :pause — the run is already
           ;; closed/paused by the verb; the loop just stops, recording the
           ;; FSM state the verb moved to.
           :else
           (do (log id "halt" (str "verb — " (name event)))
-              (fsm/transition state event)))))))
+              (transition state event)))))))
 
 (defn ^:async ^:private renew-current-run!
   "Renew the agent's CURRENT open run's lease — the new message extends both
@@ -277,7 +304,7 @@
                  " (agent↔agent ping-pong guard). A human message"
                  " resets the chain (hops 0)."))))
       (when (seq waking)
-        (let [state (agent/derive-agent-state {:seon.agent/id id :seon.db/db db})
+        (let [state (derive/derive-state db id)
               ;; The message that caused this wake (the run's cause ref on an
               ;; :idle open). The first waking datom's eid — the others, if
               ;; any, are absorbed by the same run's lease.
@@ -486,7 +513,7 @@
 (schema/register! :seon.agent.loop/activity-entry
   [:map
    [:seon.agent.loop/at          :inst]
-   [:seon.agent/state            :seon.agent.fsm/state]
+   [:seon.agent/state            :seon.derive/state]
    [:seon.agent.loop/stop-reason {:optional true} :seon.agent.run/closed-reason]
    [:seon.agent.loop/cause       {:optional true} :string]])
 
@@ -498,8 +525,9 @@
    by `:seon.agent.run/started-at`. Map-in, map-out.
 
    Each entry: `:seon.agent.loop/at` (the run's started-at), `:seon.agent/state`
-   (the run's projected state — :terminated when closed :terminated, :running
-   while open, else :idle), the run's `:seon.agent.loop/stop-reason`
+   (the run's projected state via [[seon.derive/state-from-primitives]] —
+   :terminated when closed :terminated, :paused when the open run is paused,
+   :running while open, else :idle), the run's `:seon.agent.loop/stop-reason`
    (= `:seon.agent.run/closed-reason` when closed), and — when the run was a
    `:message` trigger — `:seon.agent.loop/cause` (the waking message's content).
    A function of the DB; no stored log to clear."
@@ -526,10 +554,16 @@
                        cause    (some-> (:db/id (:seon.agent.run/cause r))
                                         db/entity
                                         :seon.agent.message/content)
-                       state    (cond
-                                  (= reason :terminated) :terminated
-                                  open?                  :running
-                                  :else                  :idle)]
+                       ;; DERIVE the per-run state via the ONE rule so :paused
+                       ;; (an open run carrying paused-at) is included — map a
+                       ;; closed-:terminated run to a terminated-at primitive.
+                       state    (derive/state-from-primitives
+                                  (cond-> {:seon.agent.run/open? open?}
+                                    (= reason :terminated)
+                                    (assoc :seon.agent/terminated-at started)
+                                    (:seon.agent.run/paused-at r)
+                                    (assoc :seon.agent.run/paused-at
+                                           (:seon.agent.run/paused-at r))))]
                    (cond-> {:seon.agent.loop/at    started
                             :seon.agent/state      state}
                      reason (assoc :seon.agent.loop/stop-reason reason)

@@ -1,7 +1,7 @@
 (ns seon.agent-lifecycle-test
   "Agent lifecycle for the RUN MODEL (feature/agent-fsm cutover): state is
    DERIVED from the agent's primitives (terminated-at / open run / paused-at)
-   via `fsm/derive-state` — there is NO stored `:seon.agent/state`. The
+   via `seon.derive/derive-state` — there is NO stored `:seon.agent/state`. The
    lifecycle verbs MUTATE the run; the derived state follows.
 
    Pins the invariants the boot + loop paths depend on:

@@ -58,7 +58,6 @@
   (:require
     [clojure.string :as str]
     [cljs.reader :as edn]
-    [seon.agent.fsm :as fsm]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
@@ -283,33 +282,10 @@
    `seon.agent.run/default-turn-limit`."
   20)
 
-(defn current-run
-  "The agent's CURRENT OPEN run entity (lazy) — navigates `:seon.agent/run`
-   and returns it only when it resolves to an `:open` run, else nil. Optional
-   `db` value (the composer's snapshot)."
-  ([agent-id] (current-run agent-id nil))
-  ([agent-id db]
-   (let [a (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
-                             db (assoc :seon.db/db db)))
-         r (:seon.agent/run a)]
-     (when (and r (= :open (:seon.agent.run/status r))) r))))
-
-(defn derived-state
-  "The agent's DERIVED FSM state (:idle/:running/:paused/:terminated) via
-   [[seon.agent.fsm/derive-state]] over its primitives — `terminated-at`,
-   whether it has an OPEN run, and that run's `paused-at`. The ONE reader the
-   readline / inspector / loop-gate share. Optional `db` snapshot."
-  ([agent-id] (derived-state agent-id nil))
-  ([agent-id db]
-   (let [a   (db/entity-lazy (cond-> {:seon.db/ref [:seon.agent/id agent-id]}
-                               db (assoc :seon.db/db db)))
-         run (current-run agent-id db)]
-     (fsm/derive-state
-       (cond-> {:seon.agent.run/open? (some? run)}
-         (:seon.agent/terminated-at a) (assoc :seon.agent/terminated-at
-                                              (:seon.agent/terminated-at a))
-         (:seon.agent.run/paused-at run) (assoc :seon.agent.run/paused-at
-                                                (:seon.agent.run/paused-at run)))))))
+;; `current-run` + `derived-state` are the [[seon.derive]] leaf — call
+;; `seon.derive/current-run` / `seon.derive/derive-state` with the db value the
+;; caller holds (the readline + inspector + loop + wake gate all share that one
+;; rule). They were duplicated here only to dodge the agent→ctx→render cycle.
 
 (defn agent-turns
   "ALL `:seon.agent.turn` entities (lazy) the agent owns, oldest-first by

@@ -59,7 +59,7 @@
     [seon.agent.lifecycle]
     ;; The agent loop + wake trigger: the client boot path ARMS the wake
     ;; trigger (seon.agent does NOT, to stay acyclic).
-    [seon.agent.loop :as fsm]
+    [seon.agent.loop :as agent-loop]
     ;; The run lifecycle — the bootstrap turn-0 opens a run for its turn.
     [seon.agent.run :as run]
     ;; Cron-as-data — required so its `:seon.agent.schedule/*` register! calls
@@ -211,7 +211,7 @@
   (rearm-wake-triggers!)
   ;; Re-arm the ONE ticker so a hot reload doesn't stack timers and the tick
   ;; body runs just-reloaded code (idempotent — clears the prior interval).
-  (fsm/install-ticker!)
+  (agent-loop/install-ticker!)
   (start-heartbeat!))
 
 ;; ---------------------------------------------------------------------------
@@ -1908,7 +1908,7 @@
    Everything is derived, nothing stored: agent ids from the DB
    (`seon.agent/armable-agent-ids`), compile-state from the idempotent
    `repl/ensure-bootstrap!`, llm-fn rebuilt via `current-llm-fn`.
-   `fsm/install-wake-trigger!` is itself idempotent (unlistens the
+   `agent-loop/install-wake-trigger!` is itself idempotent (unlistens the
    prior key), so re-running per reload is safe.
 
    Fire-and-forget from `after-reload` (which is sync): returns a
@@ -1934,7 +1934,7 @@
                   ;; but re-hosting is idempotent and keeps the two
                   ;; rosters trivially in sync).
                   (runtime-id/host! id)
-                  (fsm/install-wake-trigger!
+                  (agent-loop/install-wake-trigger!
                     {:seon.agent/id            id
                      :seon.agent/llm-fn        llm-fn
                      :seon.agent/compile-state compile-state}))
@@ -1952,7 +1952,7 @@
 (defn- ^:async boot-one-agent!
   "The per-agent slice of the boot path: prime the agent's home
    namespace (atoms + accessors), create/refresh its entity (`agent/boot!`),
-   ARM the wake trigger (`fsm/install-wake-trigger!` — the client owns this so
+   ARM the wake trigger (`agent-loop/install-wake-trigger!` — the client owns this so
    seon.agent stays acyclic), and `runtime-id/host!` the id so
    `mcp__seon_cljs__eval agent_id=<id>` pins this pod. Runs inside its own
    `with-agent` scope so every transact carries the right agent-id. Returns
@@ -1979,7 +1979,7 @@
                        " — no entity; propagating the error envelope")
                   res)
                 res)
-            (do (fsm/install-wake-trigger!
+            (do (agent-loop/install-wake-trigger!
                   {:seon.agent/id            id
                    :seon.agent/llm-fn        llm-fn
                    :seon.agent/compile-state compile-state})
@@ -2318,7 +2318,7 @@
                 ;; The ONE ticker — the only active machinery (deadline
                 ;; watchdog + schedule firing). Single instance + idempotent;
                 ;; re-armed on hot reload (after-reload above).
-                _ (fsm/install-ticker!)]
+                _ (agent-loop/install-ticker!)]
             (log/info-console! "seon.client" "agents started"
                                {:resumed resumed-ids :minted minted-ids
                                 :port port :port-file port-file})

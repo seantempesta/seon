@@ -24,6 +24,7 @@
     [clojure.string :as str]
     [seon.agent.run :as run]
     [seon.db :as db]
+    [seon.derive :as derive]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -263,16 +264,6 @@
   [d]
   (Math/floor (/ (.getTime d) 60000)))
 
-(defn- agent-idle?
-  "Is the agent :idle — not terminated AND with no open run (the only state a
-   schedule may fire in)? Derived straight from the run primitives so this ns
-   need not require seon.agent."
-  [id]
-  (let [a (db/entity {:seon.db/ref [:seon.agent/id id]})]
-    (and (some? a)
-         (nil? (:seon.agent/terminated-at a))
-         (nil? (run/current-run {:seon.agent/id id})))))
-
 (defn- fired-this-minute?
   "Does agent `agent-eid` already have a `:schedule`-triggered run STARTED in
    the same wall-clock minute as `now`? The double-fire guard."
@@ -323,7 +314,7 @@
         {:seon.agent.schedule/fired fired}
         (let [a-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))
               fire? (and a-eid
-                         (agent-idle? id)
+                         (derive/agent-idle? @db/*conn* id)
                          (not (fired-this-minute? a-eid now))
                          (boolean
                            (some #(due? {:seon.agent.schedule/cron %
@@ -341,7 +332,7 @@
                   ;; agent-idle? above and this open (the wake race), so the
                   ;; CAS lost. If a run now exists that's the cause — skip
                   ;; quietly. Otherwise it's a real failure worth surfacing.
-                  (when-not (run/current-run {:seon.agent/id id})
+                  (when-not (derive/current-run @db/*conn* id)
                     (js/console.error
                       (str "seon.agent.schedule/fire-due-schedules!: open-run! "
                            "FAILED for " id ": "

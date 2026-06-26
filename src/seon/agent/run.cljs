@@ -20,10 +20,12 @@
    Dependency direction (acyclic): it transacts via `seon.db` directly and
    references `:seon.agent/*` keywords from the global registry (no require —
    the id slot is typed `:seon.db/id`, not `:seon.agent/id`, so this ns has NO
-   load-time dependency on seon.agent). seon.agent requires THIS ns for its
-   derive-status, so the edge runs agent → run, never the reverse."
+   load-time dependency on seon.agent). It requires the [[seon.derive]] leaf so
+   `current-run` is a thin `*conn*` adapter over the one derivation; seon.agent
+   requires THIS ns, so the edge runs agent → run → derive, never the reverse."
   (:require
     [seon.db :as db]
+    [seon.derive :as derive]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -40,7 +42,7 @@
 (schema/register! :seon.agent.run/deadline   :inst)          ; WALL-CLOCK bound (absolute)
 (schema/register! :seon.agent.run/last-beat-at :inst)        ; heartbeat (liveness; per turn)
 ;; Pause marker: presence on the OPEN run ⇒ derived state :paused (read by
-;; seon.agent.fsm/derive-state via the agent's derive-status).
+;; seon.derive/derive-state via the agent's primitives).
 (schema/register! :seon.agent.run/paused-at  :inst)
 ;; Wall-clock budget banked at pause time (deadline − now). `resume!` re-extends
 ;; `deadline` by this so a long pause never blows the clock bound the instant
@@ -155,14 +157,12 @@
 (defn current-run
   "The agent's CURRENT open run entity (the `:seon.agent/run` pointer, if it
    resolves to an `:open` run), or nil. A plain touched map; drill its refs
-   via follow-up reads."
+   via follow-up reads. A `*conn*`-reading map-in convenience over the one
+   derivation leaf [[seon.derive/current-run]] — callers that already hold a
+   db value call `seon.derive/current-run` directly with it."
   {:malli/schema [:=> [:cat ::current-run-request] [:maybe :map]]}
   [{id :seon.agent/id}]
-  (let [a       (db/entity {:seon.db/ref [:seon.agent/id id]})
-        run-eid (:db/id (:seon.agent/run a))]
-    (when run-eid
-      (let [r (db/entity run-eid)]
-        (when (= :open (:seon.agent.run/status r)) r)))))
+  (derive/current-run @db/*conn* id))
 
 (schema/register! ::owns-run-request
   [:map

@@ -38,6 +38,7 @@
     [seon.agent.run :as run]
     [seon.ctx :as ctx]
     [seon.db :as db]
+    [seon.derive :as derive]
     [seon.render :as render]))
 
 (def transcript-char-budget
@@ -283,12 +284,12 @@
    something is wrong."
   [{:seon.agent/keys [id] db :seon.db/db}]
   (let [db      (or db @db/*conn*)
-        state   (ctx/derived-state id db)
+        state   (derive/derive-state db id)
         cur-ns  (ctx/current-ns {:seon.agent/id id :seon.db/db db})
         ns-str  (if (keyword? cur-ns) (name cur-ns) (str cur-ns))
         turns   (ctx/agent-turns id db)
         n-turns (count turns)
-        run     (ctx/current-run id db)
+        run     (derive/current-run db id)
         run-eid (:db/id run)
         ;; loop-k = turns stamped with the CURRENT open run (the run's
         ;; derived current-turn); 0 when idle. cap = the run's bumpable

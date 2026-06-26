@@ -56,7 +56,7 @@
    closed-reason. Returns `:idle` on success, a loud error envelope on a
    failed transact, no agent in scope, or no open run."
   {:malli/schema [:=> [:catn [::note :string]]
-                  [:or :seon.agent.fsm/state :seon.db/transact-response]]}
+                  [:or :seon.derive/state :seon.db/transact-response]]}
   [note]
   (if-let [id (db/current-agent-id)]
     (if-let [r (run/current-run {:seon.agent/id id})]
@@ -75,7 +75,7 @@
    The result is a MESSAGE, not a state. Returns `:idle` on success, the error
    envelope on a failed transact, no agent in scope, or no open run."
   {:malli/schema [:=> [:catn [::result :string]]
-                  [:or :seon.agent.fsm/state :seon.db/transact-response]]}
+                  [:or :seon.derive/state :seon.db/transact-response]]}
   [result]
   (if-let [id (db/current-agent-id)]
     (if-let [r (run/current-run {:seon.agent/id id})]
@@ -98,7 +98,7 @@
    (→ derived `:paused`) and bank the remaining wall-clock budget. `resume`
    re-extends the deadline by it. Returns `:paused` on success, the error
    envelope on a failed transact, no agent in scope, or no open run."
-  {:malli/schema [:=> [:catn] [:or :seon.agent.fsm/state :seon.db/transact-response]]}
+  {:malli/schema [:=> [:catn] [:or :seon.derive/state :seon.db/transact-response]]}
   []
   (if-let [id (db/current-agent-id)]
     (if-let [r (run/current-run {:seon.agent/id id})]
@@ -116,7 +116,7 @@
    with nothing folding turns. Returns `:running` on success, the error
    envelope on a failed transact (incl. a not-actually-paused run), no agent in
    scope, or no open run."
-  {:malli/schema [:=> [:catn] [:or :seon.agent.fsm/state :seon.db/transact-response]]}
+  {:malli/schema [:=> [:catn] [:or :seon.derive/state :seon.db/transact-response]]}
   []
   (if-let [id (db/current-agent-id)]
     (if-let [r (run/current-run {:seon.agent/id id})]
@@ -135,7 +135,7 @@
    `:terminated`. Orchestrator-only; an agent does not terminate itself.
    Returns `:terminated` on success, the error envelope on a failed transact."
   {:malli/schema [:=> [:catn [::id :seon.agent/id]]
-                  [:or :seon.agent.fsm/state :seon.db/transact-response]]}
+                  [:or :seon.derive/state :seon.db/transact-response]]}
   [id]
   (let [r   (run/current-run {:seon.agent/id id})
         env (await (db/transact!

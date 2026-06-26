@@ -233,7 +233,9 @@ else is reachable from it or derived. Full schema:
   `:terminated` if `terminated-at` exists, else `:idle` if no open run, else
   `:paused` if the open run has a `paused-at` marker, else `:running`. Every
   primitive (the open run, `paused-at`, `terminated-at`) is its own control axis;
-  state is just their projection.
+  state is just their projection — the ONE projection rule is
+  `seon.derive/derive-state`, in the acyclic `seon.derive` leaf every consumer
+  (loop, ctx, render, inspector, schedule) reads.
 - **run** (`:seon.agent.run/*`) — the bounded unit of work a trigger opens:
   `started-at`, `trigger {:message/:schedule}`, `cause`, `deadline` (wall-clock
   bound), `status`, `closed-reason`, `last-beat-at` (heartbeat). The run-id is
@@ -245,9 +247,12 @@ else is reachable from it or derived. Full schema:
   `origin {:human/:agent/:core}` (human inbound auto-mints a todo;
   hop-exhausted = dead-letter); todos are the work items.
 
-**Derived (the `state-snapshot` fingerprint)** — current turn (count), turns- &
-ms-remaining, total turns, last-closed-reason, last-human-at, next-fire-at, open
-todos, unread inbound. One call fingerprints the whole agent.
+**Derived (the `seon.derive/derive-status` fingerprint)** — derived state,
+current turn (count), turns- & ms-remaining, turn-limit, deadline, total turns,
+last-beat-at, last-closed-reason, last-human-at, open-todo count, plus the open
+run's status/trigger. One call fingerprints the whole agent; it composes the
+same `seon.derive` primitives (`derive-state`, `current-run`, `run-turn-count`,
+…) every other surface reads.
 
 ## The execution model
 
@@ -256,11 +261,13 @@ parts worth borrowing: a **defined initial state, one transition function, the
 FSM as data** (no channels: CLJS channels are single-threaded, so they buy no
 parallelism; isolation is the worker tier).
 
-- **Transitions are a data table** (`{state {event → mutation}}`) — each
-  transition mutates a primitive (open/close/pause a run, set `terminated-at`);
-  the agent's state is *derived* from those primitives, never stored. The machine
-  is inspectable/renderable, and the loop is a fold of `transition` over events
-  derived from the run's data each iteration.
+- **Transitions are a data table** (`{state {event → next-state}}`) —
+  `seon.agent.loop/transitions` + `transition`, living with the loop that folds
+  them. The effect of each event mutates a primitive (open/close/pause a run,
+  set `terminated-at`); the agent's state is *derived* from those primitives via
+  `seon.derive/derive-state`, never stored. The machine is inspectable/renderable,
+  and the loop is a fold of `transition` over events derived from the run's data
+  each iteration.
 - **Triggering is reactive:** a wake (an inbound message, or a due schedule via
   the ticker) opens a run if the agent is `:idle`; if already `:running`, the
   new data is absorbed by the running run's window. Fencing (run-id) means two
@@ -299,7 +306,7 @@ no loader shim. Tier-2 microVMs mount the store read-only via virtio-fs.
 ## Build phases
 
 1. **Phase 1 — the data-driven loop** (mechanism-agnostic): run model +
-   transition-table FSM + cron-as-data + the `state-snapshot` fingerprint +
+   transition-table FSM + cron-as-data + the `derive-status` fingerprint +
    the run-status render section, single-process on a fresh world. Fully
    testable; the worker/edge/Tier-2 layers slot in additively.
 2. **Phase 2 — Tier-1 worker isolation:** offload `eval-batch!` to the warm
