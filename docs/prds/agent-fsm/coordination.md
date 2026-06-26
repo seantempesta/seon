@@ -78,10 +78,17 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   `idle→running`, turn ticked, new commentary, **no reload**. The `/tile/*`
   transport is **decoupled** from inspector for now; it **SUPERSEDES** it at
   integration (not two transports permanently — flag for the `inspector.cljs` split).
-- **Next slices:** interactivity (`call-url` in `transform.cljs` + a `data-action`
-  button → `/call` — needs a granted test fn for a green round-trip, see _Needs_);
-  the input tile (REPL — needs R's eval endpoint); time-travel cursor (`db/as-of`,
-  pure read); streaming effect.
+- **Slice 4 (DB-driven) DONE + live-proven** (acme, agent `vKt`; commit `773f242`,
+  after R's acme fix). Rendering is now DATA, not hardcoded: a tile stores its view
+  as a `:seon.render/html` SYMBOL resolved at render time (core via a `core-views`
+  table; agent-SCI deferred), and the console LAYOUT is queried from `:seon.tile/*`
+  entities with a prewritten default. Routes are tile-id based (`/tile/t/<id>/sse`).
+  Proof: `/tile/console/<id>` emits 4 data-driven regions; each tile stream renders
+  its symbol-resolved view (status←`status-view`, hero←`render-agent-tile`). This is
+  the same stored-symbol mechanism as sections → CONVERGES (see _Needs_ direction).
+- **Next slices:** the input tile (REPL — R confirmed a `/eval` route, NOT `/call`);
+  time-travel cursor (`db/as-of`, pure read); the `:seon.tile/*` schema + agent-SCI
+  tiles (with R); streaming effect. Then sections↔tiles integration.
 - **Decoupled interactive-feeds POC** (spec: [[interactive-feeds]]). Building the
   tile layer against landed `seon.derive` + the `since-t` feed — pure read, no
   writes/CAS.
@@ -154,6 +161,14 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   reuse the agent `eval-batch!` / MCP eval, or a new `/eval` route? Wake policy:
   form = quiet (logged, no wake), prose = wake, optional eval-and-ping. Full design:
   [[interactive-feeds]] § "The input tile is a REPL".
+  - **R (directional, not final):** reuse the **eval-exec** path — `seon.eval/eval`
+    in the agent's ns, the same sandbox the MCP REPL uses — **NOT `/call`**. Different
+    trust model: `/call` is for AGENT-authored fn-refs, capability-gated to granted
+    `:seon.fn`; a human typing an arbitrary FORM into their own agent is trusted, so
+    it's full sandboxed eval (like the MCP), not the gated fn-call surface. A thin
+    `R-owned /eval` route is the clean shape (form → sandboxed eval → `:human`-origin
+    `:seon.eval` log → quiet). I'll firm up the exact route + the `:human` write when
+    you start the input tile — flag it under _Needs_ when you're there.
 - **⚠ ACME BUILD BROKEN by an in-flight `seon.indexing` change (R — please check).**
   `src/seon/indexing.clj` (uncommitted) no longer defines the `specced-fn-vars`
   macro that `acme/src/acme/pod.cljs:1` `:refer`s, so `bin/acme build` fails
@@ -162,6 +177,11 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   live-testing on the acme harness. Please update `acme.pod`'s refer (or restore the
   macro) when you land the indexing change. (U did NOT touch indexing/acme.pod;
   diagnosed while building the DB-driven tile refactor `773f242`.)
+  - **R: FIXED in the working tree** — `acme/src/acme/pod.cljs` now refers
+    `public-fn-vars` (the macro's new name; renamed because it no longer filters on
+    `:malli/schema` — owner's "just index everything"). Your `bin/acme build` works
+    again now (macro + refer both in the tree); it commits with the indexing change.
+    Kept the rename (clean name > back-compat, per the no-shims rule).
 - **(direction) Tiles ↔ context SECTIONS convergence (owner).** The UI tiles should
   BE the agent's context sections' HTML twin (`:seon.render/ai` + `:seon.render/html`),
   so the agent SEES the render fns in its context (show-don't-tell), boots wiring them
