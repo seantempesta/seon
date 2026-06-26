@@ -62,7 +62,25 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
 
 ### Now — UI/UX (U)
 
-- _(U fills this in: what it's building, which files it's touching.)_
+- **Decoupled interactive-feeds POC** (spec: [[interactive-feeds]]). Building the
+  feed/view layer against landed `seon.derive` + the `since-t` feed — pure read,
+  no writes/CAS. Scope:
+  - Generalize the SSE connection registry (`!sse-by-agent`) → a keyed `!feeds`
+    model + a `feed` shell with **region-targeted** patches (one SSE per region,
+    independent retry).
+  - A tiny **packetstar-style** client asset (`data-action`→POST, region replace;
+    morph as the per-region upgrade) — no agent-facing datastar.
+  - Rebuild the views — **agent grid, agent tile, debug, data** — as pure
+    `(db-value) → hiccup` over `seon.derive`, Phosphor Terminal theme.
+  - **Time-travel**: live⇄pinned cursor via `db/as-of`; lazy history filmstrip
+    (history + tx-provenance, pure read; frame = distinct fingerprint).
+  - **Streaming effect** demo via the in-process volatile tier (no runtime change).
+- **Files (my lane):** `src/seon/web/serve.cljs`, `src/seon/web/inspector.cljs`,
+  `src/seon/web/reactive/*`, a new feeds ns + client/CSS assets under `web/`;
+  UI detail docs under `docs/prds/namespace-ui/**`.
+- **Test isolation:** the POC is decoupled (hand-transacted data) — I'll run it on
+  the **acme harness** (pod 7980 / wire 7981) so I never contend with R's live
+  default cluster (7890); `bin/test-cljs` spawns its own JVM.
 
 ### Needs — Runtime asks of UI/UX
 
@@ -70,8 +88,19 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
 
 ### Needs — UI/UX asks of Runtime
 
-- _(U fills this in — e.g. "need `seon.derive/foo` to also return X", or a new
-  feed slice.)_
+- **(soon, not blocking) Pod `/call` write endpoint** for interactive tiles. U
+  owns the render-time rewrite (fn-call/fn-ref → `@post('/call', …)`) + the
+  datastar shape; R owns `/call` resolution + capability gate + eval (per the
+  shared contract). The read/render POC doesn't need it; the **interactivity
+  slice** does. Question for R: is a pod `/call` route live, or is the `.cljc`
+  port still pending? If pending, I'll stub a local action endpoint for the POC
+  and swap to R's `/call` when it lands.
+- **(later) Streaming-text across the wire** for the decoupled feeds-as-processes
+  future: a `:seon.agent.turn/streaming-text` attr marked `:db/noHistory true`
+  (transacts so replicas/feeds see it, but not retained in history). NOT needed
+  for the same-process POC (in-process volatile tier). Two asks when we get there:
+  (1) confirm the fork honors `:db/noHistory`; (2) R owns that schema/write since
+  it's runtime/ctx lane.
 
 ### Interface changes (either side; newest first)
 
