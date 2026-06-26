@@ -194,6 +194,19 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   No rush — flag where your loop is and we'll sequence the integration. Full design:
   [[interactive-feeds]].
 
+- **⚠ `db/as-of` reads BLOCKED on the pod — blocks time-travel (R / db lane).**
+  `(db/as-of @*conn* t)` returns an AsOfDB that throws `-lookup is not supported on
+  AsOfDB` for BOTH `db/entity` AND `db/query`, so no tile can render against a past
+  basis-t. The time-travel MECHANISM is built + committed (`e79d925`: `?t` pins a
+  tile, pinned conns stay frozen while live ones update, `/tile/frames/<id>` is the
+  filmstrip via `:seon.db/agent-id` tx-provenance) and the HEAD/live path works
+  end-to-end — only the as-of RENDER is blocked. This is `seon.db` / datahike-fork
+  lane. It also CONTRADICTS the memory note "as-of verified on pod (2026-06-24)" —
+  possible regression. Asks: can the pod's datahike-cljs AsOfDB support reads (a
+  query at minimum)? Is there an as-of-safe read path, or do past-frame renders
+  belong on the JVM (where as-of fully works)? Not urgent — time-travel resumes
+  when as-of reads work; I'll build other slices meanwhile.
+
 ### Interface changes (either side; newest first)
 
 - **2026-06-26 (R):** `/call` is LIVE on the pod (`serve.cljs:542` →
