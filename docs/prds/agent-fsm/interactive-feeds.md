@@ -136,6 +136,35 @@ stateful inputs: swap that region's apply-step from replace to **morph**
 region; the POC defaults to replace + isolation and reaches for morph only where
 proven necessary. This is the one open client decision (below).
 
+### The input tile is a REPL (form → eval, prose → message)
+
+The input tile is the human's REPL prompt — **symmetric with the agent**, whose
+context already *is* "a REPL session over the DB" (it writes forms that eval and
+prose that doesn't). One bar, two modes, dispatched by parsing the input:
+
+- **A Clojure form → eval.** Runs through the **same sandboxed exec service** as
+  agent eval / `/call` interactions (one mechanism, capability-gated), in the
+  **current agent's context** — the human shares the agent's capability surface and
+  DB view. The result renders back, and the eval is logged as a `:human`-origin
+  `:seon.eval` event.
+- **Natural-language prose → message.** Transacted as an inbound `:human` message →
+  **wakes** the agent (the existing wake-on-inbound path).
+
+The unification: a user eval is a `:human` event in the **same event log the
+agent's transcript renders**, so the **agent sees what the human did** on its next
+turn — no special channel, just render-of-DB. Human and agent are symmetric actors
+in one shared REPL over the bitemporal DB; the **commentary tile is that shared
+transcript** (messages + evals from both). This retroactively justifies
+"chat → commentary": it was never chat, it is the shared REPL log.
+
+Wake policy: a **form evals quietly** (logged, not a wake); **prose wakes**; an
+optional modifier (eval-and-ping) wakes the agent to react to an eval when wanted.
+
+Lane: the user-eval execution + the `:human` `:seon.eval` write are a WRITE through
+the sandbox — **R-owned** (same family as `/call`). U owns the input-tile UI and
+the form-vs-prose dispatch (which endpoint to POST). See *Needs* in
+`coordination.md`.
+
 ## Time-travel — Snap-to-Tx for views (free, via `as-of`)
 
 The loop already threads ONE frozen db value per turn (Snap-to-Tx, [[architecture]]).
@@ -144,6 +173,14 @@ A feed does the same: it renders against a **basis-t**.
 - **Live feed** — basis-t = HEAD; re-render on each (coalesced) tx.
 - **Pinned feed** — basis-t = `T`; render `(db/as-of T)`; ignores new commits. A
   pinned feed does **no reactive work** — render once, then idle.
+- **Scrubber granularity — both, per-tile is the primitive.** Each tile owns its
+  cursor (live/`as-of`), so per-tile back/forward is free. The **whole-screen
+  scrubber is a master** that broadcasts one `basis-t` to every tile at once (one
+  writer + total tx order ⇒ `as-of(T)` is coherent across all tiles). Default:
+  all tiles live; global arrows move everything together; a per-tile
+  **follow-global ⇄ pinned** toggle lets one tile hold a past frame while the rest
+  track HEAD. Per-tile steps through that tile's fingerprint change-points; global
+  steps through their union.
 - **A frame is a distinct rendered fingerprint** — not a distinct tx. Most txes
   don't change a given tile; identical output ⇒ no new frame. This dissolves the
   "most txes are unrelated to this render" problem: the live path lets the client

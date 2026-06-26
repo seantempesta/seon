@@ -51,7 +51,8 @@
     [seon.log :as log]
     [seon.platform :as platform]
     [seon.web.inspector :as inspector]
-    [seon.web.reactive.call :as call]))
+    [seon.web.reactive.call :as call]
+    [seon.web.tile :as tile]))
 
 ;; ============================================================
 ;; Process-lifetime state
@@ -529,6 +530,7 @@
                  (str/starts-with? path "/js/")     (serve-static! res path)
                  (= path "/sse")                    (open-sse! req res)
                  (inspector/route? path)            (inspector/handle! req res path)
+                 (tile/route? path)                 (tile/handle! req res path)
                  :else                              (write-status! res 404 "text/plain; charset=utf-8"
                                                                    (str "Not found: " url)))
         "POST" (if-not (same-origin? req)
