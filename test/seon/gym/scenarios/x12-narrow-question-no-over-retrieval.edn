@@ -70,7 +70,16 @@
   {:seon.gym.predicate/id     :both-agents-end-idle
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :terminates
-   :seon.gym.predicate/query  [:find ?a :where [?a :seon.agent/state :idle]]
+   ;; idle is DERIVED, never a stored :seon.agent/state datom: an agent is
+   ;; idle iff not terminated and owns NO open run (the run's close retracts
+   ;; :seon.agent/run → derived :idle). Both agents idle = 2 rows.
+   :seon.gym.predicate/query  [:find ?a
+                               :where
+                               [?a :seon.agent/id _]
+                               (not [?a :seon.agent/terminated-at _])
+                               (not-join [?a]
+                                 [?r :seon.agent.run/agent ?a]
+                                 [?r :seon.agent.run/status :open])]
    :seon.gym.predicate/expect [:count 2]}
   {:seon.gym.predicate/id        :judge-dentist-name
    :seon.gym.predicate/kind      :llm-judge

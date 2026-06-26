@@ -36,8 +36,9 @@
    :seon.gym.predicate/query  [:find ?e :where [?e :my.subscription/monthly-usd _]]
    :seon.gym.predicate/expect [:count>= 5]}
   ;; DISCOVERY: B's first message-driven eval is a seon.db read op — the
-  ;; carved FSM scopes "message-driven" on :seon.agent.turn/wake, so the
-  ;; bootstrap turn 0 is excluded and this measures B's first real move.
+  ;; run model scopes "message-driven" on :seon.agent.run/cause (the
+  ;; bootstrap run carries no cause), so turn 0 is excluded and this
+  ;; measures B's first real move.
   {:seon.gym.predicate/id      :b-discovery-reads-store-first
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/agent   :b
@@ -58,7 +59,16 @@
   {:seon.gym.predicate/id     :both-agents-end-idle
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :terminates
-   :seon.gym.predicate/query  [:find ?a :where [?a :seon.agent/state :idle]]
+   ;; idle is DERIVED, never a stored :seon.agent/state datom: an agent is
+   ;; idle iff not terminated and owns NO open run (the run's close retracts
+   ;; :seon.agent/run → derived :idle). Both agents idle = 2 rows.
+   :seon.gym.predicate/query  [:find ?a
+                               :where
+                               [?a :seon.agent/id _]
+                               (not [?a :seon.agent/terminated-at _])
+                               (not-join [?a]
+                                 [?r :seon.agent.run/agent ?a]
+                                 [?r :seon.agent.run/status :open])]
    :seon.gym.predicate/expect [:count 2]}
   ;; --- judged answer correctness, SEPARATE from the behavior legs ---
   {:seon.gym.predicate/id        :judge-total-and-max

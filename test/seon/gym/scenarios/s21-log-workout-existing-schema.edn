@@ -85,7 +85,11 @@
    :seon.gym.predicate/axis   :terminates
    :seon.gym.predicate/query  [:find ?a
                                :where
-                               [?a :seon.agent/state :idle]]
+                               [?a :seon.agent/id _]
+                              (not [?a :seon.agent/terminated-at _])
+                              (not-join [?a]
+                                [?r :seon.agent.run/agent ?a]
+                                [?r :seon.agent.run/status :open])]
    :seon.gym.predicate/expect :non-empty}
   {:seon.gym.predicate/id     :terminates-under-cap
    :seon.gym.predicate/kind   :datalog

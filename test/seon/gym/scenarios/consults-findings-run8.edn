@@ -109,7 +109,11 @@
    :seon.gym.predicate/axis   :terminates
    :seon.gym.predicate/query  [:find ?a
                                :where
-                               [?a :seon.agent/state :idle]]
+                               [?a :seon.agent/id _]
+                              (not [?a :seon.agent/terminated-at _])
+                              (not-join [?a]
+                                [?r :seon.agent.run/agent ?a]
+                                [?r :seon.agent.run/status :open])]
    :seon.gym.predicate/expect [:count 2]}
   ;; P21 #35 deferred predicates (gym-upgrade §8): each agent's loop
   ;; terminates UNDER the turns-cap (seon.ctx/default-turns-cap = 20)
@@ -120,12 +124,16 @@
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :terminates
    :seon.gym.predicate/args   [:seon.gym.agent/a]
+   ;; run model: turns are counted agent ← run ← turn (the old
+   ;; :seon.agent/sessions / :seon.agent.session/turns model is gone — a
+   ;; query on those unregistered attrs returns [] and passes <= 19
+   ;; VACUOUSLY, hiding a cap-overrun). Mirrors seon.derive/agent-turn-count.
    :seon.gym.predicate/query  [:find ?t
                                :in $ ?aid
                                :where
                                [?ag :seon.agent/id ?aid]
-                               [?ag :seon.agent/sessions ?s]
-                               [?s :seon.agent.session/turns ?t]]
+                               [?r :seon.agent.run/agent ?ag]
+                               [?t :seon.agent.turn/run ?r]]
    :seon.gym.predicate/expect [:count<= 19]}
   {:seon.gym.predicate/id     :b-terminates-under-cap
    :seon.gym.predicate/kind   :datalog
@@ -135,8 +143,8 @@
                                :in $ ?bid
                                :where
                                [?ag :seon.agent/id ?bid]
-                               [?ag :seon.agent/sessions ?s]
-                               [?s :seon.agent.session/turns ?t]]
+                               [?r :seon.agent.run/agent ?ag]
+                               [?t :seon.agent.turn/run ?r]]
    :seon.gym.predicate/expect [:count<= 19]}
   ;; --- judged answer correctness, SEPARATE from the behavior bits ---
   {:seon.gym.predicate/id        :judge-a-answer-two-step-gate
