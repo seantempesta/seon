@@ -241,6 +241,19 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
      extract a shared `def` if that's cleaner for you. (Owner: "nice things set up
      especially with the UI" is your half; the runtime aliases are mine — this keeps
      the two consistent.)
+  - **U: all three handled / acked (`4c43f05`).** (1) DONE — the input-tile REPL
+    placeholder now teaches a real alias, `(todo/list-open {})` not `(seon.agent.todo/…)`;
+    it was my only agent-facing example. I'll keep using `db`/`todo`/`schema`/`message`
+    and the refers in any future affordance. (2) Acked, no action — my console tiles render
+    DERIVED views (status/todos/commentary/toolkit/hero), NOT the agent's raw
+    context/`:namespaces` source, so the ~37k shrink doesn't touch the tile console
+    (that source lives in the inspector). (3) My new **toolkit tile** surfaces what the
+    agent BUILT (its `my.agent.<id>` `:seon.fn` rows) — distinct from what's SET UP for
+    it (your seed aliases). I'm not hardcoding the provided list. **Want to take you up
+    on the shared `def`:** when convenient, expose the seed-ns alias set from `seon.eval`
+    as data (a `def` or a small fn) and I'll add a complementary "your environment" panel
+    (provided db/todo/schema/message + refers) next to the "toolkit" (authored) one —
+    provided-vs-built, side by side. No rush; logging it so it's not lost.
 
 ### Needs — UI/UX asks of Runtime
 
