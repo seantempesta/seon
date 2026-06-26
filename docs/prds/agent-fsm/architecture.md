@@ -23,9 +23,23 @@ reversible). The loop is data; the context is a render of data; the UI is a
 reactive projection of data.
 
 It is **dual-track** — a CLJ **JVM server** (DB writer + render/serve + Integrant
-lifecycle, data-only) and CLJS **agent executors** (isolated), sharing `.cljc`
-(schema, `derive-state`, the transition table). This **revives the JVM** as the
-convergence always intended; it is not a CLJS-only effort.
+lifecycle + heavy processing, data-only) and CLJS **agent executors** (isolated),
+sharing the `.cljc` **schema** layer. The derived-state rule and the transition
+table are CLJS (`seon.derive` / `seon.agent.loop`), reached from the device the
+same way every read is — over the wire against the replica. This **revives the
+JVM** as the convergence always intended; it is not a CLJS-only effort.
+
+**Client/server is the shape, and it already exists in miniature.** The pod is a
+**read-only datahike replica** of the single JVM **writer** (reads local off the
+replica, writes forwarded over the wire). The end-state generalizes this: agent
+clusters run on user devices, each a replica the writer feeds datoms to —
+**indexes are materialized once per cluster**, all writes forwarded to the one
+writer (total order). A **local "system" cluster** does system work; **user
+clusters** do local data processing. The fixes below are the prerequisites for
+that, not obstacles to it (a threaded db *value* is location-agnostic; the CAS
+work-fence is arbitrated at the single writer; `since-t` replay is the
+network-blip recovery primitive). *Needs baking* (see below): a tiered
+local-write path for offline.
 
 ## Deployment topology
 
@@ -44,6 +58,7 @@ convergence always intended; it is not a CLJS-only effort.
    │  interactions → returns DATA (hiccup/result/tx).  Tier 1 worker+SCI | Tier 2 microVM │
    └──────────────────────────────────────────────────────────────────────────────┘
    (live-tile / debug / chat are FEEDS the JVM renders from agent data, not units)
+
 ```
 
 - **The JVM is "the server" — several roles, infra for free.** One JVM hosts the
@@ -95,6 +110,19 @@ aggregate. The reactive loop, end to end:
    via datastar `merge-fragment` **only if the hash changed**.
 5. Browser patches that part of the DOM.
 
+**Two channels on the wire, different reliability.** Reads / writes / heavy calls
+(`q`/`transact`/`pull`/`knn-search` — embeddings included) ride a **request-reply
+RPC** that is reliable by construction (only *values* cross — `:db.fn/cas` is
+data and crosses fine, closures can't). The **tx feed** that fans commits out is a
+separate broadcast; it is now **lossless across reconnect** — each subscriber
+tracks a basis-t watermark and re-subscribes with `since-t`, and the writer
+replays the gap from its bitemporal tx-log (per-subscriber, no pod-singleton). A
+dropped feed event used to be treated as "harmless — re-read latest"; that holds
+for rendering but is fatal for the **wake edge** (the event *is* the trigger to
+act), which `since-t` now closes. Within a run the loop reads the store itself
+each turn, so the feed's only jobs are **waking idle agents** and **driving the
+renderer**.
+
 **Units never serve HTTP to the browser and never talk to each other** — they
 write only *facts* to the DB. The **web renderer** is the single front door: it
 owns the SSE connections and derives every fragment from DB state on demand —
@@ -143,6 +171,21 @@ one dead tile (auto-retried via fetch backoff + `data-on:online__window`), not a
 black screen. Seon already serves per-region SSE (`/agent/<id>/sse`, `/debug/sse`,
 …). New: a feed registry, pod-side compression (Node zlib; JVM has brotli),
 HTTP/2 via Caddy to lift the ~6-connection cap for large walls.
+
+**The renderer is a ROLE, not a single process.** "Single front door" means
+*units never serve the browser and untrusted code never runs in the renderer* —
+not "one OS process." A feed is `subscribe → derive → hash → push`, and both
+halves are now first-class: `seon.derive` is a process-portable read layer (pure
+`(db, id)`, requires only `seon.db`) and the feed is a per-subscriber
+`since-t`-replayable subscription. So the video-wall horizontally splits into **N
+independent feed-processes** — each loads the same compiled bundle, an **env-var
+picks its entry point** (one feed), and it is a **read-only replica plus
+`seon.derive` plus one feed subscription**: simpler than the agent pod (no writer, no loop, no
+echo-suppression) and **live-restartable** (rejoins via `since-t`, no lost
+events). *Needs baking* (see below): the actual fan-out into separate processes is
+the deferred Feeds feature + the microVM snapshot-fork — today they are N SSE
+streams inside the one pod, but the collapse removed the couplings that would
+have made the split a rewrite.
 
 ### Interactivity — agent fn-calls → predictable datastar → the owning VM
 
@@ -268,10 +311,26 @@ parallelism; isolation is the worker tier).
   `seon.derive/derive-state`, never stored. The machine is inspectable/renderable,
   and the loop is a fold of `transition` over events derived from the run's data
   each iteration.
+- **The turn is a value-transform — "Snap-to-Tx"** *(derive leaf + this model
+  landed; per-turn threading + work-fence = Unit 2, in progress).* Each turn
+  threads ONE frozen db value (re-read once at the top) through `next-event` +
+  the prompt render + the bound checks, so the LLM reasons over a single
+  consistent basis-t; the next turn re-reads the latest store (single writer ⇒ it
+  sees every other writer's commits — never a private world). Every WORK tx
+  (`beat!`, `open-turn!`, `eval-batch!`) LEADS with an in-tx
+  `[:db.fn/cas [:seon.agent/id id] :seon.agent/run [run R] [run R]]`: the
+  *database*, not a pre-read predicate, tells the loop it has lost authority — if
+  a watchdog/human/newer run moved the pointer the tx aborts and the work never
+  lands (live-proven). This replaces the old `owns-run?` check-then-act pre-read
+  and fences the eval batch that was previously unfenced.
 - **Triggering is reactive:** a wake (an inbound message, or a due schedule via
   the ticker) opens a run if the agent is `:idle`; if already `:running`, the
-  new data is absorbed by the running run's window. Fencing (run-id) means two
-  wakes can't both start a loop.
+  new data is absorbed by the running run's window. Fencing is two-layered: the
+  OPEN race is a `:db.fn/cas` on `:seon.agent/run` being *absent* (two wakes can't
+  both open — single-writer serialized); the WORK is fenced by the per-tx CAS
+  above (a superseded run's writes are rejected at commit). A stop between turns
+  exits cleanly at the next `next-event`; a stop mid-turn is rejected at the CAS
+  (hard-aborting an in-flight LLM call is Phase-2 worker-kill).
 - **Two bounds, externally enforced:** the loop stops at `turn ≥ turn-limit`;
   the **ticker** (one periodic timer — the only active piece, since the DB is
   passive about wall-clock) fires due schedules and `terminate()`s runs past
@@ -300,8 +359,16 @@ no loader shim. Tier-2 microVMs mount the store read-only via virtio-fs.
   never replay. Bound the *view* (query a window), not the storage.
 - **Not QuickJS-WASM / Wasmtime for eval** — prior spikes found `cljs.js` broken
   under QuickJS + non-reproducible build; a WASM guest can't do realtime npm.
-- **Native primitives that are free** — fencing (run-id), dead-letter
-  (hop-exhausted datoms), event stream (tx-log), "state at T" (datahike as-of).
+- **Native primitives that are free** — fencing (in-tx `:db.fn/cas`), dead-letter
+  (hop-exhausted datoms), event stream (tx-log + `since`-replay), "state at T"
+  (datahike `as-of`).
+- **Port datahike/Datomic primitives — don't roll our own.** `seon.db` is the
+  sole DB API; we surface and use the fork's primitives (`as-of`/`since`/
+  `tx-range`/`:db.fn/cas`/`d/with`) instead of reinventing coordination, caching,
+  or replay. Agents don't know datahike internals, so a hand-rolled version drifts
+  from reality (e.g. *do not memoize on a db value — `equiv-db` walks the EAVT
+  index and faults konserve nodes in; key on basis-t*). Read the fork; the mindset
+  and source map live in [[datahike-primer]].
 
 ## Build phases
 
@@ -319,13 +386,17 @@ no loader shim. Tier-2 microVMs mount the store read-only via virtio-fs.
 **Correctness gaps to fix during build** (from validation —
 [[architecture-validation-gemini-2026-06-25]]):
 
-- **Buffer worker writes, commit on the main thread atomically** after the
-  worker returns — this is the keystone fix: it closes both the *fencing bypass*
-  (agent eval can `transact!` without an `owns-run?` check) and the *in-flight
-  split-brain* (a terminated worker leaving a half-committed write). Single most
-  important structural decision.
-- **Reconnect replay** — `subscribe-tx` needs a `since-t` basis, or a UDS drop
-  silently loses wake messages → an agent sits `:idle` with unread mail.
+- **Fencing bypass — RESOLVED (Unit 2):** every WORK tx (`beat!`/`open-turn!`/
+  `eval-batch!`) now LEADS with the in-tx `:db.fn/cas` work-fence, so a superseded
+  run's writes (including the eval batch, previously unfenced) abort at commit —
+  no more "agent eval `transact!`s without an ownership check." The remaining
+  *in-flight split-brain* half (a terminated worker leaving a half-committed
+  write) folds into **Phase-2 worker isolation**: the worker's writes are buffered
+  and committed atomically through the same fenced tx after it returns.
+- **Reconnect replay — RESOLVED (Unit 3):** `subscribe-tx` takes a `since-t`; each
+  subscriber tracks a basis-t watermark and replays the gap from the writer's
+  tx-log on reconnect, so a UDS drop no longer loses wake messages. (Full
+  two-process drop-UDS live-proof pending; logic proven in isolation.)
 - **Offload the agent's prompt render to its worker** (not just `eval-batch!`) —
   a big context render shouldn't block the main event loop. (The *view* render is
   the web-renderer component's job, already off the agent's hot path.)
@@ -339,8 +410,9 @@ so a long pause no longer insta-kills on resume.
 orphaned `:open` runs `:crashed` → `:idle`, live-proven via `kill -9`); `open-run!`
 ends with a `[:db.fn/cas … :seon.agent/run nil …]` so a second concurrent wake's tx
 aborts (single-writer serialized); `store/wire.cljs` fires each tx-feed listener on its
-own `setTimeout 0`. Still open: **reconnect-since-t replay** + the **keystone worker-write
-buffer** (Phase 2).
+own `setTimeout 0`. Now also resolved: **reconnect-since-t replay** (Unit 3) and the
+**fencing bypass** (Unit 2's in-tx CAS work-fence). Still open: the **worker-write
+buffer** (the in-flight split-brain half), folded into Phase-2 worker isolation.
 
 **Resolved decisions** (no longer open): sliding cap is **derived** (window =
 `default-turn-limit` + inbound-count; stored `turn-limit-override` only on an
@@ -353,11 +425,40 @@ value + whether deadline-less runs are allowed; `parent`/`llm-meta` disposition;
 dead-letter clear/age-out; thin Tauri webview vs on-device replica timing; edge
 scaling for multi-user (each edge = a read-replica + relay).
 
+## Not yet — needs baking before implementing
+
+Designed-or-implied above but deliberately NOT built; the model is sound and the
+fixes don't preclude them, but each needs a real trigger or an open decision
+first. (Marked *needs baking* at their mention.)
+
+- **Tiered local writes for offline.** All writes forward to the single writer
+  today (and LLM calls already require network). A local-write tier — buffer
+  writes on-device, replay to the writer when the link returns — is additive at
+  the wire seam but needs a conflict model and is gated on local models or an
+  accepted offline window. Don't build until offline is a real requirement.
+- **Multi-process feed fan-out.** The renderer-as-N-processes model is designed
+  but unbuilt; it lands with the Feeds feature + the microVM snapshot-fork (boot
+  the bundle once, fast-restore per feed/agent, env-var entry point). Gated on the
+  microVM experiment (`research/microvm-isolation-experiment.md`).
+- **A named function-call RPC registry.** The wire is already a values-only
+  op-RPC (`q`/`transact`/`knn-search`); turning the op surface into a first-class
+  "expose a JVM fn as a wire-callable, Malli-validated by its schema" registry is
+  ergonomics, not correctness — defer until the op list grows enough to hurt.
+- **Phase-2 per-agent isolation** (worker_threads/SCI then microVM) — gated on the
+  microVM experiment; until it lands, eval stays in-process and the worker-write
+  buffer (the in-flight split-brain half of the keystone) waits with it.
+
 ## Detail docs
 
 - [[agent-runtime-spec]] — full schema + the run model + the FSM table.
 - [[single-render-path-design-2026-06-25]] — one render → twin → transact →
   reactive inspector.
+- [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset
+  (db is a value, only values cross the wire, CAS-as-assertion, basis-t caching,
+  where to read in the fork). Read before touching the loop.
+- [[abstractions-review-2026-06-26]] — the Snap-to-Tx collapse; §8 is the locked
+  model (per-turn db-value threading, the in-tx CAS work-fence, the `seon.derive`
+  leaf, the feed/RPC channel split).
 - `research/execution-mechanism-loop-vs-flow-2026-06-25.md` — loop vs flow vs
   DB-queue; the two-step worker plan.
 - `research/worker-threads-spike-2026-06-25.md` — measured worker cost +
