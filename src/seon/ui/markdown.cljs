@@ -82,6 +82,17 @@
       (swap! acc conj (subs text @last-end)))
     (if (empty? @acc) [text] @acc)))
 
+(defn inline
+  "Parse one line of markdown `text` into a SEQ of inline hiccup children —
+   `**bold**`, `*italic*`, `` `code` ``, `[link](url)` — with NO block `<p>`
+   wrapper and no paragraph margins. For tight one-line surfaces (a tile title,
+   a status line). SPLICE the result into the parent element with `into`
+   (`(into [:span {…}] (inline s))`); a parent must never hold the seq as a
+   single child. Use `md->hiccup` for multi-line block content."
+  {:malli/schema [:=> [:catn [::text :string]] [:sequential :any]]}
+  [text]
+  (inline->hiccup text))
+
 ;; ============================================================
 ;; Block parsing — group lines into blocks (headings, paragraphs,
 ;; lists, code fences) then render each.

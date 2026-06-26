@@ -116,7 +116,8 @@
       ;; `min-w-0 break-all` wraps a long agent id rather than clipping it off
       ;; the right edge of a narrow (phone) panel.
       [:span {:class "text-2xs text-text-500 min-w-0 break-all text-right"} id]]
-     [:div {:class "text-sm text-text-50 font-medium leading-tight mb-3 break-words"} (or purpose "—")]
+     (into [:div {:class "text-sm text-text-50 font-medium leading-tight mb-3 break-words"}]
+           (md/inline (or purpose "—")))
      [:div {:class "grid grid-cols-3 gap-2 text-2xs"}
       (metric "turns" turns)
       (metric "todos" todos)
@@ -145,7 +146,7 @@
                                       (case origin :human "text-info" :agent "text-eval"
                                         "text-text-500"))}
                    (case origin :human "›you" :agent "‹agent" "·core")]
-                  [:span {:class "text-text-200"} (clip content 120)]])]
+                  (into [:span {:class "text-text-200"}] (md/inline (clip content 120)))])]
     ;; `max-h-[55vh]` (not `h-full`) so this bounds itself + scrolls internally
     ;; inside the now-scrolling rail, instead of trying to fill the whole column.
     [:div {:class "rounded border border-base-700 bg-base-850 p-3 max-h-[55vh] flex flex-col min-h-0"}
@@ -155,26 +156,42 @@
        [:div {:class "text-xs text-text-500"} "no messages yet"])]))
 
 (defn todos-view
-  "The agent's todos — open first."
+  "The agent's todos — open first. A todo carrying a `:seon.agent.todo/message`
+   back-ref is MESSAGE-ORIGIN (the human-inbound auto-todo): it renders as
+   `✉ Respond: \"…\"` so a reply is the obvious next move, distinct from the
+   plain ☐/☑ of agent-created todos. Message-origin is read INLINE here via
+   `get-else` (the ref's eid is truthy, the `false` default means absent)."
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (let [me   (agent-eid db id)            ; query-based → time-travel-safe
         rows (when me
                (db/query {:seon.db/db db
                           :seon.db/query
-                          '[:find ?status ?title
+                          '[:find ?status ?title ?msg
                             :in $ ?me
                             :where
                             [?t :seon.agent.todo/owner ?me]
                             [?t :seon.agent.todo/status ?status]
-                            [?t :seon.agent.todo/title ?title]]
+                            [?t :seon.agent.todo/title ?title]
+                            [(get-else $ ?t :seon.agent.todo/message false) ?msg]]
                           :seon.db/args [me]}))
         open (count (filter #(= :open (first %)) rows))
-        row  (fn [[status title]]
-               [:div {:class "text-xs leading-tight flex items-start gap-1.5"}
-                [:span {:class (if (= :open status) "text-warning" "text-success")}
-                 (if (= :open status) "☐" "☑")]
-                [:span {:class (if (= :open status) "text-text-200" "text-text-500 line-through")}
-                 (clip title 80)]])]
+        row  (fn [[status title msg]]
+               (let [open? (= :open status)
+                     ;; truthy eid = has a message back-ref → message-origin
+                     msg?  (boolean msg)
+                     tcls  (if open? "text-text-200" "text-text-500 line-through")
+                     ;; the title as inline markdown; message-origin quotes it
+                     ;; after a "Respond:" affordance.
+                     body  (md/inline (clip title 80))
+                     kids  (if msg?
+                             (concat [[:span {:class "text-info font-medium mr-1"} "Respond:"]
+                                      "“"]
+                                     body ["”"])
+                             body)]
+                 [:div {:class "text-xs leading-tight flex items-start gap-1.5"}
+                  [:span {:class (cond msg? "text-info" open? "text-warning" :else "text-success")}
+                   (cond msg? "✉" open? "☐" :else "☑")]
+                  (into [:span {:class tcls}] kids)]))]
     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
      [:div {:class "flex items-center justify-between mb-2"}
       [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "todos"]
@@ -209,7 +226,8 @@
                   [:div {:class "min-w-0"}
                    [:span {:class "text-text-100 font-medium"} (short sym)]
                    (when (seq doc)
-                     [:span {:class "text-text-500 ml-1 break-words"} (clip doc 64)])]])]
+                     (into [:span {:class "text-text-500 ml-1 break-words"}]
+                           (md/inline (clip doc 64))))]])]
     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
      [:div {:class "flex items-center justify-between mb-2"}
       [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "toolkit"]
