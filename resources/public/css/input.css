@@ -327,6 +327,13 @@ details.tool-call-details[open] .tool-preview {
   .seon-tile-compact { display: none; }
   .seon-tile-expanded { display: block; }
 }
+/* The console HERO is the agent's PRIMARY surface, not a grid-cell preview, so
+   it always shows the rich EXPANDED face — never the clamped, text-clipping
+   compact face — regardless of container width (phones included). Scoped to
+   `.tile-hero` (seon.web.tile/hero-view); the container-query default above is
+   untouched for every other tile. */
+.tile-hero .seon-tile-compact { display: none; }
+.tile-hero .seon-tile-expanded { display: block; }
 
 /* Compact-tile last reply (live-tiles U3): the default root tile
    shows the agent's last reply as readable text — clamp it so a

@@ -104,9 +104,11 @@
                   [:div [:div {:class "text-text-500"} label]
                    [:div {:class "text-sm text-text-100 tabular-nums"} v]])]
     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
-     [:div {:class "flex items-center justify-between mb-2"}
+     [:div {:class "flex items-center justify-between gap-2 mb-2"}
       (comp/status-dot state)
-      [:span {:class "text-2xs text-text-500"} id]]
+      ;; `min-w-0 break-all` wraps a long agent id rather than clipping it off
+      ;; the right edge of a narrow (phone) panel.
+      [:span {:class "text-2xs text-text-500 min-w-0 break-all text-right"} id]]
      [:div {:class "text-sm text-text-50 font-medium leading-tight mb-3 break-words"} (or purpose "—")]
      [:div {:class "grid grid-cols-3 gap-2 text-2xs"}
       (metric "turns" turns)
@@ -177,12 +179,18 @@
   "The hero — the agent's OWN live tile (welcome default or wired content),
    itself DB-driven + SCI-bounded by `seon.render/render-agent-tile`."
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  ;; center the (often-sparse) agent render so a tall hero looks intentional, and
-  ;; constrain width (min-w-0 / break-words / overflow-x-hidden) so nothing clips
-  ;; off the right edge on a phone.
-  [:div {:class (str "rounded border border-base-700 bg-base-850 p-4 sm:p-6 h-full "
-                     "flex flex-col justify-center overflow-y-auto overflow-x-hidden")}
-   [:div {:class "min-w-0 max-w-full break-words"}
+  ;; Vertically center the (often-sparse) agent render. `flex items-center` (a
+  ;; flex ROW) centers on the cross axis reliably — note `.seon-tile { height:100% }`
+  ;; means the agent's tile fills this child, so a flex-col `justify-center`/`my-auto`
+  ;; bottom-aligned it. The child is `w-full` so text wraps at the FULL tile width
+  ;; (a `justify-center` row would shrink it to a 1-char sliver); `min-w-0` /
+  ;; `break-words` / `overflow-x-hidden` keep content inside a phone viewport.
+  ;; `tile-hero` (input.css) forces the live tile's EXPANDED face at any width —
+  ;; the hero is the PRIMARY surface, so it never falls back to the clamped,
+  ;; text-clipping compact grid-cell face on a narrow phone.
+  [:div {:class (str "tile-hero rounded border border-base-700 bg-base-850 p-4 sm:p-6 h-full "
+                     "flex items-center overflow-y-auto overflow-x-hidden")}
+   [:div {:class "w-full min-w-0 max-w-full break-words"}
     (or (:seon.render/hiccup
           (render/render-agent-tile {:seon.db/db db :seon.agent/id id}))
         [:div {:class "text-text-500 text-xs"} "no tile"])]])
@@ -439,7 +447,10 @@
    stable `#tile-<id>` the patch protocol targets by id. `extra` carries the
    per-slot flex sizing (fill vs content-height)."
   [tile-id extra]
-  [:div {:id (str "tile-" tile-id) :class (str "min-h-0 flex flex-col " extra)}
+  ;; `min-w-0` lets this grid/flex child shrink below its content's intrinsic
+  ;; width (grid/flex items default to min-width:auto) — without it a wide tile
+  ;; pushes the whole column past a phone viewport.
+  [:div {:id (str "tile-" tile-id) :class (str "min-w-0 min-h-0 flex flex-col " extra)}
    [:div {:class "text-text-500 text-xs"} "connecting…"]])
 
 (defn- scrubber
@@ -503,12 +514,15 @@
         rails  (vec (remove #(>= (span %) 2) tiles))
         last-i (dec (count rails))
         ;; hero column: span-2 tiles, each fills (big min-height on phones).
-        hero   (into [:div {:class "lg:col-span-2 flex flex-col gap-2 sm:gap-3 lg:min-h-0"}]
+        ;; `min-w-0` lets this GRID ITEM shrink below content width (grid items
+        ;; default to min-width:auto) — without it a wide tile overflows a phone.
+        hero   (into [:div {:class "min-w-0 lg:col-span-2 flex flex-col gap-2 sm:gap-3 lg:min-h-0"}]
                      (map #(console-region (:seon.tile/id %)
                                            "min-h-[42vh] lg:min-h-0 lg:flex-1")
                           (filter #(>= (span %) 2) tiles)))
         ;; rail column: span-1 tiles stack; the LAST (commentary) fills the rest.
-        rail   (into [:div {:class "lg:col-span-1 flex flex-col gap-2 sm:gap-3 lg:min-h-0"}]
+        ;; `min-w-0` (as on the hero column) lets this grid item shrink on a phone.
+        rail   (into [:div {:class "min-w-0 lg:col-span-1 flex flex-col gap-2 sm:gap-3 lg:min-h-0"}]
                      (map-indexed (fn [i tl]
                                     (console-region (:seon.tile/id tl)
                                                     (if (= i last-i) "lg:flex-1 lg:min-h-0" "shrink-0")))
@@ -522,7 +536,7 @@
         page   [:html {:lang "en"}
                 (head (str "console · " agent-id))
                 [:body {:class (str "bg-base-950 text-text-200 font-mono p-2 sm:p-3 gap-2 sm:gap-3 "
-                                    "min-h-screen lg:h-screen flex flex-col")
+                                    "min-h-screen lg:h-screen flex flex-col overflow-x-hidden")
                         :data-console stream}
                  (header-bar agent-id t)
                  grid

@@ -112,12 +112,19 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   time-travel are complete end-to-end on acme.
 - **Responsive polish DONE + browser-verified** (commits `765f7af`/`aefe269` + this
   unit): the console fills the viewport on desktop and stacks cleanly on a phone.
-  Fixes this pass — hero text wraps at full width + vertically centers via `my-auto`
-  (was collapsing to a 1-char column under a `justify-center` flex child), `min-w-0`
-  propagated up the grid/flex column chain (grid items default to `min-width:auto` →
-  a wide tile pushed past a 390px viewport), and the status-panel agent-id now wraps
-  (`break-all`) instead of clipping off the phone's right edge. Verified at 1440×900
-  and 390×844 via headless Chrome.
+  Fixes this pass — hero vertically centers via `flex items-center` with a `w-full`
+  child (note `.seon-tile { height:100% }` made a flex-col `justify-center`/`my-auto`
+  bottom-align it; a `justify-center` ROW collapsed it to a 1-char sliver — proven via
+  box-model: child-center == card-center); `min-w-0` propagated up the grid-ITEM
+  column chain (`hero`/`rail` divs, not just `console-region` — grid items default to
+  `min-width:auto`) + body `overflow-x-hidden`; status agent-id `break-all`; and a
+  new **`.tile-hero`** CSS rule (input.css) forces the live tile's rich EXPANDED face
+  on the console hero at ANY width (the hero is the primary surface, never the clamped
+  compact grid-cell face). **Method note for whoever screenshots:** headless Chrome
+  enforces a ~500px MIN viewport — `--window-size=390` renders at innerWidth 500 and
+  crops the canvas to 390, which looks like a right-edge "clip" but isn't. True-narrow
+  was verified via an in-page single-column 374px simulation (zero overflow) + a clean
+  520px render + box-model probes; trust those over a sub-500 headless screenshot.
 - **AsOfDB durable delivery: DONE by R** (`de6c769` — fork pushed, `deps.edn` sha
   bumped). Acknowledged: time-travel is now permanent, not a runtime stopgap. (Noted
   the one-time `compile-java` prep for fresh checkouts; my acme env is already prepped.)
