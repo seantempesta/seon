@@ -28,8 +28,8 @@ reactive projection of data.
  browser / Tauri webview
         │  ONE connection: SSE down (datastar), POST up (actions)
         ▼
-   EDGE GATEWAY ─────────────────────────────┐  the only browser-facing HTTP/SSE
-        │  listen!(tx-log) → push fragments    │  (today: seon.web.serve/inspector)
+   WEB RENDERER (the edge) ───────────────────┐  the only browser-facing HTTP/SSE
+        │  listen! → derive → hash → push      │  (today: seon.web.serve/inspector)
         ▼                                      │
    WIRE-SERVER (JVM) ── single-writer datahike ┘  the bus + aggregation point
         ▲ ▲ ▲   each unit is a wire client (reads its replica, writes its output)
@@ -61,8 +61,8 @@ aggregate. The reactive loop, end to end:
 2. Wire-server commits → fans the tx out to every subscriber (units + the web
    renderer).
 3. The relevant unit's `listen!` fires → it computes → writes its **facts**
-   (agent output, eval results, state) back to the DB. *Never a render* — see
-   *One render path*.
+   (agent output, eval results, run/turn primitive mutations) back to the DB.
+   *Never a render, never derived "state"* — see *One render path* / *data model*.
 4. Wire-server commits → fans out → the **web renderer's** `listen!` fires → it
    re-derives the affected fragment from DB state, **fast-hashes** it, and pushes
    via datastar `merge-fragment` **only if the hash changed**.
@@ -105,7 +105,52 @@ re-derived historical view uses the *current* renderer (today's view of
 yesterday's data), not the literal bytes sent — fine for inspection; store the
 prompt text only as a deliberate exception if strict audit is ever needed.
 
-## Isolation — two tiers
+### Feeds — a video-wall, not one webapp
+
+The UI is N independent **feeds** (live-tile, debug, chat, each agent), each its
+own SSE stream + render→hash→push pipeline. datastar opens one connection per
+`@get`, so **one SSE per feed** gives independent windows: one crashed feed is
+one dead tile (auto-retried via fetch backoff + `data-on:online__window`), not a
+black screen. Seon already serves per-region SSE (`/agent/<id>/sse`, `/debug/sse`,
+…). New: a feed registry, pod-side compression (Node zlib; JVM has brotli),
+HTTP/2 via Caddy to lift the ~6-connection cap for large walls.
+
+### Interactivity — agent fn-calls → predictable datastar → the owning VM
+
+Agents make tiles interactive by writing *normal Clojure fn-calls* in handler
+slots; the browser only ever sees *standard* datastar.
+
+- **Authoring:** a fn-**call** `(cancel-order! id)` (args bound at render time) or
+  a fn-**ref** `submit-order!` (args from click-time signals).
+- **Render-time rewrite** (server-side postwalk, not a browser macro): both →
+  one standard `@post('/call', {:fn 'my.agent.X/…, :args …})` (args
+  transit-serialized; the ref case pulls form values from datastar signals).
+- **Namespace is the route:** `/call` resolves the *owning agent* from the fn
+  symbol's namespace (no routing table — the name is the route) and
+  **sandbox-invokes in that agent's VM** (capability-checked to agent-granted
+  `:seon.fn`s, Malli-validated) → it transacts → the reactive feed re-derives and
+  pushes.
+
+This is the **same sandboxed call-routing path as eval and render** — an
+interaction is just an eval authored as hiccup and routed by its namespace.
+**Most of this exists on the JVM track** (`reactive/transform.clj` rewrite,
+`ns/routes.clj` resolve-and-call, `sse.clj` render→hash→push, `inspector.cljs`
+per-feed SSE); the pod work is the `.cljc` port + replacing the JVM `seon.*`
+prefix-whitelist with namespace-as-route-into-the-sandbox.
+
+## One sandboxed execution service (eval = render = interaction)
+
+Eval, render fns, and interactions are **three doors to one service**: "run an
+agent-granted fn with args, safely." Every call resolves the owning agent from
+the fn's namespace, is capability-checked (only that agent's granted `:seon.fn`s
+resolve — the same surface that denies `fs`), Malli-validates its args, runs in
+that agent's sandbox, and transacts a fact (→ the reactive feeds update). **One
+API, one capability model, one route, one pool.** The *backend* is tiered
+(below) — worker + SCI by default, microVM when isolation must be a kernel
+boundary — but callers see one service regardless. This is the single "eval +
+render + interaction safety" solution; there is no second mechanism.
+
+## Isolation — the execution service's backend tiers
 
 | | Tier 1 — worker_threads + SCI (default) | Tier 2 — microVM (opt-in) |
 |---|---|---|
@@ -154,15 +199,19 @@ else is reachable from it or derived. Full schema:
   `:seon.agent.turn/run` (a **run** replaces the old "session" — there is no
   session concept). Plus `sections[]` (its own context sections), `schedules[]`
   (self-managed cron maps, each with its fn), `default-turn-limit`, `purpose`,
-  `parent`, `terminated-at?`, tile. **State is derived, not stored** —
+  `parent`, `terminated-at` (optional `:inst`), tile. **State is derived, not
+  stored** —
   `:terminated` if `terminated-at` exists, else `:idle` if no open run, else
   `:paused` if the open run has a `paused-at` marker, else `:running`. Every
   primitive (the open run, `paused-at`, `terminated-at`) is its own control axis;
   state is just their projection.
 - **run** (`:seon.agent.run/*`) — the bounded unit of work a trigger opens:
-  `started-at`, `trigger {:message/:schedule}`, `cause`, **two bounds**
-  `turn-limit` (work quantity, bumpable) + `deadline` (wall clock), `status`,
-  `closed-reason`, `last-beat-at` (heartbeat). The run-id is the fencing token.
+  `started-at`, `trigger {:message/:schedule}`, `cause`, `deadline` (wall-clock
+  bound), `status`, `closed-reason`, `last-beat-at` (heartbeat). The run-id is
+  the fencing token. **The work bound is DERIVED** (no per-message write):
+  `default-turn-limit` + count of inbound messages this run; a stored
+  `turn-limit-override` appears only when a process *explicitly* bumps/stops it.
+  (Same principle as derived state — store facts, derive windows.)
 - **turn / message / todo** — turns belong to a run; messages carry
   `origin {:human/:agent/:core}` (human inbound auto-mints a todo;
   hop-exhausted = dead-letter); todos are the work items.
@@ -255,17 +304,11 @@ no loader shim. Tier-2 microVMs mount the store read-only via virtio-fs.
   a big context render shouldn't block the main event loop. (The *view* render is
   the web-renderer component's job, already off the agent's hot path.)
 
-**Design tension needing a call:**
-
-- **Sliding cap: derive vs. store.** The spec's `renew!` writes `turn-limit` +
-  `deadline` on *every* inbound message; the current code *derives* the window
-  (`effective-cap`, no writes). Datahike writes are the ceiling. **Recommend a
-  hybrid:** derive the default window (base + inbound count — no writes), store
-  an explicit override *only* when a process actually bumps/stops it (rare). Keeps
-  "other processes can extend it" without per-message churn.
-
-  (Render storage is no longer a tension — renders are derived, never stored;
-  see *One render path*.)
+**Resolved decisions** (no longer open): sliding cap is **derived** (window =
+`default-turn-limit` + inbound-count; stored `turn-limit-override` only on an
+explicit bump/stop) — see *The data model*. Render storage is **derived, never
+stored** — see *One render path*. State is **derived** from primitives — see
+*The data model*.
 
 **Minor / later:** heartbeat cadence (start per-turn); `default-deadline-ms`
 value + whether deadline-less runs are allowed; `parent`/`llm-meta` disposition;
