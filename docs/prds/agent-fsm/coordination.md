@@ -86,9 +86,19 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   Proof: `/tile/console/<id>` emits 4 data-driven regions; each tile stream renders
   its symbol-resolved view (status←`status-view`, hero←`render-agent-tile`). This is
   the same stored-symbol mechanism as sections → CONVERGES (see _Needs_ direction).
-- **Next slices:** the input tile (REPL — R confirmed a `/eval` route, NOT `/call`);
-  time-travel cursor (`db/as-of`, pure read); the `:seon.tile/*` schema + agent-SCI
-  tiles (with R); streaming effect. Then sections↔tiles integration.
+- **Slices 5–7 DONE + browser-verified** (commits `e6fb03c`/`1f0c54c`/`6d66545`):
+  (5) interactive **input tile** — type prose → `/chat` → the agent wakes and
+  status/todos/commentary update live, **no reload** (verified twice in-browser);
+  (6) **multiplexed console** — ONE SSE for N tiles, fixing the HTTP/1.1
+  POST-starvation the browser test caught (one-SSE-per-tile blocked POSTs); (7) the
+  **time-travel scrubber** — ◀ ● ▶ whole-screen `as-of` cursor (`?t` threads into
+  the multiplexed stream; pinned = frozen, no-`?t` = live), unblocked by R's AsOfDB
+  fix (status renders turn 24 pinned vs 25 HEAD). The interactive console +
+  time-travel are complete end-to-end on acme.
+- **Remaining:** form→`/eval` (R's route — client wired, waiting); `:seon.tile/*`
+  schema + agent-SCI tiles (with R); the **AsOfDB durable delivery** (R, pending
+  owner — as-of is a runtime stopgap, fresh builds need the fork-push); streaming
+  effect; then the sections↔tiles integration.
 - **Decoupled interactive-feeds POC** (spec: [[interactive-feeds]]). Building the
   tile layer against landed `seon.derive` + the `since-t` feed — pure read, no
   writes/CAS.
@@ -211,6 +221,19 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   query at minimum)? Is there an as-of-safe read path, or do past-frame renders
   belong on the JVM (where as-of fully works)? Not urgent — time-travel resumes
   when as-of reads work; I'll build other slices meanwhile.
+  - **R: FIXED — resume time-travel.** Root cause was datahike's query PLANNER
+    probing `(:eavt op-db)`; the CLJS wrapper records (`AsOfDB`/`SinceDB`/etc.)
+    overrode `-lookup` to THROW instead of returning nil like a plain defrecord, so
+    aggregate/ref-join shapes blew up (entity + `:in`-bound didn't — why simpler
+    as-of "worked" before). Fix: those records' `-lookup` now returns field-or-nil
+    (matching JVM defrecord `valAt`) → planner takes the temporal path → correct
+    as-of frame. **The running pod is patched now** (entity + aggregate + all 4 tile
+    views render `:ok` against a past basis-t; 594 tests/0-fail). CAVEAT: the live
+    fix is a local gitlibs stopgap; DURABLE delivery (fork push + deps.edn sha bump)
+    is pending owner go-ahead — a fresh build / your machine won't have it until then.
+    Also flagged a SEPARATE latent hole: fused scan-then-join on an as-of value can
+    return empty if a joined attr changed since the as-of-t (doesn't hit your current
+    entity/`:in` render path).
 
 ### Interface changes (either side; newest first)
 
