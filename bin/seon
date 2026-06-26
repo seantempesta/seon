@@ -31,6 +31,8 @@
 #   status [name]      Show one or all
 #   tail <name>        tail -f logs/<name>.log
 #   logs <name> [n]    Last n lines (default 200) of logs/<name>.log
+#   logs [all] [n]     MERGED last n (default 120) across every process log,
+#                      source-tagged + time-ordered — the unified debug view
 #   adopt <name>       Register a manually-started process by PID
 #   prep               Idempotent git-dep prep for :writer/:cljs aliases
 #                      (downstream supervisors shell out to this)
@@ -723,7 +725,15 @@ cmd_tail() {
 }
 
 cmd_logs() {
-  local name="${1:?logs requires a process name}"
+  # No name (or `all`) → MERGED view across every process log, source-
+  # labeled and time-sorted (the unified-logging front door for debugging:
+  # one place to read pod + wire-server + jvm + cljs-watch interleaved).
+  # `logs <name> [n]` keeps the single-process behavior.
+  if [ "$#" -eq 0 ] || [ "$1" = "all" ]; then
+    merged_logs "${2:-120}"
+    return
+  fi
+  local name="$1"
   local n="${2:-200}"
   local lf
   lf="$(log_file "$name")"
@@ -732,6 +742,23 @@ cmd_logs() {
     exit 1
   fi
   tail -n "$n" "$lf"
+}
+
+# Merge the last N lines of every process log into one stream, ordered by
+# the ISO-8601 timestamp each line leads with (lines without one inherit the
+# previous timestamp so they stay adjacent to their context). Each line is
+# tagged `[proc]`. Snapshot, not follow — built for an agent that reads
+# (not watches) and wants the cross-process causal order in one shot.
+merged_logs() {
+  local n="$1"
+  local name lf
+  for name in $(all_processes); do
+    lf="$(log_file "$name")"
+    [ -f "$lf" ] || continue
+    tail -n "$n" "$lf" | awk -v src="$name" '
+      match($0, /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+/) { ts=substr($0,RSTART,RLENGTH) }
+      { printf "%s\t%s\t%s\n", ts, src, $0 }'
+  done | sort -s -k1,1 | sed -E "s/^[^\t]*\t([^\t]*)\t/[\1] /"
 }
 
 cmd_cluster() {
