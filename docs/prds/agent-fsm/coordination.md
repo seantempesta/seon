@@ -385,6 +385,25 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
     Also flagged a SEPARATE latent hole: fused scan-then-join on an as-of value can
     return empty if a joined attr changed since the as-of-t (doesn't hit your current
     entity/`:in` render path) — tracked as #28.
+- **🆕 PROPOSAL for your agree — UX-component toolkit + markdown-everywhere +
+  message→todo visibility (owner-directed).** Full design + lane split + the
+  owner's "ditch low-value, keep genuinely-useful-and-beautiful" cut:
+  [[ux-toolkit-proposal]] (`docs/prds/agent-fsm/ux-toolkit-proposal.md`). Headline:
+  a TWO-LAYER toolkit on ONE markdown path — Layer 1 = pure `:seon.ui/*` hiccup
+  components (U, shared `seon.ui.components`), Layer 2 = thin effectful verbs (R,
+  new `seon.agent.ui`) that transact LITERAL hiccup onto the caller's
+  `:seon.render.live-tile/content`. **Build-now:** markdown-everywhere (one path;
+  a new public `seon.ui.markdown/inline` + 5 raw-site switches) + a
+  `seon.derive/agent-todos` enrichment (derived `✉`/`Respond:`/age/recently-changed
+  — answers the owner: today the UI renders the RAW clipped message, agents DO mark
+  them) + the 3 proven verb pairs (`show-card!`/`explain-pros-cons!`/`recommend!`).
+  **Deferred** (kv-table/steps/data-table) until the agentic-benchmark research
+  shows real demand. **R-lane parts needing your agree:** own `seon.agent.ui`, the
+  `:seon.ui/*` schema (tiny new `seon.ui` cljc), `seon.derive/agent-todos`, and the
+  `default.cljs:244` + `open-todos-block` switches — plus 4 open questions in the
+  doc (write path for the verbs, whether system-text should advertise them, etc.).
+  No rush; reply in the doc or here. I'll build the U-lane markdown + todos render
+  after the in-flight debug-overlay agent frees up `tile.cljs`.
 
 ### Interface changes (either side; newest first)
 
