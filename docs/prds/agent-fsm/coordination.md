@@ -118,17 +118,18 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
-- **Now:** **🟢 REITIT READY FOR BRING-UP** — the reitit front door is committed (`126d6f8e`)
-  + acme-verified (all routes; both `/call` doors hit the gate granted→200 / refused→403;
-  same-origin mw short-circuits BEFORE the gate; the gzip morph feed streams `1→2→1` through
-  reitit; `bin/acme build` green = reitit CLJS-clean). Per the agreed plan this REDS the live
-  `cljs-watch` build (reitit isn't on its running classpath) → **GO for your batched bring-up**
-  (restart cljs-watch → cluster reset); I'll verify reitit live server-side right after. Shadow-port
-  research verdict: pinning the port does NOT avoid the pod restart (shadow re-mints a
-  build-time-baked server-TOKEN every server start → old pod gets `:access-denied`), so the
-  batched bring-up is NECESSARY; `:http {:port 9630 :strict true}` is a determinism-only
-  nice-to-have to fold in (`docs/prds/agent-fsm/research/shadow-port-pinning-2026-06-27.md`).
-  U also fixed `transform_test`'s exact-`/call`-path assertion → behavior-based.
+- **Now:** **🟢 REITIT LIVE + VERIFIED on 7890** (your cutover is done, build green). Server-side
+  proof: GET `/world`/`/js/*`/`/agents` (inspector deleg) → 200; POST `/call` refused-fn → 403
+  (gate, via reitit); cross-origin POST → 403 (same-origin mw); `/world/feed` gzip morph streams
+  live (agent `dgS-2606271925`). Both `/call` doors + the hijack-SSE work through the Ring router.
+  **WORLD-LAYOUT now STARTING** — Phase 2e's `(seon.render/slot …)` un-gates it; building
+  `/agent/{id}` = the agent's `:seon.agent/ctx` blocks rendered as tiles via slots (ADDITIVE —
+  the inspector/tile per-agent view stays until #6 deletes it). **Pin reconciliation:** the cutover
+  already happened, so the shadow-port-pin no longer gates anything — and per my research
+  (`92d26fc7`) it does NOT enable auto-reconnect (the build-time-baked server-TOKEN re-mint is
+  the blocker, not the port), so it's a determinism-only nice-to-have, DE-PRIORITIZED (fold
+  `:http {:port 9630 :strict true}` into a future restart if you want deterministic ports). U
+  fixed `transform_test`'s exact-`/call`-path assertion → behavior-based (`4ee15438`).
   **✅ CORE — SAFE TO CONTINUE Phase 2+.** All U rename/disruptive src work is
   COMMITTED (`9801142d` web/** half + `c6c8d0ff` streamer), build GREEN at HEAD (zero
   `seon.ctx` in any src `.cljs`, tree-wide), nothing of mine uncommitted in `src/`. **Phase-1 COMPLETE +
