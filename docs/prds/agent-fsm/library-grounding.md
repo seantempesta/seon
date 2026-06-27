@@ -358,3 +358,155 @@ Concrete examples (file:line) of the patterns to imitate:
 5. ✓ Build-note for error construction: `explain` returns `nil` on valid.
 6. ✓ `:my.todo/parent` is a plain ref (NOT a component) — confirmed correct in
    the doc; the grounding makes the "no cascade" consequence explicit.
+
+## Lane-U grounding — reitit + the gzip-morph live channel (Phase 8)
+
+> **Lane-U section** (appended; Core owns everything above). Read these BEFORE
+> building Phase 8. The live channel is PROVEN — `src/seon/web/datastar.cljs` IS the
+> reference implementation; read it first, then the sources it ports from.
+
+### reitit is CLJS-clean — read the source, don't fear the Java
+
+Read: `reference-code/reitit/modules/reitit-core/src/reitit/core.cljc:331-383`
+(`router`), `…/reitit-core/src/reitit/trie.cljc:346-350` (`compiler`),
+`…/reitit-ring/src/reitit/ring.cljc:360-420` (`ring-handler` +
+`reloading-ring-handler` just below).
+
+- **`router` (core.cljc:331-383)** is pure data→router: `resolve-routes` → conflict
+  detection (path + name) → `compile-routes` → pick an impl (`single-static-path-
+  router` / `lookup-router` / `trie-router` / `mixed-router`) by whether routes are
+  wild. All `.cljc`, no host types — runs in Node as-is. `match-by-name` (reverse
+  routing) and build-time conflict detection are the wins over the hand-rolled `cond`.
+- **`trie/compiler` (trie.cljc:346-350)** is the ONLY place the impl forks on host:
+  `#?(:cljs (clojure-trie-compiler) :clj (java-trie-compiler))`. **CLJS ALWAYS gets
+  the pure-Clojure trie**; the `JavaSegmentRouter` is `:clj`-only and never loaded in
+  the pod. This is why the build delta is a Maven dep, not source-paths.
+- **`ring-handler` (ring.cljc:360-420)** has BOTH a sync `([request])` and an async
+  `([request respond raise])` arity, dispatching `(-> result method :handler)` after
+  `match-by-path`. **`reloading-ring-handler`** (just below) recreates the handler per
+  request from a 0-arity thunk — that IS our "the router is a pure derived value of
+  the route datoms, rebuilt on tx" mechanism; generalize the serve.cljs:704-710
+  var-rereading wrapper into it.
+- **reitit-malli coercion is zero-interop** — it validates/coerces path-params /
+  query / body against a route's `:parameters` malli schema with the SAME malli we
+  already instrument with. No new validation surface; our malli-everything maps ride
+  as open route-data with no friction.
+
+### Build delta — Maven, in `:cljs`, NOT source-paths
+
+`deps.edn :cljs :extra-deps` is Maven coords (`:mvn/version`). ADD
+`metosin/reitit-ring {:mvn/version "0.10.1"}` + `metosin/reitit-malli {:mvn/version
+"0.10.1"}` there (reitit-ring pulls reitit-core transitively). Do NOT put
+`reference-code/reitit` on source-paths — the published CLJS artifact is clean;
+vendoring the source would drag the `:clj`-only Java trie onto the classpath.
+
+### The Node↔Ring adapter + the hijack sentinel
+
+reitit speaks Ring (a request MAP → a response MAP); the pod speaks raw `node:http`
+`(req, res)`. The ~20-line adapter builds a Ring request from the node `req` (method,
+uri, query, headers) AND injects the raw node `req`/`res` under namespaced keys so the
+streaming + static handlers can reach them. A handler that takes over the socket
+itself (the SSE open, a static file pipe) returns `{:seon.http/hijacked true}`; the
+adapter sees the sentinel and does NOT write a Ring response (the handler already owns
+the stream). This is how the gzip SSE handler — which needs the raw `res` to `.pipe`
+the gzip stream — coexists with reitit, which has zero streaming primitives by design.
+
+### KEEP-VERBATIM — the interactivity floor + the capability gate
+
+Read: `src/seon/web/reactive/transform.cljs:183-197` (`transform-hiccup`),
+`src/seon/web/reactive/call.cljs` (`resolve-owning-agent`:63 / `granted-fn?`:82 /
+`capability-check`:98 / `invoke!`:126 / `handle!`:203).
+
+- `transform-hiccup` is a render-time server-side postwalk that rewrites a fn-call
+  `(cancel-order! id)` or a fn-ref `submit-order!` in a handler slot into one standard
+  datastar `@post` (the `?fn=`/`?args=` descriptor; `call-action`, transform.cljs:114).
+  It is a PURE hiccup→hiccup transform — keep it + its render.cljs:439-452 wiring
+  verbatim; reitit routes the door, this rewrites the body, they are orthogonal.
+- The capability gate `handle!` resolves the owning agent FROM the fn symbol's
+  namespace (`my.agent.<id>`), capability-checks (the fn must be a registered
+  `:seon.fn` the agent owns), and only then `invoke!`s it SCI-bounded. The gate is the
+  SECURE refusal point; reitit replaces only the FRAGILE URL dispatch. Phase 8 moves
+  ONLY the door's registration to a `/agent/{id}/call` route datom — the gate's logic
+  is untouched. (The `{id}` path segment is redundant with the fn's namespace and the
+  gate still authorizes from the namespace; the segment is just the routing level. The
+  kept `call-action` currently emits a flat `/call?fn=…` — repoint it at
+  `/agent/{id}/call` when the route lands; that is the only edit to the floor.)
+
+### The client/SSE contract — datastar v1, packetstar DITCHED
+
+Read: `reference-code/datastar-clojure/libraries/sdk/src/main/starfederation/datastar/
+clojure/consts.clj`; the proven `src/seon/web/datastar.cljs` (`patch-elements`:58).
+
+- The wire event is **`datastar-patch-elements`**; each HTML line is one
+  `data: elements <line>` dataline; the default patch mode is **`outer`**
+  (`element-patch-mode-outer "outer"`, consts.clj) = morph the element with the
+  matching id — so a whole-element morph needs NO selector/mode dataline. A blank line
+  terminates the event. (consts.clj also lists `inner`/`remove`/`replace` and the
+  `signals` dataline for `datastar-patch-signals`.)
+- **packetstar.js is DITCHED.** Its per-tile `{id, html}` streaming protocol, the
+  `!last-tree` slot-tree BFS, and the UI-side `since-t` replay are all DELETED. The
+  default client is datastar.js; idiomorph does the granular DOM diff client-side, so
+  the server pushes whole elements and never computes a diff.
+
+### hyperlith — the model we ported
+
+Read: `reference-code/hyperlith/src/hyperlith/core.clj:88-110`
+(`defview`/`defaction`/`refresh-all!`), `…/impl/datastar.clj:122-181`
+(`render-handler`), `…/examples/chat_atom/src/app/main.clj`; and the gzip-SSE proof
+`reference-code/datastar-clojure/src/dev/examples/tiny_gzip.clj`.
+
+- `defview` (core.clj:99-105) registers a shim-handler (the page) + a render-handler
+  (the stream) at the SAME path — that IS our "GET shim + live stream share the path,
+  no /feed."
+- `render-handler` (impl/datastar.clj:122-181) is the engine: tap the `refresh-mult`
+  through a `(dropping-buffer 1)` (= the drop-latest throttle), render on connect, then
+  on each refresh re-run `(render-fn req)`, write `event: datastar-patch-elements\n
+  data: elements ` + the streamed HTML, flush, and `send!`. `refresh-all!`
+  (core.clj:107-110) is one global refresh signal — our `db/listen!` tx-listener plays
+  that role.
+- **Difference to note:** hyperlith compresses with **brotli** (`br-window-size`); our
+  Node proof uses **gzip** (`zlib.createGzip` + `Z_SYNC_FLUSH`) because the Node zlib
+  path is the proven one — `tiny_gzip.clj` is the datastar-clojure proof that small
+  gzip-compressed SSE events flush fine (no server buffering). Same wire event,
+  different `Content-Encoding`.
+
+### Ops — streamed surfaces can't be browser-verified
+
+A long-lived `text/event-stream` 503s through the in-tool chrome agent's network
+layer, so do NOT try to verify the morph with a browser agent. Verify SERVER-SIDE: a
+small Node client opens the gzip stream, gunzips, and asserts the payload changes on a
+real datahike tx (the `seon.web.datastar` acme proof: roster `1→2→1` on ADD/RETRACT,
+~300ms post-commit, store clean). The final live-morph eyeball is the OWNER's, in real
+Chrome.
+
+### Idiom cheat-sheet (Lane-U)
+
+- **Hiccup→hiccup postwalk for interactivity** — never string-concat HTML; rewrite the
+  data (`transform-hiccup`).
+- **The router is a derived VALUE** — `db->routes` is a pure fn of `:seon.route/*`
+  datoms; `reloading-ring-handler` rebuilds it per request, no mutable route registry.
+- **The stream is a fn of the db** — `view = f(db-as-of t)`; never accumulate UI state,
+  never push a delta the agent computed. Re-render the whole element; let idiomorph
+  diff.
+- **Crash-proof every write** — guard `writableEnded`, error-handlers on gz + res,
+  `req.on('close')` cleanup; one uncaught throw blanks every connection on the single
+  pod thread.
+- **Transient client state = datastar signals**, never DOM attrs — a morph must not
+  clobber the input value / popover / time-slider.
+- **The hijack sentinel** `{:seon.http/hijacked true}` keeps raw-socket handlers (SSE,
+  static) verbatim under a Ring router.
+
+### How to task an agent with this grounding
+
+> You are building Phase 8 (Lane-U) of Seon's agent-fsm, opus. READ FIRST, in order:
+> `src/seon/web/datastar.cljs` (the PROVEN gzip-morph streamer — this is the
+> reference, copy its shape), then [[ui]] (the target) + this Lane-U section's reitit
+> / hijack / interactivity-floor / hyperlith pointers. Build reitit over
+> `:seon.route/*` datoms (Maven `metosin/reitit-ring` + `reitit-malli` 0.10.1 in
+> `deps.edn :cljs`, NOT source-paths); the router is a derived value (`db->routes` +
+> `reloading-ring-handler`). KEEP the capability gate (`seon.web.reactive.call`) and
+> `transform-hiccup` VERBATIM — move only the action door to a `/agent/{id}/call`
+> route datom and repoint `call-action`'s path. The live channel is the gzip-morph
+> stream (no `!last-tree`, no per-tile packet, no `since-t`); verify it SERVER-SIDE
+> with a Node gunzip client on a real tx, never a browser agent; the final eyeball is
+> the owner's in real Chrome.
