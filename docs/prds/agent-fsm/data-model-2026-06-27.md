@@ -119,7 +119,7 @@ The identity attrs in the model, by value type:
 
 `:seon.db/id` is itself a shared shape (`[:string {:min 14 :max 14}]`,
 `schema.cljc:104`) referenced by every id-attr — bump it once, every length
-constraint follows. Note `:seon.ctx/name` is NOT in this table (see §4 block):
+constraint follows. Note `:seon.ctx/name` is NOT in this table (see §3.2 block):
 it is a plain `:keyword`, a per-agent logical name, not a global identity.
 
 ### 2.3 symbol-as-value — late binding to the program graph (NOT a ref)
@@ -212,7 +212,7 @@ The "upsert by name" the design docs describe is an APPLICATION-level merge in
 `gather-blocks` (override-by-name within one agent's set merged over
 `default-blocks`), not a datahike identity upsert. The block schema REFERENCES the
 already-registered `:seon.render/ai` / `:seon.render/html` shapes — it does NOT
-re-inline `[:or :symbol :string]` (see §5 reinvention finding).
+re-inline `[:or :symbol :string]` (see §6 reinvention finding).
 
 ### 3.3 run — `:seon.agent.run/*` (run.cljs:40-68) — KEEP
 
@@ -300,7 +300,7 @@ projects into a reitit route vector `[pattern data & children]`.
 | `:seon.route/method` | `:keyword` | keyword / one | NEW | `:get`/`:post`/… → the method endpoint key (reitit `http-methods`, ring.cljc:14) |
 | `:seon.route/name` | `[:keyword {:seon.db/identity true}]` | keyword / one / identity | NEW | `:name` → `match-by-name` reverse routing (core.cljc:49) |
 | `:seon.route/owner` | `:seon.db/ref` | ref / one | NEW | rides as opaque route-data; meta-merges parent→child for auth |
-| `:seon.route/handler` | `:symbol` | **symbol** / one | NEW (recommended) | the layout symbol → `{:handler …}` via reitit `Expand` (core.cljc:29) |
+| `:seon.route/handler` | `:symbol` | **symbol** / one | NEW | the layout symbol → `{:handler …}` via reitit `Expand` (core.cljc:29); symbol-as-value (§2.3) |
 | `:seon.route/middleware` | `[:vector :keyword]` | keyword / **many** | NEW (optional) | `:middleware` keywords resolved through reitit's `::registry` (middleware.cljc:15-33) |
 
 `seon.route` entity-map (`:map {:seon.db/entity true}` with `pattern`/`method`/
@@ -310,12 +310,32 @@ on a map returns it unchanged, core.cljc:21). reitit gives build-time path + nam
 **conflict detection** (`path-conflicting-routes` → `:conflicts` throws
 `:path-conflicts`, core.cljc:292,329) that the hand-rolled `cond` dispatch lacks.
 
-Handler-attr decision: the design docs say "the handler reuses `:seon.render/html`"
-(unifying "a route handler IS a layout IS a block's html render"). That WORKS (the
-symbol arm of the mixed `:or`, stored EDN-encoded) but a route handler is never
-literal hiccup, so a dedicated `:seon.route/handler :symbol` (native
-`:db.type/symbol`, cleaner storage) is recommended. Either resolves via
-`lookup-value`. Flagged in §6.
+**DECIDED (handler) — dedicated `:seon.route/handler :symbol`.** Not a reuse of
+`:seon.render/html`: a route handler is always a layout symbol, never literal
+hiccup, so it stores as a native `:db.type/symbol` (not the EDN-encoded mixed-`:or`)
+and resolves via `lookup-value` like every other late-bound symbol (§2.3). "A route
+handler IS a layout" still holds at the VALUE level (the symbol names a layout fn);
+they just don't share the storage attr.
+
+**DECIDED (agent-extendable app routes) — YES, agents customize their own world.**
+Two tiers of route rows:
+
+- **Core base routes**, seeded at boot: `/` (dashboard), `/agent/{id}` (world),
+  `/agent/{id}/feed` (SSE), `/call` (the action door), `/eval`.
+- **Agent app routes** under `/agent/{id}/app/{x}`, transacted by the agent itself.
+  An app route's `:seon.route/handler` is one of the agent's OWN `my.agent.<id>/…`
+  layout fns — the `my.*` / `my.agent.<id>` namespaces are the grounds for app-like
+  systems (the same namespace-as-route + own-ns-fn model the `/call` gate already
+  enforces). Creating a route is a **capability-gated write**, exactly like the
+  agent's other writes: the agent may only point a handler at a symbol in its own
+  home ns, and `:seon.route/owner` is itself. This is especially relevant when the
+  user is driving the agent to build its own UI.
+
+To keep the GLOBAL `:seon.route/name` identity unique across agents (required for
+reverse routing via `match-by-name`), agent app-route names are **namespaced
+per-agent** — e.g. `:agent.abc/app-x` — so two agents' app routes never collide on
+the identity attr; reitit's build-time name-conflict detection (core.cljc:329) is
+the backstop.
 
 ### 3.9 error VALUE — base `:seon/error`, specialized only where the shape diverges
 
@@ -330,6 +350,32 @@ referencing the base's shared FIELD shapes (the shared-shape rule; malli `:merge
 not wired in the registry, so sharing is at field-shape granularity — verified:
 schema.cljc registers only `m/default-schemas` + the mutable atom, no `malli.util`).
 
+**The SHARED CORE — what every error guarantees.** A generic surfacer or handler
+relies ONLY on the shared core; variant attrs are bonus. The owner's framing:
+"functions accepting an error handle the SHARED parts." So the base is the minimal
+contract:
+
+- `:seon.error/message` (REQUIRED) — the HUMANIZED headline string a generic
+  surfacer always prints. For the schema/coercion kind it is produced by
+  `malli.error/humanize` (and reitit-malli's humanized coercion messages where
+  reitit coercion is in play) — never hand-rolled; for render/eval/transact/
+  capability/LLM errors it is a plain readable one-liner. It is a VIEW over the
+  data, not a replacement for it (see below).
+- `:seon.error/where` (optional but conventionally present) — the SITE as a keyword
+  (block name / route name / fn sym). The generic "where did this happen" hook.
+- `:seon.error/data` (optional, but ALWAYS present when there is structured detail)
+  — the STRUCTURED payload, retained verbatim, never humanized-and-discarded. For
+  the schema kind it IS the malli explain map (`:schema`/`:value`/`:in`/`:path`/
+  `:type`) — the precise data an AI agent reasons over to locate and fix the
+  defect. Not a reinvention: it is malli's own explain output.
+- `:seon.error/symbol` / `:seon.error/hint` (optional) — the offending fn and the
+  actionable fix. A handler may use them if present, never requires them.
+
+A handler written against the base — `(defn surface [{:seon.error/keys [message
+where hint]}] …)` — works on ANY error, base or specialized, because every
+specialization references these same field shapes. That is the whole point of one
+base + variant attrs over N unrelated error maps.
+
 ```clojure
 ;; Shared FIELD shapes (registered once; both the base and any specialization
 ;; reference these — never re-inline [:string] across error maps).
@@ -337,17 +383,69 @@ schema.cljc registers only `m/default-schemas` + the mutable atom, no `malli.uti
 (schema/register! :seon.error/where   :keyword)   ; NEW — the site: a block/route/fn name
 (schema/register! :seon.error/symbol  :symbol)    ; NEW — the offending fn
 (schema/register! :seon.error/hint    :string)    ; NEW — the actionable fix
-(schema/register! :seon.error/data    :map)       ; NEW — opaque per-site payload
+(schema/register! :seon.error/data    :map)       ; NEW — opaque per-site payload (e.g. the malli explain)
 
 ;; THE base error — every error IS one of these unless it genuinely diverges.
+;; A consumer that destructures only the shared core handles every variant.
 (schema/register! :seon/error
   [:map
-   [:seon.error/message :seon.error/message]
+   [:seon.error/message :seon.error/message]               ; the one required field
    [:seon.error/where   {:optional true} :seon.error/where]
    [:seon.error/symbol  {:optional true} :seon.error/symbol]
    [:seon.error/hint    {:optional true} :seon.error/hint]
    [:seon.error/data    {:optional true} :seon.error/data]])
 ```
+
+**Grounded in malli's OWN error model.** Malli is the precedent for "a structured
+error value, humanized for display, programmatic underneath" — read from the
+vendored source:
+
+- `malli.core/explain` returns `{:schema <s>, :value <v>, :errors [<error> …]}`
+  (`core.cljc:2655-2658`); each `<error>` is
+  `{:path <schema-path>, :in <value-path>, :schema <sub>, :value <sub>, :type
+  <error-type-kw>}` (`malli.impl.util/-error`, `util.cljc:19-21`). Note malli ALSO
+  has no `:kind` discriminator — the error `:type` keyword (e.g. `::m/invalid-type`,
+  `::m/missing-key`) is a registry KEY into messages, not a branch in the value.
+- `malli.error/humanize` (`error.cljc:374-390`) turns an explanation into the
+  human string(s) via the `default-errors` registry (`error.cljc:44`), each entry
+  `{:error/message {:en "…"}}` or `{:error/fn {:en (fn [error opts] …)}}`, with
+  per-schema `:error/message` / `:error/fn` property overrides.
+
+So `:seon.error/message` mirrors malli's HUMANIZED output; `:seon.error/data`
+mirrors the structured `explain` map. **Seon already captures exactly this** in
+`seon.error.instrument` (`error/instrument.cljc:62-81`): `:seon.error.malli/path`
+= malli's `:in` (value path), `:seon.error.malli/explain-path` = malli's `:path`
+(schema path), `:seon.error.malli/leaf-type` = malli's error `:type`,
+`:seon.error.malli/humanized` = `me/humanize` output, plus `expected`/`got-edn`/
+`got-type`/`fn-sym`/`schema`. A **schema/instrumentation rejection** therefore needs
+NO new shape: it is a `:seon/error` whose `:seon.error/data` IS the existing
+`:seon.error.malli/*` projection (the malli explain). Reuse, don't reinvent.
+
+**Humanize is a derived VIEW, never a replacement — the value carries BOTH.** We do
+NOT choose humanized-string-vs-structured-data; the base shape keeps both at once.
+`:seon.error/message` is the humanized headline; `:seon.error/data` is the structured
+payload, ALWAYS retained (never humanized-and-thrown-away). This is malli's own
+design: `malli.error/humanize` is a pure TRANSFORM over the explain map, and the
+explain map is the source of truth —
+
+- `malli.error/humanize` (`error.cljc:374-390`) takes an EXPLANATION (`{:schema
+  :value :errors}` from `malli.core/explain`) and `reduce`s the `:errors` into a
+  structure that MIRRORS the value, pushing each error's message in at its `:in`
+  path (default `:wrap :message`, `:resolve -resolve-direct-error`). Output is a
+  path-keyed MAP for nested errors, or a vector of strings for a top-level scalar
+  miss (e.g. `["should be a string"]`) — exactly as our
+  `:seon.error.malli/humanized` captures (`error/instrument.cljc:72-75`). The
+  underlying explain map (`:schema`/`:value`/`:in`/`:path`/`:type`) is never lost.
+
+Rationale, captured for the consumers: the **AI agent acts on the DATA** — precise
+`:in` path + offending `:value` + the `:schema` it violated — with the humanized
+message as a fast headline to orient; the **human UI shows the headline + a
+value-explorer drill-down** into the data. Same shape as our render twins: the data
+is the model, the message/render is a view. So an error value's two renders split
+the emphasis — its **ai render** prints the error as data-as-Clojure (the explain
+map, eval-able, for the prompt), its **html render** leads with the humanized
+headline and offers a drill-down into `:seon.error/data` (the human tile). One
+value, two views, data always primary.
 
 **Per-error DECISION — diverge or fold?** Apply the rule "mint a specialized
 keyword only if the shape truly differs" to each error shape that exists today:
@@ -355,7 +453,10 @@ keyword only if the shape truly differs" to each error shape that exists today:
 | error keyword | diverges from `:seon/error`? | decision |
 |---|---|---|
 | **render error** | NO — message + where (block/route name) + symbol (offending fn) + hint is exactly the base | **FOLD.** Do NOT register a distinct `:seon.render/error` schema (it would be identical). The render guard PRODUCES a `:seon/error`; the html-response carries it under the `:seon.render/error` KEY (the structural discriminator — see below). Replaces the current bare alias `(register! :seon.render/error :seon.db/error)` (render.cljs:116). |
+| **schema / instrumentation rejection** | NO new shape — base + the malli explain under `:seon.error/data` | **FOLD.** It is a `:seon/error` whose `:seon.error/data` is the existing `:seon.error.malli/*` projection (= malli's explain). No new map. |
+| **capability denial** | NO — a message + where (the denied fn) + hint ("read your grants") is the base | **FOLD.** A plain `:seon/error`; evidence is also the eval-log string the `check-fs-denied` warn-check reads. |
 | **transact error** `:seon.db/error` (db.cljs:143-152) | YES — adds the serialized JS exception (`:seon.error/ex-data?`, `:stack?`, `:cause?`, `:raw?`, `:truncated?`), built by `seon.error/->map` from a thrown error | **KEEP as a specialization** referencing the base's shared fields, adding the exception-capture fields. It is the only error that carries a serialized exception, so it genuinely diverges. |
+| **LLM / provider error** `:seon.ai/error` (ai.cljs:96-103) | YES — carries provider/transport fields (`:seon.ai/status` HTTP, `:seon.ai/transport?` retryable, `:seon.ai/timeout?`, `:seon.ai/raw-body`) | **KEEP as a specialization** (see §3.9b) — these fields drive the retry decision, so it genuinely diverges. Reconcile its existing `:seon.ai/msg` to reference `:seon.error/message`. |
 | **eval error** | NO new in-memory shape — it is the base error PROJECTED to strings for durable storage | **No new map.** Persisted on the `:seon.eval` row (below). |
 
 ```clojure
@@ -374,6 +475,57 @@ keyword only if the shape truly differs" to each error shape that exists today:
    [:seon.error/raw       {:optional true} :any]
    [:seon.error/truncated {:optional true} :boolean]])
 ```
+
+#### 3.9b The LLM / provider error — `:seon.ai/error` (DECIDED: a specialization)
+
+The LLM envelope ALREADY EXISTS (`ai.cljs:96-103`) and ALREADY carries useful
+structured fields, so it is a genuine specialization, not a plain message:
+
+```clojure
+;; TODAY (ai.cljs:96-103) — note it predates the base and uses :seon.ai/msg:
+(schema/register! :seon.ai/error
+  [:map
+   [:seon.ai/msg        :seon.ai/msg]                 ; :string
+   [:seon.ai/status     {:optional true} :int]         ; HTTP status (4xx/5xx)
+   [:seon.ai/timeout?   {:optional true} :boolean]     ; wall-clock abort
+   [:seon.ai/transport? {:optional true} :boolean]     ; THE retryable flag (fetch threw pre-status)
+   [:seon.ai/raw-body   {:optional true} :string]])    ; raw provider body
+```
+
+Both adapters build it the same way (`anthropic.cljs/error->envelope` :255-279,
+`openai_compat.cljs/error->envelope` :273-297): APIConnectionError →
+`:seon.ai/transport? true` (the one retryable class); an HTTP non-2xx →
+`:seon.ai/status (.-status e)`; a wall-clock abort → `:seon.ai/timeout?`. There is
+**no `retry-after` or billing field captured today** — only `:status` +
+`:transport?` + `:timeout?`. The retryable flag drives the agent loop's one bounded
+retry (`turn.cljs:296-309`).
+
+**DECISION:** keep `:seon.ai/error` as the LLM specialization of `:seon/error`. The
+ONE reconciliation: it should reference the shared core so the generic surfacer
+reads it — i.e. `:seon.ai/msg` becomes (or mirrors to) `:seon.error/message`. Target
+shape:
+
+```clojure
+;; TARGET — references the base's shared field + keeps the provider variant attrs.
+(schema/register! :seon.ai/error
+  [:map
+   [:seon.error/message :seon.error/message]            ; shared core (was :seon.ai/msg)
+   [:seon.ai/status     {:optional true} :int]
+   [:seon.ai/timeout?   {:optional true} :boolean]
+   [:seon.ai/transport? {:optional true} :boolean]
+   [:seon.ai/raw-body   {:optional true} :string]])
+```
+
+**How a failed LLM turn surfaces to the agent (so it SEES the failure).** The
+adapters return errors-as-VALUES — never a rejected Promise (`ai.cljs:91-95`). In
+the turn loop (`turn.cljs:332-340`): a `:seon.ai/error` in the response closes the
+turn `:seon.agent.turn/status :error` (no self→self message row); the render then
+DERIVES a system line from the turn status (turn.cljs:321), so the failure appears
+in the TRANSCRIPT the next prompt shows the agent. A `:seon.ai/transport?` error
+gets ONE bounded retry first (turn.cljs:296-309); a persistent failure closes the
+run `:error`. So the carrier here is the turn-status datom + the logged
+`:seon.ai/msg`, surfaced via the transcript block — no uncaught path, the agent
+always sees it.
 
 **How consumers tell errors apart — structurally, never by a field.** The carrier
 attribute IS the identification:
@@ -464,7 +616,48 @@ tile (human, where it happened) and the warnings block (agent, aggregated) — a
 an eval failure ALSO surfaces in the persisted eval log. The warnings block is the
 union of checks; errors are one input among many.
 
-## 5. Reuse audit — what already exists, do NOT reinvent
+## 5. Error handling — never crash, always surface
+
+**The principle: there is NO uncaught path and NO silent swallow.** Every failure
+in the system is CAUGHT at its site and SURFACED in a derived, agent-visible place
+(the warnings block, the transcript, an error tile) — never a process crash, never
+a discarded exception. This is catch-to-SURFACE, the opposite of catch-to-hide: the
+catch exists so the failure becomes a first-class `:seon/error` VALUE that flows to
+a render, a check, or a row — exactly the standing "surface errors loudly, fix as
+they come" rule, made structural. The pod is single-threaded, so one uncaught throw
+would take down every agent + the UI host; the discipline is what keeps one bad
+render or one runaway eval from blanking the world. Self-healing falls out: because
+every surface is a derived fn of the db (or of a transient render value), the
+moment the underlying fact is fixed the surface returns empty and the error
+vanishes — no acknowledgement, no stored "last error" to clear.
+
+**Failure-site → surface table.** Every site has a catch, a carrier, and at least
+one agent-visible AND one human-visible surface:
+
+| failure site | catch site (fn) | carrier | agent-visible surface | human-visible surface |
+|---|---|---|---|---|
+| **render** (block ai/html throws, missing symbol, SCI deadline) | `seon.render` guarded walker (render.cljs `render` catch :663-666, `render-entity-html`/`-ai` catches) | transient `:seon/error` under the `:seon.render/error` KEY of `:seon.render/html-response` | warnings block via `check-render-health` (NEW) | the in-place **error tile** (siblings untouched) |
+| **eval** (a form in `eval-batch!` throws) | `seon.eval/record-eval!` → `seon.error/->map` | PERSISTED `:seon.eval/error` + `:seon.eval/error-data` on the `:seon.eval` row | `check-failed-evals` / `check-bad-ref` (warn) + the eval's own render in the transcript | the eval tile / transcript line |
+| **transact** (a tx is rejected) | `seon.db/transact!` failure arm | transient `:seon.db/error` under `::error` of `::transact-response` | the eval that called `transact!` records it (→ `check-failed-evals`) | the eval tile |
+| **capability denial** (fs / `/call` refuses) | `seon.agent.fs` / `seon.web.reactive.call` gate | the denial string in the eval result | `check-fs-denied` (warn) | the eval tile |
+| **schema / instrumentation rejection** (a fn's `:malli/schema` rejects args/return) | `seon.error.instrument/report-fn` → ex-info → `eval` catch | `:seon.error.malli/*` under `:seon.eval/error-data` (= malli explain) | `check-failed-evals` renders the structured malli error | the eval tile |
+| **LLM / provider error** (timeout, HTTP non-2xx, fetch throw) | adapter `error->envelope` (anthropic/openai-compat) — errors-as-values, never a rejected Promise | `:seon.ai/error` in the response → turn `:seon.agent.turn/status :error` | the **transcript** system line derived from the turn status (turn.cljs:321) | the same transcript line, human side |
+| **throwing warn-check** (a check fn itself throws) | `seon.warn/run-checks` per-check catch (warn.cljs:973-987) | synthetic `:warn-check-error` cluster | the warnings block (that check degrades loudly, others render) | the warnings tile |
+| **throwing layout / route handler** | a reitit error-catch middleware (the `:compile` middleware seam, middleware.cljc:58-74) | transient `:seon/error` (same as render) | warnings block if the agent owns the route | a human error page / error tile |
+| **agent runaway / hung eval** | the deadline ticker → worker `terminate()` (Phase-2); today the turn-limit + run deadline close the run | run `:seon.agent.run/closed-reason :deadline-exceeded` | derived run-status surfaces "deadline exceeded"; agent resets `:idle` | the run-status tile |
+
+Two invariants this table encodes: (1) **no agent code ever touches an SSE
+connection or throws into the event loop** — a failure becomes a value the UI host
+renders; (2) **every error reaches the agent** (the actor that can fix it) AND the
+human (who is watching), from ONE source, because the warnings block / transcript /
+tiles are all derived fns of the same db + transient render values.
+
+> Flag for `architecture.md`: this "never crash, always surface" principle and the
+> failure-site→surface table belong in the architecture doc's §The render engine
+> (which already states "a throwing or hung render yields a structured error value
+> for that render only") — generalize it from render to ALL sites.
+
+## 6. Reuse audit — what already exists, do NOT reinvent
 
 Already-registered shapes to REFERENCE, never re-create:
 
@@ -486,8 +679,14 @@ Already-registered shapes to REFERENCE, never re-create:
 - **`:seon.error.malli/*`** (error/instrument.cljc:62-71) — the schema-rejection
   payload; reuse as a `:seon.error/data` payload, unchanged.
 - **`:seon.db/error`** (db.cljs:143-152) — the serialized-exception/transact
-  envelope; KEEP as the one specialization of `:seon/error` (it carries the captured
+  envelope; KEEP as a specialization of `:seon/error` (it carries the captured
   exception); reference the base's shared field shapes, don't duplicate the message.
+- **`:seon.ai/error`** (ai.cljs:96-103) — the LLM/provider envelope (status /
+  transport? / timeout? / raw-body); KEEP as the second specialization; reconcile
+  `:seon.ai/msg` → `:seon.error/message` so it references the shared core.
+- **`malli.error/humanize`** (malli `error.cljc:374`) — produces the humanized
+  `:seon.error/message` for the schema kind; never hand-roll schema-error prose.
+  Pair with the explain map as `:seon.error/data`.
 - **`seon.warn/checks`** registry (warn.cljs:944) — the general current-problems
   mechanism; add a check, don't build a parallel error feed.
 - **`set-tee-fn!` idiom** (schema.cljc:183-191: `defonce ^:private` atom +
@@ -549,37 +748,43 @@ Reinvention / mistype findings (prior docs got these wrong):
    task: `:seon.error/kind` (error/instrument.cljc:62) and `:seon.warn/kind`
    (warn.cljs:50). Do NOT add new `:kind`/`:type` attrs.
 
-## 6. Open data-model decisions (for the owner)
+## 7. Decisions + remaining open questions
 
-1. **Route handler attr** — dedicated `:seon.route/handler :symbol` (recommended,
-   native symbol storage) vs reuse `:seon.render/html` (the design's "handler IS a
-   layout" unification, EDN-encoded). Pick one before seeding routes.
-2. **`:seon.route/name` uniqueness scope** — it is a GLOBAL datahike identity (good
-   for `match-by-name`), so per-agent app routes (`/agent/{id}/app/{x}`) must mint
-   globally-unique names (e.g. `:agent.abc/app-x`). Confirm the naming convention,
-   or scope names per-agent in app code (and drop the global identity).
-3. **Are routes seeded-only or agent-extendable?** Core routes (`/`, `/agent/{id}`,
-   `/agent/{id}/feed`, `/call`, `/eval`) seed at boot. Do agents transact their own
-   `:seon.route/*` rows for apps (`/agent/{id}/app/{x}`), and if so, is route
-   creation a capability-gated verb? (Affects the conflict-detection blast radius.)
-4. **Confirm `:seon/error` as the base + `:seon.db/error` as the lone divergence.**
-   §3.9 folds render/eval errors into the base (no distinct schema, discriminate by
-   carrier) and keeps only `:seon.db/error` (carries the exception) as a
-   specialization. Confirm no other error genuinely diverges (e.g. an LLM/provider
-   error — does it carry provider-specific fields, or is it just a `:seon/error` under
-   an `:seon.ai/error` carrier key? Lean: just a base value, no new schema).
-5. **Field-shape sharing + the `where` overlap.** Promote `:seon.error/message`,
-   `:seon.error/where`, `:seon.error/hint`, `:seon.error/symbol`, `:seon.error/data`
-   to registered shared FIELD shapes referenced by both error maps (recommended).
-   Note the overlap with `:seon.warn/where :string` (warn.cljs:52) — two `where`s,
-   two namespaces, similar meaning; keep separate (different ns) or unify.
-6. **Retire the two pre-existing `:kind` attrs?** `:seon.error/kind`
+### 7.1 Locked (owner-decided)
+
+1. **Route handler attr = dedicated `:seon.route/handler :symbol`** (native symbol
+   storage), NOT a reuse of `:seon.render/html`. (§3.8.)
+2. **Routes are seeded-base + agent-extendable**, agent app routes capability-gated,
+   handlers in the agent's `my.agent.<id>` ns, owner = self. (§3.8.)
+3. **`:seon.route/name` is per-agent namespaced** (e.g. `:agent.abc/app-x`) so the
+   global identity stays unique for reverse routing. (§3.8.)
+4. **Error model = one base `:seon/error` + two specializations** (`:seon.db/error`
+   for the captured exception, `:seon.ai/error` for the provider/transport fields);
+   render / eval / transact / capability / schema errors all FOLD into the base.
+   NO `:kind`/`:type` discriminator; discriminate by carrier attr. (§3.9.)
+5. **Error value carries BOTH `:seon.error/message` (humanized, via
+   `malli.error/humanize` for the schema kind) AND `:seon.error/data` (the structured
+   payload, = the malli explain map for schema errors), always.** Humanize is a
+   derived view; data is the source of truth. (§3.9.)
+6. **Promote the shared error FIELD shapes** (`:seon.error/message`/`where`/`hint`/
+   `symbol`/`data`) to registered schemas referenced by the base + both
+   specializations (the shared-shape rule).
+7. **Block name is NOT a datahike identity** — a plain per-agent `:keyword`; merge is
+   app-level (so it is not "fixed" into an identity by a later patch). (§3.2.)
+
+### 7.2 Remaining open
+
+1. **Retire the two pre-existing `:kind` attrs?** `:seon.error/kind`
    (error/instrument.cljc:62) and `:seon.warn/kind` (warn.cljs:50) both use the now-
    banned `:kind` pattern. The new error model uses neither. Decide whether to
    replace them (out of this redesign's scope — flagged, separate task).
-7. **Block name as datahike identity — confirmed NO** (finding 4); calling it out so
-   it is not "fixed" into an identity by a later patch.
-8. **`:seon.agent.turn/llm-meta`** — write-only, never read (turn.cljs:76); drop or
+2. **The `where` overlap** — `:seon.error/where :keyword` (new) vs the existing
+   `:seon.warn/where :string` (warn.cljs:52): two `where`s, two namespaces, similar
+   meaning. Keep separate (different ns, different value type) or unify.
+3. **`:seon.ai/error` `:seon.ai/msg` → `:seon.error/message` reconciliation** — the
+   one source delta to make the LLM error participate in the generic surfacer (§3.9b).
+   Do it now or stage it.
+4. **`:seon.agent.turn/llm-meta`** — write-only, never read (turn.cljs:76); drop or
    keep as audit. (Carried from agent-runtime-spec open decision 3.)
 
 ## Detail docs
