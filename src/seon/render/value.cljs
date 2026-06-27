@@ -53,9 +53,10 @@
      {:seon.eval/opaque \"datahike/DB\" :seon.eval/summary \"max-tx=42\"}
      {:seon.eval/datom [e a v]}
 
-   (The opaque/datom markers reuse `seon.eval`'s existing reserved keys so
-   the whole system speaks one vocabulary. At cutover the opaque-DETECTION
-   helpers here and in `seon.eval` collapse to one copy — see ns-end note.)"
+   (The opaque/datom markers use the `:seon.eval/opaque|datom` reserved
+   keys so the whole system speaks one vocabulary. The opaque-DETECTION +
+   projection logic lives ONLY here; `seon.eval` requires this ns for both
+   `render-ai` and `project-plain` — see ns-end note.)"
   (:require
     [clojure.string :as str]
     [seon.platform :as platform]))
@@ -76,9 +77,10 @@
    :shape-sample (env-int "SEON_VALUE_SHAPE_SAMPLE" 8)})
 
 ;; ============================================================
-;; Opaque detection (mirrors seon.eval/datahike-handle? + opaque-summary;
-;; collapses to one copy at cutover). Per-node, only on VISITED nodes, so a
-;; giant value is never fully walked.
+;; Opaque detection — the ONE home for "this node is not plain data,
+;; project it to a compact marker." `seon.eval` requires this ns rather
+;; than carrying its own copy. Per-node, only on VISITED nodes, so a giant
+;; value is never fully walked.
 ;; ============================================================
 
 (defn- datahike-handle?
@@ -134,6 +136,40 @@
        :seon.eval/summary (let [s (str x)] (subs s 0 (min 80 (count s))))})
     (catch :default _
       {:seon.eval/opaque "unknown" :seon.eval/summary "<unprintable>"})))
+
+(declare project-plain)
+
+(defn- project-plain*
+  [value]
+  (cond
+    ;; opaque handles FIRST — a datahike DB is also map?/coll?.
+    (opaque-node? value) (opaque-marker value)
+
+    ;; plain map — recurse over keys AND values.
+    (map? value)
+    (reduce-kv (fn [m k vv] (assoc m (project-plain k) (project-plain vv))) {} value)
+
+    ;; plain vector/set/list/seq — recurse element-wise (lazy/seq → vector
+    ;; for a finite, reader-safe shape).
+    (coll? value)
+    (if (seq? value)
+      (mapv project-plain value)
+      (into (empty value) (map project-plain) value))
+
+    :else value))
+
+(defn project-plain
+  "Recursively project VALUE into reader-safe PLAIN DATA: every non-plain
+   node (datahike DB/Datom/Entity, record, JS object, fn) becomes a compact
+   marker map; plain scalars (incl. #inst/#uuid) and collections survive,
+   walked element-wise. Unbounded — the full structure is preserved, only
+   opaque nodes are summarized; pair it with `pr-str` for a round-trippable
+   string. (`sample` is the BOUNDED variant for agent display.) Never
+   throws — a walk failure degrades to the opaque marker for that node."
+  {:malli/schema [:=> [:catn [:seon.render.value/value :any]] :any]}
+  [value]
+  (try (project-plain* value)
+       (catch :default _ (opaque-marker value))))
 
 ;; ============================================================
 ;; SAMPLE — depth + breadth bounded skeleton of plain data + markers.
@@ -194,8 +230,10 @@
      :seon.render.value/count  (counted-count x)}
 
     (map? x)
-    (let [ks       (try (sort-by str (keys x)) (catch :default _ (keys x)))
-          shown-ks (take max-keys ks)
+    ;; REPL-faithful: keep the map's NATURAL key order (what `pr-str` shows),
+    ;; never re-sort — an agent reading a constructed value back (e.g. an
+    ;; `{:seon.db/ok? false …}` envelope) sees the keys as it built them.
+    (let [shown-ks (take max-keys (keys x))
           elided   (max 0 (- (count x) max-keys))]
       (cond-> (into {} (map (fn [k] [k (sample* (get x k) opts (inc depth))]))
                     shown-ks)
@@ -406,15 +444,13 @@
      :seon.render.value/tree       skel}))
 
 ;; ============================================================
-;; Cutover note (NOT done here — design+prototype only):
+;; Live integration:
 ;;
-;; `seon.eval/render-result-edn` is the live producer of
-;; `:seon.eval/result-edn` (the AI text). At cutover its internals
-;; (project-agent-safe + row-cap-preview + pr-str + char-clip) are REPLACED
-;; by `(render-ai eval-id value)`. The `result/<id>` handle stays attached
-;; downstream in `seon.ctx/format-eval-row` (untouched). The opaque-DETECTION
-;; helpers duplicated here and in `seon.eval` (`datahike-handle?` /
-;; `opaque-marker`/`opaque-summary`) collapse to ONE copy — they MOVE here
-;; (the value-projection home) and `seon.eval` requires them, a one-way edge
-;; (eval → render.value), no cycle.
+;; `seon.eval/render-result-edn` (the producer of `:seon.eval/result-edn`,
+;; the AI text) is `(render-ai eval-id value)` + a final char-cap backstop.
+;; `seon.eval/sanitize-result-edn` (the read-side net for legacy rows)
+;; reuses `project-plain`. The opaque-DETECTION + projection logic lives
+;; ONLY here; `seon.eval` requires this ns — a one-way edge (eval →
+;; render.value), no cycle. The `result/<id>` handle on the `;=>` line is
+;; still added downstream by `seon.ctx/format-eval-row` (untouched).
 ;; ============================================================

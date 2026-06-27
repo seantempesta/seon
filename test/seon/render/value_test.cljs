@@ -105,6 +105,33 @@
     (is (<= (count (:seon.render.value/head skel)) 80))))
 
 ;; ============================================================
+;; project-plain — the UNBOUNDED reader-safe projection (the read-side net
+;; reused by seon.eval/sanitize-result-edn). Opaque → marker, plain
+;; survives, full structure preserved (no breadth/depth bound).
+;; ============================================================
+
+(deftest project-plain-leaves-plain-data-untouched
+  (testing "scalars + plain collections (incl. #inst) survive verbatim, unbounded"
+    (let [plain {:a [1 2 3] :b #{:x :y} :c {:d (vec (range 100))}
+                 :t #inst "2020-01-01"}]
+      (is (= plain (v/project-plain plain)))
+      ;; UNbounded — every one of the 100 elements is kept (unlike `sample`)
+      (is (= 100 (count (get-in (v/project-plain plain) [:c :d])))))))
+
+(deftest project-plain-projects-opaque-nodes-to-markers
+  (testing "a datahike-shaped handle / datom becomes a compact marker"
+    (is (= "datahike/DB" (:seon.eval/opaque (v/project-plain (->FakeDB 5 5)))))
+    (is (= [1 :user/name "Jo"] (:seon.eval/datom (v/project-plain (FakeDatom. 1 :user/name "Jo")))))))
+
+(deftest project-plain-projects-opaque-nested-in-collections
+  (testing "an opaque node nested in a coll is projected; plain siblings survive"
+    (let [out (v/project-plain {:keep [1 2] :db (->FakeDB 7 7)})]
+      (is (= [1 2] (:keep out)))
+      (is (= "datahike/DB" (:seon.eval/opaque (:db out))))
+      ;; round-trips through pr-str (the sanitize-result-edn use)
+      (is (string? (pr-str out))))))
+
+;; ============================================================
 ;; render-ai — text composition + the drill hint contract.
 ;; ============================================================
 
