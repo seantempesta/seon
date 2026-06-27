@@ -156,8 +156,26 @@ identity — see [[data-model]] §4.2). Renders are fns/symbols, never stored ou
   (ctx.cljs:1562-1603). KEEP `render-context`(1852) as the single prompt producer and
   `render-context-ai`(1905) (concat-by-priority + bracket + cache-split).
 - Rename the remaining merge/prompt helpers in place: `rendered-section-texts`(1893)
-  → `rendered-block-texts`; `section-bracket-ai`(1752) → `block-bracket-ai`;
-  `agent-section-char-budget`(1693) → `agent-block-char-budget`.
+  → `rendered-block-texts`; `section-bracket-ai`(1752) → `block-bracket-ai`.
+- **DELETE the per-agent char budget** (owner decision 2026-06-27): `apply-agent-budget`
+  (1761), `agent-section-char-budget`(1693), and the truncation marker. After
+  seed-copy every block is the agent's own and the seeded blocks (transcript 53k /
+  namespaces 18k) dwarf the old 8k cap; unbounded growth is bounded at the EVAL-OUTPUT
+  layer instead (2g), and seeded blocks get rolling windows later (deferred milestone).
+  The byte-stable tie-break loses the `:seon.ctx/agent?` tag → use `(juxt priority name)`.
+
+**2g — Conditional eval-output bound (replaces the char budget).**
+
+Bound the real growth source — agent eval output — at the eval-render layer, reusing
+the SHIPPED value-renderer (`seon.render.value`) + result-mechanism (`result/<id>`),
+NOT a ctx char budget. Two tiers: (1) **incidental** eval output keeps the bounded
+skeleton (`render.value/sample` + `result-body-render-cap` ≈ 4k tokens) + the
+`result/<id>` drill handle (already shipped); (2) **intentional drill** — when the
+form REFERENCES a `result/<id>` var — renders with a loosened skeleton + a high cap
+(`SEON_RESULT_DRILL_CAP` ≈ 50k tokens) so the agent SEES the data it asked for instead
+of a re-skeleton. Broaden `result-var-ref?` (eval.cljs:750, today only the bare symbol)
+to "the form's source references a `result/<id>` token." Full design + file:lines:
+[[library-grounding]] "Output bounding."
 
 **2c — Seed-copy at creation.**
 
@@ -442,3 +460,23 @@ Two lanes, both must agree; Phase 1's rename is the cross-lane atomic part.
 - **Live proof:** a fresh world renders an agent's prompt from its own
   `:seon.agent/ctx` (no merge), `set`-equivalent via `(ctx/install! …)` upserts
   by name, `start!` writes `:seon.agent/parent`, and `/` derives from root.
+
+## Cross-cutting milestones (owner directives 2026-06-27)
+
+These run alongside / after the phases, not as a separate lane.
+
+- **Live DeepSeek feedback ASAP.** As soon as Phases 1-2 land enough to run an agent,
+  drive a live DeepSeek agent (pre-authorized) and READ its actual outputs — are the
+  instructions good? Real-output feedback gates "is the context working," not just
+  green tests. Every subsequent phase ships a live-drive observation.
+- **Context-quality audit — no overlap, no repetition, colocate.** Review the seeded
+  ctx blocks against the LIVE rendered prompt for (a) bad/stale context, (b) OVERLAPPING
+  context (the same fact stated in two blocks — e.g. transcript masthead vs
+  shared-instructions vs the fixed system-text), (c) colocation (relevant context
+  together, not scattered). Prune duplicates; one fact, one home. Pairs with the live
+  DeepSeek drives (look at what the model actually receives). Aligns with the
+  show-don't-tell / align-context-with-runtime standing guidance.
+- **Rolling window on unbounded blocks (DEFERRED).** The transcript (53k chars live)
+  and similar grow without bound; add a rolling window (last-N turns / since-T) so
+  growth is bounded by VIEW, not a char cap. Not blocking the phases; do after the
+  seed-copy + eval-output-bound model is proven live.

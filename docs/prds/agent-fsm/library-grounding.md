@@ -237,6 +237,74 @@ Read: `reference-code/reitit/modules/reitit-core/src/reitit/trie.cljc:60`
   `eval/lookup-value`, map `:seon.route/middleware` keywords through reitit's
   registry. One pattern + N methods = N rows collapsing into one reitit path.
 
+## Phase 1-2 keystone — ctx merge→seed-copy + the render engine
+
+Read: `src/seon/ctx.cljs` (the merge/render machinery) + `src/seon/render.cljs`
+(the engine). The whole transformation:
+
+- `core-default-ctx` (ctx.cljs:1604) = the hardcoded default block catalog →
+  becomes the PRIVATE boot-only seed set consumed by `install!` (Phase 2).
+- `gather-sections` (ctx.cljs:1737) = the render-time merge `defaults ∪ agent-own`,
+  tagging each `:seon.ctx/agent?` → **DELETED**. `context-root` (ctx.cljs:1821)
+  rewritten to read the agent's OWN complete `:seon.agent/ctx`, decode, sort, stop.
+- The byte-stable cache split keys on `:seon.ctx/priority ≤ 20` (render-context-ai,
+  ctx.cljs:1921-1928), NOT the `agent?` tag — survives seed-copy. The stable
+  tie-break loses `agent?`; use `(juxt priority name)` (name is the unique key).
+- The render engine: `render` (render.cljs:645) injects the `:seon.render/render`
+  recursion handle (660) + a try/catch guard (663-666 → `:seon/error` in Phase 7);
+  `resolve-slot` (606) does string/hiccup-verbatim, agent-symbol→SCI-bounded
+  (`agent-authored-sym?`, render/sci.cljs:92), core-symbol→direct. Phase 2e
+  generalizes the handle into `(slot :name)` (look the block up by
+  `:seon.agent.ctx/name` in the agent's `:seon.agent/ctx`).
+- `:seon.render/ai` flips required→optional on the block (html-only blocks).
+- `render-context` (ctx.cljs:1852) carries a per-agent full-prompt `:seon.render/ai`
+  OVERRIDE on the entity — orthogonal to blocks, survives unchanged.
+
+## Output bounding — value-renderer + result-mechanism (REPLACES the char budget)
+
+> **DECISION (owner, 2026-06-27): DROP the per-agent char budget.** Phase 2 deletes
+> `apply-agent-budget`, `agent-section-char-budget`, and its truncation marker
+> (ctx.cljs:1693-1802). The seeded blocks grow predictably (transcript 53k /
+> namespaces 18k chars live — they get ROLLING WINDOWS later, not a char cap); the
+> real unbounded-growth risk is agent EVAL OUTPUT, bounded at the eval-render layer.
+
+Read: `src/seon/render/value.cljs` (the structural value renderer — ALREADY the
+default for every eval value), `src/seon/eval.cljs:700-784` (the `result/<id>`
+mechanism + `result-var-ref?`), `src/seon/ctx.cljs:372-470` (the render caps).
+
+The machinery already shipped:
+- `seon.render.value/sample` (value.cljs:248) → a depth+breadth-bounded SKELETON
+  (max-depth 3 / max-items 8 / max-keys 8, env-overridable) that PRESERVES
+  navigation paths (keys/indices), per-node type+count, the homogeneous column-set
+  (`… +129 more each {:a :b :c}`), lazy-safe head sampling, opaque-handle markers.
+  `render-ai` (value.cljs:393) appends the `result/<id>` drill hint.
+- The `result/<id>` mechanism (eval.cljs:736-784): every eval value is stashed in
+  `globalThis.result.<id>` (+ an analyzer def), last 200 kept; the agent drills with
+  `(get-in result/<id> […])` / `filter` / `count` WITHOUT re-running.
+- Current caps (ctx.cljs): `eval-render-cap` 1500 (echoed source+stdout),
+  `result-body-render-cap` 16384 ≈ 4k tokens (the citable `;;=>` body, skeleton'd +
+  row-capped 50), `message-render-cap` 4000.
+
+**The target model — three tiers, bound the VIEW not the storage:**
+
+1. **Incidental eval output → the bounded skeleton** (`sample` + `result-body-render-cap`
+   ≈ 4k tokens) + the `result/<id>` handle. Already shipped; this IS the "reasonable
+   default." Don't dump a possibly-accidental huge result into context.
+2. **Intentional query against a result → high tolerance (~50k tokens / unbounded).**
+   When the eval form REFERENCES a `result/<id>` var (a deliberate drill —
+   `result/<id>`, `(get-in result/<id> …)`, `(filter … result/<id>)`), the agent
+   explicitly asked for that data: render with a loosened skeleton + a much higher
+   char cap (new `SEON_RESULT_DRILL_CAP` ≈ 200000 chars ≈ 50k tokens), so it SEES
+   the data instead of a re-skeleton. Detect by broadening `result-var-ref?`
+   (eval.cljs:750, today only the bare symbol) to "the form's source references a
+   `result/<id>` token." (Phase 2 / eval-render refinement.)
+3. **Seeded blocks → predictable now, ROLLING WINDOW later** (e.g. transcript last-N
+   turns). Deferred; tracked in [[roadmap]].
+
+This replaces the blunt char budget with bounding at the actual growth source, reusing
+the shipped value-renderer + result-mechanism. The html half (the collapsible
+value-explorer over `render-html-data`, value.cljs:427) is UI's lane.
+
 ## Idioms to internalize — stop writing JS/Java-shaped Clojure
 
 Concrete examples (file:line) of the patterns to imitate:
