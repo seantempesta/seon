@@ -29,7 +29,7 @@
 @source inline("text-{2xs,xs,sm,base,lg} text-{left,center,right} font-mono font-semibold font-bold");
 @source inline("italic uppercase tracking-wider tabular-nums whitespace-pre-wrap truncate");
 /* color — Phosphor palette only */
-@source inline("text-text-{50,100,200,300,400,500}");
+@source inline("text-text-{50,100,200,300,400,500,600,700}");
 @source inline("text-{signal,success,error,warning,info} text-amber-{300,400,500}");
 @source inline("bg-base-{800,850,900,950}");
 /* borders + overflow */
@@ -63,6 +63,12 @@
   --color-text-300: #b0aa9e;
   --color-text-400: #8c8578;
   --color-text-500: #6b6459;
+  /* 600/700 extend the cream ramp DARKER for dim affordances (tree carets,
+     the `▸ deeper` prune hint, value-explorer indices). Without these tokens
+     the `text-text-600/700` classes generated nothing and fell back to the
+     inherited body color — dim by luck, not intent. */
+  --color-text-600: #524c43;
+  --color-text-700: #413d38;
 
   /* Semantic colors */
   --color-signal: #f0b429;
@@ -90,6 +96,19 @@
 
 .animate-skeleton {
   animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+/* Value-explorer disclosure caret. The tree's <summary> is `display:flex`
+   (to lay out caret + key + type-head on one baseline), which SUPPRESSES the
+   browser's native disclosure marker — so we fold in an explicit `▸` caret and
+   rotate it to `▾` when the <details> is open. Pure CSS; no JS, survives the
+   SSE innerHTML patch. */
+.value-node > summary .vx-caret {
+  display: inline-block;
+  transition: transform 0.12s ease;
+}
+.value-node[open] > summary .vx-caret {
+  transform: rotate(90deg);
 }
 
 /* Tool call unified expand/collapse */

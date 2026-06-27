@@ -374,7 +374,12 @@
   [label head-text rows depth]
   [:details (cond-> {:class "value-node min-w-0"}
               (< depth 2) (assoc :open "open"))
-   [:summary {:class "cursor-pointer text-xs select-none hover:text-amber-300 marker:text-text-600 flex items-baseline min-w-0"}
+   ;; `flex` on the summary SUPPRESSES the browser's native disclosure marker,
+   ;; so we fold in an explicit `vx-caret` (▸) that CSS rotates to ▾ when open
+   ;; (`.value-node[open] > summary .vx-caret`, input.css) — the persistent
+   ;; "this row expands" affordance, dim so it doesn't compete with the keys.
+   [:summary {:class "cursor-pointer text-xs select-none hover:text-amber-300 flex items-baseline min-w-0 marker:hidden"}
+    [:span {:class "vx-caret text-text-600 shrink-0 mr-1"} "▸"]
     label
     [:span {:class "text-text-400 font-mono truncate"} head-text]]
    (into [:div {:class "pl-3 ml-0.5 border-l border-base-700 mt-1 flex flex-col gap-1 min-w-0"}]
