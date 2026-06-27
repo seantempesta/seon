@@ -1655,8 +1655,12 @@
      :seon.render/ai 'my.kb.shared/instructions-section}
     {:seon.ctx/name :namespaces   :seon.ctx/priority 20
      :seon.render/ai 'seon.ctx.namespaces/namespaces-section}
-    {:seon.ctx/name :your-entity  :seon.ctx/priority 30
-     :seon.render/ai 'seon.ctx.your-entity/your-entity-section}
+    ;; :your-entity REMOVED (owner-directed, 2026-06-27): it instructed the agent
+    ;; to transact :seon.agent/purpose (not installed → errors) + invited free-form
+    ;; "write notes to yourself here" with no notes attr to write to, and its
+    ;; "this map IS you" framing overlapped :soul. The agent's own entity is still
+    ;; reachable via (seon.db/pull '[*] [:seon.agent/id <id>]); re-add a leaner
+    ;; section if a clear self-state mechanism is wired. See coordination.md.
     {:seon.ctx/name :live-tile    :seon.ctx/priority 35
      :seon.render/ai 'seon.ctx.live-tile/live-tile-section}
     {:seon.ctx/name :warnings     :seon.ctx/priority 40
