@@ -118,9 +118,38 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
-- **Now:** (not started)
-- **Needs (from Core):** Phase 1 naming, Phase 5 route schema + seeded `/`, Phase 2e slot primitive (gates above).
-- **Interface changes (Core must absorb):** —
+- **Now:** Validated the Phase-8 stack against vendored source (reitit core/ring/trie/malli
+  are CLJS-clean — the Java trie + ring's classpath static-handlers are `:clj`-only and
+  unused; build delta = Maven `metosin/reitit-ring`+`reitit-malli` 0.10.1 in `deps.edn :cljs`,
+  NOT source-paths). **Owner-approved architecture pivot** (simplest/most-robust; reuse over
+  roll-our-own): the live UI is hyperlith's model ported to Node — `view = f(db-as-of t)`
+  whole-element **datastar morph** over a **gzip-compressed SSE stream** (+ drop-latest
+  throttle). This REPLACES packetstar per-tile `{id,html}` + the `!last-tree` BFS diff + the
+  UI-side `since-t` replay. **Server half PROVEN in Node** (gzip SSE + byte-exact
+  `datastar-patch-elements` framing, decode-verified). Building the real-pod streamer
+  (`seon.web.datastar`: `/world` shim + same-path morph stream, `view=f(db)` roster,
+  morph-on-tx), confirmed in **acme** (never the live default pod). [[ui]] + roadmap Phase 8
+  get rewritten to match once the acme live-proof lands. **STAGED for Phase 1:** the 40
+  old-name occurrences in `web/**`+`ui/**` are mapped; I retarget the INSTANT your ns-move
+  lands — I won't retarget early (it would break the LIVE pod build).
+- **Needs (from Core):** (1) land the Phase-1 ns-move + attr-rename, then I retarget `web/**`
+  in the same window + ping. (2) Phase 2e `(slot :name)`. (3) Phase 5 `:seon.route/*` schema —
+  **but seed the CORRECTED route set (Interface #2 below), not the old one.**
+- **Interface changes (Core must absorb):**
+  1. **Handoff #4 still holds** — UI renders the warnings-block error-TILE; it just streams
+     inside the morphed world view (no standalone patch). The `:seon/error` VALUE shape is
+     unchanged (yours).
+  2. **Handoff #3 route SET changed — READ BEFORE seeding Phase-5 routes.** I own routing
+     (owner-delegated); the design is hierarchical reitit with route-data inheritance.
+     (a) **No `/agent/{id}/feed`** — GET=shim and the live stream ride the SAME path (datastar
+     opens the stream from the page, per hyperlith), so seed `/` + `/agent/{id}` only.
+     (b) **Namespaces are not a routing level** — one action door per agent
+     (`/agent/{id}/call`), the fn rides as a descriptor; do NOT seed per-ns/per-fn routes.
+     Full hierarchical tree + the middleware/auth/cache/CORS mapping land in [[ui]] (mine);
+     `db->routes` stays mine.
+  3. **Ops note (not a blocker):** SSE streams can't be browser-verified by the in-tool chrome
+     agent (its net layer 503s long-lived `text/event-stream`); verify streamed surfaces
+     server-side (a node streaming client showing the payload change on a tx) + human eyeball.
 
 ## Launch prompts
 
