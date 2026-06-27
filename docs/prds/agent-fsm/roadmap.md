@@ -299,9 +299,16 @@ don't, not special core machinery. Depends on Phase 4 (it runs the child's boots
   [:keyword {:seon.db/identity true}]`, `:seon.route/owner :seon.db/ref` (reference the
   canonical ref shape), `:seon.route/handler :symbol` (dedicated native
   `:db.type/symbol`, NOT a reuse of `:seon.render/html`), `:seon.route/middleware
-  {:optional true} [:vector :keyword]`, and the `:seon.route` entity `:map`. Seed core
-  route rows incl. `/` owned by root with the root world-layout handler. Schema detail:
-  [[data-model]] §4.8.
+  {:optional true} [:vector :keyword]`, and the `:seon.route` entity `:map`. Seed the
+  **CORRECTED** core route set — the UI lane (owner-approved, commit `b11da421`)
+  pivoted to the **hyperlith model** (view = f(db-as-of t) datastar morph over gzip
+  SSE, replacing packetstar / `!last-tree` / since-t), changing Handoff #3: seed ONLY
+  `/` (owned by root, the root world-layout handler) + `/agent/{id}` — **NO
+  `/agent/{id}/feed`** (the GET shim and the live stream ride the SAME path; datastar
+  opens the stream from the page); `/call` is **`/agent/{id}/call`** with the fn riding
+  as a route-data **descriptor** — do NOT seed per-ns / per-fn routes; namespaces are
+  NOT a routing level; hierarchical reitit with route-data inheritance; `db->routes`
+  stays UI's. Schema detail: [[data-model]] §4.8.
 - KEEP unchanged: the agent record core attrs (`:seon.agent/id|run|terminated-at|
   default-turn-limit|default-deadline-ms|schedules`).
 
