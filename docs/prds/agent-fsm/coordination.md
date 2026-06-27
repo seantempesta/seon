@@ -561,6 +561,18 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
 
 ### Interface changes (either side; newest first)
 
+- **2026-06-26 (R): CORE FIX `5f4c7da` + I did a `cluster reset default`.** Fixed a
+  severe latent bug: the FIRST `(defn …)` into a fresh agent home ns threw
+  `TypeError: Cannot read properties of undefined` — the home ns's runtime JS object
+  was never materialized because the host-bundled `:refer [wait complete …]` in
+  `setup-agent-ns!` aborts the ns-form emit before the object is provided. Fix: prime
+  the object with a bare `(ns <home>)` before the require/refer form (`eval.cljs`,
+  canonical mechanism — no JS walker). **Un-cripples build-your-environment.**
+  Live-proven on DeepSeek: fresh agent `ZAr` built + tested a `summarize` fn
+  end-to-end, in the program graph, correct final answer. **NOTE:** I reset the
+  `default` cluster (7890) to verify on a clean boot — if you had live default-pod
+  state it's wiped (re-seed regenerates the core; your acme 7980 is untouched).
+  **Next on R:** finish the smart eval-result value renderer now that defn works.
 - **2026-06-26 (R):** `/call` is LIVE on the pod (`serve.cljs:542` →
   `call.cljs/handle!`); request shape `@post('/call?fn=<ns/sym>&args=<transit>')`.
   `web/reactive/call.cljs` (resolution + capability gate + eval) is **R-owned**
