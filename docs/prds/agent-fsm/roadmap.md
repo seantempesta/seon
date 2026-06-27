@@ -378,24 +378,42 @@ confirm/keep (the active pod has zero stored entity-kind discriminators).
 `/`). The capability gate (`seon.web.reactive.call`) is UNCHANGED. Target design:
 [[ui]].
 
-- **Adopt reitit.** ADD `reitit-core` + `reitit-ring` + `reitit-malli` (vendored
-  `reference-code/reitit` 0.10.1, `.cljc`). ADD `db->routes` (~10 lines) + a ~20-line
-  Node↔Ring adapter; generalize the `createServer` var-rereading wrapper
-  (serve.cljs:704-710) to a per-request router thunk.
+**Landed so far:** the Phase-1 ns/keyword rename (web/** retarget `9801142d`,
+grep-clean tree-wide) and the **gzip-morph live channel** — `seon.web.datastar`
+(`c6c8d0ff`), the hyperlith `view = f(db)` model in Node: whole-element
+`datastar-patch-elements` (mode `outer`) over a gzip SSE stream + a drop-latest
+throttle, driven by one `db/listen!` tx-listener, live-proven on the reseeded pod
++ acme. The remaining Phase-8 work below wires it to the per-world routes and
+collapses the two old UI stacks onto it.
+
+- **Adopt reitit.** ADD Maven `metosin/reitit-ring` + `metosin/reitit-malli` 0.10.1
+  to `deps.edn :cljs :extra-deps` (the CLJS-clean modules — NOT source-paths; the
+  Java trie + ring's classpath static-handlers are `:clj`-only and unused). ADD
+  `db->routes` (~10 lines: GROUP rows by `:seon.route/pattern`, nest per
+  `:seon.route/method`, resolve `:seon.route/handler` via `eval/lookup-value`, map
+  `:seon.route/middleware` keywords through a registry) + a ~20-line Node↔Ring
+  adapter; generalize the `createServer` var-rereading wrapper (serve.cljs:704-710)
+  into reitit's `reloading-ring-handler` thunk so the router is a pure derived value
+  of the route datoms rebuilt on tx. Nested routes inherit route-data parent→child
+  (`:seon.route/owner` + middleware flow down via meta-merge).
 - **REPLACE the hand-rolled dispatch** with reitit: `serve/handler` method-`case` +
   GET/POST `cond` (serve.cljs:594-634), `complete-path->agent-id`(419) +
   `handle-complete-agent!`(389); `inspector` `route?`(1585)/`handle!`(1845)/
   `parse-agent-id`(1551); `tile` `route?`(1527)/`handle!`(1532) + the 8
-  `re-matches`/`re-find` blocks. Seed core routes `/`, `/agent/{id}`,
-  `/agent/{id}/feed`, `/call`, `/eval`, `/chat`, `/agent/{id}/complete`,
-  `/agent/{id}/app/{x}`. KEEP the gate verbatim
-  (`resolve-owning-agent`/`granted-fn?`/`capability-check`/`invoke!`/the `/call`
-  handler) — move ONLY `/call`'s registration (serve.cljs:620) to a seeded route datom;
-  KEEP `transform-hiccup` (transform.cljs:183-197) + wiring (render.cljs:439-452);
-  `same-origin?`(serve.cljs:572-592) → a reitit keyword middleware on POST route-data.
-- **FIX the `/eval` 404.** `packetstar.js:125` posts to `POST /eval?agent=…` but
-  `serve.cljs` has only `/chat`→`handle-chat!`(427). ADD `handle-eval!` + the `/eval`
-  route (seed a `:seon.route/*` row once reitit lands).
+  `re-matches`/`re-find` blocks. Seed ONLY the corrected core route set — `/`
+  (root world) + `/agent/{id}` (world); the GET shim and the live stream ride the
+  SAME page path, so there is **NO `/agent/{id}/feed`**. The one action door is
+  `/agent/{id}/call` (the fn rides as a `?fn=` descriptor — namespaces are not a
+  routing level). Agents add `/agent/{id}/app/{x}`. KEEP the gate verbatim
+  (`resolve-owning-agent`/`granted-fn?`/`capability-check`/`invoke!`/the `handle!`
+  handler) — move ONLY the action door's registration (serve.cljs:620) to a seeded
+  `/agent/{id}/call` route datom; KEEP `transform-hiccup` (transform.cljs:183-197) +
+  wiring (render.cljs:439-452); `same-origin?`(serve.cljs:572-592) → a reitit keyword
+  middleware on POST route-data.
+- **Eval is an action, not a standalone route.** The old `/eval` 404 (packetstar.js
+  posted to `POST /eval?agent=…`; packetstar is DITCHED) dissolves — wire eval like
+  any other action through `/agent/{id}/call`, the one capability-gated door, rather
+  than a hand-rolled `/eval` handler.
 - **Collapse the two UI stacks to ONE `world-layout`.** REPLACE — do not keep both:
   world `console-shell`(tile.cljs:1333) → `world-layout` (seon.ui), canvas = the focal
   comms block (`input-form` 1316 + commentary); RETIRE the older datastar consumer view
@@ -403,10 +421,11 @@ confirm/keep (the active pod has zero stored entity-kind discriminators).
   (`:seon.agent/id "root"`) rendered by the SAME layout, not a separate dashboard:
   `/agents` → `/`; `list-agents-data`(103)/`agents-index-page`(1283)/
   `agent-grid-tile`(1068) → the system-scoped, query-across-all-agents variant of
-  `world-layout`; `::index` SSE key → the root-world subscriber. Consolidate the two
+  `world-layout`; the root-world is the `/` subscriber. Consolidate the two
   tx-listeners (`db/listen! ::inspector` inspector.cljs:1715; `::listener`
   tile.cljs:1170) and the two push registries (inspector 1624-1689; tile 1109-1146)
-  onto one streamer + one SSE framing.
+  onto the ONE `seon.web.datastar` gzip-morph streamer (LANDED, `c6c8d0ff`) — delete
+  both old listeners + registries.
 - **Slots + tiles + placement-as-blocks** (depends on Phase 2e's `slot` primitive):
   `console-region`/`region`(tile.cljs:1242-1251) → `(slot :name)` keyed on
   `:seon.agent.ctx/name`; `render-context-html`'s flat `[:section {:data-section name}]`
@@ -420,8 +439,14 @@ confirm/keep (the active pod has zero stored entity-kind discriminators).
   `core-blocks` catalog). KEEP the lean `core-views` symbol-resolution table
   (tile.cljs:329-332,641-642) + `live-result-value`(324-338) `globalThis.result` read —
   **preserve this invariant** (no `seon.eval`/bootstrap compiler in the web bundle).
-- **ADD the `!last-tree` per-connection slot-tree BFS diff** (neither UI has it today —
-  both whole-region replace).
+- **The live channel is the gzip-morph stream, NOT a server-side diff** (LANDED,
+  `seon.web.datastar` `c6c8d0ff`): `view = f(db-as-of t)` renders the WHOLE element →
+  ONE `datastar-patch-elements` (mode `outer`) per tx over a gzip SSE stream + a
+  drop-latest throttle; datastar's idiomorph diffs the DOM client-side, so there is
+  **no `!last-tree` slot-tree BFS** and no per-tile `{id, html}` packet. Transient
+  client state = datastar signals; reconnect = the next full render (no `since-t`
+  replay). Remaining: render the per-world `view = f(db)` (`/` + `/agent/{id}`) so
+  each world morphs, retiring the `/world` bring-up path.
 - **The error-TILE html render** (the human-facing half of Phase 7's `:seon/error`
   value): the warnings-block's html render = an error-tile list.
 - **DELETE the dead A-6 broadcast stub:** `open-sse!`(serve.cljs:175-196),
@@ -447,8 +472,9 @@ Two lanes, both must agree; Phase 1's rename is the cross-lane atomic part.
   `seon.error`, `seon.route` (schema/seed), the `my.*` domain schemas, the `:kind`
   generalization in `seon.db`/`seon.schema`. Owns Phases 1-7 (the `:seon/error` VALUE,
   the warnings-block AI render, `start!`/`:seon.agent/parent`/roles/bootstrap).
-- **U — `seon.ui.*` / web / reitit / css.** The slot/layout/`!last-tree` diff, the
-  page system, reitit consumption, the error-TILE render. Owns Phase 8.
+- **U — `seon.ui.*` / web / reitit / css.** The slot/layout + the gzip-morph live
+  channel (`seon.web.datastar`), the page system, reitit consumption, the error-TILE
+  render. Owns Phase 8.
 - **Cross-lane atomic:** the `:seon.agent/sections`→`:seon.agent/ctx` +
   `:seon.ctx/section`→`:seon.agent.ctx/block` rename touches U's `web/tile.cljs` Datalog
   reads; a missed stored-attr read fails SILENTLY (empty query, not an error). Phase 2f
