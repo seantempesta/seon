@@ -16,7 +16,7 @@
    The JVM `seon.web.reactive.actions/resolve-action` allowed ONLY `seon.*`
    namespaces — exactly wrong for agent code, which lives in `my.agent.<id>`.
    Here the name is the route: a fn symbol `my.agent.<id>/foo` resolves to
-   agent `<id>` (`seon.ctx/home-ns` is the canonical id↔ns mapping). No
+   agent `<id>` (`seon.agent.ctx/home-ns` is the canonical id↔ns mapping). No
    routing table.
 
    ## The capability gate (the security boundary)
@@ -50,7 +50,7 @@
    refused before invoke — belt-and-suspenders behind resolve-and-apply."
   (:require
     [clojure.string :as str]
-    [seon.ctx :as ctx]
+    [seon.agent.ctx :as ctx]
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.log :as log]
@@ -62,7 +62,7 @@
 
 (defn resolve-owning-agent
   "The agent id that OWNS `fn-sym`, via namespace-as-route, or nil. The
-   namespace must be `my.agent.<id>` (the canonical `seon.ctx/home-ns`
+   namespace must be `my.agent.<id>` (the canonical `seon.agent.ctx/home-ns`
    mapping) AND a live agent `<id>` must exist (`:seon.agent/id` row). Any
    other namespace — `fs`, `seon.*`, a domain ns, a dead/absent agent —
    resolves to nil, and the caller refuses the call."

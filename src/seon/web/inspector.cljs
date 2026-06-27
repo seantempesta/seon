@@ -3,7 +3,7 @@
 
    Two columns per agent — both derived from `inspect/ctx-preview`
    (soul system block via `seon.ai/effective-system-prompt` + the ONE
-   composer `seon.ctx/assemble-context`), so they share their sources
+   composer `seon.agent.ctx/assemble-context`), so they share their sources
    and structurally cannot diverge (debug-view-section-twins-2026-06-18):
      - LEFT  `:seon.render/ai`   — the EXACT bytes the LLM would receive
        on its next render: the live SOUL system block FIRST, then the
@@ -44,8 +44,8 @@
     [datahike.api :as d]
     [seon.agent.loop :as agent-loop]
     [seon.ai.tokens :as tokens]
-    [seon.ctx :as ctx]
-    [seon.ctx.usage :as ctx-usage]
+    [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.usage :as ctx-usage]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.agent.inspect :as inspect]
@@ -160,7 +160,7 @@
 
 (def ^:private stable-section-names
   "Section names that form the byte-stable cacheable PREFIX (the composer
-   caches sections with `:seon.ctx/priority` ≤ `seon.ctx/stable-priority-max`
+   caches sections with `:seon.agent.ctx/priority` ≤ `seon.agent.ctx/stable-priority-max`
    = soul → :system → :namespaces). The structural cache-line falls right
    after the LAST of these in render order. Mirrors `core-default-ctx`."
   #{:soul-system :system :namespaces})
@@ -191,12 +191,12 @@
   [section-texts]
   (into []
         (mapcat
-          (fn [{nm :seon.ctx/name txt :seon.render/text :as sec}]
+          (fn [{nm :seon.agent.ctx/name txt :seon.render/text :as sec}]
             (if (= nm :namespaces)
               (->> (str/split (or txt "") #"(?m)(?=^; namespace )")
                    (remove str/blank?)
                    (map (fn [chunk]
-                          {:seon.ctx/name    (or (ns-section-name chunk) :namespaces)
+                          {:seon.agent.ctx/name    (or (ns-section-name chunk) :namespaces)
                            :seon.render/text chunk})))
               [sec])))
         section-texts))
@@ -213,7 +213,7 @@
 
    `::live-cached-tokens` is nil when no turn has run / usage is absent."
   [agent-id section-texts]
-  (let [segs   (mapv (fn [{nm :seon.ctx/name txt :seon.render/text}]
+  (let [segs   (mapv (fn [{nm :seon.agent.ctx/name txt :seon.render/text}]
                        (let [t (or txt "")]
                          {::name    nm
                           ::chars   (count t)
@@ -240,13 +240,13 @@
     {::segments           segs
      ::total-tokens       total
      ::cache-line-tokens  cache-line
-     ::live-cached-tokens (some-> usage :seon.ctx.usage/cached)
-     ::provider-shape     (some-> usage :seon.ctx.usage/provider-shape)}))
+     ::live-cached-tokens (some-> usage :seon.agent.ctx.usage/cached)
+     ::provider-shape     (some-> usage :seon.agent.ctx.usage/provider-shape)}))
 
 (defn- snapshot
   "Compute one render snapshot for `agent-id`:
      {:ai-text <string>
-      :section-texts [{:seon.ctx/name … :seon.render/text …} ...]
+      :section-texts [{:seon.agent.ctx/name … :seon.render/text …} ...]
       :token-est <int>
       :html-cards [<card-map> ...]  ; one per SECTION html twin, in render order
       :agent <pulled entity or nil>}
@@ -257,7 +257,7 @@
   (let [db @db/*conn*
         ;; `inspect/ctx-preview` returns the EXACT bytes the agent receives
         ;; for the left-pane text (`:seon.render/text` = soul system block
-        ;; FIRST, then `seon.ctx/assemble-context`), the per-section texts
+        ;; FIRST, then `seon.agent.ctx/assemble-context`), the per-section texts
         ;; (`:seon.render/section-texts`, led by the `:soul-system` section),
         ;; and the CONTEXT-section HTML TWINS behind it
         ;; (debug-view-section-twins-2026-06-18) for the right pane. `:ai-text`,
@@ -277,7 +277,7 @@
         ;; card-key is the section name so idiomorph preserves the node
         ;; across SSE morphs.
         cards (->> section-html
-                   (mapv (fn [{nm :seon.ctx/name h :seon.render/hiccup}]
+                   (mapv (fn [{nm :seon.agent.ctx/name h :seon.render/hiccup}]
                            {::hiccup   h
                             ::kind     (str nm)
                             ::card-key (str "section-" (clojure.core/name nm))})))
@@ -417,7 +417,7 @@
 (defn- ai-section-details
   "One `<details>` per context section. `data-seon-key` keys the
    client-side open-state guard (user toggles survive SSE morphs)."
-  [{sec-name :seon.ctx/name sec-text :seon.render/text}]
+  [{sec-name :seon.agent.ctx/name sec-text :seon.render/text}]
   (let [open? (contains? open-ai-sections sec-name)]
     [:details (cond-> {:class "mb-1"
                        :data-seon-key (str "ai-sec-" (name sec-name))}

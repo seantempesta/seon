@@ -11,7 +11,7 @@
      TRANSACTING a symbol — no code change. (The hero already works this way via
      `render-agent-tile` resolving the agent's `:seon.render.live-tile/content`.)
    - LAYOUT: `/tile/console/<agent>` renders by QUERYING `:seon.tile/*` entities
-     (which tiles, order via `:seon.ctx/priority`, width via `:seon.tile/span`).
+     (which tiles, order via `:seon.agent.ctx/priority`, width via `:seon.tile/span`).
      Transact a different set → a totally different UI. Absent any tile data, a
      PREWRITTEN default layout applies (prewritten fns referenced by symbol — not
      hardcoded dispatch), so it works out-of-box and is overridable by data.
@@ -30,7 +30,7 @@
     [clojure.string :as str]
     [seon.agent.inspect :as inspect]
     [seon.ai.tokens :as tokens]
-    [seon.ctx :as ctx]
+    [seon.agent.ctx :as ctx]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.log :as log]
@@ -545,9 +545,9 @@
                              :in $ ?a
                              :where
                              [?e :seon.agent/id ?a]
-                             [?e :seon.agent/sections ?s]
-                             [?s :seon.ctx/name ?nm]
-                             [?s :seon.ctx/priority ?pri]
+                             [?e :seon.agent/ctx ?s]
+                             [?s :seon.agent.ctx/name ?nm]
+                             [?s :seon.agent.ctx/priority ?pri]
                              [(get-else $ ?s :seon.render/ai "") ?ai]]
                            :seon.db/args [id]})
         ordered (sort-by second secs)
@@ -576,7 +576,7 @@
   "The agent's prominent NARRATION surface — the `:now` (or `:narration`) context
    section it pins via `add-section!` and REFRESHES as work progresses, so the
    human watches in-progress narration ('what I'm doing / just did'), not just the
-   final chat reply. Same `:seon.agent/sections` data as `context-view`, but it
+   final chat reply. Same `:seon.agent/ctx` data as `context-view`, but it
    lifts the ONE narration section out and renders it bigger (`text-sm`) and higher
    than the dense rail tiles, since it's the headline. Pure read; the agent narrates
    by re-pinning that one section — no new mechanism."
@@ -587,8 +587,8 @@
                              :in $ ?a
                              :where
                              [?e :seon.agent/id ?a]
-                             [?e :seon.agent/sections ?s]
-                             [?s :seon.ctx/name ?nm]
+                             [?e :seon.agent/ctx ?s]
+                             [?s :seon.agent.ctx/name ?nm]
                              [(get-else $ ?s :seon.render/ai "") ?ai]]
                            :seon.db/args [id]})
         by-name (into {} (map (fn [[nm ai]] [nm ai])) secs)
@@ -679,10 +679,10 @@
     :seon.ui/expects "Parameterless. Reads :seon.fn/sym + :seon.fn/doc for the agent's namespace."}
    'seon.web.tile/context-view
    {:seon.ui/desc    "The agent's OWN pinned context — the sections it add-section!'d to keep — rendered from each section's markdown twin."
-    :seon.ui/expects "Parameterless. Reads :seon.agent/sections → :seon.ctx/name, :seon.ctx/priority, :seon.render/ai."}
+    :seon.ui/expects "Parameterless. Reads :seon.agent/ctx → :seon.agent.ctx/name, :seon.agent.ctx/priority, :seon.render/ai."}
    'seon.web.tile/narration-view
    {:seon.ui/desc    "The agent's prominent NARRATION surface — its `:now` (or `:narration`) pinned section, rendered big + high so the human watches in-progress narration ('what I'm doing / just did'), not just the final reply. The agent narrates by re-pinning that one section as work progresses."
-    :seon.ui/expects "Parameterless. Reads the agent's :now / :narration pinned section (:seon.agent/sections → :seon.ctx/name, :seon.render/ai)."}
+    :seon.ui/expects "Parameterless. Reads the agent's :now / :narration pinned section (:seon.agent/ctx → :seon.agent.ctx/name, :seon.render/ai)."}
    'seon.web.tile/value-explorer-view
    {:seon.ui/desc    "Drill the agent's latest eval VALUE — a collapsible browser over the bounded structural skeleton (seon.render.value/render-html-data), so the human inspects exactly the structure the agent does with (get-in result/<id> …)."
     :seon.ui/expects "Parameterless. Reads the agent's latest successful :seon.eval/id, then the live result/<id> value from the stash; projects it through render-html-data."}
@@ -703,27 +703,27 @@
    transacting `:seon.tile/*` entities for this console."
   [agent-id]
   [{:seon.tile/id (str agent-id ":hero") :seon.tile/console agent-id
-    :seon.render/html 'seon.web.tile/hero-view :seon.ctx/priority 10 :seon.tile/span 2}
+    :seon.render/html 'seon.web.tile/hero-view :seon.agent.ctx/priority 10 :seon.tile/span 2}
    {:seon.tile/id (str agent-id ":narration") :seon.tile/console agent-id
-    :seon.render/html 'seon.web.tile/narration-view :seon.ctx/priority 15 :seon.tile/span 1}
+    :seon.render/html 'seon.web.tile/narration-view :seon.agent.ctx/priority 15 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":status") :seon.tile/console agent-id
-    :seon.render/html 'seon.web.tile/status-view :seon.ctx/priority 20 :seon.tile/span 1}
+    :seon.render/html 'seon.web.tile/status-view :seon.agent.ctx/priority 20 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":todos") :seon.tile/console agent-id
-    :seon.render/html 'seon.web.tile/todos-view :seon.ctx/priority 30 :seon.tile/span 1}
+    :seon.render/html 'seon.web.tile/todos-view :seon.agent.ctx/priority 30 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":progress") :seon.tile/console agent-id
-    :seon.render/html 'seon.web.tile/progress-view :seon.ctx/priority 33 :seon.tile/span 1}
+    :seon.render/html 'seon.web.tile/progress-view :seon.agent.ctx/priority 33 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":toolkit") :seon.tile/console agent-id
-    :seon.render/html 'seon.web.tile/toolkit-view :seon.ctx/priority 35 :seon.tile/span 1}
+    :seon.render/html 'seon.web.tile/toolkit-view :seon.agent.ctx/priority 35 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":context") :seon.tile/console agent-id
-    :seon.render/html 'seon.web.tile/context-view :seon.ctx/priority 37 :seon.tile/span 1}
+    :seon.render/html 'seon.web.tile/context-view :seon.agent.ctx/priority 37 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":value-explorer") :seon.tile/console agent-id
-    :seon.render/html 'seon.web.tile/value-explorer-view :seon.ctx/priority 38 :seon.tile/span 1}
+    :seon.render/html 'seon.web.tile/value-explorer-view :seon.agent.ctx/priority 38 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":commentary") :seon.tile/console agent-id
-    :seon.render/html 'seon.web.tile/commentary-view :seon.ctx/priority 40 :seon.tile/span 1}])
+    :seon.render/html 'seon.web.tile/commentary-view :seon.agent.ctx/priority 40 :seon.tile/span 1}])
 
 (defn- console-tiles
   "The tiles for a console — the DB `:seon.tile/*` entities for `agent-id`,
-   ordered by `:seon.ctx/priority`; the prewritten default when none exist."
+   ordered by `:seon.agent.ctx/priority`; the prewritten default when none exist."
   [db agent-id]
   (let [eids (when (contains? (db/installed-schema db) :seon.tile/console)
                (try (db/query {:seon.db/db db
@@ -733,7 +733,7 @@
                     (catch :default _ nil)))   ; not installed yet → default layout
         rows (when (seq eids)
                (map #(db/entity {:seon.db/db db :seon.db/ref %}) eids))]
-    (sort-by #(or (:seon.ctx/priority %) 0)
+    (sort-by #(or (:seon.agent.ctx/priority %) 0)
              (if (seq rows) rows (default-tiles agent-id)))))
 
 (defn- find-tile
@@ -910,14 +910,14 @@
 ;; CAPTURED turn blob (`:seon.agent.turn/prompt-file`, written verbatim by
 ;; `seon.debug` when SEON_DEBUG_CAPTURE is on) when present, else a LIVE
 ;; re-render via the SAME single producer the turn uses
-;; (`seon.agent.inspect/ctx-preview` → `seon.ctx/render-context` +
+;; (`seon.agent.inspect/ctx-preview` → `seon.agent.ctx/render-context` +
 ;; `seon.ai/debug-full-prompt`). The bottom bar partitions THAT SAME exact
 ;; text, so its tokens derive from the same bytes the left pane shows.
 ;; ============================================================
 
 (def ^:private stable-debug-sections
   "Section names of the byte-stable cacheable PREFIX (the composer caches
-   sections with `:seon.ctx/priority` ≤ stable-priority-max): the system
+   sections with `:seon.agent.ctx/priority` ≤ stable-priority-max): the system
    block + soul → agents → shared-instructions → namespaces. Rendered amber
    on the breakdown bar; the volatile tail reads grey."
   #{:system :soul :agents :shared-instructions :namespaces})
@@ -956,7 +956,7 @@
    breakdown bar — the SAME bytes the left pane shows. The system block
    (everything before the first section) is one `:system` segment; each
    context section is one segment delimited by the `;;; ┌─ <name> ─`
-   fold-brackets `seon.ctx/render-context-ai` emits. Every byte is assigned
+   fold-brackets `seon.agent.ctx/render-context-ai` emits. Every byte is assigned
    to exactly one segment, so the segment tokens sum to the total.
 
    The bracket match is LINE-ANCHORED (`^…` with the `m` flag, via `.exec`
@@ -1040,7 +1040,7 @@
   [section-html]
   (if (seq section-html)
     (into [:div {:class "flex flex-col gap-2"}]
-          (map (fn [{nm :seon.ctx/name h :seon.render/hiccup}]
+          (map (fn [{nm :seon.agent.ctx/name h :seon.render/hiccup}]
                  [:div {:class "border-l-2 border-amber-700/40 pl-2 py-1"}
                   [:div {:class (str "text-[10px] font-mono font-semibold text-text-400 "
                                      "mb-0.5 uppercase tracking-wider")}
