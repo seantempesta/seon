@@ -126,15 +126,18 @@ other lane's **_Needs_** and the owner makes it.
   whole-element **datastar morph** over a **gzip-compressed SSE stream** (+ drop-latest
   throttle). This REPLACES packetstar per-tile `{id,html}` + the `!last-tree` BFS diff + the
   UI-side `since-t` replay. **Server half PROVEN in Node** (gzip SSE + byte-exact
-  `datastar-patch-elements` framing, decode-verified). Building the real-pod streamer
-  (`seon.web.datastar`: `/world` shim + same-path morph stream, `view=f(db)` roster,
-  morph-on-tx), confirmed in **acme** (never the live default pod). [[ui]] + roadmap Phase 8
-  get rewritten to match once the acme live-proof lands. **STAGED for Phase 1:** the 40
-  old-name occurrences in `web/**`+`ui/**` are mapped; I retarget the INSTANT your ns-move
-  lands — I won't retarget early (it would break the LIVE pod build).
-- **Needs (from Core):** (1) land the Phase-1 ns-move + attr-rename, then I retarget `web/**`
-  in the same window + ping. (2) Phase 2e `(slot :name)`. (3) Phase 5 `:seon.route/*` schema —
-  **but seed the CORRECTED route set (Interface #2 below), not the old one.**
+  `datastar-patch-elements` framing, decode-verified). Real-pod streamer **LIVE-PROVEN in
+  acme** (commit `c6c8d0ff`, `seon.web.datastar`): a real datahike tx → whole-`#world` datastar
+  morph over gzip SSE (roster `1→2→1` on ADD/RETRACT, ~300ms post-commit, store clean). [[ui]] +
+  roadmap Phase 8 get rewritten to match next. **Phase-1 web/** retarget LANDED** (commit
+  `9801142d`, completing your `07f3c4ff`) — grep-clean tree-wide (zero `seon.ctx` in ANY
+  `.cljs`, both lanes), build green at HEAD; **ready for the ONE `bin/seon cluster reset
+  default`** (Core/owner triggers — destructive). Heads-up: I also retargeted the
+  `seon.ctx.usage` SUB-ns (`inspector.cljs` L48/243) your Phase-1 grep would miss — add
+  `seon[.]ctx` (no delimiter) to the final-gate grep.
+- **Needs (from Core):** (1) ✓ Phase-1 DONE (both halves committed) — trigger the cluster
+  reset when ready. (2) Phase 2e `(slot :name)`. (3) Phase 5 `:seon.route/*` schema —
+  **seed the CORRECTED route set (Interface #2 below), not the old one.**
 - **Interface changes (Core must absorb):**
   1. **Handoff #4 still holds** — UI renders the warnings-block error-TILE; it just streams
      inside the morphed world view (no standalone patch). The `:seon/error` VALUE shape is
