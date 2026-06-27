@@ -21,8 +21,8 @@ one choice: units share *data*, not memory, so they can run in parallel, can't
 corrupt each other, and restart cleanly from the DB (which is itself
 reversible). The loop is data; the context is a render of data; the UI is a
 reactive projection of data. The context unit is the **block**
-(`:seon.ctx/block`); every surface — the prompt, an agent's world, the dashboard —
-is a derivation of the same blocks.
+(`:seon.agent.ctx/block`); every surface — the prompt, an agent's world, the root
+agent's world (`/`) — is a derivation of the same blocks.
 
 It is **dual-track** — a CLJ **JVM server** (DB writer + render/serve + Integrant
 lifecycle + heavy processing, data-only) and CLJS **agent executors** (isolated),
@@ -49,28 +49,36 @@ One vocabulary, each name grounded in a namespace + a schema/fn. *("today …" m
 the current code name being renamed.)*
 
 - **block** — the context unit: a function-of-the-DB map with up to two renders,
-  merged over the agent's own set by one `:seon.ctx/priority` sort. `:seon.ctx/block`
-  in `seon.ctx` *(today `:seon.ctx/section`)*.
+  merged over the agent's own set by one `:seon.agent.ctx/priority` sort. `:seon.agent.ctx/block`
+  in `seon.agent.ctx` *(today `:seon.ctx/section`)*.
 - **render** — a block's output; the one word for what older code calls
   "twin"/"face"/"surface". Engine: `seon.render`.
 - **ai render** — a block's prompt-text output (a string, or a symbol late-resolved
   via `seon.eval/lookup-value`). `:seon.render/ai`.
 - **html render** — a block's hiccup output → a tile. `:seon.render/html`.
 - **prompt** — the agent's assembled context: ai renders concatenated by priority.
-  `seon.ctx/render-context`.
+  `seon.agent.ctx/render-context`.
 - **page** — the human's UI: a layout placing html renders into slots. Web layer:
   `seon.ui.*`.
 - **tile** — an html render placed in a slot (the live UI element) *(replaces
   "card")*.
 - **slot** — a named, DB-keyed hole in a layout: `(slot :name)` → `[:div {:id
-  "tile-<name>" :data-slot :name}]`, keyed on `:seon.ctx/name`.
+  "tile-<name>" :data-slot :name}]`, keyed on `:seon.agent.ctx/name`.
 - **layout** — a render whose hiccup contains slots (it nests tiles); a role, not a
   stored kind. A render with no slots is a leaf tile.
 - **canvas** — the focal block on an agent's world: the agent↔human communication
   block.
 - **world** — an agent's page, route `/agent/{id}`: the canvas + a priority scroll
   of the agent's tiles.
-- **dashboard** — the all-agents overview page, route `/`: a preview tile per agent.
+- **root agent** — the seeded system agent `:seon.agent/id "root"` whose **world**
+  IS the all-agents overview at route `/` (there is NO separate "dashboard"
+  mechanism — the overview is rendered by the IDENTICAL block/layout/route machinery
+  as any agent's world). Root is the root of the render + route tree (root world `/`
+  → per-agent worlds `/agent/{id}` → apps). It has system SCOPE (its blocks query
+  across all agents) and an ELEVATED capability grant (system-level `:seon.fn`s) —
+  through the SAME `/call` gate, not a bypass: root = superuser by grant. Turtles —
+  root is just an agent with system-scoped ctx ("the local system cluster does
+  system work").
 - **app** — an agent-authored sub-page, route `/agent/{id}/app/{x}`.
 - **route** — a datom mapping a URL pattern to a layout, consumed by reitit.
   `:seon.route/*` (new `seon.route` ns).
@@ -79,11 +87,15 @@ the current code name being renamed.)*
   hand-rolled dispatch.
 - **warnings block** — the block surfacing current problems to the agent (ai
   render); the same problems render as error tiles to the human, via
-  `seon.ctx.warnings` and `seon.warn`.
-- **error value** — the structured value a failed render produces. `:seon.render/error`
-  (`:seon.error/message|where|symbol|hint`).
+  `seon.agent.ctx.warnings` and `seon.warn`.
+- **error value** — the structured value any failure produces: ONE base shape
+  `:seon/error` (`:seon.error/message` humanized + `:seon.error/where|symbol|hint|data`),
+  specialized only where a shape truly diverges (`:seon.db/error` adds the captured
+  exception; `:seon.ai/error` adds provider/transport fields). NO `:kind`/`:type`
+  discriminator — the carrier attribute identifies the failure. Never crash, always
+  surface (see [[data-model-2026-06-27]] §5).
 - **core-blocks / default-blocks / set-blocks-provider! / !blocks-provider** — the
-  default block set + the override seam (the `set-tee-fn!` idiom), in `seon.ctx`.
+  default block set + the override seam (the `set-tee-fn!` idiom), in `seon.agent.ctx`.
 - **run / turn / derive-state** — the bounded unit of work (`seon.agent.run`), the
   per-iteration value-transform (`seon.agent.loop`), and the one projection rule for
   agent state (`seon.derive`). Unchanged by the UI redesign.
@@ -116,8 +128,8 @@ Three roles, decoupled in principle, **co-located in one pod for v1**:
   only; it never executes agent code. A future JVM-hosted UI is optional and would
   need the render layer promoted to `.cljc` (today the engine is `.cljs`, pod-only).
 - **Node UI-host** — the browser's center point: a read-only replica + one
-  tx-listener that derives every agent's **world** and the **dashboard** from
-  `:seon.agent/ctx`, holds the route table, and streams patches. The streamer is **a
+  tx-listener that derives every agent's **world** (including the **root agent's
+  world** at `/`) from `:seon.agent/ctx`, holds the route table, and streams patches. The streamer is **a
   role, not a process** — any process holding a replica + a tx-listener can play it,
   so the UI-host is relocatable.
 - **Isolated per-agent Node runtimes** — the dangerous part. Each runs the one
@@ -203,14 +215,14 @@ yields a structured error value for *that* render only; siblings never crash.
 
 **Slots and layouts.** A render whose hiccup contains `(slot :name)` plays the
 **layout** role — `(slot :name)` emits `[:div {:id "tile-<name>" :data-slot
-:name}]`, a named, DB-keyed empty hole keyed on `:seon.ctx/name`, resolved by
+:name}]`, a named, DB-keyed empty hole keyed on `:seon.agent.ctx/name`, resolved by
 recursion at expansion (generalizing the anonymous `:seon.render/render`
 recursion handle). A render with no slots is a leaf **tile**. Layout-vs-tile is a
 role, never stored.
 
 **Prompt == world by construction.** Both derive from the same blocks over the
-same db value (`as-of` the turn's `t`); the prompt is `seon.ctx/render-context`
-(ai renders concatenated by `:seon.ctx/priority`), the world is the same blocks'
+same db value (`as-of` the turn's `t`); the prompt is `seon.agent.ctx/render-context`
+(ai renders concatenated by `:seon.agent.ctx/priority`), the world is the same blocks'
 html renders placed into a world layout's slots. Nothing is stored; "what the
 agent saw at turn N" is a re-derive from `db-as-of(t)`.
 
@@ -229,37 +241,44 @@ agent-visible place, never a process crash (the pod is single-threaded — one
 uncaught throw would blank every agent + the UI host). The full failure-site →
 surface map is [[data-model-2026-06-27]] §5.
 
-**The default block set + the override seam.** `core-blocks` (`seon.ctx`) is the
+**The default block set + the override seam.** `core-blocks` (`seon.agent.ctx`) is the
 stable public default vector every fresh agent merges over. A downstream cluster
 swaps it without editing core via the `set-tee-fn!` idiom: `set-blocks-provider!`
 installs a provider into the `!blocks-provider` atom, `default-blocks` is the
 guarded read (provider-or-`core-blocks`, errors-as-values), and `context-root`
 reads `default-blocks`. Per-agent additions live in the stored `:seon.agent/ctx`
-vector, merged by one `:seon.ctx/priority` sort (override-by-name).
+vector, merged by one `:seon.agent.ctx/priority` sort (override-by-name).
 
 **Capability + cache.** Agent-authored renders, layouts, route handlers, and
 blocks run SCI-bounded (`seon.render.sci/invoke-bounded`, a deadline), never
 `lookup-value`-direct; core symbols run compiled, and the bootstrap CLJS compiler
 stays out of the web bundle. The byte-stable cache prefix (`stable-boundary` /
-`split-context` at `:seon.ctx/priority` ≤ 20) is preserved for provider
+`split-context` at `:seon.agent.ctx/priority` ≤ 20) is preserved for provider
 prefix-caching.
 
-### The page system — world, dashboard, app
+### The page system — root world, world, app
 
 The human UI is **pages**, each a **layout** placing block html renders into named
-**slots**; each filled slot is a **tile**. Three page kinds, all routed:
+**slots**; each filled slot is a **tile**. All are agent worlds — one mechanism, a
+tree of routes:
 
 - **world** (`/agent/{id}`) — one agent: a **canvas** (the focal agent↔human
-  communication block) in `(slot :canvas)` plus a `:seon.ctx/priority`-ordered
+  communication block) in `(slot :canvas)` plus a `:seon.agent.ctx/priority`-ordered
   scroll of the agent's tiles. (Today: `console-shell`, the closer of two
   competing shells; the older datastar consumer view is retired.)
-- **dashboard** (`/`) — every agent, a preview tile each (step back to see all,
-  dive into one).
+- **the root agent's world** (`/`) — the all-agents overview, which is just the
+  **root agent's** world (`:seon.agent/id "root"`): its system-scoped blocks query
+  across all agents to render a preview tile each (step back to see all, dive into
+  one). NOT a separate dashboard concept — the IDENTICAL block/layout/route
+  machinery. It grounds the render + route tree: root world (`/`) → per-agent worlds
+  (`/agent/{id}`) → apps. The `/` route's `:seon.route/owner` is the root agent and
+  its handler is the root world-layout symbol (core-seeded, since root is a system
+  agent).
 - **app** (`/agent/{id}/app/{x}`) — an agent-authored sub-page; its route handler
   is an agent layout symbol, SCI-bounded.
 
 **The live channel is ours, not reitit's.** One tx-listener on a read-replica
-derives every world + the dashboard and streams patches; SSE is a pure derivation
+derives every world (root world included) and streams patches; SSE is a pure derivation
 of the tx-log (`listen! → derive → diff → push`), reconnect-lossless via
 per-subscriber `since-t`. The diff is a per-connection `!last-tree` slot-tree BFS
 to fixpoint: a leaf patch on content change, one expanded-subtree patch on a shape
@@ -283,8 +302,8 @@ datoms: `db->routes` projects them into reitit's vector, and a ~20-line Node↔R
 adapter feeds the router (a pure derived value of the datoms, rebuilt on tx via a
 reloading thunk). This **replaces the hand-rolled `case`/`cond`/`re-matches`
 dispatch** in `seon.web.serve` / `inspector` / `tile`. Seeded core routes: `/`
-(dashboard), `/agent/{id}` (world), `/agent/{id}/feed` (SSE), `/call`, `/eval`;
-agents add `/agent/{id}/app/{x}`. reitit's nested route-data meta-merge makes
+(the root agent's world), `/agent/{id}` (world), `/agent/{id}/feed` (SSE), `/call`,
+`/eval`; agents add `/agent/{id}/app/{x}`. reitit's nested route-data meta-merge makes
 **nested routes = nested layouts**, and `match-by-name` gives reverse routing.
 
 **Agents author interactivity as normal Clojure fn-calls in handler slots; the
@@ -368,13 +387,13 @@ else is reachable from it or derived. Full schema:
   of derived state); runs link back via `:seon.agent.run/agent`, turns via
   `:seon.agent.turn/run` (a **run** replaces the old "session" — there is no
   session concept). Plus **`ctx[]`** (`:seon.agent/ctx`, the agent's own
-  `:seon.ctx/block` vector, merged over `core-blocks` by one `:seon.ctx/priority`
+  `:seon.agent.ctx/block` vector, merged over `core-blocks` by one `:seon.agent.ctx/priority`
   sort), `schedules[]` (self-managed cron maps, each with its fn),
   `default-turn-limit`, `purpose`, `parent`, `terminated-at` (optional `:inst`). A
-  **block** (`:seon.ctx/block`) is `{:seon.ctx/name :keyword, :seon.ctx/priority
+  **block** (`:seon.agent.ctx/block`) is `{:seon.agent.ctx/name :keyword, :seon.agent.ctx/priority
   :int, :seon.render/ai {:optional true}, :seon.render/html {:optional true}}` —
-  `:seon.ctx/name` is the single identity (upsert key = prompt header = DOM
-  `#tile-<name>`). **State is derived, not stored** — `:terminated` if
+  `:seon.agent.ctx/name` is the per-agent merge key (upsert key = prompt header = DOM
+  `#tile-<name>`), a plain `:keyword`, NOT a datahike identity. **State is derived, not stored** — `:terminated` if
   `terminated-at` exists, else `:idle` if no open run, else `:paused` if the open
   run has a `paused-at` marker, else `:running`. Every primitive (the open run,
   `paused-at`, `terminated-at`) is its own control axis; state is just their
@@ -483,12 +502,12 @@ no loader shim. Tier-2 microVMs mount the store read-only via virtio-fs.
 3. **Later, additive:** the edge/render-from-worker generalization; Tier-2
    microVM for untrusted code; the Tauri edge node + on-device replica.
 4. **Layout-context unification** (see [[layout-context-unification-design-2026-06-27]]):
-   the atomic `section`→`block` rename (`:seon.ctx/block`, `:seon.agent/ctx`) across
+   the atomic `section`→`block` rename (`:seon.agent.ctx/block`, `:seon.agent/ctx`) across
    both lanes + a cluster reset; the override seam
    (`core-blocks`/`default-blocks`/`set-blocks-provider!`); R's derived tiles become
    html-only blocks; `:seon.route/*` + `db->routes` + the reitit adapter; the
    `:seon.render/error` value + the `:render-health` warn check; the page system
-   (world/dashboard/app layouts, slots, the `!last-tree` diff) in `seon.ui.*`. R owns
+   (root-world/world/app layouts, slots, the `!last-tree` diff) in `seon.ui.*`. R owns
    context/schema/seed/render-engine; U owns `seon.ui`/web/css/reitit.
 
 ## Open risks & questions (refine these)
@@ -560,7 +579,7 @@ first. (Marked *needs baking* at their mention.)
   the wire seam but needs a conflict model and is gated on local models or an
   accepted offline window. Don't build until offline is a real requirement.
 - **Multi-process UI-host fan-out.** The streamer-as-N-processes model is designed
-  but unbuilt; each page (world/dashboard/app) becomes its own streamer-process —
+  but unbuilt; each page (root-world/world/app) becomes its own streamer-process —
   a read-only replica + `seon.derive` + one subscription, rejoining via `since-t`.
   Lands with the microVM snapshot-fork (boot the bundle once, fast-restore per
   page/agent, env-var entry point). Gated on the microVM experiment
@@ -580,7 +599,7 @@ first. (Marked *needs baking* at their mention.)
   attribute + exact datahike facet, the three relationship kinds, the general
   `:seon/error` model, and the never-crash failure-site → surface table.
 - [[layout-context-unification-design-2026-06-27]] — **the canonical context + UI
-  spec**: the block / render / tile / slot / layout system, world/dashboard/app
+  spec**: the block / render / tile / slot / layout system, root-world/world/app
   pages, routing-as-data via reitit, the override seam, and friendly errors → the
   warnings block. Supersedes the two below for the UI/context surface.
 - [[layout-context-migration-2026-06-27]] — the grounded file:line migration plan

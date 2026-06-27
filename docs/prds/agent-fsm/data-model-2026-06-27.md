@@ -16,16 +16,17 @@ parallel model — it reuses what is already registered and flags every place a
 prior doc proposed a reinvented or mistyped shape.
 
 Vocabulary is locked ([[architecture]] §Glossary): **block · render · prompt ·
-page · tile · slot · layout · canvas · world · dashboard · app · route ·
-warnings block**. The error value is **one general base shape**, not
-render-specific, with NO `:kind`/`:type` discriminator — specialized only where a
-shape truly diverges.
+page · tile · slot · layout · canvas · world · root agent · app · route ·
+warnings block**. The all-agents overview is the **root agent's world** at `/`
+(there is no separate "dashboard" mechanism). The error value is **one general base
+shape**, not render-specific, with NO `:kind`/`:type` discriminator — specialized
+only where a shape truly diverges.
 
 ## 1. TL;DR — the entity graph in one paragraph
 
 The **agent** (`:seon.agent/id`, identity) is the root. It OWNS, by
 cascade-retract component vectors, its **blocks** (`:seon.agent/ctx` →
-`:seon.ctx/block` children — the context units, each up to two renders) and its
+`:seon.agent.ctx/block` children — the context units, each up to two renders) and its
 **schedules** (`:seon.agent/schedules` → `:seon.agent.schedule` cron maps). It
 POINTS (plain ref) at its current **run** (`:seon.agent/run`); a run points back
 (`:seon.agent.run/agent`) and OWNS no turns — **turns** point UP to their run
@@ -37,7 +38,10 @@ entities joined by refs (`from` / `to` / `owner`). The **program graph**
 as data; blocks, routes, and schedules reference its members by **symbol value**
 (late-resolved, NOT a datahike ref). **Routes** (`:seon.route`, NEW) are datoms a
 `db->routes` fn projects into reitit; a route's handler IS a layout symbol and its
-`:seon.route/owner` is a ref to the owning agent. The **state** is never stored —
+`:seon.route/owner` is a ref to the owning agent. The **root agent**
+(`:seon.agent/id "root"`) is a seeded system agent whose world IS the `/` overview
+(system-scoped ctx + an elevated capability grant through the same gate). The
+**state** is never stored —
 it is derived (`seon.derive/derive-state`) from the agent's primitives. The
 **error value** is ONE base shape, top-level `:seon/error`; a specialized error is
 a DIFFERENT namespaced keyword only where the shape truly diverges
@@ -119,7 +123,7 @@ The identity attrs in the model, by value type:
 
 `:seon.db/id` is itself a shared shape (`[:string {:min 14 :max 14}]`,
 `schema.cljc:104`) referenced by every id-attr — bump it once, every length
-constraint follows. Note `:seon.ctx/name` is NOT in this table (see §3.2 block):
+constraint follows. Note `:seon.agent.ctx/name` is NOT in this table (see §3.2 block):
 it is a plain `:keyword`, a per-agent logical name, not a global identity.
 
 ### 2.3 symbol-as-value — late binding to the program graph (NOT a ref)
@@ -181,31 +185,41 @@ TARGET name; it churned (`:seon.agent/ctx` → `:seon.agent/sections` in the
 runtime-spec, now `:seon.agent/sections` → `:seon.agent/ctx` here). Grep-verify
 zero `:seon.agent/sections` before the cluster reset (silent-empty-query risk).
 
-### 3.2 block — `:seon.ctx/block` (ctx.cljs:100-113, RENAME of `:seon.ctx/section`)
+### 3.2 block — `:seon.agent.ctx/block` (ns move + RENAME of `:seon.ctx/section`, ctx.cljs:100-113)
+
+The block schema moves with its namespace: `seon.ctx` → **`seon.agent.ctx`**, and
+every `:seon.ctx/*` keyword → `:seon.agent.ctx/*` (CLJS track only; the paused JVM
+`.clj` side stays on `:seon.ctx/*`). Folded into the SAME atomic
+`section`→`block` patch + cluster reset (see [[layout-context-migration-2026-06-27]]
+item 0). **Naming coherence — three distinct, coherent things:** `:seon.agent/ctx`
+is the agent's block VECTOR attr (the agent OWNS a `ctx`); `seon.agent.ctx` is the
+NS that defines blocks; `:seon.agent.ctx/block` is the block schema. The agent owns
+a `ctx` of blocks defined in `seon.agent.ctx`.
 
 | attribute | malli | datahike facet | reuse/NEW | notes |
 |---|---|---|---|---|
-| `:seon.ctx/name` | `:keyword` | keyword / one | reuse | per-agent logical name; prompt header + DOM `#tile-<name>` — **NOT a datahike identity** (see below) |
-| `:seon.ctx/priority` | `:int` | long / one | reuse | prompt order AND default scroll order |
+| `:seon.agent.ctx/name` | `:keyword` | keyword / one | reuse | per-agent logical name; prompt header + DOM `#tile-<name>` — **NOT a datahike identity** (see below) |
+| `:seon.agent.ctx/priority` | `:int` | long / one | reuse | prompt order AND default scroll order |
 | `:seon.render/ai` | `:seon.render/ai` (ref to the registered `[:or :string :symbol]`) | string (EDN) / one | reuse | **make `{:optional true}`** (ctx.cljs:112) — html-only blocks |
 | `:seon.render/html` | `:seon.render/html` (ref to registered shape) | string (EDN) / one | reuse | optional; present ⇒ a tile |
 
-The block map schema (rename `:seon.ctx/section` → `:seon.ctx/block`, make ai
+The block map schema (rename `:seon.ctx/section` → `:seon.agent.ctx/block`, make ai
 optional):
 
 ```clojure
-(schema/register! :seon.ctx/block
+;; ns seon.agent.ctx (the `::` keywords expand to :seon.agent.ctx/*)
+(schema/register! :seon.agent.ctx/block
   [:map
-   [:seon.ctx/name     :seon.ctx/name]
-   [:seon.ctx/priority :seon.ctx/priority]
-   [:seon.render/ai    {:optional true} :seon.render/ai]
-   [:seon.render/html  {:optional true} :seon.render/html]])
+   [:seon.agent.ctx/name     :seon.agent.ctx/name]
+   [:seon.agent.ctx/priority :seon.agent.ctx/priority]
+   [:seon.render/ai          {:optional true} :seon.render/ai]
+   [:seon.render/html        {:optional true} :seon.render/html]])
 ```
 
 **Decision — blocks are component children, name is NOT a datahike identity.**
 Each block is its own entity, owned via `:seon.agent/ctx`
 (`[:vector {:seon.db/component true} :seon.db/ref]`) so it cascade-retracts with
-the agent. `:seon.ctx/name` stays a plain `:keyword`: if it were
+the agent. `:seon.agent.ctx/name` stays a plain `:keyword`: if it were
 `{:seon.db/identity true}` the uniqueness would be GLOBAL, and two agents could not
 both own a `:transcript` block (the second upsert would steal the first's eid).
 The "upsert by name" the design docs describe is an APPLICATION-level merge in
@@ -320,8 +334,9 @@ they just don't share the storage attr.
 **DECIDED (agent-extendable app routes) — YES, agents customize their own world.**
 Two tiers of route rows:
 
-- **Core base routes**, seeded at boot: `/` (dashboard), `/agent/{id}` (world),
-  `/agent/{id}/feed` (SSE), `/call` (the action door), `/eval`.
+- **Core base routes**, seeded at boot: `/` (the **root agent's world** — see
+  below; NOT a separate dashboard), `/agent/{id}` (world), `/agent/{id}/feed` (SSE),
+  `/call` (the action door), `/eval`.
 - **Agent app routes** under `/agent/{id}/app/{x}`, transacted by the agent itself.
   An app route's `:seon.route/handler` is one of the agent's OWN `my.agent.<id>/…`
   layout fns — the `my.*` / `my.agent.<id>` namespaces are the grounds for app-like
@@ -336,6 +351,32 @@ reverse routing via `match-by-name`), agent app-route names are **namespaced
 per-agent** — e.g. `:agent.abc/app-x` — so two agents' app routes never collide on
 the identity attr; reitit's build-time name-conflict detection (core.cljc:329) is
 the backstop.
+
+**The `/` route = the root agent's world (no separate "dashboard").** The
+all-agents overview is NOT a distinct page mechanism — it is the **root agent's**
+world, rendered by the IDENTICAL block / layout / route machinery as every other
+agent's world. `root` is a seeded agent `:seon.agent/id "root"`; the `/` route's
+`:seon.route/owner` is the root agent and its `:seon.route/handler` is the root
+world-layout symbol (a seeded core symbol, since root is a system agent — its layout
+may be core-seeded rather than agent-authored, e.g. `seon.agent.ctx`/`seon.ui` or a
+`my.agent.root/…` fn). The render + route tree is rooted here: **root world (`/`) →
+per-agent worlds (`/agent/{id}`) → apps (`/agent/{id}/app/{x}`)**. Turtles: root is
+just an agent with system-scoped ctx; "the local system cluster does system work"
+([[architecture]]).
+
+**Root has ELEVATED capability — a broader GRANT, not a gate bypass.** Two ways
+root differs, both through the SAME mechanisms (no new schema):
+
+- **System SCOPE:** root's `:seon.agent/ctx` blocks query ACROSS all agents (the
+  all-agents overview / the agent-preview tiles); normal agents' blocks are
+  self-scoped. Same render/block mechanism, wider query.
+- **Elevated GRANT:** root OWNS a larger granted set of `:seon.fn`s — system-level
+  fns a normal agent isn't granted (agent lifecycle spawn/terminate, cross-agent
+  reads/coordination, system routes). It still routes through the SAME `/call`
+  capability gate (namespace-as-route → owning agent → granted `:seon.fn`); root
+  simply has a system capability scope. The security model stays uniform — root is
+  an agent with more granted fns, not a hole in the gate (root = superuser, by
+  grant).
 
 ### 3.9 error VALUE — base `:seon/error`, specialized only where the shape diverges
 
@@ -666,8 +707,9 @@ Already-registered shapes to REFERENCE, never re-create:
   the design for `:seon.route/owner` and the component vectors.
 - **`:seon.db/id`** (schema.cljc:104) — the shared 14-char id shape behind every
   identity attr.
-- **`:seon.ctx/name`** (ctx.cljs:100) + **`:seon.ctx/priority`** (ctx.cljs:101) —
-  the block's name/sort; reuse verbatim.
+- **`:seon.agent.ctx/name`** + **`:seon.agent.ctx/priority`** (today `:seon.ctx/name`
+  / `:seon.ctx/priority`, ctx.cljs:100-101) — the block's name/sort shapes; reuse the
+  shapes, renamed with the `seon.ctx` → `seon.agent.ctx` ns move.
 - **`:seon.render/ai`** (render.cljs:79) + **`:seon.render/html`** (render.cljs:86)
   — the two render shapes (mixed `:or`, EDN-encoded). The block schema REFERENCES
   these.
@@ -722,8 +764,8 @@ Reinvention / mistype findings (prior docs got these wrong):
    `:seon.db/error`. Per the shared-shape rule, register `:seon.error/message :string`
    once and reference it from the base and the specialization.
 
-4. **`:seon.ctx/name` called "the single identity".** The design §1 says
-   `:seon.ctx/name` is "THE id: upsert key". It is NOT a datahike identity (must
+4. **`:seon.agent.ctx/name` called "the single identity".** The design §1 says
+   `:seon.agent.ctx/name` is "THE id: upsert key". It is NOT a datahike identity (must
    stay a plain `:keyword` — global uniqueness would forbid two agents sharing a
    block name); the upsert is an app-level per-agent merge. Correct framing: name is
    the per-agent logical key + DOM slot id; the entity identity is the component
@@ -771,6 +813,13 @@ Reinvention / mistype findings (prior docs got these wrong):
    specializations (the shared-shape rule).
 7. **Block name is NOT a datahike identity** — a plain per-agent `:keyword`; merge is
    app-level (so it is not "fixed" into an identity by a later patch). (§3.2.)
+8. **NS move `seon.ctx` → `seon.agent.ctx`** (every `:seon.ctx/*` → `:seon.agent.ctx/*`),
+   CLJS track only, folded into the atomic `section`→`block` patch + cluster reset; the
+   paused JVM `.clj` side stays on `:seon.ctx/*`. (§3.2.)
+9. **The root agent** (`:seon.agent/id "root"`) — the all-agents overview IS the root
+   agent's world at `/` (no separate "dashboard"); root has system SCOPE (blocks query
+   across agents) + an ELEVATED capability grant (system `:seon.fn`s) through the SAME
+   `/call` gate. (§3.8.)
 
 ### 7.2 Remaining open
 

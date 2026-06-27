@@ -21,12 +21,44 @@ across `src/` + `my.*` + `acme/` before the reset.
 
 ## Lane R — core context / schema / seed / render-engine
 
-`seon.ctx`, `seon.agent`, `seon.render`, `seon.warn`, `seon.error`, new `seon.route`.
+`seon.agent.ctx` (was `seon.ctx`), `seon.agent`, `seon.render`, `seon.warn`,
+`seon.error`, new `seon.route`.
 
-### 0. The atomic `section` → `block` rename (one patch)
+### 0. The atomic `section`→`block` rename + `seon.ctx`→`seon.agent.ctx` ns move (one patch)
 
-- Schema: `:seon.ctx/section` → `:seon.ctx/block` (ctx.cljs:108); make
-  `:seon.render/ai {:optional true}` (ctx.cljs:112).
+Both the `section`→`block` rename AND the `seon.ctx`→`seon.agent.ctx` ns move ship
+in the SAME atomic patch + ONE `bin/seon cluster reset default`. Scope = the ACTIVE
+CLJS track only; the PAUSED JVM `.clj` side (`seon.ctx.clj`, `ctx/history.clj` + its
+JVM requirers) STAYS on `:seon.ctx/*` (separate store; reconcile if the JVM track
+resumes). Naming coherence stays clean: `:seon.agent/ctx` (the agent's block VECTOR
+attr) vs `seon.agent.ctx` (the NS defining blocks) vs `:seon.agent.ctx/block` (the
+block schema) — the agent OWNS a `ctx` of blocks defined in `seon.agent.ctx`.
+
+**0a. The ns move — measured blast radius (CLJS track):**
+
+- **8 CLJS files MOVE:** `src/seon/ctx.cljs` → `src/seon/agent/ctx.cljs`;
+  `src/seon/ctx/{inventory,live_tile,namespaces,relevant,transcript,usage,warnings}.cljs`
+  → `src/seon/agent/ctx/*.cljs`.
+- **~15 CLJS requirers** update `[seon.ctx …]` → `[seon.agent.ctx …]`: `agent`,
+  `agent/inspect`, `agent/message`, `agent/turn`, `ai`, `ai/anthropic`, `client`,
+  `web/inspector`, `web/reactive/call`, `web/tile` (+ the internal `ctx/*`
+  requirers: `live_tile`, `namespaces`, `transcript`, `warnings`).
+- **24 distinct `:seon.ctx/*` keywords (~240 occurrences) → `:seon.agent.ctx/*`:**
+  `agent`, `agent-attrs`, `children`, `core-authored`, `data`, `file-path`, `fn`,
+  `get-ctx-request`, `get-ctx-response`, `instance-id`, `keys`, `live-tile-test`,
+  `messages`, `name`, `namespace`, `priority`, `render-namespace-response`,
+  `retrieval-query-request`, `section`(→`block`), `section-html`(→`block-html`),
+  `strip-markers`, `updated-at`, `uploads`, `user-input`. (The `section`/`section-html`
+  pair ALSO renames to `block`/`block-html` in the same sweep.)
+- **~9 CLJS test files:** `ctx_test.cljs`, `agent_loop_test`, `gym/driver`,
+  `gym/driver_test`, `instrument_smoke_test`, `render/live_tile_test`,
+  `web/reactive/transform_test`, `internal_boundary_test`,
+  `agent_context_test.cljs.disabled`.
+
+**0b. The `section`→`block` rename (within the moved files):**
+
+- Schema: `:seon.ctx/section` → `:seon.agent.ctx/block` (ctx.cljs:108 →
+  agent/ctx.cljs); make `:seon.render/ai {:optional true}` (ctx.cljs:112).
 - Stored attr: `:seon.agent/sections` → `:seon.agent/ctx` register! (agent.cljs:163).
 - **SILENT-FAILURE** read sites of `:seon.agent/sections`: `ctx.cljs:864`
   (`ctx-entities` pull `{:seon.agent/sections [*]}`); `ctx.cljs:1818-1819`
@@ -43,7 +75,7 @@ across `src/` + `my.*` + `acme/` before the reset.
   `::section-response`(577) → `::add-block-request`/…; `default-section-priority`(586)
   → `default-block-priority`. `add-block!` accepts html-only + optional ai.
 - `reset-ctx!`(520)/`update-ctx!`(534): KEEP names, retarget to `:seon.agent/ctx`.
-- Per-block input key `:seon.ctx/section` → `:seon.ctx/block` at the producer
+- Per-block input key `:seon.ctx/section` → `:seon.agent.ctx/block` at the producer
   (ctx.cljs:53) and the reader (`warnings.cljs:21`).
 
 ### 1. The override seam (mirror `seon.schema/set-tee-fn!`, schema.cljc:183)
@@ -90,7 +122,7 @@ soul (5), agents (8). `default-block-priority` = 46.
 - `ctx-sections`(1950)→`ctx-blocks`; keys `:seon.render/section-texts`→
   `:seon.render/block-texts`, `:seon.render/section-html`→`:seon.render/block-html`.
   **SILENT-FAILURE** U consumers: `web/tile.cljs:1001,1040,1104,1406`.
-- `:seon.ctx/section-html` register!(1557)→`:seon.ctx/block-html`; holder in
+- `:seon.ctx/section-html` register!(1557)→`:seon.agent.ctx/block-html`; holder in
   `agent/inspect.cljs:41-48,105`.
 
 ### 6. Render engine word-cleanup + the slot primitive
@@ -108,7 +140,7 @@ soul (5), agents (8). `default-block-priority` = 46.
 - KEEP `invoke-bounded`(sci.cljs:335) + `agent-authored-sym?`(92); broaden scope
   wording to "any agent-authored render/layout/handler."
 - FOLD `:seon.render.live-tile/content` (live_tile.cljs:314) into `:seon.render/html`
-  on a `:seon.ctx/block`; `render-agent-tile`(386) becomes the canvas/tile block.
+  on a `:seon.agent.ctx/block`; `render-agent-tile`(386) becomes the canvas/tile block.
 
 ### 7. The friendly error value + warnings/render-health
 
@@ -133,8 +165,14 @@ soul (5), agents (8). `default-block-priority` = 46.
 `:seon.route/*` REQUIRES a `seon.route` code ns. Register `:seon.route/pattern
 :string`, `:seon.route/method :keyword`, `:seon.route/name [:keyword
 {:seon.db/identity true}]`, `:seon.route/owner :seon.db/ref` (reference the
-canonical ref, never inline), `:seon.route/middleware {:optional true} [:vector
-:keyword]`; a `:seon.route` entity `:map`. Seed core route rows.
+canonical ref, never inline), `:seon.route/handler :symbol` (dedicated, native
+`:db.type/symbol` — NOT a reuse of `:seon.render/html`), `:seon.route/middleware
+{:optional true} [:vector :keyword]`; a `:seon.route` entity `:map`. Seed core route
+rows — incl. seeding the **root agent** (`:seon.agent/id "root"`) and its `/` route
+(`:seon.route/owner` = root, `:seon.route/handler` = the root world-layout symbol).
+Agent app routes (`/agent/{id}/app/{x}`) are agent-transacted, capability-gated,
+handler in the agent's own `my.agent.<id>` ns, route name per-agent namespaced
+(e.g. `:agent.abc/app-x`).
 
 ### 9. system-text stays a fixed, non-overridable const (ctx.cljs:982-1101)
 
@@ -182,16 +220,19 @@ per-request router thunk (`reloading-ring-handler`, ring.cljc:420).
 has only `/chat`→`handle-chat!` (:427), no `/eval`. ADD `handle-eval!` +
 the `/eval` route (or seed a `:seon.route/*` `/eval` row once reitit lands).
 
-### 13. RESOLVE the two-UI-stacks drift — pick ONE world + ONE dashboard
+### 13. RESOLVE the two-UI-stacks drift — pick ONE world layout (root world + per-agent worlds)
 
-The packetstar tile/console path is closer to target.
+The packetstar tile/console path is closer to target. There is ONE `world-layout`;
+the all-agents overview is the ROOT AGENT's world (`:seon.agent/id "root"`) rendered
+by that same layout, NOT a separate dashboard stack.
 
 - world: `console-shell`(tile.cljs:1333) → `world-layout` (seon.ui); canvas = the
   focal comms block (`input-form` 1316 + commentary); retire the older datastar
   consumer view (`/agent/<id>`, inspector.cljs:1023).
-- dashboard: `/agents` → `/`; `list-agents-data`(103)/`agents-index-page`(1283)/
-  `agent-grid-tile`(1068) → `dashboard-layout`; `::index` SSE key → the dashboard
-  subscriber.
+- root agent's world: `/agents` → `/`; `list-agents-data`(103)/`agents-index-page`(1283)/
+  `agent-grid-tile`(1068) → the root agent's world-layout (the system-scoped, query-
+  across-all-agents variant of `world-layout`); `::index` SSE key → the root world
+  subscriber. Seed the `root` agent + the `/` route owned by it.
 - Consolidate the two tx-listeners into one streamer (`db/listen! ::inspector`
   inspector.cljs:1715; `db/listen! ::listener` tile.cljs:1170). Consolidate the
   push registries (`push-agent!/index!/data!` 1624-1689; `push-tile!/console!/debug!`
@@ -200,12 +241,12 @@ The packetstar tile/console path is closer to target.
 ### 14. Slots + tiles + placement-as-blocks (depends on R-0)
 
 - `console-region`/`region`(tile.cljs:1242-1251) → the `(slot :name)` primitive
-  keyed on `:seon.ctx/name`; `render-context-html`'s flat `[:section {:data-section
+  keyed on `:seon.agent.ctx/name`; `render-context-html`'s flat `[:section {:data-section
   name}]` dump (ctx.cljs:1936) → slot placement (`data-section` → `data-slot`).
 - REPLACE the `:seon.tile/*` placement entities — `default-tiles`(700)/
   `console-tiles`(724)/`find-tile`(739), `:seon.tile/console|id|span` — with
-  `:seon.agent/ctx` blocks sorted by `:seon.ctx/priority` placed into layout slots;
-  `find-tile` → lookup by `:seon.ctx/name`. KEEP `:seon.ctx/priority`;
+  `:seon.agent/ctx` blocks sorted by `:seon.agent.ctx/priority` placed into layout slots;
+  `find-tile` → lookup by `:seon.agent.ctx/name`. KEEP `:seon.agent.ctx/priority`;
   `:seon.tile/span` becomes a layout/CSS concern.
 - KEEP the ~9 core view fns (tile.cljs:643-652) as `:seon.render/html` symbols
   re-homed as blocks' html renders; `prebuilt-views`(661) → the `core-blocks` catalog.
@@ -220,7 +261,7 @@ Neither UI has it today (both whole-region replace).
 ### 16. DELETE the dead A-6 broadcast stub
 
 `open-sse!`(serve.cljs:175-196), `!sse-connections`(69), `open-sse-connections`(71),
-and `serve-root!`'s 302→`/agents`(164-173). `/` becomes the dashboard route.
+and `serve-root!`'s 302→`/agents`(164-173). `/` becomes the root agent's world route.
 
 ### 17. KEEP hand-rolled (reitit has no streaming/file primitives)
 
@@ -241,10 +282,10 @@ one developer page, likely `/agent/{id}/app/debug`). KEEP the prompt-faithful de
 
 ## Tests to update (same unit — these reference the renamed surface)
 
-- `test/seon/ctx_test.cljs` — `add-section!`/`remove-section!` + `:seon.ctx/name`
+- `test/seon/ctx_test.cljs` — `add-section!`/`remove-section!` + `:seon.agent.ctx/name`
   (esp. 491-658, 978-1016).
 - `test/seon/gym/driver.cljs:323,785-787` + `driver_test.cljs:506-507` —
-  `:seon.gym.profile/sections` reads `:seon.ctx/name` off `:seon.agent/sections`.
+  `:seon.gym.profile/sections` reads `:seon.agent.ctx/name` off `:seon.agent/sections`.
 - `src/seon/agent/inspect.cljs:41-48,105` — the `:seon.ctx/section-html` holder.
 
 ## Final gate
