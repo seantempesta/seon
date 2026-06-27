@@ -217,3 +217,15 @@ route-data is open maps, so our malli-validated maps ride as route-data with no
 friction; reitit-malli coercion (vendored, optional) validates/coerces path-params
 / query / body against a route's `:parameters` schema for free, since we
 malli-everything already.
+
+## See also
+
+Strict single-ownership: when a fact you need is owned by another doc, follow the
+link and read it.
+
+- [[architecture]] — the map: glossary, the cross-cutting principles, deployment topology.
+- [[data-model]] — the block / `:seon.route/*` / `:seon/error` schemas these renders read, and the `my.*` domains.
+- [[agent-runtime]] — the loop that assembles the prompt, the bootstrap that seeds blocks, and the run-status block's data source (`derive-status`).
+- [[toolkit]] — `my.tile` and the agent verbs that drive the live tile.
+- [[roadmap]] — current code state + the dependency-ordered migration to this target (Lane U).
+- [[datahike-primer]] — the datahike-in-the-grain mindset.
