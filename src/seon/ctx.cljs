@@ -35,8 +35,8 @@
        every read takes the composer's `:seon.db/db` snapshot so one
        render is one db view. The other core sections live in their own
        `seon.ctx.<name>` nses: :namespaces → `seon.ctx.namespaces`,
-       :your-entity → `seon.ctx.your-entity`, :live-tile →
-       `seon.ctx.live-tile`, :warnings → `seon.ctx.warnings`,
+       :live-tile → `seon.ctx.live-tile`, :warnings →
+       `seon.ctx.warnings`,
        :inventory → `seon.ctx.inventory`, :relevant-source →
        `seon.ctx.relevant`, :transcript → `seon.ctx.transcript`;
        `core-default-ctx` wires them by SYMBOL (late lookup-value
@@ -988,19 +988,17 @@
     "; human sees the :html panel, one section row serving both.\n"
     ";\n"
     "; THE SHARED STORE. All agents are wired to ONE shared datahike\n"
-    "; (datomic-style) database. Your runnable DB manual (db.examples) is\n"
-    "; rendered below — its worked, copyable recipes are the API reference.\n"
-    "; Two laws worth stating once: register an attribute (schema/register!)\n"
-    "; BEFORE the first transact that uses it, and give every attribute\n"
-    "; keyword a namespace of at least two dot-separated segments\n"
-    "; (:my.kb.doc/title — never :doc/title, never :title).\n"
+    "; (datomic-style) database. Two laws worth stating once: register an\n"
+    "; attribute (schema/register!) BEFORE the first transact that uses it,\n"
+    "; and give every attribute keyword a namespace of at least two\n"
+    "; dot-separated segments (:my.kb.doc/title — never :doc/title, never\n"
+    "; :title).\n"
     ";\n"
     "; THE NAMESPACES BELOW are real loaded code, each delimited by its own\n"
     "; ;;; ┌─ namespace X ─ / ;;; └─ end namespace X ─ brackets. YOUR OWN\n"
     "; namespace renders in FULL — your live workspace, the most important\n"
-    "; thing here. Set-up examples come with you: a runnable DB manual\n"
-    "; (db.examples — copyable recipes using your db alias) and your work\n"
-    "; list (todo). The rest of the\n"
+    "; thing here — as does the rest of your my.* world and your set-up\n"
+    "; tools (todo). The rest of the\n"
     "; seon framework is deliberately NOT dumped — it stays QUERYABLE and\n"
     "; SEARCHABLE, one search\n"
     "; away, so you are not buried in code you don't need. Never hallucinate a\n"
@@ -1573,7 +1571,7 @@
   "The in-band cache-boundary line the composer joins between the
    STABLE prefix (every section through :namespaces — byte-stable
    within a session given the deterministic rendering) and the
-   VOLATILE tail (everything after: your-entity, live-tile, warnings,
+   VOLATILE tail (everything after: live-tile, warnings,
    open-todos, relevant-source, inventory, transcript).
 
    In-band because the agent loop hands providers ONE assembled
@@ -1616,12 +1614,10 @@
      2. :namespaces  — THE BODY: one `;;; ┌─ namespace x ─ … ─ end ─`
                        bracketed block per included ns, recency-ordered
                        (most-recently-modified LAST), curated full per ns
-     3. :your-entity — the agent's own entity as a pretty-printed map
-                       (purpose, tile wiring, sections, self-notes)
-     4. :live-tile   — what your human currently sees
-     5. :warnings    — current problems; reactive, vanishes when fixed
-     6. :open-todos  — the agent's open work items; derived, vanishes
-     6b. :relevant-source — env-gated (SEON_EMBED, default-OFF): the
+     3. :live-tile   — what your human currently sees
+     4. :warnings    — current problems; reactive, vanishes when fixed
+     5. :open-todos  — the agent's open work items; derived, vanishes
+     5b. :relevant-source — env-gated (SEON_EMBED, default-OFF): the
                        top-k entities nearest this turn's query by
                        embedding KNN, PREFETCHED in run-turn! + read from
                        the per-turn stash. VOLATILE half; blank when off
@@ -1655,12 +1651,6 @@
      :seon.render/ai 'my.kb.shared/instructions-section}
     {:seon.ctx/name :namespaces   :seon.ctx/priority 20
      :seon.render/ai 'seon.ctx.namespaces/namespaces-section}
-    ;; :your-entity REMOVED (owner-directed, 2026-06-27): it instructed the agent
-    ;; to transact :seon.agent/purpose (not installed → errors) + invited free-form
-    ;; "write notes to yourself here" with no notes attr to write to, and its
-    ;; "this map IS you" framing overlapped :soul. The agent's own entity is still
-    ;; reachable via (seon.db/pull '[*] [:seon.agent/id <id>]); re-add a leaner
-    ;; section if a clear self-state mechanism is wired. See coordination.md.
     {:seon.ctx/name :live-tile    :seon.ctx/priority 35
      :seon.render/ai 'seon.ctx.live-tile/live-tile-section}
     {:seon.ctx/name :warnings     :seon.ctx/priority 40
@@ -1712,8 +1702,7 @@
   "Decode the mixed-:or render slots of a PULLED section entity back to
    their value shapes (`seon.db/decode-edn-value` — the inverse of the
    bridge's EDN-string storage encoding). Code-default sections pass
-   through unchanged. Public: `seon.ctx.your-entity` calls it to render
-   the agent's own ctx vector."
+   through unchanged."
   {:malli/schema [:=> [:catn [::section :map]] :map]}
   [section]
   (cond-> section

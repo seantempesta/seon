@@ -7,8 +7,8 @@
    (internal never renders, an agent-authored ns appears with NO config
    change, downstream code renders with NO config, recency =
    most-recently-modified LAST with a byte-identical prefix above the
-   moved block); the `:seon.agent/purpose` entity seed + your-entity
-   render; merge/override-by-name semantics; the render guard; the
+   moved block); the `:seon.agent/purpose` entity seed;
+   merge/override-by-name semantics; the render guard; the
    per-agent section budget; and the mixed-:or slot storage roundtrip.
 
    All on a FRESH :memory conn seeded like the pod boots — never the
@@ -30,7 +30,6 @@
     [seon.ctx.live-tile :as ctx-live-tile]
     [seon.ctx.namespaces :as ctx-namespaces]
     [seon.ctx.relevant :as ctx-relevant]
-    [seon.ctx.your-entity :as ctx-your-entity]
     [seon.db :as db]
     [seon.embed.stash :as embed-stash]
     [seon.render :as render]
@@ -345,7 +344,7 @@
         "a genuine agent-authored def is still teed")))
 
 ;; ------------------------------------------------------------
-;; Composer: purpose-as-entity-data, your-entity, merge, verbs.
+;; Composer: purpose-as-entity-data, merge, verbs.
 ;; ------------------------------------------------------------
 
 (defn- assemble
@@ -375,52 +374,6 @@
   (some #(when (= nm (:seon.ctx/name %)) (:seon.render/text %))
         (:seon.render/section-texts (assemble id))))
 
-(deftest your-entity-teaches-derive-purpose-only-while-unset
-  ;; Chat-surface task #29 (a23): the derive-your-purpose instruction
-  ;; is CONTEXT — never stored on the attr the customer tile renders.
-  (async done
-    (let [!unset (atom nil)]
-     (-> (with-conn
-          (fn [_conn]
-            (-> (agent/create! {:seon.agent/id "AGTctxtest00p2"})
-                (.then
-                  (fn [_]
-                    (let [txt (str (section-text "AGTctxtest00p2"
-                                                 :your-entity))]
-                      (reset! !unset txt)
-                      ;; The header's example transact contains the
-                      ;; literal `:seon.agent/purpose "..."` (ASCII
-                      ;; placeholder, no glyphs — no-bare-prose unit) —
-                      ;; exclude it: a REAL value is any other string.
-                      (is (not (re-find #":seon\.agent/purpose \"(?!\.\.\.)" txt))
-                          "no purpose VALUE rendered — the attr is absent")
-                      ;; while unset, the section teaches deriving the purpose
-                      ;; attr — anchor on the CONTRACT TOKEN (the attr keyword),
-                      ;; not the prose wording of the teaching.
-                      (is (str/includes? txt ":seon.agent/purpose")
-                          "the unset section is about the :seon.agent/purpose attr"))))
-                ;; The agent claims a purpose → the teaching vanishes
-                ;; (derived section, self-healing — nothing to clear).
-                (.then (fn [_]
-                         (db/transact!
-                           {:seon.db/tx-data
-                            [{:seon.db/ref [:seon.agent/id "AGTctxtest00p2"]
-                              :seon.agent/purpose "watch Acme invoices"}]})))
-                (.then
-                  (fn [_]
-                    (let [txt (str (section-text "AGTctxtest00p2"
-                                                 :your-entity))]
-                      (is (str/includes? txt "watch Acme invoices")
-                          "claimed purpose renders as entity data")
-                      ;; self-healing vanish: once the attr is set the derive
-                      ;; teaching block is gone, so the section SHRINKS — we
-                      ;; assert the mechanism (section got smaller), not the
-                      ;; exact teaching text that disappeared.
-                      (is (< (count txt) (count @!unset))
-                          "the derive teaching vanished — section shrank once purpose is set")))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
-
 (deftest live-tile-section-stable-on-composer-input
   ;; REGRESSION GUARD (live-tile-nil-entity-render-failed): the composer
   ;; injects ONLY {:seon.db/db … :seon.agent/id …} — it does NOT pass
@@ -444,16 +397,6 @@
                          "no swallowed malli code in the agent's context")
                      (is (str/includes? out "Wired:")
                          "the wired-label header resolves (welcome by default)"))
-                   ;; (a2) the sibling F1 case: your-entity must ALSO resolve
-                   ;; its entity from the db under the bare composer ctx —
-                   ;; never silently return "" (it must always show the agent
-                   ;; its own entity). Pure fn of db, no injected entity.
-                   (let [ye (str (ctx-your-entity/your-entity-section
-                                   {:seon.db/db    @db/*conn*
-                                    :seon.agent/id "AGTctxtile00p1"}))]
-                     (is (seq ye) "your-entity renders under bare composer ctx")
-                     (is (str/includes? ye "YOUR OWN ENTITY")
-                         "your-entity resolves the entity from db, not nil"))
                    ;; (b) the REAL prompt path (render-context-ai, NOT the
                    ;; inspector's ctx-sections) must also be render-failure-free.
                    (let [ctx  {:seon.db/db @db/*conn* :seon.agent/id "AGTctxtile00p1"}
@@ -500,7 +443,15 @@
                 lines)
         "no bare margin prose — every line is blank, indented, a `;` comment, or a code form")))
 
-(deftest purpose-entity-and-your-entity-and-verbs
+(defn- agent-purpose
+  "The stored `:seon.agent/purpose` attr value for `id` (entity data, not
+   a context surface)."
+  [id]
+  (:seon.agent/purpose
+   (db/pull {:seon.db/pull-pattern '[:seon.agent/purpose]
+             :seon.db/ref [:seon.agent/id id]})))
+
+(deftest purpose-entity-and-verbs
   (async done
     (-> (with-conn
           (fn [_conn]
@@ -508,15 +459,12 @@
                                 :seon.agent/purpose "watch the ledger"})
                 (.then
                   (fn [_]
-                    (let [{:seon.render/keys [sections]} (assemble "AGTctxtest00p1")
-                          ent-txt (section-text "AGTctxtest00p1" :your-entity)]
-                      (is (some #{:your-entity} sections)
-                          "minted agent renders the your-entity section")
-                      (is (str/includes? (str ent-txt) "watch the ledger")
-                          "stated purpose is entity data, rendered in the map")
-                      ;; The `;; ── your entity ──` header was REMOVED
-                      ;; (keystone): the section renderer's bracket demarcates
-                      ;; the section now.
+                    (let [{:seon.render/keys [sections]} (assemble "AGTctxtest00p1")]
+                      ;; the stated purpose is stored as ENTITY DATA on the
+                      ;; attr (the welcome tile reads it; no context section
+                      ;; renders it anymore).
+                      (is (= "watch the ledger" (agent-purpose "AGTctxtest00p1"))
+                          "create! stores the stated purpose on the entity attr")
                       (is (some #{:namespaces} sections)
                           "core defaults merged in")
                       (is (some #{:transcript} sections))
@@ -524,19 +472,21 @@
                           "the :purpose seed section is dead")
                       (is (not-any? #{:your-sections} sections)
                           "the :your-sections seed section is dead"))))
-                ;; set-purpose! now writes the entity attr.
+                ;; set-purpose! writes the entity attr.
                 (.then (fn [_]
                          (db/with-agent "AGTctxtest00p1"
                            (fn []
                              (agent/set-purpose!
                                {:seon.render/ai "guard the books"})))))
+                (.then
+                  (fn [_]
+                    (is (= "guard the books" (agent-purpose "AGTctxtest00p1"))
+                        "set-purpose! writes the purpose attr")))
                 ;; create! again = resume — must NOT overwrite purpose.
                 (.then (fn [_] (agent/create! {:seon.agent/id "AGTctxtest00p1"})))
                 (.then
                   (fn [_]
-                    (is (str/includes?
-                          (str (section-text "AGTctxtest00p1" :your-entity))
-                          "guard the books")
+                    (is (= "guard the books" (agent-purpose "AGTctxtest00p1"))
                         "resume (re-create!) keeps the agent's own purpose")))
                 ;; add-section! upsert-by-name + envelopes (unchanged).
                 (.then (fn [_]

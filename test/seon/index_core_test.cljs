@@ -178,9 +178,10 @@
 (deftest core-ns-rows-stub-bulk-full-source-whitelist
   ;; Curated render (LEAN whitelist): the seon.* FRAMEWORK BULK keeps the
   ;; minimal `(ns x)` stub (it is DROPPED from render, never shown as a body),
-  ;; while EACH curated seon.* whitelist member
-  ;; (seon.ctx.namespaces/full-source-whitelist = #{:seon.db.examples :seon.agent.todo})
-  ;; force-stores its REAL FULL FILE TEXT (it renders FULL, so the boot
+  ;; while THE curated seon.* whitelist member
+  ;; (seon.ctx.namespaces/full-source-whitelist = #{:seon.agent.todo}) AND
+  ;; every my.* ns (my.kb, the runnable DB manual, full via the my.* rule)
+  ;; force-store their REAL FULL FILE TEXT (they render FULL, so the boot
   ;; indexer reads the file — probing .cljs then .cljc — the same
   ;; seon.ctx.namespaces/full-source-ns? rule the renderer uses, one writer no
   ;; drift). seon.warn / seon.eval / seon.agent.search / seon.agent.fs are all
@@ -198,14 +199,16 @@
         "seon.warn (framework bulk) source is the minimal (ns x) stub")
     (is (= "(ns seon.eval)" eval-ns)
         "seon.eval (framework bulk) source is the minimal (ns x) stub")
-    ;; EVERY whitelisted tool carries its REAL full file source, not a stub.
-    (is (full? :seon.db.examples)
-        "seon.db.examples (whitelist — the runnable DB manual) source is its REAL full file text")
+    ;; my.kb (the DB manual) is full-source via the my.* rule, and the
+    ;; whitelisted tool carries its REAL full file source — neither a stub.
+    (is (full? :my.kb)
+        "my.kb (the runnable DB manual, full via the my.* rule) source is its REAL full file text")
     (is (full? :seon.agent.todo)
         "seon.agent.todo (whitelist) source is its REAL full file text")
     ;; seon.db itself is DE-whitelisted — the raw db source is no longer
     ;; dumped; it drops to the minimal (ns x) stub (still indexed via its
-    ;; member rows). The worked-example layer (seon.db.examples) replaces it.
+    ;; member rows). The worked-example layer (my.kb, full via the my.* rule)
+    ;; replaces it.
     (is (= "(ns seon.db)" (:seon.ns/source (row-for :seon.db)))
         "seon.db (de-whitelisted) source is the minimal (ns x) stub")
     ;; LEAN: search + fs are NO LONGER whitelisted — they drop to the minimal
@@ -464,8 +467,9 @@
   ;; ns rows dedup on name AND source. A store whose :seon.ns/source for a
   ;; full-source (my.*) ns differs from the freshly-built full file text
   ;; (e.g. a regressed `(ns x)` stub, or a stale build) gets exactly that
-  ;; ns row re-emitted; everything else stays a no-op. (my.kb is a
-  ;; fn-less compiled root — its full file text is read at boot.)
+  ;; ns row re-emitted; everything else stays a no-op. (my.kb is a compiled
+  ;; my.* root — its full file text is read at boot; its fn/schema rows are
+  ;; already present, so only the drifted ns row re-emits.)
   (async done
     (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
                              (db/tx-meta-datahike-schema)))

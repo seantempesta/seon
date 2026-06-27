@@ -104,32 +104,26 @@
 (def full-source-whitelist
   "The LEAN whitelist of `seon.*` FRAMEWORK namespaces shown to every agent
    IN FULL — kept deliberately tiny so the agent is not buried in framework
-   code. Just two set-up tools, shown as EXAMPLES (both already aliased in
-   the agent's home ns), not an exhaustive API dump. This is the clear
-   EDITABLE def to extend.
-     - `:seon.db.examples` — the runnable DB manual every agent copies from:
-       worked recipes (schema/register!, transact!, query, pull/entity,
-       store-inventory) over a neutral demo domain, all 100% AMBIENT (no call
-       threads conn). It is the agent-facing API reference. The raw `seon.db`
-       source is deliberately NOT dumped — it stays indexed + grep-able, but
-       its internal API threads `:seon.db/conn`/`:seon.db/db`, which agents
-       must never copy; the worked-example layer shows only the ambient form.
+   code. Just one set-up tool, shown as an EXAMPLE (already aliased in the
+   agent's home ns), not an exhaustive API dump. This is the clear EDITABLE
+   def to extend.
      - `:seon.agent.todo` — the work-list tool an agent calls directly:
        `register!` per attr, map-in/map-out `:malli/schema` fn shapes,
        error-as-value envelopes, the todo verbs the system prompt teaches
        by name.
    EVERYTHING ELSE in the framework is curated OUT — the rest of `seon.*`
-   (search, fs, message, lifecycle, schema, render, …) is NOT dumped here.
-   It stays INDEXED and grep-able via `seon.agent.search` and readable on
-   demand via [[seon.ctx/render-namespace]] — one search away, never a wall
-   of code the agent must wade through. `my.*` nses (`my.kb`, agent-authored
-   code) are ALREADY rendered full by the `my.*` rule in [[full-source-ns?]]
-   — they do NOT belong here; this whitelist is ONLY for the seon.* example
-   tools. Shared by the boot indexer (which stores their real file source —
-   see `seon.client/ns-row`) and [[namespaces-section]] (which renders them
-   FULL while the rest of the framework is DROPPED from the rendered
-   section — still indexed + searchable)."
-  #{:seon.db.examples :seon.agent.todo})
+   (db, search, fs, message, lifecycle, schema, render, …) is NOT dumped
+   here. It stays INDEXED and grep-able via `seon.agent.search` and readable
+   on demand via [[seon.ctx/render-namespace]] — one search away, never a
+   wall of code the agent must wade through. `my.*` nses are ALREADY rendered
+   full by the `my.*` rule in [[full-source-ns?]] — including `my.kb`, the
+   worked, runnable DB manual — so they do NOT belong here; this whitelist is
+   ONLY for the seon.* tool example. Shared by the boot indexer (which stores
+   their real file source — see `seon.client/ns-row`) and
+   [[namespaces-section]] (which renders them FULL while the rest of the
+   framework is DROPPED from the rendered section — still indexed +
+   searchable)."
+  #{:seon.agent.todo})
 
 (defn in-full-source-whitelist?
   "True when `ns-name` (string, keyword, or symbol) is one of the curated
@@ -189,12 +183,11 @@
 
 (def ^:private namespaces-header
   (str "; Real loaded code. Shown in FULL: YOUR OWN namespace (your live\n"
-       "; workspace — the most important), and a couple of set-up examples —\n"
-       "; a runnable DB manual (db.examples, copyable recipes using your db\n"
-       "; alias) and your work list (todo). The rest of the framework is\n"
-       "; NOT dumped here on purpose — it stays indexed and one search away,\n"
-       "; so you are not buried in code you don't need. Full namespaces are\n"
-       "; ordered by recency (most-recently-modified last)."))
+       "; workspace — the most important), the rest of your my.* world, and\n"
+       "; your set-up tools (todo). The rest of the framework is NOT dumped\n"
+       "; here on purpose — it stays indexed and one search away, so you are\n"
+       "; not buried in code you don't need. Full namespaces are ordered by\n"
+       "; recency (most-recently-modified last)."))
 
 (defn- cur-ns-workspace-stub
   "The never-omit block for the agent's CURRENT ns when it has no members

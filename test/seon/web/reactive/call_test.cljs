@@ -98,7 +98,7 @@
   ;; The invoked fn transacts inside invoke!'s internal awaits, so the conn
   ;; must be ROOT-set! — CLJS `binding` does NOT survive await boundaries
   ;; (only the root binding / AsyncLocalStorage does; this is exactly how the
-  ;; live pod root-set!s db/*conn* at boot). Mirrors seon.teachings-test.
+  ;; live pod root-set!s db/*conn* at boot).
   (async done
     (let [prev-conn db/*conn*
           finish    (fn [] (set! db/*conn* prev-conn) (done))]

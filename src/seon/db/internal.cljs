@@ -517,7 +517,7 @@
 (defn normalize-entity-ref-keys
   "Rewrite the taught entity-identity shorthand — an entity map keyed by
    `:seon.db/ref` (`{:seon.db/ref [:seon.agent/id \"…\"] :attr v}`, the
-   transact-onto-your-entity pattern) — into datahike's native `:db/id`
+   transact-onto-your-own-entity pattern) — into datahike's native `:db/id`
    slot, recursively through nested entity maps and tx vectors.
 
    `:seon.db/ref` is a registered Malli SHAPE, not an installed datahike

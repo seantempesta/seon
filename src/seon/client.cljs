@@ -135,15 +135,6 @@
     ;; Work items (user→agent asks + agent notes-to-self) — required so
     ;; its register! calls run before the boot install of :seon.agent.todo/*.
     [seon.agent.todo]
-    ;; The runnable DB manual — the agent-facing database reference, shown
-    ;; FULL in the :namespaces section (seon.ctx.namespaces/full-source-whitelist
-    ;; replaces the raw seon.db source dump with it). Required ONLY so the
-    ;; build compiles it into the bundle and the public-fn-vars closure indexes
-    ;; it (its public fns + a full-source :seon.ns row); the core never calls
-    ;; it. 100% ambient — no call threads conn — so nothing the agent copies
-    ;; from it carries the internal :seon.db/conn / :seon.db/db threading that
-    ;; the raw seon.db source (now dropped from render, still indexed) exposes.
-    [seon.db.examples]
     ;; The per-section ctx namespaces (ctx-sections-split-2026-06-18):
     ;; each owns one section fn (+ html twin) that core-default-ctx
     ;; wires by SYMBOL — required here so the build includes them and
@@ -151,7 +142,6 @@
     ;; render time (no require cycle: the section nses require seon.ctx
     ;; for the shared read API, seon.ctx names them only as symbols).
     [seon.ctx.namespaces :as nss]
-    [seon.ctx.your-entity]
     [seon.ctx.live-tile]
     [seon.ctx.warnings]
     [seon.ctx.transcript]

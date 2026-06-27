@@ -63,7 +63,6 @@
     [seon.ctx.namespaces :as ctx-namespaces]
     [seon.ctx.transcript :as ctx-transcript]
     [seon.ctx.warnings :as ctx-warnings]
-    [seon.ctx.your-entity :as ctx-your-entity]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.schema :as schema]))
@@ -117,7 +116,6 @@
 (def cap-result ctx/cap-result)
 (def cap-result-body ctx/cap-result-body)
 (def namespaces-section ctx-namespaces/namespaces-section)
-(def your-entity-section ctx-your-entity/your-entity-section)
 (def render-namespace ctx/render-namespace)
 (def warnings-section ctx-warnings/warnings-section)
 (def transcript-char-budget ctx-transcript/transcript-char-budget)
@@ -398,9 +396,8 @@
    own purpose and sections. A GENUINELY NEW entity gets `:seon.agent/purpose`
    ONLY when the human stated one; otherwise the attr stays ABSENT (optional =
    absent) until the agent derives a purpose and transacts it. Purpose is
-   ENTITY DATA rendered by the your-entity context section, never
-   agent-directed instruction text — the welcome tile shows it verbatim to the
-   customer. `:seon.agent/default-turn-limit`, when given, is transacted onto
+   ENTITY DATA, never agent-directed instruction text — the welcome tile shows
+   it verbatim to the customer. `:seon.agent/default-turn-limit`, when given, is transacted onto
    the entity (it seeds a new run's WORK bound); absent leaves the stored value
    unchanged.
 
