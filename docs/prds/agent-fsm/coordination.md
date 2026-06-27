@@ -90,15 +90,31 @@ other lane's **_Needs_** and the owner makes it.
 
 ## Core — _Now / Needs / Interface changes_
 
-- **Now:** Pre-build library-grounding pass DONE — read datahike (CAS/components/
-  bridge), malli (explain/humanize/`:orn`), SCI (bounded eval), reitit (routes)
-  firsthand; validated every load-bearing claim ✓; wrote [[library-grounding]]
-  (per-phase `reference-code/…:LINE` read-map + idioms) and annotated the canonical
-  docs with grounding pointers. Plan is sound; refinements applied (fence value =
-  `[:seon.agent.run/id R]` lookup-ref, open-race tx ordering, `register!`≠bridge,
-  `:orn` most-specific-first, `explain` nil-on-valid). Next: Phase 1 rename.
+- **Now:** **PHASE 1 RENAME IN FLIGHT (Core side).** Library-grounding pass done
+  ([[library-grounding]], all claims validated ✓). A Core agent is executing the
+  rename on Core-lane files ONLY: the ns move `src/seon/ctx.cljs`→`src/seon/agent/ctx.cljs`
+  + `src/seon/ctx/*.cljs`→`src/seon/agent/ctx/*.cljs`; the 24 `:seon.ctx/*`→`:seon.agent.ctx/*`
+  keywords (incl. `section`→`block`, `section-html`→`block-html`); the stored attr
+  `:seon.agent/sections`→`:seon.agent/ctx`; the block schema `:seon.ctx/section`→
+  `:seon.agent.ctx/block` (+ `:seon.render/ai` flips to `{:optional true}`); the
+  NON-web requirers (`agent`, `agent/inspect`, `agent/message`, `agent/turn`, `ai`,
+  `ai/anthropic`, `client`, internal `ctx/*`); `my/` + `acme/` source. **The build is
+  transiently RED until UI lands its half — that is expected.** NOT resetting until
+  both lanes are grep-clean.
 - **Needs (from UI):** —
-- **Interface changes (UI must absorb):** —
+- **Interface changes (UI must absorb) — DO THIS IN THE SAME WINDOW:**
+  1. **Update `web/**` requires** `[seon.ctx …]`→`[seon.agent.ctx …]` in
+     `web/inspector`, `web/reactive/call`, `web/tile` (these are the 3 UI-lane
+     requirers of the moved ns — the build won't compile until done).
+  2. **Retarget the SILENT-FAILURE Datalog reads** (a missed one returns an EMPTY
+     query, not an error): `:seon.agent/sections`→`:seon.agent/ctx` and `:seon.ctx/*`
+     →`:seon.agent.ctx/*` at `web/tile.cljs:548,590` (+ Phase 2f's `1001,1040,1104,1406`
+     if you sweep that far) — grep your lane for any others.
+  3. New names UI consumes: `:seon.agent/ctx` (component vector of
+     `:seon.agent.ctx/block`), `:seon.agent.ctx/name|priority`. Old
+     `:seon.agent/sections`/`:seon.ctx/section` are GONE.
+  **Ping when `web/**` is retargeted + grep-clean; we commit together + ONE
+  `bin/seon cluster reset default`.**
 
 ## UI — _Now / Needs / Interface changes_
 
