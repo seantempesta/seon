@@ -357,10 +357,17 @@
      by bounding) or throws the real error into the caller's catch → a legible
      fallback. SCI is a pure safety net for hangs; it is never a correctness
      gate."
-  {:malli/schema [:=> [:catn [::sym :symbol] [::input :map]
-                       [::view {:optional true} :keyword]
-                       [::budget-ms {:optional true} :int]]
-                  [:or :map :string]]}
+  ;; One `:=>` per runtime arity (idiomatic multi-arity) — a single `:=>` with
+  ;; `{:optional true}` catn slots leaves arities 2/3 loosely validated and
+  ;; trips malli's arity dispatch under instrument/unstrument cycles. The
+  ;; lower arities delegate schema-valid defaults (`:seon.render/html` keyword,
+  ;; `default-budget-ms` int), so no delegation trap.
+  {:malli/schema
+   [:function
+    [:=> [:catn [::sym :symbol] [::input :map]] [:or :map :string]]
+    [:=> [:catn [::sym :symbol] [::input :map] [::view :keyword]] [:or :map :string]]
+    [:=> [:catn [::sym :symbol] [::input :map] [::view :keyword] [::budget-ms :int]]
+         [:or :map :string]]]}
   ([sym input] (invoke-bounded sym input :seon.render/html default-budget-ms))
   ([sym input view] (invoke-bounded sym input view default-budget-ms))
   ([sym input view budget-ms]
