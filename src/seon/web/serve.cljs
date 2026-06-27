@@ -51,6 +51,7 @@
     [seon.db :as db]
     [seon.log :as log]
     [seon.platform :as platform]
+    [seon.web.datastar :as datastar]
     [seon.web.inspector :as inspector]
     [seon.web.reactive.call :as call]
     [seon.web.tile :as tile]))
@@ -603,6 +604,7 @@
                  (str/starts-with? path "/css/")    (serve-static! res path)
                  (str/starts-with? path "/js/")     (serve-static! res path)
                  (= path "/sse")                    (open-sse! req res)
+                 (datastar/route? path)             (datastar/handle! req res path)
                  (inspector/route? path)            (inspector/handle! req res path)
                  (tile/route? path)                 (tile/handle! req res path)
                  :else                              (write-status! res 404 "text/plain; charset=utf-8"
