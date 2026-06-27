@@ -21,6 +21,12 @@
     var url = el.getAttribute("data-tile");
     if (!url) return;
     var backoff = RETRY_MIN;
+    // Last html applied to this tile. Skip the innerHTML replace when a new
+    // payload is byte-identical — an unconditional replace would WIPE in-tile
+    // interactive state the server can't know about (a <details> the user
+    // expanded, scroll position, text selection, focus). Scoped here (not in
+    // `connect`) so it persists across reconnects — the DOM still holds it.
+    var lastHtml = null;
 
     function connect() {
       var es = new EventSource(url);
@@ -30,6 +36,8 @@
       es.onmessage = function (e) {
         // One stream per tile, so the target is implicit — the payload is just
         // this tile's inner HTML.
+        if (e.data === lastHtml) return;
+        lastHtml = e.data;
         el.innerHTML = e.data;
       };
 
@@ -52,6 +60,13 @@
     var url = el.getAttribute("data-console");
     if (!url) return;
     var backoff = RETRY_MIN;
+    // Last html applied per tile-id. `console-payload` re-renders and sends
+    // EVERY tile on EVERY tx, so without this an unconditional replace would
+    // wipe in-tile interactive state (an expanded <details>, scroll, focus) on
+    // every tx even for tiles whose content didn't change — and most txs change
+    // only one or two tiles. Re-render a tile only when its html actually
+    // changed. Scoped outside `connect` so it survives reconnects.
+    var lastPatch = Object.create(null);
 
     function connect() {
       var es = new EventSource(url);
@@ -59,6 +74,8 @@
       es.addEventListener("patch", function (e) {
         try {
           var p = JSON.parse(e.data);
+          if (lastPatch[p.id] === p.html) return;
+          lastPatch[p.id] = p.html;
           var t = document.getElementById("tile-" + p.id);
           if (t) t.innerHTML = p.html;
         } catch (err) { /* ignore a malformed patch */ }
