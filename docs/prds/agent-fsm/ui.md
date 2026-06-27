@@ -11,7 +11,8 @@ tags: [architecture, web, agent]
 The human's UI and the agent's prompt are the same data, dual-rendered. Every
 page is a derived projection of the database; nothing rendered is stored. The
 context unit is the **block**; the engine is `seon.render`; the front door is
-**reitit**; the live channel is SSE driven by one tx-listener. Every layer is a
+**reitit**; the live channel is a gzip-compressed datastar **morph** stream
+driven by one tx-listener. Every layer is a
 symbol or a datom, so a third party overrides any of it — blocks, canvas,
 layout, the root agent's world, routes, CSS, client — reusing the same
 primitives, with zero `src/seon` edits.
@@ -123,60 +124,96 @@ is a tile. All pages are agent worlds — one mechanism, a tree of routes:
 The front door is **reitit** (vendored `reference-code/reitit`, `.cljc`, runs in
 the Node pod) consuming `:seon.route/*` datoms. A route datom carries its pattern,
 method, unique name (reverse routing), owning agent (`:seon.route/owner`, rides as
-route-data for auth), and a handler that reuses `:seon.render/html` — **a handler
-IS a layout symbol**. `db->routes` projects the datoms into reitit's route vector;
+route-data for auth), and a `:seon.route/handler` symbol that **IS a layout
+symbol** — the same render machinery as a block's html render, not a separate
+mechanism. `db->routes` projects the datoms into reitit's route vector;
 a ~20-line Node↔Ring adapter feeds the router, which is a pure derived value of
 the route datoms rebuilt on tx via a reloading thunk. This replaces hand-rolled
 `case`/`cond`/`re-matches` dispatch. (The `:seon.route/*` attributes are
 registered per [[data-model]].)
 
-- **Seeded core routes:** `/` (root agent's world), `/agent/{id}` (world),
-  `/agent/{id}/feed` (SSE), `/call` (action), `/eval`. Agents add
+- **Seeded core routes:** `/` (root agent's world) and `/agent/{id}` (world) —
+  that is the whole seeded set. Each page route also serves its OWN live stream
+  over the SAME path (the GET shim opens it from the page), so there is **no
+  separate feed route**. The one action door is `/agent/{id}/call`. Agents add
   `/agent/{id}/app/{x}` rows (capability-gated, handler in the agent's own
   `my.agent.<id>` ns).
 - **Nested routes ARE nested layouts** — reitit meta-merges route-data parent →
   child (`:seon.route/owner` + middleware flow down). `match-by-name` gives reverse
   routing; build-time path/name conflict detection catches overlaps the
   hand-rolled `cond` silently shadowed.
-- **`/call` is the one action door, and the capability gate
-  (`seon.web.reactive.call`) is unchanged.** reitit dispatches the URL; the gate
-  authorizes the fn — **namespace is the route** (`my.agent.<id>/foo` → the owning
-  agent), granted only if it is a registered `:seon.fn` in that agent's home ns;
+- **`/agent/{id}/call` is the one action door, and the capability gate
+  (`seon.web.reactive.call`) is unchanged.** reitit dispatches the URL to that one
+  per-agent door; the fn rides as a route-data **descriptor** (the `?fn=` param),
+  NOT its own route — **namespaces are not a routing level**. The gate authorizes
+  the fn by resolving its owning agent from the fn's `my.agent.<id>` namespace and
+  granting it only if it is a registered `:seon.fn` in that agent's home ns;
   refusal precedes any invoke; args stay data; the call runs SCI-bounded → it
-  transacts → the page re-derives and pushes. reitit replaces the FRAGILE dispatch,
-  not the SECURE gate.
+  transacts → the page re-derives and the stream morphs. reitit replaces the
+  FRAGILE dispatch, not the SECURE gate.
 - **Interactivity is plain Clojure.** Agents author fn-calls in handler slots; a
   render-time server-side postwalk rewrites a fn-call `(cancel-order! id)` or a
-  fn-ref `submit-order!` into one standard datastar `@post('/call', {:fn …, :args
-  …})` (args transit-serialized; the ref case pulls form values from datastar
-  signals). Routing is orthogonal to this rewrite.
+  fn-ref `submit-order!` into one standard datastar `@post` to the agent's
+  `/agent/{id}/call` door (fn-call args transit-serialized in the query; the
+  fn-ref case pulls form values from datastar **signals** — the POST body).
+  Transient client state — an input value, a popover, a time-slider — lives in
+  datastar signals, never in DOM attributes, so a whole-element morph never
+  clobbers it. Routing is orthogonal to this rewrite.
 - **Auth + error-catch ride as middleware.** Per-route concerns are reitit
   route-data middleware referenced by keyword through a registry; a `:compile`
   middleware reads route-data and vanishes when N/A. Auth is wired empty — adding
   it later is one keyword + one registry entry, zero handler edits.
 
-## The live channel — SSE + `!last-tree`
+## The live channel — gzip morph SSE
 
-SSE is a pure derivation of the tx-log, not the agent pushing. One **tx-listener**
-on a read-replica fires on every datahike commit, re-derives every world (root
-world included) from `:seon.agent/ctx`, and streams datastar `merge-fragment`
-patches. The agent only `transact!`s datoms; it never opens or writes a stream.
+The live channel is **ours** (reitit has no streaming primitives by design): one
+**tx-listener** on a read-replica is the refresh signal, and the view is a pure
+derivation of the DB. The agent only `transact!`s datoms; it never opens or writes
+a stream. The model is hyperlith's `view = f(db)` ported into the Node pod, proven
+in `seon.web.datastar`.
 
-- The diff is a per-connection **`!last-tree`** slot-tree BFS to fixpoint: a leaf
-  patch on content change, ONE fully-expanded subtree patch on a shape change (a
-  tile that gains/loses sub-slots), so packetstar.js stays byte-stable.
-- The feed is reconnect-lossless via per-subscriber `since-t` replay.
-- reitit has zero streaming primitives by design; it only routes the GET that
-  OPENS the feed — thereafter patches stream over the raw socket (the SSE handler
-  needs the raw `node:http` `res`; the thin adapter injects it before reitit).
+- **view = f(db-as-of t).** ONE render fn produces the WHOLE element (a world =
+  `[:main#world …tiles…]`). On every datahike commit the tx-listener re-renders
+  `view = f(db)` and writes ONE `datastar-patch-elements` event (default patch
+  mode `outer`) to every open stream. datastar's **idiomorph** diffs the DOM
+  client-side, so pushing the whole element MORPHS only what changed and preserves
+  in-element state (focus, scroll, selection, the open popover). There is no
+  server-side tree diff, no per-tile `{id, html}` packet, and no slot-tree BFS —
+  one whole-element morph, granularly applied by idiomorph.
+- **gzip + immediate flush.** The stream is long-lived and `Content-Encoding:
+  gzip`: each event is written then sync-flushed (`Z_SYNC_FLUSH`) so the
+  compressed bytes hit the wire at once; the browser transparently gunzips before
+  datastar reads. The streamer is crash-proofed — error handlers on the gzip
+  stream + the response, a `writableEnded` guard before every write, and
+  `req.on('close')` ends the gzip stream and deregisters the connection.
+- **One throttle.** A drop-latest (coalescing) throttle collapses a tx burst into
+  ONE morph — an agent turn commits many datoms; the human sees a single
+  re-render.
+- **Same path, no feed route.** The GET shim page and the live stream ride the
+  SAME path: datastar opens the stream from the page (`data-init`), so there is no
+  `/agent/{id}/feed`. reitit only routes the GET that serves the page; the stream
+  then rides the raw `node:http` `res` — the thin Node↔Ring adapter injects it and
+  the SSE handler returns `{:seon.http/hijacked true}` so the adapter does not
+  double-write.
+- **Transient state is signals; time-travel and reconnect are just re-renders.**
+  Transient client state lives in datastar **signals** only, never DOM attrs. Time
+  travel is `view = f(db-as-of t)` over the bitemporal DB — a different `t`, the
+  same render. Reconnect needs no UI-side `since-t` replay: the first paint fires
+  immediately on open and repaints the current world.
 - **The hard invariant: no agent code ever touches an SSE connection.** agent →
-  datom → tx-listener → derived render → SSE, one way; actions reverse it (a
+  datom → tx-listener → derived render → morph, one way; actions reverse it (a
   browser POST → the owning agent's sandbox → result datoms → tx-listener →
-  stream). The DB is the bus both ways.
+  morph). The DB is the bus both ways.
 
 The streamer is a **role, not a process** — any process holding a read-replica + a
 tx-listener can play it, so the UI-host is relocatable and can split into N
 streamer-processes later (see [[architecture]] for the deployment topology).
+
+**Streamed surfaces are verified server-side, not in a browser agent.** A
+long-lived `text/event-stream` 503s through the in-tool chrome agent's net layer,
+so verify a streamed change with a Node client that opens the gzip stream, gunzips
+the payload, and asserts it changes on a real tx; the final live-morph eyeball is
+the owner's, in real Chrome.
 
 ## Errors render as tiles
 
@@ -203,7 +240,7 @@ primitives, with zero `src/seon` edits:
 | **root agent's world (`/`)** | the `/` route handler symbol (root's world layout) | seon's root world layout |
 | **routes / apps** | `:seon.route/*` rows | seeded core routes |
 | **CSS / theme** | `SEON_BRAND_CSS` (injected on all heads) | Phosphor |
-| **client JS** | `SEON_EXTRA_PUBLIC` + scripts | packetstar.js |
+| **client JS** | `SEON_EXTRA_PUBLIC` + scripts | datastar.js |
 
 acme installs at preload in its own namespaces (loaded via `SEON_EXTRA_SRC`),
 where it already wires its overrides. Acceptance: a completely different acme UI
