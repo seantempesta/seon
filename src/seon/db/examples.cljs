@@ -16,7 +16,7 @@
        `(await …)` it (see [[build-reading-log!]]). At the REPL top level
        the runtime auto-awaits, so you read the envelope directly.
 
-   `*conn*` is ambient — never thread it; every call below omits it."
+   Every call below omits the db arg — it's auto-injected."
   (:require
     [seon.db :as db]
     [seon.schema :as schema]))

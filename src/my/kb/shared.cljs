@@ -6,21 +6,12 @@
    APPENDING — one transact adds a row and the ref in the same nested
    map:
 
-     (seon.db/transact!
+     (db/transact!
        {:seon.db/tx-data
         [{:my.kb.shared/id \"shared\"
           :my.kb.shared/instructions
           [{:my.kb.shared/text \"Always store provenance (:my.kb/source-path) with findings.\"
             :my.kb.shared/at   (js/Date.)}]}]})
-
-   The append shape is the positional, conn-first transact agents reach
-   for by instinct:
-
-     (seon.db/transact! seon.db/*conn*
-       [{:my.kb.shared/id \"shared\"
-         :my.kb.shared/instructions
-         [{:my.kb.shared/text \"Always store provenance with findings.\"
-           :my.kb.shared/at   (js/Date.)}]}])
 
    These rows are shown to EVERY agent automatically, every turn — the
    `:shared-instructions` context section ([[instructions-section]])
@@ -75,7 +66,7 @@
    the ns doc for the one-transact append shape); re-run this whenever
    you want the current set. Returns [] when none exist yet.
 
-   ;; read the current set (db injected from your *conn*):
+   ;; read the current set (db injected automatically):
    (my.kb.shared/instructions)
    ;; => [\"Always store provenance (:my.kb/source-path) with findings.\"]"
   {:malli/schema [:function

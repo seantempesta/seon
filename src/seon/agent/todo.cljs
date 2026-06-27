@@ -110,7 +110,7 @@
 
       (nil? owner)
       (internal/fail (str "add!: no :seon.agent.todo/owner and no agent in scope — pass an "
-                          "owner ref or call inside (seon.db/with-agent …)."))
+                          "owner ref or call inside (db/with-agent …)."))
 
       :else
       (let [id (db/new-id!)]
@@ -166,7 +166,7 @@
 
       (and (nil? owner) (not all?))
       (internal/fail (str "list-open: no :seon.agent.todo/owner and no agent in scope — pass "
-                          "an owner ref, {::all? true}, or use (seon.db/with-agent …)."))
+                          "an owner ref, {::all? true}, or use (db/with-agent …)."))
 
       :else
       (let [db @db/*conn*]
