@@ -318,7 +318,7 @@
                          :seon.db/args [ns-kw]})]
     (some-> (last (sort-by #(.getTime ^js (second %)) rows)) first)))
 
-(declare value-node)
+(declare value-row)
 
 (defn- value-leaf
   "A non-container skeleton node → a styled inline token. Mirrors R's
@@ -327,17 +327,20 @@
   (cond
     (and (map? x) (contains? x :seon.eval/datom))
     (let [[e a v] (:seon.eval/datom x)]
-      [:span {:class "text-keyword font-mono"} (str "#datom[" e " " (pr-str a) " " (pr-str v) "]")])
+      [:span {:class "text-keyword font-mono break-all"} (str "#datom[" e " " (pr-str a) " " (pr-str v) "]")])
 
     (and (map? x) (contains? x :seon.eval/opaque))
-    [:span {:class "text-text-400 font-mono italic"}
+    [:span {:class "text-text-400 font-mono italic break-all"}
      (str "#‹" (:seon.eval/opaque x)
           (when-some [s (:seon.eval/summary x)] (str " " s)) "›")]
 
     (and (map? x) (contains? x :seon.render.value/string-len))
-    [:span {:class "text-success font-mono break-all"}
-     (str (pr-str (str (:seon.render.value/head x) "…"))
-          " ⟨" (:seon.render.value/string-len x) " chars⟩")]
+    ;; clipped string: green head + a muted "·N chars" suffix. Plain glyphs
+    ;; only (no ⟨⟩ — those font-substitute to boxes/parens in the UI; the
+    ;; angle-bracket form is R's AGENT-TEXT surface, not this HTML one).
+    [:span {:class "font-mono break-all"}
+     [:span {:class "text-success"} (pr-str (str (:seon.render.value/head x) "…"))]
+     [:span {:class "text-text-600"} (str " ·" (:seon.render.value/string-len x) " chars")]]
 
     :else
     [:span {:class (str "font-mono break-all "
@@ -351,81 +354,89 @@
 (defn- pruned-marker
   "A depth/breadth boundary R's sampler stopped at — the deeper value is NOT
    in the tree. Rendered as a passive 'deeper' hint (no client expansion yet
-   — that needs R's path `/call` endpoint)."
+   — that needs R's path `/call` endpoint). `whitespace-nowrap` keeps the
+   typed-count and the hint glued together rather than wrapping mid-token."
   [x]
   (let [k (:seon.render.value/pruned x) c (:seon.render.value/count x)
         [o cl] (case k :map ["{" "}"] :set ["#{" "}"] :vector ["[" "]"] ["(" ")"])
         unit   (if (= k :map) "keys" "items")]
-    [:span {:class "inline-flex items-center gap-1 text-2xs text-text-500 font-mono"
+    [:span {:class "inline-flex items-center gap-1 text-2xs text-text-500 font-mono whitespace-nowrap shrink-0"
             :title "deeper than the bounded view — drill the live result/<id> var"}
      [:span {:class "text-text-600"} (str o "…" (when c (str c " " unit)) cl)]
      [:span {:class "text-text-700"} "▸ deeper"]]))
 
-(defn- value-details
-  "A collapsible container row for a map or seqish skeleton node. `<details>`
-   is open for the first two depths (the value at a glance), collapsed below."
-  [summary-hiccup child-rows depth]
+(defn- container-details
+  "A collapsible container row. The `label` (key / index span, nil at the root)
+   is folded INTO the `<summary>` next to the type-head, so (a) the WHOLE header
+   is the click target and (b) children indent a FIXED step (the `pl-3` border)
+   regardless of key width — a labelled child no longer pushes its subtree right
+   by its own key's length. Open for the first two depths."
+  [label head-text rows depth]
   [:details (cond-> {:class "value-node min-w-0"}
               (< depth 2) (assoc :open "open"))
-   [:summary {:class "cursor-pointer text-xs select-none hover:text-amber-300 marker:text-text-600"}
-    summary-hiccup]
+   [:summary {:class "cursor-pointer text-xs select-none hover:text-amber-300 marker:text-text-600 flex items-baseline min-w-0"}
+    label
+    [:span {:class "text-text-400 font-mono truncate"} head-text]]
    (into [:div {:class "pl-3 ml-0.5 border-l border-base-700 mt-1 flex flex-col gap-1 min-w-0"}]
-         child-rows)])
+         rows)])
 
-(defn- map-node [m depth]
-  (let [elided (:seon.render.value/elided-keys m)
-        m      (dissoc m :seon.render.value/elided-keys)
-        pairs  (seq m)
-        n      (count pairs)
-        rows   (cond-> (vec (for [[k v] pairs]
-                              [:div {:class "flex items-start gap-1.5 text-xs min-w-0"}
-                               [:span {:class "text-keyword shrink-0 font-mono"} (pr-str k)]
-                               (value-node v (inc depth))]))
-                 elided (conj [:div {:class "text-2xs text-text-600 font-mono"}
-                               (str "… +" elided " more key" (when (not= 1 elided) "s"))]))]
-    (value-details
-      [:span {:class "text-text-400 font-mono"}
-       (str "{} " n " key" (when (not= 1 n) "s")
-            (when elided (str " +" elided " hidden")))]
-      rows depth)))
+(defn- key-label  [k] [:span {:class "text-keyword shrink-0 font-mono mr-1.5"} (pr-str k)])
+(defn- idx-label  [i] [:span {:class "text-text-600 shrink-0 font-mono mr-1.5"} (str i)])
 
-(defn- seqish-node [m depth]
-  (let [{:seon.render.value/keys [kind shown elided shape]} m
-        [open close] (case kind :vector ["[" "]"] :set ["#{" "}"] ["(" ")"])
-        n     (count shown)
-        rows  (cond-> (vec (map-indexed
-                             (fn [i v]
-                               [:div {:class "flex items-start gap-1.5 text-xs min-w-0"}
-                                [:span {:class "text-text-600 shrink-0 font-mono"} (str i)]
-                                (value-node v (inc depth))])
-                             shown))
-                (and elided (not= 0 elided))
-                (conj [:div {:class "text-2xs text-text-600 font-mono"}
-                       (if (= :more elided) "… +more" (str "… +" elided " more"))]))]
-    (value-details
-      [:span {:class "text-text-400 font-mono"}
-       (str open close " " n " shown"
-            (cond (= :more elided) " +more"
-                  (and elided (not= 0 elided)) (str " +" elided)
-                  :else "")
-            (when shape (str " · each {" (str/join " " (map pr-str shape)) "}")))]
-      rows depth)))
-
-(defn- value-node
-  "Recursively render one `render-html-data` `:tree` node to hiccup. Containers
-   (map / seqish) become `<details>`; everything else is an inline token."
-  [x depth]
+(defn- value-row
+  "Render one labelled `:tree` node. `label` is the key/index span (nil at the
+   root). A container (map / seqish) becomes a `<details>` whose summary folds
+   the label in; a leaf renders the label beside its inline token on one
+   `flex-wrap` row, so a long value or the `▸ deeper` hint wraps cleanly under."
+  [label x depth]
   (cond
-    (and (map? x) (contains? x :seon.render.value/pruned)) (pruned-marker x)
-    (and (map? x) (contains? x :seon.render.value/kind))   (seqish-node x depth)
-    ;; a plain map (no marker keys, or only the elided-keys tail) — but NOT a
-    ;; leaf-marker map (datom/opaque/clipped), which `value-leaf` owns.
+    ;; seqish container (vector / set / seq)
+    (and (map? x) (contains? x :seon.render.value/kind))
+    (let [{:seon.render.value/keys [kind shown elided shape]} x
+          [open close] (case kind :vector ["[" "]"] :set ["#{" "}"] ["(" ")"])
+          n    (count shown)
+          head (str open close " " n " shown"
+                    (cond (= :more elided) " +more"
+                          (and elided (not= 0 elided)) (str " +" elided)
+                          :else "")
+                    (when shape (str " · each {" (str/join " " (map pr-str shape)) "}")))
+          rows (cond-> (vec (map-indexed
+                              (fn [i v] (value-row (idx-label i) v (inc depth)))
+                              shown))
+                 (and elided (not= 0 elided))
+                 (conj [:div {:class "text-2xs text-text-600 font-mono"}
+                        (if (= :more elided) "… +more" (str "… +" elided " more"))]))]
+      (container-details label head rows depth))
+
+    ;; plain-map container (no leaf-marker keys)
     (and (map? x)
          (not (contains? x :seon.eval/datom))
          (not (contains? x :seon.eval/opaque))
-         (not (contains? x :seon.render.value/string-len)))
-    (map-node x depth)
-    :else (value-leaf x)))
+         (not (contains? x :seon.render.value/string-len))
+         (not (contains? x :seon.render.value/pruned)))
+    (let [elided (:seon.render.value/elided-keys x)
+          m      (dissoc x :seon.render.value/elided-keys)
+          n      (count m)
+          head   (str "{} " n " key" (when (not= 1 n) "s")
+                      (when elided (str " +" elided " hidden")))
+          rows   (cond-> (vec (for [[k v] (seq m)]
+                                (value-row (key-label k) v (inc depth))))
+                   elided (conj [:div {:class "text-2xs text-text-600 font-mono"}
+                                 (str "… +" elided " more key" (when (not= 1 elided) "s"))]))]
+      (container-details label head rows depth))
+
+    ;; leaf — scalar / clipped-string / opaque / datom / pruned-marker
+    :else
+    [:div {:class "flex items-baseline gap-0 text-xs min-w-0 flex-wrap"}
+     label
+     (if (and (map? x) (contains? x :seon.render.value/pruned))
+       (pruned-marker x)
+       (value-leaf x))]))
+
+(defn- value-node
+  "Render a `render-html-data` `:tree` (the root node, unlabelled)."
+  [x depth]
+  (value-row nil x depth))
 
 (defn value-explorer-view
   "Drill the agent's latest eval VALUE — a collapsible browser over R's
