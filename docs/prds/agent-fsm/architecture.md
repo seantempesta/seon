@@ -292,3 +292,6 @@ doc; this one stays pure target.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db is
   a value, only values cross the wire, CAS-as-assertion, basis-t caching). Read before
   touching the loop.
+- [[library-grounding]] — the concrete `reference-code/…:LINE` read-map (datahike,
+  malli, SCI, reitit) per phase: every load-bearing claim grounded in real source +
+  the idioms to imitate. **Every build-agent reads its phase's rows before coding.**

@@ -76,6 +76,12 @@ Seven R-spine phases (context-model + seed + root) plus a parallel Lane-U track
 REPLACE-IN-PLACE or DELETE; `SILENT-FAILURE` marks a missed stored-attr read that
 returns an empty query instead of erroring.
 
+> **Before coding ANY phase, read its rows in [[library-grounding]]** — the
+> concrete `reference-code/…:LINE` map (datahike CAS/components/bridge, malli
+> explain/humanize/`:orn`, SCI bounded-eval, reitit routes) that grounds the
+> phase's claims in real source and demonstrates idiomatic Clojure. Guessing
+> library semantics produces confident, wrong code; the read flips the mindset.
+
 ### Phase 1 — Ratify the `:seon.agent.ctx/*` naming (cross-lane, atomic)
 
 Owner-ratified: the unit is **block**, ns `seon.ctx` → `seon.agent.ctx`, keywords

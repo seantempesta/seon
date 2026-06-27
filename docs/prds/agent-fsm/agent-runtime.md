@@ -112,15 +112,20 @@ a turn never runs in a private world.
 `eval-batch!`) **leads** with an in-tx assertion:
 
 ```clojure
-[:db.fn/cas [:seon.agent/id id] :seon.agent/run [run R] [run R]]
+;; OV == NV == the current run, as a lookup-ref ([:seon.agent/run] is a REF).
+[:db.fn/cas [:seon.agent/id id] :seon.agent/run [:seon.agent.run/id R] [:seon.agent.run/id R]]
 ```
 
 The *database*, not a pre-read predicate, tells the loop it has lost authority: if
 a watchdog, a human, or a newer run moved the `:seon.agent/run` pointer, the tx
-aborts and the work never lands. This replaces any check-then-act ownership
-pre-read and fences the eval batch atomically with its result write. (The mindset
-— db is a value, only values cross the wire, CAS-as-assertion, never memoize on a
-db value — is [[datahike-primer]].)
+aborts and the work never lands (`compare-and-swap` re-asserts when current==R,
+RAISES otherwise → the whole tx, eval batch included, aborts). This replaces any
+check-then-act ownership pre-read and fences the eval batch atomically with its
+result write. **Ground in** `transaction.cljc:873` (`compare-and-swap`) +
+`db/utils.cljc:109` (`entid` resolves the `:db/unique` lookup-ref entity) — read
+[[library-grounding]] before building the fence. (The mindset — db is a value,
+only values cross the wire, CAS-as-assertion, never memoize on a db value — is
+[[datahike-primer]].)
 
 ## The loop as data — the FSM table + the fold
 
@@ -198,8 +203,12 @@ toward a run (this is what makes seeded bootstrap forms silent; see below).
 **Fencing is two-layered, both via the single writer:**
 
 - **The OPEN race.** Opening a run ends with `[:db.fn/cas … :seon.agent/run nil
-  …]` — the pointer must be *absent* — so two concurrent wakes cannot both open a
-  run; the loser's tx aborts (single-writer serialized).
+  [:seon.agent.run/id R]]` — the pointer must be *absent* — so two concurrent wakes
+  cannot both open a run; the loser's tx aborts (single-writer serialized). Order
+  the tx `[{run-create-map} [:db.fn/cas …]]`: the CAS resolves its NV against the
+  RUNNING in-tx db (`transaction.cljc:1138-1140`), and `entid-strict` RAISES on a
+  run that doesn't exist yet, so the create map MUST precede the CAS. See
+  [[library-grounding]].
 - **The WORK race.** Every work tx leads with the in-tx CAS work-fence above, so a
   superseded run's writes (including its eval batch) abort at commit.
 

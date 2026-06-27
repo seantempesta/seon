@@ -77,7 +77,9 @@ retract:** on `[:db.fn/retractEntity parent]`, datahike's `retract-components`
 `retractEntity`, so retracting the agent retracts every owned block and schedule,
 and retracting a turn retracts its evals. The owned-children attrs:
 `:seon.agent/ctx`, `:seon.agent/schedules`, `:seon.agent.turn/evals`,
-`:seon.render/children`.
+`:seon.render/children`. **Ground in** `transaction.cljc:730` (`retract-components`)
++ our bridge `src/seon/db/internal.cljs:344-350` (the component/identity facet) —
+[[library-grounding]]. (Contrast `:my.todo/parent`, a PLAIN ref: no cascade.)
 
 Lookup-by-identity rides on a ref's `[:attr val]` form: `[:seon.agent/id "abc"]`
 is a valid `:seon.db/ref` value (the `[:tuple :keyword …]` arm) that datahike
@@ -169,6 +171,11 @@ its identity attr. You IDENTIFY kind two ways:
 ;; => #malli.core.Tag{:key :my.kb.shared, :value {…}}
 ```
 
+**Ground in** malli `core.cljc:164` (`Tag`) + `:1073-1078` (the `:orn` parser).
+The parser returns `(reduced (tag k %))` on the FIRST branch that validates — so
+order `:orn` branches **most-specific-first** (most required attrs first), or a
+loose branch matches prematurely. See [[library-grounding]].
+
 **Entity-kind discriminator (BANNED) vs value enum (FINE) — the distinction the
 whole audit turns on.** Two things wear the keyword `kind`/`type`:
 
@@ -201,6 +208,16 @@ derived label / library shape (FINE → keep the enum)?
 Facet column reads `valueType / cardinality / unique|component`. Mixed-`:or`
 attrs note the EDN-string storage. Every attribute below is named, typed, and
 registered via `schema/register!`; the bridge derives the datahike facet.
+
+**`register!` ≠ bridge-to-datahike.** `schema/register!` is in-memory (the malli
+registry) only; the datahike bridge runs lazily at transact time, on the attrs
+that actually appear in a tx (`ensure-datahike-attrs!`, `internal.cljs:1359/1370`).
+So an IN-MEMORY-ONLY value shape — the `:seon/error` family (§6), the derived
+`:seon.warn/check-response` (§7), `:seon.derive/status` — registers fine even
+though it is a `:map` the bridge cannot store: it is never transacted as an entity
+attr, so it never hits the bridge. Only attrs you `transact!` must be
+bridge-storable. **Ground in** `src/seon/db/internal.cljs:286-360,1211` —
+[[library-grounding]].
 
 ### 4.1 agent — `:seon.agent/*`
 
@@ -366,7 +383,11 @@ The `seon.route` entity map (`{:seon.db/entity true}`) requires
 `:seon.route/handler` is a native `:db.type/symbol` (a route handler is always a
 layout symbol, never literal hiccup) — "a route handler IS a layout" holds at the
 value level; it simply stores as a pure symbol rather than the EDN-encoded
-mixed-`:or` of `:seon.render/html`.
+mixed-`:or` of `:seon.render/html`. **Ground in** reitit `trie.cljc:60`
+(`split-path` accepts both `{id}` and `:id`) + `reitit-ring/.../ring.cljc:14-16`
+(`http-methods` + `Endpoint`): one `{pattern, method, handler, middleware}` row
+maps to `["/agent/{id}" {:get {:handler <sym> :middleware […]}}]`. `db->routes`
+(UI lane) groups rows by `pattern`, nests by `method`. See [[library-grounding]].
 
 ### 4.9 program graph — `:seon.fn` / `:seon.ns` / `:seon.schema` / `:seon.test`
 
@@ -526,10 +547,13 @@ specialization references these same field shapes. That is the whole point of on
 base + variant attrs over N unrelated error maps.
 
 **Grounded in malli's own error model — humanize is a VIEW, data is the source.**
-`malli.core/explain` returns `{:schema :value :errors}`, each error
+`malli.core/explain` returns `{:schema :value :errors}` (and **`nil` on a valid
+value** — construct the error only on a non-nil explanation), each error
 `{:path :in :schema :value :type}`; `malli.error/humanize` is a pure transform
 over that map (the error `:type` keyword is a registry key into messages, not a
-branch — malli too has no `:kind`). So `:seon.error/data` keeps the explain map
+branch — malli too has no `:kind`). **Ground in** malli `core.cljc:2660`
+(`explain`), `error.cljc:374` (`humanize`), `impl/util.cljc:19` (`-error`) —
+[[library-grounding]]. So `:seon.error/data` keeps the explain map
 (the precise `:in` path + offending `:value` + violated `:schema` an AI agent
 reasons over), and `:seon.error/message` is the humanized headline. The value
 carries BOTH at once — humanize never replaces the data. A schema /

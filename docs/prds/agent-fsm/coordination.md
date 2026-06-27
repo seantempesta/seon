@@ -90,7 +90,13 @@ other lane's **_Needs_** and the owner makes it.
 
 ## Core — _Now / Needs / Interface changes_
 
-- **Now:** (not started)
+- **Now:** Pre-build library-grounding pass DONE — read datahike (CAS/components/
+  bridge), malli (explain/humanize/`:orn`), SCI (bounded eval), reitit (routes)
+  firsthand; validated every load-bearing claim ✓; wrote [[library-grounding]]
+  (per-phase `reference-code/…:LINE` read-map + idioms) and annotated the canonical
+  docs with grounding pointers. Plan is sound; refinements applied (fence value =
+  `[:seon.agent.run/id R]` lookup-ref, open-race tx ordering, `register!`≠bridge,
+  `:orn` most-specific-first, `explain` nil-on-valid). Next: Phase 1 rename.
 - **Needs (from UI):** —
 - **Interface changes (UI must absorb):** —
 
