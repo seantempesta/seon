@@ -457,12 +457,36 @@
         src    (some-> latest first str str/trim)]
     (when (and src (seq src)) (clip (str/replace src #"\s+" " ") 52))))
 
+(defn- stop-control
+  "The graceful STOP / RESUME button for the agent's open run, derived from
+   `state` — the proper way for the human to halt a running agent. `:running`
+   ⇒ `■ stop` (POST /stop PAUSES the open run → derived `:paused`, the drive
+   loop exits, resumable); `:paused` ⇒ `▶ resume` (POST /resume clears the
+   pause AND re-drives the loop); any other state ⇒ nothing (no run to act on).
+   The `data-action` URL is POSTed by packetstar's document-delegated click
+   handler; since the activity region re-renders per tx, the button
+   appears/vanishes with the state automatically — no client wiring needed."
+  [id state]
+  (let [btn (fn [action label colour]
+              [:button {:type        "button"
+                        :data-action (str action "?agent=" id)
+                        :class       (str "shrink-0 ml-1 text-2xs leading-none "
+                                          "border border-base-700 rounded px-2 py-1 "
+                                          "bg-transparent cursor-pointer hover:text-amber-300 "
+                                          colour)}
+               label])]
+    (case state
+      :running (btn "/stop"   "■ stop"   "text-warning")
+      :paused  (btn "/resume" "▶ resume" "text-success")
+      nil)))
+
 (defn- activity-view
   "Always-visible 'what the agent is doing NOW', derived live: a state dot +
-   the current turn + (when active) the latest thing it ran. This is the
-   AGENT-activity signal — distinct from the scrubber's live/pinned, which is
-   about time-travel, not what the agent is doing. Rendered into the header's
-   `#tile-<id>:activity` region and patched on every tx via `console-payload`."
+   the current turn + (when active) the latest thing it ran + the graceful
+   stop/resume control. This is the AGENT-activity signal — distinct from the
+   scrubber's live/pinned, which is about time-travel, not what the agent is
+   doing. Rendered into the header's `#tile-<id>:activity` region and patched on
+   every tx via `console-payload`, so the stop button tracks the live state."
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (let [state   (derive/derive-state db id)
         turns   (derive/agent-turn-count db id)
@@ -472,7 +496,8 @@
      (comp/status-dot state)
      [:span {:class "text-text-500 shrink-0"} (str "turn " turns)]
      (when detail
-       [:span {:class "text-eval truncate min-w-0 font-mono"} (str "· " detail)])]))
+       [:span {:class "text-eval truncate min-w-0 font-mono"} (str "· " detail)])
+     (stop-control id state)]))
 
 (defn- activity-region-id [agent-id] (str agent-id ":activity"))
 

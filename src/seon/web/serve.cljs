@@ -46,6 +46,7 @@
     [clojure.string :as str]
     [goog.object :as gobj]
     [seon.agent :as agent]
+    [seon.agent.lifecycle :as lifecycle]
     [seon.agent.run :as run]
     [seon.db :as db]
     [seon.log :as log]
@@ -483,6 +484,79 @@
                     (catch :default _ nil)))))))
 
 ;; ============================================================
+;; POST /stop — the graceful STOP: PAUSE the agent's open run (resumable).
+;; `run/pause!` stamps the open run `paused-at` (⇒ derived state `:paused`) and
+;; banks the remaining wall-clock budget; the drive loop reads the lost lease
+;; (the fencing CAS) and exits. No open run ⇒ already idle (204 no-op). The
+;; agent is HELD, not killed — POST /resume re-drives it.
+;; ============================================================
+
+(defn- handle-stop! [req res]
+  ;; Agent-id resolution mirrors /chat: query param wins, else the ALS scope,
+  ;; else 400 — no silent fallback.
+  (let [agent-id (or (query-param req "agent") (db/current-agent-id))]
+    (when-not agent-id
+      (write-status! res 400 "text/plain; charset=utf-8"
+                     "missing 'agent' query param (no agent-id in scope)")
+      (throw (js/Error. "handle-stop!: no agent-id resolved")))
+    (if-let [r (run/current-run {:seon.agent/id agent-id})]
+      (-> (run/pause! {:seon.agent/id     agent-id
+                       :seon.agent.run/id (:seon.agent.run/id r)})
+          (.then (fn [{ok? :seon.db/ok? error :seon.db/error}]
+                   (if ok?
+                     (do
+                       (log/info-console! "seon.web.serve" "POST /stop — paused open run"
+                                          {:agent agent-id :run (:seon.agent.run/id r)})
+                       (write-status! res 204 "text/plain; charset=utf-8" ""))
+                     (do
+                       (log/error-console! "seon.web.serve" "/stop pause! refused"
+                                           (:seon.error/message error))
+                       (write-status! res 422 "text/plain; charset=utf-8"
+                                      (str "stop refused: " (:seon.error/message error)))))))
+          (.catch (fn [err]
+                    (log/error-console! "seon.web.serve" "/stop pause! threw" err)
+                    (write-status! res 500 "text/plain; charset=utf-8"
+                                   (str "stop failed: " err)))))
+      (do
+        (log/info-console! "seon.web.serve" "POST /stop — no open run (already idle)"
+                           {:agent agent-id})
+        (write-status! res 204 "text/plain; charset=utf-8" "")))))
+
+;; ============================================================
+;; POST /resume — wake a PAUSED run. `lifecycle/resume` clears `paused-at`,
+;; re-extends the deadline by the banked budget, AND re-enters the drive loop
+;; (the loop EXITED on :pause, so resume must re-drive). It reads
+;; `(db/current-agent-id)`, so we run it inside the agent's ALS scope via
+;; `db/with-agent` (which preserves the id across the resume's awaits). It
+;; returns the derived state keyword (`:running`) on success or a loud error
+;; envelope (e.g. not paused / no open run).
+;; ============================================================
+
+(defn- handle-resume! [req res]
+  (let [agent-id (or (query-param req "agent") (db/current-agent-id))]
+    (when-not agent-id
+      (write-status! res 400 "text/plain; charset=utf-8"
+                     "missing 'agent' query param (no agent-id in scope)")
+      (throw (js/Error. "handle-resume!: no agent-id resolved")))
+    (-> (js/Promise.resolve (db/with-agent agent-id (fn [] (lifecycle/resume))))
+        (.then (fn [result]
+                 ;; success = a derived state keyword (:running); failure = the
+                 ;; `{:seon.db/ok? false …}` envelope (a map).
+                 (if (keyword? result)
+                   (do
+                     (log/info-console! "seon.web.serve" "POST /resume — re-driving"
+                                        {:agent agent-id :state result})
+                     (write-status! res 204 "text/plain; charset=utf-8" ""))
+                   (let [error (get-in result [:seon.db/error :seon.error/message])]
+                     (log/error-console! "seon.web.serve" "/resume refused" error)
+                     (write-status! res 422 "text/plain; charset=utf-8"
+                                    (str "resume refused: " error))))))
+        (.catch (fn [err]
+                  (log/error-console! "seon.web.serve" "/resume threw" err)
+                  (write-status! res 500 "text/plain; charset=utf-8"
+                                 (str "resume failed: " err)))))))
+
+;; ============================================================
 ;; CSRF / same-origin guard for state-changing POSTs. Loopback BINDING is not
 ;; protection — a page on any site the human visits can `no-cors` POST to
 ;; 127.0.0.1. A browser attaches an `Origin` header on such cross-site
@@ -541,6 +615,8 @@
                                   "cross-origin POST refused"))
                  (cond
                    (= path "/chat")                   (handle-chat! req res)
+                   (= path "/stop")                   (handle-stop! req res)
+                   (= path "/resume")                 (handle-resume! req res)
                    (= path "/call")                   (call/handle! req res)
                    (= path "/agents/new")             (handle-create-agent! req res)
                    (complete-path->agent-id path)     (handle-complete-agent!
