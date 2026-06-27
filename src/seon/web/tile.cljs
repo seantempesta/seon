@@ -30,6 +30,7 @@
     [clojure.string :as str]
     [seon.agent.inspect :as inspect]
     [seon.ai.tokens :as tokens]
+    [seon.ctx :as ctx]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.log :as log]
@@ -665,25 +666,56 @@
         (into (if (str/blank? system) [] [{::sname :system ::stext system}])
               secs)))))
 
+(defn- compute-debug-snapshot
+  "The actual (uncached) render. When the captured prompt blob is present, the
+   left pane + bar come from it, so we need ONLY the right-pane section-html —
+   fetched from `ctx/ctx-sections`, which SKIPS the redundant full-text
+   `render-context` that `inspect/ctx-preview` also runs (ctx-preview rebuilds
+   `context-root` + re-renders every section's ai text a SECOND time just to
+   join a text the captured blob already gives us). No blob → fall back to the
+   full ctx-preview for the live text too."
+  [agent-id db]
+  (let [file     (latest-turn-prompt-file db agent-id)
+        captured (when file (read-text-file file))]
+    (if (and captured (not (str/blank? captured)))
+      {::exact        captured
+       ::source       :captured
+       ::token-est    (tokens/estimate captured)
+       ::sections     (split-exact-sections captured)
+       ::section-html (or (:seon.render/section-html
+                            (ctx/ctx-sections {:seon.agent/id agent-id :seon.db/db db}))
+                          [])}
+      (let [preview (inspect/ctx-preview {:seon.agent/id agent-id})
+            text    (or (:seon.render/text preview) "")]
+        {::exact        text
+         ::source       :live
+         ::token-est    (tokens/estimate text)
+         ::sections     (split-exact-sections text)
+         ::section-html (or (:seon.render/section-html preview) [])}))))
+
+;; Per-agent debug-render cache keyed by the db's `:max-tx` (basis-t). The
+;; context is a PURE fn of the db value, so re-rendering at the same tx-id is
+;; FREE — exactly what makes the overlay cheap to keep open / re-open while the
+;; agent is idle. Only the transcript's live `now` would differ on a cache hit,
+;; acceptable for a debug view. Self-invalidating: a new tx → new `:max-tx` →
+;; recompute; one entry per agent, cleared on code reload.
+(defonce ^:private !debug-cache (atom {}))
+
 (defn- debug-snapshot
-  "One pure-read debug render snapshot for `agent-id` against HEAD.
-   `::exact` is the faithful left-pane text (captured blob → live re-render),
-   `::source` :captured|:live; `::sections` partitions that exact text for
-   the bar; `::section-html` is the live html twin for the right pane (never
-   captured); `::token-est` is chars/4 over the WHOLE exact text."
+  "Pure-read debug render snapshot for `agent-id` against HEAD — memoized by the
+   db `:max-tx` so re-renders at an unchanged tx-id are free (see [[!debug-cache]]).
+   `::exact` = faithful left-pane text (captured blob → live re-render); `::source`
+   :captured|:live; `::sections` partitions it for the bar; `::section-html` = the
+   html twin (right pane); `::token-est` = chars/4 over the whole exact text."
   [agent-id]
-  (let [db       @db/*conn*
-        preview  (inspect/ctx-preview {:seon.agent/id agent-id})
-        file     (latest-turn-prompt-file db agent-id)
-        captured (when file (read-text-file file))
-        [exact source] (if (and captured (not (str/blank? captured)))
-                         [captured :captured]
-                         [(or (:seon.render/text preview) "") :live])]
-    {::exact        exact
-     ::source       source
-     ::token-est    (tokens/estimate exact)
-     ::sections     (split-exact-sections exact)
-     ::section-html (or (:seon.render/section-html preview) [])}))
+  (let [db     @db/*conn*
+        tx     (:max-tx db)
+        cached (get @!debug-cache agent-id)]
+    (if (and tx (= tx (:max-tx cached)))
+      (:snapshot cached)
+      (let [snap (compute-debug-snapshot agent-id db)]
+        (swap! !debug-cache assoc agent-id {:max-tx tx :snapshot snap})
+        snap))))
 
 (defn- debug-rendered-inner
   "The right-pane inner content — one card per context section html twin, in
@@ -800,10 +832,14 @@
 (defonce ^:private !pending (atom {}))
 
 (defn- schedule!
-  "Coalesce a push for `[kind id]` (`:tile` or `:console`) into a 100ms trailing
-   timer."
+  "Coalesce a push for `[kind id]` into a trailing timer. Tiles/console use a
+   snappy 100ms; the DEBUG overlay uses 500ms — it re-renders the whole context
+   (expensive even with the max-tx cache when a burst of txs each advance the
+   basis-t), and a developer view doesn't need per-tx immediacy. Coalescing a
+   burst into one render keeps it off the agent's single work thread."
   [kind id]
-  (let [k [kind id]]
+  (let [k     [kind id]
+        delay (if (= kind :debug) 500 100)]
     (when-not (get @!pending k)
       (swap! !pending assoc k true)
       (js/setTimeout
@@ -813,7 +849,7 @@
             :tile    (push-tile! id)
             :console (push-console! id)
             :debug   (push-debug! id)))
-        100))))
+        delay))))
 
 (defn- on-tx
   "Any commit re-renders every per-tile + console stream that has a LIVE conn
@@ -841,6 +877,9 @@
   (when-not @!installed? (install!)))
 
 (defn ^:dev/before-load before-reload []
+  ;; Drop the debug render cache on a code reload — the render fns may have
+  ;; changed while the db `:max-tx` did not, so a cached snapshot would be stale.
+  (reset! !debug-cache {})
   (try (uninstall!) (catch :default _ nil)))
 
 (defn ^:dev/after-load after-reload []
