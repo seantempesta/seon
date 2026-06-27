@@ -124,7 +124,9 @@
       [:div {:class "grid grid-cols-3 gap-2 text-2xs"}
        (metric "turns" turns)
        (metric "todos" todos)
-       (metric "msgs" msgs)]]}))
+       (metric "msgs" msgs)]]
+     :seon.render/ai (str "● " (name state) " · " (or purpose "—")
+                          " · turn " turns " · " todos " open todos · " msgs " msgs")}))
 
 (defn commentary-view
   "The shared REPL transcript (demoted chat) — recent messages to/from the agent."
@@ -157,7 +159,16 @@
       [:div {:class "text-2xs uppercase tracking-wider text-text-400 mb-2 shrink-0"} "commentary"]
       (if (seq recent)
         (into [:div {:class "flex flex-col gap-1 flex-1 overflow-auto min-h-0"}] (map line recent))
-        [:div {:class "text-xs text-text-500"} "no messages yet"])]}))
+        [:div {:class "text-xs text-text-500"} "no messages yet"])]
+     :seon.render/ai
+     (if (seq recent)
+       (str "Recent messages:\n"
+            (str/join "\n"
+                      (map (fn [[_ origin content]]
+                             (str (case origin :human "›you" :agent "‹agent" "·core")
+                                  " " (clip content 120)))
+                           (take-last 6 recent))))
+       "No messages yet.")}))
 
 (defn todos-view
   "The agent's todos — open first. A todo carrying a `:seon.agent.todo/message`
@@ -204,7 +215,16 @@
       (if (seq rows)
         (into [:div {:class "flex flex-col gap-1"}]
               (map row (sort-by #(if (= :open (first %)) 0 1) rows)))
-        [:div {:class "text-xs text-text-500"} "no todos"])]}))
+        [:div {:class "text-xs text-text-500"} "no todos"])]
+     :seon.render/ai
+     (let [opens (filter #(= :open (first %)) rows)]
+       (if (seq opens)
+         (str "Todos — " open " open:\n"
+              (str/join "\n"
+                        (map (fn [[_ title msg]]
+                               (str "- " (when msg "✉ Respond: ") (clip title 80)))
+                             (take 6 opens))))
+         "No open todos."))}))
 
 (defn progress-view
   "The agent's todo completion as a horizontal bar — `:done` todos over total
@@ -239,7 +259,8 @@
         ;; arbitrary-percent utility in the build (owner-blessed inline style).
         [:div {:class "h-2 w-full rounded-full bg-base-900 overflow-hidden"}
          [:div {:class "h-full rounded-full bg-success" :style (str "width:" pct "%")}]]
-        [:div {:class "text-xs text-text-500"} "no todos yet"])]}))
+        [:div {:class "text-xs text-text-500"} "no todos yet"])]
+     :seon.render/ai (str "Progress: " done "/" total " todos done")}))
 
 (defn toolkit-view
   "The agent's OWN toolkit — the fns it has authored in its namespace, so the
@@ -276,7 +297,15 @@
         (str (count tools) (if (= 1 (count tools)) " tool" " tools"))]]
       (if (seq tools)
         (into [:div {:class "flex flex-col gap-1"}] (map row tools))
-        [:div {:class "text-xs text-text-500"} "no tools yet — the agent builds its own"])]}))
+        [:div {:class "text-xs text-text-500"} "no tools yet — the agent builds its own"])]
+     :seon.render/ai
+     (if (seq tools)
+       (str "Your toolkit — " (count tools) (if (= 1 (count tools)) " fn:\n" " fns:\n")
+            (str/join "\n"
+                      (map (fn [[sym doc]]
+                             (str "- " (short sym) (when (seq doc) (str " — " (clip doc 64)))))
+                           tools)))
+       "No tools yet — you build your own.")}))
 
 ;; ============================================================
 ;; VALUE EXPLORER — a collapsible HTML browser over R's `render-html-data`
@@ -484,7 +513,10 @@
 
         :else
         [:div {:class "text-xs text-text-500"}
-         "no eval value yet — the agent's last result will appear here to drill"])]}))
+         "no eval value yet — the agent's last result will appear here to drill"])]
+     :seon.render/ai (if data
+                       (render-value/render-ai eval-id value)
+                       "No eval value yet.")}))
 
 (defn- decode-section-text
   "Render an agent-authored `:seon.render/ai` robustly. `add-section!` stores the
@@ -533,7 +565,12 @@
       (if (seq ordered)
         (into [:div {:class "flex flex-col gap-3"}] (map card ordered))
         [:div {:class "text-xs text-text-500"}
-         "nothing pinned yet — the agent uses add-section! to keep things here"])]}))
+         "nothing pinned yet — the agent uses add-section! to keep things here"])]
+     :seon.render/ai
+     (if (seq ordered)
+       (str "Pinned context — " (count secs) " sections:\n"
+            (str/join "\n" (map (fn [[nm _ _]] (str "- " (name nm))) ordered)))
+       "Nothing pinned.")}))
 
 (defn narration-view
   "The agent's prominent NARRATION surface — the `:now` (or `:narration`) context
@@ -573,7 +610,8 @@
          (md/md->hiccup (decode-section-text ai)
                         {:wrap-class "markdown text-sm text-text-100"})]
         [:div {:class "text-xs text-text-500"}
-         "the agent narrates here — it add-section!s a :now section and refreshes it as it works"])]}))
+         "the agent narrates here — it add-section!s a :now section and refreshes it as it works"])]
+     :seon.render/ai (if live? (decode-section-text ai) "No narration yet.")}))
 
 (defn hero-view
   "The hero — the agent's OWN live tile (welcome default or wired content),
@@ -588,13 +626,14 @@
   ;; `tile-hero` (input.css) forces the live tile's EXPANDED face at any width —
   ;; the hero is the PRIMARY surface, so it never falls back to the clamped,
   ;; text-clipping compact grid-cell face on a narrow phone.
-  {:seon.render/hiccup
-   [:div {:class (str "tile-hero rounded border border-base-700 bg-base-850 p-4 sm:p-6 h-full "
-                      "flex items-center overflow-y-auto overflow-x-hidden")}
-    [:div {:class "w-full min-w-0 max-w-full break-words"}
-     (or (:seon.render/hiccup
-           (render/render-agent-tile {:seon.db/db db :seon.agent/id id}))
-         [:div {:class "text-text-500 text-xs"} "no tile"])]]})
+  (let [resp (render/render-agent-tile {:seon.db/db db :seon.agent/id id})]
+    {:seon.render/hiccup
+     [:div {:class (str "tile-hero rounded border border-base-700 bg-base-850 p-4 sm:p-6 h-full "
+                        "flex items-center overflow-y-auto overflow-x-hidden")}
+      [:div {:class "w-full min-w-0 max-w-full break-words"}
+       (or (:seon.render/hiccup resp)
+           [:div {:class "text-text-500 text-xs"} "no tile"])]]
+     :seon.render/ai (:seon.render/ai resp)}))
 
 ;; The core views resolvable by SYMBOL. Core symbols map here (direct, fast);
 ;; AGENT-authored symbols resolve via SCI (`render-sci`). This is the resolution
