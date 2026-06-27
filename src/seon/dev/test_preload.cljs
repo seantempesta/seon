@@ -61,6 +61,12 @@
     ;; Required here so the deftest-vars roster carries my.kb-test and
     ;; its full source renders as the exemplar test sibling.
     [my.kb-test]
+    ;; UI lane (agent-fsm): the /world datastar streamer framing + the
+    ;; view=f(db) roster (appear/vanish, determinism, never-crash) and the
+    ;; /call capability gate. Required here so seon.test.runner can drive
+    ;; them against the live pod (the munged ns object must be in the build).
+    [seon.web.datastar-test]
+    [seon.web.reactive.call-test]
     ;; Boot-time test indexing (unit #23 fix b): this preload's require
     ;; closure IS the pod's test roster, so the deftest-vars macro below
     ;; can see every deftest var — seon.client (compiled before the test
