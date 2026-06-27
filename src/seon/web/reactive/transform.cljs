@@ -22,13 +22,16 @@
    ## The rewrite (both shapes → one standard Datastar attribute)
 
      {:on-click (list 'cancel-order! \"o-1\")}
-       => {:data-on:click \"@post('/call?fn=my.agent.X%2Fcancel-order%21&args=…')\"}
+       => {:data-on:click \"@post('/agent/X/call?fn=my.agent.X%2Fcancel-order%21&args=…')\"}
      {:on-click 'submit-order!}
-       => {:data-on:click \"@post('/call?fn=my.agent.X%2Fsubmit-order%21')\"}
+       => {:data-on:click \"@post('/agent/X/call?fn=my.agent.X%2Fsubmit-order%21')\"}
 
-   The fn symbol's NAMESPACE is the route: `/call` resolves the owning agent
-   from it (`seon.web.reactive.call`). A bare handler symbol is qualified to
-   `ns-sym` (the authoring namespace the rewrite is bound to) — Clojure
+   The door is the owning agent's hierarchical `/agent/<id>/call` (`<id>` =
+   the fn's namespace minus `my.agent.`); the capability gate
+   (`seon.web.reactive.call`) still resolves + authorizes the owning agent
+   from the fn's NAMESPACE, so the `<id>` segment is just the routing level.
+   A bare handler symbol is qualified to `ns-sym` (the authoring namespace the
+   rewrite is bound to) — Clojure
    semantics: a bare name means the current ns. An already-qualified symbol
    passes through unchanged.
 
@@ -111,12 +114,29 @@
 (defn- url-enc [s]
   (str/replace (js/encodeURIComponent (str s)) "'" "%27"))
 
+(defn- agent-id-of
+  "The agent id that owns `fn-sym` — its namespace minus the `my.agent.`
+   prefix — or nil when the namespace isn't an agent home ns. Drives the
+   hierarchical `/agent/<id>/call` door."
+  [fn-sym]
+  (let [ns-str (namespace fn-sym)
+        prefix "my.agent."]
+    (when (and ns-str (str/starts-with? ns-str prefix))
+      (not-empty (subs ns-str (count prefix))))))
+
 (defn- call-action
-  "The standard Datastar `@post('/call?…')` expression for a resolved fn
-   symbol + optional render-time args. fn-CALL passes `args` (transit in the
-   query); fn-REF passes none (the body's signals become the fn's arg)."
+  "The standard Datastar `@post('/agent/<id>/call?…')` expression for a
+   resolved fn symbol + optional render-time args. `<id>` is the owning
+   agent (the fn's namespace minus `my.agent.`) — the hierarchical action
+   door; the fn's own namespace still authorizes (the `{id}` segment is the
+   routing level, not an auth input). A non-agent namespace (no id) falls back
+   to the flat `/call` door, which the capability gate refuses. fn-CALL passes
+   `args` (transit in the query); fn-REF passes none (the body's signals
+   become the fn's arg)."
   [fn-sym args]
-  (let [base (str "@post('/call?fn=" (url-enc (str fn-sym)))]
+  (let [id   (agent-id-of fn-sym)
+        door (if id (str "/agent/" (url-enc id) "/call") "/call")
+        base (str "@post('" door "?fn=" (url-enc (str fn-sym)))]
     (str (if (seq args)
            (str base "&args=" (url-enc (encode-args args)))
            base)

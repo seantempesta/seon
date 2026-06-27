@@ -333,7 +333,18 @@
                          ;; (keywords, sets, instants, ratios) crossing the
                          ;; CLJS guest <-> JVM wire-server boundary. Mirrored by
                          ;; com.cognitect/transit-clj on the server (seon.server.transit).
-                         com.cognitect/transit-cljs           {:mvn/version "0.8.280"}}
+                         com.cognitect/transit-cljs           {:mvn/version "0.8.280"}
+                         ;; reitit — the pod's HTTP front door (seon.web.router).
+                         ;; The published CLJS artifact is clean: reitit's trie
+                         ;; compiler forks `#?(:cljs clojure-trie :clj java-trie)`,
+                         ;; so the Node pod always gets the pure-Clojure trie and
+                         ;; the :clj-only JavaSegmentRouter is never loaded. NOT
+                         ;; vendored on source-paths (that would drag the Java
+                         ;; trie onto the classpath). reitit-core + meta-merge come
+                         ;; transitively; reitit-malli rides our malli-everything
+                         ;; for future :parameters coercion.
+                         metosin/reitit-ring                  {:mvn/version "0.10.1"}
+                         metosin/reitit-malli                 {:mvn/version "0.10.1"}}
          ;; Spec-02 §5.2 — point datahike at the patched fork (selective
          ;; Promise wrap driven by :referentially-transparent?) and
          ;; partial-cps at the cps-probe-safety patch (transitive via

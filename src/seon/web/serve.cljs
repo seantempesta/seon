@@ -51,10 +51,7 @@
     [seon.db :as db]
     [seon.log :as log]
     [seon.platform :as platform]
-    [seon.web.datastar :as datastar]
-    [seon.web.inspector :as inspector]
-    [seon.web.reactive.call :as call]
-    [seon.web.tile :as tile]))
+    [seon.web.router :as router]))
 
 ;; ============================================================
 ;; Process-lifetime state
@@ -417,14 +414,6 @@
                 (write-status! res 500 "text/plain; charset=utf-8"
                                (str "complete failed: " err))))))
 
-(defn- complete-path->agent-id
-  "`/agent/<id>/complete` → `<id>`; nil for any other path."
-  [path]
-  (when (and (str/starts-with? path "/agent/")
-             (str/ends-with? path "/complete"))
-    (not-empty (subs path (count "/agent/")
-                     (- (count path) (count "/complete"))))))
-
 (defn- handle-chat! [req res]
   ;; Agent-id resolution (audit P1 — 2026-05-24): query param wins,
   ;; else `(db/current-agent-id)`, else 400 — no silent "seon" fallback.
@@ -592,48 +581,28 @@
                   (contains? loopback-hosts (.-hostname (js/URL. origin)))))
             (catch :default _ false))))))
 
-(defn- handler [req res]
-  (let [url    (or (.-url req) "/")
-        ;; Strip query string for routing match
-        path   (first (str/split url #"\?"))
-        method (or (.-method req) "GET")]
-    (try
-      (case method
-        "GET"  (cond
-                 (= path "/")                       (serve-root! res)
-                 (str/starts-with? path "/css/")    (serve-static! res path)
-                 (str/starts-with? path "/js/")     (serve-static! res path)
-                 (= path "/sse")                    (open-sse! req res)
-                 (datastar/route? path)             (datastar/handle! req res path)
-                 (inspector/route? path)            (inspector/handle! req res path)
-                 (tile/route? path)                 (tile/handle! req res path)
-                 :else                              (write-status! res 404 "text/plain; charset=utf-8"
-                                                                   (str "Not found: " url)))
-        "POST" (if-not (same-origin? req)
-                 (do
-                   (log/info-console! "seon.web.serve" "POST cross-origin REFUSED"
-                                      {:path path})
-                   (write-status! res 403 "text/plain; charset=utf-8"
-                                  "cross-origin POST refused"))
-                 (cond
-                   (= path "/chat")                   (handle-chat! req res)
-                   (= path "/stop")                   (handle-stop! req res)
-                   (= path "/resume")                 (handle-resume! req res)
-                   (= path "/call")                   (call/handle! req res)
-                   (= path "/agents/new")             (handle-create-agent! req res)
-                   (complete-path->agent-id path)     (handle-complete-agent!
-                                                        req res
-                                                        (complete-path->agent-id path))
-                   (= path "/clear")                  (handle-clear! req res)
-                   (= path "/log")                    (handle-log! req res)
-                   :else                              (write-status! res 404 "text/plain; charset=utf-8"
-                                                                     (str "Not found: " url))))
-        (write-status! res 405 "text/plain; charset=utf-8" "Method not allowed"))
-      (catch :default e
-        (log/error-console! "seon.web.serve" "handler error" e)
-        (try
-          (write-status! res 500 "text/plain; charset=utf-8" (str "Internal error: " e))
-          (catch :default _ nil))))))
+;; ============================================================
+;; Reitit front door — `seon.web.router` owns the route vector + the
+;; Node↔Ring adapter; serve keeps the handler fns (they touch serve-state:
+;; the SSE registry, the create-agent closure) and the same-origin? gate (a
+;; test pins it). We INJECT both into router here. This call re-runs on
+;; hot-reload, so the cached router always holds the freshly-reloaded
+;; handler fns. createServer (below) dispatches every request through
+;; `router/handle-request`.
+;; ============================================================
+
+(router/install!
+  {:seon.web.router/root          serve-root!
+   :seon.web.router/sse           open-sse!
+   :seon.web.router/static        serve-static!
+   :seon.web.router/chat          handle-chat!
+   :seon.web.router/stop          handle-stop!
+   :seon.web.router/resume        handle-resume!
+   :seon.web.router/clear         handle-clear!
+   :seon.web.router/log           handle-log!
+   :seon.web.router/create-agent  handle-create-agent!
+   :seon.web.router/complete      handle-complete-agent!
+   :seon.web.router/same-origin?  same-origin?})
 
 ;; ============================================================
 ;; Lifecycle
@@ -703,13 +672,13 @@
             (try (.close old) (catch :default _ nil))
             (reset! !server nil)
             (reset! !sse-connections []))
-          (let [;; LATE-BINDING wrapper, not `handler` itself: createServer
-                ;; captures the fn OBJECT, so passing `handler` directly
-                ;; pins the server to boot-time routes forever — a
-                ;; hot-reloaded route 404s until pod restart (observed
-                ;; live 2026-06-10: /agents/new). The wrapper re-reads
-                ;; the var on every request.
-                server (.createServer http (fn [req res] (handler req res)))
+          (let [;; LATE-BINDING wrapper: createServer captures the fn OBJECT,
+                ;; so the wrapper re-reads `router/handle-request` on every
+                ;; request. `handle-request` derefs the cached reitit
+                ;; ring-handler, which `router/install!` rebuilds on every
+                ;; serve hot-reload — so a reloaded route never 404s until
+                ;; pod restart (the live 2026-06-10 /agents/new failure mode).
+                server (.createServer http (fn [req res] (router/handle-request req res)))
                 port   (requested-port)]
             (.once server "error"
                    (fn [err]
