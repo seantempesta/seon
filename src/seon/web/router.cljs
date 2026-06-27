@@ -164,6 +164,13 @@
      ["/sse"         {:get {:handler (fn [r] (sse (node-req r) (node-res r)) hijacked)}}]
      ["/world"       {:get {:handler (fn [r] (datastar/handle! (node-req r) (node-res r) (:uri r)) hijacked)}}]
      ["/world/feed"  {:get {:handler (fn [r] (datastar/handle! (node-req r) (node-res r) (:uri r)) hijacked)}}]
+     ;; Per-agent world (#6 retires the legacy inspector/tile console at the
+     ;; same bare `/agent/{id}`): the shim page + the gzip morph feed bound
+     ;; to THAT agent's `world-layout`. Both ride the proven datastar
+     ;; streamer; the GET routes take precedence over the legacy-default
+     ;; inspector delegation, deeper `/agent/{id}/…` GETs still fall through.
+     ["/agent/{id}"      {:get {:handler (fn [r] (datastar/serve-agent-page! (node-res r) (get-in r [:path-params :id])) hijacked)}}]
+     ["/agent/{id}/feed" {:get {:handler (fn [r] (datastar/open-agent-feed! (node-req r) (node-res r) (get-in r [:path-params :id])) hijacked)}}]
 
      ["/chat"        {:post {:middleware [same-origin-mw] :handler (post-handler chat)}}]
      ["/stop"        {:post {:middleware [same-origin-mw] :handler (post-handler stop)}}]

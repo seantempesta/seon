@@ -40,15 +40,20 @@
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.log :as log]
-    [seon.ui.html :as html]))
+    [seon.ui.html :as html]
+    [seon.ui.world :as world]))
 
 ;; ============================================================
-;; Connection registry — every open /world/feed gzip stream.
+;; Connection registry — every open gzip stream (a /world roster or a
+;; /agent/{id} world). Each entry carries its OWN `:view-fn` (a 0-arg
+;; thunk → hiccup, bound to its route's params) so a single commit
+;; re-renders DIFFERENT views per connection.
 ;; ============================================================
 
 (defonce ^{:doc "Vector of `{:id <uuid> :gz <Gzip> :res <ServerResponse>
-                  :opened-at <Date>}` — one entry per open /world/feed
-                  stream. The tx-listener fans each commit's morph to all."}
+                  :view-fn <0-arg thunk → hiccup> :opened-at <Date>}` — one
+                  entry per open feed. The tx-listener re-renders EACH
+                  connection's own view and morphs it."}
   !feeds (atom []))
 
 ;; ============================================================
@@ -108,37 +113,47 @@
        [:div {:id "world-error" :class "world-error"}
         (str "render error: " (.-message e))]])))
 
-(defn- current-patch
-  "Render the LIVE db once → the SSE morph string for `#world`."
-  []
-  (-> (world-view @db/*conn*)
+(defn- view-fn-patch
+  "Render a connection's bound 0-arg `view-fn` → its `#world` SSE morph
+   string. GUARDED: a throwing view degrades to a visible `#world-error`
+   morph so one bad view never aborts the whole broadcast."
+  [view-fn]
+  (-> (try
+        (view-fn)
+        (catch :default e
+          [:main {:id "world"}
+           [:div {:id "world-error" :class "text-error text-xs font-mono"}
+            (str "render error: " (.-message e))]]))
       html/->string
       patch-elements))
 
 ;; ============================================================
-;; Per-connection push + broadcast. Best-effort, never throws.
+;; Per-connection push + broadcast. Each connection renders its OWN
+;; bound view (the /world roster vs a /agent/{id} world). Best-effort,
+;; never throws.
 ;; ============================================================
 
 (defn- push-conn!
-  "Write `patch` to one connection's gzip stream and flush so the bytes hit
-   the wire immediately. Guards a closed stream; logs (never rethrows) on
-   failure."
-  [{:keys [gz res]} patch]
+  "Render `conn`'s OWN bound view and write it to its gzip stream, flushing
+   so the bytes hit the wire immediately. Guards a closed stream; logs
+   (never rethrows) on failure."
+  [{:keys [gz res view-fn]}]
   (try
     (when-not (or (.-writableEnded ^js gz) (.-writableEnded ^js res))
-      (.write ^js gz patch)
+      (.write ^js gz (view-fn-patch view-fn))
       (.flush ^js gz (.. zlib -constants -Z_SYNC_FLUSH)))
     (catch :default e
       (log/error-console! "seon.web.datastar" "push-conn! failed" e))))
 
 (defn- broadcast!
-  "Re-render `view = f(db)` ONCE and morph every open feed."
+  "Re-render EACH open feed's OWN bound view and morph it — per connection,
+   so the /world roster and a /agent/{id} world reflect the same commit
+   through different views."
   []
   (when (seq @!feeds)
-    (let [patch (current-patch)
-          conns @!feeds]
+    (let [conns @!feeds]
       (doseq [conn conns]
-        (push-conn! conn patch))
+        (push-conn! conn))
       (log/info-console! "seon.web.datastar" "broadcast"
                          {:conns (count conns)}))))
 
@@ -211,9 +226,10 @@
   (.end res world-page-html))
 
 (defn- open-feed!
-  "Open a long-lived gzip-compressed SSE stream, register it, send the
-   initial paint, and clean up on close."
-  [^js req ^js res]
+  "Open a long-lived gzip-compressed SSE stream bound to `view-fn` (a 0-arg
+   thunk → hiccup), register it, send the initial paint, and clean up on
+   close."
+  [^js req ^js res view-fn]
   (.writeHead res 200 #js {"Content-Type"      "text/event-stream; charset=utf-8"
                            "Content-Encoding"  "gzip"
                            "Cache-Control"     "no-store"
@@ -221,7 +237,7 @@
                            "X-Accel-Buffering" "no"})
   (let [gz   (.createGzip zlib)
         id   (random-uuid)
-        conn {:id id :gz gz :res res :opened-at (js/Date.)}]
+        conn {:id id :gz gz :res res :view-fn view-fn :opened-at (js/Date.)}]
     (.on gz "error"  (fn [e] (log/error-console! "seon.web.datastar" "gz error" e)))
     (.on res "error" (fn [e] (log/error-console! "seon.web.datastar" "res error" e)))
     (.pipe gz res)
@@ -229,13 +245,65 @@
     (log/info-console! "seon.web.datastar" "FEED OPEN"
                        {:conn-id (str id) :total (count @!feeds)})
     ;; First paint immediately so the page populates without waiting for a tx.
-    (push-conn! conn (current-patch))
+    (push-conn! conn)
     (.on req "close"
          (fn []
            (swap! !feeds (fn [cs] (vec (remove #(= (:id %) id) cs))))
            (try (.end gz) (catch :default _ nil))
            (log/info-console! "seon.web.datastar" "FEED CLOSE"
                               {:conn-id (str id) :remaining (count @!feeds)})))))
+
+;; ============================================================
+;; Per-agent world (/agent/{id}) — the shim page + the feed bound to
+;; that agent's `world-layout`. The router calls these public entries
+;; with the `{id}` path-param.
+;; ============================================================
+
+(def ^:private safe-id-re
+  ;; Agent ids are alphanumeric + `._:-` (`:seon.db/id` 14-char ids, plus
+  ;; \"root\"). Validating the id before it lands in the shim page's HTML /
+  ;; URL closes any injection via the path segment; anything else 404s.
+  #"[A-Za-z0-9._:-]+")
+
+(defn- safe-id? [id] (boolean (and id (re-matches safe-id-re id))))
+
+(defn- agent-page-html
+  "The per-agent shim: load datastar.js, open the agent's long-lived feed
+   via `data-init`, and present an empty `<main id=\"world\">` for the
+   feed's first morph to fill. `id` is pre-validated by `safe-id?`."
+  [id]
+  (str "<!doctype html>\n"
+       "<html lang=\"en\"><head><meta charset=\"utf-8\">\n"
+       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+       "<title>" id " — Seon</title>\n"
+       "<link rel=\"stylesheet\" href=\"/css/output.css\">\n"
+       "<script type=\"module\" src=\"/js/datastar.js\"></script>\n"
+       "</head>\n"
+       "<body class=\"bg-base-950 text-text-200 font-mono p-3\">\n"
+       "<main id=\"world\" data-init=\"@get('/agent/" id "/feed')\">loading…</main>\n"
+       "</body></html>"))
+
+(defn serve-agent-page!
+  "Serve the per-agent world shim page for agent `id`. Public — the router
+   calls it with the `{id}` path-param. Invalid ids 404."
+  [^js res id]
+  (if (safe-id? id)
+    (do (.writeHead res 200 #js {"Content-Type"  "text/html; charset=utf-8"
+                                 "Cache-Control" "no-store, no-cache, must-revalidate"})
+        (.end res (agent-page-html id)))
+    (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"})
+        (.end res "invalid agent id"))))
+
+(defn open-agent-feed!
+  "Open the per-agent world gzip feed bound to `#(world/world-layout @db id)`.
+   Public — the router calls it with the `{id}` path-param. Lazily installs
+   the tx-listener (idempotent). Invalid ids 404."
+  [^js req ^js res id]
+  (ensure-installed!)
+  (if (safe-id? id)
+    (open-feed! req res #(world/world-layout @db/*conn* id))
+    (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"})
+        (.end res "invalid agent id"))))
 
 (defn route?
   "True iff `path` is a /world route. `seon.web.serve` delegates here."
@@ -248,6 +316,6 @@
   [^js req ^js res path]
   (ensure-installed!)
   (cond
-    (= path "/world/feed") (do (open-feed! req res) true)
+    (= path "/world/feed") (do (open-feed! req res #(world-view @db/*conn*)) true)
     (= path "/world")      (do (serve-world-page! res) true)
     :else                  false))

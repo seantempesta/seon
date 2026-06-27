@@ -198,3 +198,32 @@
         "broadcast! over an empty feed registry is a silent no-op (no throw)")
     (is (empty? @datastar/!feeds)
         "no connection was added or mutated")))
+
+;; ============================================================
+;; 5. PER-CONNECTION views — the streamer renders EACH connection's OWN
+;; bound view-fn (the /world roster vs a /agent/{id} world both ride the
+;; same broadcast). `view-fn-patch` is the per-conn render core: a bound
+;; thunk → its own morph patch, GUARDED so one bad view can't abort the
+;; broadcast. (The full gzip-stream path needs a node socket, so the
+;; mechanism is proven here at the thunk level.)
+;; ============================================================
+
+(deftest view-fn-patch-renders-the-bound-view-and-is-guarded
+  (testing "a connection's bound view-fn is rendered into its OWN morph patch"
+    (let [patch (@#'datastar/view-fn-patch
+                 (fn [] [:main {:id "world"} [:div {:id "x"} "BOUND-VIEW"]]))]
+      (is (str/starts-with? patch "event: datastar-patch-elements\n")
+          "the bound view is framed as a datastar-patch-elements morph")
+      (is (str/includes? patch "BOUND-VIEW")
+          "the connection's OWN view content rides in its patch")))
+  (testing "two connections' views differ — each renders its own bound thunk"
+    (let [pa (@#'datastar/view-fn-patch (fn [] [:main {:id "world"} "VIEW-A"]))
+          pb (@#'datastar/view-fn-patch (fn [] [:main {:id "world"} "VIEW-B"]))]
+      (is (and (str/includes? pa "VIEW-A") (not (str/includes? pa "VIEW-B")))
+          "connection A's patch carries only A's view")
+      (is (and (str/includes? pb "VIEW-B") (not (str/includes? pb "VIEW-A")))
+          "connection B's patch carries only B's view")))
+  (testing "a throwing view-fn degrades to a #world-error morph — never throws"
+    (let [patch (@#'datastar/view-fn-patch (fn [] (throw (js/Error. "view boom"))))]
+      (is (str/includes? patch "world-error")
+          "a per-connection render failure degrades to a visible error, not a crash"))))
