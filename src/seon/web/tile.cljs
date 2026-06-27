@@ -201,6 +201,40 @@
              (map row (sort-by #(if (= :open (first %)) 0 1) rows)))
        [:div {:class "text-xs text-text-500"} "no todos"])]))
 
+(defn progress-view
+  "The agent's todo completion as a horizontal bar — `:done` todos over total
+   (owner = the agent entity), with an `N / M done` label. A filled `bg-success`
+   portion over a `bg-base-900` track, width = done%. Empty (no todos) reads a
+   muted note. Pure read; time-travel-safe (the counts derive from an `as-of`
+   db just as well, since the todo rows are query-based)."
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [me    (agent-eid db id)            ; query-based → time-travel-safe
+        ;; bind the todo eid `?t` too — without it `:find ?status` collapses to a
+        ;; SET of distinct statuses (all-done → one row). `?t` makes each todo a
+        ;; distinct tuple, so total/done count todos, not statuses.
+        rows  (when me
+                (db/query {:seon.db/db db
+                           :seon.db/query
+                           '[:find ?t ?status
+                             :in $ ?me
+                             :where
+                             [?t :seon.agent.todo/owner ?me]
+                             [?t :seon.agent.todo/status ?status]]
+                           :seon.db/args [me]}))
+        total (count rows)
+        done  (count (filter #(= :done (second %)) rows))
+        pct   (if (pos? total) (js/Math.round (/ (* 100.0 done) total)) 0)]
+    [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
+     [:div {:class "flex items-center justify-between mb-2"}
+      [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "progress"]
+      [:span {:class "text-2xs text-text-500 tabular-nums"} (str done " / " total " done")]]
+     (if (pos? total)
+       ;; the track + a width-NN% fill; inline width % since Tailwind has no
+       ;; arbitrary-percent utility in the build (owner-blessed inline style).
+       [:div {:class "h-2 w-full rounded-full bg-base-900 overflow-hidden"}
+        [:div {:class "h-full rounded-full bg-success" :style (str "width:" pct "%")}]]
+       [:div {:class "text-xs text-text-500"} "no todos yet"])]))
+
 (defn toolkit-view
   "The agent's OWN toolkit — the fns it has authored in its namespace, so the
    human watches the harness GROW as a first-class panel. Pure read over the
@@ -314,9 +348,46 @@
   {'seon.web.tile/hero-view       hero-view
    'seon.web.tile/status-view     status-view
    'seon.web.tile/todos-view      todos-view
+   'seon.web.tile/progress-view   progress-view
    'seon.web.tile/toolkit-view    toolkit-view
    'seon.web.tile/context-view    context-view
    'seon.web.tile/commentary-view commentary-view})
+
+;; The agent-referenceable catalog of the prewritten view SYMBOLS — each entry
+;; says what the view renders + the DB data it reads. EVERY core view is
+;; PARAMETERLESS: it takes only the injected `{:seon.db/db :seon.agent/id}` and
+;; queries the DB itself, so an agent (or a downstream consumer) reaches for one
+;; by transacting a tile whose `:seon.render/html` IS the symbol — no args, no
+;; wiring. This is the public teaching surface for "which prewritten tile do I
+;; want"; the resolution table is `core-views` above.
+(def prebuilt-views
+  "Catalog: core view SYMBOL → `{:seon.ui/desc :seon.ui/expects}`. Every view is
+   parameterless (reads only the injected `{:seon.db/db :seon.agent/id}` and
+   queries the DB). Set a tile's `:seon.render/html` to one of these symbols."
+  {'seon.web.tile/hero-view
+   {:seon.ui/desc    "The agent's own live tile — its welcome default or wired content, itself DB-driven + SCI-bounded. The primary surface (span-2 in the default layout)."
+    :seon.ui/expects "Parameterless. Renders the agent's `:seon.render.live-tile/content` via render-agent-tile."}
+   'seon.web.tile/status-view
+   {:seon.ui/desc    "The agent's status card: a state dot, its purpose, and turns / open-todos / msgs metrics."
+    :seon.ui/expects "Parameterless. Reads :seon.agent/purpose, derived state + turn-count, open todos, and messages to/from the agent."}
+   'seon.web.tile/todos-view
+   {:seon.ui/desc    "The agent's todos, open first; a message-origin todo renders as a 'Respond:' affordance."
+    :seon.ui/expects "Parameterless. Reads the agent's :seon.agent.todo/* (owner = the agent): status, title, and the message back-ref."}
+   'seon.web.tile/progress-view
+   {:seon.ui/desc    "The agent's todo completion as a horizontal bar — done vs total — with an 'N / M done' label."
+    :seon.ui/expects "Parameterless. Reads :seon.agent.todo/status (owner = the agent), counting :done over the total."}
+   'seon.web.tile/toolkit-view
+   {:seon.ui/desc    "The agent's OWN toolkit — the fns it has authored in its `my.agent.<id>` namespace, so the human watches the harness grow."
+    :seon.ui/expects "Parameterless. Reads :seon.fn/sym + :seon.fn/doc for the agent's namespace."}
+   'seon.web.tile/context-view
+   {:seon.ui/desc    "The agent's OWN pinned context — the sections it add-section!'d to keep — rendered from each section's markdown twin."
+    :seon.ui/expects "Parameterless. Reads :seon.agent/sections → :seon.ctx/name, :seon.ctx/priority, :seon.render/ai."}
+   'seon.web.tile/commentary-view
+   {:seon.ui/desc    "The shared REPL transcript (demoted chat) — the recent messages to/from the agent, newest last."
+    :seon.ui/expects "Parameterless. Reads :seon.agent.message/* (to/from the agent): at, origin, content."}
+   'seon.web.tile/activity-view
+   {:seon.ui/desc    "The always-visible header strip — state dot · current turn · latest eval · graceful stop/resume. What the agent is doing NOW (rendered into the masthead activity region, not a standalone rail tile)."
+    :seon.ui/expects "Parameterless. Reads derived state + turn-count and the agent's latest eval source."}})
 
 ;; ============================================================
 ;; The DB-driven layout — tile entities (or the prewritten default).
@@ -333,6 +404,8 @@
     :seon.render/html 'seon.web.tile/status-view :seon.ctx/priority 20 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":todos") :seon.tile/console agent-id
     :seon.render/html 'seon.web.tile/todos-view :seon.ctx/priority 30 :seon.tile/span 1}
+   {:seon.tile/id (str agent-id ":progress") :seon.tile/console agent-id
+    :seon.render/html 'seon.web.tile/progress-view :seon.ctx/priority 33 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":toolkit") :seon.tile/console agent-id
     :seon.render/html 'seon.web.tile/toolkit-view :seon.ctx/priority 35 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":context") :seon.tile/console agent-id
