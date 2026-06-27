@@ -35,9 +35,12 @@ target shape.
   `:seon.agent/ctx` at creation; render reads that one collection priority-sorted;
   override is the scope-aware variadic `install!`/`remove!` — **no merge, no
   provider**. → [[ui]], [[data-model]] §4.2.
-- **Purpose / planning.** NOW: `:seon.agent/purpose` (agent.cljs:76) with the
-  `set-purpose!` verb (agent.cljs:689) that throws because the attr is never
-  installed; no plan tree. TARGET: `:my.agent/purpose` as the first per-agent seed
+- **Purpose / planning.** NOW: `:seon.agent/purpose` (`:string`, agent.cljs:76) with
+  the `set-purpose!` verb (agent.cljs:689) — both WORK today (live-verified
+  2026-06-27: `set-purpose!` returns `{:seon.agent/ok? true …}`, the attr installs on
+  first transact; the earlier "throws, never installed" note was stale). No plan tree.
+  Phase 3 is therefore a clean DESIGN move (not a bug fix). TARGET: `:my.agent/purpose`
+  as the first per-agent seed
   worked-example (schema + refine fn + self-refining block); planning = `my.todo`
   as a TREE (`:my.todo/parent` + derived roll-up), not a separate `:my.plan`. →
   [[data-model]] §5, [[agent-runtime]].
@@ -179,11 +182,17 @@ to "the form's source references a `result/<id>` token." Full design + file:line
 
 **2c — Seed-copy at creation.**
 
-`create!` (agent.cljs ~396-444) seeds the FULL block set into the new agent's
+`create!` (agent.cljs ~392-428) seeds the FULL block set into the new agent's
 `:seon.agent/ctx` via `(ctx/install! [...])`. The seed vector is assembled from the
 owning `my.*`/`seon.agent.ctx.*` nses, NOT from a central hardcoded catalog. (Phase 4
 makes this seed run as recorded bootstrap forms; Phase 2 establishes that the seed
 COPIES the complete set in, so render needs no default fallback.)
+- **Seed ONLY on a genuinely new entity (`fresh?`-guard).** `create!` is idempotent
+  and today re-call NEVER re-seeds (it keeps the agent's own purpose/sections — the
+  `(and fresh? …)` guard at agent.cljs:415-418). The block seed-copy MUST ride the
+  SAME `fresh?` gate, or a resumed agent's edited/removed blocks get clobbered back to
+  defaults every boot. Seed-copy is creation-only; resume reads the agent's existing
+  `:seon.agent/ctx` untouched.
 
 **2d — Rename the wired blocks + the file-block factory (no central catalog).**
 
@@ -226,8 +235,9 @@ COPIES the complete set in, so render needs no default fallback.)
 
 ### Phase 3 — `:seon.agent/purpose` → `:my.agent/purpose` (the first seed worked-example)
 
-Proves the seed/`install!` path end-to-end and fixes the live bug (`set-purpose!`
-throws because `:seon.agent/purpose` is never installed). Depends on Phase 2. The
+Proves the seed/`install!` path end-to-end. (`:seon.agent/purpose` + `set-purpose!`
+WORK today — live-verified; this is a clean DESIGN move to a per-agent `my.*`
+worked-example, NOT a bug fix.) Depends on Phase 2. The
 schema + attr + verb move into `my.agent.<id>` as a seeded example: register
 `:my.agent/purpose` (a markdown goal string), a `refine` fn, and a self-refining
 block. DELETE the old `:seon.agent/purpose` path — REPLACE, not parallel.
