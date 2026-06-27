@@ -1,339 +1,219 @@
 ---
-type: prd
-status: draft
-tags: [prd, web, agent, architecture]
+type: architecture
+status: active
+tags: [architecture, web, agent]
 ---
 
-# Unified Context + UI — the single data model
+# UI — pages, blocks, renders, and routes
 
-The canonical spec for one coherent system where the agent's **context** and the
-human's **UI** are the same data, dual-rendered. This is the artifact to take to
-R (core-context lane) for agreement. Vocabulary settled with the owner
-(2026-06-27): **block · canvas · world · root agent · slot · layout · route**
-(the all-agents overview is the root agent's world at `/`, not a separate dashboard),
-`seon.ui.*` for the web layer with `seon.render.*` (the render engine, not
-UI-specific) kept separate. Supersedes the `section`/`panel` naming. Supporting research:
-[[reitit-routing-2026-06-27]], [[ui-override-research-2026-06-27]],
-[[ui-override-plan-2026-06-27]].
+> **Target design** (present tense — the system as it is when built). Current code state + the migration path live in [[roadmap]].
 
-## TL;DR
+The human's UI and the agent's prompt are the same data, dual-rendered. Every
+page is a derived projection of the database; nothing rendered is stored. The
+context unit is the **block**; the engine is `seon.render`; the front door is
+**reitit**; the live channel is SSE driven by one tx-listener. Every layer is a
+symbol or a datom, so a third party overrides any of it — blocks, canvas,
+layout, the root agent's world, routes, CSS, client — reusing the same
+primitives, with zero `src/seon` edits.
 
-One atom — the **block** (`:seon.agent.ctx/block`): a DB-derived map with up to two
-**renders** — an **ai render** (`:seon.render/ai`, text in the prompt) and an
-**html render** (`:seon.render/html`, a tile on the page). An agent's context is a
-vector of blocks (`:seon.agent/ctx`), merged over a seeded default set
-(`default-blocks`) and sorted by `:seon.agent.ctx/priority`. The **prompt** is the ai
-renders concatenated; the **page** is a **layout** (a fn of the db) that places
-block html renders into named **slots**. **Routing is data** consumed by reitit (the front door): a
-route's handler IS a layout, so nested routes ARE nested layouts — `/` is the
-**root agent's world** (the seeded system agent `:seon.agent/id "root"`, whose
-system-scoped blocks render the agent previews — NOT a separate dashboard),
-`/agent/{id}` is an agent's **world** (the **canvas** focal block + a priority
-scroll), `/agent/{id}/app/{x}` is an agent app. The **live channel** stays ours
-(datastar/SSE + the `!last-tree` slot-tree diff); reitit only routes the request
-that opens it. Every failure becomes a friendly **error value** (one base
-`:seon/error`) shown two ways from one source: an **error tile** (human) and the
-**warnings block** (agent). Every layer is a symbol or a datom, so a third party
-overrides any of it — blocks, canvas, layout, root world, routes, CSS, client —
-reusing the same primitives, with zero `src/seon` edits.
+## The block and its two renders
 
-## 1. The block — the one atom
+A **block** (`:seon.agent.ctx/block`, registered in [[data-model]]) carries up to
+two **renders**, selected by key presence — there is no stored discriminator:
 
-```clojure
-;; registered in seon.agent.ctx (the ns whose name the keyword carries; ns moved
-;; seon.ctx → seon.agent.ctx, CLJS track only). Reference the registered render
-;; shapes — do NOT re-inline [:or :symbol :string] (see data-model §6 finding 1).
-(schema/register! :seon.agent.ctx/block
-  [:map
-   [:seon.agent.ctx/name     :seon.agent.ctx/name]   ; per-agent merge key = prompt header = DOM #tile-<name>
-   [:seon.agent.ctx/priority :seon.agent.ctx/priority] ; sort: prompt order AND default-scroll order
-   [:seon.render/ai          {:optional true} :seon.render/ai]    ; present → ai render (prompt text)
-   [:seon.render/html        {:optional true} :seon.render/html]]) ; present → html render (a tile)
+- **ai render** (`:seon.render/ai`) → **prompt** text: a verbatim string, or a
+  qualified symbol late-resolved each render via `seon.eval/lookup-value`.
+- **html render** (`:seon.render/html`) → a **tile**: a symbol, a literal hiccup
+  vector, else the structural pretty-print.
 
-```
+Presence decides placement: ai-render-only = prompt only (no tile); html-render-
+only = a tile only (zero prompt tokens); both = both. `:seon.agent.ctx/name` is
+one keyword in three roles — the prompt header, the per-agent upsert key, and the
+DOM slot id `#tile-<name>` — always in sync, which is what makes "the agent edits
+the same thing the human sees" true. Renders are fns/symbols; the rendered output
+is ephemeral, never stored.
 
-- **Presence of a render key decides where the block appears** (no `:kind`
-  discriminator — datomic-idiomatic). ai-render-only = prompt only (no tile).
-  html-render-only = a tile only (zero prompt tokens). Both = both places.
-- **`:seon.agent.ctx/name` is the single identity** — the upsert key, the prompt-section
-  header, AND the DOM slot id `#tile-<name>`. One keyword, three roles, always in
-  sync. This is what makes "the agent edits the same thing the human sees" true.
+## Seed-copy — one collection, no merge
 
-## 2. Where blocks come from — defaults + the agent's own + the override seam
+Each agent OWNS its complete block set in `:seon.agent/ctx`, seeded at creation.
+Render reads that complete collection sorted by `:seon.agent.ctx/priority` and
+stops: there is no render-time merge and no separate default set — every block an
+agent renders, it owns. The set is deduped app-level by `:seon.agent.ctx/name` (a
+plain `:keyword`, NOT a datahike identity, so two agents can each own a
+`:transcript` block); priority sorts with a stable by-name tiebreaker.
 
-The blessed `set-tee-fn!` idiom (a `defonce ^:private` atom + installer + guarded
-read), so a third party overrides the default SET with no `seon/` src edit and no
-capture-dance:
+Global-vs-per-agent is decided by the DATA the render fn queries, never by the
+block: a `:my.kb.*` row carries no agent ref (one KB, every agent sees it), a
+`:my.todo/*` row carries `:my.todo/agent` (each agent sees its own). Same block
+registration; the render fn scopes by what it reads. (See [[data-model]] for the
+domain schemas + data-ref scoping; [[agent-runtime]] for how the seed runs as
+quiet `:core` bootstrap forms at creation.)
 
-```clojure
-(defn core-blocks [] ...)            ; PUBLIC, stable — seon's defaults; third parties call to EXTEND
-(defonce ^:private !blocks-provider (atom nil))
-(defn set-blocks-provider! [f] (reset! !blocks-provider f) nil)   ; the ONE override hook
-(defn default-blocks []              ; the guarded seam context-root reads (errors-as-values)
-  (if-let [f @!blocks-provider]
-    (try (f) (catch :default e <core-blocks + a loud :blocks-provider-error block>))
-    (core-blocks)))
+## `install!` / `remove!` — the one override
 
-```
+`seon.agent.ctx/install!` and `seon.agent.ctx/remove!` are the sole verbs that
+shape a block set:
 
-- Per-agent attr `:seon.agent/ctx` `[:vector {:seon.db/component true}
-  :seon.db/ref]` — blocks the agent owns; verbs `add-block!` / `remove-block!`.
-- The ONE merge seam (`context-root`): `(gather-blocks (default-blocks)
-  (agent-blocks entity))` sorted by `:seon.agent.ctx/priority`; agent blocks override
-  core by `:seon.agent.ctx/name`.
-- A pure ADD needs NO provider override (name a block + its symbols; symbols
-  resolve late). `set-blocks-provider!` is for changing the DEFAULT SET every
-  agent sees.
+- `install!` is **scope-aware + variadic** — one block map OR a vector of block
+  maps to load the whole set at once. With no agent scope (boot) it builds the
+  default seed set; in an agent's scope it targets THAT agent's `:seon.agent/ctx`.
+  Idempotent **upsert by `:seon.agent.ctx/name`**.
+- `remove!` drops a block by name; because `:seon.agent/ctx` is a component
+  vector, the child entity cascade-retracts.
 
-## 3. The two renders (one engine)
+seon's `my.*` namespaces DEFINE the render fns and block data and batch-install
+the set at seed. acme overrides by calling `install!`/`remove!` from its own
+namespaces (loaded via `SEON_EXTRA_SRC`), so new acme agents seed acme's set. One
+mechanism for everyone — seon, acme, and the agents themselves. A pure ADD needs
+nothing more: name a block and its render symbols; the symbols resolve late.
 
-- **Prompt (agent):** R's `render-context` renders each merged block's ai render
-  (guarded) and concatenates by priority. The byte-stable prefix at low priority
-  is preserved for provider prefix-caching.
-- **Page (human):** a layout fn places each block's html render into a slot.
-- Both resolve `:seon.render/ai` / `:seon.render/html` symbols through the ONE
-  `seon.render` engine — agent-authored symbols SCI-bounded, core symbols direct.
+## The render engine
 
-## 4. Slots + layouts
+One engine, `seon.render`, renders every page and the prompt. It is a single
+recursive, **guarded** walker over the agent's blocks in two views (`:ai` →
+String, `:html` → hiccup). Renders are projections, never persisted. A throwing or
+hung render yields a `:seon/error` value (see [[data-model]] §6) for THAT render
+only; siblings never crash.
 
-- **slot** — `(slot :name)` → `[:div {:id "tile-<name>" :data-slot :name}]`, an
-  EMPTY placeholder. Recursive: it does NOT resolve `:name`, it marks a hole.
-  Resolution happens at expansion — render the block's `:html`; if THAT output
-  contains more `(slot …)`, recurse. Generalizes the injected
-  `:seon.render/render` handle (render.cljs) into a named, DB-keyed slot.
-- **layout** — a block (or a route handler) whose `:html` is `(fn [request]
-  hiccup-of-slots)` — queries the db (the request carries it) + path-params, owns
-  placement + CSS only. Whether a render is a **layout** is NEVER stored — it is
-  purely whether its output contains child slots (none = a leaf tile).
+**prompt == page by construction.** Both derive from the same blocks over the
+same db value (`as-of` the turn's `t`): the prompt is
+`seon.agent.ctx/render-context` (ai renders concatenated by
+`:seon.agent.ctx/priority`), the page is the same blocks' html renders placed into
+a layout's slots. "What the agent saw at turn N" is a re-derive from
+`db-as-of(t)`.
 
-## 5. The pages + the canvas (all are agent worlds)
+**Capability + cache.** Agent-authored renders, layouts, and route handlers run
+SCI-bounded (`seon.render.sci/invoke-bounded`, a deadline), never
+`lookup-value`-direct; core symbols run compiled, and the bootstrap CLJS compiler
+stays out of the web bundle. The byte-stable cache prefix at low priority is
+preserved for provider prefix-caching.
 
-- **canvas** — the focal **block** `:canvas` (high priority), likely a small
-  nested layout `[(slot :transcript) (slot :composer)]`: the agent↔human
-  communication block. Because it is a block, a third party overrides the whole
-  comms block by overriding one symbol.
-- **world layout** (`/agent/{id}`) — places `(slot :canvas)` focal + the agent's
-  other blocks' html renders (tiles) as a priority-sorted vertical scroll.
-- **the root agent's world** (`/`) — the multi-agent overview is NOT a separate
-  page kind: it is the **root agent's** world (`:seon.agent/id "root"`), rendered by
-  the IDENTICAL world layout / block / slot machinery. Its system-scoped blocks
-  query across all agents and place `(slot :agent-<id>-preview)` per agent in a
-  grid; each preview is a compact agent render, reverse-routed-linked into that
-  agent's world. Step back / dive in. There is no "dashboard" mechanism — root is
-  just an agent with system-scoped ctx and an elevated capability grant (through the
-  same `/call` gate). The render + route tree: root world (`/`) → per-agent worlds
-  (`/agent/{id}`) → apps (`/agent/{id}/app/{x}`).
-- **app layout** (`/agent/{id}/app/{x}`) — an agent-authored app; its handler is a
-  layout placing its own slots.
+## Slots and layouts
 
-## 6. Routing is data — reitit as the front door
+- **slot** — `(slot :name)` emits `[:div {:id "tile-<name>" :data-slot :name}]`, a
+  named, DB-keyed EMPTY hole keyed on `:seon.agent.ctx/name`. It does not resolve
+  `:name`; it marks a hole. Resolution happens at expansion: render the named
+  block's html, and if THAT output contains more slots, recurse to fixpoint.
+- **layout** — a render whose hiccup contains slots; it queries the db (the
+  request carries it) + path-params and owns placement + CSS. **layout-vs-tile is
+  a role, never stored**: a render with child slots is a layout, a render with
+  none is a leaf **tile**.
 
-```clojure
-(schema/register! :seon.route/pattern :string)                            ; reitit syntax "/agent/{id}"
-(schema/register! :seon.route/method  :keyword)                           ; :get :post …
-(schema/register! :seon.route/name    [:keyword {:seon.db/identity true}]) ; reverse routing, unique
-(schema/register! :seon.route/owner   :seon.db/ref)                       ; owning agent — rides as route-data for auth
-(schema/register! :seon.route/middleware {:optional true} [:vector :keyword]) ; later auth; v1 absent
-;; the handler reuses :seon.render/html — a route handler IS a layout symbol
+## Pages — world, the root agent's world, app
 
-```
+Every **page** is a layout placing block html renders into slots; each filled slot
+is a tile. All pages are agent worlds — one mechanism, a tree of routes:
 
-`db->routes` (~10 lines) projects route datoms → reitit's vector; the handler
-symbol + `:seon.route/owner` ride as opaque route-data. Verified against
-`reference-code/reitit` 0.10.1 (vendored), all `.cljc` (runs in the Node pod):
+- **world** (`/agent/{id}`) — one agent: a **canvas** (the focal agent↔human
+  communication block) in `(slot :canvas)` plus a `:seon.agent.ctx/priority`-
+  ordered scroll of the agent's tiles.
+- **the root agent's world** (`/`) — the all-agents overview IS the **root
+  agent's** world (`:seon.agent/id "root"`). Its system-scoped blocks query across
+  all agents to render a preview tile each; dive into one via reverse routing
+  (step back to see all, dive into one). The IDENTICAL block/layout/route
+  machinery — NOT a separate overview page. It grounds the render + route tree: root
+  world (`/`) → per-agent worlds (`/agent/{id}`) → apps. (Root's
+  lifecycle/orchestrator facet lives in [[agent-runtime]]; here it is just the
+  agent whose world is `/`.)
+- **app** (`/agent/{id}/app/{x}`) — an agent-authored sub-page; its route handler
+  is an agent layout symbol, SCI-bounded.
 
-- match + path-params parsed once; auto precedence; **build-time path + name
-  conflict detection** (`core.cljc` throws on overlap/dup-name — our hand-rolled
-  `cond` silently shadows).
-- **reverse routing** (`match-by-name` → URL from name+params): a layout links to
-  child routes by name, no string-building.
-- **nested route data meta-merges parent→child** (`ring/compile-result:80`):
-  `:owner`/middleware set on `/agent/{id}` flow to every child — **nested routes
-  ARE nested layouts.**
-- **middleware seam** (`middleware.cljc` `IntoMiddleware`): middleware can be a
-  *keyword* resolved through a `::registry`, and a `:compile` middleware reads
-  route-data and vanishes when N/A. This is the auth answer AND the error-catch
-  answer (§8). v1: empty registry. Later: add `:authz` to a subtree's route-data +
-  one registry entry — ZERO handler edits.
-- **3-arity async handler `[request respond raise]`** (`ring.cljc:391`) maps onto
-  our Promise handlers; `reloading-ring-handler` rebuilds the router from a thunk
-  per request → "router is a pure derived value of the route datoms" is a
-  one-liner.
-- **The capability gate STAYS** (`seon.call`): reitit dispatches the URL;
-  `call.cljs` authorizes the fn (namespace-as-route → owning agent →
-  granted-`:seon.fn` → SCI-bounded). reitit replaces the FRAGILE part (dispatch),
-  NOT the SECURE part.
-- Seeded core routes: `/` root agent's world, `/agent/{id}` world,
-  `/agent/{id}/feed` SSE, `/call` action door. Agents add `/agent/{id}/app/{x}`
-  rows (capability-gated, handler in the agent's own `my.agent.<id>` ns).
-- Integration: a ~20-line Node↔Ring adapter (the pod is raw `node:http`); static
-  files stay `node:fs` (reitit's file handlers are the ONLY `#?(:clj)`-gated part;
-  everything else is host-neutral).
+## Routing is data — reitit + the capability gate
 
-## 7. The live channel + process topology (SSE)
+The front door is **reitit** (vendored `reference-code/reitit`, `.cljc`, runs in
+the Node pod) consuming `:seon.route/*` datoms. A route datom carries its pattern,
+method, unique name (reverse routing), owning agent (`:seon.route/owner`, rides as
+route-data for auth), and a handler that reuses `:seon.render/html` — **a handler
+IS a layout symbol**. `db->routes` projects the datoms into reitit's route vector;
+a ~20-line Node↔Ring adapter feeds the router, which is a pure derived value of
+the route datoms rebuilt on tx via a reloading thunk. This replaces hand-rolled
+`case`/`cond`/`re-matches` dispatch. (The `:seon.route/*` attributes are
+registered per [[data-model]].)
 
-**SSE is a pure derivation of the tx-log — not the agent pushing.** Today the
-pod's ONE tx-listener (`db/listen! ::inspector`, `inspector.cljs:1752`) fires on
-every datahike commit, re-renders the affected fragments from its db read-replica,
-and writes `event: datastar-patch-elements` frames to each open connection
-(`!sse-by-agent`). The agent only `transact!`s datoms (forwarded to the JVM
-writer); it never touches a browser stream. It LOOKS agent-driven only because the
-agent loop + the streamer share the one pod process today.
+- **Seeded core routes:** `/` (root agent's world), `/agent/{id}` (world),
+  `/agent/{id}/feed` (SSE), `/call` (action), `/eval`. Agents add
+  `/agent/{id}/app/{x}` rows (capability-gated, handler in the agent's own
+  `my.agent.<id>` ns).
+- **Nested routes ARE nested layouts** — reitit meta-merges route-data parent →
+  child (`:seon.route/owner` + middleware flow down). `match-by-name` gives reverse
+  routing; build-time path/name conflict detection catches overlaps the
+  hand-rolled `cond` silently shadowed.
+- **`/call` is the one action door, and the capability gate
+  (`seon.web.reactive.call`) is unchanged.** reitit dispatches the URL; the gate
+  authorizes the fn — **namespace is the route** (`my.agent.<id>/foo` → the owning
+  agent), granted only if it is a registered `:seon.fn` in that agent's home ns;
+  refusal precedes any invoke; args stay data; the call runs SCI-bounded → it
+  transacts → the page re-derives and pushes. reitit replaces the FRAGILE dispatch,
+  not the SECURE gate.
+- **Interactivity is plain Clojure.** Agents author fn-calls in handler slots; a
+  render-time server-side postwalk rewrites a fn-call `(cancel-order! id)` or a
+  fn-ref `submit-order!` into one standard datastar `@post('/call', {:fn …, :args
+  …})` (args transit-serialized; the ref case pulls form values from datastar
+  signals). Routing is orthogonal to this rewrite.
+- **Auth + error-catch ride as middleware.** Per-route concerns are reitit
+  route-data middleware referenced by keyword through a registry; a `:compile`
+  middleware reads route-data and vanishes when N/A. Auth is wired empty — adding
+  it later is one keyword + one registry entry, zero handler edits.
 
-- reitit has ZERO SSE/streaming primitives (grepped all 16 modules) — by design;
-  routing ⊥ live-updates. Adopting reitit touches the SSE engine NOT AT ALL.
-- Our engine unchanged: datastar + packetstar.js + the per-connection `!last-tree`
-  slot-tree diff (BFS to fixpoint; leaf patch on content change; ONE
-  fully-expanded subtree patch on shape change → packetstar.js byte-unchanged).
-- reitit routes the full-page GET (→ layout → HTML) + the action POSTs + the GET
-  that OPENS the feed; thereafter patches stream over the raw socket. The one seam:
-  the SSE handler needs the raw `node:http` `res` — keep SSE routes in the thin
-  adapter before reitit, or inject `res` + return `{:seon.http/hijacked true}`.
-  ~10 lines.
+## The live channel — SSE + `!last-tree`
 
-**The relocation property — why isolation + a UI-host are free.** Because the
-stream is derived from commits, the streamer can be ANY process holding a
-read-replica + a tx-listener; it need not be the agent's process. The convergence
-topology:
+SSE is a pure derivation of the tx-log, not the agent pushing. One **tx-listener**
+on a read-replica fires on every datahike commit, re-derives every world (root
+world included) from `:seon.agent/ctx`, and streams datastar `merge-fragment`
+patches. The agent only `transact!`s datoms; it never opens or writes a stream.
 
-- **Isolated per-agent Node runtimes** — each agent its own Node process (own SCI
-  sandbox + event loop = isolation), writing datoms to the shared JVM DB.
-- **One dedicated UI-host Node** (the center point the browser connects to) — holds
-  a shared-DB read-replica, runs the tx-listener, derives every agent's world (the
-  root agent's world at `/` included) from `:seon.agent/ctx`, streams SSE. Reads
-  every agent's data; runs no agent.
-- **JVM `wire-server`** — authoritative writer + heavy processing; may host its own
-  admin UI (needs the render layer portable), but the user-facing UI is the Node
-  host.
+- The diff is a per-connection **`!last-tree`** slot-tree BFS to fixpoint: a leaf
+  patch on content change, ONE fully-expanded subtree patch on a shape change (a
+  tile that gains/loses sub-slots), so packetstar.js stays byte-stable.
+- The feed is reconnect-lossless via per-subscriber `since-t` replay.
+- reitit has zero streaming primitives by design; it only routes the GET that
+  OPENS the feed — thereafter patches stream over the raw socket (the SSE handler
+  needs the raw `node:http` `res`; the thin adapter injects it before reitit).
+- **The hard invariant: no agent code ever touches an SSE connection.** agent →
+  datom → tx-listener → derived render → SSE, one way; actions reverse it (a
+  browser POST → the owning agent's sandbox → result datoms → tx-listener →
+  stream). The DB is the bus both ways.
 
-**The hard invariant (already honored): no agent code ever touches an SSE
-connection.** agent → datom → tx-listener → derived render → SSE, one way. Actions
-too: a browser POST hits the UI host → routed to the owning agent's runtime to
-execute (SCI-bounded, isolation preserved) → result datoms → tx-listener → stream.
-The DB is the bus both ways. **v1 = the single pod plays all roles**; the split is
-the target and changes WHICH process runs the tx-listener, NOT the data model. R's
-tx-feed replay + reconnect-since-t (`tx_feed_replay_test` on this branch) is the
-enabler.
+The streamer is a **role, not a process** — any process holding a read-replica + a
+tx-listener can play it, so the UI-host is relocatable and can split into N
+streamer-processes later (see [[architecture]] for the deployment topology).
 
-## 8. Friendly errors → the warnings block
+## Errors render as tiles
 
-One source, two renders — the agent's ask, fitted to the existing machinery.
+Any render failure becomes a **`:seon/error`** value (the one base shape — see
+[[data-model]] §6) instead of crashing siblings. The html render shows it as an
+**error tile** — friendly message, the offending block/route name and symbol, an
+actionable hint — ancestors and siblings untouched, self-healing on the next
+render. The SAME source feeds the agent's **warnings block** (its ai render), so a
+render failure the agent owns enters its prompt as fix-oriented prose; when the
+underlying fn is fixed, both the tile and the warning vanish (pure fn of state,
+never stored). Route/layout throws flow identically via the error-catch
+middleware.
 
-- **One source:** the guarded renderer (`seon.render`, exists) turns ANY render
-  failure — block ai/html throw, missing symbol, SCI deadline, capability
-  denial, route-handler throw (caught by a reitit middleware) — into a first-class
-  **error value** instead of crashing siblings:
-
-  ```clojure
-  (schema/register! :seon.render/error
-    [:map
-     [:seon.error/message :string]                      ; friendly, not a raw stack
-     [:seon.error/where   :keyword]                      ; the block name / route name
-     [:seon.error/symbol  {:optional true} :symbol]      ; the offending fn
-     [:seon.error/hint    {:optional true} :string]])    ; the actionable fix
-
-  ```
-
-- **Human (page):** the html render shows an error value as an **error tile** —
-  siblings/ancestors untouched, self-heals next render.
-- **Agent (prompt):** the **`:warnings` block** aggregates all current error values
-  into friendly, fix-oriented prose in its ai render (so they enter the prompt) +
-  an error list in its html render.
-- **Wired into the EXISTING registry:** add a `:render-health` check to
-  `seon.warn/checks` (today: failed-evals, bad-ref, slow-evals, failing-tests,
-  spec-hygiene). Pure fn of state, never stored, self-healing — generalizes the
-  existing `missing-slot-render` self-heal line.
-- **Friendly + actionable:** "Block `:status` html `my.agent.abc/status-tile`
-  threw `TypeError: x is undefined` — fix the fn; it reappears next render."
-  Missing-symbol / arity / schema-rejection / capability-denied all flow the same
-  way.
-- **reitit dividend:** the SAME middleware mechanism that does auth-later also
-  wraps handlers to catch throws → error value, so route/layout failures appear
-  identically (human error page + agent warnings entry if the agent owns it).
-
-## 9. Total third-party override (the acme proof)
+## Total override — the acme proof
 
 Every layer is a symbol or a datom; acme overrides each reusing the same
 primitives, with zero `src/seon` edits:
 
 | Layer | Override mechanism | Default |
 |---|---|---|
-| **block set** | `set-blocks-provider!` | `core-blocks` |
+| **block set** | `ctx/install!` / `ctx/remove!` from acme's own nses | seon's seeded set |
 | **a tile's look** | the block's `:seon.render/html` symbol | seon's html render fn |
-| **canvas / any layout** | the layout block's `:html` symbol | seon's layout fn |
-| **root agent's world (`/`)** | the `/` route handler symbol (root's world-layout) | `seon.ui/root-world-layout` |
+| **canvas / any layout** | the layout block's `:seon.render/html` symbol | seon's layout fn |
+| **root agent's world (`/`)** | the `/` route handler symbol (root's world layout) | seon's root world layout |
 | **routes / apps** | `:seon.route/*` rows | seeded core routes |
-| **CSS / theme** | `SEON_BRAND_CSS` (injected on ALL heads) | Phosphor |
+| **CSS / theme** | `SEON_BRAND_CSS` (injected on all heads) | Phosphor |
 | **client JS** | `SEON_EXTRA_PUBLIC` + scripts | packetstar.js |
 
-acme installs at preload in `acme/src/acme/overrides.cljs` (already `:require`d by
-`acme.pod`), exactly where it already does `(reset! client/!extra-core-vars …)`.
-Acceptance: a COMPLETELY different acme UI end-to-end, `bin/acme build` 0 warnings,
-default seon UI unchanged.
+acme installs at preload in its own namespaces (loaded via `SEON_EXTRA_SRC`),
+where it already wires its overrides. Acceptance: a completely different acme UI
+end-to-end, `bin/acme build` with zero warnings, the default seon UI unchanged.
 
-## 10. Malli throughout
+## Malli throughout
 
-- Every map is a registered `:malli/schema`: `:seon.agent.ctx/block`, `:seon.route/*`,
-  `:seon.render/error`, layout I/O — instrumented like everything else.
-- reitit route-data is OPEN maps → our malli-validated maps ride as route-data
-  with no friction.
-- reitit-malli coercion (vendored, optional): validate/coerce path-params / query
-  / body against a route's `:parameters` malli schema — free alignment since we
-  malli-everything, not new work.
-- `set-blocks-provider!` is `[:=> [:cat fn?] :nil]` — instrumented; a throwing
-  provider falls back to `core-blocks` + a loud error block.
-
-## 11. Lane split (who owns what — both must agree)
-
-- **R — core context.** `:seon.agent.ctx/block` schema + `:seon.agent/ctx`,
-  `default-blocks`/`core-blocks`/`set-blocks-provider!`, the `seon.render`
-  dual-render engine, prompt assembly (`render-context`), fixed system-text, the
-  `:seon.route/*` + `:seon.render/error` schema registration + seed, and
-  `seon.warn` (incl. the new `:render-health` check). R's derived tiles become
-  html-bearing blocks.
-- **U — UI/UX** (`seon.ui.*` + web + css/js). The layout fns
-  (root-world/world/app), the slot primitive + slot-tree BFS + the `!last-tree` SSE
-  diff, the shell, ALL of reitit (`db->routes`, the Node↔Ring adapter, the router
-  rebuild, the middleware registry), the error-tile render, CSS/theme,
-  packetstar.js.
-- **Shared contract:** the `:seon.agent.ctx/block` map shape, resolved through
-  `seon.render`. reitit lives entirely in U, consuming `:seon.route/*` datoms whose
-  schema R registers — the ONLY coupling.
-
-## 12. Migration / convergence (atomic)
-
-- **Supersedes R's in-flight `section → panel`.** The unit is **`block`**
-  (`:seon.agent.ctx/block`), vector **`:seon.agent/ctx`**, producer **`default-blocks`**,
-  override **`set-blocks-provider!`** — NOT panel / `:seon.agent/panels`. Both
-  lanes rename to `block` in ONE atomic patch + `bin/seon cluster reset default`.
-- **The 5 asks to R:** (1) `:seon.render/ai` optional in the block schema; (2)
-  rename `section`→`block` + `:seon.agent/sections`→`:seon.agent/ctx` + the ns move
-  `seon.ctx`→`seon.agent.ctx` with every `:seon.ctx/*`→`:seon.agent.ctx/*` (CLJS
-  track only; FROM-side grep keeps the literal `:seon.ctx/section`); (3)
-  `add-block!`/install accept html-only + batch upsert-by-name; (4) expose ONE pure
-  `(fn [db agent-id] → merged priority-sorted blocks)`; (5) R's derived tiles
-  become html-only blocks (the crux — the prompt-set and the page-set become ONE
-  set).
-- U-lane web Datalog sites that read the renamed attr fail SILENTLY (empty result,
-  not an error) if missed — grep-verify zero `:seon.agent/sections` /
-  `:seon.ctx/section` before the reset.
-- system-text stays a fixed code const (non-overridable) — keep R's lockdown.
-
-## 13. Open decisions / risks
-
-- **Dynamic-slot streaming** is the genuinely hard part — the `!last-tree`
-  shape-change rule needs explicit tests (move + content-change in one tx; churny
-  subtrees; coalesced flip-flop). Measure before memoizing `(slot-id, basis-t)`.
-- **Capability bound:** agent layouts/handlers/blocks MUST go through SCI-bounded
-  invoke (deadline), never `lookup-value`-direct, or a runaway freezes the
-  single-threaded pod. v1 routes read-only + own-fns.
-- **Web bundle:** keep the bootstrap CLJS compiler OUT of the web bundle (the lean
-  core table tile.cljs uses today).
-- **Atomic wide rename** across the shared tree (section→block, the `seon.ctx →
-  seon.agent.ctx` ns move + `:seon.ctx/*` → `:seon.agent.ctx/*`, `:seon.agent/ctx`,
-  the two renders) — one unit, fresh `bin/test-cljs`, atomic commit.
-- **Agent preview render** (the root agent's world) — does a preview reuse the
-  agent's html renders in miniature, or a dedicated compact `:agent-preview` tile?
-  (Leaning: a dedicated tile that reverse-routes to the world.)
-- **Per-cluster CSS keying** if one wire-server themes N clusters (today brand is a
-  global singleton).
+Every map is a registered `:malli/schema` — the block, `:seon.route/*`, the
+`:seon/error` value, layout I/O — instrumented like everything else. reitit
+route-data is open maps, so our malli-validated maps ride as route-data with no
+friction; reitit-malli coercion (vendored, optional) validates/coerces path-params
+/ query / body against a route's `:parameters` schema for free, since we
+malli-everything already.

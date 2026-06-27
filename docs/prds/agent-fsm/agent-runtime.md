@@ -1,331 +1,426 @@
 ---
 type: prd
-status: draft
+status: active
 tags: [prd, agent, schema, flow]
 ---
 
-# Agent Runtime Spec — the coherent data model (2026-06-25)
+# Agent runtime — the loop, the run, derived state, and lifecycle
 
-The single, fully-namespaced contract for the agent record + its run / turn /
-trigger / schedule / context model. Every concept is data; the loop is a
-function of that data; one periodic ticker is the only active piece. Names are
-industry-grounded (Temporal durable execution + k8s Jobs + Akka actors —
-[[loop-cycle-naming-precedent-2026-06-25]]) and reconciled with the data-model
-audit ([[agent-data-model-audit-2026-06-25]]) and the cycle/timestamp design.
+> **Target design** (present tense — the system as it is when built). Current code state + the migration path live in [[roadmap]].
 
-Supersedes the scattered `:seon.agent.loop/*` wake-token model. Lock target:
-this is the contract the loop, the render, cron, and the watchdog all read.
+This doc owns the **runtime**: how an agent runs, how a **run** bounds its work,
+how the loop is a fold over a data **FSM**, how **state is derived** from
+primitives, how an agent is **created** and **bootstrapped**, how the
+**orchestrator-root** starts and manages other agents, and the **isolation**
+backend that runs agent code. The entity schemas it reads live in
+[[data-model]]; the blocks/renders/pages it feeds live in [[ui]]; the agent's
+action verbs live in [[toolkit]]; the cross-cutting principles and the glossary
+live in [[architecture]].
 
 ## The model in one paragraph
 
-An agent is normally **`:idle`** (asleep). A **trigger** — an inbound
-**message** or a due **schedule** (cron) — opens a **run**: a bounded unit of
-work. While the run is open the agent is **`:running`** and the loop executes
-**turns** until a bound is hit. A run has **two independent bounds** (whichever
-fires first closes it): a **work-quantity** bound (`turn-limit`, a bumpable
-count) and a **wall-clock** bound (`deadline`, an absolute instant). New
-messages **renew the lease** (bump both bounds — the sliding window). The
-clock bound is enforced **externally** by one periodic **ticker** (a stalled
-LLM burns the clock and can't self-detect). The **run-id is a fencing token**:
-a write from a superseded/timed-out run is rejected. Everything else — status,
-liveness, history, fleet view — is a **query** over the bitemporal DB.
+An agent is normally **`:idle`** — asleep, and the only triggerable state. A
+**trigger** (an inbound **message**, or a due **schedule** fired by the ticker)
+opens a **run**: the bounded unit of work. While the run is open the agent is
+**`:running`** and the loop executes **turns** until a bound fires. A run carries
+**two independent bounds** — a **work-quantity** bound (turn count) and a
+**wall-clock** bound (deadline) — and whichever is hit first closes it. New
+inbound messages **renew the lease** (slide both bounds). The clock bound is
+enforced **externally** by one periodic **ticker**, because a stalled LLM burns
+the clock and cannot self-detect. The **run-id is a fencing token**: a write from
+a superseded or timed-out run is rejected at commit. Everything else — state,
+liveness, history, the fleet view — is a **query** over the bitemporal DB. The
+loop is a **function of that DB**; the only active piece is the one ticker.
 
-## Namespace plan (key namespace = code namespace that manages it)
+## State is derived — the one projection rule
 
-| namespace | owns (`:ns/*` keys) | manages (fns colocated here) |
-|---|---|---|
-| `seon.agent` | the agent entity + its config/pointers | mint, `set-state!`, `state-snapshot` (fingerprint), `set-purpose!`, `add-section!`/`remove-section!` |
-| `seon.agent.run` *(NEW)* | the **run** entity + its bounds/lifecycle | `open-run!`, `close-run!`, `renew!` (lease bump), `beat!`, `turn-limit-reached?`, `deadline-passed?`, `current-run`, `owns-run?` (fencing), `close-overdue-runs!` (watchdog action) |
-| `seon.agent.schedule` *(NEW)* | the **schedule** (cron) entity | `parse`, `next-fire-at`, `due?`, `fire-due-schedules!` |
-| `seon.agent.loop` | *(no data — the driver)* | `run-loop!`, `wake-handler` (message trigger → `open-run!`), `install-wake-trigger!`, `install-ticker!` (the one timer → schedule + watchdog) |
-| `seon.agent.turn` | the **turn** entity | `open-turn!`, `close-turn!`, `run-turn!` |
-| `seon.agent.message` | the **message** entity | `message!`, `inbound?`, hop guard |
-| `seon.agent.todo` | the **todo** entity | `add!`, `complete!`, `list-open` |
-| `seon.ctx` | the **section** shape + composer | `render-context`, the composer |
-| `seon.render.live-tile` | the **tile** | tile resolution/render |
+**There is no stored agent state.** The agent's FSM state is a pure projection of
+three primitives, computed each read by `seon.derive/derive-state`:
 
-(There is no `session` — a **run** is the wake-episode grouping. Runs link back
-to the agent via `:seon.agent.run/agent`; turns to their run via
-`:seon.agent.turn/run`.)
-
-## Schema — fully-namespaced, by owning namespace
-
-### `seon.agent` — the agent entity
+- `:seon.agent/terminated-at` present ⇒ **`:terminated`**
+- else no open run ⇒ **`:idle`**
+- else the open run carries `:seon.agent.run/paused-at` ⇒ **`:paused`**
+- else **`:running`**
 
 ```clojure
-(schema/register! :seon.agent/id      [:and {:seon.db/identity true} :seon.db/id])
-(schema/register! :seon.agent/run     :seon.db/ref)   ; → the CURRENT run (fencing pointer; spine of derived state)
-(schema/register! :seon.agent/terminated-at :inst)    ; presence ⇒ derived state :terminated
-(schema/register! :seon.agent/state   [:enum :idle :running :paused :terminated]) ; DERIVED shape — computed, NEVER transacted
-(schema/register! :seon.agent/sections [:vector {:seon.db/component true} :seon.db/ref]) ; the agent's OWN ctx sections (was :seon.agent/ctx)
-(schema/register! :seon.agent/schedules [:vector {:seon.db/component true} :seon.db/ref]) ; self-managed cron maps (0..N)
-(schema/register! :seon.agent/purpose  :string)        ; optional; renders into context
-(schema/register! :seon.agent/parent   :seon.db/ref)   ; optional; aspirational (no writer until spawn)
-(schema/register! :seon.agent/default-turn-limit  :int) ; optional; seeds a new run's turn-limit (else global 20)
-(schema/register! :seon.agent/default-deadline-ms  :int) ; optional; seeds a new run's deadline (else global)
-;; tile wiring lives in seon.render.live-tile:
-(schema/register! :seon.render.live-tile/content ...)
+(schema/register! :seon.derive/state [:enum :idle :running :paused :terminated])
 ```
 
-**State is DERIVED, never stored** (the data primitives ARE the state):
-`:terminated` if `:seon.agent/terminated-at` exists; else `:idle` if no open
-run; else `:paused` if the open run carries `:seon.agent.run/paused-at`; else
-`:running`. `:idle` is the only triggerable state. The transition table below
-maps each event to the primitive MUTATION (open/close/pause a run, set
-`terminated-at`); the state label is just their projection.
+Each primitive (the open-run pointer, `paused-at`, `terminated-at`) is its own
+control axis; the state label is only their projection. This is why state never
+drifts: there is nothing to keep in sync. `seon.derive` is the **acyclic leaf** —
+it requires only `seon.db` (to read) and `seon.schema` (to name shapes), so it
+sits below every consumer (the loop, the prompt render, the renderer, the UI, the
+ticker, the wake gate) and the `agent → ctx → render` require cycle evaporates.
+Every consumer reads `seon.derive/derive-state` over the db value it already
+holds; `agent-idle?` and `armable-agent-ids` are **filters** over that rule, never
+re-encodings of it, so the rule cannot fork.
 
-### `seon.agent.run` — the run entity (NEW)
+## The run — the bounded unit of work
 
-```clojure
-(schema/register! :seon.agent.run/id     [:and {:seon.db/identity true} :seon.db/id]) ; the FENCING TOKEN
-(schema/register! :seon.agent.run/agent  :seon.db/ref)   ; back-ref → agent (fleet/history queries)
-(schema/register! :seon.agent.run/started-at :inst)      ; the wake time
-(schema/register! :seon.agent.run/trigger    [:enum :message :schedule])
-(schema/register! :seon.agent.run/cause      :seon.db/ref) ; → the message (when :message)
-(schema/register! :seon.agent.run/turn-limit :int)        ; WORK-QUANTITY bound (bumpable)
-(schema/register! :seon.agent.run/deadline   :inst)       ; WALL-CLOCK bound (absolute)
-(schema/register! :seon.agent.run/last-beat-at :inst)     ; heartbeat (liveness; written per turn)
-(schema/register! :seon.agent.run/status     [:enum :open :closed])
-(schema/register! :seon.agent.run/closed-reason
-                  [:enum :completed :waited :turn-limit :deadline-exceeded
-                         :terminated :superseded :error])  ; present iff :closed
-```
+A **run** (`:seon.agent.run/*` — schema in [[data-model]]) is what a trigger
+opens. Its **run-id is the fencing token**; it records `started-at`, its
+`trigger` (`:message` or `:schedule`), the `cause` (the triggering message), the
+two bounds, a per-turn heartbeat `last-beat-at`, a `status` (`:open`/`:closed`),
+and — once closed — a `closed-reason`
+(`:completed`/`:waited`/`:turn-limit`/`:deadline-exceeded`/`:terminated`/
+`:superseded`/`:error`). A **run replaces any "session" concept** — there is no
+session entity. Runs link back to the agent via `:seon.agent.run/agent`; turns to
+their run via `:seon.agent.turn/run`.
 
-The two bounds are deliberately separate attrs (k8s `backoffLimit` count vs
-`activeDeadlineSeconds` clock): **whichever is hit first closes the run.**
+### The two bounds, the lease, the heartbeat
 
-### `seon.agent.schedule` — self-managed cron maps (NEW)
+The two bounds are deliberately separate (the k8s split: a `backoffLimit` count
+vs an `activeDeadlineSeconds` clock):
 
-The agent owns a vector of schedule maps (`:seon.agent/schedules`) and
-adds/removes them by transacting on its own record — each map carries its cron
-expression AND the **fn to call** when due (a qualified symbol, resolved like
-tile-content / section-ai — code-as-data). This generalizes cron from "wake me"
-to "at this schedule, run this fn."
-
-```clojure
-(schema/register! :seon.agent.schedule/id       [:and {:seon.db/identity true} :seon.db/id])
-(schema/register! :seon.agent.schedule/cron     :string)   ; 5-field cron
-(schema/register! :seon.agent.schedule/fn       :symbol)   ; qualified fn to invoke when due (code-as-data)
-(schema/register! :seon.agent.schedule/timezone :string)   ; IANA tz; default host tz
-(schema/register! :seon.agent.schedule/concurrency-policy
-                  [:enum :forbid :allow])   ; default :forbid (single-agent: don't open a 2nd run)
-```
-
-(The mechanism that FIRES a due schedule — the ticker vs. a flow process — is
-held pending the execution-mechanism research; the data shape above stands
-either way.)
-
-### `seon.agent.turn` — the turn (rename only)
-
-`:seon.agent.turn/run :seon.db/ref` **replaces** `:seon.agent.turn/wake` (turns
-belong to a run). Keep: `id`, `at`, `status [:enum :running :done :error]`,
-`evals`, `prompt-chars`, `prompt-file`, `llm-usage`. `llm-meta` — drop or mark
-write-only (audit: never read). Plus the render twin (single-render-path wave):
-`:seon.agent.turn/render-file` (the stored ai+html result) + `token-estimate`.
-
-### Unchanged: `seon.agent.message`, `seon.agent.todo`
-
-Message `origin [:enum :human :agent :core]` stays (cron fires a run **directly**,
-not a synthetic message — so no `:cron` origin). Human inbound still auto-mints
-a todo. Hop-exhausted messages are our **dead-letter** (stay as datoms, render
-as a reactive warning).
-
-## The two bounds, the lease, the heartbeat
-
-- **`turn-limit`** (count): a new run opens with `turn-limit =
-  default-turn-limit (or 20)`. **current turn = `count(turns where run = this)`
-  — derived, nothing stored.** Loop stops when `turn ≥ turn-limit`.
-- **`deadline`** (clock): a new run opens with `deadline = started-at +
-  default-deadline-ms`. Absolute, so it survives restart and is a pure DB read.
-- **Lease renewal = the sliding window:** an inbound message during an open run
-  calls `run/renew!` → `turn-limit += 1` **and** pushes `deadline` out. "The
-  human keeps talking" extends both bounds. Any process (orchestrator, cron)
+- **Work-quantity bound (derived).** The effective turn budget is **base
+  `:seon.agent/default-turn-limit` plus the count of inbound messages received
+  during the run** — nothing per-message is stored. Every inbound that lands
+  mid-run earns +1 turn, so a message arriving during an LLM call always earns a
+  turn to be **seen and answered**. The current turn is itself a derived count of
+  `:seon.agent.turn/run` datoms — `seon.derive/run-turn-count`. A stored
+  override appears only when a process *explicitly* bumps or stops the budget.
+- **Wall-clock bound (`deadline`).** A run opens with `deadline = started-at +`
+  the agent's `:seon.agent/default-deadline-ms` (or a generous global default).
+  It is an **absolute instant**, so it survives restart and is a pure DB read;
+  the turn-limit is the usual stopper, the deadline the backstop.
+- **Lease renewal = the sliding window.** An inbound message during an open run
+  slides both bounds (the work budget grows by the derived inbound count; the
+  deadline pushes out). "The human keeps talking" extends the run. Any process
   may renew.
-- **Heartbeat:** `run/beat!` writes `last-beat-at` per turn (coarse — see
-  Disadvantages). Enables fleet liveness + finer stall detection (open run with
-  a stale beat = stuck, even if within deadline).
+- **Heartbeat.** A coarse `last-beat-at` is written per turn — enough for fleet
+  liveness and stall detection (an open run with a stale beat is stuck even
+  inside its deadline), cheap enough to avoid tx churn (datahike writes are the
+  measured bottleneck; never beat per-second).
 
-## The one ticker + fencing (the only active machinery)
+### Pause vs the absolute deadline
 
-The DB is passive about wall-clock: `now > deadline` is true in the world but
-nothing fires until something checks. So **exactly one periodic ticker**
-(`loop/install-ticker!`, wired at client boot beside `install-wake-trigger!`):
-every N seconds it
-1. `schedule/fire-due-schedules!` — open a `:schedule`-triggered run for each
-   due schedule on an `:idle` agent (respecting `concurrency-policy`);
-2. `run/close-overdue-runs!` — for each `:open` run where `now > deadline` (or
-   `last-beat-at` is stale): `close-run!` with `:deadline-exceeded`, emit the
-   error, reset the agent to `:idle`.
+`pause` **banks** the remaining budget (`remaining-ms = deadline − now`) on the
+run; `resume` re-extends the absolute `deadline` by the banked amount, so a long
+pause does not insta-kill on resume. While paused, the derived `ms-remaining`
+surfaces the banked budget, not `deadline − now` (which would keep decaying).
 
-The ticker is **idempotent** (acts on db state; safe to re-run). **Fencing:**
-`run/close-run!`/`renew!`/`beat!` first check `owns-run?` — the agent's current
-`:seon.agent/run` must equal the run being written; a late write from a
-superseded or timed-out run (different run-id) is rejected. This is the lease
-hazard ("slow holder wakes after expiry and still writes"), solved for free by
-the run-id already in the DB.
+## The turn — a value-transform, "Snap-to-Tx"
 
-## Derived state — the fingerprint
+Each **turn** threads **one frozen db value** (re-read once at the top) through
+`next-event`, the prompt render, and the bound checks, so the LLM reasons over a
+single consistent basis-t. The **next** turn re-reads the latest store — and
+because there is a single writer, that read sees every other writer's commits, so
+a turn never runs in a private world.
 
-`seon.agent/state-snapshot` (map-in/map-out) returns the COMPLETE state from
-the record + cheap queries — every field specced, so one call fingerprints the
-agent:
+**The in-tx work-fence.** Every WORK transaction (`beat!`, `open-turn!`,
+`eval-batch!`) **leads** with an in-tx assertion:
 
 ```clojure
-;; Reference registered schemas (register once, reference everywhere); only
-;; the DERIVED-only fields (no standalone attr) carry a bare base type.
-(schema/register! :seon.agent/state-snapshot
-  [:map
-   [:seon.agent/state                              :seon.agent/state]
-   [:seon.agent.run/status      {:optional true}   :seon.agent.run/status]
-   [:seon.agent.run/trigger     {:optional true}   :seon.agent.run/trigger]
-   [:seon.agent.run/turn-limit                     :seon.agent.run/turn-limit]
-   [:seon.agent.run/deadline    {:optional true}   :seon.agent.run/deadline]
-   [:seon.agent.run/last-beat-at {:optional true}  :seon.agent.run/last-beat-at]
-   [:seon.agent.run/closed-reason {:optional true} :seon.agent.run/closed-reason] ; last
-   ;; derived-only (no standalone attr): bare base types
-   [:seon.agent.run/turn            :int]   ; current = count(turns this run)
-   [:seon.agent.run/turns-remaining :int]   ; turn-limit − turn
-   [:seon.agent.run/ms-remaining    {:optional true} :int]   ; deadline − now
-   [:seon.agent/total-turns         :int]   ; ever-increasing
-   [:seon.agent.message/last-human-at {:optional true} :inst]
-   [:seon.agent.schedule/next-fire-at {:optional true} :inst]
-   [:seon.agent.todo/open-count     :int]
-   [:seon.agent.message/unread-count :int]])
+[:db.fn/cas [:seon.agent/id id] :seon.agent/run [run R] [run R]]
 ```
 
-## The loop as a data-declared process (flow's good parts, no channels)
+The *database*, not a pre-read predicate, tells the loop it has lost authority: if
+a watchdog, a human, or a newer run moved the `:seon.agent/run` pointer, the tx
+aborts and the work never lands. This replaces any check-then-act ownership
+pre-read and fences the eval batch atomically with its result write. (The mindset
+— db is a value, only values cross the wire, CAS-as-assertion, never memoize on a
+db value — is [[datahike-primer]].)
 
-We keep the loop in `seon.agent.loop`, but model it like a `core.async.flow`
-process — the parts worth stealing: **a defined initial state, one transition
-function, and the whole FSM represented as data.** The imperative `while` +
-scattered `cond` becomes a transition table you can read, render, and
-fingerprint. (We do NOT adopt flow's channels — single-threaded in CLJS, no
-parallelism; isolation is the separate worker layer below.)
+## The loop as data — the FSM table + the fold
 
-**The FSM as data** lives in **`seon.agent.fsm` (`.cljc`, dual-track shared)** —
-`transitions` (the whole machine in one value; `event → next-state`),
-`transition`, and the pure `derive-state` projection. (Built additively in
-build-pass 2 — see [[night-loop-log]]; it supersedes the original
-`:seon.agent.loop/transitions` placement so both the CLJS loop and the CLJ
-renderer read one table. `derive-state` takes a boolean `:seon.agent.run/open?`
-primitive so the ns stays pure with no dependency on the run/agent attr
-registrations.) The table:
+The loop lives in `seon.agent.loop`, shaped like a flow process for the parts
+worth borrowing — **a defined initial state, one transition function, the whole
+machine as data**. No channels: CLJS channels are single-threaded and buy no
+parallelism; isolation is the worker tier below.
+
+**The machine is one value** (`{state {event → next-state}}`):
 
 ```clojure
 (def transitions
-  {:idle       {:trigger     :running}      ; a wake (message/schedule) opens a run
-   :running    {:turn-ok     :running       ; within both bounds → another turn
-                :wait        :idle           ; verb
-                :complete    :idle           ; verb
-                :turn-limit  :idle           ; work bound hit (clean)
-                :deadline    :idle           ; clock bound hit (ticker; :deadline-exceeded)
-                :superseded  :idle           ; a newer run won the fence
-                :error       :idle           ; turn threw
+  {:idle       {:trigger     :running}     ; a wake (message/schedule) opens a run
+   :running    {:turn-ok     :running      ; within both bounds → another turn
+                :wait        :idle          ; verb: park, wakeable
+                :complete    :idle          ; verb: finished; result delivered as a message
+                :turn-limit  :idle          ; work bound hit (clean)
+                :deadline    :idle          ; clock bound hit (ticker; :deadline-exceeded)
+                :superseded  :idle          ; a newer run won the fence
+                :error       :idle          ; the turn threw
                 :pause       :paused
                 :terminate   :terminated}
-   :paused     {:resume      :running        ; flow's start-paused/resume — "hold, don't kill"
+   :paused     {:resume      :running       ; "hold, don't kill"
                 :terminate   :terminated}
-   :terminated {}})                          ; terminal
+   :terminated {}})                         ; terminal
 ```
 
-**Defined initial state:** a fresh agent boots `:idle`. A run opens at
-`:running` (or `:paused`-then-`:resume`, flow-style, when minted held).
-
-**One transition function** — `(loop/transition agent event) → effects` —
-applies the table + the bound checks + the fencing, in ONE place (replacing the
-spread-out conds in `run-loop!`/`wake-handler`). The driver is then trivial:
+The **effect** of each event mutates a *primitive* (open/close/pause a run, set
+`terminated-at`); the agent's state is then **derived** from those primitives, never
+stored. A fresh agent boots `:idle`; a run opens at `:running`. The driver is
+trivial — a fold of one `transition` over events derived from the run's data each
+iteration:
 
 ```
 run-loop!(agent, run):
   loop:
-    event = next-event(agent, run)   ; turn-ok | wait | complete | turn-limit
-                                     ; | deadline | superseded | error | pause | terminate
-    [state', effects] = transition(state, event)   ; data-driven
-    apply!(effects)                  ; beat!, run-turn!, close-run!, set-state!…
-    if state' is terminal-for-this-run: break
+    db    = snapshot()                          ; one frozen db value this turn
+    event = next-event(db, agent, run)          ; turn-ok | wait | complete
+                                                ; | turn-limit | deadline | superseded
+                                                ; | error | pause | terminate
+    [state', effects] = transition(state, event)
+    apply!(effects)                             ; beat!, run-turn!, close-run! …
+    if terminal-for-this-run: break
 ```
 
-`next-event` derives the event from the run's data each iteration: still
-`:running` and within `turn-limit` + `deadline` and `owns-run?` → `:turn-ok`
-(beat + run a turn); a verb inside the turn emits `:wait`/`:complete`/
-`:terminate`/`:pause`; a bound or the ticker emits `:turn-limit`/`:deadline`/
-`:superseded`. The whole loop is a fold of `transition` over events — a function
-of the run's data, and the machine itself is inspectable/renderable data.
+`next-event` reads the event off the run's data: still `:running`, within both
+bounds, and still owning the fence → `:turn-ok` (beat + run a turn); a verb inside
+the turn emits `:wait`/`:complete`/`:pause`/`:terminate`; a bound or the ticker
+emits `:turn-limit`/`:deadline`/`:superseded`. Because every branch is data, the
+machine is itself inspectable and renderable.
 
-## Rendering the state (both surfaces, one source)
+**Stop policy nuances.** A turn that *attempts* forms but every form errors is not
+a quiet stop — it recurs so the next turn surfaces the errors. Two consecutive
+**zero-form** turns (an `empty-streak` guard) close the run cleanly — a deliberate
+"thinking mode" of up to two empty turns before the loop concludes there is no
+more work. A `wait` parks the agent (wakeable) with its reason on the run's
+`closed-reason`; a `complete` delivers its result as a **message** (to the parent
+or the human) and parks — the result is a message, never a held state.
 
-A **run-status section** (`seon.ctx` section, ai + html twins) renders from the
-run entity:
-- **agent context (ai):** *"Run · woken by ‹human msg› · turn 3/20 · 9m to
-  deadline · open"*
-- **inspector (html):** the same, from the same data.
+## Triggering + fencing — the reactive wake
 
-It folds into the single-render-path wave (the render result is itself stored
-on the turn — [[single-render-path-design-2026-06-25]]). Agent-view and
-debug-view agree by construction.
+Triggering is **DB-reactive**. Each agent installs one `db/listen!` tx-listener
+(`install-wake-trigger!`, idempotent — it unlistens the prior key first, so a hot
+reload never doubles up). On every commit the listener inspects the added
+`:seon.agent.message/to` datoms; a datom **wakes** the agent iff:
 
-## What we deliberately DON'T adopt — and why (the DB advantage)
+> `to ∋ me` ∧ `from ≠ me` ∧ `origin ∈ {:human :agent}` (never `:core`) ∧ `hops < hop-cap`
+
+The `to`-check is load-bearing (every agent installs the listener; without it one
+message wakes everyone). Hop-exhausted messages are the **dead-letter** — they
+stay as datoms, render as a reactive warning, and never wake. `:core`-origin
+messages and eval rows are **quiet** by construction — they neither wake nor count
+toward a run (this is what makes seeded bootstrap forms silent; see below).
+
+**Fencing is two-layered, both via the single writer:**
+
+- **The OPEN race.** Opening a run ends with `[:db.fn/cas … :seon.agent/run nil
+  …]` — the pointer must be *absent* — so two concurrent wakes cannot both open a
+  run; the loser's tx aborts (single-writer serialized).
+- **The WORK race.** Every work tx leads with the in-tx CAS work-fence above, so a
+  superseded run's writes (including its eval batch) abort at commit.
+
+A wake that arrives while the agent is already `:running` is **absorbed** by the
+open run's sliding window (it renews the lease), not a second run. A stop between
+turns exits cleanly at the next `next-event`; a stop mid-turn is rejected at the
+CAS (hard-aborting an in-flight LLM call is the worker-kill of the isolation tier).
+
+## The one ticker — schedules + overdue runs
+
+The DB is **passive about wall-clock**: `now > deadline` is true in the world but
+nothing fires until something checks. So exactly **one periodic ticker** (wired at
+boot beside the wake trigger) does the only active work in the system. Every N
+seconds it:
+
+1. **Fires due schedules** — opens a `:schedule`-triggered run for each due
+   `:seon.agent.schedule/*` on an `:idle` agent (respecting its
+   `concurrency-policy`). A schedule carries its cron expression **and the fn to
+   call** when due (a qualified symbol resolved late, code-as-data) — cron is "at
+   this schedule, run this fn", not merely "wake me".
+2. **Closes overdue runs** — for each `:open` run where `now > deadline` (or the
+   beat is stale): `terminate()` the run's worker, `close-run!` with
+   `:deadline-exceeded`, surface the error, and the agent derives back to `:idle`.
+
+The ticker is **idempotent** (it acts on db state; safe to re-run) and lives **off
+the runaway's thread** — a sync runaway in a worker cannot block it, which is the
+whole point of enforcing the clock bound externally.
+
+## The derived fingerprint — `derive-status`
+
+`seon.derive/derive-status` (map-in / map-out, `:seon.derive/status-request` →
+`:seon.derive/status`) returns the agent's complete derived status in one map over
+**one threaded db value**: the derived `state`, `total-turns`, `open-todo-count`,
+`last-human-at`, the last run's `closed-reason`, and — present only while a run is
+open — the run's `status`/`trigger`/`turn-limit`/`deadline`/`last-beat-at`, the
+derived current `turn`, `turns-remaining`, and `ms-remaining`. It is a pure read
+(no writes) composing the same `seon.derive` primitives every other reader reads,
+so the agent-facing run-status block and the human-facing status tile agree by
+construction. The run-status **block** (ai + html renders) is owned by [[ui]];
+this fn is its sole data source.
+
+## Creation = an idle agent entity
+
+**Creating an agent does not start a loop.** Creation transacts an **idle agent
+entity** and nothing more: its `:seon.agent/id`, optional
+`:seon.agent/default-turn-limit` / `:seon.agent/default-deadline-ms` seeds, the
+seeded `:seon.agent/ctx` block set, and a fresh `my.agent.<id>` home namespace.
+There is no run, no turn, no wake until a **trigger** arrives. This keeps creation
+pure and the loop strictly trigger-driven: "start an agent" (create + bootstrap,
+idle) and "run an agent" (trigger-driven) are two separate acts. To make a freshly
+created agent work, **send it a message** — that message is the trigger that opens
+run #1.
+
+## Bootstrap = seeded forms, run quiet before any trigger
+
+An agent's **bootstrap is a form-vector** carried with its seed. Immediately after
+creation transacts the idle entity, those forms are eval'd **synchronously in the
+new agent's own scope, before any trigger can open a run**, each recorded as a
+`:seon.eval` row with **`:core` origin**. The `:core` origin is what makes them
+**quiet**: the wake gate and the turn counter ignore them, so no run opens and no
+turn is consumed — yet because they are real eval rows in the agent's own scope,
+**the agent sees its own startup** in its transcript and program graph. Bootstrap
+is not hidden core magic; it is the agent's first, visible, replayable commands.
+
+The bootstrap forms **are** the seed commands themselves:
+
+- the batched `(ctx/install! [ … ])` that seeds the agent's complete block set
+  (the install!/seed-copy mechanism is owned by [[ui]]);
+- `(schema/register! :my.agent/purpose …)` plus its **refine** fn and a
+  self-refining block — `:my.agent/purpose` (a markdown goal string) is the
+  canonical **first per-agent seed worked-example**: the agent owns, sees, and can
+  rewrite its own purpose (schema in [[data-model]], the verb in [[toolkit]]);
+- the home-namespace `defn`s the agent starts life knowing.
+
+**Planning rides the same data.** An agent plans with its **`my.todo` tree** — a
+todo carries a `:my.todo/parent` ref plus status, and parent progress is a derived
+roll-up of its children (top = plans/milestones, leaves = actions). There is no
+separate plan entity; the work-list *is* the plan tree (schema in [[data-model]],
+verbs in [[toolkit]]). The derived open-todo count feeds the fingerprint above.
+
+## The orchestrator-root + agent lifecycle
+
+**Root is one ordinary agent holding capabilities others don't — not special core
+machinery.** There is exactly **one** `:seon.agent/id "root"`, and it is **both**
+the `/`-world owner (the UI role — its system-scoped blocks derive the all-agents
+overview at `/`) **and** the system orchestrator (the lifecycle role — it starts
+and manages other agents). These are two facets of the same elevated grant and the
+same bootstrap; there is **never** a second supervisor or overview entity.
+
+- **`seon.agent/start!` — the capability-gated lifecycle verb.** `start!` is a core
+  verb (an alias of `create!`) **granted to root**, called through the **same
+  `/call` capability gate** as any other fn — not a bypass. It transacts a new
+  **idle** child agent and **writes `:seon.agent/parent` = the caller** (root). That
+  write *is* the activation of `:seon.agent/parent`; no separate writer exists. The
+  gate check is ordinary: the caller must hold the spawn capability — root does by
+  grant, a normal agent does not unless granted.
+- **Start = create + quiet bootstrap, leaving the child idle.** `start!` runs the
+  child's bootstrap form-vector (quiet `:core` evals, as above) and stops. The child
+  does no work until it receives a trigger; to make it work, root (or anyone) sends
+  it a message — that message opens its run #1. Two steps, one entry verb.
+- **Roles are capability-SETS, not a stored `:kind`/`:role`.** A role = (the set of
+  granted `:seon.fn` capabilities) + (which bootstrap form-vector ran).
+  "Orchestrator" = an agent granted the spawn/terminate/system fns; "worker" = an
+  agent without them. The difference is **Datomic presence/absence** of grants,
+  queried at the `/call` gate — never a discriminator field (the entity-kind rule,
+  owned by [[data-model]]).
+- **Root's own bootstrap = the cluster-boot base case.** Cluster boot seeds root the
+  same way `start!` seeds a child, except root has **no parent** —
+  `:seon.agent/parent` is absent, root *is* the base case of the recursion. Boot
+  runs root's elevated bootstrap form-vector: install its system-scoped blocks, seed
+  the `/`-world layout on root's route, grant the spawn/terminate/system fns. The
+  recursion bottoms out cleanly: **boot → seed-root → root.start!(child) →
+  seed-child → …** The "start an agent" affordance on the `/`-world is simply this
+  orchestrator capability exposed for the human — it calls root's `start!` through
+  `/call`.
+
+## Message intake — auto-todo (write-side)
+
+Message intake is **write-side**, independent of render (render is a pure read
+projection). When an inbound `:human` message lands, `seon.agent.message/message!`
+mints one **address-todo in the same tx** as the message (atomic with the
+message's birth, gated on `:human` origin) — carrying a short clipped preview plus
+a back-ref to the message; the agent pulls the full message by its identity attr
+when it acts. "Addressed" then **derives** from that todo's completion — there is
+no stored handled-flag. The todo's *render* is owned by [[ui]]; the write hook is
+owned here.
+
+## History is derived
+
+The activity timeline — created, woken-by, turn counts, why each run ended — is a
+**derived query** over the bitemporal tx-log: walk the agent's run entities
+(`started-at`, `trigger`, `cause`, `closed-reason`) plus each transition's
+`:db/txInstant` and the loop's transition tx-meta (`:seon.agent.loop/cause` →
+the triggering message). Nothing is stored that the log doesn't already hold; the
+timeline is a function of the DB at render time, self-healing (no log to clear).
+The rendered timeline view lives in [[ui]]; this doc owns only the run-lifecycle
+facts it reads.
+
+## Isolation — the execution service's backend tiers
+
+Eval, render fns, and interactions are **three doors to one service** — "run an
+agent-granted fn with args, safely" (the one-service principle is stated in
+[[architecture]]; agent-authored renders and route handlers go the **same** door,
+covered by [[ui]]). The runtime owns the **backend** that actually runs the code,
+and it is **tiered**:
+
+| | Tier 1 — worker_threads + SCI (default) | Tier 2 — microVM (opt-in) |
+|---|---|---|
+| weight | ~8MB / ~30ms per worker; `terminate()` ~0.8ms | ~5MB+guest / ~125ms boot; a second kernel |
+| isolation | process boundary (real kill) + SCI cage (hallucination guard) | full kernel isolation — "contain a stranger" |
+| DB reads | in-process, sub-ms (great for reactive readers) | vsock/VM-exit hop (fine for LLM-paced, bad for sub-ms re-render) |
+| npm | direct `require`, shared pnpm store | full Node inside; shared store via virtio-fs RO mount |
+| on macOS | native | libkrun (HVF) / Apple `container` |
+| use for | reactive readers, UI, the trusted single-user agent | untrusted/dangerous code; the multi-tenant case |
+
+**Three isolation axes — `worker_threads` alone are NOT a security boundary:**
+
+- **Fault** (a hang/crash can't take down others) → worker_threads + `terminate()`.
+  SCI catches the common interpreted runaway in-process (~0.2ms); `terminate()` is
+  the CPU-proof backstop SCI can't deliver (a native loop, ReDoS) and the
+  deadline-watchdog's only real kill.
+- **Capability** (*what* code may do) → the **SCI curated surface**. Agent code runs
+  in SCI exposing only GRANTED fns (`db/query`, `message!`, the wire capabilities);
+  `fs`/`child_process`/`net`/`require` aren't in scope, so a worker can't format the
+  disk — the symbol doesn't resolve. A bare worker has full process perms and
+  `terminate()` can't stop an instant `fs` call, so **untrusted agent code MUST go
+  through SCI**; the bootstrap `cljs.js` compiler is only for *our* trusted code.
+- **Resource** (runaway memory/CPU) → worker `resourceLimits` / the Tier-2 microVM.
+
+Tier-1 covers fault + capability-by-grant + resource for the single-user,
+non-adversarial case. **Tier-2 microVM** is the *kernel* boundary for genuinely
+untrusted / multi-tenant code or defense-in-depth against an SCI escape: a guest
+can format its own disk but not the host's.
+
+**The pool shape** (piscina/tinypool patterns): warm `min 4 / max 8`
+pre-bootstrapped SCI cages; `concurrentTasksPerWorker 1`; recycle = terminate +
+respawn + re-read the DB (DB-stateless — no handoff); an `AbortSignal` →
+terminate on deadline; a bootstrap-failure breaker stops respawn storms. **Eval is
+offloaded**: the SCI `eval-batch!` runs in this pool, and the deadline-watchdog
+terminates a runaway worker — the CPU-proof kill an in-process timer can't deliver.
+The worker buffers its writes and commits them atomically through the same fenced
+tx after it returns, so a terminated worker can't leave a half-committed write.
+
+## What the DB gives us for free — and what we don't adopt
 
 Most durable-execution machinery exists to work around the absence of a
 bitemporal, reactive DB. We have one, so:
 
-- **Continue-as-new (Temporal): NOT adopted.** It bounds history because
-  Temporal *replays* full event history. We never replay — the rendered
-  context is a **query over a window** (last-N / since-T / this-run); history
-  accumulates as cheap deltas. Bound the **view**, not the storage.
-- **External fencing/lease service (Chubby/etcd): NOT needed.** The run-id on
-  the agent record IS the fence; single writer (wire-server) gives the
-  ordering.
-- **Heartbeat service: NOT a service** — one `last-beat-at` datom; fleet
-  status = one unfiltered query, live over `listen!`.
-- **Dead-letter queue / metrics pipeline / event-sourcing rebuild: free** —
-  hop-exhausted-as-datoms, the tx-log IS the event stream, datahike as-of is
-  native.
+- **No continue-as-new (Temporal).** It bounds history because Temporal *replays*
+  full event history. We never replay — the rendered context is a **query over a
+  window** (last-N / since-T / this-run); history accumulates as cheap deltas. Bound
+  the **view**, not the storage.
+- **No external fencing/lease service (Chubby/etcd).** The run-id on the agent
+  record IS the fence; the single writer gives the ordering.
+- **No heartbeat service.** One `last-beat-at` datom; fleet status = one unfiltered
+  query, live over `listen!`.
+- **No core.async.flow port.** JVM-only, and CLJS channels are single-threaded — no
+  parallelism. We borrow its *patterns* (initial state, transition fn, supervision),
+  not its channels.
+- **Dead-letter queue / event stream / state-at-T = native.** Hop-exhausted datoms
+  are the dead-letter; the tx-log + `since`-replay IS the event stream; datahike
+  `as-of` is "state at T". Port datahike's primitives — don't roll our own
+  ([[datahike-primer]]).
 
-## Disadvantages to respect
+## Detail docs
 
-1. **The ticker is the one irreducible timer** — DB is passive about
-   wall-clock. Keep it single + idempotent.
-2. **Heartbeat cadence = tx churn.** datahike WRITES are the measured
-   bottleneck (~1040→324 ent/s) and every beat is retained in history forever.
-   **Beat coarsely** — per turn (or only at LLM-call start), never per-second.
-3. **Single writer (wire-server)** is the coordination point — the
-   ticker/watchdog logic lives there (or a monitor), not per-pod.
-
-## Open decisions (flagged, not decided unilaterally)
-
-1. **`session` vs `run`** — RESOLVED: `run` REPLACES `session`. There is no
-   `seon.agent.session`; runs link back to the agent via `:seon.agent.run/agent`,
-   turns to their run via `:seon.agent.turn/run`. (Touches `turns-this-wake`'s
-   join → `turns-this-run`.)
-1b. **`state` stored vs derived** — RESOLVED: state is DERIVED, never stored
-   (`:terminated`←`terminated-at`, `:idle`←no open run, `:paused`←`run/paused-at`,
-   else `:running`). The presence/absence of primitives IS the state.
-2. **`schedules`** — RESOLVED: a self-managed vector of schedule maps on the
-   agent (`:seon.agent/schedules`), each carrying cron + the fn to call +
-   timezone/concurrency. The firing mechanism (ticker vs flow process) is held
-   pending the execution-mechanism research.
-3. **`parent` / `llm-meta` / `wait-note`** — `wait-note` dropped (orphaned
-   write; "why parked" is now `run/closed-reason`). `parent` kept aspirational
-   (no writer until spawn). `llm-meta` write-only — drop or mark. Confirm.
-4. **Heartbeat granularity** — per-turn (cheap, coarse) vs per-LLM-call-start
-   (finer stall detection, more writes). Recommend per-turn to start.
-5. **Deadline default** — what `default-deadline-ms` should be (and whether a
-   run with no deadline is allowed, i.e. turn-limit-only). Recommend a generous
-   default (e.g. 10 min) with the turn-limit as the usual stopper.
-
-## Migration (renames, atomic)
-
-- `:seon.agent/state` value `:active` → **`:running`**
-- `:seon.agent/wake` → **`:seon.agent/run`** (id token → ref to run entity)
-- `:seon.agent.turn/wake` → **`:seon.agent.turn/run`**
-- `:seon.agent/max-turns-per-loop` → **`:seon.agent/default-turn-limit`** (+ the
-  cycle's live `:seon.agent.run/turn-limit`); env `SEON_MAX_TURNS_PER_LOOP` →
-  `SEON_DEFAULT_TURN_LIMIT`
-- `:seon.agent/ctx` → **`:seon.agent/sections`**
-- drop `:seon.agent/wait-note`
-- new: `seon.agent.run/*`, `seon.agent.schedule/*`, `:seon.agent/run`,
-  `:seon.agent/schedule`, `:seon.agent/default-*`
-
-Fresh world via `bin/seon nuke` — no data migration (we re-seed the core), so
-the renames are pure code + schema changes.
+- [[architecture]] — the map: thesis, glossary, deployment topology, the
+  cross-cutting principles (DB-as-bus, derive-everything, never-crash, roles-as-
+  capabilities, code-as-data, seed-copy), the one-service principle.
+- [[data-model]] — every entity + attribute + datahike facet: the agent record,
+  `:seon.agent.run/*`, `:seon.agent.turn/*`, message, todo, schedule, the
+  `:seon/error` model, and the `my.kb` / `my.todo` (tree) / `my.agent` domain
+  schemas + data-agent-ref scoping.
+- [[ui]] — the block / render / tile / slot / layout system, the seed-copy +
+  variadic `install!`/`remove!` override model, the pages (root world / world /
+  app), routing-as-data via reitit + the capability gate, and the SSE /
+  `!last-tree` live channel.
+- [[toolkit]] — the agent's `my.*` verb catalog (purpose, the my.todo planning
+  tree, schedules, code lifecycle, recall).
+- [[roadmap]] — current code state, the gap, and the dependency-ordered,
+  replace-in-place migration to this target.
+- [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db
+  is a value, only values cross the wire, CAS-as-assertion, basis-t caching). Read
+  before touching the loop.

@@ -1,182 +1,135 @@
 ---
 type: prd
-status: draft
+status: active
 tags: [prd, agent]
 ---
 
-# Agent toolkit catalog — the agent-owned `my.*` tools over a protected `seon.*` floor
+# Agent toolkit — the `my.*` verb catalog over a protected `seon.*` floor
 
-The agent's whole working surface, designed as a SMALL set of namespaces that,
-shown in full, ARE its context — replacing a 70k-char source dump with a few
-high-signal, threadable verbs. The owner's framing decision: the agent's tools
-live in **`my.*` namespaces, fully agent-owned and editable** (`my.files`,
-`my.todos`, `my.search`, `my.shell`, `my.test`, `my.kb`, plus `my.code`,
-`my.schedule`, `my.recall`, `my.tile`). Each is a THIN wrapper over a protected
-`seon.*` substrate — the real syscalls, db engine, compiler, and wire stay
-`seon.*` and are `:core-seed`-guarded (un-clobberable). Build-your-environment
-extends to the tools themselves: the agent can tweak `my.files`, and if it breaks
-a wrapper, the protected floor still stands and `forget!` / the bitemporal store
-recover it. This is a DESIGN deliverable — it specifies interfaces, the shared
-shapes, and the two-tier model; it changes no source.
+> **Target design** (present tense — the system as it is when built). Current code state + the migration path live in [[roadmap]].
+
+The agent's whole working surface is a SMALL set of namespaces that, shown in
+full, ARE its context — a few high-signal, threadable verbs instead of a 70k-char
+source dump. The agent's tools live in **`my.*` namespaces, fully agent-owned and
+editable** (`my.files`, `my.search`, `my.shell`, `my.todo`, `my.test`, `my.kb`,
+`my.code`, `my.schedule`, `my.recall`, `my.tile`, `my.blob`). Each is a THIN
+wrapper over a protected `seon.*` substrate — the real syscalls, db engine,
+compiler, and wire stay `seon.*` and are `:core-seed`-guarded (un-clobberable).
+Build-your-environment extends to the tools themselves: the agent tweaks
+`my.files`, and if it breaks a wrapper, the protected floor still stands and
+`forget!` / the bitemporal store recover it.
+
+This doc owns the verb catalog (the action surface). The data shapes those verbs
+read and write — `:my.kb.*`, `:my.todo/*`, `:my.agent/*`, the `:seon/error`
+value, the entity-kind-vs-value-enum rule — live in [[data-model]]. The block /
+render / tile / slot machinery the verbs surface into lives in [[ui]]. The loop,
+the run, `start!`, and isolation tiers live in [[agent-runtime]].
 
 ## TL;DR
 
 - Seon's agent does not edit files; it DEFINES functions, evals them, redefines
   (= upserts), composes, and tests in a live REPL, with code and knowledge
-  persisting as datoms. The toolkit must serve THAT loop — every verb is a REPL
-  one-liner whose value is data the agent reads back and threads onward.
-- **Two tiers.** A PROTECTED FLOOR (`seon.*`, `:core-seed`-guarded,
-  un-clobberable): the db engine (`seon.db`, aliased `db`), the compiler
-  (`seon.eval`), the loop's control verbs (`seon.agent.message`,
-  `seon.agent.lifecycle`), and the `*.internal` syscall namespaces + the wire.
-  An AGENT-OWNED TOOLKIT (`my.*`, editable, thin wrappers): `my.files`,
-  `my.search`, `my.shell`, `my.todos`, `my.test`, `my.kb`, `my.code`,
-  `my.schedule`, `my.recall` (+ `my.tile`, + a deferred `my.blob`). Each `my.*`
-  tool delegates the dangerous work to a named `seon.*` floor.
-- **Isolation: SHARED-COLLECTIVE** (recommended). The `my.*` tools are ONE
-  cluster-wide seeded definition the user's agents collectively evolve. In a
-  personal single-user cluster a shared edit is a feature, not a leak; it keeps
-  the short catchy name (`my.files`, not `my.agent.<id>.files`), is leaner (one
-  indexed+rendered copy, not N), and the `seon.*` floor + `forget!`/undo bound the
-  only real risk. Mechanism: seed the toolkit under a NON-core origin
-  (`:toolkit-seed`) so the override/`forget!` guard — which keys on `:core-seed`
-  — leaves it editable, while the floor stays `:core-seed`.
-- **Most of the floor + several tools already EXIST** and are well-shaped (the
-  current `seon.db`, `seon.agent.todo`/`fs`/`search`/`message`/`lifecycle`,
-  `seon.test.runner`, `seon.agent.schedule`, `seon.embed`). The work is: (1) the
-  `my.*` rename + thin-wrapper split, (2) FORMALIZE four shared shapes so verbs
-  THREAD without reshaping, (3) one new floor + tool (`shell`/`my.shell`), (4)
-  the new `forget!` primitive, (5) the lean facades (`my.test`, `my.tile`,
-  `my.recall`).
-- The single biggest composability defect today: a `grep` hit's path key is
-  `:seon.agent.search/path` but `read-file` wants `:seon.agent.fs/path`, so the
-  core "search → read" move pays a manual rekey tax. The fix is a shared
-  `:seon.path/*` shape both wrappers reference.
-- **NEW primitive — `forget!`** (in `my.code`): the agent can define + redefine
-  (= upsert) but cannot REMOVE. `(forget! 'my.foo/bar)` retracts whichever entity
-  owns that sym and drops the live binding, core-guarded by the SAME `:core-seed`
-  check that blocks core overrides. UNDO is free from the bitemporal store.
-- **Candidate verdicts:** `my.schedule`/`remind` — **IN** (cron engine + ticker
-  exist; only the verb is missing). `my.recall` (semantic KNN) — **IN** (read-only
-  meaning-based retrieval over `seon.embed`; a capability datalog can't express).
-  `my.blob` — **IN but DEFERRED** (the third storage tier is sound + specified,
-  but `seon.blob` isn't built and has no consumer; build it WITH its first one).
-  A `kb` CRUD facade — **OUT** (Q1: `transact!`/`query` over a real schema already
-  IS the kb).
-- **One render-rule** (not a utility): **tests render in context ONLY for the
-  agent's CURRENT namespace**, never for other shown nses — flagged for the
-  prompt/render work, coordinating with the in-flight GI-1 double-render fix.
+  persisting as datoms. Every verb is a REPL one-liner whose value is data the
+  agent reads back and threads onward.
+- **Two tiers.** A PROTECTED FLOOR (`seon.*`, `:core-seed`-guarded): the db
+  engine (`seon.db`, aliased `db`), the compiler (`seon.eval`), the loop's
+  control verbs (`seon.agent.message`, `seon.agent.lifecycle`, and root's
+  `seon.agent/start!`), and the `*.internal` syscall namespaces + the wire. An AGENT-OWNED
+  TOOLKIT (`my.*`, editable thin wrappers) over it.
+- **Shared cluster-wide.** The `my.*` toolkit is ONE seeded definition the user's
+  agents collectively evolve — short reflexive names (`(files/read-file …)`),
+  one indexed+rendered copy. The per-agent home ns `my.agent.<id>` carries that
+  agent's purpose and its own defns.
+- **The action surface threads.** Four shared shapes (`:seon.path/*`,
+  `:seon.db/ref`, `:seon.items/*`, the `<ns>/ok?` + `:seon/error` envelope) make
+  the output of one verb a valid input to the next with no reshaping at the arrow.
+- **Three lifecycle verbs for code:** define → redefine (= upsert) → `forget!`.
+  `forget!` retracts the owning entity AND drops the live binding, core-guarded;
+  undo is free from the bitemporal store.
 
 ## The two tiers — protected floor vs. owned toolkit
 
-The reframe rests on one line: **a namespace is `my.*` (owned, editable) iff
-redefining it cannot break a runtime invariant; it is `seon.*` (protected,
-`:core-seed`-guarded) iff it is load-bearing for the substrate's correctness.**
+A namespace is `my.*` (owned, editable) iff redefining it cannot break a runtime
+invariant; it is `seon.*` (protected, `:core-seed`-guarded) iff it is
+load-bearing for the substrate's correctness.
 
 | Tier | Namespaces | Origin | Agent may edit? | Renders full in context? |
 |---|---|---|---|---|
-| **Protected floor** | `seon.db` (aliased `db`), `seon.eval`, `seon.agent.message` (aliased `message`), `seon.agent.lifecycle` (refer'd verbs), the `*.internal` syscall nses + the wire | `:core-seed` | NO — `forget!`/override guard refuse | NO — indexed + grep-able only |
-| **Owned toolkit** | `my.files`, `my.search`, `my.shell`, `my.todos`, `my.test`, `my.kb`, `my.code`, `my.schedule`, `my.recall`, `my.tile` | `:toolkit-seed` → `:agent` on first edit | YES — redefine or `forget!` | YES — full source every turn |
+| **Protected floor** | `seon.db` (aliased `db`), `seon.eval`, `seon.agent.message` (aliased `message`), `seon.agent.lifecycle` (refer'd verbs) + root's `seon.agent/start!`, the `*.internal` syscall nses + the wire | `:core-seed` | NO — `forget!`/override guard refuse | NO — indexed + grep-able only |
+| **Owned toolkit** | `my.files`, `my.search`, `my.shell`, `my.todo`, `my.test`, `my.kb`, `my.code`, `my.schedule`, `my.recall`, `my.tile`, `my.blob` | `:toolkit-seed` → `:agent` on first edit | YES — redefine or `forget!` | YES — full source every turn |
 
-Why `message` + `lifecycle` stay on the floor (and are not `my.*`): they are the
-loop's control verbs — the wake gate / hop-cap (`message!`) and the run-FSM
-mutations (`wait`/`complete`/`pause`/`resume`/`terminate`). Redefining `wait`
-breaks the FSM. The agent talks THROUGH them (aliased/refer'd into its home ns,
-exactly as today), it does not own them. (If the owner later wants them `my.*`
-too, the same thin-wrapper pattern applies — a `my.lifecycle` over a protected
-`seon.agent.run` floor — but the default is: loop verbs are protected.)
+`message` and `lifecycle` stay on the floor because they are the loop's control
+verbs — the wake gate / hop-cap (`message!`) and the run-FSM mutations
+(`wait`/`complete`/`pause`/`resume`/`terminate`) plus the spawn verb
+(`seon.agent/start!`, an alias of `create!`).
+The agent talks THROUGH them (aliased/refer'd into its home ns), it does not own
+them.
 
-**The protection mechanism (already built — reuse it):** the override guard
-`seon.eval/core-origin-fn-syms` blocks redefining/`forget!`-ing any sym whose
-current `:seon.fn/source` tx carries `:seon.db/origin :core-seed` (`eval.cljs`
-~L1702-1750). So:
+**The protection mechanism.** The override guard `seon.eval/core-origin-fn-syms`
+blocks redefining or `forget!`-ing any symbol whose current `:seon.fn/source` tx
+carries `:seon.db/origin :core-seed`. So:
 
 - The floor's syscall fns are `:core-seed` → un-clobberable. An agent that
-  `(defn seon.agent.fs/read-file …)` is rejected with the existing actionable
-  warning; the row is not persisted.
-- The `my.*` wrappers are seeded under a DISTINCT `:toolkit-seed` origin (NOT
-  `:core-seed`), so the guard — which keys on `:core-seed` only — leaves them
-  editable and forgettable. The crux change is one origin keyword on the seed,
-  not a new mechanism.
+  `(defn seon.agent.fs/read-file …)` is refused with the actionable warning and
+  the row is not persisted.
+- The `my.*` wrappers are seeded under `:toolkit-seed` (NOT `:core-seed`), so the
+  guard leaves them editable and forgettable; an agent's edit flips the row's
+  origin to `:agent`. The distinction is one origin keyword on the seed, not a
+  separate mechanism.
 
-**Recovery is free.** Break `my.files/read-file` and: (a) `(forget!
-'my.files/read-file)` removes the broken def, falling back to a re-seed; or (b)
-re-transact its prior `:seon.fn/source` from `(db/history)`; or (c) a
-`cluster reset` re-seeds the shipped default toolkit (cluster reset = fresh
-world; the shipped `my.*` source is the default). A broken wrapper is never
-fatal — the protected floor underneath it is intact.
+**Recovery is free.** Break `my.files/read-file` and: `(forget!
+'my.files/read-file)` removes the broken def; or re-transact its prior
+`:seon.fn/source` from `(db/history)`; or a `bin/seon cluster reset` re-seeds the
+shipped default toolkit. A broken wrapper is never fatal — the protected floor
+underneath it is intact.
 
-## Isolation — shared-collective vs. per-agent (recommendation)
+## Shared cluster-wide ownership
 
-"Fully yours" + a SHORT shared name (`my.files`) is in tension: a shared-runtime
-ns name can't be per-agent-distinct without scoping, and scoping kills the short
-name. Two resolutions:
+The `my.*` toolkit is ONE cluster-wide seeded definition; all the user's agents
+see and evolve the same `my.files`. Seon is a personal, single-user cluster —
+shared toolkit evolution is the intended dynamic, not a leak between distrusting
+tenants. The short name is the point: `my.files` is catchy and reflexive
+(`(files/read-file …)` via the home-ns alias). The only real hazard — a broken
+wrapper — cannot touch the `:core-seed` floor and is recoverable. And it is
+leaner: one seeded, indexed, and rendered toolkit, not N identical copies
+multiplying render cost on every agent's every turn.
 
-- **(a) SHARED-COLLECTIVE** — `my.*` is ONE cluster-wide seeded definition; all
-  the user's agents see and evolve the same `my.files`. An edit by agent A is
-  visible to agent B.
-- **(b) PER-AGENT-SCOPED** — each agent gets its own copy (e.g.
-  `my.agent.<id>.files`, or a per-agent registry). A's edit can't reach B.
+Two `my.*` axes do NOT collide:
 
-**Recommend (a) SHARED-COLLECTIVE.** Four grounded reasons:
+- **Shared fn definitions** — `my.files`/`my.search`/… are one `:seon.fn` corpus
+  the whole cluster calls.
+- **Scoped data** — global vs per-agent is the DATA's agent-ref, never the ns and
+  never a stored kind: `:my.kb.*` rows carry no ref → global (one KB, all
+  agents); `:my.todo/*` rows carry `:my.todo/agent` → per-agent (each sees its
+  own). The verb's render fn scopes by what it queries. Full scoping rule:
+  [[data-model]].
 
-1. **The short name is the point.** `my.files` is catchy and reflexive
-   (`(files/read-file …)` via the home-ns alias). Per-agent scoping forces
-   `my.agent.<id>.files` and bespoke per-agent alias setup — it loses exactly
-   what the reframe is for.
-2. **Seon is a personal, single-user cluster.** One human; the orchestrator and
-   all task agents serve that one user. Shared toolkit evolution is the intended
-   dynamic — the user's agents improve ONE toolkit together — not a leak between
-   distrusting tenants.
-3. **The only real risk is already bounded.** The single hazard — a broken
-   wrapper — cannot touch the `:core-seed` floor and is recoverable via
-   `forget!` / the bitemporal store / cluster reset. Per-agent isolation defends
-   a non-threat (cooperating agents under one human), at real cost.
-4. **It is leaner — the catalog's whole thesis.** ONE seeded, indexed, and
-   rendered toolkit, not N identical copies multiplying render cost on every
-   agent's every turn.
+The toolkit renders FULL every turn (the build-your-environment payoff — the
+agent SEES and edits its toolkit source), which is why the wrappers stay thin:
+rendering them whole is cheap precisely because they delegate the bulk to the
+protected floor, which is indexed + grep-able only, never rendered full. The
+per-tool budgets below are a FIXED cluster-wide context cost — keep them tight.
+The full render-curation rule (index everything, render `my.*` whole) lives in
+[[data-model]].
 
-**Indexer / render interaction.** `my.*` renders FULL in the namespaces section
-(the existing rule (a): every `my.*` ns renders whole source —
-`seon.ctx.namespaces`). So the agent SEES its toolkit source every turn and can
-read + edit it — the build-your-environment payoff. This is WHY the wrappers must
-stay thin: rendering them full is cheap precisely because they delegate the bulk
-to the protected floor, which is NOT rendered full (only indexed + grep-able).
-The crux indexer change: tag the shipped `my.*` toolkit nses `:toolkit-seed`
-(not `:core-seed`) at boot index, so they render like shipped code yet remain
-agent-editable; an agent's edit flips the row's origin to `:agent` and the seed
-yields ownership (idempotent seed-if-absent never clobbers an edit). Shared
-budget note: because the toolkit renders full for ALL agents, the per-tool
-budgets below are a FIXED cluster-wide context cost — keep them tight.
+The per-agent home ns is **`my.agent.<id>`** — the one place a single agent's own
+state lives: its `:my.agent/purpose`, its `refine` fn, its self-refining purpose
+block, and any `defn`s it authors for itself. See `my.agent` in the catalog.
 
 ## The composability backbone — four shared shapes
 
-The design rule the whole catalog is held to: **the output of one verb is a valid
-input to the next, with no reshaping at the arrow.** That needs a small set of
-shapes that many wrappers reference (the register-once rule from
-`docs/conventions.md`). These shared THREADING shapes belong to the protected
-substrate (`seon.*`) — they are the stable contract the wrappers exchange, the
-one part of a tool's I/O an edit should not casually rename. Tool-specific
+The rule the whole catalog is held to: **the output of one verb is a valid input
+to the next, with no reshaping at the arrow.** A small set of shapes that many
+wrappers reference (the register-once rule) carries the threading. Tool-specific
 payload keys are `my.<tool>/*`; the shapes you THREAD are `seon.*`. There are
 exactly four.
 
-### 1. PATH — `:seon.path/*` (the files ↔ search ↔ shell hinge) — NEW
+### 1. PATH — `:seon.path/*` (the files ↔ search ↔ shell hinge)
 
-The defect today, verbatim from the two real surfaces:
-
-- `seon.agent.fs/read-request` keys on `:seon.agent.fs/path` (a `:string`).
-- `seon.agent.search/match` keys on `:seon.agent.search/path` (a `:string`),
-  with the hit's location at `:seon.agent.search/line-number` and the matching
-  text at `:seon.agent.search/line-text`.
-
-So a `grep` match cannot feed `read-file` directly — `search.cljs`'s own
-docstring even shows the manual rekey: `(read-file {:seon.agent.fs/path
-"<:seon.agent.search/path of the hit>"})`. That `<…of the hit>` IS the friction
-this backbone removes.
+One canonical path vocabulary on the floor, referenced by `my.files`,
+`my.search`, and `my.shell`, so a grep hit feeds `read-file` directly:
 
 ```clojure
-;; ONE canonical path vocabulary, on the floor, referenced by my.files / my.search
-;; / my.shell.
 (schema/register! :seon.path/abs     [:string {:min 1}])  ; an absolute path
 (schema/register! :seon.path/line    :int)                ; 1-based line
 (schema/register! :seon.path/preview :string)             ; the line / a snippet
@@ -187,7 +140,6 @@ this backbone removes.
    [:seon.path/abs     :seon.path/abs]
    [:seon.path/line    {:optional true} :seon.path/line]
    [:seon.path/preview {:optional true} :seon.path/preview]])
-
 ```
 
 `my.files/read-file`, `stat`, `list-dir`/`walk-dir` entries, `my.search/grep`
@@ -195,29 +147,25 @@ matches, and `my.shell`'s `cwd` all reference `:seon.path/abs`. A grep match
 returns a `:seon.path/located`; `read-file` takes a `:seon.path/located`; the two
 compose with no rekey.
 
-### 2. REF — `:seon.db/ref` (db addressing) — EXISTS, conforms
+### 2. REF — `:seon.db/ref` (db addressing)
 
 A lookup-ref `[identity-attr value]` (or a raw eid) is the universal "address of a
-thing." Already canonical on the floor (`seon.schema`), already used uniformly:
-`:seon.agent.todo/owner`, `:seon.agent.message/from`/`/to`, `:seon.agent/parent`.
-The output of one verb is the input to the next: a message's `from` is a ref you
-pass straight to `db/entity`, to `my.todos/add!`'s `:from`, or to `message/agent`.
-No change — this is the shape the others imitate.
+thing," canonical on the floor (`seon.schema`) and used uniformly:
+`:my.todo/agent`, `:seon.agent.message/from`/`/to`, `:seon.agent/parent`. The
+output of one verb is the input to the next — a message's `from` is a ref you pass
+straight to `db/entity`, to `my.todo/add!`'s owner, or to `message/agent`.
 
 ```clojure
 [:seon.agent/id "iCg-2606101519"]     ; a ref — addresses an agent
 (db/entity {:seon.db/ref [:seon.agent/id "iCg-2606101519"]})   ; threads in
-
 ```
 
-### 3. ITEMS — `:seon.items/*` (self-describing collections) — FORMALIZE
+### 3. ITEMS — `:seon.items/*` (self-describing collections)
 
-A collection result is `{ok? + a vector of SELF-DESCRIBING MAPS + count +
-truncated}`. Today three surfaces do this but each names the vector differently
-(`:seon.agent.todo/todos`, `:seon.agent.search/matches`, `store-inventory`'s
-anonymous vector) and two carry BARE STRINGS (`fs/list-dir` + `fs/walk-dir`
-`:seon.agent.fs/entries` are `[:vector :string]` — a bare filename can't thread
-into `stat`/`read`).
+A collection result is `{<ns>/ok? + a vector of SELF-DESCRIBING MAPS + count +
+truncated?}`. Every item is a map carrying enough keys to BE the next call's
+input — a listing entry IS a `:seon.path/located` (feeds `stat`/`read`), a grep
+match IS one, a todo IS addressable.
 
 ```clojure
 (schema/register! :seon.items/items      [:vector :map])  ; each item self-describing
@@ -226,46 +174,35 @@ into `stat`/`read`).
 ;; Mixin (referenced, never re-inlined):
 ;;   {<ns>/ok? true :seon.items/items [<map> …] :seon.items/count <int>
 ;;    :seon.items/truncated? <bool>}
-
 ```
 
-The rule: every item is a map carrying enough keys to BE the next call's input. A
-listing entry becomes a `:seon.path/located` (feeds `stat`/`read`); a grep match
-already is; a todo already is. Counts/aggregates are NOT items — they stay scalars.
+Counts/aggregates are NOT items — they stay scalars.
 
-### 4. RESULT — `<ns>/ok?` + `:seon.error/*` (the never-throw envelope) — FORMALIZE
+### 4. RESULT — `<ns>/ok?` + `:seon/error` (the never-throw envelope)
 
-Every agent-facing verb returns an envelope; it never throws (Errors-Are-Values).
-Two real inconsistencies to settle:
-
-- The discriminator NAMESPACE varies by owner — CORRECT (keyword-ns = data-ns),
-  it stays; formalize it so each `<ns>/ok?` references one shared
-  `:seon.result/ok?` `:boolean`.
-- The error VALUE varies: `db/transact!` returns a structured `:seon.error/*` MAP
-  (`:seon.error/message` + `:seon.error/data` carrying `:seon.error/kind`); but
-  `search`/`todo`/`fs` return a plain STRING. **Pick one: the map.** A string
-  can't carry `:seon.error/kind :user-input` vs `:core-bug` — the signal the
-  agent needs to decide "fix my args" vs "report it." Keep a human message at
-  `:seon.error/message` so a string read still works.
+Every agent-facing verb returns an envelope and never throws (errors are values).
+The envelope is `{<ns>/ok? <bool> …}`; on failure `{<ns>/ok? false :seon/error
+<error value>}`. The discriminator namespace tracks the owning data ns
+(`:seon.db/ok?`, `:my.files/ok?`, …), each referencing one shared
+`:seon.result/ok? :boolean` shape. The error value is the one `:seon/error`
+base — `:seon.error/message` (humanized via `malli.error/humanize`) +
+`:seon.error/data` (the malli explain map) + where/symbol/hint, plus the
+value-enum fault tag `:seon.error/kind :user-input|:core-bug` the agent reads to
+decide "fix my args" vs "report it." `:seon.error/kind` is a value flavor on a
+non-entity error value, not a stored entity discriminator. The full `:seon/error`
+shape + the entity-kind-vs-value-enum rule live in [[data-model]].
 
 ```clojure
 (schema/register! :seon.result/ok? :boolean)   ; the shared discriminator shape
-;; :seon.error/* already on the floor (seon.db) — the ONE error map:
-;;   {:seon.error/message "<guiding>" :seon.error/data {:seon.error/kind :user-input}
-;;    :seon.error/raw "<underlying>"}
-
 ```
 
-Three result FLAVORS, one discipline. The generic verb envelope covers
-db/my.files/my.search/my.todos/message/my.tile/my.code/my.schedule/my.recall.
 Two specialized values keep their own shape because the value IS the answer:
 
 - **my.shell** — `{:seon.shell/ok? :seon.shell/exit :seon.shell/out
-  :seon.shell/err :seon.shell/timed-out?}` (exit/out/err is the universal shell
-  contract).
+  :seon.shell/err :seon.shell/timed-out?}`.
 - **my.test** — `{:seon.test/pass? :seon.test/summary :seon.test/failures}`.
-- **lifecycle** — returns a bare `:seon.derive/state` keyword on success (the
-  natural value) and the envelope only on failure.
+- **lifecycle** — a bare `:seon.derive/state` keyword on success (the derived
+  state IS the answer), the envelope only on failure.
 
 ### The worked chain (the move every other chain is a variant of)
 
@@ -281,117 +218,109 @@ Two specialized values keep their own shape because the value IS the answer:
                     :my.kb/source-path "…" :my.kb/confidence :inferred}))
      (hash-map :seon.db/tx-data)
      db/transact!)                                           ; -> {:seon.db/ok? true …}
-
 ```
 
-Every arrow is total — no `<…of the hit>` rekey anywhere.
+Every arrow is total — no rekey anywhere.
 
 ## The catalog
 
-Each entry carries: status, the one-line reason the agent reaches for it, its
-`seon.*` floor backing, the public surface as malli-ish sketches, how it
-composes, and a render budget (tokens, chars/4 — keep the FULL source cheap to
-show, since `my.*` renders whole every turn for every agent).
+Each entry carries the one-line reason the agent reaches for it, its `seon.*`
+floor backing, the public surface as malli-ish sketches, how it composes, and a
+render budget (tokens, chars/4 — keep the FULL source cheap to show, since `my.*`
+renders whole every turn for every agent).
 
-### Protected floor — stays `seon.*` (aliased/refer'd, not owned)
+### Protected floor — `seon.*` (aliased/refer'd, not owned)
 
-#### `db` — `seon.db`, aliased `db` — PROTECTED (point 4: stays `seon.db`)
+#### `db` — `seon.db`, aliased `db`
 
-**Why it stays protected:** it is the engine, not a customizable convenience — one
-bound conn, synchronous reads, a never-throwing write envelope. A `my.db` thin
-wrapper would buy nothing (it adds no syscall to gate, no policy to localize) and
-would put the agent's most-used, correctness-critical surface one editable layer
-away from the real datahike/wire boundary. **Recommend: `db` stays `seon.db`,
-aliased `db`** in the home ns, `:core-seed`-guarded.
+The engine: one bound conn, synchronous reads, a never-throwing write envelope.
+A thin wrapper would buy nothing and put the agent's most-used,
+correctness-critical surface one editable layer away from the real
+datahike/wire boundary — so `db` stays `seon.db`, `:core-seed`-guarded.
 
-Surface (unchanged): `new-id!`, `transact!`, `query`, `pull`, `entity`,
+Surface: `new-id!`, `transact!`, `query`, `pull`, `entity`,
 `as-of`/`since`/`history`, `listen!`/`unlisten!`, `store-inventory`,
 `installed-schema`. **Composes:** `store-inventory` → `query`; `pull`/`entity`
-emit maps; `transact!`'s `:seon.db/tempids` resolves new refs. **Gap (document,
-don't over-build):** tuple `:find` returns positional vectors (not items) —
-correct for counts; for "list of things" use pull-syntax `:find` or `pull`.
-**Budget (public face rendered):** ≤ 2.5k tok — `db` is the one heavy ns (~15k
-today); render its docstring + cheat sheet + verb signatures, keep guard/bridge
-bodies in `seon.db.internal`. The accompanying `db.examples` (~600 tok) is a tiny
-ns of `(comment …)` canonical CHAINS (incl. the `forget!` undo recipe).
+emit maps; `transact!`'s `:seon.db/tempids` resolves new refs. **Budget:** ≤ 2.5k
+tok — `db` is the one heavy ns; render its docstring + cheat sheet + verb
+signatures, keep guard/bridge bodies in `seon.db.internal`. The worked DB chains
+and the cheat sheet live in `my.kb` (the DB manual), not a separate examples ns.
 
-#### `message` — `seon.agent.message`, aliased `message` — PROTECTED
+#### `message` — `seon.agent.message`, aliased `message`
 
-**Why protected:** the single write path for `:seon.agent.message` rows, coupled
-to the wake gate (`waking-inbound?`) and hop-cap. Redefining it could break the
-loop's wake/halt invariants. Surface (keep): `message!`, `user`,
-`agent` (refuses self→self), `waking-inbound?`/`hop-live?`, `user-ref`.
+The single write path for `:seon.agent.message` rows, coupled to the wake gate
+(`waking-inbound?`) and the hop-cap. Surface: `message!`, `user`, `agent`
+(refuses self→self), `waking-inbound?`/`hop-live?`, `user-ref`. Success returns
+`{:seon.agent.message/ok? true …}`; failure returns `{:seon.agent.message/ok?
+false :seon/error …}` (own-ns `ok?` + the shared error value). **Budget:** ~3k
+tok.
 
-**Smell to fix on the floor:** success returns `{:seon.agent.message/ok? true …}`
-but FAILURE returns `{:seon.db/ok? false :seon.db/error …}` — the failure
-envelope leaks the `db` namespace. Fix: failure returns
-`{:seon.agent.message/ok? false :seon.error/message …}` (own-ns ok? + shared
-error map). **Budget:** ~3k tok.
+#### `lifecycle` — `seon.agent.lifecycle`, refer'd verbs
 
-#### `lifecycle` — `seon.agent.lifecycle`, refer'd verbs — PROTECTED
+`wait`/`complete`/`pause`/`resume`/`terminate` are run-FSM mutations the agent
+makes on its OWN run; the agent's state is DERIVED from those primitives via
+`seon.derive/derive-state`, never stored. They return a bare `:seon.derive/state`
+keyword on success ("keyword ⇒ ok, map ⇒ error"), the envelope only on failure.
 
-**Why protected:** `wait`/`complete`/`pause`/`resume`/`terminate` are run-FSM
-mutations; state is derived from them. Redefining them desyncs the FSM. Refer'd
-into the home ns as today. **One documented divergence from the RESULT backbone:**
-the happy path is a bare `:seon.derive/state` keyword (the derived state IS the
-answer), the envelope only on failure — "keyword ⇒ ok, map ⇒ error." **Budget:**
-~1.8k tok. No reshape.
+`seon.agent/start!` is the lifecycle SPAWN verb — a core verb GRANTED to root (and to any
+agent holding the spawn capability), an alias of `create!`, called through the
+SAME `/call` capability gate. It transacts an IDLE child agent and writes
+`:seon.agent/parent` = the caller; the child's quiet bootstrap runs and leaves it
+IDLE — a message is its first trigger. Roles are capability-SETS (which `:seon.fn`s
+are granted + which bootstrap ran), differentiated by Datomic presence/absence at
+the gate, NOT a stored `:kind`/`:role`. The full lifecycle — `:seon.agent/parent`,
+roles-as-capabilities, the root base case, bootstrap-as-seeded-forms — lives in
+[[agent-runtime]]. **Budget:** ~1.8k tok.
 
 ### Owned toolkit — `my.*` (thin, editable wrappers)
 
-#### `my.files` — FORMALIZE (rename + reshape) — floor: `seon.agent.fs`
+#### `my.agent` — the per-agent home ns `my.agent.<id>`
+
+**Why it exists:** the one place a single agent's own state and code live. It
+carries `:my.agent/purpose` (a markdown goal string), a `refine` fn, a
+self-refining purpose block, and the `defn`s the agent authors for itself. It is
+the first per-agent seed worked-example: the bootstrap registers the
+`:my.agent/purpose` schema + the refine fn + the block, so the agent OWNS and SEES
+its own purpose and can rewrite it. The schema lives in [[data-model]];
+purpose-as-seed and the quiet bootstrap that installs it live in [[agent-runtime]].
+**Budget:** the home ns renders full every turn — keep authored fns lean.
+
+#### `my.files` — floor: `seon.agent.fs`
 
 **Why reach for it:** the agent's eyes and hands on the user's machine, gated by
 an allowlist — read, list, stat, walk — without leaving the REPL.
 
 **Floor:** `seon.agent.fs` (+ `seon.agent.fs.internal`) — the protected node:fs
-syscalls + the `SEON_FS_*` allowlist gate. `my.files` is the thin editable
-wrapper; the syscall + gate stay `:core-seed`. The agent can tweak how
-`my.files/read-file` shapes its result, but cannot disable the allowlist (that
-lives on the floor).
+syscalls + the `SEON_FS_*` allowlist gate. The agent shapes how `my.files`
+returns results but cannot disable the allowlist (that lives on the floor).
 
-Surface (keep, renamed): `grants`, `configure!`, `read-file` (paged
-`from-line`/`max-lines` + honest totals), `write-file`, `list-dir`, `walk-dir`,
-`stat`, `file-exists?`, `home-dir`. Map-in/map-out, never-throws, default-deny.
+Surface: `grants`, `configure!`, `read-file` (paged `from-line`/`max-lines` +
+honest totals), `write-file`, `list-dir`, `walk-dir`, `stat`, `file-exists?`,
+`home-dir`. Map-in/map-out, never-throws, default-deny. `read`/`stat`/`write`
+requests reference `:seon.path/abs`; `list-dir`/`walk-dir` entries are
+`:seon.items/items` of `:seon.path/located` (each `{:seon.path/abs …
+:my.files/dir? …}`), so a located item from `grep` or a listing threads straight
+into `read`/`stat`/`grep`. **Budget:** ~2k tok.
 
-**Reshape (the headline backbone work):**
-
-- `read`/`stat`/`write` requests reference `:seon.path/abs` (not the private
-  `:seon.agent.fs/path`), so a `:seon.path/located` from `grep` feeds straight in.
-- `list-dir`/`walk-dir` entries become `:seon.items/items` of `:seon.path/located`
-  (each `{:seon.path/abs … :my.files/dir? …}`), so an entry threads into
-  `stat`/`read`/`grep`. Today bare strings — the one place files breaks the chain.
-
-**Composes:** located items → `read`/`stat`/`grep`; `grants` →
-`my.search` default roots. **Budget:** ~2k tok (the wrapper is thin; the WASI
-branches + syscalls live on the floor).
-
-#### `my.search` — FORMALIZE (rename + reshape) — floor: `seon.agent.search`
+#### `my.search` — floor: `seon.agent.search`
 
 **Why reach for it:** find where something lives by CONTENT (ripgrep) and land on
 absolute, allowlisted hits that feed `read-file` with zero guessing.
 
 **Floor:** `seon.agent.search` (+ `.internal`) — the protected ripgrep `execFile`
 plus the fs-allowlist gate (reuses `seon.agent.fs`, so search and read agree on
-reach). `my.search` is the thin wrapper.
+reach). Surface: `grep` → `{ok? items count truncated?}`; a match IS a
+`:seon.path/located` (`:seon.path/abs` + `:seon.path/line` + `:seon.path/preview`).
+`^:async`, never-throws. Then `(map files/read-file matches)` just works.
+**Budget:** ~1.5k tok.
 
-Surface (keep): `grep` → `{ok? + items + count + truncated?}`. `^:async`,
-never-throws. **Reshape (the single highest-value fix):** a match becomes a
-`:seon.path/located` (`:seon.path/abs`+`:seon.path/line`+`:seon.path/preview`) and
-the envelope uses `:seon.items/*`. Then `(map files/read-file matches)` just
-works — the documented manual rekey DELETES. **Smell:** error STRING → the shared
-`:seon.error/*` map. **Budget:** ~1.5k tok (wrapper).
-
-#### `my.shell` — NEW (tool + floor) — floor: `seon.agent.shell` (NEW)
+#### `my.shell` — floor: `seon.agent.shell`
 
 **Why reach for it:** run a real command — a formatter, a one-off `node`/`python`
-script, a `git` query — and get `{exit out err}` back as data. The survey's
-recurring "give the agent a terminal" capability (Terminal-Bench / SWE-bench
-enabler) and the one genuinely missing surface.
+script, a `git` query — and get `{exit out err}` back as data.
 
-**Floor:** a NEW protected `seon.agent.shell` (+ `.internal`) — `child_process`
-`execFile` (argv, NEVER `sh -c`), the fs cwd gate, the timeout + maxBuffer caps —
-modeled exactly on `seon.agent.search.internal`. `my.shell` is the thin wrapper.
+**Floor:** the protected `seon.agent.shell` (+ `.internal`) — `child_process`
+`execFile` (argv, NEVER `sh -c`), the fs cwd gate, the timeout + maxBuffer caps.
 
 ```clojure
 (schema/register! :seon.shell/cmd        [:string {:min 1}])  ; argv[0]
@@ -411,42 +340,44 @@ modeled exactly on `seon.agent.search.internal`. `my.shell` is the thin wrapper.
    The cwd is gated by the seon.agent.fs allowlist; default-deny until the host
    grants SEON_SHELL." ;; [:=> [:cat :seon.shell/run-request] :seon.shell/run-response]
   )
-
 ```
 
 **Safety:** argv-only; cwd through `seon.agent.fs/stat`; timeout SIGTERM;
 maxBuffer cap (honest `timed-out?`/truncation); `SEON_SHELL` host grant
-(default-deny, same posture as `SEON_FS_*`). Soft boundary against LLM accidents,
-not a security boundary. **Composes:** `:seon.shell/out` → transform →
+(default-deny, same posture as `SEON_FS_*`). A soft boundary against LLM
+accidents, not a security boundary. **Composes:** `:seon.shell/out` → transform →
 `db/transact!`; `cwd` takes a `:seon.path/abs` from a listing/grep. **Budget:**
-~1.2k tok (wrapper).
+~1.2k tok.
 
-#### `my.todos` — FORMALIZE (rename) — floor: `seon.db` + the `:seon.agent.todo/*` schema
+#### `my.todo` — floor: `seon.db` + the `:my.todo/*` schema
 
 **Why reach for it:** so a resumed or distracted agent always sees what's left —
-open items render every turn; an empty section is the done-signal.
+open items render every turn; an empty list is the done-signal.
 
-**Floor:** `seon.db` (the engine) + the `:seon.agent.todo/*` entity schema. A todo
-is just an entity; the wrapper holds the verbs + the owner-scope default, the db
-engine does the durable write. (The schema can stay registered on a protected
-seon ns or move with `my.todos` — recommend the verbs in `my.todos`, the schema
-referencing the protected `:seon.db/ref`/`:seon.db/id` shapes.)
+**Floor:** `seon.db` (the engine) + the `:my.todo/*` entity schema. A todo is just
+an entity; the wrapper holds the verbs + the owner-scope default, the db engine
+does the durable write.
 
-Surface (keep, renamed): `add!` → `{ok? id}`, `complete!`/`reopen!` (idempotent),
-`list-open` → `{ok? items}`. Map-in/map-out, never-throws, owner-scoped to the
-ALS agent. **Reshape (cosmetic):** add the `:seon.items/count`/`truncated?` mixin
-to `list-open` (its vector already IS the items pattern). **Budget:** ~1.6k tok.
+Surface: `add!` → `{ok? id}` (accepts an optional `:my.todo/parent` ref),
+`complete!`/`reopen!` (idempotent), `list-open` → the `:seon.items/*` envelope.
+Map-in/map-out, never-throws, scoped per-agent by the `:my.todo/agent` ref.
 
-#### `my.test` — NEW lean facade (Q2) — floor: `seon.test.runner`
+**Planning IS the todo tree.** A todo's `:my.todo/parent` ref makes the work-list
+a plan tree (top = plans/milestones, leaves = actions); a parent's progress is a
+DERIVED roll-up of its children's status — there is no separate plan system. The
+`:my.todo/*` schema, the tree shape, the roll-up derivation, and per-agent scoping
+live in [[data-model]]. **Budget:** ~1.6k tok.
 
-**Why reach for it:** close the define→eval→**verify** loop in one call — "did
-the fn I just (re)defined pass its `:test`?" — and score an edit the way every
-serious benchmark does: it fixed the broken case AND didn't break the working ones.
+#### `my.test` — floor: `seon.test.runner`
 
-**Floor:** `seon.test.runner` — the engine (cljs.test capture, fixtures, stash,
-DB projection). Heavy (~9.5k tok, 10 fns) — stays the protected engine; `my.test`
-is the lean wrapper the agent sees. Authoring stays a COLOCATION convention
-(`{:test (fn [] (is …))}` meta or `deftest` — no "register a test" call).
+**Why reach for it:** close the define→eval→**verify** loop in one call — "did the
+fn I just (re)defined pass its `:test`?" — and score an edit the way every serious
+benchmark does: it fixed the broken case AND didn't break the working ones.
+
+**Floor:** `seon.test.runner` — the engine (cljs.test capture, fixtures, stash, DB
+projection) stays the protected floor; `my.test` is the lean wrapper. Authoring is
+a COLOCATION convention (`{:test (fn [] (is …))}` meta or `deftest` — no "register
+a test" call).
 
 ```clojure
 (schema/register! :seon.test/pass?    :boolean)
@@ -457,46 +388,52 @@ is the lean wrapper the agent sees. Authoring stays a COLOCATION convention
 (defn ^:async check
   "Run the tests for a fn/ns → {pass? summary failures}. The verify half of
    define→eval→verify: (test/check 'my.x/add)." )
-;; The FAIL_TO_PASS / PASS_TO_PASS dual-set (benchmark survey §D) — score an edit:
+;; Score an edit with the FAIL_TO_PASS / PASS_TO_PASS dual-set:
 (defn ^:async check-edit
   "Run a must-now-pass set + a must-still-pass set; report {fixed? regressed?}." )
-
 ```
 
-**Smell to fix in the same patch:** `seon.test.runner`'s `::summary` uses BARE
-keywords (`{:test :pass :fail :error}`) — a Data-Rules violation; namespace them.
-**Render-rule (owner decision — see the dedicated note below):** the
-per-namespace `:seon.test` block renders into context ONLY when the rendered ns
-is the agent's CURRENT namespace — the agent sees + iterates its OWN tests, never
-another ns's. **Composes:** `:seon.test/failures` carry `:seon.test/var` for a
-follow-up `db/pull` of `:seon.test/source`. **Budget (facade):** ~900 tok.
+A namespace's `:seon.test` colocated tests render into context ONLY for the
+agent's CURRENT namespace — the agent sees and iterates its OWN tests, never
+another ns's (the render-curation rule lives in [[data-model]]). **Composes:**
+`:seon.test/failures` carry `:seon.test/var` for a follow-up `db/pull` of
+`:seon.test/source`. **Budget:** ~900 tok.
 
-#### `my.kb` — EXISTS, stays `my.*` (schema + worked domain) — floor: `seon.db`
+#### `my.kb` — floor: `seon.db`
 
 **Why reach for it:** consult what's already known before researching, and persist
 a verified fact with provenance — via `db/query` + `db/transact!` over a real
 per-domain schema, NOT a generic memory store.
 
-**Floor:** `seon.db`. `my.kb` is already exactly right: it registers the shared
-provenance shapes (`:my.kb/source-path`, `/source-line`, `/source-line-end`,
-`/verified-at`, `/confidence`) and documents the move — design a
-`my.kb.<domain>` schema, then transact ONE row mixing domain attrs with the
-shared `:my.kb/*` provenance. There is deliberately no `store!`/`consult` API
-(Q1). **Budget:** ~700 tok (schema only). Optionally add one more worked domain
-(`my.kb.paper`).
+**The knowledge base's API IS `seon.db`.** There is deliberately no
+`remember!`/`recall`/`forget` CRUD facade: `remember!` would just be `transact!`
+with a stamped `:my.kb/verified-at`, `recall` is `query`, and a CRUD wrapper
+re-grows the memory-blob anti-pattern while hiding the schema-design skill that IS
+the product. Designing a `my.kb.<domain>` schema is the same skill as modeling the
+human's data; `store-inventory` + `query` is the discoverable recall path.
 
-#### `my.code` — NEW: `forget!`, the missing symbol-lifecycle verb — floor: `seon.eval` + `seon.db`
+`my.kb` registers the shared provenance shapes (`:my.kb/source-path`,
+`/source-line`, `/source-line-end`, `/verified-at`, `/confidence`); domain
+knowledge lives in `my.kb.<domain>` schemas, each row mixing domain attrs with the
+shared `:my.kb/*` provenance. KB rows carry no agent-ref → the KB is GLOBAL (one
+base all agents share). `my.kb` is also the **DB manual** — it carries the worked
+`db` chains and the cheat sheet the agent consults (the role a separate examples
+ns would otherwise play). The `:my.kb.*` schemas + global scoping live in
+[[data-model]]. **Budget:** ~700 tok (schema + the worked chains).
+
+#### `my.code` — floor: `seon.eval` + `seon.db`
 
 **Why reach for it:** the agent can DEFINE and REDEFINE (= upsert) a
-fn/schema/test, but has no way to REMOVE one — a wrong `(defn …)` lingers as a
-live binding AND a `:seon.fn` row forever. `forget!` is the missing third verb of
-define→redefine→forget, so the agent cleans up its own toolkit.
+fn/schema/test, but otherwise has no way to REMOVE one — a wrong `(defn …)`
+lingers as a live binding AND a `:seon.fn` row. `forget!` is the missing third
+verb of define→redefine→forget, so the agent cleans up its own toolkit.
 
 Every defined thing is an entity with a UNIQUE identity sym (`:seon.fn/sym`,
 `:seon.schema/key`, `:seon.test/sym`), so ONE general verb covers all three:
 
 ```clojure
 (schema/register! :seon.code/sym  :symbol)
+;; :seon.code/kind is a DERIVED response label, NEVER stored on any row.
 (schema/register! :seon.code/kind [:enum :seon.fn :seon.schema :seon.test])
 (schema/register! :seon.code/forget-response
   [:or [:map [:seon.code/ok? [:= true]] [:seon.code/sym :seon.code/sym]
@@ -508,54 +445,46 @@ Every defined thing is an entity with a UNIQUE identity sym (`:seon.fn/sym`,
    globalThis + the analyzer, via the same compile-state your evals use). REFUSES
    a :core-seed sym (you cannot delete the protected floor). Errors are values.
    (forget! 'my.x/old-helper)" )
-
 ```
 
-Behavior, grounded in the real surfaces:
+Behavior:
 
-- **Resolve the owning entity** by trying the three identity attrs in order;
+- **Resolve the owning entity** by which identity attr the sym carries; an
   unknown sym → a legible `{:seon.code/ok? false :seon.error/message …}`.
-- **Core guard — REUSE, do not reinvent.** `seon.eval/core-origin-fn-syms`
-  returns the subset whose current source tx is `:seon.db/origin :core-seed`;
-  `forget!` calls it (+ the schema sibling) and refuses a floor sym with the same
-  message `reject-core-overrides` warns (`eval.cljs` ~L1702-1750). One provenance
-  rule. Note: a `:toolkit-seed` `my.*` wrapper is NOT `:core-seed`, so it is
-  forgettable — exactly the owned-tool semantics.
+- **Core guard.** `forget!` calls `seon.eval/core-origin-fn-syms` (+ the schema
+  sibling) and refuses a floor sym whose source tx is `:seon.db/origin
+  :core-seed`. A `:toolkit-seed`/`:agent` `my.*` wrapper is NOT `:core-seed`, so
+  it is forgettable — the owned-tool semantics.
 - **Retract the entity** with `[:db.fn/retractEntity [<identity-attr> s]]` — a
   normal `db/transact!`, so history retains every prior value.
-- **Drop the live binding** the way result-var pruning does: undef from BOTH
-  globalThis and the analyzer via the agent's compile-state (the mechanism at
-  `eval.cljs` ~L724/L1035). Retracting the row without undef'ing leaves a callable
-  ghost the agent can't see — both halves are load-bearing.
+- **Drop the live binding** by undef'ing from BOTH globalThis and the analyzer via
+  the agent's compile-state. Retracting the row without undef'ing would leave a
+  callable ghost — both halves are load-bearing.
 
-**Placement (recommended): the new tiny `my.code` ns**, refer'd into the home ns
-beside the lifecycle verbs — symbol-lifecycle is its own concern and `my.code` is
-its natural home if more verbs appear (e.g. `rename!`). It requires `seon.eval`
-(the floor: compile-state + provenance guard + undef) and `seon.db` (retract). It
-is itself a `my.*` editable wrapper over a protected floor — consistent with the
-two-tier model. (Cheaper alternative — a public `forget!` ON `seon.eval` — buries
-an agent verb in the heavy protected compiler and isn't in the home-ns set; the
-`my.code` wrapper is cleaner.)
+**`:seon.code/kind` is a DERIVED response label, never stored.** The forget
+response names which kind was removed, and that value is COMPUTED from which
+identity attribute the entity carried — `:seon.fn/sym` present → `:seon.fn`,
+`:seon.schema/key` → `:seon.schema`, `:seon.test/sym` → `:seon.test`. Its enum
+values ARE those namespace keywords. No row ever stores a `:seon.code/kind` field;
+it is a value-enum label produced at return time, exactly the
+entity-kind-vs-value-enum distinction (a stored field that selects a row's schema
+is banned; a derived/value label is fine — [[data-model]]).
 
-**UNDO is free — no new verb.** The store is bitemporal: re-transact the sym's
-prior `:seon.fn/source` from `(db/history)` and re-eval it, or read `(db/as-of
-t)` before the forget. A `restore!` verb is NOT worth it (it is one
-`history`/`as-of` read + the agent's normal define move); document the recipe in
-`db.examples`, add `restore!` only if forgets prove common AND error-prone in
-live drives. **Composes:** bare sym OR `{:seon.code/sym 'my.x/foo}` → RESULT
-envelope. **Budget:** ~900 tok.
+**Undo is free — no new verb.** The store is bitemporal: re-transact the sym's
+prior `:seon.fn/source` from `(db/history)` and re-eval it, or read `(db/as-of t)`
+before the forget. The recipe lives in `my.kb` (the DB manual). **Composes:** a
+bare sym OR `{:seon.code/sym 'my.x/foo}` → the RESULT envelope. **Budget:** ~900
+tok.
 
-#### `my.schedule` / `remind` — IN: the agent verb over the existing cron engine — floor: `seon.agent.schedule`
+#### `my.schedule` — floor: `seon.agent.schedule`
 
 **Why reach for it:** "remind me every morning," "run this at 9am," "check X in an
-hour" — the assistant-flavor capability a personal AI obviously needs (survey §D:
-GAIA / tau-bench register).
+hour" — the assistant-flavor capability a personal AI obviously needs.
 
-**Floor:** `seon.agent.schedule` ALREADY has the hard part — the
-`:seon.agent.schedule/*` entity (5-field cron + a qualified fn), the pure cron
-logic (`parse`/`due?`/`next-fire-at`), and `fire-due-schedules!` (the schedule
-half of the ONE ticker). The GAP is purely the agent-facing verb. `my.schedule`
-is the thin wrapper that transacts a schedule entity onto the agent's
+**Floor:** `seon.agent.schedule` — the `:seon.agent.schedule/*` entity (5-field
+cron + a qualified fn), the pure cron logic (`parse`/`due?`/`next-fire-at`), and
+`fire-due-schedules!` (the schedule half of the ONE ticker). `my.schedule` is the
+thin wrapper that transacts a schedule entity onto the agent's
 `:seon.agent/schedules`.
 
 ```clojure
@@ -567,31 +496,23 @@ is the thin wrapper that transacts a schedule entity onto the agent's
 (defn list!   [_]  #_"your schedules → the :seon.items/items envelope")
 (defn ^:async cancel! [m] #_"{:seon.agent.schedule/id …} → retract one")
 (defn ^:async remind! [m] #_"sugar: a daily/one-shot wake with :say text")
-
 ```
 
-**Honest caveat (read `seon.agent.schedule` ~L224-228):** firing TODAY opens +
-drives a `:schedule` run (the wake), but running the schedule's fn IN THE AGENT
-SANDBOX is DEFERRED pending the one-exec-service routing. So `remind!` (wake +
-`:say` surfaces in the woken run's context) works now; "every morning, run THIS
-fn" is the same verb, fn-exec landing with that routing. The verb shape is
-forward-compatible — ship it. **Recommend IN.** **Budget:** ~1.2k tok (verb only).
+A due schedule fires via the ticker: it opens a `:schedule` run (the wake), the
+`:say` text surfaces in the woken run's context, and the schedule's fn runs in the
+agent's sandbox through the one exec service. The ticker + run mechanics live in
+[[agent-runtime]]. **Budget:** ~1.2k tok (verb only).
 
-#### `my.recall` — IN: semantic (KNN) retrieval — floor: `seon.embed`
+#### `my.recall` — floor: `seon.embed`
 
 **Why reach for it:** find what's stored BY MEANING, not exact attr/keyword —
 "what do I know about the user's sleep?" matching a row that never said "sleep."
-The read surface behind the gym's `s32` "seeded-claim-not-found" finding (the
-agent re-researches because exact datalog missed a semantically-relevant fact).
-This is categorically NOT the rejected CRUD facade: that wrapped
-`transact!`/`query` (which datalog already does); THIS expresses
-nearest-by-meaning, which datalog CANNOT.
+This is categorically NOT a CRUD facade: that would wrap `transact!`/`query` (which
+datalog already does); THIS expresses nearest-by-meaning, which datalog CANNOT.
 
-**Floor:** `seon.embed` — pod-side, READ-ONLY (`search`/`search-pull`). The pod
-never embeds; it ships `{query, k, eids}` over the UDS to the JVM wire-server,
-which embeds the query (retrieval prefix) + runs HNSW KNN, returning
-`{:seon.embed/hits [{:seon.embed/eid :seon.embed/distance :seon.embed/entity}
-…]}` distance-ascending. Gated by `SEON_EMBED`.
+**Floor:** `seon.embed` — pod-side, READ-ONLY. The pod never embeds; it ships
+`{query, k, eids}` over the wire to the JVM writer, which embeds the query
+(retrieval prefix) + runs HNSW KNN, returning hits distance-ascending.
 
 ```clojure
 (schema/register! :seon.recall/query :string)
@@ -601,194 +522,67 @@ which embeds the query (retrieval prefix) + runs HNSW KNN, returning
    :seon.items/items envelope (each item the pulled entity + its distance). Gated
    by SEON_EMBED; when OFF, a legible ok?-false pointing you at store-inventory +
    datalog/grep — never an error. (recall {:seon.recall/query \"user sleep\"})" )
-
 ```
 
-The wrapper's two jobs over `seon.embed/search-pull`: reshape `:seon.embed/hits`
-→ the `:seon.items/*` envelope (so hits thread into `pull`/`transact!`), and
-handle `SEON_EMBED` off as a graceful ok?-false fallback. Mark **FORMALIZE** — the
-engine exists; the lean wrapper + items-envelope + off-fallback is the gap.
-**Recommend IN.** **Budget:** ~900 tok.
+The wrapper reshapes `:seon.embed/hits` → the `:seon.items/*` envelope (so hits
+thread into `pull`/`transact!`) and handles `SEON_EMBED` off as a graceful
+ok?-false fallback. **Budget:** ~900 tok.
 
-#### `my.tile` — NEW lean facade (agent-facing call only) — floor: `seon.render.live-tile` + `seon.ui.components`
+#### `my.tile` — floor: the UI tile/component layer ([[ui]])
 
-**Why reach for it:** show the human a finished view — a card, a pros/cons, a
+**Why reach for it:** show the human a finished view — a note, a pros/cons, a
 recommendation — with ONE call and zero hiccup authoring; the agent says what it
 MEANS, the human sees the picture.
 
-**Floor / cross-lane:** the Layer-2 facade from
-`docs/prds/agent-fsm/ux-toolkit-proposal.md` — Session U owns the Layer-1
-`seon.ui.components` hiccup + the markdown path; `my.tile` is the agent-facing
-call. It writes by transacting onto the agent's `:seon.render.live-tile/content`
-(the welcome-wiring move in `seon.render.live-tile`) — a literal hiccup (built
-from a U component) bypasses SCI; a fn symbol late-resolves.
+`my.tile` is the agent-facing call over the tile/render machinery in [[ui]]. It
+writes by transacting the built hiccup onto the agent's `:seon.render/html`
+(the agent's own html render — its live tile) — a
+literal hiccup (built from a UI component) bypasses SCI; a fn symbol late-resolves
+SCI-bounded and re-derives every render.
 
 ```clojure
 (schema/register! :seon.tile/view [:or :keyword :symbol])  ; a prebuilt view key OR your own fn sym
 (defn ^:async show!
   "Set your live tile to a prebuilt VIEW rendered with DATA — transacts the built
-   hiccup onto :seon.render.live-tile/content. (tile/show! {:seon.tile/view
+   hiccup onto the agent's :seon.render/html. (tile/show! {:seon.tile/view
    :pros-cons :seon.tile/data {:seon.ui/title \"…\" …}})" )
-(defn ^:async card!      [m] #_"{:seon.ui/title :seon.ui/body :seon.ui/tone}")
-(defn ^:async pros-cons! [m] #_"{:seon.ui/title :seon.ui/pros [..] :seon.ui/cons [..]}")
-(defn ^:async recommend! [m] #_"{:seon.ui/recommendation :seon.ui/rationale :seon.ui/options [..]}")
-
 ```
 
+Prebuilt views (`:seon.tile/view` keys): `:note`, `:pros-cons`, `:recommendation`.
 **Composes:** `:seon.tile/data` is plain namespaced data the agent already has (a
 `store-inventory` row, a `query` result) — show it without rendering it. For
-dynamic tiles, `:seon.tile/view` is a fn SYMBOL (the agent's own
-hiccup-returning fn), so the tile re-derives every render. **Budget:** ~1k tok.
+dynamic tiles, `:seon.tile/view` is the agent's own hiccup-returning fn SYMBOL, so
+the tile re-derives every render. The tile / slot / render mechanism lives in
+[[ui]]. **Budget:** ~1k tok.
 
-#### `my.blob` — IN but DEFERRED: the third storage tier — floor: `seon.blob` (NEW)
+#### `my.blob` — floor: `seon.blob`
 
 **Why reach for it:** persist LARGE content that doesn't belong in datoms — a
 benchmark run's full output, a scraped PDF, anything big the agent's domain code
 produces — keeping only a hash + small projection in the DB. The `Blobs` tier of
-the load-bearing three-tier storage rule (DB datoms = small indexed projections;
-Blobs = persistent full content; globalThis stash = volatile per-session values).
+the three-tier storage rule (DB datoms = small indexed projections; Blobs =
+persistent full content; the globalThis stash = volatile per-session values).
 
-**Floor:** a NEW protected `seon.blob` (content-addressed, on-disk zstd per the
-tier spec). `my.blob` would be the thin `put!`/`get` wrapper, storing the hash on
-a typed projection entity.
+**Floor:** the protected `seon.blob` (content-addressed, on-disk zstd). `my.blob`
+is the thin `put!`/`get` wrapper, storing the hash on a typed projection entity.
 
 ```clojure
 (defn ^:async put! [m] #_"{:seon.blob/content \"…\"} → {:seon.blob/ok? true :seon.blob/hash \"…\"}")
 (defn ^:async get  [m] #_"{:seon.blob/hash \"…\"} → {:seon.blob/ok? true :seon.blob/content \"…\"} | not-found")
-
 ```
 
-**Verdict: IN but DEFERRED — the honest call.** `seon.blob` does NOT exist in
-`src/` today (only the three-tier DESIGN doc describes it; the wire has
-content-addressing infra but no agent-facing blob verb). The design is settled
-and the need is real, but NOTHING currently needs it: the core
-define→eval→test→persist loop fits in datoms + the globalThis stash (the test
-runner exemplifies "full payload in the stash, projection in the DB"). Building a
-store with no consumer is speculative. **Recommend: spec it now, build it WITH its
-first consumer** (the benchmark-output harness or doc-ingest) so the on-disk
-format is shaped by a real payload. **Budget (when built):** ~800 tok.
+**Budget:** ~800 tok.
 
-## The tests-render-rule (owner decision — for the prompt/render work)
+## Detail docs
 
-A RENDER behavior, not a utility surface — recorded here so the toolkit spec is
-complete and the prompt/render owner picks it up.
-
-**Rule:** the per-namespace `:seon.test` block renders into the agent's context
-ONLY for the agent's CURRENT namespace; never for any other rendered ns. The
-agent sees and iterates ITS OWN tests (the verify half of the loop) without other
-nses' tests bloating the prompt.
-
-- **Where it lives:** the namespaces-section / `render-namespace` path
-  (`seon.ctx.namespaces` + `seon.ctx/render-namespace`). That code already
-  curates which nses render full (my.*, third-party, the CURRENT ns, a small
-  `seon.*` whitelist) and renders `:seon.fn`/`:seon.schema`/`:seon.test` per kind.
-  The change is narrow: gate the `:seon.test` per-kind emission on
-  `ns == current-ns` (current-ns is already derived from the latest
-  `:seon.eval/ns` datom — `seon.agent/current-ns`).
-- **Coordination:** flag this to the in-flight **GI-1 double-render fix** — both
-  touch the per-kind render in `render-namespace`; land them together so the
-  test-gate and the de-dup don't fight. A one-conditional change, not a new
-  mechanism (reactive-context: the block simply doesn't render off-current-ns).
-
-## Build / REPL-test order
-
-Each unit is independently evaluable against the live pod — define, eval, read the
-value back. Order follows the dependency graph; the backbone shapes + the
-`:toolkit-seed` origin come first because every wrapper depends on them.
-
-1. **Backbone shapes + `:toolkit-seed` origin** — register `:seon.path/*`,
-   `:seon.result/ok?`, `:seon.items/*` on the floor; confirm `:seon.error/*` +
-   `:seon.db/ref` referenceable; add the `:toolkit-seed` boot-index origin for
-   `my.*` nses (so `core-origin-fn-syms` leaves them editable). Test:
-   `(schema/registered? :seon.path/located)`; a `(defn my.files/x …)` redef
-   persists (not core-guarded) while `(defn seon.agent.fs/read-file …)` is
-   refused.
-2. **`my.files`** — rename wrapper over `seon.agent.fs`; reshape paths +
-   located-item listings. Test: `(files/list-dir {…})` returns located maps;
-   `(-> (files/walk-dir {…}) :seon.items/items first files/stat)` threads.
-3. **`my.search`** — rename wrapper over `seon.agent.search`; match →
-   `:seon.path/located`, items mixin, error → map. Test:
-   `(->> (search/grep {:seon.search/pattern "defn"}) :seon.items/items (map
-   files/read-file))` runs with no rekey. (Proves the headline fix.)
-4. **`my.shell` + the `seon.agent.shell` floor** (NEW) — child_process execFile,
-   fs cwd gate, timeout. Test: `(shell/run {:seon.shell/cmd "echo"
-   :seon.shell/args ["hi"]})` → `{ok? exit 0 out "hi\n"}`; `timeout-ms 1` on
-   `sleep` → `timed-out? true`.
-5. **`my.test`** (facade over `seon.test.runner`) — namespace the engine summary
-   in the same patch. Test: `(test/check 'seon.db-test/…)` → `{pass? summary
-   failures}`; `check-edit` over a known fail+pass pair.
-6. **`my.todos`** — rename wrapper; add the items mixin to `list-open`.
-7. **`message` floor smell** — failure envelope → own-ns ok? + `:seon.error/*`.
-8. **`my.code` / `forget!`** (NEW) — over `seon.eval`'s guard + undef. Test:
-   `(forget! 'my.x/foo)` retracts the row AND the binding (a follow-up `foo` is
-   undeclared); `(forget! 'seon.db/query)` → ok?-false (floor-guarded); the undo
-   recipe restores it.
-9. **`my.schedule` / `remind`** (verb over the existing engine). Test:
-   `(schedule/add! {:seon.agent.schedule/cron "0 8 * * *" …})` transacts a
-   schedule; the ticker fires it (already proven).
-10. **`my.recall`** (over `seon.embed`). Test (SEON_EMBED on): items envelope of
-    pulled entities; off → graceful ok?-false fallback.
-11. **`lifecycle`** — no code change; add the "keyword ⇒ ok" docstring note.
-12. **`my.tile`** (facade) — depends on U's `seon.ui.components` +
-    `seon.render.live-tile`. Test: `(tile/card! {…})` transacts literal hiccup.
-13. **`db.examples`** — write the canonical chains (incl. the `forget!` undo
-    recipe) once the above are stable.
-14. **`my.blob` + the `seon.blob` floor** (DEFERRED) — build only with its first
-    consumer (benchmark output / doc-ingest).
-15. **`my.kb`** — no build (convention only); optionally add a worked
-    `my.kb.<domain>`.
-
-## Candidate verdicts (summary)
-
-| Candidate | Verdict | Floor | Why |
-|---|---|---|---|
-| `my.code` / `forget!` | **IN — build** | `seon.eval` + `seon.db` | The missing third lifecycle verb; one general retract+undef over the unique sym; core-guarded by the existing `:core-seed` check; undo is free (bitemporal). |
-| `my.schedule` / `remind` | **IN — build the verb** | `seon.agent.schedule` | Cron entity + ticker already exist; only the agent verb is missing; core assistant capability. `remind!` works today; "run THIS fn" lands with the one-exec-service routing. |
-| `my.recall` (semantic KNN) | **IN — formalize** | `seon.embed` | Read-only nearest-by-meaning over the existing wire KNN; a capability datalog can't express; the surface behind the `s32` finding. Distinct from the rejected CRUD facade. |
-| `my.blob` | **IN — but DEFERRED** | `seon.blob` (NEW) | The third storage tier is sound + specified, but the floor isn't built and has no consumer; build it with its first real payload, not speculatively. |
-| `kb` CRUD facade (`remember!/recall/forget`) | **OUT** | — | Duplicates `transact!`/`query`, re-grows the memory-blob anti-pattern, hides the schema-design skill (Q1). |
-
-## The two open questions, decided
-
-### Q1 — A `kb` CRUD facade (`remember!/recall/forget` over `my.kb`)? — NO.
-
-(Distinct from the catalog's real `forget!` — a general symbol-RETRACT verb in
-`my.code`, not a kb write — and the real semantic `my.recall` over `seon.embed`.
-This rejects a CRUD wrapper around `my.kb` writes/reads.) Four grounded reasons:
-
-1. **It duplicates `db`.** `remember!` is `transact!` with a stamped
-   `:my.kb/verified-at`; `recall` is `query`; `forget` is a retract. The
-   Don't-Be-A-Dumbass rule (one mechanism) and reactive-context doctrine (derive,
-   don't add a subsystem) both say no.
-2. **It re-grows the anti-pattern `my.kb` forbids.** A `remember!(text)` API
-   biases toward a generic memory-blob; `my.kb`'s docstring explicitly says "do
-   NOT build a general memory-markdown structure" — knowledge lives in
-   `my.kb.<domain>` sub-namespaces with REAL schemas.
-3. **It hides the skill that IS the product.** Designing a `my.kb.<domain>` schema
-   is the same skill as modeling the human's data. `store-inventory` + `query`
-   ("consult FIRST") is already the discoverable recall path, vocabulary-agnostic
-   (the gym's `reuses-schemas` axis grades exactly this).
-4. **The one real win is already covered.** Auto-stamping provenance is a
-   three-line worked example, not an API — and `my.kb` already shows it.
-
-Keep `my.kb` as the registered provenance shapes + the worked-domain exemplar; the
-knowledge base's API is `seon.db`.
-
-### Q2 — `test` as its own ns, or `:test`-meta + a runner verb? — Its own LEAN `my.test` facade.
-
-Both halves are true and don't conflict: authoring stays a COLOCATION CONVENTION
-(`{:test (fn [] …)}` or `deftest` — no "register a test" call), AND the agent gets
-a small `my.test` facade because:
-
-1. **The loop needs a one-call verify.** `(test/check 'my.x/add)` → `{pass?
-   summary failures}` is define→eval→**verify** in one line; the
-   `seon.test.runner` engine (10 fns, ~9.5k tok) is a floor, not a context surface.
-2. **The dual-set shape is a recurring capability (survey §D).** "A test runner
-   with structured pass/fail" recurs across SWE-bench/Aider/Commit0/SWE-Lancer/
-   Terminal-Bench; the GAP flagged is the FAIL_TO_PASS/PASS_TO_PASS dual-set —
-   `check-edit` gives it natively.
-3. **It fixes a live smell.** Building the facade forces namespacing the engine's
-   bare-keyword `::summary`, a Data-Rules violation, in the same patch.
-
-So: a lean `my.test` ns (editable wrapper) over the protected `seon.test.runner`
-engine; authoring is meta/deftest with no extra ceremony.
+- [[data-model]] — the `:my.kb.*` / `:my.todo/*` (tree) / `:my.agent/*` schemas +
+  data-agent-ref scoping; the `:seon/error` value; the entity-kind-vs-value-enum
+  rule; index-everything / show-`my.*`-full.
+- [[agent-runtime]] — the loop/run/turn/FSM; creation-as-idle; bootstrap-as-seeded
+  forms; `start!` / `:seon.agent/parent` / roles-as-capabilities / root base case;
+  the ticker; isolation tiers.
+- [[ui]] — block / render / tile / slot / layout; reitit routing + the `/call`
+  capability gate; the seed-copy + variadic `install!`/`remove!` model.
+- [[architecture]] — the map: the glossary, the cross-cutting principles, the
+  deployment topology.
+- [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset.
