@@ -1131,7 +1131,22 @@
    the eval `:ok` to false EVEN THOUGH the alias/refer map wires up and
    the vars resolve at runtime (live-proven). So we do NOT trust the
    eval `:ok`; we verify success by PROBING that the refer'd `complete`
-   resolves to a fn in the home ns, and only throw when that probe fails."
+   resolves to a fn in the home ns, and only throw when that probe fails.
+
+   The home ns's runtime JS object is materialized by a BARE `(ns <home>)`
+   prime BEFORE the require/refer form. Why (root-caused + LIVE-PROVEN
+   2026-06-26): a `(defn foo)` in `my.agent.X` emits `my.agent.X.foo = …`,
+   which assumes the nested object path already exists — the `:def` emit
+   does NOT create it (cljs.compiler), and `goog.provide` is unreliable in
+   self-host (cljs forces `goog.isProvided_`→false). Object creation rides
+   on the ns-form's emit COMPLETING. But the host-bundled
+   `:refer [wait complete …]` raises an `:undeclared-var` that ABORTS the
+   emit before the object is provided — so the require/refer form alone
+   wires the analyzer entry + refers but leaves NO runtime object, and the
+   agent's first `(defn …)` writes into `undefined`. A bare `(ns <home>)`
+   has no refer to abort on, so it provides the object cleanly; the
+   subsequent require/refer form then layers the aliases on the existing
+   object (its own emit still aborts, harmlessly — the object persists)."
   {:malli/schema
    [:=> [:catn [::compile-state :any] [::agent-ns-sym :any] [::agent-id :any]] :any]}
   [compile-state agent-ns-sym _agent-id]
@@ -1143,6 +1158,11 @@
              " [seon.schema :as schema]"
              " [seon.db :as db]"
              " [seon.agent.todo :as todo]))")]
+    ;; Materialize the home ns's runtime JS object FIRST via a bare ns
+    ;; prime (no refer to abort the emit), so a later `(defn …)` has a path
+    ;; to write into. The require/refer form below then wires the aliases.
+    (await (eval compile-state (str "(ns " agent-ns-sym ")")
+                 {:ns 'cljs.user :analyze-deps? true}))
     (await (eval compile-state setup-src
                  {:ns 'cljs.user :analyze-deps? true}))
     ;; The benign refer-warning makes the ns form report :ok false, so the
