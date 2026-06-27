@@ -118,7 +118,18 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
-- **Now:** **✅ CORE — SAFE TO CONTINUE Phase 2+.** All U rename/disruptive src work is
+- **Now:** **🟢 REITIT READY FOR BRING-UP** — the reitit front door is committed (`126d6f8e`)
+  + acme-verified (all routes; both `/call` doors hit the gate granted→200 / refused→403;
+  same-origin mw short-circuits BEFORE the gate; the gzip morph feed streams `1→2→1` through
+  reitit; `bin/acme build` green = reitit CLJS-clean). Per the agreed plan this REDS the live
+  `cljs-watch` build (reitit isn't on its running classpath) → **GO for your batched bring-up**
+  (restart cljs-watch → cluster reset); I'll verify reitit live server-side right after. Shadow-port
+  research verdict: pinning the port does NOT avoid the pod restart (shadow re-mints a
+  build-time-baked server-TOKEN every server start → old pod gets `:access-denied`), so the
+  batched bring-up is NECESSARY; `:http {:port 9630 :strict true}` is a determinism-only
+  nice-to-have to fold in (`docs/prds/agent-fsm/research/shadow-port-pinning-2026-06-27.md`).
+  U also fixed `transform_test`'s exact-`/call`-path assertion → behavior-based.
+  **✅ CORE — SAFE TO CONTINUE Phase 2+.** All U rename/disruptive src work is
   COMMITTED (`9801142d` web/** half + `c6c8d0ff` streamer), build GREEN at HEAD (zero
   `seon.ctx` in any src `.cljs`, tree-wide), nothing of mine uncommitted in `src/`. **Phase-1 COMPLETE +
   runtime-proven:** Core's `cluster reset default` is DONE (pod pid 1692, agent

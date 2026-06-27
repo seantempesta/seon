@@ -31,9 +31,13 @@
     (testing "the on-click key becomes a standard data-on:click (old key gone)"
       (is (contains? attrs on-click))
       (is (not (contains? attrs :on-click))))
-    (testing "the value is a standard Datastar @post('/call?…') — no bespoke macro"
+    (testing "the value is a standard Datastar @post(…) to the call door — no bespoke macro"
       (is (string? action))
-      (is (str/starts-with? action "@post('/call?")))
+      ;; behavior, not the exact route: it's a datastar @post to a /call door
+      ;; (flat or hierarchical both route to the gate); namespace-as-route is
+      ;; verified by the fn param below, so don't pin the path structure.
+      (is (str/starts-with? action "@post('"))
+      (is (str/includes? action "/call?")))
     (let [sp (action->params action)]
       (testing "namespace is the route — the bare handler qualified to the authoring ns"
         (is (= "my.agent.tst/cancel-order!" (.get sp "fn"))))
