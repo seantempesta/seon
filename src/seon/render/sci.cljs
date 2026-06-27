@@ -90,10 +90,12 @@
   (not= "0" (some-> js/process .-env .-SEON_TILE_SCI)))
 
 (defn agent-authored-sym?
-  "True when `sym` names an AGENT-authored fn (gets the SCI wrapper), false
-   for the core (`seon.*`/`clojure.*`/`cljs.*`) compiled path. The core
-   `welcome` and every core section fn stay on the fast compiled path; only
-   agent-chosen namespaces (e.g. `my.workouts/chart-tile`) are bounded."
+  "True when `sym` names an AGENT-authored fn — any agent-authored
+   render/layout/handler (a tile fn, a context-block render, a layout, a
+   `/call` handler) gets the SCI wrapper; the core
+   (`seon.*`/`clojure.*`/`cljs.*`) compiled path does not. Core renders and
+   every core block fn stay on the fast compiled path; only agent-chosen
+   namespaces (e.g. `my.workouts/chart-tile`) are bounded."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [sym]
   (boolean
@@ -507,7 +509,7 @@
 ;; FROM the user-ref with :force, indistinguishable from a human message,
 ;; so a broken tile re-armed the wake loop AND defeated the halt. There is
 ;; no active intervention now: a broken tile is a DERIVED surface. The
-;; `:seon.render/ai` twin in seon.render.live-tile/error-response carries
+;; `:seon.render/ai` render in seon.render.live-tile/error-response carries
 ;; "YOUR LIVE TILE IS BROKEN — …" and the :seon.agent.ctx.live-tile/live-tile-
 ;; section re-derives it from the db value EVERY turn (a pure fn of state,
 ;; no stored error flag, self-healing when the tile renders clean again).

@@ -1,26 +1,23 @@
 (ns seon.render
-  "Render surfaces — two today (`:seon.render/ai` and
-   `:seon.render/html`), `:seon.render/canvas` planned (v2/v3).
+  "The two renders every renderable carries — `:seon.render/ai` (the
+   prompt text) and `:seon.render/html` (a tile) — selected by key
+   presence, never a stored discriminator.
 
-   Each agent entity carries one slot per surface — a fully-qualified
-   symbol naming the fn to call. `*-render` resolves the symbol via
-   `seon.eval/lookup-value` and calls it; if the slot is nil,
-   unqualified, or points at an unresolvable symbol, falls through to
-   `seon.render.default/pretty-*` so the surface never crashes.
+   Each slot is a fully-qualified symbol (or a literal: a verbatim
+   string for ai, a hiccup vector for html). `*-render` resolves the
+   symbol via `seon.eval/lookup-value` and calls it; a nil, unqualified,
+   or unresolvable symbol falls through to `seon.render.default/pretty-*`
+   so a render never crashes.
 
-   See [[../prds/agent-runtime/v1.md]] §5 for the AI surface (the
-   section composer producing the turn's prompt text) and
-   [[../prds/agent-runtime/v2.md]] 'Per-section HTML composer' for the
-   HTML mirror (section fns grow `:seon.render/hiccup` in their
-   return map alongside `:seon.render/text`).
+   ## The engine
 
-   ## Naming note
-
-   `ai-render` / `html-render` are thin: resolve symbol → call fn →
-   fall back to pretty-print. They are NOT multimethod dispatch.
-   V2's per-entity Malli-specificity dispatch is the real
-   data-shape-driven pick-the-renderer — it lives in `seon.eval`
-   alongside the program-graph queries it needs.
+   `render` is the whole system: one recursive, guarded walker over a
+   node's children in two views (`:seon.render/ai` → String,
+   `:seon.render/html` → hiccup). It injects a view-bound recursion
+   handle (`:seon.render/render`) so a parent renders its children
+   through the same dispatch, and a `:seon.render/slot` handle so a
+   layout places a named block's html into a slot ([[slot]]). A throwing
+   or missing render degrades to a legible value, never a crash.
 
    ## Late-bound symbol lookup
 
@@ -127,13 +124,13 @@
 ;; `{:seon.render/hiccup nil}` to mean "render nothing"
 ;; (render-entity-html callers already handle nil via `or`).
 ;;
-;; `:seon.render/ai` — the OPTIONAL text twin (live-tiles U1, PRD §2):
-;; how the agent knows what its human sees. Tile fns return it
-;; alongside the hiccup; the awareness section renders it into the
-;; agent's context every turn. Same twin idea as `:seon.agent.ctx/block`.
+;; `:seon.render/ai` — the OPTIONAL ai render (PRD §2): how the agent
+;; knows what its human sees. Tile fns return it alongside the hiccup;
+;; the awareness section renders it into the agent's context every turn.
+;; Same render idea as `:seon.agent.ctx/block`.
 ;;
 ;; `:seon.render/error` — present when the renderer THREW: the hiccup
-;; is the human fallback card and this entry carries the envelope so
+;; is the human fallback tile and this entry carries the envelope so
 ;; the agent sees its own renderer is broken (vanish = banned).
 (schema/register! :seon.render/html-response
   [:map
@@ -187,15 +184,12 @@
 ;; Renderable entity KINDS are `:seon.schema` rows carrying both an
 ;; id-attr and a `:seon.schema/render-fn`. `entity-primary-kind` picks
 ;; the most-specific kind whose required-attrs are all present on an
-;; entity; `entity-render-slot` / `render-entity-html` / `render-entity-ai`
+;; entity; `entity-render` / `render-entity-html` / `render-entity-ai`
 ;; resolve a render symbol from that kind (or a per-entity override).
 ;;
-;; This machinery is shared by the test-capture-as-data rendering
-;; (`render-entity-html` etc.). The legacy per-entity inspector window
-;; (`visible-entities` / `renderable-entities`) that also rode on it was
-;; deleted when the debug right pane switched to section html twins
-;; (debug-view-section-twins-2026-06-18) — the right pane now mirrors the
-;; left's section set rather than a last-N-by-tx-time entity window.
+;; Shared by the test-capture-as-data rendering (`render-entity-html`
+;; etc.); the inspector's debug right pane mirrors the left's block set
+;; via these same converters.
 ;; ============================================================
 
 (defn- renderable-kinds
@@ -209,7 +203,7 @@
    `seon.schema/*schemas` atom.
 
    The render-fn clause is load-bearing, not cosmetic: a row WITHOUT a
-   renderer has no symbol for `entity-render-slot` to resolve, and its
+   renderer has no symbol for `entity-render` to resolve, and its
    id-attr could still be registered-but-never-transacted — `d/datoms`
    THROWS (\"Bad entity attribute … not defined in current schema\") on
    such an attr, e.g. the request/response envelopes the registry's
@@ -296,17 +290,14 @@
                (sort-by (juxt (comp - second) (comp str first)))
                ffirst))))))
 
-(defn- entity-render-slot
-  "Resolve the render value for `entity` on `surface` (`:html` or
-   `:ai`) — THE two-step resolution both twins share: per-entity attr
-   override wins (`:seon.render/html` / `:seon.render/ai`,
-   bridge-decoded), else the entity's primary `:seon.schema` kind's
-   default symbol. nil when neither step yields a value.
-
-   (Replaces the former entity-html-sym/entity-ai-sym twins — one
-   resolution path, one dispatch; render sweep 2026-06-11.)"
-  [db entity surface]
-  (let [attr (case surface :html :seon.render/html :ai :seon.render/ai)]
+(defn- entity-render
+  "Resolve the render value for `entity` in `render` (`:html` or `:ai`)
+   — the two-step resolution both renders share: per-entity attr override
+   wins (`:seon.render/html` / `:seon.render/ai`, bridge-decoded), else
+   the entity's primary `:seon.schema` kind's default symbol. nil when
+   neither step yields a value."
+  [db entity render]
+  (let [attr (case render :html :seon.render/html :ai :seon.render/ai)]
     (or (some->> (get entity attr)
                  (db/decode-edn-value attr))
         (let [{:keys [kinds-by-kw]} (kind-tables db)
@@ -314,7 +305,7 @@
           ;; NOTE: `(get kinds-by-kw kind)`, NOT `(some-> kinds-by-kw kind …)`
           ;; — the latter invokes `kind` as a fn and throws a TypeError
           ;; when entity-primary-kind returns nil (no kind matched).
-          (get (get kinds-by-kw kind) surface)))))
+          (get (get kinds-by-kw kind) render)))))
 
 (defn render-entity-html
   "Render `entity` to hiccup via its resolved `:seon.render/html` symbol.
@@ -325,7 +316,7 @@
    The kind's html symbol IS a converter (`seon.handlers.*/render-html`)
    that returns BARE hiccup, called with the entity under
    `:seon.render/node`. A renderer that THROWS does NOT vanish (same
-   posture as the live tile's `error-response`): the card becomes a
+   posture as the live tile's `error-response`): the tile becomes a
    legible error banner naming the fn + message, siblings render
    untouched, the page stays 200.
 
@@ -338,7 +329,7 @@
   [{:seon.db/keys [db] :seon.render/keys [entity node] :as input}]
   (let [db     (or db @db/*conn*)
         entity (or node entity)]
-    (when-let [sym (entity-render-slot db entity :html)]
+    (when-let [sym (entity-render db entity :html)]
       (try
         (let [f (eval/lookup-value sym)
               r (when f (f (assoc input :seon.render/node entity)))]
@@ -362,7 +353,7 @@
 ;; per-entity `:seon.render.live-tile/content` → the core
 ;; welcome. Neither `:seon.render/html` nor the `:seon.agent` KIND
 ;; default is consulted for the TILE — that key means only the
-;; generic entity-card render (one key, one meaning; PRD §8.1).
+;; generic entity-tile render (one key, one meaning; PRD §8.1).
 ;; ============================================================
 
 (def ^:private tile-entity-pattern
@@ -392,8 +383,8 @@
 
    Returns `:seon.render/html-response`. A renderer that THROWS does
    NOT vanish: the response is `seon.render.live-tile/error-response`
-   — fallback card for the human, `:seon.render/error` envelope +
-   `:seon.render/ai` twin for the agent. nil hiccup only when the
+   — fallback tile for the human, `:seon.render/error` envelope +
+   `:seon.render/ai` render for the agent. nil hiccup only when the
    agent entity doesn't exist (the tile never crashes its caller)."
   {:malli/schema [:=> [:cat :seon.render/tile-request] :seon.render/html-response]}
   [{:seon.agent/keys [id] :seon.db/keys [db]}]
@@ -477,10 +468,10 @@
             resp)
           (catch :default e
             ;; A broken tile must never crash the render and never show the
-            ;; human a scary error: return the calm 'updating this panel' card
+            ;; human a scary error: return the calm 'updating this tile' placeholder
             ;; for the human. The agent is NOT actively pushed a message (#43 /
             ;; D2 — a forged self-message wakes + defeats the halt); breakage
-            ;; is a DERIVED surface: error-response's :seon.render/ai twin
+            ;; is a DERIVED surface: error-response's :seon.render/ai render
             ;; ("YOUR LIVE TILE IS BROKEN …") is re-derived into the agent's
             ;; live-tile context section every turn, self-healing on the next
             ;; clean render. No stored flag, no notification.
@@ -501,7 +492,7 @@
   [{:seon.db/keys [db] :seon.render/keys [entity node] :as input}]
   (let [db     (or db @db/*conn*)
         entity (or node entity)]
-    (when-let [sym (entity-render-slot db entity :ai)]
+    (when-let [sym (entity-render db entity :ai)]
       (try
         (let [f (eval/lookup-value sym)
               r (when f (f (assoc input :seon.render/node entity)))]
@@ -512,7 +503,7 @@
             r))
         ;; A throwing AI renderer is LEGIBLE, never nil-vanished — the
         ;; agent reading its context sees its own renderer is broken
-        ;; (mirror of the html banner above / the tile's error twin).
+        ;; (mirror of the html banner above / the tile's error render).
         (catch :default e
           (str "[render error — " sym " threw: "
                (or (.-message e) (str e)) "]"))))))
@@ -560,7 +551,7 @@
                                         [?e _ _ ?tx] [?tx :db/txInstant ?t]]
                        :seon.db/args [eid]}))))
 
-(declare render)
+(declare render slot)
 
 (defn- generic-default-renderer
   "The GENERIC default — renders ANY structure when there is no slot and no
@@ -581,9 +572,9 @@
        (with-out-str (pprint/pprint (apply dissoc node render-control-attrs)))])))
 
 (defn- schema-default-renderer
-  "resolve-slot step 4 — the renderer the node's primary `:seon.schema` kind
+  "resolve-render step 4 — the renderer the node's primary `:seon.schema` kind
    registers (or a per-entity slot override), via the existing
-   `entity-render-slot` / `entity-primary-kind` dispatch. Calls the resolved
+   `entity-render` / `entity-primary-kind` dispatch. Calls the resolved
    converter symbol (bare value); nil when no kind matches."
   [view node input]
   (let [db (or (:seon.db/db input) @db/*conn*)
@@ -592,21 +583,21 @@
       :seon.render/html (render-entity-html in)
       (render-entity-ai in))))
 
-(defn- missing-slot-render
+(defn- missing-render
   "A legible, self-healing line for a slot symbol that resolves NOWHERE
    (neither SCI source nor a compiled var). Surfaces loudly instead of
-   silently dropping the section — the agent sees what to fix; defining the
-   fn self-heals the section next render. nil hiccup for the html view."
+   silently dropping the block — the agent sees what to fix; defining the
+   fn self-heals the block next render. nil hiccup for the html view."
   [view id sym]
   (when (= view :seon.render/ai)
     (str "[" (name (or id :unnamed)) "] render failed: fn " sym
          " does not resolve — define it (or fix the symbol) and this "
-         "section self-heals next render")))
+         "block self-heals next render")))
 
-(defn- resolve-slot
+(defn- resolve-render
   "The render fn for `node` in `view`:
-     1. read the slot (already decoded — DB-pulled sections are slot-decoded
-        before they become nodes; in-memory sections carry literal values);
+     1. read the slot (already decoded — DB-pulled blocks are slot-decoded
+        before they become nodes; in-memory blocks carry literal values);
      2. string → verbatim; shallow-hiccup vector → verbatim;
      3. fn-symbol → the fn. An AGENT-authored symbol is invoked SCI-BOUNDED
         (a runaway agent fn must not freeze the single-threaded pod);
@@ -614,28 +605,28 @@
      4. absent → the schema-default (the node's primary kind's converter);
      5. none → the GENERIC default (any data → Clojure / a dump)."
   [view node]
-  (let [slot (get node view)]
+  (let [slot-val (get node view)]
     (cond
-      (string? slot) (fn [_] slot)
-      (vector? slot) (fn [_] slot)
-      (symbol? slot)
-      (if (render-sci/agent-authored-sym? slot)
+      (string? slot-val) (fn [_] slot-val)
+      (vector? slot-val) (fn [_] slot-val)
+      (symbol? slot-val)
+      (if (render-sci/agent-authored-sym? slot-val)
         (fn [in]
-          (let [r (render-sci/invoke-bounded slot in view)]
+          (let [r (render-sci/invoke-bounded slot-val in view)]
             (cond
-              ;; deadline tripped → render nothing (a section never crashes
+              ;; deadline tripped → render nothing (a block never crashes
               ;; its siblings; the recovery path warns the agent).
               (and (map? r) (:seon.render.sci/interrupt r)) nil
               ;; SCI could not run it — fall back to the COMPILED fn (the SCI
               ;; env was just incomplete). If the symbol resolves nowhere, it
               ;; is a genuinely-missing slot → a legible self-heal line.
               (and (map? r) (:seon.render.sci/fallthrough r))
-              (if-let [f (eval/lookup-value slot)]
+              (if-let [f (eval/lookup-value slot-val)]
                 (f in)
-                (missing-slot-render view (renderable-id node) slot))
+                (missing-render view (renderable-id node) slot-val))
               :else r)))
-        (let [f (eval/lookup-value slot)]
-          (if f f (fn [_] (missing-slot-render view (renderable-id node) slot)))))
+        (let [f (eval/lookup-value slot-val)]
+          (if f f (fn [_] (missing-render view (renderable-id node) slot-val)))))
       ;; no explicit slot: try the node's schema-kind converter; if no kind
       ;; matches (nil), fall to the generic any-data default.
       :else (fn [input]
@@ -655,13 +646,90 @@
     (when (= view :seon.render/ai)
       (str ";; (1 pruned — " (renderable-id node)
            "; (seon.agent/unprune! …) to restore)"))
-    (let [f  (resolve-slot view node)
+    (let [f  (resolve-render view node)
           in (assoc ctx :seon.render/node   node
-                        :seon.render/render  #(render view ctx %))]
+                        :seon.render/render  #(render view ctx %)
+                        :seon.render/slot    #(slot ctx %))]
       (try
         (f in)                                  ;; converters return bare String / hiccup
         (catch :default e
           (if (= view :seon.render/ai)
             (str ";; ⚠ [" (renderable-id node) "] render failed: " (ex-message e))
             [:div.render-error "⚠ " (str (renderable-id node)) " — " (ex-message e)]))))))
+
+;; ============================================================
+;; The `slot` primitive — place a named block's html render into a
+;; layout hole. `(slot ctx :canvas)` looks the block up by
+;; `:seon.agent.ctx/name` in the agent's OWN `:seon.agent/ctx`, renders
+;; its `:seon.render/html` through the guarded engine, and wraps it as
+;; `[:div {:id "tile-<name>" :data-slot "<name>"} <html>]` — a stable DOM
+;; id for idiomorph. GUARDED: a missing block or a throwing render
+;; becomes a `:seon/error` value rendered as an error tile in the slot,
+;; so a sibling slot never crashes (never-crash-always-surface). The same
+;; handle is injected into every render ctx as `:seon.render/slot`, so a
+;; core or agent layout calls `((:seon.render/slot in) :canvas)`.
+;; ============================================================
+
+(defn- agent-ctx-block
+  "The agent's `:seon.agent/ctx` block named `block-name` (its render
+   slots EDN-decoded), or nil when the agent has no such block. Pulls the
+   block components from `db` directly — `seon.render` cannot require
+   `seon.agent.ctx` (that ns requires this one), so the lookup + decode
+   live here rather than calling `seon.agent.ctx/agent-blocks`."
+  [db agent-id block-name]
+  (when (and db agent-id block-name)
+    (let [ent (try (db/pull db '[{:seon.agent/ctx [*]}] [:seon.agent/id agent-id])
+                   (catch :default _ nil))]
+      (when-let [b (->> (:seon.agent/ctx ent)
+                        (filter #(= block-name (:seon.agent.ctx/name %)))
+                        first)]
+        (cond-> b
+          (contains? b :seon.render/html)
+          (update :seon.render/html #(db/decode-edn-value :seon.render/html %))
+          (contains? b :seon.render/ai)
+          (update :seon.render/ai #(db/decode-edn-value :seon.render/ai %)))))))
+
+(defn- slot-error-tile
+  "An error TILE (hiccup) for a slot whose named block is missing or
+   threw — derived from a `:seon/error`-shaped value (`message`), so the
+   human sees a legible card and a sibling slot never crashes."
+  [message]
+  [:div {:class (str "flex flex-col gap-1 p-3 border "
+                     "border-error/40 bg-error/10 rounded")}
+   [:div {:class "text-xs text-error font-mono font-bold"} "⚠ slot error"]
+   [:div {:class "text-xs font-mono text-text-300 break-all"} message]])
+
+(schema/register! ::slot-request
+  [:map
+   [:seon.db/db    {:optional true} :seon.db/db]
+   [:seon.agent/id {:optional true} :string]])
+
+(defn slot
+  "Place the agent's block named `block-name` into a named tile slot.
+   Looks the block up by `:seon.agent.ctx/name` in the agent's OWN
+   `:seon.agent/ctx` (`ctx` carries `:seon.db/db` + `:seon.agent/id`),
+   renders its `:seon.render/html` through the guarded engine, and wraps
+   it as `[:div {:id \"tile-<name>\" :data-slot \"<name>\"} <html>]` — a
+   stable DOM id for idiomorph. GUARDED: a missing block or a throwing
+   render becomes a `:seon/error` value surfaced as an error tile, so a
+   sibling slot never crashes (never-crash-always-surface). Injected into
+   every render ctx as `:seon.render/slot`."
+  {:malli/schema [:=> [:catn [::ctx ::slot-request] [::block-name :keyword]]
+                  :seon.render.live-tile/hiccup]}
+  [ctx block-name]
+  (let [db    (or (:seon.db/db ctx) @db/*conn*)
+        id    (:seon.agent/id ctx)
+        block (agent-ctx-block db id block-name)
+        body  (if (nil? block)
+                (slot-error-tile
+                  (str "no block named " block-name " on "
+                       (or id "this agent")
+                       " — install! it (or fix the slot name)"))
+                (try
+                  (render :seon.render/html (assoc ctx :seon.db/db db) block)
+                  (catch :default e
+                    (slot-error-tile
+                      (str block-name " render failed: " (err/->message e))))))]
+    [:div {:id (str "tile-" (name block-name)) :data-slot (name block-name)}
+     body]))
 

@@ -125,9 +125,9 @@
 ;; ============================================================
 
 (deftest pretty-ai-returns-ai-string
-  ;; Twin-key convergence (PRD live-tiles §8.2): the text twin of a
-  ;; render is :seon.render/ai — pretty-ai emits it, never the retired
-  ;; producer key :seon.render/text.
+  ;; Render-key convergence (PRD live-tiles §8.2): the ai render is
+  ;; :seon.render/ai — pretty-ai emits it, never the retired producer
+  ;; key :seon.render/text.
   (let [out (default/pretty-ai {:seon.db/db nil :seon.agent/id "x"})]
     (is (map? out))
     (is (contains? out :seon.render/ai))
@@ -182,9 +182,9 @@
               (is (vector? hiccup) "default tile renders hiccup")
               (is (= "seon-tile" (:class (second hiccup)))
                   "it is the welcome's .seon-tile container")
-              (is (string? ai) "the welcome carries its :seon.render/ai twin")
+              (is (string? ai) "the welcome carries its :seon.render/ai render")
               (is (re-find #"Good (morning|afternoon|evening|night)" ai)
-                  "twin carries the time-aware greeting"))))
+                  "the ai render carries the time-aware greeting"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -284,5 +284,70 @@
                                                  :seon.agent/id "no-such-agent0"})]
               (is (= {:seon.render/hiccup nil} out)
                   "missing agent → nil hiccup, no throw"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; slot — place a named block's html render into a stable-id tile slot
+;; (the Lane-U gate). A slot ALWAYS returns a [:div {:id "tile-<name>"}]
+;;   • a slot renders the named block's :seon.render/html into the div;
+;;   • a MISSING block surfaces a :seon/error tile and NEVER throws —
+;;     the slot div keeps its stable id and a sibling slot is untouched.
+;; ============================================================
+
+(defn- with-block-conn
+  "Fresh conn seeded with the :seon.agent kind schema, one agent row, and
+   one :seon.agent/ctx block named :mytile whose :seon.render/html is a
+   literal hiccup. Calls `body` with the conn bound; returns a Promise."
+  [agent-id body]
+  (-> (client/open-agent-conn!)
+      (.then (fn [conn]
+               (binding [db/*conn* conn]
+                 (-> (db/transact!
+                       {:seon.db/tx-data
+                        (into (vec (schema/entity-schema-tx-data :seon.agent))
+                              [{:seon.agent/id   agent-id
+                                :seon.agent/ctx
+                                [{:seon.agent.ctx/name     :mytile
+                                  :seon.agent.ctx/priority 50
+                                  :seon.render/html        [:h1 "tile!"]}]}])})
+                     (.then (fn [_]
+                              (binding [db/*conn* conn]
+                                (body conn))))))))))
+
+(deftest slot-renders-named-block-html
+  (async done
+    (-> (with-block-conn "slottest-00001"
+          (fn [conn]
+            (let [out (render/slot {:seon.db/db @conn :seon.agent/id "slottest-00001"}
+                                   :mytile)]
+              (is (vector? out) "slot returns hiccup")
+              (is (= :div (first out)) "wrapped in a div")
+              (is (= "tile-mytile" (:id (second out)))
+                  "stable DOM id #tile-<name> for idiomorph")
+              (is (= "mytile" (:data-slot (second out)))
+                  "carries data-slot=<name> (string, no colon)")
+              (is (re-find #"tile!" (html/->string out))
+                  "the named block's :seon.render/html renders into the slot"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest slot-missing-block-surfaces-error-never-throws
+  (async done
+    (-> (with-block-conn "slottest-00002"
+          (fn [conn]
+            (let [ctx     {:seon.db/db @conn :seon.agent/id "slottest-00002"}
+                  missing (render/slot ctx :no-such-block)
+                  sibling (render/slot ctx :mytile)]
+              (is (vector? missing)
+                  "a missing block still returns a slot div, never throws")
+              (is (= "tile-no-such-block" (:id (second missing)))
+                  "the slot div keeps its stable id even on error")
+              (is (re-find #"slot error" (html/->string missing))
+                  "a missing block surfaces a legible error tile")
+              (is (re-find #"no-such-block" (html/->string missing))
+                  "the error names the missing block")
+              (is (re-find #"tile!" (html/->string sibling))
+                  "a sibling slot renders untouched (never-crash-always-surface)"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

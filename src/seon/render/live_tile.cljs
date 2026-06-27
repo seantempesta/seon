@@ -2,7 +2,7 @@
   "The live tile — the ONE thing an agent is currently conveying to
    its human (a chart, a status, a list — whatever the human asked
    for). One wired value renders at every zoom surface: the root grid
-   (compact), the agent view (expanded), and — as a text twin — the
+   (compact), the agent view (expanded), and — as an ai render — the
    agent's own context every turn, so the agent always knows what its
    human currently sees.
 
@@ -23,17 +23,17 @@
           [{:seon.agent/id (seon.db/current-agent-id)
             :seon.render.live-tile/content 'my.workouts/chart-tile}]})
 
-   ## The twin contract
+   ## The two renders
 
    A tile FN returns the standard `:seon.render/html-response` map,
-   carrying the html twin AND a text twin:
+   carrying the html render AND an ai render:
 
        {:seon.render/hiccup [...]   ;; what the human sees
         :seon.render/ai \"3 workouts this week: Mon 4200kg, …\"}
 
    The `:seon.render/ai` string is how YOU know what your human sees —
    say what the content MEANS. Your human sees the picture; you see
-   your words. A fn that omits the twin gets its hiccup shown to it
+   your words. A fn that omits the ai render gets its hiccup shown to it
    verbatim instead.
 
    ## Compact vs expanded — tag blocks, never write media queries
@@ -49,7 +49,7 @@
    `.seon-tile-expanded` at or above it (container rules live in
    `resources/public/css/input.css`). Untagged content renders at
    every size. The compact block is HEIGHT-CLAMPED by the core
-   (grid tiles are uniform cards; overflow clips) — put a glanceable
+   (grid tiles are uniform; overflow clips) — put a glanceable
    summary there and the full content in the expanded block.
 
    ## Styling — write SEMANTIC hiccup, zero classes needed
@@ -317,7 +317,7 @@
 ;; into the agent's awareness section header so the agent always sees
 ;; HOW to change the display. (The legacy `:seon.render/html` arm was
 ;; deleted in the render sweep — PRD live-tiles §8.1, no legacy: that
-;; key now means ONLY the generic entity-card render slot.)
+;; key now means ONLY the generic entity-tile render slot.)
 (schema/register! ::source [:enum ::content ::welcome])
 
 (schema/register! ::wired-request
@@ -364,7 +364,7 @@
    `:seon.render.live-tile/content` (THE tile key) when present, else
    [[welcome-sym]] (the core welcome). Neither the per-entity
    `:seon.render/html` nor the `:seon.agent` KIND default is consulted
-   — that key means ONLY the generic entity-card render slot (one key,
+   — that key means ONLY the generic entity-tile render slot (one key,
    one meaning; the legacy tile fallback was deleted per PRD
    live-tiles-prd-2026-06-11 §8.1).
 
@@ -429,12 +429,12 @@
         {})
       {})))
 
-(def panel-line
-  "The double-duty line: tells the HUMAN what the panel is, and —
-   because the agent reads this fn's twin and source every turn —
+(def tile-line
+  "The double-duty line: tells the HUMAN what the tile is, and —
+   because the agent reads this fn's render and source every turn —
    reinforces to the AGENT that writing hiccup-returning fns is
    normal and easy."
-  "I'll update this panel as I work — charts, statuses, whatever you ask for.")
+  "I'll update this tile as I work — charts, statuses, whatever you ask for.")
 
 (defn welcome
   "The core default tile — elegant, simple, TIME-AWARE.
@@ -444,11 +444,11 @@
    conversation query, not raw message data), so an uncustomized
    agent's grid tile is worth glancing at. EXPANDED (the agent view):
    a greeting (by name when the store knows one), today's date and
-   time, the purpose line, and [[panel-line]].
+   time, the purpose line, and [[tile-line]].
 
    This fn is itself the worked example of the tile contract: ONE
    render emitting tagged compact + expanded blocks, plus the
-   `:seon.render/ai` twin saying what the human sees. Note it
+   `:seon.render/ai` render saying what the human sees. Note it
    DERIVES everything from the db value and the wall clock at render
    time — nothing stored, nothing stale (write your tile fns the
    same way: rendered database queries, not hiccup snapshots)."
@@ -496,9 +496,9 @@
        [:div {:class "text-xs font-mono text-signal"}
         (str date-str " · " time-str)]
        [:div {:class "text-sm text-text-200"} purpose-line]
-       [:div {:class "text-xs text-text-400 italic"} panel-line]]]
+       [:div {:class "text-xs text-text-400 italic"} tile-line]]]
      :seon.render/ai
-     (str "Welcome card — your tile is showing the core default "
+     (str "Welcome — your tile is showing the core default "
           "(point :seon.render.live-tile/content at your own fn to "
           "replace it). Your human currently sees — in the root grid "
           "(compact): "
@@ -511,7 +511,7 @@
             (str ", and \"" greet-line "\""))
           "; expanded (the agent view): \"" greet-line "\" with "
           date-str " " time-str ", your purpose line, and: \""
-          panel-line "\" "
+          tile-line "\" "
           "To replace it, transact :seon.render.live-tile/content onto "
           "your agent entity — a qualified fn symbol or literal hiccup.")}))
 
@@ -542,7 +542,7 @@
     ";; I am an entity in the shared store — everything about me is data,\n"
     ";; and I change myself by transacting to my own lookup ref: the\n"
     ";; identity attr :seon.agent/id in this map addresses MY entity.\n"
-    ";; First act: wire my live tile (the panel my human sees) to the\n"
+    ";; First act: wire my live tile (the tile my human sees) to the\n"
     ";; core welcome fn. Any fn returning\n"
     ";; {:seon.render/hiccup … :seon.render/ai …} can go here — when I\n"
     ";; have something better to show, I define a fn and point this\n"
@@ -558,12 +558,12 @@
 
 (defn error-response
   "Build the html-response for a tile fn that THREW. THE HUMAN sees a calm,
-   nicely-formatted 'updating this panel' card — never a scary error, never a
+   nicely-formatted 'updating this tile' placeholder — never a scary error, never a
    blank (vanish is indistinguishable from unwired, banned). THE AGENT is told
-   the truth: the `:seon.render/ai` twin carries the failure (awareness
+   the truth: the `:seon.render/ai` render carries the failure (awareness
    section) and the full `:seon.error/*` envelope rides on `:seon.render/error`.
    Breakage is a DERIVED surface only (#43 / D2) — the
-   `:seon.agent.ctx.live-tile/live-tile-block` re-derives this twin into the
+   `:seon.agent.ctx.live-tile/live-tile-block` re-derives this render into the
    agent's context EVERY turn (a pure fn of state, no stored flag,
    self-healing on the next clean render). There is NO active push: a forged
    self-message would wake the agent and defeat the loop's halt. So the human
@@ -578,14 +578,14 @@
     {:seon.render/hiccup
      [:div {:class "seon-tile"}
       [:div {:class "seon-tile-compact flex flex-col gap-1 p-3"}
-       [:div {:class "text-sm text-text-200"} "Updating this panel…"]]
+       [:div {:class "text-sm text-text-200"} "Updating this tile…"]]
       [:div {:class "seon-tile-expanded flex flex-col gap-2 p-4"}
-       [:div {:class "text-base text-text-100"} "Updating this panel…"]
+       [:div {:class "text-base text-text-100"} "Updating this tile…"]
        [:div {:class "text-xs text-text-400 italic"}
         "I'm refining what I show here."]]]
      :seon.render/ai
      (str "YOUR LIVE TILE IS BROKEN — the wired renderer (" wired-str
-          ") threw: " msg ". Your human sees a calm 'updating this panel' "
+          ") threw: " msg ". Your human sees a calm 'updating this tile' "
           "placeholder, not your content. Fix the fn, or transact a working "
           "value onto :seon.render.live-tile/content.")
      :seon.render/error error}))

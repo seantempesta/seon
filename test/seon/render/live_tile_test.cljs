@@ -8,8 +8,8 @@
        fallback DELETED, PRD §8.1) → welcome default; pr-str-encoded
        values decode
      • welcome — .seon-tile compact+expanded blocks, date, purpose,
-       panel line, :seon.render/ai twin
-     • error-response — fallback card + envelope + twin (never vanish)
+       tile line, :seon.render/ai render
+     • error-response — fallback tile + envelope + render (never vanish)
      • render-agent-tile — unwired→welcome, literal hiccup via the new
        key, throwing fn → error-response, ::content EDN roundtrip
 
@@ -106,9 +106,10 @@
                                                :month   "long"
                                                :day     "numeric"})]
         (is (some #(re-find (re-pattern date-str) %) (hiccup-strings hiccup)))))
-    (testing "the double-duty panel line is present in BOTH twins"
-      (is (some #(= tile/panel-line %) (hiccup-strings hiccup)))
-      (is (re-find #"update this panel" ai)))))
+    (testing "the double-duty tile line is present in BOTH renders"
+      (is (some #(= tile/tile-line %) (hiccup-strings hiccup)))
+      (is (str/includes? ai tile/tile-line)
+          "the ai render surfaces the tile-line verbatim"))))
 
 (deftest welcome-uses-purpose-when-present
   (let [{:seon.render/keys [hiccup ai]}
@@ -449,9 +450,9 @@
                                  (render/render-agent-tile
                                    {:seon.db/db @conn
                                     :seon.agent/id "tileerr-000001"})]
-                             (is (some #(re-find #"Updating this panel" %)
+                             (is (some #(re-find #"Updating this tile" %)
                                        (hiccup-strings hiccup))
-                                 "human sees the calm placeholder card — NOT a vanish, NOT a scary error")
+                                 "human sees the calm placeholder tile — NOT a vanish, NOT a scary error")
                              (is (re-find #"deliberate tile failure"
                                           (:seon.error/message error))
                                  "response carries the error envelope")
@@ -503,9 +504,9 @@
                 (let [{:seon.render/keys [hiccup ai error]}
                       (render/render-agent-tile
                         {:seon.db/db @conn :seon.agent/id agent-id})]
-                  (is (some #(re-find #"Updating this panel" %)
+                  (is (some #(re-find #"Updating this tile" %)
                             (hiccup-strings hiccup))
-                      "human sees the calm placeholder card — the page never 500s")
+                      "human sees the calm placeholder tile — the page never 500s")
                   (is (re-find re (:seon.error/message error))
                       "envelope carries the legible structure error")
                   (is (re-find re (str ai))
