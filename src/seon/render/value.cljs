@@ -456,5 +456,5 @@
 ;; reuses `project-plain`. The opaque-DETECTION + projection logic lives
 ;; ONLY here; `seon.eval` requires this ns — a one-way edge (eval →
 ;; render.value), no cycle. The `result/<id>` handle on the `;=>` line is
-;; still added downstream by `seon.ctx/format-eval-row` (untouched).
+;; still added downstream by `seon.agent.ctx/format-eval-row` (untouched).
 ;; ============================================================

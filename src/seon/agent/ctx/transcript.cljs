@@ -1,4 +1,4 @@
-(ns seon.ctx.transcript
+(ns seon.agent.ctx.transcript
   "The `:transcript` context section + its `:seon.render/html` twin — the
    WHOLE bottom of the agent's context.
 
@@ -18,8 +18,8 @@
 
    The masthead opens it, the events stream in time order, and the folded
    live readline at the very bottom carries the cursor (current ns) + this
-   turn's status/steering. Symbol-wired into `seon.ctx/core-default-ctx` as
-   `'seon.ctx.transcript/transcript-section` (+ the html twin
+   turn's status/steering. Symbol-wired into `seon.agent.ctx/core-default-ctx` as
+   `'seon.agent.ctx.transcript/transcript-section` (+ the html twin
    `'…/transcript-section-html`).
 
    BYTE-STABILITY: every past event renders byte-identical turn-to-turn —
@@ -29,14 +29,14 @@
    the cache breakpoint — busting there is free). No render fn here calls
    `now` to produce displayed text except that one readline line.
 
-   The eval-row converter delegates to `seon.ctx/format-eval-row` (which
+   The eval-row converter delegates to `seon.agent.ctx/format-eval-row` (which
    carries the fabrication-guard + the component caps); the message
    converter renders the REPL-comment `;;; ◀ from X` / `;;; ▶ to X` line."
   (:require
     [clojure.string :as str]
     [seon.agent.message :as msg]
     [seon.agent.run :as run]
-    [seon.ctx :as ctx]
+    [seon.agent.ctx :as ctx]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.render :as render]))
@@ -110,10 +110,10 @@
   {:malli/schema [:=> [:catn [::inst :any]] :string]}
   [inst]
   (when-not (instance? js/Date inst)
-    (throw (ex-info (str "seon.ctx.transcript/clock: missing stored time — "
+    (throw (ex-info (str "seon.agent.ctx.transcript/clock: missing stored time — "
                          "every transcript event time must derive from its "
                          "fixed :at (byte-stability); got " (pr-str inst))
-                    {:seon.ctx.transcript/inst inst})))
+                    {:seon.agent.ctx.transcript/inst inst})))
   (try (.toLocaleTimeString ^js inst "sv-SE" #js {:timeZone (ctx/host-timezone)})
        (catch :default _ (subs (.toISOString ^js inst) 11 19))))
 
@@ -150,7 +150,7 @@
    (outbound) runtime-structure line. The `from`/`to` labels resolve by
    ref kind (`user`/`assistant`/`agent-<id>`). The message's transactable
    handle (`:seon.agent.message/id`) rides the line so the agent can pull
-   it. Content bounded by [[seon.ctx/message-render-cap]]. `new?` marks a
+   it. Content bounded by [[seon.agent.ctx/message-render-cap]]. `new?` marks a
    message that arrived mid-LLM-call (after the last event of the prior
    turn) so the agent knows it is acting on it for the first time."
   {:malli/schema [:=> [:cat :map] :string]}
@@ -167,10 +167,10 @@
 
 (defn eval->renderable
   "The `:seon.render/ai` converter for a transcript EVAL event — the
-   canonical eval row. Delegates to [[seon.ctx/format-eval-row]], which
-   carries the fabrication-guard ([[seon.ctx/neutralize-result-claims]])
-   and the component caps ([[seon.ctx/eval-render-cap]] /
-   [[seon.ctx/result-body-render-cap]]) forward. A `::ns-marker?` true
+   canonical eval row. Delegates to [[seon.agent.ctx/format-eval-row]], which
+   carries the fabrication-guard ([[seon.agent.ctx/neutralize-result-claims]])
+   and the component caps ([[seon.agent.ctx/eval-render-cap]] /
+   [[seon.agent.ctx/result-body-render-cap]]) forward. A `::ns-marker?` true
    event prepends a `; in <ns>` line (emitted only where the eval ns
    changes from the prior eval). PRIOR-SESSION evals (`::prior?` true)
    render their value WITHOUT the `result/<id>` handle (their vars died
@@ -228,13 +228,13 @@
                   ::to-labels (->> (:seon.agent.message/to m)
                                    (map #(ctx/message-label % own-id))
                                    distinct vec)
-                  :seon.render/ai 'seon.ctx.transcript/message->renderable})))))))
+                  :seon.render/ai 'seon.agent.ctx.transcript/message->renderable})))))))
 
 (defn- eval-events
   "ALL of the agent's evals as transcript events across ALL its turns,
    oldest-first, each `{::at ::kind :eval ::entity ::run-id ::prior?
    :seon.render/ai 'eval->renderable}`. Walks agent → runs → turns → evals
-   (via [[seon.ctx/agent-turns]]). `::run-id` tags each so the section can
+   (via [[seon.agent.ctx/agent-turns]]). `::run-id` tags each so the section can
    interleave the resume marker at the process boundary; `::prior?` marks
    evals from a run opened by a PREVIOUS pod process — its `result/<id>`
    vars died ([[seon.agent.run/this-process-run?]])."
@@ -248,7 +248,7 @@
          ::entity  (into {} e)
          ::run-id  rid
          ::prior?  (and (some? rid) (not (run/this-process-run? rid)))
-         :seon.render/ai 'seon.ctx.transcript/eval->renderable}))))
+         :seon.render/ai 'seon.agent.ctx.transcript/eval->renderable}))))
 
 (defn- agent-rec
   "The agent entity (lazy) for `id` against `db`."

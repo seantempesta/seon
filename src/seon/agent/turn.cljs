@@ -25,8 +25,8 @@
   (:require
     [clojure.string :as str]
     [seon.ai :as ai]
-    [seon.ctx :as ctx]
-    [seon.ctx.relevant :as ctx-relevant]
+    [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.relevant :as ctx-relevant]
     [seon.db :as db]
     [seon.debug :as debug]
     [seon.embed :as embed]
@@ -120,7 +120,7 @@
 
 (defn render-prompt
   "Sync — the agent's full LLM context, rendered as a bare String. Thin
-   delegate to [[seon.ctx/render-context]] (the SINGLE producer the human
+   delegate to [[seon.agent.ctx/render-context]] (the SINGLE producer the human
    inspector `seon.agent.inspect/ctx-preview` also routes through, so the
    debug view and the model's prompt are byte-identical by construction).
    Renders against the frozen `db` value the loop pinned for this TURN (the

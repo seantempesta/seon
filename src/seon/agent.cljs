@@ -13,7 +13,7 @@
        map), plus the `:seon.eval/*`, `:seon.ns/*`, `:seon.fn/*`,
        `:seon.schema/*` corpus schemas (`:seon.agent.message/*` lives in
        [[seon.agent.message]], `:seon.agent.turn/*` in [[seon.agent.turn]],
-       `:seon.agent.run/*` in [[seon.agent.run]], `:seon.ctx/*` in [[seon.ctx]])
+       `:seon.agent.run/*` in [[seon.agent.run]], `:seon.agent.ctx/*` in [[seon.agent.ctx]])
      - `armable-agent-ids` — the wakeable roster (a `:seon.db/db` map-in
        adapter over the one [[seon.derive]] leaf); state is a projection of the
        run/terminated-at primitives, never stored
@@ -24,7 +24,7 @@
        the wake trigger — that's the client boot path)
      - `message!` / `user-ref` — re-exported from [[seon.agent.message]]
      - `add-section!` / `remove-section!` / `reset-ctx!` / `update-ctx!` —
-       the agent's section-layout editing surface (over `:seon.agent/sections`)
+       the agent's section-layout editing surface (over `:seon.agent/ctx`)
 
    Agent-id resolution: read APIs take `:seon.agent/id` and fall back to
    `(seon.db/current-agent-id)` when unset (the boot/run path wraps calls in
@@ -45,24 +45,24 @@
    ## Prompt assembly
 
    The LLM ctx is ONE recursive render of the ROOT renderable
-   (`seon.ctx/context-root`): `seon.agent.turn/render-prompt` calls
-   `(seon.render/render :seon.render/ai ctx (seon.ctx/context-root ctx))`,
+   (`seon.agent.ctx/context-root`): `seon.agent.turn/render-prompt` calls
+   `(seon.render/render :seon.render/ai ctx (seon.agent.ctx/context-root ctx))`,
    shared byte-for-byte with the inspector (`seon.agent.inspect/ctx-preview`).
-   The core section LAYOUT is CODE (`seon.ctx/core-default-ctx`); the agent's
-   own `:seon.agent/sections` section maps MERGE with it by one priority sort
+   The core section LAYOUT is CODE (`seon.agent.ctx/core-default-ctx`); the agent's
+   own `:seon.agent/ctx` section maps MERGE with it by one priority sort
    (override-by-id). Each section's `:seon.render/ai` slot is a verbatim
    string or a fn symbol resolved late via `seon.eval/lookup-value`.
 
-   The agent customizes by transacting different `:seon.ctx` entities into
-   `:seon.agent/sections` (use `update-ctx!`) or by transacting a completely
+   The agent customizes by transacting different `:seon.agent.ctx` entities into
+   `:seon.agent/ctx` (use `update-ctx!`) or by transacting a completely
    different symbol onto the agent's `:seon.render/ai` slot."
   (:require
     [clojure.string :as str]
     [seon.agent.message :as msg]
-    [seon.ctx :as ctx]
-    [seon.ctx.namespaces :as ctx-namespaces]
-    [seon.ctx.transcript :as ctx-transcript]
-    [seon.ctx.warnings :as ctx-warnings]
+    [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.namespaces :as ctx-namespaces]
+    [seon.agent.ctx.transcript :as ctx-transcript]
+    [seon.agent.ctx.warnings :as ctx-warnings]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.schema :as schema]))
@@ -95,11 +95,11 @@
 (schema/register! :seon.agent/schedules
                   [:vector {:seon.db/component true} :seon.db/ref])
 ;; ============================================================
-;; Aliases — the context machinery lives in `seon.ctx`. These keep (a) the
+;; Aliases — the context machinery lives in `seon.agent.ctx`. These keep (a) the
 ;; agent-TAUGHT read surface (`seon.agent/messages` …) resolving via
 ;; seon.eval/lookup-value, and (b) stored `:seon.render/ai` slots pointing at
 ;; 'seon.agent/assemble-context working. An alias captures the fn value at
-;; load time (pre-instrumentation) — call `seon.ctx/*` directly when you
+;; load time (pre-instrumentation) — call `seon.agent.ctx/*` directly when you
 ;; want the validated entry point.
 ;; ============================================================
 
@@ -156,11 +156,11 @@
 (schema/register! :seon.eval/ns          :keyword)
 
 ;; The agent's OWN context sections — a component vector of
-;; :seon.ctx/section maps (see seon.ctx). MERGED with the core defaults by
+;; :seon.agent.ctx/block maps (see seon.agent.ctx). MERGED with the core defaults by
 ;; one priority sort at render time (override-by-name). The one slot attr is
 ;; :seon.render/ai. (Turns are NOT owned here — a turn points UP to its run;
 ;; runs point UP to the agent via :seon.agent.run/agent.)
-(schema/register! :seon.agent/sections    [:vector {:seon.db/component true} :seon.db/ref])
+(schema/register! :seon.agent/ctx    [:vector {:seon.db/component true} :seon.db/ref])
 
 ;; ============================================================
 ;; Program graph. :seon.ns owns the namespace source; :seon.fn /
@@ -170,8 +170,8 @@
 ;; indexed codebase at boot; agent-defined entities populate via
 ;; detect-and-tee in eval-batch!.
 ;;
-;; :seon.ns/name + :seon.ns/source live in seon.ctx (its render-namespace
-;; schemas reference them and seon.ctx loads first).
+;; :seon.ns/name + :seon.ns/source live in seon.agent.ctx (its render-namespace
+;; schemas reference them and seon.agent.ctx loads first).
 ;; ============================================================
 
 (schema/register! :seon.fn/sym        [:string {:seon.db/identity true}])
@@ -504,13 +504,13 @@
 ;; The agent's ctx-LAYOUT editing surface — read-only against the DB except
 ;; the explicit layout verbs (reset-ctx! / update-ctx! / add-section! /
 ;; remove-section! / set-purpose!) the agent invokes. The section fns + the
-;; composer live in seon.ctx (re-exported above as transitional aliases).
+;; composer live in seon.agent.ctx (re-exported above as transitional aliases).
 ;; ============================================================
 
 
 ;; ------------------------------------------------------------
 ;; Layout verbs — reset-ctx! restores core defaults; update-ctx!
-;; threads f over the current :seon.agent/sections and retract-then-adds
+;; threads f over the current :seon.agent/ctx and retract-then-adds
 ;; the result. Component-cardinality-many means the retract is needed
 ;; to drop the old ctx entities before transacting new ones (cardinality-
 ;; many ref attrs accumulate on upsert).
@@ -519,8 +519,8 @@
 
 (defn ^:async reset-ctx!
   "Restore the core-default ctx layout for `agent-id` by RETRACTING
-   the stored :seon.agent/sections override (cascade-retracts the existing
-   :seon.ctx entities via component semantics). With no stored ctx,
+   the stored :seon.agent/ctx override (cascade-retracts the existing
+   :seon.agent.ctx entities via component semantics). With no stored ctx,
    `assemble-context` falls back to the CODE default
    (`core-default-ctx`) — so the agent tracks every future layout
    change automatically instead of freezing a stored copy of today's
@@ -529,11 +529,11 @@
   [agent-id]
   (await (db/transact!
            {:seon.db/tx-data
-            [[:db/retract [:seon.agent/id agent-id] :seon.agent/sections]]})))
+            [[:db/retract [:seon.agent/id agent-id] :seon.agent/ctx]]})))
 
 (defn ^:async update-ctx!
   "Apply `f` to the current ctx vector for `agent-id`; transact the
-   result. `f` receives the existing seq of :seon.ctx entity maps
+   result. `f` receives the existing seq of :seon.agent.ctx entity maps
    (component-inlined via pull) and returns a vector of ctx maps.
    Use to add/remove sections or change priorities without blowing
    away the whole layout."
@@ -543,13 +543,13 @@
         new-ctx (vec (f current))]
     (await (db/transact!
              {:seon.db/tx-data
-              [[:db/retract [:seon.agent/id agent-id] :seon.agent/sections]
+              [[:db/retract [:seon.agent/id agent-id] :seon.agent/ctx]
                {:seon.agent/id agent-id
-                :seon.agent/sections new-ctx}]}))))
+                :seon.agent/ctx new-ctx}]}))))
 
 ;; ============================================================
 ;; Self-context verbs — the validated path onto YOUR OWN
-;; `:seon.agent/sections` sections. Errors are values; blank text is refused
+;; `:seon.agent/ctx` sections. Errors are values; blank text is refused
 ;; with a guiding message; unknown name on remove names the current
 ;; section list. Default scope = the calling agent; explicit
 ;; :seon.agent/id allowed (a human or another agent can configure an
@@ -558,15 +558,15 @@
 
 (schema/register! ::add-section-request
   [:map
-   [:seon.ctx/name     :seon.ctx/name]
-   [:seon.ctx/priority {:optional true} :seon.ctx/priority]
+   [:seon.agent.ctx/name     :seon.agent.ctx/name]
+   [:seon.agent.ctx/priority {:optional true} :seon.agent.ctx/priority]
    [:seon.render/ai    :seon.render/ai]
    [:seon.render/html  {:optional true} :seon.render/html]
    [:seon.agent/id     {:optional true} :seon.agent/id]])
 
 (schema/register! ::remove-section-request
   [:map
-   [:seon.ctx/name :seon.ctx/name]
+   [:seon.agent.ctx/name :seon.agent.ctx/name]
    [:seon.agent/id {:optional true} :seon.agent/id]])
 
 ;; Shared response shapes for the section verbs (add-section! /
@@ -578,7 +578,7 @@
   [:or
    [:map
     [::ok?          [:= true]]
-    [:seon.ctx/name :seon.ctx/name]]
+    [:seon.agent.ctx/name :seon.agent.ctx/name]]
    [:map
     [::ok?   [:= false]]
     [::error ::error]]])
@@ -591,7 +591,7 @@
 
 (defn ^:async add-section!
   "Add or update ONE section of your own context — upsert-by-name
-   within your `:seon.agent/sections` vector (re-adding a name replaces that
+   within your `:seon.agent/ctx` vector (re-adding a name replaces that
    entry, so iterating on a section doesn't accumulate copies). A name
    that collides with a core default OVERRIDES it (deliberate,
    visible as data). `:seon.render/ai` is a string (rendered verbatim —
@@ -599,11 +599,11 @@
    every render with {:seon.db/db … :seon.agent/entity …}.
 
      (seon.agent/add-section!
-       {:seon.ctx/name :doctrine :seon.ctx/priority 15
+       {:seon.agent.ctx/name :doctrine :seon.agent.ctx/priority 15
         :seon.render/ai \"Always reconcile against my.finance.ledger.\"})
-     ;; => {:seon.agent/ok? true :seon.ctx/name :doctrine}"
+     ;; => {:seon.agent/ok? true :seon.agent.ctx/name :doctrine}"
   {:malli/schema [:=> [:cat ::add-section-request] ::section-response]}
-  [{nm :seon.ctx/name pri :seon.ctx/priority slot :seon.render/ai
+  [{nm :seon.agent.ctx/name pri :seon.agent.ctx/priority slot :seon.render/ai
     html :seon.render/html id :seon.agent/id}]
   (let [id (or id (db/current-agent-id))]
     (cond
@@ -614,7 +614,7 @@
 
       (not (keyword? nm))
       {::ok? false
-       ::error ":seon.ctx/name must be a keyword (e.g. :doctrine)."}
+       ::error ":seon.agent.ctx/name must be a keyword (e.g. :doctrine)."}
 
       (and (string? slot) (str/blank? slot))
       {::ok? false
@@ -630,31 +630,31 @@
 
       :else
       (let [current (ctx/ctx-entities {:seon.agent/id id})
-            section (cond-> {:seon.ctx/name     nm
-                             :seon.ctx/priority (or pri default-section-priority)
+            section (cond-> {:seon.agent.ctx/name     nm
+                             :seon.agent.ctx/priority (or pri default-section-priority)
                              :seon.render/ai    slot}
                       (some? html) (assoc :seon.render/html html))
             new-ctx (conj (->> current
-                               (remove #(= nm (:seon.ctx/name %)))
+                               (remove #(= nm (:seon.agent.ctx/name %)))
                                (mapv #(dissoc % :db/id)))
                           section)
             res     (await
                       (db/transact!
                         {:seon.db/tx-data
-                         [[:db/retract [:seon.agent/id id] :seon.agent/sections]
+                         [[:db/retract [:seon.agent/id id] :seon.agent/ctx]
                           {:seon.agent/id  id
-                           :seon.agent/sections new-ctx}]}))]
+                           :seon.agent/ctx new-ctx}]}))]
         (if (false? (:seon.db/ok? res))
           {::ok? false
            ::error (str "add-section! transact failed: "
                         (:seon.error/message (:seon.db/error res)))}
-          {::ok? true :seon.ctx/name nm})))))
+          {::ok? true :seon.agent.ctx/name nm})))))
 
 (defn ^:async remove-section!
   "Remove ONE of your own sections by name. Unknown name → error
    naming the current section list (errors are values)."
   {:malli/schema [:=> [:cat ::remove-section-request] ::section-response]}
-  [{nm :seon.ctx/name id :seon.agent/id}]
+  [{nm :seon.agent.ctx/name id :seon.agent/id}]
   (let [id (or id (db/current-agent-id))]
     (cond
       (nil? id)
@@ -664,27 +664,27 @@
 
       :else
       (let [current (ctx/ctx-entities {:seon.agent/id id})
-            names   (mapv :seon.ctx/name current)]
+            names   (mapv :seon.agent.ctx/name current)]
         (if-not (some #{nm} names)
           {::ok? false
            ::error (str "no section named " nm " — your sections: "
                         (pr-str names) ".")}
           (let [new-ctx (->> current
-                             (remove #(= nm (:seon.ctx/name %)))
+                             (remove #(= nm (:seon.agent.ctx/name %)))
                              (mapv #(dissoc % :db/id)))
                 res     (await
                           (db/transact!
                             {:seon.db/tx-data
                              (into [[:db/retract [:seon.agent/id id]
-                                     :seon.agent/sections]]
+                                     :seon.agent/ctx]]
                                    (when (seq new-ctx)
                                      [{:seon.agent/id  id
-                                       :seon.agent/sections new-ctx}]))}))]
+                                       :seon.agent/ctx new-ctx}]))}))]
             (if (false? (:seon.db/ok? res))
               {::ok? false
                ::error (str "remove-section! transact failed: "
                             (:seon.error/message (:seon.db/error res)))}
-              {::ok? true :seon.ctx/name nm})))))))
+              {::ok? true :seon.agent.ctx/name nm})))))))
 
 (defn ^:async set-purpose!
   "Pin or update why you exist — sugar over a one-attr transact to
@@ -709,4 +709,4 @@
           {::ok? false
            ::error (str "set-purpose! transact failed: "
                         (:seon.error/message (:seon.db/error res)))}
-          {::ok? true :seon.ctx/name :purpose})))))
+          {::ok? true :seon.agent.ctx/name :purpose})))))

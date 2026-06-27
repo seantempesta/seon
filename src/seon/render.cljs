@@ -105,7 +105,7 @@
 ;; slot-primitive return shape (`ai-render` → `seon.render.default/pretty-ai`
 ;; and `seon.render.chat`). The old `:seon.render/text` second arm was
 ;; DELETED with the V4 composer rewrite (context-render keystone): the ONE
-;; producer of it (`seon.ctx/assemble-context`) is gone, and the keystone's
+;; producer of it (`seon.agent.ctx/assemble-context`) is gone, and the keystone's
 ;; CONVERTERS return BARE Strings (not this envelope). One key, one meaning.
 (schema/register! :seon.render/ai-response
   [:map
@@ -130,7 +130,7 @@
 ;; `:seon.render/ai` — the OPTIONAL text twin (live-tiles U1, PRD §2):
 ;; how the agent knows what its human sees. Tile fns return it
 ;; alongside the hiccup; the awareness section renders it into the
-;; agent's context every turn. Same twin idea as `:seon.ctx/section`.
+;; agent's context every turn. Same twin idea as `:seon.agent.ctx/block`.
 ;;
 ;; `:seon.render/error` — present when the renderer THREW: the hiccup
 ;; is the human fallback card and this entry carries the envelope so
@@ -533,7 +533,7 @@
   "The OPTIONAL render-control attrs ANY renderable may carry — stripped by
    the generic default so a data dump shows only domain attrs."
   [:seon.render/ai :seon.render/html :seon.render/clip
-   :seon.render/hidden? :seon.render/children :seon.ctx/priority])
+   :seon.render/hidden? :seon.render/children :seon.agent.ctx/priority])
 
 (defn renderable-id
   "A node's stable HANDLE — its own identity attr (dispatch by presence), or a
@@ -544,7 +544,7 @@
   (or (:seon.agent.message/id node)
       (:seon.eval/id node)
       (:seon.agent.todo/id node)
-      (:seon.ctx/name node)
+      (:seon.agent.ctx/name node)
       (:db/id node)))
 
 (defn renderable-inst

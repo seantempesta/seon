@@ -508,7 +508,7 @@
 ;; so a broken tile re-armed the wake loop AND defeated the halt. There is
 ;; no active intervention now: a broken tile is a DERIVED surface. The
 ;; `:seon.render/ai` twin in seon.render.live-tile/error-response carries
-;; "YOUR LIVE TILE IS BROKEN — …" and the :seon.ctx.live-tile/live-tile-
+;; "YOUR LIVE TILE IS BROKEN — …" and the :seon.agent.ctx.live-tile/live-tile-
 ;; section re-derives it from the db value EVERY turn (a pure fn of state,
 ;; no stored error flag, self-healing when the tile renders clean again).
 ;; The agent learns of breakage by reading its own context, not by being

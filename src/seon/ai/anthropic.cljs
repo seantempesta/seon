@@ -34,8 +34,8 @@
      - PROMPT CACHING (task #34, 2026-06-12 — the system-block-only
        breakpoint covered just ~5.4k of ~38k input tokens because the
        ENTIRE assembled ctx rode as one user message AFTER the only
-       breakpoint): the ctx string carries seon.ctx's in-band
-       [[seon.ctx/stable-boundary]]; [[seon.ctx/split-context]]
+       breakpoint): the ctx string carries seon.agent.ctx's in-band
+       [[seon.agent.ctx/stable-boundary]]; [[seon.agent.ctx/split-context]]
        recovers the STABLE prefix (sections through :namespaces —
        byte-stable within a session) and the VOLATILE tail. :system
        becomes TWO content blocks, each with cache_control {:type
@@ -51,7 +51,7 @@
   (:require [clojure.string :as str]
             ["@anthropic-ai/sdk" :as Anthropic]
             [seon.ai :as ai]
-            [seon.ctx :as ctx]
+            [seon.agent.ctx :as ctx]
             [seon.error :as error]
             [seon.schema :as schema]))
 

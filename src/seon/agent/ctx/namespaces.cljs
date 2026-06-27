@@ -1,8 +1,8 @@
-(ns seon.ctx.namespaces
+(ns seon.agent.ctx.namespaces
   "The `:namespaces` context section — THE BODY of the prompt: CURATED,
    not render-everything. Each rendered ns is a full-source comment-block
    delimited by per-ns `;;; ┌─ namespace x ─` / `;;; └─ end namespace x ─`
-   brackets ([[seon.ctx/ns-demarc]]). ONLY the curated set renders:
+   brackets ([[seon.agent.ctx/ns-demarc]]). ONLY the curated set renders:
 
      - FULL source (whole file, NO clipping) for the few nses an agent
        actually USES or OWNS:
@@ -19,12 +19,12 @@
        section — it is NOT shown here at all. It stays INDEXED (its
        `:seon.ns/name` + `:seon.fn` / `:seon.schema` / `:seon.test` rows)
        and SEARCHABLE — discoverable via `seon.agent.search` (ripgrep) or
-       readable on demand via [[seon.ctx/render-namespace]]. There is no
+       readable on demand via [[seon.agent.ctx/render-namespace]]. There is no
        signature manifest: passive name-listing is replaced by active
        grep/query, taught in the `<system>` prose.
 
-   Symbol-wired into the composer layout (`seon.ctx/core-default-ctx`) as
-   `'seon.ctx.namespaces/namespaces-section`; loaded at boot so the
+   Symbol-wired into the composer layout (`seon.agent.ctx/core-default-ctx`) as
+   `'seon.agent.ctx.namespaces/namespaces-section`; loaded at boot so the
    symbol resolves for `seon.eval/lookup-value`.
 
    The section NEVER re-reads files at render time (code-as-data): the
@@ -37,7 +37,7 @@
    real file source, never a reconstructed stub."
   (:require
     [clojure.string :as str]
-    [seon.ctx :as ctx]
+    [seon.agent.ctx :as ctx]
     [seon.db :as db]))
 
 ;; ============================================================
@@ -46,7 +46,7 @@
 ;; the boot indexer (`seon.client/ns-row`, the one file reader) and
 ;; [[namespaces-section]] (the curated namespaces prompt body):
 ;; one rule, one writer, no drift. Pure string/keyword/symbol fns —
-;; no dependency on anything in `seon.ctx`.
+;; no dependency on anything in `seon.agent.ctx`.
 ;; ============================================================
 
 (defn hidden-ns-name?
@@ -72,7 +72,7 @@
    agent prompt — its `deftest`s are noise to the working agent, and the
    per-fn `:test` usage example already rides the regular fn's attr-map in
    the compact head. Full tests stay reachable on demand via
-   [[seon.ctx/render-namespace]]. STRUCTURAL, like [[hidden-ns-name?]]: the
+   [[seon.agent.ctx/render-namespace]]. STRUCTURAL, like [[hidden-ns-name?]]: the
    suffix IS the filter. String/keyword/symbol tolerant."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
   [ns-name]
@@ -114,7 +114,7 @@
    EVERYTHING ELSE in the framework is curated OUT — the rest of `seon.*`
    (db, search, fs, message, lifecycle, schema, render, …) is NOT dumped
    here. It stays INDEXED and grep-able via `seon.agent.search` and readable
-   on demand via [[seon.ctx/render-namespace]] — one search away, never a
+   on demand via [[seon.agent.ctx/render-namespace]] — one search away, never a
    wall of code the agent must wade through. `my.*` nses are ALREADY rendered
    full by the `my.*` rule in [[full-source-ns?]] — including `my.kb`, the
    worked, runnable DB manual — so they do NOT belong here; this whitelist is
@@ -193,7 +193,7 @@
   "The never-omit block for the agent's CURRENT ns when it has no members
    defined yet (GI-2). A fresh home ns (`my.agent.<id>`) carries a
    `:seon.ns/name` + `:seon.ns/requires` row but no stored `:seon.ns/source`
-   and no fns/schemas, so [[seon.ctx/render-namespace]] yields an empty body
+   and no fns/schemas, so [[seon.agent.ctx/render-namespace]] yields an empty body
    that would be omitted — breaking the system prompt's promise that YOUR
    OWN namespace renders in full. This stub keeps that promise: it shows the
    reconstructed `(ns …)` require form (from the stored `:seon.ns/requires`,
@@ -218,7 +218,7 @@
 
 (defn- render-one
   "Render ONE included ns through the SINGLE renderer
-   ([[seon.ctx/render-namespace]]) at the chosen detail LEVEL, flat (depth
+   ([[seon.agent.ctx/render-namespace]]) at the chosen detail LEVEL, flat (depth
    0 — no require-recursion; the section renders each ns once). `:full`
    yields the whole-ns view (real file source + members); `:signature`
    yields the `(signatures)` API-surface block.
@@ -254,7 +254,7 @@
 
 (defn namespaces-section
   "CURATED namespaces body. Routes EVERY included ns through the SINGLE
-   renderer [[seon.ctx/render-namespace]] — no parallel hand-rolled paths.
+   renderer [[seon.agent.ctx/render-namespace]] — no parallel hand-rolled paths.
    The per-ns DETAIL LEVEL is the only choice the section makes
    ([[render-full?]]):
 
@@ -266,7 +266,7 @@
      - Every OTHER `seon.*` framework ns is DROPPED from the rendered
        section — not shown here at all. It stays INDEXED and SEARCHABLE
        (via `seon.agent.search`) and readable on demand via
-       [[seon.ctx/render-namespace]].
+       [[seon.agent.ctx/render-namespace]].
 
    The full blocks are ordered by RECENCY (tx of the `:seon.ns/name` datom —
    bumped by the tee's nested upsert on every define), name as the

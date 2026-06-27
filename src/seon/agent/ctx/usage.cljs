@@ -1,4 +1,4 @@
-(ns seon.ctx.usage
+(ns seon.agent.ctx.usage
   "Read-side extractor for the per-turn LLM token usage — the FIRST (and
    so far only) consumer of `:seon.agent.turn/llm-usage`, the verbatim
    provider `usage` map persisted as an EDN string by

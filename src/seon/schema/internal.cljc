@@ -4,7 +4,7 @@
    Private engine internals, factored out of the public registry surface
    so they stay indexed + grep-able WITHOUT rendering into agent context
    (the `*.internal` convention drops them from the curated namespaces
-   body — see `seon.ctx.namespaces/hidden-ns-name?`).
+   body — see `seon.agent.ctx.namespaces/hidden-ns-name?`).
 
    Everything here is pure form-shape inspection over a Malli schema form,
    plus the two `register!` gates. The registry atom lives in `seon.schema`;

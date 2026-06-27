@@ -1947,7 +1947,7 @@
 (defn render-error-string
   "Produce the CRYSTAL-CLEAR, edn-SAFE string persisted as
    `:seon.eval/error` for a failed eval — what the agent reads in the
-   transcript (rendered as `;; ⚠` lines by `seon.ctx/format-eval-row`).
+   transcript (rendered as `;; ⚠` lines by `seon.agent.ctx/format-eval-row`).
 
    It must tell a fresh, confused LLM the EXACT defect AND the exact next
    action — never a stack trace, never a raw EDN dump. So we keep ONLY

@@ -1,9 +1,9 @@
-(ns seon.ctx.inventory
+(ns seon.agent.ctx.inventory
   "The stored-data inventory context section — a cheap, reactive map of
    what the shared store holds RIGHT NOW (one line per stored KIND with
    each attr's live row count), rendered as a single-`;` comment-block
    (one line per kind). Symbol-wired into the composer layout
-   (`seon.ctx/core-default-ctx`) as `'seon.ctx.inventory/inventory-section`;
+   (`seon.agent.ctx/core-default-ctx`) as `'seon.agent.ctx.inventory/inventory-section`;
    loaded at boot so the symbol resolves for `seon.eval/lookup-value`."
   (:require
     [clojure.string :as str]

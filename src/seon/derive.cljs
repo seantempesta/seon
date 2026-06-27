@@ -4,7 +4,7 @@
 
    Why a leaf: the agent's derived state, turn counts, current-run, and the
    armable roster were each re-implemented 5+ times across `seon.agent`,
-   `seon.ctx`, `seon.render.default`, `seon.agent.run`, and
+   `seon.agent.ctx`, `seon.render.default`, `seon.agent.run`, and
    `seon.agent.schedule`, every copy justified by dodging the
    `agent → ctx → render` require cycle. A pure `(derive-x db id)` needs
    NOTHING from those namespaces — only `seon.db` to read and `seon.schema`
@@ -21,7 +21,7 @@
    site (the wrappers in `seon.agent`/`seon.agent.run` do exactly that).
 
    Dependency direction (acyclic): requires ONLY `seon.db` + `seon.schema`.
-   It MUST NOT require `seon.agent`, `seon.ctx`, `seon.render.*`, or
+   It MUST NOT require `seon.agent`, `seon.agent.ctx`, `seon.render.*`, or
    `seon.agent.loop` — that is the whole point."
   (:require
     [seon.db :as db]

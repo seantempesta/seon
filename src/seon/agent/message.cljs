@@ -113,7 +113,7 @@
 ;; The waking-inbound RULE — ONE source of truth for "this message wakes
 ;; (and renders as an inbound) for the agent whose eid is `my-eid`". Both
 ;; the wake gate ([[seon.agent/inbound-msg-datom?]]) and the transcript
-;; head-render ([[seon.ctx.transcript]]) call these so a message wakes
+;; head-render ([[seon.agent.ctx.transcript]]) call these so a message wakes
 ;; under exactly the rule it renders under — no drift. PUBLIC (cross-ns
 ;; callers): lives here, the message-data owner, not in `.internal`.
 

@@ -22,8 +22,8 @@
    The OTHER instruction homes (don't mix them up): per-agent standing
    orders go on the agent's OWN entity; identity/personality lives in the
    SOUL.md / AGENTS.md files (read LIVE as context file-sections —
-   `seon.ctx/file-section`); static behavioral defaults are the hardcoded
-   system prompt (`seon.ctx/system-text`). This ns is only the
+   `seon.agent.ctx/file-section`); static behavioral defaults are the hardcoded
+   system prompt (`seon.agent.ctx/system-text`). This ns is only the
    cluster-wide, all-agents home."
   (:require
     [clojure.string :as str]
@@ -88,13 +88,13 @@
   "The single-`;` `SHARED INSTRUCTIONS` context block — cluster-wide
    standing guidance shown to EVERY agent, every turn. This is the SHARED
    knowledge-base surface, NOT the hardcoded system prompt
-   (`seon.ctx/system-text`) — it never overrides those mechanics, it adds
+   (`seon.agent.ctx/system-text`) — it never overrides those mechanics, it adds
    durable human/agent guidance alongside them. Rendered FRESH from the db
    ([[instructions]] over the passed `:seon.db/db`), so it is reactive:
    append a row and it appears next turn; retract it and the line is gone
    — nothing stored that needs clearing. Empty string when none exist, so
    the whole section vanishes until the first instruction lands.
-   Symbol-wired into the composer (`seon.ctx/core-default-ctx`) as
+   Symbol-wired into the composer (`seon.agent.ctx/core-default-ctx`) as
    `'my.kb.shared/instructions-section`."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db]}]

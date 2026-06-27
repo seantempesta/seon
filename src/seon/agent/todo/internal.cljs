@@ -6,7 +6,7 @@
    Factored out of the public verb surface so the teaching ns shows ONLY
    add!/complete!/reopen!/list-open + their register! schemas (the
    `*.internal` convention drops these from rendered agent context —
-   see `seon.ctx.namespaces/hidden-ns-name?`).
+   see `seon.agent.ctx.namespaces/hidden-ns-name?`).
 
    Keyword-namespace note: this lives under `seon.agent.todo.internal`, so
    `::foo` would expand WRONG. Every helper references the owning ns's

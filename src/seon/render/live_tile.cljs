@@ -563,7 +563,7 @@
    the truth: the `:seon.render/ai` twin carries the failure (awareness
    section) and the full `:seon.error/*` envelope rides on `:seon.render/error`.
    Breakage is a DERIVED surface only (#43 / D2) — the
-   `:seon.ctx.live-tile/live-tile-section` re-derives this twin into the
+   `:seon.agent.ctx.live-tile/live-tile-section` re-derives this twin into the
    agent's context EVERY turn (a pure fn of state, no stored flag,
    self-healing on the next clean render). There is NO active push: a forged
    self-message would wake the agent and defeat the loop's halt. So the human

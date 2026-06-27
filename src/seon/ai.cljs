@@ -37,14 +37,14 @@
    errors-are-values envelope, request/response field shapes) and the
    provider-agnostic system-prompt resolution. The LLM `system` role
    message is the HARDCODED, system-specific seon mechanics
-   ([[seon.ctx/system-text]] — REPL doctrine, environment orientation,
+   ([[seon.agent.ctx/system-text]] — REPL doctrine, environment orientation,
    common DB ops, standing teachings); both providers send the same one.
    It is decoupled from SOUL.md / AGENTS.md, which are FILE-LOADED
-   CONTEXT sections (`seon.ctx/file-section`), not the system
+   CONTEXT sections (`seon.agent.ctx/file-section`), not the system
    message."
   (:require [clojure.string :as str]
             [cljs.reader :as reader]
-            [seon.ctx :as ctx]
+            [seon.agent.ctx :as ctx]
             [seon.db :as db]
             [seon.log :as log]
             [seon.schema :as schema]))
@@ -331,9 +331,9 @@
 ;;
 ;; The system role message is NOT the soul and NOT any file: it is the
 ;; environment orientation + REPL doctrine + common DB ops + standing
-;; teachings hardcoded in `seon.ctx/system-text`. SOUL.md / AGENTS.md are
-;; FILE-LOADED CONTEXT sections (`seon.ctx/file-section`), wired into
-;; `seon.ctx/core-default-ctx` — they ride the user-message context, not
+;; teachings hardcoded in `seon.agent.ctx/system-text`. SOUL.md / AGENTS.md are
+;; FILE-LOADED CONTEXT sections (`seon.agent.ctx/file-section`), wired into
+;; `seon.agent.ctx/core-default-ctx` — they ride the user-message context, not
 ;; here. There is NO file read and NO fallback in this path.
 ;; ============================================================
 
@@ -360,7 +360,7 @@
 (defn effective-system-prompt
   "The system message content for a call: the request's explicit
    `:seon.ai/system-prompt` override when given, else the HARDCODED
-   system-specific seon mechanics (`seon.ctx/system-text` — byte-stable,
+   system-specific seon mechanics (`seon.agent.ctx/system-text` — byte-stable,
    the same for every agent and turn, so it caches as the system block).
    This is NOT the soul and NOT a file — SOUL.md / AGENTS.md are context
    sections, decoupled from the system message. Never throws."

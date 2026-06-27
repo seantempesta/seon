@@ -1,9 +1,9 @@
-(ns seon.ctx.relevant
+(ns seon.agent.ctx.relevant
   "The `:relevant-source` context section — the top-k embedding-retrieval
    hits for THIS turn's query, surfaced (as a single-`;` `relevant context`
    comment-block) as source the agent can read inline.
-   Symbol-wired into the composer layout (`seon.ctx/core-default-ctx`) as
-   `'seon.ctx.relevant/relevant-source-section` at priority 48 (the VOLATILE
+   Symbol-wired into the composer layout (`seon.agent.ctx/core-default-ctx`) as
+   `'seon.agent.ctx.relevant/relevant-source-section` at priority 48 (the VOLATILE
    half — query-dependent content must stay out of the cacheable stable prefix).
 
    The HITS are NOT computed here. They are PREFETCHED by the async

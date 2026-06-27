@@ -13,7 +13,7 @@
      and the inspector.
 
    This namespace renders the tile and reads the message log; it does
-   NOT compose the agent's prompt (that is `seon.ctx`'s job).
+   NOT compose the agent's prompt (that is `seon.agent.ctx`'s job).
 
    ## Independent of seon.agent
 

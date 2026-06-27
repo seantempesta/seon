@@ -37,11 +37,11 @@
    explicit request opt > config row > the shipped defaults below.
 
    The `system` role message is the HARDCODED system-specific seon
-   mechanics (`seon.ctx/system-text` via
+   mechanics (`seon.agent.ctx/system-text` via
    `seon.ai/effective-system-prompt`), byte-stable for every agent and
    turn — NO file read, NO fallback. The agent's IDENTITY (SOUL.md /
    AGENTS.md) rides the user-message CONTEXT as file-sections
-   (`seon.ctx/file-section`), decoupled from the system message.
+   (`seon.agent.ctx/file-section`), decoupled from the system message.
 
    Streaming: we ASK for a stream (`.stream` + `.finalChatCompletion`)
    and the SDK buffers it into one assembled ChatCompletion object —

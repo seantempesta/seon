@@ -153,7 +153,7 @@
    agent always sees the diff and can reject a wrong-but-valid repair.
 
    Leads with the `↻` glyph and carries NO `;;` prefix — the transcript
-   renderer (`seon.ctx/format-eval-row`) emits it as a `;; ↻ …` comment
+   renderer (`seon.agent.ctx/format-eval-row`) emits it as a `;; ↻ …` comment
    line in the unified stream, so a wrong-but-valid repair stays
    catchable right above the form it changed.
 

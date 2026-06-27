@@ -5,7 +5,7 @@
    Factored out of the public message surface so the teaching ns shows ONLY
    message!/user/agent + the public wake-rule predicates + their register!
    schemas (the `*.internal` convention drops these from rendered agent
-   context — see `seon.ctx.namespaces/hidden-ns-name?`).
+   context — see `seon.agent.ctx.namespaces/hidden-ns-name?`).
 
    Required ONLY by its parent ns `seon.agent.message`.
 

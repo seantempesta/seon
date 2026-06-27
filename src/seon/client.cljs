@@ -68,7 +68,7 @@
     [seon.agent.schedule]
     ;; One turn — the bootstrap turn-0 opens a turn directly.
     [seon.agent.turn :as turn]
-    [seon.ctx]
+    [seon.agent.ctx]
     [seon.ai :as ai]
     [seon.ai.anthropic :as anthropic]
     [seon.ai.openai-compat :as openai]
@@ -139,14 +139,14 @@
     ;; each owns one section fn (+ html twin) that core-default-ctx
     ;; wires by SYMBOL — required here so the build includes them and
     ;; their munged symbols resolve via seon.eval/lookup-value at
-    ;; render time (no require cycle: the section nses require seon.ctx
-    ;; for the shared read API, seon.ctx names them only as symbols).
-    [seon.ctx.namespaces :as nss]
-    [seon.ctx.live-tile]
-    [seon.ctx.warnings]
-    [seon.ctx.transcript]
-    [seon.ctx.inventory]
-    [seon.ctx.relevant]
+    ;; render time (no require cycle: the section nses require seon.agent.ctx
+    ;; for the shared read API, seon.agent.ctx names them only as symbols).
+    [seon.agent.ctx.namespaces :as nss]
+    [seon.agent.ctx.live-tile]
+    [seon.agent.ctx.warnings]
+    [seon.agent.ctx.transcript]
+    [seon.agent.ctx.inventory]
+    [seon.agent.ctx.relevant]
     [seon.platform]
     ;; Phase B item 9 — shared read-side wrapper over the analyzer
     ;; state. Required here so the build includes it; item 10's
@@ -347,7 +347,7 @@
    :seon.agent/default-turn-limit
    :seon.agent/default-deadline-ms
    :seon.agent/schedules
-   :seon.agent/sections
+   :seon.agent/ctx
 
    ;; --- Schedule (seon.agent.schedule — the cron maps an agent owns via
    ;; :seon.agent/schedules; the ticker's fire-due-schedules! reads these) ---
@@ -361,11 +361,11 @@
    :seon.render/ai
    :seon.render/html
 
-   ;; --- Ctx section entities (seon.ctx; self-context spec 2026-06-10).
-   ;; :seon.ctx/fn is DEAD — the one slot attr is :seon.render/ai
+   ;; --- Ctx section entities (seon.agent.ctx; self-context spec 2026-06-10).
+   ;; :seon.agent.ctx/fn is DEAD — the one slot attr is :seon.render/ai
    ;; (above), string-or-symbol via the bridge's EDN-string encoding. ---
-   :seon.ctx/name
-   :seon.ctx/priority
+   :seon.agent.ctx/name
+   :seon.agent.ctx/priority
 
    ;; --- Run (seon.agent.run — the wake-episode grouping; turns point UP
    ;; to it via :seon.agent.turn/run, it points UP to the agent) ---
@@ -495,7 +495,7 @@
    :my.kb.shared/at
    ;; (No identity attrs — the agent's identity is read LIVE from
    ;; SOUL.md / AGENTS.md every turn as file-sections, never stored. See
-   ;; seon.ctx/file-section.)
+   ;; seon.agent.ctx/file-section.)
 
    ;; --- Test (Phase 2 — test capture as data) ---
    :seon.test/sym
@@ -1138,7 +1138,7 @@
 (defn- ns-row
   "Build the `:seon.ns` row for an owning ns name string.
 
-   FULL-SOURCE nses (`seon.ctx.namespaces/full-source-ns?` — all `my.*`, test
+   FULL-SOURCE nses (`seon.agent.ctx.namespaces/full-source-ns?` — all `my.*`, test
    siblings included) carry the REAL FULL FILE TEXT as
    `:seon.ns/source`: the boot indexer is the ONE file-reader; the
    `:namespaces` context section (and anything else downstream) renders
@@ -2020,7 +2020,7 @@
    two can never drift again (the gym hand-mirrored this sequence and
    drifted twice). The agent's identity is NOT seeded — SOUL.md /
    AGENTS.md are read LIVE as context sections every render
-   (`seon.ctx/file-section`), so gym and live prompts get the same
+   (`seon.agent.ctx/file-section`), so gym and live prompts get the same
    identity with no seed step.
 
    Steps, in boot order, under ONE `{:seon.db/origin :core-seed}`
@@ -2069,7 +2069,7 @@
                                 :seon.db/tx-data (seed-core!)})))
               ;; No soul seed: the agent's identity is read LIVE from
               ;; SOUL.md / AGENTS.md as context sections every render
-              ;; (seon.ctx/file-section), never seeded into the store.
+              ;; (seon.agent.ctx/file-section), never seeded into the store.
               (check! :core-index
                       (await (db/transact!
                                {:seon.db/conn conn

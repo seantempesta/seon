@@ -914,7 +914,7 @@
 (defn entity-lazy
   "INTERNAL: look up an entity and return the RAW datahike Entity (lazy,
    map-like). Ref attrs navigate lazily to nested Entities — the render
-   hot-path (`seon.ctx.transcript/session-turns` walks agent → sessions →
+   hot-path (`seon.agent.ctx.transcript/session-turns` walks agent → sessions →
    turns → evals) depends on this lazy traversal, so it MUST NOT touch.
 
    Not part of the agent-taught surface — agents call [[entity]] (which

@@ -612,7 +612,7 @@
 ;; keyword-typed identity attrs the registry holds (today `:seon.ns/name`
 ;; and `:seon.schema/key`), never for string-identity attrs (`:seon.fn/sym`),
 ;; ref-identity attrs (`:seon.agent/id` → `:seon.db/id`), or non-identity
-;; keyword attrs (`:seon.ctx/name`). The KEYWORD stays the stored canonical
+;; keyword attrs (`:seon.agent.ctx/name`). The KEYWORD stays the stored canonical
 ;; value — we coerce on the way IN and never loosen the stored schema — so
 ;; datahike lookup-refs / identity resolution keep working.
 ;;

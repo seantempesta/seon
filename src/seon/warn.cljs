@@ -312,8 +312,8 @@
 ;; ============================================================
 
 (defn agent-registered-attrs
-  "PUBLIC: the `seon.ctx/context-model` classifier consumes this as its
-   `:seon.ctx/agent-attrs` leg — ONE provenance query for the attr
+  "PUBLIC: the `seon.agent.ctx/context-model` classifier consumes this as its
+   `:seon.agent.ctx/agent-attrs` leg — ONE provenance query for the attr
    surface, shared by domain-attrs and the classifier.
 
    The set of attr keywords whose `:seon.schema/key` row landed in a tx

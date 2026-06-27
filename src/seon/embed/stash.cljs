@@ -1,8 +1,8 @@
 (ns seon.embed.stash
   "Per-turn embedding-retrieval stash — an AsyncLocalStorage bridge from the
    ASYNC prefetch (`seon.agent/run-turn!`, which awaits the wire `knn-search`)
-   to the SYNCHRONOUS section render (`seon.ctx.relevant/relevant-source-section`,
-   read by the value-returning `seon.ctx/assemble-context`).
+   to the SYNCHRONOUS section render (`seon.agent.ctx.relevant/relevant-source-section`,
+   read by the value-returning `seon.agent.ctx/assemble-context`).
 
    WHY ALS, not a `^:dynamic` Var or an atom: the pod runs CONCURRENT agents in
    one Node process. A global slot (atom OR a CLJS `binding`, which macroexpands
@@ -34,7 +34,7 @@
 (defn current-hits
   "The hits vector stashed by the active `with-hits` scope, or nil outside any
    scope (the default-OFF path — no prefetch ran, nothing called `with-hits`).
-   `seon.ctx.relevant/relevant-source-section` reads this synchronously."
+   `seon.agent.ctx.relevant/relevant-source-section` reads this synchronously."
   {:malli/schema [:=> [:cat] :any]}
   []
   (let [store (.getStore retrieval-als)]

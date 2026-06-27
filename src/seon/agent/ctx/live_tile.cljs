@@ -1,8 +1,8 @@
-(ns seon.ctx.live-tile
+(ns seon.agent.ctx.live-tile
   "The `:live-tile` context section — \"what your human currently sees\",
    rendered as a `;; ── live tile ──` comment-block. Symbol-wired into the
-   composer layout (`seon.ctx/core-default-ctx`) as
-   `'seon.ctx.live-tile/live-tile-section`; loaded at boot so the symbol
+   composer layout (`seon.agent.ctx/core-default-ctx`) as
+   `'seon.agent.ctx.live-tile/live-tile-section`; loaded at boot so the symbol
    resolves for `seon.eval/lookup-value`.
 
    The agent sees the SAME wired value the human's surfaces render —
@@ -11,7 +11,7 @@
    Self-contained: no spine read API, just the tile renderer +
    wired-content provenance."
   (:require
-    [seon.ctx :as ctx]
+    [seon.agent.ctx :as ctx]
     [seon.db :as db]
     [seon.render :as render]
     [seon.render.live-tile :as live-tile]))
@@ -91,7 +91,7 @@
               ;; The body is a render twin (:ai text, or hiccup pr-str, or
               ;; an error envelope) — arbitrary content the human's tile
               ;; shows. It rides this comment-block as `;` lines (via
-              ;; [[seon.ctx/quote-lines]]) so the whole section reads as
+              ;; [[seon.agent.ctx/quote-lines]]) so the whole section reads as
               ;; eval'able Clojure (the context IS one live REPL); the agent
               ;; reads the value, it never evaluates.
               body-comment (ctx/quote-lines body)]
