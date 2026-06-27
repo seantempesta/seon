@@ -1229,7 +1229,11 @@
    [:div {:class "flex items-center gap-3 min-w-0"}
     [:div {:class "flex items-baseline gap-2 shrink-0"}
      [:span {:class "text-sm font-semibold text-text-50"} "seon"]
-     [:span {:class "text-2xs text-text-500"} agent-id]]
+     ;; agent-id is dev metadata (also in the URL + chat view); hide it below
+     ;; `sm` so the always-visible activity region keeps room on a phone — at
+     ;; ~360px the brand + right-controls otherwise consume the full width and
+     ;; the activity text collides with the controls (responsive audit finding).
+     [:span {:class "text-2xs text-text-500 hidden sm:inline"} agent-id]]
     ;; ALWAYS-VISIBLE live agent activity — what it's doing right NOW (state ·
     ;; turn · latest action). A patchable region (`tile-<id>:activity`) the
     ;; console multiplex re-renders on every tx (see `console-payload`).
@@ -1242,12 +1246,15 @@
     ;; console without a URL change — packetstar toggles `#seon-debug-overlay`
     ;; (⚙ / backtick, Esc/backdrop closes). Document-delegated click, so the
     ;; button survives any future morph.
+    ;; icon-only below `sm` (the glyph carries the meaning); label returns on
+    ;; wider screens — keeps the header chrome compact on a phone.
     [:button {:id "seon-debug-toggle" :type "button"
               :class (str "text-2xs text-amber-400 hover:text-amber-300 cursor-pointer "
                           "bg-transparent border-0 p-0")}
-     "⚙ debug"]
+     "⚙" [:span {:class "hidden sm:inline"} " debug"]]
     [:a {:class "text-2xs text-amber-400 hover:text-amber-300"
-         :href  (str "/tile/agent/" agent-id "/full")} "⛶ fullscreen"]]])
+         :href  (str "/tile/agent/" agent-id "/full")}
+     "⛶" [:span {:class "hidden sm:inline"} " fullscreen"]]]])
 
 (defn- input-form
   "The input tile — the human's REPL prompt. A user-OWNED region the server never
