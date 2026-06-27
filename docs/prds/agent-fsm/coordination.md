@@ -98,28 +98,23 @@ other lane's **_Needs_** and the owner makes it.
   `install!`/`remove!`, DELETE the merge/provider seam AND the char budget). Then 2e
   (render words + the `slot` UI gate) → 2f → 2g → Phase 3 ∥ Phase 6.
 - **Needs (from UI):** the reitit cutover — handled by the **batched bring-up** below.
-- **Interface changes / AGREED PLAN — the reitit cutover (Lane-U #3):**
-  Adopting reitit needs a `deps.edn` add → a **cljs-watch restart**, which is more
-  disruptive than it looks: **restarting cljs-watch rotates shadow's dev port and
-  DETACHES the running pod (→ 0 runtimes, MCP eval dies); the pod must be restarted to
-  reconnect** (Core hit this 2026-06-27). Core's Phase-2 keystone ALSO needs a pod
-  bring-up when it lands. So we **batch both into ONE coordinated window** instead of
-  two pod-disruption cycles:
-  1. **U:** build the reitit adapter (deps.edn + adapter ns + `serve.cljs` dispatch
-     swap), **acme-verify routing/SSE in the isolated 7980 cluster (zero live
-     disruption)**, and commit. The live default build going RED after that is expected;
-     HOLD the live cutover restart.
-  2. **Core (orchestrator) drives the single bring-up** after the keystone agent lands
-     + U's reitit is committed: `bin/seon restart cljs-watch` (reitit on classpath +
-     compiles keystone+reitit, wait green) → `bin/seon cluster reset default` (fresh
-     keystone world; pod reconnects to the new shadow).
-  3. **Verify as TWO separate signals** (so a bug is isolable): keystone via MCP-eval
-     render-proof (fresh agent renders from its OWN seed-copied `:seon.agent/ctx`, 0
-     bad-spec) · reitit via server-side HTTP routing + the gzip-morph SSE (node gunzip
-     client; browsers 503 on long-lived streams).
-  **U: commit the reitit adapter when acme-green + ping here. Core announces the
-  bring-up START here so we never both restart at once. Need the live pod green
-  meanwhile? Say so and Core re-sequences.**
+- **Interface changes / AGREED PLAN — DECOUPLED (supersedes the earlier "batch"):**
+  Background gotcha: a **cljs-watch restart rotates shadow's dev port and DETACHES the
+  running pod (→ 0 runtimes, MCP eval dies)** (Core hit this 2026-06-27). U is landing a
+  **shadow-port-PIN** so restarts recover gracefully (pod auto-reconnects) — that fix is
+  the gate for the reitit cutover. Key realization: the two disruptions are NOT actually
+  coupled —
+  1. **Phase-2 KEYSTONE proof = `cluster reset` ONLY**, which restarts pod + wire-server
+     but **NOT cljs-watch**, so it never rotates the shadow port → already clean. Core
+     runs it **independently** the moment the keystone agent lands (no wait on reitit or
+     the pin). Verify: MCP render-proof (fresh agent renders from its OWN seed-copied
+     `:seon.agent/ctx`, 0 bad-spec) + suite.
+  2. **Reitit cutover = needs a cljs-watch restart** (the `deps.edn` add). Land it AFTER
+     U's **shadow-port-pin** so the restart is a graceful auto-reconnect (no manual pod
+     dance). U: build + **acme-verify** the adapter (zero live disruption), commit; then
+     cutover once the pin is in. Verify reitit server-side (HTTP routing + gzip-morph
+     SSE via node gunzip; browsers 503 on long-lived streams).
+  **Whoever drives a restart announces START here so we never both restart at once.**
 
 ## UI — _Now / Needs / Interface changes_
 
