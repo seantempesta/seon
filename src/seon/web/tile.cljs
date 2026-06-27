@@ -320,6 +320,45 @@
        [:div {:class "text-xs text-text-500"}
         "nothing pinned yet — the agent uses add-section! to keep things here"])]))
 
+(defn narration-view
+  "The agent's prominent NARRATION surface — the `:now` (or `:narration`) context
+   section it pins via `add-section!` and REFRESHES as work progresses, so the
+   human watches in-progress narration ('what I'm doing / just did'), not just the
+   final chat reply. Same `:seon.agent/sections` data as `context-view`, but it
+   lifts the ONE narration section out and renders it bigger (`text-sm`) and higher
+   than the dense rail tiles, since it's the headline. Pure read; the agent narrates
+   by re-pinning that one section — no new mechanism."
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [secs    (db/query {:seon.db/db db
+                           :seon.db/query
+                           '[:find ?nm ?ai
+                             :in $ ?a
+                             :where
+                             [?e :seon.agent/id ?a]
+                             [?e :seon.agent/sections ?s]
+                             [?s :seon.ctx/name ?nm]
+                             [(get-else $ ?s :seon.render/ai "") ?ai]]
+                           :seon.db/args [id]})
+        by-name (into {} (map (fn [[nm ai]] [nm ai])) secs)
+        ;; prefer the agreed `:now`; accept `:narration` as an alias if present.
+        ai      (or (get by-name :now) (get by-name :narration))
+        live?   (and ai (seq (str/trim (str ai))))]
+    [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
+     [:div {:class "flex items-center justify-between mb-2"}
+      [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "narration · now"]
+      (when live?
+        [:span {:class "inline-flex items-center gap-1 text-2xs text-amber-400"}
+         [:span {:class "w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"}]
+         "‹agent narrating›"])]
+     (if live?
+       ;; amber left-accent on the body (the proven context-view section pattern)
+       ;; marks this as the live narration; `text-sm` is bigger than the dense tiles.
+       [:div {:class "border-l-2 border-amber-700/40 pl-3"}
+        (md/md->hiccup (decode-section-text ai)
+                       {:wrap-class "markdown text-sm text-text-100"})]
+       [:div {:class "text-xs text-text-500"}
+        "the agent narrates here — it add-section!s a :now section and refreshes it as it works"])]))
+
 (defn hero-view
   "The hero — the agent's OWN live tile (welcome default or wired content),
    itself DB-driven + SCI-bounded by `seon.render/render-agent-tile`."
@@ -352,6 +391,7 @@
    'seon.web.tile/progress-view   progress-view
    'seon.web.tile/toolkit-view    toolkit-view
    'seon.web.tile/context-view    context-view
+   'seon.web.tile/narration-view  narration-view
    'seon.web.tile/commentary-view commentary-view})
 
 ;; The agent-referenceable catalog of the prewritten view SYMBOLS — each entry
@@ -383,6 +423,9 @@
    'seon.web.tile/context-view
    {:seon.ui/desc    "The agent's OWN pinned context — the sections it add-section!'d to keep — rendered from each section's markdown twin."
     :seon.ui/expects "Parameterless. Reads :seon.agent/sections → :seon.ctx/name, :seon.ctx/priority, :seon.render/ai."}
+   'seon.web.tile/narration-view
+   {:seon.ui/desc    "The agent's prominent NARRATION surface — its `:now` (or `:narration`) pinned section, rendered big + high so the human watches in-progress narration ('what I'm doing / just did'), not just the final reply. The agent narrates by re-pinning that one section as work progresses."
+    :seon.ui/expects "Parameterless. Reads the agent's :now / :narration pinned section (:seon.agent/sections → :seon.ctx/name, :seon.render/ai)."}
    'seon.web.tile/commentary-view
    {:seon.ui/desc    "The shared REPL transcript (demoted chat) — the recent messages to/from the agent, newest last."
     :seon.ui/expects "Parameterless. Reads :seon.agent.message/* (to/from the agent): at, origin, content."}
@@ -401,6 +444,8 @@
   [agent-id]
   [{:seon.tile/id (str agent-id ":hero") :seon.tile/console agent-id
     :seon.render/html 'seon.web.tile/hero-view :seon.ctx/priority 10 :seon.tile/span 2}
+   {:seon.tile/id (str agent-id ":narration") :seon.tile/console agent-id
+    :seon.render/html 'seon.web.tile/narration-view :seon.ctx/priority 15 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":status") :seon.tile/console agent-id
     :seon.render/html 'seon.web.tile/status-view :seon.ctx/priority 20 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":todos") :seon.tile/console agent-id
