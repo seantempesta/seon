@@ -573,6 +573,8 @@ first. (Marked *needs baking* at their mention.)
   spec**: the block / render / tile / slot / layout system, world/dashboard/app
   pages, routing-as-data via reitit, the override seam, and friendly errors → the
   warnings block. Supersedes the two below for the UI/context surface.
+- [[layout-context-migration-2026-06-27]] — the grounded file:line migration plan
+  (lanes R/U, dependency-ordered, silent-failure-flagged).
 - [[single-render-path-design-2026-06-25]] — the original one-render → two-renders +
   reactive-inspector design (superseded for the surface by the spec above; the
   derive-don't-store and prompt==page facts survive in *The render engine*).
