@@ -112,18 +112,19 @@
         metric  (fn [label v]
                   [:div [:div {:class "text-text-500"} label]
                    [:div {:class "text-sm text-text-100 tabular-nums"} v]])]
-    [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
-     [:div {:class "flex items-center justify-between gap-2 mb-2"}
-      (comp/status-dot state)
-      ;; `min-w-0 break-all` wraps a long agent id rather than clipping it off
-      ;; the right edge of a narrow (phone) panel.
-      [:span {:class "text-2xs text-text-500 min-w-0 break-all text-right"} id]]
-     (into [:div {:class "text-sm text-text-50 font-medium leading-tight mb-3 break-words"}]
-           (md/inline (or purpose "—")))
-     [:div {:class "grid grid-cols-3 gap-2 text-2xs"}
-      (metric "turns" turns)
-      (metric "todos" todos)
-      (metric "msgs" msgs)]]))
+    {:seon.render/hiccup
+     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
+      [:div {:class "flex items-center justify-between gap-2 mb-2"}
+       (comp/status-dot state)
+       ;; `min-w-0 break-all` wraps a long agent id rather than clipping it off
+       ;; the right edge of a narrow (phone) panel.
+       [:span {:class "text-2xs text-text-500 min-w-0 break-all text-right"} id]]
+      (into [:div {:class "text-sm text-text-50 font-medium leading-tight mb-3 break-words"}]
+            (md/inline (or purpose "—")))
+      [:div {:class "grid grid-cols-3 gap-2 text-2xs"}
+       (metric "turns" turns)
+       (metric "todos" todos)
+       (metric "msgs" msgs)]]}))
 
 (defn commentary-view
   "The shared REPL transcript (demoted chat) — recent messages to/from the agent."
@@ -151,11 +152,12 @@
                   (into [:span {:class "text-text-200"}] (md/inline (clip content 120)))])]
     ;; `max-h-[55vh]` (not `h-full`) so this bounds itself + scrolls internally
     ;; inside the now-scrolling rail, instead of trying to fill the whole column.
-    [:div {:class "rounded border border-base-700 bg-base-850 p-3 max-h-[55vh] flex flex-col min-h-0"}
-     [:div {:class "text-2xs uppercase tracking-wider text-text-400 mb-2 shrink-0"} "commentary"]
-     (if (seq recent)
-       (into [:div {:class "flex flex-col gap-1 flex-1 overflow-auto min-h-0"}] (map line recent))
-       [:div {:class "text-xs text-text-500"} "no messages yet"])]))
+    {:seon.render/hiccup
+     [:div {:class "rounded border border-base-700 bg-base-850 p-3 max-h-[55vh] flex flex-col min-h-0"}
+      [:div {:class "text-2xs uppercase tracking-wider text-text-400 mb-2 shrink-0"} "commentary"]
+      (if (seq recent)
+        (into [:div {:class "flex flex-col gap-1 flex-1 overflow-auto min-h-0"}] (map line recent))
+        [:div {:class "text-xs text-text-500"} "no messages yet"])]}))
 
 (defn todos-view
   "The agent's todos — open first. A todo carrying a `:seon.agent.todo/message`
@@ -194,14 +196,15 @@
                   [:span {:class (cond msg? "text-info" open? "text-warning" :else "text-success")}
                    (cond msg? "✉" open? "☐" :else "☑")]
                   (into [:span {:class tcls}] kids)]))]
-    [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
-     [:div {:class "flex items-center justify-between mb-2"}
-      [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "todos"]
-      [:span {:class "text-2xs text-text-500"} (str open " open")]]
-     (if (seq rows)
-       (into [:div {:class "flex flex-col gap-1"}]
-             (map row (sort-by #(if (= :open (first %)) 0 1) rows)))
-       [:div {:class "text-xs text-text-500"} "no todos"])]))
+    {:seon.render/hiccup
+     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
+      [:div {:class "flex items-center justify-between mb-2"}
+       [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "todos"]
+       [:span {:class "text-2xs text-text-500"} (str open " open")]]
+      (if (seq rows)
+        (into [:div {:class "flex flex-col gap-1"}]
+              (map row (sort-by #(if (= :open (first %)) 0 1) rows)))
+        [:div {:class "text-xs text-text-500"} "no todos"])]}))
 
 (defn progress-view
   "The agent's todo completion as a horizontal bar — `:done` todos over total
@@ -226,16 +229,17 @@
         total (count rows)
         done  (count (filter #(= :done (second %)) rows))
         pct   (if (pos? total) (js/Math.round (/ (* 100.0 done) total)) 0)]
-    [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
-     [:div {:class "flex items-center justify-between mb-2"}
-      [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "progress"]
-      [:span {:class "text-2xs text-text-500 tabular-nums"} (str done " / " total " done")]]
-     (if (pos? total)
-       ;; the track + a width-NN% fill; inline width % since Tailwind has no
-       ;; arbitrary-percent utility in the build (owner-blessed inline style).
-       [:div {:class "h-2 w-full rounded-full bg-base-900 overflow-hidden"}
-        [:div {:class "h-full rounded-full bg-success" :style (str "width:" pct "%")}]]
-       [:div {:class "text-xs text-text-500"} "no todos yet"])]))
+    {:seon.render/hiccup
+     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
+      [:div {:class "flex items-center justify-between mb-2"}
+       [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "progress"]
+       [:span {:class "text-2xs text-text-500 tabular-nums"} (str done " / " total " done")]]
+      (if (pos? total)
+        ;; the track + a width-NN% fill; inline width % since Tailwind has no
+        ;; arbitrary-percent utility in the build (owner-blessed inline style).
+        [:div {:class "h-2 w-full rounded-full bg-base-900 overflow-hidden"}
+         [:div {:class "h-full rounded-full bg-success" :style (str "width:" pct "%")}]]
+        [:div {:class "text-xs text-text-500"} "no todos yet"])]}))
 
 (defn toolkit-view
   "The agent's OWN toolkit — the fns it has authored in its namespace, so the
@@ -264,14 +268,15 @@
                    (when (seq doc)
                      (into [:span {:class "text-text-500 ml-1 break-words"}]
                            (md/inline (clip doc 64))))]])]
-    [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
-     [:div {:class "flex items-center justify-between mb-2"}
-      [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "toolkit"]
-      [:span {:class "text-2xs text-text-500"}
-       (str (count tools) (if (= 1 (count tools)) " tool" " tools"))]]
-     (if (seq tools)
-       (into [:div {:class "flex flex-col gap-1"}] (map row tools))
-       [:div {:class "text-xs text-text-500"} "no tools yet — the agent builds its own"])]))
+    {:seon.render/hiccup
+     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
+      [:div {:class "flex items-center justify-between mb-2"}
+       [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "toolkit"]
+       [:span {:class "text-2xs text-text-500"}
+        (str (count tools) (if (= 1 (count tools)) " tool" " tools"))]]
+      (if (seq tools)
+        (into [:div {:class "flex flex-col gap-1"}] (map row tools))
+        [:div {:class "text-xs text-text-500"} "no tools yet — the agent builds its own"])]}))
 
 ;; ============================================================
 ;; VALUE EXPLORER — a collapsible HTML browser over R's `render-html-data`
@@ -458,27 +463,28 @@
         value   (when eval-id (live-result-value eval-id))
         data    (when (and eval-id (not= ::miss value))
                   (render-value/render-html-data eval-id value))]
-    [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
-     [:div {:class "flex items-center justify-between mb-2"}
-      [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "value explorer"]
-      (when data
-        [:span {:class "text-2xs text-text-500 font-mono truncate min-w-0 ml-2"}
-         (str "result/" eval-id
-              (when (:seon.render.value/truncated? data) " · partial")) ])]
-     (cond
-       data
-       [:div {:class "flex flex-col gap-1 max-h-[40vh] overflow-auto"}
-        [:div {:class "text-2xs text-text-500 font-mono mb-1"}
-         (:seon.render.value/summary data)]
-        (value-node (:seon.render.value/tree data) 0)]
+    {:seon.render/hiccup
+     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
+      [:div {:class "flex items-center justify-between mb-2"}
+       [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "value explorer"]
+       (when data
+         [:span {:class "text-2xs text-text-500 font-mono truncate min-w-0 ml-2"}
+          (str "result/" eval-id
+               (when (:seon.render.value/truncated? data) " · partial")) ])]
+      (cond
+        data
+        [:div {:class "flex flex-col gap-1 max-h-[40vh] overflow-auto"}
+         [:div {:class "text-2xs text-text-500 font-mono mb-1"}
+          (:seon.render.value/summary data)]
+         (value-node (:seon.render.value/tree data) 0)]
 
-       (and eval-id (= ::miss value))
-       [:div {:class "text-xs text-text-500"}
-        "the latest value was from a prior session — re-run its form to inspect it"]
+        (and eval-id (= ::miss value))
+        [:div {:class "text-xs text-text-500"}
+         "the latest value was from a prior session — re-run its form to inspect it"]
 
-       :else
-       [:div {:class "text-xs text-text-500"}
-        "no eval value yet — the agent's last result will appear here to drill"])]))
+        :else
+        [:div {:class "text-xs text-text-500"}
+         "no eval value yet — the agent's last result will appear here to drill"])]}))
 
 (defn- decode-section-text
   "Render an agent-authored `:seon.render/ai` robustly. `add-section!` stores the
@@ -519,14 +525,15 @@
                     (name nm)]
                    (md/md->hiccup (decode-section-text ai)
                                   {:wrap-class "markdown text-xs text-text-200"})])]
-    [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
-     [:div {:class "flex items-center justify-between mb-2"}
-      [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "context"]
-      [:span {:class "text-2xs text-text-500"} (str (count secs) " pinned")]]
-     (if (seq ordered)
-       (into [:div {:class "flex flex-col gap-3"}] (map card ordered))
-       [:div {:class "text-xs text-text-500"}
-        "nothing pinned yet — the agent uses add-section! to keep things here"])]))
+    {:seon.render/hiccup
+     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
+      [:div {:class "flex items-center justify-between mb-2"}
+       [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "context"]
+       [:span {:class "text-2xs text-text-500"} (str (count secs) " pinned")]]
+      (if (seq ordered)
+        (into [:div {:class "flex flex-col gap-3"}] (map card ordered))
+        [:div {:class "text-xs text-text-500"}
+         "nothing pinned yet — the agent uses add-section! to keep things here"])]}))
 
 (defn narration-view
   "The agent's prominent NARRATION surface — the `:now` (or `:narration`) context
@@ -551,21 +558,22 @@
         ;; prefer the agreed `:now`; accept `:narration` as an alias if present.
         ai      (or (get by-name :now) (get by-name :narration))
         live?   (and ai (seq (str/trim (str ai))))]
-    [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
-     [:div {:class "flex items-center justify-between mb-2"}
-      [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "narration · now"]
-      (when live?
-        [:span {:class "inline-flex items-center gap-1 text-2xs text-amber-400"}
-         [:span {:class "w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"}]
-         "‹agent narrating›"])]
-     (if live?
-       ;; amber left-accent on the body (the proven context-view section pattern)
-       ;; marks this as the live narration; `text-sm` is bigger than the dense tiles.
-       [:div {:class "border-l-2 border-amber-700/40 pl-3"}
-        (md/md->hiccup (decode-section-text ai)
-                       {:wrap-class "markdown text-sm text-text-100"})]
-       [:div {:class "text-xs text-text-500"}
-        "the agent narrates here — it add-section!s a :now section and refreshes it as it works"])]))
+    {:seon.render/hiccup
+     [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
+      [:div {:class "flex items-center justify-between mb-2"}
+       [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "narration · now"]
+       (when live?
+         [:span {:class "inline-flex items-center gap-1 text-2xs text-amber-400"}
+          [:span {:class "w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"}]
+          "‹agent narrating›"])]
+      (if live?
+        ;; amber left-accent on the body (the proven context-view section pattern)
+        ;; marks this as the live narration; `text-sm` is bigger than the dense tiles.
+        [:div {:class "border-l-2 border-amber-700/40 pl-3"}
+         (md/md->hiccup (decode-section-text ai)
+                        {:wrap-class "markdown text-sm text-text-100"})]
+        [:div {:class "text-xs text-text-500"}
+         "the agent narrates here — it add-section!s a :now section and refreshes it as it works"])]}))
 
 (defn hero-view
   "The hero — the agent's OWN live tile (welcome default or wired content),
@@ -580,12 +588,13 @@
   ;; `tile-hero` (input.css) forces the live tile's EXPANDED face at any width —
   ;; the hero is the PRIMARY surface, so it never falls back to the clamped,
   ;; text-clipping compact grid-cell face on a narrow phone.
-  [:div {:class (str "tile-hero rounded border border-base-700 bg-base-850 p-4 sm:p-6 h-full "
-                     "flex items-center overflow-y-auto overflow-x-hidden")}
-   [:div {:class "w-full min-w-0 max-w-full break-words"}
-    (or (:seon.render/hiccup
-          (render/render-agent-tile {:seon.db/db db :seon.agent/id id}))
-        [:div {:class "text-text-500 text-xs"} "no tile"])]])
+  {:seon.render/hiccup
+   [:div {:class (str "tile-hero rounded border border-base-700 bg-base-850 p-4 sm:p-6 h-full "
+                      "flex items-center overflow-y-auto overflow-x-hidden")}
+    [:div {:class "w-full min-w-0 max-w-full break-words"}
+     (or (:seon.render/hiccup
+           (render/render-agent-tile {:seon.db/db db :seon.agent/id id}))
+         [:div {:class "text-text-500 text-xs"} "no tile"])]]})
 
 ;; The core views resolvable by SYMBOL. Core symbols map here (direct, fast);
 ;; AGENT-authored symbols resolve via SCI (`render-sci`). This is the resolution
@@ -720,6 +729,15 @@
 ;; Render — resolve the tile's stored `:seon.render/html` symbol to hiccup.
 ;; ============================================================
 
+(defn- view->hiccup
+  "Normalize a tile view's return to bare hiccup for console serialization.
+   The canonical tile-fn contract is the html-response map
+   {:seon.render/hiccup .. :seon.render/ai ..}; a bare hiccup vector is also
+   accepted. `html/->string` renders a MAP as empty, so the console path must
+   extract the hiccup here."
+  [x]
+  (if (and (map? x) (contains? x :seon.render/hiccup)) (:seon.render/hiccup x) x))
+
 (defn- resolve-view
   "Resolve a `:seon.render/html` slot to hiccup. Shallow-hiccup vector →
    verbatim; SYMBOL → its fn (agent-authored SCI-bounded, core direct)."
@@ -728,7 +746,7 @@
     (vector? slot) slot
     (symbol? slot)
     (if-let [f (get core-views slot)]
-      (f input)                                 ; a core view — direct call
+      (view->hiccup (f input))                  ; a core view — direct call
       ;; an AGENT-authored view symbol → SCI-bounded (a runaway agent fn must not
       ;; freeze the single-threaded pod). This is how the agent renders its OWN
       ;; tile views; the hero already does it via `render-agent-tile`.
@@ -737,7 +755,7 @@
           (cond
             (:seon.render.sci/interrupt r)   [:div {:class "text-warning text-xs"} "tile interrupted"]
             (:seon.render.sci/fallthrough r) [:div {:class "text-text-500 text-xs"} "no tile source"]
-            :else r))
+            :else (view->hiccup r)))
         [:div {:class "text-error text-xs"} (str "unknown view: " slot)]))
     :else [:div {:class "text-text-500 text-xs"} (str "unrenderable tile slot: " (pr-str slot))]))
 
