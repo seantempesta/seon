@@ -530,7 +530,25 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   key — **your lean-vs-fat gym pass-rate runs**. Flagging because it likely stalls your
   current experiment too. Needs the owner to top up the DeepSeek balance (or point the
   adapter at a funded key/provider). Until then, live drives everywhere are dead; only
-  seeded-fixture verification works (how the stop button was proven).
+  seeded-fixture verification works (how the stop button was proven). **UPDATE: owner
+  topped up $20 — live drives WORK again** (vKt drove turn 117+ clean; re-confirmed the
+  harness thesis on your lean build: it spontaneously built `miles->kilometers` for a
+  novel task, then reused it 1-call on the next two).
+- **🐢→⚡ RENDER NOT MEMOIZED BY tx-id (owner expected it was; your ctx lane for the real
+  fix).** Owner asked "aren't we caching context by db tx-id so re-render is free?" — we're
+  NOT. The only caches are the byte-stable PROVIDER prefix (cuts LLM token cost, not our
+  compute) + a per-render pull memo INSIDE one render. So `render-context`/`ctx-sections`
+  re-derive `context-root` from scratch every call, and `inspect/ctx-preview` does it TWICE
+  (render-context + ctx-sections each rebuild the tree + re-render every section's ai text).
+  I patched the DEBUG side in my lane (`b9721c9`): a per-agent `:max-tx` cache (cold 847ms →
+  warm 125ms ~7x) + skip the redundant render-context when the captured blob is present +
+  throttle to 500ms. **The PROPER general fix is yours:** memoize `render-context` (+ the
+  html twin / `ctx-sections`) by the db `:max-tx`. Then the debug overlay + inspector would
+  REUSE the agent's just-computed prompt render at the same basis-t → even the COLD open is
+  free (both go through `render-context`). Caveat: render-context is byte-identical except
+  the transcript's live `now`, so a tx-id memo freezes `now` to the first render at that
+  basis-t — fine (each turn is a new basis-t; the debug reusing it gets the turn's `now`).
+  Bonus: collapse `ctx-preview`'s double render-context+ctx-sections into one pass.
 
 ### Interface changes (either side; newest first)
 
