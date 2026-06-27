@@ -428,6 +428,79 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; #39: the eval is the transaction boundary — a `schema/register!` inside a
+;; FAILED form persists NOTHING (neither a :seon.schema row NOR an in-memory
+;; registry entry), and a subsequent SUCCESSFUL register! of the same key
+;; tees normally.
+;;
+;; Mechanism: `register!`'s self-tee DEFERS its DB write when a `:seon.db/
+;; eval-id` is in the tx-context (every eval-batch! per-form scope), because
+;; the GATED detect-and-tee (build-tee-entities in record-eval!) owns the
+;; :seon.schema row and writes it ONLY on success. On the failure path
+;; eval-form-entry! also calls `schema/discard-registrations!` over the form's
+;; newly-registered keys, the schema analog of remove-phantom-defs!. Without
+;; the fix the eager self-tee wrote the row mid-eval and the registry kept the
+;; key, so `(do (register! …) (broken))` registered the schema anyway.
+;; ---------------------------------------------------------------------------
+
+(deftest register-in-failed-form-persists-nothing-then-success-tees
+  (async done
+    ;; open-agent-conn! (like the body-retry test): eval-batch! tx-meta-tags
+    ;; with the causality bundle, so the conn needs pod-full-schema.
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then
+          (fn [res]
+            (let [cs    (aget res 0)
+                  conn  (aget res 1)
+                  prev  db/*conn*
+                  uniq  (str "probe.tee39" (rand-int 1000000000))
+                  ;; a unique DATA attr key per run (process-shared registry):
+                  ;; multi-segment ns so register! accepts it; never collides.
+                  attr  (keyword (str uniq ".dom") "metric")
+                  ;; membership probe in the DB: #{[attr]} when a :seon.schema
+                  ;; row exists, else #{}.
+                  rows  (fn [] (d/q '[:find ?k :in $ ?k
+                                      :where [?s :seon.schema/key ?k]]
+                                    @conn attr))
+                  reg?  (fn [] (contains? (schema/current-keys) attr))
+                  batch (fn [src] (seval/eval-batch! cs (repl/parse-forms src)
+                                                     (symbol uniq) "tee39-test"
+                                                     (db/new-id!) nil))
+                  ;; the failed form: register! RUNS, then a deliberate throw
+                  ;; fails the whole `do` (errors-are-values → :ok false).
+                  fail-src (str "(do (seon.schema/register! " attr " :int)"
+                                "    (throw (js/Error. \"deliberate #39 probe\")))")
+                  ok-src   (str "(seon.schema/register! " attr " :int)")]
+              (set! db/*conn* conn)
+              (-> (seval/eval cs (str "(ns " uniq ")")
+                              {:ns 'cljs.user :analyze-deps? false})
+                  (.then (fn [_] (batch fail-src)))
+                  (.then
+                    (fn [b1]
+                      (testing "the register!+throw form FAILS (errors-are-values)"
+                        (is (= 1 (:seon.eval/n-fail b1)))
+                        (is (= 0 (:seon.eval/n-ok b1))))
+                      (testing "no :seon.schema row persisted — the self-tee deferred"
+                        (is (= #{} (rows))))
+                      (testing "and the in-memory registry rolled the key back"
+                        (is (false? (reg?))))
+                      (batch ok-src)))
+                  (.then
+                    (fn [b2]
+                      (testing "the standalone register! SUCCEEDS"
+                        (is (= 1 (:seon.eval/n-ok b2)))
+                        (is (= 0 (:seon.eval/n-fail b2))))
+                      (testing "NOW the :seon.schema row is teed (detect-and-tee, no regression)"
+                        (is (= #{[attr]} (rows))))
+                      (testing "and the registry holds the key"
+                        (is (true? (reg?))))))
+                  (.finally (fn []
+                              (set! db/*conn* prev)
+                              (unregister! attr)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; B9 tee-gate bug (db-is-the-running-system PRD): a usage-example
 ;; `(defn f {:test (fn [] …)} …)` carries the analyzer's TOP-LEVEL `:test
 ;; true` marker (deftest-def? TRUE) just like a real `(deftest …)`, so the

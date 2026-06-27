@@ -1808,6 +1808,15 @@
      re-teeing them would write a no-op upsert per schema per boot,
      re-anchoring row tx-ids (the exact churn the replay design's
      'detect-and-tee doesn't re-fire' invariant exists to avoid).
+   - EVAL-BATCH scope (`:seon.db/eval-id` in the tx-context) → nil. An
+     agent turn's `eval-batch!` wraps each form in a tx-context carrying
+     its eval-id, and the GATED detect-and-tee (`build-tee-entities` in
+     `record-eval!`) writes the :seon.schema row only on a SUCCESSFUL
+     eval. The self-tee must stand down there or a `register!` in a
+     later-failing form would persist its schema/`:seon.ns` rows anyway
+     (#39 — the eval is the transaction boundary). The self-tee is the
+     durability path ONLY for the bare-eval/REPL scope (no eval-id, no
+     detect-and-tee).
    - CORE-CLAIMED row (current `:seon.schema/source` datom's tx
      carries `:seon.db/origin :core-seed`) → nil. The bootstrap
      self-host compiler can re-execute compiled-bundle registrations
@@ -1831,7 +1840,16 @@
    for deterministic test/proof awaiting."
   [k form]
   (when-some [conn db/*conn*]
-    (when-not (:seon.db/replay? (db/current-tx-context))
+    (when-not (or (:seon.db/replay? (db/current-tx-context))
+                  ;; #39: inside an eval-batch! per-form scope (an eval-id is
+                  ;; in the tx-context) the GATED detect-and-tee
+                  ;; (`build-tee-entities` in `record-eval!`) owns this
+                  ;; schema's :seon.schema row and writes it ONLY on a
+                  ;; successful eval. Deferring here is what makes "a
+                  ;; register! in a FAILED form persists nothing" true — the
+                  ;; eager self-tee is the durability path ONLY for the
+                  ;; bare-eval/REPL scope (no eval-id, no detect-and-tee).
+                  (:seon.db/eval-id (db/current-tx-context)))
       (let [source (pr-str (list 'seon.schema/register! k form))
             [stored-src origin]
             (first (db/query
@@ -2416,7 +2434,16 @@
         ;; and tees — the REPL invariant that a failed defn defines
         ;; nothing. Pre-existing defs (in defs-before) are untouched.
         (when-not (:ok result)
-          (analyzer-info/remove-phantom-defs! compile-state defs-before @current-ns))
+          (analyzer-info/remove-phantom-defs! compile-state defs-before @current-ns)
+          ;; #39: the schema analog of the phantom-def rollback. A failed
+          ;; eval that ran `schema/register!` must define NOTHING. The
+          ;; self-tee already DEFERRED its DB write (eval-id in scope), so
+          ;; nothing persisted; drop the in-memory registry entries too —
+          ;; diff is THIS form's newly-registered keys only (current-keys
+          ;; minus the pre-eval snapshot) — so a re-eval of the fixed form
+          ;; registers cleanly and a pre-existing schema is never touched.
+          (schema/discard-registrations!
+            (set/difference (schema/current-keys) schemas-before)))
         ;; Advance the accumulator on successful ns switch.
         ;; Failed evals leave the accumulator untouched —
         ;; the form ran in @current-ns and we record that

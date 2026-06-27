@@ -132,6 +132,8 @@
   (swap! *schemas assoc :seon.schema/namespace-name :string))
 (defonce ^:private _kvs-type
   (swap! *schemas assoc :seon.schema/kvs [:vector :any]))
+(defonce ^:private _discarded-keys-type
+  (swap! *schemas assoc :seon.schema/discarded-keys [:set :seon.schema/registry-key]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Registration API
@@ -238,6 +240,23 @@
   {:malli/schema [:=> [:cat] [:set :keyword]]}
   []
   (set (keys @*schemas)))
+
+(defn discard-registrations!
+  "Drop `ks` from the in-memory registry — the schema analog of
+   `analyzer-info/remove-phantom-defs!`. A FAILED eval that ran
+   `register!` must define NOTHING: the DB self-tee already DEFERS to
+   the gated detect-and-tee (so nothing persisted), and this removes the
+   in-session registry entries too, so a re-eval of the fixed form
+   registers cleanly. `ks` is the keys NEWLY registered during the
+   failed eval (post-eval `current-keys` minus the pre-eval snapshot),
+   so a pre-existing key is never in `ks`. `*schema-required-counts` is
+   left untouched — `register!` never writes it (only the boot/lifecycle
+   `entity-schema-tx-data` does), so a failed eval populated no entry to
+   clear. Returns nil."
+  {:malli/schema [:=> [:catn [::discarded-keys [:set :keyword]]] :nil]}
+  [ks]
+  (swap! *schemas #(apply dissoc % ks))
+  nil)
 
 (defn register-all!
   "Register multiple schemas at once, given pairs of keyword and schema
