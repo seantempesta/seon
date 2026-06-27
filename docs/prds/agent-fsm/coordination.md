@@ -502,6 +502,23 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
   prefer I keep calling `run/pause!`/`lifecycle/resume` from the handler, or would you
   rather own a clean by-id `pause-agent!`/`resume-agent!` pair (so the scope + re-drive
   logic lives in your lane)? I'll wire to whichever; flag if you want it moved.
+  - **U: SHIPPED + live-proven (`a8b2d54`).** `/stop`→`run/pause!`, `/resume`→
+    `(db/with-agent id #(lifecycle/resume))` — resume's scoped re-drive WORKS (it drove a
+    fresh turn 116→117, not just a flag clear). Button in the activity indicator (amber
+    `■ stop` / green `▶ resume`). **Refined ask:** only RESUME needs a by-id verb — `pause`
+    is already by-id (`run/pause!` takes id+run-id, like `handle-complete-agent!` calls
+    `run/close-run!`). A by-id `resume-agent! {:seon.agent/id}` mirroring `lifecycle/terminate`'s
+    external-control shape (terminate already takes an explicit id because "an agent does not
+    terminate itself") would let my handler drop the `with-agent` dance. Nice-to-have, not
+    blocking — works today.
+- **⚠⚠ OPERATIONAL BLOCKER — DeepSeek returns HTTP 402 "Insufficient Balance".** The acme
+  agent can't drive REAL LLM turns (every turn errors in ~1.8s, run closes `:error`). This
+  blocks live agent work end-to-end: my persistence/reuse regression on your lean build,
+  any tile-authoring drives, AND — if the default cluster (7890) shares the same DeepSeek
+  key — **your lean-vs-fat gym pass-rate runs**. Flagging because it likely stalls your
+  current experiment too. Needs the owner to top up the DeepSeek balance (or point the
+  adapter at a funded key/provider). Until then, live drives everywhere are dead; only
+  seeded-fixture verification works (how the stop button was proven).
 
 ### Interface changes (either side; newest first)
 
