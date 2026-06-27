@@ -312,6 +312,18 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
     tile already renders it; a dedicated NARRATION view would just render that one section
     prominently). I lean (ii) — it's agent-authored narration, no new mechanism, and it's the
     "build your environment" story. Your call (or owner's); I'll build whichever once you pick.
+- **Value-explorer panel (NEW — owner-requested smart value renderer).** Every eval result will
+  render a structure-revealing `:ai` text (done — prototype `seon.render.value`, review-pending
+  cutover) AND a `:html` interactive drill-down browser (your lane). The `:html` side is a pure
+  DATA contract, no hiccup from me: `render-html-data` returns `{:eval-id :summary :truncated?
+  :tree}` (the `:tree` is the same depth/breadth-bounded sample the `:ai` side shows, with prune
+  markers). Asks: (1) build a collapsible drill-down browser over `:tree` (Phosphor Terminal),
+  each prune-marker an expand affordance; (2) expansion is PATH-BASED — a node's `get-in` path is
+  reconstructable from its position, so it needs an R-owned `/call`-style endpoint
+  `{eval-id, path}` → `(sample (get-in result/<id> path) deeper-opts)` against the `result/<id>`
+  live stash (prior-session evals fall back to the persisted skeleton). I'll stand up that
+  endpoint when we sequence it. No rush — flag where your tile work is; this rides the same
+  `:seon.render/ai`+`/html` twin you're already building.
 
 ### Needs — UI/UX asks of Runtime
 
