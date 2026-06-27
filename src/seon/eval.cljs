@@ -2403,6 +2403,20 @@
                   (set! *print-err-fn* prev-print-err-fn))
             output      @!out
             duration-ms (- (.now js/Date) start-ms)]
+        ;; A FAILED eval leaves a PHANTOM analyzer def: under
+        ;; `:def-emits-var true`, `parse 'def` registers the var-map into
+        ;; `:defs` BEFORE the body error and does not roll it back. When
+        ;; the body analyzes cleanly but the eval is FAILED post-eval (a
+        ;; warning-promoted `:undeclared-var`, or a runtime/emit throw),
+        ;; that registration is the FULL var-map — whose digest equals a
+        ;; SUCCESSFUL same-signature retry's, so `defs-since` sees no
+        ;; change and the tee SILENTLY SKIPS the `:seon.fn` row (the fn
+        ;; works in-session but never persists). Drop the syms THIS form
+        ;; newly registered in its eval ns so the retry is genuinely-new
+        ;; and tees — the REPL invariant that a failed defn defines
+        ;; nothing. Pre-existing defs (in defs-before) are untouched.
+        (when-not (:ok result)
+          (analyzer-info/remove-phantom-defs! compile-state defs-before @current-ns))
         ;; Advance the accumulator on successful ns switch.
         ;; Failed evals leave the accumulator untouched —
         ;; the form ran in @current-ns and we record that

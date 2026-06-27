@@ -355,6 +355,79 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; Detect-and-tee body-retry loss (live-proven 2026-06-27): a defn an agent
+;; DEBUGS — define → fail in the body → fix the BODY keeping the SAME
+;; signature → redefine — works in-session but SILENTLY does not persist.
+;;
+;; Mechanism: under `:def-emits-var true`, `cljs.analyzer`'s `parse 'def`
+;; registers the var-map into `:defs` BEFORE analyzing the body and never
+;; rolls it back. A body that analyzes cleanly but FAILS the eval (here a
+;; warning-promoted `:undeclared-var` — the same failure mode the agent hit
+;; with a bad query) leaves the FULL var-map (incl. `:fn-var`), whose
+;; [[seon.analyzer-info/var-digest]] EQUALS what a successful same-signature
+;; retry produces. That collision makes the retry's `defs-before` already
+;; hold the digest, so `defs-since` sees no change and the tee SKIPS the
+;; `:seon.fn` row — the fn resolves + is callable but vanishes on the next
+;; restart (the program graph is what boot reconstitutes from).
+;;
+;; The cure: `eval-form-entry!` calls `analyzer-info/remove-phantom-defs!` on
+;; the failure path, dropping the syms THIS form newly registered, so the
+;; retry is genuinely-new and tees. A UNIQUE ns per run keeps the assertion
+;; deterministic on the process-shared bootstrap compile-state. Without the
+;; fix the final assertion is `#{}` (no row); with it, the row lands.
+;; ---------------------------------------------------------------------------
+
+(deftest failed-body-defn-then-same-signature-retry-tees
+  (async done
+    ;; open-agent-conn! (NOT fresh-conn): eval-batch! opens a tx-context with
+    ;; the causality bundle (:seon.db/agent-id/eval-id/origin), so record-eval!
+    ;; auto-tags the tx with those tx-meta attrs — they must be in the conn's
+    ;; schema. open-agent-conn! installs pod-full-schema (entity + tx-meta);
+    ;; fresh-conn here installs only entity attrs.
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then
+          (fn [res]
+            (let [cs    (aget res 0)
+                  conn  (aget res 1)
+                  prev  db/*conn*
+                  uniq  (str "probe.teeretry" (rand-int 1000000000))
+                  fq    (str uniq "/recover")
+                  ;; membership probe: #{[fq]} when the row exists, else #{}.
+                  rows  (fn [] (d/q '[:find ?s :in $ ?s
+                                      :where [?f :seon.fn/sym ?s]]
+                                    @conn fq))
+                  ;; one full eval-batch! per attempt (run-id nil → no fence),
+                  ;; exercising eval-form-entry!'s failure-path cleanup wiring.
+                  batch (fn [src] (seval/eval-batch! cs (repl/parse-forms src)
+                                                     (symbol uniq) "tee-retry-test"
+                                                     (db/new-id!) nil))]
+              ;; set! (not binding) so *conn* spans the async eval-batch!
+              ;; internals (record-eval! reads it post-await), mirroring how
+              ;; the live pod root-set!s the conn. Restored in .finally.
+              (set! db/*conn* conn)
+              (-> (seval/eval cs (str "(ns " uniq ")")
+                              {:ns 'cljs.user :analyze-deps? false})
+                  (.then (fn [_] (batch "(defn recover [x] (zzz-undeclared-probe x))")))
+                  (.then
+                    (fn [b1]
+                      (testing "the body-undeclared defn's eval FAILS (errors-are-values)"
+                        (is (= 1 (:seon.eval/n-fail b1)))
+                        (is (= 0 (:seon.eval/n-ok b1))))
+                      (testing "a failed eval tees nothing"
+                        (is (= #{} (rows))))
+                      (batch "(defn recover [x] (inc x))")))
+                  (.then
+                    (fn [b2]
+                      (testing "the same-signature retry SUCCEEDS"
+                        (is (= 1 (:seon.eval/n-ok b2)))
+                        (is (= 0 (:seon.eval/n-fail b2))))
+                      (testing "and NOW tees a :seon.fn row (the fix; #{} without it)"
+                        (is (= #{[fq]} (rows))))))
+                  (.finally (fn [] (set! db/*conn* prev)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; B9 tee-gate bug (db-is-the-running-system PRD): a usage-example
 ;; `(defn f {:test (fn [] …)} …)` carries the analyzer's TOP-LEVEL `:test
 ;; true` marker (deftest-def? TRUE) just like a real `(deftest …)`, so the
