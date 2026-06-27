@@ -90,31 +90,36 @@ other lane's **_Needs_** and the owner makes it.
 
 ## Core — _Now / Needs / Interface changes_
 
-- **Now:** **PHASE 1 RENAME IN FLIGHT (Core side).** Library-grounding pass done
-  ([[library-grounding]], all claims validated ✓). A Core agent is executing the
-  rename on Core-lane files ONLY: the ns move `src/seon/ctx.cljs`→`src/seon/agent/ctx.cljs`
-  + `src/seon/ctx/*.cljs`→`src/seon/agent/ctx/*.cljs`; the 24 `:seon.ctx/*`→`:seon.agent.ctx/*`
-  keywords (incl. `section`→`block`, `section-html`→`block-html`); the stored attr
-  `:seon.agent/sections`→`:seon.agent/ctx`; the block schema `:seon.ctx/section`→
-  `:seon.agent.ctx/block` (+ `:seon.render/ai` flips to `{:optional true}`); the
-  NON-web requirers (`agent`, `agent/inspect`, `agent/message`, `agent/turn`, `ai`,
-  `ai/anthropic`, `client`, internal `ctx/*`); `my/` + `acme/` source. **The build is
-  transiently RED until UI lands its half — that is expected.** NOT resetting until
-  both lanes are grep-clean.
-- **Needs (from UI):** —
-- **Interface changes (UI must absorb) — DO THIS IN THE SAME WINDOW:**
-  1. **Update `web/**` requires** `[seon.ctx …]`→`[seon.agent.ctx …]` in
-     `web/inspector`, `web/reactive/call`, `web/tile` (these are the 3 UI-lane
-     requirers of the moved ns — the build won't compile until done).
-  2. **Retarget the SILENT-FAILURE Datalog reads** (a missed one returns an EMPTY
-     query, not an error): `:seon.agent/sections`→`:seon.agent/ctx` and `:seon.ctx/*`
-     →`:seon.agent.ctx/*` at `web/tile.cljs:548,590` (+ Phase 2f's `1001,1040,1104,1406`
-     if you sweep that far) — grep your lane for any others.
-  3. New names UI consumes: `:seon.agent/ctx` (component vector of
-     `:seon.agent.ctx/block`), `:seon.agent.ctx/name|priority`. Old
-     `:seon.agent/sections`/`:seon.ctx/section` are GONE.
-  **Ping when `web/**` is retargeted + grep-clean; we commit together + ONE
-  `bin/seon cluster reset default`.**
+- **Now:** **PHASE 1 DONE + `cluster reset default` ALREADY RUN (by Core) + live-proven
+  — UI: do NOT re-run the reset.** Reset boot clean (replay 6/6, 410 fns instrumented
+  0 bad-spec, fresh agent `PGh-2606271755`); render-proof = 40k-char prompt with new
+  `;;; ┌─` brackets, write→commit→read→retract green, **full suite 635 tests / 0 fail**.
+  **PHASE 2 KEYSTONE now in flight** (a Core agent: seed-copy + variadic
+  `install!`/`remove!`, DELETE the merge/provider seam AND the char budget). Then 2e
+  (render words + the `slot` UI gate) → 2f → 2g → Phase 3 ∥ Phase 6.
+- **Needs (from UI):** the reitit cutover — handled by the **batched bring-up** below.
+- **Interface changes / AGREED PLAN — the reitit cutover (Lane-U #3):**
+  Adopting reitit needs a `deps.edn` add → a **cljs-watch restart**, which is more
+  disruptive than it looks: **restarting cljs-watch rotates shadow's dev port and
+  DETACHES the running pod (→ 0 runtimes, MCP eval dies); the pod must be restarted to
+  reconnect** (Core hit this 2026-06-27). Core's Phase-2 keystone ALSO needs a pod
+  bring-up when it lands. So we **batch both into ONE coordinated window** instead of
+  two pod-disruption cycles:
+  1. **U:** build the reitit adapter (deps.edn + adapter ns + `serve.cljs` dispatch
+     swap), **acme-verify routing/SSE in the isolated 7980 cluster (zero live
+     disruption)**, and commit. The live default build going RED after that is expected;
+     HOLD the live cutover restart.
+  2. **Core (orchestrator) drives the single bring-up** after the keystone agent lands
+     + U's reitit is committed: `bin/seon restart cljs-watch` (reitit on classpath +
+     compiles keystone+reitit, wait green) → `bin/seon cluster reset default` (fresh
+     keystone world; pod reconnects to the new shadow).
+  3. **Verify as TWO separate signals** (so a bug is isolable): keystone via MCP-eval
+     render-proof (fresh agent renders from its OWN seed-copied `:seon.agent/ctx`, 0
+     bad-spec) · reitit via server-side HTTP routing + the gzip-morph SSE (node gunzip
+     client; browsers 503 on long-lived streams).
+  **U: commit the reitit adapter when acme-green + ping here. Core announces the
+  bring-up START here so we never both restart at once. Need the live pod green
+  meanwhile? Say so and Core re-sequences.**
 
 ## UI — _Now / Needs / Interface changes_
 
