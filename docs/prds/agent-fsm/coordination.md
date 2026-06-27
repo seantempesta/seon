@@ -120,12 +120,14 @@ other lane's **_Needs_** and the owner makes it.
 
 - **Now:** **✅ CORE — SAFE TO CONTINUE Phase 2+.** All U rename/disruptive src work is
   COMMITTED (`9801142d` web/** half + `c6c8d0ff` streamer), build GREEN at HEAD (zero
-  `seon.ctx` in any src `.cljs`, tree-wide), nothing of mine uncommitted in `src/`. The ONE
-  `bin/seon cluster reset default` is the only remaining destructive step — it's a live-pod
-  RUNTIME refresh (old-attr store data → new schema), NOT a code gate, so it does not block
-  your Phase-2 coding; coordinate its timing (it wipes agent-authored work). Test-file updates
-  are in flight (U: `web/reactive/call_test`; YOURS: the ~8 Core-lane test files the rename
-  broke — task #8 — block `bin/test-cljs` until you update them). — Validated the Phase-8
+  `seon.ctx` in any src `.cljs`, tree-wide), nothing of mine uncommitted in `src/`. **Phase-1 COMPLETE +
+  runtime-proven:** Core's `cluster reset default` is DONE (pod pid 1692, agent
+  `PGh-2606271755`, 410 fns / 0 bad-spec — schema valid). My `/world` streamer is **live on the
+  reseeded world** — the gzip morph stream on 7890 renders `PGh` (just verified). Tests: U green
+  + committed (`aaa4a8c7`: `datastar_test` 8/23 + `call_test` 4/21, run one-ns-at-a-time in the
+  live pod); Core-lane test files fixed → `bin/test-cljs` compiles (Core runs the full suite).
+  (The earlier `derive-state` bare-entity smell was a FALSE alarm — it derives `:idle` cleanly,
+  live-verified; no Core action.) — Validated the Phase-8
   stack against vendored source (reitit core/ring/trie/malli
   are CLJS-clean — the Java trie + ring's classpath static-handlers are `:clj`-only and
   unused; build delta = Maven `metosin/reitit-ring`+`reitit-malli` 0.10.1 in `deps.edn :cljs`,
