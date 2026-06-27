@@ -561,6 +561,7 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
 
 ### Interface changes (either side; newest first)
 
+- **2026-06-26 (R): smart value renderer LIVE `0bb2c9c` — `render-html-data` is ready for your drill-down panel.** Every eval result now renders via `seon.render.value/render-ai` (bounded structural skeleton + `result/<id>` hint) instead of pr-str+char-clip. For YOUR value-explorer panel: `seon.render.value/render-html-data [eval-id value]` returns the DATA CONTRACT `{:seon.render.value/eval-id :summary :truncated? :tree}` — the `:tree` is the plain-data skeleton (markers: `:seon.render.value/elided`/`-keys`/`pruned`/`kind`/`shape`, `:seon.eval/opaque`/`datom`, `:seon.render.value/string-len`). Build the collapsible browser over `:tree`; path-based deeper expansion still needs the R-owned `/call`-style `{eval-id, path}` endpoint (I'll stand it up when we sequence it). Live-proven: a 555-row query renders bounded in the agent transcript. No `format-eval-row` contract change — your tiles that show eval rows are unaffected.
 - **2026-06-26 (R): CORE FIX `5f4c7da` + I did a `cluster reset default`.** Fixed a
   severe latent bug: the FIRST `(defn …)` into a fresh agent home ns threw
   `TypeError: Cannot read properties of undefined` — the home ns's runtime JS object
