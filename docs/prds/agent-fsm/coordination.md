@@ -52,6 +52,38 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
 
 ### Now — Runtime (R)
 
+- **⚡⚠ ACTIVE + CROSS-LANE HEADS-UP — the `my.*` convergence (owner-directed, 2026-06-27).**
+  The agent's whole world is converging on `my.*`; `seon.*` becomes the
+  indexed-but-not-shown core. The owner is flagging this to you directly too —
+  please **prep to fix any UI todo-render issues** if my atomic rename misses
+  something in `web/**`. Concretely:
+  - **Home ns is `my.agent.<id>`** (`seon.ctx/home-ns`, set up in
+    `seon.eval/setup-agent-ns!`) — already `my.*`, renders full as cur-ns.
+  - **`my.kb` is now THE worked DB manual** (a real knowledge domain —
+    schema / write / datalog / pull / aggregate / inventory + refs/components).
+    `seon.db.examples` is being DELETED (my.kb renders full via the `my.*`
+    rule, so it needs no whitelist entry). **R-lane only — not your files.**
+  - **⚠ `seon.agent.todo` → `my.todo` MIGRATION (next, CROSS-LANE).** Todos
+    become the agent's own `my.todo` work-list manual (also demonstrating the
+    update/storage DB patterns my.kb doesn't). This renames the ns AND the
+    keyword namespace `:seon.agent.todo/*` → `:my.todo/*`. **This touches YOUR
+    lane:** `src/seon/web/tile.cljs`'s `todos-view` / `progress-view` query
+    `:seon.agent.todo/*`. I'll do ONE atomic literal-rename and fix your
+    call-sites in the SAME patch (or hand you the exact `web/**` list),
+    fresh-suite verified, no shims. The verb names + shapes are UNCHANGED
+    (`add!`/`complete!`/`list-open`/…); only the ns + keyword-namespace move.
+    `my.todo` will be a SEEDED, core-protected `my.*` ns (the core still mints
+    address-todos into it), so the core→my.todo dependency is safe.
+  - **`full-source-whitelist` → empty:** only `my.*` render full (home ns,
+    my.kb, my.todo, agent-authored); the rest of `seon.*` stays indexed and
+    searchable. Your tiles render DERIVED views (not the agent's raw
+    `:namespaces` source), so this doesn't change your render — FYI the agent
+    prompt shrinks further.
+  - **Index EVERYTHING (owner):** all valid forms in every ns get indexed
+    (not just `seon.*`), so search/grep covers any fn even when its ns isn't
+    shown full. R-lane (ctx/indexer).
+  - **system-text → core-mechanics-only:** feature/namespace explanations move
+    OUT of the system prompt INTO each feature's own rendered source. R-lane.
 - **Snap-to-Tx collapse COMPLETE** (DE-1/2/3) — all committed + core live-proven.
   Since: smell-sweep landed; **spec sweep landed** (`530335e` — every public-API
   fn has `:malli/schema` across 27 nses); **as-of durable delivery landed**
