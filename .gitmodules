@@ -236,3 +236,6 @@
 [submodule "reference-code/openai-evals"]
 	path = reference-code/openai-evals
 	url = https://github.com/openai/evals
+[submodule "reference-code/reitit"]
+	path = reference-code/reitit
+	url = https://github.com/metosin/reitit.git
