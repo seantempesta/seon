@@ -36,6 +36,7 @@
     [seon.log :as log]
     [seon.render :as render]
     [seon.render.sci :as render-sci]
+    [seon.render.value :as render-value]
     [seon.ui.components :as comp]
     [seon.ui.html :as html]
     [seon.ui.markdown :as md]))
@@ -272,6 +273,193 @@
        (into [:div {:class "flex flex-col gap-1"}] (map row tools))
        [:div {:class "text-xs text-text-500"} "no tools yet — the agent builds its own"])]))
 
+;; ============================================================
+;; VALUE EXPLORER — a collapsible HTML browser over R's `render-html-data`
+;; DATA CONTRACT (seon.render.value): the human drills the agent's latest
+;; eval value the same way the agent does with `(get-in result/<id> …)`,
+;; but visually. R owns the bounded SKELETON (`:tree`) + its markers; this
+;; view owns styling + interactivity. The collapse is `<details>`-native —
+;; the whole bounded tree ships in one render, so expand/collapse is a
+;; client-side CSS toggle with NO round-trip (the SSE patch model already
+;; re-sends the region per tx). PRUNED/elided markers are the depth/breadth
+;; boundary where R's bound stopped; deeper slices need R's path `/call`
+;; endpoint (not built yet — those markers render as a passive "deeper"
+;; hint until it lands; see coordination.md _Needs_).
+;; ============================================================
+
+(defn- live-result-value
+  "The live value of eval `id`, read straight from the documented
+   `globalThis.result.<munged-id>` slot (seon.eval's `result/<id>` var
+   mechanism). We read it DIRECTLY rather than via `seon.eval/lookup-result`
+   on purpose: requiring `seon.eval` would drag the whole bootstrap CLJS
+   compiler into the web bundle (the same reason `core-views` resolves core
+   symbols by hand). Returns `::miss` when the value is absent (prior
+   session / errored / pruned id) so the panel degrades gracefully — never
+   the agent-facing error MAP `lookup-result` returns."
+  [id]
+  (let [robj   (js/Reflect.get js/globalThis (name 'result))
+        munged (cljs.core/munge (str id))]
+    (if (and robj (js/Reflect.has robj munged))
+      (js/Reflect.get robj munged)
+      ::miss)))
+
+(defn- latest-ok-eval-id
+  "The id of the agent's most recent SUCCESSFUL eval in its own ns — the one
+   whose live value the explorer drills. nil if it has produced no value."
+  [db id]
+  (let [ns-kw (keyword (str "my.agent." id))
+        rows  (db/query {:seon.db/db db
+                         :seon.db/query
+                         '[:find ?eid ?at :in $ ?ns :where
+                           [?e :seon.eval/ns ?ns]
+                           [?e :seon.eval/ok? true]
+                           [?e :seon.eval/id ?eid]
+                           [?e :seon.eval/at ?at]]
+                         :seon.db/args [ns-kw]})]
+    (some-> (last (sort-by #(.getTime ^js (second %)) rows)) first)))
+
+(declare value-node)
+
+(defn- value-leaf
+  "A non-container skeleton node → a styled inline token. Mirrors R's
+   `emit-leaf` tokens (datom / opaque / clipped-string), plus plain scalars."
+  [x]
+  (cond
+    (and (map? x) (contains? x :seon.eval/datom))
+    (let [[e a v] (:seon.eval/datom x)]
+      [:span {:class "text-keyword font-mono"} (str "#datom[" e " " (pr-str a) " " (pr-str v) "]")])
+
+    (and (map? x) (contains? x :seon.eval/opaque))
+    [:span {:class "text-text-400 font-mono italic"}
+     (str "#‹" (:seon.eval/opaque x)
+          (when-some [s (:seon.eval/summary x)] (str " " s)) "›")]
+
+    (and (map? x) (contains? x :seon.render.value/string-len))
+    [:span {:class "text-success font-mono break-all"}
+     (str (pr-str (str (:seon.render.value/head x) "…"))
+          " ⟨" (:seon.render.value/string-len x) " chars⟩")]
+
+    :else
+    [:span {:class (str "font-mono break-all "
+                        (cond (string? x)  "text-success"
+                              (keyword? x) "text-keyword"
+                              (number? x)  "text-eval"
+                              (nil? x)     "text-text-600"
+                              :else        "text-text-200"))}
+     (pr-str x)]))
+
+(defn- pruned-marker
+  "A depth/breadth boundary R's sampler stopped at — the deeper value is NOT
+   in the tree. Rendered as a passive 'deeper' hint (no client expansion yet
+   — that needs R's path `/call` endpoint)."
+  [x]
+  (let [k (:seon.render.value/pruned x) c (:seon.render.value/count x)
+        [o cl] (case k :map ["{" "}"] :set ["#{" "}"] :vector ["[" "]"] ["(" ")"])
+        unit   (if (= k :map) "keys" "items")]
+    [:span {:class "inline-flex items-center gap-1 text-2xs text-text-500 font-mono"
+            :title "deeper than the bounded view — drill the live result/<id> var"}
+     [:span {:class "text-text-600"} (str o "…" (when c (str c " " unit)) cl)]
+     [:span {:class "text-text-700"} "▸ deeper"]]))
+
+(defn- value-details
+  "A collapsible container row for a map or seqish skeleton node. `<details>`
+   is open for the first two depths (the value at a glance), collapsed below."
+  [summary-hiccup child-rows depth]
+  [:details (cond-> {:class "value-node min-w-0"}
+              (< depth 2) (assoc :open "open"))
+   [:summary {:class "cursor-pointer text-xs select-none hover:text-amber-300 marker:text-text-600"}
+    summary-hiccup]
+   (into [:div {:class "pl-3 ml-0.5 border-l border-base-700 mt-1 flex flex-col gap-1 min-w-0"}]
+         child-rows)])
+
+(defn- map-node [m depth]
+  (let [elided (:seon.render.value/elided-keys m)
+        m      (dissoc m :seon.render.value/elided-keys)
+        pairs  (seq m)
+        n      (count pairs)
+        rows   (cond-> (vec (for [[k v] pairs]
+                              [:div {:class "flex items-start gap-1.5 text-xs min-w-0"}
+                               [:span {:class "text-keyword shrink-0 font-mono"} (pr-str k)]
+                               (value-node v (inc depth))]))
+                 elided (conj [:div {:class "text-2xs text-text-600 font-mono"}
+                               (str "… +" elided " more key" (when (not= 1 elided) "s"))]))]
+    (value-details
+      [:span {:class "text-text-400 font-mono"}
+       (str "{} " n " key" (when (not= 1 n) "s")
+            (when elided (str " +" elided " hidden")))]
+      rows depth)))
+
+(defn- seqish-node [m depth]
+  (let [{:seon.render.value/keys [kind shown elided shape]} m
+        [open close] (case kind :vector ["[" "]"] :set ["#{" "}"] ["(" ")"])
+        n     (count shown)
+        rows  (cond-> (vec (map-indexed
+                             (fn [i v]
+                               [:div {:class "flex items-start gap-1.5 text-xs min-w-0"}
+                                [:span {:class "text-text-600 shrink-0 font-mono"} (str i)]
+                                (value-node v (inc depth))])
+                             shown))
+                (and elided (not= 0 elided))
+                (conj [:div {:class "text-2xs text-text-600 font-mono"}
+                       (if (= :more elided) "… +more" (str "… +" elided " more"))]))]
+    (value-details
+      [:span {:class "text-text-400 font-mono"}
+       (str open close " " n " shown"
+            (cond (= :more elided) " +more"
+                  (and elided (not= 0 elided)) (str " +" elided)
+                  :else "")
+            (when shape (str " · each {" (str/join " " (map pr-str shape)) "}")))]
+      rows depth)))
+
+(defn- value-node
+  "Recursively render one `render-html-data` `:tree` node to hiccup. Containers
+   (map / seqish) become `<details>`; everything else is an inline token."
+  [x depth]
+  (cond
+    (and (map? x) (contains? x :seon.render.value/pruned)) (pruned-marker x)
+    (and (map? x) (contains? x :seon.render.value/kind))   (seqish-node x depth)
+    ;; a plain map (no marker keys, or only the elided-keys tail) — but NOT a
+    ;; leaf-marker map (datom/opaque/clipped), which `value-leaf` owns.
+    (and (map? x)
+         (not (contains? x :seon.eval/datom))
+         (not (contains? x :seon.eval/opaque))
+         (not (contains? x :seon.render.value/string-len)))
+    (map-node x depth)
+    :else (value-leaf x)))
+
+(defn value-explorer-view
+  "Drill the agent's latest eval VALUE — a collapsible browser over R's
+   `render-html-data` skeleton. Reads the live `result/<id>` value from the
+   stash and projects it through `seon.render.value`, so the human inspects
+   exactly the structure the agent does. Empty until the agent produces a
+   value; a prior-session/pruned id degrades to a 're-run to inspect' note."
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [eval-id (latest-ok-eval-id db id)
+        value   (when eval-id (live-result-value eval-id))
+        data    (when (and eval-id (not= ::miss value))
+                  (render-value/render-html-data eval-id value))]
+    [:div {:class "rounded border border-base-700 bg-base-850 p-3"}
+     [:div {:class "flex items-center justify-between mb-2"}
+      [:div {:class "text-2xs uppercase tracking-wider text-text-400"} "value explorer"]
+      (when data
+        [:span {:class "text-2xs text-text-500 font-mono truncate min-w-0 ml-2"}
+         (str "result/" eval-id
+              (when (:seon.render.value/truncated? data) " · partial")) ])]
+     (cond
+       data
+       [:div {:class "flex flex-col gap-1 max-h-[40vh] overflow-auto"}
+        [:div {:class "text-2xs text-text-500 font-mono mb-1"}
+         (:seon.render.value/summary data)]
+        (value-node (:seon.render.value/tree data) 0)]
+
+       (and eval-id (= ::miss value))
+       [:div {:class "text-xs text-text-500"}
+        "the latest value was from a prior session — re-run its form to inspect it"]
+
+       :else
+       [:div {:class "text-xs text-text-500"}
+        "no eval value yet — the agent's last result will appear here to drill"])]))
+
 (defn- decode-section-text
   "Render an agent-authored `:seon.render/ai` robustly. `add-section!` stores the
    string verbatim, so an agent that over-escapes (passes a pr-str'd string —
@@ -392,6 +580,7 @@
    'seon.web.tile/toolkit-view    toolkit-view
    'seon.web.tile/context-view    context-view
    'seon.web.tile/narration-view  narration-view
+   'seon.web.tile/value-explorer-view value-explorer-view
    'seon.web.tile/commentary-view commentary-view})
 
 ;; The agent-referenceable catalog of the prewritten view SYMBOLS — each entry
@@ -426,6 +615,9 @@
    'seon.web.tile/narration-view
    {:seon.ui/desc    "The agent's prominent NARRATION surface — its `:now` (or `:narration`) pinned section, rendered big + high so the human watches in-progress narration ('what I'm doing / just did'), not just the final reply. The agent narrates by re-pinning that one section as work progresses."
     :seon.ui/expects "Parameterless. Reads the agent's :now / :narration pinned section (:seon.agent/sections → :seon.ctx/name, :seon.render/ai)."}
+   'seon.web.tile/value-explorer-view
+   {:seon.ui/desc    "Drill the agent's latest eval VALUE — a collapsible browser over the bounded structural skeleton (seon.render.value/render-html-data), so the human inspects exactly the structure the agent does with (get-in result/<id> …)."
+    :seon.ui/expects "Parameterless. Reads the agent's latest successful :seon.eval/id, then the live result/<id> value from the stash; projects it through render-html-data."}
    'seon.web.tile/commentary-view
    {:seon.ui/desc    "The shared REPL transcript (demoted chat) — the recent messages to/from the agent, newest last."
     :seon.ui/expects "Parameterless. Reads :seon.agent.message/* (to/from the agent): at, origin, content."}
@@ -456,6 +648,8 @@
     :seon.render/html 'seon.web.tile/toolkit-view :seon.ctx/priority 35 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":context") :seon.tile/console agent-id
     :seon.render/html 'seon.web.tile/context-view :seon.ctx/priority 37 :seon.tile/span 1}
+   {:seon.tile/id (str agent-id ":value-explorer") :seon.tile/console agent-id
+    :seon.render/html 'seon.web.tile/value-explorer-view :seon.ctx/priority 38 :seon.tile/span 1}
    {:seon.tile/id (str agent-id ":commentary") :seon.tile/console agent-id
     :seon.render/html 'seon.web.tile/commentary-view :seon.ctx/priority 40 :seon.tile/span 1}])
 
