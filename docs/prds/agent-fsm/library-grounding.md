@@ -186,19 +186,19 @@ Read: `src/seon/db.cljs:399` (`cas-assert`) + `:422` (`transact!`),
   re-derefs and fires native `d/listen` listeners with a synthesized tx-report
   (store.wire.cljs:20-21); `install-wake-trigger!` already runs in the live pod.
 
-⚠ **PRE-PHASE-5 VERIFICATION GATE — the open race.** Opening a run is ONE tx:
-`[{run-create-map} (cas-assert-nil→[:seon.agent.run/id R])]`. The CAS's NV is a
-**lookup-ref to a run created earlier in the SAME tx**. A CAS NV cannot be a tempid
-string (`entid-strict` resolves only eids / lookup-refs / `:db/ident`, utils.cljc:109),
-so the lookup-ref is the only option — and db.cljs:488-490 warns "lookup-refs do
-NOT resolve against not-yet-committed entities" (that warning is about entity-map
-ref SLOTS; an explicit `:db.fn/cas` op runs against the running in-tx db-after, so
-it SHOULD resolve — transaction.cljc:1138-1140). These two facts are in tension.
-**Verify empirically at the wire-server REPL before building Phase 5** that
-`[{:seon.agent.run/id R …} [:db.fn/cas [:seon.agent/id id] :seon.agent/run nil
-[:seon.agent.run/id R]]]` commits and sets the pointer. If it does NOT resolve, the
-open-race pattern needs a different shape (e.g. a `:db.fn/call` op, or a writer-side
-tx fn). This is the #1 correctness unknown.
+✓ **The open race is SOLVED + live-proven — read it, keep it.** `open-run!`
+(run.cljs:215-274) already opens a run in ONE atomic tx and the inline comment
+(262-265) pins the exact mechanism: the run-row (`:db/id "run"` + identity
+`:seon.agent.run/id`) is placed **FIRST**, then `[:db.fn/cas [:seon.agent/id id]
+:seon.agent/run nil [:seon.agent.run/id run-id]]` uses the **lookup-ref** as NV (a
+tempid is NOT resolvable in a CAS NV slot). The run-row is processed first → the
+lookup-ref resolves against the just-added run → the CAS sets the pointer; a racing
+second open sees the pointer set and its whole tx fails. This runs through the wire
+to the JVM writer and is live-proven (the night-build). The db.cljs:488-490 warning
+is about entity-map ref SLOTS, not an explicit CAS op, so there is no real tension.
+**Phases 4-5 KEEP `open-run!`/`close-run!`/`run-fence` unchanged** — do NOT rebuild
+the run lifecycle; build the bootstrap/seed/`start!` layer AROUND it. `close-tx-data`
+(run.cljs:281) is the matching work-fence-on-close pattern (pure, unit-testable).
 
 ## Instrumentation — write `:malli/schema` normally; it WORKS ✓
 
@@ -272,9 +272,10 @@ Concrete examples (file:line) of the patterns to imitate:
 
 1. ⚠ agent-runtime.md:115 — fence OV/NV `[run R]` → `[:seon.agent.run/id R]`
    (lookup-ref), since `:seon.agent/run` is a ref.
-2. ⚠ Phase 5 **VERIFICATION GATE** — the open-race tx `[create-run, cas-nil→run]`
-   relies on a same-tx CAS lookup-ref resolving at the WIRE-SERVER. In tension with
-   db.cljs:488-490; verify empirically at the REPL before building Phase 5.
+2. ✓ Phase 5 open-race is SOLVED + live-proven at `run.cljs:215-274` (`open-run!`):
+   run-row first, CAS NV = lookup-ref, resolves against the in-tx run. KEEP the run
+   lifecycle (`open-run!`/`close-run!`/`run-fence`) — build the seed/`start!` layer
+   around it, do NOT rebuild it.
 2a. ✓ Build the fence with `db/cas-assert` (db.cljs:399), never a hand-written
    `:db.fn/cas` vector. The CAS executes at the SOLE writer, so the fence is sound
    across the wire (store.wire.cljs:12-21).
