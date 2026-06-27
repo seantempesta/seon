@@ -10,6 +10,13 @@
    throughout: `db` (seon.db) and `schema` (seon.schema). seon.db's own
    docstrings remain the full reference; this is the worked-example layer.
 
+   ILLUSTRATIVE, NOT LIVE: the `:my.reading/*` schema and the reading-log
+   rows these recipes build are NOT registered in your cluster and NOT in
+   your store — they only come into being when YOU call these fns (the
+   test exercises them in its own throwaway db, never yours). Your store
+   starts empty; `(db/store-inventory)` is the truth for what's actually
+   there. So never report the demo reading log as the human's real data.
+
    Two async facts to copy correctly:
      - reads (`db/query` / `db/pull` / `db/entity`) are SYNCHRONOUS.
      - `db/transact!` returns a Promise in compiled code; inside a fn you
