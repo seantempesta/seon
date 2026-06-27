@@ -37,7 +37,7 @@
     [malli.instrument :as mi]
     [my.kb.shared :as kb]
     [seon.client :as client]
-    [seon.ctx :as ctx]
+    [seon.agent.ctx :as ctx]
     [seon.db :as db]
     [seon.error :as err]
     [seon.error.instrument :as einst]
@@ -69,7 +69,7 @@
    `seon.render.sci/invoke-bounded`) — unstrument nils the uncovered
    arities, breaking later nses. Every multi-arity fn in THESE nses uses a
    complete `[:function …]` schema, so scoped teardown restores them clean."
-  '[seon.render.value seon.eval seon.ctx seon.render.default
+  '[seon.render.value seon.eval seon.agent.ctx seon.render.default
     seon.ui.components seon.ui.markdown seon.web.brand seon.db
     seon.error seon.error.instrument my.kb.shared])
 
@@ -144,8 +144,8 @@
   ;; every clean test below pass vacuously.
   (let [schemas (m/function-schemas :cljs)]
     (doseq [[ns-sym fn-sym] '[[seon.render.value sample]
-                              [seon.ctx cap-result-body]
-                              [seon.ctx format-eval-row]
+                              [seon.agent.ctx cap-result-body]
+                              [seon.agent.ctx format-eval-row]
                               [seon.render.default recent-messages]
                               [seon.db core-kinds]
                               [seon.ui.components status-dot]]]
@@ -215,9 +215,9 @@
   (check-clean! "eval/cap-edn 1-arity"       #(seval/cap-edn "hello"))
   (check-clean! "eval/cap-edn 2-arity"       #(seval/cap-edn "hello" 3))
 
-  ;; seon.ctx — the transcript/text fns (every multi-arity one).
+  ;; seon.agent.ctx — the transcript/text fns (every multi-arity one).
   (check-clean! "ctx/quote-lines 1-arity"    #(ctx/quote-lines "a\nb"))
-  (check-clean! "ctx/quote-lines 2-arity"    #(ctx/quote-lines "a\nb" {:seon.ctx/strip-markers? true}))
+  (check-clean! "ctx/quote-lines 2-arity"    #(ctx/quote-lines "a\nb" {:seon.agent.ctx/strip-markers? true}))
   (check-clean! "ctx/quote-lines nil"        #(ctx/quote-lines nil))
   (check-clean! "ctx/truncate-edn 1-arity"   #(ctx/truncate-edn {:a 1}))
   (check-clean! "ctx/truncate-edn 2-arity"   #(ctx/truncate-edn {:a 1} 100))
@@ -320,7 +320,7 @@
     (check-clean! "brand/info 1-arity"        #(brand/info D))
     (check-clean! "brand/page-title"          #(brand/page-title (brand/info D) "agents"))
 
-    ;; seon.ctx — the readers, 0-arity (ALS id) AND explicit-id forms.
+    ;; seon.agent.ctx — the readers, 0-arity (ALS id) AND explicit-id forms.
     (check-clean! "ctx/messages 0-arity"      #(ctx/messages))
     (check-clean! "ctx/messages map-arity"    #(ctx/messages {:seon.agent/id test-agent-id :seon.db/db D}))
     (check-clean! "ctx/evals 0-arity"         #(ctx/evals))

@@ -1,5 +1,5 @@
 (ns seon.ctx-test
-  "Contract tests for `seon.ctx` — the ONE composer.
+  "Contract tests for `seon.agent.ctx` — the ONE composer.
 
    Pins: the ONE namespace-selection rule (included-ns? — EVERY indexed
    :seon.ns row minus *.internal and *-test, no prefix allow-list) and
@@ -25,11 +25,11 @@
     [seon.ai.openai-compat :as openai]
     [seon.analyzer-info :as ai]
     [seon.client :as client]
-    [seon.ctx :as ctx]
-    [seon.ctx.inventory :as ctx-inventory]
-    [seon.ctx.live-tile :as ctx-live-tile]
-    [seon.ctx.namespaces :as ctx-namespaces]
-    [seon.ctx.relevant :as ctx-relevant]
+    [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.inventory :as ctx-inventory]
+    [seon.agent.ctx.live-tile :as ctx-live-tile]
+    [seon.agent.ctx.namespaces :as ctx-namespaces]
+    [seon.agent.ctx.relevant :as ctx-relevant]
     [seon.db :as db]
     [seon.embed.stash :as embed-stash]
     [seon.render :as render]
@@ -118,7 +118,7 @@
           n  [(name kw) (str (name kw) "-test")]]
     (is (true? (ctx-namespaces/full-source-ns? n))
         (str n " (whitelist member / its -test sibling) is full-source")))
-  (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.ctx"
+  (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.agent.ctx"
              "seon.warn" "seon.ai" "seon.agent.search" "seon.agent.fs"
              "seon.agent.searcher" "seon.db" "my.foo.internal"]]
     (is (false? (ctx-namespaces/full-source-ns? n)) (str n " is NOT full-source"))))
@@ -364,14 +364,14 @@
      ;; LAYOUT PROVENANCE — every child section name in render order
      ;; (including ones that rendered blank this turn), the same shape the
      ;; old assemble-context's :seon.render/sections carried.
-     :seon.render/sections       (mapv :seon.ctx/name (:seon.ctx/children root))
+     :seon.render/sections       (mapv :seon.agent.ctx/name (:seon.agent.ctx/children root))
      :seon.render/section-texts  section-texts
      :seon.render/section-html   section-html
      :seon.render/token-estimate (quot (count text) 4)}))
 
 (defn- section-text
   [id nm]
-  (some #(when (= nm (:seon.ctx/name %)) (:seon.render/text %))
+  (some #(when (= nm (:seon.agent.ctx/name %)) (:seon.render/text %))
         (:seon.render/section-texts (assemble id))))
 
 (deftest live-tile-section-stable-on-composer-input
@@ -491,23 +491,23 @@
                 ;; add-section! upsert-by-name + envelopes (unchanged).
                 (.then (fn [_]
                          (agent/add-section!
-                           {:seon.ctx/name :doctrine
-                            :seon.ctx/priority 15
+                           {:seon.agent.ctx/name :doctrine
+                            :seon.agent.ctx/priority 15
                             :seon.render/ai "Always check twice."
                             :seon.agent/id "AGTctxtest00p1"})))
                 (.then (fn [res]
-                         (is (= {:seon.agent/ok? true :seon.ctx/name :doctrine}
+                         (is (= {:seon.agent/ok? true :seon.agent.ctx/name :doctrine}
                                 res)
                              "add-section! success envelope")
                          (agent/add-section!
-                           {:seon.ctx/name :doctrine
-                            :seon.ctx/priority 16
+                           {:seon.agent.ctx/name :doctrine
+                            :seon.agent.ctx/priority 16
                             :seon.render/ai "Always check three times."
                             :seon.agent/id "AGTctxtest00p1"})))
                 (.then
                   (fn [_]
                     (let [secs (ctx/ctx-entities {:seon.agent/id "AGTctxtest00p1"})
-                          doctrines (filter #(= :doctrine (:seon.ctx/name %))
+                          doctrines (filter #(= :doctrine (:seon.agent.ctx/name %))
                                             secs)]
                       (is (= 1 (count doctrines))
                           "re-adding a name replaces — upsert-by-name")
@@ -516,10 +516,10 @@
                           "slot stored + decoded as the verbatim string"))))
                 (.then (fn [_]
                          (agent/remove-section!
-                           {:seon.ctx/name :doctrine :seon.agent/id "AGTctxtest00p1"})))
+                           {:seon.agent.ctx/name :doctrine :seon.agent/id "AGTctxtest00p1"})))
                 (.then (fn [res]
                          (is (= {:seon.agent/ok? true
-                                 :seon.ctx/name :doctrine} res))
+                                 :seon.agent.ctx/name :doctrine} res))
                          (is (nil? (section-text "AGTctxtest00p1" :doctrine))
                              "removed section vanishes from the render"))))))
         (.then (fn [] (done)))
@@ -532,8 +532,8 @@
             (-> (agent/create! {:seon.agent/id "AGTctxtest00g1"})
                 (.then (fn [_]
                          (agent/add-section!
-                           {:seon.ctx/name :broken
-                            :seon.ctx/priority 14
+                           {:seon.agent.ctx/name :broken
+                            :seon.agent.ctx/priority 14
                             :seon.render/ai 'my.nowhere/missing-fn
                             :seon.agent/id "AGTctxtest00g1"})))
                 (.then
@@ -546,8 +546,8 @@
                 ;; budget: one huge agent section truncates loudly.
                 (.then (fn [_]
                          (agent/add-section!
-                           {:seon.ctx/name :huge
-                            :seon.ctx/priority 47
+                           {:seon.agent.ctx/name :huge
+                            :seon.agent.ctx/priority 47
                             :seon.render/ai (apply str (repeat 9000 "x"))
                             :seon.agent/id "AGTctxtest00g1"})))
                 (.then
@@ -640,22 +640,22 @@
             (-> (agent/create! {:seon.agent/id "AGTctxtest00s1"})
                 (.then (fn [_]
                          (agent/add-section!
-                           {:seon.ctx/name :tile
-                            :seon.ctx/priority 30
+                           {:seon.agent.ctx/name :tile
+                            :seon.agent.ctx/priority 30
                             :seon.render/ai 'my.x/view-section
                             :seon.render/html [:div "static badge"]
                             :seon.agent/id "AGTctxtest00s1"})))
                 (.then
                   (fn [_]
                     (let [secs (ctx/ctx-entities {:seon.agent/id "AGTctxtest00s1"})
-                          tile (some #(when (= :tile (:seon.ctx/name %)) %)
+                          tile (some #(when (= :tile (:seon.agent.ctx/name %)) %)
                                      secs)
                           raw  (db/pull
                                  {:seon.db/pull-pattern
-                                  '[{:seon.agent/sections [*]}]
+                                  '[{:seon.agent/ctx [*]}]
                                   :seon.db/ref [:seon.agent/id "AGTctxtest00s1"]})
-                          raw-tile (some #(when (= :tile (:seon.ctx/name %)) %)
-                                         (:seon.agent/sections raw))]
+                          raw-tile (some #(when (= :tile (:seon.agent.ctx/name %)) %)
+                                         (:seon.agent/ctx raw))]
                       (is (= 'my.x/view-section (:seon.render/ai tile))
                           "symbol slot decodes back to a symbol")
                       (is (= [:div "static badge"] (:seon.render/html tile))
@@ -853,7 +853,7 @@
                     (let [r1 (assemble "AGTctxrel0001p")
                           r2 (assemble "AGTctxrel0001p")
                           texts-of (fn [r]
-                                     (into {} (map (juxt :seon.ctx/name
+                                     (into {} (map (juxt :seon.agent.ctx/name
                                                          :seon.render/text))
                                            (:seon.render/section-texts r)))]
                       ;; :relevant-source IS in the LAYOUT provenance (every
@@ -888,7 +888,7 @@
 ;; THE single render path — prompt == view, byte-identical by
 ;; construction. The model's prompt (the loop's `render-prompt`) and the
 ;; human inspector's context pane (`ctx-preview`) both route through the
-;; ONE producer `seon.ctx/render-context` over the SAME unfiltered db, so
+;; ONE producer `seon.agent.ctx/render-context` over the SAME unfiltered db, so
 ;; the `:ai` side is byte-identical by construction. Asserted THROUGH the
 ;; real fns — never a hand-built ctx string (the trap that let the old
 ;; tests lie). The only per-render-moment difference is the single live
@@ -930,7 +930,7 @@
                           "render-prompt IS render-context (the loop routes through the one producer)")
                       (is (str/ends-with? full prod-txt)
                           "inspector context pane is byte-identical to the prompt (full = system + boundary + the EXACT context bytes)")
-                      (doseq [{nm  :seon.ctx/name
+                      (doseq [{nm  :seon.agent.ctx/name
                                txt :seon.render/text} (:seon.render/section-texts preview)
                               :when (not= nm :system)]
                         (is (str/includes? prod-txt (strip-readline-now txt))
@@ -948,7 +948,7 @@
 
 ;; ------------------------------------------------------------
 ;; file-section — the GENERIC markdown-file → context-section UTILITY
-;; folded into seon.ctx. The mechanism, not any file's prose:
+;; folded into seon.agent.ctx. The mechanism, not any file's prose:
 ;;   - a PRESENT file → a renderable section (both views: ai = `;;`
 ;;     markdown, html = markdown hiccup);
 ;;   - an ABSENT file → NO section (nil — NO fallback);
@@ -974,13 +974,13 @@
 (deftest file-section-present-file-yields-section-both-views
   (write-fs-fixture!)
   (try
-    (let [sect (ctx/file-section {:seon.ctx/file-path fs-tmp-rel
-                                  :seon.ctx/name :fixture
-                                  :seon.ctx/priority 5})]
+    (let [sect (ctx/file-section {:seon.agent.ctx/file-path fs-tmp-rel
+                                  :seon.agent.ctx/name :fixture
+                                  :seon.agent.ctx/priority 5})]
       (is (map? sect) "a present file → a section map")
-      (is (= :fixture (:seon.ctx/name sect)))
-      (is (= 5 (:seon.ctx/priority sect)))
-      (is (= fs-tmp-rel (:seon.ctx/file-path sect)))
+      (is (= :fixture (:seon.agent.ctx/name sect)))
+      (is (= 5 (:seon.agent.ctx/priority sect)))
+      (is (= fs-tmp-rel (:seon.agent.ctx/file-path sect)))
       (is (symbol? (:seon.render/ai sect)) "ai slot is a symbol (fresh read each render)")
       (is (symbol? (:seon.render/html sect)) "html slot is a symbol")
       ;; AI view — the file rendered as reader-valid `;` markdown.
@@ -998,9 +998,9 @@
     (finally (rm-fs-fixture!))))
 
 (deftest file-section-absent-file-yields-no-section-no-fallback
-  (is (nil? (ctx/file-section {:seon.ctx/file-path fs-absent-rel
-                               :seon.ctx/name :missing
-                               :seon.ctx/priority 5}))
+  (is (nil? (ctx/file-section {:seon.agent.ctx/file-path fs-absent-rel
+                               :seon.agent.ctx/name :missing
+                               :seon.agent.ctx/priority 5}))
       "an absent file → nil → no section (NO fallback)"))
 
 (deftest file-section-is-generic-any-path
@@ -1008,12 +1008,12 @@
   ;; nothing soul-specific is hardcoded.
   (write-fs-fixture!)
   (try
-    (let [a (ctx/file-section {:seon.ctx/file-path fs-tmp-rel
-                               :seon.ctx/name :alpha :seon.ctx/priority 1})
-          b (ctx/file-section {:seon.ctx/file-path fs-tmp-rel
-                               :seon.ctx/name :beta :seon.ctx/priority 9})]
-      (is (= :alpha (:seon.ctx/name a)))
-      (is (= :beta (:seon.ctx/name b)))
+    (let [a (ctx/file-section {:seon.agent.ctx/file-path fs-tmp-rel
+                               :seon.agent.ctx/name :alpha :seon.agent.ctx/priority 1})
+          b (ctx/file-section {:seon.agent.ctx/file-path fs-tmp-rel
+                               :seon.agent.ctx/name :beta :seon.agent.ctx/priority 9})]
+      (is (= :alpha (:seon.agent.ctx/name a)))
+      (is (= :beta (:seon.agent.ctx/name b)))
       (is (= (:seon.render/ai a) (:seon.render/ai b))
           "same generic render fn regardless of name/priority"))
     (finally (rm-fs-fixture!))))
@@ -1021,7 +1021,7 @@
 ;; ------------------------------------------------------------
 ;; The system-message DECOUPLING contract (moved here from the deleted
 ;; my.soul-test): the LLM `system` role message is the HARDCODED
-;; system-specific mechanics (seon.ctx/system-text), NOT the soul, NOT a
+;; system-specific mechanics (seon.agent.ctx/system-text), NOT the soul, NOT a
 ;; file, NO fallback; the identity files (SOUL.md / AGENTS.md) ride the
 ;; user-message context as file-sections; identity-files-text reads them
 ;; live (used by the teachings validator).
@@ -1037,7 +1037,7 @@
 (deftest system-message-is-hardcoded-mechanics-not-the-soul
   ;; THE decoupling: the LLM system message is the hardcoded mechanics.
   (is (= ctx/system-text (llm/effective-system-prompt {}))
-      "system message = the hardcoded seon mechanics (seon.ctx/system-text)")
+      "system message = the hardcoded seon mechanics (seon.agent.ctx/system-text)")
   (is (= ctx/system-text (llm/effective-system-prompt {:seon.ai/system-prompt nil}))
       "no override → still the hardcoded mechanics (no fallback const)")
   (is (= "OVERRIDE" (llm/effective-system-prompt {:seon.ai/system-prompt "OVERRIDE"}))

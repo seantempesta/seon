@@ -82,7 +82,7 @@
     [seon.agent.turn :as turn]
     [seon.agent.run :as run]
     [seon.agent.loop :as aloop]
-    [seon.ctx :as ctx]
+    [seon.agent.ctx :as ctx]
     [seon.db :as db]
     [seon.debug :as debug]
     ;; World-parity (2026-06-10 deep audit): the :test build has no
@@ -320,11 +320,11 @@
 ;; ctx-sections' :seon.render/section-texts). The carve retired
 ;; :seon.render/sections (its old producer assemble-context is gone), so
 ;; the profile carries its own gym-local copy.
-(schema/register! :seon.gym.profile/sections [:vector :seon.ctx/name])
+(schema/register! :seon.gym.profile/sections [:vector :seon.agent.ctx/name])
 ;; [section-name rendered-char-count] in render order — only the
 ;; non-blank contributions (ctx-sections' :seon.render/section-texts).
 (schema/register! :seon.gym.profile/section-chars
-  [:vector [:tuple :seon.ctx/name :int]])
+  [:vector [:tuple :seon.agent.ctx/name :int]])
 (schema/register! :seon.gym/turn-profile
   [:map
    [:seon.gym.profile/agent         :seon.gym.profile/agent]
@@ -782,9 +782,9 @@
                 (ctx/ctx-sections {:seon.db/db dbv
                                    :seon.agent/id agent-id}))]
     {:seon.gym.profile/agent    designator
-     :seon.gym.profile/sections (mapv :seon.ctx/name texts)
+     :seon.gym.profile/sections (mapv :seon.agent.ctx/name texts)
      :seon.gym.profile/section-chars
-     (mapv (fn [{nm :seon.ctx/name txt :seon.render/text}]
+     (mapv (fn [{nm :seon.agent.ctx/name txt :seon.render/text}]
              [nm (count txt)])
            texts)}))
 

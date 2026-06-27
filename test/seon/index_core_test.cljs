@@ -179,11 +179,11 @@
   ;; Curated render (LEAN whitelist): the seon.* FRAMEWORK BULK keeps the
   ;; minimal `(ns x)` stub (it is DROPPED from render, never shown as a body),
   ;; while THE curated seon.* whitelist member
-  ;; (seon.ctx.namespaces/full-source-whitelist = #{:seon.agent.todo}) AND
+  ;; (seon.agent.ctx.namespaces/full-source-whitelist = #{:seon.agent.todo}) AND
   ;; every my.* ns (my.kb, the runnable DB manual, full via the my.* rule)
   ;; force-store their REAL FULL FILE TEXT (they render FULL, so the boot
   ;; indexer reads the file — probing .cljs then .cljc — the same
-  ;; seon.ctx.namespaces/full-source-ns? rule the renderer uses, one writer no
+  ;; seon.agent.ctx.namespaces/full-source-ns? rule the renderer uses, one writer no
   ;; drift). seon.warn / seon.eval / seon.agent.search / seon.agent.fs are all
   ;; framework bulk → stub (search/fs are NO LONGER whitelisted — lean set).
   (let [tx      @core-tx
@@ -227,7 +227,7 @@
 
 (deftest test-sibling-ns-rows-ride-their-base-full-source-rule
   ;; Test siblings ride the SAME full-source rule as their subject ns (the
-  ;; `-test` suffix is stripped to the base — seon.ctx.namespaces/full-source-ns?):
+  ;; `-test` suffix is stripped to the base — seon.agent.ctx.namespaces/full-source-ns?):
   ;;   (a) a `-test` sibling of a WHITELISTED base (seon.agent.todo-test →
   ;;       seon.agent.todo, a full-source-whitelist member) carries its REAL
   ;;       FULL FILE TEXT, so the deep render-namespace view has the real test

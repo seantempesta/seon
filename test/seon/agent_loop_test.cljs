@@ -21,7 +21,7 @@
     [seon.agent.loop :as loop]
     [seon.agent.run :as run]
     [seon.client :as client]
-    [seon.ctx :as ctx]
+    [seon.agent.ctx :as ctx]
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.repl :as repl]

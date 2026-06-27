@@ -6,7 +6,7 @@
    MECHANISM that enforces it, not any particular namespace's contents:
 
      1. `.internal` nses are NOT in the agent-facing
-        `seon.ctx.namespaces/full-source-whitelist` (the curated set rendered
+        `seon.agent.ctx.namespaces/full-source-whitelist` (the curated set rendered
         to agents in full) — and the predicates over that whitelist agree.
      2. The structural selection rule `included-ns?` EXCLUDES every
         `.internal` ns from the agent prompt while INCLUDING its public
@@ -16,7 +16,7 @@
         distinct namespaces (the boundary is real code, not a comment)."
   (:require
     [cljs.test :refer [deftest is]]
-    [seon.ctx.namespaces :as ns]
+    [seon.agent.ctx.namespaces :as ns]
     [seon.db :as db]
     [seon.db.internal :as db.internal]))
 

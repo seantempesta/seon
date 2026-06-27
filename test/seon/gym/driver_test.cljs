@@ -19,7 +19,7 @@
     [malli.core :as m]
     [seon.agent :as agent]
     [seon.client :as client]
-    [seon.ctx.namespaces :as ctx-namespaces]
+    [seon.agent.ctx.namespaces :as ctx-namespaces]
     [seon.db :as db]
     [seon.gym.driver :as gym]
     [seon.schema :as schema]
@@ -503,8 +503,8 @@
            :seon.gym.scenario/turns
            [{:seon.gym.turn/message "Install your section now."
              :seon.gym.turn/llm-script
-             [(str "(seon.agent/add-section! {:seon.ctx/name :gymtest-static "
-                   ":seon.ctx/priority 12 "
+             [(str "(seon.agent/add-section! {:seon.agent.ctx/name :gymtest-static "
+                   ":seon.agent.ctx/priority 12 "
                    ":seon.render/ai 'cljs.user/gymtest-telemetry-section})\n")]}
             {:seon.gym.turn/message "Now render a turn with it in place."
              :seon.gym.turn/llm-script

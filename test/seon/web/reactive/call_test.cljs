@@ -16,7 +16,7 @@
     [clojure.string :as str]
     [cljs.test :refer [deftest is testing async]]
     [seon.client :as client]
-    [seon.ctx :as ctx]
+    [seon.agent.ctx :as ctx]
     [seon.db :as db]
     [seon.repl :as repl]
     [seon.web.reactive.call :as call]))

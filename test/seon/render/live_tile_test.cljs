@@ -268,7 +268,7 @@
              :seon.render/html
              :seon.render/html-response
              :seon.render/ai-response
-             :seon.ctx/render-namespace-response
+             :seon.agent.ctx/render-namespace-response
              :seon.db/db-val
              :seon.db/listen-request]]
     (testing (str k)
