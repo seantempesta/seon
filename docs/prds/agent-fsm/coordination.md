@@ -84,7 +84,7 @@ other lane's **_Needs_** and the owner makes it.
 |---|---|---|---|
 | 1 | Core (Phase 1) | UI | `:seon.agent/ctx` (component vector of `:seon.agent.ctx/block`), `:seon.agent.ctx/name|priority`; the old `:seon.agent/sections`/`:seon.ctx/section` are gone. |
 | 2 | Core (Phase 2e) | UI | `(slot :name)` primitive in `seon.render`, keyed on `:seon.agent.ctx/name`; the guarded render that yields a `:seon/error` value. |
-| 3 | Core (Phase 5) | UI | `:seon.route/*` schema registered + the core routes seeded (`/` owned by root, `/agent/{id}`, `/agent/{id}/feed`, `/call`, `/eval`); `db->routes` is UI's to write. |
+| 3 | Core (Phase 5) | UI | `:seon.route/*` schema registered + the core routes seeded: `/` (root world) + `/agent/{id}` (GET shim + same-path live stream — NO `/agent/{id}/feed`), `/agent/{id}/call`, `/eval`; `db->routes` is UI's to write. |
 | 4 | Core (Phase 7) | UI | the `:seon/error` value shape + `warnings-section`→`warnings-block` (UI renders the error-TILE half). |
 | 5 | UI | Core | none flowing back beyond _Needs_; the capability gate (`seon.web.reactive.call`) stays UNCHANGED — UI only moves `/call`'s registration to a route datom. |
 

@@ -70,7 +70,7 @@ target shape.
   placement entities; a `/eval` 404; a dead broadcast stub. TARGET: reitit front door
   over `:seon.route/*` datoms, the capability gate UNCHANGED, one `world-layout` with
   the all-agents overview = the root agent's world, slots/tiles over
-  `:seon.agent/ctx`, a per-connection `!last-tree` diff. → [[ui]].
+  `:seon.agent/ctx`, a gzip-morph SSE stream (`view=f(db-as-of t)` datastar morph). → [[ui]].
 
 ## The build path (dependency-ordered)
 
