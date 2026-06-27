@@ -214,13 +214,20 @@ same db value (`as-of` the turn's `t`); the prompt is `seon.ctx/render-context`
 html renders placed into a world layout's slots. Nothing is stored; "what the
 agent saw at turn N" is a re-derive from `db-as-of(t)`.
 
-**Errors are values, surfaced two ways.** A guarded render that fails constructs
-one `:seon.render/error` `{:seon.error/message, :seon.error/where,
-:seon.error/symbol?, :seon.error/hint?}`. That single value renders as an **error
-tile** (html) for the human and feeds the **warnings block** (ai) for the agent
-via a `:render-health` check in `seon.warn/checks` — one source, two renders,
-self-healing (empty when clean). This replaces today's scattered catch products
-(`missing-slot-render`, the per-entity render catches, `live-tile/error-response`).
+**Errors are values, never crashes — surfaced everywhere the agent can see.** A
+guarded render that fails constructs a **`:seon/error`** value (the one general
+error base — `:seon.error/message` humanized via `malli.error/humanize`,
+`:seon.error/data` keeping the structured payload, plus where/symbol/hint; NO
+`:kind` — discriminate by the carrier attr). It renders as an **error tile** (html)
+for the human and feeds the **warnings block** (ai) for the agent via a
+`:render-health` check in `seon.warn/checks` — one source, two renders,
+self-healing (empty when clean). Render is just one instance of a system-wide
+discipline: **no uncaught path, no silent swallow** — every failure (render, eval,
+transact, capability denial, schema rejection, LLM error, a throwing check or
+handler) is caught at its site and surfaced as a `:seon/error` value in a derived,
+agent-visible place, never a process crash (the pod is single-threaded — one
+uncaught throw would blank every agent + the UI host). The full failure-site →
+surface map is [[data-model-2026-06-27]] §5.
 
 **The default block set + the override seam.** `core-blocks` (`seon.ctx`) is the
 stable public default vector every fresh agent merges over. A downstream cluster
@@ -569,6 +576,9 @@ first. (Marked *needs baking* at their mention.)
 ## Detail docs
 
 - [[agent-runtime-spec]] — full schema + the run model + the FSM table.
+- [[data-model-2026-06-27]] — the complete current data model: every entity +
+  attribute + exact datahike facet, the three relationship kinds, the general
+  `:seon/error` model, and the never-crash failure-site → surface table.
 - [[layout-context-unification-design-2026-06-27]] — **the canonical context + UI
   spec**: the block / render / tile / slot / layout system, world/dashboard/app
   pages, routing-as-data via reitit, the override seam, and friendly errors → the
