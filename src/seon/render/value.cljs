@@ -253,7 +253,11 @@
                   [:=> [:catn [:seon.render.value/x :any]] :any]
                   [:=> [:catn [:seon.render.value/x :any]
                               [:seon.render.value/opts :map]] :any]]}
-  ([x] (sample x nil))
+  ;; The 1-arity delegates with `{}` (NOT nil): the 2-arity's `opts` slot is
+  ;; schema'd `:map`, and under always-on instrumentation a nil there throws
+  ;; `:malli.core/invalid-input` on this internal self-call (uninstrumented,
+  ;; `merge` tolerated nil — the trap only fires once instrumented at boot).
+  ([x] (sample x {}))
   ([x opts] (sample* x (merge default-opts opts) 0)))
 
 ;; ============================================================
