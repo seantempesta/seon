@@ -101,9 +101,11 @@
                ";\n"
                body-comment "\n"
                ";\n"
-               "; To change it: redefine the wired fn, or transact a new value\n"
-               "; (a qualified fn symbol or literal hiccup) onto\n"
-               "; :seon.render.live-tile/content on your agent entity."))))
+               "; To make it yours: define a tile fn in YOUR OWN namespace that\n"
+               "; returns hiccup, then transact its qualified symbol (or literal\n"
+               "; hiccup) onto :seon.render.live-tile/content on your agent entity.\n"
+               "; Evolve it by redefining YOUR fn — seon.render.live-tile is a\n"
+               "; shared core default, so build your own rather than editing it."))))
     ;; CONTRACT: this section NEVER vanishes and NEVER surfaces a bare
     ;; ⚠/malli code. `render-agent-tile` is already throw-safe, so this
     ;; backstop only fires on an UNEXPECTED failure (e.g. a db read) —
