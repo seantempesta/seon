@@ -23,8 +23,8 @@
        signature manifest: passive name-listing is replaced by active
        grep/query, taught in the `<system>` prose.
 
-   Symbol-wired into the composer layout (`seon.agent.ctx/core-default-ctx`) as
-   `'seon.agent.ctx.namespaces/namespaces-section`; loaded at boot so the
+   Symbol-wired into the composer layout (`seon.agent.ctx/default-seed-blocks`) as
+   `'seon.agent.ctx.namespaces/namespaces-block`; loaded at boot so the
    symbol resolves for `seon.eval/lookup-value`.
 
    The section NEVER re-reads files at render time (code-as-data): the
@@ -44,7 +44,7 @@
 ;; The namespace-display selection rules — the ONE home for which
 ;; indexed :seon.ns rows render, and which render in FULL. Shared by
 ;; the boot indexer (`seon.client/ns-row`, the one file reader) and
-;; [[namespaces-section]] (the curated namespaces prompt body):
+;; [[namespaces-block]] (the curated namespaces prompt body):
 ;; one rule, one writer, no drift. Pure string/keyword/symbol fns —
 ;; no dependency on anything in `seon.agent.ctx`.
 ;; ============================================================
@@ -120,7 +120,7 @@
    worked, runnable DB manual — so they do NOT belong here; this whitelist is
    ONLY for the seon.* tool example. Shared by the boot indexer (which stores
    their real file source — see `seon.client/ns-row`) and
-   [[namespaces-section]] (which renders them FULL while the rest of the
+   [[namespaces-block]] (which renders them FULL while the rest of the
    framework is DROPPED from the rendered section — still indexed +
    searchable)."
   #{:seon.agent.todo})
@@ -143,7 +143,7 @@
    `:seon.agent.todo` gets its REAL body stored — private helpers and
    comments included). Used by the boot indexer (`seon.client/ns-row`) to
    decide which rows get the file read; the SAME rule decides which rows
-   [[namespaces-section]] renders FULL — one rule, one writer, no drift.
+   [[namespaces-block]] renders FULL — one rule, one writer, no drift.
    Third-party (`acme`) roots are full-source too, gated separately by
    `seon.client/extra-src-ns-strs` (the same file read). Every other ns
    gets the minimal `(ns x)` stub at boot and is DROPPED from the rendered
@@ -252,7 +252,7 @@
       empty?        nil
       :else         txt)))
 
-(defn namespaces-section
+(defn namespaces-block
   "CURATED namespaces body. Routes EVERY included ns through the SINGLE
    renderer [[seon.agent.ctx/render-namespace]] — no parallel hand-rolled paths.
    The per-ns DETAIL LEVEL is the only choice the section makes

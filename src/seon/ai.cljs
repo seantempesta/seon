@@ -40,7 +40,7 @@
    ([[seon.agent.ctx/system-text]] — REPL doctrine, environment orientation,
    common DB ops, standing teachings); both providers send the same one.
    It is decoupled from SOUL.md / AGENTS.md, which are FILE-LOADED
-   CONTEXT sections (`seon.agent.ctx/file-section`), not the system
+   CONTEXT sections (`seon.agent.ctx/file-block`), not the system
    message."
   (:require [clojure.string :as str]
             [cljs.reader :as reader]
@@ -332,8 +332,8 @@
 ;; The system role message is NOT the soul and NOT any file: it is the
 ;; environment orientation + REPL doctrine + common DB ops + standing
 ;; teachings hardcoded in `seon.agent.ctx/system-text`. SOUL.md / AGENTS.md are
-;; FILE-LOADED CONTEXT sections (`seon.agent.ctx/file-section`), wired into
-;; `seon.agent.ctx/core-default-ctx` — they ride the user-message context, not
+;; FILE-LOADED CONTEXT sections (`seon.agent.ctx/file-block`), wired into
+;; `seon.agent.ctx/default-seed-blocks` — they ride the user-message context, not
 ;; here. There is NO file read and NO fallback in this path.
 ;; ============================================================
 

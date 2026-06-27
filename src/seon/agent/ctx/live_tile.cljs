@@ -1,8 +1,8 @@
 (ns seon.agent.ctx.live-tile
   "The `:live-tile` context section — \"what your human currently sees\",
    rendered as a `;; ── live tile ──` comment-block. Symbol-wired into the
-   composer layout (`seon.agent.ctx/core-default-ctx`) as
-   `'seon.agent.ctx.live-tile/live-tile-section`; loaded at boot so the symbol
+   composer layout (`seon.agent.ctx/default-seed-blocks`) as
+   `'seon.agent.ctx.live-tile/live-tile-block`; loaded at boot so the symbol
    resolves for `seon.eval/lookup-value`.
 
    The agent sees the SAME wired value the human's surfaces render —
@@ -16,7 +16,7 @@
     [seon.render :as render]
     [seon.render.live-tile :as live-tile]))
 
-(defn live-tile-section
+(defn live-tile-block
   "The `:live-tile` awareness section — what your human currently
    sees. Invokes the agent's wired tile value against THIS TURN's db
    value through `seon.render/render-agent-tile` (the ONE tile entry

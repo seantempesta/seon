@@ -2,7 +2,7 @@
   "Envelope-contract tests for seon.agent.todo — the exemplar store/retrieve ns.
    Covers add!/complete!/reopen! happy + failure paths, owner scoping (ALS
    default + explicit), the resume property (open items persist; every list
-   re-derives from the conn), and the pure open-todos-block view. All on a
+   re-derives from the conn), and the pure open-todos-body view. All on a
    FRESH :memory conn seeded like the pod boots — never the live agent conn."
   (:require
     [cljs.test :refer [deftest is async]]
@@ -146,7 +146,7 @@
                     (is (= ["first (oldest)" "second" "b's item"]
                            (open-titles (todo/list-open {:seon.agent.todo/all? true})))
                         "all? widens across owners")
-                    (let [block (todo-int/open-todos-block @conn a-ref)
+                    (let [block (todo-int/open-todos-body @conn a-ref)
                           ids   (mapv :seon.agent.todo/id
                                       (:seon.agent.todo/todos
                                         (todo/list-open {:seon.agent.todo/owner a-ref})))]
@@ -203,9 +203,9 @@
   (async done
     (-> (with-conn
           (fn [conn]
-            (is (= "" (todo-int/open-todos-block @conn a-ref))
+            (is (= "" (todo-int/open-todos-body @conn a-ref))
                 "no open items → empty block, the section vanishes")
-            (is (= "" (todo-int/open-todos-block @conn [:seon.agent/id "ghost"]))
+            (is (= "" (todo-int/open-todos-body @conn [:seon.agent/id "ghost"]))
                 "unknown owner → empty block, not a throw")))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -215,7 +215,7 @@
   ;; when present, and ABSENT db defaults to the current conn — the
   ;; same convention as every other core section fn. Regression
   ;; for the [open-todos] render-failed crash-loop (C-14 smell 1,
-  ;; 2026-06-11): nil db reached open-todos-block's instrumented
+  ;; 2026-06-11): nil db reached open-todos-body's instrumented
   ;; :catn slot and every render printed :malli.core/invalid-input.
   (async done
     (-> (with-conn
@@ -225,14 +225,14 @@
                 (.then
                   (fn [_]
                     (is (re-find #"live item"
-                                 (todo-int/open-todos-section
+                                 (todo-int/open-todos-block
                                    {:seon.db/db @conn :seon.agent/id a-id}))
                         "db present → renders against that snapshot")
                     (is (re-find #"live item"
-                                 (todo-int/open-todos-section
+                                 (todo-int/open-todos-block
                                    {:seon.agent/id a-id}))
                         "db absent → defaults to the current conn, no throw")
-                    (is (= "" (todo-int/open-todos-section
+                    (is (= "" (todo-int/open-todos-block
                                 {:seon.agent/id b-id}))
                         "other agent, no items → empty, section vanishes"))))))
         (.then (fn [_] (done)))

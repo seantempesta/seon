@@ -2,8 +2,8 @@
   "The `:relevant-source` context section — the top-k embedding-retrieval
    hits for THIS turn's query, surfaced (as a single-`;` `relevant context`
    comment-block) as source the agent can read inline.
-   Symbol-wired into the composer layout (`seon.agent.ctx/core-default-ctx`) as
-   `'seon.agent.ctx.relevant/relevant-source-section` at priority 48 (the VOLATILE
+   Symbol-wired into the composer layout (`seon.agent.ctx/default-seed-blocks`) as
+   `'seon.agent.ctx.relevant/relevant-source-block` at priority 48 (the VOLATILE
    half — query-dependent content must stay out of the cacheable stable prefix).
 
    The HITS are NOT computed here. They are PREFETCHED by the async
@@ -22,7 +22,7 @@
    `source-char-cap` are constants here — worst case ~7.5k chars.
 
    The section name `:relevant-source` is CORE-RESERVED (it lives in
-   `core-default-ctx`); an agent that names a section `:relevant-source`
+   `default-seed-blocks`); an agent that names a section `:relevant-source`
    overrides this by the composer's override-by-name merge."
   (:require
     [clojure.string :as str]
@@ -95,7 +95,7 @@
         body  (longest-string-attr entity)]
     (block title (when (not= title body) body))))
 
-(defn relevant-source-section
+(defn relevant-source-block
   "The `:relevant-source` section. PURE reader of the per-turn retrieval
    stash ([[seon.embed.stash/current-hits]]) — renders the top-`top-k` hits,
    each rendered GENERICALLY by [[render-hit]] (the entity's identity + its

@@ -3,7 +3,7 @@
    what the shared store holds RIGHT NOW (one line per stored KIND with
    each attr's live row count), rendered as a single-`;` comment-block
    (one line per kind). Symbol-wired into the composer layout
-   (`seon.agent.ctx/core-default-ctx`) as `'seon.agent.ctx.inventory/inventory-section`;
+   (`seon.agent.ctx/default-seed-blocks`) as `'seon.agent.ctx.inventory/inventory-block`;
    loaded at boot so the symbol resolves for `seon.eval/lookup-value`."
   (:require
     [clojure.string :as str]
@@ -134,7 +134,7 @@
       (str (name a) " " c " «" (str/join " " vs) "»")
       (str (name a) " " c))))
 
-(defn inventory-section
+(defn inventory-block
   "The stored-data discovery surface (always-changing volatile tail): a
    CHEAP map of what the shared store holds RIGHT NOW, derived
    from [[seon.db/store-inventory]] (user-domain kinds first). ONE line

@@ -20,7 +20,7 @@
    ns-scope (`:seon.warn/ns`, optional) limits the CORPUS checks
    (no-malli-schema / return-is-any / arg-is-any / uses-maybe /
    no-return-spec / no-input-spec) to one namespace —
-   the caller (seon.agent/warnings-section) defaults it to the agent's
+   the caller (seon.agent/warnings-block) defaults it to the agent's
    CURRENT ns so an agent isn't confused by other namespaces' defects.
    Omit it for the whole-core overview. The RUNTIME checks
    (failed-evals / slow-evals / failing-tests / bad-ref) and the

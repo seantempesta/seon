@@ -503,7 +503,7 @@
            :seon.gym.scenario/turns
            [{:seon.gym.turn/message "Install your section now."
              :seon.gym.turn/llm-script
-             [(str "(seon.agent/add-section! {:seon.agent.ctx/name :gymtest-static "
+             [(str "(seon.agent.ctx/install! {:seon.agent.ctx/name :gymtest-static "
                    ":seon.agent.ctx/priority 12 "
                    ":seon.render/ai 'cljs.user/gymtest-telemetry-section})\n")]}
             {:seon.gym.turn/message "Now render a turn with it in place."

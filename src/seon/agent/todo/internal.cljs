@@ -69,7 +69,7 @@
           (< m 1440) (str (quot m 60) "h")
           :else      (str (quot m 1440) "d"))))
 
-(defn open-todos-block
+(defn open-todos-body
   "Context-section text for `owner`'s open todos in db value `db` — single-`;`
    prose guidance + one `; <id> [<age>] <title>` line per item, oldest first;
    a `✉` marker leads items auto-minted from one of your human's messages (a
@@ -90,9 +90,9 @@
                             (str "; " (when message "✉ ") id " [" (age-str created-at) "] " title))
                           todos))))))
 
-(defn open-todos-section
-  "Context-section fn (`:open-todos`, core-default-ctx priority 45):
-   [[open-todos-block]] for the CALLING agent — the `:seon.agent/id` in the
+(defn open-todos-block
+  "Context-section fn (`:open-todos`, default-seed-blocks priority 45):
+   [[open-todos-body]] for the CALLING agent — the `:seon.agent/id` in the
    render input, resolved as a `[:seon.agent/id id]` ref against the render's
    db value — absent `:seon.db/db` defaults to the current conn, the same
    convention as every other core section fn. Returns \"\" when the
@@ -100,4 +100,4 @@
    nothing to acknowledge)."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (open-todos-block (or db @db/*conn*) [:seon.agent/id id]))
+  (open-todos-body (or db @db/*conn*) [:seon.agent/id id]))

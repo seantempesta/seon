@@ -6,7 +6,7 @@
      :seon.render/ai   'seon.handlers.eval/render-ai
      :seon.render/html 'seon.handlers.eval/render-html
 
-   The transcript section's html twin (`seon.agent.ctx/transcript-section-html`)
+   The transcript section's html twin (`seon.agent.ctx/transcript-block-html`)
    resolves these per-eval symbols (via `seon.render/render-entity-html` /
    `render-entity-ai`, which call each symbol through
    `seon.eval/lookup-value`) to render the agent's evals as right-pane

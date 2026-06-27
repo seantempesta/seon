@@ -1,6 +1,6 @@
 (ns seon.agent.ctx
-  "Context generation — the ONE composer. The prompt IS a REPL session:
-   a static system header, the loaded namespaces as the body, the
+  "Context generation — the ONE block renderer. The prompt IS a REPL
+   session: a static system header, the loaded namespaces as the body, the
    agent's own entity as a map, what the human currently sees, the
    reactive warnings/todos, and the comment-block transcript of past
    turns + the live readline. Layout is ordered top→bottom =
@@ -8,16 +8,18 @@
    provider-cacheable prefix.
 
    This namespace owns:
-     - the `:seon.agent.ctx/*` section schemas (`:seon.agent.ctx/name`,
+     - the `:seon.agent.ctx/*` block schemas (`:seon.agent.ctx/name`,
        `:seon.agent.ctx/priority`, the `:seon.agent.ctx/block` map shape). The
        one slot attr is `:seon.render/ai` (string = verbatim doctrine,
-       symbol = late-bound section fn); `:seon.render/html` is the
+       symbol = late-bound block fn); `:seon.render/html` is the
        optional debug-view twin.
-     - `assemble-context` — the ONE composer. Core default sections
-       MERGED with the agent's own `:seon.agent/ctx` sections by one
-       priority sort (override-by-name). Render guard (a broken section
-       renders an inline error line, never breaks assembly) and the
-       per-agent section char budget live here.
+     - `install!` / `remove!` — the ONE scope-aware override + seed verb
+       over the agent's own `:seon.agent/ctx` block set; `seed-default-ctx!`
+       SEED-COPIES `default-seed-blocks` into a fresh agent at creation.
+       `context-root` reads the agent's COMPLETE `:seon.agent/ctx`, decoded
+       + priority-sorted — NO render-time merge, NO separate default set, NO
+       char budget. The render guard (a broken block renders an inline error
+       line, never breaks assembly) lives in [[seon.render]].
      - the namespace-display selection rules live in their rightful
        home [[seon.agent.ctx.namespaces]]:
        [[seon.agent.ctx.namespaces/included-ns?]] (the ONE structural rule —
@@ -28,7 +30,7 @@
      - `system-text` — the byte-stable, system-specific seon mechanics
        sent as the LLM `system` role message (via
        `seon.ai/effective-system-prompt`); NOT a context section (the
-       soul/agents files are context sections via [[file-section]]) — and
+       soul/agents files are context sections via [[file-block]]) — and
        the derived read API every section shares (messages / evals /
        session-evals / current-ns /
        format-eval-row / the eval-render caps / …) —
@@ -39,7 +41,7 @@
        `seon.agent.ctx.warnings`,
        :inventory → `seon.agent.ctx.inventory`, :relevant-source →
        `seon.agent.ctx.relevant`, :transcript → `seon.agent.ctx.transcript`;
-       `core-default-ctx` wires them by SYMBOL (late lookup-value
+       `default-seed-blocks` wires them by SYMBOL (late lookup-value
        resolution), so this ns does NOT require them — they require this
        ns for the shared read API.
      - `render-namespace` — the standalone whole-namespace render
@@ -71,12 +73,12 @@
     [seon.warn :as warn]))
 
 ;; ============================================================
-;; Section schemas. A section is a plain map — the SAME shape whether
-;; it lives in code (core defaults) or as a component entity on
-;; the agent's :seon.agent/ctx vector.
+;; Block schemas. A block is a plain map — the SAME shape whether it lives
+;; in code (the default seed set) or as a component entity on the agent's
+;; :seon.agent/ctx vector.
 ;; ============================================================
 
-(declare decode-section core-default-ctx)
+(declare decode-block)
 
 ;; Program-graph ns rows — registered HERE (not seon.agent) because
 ;; this ns loads first and its render-namespace schemas reference
@@ -100,7 +102,7 @@
 (schema/register! :seon.agent.ctx/name     :keyword)
 (schema/register! :seon.agent.ctx/priority :int)
 
-;; The section map contract (validated at seon.agent/add-section! AND
+;; The block map contract (validated at seon.agent.ctx/install! AND
 ;; at transact! like everything else). :seon.render/ai is the ONE slot:
 ;; a string renders verbatim (doctrine — content as source); a
 ;; qualified symbol resolves LATE via seon.eval/lookup-value at every
@@ -117,8 +119,8 @@
 ;; markdown file into a renderable context section. GENERIC: it takes a
 ;; file PATH (not soul, not agents — any `.md`), returns a section when
 ;; the file currently exists, else nil (REACTIVE: an absent file is no
-;; section, NO fallback). SOUL.md and AGENTS.md are two `file-section`s
-;; wired in `core-default-ctx`; a third party adds another the same way.
+;; section, NO fallback). SOUL.md and AGENTS.md are two `file-block`s
+;; wired in `default-seed-blocks`; a third party adds another the same way.
 ;;
 ;; The file is read FRESH on every render (the path lives on the section
 ;; node; the slot fns re-read it), so a user's edit lands next render
@@ -129,7 +131,7 @@
 ;; rendered (`seon.ui.markdown`).
 ;; ============================================================
 
-;; The on-disk path a file-section reads (relative to the pod's cwd =
+;; The on-disk path a file-block reads (relative to the pod's cwd =
 ;; repo root). Carried on the section node so the slot render fns re-read
 ;; it fresh each render.
 (schema/register! :seon.agent.ctx/file-path [:string {:min 1}])
@@ -196,8 +198,8 @@
                    :else             (str "; " line)))))
         (str/join "\n"))))
 
-(defn file-section-ai
-  "The `:seon.render/ai` slot for a file-section — the node's file read
+(defn file-block-ai
+  "The `:seon.render/ai` slot for a file-block — the node's file read
    FRESH and `;`-commented (via [[quote-lines]]). Blank when the file
    vanished between wiring and render (the section then renders empty and
    is dropped upstream)."
@@ -206,25 +208,25 @@
   (let [text (read-file-text path)]
     (if (str/blank? text) "" (quote-lines text))))
 
-(defn file-section-html
-  "The `:seon.render/html` slot for a file-section — the node's file read
+(defn file-block-html
+  "The `:seon.render/html` slot for a file-block — the node's file read
    FRESH and rendered as markdown hiccup. Empty `[:div]` when the file
    vanished."
   {:malli/schema [:=> [:cat :map] :seon.render.live-tile/content]}
   [{{path :seon.agent.ctx/file-path} :seon.render/node}]
   (md/md->hiccup (or (read-file-text path) "")))
 
-(defn file-section
+(defn file-block
   "A renderable context SECTION backed by the markdown file at
    `:seon.agent.ctx/file-path`, named `:seon.agent.ctx/name`, ordered at
    `:seon.agent.ctx/priority` — when the file currently exists; else `nil`
    (REACTIVE, NO fallback: absent file → no section).
 
    The returned section carries the path + a SYMBOL slot per view; the
-   slot fns ([[file-section-ai]] / [[file-section-html]]) re-read the file
+   slot fns ([[file-block-ai]] / [[file-block-html]]) re-read the file
    fresh on every render so a user's edit lands next turn with no
    seed/restart. GENERIC: any markdown file is a section — SOUL.md and
-   AGENTS.md are two `file-section`s wired in [[core-default-ctx]],
+   AGENTS.md are two `file-block`s wired in [[default-seed-blocks]],
    nothing file-name-specific lives here."
   {:malli/schema [:=> [:cat [:map
                              [:seon.agent.ctx/file-path :seon.agent.ctx/file-path]
@@ -241,11 +243,11 @@
     {:seon.agent.ctx/name      name
      :seon.agent.ctx/priority  priority
      :seon.agent.ctx/file-path path
-     :seon.render/ai     'seon.agent.ctx/file-section-ai
-     :seon.render/html   'seon.agent.ctx/file-section-html}))
+     :seon.render/ai     'seon.agent.ctx/file-block-ai
+     :seon.render/html   'seon.agent.ctx/file-block-html}))
 
 ;; The repo-relative identity files surfaced to every agent as
-;; file-sections in [[core-default-ctx]]. The primary file is
+;; file-blocks in [[default-seed-blocks]]. The primary file is
 ;; `SEON_SOUL_FILE` (override) else `SOUL.md`; AGENTS.md is the cross-tool
 ;; standard repo/work-instructions file, read alongside it. They are
 ;; CONTEXT, NOT the LLM system message — that is the hardcoded mechanics
@@ -864,7 +866,7 @@
      (->> (db/pull {:seon.db/pull-pattern '[{:seon.agent/ctx [*]}]
                     :seon.db/ref [:seon.agent/id id]})
           :seon.agent/ctx
-          (map decode-section)
+          (map decode-block)
           (sort-by :seon.agent.ctx/priority)
           vec))))
 
@@ -1601,13 +1603,15 @@
        :seon.render/volatile-text text}
       {:seon.render/stable-text   (subs text 0 i)
        :seon.render/volatile-text (subs text (+ i (count stable-boundary-delim)))})))
-(defn core-default-ctx
-  "The default :seon.agent.ctx section layout that ships with every fresh
-   agent — ordered top→bottom = static→volatile (the provider-cache
-   contract): everything through :namespaces is the cacheable prefix.
+(defn- default-seed-blocks
+  "The default `:seon.agent.ctx/block` layout SEED-COPIED into every fresh
+   agent's own `:seon.agent/ctx` at creation (PRIVATE — consumed only by the
+   boot seed path, never read at render). Ordered top→bottom =
+   static→volatile (the provider-cache contract): everything through
+   :namespaces is the cacheable prefix.
 
-     1. :soul/:agents — SOUL.md + AGENTS.md as generic file-sections
-                       (present file → its own section, absent → none).
+     1. :soul/:agents — SOUL.md + AGENTS.md as generic file-blocks
+                       (present file → its own block, absent → none).
                        These are CONTEXT, not the system message — the
                        hardcoded system-specific mechanics ride the
                        system role (`seon.ai/effective-system-prompt`).
@@ -1629,76 +1633,160 @@
     10. :transcript  — the comment-block REPL: the masthead, PAST turns,
                        and the folded live readline — the whole bottom of
                        the context (absorbs the old prompt/turns/status
-                       sections)
+                       blocks)
 
    Smallest priority renders first."
-  {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (into
-   ;; SOUL.md + AGENTS.md as generic file-sections — a present file → its
-   ;; own context section, absent → nothing (NO fallback). These are
-   ;; CONTEXT sections (user message), NOT the LLM system message: the
+   ;; SOUL.md + AGENTS.md as generic file-blocks — a present file → its
+   ;; own context block, absent → nothing (NO fallback). These are
+   ;; CONTEXT blocks (user message), NOT the LLM system message: the
    ;; system role carries the hardcoded system-specific mechanics
    ;; ([[system-text]] via `seon.ai/effective-system-prompt`), kept
    ;; strictly separate from these files. `:soul` (5) / `:agents` (8) sit
    ;; at the top of the cacheable prefix; an edit busts only their block.
    (filterv some?
-            [(file-section {:seon.agent.ctx/file-path soul-file-path
-                            :seon.agent.ctx/name :soul :seon.agent.ctx/priority 5})
-             (file-section {:seon.agent.ctx/file-path agents-file-path
-                            :seon.agent.ctx/name :agents :seon.agent.ctx/priority 8})])
+            [(file-block {:seon.agent.ctx/file-path soul-file-path
+                          :seon.agent.ctx/name :soul :seon.agent.ctx/priority 5})
+             (file-block {:seon.agent.ctx/file-path agents-file-path
+                          :seon.agent.ctx/name :agents :seon.agent.ctx/priority 8})])
    [{:seon.agent.ctx/name :shared-instructions :seon.agent.ctx/priority 10
-     :seon.render/ai 'my.kb.shared/instructions-section}
+     :seon.render/ai 'my.kb.shared/instructions-block}
     {:seon.agent.ctx/name :namespaces   :seon.agent.ctx/priority 20
-     :seon.render/ai 'seon.agent.ctx.namespaces/namespaces-section}
+     :seon.render/ai 'seon.agent.ctx.namespaces/namespaces-block}
     {:seon.agent.ctx/name :live-tile    :seon.agent.ctx/priority 35
-     :seon.render/ai 'seon.agent.ctx.live-tile/live-tile-section}
+     :seon.render/ai 'seon.agent.ctx.live-tile/live-tile-block}
     {:seon.agent.ctx/name :warnings     :seon.agent.ctx/priority 40
-     :seon.render/ai 'seon.agent.ctx.warnings/warnings-section}
+     :seon.render/ai 'seon.agent.ctx.warnings/warnings-block}
     {:seon.agent.ctx/name :open-todos   :seon.agent.ctx/priority 45
-     :seon.render/ai 'seon.agent.todo.internal/open-todos-section}
+     :seon.render/ai 'seon.agent.todo.internal/open-todos-block}
     {:seon.agent.ctx/name :relevant-source :seon.agent.ctx/priority 48
-     :seon.render/ai 'seon.agent.ctx.relevant/relevant-source-section}
+     :seon.render/ai 'seon.agent.ctx.relevant/relevant-source-block}
     {:seon.agent.ctx/name :inventory    :seon.agent.ctx/priority 97
-     :seon.render/ai 'seon.agent.ctx.inventory/inventory-section}
+     :seon.render/ai 'seon.agent.ctx.inventory/inventory-block}
     ;; The transcript is the WHOLE bottom of the context (priority 100,
     ;; LAST): the comment-block REPL with the masthead at its head and the
     ;; folded live readline at its very end — it ABSORBS the prompt + turns
-    ;; + status into ONE steering surface (no separate sections).
+    ;; + status into ONE steering surface (no separate blocks).
     {:seon.agent.ctx/name :transcript   :seon.agent.ctx/priority 100
-     :seon.render/ai 'seon.agent.ctx.transcript/transcript-section
-     :seon.render/html 'seon.agent.ctx.transcript/transcript-section-html}]))
+     :seon.render/ai 'seon.agent.ctx.transcript/transcript-block
+     :seon.render/html 'seon.agent.ctx.transcript/transcript-block-html}]))
 
 ;; ============================================================
-;; Composer — merge semantics + render guard + budget (the
-;; agent-self-context spec, 2026-06-10):
+;; install! / remove! — the ONE scope-aware override + seed verb over the
+;; agent's own :seon.agent/ctx block set. Errors are values. Both target the
+;; agent in scope (db/current-agent-id): an agent shapes its OWN context, and
+;; the boot seed-copy runs them inside the new agent's with-agent scope.
+;; ============================================================
+
+(schema/register! ::ok?   :boolean)
+(schema/register! ::error :string)
+(schema/register! ::names [:vector :seon.agent.ctx/name])
+
+(schema/register! ::install-request
+  [:or :seon.agent.ctx/block [:vector :seon.agent.ctx/block]])
+
+(schema/register! ::result
+  [:or
+   [:map [::ok? [:= true]]  [::names ::names]]
+   [:map [::ok? [:= false]] [::error ::error]]])
+
+(defn- upsert-ctx-tx
+  "Tx-data that REPLACES the scoped agent's :seon.agent/ctx with `blocks`:
+   retract the whole component vector (cascade-retracts the old child block
+   entities — datahike component semantics), then re-add `blocks`. An empty
+   `blocks` leaves the attr retracted (no add)."
+  [id blocks]
+  (into [[:db/retract [:seon.agent/id id] :seon.agent/ctx]]
+        (when (seq blocks)
+          [{:seon.agent/id id :seon.agent/ctx (vec blocks)}])))
+
+(defn ^:async install!
+  "Install context BLOCK(S) into the agent in scope — one block map OR a
+   vector of block maps, idempotent UPSERT by :seon.agent.ctx/name (re-installing
+   a name replaces that block, so iterating never accumulates copies). The
+   target is the agent in scope (db/current-agent-id): an agent shapes its OWN
+   context; the creation seed-copy runs install! inside the new agent's scope
+   to copy the default block set in. Errors are values — no agent in scope or
+   a failed transact comes back as {::ok? false ::error …}.
+
+     (seon.agent.ctx/install!
+       {:seon.agent.ctx/name :doctrine :seon.agent.ctx/priority 15
+        :seon.render/ai \"Always reconcile against my.finance.ledger.\"})"
+  {:malli/schema [:=> [:cat ::install-request] ::result]}
+  [block-or-blocks]
+  (let [id (db/current-agent-id)]
+    (if (nil? id)
+      {::ok? false
+       ::error (str "install!: no agent in scope — call inside "
+                    "(seon.db/with-agent id …).")}
+      (let [blocks    (if (vector? block-or-blocks) block-or-blocks [block-or-blocks])
+            new-names (into #{} (map :seon.agent.ctx/name) blocks)
+            current   (ctx-entities {:seon.agent/id id})
+            kept      (->> current
+                           (remove #(contains? new-names (:seon.agent.ctx/name %)))
+                           (mapv #(dissoc % :db/id)))
+            res       (await (db/transact!
+                               {:seon.db/tx-data
+                                (upsert-ctx-tx id (into kept blocks))}))]
+        (if (false? (:seon.db/ok? res))
+          {::ok? false
+           ::error (str "install! transact failed: "
+                        (:seon.error/message (:seon.db/error res)))}
+          {::ok? true ::names (vec new-names)})))))
+
+(defn ^:async remove!
+  "Remove ONE context block by name from the agent in scope. The block is a
+   component child, so dropping it from :seon.agent/ctx cascade-retracts the
+   child entity. Errors are values — no agent in scope or a failed transact
+   comes back as {::ok? false ::error …}. Removing an absent name is a no-op
+   success."
+  {:malli/schema [:=> [:catn [:seon.agent.ctx/name :seon.agent.ctx/name]] ::result]}
+  [nm]
+  (let [id (db/current-agent-id)]
+    (if (nil? id)
+      {::ok? false
+       ::error (str "remove!: no agent in scope — call inside "
+                    "(seon.db/with-agent id …).")}
+      (let [current (ctx-entities {:seon.agent/id id})
+            kept    (->> current
+                         (remove #(= nm (:seon.agent.ctx/name %)))
+                         (mapv #(dissoc % :db/id)))
+            res     (await (db/transact!
+                             {:seon.db/tx-data (upsert-ctx-tx id kept)}))]
+        (if (false? (:seon.db/ok? res))
+          {::ok? false
+           ::error (str "remove! transact failed: "
+                        (:seon.error/message (:seon.db/error res)))}
+          {::ok? true ::names [nm]})))))
+
+(defn ^:async seed-default-ctx!
+  "SEED-COPY the default block set ([[default-seed-blocks]]) into the agent in
+   scope — the creation-time copy that gives a fresh agent its COMPLETE
+   :seon.agent/ctx so render needs no default fallback. Idempotent via
+   install!'s upsert-by-name; `seon.agent/create!` calls it ONLY for a
+   genuinely new entity (a resumed agent keeps its own edited/removed blocks)."
+  {:malli/schema [:=> [:cat] ::result]}
+  []
+  (install! (default-seed-blocks)))
+
+;; ============================================================
+;; Render pipeline — the agent's OWN block set, decoded + priority-sorted,
+;; each block rendered via the injected handle:
 ;;
-;;   sections = sort-by priority (core defaults ∪ agent's
-;;              :seon.agent/ctx)   — MERGE, never replace; a name
-;;              collision means override-by-name (deliberate, visible
-;;              as data).
-;;   input    = {db, id, entity (pulled ONCE), section, model}
+;;   children = sort-by priority (the agent's complete :seon.agent/ctx) —
+;;              one collection, no merge over a default catalog.
+;;   input    = {db, id, entity (pulled ONCE), node}
 ;;   render   = string slot → verbatim | symbol slot → (fn input)
 ;;
-;; Guard: a section whose fn is missing/throws renders a one-line
-;; error string inside the section — never breaks assembly, surfaces
-;; loudly, self-heals when fixed.
-;;
-;; Budget: agent-authored sections share a per-agent char budget
-;; (agent-section-char-budget). Over budget → lowest-priority agent
-;; sections truncate with a loud marker. Core sections are not
-;; charged to it.
+;; Guard: a block whose fn is missing/throws renders a one-line error
+;; string inside the block — never breaks assembly, surfaces loudly,
+;; self-heals when fixed. There is NO char budget: the agent owns its
+;; whole block set; unbounded growth is bounded at the eval-output layer
+;; (and seeded blocks get rolling windows later).
 ;; ============================================================
 
-(def agent-section-char-budget
-  "Total rendered-chars budget shared by the agent's OWN sections
-   (everything in :seon.agent/ctx — strings and computed alike).
-   Core default sections are not charged. Over budget, the
-   LOWEST-priority (largest number, renders last) agent sections
-   truncate first, each with a loud marker line."
-  8000)
-
-(defn decode-section
+(defn decode-block
   "Decode the mixed-:or render slots of a PULLED section entity back to
    their value shapes (`seon.db/decode-edn-value` — the inverse of the
    bridge's EDN-string storage encoding). Code-default sections pass
@@ -1711,45 +1799,33 @@
     (contains? section :seon.render/html)
     (update :seon.render/html #(db/decode-edn-value :seon.render/html %))))
 
-(defn agent-sections
-  "The agent's OWN section maps from its pulled entity — slot-decoded,
-   sorted by priority. `entity` is the once-pulled agent entity map."
+(defn agent-blocks
+  "The agent's COMPLETE set of `:seon.agent.ctx/block` maps from its pulled
+   entity — slot-decoded, sorted by `:seon.agent.ctx/priority` with the block
+   NAME as the byte-stable tie-break (no merge, no separate default set: every
+   block was seed-copied in at creation and the agent owns the whole set).
+   `entity` is the once-pulled agent entity map."
   {:malli/schema [:=> [:catn [::entity :map]] [:vector :map]]}
   [entity]
   (->> (:seon.agent/ctx entity)
-       (map decode-section)
-       (sort-by :seon.agent.ctx/priority)
+       (map decode-block)
+       (sort-by (juxt :seon.agent.ctx/priority
+                      (comp str :seon.agent.ctx/name)))
        vec))
 
-;; ── section gathering (subsumes the old merge-sections) ─────────────────
-;; The ROOT renderable's children = core defaults ∪ the agent's own sections,
-;; ONE priority sort. Name collisions = override-by-id (the agent's entry
-;; wins — the deliberate escape hatch). The core's `:soul` block is NOT a
-;; child here (it stays the adapter's system message — P3 moves it in).
+;; ── the root's children = the agent's OWN complete block set ─────────────
+;; The ROOT renderable's children are exactly the agent's `:seon.agent/ctx`
+;; blocks, one priority sort. There is no render-time merge over a separate
+;; default catalog — `default-seed-blocks` was copied into the agent at
+;; creation, so render reads one collection and stops.
 
 (def stable-priority-max
-  "Sections with priority ≤ this are the byte-stable cacheable PREFIX (soul
-   → :system → :namespaces); the cache breakpoint falls at the transition to
-   the volatile tail. Matches the old `.indexOf :namespaces` heuristic
-   (:namespaces has priority 20)."
+  "Blocks with priority ≤ this are the byte-stable cacheable PREFIX (soul
+   → :namespaces); the cache breakpoint falls at the transition to the
+   volatile tail. :namespaces has priority 20."
   20)
 
-(defn- gather-sections
-  "Core defaults ∪ the agent's own sections, one priority sort. Name
-   collisions = override-by-id (agent wins). Ties sort core-first, then by
-   name, for byte-stable output."
-  [defaults agent-sects]
-  (let [agent-names (into #{} (map :seon.agent.ctx/name) agent-sects)
-        kept        (remove #(contains? agent-names (:seon.agent.ctx/name %))
-                            defaults)
-        tagged      (concat (map #(assoc % :seon.agent.ctx/agent? false) kept)
-                            (map #(assoc % :seon.agent.ctx/agent? true) agent-sects))]
-    (vec (sort-by (juxt :seon.agent.ctx/priority
-                        :seon.agent.ctx/agent?
-                        (comp str :seon.agent.ctx/name))
-                  tagged))))
-
-(defn- section-bracket-ai
+(defn- block-bracket-ai
   "The ai-view bracket the ROOT section renderer wraps each child in — the
    self-demarcating boundary that REPLACES the old per-section `;; ── x ──`
    headers. The agent can fold the left inspector pane on these lines."
@@ -1757,49 +1833,6 @@
   (str ";;; ┌─ " (name section-name) " ─\n"
        body
        "\n;;; └─ end " (name section-name) " ─"))
-
-(defn- apply-agent-budget
-  "Enforce [[agent-section-char-budget]] over the rendered agent
-   sections. `rendered` is [{:seon.agent.ctx/name _ :seon.agent.ctx/agent? _
-   :seon.agent.ctx/priority _ :seon.render/text _} …] in render order.
-   Truncates the lowest-priority (largest number) agent sections first,
-   replacing the overflow with a loud marker; core sections pass
-   through untouched."
-  [rendered]
-  (let [agent-total (transduce (comp (filter :seon.agent.ctx/agent?)
-                                     (map (comp count :seon.render/text)))
-                               + 0 rendered)]
-    (if (<= agent-total agent-section-char-budget)
-      rendered
-      ;; Walk agent sections lowest-priority-first, truncating until
-      ;; the total fits. Each truncated section keeps a head slice +
-      ;; the loud marker (a fully-dropped section would hide that it
-      ;; exists — the marker teaches the agent to trim its own ctx).
-      (let [order (->> rendered
-                       (filter :seon.agent.ctx/agent?)
-                       (sort-by (juxt (comp - :seon.agent.ctx/priority)
-                                      (comp str :seon.agent.ctx/name))))
-            cuts  (loop [over (- agent-total agent-section-char-budget)
-                         [s & more] order
-                         acc {}]
-                    (if (or (<= over 0) (nil? s))
-                      acc
-                      (let [n    (count (:seon.render/text s))
-                            keep (max 0 (- n over))]
-                        (recur (- over (- n keep))
-                               more
-                               (assoc acc (:seon.agent.ctx/name s) keep)))))]
-        (mapv (fn [{nm :seon.agent.ctx/name txt :seon.render/text :as s}]
-                (if-let [keep (and (:seon.agent.ctx/agent? s) (get cuts nm))]
-                  (assoc s :seon.render/text
-                         (str (subs txt 0 keep)
-                              "\n; ⚠ [" (name nm) "] TRUNCATED — your agent "
-                              "sections exceed the " agent-section-char-budget
-                              "-char budget (this section was "
-                              (count txt) " chars). Trim it with "
-                              "(seon.agent/add-section! …) or remove it."))
-                  s))
-              rendered)))))
 
 (defn- pull-agent-entity
   "The agent entity, pulled ONCE (the run/turn history is walked separately
@@ -1819,12 +1852,12 @@
             :seon.db/ref [:seon.agent/id id]}))
 
 (defn context-root
-  "The ROOT renderable. Its children = the core section renderables
-   ([[core-default-ctx]]) UNIONed with the agent's `:seon.agent/ctx`
-   overrides (override-by-id) and any derived rows, sorted by static
-   `:seon.agent.ctx/priority` (subsumes the old merge-sections override-by-name).
-   The agent entity is pulled once and assoc'd into ctx so every child
-   reads it without re-pulling.
+  "The ROOT renderable. Its children are the agent's OWN complete
+   `:seon.agent/ctx` block set — slot-decoded and priority-sorted by
+   [[agent-blocks]], with NO render-time merge over a separate default
+   catalog (every block was seed-copied into the agent at creation, so
+   render reads one collection and stops). The agent entity is pulled once
+   and stashed so every child reads it without re-pulling.
 
    Producing the prompt is rendering the root per view — there is no
    bespoke composer:
@@ -1837,12 +1870,12 @@
   {:malli/schema [:=> [:catn [::ctx :map]] :map]}
   [{:seon.db/keys [db] :seon.agent/keys [id] :as ctx}]
   (let [entity   (pull-agent-entity db id)
-        children (gather-sections (core-default-ctx) (agent-sections entity))]
-    {:seon.agent.ctx/name          :context
-     :seon.agent/entity      entity
-     :seon.agent.ctx/children      children
-     :seon.render/ai         'seon.agent.ctx/render-context-ai
-     :seon.render/html       'seon.agent.ctx/render-context-html}))
+        children (agent-blocks entity)]
+    {:seon.agent.ctx/name     :context
+     :seon.agent/entity       entity
+     :seon.agent.ctx/children children
+     :seon.render/ai          'seon.agent.ctx/render-context-ai
+     :seon.render/html        'seon.agent.ctx/render-context-html}))
 
 (schema/register! ::render-context-request
   [:map
@@ -1882,40 +1915,38 @@
                          ""))))
 
 (defn- render-child-text
-  "Render ONE child section to its ai text via the injected handle, carrying
-   its name / agent? / priority forward for budgeting + the cache split."
+  "Render ONE child block to its ai text via the injected handle, carrying
+   its name + priority forward for the cache split."
   [render child]
   {:seon.agent.ctx/name     (:seon.agent.ctx/name child)
-   :seon.agent.ctx/agent?   (boolean (:seon.agent.ctx/agent? child))
    :seon.agent.ctx/priority (:seon.agent.ctx/priority child)
    :seon.render/text  (or (render child) "")})
 
-(defn- rendered-section-texts
-  "Render each child to its ai text via `render`, drop blanks, apply the
-   per-agent char budget — the post-budget per-section vector shared by the
-   joined prompt ([[render-context-ai]]) and the inspector ([[ctx-sections]])
-   so the two can never disagree on what each section contributes."
+(defn- rendered-block-texts
+  "Render each child block to its ai text via `render`, drop blanks — the
+   per-block text vector shared by the joined prompt ([[render-context-ai]])
+   and the inspector ([[ctx-sections]]) so the two can never disagree on what
+   each block contributes."
   [render children]
   (->> children
        (map #(render-child-text render %))
        (remove (comp str/blank? :seon.render/text))
-       vec
-       apply-agent-budget))
+       vec))
 
 (defn render-context-ai
-  "The ROOT renderable's :ai slot — the section renderer. Renders each child
-   via the injected `:seon.render/render` handle, drops blanks, applies the
-   per-agent char budget, brackets each section (self-demarcating — replaces
-   the old `;; ── x ──` headers), and joins with the in-band [[stable-boundary]]
-   inserted at the static stable→volatile `:seon.agent.ctx/priority` transition
-   (priority ≤ [[stable-priority-max]] = the cacheable prefix). [[split-context]]
-   recovers the two halves on the provider side."
+  "The ROOT renderable's :ai slot — the block renderer. Renders each child
+   via the injected `:seon.render/render` handle, drops blanks, brackets each
+   block (self-demarcating — replaces the old `;; ── x ──` headers), and joins
+   with the in-band [[stable-boundary]] inserted at the static stable→volatile
+   `:seon.agent.ctx/priority` transition (priority ≤ [[stable-priority-max]] =
+   the cacheable prefix). [[split-context]] recovers the two halves on the
+   provider side."
   {:malli/schema [:=> [:catn [::input :map]] :string]}
   [{:seon.render/keys [node render]}]
-  (let [rendered  (rendered-section-texts render (:seon.agent.ctx/children node))
+  (let [rendered  (rendered-block-texts render (:seon.agent.ctx/children node))
         bracketed (mapv (fn [s]
                           (assoc s :seon.render/bracketed
-                                 (section-bracket-ai (:seon.agent.ctx/name s)
+                                 (block-bracket-ai (:seon.agent.ctx/name s)
                                                      (:seon.render/text s))))
                         rendered)
         stable   (->> bracketed
@@ -1960,10 +1991,9 @@
         ctx*     (assoc ctx :seon.agent/entity (:seon.agent/entity root))
         rh       #(render/render :seon.render/html ctx* %)
         ra       #(render/render :seon.render/ai   ctx* %)
-        ;; Post-budget per-section texts — the SAME path the joined prompt
-        ;; takes, so the inspector's left pane shows exactly what each
-        ;; section contributes (TRUNCATED markers included).
-        texts    (->> (rendered-section-texts ra children)
+        ;; Per-block texts — the SAME path the joined prompt takes, so the
+        ;; inspector's left pane shows exactly what each block contributes.
+        texts    (->> (rendered-block-texts ra children)
                       (mapv #(select-keys % [:seon.agent.ctx/name :seon.render/text])))
         htmls    (->> children
                       (keep (fn [c]

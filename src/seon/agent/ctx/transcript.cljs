@@ -18,9 +18,9 @@
 
    The masthead opens it, the events stream in time order, and the folded
    live readline at the very bottom carries the cursor (current ns) + this
-   turn's status/steering. Symbol-wired into `seon.agent.ctx/core-default-ctx` as
-   `'seon.agent.ctx.transcript/transcript-section` (+ the html twin
-   `'…/transcript-section-html`).
+   turn's status/steering. Symbol-wired into `seon.agent.ctx/default-seed-blocks` as
+   `'seon.agent.ctx.transcript/transcript-block` (+ the html twin
+   `'…/transcript-block-html`).
 
    BYTE-STABILITY: every past event renders byte-identical turn-to-turn —
    each time comes from the event's FIXED stored `:at` (never `now`), and
@@ -338,7 +338,7 @@
                         (concat msgs evs))]
     (with-ns-markers sorted)))
 
-(defn transcript-section
+(defn transcript-block
   "The WHOLE bottom of the context: the [[masthead]], then the agent's
    flat TIME-ORDERED EVENT LOG (messages + evals, oldest-first, each
    rendered through the recursive [[seon.render/render]] handle via its
@@ -369,7 +369,7 @@
         ns-str   (if (keyword? cur-ns) (name cur-ns) (str cur-ns))
         ;; Render handle: the recursive walker injects `:seon.render/render`
         ;; (ONE section model). When the section is called DIRECTLY (the
-        ;; gym driver, the `seon.agent/transcript-section` re-export), there
+        ;; gym driver, the `seon.agent/transcript-block` re-export), there
         ;; is no injected handle — fall back to a local ai render so the
         ;; same code path produces the same String.
         render*  (or render-fn #(render/render :seon.render/ai input %))
@@ -422,8 +422,8 @@
 ;; kind), oldest-first.
 ;; ------------------------------------------------------------
 
-(defn transcript-section-html
-  "The HTML TWIN of [[transcript-section]]: the agent's flat time-ordered
+(defn transcript-block-html
+  "The HTML TWIN of [[transcript-block]]: the agent's flat time-ordered
    event stream rendered as cards (message bubbles + eval cards),
    oldest-first. Each event's UNDERLYING entity (`:seon.agent.message` /
    `:seon.eval`) is rendered through `seon.render/render-entity-html`,

@@ -9,7 +9,7 @@
 
    This namespace owns:
      - the `:seon.agent/*` schemas (id/purpose/run/terminated-at/parent/
-       default-turn-limit/default-deadline-ms/schedules/sections + the entity
+       default-turn-limit/default-deadline-ms/schedules/ctx + the entity
        map), plus the `:seon.eval/*`, `:seon.ns/*`, `:seon.fn/*`,
        `:seon.schema/*` corpus schemas (`:seon.agent.message/*` lives in
        [[seon.agent.message]], `:seon.agent.turn/*` in [[seon.agent.turn]],
@@ -23,8 +23,9 @@
      - `create!` / `boot!` — allocate the agent entity (boot! does NOT arm
        the wake trigger — that's the client boot path)
      - `message!` / `user-ref` — re-exported from [[seon.agent.message]]
-     - `add-section!` / `remove-section!` / `reset-ctx!` / `update-ctx!` —
-       the agent's section-layout editing surface (over `:seon.agent/ctx`)
+     - `set-purpose!` — sugar over a one-attr transact to the agent's own
+       entity. The ctx-block editing surface is [[seon.agent.ctx/install!]] /
+       [[seon.agent.ctx/remove!]] (over `:seon.agent/ctx`), not here.
 
    Agent-id resolution: read APIs take `:seon.agent/id` and fall back to
    `(seon.db/current-agent-id)` when unset (the boot/run path wraps calls in
@@ -48,14 +49,15 @@
    (`seon.agent.ctx/context-root`): `seon.agent.turn/render-prompt` calls
    `(seon.render/render :seon.render/ai ctx (seon.agent.ctx/context-root ctx))`,
    shared byte-for-byte with the inspector (`seon.agent.inspect/ctx-preview`).
-   The core section LAYOUT is CODE (`seon.agent.ctx/core-default-ctx`); the agent's
-   own `:seon.agent/ctx` section maps MERGE with it by one priority sort
-   (override-by-id). Each section's `:seon.render/ai` slot is a verbatim
-   string or a fn symbol resolved late via `seon.eval/lookup-value`.
+   The default block set (`seon.agent.ctx/default-seed-blocks`) is SEED-COPIED
+   into a new agent's own `:seon.agent/ctx` at creation; render reads that one
+   complete collection priority-sorted — no merge, no separate default set.
+   Each block's `:seon.render/ai` slot is a verbatim string or a fn symbol
+   resolved late via `seon.eval/lookup-value`.
 
-   The agent customizes by transacting different `:seon.agent.ctx` entities into
-   `:seon.agent/ctx` (use `update-ctx!`) or by transacting a completely
-   different symbol onto the agent's `:seon.render/ai` slot."
+   The agent customizes by `seon.agent.ctx/install!` / `remove!` on its
+   `:seon.agent/ctx` blocks, or by transacting a completely different symbol
+   onto the agent's `:seon.render/ai` slot."
   (:require
     [clojure.string :as str]
     [seon.agent.message :as msg]
@@ -115,13 +117,12 @@
 (def eval-render-cap ctx/eval-render-cap)
 (def cap-result ctx/cap-result)
 (def cap-result-body ctx/cap-result-body)
-(def namespaces-section ctx-namespaces/namespaces-section)
+(def namespaces-block ctx-namespaces/namespaces-block)
 (def render-namespace ctx/render-namespace)
-(def warnings-section ctx-warnings/warnings-section)
+(def warnings-block ctx-warnings/warnings-block)
 (def transcript-char-budget ctx-transcript/transcript-char-budget)
-(def transcript-section ctx-transcript/transcript-section)
+(def transcript-block ctx-transcript/transcript-block)
 (def context-root ctx/context-root)
-(def core-default-ctx ctx/core-default-ctx)
 
 (schema/register! :seon.eval/id          [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.eval/at          :inst)
@@ -155,9 +156,10 @@
 ;; successful eval.
 (schema/register! :seon.eval/ns          :keyword)
 
-;; The agent's OWN context sections — a component vector of
-;; :seon.agent.ctx/block maps (see seon.agent.ctx). MERGED with the core defaults by
-;; one priority sort at render time (override-by-name). The one slot attr is
+;; The agent's COMPLETE context block set — a component vector of
+;; :seon.agent.ctx/block maps (see seon.agent.ctx). SEED-COPIED from the
+;; default set at creation; render reads this one collection priority-sorted
+;; (no merge over a separate default set). The one slot attr is
 ;; :seon.render/ai. (Turns are NOT owned here — a turn points UP to its run;
 ;; runs point UP to the agent via :seon.agent.run/agent.)
 (schema/register! :seon.agent/ctx    [:vector {:seon.db/component true} :seon.db/ref])
@@ -393,13 +395,19 @@
   "Allocate an agent entity (just its `:seon.agent/id` — state is DERIVED, a
    fresh agent with no open run is `:idle`). Idempotent: re-calling with the
    same id is a no-op upsert that NEVER re-seeds — a resumed agent keeps its
-   own purpose and sections. A GENUINELY NEW entity gets `:seon.agent/purpose`
-   ONLY when the human stated one; otherwise the attr stays ABSENT (optional =
-   absent) until the agent derives a purpose and transacts it. Purpose is
-   ENTITY DATA, never agent-directed instruction text — the welcome tile shows
-   it verbatim to the customer. `:seon.agent/default-turn-limit`, when given, is transacted onto
-   the entity (it seeds a new run's WORK bound); absent leaves the stored value
-   unchanged.
+   own purpose and its own edited/removed ctx blocks. A GENUINELY NEW entity
+   gets `:seon.agent/purpose` ONLY when the human stated one; otherwise the
+   attr stays ABSENT (optional = absent) until the agent derives a purpose and
+   transacts it. Purpose is ENTITY DATA, never agent-directed instruction text
+   — the welcome tile shows it verbatim to the customer.
+   `:seon.agent/default-turn-limit`, when given, is transacted onto the entity
+   (it seeds a new run's WORK bound); absent leaves the stored value unchanged.
+
+   SEED-COPY: a genuinely-new entity gets the FULL default block set copied
+   into its own `:seon.agent/ctx` via `seon.agent.ctx/seed-default-ctx!` (run
+   in the new agent's `with-agent` scope), so render reads one collection and
+   needs no default fallback. The seed rides the SAME `fresh?` gate as purpose:
+   a resumed agent keeps whatever blocks it edited/removed.
 
    Returns `{:seon.agent/id id}` on success; on a FAILED transact the
    db error envelope (`{:seon.db/ok? false :seon.db/error …}`) comes
@@ -425,7 +433,18 @@
             (str "seon.agent/create! transact FAILED for " id ": "
                  (:seon.error/message (:seon.db/error res))))
           res)
-      {:seon.agent/id id})))
+      ;; SEED-COPY the default block set into the NEW agent's own ctx
+      ;; (creation-only — the fresh? gate keeps a resumed agent's edits).
+      ;; Runs in the agent's scope so `seed-default-ctx!` targets it.
+      (do (when fresh?
+            (let [seed (await (db/with-agent id
+                                (fn ^:async seed-ctx! []
+                                  (await (ctx/seed-default-ctx!)))))]
+              (when (false? (:seon.agent.ctx/ok? seed))
+                (js/console.error
+                  (str "seon.agent/create! seed-default-ctx! FAILED for " id
+                       ": " (:seon.agent.ctx/error seed))))))
+          {:seon.agent/id id}))))
 
 ;; ============================================================
 ;; Boot. The single entry point seon.client calls at startup. Agent
@@ -501,76 +520,20 @@
 ;; ============================================================
 
 ;; ============================================================
-;; The agent's ctx-LAYOUT editing surface — read-only against the DB except
-;; the explicit layout verbs (reset-ctx! / update-ctx! / add-section! /
-;; remove-section! / set-purpose!) the agent invokes. The section fns + the
-;; composer live in seon.agent.ctx (re-exported above as transitional aliases).
+;; The agent's ctx-LAYOUT surface is `seon.agent.ctx/install!` /
+;; `seon.agent.ctx/remove!` — the scope-aware override + seed verbs over the
+;; agent's own `:seon.agent/ctx` block set. The block fns + the render
+;; pipeline live in seon.agent.ctx (read API re-exported above).
 ;; ============================================================
 
-
-;; ------------------------------------------------------------
-;; Layout verbs — reset-ctx! restores core defaults; update-ctx!
-;; threads f over the current :seon.agent/ctx and retract-then-adds
-;; the result. Component-cardinality-many means the retract is needed
-;; to drop the old ctx entities before transacting new ones (cardinality-
-;; many ref attrs accumulate on upsert).
-;; ------------------------------------------------------------
-
-
-(defn ^:async reset-ctx!
-  "Restore the core-default ctx layout for `agent-id` by RETRACTING
-   the stored :seon.agent/ctx override (cascade-retracts the existing
-   :seon.agent.ctx entities via component semantics). With no stored ctx,
-   `assemble-context` falls back to the CODE default
-   (`core-default-ctx`) — so the agent tracks every future layout
-   change automatically instead of freezing a stored copy of today's
-   default."
-  {:malli/schema [:=> [:catn [:seon.agent/id :seon.db/id]] :seon.db/transact-response]}
-  [agent-id]
-  (await (db/transact!
-           {:seon.db/tx-data
-            [[:db/retract [:seon.agent/id agent-id] :seon.agent/ctx]]})))
-
-(defn ^:async update-ctx!
-  "Apply `f` to the current ctx vector for `agent-id`; transact the
-   result. `f` receives the existing seq of :seon.agent.ctx entity maps
-   (component-inlined via pull) and returns a vector of ctx maps.
-   Use to add/remove sections or change priorities without blowing
-   away the whole layout."
-  {:malli/schema [:=> [:catn [:seon.agent/id :seon.db/id] [:f :any]] :seon.db/transact-response]}
-  [agent-id f]
-  (let [current (ctx-entities {:seon.agent/id agent-id})
-        new-ctx (vec (f current))]
-    (await (db/transact!
-             {:seon.db/tx-data
-              [[:db/retract [:seon.agent/id agent-id] :seon.agent/ctx]
-               {:seon.agent/id agent-id
-                :seon.agent/ctx new-ctx}]}))))
-
 ;; ============================================================
-;; Self-context verbs — the validated path onto YOUR OWN
-;; `:seon.agent/ctx` sections. Errors are values; blank text is refused
-;; with a guiding message; unknown name on remove names the current
-;; section list. Default scope = the calling agent; explicit
-;; :seon.agent/id allowed (a human or another agent can configure an
-;; agent — it is all just transacts; the verb is the validated path).
+;; Self-context verbs — the validated path onto YOUR OWN entity. Errors are
+;; values; default scope = the calling agent; explicit :seon.agent/id allowed
+;; (a human or another agent can configure an agent — it is all just
+;; transacts; the verb is the validated path).
 ;; ============================================================
 
-(schema/register! ::add-section-request
-  [:map
-   [:seon.agent.ctx/name     :seon.agent.ctx/name]
-   [:seon.agent.ctx/priority {:optional true} :seon.agent.ctx/priority]
-   [:seon.render/ai    :seon.render/ai]
-   [:seon.render/html  {:optional true} :seon.render/html]
-   [:seon.agent/id     {:optional true} :seon.agent/id]])
-
-(schema/register! ::remove-section-request
-  [:map
-   [:seon.agent.ctx/name :seon.agent.ctx/name]
-   [:seon.agent/id {:optional true} :seon.agent/id]])
-
-;; Shared response shapes for the section verbs (add-section! /
-;; remove-section!), referenced by ::section-response below.
+;; Shared response shapes for set-purpose! (errors are values).
 (schema/register! ::ok?   :boolean)
 (schema/register! ::error :string)
 
@@ -582,109 +545,6 @@
    [:map
     [::ok?   [:= false]]
     [::error ::error]]])
-
-(def ^:private default-section-priority
-  "Priority when add-section! is called without one — between
-   :open-todos (45) and :transcript (50), so an unplaced section lands
-   late in the static-ish region without displacing the transcript."
-  46)
-
-(defn ^:async add-section!
-  "Add or update ONE section of your own context — upsert-by-name
-   within your `:seon.agent/ctx` vector (re-adding a name replaces that
-   entry, so iterating on a section doesn't accumulate copies). A name
-   that collides with a core default OVERRIDES it (deliberate,
-   visible as data). `:seon.render/ai` is a string (rendered verbatim —
-   doctrine, notes-to-self) or a qualified symbol of a fn called at
-   every render with {:seon.db/db … :seon.agent/entity …}.
-
-     (seon.agent/add-section!
-       {:seon.agent.ctx/name :doctrine :seon.agent.ctx/priority 15
-        :seon.render/ai \"Always reconcile against my.finance.ledger.\"})
-     ;; => {:seon.agent/ok? true :seon.agent.ctx/name :doctrine}"
-  {:malli/schema [:=> [:cat ::add-section-request] ::section-response]}
-  [{nm :seon.agent.ctx/name pri :seon.agent.ctx/priority slot :seon.render/ai
-    html :seon.render/html id :seon.agent/id}]
-  (let [id (or id (db/current-agent-id))]
-    (cond
-      (nil? id)
-      {::ok? false
-       ::error (str "add-section!: no agent in scope — pass "
-                    ":seon.agent/id or call inside (seon.db/with-agent id …).")}
-
-      (not (keyword? nm))
-      {::ok? false
-       ::error ":seon.agent.ctx/name must be a keyword (e.g. :doctrine)."}
-
-      (and (string? slot) (str/blank? slot))
-      {::ok? false
-       ::error (str "blank section text refused — write the text you "
-                    "want rendered every turn, or remove-section! to "
-                    "drop the section.")}
-
-      (not (or (string? slot) (qualified-symbol? slot)))
-      {::ok? false
-       ::error (str ":seon.render/ai must be a string (verbatim text) or "
-                    "a fully-qualified symbol of a section fn, got "
-                    (pr-str slot) ".")}
-
-      :else
-      (let [current (ctx/ctx-entities {:seon.agent/id id})
-            section (cond-> {:seon.agent.ctx/name     nm
-                             :seon.agent.ctx/priority (or pri default-section-priority)
-                             :seon.render/ai    slot}
-                      (some? html) (assoc :seon.render/html html))
-            new-ctx (conj (->> current
-                               (remove #(= nm (:seon.agent.ctx/name %)))
-                               (mapv #(dissoc % :db/id)))
-                          section)
-            res     (await
-                      (db/transact!
-                        {:seon.db/tx-data
-                         [[:db/retract [:seon.agent/id id] :seon.agent/ctx]
-                          {:seon.agent/id  id
-                           :seon.agent/ctx new-ctx}]}))]
-        (if (false? (:seon.db/ok? res))
-          {::ok? false
-           ::error (str "add-section! transact failed: "
-                        (:seon.error/message (:seon.db/error res)))}
-          {::ok? true :seon.agent.ctx/name nm})))))
-
-(defn ^:async remove-section!
-  "Remove ONE of your own sections by name. Unknown name → error
-   naming the current section list (errors are values)."
-  {:malli/schema [:=> [:cat ::remove-section-request] ::section-response]}
-  [{nm :seon.agent.ctx/name id :seon.agent/id}]
-  (let [id (or id (db/current-agent-id))]
-    (cond
-      (nil? id)
-      {::ok? false
-       ::error (str "remove-section!: no agent in scope — pass "
-                    ":seon.agent/id or call inside (seon.db/with-agent id …).")}
-
-      :else
-      (let [current (ctx/ctx-entities {:seon.agent/id id})
-            names   (mapv :seon.agent.ctx/name current)]
-        (if-not (some #{nm} names)
-          {::ok? false
-           ::error (str "no section named " nm " — your sections: "
-                        (pr-str names) ".")}
-          (let [new-ctx (->> current
-                             (remove #(= nm (:seon.agent.ctx/name %)))
-                             (mapv #(dissoc % :db/id)))
-                res     (await
-                          (db/transact!
-                            {:seon.db/tx-data
-                             (into [[:db/retract [:seon.agent/id id]
-                                     :seon.agent/ctx]]
-                                   (when (seq new-ctx)
-                                     [{:seon.agent/id  id
-                                       :seon.agent/ctx new-ctx}]))}))]
-            (if (false? (:seon.db/ok? res))
-              {::ok? false
-               ::error (str "remove-section! transact failed: "
-                            (:seon.error/message (:seon.db/error res)))}
-              {::ok? true :seon.agent.ctx/name nm})))))))
 
 (defn ^:async set-purpose!
   "Pin or update why you exist — sugar over a one-attr transact to

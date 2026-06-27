@@ -124,7 +124,7 @@
     (is (false? (ctx-namespaces/full-source-ns? n)) (str n " is NOT full-source"))))
 
 ;; ------------------------------------------------------------
-;; namespaces-section — tags, hiding, reconstitution, recency.
+;; namespaces-block — tags, hiding, reconstitution, recency.
 ;; ------------------------------------------------------------
 
 (defn- transact-ns-row!
@@ -143,7 +143,7 @@
     {:seon.db/tx-data [{:seon.ns/name   (keyword nm)
                         :seon.ns/source (str "(ns " nm ")\n" body)}]}))
 
-(deftest namespaces-section-curated-full-only-recency
+(deftest namespaces-block-curated-full-only-recency
   ;; CURATED render (de-stub 2026-06-24): ONLY full nses (my.*, third-party
   ;; acme.*, the curated seon.* whitelist, the current ns) render — each its
   ;; WHOLE source as a tag, UNCLIPPED. Every OTHER seon.* framework ns is
@@ -184,7 +184,7 @@
                   (.then (fn [_] (transact-ns-row! "seon.db.internal")))
                   (.then
                     (fn [_]
-                      (let [txt (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})]
+                      (let [txt (ctx-namespaces/namespaces-block {:seon.db/db @db/*conn*})]
                         ;; FULL: my.* + third-party acme render their whole
                         ;; source. Anchor on the rendered ns-source HEAD
                         ;; (`(ns X`) — real content in every full block — plus
@@ -260,7 +260,7 @@
                 (.then (fn [_] (transact-ns-with-test-member! "acme.widget-test")))
                 (.then
                   (fn [_]
-                    (let [txt (ctx-namespaces/namespaces-section {:seon.db/db @db/*conn*})]
+                    (let [txt (ctx-namespaces/namespaces-block {:seon.db/db @db/*conn*})]
                       ;; third-party code renders FULL with NO config transact.
                       (is (str/includes? txt "(ns acme.widget")
                           "downstream acme.widget renders FULL with NO config")
@@ -298,7 +298,7 @@
             (-> (db/transact! {:seon.db/tx-data [{:seon.ns/name :my.agent.wtest}]})
                 (.then
                   (fn [_]
-                    (let [txt (ctx-namespaces/namespaces-section
+                    (let [txt (ctx-namespaces/namespaces-block
                                 {:seon.db/db @db/*conn* :seon.agent/id "wtest"})]
                       ;; The empty home ns renders inside the per-ns
                       ;; begin/end demarcation brackets (the `;;;`
@@ -374,7 +374,7 @@
   (some #(when (= nm (:seon.agent.ctx/name %)) (:seon.render/text %))
         (:seon.render/section-texts (assemble id))))
 
-(deftest live-tile-section-stable-on-composer-input
+(deftest live-tile-block-stable-on-composer-input
   ;; REGRESSION GUARD (live-tile-nil-entity-render-failed): the composer
   ;; injects ONLY {:seon.db/db … :seon.agent/id …} — it does NOT pass
   ;; :seon.agent/entity. The section must resolve the agent entity from
@@ -387,7 +387,7 @@
                (.then
                  (fn [_]
                    ;; (a) the EXACT composer input shape — db + id, no entity.
-                   (let [out (str (ctx-live-tile/live-tile-section
+                   (let [out (str (ctx-live-tile/live-tile-block
                                     {:seon.db/db    @db/*conn*
                                      :seon.agent/id "AGTctxtile00p1"}))]
                      (is (seq out) "section renders content, never blank")
@@ -415,7 +415,7 @@
                              'my.broken/does-not-exist}]})))
                (.then
                  (fn [_]
-                   (let [out (str (ctx-live-tile/live-tile-section
+                   (let [out (str (ctx-live-tile/live-tile-block
                                     {:seon.db/db    @db/*conn*
                                      :seon.agent/id "AGTctxtile00p1"}))]
                      (is (not (str/includes? out "⚠"))
@@ -466,7 +466,7 @@
                       (is (= "watch the ledger" (agent-purpose "AGTctxtest00p1"))
                           "create! stores the stated purpose on the entity attr")
                       (is (some #{:namespaces} sections)
-                          "core defaults merged in")
+                          "default blocks seed-copied in")
                       (is (some #{:transcript} sections))
                       (is (not-any? #{:purpose} sections)
                           "the :purpose seed section is dead")
@@ -488,77 +488,63 @@
                   (fn [_]
                     (is (= "guard the books" (agent-purpose "AGTctxtest00p1"))
                         "resume (re-create!) keeps the agent's own purpose")))
-                ;; add-section! upsert-by-name + envelopes (unchanged).
+                ;; install! upsert-by-name within the agent's scope.
                 (.then (fn [_]
-                         (agent/add-section!
-                           {:seon.agent.ctx/name :doctrine
-                            :seon.agent.ctx/priority 15
-                            :seon.render/ai "Always check twice."
-                            :seon.agent/id "AGTctxtest00p1"})))
+                         (db/with-agent "AGTctxtest00p1"
+                           (fn ^:async []
+                             (ctx/install!
+                               {:seon.agent.ctx/name :doctrine
+                                :seon.agent.ctx/priority 15
+                                :seon.render/ai "Always check twice."})))))
                 (.then (fn [res]
-                         (is (= {:seon.agent/ok? true :seon.agent.ctx/name :doctrine}
-                                res)
-                             "add-section! success envelope")
-                         (agent/add-section!
-                           {:seon.agent.ctx/name :doctrine
-                            :seon.agent.ctx/priority 16
-                            :seon.render/ai "Always check three times."
-                            :seon.agent/id "AGTctxtest00p1"})))
+                         (is (true? (:seon.agent.ctx/ok? res))
+                             "install! success envelope")
+                         (db/with-agent "AGTctxtest00p1"
+                           (fn ^:async []
+                             (ctx/install!
+                               {:seon.agent.ctx/name :doctrine
+                                :seon.agent.ctx/priority 16
+                                :seon.render/ai "Always check three times."})))))
                 (.then
                   (fn [_]
                     (let [secs (ctx/ctx-entities {:seon.agent/id "AGTctxtest00p1"})
                           doctrines (filter #(= :doctrine (:seon.agent.ctx/name %))
                                             secs)]
                       (is (= 1 (count doctrines))
-                          "re-adding a name replaces — upsert-by-name")
+                          "re-installing a name replaces — upsert-by-name")
                       (is (= "Always check three times."
                              (:seon.render/ai (first doctrines)))
                           "slot stored + decoded as the verbatim string"))))
                 (.then (fn [_]
-                         (agent/remove-section!
-                           {:seon.agent.ctx/name :doctrine :seon.agent/id "AGTctxtest00p1"})))
+                         (db/with-agent "AGTctxtest00p1"
+                           (fn ^:async [] (ctx/remove! :doctrine)))))
                 (.then (fn [res]
-                         (is (= {:seon.agent/ok? true
-                                 :seon.agent.ctx/name :doctrine} res))
+                         (is (true? (:seon.agent.ctx/ok? res))
+                             "remove! success envelope")
                          (is (nil? (section-text "AGTctxtest00p1" :doctrine))
-                             "removed section vanishes from the render"))))))
+                             "removed block vanishes from the render"))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
-(deftest render-guard-and-budget
+(deftest render-guard
   (async done
     (-> (with-conn
           (fn [_conn]
             (-> (agent/create! {:seon.agent/id "AGTctxtest00g1"})
                 (.then (fn [_]
-                         (agent/add-section!
-                           {:seon.agent.ctx/name :broken
-                            :seon.agent.ctx/priority 14
-                            :seon.render/ai 'my.nowhere/missing-fn
-                            :seon.agent/id "AGTctxtest00g1"})))
+                         (db/with-agent "AGTctxtest00g1"
+                           (fn ^:async []
+                             (ctx/install!
+                               {:seon.agent.ctx/name :broken
+                                :seon.agent.ctx/priority 14
+                                :seon.render/ai 'my.nowhere/missing-fn})))))
                 (.then
                   (fn [_]
                     (let [{:seon.render/keys [text sections]} (assemble "AGTctxtest00g1")]
                       (is (str/includes? text "[broken] render failed:")
                           "broken symbol → inline error line")
                       (is (some #{:transcript} sections)
-                          "assembly continues past the broken section"))))
-                ;; budget: one huge agent section truncates loudly.
-                (.then (fn [_]
-                         (agent/add-section!
-                           {:seon.agent.ctx/name :huge
-                            :seon.agent.ctx/priority 47
-                            :seon.render/ai (apply str (repeat 9000 "x"))
-                            :seon.agent/id "AGTctxtest00g1"})))
-                (.then
-                  (fn [_]
-                    (let [huge (section-text "AGTctxtest00g1" :huge)]
-                      (is (some? huge))
-                      (is (str/includes? (str huge) "TRUNCATED")
-                          "over-budget agent section carries the loud marker")
-                      (is (< (count (str huge))
-                             (+ ctx/agent-section-char-budget 400))
-                          "rendered size bounded by the budget")))))))
+                          "assembly continues past the broken block")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
@@ -639,12 +625,13 @@
           (fn [_conn]
             (-> (agent/create! {:seon.agent/id "AGTctxtest00s1"})
                 (.then (fn [_]
-                         (agent/add-section!
-                           {:seon.agent.ctx/name :tile
-                            :seon.agent.ctx/priority 30
-                            :seon.render/ai 'my.x/view-section
-                            :seon.render/html [:div "static badge"]
-                            :seon.agent/id "AGTctxtest00s1"})))
+                         (db/with-agent "AGTctxtest00s1"
+                           (fn ^:async []
+                             (ctx/install!
+                               {:seon.agent.ctx/name :tile
+                                :seon.agent.ctx/priority 30
+                                :seon.render/ai 'my.x/view-section
+                                :seon.render/html [:div "static badge"]})))))
                 (.then
                   (fn [_]
                     (let [secs (ctx/ctx-entities {:seon.agent/id "AGTctxtest00s1"})
@@ -668,16 +655,16 @@
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
 ;; ------------------------------------------------------------
-;; inventory-section — the cheap stored-data discovery surface.
+;; inventory-block — the cheap stored-data discovery surface.
 ;; ------------------------------------------------------------
 
-(deftest inventory-section-renders-stored-kinds-compact
+(deftest inventory-block-renders-stored-kinds-compact
   (async done
     (-> (with-conn
           (fn [_conn]
             ;; REACTIVE: a fresh conn has NO post-bootstrap data → the
             ;; section is suppressed (composer drops it), not an empty shell.
-            (is (= "" (ctx-inventory/inventory-section {:seon.db/db @db/*conn*}))
+            (is (= "" (ctx-inventory/inventory-block {:seon.db/db @db/*conn*}))
                 "no user-domain data → \"\" (reactive suppression)")
             (schema/register! :my.workout/date :string)
             (schema/register! :my.workout/type :keyword)
@@ -688,7 +675,7 @@
                     {:my.workout/date "2026-06-15" :my.workout/type :run}]})
                 (.then
                   (fn [_]
-                    (let [txt   (ctx-inventory/inventory-section {:seon.db/db @db/*conn*})
+                    (let [txt   (ctx-inventory/inventory-block {:seon.db/db @db/*conn*})
                           lines (str/split-lines txt)]
                       ;; The section renderer's bracket demarcates the
                       ;; section; the body is header-less. ONE line per kind:
@@ -730,11 +717,11 @@
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
 ;; ------------------------------------------------------------
-;; relevant-source-section (P2-D) — the embedding-retrieval surface.
+;; relevant-source-block (P2-D) — the embedding-retrieval surface.
 ;; PURE reader of the per-turn `seon.embed.stash`; no conn needed.
 ;; ------------------------------------------------------------
 
-(deftest relevant-source-section-renders-stashed-hits
+(deftest relevant-source-block-renders-stashed-hits
   ;; NO stash active (the default-OFF / no-prefetch path) → "" so the
   ;; composer drops the section. WITH a stash → the relevant-context
   ;; header, the hits' syms + source, top-k respected, per-hit char cap
@@ -749,11 +736,11 @@
                    :seon.fn/source (if (zero? i) long-src
                                        (str "(defn fn" i " [] " i ")"))}}))]
     ;; (1) no stash → reactive blank.
-    (is (= "" (ctx-relevant/relevant-source-section in))
+    (is (= "" (ctx-relevant/relevant-source-block in))
         "no stash (default-OFF / no prefetch) → \"\" (reactive suppression)")
     ;; (2) with a stash → full render.
     (let [txt (embed-stash/with-hits hits
-                #(ctx-relevant/relevant-source-section in))]
+                #(ctx-relevant/relevant-source-block in))]
       ;; The `;; ── relevant context ──` header was REMOVED (keystone): the
       ;; section renderer's bracket demarcates the section now.
       ;; top-k respected: only the first `top-k` hits render.
@@ -770,7 +757,7 @@
       (is (not (str/includes? txt long-src))
           "the full over-cap source NEVER leaks (capped)"))))
 
-(deftest relevant-source-section-renders-any-kind
+(deftest relevant-source-block-renders-any-kind
   ;; GENERALITY (P2-D): the section is kind-general + has NO hard-coded attr
   ;; names — it renders the most relevant embedded ENTITY of ANY kind by a
   ;; uniform rule (the attribute IS the type; NO :seon/kind enum): header = the
@@ -801,7 +788,7 @@
                     :my.doc/prose "the longest string attr is the embedded text here"}}
         lost-hit  {:seon.embed/eid 7 :seon.embed/distance 0.5}   ; raced retraction → no entity
         render    (fn [hits] (embed-stash/with-hits hits
-                               #(ctx-relevant/relevant-source-section in)))]
+                               #(ctx-relevant/relevant-source-block in)))]
     ;; KB renders IDENTITY (shortest string attr) + BODY (longest string attr),
     ;; GENERICALLY — no hard-coded :my.kb/title dispatch (the attribute IS the
     ;; type). For this row the shortest string is :my.kb/id "kb-wire-server".
@@ -974,7 +961,7 @@
 (deftest file-section-present-file-yields-section-both-views
   (write-fs-fixture!)
   (try
-    (let [sect (ctx/file-section {:seon.agent.ctx/file-path fs-tmp-rel
+    (let [sect (ctx/file-block {:seon.agent.ctx/file-path fs-tmp-rel
                                   :seon.agent.ctx/name :fixture
                                   :seon.agent.ctx/priority 5})]
       (is (map? sect) "a present file → a section map")
@@ -998,7 +985,7 @@
     (finally (rm-fs-fixture!))))
 
 (deftest file-section-absent-file-yields-no-section-no-fallback
-  (is (nil? (ctx/file-section {:seon.agent.ctx/file-path fs-absent-rel
+  (is (nil? (ctx/file-block {:seon.agent.ctx/file-path fs-absent-rel
                                :seon.agent.ctx/name :missing
                                :seon.agent.ctx/priority 5}))
       "an absent file → nil → no section (NO fallback)"))
@@ -1008,9 +995,9 @@
   ;; nothing soul-specific is hardcoded.
   (write-fs-fixture!)
   (try
-    (let [a (ctx/file-section {:seon.agent.ctx/file-path fs-tmp-rel
+    (let [a (ctx/file-block {:seon.agent.ctx/file-path fs-tmp-rel
                                :seon.agent.ctx/name :alpha :seon.agent.ctx/priority 1})
-          b (ctx/file-section {:seon.agent.ctx/file-path fs-tmp-rel
+          b (ctx/file-block {:seon.agent.ctx/file-path fs-tmp-rel
                                :seon.agent.ctx/name :beta :seon.agent.ctx/priority 9})]
       (is (= :alpha (:seon.agent.ctx/name a)))
       (is (= :beta (:seon.agent.ctx/name b)))

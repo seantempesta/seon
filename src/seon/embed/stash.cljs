@@ -1,7 +1,7 @@
 (ns seon.embed.stash
   "Per-turn embedding-retrieval stash — an AsyncLocalStorage bridge from the
    ASYNC prefetch (`seon.agent/run-turn!`, which awaits the wire `knn-search`)
-   to the SYNCHRONOUS section render (`seon.agent.ctx.relevant/relevant-source-section`,
+   to the SYNCHRONOUS section render (`seon.agent.ctx.relevant/relevant-source-block`,
    read by the value-returning `seon.agent.ctx/assemble-context`).
 
    WHY ALS, not a `^:dynamic` Var or an atom: the pod runs CONCURRENT agents in
@@ -20,7 +20,7 @@
      ─────────────────                         ───────────────────────
      hits = await (embed/search-pull …)
      (with-hits hits #(render-prompt id)) ───► (current-hits) → hits vector
-                                               relevant-source-section renders
+                                               relevant-source-block renders
 
    The require of `node:async_hooks` is top-level so a pod missing it fails
    loudly at ns load, not silently at first render."
@@ -34,7 +34,7 @@
 (defn current-hits
   "The hits vector stashed by the active `with-hits` scope, or nil outside any
    scope (the default-OFF path — no prefetch ran, nothing called `with-hits`).
-   `seon.agent.ctx.relevant/relevant-source-section` reads this synchronously."
+   `seon.agent.ctx.relevant/relevant-source-block` reads this synchronously."
   {:malli/schema [:=> [:cat] :any]}
   []
   (let [store (.getStore retrieval-als)]

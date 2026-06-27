@@ -135,8 +135,8 @@
     ;; Work items (user→agent asks + agent notes-to-self) — required so
     ;; its register! calls run before the boot install of :seon.agent.todo/*.
     [seon.agent.todo]
-    ;; The per-section ctx namespaces (ctx-sections-split-2026-06-18):
-    ;; each owns one section fn (+ html twin) that core-default-ctx
+    ;; The per-block ctx namespaces (ctx-sections-split-2026-06-18):
+    ;; each owns one block fn (+ html twin) that default-seed-blocks
     ;; wires by SYMBOL — required here so the build includes them and
     ;; their munged symbols resolve via seon.eval/lookup-value at
     ;; render time (no require cycle: the section nses require seon.agent.ctx
@@ -495,7 +495,7 @@
    :my.kb.shared/at
    ;; (No identity attrs — the agent's identity is read LIVE from
    ;; SOUL.md / AGENTS.md every turn as file-sections, never stored. See
-   ;; seon.agent.ctx/file-section.)
+   ;; seon.agent.ctx/file-block.)
 
    ;; --- Test (Phase 2 — test capture as data) ---
    :seon.test/sym
@@ -2020,7 +2020,7 @@
    two can never drift again (the gym hand-mirrored this sequence and
    drifted twice). The agent's identity is NOT seeded — SOUL.md /
    AGENTS.md are read LIVE as context sections every render
-   (`seon.agent.ctx/file-section`), so gym and live prompts get the same
+   (`seon.agent.ctx/file-block`), so gym and live prompts get the same
    identity with no seed step.
 
    Steps, in boot order, under ONE `{:seon.db/origin :core-seed}`
@@ -2069,7 +2069,7 @@
                                 :seon.db/tx-data (seed-core!)})))
               ;; No soul seed: the agent's identity is read LIVE from
               ;; SOUL.md / AGENTS.md as context sections every render
-              ;; (seon.agent.ctx/file-section), never seeded into the store.
+              ;; (seon.agent.ctx/file-block), never seeded into the store.
               (check! :core-index
                       (await (db/transact!
                                {:seon.db/conn conn

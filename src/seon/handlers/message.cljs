@@ -7,7 +7,7 @@
      :seon.render/ai   'seon.handlers.message/render-ai
      :seon.render/html 'seon.handlers.message/render-html
 
-   The transcript section's html twin (`seon.agent.ctx/transcript-section-html`)
+   The transcript section's html twin (`seon.agent.ctx/transcript-block-html`)
    resolves these per-message symbols (via `seon.render/render-entity-html`
    / `render-entity-ai`) to render the agent's messages as right-pane cards.
 

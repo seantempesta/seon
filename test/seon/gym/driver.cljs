@@ -1491,7 +1491,7 @@
                   primary     (or (get agents :a) (second (first agents)))
                   transcript  (->> (sort-by key agents)
                                    (map (fn [[_ aid]]
-                                          (agent/transcript-section
+                                          (agent/transcript-block
                                             {:seon.db/db    dbv
                                              :seon.agent/id aid})))
                                    (str/join "\n"))

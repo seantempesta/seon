@@ -1,13 +1,13 @@
 (ns seon.agent.ctx.warnings
   "The `:warnings` context section — current problems rendered as a
    single-`;` `WARNINGS` comment-block via the `seon.warn` check registry.
-   Symbol-wired into the composer (`seon.agent.ctx/core-default-ctx`) as
-   `'seon.agent.ctx.warnings/warnings-section`."
+   Symbol-wired into the composer (`seon.agent.ctx/default-seed-blocks`) as
+   `'seon.agent.ctx.warnings/warnings-block`."
   (:require
     [seon.agent.ctx :as ctx]
     [seon.warn :as warn]))
 
-(defn warnings-section
+(defn warnings-block
   "Current problems as a single-`;` `WARNINGS` comment-block (one
    explanation + fix example per kind, then affected locations), or empty
    when clean — derived from live state, never stored, so a warning
