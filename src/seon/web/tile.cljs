@@ -363,7 +363,11 @@
     [:span {:class "inline-flex items-center gap-1 text-2xs text-text-500 font-mono whitespace-nowrap shrink-0"
             :title "deeper than the bounded view — drill the live result/<id> var"}
      [:span {:class "text-text-600"} (str o "…" (when c (str c " " unit)) cl)]
-     [:span {:class "text-text-700"} "▸ deeper"]]))
+     ;; `↘` (descend-into), NOT the disclosure caret's `▸` — this marks a node
+     ;; PRUNED at the sample bound (deeper data not in the tree; drill it via
+     ;; result/<id>, and via R's path /call once it lands), distinct at a glance
+     ;; from a merely-collapsed `▸` container the human CAN expand in place.
+     [:span {:class "text-text-700"} "↘ deeper"]]))
 
 (defn- container-details
   "A collapsible container row. The `label` (key / index span, nil at the root)
