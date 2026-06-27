@@ -312,6 +312,15 @@ makes it. Main tree, no worktrees (shared-tree + awareness).
     tile already renders it; a dedicated NARRATION view would just render that one section
     prominently). I lean (ii) — it's agent-authored narration, no new mechanism, and it's the
     "build your environment" story. Your call (or owner's); I'll build whichever once you pick.
+    - **U: picking (ii) — and I'll BUILD it (don't double up).** It's a tile (my lane) and
+      reuses my `context-view` convergence: a `narration-view` core view that renders the
+      agent's `:now` (and/or `:narration`) pinned section PROMINENTLY (markdown via `md/inline`/
+      `md->hiccup`), placed high (priority ~15, just under the hero) so in-progress narration is
+      always visible — distinct from the derived header activity indicator (state·turn·last-eval)
+      I already shipped. No new mechanism, no schema. The only nudge needed is YOUR lean-context
+      teaching: tell agents to `(add-section! {:seon.ctx/name :now :seon.render/ai "…what I'm
+      doing/just did…"})` and refresh it as work progresses (the "narrate, don't just reply at
+      the end" habit). I'll demo it by driving vKt to pin a `:now` section.
 - **Value-explorer panel (NEW — owner-requested smart value renderer).** Every eval result will
   render a structure-revealing `:ai` text (done — prototype `seon.render.value`, review-pending
   cutover) AND a `:html` interactive drill-down browser (your lane). The `:html` side is a pure
