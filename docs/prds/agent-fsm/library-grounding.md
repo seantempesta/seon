@@ -166,6 +166,57 @@ Read: `src/seon/render/sci.cljs:335-430` (`invoke-bounded`), `:92`
 - The agent ns env is reconstituted from `:seon.fn/source`/`:seon.ns/source` rows
   each call — **code-as-data: the runtime IS the database**.
 
+## The wire boundary — the CAS fence executes AT the writer ✓ (critical)
+
+Read: `src/seon/db.cljs:399` (`cas-assert`) + `:422` (`transact!`),
+`src/seon/store/wire.cljs:12-21` (the forwarder), `src/seon/server/wire.clj`
+(the JVM writer), `src/seon/db/internal.cljs:1294-1311` (the wire report).
+
+- The pod has datahike-cljs but its WRITER is a `:seon-wire` PWriter: `d/transact!`
+  forwards the **raw tx-data** (the `:db.fn/cas` op included — pure data) over the
+  UDS to `seon.server.wire`, which runs `d/transact` against the **authoritative**
+  JVM conn (client.cljs:517 "the SOLE writer"). So **`compare-and-swap` runs at the
+  single writer against total-ordered state, NOT the pod's replica** — the fence is
+  sound across the wire. A CAS failure returns as a `{::db/ok? false …}` value.
+- **Use `db/cas-assert`, do NOT hand-write the CAS vector.** It builds the
+  no-op fence as data: `(db/cas-assert [:seon.agent/id id] :seon.agent/run
+  [:seon.agent.run/id run-id])` → `[:db.fn/cas … V V]`, leading the work-tx
+  (db.cljs:399-420). This is the canonical fence; the docs' `[run R]` was shorthand.
+- The wake `listen!` is PROVEN by current operation: after a wire commit the pod
+  re-derefs and fires native `d/listen` listeners with a synthesized tx-report
+  (store.wire.cljs:20-21); `install-wake-trigger!` already runs in the live pod.
+
+⚠ **PRE-PHASE-5 VERIFICATION GATE — the open race.** Opening a run is ONE tx:
+`[{run-create-map} (cas-assert-nil→[:seon.agent.run/id R])]`. The CAS's NV is a
+**lookup-ref to a run created earlier in the SAME tx**. A CAS NV cannot be a tempid
+string (`entid-strict` resolves only eids / lookup-refs / `:db/ident`, utils.cljc:109),
+so the lookup-ref is the only option — and db.cljs:488-490 warns "lookup-refs do
+NOT resolve against not-yet-committed entities" (that warning is about entity-map
+ref SLOTS; an explicit `:db.fn/cas` op runs against the running in-tx db-after, so
+it SHOULD resolve — transaction.cljc:1138-1140). These two facts are in tension.
+**Verify empirically at the wire-server REPL before building Phase 5** that
+`[{:seon.agent.run/id R …} [:db.fn/cas [:seon.agent/id id] :seon.agent/run nil
+[:seon.agent.run/id R]]]` commits and sets the pointer. If it does NOT resolve, the
+open-race pattern needs a different shape (e.g. a `:db.fn/call` op, or a writer-side
+tx fn). This is the #1 correctness unknown.
+
+## Instrumentation — write `:malli/schema` normally; it WORKS ✓
+
+Read: `src/seon/instrument.cljc:109-161` (`collect-registrations` + `collect!`).
+
+- `collect!` is a compile-time MACRO: it walks every first-party CLJS ns via the
+  analyzer, reads each public def's `:meta → :malli/schema`, and expands to
+  `register-target!` calls. So **a `:malli/schema` on a public fn IS collected and
+  instrumented at every rebuild** — the old "analyzer strips fn-meta" worry is
+  handled by reading at compile time.
+- What the analyzer DOES strip is custom metadata MARKERS — so **opt-out is a
+  FQ-symbol set `seon.instrument/skip-syms`, never a per-fn marker** (db.cljs:499).
+- `^:async` fns: the `:malli/schema` describes the RESOLVED value; the runtime
+  routes them to an **await-then-validate** wrapper (simple fns get input+output;
+  variadic/multi-arity get input+arity). So an `^:async` fn returning a Promise of
+  `::transact-response` is schema'd as `… ::transact-response` (db.cljs:501-506).
+- `SEON_INSTRUMENT` is the kill-switch (default ON).
+
 ## reitit — routing-as-data (Phase 5 schema design)
 
 Read: `reference-code/reitit/modules/reitit-core/src/reitit/trie.cljc:60`
@@ -221,8 +272,15 @@ Concrete examples (file:line) of the patterns to imitate:
 
 1. ⚠ agent-runtime.md:115 — fence OV/NV `[run R]` → `[:seon.agent.run/id R]`
    (lookup-ref), since `:seon.agent/run` is a ref.
-2. ⚠ Phase 5 — open-race tx must be `[create-run, cas]` (CAS sees the running
-   in-tx db; `entid-strict` raises on a missing run).
+2. ⚠ Phase 5 **VERIFICATION GATE** — the open-race tx `[create-run, cas-nil→run]`
+   relies on a same-tx CAS lookup-ref resolving at the WIRE-SERVER. In tension with
+   db.cljs:488-490; verify empirically at the REPL before building Phase 5.
+2a. ✓ Build the fence with `db/cas-assert` (db.cljs:399), never a hand-written
+   `:db.fn/cas` vector. The CAS executes at the SOLE writer, so the fence is sound
+   across the wire (store.wire.cljs:12-21).
+2b. ✓ Instrumentation: write `:malli/schema` normally (collected at compile time,
+   instrument.cljc:109); opt out via `seon.instrument/skip-syms` (FQ-symbol set),
+   NOT a metadata marker; `^:async` fns are schema'd on the RESOLVED value.
 3. ✓ Make explicit in data-model: `register!` ≠ datahike-bridge; in-memory `:map`
    value shapes (the `:seon/error` family, `:seon.warn/check-response`,
    `:seon.derive/status`) never bridge — only transacted attrs do.
