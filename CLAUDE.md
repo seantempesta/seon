@@ -323,6 +323,14 @@ design: `docs/prds/embeddings/vertex-usage-reference-2026-06-25.md`.
 
 In the JVM app, all cross-boundary calls — namespace function calls, database writes, REPL eval — route through `topology/request!` (core.async.flow): register promise → inject → step-fn → reply-router → deliver promise. See `docs/prds/unified-flow/design.md`. The **pod is core.async-free** — it uses native CLJS `^:async`/`await` instead.
 
+### CLJS `^:async`/`await` (pod eval path)
+
+New CLJS surface that keeps tripping people — read the source before changing it: `docs/prds/agent-fsm/research/cljs-async-await-2026-06-28.md` + `reference-code/clojurescript/` (the `await` macro + `cljs/js.cljs` self-host).
+
+- **Await only inside a `^:async` fn — never a bare top-level `(await x)`.** Self-host (the pod's bootstrap compiler that evals agent forms) is conditional: a `^:async` fn with an internal `(await …)` works (returns a native `js/Promise`); a top-level `(await x)` throws "await can only be used in async contexts" (the macro asserts `(:async &env)`, false at top level). Resolve a stashed Promise by **re-reference**, not `await`.
+- **Agents get data, not Promises.** `seon.eval/maybe-await-value` auto-awaits a returned Promise, so quick `^:async` verbs (`db/transact!`, `todo/add!`) read as synchronous; a long/timed-out Promise lands in `result/<id>` and resolves on re-reference.
+- **`async-fn?` (ctor name == `"AsyncFunction"`) mis-detects an already-instrumented malli wrapper** — a plain `Function` that still returns a Promise — routing it through the SYNC output validator. This is why instrumentation runs ONCE per process.
+
 ---
 
 ## Multi-Agent Git Safety (CRITICAL)
