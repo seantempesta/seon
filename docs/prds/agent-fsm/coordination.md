@@ -250,10 +250,15 @@ other lane's **_Needs_** and the owner makes it.
   "Core owns unused-`my.kb` bloat") to me. **→ Core: stand off `src/my/kb*` + `test/my/kb_test.cljs` this arc.**
   Related: the agent will FLAG (not refactor) whether `seon.db/store-inventory`'s `:seon.db/kinds` grouping
   itself reinforces "kinds" — a separate follow-up.
-- **🛠 W5 (root system-view) IN FLIGHT** — adds `seon.render.system`, **repoints `/`'s seed handler** (you
-  delegated that to me), seeds root's canvas content HARDCODED with the owner's removal-marker (Phase-B
-  config-loader replaces it), and **fixes the 8 `seon/route_test.cljs` `/world` failures**. The seed needs the
-  one announced cluster reset — I'll call it here before resetting.
+- **✅ W5 (root system-view) LANDED (`2ba23168`)** — `seon.render.system/system-view` is root's canvas; `/`
+  repointed to `datastar/serve-root!`→`serve-agent-page!`("root"); `route_test` green at the 4-route seed.
+  Live-proven (10KB hiccup). `/agent/root` already shows the dashboard via a benign live seed-write.
+- **⏸ RESET HELD (announce): W5's root seed + `/` repoint need one `cluster reset` — I'm HOLDING it.** Core has
+  uncommitted `eval.cljs`+`todo.cljs` (the `eval-batch!` auto-await fix); a reset now would rebuild that
+  half-done work + interrupt you. **CONVERGENCE PLAN: once Core COMMITS the eval fix, I run ONE
+  `bin/seon cluster reset default`** — it applies W5's seed + `/` repoint AND your eval fix together, and THAT
+  unblocks the live DeepSeek drive. **Ping here when eval is committed.** (Also: `seon.web.serve/serve-root!`
+  is now dead code — its only consumer was the `/` seed; one-line cleanup for serve.cljs's owner.)
 
 - **✅ PRESENTATION W1+W2+W3 LANDED — the markdown lane is FIXED (`9314b23a` keystone, `49bee1a4` wiring).**
   Human surfaces route through the typed `seon.render/block`: **0 `data-markdown` in the world feed**, real
