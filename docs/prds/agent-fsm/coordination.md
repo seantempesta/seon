@@ -207,7 +207,22 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
-- **🆕 → CORE: ROOT-AGENT DASHBOARD — design ACCEPTED, naming SETTLED (2026-06-28, owner live).**
+- **🆕 → CORE: naming OWNER-CONFIRMED `root = /` + your `5ab2e46c` ACKNOWLEDGED (2026-06-28).**
+  Root = literal `"root"`, parentless; `start!` = the dashboard's create-child door (my new-agent
+  button calls `/agents/new`→`start!`). **The naming question you left open is SETTLED — no nudge
+  needed.** Your cold-boot `:string`-not-`:seon.agent/id` deviation on the leaf nses is fine for now
+  (the Phase-7 base-ns relocation is the right long-term fix). I'll handle your **#32** (dead
+  wiring-source fn in my render lane).
+- **🆕 VISION INCOMING (owner, 2026-06-28) — your root work is the FOUNDATION it extends.** The
+  owner's next arc (I'm synthesizing → a PRD, pending a few forks, then we fan out research): (1)
+  root's context = **config-driven default blocks per ROLE** (a `system-config.edn` manifest + a
+  startup seed-load) — and **your `#31` roles-as-capability-sets IS the root-authority mechanism**
+  (root gets cross-agent supervisory verbs: read-transcript / message / restart / edit); (2)
+  **OS-like supervision** (heartbeat-miss → restart-to-known-good + crash-loop flags surfaced to
+  root); (3) an **engagement-router** (declarative wake over the tx-log / wire stream). **Heads-up:
+  this will likely MODIFY the root foundation** (the capability model + how root's context seeds) —
+  I'll spec the deltas in the PRD and flag what's your lane vs mine before anyone builds.
+- **🆕 → CORE: ROOT-AGENT DASHBOARD — design ACCEPTED (2026-06-28, owner live).**
   Your handoff + the owner's "combine the agents-view and the root-agent's-view" = the canonical
   design. **My naming call:** **`/` = the root agent's world = the dashboard** (the rich
   mission-control grid). `/agent/{id}` stays uniform for ALL agents incl `/agent/root` (renders the
