@@ -19,16 +19,20 @@ tags: [prd, agent, research, web]
 - **Decided:** run **BF16 on an A100-80GB** via **runpod-flash** (serverless
   Python `@Endpoint`), using HF `transformers` **directly** (PyTorch) because the
   `accept_canvas` hook — the whole point — lives in the transformers decode loop.
-- **Status:** the harness works (deploy, async run/poll, A100 spins up, model
-  CODE runs, `transformers` loads) — but we are **blocked on the Flash serverless
-  worker environment**: its base image ships a **broken/mismatched torch
-  2.9.1**, and Flash's **deploy-time dependency installs are flaky**. We have
-  **not yet produced real DiffusionGemma output.**
-- **Immediate next action:** read the research agent's grounding doc
-  `research/runpod-flash-grounding-2026-06-28.md` (it vendored the Flash/RunPod
-  SDK source into `reference-code/` and worked out the env-fix recipe), then set
-  up a **NetworkVolume** to cache a **clean torch+transformers stack + the 50 GB
-  model**, and get the first generate. Full step list in §"Next steps".
+- **Status: PREP COMPLETE — one gate left, the image push.** The env-fix recipe is
+  fully implemented and validated (custom cu128 base image push-ready; unified
+  `gpu_worker.py` = probe + generate + full introspect in ONE cold load, C1/C3/C4
+  resolved; NetworkVolume wired). **Capabilities #1–#3 are prepped** (worker stubs +
+  ready-to-run experiment plans + the measured 3-tier oracle that feeds them); **#4
+  (live human feedback) is the next prep item, not yet started.** The first-light
+  runbook is the ordered execute sequence; the capstone is the synthesis +
+  GO/NO-GO. The **ONLY** remaining blocker: the image push completing → `flash
+  deploy` → first real DiffusionGemma output (the milestone not yet hit).
+- **Immediate next action:** pick the registry (the ONE open decision below), run
+  `flash-worker/build-image.sh` to push, `export FLASH_GPU_IMAGE`, `flash deploy`,
+  then execute [[first-light-runbook-2026-06-28]] top to bottom. The thesis
+  GO/NO-GO is mapped against the T0–T5 ladder in
+  [[thesis-capstone-2026-06-28]].
 
 ## The thesis (the idea)
 
@@ -176,8 +180,19 @@ path for `accept_canvas`.)
 
 ## Next steps (ordered)
 
-**PREPPED (2026-06-28) — push-ready, blocked on ONE owner decision.** The recipe
-is implemented in `tmp/flash-diffgemma/` (snapshot in `flash-worker/`):
+**PREP COMPLETE (2026-06-28) — image push-ready+validated, all of #1–#3 prepped,
+unified worker + runbook + capstone done. The ONLY remaining gate is the push →
+deploy.** Beyond the image (below), this session also landed: the **measured
+3-tier oracle** ([[research/parser-as-generation-oracle-2026-06-28]] — 92.7%
+parser detection, 100% safe-class recovery, 62.5% free / 93.5% combined eval
+catch, both strong-model A/B nulls), the **three capability experiment plans +
+worker stubs** (#1 infill, #2 eval-renoise, #3 retrieval), the **unified
+`gpu_worker.py`** (probe + generate + full introspect, C1/C3/C4 resolved), the
+ordered **[[first-light-runbook-2026-06-28]]**, and the synthesis +
+GO/NO-GO **[[thesis-capstone-2026-06-28]]**. Still unprepped: **capability #4
+(live human feedback)** — no plan/stub yet.
+
+The recipe is implemented in `tmp/flash-diffgemma/` (snapshot in `flash-worker/`):
 
 - `Dockerfile` — `FROM runpod/flash:py3.12-latest` + pristine cu128 triple
   (**torch 2.9.0 / torchvision 0.24.0 / torchaudio 2.9.0 + transformers 5.11.0**,
@@ -211,6 +226,15 @@ Pick one, set `REGISTRY`, run `build-image.sh`, then the remaining ordered steps
 
 ## Pointers
 
+- [[thesis-capstone-2026-06-28]] — **the synthesis**: measured oracle + how it
+  feeds the 4 capabilities + the first-light GO/NO-GO against T0–T5 + remaining gaps.
+- [[first-light-runbook-2026-06-28]] — the ordered execute sequence (deploy → 3
+  caps) + the C1–C4 cross-doc conflict reconciliation.
+- [[research/parser-as-generation-oracle-2026-06-28]] — the measured 3-tier
+  detection oracle (parser → eval → retrieval) the capabilities feed on.
+- [[research/infill-experiment-plan-2026-06-28]] — capability #1 (infill / U1–U4).
+- [[research/eval-renoise-experiment-plan-2026-06-28]] — capability #2 (re-noise / V1–V3).
+- [[research/retrieval-denoising-experiment-plan-2026-06-28]] — capability #3 (RAG-in-loop / W1–W3).
 - [[infra-flash-runpod]] — full infra + the complete debugging log (12 issues).
 - `docs/prds/agent-fsm/research/diffusion-llm-live-context-2026-06-27.md` — papers
   + the 4 ideas assessed + the `accept_canvas` mechanism.
