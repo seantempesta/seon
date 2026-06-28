@@ -6,6 +6,13 @@ tags: [research, agent, web, database]
 
 # Diffusion dynamic-context — thesis capstone + first-light go/no-go
 
+> **CORRECTION (post-synthesis):** capability **#4 (live human feedback) IS now
+> prepped** — `[[research/live-feedback-experiment-plan-2026-06-28]]` (committed
+> after this synthesis was written). All FOUR capability plans + the unified
+> worker + the runbook now exist; the "#4 pending / unprepped" notes below are a
+> snapshot-timing artifact. #4's deployable architecture is Route A (per-step
+> round-trip — Flash serverless has no input-into-a-running-job surface).
+
 > The one-page synthesis of this session's work: the measured oracle, how it
 > feeds the four capabilities, the first-light GO/NO-GO against the T0–T5 ladder,
 > and the gaps prep CANNOT close until real DiffusionGemma output exists. This is

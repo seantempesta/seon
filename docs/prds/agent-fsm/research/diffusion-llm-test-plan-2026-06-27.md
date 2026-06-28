@@ -34,6 +34,17 @@ on the rented box once the loop runs. Same `accept_canvas`-shaped seam both side
 
 ## Hardware: rent a 5090, use the official NVFP4 checkpoint
 
+> **SUPERSEDED (2026-06-28) — hardware only; the T0–T5 ladder below is still
+> current.** This section's "5090 / NVFP4 / A100 NOT needed" guidance is
+> outdated. The settled decision is **A100-80GB BF16** (see
+> [[../../diffusion-dynamic-context/index]] §GPU + cost and the cost-comparison
+> doc): the thesis hinges on the model's UNPERTURBED entropy/commit dynamics, so
+> the confound-free baseline MUST be BF16 — quantization (NVFP4) perturbs exactly
+> what we measure. (≥100k context also needs Flash Attention, disabled on the
+> 5090's Blackwell SM120.) NVFP4/5090 is a *later* speed-sweep arm measured
+> against the BF16 baseline, NOT the bring-up path. Do NOT rent a 5090 for first
+> light — the validated worker image targets A100-80 BF16.
+
 The model is 25.2B params and it's MoE — **all experts stay resident**, so VRAM
 tracks total params, not the 3.8B active. BF16 ≈ 50 GB (needs H100). But there is
 an **official 4-bit checkpoint** that settles this:
