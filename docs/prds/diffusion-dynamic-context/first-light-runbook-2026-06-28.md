@@ -23,11 +23,12 @@ keys (`RUNPOD_API_KEY`, `HF_TOKEN`) are in `.env` — `source .env` first. The f
 
 ## STOP — read the cross-doc conflicts first (§4)
 
-Four consistency findings reconcile the three prep docs. **Two change what you do
-on the very first warm window** (C1 — one endpoint vs three cold loads; C4 — the
-mask-id single point of failure). Read §4 before step 1; a conflict caught on
-paper is free, the same conflict caught on a live A100 is a wasted 50 GB cold
-start.
+Four consistency findings reconcile the three prep docs. **Three are now RESOLVED
+in code** (C1 — one unified `introspect` on one endpoint, one cold load; C3 — the
+ONE canonical offset_map in `diffgemma_common`; C4 — defensive mask-id
+resolution). C2 (encoder vs prefix-LM) stays a watch on W1. Read §4 before step 1;
+a conflict caught on paper is free, the same conflict caught on a live A100 is a
+wasted 50 GB cold start.
 
 ## 1. Deploy
 
@@ -69,12 +70,13 @@ minutes-to-download — but still a real per-endpoint load). `idle_timeout=600`
 keeps a worker warm 10 min; do every probe below inside that window or pay the
 load again.
 
-**C1 applies here (see §4):** the three introspects live in three *different*
-endpoints → three separate cold loads. The U/V/W probes are **pure reflection
-(`inspect`, no `generate`)**. For first light, run the consolidated introspect on
-**one** endpoint (the prescribed action in §4-C1) so the 50 GB load happens once
-and resolves U1–U4 + V1–V3 + W1–W3 together. The per-endpoint introspects below
-are the fallback if you keep them separate.
+**C1 is now RESOLVED in code (see §4).** The three per-endpoint introspects are
+folded into ONE unified `introspect` mode on the proven `diffgemma` endpoint
+(`gpu_worker.py`), so a single deploy gives probe + generate + the FULL introspect
+(U1–U4 + V1–V3 + W1–W3) in one ~50 GB cold load. The U/V/W probes are **pure
+reflection (`inspect`/decode, no `generate`)**, so they all run in the same warm
+window against the one cached model. The per-endpoint introspects in the three
+capability stubs still exist as fallbacks, but first light uses the unified one.
 
 Run in this order against the proven `diffgemma` endpoint (`export
 DIFFGEMMA_EP=<diffgemma id>`):
@@ -99,10 +101,18 @@ DIFFGEMMA_EP=<diffgemma id>`):
    Success = a coherent `(defn mean …)` in the ```clojure block, a sane
    `tok_per_s`, no `gen_error`. This is the first real DiffusionGemma output.
 
-3. **`introspect`** — the first-deploy oracle. Resolve the SHARED unknowns the
-   three prep docs all depend on. The probes are reflection only; collect into
-   ONE call where they overlap (§4-C1). What each probe must read off the live
-   model:
+3. **`introspect`** — the first-deploy oracle, now ONE consolidated call on the
+   same warm `diffgemma` worker (C1):
+
+   ```bash
+   .venv/bin/python client.py '{"mode":"introspect"}'
+   ```
+
+   It returns one structured dict: `mask_resolution` (C4 — the resolved mask id +
+   its source, or a loud `mask_resolution_fatal` if undeterminable), then nested
+   `U` (U1–U4 infill seams), `V` (V1–V3 re-noise, incl. the LIVE offset-map
+   fidelity demo), and `W` (W1–W3 encoder/cross-attn inject). What each probe
+   reads off the live model:
 
    - **U1 — canvas seeding** (J): `model.generate` param list — look for a
      canvas / `decoder_input_ids` / `infill_mask` / `prefix_ids`+`suffix_ids`
@@ -150,7 +160,8 @@ DIFFGEMMA_EP=<diffgemma id>`):
      (round-trip)? Checks whether `accept_canvas`/the decode loop can reach +
      mutate the encoder `past_key_values`.
 
-   Per-endpoint fallback commands (three cold loads):
+   Per-endpoint fallback commands (three cold loads — only if you deliberately
+   keep the stubs separate; the unified `introspect` above supersedes these):
 
    ```bash
    export DIFFGEMMA_EP=<infill id>;    .venv/bin/python gpu_worker_infill.py introspect     # U1–U4
@@ -285,28 +296,33 @@ first light:
   strongest agreement in the set. (#1 is one-shot, no round-trip — also
   consistent, just simpler.)
 
-Four findings still need a decision or a watch:
+C1, C3, and C4 are now RESOLVED in code (the unified `gpu_worker.py` worker +
+`diffgemma_common.py`); C2 remains a watch:
 
-- **C1 (operational — changes the first warm window). Three introspects live in
-  three *separate* endpoints → three separate ~50 GB cold loads.** The
-  "do-everything-in-one-warm-window" economy only holds *within* one endpoint; the
-  shared NetworkVolume makes the model *files* cheap to mount but each endpoint
-  still loads 50 GB into its own A100 on first call. Since U1–U4 + V1–V3 + W1–W3
-  are **pure `inspect` reflection (no generate)**, the prescribed first-light move
-  is to run a **single consolidated introspect on ONE endpoint** (temporarily fold
-  the V/W reflection probes into, e.g., `diffgemma`'s or `diffgemma-infill`'s
-  introspect) so the expensive load happens once — exactly the "ONE introspect
-  call" the milestone wants. Keeping them separate = pay the cold load three
-  times. *(Doc-only flags it; the fold is a one-line code move at wire time.)*
+- **C1 (RESOLVED in code). The three introspects are folded into ONE unified
+  `introspect` mode on the proven `diffgemma` endpoint (`gpu_worker.py`).** The
+  "do-everything-in-one-warm-window" economy only holds *within* one endpoint (the
+  shared NetworkVolume makes the model *files* cheap to mount, but each endpoint
+  still loads 50 GB into its own A100 on first call). Since U1–U4 + V1–V3 + W1–W3
+  are **pure `inspect`/decode reflection (no generate)**, they now all run against
+  the one cached model the generate path already loaded — probe + generate + the
+  full introspect in ONE ~50 GB cold load. The probe + generate path in
+  `gpu_worker.py` is unchanged byte-for-byte (verified by diff); introspect is an
+  added branch that reuses `_CACHE`. The per-endpoint introspects remain in the
+  capability stubs as fallbacks.
 
-- **C4 (shared single point of failure — resolve U4 before anything else). All
-  three stubs read `mask_id = getattr(tkz, "mask_token_id", None)`.** U4 warns the
-  mask may be a **reserved id, not `mask_token_id`**. If `mask_token_id` is `None`,
-  **all three break silently**: `build_offset_map`/`_offset_map` would treat *no*
-  position as a hole (every token gets a char range), and the clamp/re-mask would
-  write `None` into the canvas. Confirm the real mask id in the introspect pass and
-  patch the three `getattr` defaults together. This is load-bearing for offset_map,
-  the clamp, AND the re-mask.
+- **C4 (RESOLVED in code). Mask-id resolution is now defensive
+  (`diffgemma_common.resolve_mask_id`).** U4 warns the mask may be a **reserved id,
+  not `mask_token_id`**. The old `mask_id = getattr(tkz, "mask_token_id", None)` in
+  all three stubs would, on `None`, make `build_offset_map` treat *no* position as
+  a hole (every token gets a char range) and the clamp/re-mask write `None` into
+  the canvas — silent total breakage. `resolve_mask_id` checks, in order:
+  `tokenizer.mask_token_id` → `tokenizer.mask_token` → `special_tokens_map` → a
+  `<mask>`-like added token → `model.config.{mask_token_id,mask_index,mask_id}`,
+  and RETURNS the source. The unified introspect reports `mask_resolution` and
+  raises a loud `mask_resolution_fatal` (and SKIPS the offset-map demo) if the id
+  cannot be determined, rather than proceeding with `None`. All four workers now
+  call it; the unsafe `getattr` defaults are gone.
 
 - **C2 (paper-vs-code framing — watch W1). #3's injection assumes a *separate
   encoder* with a cross-attended KV cache.** The index/J/L describe "an AR encoder
@@ -320,17 +336,18 @@ Four findings still need a decision or a watch:
   regardless**, so injection is still provable. Flagged so a False `has_encoder_attr`
   reads as "reframe," not "blocked."
 
-- **C3 (code smell — duplicated offset_map). The char↔token offset_map is written
-  twice:** L's `build_offset_map` (`gpu_worker_renoise.py`,
+- **C3 (RESOLVED in code). The duplicated offset_map is now ONE canonical
+  function (`diffgemma_common.build_offset_map`).** It was written twice: L's
+  `build_offset_map` (`gpu_worker_renoise.py`,
   `tkz.decode([tid], skip_special_tokens=False)`) and #3's `_offset_map`
-  (`gpu_worker_retrieval.py`, `tkz.decode([tid])` — relies on the HF default).
-  Same math, two copies; J builds none (it works in canvas positions directly).
-  Per the "don't be a dumbass / register-once" rule this should be **one** shared
-  function, and once V2 picks the faithful decode method (joint decode +
-  fast-tokenizer offsets), **both** call sites must adopt it or they will drift on
-  BPE-boundary artifacts. Consolidate at wire time; until then, treat L's
-  `build_offset_map` as canonical (it makes `skip_special_tokens` explicit and owns
-  the V2 fidelity question).
+  (`gpu_worker_retrieval.py`, `tkz.decode([tid])` — relied on the HF default).
+  Same math, two copies, drifting on the BPE-boundary / byte-fallback artifact; J
+  builds none (it works in canvas positions directly). L's version is canonical
+  (it makes `skip_special_tokens=False` explicit and owns the V2 fidelity
+  question) and now lives in `diffgemma_common` with `span_to_positions`; the
+  unified worker, the renoise stub, and the retrieval stub all import it, and the
+  `_offset_map` duplicate is deleted. When V2 settles the faithful decode method,
+  there is now ONE place to change it.
 
 ## Decision-gate ladder
 
