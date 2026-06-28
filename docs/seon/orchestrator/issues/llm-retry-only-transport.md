@@ -1,10 +1,18 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, agent, ai]
 ---
 # LLM-call retry covers only transport errors, not 429/503/timeout
+
+> RESOLVED — `seon.agent.turn/call-llm!` now retries transient provider
+> errors (transport, HTTP 429, HTTP 5xx) with bounded exponential backoff
+> + jitter, honoring `Retry-After`, via the new reusable `seon.retry`
+> primitive (strategy-as-seq, design ported from the JVM `again` lib).
+> `SEON_AI_MAX_RETRIES` (default 4) caps the count; a per-wait clamp +
+> total-duration ceiling bound latency. 4xx-other-than-429 / refusals /
+> timeouts surface immediately as `:seon.ai/error` values (no throw).
 
 ## Problem
 

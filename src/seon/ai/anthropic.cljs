@@ -272,8 +272,10 @@
      :seon.ai/transport? true}
 
     (instance? (.-APIError Anthropic) e)
-    {:seon.ai/msg    (str "Anthropic HTTP " (.-status e) ": " (error/->message e))
-     :seon.ai/status (.-status e)}
+    (let [ra (ai/error-retry-after-ms e)]
+      (cond-> {:seon.ai/msg    (str "Anthropic HTTP " (.-status e) ": " (error/->message e))
+               :seon.ai/status (.-status e)}
+        ra (assoc :seon.ai/retry-after-ms ra)))
 
     :else
     {:seon.ai/msg (str "Anthropic call failed: " (error/->message e))}))

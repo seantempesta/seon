@@ -487,6 +487,30 @@
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
+(deftest retry-after-header-surfaces-as-ms-on-429
+  ;; A 429 carrying a `Retry-After` (delta-seconds) is mapped to
+  ;; :seon.ai/retry-after-ms (parsed to ms) so the agent loop's backoff
+  ;; can honor the server's directive. Still NON-transport (the retry
+  ;; decision lives in seon.agent.turn/llm-retryable?, on :status).
+  (async done
+    (-> (with-stubbed
+          (fn [_ _]
+            (js/Promise.resolve
+              (js/Response. "rate limited"
+                            #js{:status 429
+                                :headers #js{"content-type"  "application/json"
+                                             "retry-after"   "2"}})))
+          #(openai/complete {:seon.ai/ctx "hi"}))
+        (.then
+          (fn [{:seon.ai/keys [error]}]
+            (is (= 429 (:seon.ai/status error)))
+            (is (= 2000 (:seon.ai/retry-after-ms error))
+                "Retry-After delta-seconds parsed to ms")
+            (is (not (contains? error :seon.ai/transport?))
+                "a 429 is status-shaped, never transport-flagged")))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 ;; ============================================================
 ;; Config-gap guards (no fetch attempted).
 ;; ============================================================

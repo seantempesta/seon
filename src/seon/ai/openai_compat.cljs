@@ -291,8 +291,10 @@
      :seon.ai/transport? true}
 
     (instance? (.-APIError OpenAI) e)
-    {:seon.ai/msg    (str label " HTTP " (.-status e) ": " (error/->message e))
-     :seon.ai/status (.-status e)}
+    (let [ra (ai/error-retry-after-ms e)]
+      (cond-> {:seon.ai/msg    (str label " HTTP " (.-status e) ": " (error/->message e))
+               :seon.ai/status (.-status e)}
+        ra (assoc :seon.ai/retry-after-ms ra)))
 
     :else
     {:seon.ai/msg (str label " call failed: " (error/->message e))}))

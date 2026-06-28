@@ -26,6 +26,8 @@
     [clojure.string :as str]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
+    [seon.config :as config]
+    [seon.retry :as retry]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.relevant :as ctx-relevant]
     [seon.db :as db]
@@ -284,35 +286,75 @@
                                  (:seon.eval/n-fail batch))}
       debug-dir (assoc :seon.agent.turn/debug-dir debug-dir))))
 
-(def llm-transport-retry-backoff-ms
-  "Backoff before the single transport-error LLM retry. Small on purpose: a
-   transient \"fetch failed\" usually heals immediately."
-  2000)
+;; LLM retry tuning. The agent loop is the SOLE retry authority (the
+;; adapters ship `maxRetries 0`); these shape the exponential-backoff
+;; strategy fed to [[seon.retry/with-retry!]]. `SEON_AI_MAX_RETRIES`
+;; (default 4) caps the retry COUNT; the per-wait clamp + total-duration
+;; ceiling bound worst-case latency so a transient blip never hangs the
+;; run loop.
+(def ^:private llm-retry-base-ms      500)
+(def ^:private llm-retry-factor       2)
+(def ^:private llm-retry-jitter       0.5)
+(def ^:private llm-retry-max-delay-ms 20000)
+(def ^:private llm-retry-total-cap-ms 60000)
+(def ^:private llm-retry-default-n    4)
 
-(defn- transport-error?
-  "True when `resp` failed TRANSPORT-shaped (`:seon.ai/transport?` — the
-   provider fetch threw before any HTTP status). HTTP 4xx/5xx, parse
-   failures, and wall-clock timeouts are NOT transport errors."
+(defn- llm-retryable?
+  "True when an LLM `resp` failed with a TRANSIENT provider error worth a
+   bounded retry: a TRANSPORT-shaped fetch throw (`:seon.ai/transport?`),
+   HTTP 429 (rate limit), or any HTTP 5xx (502/503/504 overload/gateway).
+   A non-transient error — HTTP 4xx other than 429 (400/401/403/404 are
+   real, surface them), a refusal, an unparseable body, a config gap — and
+   a wall-clock timeout (already burned its full budget) are NOT retried.
+   A success (no `:seon.ai/error`) is never retried."
   [resp]
-  (true? (get-in resp [:seon.ai/error :seon.ai/transport?])))
+  (let [err    (:seon.ai/error resp)
+        status (:seon.ai/status err)]
+    (boolean
+      (and err
+           (or (true? (:seon.ai/transport? err))
+               (= 429 status)
+               (and (int? status) (<= 500 status 599)))))))
+
+(defn- llm-retry-strategy
+  "The backoff strategy for an LLM provider retry: exponential (base ×2),
+   jittered, per-wait-clamped, capped at `SEON_AI_MAX_RETRIES` retries and
+   a total-duration ceiling."
+  []
+  (-> (retry/multiplicative-strategy llm-retry-base-ms llm-retry-factor)
+      (retry/randomize-strategy llm-retry-jitter)
+      (retry/clamp-delay llm-retry-max-delay-ms)
+      (retry/max-retries (config/env-int "SEON_AI_MAX_RETRIES" llm-retry-default-n))
+      (retry/max-duration llm-retry-total-cap-ms)))
 
 (defn ^:async ^:private call-llm!
-  "Internal — `(llm-fn prompt-text)` with ONE bounded retry on a
-   transport-shaped provider failure. When the retry fires, the resp carries
-   `:seon.agent.turn/llm-retries 1` so the turn record is honest."
+  "Internal — `(llm-fn prompt-text)` with bounded retry-with-backoff on a
+   TRANSIENT provider failure ([[llm-retryable?]]). Delegates the mechanics
+   to [[seon.retry/with-retry!]] (this is the SOLE LLM retry authority —
+   no parallel path). Honors a server `Retry-After`
+   (`:seon.ai/retry-after-ms`, clamped to the per-wait ceiling) over the
+   strategy's delay. On exhaustion the last (error) resp flows through
+   unchanged — the turn surfaces its `:seon.ai/error` as a value, never a
+   throw. When any retry fired, the resp carries `:seon.agent.turn/llm-retries n`
+   so the turn record is honest."
   [id id-of-turn llm-fn prompt-text]
-  (let [resp (await (llm-fn prompt-text))]
-    (if-not (transport-error? resp)
-      resp
-      (do
-        (log id id-of-turn "llm transport error — one retry in"
-             (str llm-transport-retry-backoff-ms "ms — "
-                  (get-in resp [:seon.ai/error :seon.ai/msg])))
-        (await (js/Promise.
-                 (fn [resolve]
-                   (js/setTimeout resolve llm-transport-retry-backoff-ms))))
-        (assoc (await (llm-fn prompt-text))
-               :seon.agent.turn/llm-retries 1)))))
+  (let [{:seon.retry/keys [result retries]}
+        (await
+          (retry/with-retry!
+            {:seon.retry/thunk    (fn [] (llm-fn prompt-text))
+             :seon.retry/strategy (llm-retry-strategy)
+             :seon.retry/retry?   llm-retryable?
+             :seon.retry/override (fn [resp]
+                                    (some-> (get-in resp [:seon.ai/error
+                                                          :seon.ai/retry-after-ms])
+                                            (min llm-retry-max-delay-ms)))
+             :seon.retry/on-retry
+             (fn [{:seon.retry/keys [attempt delay-ms result]}]
+               (log id id-of-turn "llm transient error — retry"
+                    (str attempt " in " delay-ms "ms — "
+                         (get-in result [:seon.ai/error :seon.ai/msg]))))}))]
+    (cond-> result
+      (pos? retries) (assoc :seon.agent.turn/llm-retries retries))))
 
 (defn ^:async ask-and-eval!
   "Body of `open-turn!`. Calls the LLM (via [[call-llm!]]), parses the reply,

@@ -76,6 +76,11 @@
 ;; flagged, it already burned the full timeout budget.
 (schema/register! ::transport? :boolean)
 (schema/register! ::raw-body :string)
+;; The server's `Retry-After` for a 429/503, already PARSED to
+;; milliseconds (delta-seconds or HTTP-date → ms-from-now; never
+;; negative). Present ONLY when the provider sent the header on a
+;; retryable HTTP-status error; the agent turn loop's backoff honors it.
+(schema/register! ::retry-after-ms :int)
 
 ;; Tool/function-calling + extra-request + provider-metadata vocabulary
 ;; (SDK migration, 2026-06-16). These ride third-party-shaped maps: the
@@ -97,11 +102,51 @@
 (schema/register!
   ::error
   [:map
-   [::msg        ::msg]
-   [::status     {:optional true} ::status]
-   [::timeout?   {:optional true} ::timeout?]
-   [::transport? {:optional true} ::transport?]
-   [::raw-body   {:optional true} ::raw-body]])
+   [::msg            ::msg]
+   [::status         {:optional true} ::status]
+   [::timeout?       {:optional true} ::timeout?]
+   [::transport?     {:optional true} ::transport?]
+   [::retry-after-ms {:optional true} ::retry-after-ms]
+   [::raw-body       {:optional true} ::raw-body]])
+
+;; ------------------------------------------------------------
+;; Retry-After parsing — ONE place so both adapters (anthropic /
+;; openai-compat) extract the header identically (no duplicate shape).
+;; ------------------------------------------------------------
+
+(defn parse-retry-after-ms
+  "Parse an HTTP `Retry-After` header value to MILLISECONDS, or nil. The
+   header is either delta-seconds (e.g. \"30\") or an HTTP-date (e.g.
+   \"Wed, 21 Oct 2026 07:28:00 GMT\"); a date resolves to the delay from
+   now (clamped non-negative). Blank/unparseable → nil."
+  {:malli/schema [:=> [:catn [::header [:maybe :string]]] [:maybe :int]]}
+  [header]
+  (when (and (string? header) (not (str/blank? header)))
+    (let [trimmed (str/trim header)
+          secs    (js/Number trimmed)]
+      (if (js/isFinite secs)
+        (max 0 (js/Math.round (* secs 1000)))
+        (let [t (js/Date.parse trimmed)]
+          (when-not (js/isNaN t)
+            (max 0 (- t (js/Date.now)))))))))
+
+(defn- header-get
+  "Read header `k` (case-insensitively) off either a `Headers` instance
+   (`.get`) or a plain header object. nil when absent."
+  [headers k]
+  (when headers
+    (if (fn? (.-get headers))
+      (.get headers k)
+      (or (aget headers k) (aget headers (str/lower-case k))))))
+
+(defn error-retry-after-ms
+  "The `Retry-After` (ms) carried by an SDK APIError's response headers,
+   or nil. Reads the header off the error's `.headers` (a `Headers`
+   instance on the official SDKs) and parses via [[parse-retry-after-ms]].
+   `e` is a third-party SDK error object (`:any` boundary)."
+  {:malli/schema [:=> [:catn [::error-obj :any]] [:maybe :int]]}
+  [e]
+  (parse-retry-after-ms (header-get (some-> e .-headers) "retry-after")))
 
 ;; ============================================================
 ;; The config row — :seon.ai/config singleton (identity ::id "config").
