@@ -157,10 +157,14 @@
           live-tile])
        [:div {:id "world-tiles" :class "flex flex-col gap-3"}
         (when (seq tile-names)
-          ;; EAGER (mapv, not for): a lazy seq would defer a throwing tile until
-          ;; `->string` serialization OUTSIDE this fn's try/catch, so a bad slot
-          ;; would escape the never-throws guard. Realize inside the catch.
-          (mapv #(tile-card ctx %) tile-names))]
+          ;; EAGER but a SEQ (doall+map, NOT mapv): seon.ui.html splices a SEQ
+          ;; child yet treats a VECTOR child as one element (its first slot must
+          ;; be a tag) — a `mapv` of `[:section …]` tiles lands a section in tag
+          ;; position and throws "Invalid tag" at serialization, killing the
+          ;; whole feed. `doall` still realizes every tile INSIDE this try/catch
+          ;; (a throwing slot stays caught); `map` keeps it a seq the serializer
+          ;; flattens.
+          (doall (map #(tile-card ctx %) tile-names)))]
        (when (and (nil? live-tile) (empty? tile-names))
          [:div {:id    "world-empty"
                 :class "text-text-500 text-xs font-mono"}
