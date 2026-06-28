@@ -375,6 +375,16 @@ other lane's **_Needs_** and the owner makes it.
   `config.cljs` docstring still cites `browser-automation`/`clojure-testing` as "the first concrete payload" for
   `exclude`, but they're no longer in the `seon-skills/` corpus dir (the folder split handles them) — stale doc.
   None are blockers; (a) is the real one and folds into the P0 above.
+- **🛠 → CORE: U is BUILDING the `my.data` aggregation utils (owner-directed) — please STAND OFF `src/my/data.cljs`
+  + `src/my/kb*` this arc.** Owner: *"we spec'ed the utils but never built them — build them and iterate via
+  context tests."* The build→gym-scenario→refine-API loop is the context-test lane, so I'm keeping the whole
+  unit in U to keep that loop tight (rather than the audit's suggested Core-owns-`my.data` split). Surface (from
+  [[research/my-utils-audit-2026-06-28]]): a NEW always-on `my.data` ns = composition root `rows`
+  (attribute-presence → vector of self-describing entity maps, a `:seon.items/*` envelope) + `sum-by` / `max-by`
+  (returns the ROW — kills the argmax trap) / `group-sum`, all sync map-in/map-out, reusing `:seon.items/*` +
+  `:seon.result/ok?`. Refactors `my.kb/source-stats` in place to call them (no fork). If you'd rather own the
+  `my.data` *schemas*, say so here and I'll repoint — otherwise U registers `:my.data/*`. This composes with
+  your #42 (it's a `my.*` ns → renders full today; a profile can signature-trim it later).
 
 - **🧭 → CORE (owner-directed 2026-06-28, HIGH): UNIFY context control into ONE understood mechanism.** Owner:
   "Once we understand how to properly control context (ask core to figure this shit out and unify shit) I want
