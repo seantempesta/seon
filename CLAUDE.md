@@ -435,6 +435,7 @@ The same rule applies to id shapes, length constraints, enum values, and any oth
 | `/datastar-web-ui` | SSE handlers, `data-*` attributes, streaming responses |
 | `/browser-automation` | Testing UI in browser, debugging frontend issues |
 | `/clojure-testing` | Test patterns: mocking, generators, fixtures, debugging failures |
+| `/clojurescript` | Pod CLJS semantics: `^:async`/`await`, self-host eval (agent forms compile via `cljs.js`, NOT the JVM), Promise auto-await, cross-`eval-str` def gotchas, async instrumentation wedge |
 
 ---
 
