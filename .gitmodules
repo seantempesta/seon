@@ -239,3 +239,6 @@
 [submodule "reference-code/reitit"]
 	path = reference-code/reitit
 	url = https://github.com/metosin/reitit.git
+[submodule "reference-code/bd3lms"]
+	path = reference-code/bd3lms
+	url = https://github.com/kuleshov-group/bd3lms.git

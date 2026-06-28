@@ -21,6 +21,7 @@
     [seon.eval :as eval]
     [seon.render :as render]
     [seon.render.default :as default]
+    [seon.render.live-tile :as live-tile]
     [seon.schema :as schema]
     [seon.ui.html :as html]))
 
@@ -332,22 +333,72 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest slot-missing-block-surfaces-error-never-throws
+(defn- with-blocks-conn
+  "Fresh conn seeded with the :seon.agent kind schema, one agent row, and the
+   given :seon.agent/ctx `blocks`. Calls `body` with the conn bound; Promise.
+   The flexible twin of [[with-block-conn]] (which fixes one literal-hiccup
+   block) — for slots over symbol-html and map-envelope blocks."
+  [agent-id blocks body]
+  (-> (client/open-agent-conn!)
+      (.then (fn [conn]
+               (binding [db/*conn* conn]
+                 (-> (db/transact!
+                       {:seon.db/tx-data
+                        (into (vec (schema/entity-schema-tx-data :seon.agent))
+                              [{:seon.agent/id  agent-id
+                                :seon.agent/ctx (vec blocks)}])})
+                     (.then (fn [_]
+                              (binding [db/*conn* conn]
+                                (body conn))))))))))
+
+(deftest slot-missing-block-routes-through-overridable-error-never-throws
+  ;; CONVERGENCE: a missing (or throwing) block surfaces THROUGH the
+  ;; established overridable seon.render.live-tile/error-response — not a
+  ;; hardcoded div — so a consumer's set! override (acme's branded card)
+  ;; applies on the world page too. Never throws; stable id + sibling kept.
   (async done
     (-> (with-block-conn "slottest-00002"
           (fn [conn]
-            (let [ctx     {:seon.db/db @conn :seon.agent/id "slottest-00002"}
-                  missing (render/slot ctx :no-such-block)
-                  sibling (render/slot ctx :mytile)]
-              (is (vector? missing)
-                  "a missing block still returns a slot div, never throws")
-              (is (= "tile-no-such-block" (:id (second missing)))
-                  "the slot div keeps its stable id even on error")
-              (is (re-find #"slot error" (html/->string missing))
-                  "a missing block surfaces a legible error tile")
-              (is (re-find #"no-such-block" (html/->string missing))
-                  "the error names the missing block")
-              (is (re-find #"tile!" (html/->string sibling))
-                  "a sibling slot renders untouched (never-crash-always-surface)"))))
+            (let [ctx  {:seon.db/db @conn :seon.agent/id "slottest-00002"}
+                  orig live-tile/error-response]
+              (try
+                (set! live-tile/error-response
+                      (fn [_] {:seon.render/hiccup [:div.acme-override "OVERRIDE CARD"]
+                               :seon.render/ai     "overridden"}))
+                (let [missing (render/slot ctx :no-such-block)
+                      sibling (render/slot ctx :mytile)]
+                  (is (vector? missing)
+                      "a missing block still returns a slot div, never throws")
+                  (is (= "tile-no-such-block" (:id (second missing)))
+                      "the slot div keeps its stable id even on error")
+                  (is (re-find #"OVERRIDE CARD" (html/->string missing))
+                      "the error tile routes through the overridable error-response")
+                  (is (re-find #"tile!" (html/->string sibling))
+                      "a sibling slot renders untouched (never-crash-always-surface)"))
+                (finally (set! live-tile/error-response orig))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest slot-map-envelope-block-renders-hiccup-not-empty
+  ;; THE BUG FIX: a block whose :seon.render/html SYMBOL returns the
+  ;; :seon.render/html-response MAP envelope must render its HICCUP in the
+  ;; slot — not a raw/empty map body. welcome returns the envelope.
+  (async done
+    (-> (with-blocks-conn "slotmap-00001"
+          [{:seon.agent.ctx/name     :wtile
+            :seon.agent.ctx/priority 50
+            :seon.render/html        'seon.render.live-tile/welcome}]
+          (fn [conn]
+            (let [out  (render/slot {:seon.db/db @conn :seon.agent/id "slotmap-00001"}
+                                    :wtile)
+                  body (nth out 2 nil)]
+              (is (= "tile-wtile" (:id (second out)))
+                  "stable slot id preserved")
+              (is (vector? body)
+                  "the map envelope is unwrapped to hiccup, not a raw map body")
+              (is (not (map? body))
+                  "body is not the raw :seon.render/html-response map")
+              (is (re-find #"seon-tile" (html/->string out))
+                  "the welcome envelope's hiccup actually renders into the slot"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

@@ -307,6 +307,40 @@
           ;; when entity-primary-kind returns nil (no kind matched).
           (get (get kinds-by-kw kind) render)))))
 
+;; ============================================================
+;; The ONE envelope-unwrap — every render path consumes the SAME
+;; `:seon.render/html-response` MAP contract here.
+;;
+;; A render fn (an entity converter, a ctx-block render, the live tile)
+;; may return BARE content — hiccup for the html view, a String for the
+;; ai view — OR the established `:seon.render/html-response` MAP envelope
+;; `{:seon.render/hiccup <h> :seon.render/ai <s> …}`. This is the ONLY
+;; place the envelope is unwrapped, so entity tiles AND ctx-block slots
+;; AND recursive sections never leak a raw map into hiccup (the
+;; map-renders-empty bug). No second extraction site, no second contract.
+;; ============================================================
+
+(defn- view->response-key
+  "The `:seon.render/html-response` key carrying `view`'s value:
+   `:seon.render/html` → `:seon.render/hiccup`; `:seon.render/ai` →
+   `:seon.render/ai`."
+  [view]
+  (case view
+    :seon.render/html :seon.render/hiccup
+    :seon.render/ai   :seon.render/ai))
+
+(defn- unwrap-response
+  "Extract `view`'s value from a render result `r`. When `r` is the
+   `:seon.render/html-response` MAP envelope carrying `view`'s key, return
+   that value (the hiccup or the ai String); otherwise pass the bare value
+   through unchanged. A non-envelope map (one lacking the key) passes
+   through too — only the established contract is unwrapped."
+  [view r]
+  (let [k (view->response-key view)]
+    (if (and (map? r) (contains? r k))
+      (get r k)
+      r)))
+
 (defn render-entity-html
   "Render `entity` to hiccup via its resolved `:seon.render/html` symbol.
    Per-entity override wins; else falls back to the entity-kind schema's
@@ -333,12 +367,11 @@
       (try
         (let [f (eval/lookup-value sym)
               r (when f (f (assoc input :seon.render/node entity)))]
-          ;; Converters return BARE hiccup; tolerate a per-entity renderer
-          ;; (agent-authored, test fixture) still returning the old
-          ;; {:seon.render/hiccup h} envelope.
-          (if (and (map? r) (contains? r :seon.render/hiccup))
-            (:seon.render/hiccup r)
-            r))
+          ;; Converters return BARE hiccup; a per-entity renderer
+          ;; (agent-authored, test fixture, the live-tile contract) may
+          ;; return the {:seon.render/hiccup h …} envelope — unwrapped via
+          ;; the ONE shared path so every renderer obeys one contract.
+          (unwrap-response :seon.render/html r))
         (catch :default e
           [:div {:class (str "flex flex-col gap-1 p-3 border "
                              "border-error/40 bg-error/10 rounded")}
@@ -496,11 +529,10 @@
       (try
         (let [f (eval/lookup-value sym)
               r (when f (f (assoc input :seon.render/node entity)))]
-          ;; Converters return a BARE String; tolerate a per-entity renderer
-          ;; still returning the old {:seon.render/ai s} envelope.
-          (if (and (map? r) (contains? r :seon.render/ai))
-            (:seon.render/ai r)
-            r))
+          ;; Converters return a BARE String; a per-entity renderer may
+          ;; return the {:seon.render/ai s …} envelope — unwrapped via the
+          ;; ONE shared path (the ai twin of render-entity-html).
+          (unwrap-response :seon.render/ai r))
         ;; A throwing AI renderer is LEGIBLE, never nil-vanished — the
         ;; agent reading its context sees its own renderer is broken
         ;; (mirror of the html banner above / the tile's error render).
@@ -633,13 +665,42 @@
               (or (schema-default-renderer view node input)
                   ((generic-default-renderer view) input))))))
 
+;; ============================================================
+;; The ONE overridable error tile. A slot/world render that could not
+;; produce its content (missing block, throwing render) surfaces THROUGH
+;; the established `seon.render.live-tile/error-response` — the SAME error
+;; contract the live tile uses, so a consumer's `set!` override of
+;; `error-response` (acme's branded card) applies on the new world page
+;; too. Never a hardcoded div. The result is unwrapped to bare hiccup via
+;; the one envelope path; a last-resort floor keeps never-crash intact if
+;; the (overridable) error tile itself throws.
+;; ============================================================
+
+(defn- error-tile-hiccup
+  "Bare hiccup for a slot/world error whose cause is `message`, routed
+   through the overridable `seon.render.live-tile/error-response` so one
+   error contract serves the live tile AND the world slots."
+  [message]
+  (try
+    (unwrap-response :seon.render/html
+                     (live-tile/error-response
+                       {:seon.db/error {:seon.error/message message}}))
+    (catch :default _
+      [:div {:class (str "flex flex-col gap-1 p-3 border "
+                         "border-error/40 bg-error/10 rounded")}
+       [:div {:class "text-xs text-error font-mono font-bold"} "⚠ render error"]
+       [:div {:class "text-xs font-mono text-text-300 break-all"} message]])))
+
 (defn render
   "Render ONE node in `view`, recursively + guarded. The fn receives the full
    injected context PLUS the node and a view-bound recursion handle
    (`:seon.render/render`) so a section renders its children through the same
-   dispatch. Returns a String (`:seon.render/ai`) or hiccup
-   (`:seon.render/html`). A hidden node contributes a one-line prune note (ai)
-   or nothing (html); a throwing fn renders a legible error, never crashes."
+   dispatch. A render fn may return BARE content OR the
+   `:seon.render/html-response` MAP envelope — unwrapped via the one shared
+   path, so the result is always a String (`:seon.render/ai`) or hiccup
+   (`:seon.render/html`), never a raw map. A hidden node contributes a
+   one-line prune note (ai) or nothing (html); a throwing html render
+   becomes the overridable error tile, never crashes."
   {:malli/schema [:=> [:cat :keyword :map :any] :any]}
   [view ctx node]
   (if (:seon.render/hidden? node)
@@ -651,11 +712,12 @@
                         :seon.render/render  #(render view ctx %)
                         :seon.render/slot    #(slot ctx %))]
       (try
-        (f in)                                  ;; converters return bare String / hiccup
+        (unwrap-response view (f in))           ;; bare OR html-response envelope
         (catch :default e
           (if (= view :seon.render/ai)
             (str ";; ⚠ [" (renderable-id node) "] render failed: " (ex-message e))
-            [:div.render-error "⚠ " (str (renderable-id node)) " — " (ex-message e)]))))))
+            (error-tile-hiccup
+              (str (renderable-id node) " — " (ex-message e)))))))))
 
 ;; ============================================================
 ;; The `slot` primitive — place a named block's html render into a
@@ -689,16 +751,6 @@
           (contains? b :seon.render/ai)
           (update :seon.render/ai #(db/decode-edn-value :seon.render/ai %)))))))
 
-(defn- slot-error-tile
-  "An error TILE (hiccup) for a slot whose named block is missing or
-   threw — derived from a `:seon/error`-shaped value (`message`), so the
-   human sees a legible card and a sibling slot never crashes."
-  [message]
-  [:div {:class (str "flex flex-col gap-1 p-3 border "
-                     "border-error/40 bg-error/10 rounded")}
-   [:div {:class "text-xs text-error font-mono font-bold"} "⚠ slot error"]
-   [:div {:class "text-xs font-mono text-text-300 break-all"} message]])
-
 (schema/register! ::slot-request
   [:map
    [:seon.db/db    {:optional true} :seon.db/db]
@@ -721,14 +773,14 @@
         id    (:seon.agent/id ctx)
         block (agent-ctx-block db id block-name)
         body  (if (nil? block)
-                (slot-error-tile
+                (error-tile-hiccup
                   (str "no block named " block-name " on "
                        (or id "this agent")
                        " — install! it (or fix the slot name)"))
                 (try
                   (render :seon.render/html (assoc ctx :seon.db/db db) block)
                   (catch :default e
-                    (slot-error-tile
+                    (error-tile-hiccup
                       (str block-name " render failed: " (err/->message e))))))]
     [:div {:id (str "tile-" (name block-name)) :data-slot (name block-name)}
      body]))
