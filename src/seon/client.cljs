@@ -2292,8 +2292,10 @@
                 ;; This is the complete, ordering-independent source (issue
                 ;; instrumentation-collect-clean-build-empty). Agent fns were
                 ;; already wrapped inline by the eval-tee during replay; this
-                ;; adds the compiled core fns (idempotent re-wrap otherwise).
-                instr-stats   (instrument/instrument-from-db! (await (d/db conn)))
+                ;; adds the compiled core fns. ONCE per process — a 2nd pass
+                ;; (a later POST /agents/new) would re-read the wrapper vars,
+                ;; mis-detect async, and wedge the pod (see instrument-from-db-once!).
+                instr-stats   (instrument/instrument-from-db-once! (await (d/db conn)))
                 _             (log/info-console!
                                 "seon.client/start-agent!"
                                 (str "instrumentation: " (pr-str instr-stats)))

@@ -361,3 +361,32 @@
                 :seon.instrument/enabled? true
                 :seon.instrument/n-instrumented
                 (reduce + (map count (vals (m/function-schemas :cljs)))))))))
+
+#?(:cljs
+   ;; P0 (double-instrument async wedge) — instrument the program graph ONCE
+   ;; per process. The 1st pass (boot, after index + replay) wraps core +
+   ;; every replayed agent fn from its FRESH var. A 2nd pass (a later POST
+   ;; /agents/new → start-agent!) would re-read the 1st pass's WRAPPER var,
+   ;; whose constructor is `Function` not `AsyncFunction`, so `async-fn?`
+   ;; mis-detects every `^:async` fn as sync and re-routes its Promise return
+   ;; through malli's SYNC output validator → `:malli.core/invalid-output`
+   ;; and the pod wedges (ticker + wake loop throw every agent). Agent fns
+   ;; defined AFTER boot are wrapped inline by the eval-tee, so the once-gate
+   ;; loses nothing. Resets on a fresh process (a cluster reset re-boots).
+   (defonce ^:private !instrumented? (atom false)))
+
+#?(:cljs
+   (defn instrument-from-db-once!
+     "Idempotent [[instrument-from-db!]] — the `start-agent!` entry point.
+      Runs the full pass the FIRST time per process, then short-circuits so a
+      later agent-creation never re-instruments already-wrapped vars (which
+      would mis-route every async fn and wedge the pod — see [[!instrumented?]])."
+     {:malli/schema [:=> [:cat :any] :map]}
+     [db]
+     (if @!instrumented?
+       {:seon.instrument/enabled?       (enabled?)
+        :seon.instrument/already-done?  true
+        :seon.instrument/n-instrumented (reduce + (map count (vals (m/function-schemas :cljs))))}
+       (let [stats (instrument-from-db! db)]
+         (reset! !instrumented? true)
+         stats))))
