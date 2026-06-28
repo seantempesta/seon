@@ -424,7 +424,10 @@
    unrecognized message degrades to the generic kind rather than breaking
    the parse."
   [msg]
-  (let [m (str/lower-case msg)]
+  ;; `(str msg)` guards a nil exception message (some throws carry none) —
+  ;; lower-case on nil would NPE/TypeError; an empty string falls through to
+  ;; the generic `:read` kind, which is the correct degrade.
+  (let [m (str/lower-case (str msg))]
     (cond
       (or (str/includes? m "unexpected eof")
           (str/includes? m "eof while reading"))     :eof
