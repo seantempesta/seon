@@ -79,24 +79,30 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
-;; 2. The focal #world-canvas IS the live tile; html ctx blocks (incl
-;; :transcript) are SUPPORTING tiles below it (post-#19: the canvas is the
-;; live tile, never a comms block).
+;; 2. The focal #world-canvas IS the live tile; the :transcript block is its
+;; OWN dedicated #world-transcript <details> directly below the canvas (NOT a
+;; supporting tile in the priority loop, NOT the canvas).
 ;; ============================================================
 
-(deftest world-layout-canvas-is-the-live-tile
+(deftest world-layout-canvas-then-transcript-details
   (async done
     (-> (with-agents [[agent-a (mixed-blocks :transcript)]]
           (fn [conn]
             (let [s          (html/->string (world/world-layout @conn agent-a))
                   canvas-idx (str/index-of s "world-canvas")
-                  tr-tile    (str/index-of s "world-tile-transcript")]
-              (testing "#world-canvas (the live tile) renders, and :transcript is a SUPPORTING tile below it — not the canvas"
+                  tr-idx     (str/index-of s "world-transcript")]
+              (testing "#world-canvas (the live tile) renders, and the transcript is its own #world-transcript section below it"
                 (is (some? canvas-idx) "the live-tile canvas region renders")
-                (is (some? tr-tile)
-                    "the :transcript block renders as a supporting tile (#world-tile-transcript)")
-                (is (< canvas-idx tr-tile)
-                    "the transcript tile sits below the canvas, not as the canvas")))))
+                (is (some? tr-idx)
+                    "the :transcript block renders as a dedicated #world-transcript section")
+                (is (< canvas-idx tr-idx)
+                    "the transcript section sits below the canvas, not as the canvas"))
+              (testing "the transcript is NOT also rendered as a supporting tile (no double render)"
+                (is (not (str/includes? s "world-tile-transcript"))
+                    "the :transcript block is excluded from the supporting-tile loop"))
+              (testing "the transcript body renders through the slot path (its data-slot marker is present once)"
+                (is (str/includes? s "data-slot=\"transcript\"")
+                    "the transcript body is placed via render/slot inside the details")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

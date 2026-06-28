@@ -21,9 +21,11 @@
    resolves `:seon.render.live-tile/content` (or the `welcome` default)
    against the SAME db value, so a consumer's tile override is the page
    hero. It never throws: a broken tile is a calm placeholder, a missing
-   agent is nil hiccup → no canvas. Every `:seon.agent/ctx` html block —
-   `:transcript` included — is a supporting tile; there is no second
-   ctx-block \"canvas\" concept fighting the live tile for the hero.
+   agent is nil hiccup → no canvas. Every other `:seon.agent/ctx` html block
+   is a supporting tile; there is no second ctx-block \"canvas\" concept
+   fighting the live tile for the hero. `:transcript` is the one html block
+   pulled OUT of the supporting flow into its own focal `#world-transcript`
+   `<details>` directly below the canvas (the messages+evals stream).
 
    ## Pure + never-crash
 
@@ -126,10 +128,12 @@
    The focal `#world-canvas` is the agent's live tile —
    `(seon.render/render-agent-tile {…})`'s `:seon.render/hiccup`, resolved
    against the SAME supplied db value (passed EXPLICITLY, never defaulted)
-   so the layout stays a pure `f(db, agent-id)`. Below it, every
+   so the layout stays a pure `f(db, agent-id)`. Directly below it the
+   `:transcript` block renders as a focal collapsible `#world-transcript`
+   `<details>` (the messages+evals stream); below THAT, every other
    html-rendering `:seon.agent/ctx` block (`:seon.agent.ctx/priority`-
-   ordered, `:transcript` included) is a supporting tile via
-   `seon.render/slot`. Pure of external state (reads only the supplied db
+   ordered) is a supporting tile via `seon.render/slot`. Both reuse the same
+   guarded slot render path. Pure of external state (reads only the supplied db
    value); NEVER throws — the live tile and each slot self-guard, a
    whole-layout failure degrades to a visible `#world-error`. A missing
    agent (nil live-tile hiccup + no tiles) renders the header +
@@ -139,11 +143,18 @@
                   :any]}
   [db agent-id]
   (try
-    (let [ctx        {:seon.db/db db :seon.agent/id agent-id}
-          tile-names (agent-html-block-names db agent-id)
-          live-tile  (:seon.render/hiccup
-                       (render/render-agent-tile {:seon.agent/id agent-id
-                                                  :seon.db/db    db}))]
+    (let [ctx            {:seon.db/db db :seon.agent/id agent-id}
+          ;; :transcript is pulled OUT of the supporting-tile flow and given its
+          ;; own dedicated #world-transcript section below the canvas (the focal
+          ;; messages+evals stream), so it is removed here to avoid a double
+          ;; render. The same list drives transcript PRESENCE — an agent with no
+          ;; :transcript block gets no empty transcript section.
+          html-names     (agent-html-block-names db agent-id)
+          has-transcript (boolean (some #{:transcript} html-names))
+          tile-names     (remove #{:transcript} html-names)
+          live-tile      (:seon.render/hiccup
+                           (render/render-agent-tile {:seon.agent/id agent-id
+                                                      :seon.db/db    db}))]
       [:main {:id "world" :class "flex flex-col gap-3 w-full"}
        [:header {:id    "world-header"
                  :class "flex items-center justify-between border-b border-base-800 pb-2"}
@@ -159,6 +170,21 @@
          [:section {:id    "world-canvas"
                     :class "border border-base-800 rounded-md bg-base-900 p-3 overflow-auto"}
           live-tile])
+       ;; The focal transcript — the agent's enriched messages+evals stream — as
+       ;; a dedicated collapsible section directly BELOW the canvas and above the
+       ;; (fixed-bottom, sibling-of-#world) chat input. Body = the SAME
+       ;; `:transcript` block, placed through the SAME guarded `render/slot` path
+       ;; the supporting tiles use (so a throwing transcript stays a contained
+       ;; error tile, siblings intact) — just in the `<details>` container instead
+       ;; of the priority loop. `open` so it reads as the page's main scroll.
+       (when has-transcript
+         [:details {:id    "world-transcript"
+                    :open  true
+                    :class "border border-base-800 rounded-md bg-base-900 overflow-hidden"}
+          [:summary {:class "px-3 py-2 text-text-300 text-xs font-mono cursor-pointer select-none"}
+           "transcript"]
+          [:div {:class "p-3 border-t border-base-800 overflow-auto"}
+           (render/slot ctx :transcript)]])
        [:div {:id "world-tiles" :class "flex flex-col gap-3"}
         (when (seq tile-names)
           ;; EAGER but a SEQ (doall+map, NOT mapv): seon.ui.html splices a SEQ
@@ -169,7 +195,7 @@
           ;; (a throwing slot stays caught); `map` keeps it a seq the serializer
           ;; flattens.
           (doall (map #(tile-card ctx %) tile-names)))]
-       (when (and (nil? live-tile) (empty? tile-names))
+       (when (and (nil? live-tile) (empty? tile-names) (not has-transcript))
          [:div {:id    "world-empty"
                 :class "text-text-500 text-xs font-mono"}
           (str "agent " agent-id " has no html tiles yet")])])
