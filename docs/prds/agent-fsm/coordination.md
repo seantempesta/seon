@@ -431,6 +431,32 @@ other lane's **_Needs_** and the owner makes it.
     trigger clause, not the full 2–4-sentence "Use when…" essay (~300 tok). U is taking the `:live-tile` trim
     (~1.3k — move the static cookbook + safelist OUT of the always-on block into the `ui-live-tiles` skill /
     `my.ui` docstrings, keep only the reactive awareness body).
+  - **🐛 → CORE (fabrication root-cause, `research/fabrication-root-cause-2026-06-28.md` — THREE bugs):**
+    (A) DOMINANT/structural — `eval-batch!` turns ONE reply into one batch, so a `(message/user "…1234…")` in
+    the SAME reply as the `(compute)` is authored BEFORE the eval runs → pure guess. Mitigation = the cite-card
+    (U, below) + a guidance sharpen at `ctx.cljs:925-956` `system-text` (yours) naming the same-response failure;
+    a full fix (re-render message post-eval / disallow same-reply compute+report) is a LOOP change — your call.
+    (C) **`result/<id>` pending-Promise trap — REPL-VERIFIED FIX, high value, small, yours:** `eval.cljs:2624-2631`
+    (+ `maybe-await-value` ~1282) — in the `pending?` branch attach `.then` to re-stash + re-bind the resolved
+    value (today the stash holds a raw `js/Promise` forever; any in-form use → `:ok false`/nil). Verified: after
+    self-heal `(mapv :a result/tpend2)` → `[1 2 3]` `:ok true`. SMELL: outbound `(message/user …)` body never runs
+    through `neutralize-result-claims` (only the transcript render does) → the human gets the raw fabricated
+    number uncaught (by design, but that's the leak path).
+    (B) Burial → the **cite-card** (derived "values you just computed — quote THESE" above the readline,
+    `transcript.cljs:360`, last-N successful `result/<id> => value`; reactive, nearest tokens to the reply).
+    `transcript.cljs` is YOUR lane (`seon.agent.ctx`) — bundle the cite-card with the transcript-eviction below.
+  - **🔴 → CORE (#1 TOKEN LEVER — transcript eviction, `research/transcript-eviction-2026-06-28.md`):** the
+    transcript is ~20,315 tok UNBOUNDED; a 3-tier recency policy saves **~14,300 tok/turn** (~70% of the block)
+    for long-lived agents, ZERO change for young/lean ones (no-op below the cap). Derived at render (no stored
+    flags): FULL newest (~3,500) → CLIPPED middle (source/narration full, big eval VALUES collapse to a
+    `;=> <type>(<size>) ; result/<id> — live, deref to expand` pointer, ~2,000) → SUMMARIZED head (~500); pin
+    masthead/readline/resume-marker/unanswered-inbound full; flip `transcript-token-cap` (6,000) ON (off
+    `:seon.render/clip :none`). **Mechanism = yours** (`transcript.cljs:424` recency walk, `transcript.cljs:160`
+    `eval->renderable` detail thread, `ctx.cljs:567` `format-eval-row` `:full|:clipped|:summary` arg + value→pointer,
+    `config.cljs:263` cap flip + tier knobs). Reuse `seon.render`'s existing value-skeleton type/size probe on the
+    stored `:seon.eval/result-edn` (don't add a 2nd). **U owns** the tier numbers (3,500/2,000/500), the
+    pointer/summary WORDING, and the live-drive check that agents actually re-reference a clipped `result/<id>`.
+    Bundle the cite-card (B above) into this — same file, same "make computed values cite-able" goal.
 
 - **🧭 → CORE (owner-directed 2026-06-28, HIGH): UNIFY context control into ONE understood mechanism.** Owner:
   "Once we understand how to properly control context (ask core to figure this shit out and unify shit) I want
