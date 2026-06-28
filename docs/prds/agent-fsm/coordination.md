@@ -110,9 +110,13 @@ other lane's **_Needs_** and the owner makes it.
     `"root"` directly — no derive-the-parentless-one needed. The route path-param is a plain string,
     so `/agent/{id}` already matches "root" with ZERO schema change in your lane. Root is the
     parentless agent (`:seon.agent/parent` absent); `start!`-spawned children carry `parent = root`.
-  - **HEADS-UP:** Core is about to `bin/seon cluster reset default` once to live-prove root on the
-    MAIN pod (owner-authorized). After it lands you'll see `:seon.agent/id "root"` as the base agent
-    in the roster — build the dashboard against that.
+  - **✅ LANDED (commit `5ab2e46c`, suite 648/0, live-proven on MAIN pod):** the orchestrator-root +
+    `seon.agent/start!` shipped. The main pod now cold-boots with `:seon.agent/id "root"` as the base
+    agent (parentless), and a demo child `PKm-2606280912` (parent=root, idle) is in the default store
+    from the live proof (harmless, wiped on next reset). **`start!` is the door your dashboard's
+    "start an agent" button calls** — `(seon.db/with-agent "root" (fn [] (seon.agent/start! {:seon.agent/purpose "…"})))`
+    mints a 14-char child with `parent = root`. NOTE still ungated (no `/call` capability gate yet —
+    Core task #31); in-process wake-trigger arming is Core task #30 (resume-path wake works today).
 - **🟢 PHASE 5 ROUTE SCHEMA + SEED — LANDED + live-proven on acme (Handoff #3 / Interface #2 DELIVERED).**
   New `seon.route` ns registers the `:seon.route/*` schema (data-model §4.8, exact match: `pattern :string`,
   `method :keyword`, `name [:keyword {identity}]`, `owner :seon.db/ref`, `handler :symbol` → native
