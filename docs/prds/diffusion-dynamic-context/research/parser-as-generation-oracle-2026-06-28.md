@@ -95,7 +95,84 @@ the pod recovery eval (`seon.repair`). Inner-loop test gate: `bin/test-parser`
   cage catches it is the next measurement.
 - The strong-model A/B null means a **noisier live generator** (DeepSeek-on-acme,
   or the diffusion model) is needed for an end-to-end "skill guides generation"
-  number; the corruption sim is a clean proxy, not a substitute.
+  number; the corruption sim is a clean proxy, not a substitute. **DONE for
+  DeepSeek-on-acme — also null (guided trended worse); see "Live acme drive"
+  below.** The diffusion-model arm remains.
+
+## Live acme drive — DeepSeek A/B, repl-skill in context vs not (2026-06-28)
+
+The corruption sim's strong-model A/B was null because gemini-flash writes clean
+Clojure. We re-ran the A/B with a **noisier live generator** — a real DeepSeek
+agent on the isolated **acme** cluster (pod 7980, store `data/clusters/acme`),
+driven on an identical, deliberately delimiter-stressful, deeply-nested
+form-heavy task (nested `db/transact!` of three nested person maps → a `defn`
+querying them → a `let` mapping over the result; then two harder rounds: a
+single deeply-nested company literal, and a `defn` with nested destructuring +
+`reduce` + `->>`). Two fresh dedicated agents, eval rows attributed by
+`:seon.eval/agent` and filtered to the post-task window:
+
+- **A — baseline:** repl skill NOT loaded.
+- **B — guided:** `(my.skills/load :repl)` first (verified: a `:skill/repl`
+  context block on the agent before the task turns).
+
+### Results (real counts, read back from the acme store)
+
+| condition | total evals | clean forms | **read failures** | auto-repaired | runtime (semantic) fails |
+|---|---|---|---|---|---|
+| A baseline | 117 | 115 | **1** | 0 | 1 |
+| B guided | 85 | 73 | **2** | 1 | 8 |
+
+- **Read-failure (parse) rate:** baseline **0.85%** (1/117) vs guided **2.4%**
+  (2/85). Parse-level including parinfer auto-repair: baseline 0.85% vs guided
+  **3.5%** (3/85).
+- **Delta: the skill did NOT reduce broken-form evals — guided trended HIGHER.**
+  No reduction was observed at this scale.
+
+### What the failures actually were (the honest read)
+
+Pulling the failing `:seon.eval/source` strings is more informative than the
+counts:
+
+- **Read failures in BOTH conditions were stray single delimiters**, not the
+  unbalanced-nesting the deep task was meant to provoke: baseline's was a prose
+  line beginning with a stray `)`; guided's two were stray **backticks**
+  (`` `:seon.db/unbridgeable-attrs` `` / `` (`:my.agent…/…`) ``) →
+  `:invalid-token`. The FLAG class, not the SAFE/auto-fix class. Parinfer
+  auto-repair fired only **once total** (one guided `db/transact!`), confirming
+  DeepSeek almost never emits the missing-closer error the repair collar targets.
+- **The dominant failure mode was semantic, not syntactic** — and a chunk of it
+  was **prose-wrapped-in-parens**: the model wrote English asides as `(…)` lists
+  — `(Engineering, Design, Product)`, `(nested maps and vectors)`,
+  `(name, departments, teams, members, skills)`, `(schema registration)` — which
+  parse fine, then throw "undefined symbol" at eval. This is *exactly* the mistake
+  the repl skill calls out ("reasoning is `;` prose, never a `(` form"), yet the
+  guided agent produced MORE of them, not fewer.
+- Guided's higher fail count is largely **behavioral divergence**: with the skill
+  loaded it went down a schema-registration path (`schema/register!` hitting
+  `:seon.db/unbridgeable-attrs`) and an undefined-verb path (`(complete …)`,
+  `(message/user …)`) — a different, harder sub-problem, not a parser effect.
+
+### Conclusion + honest limits
+
+The live DeepSeek drive **confirms and extends the gemini-flash null**: even a
+noisier capable model writes Clojure clean enough at the *syntactic* level that
+the parser-repair collar barely engages (≈1% read-failure rate, ~0–1 auto-repairs
+per ~100 evals), so loading the `repl` skill produced **no measurable reduction
+in broken-form evals** — guided was if anything slightly worse, dominated by
+inter-agent behavioral variance and DeepSeek's *semantic* (not delimiter) error
+profile. Limits: N is two single agents per condition, so the comparison is
+confounded by autonomous divergence (B ran a schema-heavy path); a rigorous
+number needs **many agents per condition** (pass^k) or a genuinely weak/diffusion
+generator whose per-step commits actually produce the unbalanced-delimiter noise
+the collar is built for. The mechanism's value remains where the sim predicted:
+**noisy per-step generation**, not capable autoregressive agents.
+
+Harness note (fixed in passing): the skill seeder
+(`my.skills/list-skill-files`) used `readdirSync` Dirent flags, whose
+`.isDirectory?` is **false for a symlink** — so `.claude/skills`'s symlinked
+`seon-skills/*` skills (incl `repl`) silently never seeded; only the two real
+dirs did. Switched to `statSync` (follows links). Without this the guided
+condition could not have loaded `:repl` on the acme pod at all.
 
 ## Feeds into
 
