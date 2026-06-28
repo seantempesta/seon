@@ -23,6 +23,13 @@
 set -euo pipefail
 SEON_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# --- persisted local config: a gitignored .env at the repo root holds the LLM
+#     provider/key/model + debug-capture vars so a plain `bin/acme …` picks them
+#     up without inline env on every command. `set -a` exports each VAR=value so
+#     the pod + wire-server inherit them. Keep MACHINE overrides (ports) OUT of
+#     .env — those use ${:-} below and a shell-set value still wins. ---
+if [ -f "$SEON_ROOT/.env" ]; then set -a; . "$SEON_ROOT/.env"; set +a; fi
+
 # --- isolation: distinct from the live default (7890/7891, data/clusters/default,
 #     tmp/seon-cluster-default-*.sock, tmp/proc, logs/). Ports use ${...:-} so a
 #     shell override (SEON_PORT=… SEON_WRITER_REPL_PORT=… bin/acme …) can dodge a
