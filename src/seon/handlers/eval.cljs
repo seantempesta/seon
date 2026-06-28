@@ -65,7 +65,7 @@
     (let [s (str error-str)
           ;; Cheap regex extraction so we don't read-string an arbitrary
           ;; tagged-literal-bearing payload.
-          msg (when-let [m (re-find #":seon\.error/message\s+\"([^\"]*)\"" s)]
+          msg (when-let [m (re-find #":seon\.error/message\s+\"((?:[^\"\\]|\\.)*)\"" s)]
                 (second m))
           line (or msg (first (str/split-lines s)) s)]
       (truncate line error-summary-truncate))))
@@ -100,18 +100,17 @@
                     tail (conj tail))]
     (str/join "\n" lines)))
 
-(defn- error-value
-  "Build the `:seon/error` value `seon.render/block` renders as an error
-   card, from a stored `:seon.eval/error` pr-str string. Pulls the FULL
-   `:seon.error/message` (untruncated, unlike `short-error`) by the same
-   cheap regex — no `read-string` of an arbitrary tagged payload — and
-   falls back to the whole string when the shape isn't recognized."
+(defn- full-error
+  "The FULL error message (untruncated, unlike `short-error`) of a stored
+   `:seon.eval/error` pr-str string — the text the agent READS to
+   self-correct. Pulls `:seon.error/message` by the same cheap regex — no
+   `read-string` of an arbitrary tagged payload — and falls back to the
+   whole string when the shape isn't recognized. Nil-safe."
   [error-str]
   (let [s (str error-str)
-        msg (when-let [m (re-find #":seon\.error/message\s+\"([^\"]*)\"" s)]
+        msg (when-let [m (re-find #":seon\.error/message\s+\"((?:[^\"\\]|\\.)*)\"" s)]
               (second m))]
-    {:seon.error/message (or msg s)
-     :seon.error/where   :eval}))
+    (or msg s)))
 
 (defn render-html
   "Hiccup card for the transcript / canvas — every part routes through the
@@ -125,10 +124,14 @@
      expanded shows the full result skeleton as a highlighted Clojure
      block (the stored `:seon.eval/result-edn` is the bounded data
      projection; the live value lives at `result/<id>`).
-   - On :error — a collapsible `<details>`: a one-line `:error <short>`
-     summary; expanded shows the `:seon/error` card via the override-able
-     `seon.render.live-tile/error-tile` seam (so acme's branded error card
-     applies here too)."
+   - On :error — a FAILED EVAL (the agent's code didn't work — normal,
+     agents learn from it), NOT a render fault. Rendered as calm eval-card
+     content in the normal chrome: a collapsible `<details>` whose summary
+     is a one-line `✗ <short>`, expanded to an error-tinted `✗ eval failed`
+     block with the FULL `:seon.error/message`. It deliberately does NOT
+     route through the `error-tile` seam — that seam is the never-throw
+     backstop for actual RENDER throws and its header reads 'render error',
+     which would mislabel (and alarm about) an ordinary eval error."
   {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
   [{:seon.render/keys [node entity]}]
   (let [entity    (or node entity)
@@ -165,10 +168,15 @@
        (string? err-str)
        [:details {:class "mt-1"}
         [:summary {:class "text-xs font-mono text-error cursor-pointer"}
-         (str ":error " (short-error err-str))]
-        [:div {:class "mt-1"}
-         (render/block :html (error-value err-str))]]
+         (str "✗ " (short-error err-str))]
+        [:div {:class (str "mt-1 p-2 rounded border border-error/30 "
+                           "bg-error/5")}
+         [:div {:class "text-xs font-mono text-error font-semibold mb-1"}
+          "✗ eval failed"]
+         [:pre {:class (str "text-xs font-mono text-text-300 "
+                            "whitespace-pre-wrap break-words")}
+          (full-error err-str)]]]
 
        :else
        [:div {:class "text-xs font-mono text-error mt-1"}
-        ":error <no detail>"])]))
+        "✗ eval failed: <no detail>"])]))
