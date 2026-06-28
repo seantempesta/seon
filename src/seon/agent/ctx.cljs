@@ -254,10 +254,14 @@
 ;; ([[system-text]] via `seon.ai/effective-system-prompt`).
 (def soul-file-path
   "Repo-relative path of the primary identity file: `SEON_SOUL_FILE`
-   override, else `SOUL.md`."
-  (or (some-> (.. js/globalThis -process) .-env (aget "SEON_SOUL_FILE")
-              (#(when-not (str/blank? %) %)))
-      "SOUL.md"))
+   override, else `SOUL.md`. `nil` when `SEON_SOUL` is explicitly disabled
+   (`false`/`0`/`off`/`no`) — the `:soul` block is then omitted entirely."
+  (when-not (contains? #{"false" "0" "off" "no"}
+                       (some-> (.. js/globalThis -process) .-env (aget "SEON_SOUL")
+                               str/lower-case str/trim))
+    (or (some-> (.. js/globalThis -process) .-env (aget "SEON_SOUL_FILE")
+                (#(when-not (str/blank? %) %)))
+        "SOUL.md")))
 
 (def agents-file-path
   "Repo-relative path of the cross-tool repo/work-instructions file."
@@ -1639,8 +1643,9 @@
    ;; strictly separate from these files. `:soul` (5) / `:agents` (8) sit
    ;; at the top of the cacheable prefix; an edit busts only their block.
    (filterv some?
-            [(file-block {:seon.agent.ctx/file-path soul-file-path
-                          :seon.agent.ctx/name :soul :seon.agent.ctx/priority 5})
+            [(when soul-file-path
+               (file-block {:seon.agent.ctx/file-path soul-file-path
+                            :seon.agent.ctx/name :soul :seon.agent.ctx/priority 5}))
              (file-block {:seon.agent.ctx/file-path agents-file-path
                           :seon.agent.ctx/name :agents :seon.agent.ctx/priority 8})])
    [{:seon.agent.ctx/name :shared-instructions :seon.agent.ctx/priority 10

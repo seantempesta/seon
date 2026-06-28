@@ -110,15 +110,18 @@ SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-7891}"
 # cluster, matching bin/acme. Read by the wire-server (declares the index +
 # backfills) and the pod (per-turn predictive retrieval). Set SEON_EMBED= (empty)
 # to disable. Recover/rebuild: the index is DERIVED — re-ingest from source.
+# Persisted local config: the main pod's gitignored .env at the repo root
+# (acme's lives in .env.acme, sourced by bin/acme). `set -a` exports each
+# VAR=value; a value already set in your shell still wins via the ${:-} below.
+if [ -f "$SEON_ROOT/.env" ]; then set -a; . "$SEON_ROOT/.env"; set +a; fi
+
 export SEON_EMBED="${SEON_EMBED:-1}"
 
 # Identity files: SOUL.md (+ AGENTS.md if present) load as CONTEXT blocks when
-# the file exists; an absent file contributes nothing (seon.agent.ctx/file-block
-# → nil, filtered). TEMPORARY (root-os focus, 2026-06-28): disable SOUL.md while
-# we converge on lean core-essential context (the SYSTEM.md work) so we don't
-# duplicate guidance across SOUL + system + my.kb. This points SEON_SOUL_FILE at
-# a non-existent sentinel → no :soul block. Re-enable: SEON_SOUL_FILE=SOUL.md.
-export SEON_SOUL_FILE="${SEON_SOUL_FILE:-.seon-soul-disabled}"
+# the file exists. The SOUL block is disabled via SEON_SOUL=false in the main
+# .env (seon.agent.ctx/soul-file-path → nil → :soul block omitted) — TEMPORARY
+# while we converge lean core-essential context (the SYSTEM.md work). Re-enable
+# with SEON_SOUL=true in .env. SEON_SOUL_FILE overrides the path when enabled.
 
 # ============================================================
 # SEON_EXTRA_SRC — downstream CLJS source roots (task #36; spec:
