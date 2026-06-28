@@ -121,6 +121,52 @@
   (reset! !next-budget-ms ms)
   inner)
 
+;; ============================================================
+;; Deferred — explicit opt-out of auto-await. `(seon.eval/defer expr)`
+;; wraps a Promise so the eval pipeline stashes the HANDLE at
+;; `result/<id>` instead of blocking for the value. Same destination as
+;; the auto-await TIMEOUT path: the form records a `:seon.eval/pending`
+;; placeholder, the live Promise goes to `result/<id>`, and a later
+;; re-reference auto-awaits it to data (top-level `(await …)` cannot —
+;; the macro needs an async env; re-reference is the resolution path).
+;; ============================================================
+
+(deftype Deferred [promise])
+
+(defn defer
+  "Hand the eval pipeline a Promise WITHOUT auto-awaiting it — for a
+   long-running or fire-and-forget op when you want the HANDLE, not to
+   block for the value. Wrap a form that returns a Promise:
+
+     (seon.eval/defer (some-slow-async-op))
+
+   The form's value records as a `:seon.eval/pending` placeholder and the
+   live Promise is stashed at `result/<id>`; re-reference `result/<id>`
+   in a LATER eval and the normal auto-await resolves it to data. A
+   non-Promise argument is returned unchanged (nothing to defer).
+
+   NOTE: the stash is process-scoped (globalThis) — a pod restart drops
+   it. Anything that must survive a restart should persist its RESULT to
+   the DB, not rely on this in-memory handle."
+  ;; `v` + the return are `:any` on purpose: `v` is the agent form's
+  ;; already-evaluated value (a Promise / any runtime value) — a
+  ;; runtime-value boundary, same as `budget`'s `inner`.
+  {:malli/schema [:=> [:catn [::value :any]] :any]}
+  [v]
+  (if (instance? js/Promise v)
+    (->Deferred v)
+    v))
+
+(defn- pending-placeholder
+  "The clean DATA value recorded + displayed for a form whose Promise is
+   still running (auto-await timeout OR explicit `defer`). NEVER the raw
+   Promise — the value renderer must never `seq` a Promise. Names
+   `result/<id>` so the agent knows exactly how to await the real value."
+  [eval-id]
+  {:seon.eval/pending
+   (str "still running — re-reference `result/" eval-id "` in a later "
+        "eval to await its value")})
+
 ;; Identity-checked marker returned by `race-timeout` when the timer
 ;; wins. A fresh JS object so `identical?` distinguishes it from any
 ;; resolved eval value.
@@ -1196,14 +1242,27 @@
    CLJS-1.12.145 syntax they don't see. This makes calls to seon.db/*
    feel synchronous from inside agent forms.
 
-   Bounded by `@!timeout-ms` (default) OR the one-shot override left
-   by [[budget]]. A Promise that never resolves returns
-   `{:ok false :error <timeout>}` instead of wedging the agent loop.
+   Bounded by `@!timeout-ms` (default) OR the one-shot override left by
+   [[budget]]. A Promise that exceeds the bound is NOT dropped: it is
+   handed back as `:pending` so the caller stashes the live handle at
+   `result/<id>` (re-reference auto-resolves it later). A `(defer …)`
+   wrapper opts out of awaiting entirely and takes the same `:pending`
+   path immediately.
 
-   Returns {:ok true :value v} on resolution OR a non-Promise value;
-           {:ok false :error <seon.error/->map>} on rejection or timeout."
+   Returns {:ok true  :value v}        on resolution OR a non-Promise value;
+           {:ok false :pending <promise>} on timeout OR `defer` — carry the
+                                          still-running Promise to result/<id>;
+           {:ok false :error <seon.error/->map>} on rejection."
   [v]
-  (if (instance? js/Promise v)
+  (cond
+    ;; Explicit opt-out: `(defer expr)` wrapped the Promise. Don't await —
+    ;; hand the raw Promise back as a pending handle. Consume any one-shot
+    ;; budget so it doesn't leak into the NEXT form's auto-await.
+    (instance? Deferred v)
+    (do (reset! !next-budget-ms nil)
+        {:ok false :pending (.-promise v)})
+
+    (instance? js/Promise v)
     (try
       (let [override (let [m @!next-budget-ms]
                        (reset! !next-budget-ms nil)
@@ -1211,14 +1270,16 @@
             ms       (or override @!timeout-ms)
             raced    (await (race-timeout v ms))]
         (if (identical? raced timeout-sentinel)
-          {:ok false
-           :error (error/->map
-                    (js/Error.
-                      (str "auto-await timed out after " ms "ms"
-                           (when override " (explicit (budget) override)"))))}
+          ;; Auto-await timed out. The Promise keeps running (no JS
+          ;; preemption); carry the live handle back as `:pending` so the
+          ;; caller stashes it at result/<id> for a later re-reference —
+          ;; never drop it (the agent would have no way to recover it).
+          {:ok false :pending v}
           {:ok true :value raced}))
       (catch :default e
         {:ok false :error (error/->map e)}))
+
+    :else
     (do
       ;; Even for non-Promise values, consume any pending budget so it
       ;; doesn't leak into the NEXT form's auto-await.
@@ -2427,13 +2488,33 @@
             raw-result  (await (eval compile-state source
                                      {:ns @current-ns
                                       :analyze-deps? false}))
+            awaited     (when (:ok raw-result)
+                          (await (maybe-await-value (:value raw-result))))
+            ;; A still-running Promise — auto-await timeout OR an explicit
+            ;; `(defer …)`. The form records a clean PLACEHOLDER value and
+            ;; the live Promise is stashed at result/<id> (see stash site
+            ;; below) for a later re-reference that auto-awaits it to data.
+            ;; The raw Promise NEVER becomes the displayed value — the value
+            ;; renderer must not `seq` a Promise.
+            pending-promise (:pending awaited)
+            ;; `(some? pending-promise)`, NOT a bare `pending-promise` test:
+            ;; in a CLJS `^:async` fn, a Promise in an `if`/`or`/`cond` TEST
+            ;; position is AUTO-AWAITED (the compiler emits `await` for the
+            ;; condition). A bare `pending-promise` test would block on the
+            ;; handle and resolve it — exactly what we must NOT do. A boolean
+            ;; test never awaits; the Promise stays a live handle, only ever
+            ;; referenced in branch/arg positions (which do not await).
+            pending?        (some? pending-promise)
             result
             (cond
               (not (:ok raw-result)) raw-result
-              :else (let [r2 (await (maybe-await-value (:value raw-result)))]
-                      (if (:ok r2)
-                        {:ok true :value (:value r2) :ns (:ns raw-result)}
-                        r2)))
+              pending?               {:ok true
+                                      :value (pending-placeholder eval-id)
+                                      :ns    (:ns raw-result)}
+              (:ok awaited)          {:ok true
+                                      :value (:value awaited)
+                                      :ns    (:ns raw-result)}
+              :else                  awaited)
             ;; Restore BEFORE any further awaits — record/tee/
             ;; auto-test prints belong to the pod log, not this
             ;; eval's record. (`eval`/`maybe-await-value` never
@@ -2484,13 +2565,26 @@
         ;; no eval-str round-trip (opaque values like datahike DB
         ;; tagged literals don't break the stash). Backs the `result/<id>`
         ;; value var AND the internal `lookup-result` reader.
+        ;;
+        ;; PENDING case (auto-await timeout / `defer`): stash the live
+        ;; PROMISE handle (`pending-promise`), NOT the placeholder that was
+        ;; recorded as the displayed value — so a later bare `result/<id>`
+        ;; returns the Promise and the eval-batch auto-await resolves it to
+        ;; data. The normal case stashes the resolved value.
+        ;; `(if pending? pending-promise …)`, NOT `(or pending-promise …)`:
+        ;; `or` expands to `(if pending-promise pending-promise …)`, putting
+        ;; the Promise in the TEST position, which a CLJS `^:async` fn
+        ;; AUTO-AWAITS — that would resolve the handle (and block) instead of
+        ;; stashing it. A boolean test keeps the Promise unawaited; it reaches
+        ;; the stash as a live handle (a fn arg never awaits).
         (when (:ok result)
-          (stash-result-raw! eval-id (:value result))
-          ;; transcript-redesign-2026-06-18: bind the value as the plain
-          ;; var `result/<id>` (globalThis + analyzer def) so the agent
-          ;; references it directly — the SOLE value-reuse surface. Failed
-          ;; evals bind nothing — no value to retrieve.
-          (bind-result-var! compile-state eval-id (:value result)))
+          (let [stash-val (if pending? pending-promise (:value result))]
+            (stash-result-raw! eval-id stash-val)
+            ;; transcript-redesign-2026-06-18: bind the value as the plain
+            ;; var `result/<id>` (globalThis + analyzer def) so the agent
+            ;; references it directly — the SOLE value-reuse surface. Failed
+            ;; evals bind nothing — no value to retrieve.
+            (bind-result-var! compile-state eval-id stash-val)))
         ;; Detect-and-tee — only on success. Failed evals roll
         ;; back analyzer defs and never touch the schema registry,
         ;; so diff would be empty anyway; we still skip
