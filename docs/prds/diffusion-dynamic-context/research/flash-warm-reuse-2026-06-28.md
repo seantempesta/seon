@@ -15,18 +15,31 @@ finding.
 
 ## TL;DR
 
-- **THE answer to "does FlashBoot snapshot GPU/VRAM?": the open-source code does
-  NOT implement FlashBoot at all — so it cannot be confirmed OR refuted from
-  `reference-code/`.** Both repos only (a) *toggle* it on the endpoint
+> **RESOLVED via web research (§6) — RunPod's own docs answer the VRAM question.**
+> FlashBoot **does** retain GPU/worker state across spin-down: "It can page what's
+> in VRAM back to system RAM or save it to NVMe flash storage … We automatically
+> page things in and out as traffic comes and goes" (RunPod blog). The config doc:
+> FlashBoot "Reduces cold starts by **retaining worker state after spin-down**,
+> allowing faster 'revival' than fresh boots. **Most effective on endpoints with
+> consistent traffic.**" So a loaded 50GB model CAN be revived faster than the
+> 66-147s reload — **BUT it is best-effort, host-local, and traffic-dependent**,
+> and the retained state is **EVICTED after an idle gap**: real-world (worker-vllm
+> #111) an 8B model fully reinitialized + re-downloaded weights **~1 minute after
+> the last request**. For large models the realistic FlashBoot win is **~10-15s,
+> not sub-second**, and it decays as gaps grow — so it does **NOT reliably rescue
+> our scale-to-zero + `idle_timeout=600` intermittent-burst pattern**. The
+> dependable lever remains **keep-warm** (§3); FlashBoot is a bonus when traffic is
+> dense, not a guarantee. Full quotes + cites in §6.
+
+- **What the open-source code shows (mechanism is NOT in `reference-code/`):** both
+  repos only (a) *toggle* it on the endpoint
   (`flashBootType: FLASHBOOT`, `runpod-python/.../mutations/endpoints.py:26`,
   `flash/.../serverless.py:571`) and (b) treat an **HTTP 400 on job-acquire as
   the expected "FlashBoot enabled" signal**
   (`runpod-python/.../rp_job.py:150`). There is **zero** snapshot/restore/VRAM
-  /checkpoint code for FlashBoot in either repo. FlashBoot is a **RunPod
-  platform-side feature**; its snapshot scope (container-only vs CPU-process vs
-  GPU-VRAM) is **not in the source we have**. This must be settled by
-  MEASUREMENT (§5), not by reading code — anyone claiming "source proves VRAM is
-  snapshotted" is guessing.
+  /checkpoint code for FlashBoot in either repo — it is a **RunPod platform-side
+  feature**, so the mechanism had to be read from RunPod's published docs (§6),
+  not the code.
 - **Strong corroborating signal that Flash's OWN serialization does NOT carry a
   loaded model:** Flash's class wrapper explicitly resets init state on
   pickle — `__getstate__` sets `state["_initialized"] = False`
@@ -278,6 +291,148 @@ Record for each call: `worker_id`, `worker_sha`, `load_s`, `gen_s`,
 `attn_impl`, wall-clock since deploy. The matrix of (worker_id changed?) ×
 (load_s cold/warm) answers every open question above with live numbers instead
 of inference.
+
+> **The web research below (§6) now resolves what §1-§2 left open, so the
+> experiment changes posture: it is no longer "discover IF FlashBoot snapshots
+> VRAM" (RunPod says it does) but "measure HOW LONG FlashBoot's revival survives
+> our idle gaps, and whether load-placement widens what it captures." Experiments
+> A-D still apply; interpret B/C against the eviction reality in §6.**
+
+---
+
+## 6. Web research — FlashBoot's actual mechanism (RunPod primary sources)
+
+The mechanism is not in `reference-code/` (§1). It IS in RunPod's published
+docs/blog. Raw quotes preserved verbatim; each is attributed.
+
+### 6a. FlashBoot DOES retain GPU/VRAM state (paged out, restored)
+
+RunPod blog, *What's new in Runpod Serverless: Faster cold starts…* — verbatim:
+
+> "It can page what's in VRAM back to system RAM or save it to NVMe flash storage,
+> which is especially powerful for intermittent workloads."
+
+> "We automatically page things in and out as traffic comes and goes."
+
+> "FlashBoot is our cold-start optimization layer, delivering sub-200ms cold
+> starts on active endpoints at no extra cost."
+
+> "The more popular your endpoint, the more FlashBoot helps."
+
+RunPod docs, *Endpoint configurations → FlashBoot* — verbatim:
+
+> "Reduces cold starts by retaining worker state after spin-down, allowing faster
+> 'revival' than fresh boots. Most effective on endpoints with consistent traffic
+> where workers frequently cycle between active and idle."
+
+**Reading:** this directly answers the §1 hypothesis — FlashBoot's retained state
+**includes VRAM contents** (paged to system RAM / NVMe), not just the container
+filesystem. So a revived worker *can* skip reloading the model. This is the very
+capability RunPod was chosen for, and it is real per RunPod's own words.
+
+### 6b. …but it is best-effort, host-local, and EVICTED after idle gaps
+
+The cost of the win: the paged-out state lives on a specific host's RAM/NVMe and
+is reclaimed as traffic ebbs. Two independent signals:
+
+- **Traffic-dependence (RunPod's own framing):** "Most effective on endpoints with
+  consistent traffic" / "The more popular your endpoint, the more FlashBoot
+  helps." FlashBoot is optimized for endpoints that cycle *frequently*, not for a
+  burst-then-quiet-for-minutes pattern.
+- **Real-world eviction (community, worker-vllm issue #111):** a user running
+  Llama-3.1-8B observed the model **"reinitialize and redownload weights
+  approximately 1 minute after the last request"** — i.e. after ~60s idle the
+  FlashBoot revival no longer applied and a full cold reload occurred. (An 8B
+  model; a 50GB DiffusionGemma is *more* pressure on the page-out tier, so expect
+  eviction no more generous.)
+
+### 6c. Realistic large-model numbers (not the sub-200ms headline)
+
+The sub-200ms / 500ms figures are for **small models on hot/active endpoints**.
+For large models the published/aggregated numbers are coarser:
+
+> (blog, original FlashBoot announcement) "95% of our cold-starts are less than
+> 2.3 seconds" — small-model, popular-endpoint regime.
+
+> (secondary roundup, RunPod-sourced) FlashBoot "reduces cold starts from 60s to
+> 10s, with subsequent cold starts taking only 10-15 seconds" — the large-model
+> regime; **seconds-to-tens-of-seconds, not sub-second**.
+
+> (RunPod guide) "for a 70B parameter model, GPU-memory initialization is an
+> inherent constraint that no caching layer fully eliminates."
+
+So even when FlashBoot helps a 50GB model, the floor is **~10-15s**, and only
+while the revival window is warm. Our observed 66-147s is the *no-revival* cold
+reload.
+
+### 6d. Model caching is a SEPARATE feature — download only, not VRAM
+
+Confirms prior doc §4. RunPod docs, *Model caching* — paraphrase with quotes:
+
+> "Model caching in network storage lets you download a model once so workers
+> don't re-download weights on every scale-up."
+
+> cached models are "Shared across workers" on the same host, "eliminating
+> redundant downloads"; "You aren't billed for worker time while your model is
+> being downloaded."
+
+It removes the **download**, not the **VRAM load**. We already get this via our
+NetworkVolume (`gpu_worker.py:33-37`). It does nothing for the 66-147s
+load-into-VRAM. The only thing that removes the VRAM-load is FlashBoot's
+VRAM-paging revival (6a) — when it's warm.
+
+### 6e. Active workers + idle timeout (the dependable levers), from the docs
+
+> *Active (min) workers:* "Minimum number of workers that remain warm and ready at
+> all times. Setting this to 1+ eliminates cold starts."
+
+> *Idle timeout:* "How long a worker stays active after completing a request
+> before shutting down. You're billed during idle time, but the worker remains
+> warm for immediate processing. Default: 5 seconds."
+
+Note our `idle_timeout=600` is a deliberate 10-min hold vs the 5s default. The
+docs do **not** state whether an in-flight/queued request resets the idle clock
+(open, as in §3) — but `workers_min ≥ 1` sidesteps it entirely by never spinning
+down.
+
+### 6f. What this changes in the recommendation
+
+- The §1/§5 "unknown — must measure IF FlashBoot snapshots VRAM" is **resolved:
+  it does** (6a). The experiment's job narrows to *how long the revival survives
+  our gaps* (6b) and whether load-placement widens capture (§2/Experiment D).
+- For our **intermittent-burst** usage (deploy, run a batch, idle for minutes,
+  come back), FlashBoot will frequently have **evicted** the revival → we pay the
+  cold reload anyway. So **do not rely on FlashBoot to dodge the 50GB load** for
+  iteration. Rely on **keep-warm** (`workers_min=1` for an active session, or stay
+  within the idle window) — that is the one mechanism RunPod guarantees
+  ("eliminates cold starts").
+- Keep `flashboot=True` (free, can only help) and still move model-load to init
+  (§2) — it costs nothing and gives FlashBoot the best chance to capture loaded
+  state when traffic IS dense.
+
+### 6g. Sources (web)
+
+- RunPod blog — *What's new in Runpod Serverless: Faster cold starts, batch
+  inference, and no-Docker deploys*:
+  <https://www.runpod.io/blog/whats-new-in-runpod-serverless-faster-cold-starts-batch-inference-and-no-docker-deploys>
+  (the VRAM-paging quotes, 6a)
+- RunPod blog — *Introducing FlashBoot: 1-Second Serverless Cold-Start*:
+  <https://www.runpod.io/blog/introducing-flashboot-serverless-cold-start>
+  (the 2.3s P95 / popularity-dependence quotes; no mechanism detail)
+- RunPod docs — *Serverless Overview* (cold-start definition; reduce via cached
+  models / FlashBoot / active workers):
+  <https://docs.runpod.io/serverless/overview>
+- RunPod docs — *Endpoint configurations* (FlashBoot "retaining worker state after
+  spin-down"; active workers; idle timeout):
+  <https://docs.runpod.io/serverless/endpoints/endpoint-configurations>
+- RunPod docs — *Model caching* (download-avoidance, separate from FlashBoot):
+  <https://docs.runpod.io/serverless/endpoints/model-caching>
+- GitHub — runpod-workers/worker-vllm issue #111 *Very slow cold starts even with
+  flashboot* (eviction ~1 min after last request):
+  <https://github.com/runpod-workers/worker-vllm/issues/111>
+- Secondary roundup (RunPod-sourced large-model numbers, 60s→10s): RunPod
+  serverless-for-generative-ai guide,
+  <https://www.runpod.io/articles/guides/serverless-for-generative-ai>
 
 ---
 
