@@ -1,0 +1,20 @@
+;; The consolidated pod context/skill loadout manifest — read by seon.config
+;; via aero (`SEON_CONFIG` overrides the path; `#profile` selects a per-cluster
+;; variant from `SEON_PROFILE`). ABSENT → the pod boots byte-identically to a
+;; no-config world (full env-dir skill scan + default-seed-blocks). PRESENT →
+;; the OPTIONAL override below. Every key fully namespaced; entries that ride
+;; registered schemas (a loadout's :seon.config/blocks → :seon.agent.ctx/block)
+;; are those maps verbatim. Add a new concern = add ONE key here + a resolver in
+;; seon.config (the "add more things to it" contract).
+{;; ── the curated POD skill corpus ──
+ ;; ONE physical .claude/skills dir, two consumers: these stay on disk for
+ ;; Claude Code; they are just dropped from the seon-agent catalog.
+ :seon.config/skills
+ {:seon.config/exclude [:browser-automation :clojure-testing]}
+
+ ;; ── per-role context loadouts (merged over default-seed-blocks at create) ──
+ ;; `:repl`'s body is always-on for EVERY agent — seeded as a :skill/repl block
+ ;; at the cached-prefix priority (16), reusing my.skills/skill-block.
+ :seon.config/loadouts
+ [{:seon.config/role         :default
+   :seon.config/default-load [:repl]}]}

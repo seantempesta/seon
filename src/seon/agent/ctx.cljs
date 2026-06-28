@@ -60,6 +60,7 @@
   (:require
     [clojure.string :as str]
     [cljs.reader :as edn]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
@@ -1775,10 +1776,18 @@
    scope — the creation-time copy that gives a fresh agent its COMPLETE
    :seon.agent/ctx so render needs no default fallback. Idempotent via
    install!'s upsert-by-name; `seon.agent/create!` calls it ONLY for a
-   genuinely new entity (a resumed agent keeps its own edited/removed blocks)."
+   genuinely new entity (a resumed agent keeps its own edited/removed blocks).
+
+   The seed is shaped by the OPTIONAL config loadout
+   ([[seon.config/resolve-loadout]]) for the scoped agent's role — config
+   absent → `default-seed-blocks` verbatim (byte-identical to today); present →
+   default-load skill bodies + per-role extra blocks merged in."
   {:malli/schema [:=> [:cat] ::result]}
   []
-  (install! (default-seed-blocks)))
+  (let [id (db/current-agent-id)]
+    (install! (config/resolve-loadout (default-seed-blocks)
+                                      (config/agent-role id)
+                                      (config/load-manifest)))))
 
 ;; ============================================================
 ;; Render pipeline — the agent's OWN block set, decoded + priority-sorted,

@@ -142,6 +142,11 @@
     ;; catalog/skill-block render fns `default-seed-blocks` wires by symbol.
     ;; Required here so its register! calls run and the build includes it.
     [my.skills]
+    ;; Config-driven context/skill loadout — the OPTIONAL manifest
+    ;; (`config/system.edn`) that curates the skill corpus + seeds per-role
+    ;; loadouts. Absent → byte-identical to a no-config boot. `boot-seed!`
+    ;; loads it ONCE and threads it to the skill + route seed steps.
+    [seon.config :as config]
     ;; Local-machine capability surface — A-9. Required so the agent
     ;; can call (seon.agent.fs/read-file ...) + (seon.platform/host) from
     ;; bootstrap-CLJS eval.
@@ -2048,6 +2053,10 @@
     (set! db/*conn* conn)
     (try
       (let [index-tx (await (core-index-tx conn))
+            ;; The OPTIONAL loadout manifest, read ONCE and threaded to the
+            ;; route + skills steps below ({} when config/system.edn is absent
+            ;; ⇒ every resolve-* is the identity ⇒ byte-identical seed).
+            manifest (config/load-manifest)
             check!   (fn [step {ok?   :seon.db/ok?
                                 error :seon.db/error}]
                        (when-not ok?
@@ -2084,13 +2093,17 @@
               (check! :core-routes
                       (await (db/transact!
                                {:seon.db/conn conn
-                                :seon.db/tx-data (route/core-routes-tx)})))
+                                :seon.db/tx-data (config/resolve-routes
+                                                   (route/core-routes-tx)
+                                                   manifest)})))
               ;; Skills corpus: one `:my.skills` row per SKILL.md under
               ;; `SEON_SKILLS_DIR` (default `.claude/skills`, the same dir
               ;; humans edit). Identity upsert on `:my.skills/name`, so an
               ;; Nth boot re-scans idempotently. Only transact when the scan
               ;; found files (an empty tx-data is a no-op to skip).
-              (let [skills-tx (my.skills/seed-skills-tx-data)]
+              (let [skills-tx (config/resolve-skill-rows
+                                (my.skills/seed-skills-tx-data)
+                                manifest)]
                 (when (seq skills-tx)
                   (check! :core-skills
                           (await (db/transact!
