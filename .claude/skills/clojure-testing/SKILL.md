@@ -1,143 +1,147 @@
 ---
 name: clojure-testing
-description: "Clojure test patterns for Seon. Use when writing tests, debugging test failures, working with generators or test-utils, or when tests fail with unexpected errors."
+description: "Test patterns for Seon — pod-first (CLJS). Use when writing or debugging .cljs tests, when a test fails with an unexpected error, when an async/Promise test never finishes, when a db-omitted (ambient) read sees the wrong conn, or when setting up a fresh in-memory datahike conn per test. Covers bin/test-cljs, cljs.test/async, awaiting capability-verb envelopes, the root set! of db/*conn* (CLJS has no binding across awaits), and example-tests-as-manual. The JVM mg/sample + user/run-tests generative idiom is the PAUSED track."
 ---
 
-# Clojure Testing
+# Clojure Testing — pod-first
 
-> See also: `docs/seon/components/testing.md`
+The active suite is **ClojureScript**, run in a fresh `:node-test` JVM via
+`bin/test-cljs` (~160 s). Tests double as the worked manual for the surface they
+cover — read `test/seon/db_test.cljs`, `test/seon/ctx_test.cljs`,
+`test/my/kb_test.cljs`, `test/my/skills_test.cljs` as the canonical examples.
 
-**How to run tests is documented in CLAUDE.md "Testing".** This skill covers patterns, fixtures, and debugging.
+> Hand-offs: `^:async`/`await`/Promise semantics → **`clojurescript`**; what
+> `db/transact!` / `db/query` actually do + the envelope shape →
+> **`datahike`**; errors-as-values / no-bare-keys mindset →
+> **`data-oriented-clojure`**. How to RUN the suite is in `CLAUDE.md` "Testing".
 
-## Test Fixtures
+## Running
 
-### Temporary Datalevin Connection
-
-Most tests need an isolated database. Use `with-temp-conn` from `seon.test-utils`:
-
-```clojure
-(require '[seon.test-utils :as tu])
-(require '[datalevin.core :as d])
-
-;; Provide a Datalevin schema, get a temp connection
-(tu/with-temp-conn my-schema
-  (fn [conn]
-    (d/transact! conn [{:my/name "test"}])
-    (is (= 1 (count (d/q '[:find ?e :where [?e :my/name _]] @conn))))))
+```bash
+bin/test-cljs              # compile (DEV) + run every *-test ns, ~160s
+bin/test-cljs --no-build   # skip compile; rerun out/test/test.js
 ```
 
-### Direct Mode (bypass flow infrastructure)
+It compiles **DEV, not release** on purpose: the core resolves fns by walking
+`goog.global` at munged paths (`seon.eval/lookup-value`, malli's CLJS
+instrument), which Closure `:simple`/`:advanced` would flatten away. Use it as
+the batch checkpoint **once per unit of work**, not after each sub-step
+(`CLAUDE.md` "Test cadence = token economy"). To verify ONE behavior fast, eval
+the fn directly against the live pod instead of running a whole ns.
 
-For tests that use `db/transact!` and `db/query` (the public API), bind `db/*direct-mode*` and `db/*conn-manager*` with a fake manager. The fake manager maps db-name keywords to connections.
+**Never fire overlapping `cljs.test/run-tests` in the LIVE pod** — it wedges the
+shared async continuation. Restart (`bin/seon restart pod`) for a pristine run;
+`bin/test-cljs` is the isolated path (its own JVM, no live-pod contention).
 
-`with-test-datalevin` provides a quick fixture mapping `:seon.ai` to a schemaless temp conn:
+## Fresh in-memory datahike conn per test
 
-```clojure
-(tu/with-test-datalevin
-  (fn []
-    ;; db/transact! and db/query work without the flow infrastructure
-    (db/transact! :seon.ai [{:my/key "val"}])))
-```
-
-For custom db-names or schemas, wrap `with-temp-conn` yourself. This is the pattern used in `validation_test.clj`:
-
-```clojure
-(defn- with-my-conn [f]
-  (tu/with-temp-conn my-datalevin-schema
-    (fn [conn]
-      (let [fake-mgr {::conn/port 0
-                      ::conn/connections (atom {:my-db {::conn/connection conn}})}]
-        (binding [db/*direct-mode* true
-                  db/*conn-manager* fake-mgr]
-          (f conn))))))
-
-;; Then in tests:
-(with-my-conn
-  (fn [conn]
-    (db/transact! :my-db [{::id 1 ::name "test"}])
-    (is (= "test" (::name (d/pull @conn '[*] [::id 1]))))))
-```
-
-### Pipeline Roundtrip Testing
-
-`assert-pipeline-roundtrip!` in `seon.db.pipeline-test` is the canonical generative test for schema development. Given a Malli `:map` schema, it:
-
-1. Validates schema constraints (no `:any`, no `[:maybe X]`, namespaced keys)
-2. Derives Datalevin schema via the bridge (`malli-map->datalevin-schema`)
-3. Generates N entities from the Malli schema
-4. Transacts each to a temp Datalevin DB
-5. Pulls each back and coerces (vector->set for `:set` keys, strips `:db/id`)
-6. Validates the pulled entity against Malli
-7. Asserts value equality (sets for cardinality-many, direct for scalars)
-
-Returns `{:pass-count N :fail-count M :failures [...]}`.
+The pod doesn't embed datahike — but a TEST opens a real `:memory` datahike conn
+directly (no wire-server), seeded like the pod boots. Each test gets its own
+instance (a fresh `:id` random-uuid) so they never see each other's data. This
+is a Promise (datahike connect is async):
 
 ```clojure
-(require '[seon.db.pipeline-test :refer [assert-pipeline-roundtrip!]])
+(require '[datahike.api :as d] '[seon.db :as db] '[seon.client :as client])
 
-(deftest my-entity-pipeline-test
-  (testing "my entity schema survives the full pipeline"
-    (let [schema [:map
-                  [:my.entity/id {:db/unique :db.unique/identity} :string]
-                  [:my.entity/name :string]
-                  [:my.entity/status [:enum :active :inactive]]
-                  [:my.entity/tags {:optional true} [:set :keyword]]]
-          result (assert-pipeline-roundtrip! schema
-                   {:identity-key :my.entity/id :num-samples 20})]
-      (is (zero? (:fail-count result))
-          (str "Failures: " (pr-str (:failures result))))
-      (is (= 20 (:pass-count result))))))
+(defn- fresh-conn
+  "Promise of a fresh :memory conn carrying the pod's boot schema."
+  []
+  (let [cfg {:store {:backend :memory :id (random-uuid)}
+             :schema-flexibility :write
+             :keep-history? true}]
+    (-> (d/create-database cfg)
+        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [conn]
+                 (-> (d/transact! conn {:tx-data (into (db/malli->datahike-schema
+                                                         client/agent-bootstrap-attrs)
+                                                        (db/tx-meta-datahike-schema))})
+                     (.then (fn [_] conn))))))))
 ```
 
-## Malli Generators
+Domain attrs need NOT be pre-installed — `db/transact!` lazy-installs an attr's
+schema on its first write. Pre-seed only the pod's boot schema (above).
 
-Seon uses Malli schemas for generative testing. Custom generators live on the schema itself:
+## The big CLJS gotcha: root `set!`, not `binding`
+
+The pod's verbs read `db/*conn*` **ambiently** (db-omitted), exactly as in
+production. To make those reads hit YOUR test conn you must `set!` the **root**
+binding — a `binding` form pops at the first `await`/microtask boundary, so it
+would not survive a single async hop:
 
 ```clojure
-;; Schema with custom generator
-(schema/register! ::my-type
-  [:string {:gen/elements ["alpha" "beta" "gamma"]}])
-
-;; Generate samples
-(require '[malli.generator :as mg])
-(mg/generate ::my-type)
-
-;; Property-based test
-(deftest my-property-test
-  (let [schema [:map [:id :string] [:count :int]]]
-    (doseq [sample (mg/sample schema 100)]
-      (is (m/validate schema sample)))))
+(defn- with-conn
+  "Fresh seeded conn set! as the ROOT db/*conn* for body (conn → Promise);
+   prior root restored after. NOT binding — CLJS dynamic bindings don't
+   survive await."
+  [body]
+  (-> (fresh-conn)
+      (.then (fn [conn]
+               (let [orig db/*conn*]
+                 (set! db/*conn* conn)
+                 (-> (js/Promise.resolve (body conn))
+                     (.finally (fn [] (set! db/*conn* orig)))))))))
 ```
 
-For generative function testing, use `(user/test-gen 'seon.ns)` — it generates inputs from `:malli/schema` metadata and checks outputs.
-
-## Common Failure Patterns
-
-| Symptom | Likely Cause | Fix |
-|---------|--------------|-----|
-| "Unregistered attributes in transaction" | Missing `schema/register!` for an attr | Register the attr in the source namespace |
-| "Malli validation failed for :attr" | Value doesn't match registered schema | Check what schema is registered, fix the value or the schema |
-| Instrumentation error on function call | Function args don't match `:malli/schema` | Read the error — it shows expected schema and a generated example |
-| LMDB assertion in tests | Bad type reaching Datalevin (e.g., String where Keyword expected) | Check validation gate is catching it; fix the schema type |
-| "Direct buffer memory" OOM | Too many test connections | Use `tu/with-small-db-size` fixture |
-
-## Mocking with-redefs
+Because that root is a SHARED global the whole suite mutates, a concurrent
+test's fiber can `set!` it between your async hops. Guard each `.then` that does
+an ambient read by **re-pinning** the conn first — a synchronous read right
+after a `set!` can't be interleaved:
 
 ```clojure
-(deftest my-test
-  (with-redefs [seon.render/invalidate-render-cache! (constantly nil)]
-    ;; Test code that would normally trigger UI refresh
-    ))
+(defn- pinned [conn f] (fn [x] (set! db/*conn* conn) (f x)))
 ```
 
-## Key Test Files
+## Async tests — `cljs.test/async` + the envelope
 
-| File | Purpose |
-|------|---------|
-| `test/seon/test_utils.clj` | Datalevin fixtures, time helpers |
-| `test/seon/db/pipeline_test.clj` | Generative pipeline roundtrip tests |
-| `test/seon/db/validation_test.clj` | Validation gate tests |
-| `test/seon/db/schema_roundtrip_test.clj` | Bridge roundtrip contract |
-| `test/seon/db/schema_test.clj` | Schema registration and derivation tests |
-| `test/seon/db/consistency_test.clj` | Cross-entity consistency checks |
-| `test/seon/db/datalevin/writer_test.clj` | Datalevin writer flow tests |
+`db/transact!` (and every `^:async` capability verb) ALWAYS resolves to a data
+**envelope** — it never rejects, never throws into the caller. Assert on the
+envelope's `:seon.db/ok?` (an eval can "succeed" yet the write did NOT happen):
+
+```clojure
+(deftest append-then-read-back
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (-> (db/transact! {:seon.db/tx-data [{:my.kb.shared/id "shared"
+                                                  :my.kb.shared/instructions
+                                                  [{:my.kb.shared/text "store provenance"
+                                                    :my.kb.shared/at (js/Date. 1000)}]}]})
+                (.then (fn [{ok? :seon.db/ok?}]
+                         (is (true? ok?) "an append is ONE nested-map transact"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+```
+
+Always call `done` on BOTH the success and the `.catch` rail — a forgotten
+`done` is the usual cause of an async test that "hangs" until the runner times
+out. A rejection should fail loudly (`(is false …)`), not silently pass.
+
+## Common failure patterns
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Async test never finishes | `done` not called on one rail (often the error rail) | call `done` in BOTH `.then` and `.catch` |
+| Ambient read sees another test's data | `binding` instead of root `set!`, or no re-pin before the read | use `with-conn` + `pinned` |
+| "Unregistered attributes in transaction" | missing `schema/register!` for an attr | register it in the owning ns |
+| `:malli.core/invalid-input/output` on a call | args/return don't match `:malli/schema` | read the explain — fix the call or the schema, don't coerce |
+| Empty `#{}` from a query that should match | attr misspelled, type mismatch, or ref-join-as-keyword | see the `datahike` skill's read traps |
+
+## Generative testing — PAUSED JVM track
+
+The `mg/sample` + `m/validate` property-test idiom and `(user/test-gen 'ns)` /
+`(user/run-tests …)` REPL verbs belong to the **paused JVM track** (run inside
+the embedded-datahike JVM via its REPL). They are NOT the default for pod work.
+Malli generators still attach to a schema the same way
+(`[:string {:gen/elements [...]}]`), and `mg/generate` works in CLJS — but the
+batch path is `bin/test-cljs`, and the boundary you're validating is the
+`schema/register!` + lazy-install + transact roundtrip exercised live in
+`db_test.cljs`, not a JVM pipeline-roundtrip harness.
+
+## Key test files
+
+| File | What it teaches |
+|---|---|
+| `test/seon/db_test.cljs` | `fresh-conn`, instrument-in-test setup, the envelope contract, query/pull shapes |
+| `test/seon/ctx_test.cljs` | `with-conn` root-`set!`, context composition contracts |
+| `test/my/kb_test.cljs` | `pinned` re-pin pattern, append/read-back, the DB-as-manual idiom |
+| `test/my/skills_test.cljs` | derived-state assertions (no stored flags), corpus-scan-can't-bit-rot |

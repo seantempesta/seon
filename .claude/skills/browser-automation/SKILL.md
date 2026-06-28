@@ -1,93 +1,91 @@
 ---
 name: browser-automation
-description: "Multi-agent browser coordination for Seon. Use when debugging web UI in browser, testing Datastar/SSE behavior, or verifying UI changes. Provides tab ownership patterns so agents don't step on each other's browser tabs."
+description: "Verify the Seon pod's OWN web UI in a real browser. Use when eyeballing the /world roster or a /agent/{id} page on http://127.0.0.1:7890, checking a Datastar morph rendered, or debugging a tile/console error. Provides Chrome-MCP tab-ownership so agents don't clobber each other's tabs — and the KEY limit: the browser agent 503s long-lived SSE streams, so verify the /feed server-side (node gunzip client), not in the browser."
 ---
 
-# Browser Automation for Seon Agents
+# Browser Automation — verifying the Seon pod UI
 
-You have Chrome MCP tools (`mcp__claude-in-chrome__*`) for browser automation. This skill covers **multi-agent coordination** - how to share browser resources without conflicts.
+You have Chrome MCP tools (`mcp__claude-in-chrome__*`) to look at the **pod's own
+web UI** on `http://127.0.0.1:7890` — the `/world` roster, a `/agent/{id}` page,
+the `/data` datom browser. This skill is coordination (don't clobber peer tabs)
++ the one hard limit (SSE doesn't verify in-browser).
 
-**Tool names:** This skill uses shorthand names (e.g., `navigate`, `computer screenshot`). The actual MCP tool names are prefixed with `mcp__claude-in-chrome__` (e.g., `mcp__claude-in-chrome__navigate`).
+**Tool names:** shorthand here (`navigate`, `computer screenshot`) maps to
+`mcp__claude-in-chrome__*` (e.g. `mcp__claude-in-chrome__navigate`). Load them
+via ToolSearch first (one batched `select:` call — see the MCP server note).
 
-## Tab Ownership Protocol
+## The KEY limit: SSE streams DON'T verify in the browser agent
 
-Agents share the browser. Follow these rules:
+The Datastar UI is `view = f(db)` morphed over a **long-lived gzip
+`text/event-stream`** (`/world/feed`, `/agent/{id}/feed`). The in-tool Chrome
+agent's network layer **503s long-lived event-streams**, so the page may load
+the shim but never receive a morph in the agent's view — that is a tooling
+artifact, NOT a broken feed.
 
-1. **Get context first:** `tabs_context_mcp` shows existing tabs
-2. **Create your own tab:** Use `tabs_create_mcp`, don't reuse tabs you didn't create
-3. **Track your tab ID:** Store it for the session, re-find if lost
-4. **Leave tabs open:** Let orchestrator or user clean up (they may want to inspect)
+So: confirm a feed actually pushes **server-side**, not in the browser.
 
-```
-# Session start
-tabs_context_mcp → see what exists
-tabs_create_mcp → get YOUR tab (remember this ID)
-navigate to your URL
-```
+- A tiny Node client that GETs the `/feed` URL, gunzips the stream, and prints
+  the `datastar-patch-elements` frames (the feed is `Content-Encoding: gzip`).
+- `bin/seon tail pod` — the `FEED OPEN` / `broadcast` log lines prove the
+  tx-listener fired and pushed.
+- A human eyeball on the real page.
 
-## Seon URLs
+The browser agent is for the STATIC render (did the shim load, is the layout/
+theme right, console errors, a `@post` button firing) — not for proving liveness.
+SSE mechanics → the **`datastar-web-ui`** skill.
 
-| Page | Path | Description |
-|------|------|-------------|
-| Dashboard | `/` | Main dashboard (root) |
-| Agent Observatory | `/agents` | Agent list and status |
-| Agent Detail | `/agents/{agent-id}` | Single agent view |
-| Flow Monitor | `/flows` | core.async flow status |
-| Log Viewer | `/logs` | Application logs |
-| Namespace Page | `/ns/{namespace}` | Per-namespace view (e.g., `/ns/seon.trading`) |
-| Function Call | `/ns/{namespace}/{function}` | POST to call, GET to read |
-| Health Check | `/api/health` | JSON health endpoint |
+## Tab ownership (don't step on peers)
 
-**Base URLs:**
-- HTTP: `http://localhost:8080`
-- HTTPS (Caddy): `https://localhost:3030`
-
-## Quick Workflow: Verify UI Change
-
-After editing a handler or component:
+Agents share the browser. Make your own tab; never reuse one you didn't create.
 
 ```
-1. tabs_create_mcp              → Your tab
-2. navigate to page             → Load it
-3. computer screenshot          → See current state
-4. find "the element"           → Get ref
-5. computer left_click ref      → Interact
-6. read_network_requests        → Check POST fired
-7. read_console_messages        → Check for errors
+tabs_context_mcp     # see existing tabs
+tabs_create_mcp      # YOUR tab — remember its id for the session
+navigate <url>       # load your page
+# leave tabs open — the orchestrator/human cleans up
 ```
 
-## Debugging Datastar SSE
+If a tab id goes invalid, `tabs_context_mcp` for fresh ids. Element refs
+invalidate on navigation — re-`find` after navigating.
 
-For SSE issues, also invoke `/datastar-web-ui` for attribute patterns.
+## Pod URLs (active, port 7890)
+
+| Page | Path |
+|---|---|
+| Root (= root agent's world) | `/` |
+| World roster | `/world` |
+| Agent page | `/agent/{id}` |
+| Datom browser | `/data` |
+| Agent debug (exact LLM bytes) | `/agent/{id}/debug` |
+
+(The old `:8080` JVM-track routes — `/agents`, `/flows`, `/logs`, `/ns/...` — are
+the paused track; ignore them for pod work.)
+
+## Verify a static UI change
 
 ```
-1. Check button has `data-on:click` (COLON not hyphen!)
-2. read_network_requests → Look for POST on click
-3. read_network_requests → Look for SSE connection (pending request)
-4. read_console_messages pattern="error|Datastar"
+1. tabs_create_mcp                  → your tab
+2. navigate http://127.0.0.1:7890/world
+3. computer screenshot              → layout + Phosphor theme correct?
+4. read_console_messages            → JS errors? (pattern "error|Datastar")
+5. find / computer left_click       → exercise a @post button (e.g. + new agent)
+6. read_network_requests            → POST fired? (call it BEFORE the click)
 ```
 
-## Inspect DOM
+## Common issues
 
-```javascript
-// Via javascript_tool
-document.querySelector('[data-on\\:click]').outerHTML
-typeof window.Datastar !== 'undefined' ? 'loaded' : 'NOT loaded'
-```
+| Problem | Fix |
+|---|---|
+| Page loads but never updates live | EXPECTED — browser agent 503s SSE; verify the feed server-side |
+| Tab id invalid | `tabs_context_mcp` for fresh ids |
+| Element ref stale | re-`find` after any navigation |
+| No network captured | call `read_network_requests` BEFORE the action |
+| `data-on:click` does nothing | it's `data-on:click` with a COLON, not a hyphen — see `datastar-web-ui` |
 
-## Common Issues
-
-| Problem | Solution |
-|---------|----------|
-| Tab ID invalid | Call `tabs_context_mcp` to get fresh IDs |
-| Element ref stale | Refs invalidate on navigation - re-find |
-| No network captured | Call `read_network_requests` BEFORE the action |
-| Screenshot fails | Can't screenshot chrome:// URLs - navigate first |
-
-## Key Files
+## Key files
 
 | File | Purpose |
-|------|---------|
-| `src/seon/web/routes.clj` | Route definitions |
-| `src/seon/web/sse.clj` | SSE core |
-| `src/seon/web/components.clj` | UI components |
+|---|---|
+| `src/seon/web/serve.cljs` | the pod HTTP server (port 7890) + POST handlers |
+| `src/seon/web/datastar.cljs` | the `/world` + `/agent/{id}` pages and their gzip SSE feeds |
+| `src/seon/web/router.cljs` | reitit routes from `:seon.route/*` datoms |
