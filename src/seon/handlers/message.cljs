@@ -28,7 +28,8 @@
   (:require
     [clojure.string :as str]
     [seon.agent :as agent]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.render :as render]))
 
 (defn- resolve-ref
   "Materialize a `{:db/id n}` ref into its identifying attrs. Returns
@@ -71,11 +72,13 @@
      `:seon.agent.message/hops` counter stays in the DATA MODEL (loop
      prevention) but is NOT displayed — it confused users
      (user-requested, 2026-06-10).
-   - Content rendered as MARKDOWN via the inspector's `[data-markdown]`
-     + marked.js mechanism. XSS-safe end-to-end: the attr value is
-     HTML-escaped by seon.ui.html at serialization, and the inspector's
-     `seonMarkdownAll` re-escapes the raw text before `marked.parse`,
-     so agent-authored inline HTML renders as visible text, never DOM."
+   - Content rendered as MARKDOWN server-side via the typed
+     `seon.render/block` renderer (`{:seon.render/markdown body}` →
+     `seon.ui.markdown/md->hiccup`). XSS-safe end-to-end: every text node
+     is HTML-escaped by seon.ui.html at serialization, so agent-authored
+     inline HTML renders as visible text, never DOM. No client-side
+     `data-markdown`/marked.js pass — the world shim loads only
+     datastar.js, so the markdown must be hiccup by the time it ships."
   {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
   [{:seon.db/keys [db] :seon.render/keys [node entity] :seon.agent/keys [id]}]
   (let [entity (or node entity)
@@ -114,5 +117,5 @@
           (str "→ " (str/join ", " tos))])
        (when (instance? js/Date at)
          [:span {:class "text-xs text-text-500"} (hh-mm-ss at)])]
-      [:div {:class "markdown mt-0.5"
-             :data-markdown (str/trim body)}]]]))
+      [:div {:class "markdown mt-0.5"}
+       (render/block :html {:seon.render/markdown (str/trim body)})]]]))

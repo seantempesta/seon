@@ -235,6 +235,10 @@
          "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
          "<title>" (brand/page-title b title-suffix) "</title>\n"
          "<link rel=\"stylesheet\" href=\"/css/output.css\">\n"
+         ;; The `.hljs-*` palette for SERVER-side Clojure source cards
+         ;; (seon.ui.clojure/clj->hiccup, via seon.render/block) — the eval
+         ;; cards on the transcript/canvas highlight without any client JS.
+         "<link rel=\"stylesheet\" href=\"/css/highlight-github-dark.css\">\n"
          (brand/css-style-tag)
          "<script type=\"module\" src=\"/js/datastar.js\"></script>\n"
          "</head>\n"

@@ -103,7 +103,8 @@
     [seon.db :as db]
     [seon.render.chat :as chat]
     [seon.schema :as schema]
-    [seon.ui.html :as html]))
+    [seon.ui.html :as html]
+    [seon.ui.markdown :as md]))
 
 ;; ============================================================
 ;; The hiccup predicate + the canonical value-or-fn shape.
@@ -442,9 +443,13 @@
    COMPACT (the root grid): purpose headline + agent id + the agent's
    last reply as readable text (`seon.render.chat/last-reply` — the
    conversation query, not raw message data), so an uncustomized
-   agent's grid tile is worth glancing at. EXPANDED (the agent view):
-   a greeting (by name when the store knows one), today's date and
-   time, the purpose line, and [[tile-line]].
+   agent's grid tile is worth glancing at. EXPANDED (the canvas): when
+   the agent has a reply, LEAD with that reply as a real markdown card
+   (`seon.ui.markdown/md->hiccup`) with the greeting/date demoted to a
+   thin subhead — so a plain chat answer renders richly on the canvas;
+   when there's no reply yet, a greeting empty-state (by name when the
+   store knows one), today's date and time, the purpose line, and
+   [[tile-line]].
 
    This fn is itself the worked example of the tile contract: ONE
    render emitting tagged compact + expanded blocks, plus the
@@ -491,12 +496,23 @@
          [:div {:class "seon-tile-reply text-xs text-text-300 whitespace-pre-wrap"}
           reply]
          [:div {:class "text-xs text-text-400 italic"} greet-line])]
-      [:div {:class "seon-tile-expanded flex flex-col gap-3 p-4"}
-       [:div {:class "text-lg text-text-50"} greet-line]
-       [:div {:class "text-xs font-mono text-signal"}
-        (str date-str " · " time-str)]
-       [:div {:class "text-sm text-text-200"} purpose-line]
-       [:div {:class "text-xs text-text-400 italic"} tile-line]]]
+      (if reply
+        ;; The agent has spoken: the canvas LEADS with the latest reply as
+        ;; a real markdown card (server-side md->hiccup — `block`'s message
+        ;; arm, called direct here because seon.render requires THIS ns), and
+        ;; demotes the greeting/date to a thin subhead. So a plain chat reply
+        ;; renders richly on the canvas with zero agent effort.
+        [:div {:class "seon-tile-expanded flex flex-col gap-2 p-4"}
+         (md/md->hiccup reply {:wrap-class "markdown text-sm text-text-100"})
+         [:div {:class "text-[10px] font-mono text-text-500 pt-1.5 border-t border-base-800"}
+          (str greet-line " · " date-str " · " time-str)]]
+        ;; Fresh agent, no reply yet — keep the greeting empty-state.
+        [:div {:class "seon-tile-expanded flex flex-col gap-3 p-4"}
+         [:div {:class "text-lg text-text-50"} greet-line]
+         [:div {:class "text-xs font-mono text-signal"}
+          (str date-str " · " time-str)]
+         [:div {:class "text-sm text-text-200"} purpose-line]
+         [:div {:class "text-xs text-text-400 italic"} tile-line]])]
      :seon.render/ai
      (str "Welcome — your tile is showing the core default "
           "(point :seon.render.live-tile/content at your own fn to "

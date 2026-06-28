@@ -31,7 +31,8 @@
    shows the macroexpansion `(cljs.core/sequence ...)`, not the
    readable thing the agent wrote."
   (:require
-    [clojure.string :as str]))
+    [clojure.string :as str]
+    [seon.render :as render]))
 
 (def ^:private source-truncate 800)
 (def ^:private result-summary-truncate 80)
@@ -99,16 +100,35 @@
                     tail (conj tail))]
     (str/join "\n" lines)))
 
-(defn render-html
-  "Hiccup card for the inspector's HTML pane.
+(defn- error-value
+  "Build the `:seon/error` value `seon.render/block` renders as an error
+   card, from a stored `:seon.eval/error` pr-str string. Pulls the FULL
+   `:seon.error/message` (untruncated, unlike `short-error`) by the same
+   cheap regex — no `read-string` of an arbitrary tagged payload — and
+   falls back to the whole string when the shape isn't recognized."
+  [error-str]
+  (let [s (str error-str)
+        msg (when-let [m (re-find #":seon\.error/message\s+\"([^\"]*)\"" s)]
+              (second m))]
+    {:seon.error/message (or msg s)
+     :seon.error/where   :eval}))
 
-   - Narration as muted text comment (if present).
+(defn render-html
+  "Hiccup card for the transcript / canvas — every part routes through the
+   typed `seon.render/block` renderer so each kind gets first-class TLC.
+
+   - Narration → a markdown card (`{:seon.render/markdown …}`).
    - Header line: eval id + duration + status pill.
-   - Source as `<pre><code class=\"language-clojure\">…</code></pre>`
-     so highlight.js (loaded from CDN in inspector-shell) colorizes it.
-   - On :ok — a single `=> <short>` line in dim amber.
-   - On :error — short summary inline + a collapsible `<details>` with
-     the full pr-str'd error map for forensics."
+   - Source → a highlighted Clojure card (`{:seon.render/source …}`,
+     server-side `seon.ui.clojure/clj->hiccup` — no client highlight.js).
+   - On :ok — a collapsible `<details>`: a one-line `=> <short>` summary;
+     expanded shows the full result skeleton as a highlighted Clojure
+     block (the stored `:seon.eval/result-edn` is the bounded data
+     projection; the live value lives at `result/<id>`).
+   - On :error — a collapsible `<details>`: a one-line `:error <short>`
+     summary; expanded shows the `:seon/error` card via the override-able
+     `seon.render.live-tile/error-tile` seam (so acme's branded error card
+     applies here too)."
   {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
   [{:seon.render/keys [node entity]}]
   (let [entity    (or node entity)
@@ -121,14 +141,9 @@
         dur       (:seon.eval/duration-ms entity)
         status-class (if ok? "text-amber-400" "text-error")]
     [:div {:class "py-1"}
-     ;; Narration is markdown emitted by the agent (`## heading`,
-     ;; `**bold**`, lists). marked.js + the inspector-shell's
-     ;; MutationObserver expand `[data-markdown]` to real HTML on
-     ;; load and after every SSE morph. AI pane keeps it raw — LLMs
-     ;; read markdown fine as text.
      (when (and narration (not (str/blank? narration)))
-       [:div {:class "markdown mb-0.5"
-              :data-markdown (str/trim narration)}])
+       [:div {:class "markdown mb-0.5"}
+        (render/block :html {:seon.render/markdown (str/trim narration)})])
      [:div {:class "flex items-baseline gap-2"}
       [:span {:class "text-xs font-mono font-semibold text-amber-500"}
        (str "eval " eid)]
@@ -136,20 +151,23 @@
         [:span {:class "text-xs text-text-500"} (str dur "ms")])
       [:span {:class (str "text-xs font-mono " status-class)}
        (if ok? ":ok" ":error")]]
-     [:pre {:class "text-xs whitespace-pre-wrap mt-0.5 rounded bg-base-900 p-1.5 overflow-x-auto"}
-      [:code {:class "language-clojure hljs"} (str/trim src)]]
+     [:div {:class "mt-0.5"}
+      (render/block :html {:seon.render/source (str/trim src)})]
      (cond
        ok?
        (when-let [r (short-result res-edn)]
-         [:div {:class "text-xs font-mono text-amber-300/70 mt-1"}
-          (str "=> " r)])
+         [:details {:class "mt-1"}
+          [:summary {:class "text-xs font-mono text-amber-300/70 cursor-pointer"}
+           (str "=> " r)]
+          [:div {:class "mt-1"}
+           (render/block :html {:seon.render/source (str res-edn)})]])
 
        (string? err-str)
        [:details {:class "mt-1"}
         [:summary {:class "text-xs font-mono text-error cursor-pointer"}
          (str ":error " (short-error err-str))]
-        [:pre {:class "text-xs font-mono whitespace-pre-wrap text-error/80 mt-1 p-1.5 rounded bg-base-900"}
-         err-str]]
+        [:div {:class "mt-1"}
+         (render/block :html (error-value err-str))]]
 
        :else
        [:div {:class "text-xs font-mono text-error mt-1"}
