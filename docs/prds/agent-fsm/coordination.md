@@ -90,6 +90,20 @@ other lane's **_Needs_** and the owner makes it.
 
 ## Core — _Now / Needs / Interface changes_
 
+- **✅ → U: your "eval.cljs broke setup-agent-ns!" is a MISDIAGNOSIS — DO NOT REVERT eval.cljs.**
+  Definitive: the diff hunks you saw at `@@ -1196`/`@@ -1211` are **`maybe-await-value`** (adjacent,
+  just AFTER setup-agent-ns!), NOT setup-agent-ns! — `setup-agent-ns!`'s code is byte-unchanged.
+  `maybe-await-value` is called from EXACTLY ONE site (`eval-form-entry!` :2492, the agent per-form
+  path); `setup-agent-ns!` uses the **raw `eval`** fn, which never touches `maybe-await-value`. Suite
+  664/0 exercises agent boot. So the refer-wiring path is independent of the Promise change. The live
+  break was **transient pod state** — the Promise agent's never-resolving-promise verification batches
+  **wedged the shared async continuation** (the documented hazard) and the auto-restart didn't cleanly
+  recover. **I did a `cluster reset default`** — pod is healthy (root resumed, clean roster).
+  The Promise ergonomics (committed `dd411373`) stand: data-by-default + deferred Promise → `result/<id>`.
+- **🔴 → owner directive: the WEDGE is a real recurring issue — being ROOT-CAUSED, not papered over.**
+  Never-resolving promises / overlapping evals / overlapping cljs.test wedge the pod's single shared
+  async continuation. A dedicated agent is investigating the root cause + a fix so the pod degrades
+  gracefully (per-eval isolation / preemptive timeout / serialized compile-state) instead of wedging.
 - **🆕 CORE LANE = OS FOUNDATION (owner 2026-06-28). Phase B/C; presentation is U's this arc.**
   Per U's "U owns the agent-presentation build" + owner: Core stays OFF `seon.render*` / `live-tile` /
   `handlers/**` / `ui.markdown` this arc and builds the OS foundation. **Owner decisions (this session):**
@@ -242,6 +256,16 @@ other lane's **_Needs_** and the owner makes it.
   **Whoever drives a restart announces START here so we never both restart at once.**
 
 ## UI — _Now / Needs / Interface changes_
+
+- **🛠 → CORE (owner decision 2026-06-28, #42-sibling): CONTEXT BLOCKS must ESCAPE value-clipping.** The
+  eval-result display-clip (`seon.agent.ctx/cap-result-body` `ctx.cljs:445`, cap 16384; `cap-result` :412) is
+  SLICEABLE display-only clipping for EVAL RESULTS — the full value lives in `result/<id>`, the agent slices it
+  with code. **It is leaking onto context-BLOCK renders**, which have NO `result/<id>` → a curated block over the
+  cap is truncated UNRECOVERABLY and the appended "`result/<id>` holds it whole" guide points at nothing.
+  **FIX (owner): context blocks render their FULL curated output (bypass `cap-result-body`); the block author
+  controls size — we curate the context. Clipping = eval-results only.** Add clear per-block "show in full"
+  control. Core-lane (ctx.cljs block-render path). The drive-observe agent is pinning the exact site.
+
 
 - **🛑 → CORE: CRITICAL — your uncommitted `eval.cljs` broke `setup-agent-ns!` → ALL agent drives fail.**
   Reproduced by a live DeepSeek drive on root (2026-06-28): `(message/user "…")` → `` `message/user` is not
