@@ -1152,6 +1152,15 @@
   [:map
    [::kind  ::kind]
    [::attrs ::attrs]])
+(schema/register! ::kind-count  :int)
+(schema/register! ::attr-count  :int)
+(schema/register! ::datom-count :int)
+(schema/register! ::inventory
+  [:map
+   [::kinds       [:vector ::inventory-row]]
+   [::kind-count  ::kind-count]
+   [::attr-count  ::attr-count]
+   [::datom-count ::datom-count]])
 
 (defn- row-origin-scan
   "ONE pass over every live datom `[e a tx]` — the provenance facts the
@@ -1217,77 +1226,51 @@
                  ::query '[:find ?s ?k :where [?s :seon.schema/key ?k]]}))))
 
 (defn store-inventory
-  "What this cluster's store holds RIGHT NOW — one row per attribute
-   NAMESPACE (the kind), carrying every attr of that namespace that
-   has at least one live row, with its entity count. Derived entirely
-   from the datoms in the db you pass: an attr appears the moment its
-   first row lands, and an attr whose rows are all retracted simply
-   vanishes from the next run. Attrs that are only registered in code
-   (no data yet) do NOT show — registration is readable in the
-   rendered namespace sources; this surface is existence + sparsity.
-   Re-run it whenever you want fresh numbers — this is an ordinary
-   query, not a snapshot.
+  "Discovery call: WHICH ATTRIBUTES HOLD DATA in this cluster's store
+   RIGHT NOW, so you know what you can query for. Returns a map:
 
-   DEFAULT = the data added AFTER bootstrap: a row counts only when
-   its identity datom did NOT land under a `:core-seed` boot tx
-   ([[bootstrap-row-ids]] — per-ROW provenance, never a name-list, so
-   agent-authored `:seon.fn` rows count while the boot index's
-   thousands do not, and an agent-registered `:my.workout` shows the
-   moment its first row lands). Transaction entities (provenance
-   bookkeeping) are also excluded. Kinds with zero post-bootstrap
-   rows simply don't appear. Pass `{:seon.db/system? true}` for the
-   FULL system inventory — every row including the compiled
-   core's boot index (`:seon.fn`, `:seon.schema`, `:seon.test`,
-   `:seon.ns`, tx provenance rows).
+     {:seon.db/kinds       [{:seon.db/kind  :my.kb           ; the attr namespace
+                             :seon.db/attrs {:my.kb/question 3   ; attr -> row count
+                                             :my.kb/answer   3}}
+                            …
+                            {:seon.db/kind :seon.eval …}]    ; core kinds last
+      :seon.db/kind-count  9     ; distinct kinds (attr namespaces) with data
+      :seon.db/attr-count  53    ; distinct attrs with data
+      :seon.db/datom-count 124}  ; total entity/attr pairs in scope
 
-   Check this BEFORE researching or registering anything new: a kind
-   that already exists means prior agents stored data you can query
-   (datalog the listed attrs directly — the attr names here are the
-   exact keywords to put in your :where clauses), and a shape that
-   already exists must be REUSED, never forked in parallel.
+   `:seon.db/kinds` is one row per attr NAMESPACE (the kind), each
+   carrying every attr of that namespace that has ≥1 live row with its
+   entity count. Pure query, not a snapshot — an attr appears the
+   moment its first row lands and vanishes when all its rows retract.
+   Attrs only REGISTERED (no rows yet) don't show; pair with
+   [[installed-schema]] to see every registered attr-namespace.
 
-   THIS SURFACE OMITS REGISTERED-BUT-DATALESS KINDS (it's existence +
-   sparsity, not the schema catalog). To find EVERY registered kind —
-   including ones with zero rows you'd otherwise re-invent — pair it
-   with [[installed-schema]]:
+   DEFAULT scope = data added AFTER bootstrap. Boot-index rows (the
+   compiled core's `:seon.fn`/`:seon.schema`/`:seon.ns`/seed, minted
+   under a `:core-seed` tx — thousands of datoms) and transaction
+   entities are excluded by per-ROW provenance ([[bootstrap-row-ids]]),
+   so agent-authored rows count while the boot index does not. Pass
+   `{:seon.db/system? true}` for the FULL inventory including the boot
+   index. Kinds are ordered user-domain-first ([[core-kinds]]),
+   alphabetical within each group.
 
-     (->> (keys (db/installed-schema @db/*conn*))
-          (keep namespace) distinct sort)
-     ;; every attr-namespace the conn knows; a hit here means it's
-     ;; already registered — reuse it instead of minting :my.new.thing.
+   Check this BEFORE researching or registering: a kind that exists
+   means data you can query — datalog its listed attrs directly (the
+   attr names are the exact :where keywords) — and a shape that exists
+   must be REUSED, never forked.
 
-   ORDERING serves that consult-first read: USER-DOMAIN kinds — the
-   ones agents created for THIS human, the rows you came to consult —
-   sort FIRST; the core's own bookkeeping kinds (evals, turns,
-   program-graph rows) follow. Alphabetical within each group. A kind
-   is core iff [[core-kinds]] says so (its `:seon.schema/key`
-   row is a bootstrap row — derived per call from tx provenance,
-   never a name-list).
-
-   ;; what has this cluster stored? (post-bootstrap rows only) — the SHAPE,
-   ;; report the kinds/counts YOUR call returns:
-   (seon.db/store-inventory)
-   ;; => [{:seon.db/kind :my.kb.codebase            ; user domains first
-   ;;      :seon.db/attrs {:my.kb.codebase/answer «n»
-   ;;                      :my.kb.codebase/question «n»}}
-   ;;     {:seon.db/kind :my.workout              ; agent-registered
-   ;;      :seon.db/attrs {:my.workout/date «n», :my.workout/type «n»}}
-   ;;     …
-   ;;     {:seon.db/kind :seon.agent …}]            ; core last
-
-   ;; EVERYTHING, boot index included:
-   (seon.db/store-inventory {:seon.db/system? true})
-
-   ;; then read a kind's rows with the attrs it lists, e.g.:
-   (seon.db/query {:seon.db/query
-                   '[:find ?q :where [?e :my.kb.codebase/question ?q]]})"
+   (def inv (seon.db/store-inventory))
+   (keys inv)                                ; the section keys
+   (count (:seon.db/kinds inv))              ; how many kinds hold data
+   (seon.db/query {:seon.db/query            ; then read one
+                   '[:find ?q :where [?e :my.kb/question ?q]]})"
   {:malli/schema
    [:function
-    [:=> [:cat] [:vector ::inventory-row]]
+    [:=> [:cat] ::inventory]
     [:=> [:cat [:map [::db {:optional true} :any]
                      [::conn {:optional true} ::conn]
                      [::system? {:optional true} ::system?]]]
-         [:vector ::inventory-row]]]}
+         ::inventory]]}
   ([] (store-inventory {}))
   ([{::keys [db conn system?] :or {conn *conn*}}]
    (let [db (or db @(internal/resolve-conn conn))
@@ -1303,14 +1286,18 @@
                                            (contains? tx-rows e))))
                             m
                             (update m a (fnil inc 0))))
-                        {} pairs)]
-     (->> counts
-          (group-by (fn [[a _]] (keyword (namespace a))))
-          ;; User-domain kinds FIRST (consult-first — see docstring),
-          ;; core kinds after; alphabetical within each group.
-          (sort-by (fn [[ns-kw _]]
-                     [(if (contains? sub-kinds ns-kw) 1 0)
-                      (str ns-kw)]))
-          (mapv (fn [[ns-kw attr-counts]]
-                  {::kind  ns-kw
-                   ::attrs (into (sorted-map) attr-counts)}))))))
+                        {} pairs)
+         rows   (->> counts
+                     (group-by (fn [[a _]] (keyword (namespace a))))
+                     ;; User-domain kinds FIRST (consult-first — see
+                     ;; docstring), core kinds after; alphabetical within.
+                     (sort-by (fn [[ns-kw _]]
+                                [(if (contains? sub-kinds ns-kw) 1 0)
+                                 (str ns-kw)]))
+                     (mapv (fn [[ns-kw attr-counts]]
+                             {::kind  ns-kw
+                              ::attrs (into (sorted-map) attr-counts)})))]
+     {::kinds       rows
+      ::kind-count  (count rows)
+      ::attr-count  (count counts)
+      ::datom-count (reduce + 0 (vals counts))})))

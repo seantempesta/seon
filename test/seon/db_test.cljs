@@ -443,6 +443,36 @@
                    (is (= "Alpha" (::name e)))))))
       done)))
 
+(deftest store-inventory-returns-a-map-of-kinds-with-data
+  ;; The discovery surface: WHICH ATTRS HOLD DATA. Returns a map (NOT a
+  ;; bare vector) so `(keys inv)` / keyword lookup work — the agent reads
+  ;; :seon.db/kinds (rows) + the headline counts to decide what to query.
+  (async done
+    (with-conn
+      (fn [conn]
+        (.then (tx! conn [{::name "Alpha" ::rank 1}
+                          {::name "Seon"  ::rank 2}])
+               (fn [_]
+                 (let [inv (db/store-inventory {::db/conn conn})
+                       row (->> (:seon.db/kinds inv)
+                                (filter (fn [r] (= :seon.db-test
+                                                   (:seon.db/kind r))))
+                                first)]
+                   ;; map-out: keyword access works (old vector threw on keys)
+                   (is (map? inv))
+                   (is (vector? (:seon.db/kinds inv)))
+                   (is (every? keyword? (keys inv)))
+                   ;; the user-domain kind appears with its attrs + counts
+                   (is (some? row) "the :seon.db-test kind is inventoried")
+                   (is (= 2 (get-in row [:seon.db/attrs :seon.db-test/name])))
+                   (is (= 2 (get-in row [:seon.db/attrs :seon.db-test/rank])))
+                   ;; headline counts are consistent with the rows
+                   (is (= (count (:seon.db/kinds inv))
+                          (:seon.db/kind-count inv)))
+                   (is (pos? (:seon.db/attr-count inv)))
+                   (is (pos? (:seon.db/datom-count inv)))))))
+      done)))
+
 (deftest query-accepts-explicit-db
   ;; Caller can pass a frozen ::db/db value (e.g. :db-after from a tx-report)
   ;; instead of going through @conn — useful in listener handlers.

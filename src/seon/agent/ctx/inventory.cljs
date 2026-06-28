@@ -168,7 +168,7 @@
         ;; drowning the one `my.kb` line under bookkeeping. Empty after the
         ;; filter → "" → the section reactively vanishes (a fresh cluster
         ;; with no stored knowledge shows no inventory).
-        rows (->> (db/store-inventory {:seon.db/db db})
+        rows (->> (:seon.db/kinds (db/store-inventory {:seon.db/db db}))
                   (remove (fn [{kind :seon.db/kind}]
                             (str/starts-with? (name kind) "seon."))))]
     (if (seq rows)

@@ -172,7 +172,8 @@
                                       inventory (db/store-inventory
                                                   {:seon.db/db db})
                                       kinds     (set (map :seon.db/kind
-                                                          inventory))]
+                                                          (:seon.db/kinds
+                                                            inventory)))]
                                   ;; the seeded reuse surface IS domain attrs
                                   ;; (S-21 production-bug pin: agent DATA
                                   ;; domains discriminate by PROVENANCE,

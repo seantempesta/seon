@@ -269,9 +269,10 @@
 ;;; ───────────────────────────────────────────────────────────────────────
 
 (defn inventory
-  "Discovery call: every kind the store holds, one row per attribute
-   namespace with per-attr counts."
-  {:malli/schema [:=> [:cat] [:vector :any]]}
+  "Discovery call: which attributes hold data. Returns a map with
+   `:seon.db/kinds` (one row per attr namespace with per-attr counts)
+   plus `:seon.db/kind-count`/`:seon.db/attr-count`/`:seon.db/datom-count`."
+  {:malli/schema [:=> [:cat] :map]}
   []
   (db/store-inventory))
 
