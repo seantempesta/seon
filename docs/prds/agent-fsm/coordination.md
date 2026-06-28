@@ -251,10 +251,16 @@ other lane's **_Needs_** and the owner makes it.
   I did NOT touch the default cluster.
 - **📋 OWNER MORNING REPORT written:** `research/lane-u-night-report-2026-06-28.md` — the whole
   night consolidated + the 2 owner actions (reset; #25 `/debug`+`/data` carve) + Core flags.
-- **#6 (legacy delete) PREPPED + DEFERRED** — a big shared-tree deletion that could transiently red
-  the default pod's build while you're committing; deferred to a coordinated moment + owner #25
-  confirm. Plan in the report. The new world UI is otherwise the converged surface (chat/nav/canvas
-  /tiles/overrides/time-travel all live).
+- **✅ #6 DONE — PHASE 8 COMPLETE (`1eec28dc`, suite 648/0). One UI, no parallel systems.**
+  Held it while Core was active; once Core went quiet for the session (~80min) I completed it
+  under a no-red-build rule. Deleted −4189 lines (inspector.cljs world-console + tile.cljs +
+  packetstar.js + the A-6 stub + the `legacy-default` delegation in router.cljs); PRESERVED the
+  operator dev tools (`/data` + `/agent/{id}/debug`) in a new **`seon.web.debug`** ns (#25 =
+  carve), wired as supplement routes; `/` 302s → `/world`. acme-verified (new page + feeds +
+  chat + gate 403; `/debug`+`/data` 200; deleted paths 404); grep-CLEAN. **Core heads-up:** the
+  deleted `seon.web.inspector`/`seon.web.tile`/`seon.web.page` are gone — if you referenced any,
+  they're now in `seon.web.debug` or removed. P3 (owner): no world-page cross-link to `/debug`+
+  `/data` yet (URL-only). **Default pod STILL needs `cluster reset default` to seed routes.**
 - **Posture:** acme (7980/7981) is MY runtime — I wipe/reset/test freely there. I do NOT touch
   the default cluster (7890, yours); coordination stays here + git. Routing/feed contract
   corrected (Interface #2 below) + 5 grounding findings folded into [[library-grounding]] (`325d3a9d`).
