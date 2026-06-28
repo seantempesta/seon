@@ -25,7 +25,15 @@
         :ok? false
         :narration string     ; same `;;`-comment accumulation rule
         :source string        ; the bad span (offset → recovery point)
-        :error string}        ; rewrite-clj's parser message
+        :error string         ; rewrite-clj's parser message
+        :span [start end]     ; ABSOLUTE char offsets of the bad span in
+                              ; `text` — what a token-canvas re-noise step
+                              ; maps back to mask positions
+        :error-kind keyword}  ; classified failure (`classify-read-error`):
+                              ; :eof / :unmatched-delimiter / :invalid-token
+                              ; / :read — the re-noise / repair layer
+                              ; dispatches on this (tail vs point re-mask;
+                              ; :invalid-token is the embedding-lookup hook)
 
        {:kind :comment
         :narration string}    ; either trailing `;;` comment lines with NO
@@ -352,13 +360,57 @@
         ;; comma is Clojure whitespace, but rewrite-clj tags it
         ;; :comma; without it here the sexpr call throws and the
         ;; comma poisons the span up to the next recovery anchor.
-        (#{:whitespace :newline :comma} tag)
+        ;; :uneval is a `#_` discard — the reader IGNORES the discarded
+        ;; form (discard family); its node has no sexpr (rcn/sexpr throws
+        ;; "unsupported operation"), so without this branch a top-level
+        ;; `#_foo` falsely reads as a :read failure. Drop it like
+        ;; whitespace (a bare top-level discard carries nothing to eval).
+        (#{:whitespace :newline :comma :uneval} tag)
         {:kind :whitespace :end end}
 
         :else
         {:kind :form :source src :form (rcn/sexpr node) :tag tag :end end}))
     (catch #?(:clj Exception :cljs :default) e
       {:kind :error :error (#?(:clj .getMessage :cljs .-message) e)})))
+
+;; ============================================================
+;; Read-failure classification
+;; ============================================================
+
+(defn- classify-read-error
+  "Map a rewrite-clj parse-failure message to an error-kind keyword the
+   re-noise / repair layer dispatches on. The kinds, with their recovery
+   disposition (SAFE = mechanically completable, intent-preserving;
+   UNSAFE = needs the agent / a lookup — never silently rewritten):
+
+     :eof                 — unclosed delimiter/string/regex (EOF family).
+                            SAFE: parinferish closes it (`seon.repair`).
+     :unmatched-delimiter — a stray closer. SAFE: drop the surplus.
+     :odd-map             — a map literal with an odd form count
+                            (`{:a 1 :b}`). UNSAFE: a value is MISSING —
+                            guessing it is guessing intent.
+     :bad-metadata        — `^x` where x isn't a map/kw/sym/string. UNSAFE.
+     :invalid-token       — an unreadable token (`3x`, a lone `:`). UNSAFE:
+                            the natural hook for an embedding / source lookup.
+     :read                — anything else (generic broken span). UNSAFE.
+
+   Matched on the STABLE error CORE, not the whole message: rewrite-clj
+   wraps some messages with a `[line L, col C]` PREFIX and others with an
+   `[at line L, column C]` SUFFIX, so a prefix match misses half of them.
+   The cores mirror tools.reader's `impl/errors.clj` families (eof-error /
+   throw-unmatch-delimiter / throw-odd-map / throw-bad-metadata /
+   throw-invalid*). A wording drift falls through to `:read` — never
+   throws, so an unrecognized message degrades to the generic kind rather
+   than breaking the parse."
+  [msg]
+  (cond
+    (or (str/includes? msg "Unexpected EOF")
+        (str/includes? msg "EOF while reading"))    :eof
+    (str/includes? msg "Unmatched delimiter")       :unmatched-delimiter
+    (str/includes? msg "No value supplied for key") :odd-map
+    (str/includes? msg "Metadata")                  :bad-metadata
+    (str/includes? msg "Invalid")                   :invalid-token
+    :else                                           :read))
 
 ;; ============================================================
 ;; Public surface
@@ -464,8 +516,11 @@
                 (let [recovery (find-recovery-point text offset)]
                   (recur recovery
                          []
-                         (conj out {:kind      :read
-                                    :ok?       false
-                                    :narration (join-narration pending)
-                                    :source    (subs text offset recovery)
-                                    :error     (:error token)})))))))))))
+                         (conj out {:kind       :read
+                                    :ok?        false
+                                    :narration  (join-narration pending)
+                                    :source     (subs text offset recovery)
+                                    :error      (:error token)
+                                    :span       [offset recovery]
+                                    :error-kind (classify-read-error
+                                                  (:error token))})))))))))))

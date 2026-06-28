@@ -361,10 +361,68 @@
               (str "expected kinds " (pr-str expected-kinds-contain)
                    " all present, got " (pr-str kinds))))
         ;; Every :read entry must have :ok? false + non-blank :source + :error
+        ;; + the re-noise/repair fields (:span absolute offsets, :error-kind).
         (doseq [e entries :when (= :read (:kind e))]
           (is (false? (:ok? e)))
           (is (string? (:source e)))
-          (is (string? (:error e))))))))
+          (is (string? (:error e)))
+          (is (vector? (:span e)))
+          (is (= 2 (count (:span e))))
+          (is (keyword? (:error-kind e))))))))
+
+;; ============================================================
+;; :error-kind classification — every rewrite-clj read-throw the
+;; re-noise / repair layer dispatches on. Cores grounded in
+;; tools.reader's impl/errors.clj families (cited in classify-read-error).
+;; rewrite-clj wraps some messages with a `[line L, col C]` PREFIX and
+;; others with an `[at line …]` SUFFIX — these cases pin BOTH shapes so a
+;; prefix-only matcher (the original bug) can't regress.
+;; ============================================================
+
+(def error-kind-cases
+  [{:in "(a b c"          :kind :eof                 :note "unclosed list"}
+   {:in "[1 2 3"          :kind :eof                 :note "unclosed vector"}
+   {:in "{:a 1"           :kind :eof                 :note "unclosed map"}
+   {:in "#{1 2"           :kind :eof                 :note "unclosed set"}
+   {:in "(str \"oops"     :kind :eof                 :note "unterminated string (suffix-form msg)"}
+   {:in "(map #(+ % 1"    :kind :eof                 :note "unclosed anon-fn"}
+   {:in "(a))"            :kind :unmatched-delimiter :note "surplus closer"}
+   {:in "(+ 1 3x)"        :kind :invalid-token       :note "invalid number"}
+   {:in "(get m :)"       :kind :invalid-token       :note "lone colon (prefix-form msg)"}
+   {:in "{:a 1 :b}"       :kind :odd-map             :note "odd map — value MISSING (unsafe to fix)"}
+   {:in "^123 (foo)"      :kind :bad-metadata        :note "metadata not a map/kw/sym/string"}])
+
+(deftest error-kind-classification
+  (doseq [{:keys [in kind note]} error-kind-cases]
+    (testing (str note " — " (pr-str in))
+      (let [reads (filter #(= :read (:kind %)) (parse/parse-forms in))
+            ek    (:error-kind (first reads))]
+        (is (= kind ek)
+            (str "expected :error-kind " kind " got " (pr-str ek)
+                 " (msg: " (:error (first reads)) ")"))))))
+
+;; ============================================================
+;; Borrowed false-positive guard — inputs the real ClojureScript reader
+;; ACCEPTS (corpus lifted from reference-code/.../cljs/reader_test.cljs)
+;; must NEVER produce a :read failure in our parser. We don't start from
+;; zero: the reader's own accepted corpus is our regression net against
+;; mis-flagging valid Clojure as broken.
+;; ============================================================
+
+(def reader-accepted-corpus
+  ;; valid forms the cljs reader round-trips (reader_test.cljs)
+  ["1" "-1" "-1.5" "[3 4]" "\"foo\"" ":hello" "goodbye" "%" "#{1 2 3}"
+   "(7 8 9)" "foo/bar" "\\a" "^String {:a 1}" "[:a b #{c {:d [:e :f :g]}}]"
+   ":foo/bar" "nil" "true" "false" "#_nope 2" "{:a 1 :b 2 :c 3}"
+   "#js [1 2 3]" "#js {:foo \"bar\"}" "#inst \"2010-11-12T13:14:15.666-05:00\""
+   "#uuid \"550e8400-e29b-41d4-a716-446655440000\""
+   "(map #(+ % 1) [1 2 3])" "#?(:clj 1 :cljs 2)" "#'foo" "`(a ~b ~@c)"])
+
+(deftest reader-accepted-never-misflagged
+  (doseq [in reader-accepted-corpus]
+    (testing (str "valid reader input must not :read-fail — " (pr-str in))
+      (is (not-any? #(= :read (:kind %)) (parse/parse-forms in))
+          (str "mis-flagged valid input as broken: " (pr-str in))))))
 
 ;; ============================================================
 ;; Narration semantics on recovery — narration accumulated before a
