@@ -1188,6 +1188,38 @@
                        (pr-str id) "—" (error/->message e))))
   nil)
 
+(def home-ns-require-specs
+  "THE canonical require list every agent's home namespace is wired with —
+   the single source of truth, shared by [[setup-agent-ns!]] (which INSTALLS
+   it) and `seon.agent.ctx.namespaces/cur-ns-workspace-stub` (which RENDERS it
+   VERBATIM into the agent's workspace block). No parallel reconstruction, no
+   hidden aliasing: the agent SEES the exact aliases/refers its reflexive
+   `(message/user …)` / `(wait …)` / `(schema/register! …)` / `(db/transact! …)`
+   forms resolve against.
+
+   Each entry is a `(require …)`-style spec — `[ns :as alias]` or
+   `[ns :refer [verbs…]]` — `pr-str`'d straight into the `(ns … (:require …))`
+   head by [[home-ns-form]]."
+  '[[seon.agent.message :as message]
+    [seon.agent :as agent]
+    [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
+    [seon.schema :as schema]
+    [seon.db :as db]
+    [seon.agent.todo :as todo]])
+
+(defn home-ns-form
+  "The exact `(ns <home> (:require …))` SOURCE wired into every agent's home
+   namespace — the one form [[setup-agent-ns!]] evaluates AND the one the
+   workspace block renders verbatim. Built from [[home-ns-require-specs]] so
+   there is a SINGLE source of truth for what an agent's home ns requires,
+   with every alias/refer visible (no bare-name reconstruction). `home-ns` is
+   the home-ns symbol/string/keyword (e.g. `my.agent.<id>`)."
+  {:malli/schema [:=> [:catn [::home-ns [:or :symbol :string :keyword]]] :string]}
+  [home-ns]
+  (str "(ns " (name home-ns) "\n  (:require "
+       (str/join "\n            " (map pr-str home-ns-require-specs))
+       "))"))
+
 (defn ^:async setup-agent-ns!
   "Create + initialize the agent's home namespace. Returns the agent-ns
    symbol (same as the input). Idempotent.
@@ -1229,14 +1261,7 @@
   {:malli/schema
    [:=> [:catn [::compile-state :any] [::agent-ns-sym :any] [::agent-id :any]] :any]}
   [compile-state agent-ns-sym _agent-id]
-  (let [setup-src
-        (str "(ns " agent-ns-sym
-             " (:require [seon.agent.message :as message]"
-             " [seon.agent :as agent]"
-             " [seon.agent.lifecycle :refer [wait complete pause resume terminate]]"
-             " [seon.schema :as schema]"
-             " [seon.db :as db]"
-             " [seon.agent.todo :as todo]))")
+  (let [setup-src (home-ns-form agent-ns-sym)
         r (await (eval compile-state setup-src
                        {:ns 'cljs.user :analyze-deps? true}))]
     (when-not (:ok r)

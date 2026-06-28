@@ -38,7 +38,8 @@
   (:require
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.eval :as seval]))
 
 ;; ============================================================
 ;; The namespace-display selection rules — the ONE home for which
@@ -125,6 +126,20 @@
    searchable)."
   #{:seon.agent.todo})
 
+(def verb-signature-whitelist
+  "The seon.* VERB namespaces aliased/refer'd into every agent's home ns by
+   [[seon.eval/setup-agent-ns!]] whose PUBLIC SIGNATURES (arglists + doc line,
+   bodies elided — `:seon.render/detail :signature`) render in every agent
+   prompt. The home-ns require form names `message`/`wait`/`complete`/… but a
+   bare alias is undiscoverable — the agent must SEE the arglist to call
+   `(message/user content)` or `(complete result)`. These are NOT in
+   [[full-source-whitelist]] (no full-body dump — just the API surface) and
+   kept matched to [[seon.eval/home-ns-require-specs]]. `seon.db` /
+   `seon.schema` / `seon.agent.todo` self-document elsewhere (todo is full
+   source; db/schema via grep + the system prose), so only the messaging +
+   lifecycle verbs — the ones with no other surface — live here."
+  #{:seon.agent.message :seon.agent.lifecycle})
+
 (defn in-full-source-whitelist?
   "True when `ns-name` (string, keyword, or symbol) is one of the curated
    seon.* framework [[full-source-whitelist]] nses. String/keyword/symbol
@@ -191,29 +206,23 @@
 (defn- cur-ns-workspace-stub
   "The never-omit block for the agent's CURRENT ns when it has no members
    defined yet (GI-2). A fresh home ns (`my.agent.<id>`) carries a
-   `:seon.ns/name` + `:seon.ns/requires` row but no stored `:seon.ns/source`
-   and no fns/schemas, so [[seon.agent.ctx/render-namespace]] yields an empty body
-   that would be omitted — breaking the system prompt's promise that YOUR
-   OWN namespace renders in full. This stub keeps that promise: it shows the
-   reconstructed `(ns …)` require form (from the stored `:seon.ns/requires`,
-   cardinality-many → pulled as a vector) so the agent sees what's wired into
-   its workspace, plus a one-line note that the workspace is empty. `nm` is a
-   ns-name keyword that already has a `:seon.ns/name` row (the caller only
-   reaches this for an included, current-ns row)."
-  [db nm]
-  (let [reqs    (-> (db/pull {:seon.db/db db
-                              :seon.db/ref [:seon.ns/name nm]
-                              :seon.db/pull-pattern '[:seon.ns/requires]})
-                    :seon.ns/requires
-                    sort)
-        ns-form (if (seq reqs)
-                  (str "(ns " (name nm) "\n  (:require "
-                       (str/join " " (map name reqs)) "))")
-                  (str "(ns " (name nm) ")"))]
-    (ctx/ns-demarc
-      nm
-      (str ns-form "\n"
-           "; (your workspace — nothing defined here yet; define schemas + fns and they appear here)"))))
+   `:seon.ns/name` row but no stored `:seon.ns/source` and no fns/schemas, so
+   [[seon.agent.ctx/render-namespace]] yields an empty body that would be omitted
+   — breaking the system prompt's promise that YOUR OWN namespace renders in
+   full. This stub keeps that promise: it shows the REAL `(ns … (:require …))`
+   form [[seon.eval/setup-agent-ns!]] actually installed — `[seon.agent.message
+   :as message]` / `[seon.agent.lifecycle :refer [wait complete …]]` / … WITH
+   the aliases + refers — straight from the ONE canonical
+   [[seon.eval/home-ns-form]], NOT a bare-name reconstruction from
+   `:seon.ns/requires`. No hidden aliasing: the agent reads the form and knows
+   `message/user`, `db/transact!`, `schema/register!`, `wait`, `complete`
+   exist and how to call them. `nm` is a ns-name keyword whose `:seon.ns/name`
+   row the caller already matched (an included, current-ns row)."
+  [_db nm]
+  (ctx/ns-demarc
+    nm
+    (str (seval/home-ns-form nm) "\n"
+         "; (your workspace — nothing defined here yet; define schemas + fns and they appear here)")))
 
 (defn- render-one
   "Render ONE included ns through the SINGLE renderer
@@ -306,7 +315,18 @@
         ;; the rendered section — it stays indexed + grep-able via
         ;; seon.agent.search, just not dumped here.
         full-rows (filter (fn [[nm _tx]] (render-full? nm cur-ns)) rows)
-        blocks    (keep (fn [[nm _tx]] (render-one db nm :full cur-ns)) full-rows)]
+        ;; The aliased/refer'd VERB nses (message + lifecycle) render their
+        ;; public SIGNATURES — arglists, bodies elided — so the agent SEES how
+        ;; to call `(message/user …)` / `(complete …)`, not just a bare alias.
+        ;; Name-sorted, rendered FIRST as a stable cache prefix ahead of the
+        ;; churning full blocks. No overlap with full-rows (a seon.* verb ns is
+        ;; not full-source/my/third-party).
+        sig-rows  (->> rows
+                       (filter (fn [[nm _tx]] (contains? verb-signature-whitelist nm)))
+                       (sort-by (fn [[nm _tx]] (name nm))))
+        sig-blocks  (keep (fn [[nm _tx]] (render-one db nm :signature cur-ns)) sig-rows)
+        full-blocks (keep (fn [[nm _tx]] (render-one db nm :full cur-ns)) full-rows)
+        blocks      (concat sig-blocks full-blocks)]
     (if (seq blocks)
       (str namespaces-header "\n\n" (str/join "\n\n" blocks))
       "")))

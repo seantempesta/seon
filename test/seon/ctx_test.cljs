@@ -295,7 +295,17 @@
   (async done
     (-> (with-conn
           (fn [_conn]
-            (-> (db/transact! {:seon.db/tx-data [{:seon.ns/name :my.agent.wtest}]})
+            (-> (db/transact!
+                  {:seon.db/tx-data
+                   [{:seon.ns/name :my.agent.wtest}
+                    ;; index the messaging verb ns so the signature surfacing
+                    ;; path (verb-signature-whitelist) has a real row to render.
+                    {:seon.ns/name :seon.agent.message}
+                    {:seon.fn/sym      "seon.agent.message/user"
+                     :seon.fn/ns       [:seon.ns/name :seon.agent.message]
+                     :seon.fn/arglists "([content])"
+                     :seon.fn/doc      "Send a message to your human."
+                     :seon.fn/source   "(defn user [content] content)"}]})
                 (.then
                   (fn [_]
                     (let [txt (ctx-namespaces/namespaces-block
@@ -311,7 +321,23 @@
                       (is (not (str/includes? txt "not in db"))
                           "no misleading 'not in db' for the indexed home ns")
                       (is (str/includes? txt "(ns my.agent.wtest")
-                          "shows the reconstructed (ns …) form")
+                          "shows the (ns …) form")
+                      ;; NO hidden aliasing: the workspace block shows the REAL
+                      ;; canonical home-ns require form (seon.eval/home-ns-form)
+                      ;; that setup-agent-ns! installs — WITH aliases/refers —
+                      ;; not a bare-name reconstruction. The agent must SEE that
+                      ;; `message/user`, `db/transact!`, `wait`, `complete`
+                      ;; resolve.
+                      (is (str/includes? txt "[seon.agent.message :as message]")
+                          "shows seon.agent.message WITH its :as message alias")
+                      (is (str/includes? txt "[seon.db :as db]")
+                          "shows seon.db WITH its :as db alias")
+                      (is (str/includes? txt ":refer [wait complete pause resume terminate]")
+                          "shows the refer'd lifecycle verbs")
+                      ;; and the messaging verb SIGNATURES are surfaced (arglist,
+                      ;; not just the alias) so the verb is discoverable.
+                      (is (str/includes? txt "(seon.agent.message/user [content])")
+                          "surfaces the message/user signature with its arglist")
                       (is (str/includes? txt "nothing defined here yet")
                           "carries the empty-workspace note")))))))
         (.then (fn [] (done)))
