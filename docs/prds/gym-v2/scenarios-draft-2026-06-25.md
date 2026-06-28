@@ -24,7 +24,7 @@ A scenario file = one map or vector of maps; `load-scenarios!` validates vs `:se
 - `:first-eval-matches` — `:pattern "regex"` over the first message-driven eval source. optional `:agent`.
 - `:eval-count-matching` — `:pattern` + `:expect` over matching message-driven evals. optional `:agent`.
 - `:llm-judge` — `:rubric` + `:reference` (shape-level GT) + optional `:agent`. Graded 0-100 on the SEPARATE judge axis.
-- `:transcript-includes/excludes`, `:prompt-includes/excludes/every-turn` — restricted (design §6 r2) to the user's own message text or telemetry, never a rendered section's phrasing.
+- `:transcript-includes/excludes`, `:prompt-includes/excludes/every-turn` — restricted (design §6 r2) to the user's own message text or telemetry, never a rendered block's phrasing.
 
 **Datalog engine constraints obeyed**: no double-identity-join through one message (reply checks use `from-agent + hops>0`); no two distinct unbound attr vars joined on one entity (name-stem checks ride nested `q`+`set`); ref slots match by joining through the target's identity; linked fixtures use the shared-tempid idiom (a ref slot carries a `:db/id "p1"` tempid resolved in the same tx — lookup-refs don't resolve against not-yet-committed entities).
 

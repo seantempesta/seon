@@ -17,7 +17,7 @@
 ;;
 ;; DEEPSEEK TIER (cheap) — refuses without allow-paid? + key.
 {:seon.gym.scenario/id     :todo-multistep-tracking
- :seon.gym.scenario/doc    "A 3-step data task (schema + rows + fn-with-test) that never mentions todos: the standing teaching says 2+ steps → mint one todo per step and complete! as you go. Bar: ≥2 owner-scoped todo rows minted AND zero still :open at run end (the agent closes its own loop — an empty <open-todos> section is the done-signal), the work lands (≥2 domain attrs, a deftest), one honest reply, under the turn cap."
+ :seon.gym.scenario/doc    "A 3-step data task (schema + rows + fn-with-test) that never mentions todos: the standing teaching says 2+ steps → mint one todo per step and complete! as you go. Bar: ≥2 owner-scoped todo rows minted AND zero still :open at run end (the agent closes its own loop — an empty <open-todos> block is the done-signal), the work lands (≥2 domain attrs, a deftest), one honest reply, under the turn cap."
  :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
  :seon.gym.scenario/axes   [:stores-proactively :models-work-directed

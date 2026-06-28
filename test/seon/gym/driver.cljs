@@ -6,7 +6,7 @@
    queries against the post-run store plus transcript checks — that a
    driver evaluates MECHANICALLY, plus optional LLM-JUDGE predicates
    (rubric + reference facts → graded verdict) recorded on a SEPARATE
-   scorecard axis. Section-by-section context iteration becomes
+   scorecard axis. Block-by-block context iteration becomes
    QUANTIFIED: every defect class from live runs 3–7 is encoded as a
    permanent regression predicate, and the scorecard is keyed
    (scenario × git sha) so a context/prompt change shows up as a moved
@@ -83,6 +83,7 @@
     [seon.agent.run :as run]
     [seon.agent.loop :as aloop]
     [seon.agent.ctx :as ctx]
+    [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.debug :as debug]
     ;; World-parity (2026-06-10 deep audit): the :test build has no
@@ -308,28 +309,31 @@
 ;; moved number is diffable to the exact context bytes the agent saw.
 (schema/register! :seon.gym.scorecard/prompt-files [:vector :string])
 ;; --- per-turn context telemetry (informational, NEVER gates pass?) ----------
-;; Captured once per driven gym turn from `assemble-context`'s OWN
+;; Captured once per driven gym turn from the per-block render path's OWN
 ;; output against the PRE-TURN db value (user message landed, turn not
 ;; yet run — the exact db the turn's prompt renders from). Pure
-;; evidence for "what context was loaded for this turn": section names
-;; in render order + per-section char counts. The gym's job is testing
-;; the AGENT — no layout predicate, no section-name coupling, nothing
-;; here affects the scorecard verdict (user r2, 2026-06-11).
+;; evidence for "what context was loaded for this turn": context BLOCK
+;; names in render order + per-block TOKEN estimates. This is the lever
+;; the config-aware A/B reads — the resulting context SIZE (in tokens)
+;; for the loadout the run booted under. The gym's job is testing the
+;; AGENT — no layout predicate, no block-name coupling, nothing here
+;; affects the scorecard verdict (user r2, 2026-06-11).
 (schema/register! :seon.gym.profile/agent :seon.gym.turn/agent)
-;; Section names in render order (the non-blank contributions from
-;; ctx-sections' :seon.render/section-texts). The carve retired
-;; :seon.render/sections (its old producer assemble-context is gone), so
-;; the profile carries its own gym-local copy.
-(schema/register! :seon.gym.profile/sections [:vector :seon.agent.ctx/name])
-;; [section-name rendered-char-count] in render order — only the
-;; non-blank contributions (ctx-sections' :seon.render/section-texts).
-(schema/register! :seon.gym.profile/section-chars
+;; Context BLOCK names in render order (the non-blank contributions from
+;; the per-block render path). Current ctx model: each block is a
+;; `:seon.agent.ctx/block` named by `:seon.agent.ctx/name` (the renamed
+;; section→block model); the profile carries a gym-local copy.
+(schema/register! :seon.gym.profile/blocks [:vector :seon.agent.ctx/name])
+;; [block-name rendered-token-estimate] in render order — only the
+;; non-blank block contributions. TOKENS, never chars (the hard
+;; size-reporting rule): `seon.ai.tokens/estimate` (chars/4).
+(schema/register! :seon.gym.profile/block-tokens
   [:vector [:tuple :seon.agent.ctx/name :int]])
 (schema/register! :seon.gym/turn-profile
   [:map
-   [:seon.gym.profile/agent         :seon.gym.profile/agent]
-   [:seon.gym.profile/sections      :seon.gym.profile/sections]
-   [:seon.gym.profile/section-chars :seon.gym.profile/section-chars]])
+   [:seon.gym.profile/agent        :seon.gym.profile/agent]
+   [:seon.gym.profile/blocks       :seon.gym.profile/blocks]
+   [:seon.gym.profile/block-tokens :seon.gym.profile/block-tokens]])
 (schema/register! :seon.gym.scorecard/turn-profiles
   [:vector :seon.gym/turn-profile])
 ;; --- judge verdicts — a SEPARATE scorecard axis from the mechanical
@@ -386,9 +390,28 @@
 ;; inject a mock (zero spend) to prove the verdict→axis wiring; absent,
 ;; the driver builds the DeepSeek judge — but ONLY under allow-paid?.
 (schema/register! :seon.gym/judge-fn fn?)
+;; CONTEXT CONFIG the run boots agents under — the unified `seon.config`
+;; seam, NOT a gym-local profile mechanism. A run names a `#profile` of
+;; the default `config/system.edn` (`:profile`, sets SEON_PROFILE) and/or
+;; a whole manifest file (`:path`, sets SEON_CONFIG). The driver steers
+;; those two env vars around the run; the REAL seed paths already read
+;; them — `seon.client/boot-seed!` (skills/routes via
+;; `config/resolve-skill-rows`/`resolve-routes`) and `agent/create!` →
+;; `ctx/seed-default-ctx!` → `config/resolve-loadout` (the per-role block
+;; loadout). So the gym agents' `:seon.agent/ctx` is seeded FROM the
+;; named loadout with zero duplicated resolution. Absent = today's full
+;; default context (byte-identical no-config boot). The resulting context
+;; SIZE lands in each turn-profile's `:seon.gym.profile/block-tokens`.
+(schema/register! :seon.gym.config/profile :keyword)
+(schema/register! :seon.gym.config/path    :string)
+(schema/register! :seon.gym/config
+  [:map
+   [:seon.gym.config/profile {:optional true} :seon.gym.config/profile]
+   [:seon.gym.config/path    {:optional true} :seon.gym.config/path]])
 (schema/register! :seon.gym/run-request
   [:map
    [:seon.gym/scenario :seon.gym/scenario]
+   [:seon.gym/config {:optional true} :seon.gym/config]
    [:seon.gym/allow-paid? {:optional true} :seon.gym/allow-paid?]
    [:seon.gym/judge-fn {:optional true} :seon.gym/judge-fn]])
 (schema/register! :seon.gym/run-response
@@ -764,28 +787,29 @@
         axes))
 
 ;; ===========================================================================
-;; Per-turn context telemetry — INFORMATIONAL ONLY. One render of
-;; `assemble-context` against the pre-turn db value records what
-;; context was loaded for the turn (section names + char counts). It
+;; Per-turn context telemetry — INFORMATIONAL ONLY. One render of the
+;; per-block context path against the pre-turn db value records what
+;; context was loaded for the turn (BLOCK names + TOKEN estimates). It
 ;; never gates pass?: the gym tests the agent, not the layout (user
 ;; r2, 2026-06-11 — the former structural gates broke on every context
 ;; change and were removed).
 ;; ===========================================================================
 
 (defn- capture-turn-profile
-  "One `:seon.gym/turn-profile` for the turn about to run — section
-   names in render order + per-section char counts from
-   [[ctx/ctx-sections]] (the SAME post-budget per-section path the prompt
-   and the inspector take) against the pre-turn db value."
+  "One `:seon.gym/turn-profile` for the turn about to run — context BLOCK
+   names in render order + per-block TOKEN estimates (the hard
+   size-reporting rule: tokens via `seon.ai.tokens/estimate`, never
+   chars) from [[ctx/ctx-sections]] (the SAME per-block render path the
+   prompt and the inspector take) against the pre-turn db value."
   [dbv agent-id designator]
   (let [texts (:seon.render/section-texts
                 (ctx/ctx-sections {:seon.db/db dbv
                                    :seon.agent/id agent-id}))]
-    {:seon.gym.profile/agent    designator
-     :seon.gym.profile/sections (mapv :seon.agent.ctx/name texts)
-     :seon.gym.profile/section-chars
+    {:seon.gym.profile/agent  designator
+     :seon.gym.profile/blocks (mapv :seon.agent.ctx/name texts)
+     :seon.gym.profile/block-tokens
      (mapv (fn [{nm :seon.agent.ctx/name txt :seon.render/text}]
-             [nm (count txt)])
+             [nm (tokens/estimate txt)])
            texts)}))
 
 ;; ===========================================================================
@@ -1354,6 +1378,29 @@
                                             (resolve-fixture-dates fixtures)}))))))))
     {:seon.gym/ok? true}))
 
+(defn- env-get [k] (aget (.-env js/process) k))
+
+(defn- env-set!
+  "Set (or, on nil, delete) a `process.env` key — the seam the gym uses to
+   steer `seon.config`'s `SEON_PROFILE`/`SEON_CONFIG` reads for a run."
+  [k v]
+  (if (nil? v)
+    (js-delete (.-env js/process) k)
+    (aset (.-env js/process) k v)))
+
+(defn- apply-run-config!
+  "Steer the `seon.config` env for the run from a `:seon.gym/config` map
+   (`:profile` → SEON_PROFILE, `:path` → SEON_CONFIG). Returns the prior
+   [profile path] env values so `finally` can restore them. nil config →
+   no-op (today's full default context)."
+  [config]
+  (let [prev [(env-get "SEON_PROFILE") (env-get "SEON_CONFIG")]]
+    (when-let [p (:seon.gym.config/profile config)]
+      (env-set! "SEON_PROFILE" (name p)))
+    (when-let [path (:seon.gym.config/path config)]
+      (env-set! "SEON_CONFIG" path))
+    prev))
+
 (defn ^:async run-scenario!
   "Run ONE scenario end-to-end on a scratch `:memory` conn and return a
    Promise of the scorecard (or a refusal map — errors are values):
@@ -1375,6 +1422,7 @@
    (scenario × git sha)."
   {:malli/schema [:=> [:cat :seon.gym/run-request] :seon.gym/run-response]}
   [{scenario    :seon.gym/scenario
+    config      :seon.gym/config
     allow-paid? :seon.gym/allow-paid?
     judge-fn    :seon.gym/judge-fn}]
   (let [{:seon.gym.scenario/keys [id tier status axes fixture-sources llm
@@ -1396,7 +1444,12 @@
       :else
       (let [prev-conn    db/*conn*
             prev-fs      @sfs-int/!config
-            keys-before  (schema/current-keys)]
+            keys-before  (schema/current-keys)
+            ;; UNIFIED config seam: steer SEON_PROFILE/SEON_CONFIG before
+            ;; the seed + agent boot so boot-seed!'s manifest read and
+            ;; create!'s resolve-loadout pick up the run's chosen loadout.
+            ;; nil config → no-op. Restored in finally.
+            prev-env     (apply-run-config! config)]
         ;; The gym's prompt-blob evidence (§6.6) IS debug capture — it
         ;; reads back the verbatim prompt the agent saw. run-turn!'s
         ;; capture is OFF by default (live pods don't want the disk
@@ -1559,9 +1612,89 @@
             (set! db/*conn* prev-conn)
             (reset! sfs-int/!config prev-fs)
             (debug/set-override! :env)
+            (env-set! "SEON_PROFILE" (first prev-env))
+            (env-set! "SEON_CONFIG" (second prev-env))
             (let [minted (remove keys-before (schema/current-keys))]
               (when (seq minted)
                 (swap! schema/*schemas #(apply dissoc % minted))))))))))
+
+;; ===========================================================================
+;; Context-size MEASUREMENT — the context-improvement loop's free probe.
+;; Seeds the scenario world under a chosen config + boots agent :a + lands
+;; the first turn's user message, then captures the PRE-TURN context
+;; profile WITHOUT driving the LLM. Free for ANY tier (paid/todo
+;; included): it never calls a provider — it measures the context an agent
+;; WOULD see for turn 1, through the SAME seed + `seed-default-ctx!` →
+;; `resolve-loadout` path a real run uses, so the token numbers are real.
+;; This is what makes pass-rate-vs-context systematic: the SIZE axis is
+;; measurable for every scenario for free; pass/fail needs the paid drive.
+;; ===========================================================================
+
+(schema/register! :seon.gym/total-tokens :int)
+(schema/register! :seon.gym/measure-request
+  [:map
+   [:seon.gym/scenario :seon.gym/scenario]
+   [:seon.gym/config {:optional true} :seon.gym/config]])
+(schema/register! :seon.gym/measure-response
+  [:map
+   [:seon.gym.scorecard/scenario :seon.gym.scorecard/scenario]
+   [:seon.gym/total-tokens        :seon.gym/total-tokens]
+   [:seon.gym/turn-profile        :seon.gym/turn-profile]])
+
+(defn ^:async measure-context!
+  "Measure the fresh-agent turn-1 context SIZE for a scenario under the
+   given `:seon.gym/config` (nil = today's full default), WITHOUT spending
+   on the LLM. Same isolation + seed path as [[run-scenario!]] (scratch
+   `:memory` conn, root `*conn*` swap restored in finally, schema keys
+   reaped, SEON_PROFILE/SEON_CONFIG steered + restored). Returns
+   Promise<:seon.gym/measure-response> — the scenario id, the per-block
+   token estimates (`:seon.gym/turn-profile`), and the summed
+   `:seon.gym/total-tokens`."
+  {:malli/schema [:=> [:cat :seon.gym/measure-request] :seon.gym/measure-response]}
+  [{scenario :seon.gym/scenario config :seon.gym/config}]
+  (let [{:seon.gym.scenario/keys [id fixture-sources turns]} scenario
+        prev-conn   db/*conn*
+        prev-fs     @sfs-int/!config
+        keys-before (schema/current-keys)
+        prev-env    (apply-run-config! config)]
+    (try
+      (let [conn          (await (client/open-agent-conn!))
+            _             (set! db/*conn* conn)
+            compile-state (await (repl/ensure-bootstrap!))
+            !agents       (atom {})
+            cwd           (.cwd js/process)]
+        (sfs/configure! {:seon.agent.fs/allowed-roots
+                         [(str cwd "/src") (str cwd "/docs")]
+                         :seon.agent.fs/read-only? true})
+        (let [primary (db/new-id!)]
+          (await
+            (db/with-agent primary
+              (fn ^:async seed-and-sync! []
+                (await (seed-scenario-world! {:seon.gym/scenario scenario
+                                              :seon.db/conn conn}))
+                (await (ai/sync!)))))
+          (await (eval-fixture-sources! compile-state fixture-sources))
+          (await (ensure-agent! !agents compile-state :a primary)))
+        (let [designator (or (:seon.gym.turn/agent (first turns)) :a)
+              agent-id    (await (ensure-agent! !agents compile-state designator))]
+          ;; land the first turn's message so reactive blocks render the
+          ;; same pre-turn db a real turn 1 would (the message has landed,
+          ;; the turn hasn't run) — but never drive the LLM.
+          (when-let [msg (:seon.gym.turn/message (first turns))]
+            (await (send-user-message! agent-id msg)))
+          (let [profile (capture-turn-profile @conn agent-id designator)]
+            {:seon.gym.scorecard/scenario id
+             :seon.gym/turn-profile       profile
+             :seon.gym/total-tokens
+             (reduce + 0 (map second (:seon.gym.profile/block-tokens profile)))})))
+      (finally
+        (set! db/*conn* prev-conn)
+        (reset! sfs-int/!config prev-fs)
+        (env-set! "SEON_PROFILE" (first prev-env))
+        (env-set! "SEON_CONFIG" (second prev-env))
+        (let [minted (remove keys-before (schema/current-keys))]
+          (when (seq minted)
+            (swap! schema/*schemas #(apply dissoc % minted))))))))
 
 (defn print-scorecard!
   "Print the scorecard as one greppable line (`bin/gym` surfaces these

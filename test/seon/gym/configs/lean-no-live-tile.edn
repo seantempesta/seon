@@ -1,0 +1,15 @@
+;; Gym-local seon.config manifest — the lean A/B arm. A `:seon.gym/config`
+;; `{:seon.gym.config/path "test/seon/gym/configs/lean-no-live-tile.edn"}`
+;; points SEON_CONFIG here for the run; the REAL seed paths
+;; (`client/boot-seed!` + `agent/create!` → `ctx/seed-default-ctx!` →
+;; `config/resolve-loadout`) read it, so gym agents seed FROM this loadout.
+;;
+;; Drops the always-on-but-unused `:live-tile` block (minimal-context
+;; experiment 2026-06-28: a free win — agents never referenced it) while
+;; KEEPING the load-bearing `:namespaces` manual (its removal broke
+;; memory-write). Keeps the `:repl` skill body. No `#profile` — a flat
+;; manifest read verbatim.
+{:seon.config/loadouts
+ [{:seon.config/role         :default
+   :seon.config/default-load [:repl]
+   :seon.config/removes      [:live-tile]}]}

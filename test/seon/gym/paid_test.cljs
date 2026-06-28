@@ -50,7 +50,7 @@
    `:calib` is the JUDGE CALIBRATION probe (not a scenario drive — it
    grades a canned good/bad reply pair to prove the judge discriminates);
    the `x*` keys are the cross-session A→B baseline scenarios."
-  [:s32 :s21 :s12 :todo :err :calib :x1 :x3 :x12])
+  [:s32 :s21 :s12 :todo :err :calib :x1 :x3 :x12 :ab])
 
 (defn- gate-value
   "The raw SEON_GYM_PAID env value (\"\" when unset)."
@@ -266,6 +266,59 @@
     (run-paid! :x12
                "test/seon/gym/scenarios/x12-narrow-question-no-over-retrieval.edn"
                done)))
+
+;; ---------------------------------------------------------------------------
+;; CONFIG A/B — the context-improvement loop's LIVE proof. Drives ONE
+;; memory scenario under :default (full ctx) then under the lean
+;; manifest (drops :live-tile, keeps :namespaces), BOTH via the real
+;; provider, and prints both scorecards' pass? + turn-1 ctx token totals.
+;; pass/fail is NOT asserted (honest reds are the data); the measurement
+;; is whether the lean context still passes the memory scenario at a
+;; smaller token cost. Gate key :ab. Greppable: `SEON-GYM CONFIG-AB`.
+;; ---------------------------------------------------------------------------
+
+(defn- profile-tokens [card]
+  (reduce + 0 (mapcat (fn [p] (map second (:seon.gym.profile/block-tokens p)))
+                      (take 1 (:seon.gym.scorecard/turn-profiles card)))))
+
+(deftest config-ab-memory-paid
+  (async done
+    (let [done (call-once done)]
+      (if-not (enabled? (gate-value) :ab)
+        (do (is true "ab skipped — set SEON_GYM_PAID=ab (or all) to run the config A/B")
+            (done))
+        (let [s   (first (:seon.gym/scenarios
+                           (gym/load-scenarios!
+                             {:seon.gym/path
+                              "test/seon/gym/scenarios/x3-expense-reuse-and-category-total.edn"})))
+              run (fn [cfg]
+                    (restore-operator-ai-env!)
+                    (gym/run-scenario!
+                      (cond-> {:seon.gym/scenario s :seon.gym/allow-paid? true}
+                        cfg (assoc :seon.gym/config cfg))))]
+          (reset! !paid-in-flight? true)
+          (-> (run nil)
+              (.then (fn [full]
+                       (gym/print-scorecard! full)
+                       (.then (run {:seon.gym.config/path
+                                    "test/seon/gym/configs/lean-no-live-tile.edn"})
+                              (fn [lean] [full lean]))))
+              (.then (fn [[full lean]]
+                       (reset! !paid-in-flight? false)
+                       (gym/print-scorecard! lean)
+                       (println "SEON-GYM CONFIG-AB"
+                                (pr-str {:default/pass? (:seon.gym.scorecard/pass? full)
+                                         :default/tokens (profile-tokens full)
+                                         :lean/pass? (:seon.gym.scorecard/pass? lean)
+                                         :lean/tokens (profile-tokens lean)}))
+                       (is (m/validate :seon.gym/scorecard full)
+                           "default-config scorecard validates")
+                       (is (m/validate :seon.gym/scorecard lean)
+                           "lean-config scorecard validates (pass/fail NOT asserted)")
+                       (done)))
+              (.catch (fn [e]
+                        (reset! !paid-in-flight? false)
+                        (is false (str "config A/B threw — " e)) (done)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; JUDGE CALIBRATION — the live DeepSeek discrimination proof (design §3 /

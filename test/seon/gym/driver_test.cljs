@@ -486,16 +486,17 @@
 ;; PER-TURN CONTEXT TELEMETRY — informational only, NEVER gates pass?
 ;; (user r2, 2026-06-11: the former structural gates broke the gym on
 ;; every context change and were removed). Each driven turn's scorecard
-;; profile records what context was loaded — section names in render
-;; order + per-section char counts — so "what db state/context did the
-;; agent see" stays answerable without coupling the verdict to layout.
+;; profile records what context was loaded — context BLOCK names in
+;; render order + per-block TOKEN estimates — so "what db state/context
+;; did the agent see" stays answerable without coupling the verdict to
+;; layout.
 ;; ---------------------------------------------------------------------------
 
 (deftest turn-profiles-record-context-telemetry-without-gating
   (async done
     (let [scenario
           {:seon.gym.scenario/id     :gymtest-context-telemetry
-           :seon.gym.scenario/doc    "Inline stub: an agent installs a custom section; turn-profiles record sections + char counts as evidence, and the verdict comes ONLY from the scenario's predicates."
+           :seon.gym.scenario/doc    "Inline stub: an agent installs a custom context block; turn-profiles record blocks + token estimates as evidence, and the verdict comes ONLY from the scenario's predicates."
            :seon.gym.scenario/tier   :stub
            :seon.gym.scenario/status :active
            :seon.gym.scenario/axes   [:terminates]
@@ -538,18 +539,62 @@
                      (is (= 2 (count profiles)) "one profile per driven turn")
                      (doseq [p profiles]
                        (is (m/validate :seon.gym/turn-profile p)))
-                     (let [chars (into {} (:seon.gym.profile/section-chars
-                                           (last profiles)))]
-                       (is (pos? (get chars :namespaces 0))
-                           "core sections render into the profile")
-                       (is (pos? (get chars :gymtest-static 0))
-                           "the installed section renders into the profile"))
+                     (let [toks (into {} (:seon.gym.profile/block-tokens
+                                          (last profiles)))]
+                       (is (pos? (get toks :namespaces 0))
+                           "core blocks render into the profile")
+                       (is (pos? (get toks :gymtest-static 0))
+                           "the installed block renders into the profile"))
                      (is (some #{:gymtest-static}
-                               (:seon.gym.profile/sections (last profiles)))
-                         "turn 2's layout records the installed section"))
+                               (:seon.gym.profile/blocks (last profiles)))
+                         "turn 2's layout records the installed block"))
                    ;; prompt-file evidence: what the agent saw, per turn.
                    (is (seq (:seon.gym.scorecard/prompt-files card))
                        "scorecard carries prompt-blob paths")
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ---------------------------------------------------------------------------
+;; CONFIG-AWARE LOADOUT — a run names a seon.config profile/manifest; the
+;; driver steers SEON_PROFILE/SEON_CONFIG so the REAL seed paths
+;; (boot-seed! + create! → seed-default-ctx! → resolve-loadout) seed the
+;; gym agents' :seon.agent/ctx from THAT loadout. The resulting context
+;; SIZE lands in the turn-profile block-tokens (the A/B lever). Here:
+;; :minimal drops the always-on :skill/repl body → a smaller, observably
+;; different seeded context, with zero gym-local seeding logic.
+;; ---------------------------------------------------------------------------
+
+(defn- first-profile-blocks [card]
+  (set (:seon.gym.profile/blocks
+        (first (:seon.gym.scorecard/turn-profiles card)))))
+
+(defn- first-profile-tokens [card]
+  (reduce + 0 (map second
+                   (:seon.gym.profile/block-tokens
+                    (first (:seon.gym.scorecard/turn-profiles card))))))
+
+(deftest config-profile-shapes-the-seeded-context
+  (async done
+    (let [s (load-first "test/seon/gym/scenarios/s01-stub-pipeline-smoke.edn")]
+      (-> (.then (gym/run-scenario! {:seon.gym/scenario s})
+                 (fn [full]
+                   (.then (gym/run-scenario!
+                            {:seon.gym/scenario s
+                             :seon.gym/config
+                             {:seon.gym.config/profile :minimal}})
+                          (fn [lean] [full lean]))))
+          (.then (fn [[full lean]]
+                   (is (contains? (first-profile-blocks full) :skill/repl)
+                       "default loadout seeds the always-on :skill/repl body")
+                   (is (not (contains? (first-profile-blocks lean) :skill/repl))
+                       ":minimal profile drops :skill/repl from the seeded ctx")
+                   (is (contains? (first-profile-blocks lean) :namespaces)
+                       ":minimal keeps the load-bearing :namespaces block")
+                   (is (< (first-profile-tokens lean)
+                          (first-profile-tokens full))
+                       (str "lean context is smaller in tokens — full="
+                            (first-profile-tokens full) " lean="
+                            (first-profile-tokens lean)))
                    (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 

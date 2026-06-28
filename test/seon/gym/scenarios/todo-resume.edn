@@ -34,7 +34,7 @@
 ;;   - schema catalog domain-attrs lists :my.workout/*. PASS.
 ;;   - open todo SURVIVES but does not render in the new boot agent's
 ;;     turn-0: start-agent! mints a fresh agent-id each boot
-;;     (client.cljs:1375), so the owner-scoped todo section scopes to a
+;;     (client.cljs:1375), so the owner-scoped todo block scopes to a
 ;;     dead agent. Encoded as :todo-renders-for-boot-agent (RED until
 ;;     agent identity is durable across restarts).
 {:seon.gym.scenario/id     :todo-resume
@@ -126,7 +126,7 @@
    :seon.gym.predicate/expect :non-empty}
   ;; Post-restart: the boot agent's turn-0 context shows the open todo.
   ;; RED as of 2026-06-10: start-agent! mints a NEW agent-id each boot
-  ;; (client.cljs:1375), so the owner-scoped section renders "" for the
+  ;; (client.cljs:1375), so the owner-scoped block renders "" for the
   ;; new agent while the todo's owner is the dead pre-restart agent.
   {:seon.gym.predicate/id   :todo-renders-for-boot-agent
    :seon.gym.predicate/kind :transcript-includes
