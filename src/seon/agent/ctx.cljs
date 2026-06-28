@@ -1915,13 +1915,32 @@
    :seon.agent.ctx/priority (:seon.agent.ctx/priority child)
    :seon.render/text  (or (render child) "")})
 
+(defn- block-renders-ai?
+  "A context block contributes to the agent's PROMPT only when it declares an
+   `:seon.render/ai` render. An html-only block (a human-facing widget — the
+   live-tile/canvas, an acme dashboard tile) has nothing to say to the agent:
+   it is OMITTED from the prompt entirely — no self-demarcating bracket, no
+   generic data-dump stub (`;; :canvas {:db/id … :seon.agent.ctx/name …}`).
+   This is the inverse of the html view's 'ai-only block contributes no tile'
+   rule, and the reactive-context principle: a block surfaces to the agent
+   only when it has ai content for the current state. The html twin is
+   untouched — the block still renders for humans ([[render-context-html]]).
+   A block that DOES declare an ai render but resolves to blank for the
+   current state is dropped separately, after render, by
+   [[rendered-block-texts]] — both 'no ai content' cases vanish."
+  [block]
+  (contains? block :seon.render/ai))
+
 (defn- rendered-block-texts
-  "Render each child block to its ai text via `render`, drop blanks — the
-   per-block text vector shared by the joined prompt ([[render-context-ai]])
-   and the inspector ([[ctx-sections]]) so the two can never disagree on what
-   each block contributes."
+  "Render each ai-contributing child block to its ai text via `render`, drop
+   blanks — the per-block text vector shared by the joined prompt
+   ([[render-context-ai]]) and the inspector ([[ctx-sections]]) so the two can
+   never disagree on what each block contributes. A block with no
+   `:seon.render/ai` render ([[block-renders-ai?]]) contributes NO prompt
+   section."
   [render children]
   (->> children
+       (filter block-renders-ai?)
        (map #(render-child-text render %))
        (remove (comp str/blank? :seon.render/text))
        vec))

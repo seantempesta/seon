@@ -549,6 +549,45 @@
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
 ;; ------------------------------------------------------------
+;; Prompt-bloat guard: an html-only block (a human-facing widget — the
+;; live-tile/canvas, an acme dashboard tile) has nothing to say to the
+;; agent, so it contributes NO prompt section — no self-demarcating
+;; bracket, no generic data-dump stub. The inverse of the html view's
+;; "ai-only block contributes no tile" rule.
+;; ------------------------------------------------------------
+
+(deftest html-only-block-omitted-from-prompt
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (-> (agent/create! {:seon.agent/id "AGTctxtesth001"})
+                (.then (fn [_]
+                         (db/with-agent "AGTctxtesth001"
+                           (fn ^:async []
+                             (ctx/install!
+                               [{:seon.agent.ctx/name :widget-only
+                                 :seon.agent.ctx/priority 13
+                                 :seon.render/html [:div "human-only widget"]}
+                                {:seon.agent.ctx/name :has-ai
+                                 :seon.agent.ctx/priority 14
+                                 :seon.render/ai "; real ai content"}])))))
+                (.then
+                  (fn [_]
+                    (let [{:seon.render/keys [text section-texts]}
+                          (assemble "AGTctxtesth001")
+                          names (set (map :seon.agent.ctx/name section-texts))]
+                      (is (not (contains? names :widget-only))
+                          "an html-only block contributes NO prompt section")
+                      (is (not (str/includes? text "widget-only"))
+                          "…no empty bracket / data-dump stub for it leaks into the prompt")
+                      (is (contains? names :has-ai)
+                          "a sibling block that DOES carry an ai render is present")
+                      (is (str/includes? text "real ai content")
+                          "…with its ai content intact")))))))
+        (.then (fn [] (done)))
+        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+
+;; ------------------------------------------------------------
 ;; Stable/volatile split — the provider-cache contract (task #34).
 ;; Two assembles over the SAME db value → byte-identical stable
 ;; blocks; a volatile-only change (a new turn row) leaves the stable
