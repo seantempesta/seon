@@ -176,18 +176,37 @@ path for `accept_canvas`.)
 
 ## Next steps (ordered)
 
-1. **Read** `research/runpod-flash-grounding-2026-06-28.md` (the recipe + `file:line`
-   cites) + the vendored `reference-code/flash` source.
-2. **Build + push the custom base image** (`FROM runpod/flash:py3.12-latest` + a
-   verified torch+transformers cu128 triple + the dynamo smoke-test gate); set
-   `FLASH_GPU_IMAGE`. **Delete** the `gpu_worker.py` runtime hacks once it works.
-3. **Create the NetworkVolume** (EU-RO-1), attach via `volume=`, point
-   `HF_HOME`/`PIP_CACHE_DIR` at `/runpod-volume`.
-4. **First real generate** — the Clojure `mean` prompt → coherence + tok/s. The
+**PREPPED (2026-06-28) — push-ready, blocked on ONE owner decision.** The recipe
+is implemented in `tmp/flash-diffgemma/` (snapshot in `flash-worker/`):
+
+- `Dockerfile` — `FROM runpod/flash:py3.12-latest` + pristine cu128 triple
+  (**torch 2.9.0 / torchvision 0.24.0 / torchaudio 2.9.0 + transformers 5.11.0**,
+  `--force-reinstall` over the broken base torch) + the build-time smoke-test gate
+  (`import torch._dynamo; from torch.nn.attention.flex_attention import
+  setup_compilation_env; import transformers`).
+- `gpu_worker.py` — REWRITTEN clean: torch+transformers imported straight from the
+  image; the torchvision `--no-deps`, `torch._dynamo` probe, and
+  `setup_compilation_env` shim are DELETED. NetworkVolume `diffgemma-vol`
+  (200 GB, EU-RO-1) wired via `volume=`, mounted `/runpod-volume`, with
+  `HF_HOME`/`HF_HUB_CACHE`/`PIP_CACHE_DIR` env pointed into it; endpoint pinned to
+  EU-RO-1 to match the volume DC.
+- `build-image.sh` — `docker buildx --platform linux/amd64` build+push; documents
+  `export FLASH_GPU_IMAGE=<registry>:cu128-v1` before deploy. **Stops at the push.**
+
+**THE ONE OPEN DECISION — which registry to push to.** RunPod workers cannot pull
+the local private corp registry; the realistic options are **public Docker Hub**
+(simplest, no RunPod-side auth) vs **private ECR** (already in the local docker
+config, but needs RunPod registry-auth creds wired into the endpoint/template).
+Pick one, set `REGISTRY`, run `build-image.sh`, then the remaining ordered steps:
+
+1. **Push the image** to the chosen registry; `export FLASH_GPU_IMAGE=<tag>`.
+2. **`flash deploy`** — `FLASH_GPU_IMAGE` is structural, so it also recycles stale
+   workers (endpoint id preserved). The NetworkVolume auto-deploys idempotently.
+3. **First real generate** — the Clojure `mean` prompt → coherence + tok/s. The
    milestone we haven't hit yet.
-5. **Max-context measurement** on A100-80 BF16 (how far past 100k).
-6. **`accept_canvas` observability** — surface the per-step canvas/entropy.
-7. **The 4 dynamic-context experiments** (infill → eval-renoise → retrieval →
+4. **Max-context measurement** on A100-80 BF16 (how far past 100k).
+5. **`accept_canvas` observability** — surface the per-step canvas/entropy.
+6. **The 4 dynamic-context experiments** (infill → eval-renoise → retrieval →
    live feedback), wiring Seon's eval cage + Proximum index as oracles over HTTP.
 
 ## Pointers

@@ -1,55 +1,52 @@
 import os, sys, json, asyncio
-from runpod_flash import Endpoint, GpuType, PodTemplate
+from runpod_flash import Endpoint, GpuType, DataCenter, NetworkVolume, PodTemplate
 
 # Warm-worker model cache: persists across requests within one live worker, so a
 # burst of calls loads the 50GB model ONCE. Scales to zero after idle_timeout.
 _CACHE = {}
 
+# NetworkVolume: caches the ~50GB DiffusionGemma snapshot + pip wheels so cold
+# starts mount it (seconds) instead of re-downloading (minutes). Idempotent by
+# name+datacenter; survives `flash undeploy`. Volume AND endpoint MUST share
+# EU-RO-1 (a volume is single-DC; the endpoint reading it pins to that DC).
+_VOL = NetworkVolume(name="diffgemma-vol", size=200, datacenter=DataCenter.EU_RO_1)
+
 @Endpoint(
     name="diffgemma",
     gpu=GpuType.NVIDIA_A100_80GB_PCIe,   # 80GB → BF16 (~50GB) + long-context KV
+    datacenter=DataCenter.EU_RO_1,        # MUST equal the volume's DC
+    volume=_VOL,                          # mounted at /runpod-volume
     workers=(0, 1),                       # scale-to-zero; $0 when idle
     idle_timeout=600,                     # stay warm 10 min between bursts
     flashboot=True,
     template=PodTemplate(containerDiskInGb=120),
+    # torch is force-stripped from Flash deps and comes ONLY from the custom
+    # FLASH_GPU_IMAGE (Dockerfile). transformers is a pure-python wheel and also
+    # lives in the image; listing it here is belt-and-suspenders, harmless.
     dependencies=["transformers==5.11.0", "accelerate", "sentencepiece", "pillow"],
-    env={"HF_TOKEN": os.environ.get("HF_TOKEN", "")},
+    env={
+        "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
+        "HF_HOME": "/runpod-volume/hf",
+        "HF_HUB_CACHE": "/runpod-volume/hf/hub",
+        "PIP_CACHE_DIR": "/runpod-volume/pipcache",
+    },
     execution_timeout_ms=1_500_000,
 )
 def diffgemma(**payload):
-    import os, time, subprocess, sys, traceback, contextlib
+    import time, traceback
     MID = "google/diffusiongemma-26B-A4B-it"
     tok = os.environ.get("HF_TOKEN")
 
-    # Gemma4Processor (pulled in loading diffusion_gemma) needs a vision backend.
-    # --no-deps so torchvision CANNOT upgrade/corrupt the image's pinned torch
-    # (a plain install pulls a mismatched torch and breaks torch._dynamo).
-    try:
-        import torchvision  # noqa: F401
-    except ImportError:
-        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "--no-deps", "torchvision==0.24.1"], check=False)
-
+    # Clean image: torch + transformers come pre-installed and matched from the
+    # custom FLASH_GPU_IMAGE. No runtime pip, no torch._dynamo probe, no
+    # setup_compilation_env shim — those were symptom-patches for the broken
+    # base-image torch 2.9.1 and are gone now that the image ships a pristine
+    # torch 2.9.0 + transformers 5.11.0 (cu128) triple.
     import torch
-    # Surface torch._dynamo health (transformers imports it; base-image torch
-    # has been the recurring blocker).
-    try:
-        import torch._dynamo  # noqa: F401
-        _dynamo_ok = True
-    except Exception as _e:
-        _dynamo_ok = f"{type(_e).__name__}: {_e}"[:160]
-    # The base image's transformers imports torch.nn.attention.flex_attention,
-    # which needs setup_compilation_env — absent in this image's torch 2.9.1
-    # (version skew baked into the image). Shim it so the import succeeds; we
-    # load with attn_implementation="eager" so flex_attention is never used.
-    import torch._higher_order_ops.utils as _hou
-    if not hasattr(_hou, "setup_compilation_env"):
-        _hou.setup_compilation_env = lambda *a, **k: contextlib.nullcontext()
-
     import transformers
     info = {
         "transformers": transformers.__version__,
         "torch": torch.__version__,
-        "dynamo": _dynamo_ok,
         "cuda": torch.cuda.is_available(),
         "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
         "vram_gb": round(torch.cuda.get_device_properties(0).total_memory / 1e9, 1)

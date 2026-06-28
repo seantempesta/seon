@@ -460,14 +460,23 @@ RUN python3.12 -m pip install --no-cache-dir \
 # A transformers release that supports DiffusionGemma + accept_canvas.
 RUN python3.12 -m pip install --no-cache-dir \
       "transformers==<verified>" accelerate sentencepiece pillow
-# Smoke-test the import chain at build time so a bad combo fails the build, not the worker:
-RUN python3.12 -c "import torch, torch._dynamo; from torch.nn.attention.flex_attention import setup_compilation_env; import transformers; print(torch.__version__, transformers.__version__)"
+# Smoke-test the import chain at build time so a bad combo fails the build, not the worker.
+# NOTE (CORRECTED 2026-06-28, live build): do NOT probe
+# `flex_attention.setup_compilation_env` — that public symbol does NOT exist in
+# torch 2.9.0 (it is the PRIVATE `_set_compilation_env`); probing it fails the
+# build for a hallucinated reason even on a perfectly good stack. The gate that
+# actually matters is importing the MODEL CLASS, which forces transformers'
+# masking_utils to resolve its flex_attention imports against the installed torch:
+RUN python3.12 -c "import torch, torch._dynamo, transformers; from transformers import DiffusionGemmaForBlockDiffusion; print('SMOKE OK', torch.__version__, transformers.__version__)"
 ```
 
 Build for `linux/amd64`, push to a registry the RunPod workers can pull. Pin the
 exact `torch`/`transformers` versions you've verified import cleanly together
-(the build-time smoke test is the gate — if `torch._dynamo` or
-`flex_attention.setup_compilation_env` is broken, the image fails to build).
+(the build-time smoke test is the gate). **Verified combo (live build, 2026-06-28):**
+torch 2.9.0 / torchvision 0.24.0 / torchaudio 2.9.0 (cu128) + transformers 5.11.0 —
+`SMOKE OK`, and `DiffusionGemmaForBlockDiffusion` imports clean. This FALSIFIES the
+"base-image torch is the blocker" worry: pristine torch 2.9.0 from the cu128 index
+is internally consistent and ABI-matches transformers 5.11.0.
 
 ### 2. Point Flash at that image (env override, structural → also kills stale workers)
 
