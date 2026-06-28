@@ -178,6 +178,97 @@
       row)))
 
 ;; ------------------------------------------------------------
+;; Wall coalescing — a thrash burst never floods the transcript. TWO pure
+;; render derivations over the already-ordered event stream (drop the cause
+;; and they vanish — reactive-context):
+;;
+;;   1. CONTENT-FREE noise (empty / closing-delimiter-only source — a
+;;      mis-split trailing `}`/`]` that parsed to NOTHING) is dropped
+;;      outright: it is a segmentation artifact, never agent intent, and
+;;      carries zero learning. (The durable complement is Core dropping
+;;      these segments before they record — until then the display stays
+;;      robust to whatever the log already holds.)
+;;   2. A run of ≥[[coalesce-min-run]] CONSECUTIVE same-signature ERROR
+;;      evals collapses into ONE honest line — `✗ 10× Unmatched delimiter` —
+;;      expandable to the individual evals in the html twin, a single `;`
+;;      summary comment in the (flat, eval'able) :ai twin.
+;; ------------------------------------------------------------
+
+(def coalesce-min-run
+  "Fewest consecutive same-signature error evals that collapse into one
+   coalesced summary; below this each error renders on its own."
+  3)
+
+(defn- noise-eval?
+  "True iff an eval EVENT is a CONTENT-FREE segment — a source that is empty
+   or only closing delimiters / whitespace (`}`, `]`, `)}`), AND either it
+   FAILED to read (`ok? false` — a mis-split trailing delimiter that parsed
+   to nothing; its narration is the model's mis-attributed `=>` prose, not
+   real intent) OR it has no narration (a blank no-op line). The transcript
+   never renders these. A comment-only row — blank source but real `;`
+   narration the agent typed AND no read error — is NOT noise."
+  [ev]
+  (and (= :eval (::kind ev))
+       (let [e (::entity ev)
+             s (str/trim (str (:seon.eval/source e)))]
+         (and (or (str/blank? s) (boolean (re-matches #"[)\]}]+" s)))
+              (or (false? (:seon.eval/ok? e))
+                  (str/blank? (str (:seon.eval/narration e))))))))
+
+(defn- error-signature
+  "A normalized error CLASS for a FAILED eval event (nil for ok / non-error
+   / noise events). Strips position + the specific offending token so
+   `Unmatched delimiter: }` and `Unmatched delimiter: ]` share one class —
+   a run of one class is 'the same wall'."
+  [ev]
+  (when (and (= :eval (::kind ev)) (not (noise-eval? ev)))
+    (let [e (::entity ev)]
+      (when (false? (:seon.eval/ok? e))
+        (-> (or (first (str/split-lines (str (:seon.eval/error e)))) "")
+            (str/replace #"\[line[^\]]*\]" "")
+            (str/replace #"\s+at line.*$" "")
+            (str/replace #":\s*[`(\[{)\]}].*$" "")
+            (str/replace #"`[^`]*`" "`…`")
+            str/trim)))))
+
+(defn coalesced->renderable
+  "The `:seon.render/ai` converter for a COALESCED error run: ONE `;` summary
+   line standing in for N identical consecutive failures, so a thrash burst
+   never floods the agent's own context. Flat + eval'able (a pure comment —
+   re-evaluating runs nothing, which is correct: every collapsed form DEFINED
+   NOTHING)."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{node :seon.render/node}]
+  (let [{::keys [signature count]} node]
+    (str ";=> ✗ " count "× " signature
+         " — " count " consecutive failures collapsed; each DEFINED NOTHING. "
+         "Fix the form once, not " count " times.")))
+
+(defn- coalesce-events
+  "Pure pass over the ordered event stream: drop content-free [[noise-eval?]]
+   events, then collapse maximal runs of ≥[[coalesce-min-run]] CONSECUTIVE
+   same-signature error events into one `::coalesced` event carrying the run's
+   members. Real forms / ok evals / messages break a run."
+  [events]
+  (->> events
+       (remove noise-eval?)
+       (partition-by (fn [ev] [(error-signature ev) (::prior? ev)]))
+       (mapcat
+         (fn [grp]
+           (let [sig (error-signature (first grp))]
+             (if (and sig (>= (count grp) coalesce-min-run))
+               [{::kind          :coalesced
+                 ::at            (::at (first grp))
+                 ::prior?        (::prior? (first grp))
+                 ::run-id        (::run-id (first grp))
+                 ::signature     sig
+                 ::count         (count grp)
+                 ::members       (vec grp)
+                 :seon.render/ai 'seon.agent.ctx.transcript/coalesced->renderable}]
+               grp))))
+       vec))
+
+;; ------------------------------------------------------------
 ;; The agent's full event stream, derived once per render: messages +
 ;; evals, flattened, each carrying its FIXED stored time, sorted by it.
 ;; ------------------------------------------------------------
@@ -390,14 +481,18 @@
                            (assoc ev ::new? true)
                            ev))
                        events)
+        ;; Coalesce: drop content-free noise + collapse consecutive
+        ;; same-error runs to one line (a thrash burst can't flood the ctx).
+        events** (coalesce-events events*)
         ;; Render each event, interleaving the resume marker ONCE at the
         ;; process boundary — before the first THIS-PROCESS eval that follows
         ;; a PRIOR-process eval (its `result/<id>` vars are gone).
         body
         (->> (reduce
                (fn [[rows prev-prior?] ev]
-                 (let [prior? (::prior? ev)
-                       marker (when (and (= :eval (::kind ev))
+                 (let [evalish? (boolean (#{:eval :coalesced} (::kind ev)))
+                       prior?   (::prior? ev)
+                       marker (when (and evalish?
                                          (true? prev-prior?)
                                          (false? prior?))
                                 resume-marker-line)
@@ -405,9 +500,9 @@
                        rows'  (cond-> rows
                                 marker (conj marker)
                                 true   (conj text))]
-                   [rows' (if (= :eval (::kind ev)) prior? prev-prior?)]))
+                   [rows' (if evalish? prior? prev-prior?)]))
                [[] nil]
-               events*)
+               events**)
              first
              (remove str/blank?)
              (str/join "\n"))
@@ -425,6 +520,26 @@
 ;; kind), oldest-first.
 ;; ------------------------------------------------------------
 
+(defn- coalesced-card-html
+  "Hiccup for a COALESCED error run: a collapsed `✗ N× <class>` summary that
+   expands (`<details>`) to the individual eval cards. The `<summary>` is NOT
+   a flex container (a flex summary hides the native ▾ disclosure marker);
+   its inner spans lay out inline instead."
+  [{::keys [signature count members]} input db]
+  [:div {:class "py-1"}
+   [:details {:class "rounded border border-error/30 bg-error/5"}
+    [:summary {:class "text-xs font-mono text-error cursor-pointer px-2 py-1"}
+     [:span {:class "font-semibold"} (str "✗ " count "× ")]
+     [:span signature]
+     [:span {:class "text-text-500"}
+      (str " — " count " consecutive failures collapsed")]]
+    [:div {:class (str "px-2 pb-2 pt-1 flex flex-col gap-1 border-t "
+                       "border-error/20")}
+     (map (fn [m]
+            (render/render-entity-html
+              (assoc input :seon.render/node (::entity m) :seon.db/db db)))
+          members)]]])
+
 (defn transcript-block-html
   "The HTML TWIN of [[transcript-block]]: the agent's flat time-ordered
    event stream rendered as cards (message bubbles + eval cards),
@@ -438,26 +553,31 @@
         a        (agent-rec id db)
         my-eid   (:db/id a)
         own-id   id
-        events   (ordered-events db own-id my-eid)
+        ;; Same coalescing as the :ai twin — content-free noise dropped,
+        ;; consecutive same-error runs collapsed (here: expandable cards).
+        events   (coalesce-events (ordered-events db own-id my-eid))
         cards
         (->> events
              (keep
                (fn [ev]
-                 (let [entity (case (::kind ev)
-                                ;; Message events carry projected fields, not
-                                ;; the raw entity — re-pull the message by id
-                                ;; so the html converter sees its full shape.
-                                :message (when-let [mid (::id ev)]
-                                           (db/pull db '[* {:seon.agent.message/from
-                                                            [:db/id :seon.user/id :seon.agent/id]
-                                                            :seon.agent.message/to
-                                                            [:db/id :seon.user/id :seon.agent/id]}]
-                                                     [:seon.agent.message/id mid]))
-                                :eval    (::entity ev)
-                                nil)]
-                   (when entity
-                     (render/render-entity-html
-                       (assoc input :seon.render/node entity :seon.db/db db))))))
+                 (case (::kind ev)
+                   :coalesced (coalesced-card-html ev input db)
+                   ;; Message events carry projected fields, not the raw
+                   ;; entity — re-pull the message by id so the html
+                   ;; converter sees its full shape.
+                   :message   (when-let [mid (::id ev)]
+                                (render/render-entity-html
+                                  (assoc input :seon.db/db db
+                                         :seon.render/node
+                                         (db/pull db '[* {:seon.agent.message/from
+                                                          [:db/id :seon.user/id :seon.agent/id]
+                                                          :seon.agent.message/to
+                                                          [:db/id :seon.user/id :seon.agent/id]}]
+                                                   [:seon.agent.message/id mid]))))
+                   :eval      (render/render-entity-html
+                                (assoc input :seon.render/node (::entity ev)
+                                       :seon.db/db db))
+                   nil)))
              vec)]
     (if (seq cards)
       (into [:div {:class "flex flex-col"}] cards)

@@ -33,6 +33,7 @@
   (:require
     [seon.agent.ctx.usage :as usage]
     [seon.db :as db]
+    [seon.derive :as derive]
     [seon.render.system :as system]
     [seon.schema :as schema]
     [seon.web.brand :as brand]))
@@ -160,6 +161,28 @@
                                    "SEON_EMBED off")}
       (if embedding? "⌁ embed" "embed off")]]))
 
+(defn- storms-chunk
+  "HEALTH SIGNAL — agents currently THRASHING on broken evals
+   (`seon.derive/error-storms`: an anomalous recent eval-failure rate).
+   DERIVED, so it vanishes the instant an agent's evals recover; renders
+   NOTHING (incl. its own leading divider) when the fleet is healthy. Each
+   storming agent links to its `/agent/{id}` so the human can intervene."
+  [storms]
+  (when (seq storms)
+    [:span {:class "flex items-center gap-2"}
+     [:span {:class "text-text-700"} "│"]
+     [:span {:class "text-warning"
+             :title "agents with an anomalous recent eval-failure rate"}
+      "⚠"]
+     (for [{:seon.agent/keys [id] :seon.derive/keys [failed window consec]} storms]
+       [:a {:key   id
+            :href  (str "/agent/" id)
+            :class "flex items-center gap-1 text-warning hover:text-amber-300"
+            :title (str failed "/" window " recent evals failed"
+                        (when (>= consec 2) (str " · " consec " in a row")))}
+        [:span {:class "font-semibold"} id]
+        [:span {:class "text-text-500"} "erroring"]])]))
+
 (def ^:private new-agent-onclick
   "Inline new-agent action: prompt for an optional purpose, POST `/agents/new`
    (the same same-origin-gated door the roster bar uses), then SWITCH to the
@@ -230,6 +253,7 @@
        (throughput-chunk fleet thru)
        [:span {:class "text-text-700"} "│"]
        (store-chunk db fleet)
+       (storms-chunk (derive/error-storms db))
        [:span {:class "ml-auto"} (actions-chunk fleet)]])
     (catch :default e
       [:header {:id    "system-header"

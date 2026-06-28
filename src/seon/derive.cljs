@@ -169,6 +169,99 @@
        vec))
 
 ;; ============================================================
+;; Error-storm detection — a DERIVED health signal. An agent thrashing on
+;; broken evals (a burst of consecutive failures, or a majority-failing
+;; recent window) is a QUERY of the recent eval log, never a stored counter,
+;; so it VANISHES the moment the agent's next evals succeed (the window
+;; slides past the failures). Drives BOTH the human header signal
+;; (`seon.ui.header`) and the agent-facing `seon.warn` check — one rule, two
+;; surfaces. CONTENT-FREE noise evals (empty / closing-delimiter-only source
+;; — a segmentation artifact that defined nothing) are excluded so a
+;; mis-split `}` never reads as thrash.
+;; ============================================================
+
+(def error-storm-window
+  "How many of the agent's most-recent REAL evals the rate test examines." 8)
+
+(def error-storm-min-fail
+  "Absolute failure floor — below this no rate storm flags (a 2/3 window is
+   not a storm)." 4)
+
+(def error-storm-consec
+  "Trailing consecutive REAL-eval failures that flag a storm regardless of
+   rate (the agent is stuck repeating one broken form)." 4)
+
+(schema/register! :seon.derive/error-storm
+  [:map
+   [:seon.agent/id      :string]   ; the thrashing agent
+   [:seon.derive/failed :int]      ; failures within the examined window
+   [:seon.derive/window :int]      ; real evals examined (≤ error-storm-window)
+   [:seon.derive/consec :int]])    ; trailing consecutive failures
+
+(defn- real-eval-oks
+  "The agent's REAL evals as a vec of `ok?` booleans, oldest→newest.
+   CONTENT-FREE noise (blank / closing-delimiter-only source) is excluded —
+   it is a segmentation artifact, not a sign the agent is thrashing."
+  [db agent-id]
+  (->> (db/query
+         {:seon.db/db db
+          :seon.db/query
+          '[:find ?at ?ok ?src
+            :in $ ?id
+            :where
+            [?a :seon.agent/id ?id]
+            [?r :seon.agent.run/agent ?a]
+            [?t :seon.agent.turn/run ?r]
+            [?t :seon.agent.turn/evals ?e]
+            [?e :seon.eval/at ?at]
+            [?e :seon.eval/ok? ?ok]
+            [(get-else $ ?e :seon.eval/source "") ?src]]
+          :seon.db/args [agent-id]})
+       (sort-by first)
+       (remove (fn [[_ _ src]]
+                 (let [s (clojure.string/trim (str src))]
+                   (or (clojure.string/blank? s)
+                       (boolean (re-matches #"[)\]}]+" s))))))
+       (mapv (fn [[_ ok _]] (boolean ok)))))
+
+(defn error-storm
+  "nil, or an `:seon.derive/error-storm` map when agent `agent-id` is
+   thrashing: among its last [[error-storm-window]] REAL evals MORE THAN HALF
+   failed (and ≥[[error-storm-min-fail]] absolute), OR its last
+   [[error-storm-consec]]+ real evals ALL failed. Pure read of the recent
+   eval log — self-heals as soon as new evals succeed."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent/id :seon.agent/id]]
+                  [:maybe :seon.derive/error-storm]]}
+  [db agent-id]
+  (let [oks    (real-eval-oks db agent-id)
+        recent (vec (take-last error-storm-window oks))
+        n      (count recent)
+        failed (count (remove true? recent))
+        consec (count (take-while false? (reverse oks)))]
+    (when (or (>= consec error-storm-consec)
+              (and (>= failed error-storm-min-fail)
+                   (> failed (quot n 2))))
+      {:seon.agent/id      agent-id
+       :seon.derive/failed failed
+       :seon.derive/window n
+       :seon.derive/consec consec})))
+
+(defn error-storms
+  "Every agent currently in an error storm, as `:seon.derive/error-storm`
+   maps (empty when the fleet is healthy) — ONE derived read shared by the
+   human header signal and the agent-facing warn check. No stored counters:
+   a storm clears itself the moment the agent's evals recover."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]]
+                  [:vector :seon.derive/error-storm]]}
+  [db]
+  (->> (db/query {:seon.db/db db
+                  :seon.db/query '[:find [?id ...] :where [?a :seon.agent/id ?id]]})
+       (keep #(error-storm db %))
+       (sort-by :seon.agent/id)
+       vec))
+
+;; ============================================================
 ;; The agent FINGERPRINT — one map of the whole derived state. A pure DERIVED
 ;; READ (no writes); state via [[state-from-primitives]], run/turn/todo fields
 ;; via cheap queries. Run-scoped fields are present only while a run is open.
