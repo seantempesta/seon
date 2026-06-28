@@ -84,19 +84,33 @@ other lane's **_Needs_** and the owner makes it.
 |---|---|---|---|
 | 1 | Core (Phase 1) | UI | `:seon.agent/ctx` (component vector of `:seon.agent.ctx/block`), `:seon.agent.ctx/name|priority`; the old `:seon.agent/sections`/`:seon.ctx/section` are gone. |
 | 2 | Core (Phase 2e) | UI | ✅ **DELIVERED `b4aa2616` + live-proven.** `(seon.render/slot ctx block-name)` — ctx `{:seon.db/db :seon.agent/id}`, block-name a keyword → ALWAYS `[:div {:id "tile-<name>" :data-slot "<name>"} <body>]` (`:data-slot` is the STRING name, not a keyword — DOM-correct). body = the named block's `:seon.render/html` guarded; a missing/throwing block → an error tile (never throws, siblings intact). Also injected per render ctx as `:seon.render/slot`, so a layout calls `((:seon.render/slot in) :canvas)`. **Build is GREEN (reitit bring-up done) — both lanes unblocked.** |
-| 3 | Core (Phase 5) | UI | `:seon.route/*` schema registered + the core routes seeded: `/` (root world) + `/agent/{id}` (GET shim + same-path live stream — NO `/agent/{id}/feed`), `/agent/{id}/call`, `/eval`; `db->routes` is UI's to write. |
+| 3 | Core (Phase 5) | UI | `:seon.route/*` schema registered + the core routes seeded: `/` + `/world` + `/world/feed` (GET); `/agent/{id}` + `/agent/{id}/feed` (GET); `/agent/{id}/call` (POST). The shim page and its live SSE stream are SEPARATE GET paths (`…` + `…/feed`) — **the earlier "same path, no /feed" was wrong vs the live code** (corrected 2026-06-27; the code matches datastar-clojure's own `tiny_gzip.clj` separate-GET-stream idiom). `db->routes` is UI's to write. |
 | 4 | Core (Phase 7) | UI | the `:seon/error` value shape + `warnings-section`→`warnings-block` (UI renders the error-TILE half). |
 | 5 | UI | Core | none flowing back beyond _Needs_; the capability gate (`seon.web.reactive.call`) stays UNCHANGED — UI only moves `/call`'s registration to a route datom. |
 
 ## Core — _Now / Needs / Interface changes_
 
-- **Now:** **PHASE 1 DONE + `cluster reset default` ALREADY RUN (by Core) + live-proven
-  — UI: do NOT re-run the reset.** Reset boot clean (replay 6/6, 410 fns instrumented
-  0 bad-spec, fresh agent `PGh-2606271755`); render-proof = 40k-char prompt with new
-  `;;; ┌─` brackets, write→commit→read→retract green, **full suite 635 tests / 0 fail**.
-  **PHASE 2 KEYSTONE now in flight** (a Core agent: seed-copy + variadic
-  `install!`/`remove!`, DELETE the merge/provider seam AND the char budget). Then 2e
-  (render words + the `slot` UI gate) → 2f → 2g → Phase 3 ∥ Phase 6.
+- **Now:** **PHASES 1 + 2-keystone + 2e + reitit ALL DONE + live-proven; full suite
+  646 tests / 0 fail (200s).** **coord-#12 (slot/render convergence) LANDED `690ae2b8`**
+  — the override-proof gap is closed. SEAM for U: `slot`/`render` now consume the
+  `{:seon.render/hiccup …}` envelope via one `unwrap-response` (render.cljs); the slot/world
+  ERROR path routes through the **overridable** `seon.render.live-tile/error-response` (acme's
+  existing `set!` override flows through unchanged). **→ U: swap acme's error `set!` to that
+  surface + fix the ui.md "Total override" table; coord-#6 (delete legacy) unblocked on this
+  half.**
+- **coord-#14 REFRAMED (grounded in source + owner's seed/resume clarification 2026-06-27):**
+  **"resume re-seeds the block set" is the wrong frame.** Context blocks are DATA
+  (`:seon.agent.ctx/block` datoms in `:seon.agent/ctx`); on a new runtime they're READ BACK
+  from the DB directly (`pull-agent-entity`) — not re-seeded, not replayed. Resume = bulk
+  whole-ns reconstitution (`replay-program-graph!` client.cljs:752 → `reconstitute-ns-source`
+  eval.cljs:533, NO eval-by-eval). So #14 splits into:
+  - **(a) live-tile bridge — NO Core change needed.** Seam already exists:
+    `seon.render/render-agent-tile` (render.cljs:410), the entry the legacy console calls
+    (inspector.cljs:293/916/1077). New world-layout calls it + unwraps via `unwrap-response`.
+    **→ U's lane (web/ui placement).**
+  - **(b) new-core-block propagation to long-lived agents** = owner fork (provenance vs
+    `cluster reset`); **(c) fold live-tile → block/slot system** = owner fork (Core task #14).
+    Both flagged to owner; neither blocks U's immediate world-UI work.
 - **Needs (from UI):** the reitit cutover — handled by the **batched bring-up** below.
 - **Interface changes / AGREED PLAN — DECOUPLED (supersedes the earlier "batch"):**
   Background gotcha: a **cljs-watch restart rotates shadow's dev port and DETACHES the
@@ -191,8 +205,13 @@ other lane's **_Needs_** and the owner makes it.
      unchanged (yours).
   2. **Handoff #3 route SET changed — READ BEFORE seeding Phase-5 routes.** I own routing
      (owner-delegated); the design is hierarchical reitit with route-data inheritance.
-     (a) **No `/agent/{id}/feed`** — GET=shim and the live stream ride the SAME path (datastar
-     opens the stream from the page, per hyperlith), so seed `/` + `/agent/{id}` only.
+     (a) **The feed IS a separate GET path** (CORRECTED 2026-06-27 — the earlier "same path,
+     no /feed" claim was wrong vs the live, working code). The shim page and its long-lived
+     SSE stream are two GET URLs: `/world` → `/world/feed`, `/agent/{id}` → `/agent/{id}/feed`.
+     This matches datastar-clojure's own example (`tiny_gzip.clj`: page `/`, stream GET
+     `/updates`); separate URLs sidestep the GET/POST same-URL cache collision that forced
+     hyperlith's same-path-POST `&u=` hack. **Phase-5 MUST seed the `…/feed` routes too** or
+     `db->routes` drops them and the live stream 404s after the static-vector cutover.
      (b) **Namespaces are not a routing level** — one action door per agent
      (`/agent/{id}/call`), the fn rides as a descriptor; do NOT seed per-ns/per-fn routes.
      Full hierarchical tree + the middleware/auth/cache/CORS mapping land in [[ui]] (mine);

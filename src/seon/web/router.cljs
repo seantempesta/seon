@@ -80,7 +80,15 @@
 
 (def ^:private hijacked
   "The handler-owns-the-socket sentinel. A handler that wrote (or will write)
-   the node res directly returns this so the adapter double-writes nothing."
+   the node res directly returns this so the adapter double-writes nothing.
+
+   LOAD-BEARING INVARIANT: every reitit handler here MUST return a TRUTHY value
+   (this sentinel). reitit's sync `ring-handler` is `(or (handler req)
+   (default-handler req))` (reitit-ring/ring.cljc:389) — a handler that writes the
+   socket then returns a FALSY value makes reitit re-invoke the default-handler
+   (`legacy-default`), which writes the res AGAIN → a 'headers already sent' crash.
+   The `hijacked` sentinel is truthy, so the `or` short-circuits and the default
+   never double-fires. Keep every handler returning it."
   {:seon.http/hijacked true})
 
 (defn- node-req [r] (:seon.http/node-req r))

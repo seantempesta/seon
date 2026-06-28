@@ -132,12 +132,12 @@ the route datoms rebuilt on tx via a reloading thunk. This replaces hand-rolled
 `case`/`cond`/`re-matches` dispatch. (The `:seon.route/*` attributes are
 registered per [[data-model]].)
 
-- **Seeded core routes:** `/` (root agent's world) and `/agent/{id}` (world) —
-  that is the whole seeded set. Each page route also serves its OWN live stream
-  over the SAME path (the GET shim opens it from the page), so there is **no
-  separate feed route**. The one action door is `/agent/{id}/call`. Agents add
-  `/agent/{id}/app/{x}` rows (capability-gated, handler in the agent's own
-  `my.agent.<id>` ns).
+- **Seeded core routes:** `/` (root agent's world), `/world` + `/world/feed`, and
+  `/agent/{id}` + `/agent/{id}/feed` — all GET. Each world is TWO GET routes: the
+  shim page and its long-lived SSE stream at a `…/feed` sibling path (the shim's
+  `data-init="@get('…/feed')"` opens the stream). The one action door is
+  `/agent/{id}/call` (POST). Agents add `/agent/{id}/app/{x}` rows
+  (capability-gated, handler in the agent's own `my.agent.<id>` ns).
 - **Nested routes ARE nested layouts** — reitit meta-merges route-data parent →
   child (`:seon.route/owner` + middleware flow down). `match-by-name` gives reverse
   routing; build-time path/name conflict detection catches overlaps the
@@ -189,17 +189,22 @@ in `seon.web.datastar`.
 - **One throttle.** A drop-latest (coalescing) throttle collapses a tx burst into
   ONE morph — an agent turn commits many datoms; the human sees a single
   re-render.
-- **Same path, no feed route.** The GET shim page and the live stream ride the
-  SAME path: datastar opens the stream from the page (`data-init`), so there is no
-  `/agent/{id}/feed`. reitit only routes the GET that serves the page; the stream
-  then rides the raw `node:http` `res` — the thin Node↔Ring adapter injects it and
-  the SSE handler returns `{:seon.http/hijacked true}` so the adapter does not
-  double-write.
+- **Separate GET feed path.** The shim page (`/world`, `/agent/{id}`) and its live
+  stream (`/world/feed`, `/agent/{id}/feed`) are two GET URLs; the shim's
+  `data-init="@get('…/feed')"` opens the stream. Two distinct URLs sidestep the
+  GET/POST same-URL cache collision that forces hyperlith's same-path-POST `&u=`
+  hack, and this matches datastar-clojure's own example (`tiny_gzip.clj`: page `/`,
+  stream GET `/updates`). reitit routes the feed GET to the SSE handler, which rides
+  the raw `node:http` `res` — the thin Node↔Ring adapter injects it and the handler
+  returns `{:seon.http/hijacked true}` so the adapter does not double-write.
 - **Transient state is signals; time-travel and reconnect are just re-renders.**
   Transient client state lives in datastar **signals** only, never DOM attrs. Time
   travel is `view = f(db-as-of t)` over the bitemporal DB — a different `t`, the
   same render. Reconnect needs no UI-side `since-t` replay: the first paint fires
-  immediately on open and repaints the current world.
+  immediately on open and repaints the current world. **Status:** reconnect-as-paint
+  is LIVE; the time-travel half is DESIGNED, not yet wired — the feed view-fns
+  currently close over the CURRENT db (`@db/*conn*`) with no `t` thread and no
+  time-slider signal. Wiring it = a slider signal → `db/as-of` in the view-fn.
 - **The hard invariant: no agent code ever touches an SSE connection.** agent →
   datom → tx-listener → derived render → morph, one way; actions reverse it (a
   browser POST → the owning agent's sandbox → result datoms → tx-listener →

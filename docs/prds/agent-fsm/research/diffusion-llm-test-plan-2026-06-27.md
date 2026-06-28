@@ -32,30 +32,28 @@ or retrieve.
 Build the harness against BD3-LMs for $0; flip the model handle to DiffusionGemma
 on the rented box once the loop runs. Same `accept_canvas`-shaped seam both sides.
 
-## Hardware: rent a 5090, not an A6000
+## Hardware: rent a 5090, use the official NVFP4 checkpoint
 
-The model is 25.2B params; precision is the whole game on a small box:
+The model is 25.2B params and it's MoE — **all experts stay resident**, so VRAM
+tracks total params, not the 3.8B active. BF16 ≈ 50 GB (needs H100). But there is
+an **official 4-bit checkpoint** that settles this:
 
-- **bf16** ≈ 50 GB → fits neither.
-- **FP8** ≈ 25 GB → needs **native FP8 hardware**.
-- **FP4/NF4** ≈ 13 GB → fits anything 16 GB+.
+- **`nvidia/diffusiongemma-26B-A4B-it-NVFP4`** — Gemma-26B-A4B quantized to
+  **NVFP4** (4-bit float) with NVIDIA Model Optimizer, **vLLM-ready**, near-lossless.
+  **~18 GB**, runs on RTX 4090 (24 GB) / **5090 (32 GB)**, **700+ tok/s on the
+  5090**. This is the checkpoint we serve — not the BF16 one.
 
-Key fact: **A6000 is Ampere — no native FP8.** FP8 there is emulated/slow. So:
+So:
 
-- **RTX 5090 (Blackwell, 32 GB) — RECOMMENDED.** Native FP4/FP8, matches the
-  model's intended FP8 serving, much faster compute than Ampere, **cheapest**
-  (~$0.40–0.70/hr on Vast/RunPod). FP8 (~25 GB) fits 32 GB for text+256-canvas
-  (KV is small); FP4 leaves comfortable headroom. Risk: 32 GB is tight for FP8 +
-  multimodal — but our tests are text/code, so fine.
-- **A6000 (48 GB)** — fallback only if 32 GB proves tight: run **int8** (~25 GB,
-  Ampere-supported) or NF4. More VRAM, slower, no FP8, ~same hourly. Use only if
-  the 5090 OOMs.
-- **H100** — only if we later need the >1100 tok/s throughput number; not for
-  traction testing.
+- **RTX 5090 (Blackwell, 32 GB) — THE card.** Native NVFP4, ~18 GB checkpoint
+  leaves ~14 GB for KV/activations at our small contexts, cheapest (~$0.43–0.69/hr).
+- **RTX 4090 (24 GB)** — also works (NVFP4 fits 18 GB); a fallback if no 5090.
+- **H100/A100-80GB** — only if we ever want the BF16 checkpoint or the >1100 tok/s
+  number; NOT needed for any traction probe.
 
-**Verdict: rent one 5090 by the hour.** Total traction spend is single-digit
-dollars (see cost gate). Keep BD3-LMs local for harness dev so the meter only
-runs during real DiffusionGemma probes.
+**Verdict: rent one 5090, serve the NVFP4 checkpoint.** Single-digit-dollar spend.
+Keep BD3-LMs local for harness dev so the meter only runs on real probes. Full
+copy-paste setup: [[diffusion-llm-runpod-runbook-2026-06-27]].
 
 ## Harness shape — do NOT integrate into the pod yet
 

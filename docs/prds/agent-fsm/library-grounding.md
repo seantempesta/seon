@@ -383,10 +383,20 @@ Read: `reference-code/reitit/modules/reitit-core/src/reitit/core.cljc:331-383`
   the pod. This is why the build delta is a Maven dep, not source-paths.
 - **`ring-handler` (ring.cljc:360-420)** has BOTH a sync `([request])` and an async
   `([request respond raise])` arity, dispatching `(-> result method :handler)` after
-  `match-by-path`. **`reloading-ring-handler`** (just below) recreates the handler per
-  request from a 0-arity thunk — that IS our "the router is a pure derived value of
-  the route datoms, rebuilt on tx" mechanism; generalize the serve.cljs:704-710
-  var-rereading wrapper into it.
+  `match-by-path`. ⚠ **Sharp edge (ring.cljc:389):** the sync arity is
+  `(or (handler request) (default-handler request))` — a matched handler that returns a
+  FALSY value triggers a SECOND call to the default-handler. Our handlers all return the
+  truthy hijack sentinel `{:seon.http/hijacked true}`, so the `or` short-circuits and the
+  default never double-fires — but this makes "every router handler returns the truthy
+  sentinel" a LOAD-BEARING invariant: a future handler that writes the socket then returns
+  `nil` would have reitit re-invoke `legacy-default` → a double-write ("headers already
+  sent") crash. Documented in `router.cljs`.
+- **`reloading-ring-handler` (ring.cljc:406-420)** recreates the handler PER REQUEST from a
+  0-arity thunk — good for REPL dev but wasteful per-request. ⚠ **We did NOT use it.** The
+  router rebuilds on hot-reload via `install!` (serve re-runs it on `:dev/after-load`),
+  caching one handler in `!ring-handler` — rebuilt once per reload, not once per request.
+  Same "router is a pure derived value of the route datoms" goal, cheaper. (When Phase-5
+  `db->routes` lands, `install!` rebuilds on the route-tx too.)
 - **reitit-malli coercion is zero-interop** — it validates/coerces path-params /
   query / body against a route's `:parameters` malli schema with the SAME malli we
   already instrument with. No new validation surface; our malli-everything maps ride
@@ -455,9 +465,17 @@ Read: `reference-code/hyperlith/src/hyperlith/core.clj:88-110`
 (`render-handler`), `…/examples/chat_atom/src/app/main.clj`; and the gzip-SSE proof
 `reference-code/datastar-clojure/src/dev/examples/tiny_gzip.clj`.
 
-- `defview` (core.clj:99-105) registers a shim-handler (the page) + a render-handler
-  (the stream) at the SAME path — that IS our "GET shim + live stream share the path,
-  no /feed."
+- `defview` (core.clj:99-105) registers a shim-handler (the page, `[:get path]`) + a
+  render-handler (the stream, `[:post path]`) at the SAME path — hyperlith disambiguates
+  shim-vs-stream by HTTP METHOD (GET=page, POST=stream), so its `on-load-js` does
+  `@post(window.location.pathname …)` with a `&u=` cache-buster (its comment: GET/POST
+  cache headers collide on one URL). ⚠ **We DIVERGED — and the divergence is correct:**
+  our shim and feed are SEPARATE paths (`/world` GET → `/world/feed` GET; `/agent/{id}`
+  GET → `/agent/{id}/feed` GET). This matches datastar-clojure's OWN canonical example
+  (`tiny_gzip.clj:31` — page at `/`, stream at a separate GET `/updates` via
+  `(d*/sse-get "/updates")`), and because the two URLs differ there is NO GET/POST
+  same-URL cache collision, so we need none of hyperlith's `&u=` hack. **The doc claim
+  "no /feed, same path" was WRONG vs the live code — corrected here + in [[ui]]/coordination.**
 - `render-handler` (impl/datastar.clj:122-181) is the engine: tap the `refresh-mult`
   through a `(dropping-buffer 1)` (= the drop-latest throttle), render on connect, then
   on each refresh re-run `(render-fn req)`, write `event: datastar-patch-elements\n
@@ -495,6 +513,43 @@ Chrome.
   clobber the input value / popover / time-slider.
 - **The hijack sentinel** `{:seon.http/hijacked true}` keeps raw-socket handlers (SSE,
   static) verbatim under a Ring router.
+
+### Validation re-grounding (2026-06-27) — findings vs the live code
+
+Re-read hyperlith (`core.clj`, `impl/datastar.clj`), reitit (`reitit-ring/.../ring.cljc`),
+datastar-clojure (`consts.clj`, `tiny_gzip.clj`) against `web/datastar.cljs`,
+`web/router.cljs`, `ui/world.cljs`. The wire framing + view=f(db) + crash-guards all
+hold. Findings, by severity:
+
+- 🔴 **A — feed routing: doc/contract was WRONG, would 404 the feed at Phase 5.** The code
+  uses separate GET feed paths (`/world/feed`, `/agent/{id}/feed`); the doc said "no /feed,
+  same path." The code is the idiomatic choice (datastar-clojure `tiny_gzip.clj:31`). FIXED
+  the routing contract here + [[ui]] + coordination Handoff #3 / Interface #2 so Phase-5
+  `db->routes` SEEDS the feed routes (`/world/feed`, `/agent/{id}/feed` GET). Without this
+  fix the feeds vanish when the static route vector is replaced by the db projection.
+- 🟠 **B — no reconnect/retry hardening on the feed.** `shim-html`'s `data-init="@get('…')"`
+  relies on datastar defaults; hyperlith sets `{retryMaxCount: Infinity, openWhenHidden:
+  false}` + a `data-on:online__window` reconnect for an always-on view. For an agent
+  dashboard that must survive pod restarts / sleep, add those to the `@get`. (Task.)
+- 🟠 **E — historical time-travel is DESIGNED, not WIRED.** The feed view-fns close over
+  `@db/*conn*` (current db) with no `t` thread + no time-slider signal. `view = f(db-as-of
+  t)` is the model; the slider-signal → `db-as-of` path is unbuilt. Don't read the vision's
+  "time travel" as shipped. (Task — it's a stated owner goal.)
+- 🟡 **C — reitit falsy-handler double-invoke** (see `ring-handler` note above): an invariant,
+  not a current bug; documented in `router.cljs`.
+- 🟡 **D — `reloading-ring-handler` not used** (see note above): we rebuild-on-reload via
+  `install!`; cheaper. Doc corrected.
+- ⚪ **F — single-thread render, no CPU-pool offload.** hyperlith offloads render+compress to
+  a CPU pool (`cp/on-cpu-pool`) so a slow render never blocks the accept loop; Node is
+  single-threaded, so `broadcast!` renders+gzips every connection synchronously on the event
+  loop. Fine at agent-dashboard scale (a handful of connections); a known ceiling if fan-out
+  grows (then: `worker_threads`, or shard the render). Already implied by the "one uncaught
+  throw blanks every connection on the single pod thread" guard rule.
+
+Idiom wins folded in: hyperlith's `with-open` stream-resource scoping, `loop`/`recur` over
+the refresh channel, `er/try-on-error` wrapping EVERY render (mirrors our per-tile guards),
+and the `dropping-buffer 1` drop-latest throttle (our `setTimeout` coalescer is the Node
+analog). Our `datastar.cljs` is in-grain: guarded renders, crash-proof writes, `view=f(db)`.
 
 ### How to task an agent with this grounding
 
