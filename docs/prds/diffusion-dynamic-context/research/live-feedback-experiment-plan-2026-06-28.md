@@ -535,5 +535,102 @@ model still has both in view. There is no autoregressive analog.
   unambiguously a thing AR cannot do. It is a clean proxy for live human steering,
   not a general benchmark.
 - This plan is to EXECUTE fast once the GPU is live, not a result.
-</content>
-</invoke>
+
+## X1/X2 resolved from SDK source (no GPU)
+
+Read-the-source verdict, grounded in the vendored SDKs (`reference-code/runpod-python`,
+`reference-code/flash`). X1 and X2 are both **fully answerable from the client/worker
+SDK source** — they are not opaque server-side platform behaviors. The job lifecycle
+is defined IN the SDK: the client wraps a fixed set of HTTP routes, and the worker's
+own FastAPI app registers exactly those routes. There is nothing hidden behind them.
+
+### X1 — input into a running job: UNSUPPORTED (confirms Route A)
+
+The complete inbound-to-a-job surface in BOTH SDKs is `/run` (or `/runsync`). Once a
+job is submitted, every remaining operation is read-only (`/status`, `/stream`) or
+terminal (`/cancel`). There is **no `/update`, no `/send`, no re-readable input, no
+message-into-a-running-job route anywhere in the SDK.**
+
+- **runpod-python client** (`reference-code/runpod-python/runpod/endpoint/runner.py`):
+  the entire `Job` + `Endpoint` API is `run` → POST `/run` (`:207`-`:224`), `run_sync`
+  → POST `/runsync` (`:226`-`:250`), `status` → GET `/status/{id}` (`:130`-`:135` via
+  `_fetch_job` `:119`-`:128`), `stream` → GET `/stream/{id}` (output only, `:156`-`:169`),
+  `cancel` → POST `/cancel/{id}` (`:170`-`:181`), plus `health`/`purge_queue`
+  (`:252`-`:275`). **No method posts data INTO an existing `job_id`** — `/cancel` is the
+  only POST that targets a running job, and it only kills it.
+- **runpod-python worker** (`reference-code/runpod-python/runpod/serverless/modules/rp_fastapi.py:236`-`:271`):
+  the worker's FastAPI app registers ONLY `/run`, `/runsync`, `/stream/{job_id}`,
+  `/status/{job_id}` (+ a docs redirect + an optional `/{id}/realtime`). The route table
+  IS the inbound surface; there is no input route keyed by a live `job_id`.
+- **`/realtime` is not an exception** (`rp_fastapi.py:290`-`:303`): `_realtime` takes a
+  `Job`, runs `run_job(handler, …)` **to completion**, and returns the result. It is a
+  low-latency *one-shot* (submit→run→return), not a channel into an in-flight
+  `generate()`.
+- **Flash QB `@Endpoint`** (`reference-code/flash/src/runpod_flash/endpoint.py`): the
+  queue-based path `gpu_worker.py` uses exposes `run` → `/run` (`:865`-`:885`), `runsync`
+  → `/runsync` (`:887`-`:897`), `cancel` → `/cancel/{id}` (`:899`-`:908`); the returned
+  `EndpointJob` offers only `status`/`cancel`/`wait` (`:113`-`:128`). **No update /
+  send-to-job surface** — Flash is strictly narrower than runpod-python here (it does not
+  even wrap `/stream`; see X2).
+
+**Verdict X1: UNSUPPORTED.** Serverless jobs are one-shot; the only inbound is a fresh
+`/run`. This **confirms Route A (per-step round-trip via repeated `/run`) is the correct
+architecture, not a compromise** — it is the only shape the platform's job lifecycle
+permits. Every feedback injection MUST be a new `/run`; "feedback between steps within
+one `generate()`" is impossible on the queue-based serverless path.
+
+**The one honest caveat (does not change the verdict for the gpu_worker path):** Flash's
+**load-balanced** mode (`LoadBalancerSlsResource`, `reference-code/flash/src/runpod_flash/core/resources/load_balancer_sls_resource.py:34`-`:38`)
+advertises "REST APIs, **WebSocket servers**, Real-time streaming, Custom HTTP protocols"
+— i.e. a direct always-on HTTP server, NOT the queue model. A WebSocket in LB mode is the
+only SDK-visible path to a true bidirectional mid-job channel — but it abandons
+scale-to-zero (`workersMin ≥ 1`, request-count scaling, `:54`-`:62`) and requires the
+worker to hold GPU state across the interactive human pause. That is exactly the
+"dedicated persistent process" deploy the doc already scopes OUT of serverless Route B.
+So: on the queue-based `@Endpoint` path (the one `gpu_worker.py` and this whole plan
+use), X1 is a hard **no**.
+
+### X2 — generator-handler OUTPUT streaming: SUPPORTED (observation optimization is available)
+
+The serverless worker fully supports a generator handler whose `yield`s are streamed out
+and polled via `/stream/{job_id}`:
+
+- **Detection** (`reference-code/runpod-python/runpod/serverless/modules/rp_handler.py:7`-`:9`):
+  `is_generator` returns true for `inspect.isgeneratorfunction` OR
+  `inspect.isasyncgenfunction` — a sync `yield` handler or an `async def … yield` handler
+  both qualify.
+- **Streaming pump** (`reference-code/runpod-python/runpod/serverless/modules/rp_job.py:307`-`:336`):
+  `run_job_generator` iterates the handler and emits each partial as `{"output": …}` —
+  one streamed chunk per `yield`.
+- **The `/stream` route requires it** (`rp_fastapi.py:352`-`:372`): `_sim_stream` runs the
+  generator and, if the handler is NOT a generator, returns `"Stream not supported, handler
+  must be a generator."` So `/stream/{job_id}` ⇔ generator handler.
+- **Client poll** (`runner.py:156`-`:169`): `Job.stream()` GET-polls `/stream/{id}` every
+  1 s and yields each chunk's `output` until a terminal status — pull-based output streaming,
+  ~1 s poll granularity.
+
+**Flash caveat for X2:** Flash's QB `@Endpoint` client does **not** expose a `.stream()`
+helper (only `run`/`runsync`/`status`/`cancel`/`wait`, `endpoint.py:113`-`:128`, `:865`-`:908`).
+So to use generator streaming with the `gpu_worker.py` QB endpoint you either (a) poll
+`/stream/{job_id}` via `runpod.Endpoint(id).run(...).stream()` from runpod-python directly
+(the worker emits it regardless of which client reads), or (b) use Flash LB mode's native
+real-time streaming. The output-streaming *capability* exists at the worker/platform level;
+only Flash's QB *client wrapper* omits the convenience method.
+
+**Verdict X2: SUPPORTED as an observation optimization layered on Route A.** A
+`accept_canvas`-override handler can `yield` each denoise step's canvas; the human watches
+sub-segment evolution over `/stream` without a round-trip per step. But — per X1 — every
+actual feedback **injection** still ends that stream and issues a new `/run`. Stream to
+OBSERVE, round-trip to STEER. Route A works fully without it (N segment-paced round-trips);
+X2 just makes the watching cheaper.
+
+### The deployable live-feedback architecture is
+
+**Route A — Seon drives a stateless QB `@Endpoint` denoiser one `accept_canvas` segment per
+`/run`, feedback injected as the next `/run`'s body — optionally streaming intermediate
+canvases OUT via a generator handler + `/stream` for cheaper observation, but never taking
+feedback IN mid-job (the SDK exposes no such route).** This is now grounded in the SDK
+source, not "almost certainly": X1 is a confirmed hard no on the queue path (only `/run`
+is inbound; `/status`/`/stream` read, `/cancel` kills), and X2 is a confirmed yes for output
+streaming. No live GPU probe is needed to settle either — both are decided by the SDK's
+fixed route table. (X3, warm per-segment latency, remains a genuine GPU measurement.)
