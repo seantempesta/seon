@@ -16,6 +16,11 @@ Core owns the engine (`seon.agent.ctx`, `seon.render` engine, `seon.config`,
 live-test→learn→tweak loop. **Read [[coordination]] first** — it's the live Core↔U
 channel + the lane table; this file is the methodology + runbook on top of it.
 
+**If you are the CORE lane, jump to [§ Core lane — how to be the best Core
+agent](#core-lane--how-to-be-the-best-core-agent) below** — that section is your
+charter; the UI methodology above is context on what your engine changes must
+serve.
+
 ## The method (this is the actual job now)
 
 **Build/change → drive a real agent → observe what it ACTUALLY uses/struggles
@@ -102,6 +107,64 @@ install-timing + discoverability. P1: drop `:live-tile` from the always-on base
 context · honesty (message↔stored). P2 (tracked): #43 clip-escape · #45 inventory-block ·
 #40 turn at/status · #41 relink-registry stomp · #22 `my.tile` interactivity.
 
+## Core lane — how to be the best Core agent
+
+You own the **engine**: `seon.agent.*` (loop/run/turn/FSM/ctx), `seon.render`
+engine, `seon.config`, `seon.warn`, the parser, the `my.*` schemas, the
+bootstrap/seed, `seon.db`/`seon.eval`, and the resilience primitives
+(`seon.retry`, the LLM adapters). The UI lane consumes what you produce — so a
+change that alters the agent's CONTEXT, FSM, or verb surface is a Core change
+even when the UI lane requested it. Single ownership: don't fix a context bug in
+a render fn.
+
+**Your method is REPL-first, not UI-first.** Observe the live pod, test the
+assumption, read the source (`reference-code/` for any lib semantics you'd
+otherwise guess — datahike / malli / sci / clojurescript self-host), then
+implement, then live-prove in the pod (a datom read back, an eval result) — not
+just a green suite. The suite runs UNINSTRUMENTED, so it can hide an
+instrumentation-only break.
+
+**Core invariants you must hold (root `CLAUDE.md`, the parts that bite):**
+
+- **Errors-as-values at every agent-facing boundary** — `:seon/error` /
+  `:seon.ai/error`, never a throw into the agent loop. Resilience surfaces a
+  value the render derives a line from.
+- **Schema-first + instrumented.** Every public fn carries a correct
+  `:malli/schema` — it's validated at runtime, a wrong schema throws. Register
+  shared shapes ONCE and reference them; never inline a duplicated constraint.
+- **No `:kind`/`:type`.** An entity is its attributes + refs. FIND by
+  attribute-presence, IDENTIFY by `:db.unique/identity`, RELATE by refs.
+- **Derive, don't store.** A new agent-facing surface is a section/render fn
+  that queries the DB, not a stored counter/flag/notification. Self-healing
+  because nothing needs clearing.
+- **One mechanism, in place.** No `foo-v2`, no parallel ns to "house a fix";
+  the tree is a feature branch — atomic refactors are the cheap option.
+- **Don't reinvent — but make it FIT the pod.** A JVM-only lib (blocking
+  `Thread/sleep`, exception-based, `.clj`-only) cannot run in the CLJS pod; port
+  the proven DESIGN to native async / errors-as-values instead. Worked example:
+  `seon.retry` ports the `again` lib's strategy-as-seq combinators, with a fresh
+  `^:async` errors-as-values executor (`seon.agent.turn/call-llm!` is the sole
+  LLM retry authority — no parallel retry path).
+
+**Coordination (shared tree, peers live):** commit per unit with EXPLICIT
+pathspecs (never `git add -A` — peers have uncommitted work); `bin/test-cljs`
+green ONCE per unit (not per edit); NEVER overlap `cljs.test/run-tests` in the
+live pod (wedges async — `bin/seon restart pod` to recover); after a
+context/FSM/verb change re-align ALL agent-facing context + `bin/seon cluster
+reset default` to re-seed the shared pod; capture each flagged cross-lane
+casualty as a tracked task with `file:line`.
+
+**Your slice of the focus queue.** #42 (namespaces signature-render +
+config-driven) is the #1 unlock and is YOURS — the signature machinery already
+exists (`seon.agent.ctx.namespaces/verb-signature-whitelist`,
+`:seon.render/detail :signature`); render-TRIM `my.*` to signatures by default
+(keep the one worked `register!→transact!→query` example), full body on demand,
+and wire `full-source-whitelist`/`verb-signature-whitelist`/`render-depth` to
+`seon.config` profiles. Also Core: the `message/user` `init-message-verbs!`
+install-timing race + discoverability, and the data-integrity bugs #40/#41. See
+[§ Open](#open--the-full-core-request-list-owner-relayed-2026-06-28) for the
+full list with severities.
+
 ## Settled — do NOT re-litigate
 
 - **`seon-skills/`** (repo root) = the dedicated AGENT skill corpus (env `SEON_SKILLS_DIR`);
@@ -129,4 +192,3 @@ context · honesty (message↔stored). P2 (tracked): #43 clip-escape · #45 inve
   `research/my-skills-design-2026-06-28.md` — the live-test evidence + designs.
 - `seon-skills/*/SKILL.md` (agent skills) + `.claude/skills/*` (dev skills); the `data-oriented-clojure`
   + `ui-live-tiles` skills are the agent-facing mindset/how-to.
-</content>
