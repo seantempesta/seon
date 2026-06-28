@@ -124,21 +124,30 @@
 (defn- list-skill-files
   "Repo-relative paths of every `SKILL.md` under `dir`: the directory form
    `<dir>/<name>/SKILL.md` plus any top-level `<dir>/<name>.md`. [] when `dir`
-   is absent/unreadable. Node `fs` (the pod is Node)."
+   is absent/unreadable. Node `fs` (the pod is Node).
+
+   Entry type is resolved with `statSync` (which FOLLOWS symlinks), not the
+   `readdirSync` Dirent flags — a `<dir>/<name>` that is a SYMLINK to a skill
+   directory reports `.isDirectory? = false` on its Dirent and would be
+   silently dropped. `.claude/skills` symlinks the shared `seon-skills/*`
+   dirs in exactly this shape, so following links is mandatory."
   [dir]
-  (let [fs (js/require "fs")]
+  (let [fs (js/require "fs")
+        stat (fn [p] (try (.statSync fs p) (catch :default _ nil)))]
     (if-not (try (.existsSync fs dir) (catch :default _ false))
       []
       (into []
-            (mapcat (fn [ent]
-                      (let [nm (.-name ent)]
+            (mapcat (fn [nm]
+                      (let [p  (str dir "/" nm)
+                            st (stat p)]
                         (cond
-                          (.isDirectory ent)
-                          (let [p (str dir "/" nm "/SKILL.md")]
-                            (when (.existsSync fs p) [p]))
-                          (and (.isFile ent) (str/ends-with? nm ".md"))
-                          [(str dir "/" nm)]))))
-            (.readdirSync fs dir #js {:withFileTypes true})))))
+                          (nil? st) nil
+                          (.isDirectory st)
+                          (let [sp (str p "/SKILL.md")]
+                            (when (.existsSync fs sp) [sp]))
+                          (and (.isFile st) (str/ends-with? nm ".md"))
+                          [p]))))
+            (.readdirSync fs dir)))))
 
 (defn seed-skills-tx-data
   "Tx-data seeding one `:my.skills` row per `SKILL.md` found by scanning
