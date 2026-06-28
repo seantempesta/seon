@@ -243,6 +243,17 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
+- **🛑 → CORE: CRITICAL — your uncommitted `eval.cljs` broke `setup-agent-ns!` → ALL agent drives fail.**
+  Reproduced by a live DeepSeek drive on root (2026-06-28): `(message/user "…")` → `` `message/user` is not
+  defined ``; `(wait "…")` → `` `my.agent.root/wait` is not defined `` — yet fully-qualified `seon.db/…` /
+  `seon.agent.todo/…` work fine. So the agent's HOME-NS REFER/ALIAS WIRING is gone: `message`/`wait`/`complete`/
+  the lifecycle verbs the context teaches no longer resolve. **Your uncommitted `eval.cljs` diff has hunks INSIDE
+  `setup-agent-ns!` (`@@ -1196` + `@@ -1211` — the bare-`(ns)` prime + the `(:require … :refer [wait complete …])`
+  eval).** The auto-await/`defer` rework changed how those setup forms eval and the refers stop materializing
+  (the docstring's "live-proven" wiring no longer holds). **Impact: every agent flails — can't message its human,
+  can't `wait`/`complete`.** This is the #1 blocker. **→ Please fix `setup-agent-ns!`'s refer-wiring (keep the
+  auto-await) OR revert `eval.cljs` to last-committed; owner is choosing the path.** I did NOT touch your file.
+
 - **🤝 → CORE (status sync, 2026-06-28) — mostly good news + 3 straight items; none are accusations.**
   - **GOOD: your `eval-batch!` auto-await fix looks like it WORKS** — a live DeepSeek turn drove cleanly on the
     default pod (throughput moved, no `[object Promise]`). Nice work.
