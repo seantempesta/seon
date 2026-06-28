@@ -159,16 +159,22 @@
 ;; Route handlers
 ;; ============================================================
 
-(defn- serve-root! [^js res]
+(defn serve-root!
+  "GET / — 302 to the inspector picker (/agents). A Ring handler: takes the
+   Ring request `r`, self-extracts the node res. Resolved LATE by the router
+   (db->routes) from the seeded :seon.route/root datom, so it is PUBLIC — its
+   symbol must resolve via eval/lookup-value at request time."
+  [r]
   ;; The root `/` shell (`page/root-html`) is an unfinished A-6 stub: it
   ;; opens `/sse` but nothing ever pushes a tile patch, so it sits on
   ;; "loading…" forever (and its placeholder `#agent-seon` id doesn't even
   ;; match live agent ids). Until A-6's broadcast lands, land the user on
   ;; the working inspector picker (`/agents`) via a 302 redirect — that
   ;; route lists live agents and links into the two-pane live view.
-  (.writeHead res 302 #js {"Location"      "/agents"
-                           "Cache-Control" "no-store, no-cache, must-revalidate"})
-  (.end res ""))
+  (let [^js res (:seon.http/node-res r)]
+    (.writeHead res 302 #js {"Location"      "/agents"
+                             "Cache-Control" "no-store, no-cache, must-revalidate"})
+    (.end res "")))
 
 (defn- open-sse! [^js req ^js res]
   (.writeHead res 200 #js {"Content-Type"      "text/event-stream"
@@ -591,9 +597,11 @@
 ;; `router/handle-request`.
 ;; ============================================================
 
+;; `serve-root!` is NOT injected here — it is a SEEDED core route
+;; (:seon.route/root → seon.web.serve/serve-root!), resolved late by the
+;; router's db->routes. Only the non-core supplement handlers are injected.
 (router/install!
-  {:seon.web.router/root          serve-root!
-   :seon.web.router/sse           open-sse!
+  {:seon.web.router/sse           open-sse!
    :seon.web.router/static        serve-static!
    :seon.web.router/chat          handle-chat!
    :seon.web.router/stop          handle-stop!
@@ -660,6 +668,13 @@
   []
   (js/Promise.
     (fn [resolve reject]
+      ;; Re-derive the router from the NOW-SEEDED route datoms. The top-level
+      ;; (router/install!) ran at module load — before boot-seed! transacted
+      ;; the :seon.route/* rows and before *conn* was set — so its router held
+      ;; only the static supplement. start! runs AFTER boot-seed! (see
+      ;; seon.client/start-agent!), so the live conn now carries the six core
+      ;; routes; rebuild before the server accepts its first request.
+      (router/rebuild!)
       (if-let [live-addr (some-> @!server .address)]
         ;; Already listening — reuse (see docstring; a second
         ;; start-agent! on the same pod must NOT bounce the server).

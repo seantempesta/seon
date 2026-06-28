@@ -489,20 +489,25 @@
                     (time-travel-bar-html id basis db/origin-t)))))
 
 (defn serve-agent-page!
-  "Serve the per-agent world shim page for agent `id`. Public — the router
-   calls it with the `{id}` path-param. Invalid ids 404."
-  [^js res id]
-  (if (safe-id? id)
-    (do (.writeHead res 200 #js {"Content-Type"  "text/html; charset=utf-8"
-                                 "Cache-Control" "no-store, no-cache, must-revalidate"})
-        (.end res (agent-page-html id)))
-    (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"})
-        (.end res "invalid agent id"))))
+  "Serve the per-agent world shim page (the seeded :seon.route/agent handler).
+   A Ring handler: takes the Ring request `r`, self-extracts the node res + the
+   `{id}` path-param. Invalid ids 404. Public — db->routes resolves its symbol
+   via eval/lookup-value at request time."
+  [r]
+  (let [^js res (:seon.http/node-res r)
+        id      (get-in r [:path-params :id])]
+    (if (safe-id? id)
+      (do (.writeHead res 200 #js {"Content-Type"  "text/html; charset=utf-8"
+                                   "Cache-Control" "no-store, no-cache, must-revalidate"})
+          (.end res (agent-page-html id)))
+      (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"})
+          (.end res "invalid agent id")))))
 
 (defn open-agent-feed!
-  "Open the per-agent world gzip feed. Public — the router calls it with the
-   `{id}` path-param. Lazily installs the tx-listener (idempotent). Invalid ids
-   404.
+  "Open the per-agent world gzip feed (the seeded :seon.route/agent-feed
+   handler). A Ring handler: takes the Ring request `r`, self-extracts
+   node-req/node-res + the `{id}` path-param. Lazily installs the tx-listener
+   (idempotent). Invalid ids 404. Public — db->routes resolves its symbol.
 
    #18 — historical time-travel: an optional `?t=<tx-id>` binds the view to
    `db-as-of-t` instead of the live db. With `t`, the feed is the SAME
@@ -510,28 +515,33 @@
    is naturally FROZEN (re-rendering it on a later tx yields identical bytes, so
    the broadcast harmlessly re-pushes the same #world). With NO `t` it is the
    current auto-morphing feed, UNCHANGED. A bad/absent `t` falls back to live."
-  [^js req ^js res id]
+  [r]
   (ensure-installed!)
-  (if (safe-id? id)
-    (let [t (parse-t req)]
-      (open-feed! req res
-                  (if t
-                    #(world/world-layout (db/as-of @db/*conn* t) id)
-                    #(world/world-layout @db/*conn* id))))
-    (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"})
-        (.end res "invalid agent id"))))
-
-(defn route?
-  "True iff `path` is a /world route. `seon.web.serve` delegates here."
-  [path]
-  (or (= path "/world") (= path "/world/feed")))
+  (let [^js req (:seon.http/node-req r)
+        ^js res (:seon.http/node-res r)
+        id      (get-in r [:path-params :id])]
+    (if (safe-id? id)
+      (let [t (parse-t req)]
+        (open-feed! req res
+                    (if t
+                      #(world/world-layout (db/as-of @db/*conn* t) id)
+                      #(world/world-layout @db/*conn* id))))
+      (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"})
+          (.end res "invalid agent id")))))
 
 (defn handle!
-  "Dispatch a /world route. Returns true if handled. Lazily installs the
-   tx-listener on first hit (idempotent)."
-  [^js req ^js res path]
+  "Dispatch a /world route — the seeded :seon.route/world (shim page) +
+   :seon.route/world-feed (gzip SSE feed) BOTH resolve here, routing on the
+   path internally. A Ring handler: takes the Ring request `r`, self-extracts
+   node-req/node-res/path. Lazily installs the tx-listener on first hit
+   (idempotent). The router wraps this and appends the hijack sentinel, so the
+   true/false return is ignored. Public — db->routes resolves its symbol."
+  [r]
   (ensure-installed!)
-  (cond
-    (= path "/world/feed") (do (open-feed! req res #(world-view @db/*conn*)) true)
-    (= path "/world")      (do (serve-world-page! res) true)
-    :else                  false))
+  (let [^js req (:seon.http/node-req r)
+        ^js res (:seon.http/node-res r)
+        path    (:uri r)]
+    (cond
+      (= path "/world/feed") (do (open-feed! req res #(world-view @db/*conn*)) true)
+      (= path "/world")      (do (serve-world-page! res) true)
+      :else                  false)))

@@ -1,13 +1,28 @@
 (ns seon.web.router
-  "The pod's HTTP front door — reitit over a static route vector.
+  "The pod's HTTP front door — reitit over a route vector DERIVED from the
+   `:seon.route/*` datoms.
 
-   This replaces `seon.web.serve`'s hand-rolled method `case` + GET/POST
-   `cond` with reitit's data-driven router. The router is built ONCE per
-   load (cached in `!ring-handler`) from a static route vector; build-time
-   path/name conflict detection catches overlaps the old `cond` silently
-   shadowed. Reverse routing (`match-by-name`) and reitit-malli `:parameters`
-   coercion are available for free once the route datoms land — see the
-   `db->routes` TODO seam below.
+   The route vector is `(into (db->routes db) (static-supplement h))`:
+   [[db->routes]] is a PURE projection of the seeded `:seon.route/*` datoms
+   (the six core routes — `/`, `/world`, `/world/feed`, `/agent/{id}`,
+   `/agent/{id}/feed`, `/agent/{id}/call`), and the static supplement carries
+   the routes NOT yet seeded as datoms (static assets, the secondary POST
+   doors, `/sse`, the flat `/call`). The router is cached in `!ring-handler`
+   and is a pure derived value of those datoms — [[rebuild!]] re-derives it
+   from the current db (called post-seed by serve/start! and, when Core wires a
+   route tx-listener, on every route tx). Build-time path/name conflict
+   detection catches overlaps the old `cond` silently shadowed.
+
+   ## Handlers resolve LATE — a symbol per route
+
+   `:seon.route/handler` is a `:db.type/symbol`; [[route-handler]] resolves it
+   at REQUEST time via `seon.eval/lookup-value` (the same late-binding the
+   render engine uses), so a redefine takes effect with no router rebuild. Each
+   seeded handler is a Ring handler that takes the Ring request `r` and
+   self-extracts `(:seon.http/node-req r)` / `(:seon.http/node-res r)` /
+   `(get-in r [:path-params :id])`, so [[db->routes]] wraps every one
+   uniformly. `:seon.route/middleware` keywords resolve through reitit's
+   `:reitit.middleware/registry` ([[mw-registry]]).
 
    ## The Node↔Ring adapter + the hijack sentinel
 
@@ -34,8 +49,14 @@
    so the cached router always holds the freshly-reloaded handler fns."
   (:require
     [clojure.string :as str]
+    [seon.db :as db]
+    [seon.eval :as seval]
     [seon.log :as log]
-    [seon.web.datastar :as datastar]
+    ;; Build-inclusion only (no alias): db->routes resolves datastar's core
+    ;; handler SYMBOLS (`handle!`, `serve-agent-page!`, `open-agent-feed!`) at
+    ;; request time via eval/lookup-value, so the ns must be compiled into the
+    ;; build. router is its sole requirer.
+    [seon.web.datastar]
     [seon.web.inspector :as inspector]
     [seon.web.reactive.call :as call]
     [seon.web.tile :as tile]
@@ -53,6 +74,13 @@
                  verbatim because a test pins it). Defaults to allow-all
                  until install! runs."}
   !same-origin-pred (atom (constantly true)))
+
+(defonce ^{:private true
+           :doc "The serve handler set last injected by install! (the static
+                 supplement's leaf handlers). Stored so rebuild! can re-derive
+                 the router from fresh route datoms WITHOUT serve re-passing the
+                 config — a route tx-listener calls (rebuild!) with no args."}
+  !router-config (atom {}))
 
 ;; ============================================================
 ;; Low-level node writes (the adapter's own minimal helpers — the
@@ -134,25 +162,78 @@
                  hijacked))))})
 
 ;; ============================================================
-;; The route vector.
-;;
-;; TODO (Phase 5 / db->routes seam): the route vector is STATIC here because
-;; the `:seon.route/*` schema isn't landed yet. When it is, replace
-;; `(routes h)` with a `db->routes` projection: GROUP `:seon.route/*` datoms
-;; by `:seon.route/pattern`, nest per `:seon.route/method`, resolve
-;; `:seon.route/handler` via `seon.eval/lookup-value`, map
-;; `:seon.route/middleware` keywords through a registry. The router stays a
-;; pure derived value of the route datoms, rebuilt on tx via install!.
-;;
-;; Every CURRENT route is covered so nothing 404s after the swap: the GET
-;; pages + static + /sse + /world feed, every state-changing POST (each
-;; same-origin-gated), the NEW hierarchical `/agent/{id}/call` (the gate is
-;; unchanged — the {id} segment is just the routing level, the fn's own
-;; namespace still authorizes), and a kept flat `/call` for back-compat.
-;; The inspector + tile sub-trees are NOT reitit routes — they ride the
-;; legacy `route?`/`handle!` dispatch via the no-match default-handler
-;; (legacy-default), so their internal dispatch stays untouched until those
-;; stacks are deleted.
+;; Middleware registry — the ONE place a `:seon.route/middleware` keyword
+;; resolves to its reitit middleware. Threaded into the reitit router as
+;; `:reitit.middleware/registry`, so a route's `:middleware [:seon.route/…]`
+;; keywords (both the db-projected routes AND the static supplement) resolve
+;; here; reitit throws a legible "not found in registry" at BUILD time if a
+;; route names an unknown one (surface-errors-loudly, no silent gate bypass).
+;; ============================================================
+
+(def ^:private mw-registry
+  {:seon.route/same-origin same-origin-mw})
+
+;; ============================================================
+;; db->routes — the route vector is a PURE projection of the `:seon.route/*`
+;; datoms. GROUP the route entities by `:seon.route/pattern`, nest per
+;; `:seon.route/method`, wrap `:seon.route/handler` (a late-bound symbol)
+;; with [[route-handler]], and pass `:seon.route/middleware` keywords through
+;; to [[mw-registry]]. The handlers are the EXISTING pod handler fns (each
+;; refactored to take the Ring request `r`), resolved late at request time.
+;; ============================================================
+
+(defn- route-handler
+  "A reitit ring handler for a route's late-bound handler SYMBOL `sym`.
+   Resolves `sym` via `eval/lookup-value` at REQUEST time (late binding, like
+   the render engine's `:seon.render/html` symbols), calls it with the Ring
+   request `r` (the handler self-extracts node-req/node-res/path-params), and
+   returns the hijack sentinel. An unresolved symbol degrades to a 500 — never
+   a falsy return that would re-fire the default-handler (a double write)."
+  [sym]
+  (fn [r]
+    (if-let [f (seval/lookup-value sym)]
+      (do (f r) hijacked)
+      (do (log/error-console! "seon.web.router" "route handler unresolved"
+                              {:sym (str sym) :path (:uri r)})
+          (write-text! (node-res r) 500 (str "route handler unresolved: " sym))
+          hijacked))))
+
+(defn db->routes
+  "Project the `:seon.route/*` datoms in `db` into a reitit route vector: GROUP
+   the route entities by `:seon.route/pattern`, nest per `:seon.route/method`,
+   wrap `:seon.route/handler` (the late-bound symbol) via [[route-handler]],
+   pass `:seon.route/middleware` keywords through to [[mw-registry]]. A pure
+   value of the route datoms — a nil/route-less `db` yields `[]` (the static
+   supplement keeps the pod serving until the seed lands)."
+  {:malli/schema [:=> [:catn [::db [:maybe :seon.db/db-val]]] [:vector :any]]}
+  [db]
+  (if-not db
+    []
+    (->> (db/query '[:find [(pull ?e [:seon.route/pattern :seon.route/method
+                                      :seon.route/handler :seon.route/middleware]) ...]
+                     :where [?e :seon.route/pattern]]
+                   db)
+         (group-by :seon.route/pattern)
+         (sort-by key)
+         (mapv (fn [[pattern rows]]
+                 [pattern
+                  (into {}
+                        (map (fn [{:seon.route/keys [method handler middleware]}]
+                               [method (cond-> {:handler (route-handler handler)}
+                                         (seq middleware)
+                                         (assoc :middleware (vec middleware)))]))
+                        rows)])))))
+
+;; ============================================================
+;; The static supplement — the routes NOT (yet) seeded as `:seon.route/*`
+;; datoms, so nothing 404s: static assets, the secondary state-changing POST
+;; doors (each `:seon.route/same-origin`-gated), `/sse`, and the back-compat
+;; flat `/call`. db->routes supplies the six core routes; this supplies the
+;; rest. FLAG (coordination → Core): the secondary POST doors below should be
+;; seeded as `:seon.route/*` datoms for fully data-driven routing — until then
+;; they live here. The inspector + tile sub-trees are NOT reitit routes — they
+;; ride the legacy `route?`/`handle!` dispatch via the no-match default-handler
+;; (legacy-default).
 ;; ============================================================
 
 (defn- post-handler
@@ -160,42 +241,28 @@
   [f]
   (fn [r] (f (node-req r) (node-res r)) hijacked))
 
-(defn- routes
-  "The static reitit route vector, built from the injected handler set `h`
-   (serve's handlers) + the directly-required leaf handlers (datastar / call)."
+(defn- static-supplement
+  "The non-core reitit routes, built from the injected handler set `h`
+   (serve's handlers) + the directly-required `call` leaf handler."
   [h]
-  (let [{::keys [root sse static chat stop resume clear log create-agent
+  (let [{::keys [sse static chat stop resume clear log create-agent
                  complete]} h]
-    [["/"            {:get {:handler (fn [r] (root (node-res r)) hijacked)}}]
-     ["/css/{*path}" {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
+    [["/css/{*path}" {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/js/{*path}"  {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/sse"         {:get {:handler (fn [r] (sse (node-req r) (node-res r)) hijacked)}}]
-     ["/world"       {:get {:handler (fn [r] (datastar/handle! (node-req r) (node-res r) (:uri r)) hijacked)}}]
-     ["/world/feed"  {:get {:handler (fn [r] (datastar/handle! (node-req r) (node-res r) (:uri r)) hijacked)}}]
-     ;; Per-agent world (#6 retires the legacy inspector/tile console at the
-     ;; same bare `/agent/{id}`): the shim page + the gzip morph feed bound
-     ;; to THAT agent's `world-layout`. Both ride the proven datastar
-     ;; streamer; the GET routes take precedence over the legacy-default
-     ;; inspector delegation, deeper `/agent/{id}/…` GETs still fall through.
-     ["/agent/{id}"      {:get {:handler (fn [r] (datastar/serve-agent-page! (node-res r) (get-in r [:path-params :id])) hijacked)}}]
-     ["/agent/{id}/feed" {:get {:handler (fn [r] (datastar/open-agent-feed! (node-req r) (node-res r) (get-in r [:path-params :id])) hijacked)}}]
 
-     ["/chat"        {:post {:middleware [same-origin-mw] :handler (post-handler chat)}}]
-     ["/stop"        {:post {:middleware [same-origin-mw] :handler (post-handler stop)}}]
-     ["/resume"      {:post {:middleware [same-origin-mw] :handler (post-handler resume)}}]
-     ["/clear"       {:post {:middleware [same-origin-mw] :handler (post-handler clear)}}]
-     ["/log"         {:post {:middleware [same-origin-mw] :handler (post-handler log)}}]
-     ["/agents/new"  {:post {:middleware [same-origin-mw] :handler (post-handler create-agent)}}]
-     ;; The one action door (flat, kept for back-compat this unit) + the
-     ;; NEW hierarchical per-agent door. Both just hand the raw (req,res) to
-     ;; the unchanged capability gate (`reactive.call/handle!`), which reads
-     ;; `?fn=`/`?args=` and authorizes the fn from its own namespace; the
-     ;; `{id}` segment is the routing level, not an auth input.
-     ["/call"                {:post {:middleware [same-origin-mw]
+     ["/chat"        {:post {:middleware [:seon.route/same-origin] :handler (post-handler chat)}}]
+     ["/stop"        {:post {:middleware [:seon.route/same-origin] :handler (post-handler stop)}}]
+     ["/resume"      {:post {:middleware [:seon.route/same-origin] :handler (post-handler resume)}}]
+     ["/clear"       {:post {:middleware [:seon.route/same-origin] :handler (post-handler clear)}}]
+     ["/log"         {:post {:middleware [:seon.route/same-origin] :handler (post-handler log)}}]
+     ["/agents/new"  {:post {:middleware [:seon.route/same-origin] :handler (post-handler create-agent)}}]
+     ;; The flat `/call` (back-compat this unit) hands the raw (req,res) to the
+     ;; unchanged capability gate; the per-agent `/agent/{id}/call` is the
+     ;; SEEDED core door (db->routes) → the same gate.
+     ["/call"                {:post {:middleware [:seon.route/same-origin]
                                      :handler (fn [r] (call/handle! (node-req r) (node-res r)) hijacked)}}]
-     ["/agent/{id}/call"     {:post {:middleware [same-origin-mw]
-                                     :handler (fn [r] (call/handle! (node-req r) (node-res r)) hijacked)}}]
-     ["/agent/{id}/complete" {:post {:middleware [same-origin-mw]
+     ["/agent/{id}/complete" {:post {:middleware [:seon.route/same-origin]
                                      :handler (fn [r] (complete (node-req r) (node-res r)
                                                                 (get-in r [:path-params :id]))
                                                 hijacked)}}]]))
@@ -226,22 +293,44 @@
 ;; Build + dispatch.
 ;; ============================================================
 
-(defn- build-ring-handler [h]
-  (rr/ring-handler (rr/router (routes h)) legacy-default))
+(defn- build-ring-handler
+  "Build the reitit ring-handler for `db` (the route-datom source) + the stored
+   serve config: `(into (db->routes db) (static-supplement config))`, with
+   [[mw-registry]] threaded in for keyword middleware."
+  [db]
+  (let [config @!router-config]
+    (rr/ring-handler
+      (rr/router (into (db->routes db) (static-supplement config))
+                 {:reitit.middleware/registry mw-registry})
+      legacy-default)))
+
+(defn rebuild!
+  "Re-derive + cache the reitit ring-handler from the CURRENT route datoms (a
+   pure value of `:seon.route/*` in `@*conn*`) + the stored serve config.
+   Idempotent. Called post-seed by `seon.web.serve/start!` (the seeded routes
+   land AFTER the top-level install!, when *conn* was still nil) and, when Core
+   wires a route tx-listener, on every route tx."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (reset! !ring-handler (build-ring-handler (some-> db/*conn* deref)))
+  nil)
 
 (defn install!
-  "(Re)build + cache the reitit ring-handler from serve's handler set, and
-   install serve's same-origin predicate for the POST middleware. serve calls
-   this at load (re-runs on hot-reload, so the cached router tracks reloaded
-   handlers). `config` keys: `:seon.web.router/{root sse static chat stop
-   resume clear log create-agent complete}` (the serve handler fns) +
-   `:seon.web.router/same-origin?` (the predicate)."
+  "Inject serve's handler set + same-origin predicate, then (re)build the
+   cached reitit ring-handler from the current route datoms. serve calls this
+   at load (re-runs on hot-reload, so the cached router tracks reloaded
+   handlers + the latest route datoms). `config` keys:
+   `:seon.web.router/{sse static chat stop resume clear log create-agent
+   complete}` (the serve handler fns) + `:seon.web.router/same-origin?` (the
+   predicate). The six CORE routes are NOT in `config` — they project from the
+   `:seon.route/*` datoms via [[db->routes]]."
   {:malli/schema [:=> [:catn [::config :map]] :nil]}
   [config]
   (reset! !same-origin-pred (or (::same-origin? config) (constantly true)))
-  (reset! !ring-handler (build-ring-handler config))
+  (reset! !router-config config)
+  (rebuild!)
   (log/info-console! "seon.web.router" "router installed"
-                     {:routes (count (routes config))})
+                     {:supplement (count (static-supplement config))})
   nil)
 
 (defn handle-request
@@ -252,7 +341,7 @@
    throw anywhere degrades to a 500 (never crash the single pod thread)."
   [^js req ^js res]
   (try
-    (let [rh (or @!ring-handler (build-ring-handler {}))
+    (let [rh (or @!ring-handler (build-ring-handler (some-> db/*conn* deref)))
           result (rh (node->ring req res))]
       (cond
         (nil? result)                  (write-text! res 404 (str "Not found: " (or (.-url req) "/")))
