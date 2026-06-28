@@ -353,18 +353,17 @@
 
 (deftest slot-missing-block-routes-through-overridable-error-never-throws
   ;; CONVERGENCE: a missing (or throwing) block surfaces THROUGH the
-  ;; established overridable seon.render.live-tile/error-response — not a
-  ;; hardcoded div — so a consumer's set! override (acme's branded card)
-  ;; applies on the world page too. Never throws; stable id + sibling kept.
+  ;; overridable seon.render.live-tile/error-tile seam — not a hardcoded
+  ;; div — so a consumer's set! override (acme's branded card) applies on
+  ;; the world page too. Never throws; stable id + sibling kept.
   (async done
     (-> (with-block-conn "slottest-00002"
           (fn [conn]
             (let [ctx  {:seon.db/db @conn :seon.agent/id "slottest-00002"}
-                  orig live-tile/error-response]
+                  orig live-tile/error-tile]
               (try
-                (set! live-tile/error-response
-                      (fn [_] {:seon.render/hiccup [:div.acme-override "OVERRIDE CARD"]
-                               :seon.render/ai     "overridden"}))
+                (set! live-tile/error-tile
+                      (fn [_] [:div.acme-override "OVERRIDE CARD"]))
                 (let [missing (render/slot ctx :no-such-block)
                       sibling (render/slot ctx :mytile)]
                   (is (vector? missing)
@@ -372,10 +371,10 @@
                   (is (= "tile-no-such-block" (:id (second missing)))
                       "the slot div keeps its stable id even on error")
                   (is (re-find #"OVERRIDE CARD" (html/->string missing))
-                      "the error tile routes through the overridable error-response")
+                      "the error tile routes through the overridable error-tile seam")
                   (is (re-find #"tile!" (html/->string sibling))
                       "a sibling slot renders untouched (never-crash-always-surface)"))
-                (finally (set! live-tile/error-response orig))))))
+                (finally (set! live-tile/error-tile orig))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

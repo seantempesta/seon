@@ -90,14 +90,27 @@ other lane's **_Needs_** and the owner makes it.
 
 ## Core — _Now / Needs / Interface changes_
 
-- **Now:** **PHASES 1 + 2-keystone + 2e + reitit ALL DONE + live-proven; full suite
-  646 tests / 0 fail (200s).** **coord-#12 (slot/render convergence) LANDED `690ae2b8`**
-  — the override-proof gap is closed. SEAM for U: `slot`/`render` now consume the
-  `{:seon.render/hiccup …}` envelope via one `unwrap-response` (render.cljs); the slot/world
-  ERROR path routes through the **overridable** `seon.render.live-tile/error-response` (acme's
-  existing `set!` override flows through unchanged). **→ U: swap acme's error `set!` to that
-  surface + fix the ui.md "Total override" table; coord-#6 (delete legacy) unblocked on this
-  half.**
+- **Now:** **PHASES 1 + 2-keystone + 2e + reitit DONE.** `690ae2b8` still holds (slot/render
+  consume the `{:seon.render/hiccup …}` envelope via `unwrap-response`). **coord-#12 ERROR-TILE
+  SEAM landed (Design B-variant — implements your `error-tile-unification` doc EXCEPT one point).**
+  ONE overridable seam **`seon.render.live-tile/error-tile`** `(fn [:seon/error] → hiccup)` renders
+  the ERROR-TILE surfaces (entity render, world slot, a render failure); `default-error-tile` = the
+  informative default; the 4 sites (render-entity-html catch, render catch, slot ×2) call it
+  directly; `error-tile-hiccup` deleted. **DEVIATION from the doc's Design B:** the live-tile HERO
+  (`error-response`) does NOT delegate to the seam — it stays CALM. The tested
+  `error-response-never-vanishes` contract REQUIRES no error text/message leak to the human card
+  (the failure rides the agent twin only); the doc's `(error-tile error)` delegation broke 3
+  assertions by leaking "⚠ render error"+msg to the human. Live-proven: default tile shows
+  msg/where/symbol/hint; `set!` override carries; hero stays calm. **→ U: `set!`
+  `seon.render.live-tile/error-tile` for SLOT/world error branding (NOT error-response); KEEP the
+  error-response override for the calm-hero brand; fix the ui.md "Total override" table. coord-#6
+  unblocked on this half.**
+- **🚩 FLAG → U (your lane, blocks your suite — NOT a Core change):**
+  `world-layout-survives-a-throwing-slot` FAILS. `world.cljs:159 (for [n tile-names] (tile-card …))`
+  is a LAZY seq that escapes world-layout's try/catch (:165) — a throwing slot fires later during
+  `->string`, OUTSIDE the catch, so `#world-error` never renders and the throw propagates. Fix:
+  `(doall …)` or `(mapv #(tile-card ctx %) tile-names)`. Regression from `2be4247c`; my error-tile
+  work is orthogonal (the test redefs `slot`).
 - **coord-#14 REFRAMED (grounded in source + owner's seed/resume clarification 2026-06-27):**
   **"resume re-seeds the block set" is the wrong frame.** Context blocks are DATA
   (`:seon.agent.ctx/block` datoms in `:seon.agent/ctx`); on a new runtime they're READ BACK

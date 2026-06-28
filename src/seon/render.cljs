@@ -373,12 +373,9 @@
           ;; the ONE shared path so every renderer obeys one contract.
           (unwrap-response :seon.render/html r))
         (catch :default e
-          [:div {:class (str "flex flex-col gap-1 p-3 border "
-                             "border-error/40 bg-error/10 rounded")}
-           [:div {:class "text-xs text-error font-mono font-bold"}
-            "⚠ render error"]
-           [:div {:class "text-xs font-mono text-text-300 break-all"}
-            (str sym " threw: " (or (.-message e) (str e)))]])))))
+          (live-tile/error-tile
+            {:seon.error/message (str sym " threw: " (or (.-message e) (str e)))
+             :seon.error/symbol  sym}))))))
 
 ;; ============================================================
 ;; Agent tile (live-tiles U1) — the agent's ONE always-visible HTML
@@ -665,32 +662,6 @@
               (or (schema-default-renderer view node input)
                   ((generic-default-renderer view) input))))))
 
-;; ============================================================
-;; The ONE overridable error tile. A slot/world render that could not
-;; produce its content (missing block, throwing render) surfaces THROUGH
-;; the established `seon.render.live-tile/error-response` — the SAME error
-;; contract the live tile uses, so a consumer's `set!` override of
-;; `error-response` (acme's branded card) applies on the new world page
-;; too. Never a hardcoded div. The result is unwrapped to bare hiccup via
-;; the one envelope path; a last-resort floor keeps never-crash intact if
-;; the (overridable) error tile itself throws.
-;; ============================================================
-
-(defn- error-tile-hiccup
-  "Bare hiccup for a slot/world error whose cause is `message`, routed
-   through the overridable `seon.render.live-tile/error-response` so one
-   error contract serves the live tile AND the world slots."
-  [message]
-  (try
-    (unwrap-response :seon.render/html
-                     (live-tile/error-response
-                       {:seon.db/error {:seon.error/message message}}))
-    (catch :default _
-      [:div {:class (str "flex flex-col gap-1 p-3 border "
-                         "border-error/40 bg-error/10 rounded")}
-       [:div {:class "text-xs text-error font-mono font-bold"} "⚠ render error"]
-       [:div {:class "text-xs font-mono text-text-300 break-all"} message]])))
-
 (defn render
   "Render ONE node in `view`, recursively + guarded. The fn receives the full
    injected context PLUS the node and a view-bound recursion handle
@@ -716,8 +687,8 @@
         (catch :default e
           (if (= view :seon.render/ai)
             (str ";; ⚠ [" (renderable-id node) "] render failed: " (ex-message e))
-            (error-tile-hiccup
-              (str (renderable-id node) " — " (ex-message e)))))))))
+            (live-tile/error-tile
+              {:seon.error/message (str (renderable-id node) " — " (ex-message e))})))))))
 
 ;; ============================================================
 ;; The `slot` primitive — place a named block's html render into a
@@ -773,15 +744,18 @@
         id    (:seon.agent/id ctx)
         block (agent-ctx-block db id block-name)
         body  (if (nil? block)
-                (error-tile-hiccup
-                  (str "no block named " block-name " on "
-                       (or id "this agent")
-                       " — install! it (or fix the slot name)"))
+                (live-tile/error-tile
+                  {:seon.error/message (str "no block named " block-name " on "
+                                            (or id "this agent"))
+                   :seon.error/where   block-name
+                   :seon.error/hint    "install! it (or fix the slot name)"})
                 (try
                   (render :seon.render/html (assoc ctx :seon.db/db db) block)
                   (catch :default e
-                    (error-tile-hiccup
-                      (str block-name " render failed: " (err/->message e))))))]
+                    (live-tile/error-tile
+                      {:seon.error/message (str block-name " render failed: "
+                                                (err/->message e))
+                       :seon.error/where   block-name}))))]
     [:div {:id (str "tile-" (name block-name)) :data-slot (name block-name)}
      body]))
 

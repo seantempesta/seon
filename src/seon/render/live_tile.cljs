@@ -554,12 +554,45 @@
 
 ;; ============================================================
 ;; Errors are legible — a broken tile never silently vanishes.
+;;
+;; ONE overridable seam ([[error-tile]]) renders the ERROR-TILE surfaces
+;; (entity render, world slot, a render failure); a consumer `set!`s it to
+;; a branded card (acme does) and the override carries across them all.
+;; The live-tile HERO ([[error-response]]) is the deliberate EXCEPTION: it
+;; stays CALM — the human never sees the failure there (it rides the agent
+;; twin), so the hero does NOT route through the seam.
 ;; ============================================================
+
+(defn default-error-tile
+  "The core default html render of a `:seon/error` value — the ONE error
+   tile shared by the error-tile surfaces (entity render, slot, a render
+   failure). Reads only the shared error core (message + optional
+   where/symbol/hint), so it renders ANY error. Override the whole look by
+   `set!`-ing [[error-tile]]."
+  {:malli/schema [:=> [:cat :seon.db/error] ::hiccup]}
+  [{:seon.error/keys [message where hint] sym :seon.error/symbol}]
+  [:div {:class (str "seon-tile flex flex-col gap-1 p-3 border "
+                     "border-error/40 bg-error/10 rounded")}
+   [:div {:class "text-xs text-error font-mono font-bold"}
+    (str "⚠ " (when where (str (name where) " — ")) "render error")]
+   [:div {:class "text-xs font-mono text-text-300 break-all"} message]
+   (when sym  [:div {:class "text-[10px] font-mono text-text-500"} (str sym)])
+   (when hint [:div {:class "text-xs text-text-400 italic"} hint])])
+
+(def error-tile
+  "THE one overridable error-tile seam — a fn `(fn [:seon/error] → hiccup)`
+   the error-tile surfaces call (entity render, slot, a render failure) —
+   NOT the calm live-tile hero ([[error-response]]). A consumer `set!`s
+   this var to a branded card and the override carries across those
+   surfaces (the late-binding `set!` pattern acme already uses). Defaults
+   to [[default-error-tile]]. One error renderer, no forks."
+  default-error-tile)
 
 (defn error-response
   "Build the html-response for a tile fn that THREW. THE HUMAN sees a calm,
-   nicely-formatted 'updating this tile' placeholder — never a scary error, never a
-   blank (vanish is indistinguishable from unwired, banned). THE AGENT is told
+   nicely-formatted 'updating this tile' placeholder — never a scary error
+   (NO failure text leaks to the human card), never a blank (vanish is
+   indistinguishable from unwired, banned). THE AGENT is told
    the truth: the `:seon.render/ai` render carries the failure (awareness
    section) and the full `:seon.error/*` envelope rides on `:seon.render/error`.
    Breakage is a DERIVED surface only (#43 / D2) — the
