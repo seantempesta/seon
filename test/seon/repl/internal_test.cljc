@@ -654,6 +654,64 @@
            (parse/form-source-at
              "(foo \\) #\"a)b\" \"c)d\" bar) trailing" 0)))))
 
+;; ============================================================
+;; Mined from the LIVE default store (`:seon.eval/source` rows) — REAL
+;; text agents wrote that leaked into the eval channel, NOT synthetic.
+;; ~9% of stored eval sources (12/128) produced a `:read`; these are the
+;; novel shapes the curated corpus above didn't already cover. Two real
+;; categories surfaced: (1) result-stash RE-REFERENCE whose stash id
+;; begins with a digit (`result/0xO-…`) — a genuine broken FORM; and
+;; (2) markdown backtick-quoted-keyword NARRATION the agent leaked into
+;; the eval channel (`` `:seon.db/id` shape `` ). Assert BEHAVIOR only —
+;; kinds / error-kind / no-spurious-form — never exact error strings.
+;; ============================================================
+
+(def mined-agent-cases
+  ;; :in (real/representative agent text), :no-form? (no evaluated :form
+  ;; leaked — the fix-stable safety invariant), optional :expected-kinds,
+  ;; optional :error-kind (of the first :read entry).
+  [{:in "(get-in result/0xO-2606281659 [:seon.render/text])"
+    :note "real mined leak: result-stash re-reference whose id begins with a digit → `result/0xO-…` is an invalid symbol; `(`-at-start so a genuinely broken FORM recorded as one :read, NOT a spurious eval (5 such rows in the store)"
+    :expected-kinds [:read]
+    :error-kind :invalid-token
+    :no-form? true}
+
+   {:in "(str (get-in result/4IU-2606281655 [:seon.render/text]))"
+    :note "real mined leak: same digit-leading stash-ref nested under (str …) — still one honest :read, no eval"
+    :expected-kinds [:read]
+    :error-kind :invalid-token
+    :no-form? true}
+
+   {:in "`:seon.db/id` shape — the 14-char generated id, not a plain string."
+    :note "real mined leak: markdown backtick-quoted-keyword narration in the eval channel. KNOWN GAP — currently surfaces as a :read (backtick-while-reading-keyword) rather than being dropped as prose; the load-bearing invariant asserted here is that it NEVER produces a spurious evaluated form (4 such rows)"
+    :no-form? true}
+
+   {:in "`:idle` on turn 2, but by turn 5 both verbs are undefined."
+    :note "real mined leak: same backtick-keyword markdown-narration shape — no spurious eval"
+    :no-form? true}
+
+   {:in "`: they're dynamic verbs installed at boot."
+    :note "real mined leak: backtick then lone-colon markdown narration (a distinct read-error variant) — still no spurious eval"
+    :no-form? true}])
+
+(deftest mined-real-agent-leaks
+  (doseq [{:keys [in note expected-kinds error-kind no-form?]} mined-agent-cases]
+    (testing (str note " — " (pr-str in))
+      (let [entries (parse/parse-forms in)
+            kinds   (mapv :kind entries)
+            reads   (filter #(= :read (:kind %)) entries)]
+        (when expected-kinds
+          (is (= expected-kinds kinds)
+              (str "kinds mismatch: got " (pr-str kinds))))
+        (when error-kind
+          (is (= error-kind (:error-kind (first reads)))
+              (str "error-kind mismatch: got "
+                   (pr-str (:error-kind (first reads))))))
+        (when no-form?
+          (is (not-any? #(= :form (:kind %)) entries)
+              (str "a spurious :form was evaluated from agent narration: "
+                   (pr-str kinds))))))))
+
 (deftest form-source-at-semantics
   (testing "reads EXACTLY one top-level form, dropping trailing forms"
     (is (= "(defn f [x] (+ x 1))"
