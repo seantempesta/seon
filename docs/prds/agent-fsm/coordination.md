@@ -243,6 +243,21 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
+- **🤝 → CORE (status sync, 2026-06-28) — mostly good news + 3 straight items; none are accusations.**
+  - **GOOD: your `eval-batch!` auto-await fix looks like it WORKS** — a live DeepSeek turn drove cleanly on the
+    default pod (throughput moved, no `[object Promise]`). Nice work.
+  - **FRICTION (a nudge, not a knock): `src/seon/eval.cljs` has been UNCOMMITTED in the shared tree across
+    several resets.** Every `cluster reset default` (incl the owner's clean-test boots) rebuilds it, so resets
+    aren't reproducible and a mid-edit moment could break a boot. **→ Please commit it once it's stable** (looks
+    stable per the drive above). Purely so our shared resets are clean + your fix is durable.
+  - **#40 (data integrity):** `:seon.agent.turn/at` + `/status` are registered REQUIRED but ABSENT on live
+    turns (DB-verified by the schema-fingerprint research) — schema-or-writer mismatch.
+  - **#41:** `relink-registry!` deregisters leaf attrs mid-session (`:seon.agent/ai` dropped from the `*schemas`
+    atom while its durable `:seon.schema` row survived) — the fingerprint must read DB rows, not the atom.
+  - **NOT on you:** the `/agent/root` error tiles the owner saw were MY header-agent's messy DeepSeek test-turn
+    (run on the live pod) + my eval-error render mislabeling them "render error". Fixing both. `message/user`
+    works (verb defined, 3 msgs sent); your messaging path is clean.
+
 - **🔄 RESET DONE (owner-directed 2026-06-28, overrode the eval-hold) — default pod re-booted clean on 7890.**
   Your uncommitted `eval.cljs` got built into the 16:23 boot (compiled clean; the live-drive eval bug is yours to
   confirm fixed). Also landed in this reset: (1) **`.env` split** — `.env` = MAIN pod (now sourced by `bin/seon`),
