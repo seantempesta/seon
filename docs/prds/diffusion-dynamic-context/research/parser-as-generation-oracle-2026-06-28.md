@@ -22,7 +22,11 @@ diverse real-LLM programs and 124 injected corruptions:
   fixes them in place with **zero model round-trips**.
 - The remaining **3.2% are "masked-divergent"** — the corruption still parses but
   *means something else*; only the eval cage can catch these. This is the
-  syntactic/semantic boundary the diffusion papers predicted.
+  syntactic/semantic boundary the diffusion papers predicted. **The eval cage
+  catches ~91.5% of masked-divergent corruptions** (62.5% as a hard error, no
+  reference needed); its ~8.5% residual is dead-data mutation (data off the
+  program's live path) — the semantic/factual boundary one tier further out. See
+  "Eval-tier catch of masked-divergent".
 
 A strong-model A/B (gemini-3.5-flash, repl-skill in context vs not) was **null** —
 flash writes clean Clojure regardless, 0 errors either way. That is itself the
@@ -91,8 +95,11 @@ the pod recovery eval (`seon.repair`). Inner-loop test gate: `bin/test-parser`
   canvases** once the RunPod env is unblocked (still blocked on the custom torch
   image; see [[index]]).
 - The **3.2% masked-divergent** rate is a genuine parser blind spot by
-  construction — it is the eval tier's job, and quantifying how reliably the SCI
-  cage catches it is the next measurement.
+  construction — it is the eval tier's job. **NOW MEASURED:** the SCI cage catches
+  **~91.5%** of masked-divergent corruptions (62.5% via a hard error alone, no
+  reference needed); the ~8.5% it misses are **dead-data mutations** — corruption
+  of data off the program's live path. See "Eval-tier catch of masked-divergent"
+  below.
 - The strong-model A/B null means a **noisier live generator** (DeepSeek-on-acme,
   or the diffusion model) is needed for an end-to-end "skill guides generation"
   number; the corruption sim is a clean proxy, not a substitute. **DONE for
@@ -173,6 +180,140 @@ Harness note (fixed in passing): the skill seeder
 `seon-skills/*` skills (incl `repl`) silently never seeded; only the two real
 dirs did. Switched to `statSync` (follows links). Without this the guided
 condition could not have loaded `:repl` on the acme pod at all.
+
+## Eval-tier catch of masked-divergent (2026-06-28)
+
+The third tier of the detection story — **does running the form in Seon's SCI
+cage actually catch a corruption the parser provably can't?** Measured directly:
+**~91.5% of masked-divergent corruptions are caught by eval** (natural-weighted),
+of which **62.5% throw a hard error with no oracle at all**; **~8.5% are truly
+silent** — and the silent misses are a precise, explainable class.
+
+### Why a new corpus + a unified corruption model
+
+The original corpus's 4 masked-divergent variants (the 3.2% above) are **not
+measurable as-is**: all four are `:db/id` string mangles (`"order-1"` →
+`"order-1z"`) inside a `(db/transact! conn …)` that references undefined `conn`.
+Eval errors *identically* on the clean and corrupted form (undefined `conn`
+before the mangled datum is ever reached) — the corruption is invisible to eval
+not because eval is blind but because the **outcome isn't observable**. The task's
+own caveat. So two changes, both toward a cleaner measurement:
+
+1. **Unified corruption model: delete ONE character at each position.** This
+   subsumes the earlier closer-drop (delimiter chars) AND token mutation
+   (alphanumerics) under one diffusion-faithful noise model — a single wrong/
+   dropped character is exactly a diffusion per-step commit error. Masked-
+   divergent = the deletions that **parse clean yet whose sexpr differs**.
+2. **Self-contained pure-expression corpus** (14 hand-authored forms — `map`/
+   `filter`/`reduce`/`group-by`/`get-in`/`merge`/`case` over **inline literal
+   data**, no external vars, no side effects). Every original evals to a concrete
+   value (verified: 14/14 `:ok`), so a meaning change is **eval-observable** by
+   construction. (`agy` was quota-empty; the corpus is the substrate, the
+   corruption+eval is the measurement.)
+
+A key structural finding falls out of the unified model: **single delimiter
+deletions almost never produce masked-divergent — they unbalance and the parser
+catches them.** Over the 14-form corpus, 1598 one-char deletions split into 282
+parser-detected (`:read`), 369 no-op (same sexpr), and **928 masked-divergent**.
+By deleted-char category the 928 are: `:alpha` 585, `:whitespace` 101, `:digit`
+96, `:punct` 83, `:delimiter` 63 — i.e. masked-divergence is overwhelmingly a
+**token-level** phenomenon (mutate a symbol/keyword/number that stays parseable),
+not a structural one. That is exactly the tier split the boundary predicts:
+delimiters → parser, token-substitution-that-parses → eval.
+
+### Method
+
+Each masked-divergent variant's source is evaluated through the real cage —
+`(seon.eval/eval @seon.repl/!compile-state src)` on the live `:client` runtime
+(the bootstrap-cljs self-host compiler + always-on Malli instrumentation;
+`seon.eval/eval` never throws, returns `{:ok true :value v}` | `{:ok false
+:error …}`). Every original is evaled once; each divergent is compared to its
+original's result. Forms are **pure expressions** so eval mutates no store — safe
+on the live runtime. Classification per divergent variant:
+
+- **CAUGHT-BY-ERROR** — divergent `{:ok false}` (analyzer/instrument/runtime
+  throw) while original `{:ok true}`. The strong catch: the cage flags it with
+  **no reference needed**.
+- **DIVERGES-IN-VALUE** — both `{:ok true}` but `(not= div-value orig-value)`.
+  The cage ran it clean; catching the divergence needs an external check (a
+  comparator / a test / the reference value).
+- **MISSED** — both `{:ok true}` and `(= div-value orig-value)`. Truly silent.
+
+Stratified sample of 50 per deleted-char category (250 total) so each category's
+rate is well-estimated; headline numbers are re-weighted to the natural 928
+distribution. Scripts: `scratchpad/abtest/{gen-divergent3.clj}` (bb, corruption +
+classify + sample) + the in-pod async harness reading `sample.edn` and stashing
+`__catch_out` to `globalThis`.
+
+### Results
+
+Per deleted-char category (50-each stratified sample):
+
+| deleted char | N (of 928) | **catch** | err-only | diverges-in-value | **missed** |
+|---|---|---|---|---|---|
+| `:delimiter` | 63 | 100.0% | 100.0% | 0% | 0.0% |
+| `:whitespace` | 101 | 100.0% | 60.0% | 40.0% | 0.0% |
+| `:punct` | 83 | 94.0% | 90.0% | 4.0% | 6.0% |
+| `:alpha` | 585 | 90.0% | 64.0% | 26.0% | 10.0% |
+| `:digit` | 96 | 84.0% | 8.0% | 76.0% | 16.0% |
+
+Natural-distribution-weighted over all 928 masked-divergent corruptions:
+
+| metric | value |
+|---|---|
+| masked-divergent corruptions | 928 (of 1598 one-char deletions) |
+| **eval-tier CATCH (error OR value-diff)** | **849 / 928 = 91.5%** |
+| → CAUGHT-BY-ERROR (no reference needed) | 580 / 928 = **62.5%** |
+| → DIVERGES-IN-VALUE (needs a comparator/test) | 269 / 928 = 29.0% |
+| **MISSED (truly silent)** | **79 / 928 = 8.5%** |
+
+### What gets caught vs missed (concrete)
+
+- **CAUGHT-BY-ERROR (delimiter):** dropping the leading `(` of
+  `(let [people …] …)` reparses as the symbol `let` followed by a vector
+  `[people …]` — a structurally different sexpr that references undefined
+  `people` → eval throws *"people is not defined — this form ran NOTHING."* A
+  delimiter deletion that *rebalances* (rather than unbalancing) lands in the
+  parser's blind spot, and the cage catches it the instant it runs.
+- **DIVERGES-IN-VALUE (digit):** `(merge {:a 1 :b 2} {:b 20 :c 30} {:d 40})` with
+  a digit dropped → `:c 30`→`:c 3`. Parses clean, evals clean, but returns
+  `{:a 1 :b 20 :c 3 :d 40}` ≠ original `{… :c 30 …}` — observable iff you have
+  the reference.
+- **MISSED (the honest blind spot):** both misses below are **dead-data
+  mutations** — the corrupted datum is off the program's live computation path:
+  - `:e [10 20 30]` → `:e [10 2 30]`, but the form only reads `(nth (:e m) 2)` =
+    `30`. Result `45` either way. The `20`→`2` change is real but **never
+    observed**.
+  - one order's `:id`→`:d` (`{:id 2 …}`→`{:d 2 …}`), but the computation filters
+    `:paid?` and sums `:total` — it **never reads `:id`**. Result `170` either
+    way.
+
+  This is the precise characterization of the eval tier's residual blind spot:
+  **eval catches divergence only on the live path.** A corruption to data the
+  program never observes is invisible to *running* it — it can only be caught by
+  a tier that compares against **intent** (a test, a spec, the factual/retrieval
+  oracle). This is the semantic→factual boundary, one tier further out.
+
+### Honest limits + the combined two-tier number
+
+- **62.5% is the "free" rate** a per-step diffusion oracle gets with no reference
+  (re-eval, flag on thrown error). The 91.5% requires a comparator/test/reference
+  value — available when guiding toward a known target, not in pure open
+  generation. State both, never just the 91.5%.
+- The corpus is **pure self-contained expressions** — chosen so divergence is
+  observable, but real agent code is full of `db/`, undefined-until-defined
+  vars, and side effects where (as the original corpus showed) eval can error
+  *identically* and mask the corruption. The 91.5% is an **upper-ish bound** for
+  the favorable, observable case; the live-agent rate is lower and bounded below
+  by the 62.5% error-catch.
+- **Combined parser + eval:** of all meaning-altering corruptions (parser-detected
+  282 + masked-divergent 928 = 1210), the two cheap syntactic+semantic tiers
+  together catch **(282 + 849)/1210 = 93.5%**. The residual ~6.5% are the
+  dead-data silent class — neither parsing nor running surfaces them; only an
+  intent-level (factual/retrieval) oracle can. The three-tier
+  syntactic→semantic→factual story closes exactly where the diffusion papers
+  predicted: each tier has a provable blind spot the next tier covers, and the
+  last residual is genuinely irreducible without a model of intent.
 
 ## Feeds into
 
