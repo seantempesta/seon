@@ -641,7 +641,7 @@
 (declare core-ns-set)
 
 ;; Forward decls: the SEON_EXTRA_SRC scanning helpers are defined far below
-;; (alongside `extra-src-env`, after the form/arglist parsers they reuse), but
+;; (alongside `config/extra-src`, after the form/arglist parsers they reuse), but
 ;; `core-ns-set`/`ns-row`/`index-core!` reference them. Fn-body references
 ;; resolve at call time; the declare silences the compile-time :undeclared-var
 ;; warning.
@@ -1073,11 +1073,8 @@
    can't be read."
   [file]
   (let [fs    (js/require "fs")
-        extra (let [v (some-> (.. js/globalThis -process)
-                              (.-env)
-                              (aget "SEON_EXTRA_SRC"))]
-                (when (and (string? v) (not= v ""))
-                  [(str v "/src") (str v "/test")]))]
+        extra (when-let [v (config/extra-src)]
+                [(str v "/src") (str v "/test")])]
     (some (fn [root]
             (try
               (.readFileSync fs (str root "/" file) "utf8")
@@ -1319,13 +1316,6 @@
         ;; PRESENT ⇒ specced (exact contract in corpus); ABSENT ⇒ unspecced.
         (some? spec) (assoc :seon.fn/spec spec)))))
 
-(defn- extra-src-env
-  "The `SEON_EXTRA_SRC` env value, or nil when unset/empty. Read the SAME way
-   `read-src-file` does (off `js/globalThis.process.env`) so the warn keys on
-   the EXACT signal that joins acme's source onto the build classpath."
-  []
-  (let [v (some-> (.. js/globalThis -process) (.-env) (aget "SEON_EXTRA_SRC"))]
-    (when (and (string? v) (not= v "")) v)))
 
 ;; --- WHOLE-DOWNSTREAM-SURFACE INDEXING (SEON_EXTRA_SRC) ---------------------
 ;;
@@ -1506,7 +1496,7 @@
    THIS is the authoritative downstream ns set — independent of which fns are
    specced, so an unspecced-only ns (`acme.notes`) is included."
   []
-  (if-let [root (extra-src-env)]
+  (if-let [root (config/extra-src)]
     (let [fs    (js/require "fs")
           files (mapcat list-cljs-files [(str root "/src") (str root "/test")])]
       (reduce
@@ -1559,7 +1549,7 @@
    `:seon.log` warn naming SEON_EXTRA_SRC + the exact one-liner the entry ns
    must run. Observability only — does NOT change indexing. Returns nil."
   [extra]
-  (when-let [src (extra-src-env)]
+  (when-let [src (config/extra-src)]
     (when (empty? extra)
       (log/warn!
         {:seon.log/source  ::index-core!
@@ -1915,7 +1905,7 @@
    code, defeating the re-arm."
   []
   (case (ai/provider)
-    :anthropic     (if (.. js/process -env -ANTHROPIC_API_KEY)
+    :anthropic     (if (config/anthropic-api-key)
                      (anthropic/agent-adapter)
                      stub-llm)
     ;; :openai-compat rides the SAME adapter as :deepseek (the wire
@@ -2514,11 +2504,11 @@
   ;; A-5: auto-boot the V0 agent + HTTP server unless SEON_NO_AUTO_BOOT.
   ;; Cheap default for dev iteration — browser hits the loopback port,
   ;; no REPL needed. Disable when running the bare smoke test alone.
-  (when-not (.. js/process -env -SEON_NO_AUTO_BOOT)
+  (when-not (config/no-auto-boot?)
     (let [llm-fn   (current-llm-fn)
           provider (ai/provider)
           key-set? (case provider
-                     :anthropic (boolean (.. js/process -env -ANTHROPIC_API_KEY))
+                     :anthropic (boolean (config/anthropic-api-key))
                      (openai/api-key-configured?))]
       (log/info-console! "seon.client"
                          (if key-set?

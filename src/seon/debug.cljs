@@ -41,8 +41,8 @@
    collision (minute reuse / restart) suffixes the filename rather than
    silently clobbering an episode."
   (:require [clojure.string :as str]
+            [seon.config :as config]
             [seon.log :as log]
-            [seon.platform :as platform]
             [seon.schema :as schema]))
 
 ;; The per-turn pointer the turn entity carries (projection only; the
@@ -82,7 +82,7 @@
     (if (some? o)
       o
       (boolean
-        (when-let [v (platform/env-val "SEON_DEBUG_CAPTURE")]
+        (when-let [v (config/debug-capture)]
           (not (contains? off-values (str/lower-case (.trim v)))))))))
 
 (defn capture-dir
@@ -90,7 +90,7 @@
    default `logs/turns`. Always CWD-relative (a DATA path)."
   {:malli/schema [:=> [:cat] :string]}
   []
-  (or (platform/env-val "SEON_DEBUG_CAPTURE_DIR") "logs/turns"))
+  (config/debug-capture-dir))
 
 (defn turn-dir
   "The per-turn directory path (not created): `<base>/<agent-id>/

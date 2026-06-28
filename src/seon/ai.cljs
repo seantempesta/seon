@@ -45,6 +45,7 @@
   (:require [clojure.string :as str]
             [cljs.reader :as reader]
             [seon.agent.ctx :as ctx]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.log :as log]
             [seon.schema :as schema]))
@@ -183,13 +184,6 @@
 ;; Env reads — SEON_AI_*, parsed to the attr's concrete type.
 ;; ============================================================
 
-(defn- env-val
-  "process.env value for `var-name`, or nil when unset/blank (or when
-   there is no Node process env at all)."
-  [var-name]
-  (let [v (some-> (.. js/globalThis -process) (.-env) (aget var-name))]
-    (when (and (string? v) (not (str/blank? v))) v)))
-
 (defn- parse-double*
   [s]
   (let [v (js/parseFloat s)] (when-not (js/isNaN v) v)))
@@ -238,7 +232,7 @@
   []
   (reduce-kv
     (fn [m attr [var-name parse]]
-      (if-let [raw (env-val var-name)]
+      (if-let [raw (config/env-string var-name)]
         (if-some [v (parse raw)]
           (assoc m attr v)
           (do (log/error-console!

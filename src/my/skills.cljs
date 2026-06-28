@@ -23,8 +23,8 @@
        unload hint so the trade stays visible. `(unload :name)` drops it.
 
    THE CORPUS — `(load :name)` resolves a `:my.skills/*` row seeded at boot by
-   scanning [[skills-dir]] (env `SEON_SKILLS_DIR`, default `.claude/skills`),
-   the SAME directory humans edit. Drop a standard `<name>/SKILL.md` in there
+   scanning [[seon.config/skills-dir]] (manifest `:seon.config/dirs` else env
+   `SEON_SKILLS_DIR`, default `.claude/skills`), the SAME directory humans edit. Drop a standard `<name>/SKILL.md` in there
    and it appears; edit a skill file and the agent gets the edit. The pod
    stores only the path + the frontmatter `name`/`description` — no YAML or
    markdown parser, the body is the file.
@@ -38,6 +38,7 @@
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]
     [seon.ai.tokens :as tokens]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -89,15 +90,6 @@
 ;;; and emit one row per file. No YAML/markdown parser: the body stays in the
 ;;; file (read fresh at render via `:seon.agent.ctx/file-path`); only the two
 ;;; frontmatter scalars `name`/`description` are pulled.
-
-(def skills-dir
-  "The skills corpus directory — env `SEON_SKILLS_DIR` (sibling of
-   `SEON_SOUL` / `SEON_EMBED`), default `.claude/skills`: the standard
-   Claude-Code layout AND the same directory humans edit, so one corpus
-   serves both. Repo-relative (the pod's cwd is the repo root)."
-  (or (some-> (.. js/globalThis -process) .-env (aget "SEON_SKILLS_DIR")
-              (#(when-not (str/blank? %) %)))
-      ".claude/skills"))
 
 (defn- parse-frontmatter
   "Pull ONLY `name` + `description` from a SKILL.md's YAML frontmatter (the
@@ -151,7 +143,7 @@
 
 (defn seed-skills-tx-data
   "Tx-data seeding one `:my.skills` row per `SKILL.md` found by scanning
-   [[skills-dir]] (default arg) — each row carries `:my.skills/name` (the
+   [[seon.config/skills-dir]] (default arg) — each row carries `:my.skills/name` (the
    frontmatter name as a keyword), `:my.skills/description` (verbatim), and
    `:seon.agent.ctx/file-path` (the body stays in the file, read fresh at
    render). Identity-upsert on `:my.skills/name`, so a re-scan at every boot
@@ -161,7 +153,7 @@
   {:malli/schema [:function
                   [:=> [:cat] [:vector ::skill-row]]
                   [:=> [:catn [::dir :string]] [:vector ::skill-row]]]}
-  ([] (seed-skills-tx-data skills-dir))
+  ([] (seed-skills-tx-data (config/skills-dir)))
   ([dir]
    (->> (list-skill-files dir)
         (keep (fn [path]

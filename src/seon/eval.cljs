@@ -45,6 +45,7 @@
             [malli.instrument :as mi]
             [shadow.cljs.bootstrap.node :as boot]
             [seon.analyzer-info :as analyzer-info]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
             [seon.error.instrument :as einstrument]
@@ -56,13 +57,6 @@
             [seon.schema :as schema]
             [seon.test.runner :as test-runner]))
 
-(defn- env-int
-  "Read `env-name` from `process.env` as a positive int, or `default`
-   when unset/blank/non-numeric. The ONE knob reader for this ns's
-   SEON_* caps — every clip/limit below is overridable this way."
-  [env-name default]
-  (let [v (some-> (platform/env-val env-name) js/parseInt)]
-    (if (and (number? v) (not (js/isNaN v)) (pos? v)) v default)))
 
 ;; ============================================================
 ;; Per-form wall-clock timeout. Stability guard, not a security
@@ -837,7 +831,7 @@
   "Max live `result/<id>` vars kept per session. Older ids are pruned
    (undef'd from globalThis + the analyzer) to bound memory. Override
    with SEON_RESULT_VARS_CAP."
-  (env-int "SEON_RESULT_VARS_CAP" 200))
+  (config/result-vars-cap))
 
 ;; Insertion-ordered vector of bound result ids (oldest first). Process-
 ;; shared, defonce'd so it survives hot-reload of `seon.eval`.
@@ -2010,7 +2004,7 @@
    staying ~600x below the 9.7M blob that caused the OOM. The FULL value
    remains available in-session as the live var `result/<id>` (globalThis
    live-result stash, `stash-result-raw!`) — that path is NOT capped."
-  (env-int "SEON_STORE_EDN_CAP" 16384))
+  (config/store-edn-cap))
 
 (defn cap-edn
   "Truncate an already-stringified (pr-str'd) value to `store-edn-cap`,
@@ -2098,7 +2092,7 @@
    persisted. Any value (a giant scalar, a wide map, a long string)
    clips here to a well-formed string that names `result/<id>` for the
    full live value. Override with SEON_RESULT_BODY_RENDER_CAP."
-  (env-int "SEON_RESULT_BODY_RENDER_CAP" 16384))
+  (config/result-body-render-cap))
 
 (defn clip-result-body
   "Clip a rendered result-body STRING to `result-body-render-cap`,

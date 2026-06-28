@@ -149,6 +149,99 @@
                    {:seon.config/path  path
                     :seon.error/kind   :user-input})))))))
 
+;;; ============================================================
+;;; ENV KNOBS — the ONE typed env surface. Every `SEON_*` knob that is NOT a
+;;; manifest section is read HERE, coerced to its concrete type, on top of the
+;;; single low-level reader `platform/env-val`. Nothing outside this ns reads
+;;; `process.env` for a knob — consumers call these accessors. (`platform`
+;;; itself is the leaf this ns sits on, so its own `SEON_RUNTIME_ROOT` path
+;;; resolution reads `env-val` directly — it cannot require config without a
+;;; cycle, and path resolution is pre-config.)
+;;; ============================================================
+
+(defn env-string
+  "The raw string value of env `var-name`, or nil when unset/blank — the base
+   typed read every named knob below sits on."
+  {:malli/schema [:=> [:catn [::var-name :string]] [:maybe :string]]}
+  [var-name]
+  (env var-name))
+
+(defn env-int
+  "Env `var-name` parsed as a POSITIVE int, or `default` when unset / blank /
+   non-numeric / non-positive — the shared cap-knob reader."
+  {:malli/schema [:=> [:catn [::var-name :string] [::default :int]] :int]}
+  [var-name default]
+  (let [v (some-> (env var-name) js/parseInt)]
+    (if (and (number? v) (not (js/isNaN v)) (pos? v)) v default)))
+
+(defn skills-dir
+  "The skills corpus directory: the manifest's `:seon.config/skills`
+   `:seon.config/dirs` first entry when present, else `SEON_SKILLS_DIR`, else
+   `.claude/skills` (the standard Claude-Code layout humans edit too). This is
+   where `:seon.config/dirs` is finally consumed — the last hardcoded env read
+   folded into the config seam."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (or (some-> (load-manifest) :seon.config/skills :seon.config/dirs first)
+      (env "SEON_SKILLS_DIR")
+      ".claude/skills"))
+
+(defn extra-src
+  "`SEON_EXTRA_SRC` — a downstream's compiled-in source root (its `/src` +
+   `/test` get probed after the seon artifact roots), or nil when unset."
+  {:malli/schema [:=> [:cat] [:maybe :string]]}
+  []
+  (env "SEON_EXTRA_SRC"))
+
+(defn no-auto-boot?
+  "True when `SEON_NO_AUTO_BOOT` is set — `-main` then skips the auto-boot of
+   the agent + HTTP server (the bare-smoke-test switch)."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (some? (env "SEON_NO_AUTO_BOOT")))
+
+(defn anthropic-api-key
+  "`ANTHROPIC_API_KEY` (the Anthropic adapter's secret), or nil when unset —
+   the one non-`SEON_*` knob read through here; it gates adapter vs stub."
+  {:malli/schema [:=> [:cat] [:maybe :string]]}
+  []
+  (env "ANTHROPIC_API_KEY"))
+
+(defn result-vars-cap
+  "Max live `result/<id>` vars kept per session (`SEON_RESULT_VARS_CAP`,
+   default 200)."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (env-int "SEON_RESULT_VARS_CAP" 200))
+
+(defn store-edn-cap
+  "Per-value pr-str truncation cap for stored EDN (`SEON_STORE_EDN_CAP`,
+   default 16384)."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (env-int "SEON_STORE_EDN_CAP" 16384))
+
+(defn result-body-render-cap
+  "Per-value render-body truncation cap (`SEON_RESULT_BODY_RENDER_CAP`,
+   default 16384)."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (env-int "SEON_RESULT_BODY_RENDER_CAP" 16384))
+
+(defn debug-capture
+  "Raw `SEON_DEBUG_CAPTURE` string (or nil) — `seon.debug` applies its
+   off-values + process-override semantics on top."
+  {:malli/schema [:=> [:cat] [:maybe :string]]}
+  []
+  (env "SEON_DEBUG_CAPTURE"))
+
+(defn debug-capture-dir
+  "Debug-capture output base dir: `SEON_DEBUG_CAPTURE_DIR` when set, else the
+   default `logs/turns` (a DATA path → CWD-relative)."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (or (env "SEON_DEBUG_CAPTURE_DIR") "logs/turns"))
+
 (defn agent-role
   "The loadout SELECTOR for `agent-id` — `:root` for the root agent (id
    \"root\"), `:worker` otherwise. A pure config-composition key, NOT a stored

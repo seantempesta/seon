@@ -114,3 +114,45 @@
   (testing "root id selects :root, everything else :worker"
     (is (= :root   (config/agent-role "root")))
     (is (= :worker (config/agent-role "iCg-2606101519")))))
+
+;;; ENV KNOBS — the consolidated env surface (#54b). The accessors sit on the
+;;; single low-level reader (platform/env-val); these tests pin the COERCION +
+;;; the :seon.config/dirs precedence, not specific live env values.
+
+(defn- with-env
+  "Set process.env[k]=v, run f, restore — so the env-reading accessors get a
+   known value without touching the ambient pod env."
+  [k v f]
+  (let [env (.. js/globalThis -process -env)
+        old (aget env k)]
+    (try (if (nil? v) (js-delete env k) (aset env k v))
+         (f)
+         (finally (if (nil? old) (js-delete env k) (aset env k old))))))
+
+(deftest env-int-coerces-positive-or-default
+  (testing "positive int parses; blank/non-numeric/non-positive fall to default"
+    (with-env "SEON_TEST_CAP" "350"
+      #(is (= 350 (config/env-int "SEON_TEST_CAP" 99))))
+    (with-env "SEON_TEST_CAP" "0"
+      #(is (= 99 (config/env-int "SEON_TEST_CAP" 99))))   ; non-positive → default
+    (with-env "SEON_TEST_CAP" "abc"
+      #(is (= 99 (config/env-int "SEON_TEST_CAP" 99))))   ; non-numeric → default
+    (with-env "SEON_TEST_CAP" nil
+      #(is (= 99 (config/env-int "SEON_TEST_CAP" 99)))))) ; unset → default
+
+(deftest env-string-nil-when-blank
+  (with-env "SEON_TEST_STR" "  "
+    #(is (nil? (config/env-string "SEON_TEST_STR"))))    ; blank → nil
+  (with-env "SEON_TEST_STR" "x"
+    #(is (= "x" (config/env-string "SEON_TEST_STR")))))
+
+(deftest skills-dir-precedence
+  (testing "manifest :seon.config/dirs wins over env, which wins over the default"
+    (with-redefs [config/load-manifest
+                  (fn [] {:seon.config/skills {:seon.config/dirs ["from/manifest"]}})]
+      (is (= "from/manifest" (config/skills-dir))))
+    (with-redefs [config/load-manifest (fn [] {})]
+      (with-env "SEON_SKILLS_DIR" "from/env"
+        #(is (= "from/env" (config/skills-dir))))
+      (with-env "SEON_SKILLS_DIR" nil
+        #(is (= ".claude/skills" (config/skills-dir)))))))
