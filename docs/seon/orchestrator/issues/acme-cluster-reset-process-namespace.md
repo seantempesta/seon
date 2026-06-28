@@ -97,7 +97,7 @@ BETWEEN stop and pod-start is race-safe. One mechanism, not two.
 - Live DEFAULT cluster UNTOUCHED across the reset: pod pid `63340` and
   wire-server pid `63196` identical before and after; HTTP 7890 → `200`.
 
-## Related smell (pre-existing, NOT fixed here)
+## Related smell (FIXED in a follow-up — see seon-port-non-namespaced.md)
 
 `tmp/seon-port` is a single, non-namespaced file that BOTH clusters' pods write
 on boot. After an acme boot it reads `7980`, so `bin/seon status` AND

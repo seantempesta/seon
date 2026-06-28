@@ -91,6 +91,9 @@ mkdir -p "$PROC_DIR" "$LOG_DIR"
 #   SEON_WRITER_REPL_PORT   wire-server loopback socket-REPL port
 #   SEON_PORT               pod HTTP port (read by the pod itself —
 #                           seon.web.serve; inherits through nohup)
+#   SEON_PORT_FILE          per-cluster pod port file (default tmp/seon-port);
+#                           pod writes its bound port here, supervisor reads it
+#                           in status/ready_check. Exported so the pod inherits.
 #   SEON_RUNTIME_ROOT       pod artifact root (read by the pod itself —
 #                           seon.platform/artifact-path; inherits)
 #   SEON_EXTRA_SRC          downstream CLJS source root (deps.edn project)
@@ -105,6 +108,15 @@ SEON_CLUSTER_DIR="${SEON_CLUSTER_DIR:-data/clusters/default}"
 SEON_REQ_SOCK="${SEON_REQ_SOCK:-tmp/seon-cluster-default-req.sock}"
 SEON_PUB_SOCK="${SEON_PUB_SOCK:-tmp/seon-cluster-default-pub.sock}"
 SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-7891}"
+
+# Per-cluster pod port file. The pod (seon.web.serve/write-port-file!) writes
+# its bound HTTP port here on boot; the supervisor's ready_check/status read it.
+# A SINGLE non-namespaced file would be clobbered by a second cluster's pod
+# (bin/acme), so isolate it like the proc dir + sockets: default = tmp/seon-port
+# (byte-identical to today), acme overrides to tmp/seon-port-acme. Exported so
+# the pod inherits the SAME path it must write through nohup.
+SEON_PORT_FILE="${SEON_PORT_FILE:-tmp/seon-port}"
+export SEON_PORT_FILE
 
 # Embeddings (Proximum HNSW semantic search) — default ON for the default
 # cluster, matching bin/acme. Read by the wire-server (declares the index +
@@ -203,7 +215,7 @@ process_command() {
 
 process_ready_hint() {
   case "$1" in
-    pod)         echo "  ready: tmp/seon-port written + HTTP answers on /" ;;
+    pod)         echo "  ready: $SEON_PORT_FILE written + HTTP answers on /" ;;
     cljs-watch)  echo "  ready: 'Build completed' appears in logs/cljs-watch.log" ;;
     jvm)         echo "  ready: logs/app.log shows 'Server started'" ;;
     wire-server) echo "  ready: $SEON_REQ_SOCK ACCEPTING; REPL on 127.0.0.1:$SEON_WRITER_REPL_PORT (tmp/seon-writer-repl-port)" ;;
@@ -248,14 +260,14 @@ ready_check() {
       fi
       ;;
     pod)
-      [ -f tmp/seon-port ] || return 1
+      [ -f "$SEON_PORT_FILE" ] || return 1
       # Probe `/` — the most fundamental core route (always seeded on every
       # cluster). It's render-independent (a 302/200, no agent-page render),
       # so this gate won't false-fail during a render hot-reload. `curl -f`
       # passes on the 302 (<400) and on the 200 after the root=/ repoint.
       # (Was `/agents`, removed by the db->routes routing cutover → 404.)
       curl -fsS -m 2 -o /dev/null \
-        "http://127.0.0.1:$(cat tmp/seon-port)/" 2>/dev/null
+        "http://127.0.0.1:$(cat "$SEON_PORT_FILE")/" 2>/dev/null
       ;;
     cljs-watch)
       # Build artifact newer than this start, or completion line in the
@@ -723,9 +735,11 @@ cmd_status() {
       echo "○ $name  (not running)"
     fi
   done
-  # Bonus: surface the pod's port if it's been written.
-  if [ -f tmp/seon-port ]; then
-    echo "  pod port: $(cat tmp/seon-port)  →  http://127.0.0.1:$(cat tmp/seon-port)"
+  # Bonus: surface the pod's port if it's been written. Per-cluster file
+  # ($SEON_PORT_FILE) so an isolated second cluster (bin/acme) never makes
+  # this status print the OTHER cluster's port.
+  if [ -f "$SEON_PORT_FILE" ]; then
+    echo "  pod port: $(cat "$SEON_PORT_FILE")  →  http://127.0.0.1:$(cat "$SEON_PORT_FILE")"
   fi
 }
 
@@ -874,7 +888,7 @@ cmd_nuke() {
   #   - data/clusters/*/store      every cluster's durable datahike store
   #   - data/seon-pod/* data/sessions/* data/embeddings/*   transient runtime
   #   - logs/*                     every log file + turns/agents/prompts/archive
-  #   - the default cluster's UDS sockets + tmp/seon-port
+  #   - the default cluster's UDS sockets + its pod port file ($SEON_PORT_FILE)
   # What it KEEPS: out*/ (CLJS build output — rebuilt incrementally anyway),
   #   data/dev-hook (the dev hook's own tooling state, not seon runtime data),
   #   the git tree.
@@ -914,7 +928,7 @@ cmd_nuke() {
 
   # 2. Drop the default cluster's stale UDS sockets + the published port file
   #    (recreated on the fresh start).
-  rm -f "$SEON_REQ_SOCK" "$SEON_PUB_SOCK" tmp/seon-port 2>/dev/null || true
+  rm -f "$SEON_REQ_SOCK" "$SEON_PUB_SOCK" "$SEON_PORT_FILE" 2>/dev/null || true
 
   # 3. Wipe every cluster dir wholesale (store/ AND its siblings — the
   #    embedding-index/ HNSW store, any future per-cluster artifacts) plus
@@ -1037,6 +1051,8 @@ Env overrides (downstream parametrization — defaults = today's values):
   SEON_PUB_SOCK           wire-server publish UDS (default tmp/seon-cluster-default-pub.sock)
   SEON_WRITER_REPL_PORT   wire-server loopback REPL port (default 7891)
   SEON_PORT               pod HTTP port (default 7890; read by the pod)
+  SEON_PORT_FILE          per-cluster pod port file (default tmp/seon-port);
+                          pod writes its bound port, status/ready_check read it
   SEON_RUNTIME_ROOT       pod artifact root (read by the pod; build/source
                           artifacts resolve against it — data stays CWD-local)
   SEON_EXTRA_SRC          downstream CLJS source root: a deps.edn project

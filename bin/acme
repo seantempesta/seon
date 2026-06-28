@@ -43,6 +43,9 @@ export SEON_REQ_SOCK=tmp/acme-cluster-req.sock
 export SEON_PUB_SOCK=tmp/acme-cluster-pub.sock
 export SEON_PROC_DIR=tmp/proc-acme          # own supervisor pid/lock namespace
 export SEON_LOG_DIR=logs/acme               # own logs (bin/acme tail reads here)
+export SEON_PORT_FILE=tmp/seon-port-acme    # own pod port file (the live default
+                                            # writes tmp/seon-port; a single shared
+                                            # file would cross-talk in status/ready)
 
 # --- embeddings: on by default; export GEMINI_API_KEY in your shell for KNN ---
 export SEON_EMBED="${SEON_EMBED:-1}"
