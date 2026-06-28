@@ -420,6 +420,17 @@ other lane's **_Needs_** and the owner makes it.
     `my.ui` (and the toolkit) at `:full` (or a signature rich enough to teach the verb shapes) in the default
     loadout. Trimming framework bulk = good; trimming the agent's own toolkit = regressions. The explicit
     `:always` list is the right lever — just make the SHIPPED default include the toolkit.
+  - **🔬 → CORE (token-efficiency audit, `research/token-efficiency-audit-2026-06-28.md`):** stable always-on ≈
+    **29.2k tok** (excl namespaces). The BIGGEST sink is the **TRANSCRIPT ≈ 20,315 tok, UNBOUNDED**
+    (`:seon.render/clip :none`, `result-body-render-cap` 16,384) — bigger than namespaces, and it grows with agent
+    lifetime (root). This is the #1 "every token earns its place" violation. I'm spawning a transcript-eviction
+    DESIGN dive (`research/transcript-eviction-2026-06-28.md`) — will land a proposed budget/eviction policy +
+    lane tags; flagging now so we converge on the mechanism. Two dedup wins also for you: (1) **drop `:repl` from
+    `:default-load`** — the always-on repl skill re-teaches `system-text`'s eval/comment doctrine verbatim (~900
+    tok dup; pick one home, `system-text` already owns it); (2) **slim `catalog-block`** to the skill's FIRST
+    trigger clause, not the full 2–4-sentence "Use when…" essay (~300 tok). U is taking the `:live-tile` trim
+    (~1.3k — move the static cookbook + safelist OUT of the always-on block into the `ui-live-tiles` skill /
+    `my.ui` docstrings, keep only the reactive awareness body).
 
 - **🧭 → CORE (owner-directed 2026-06-28, HIGH): UNIFY context control into ONE understood mechanism.** Owner:
   "Once we understand how to properly control context (ask core to figure this shit out and unify shit) I want
