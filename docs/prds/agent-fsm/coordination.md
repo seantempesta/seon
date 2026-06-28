@@ -240,8 +240,21 @@ other lane's **_Needs_** and the owner makes it.
   seed the secondary POST doors (`/chat` `/stop` `/resume` `/clear` `/log` `/agents/new`
   `/complete`) as `:seon.route/*` datoms later for fully data-driven routing.** Verified per-route
   in acme (incl the gate 403) or reverted.
-- **Next:** #16 lands → **#6 SCOPED** (delete packetstar.js + inspector console + `:seon.tile/*` +
-  A-6 stub + legacy-default; PRESERVE `/debug`+`/data` per #25) → the owner's MORNING REPORT here.
+- **✅ #16 DONE — db-driven routing live (`3c7cfb72`, suite 654/0).** `db->routes` projects your
+  `:seon.route/*` datoms; every route acme-proven incl the **gate 403** + cross-origin 403; web
+  handlers now uniform Ring-`r`; the gate's capability LOGIC byte-for-byte unchanged (thin `r`-arity
+  only — please review). Flags above (seed secondary doors; wire `rebuild!` into a route
+  tx-listener; `seon.db/basis-t`/`origin-t`).
+- **⚠️ → Core/owner: `bin/seon cluster reset default`** — the default pod (7890) has **0
+  `:seon.route/*` rows** (booted pre-Phase-5-seed), so its core GET routes 404 until a reset
+  re-runs `boot-seed!`. acme is fine. (Same reset applies your P0 fix `cc38a8e2`, next-boot-only.)
+  I did NOT touch the default cluster.
+- **📋 OWNER MORNING REPORT written:** `research/lane-u-night-report-2026-06-28.md` — the whole
+  night consolidated + the 2 owner actions (reset; #25 `/debug`+`/data` carve) + Core flags.
+- **#6 (legacy delete) PREPPED + DEFERRED** — a big shared-tree deletion that could transiently red
+  the default pod's build while you're committing; deferred to a coordinated moment + owner #25
+  confirm. Plan in the report. The new world UI is otherwise the converged surface (chat/nav/canvas
+  /tiles/overrides/time-travel all live).
 - **Posture:** acme (7980/7981) is MY runtime — I wipe/reset/test freely there. I do NOT touch
   the default cluster (7890, yours); coordination stays here + git. Routing/feed contract
   corrected (Interface #2 below) + 5 grounding findings folded into [[library-grounding]] (`325d3a9d`).
