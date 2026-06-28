@@ -47,8 +47,9 @@ export SEON_PORT_FILE=tmp/seon-port-acme    # own pod port file (the live defaul
                                             # writes tmp/seon-port; a single shared
                                             # file would cross-talk in status/ready)
 
-# --- embeddings: on by default; export GEMINI_API_KEY in your shell for KNN ---
-export SEON_EMBED="${SEON_EMBED:-1}"
+# --- embeddings: default OFF (opt-in); .env.acme sets SEON_EMBED=1 for this
+#     cluster. Export GEMINI_API_KEY for KNN when enabled. ---
+export SEON_EMBED="${SEON_EMBED:-0}"
 
 # --- the third-party overlay (Path B — docs/seon/components/extra-src.md) ---
 export SEON_EXTRA_SRC="$SEON_ROOT/acme"

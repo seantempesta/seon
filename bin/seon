@@ -118,16 +118,17 @@ SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-7891}"
 SEON_PORT_FILE="${SEON_PORT_FILE:-tmp/seon-port}"
 export SEON_PORT_FILE
 
-# Embeddings (Proximum HNSW semantic search) — default ON for the default
-# cluster, matching bin/acme. Read by the wire-server (declares the index +
-# backfills) and the pod (per-turn predictive retrieval). Set SEON_EMBED= (empty)
-# to disable. Recover/rebuild: the index is DERIVED — re-ingest from source.
+# Embeddings (Proximum HNSW semantic search) — default OFF (opt-in: a fresh
+# clone runs zero embedding code, no Vertex/Gemini calls). OUR clusters turn it
+# ON via the gitignored .env / .env.acme (SEON_EMBED=1). Read by the wire-server
+# (declares the index + backfills) and the pod (per-turn predictive retrieval).
+# Set SEON_EMBED=1 to enable. Recover/rebuild: the index is DERIVED — re-ingest.
 # Persisted local config: the main pod's gitignored .env at the repo root
 # (acme's lives in .env.acme, sourced by bin/acme). `set -a` exports each
 # VAR=value; a value already set in your shell still wins via the ${:-} below.
 if [ -f "$SEON_ROOT/.env" ]; then set -a; . "$SEON_ROOT/.env"; set +a; fi
 
-export SEON_EMBED="${SEON_EMBED:-1}"
+export SEON_EMBED="${SEON_EMBED:-0}"
 
 # ── Config manifest selection — the ONE config seam (read by seon.config) ──
 # SEON_CONFIG  = manifest path (default config/system.edn, CWD-relative to the
