@@ -169,6 +169,20 @@
            e)
          nil)))))
 
+(defn css-style-tag
+  "The downstream brand stylesheet as a raw `<style>…</style>` HTML
+   string, or \"\" when SEON_BRAND_CSS is unset/unreadable. The
+   raw-string sibling of the inspector's hiccup `brand-css-style` — both
+   delegate to [[css-text]] — for surfaces (the datastar world shim) that
+   build their <head> as a string rather than hiccup. Inlined AFTER
+   output.css so its token overrides (--color-base-*, --color-amber-*,
+   fonts) win the cascade."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (if-let [css (css-text)]
+    (str "<style>" css "</style>")
+    ""))
+
 ;; --- Boot sync — env owns the row.
 
 (defn sync-tx-data

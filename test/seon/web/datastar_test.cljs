@@ -23,6 +23,7 @@
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.ui.html :as html]
+    [seon.web.brand :as brand]
     [seon.web.datastar :as datastar]))
 
 ;; Valid 14-char ids (`:seon.db/id` is [:string {:min 14 :max 14}]).
@@ -207,6 +208,73 @@
 ;; broadcast. (The full gzip-stream path needs a node socket, so the
 ;; mechanism is proven here at the thunk level.)
 ;; ============================================================
+
+;; ============================================================
+;; 6. The world SHIM heads route through the seon.web.brand seams (#13) —
+;; the page users actually navigate to (/world and /agent/{id}) must carry
+;; the downstream brand the same way the inspector does: SEON_BRAND_CSS
+;; inlined in the <head>, the brand NAME in the <title>, and `data-theme`
+;; from the brand row. Absent brand row + env → the shipped seon defaults.
+;; Assert the brand MECHANISM (css present, name in title, theme attr) — not
+;; the surrounding shim markup, which is a refactoring surface.
+;; ============================================================
+
+(deftest world-shim-heads-route-through-the-brand-seams
+  (async done
+    (let [env      (.. js/process -env)
+          fs       (js/require "fs")
+          css-path "tmp/datastar-brand-shim-test.css"]
+      (-> (client/open-agent-conn!)
+          (.then
+            (fn [conn]
+              (let [orig db/*conn*]
+                (set! db/*conn* conn)
+                ;; --- DEFAULT (unbranded): no brand row, no SEON_BRAND_CSS.
+                (js-delete env "SEON_BRAND_CSS")
+                (let [world (@#'datastar/world-page-html)
+                      agent (@#'datastar/agent-page-html agent-a)]
+                  (testing "unbranded → seon defaults, NO brand <style> inlined"
+                    (is (str/includes? world "data-theme=\"phosphor\"")
+                        "the default phosphor theme rides the <html> tag")
+                    (is (str/includes? world "<title>seon · world</title>")
+                        "the world title falls back to the seon brand name")
+                    (is (str/includes? agent
+                                       (str "<title>seon · agent " agent-a "</title>"))
+                        "the agent title falls back to the seon brand name")
+                    (is (not (str/includes? world "<style>"))
+                        "no SEON_BRAND_CSS set → no inline brand stylesheet")
+                    (is (str/includes? world "/css/output.css")
+                        "output.css is still linked on the default path")))
+                ;; --- BRANDED: a brand row + a SEON_BRAND_CSS file (cyan token).
+                (.writeFileSync fs css-path ":root{--color-amber-400:#38bdf8;}")
+                (aset env "SEON_BRAND_CSS" css-path)
+                (-> (db/transact!
+                      {:seon.db/conn    conn
+                       :seon.db/tx-data [{::brand/id    "brand"
+                                          ::brand/name  "Acme"
+                                          ::brand/theme "midnight"}]})
+                    (.then
+                      (fn [_]
+                        (let [world (@#'datastar/world-page-html)
+                              agent (@#'datastar/agent-page-html agent-a)]
+                          (testing "branded → SEON_BRAND_CSS inlined, brand name + theme in head"
+                            (is (str/includes? world "#38bdf8")
+                                "the SEON_BRAND_CSS content is inlined in the world <head>")
+                            (is (str/includes? world "Acme · world")
+                                "the brand name flows into the world <title>")
+                            (is (str/includes? world "data-theme=\"midnight\"")
+                                "the brand theme rides the <html> tag")
+                            (is (str/includes? agent "#38bdf8")
+                                "the SEON_BRAND_CSS content is inlined in the agent <head>")
+                            (is (str/includes? agent (str "Acme · agent " agent-a))
+                                "the brand name flows into the agent <title>")))))
+                    (.finally
+                      (fn []
+                        (set! db/*conn* orig)
+                        (js-delete env "SEON_BRAND_CSS")
+                        (try (.unlinkSync fs css-path) (catch :default _ nil))))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
 (deftest view-fn-patch-renders-the-bound-view-and-is-guarded
   (testing "a connection's bound view-fn is rendered into its OWN morph patch"

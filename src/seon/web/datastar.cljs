@@ -41,7 +41,8 @@
     [seon.derive :as derive]
     [seon.log :as log]
     [seon.ui.html :as html]
-    [seon.ui.world :as world]))
+    [seon.ui.world :as world]
+    [seon.web.brand :as brand]))
 
 ;; ============================================================
 ;; Connection registry — every open gzip stream (a /world roster or a
@@ -204,26 +205,43 @@
 ;; HTTP handlers — called from seon.web.serve when route? matched.
 ;; ============================================================
 
-(def ^:private world-page-html
-  ;; The shim: load datastar.js, open the long-lived feed via data-init,
-  ;; and present an empty `<main id=\"world\">` for the feed's first morph
-  ;; to fill. Written as a raw string (not hiccup) so the data-init's
-  ;; single quotes stay literal and the doctype leads.
-  (str "<!doctype html>\n"
-       "<html lang=\"en\"><head><meta charset=\"utf-8\">\n"
-       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-       "<title>Seon world</title>\n"
-       "<link rel=\"stylesheet\" href=\"/css/output.css\">\n"
-       "<script type=\"module\" src=\"/js/datastar.js\"></script>\n"
-       "</head>\n"
-       "<body class=\"bg-base-900 text-text-200 font-mono p-3\">\n"
-       "<main id=\"world\" data-init=\"@get('/world/feed')\">loading…</main>\n"
-       "</body></html>"))
+(defn- shim-html
+  "The datastar world-shim page as a raw HTML string, BRAND-AWARE: the
+   <head> routes through the seon.web.brand seams — the brand <title> via
+   `page-title`, `data-theme` from the brand row, and the optional
+   SEON_BRAND_CSS inlined AFTER output.css — so a downstream deploy's
+   branding reaches the world page users actually navigate to (not just
+   the inspector). Absent brand row + env → the shipped seon defaults.
+
+   The shim itself: load datastar.js, open the long-lived feed via
+   `data-init`, and present an empty `<main id=\"world\">` for the feed's
+   first morph to fill. `title-suffix` is the brand-name suffix (\"world\",
+   \"agent <id>\"); `feed-url` the data-init SSE URL. Raw string (not
+   hiccup) so the data-init single quotes stay literal and the doctype
+   leads."
+  [title-suffix body-class feed-url]
+  (let [b (brand/info)]
+    (str "<!doctype html>\n"
+         "<html lang=\"en\" data-theme=\"" (::brand/theme b) "\"><head><meta charset=\"utf-8\">\n"
+         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+         "<title>" (brand/page-title b title-suffix) "</title>\n"
+         "<link rel=\"stylesheet\" href=\"/css/output.css\">\n"
+         (brand/css-style-tag)
+         "<script type=\"module\" src=\"/js/datastar.js\"></script>\n"
+         "</head>\n"
+         "<body class=\"" body-class "\">\n"
+         "<main id=\"world\" data-init=\"@get('" feed-url "')\">loading…</main>\n"
+         "</body></html>")))
+
+(defn- world-page-html
+  "The /world roster shim page (brand-aware head — see [[shim-html]])."
+  []
+  (shim-html "world" "bg-base-900 text-text-200 font-mono p-3" "/world/feed"))
 
 (defn- serve-world-page! [^js res]
   (.writeHead res 200 #js {"Content-Type"  "text/html; charset=utf-8"
                            "Cache-Control" "no-store, no-cache, must-revalidate"})
-  (.end res world-page-html))
+  (.end res (world-page-html)))
 
 (defn- open-feed!
   "Open a long-lived gzip-compressed SSE stream bound to `view-fn` (a 0-arg
@@ -268,20 +286,12 @@
 (defn- safe-id? [id] (boolean (and id (re-matches safe-id-re id))))
 
 (defn- agent-page-html
-  "The per-agent shim: load datastar.js, open the agent's long-lived feed
-   via `data-init`, and present an empty `<main id=\"world\">` for the
-   feed's first morph to fill. `id` is pre-validated by `safe-id?`."
+  "The per-agent (/agent/{id}) world shim page (brand-aware head — see
+   [[shim-html]]). `id` is pre-validated by `safe-id?`."
   [id]
-  (str "<!doctype html>\n"
-       "<html lang=\"en\"><head><meta charset=\"utf-8\">\n"
-       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
-       "<title>" id " — Seon</title>\n"
-       "<link rel=\"stylesheet\" href=\"/css/output.css\">\n"
-       "<script type=\"module\" src=\"/js/datastar.js\"></script>\n"
-       "</head>\n"
-       "<body class=\"bg-base-950 text-text-200 font-mono p-3\">\n"
-       "<main id=\"world\" data-init=\"@get('/agent/" id "/feed')\">loading…</main>\n"
-       "</body></html>"))
+  (shim-html (str "agent " id)
+             "bg-base-950 text-text-200 font-mono p-3"
+             (str "/agent/" id "/feed")))
 
 (defn serve-agent-page!
   "Serve the per-agent world shim page for agent `id`. Public — the router
