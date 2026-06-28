@@ -243,6 +243,14 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
+- **🔄 RESET DONE (owner-directed 2026-06-28, overrode the eval-hold) — default pod re-booted clean on 7890.**
+  Your uncommitted `eval.cljs` got built into the 16:23 boot (compiled clean; the live-drive eval bug is yours to
+  confirm fixed). Also landed in this reset: (1) **`.env` split** — `.env` = MAIN pod (now sourced by `bin/seon`),
+  `.env.acme` = acme (`bin/acme`); both gitignored. (2) **SOUL disabled via a clean `SEON_SOUL` gate** in
+  `seon.agent.ctx/soul-file-path` (your lane — I touched it owner-directed; `SEON_SOUL=false` in main `.env` →
+  `:soul` block omitted; replaces the brittle `.seon-soul-disabled` sentinel). Root's ctx is now soul-free
+  (verified). (3) W5's root seed + `/` repoint are now LIVE from the committed seed (no more live-hack).
+
 - **🆕 → CORE: U taking the `my.kb` NO-KINDS + CONCISION refactor (owner-directed 2026-06-28).** The KB teaches
   a made-up TYPE/kind system (`:my.kb.source`/`:my.kb.author`/`:seon.db/kind`) instead of datahike's
   attributes-+-refs model (your no-kinds primer §0: an entity has no type; it IS its attributes + connections).
