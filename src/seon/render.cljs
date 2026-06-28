@@ -672,17 +672,31 @@
                 ;; INTERACTIVITY: rewrite agent fn-call / fn-ref handler slots
                 ;; in AGENT-authored hiccup into standard Datastar
                 ;; `@post('/call?…')` (seon.web.reactive.transform). Bare
-                ;; handler symbols qualify to the tile fn's namespace; /call
+                ;; handler symbols qualify to the authoring namespace; /call
                 ;; routes by that namespace into the owning agent's sandbox.
-                ;; No-op on core hiccup + hiccup with no interactive handlers.
-                resp   (if (render-sci/agent-authored-sym? value)
-                         (update resp :seon.render/hiccup
-                                 (fn [h]
-                                   (if h
-                                     (transform/transform-hiccup
-                                       (symbol (namespace value)) h)
-                                     h)))
-                         resp)
+                ;;
+                ;; The authoring ns is the tile fn's ns when an agent wired a
+                ;; SYMBOL, but a LITERAL-HICCUP tile (the easiest path the
+                ;; live-tile guidance pushes) has no symbol — it is still
+                ;; agent-authored, so we qualify its bare handlers to the
+                ;; agent's OWN home ns `my.agent.<id>` (the same id /call
+                ;; routes by). Without this, a literal `[:button {:on-click …}]`
+                ;; emitted no @post → a dead button.
+                ;;
+                ;; No-op on core hiccup (welcome/section symbols → not
+                ;; agent-authored) and on hiccup with no interactive handlers.
+                resp   (let [ns-sym (cond
+                                      (render-sci/agent-authored-sym? value)
+                                      (symbol (namespace value))
+                                      (vector? value)        ; literal hiccup
+                                      (symbol (str "my.agent." id)))]
+                         (if ns-sym
+                           (update resp :seon.render/hiccup
+                                   (fn [h]
+                                     (if h
+                                       (transform/transform-hiccup ns-sym h)
+                                       h)))
+                           resp))
                 hiccup (:seon.render/hiccup resp)]
             ;; SERIALIZATION joins the same guarded path as invocation
             ;; (serialization-boundary hardening): a structurally-broken hiccup (e.g. a

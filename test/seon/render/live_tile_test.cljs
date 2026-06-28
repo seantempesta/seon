@@ -412,6 +412,43 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+(deftest render-agent-tile-literal-hiccup-interactive-gets-transform
+  ;; #22 B.1 — a LITERAL-HICCUP tile with an :on-click handler is
+  ;; agent-authored too, so its handler MUST be rewritten to a Datastar
+  ;; @post pointing at the agent's OWN /call door. Before the fix the
+  ;; transform gated on `agent-authored-sym?` (a SYMBOL), so literal
+  ;; hiccup fell through untouched → a dead button.
+  (async done
+    (-> (with-agent-conn "tileint-000001"
+          (fn [conn]
+            (-> (db/transact!
+                  {:seon.db/tx-data
+                   [{:seon.agent/id "tileint-000001"
+                     :seon.render.live-tile/content
+                     [:button {:on-click (list 'bump! "row-1")} "+1"]}]})
+                (.then (fn [_]
+                         (binding [db/*conn* conn]
+                           (let [{:seon.render/keys [hiccup]}
+                                 (render/render-agent-tile
+                                   {:seon.db/db @conn
+                                    :seon.agent/id "tileint-000001"})
+                                 attrs (second hiccup)
+                                 action (:data-on:click attrs)]
+                             (is (nil? (:on-click attrs))
+                                 "the raw :on-click slot is gone — rewritten, not emitted verbatim")
+                             (is (string? action)
+                                 "a literal-hiccup :on-click becomes a Datastar @post (no dead button)")
+                             (is (str/includes?
+                                   action "@post('/agent/tileint-000001/call?fn=")
+                                 "routes to the agent's OWN /call door")
+                             (is (str/includes?
+                                   action "my.agent.tileint-000001%2Fbump!")
+                                 "the bare handler qualifies to the agent's home ns")
+                             (is (str/includes? action "args=")
+                                 "the fn-CALL render-time arg rides ?args="))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest render-agent-tile-twin-fn-carries-both-keys
   (async done
     (-> (with-agent-conn "tiletwn-000001"

@@ -41,6 +41,15 @@
 /* borders + overflow */
 @source inline("border border-t border-b border-base-{700,800} rounded rounded-md");
 @source inline("divide-y divide-base-800 overflow-hidden overflow-auto overflow-x-auto");
+/* interactive controls (my.tile) — button / input / select / toggle.
+   Without these an agent-authored control is unstyled + gives no click
+   affordance. Variant classes (hover:/focus:/disabled:/placeholder:)
+   each need their OWN safelist entry — the base class alone won't emit
+   the variant. Keep tight + in sync with my.tile's class strings. */
+@source inline("cursor-pointer select-none accent-amber-400");
+@source inline("hover:bg-base-{800,850} hover:text-text-{50,100} hover:border-base-700");
+@source inline("focus:outline-none focus-visible:border-amber-400 border-amber-{300,400}");
+@source inline("disabled:opacity-50 placeholder:text-text-{400,500}");
 
 /* Custom theme tokens using Tailwind v4 @theme directive.
    Phosphor Terminal theme - warm blacks, cream text, amber accents.
