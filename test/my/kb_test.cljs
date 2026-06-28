@@ -308,7 +308,7 @@
         (-> (kb/build-kb-example!)
             (.then (pinned conn
                      (fn [_]
-                       (let [kinds (set (map :seon.db/kind (kb/inventory)))]
+                       (let [kinds (set (map :seon.db/kind (:seon.db/kinds (kb/inventory))))]
                          (is (contains? kinds :my.kb.source)
                              "the source kind shows once its data lands")
                          (is (contains? kinds :my.kb.author)
