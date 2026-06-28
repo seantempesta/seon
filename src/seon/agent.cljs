@@ -74,7 +74,17 @@
 ;; stored on the entity — it's deterministic from the id via `home-ns`.
 ;; ============================================================
 
-(schema/register! :seon.agent/id            [:and {:seon.db/identity true} :seon.db/id])
+;; The literal "root" id (the orchestrator-root base case) is the ONE
+;; agent id exempt from the 14-char minted-id shape — every other agent id
+;; is a `:seon.db/id`. The `:or` bridges to the SAME datahike schema:
+;; the CLJS bridge (seon.db.internal/form->datahike-value-type) walks
+;; `:and` → base, then the `:or` (one mappable type :db.type/string via
+;; :seon.db/id + the unmappable `[:= "root"]`) → :db.type/string; the
+;; `{:seon.db/identity true}` prop still yields :db.unique/identity. Because
+;; the resolved head is `:and` (not `:or`), `edn-encoded-attr?` is FALSE —
+;; "root" stores as a plain string, NOT pr-str'd EDN. Net datahike schema:
+;; byte-identical to before; only Malli validation broadens.
+(schema/register! :seon.agent/id            [:and {:seon.db/identity true} [:or [:= "root"] :seon.db/id]])
 (schema/register! :seon.agent/purpose       :string)
 ;; Subagent → parent (optional; delivery is a thin conditional in
 ;; `complete` — no spawn path sets this yet). References the canonical ref
@@ -333,7 +343,7 @@
 ;; ============================================================
 
 (schema/register! ::armable-agent-ids-request [:map [:seon.db/db {:optional true} :seon.db/db-val]])
-(schema/register! ::armable-agent-ids-response [:vector :seon.db/id])
+(schema/register! ::armable-agent-ids-response [:vector :seon.agent/id])
 
 (defn armable-agent-ids
   "Agent ids whose DERIVED state is `:idle` — not `:terminated` AND with no
@@ -390,7 +400,7 @@
 ;; slot without throwing (the cond-> guards what actually reaches the tx).
 (schema/register! ::create-request
   [:map
-   [:seon.agent/id                  :seon.db/id]
+   [:seon.agent/id                  :seon.agent/id]
    [:seon.agent/purpose             {:optional true} :any]
    [:seon.agent/default-turn-limit  {:optional true} :any]])
 
@@ -398,7 +408,7 @@
 ;; envelope as-is (errors are values).
 (schema/register! ::create-response
   [:or
-   [:map [:seon.agent/id :seon.db/id]]
+   [:map [:seon.agent/id :seon.agent/id]]
    :seon.db/transact-response])
 
 (defn ^:async create!
@@ -457,6 +467,55 @@
           {:seon.agent/id id}))))
 
 ;; ============================================================
+;; start! — the spawn verb. Alias of create! that ALSO writes the caller as
+;; the new agent's `:seon.agent/parent`. The base case of the spawn recursion
+;; is the orchestrator-root ("root", parentless); every other agent is spawned
+;; by some parent via this verb.
+;; ============================================================
+
+(schema/register! ::start-request
+  [:map
+   [:seon.agent/id                  {:optional true} :seon.agent/id]
+   [:seon.agent/purpose             {:optional true} :any]
+   [:seon.agent/default-turn-limit  {:optional true} :any]])
+
+(defn ^:async start!
+  "Spawn a child agent — the capability-gated lifecycle verb (the spawn
+   counterpart of `seon.agent.lifecycle/terminate`). An alias of `create!`
+   that ALSO writes `:seon.agent/parent` = the CALLING agent (read from the
+   ALS scope via `db/current-agent-id`). That parent write IS the activation
+   of `:seon.agent/parent` — no separate writer. Mints a fresh 14-char child
+   id when `:seon.agent/id` is absent (a child is never \"root\"). The child
+   is created IDLE: it does no work until it receives a message (which opens
+   its run #1). Like `boot!`, this does NOT arm the child's wake trigger —
+   the loop layer owns that. Returns `{:seon.agent/id child-id}` on success;
+   the db error envelope as-is on a failed transact (errors are values).
+   Called outside an agent scope (no caller) → the child is created
+   PARENTLESS (a host-initiated create), matching `create!`."
+  {:malli/schema [:=> [:cat ::start-request] ::create-response]}
+  [{:seon.agent/keys [id purpose default-turn-limit]}]
+  (let [child-id  (or id (db/new-id!))
+        parent-id (db/current-agent-id)
+        res       (await (create! {:seon.agent/id child-id
+                                   :seon.agent/purpose purpose
+                                   :seon.agent/default-turn-limit default-turn-limit}))]
+    (if (false? (:seon.db/ok? res))
+      res
+      (if parent-id
+        (let [penv (await (db/transact!
+                            {:seon.db/tx-data
+                             [{:seon.agent/id     child-id
+                               :seon.agent/parent [:seon.agent/id parent-id]}]}))]
+          (if (false? (:seon.db/ok? penv))
+            (do (js/console.error
+                  (str "seon.agent/start! parent-write FAILED for " child-id
+                       " (parent " parent-id "): "
+                       (:seon.error/message (:seon.db/error penv))))
+                penv)
+            {:seon.agent/id child-id}))
+        {:seon.agent/id child-id}))))
+
+;; ============================================================
 ;; Boot. The single entry point seon.client calls at startup. Agent
 ;; identity flows via the `seon.db/agent-id-als` scope, not process-global
 ;; atoms: the caller (seon.client/start-agent!) mints the id locally and
@@ -469,7 +528,7 @@
 ;; extra runtime slots pass. purpose is :any (absent-or-nil tolerant).
 (schema/register! ::boot-request
   [:map
-   [:seon.agent/id      :seon.db/id]
+   [:seon.agent/id      :seon.agent/id]
    [:seon.agent/purpose {:optional true} :any]])
 
 ;; Success = `{:seon.agent/id _ :seon.agent/ns <home-ns symbol>}`; on a failed
@@ -477,7 +536,7 @@
 ;; home-ns symbol — an opaque derived value, not a stored attr).
 (schema/register! ::boot-response
   [:or
-   [:map [:seon.agent/id :seon.db/id] [:seon.agent/ns :any]]
+   [:map [:seon.agent/id :seon.agent/id] [:seon.agent/ns :any]]
    :seon.db/transact-response])
 
 (defn ^:async boot!

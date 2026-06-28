@@ -110,7 +110,7 @@
   "The agent's NEXT turn number — `count` of every `:seon.agent.turn` the
    agent owns (walked agent → runs → turns). Used for debug-capture file
    names + log lines (uniqueness, not run-position). Derived, not persisted."
-  {:malli/schema [:=> [:catn [:seon.agent/id :seon.db/id]] :int]}
+  {:malli/schema [:=> [:catn [:seon.agent/id :seon.agent/id]] :int]}
   [agent-id]
   (count (ctx/agent-turns agent-id nil)))
 
@@ -127,8 +127,8 @@
    one basis-t the bound-checks + render share, §8a); defaults to `@*conn*`
    when called without one."
   {:malli/schema [:function
-                  [:=> [:catn [:seon.agent/id :seon.db/id]] :string]
-                  [:=> [:catn [:seon.agent/id :seon.db/id] [:seon.db/db :any]] :string]]}
+                  [:=> [:catn [:seon.agent/id :seon.agent/id]] :string]
+                  [:=> [:catn [:seon.agent/id :seon.agent/id] [:seon.db/db :any]] :string]]}
   ([agent-id] (render-prompt agent-id @db/*conn*))
   ([agent-id db]
    (ctx/render-context {:seon.agent/id agent-id :seon.db/db db})))
@@ -152,7 +152,7 @@
    SAME db inside that scope so the `:relevant-source` section reads them
    without making `assemble-context` async. FAIL-SOFT to nil hits on any error
    (section renders blank)."
-  {:malli/schema [:=> [:catn [:seon.agent/id :seon.db/id] [:seon.db/db :any]] :string]}
+  {:malli/schema [:=> [:catn [:seon.agent/id :seon.agent/id] [:seon.db/db :any]] :string]}
   [agent-id db]
   (if-not (embed-retrieval-on?)
     (render-prompt agent-id db)

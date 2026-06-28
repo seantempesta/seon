@@ -2248,7 +2248,13 @@
         ;; RESUME, DON'T MINT (P3.5/#31): the store is the identity
         ;; source. Mint only on genuine first boot or explicit create.
         resumed-ids   (if mint? [] (agent/armable-agent-ids {:seon.db/db @conn}))
-        minted-ids    (if (empty? resumed-ids) [(db/new-id!)] [])
+        ;; First boot mints the orchestrator-root ("root", no parent — the
+        ;; spawn-recursion base case); `mint?` (`/agents/new`) mints a normal
+        ;; 14-char child id instead.
+        minted-ids    (cond
+                        mint?                [(db/new-id!)]
+                        (empty? resumed-ids) ["root"]
+                        :else                [])
         agent-ids     (into resumed-ids minted-ids)
         ;; The PRIMARY agent (return-shape + shared-boot tx scope):
         ;; the minted one when minting, else the first resumed.

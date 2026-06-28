@@ -311,8 +311,16 @@ don't, not special core machinery. Depends on Phase 4 (it runs the child's boots
   is `/agent/{id}/call` with the fn riding as a route-data **descriptor** — do NOT seed
   per-ns / per-fn routes; namespaces are NOT a routing level; hierarchical reitit with
   route-data inheritance; `db->routes` stays UI's. Schema detail: [[data-model]] §4.8.
-  (The `start!`/`:seon.agent/parent`/root-base-case half of Phase 5 below is NOT yet
-  done.)
+  (UPDATE 2026-06-28: the `start!` VERB + `:seon.agent/parent` writer + root-base-case
+  boot-mint are now IMPLEMENTED + live-proven. First boot mints the literal
+  `:seon.agent/id "root"` (parentless base case); `seon.agent/start!` is an alias of
+  `create!` that writes `:seon.agent/parent` = `(db/current-agent-id)`. The keystone:
+  `:seon.agent/id` is `[:and {:seon.db/identity true} [:or [:= "root"] :seon.db/id]]` and
+  every AGENT-id slot now references `:seon.agent/id` (load-time `register!`s in the
+  leaf nses below seon.agent — `derive`/`run`/`schedule` — use base `:string`, which
+  also admits "root", to respect cold-boot order). STILL OPEN for full Phase 5: routing
+  `start!` through the `/call` capability GATE + roles-as-capability-SETS (the spawn-grant
+  check); root's elevated bootstrap grants.)
 - KEEP unchanged: the agent record core attrs (`:seon.agent/id|run|terminated-at|
   default-turn-limit|default-deadline-ms|schedules`).
 

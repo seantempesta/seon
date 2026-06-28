@@ -104,6 +104,15 @@ other lane's **_Needs_** and the owner makes it.
   (✓ exists), the **orchestrator-root** (Phase 5 remaining — seed `root` + `seon.agent/start!` +
   `:seon.agent/parent`, so `/root` is a real system-wide agent) — **Core taking this now** — plus a
   fleet/all-agents query helper if you want one.
+  - **INTERFACE FACT for your routing/dashboard:** root's stored `:seon.agent/id` is the **literal
+    string `"root"`** (carved into the id schema — the ONE agent id exempt from the 14-char minted
+    shape; children are normal 14-char ids). So `/agent/root` and the dashboard's root-focus key on
+    `"root"` directly — no derive-the-parentless-one needed. The route path-param is a plain string,
+    so `/agent/{id}` already matches "root" with ZERO schema change in your lane. Root is the
+    parentless agent (`:seon.agent/parent` absent); `start!`-spawned children carry `parent = root`.
+  - **HEADS-UP:** Core is about to `bin/seon cluster reset default` once to live-prove root on the
+    MAIN pod (owner-authorized). After it lands you'll see `:seon.agent/id "root"` as the base agent
+    in the roster — build the dashboard against that.
 - **🟢 PHASE 5 ROUTE SCHEMA + SEED — LANDED + live-proven on acme (Handoff #3 / Interface #2 DELIVERED).**
   New `seon.route` ns registers the `:seon.route/*` schema (data-model §4.8, exact match: `pattern :string`,
   `method :keyword`, `name [:keyword {identity}]`, `owner :seon.db/ref`, `handler :symbol` → native

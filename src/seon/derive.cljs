@@ -72,7 +72,7 @@
    pointer, resolved to its run entity, returned only when that run is
    `:open`), or nil. Drill its refs via follow-up reads."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
-                             [:seon.agent/id :seon.db/id]]
+                             [:seon.agent/id :seon.agent/id]]
                   [:maybe :map]]}
   [db agent-id]
   (let [a       (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]})
@@ -88,7 +88,7 @@
    [[state-from-primitives]]. The ONE reader the readline / inspector / loop /
    wake gate share."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
-                             [:seon.agent/id :seon.db/id]]
+                             [:seon.agent/id :seon.agent/id]]
                   :seon.derive/state]}
   [db agent-id]
   (let [a   (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]})
@@ -124,7 +124,7 @@
    explicit db value. Query-based (not reverse-ref nav) so it works on a plain
    pulled/touched agent map and on a FilteredDB."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
-                             [:seon.agent/id :seon.db/id]]
+                             [:seon.agent/id :seon.agent/id]]
                   :int]}
   [db agent-id]
   (or (db/query {:seon.db/db db
@@ -151,7 +151,7 @@
   "Is the agent DERIVED `:idle` (wakeable — not terminated, no open run)? A
    FILTER over [[derive-state]], never a re-encoding of the rule."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
-                             [:seon.agent/id :seon.db/id]]
+                             [:seon.agent/id :seon.agent/id]]
                   :boolean]}
   [db agent-id]
   (= :idle (derive-state db agent-id)))
@@ -160,7 +160,7 @@
   "Agent ids whose DERIVED state is `:idle` — the agents a trigger can WAKE.
    A FILTER over [[derive-state]] (one rule, never a re-encoded idle query),
    sorted asc for deterministic boot logs."
-  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] [:vector :seon.db/id]]}
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] [:vector :seon.agent/id]]}
   [db]
   (->> (db/query {:seon.db/db db
                   :seon.db/query '[:find [?id ...] :where [?a :seon.agent/id ?id]]})
@@ -240,7 +240,14 @@
 
 (schema/register! :seon.derive/status-request
   [:map
-   [:seon.agent/id  :seon.db/id]
+   ;; Leaf-purity (see note below): this is a LOAD-TIME register! in a leaf ns
+   ;; — seon.agent requires THIS, so `:seon.agent/id` is NOT registered yet at
+   ;; cold boot and can't be referenced here. The base type `:string` still
+   ;; admits the literal "root" id (the orchestrator-root); the 14-char minted
+   ;; shape is enforced where the agent is CREATED (`:seon.agent/id` itself).
+   ;; This is a derived READ. The defn `:malli/schema` slots below (resolved at
+   ;; instrumentation time, after seon.agent loads) DO reference `:seon.agent/id`.
+   [:seon.agent/id  :string]
    ;; optional explicit wall-clock for ms-remaining (defaults to (js/Date.))
    [:seon.agent/now {:optional true} :inst]])
 

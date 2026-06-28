@@ -244,9 +244,13 @@
 ;; schedule fires per agent per minute — correct here.
 ;; ============================================================
 
+;; agent-id VALUE schema is base `:string` (not `:seon.agent/id`): LOAD-TIME
+;; register! in a LEAF ns (seon.agent.schedule loads before seon.agent registers
+;; `:seon.agent/id`). `:string` admits the literal "root" id too; identity shape
+;; is enforced at create.
 (schema/register! ::fired-entry
   [:map
-   [:seon.agent/id     :seon.db/id]
+   [:seon.agent/id     :string]
    [:seon.agent.run/id :seon.agent.run/id]])
 
 (schema/register! ::fire-due-request

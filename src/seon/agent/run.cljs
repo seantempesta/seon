@@ -157,7 +157,13 @@
                     :seon.agent.run/deadline :seon.agent.run/last-beat-at
                     :seon.agent.run/paused-at :seon.agent.run/closed-reason])))
 
-(schema/register! ::current-run-request [:map [:seon.agent/id :seon.db/id]])
+;; The agent-id VALUE schema in these request maps is base `:string`, NOT
+;; `:seon.agent/id`: every register! here is LOAD-TIME, and seon.agent.run is a
+;; LEAF (requires only db/derive/schema) that loads BEFORE seon.agent registers
+;; `:seon.agent/id` — referencing it at cold boot throws. `:string` also admits
+;; the literal "root" orchestrator-root id (the 14-char minted shape is enforced
+;; at CREATE, via `:seon.agent/id` itself); these are run OPS over an existing id.
+(schema/register! ::current-run-request [:map [:seon.agent/id :string]])
 
 (defn current-run
   "The agent's CURRENT open run entity (the `:seon.agent/run` pointer, if it
@@ -205,7 +211,7 @@
 
 (schema/register! ::open-run-request
   [:map
-   [:seon.agent/id              :seon.db/id]
+   [:seon.agent/id              :string]
    [:seon.agent.run/trigger     :seon.agent.run/trigger]
    [:seon.agent.run/cause       {:optional true} :seon.db/ref]
    [:seon.agent.run/turn-limit  {:optional true} :seon.agent.run/turn-limit]
@@ -334,7 +340,7 @@
 
 (schema/register! ::renew-request
   [:map
-   [:seon.agent/id     :seon.db/id]
+   [:seon.agent/id     :string]
    [:seon.agent.run/id :seon.agent.run/id]
    ;; Optional clock extension (ms) — defaults to the agent's
    ;; default-deadline-ms (else the global default).
@@ -363,7 +369,7 @@
 
 (schema/register! ::beat-request
   [:map
-   [:seon.agent/id     :seon.db/id]
+   [:seon.agent/id     :string]
    [:seon.agent.run/id :seon.agent.run/id]])
 
 (defn ^:async beat!
@@ -380,7 +386,7 @@
 
 (schema/register! ::pause-request
   [:map
-   [:seon.agent/id     :seon.db/id]
+   [:seon.agent/id     :string]
    [:seon.agent.run/id :seon.agent.run/id]])
 
 (defn ^:async pause!
@@ -404,7 +410,7 @@
 
 (schema/register! ::resume-request
   [:map
-   [:seon.agent/id     :seon.db/id]
+   [:seon.agent/id     :string]
    [:seon.agent.run/id :seon.agent.run/id]])
 
 (defn ^:async resume!
