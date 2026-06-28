@@ -235,21 +235,37 @@ middleware.
 ## Total override — the acme proof
 
 Every layer is a symbol or a datom; acme overrides each reusing the same
-primitives, with zero `src/seon` edits:
+primitives, with zero `src/seon` edits. Each row below is verified on the live
+acme cluster's NEW per-agent page (`/agent/{id}`), not just the legacy console:
 
 | Layer | Override mechanism | Default |
 |---|---|---|
-| **block set** | `ctx/install!` / `ctx/remove!` from acme's own nses | seon's seeded set |
+| **block set** (supporting tiles) | `ctx/install!` / `ctx/remove!` from acme's own nses | seon's seeded set |
 | **a tile's look** | the block's `:seon.render/html` symbol | seon's html render fn |
-| **canvas / any layout** | the layout block's `:seon.render/html` symbol | seon's layout fn |
+| **focal `#world-canvas` (the live tile)** | the agent's `:seon.render.live-tile/content` symbol | seon's `welcome` tile |
+| **any broken/error tile — live tile OR slot** | `set!` of `seon.render.live-tile/error-response` (one error contract for both paths) | seon's "updating this tile" card |
 | **root agent's world (`/`)** | the `/` route handler symbol (root's world layout) | seon's root world layout |
 | **routes / apps** | `:seon.route/*` rows | seeded core routes |
-| **CSS / theme** | `SEON_BRAND_CSS` (injected on all heads) | Phosphor |
+| **brand head — name / tagline / CSS** | `SEON_BRAND_NAME` / `SEON_BRAND_TAGLINE` / `SEON_BRAND_CSS` (on every shim `<head>`, incl. `/agent/{id}`) | seon defaults / Phosphor |
 | **client JS** | `SEON_EXTRA_PUBLIC` + scripts | datastar.js |
 
 acme installs at preload in its own namespaces (loaded via `SEON_EXTRA_SRC`),
-where it already wires its overrides. Acceptance: a completely different acme UI
-end-to-end, `bin/acme build` with zero warnings, the default seon UI unchanged.
+where it already wires its overrides. The `#world-canvas` override flows through
+the LIVE-TILE path: `world-layout`'s focal canvas IS `render-agent-tile` resolving
+the agent's `:seon.render.live-tile/content`, and a throwing tile routes through
+the overridable `seon.render.live-tile/error-response` — the SAME var the slot
+error path (`render/error-tile-hiccup`) calls, so one consumer `set!` brands every
+error surface on the page.
+
+Acceptance (proven server-side on `/agent/{id}`, agent `vKt-2606261227`, acme
+cluster port 7980 — gunzipped feed, not inference): with acme's
+`:seon.render.live-tile/content` wired to `acme.widget/broken-tile` (a throwing
+tile) and its blocks installed via `ctx/install!`, the `#world-canvas` section and
+the `#tile-acme-broken` slot BOTH render acme's branded
+`"Acme is preparing this view…"` card — NOT seon's stock "updating this tile" card
+— and the page `<head>` carries `<title>Acme · agent …</title>` plus the inlined
+`acme/branding/acme.css`. `bin/acme build` ran with zero warnings; the default
+seon UI (default cluster) is untouched.
 
 ## Malli throughout
 
