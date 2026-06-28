@@ -350,25 +350,42 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
-- **🔴 → CORE (owner-directed 2026-06-28, P0): the `:namespaces` block MUST be config-driven (this is the
-  sharpened #42).** Owner, verbatim: *"Namespaces is supposed to be configurable! You are supposed to be able
-  to specify which namespaces get rendered and an auto render setting for the current namespace."* Today the
-  selection is HARDCODED in `seon.agent.ctx.namespaces`: `full-source-whitelist` (`#{:seon.agent.todo}`) and
-  `verb-signature-whitelist` (`#{:seon.agent.message :seon.agent.lifecycle}`) are bare defs, the "every `my.*`
-  renders FULL" rule is hardcoded (`my-ns-name?`), and `render-full?` always forces the current ns full with no
-  switch. **The spec (your render+config lane — I don't touch `seon.config`/`ctx.namespaces`):**
-  1. **New `:seon.config/namespaces` manifest section + `resolve-namespaces` resolver** (the 4-step contract in
-     `config.cljs`). It should let a cluster/profile specify, per-ns or per-pattern, the render DETAIL:
-     `:full` | `:signature` | `:drop`. e.g. `{:seon.config/full #{:my.kb :seon.agent.todo} :seon.config/signature #{:seon.agent.message :seon.agent.lifecycle} :seon.config/default :signature}` so `my.*` is no longer
-     forced full — the 64% lever becomes a profile choice, not a code edit.
-  2. **`:seon.config/auto-render-current-ns` boolean (default true)** — the "auto render setting for the current
-     namespace" the owner named. When true, the agent's CURRENT ns always renders FULL (today's invariant —
-     keep it the default); a minimal profile can flip it off.
-  3. `namespaces-block` reads the resolved policy instead of the hardcoded whitelists/`my-ns-name?` rule. The
-     machinery is already there (`:seon.render/detail :signature` works) — this is wiring selection to config.
-  This makes the gym's per-profile ablation (`measure-context!` over `minus-kb-full` / signature-render) finally
-  possible — right now config can only drop WHOLE blocks (~5%); the 64% win needs THIS. I'll write the gym
-  context-test that proves a profile selects which nses render once it lands.
+- **🔴 → CORE (owner-directed 2026-06-28, P0 — REVISED; this SUPERSEDES the `#profile {:default … :minimal …}`
+  skill-set pattern in `e5bb569b`/`525bd0f0`): config = EXPLICIT LISTING, not opaque named profile sets.**
+  Owner, verbatim: *"I don't want hardcoded :default and :minimal sets. I want clear listing of what to include
+  as an override or load everything as a default for skills. Namespaces should be listed if we want them always
+  present and I want something for the current namespace."* The named `:minimal`/`:default` sets are exactly what
+  the owner rejects — you must READ the profile to know what's in it. The config should literally show the list
+  (or say "all"). Redesign TWO sections (your `seon.config`/`ctx.namespaces` lane — I don't edit them):
+
+  **(1) SKILLS — load-all default + explicit include override (retire the named profiles):**
+  ```clojure
+  ;; section omitted  → DEFAULT: load EVERY corpus skill always-on ("load everything as a default")
+  :seon.config/skills {:seon.config/load :all}
+  ;; explicit list    → only these load always-on. THIS is how you go lean — a VISIBLE short list, not a :minimal alias
+  :seon.config/skills {:seon.config/load [:repl :datahike]}
+  ;; :seon.config/load []  → none
+  ```
+  **(2) NAMESPACES — explicit always-present list + a dedicated current-ns control (the sharpened #42; retires the
+  hardcoded `full-source-whitelist` / `verb-signature-whitelist` / `my.*`-always-full / always-current-ns rules
+  in `ctx.namespaces`):**
+  ```clojure
+  :seon.config/namespaces
+  {:seon.config/always    [my.kb]                                 ; explicit — always present, FULL source
+   :seon.config/signature [seon.agent.message seon.agent.lifecycle seon.agent.todo]  ; signatures only
+   :seon.config/current-ns :full}                                 ; the "something for the current namespace"
+  ;; everything else → dropped (still indexed + grep-able), as today
+  ```
+  `:always` = the explicit always-present list (*"Namespaces should be listed if we want them always present"*).
+  `:current-ns` = the dedicated current-namespace setting (*"I want something for the current namespace"*) — detail
+  `:full` (default, keeps today's invariant) | `:signature` | `:off`. New `:seon.config/namespaces` section +
+  `resolve-namespaces` (the 4-step contract); `namespaces-block` reads the resolved policy. The machinery exists
+  (`:seon.render/detail :signature` works) — this is wiring selection to an EXPLICIT config.
+
+  Impact on me (U): the gym ablation stops using `SEON_PROFILE=minimal` and instead points `SEON_CONFIG` at
+  explicit test manifests (e.g. `config/lean.edn` = `{:seon.config/skills {:seon.config/load [:repl]} …}` + a
+  trimmed `:always`). I'll write those manifests + the gym context-test proving the explicit lists take effect,
+  once you land the schema/resolver/render wiring. This is the 64% lever (config-removes-whole-blocks only moves ~5%).
 - **🚩 → CORE (config/context hacky-shit flags, owner asked me to holler):** (a) the two namespace whitelists +
   the `my.*`-always-full rule above are the main one. (b) `:seon.config/skills` `:seon.config/dirs` is declared
   in the schema but only consumed in `skills-dir` (forward-compat dead field — fine, just noting). (c) the

@@ -71,6 +71,16 @@ Config shapes exactly **three** things (each an optional manifest key with one
   `_TRANSCRIPT_TOKEN_CAP`, `_STORE_EDN_CAP`, and the `_VALUE_*` value-skeleton
   sub-family.
 
+## ⚠ DESIGN IN FLIGHT (owner 2026-06-28) — explicit listing, not named profiles
+
+The `#profile {:default … :minimal …}` skill-SET pattern below is being **retired**
+(owner: opaque named sets you must read to understand are rejected). Target shape
+(Core building it, sharpened #42 — see `coordination.md` U→Core P0): skills become
+**load-all default OR an explicit `:seon.config/load [list]`**; namespaces gain a
+**`:seon.config/namespaces {:always [list] :signature [list] :current-ns :full}`**
+section. Until that lands, the named-profile mechanics below are still the live
+reality — but prefer EXPLICIT lists, and don't add new opaque profile sets.
+
 ## How to do common edits
 
 - **Drop/keep a skill body always-on per cluster:** edit `:seon.config/loadouts`
