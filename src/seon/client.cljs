@@ -97,6 +97,11 @@
     ;; `seon.repl/ensure-bootstrap!` rather than holding a second
     ;; copy here. See compile-state-lifecycle research note.
     [seon.repl :as repl]
+    ;; One-node source extraction (`form-source-at`) for the program-graph
+    ;; source capture below — rewrite-clj parses EXACTLY one top-level form,
+    ;; so char/regex/string-literal parens are balanced correctly (a raw
+    ;; depth counter truncates such a form). Same parser `parse-forms` uses.
+    [seon.repl.internal :as repl-internal]
     ;; Schemas-as-queryable-data (research file
     ;; schemas-as-queryable-data-2026-05-26.md). At boot,
     ;; start-agent! decomposes every entity-shape :map schema into
@@ -1071,53 +1076,27 @@
           (concat (map seon.platform/artifact-path ["src" "test" "guest-cljs/src"])
                   extra))))
 
-(defn- extract-form-from-string
-  "Return the exact text of the form that begins at the FIRST `(` in `start`
-   by paren-balancing (reader-free, so `::kw` / `#js` / reader-conditionals
-   pass through verbatim). Tracks string + escape state so docstring parens
-   don't unbalance. Any leading whitespace/indentation before that first `(`
-   is DROPPED — so a `defn` nested in a `#?(:cljs …)` reader conditional
-   (whose `:line` points at the indented inner form, column > 1) still yields
-   source that starts at `(defn`, not at the indentation. Returns nil if no
-   `(` opens before EOF."
-  [start]
-  (let [n (count start)]
-    (loop [i 0 depth 0 in-str? false esc? false s0 nil]
-      (if (>= i n)
-        ;; unbalanced-to-EOF fallback: return from the first `(` we saw
-        (when s0 (subs start s0))
-        (let [c (nth start i)]
-          (cond
-            ;; pre-form: skip leading indentation/whitespace until the first `(`
-            (nil? s0)              (if (= c \()
-                                     (recur (inc i) 1 false false i)
-                                     (recur (inc i) 0 false false nil))
-            esc?                   (recur (inc i) depth in-str? false s0)
-            (and in-str? (= c \\)) (recur (inc i) depth in-str? true  s0)
-            in-str?                (recur (inc i) depth (not (= c \")) false s0)
-            (= c \")               (recur (inc i) depth true false s0)
-            (= c \()               (recur (inc i) (inc depth) in-str? false s0)
-            (= c \))               (let [d (dec depth)]
-                                     (if (zero? d)
-                                       (subs start s0 (inc i))
-                                       (recur (inc i) d in-str? false s0)))
-            :else                  (recur (inc i) depth in-str? false s0)))))))
-
 (defn- extract-form-at-line
   "Return the exact text of the top-level form beginning at `line-1based` in
-   `txt`. Reader-free paren-balancing (see [[extract-form-from-string]])."
+   `txt`. Delegates to `seon.repl.internal/form-source-at` — rewrite-clj's
+   one-node parse, so char/regex/string-literal parens are balanced
+   correctly (a `)` inside `\\)` or `#\"…)…\"` no longer truncates the form).
+   Any leading indentation on the target line is dropped (a `defn` nested in
+   a `#?(:cljs …)` reader conditional still yields source starting at
+   `(defn`)."
   [txt line-1based]
   (let [lines (vec (str/split-lines txt))
         idx   (dec line-1based)]
     (when (and (nat-int? idx) (< idx (count lines)))
-      (extract-form-from-string (str/join "\n" (subvec lines idx))))))
+      (repl-internal/form-source-at (str/join "\n" (subvec lines idx)) 0))))
 
 (defn- extract-form-at-index
   "Return the exact text of the top-level form beginning at char `idx` in
-   `txt` (`idx` must point AT a `(`). Reader-free paren-balancing."
+   `txt` (`idx` must point AT a `(`). Delegates to
+   `seon.repl.internal/form-source-at` (see [[extract-form-at-line]])."
   [txt idx]
   (when (and (nat-int? idx) (< idx (count txt)))
-    (extract-form-from-string (subs txt idx))))
+    (repl-internal/form-source-at txt idx)))
 
 (defn- ghost-var?
   "True when var-meta `txt`/`line` is the signature of a GHOST var: the file

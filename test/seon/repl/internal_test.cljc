@@ -623,3 +623,52 @@
         (is (= (mapv :narration entries) (mapv :narration reparsed))
             (str "narration drifted across round-trip — got "
                  (pr-str (mapv :narration reparsed))))))))
+
+;; ============================================================
+;; form-source-at — one-node source extraction (program-graph
+;; source capture in seon.client routes through this). The
+;; rewrite-clj one-node parse is char/regex/string-literal aware,
+;; so a `)` inside `\)` or `#"…)…"` no longer truncates the form.
+;; ============================================================
+
+(deftest form-source-at-literal-aware
+  (testing "char literal `\\)` does not miscount depth"
+    (is (= "(foo \\) bar)"
+           (parse/form-source-at "(foo \\) bar) trailing" 0))))
+
+  (testing "char literal `\\(` does not miscount depth"
+    (is (= "(foo \\( bar)"
+           (parse/form-source-at "(foo \\( bar)" 0))))
+
+  (testing "regex literal `#\"…)…\"` does not miscount depth"
+    (is (= "(re-find #\"a)b\" s)"
+           (parse/form-source-at "(re-find #\"a)b\" s) trailing" 0))))
+
+  (testing "string literal with parens does not miscount depth"
+    (is (= "(defn f \"doc with ) paren\" [x] x)"
+           (parse/form-source-at
+             "(defn f \"doc with ) paren\" [x] x)\n(defn g [])" 0))))
+
+  (testing "combined char + regex + string parens — full form, not truncated"
+    (is (= "(foo \\) #\"a)b\" \"c)d\" bar)"
+           (parse/form-source-at
+             "(foo \\) #\"a)b\" \"c)d\" bar) trailing" 0)))))
+
+(deftest form-source-at-semantics
+  (testing "reads EXACTLY one top-level form, dropping trailing forms"
+    (is (= "(defn f [x] (+ x 1))"
+           (parse/form-source-at "(defn f [x] (+ x 1))\n(defn g [])" 0))))
+
+  (testing "skips leading indentation to the first `(` (reader-conditional)"
+    (is (= "(defn g [a] a)"
+           (parse/form-source-at "   (defn g [a] a)\nmore" 0))))
+
+  (testing "honors a non-zero offset (by-index caller)"
+    (let [txt "(a) (bee two)"]
+      (is (= "(bee two)" (parse/form-source-at txt 4)))))
+
+  (testing "no `(` at-or-after offset → nil"
+    (is (nil? (parse/form-source-at "no parens here" 0))))
+
+  (testing "unbalanced-to-EOF → from-`(` fallback (not nil, not a throw)"
+    (is (= "(foo (bar" (parse/form-source-at "(foo (bar" 0)))))

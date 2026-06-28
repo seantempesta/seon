@@ -1,11 +1,35 @@
 ---
 type: issue
-status: open
+status: verified
 severity: cleanup
 tags: [issue, agent]
 ---
 
 # client paren-balancer duplicates (and under-handles) parse-forms
+
+## Resolution (2026-06-28)
+
+Fixed via option (b) — factored a public `form-source-at` into
+`seon.repl.internal` (the ns that already owns rewrite-clj) and routed the
+client through it. The hand-rolled `extract-form-from-string` depth-counter
+is DELETED; `extract-form-at-line` / `extract-form-at-index` now delegate to
+`seon.repl.internal/form-source-at`, which reads EXACTLY one rewrite-clj node
+(`rewrite-clj.node/string` of `rewrite-clj.parser/parse-string` on the chunk)
+— so a `)` inside a char literal (`\)`), regex literal (`#"…)…"`), or string
+is balanced correctly instead of truncating the form. One node is parsed, not
+the whole file, so there is no perf regression. The find-first-`(`, leading-
+indentation-drop, line-bounds-check (ea603627), and EOF/unbalanced fallback
+(rewrite-clj throws → catch → from-`(`-to-EOF substring) semantics are all
+preserved.
+
+The genuine truncation bug was the CHARACTER literal (`\)` / `\(` / `\"`): the
+old scanner only tracked string state, so a `\)` outside a string decremented
+depth. (Regex `#"…)…"` was already handled incidentally by the string
+tracking, but is now handled robustly.)
+
+Live-proven in the pod; focused cases added to `seon.repl.internal-test`
+(`form-source-at-literal-aware` / `form-source-at-semantics`); `bin/test-cljs`
+green (689 tests / 3195 assertions / 0 failures).
 
 ## Problem
 

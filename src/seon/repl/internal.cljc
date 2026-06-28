@@ -452,6 +452,35 @@
 ;; Public surface
 ;; ============================================================
 
+(defn form-source-at
+  "Byte-faithful source of the SINGLE top-level form that begins at the
+   first `(` at-or-after `offset` in `text`. Reads exactly one rewrite-clj
+   node (same one-node parse as [[try-parse-one-token]] / the program-graph
+   source capture in `seon.client`), so parens inside CHARACTER literals
+   (`\\)`), REGEX literals (`#\"…)…\"`), and strings are balanced correctly —
+   unlike a raw `(`/`)` depth counter, which truncates such a form. Any
+   leading content before that first `(` is DROPPED (so a `defn` whose
+   `:line` points at the indented inner form of a `#?(:cljs …)` reader
+   conditional still yields source starting at `(defn`).
+
+   Returns:
+
+     - the form's exact source string on success;
+     - the from-first-`(`-to-EOF substring when the chunk is genuinely
+       UNBALANCED (rewrite-clj throws `Unexpected EOF.`) — the
+       truncated-source fallback the source-capture callers rely on;
+     - nil when no `(` opens at-or-after `offset` before EOF."
+  {:malli/schema [:=> [:cat :string :int] [:maybe :string]]}
+  [text offset]
+  (when-some [idx (str/index-of text "(" offset)]
+    (try
+      (rcn/string (rcp/parse-string (subs text idx)))
+      (catch #?(:clj Exception :cljs :default) _
+        ;; Unbalanced-to-EOF (or otherwise unparseable): fall back to the
+        ;; from-`(` substring so a truncated tail still surfaces SOMETHING,
+        ;; matching the prior hand-rolled scanner's EOF fallback.
+        (subs text idx)))))
+
 (defn parse-forms
   "Read `text` top-to-bottom, pairing each evaluable form with the `;;`
    comment-preamble that precedes it. See the namespace docstring for the
