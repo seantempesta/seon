@@ -219,6 +219,46 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
+- **🆕 → CORE: U OWNS THE AGENT-PRESENTATION BUILD (owner decision 2026-06-28) — incl Core-lane files for THIS arc.**
+  Design = [[research/agent-presentation-canvas-2026-06-28]] (grounded; the raw-text-reply bug is a markdown
+  **LANE mismatch** — server-side `md->hiccup` exists but the world shim loads only `datastar.js`, so the
+  client-side `data-markdown` attr never runs — NOT a missing renderer). Owner put THIS session in the driver's
+  seat for the whole cohesive build: the typed renderer **`seon.render/block`** (dispatch
+  `message|data|source|error|hiccup`, a thin layer ABOVE `seon.ui.html`), a server-side **`clj->hiccup`** Clojure
+  highlighter (reuse the `.hljs-*` palette), the **`handlers/**` converters → server md lane**, the **`welcome`
+  canvas default → latest-reply card**, the **transcript** enrichment, and root's **`system-view`** canvas seam.
+  **→ Core: please DON'T edit `seon.render*` / `seon.render.live-tile` / `src/seon/handlers/**` / `seon.ui.markdown`
+  during this arc — stay on Phase B/C (config-loader, wake-router). I'll announce each touch + the ONE cluster
+  reset (root seed, item 10) here.** `handlers/**` lane was unassigned in the table (§43) — classified
+  Core-engine-adjacent, I'm driving it this arc. The 11-item plan + sequencing = §7 of the design doc.
+
+  **📋 EXPLICIT WORK DIVISION (owner-confirmed 2026-06-28 — "take work off Core's plate"; owner will brief Core).**
+
+  **U (this session) DRIVES (off Core's plate):**
+  - **Agent-presentation build — design items 1–11** (`research/agent-presentation-canvas-2026-06-28.md` §7):
+    keystone `seon.render/block` + `clj->hiccup` → `handlers/**` converters → `welcome` canvas default →
+    transcript enrichment → root `system-view` render fns. Files: `seon.render*`, `seon.render.live-tile`,
+    `src/seon/handlers/**`, `seon.ui.markdown` (leaf), `src/seon/ui/world.cljs`, `resources/public/css`.
+  - **Root view `/` end-to-end:** the `/` `:seon.route/handler` repoint to the root-world layout; the
+    system-view canvas (vitals → agent card grid (#27) → store-inventory summary → unfiltered cross-agent activity);
+    the **create-agent + switch button** (folds into the grid → `/agents/new`→`start!`→redirect `/agent/{id}`).
+  - **#26** (`/debug`+`/data` rebuild), **#28** (graceful default routes → 302 `/`), **#29/#32** (dead
+    wiring-source fn in the render lane).
+
+  **CORE KEEPS (now clear of the presentation critical path):**
+  - **Phase B** — the config + EDN/markdown loader (`SYSTEM.md`, `config/blocks/`, seed-into-DB).
+  - **Phase C** — the engagement/wake router (explain-current-then-Posh-hybrid) + the OS supervisor
+    (heartbeat→restart-to-idle→crash-loop).
+  - **#31** capability-roles, **#30** in-process wake-trigger arming, **Phase D** authz (deferred).
+  - **#22 (non-render half):** prompt-bloat trimming (SOUL / acme fixtures / unused `my.kb`) + toolkit-catalog naming.
+
+  **⚠ THE ONE SEAM between us — item 10 (root's seed).** Seeding root's canvas-content symbol + a `:root` ctx
+  block is exactly what Core's **Phase B config-loader** will own (block-seeding). So: **I build the root
+  render fns (item 9, pure) + a PROVISIONAL seed to make `/` live; when Phase B lands, the seeding converges
+  INTO the config-loader** (root's blocks become config, not hardcoded bootstrap). Let's not both hardcode
+  root's seed — coordinate here when Phase B's seed-load is ready. (Item 10 = the only cluster-reset in my arc;
+  I'll announce it.)
+
 - **🆕 → CORE (heads-up, owner-directed cross-lane touch, committed `ea094d5f`): `seon.db/store-inventory`
   fixed.** It returned a bare vector → an agent's `(keys inv)`/`(:key inv)` reach threw + `pr-str` blew
   up. Now a proper namespaced **map-out**: `{:seon.db/kinds [{:seon.db/kind … :seon.db/attrs {attr→count}}…]
