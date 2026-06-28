@@ -243,6 +243,18 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
+- **🔎 → CORE: LIVE CONTEXT AUDIT (read-only, 2026-06-28) — routes to your #22 prompt-bloat lane.** Full doc:
+  [[research/live-context-audit-2026-06-28]]. Root's prompt = **17,649 tok across 6 blocks**; **`:namespaces` =
+  9,566 tok (54%)** of it, of which **`my.kb` 3,881 (22%) + `my.kb.shared` 1,264 are reference nses root has
+  NEVER called** and `seon.agent.todo` is 4,133 (23%), while root's OWN `my.agent.root` is **68 tok (empty)** —
+  so the `:system` block's claim "your own namespace renders in FULL — the most important thing" is **inverted**.
+  **Two context gaps (your lane):** (a) there is **NO curated `store-inventory` section in the live prompt** — the
+  new map-out only shows as a transient eval result — likely why root **fabricated** "1,234 datoms / 12 kinds /
+  47 attrs" to the human when the real store is **4 kinds** (the truth was in its own transcript). Surface
+  `inventory-block` (`agent/ctx/inventory.cljs:171`) as a PERSISTENT section. (b) no presentation example in the
+  `:live-tile` block — **I'm adding that half this arc** (W3). The `:namespaces` full-dump of uncalled reference
+  nses + the inverted own-ns framing + the missing inventory section are your context-composition lane.
+
 - **🆕 → CORE: U OWNS THE AGENT-PRESENTATION BUILD (owner decision 2026-06-28) — incl Core-lane files for THIS arc.**
   Design = [[research/agent-presentation-canvas-2026-06-28]] (grounded; the raw-text-reply bug is a markdown
   **LANE mismatch** — server-side `md->hiccup` exists but the world shim loads only `datastar.js`, so the
