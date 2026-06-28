@@ -422,6 +422,19 @@
       (str/includes? m "invalid")                    :invalid-token
       :else                                          :read)))
 
+(defn- closer-only?
+  "True iff a recovered bad span is ONLY whitespace + closing delimiters
+   (`)`/`]`/`}`). Such a span is an orphan-delimiter RECOVERY ARTIFACT: an
+   unbalanced form upstream already shed it and is itself recorded as a
+   :read failure, so re-emitting the lone closer is duplicate noise (one
+   broken block → a wall of `}`/`]` rows). Never matches a real form — a
+   form leads with `(`/`[`/`{` or a token — so dropping a closer-only span
+   can't hide a genuine failure. Runs on an already-FAILED :read span,
+   never on a valid form, so a `}` inside a good form's string literal is
+   never reached."
+  [s]
+  (boolean (re-matches #"[\s)\]}]+" s)))
+
 ;; ============================================================
 ;; Public surface
 ;; ============================================================
@@ -523,14 +536,22 @@
                 (recur nl-recovery pending out)
                 ;; Broken code — record a :read failure; recover at the
                 ;; next column-0 anchor (form OR comment).
-                (let [recovery (find-recovery-point text offset)]
-                  (recur recovery
-                         []
-                         (conj out {:kind       :read
-                                    :ok?        false
-                                    :narration  (join-narration pending)
-                                    :source     (subs text offset recovery)
-                                    :error      (:error token)
-                                    :span       [offset recovery]
-                                    :error-kind (classify-read-error
-                                                  (:error token))})))))))))))
+                (let [recovery (find-recovery-point text offset)
+                      bad-span (subs text offset recovery)]
+                  (if (closer-only? bad-span)
+                    ;; PRONG 1: a pure-closer span is recovery COLLATERAL
+                    ;; (the orphan delimiter an unbalanced form upstream
+                    ;; already shed). DROP it — the real error is the
+                    ;; bad-head :read already recorded — and carry pending
+                    ;; so a real `;;` preamble still lands on the next form.
+                    (recur recovery pending out)
+                    (recur recovery
+                           []
+                           (conj out {:kind       :read
+                                      :ok?        false
+                                      :narration  (join-narration pending)
+                                      :source     bad-span
+                                      :error      (:error token)
+                                      :span       [offset recovery]
+                                      :error-kind (classify-read-error
+                                                    (:error token))}))))))))))))

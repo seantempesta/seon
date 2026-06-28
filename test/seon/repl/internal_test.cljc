@@ -386,7 +386,9 @@
    {:in "#{1 2"           :kind :eof                 :note "unclosed set"}
    {:in "(str \"oops"     :kind :eof                 :note "unterminated string (suffix-form msg)"}
    {:in "(map #(+ % 1"    :kind :eof                 :note "unclosed anon-fn"}
-   {:in "(a))"            :kind :unmatched-delimiter :note "surplus closer"}
+   ;; trailing token keeps the span non-closer-only so it survives PRONG 1
+   ;; as a real :read (a pure `(a))` orphan is dropped — see prong1 tests).
+   {:in "(a)) oops"       :kind :unmatched-delimiter :note "surplus closer + trailing token"}
    {:in "(+ 1 3x)"        :kind :invalid-token       :note "invalid number"}
    {:in "(get m :)"       :kind :invalid-token       :note "lone colon (prefix-form msg)"}
    {:in "{:a 1 :b}"       :kind :odd-map             :note "odd map — value MISSING (unsafe to fix)"}
@@ -423,6 +425,44 @@
     (testing (str "valid reader input must not :read-fail — " (pr-str in))
       (is (not-any? #(= :read (:kind %)) (parse/parse-forms in))
           (str "mis-flagged valid input as broken: " (pr-str in))))))
+
+;; ============================================================
+;; PRONG 1 (eval-segmenter research) — a pure-closer recovery span is an
+;; orphan-delimiter artifact (the unbalanced form upstream already shed
+;; it + is itself recorded). Drop it at emit; never shred one broken
+;; block into a wall of `}`/`]` rows. Assert BEHAVIOR (kinds), not strings.
+;; ============================================================
+
+(def closer-only-cases
+  [{:in "(message/user \"hi\")\n}"   :kinds [:form] :note "trailing orphan } dropped, good form kept"}
+   {:in "(message/user \"hi\")\n]"   :kinds [:form] :note "orphan ] dropped too"}
+   {:in "(a)\n}\n}\n}"               :kinds [:form] :note "stacked orphans all dropped"}
+   {:in "(let [x 1]\n(f x)\n}"       :kinds [:read :form] :note "broken-head :read kept, trailing orphan dropped"}])
+
+(deftest prong1-closer-only-spans-dropped
+  (doseq [{:keys [in kinds note]} closer-only-cases]
+    (testing (str note " — " (pr-str in))
+      (is (= kinds (mapv :kind (parse/parse-forms in)))
+          (str "kinds: " (pr-str (mapv :kind (parse/parse-forms in))))))))
+
+(deftest prong1-never-hides-a-real-failure
+  ;; risk #1: a genuinely broken FORM (leading `(` + bad token) must STILL
+  ;; surface as a :read with non-blank source + :error.
+  (testing "real broken form still recorded"
+    (let [r (first (filter #(= :read (:kind %)) (parse/parse-forms "(+ 1 3x)")))]
+      (is (some? r))
+      (is (not (str/blank? (:source r))))
+      (is (string? (:error r)))))
+  ;; risk #2: incomplete final form (EOF mid-form) is ONE honest :read,
+  ;; NOT a dropped orphan (its span is the whole form, not pure closers).
+  (testing "EOF mid-form stays one honest :read"
+    (let [es (parse/parse-forms "(db/transact! :seon [{:a 1}")]
+      (is (= [:read] (mapv :kind es)))
+      (is (not (str/blank? (:source (first es)))))))
+  ;; risk #3: a closer INSIDE a string of a GOOD form is never stripped
+  ;; (closer-only? runs on failed spans only; this form reads clean).
+  (testing "closer inside a string literal is not stripped"
+    (is (= [:form] (mapv :kind (parse/parse-forms "(str \"}\")"))))))
 
 ;; ============================================================
 ;; Narration semantics on recovery — narration accumulated before a
