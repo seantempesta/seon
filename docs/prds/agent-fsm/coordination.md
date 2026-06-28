@@ -90,6 +90,41 @@ other lane's **_Needs_** and the owner makes it.
 
 ## Core — _Now / Needs / Interface changes_
 
+- **🟢 PHASE 5 ROUTE SCHEMA + SEED — LANDED + live-proven on acme (Handoff #3 / Interface #2 DELIVERED).**
+  New `seon.route` ns registers the `:seon.route/*` schema (data-model §4.8, exact match: `pattern :string`,
+  `method :keyword`, `name [:keyword {identity}]`, `owner :seon.db/ref`, `handler :symbol` → native
+  `:db.type/symbol`, `middleware [:vector :keyword]`, entity `:seon.route`). `boot-seed!` (client.cljs) now has a
+  4th `:core-routes` step seeding the CORRECTED set (idempotent upsert on `:seon.route/name`): **`/` · `/world` ·
+  `/world/feed` · `/agent/{id}` · `/agent/{id}/feed` (all GET) · `/agent/{id}/call` (POST)** — the `…/feed` routes
+  ARE seeded. Live-proven on acme (wire-server 7981): all 6 rows present, handler reads back as a native
+  `clojure.lang.Symbol`, and a mimicked `db->routes` projection builds a reitit router (`match-by-path
+  "/agent/xyz/call"` → `{:id "xyz"}`). Suite 653/0.
+  **→ U, the `db->routes` contract (READ before you write it):**
+  1. `:seon.route/handler` is the FQ symbol of the EXISTING pod handler the static `routes` vector wires
+     (`/`→`seon.web.serve/serve-root!`, `/world`+`/world/feed`→`datastar/handle!`,
+     `/agent/{id}`→`datastar/serve-agent-page!`, `/agent/{id}/feed`→`datastar/open-agent-feed!`,
+     `/agent/{id}/call`→`reactive.call/handle!`). All resolve via `eval/lookup-value`. `db->routes` does the same
+     node-req/node-res/path-param/hijack wrapping the static vector does today — behaviour-preserving cutover.
+  2. **`:seon.route/middleware` carries `[:seon.route/same-origin]` on `/agent/{id}/call`** — register that keyword
+     in your middleware registry → the existing `same-origin-mw`. (It's the only POST in the seed.) The keyword is
+     Core-owned/namespaced; if you'd rather a different registry key, say so under _Needs_ and I'll repoint it.
+  3. **`/`'s handler is the one most likely to change.** I seeded `seon.web.serve/serve-root!` to mirror the live
+     vector, but your roadmap deletes serve-root!'s 302→/agents and makes `/` the root agent's world. When the
+     root-world layout lands (the OTHER half of Phase 5, not this unit), `/`'s handler repoints — flag it under
+     _Needs_ or it moves into root's bootstrap. `:seon.route/owner` is OMITTED on all core routes (they're
+     core-owned, not agent-app routes; owner is optional).
+- **🟢 coord-P0 (#20) agent-create wedge — FIXED + live-proven** (`cc38a8e2`). `start-agent!`
+  re-ran `instrument-from-db!`; the 2nd pass mis-detected async (it read the 1st pass's WRAPPER
+  var) and routed Promise returns through malli's SYNC validator → wedge. Fix:
+  `instrument-from-db-once!` gates to ONE pass per process. Proven on acme — a 2nd `POST
+  /agents/new` logs `instrumentation {:already-done? true}` and the pod stays healthy (clean
+  ticks, no `invalid-output`). **⚠️ Takes effect on the NEXT BOOT only:** the running default pod
+  hot-reloaded the code but its flag is false (it booted on old code), so it is STILL vulnerable —
+  an agent-create on it (e.g. a DeepSeek drive) would wedge it (recoverable by restart). **→
+  restart / `cluster reset default` to apply the fix to the default pod BEFORE the next live drive.**
+  (The 2 smaller P0-doc smells — `:seon.eval/agent`=nil on eval rows, `:seon.fn/name` lookup-ref
+  w/o `:db/unique` — are queued as Core tasks, lower priority.) Also landed: **Phase 6a
+  hierarchical `my.todo`** (`52c31dd8`, suite 649/0) + **coord-#12 error-tile seam** (below).
 - **Now:** **PHASES 1 + 2-keystone + 2e + reitit DONE.** `690ae2b8` still holds (slot/render
   consume the `{:seon.render/hiccup …}` envelope via `unwrap-response`). **coord-#12 ERROR-TILE
   SEAM landed (Design B-variant — implements your `error-tile-unification` doc EXCEPT one point).**

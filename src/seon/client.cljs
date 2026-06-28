@@ -83,6 +83,10 @@
     [seon.render.default]
     ;; Live-tile render namespace — required so the build includes it.
     [seon.render.live-tile]
+    ;; Routing-as-data — the `:seon.route/*` schema + the seeded core route
+    ;; set; boot-seed! transacts (route/core-routes-tx). Required here so the
+    ;; schema register! calls run and the build includes the seed builder.
+    [seon.route :as route]
     ;; Iteration surface — owns the canonical `!compile-state`
     ;; defonce (in `seon.repl`). start-agent! reads through
     ;; `seon.repl/ensure-bootstrap!` rather than holding a second
@@ -2030,7 +2034,7 @@
    identity with no seed step.
 
    Steps, in boot order, under ONE `{:seon.db/origin :core-seed}`
-   tx-context — three transacts (each its own tx so the core prefix
+   tx-context — four transacts (each its own tx so the core prefix
    stays a stable sequence of tx-times):
           :entity-schemas  — `schema/all-entity-schemas-tx-data`.
           :core-seed  — `seed-core!` (user entity +
@@ -2039,6 +2043,10 @@
                              `:seon.fn` / `:seon.schema` / `:seon.test`
                              rows, conn-deduped so an Nth boot on the
                              same store re-seeds nothing).
+          :core-routes — `route/core-routes-tx` (the `:seon.route/*`
+                             datoms the UI lane projects into reitit;
+                             identity upsert on `:seon.route/name`,
+                             idempotent on an Nth boot).
 
    Pins the root `db/*conn*` to `conn` for the duration, restoring in
    `finally`. ENVELOPE CONTRACT
@@ -2079,7 +2087,15 @@
               (check! :core-index
                       (await (db/transact!
                                {:seon.db/conn conn
-                                :seon.db/tx-data index-tx})))))))
+                                :seon.db/tx-data index-tx})))
+              ;; Routing-as-data: the seeded core route set
+              ;; (`:seon.route/*` datoms the UI lane's `db->routes`
+              ;; projects into reitit). Identity upsert on
+              ;; `:seon.route/name` — idempotent on an Nth boot.
+              (check! :core-routes
+                      (await (db/transact!
+                               {:seon.db/conn conn
+                                :seon.db/tx-data (route/core-routes-tx)})))))))
       {::seeded? true}
       (finally
         (set! db/*conn* prev-conn)))))

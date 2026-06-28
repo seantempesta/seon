@@ -293,22 +293,26 @@ don't, not special core machinery. Depends on Phase 4 (it runs the child's boots
 - **UI-root == orchestrator-root.** ONE entity. The `/`-world is DERIVED from root's
   system-scoped blocks; the "start an agent" affordance on `/` is a UI surface over
   root's `start!` through `/call`. No second supervisor/dashboard entity.
-- **ADD the `seon.route` ns + `:seon.route/*` schema** (keyword-ns = code-ns rule),
-  needed here to seed root's `/` route and by Lane U's reitit adoption. Register
-  `:seon.route/pattern :string`, `:seon.route/method :keyword`, `:seon.route/name
-  [:keyword {:seon.db/identity true}]`, `:seon.route/owner :seon.db/ref` (reference the
+- **🟢 DONE (route schema + seed half) — ADD the `seon.route` ns + `:seon.route/*` schema**
+  (keyword-ns = code-ns rule), needed here to seed root's `/` route and by Lane U's reitit
+  adoption. Registered (data-model §4.8, exact): `:seon.route/pattern :string`,
+  `:seon.route/method :keyword`, `:seon.route/name
+  [:keyword {:seon.db/identity true}]`, `:seon.route/owner :seon.db/ref` (references the
   canonical ref shape), `:seon.route/handler :symbol` (dedicated native
   `:db.type/symbol`, NOT a reuse of `:seon.render/html`), `:seon.route/middleware
-  {:optional true} [:vector :keyword]`, and the `:seon.route` entity `:map`. Seed the
-  **CORRECTED** core route set — the UI lane (owner-approved, commit `b11da421`)
-  pivoted to the **hyperlith model** (view = f(db-as-of t) datastar morph over gzip
-  SSE, replacing packetstar / `!last-tree` / since-t), changing Handoff #3: seed ONLY
-  `/` (owned by root, the root world-layout handler) + `/agent/{id}` — **NO
-  `/agent/{id}/feed`** (the GET shim and the live stream ride the SAME path; datastar
-  opens the stream from the page); `/call` is **`/agent/{id}/call`** with the fn riding
-  as a route-data **descriptor** — do NOT seed per-ns / per-fn routes; namespaces are
-  NOT a routing level; hierarchical reitit with route-data inheritance; `db->routes`
-  stays UI's. Schema detail: [[data-model]] §4.8.
+  {:optional true} [:vector :keyword]`, and the `:seon.route` entity `:map`. `boot-seed!`
+  seeds the **CORRECTED** core route set (idempotent upsert on `:seon.route/name`). The
+  route SET was corrected (2026-06-27, coordination Interface #2 — the earlier "NO
+  `/agent/{id}/feed`, same path" was WRONG vs the live, working code): the shim page and
+  its long-lived SSE stream are SEPARATE GET paths (datastar-clojure's own `tiny_gzip.clj`
+  idiom), so seed **`/` · `/world` · `/world/feed` · `/agent/{id}` · `/agent/{id}/feed`
+  (all GET) · `/agent/{id}/call` (POST)** — the `…/feed` routes ARE seeded or
+  `db->routes` would 404 the live stream after the static-vector cutover. The action door
+  is `/agent/{id}/call` with the fn riding as a route-data **descriptor** — do NOT seed
+  per-ns / per-fn routes; namespaces are NOT a routing level; hierarchical reitit with
+  route-data inheritance; `db->routes` stays UI's. Schema detail: [[data-model]] §4.8.
+  (The `start!`/`:seon.agent/parent`/root-base-case half of Phase 5 below is NOT yet
+  done.)
 - KEEP unchanged: the agent record core attrs (`:seon.agent/id|run|terminated-at|
   default-turn-limit|default-deadline-ms|schedules`).
 
