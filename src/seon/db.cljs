@@ -58,6 +58,7 @@
     [clojure.string :as str]
     [cljs.reader :as reader]
     [datahike.api :as d]
+    [datahike.constants :as dconst]
     [datahike.db.interface :as dbi]
     [datahike.impl.entity :as dentity]
     [seon.db.internal :as internal]
@@ -1027,6 +1028,26 @@
                   [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]}
   ([t]    (since @(internal/resolve-conn *conn*) t))
   ([db t] (d/since db t)))
+
+;; The two ENDS of a time-travel domain (the `as-of`/`since` `t` range).
+;; `basis-t` is the latest tx reflected in a db value — the \"now\" end of a
+;; scrubber. `origin-t` is datahike's origin tx (`tx0`) — the floor; the first
+;; user tx is `origin-t`+1, so an `as-of` below it is the empty/pre-seed world.
+;; Both are valid [[time-point]]s usable directly with `as-of`/`since`.
+
+(def ^{:doc "Datahike's origin tx-id (`tx0`) — the floor of any time-travel
+   domain. `(as-of … origin-t)` is the empty world before the first user tx."}
+  origin-t dconst/tx0)
+
+(defn basis-t
+  "The basis tx-id of a db value — the latest tx it reflects, the \"now\" end
+   of a time-travel domain. Omit db ⇒ your `*conn*`'s current basis. A
+   [[time-point]] usable directly with `as-of`/`since`."
+  {:malli/schema [:function
+                  [:=> [:cat] ::time-point]
+                  [:=> [:catn [::db ::db-val]] ::time-point]]}
+  ([]   (basis-t @(internal/resolve-conn *conn*)))
+  ([db] (dbi/-max-tx db)))
 
 ;; ---------------------------------------------------------------------------
 ;; Listeners

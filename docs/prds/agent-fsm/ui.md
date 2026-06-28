@@ -206,10 +206,20 @@ in `seon.web.datastar`.
   Transient client state lives in datastar **signals** only, never DOM attrs. Time
   travel is `view = f(db-as-of t)` over the bitemporal DB — a different `t`, the
   same render. Reconnect needs no UI-side `since-t` replay: the first paint fires
-  immediately on open and repaints the current world. **Status:** reconnect-as-paint
-  is LIVE; the time-travel half is DESIGNED, not yet wired — the feed view-fns
-  currently close over the CURRENT db (`@db/*conn*`) with no `t` thread and no
-  time-slider signal. Wiring it = a slider signal → `db/as-of` in the view-fn.
+  immediately on open and repaints the current world. **Status: LIVE** (`/agent/{id}`).
+  `open-agent-feed!` reads an optional `?t=<tx-id>` and binds the view-fn to
+  `world-layout (db/as-of @*conn* t)` — a PAST snapshot that is naturally FROZEN
+  (re-rendering `db-as-of-t` on a later tx yields identical bytes, so the broadcast
+  harmlessly re-pushes the same `#world`); no `?t` ⇒ the current auto-morphing feed,
+  unchanged. The `/agent` shim's time-travel bar (a SIBLING of `#world`, outside the
+  morph) owns the feed via ONE `data-effect` `@get` so datastar's per-attribute
+  auto-cancellation aborts the prior stream → exactly one stream targets `#world`
+  (the shim omits `data-init` on `#world` for that reason). Signals: `$live` /
+  `$t` (scrub position) / `$ct` (committed as-of tx, set on slider release). Domain
+  is `[db/origin-t .. db/basis-t]` (tx-ids). Proven server-side: pre-creation `t` →
+  empty world, mid `t` → frozen partial world that holds under tx pressure, no-`t` →
+  live auto-morph. The timeline UX (human timestamps, ticks, diff) is the owner's to
+  refine.
 - **The hard invariant: no agent code ever touches an SSE connection.** agent →
   datom → tx-listener → derived render → morph, one way; actions reverse it (a
   browser POST → the owning agent's sandbox → result datoms → tx-listener →

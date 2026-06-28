@@ -220,12 +220,15 @@
    The shim itself: load datastar.js, open the long-lived feed via
    `data-init`, and present an empty `<main id=\"world\">` for the feed's
    first morph to fill. `title-suffix` is the brand-name suffix (\"world\",
-   \"agent <id>\"); `feed-url` the data-init SSE URL; `extra-body` is a raw
-   HTML string spliced in as a SIBLING of `<main id=\"world\">` (a human
-   input — chat / new-agent — that must live OUTSIDE the morphed `#world` so
-   the feed's whole-element morph never clobbers its focus/value). Raw string
-   (not hiccup) so the data-init single quotes stay literal and the doctype
-   leads."
+   \"agent <id>\"); `feed-url` the data-init SSE URL — or `nil` to OMIT
+   data-init, when the page's `extra-body` opens the feed itself (the
+   /agent/{id} time-travel bar owns its feed via a single `data-effect` so it
+   can re-open at a past `t`; a data-init here would be a second, competing
+   stream). `extra-body` is a raw HTML string spliced in as a SIBLING of
+   `<main id=\"world\">` (a human input — chat / new-agent / time-travel — that
+   must live OUTSIDE the morphed `#world` so the feed's whole-element morph
+   never clobbers its focus/value). Raw string (not hiccup) so the data-init
+   single quotes stay literal and the doctype leads."
   [title-suffix body-class feed-url extra-body]
   (let [b (brand/info)]
     (str "<!doctype html>\n"
@@ -244,8 +247,11 @@
          ;; cheap, and reopen = a fresh full `view=f(db)` repaint (no since-t
          ;; replay needed in this model). Both verified-supported in our shipped
          ;; datastar.js RC.7.
-         "<main id=\"world\" data-init=\"@get('" feed-url
-         "', {retryMaxCount: Infinity, openWhenHidden: false})\">loading…</main>\n"
+         "<main id=\"world\""
+         (when feed-url
+           (str " data-init=\"@get('" feed-url
+                "', {retryMaxCount: Infinity, openWhenHidden: false})\""))
+         ">loading…</main>\n"
          extra-body
          "</body></html>")))
 
@@ -297,6 +303,67 @@
        [:button {:type  "submit"
                  :class "bg-base-800 hover:bg-base-700 text-signal border border-base-700 px-3 py-1 rounded text-xs font-mono"}
         "send"]])))
+
+(defn- time-travel-bar-html
+  "#18 — historical time-travel on the world feed for `/agent/{id}`, as a raw
+   HTML string. The live feed is `view = f(db)`; time-travel is the SAME feed
+   rendered against `db-as-of-t` — a PAST snapshot that is naturally FROZEN
+   (re-rendering `db-as-of-t` on a later tx yields identical bytes).
+
+   A FIXED bar (a SIBLING of `#world`, OUTSIDE the morph so a whole-`#world`
+   morph never clobbers the slider position/focus) OWNS the agent feed via ONE
+   `data-effect` `@get`: datastar re-runs the effect when its referenced
+   signals change AND auto-cancels the prior `@get` issued from the SAME
+   attribute, so exactly ONE gzip stream targets `#world` at any time. (This is
+   why the /agent shim omits `data-init` on `#world` — the effect is the SOLE
+   opener; a data-init would be a second, competing stream that clobbers the
+   frozen snapshot on the next live tx.)
+
+   Signals: `$live` (true ⇒ the current auto-morphing feed, UNCHANGED), `$t`
+   (the slider's live scrub position, for the readout), `$ct` (the COMMITTED
+   tx-id the feed actually opens at — set on slider release so a drag doesn't
+   open a stream per intermediate tick). Live ⇒ `@get('…/feed')`; scrubbing
+   commits `$ct` + flips `$live` false ⇒ `@get('…/feed?t='+$ct)`. The domain is
+   `[origin-t .. basis-t]` (datahike tx-ids; scrub to the floor = the empty
+   pre-seed world); 'now / live' resets the slider to the basis + re-opens the
+   live feed. `id` is `safe-id?`-validated, injection-safe in `@get('…')`.
+
+   MINIMAL by intent — a raw tx-id slider + a live/as-of readout. The owner
+   refines the timeline UX (human-readable timestamps, tick marks, a diff)."
+  [id basis floor]
+  (let [feed (str "/agent/" id "/feed")
+        opts "{retryMaxCount: Infinity, openWhenHidden: false}"]
+    (html/->string
+      (list
+        ;; Spacer — reserves scroll room above the chat bar (which sits at
+        ;; bottom:0 and reserves its own 3.25rem) so neither fixed bar hides a
+        ;; tile. Inline height (no Tailwind height class is in the built vocab).
+        [:div {:style "height:3.25rem"}]
+        [:div {:id "world-time"
+               ;; The SOLE feed opener. Re-runs on $live/$ct change; each @get
+               ;; auto-cancels the prior from THIS attribute → one stream.
+               :data-effect (str "$live ? @get('" feed "', " opts ")"
+                                 " : @get('" feed "?t=' + $ct, " opts ")")
+               :data-signals (str "{t: " basis ", ct: " basis ", live: true}")
+               ;; bottom:3.25rem (inline) stacks this bar above the chat bar;
+               ;; fixed/left-0/right-0/z-10 are in the built vocabulary.
+               :style "bottom:3.25rem"
+               :class "fixed left-0 right-0 z-10 flex items-center gap-2 border-t border-base-800 bg-base-900 px-3 py-2"}
+         [:span {:data-text  "$live ? '● live' : '⏸ as-of t=' + $ct"
+                 :data-class "{'text-signal': $live, 'text-warning': !$live}"
+                 :class      "text-xs font-mono shrink-0 w-32"}]
+         [:input {:type      "range"
+                  :min       floor
+                  :max       basis
+                  :data-bind "t"
+                  ;; Commit on release (not on every input tick): set the as-of
+                  ;; value + leave live mode. The effect re-opens at $ct.
+                  (keyword "data-on:change") "$ct = $t; $live = false"
+                  :class     "flex-1"}]
+         [:button {:type  "button"
+                   (keyword "data-on:click") (str "$live = true; $t = " basis "; $ct = " basis)
+                   :class "bg-base-800 hover:bg-base-700 text-signal border border-base-700 px-3 py-1 rounded text-xs font-mono shrink-0"}
+          "now / live"]]))))
 
 (defn- new-agent-bar-html
   "P1c — the `/world` roster's new-agent affordance, as a raw HTML string.
@@ -389,14 +456,37 @@
 
 (defn- safe-id? [id] (boolean (and id (re-matches safe-id-re id))))
 
+(defn- parse-t
+  "Parse the optional `?t=<tx-id>` from a node req URL into a datahike
+   time-point (a tx-id number). Returns nil for an absent/blank/non-numeric
+   `t` → the live feed. Never throws (a bad `t` falls back to live)."
+  [^js req]
+  (try
+    (let [url  (or (.-url ^js req) "")
+          qidx (str/index-of url "?")]
+      (when qidx
+        (let [t (.get (js/URLSearchParams. (subs url (inc qidx))) "t")]
+          (when (and t (not= "" t))
+            (let [n (js/parseInt t 10)]
+              (when (js/Number.isFinite n) n))))))
+    (catch :default _ nil)))
+
 (defn- agent-page-html
   "The per-agent (/agent/{id}) world shim page (brand-aware head — see
-   [[shim-html]]). `id` is pre-validated by `safe-id?`."
+   [[shim-html]]). `id` is pre-validated by `safe-id?`.
+
+   Omits `data-init` on `#world` (passes `nil` feed-url): the time-travel bar
+   owns the feed via its single `data-effect` (see [[time-travel-bar-html]]) so
+   it can re-open at a past `t`. The slider's `[floor .. basis]` domain is read
+   from the live db here (guarded — a missing conn degenerates to the origin,
+   the page still serves + the effect still opens the live feed)."
   [id]
-  (shim-html (str "agent " id)
-             "bg-base-950 text-text-200 font-mono p-3"
-             (str "/agent/" id "/feed")
-             (chat-form-html id)))
+  (let [basis (try (db/basis-t @db/*conn*) (catch :default _ db/origin-t))]
+    (shim-html (str "agent " id)
+               "bg-base-950 text-text-200 font-mono p-3"
+               nil
+               (str (chat-form-html id)
+                    (time-travel-bar-html id basis db/origin-t)))))
 
 (defn serve-agent-page!
   "Serve the per-agent world shim page for agent `id`. Public — the router
@@ -410,13 +500,24 @@
         (.end res "invalid agent id"))))
 
 (defn open-agent-feed!
-  "Open the per-agent world gzip feed bound to `#(world/world-layout @db id)`.
-   Public — the router calls it with the `{id}` path-param. Lazily installs
-   the tx-listener (idempotent). Invalid ids 404."
+  "Open the per-agent world gzip feed. Public — the router calls it with the
+   `{id}` path-param. Lazily installs the tx-listener (idempotent). Invalid ids
+   404.
+
+   #18 — historical time-travel: an optional `?t=<tx-id>` binds the view to
+   `db-as-of-t` instead of the live db. With `t`, the feed is the SAME
+   `world-layout` rendered against `(db/as-of @*conn* t)` — a PAST snapshot that
+   is naturally FROZEN (re-rendering it on a later tx yields identical bytes, so
+   the broadcast harmlessly re-pushes the same #world). With NO `t` it is the
+   current auto-morphing feed, UNCHANGED. A bad/absent `t` falls back to live."
   [^js req ^js res id]
   (ensure-installed!)
   (if (safe-id? id)
-    (open-feed! req res #(world/world-layout @db/*conn* id))
+    (let [t (parse-t req)]
+      (open-feed! req res
+                  (if t
+                    #(world/world-layout (db/as-of @db/*conn* t) id)
+                    #(world/world-layout @db/*conn* id))))
     (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"})
         (.end res "invalid agent id"))))
 
