@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: architectural
 milestone: M1
 tags: [issue, flow]
@@ -27,3 +27,7 @@ When namespace state changes in ctx, atom watches fire persistence and SSE push 
 
 - [[components/context]]
 - [[components/flow-topology]]
+
+## Superseded (2026-06-28 audit)
+
+ctx.clj watch-to-flow wiring is JVM; the active pod is core.async-free (native ^:async).

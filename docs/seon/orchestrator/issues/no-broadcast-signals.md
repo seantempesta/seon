@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: architectural
 milestone: M1
 tags: [issue, flow]
@@ -27,3 +27,7 @@ When a namespace's state changes, only atom watches (internal to ctx) know about
 
 - [[components/context]]
 - [[components/flow-topology]]
+
+## Superseded (2026-06-28 audit)
+
+Described JVM ctx atom-watches + flow signals; superseded by the DB-as-bus reactive-context model.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: blocking
 milestone: M3
 tags: [issue, schema]
@@ -27,3 +27,7 @@ Many public functions across the codebase lack `:malli/schema` metadata and don'
 
 - [[components/code-graph]]
 - [[components/renderer]]
+
+## Superseded (2026-06-28 audit)
+
+Hotspots (health.*, trading.*) are dead domains; always-on instrument-from-db! instruments every schema'd fn in the active pod.

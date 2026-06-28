@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 tags: [issue, schema]
 ---
 # Graph scanner doesn't handle :as-alias for :: keyword expansion
@@ -20,3 +20,7 @@ Any namespace using `:as-alias` would have its `::alias/keyword` forms misresolv
 ## Severity
 
 cleanup
+
+## Superseded (2026-06-28 audit)
+
+graph/scanner.clj is JVM-paused; the active pod resolves `::` aliases via the client.cljs analyzer.

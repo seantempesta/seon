@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: architectural
 milestone: M4
 tags: [issue, web, architecture]
@@ -33,3 +33,7 @@ Having two live systems with different dispatch (specificity vs multimethods) me
 
 - [[components/renderer]]
 - [[components/namespace-lifecycle]]
+
+## Superseded (2026-06-28 audit)
+
+render.clj/ns/view.clj/ui/viewer.clj are all JVM-paused; the active pod has ONE render.cljs.

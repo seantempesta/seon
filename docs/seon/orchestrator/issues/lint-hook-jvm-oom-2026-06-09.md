@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 tags: [issue]
 ---
 
@@ -145,3 +145,7 @@ the reactive-agent topology rename. Harmless for the orchestrator port (the
 code falls back to 7888), but `list_sessions` / `create_session` are broken and
 isolated agent REPL sessions cannot be created via the MCP. Out of scope for
 this OOM fix; flagging per the report-smells rule.
+
+## Superseded (2026-06-28 audit)
+
+Described the dev JVM -Xmx2g + in-process clj-kondo; the active hook path is the pod. Revisit if the JVM track resumes.

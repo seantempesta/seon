@@ -3,7 +3,7 @@ type: issue
 status: open
 severity: blocking
 milestone: M3
-tags: [issue, schema]
+tags: [issue, schema, jvm-track, paused]
 ---
 # Graph Missing Generalized Discovery API
 
@@ -28,3 +28,5 @@ What is missing is the generalized discovery API: `gq/functions-with-input-key` 
 ## Related
 
 - [[components/code-graph]]
+
+## Status (2026-06-28 audit): valid but JVM-track is paused — defer until that track resumes.

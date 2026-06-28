@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: architectural
 milestone: M6
 tags: [issue, architecture]
@@ -28,3 +28,7 @@ Namespace behavior is split between harness and ctx with no unified model. The h
 - [[components/context]]
 - [[components/harness]]
 - [[components/namespace-lifecycle]]
+
+## Superseded (2026-06-28 audit)
+
+Same harness+ctx split is JVM-only; the active pod has the unified seon.agent.ctx.

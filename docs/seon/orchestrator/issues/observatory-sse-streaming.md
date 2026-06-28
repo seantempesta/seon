@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 tags: [issue, web, agent]
 ---
 # Observatory: upgrade from polling to true SSE append streaming
@@ -36,3 +36,7 @@ friction
 ## Milestone
 
 [[vision/m5-observable-system]]
+
+## Superseded (2026-06-28 audit)
+
+Refs the gone web/agents.clj; the active observatory is the /world Datastar SSE stream.

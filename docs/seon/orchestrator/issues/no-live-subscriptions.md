@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: architectural
 milestone: M6
 tags: [issue, flow]
@@ -27,3 +27,7 @@ Namespaces can query the code graph on demand (pull), but there is no way to say
 
 - [[components/code-graph]]
 - [[components/flow-topology]]
+
+## Superseded (2026-06-28 audit)
+
+graph/query.clj pull-only is JVM-paused; the active pod uses datahike listen!/triggers + derive-at-render.

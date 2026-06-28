@@ -3,7 +3,7 @@ type: issue
 status: open
 severity: friction
 milestone: M3
-tags: [issue, schema, architecture]
+tags: [issue, schema, architecture, jvm-track, paused]
 ---
 # Duplication: clj-kondo Analysis Wrapped in 3 Namespaces
 
@@ -27,3 +27,5 @@ clj-kondo analysis is wrapped independently in 3 namespaces. Each has its own in
 ## Related
 
 - [[components/code-graph]]
+
+## Status (2026-06-28 audit): valid but JVM-track is paused — defer until that track resumes.

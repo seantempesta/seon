@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, architecture]
+tags: [issue, architecture, jvm-track, paused]
 ---
 # Duplication: parse-form-body in Two Places
 
@@ -24,3 +24,5 @@ tags: [issue, architecture]
 ## Related
 
 - [[components/web-layer]]
+
+## Status (2026-06-28 audit): valid but JVM-track is paused — defer until that track resumes.

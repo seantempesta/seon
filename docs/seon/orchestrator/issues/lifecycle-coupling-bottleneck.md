@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 milestone: M4
 tags: [issue, flow, architecture]
@@ -26,3 +26,7 @@ tags: [issue, flow, architecture]
 ## Related
 
 - [[components/namespace-lifecycle]]
+
+## Superseded (2026-06-28 audit)
+
+ns/lifecycle.clj is JVM-paused; there is no equivalent bottleneck in the active pod.

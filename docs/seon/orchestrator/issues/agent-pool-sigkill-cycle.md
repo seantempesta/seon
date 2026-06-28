@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: superseded
 tags: [issue, agent, flow]
 ---
 # Agent Pool Health-Check SIGKILLs Idle JVMs
@@ -38,3 +38,7 @@ The refactor is the natural place to also fix the SIGKILL-cycle root cause: inve
 - `src/seon/flow/pool.clj` — current implementation (~930 LOC)
 - `docs/prds/datahike-migration/phase-3-harness-migration.md` §"State migration"
 - `src/seon/session.clj` — Phase 3 demo's pool-bypass path
+
+## Superseded (2026-06-28 audit)
+
+flow/pool.clj is a disabled JVM nREPL pool; active-pod agents are CLJS runtimes, not nREPL sessions.

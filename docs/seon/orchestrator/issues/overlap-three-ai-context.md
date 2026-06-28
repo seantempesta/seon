@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 milestone: M3
 tags: [issue, architecture]
@@ -34,3 +34,7 @@ Consumers must know which variant to use, and improvements to context building m
 
 - [[components/code-graph]]
 - [[components/agent-system]]
+
+## Superseded (2026-06-28 audit)
+
+render/code.clj/repl/context.clj/graph/context.clj are JVM-paused; the active pod has a single render-context.

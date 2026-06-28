@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: architectural
 milestone: M2
 tags: [issue, flow]
@@ -35,3 +35,7 @@ When one updates, the others don't know. Any component that needs to know "what 
 - [[components/context]]
 - [[components/harness]]
 - [[components/flow-topology]]
+
+## Superseded (2026-06-28 audit)
+
+ctx atom + flow/harness + flow/topology are all JVM; the active pod is single-source-of-truth on the DB.

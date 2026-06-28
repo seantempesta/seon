@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 tags: [issue, agent]
 ---
 # No distinction between agent "thinking" and "stuck"
@@ -35,3 +35,7 @@ friction
 ## Origin
 
 Surfaced from archive review of `docs/archive/agent-isolation/`
+
+## Superseded (2026-06-28 audit)
+
+Refs missing ai/claude.clj + web/agents.clj; the active pod derives stuck-detection from run-FSM derived-state.

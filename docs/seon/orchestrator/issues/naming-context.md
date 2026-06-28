@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, architecture]
 ---
@@ -32,3 +32,7 @@ tags: [issue, architecture]
 
 - [[components/context]]
 - [[components/code-graph]]
+
+## Superseded (2026-06-28 audit)
+
+The four JVM .clj context files are paused; the active producer is seon.agent.ctx.cljs (Phase-1 rename landed).

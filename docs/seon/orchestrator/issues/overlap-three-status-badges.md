@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: cleanup
 milestone: M4
 tags: [issue, web, architecture]
@@ -31,3 +31,7 @@ The same visual element (status badge) is implemented three times with slightly 
 ## Related
 
 - [[components/web-layer]]
+
+## Superseded (2026-06-28 audit)
+
+web/agents.clj is gone and html.clj/components.clj are JVM-paused; active badges live in seon.ui.*.

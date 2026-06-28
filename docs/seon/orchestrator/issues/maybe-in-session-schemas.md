@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-tags: [issue, schema]
+tags: [issue, schema, jvm-track, paused]
 ---
 # [:maybe] Convention Violation in session.clj
 
@@ -30,3 +30,5 @@ cleanup
 ## Milestone
 
 [[vision/m3-convention-uniformity]]
+
+## Status (2026-06-28 audit): valid but JVM-track is paused — defer until that track resumes.

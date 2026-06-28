@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 tags: [issue, schema]
 ---
 # 10 keyword namespace prefixes have no backing code namespace
@@ -43,3 +43,7 @@ Two options:
 ## Severity
 
 design
+
+## Superseded (2026-06-28 audit)
+
+Superseded by code-as-data/no-kinds: seon.fn/seon.ns/seon.spec entity prefixes are legitimate in the active pod.

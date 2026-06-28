@@ -3,7 +3,7 @@ type: issue
 status: open
 severity: cleanup
 milestone: M4
-tags: [issue, web, architecture]
+tags: [issue, web, architecture, jvm-track, paused]
 ---
 # Deprecated: web/sse.clj send! Still Has Callers
 
@@ -27,3 +27,5 @@ Callers of `sse/send!` have already been migrated — no production code in `src
 ## Related
 
 - [[components/web-layer]]
+
+## Status (2026-06-28 audit): valid but JVM-track is paused — defer until that track resumes.

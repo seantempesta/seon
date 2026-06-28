@@ -3,7 +3,7 @@ type: issue
 status: open
 severity: cleanup
 milestone: M4
-tags: [issue, web, architecture]
+tags: [issue, web, architecture, jvm-track, paused]
 ---
 # Dead Code: web/namespace.clj and ui/viewer.clj
 
@@ -25,3 +25,5 @@ tags: [issue, web, architecture]
 ## Related
 
 - [[components/namespace-lifecycle]]
+
+## Status (2026-06-28 audit): valid but JVM-track is paused — defer until that track resumes.

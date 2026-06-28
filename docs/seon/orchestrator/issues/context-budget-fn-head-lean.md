@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: superseded
 tags: [issue, agent, flow]
 ---
 
@@ -127,3 +127,7 @@ agent id from `logs/pod.log`), eval against the live pod:
 - The new `:inventory` context section (cheap data-discovery surface,
   priority 97) landed in `a86c139` and renders fine (~250 tok on a fresh
   reset).
+
+## Superseded (2026-06-28 audit)
+
+All refs are to ctx.cljs (now agent/ctx/namespaces.cljs); reworked by the lean-context change.

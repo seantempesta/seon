@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: architectural
 milestone: M3
 tags: [issue, web, schema]
@@ -25,3 +25,7 @@ tags: [issue, web, schema]
 ## Related
 
 - [[components/renderer]]
+
+## Superseded (2026-06-28 audit)
+
+`:any` lives in the paused JVM ns/view.clj; the active renderer is render.cljs.

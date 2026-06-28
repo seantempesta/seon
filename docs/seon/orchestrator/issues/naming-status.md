@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 tags: [issue, architecture]
 ---
@@ -32,3 +32,7 @@ All use the bare word "status," making code and data ambiguous.
 
 - [[components/flow-topology]]
 - [[components/system-lifecycle]]
+
+## Superseded (2026-06-28 audit)
+
+health.clj/runtime.clj/flow/topology.clj are all JVM-paused.

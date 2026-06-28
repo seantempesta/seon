@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: architectural
 milestone: M1
 tags: [issue, architecture]
@@ -26,3 +26,7 @@ Three pairs of namespaces depend on each other and use `requiring-resolve` to av
 ## Related
 
 - [[components/code-graph]]
+
+## Superseded (2026-06-28 audit)
+
+requiring-resolve across ~13 .clj files is entirely JVM-paused.

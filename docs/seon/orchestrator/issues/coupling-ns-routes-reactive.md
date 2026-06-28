@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: friction
 milestone: M4
 tags: [issue, architecture]
@@ -26,3 +26,7 @@ Namespace views are tightly coupled to the reactive system implementation rather
 
 - [[components/namespace-lifecycle]]
 - [[components/web-layer]]
+
+## Superseded (2026-06-28 audit)
+
+ns/routes.clj's web.reactive.* coupling is JVM-paused.

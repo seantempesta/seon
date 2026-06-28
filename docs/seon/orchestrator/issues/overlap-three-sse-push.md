@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: architectural
 milestone: M4
 tags: [issue, web, architecture]
@@ -50,3 +50,7 @@ Buffer choice per connection type: `sliding-buffer 1` for browsers (latest state
 - [[components/context]]
 - [[components/flow-topology]]
 - [[prds/unified-namespace-flow/design]]
+
+## Superseded (2026-06-28 audit)
+
+ctx.clj/web/sse are JVM-paused; the active pod is a single web/datastar.cljs morph.

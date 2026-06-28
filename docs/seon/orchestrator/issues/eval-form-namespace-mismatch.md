@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 tags: [issue, agent]
 ---
 # eval-form! doesn't set namespace before nREPL eval
@@ -28,3 +28,7 @@ Prepend `(in-ns 'the-namespace)` before every eval, or at minimum assert the ses
 ## Severity
 
 friction
+
+## Superseded (2026-06-28 audit)
+
+Refs repl.clj + flow/pool nREPL + datalevin (scrubbed); the active pod uses self-host cljs.js, not this path.

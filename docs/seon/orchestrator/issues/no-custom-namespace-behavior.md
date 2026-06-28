@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 severity: architectural
 milestone: M1
 tags: [issue, architecture]
@@ -30,3 +30,7 @@ All namespaces get the same ctx atom + harness proxy. A namespace that needs cus
 - [[components/context]]
 - [[components/harness]]
 - [[components/namespace-lifecycle]]
+
+## Superseded (2026-06-28 audit)
+
+Premised on per-ns ctx-atom + harness (JVM); the active pod uses the block/role model.

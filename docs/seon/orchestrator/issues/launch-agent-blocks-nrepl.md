@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: superseded
 tags: [issue, agent]
 ---
 # launch-agent!! blocks nREPL thread on MCP abort
@@ -29,3 +29,7 @@ friction
 ## Origin
 
 Surfaced from archive review of `docs/archive/agent-isolation/`
+
+## Superseded (2026-06-28 audit)
+
+ai/claude.clj launch-agent!! nREPL blocking is JVM-paused; the active pod has no nREPL agent launch.
