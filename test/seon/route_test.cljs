@@ -15,12 +15,11 @@
     [seon.route :as route]))
 
 (def ^:private expected
-  "name → [pattern method] — the authoritative seeded core route set
-   (coordination Interface #2): each world is TWO GET routes (the shim page +
-   its separate `…/feed` SSE stream), plus the one POST action door."
+  "name → [pattern method] — the authoritative seeded core route set. `root = /`
+   (root-os-vision): `/world` + `/world/feed` are RETIRED; `/` IS root's world
+   (the dashboard). So the seed is `/` + the per-agent page + its separate
+   `…/feed` SSE stream + the one POST action door."
   {:seon.route/root       ["/" :get]
-   :seon.route/world      ["/world" :get]
-   :seon.route/world-feed ["/world/feed" :get]
    :seon.route/agent      ["/agent/{id}" :get]
    :seon.route/agent-feed ["/agent/{id}/feed" :get]
    :seon.route/agent-call ["/agent/{id}/call" :post]})
@@ -29,14 +28,15 @@
   (let [rows  (route/core-routes-tx)
         by-nm (into {} (map (juxt :seon.route/name identity)) rows)]
     (is (= (set (keys expected)) (set (keys by-nm)))
-        "exactly the six corrected core routes, no more, no fewer")
+        "exactly the corrected core routes (post-/world-retirement), no more, no fewer")
     (doseq [[nm [pattern method]] expected]
       (testing (str nm)
         (let [r (by-nm nm)]
           (is (= pattern (:seon.route/pattern r)))
           (is (= method (:seon.route/method r))))))
-    (testing "the /feed routes are SEPARATE GET paths (dropping them 404s the live stream)"
-      (is (contains? by-nm :seon.route/world-feed))
+    (testing "/world is RETIRED (root = /); the agent /feed stays a SEPARATE GET path"
+      (is (not (contains? by-nm :seon.route/world)))
+      (is (not (contains? by-nm :seon.route/world-feed)))
       (is (contains? by-nm :seon.route/agent-feed)))
     (testing "the one action door is the per-agent POST /call (no per-ns/per-fn routes)"
       (is (= [:seon.route/agent-call]
@@ -99,7 +99,7 @@
                                                     [?e :seon.route/name :seon.route/agent]
                                                     [?e :seon.route/handler ?h]]
                                                   db))]
-                           (is (= 6 (count names)) "six entities after a double seed — no duplicates")
+                           (is (= 4 (count names)) "four entities after a double seed — no duplicates")
                            (is (= (set (keys expected)) (set names)))
                            (is (symbol? h) "handler reads back as a native symbol")
                            (is (= 'seon.web.datastar/serve-agent-page! h)))))

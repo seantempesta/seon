@@ -506,6 +506,18 @@
       (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"})
           (.end res "invalid agent id")))))
 
+(defn serve-root!
+  "Serve `/` — root's world (= the all-agents dashboard). `root = /`
+   (root-os-vision): `/` is the root agent's world, so it reuses the per-agent
+   shim page bound to the literal id \"root\". The page's feed effect opens
+   `/agent/root/feed` (already seeded), whose `world-layout` renders root's
+   canvas = `seon.render.system/system-view` (root's seeded live-tile content).
+   ONE mechanism — no `/`-special page, no `/`-special feed. A Ring handler:
+   injects the `\"root\"` path-param and delegates to [[serve-agent-page!]].
+   Public — db->routes resolves its symbol at request time."
+  [r]
+  (serve-agent-page! (assoc-in r [:path-params :id] "root")))
+
 (defn open-agent-feed!
   "Open the per-agent world gzip feed (the seeded :seon.route/agent-feed
    handler). A Ring handler: takes the Ring request `r`, self-extracts

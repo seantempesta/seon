@@ -64,9 +64,11 @@
 ;;
 ;; `root = /` (root-os-vision, owner 2026-06-28): the all-agents overview IS the
 ;; root agent's world, so `/` IS the dashboard and `/agent/{id}` is uniform for
-;; EVERY agent incl `/agent/root`. `/world` + `/world/feed` are RETIRED — Lane-U
-;; repoints `/`'s handler from the `serve-root!` 302 placeholder to the
-;; root-world layout. (`/` stays a CORE route datom here, UI-repointed; if root's
+;; EVERY agent incl `/agent/root`. `/world` + `/world/feed` are RETIRED. `/`'s
+;; handler is `seon.web.datastar/serve-root!` — it serves root's world shim page
+;; (the per-agent page bound to the literal id "root"); the page's feed opens
+;; `/agent/root/feed`, whose world-layout renders root's canvas =
+;; `seon.render.system/system-view`. (`/` stays a CORE route datom here; if root's
 ;; bootstrap/config later OWNS `/`, only its `:seon.route/owner` ref + which
 ;; seed-step writes it changes — still a datom, no shape change.)
 ;;
@@ -95,7 +97,7 @@
   {:malli/schema [:=> [:cat] [:vector ::route]]}
   []
   [{::pattern "/"                ::method :get  ::name ::root
-    ::handler 'seon.web.serve/serve-root!}
+    ::handler 'seon.web.datastar/serve-root!}
    {::pattern "/agent/{id}"      ::method :get  ::name ::agent
     ::handler 'seon.web.datastar/serve-agent-page!}
    {::pattern "/agent/{id}/feed" ::method :get  ::name ::agent-feed

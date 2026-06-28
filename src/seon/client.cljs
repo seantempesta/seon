@@ -83,6 +83,10 @@
     [seon.render.default]
     ;; Live-tile render namespace — required so the build includes it.
     [seon.render.live-tile]
+    ;; Root's SYSTEM VIEW — the `/` dashboard = root's live-tile content.
+    ;; Required so the build includes it and `system-view`'s symbol resolves
+    ;; via eval/lookup-value when render-agent-tile renders root.
+    [seon.render.system]
     ;; Routing-as-data — the `:seon.route/*` schema + the seeded core route
     ;; set; boot-seed! transacts (route/core-routes-tx). Required here so the
     ;; schema register! calls run and the build includes the seed builder.
@@ -2343,7 +2347,20 @@
                                   (when (some #{aid} minted-ids)
                                     (await (bootstrap-turn!
                                              {:seon.agent/id            aid
-                                              :seon.agent/compile-state compile-state}))))
+                                              :seon.agent/compile-state compile-state})))
+                                  ;; this will be removed when Core finishes the config + data loader
+                                  ;; Root's canvas = the SYSTEM VIEW. Seed root's
+                                  ;; live-tile content to seon.render.system/system-view
+                                  ;; so `/` (= root's world) renders the fleet/system
+                                  ;; dashboard via the SAME render-agent-tile seam every
+                                  ;; agent uses. Idempotent upsert on :seon.agent/id —
+                                  ;; re-asserted every boot so a resumed root gets it too.
+                                  (when (= "root" aid)
+                                    (await (db/transact!
+                                             {:seon.db/tx-data
+                                              [{:seon.agent/id aid
+                                                :seon.render.live-tile/content
+                                                'seon.render.system/system-view}]}))))
                                 @!acc)
                 ;; Task #21: a boot-one-agent! that came back as an
                 ;; error envelope means an agent with NO entity —
