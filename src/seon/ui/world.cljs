@@ -46,7 +46,8 @@
   (:require
     [seon.db :as db]
     [seon.derive :as derive]
-    [seon.render :as render]))
+    [seon.render :as render]
+    [seon.ui.header :as header]))
 
 ;; ============================================================
 ;; The agent's html-rendering block names — priority-sorted. A pure read of
@@ -156,6 +157,12 @@
                            (render/render-agent-tile {:seon.agent/id agent-id
                                                       :seon.db/db    db}))]
       [:main {:id "world" :class "flex flex-col gap-3 w-full"}
+       ;; The persistent global status bar (fixed top) + its scroll spacer —
+       ;; pure f(db), so it rides the live morph and the fleet stats tick on
+       ;; every commit. Lives INSIDE #world so it stays live; the spacer below
+       ;; reserves room under the fixed bar.
+       (header/system-header db)
+       header/header-spacer
        [:header {:id    "world-header"
                  :class "flex items-center justify-between border-b border-base-800 pb-2"}
         [:div {:class "flex items-center gap-2 min-w-0"}

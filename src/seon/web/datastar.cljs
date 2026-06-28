@@ -39,6 +39,7 @@
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.log :as log]
+    [seon.ui.header :as header]
     [seon.ui.html :as html]
     [seon.ui.world :as world]
     [seon.web.brand :as brand]))
@@ -106,6 +107,8 @@
                    (map first)
                    sort)]
       [:main {:id "world" :class "world"}
+       (header/system-header db)
+       header/header-spacer
        [:h1 {:class "world-title"} "Seon world"]
        [:div {:id "world-count" :class "world-count"}
         (str (count ids) " agent" (when (not= 1 (count ids)) "s"))]
@@ -459,6 +462,16 @@
 
 (defn- safe-id? [id] (boolean (and id (re-matches safe-id-re id))))
 
+(defn- agent-exists?
+  "True iff `id` resolves to a live `:seon.agent/id` entity in the cluster
+   store. Guards the per-agent page: an unknown/stale id (a bookmark from a
+   reset store, a typo) redirects HOME rather than serving an empty world."
+  [id]
+  (boolean
+    (seq (db/query {:seon.db/db    @db/*conn*
+                    :seon.db/query '[:find ?e :in $ ?id :where [?e :seon.agent/id ?id]]
+                    :seon.db/args  [id]}))))
+
 (defn- parse-t
   "Parse the optional `?t=<tx-id>` from a node req URL into a datahike
    time-point (a tx-id number). Returns nil for an absent/blank/non-numeric
@@ -499,12 +512,21 @@
   [r]
   (let [^js res (:seon.http/node-res r)
         id      (get-in r [:path-params :id])]
-    (if (safe-id? id)
+    (cond
+      ;; A malformed id (injection attempt, junk path segment) → home.
+      (not (safe-id? id))
+      (do (.writeHead res 302 #js {"Location" "/" "Cache-Control" "no-store"})
+          (.end res ""))
+      ;; #28 — a well-formed but UNKNOWN agent (stale bookmark, reset store,
+      ;; typo) gracefully redirects HOME rather than serving an empty world or
+      ;; a raw 404. "root" always resolves (seeded), so it is never redirected.
+      (not (agent-exists? id))
+      (do (.writeHead res 302 #js {"Location" "/" "Cache-Control" "no-store"})
+          (.end res ""))
+      :else
       (do (.writeHead res 200 #js {"Content-Type"  "text/html; charset=utf-8"
                                    "Cache-Control" "no-store, no-cache, must-revalidate"})
-          (.end res (agent-page-html id)))
-      (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"})
-          (.end res "invalid agent id")))))
+          (.end res (agent-page-html id))))))
 
 (defn serve-root!
   "Serve `/` — root's world (= the all-agents dashboard). `root = /`

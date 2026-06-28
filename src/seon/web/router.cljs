@@ -279,14 +279,16 @@
                                                 hijacked)}}]]))
 
 ;; ============================================================
-;; The no-match default-handler — a plain 404. reitit calls this when no
-;; route matches (or the matched path has no handler for the method).
-;; Every real surface is a route now (the seeded core routes + the static
-;; supplement); a miss is a genuine 404.
+;; The no-match default-handler — a graceful redirect HOME (#28). reitit
+;; calls this when no route matches (or the matched path has no handler for
+;; the method). Rather than a raw 404 dead-end, a miss 302s to `/` (root's
+;; system dashboard) so a mistyped/stale URL always lands somewhere live.
 ;; ============================================================
 
 (defn- not-found [r]
-  (write-text! (node-res r) 404 (str "Not found: " (:uri r)))
+  (let [^js res (node-res r)]
+    (.writeHead res 302 #js {"Location" "/" "Cache-Control" "no-store"})
+    (.end res ""))
   hijacked)
 
 ;; ============================================================

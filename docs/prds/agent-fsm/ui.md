@@ -142,6 +142,31 @@ is a tile. All pages are agent worlds — one mechanism, a tree of routes:
 - **app** (`/agent/{id}/app/{x}`) — an agent-authored sub-page; its route handler
   is an agent layout symbol, SCI-bounded.
 
+## The persistent header — `system-header = f(db)`
+
+Every page carries a fixed-top **status bar**, `seon.ui.header/system-header`, a
+pure function of the db value (NEVER throws — degrades to a brand-only bar).
+Left→right: the brand (`seon.web.brand`, links `/`); agents-by-state dots+counts
+(reusing `seon.render.system/fleet-summary` — one fleet counter, not
+re-derived); throughput; datom count (links `/data`) + `SEON_EMBED` on/off; and a
+`+ new agent` button + home/data links + a health dot. On the morphed world pages
+(`/`, `/agent/{id}`, `/world`) it lives INSIDE `#world`, so it rides the live
+morph and the stats tick on every commit; on the server-rendered `/data` +
+`/agent/{id}/debug` it is a request-time snapshot. The `+ new agent` button POSTs
+the same `/agents/new` create door and SWITCHES to the new `/agent/{id}`.
+
+**Throughput is honest.** No per-turn duration is stored, so an instantaneous
+tokens/sec is not derivable. `header/throughput` instead reports a ROLLING rate —
+tokens from turns STARTED in the last 60 s ÷ 60 s (via `seon.agent.ctx.usage/extract`
+over `:seon.agent.turn/llm-usage`) — beside the all-time token total + turn/eval
+counts. Live-proven: a driven turn moved the bar to `1309.5 tok/s · 78.6k tok`.
+
+## Graceful default routes (#28)
+
+No request dead-ends on a raw 404. The reitit no-match default-handler 302s to
+`/` (root's dashboard); a well-formed but UNKNOWN `/agent/{id}` (stale bookmark,
+reset store, typo) also 302s home (`"root"` always resolves, never redirected).
+
 ## Routing is data — reitit + the capability gate
 
 The front door is **reitit** (vendored `reference-code/reitit`, `.cljc`, runs in

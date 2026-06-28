@@ -46,6 +46,7 @@
     [seon.log :as log]
     [seon.render :as render]
     [seon.ui.components :as comp]
+    [seon.ui.header :as header]
     [seon.ui.html :as html]
     [seon.web.brand :as brand]))
 
@@ -667,6 +668,11 @@
         [:html {:lang "en" :data-theme (::brand/theme b)}
          (page-head (brand/page-title b (str "agent " agent-id " · debug")))
          [:body {:class "h-screen bg-base-950 text-text-50 font-sans antialiased flex flex-col"}
+          ;; The persistent global status bar (fixed top) — a request-time
+          ;; snapshot here (this page is server-rendered, not morphed). The
+          ;; shrink-0 spacer reserves room under the fixed bar.
+          (header/system-header (deref db/*conn*))
+          [:div {:class "shrink-0" :style "height:2.25rem"}]
           [:div {:data-init (str "@get('/agent/" agent-id "/debug/sse')")
                  :data-on:online__window (str "@get('/agent/" agent-id "/debug/sse')")}]
           (header-fragment agent-id snap)
@@ -911,6 +917,10 @@
           (brand-css-style)
           [:script {:type "module" :src "/js/datastar.js"}]]
          [:body {:class "min-h-screen bg-base-950 text-text-50 font-sans p-4"}
+          ;; The persistent global status bar (fixed top, request-time
+          ;; snapshot) + scroll spacer under it.
+          (header/system-header (deref db/*conn*))
+          header/header-spacer
           [:div {:data-init (str "@get('/data/sse" (data-qs params) "')")
                  :data-on:online__window
                  (str "@get('/data/sse" (data-qs params) "')")}]
