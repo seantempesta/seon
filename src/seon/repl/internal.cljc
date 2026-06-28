@@ -244,17 +244,30 @@
 
 (defn- find-recovery-point
   "When parsing fails starting at `offset`, scan forward in `text` for
-   the next column-0 anchor — either an open-delim (`(` / `[` / `{`)
-   OR a comment (`;`). Returns the offset of that anchor, or
-   `(count text)` if none found.
+   the next column-0 anchor — a LIST open-delim `(` OR a comment `;`.
+   Returns the offset of that anchor, or `(count text)` if none found.
 
-   Including `;` in the anchor set matters: when a LLM emits
-   `(broken-form\n;; intent for next\n(good)`, recovery should land
-   on the `;;` line so the intent attaches as narration to `(good)`,
-   not get swallowed in the bad span."
+   PRONG 2 (eval-segmenter): the anchor set is deliberately `(` and `;`
+   ONLY — NOT `[`/`{`. Under forms-and-prose-only the only top-level shape
+   that is a runnable FORM is a `(`-list; a column-0 `{`/`[` is almost
+   always the BODY of the broken form above (the inner maps/vectors of an
+   unbalanced `(db/transact! [ {…} {…} ])`). Anchoring on them shredded one
+   broken block into bad-head + N demoted-map `:comment`s + an orphan
+   closer. Anchoring only on `(`/`;` keeps the broken block as ONE honest
+   `:read` span — its inner `{…}` lines are never exposed as fresh
+   top-level parses, so the empty-source recovery collateral disappears.
+
+   Documented trade-off: a GENUINE bare top-level `{…}` written immediately
+   after a broken form is absorbed into the error span instead of emitting
+   its own demotion warning. Acceptable — a bare top-level map is
+   non-evaluated prose anyway and the agent's real signal is \"fix the
+   broken form above\" (simple-core-over-edge-cases).
+
+   Including `;` still matters: `(broken\n;; intent\n(good)` lands recovery
+   on the `;;` line so the intent attaches as narration to `(good)`."
   [text offset]
   (let [tail (subs text offset)
-        m (re-find #"\n[;\(\[\{]" tail)]
+        m (re-find #"\n[;\(]" tail)]
     (if m
       (+ offset (str/index-of tail m) 1)  ; +1 to land on the anchor
       (count text))))

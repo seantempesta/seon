@@ -445,6 +445,29 @@
       (is (= kinds (mapv :kind (parse/parse-forms in)))
           (str "kinds: " (pr-str (mapv :kind (parse/parse-forms in))))))))
 
+;; ============================================================
+;; PRONG 2 (eval-segmenter research) — recovery anchors narrowed to `(`/`;`
+;; only (never bare `{`/`[`), so a shredded broken block collapses to ONE
+;; honest :read instead of bad-head + N demoted-map rows. Includes the
+;; documented absorption-cost case so the trade-off is visible + intentional.
+;; ============================================================
+
+(def prong2-cases
+  [{:in "(db/transact! :seon [\n{:a 1}\n{:b 2}\n}]" :kinds [:read]
+    :note "shred collapses to one honest :read (no inner-map :comment collateral)"}
+   {:in "{:a 1}" :kinds [:comment]
+    :note "clean bare map still demotes to :comment ⚠ (PRONG 2 doesn't touch clean reads)"}
+   {:in "(good)\n{:a 1}" :kinds [:form :comment]
+    :note "bare map after a GOOD form still demotes + warns"}
+   {:in "(broken [\n{:a 1}" :kinds [:read]
+    :note "ABSORPTION COST: bare map after a BROKEN form is absorbed into the :read span"}])
+
+(deftest prong2-shred-collapses-to-one-read
+  (doseq [{:keys [in kinds note]} prong2-cases]
+    (testing (str note " — " (pr-str in))
+      (is (= kinds (mapv :kind (parse/parse-forms in)))
+          (str "kinds: " (pr-str (mapv :kind (parse/parse-forms in))))))))
+
 (deftest prong1-never-hides-a-real-failure
   ;; risk #1: a genuinely broken FORM (leading `(` + bad token) must STILL
   ;; surface as a :read with non-blank source + :error.
