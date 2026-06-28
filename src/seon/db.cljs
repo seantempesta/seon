@@ -275,7 +275,7 @@
 (schema/register! ::session-id      :seon.db/id)
 (schema/register! ::turn-id         :seon.db/id)
 (schema/register! ::eval-id         :seon.db/id)
-(schema/register! ::origin          [:enum :user :agent :system :replay :core-seed :test-run])
+(schema/register! ::origin          [:enum :user :agent :system :replay :core-seed :config :test-run])
 (schema/register! ::replay?         :boolean)
 (schema/register! ::resume-marker?  :boolean)
 
@@ -1204,6 +1204,58 @@
   {:malli/schema [:=> [:catn [::db ::db-val]] ::row-ids]}
   [db]
   (::bootstrap-rows (row-origin-scan db)))
+
+;; --- provenance-scoped managed population (the reconcile handle) ----------
+;; Generalizes [[row-origin-scan]]'s hard-wired `:core-seed` first-tx
+;; derivation to an ARBITRARY managed scope (a set of `:seon.db/origin`
+;; values) and pairs each managed entity with the `:db.unique/identity`
+;; datom(s) it carries — the population `seon.state/reconcile!` diffs a
+;; desired set against. Same single `[?e ?a ?v ?tx]` scan + min-tx-origin
+;; reduce; NEVER a per-kind / per-identity-attr AEVT loop.
+(schema/register! ::managed-scope [:set ::origin])
+;; `[identity-attr identity-value]`. The value spans heterogeneous registered
+;; id types (string ids, keyword route names), hence `:any` for the value.
+(schema/register! ::identity-pair [:tuple :keyword :any])
+(schema/register! ::managed-identities [:map-of :int [:set ::identity-pair]])
+(schema/register!
+  ::managed-identities-request
+  [:map
+   [::managed-scope ::managed-scope]
+   [:seon.db/db   {:optional true} :seon.db/db]
+   [::conn        {:optional true} ::conn]])
+
+(defn managed-identities
+  "Map of `managed-eid → #{[identity-attr identity-value] …}`: every entity
+   whose FIRST-assertion (min-tx) origin is in `:seon.db/managed-scope`,
+   paired with the `:db.unique/identity` datom(s) it carries. PURE
+   PROVENANCE — ONE `[?e ?a ?v ?tx]` scan + a min-tx-origin reduce (the same
+   derivation as [[row-origin-scan]], generalized from the hard-wired
+   `:core-seed` to an arbitrary scope), never a per-kind / per-identity-attr
+   AEVT loop. Eids carrying NO identity attr (component children, tx /
+   schema-def rows) are OMITTED: they are removed via their parent's
+   component cascade, never directly. THE managed-population
+   [[seon.state/reconcile!]] diffs a desired set against. Reads default to
+   `*conn*`; pass `:seon.db/db` or `:seon.db/conn` for another store."
+  {:malli/schema [:=> [:cat ::managed-identities-request] ::managed-identities]}
+  [{::keys [managed-scope conn] db :seon.db/db :or {conn *conn*}}]
+  (let [db        (or db @(internal/resolve-conn conn))
+        triples   (query {::db db ::query '[:find ?e ?a ?v ?tx
+                                            :where [?e ?a ?v ?tx]]})
+        tx-origin (into {} (query {::db db
+                                   ::query '[:find ?tx ?o
+                                             :where [?tx :seon.db/origin ?o]]}))
+        first-tx  (reduce (fn [m [e _ _ tx]]
+                            (update m e #(if % (min % tx) tx)))
+                          {} triples)
+        managed   (into #{}
+                        (keep (fn [[e tx]]
+                                (when (contains? managed-scope (get tx-origin tx)) e)))
+                        first-tx)]
+    (reduce (fn [m [e a v _]]
+              (if (and (contains? managed e) (schema/identity-attr? a))
+                (update m e (fnil conj #{}) [a v])
+                m))
+            {} triples)))
 
 (defn core-kinds
   "Attr namespaces (keywords) whose `:seon.schema/key` row is a

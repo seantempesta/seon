@@ -1691,11 +1691,14 @@
 
 (defn- upsert-ctx-tx
   "Tx-data that REPLACES the scoped agent's :seon.agent/ctx with `blocks`:
-   retract the whole component vector (cascade-retracts the old child block
-   entities — datahike component semantics), then re-add `blocks`. An empty
-   `blocks` leaves the attr retracted (no add)."
+   `:db.fn/retractAttribute` the whole component vector — which
+   cascade-retracts the old child block entities (datahike emits a
+   `:db.fn/retractEntity` per component-ref value; plain `:db/retract` returns
+   NO follow-on ops, so it would only sever the agent→block edges and ORPHAN
+   the children) — then re-add `blocks`. An empty `blocks` leaves the attr
+   retracted (no add)."
   [id blocks]
-  (into [[:db/retract [:seon.agent/id id] :seon.agent/ctx]]
+  (into [[:db.fn/retractAttribute [:seon.agent/id id] :seon.agent/ctx]]
         (when (seq blocks)
           [{:seon.agent/id id :seon.agent/ctx (vec blocks)}])))
 
