@@ -114,18 +114,24 @@ All documentation lives in `docs/` — markdown files under version control. Use
 Code auto-reads nested `CLAUDE.md` files when working in that tree, so this is the
 ALWAYS-IN-CONTEXT orientation for anyone (agent or human) touching that PRD — the
 must-know that would otherwise be lost in the sea of dated research files. Keep
-it **tight and current** (it loads into context every time you work there):
+it **tight and current** (it loads into context every time you work there). The
+goal is a ONE-STOP SHOP to get up to speed — typically:
 
 - **Current state** — where the work actually is right now (one short paragraph).
+- **How to run it** — the actual commands (build/deploy/drive/test/check-status),
+  copy-pasteable, with the live ids/paths. So nobody re-derives how to operate it.
 - **Load-bearing findings + gotchas** — the corrections that cost cycles to learn
   (e.g. "torch 2.9.1 works, the saga was a hallucinated symbol").
+- **Current issues / blockers** — what's open right now (link the issue notes).
 - **Settled — do NOT re-litigate** — decisions made, so they're not reopened.
+- **Plans + next steps** — the ordered path forward, so it's not lost.
 - **Entry points** — the few docs to read for depth (link them; don't duplicate).
 
 The dated research files stay as the depth; the folder `CLAUDE.md` is the index +
-the hard-won context. Update it as the PRD's reality changes — same discipline as
-component notes. It takes YAML frontmatter like any `docs/**/*.md` (the linter
-validates it); use `type: orchestrator`.
+the hard-won context + the runbook. Update it as the PRD's reality changes — same
+discipline as component notes. It takes YAML frontmatter like any `docs/**/*.md`
+(the linter validates it); use `type: orchestrator`.
+`docs/prds/diffusion-dynamic-context/CLAUDE.md` is the worked example.
 
 ### Markdown Standards
 
