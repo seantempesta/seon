@@ -1,36 +1,28 @@
 (ns seon.agent.todo
   "Your plan + work queue as a TREE. A todo is one `:seon.agent.todo` entity; a
-   `:seon.agent.todo/parent` ref makes the list a PLAN (top = milestones,
-   leaves = the actions you actually do); a `:seon.agent.todo/depends-on` ref
-   SEQUENCES work (\"do B after A\" = B depends-on A). Progress, blocked-ness,
-   and \"what's next\" are all DERIVED — you store leaf facts (`:open`/`:done`),
-   the queue re-derives every turn. THE EXEMPLAR store/retrieve ns: attrs via
-   `schema/register!`, map-in/map-out fns, errors as `:seon.agent.todo/ok?`
-   envelopes (never throws), pure derived views for context rendering.
+   `:seon.agent.todo/parent` ref makes a PLAN (top = milestones, leaves =
+   actions); a `:seon.agent.todo/depends-on` ref SEQUENCES work (B depends-on A
+   = do B after A). Progress, blocked-ness, and what's-next are DERIVED from the
+   leaf `:open`/`:done` facts every turn — nothing derivable is stored. THE
+   EXEMPLAR store/retrieve ns: `schema/register!` per attr, map-in/map-out fns,
+   errors as `:seon.agent.todo/ok?` value envelopes (never throws), derived views.
 
-   WHEN: any task with two or more steps. Mint the steps BEFORE you start, then
-   close each as it lands. Two ways to structure:
+   Use it for any task of two+ steps: mint the steps up front, `done!` each as it
+   lands. Add one at a time (sequencing is a dependency), or author a whole plan
+   in one `plan!` (`:children` nests; `:ref` labels a node; `:after` names labels
+   it runs after):
 
-     ;; one-liners — sequencing is just a dependency:
-     (seon.agent.todo/add! {:seon.agent.todo/title \"research vendor X\"})  ; => {…/id \"a\"}
-     (seon.agent.todo/add! {:seon.agent.todo/title \"write the brief\"
+     (seon.agent.todo/add! {:seon.agent.todo/title \"write brief\"
                             :seon.agent.todo/depends-on [[:seon.agent.todo/id \"a\"]]})
-
-     ;; or author a WHOLE plan in ONE transact — children nest into the tree,
-     ;; :ref labels a node, :after names labels it runs after (a depends-on edge):
      (seon.agent.todo/plan!
        {:seon.agent.todo/title \"Process inbox → KB\"
         :seon.agent.todo/children
-        [{:seon.agent.todo/title \"process notes-a.md\" :seon.agent.todo/ref \"a\"}
-         {:seon.agent.todo/title \"process notes-b.md\" :seon.agent.todo/ref \"b\"}
-         {:seon.agent.todo/title \"synthesize findings\" :seon.agent.todo/after [\"a\" \"b\"]}]})
+        [{:seon.agent.todo/title \"notes-a\" :seon.agent.todo/ref \"a\"}
+         {:seon.agent.todo/title \"synthesize\" :seon.agent.todo/after [\"a\"]}]})
 
-   Then run the loop off `next` — it surfaces only READY leaves (open, unblocked,
-   no incomplete children), oldest first, so you cannot pick blocked work or
-   re-do finished work. `done!` a leaf when it lands; that may unblock its
-   dependents next turn. `tree` shows the whole structure when you re-plan;
-   `status` is the derived view of one node. Your open items also render in the
-   open-todos section every turn — an empty section is the done-signal."
+   Run the loop off `next` (READY leaves only); `tree`/`status` are derived read
+   views. Open items also render every turn in the open-todos section — an empty
+   section is the done-signal."
   (:refer-clojure :exclude [next])
   (:require
     [clojure.string :as str]
@@ -38,8 +30,7 @@
     [seon.db :as db]
     [seon.schema :as schema]))
 
-;; --- Attribute schemas — one register! per attr; shared shapes
-;; --- (:seon.db/id, :seon.db/ref) referenced, never inlined.
+;; --- Attribute schemas — one register! per attr; shared shapes referenced, never inlined.
 
 (schema/register! ::id [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! ::title [:string {:min 1}])
@@ -47,27 +38,21 @@
 (schema/register! ::status [:enum :open :done])
 (schema/register! ::created-at :inst)
 (schema/register! ::completed-at :inst)
-(schema/register! ::owner :seon.db/ref)   ; the agent this item belongs to (the SCOPE ref)
-(schema/register! ::from :seon.db/ref)     ; who asked (the user or an agent)
-(schema/register! ::message :seon.db/ref)  ; the inbound message this address-todo tracks
-(schema/register! ::parent :seon.db/ref)            ; the TREE edge — plain ref, no cascade
-(schema/register! ::depends-on [:vector :seon.db/ref]) ; the DAG edges — plain cardinality-many
+(schema/register! ::owner :seon.db/ref)   ; SCOPE ref — the agent this item belongs to
+(schema/register! ::from :seon.db/ref)     ; who asked
+(schema/register! ::message :seon.db/ref)  ; the inbound message an address-todo tracks
+(schema/register! ::parent :seon.db/ref)            ; TREE edge — plain ref, no cascade
+(schema/register! ::depends-on [:vector :seon.db/ref]) ; DAG edges — cardinality-many
 
-;; --- The work-queue semantics: ONE rule set, plain data you can read AND
-;; --- extend. Pass it as `%` in your own queries. The whole point: the queue
-;; --- (next/blocked/ready/roll-up) is pure Datalog over the two refs — nothing
-;; --- derivable is stored.
+;; --- Work-queue semantics: ONE rule set, plain data you can read AND extend
+;; --- (pass it as `%`). The queue is pure Datalog over the two refs.
 
 (def rules
-  "Datalog rules over the two refs:
-   - descendant — the tree's transitive closure (recursive, cycle-safe).
-   - leaf — a todo nothing names as parent (an action, not a milestone).
-   - open-work — ?t is open itself, or some open leaf sits in its subtree.
-   - blocked — some dependency still has open work (transitivity rides on
-     done-ness, so no recursive DAG walk and no cycle risk in the queue path).
-   - ready — an open, unblocked leaf: real work you can do RIGHT NOW.
-   Negations (`leaf`, `not (blocked …)`) only FILTER bound tuples, so every
-   query binds its entity with a positive clause BEFORE invoking these."
+  "Datalog rules over the two refs — read AND extend them:
+   descendant (transitive tree closure, cycle-safe), leaf (no children),
+   open-work (open leaf in the subtree), blocked (a dependency has open-work),
+   ready (open unblocked leaf — work to do now). Negations (`leaf`, `not blocked`)
+   only FILTER bound tuples, so bind the entity positively BEFORE invoking these."
   '[[(descendant ?a ?n) [?n :seon.agent.todo/parent ?a]]
     [(descendant ?a ?n) [?m :seon.agent.todo/parent ?a] (descendant ?m ?n)]
     [(leaf ?t) (not-join [?t] [?c :seon.agent.todo/parent ?t])]
@@ -76,8 +61,8 @@
     [(blocked ?t) [?t :seon.agent.todo/depends-on ?d] (open-work ?d)]
     [(ready ?t) [?t :seon.agent.todo/status :open] (leaf ?t) (not (blocked ?t))]])
 
-;; --- Request/response schemas. ::ok? is the envelope discriminator;
-;; --- failures carry a guiding ::error (errors are values — branch, don't catch).
+;; --- Request/response schemas. ::ok? discriminates the envelope; failures
+;; --- carry a guiding ::error (errors are values — branch, don't catch).
 
 (schema/register! ::ok? :boolean)
 (schema/register! ::error :string)
@@ -106,9 +91,7 @@
    [::parent      {:optional true} ::parent]
    [::depends-on  {:optional true} ::depends-on]])
 
-;; plan! — a plan is data. :children nests (each level = a :parent edge); :ref
-;; labels a node; :after names labels this node runs after (a depends-on edge).
-;; Recursive, self-contained shape (a child may carry its own :children).
+;; plan! shape — recursive: each child may carry its own :children.
 (schema/register! ::plan-node
   [:schema {:registry {::node [:map
                                [::title ::title]
@@ -159,9 +142,8 @@
 ;; root? → one subtree map; else → a vector of root subtrees; nil when nothing.
 (schema/register! ::tree-response [:maybe [:or :map [:vector :map]]])
 
-;; --- The stored entity kind. `{:seon.db/entity true}` DECLARES that
-;; --- rows of this shape live in the DB (it's what puts the kind in the
-;; --- catalog); request/response envelopes above carry no marker.
+;; --- The stored entity kind. `{:seon.db/entity true}` DECLARES that rows of
+;; --- this shape live in the DB (puts the kind in the catalog).
 
 (schema/register! ::todo
   [:map {:seon.db/entity true}
@@ -189,10 +171,9 @@
 ;; --- Public API
 
 (defn ^:async add!
-  "Mint one OPEN work item. Owner defaults to the calling agent (ALS scope);
-   blank title refused. `:parent` and `:depends-on` (lookup-refs) place it in
-   the tree / DAG at birth; both default absent (a free-standing ready leaf).
-   Resolves to {::ok? true ::id _} or a fail envelope."
+  "Mint one OPEN work item (owner = calling agent; blank title refused).
+   `:parent`/`:depends-on` lookup-refs place it in the tree/DAG, both optional.
+   → {::ok? true ::id _} or a fail envelope."
   {:malli/schema [:=> [:cat ::add-request] ::write-response]}
   [{::keys [title description owner from parent depends-on]}]
   (let [owner (internal/scoped-owner owner)]
@@ -220,11 +201,10 @@
              (internal/write-result "add!" id))))))
 
 (defn ^:async plan!
-  "Author a WHOLE plan in ONE transact. `:children` nests (each level becomes a
-   `:parent` edge); `:ref` labels a node; `:after` names labels this node runs
-   after (a `depends-on` edge). Cross-sibling links compile to string tempids,
-   so `:after` may reference any label in the plan, defined earlier OR later.
-   Returns {::ok? true ::root <root-id> ::ids <label→id>} or a fail envelope."
+  "Author a WHOLE plan in ONE transact. `:children` nests (`:parent` edges);
+   `:ref` labels a node; `:after` names labels it runs after (`depends-on`
+   edges). `:after` may name any label, defined earlier OR later. → {::ok? true
+   ::root <root-id> ::ids <label→id>} or a fail envelope."
   {:malli/schema [:=> [:cat ::plan-request] ::plan-response]}
   [{::keys [title children]}]
   (let [owner (internal/scoped-owner nil)]
@@ -246,9 +226,8 @@
                                   (get-in env [:seon.db/error :seon.error/message]))))))))))
 
 (defn ^:async done!
-  "Mark a leaf done, stamping ::completed-at. Unknown id → fail envelope;
-   already-done is idempotent success. Completing a node may unblock its
-   dependents — they appear in `next` next turn."
+  "Mark a leaf done (stamps ::completed-at); may unblock its dependents next
+   turn. Already-done is idempotent success; unknown id → fail envelope."
   {:malli/schema [:=> [:cat ::id-request] ::write-response]}
   [{::keys [id]}]
   (case (internal/status-of id)
@@ -262,8 +241,8 @@
          (internal/write-result "done!" id))))
 
 (defn ^:async reopen!
-  "Flip a done todo back to open. Clearing ::completed-at is an explicit
-   `[:db/retract …]` — absent means absent, nil is never stored."
+  "Flip a done todo back to open; ::completed-at is explicitly retracted (absent
+   means absent, nil is never stored)."
   {:malli/schema [:=> [:cat ::id-request] ::write-response]}
   [{::keys [id]}]
   (case (internal/status-of id)
@@ -276,10 +255,8 @@
          (internal/write-result "reopen!" id))))
 
 (defn ^:async depends!
-  "Add dependency edge(s) to an EXISTING todo — it now runs after each :on ref.
-   One cardinality-many add per ref. Remove one with
-   (db/transact! {:seon.db/tx-data [[:db/retract [:seon.agent.todo/id id]
-   :seon.agent.todo/depends-on [:seon.agent.todo/id dep]]]})."
+  "Add dependency edge(s) — the todo now runs after each :on ref (cardinality-
+   many). Remove one via `[:db/retract id :seon.agent.todo/depends-on dep]`."
   {:malli/schema [:=> [:cat ::depends-request] ::write-response]}
   [{::keys [id on]}]
   (case (internal/status-of id)
@@ -290,9 +267,8 @@
          (internal/write-result "depends!" id))))
 
 (defn ^:async move!
-  "Re-parent a node — `:parent` is cardinality-one, so asserting the new parent
-   replaces the old. Identity, status, and deps are unchanged; only its place
-   in the tree moves."
+  "Re-parent a node — `:parent` is cardinality-one, so the new parent replaces
+   the old. Identity, status, and deps unchanged."
   {:malli/schema [:=> [:cat ::move-request] ::write-response]}
   [{::keys [id parent]}]
   (case (internal/status-of id)
@@ -301,18 +277,16 @@
          (internal/write-result "move!" id))))
 
 (defn ^:async drop!
-  "Retract a node AND its whole subtree (`parent` is a plain ref ⇒ no cascade,
-   so this walks descendants and retracts each). History keeps them — undo via
-   db/as-of. Returns {::ok? true ::dropped <count>} or a fail envelope."
+  "Retract a node AND its whole subtree (plain `parent` ref ⇒ no cascade, so it
+   walks descendants). History keeps them (undo via db/as-of). → {::ok? true
+   ::dropped <count>} or a fail envelope."
   {:malli/schema [:=> [:cat ::id-request] ::drop-response]}
   [{::keys [id]}]
   (await (internal/retract-subtree! id rules)))
 
 (defn next
-  "Your focus queue: READY leaves (open, unblocked, real work) owned by the
-   calling agent, oldest first. The ONE thing to act on — blocked work is never
-   offered, done work is gone. Sync read of the current conn; [] outside an
-   agent scope."
+  "Your focus queue: READY leaves (open, unblocked) for the calling agent,
+   oldest first — the work to act on now. [] outside an agent scope."
   {:malli/schema [:=> [:cat :map] [:vector ::todo-ref]]}
   [_]
   (if-let [owner (internal/scoped-owner nil)]
@@ -323,11 +297,9 @@
     []))
 
 (defn tree
-  "The plan as nested EDN (children under each node via `:seon.agent.todo/_parent`,
-   dep ids inline). {::root? id} → that one subtree (a map); {::all? true} → the
-   whole forest across owners; default → the calling agent's forest (a vector of
-   root subtrees). The structural read you re-plan over. Sync read of the
-   current conn."
+  "The plan as nested EDN (children under `:seon.agent.todo/_parent`, dep ids
+   inline). {::root? id} → that subtree; {::all? true} → every owner's forest;
+   default → the calling agent's forest. The structural read you re-plan over."
   {:malli/schema [:=> [:cat ::tree-request] ::tree-response]}
   [{::keys [root? all?]}]
   (let [db @db/*conn*]
@@ -342,8 +314,8 @@
 
 (defn status
   "Derived view of one node: done? (subtree complete), blocked? (a dependency
-   still has open work), ready? (an open unblocked leaf), and the {::done ::total}
-   roll-up over its subtree leaves. Sync read; nil id-arg-less — always pass ::id."
+   has open work), ready? (open unblocked leaf), and the {::done ::total}
+   subtree roll-up. Pass ::id."
   {:malli/schema [:=> [:cat ::id-request] ::status-response]}
   [{::keys [id]}]
   (internal/status-view @db/*conn* id rules))
@@ -351,7 +323,7 @@
 (defn list-open
   "Open todos, oldest first, scoped to ::owner (default: the calling agent);
    {::all? true} lists every owner's. Flat — includes parents and blocked items
-   (use `next` for the ready-leaf focus queue). Sync read of the current conn."
+   (use `next` for the ready-leaf focus queue)."
   {:malli/schema [:=> [:cat ::list-request] ::list-response]}
   [{::keys [owner all?]}]
   (let [owner (internal/scoped-owner owner)]
