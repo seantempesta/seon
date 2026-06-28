@@ -108,6 +108,25 @@ All documentation lives in `docs/` — markdown files under version control. Use
 
 **After making code changes**, update the relevant component note to reflect new reality. See `docs/seon/_dashboard.md` for the full protocol.
 
+### PRD folder context — auto-loaded `CLAUDE.md`
+
+**Every active PRD folder (`docs/prds/<project>/`) carries a `CLAUDE.md`.** Claude
+Code auto-reads nested `CLAUDE.md` files when working in that tree, so this is the
+ALWAYS-IN-CONTEXT orientation for anyone (agent or human) touching that PRD — the
+must-know that would otherwise be lost in the sea of dated research files. Keep
+it **tight and current** (it loads into context every time you work there):
+
+- **Current state** — where the work actually is right now (one short paragraph).
+- **Load-bearing findings + gotchas** — the corrections that cost cycles to learn
+  (e.g. "torch 2.9.1 works, the saga was a hallucinated symbol").
+- **Settled — do NOT re-litigate** — decisions made, so they're not reopened.
+- **Entry points** — the few docs to read for depth (link them; don't duplicate).
+
+The dated research files stay as the depth; the folder `CLAUDE.md` is the index +
+the hard-won context. Update it as the PRD's reality changes — same discipline as
+component notes. It takes YAML frontmatter like any `docs/**/*.md` (the linter
+validates it); use `type: orchestrator`.
+
 ### Markdown Standards
 
 All `docs/**/*.md` files are validated by `seon.dev.markdown` — a Seon-native linter that runs automatically on every edit via the dev hook. It auto-fixes formatting (blank lines, trailing whitespace) and reports structural issues.
