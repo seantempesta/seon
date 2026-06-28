@@ -83,6 +83,20 @@ same db value (`as-of` the turn's `t`): the prompt is
 a layout's slots. "What the agent saw at turn N" is a re-derive from
 `db-as-of(t)`.
 
+**The typed block renderer.** Above `seon.ui.html` sits one reusable value→hiccup
+layer, `seon.render/block` — `(block view x)` dispatches on the value-KIND `x`
+carries (the namespaced key ON the value, never a stored `:kind`): a **message**
+(`:seon.render/markdown`) → `seon.ui.markdown/md->hiccup`, a **source**
+(`:seon.render/source`) → `clj->hiccup`, a **data** projection → the value panel, a
+**`:seon/error`** → the error tile, a literal **hiccup** vector → passthrough, and
+anything else → the data panel (never throws). The transcript and the canvas both
+route their bodies through it, so every surface "just displays the block."
+
+**Markdown renders server-side.** Agent text becomes HTML on the server via
+`seon.ui.markdown/md->hiccup` (the `block` message lane) — the world shim loads NO
+client markdown JS; the old client-side `data-markdown` / marked.js lane is gone from
+the world page. One lane, server-side, for every message/eval body.
+
 **Capability + cache.** Agent-authored renders, layouts, and route handlers run
 SCI-bounded (`seon.render.sci/invoke-bounded`, a deadline), never
 `lookup-value`-direct; core symbols run compiled, and the bootstrap CLJS compiler
@@ -112,7 +126,10 @@ is a tile. All pages are agent worlds — one mechanism, a tree of routes:
   scroll of the agent's html `:seon.agent/ctx` blocks as supporting tiles
   (`:transcript` included). The canvas is NOT a `(slot :canvas)` block —
   `:canvas` is just a block name like any other; the hero is always the live
-  tile (decision #19, observer-confirmed KEEP).
+  tile (decision #19, observer-confirmed KEEP). With no custom tile, the
+  default (`seon.render.live-tile/welcome`) LEADS with the agent's latest
+  reply rendered as a markdown card (through the `block` message lane), falling
+  back to the greeting only before the agent has spoken.
 - **the root agent's world** (`/`) — the all-agents overview IS the **root
   agent's** world (`:seon.agent/id "root"`). Its system-scoped blocks query across
   all agents to render a preview tile each; dive into one via reverse routing
@@ -120,7 +137,8 @@ is a tile. All pages are agent worlds — one mechanism, a tree of routes:
   machinery — NOT a separate overview page. It grounds the render + route tree: root
   world (`/`) → per-agent worlds (`/agent/{id}`) → apps. (Root's
   lifecycle/orchestrator facet lives in [[agent-runtime]]; here it is just the
-  agent whose world is `/`.)
+  agent whose world is `/`.) It is the same page as any `/agent/{id}` world,
+  with `seon.render.system/system-view` as its canvas (its live-tile content).
 - **app** (`/agent/{id}/app/{x}`) — an agent-authored sub-page; its route handler
   is an agent layout symbol, SCI-bounded.
 

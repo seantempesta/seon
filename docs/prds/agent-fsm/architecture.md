@@ -115,7 +115,7 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
         │  SSE down (the live channel), POST up (actions)
         ▼
    NODE UI-HOST ── read-only replica + ONE tx-listener + the route table (reitit)
-        │  listen! → derive world → slot-tree diff → push   the only browser-facing HTTP/SSE
+        │  listen! → derive world → whole-element morph → push  the only browser-facing HTTP/SSE
         ▲                                                    (derives every page; runs NO agent code)
         │  wire (RPC + tx-feed, since-t replay)
    JVM WIRE-SERVER ── single-writer datahike + heavy processing (embeddings/LLM/indexing) + Integrant
@@ -159,14 +159,16 @@ all of them" = read the one DB they all write to — there are no silos to aggre
 The reactive loop, end to end: a browser action POSTs a fact → the writer commits and
 fans the tx out → the relevant unit's `listen!` fires, it computes and writes its
 **facts** back → the writer fans out → the Node UI-host's `listen!` fires,
-re-derives the affected fragment, fast-hashes it, and pushes via datastar only if the
-hash changed. Two channels ride the wire with different reliability: reads/writes/
-heavy calls ride a **request-reply RPC** (only *values* cross — `:db.fn/cas` is data
-and crosses fine, closures can't); the **tx feed** is a separate broadcast made
-lossless across reconnect by per-subscriber `since-t` replay from the bitemporal
-tx-log (the dropped event is the wake trigger, so it must not be lost). **No agent
-code ever touches an SSE connection** — agents write facts; the UI-host derives and
-streams.
+re-renders the WHOLE element (`view = f(db-as-of t)`) and pushes one gzip datastar
+**morph**, which idiomorph diffs client-side (a coalescing throttle collapses a tx
+burst into one morph). Two channels ride the wire with different reliability:
+reads/writes/heavy calls ride a **request-reply RPC** (only *values* cross —
+`:db.fn/cas` is data and crosses fine, closures can't); the **tx feed** is a separate
+broadcast made lossless across reconnect by per-subscriber `since-t` replay from the
+bitemporal tx-log (this is the pod↔writer wire-replication layer — the dropped event
+is the wake trigger, so it must not be lost; the browser stream needs no UI-side
+`since-t`, it just repaints `view = f(db)` on reconnect). **No agent code ever touches
+an SSE connection** — agents write facts; the UI-host derives and streams.
 
 ### Derive everything
 
@@ -258,8 +260,9 @@ routes: the root agent's world (`/`), per-agent worlds (`/agent/{id}`), and apps
 (`/agent/{id}/app/{x}`). Routing is data via **reitit** over `:seon.route/*` datoms;
 `/call` is the one action door and the capability gate authorizes the fn (namespace
 is the route). The **live channel is ours**: one tx-listener on a read-replica derives
-every world and streams a per-connection `!last-tree` slot-tree diff, reconnect-
-lossless via `since-t`. The doc owns block/render/tile/slot/layout, the page tree,
+every world and streams it as a per-connection gzip whole-element **morph**
+(idiomorph-diffed client-side); reconnect just repaints `view = f(db)`, no UI-side
+`since-t` replay. The doc owns block/render/tile/slot/layout, the page tree,
 reitit + the gate, the SSE channel, and the seed-copy + variadic `install!`/`remove!`
 override model. See [[ui]].
 
@@ -286,7 +289,7 @@ doc; this one stays pure target.
 - [[agent-runtime]] — loop/run/turn/FSM/derived-state/two-bounds, creation-as-idle,
   bootstrap-as-seeded-forms, orchestrator-root lifecycle, isolation tiers.
 - [[ui]] — block/render/tile/slot/layout, the page tree, reitit + the capability gate,
-  the SSE `!last-tree` live channel, the seed-copy + `install!`/`remove!` override.
+  the gzip-morph SSE live channel, the seed-copy + `install!`/`remove!` override.
 - [[toolkit]] — the `my.*` verb catalog over the protected `seon.*` floor.
 - [[roadmap]] — we-are-here → the gap → the migration checklist + the final gate.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db is
