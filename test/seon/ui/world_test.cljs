@@ -79,43 +79,46 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
-;; 2. The focal comms block lands in the prominent canvas region.
+;; 2. The focal #world-canvas IS the live tile; html ctx blocks (incl
+;; :transcript) are SUPPORTING tiles below it (post-#19: the canvas is the
+;; live tile, never a comms block).
 ;; ============================================================
 
-(deftest world-layout-places-comms-block-in-the-canvas
+(deftest world-layout-canvas-is-the-live-tile
   (async done
     (-> (with-agents [[agent-a (mixed-blocks :transcript)]]
           (fn [conn]
             (let [s          (html/->string (world/world-layout @conn agent-a))
                   canvas-idx (str/index-of s "world-canvas")
-                  tr-idx     (str/index-of s "data-slot=\"transcript\"")]
-              (testing "the focal comms block (:transcript) sits inside #world-canvas"
-                (is (some? canvas-idx) "the canvas region renders")
-                (is (and tr-idx (< canvas-idx tr-idx))
-                    "the transcript tile is placed within the canvas region")))))
+                  tr-tile    (str/index-of s "world-tile-transcript")]
+              (testing "#world-canvas (the live tile) renders, and :transcript is a SUPPORTING tile below it — not the canvas"
+                (is (some? canvas-idx) "the live-tile canvas region renders")
+                (is (some? tr-tile)
+                    "the :transcript block renders as a supporting tile (#world-tile-transcript)")
+                (is (< canvas-idx tr-tile)
+                    "the transcript tile sits below the canvas, not as the canvas")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
-;; 3. Canvas selection is DATA, not a flag — a `:canvas` block wins over
-;; `:transcript`; the third party names its comms block and gets the canvas.
+;; 3. Post-#19 a block NAMED :canvas is just an ORDINARY supporting tile —
+;; the focal canvas is the live tile, never selected by block name.
 ;; ============================================================
 
-(deftest world-layout-canvas-name-is-data-not-a-flag
+(deftest world-layout-canvas-block-name-is-just-a-tile
   (async done
     (-> (with-agents [[agent-a (conj (mixed-blocks :transcript)
                                      {:seon.agent.ctx/name :canvas :seon.agent.ctx/priority 1
                                       :seon.render/html [:div "CANVAS-BODY"]})]]
           (fn [conn]
-            (let [s          (html/->string (world/world-layout @conn agent-a))
-                  canvas-idx (str/index-of s "world-canvas")
-                  cv-idx     (str/index-of s "data-slot=\"canvas\"")
-                  tr-idx     (str/index-of s "data-slot=\"transcript\"")]
-              (testing "when a :canvas block exists it is the focal block, not :transcript"
-                (is (and canvas-idx cv-idx (< canvas-idx cv-idx))
-                    "the :canvas block is placed in the canvas region")
-                (is (and tr-idx (< cv-idx tr-idx))
-                    ":transcript drops to the tile scroll below the canvas")))))
+            (let [s (html/->string (world/world-layout @conn agent-a))]
+              (testing "#world-canvas is the live tile (NOT the :canvas block)"
+                (is (str/includes? s "world-canvas") "the live-tile focal canvas renders"))
+              (testing "a block named :canvas is an ORDINARY supporting tile, not the focal canvas"
+                (is (str/includes? s "world-tile-canvas")
+                    "the :canvas block renders as a supporting tile #world-tile-canvas")
+                (is (str/includes? s "CANVAS-BODY")
+                    "the :canvas block's body renders as a tile (via slot)")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
