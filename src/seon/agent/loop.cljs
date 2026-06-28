@@ -46,6 +46,7 @@
     [seon.agent.run :as run]
     [seon.agent.schedule :as schedule]
     [seon.agent.turn :as turn]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.log :as seon-log]
@@ -487,14 +488,6 @@
    cheap DB reads plus at most a few transacts."
   30000)
 
-(defn- env-tick-ms
-  "The `SEON_TICK_MS` env cadence override (parsed positive int), or nil when
-   unset / unparseable / non-positive."
-  []
-  (some-> (.. js/process -env -SEON_TICK_MS)
-          js/parseInt
-          (#(when (and (not (js/isNaN %)) (pos? %)) %))))
-
 (defn- run-tick!
   "ONE ticker pass at `now`: close overdue runs, then fire due schedules
    (driving each opened run). Returns a Promise; a throw anywhere is caught +
@@ -520,7 +513,7 @@
   {:malli/schema [:=> [:catn] :any]}
   []
   (when-let [id @!ticker] (js/clearInterval id))
-  (let [ms (or (env-tick-ms) default-tick-ms)
+  (let [ms (or (config/tick-ms) default-tick-ms)
         id (js/setInterval (fn [] (run-tick! (js/Date.))) ms)]
     (reset! !ticker id)
     (seon-log/info-console! "seon.agent.loop/install-ticker!"

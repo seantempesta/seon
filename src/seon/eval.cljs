@@ -830,7 +830,7 @@
 (def ^:private result-vars-cap
   "Max live `result/<id>` vars kept per session. Older ids are pruned
    (undef'd from globalThis + the analyzer) to bound memory. Override
-   with SEON_RESULT_VARS_CAP."
+   with SEON_EVAL_RESULT_VARS_CAP."
   (config/result-vars-cap))
 
 ;; Insertion-ordered vector of bound result ids (oldest first). Process-
@@ -1991,7 +1991,7 @@
 (def store-edn-cap
   "Store-time char cap for any pr-str'd string persisted as a datom
    (`:seon.eval/result-edn`, `:seon.eval/error`). Override with
-   SEON_STORE_EDN_CAP.
+   SEON_RENDER_STORE_EDN_CAP.
 
    MEMORY-SAFETY invariant: the DB must never hold a multi-MB blob in a
    single datom. A 9.7M-char `pull [*]` result once landed verbatim as
@@ -2091,7 +2091,7 @@
    the clip applied to the projected/pr-str'd value string before it is
    persisted. Any value (a giant scalar, a wide map, a long string)
    clips here to a well-formed string that names `result/<id>` for the
-   full live value. Override with SEON_RESULT_BODY_RENDER_CAP."
+   full live value. Override with SEON_RENDER_RESULT_CAP."
   (config/result-body-render-cap))
 
 (defn clip-result-body

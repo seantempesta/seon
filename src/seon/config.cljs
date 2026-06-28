@@ -150,13 +150,24 @@
                     :seon.error/kind   :user-input})))))))
 
 ;;; ============================================================
-;;; ENV KNOBS — the ONE typed env surface. Every `SEON_*` knob that is NOT a
-;;; manifest section is read HERE, coerced to its concrete type, on top of the
-;;; single low-level reader `platform/env-val`. Nothing outside this ns reads
-;;; `process.env` for a knob — consumers call these accessors. (`platform`
-;;; itself is the leaf this ns sits on, so its own `SEON_RUNTIME_ROOT` path
-;;; resolution reads `env-val` directly — it cannot require config without a
-;;; cycle, and path resolution is pre-config.)
+;;; ENV KNOBS — the ONE typed env surface. `platform/env-val` is the single
+;;; low-level reader (a raw `process.env` lookup); `seon.config` is the single
+;;; TYPED layer on top — `env-string` / `env-int` plus the named accessors
+;;; below. Every `SEON_*` TUNING knob (render/output caps, agent bounds, fs
+;;; grants, brand, instrument, tile bounding, identity-file selection) flows
+;;; through these readers; nothing else calls `js/process.env` directly for a
+;;; knob. A consumer that needs a one-off flag calls `env-string`/`env-int`
+;;; here with its var name (e.g. `agent/turn` reads SEON_AI_MAX_RETRIES via
+;;; `env-int`; `agent/fs` reads SEON_FS_* via `env-string`).
+;;;
+;;; THREE surfaces legitimately read env OUTSIDE this layer, none a tuning knob:
+;;;   1. the LLM-provider config seam `seon.ai` (SEON_AI_* → the DB-owned
+;;;      `:seon.ai/config` row — its own consolidated env→DB surface);
+;;;   2. process-launch / infra wiring read at its point of use (SEON_PORT[_FILE],
+;;;      SEON_CLUSTER_DIR, SEON_REQ_SOCK/SEON_PUB_SOCK, SEON_AGENT_ID, and the
+;;;      SEON_EMBED feature gate) — launch wiring, not agent-tunable knobs;
+;;;   3. `platform`'s own pre-config SEON_RUNTIME_ROOT path resolution — it is
+;;;      the leaf this ns sits on, so it cannot require config without a cycle.
 ;;; ============================================================
 
 (defn env-string
@@ -208,25 +219,114 @@
   (env "ANTHROPIC_API_KEY"))
 
 (defn result-vars-cap
-  "Max live `result/<id>` vars kept per session (`SEON_RESULT_VARS_CAP`,
-   default 200)."
+  "Max live `result/<id>` vars kept per session — a COUNT of retained vars,
+   not a render width, so it keeps the `SEON_EVAL_*` prefix distinct from the
+   render-cap family (`SEON_EVAL_RESULT_VARS_CAP`, default 200)."
   {:malli/schema [:=> [:cat] :int]}
   []
-  (env-int "SEON_RESULT_VARS_CAP" 200))
+  (env-int "SEON_EVAL_RESULT_VARS_CAP" 200))
+
+;;; --- Render/output caps — the coherent `SEON_RENDER_*_CAP` family. Each is
+;;; a read-time, LLM-facing display truncation; all live here so the family is
+;;; discoverable + tunable in ONE place.
 
 (defn store-edn-cap
-  "Per-value pr-str truncation cap for stored EDN (`SEON_STORE_EDN_CAP`,
-   default 16384)."
+  "Per-value pr-str truncation cap for stored EDN display
+   (`SEON_RENDER_STORE_EDN_CAP`, default 16384)."
   {:malli/schema [:=> [:cat] :int]}
   []
-  (env-int "SEON_STORE_EDN_CAP" 16384))
+  (env-int "SEON_RENDER_STORE_EDN_CAP" 16384))
 
 (defn result-body-render-cap
-  "Per-value render-body truncation cap (`SEON_RESULT_BODY_RENDER_CAP`,
-   default 16384)."
+  "Per-value render-body truncation cap — the citable `;;=> <value>` line
+   (`SEON_RENDER_RESULT_CAP`, default 16384)."
   {:malli/schema [:=> [:cat] :int]}
   []
-  (env-int "SEON_RESULT_BODY_RENDER_CAP" 16384))
+  (env-int "SEON_RENDER_RESULT_CAP" 16384))
+
+(defn eval-render-cap
+  "Char cap for the echoed SOURCE + captured STDOUT of one eval row — neither
+   is dereferenceable via `result/<id>`, so a large one is context-wasting
+   noise (`SEON_RENDER_EVAL_CAP`, default 1500)."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (env-int "SEON_RENDER_EVAL_CAP" 1500))
+
+(defn message-render-cap
+  "Per-message rendered-content char cap for one inbound transcript line — a
+   single pasted blob must not blow the context (`SEON_RENDER_MESSAGE_CAP`,
+   default 4000 ≈ 1k tokens)."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (env-int "SEON_RENDER_MESSAGE_CAP" 4000))
+
+(defn transcript-token-cap
+  "Total token cap for the transcript section eviction knob (RETAINED but
+   currently OFF — `:seon.render/clip :none`). Measured in TOKENS, not chars
+   (`SEON_RENDER_TRANSCRIPT_TOKEN_CAP`, default 6000)."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (env-int "SEON_RENDER_TRANSCRIPT_TOKEN_CAP" 6000))
+
+;;; --- Value-renderer bounds — the `SEON_RENDER_VALUE_*` sub-family
+;;; (per-node depth/breadth limits of the structural eval-value skeleton).
+
+(defn value-max-depth
+  "Max nesting depth of the value skeleton (`SEON_RENDER_VALUE_MAX_DEPTH`, 3)."
+  {:malli/schema [:=> [:cat] :int]} [] (env-int "SEON_RENDER_VALUE_MAX_DEPTH" 3))
+
+(defn value-max-keys
+  "Max map keys shown per node (`SEON_RENDER_VALUE_MAX_KEYS`, 8)."
+  {:malli/schema [:=> [:cat] :int]} [] (env-int "SEON_RENDER_VALUE_MAX_KEYS" 8))
+
+(defn value-max-items
+  "Max collection items shown per node (`SEON_RENDER_VALUE_MAX_ITEMS`, 8)."
+  {:malli/schema [:=> [:cat] :int]} [] (env-int "SEON_RENDER_VALUE_MAX_ITEMS" 8))
+
+(defn value-max-string
+  "Max chars of a string leaf before it is clipped to a length marker
+   (`SEON_RENDER_VALUE_MAX_STRING`, 80)."
+  {:malli/schema [:=> [:cat] :int]} [] (env-int "SEON_RENDER_VALUE_MAX_STRING" 80))
+
+(defn value-shape-sample
+  "How many homogeneous-map elements to probe for a shared key-set shape
+   (`SEON_RENDER_VALUE_SHAPE_SAMPLE`, 8)."
+  {:malli/schema [:=> [:cat] :int]} [] (env-int "SEON_RENDER_VALUE_SHAPE_SAMPLE" 8))
+
+(defn value-verbatim-cap
+  "Char budget under which an eval value prints WHOLE (REPL-style) instead of
+   being skeletonized (`SEON_RENDER_VALUE_VERBATIM_CAP`, 1500)."
+  {:malli/schema [:=> [:cat] :int]} [] (env-int "SEON_RENDER_VALUE_VERBATIM_CAP" 1500))
+
+(defn value-width
+  "Inline-vs-break width budget for the skeleton emitter
+   (`SEON_RENDER_VALUE_WIDTH`, 72)."
+  {:malli/schema [:=> [:cat] :int]} [] (env-int "SEON_RENDER_VALUE_WIDTH" 72))
+
+;;; --- Agent + test bounds (not render caps — kept on their own prefixes).
+
+(defn default-turn-limit
+  "The `SEON_DEFAULT_TURN_LIMIT` work-bound override (parsed int), or nil when
+   unset / unparseable (the caller then applies its own default)."
+  {:malli/schema [:=> [:cat] [:maybe :int]]}
+  []
+  (let [v (some-> (env "SEON_DEFAULT_TURN_LIMIT") js/parseInt)]
+    (when (and (number? v) (not (js/isNaN v))) v)))
+
+(defn tick-ms
+  "The `SEON_TICK_MS` ticker-cadence override (parsed POSITIVE int), or nil
+   when unset / unparseable / non-positive (the caller then uses its default)."
+  {:malli/schema [:=> [:cat] [:maybe :int]]}
+  []
+  (let [v (some-> (env "SEON_TICK_MS") js/parseInt)]
+    (when (and (number? v) (not (js/isNaN v)) (pos? v)) v)))
+
+(defn test-timeout-ms
+  "Per-test / -fixture wall-clock bound in ms (`SEON_TEST_TIMEOUT_MS`,
+   default 15000)."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (env-int "SEON_TEST_TIMEOUT_MS" 15000))
 
 (defn debug-capture
   "Raw `SEON_DEBUG_CAPTURE` string (or nil) — `seon.debug` applies its

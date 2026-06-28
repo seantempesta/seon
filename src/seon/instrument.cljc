@@ -36,6 +36,7 @@
                [goog.object :as gobj]
                [malli.core :as m]
                [malli.instrument :as mi]
+               [seon.config :as config]
                [seon.db :as db]
                [seon.error.instrument :as ei]])))
 
@@ -171,7 +172,7 @@
       destabilizes the pod."
      {:malli/schema [:=> [:cat] :boolean]}
      []
-     (let [v (some-> js/process .-env .-SEON_INSTRUMENT str str/lower-case)]
+     (let [v (some-> (config/env-string "SEON_INSTRUMENT") str/lower-case)]
        (not (contains? #{"0" "false" "off" "no"} v)))))
 
 #?(:cljs

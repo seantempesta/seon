@@ -65,6 +65,7 @@
     [cljs.reader :as reader]
     [sci.core :as sci]
     [sci.interrupt :as interrupt]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.log :as log]))
@@ -87,7 +88,7 @@
    shippable + reversible — PRD migration step 2)."
   {:malli/schema [:=> [:cat] :boolean]}
   []
-  (not= "0" (some-> js/process .-env .-SEON_TILE_SCI)))
+  (not= "0" (config/env-string "SEON_TILE_SCI")))
 
 (defn agent-authored-sym?
   "True when `sym` names an AGENT-authored fn — any agent-authored

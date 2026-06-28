@@ -26,7 +26,7 @@
    fonts) win. Missing/unreadable file = loud log line, page still
    renders (degrade, don't break)."
   (:require
-    [clojure.string :as str]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.log :as log]
     [seon.schema :as schema]))
@@ -86,21 +86,14 @@
    ::tagline "SEON_BRAND_TAGLINE"
    ::theme   "SEON_BRAND_THEME"})
 
-(defn- env-val
-  "process.env value for `var-name`, or nil when unset/blank (or when
-   there is no Node process env at all). Same access pattern as
-   seon.platform/runtime-root."
-  [var-name]
-  (let [v (some-> (.. js/globalThis -process) (.-env) (aget var-name))]
-    (when (and (string? v) (not (str/blank? v))) v)))
-
 (defn env-row
   "The brand attrs present in the environment — `::row`-shaped, only
-   the keys whose SEON_BRAND_* var is set and non-blank."
+   the keys whose SEON_BRAND_* var is set and non-blank (read through
+   `seon.config`, the ONE typed env surface)."
   {:malli/schema [:=> [:cat] ::row]}
   []
   (reduce-kv (fn [m attr var-name]
-               (if-let [v (env-val var-name)] (assoc m attr v) m))
+               (if-let [v (config/env-string var-name)] (assoc m attr v) m))
              {}
              env-var-names))
 
@@ -156,7 +149,7 @@
                   [:=> [:cat] [:or :nil :string]]
                   [:=> [:catn [::css-path [:or :nil ::css-path]]]
                        [:or :nil :string]]]}
-  ([] (css-text (env-val "SEON_BRAND_CSS")))
+  ([] (css-text (config/env-string "SEON_BRAND_CSS")))
   ([path]
    (when path
      (try

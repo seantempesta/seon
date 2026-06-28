@@ -31,6 +31,7 @@
     ["node:fs" :as fs]
     ["node:path" :as np]
     [clojure.string :as str]
+    [seon.config :as config]
     [seon.platform :as platform]))
 
 ;; ============================================================
@@ -73,14 +74,14 @@
   (let [host (platform/host)]
     {:seon.agent.fs/allowed-roots
      (case host
-       :node (when-let [r (some-> js/process .-env .-SEON_FS_ROOT)]
+       :node (when-let [r (config/env-string "SEON_FS_ROOT")]
                (->> (str/split r (re-pattern (str "\\" np/delimiter)))
                     (remove str/blank?)
                     vec))
        :wasi nil)
      :seon.agent.fs/read-only?
      (case host
-       :node (= "1" (some-> js/process .-env .-SEON_FS_READ_ONLY))
+       :node (= "1" (config/env-string "SEON_FS_READ_ONLY"))
        :wasi true)}))
 
 (defonce !config (atom (or (env-bootstrap) {})))
@@ -91,8 +92,8 @@
    can flip it. Any non-blank value other than \"0\" locks."
   []
   (case (platform/host)
-    :node (let [v (some-> js/process .-env .-SEON_FS_LOCK)]
-            (boolean (and v (not (str/blank? v)) (not= "0" v))))
+    :node (let [v (config/env-string "SEON_FS_LOCK")]
+            (boolean (and v (not= "0" v))))
     :wasi false))
 
 (defn read-only? []

@@ -28,6 +28,7 @@
    `current-run` is a thin `*conn*` adapter over the one derivation; seon.agent
    requires THIS ns, so the edge runs agent → run → derive, never the reverse."
   (:require
+    [seon.config :as config]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.schema :as schema]))
@@ -98,15 +99,6 @@
    `:seon.agent/default-deadline-ms`. Generous on purpose — the turn-limit is
    the usual stopper; the deadline catches a stalled LLM."
   (* 10 60 1000))
-
-(defn- env-turn-limit
-  "The `SEON_DEFAULT_TURN_LIMIT` env work-bound override (parsed int), or nil
-   when unset/unparseable. The run-model successor to the old
-   `SEON_MAX_TURNS_PER_LOOP` knob (which the deleted wake-token loop read)."
-  []
-  (some-> (.. js/process -env -SEON_DEFAULT_TURN_LIMIT)
-          js/parseInt
-          (#(when-not (js/isNaN %) %))))
 
 ;; ============================================================
 ;; Process-run set — the run-ids THIS pod process opened. `defonce` so a
@@ -243,7 +235,7 @@
                             " — create the agent first.")}}
       (let [now        (js/Date.)
             turn-limit (or tl (:seon.agent/default-turn-limit a)
-                           (env-turn-limit) default-turn-limit)
+                           (config/default-turn-limit) default-turn-limit)
             deadline   (or dl (js/Date. (+ (.getTime now)
                                            (or (:seon.agent/default-deadline-ms a)
                                                default-deadline-ms))))

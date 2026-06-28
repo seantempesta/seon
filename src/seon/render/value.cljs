@@ -60,22 +60,19 @@
   (:require
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
-    [seon.platform :as platform]))
-
-(defn- env-int [env-name default]
-  (let [v (some-> (platform/env-val env-name) js/parseInt)]
-    (if (and (number? v) (not (js/isNaN v)) (pos? v)) v default)))
+    [seon.config :as config]))
 
 ;; ============================================================
-;; Sampling bounds — every one overridable by env for token economy.
+;; Sampling bounds — every one overridable by env (the `SEON_RENDER_VALUE_*`
+;; sub-family) for token economy, read through `seon.config`.
 ;; ============================================================
 
 (def default-opts
-  {:max-depth    (env-int "SEON_VALUE_MAX_DEPTH" 3)
-   :max-keys     (env-int "SEON_VALUE_MAX_KEYS" 8)
-   :max-items    (env-int "SEON_VALUE_MAX_ITEMS" 8)
-   :max-string   (env-int "SEON_VALUE_MAX_STRING" 80)
-   :shape-sample (env-int "SEON_VALUE_SHAPE_SAMPLE" 8)})
+  {:max-depth    (config/value-max-depth)
+   :max-keys     (config/value-max-keys)
+   :max-items    (config/value-max-items)
+   :max-string   (config/value-max-string)
+   :shape-sample (config/value-shape-sample)})
 
 (def ^:private verbatim-cap
   "Char budget under which an eval value prints WHOLE (REPL-style) instead of
@@ -83,8 +80,8 @@
    its own just-stored data, not `{…2 keys}`/`\"…\"`. Grounded at the same
    1500 as `seon.agent.ctx/eval-render-cap` (which can't be required here —
    that ns sits ABOVE this one): a value this size is genuinely small, well
-   under the result-body clip. Override via SEON_VALUE_VERBATIM_CAP."
-  (env-int "SEON_VALUE_VERBATIM_CAP" 1500))
+   under the result-body clip. Override via SEON_RENDER_VALUE_VERBATIM_CAP."
+  (config/value-verbatim-cap))
 
 (def ^:private verbatim-probe-opts
   "Generous bounds used ONLY to test — LAZY-SAFELY — whether `value` is small
@@ -287,7 +284,7 @@
 ;; ============================================================
 
 (def ^:private width
-  (env-int "SEON_VALUE_WIDTH" 72))
+  (config/value-width))
 
 (defn- leaf-marker? [x]
   (and (map? x)

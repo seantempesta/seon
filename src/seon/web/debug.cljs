@@ -242,7 +242,7 @@
      :turn-durs  turn-durs
      ;; No render-cap elision on the right pane — the section twins ARE the
      ;; prompt sections (the transcript twin self-bounds via the composer's
-     ;; transcript-char-budget). Kept at 0 so the pane's existing
+     ;; transcript-token-cap). Kept at 0 so the pane's existing
      ;; elided-note branch is a no-op.
      :elided    0
      :agent-tile tile

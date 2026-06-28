@@ -262,10 +262,9 @@
    override, else `SOUL.md`. `nil` when `SEON_SOUL` is explicitly disabled
    (`false`/`0`/`off`/`no`) — the `:soul` block is then omitted entirely."
   (when-not (contains? #{"false" "0" "off" "no"}
-                       (some-> (.. js/globalThis -process) .-env (aget "SEON_SOUL")
+                       (some-> (config/env-string "SEON_SOUL")
                                str/lower-case str/trim))
-    (or (some-> (.. js/globalThis -process) .-env (aget "SEON_SOUL_FILE")
-                (#(when-not (str/blank? %) %)))
+    (or (config/env-string "SEON_SOUL_FILE")
         "SOUL.md")))
 
 (def agents-file-path
@@ -386,12 +385,9 @@
    is context-wasting noise. The citable RESULT BODY gets the larger
    [[result-body-render-cap]] instead. Context-SAFETY invariant: no single
    eval component may dominate the agent's whole context (one 9.7M-char
-   `pull` result once blew the prompt to ~9.8M chars). Override via env
-   SEON_EVAL_RENDER_CAP."
-  (or (some-> (.. js/process -env -SEON_EVAL_RENDER_CAP)
-              js/parseInt
-              (#(when-not (js/isNaN %) %)))
-      1500))
+   `pull` result once blew the prompt to ~9.8M chars). The knob lives in
+   `seon.config` (SEON_RENDER_EVAL_CAP)."
+  (config/eval-render-cap))
 
 (def result-body-render-cap
   "Render cap for the CITABLE RESULT BODY — the `;;=> <value>` line every
@@ -408,11 +404,8 @@
    cap (an LLM-facing read-time projection) and `store-edn-cap` (the
    write-time per-datom anti-OOM RAM ceiling) are different tiers: this
    one is independently tunable down for token economy WITHOUT moving the
-   RAM ceiling. Override via env SEON_RESULT_BODY_RENDER_CAP."
-  (or (some-> (.. js/process -env -SEON_RESULT_BODY_RENDER_CAP)
-              js/parseInt
-              (#(when-not (js/isNaN %) %)))
-      16384))
+   RAM ceiling. The knob lives in `seon.config` (SEON_RENDER_RESULT_CAP)."
+  (config/result-body-render-cap))
 
 (defn cap-result
   "Truncate a rendered eval-result string to `eval-render-cap`,
@@ -441,11 +434,9 @@
    in the transcript: each inbound message must be individually bounded or
    a single pasted blob could blow the context. 4000 (≈1k tokens) keeps
    any realistic chat turn whole; the full content stays in the db
-   ((seon.agent/messages)). Override via env SEON_MESSAGE_RENDER_CAP."
-  (or (some-> (.. js/process -env -SEON_MESSAGE_RENDER_CAP)
-              js/parseInt
-              (#(when-not (js/isNaN %) %)))
-      4000))
+   ((seon.agent/messages)). The knob lives in `seon.config`
+   (SEON_RENDER_MESSAGE_CAP)."
+  (config/message-render-cap))
 
 (defn cap-result-body
   "Like `cap-result`, but for an eval RESULT body specifically: when the

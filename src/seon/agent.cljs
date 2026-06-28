@@ -130,7 +130,7 @@
 (def namespaces-block ctx-namespaces/namespaces-block)
 (def render-namespace ctx/render-namespace)
 (def warnings-block ctx-warnings/warnings-block)
-(def transcript-char-budget ctx-transcript/transcript-char-budget)
+(def transcript-token-cap ctx-transcript/transcript-token-cap)
 (def transcript-block ctx-transcript/transcript-block)
 (def context-root ctx/context-root)
 

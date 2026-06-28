@@ -19,6 +19,7 @@
   (:refer-clojure :exclude [run!])
   (:require [cljs.test :as t]
             [clojure.string :as str]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
             [seon.schema :as schema]))
@@ -345,16 +346,6 @@
 ;; frees the awaiter.
 ;; ============================================================
 
-(defn- env-test-timeout-ms
-  "Per-test/-fixture wall-clock bound in ms. `SEON_TEST_TIMEOUT_MS` overrides
-   the 15000 default — generous vs. real async probes (25–50 ms), a hard
-   ceiling on a hang."
-  []
-  (or (some-> (.. js/process -env -SEON_TEST_TIMEOUT_MS)
-              js/parseInt
-              (#(when (and (not (js/isNaN %)) (pos? %)) %)))
-      15000))
-
 (defn- report-timeout!
   "Emit a timeout `:error` report event (read by the active reporter via
    `t/*current-env*`). `what` is :test or :fixture; `label` names the offending
@@ -546,7 +537,7 @@
         by-ns    (group-by :ns present)
         ;; Per-test/-fixture wall-clock bound — see `with-test-timeout`. Read
         ;; once per run so a never-settling body can't park the whole run-loop.
-        ms       (env-test-timeout-ms)]
+        ms       (config/test-timeout-ms)]
     (binding [t/*current-env* env]
       (doseq [{:keys [sym]} missing]
         (t/update-current-env! [:report-counters :test] inc)

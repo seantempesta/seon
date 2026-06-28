@@ -37,20 +37,18 @@
     [seon.agent.message :as msg]
     [seon.agent.run :as run]
     [seon.agent.ctx :as ctx]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.render :as render]))
 
-(def transcript-char-budget
-  "Total rendered-chars cap for the transcript section (~6k tokens at
-   chars/4). RETAINED as the eviction knob but currently OFF for the
-   transcript (`:seon.render/clip :none` — the transcript renders ALL
-   events until the agent manages its own context; the sliding window
-   lands later). Override via env SEON_TRANSCRIPT_CHAR_BUDGET."
-  (or (some-> (.. js/process -env -SEON_TRANSCRIPT_CHAR_BUDGET)
-              js/parseInt
-              (#(when-not (js/isNaN %) %)))
-      24000))
+(def transcript-token-cap
+  "Total token cap for the transcript section (~6k tokens). RETAINED as the
+   eviction knob but currently OFF for the transcript (`:seon.render/clip
+   :none` — the transcript renders ALL events until the agent manages its own
+   context; the sliding window lands later). Measured in TOKENS, not chars.
+   The knob lives in `seon.config` (SEON_RENDER_TRANSCRIPT_TOKEN_CAP)."
+  (config/transcript-token-cap))
 
 ;; ------------------------------------------------------------
 ;; Masthead — the transcript's in-band opener, rendered every turn as the
