@@ -422,6 +422,12 @@
    ;; Back-ref to the inbound :human message an address-todo tracks
    ;; (auto-minted in message!; the render half links id+age+title).
    :seon.agent.todo/message
+   ;; The plan TREE edge (parent, plain ref) + the dependency DAG edges
+   ;; (depends-on, plain cardinality-many ref). Boot-installed so the derived
+   ;; work-queue rules (next/blocked/ready) query them before any tx has
+   ;; lazily installed them on a fresh world.
+   :seon.agent.todo/parent
+   :seon.agent.todo/depends-on
 
    ;; --- Eval ---
    ;; Evals are component-many on :seon.agent.turn/evals — no standalone

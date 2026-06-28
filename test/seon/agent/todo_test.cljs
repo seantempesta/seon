@@ -1,6 +1,6 @@
 (ns seon.agent.todo-test
   "Envelope-contract tests for seon.agent.todo — the exemplar store/retrieve ns.
-   Covers add!/complete!/reopen! happy + failure paths, owner scoping (ALS
+   Covers add!/done!/reopen! happy + failure paths, owner scoping (ALS
    default + explicit), the resume property (open items persist; every list
    re-derives from the conn), and the pure open-todos-body view. All on a
    FRESH :memory conn seeded like the pod boots — never the live agent conn."
@@ -53,6 +53,12 @@
                  (set! db/*conn* conn)
                  (-> (js/Promise.resolve (body conn))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
+
+(defn- with-agent-conn
+  "Fresh seeded conn as the root *conn*, `body` (a 0-arg fn → Promise) run
+   inside (db/with-agent a-id) so the verbs' ALS scope resolves to agent A."
+  [body]
+  (with-conn (fn [_] (db/with-agent a-id body))))
 
 (defn- open-titles [env]
   (mapv :seon.agent.todo/title (:seon.agent.todo/todos env)))
@@ -150,9 +156,9 @@
                           ids   (mapv :seon.agent.todo/id
                                       (:seon.agent.todo/todos
                                         (todo/list-open {:seon.agent.todo/owner a-ref})))]
-                      (is (and (str/includes? block "seon.agent.todo/complete!")
+                      (is (and (str/includes? block "seon.agent.todo/done!")
                                (str/includes? block ":seon.agent.todo/id"))
-                          "header teaches the complete! call — names the fn and its :seon.agent.todo/id arg")
+                          "header teaches the done! call — names the fn and its :seon.agent.todo/id arg")
                       (is (and (seq ids) (every? #(str/includes? block %) ids))
                           "every open row renders its durable id — actionable without a query")
                       (is (str/includes? block "first (oldest)")
@@ -162,7 +168,7 @@
                           "oldest first — `first (oldest)` precedes the newer `second`"))
                     (let [id (-> (todo/list-open {:seon.agent.todo/owner a-ref})
                                  :seon.agent.todo/todos first :seon.agent.todo/id)]
-                      (-> (todo/complete! {:seon.agent.todo/id id})
+                      (-> (todo/done! {:seon.agent.todo/id id})
                           (.then (fn [{ok? :seon.agent.todo/ok?}]
                                    (is (true? ok?))
                                    (is (inst? (:seon.agent.todo/completed-at
@@ -172,7 +178,7 @@
                                           (open-titles
                                             (todo/list-open {:seon.agent.todo/owner a-ref})))
                                        "done item left the derived view")
-                                   (todo/complete! {:seon.agent.todo/id id})))
+                                   (todo/done! {:seon.agent.todo/id id})))
                           (.then (fn [{ok? :seon.agent.todo/ok?}]
                                    (is (true? ok?) "already-done is idempotent")
                                    (todo/reopen! {:seon.agent.todo/id id})))
@@ -188,11 +194,11 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest complete-unknown-id-is-an-envelope
+(deftest done-unknown-id-is-an-envelope
   (async done
     (-> (with-conn
           (fn [_]
-            (-> (todo/complete! {:seon.agent.todo/id "zzz-0000000000"})
+            (-> (todo/done! {:seon.agent.todo/id "zzz-0000000000"})
                 (.then (fn [{ok? :seon.agent.todo/ok? error :seon.agent.todo/error}]
                          (is (false? ok?))
                          (is (re-find #"list-open" error) "points at the fix"))))))
@@ -237,3 +243,144 @@
                         "other agent, no items → empty, section vanishes"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; --- hierarchical + dependency-aware behavior (the plan tree + DAG). Assert
+;; --- MECHANISM (tree builds, deps block, next = ready leaves, drop! walks the
+;; --- subtree, blocked/ready derive correctly), never exact rendered strings.
+
+(deftest plan-builds-tree-and-deps-and-derives-the-queue
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (todo/plan!
+                    {:seon.agent.todo/title "Process inbox → KB"
+                     :seon.agent.todo/children
+                     [{:seon.agent.todo/title "process notes-a.md" :seon.agent.todo/ref "a"}
+                      {:seon.agent.todo/title "process notes-b.md" :seon.agent.todo/ref "b"}
+                      {:seon.agent.todo/title "synthesize findings"
+                       :seon.agent.todo/ref "syn" :seon.agent.todo/after ["a" "b"]}]})
+                  (.then (fn [{:seon.agent.todo/keys [ok? root ids]}]
+                           (reset! st {:root root :ids ids})
+                           (is (true? ok?) "plan! committed in ONE tx")
+                           (is (string? root))
+                           (is (= #{:root "a" "b" "syn"} (set (keys ids)))
+                               "label→id map returned for the root + each :ref node")
+                           (let [sub  (todo/tree {:seon.agent.todo/root? root})
+                                 kids (:seon.agent.todo/_parent sub)
+                                 syn  (some #(when (= (get ids "syn") (:seon.agent.todo/id %)) %) kids)]
+                             (is (= 3 (count kids)) "plan! linked 3 children under root in one tx")
+                             (is (= 2 (count (:seon.agent.todo/depends-on syn)))
+                                 "syn's two dependency edges landed in the SAME tx"))
+                           (is (= #{"process notes-a.md" "process notes-b.md"}
+                                  (set (map :seon.agent.todo/title (todo/next {}))))
+                               "next surfaces ONLY ready leaves — syn is blocked")
+                           (is (:seon.agent.todo/ready? (todo/status {:seon.agent.todo/id (get ids "a")}))
+                               "an open free leaf is ready")
+                           (is (false? (:seon.agent.todo/blocked? (todo/status {:seon.agent.todo/id (get ids "a")}))))
+                           (is (:seon.agent.todo/blocked? (todo/status {:seon.agent.todo/id (get ids "syn")}))
+                               "syn is blocked while its deps have open work")
+                           (is (false? (:seon.agent.todo/ready? (todo/status {:seon.agent.todo/id (get ids "syn")}))))
+                           (is (= {:seon.agent.todo/done 0 :seon.agent.todo/total 3}
+                                  (:seon.agent.todo/progress (todo/status {:seon.agent.todo/id root})))
+                               "root roll-up counts its 3 leaves, none done")
+                           (todo/done! {:seon.agent.todo/id (get ids "a")})))
+                  (.then (fn [_] (todo/done! {:seon.agent.todo/id (get-in @st [:ids "b"])})))
+                  (.then (fn [_]
+                           (let [{:keys [root ids]} @st]
+                             (is (= ["synthesize findings"]
+                                    (mapv :seon.agent.todo/title (todo/next {})))
+                                 "completing both deps unblocks syn — now the one ready leaf")
+                             (is (false? (:seon.agent.todo/blocked?
+                                           (todo/status {:seon.agent.todo/id (get ids "syn")}))))
+                             (is (= {:seon.agent.todo/done 2 :seon.agent.todo/total 3}
+                                    (:seon.agent.todo/progress (todo/status {:seon.agent.todo/id root})))
+                                 "roll-up advances as leaves close — nothing stored"))
+                           (todo/drop! {:seon.agent.todo/id (:root @st)})))
+                  (.then (fn [{:seon.agent.todo/keys [ok? dropped]}]
+                           (is (true? ok?))
+                           (is (= 4 dropped)
+                               "drop! walked the subtree: root + 3 children (plain ref, no cascade)")
+                           (is (empty? (todo/next {})) "queue empty after drop!")
+                           (is (empty? (:seon.agent.todo/todos
+                                         (todo/list-open {:seon.agent.todo/all? true})))
+                               "no open todos remain — the whole subtree was retracted"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest add-parent-and-depends-structure-and-block-the-queue
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (todo/add! {:seon.agent.todo/title "milestone"})
+                  (.then (fn [{p :seon.agent.todo/id}]
+                           (swap! st assoc :p p)
+                           (todo/add! {:seon.agent.todo/title "step 1"
+                                       :seon.agent.todo/parent [:seon.agent.todo/id p]})))
+                  (.then (fn [{s1 :seon.agent.todo/id}]
+                           (swap! st assoc :s1 s1)
+                           (todo/add! {:seon.agent.todo/title "step 2"
+                                       :seon.agent.todo/parent [:seon.agent.todo/id (:p @st)]
+                                       :seon.agent.todo/depends-on [[:seon.agent.todo/id s1]]})))
+                  (.then (fn [{s2 :seon.agent.todo/id}]
+                           (swap! st assoc :s2 s2)
+                           (is (= #{"step 1"}
+                                  (set (map :seon.agent.todo/title (todo/next {}))))
+                               "add!-built dependency blocks step 2 — only step 1 ready")
+                           (is (:seon.agent.todo/blocked? (todo/status {:seon.agent.todo/id s2})))
+                           (is (= {:seon.agent.todo/done 0 :seon.agent.todo/total 2}
+                                  (:seon.agent.todo/progress
+                                    (todo/status {:seon.agent.todo/id (:p @st)})))
+                               "milestone roll-up = 0/2 over its leaves; the parent is never offered")
+                           (todo/done! {:seon.agent.todo/id (:s1 @st)})))
+                  (.then (fn [_]
+                           (is (= #{"step 2"}
+                                  (set (map :seon.agent.todo/title (todo/next {}))))
+                               "completing step 1 unblocks step 2")
+                           (todo/add! {:seon.agent.todo/title "step 3"})))
+                  (.then (fn [{s3 :seon.agent.todo/id}]
+                           (swap! st assoc :s3 s3)
+                           (todo/depends! {:seon.agent.todo/id (:s2 @st)
+                                           :seon.agent.todo/on [[:seon.agent.todo/id s3]]})))
+                  (.then (fn [{ok? :seon.agent.todo/ok?}]
+                           (is (true? ok?))
+                           (is (:seon.agent.todo/blocked?
+                                 (todo/status {:seon.agent.todo/id (:s2 @st)}))
+                               "depends! on the still-open step 3 RE-blocks step 2"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest move-reparents-a-node-in-the-tree
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (todo/add! {:seon.agent.todo/title "plan A"})
+                  (.then (fn [{p1 :seon.agent.todo/id}]
+                           (swap! st assoc :p1 p1)
+                           (todo/add! {:seon.agent.todo/title "plan B"})))
+                  (.then (fn [{p2 :seon.agent.todo/id}]
+                           (swap! st assoc :p2 p2)
+                           (todo/add! {:seon.agent.todo/title "leaf"
+                                       :seon.agent.todo/parent [:seon.agent.todo/id (:p1 @st)]})))
+                  (.then (fn [{lf :seon.agent.todo/id}]
+                           (swap! st assoc :leaf lf)
+                           (is (= 1 (count (:seon.agent.todo/_parent
+                                             (todo/tree {:seon.agent.todo/root? (:p1 @st)}))))
+                               "leaf starts under plan A")
+                           (is (nil? (:seon.agent.todo/_parent
+                                       (todo/tree {:seon.agent.todo/root? (:p2 @st)})))
+                               "plan B starts childless")
+                           (todo/move! {:seon.agent.todo/id lf
+                                        :seon.agent.todo/parent [:seon.agent.todo/id (:p2 @st)]})))
+                  (.then (fn [{ok? :seon.agent.todo/ok?}]
+                           (is (true? ok?))
+                           (is (nil? (:seon.agent.todo/_parent
+                                       (todo/tree {:seon.agent.todo/root? (:p1 @st)})))
+                               "move! retracted the old parent edge — plan A now childless")
+                           (is (= 1 (count (:seon.agent.todo/_parent
+                                             (todo/tree {:seon.agent.todo/root? (:p2 @st)}))))
+                               "move! re-parented the leaf under plan B"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

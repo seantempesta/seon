@@ -310,7 +310,7 @@
                   (fn [{mid :seon.agent.message/id}]
                     (let [t (first (todos-for conn a-id))]
                       (is (= :open (:seon.agent.todo/status t)) "unaddressed ⇒ linked todo open")
-                      (todo/complete! {:seon.agent.todo/id (:seon.agent.todo/id t)}))))
+                      (todo/done! {:seon.agent.todo/id (:seon.agent.todo/id t)}))))
                 (.then
                   (fn [_]
                     (let [t2 (first (todos-for conn a-id))]

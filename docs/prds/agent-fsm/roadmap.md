@@ -325,6 +325,20 @@ queries. Schema tables land in [[data-model]] §5; the agent-facing verbs in [[t
   roll-up (parent progress = its children's). The work-list IS the plan tree (top =
   plans/milestones, leaves = actions). NOT a separate `:my.plan`. Add `:my.todo/agent`
   scoping (REPLACE the core `::owner` ref framing).
+  - **Phase 6a — DONE (the tree+DAG MECHANISM, in-place on `seon.agent.todo`).**
+    Added `:seon.agent.todo/parent` (plain tree ref) + `:seon.agent.todo/depends-on`
+    (plain cardinality-many DAG ref), both boot-installed (client.cljs); the readable
+    `seon.agent.todo/rules` set (descendant/leaf/open-work/blocked/ready — pure
+    Datalog, nothing derivable stored); and the verbs `plan!` (one tempid-linked
+    transact), `add!` (now takes parent/depends-on), `done!` (renamed from
+    `complete!`), `depends!`, `move!`, `drop!` (walks the subtree — plain ref, no
+    cascade), `next` (ready leaves), `tree` (recursive reverse-ref pull), `status`
+    (derived done?/blocked?/ready?/roll-up). Tests + live-proven on the pod.
+    DEFERRED to the rest of Phase 6: the ns rename → `my.todo` with `:my.todo/agent`
+    scoping (kept `seon.agent.todo` + `::owner` here), the dual ai/html render
+    rewrite of `open-todos-block`, `:my.todo/produced`, `my.kb`, `my.agent/purpose`.
+    Known follow-up: `seon.derive/open-todo-count` now over-counts (milestone
+    parents stay `:open`); repoint it at the `ready`/`open-work` rules.
 - **`my.kb`** stays global — the `my.kb.shared` singleton (kb/shared.cljs:38-49) is the
   exemplar (no agent ref). Index-everything applies; `my.*` renders full.
 - **`my.agent`** — the per-agent home ns; `:my.agent/purpose` (from Phase 3) is its
