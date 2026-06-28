@@ -297,6 +297,10 @@
                         (assoc extra :seon.eval/warning-type type)))))])
     (reset! !warning-dispatcher-version init-version)))
 
+;; Defined after `ns-fn-members` (it reads the live ns members); declared here
+;; so `init-bootstrap!` can call it.
+(declare seed-toolkit-refers!)
+
 (defn ^:async init-bootstrap!
   "Initialize a fresh compile-state from out/bootstrap/. Returns the
    compile-state, ready for `eval` / `eval-batch!`. Stores cljs.core
@@ -335,6 +339,11 @@
     ;; Idempotent + version-stamped against init-version so hot-reload
     ;; reinstalls the closure.
     (install-warning-dispatcher!)
+    ;; Seed the home-ns refer toolkit defs (see `seed-toolkit-refers!`) so
+    ;; `setup-agent-ns!`'s `(ns … (:refer [wait complete …]))` analyzes CLEANLY.
+    ;; init-bootstrap! is the ONE birthplace of a compile-state, so every
+    ;; fresh/rebuilt state carries the seed.
+    (seed-toolkit-refers! state)
     state))
 
 ;; ============================================================
@@ -422,6 +431,47 @@
               (js/Object.keys ns-obj))
       {})
     (catch :default _ {})))
+
+;; ============================================================
+;; Home-ns refer toolkit seed — declare the toolkit nses' analyzer `:defs` so
+;; `setup-agent-ns!`'s `(ns <home> (:refer [wait complete …]))` analyzes
+;; CLEANLY. The refer'd nses are HOST-bundled (emitted into the :client bundle,
+;; live on globalThis) but are NOT `:bootstrap` analyzer entries, so a fresh
+;; compile-state has no analyzer metadata for them — and the analyzer's
+;; refer-check (`missing-use?`) raises `:undeclared-ns-form` ("Could not parse
+;; ns form"). Seeding the `:defs` makes `missing-use?` false → the refer parses
+;; with `:ok true`, which is why setup-agent-ns! no longer needs a bare-`(ns)`
+;; prime or a `(fn? complete)` probe.
+;; ============================================================
+
+(def ^:private home-ns-refer-toolkit-nses
+  "Host-bundled nses whose vars the agent home ns `:refer`s UNQUALIFIED (see
+   `setup-agent-ns!`). Only `:refer`'d nses need seeded `:defs` — `:as` aliases
+   don't validate members at parse time. `seon.agent.lifecycle` is the sole
+   `:refer`; data so adding a refer'd toolkit ns is a one-line edit."
+  '[seon.agent.lifecycle])
+
+(defn- seed-toolkit-refers!
+  "Declare the LIVE fn members of each [[home-ns-refer-toolkit-nses]] ns to the
+   analyzer in `compile-state`, so a home-ns `:refer` of those vars analyzes
+   cleanly. Members are read from the live globalThis ns object via
+   [[ns-fn-members]] (code-as-data — no hardcoded var list to drift); the
+   seeded `:def` is the minimal `{:name fq-sym}` that satisfies the analyzer's
+   `missing-use?` check. Idempotent (merge). Called from [[init-bootstrap!]] so
+   every fresh/rebuilt compile-state carries it."
+  [compile-state]
+  (doseq [ns-sym home-ns-refer-toolkit-nses]
+    (let [members (ns-fn-members (name ns-sym))]
+      (when (seq members)
+        (swap! compile-state update-in
+               [:cljs.analyzer/namespaces ns-sym]
+               (fn [m]
+                 (-> (or m {})
+                     (assoc :name ns-sym)
+                     (update :defs merge
+                             (into {} (for [sym (keys members)]
+                                        [sym {:name (symbol (name ns-sym)
+                                                            (name sym))}]))))))))))
 
 (defn ns-data-members
   "Enumerate the COMPILED NON-function members of namespace `ns-name` (a string
@@ -1140,15 +1190,14 @@
 
 (defn ^:async setup-agent-ns!
   "Create + initialize the agent's home namespace. Returns the agent-ns
-   symbol (for convenience — same as the input). Idempotent.
+   symbol (same as the input). Idempotent.
 
-   The home ns is set up with the verb + data aliases the context
-   teaches, so the agent's reflexive `(message/user …)` /
-   `(message/agent …)` / `(wait …)` / `(complete …)` /
-   `(terminate …)` forms — AND the `(schema/register! …)`
-   / `(db/query …)` / `(db/transact! …)` / `::db/…` data forms the
-   namespaces section + fn docstrings teach in their SHORT-aliased shape —
-   all resolve without fully-qualifying:
+   Evaluates ONE `(ns <home> (:require …))` form that aliases the verb + data
+   namespaces the context teaches — so the agent's reflexive
+   `(message/user …)` / `(message/agent …)` / `(wait …)` / `(complete …)` /
+   `(terminate …)` AND the short-aliased `(schema/register! …)` /
+   `(db/query …)` / `(db/transact! …)` / `::db/…` data forms all resolve
+   without fully-qualifying:
 
      (ns <home>
        (:require [seon.agent.message :as message]
@@ -1158,42 +1207,25 @@
                  [seon.db :as db]
                  [seon.agent.todo :as todo]))
 
-   The home ns defs NOTHING beyond these requires: a `result` def would
-   shadow the reserved `result` NAMESPACE that holds the `result/<id>`
-   value vars, so the ns stays clean and `result/<id>` resolves
-   top-level (a fresh agent ns reads `result/<id>` with no alias).
+   The home ns defs NOTHING beyond these requires: a `result` def would shadow
+   the reserved `result` NAMESPACE holding the `result/<id>` value vars, so the
+   ns stays clean and `result/<id>` resolves top-level (no alias).
 
-   For the agent's own id, use `(seon.db/current-agent-id)` — the core
-   provides it via the ALS dynvar bound at turn entry.
+   For the agent's own id, use `(seon.db/current-agent-id)` — the core provides
+   it via the ALS dynvar bound at turn entry. `:current-ns` is derived at read
+   time from the latest `:seon.eval/ns` datom (reactive-context).
 
-   `:current-ns` is derived at read time from the latest :seon.eval/ns
-   datom (seon.agent/current-ns + reactive-context principle).
+   `:analyze-deps? true` so the `(ns …)` form analyzes cljs.core's refer map
+   and wires the implicit macro refers (defn, str, atom, …) for subsequent
+   forms in the new ns.
 
-   Uses `:analyze-deps? true` so the `(ns …)` form analyzes cljs.core's
-   refer map and wires up implicit macro refers (defn, str, atom, etc.)
-   for subsequent forms in the new ns.
-
-   `seon.agent.lifecycle` / `seon.agent.message` are host-bundled, so a
-   `:refer` against them produces a benign `:undeclared-var` warning that flips
-   the eval `:ok` to false EVEN THOUGH the alias/refer map wires up and
-   the vars resolve at runtime (live-proven). So we do NOT trust the
-   eval `:ok`; we verify success by PROBING that the refer'd `complete`
-   resolves to a fn in the home ns, and only throw when that probe fails.
-
-   The home ns's runtime JS object is materialized by a BARE `(ns <home>)`
-   prime BEFORE the require/refer form. Why (root-caused + LIVE-PROVEN
-   2026-06-26): a `(defn foo)` in `my.agent.X` emits `my.agent.X.foo = …`,
-   which assumes the nested object path already exists — the `:def` emit
-   does NOT create it (cljs.compiler), and `goog.provide` is unreliable in
-   self-host (cljs forces `goog.isProvided_`→false). Object creation rides
-   on the ns-form's emit COMPLETING. But the host-bundled
-   `:refer [wait complete …]` raises an `:undeclared-var` that ABORTS the
-   emit before the object is provided — so the require/refer form alone
-   wires the analyzer entry + refers but leaves NO runtime object, and the
-   agent's first `(defn …)` writes into `undefined`. A bare `(ns <home>)`
-   has no refer to abort on, so it provides the object cleanly; the
-   subsequent require/refer form then layers the aliases on the existing
-   object (its own emit still aborts, harmlessly — the object persists)."
+   The `:refer [wait complete …]` against host-bundled `seon.agent.lifecycle`
+   analyzes CLEANLY because [[seed-toolkit-refers!]] (run in [[init-bootstrap!]])
+   declared that ns's `:defs` into every compile-state. The clean emit also
+   materializes the home ns's runtime JS object, so a later `(defn …)` has a
+   path to write into — hence NO bare-`(ns)` prime and NO `(fn? complete)`
+   probe. A non-`:ok` result now signals a REAL failure (the seed missing, or a
+   toolkit ns gone) and throws."
   {:malli/schema
    [:=> [:catn [::compile-state :any] [::agent-ns-sym :any] [::agent-id :any]] :any]}
   [compile-state agent-ns-sym _agent-id]
@@ -1204,23 +1236,16 @@
              " [seon.agent.lifecycle :refer [wait complete pause resume terminate]]"
              " [seon.schema :as schema]"
              " [seon.db :as db]"
-             " [seon.agent.todo :as todo]))")]
-    ;; Materialize the home ns's runtime JS object FIRST via a bare ns
-    ;; prime (no refer to abort the emit), so a later `(defn …)` has a path
-    ;; to write into. The require/refer form below then wires the aliases.
-    (await (eval compile-state (str "(ns " agent-ns-sym ")")
-                 {:ns 'cljs.user :analyze-deps? true}))
-    (await (eval compile-state setup-src
-                 {:ns 'cljs.user :analyze-deps? true}))
-    ;; The benign refer-warning makes the ns form report :ok false, so the
-    ;; home ns is verified by probing the wiring directly: `complete` (a
-    ;; refer'd verb) must resolve to a fn in the new ns.
-    (let [probe (await (eval compile-state "(fn? complete)"
-                             {:ns agent-ns-sym :analyze-deps? false}))]
-      (when-not (and (:ok probe) (true? (:value probe)))
-        (throw (ex-info "setup-agent-ns! failed — home ns verb aliases did not wire"
-                        {:agent-ns agent-ns-sym
-                         :probe    probe}))))
+             " [seon.agent.todo :as todo]))")
+        r (await (eval compile-state setup-src
+                       {:ns 'cljs.user :analyze-deps? true}))]
+    (when-not (:ok r)
+      (throw (ex-info
+               (str "setup-agent-ns! failed — the home-ns require/refer did not "
+                    "analyze cleanly for " agent-ns-sym ". seed-toolkit-refers! "
+                    "(in init-bootstrap!) must declare the refer'd toolkit "
+                    "defs into the compile-state.")
+               {:agent-ns agent-ns-sym :result r})))
     agent-ns-sym))
 
 ;; ============================================================
