@@ -134,38 +134,60 @@ Full analysis: `docs/prds/agent-fsm/research/diffusion-gpu-cost-comparison-2026-
 - **Endpoint id CHANGES on every `undeploy`+`deploy`** — `client.py` reads it from
   `DIFFGEMMA_EP` env; the deploy step extracts it from the deploy output.
 
-## Current blocker + env-fix options
+## Env-fix — SOLVED (recipe known; not yet implemented)
 
-The model code RUNS on the A100 and `transformers` loads, but:
-1. **Flash deploy-time deps are flaky** — `transformers` is present some deploys,
-   absent others (only **runtime** `pip install` inside the function is reliable).
-2. **The base image's torch 2.9.1+cu128 is broken/inconsistent** —
-   `torch._dynamo/config.py` → `Config() got an unexpected keyword argument
-   'deprecated'`, and `flex_attention` missing `setup_compilation_env`. Adding
-   torchvision/timm via deploy-deps appears to **partially upgrade/corrupt torch**.
+Root cause, grounded in the vendored SDK source (full detail +
+`file:line` cites in `research/runpod-flash-grounding-2026-06-28.md`):
 
-Options (the research agent is pinning the exact recipe):
-1. **Runtime-install a clean matched stack** (`torch+torchvision+transformers`
-   from the pytorch cu128 index) **+ a NetworkVolume** caching that stack AND the
-   50 GB model so cold starts are fast and stable. **(Lean.)**
-2. **Custom Docker base image** with versions pre-matched (cleanest; more setup;
-   verify Flash supports a custom base for a *code* `@Endpoint`, not just `image=`
-   external-server mode).
-3. **Split the path:** use RunPod's official **vLLM serverless** for the
-   black-box "does it run / context / tok/s" measurements now, and keep the
-   transformers/PyTorch path for the `accept_canvas` work.
+- `@Endpoint(dependencies=[...])` is a **build-time `pip install --target`** baked
+  into the uploaded tarball, **not** a worker install — and
+  **torch/torchvision/torchaudio/triton are force-stripped** (`SIZE_PROHIBITIVE_PACKAGES`).
+  Torch comes ONLY from the base image **`runpod/flash:py3.12-latest`**, which
+  ships the broken **torch 2.9.1+cu128**. The "transformers missing some deploys"
+  flakiness = the **1500 MB tarball cap** nudging an `--exclude transformers`.
+- **`FLASH_GPU_IMAGE`** env var **replaces the base image** for a *code*
+  `@Endpoint` (bypasses version validation, wins over the default). The `image=`
+  decorator arg is a *different* feature — external-image client mode (your code
+  wouldn't run). This is the key that unlocks everything.
+
+**The recipe (do this):**
+
+1. **Custom base image.** Build `FROM runpod/flash:py3.12-latest`, pip-install a
+   verified `torch+torchvision+transformers` **cu128** triple (transformers 5.11.0
+   + the matching torch), with a build-time `import torch._dynamo; setup_compilation_env`
+   **smoke test as the gate**. Push it; `export FLASH_GPU_IMAGE=<repo>:cu128-vN`.
+   This **deletes** all the `gpu_worker.py` runtime hacks (torchvision `--no-deps`,
+   the dynamo probe, the `setup_compilation_env` shim). Stay on **Python 3.12**
+   (other versions trigger an in-image torch reinstall → mismatch).
+2. **NetworkVolume.** `NetworkVolume(name=..., size=200, datacenter=EU_RO_1)` via
+   `volume=`, mounted at **`/runpod-volume`**; set `env={HF_HOME, HF_HUB_CACHE,
+   PIP_CACHE_DIR}` into it. Volume **and** endpoint must both be **EU-RO-1**.
+   Caches the 50 GB model → fast cold starts; survives `undeploy`; idempotent by
+   name+DC.
+3. **Stale workers, no more `undeploy`.** Code-only changes only bump a *rolling*
+   fingerprint, so warm flashboot snapshots keep the old handler. Changing a
+   **structural** field (the `FLASH_GPU_IMAGE` tag, `gpus`, `flashboot`) recreates
+   workers **with the endpoint id preserved** — so re-tagging the custom image
+   gives clean recycles for free, no endpoint-id churn.
+
+(Fallback if the custom image stalls: RunPod's official **vLLM serverless** for
+black-box "does it run / context / tok/s" measurements, keeping the transformers
+path for `accept_canvas`.)
 
 ## Next steps (ordered)
 
-1. **Read** `research/runpod-flash-grounding-2026-06-28.md` (research agent's
-   output) + the newly-vendored `reference-code/` Flash/RunPod SDK source.
-2. **NetworkVolume** (EU-RO-1, the serverless DC): create one, mount it, point
-   `HF_HOME` + pip cache at it → cache a clean torch stack + the 50 GB model.
-3. **Clean torch+transformers** → **first real generate** (the Clojure `mean`
-   prompt) → record coherence + tok/s. This is the milestone we haven't hit.
-4. **Max-context measurement** on A100-80 BF16 (how far past 100k).
-5. **`accept_canvas` observability** — surface the per-step canvas/entropy.
-6. **The 4 dynamic-context experiments** (infill → eval-renoise → retrieval →
+1. **Read** `research/runpod-flash-grounding-2026-06-28.md` (the recipe + `file:line`
+   cites) + the vendored `reference-code/flash` source.
+2. **Build + push the custom base image** (`FROM runpod/flash:py3.12-latest` + a
+   verified torch+transformers cu128 triple + the dynamo smoke-test gate); set
+   `FLASH_GPU_IMAGE`. **Delete** the `gpu_worker.py` runtime hacks once it works.
+3. **Create the NetworkVolume** (EU-RO-1), attach via `volume=`, point
+   `HF_HOME`/`PIP_CACHE_DIR` at `/runpod-volume`.
+4. **First real generate** — the Clojure `mean` prompt → coherence + tok/s. The
+   milestone we haven't hit yet.
+5. **Max-context measurement** on A100-80 BF16 (how far past 100k).
+6. **`accept_canvas` observability** — surface the per-step canvas/entropy.
+7. **The 4 dynamic-context experiments** (infill → eval-renoise → retrieval →
    live feedback), wiring Seon's eval cage + Proximum index as oracles over HTTP.
 
 ## Pointers
