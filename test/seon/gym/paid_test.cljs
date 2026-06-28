@@ -290,7 +290,7 @@
         (let [s   (first (:seon.gym/scenarios
                            (gym/load-scenarios!
                              {:seon.gym/path
-                              "test/seon/gym/scenarios/x3-expense-reuse-and-category-total.edn"})))
+                              "test/seon/gym/scenarios/x1-subscriptions-total-and-max.edn"})))
               run (fn [cfg]
                     (restore-operator-ai-env!)
                     (gym/run-scenario!

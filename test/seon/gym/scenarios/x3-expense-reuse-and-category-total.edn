@@ -39,7 +39,10 @@
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/agent   :b
    :seon.gym.predicate/axis    :consults-findings
-   :seon.gym.predicate/pattern "seon\\.db/(query|pull|entity|store-inventory)"}
+   ;; Match the TAUGHT alias `db/query` (agent nses alias seon.db :as db;
+   ;; the manual teaches db/query, db/entity) AND fully-qualified
+   ;; seon.db/query — `\bdb/` hits both (the `.` is a word boundary).
+   :seon.gym.predicate/pattern "\\bdb/(query|pull|entity|store-inventory)"}
   ;; NO FORK (generic, provenance-anchored): every agent-domain attr in the
   ;; post-run store is one of A's seeded :my.expense/* attrs — B reused the
   ;; shape and minted no parallel spelling (e.g. :my.dining/* or :spend/*).

@@ -43,7 +43,13 @@
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/agent   :b
    :seon.gym.predicate/axis    :consults-findings
-   :seon.gym.predicate/pattern "seon\\.db/(query|pull|entity|store-inventory)"}
+   ;; Match the TAUGHT alias form `db/query` (agent home-nses alias
+   ;; seon.db :as db — the namespaces manual teaches db/query, db/entity,
+   ;; db/transact!) AND the fully-qualified `seon.db/query`. `\bdb/` hits
+   ;; both: in `seon.db/query` the `.` is a word boundary before `db`.
+   ;; The former `seon\.db/…` anchor RED-flagged a correct discovery eval
+   ;; that used the alias the context itself prescribes.
+   :seon.gym.predicate/pattern "\\bdb/(query|pull|entity|store-inventory)"}
   {:seon.gym.predicate/id     :b-replied-to-the-user
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :replies-honestly
