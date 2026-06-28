@@ -35,8 +35,11 @@
     [seon.render.default :as default]
     [seon.render.live-tile :as live-tile]
     [seon.render.sci :as render-sci]
+    [seon.render.value :as value]
     [seon.schema :as schema]
+    [seon.ui.clojure :as cljhl]
     [seon.ui.html :as html]
+    [seon.ui.markdown :as md]
     [seon.web.reactive.transform :as transform]))
 
 ;; ============================================================
@@ -376,6 +379,214 @@
           (live-tile/error-tile
             {:seon.error/message (str sym " threw: " (or (.-message e) (str e)))
              :seon.error/symbol  sym}))))))
+
+;; ============================================================
+;; THE typed-block renderer — `block`. One guarded `value → render` fn
+;; that DISPATCHES ON VALUE-KIND so every surface (transcript entry, canvas,
+;; /debug) "just displays the block." It is NOT a new mechanism: it
+;; GENERALIZES the same unwrap/guard seam `render-entity-html` centralizes
+;; (the ONE `unwrap-response`) from "dispatch on the entity's render symbol"
+;; to "dispatch on the value's KIND," reusing the inventory of renderers that
+;; already exist (md->hiccup, the value panel, clj->hiccup, the error-tile
+;; seam). The converters (`handlers/*/render-html`) become THIN — each tags
+;; its fields and hands them to `block`.
+;;
+;; THE TAGGED-VALUE CONTRACT (the discriminator is the namespaced key ON the
+;; value — never a stored `:kind` field; house rule). A converter tags a
+;; field by wrapping it in the marker map; `block` dispatches on the marker:
+;;
+;;   message → {:seon.render/markdown "<md string>"}     ; → md->hiccup
+;;   source  → {:seon.render/source   "<clj string>"}    ; → clj->hiccup
+;;   data    → render.value/render-html-data projection  ; key :…value/tree
+;;   error   → a :seon/error value                       ; key :seon.error/message
+;;   hiccup  → a literal hiccup vector                   ; [keyword … ] passthrough
+;;   else    → any raw value → projected via render-html-data (never throws)
+;; ============================================================
+
+(schema/register! :seon.render/markdown :string)
+(schema/register! :seon.render/source   :string)
+(schema/register! :seon.render/message-block [:map [:seon.render/markdown :seon.render/markdown]])
+(schema/register! :seon.render/source-block  [:map [:seon.render/source   :seon.render/source]])
+(schema/register! :seon.render/view [:enum :html :ai])
+
+(defn- message-block? [x]
+  (and (map? x) (contains? x :seon.render/markdown)))
+
+(defn- source-block? [x]
+  (and (map? x) (contains? x :seon.render/source)))
+
+(defn- data-projection? [x]
+  (and (map? x) (contains? x :seon.render.value/tree)))
+
+(defn- error-value? [x]
+  (and (map? x) (string? (:seon.error/message x))))
+
+(defn- value-leaf
+  "A non-container `render-html-data` skeleton node → a styled inline token.
+   Mirrors `seon.render.value`'s marker tokens (datom / opaque / clipped
+   string), plus plain scalars."
+  [x]
+  (cond
+    (and (map? x) (contains? x :seon.eval/datom))
+    (let [[e a v] (:seon.eval/datom x)]
+      [:span {:class "text-keyword font-mono"}
+       (str "#datom[" e " " (pr-str a) " " (pr-str v) "]")])
+
+    (and (map? x) (contains? x :seon.eval/opaque))
+    [:span {:class "text-text-400 font-mono italic"}
+     (str "#‹" (:seon.eval/opaque x)
+          (when-some [s (:seon.eval/summary x)] (str " " s)) "›")]
+
+    (and (map? x) (contains? x :seon.render.value/string-len))
+    [:span {:class "text-success font-mono break-all"}
+     (str (pr-str (str (:seon.render.value/head x) "…"))
+          " ⟨" (:seon.render.value/string-len x) " chars⟩")]
+
+    :else
+    [:span {:class (str "font-mono break-all "
+                        (cond (string? x)  "text-success"
+                              (keyword? x) "text-keyword"
+                              (number? x)  "text-eval"
+                              (nil? x)     "text-text-600"
+                              :else        "text-text-200"))}
+     (pr-str x)]))
+
+(declare value-node)
+
+(defn- value-details
+  "A collapsible container row (`<details>`) for a map / seqish skeleton node.
+   Open for the first two depths (value at a glance), collapsed below."
+  [summary-hiccup child-rows depth]
+  [:details (cond-> {:class "value-node min-w-0"}
+              (< depth 2) (assoc :open "open"))
+   [:summary {:class "cursor-pointer text-xs select-none hover:text-amber-300 marker:text-text-600"}
+    summary-hiccup]
+   (into [:div {:class "pl-3 ml-0.5 border-l border-base-700 mt-1 flex flex-col gap-1 min-w-0"}]
+         child-rows)])
+
+(defn- map-node [m depth]
+  (let [elided (:seon.render.value/elided-keys m)
+        m      (dissoc m :seon.render.value/elided-keys)
+        pairs  (seq m)
+        n      (count pairs)
+        rows   (cond-> (vec (for [[k v] pairs]
+                              [:div {:class "flex items-start gap-1.5 text-xs min-w-0"}
+                               [:span {:class "text-keyword shrink-0 font-mono"} (pr-str k)]
+                               (value-node v (inc depth))]))
+                 elided (conj [:div {:class "text-2xs text-text-600 font-mono"}
+                               (str "… +" elided " more key" (when (not= 1 elided) "s"))]))]
+    (value-details
+      [:span {:class "text-text-400 font-mono"}
+       (str "{} " n " key" (when (not= 1 n) "s")
+            (when elided (str " +" elided " hidden")))]
+      rows depth)))
+
+(defn- seqish-node [m depth]
+  (let [{:seon.render.value/keys [kind shown elided shape]} m
+        [open close] (case kind :vector ["[" "]"] :set ["#{" "}"] ["(" ")"])
+        n     (count shown)
+        rows  (cond-> (vec (map-indexed
+                             (fn [i v]
+                               [:div {:class "flex items-start gap-1.5 text-xs min-w-0"}
+                                [:span {:class "text-text-600 shrink-0 font-mono"} (str i)]
+                                (value-node v (inc depth))])
+                             shown))
+                (and elided (not= 0 elided))
+                (conj [:div {:class "text-2xs text-text-600 font-mono"}
+                       (if (= :more elided) "… +more" (str "… +" elided " more"))]))]
+    (value-details
+      [:span {:class "text-text-400 font-mono"}
+       (str open close " " n " shown"
+            (cond (= :more elided) " +more"
+                  (and elided (not= 0 elided)) (str " +" elided)
+                  :else "")
+            (when shape (str " · each {" (str/join " " (map pr-str shape)) "}")))]
+      rows depth)))
+
+(defn- pruned-marker
+  "A depth/breadth boundary the sampler stopped at — the deeper value is NOT
+   in the tree. Rendered as a passive 'deeper' hint."
+  [x]
+  (let [k (:seon.render.value/pruned x) c (:seon.render.value/count x)
+        [o cl] (case k :map ["{" "}"] :set ["#{" "}"] :vector ["[" "]"] ["(" ")"])
+        unit   (if (= k :map) "keys" "items")]
+    [:span {:class "inline-flex items-center gap-1 text-2xs text-text-500 font-mono"
+            :title "deeper than the bounded view — drill the live result/<id> var"}
+     [:span {:class "text-text-600"} (str o "…" (when c (str c " " unit)) cl)]
+     [:span {:class "text-text-700"} "▸ deeper"]]))
+
+(defn- value-node
+  "Recursively render one `render-html-data` `:tree` node to hiccup. Containers
+   (map / seqish) become `<details>`; everything else is an inline token."
+  [x depth]
+  (cond
+    (and (map? x) (contains? x :seon.render.value/pruned)) (pruned-marker x)
+    (and (map? x) (contains? x :seon.render.value/kind))   (seqish-node x depth)
+    (and (map? x)
+         (not (contains? x :seon.eval/datom))
+         (not (contains? x :seon.eval/opaque))
+         (not (contains? x :seon.render.value/string-len)))
+    (map-node x depth)
+    :else (value-leaf x)))
+
+(defn- data-panel
+  "The DATA-kind html render — a collapsible drill-down over a
+   `seon.render.value/render-html-data` projection (`:tree`/`:summary`/
+   `:truncated?`). The whole bounded tree ships in one render; expand/collapse
+   is a client CSS toggle (`<details>`), no round-trip."
+  [{:seon.render.value/keys [tree summary truncated? eval-id]}]
+  [:div {:class "flex flex-col gap-1"}
+   [:div {:class "text-2xs text-text-500 font-mono mb-0.5"}
+    (str summary
+         (when eval-id (str " · result/" eval-id))
+         (when truncated? " · partial"))]
+   (value-node tree 0)])
+
+(defn- hiccup-text
+  "Best-effort prompt TEXT for the `:ai` view of a literal hiccup value —
+   the concatenated string leaves, attrs/tags stripped. Never throws."
+  [h]
+  (->> (tree-seq vector? seq h)
+       (filter string?)
+       (str/join " ")
+       str/trim))
+
+(defn block
+  "THE typed-block renderer. `(block view x)` — `view` is `:html` (→ hiccup)
+   or `:ai` (→ prompt String). Dispatches on the value-KIND of `x` via the
+   namespaced key the value carries (the tagged-value contract above) and
+   delegates to the renderer that already owns that kind. GUARDED like
+   `render-entity-html`: a throwing render becomes an error card (`:html`) or
+   an error String (`:ai`) — siblings intact, never an exception. Unknown
+   values fall through to the data panel (projected via `render-html-data`),
+   so `block` renders ANYTHING."
+  {:malli/schema [:=> [:catn [::view :seon.render/view] [::x :any]] :any]}
+  [view x]
+  (try
+    (case view
+      :html
+      (cond
+        (message-block? x) (md/md->hiccup (:seon.render/markdown x))
+        (source-block? x)  (cljhl/clj->hiccup (:seon.render/source x))
+        (data-projection? x) (data-panel x)
+        (error-value? x)   (live-tile/error-tile x)
+        (live-tile/valid-hiccup? x) x
+        :else              (data-panel (value/render-html-data "inline" x)))
+
+      :ai
+      (cond
+        (message-block? x) (:seon.render/markdown x)
+        (source-block? x)  (:seon.render/source x)
+        (data-projection? x) (str (:seon.render.value/summary x)
+                                   (when (:seon.render.value/truncated? x) " (partial)"))
+        (error-value? x)   (:seon.error/message x)
+        (live-tile/valid-hiccup? x) (hiccup-text x)
+        :else              (value/render-ai "inline" x)))
+    (catch :default e
+      (let [msg (str "block render failed: " (err/->message e))]
+        (case view
+          :html (live-tile/error-tile {:seon.error/message msg :seon.error/where :block})
+          :ai   msg)))))
 
 ;; ============================================================
 ;; Agent tile (live-tiles U1) — the agent's ONE always-visible HTML
