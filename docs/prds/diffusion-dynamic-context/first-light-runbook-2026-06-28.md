@@ -16,10 +16,15 @@ tags: [reference, agent, web]
 > - [[research/retrieval-denoising-experiment-plan-2026-06-28]] — capability #3, unknowns W1–W3.
 
 All commands run from `tmp/flash-diffgemma/` (gitignored). The venv is `.venv/`;
-keys (`RUNPOD_API_KEY`, `HF_TOKEN`) are in `.env` — `source .env` first. The four
-`@Endpoint`s are `diffgemma` (proven generate), `diffgemma-infill` (J),
-`diffgemma-renoise` (L), `diffgemma-retrieval` (#3); they share one NetworkVolume
-`diffgemma-vol` (EU-RO-1).
+keys (`RUNPOD_API_KEY`, `HF_TOKEN`) are in `.env` — `source .env` first.
+
+**First light deploys ONE endpoint: `diffgemma`** (proven generate + probe + the
+unified introspect, in `gpu_worker.py`, helper `diffgemma_common.py`). The three
+capability `@Endpoint`s — `diffgemma-infill` (J), `diffgemma-renoise` (L),
+`diffgemma-retrieval` (#3) — are **staged out of the bundle** (`staged/`,
+gitignored) so they do NOT register stray A100 endpoints; deploy each later (§3)
+once introspect confirms its API. All four share one NetworkVolume `diffgemma-vol`
+(EU-RO-1).
 
 ## STOP — read the cross-doc conflicts first (§4)
 
@@ -51,12 +56,29 @@ export FLASH_GPU_IMAGE=docker.io/seantempesta:cu128-v1
   changes alone only bump a rolling fingerprint and keep the old warm handler).
 - The **NetworkVolume auto-deploys** idempotently (by name + DC) in **EU-RO-1**;
   the endpoint is pinned to EU-RO-1 to match (a volume is single-DC).
-- `flash deploy` prints one `https://api.runpod.ai/v2/<id>/runsync` URL **per
-  endpoint** — capture each `<id>`. `client.py` reads the target from
-  `DIFFGEMMA_EP`; each stub's own `main()` (`python gpu_worker_*.py <mode>`)
-  awaits its own decorated endpoint directly.
-- `.flashignore` is dead (deploy warns); patterns are built-in — ignore the
-  warning.
+- `flash deploy` prints the single `https://api.runpod.ai/v2/<id>/runsync` URL for
+  `diffgemma` — capture the `<id>`. `client.py` reads the target from
+  `DIFFGEMMA_EP`.
+
+### Bundle mechanism (Flash v1.17) — why only `diffgemma` deploys
+
+`.flashignore` is **dead** in v1.17 (deploy warns and ignores it). Flash decides
+the bundle by **recursively** scanning the project dir, applying built-in patterns
+**+ the project `.gitignore`** (`runpod_flash/cli/utils/ignore.py`
+`load_ignore_patterns` + `cli/commands/build.py:262-263`), copying every surviving
+file into the tarball, and **importing every surviving `.py`** — at which point any
+module-level `@Endpoint(...)` **registers**. So exclusion = match a `.gitignore`
+pattern. The worker dir's `.gitignore` (read by Flash even though the whole dir is
+repo-gitignored — Flash reads the file off disk, it does not call git) excludes:
+
+- `client.py` — local driver, run separately;
+- `staged/` — the three capability stubs (each declares its own `@Endpoint`);
+- `Dockerfile`, `build-image.sh`, `*.log`, `*.out`, `logs/`, `tmp/` — build-time / scratch.
+
+Result (verified by `flash build`, no deploy): `built flash-diffgemma  2 files` —
+tarball = `gpu_worker.py` + `diffgemma_common.py` only; manifest `resources` =
+`['diffgemma']`. To re-verify before deploy: `.venv/bin/flash build` then
+`python -c "import json;print(list(json.load(open('.flash/flash_manifest.json'))['resources']))"`.
 
 Rebuild path (if the image needs a fix): `TAG=cu128-v2 ./build-image.sh` →
 re-`export FLASH_GPU_IMAGE` → `flash deploy` (structural bump = free clean
@@ -179,6 +201,20 @@ Each capability: wire the confirmed seam (gated on what introspect revealed) →
 the first test case → check the success criterion. **#2 reuses #1's U-answers; #3
 reuses #1's U + #2's V (offset_map, clamp, stateless round-trip) verbatim** — do
 not re-derive.
+
+**Deploying a capability endpoint (moving it out of `staged/`).** Each stub lives
+in `staged/` (gitignored, so first light never registers it). To bring one live
+after introspect confirms its API — e.g. infill:
+
+```bash
+mv staged/gpu_worker_infill.py .      # back to the project root → now in the bundle
+.venv/bin/flash build                 # confirm: resources now == ['diffgemma','diffgemma-infill']
+.venv/bin/flash deploy                # adds the new endpoint; diffgemma id is preserved
+```
+
+The stub imports `diffgemma_common` from the root (always bundled), so no path
+edits are needed. Move only the capability you're ready to run; leave the others in
+`staged/` so you never pay for an A100 endpoint you aren't using yet.
 
 ### #1 infill (J) — cheapest "clearly better than AR", no Seon integration
 
