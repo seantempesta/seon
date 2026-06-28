@@ -3,7 +3,7 @@
    (`seon.web.datastar`) — the hyperlith `view = f(db)` world roster and the
    `datastar-patch-elements` wire framing that morphs `#world`.
 
-   Style (matches `seon.web.tile-test`): assert MECHANISM — the structural
+   Style: assert MECHANISM — the structural
    SSE framing markers, presence/absence of an agent in the roster,
    pure-fn-of-db determinism, and NEVER-CRASH — via `str/includes?` /
    line-splitting. NEVER pin the exact rendered HTML or prose (these are

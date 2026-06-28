@@ -101,14 +101,12 @@
                ";\n"
                body-comment "\n"
                ";\n"
-               "; To make it yours, two ways: (1) NAME a prewritten view — set\n"
-               "; :seon.render.live-tile/content to a symbol from\n"
-               "; seon.web.tile/prebuilt-views (status-view, todos-view,\n"
-               "; progress-view, value-explorer-view, narration-view, …); or\n"
-               "; (2) define a tile fn in YOUR OWN namespace that returns hiccup\n"
-               "; and transact its qualified symbol (or literal hiccup) onto that\n"
-               "; attr. Evolve it by redefining YOUR fn — seon.render.live-tile is\n"
-               "; a shared core default, so build your own rather than editing it."))))
+               "; To make it yours: define a tile fn in YOUR OWN namespace that\n"
+               "; returns hiccup, then transact its qualified symbol (or literal\n"
+               "; hiccup) onto :seon.render.live-tile/content. Evolve it by\n"
+               "; redefining YOUR fn — seon.render.live-tile is a shared core\n"
+               "; default (the welcome tile), so build your own rather than\n"
+               "; editing it."))))
     ;; CONTRACT: this section NEVER vanishes and NEVER surfaces a bare
     ;; ⚠/malli code. `render-agent-tile` is already throw-safe, so this
     ;; backstop only fires on an UNEXPECTED failure (e.g. a db read) —

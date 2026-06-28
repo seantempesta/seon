@@ -7,8 +7,7 @@
    what changed. The stream is long-lived and gzip-compressed: every
    datahike commit re-renders `view = f(db)` and writes a
    `datastar-patch-elements` event (flushed immediately) to every open
-   stream. This replaces packetstar's per-tile `{id,html}` streaming with a
-   single whole-element morph.
+   stream — a single whole-element morph (no per-tile `{id,html}` streaming).
 
    ## The two routes (added additively to seon.web.serve's dispatch)
 

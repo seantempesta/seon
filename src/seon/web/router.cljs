@@ -44,7 +44,7 @@
    registry, the create-agent closure) and the same-origin? gate (a test pins
    it). serve `:require`s router and calls [[install!]] with its handler set +
    the same-origin predicate; router requires only the leaf handlers
-   (`datastar`/`inspector`/`tile`/`reactive.call`, none of which require serve).
+   (`datastar`/`debug`/`reactive.call`, none of which require serve).
    One direction, no require cycle. On hot-reload serve re-runs [[install!]],
    so the cached router always holds the freshly-reloaded handler fns."
   (:require
@@ -57,9 +57,8 @@
     ;; request time via eval/lookup-value, so the ns must be compiled into the
     ;; build. router is its sole requirer.
     [seon.web.datastar]
-    [seon.web.inspector :as inspector]
+    [seon.web.debug :as debug]
     [seon.web.reactive.call :as call]
-    [seon.web.tile :as tile]
     [reitit.ring :as rr]))
 
 ;; ============================================================
@@ -114,7 +113,7 @@
    (this sentinel). reitit's sync `ring-handler` is `(or (handler req)
    (default-handler req))` (reitit-ring/ring.cljc:389) — a handler that writes the
    socket then returns a FALSY value makes reitit re-invoke the default-handler
-   (`legacy-default`), which writes the res AGAIN → a 'headers already sent' crash.
+   (`not-found`), which writes the res AGAIN → a 'headers already sent' crash.
    The `hijacked` sentinel is truthy, so the `or` short-circuits and the default
    never double-fires. Keep every handler returning it."
   {:seon.http/hijacked true})
@@ -227,13 +226,12 @@
 ;; ============================================================
 ;; The static supplement — the routes NOT (yet) seeded as `:seon.route/*`
 ;; datoms, so nothing 404s: static assets, the secondary state-changing POST
-;; doors (each `:seon.route/same-origin`-gated), `/sse`, and the back-compat
-;; flat `/call`. db->routes supplies the six core routes; this supplies the
-;; rest. FLAG (coordination → Core): the secondary POST doors below should be
-;; seeded as `:seon.route/*` datoms for fully data-driven routing — until then
-;; they live here. The inspector + tile sub-trees are NOT reitit routes — they
-;; ride the legacy `route?`/`handle!` dispatch via the no-match default-handler
-;; (legacy-default).
+;; doors (each `:seon.route/same-origin`-gated), `/sse`, the back-compat
+;; flat `/call`, and the operator dev tools (`/data` + `/agent/{id}/debug`,
+;; `seon.web.debug`). db->routes supplies the six core routes; this supplies
+;; the rest. FLAG (coordination → Core): the secondary POST doors below should
+;; be seeded as `:seon.route/*` datoms for fully data-driven routing — until
+;; then they live here.
 ;; ============================================================
 
 (defn- post-handler
@@ -250,6 +248,19 @@
     [["/css/{*path}" {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/js/{*path}"  {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/sse"         {:get {:handler (fn [r] (sse (node-req r) (node-res r)) hijacked)}}]
+
+     ;; Operator dev tools (seon.web.debug) — the datom browser + the
+     ;; per-agent two-pane debug inspector. Plain leaf handlers (no serve
+     ;; state), required directly; distinct paths from the seeded
+     ;; `/agent/{id}` family, so no reitit conflict.
+     ["/data"     {:get {:handler (fn [r] (debug/data-page! (node-req r) (node-res r)) hijacked)}}]
+     ["/data/sse" {:get {:handler (fn [r] (debug/data-sse! (node-req r) (node-res r)) hijacked)}}]
+     ["/agent/{id}/debug"     {:get {:handler (fn [r] (debug/debug-page! (node-req r) (node-res r)
+                                                                         (get-in r [:path-params :id]))
+                                               hijacked)}}]
+     ["/agent/{id}/debug/sse" {:get {:handler (fn [r] (debug/debug-sse! (node-req r) (node-res r)
+                                                                        (get-in r [:path-params :id]))
+                                               hijacked)}}]
 
      ["/chat"        {:post {:middleware [:seon.route/same-origin] :handler (post-handler chat)}}]
      ["/stop"        {:post {:middleware [:seon.route/same-origin] :handler (post-handler stop)}}]
@@ -268,26 +279,15 @@
                                                 hijacked)}}]]))
 
 ;; ============================================================
-;; The no-match default-handler — the legacy inspector + tile delegation.
-;; reitit calls this when no route matches (or the matched path has no
-;; handler for the method). GET paths get the legacy `route?`/`handle!`
-;; dispatch verbatim (their internal routing stays); everything else 404s.
+;; The no-match default-handler — a plain 404. reitit calls this when no
+;; route matches (or the matched path has no handler for the method).
+;; Every real surface is a route now (the seeded core routes + the static
+;; supplement); a miss is a genuine 404.
 ;; ============================================================
 
-(defn- legacy-default [r]
-  (let [req    (node-req r)
-        res    (node-res r)
-        path   (:uri r)
-        method (:request-method r)]
-    (cond
-      (and (= method :get) (inspector/route? path))
-      (do (inspector/handle! req res path) hijacked)
-
-      (and (= method :get) (tile/route? path))
-      (do (tile/handle! req res path) hijacked)
-
-      :else
-      (do (write-text! res 404 (str "Not found: " path)) hijacked))))
+(defn- not-found [r]
+  (write-text! (node-res r) 404 (str "Not found: " (:uri r)))
+  hijacked)
 
 ;; ============================================================
 ;; Build + dispatch.
@@ -302,7 +302,7 @@
     (rr/ring-handler
       (rr/router (into (db->routes db) (static-supplement config))
                  {:reitit.middleware/registry mw-registry})
-      legacy-default)))
+      not-found)))
 
 (defn rebuild!
   "Re-derive + cache the reitit ring-handler from the CURRENT route datoms (a

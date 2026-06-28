@@ -107,9 +107,9 @@
     ;; Pod HTTP+SSE server — A-5. Required here so the build includes
     ;; it; start-agent! calls (web.serve/start!) at boot.
     [seon.web.serve :as web.serve]
-    ;; Per-agent inspector UI (/agent/<id>) — installs its own
-    ;; tx-listener that pushes morphs to that page's SSE stream.
-    [seon.web.inspector]
+    ;; Operator dev tools (/data + /agent/<id>/debug) — installs its own
+    ;; tx-listener that pushes morphs to those pages' SSE streams.
+    [seon.web.debug]
     ;; Default :seon.render/ai + :seon.render/html for :seon.agent.message
     ;; entities. Referenced by symbol from message tx data.
     [seon.handlers.message]
@@ -216,7 +216,7 @@
   ;; Hot-reload hygiene: re-install the per-agent wake trigger so
   ;; tx-listener closures run the just-reloaded code.
   ;; Async fire-and-forget — logs the re-armed ids / errors.
-  ;; (seon.web.inspector re-arms its own ::inspector listener via its
+  ;; (seon.web.debug re-arms its own ::debug listener via its
   ;; own ^:dev/after-load — not duplicated here.)
   (rearm-wake-triggers!)
   ;; Re-arm the ONE ticker so a hot reload doesn't stack timers and the tick
@@ -2361,9 +2361,9 @@
                 ;; env vars (env owns the row across boots). Fire-and-
                 ;; forget — sync! never rejects, logs its own failures.
                 _ (ai/sync!)
-                ;; Install the per-agent inspector tx-listener. Pushes
-                ;; morphs for the per-agent inspector page (/agent/<id>).
-                _ (seon.web.inspector/install!)
+                ;; Install the dev-tools tx-listener. Pushes morphs for
+                ;; the /data browser + the per-agent /agent/<id>/debug page.
+                _ (seon.web.debug/install!)
                 ;; The ONE ticker — the only active machinery (deadline
                 ;; watchdog + schedule firing). Single instance + idempotent;
                 ;; re-armed on hot reload (after-reload above).

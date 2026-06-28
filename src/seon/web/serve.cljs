@@ -6,11 +6,10 @@
    prod) can reach the agent UI without intermediate infrastructure.
 
    Routes (V0.5):
-     GET  /                  → 302 redirect to /agents (the inspector
-                               picker; the A-6 broadcast shell is unfinished)
+     GET  /                  → 302 redirect to /world (the converged human surface)
      GET  /css/output.css    → resources/public/css/output.css
      GET  /js/datastar.js    → resources/public/js/datastar.js
-     GET  /sse               → SSE stream (A-6 wires broadcast)
+     GET  /sse               → SSE stream
      POST /chat              → A-8 (user message → message! with from = the user ref)
 
    ## Port discovery
@@ -160,19 +159,16 @@
 ;; ============================================================
 
 (defn serve-root!
-  "GET / — 302 to the inspector picker (/agents). A Ring handler: takes the
-   Ring request `r`, self-extracts the node res. Resolved LATE by the router
+  "GET / — 302 to the world roster (/world). A Ring handler: takes the Ring
+   request `r`, self-extracts the node res. Resolved LATE by the router
    (db->routes) from the seeded :seon.route/root datom, so it is PUBLIC — its
    symbol must resolve via eval/lookup-value at request time."
   [r]
-  ;; The root `/` shell (`page/root-html`) is an unfinished A-6 stub: it
-  ;; opens `/sse` but nothing ever pushes a tile patch, so it sits on
-  ;; "loading…" forever (and its placeholder `#agent-seon` id doesn't even
-  ;; match live agent ids). Until A-6's broadcast lands, land the user on
-  ;; the working inspector picker (`/agents`) via a 302 redirect — that
-  ;; route lists live agents and links into the two-pane live view.
+  ;; `/world` (seon.web.datastar) is the converged human surface — the live
+  ;; agent roster + per-agent canvas/tiles/chat. The root just lands the user
+  ;; there.
   (let [^js res (:seon.http/node-res r)]
-    (.writeHead res 302 #js {"Location"      "/agents"
+    (.writeHead res 302 #js {"Location"      "/world"
                              "Cache-Control" "no-store, no-cache, must-revalidate"})
     (.end res "")))
 
