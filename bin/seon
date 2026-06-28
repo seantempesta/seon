@@ -129,6 +129,19 @@ if [ -f "$SEON_ROOT/.env" ]; then set -a; . "$SEON_ROOT/.env"; set +a; fi
 
 export SEON_EMBED="${SEON_EMBED:-1}"
 
+# ── Config manifest selection — the ONE config seam (read by seon.config) ──
+# SEON_CONFIG  = manifest path (default config/system.edn, CWD-relative to the
+#                repo root the pod runs in).
+# SEON_PROFILE = aero #profile variant (default :default).
+# Both are EXPORTED so the spawned pod inherits them; a shell-set value still
+# wins via ${:-}. A cluster customizes its loadout/routes/skills by pointing
+# these at its own manifest/profile with ZERO src edit — bin/acme points
+# SEON_CONFIG at config/acme.edn; a test run does `SEON_CONFIG=config/test.edn
+# bin/test-cljs`. Absent file ⇒ seon.config returns {} ⇒ byte-identical
+# no-config boot.
+export SEON_CONFIG="${SEON_CONFIG:-config/system.edn}"
+[ -n "${SEON_PROFILE:-}" ] && export SEON_PROFILE
+
 # Identity files: SOUL.md (+ AGENTS.md if present) load as CONTEXT blocks when
 # the file exists. The SOUL block is disabled via SEON_SOUL=false in the main
 # .env (seon.agent.ctx/soul-file-path → nil → :soul block omitted) — TEMPORARY

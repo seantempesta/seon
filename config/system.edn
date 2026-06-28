@@ -22,6 +22,13 @@
  ;; ── per-role context loadouts (merged over default-seed-blocks at create) ──
  ;; `:repl`'s body is always-on for EVERY agent — seeded as a :skill/repl block
  ;; at the cached-prefix priority (16), reusing my.skills/skill-block.
+ ;;
+ ;; PROFILE EXAMPLE — `#profile` selects the variant by SEON_PROFILE (aero falls
+ ;; back to `:default` for any unmatched profile, so the no-flag boot is
+ ;; byte-identical). `SEON_PROFILE=minimal bin/seon restart pod` boots with NO
+ ;; always-on skill body (lean context). This is the per-test/per-cluster seam:
+ ;; one manifest, N profiles, zero src edits.
  :seon.config/loadouts
- [{:seon.config/role         :default
-   :seon.config/default-load [:repl]}]}
+ #profile {:default [{:seon.config/role         :default
+                      :seon.config/default-load [:repl]}]
+           :minimal []}}

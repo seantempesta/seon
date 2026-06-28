@@ -1,0 +1,13 @@
+;; The Acme harness's OWN config manifest — proof of the per-cluster config
+;; seam: bin/acme exports SEON_CONFIG=config/acme.edn, so the acme cluster
+;; curates its loadout/routes/skills independently of the default cluster with
+;; ZERO src edit (read by seon.config via the same aero reader as system.edn).
+;;
+;; Today acme mirrors the default loadout (the `:repl` body always-on), so acme
+;; agents get the same baseline; a downstream consumer points SEON_CONFIG at
+;; THEIR manifest to shape their cluster. To prove retract-on-drop against a
+;; real third-party shape, override at the shell:
+;;   SEON_CONFIG=config/test.edn bin/acme restart pod
+{:seon.config/loadouts
+ [{:seon.config/role         :default
+   :seon.config/default-load [:repl]}]}

@@ -59,6 +59,13 @@ export SEON_EXTRA_PRELOAD=acme.pod
 #     bundle instead of the live cluster's out/client/main.js. ---
 export SEON_CLIENT_OUT=out-acme/client/main.js
 
+# --- config seam: acme reads its OWN manifest (per-cluster loadout/routes/
+#     skills) — the same SEON_CONFIG seam bin/seon exposes, pointed at acme's
+#     file so acme curates independently of the default cluster with no src
+#     edit. A shell-set SEON_CONFIG still wins (e.g. SEON_CONFIG=config/test.edn
+#     bin/acme restart pod to prove retract-on-drop). ---
+export SEON_CONFIG="${SEON_CONFIG:-config/acme.edn}"
+
 # --- branding / CSS control (existing seon seams; no fork) ---
 export SEON_BRAND_NAME="${SEON_BRAND_NAME:-Acme}"
 export SEON_BRAND_TAGLINE="${SEON_BRAND_TAGLINE:-Acme — the third-party harness}"

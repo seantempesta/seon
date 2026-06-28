@@ -59,6 +59,36 @@ Startup is orchestrated by Integrant, configured via Aero. [[components/system-l
 
 Integrant's dependency graph enforces the phasing — components declare `#ig/ref` dependencies that determine init order. There is no explicit readiness gate; the dependency chain IS the gate. A Datahike connection failure during Phase 1 fails fast, while a flow timeout in Phase 2 gives clear diagnostics about what's stuck.
 
+## Startup load + config (CLJS pod, active track)
+
+This is the canonical map of what loads when the pod boots and the ONE way to customize it. There is a single config entry (`seon.config`) and a single boot entry (`seon.client/boot-seed!`); everything else references this section.
+
+**The one config seam.** `seon.config/load-manifest` reads ONE manifest — `config/system.edn` by default, the path overridable by `SEON_CONFIG`, the variant selected by `SEON_PROFILE` (aero `#profile`). The reader is aero, coherent with the JVM track's `seon.config`. The manifest is a pure OPTIONAL override: absent (or `{}`) ⇒ byte-identical to a no-config boot. Present ⇒ it curates skills (`include`/`exclude`), per-role context loadouts, and routes. Add a new concern = one `:seon.config/<section>` schema + one `resolve-<section>` fn + one key in `:seon.config/manifest` (the schema lives in [[../prds/agent-fsm/data-model]]).
+
+**Per-test / per-cluster recipe** — name your own manifest, zero src edits:
+
+- `SEON_CONFIG=config/test.edn bin/test-cljs` — a test run loads its own loadout/routes/skills.
+- `SEON_PROFILE=minimal bin/seon restart pod` — select a `#profile` variant of `config/system.edn`.
+- `bin/acme` exports `SEON_CONFIG=config/acme.edn` — the isolated cluster curates independently.
+
+`bin/seon`, `bin/acme`, and `bin/test-cljs` all export/honor `SEON_CONFIG`/`SEON_PROFILE`; the spawned pod inherits them.
+
+**The boot load order** (`seon.client/-main` → `start-agent!`, skipped iff `SEON_NO_AUTO_BOOT`):
+
+| # | Step | Provenance | Customization seam |
+|---|------|-----------|--------------------|
+| 1 | `open-cluster-conn!` — ping wire-server, connect, transact pod schema, start listen adapter | — | env |
+| 2 | **`boot-seed!`** (`conn` pinned as root `db/*conn*`) | — | — |
+| 2a | `manifest = (config/load-manifest)` — read ONCE | — | **the seam** (`SEON_CONFIG`/`SEON_PROFILE`) |
+| 2b | `:entity-schemas` / `:core-seed` / `:core-index` — APPEND-ONLY introspection (entity schemas, user+kb seed, program-graph index) | `:core-seed` | source |
+| 2c | **routes + skills → `seon.state/reconcile!`** — the DECLARATIVE desired set, synced (upsert + retract-stale), scope `#{:config}` | `:config` | **manifest** |
+| 3 | `replay-program-graph!` — load the agent-authored DB layer (topo-sorted ns eval) | runtime | — |
+| 4 | per-agent `create!` → `seed-default-ctx!` → `install!(resolve-loadout …)` | — | **manifest** (`:loadouts`) |
+| 5 | `ai/seed-config-row!` from the `SEON_AI_*` env table | — | env |
+| 6 | `bootstrap-turn!` (newly minted agents only) | — | — |
+
+The keystone of the unification: boot-seed!'s two provenance layers. The `:core-seed` steps are append-only introspection (never a desired set, never retracted). The routes + skills are the ONE managed *declarative* population, written under origin `:config` and synced through `seon.state/reconcile!` — so a route dropped from the manifest, or a skill removed from disk, is RETRACTED on the next boot (it can't persist as a stale datom). reconcile! upserts each row by its own `:db.unique/identity` (`:seon.route/name` / `:my.skills/name`) and retracts any managed (`:config`-origin) row absent from the desired set; the `:core-seed` introspection is outside scope `#{:config}` and is never touched. The seeding model lives in [[../prds/agent-fsm/agent-runtime]].
+
 ## Three State Tracking Mechanisms
 
 The system tracks namespace state in three mechanisms:

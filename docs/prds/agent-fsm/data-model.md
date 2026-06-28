@@ -505,6 +505,90 @@ can revise it.
 The bootstrap that seeds the schema, the refine fn, and the block is owned by
 [[agent-runtime]]; the refine verb is owned by [[toolkit]].
 
+### 5.5 my.skills — loadable knowledge (no `:kind`; file-backed vs inline is attribute presence)
+
+A skill is a unit of knowledge an agent loads into context on demand. The row is
+tiny — identity + the catalog line; the BODY is not duplicated into the DB:
+
+```clojure
+;; ns my.skills
+(schema/register! :my.skills/name        [:keyword {:seon.db/identity true}]) ; catalog key + load/unload handle
+(schema/register! :my.skills/description [:string {:min 1}])                  ; the catalog line (its "Use when…" IS the trigger)
+(schema/register! :my.skills/body        [:string {:min 1}])                  ; inline body — ONLY agent-authored skills
+```
+
+A skill row carries exactly ONE body source, and **attribute presence is the
+discriminator — there is no `:kind`** (§3): a **file-backed** skill (an imported
+`SKILL.md`) carries `:seon.agent.ctx/file-path` (the body stays in the file, read
+fresh at render — lossless, live-edited); an **inline** skill (agent-authored at
+runtime) carries `:my.skills/body`. Provenance (seeded vs authored) is the
+transaction's `:seon.db/origin` (`:core-seed`/`:config` for the dir scan, `:agent`
+for authored), never a row field.
+
+A LOADED skill is a `:seon.agent.ctx/block` (§4.2) named `:skill/<name>` in the
+agent's own `:seon.agent/ctx` — `load`/`unload` are `install!`/`remove!`. **The
+block does NOT carry `:my.skills/name`**: that attr is `:db.unique/identity`, so
+storing it on the block would collide-merge with the skill row — the block NAME
+`:skill/<name>` is the handle, and the render fn + catalog `loaded?` derive the
+skill name from it. The catalog marker and the token-cost footer are DERIVED
+projections, never stored.
+
+The corpus is the dedicated AGENT skills dir: at boot the `:core-skills` seed scans
+`SEON_SKILLS_DIR` (default `seon-skills/`) for `<name>/SKILL.md`, reading only the
+frontmatter `name`+`description` (no YAML/markdown parser — the body stays in the
+file). ONE corpus, split by consumer on disk: `seon-skills/` holds the agent-facing
+skills (datahike, clojurescript, repl, data-oriented-clojure, ui-live-tiles…), while
+`.claude/skills/` holds the Claude-Code/dev skills (browser-automation,
+clojure-testing) **plus symlinks back to the shared ones** — so both consumers read
+one physical source, curated by directory rather than by an exclude list.
+`seon.config` ([[loadable-skills]]) optionally curates the scanned corpus per cluster
+(`include`/`exclude`) and seeds always-on bodies (`default-load`). The
+`load`/`unload`/`list` verbs + the catalog/footer render live in [[toolkit]].
+
+### 5.6 config manifest — `:seon.config/*` (the ONE config schema)
+
+The startup-load customization seam is ONE consolidated manifest (`config/system.edn`,
+path overridable by `SEON_CONFIG`, variant by `SEON_PROFILE` aero `#profile`), read
+by `seon.config` (`config.cljs:55-95`). It is a pure OPTIONAL override: absent or `{}`
+⇒ byte-identical to a no-config boot. Every section key is `{:optional true}`, so the
+empty manifest validates; an UNKNOWN key fails LOUD at validation (a config typo is a
+crash, never a silent ignore). A new config concern = ONE `:seon.config/<section>`
+schema + one resolver fn + one key here.
+
+```clojure
+;; ns seon.config — the registry of known sections
+(schema/register! :seon.config/skills-spec
+  [:map
+   [:seon.config/dirs    {:optional true} [:vector :string]]          ; corpus dir(s) — :seon.config/dirs (SEON_SKILLS_DIR)
+   [:seon.config/include {:optional true} [:vector :keyword]]         ; allowlist (absent = all scanned)
+   [:seon.config/exclude {:optional true} [:vector :keyword]]])       ; denylist
+(schema/register! :seon.config/loadout
+  [:map
+   [:seon.config/role         :seon.config/role]                      ; :default | :root | :worker (SELECTOR, not a stored :kind)
+   [:seon.config/default-load {:optional true} [:vector :keyword]]    ; skill bodies always-on (priority-16 :skill/<name> blocks)
+   [:seon.config/blocks       {:optional true} [:vector :map]]        ; extra :seon.agent.ctx/block maps
+   [:seon.config/removes      {:optional true} [:vector :keyword]]    ; block names to drop from the default seed
+   [:seon.config/strategy     {:optional true} [:enum :override :replace]]])
+(schema/register! :seon.config/route-spec
+  [:map
+   [:seon.config/strategy {:optional true} [:enum :override :replace]]
+   [:seon.config/removes  {:optional true} [:vector :keyword]]])      ; :seon.route/name values to drop
+(schema/register! :seon.config/manifest
+  [:map
+   [:seon.config/skills   {:optional true} :seon.config/skills-spec]
+   [:seon.config/loadouts {:optional true} [:vector :seon.config/loadout]]
+   [:seon.config/routes   {:optional true} [:vector :seon.config/route-spec]]])
+```
+
+The manifest's resolvers feed the boot: `resolve-routes` + `resolve-skill-rows`
+produce the DECLARATIVE desired set reconciled at boot (origin `:config`, §4.8 / the
+seeding model in [[agent-runtime]]), and `resolve-loadout` shapes each agent's block
+set at create. `:seon.config/dirs` is the home for `SEON_SKILLS_DIR`; the `#env` knob
+sections (the rest of the scattered `SEON_*` reads) fold onto `seon.config` accessors
+so it is the single env surface (tracked in [[research/config-loader-2026-06-28]]).
+The per-test recipe (`SEON_CONFIG=config/test.edn`, `SEON_PROFILE=…`) lives in
+[[../../seon/architecture/overview]].
+
 ## 6. The error value — base `:seon/error`, specialized only where the shape diverges
 
 Per the never-crash-always-surface principle ([[architecture]]), every failure

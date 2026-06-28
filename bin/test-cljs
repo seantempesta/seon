@@ -6,6 +6,13 @@
 #   bin/test-cljs --no-build      # skip compile; just run out/test/test.js
 #   bin/test-cljs --watch         # shadow-cljs watch + auto-rerun (TODO: detached path)
 #
+# Config seam (per-test manifest): the node test process inherits this shell's
+# env, so a run names its own manifest via SEON_CONFIG / SEON_PROFILE — the SAME
+# seam bin/seon + bin/acme expose (seon.config reads them):
+#   SEON_CONFIG=config/test.edn bin/test-cljs        # custom loadout/routes/skills
+#   SEON_PROFILE=minimal        bin/test-cljs        # a #profile variant of system.edn
+# Unset ⇒ config/system.edn / :default profile (today's behavior, unchanged).
+#
 # Exit codes: 0 = pass, 1 = fail, 2 = compile/build error
 #
 # Output: out/test/test.js (intermediate)

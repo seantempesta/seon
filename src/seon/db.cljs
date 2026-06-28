@@ -1166,19 +1166,22 @@
   "ONE pass over every live datom `[e a tx]` — the provenance facts the
    inventory split needs:
      ::bootstrap-rows — entity ids whose IDENTITY datom (the entity's
-       first assertion, min tx) landed under a tx carrying
-       `:seon.db/origin :core-seed` (the boot index/seed);
+       first assertion, min tx) landed under a tx carrying a MANAGED-CORE
+       origin: `:core-seed` (the append-only boot index/seed) or `:config`
+       (the reconcile-managed declarative set — routes + skills). Both are
+       core infrastructure the boot minted, as opposed to agent-authored data;
      ::tx-rows — entity ids that ARE transactions (they appear in a
        datom's tx slot) — provenance machinery, not data rows;
      ::pairs — the distinct `[e a]` pairs (datalog results are sets,
        so cardinality-many attrs count each entity once)."
   [db]
   (let [seed-txs (into #{}
-                       (map first)
+                       (comp (filter (fn [[_ o]] (#{:core-seed :config} o)))
+                             (map first))
                        (query {::db db
-                               ::query '[:find ?tx
+                               ::query '[:find ?tx ?o
                                          :where
-                                         [?tx :seon.db/origin :core-seed]]}))
+                                         [?tx :seon.db/origin ?o]]}))
         triples  (query {::db db ::query '[:find ?e ?a ?tx :where [?e ?a _ ?tx]]})
         first-tx (reduce (fn [m [e _ tx]]
                            (update m e #(if % (min % tx) tx)))
@@ -1192,10 +1195,11 @@
 
 (defn bootstrap-row-ids
   "Entity ids whose IDENTITY datom (the entity's first assertion) was
-   transacted under a tx carrying `:seon.db/origin :core-seed` —
-   the rows the boot index/seed minted (compiled core: the
-   program-graph `:seon.fn`/`:seon.schema`/`:seon.test`/`:seon.ns`
-   index, the soul/kb seed). Everything else is data this cluster
+   transacted under a tx carrying a managed-core origin —
+   `:core-seed` (the program-graph `:seon.fn`/`:seon.schema`/`:seon.test`/
+   `:seon.ns` index + the kb seed) or `:config` (the reconcile-managed
+   declarative set: routes + skills) — the rows the boot minted.
+   Everything else is data this cluster
    added AFTER bootstrap. Per-ROW, never per-kind-name: an
    agent-authored `:seon.fn` row is NOT in this set; a boot-indexed
    one is. THE shared provenance derivation — [[store-inventory]]'s

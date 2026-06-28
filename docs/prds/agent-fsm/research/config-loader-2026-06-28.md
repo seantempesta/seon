@@ -1,15 +1,29 @@
 ---
 type: research
-status: draft
+status: completed
 tags: [research, agent, flow, web]
 ---
 
 # Config + EDN/markdown loader — design (root-os research topic #1)
 
-> Research deliverable for the root-os milestone (`feature/agent-fsm`, CLJS pod
-> track). Grounds every load-bearing claim in a `file:line` actually read, plus
-> three live proofs against the running pod (store at `data/clusters/default`).
-> Master doc: [[docs/prds/agent-fsm/root-os-vision.md]] (decision #1, Phase B).
+> **ADOPTED (2026-06-28).** The keystone — `boot-seed!`'s declarative desired set
+> (routes + skills) routed through `seon.state/reconcile!` (origin `:config`,
+> retract-on-drop) — plus the config-file seam in the launchers (`bin/seon` /
+> `bin/acme` / `bin/test-cljs` export `SEON_CONFIG`/`SEON_PROFILE`, the
+> `config/system.edn` `#profile` example, `config/test.edn` / `config/acme.edn`)
+> have LANDED and are live-proven on the acme cluster. The single startup-load +
+> config story now lives in [[../../../seon/architecture/overview]] (the map +
+> per-test recipe), [[../data-model]] §5.6 (the `:seon.config/*` schema), and
+> [[../agent-runtime]] (the boot → reconcile! seed model). The remaining
+> FOLLOW-ON (env consolidation #54b — the ~15 scattered `SEON_*` reads onto
+> `seon.config` `#env` accessors; the eval.cljs sites are locked by a concurrent
+> owner fix) is tracked in the audit [[startup-load-cohesion-audit-2026-06-28]].
+>
+> Original research deliverable for the root-os milestone (`feature/agent-fsm`,
+> CLJS pod track). Grounds every load-bearing claim in a `file:line` actually
+> read, plus three live proofs against the running pod (store at
+> `data/clusters/default`). Master doc:
+> [[docs/prds/agent-fsm/root-os-vision.md]] (decision #1, Phase B).
 
 ## TL;DR
 

@@ -1039,7 +1039,10 @@
   (let [tx-eid   (some (fn [d] (:seon.db/tx d)) datoms)
         tx-ent   (when tx-eid (d/entity db tx-eid))
         scope-id (:seon.db/agent-id tx-ent)
-        seed?    (= :core-seed (:seon.db/origin tx-ent))
+        ;; Core data every agent's render shows: the append-only seed
+        ;; (:core-seed) AND the reconcile-managed declarative set (:config —
+        ;; routes + skills). Both fan out to ALL watching agents.
+        seed?    (#{:core-seed :config} (:seon.db/origin tx-ent))
         watching (watching-agents)
         targets  (if (or (nil? scope-id) seed?)
                    (disj watching ::data)

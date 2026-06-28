@@ -147,6 +147,10 @@
     ;; loadouts. Absent → byte-identical to a no-config boot. `boot-seed!`
     ;; loads it ONCE and threads it to the skill + route seed steps.
     [seon.config :as config]
+    ;; Holistic declarative-state reconcile — `boot-seed!` routes its
+    ;; desired-set steps (routes + skills) through `seon.state/reconcile!`
+    ;; so a manifest that DROPS a route/skill retracts the stale datom.
+    [seon.state :as state]
     ;; Local-machine capability surface — A-9. Required so the agent
     ;; can call (seon.agent.fs/read-file ...) + (seon.platform/host) from
     ;; bootstrap-CLJS eval.
@@ -2027,9 +2031,11 @@
    (`seon.agent.ctx/file-block`), so gym and live prompts get the same
    identity with no seed step.
 
-   Steps, in boot order, under ONE `{:seon.db/origin :core-seed}`
-   tx-context — four transacts (each its own tx so the core prefix
-   stays a stable sequence of tx-times):
+   Steps, in boot order. TWO provenance layers:
+
+   APPEND-ONLY (origin `:core-seed`) — introspection, never a desired
+   set, never retracted (three transacts, each its own tx so the core
+   prefix stays a stable sequence of tx-times):
           :entity-schemas  — `schema/all-entity-schemas-tx-data`.
           :core-seed  — `seed-core!` (user entity +
                              my.kb.shared instruction singleton).
@@ -2037,10 +2043,18 @@
                              `:seon.fn` / `:seon.schema` / `:seon.test`
                              rows, conn-deduped so an Nth boot on the
                              same store re-seeds nothing).
-          :core-routes — `route/core-routes-tx` (the `:seon.route/*`
-                             datoms the UI lane projects into reitit;
-                             identity upsert on `:seon.route/name`,
-                             idempotent on an Nth boot).
+
+   DECLARATIVE DESIRED SET (origin `:config`) — the routes
+   (`route/core-routes-tx`, curated by the manifest) + the skills corpus
+   (`my.skills/seed-skills-tx-data`, curated by the manifest) are the ONE
+   managed declarative population, synced through
+   `seon.state/reconcile!` (scope `#{:config}`). reconcile UPSERTS each
+   desired row by its own `:db.unique/identity` (`:seon.route/name` /
+   `:my.skills/name`) AND RETRACTS any managed row absent from the desired
+   set — so dropping a route from the manifest, or a skill from disk,
+   removes the stale datom (it can no longer persist across boots). The
+   `:core-seed` introspection above is NOT in this scope and is never
+   touched.
 
    Pins the root `db/*conn*` to `conn` for the duration, restoring in
    `finally`. ENVELOPE CONTRACT
@@ -2066,6 +2080,8 @@
                                        (:seon.error/message error))
                                   {:seon.client/seed-step step
                                    :seon.db/error error}))))]
+        ;; APPEND-ONLY core (origin :core-seed): introspection that is not a
+        ;; desired set, never retracted.
         (await
           (db/with-tx-context
             {:seon.db/origin :core-seed}
@@ -2085,30 +2101,35 @@
               (check! :core-index
                       (await (db/transact!
                                {:seon.db/conn conn
-                                :seon.db/tx-data index-tx})))
-              ;; Routing-as-data: the seeded core route set
-              ;; (`:seon.route/*` datoms the UI lane's `db->routes`
-              ;; projects into reitit). Identity upsert on
-              ;; `:seon.route/name` — idempotent on an Nth boot.
-              (check! :core-routes
-                      (await (db/transact!
-                               {:seon.db/conn conn
-                                :seon.db/tx-data (config/resolve-routes
-                                                   (route/core-routes-tx)
-                                                   manifest)})))
-              ;; Skills corpus: one `:my.skills` row per SKILL.md under
-              ;; `SEON_SKILLS_DIR` (default `.claude/skills`, the same dir
-              ;; humans edit). Identity upsert on `:my.skills/name`, so an
-              ;; Nth boot re-scans idempotently. Only transact when the scan
-              ;; found files (an empty tx-data is a no-op to skip).
-              (let [skills-tx (config/resolve-skill-rows
-                                (my.skills/seed-skills-tx-data)
-                                manifest)]
-                (when (seq skills-tx)
-                  (check! :core-skills
-                          (await (db/transact!
-                                   {:seon.db/conn conn
-                                    :seon.db/tx-data skills-tx})))))))))
+                                :seon.db/tx-data index-tx}))))))
+        ;; DECLARATIVE DESIRED SET (origin :config): the routes
+        ;; (`:seon.route/*`, identity `:seon.route/name`) + the scanned skills
+        ;; corpus (`:my.skills/*`, identity `:my.skills/name`), curated by the
+        ;; manifest, are ONE managed population synced through reconcile! —
+        ;; upsert-by-identity (idempotent on an Nth boot) AND retract-stale, so
+        ;; a route dropped from the manifest or a skill removed from disk is
+        ;; RETRACTED (it cannot persist). Scope `#{:config}` excludes the
+        ;; :core-seed introspection above. reconcile! never rejects; its
+        ;; error-value is checked + thrown (surface-errors-loudly).
+        (let [desired (into (vec (config/resolve-routes (route/core-routes-tx)
+                                                        manifest))
+                            (config/resolve-skill-rows
+                              (my.skills/seed-skills-tx-data)
+                              manifest))
+              recon   (await
+                        (db/with-tx-context
+                          {:seon.db/origin :config}
+                          (fn ^:async reconcile-declarative! []
+                            (state/reconcile!
+                              {:seon.state/desired    desired
+                               :seon.db/managed-scope #{:config}
+                               :seon.db/conn          conn}))))]
+          (when (false? (:seon.state/ok? recon))
+            (throw (ex-info
+                     (str "boot seed reconcile (routes+skills) failed: "
+                          (:seon.state/error recon))
+                     {:seon.client/seed-step :core-declarative
+                      :seon.state/error      (:seon.state/error recon)})))))
       {::seeded? true}
       (finally
         (set! db/*conn* prev-conn)))))

@@ -289,6 +289,34 @@ roll-up of its children (top = plans/milestones, leaves = actions). There is no
 separate plan entity; the work-list *is* the plan tree (schema in [[data-model]],
 verbs in [[toolkit]]). The derived open-todo count feeds the fingerprint above.
 
+## Cluster boot — the core seed (`boot-seed!` → `reconcile!`)
+
+Before any agent runs, the pod seeds the world a cluster boots into. There is ONE
+boot entry — `seon.client/boot-seed!` (the gym's scratch worlds call the SAME fn, so
+they can't drift) — and it writes **two provenance layers**, never a stack of
+independent per-step seeders:
+
+- **Append-only introspection (origin `:core-seed`).** The entity-schema decomposition,
+  the user + `my.kb.shared` seed, and the program-graph index (`:seon.fn` / `:seon.ns`
+  / `:seon.schema` / `:seon.test` rows). This is NOT a desired set — it is conn-deduped
+  introspection that only grows; it is never retracted.
+- **The declarative desired set (origin `:config`).** The routes (`:seon.route/*`,
+  curated by the manifest) + the scanned skills corpus (`:my.skills/*`, curated by the
+  manifest) are the ONE managed declarative population, synced through
+  `seon.state/reconcile!` (scope `#{:config}`). reconcile UPSERTS each row by its own
+  `:db.unique/identity` (`:seon.route/name` / `:my.skills/name`) — idempotent on an Nth
+  boot — AND RETRACTS any managed row absent from the desired set. So **dropping a route
+  from the manifest, or a skill from disk, removes the stale datom** (it can no longer
+  persist across boots); the `:core-seed` introspection is outside the scope and is
+  never touched. `seon.state/reconcile!` is the ONE declarative-state primitive (seed,
+  config-override, reset, restore are all expressions of it); the manifest is the config
+  seam ([[data-model]] §5.6, the per-test recipe in
+  [[../../seon/architecture/overview]]).
+
+Each agent's block loadout is shaped from the same manifest at create
+(`resolve-loadout`, the install!/seed-copy mechanism owned by [[ui]]); SOUL.md /
+AGENTS.md are NOT seed steps — they are reactive `file-block`s re-read every render.
+
 ## The orchestrator-root + agent lifecycle
 
 **Root is one ordinary agent holding capabilities others don't — not special core
