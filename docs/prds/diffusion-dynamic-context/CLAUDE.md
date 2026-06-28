@@ -1,188 +1,141 @@
 ---
 type: orchestrator
 status: active
-tags: [orchestrator, agent, web]
+tags: [orchestrator, agent]
 ---
 
-# Diffusion dynamic-context — auto-loaded context (one-stop shop)
+# Diffusion dynamic-context — auto-loaded index (one-stop shop)
 
-> Everything to get up to speed on this PRD: current state, HOW TO RUN it, open
-> issues, next steps, and links to the depth. The thesis: a diffusion LLM
-> (DiffusionGemma) as a LIVE-CONTEXT interface — a buzzsaw that refines whole
-> blocks of Clojure fast, taking feedback BETWEEN denoise steps, with Seon's
-> parser+eval+retrieval as the control signal. Keep this tight + current.
+> The buzzsaw: a diffusion LLM (DiffusionGemma) as a LIVE-CONTEXT interface that
+> refines whole blocks of Clojure fast, taking feedback BETWEEN denoise steps, with
+> Seon's parser+eval+retrieval as the control signal. This file is the INDEX +
+> runbook; the forward-looking spine carries the depth. Keep it tight + current.
+
+## The spine (read these first)
+
+- [[architecture]] — the target buzzsaw: the thesis, the glossary, the control
+  seam, the worker, the **mode abstraction**, the oracle loop, the staged
+  convergent build, the Seon interface. Present-tense target, NO hedges.
+- [[roadmap]] — the single **we-are-here** → the kill-gate-first path. What's
+  PROVEN (clamp, infill, spec-slot, the 0→100% data-modeling A/B, deploy
+  stability) vs NEXT (canvas-length probe → three-arm E1 → eval-renoise live → the
+  `:defn-with-specs` MVP → E2–E6) + the CUT list (sentinel, op-axis, multi-pass).
+- [[grounding]] — every load-bearing claim → its `reference-code/…:LINE` cite (the
+  transformers v5.11.0 seams, the parser oracle, the malli→datahike bridge, the
+  Flash source).
 
 ## Current state (2026-06-28)
 
-**The model is PROVEN running** — DiffusionGemma loaded in 66s on a live A100
-(endpoint `kzonsp5b18hpq5`), first generate ran at 137 tok/s with
-`tokens_per_forward: [4]`. The mechanics are now **SOURCE-GROUNDED** (see
-`research/model-mechanics-grounding-2026-06-28.md`): NOT an absorbing-mask
-diffuser — `EntropyBoundSampler` random-inits the canvas and re-noises
-non-accepted positions with random vocab ids; "commit" is emergent low-entropy
-persistence. The clamp primitive is a custom `LogitsProcessor`, not a MASK hole.
-
-The worker has been **rebuilt on the corrected mechanism** (ready to test on the
-warm worker, NOT yet deployed): a `ClampLogitsProcessor` + a streamer-based
-per-step trace + new `clamp_smoke` / `infill` modes, `sdpa` attention (was eager),
-denoise-step + per-step-commit measurement, and tuning knobs
-(`max_denoising_steps`, `entropy_bound`, …). The mask-based staged stubs were
-DELETED (disproven premise); the corrected renoise/retrieval design lives in the
-grounding doc §4/§5.
+The model is **PROVEN running** (A100, endpoint `kzonsp5b18hpq5`, ~66 s load) and
+the **control primitives are PROVEN**: clamp holds, infill holds both ends, the
+`:malli/schema` spec-slot infills, and the dynamic-context half is validated
+(data-modeling A/B **0→100%**). The mechanism is **source-corrected** — NOT an
+absorbing-mask diffuser; commit is emergent low-entropy persistence and clamp is a
+custom `LogitsProcessor` (see [[grounding]]). The eval-renoise worker
+(`denoise_to_step`/`resume_renoise`) is BUILT but UNTESTED on GPU. **NEXT** is the
+canvas-length probe + the three-arm kill-gate ([[roadmap]] P0–P1).
 
 ## How to run it
 
 Worker lives in gitignored `tmp/flash-diffgemma/` (Python `@Endpoint` + `client.py`
-driver). Keys in `.env` (`RUNPOD_API_KEY`, `HF_TOKEN`). `.venv` = python3.12.
+driver; snapshot in `flash-worker/`). Keys in `.env` (`RUNPOD_API_KEY`, `HF_TOKEN`).
+`.venv` = python3.12.
 
 ```bash
 cd tmp/flash-diffgemma
 set -a; . ./.env; set +a                     # load keys
 
 # DEPLOY — then ALWAYS verify-fresh (see "Deployment stability" below).
-# HARD-LEARNED: a plain `flash deploy` does NOT recycle a WARM worker — it keeps
-# serving OLD code until it scales to zero (idle_timeout) or is force-recycled.
-# NEVER trust a measurement without confirming worker_sha == local (verify_fresh.py).
 export FLASH_GPU_IMAGE=docker.io/seantempesta/diffgemma-worker:cu128-v1
 .venv/bin/flash deploy                        # bundles gpu_worker.py + diffgemma_common.py
 python3 verify_fresh.py                        # MUST print "FRESH ✓" before any measuring
-#   STALE? force a recycle (flash undeploy is flaky — see flash-deployment-stability doc),
-#   or wait out idle_timeout (600s) then a cold call, then re-verify.
 
-# DRIVE a run (modes: probe | introspect | generate | clamp_smoke | infill)
+# DRIVE a run (modes: probe | introspect | generate | clamp_smoke | infill | denoise_to_step | resume_renoise)
 export DIFFGEMMA_EP=kzonsp5b18hpq5            # from deploy output
 python -u client.py '{"mode":"probe"}'                                   # cheap: imports+config, no 50GB load
-python -u client.py '{"mode":"introspect"}'                              # reflect live model (mask-free: output fields, sampler, gen-config, think-markers)
-python -u client.py '{"mode":"generate","prompt":"...","max_new_tokens":256,"trace":"canvas"}'  # generate + denoise_steps/commit trajectory
+python -u client.py '{"mode":"introspect"}'                              # reflect live model (output fields, sampler, gen-config, CANVAS_LENGTH)
+python -u client.py '{"mode":"generate","prompt":"...","max_new_tokens":256,"trace":"canvas"}'
 
-# THE DECISIVE TEST — does the LogitsProcessor clamp hold positions fixed?
-# Clamps ~3 canvas positions to chosen token ids; asserts they survive denoising
-# (out.sequences[0][nprompt+pos] == forced id) while the rest denoise. If all_held
-# is true, the whole slotted-gen / infill / eval-renoise primitive is PROVEN.
-python -u client.py '{"mode":"clamp_smoke","trace":"canvas"}'            # defaults: pos 5/40/100 -> "hello"/"world"/"diffusion"
-python -u client.py '{"mode":"clamp_smoke","clamp_text":{"5":"hello","40":"world"},"trace":"entropy"}'
+# THE PROVEN PRIMITIVES
+python -u client.py '{"mode":"clamp_smoke","trace":"canvas"}'            # clamp holds positions (PROVEN)
+python -u client.py '{"mode":"infill","prefix":"(defn mean [xs] (/ ","suffix":" (count xs)))","max_hole_tokens":16}'
 
-# INFILL — clamp a prefix + suffix, let the middle denoise (reuses the clamp)
-python -u client.py '{"mode":"infill","prefix":"(defn mean [xs] (/ ","suffix":" (count xs)))","max_hole_tokens":16,"expect_contains":"(reduce + xs)"}'
-
-# TUNING KNOBS (optional, any generate mode — A/B without redeploying logic):
-#   max_denoising_steps (int)  — the step CAP (loop bound)
-#   entropy_bound (float, dflt 0.1) — HIGHER => more tokens accepted per forward
-#   t_min / t_max (float)      — temperature schedule
-#   stability_threshold (int) + confidence_threshold (float) — early-stop (pass BOTH)
+# TUNING KNOBS (any generate mode — A/B without redeploying logic):
+#   max_denoising_steps (int) — the step CAP (do NOT shrink to "checkpoint"; it compresses the temp ramp)
+#   entropy_bound (float, dflt 0.1) — HIGHER => more tokens accepted/forward
+#   t_min / t_max, stability_threshold + confidence_threshold (early-stop, pass BOTH)
 python -u client.py '{"mode":"generate","prompt":"...","entropy_bound":0.3,"max_denoising_steps":64,"trace":"entropy"}'
 
-# RESULT FIELDS to read: attn_impl (sdpa|eager), denoise_steps, committed_per_step
-#   (full per-step list), tokens_per_forward (model's own metric), gen_s, tok_per_s.
-
-# COST / is it billing? (running>0 = executing; workersMin=0 = $0 when idle)
+# RESULT FIELDS: worker_sha, attn_impl (sdpa|eager), denoise_steps, committed_per_step, tokens_per_forward, gen_s, tok_per_s
+# COST / billing: running>0 = executing; workersMin=0 = $0 idle
 curl -s https://api.runpod.ai/v2/$DIFFGEMMA_EP/health -H "Authorization: Bearer $RUNPOD_API_KEY"
 
 # REBUILD/PUSH the custom image (stops at push; needs docker login)
 REGISTRY=docker.io/seantempesta TAG=cu128-v1 ./build-image.sh
 ```
 
-- **Scale-to-zero now** (`workers=(0,1)` in `gpu_worker.py`): $0 when idle, ~66s
-  cold reload. **Keep-warm** for fast iteration: set min worker to 1 in the
-  `@Endpoint` + redeploy (continuous A100 ~$1.19/hr — owner's call once iterating).
-- Cold start = provision A100 + pull the 15GB image + load 50GB model (cached on
-  the NetworkVolume after first load). `.flashignore` is DEAD in Flash v1.17 — use
-  `.gitignore`.
+- **Scale-to-zero** (`workers=(0,1)`): $0 when idle, ~66 s cold reload. **Keep-warm**
+  for fast iteration: min worker = 1 in the `@Endpoint` + redeploy (continuous A100
+  ~$1.19/hr — owner's call once iterating). `.flashignore` is DEAD in Flash v1.17 —
+  use `.gitignore`.
 
 ## Deployment stability — KNOW what's live (do NOT skip)
 
-We got burned measuring against a STALE warm worker (`flash deploy` said "deployed"
-but the running worker served old code for an unknown window). The guard, now built
-in, is a source fingerprint:
+A plain `flash deploy` does NOT recycle a WARM worker — it keeps serving OLD code
+until it scales to zero (`idle_timeout`) or a structural field changes. Grounded in
+the Flash source ([[grounding]] "Flash", [[research/flash-deployment-stability-2026-06-28]]):
 
-- **`worker_sha`** — every worker response carries `sha256(gpu_worker.py +
+- **`worker_sha`** — every response carries `sha256(gpu_worker.py +
   diffgemma_common.py)[:12]`, computed INSIDE the container. It proves which code
   produced a result.
-- **`verify_fresh.py`** (in `tmp/flash-diffgemma/`, gitignored) — computes the local
-  sha, probes the worker, asserts `worker_sha == local`. Prints `FRESH ✓` or refuses.
-- **The rule:** after ANY deploy, run `python3 verify_fresh.py` and see `FRESH ✓`
-  BEFORE trusting a single number. A measurement on an unverified worker is worthless.
-- **Forcing a recycle is the open problem:** plain `flash deploy` does not recycle a
-  warm worker; `flash undeploy` has been flaky (`OSError`/arg errors). The grounded
-  procedure is in [[research/flash-deployment-stability-2026-06-28]] (RunPod Flash
-  source). Until then: deploy → `verify_fresh.py`; if STALE, wait out `idle_timeout`
-  (600s) for scale-to-zero then a cold call, and re-verify.
-
-## Current issues / blockers
-
-- **Output-object bug — FIXED** (`out.sequences`, grounded). Mechanics GROUNDED.
-- **NEXT (on the warm worker, not yet run):** (1) `clamp_smoke` — the decisive
-  proof the LogitsProcessor clamp holds positions; (2) confirm `sdpa` loaded +
-  re-measure tok/s (eager suspected for the 137 tok/s); (3) sweep `entropy_bound`
-  / `max_denoising_steps` against `tokens_per_forward` to find the A100 ceiling.
-- **Slow first gen (137 tok/s, tokens_per_forward=[4]):** suspects = eager attn
-  (now switched to sdpa) + a low `entropy_bound` (only ~4 tokens accepted/forward).
-  The new `denoise_steps` + `committed_per_step` trace + the knobs exist to diagnose.
-- **`FLASH_GPU_IMAGE` didn't take effect** (worker ran stock torch 2.9.1) —
-  harmless now (stock works), but MUST be solved for the Seon-co-location image.
+- **`verify_fresh.py`** (gitignored) — asserts `worker_sha == local`; prints
+  `FRESH ✓` or refuses. Run it after ANY deploy before trusting a single number.
+- **Force-fresh that PRESERVES the endpoint id:** bump `FLASH_GPU_IMAGE` to a new
+  tag (`imageName` is structural → server-side worker recreation). `flash undeploy
+  --all && flash deploy` also works but CHANGES `DIFFGEMMA_EP`.
 
 ## Settled — do NOT re-litigate
 
-- **torch 2.9.1 (stock base) WORKS** — the ~12-cycle "broken torch" saga was a
-  hallucinated `setup_compilation_env` symbol + the worker's runtime shims.
-  Custom image NOT needed for torch.
-- **Custom image KEPT** for Seon co-location (run parse/eval/retrieve ON the
-  worker → local feedback loop, not an internet round-trip).
-- **A100-80 BF16** (NOT 5090/NVFP4 — BF16 = confound-free entropy dynamics; the
-  test-plan's "rent a 5090" hardware section is SUPERSEDED).
-- **Route A** (per-step round-trip) for live feedback — Flash has no
-  input-into-a-running-job surface.
-- Token dynamics: COMMIT/LOCK low-entropy tokens + re-noise the rest (~7.5
-  re-mask/gen) — NOT whole-canvas refinement every step.
-- The parser-as-oracle is the feedback signal, fully measured: 92.7% detect /
-  100% safe-recover / 93.5% combined-with-eval; two AR A/B nulls → value is on
-  NOISY diffusion gen. `:span`/`:error-kind` = re-noise dial; program-graph =
-  retrieval trigger.
+See [[roadmap]] "Settled" for the full list. The load-bearing ones: torch 2.9.1
+stock WORKS (custom image kept only for Seon co-location); A100-80 BF16 (FP8 1000
+tok/s is Hopper-only); two endpoints behind one provider (vLLM speed / transformers
+control); commit is emergent random-init NOT a mask; `max_denoising_steps` is a CAP
+(stop externally); stay on transformers 5.11.0.
 
-## Serving / speed (research: `research/serving-optimization-survey-2026-06-28.md`)
+## Research index (the dated depth)
 
-- **vLLM genuinely runs block-diffusion** (H100 1008 / H200 1288 tok/s, FP8) but
-  exposes NO per-step `LogitsProcessor`/`accept_canvas` hook (sampler compiled
-  shut) → **SPEED, no CONTROL**. SGLang/TGI/TensorRT: no support.
-- → **TWO endpoints behind one `diffusiongemma` Seon adapter** (`SEON_DG_BACKEND=
-  vllm|control`). vLLM is OpenAI-compatible → serving adapter ≈ existing
-  openai-compat. CONTROL = our transformers worker.
-- A100 137 tok/s explained: 4→15-20 tokens/forward **fixable today** (entropy_bound
-  0.1, temp 0.8→0.4, 48-step cap); FP8 headline unreachable on Ampere. "tok/s
-  lies" — cost is per-CANVAS, not per-token.
+The spine links the depth inline; this table is the full map — one line per file.
 
-## Plans + next steps (ordered)
+| Research file | What it covers |
+|---|---|
+| `mode-driven-guided-generation` | **THE design** — the mode abstraction, the four modes, the convergent-pass frame, E0–E6 |
+| `mode-design-critique` | the adversarial review the roadmap's sequencing is built on (missing arm-3, vacuity, canvas gating, cut-list) |
+| `transformers-diffusion-source-grounding` | the real v5.11.0 mechanism — per-step seam `:1034`, stopping ABC `:466`/`:1207`, temp ramp `:311`, streamer verdict |
+| `parser-as-generation-oracle` | the measured three-tier oracle (92.7% parse / 62.5% free / 91.5% w-ref / 93.5% combined) + the strong-model nulls |
+| `seon-diffusion-interface-design` | the `:diffusiongemma` provider (two backends) + the gym predicate machinery |
+| `serving-optimization-survey` | vLLM runs the decode but seals the sampler → the two-endpoint split; the 137 vs 1000 tok/s explanation |
+| `flash-deployment-stability` | why a warm worker keeps old code + the stable deploy procedure (Flash source) |
+| `flash-warm-reuse` | FlashBoot reality (platform-side, decays with idle) → keep-warm is the dependable lever |
+| `eval-renoise-worker-build` | the built `denoise_to_step`/`resume_renoise` worker + the two GPU-only unknowns |
+| `gym-third-party-adoption` | making the gym consumer-drivable (`SEON_CONFIG` + `SEON_EXTRA_SRC`, no `src/seon` edits) |
+| `thesis-capstone` | the session synthesis + the first-light GO/NO-GO against the T0–T5 ladder |
+| `first-light-runbook` | the ordered deploy → capabilities execute sequence |
+| `custom-image-and-seon-colocation` | the torch finding (stock works) + the co-location latency play |
+| `runpod-flash-grounding` | RunPod/Flash SDK grounding + the env-fix recipe (`dependencies` is build-time pip) |
+| `model-mechanics-grounding` | the pivotal mask→random-init correction — **absorbed into** `transformers-diffusion-source-grounding` (kept for the history) |
+| `infill` / `eval-renoise` / `retrieval-denoising` / `live-feedback`-experiment-plan | capabilities #1–#4 — capability INTENT valid; the **mask-based mechanism is SUPERSEDED** by `transformers-diffusion-source-grounding` + `eval-renoise-worker-build` |
 
-0. **DONE (first light, 2026-06-28):** deployed; first generate 137 tok/s
-   (`def`-vs-`defn` thesis demo); mechanics CORRECTED (LogitsProcessor clamp, not
-   mask); clamp surface built + **DEPLOYED to `kzonsp5b18hpq5`** (NOT yet run).
-1. **RUN `clamp_smoke`** on the warm worker — the decisive proof the clamp holds
-   (`python -u client.py '{"mode":"clamp_smoke","trace":"canvas"}'`). Then the
-   speed bench: confirm `attn_impl=sdpa` + sweep `entropy_bound`/`max_denoising_steps`
-   vs `committed_per_step`/`tok_per_s` → real step count + A100 ceiling.
-2. **Two-endpoint `diffusiongemma` Seon adapter** (vllm serving + transformers control).
-3. **Testing harness:** adapt the gym (scenario→predicate→scorecard) to drive the
-   diffusion experiments; Seon-side interface = a CLJS client to the worker
-   (`seon.ai` already has the provider + transport-retry pattern, `ai.cljs:69-98`).
-4. **ACME config port (owner-requested):** review recent commits (config-driven
-   loadout / `SEON_CONFIG`/`SEON_PROFILE` / skills / gym) → port to `config/acme.edn`
-   for max feature + context control.
-5. **Capability ladder (T0–T5):** #1 infill (**T2 = first kill gate**: must beat
-   suffix-blind AR) → #2 eval-renoise (`:span`/`:error-kind` dial) → #3 retrieval
-   (program-graph trigger) → #4 live feedback (Route A).
-6. **Owner's experiments** (may leapfrog): slotted guided-generation (clamped
-   scaffold + retrieval-injected slots + masked reasoning) + thinking-canvas
-   (denoise-steps as a compute budget; scratchpad stripped after).
-7. **Once iterating:** keep-warm endpoint + the **Seon co-location image** (the
-   latency play — bundle parse/eval/retrieve onto the worker).
+Also top-level: [[infra-flash-runpod]] (the operational deploy/debug log).
+`archive/index.md` = the original "push the image" handoff (superseded by the spine).
 
-## Entry points (depth)
+## How to work here
 
-- [[index]] — push-ready state, env-fix recipe, deploy mechanics.
-- [[thesis-capstone-2026-06-28]] — the measured oracle + first-light GO/NO-GO.
-- [[first-light-runbook-2026-06-28]] — deploy + the one-warm-window sequence.
-- [[custom-image-and-seon-colocation-2026-06-28]] — the torch finding + co-location play.
-- [[research/parser-as-generation-oracle-2026-06-28]] — the measured 3-tier oracle.
-- [[research/model-mechanics-grounding-2026-06-28]] — real model behavior (in progress).
-- 4 capability plans: `research/{infill,eval-renoise,retrieval-denoising,live-feedback}-experiment-plan-2026-06-28`.
-- [[infra-flash-runpod]] — the full deploy/debugging log (12+ issues).
+- **Docs + experiments only on this track** — `src/seon` integration (the
+  `:diffusiongemma` provider, gym predicates) lands in [[roadmap]] P3, after the
+  kill-gate. Don't wire the pod before the thesis clears P1.
+- **The GPU is the owner's single worker** — agents design + ground + write worker
+  modes (py_compile-clean, off-GPU unit-checked); the owner deploys + drives.
+- **Every experiment is a gym scenario + a predicate + a scorecard** (`scenario ×
+  git-sha`) — a knob sweep is a MOVED number, not an anecdote.
+- **Read the source before you build** — [[grounding]] maps every claim to a
+  `reference-code/…:LINE`; guessing diffusion semantics produces confident, wrong code.

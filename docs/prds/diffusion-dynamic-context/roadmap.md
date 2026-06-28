@@ -1,0 +1,217 @@
+---
+type: prd
+status: active
+tags: [prd, agent, flow]
+---
+
+# Diffusion roadmap — we are here → the target
+
+The single **we-are-here** doc. [[architecture]] describes the buzzsaw in present
+tense (the target as it IS when built); [[grounding]] cites every load-bearing
+claim in real source. THIS doc holds what is PROVEN, the gap, and the
+kill-gate-first, dependency-ordered path to close it.
+
+The discipline (owner-settled, [[research/mode-design-critique-2026-06-28]]):
+**build ONE mode, ONE fn, ONE canvas — gate the riskiest assumption BEFORE
+building the engine.** The mode engine, the op-axis, the multi-pass convergence
+loop, and the `mode/enter` sentinel are correct in principle and PREMATURE in
+sequencing; they are CUT from the MVP until one forced-spec infill beats
+prompt+oracle. Generalize after the kill-gate is green, not before.
+
+## ▸ WE ARE HERE
+
+The model is **PROVEN running** and the **control primitives are PROVEN**. The
+mechanism has been corrected from the absorbing-mask premise to the real
+`LogitsProcessor` clamp. The eval-renoise worker is built but UNTESTED on GPU. The
+next move is the **canvas-length probe**, then the **three-arm kill-gate** that
+decides whether the clamp/scaffold half of the thesis is worth building at all.
+
+## PROVEN (fingerprint-certified, 2026-06-28)
+
+Each is live-verified on the A100 worker (endpoint `kzonsp5b18hpq5`) with
+`worker_sha == local`, OR measured in the live pod.
+
+- **Model runs.** DiffusionGemma loads (~66 s) and generates on stock torch
+  2.9.1; the `def`-vs-`defn` thesis demo passed (parser passes, eval catches).
+  The ~12-cycle "broken torch" saga was a hallucinated smoke-test symbol —
+  [[research/custom-image-and-seon-colocation-2026-06-28]].
+- **Clamp holds.** `clamp_smoke` — chosen canvas positions survive denoising while
+  the rest denoise. The `LogitsProcessor` clamp is real.
+- **Infill works.** Clamp prefix AND suffix → both ends held, the middle denoises
+  co-conditioning on the suffix (the move AR cannot make).
+- **The spec-slot infills.** Forcing a `:malli/schema` via an infill hole produces
+  a fillable spec at the PRIMITIVE level (content can still be wrong — that is
+  precisely the parse→eval→span-renoise loop's job).
+- **The dynamic-context half is validated.** The data-modeling skill A/B took
+  generation from **0→100%** correct map-in/map-out (62%-hallucinating without the
+  context, 100%-correct with it). This is the SAFE half of the bet — reactive
+  section-fns help a generator regardless of the clamp question — and it is
+  already paying off.
+- **Deployment-stability fingerprint discipline.** `worker_sha` + `verify_fresh.py`
+  — a measurement on an unverified worker is worthless; the procedure is grounded
+  in the Flash source ([[research/flash-deployment-stability-2026-06-28]]).
+- **The eval-renoise worker is BUILT** (`denoise_to_step` / `resume_renoise` +
+  `StepCountStopping` + `good_clamp_for_renoise`), py_compile-clean, lowering onto
+  public seams only — but **UNTESTED on GPU** ([[research/eval-renoise-worker-build-2026-06-28]]).
+- **The oracle is measured.** Parser 92.7% detect / 100% safe-recover; eval 62.5%
+  free / 91.5% with a comparator; combined 93.5% ([[grounding]] "oracle").
+
+## The gap to the target
+
+- **Scaffold sizing is unmeasured.** Every `:defn-with-specs` scaffold assumes
+  single-canvas infill, but `canvas_length` has not been read off the live worker.
+  If a scaffold spills to a second canvas the spec slot loses its co-conditioning
+  on the clamped frame — the ONE thing clamp buys over prompting. This GATES every
+  scaffold design.
+- **The clamp/scaffold half is unproven against the RIGHT baseline.** The real
+  competitor is not naked prompting — it is `prompt + the same post-hoc
+  parse/eval/renoise loop` (arm 3). No experiment has run arm 3.
+- **"Quality by construction" is unproven on faithfulness.** No measurement
+  separates a present spec from a non-vacuous one.
+- **Speed is untuned.** 137 tok/s on the A100 is ~4 tokens/forward vs the
+  reference 15–20; `sdpa` is switched in but unconfirmed live, and
+  `entropy_bound`/`max_denoising_steps` are unswept.
+- **No Seon-side wiring.** The `:diffusiongemma` provider + the two-endpoint
+  adapter + the gym predicates are designed, not built.
+
+## The build path (kill-gate first, dependency-ordered)
+
+### P0 — Canvas-length probe (gates everything, one call)
+
+Read `canvas_length` off the live worker (`introspect`/`probe`). Then tokenize the
+actual `:defn-with-specs` scaffold offline and check (a) does it fit one canvas,
+(b) do clamp/slot boundaries fall on clean BPE token edges (a `::` abutting a hole,
+`:=>` next to a slot may share one token, so `span_to_positions` can't cleanly
+separate clamp from slot). Pure arithmetic after one probe. Do this BEFORE
+designing any scaffold. (Critique F3.)
+
+### P0 — Speed bench (parallel, cheap)
+
+Confirm `attn_impl=sdpa` loaded; sweep `entropy_bound` (0.1→0.3) and
+`max_denoising_steps` against `committed_per_step` / `tok_per_s` to find the real
+step count and the A100 BF16 ceiling. The FP8 1000 tok/s headline is unreachable on
+Ampere by construction — measure the achievable number, don't chase the headline
+([[research/serving-optimization-survey-2026-06-28]]).
+
+### P1 — THE KILL-GATE: three-arm forced-spec infill (E1)
+
+The single experiment that decides whether modes are worth building. Same handful
+of fns whose bodies are given; clamp the `defn` + `:malli/schema` frame, leave
+`:in-spec`/`:out-spec`/`:body` as holes. THREE arms:
+
+1. **forced-spec infill** + the post-hoc parse/eval/renoise loop,
+2. **free completion** (naked),
+3. **plain prompt** "write the `:malli/schema`" **+ the IDENTICAL post-hoc
+   parse/eval/renoise loop** ← the baseline the original plan omitted.
+
+- **Metric A (validity):** % of attempts that yield an instrumentable spec (parses
+  + registers, no `:seon.fn/schema-error`) within `renoise.max-retries`.
+- **Metric B (the real discrimination):** does arm 1 BEAT arm 3? If arm 1 ≈ arm 3,
+  the entire clamp/scaffold apparatus is dead weight — the post-hoc oracle loop
+  (which we build anyway) carries it. KILL modes, keep only the dynamic-context
+  half.
+- **Metric C (faithfulness — the vacuity score):** of the specs each arm produces,
+  what % are `[:map]` / over-permissive (a static check) and what % REJECT an
+  obviously-wrong input for the given body (an adversarial property / LLM-judge)?
+  If >~30% vacuous, "quality by construction" is hollow and Stage 3 must carry the
+  quality. (Critique F1 + F2.)
+
+Every run lands in the gym scorecard (`scenario × git-sha`). Read the numbers
+honestly — they, not the engine, decide whether anything below gets built.
+
+### P1 — Eval-renoise live test
+
+Drive the built `denoise_to_step` / `resume_renoise` worker on the GPU. Confirm
+the two honest unknowns: (1) does the duck-typed `StepCountStopping` actually fire
+at step K on 5.11.0 (the OR-accumulate + break path); (2) the closed loop —
+re-noise the parser-`:span` positions, confirm the retry clears the gate more often
+than a blind full re-noise. ([[research/eval-renoise-worker-build-2026-06-28]],
+[[research/eval-renoise-experiment-plan-2026-06-28]].)
+
+### P2 — The `:defn-with-specs` MVP mode (only if P1 passes)
+
+The minimal mode that proves the thesis: `:defn-with-specs`, **system-forced** on a
+single unspecced fn (the `missing-spec-target` detector — already grounded, zero
+model cooperation), in a canvas-verified scaffold, A/B'd against arm 3. One mode,
+one gym predicate (`:spec-infill-instruments`). NO sentinel, NO op-axis, NO
+convergence loop. Keep the dynamic-context section-fns regardless — they are the
+safe half and they help arm 3 too.
+
+### P3 — The Seon interface
+
+Wire the `:diffusiongemma` provider (two backends behind `SEON_DG_BACKEND`),
+reusing `:openai-compat` for `vllm` and adding `seon.ai.diffusiongemma` for
+`control`; add the gym predicate kinds. Then the consumer-drivable gym entry point
+(`SEON_CONFIG` + `SEON_EXTRA_SRC`, no `src/seon` edits).
+([[research/seon-diffusion-interface-design-2026-06-28]],
+[[research/gym-third-party-adoption-2026-06-28]].)
+
+### P4 — Generalize: the engine, the stages, the convergence loop (E2–E6)
+
+ONLY after the kill-gate is green. The full design exists
+([[research/mode-driven-guided-generation-2026-06-28]]); build it in this order:
+
+- **E2 — `:design-schema` adapt loop:** does showing `mg/sample` example data
+  tighten the next schema? (Its own kill-gate — the premise is unproven.)
+- **E3 — per-step gate latency:** the `:eval`/`:instrument` rungs run real
+  compilation; if decode+parse+eval per step dominates the ~12 ms forward, defer
+  eval to the END of each K-step call. The custom stopping criterion forfeits
+  `torch.compile` (mutually exclusive) — measure the throughput cost of being
+  allowed to gate. (Critique F1's mechanism.)
+- **E4 — span re-noise hits the right region:** the parser `:span` overlaps the
+  known-bad region AND `span_to_positions` selects the right canvas positions.
+- **E5 — the four-mode staged build, single pass:** the first capstone demo on a
+  real "build a small domain" scenario.
+- **E6 — multi-pass convergence:** the iterative-refinement proof (CREATE/UPSERT/
+  RETRACT, the monotonicity guard, the `namespace × git-sha × pass-n` scorecard).
+  KILL gate: does a schema upsert that breaks a downstream fn RE-SURFACE it as an
+  open item without being called? If instrumentation only throws on call, the
+  reactive-convergence premise needs explicit dirty-marking. (Critique F5.)
+
+## CUT from the MVP (defer until one forced infill beats arm 3)
+
+These are elegant superstructure on an unproven primitive. Build none of them
+before P1 is green (critique §3):
+
+- **The `mode/enter` sentinel + model-initiated invocation.** Circular,
+  unbootstrapped, dispensable — the `missing-spec` detector forces a mode with zero
+  model cooperation. System-forced only for the MVP.
+- **The op-axis `:create/:upsert/:retract` and the whole multi-pass convergence
+  loop** (the monotonicity guard, the scorecard trend line). None of it validates
+  before one forced infill works.
+- **`:generative-test` and `:repl-explore` as modes.** Stage 4 is the normal agent
+  loop with an empty scaffold — not a mode. Stage 3 matters as a quality CHECK on
+  Stage 2's output (the vacuity pressure), not as a fifth piece of machinery to
+  stand up first.
+- **The "one engine vs per-stage" debate.** Moot with one mode — you cannot prove
+  one engine subsumes four before you have one.
+
+**Keep regardless of P1:** the dynamic-context section-fns (`namespace-state`,
+`missing-spec-target`, `related-fns-and-schemas`). Pure reactive queries, already
+validated (the 0→100% A/B), and they help a prompted model too. They are arm 3's
+context — the safe half of the bet.
+
+## Settled — do NOT re-litigate
+
+- **torch 2.9.1 stock WORKS** — custom image NOT needed for torch (kept only for
+  the Seon co-location latency play).
+- **A100-80 BF16** — confound-free entropy dynamics; the FP8 1000 tok/s headline is
+  Hopper-only and not the target.
+- **Two endpoints behind one provider** — vLLM = speed/no control, transformers =
+  control. A single deployment cannot do both.
+- **Commit is emergent (random re-init), NOT a mask.** Infill = clamp + random-noise
+  the hole; never build on `mask_token_id`.
+- **`max_denoising_steps` is a CAP** — stop externally, never shrink it.
+- **Stay on transformers 5.11.0** — the control/streamer/sampler seam is
+  byte-identical through `main`; upgrading buys nothing and risks the cache-API
+  rename.
+
+## Detail docs
+
+- [[architecture]] — the target buzzsaw, the glossary, the mode abstraction.
+- [[grounding]] — the source-cited claims table per area.
+- [[research/mode-driven-guided-generation-2026-06-28]] — THE design (the engine,
+  the four modes, the convergent-pass frame, E0–E6).
+- [[research/mode-design-critique-2026-06-28]] — the adversarial review this
+  roadmap's sequencing is built on.
+- [[CLAUDE]] — the index + the copy-pasteable run/deploy loop.

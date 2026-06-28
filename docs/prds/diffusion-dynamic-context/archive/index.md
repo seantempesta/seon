@@ -1,14 +1,18 @@
 ---
-type: prd
-status: active
-tags: [prd, agent, research, web]
+type: archive
+status: completed
+tags: [archive, agent, research]
 ---
 
-# Diffusion Dynamic Context — PRD + Handoff
+# Diffusion Dynamic Context — PRD + Handoff (ARCHIVED)
 
-> **RESTART HERE.** This is a solo-driven exploration; this doc is the complete
-> handoff for a fresh-context continuation. Read this top-to-bottom, then
-> [[infra-flash-runpod]] for the gory infra detail and the live debugging log.
+> **SUPERSEDED 2026-06-28.** This was the original "PREP COMPLETE — push the
+> image" handoff. The model is now PROVEN running and the mechanism has been
+> corrected (a `LogitsProcessor` clamp, not an absorbing mask). The
+> forward-looking spine replaces this doc: [[architecture]] (the target),
+> [[roadmap]] (we-are-here → the path), [[grounding]] (the source-cited claims),
+> and [[CLAUDE]] (the index + runbook). Kept only for the historical infra/cost
+> detail (the model card, the GPU/cost comparison, the env-fix saga).
 
 ## TL;DR — where we are (2026-06-28)
 
