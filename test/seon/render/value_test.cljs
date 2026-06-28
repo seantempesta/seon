@@ -141,16 +141,26 @@
       (is (= "[1 2 3]" out))
       (is (not (str/includes? out "partial view"))))))
 
+(deftest render-ai-small-deep-renders-whole
+  (testing "a small but deep/long value prints VERBATIM — the agent sees the
+            real nesting of its own stored data, not {…N keys}/\"…\""
+    (let [v   {:name "widget" :stock {:warehouse {:shelf {:bin 42}}}
+               :note (apply str (repeat 90 "x"))}
+          out (v/render-ai "s2" v)]
+      (is (= (pr-str v) out))
+      (is (not (str/includes? out "partial view")))
+      (is (not (str/includes? out "…"))))))
+
 (deftest render-ai-truncated-names-the-live-var
   (testing "a clipped value points the agent at result/<id> for the whole value"
-    (let [out (v/render-ai "xyz123" (vec (range 100)))]
+    (let [out (v/render-ai "xyz123" (vec (range 2000)))]
       (is (str/includes? out "partial view"))
       (is (str/includes? out "result/xyz123"))
       (is (str/includes? out "get-in")))))
 
 (deftest render-ai-long-string-reports-length
-  (let [out (v/render-ai "s1" (apply str (repeat 300 "x")))]
-    (is (str/includes? out "chars⟩"))
+  (let [out (v/render-ai "s1" (apply str (repeat 2000 "x")))]
+    (is (str/includes? out "tokens⟩"))
     (is (str/includes? out "result/s1"))))
 
 (deftest render-ai-output-is-bounded

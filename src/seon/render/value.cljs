@@ -77,6 +77,25 @@
    :max-string   (env-int "SEON_VALUE_MAX_STRING" 80)
    :shape-sample (env-int "SEON_VALUE_SHAPE_SAMPLE" 8)})
 
+(def ^:private verbatim-cap
+  "Char budget under which an eval value prints WHOLE (REPL-style) instead of
+   being skeletonized — small enough that the agent sees the REAL nesting of
+   its own just-stored data, not `{…2 keys}`/`\"…\"`. Grounded at the same
+   1500 as `seon.agent.ctx/eval-render-cap` (which can't be required here —
+   that ns sits ABOVE this one): a value this size is genuinely small, well
+   under the result-body clip. Override via SEON_VALUE_VERBATIM_CAP."
+  (env-int "SEON_VALUE_VERBATIM_CAP" 1500))
+
+(def ^:private verbatim-probe-opts
+  "Generous bounds used ONLY to test — LAZY-SAFELY — whether `value` is small
+   and fully plain before `pr-str`'ing it whole. `sample` realizes at most
+   max-items+1 of any seq, so an untruncated probe PROVES the value is finite,
+   opaque-free, and bounded: `pr-str` then cannot hang on a lazy/infinite seq
+   nor blow up. Bounds far exceed anything a verbatim-cap-sized value reaches,
+   so the char count stays the real gate."
+  {:max-depth 64 :max-keys 256 :max-items 256
+   :max-string verbatim-cap :shape-sample 8})
+
 ;; ============================================================
 ;; Opaque detection — the ONE home for "this node is not plain data,
 ;; project it to a compact marker." `seon.eval` requires this ns rather
@@ -391,16 +410,9 @@
           n (if (counted? x) (count x) (str "≥" (count (take 1001 x))))]
       (str t " " n (if (map? x) " keys" " items")))))
 
-(defn render-ai
-  "Agent-facing TEXT for an eval value. `eval-id` names the live var the
-   agent drills. A plain small value renders verbatim (like a REPL); a
-   large / clipped value renders as a bounded structural skeleton + ONE
-   trailing hint line (top-level type/count + a drill pointer at
-   `result/<id>`). The whole output is valid Clojure comment prose — no
-   backticks, no fences — so it round-trips through the eval-able context."
-  {:malli/schema [:=> [:catn [:seon.render.value/eval-id :string]
-                             [:seon.render.value/value :any]]
-                  :string]}
+(defn- bounded-view
+  "The DEPTH/BREADTH-bounded skeleton + ONE trailing drill hint — the view
+   for a value too large/deep/opaque to print whole."
   [eval-id value]
   (let [skel  (sample value)
         clip? (truncated? skel)
@@ -412,6 +424,33 @@
                      "result/" eval-id "  (get-in result/" eval-id
                      " […]) · filter · count · take/drop"))]
     (str body hint)))
+
+(defn render-ai
+  "Agent-facing TEXT for an eval value. `eval-id` names the live var the
+   agent drills. A small value renders VERBATIM (like a REPL — full nesting,
+   so the agent navigates its own stored data correctly next turn); a large /
+   deep / opaque value renders as a bounded structural skeleton + ONE trailing
+   hint line (top-level type/count + a drill pointer at `result/<id>`). The
+   whole output is valid Clojure comment prose — no backticks, no fences — so
+   it round-trips through the eval-able context.
+
+   The SIZE GATE: a lazy-safe `verbatim-probe-opts` sample first proves the
+   value is finite + plain (never hangs on a lazy/infinite seq); only then is
+   `pr-str` safe, and a value whose printed form fits `verbatim-cap` prints
+   whole. Everything else falls to `bounded-view`."
+  {:malli/schema [:=> [:catn [:seon.render.value/eval-id :string]
+                             [:seon.render.value/value :any]]
+                  :string]}
+  [eval-id value]
+  (let [probe (sample value verbatim-probe-opts)]
+    (if (truncated? probe)
+      (bounded-view eval-id value)
+      ;; probe untruncated ⇒ value is finite, opaque-free, bounded ⇒ pr-str
+      ;; cannot hang. Print it WHOLE when it fits the char budget.
+      (let [edn (pr-str value)]
+        (if (<= (count edn) verbatim-cap)
+          edn
+          (bounded-view eval-id value))))))
 
 ;; ============================================================
 ;; RENDER-HTML-DATA — the DATA CONTRACT for the interactive drill-down
