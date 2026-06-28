@@ -219,6 +219,36 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; A nil :seon.eval/source must NEVER drop the row. A comment-only / repaired
+;; entry can hand record-eval! a nil source; the attr is registered :string,
+;; so a nil would fail Malli and sink the WHOLE tx — the exact data loss
+;; observed in live-drive-validation-2026-06-28 (3 eval rows vanished from
+;; turn 1, "DATA LOSS — bare eval row … source: null"). record-eval! coerces
+;; nil→"" at the write boundary so the row always lands.
+;; ---------------------------------------------------------------------------
+
+(deftest nil-source-still-records-the-eval-row
+  (async done
+    (-> (fresh-conn)
+        (.then
+          (fn [conn]
+            (let [eval-id (db/new-id!)]
+              ;; nil source + empty tee = the "bare eval row, no tee rows to
+              ;; drop" path that silently dropped rows pre-fix.
+              (-> (record! conn (eval-args eval-id (db/new-id!) nil []))
+                  (.then
+                    (fn [_]
+                      (let [db* @conn]
+                        (testing "the eval row landed despite a nil source"
+                          (is (= #{[eval-id ""]}
+                                 (d/q '[:find ?id ?src :in $ ?id
+                                        :where [?e :seon.eval/id ?id]
+                                               [?e :seon.eval/source ?src]]
+                                      db* eval-id)))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; HONEST RECORDS (task #24 symptom 3): when the tee tx fails and only the
 ;; bare eval row could be recovered, the eval row carries
 ;; :seon.eval/record-error and seon.warn/check-record-errors derives a

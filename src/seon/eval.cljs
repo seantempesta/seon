@@ -2084,8 +2084,11 @@
    upserts handle redefinition.
 
    NEVER silently loses the eval row (run-4 root cause,
-   e2e-demo-findings-2026-06-08 §Run 4 CORRECTION). A DB write failure
-   doesn't abort the batch, but it is handled in two LOUD stages:
+   e2e-demo-findings-2026-06-08 §Run 4 CORRECTION). A nil `source` is
+   coerced to \"\" before the tx (the attr is `:string`; a nil would fail
+   Malli and sink the whole tx) so a comment-only / repaired entry still
+   records. A DB write failure doesn't abort the batch, but it is handled
+   in two LOUD stages:
 
    1. Full tx (eval + tee) fails → `console.error` with the message +
       source, then RETRY without the tee rows. The transcript is the
@@ -2118,7 +2121,15 @@
                           :seon.eval/at          at
                           :seon.eval/duration-ms (or duration-ms 0)
                           :seon.eval/narration   (or narration "")
-                          :seon.eval/source      source
+                          ;; `:seon.eval/source` is registered `:string`, so a
+                          ;; nil source (a comment-only / repaired entry whose
+                          ;; span carries no readable form) would fail Malli
+                          ;; and SINK THE WHOLE TX — dropping the agent's eval
+                          ;; row, the one thing this fn must never lose. Coerce
+                          ;; nil→"" at the write boundary (same as narration
+                          ;; just above): an empty-source row is honest and
+                          ;; queryable; a missing row is data loss.
+                          :seon.eval/source      (or source "")
                           :seon.eval/ok?         (boolean (:ok result))
                           ;; Renderer dispatch via entity-schema props
                           ;; (`:seon.eval` map registration). No per-row
