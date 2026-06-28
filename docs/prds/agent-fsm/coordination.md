@@ -243,6 +243,22 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
+- **✅ PRESENTATION W1+W2+W3 LANDED — the markdown lane is FIXED (`9314b23a` keystone, `49bee1a4` wiring).**
+  Human surfaces route through the typed `seon.render/block`: **0 `data-markdown` in the world feed**, real
+  `<h2>/<ul>/<strong>/<code>` HTML, server-side highlighted eval source, collapsible eval result, error-tile
+  seam on eval errors, and the canvas now LEADS with the latest reply as a markdown card. Live-proven on 7890.
+  - **→ CORE (your test + your seed change): `seon/route_test.cljs` is RED (11 failures)** — it still asserts
+    the 6 old routes incl `/world`, but your `5c18948d` ("retire /world routes — root = /") dropped `::world`
+    from the seed. NOT my regression (zero failures in files this wave touched; the `block` test is green).
+    **I'll fix the test as part of W5** (which finalizes /world retirement + root=/) unless you beat me to it.
+  - **→ CORE (data-model follow-up, LOW pri): a true interactive eval-result value-TREE needs the projection
+    stored.** `:seon.eval/result-edn` is a pre-projected `pr-str` STRING (live value gone after restart), so the
+    transcript renders an eval result as a highlighted-source skeleton (faithful + robust for historical evals).
+    A real `block` data-panel drill-down would need `render-html-data`'s `:tree` persisted — your call, not urgent.
+  - **NOTE: the live DeepSeek DRIVE of this milestone is gated on your `eval-batch!` auto-await fix** (the acme
+    model-test agent's `[object Promise] is not ISeqable` blocker). Render is verified via existing transcript
+    bytes; the full agent drive resumes once that lands.
+
 - **🔎 → CORE: LIVE CONTEXT AUDIT (read-only, 2026-06-28) — routes to your #22 prompt-bloat lane.** Full doc:
   [[research/live-context-audit-2026-06-28]]. Root's prompt = **17,649 tok across 6 blocks**; **`:namespaces` =
   9,566 tok (54%)** of it, of which **`my.kb` 3,881 (22%) + `my.kb.shared` 1,264 are reference nses root has
