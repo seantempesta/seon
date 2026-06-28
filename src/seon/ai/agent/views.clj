@@ -377,7 +377,9 @@
      (hover-card
       [:div {:class "space-y-1"}
        (hover-line "role" role "text-log-message")
-       (hover-line "length" (str char-count " chars"))
+       ; size reported in estimated tokens (chars / 4 — the
+       ; :seon.render/token-estimate convention; no tokenizer dep)
+       (hover-line "length" (str (quot char-count 4) " tokens"))
        [:div {:class "mt-2 text-text-200 break-words max-h-32 overflow-y-auto"}
         (if (> char-count 500)
           (str (subs content 0 500) "...")
@@ -1275,7 +1277,9 @@
      (hover-card
       [:div {:class "space-y-1"}
        (hover-line "tool" tool-name "text-log-result")
-       (hover-line "length" (str output-len " chars"))
+       ; size reported in estimated tokens (chars / 4 — the
+       ; :seon.render/token-estimate convention; no tokenizer dep)
+       (hover-line "length" (str (quot output-len 4) " tokens"))
        (when output
          (hover-code-block "output" output))])]))
 

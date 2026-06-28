@@ -45,6 +45,7 @@
     [clojure.string :as str]
     [goog.object :as gobj]
     [seon.agent :as agent]
+    [seon.ai.tokens :as tokens]
     [seon.agent.lifecycle :as lifecycle]
     [seon.agent.run :as run]
     [seon.db :as db]
@@ -447,10 +448,10 @@
                                   (if ok?
                                     (do
                                       (log/info-console! "seon.web.serve" "POST /chat"
-                                                         {:agent agent-id :text-len (count text)})
+                                                         {:agent agent-id :tokens (tokens/estimate text)})
                                       ;; A DISTINCT intake
                                       ;; line per accepted message (the generic
-                                      ;; POST log above only records text-len).
+                                      ;; POST log above only records token count).
                                       ;; Carries the durable message id + hops so
                                       ;; an intake can be correlated with the wake
                                       ;; (or its drain) in logs/pod.log.

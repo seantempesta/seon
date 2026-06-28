@@ -200,11 +200,13 @@
       ;; Detect markdown
       (or (str/starts-with? value "#")
           (str/includes? value "```"))
-      (str "Markdown content (" (count value) " chars)")
+      ; sizes reported in estimated tokens (chars / 4 — the
+      ; :seon.render/token-estimate convention; no tokenizer dep)
+      (str "Markdown content (" (quot (count value) 4) " tokens)")
 
       ;; Regular string
       (> (count value) 200)
-      (str "\"" (subs value 0 200) "...\" [" (count value) " chars total]")
+      (str "\"" (subs value 0 200) "...\" [" (quot (count value) 4) " tokens total]")
 
       :else
       (pr-str value))
@@ -257,7 +259,7 @@
     :else
     (let [s (pr-str value)]
       (if (> (count s) 300)
-        (str (subs s 0 300) "... [truncated, " (count s) " chars total]")
+        (str (subs s 0 300) "... [truncated, " (quot (count s) 4) " tokens total]")
         s))))
 
 ;;; ---------------------------------------------------------------------------

@@ -59,6 +59,7 @@
    `render-ai` and `project-plain` — see ns-end note.)"
   (:require
     [clojure.string :as str]
+    [seon.ai.tokens :as tokens]
     [seon.platform :as platform]))
 
 (defn- env-int [env-name default]
@@ -308,7 +309,7 @@
 
     (:seon.render.value/string-len x)
     (str (pr-str (str (:seon.render.value/head x) "…"))
-         "⟨" (:seon.render.value/string-len x) " chars⟩")))
+         "⟨" (tokens/chars->tokens (:seon.render.value/string-len x)) " tokens⟩")))
 
 (defn- map-parts [m]
   (let [elided (:seon.render.value/elided-keys m)

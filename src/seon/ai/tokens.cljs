@@ -24,13 +24,22 @@
 (schema/register! ::tokens :int)
 (schema/register! ::chars :int)
 
+(defn chars->tokens
+  "Estimate tokens from an already-measured character count `n`
+   (`(quot n chars-per-token)`). The seam for size badges that carry an
+   int char-count (e.g. `:seon.render.value/string-len`) rather than the
+   string itself — same single heuristic, no inlined `(quot n 4)`."
+  {:malli/schema [:=> [:catn [::chars ::chars]] ::tokens]}
+  [n]
+  (quot n chars-per-token))
+
 (defn estimate
   "Estimate the token count of `s` as `(quot (count s) chars-per-token)`.
    The canonical `:seon.render/token-estimate` derivation — no tokenizer
    dep, integer-floored."
   {:malli/schema [:=> [:catn [::text ::text]] ::tokens]}
   [s]
-  (quot (count s) chars-per-token))
+  (chars->tokens (count s)))
 
 (defn estimate-chars
   "Inverse of [[estimate]]: the approximate character count of `n`

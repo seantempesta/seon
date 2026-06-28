@@ -70,6 +70,7 @@
     [seon.agent.turn :as turn]
     [seon.agent.ctx]
     [seon.ai :as ai]
+    [seon.ai.tokens :as tokens]
     [seon.ai.anthropic :as anthropic]
     [seon.ai.openai-compat :as openai]
     [seon.db :as db]
@@ -1906,7 +1907,7 @@
                "(message/user\n"
                "  "
                (pr-str (str "hello from the stub LLM — saw "
-                            (count ctx) " chars of ctx"))
+                            (tokens/estimate ctx) " tokens of ctx"))
                ")\n")]
     (.then (.resolve js/Promise nil) (fn [_] {:text text}))))
 

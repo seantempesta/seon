@@ -47,11 +47,27 @@ consumer-specific references in `src/`, `docs/`, or `pod-host/`.
 
 ## Token Reporting
 
-Always report context/prompt sizes in **tokens**, not characters. The estimate is
-`chars / 4` — the `:seon.render/token-estimate` convention (`seon.ctx` / `seon.agent.inspect`).
-There is **no dedicated tokenizer dependency**; if one is ever added, update this note. The
-`seon.ai` config row carries `::max-tokens` (the LLM *output* cap) — a *context-window* limit is
-a separate concern. Applies to all size reporting, everywhere.
+**ALL size/length information shown to a human — logs, UI, headers, hover cards,
+reports, debug output, EVERYWHERE — is in estimated TOKENS, NEVER raw characters.**
+Characters don't help the reader; tokens are the unit that matters. This is not a
+preference, it is a hard rule: never surface a `chars` / `char-count` / `text-len`
+count to a human or agent. If you are about to print `(count s)` as a size, print
+`(tokens/estimate s)` instead.
+
+The estimate is `chars / 4` — the `:seon.render/token-estimate` convention. There is
+**ONE estimator**, do NOT invent a second: `seon.ai.tokens/estimate` (string → tokens)
+in the CLJS pod (the leaf ns that owns the `chars/4` heuristic; reused by
+`seon.ctx` / `seon.agent.inspect` / `seon.web.debug`). There is **no dedicated tokenizer
+dependency**; if one is ever added it goes behind that one ns — update this note and
+nothing else.
+
+The code now EMITS tokens at every reporting site (turn-open log, POST /chat log,
+context-bar, agent-log hover cards). Storage-tier datoms may still be measured in chars
+(e.g. `:seon.agent.turn/prompt-chars`) — that is the persisted projection, not a display;
+when such a value is shown, convert it (`(quot chars 4)`) at the display layer.
+
+The `seon.ai` config row carries `::max-tokens` (the LLM *output* cap) — a *context-window*
+limit is a separate concern. Applies to all size reporting, everywhere.
 
 ---
 

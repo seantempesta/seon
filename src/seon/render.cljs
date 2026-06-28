@@ -36,6 +36,7 @@
     [seon.render.live-tile :as live-tile]
     [seon.render.sci :as render-sci]
     [seon.render.value :as value]
+    [seon.ai.tokens :as tokens]
     [seon.schema :as schema]
     [seon.ui.clojure :as cljhl]
     [seon.ui.html :as html]
@@ -440,7 +441,7 @@
     (and (map? x) (contains? x :seon.render.value/string-len))
     [:span {:class "text-success font-mono break-all"}
      (str (pr-str (str (:seon.render.value/head x) "…"))
-          " ⟨" (:seon.render.value/string-len x) " chars⟩")]
+          " ⟨" (tokens/chars->tokens (:seon.render.value/string-len x)) " tokens⟩")]
 
     :else
     [:span {:class (str "font-mono break-all "

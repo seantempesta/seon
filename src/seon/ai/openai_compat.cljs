@@ -53,6 +53,7 @@
   (:require [clojure.string :as str]
             ["openai" :as OpenAI]
             [seon.ai :as ai]
+            [seon.ai.tokens :as tokens]
             [seon.error :as error]
             [seon.schema :as schema]))
 
@@ -252,8 +253,8 @@
                (pos? (count (or reasoning ""))))
       (js/console.debug
         (str "seon.ai.openai-compat: completion content EMPTY but"
-             " reasoning_content present (" (count reasoning)
-             " chars) — thinking-mode tokens landed in the reasoning"
+             " reasoning_content present (~" (tokens/estimate reasoning)
+             " tokens) — thinking-mode tokens landed in the reasoning"
              " field; dropping it (parsed as before)")))
     (cond-> {:seon.ai/text                        (or msg "")
              :seon.ai.openai-compat/finish-reason (:finish_reason choice)

@@ -154,7 +154,7 @@
   "Derive the context-bar model for `agent-id` from the SAME per-section
    texts the LLM prompt is built from (`section-texts`):
 
-     {::segments [{::name ::tokens ::chars ::stable?} …]  ; render order
+     {::segments [{::name ::tokens ::stable?} …]  ; render order
       ::total-tokens N
       ::cache-line-tokens N        ; structural breakpoint (end of prefix)
       ::live-cached-tokens N|nil   ; exact, from last turn's usage
@@ -165,7 +165,6 @@
   (let [segs   (mapv (fn [{nm :seon.agent.ctx/name txt :seon.render/text}]
                        (let [t (or txt "")]
                          {::name    nm
-                          ::chars   (count t)
                           ::tokens  (tokens/estimate t)
                           ::stable? (stable-section? nm)}))
                      section-texts)

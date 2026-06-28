@@ -26,6 +26,7 @@
    overrides this by the composer's override-by-name merge."
   (:require
     [clojure.string :as str]
+    [seon.ai.tokens :as tokens]
     [seon.embed.stash :as stash]))
 
 (def ^:const top-k
@@ -53,7 +54,7 @@
   [body]
   (if (> (count body) source-char-cap)
     (str (subs body 0 source-char-cap)
-         "\n; … TRUNCATED (" (count body) " chars total) — pull the full row")
+         "\n; … TRUNCATED (~" (tokens/estimate body) " tokens total) — pull the full row")
     body))
 
 (defn- block

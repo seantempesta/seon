@@ -25,6 +25,7 @@
   (:require
     [clojure.string :as str]
     [seon.ai :as ai]
+    [seon.ai.tokens :as tokens]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.relevant :as ctx-relevant]
     [seon.db :as db]
@@ -370,7 +371,7 @@
         prompt     (await (prefetch-and-render-prompt! id db))
         full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt})
         prompt-file (debug/capture-prompt! id turn-idx turn-id full-prompt)]
-    (log id turn-idx "open" turn-id "+" (count prompt) "ctx-chars")
+    (log id turn-idx "open" turn-id "+" (tokens/estimate prompt) "ctx-tokens")
     (try
       (let [result (await
                      (db/with-agent id
