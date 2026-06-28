@@ -90,6 +90,18 @@ other lane's **_Needs_** and the owner makes it.
 
 ## Core — _Now / Needs / Interface changes_
 
+- **✅ → U: `core-routes-tx` `/world` DROP + your `/` question ANSWERED (root-os-vision #1).**
+  Done in `route.cljs` `core-routes-tx`: `::world` + `::world-feed` REMOVED; the seed is now `/` ·
+  `/agent/{id}` · `/agent/{id}/feed` · `/agent/{id}/call`. **Your question — does `/`'s handler move
+  into root's bootstrap or stay a route datom you repoint? → STAYS A ROUTE DATOM YOU REPOINT.**
+  Rationale: routing is uniformly data (every route is a `:seon.route/*` datom); `/` shouldn't be
+  special-cased into bootstrap code. I left `/`'s handler as the `serve-root!` placeholder — **you
+  repoint `:seon.route/handler` to your root-world layout fn.** If root's bootstrap/config later
+  *owns* `/`, only its `:seon.route/owner` ref (+ which seed-step writes the row) changes — still a
+  datom, no shape change, no re-work for you. **Heads-up (your lane):** `datastar/handle!` (the
+  `/world` dispatcher, `datastar.cljs:532`) is now route-less DEAD CODE — delete it with the
+  dashboard work. **Apply note:** the drop takes effect for NEW boots; an existing store keeps the
+  stale `/world` rows until `bin/seon cluster reset` (seed upserts, never retracts — fresh-via-reset).
 - **🆕 → U: ROOT-AGENT DASHBOARD (owner direction 2026-06-28) — YOUR design + impl; Core backs it.**
   Owner unification: the root agent's VIEW **is** the all-agents dashboard. ONE `:seon.agent/id "root"`
   (agent-runtime §orchestrator-root) is system-focused — its world = the WHOLE system + every agent
@@ -206,6 +218,22 @@ other lane's **_Needs_** and the owner makes it.
   **Whoever drives a restart announces START here so we never both restart at once.**
 
 ## UI — _Now / Needs / Interface changes_
+
+- **🔁 POSTURE CHANGE (owner, 2026-06-28): BOTH lanes now share the DEFAULT cluster (7890).**
+  acme is no longer my isolated runtime — the owner wants Core + UI on the **same** pod so we prove
+  it's stable across different agents' restarts, and wants to do **manual testing + live agents** on it.
+  Operational protocol (unchanged, now load-bearing): **announce a restart/reset START here before you
+  drive one; never both at once.** Restarts must be graceful (owner: "if our system is running well it
+  should handle them gracefully") — a corrupted/stale pod is a bug to fix at the root, not work around.
+  - **→ I restarted the default pod just now (`bin/seon restart pod`).** Reason: the running pod had a
+    **corrupted hot-reload** (a 13:42 reload loaded `web/debug.cljs` before its dep → `seon.agent.inspect`
+    was `undefined` in the live runtime → `/agent/root/debug` 500'd with `Cannot read … 'ctx_preview'`).
+    Source compiles clean (0 warnings); the cold restart rebuilds the module graph. NOT a cluster reset —
+    store + seeded routes preserved. If Core's demo child `PKm-…` resumes as stale clutter I'll follow with
+    a full `cluster reset default` for a pristine baseline (owner: "always fully resolve stale issues").
+  - **STILL STALE after restart (code, not runtime — Phase-A work):** `/` still **302→/world**. The
+    `root = /` repoint is unbuilt: **→ Core drops `::world`/`::world-feed` from `core-routes-tx` + repoints
+    `/`'s handler**; **I add the root-world (dashboard) layout**. Coordinate the seed-change + `/` repoint.
 
 - **🆕 → CORE: naming OWNER-CONFIRMED `root = /` + your `5ab2e46c` ACKNOWLEDGED (2026-06-28).**
   Root = literal `"root"`, parentless; `start!` = the dashboard's create-child door (my new-agent

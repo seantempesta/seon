@@ -62,20 +62,30 @@
 ;; ---------------------------------------------------------------------------
 ;; The seeded CORE route set (coordination Interface #2 — authoritative).
 ;;
-;; Six routes. Each world is TWO GET routes — the shim page and its long-lived
-;; SSE feed at a SEPARATE `…/feed` sibling path (the datastar-clojure
-;; `tiny_gzip.clj` separate-GET-stream idiom; the shim's
-;; `data-init="@get('…/feed')"` opens the stream). If `db->routes` dropped the
-;; `/feed` routes the live stream would 404 after the static-vector cutover, so
-;; they MUST be seeded. The ONE action door is `/agent/{id}/call` (POST) — the
-;; fn rides as a `?fn=` route-data descriptor; namespaces are NOT a routing
-;; level, so there are NO per-ns / per-fn routes.
+;; `root = /` (root-os-vision, owner 2026-06-28): the all-agents overview IS the
+;; root agent's world, so `/` IS the dashboard and `/agent/{id}` is uniform for
+;; EVERY agent incl `/agent/root`. `/world` + `/world/feed` are RETIRED — Lane-U
+;; repoints `/`'s handler from the `serve-root!` 302 placeholder to the
+;; root-world layout. (`/` stays a CORE route datom here, UI-repointed; if root's
+;; bootstrap/config later OWNS `/`, only its `:seon.route/owner` ref + which
+;; seed-step writes it changes — still a datom, no shape change.)
+;;
+;; Each agent world is TWO GET routes — the shim page and its long-lived SSE feed
+;; at a SEPARATE `…/feed` sibling path (the datastar-clojure `tiny_gzip.clj`
+;; separate-GET-stream idiom; the shim's `data-init="@get('…/feed')"` opens the
+;; stream). If `db->routes` dropped the `/feed` routes the live stream would 404
+;; after the static-vector cutover, so they MUST be seeded. The ONE action door
+;; is `/agent/{id}/call` (POST) — the fn rides as a `?fn=` route-data descriptor;
+;; namespaces are NOT a routing level, so there are NO per-ns / per-fn routes.
 ;;
 ;; The handler symbols name the pod handler fns the static route vector
 ;; (`seon.web.router`) wires today, so the db projection is behaviour-preserving
-;; for the cutover. (`/world` and `/world/feed` both dispatch to
-;; `seon.web.datastar/handle!`, which routes on the path internally — same as
-;; the static vector.)
+;; for the cutover.
+;;
+;; NOTE: dropping `/world` from the seed stops NEW boots from getting those
+;; rows; an EXISTING store keeps them until a `bin/seon cluster reset` (the seed
+;; upserts, it does not retract — fresh-via-reset, no migration shim). UI's
+;; graceful no-match → 302 `/` covers any lingering `/world` hit meanwhile.
 ;; ---------------------------------------------------------------------------
 
 (defn core-routes-tx
@@ -86,10 +96,6 @@
   []
   [{::pattern "/"                ::method :get  ::name ::root
     ::handler 'seon.web.serve/serve-root!}
-   {::pattern "/world"           ::method :get  ::name ::world
-    ::handler 'seon.web.datastar/handle!}
-   {::pattern "/world/feed"      ::method :get  ::name ::world-feed
-    ::handler 'seon.web.datastar/handle!}
    {::pattern "/agent/{id}"      ::method :get  ::name ::agent
     ::handler 'seon.web.datastar/serve-agent-page!}
    {::pattern "/agent/{id}/feed" ::method :get  ::name ::agent-feed
