@@ -79,6 +79,51 @@ re-invoked on every render, so the view stays current with zero extra writes:
 Evolve the tile by **redefining your own fn** — `seon.render.live-tile` is the
 shared core default; build your own, never edit the core one.
 
+## Fastest path: COMPOSE with `my.ui` — don't hand-roll `[:div …]`
+
+`my.ui` is a small toolkit of **dual-render** building blocks. Each helper takes
+data and returns the `{:seon.render/hiccup … :seon.render/ai …}` envelope from ONE
+input, so the human's styled view and the compact text YOU see can't drift. You
+build a tile by COMPOSING helpers, not authoring hiccup from scratch:
+
+- `my.ui/status-line {:my.ui/label … :my.ui/value … :my.ui/tone …}` — one labelled,
+  tinted status line.
+- `my.ui/kv-table {:my.ui/title … :my.ui/rows [[k v] …]}` — a key/value breakdown table.
+- `my.ui/section {:my.ui/title … :my.ui/blocks [<envelopes>]}` — the combinator:
+  stacks child envelopes' hiccup and joins their ai-text into one faithful result.
+
+```clojure
+;; Compose, then transact the section's hiccup onto your canvas:
+(let [board (my.ui/section
+              {:my.ui/title "Subscriptions"
+               :my.ui/blocks
+               [(my.ui/status-line {:my.ui/label "Total" :my.ui/value "$101/mo"
+                                    :my.ui/tone :signal})
+                (my.ui/kv-table {:my.ui/rows [["Adobe CC" "$45"] ["Netflix" "$18"]]})]})]
+  (seon.db/transact!
+    {:seon.db/tx-data
+     [{:seon.agent/id (seon.db/current-agent-id)
+       :seon.render.live-tile/content (:seon.render/hiccup board)}]}))
+```
+
+For a LIVE tile, wrap a `my.ui/section` call in a home-ns fn and wire its symbol —
+it re-derives every render. Read the `my.ui` source (it renders in full in your
+namespaces context) for the current helper set; every helper emits only safelisted
+classes. This is the "compose smaller pieces" doctrine applied to your canvas.
+
+## You already SEE the state of your canvas every turn
+
+Your `; Your live tile` context section is not just a how-to — it REFLECTS your
+current canvas back to you, derived from the DB at render:
+
+- **What your human sees** — the `:seon.render/ai` twin of your current tile (or the
+  literal hiccup), so you know the real state instead of guessing.
+- **`⚠ YOUR CANVAS IS BROKEN`** — if your tile fn throws or your content is invalid,
+  the section says so LOUDLY with the error; your human is staring at an error tile,
+  fix the fn/hiccup.
+- **The source driving your canvas** — when your tile is a fn symbol, its source
+  renders inline in that section, so you can edit the exact code behind the tile.
+
 ### The two renders a tile fn carries
 
 The `{:seon.render/hiccup … :seon.render/ai …}` map is the
