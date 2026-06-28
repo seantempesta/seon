@@ -115,13 +115,34 @@ REGISTRY=docker.io/seantempesta TAG=cu128-v1 ./build-image.sh
   NOISY diffusion gen. `:span`/`:error-kind` = re-noise dial; program-graph =
   retrieval trigger.
 
+## Serving / speed (research: `research/serving-optimization-survey-2026-06-28.md`)
+
+- **vLLM genuinely runs block-diffusion** (H100 1008 / H200 1288 tok/s, FP8) but
+  exposes NO per-step `LogitsProcessor`/`accept_canvas` hook (sampler compiled
+  shut) → **SPEED, no CONTROL**. SGLang/TGI/TensorRT: no support.
+- → **TWO endpoints behind one `diffusiongemma` Seon adapter** (`SEON_DG_BACKEND=
+  vllm|control`). vLLM is OpenAI-compatible → serving adapter ≈ existing
+  openai-compat. CONTROL = our transformers worker.
+- A100 137 tok/s explained: 4→15-20 tokens/forward **fixable today** (entropy_bound
+  0.1, temp 0.8→0.4, 48-step cap); FP8 headline unreachable on Ampere. "tok/s
+  lies" — cost is per-CANVAS, not per-token.
+
 ## Plans + next steps (ordered)
 
-1. **Ground the model mechanics** (research agent, IN PROGRESS) — canvas dynamics,
-   the real `generate()` API + output object, slotted-gen viability, think-token.
-2. **Fix the output-object bug** — grounded by (1), not guessed.
-3. **First real generate** → coherence of the Clojure + tok/s (the milestone).
-4. **Introspect** → resolve U/V/W unknowns + the think-token question, one warm window.
+0. **DONE (first light, 2026-06-28):** deployed; first generate 137 tok/s
+   (`def`-vs-`defn` thesis demo); mechanics CORRECTED (LogitsProcessor clamp, not
+   mask); clamp surface built + **DEPLOYED to `kzonsp5b18hpq5`** (NOT yet run).
+1. **RUN `clamp_smoke`** on the warm worker — the decisive proof the clamp holds
+   (`python -u client.py '{"mode":"clamp_smoke","trace":"canvas"}'`). Then the
+   speed bench: confirm `attn_impl=sdpa` + sweep `entropy_bound`/`max_denoising_steps`
+   vs `committed_per_step`/`tok_per_s` → real step count + A100 ceiling.
+2. **Two-endpoint `diffusiongemma` Seon adapter** (vllm serving + transformers control).
+3. **Testing harness:** adapt the gym (scenario→predicate→scorecard) to drive the
+   diffusion experiments; Seon-side interface = a CLJS client to the worker
+   (`seon.ai` already has the provider + transport-retry pattern, `ai.cljs:69-98`).
+4. **ACME config port (owner-requested):** review recent commits (config-driven
+   loadout / `SEON_CONFIG`/`SEON_PROFILE` / skills / gym) → port to `config/acme.edn`
+   for max feature + context control.
 5. **Capability ladder (T0–T5):** #1 infill (**T2 = first kill gate**: must beat
    suffix-blind AR) → #2 eval-renoise (`:span`/`:error-kind` dial) → #3 retrieval
    (program-graph trigger) → #4 live feedback (Route A).
