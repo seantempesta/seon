@@ -17,6 +17,7 @@
             [acme.notes]
             [acme.overrides]
             [acme.widget]
+            [acme.world :as world]
             [clojure.string :as str]
             [seon.client :as client])
   (:require-macros [seon.indexing :refer [public-fn-vars]]))
@@ -24,3 +25,9 @@
 (reset! client/!extra-core-vars
         (filterv #(str/starts-with? (str (:ns (meta %))) "acme.")
                  (public-fn-vars)))
+
+;; Lane-U: after the pod boots its agents (conn open + roster started),
+;; install acme's world-layout blocks into every live agent's own ctx
+;; scope via the seon override primitive `seon.agent.ctx/install!`. A
+;; one-shot timer because the preload runs BEFORE agents start.
+(js/setTimeout #(world/install-all!) 12000)
