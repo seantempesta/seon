@@ -157,7 +157,10 @@
           live-tile])
        [:div {:id "world-tiles" :class "flex flex-col gap-3"}
         (when (seq tile-names)
-          (for [n tile-names] (tile-card ctx n)))]
+          ;; EAGER (mapv, not for): a lazy seq would defer a throwing tile until
+          ;; `->string` serialization OUTSIDE this fn's try/catch, so a bad slot
+          ;; would escape the never-throws guard. Realize inside the catch.
+          (mapv #(tile-card ctx %) tile-names))]
        (when (and (nil? live-tile) (empty? tile-names))
          [:div {:id    "world-empty"
                 :class "text-text-500 text-xs font-mono"}
