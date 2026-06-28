@@ -90,6 +90,30 @@ other lane's **_Needs_** and the owner makes it.
 
 ## Core — _Now / Needs / Interface changes_
 
+- **🆕 CORE LANE = OS FOUNDATION (owner 2026-06-28). Phase B/C; presentation is U's this arc.**
+  Per U's "U owns the agent-presentation build" + owner: Core stays OFF `seon.render*` / `live-tile` /
+  `handlers/**` / `ui.markdown` this arc and builds the OS foundation. **Owner decisions (this session):**
+  (1) **build order = reconcile spine FIRST** → config-loader → SYSTEM.md/role-blocks → #31/supervision;
+  the wake-router port is an independent parallel track. (2) **managed provenance scope = `{:core-seed
+  :config}`** (reconciled/resettable); `{:agent :replay}` preserved. (3) **build `my.context/load-doc!` /
+  `unload!`** (the context load/unload verb) this arc. (4) **ONE SHARED system message** (every agent;
+  the word "global" is retired — say "shared") **+ a separate ROOT MESSAGE** for root (supervisor view),
+  drafted to NOT overlap the shared system message.
+  - **DATAHIKE NO-KINDS (now in CLAUDE.md "Data Rules" + datahike-primer §0 — BOTH lanes follow):** an
+    entity has no type/kind; it IS its attributes + connections. FIND by attribute-presence, IDENTIFY by
+    `:db.unique/identity` attr, RELATE/REMOVE by refs, SCOPE by `:seon.db/origin`. Never "for each kind".
+  - **→ U HEADS-UP (shared interface, no shape change): the seed is becoming RECONCILE-driven.** The
+    holistic `reconcile!` (design: `holistic-state-management-2026-06-28.md`, no-kinds-corrected + verified)
+    reroutes how `default-seed-blocks` + `core-routes-tx` are applied — ONE provenance-scoped retract-diff
+    instead of N ad-hoc upserts. **Block + route SHAPES are UNCHANGED — your `:seon.agent/ctx` reads +
+    `db->routes` are unaffected.** What changes: (a) a `cluster reset` now RETRACTS removed managed rows
+    (fixes #33 — stale `/world` vanishes uniformly), (b) the seed becomes config-overridable. Also fixes a
+    real bug (#35): `upsert-ctx-tx`/`remove!` plain `:db/retract` doesn't cascade → orphaned child blocks;
+    the reconcile uses `:db.fn/retractAttribute`.
+  - **LIVE-TESTING POSTURE (owner: "get as much live deepseek testing in; dig into what context it sees +
+    what isn't working"):** Core is driving live DeepSeek agents on the DEFAULT pod + a dedicated observer
+    to audit the per-turn CONTEXT (system message + blocks + eval experience) and flag/fix. **I'll announce
+    each `cluster reset`/restart START here before driving — never both at once.**
 - **✅ → U: `core-routes-tx` `/world` DROP + your `/` question ANSWERED (root-os-vision #1).**
   Done in `route.cljs` `core-routes-tx`: `::world` + `::world-feed` REMOVED; the seed is now `/` ·
   `/agent/{id}` · `/agent/{id}/feed` · `/agent/{id}/call`. **Your question — does `/`'s handler move
