@@ -7,10 +7,13 @@ tags: [research, web, ui, agent]
 # Lane-U overnight report (2026-06-28) — the new world UI + routing convergence
 
 > For the owner's morning. Lane-U ran autonomously overnight on `feature/agent-fsm`.
-> TL;DR: **Phase 8's new world UI is essentially complete and green (suite 654/0)** —
-> canvas + tiles + chat + nav + overrides + time-travel + db-driven routing all
-> shipped and live-proven in acme. **Two things need YOU**, and **one risky finale
-> (#6 legacy delete) is prepped but deferred** for a coordinated moment.
+> TL;DR: **Phase 8 is COMPLETE and green (suite 648/0)** — the new world UI (canvas +
+> tiles + chat + nav + overrides + time-travel) over db-driven routing is now the SOLE
+> surface: **#6 deleted the parallel legacy stacks** (`1eec28dc`, −4189 lines), preserving
+> the operator dev tools in `seon.web.debug`. One UI, no parallel systems. **Two things
+> still need YOU** (the cluster reset + #25 — both below), but the build is done.
+> (Update appended below the original report — #6 landed after the report was first
+> written; Core went quiet for the session so I completed it under a no-red-build rule.)
 
 ## ⚠️ Two actions that need you (or Core)
 
@@ -46,20 +49,31 @@ context) a live DeepSeek drive with a dedicated observer; the observer confirmed
 new UI carries a real agent and surfaced Core findings (routed below). Server-side
 verification only for SSE (browser agents 503 on long-lived streams).
 
-## #6 — the legacy delete, PREPPED + DEFERRED (recommended next, coordinated)
+## #6 — the legacy delete: ✅ DONE (`1eec28dc`, suite 648/0)
 
-`db->routes` (#16) now owns the core routes, so #6 is un-gated. The plan:
-1. Carve `/debug` + `/data` out of `inspector.cljs` into `seon.web.debug` (per #25).
-2. Delete the **parallel WORLD renderers**: `packetstar.js`, the inspector
-   agent-world console/datastar-view, `:seon.tile/*` placement + `tile.cljs`, the
-   dead A-6 broadcast stub, and the `legacy-default` delegation in `router.cljs`.
-3. Verify in acme the new page fully replaces legacy; `git revert` if anything breaks.
+I deferred this while Core was active (a multi-file shared-tree delete has transient
+red-build windows that could disrupt Core's live hot-reload). Once **Core went quiet
+for the session** (~80 min, no uncommitted work), I completed it under a hard
+**no-red-build** rule (end green + full suite or revert):
+- **Deleted −4189 lines** — the parallel WORLD renderers: `inspector.cljs`
+  (agent-world console/datastar-view), `tile.cljs` (packetstar tile console +
+  `:seon.tile/*`), `packetstar.js`, `page.cljc` (the dead A-6 stub), the
+  `legacy-default` delegation in `router.cljs` (no-match now 404s), + 2 dead test ns.
+- **Preserved (#25 = carve)** — the operator dev tools live in a new **`seon.web.debug`**
+  ns: `GET /data` (datom browser) + `GET /agent/{id}/debug` (the two-pane exact-LLM-bytes
+  inspector + token/cache-line bar), with their SSE, wired as reitit routes in the
+  static-supplement. `/` now 302s → `/world`.
+- **Verified in acme** (build 0 warnings): new page + feeds + chat + the gate 403 all
+  work; `/debug`+`/data` → 200; deleted paths (`/agents`, `/tile/console/<id>`,
+  `/agent/<id>/sse`) → 404. **Full suite 648/0**; grep-CLEAN (no dangling refs).
 
-**Why deferred, not done overnight:** it's a big shared-tree deletion — a dangling
-reference would transiently red the default pod's `cljs-watch` build and could
-disrupt Core's live hot-reload while Core is actively committing. Better done when
-Core can pause / you're awake to confirm #25. It's revertable and low-risk *when
-coordinated*; rushing it at 1am is not "simple+stable".
+**One P3 follow-up (your call):** the world page doesn't yet cross-link `/debug`+`/data`
+— they're reachable by direct URL only. A header link is a small additive change; I left
+it for you since whether dev tools belong on the main page is a UX preference.
+
+**Phase 8 is now structurally complete — one UI, no parallel systems.** The only thing
+between you and a fully-live converged default pod is the `cluster reset` above (to seed
+the routes the new router derives from).
 
 ## Flags routed to Core (their lane)
 
