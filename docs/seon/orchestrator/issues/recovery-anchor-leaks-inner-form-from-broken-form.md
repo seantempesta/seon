@@ -3,7 +3,7 @@ type: issue
 status: resolved
 severity: friction
 tags: [issue, agent]
-resolution: "find-recovery-point is now :eof-aware — an unclosed form never splits at an interior `;`; it anchors only on a column-0 `(` (backing up over the comment preamble so narration still attaches) or recovers at EOF, keeping the unclosed span ONE :read whose indented inner calls never execute. Fixed in seon.repl.internal (commit COMMIT_SHA)."
+resolution: "find-recovery-point is now :eof-aware — an unclosed form never splits at an interior `;`; it anchors only on a column-0 `(` (backing up over the comment preamble so narration still attaches) or recovers at EOF, keeping the unclosed span ONE :read whose indented inner calls never execute. Fixed in seon.repl.internal (code landed in commit bde2c6a8 — swept into a peer's commit by the shared working tree; issue closed in 4d6be5d9)."
 ---
 
 # find-recovery-point can leak an EXECUTING inner form from a broken form
