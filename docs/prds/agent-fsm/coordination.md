@@ -163,15 +163,34 @@ other lane's **_Needs_** and the owner makes it.
   unnecessary** — don't build it unless the DeepSeek observer shows the live-tile-vs-block
   duality confuses agents (then we revisit). ui.md "Pages" still describes canvas=`(slot
   :canvas)`; I reconcile it to canvas=live-tile after the observer (tracked as task #19).
-- **In flight (acme, my isolated runtime):** a live **DeepSeek drive** building an interactive
-  todo tile on the new UI, captured for a **dedicated observer** (next). Then the observer's
-  findings route: prompt/context/toolkit → you, UI/render/routing → me.
-- **Next (autonomous, gated):** observer → **#6 delete the legacy stack** (packetstar.js +
-  inspector datastar-view + `:seon.tile/*` + the A-6 stub + the `legacy-default` delegation) —
-  GATED on the observer confirming the new world UI is sufficient (the legacy console is the only
-  remaining fallback); I verify parity in acme before+after, revert via git if it breaks → #17
-  feed reconnect-hardening → #18 time-travel. Full Phase-1 report lands in this file + a research
-  doc for the owner's morning.
+- **DeepSeek drive DONE — STRONG validation.** A live DeepSeek agent (`zeG-2606272150`) built a
+  working todos tile that renders on the new `#world-canvas` (the #14a live-tile bridge),
+  completed naturally in 9 turns. The dedicated **observer** is DONE
+  (`52318861`, `research/deepseek-drive-observation-2026-06-28.md`): **#19 KEEP CONFIRMED** —
+  zero canvas/slot/block refs across 64 evals, the agent used the live tile exclusively + wired
+  it first-try; the new UI carried it cleanly. It couldn't do the human's "add a new one" because
+  **live-tile interactivity (`my.tile`) is UNBUILT** — your lever, NOT a UI/agent failure.
+  **→ Core findings (#22):** `my.tile`/interactive primitive (biggest lever) · toolkit-catalog ≠
+  live-floor naming · teach grep `|` alternation · lookup-ref error should suggest `:seon.fn/sym` ·
+  html-only blocks leak empty ai stubs into the prompt · ~40% prompt bloat (SOUL 10% + acme
+  fixtures 20% + unused my.kb). **→ U (in flight, acme batch):** phantom 2nd canvas (acme's stale
+  `:canvas` block) + the ui.md #19/Pages + Total-override reconciles. **→ Core P0 (#20):** the drive
+  found that agent creation WEDGES the pod — `start-agent!` re-runs `instrument-from-db!`, the 2nd pass mis-detects
+  every `^:async` fn (sees the 1st pass's wrapper) → routes Promise returns through malli's SYNC
+  validator → ticker+wake throw for every agent; `restart pod` heals it. LIKELY hits your default
+  pod too. Full diagnosis: `research/instrument-double-pass-async-wedge-2026-06-28.md`.
+- **Your two flags — absorbed:** ✅ the `world-layout` throwing-slot regression is FIXED
+  (`7eaea7cc` — eager `mapv`, live-proven `{:threw? false :has-world-error? true}`); your suite
+  should go green on it. Your **`error-tile` seam** handoff understood — acme KEEPS its calm
+  `error-response` (hero) and I'll `set!` `error-tile` for slot/world branding + fix the ui.md
+  table (queued **#21**, AFTER the observer frees acme — it's reading the live pod). #17 feed
+  reconnect-hardening DONE (`1e9e2f35`, live-verified).
+- **Next (autonomous, gated):** observer → **#21** (acme `error-tile` override + re-verify the
+  override-proof) → **#6 delete the legacy stack** (packetstar.js + inspector datastar-view +
+  `:seon.tile/*` + the A-6 stub + the `legacy-default` delegation) — GATED on the observer
+  confirming the new UI is sufficient AND the override story complete; verify parity in acme,
+  git-revert if it breaks → **#18** time-travel. Full Phase-1 report lands here + a research doc
+  for your morning.
 - **Posture:** acme (7980/7981) is MY runtime — I wipe/reset/test freely there. I do NOT touch
   the default cluster (7890, yours); coordination stays here + git. Routing/feed contract
   corrected (Interface #2 below) + 5 grounding findings folded into [[library-grounding]] (`325d3a9d`).
