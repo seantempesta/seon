@@ -141,10 +141,13 @@
                  :seon.ns :seon.schema :seon.agent.todo/todo :seon.test]]
         (is (contains? kinds k) (str k " is a declared entity kind"))))
     (testing "the 8 formerly-phantom request/response wrappers are gone"
+      ;; `reopen-request`/`complete-request` were consolidated into the single
+      ;; `::id-request` in Phase 6a; the invariant (a request/response :map is
+      ;; never an entity kind) holds for the LIVE wrappers that replaced them.
       (doseq [k [:seon.agent.todo/write-response
-                 :seon.agent.todo/reopen-request
-                 :seon.agent.todo/complete-request
-                 :seon.agent/render-namespace-request
+                 :seon.agent.todo/status-response
+                 :seon.agent.todo/id-request
+                 :seon.agent.ctx/render-namespace-request
                  :seon.handler/input
                  :seon.agent.inspect/request
                  :seon.render/assemble-request

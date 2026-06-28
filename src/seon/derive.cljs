@@ -182,7 +182,14 @@
   (agent-turn-count db id))
 
 (defn- open-todo-count
-  "Count of the agent's OPEN todos (the work still owed)."
+  "Count of the agent's open LEAF todos — the real work still owed. With
+   `my.todo` trees, milestone PARENTS stay stored `:open` (their done-ness is
+   DERIVED — done once every child is), so a flat `:status :open` count
+   over-counts them. Counting only leaves (no child names it as parent — the
+   `leaf` predicate from `seon.agent.todo/rules`, inlined to keep this ns's
+   acyclic seon.db/seon.schema-only dependency) yields the actionable work.
+   Blocked-but-open leaves are still owed, so they count (use `next` for the
+   READY-only focus queue)."
   [db id]
   (or (db/query {:seon.db/db db
                  :seon.db/query
@@ -190,7 +197,8 @@
                    :where
                    [?a :seon.agent/id ?aid]
                    [?todo :seon.agent.todo/owner ?a]
-                   [?todo :seon.agent.todo/status :open]]
+                   [?todo :seon.agent.todo/status :open]
+                   (not-join [?todo] [?child :seon.agent.todo/parent ?todo])]
                  :seon.db/args [id]})
       0))
 

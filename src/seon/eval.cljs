@@ -2109,6 +2109,11 @@
   {:malli/schema [:=> [:catn [::record-request :map]] :any]}
   [{:keys [eval-id turn-id at narration source result duration-ms ns tee output]}]
   (let [conn     db/*conn*
+        ;; Whose scope produced this eval — the agent turn loop runs each batch
+        ;; inside `(db/with-agent id …)`, so this is the owning agent. nil for
+        ;; agent-less evals (boot index, inspector REPL); then the ref is omitted
+        ;; (optional = absent), never stored nil.
+        aid      (db/current-agent-id)
         eval-map (cond-> {:seon.eval/id          eval-id
                           :seon.eval/at          at
                           :seon.eval/duration-ms (or duration-ms 0)
@@ -2130,6 +2135,11 @@
                           :seon.eval/ns          (if (keyword? ns)
                                                    ns
                                                    (keyword (str ns)))}
+                   ;; Denormalized agent link — a ref to the owning agent so an
+                   ;; eval is found in one hop (e.g. `/clear`'s eval query).
+                   ;; Lookup-ref resolves at tx time (the agent pre-exists).
+                   aid (assoc :seon.eval/agent [:seon.agent/id aid])
+
                    ;; `render-result-edn` already clips the body to
                    ;; `result-body-render-cap` and names `result/<id>` for the
                    ;; full value. `cap-edn` (store-edn-cap) is the additional

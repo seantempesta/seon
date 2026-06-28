@@ -155,6 +155,15 @@
 ;; derivation of "the agent's current ns" reads this attribute on the latest
 ;; successful eval.
 (schema/register! :seon.eval/ns          :keyword)
+;; The agent whose scope produced the eval — a DENORMALIZED direct ref to the
+;; owning agent (the same agent reachable via turn → run → agent, surfaced here
+;; so an eval row can be found in ONE hop). Written by record-eval! from
+;; `(seon.db/current-agent-id)` when the eval runs inside a `with-agent` scope
+;; (every agent turn does); ABSENT for evals with no agent scope (boot index,
+;; inspector REPL) — optional, never nil. A ref so `[:seon.agent/id id]` value
+;; lookup-refs resolve and `/clear`'s `[?e :seon.eval/agent [:seon.agent/id …]]`
+;; query matches by eid.
+(schema/register! :seon.eval/agent       :seon.db/ref)
 
 ;; The agent's COMPLETE context block set — a component vector of
 ;; :seon.agent.ctx/block maps (see seon.agent.ctx). SEED-COPIED from the
@@ -245,6 +254,7 @@
    [:seon.eval/source      :seon.eval/source]
    [:seon.eval/ok?         :seon.eval/ok?]
    [:seon.eval/at          :seon.eval/at]
+   [:seon.eval/agent       {:optional true} :seon.eval/agent]
    [:seon.eval/duration-ms {:optional true} :seon.eval/duration-ms]
    [:seon.eval/narration   {:optional true} :seon.eval/narration]
    [:seon.eval/ns          {:optional true} :seon.eval/ns]
