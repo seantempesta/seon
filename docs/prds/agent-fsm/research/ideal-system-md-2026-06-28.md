@@ -91,9 +91,16 @@ message points at them; it does not become them.
 
 ## Part 2 — Draft SYSTEM.md (the concrete proposal)
 
-Lean, capability-first, REPL-grounded. Roughly half the current size. (Format note: rendered here
-as prose for readability; whether it ships as prose or as the current `; `-comment styling is
-decision D1 below.)
+Lean, capability-first, REPL-grounded. Roughly half the current size.
+
+**Format — RESOLVED (owner, 2026-06-28):** the file holds **clean prose** (no `; ` prefixes); the
+**loader comments it at load** and prepends the system header. The `; `-comment styling is
+load-bearing, not cosmetic — uncommented text invites weaker agents to reply with loose prose +
+forms (which the runtime then parse-and-recovers), so every line the agent sees must be eval-safe.
+The comment-out primitive exists and is verified: `seon.agent.ctx/quote-lines` (ctx.cljs:171), the
+same fn `file-block-ai` uses to `;`-comment a loaded markdown file. The system loader reuses it:
+read `SYSTEM.md` → `quote-lines` → prepend `; ── system ──`. **Explaining this discipline (forms
+run, prose is `;`-commented, why) stays IN the system message** — see "Eval mechanics" below.
 
 ---
 
@@ -185,10 +192,9 @@ The draft is honest about the one capability it leans on that isn't yet first-cl
 
 ## Part 4 — Decisions I need from you
 
-- **D1 — Format.** Ship `SYSTEM.md` as clean **prose/markdown** (most readable, fewest tokens), or keep
-  the current **`; `-comment styling** (primes the REPL mindset and stays eval-safe if it ever bleeds
-  into the transcript)? The system role is block 1, separate from the eval'able context, so prose is
-  safe — I lean **prose**, but it's your call.
+- **D1 — Format. ✅ RESOLVED (owner):** clean **prose** in the file; the loader `;`-comments it at load
+  via `quote-lines` + the `; ── system ──` header. The comment discipline is load-bearing (eval-safety
+  for weaker agents), and the system message explains it. See the Format note under Part 2.
 - **D2 — Dynamic context verb.** Is `my.context/load-doc!` / `unload!` in scope to build now (Core, small),
   or describe-only for this pass?
 - **D3 — What moves to `my.kb`.** Confirm the cut list: register-before-transact mechanics, the
