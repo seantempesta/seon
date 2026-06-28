@@ -148,6 +148,13 @@ a SEPARATE disaster-recovery concern from this config/state export — different
 
 ## Migration (REPLACE, no parallel system)
 
+> Status 2026-06-28: **Step 1 DONE** (mechanism + tests, no boot reroute). `seon.state/reconcile!`
+> is live (`src/seon/state.cljs`), built on the new provenance primitive `seon.db/managed-identities`;
+> `:config` added to the `:seon.db/origin` enum; the #35 cascade bug fixed in
+> `seon.agent.ctx/upsert-ctx-tx` (`:db.fn/retractAttribute`, not plain `:db/retract`). Tests in
+> `test/seon/state_test.cljs`; full CLJS suite green. Steps 2–4 (boot reroute / config loader /
+> export) remain.
+
 1. **Build `reconcile!`** — generalize `upsert-ctx-tx`'s retract-diff to (desired-set,
    managed-scope), upserting each map by its own `:db.unique/identity` attr and diffing the current
    population (attribute-presence + origin first-tx filter) against the desired identities.
