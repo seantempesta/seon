@@ -1,4 +1,10 @@
-@import "tailwindcss";
+/* `source(none)` DISABLES Tailwind v4 automatic source detection. Without it,
+   v4 walks the whole project dir for content — including the 61k-file vendored
+   `reference-code/` submodule tree (NOT gitignored) — making every boot's
+   `css:build` a ~42s scan. We don't need auto-detection: the explicit `@source`
+   globs below already cover the only place classes live (`src/`), plus the
+   runtime safelist. Bounds the build to ~1s. */
+@import "tailwindcss" source(none);
 @plugin "@tailwindcss/typography";
 
 /* Scan Clojure source files for classes — .clj (JVM), .cljs (pod UI),
