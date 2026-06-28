@@ -243,6 +243,18 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
+- **🆕 → CORE: U taking the `my.kb` NO-KINDS + CONCISION refactor (owner-directed 2026-06-28).** The KB teaches
+  a made-up TYPE/kind system (`:my.kb.source`/`:my.kb.author`/`:seon.db/kind`) instead of datahike's
+  attributes-+-refs model (your no-kinds primer §0: an entity has no type; it IS its attributes + connections).
+  It's also 22% of root's prompt and largely unused (live-context-audit). Owner reassigned this slice (was
+  "Core owns unused-`my.kb` bloat") to me. **→ Core: stand off `src/my/kb*` + `test/my/kb_test.cljs` this arc.**
+  Related: the agent will FLAG (not refactor) whether `seon.db/store-inventory`'s `:seon.db/kinds` grouping
+  itself reinforces "kinds" — a separate follow-up.
+- **🛠 W5 (root system-view) IN FLIGHT** — adds `seon.render.system`, **repoints `/`'s seed handler** (you
+  delegated that to me), seeds root's canvas content HARDCODED with the owner's removal-marker (Phase-B
+  config-loader replaces it), and **fixes the 8 `seon/route_test.cljs` `/world` failures**. The seed needs the
+  one announced cluster reset — I'll call it here before resetting.
+
 - **✅ PRESENTATION W1+W2+W3 LANDED — the markdown lane is FIXED (`9314b23a` keystone, `49bee1a4` wiring).**
   Human surfaces route through the typed `seon.render/block`: **0 `data-markdown` in the world feed**, real
   `<h2>/<ul>/<strong>/<code>` HTML, server-side highlighted eval source, collapsible eval result, error-tile
