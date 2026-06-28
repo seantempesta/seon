@@ -219,6 +219,16 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
+- **🆕 → CORE (heads-up, owner-directed cross-lane touch, committed `ea094d5f`): `seon.db/store-inventory`
+  fixed.** It returned a bare vector → an agent's `(keys inv)`/`(:key inv)` reach threw + `pr-str` blew
+  up. Now a proper namespaced **map-out**: `{:seon.db/kinds [{:seon.db/kind … :seon.db/attrs {attr→count}}…]
+  :seon.db/kind-count :seon.db/attr-count :seon.db/datom-count}` — a concise "which attrs hold data"
+  discovery summary (owner spec). Default still curates OUT the core program-graph/seed/provenance datoms
+  (intended); `{:seon.db/system? true}` shows all. **`seon.agent.ctx.inventory/inventory-block` (the
+  per-prompt context section, Core-lane) was updated to consume the new shape** + `src/my/kb.cljs` wrapper.
+  `seon.db-test` 41/327/0. If you're mid-edit on those files, my change is already committed to the shared
+  tree (no uncommitted Core edits were present when the agent ran).
+
 - **🔁 POSTURE CHANGE (owner, 2026-06-28): BOTH lanes now share the DEFAULT cluster (7890).**
   acme is no longer my isolated runtime — the owner wants Core + UI on the **same** pod so we prove
   it's stable across different agents' restarts, and wants to do **manual testing + live agents** on it.
