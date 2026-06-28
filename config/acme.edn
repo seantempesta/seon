@@ -3,11 +3,30 @@
 ;; curates its loadout/routes/skills independently of the default cluster with
 ;; ZERO src edit (read by seon.config via the same aero reader as system.edn).
 ;;
-;; Today acme mirrors the default loadout (the `:repl` body always-on), so acme
-;; agents get the same baseline; a downstream consumer points SEON_CONFIG at
-;; THEIR manifest to shape their cluster. To prove retract-on-drop against a
-;; real third-party shape, override at the shell:
+;; Acme is the maximal-context downstream shape: the `:default` profile primes
+;; the FULL agent skill corpus always-on (every body in `seon-skills/`), so an
+;; acme agent boots with the richest context the harness can offer. The
+;; `#profile` seam mirrors system.edn so the SAME cluster can flip to a lean
+;; context with one env flag — no second file, no rebuild:
+;;
+;;   bin/acme restart pod                       ; :default → MAX features
+;;   SEON_PROFILE=minimal bin/acme restart pod  ; :minimal → tight context (no skill body)
+;;
+;; aero falls back to `:default` for any unmatched profile, so a bare boot is
+;; the maximal loadout. To prove retract-on-drop against a third-party shape,
+;; point at a different manifest at the shell:
 ;;   SEON_CONFIG=config/test.edn bin/acme restart pod
-{:seon.config/loadouts
- [{:seon.config/role         :default
-   :seon.config/default-load [:repl]}]}
+{;; ── per-role context loadouts (merged over default-seed-blocks at create) ──
+ ;; `:default` profile = MAXIMUM features: every agent-corpus skill body is
+ ;; always-on, each seeded as a :skill/<name> block at the cached-prefix
+ ;; priority (16) via my.skills/skill-block, so the rich context is part of the
+ ;; byte-stable cache prefix. `:minimal` profile = tight context control: an
+ ;; empty loadout seeds NO always-on skill body (default-seed-blocks only).
+ :seon.config/loadouts
+ #profile {:default [{:seon.config/role         :default
+                      :seon.config/default-load [:repl
+                                                 :data-oriented-clojure
+                                                 :datahike
+                                                 :clojurescript
+                                                 :ui-live-tiles]}]
+           :minimal []}}
