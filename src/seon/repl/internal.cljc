@@ -413,11 +413,11 @@
        `reader.cljc` throws a bare lowercase `unexpected EOF`, so a
        capital-only match misses the low-level read-helper path.
      - STAGE varies — `:eof`/`:unmatched-delimiter` come from rewrite-clj
-       parse-stage (`reader/throw-reader`, stable wording); `:odd-map`
-       and `:invalid-token`/`:bad-metadata` surface at SEXPR-stage and are
-       host messages (`:odd-map` is CLJS-core `No value supplied for key`
-       vs JVM `...even number of forms` — hence both are matched, keeping
-       this CLJC ns portable).
+       parse-stage (`reader/throw-reader`, stable wording); `:odd-map` and
+       `:invalid-token`/`:bad-metadata` surface at SEXPR-stage and are host
+       messages. Verified (adversarial review): odd-map is `No value
+       supplied for key` on BOTH CLJS and JVM — they do NOT diverge — so a
+       single match suffices and is CLJC-portable.
    We match the fixed phrases (not a bare `eof`/`invalid`) so an
    interpolated user token — `Invalid symbol: my-eof` — can't collide. A
    wording drift falls through to `:read` — never throws, so an
@@ -432,8 +432,7 @@
       (or (str/includes? m "unexpected eof")
           (str/includes? m "eof while reading"))     :eof
       (str/includes? m "unmatched delimiter")        :unmatched-delimiter
-      (or (str/includes? m "no value supplied for key")
-          (str/includes? m "even number"))           :odd-map
+      (str/includes? m "no value supplied for key")  :odd-map
       (str/includes? m "metadata")                   :bad-metadata
       (str/includes? m "invalid")                    :invalid-token
       :else                                          :read)))
