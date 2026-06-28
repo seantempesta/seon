@@ -21,6 +21,37 @@ directly outside `src/seon/db/`. If a datahike primitive you need isn't
 surfaced in `seon.db`, **add the wrapper there** — that is "porting the
 function," and it keeps the one-API rule.
 
+## 0. There are NO entity "kinds" — only attributes and connections
+
+The most basic datahike/Datomic mindset, and the easiest to lose: **an entity has no
+type, class, or kind.** An entity is an entity-id with a set of assertions (datoms),
+nothing more. **What an entity "is" — "what you're looking at" — is determined entirely
+by which attributes are present/absent on it and how it is connected to other entities
+via refs.** A thing "is a route" because it carries `:seon.route/pattern` +
+`:seon.route/method`, not because of a kind label; it "belongs to" an agent because a ref
+connects them, not because of a class.
+
+Schema attaches to **attributes** (`:db/valueType` / `:db/cardinality` / `:db/unique`),
+never to entities. An entity is open — it may carry attributes from several "domains" at
+once, or just one. So:
+
+- **To FIND a set of entities:** query by **attribute presence** — scan the attribute's
+  index (AEVT) for every entity asserting it. There is no "list all of kind K"; there is
+  "every entity with attribute a". (seon's `:seon.entity/id-attr` is exactly this
+  attribute-presence enumeration — it is **not** a per-row kind stamp; there is
+  deliberately no `:seon.entity/kind`, see `src/seon/schema.cljc`.)
+- **To IDENTIFY one entity:** use one of its `:db.unique/identity` **attributes** — that
+  is also how `transact` upserts (existing-or-new is resolved by the unique attribute, no
+  kind needed).
+- **To RELATE or REMOVE:** follow **refs**. Removal/cascade is a property of the
+  connection (`:db/isComponent` cascade-retracts children) — never a kind operation.
+
+The anti-pattern (correct it on sight): designing or coding "per kind" — a kind taxonomy,
+a `for each kind` loop, a per-kind dispatch, a `:type`/`:kind` discriminator field. If you
+catch yourself there, reframe in **attributes + connections + provenance**. (This is the
+same rule as CLAUDE.md "the namespaced keyword IS the discriminator" — general shapes top
+level, specialize only on real shape divergence.)
+
 ## 1. A db is a VALUE, not a place
 
 `(d/q query db)`, `(d/pull db sel eid)`, `(d/entity db ref)` are referentially

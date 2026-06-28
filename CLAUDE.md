@@ -355,6 +355,18 @@ Promote a file to `.cljc` only when it's genuinely platform-portable (e.g. `seon
 
 All data flowing through Seon must be safe at every boundary: Malli validation, core.async channels, Nippy serialization, Datahike transact/pull.
 
+**There are NO entity "kinds" — an entity is its attributes + connections.** Datahike/Datomic
+has no entity type, class, or kind. An entity is just an entity-id with a set of datoms; **what it
+*is* — "what you're looking at" — is determined by which attributes are present/absent and how it
+connects to other entities via refs.** Schema attaches to ATTRIBUTES (valueType / cardinality /
+unique), never to entities. So never model, branch, iterate, or design "per kind": to FIND entities
+query by **attribute presence** (scan the attr's index), to IDENTIFY one use its
+`:db.unique/identity` **attribute**, to RELATE/remove follow **refs** (component refs cascade).
+`:seon.entity/id-attr` is attribute-presence enumeration, NOT a kind stamp — there is deliberately
+no per-row `:seon.entity/kind`. If you catch yourself writing "for each kind" or a kind taxonomy,
+stop: reframe in attributes + connections. Mindset primer (read it):
+`docs/prds/agent-fsm/research/datahike-primer.md` + the `/datahike` skill.
+
 **Maps with namespaced keywords. Every key. No exceptions.** This is the load-bearing rule the rest of the system depends on:
 
 - **Every public function** fully specs and validates ALL its arguments and its return value via `:malli/schema`. Two argument shapes are allowed: (1) **map-in / map-out** — one namespaced-keyword map in, one out, where the request and response are named Malli schemas (`::foo-request`, `::foo-response`) registered via `seon.schema/register!` — **preferred for API-like surfaces** (discoverable, extensible); or (2) **named positional** — each argument is a fully-namespaced-keyword-spec'd slot via Malli `:catn` (named positional) inside a `:=>`/`:function` schema — fine for ordinary data-processing fns and for mimicking a well-known API (e.g. datahike). The invariant: every argument is NAMED, SPECCED, and VALIDATED, whether it sits in a map or a positional slot. The violation is an UNSPECCED or BARE-keyword argument, not a positional one. Every key in any map is fully namespaced (`:seon.runtime/status`, never `:status`).
