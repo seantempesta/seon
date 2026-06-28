@@ -394,23 +394,33 @@
                             the natural hook for an embedding / source lookup.
      :read                — anything else (generic broken span). UNSAFE.
 
-   Matched on the STABLE error CORE, not the whole message: rewrite-clj
-   wraps some messages with a `[line L, col C]` PREFIX and others with an
-   `[at line L, column C]` SUFFIX, so a prefix match misses half of them.
-   The cores mirror tools.reader's `impl/errors.clj` families (eof-error /
-   throw-unmatch-delimiter / throw-odd-map / throw-bad-metadata /
-   throw-invalid*). A wording drift falls through to `:read` — never
-   throws, so an unrecognized message degrades to the generic kind rather
-   than breaking the parse."
+   Matched on rewrite-clj's FIXED wording, case-folded, not the whole
+   message. Two reasons, both found by reading rewrite-clj's source:
+     - CASING varies — `parser/core.cljc` throws `Unexpected EOF.` but
+       `reader.cljc` throws a bare lowercase `unexpected EOF`, so a
+       capital-only match misses the low-level read-helper path.
+     - STAGE varies — `:eof`/`:unmatched-delimiter` come from rewrite-clj
+       parse-stage (`reader/throw-reader`, stable wording); `:odd-map`
+       and `:invalid-token`/`:bad-metadata` surface at SEXPR-stage and are
+       host messages (`:odd-map` is CLJS-core `No value supplied for key`
+       vs JVM `...even number of forms` — hence both are matched, keeping
+       this CLJC ns portable).
+   We match the fixed phrases (not a bare `eof`/`invalid`) so an
+   interpolated user token — `Invalid symbol: my-eof` — can't collide. A
+   wording drift falls through to `:read` — never throws, so an
+   unrecognized message degrades to the generic kind rather than breaking
+   the parse."
   [msg]
-  (cond
-    (or (str/includes? msg "Unexpected EOF")
-        (str/includes? msg "EOF while reading"))    :eof
-    (str/includes? msg "Unmatched delimiter")       :unmatched-delimiter
-    (str/includes? msg "No value supplied for key") :odd-map
-    (str/includes? msg "Metadata")                  :bad-metadata
-    (str/includes? msg "Invalid")                   :invalid-token
-    :else                                           :read))
+  (let [m (str/lower-case msg)]
+    (cond
+      (or (str/includes? m "unexpected eof")
+          (str/includes? m "eof while reading"))     :eof
+      (str/includes? m "unmatched delimiter")        :unmatched-delimiter
+      (or (str/includes? m "no value supplied for key")
+          (str/includes? m "even number"))           :odd-map
+      (str/includes? m "metadata")                   :bad-metadata
+      (str/includes? m "invalid")                    :invalid-token
+      :else                                          :read)))
 
 ;; ============================================================
 ;; Public surface
