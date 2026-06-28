@@ -50,7 +50,7 @@
    `:calib` is the JUDGE CALIBRATION probe (not a scenario drive — it
    grades a canned good/bad reply pair to prove the judge discriminates);
    the `x*` keys are the cross-session A→B baseline scenarios."
-  [:s32 :s21 :s12 :todo :err :calib :x1 :x3 :x12 :ab])
+  [:s32 :s21 :s12 :todo :err :calib :x1 :x3 :x12 :xcat :ab])
 
 (defn- gate-value
   "The raw SEON_GYM_PAID env value (\"\" when unset)."
@@ -265,6 +265,12 @@
   (async done
     (run-paid! :x12
                "test/seon/gym/scenarios/x12-narrow-question-no-over-retrieval.edn"
+               done)))
+
+(deftest x-category-argmax-paid
+  (async done
+    (run-paid! :xcat
+               "test/seon/gym/scenarios/x-category-argmax.edn"
                done)))
 
 ;; ---------------------------------------------------------------------------
