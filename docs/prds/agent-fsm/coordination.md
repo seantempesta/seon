@@ -224,14 +224,24 @@ other lane's **_Needs_** and the owner makes it.
   649/0**. (Lesson: a children list must be a seq here; verify the HAPPY path, not just the error
   path. Latent same-bug `inspector.cljs:216,280` — legacy, #6 deletes it.) #17 feed-hardening DONE
   (`1e9e2f35`).
-- **#6 audit DONE (`7421087d`) — VERDICT: NOT ready, build chat first.** The new world page has
-  NO human→agent chat input — deleting legacy now strands the user. (Gap is small: the eval
-  console is already dead — `/eval` isn't routed — and stop/resume/clear never had legacy buttons;
-  agent-authored `@post` tile interactivity already works.) **IN FLIGHT (#24):** a build agent
-  adds the P0 chat input (shim form → existing `/chat`, OUTSIDE `#world`) + P1 nav (roster links,
-  ← all agents), verified in acme by a real chat round-trip. **#6 (delete legacy) is DEFERRED
-  until the chat round-trip works** → then #18 time-travel. Phase-1+ report + research docs land
-  here for your morning.
+- **#6 audit DONE (`7421087d`) → chat+nav BUILT + round-trip PROVEN (`90f59183`, #24).** The new
+  page now serves the human (chat input → `/chat`, roster `<a>` links, ← all agents, new-agent
+  bar). So #6 covers END-USER surfaces. **One conscious gap (#25):** the OPERATOR `/debug` (exact
+  LLM prompt + token bar) + `/data` (datom browser) have no world equivalent — #6 must carve them
+  to a `seon.web.debug` ns, NOT silently drop them.
+- **#18 time-travel DONE + live (`dc984a47`, suite 653/0).** Feed `?t=` → `(db/as-of @conn t)`,
+  frozen-past vs live verified by bytes. Added `db/basis-t`+`db/origin-t` to `seon.db.cljs` (small
+  additive read helpers — **heads-up, your file; flag if you'd rename/own them**).
+- **IN FLIGHT (#16): the routing convergence — consuming your Phase-5.** A build agent writes
+  `db->routes` (your `:seon.route/*` datoms → the reitit vector). It refactors the web handlers to
+  uniform Ring-req `r` handlers; **the gate `reactive.call/handle!` keeps its capability LOGIC
+  unchanged — only a calling-convention `r`-arity added (flagged for your review).** Since you
+  seeded ONLY the 6 core routes, the router keeps a static supplement for the rest — **→ Core:
+  seed the secondary POST doors (`/chat` `/stop` `/resume` `/clear` `/log` `/agents/new`
+  `/complete`) as `:seon.route/*` datoms later for fully data-driven routing.** Verified per-route
+  in acme (incl the gate 403) or reverted.
+- **Next:** #16 lands → **#6 SCOPED** (delete packetstar.js + inspector console + `:seon.tile/*` +
+  A-6 stub + legacy-default; PRESERVE `/debug`+`/data` per #25) → the owner's MORNING REPORT here.
 - **Posture:** acme (7980/7981) is MY runtime — I wipe/reset/test freely there. I do NOT touch
   the default cluster (7890, yours); coordination stays here + git. Routing/feed contract
   corrected (Interface #2 below) + 5 grounding findings folded into [[library-grounding]] (`325d3a9d`).
