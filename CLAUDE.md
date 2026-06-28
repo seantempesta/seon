@@ -124,7 +124,7 @@ tags: [component, database]
 
 Seon is **infrastructure for AI agents to write reliable software**.
 
-The personal domains (trading, health, finance) are test cases, not the point. The real product is a codebase architecture where AI agents can own and evolve code responsibly - with contracts they can discover, history they can learn from, and isolation that prevents conflicts.
+The personal domains (trading, health, finance) are eventual product domains, not the point — and NOT the scenarios we use to exercise agents (see "Exercising agents" below). The real product is a codebase architecture where AI agents can own and evolve code responsibly - with contracts they can discover, history they can learn from, and isolation that prevents conflicts.
 
 ### Core Infrastructure
 
@@ -140,6 +140,29 @@ The personal domains (trading, health, finance) are test cases, not the point. T
 - **Homoiconicity** - Code is data. Agents can manipulate programs as data structures.
 - **REPL-driven** - Interactive development matches how agents work (try something, see result, iterate).
 - **Immutable by default** - No spooky action at a distance. Function outputs depend only on inputs.
+
+---
+
+## Exercising agents — long-term planning + database memory (NOT "workouts")
+
+**When you test or drive an agent, use scenarios that exercise two capabilities —
+long-term planning and database-backed memory — NOT the old health / "workout" /
+trading toy domains.** Don't hardcode the verbs to call here; the API moves and
+the agent discovers it from its own context (the todo namespace and the `my.kb`
+manual ns are self-describing). What stays fixed is the SHAPE of a good drive:
+
+- **Long-term planning** — a task with several steps that must survive
+  interruption. The agent should break the work into durable plan items up front
+  and close them as each lands, so a mid-task `bin/seon restart pod` lets it
+  RESUME from what's still open without re-planning. Win condition: continuity
+  across turns and restarts, not finishing in one shot.
+
+- **Database memory — store then retrieve** — the agent designs a real schema for
+  what it learns, writes facts (with provenance), and in a LATER turn queries them
+  back to answer a question. Knowledge is schema'd data in the DB, never a
+  memory-text blob. Win condition: recall that survives turns and restarts — and,
+  with `SEON_EMBED`, semantic recall over embeddings. `my.kb` is the worked manual
+  the agent reads for the current patterns.
 
 ---
 
@@ -494,7 +517,7 @@ Key rules: density over whitespace (`p-3` not `p-6`), small text (`text-xs` prim
 1. **One file per namespace** - Don't split prematurely
 2. **DB parameter** - Functions receive `db` as first parameter
 3. **Schema-first** - Define Malli schemas before implementation
-4. **Namespaced IDs** - `:seon.trading/position`, `:seon.health/workout`
+4. **Namespaced IDs** - `:seon.agent.todo/id`, `:my.kb.source/rating`
 
 See `docs/conventions.md` for full patterns.
 
