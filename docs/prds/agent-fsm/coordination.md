@@ -179,18 +179,24 @@ other lane's **_Needs_** and the owner makes it.
   every `^:async` fn (sees the 1st pass's wrapper) → routes Promise returns through malli's SYNC
   validator → ticker+wake throw for every agent; `restart pod` heals it. LIKELY hits your default
   pod too. Full diagnosis: `research/instrument-double-pass-async-wedge-2026-06-28.md`.
-- **Your two flags — absorbed:** ✅ the `world-layout` throwing-slot regression is FIXED
-  (`7eaea7cc` — eager `mapv`, live-proven `{:threw? false :has-world-error? true}`); your suite
-  should go green on it. Your **`error-tile` seam** handoff understood — acme KEEPS its calm
-  `error-response` (hero) and I'll `set!` `error-tile` for slot/world branding + fix the ui.md
-  table (queued **#21**, AFTER the observer frees acme — it's reading the live pod). #17 feed
-  reconnect-hardening DONE (`1e9e2f35`, live-verified).
-- **Next (autonomous, gated):** observer → **#21** (acme `error-tile` override + re-verify the
-  override-proof) → **#6 delete the legacy stack** (packetstar.js + inspector datastar-view +
-  `:seon.tile/*` + the A-6 stub + the `legacy-default` delegation) — GATED on the observer
-  confirming the new UI is sufficient AND the override story complete; verify parity in acme,
-  git-revert if it breaks → **#18** time-travel. Full Phase-1 report lands here + a research doc
-  for your morning.
+- **Acme batch DONE (`c092d212`/`758e88cd`) — override story COMPLETE + verified (bytes).** On
+  `/agent/{id}`: hero error → acme `error-response` (calm), slot error → acme `error-tile` (your
+  new seam), no phantom canvas, normal tiles render. ui.md "Pages"+Total-override reconciled to
+  canvas=live-tile; the two stale #19 tests rewritten (`486b0d0f`). **⚠ It also caught + fixed a
+  regression my `7eaea7cc` introduced:** `mapv` returns a VECTOR but `seon.ui.html` splices only
+  SEQS, so a `[:section]` tile hit tag position → threw → KILLED the whole `/agent/{id}` feed (the
+  default pod too). Fixed to `(doall (map …))` (`9625788e`) — eager AND a seq; **full suite
+  649/0**. (Lesson: a children list must be a seq here; verify the HAPPY path, not just the error
+  path. Latent same-bug `inspector.cljs:216,280` — legacy, #6 deletes it.) #17 feed-hardening DONE
+  (`1e9e2f35`).
+- **#6 audit DONE (`7421087d`) — VERDICT: NOT ready, build chat first.** The new world page has
+  NO human→agent chat input — deleting legacy now strands the user. (Gap is small: the eval
+  console is already dead — `/eval` isn't routed — and stop/resume/clear never had legacy buttons;
+  agent-authored `@post` tile interactivity already works.) **IN FLIGHT (#24):** a build agent
+  adds the P0 chat input (shim form → existing `/chat`, OUTSIDE `#world`) + P1 nav (roster links,
+  ← all agents), verified in acme by a real chat round-trip. **#6 (delete legacy) is DEFERRED
+  until the chat round-trip works** → then #18 time-travel. Phase-1+ report + research docs land
+  here for your morning.
 - **Posture:** acme (7980/7981) is MY runtime — I wipe/reset/test freely there. I do NOT touch
   the default cluster (7890, yours); coordination stays here + git. Routing/feed contract
   corrected (Interface #2 below) + 5 grounding findings folded into [[library-grounding]] (`325d3a9d`).
