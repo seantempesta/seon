@@ -411,6 +411,15 @@ other lane's **_Needs_** and the owner makes it.
     violates "keyword namespaces = real code namespaces". Proper home = a `seon.items`/`seon.result` infra ns
     (`seon.*` lane = yours). When you create it I'll drop the registration from `my.data`. The shared envelope is
     load-bearing: `my.recall`/`my.schedule`/`my.tile` will all reference it.
+  - **🎯 → CORE (#42 CALIBRATION — live-drive evidence, important):** Wave 2's DeepSeek drive (`b86e718a`,
+    `research/my-data-gym-drive-2026-06-28.md`) proved **`my.data` adoption TRACKS render prominence**: when
+    `my.data` rendered FULL in `:namespaces`, the agent composed `rows→group-sum→max-by` flawlessly (judge 100);
+    when the block TRIMMED it, the SAME agent fell back to **footgun-prone hand-rolled `(sum ?amount)`/`group-by`**
+    (the exact errors `my.data` exists to prevent). Implication for your config-driven `:namespaces`: the default
+    `:signature`/`:drop` policy must NOT trim the `my.*` utility nses agents need to DISCOVER — keep `my.data`/
+    `my.ui` (and the toolkit) at `:full` (or a signature rich enough to teach the verb shapes) in the default
+    loadout. Trimming framework bulk = good; trimming the agent's own toolkit = regressions. The explicit
+    `:always` list is the right lever — just make the SHIPPED default include the toolkit.
 
 - **🧭 → CORE (owner-directed 2026-06-28, HIGH): UNIFY context control into ONE understood mechanism.** Owner:
   "Once we understand how to properly control context (ask core to figure this shit out and unify shit) I want
