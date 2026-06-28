@@ -502,6 +502,26 @@
     (is (= "about-next-good" (:narration form-entry)))))
 
 ;; ============================================================
+;; :eof recovery never splits an UNCLOSED form at an interior `;`. An
+;; unclosed form with a column-0 `;;` comment + an INDENTED inner call must
+;; stay ONE broken :read span — the inner call must NEVER leak out as an
+;; executing top-level :form (silent partial execution of broken code).
+;; ============================================================
+
+(deftest eof-recovery-never-leaks-inner-form
+  (let [entries (parse/parse-forms "(defn foo []\n;; do the thing\n  (bar)")]
+    ;; the load-bearing safety property: the whole thing is ONE broken read,
+    ;; NO :form entry exists, so (bar) is never emitted as an executing form.
+    (is (= [:read] (mapv :kind entries))
+        (str "expected one broken :read, got " (pr-str (mapv :kind entries))))
+    (is (not-any? #(= :form (:kind %)) entries))
+    (let [read-entry (first entries)]
+      (is (false? (:ok? read-entry)))
+      (is (= :eof (:error-kind read-entry)))
+      ;; the inner (bar) stays INSIDE the broken span's source, not a form
+      (is (str/includes? (:source read-entry) "(bar)")))))
+
+;; ============================================================
 ;; A.1 — prose-vs-code classification. A reader THROW on a prose token
 ;; (`80s`, `to:`, `detail:`, `v1.0`) must be DROPPED, NOT recorded as a
 ;; `:read` failure — UNLESS the failing span has a LIST opener `(` at its
@@ -683,19 +703,25 @@
     :no-form? true}
 
    {:in "`:seon.db/id` shape — the 14-char generated id, not a plain string."
-    :note "real mined leak: markdown backtick-quoted-keyword narration in the eval channel. KNOWN GAP — currently surfaces as a :read (backtick-while-reading-keyword) rather than being dropped as prose; the load-bearing invariant asserted here is that it NEVER produces a spurious evaluated form (4 such rows)"
+    :note "real mined leak: markdown backtick-quoted-keyword narration in the eval channel. A leading backtick is ALWAYS inline narration at the agent REPL, so it is DROPPED as prose — NO :read, NO spurious eval (4 such rows)"
+    :expected-kinds []
+    :no-read? true
     :no-form? true}
 
    {:in "`:idle` on turn 2, but by turn 5 both verbs are undefined."
-    :note "real mined leak: same backtick-keyword markdown-narration shape — no spurious eval"
+    :note "real mined leak: same backtick-keyword markdown-narration shape — dropped as prose, no :read, no eval"
+    :expected-kinds []
+    :no-read? true
     :no-form? true}
 
    {:in "`: they're dynamic verbs installed at boot."
-    :note "real mined leak: backtick then lone-colon markdown narration (a distinct read-error variant) — still no spurious eval"
+    :note "real mined leak: backtick then lone-colon markdown narration (a distinct read-error variant) — leading backtick → dropped as prose, no :read, no eval"
+    :expected-kinds []
+    :no-read? true
     :no-form? true}])
 
 (deftest mined-real-agent-leaks
-  (doseq [{:keys [in note expected-kinds error-kind no-form?]} mined-agent-cases]
+  (doseq [{:keys [in note expected-kinds error-kind no-read? no-form?]} mined-agent-cases]
     (testing (str note " — " (pr-str in))
       (let [entries (parse/parse-forms in)
             kinds   (mapv :kind entries)
@@ -707,6 +733,10 @@
           (is (= error-kind (:error-kind (first reads)))
               (str "error-kind mismatch: got "
                    (pr-str (:error-kind (first reads))))))
+        (when no-read?
+          (is (not-any? #(= :read (:kind %)) entries)
+              (str "a :read failure leaked for backtick markdown prose: "
+                   (pr-str kinds))))
         (when no-form?
           (is (not-any? #(= :form (:kind %)) entries)
               (str "a spurious :form was evaluated from agent narration: "
