@@ -68,6 +68,15 @@ namespaces (loaded via `SEON_EXTRA_SRC`), so new acme agents seed acme's set. On
 mechanism for everyone — seon, acme, and the agents themselves. A pure ADD needs
 nothing more: name a block and its render symbols; the symbols resolve late.
 
+**Skills are blocks; config shapes the seed.** A loadable skill ([[loadable-skills]])
+is nothing but a `:skill/<name>` block — `(my.skills/load :datahike)` is
+`install!`, `unload` is `remove!`, so the agent dials knowledge into its own context
+and the cost is derived at render. And the per-cluster `seon.config` manifest
+(aero `config/system.edn`) shapes the seed set declaratively WITHOUT a code change:
+its per-role loadouts add blocks, seed skill bodies always-on (`default-load`), and
+drop seeded blocks/routes by name. Absent config ⇒ byte-identical to a no-config
+boot; both are the SAME seed-copy mechanism, fed by data instead of a hardcode.
+
 ## The render engine
 
 One engine, `seon.render`, renders every page and the prompt. It is a single
@@ -299,6 +308,7 @@ acme cluster's NEW per-agent page (`/agent/{id}`), not just the legacy console:
 | Layer | Override mechanism | Default |
 |---|---|---|
 | **block set** (supporting tiles) | `ctx/install!` / `ctx/remove!` from acme's own nses | seon's seeded set |
+| **seed/skill loadout per cluster** | `config/system.edn` (`SEON_CONFIG`, `#profile`) loadouts/`default-load`/`include`/`exclude`/route-`removes` | full env-dir scan + `default-seed-blocks` |
 | **a tile's look** | the block's `:seon.render/html` symbol | seon's html render fn |
 | **focal `#world-canvas` (the live tile)** | the agent's `:seon.render.live-tile/content` symbol | seon's `welcome` tile |
 | **the calm hero error (a broken live tile)** | `set!` of `seon.render.live-tile/error-response` (the CALM hero — keeps the agent-facing `:seon.render/ai`/`:seon.render/error`, swaps only the human hiccup) | seon's "updating this tile" card |
@@ -355,5 +365,6 @@ link and read it.
 - [[data-model]] — the block / `:seon.route/*` / `:seon/error` schemas these renders read, and the `my.*` domains.
 - [[agent-runtime]] — the loop that assembles the prompt, the bootstrap that seeds blocks, and the run-status block's data source (`derive-status`).
 - [[toolkit]] — `my.tile` and the agent verbs that drive the live tile.
+- [[loadable-skills]] — skills as `:skill/<name>` blocks; the `seon.config` seed/skill override.
 - [[roadmap]] — current code state + the dependency-ordered migration to this target (Lane U).
 - [[datahike-primer]] — the datahike-in-the-grain mindset.
