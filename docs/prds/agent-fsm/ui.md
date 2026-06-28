@@ -105,9 +105,14 @@ preserved for provider prefix-caching.
 Every **page** is a layout placing block html renders into slots; each filled slot
 is a tile. All pages are agent worlds — one mechanism, a tree of routes:
 
-- **world** (`/agent/{id}`) — one agent: a **canvas** (the focal agent↔human
-  communication block) in `(slot :canvas)` plus a `:seon.agent.ctx/priority`-
-  ordered scroll of the agent's tiles.
+- **world** (`/agent/{id}`) — one agent: the focal **canvas** IS the agent's
+  **live tile** (`seon.render/render-agent-tile` resolving
+  `:seon.render.live-tile/content`, the one HTML surface the agent rewrites),
+  rendered into `#world-canvas`, above a `:seon.agent.ctx/priority`-ordered
+  scroll of the agent's html `:seon.agent/ctx` blocks as supporting tiles
+  (`:transcript` included). The canvas is NOT a `(slot :canvas)` block —
+  `:canvas` is just a block name like any other; the hero is always the live
+  tile (decision #19, observer-confirmed KEEP).
 - **the root agent's world** (`/`) — the all-agents overview IS the **root
   agent's** world (`:seon.agent/id "root"`). Its system-scoped blocks query across
   all agents to render a preview tile each; dive into one via reverse routing
@@ -243,29 +248,41 @@ acme cluster's NEW per-agent page (`/agent/{id}`), not just the legacy console:
 | **block set** (supporting tiles) | `ctx/install!` / `ctx/remove!` from acme's own nses | seon's seeded set |
 | **a tile's look** | the block's `:seon.render/html` symbol | seon's html render fn |
 | **focal `#world-canvas` (the live tile)** | the agent's `:seon.render.live-tile/content` symbol | seon's `welcome` tile |
-| **any broken/error tile — live tile OR slot** | `set!` of `seon.render.live-tile/error-response` (one error contract for both paths) | seon's "updating this tile" card |
+| **the calm hero error (a broken live tile)** | `set!` of `seon.render.live-tile/error-response` (the CALM hero — keeps the agent-facing `:seon.render/ai`/`:seon.render/error`, swaps only the human hiccup) | seon's "updating this tile" card |
+| **slot / world / entity error tiles** | `set!` of `seon.render.live-tile/error-tile` (the `(fn [:seon/error] → hiccup)` seam the `render` / `slot` / `render-entity-html` catches call) | seon's `default-error-tile` (informative card) |
 | **root agent's world (`/`)** | the `/` route handler symbol (root's world layout) | seon's root world layout |
 | **routes / apps** | `:seon.route/*` rows | seeded core routes |
 | **brand head — name / tagline / CSS** | `SEON_BRAND_NAME` / `SEON_BRAND_TAGLINE` / `SEON_BRAND_CSS` (on every shim `<head>`, incl. `/agent/{id}`) | seon defaults / Phosphor |
 | **client JS** | `SEON_EXTRA_PUBLIC` + scripts | datastar.js |
 
 acme installs at preload in its own namespaces (loaded via `SEON_EXTRA_SRC`),
-where it already wires its overrides. The `#world-canvas` override flows through
-the LIVE-TILE path: `world-layout`'s focal canvas IS `render-agent-tile` resolving
-the agent's `:seon.render.live-tile/content`, and a throwing tile routes through
-the overridable `seon.render.live-tile/error-response` — the SAME var the slot
-error path (`render/error-tile-hiccup`) calls, so one consumer `set!` brands every
-error surface on the page.
+where it already wires its overrides. There are **two error seams**, and acme
+`set!`s BOTH so every error surface on the page is branded:
 
-Acceptance (proven server-side on `/agent/{id}`, agent `vKt-2606261227`, acme
+- the **focal `#world-canvas`** flows through the LIVE-TILE path:
+  `world-layout`'s canvas IS `render-agent-tile` resolving the agent's
+  `:seon.render.live-tile/content`, and a throwing tile routes through the CALM
+  hero seam `seon.render.live-tile/error-response` (the human never sees the
+  failure here — it rides the agent twin, so the hero does NOT delegate).
+- the **slot / world / entity error tiles** (`render` / `slot` /
+  `render-entity-html` catches) route through the SEPARATE
+  `seon.render.live-tile/error-tile` var (`(fn [:seon/error] → hiccup)`,
+  defaulting to `default-error-tile`).
+
+One `set!` per seam — two lines in `acme.overrides` — brands every error tile on
+the page.
+
+Acceptance (proven server-side on `/agent/{id}`, agent `zeG-2606272150`, acme
 cluster port 7980 — gunzipped feed, not inference): with acme's
 `:seon.render.live-tile/content` wired to `acme.widget/broken-tile` (a throwing
-tile) and its blocks installed via `ctx/install!`, the `#world-canvas` section and
-the `#tile-acme-broken` slot BOTH render acme's branded
-`"Acme is preparing this view…"` card — NOT seon's stock "updating this tile" card
-— and the page `<head>` carries `<title>Acme · agent …</title>` plus the inlined
-`acme/branding/acme.css`. `bin/acme build` ran with zero warnings; the default
-seon UI (default cluster) is untouched.
+tile) and its blocks installed via `ctx/install!`, the focal `#world-canvas`
+(via `error-response`) and the `#tile-acme-broken` slot (via `error-tile`) BOTH
+render acme's branded `"Acme is preparing this view…"` card — NOT seon's stock
+"updating this tile" card and NOT the informative `default-error-tile` — and the
+`#world-tile-canvas` phantom (the stale pre-#19 `:canvas` block) is gone, while
+the agent's normal tiles (`#world-tile-acme-tile`, `#world-tile-acme-widget`)
+still render. `bin/acme build` ran with zero warnings; the default seon UI
+(default cluster) is untouched.
 
 ## Malli throughout
 
