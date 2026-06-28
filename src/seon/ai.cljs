@@ -157,7 +157,13 @@
 ;; (enterprise, bearer-keyed). Same wire path as :deepseek
 ;; (seon.ai.openai-compat) with endpoint + key resolved from ::base-url /
 ;; ::api-key-env instead of the shipped deepseek defaults.
-(schema/register! ::provider [:enum :deepseek :anthropic :openai-compat])
+(schema/register! ::provider [:enum :deepseek :anthropic :openai-compat :diffusiongemma])
+;; DiffusionGemma backend selector (env SEON_DG_BACKEND, DB-ownable like
+;; ::provider). :control = the transformers RunPod worker that keeps the
+;; per-step LogitsProcessor seam (seon.ai.diffusiongemma); :vllm = an
+;; OpenAI-compatible serving endpoint (reuses seon.ai.openai-compat).
+;; Only consulted when ::provider is :diffusiongemma; default :control.
+(schema/register! ::dg-backend [:enum :vllm :control])
 ;; The FULL chat-completions URL of an OpenAI-compatible gateway
 ;; (e.g. "https://gw.example.com/v1/chat/completions") — NOT a prefix
 ;; the adapter appends a path to. One semantic: what you set is what
@@ -198,6 +204,7 @@
    [::timeout-ms {:optional true} ::timeout-ms]
    [::base-url    {:optional true} ::base-url]
    [::api-key-env {:optional true} ::api-key-env]
+   [::dg-backend  {:optional true} ::dg-backend]
    [::extra-body-edn {:optional true} ::extra-body-edn]])
 
 (schema/register! ::config
@@ -211,6 +218,7 @@
    [::timeout-ms  {:optional true} ::timeout-ms]
    [::base-url    {:optional true} ::base-url]
    [::api-key-env {:optional true} ::api-key-env]
+   [::dg-backend  {:optional true} ::dg-backend]
    [::extra-body-edn {:optional true} ::extra-body-edn]])
 
 (schema/register! ::synced? :boolean)
@@ -223,7 +231,7 @@
 ;; The attr order is the sync + row-read iteration order.
 (def ^:private config-attrs
   [::provider ::model ::temperature ::max-tokens ::thinking ::timeout-ms
-   ::base-url ::api-key-env ::extra-body-edn])
+   ::base-url ::api-key-env ::dg-backend ::extra-body-edn])
 
 ;; ============================================================
 ;; Env reads — SEON_AI_*, parsed to the attr's concrete type.
@@ -243,6 +251,14 @@
     "deepseek"      :deepseek
     "anthropic"     :anthropic
     "openai-compat" :openai-compat
+    "diffusiongemma" :diffusiongemma
+    nil))
+
+(defn- parse-dg-backend
+  [s]
+  (case s
+    "control" :control
+    "vllm"    :vllm
     nil))
 
 (defn- parse-extra-body-edn
@@ -267,6 +283,7 @@
    ::timeout-ms  ["SEON_AI_TIMEOUT_MS"  parse-int*]
    ::base-url    ["SEON_AI_BASE_URL"    identity]
    ::api-key-env ["SEON_AI_API_KEY_ENV" identity]
+   ::dg-backend  ["SEON_DG_BACKEND"     parse-dg-backend]
    ::extra-body-edn ["SEON_AI_EXTRA_BODY" parse-extra-body-edn]})
 
 (defn env-row
@@ -363,6 +380,21 @@
   (or (::provider (current))
       (::provider (env-row))
       :deepseek))
+
+(defn dg-backend
+  "The active DiffusionGemma backend — consulted ONLY when [[provider]]
+   is `:diffusiongemma`: the DB-owned config row's `::dg-backend` (read
+   per call via [[current]]), else `SEON_DG_BACKEND` env, else
+   `:control` (the transformers worker with the per-step seam). `:vllm`
+   routes the diffusiongemma provider through the OpenAI-compatible
+   serving path (`seon.ai.openai-compat`); `:control` builds the
+   `seon.ai.diffusiongemma` async-job adapter. ROW-FIRST so a runtime
+   backend switch persists (same seed-once contract as [[provider]])."
+  {:malli/schema [:=> [:cat] ::dg-backend]}
+  []
+  (or (::dg-backend (current))
+      (::dg-backend (env-row))
+      :control))
 
 ;; ============================================================
 ;; Shared system-prompt resolution — the HARDCODED, system-specific seon

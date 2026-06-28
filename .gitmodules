@@ -254,3 +254,6 @@
 [submodule "reference-code/again"]
 	path = reference-code/again
 	url = https://github.com/liwp/again
+[submodule "reference-code/transformers"]
+	path = reference-code/transformers
+	url = https://github.com/huggingface/transformers

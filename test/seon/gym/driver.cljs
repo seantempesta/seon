@@ -78,6 +78,7 @@
     [seon.ai :as ai]
     [seon.ai.anthropic :as anthropic]
     [seon.ai.openai-compat :as openai]
+    [seon.ai.diffusiongemma :as diffusiongemma]
     [seon.client :as client]
     [seon.agent.turn :as turn]
     [seon.agent.run :as run]
@@ -1285,6 +1286,9 @@
     (usage-logging provider
                    (case provider
                      :anthropic (anthropic/agent-adapter)
+                     :diffusiongemma (case (ai/dg-backend)
+                                       :control (diffusiongemma/agent-adapter)
+                                       (openai/agent-adapter))
                      (openai/agent-adapter)))))
 
 (defn- paid-key-set?

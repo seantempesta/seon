@@ -73,6 +73,7 @@
     [seon.ai.tokens :as tokens]
     [seon.ai.anthropic :as anthropic]
     [seon.ai.openai-compat :as openai]
+    [seon.ai.diffusiongemma :as diffusiongemma]
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.log :as log]
@@ -1908,6 +1909,18 @@
     :anthropic     (if (config/anthropic-api-key)
                      (anthropic/agent-adapter)
                      stub-llm)
+    ;; DiffusionGemma — ONE provider, two backends (seon.ai/dg-backend,
+    ;; env SEON_DG_BACKEND). :control = the transformers RunPod worker
+    ;; (the per-step seam); :vllm = an OpenAI-compatible serving endpoint
+    ;; (falls through to the openai adapter, like :openai-compat). Each
+    ;; backend gates on its own key, else the stub.
+    :diffusiongemma (case (ai/dg-backend)
+                      :control (if (diffusiongemma/api-configured?)
+                                 (diffusiongemma/agent-adapter)
+                                 stub-llm)
+                      (if (openai/api-key-configured?)
+                        (openai/agent-adapter)
+                        stub-llm))
     ;; :openai-compat rides the SAME adapter as :deepseek (the wire
     ;; format is OpenAI's) — endpoint + key resolve per call from the
     ;; :seon.ai/config row / SEON_AI_* env (see seon.ai.openai-compat's
@@ -1946,7 +1959,7 @@
       (set! db/*conn* conn)
       (-> (repl/ensure-bootstrap!)
           (.then
-            (fn [compile-state]
+            (fn ^:async rearm! [compile-state]
               (let [ids    (agent/armable-agent-ids {:seon.db/db @conn})
                     llm-fn (current-llm-fn)]
                 (doseq [id ids]
@@ -1955,6 +1968,18 @@
                   ;; but re-hosting is idempotent and keeps the two
                   ;; rosters trivially in sync).
                   (runtime-id/host! id)
+                  ;; Replay the canonical home-ns wiring into the
+                  ;; compile-state BEFORE arming the trigger. The state may
+                  ;; be freshly rebuilt (a `seon.eval` hot-reload rotates
+                  ;; `init-version`, so `ensure-bootstrap!` returns a NEW
+                  ;; compile-state with no home-ns wiring), and a minted
+                  ;; agent's home ns was never set up on this path at all.
+                  ;; `setup-agent-ns!` is idempotent + cheap; awaiting it
+                  ;; here (before `install-wake-trigger!`) guarantees the
+                  ;; agent's FIRST eval resolves message/user, wait,
+                  ;; complete, … — killing the install-timing race. Same
+                  ;; wiring source as `boot-one-agent!` (one `home-ns-form`).
+                  (await (seval/setup-agent-ns! compile-state (agent/home-ns id) id))
                   (agent-loop/install-wake-trigger!
                     {:seon.agent/id            id
                      :seon.agent/llm-fn        llm-fn

@@ -39,10 +39,15 @@ driver). Keys in `.env` (`RUNPOD_API_KEY`, `HF_TOKEN`). `.venv` = python3.12.
 cd tmp/flash-diffgemma
 set -a; . ./.env; set +a                     # load keys
 
-# DEPLOY (FLASH_GPU_IMAGE is structural → recycles workers, endpoint id preserved)
+# DEPLOY — then ALWAYS verify-fresh (see "Deployment stability" below).
+# HARD-LEARNED: a plain `flash deploy` does NOT recycle a WARM worker — it keeps
+# serving OLD code until it scales to zero (idle_timeout) or is force-recycled.
+# NEVER trust a measurement without confirming worker_sha == local (verify_fresh.py).
 export FLASH_GPU_IMAGE=docker.io/seantempesta/diffgemma-worker:cu128-v1
-.venv/bin/flash deploy                        # bundles the single diffgemma endpoint
-                                              #   (gpu_worker.py + diffgemma_common.py)
+.venv/bin/flash deploy                        # bundles gpu_worker.py + diffgemma_common.py
+python3 verify_fresh.py                        # MUST print "FRESH ✓" before any measuring
+#   STALE? force a recycle (flash undeploy is flaky — see flash-deployment-stability doc),
+#   or wait out idle_timeout (600s) then a cold call, then re-verify.
 
 # DRIVE a run (modes: probe | introspect | generate | clamp_smoke | infill)
 export DIFFGEMMA_EP=kzonsp5b18hpq5            # from deploy output
@@ -83,6 +88,25 @@ REGISTRY=docker.io/seantempesta TAG=cu128-v1 ./build-image.sh
 - Cold start = provision A100 + pull the 15GB image + load 50GB model (cached on
   the NetworkVolume after first load). `.flashignore` is DEAD in Flash v1.17 — use
   `.gitignore`.
+
+## Deployment stability — KNOW what's live (do NOT skip)
+
+We got burned measuring against a STALE warm worker (`flash deploy` said "deployed"
+but the running worker served old code for an unknown window). The guard, now built
+in, is a source fingerprint:
+
+- **`worker_sha`** — every worker response carries `sha256(gpu_worker.py +
+  diffgemma_common.py)[:12]`, computed INSIDE the container. It proves which code
+  produced a result.
+- **`verify_fresh.py`** (in `tmp/flash-diffgemma/`, gitignored) — computes the local
+  sha, probes the worker, asserts `worker_sha == local`. Prints `FRESH ✓` or refuses.
+- **The rule:** after ANY deploy, run `python3 verify_fresh.py` and see `FRESH ✓`
+  BEFORE trusting a single number. A measurement on an unverified worker is worthless.
+- **Forcing a recycle is the open problem:** plain `flash deploy` does not recycle a
+  warm worker; `flash undeploy` has been flaky (`OSError`/arg errors). The grounded
+  procedure is in [[research/flash-deployment-stability-2026-06-28]] (RunPod Flash
+  source). Until then: deploy → `verify_fresh.py`; if STALE, wait out `idle_timeout`
+  (600s) for scale-to-zero then a cold call, and re-verify.
 
 ## Current issues / blockers
 
