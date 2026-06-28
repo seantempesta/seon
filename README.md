@@ -71,6 +71,10 @@ The real-time UI:
 - **Datastar** (Star Federation, MIT). The hypermedia framework behind Seon's SSE-driven live tiles — declarative `data-*` attributes, one connection up, the server streams HTML and the DOM patches itself.
 - **[hyperlith](https://github.com/andersmurphy/hyperlith)** (Anders Murphy, MIT). The render-loop design Seon's live-feed layer adopts: render the view as a pure function of state, stream the compressed result, let the client apply it — no client-side state machine. Anders's "send the whole render down and diff on arrival" approach (and his poor-man's-datastar experiment) shaped how Seon builds composable feeds and interactive tiles.
 
+Resilience:
+
+- **[again](https://github.com/liwp/again)** (Lauri Pesonen, originally listora, EPL-1.0). The retry library whose **strategy-as-a-lazy-seq-of-delays** design Seon's `seon.retry` adopts — backoff is a composable sequence (`multiplicative` → `randomize` → `clamp-delay` → `max-retries` → `max-duration`), not a tangle of flags. `again` itself is JVM-only (it blocks on `Thread/sleep` and catches thrown exceptions), so Seon ports the pure combinators to the CLJS pod and pairs them with a native `async`/`await`, errors-as-values executor — the design is Lauri's, the inspiration explicit.
+
 These licenses (EPL and MIT) are permissive; where Seon ports their code, the upstream copyright and permission notices travel with it.
 
 ## Quickstart
