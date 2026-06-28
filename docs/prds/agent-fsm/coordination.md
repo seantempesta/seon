@@ -132,73 +132,46 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
-- **Now:** **📍 LATEST (both lanes near compaction):** #13 branding DONE (`9d87dffe` — new world
-  shim routes through the brand seams; acme brand reaches `/agent/{id}`). Error-tile unification
-  DESIGNED + handed to you: `docs/prds/agent-fsm/research/error-tile-unification-2026-06-27.md`
-  (#12 — the seam MUST be `seon.render.live-tile/error-tile` per the require cycle, FOLD into your
-  active render.cljs WIP, the 4th holdout site is `render-entity-html` catch :375). **U is now
-  GATED on your #12 (error-tile seam) + #14 (live-tile bridge + resume re-seed + provenance warn);**
-  when they land: U does the acme `set!` swap + the ui.md error-row, then #6 (delete legacy —
-  blocked on #12+#14), then the DeepSeek drive vs the complete UI. (History below.)
-- **Now (override-proof detail):** **🔴 OVERRIDE-PROOF caught a real robustness gap (owner's directive — verify the
-  consumer overrides, not just the default UI).** The new world-layout/slot UI BROKE the
-  total-override thesis on the PRIMARY surface (`/agent/{id}`, what `/agents` links to): acme's
-  overrides (error-response, branding, the live-tile map-widgets) BYPASS the new path — they
-  survive only on the now-unlinked legacy console. Root cause: the new ctx-block/`slot` contract
-  (BARE HICCUP) is a SECOND, PARALLEL tile contract that doesn't consume the established
-  live-tile one (`:seon.render/html-response` MAP) — a no-parallel-systems violation; a
-  map-returning fn renders EMPTY on the new path. **→ CORE (render engine, owner-aware): task
-  #12 CRITICAL — converge the two contracts (min: make `slot`/`render` tolerate the
-  `{:seon.render/hiccup …}` envelope as `render-entity-html` already does, render.cljs:339) +
-  make the slot/world ERROR path overridable (render.cljs:657,692 are hardcoded — route through
-  `live-tile/error-response` or one overridable `seon.render/error-tile`); task #14 — the
-  live-tile bridge into world-layout, resume re-seeds the block set, a provenance warn on clean
-  boot.** **→ U: task #13 — wire branding into the new world shim (doing now, independent).**
-  **#6 convergence is BLOCKED on #12+#13+#14** — deleting the legacy stack before the new path
-  adopts the overrides loses every consumer override. Acme override exercise committed
-  `eb04736b`; ui.md "Total override" table currently OVERSELLS — fix when #12 lands.
-- **Now (prior):** **🟢 REITIT LIVE + VERIFIED on 7890** (your cutover is done, build green). Server-side
-  proof: GET `/world`/`/js/*`/`/agents` (inspector deleg) → 200; POST `/call` refused-fn → 403
-  (gate, via reitit); cross-origin POST → 403 (same-origin mw); `/world/feed` gzip morph streams
-  live (agent `dgS-2606271925`). Both `/call` doors + the hijack-SSE work through the Ring router.
-  **WORLD-LAYOUT now STARTING** — Phase 2e's `(seon.render/slot …)` un-gates it; building
-  `/agent/{id}` = the agent's `:seon.agent/ctx` blocks rendered as tiles via slots (ADDITIVE —
-  the inspector/tile per-agent view stays until #6 deletes it). **Pin reconciliation:** the cutover
-  already happened, so the shadow-port-pin no longer gates anything — and per my research
-  (`92d26fc7`) it does NOT enable auto-reconnect (the build-time-baked server-TOKEN re-mint is
-  the blocker, not the port), so it's a determinism-only nice-to-have, DE-PRIORITIZED (fold
-  `:http {:port 9630 :strict true}` into a future restart if you want deterministic ports). U
-  fixed `transform_test`'s exact-`/call`-path assertion → behavior-based (`4ee15438`).
-  **✅ CORE — SAFE TO CONTINUE Phase 2+.** All U rename/disruptive src work is
-  COMMITTED (`9801142d` web/** half + `c6c8d0ff` streamer), build GREEN at HEAD (zero
-  `seon.ctx` in any src `.cljs`, tree-wide), nothing of mine uncommitted in `src/`. **Phase-1 COMPLETE +
-  runtime-proven:** Core's `cluster reset default` is DONE (pod pid 1692, agent
-  `PGh-2606271755`, 410 fns / 0 bad-spec — schema valid). My `/world` streamer is **live on the
-  reseeded world** — the gzip morph stream on 7890 renders `PGh` (just verified). Tests: U green
-  + committed (`aaa4a8c7`: `datastar_test` 8/23 + `call_test` 4/21, run one-ns-at-a-time in the
-  live pod); Core-lane test files fixed → `bin/test-cljs` compiles (Core runs the full suite).
-  (The earlier `derive-state` bare-entity smell was a FALSE alarm — it derives `:idle` cleanly,
-  live-verified; no Core action.) — Validated the Phase-8
-  stack against vendored source (reitit core/ring/trie/malli
-  are CLJS-clean — the Java trie + ring's classpath static-handlers are `:clj`-only and
-  unused; build delta = Maven `metosin/reitit-ring`+`reitit-malli` 0.10.1 in `deps.edn :cljs`,
-  NOT source-paths). **Owner-approved architecture pivot** (simplest/most-robust; reuse over
-  roll-our-own): the live UI is hyperlith's model ported to Node — `view = f(db-as-of t)`
-  whole-element **datastar morph** over a **gzip-compressed SSE stream** (+ drop-latest
-  throttle). This REPLACES packetstar per-tile `{id,html}` + the `!last-tree` BFS diff + the
-  UI-side `since-t` replay. **Server half PROVEN in Node** (gzip SSE + byte-exact
-  `datastar-patch-elements` framing, decode-verified). Real-pod streamer **LIVE-PROVEN in
-  acme** (commit `c6c8d0ff`, `seon.web.datastar`): a real datahike tx → whole-`#world` datastar
-  morph over gzip SSE (roster `1→2→1` on ADD/RETRACT, ~300ms post-commit, store clean). [[ui]] +
-  roadmap Phase 8 get rewritten to match next. **Phase-1 web/** retarget LANDED** (commit
-  `9801142d`, completing your `07f3c4ff`) — grep-clean tree-wide (zero `seon.ctx` in ANY
-  `.cljs`, both lanes), build green at HEAD; **ready for the ONE `bin/seon cluster reset
-  default`** (Core/owner triggers — destructive). Heads-up: I also retargeted the
-  `seon.ctx.usage` SUB-ns (`inspector.cljs` L48/243) your Phase-1 grep would miss — add
-  `seon[.]ctx` (no delimiter) to the final-gate grep.
-- **Needs (from Core):** (1) ✓ Phase-1 DONE (both halves committed) — trigger the cluster
-  reset when ready. (2) Phase 2e `(slot :name)`. (3) Phase 5 `:seon.route/*` schema —
-  **seed the CORRECTED route set (Interface #2 below), not the old one.**
+- **Now (2026-06-28, overnight autonomous — owner asleep, "simple+stable over clever, push
+  forward"):** Phase 8 is converging fast. **DONE + proven:** reitit front door live on 7890;
+  gzip-morph `view=f(db)` streamer; `/agent/{id}` world-layout; **#14a** the live-tile bridged
+  as the focal `#world-canvas` (`2be4247c` — `render-agent-tile`'s hiccup, `db` passed
+  explicitly for purity; the old dual-canvas ctx-block special-casing dropped; all html ctx
+  blocks incl `:transcript` are uniform supporting tiles); **#12** both halves — your contract
+  convergence (`690ae2b8`) + the **acme override-proof** (`22ed882e`, observed bytes:
+  `#world-canvas` renders acme's `error-response` override not seon's stock card, the slot error
+  path too, branding reaches the page).
+- **DECISION I made for you (owner delegated "make the best decisions"; reversible):** **the
+  canvas IS the live tile** (`:seon.render.live-tile/content` via `render-agent-tile`) — NOT a
+  `(slot :canvas)` block. Rationale = simple+stable: `render-agent-tile` is already
+  SCI-bounded + interactivity-rewritten + serialization-guarded + override-routed, and now
+  shares your `unwrap-response` envelope + `error-response` override path, so it is NOT a
+  parallel system. **→ Core: #14c (fold live-tile into a block) is DEPRIORITIZED / likely
+  unnecessary** — don't build it unless the DeepSeek observer shows the live-tile-vs-block
+  duality confuses agents (then we revisit). ui.md "Pages" still describes canvas=`(slot
+  :canvas)`; I reconcile it to canvas=live-tile after the observer (tracked as task #19).
+- **In flight (acme, my isolated runtime):** a live **DeepSeek drive** building an interactive
+  todo tile on the new UI, captured for a **dedicated observer** (next). Then the observer's
+  findings route: prompt/context/toolkit → you, UI/render/routing → me.
+- **Next (autonomous, gated):** observer → **#6 delete the legacy stack** (packetstar.js +
+  inspector datastar-view + `:seon.tile/*` + the A-6 stub + the `legacy-default` delegation) —
+  GATED on the observer confirming the new world UI is sufficient (the legacy console is the only
+  remaining fallback); I verify parity in acme before+after, revert via git if it breaks → #17
+  feed reconnect-hardening → #18 time-travel. Full Phase-1 report lands in this file + a research
+  doc for the owner's morning.
+- **Posture:** acme (7980/7981) is MY runtime — I wipe/reset/test freely there. I do NOT touch
+  the default cluster (7890, yours); coordination stays here + git. Routing/feed contract
+  corrected (Interface #2 below) + 5 grounding findings folded into [[library-grounding]] (`325d3a9d`).
+- **History (collapsed):** Phase-1 rename + the reitit cutover (live+verified 7890) + the
+  gzip-morph streamer + the world-layout all landed & proven earlier (see git log +
+  [[library-grounding]] Lane-U section). The **override-proof correctly caught** that the new
+  ctx-block/`slot` path was a second tile contract bypassing acme's overrides — that drove #12
+  (contract convergence), now DONE both sides. The shadow-port-pin is DE-PRIORITIZED (the cutover
+  already happened; the pin doesn't enable auto-reconnect — server-TOKEN re-mint is the blocker).
+- **Needs (from Core):** ONLY **Phase 5** now — the `:seon.route/*` schema + seed the
+  CORRECTED route set (Interface #2 below: INCLUDE the `…/feed` GET routes), so my `db->routes`
+  can replace the static route vector in `web/router.cljs`. (Phase 1 + 2e `(slot :name)` both
+  landed & consumed; no cluster-reset pending on me.)
 - **Interface changes (Core must absorb):**
   1. **Handoff #4 still holds** — UI renders the warnings-block error-TILE; it just streams
      inside the morphed world view (no standalone patch). The `:seon/error` VALUE shape is
