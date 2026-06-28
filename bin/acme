@@ -102,6 +102,14 @@ case "${1:-}" in
       exit 0
     fi
     ;;
+  # NOTE: `bin/acme cluster reset [name]` needs NO intercept here — it
+  # `exec`s straight through to bin/seon's cluster_reset (below), which now
+  # bounces the cluster THIS supervisor invocation manages (its store IS
+  # $SEON_CLUSTER_DIR/store = data/clusters/acme). That path is RACE-SAFE
+  # (it wait_ready's the wire-server BEFORE starting the pod). Do NOT add a
+  # `down && up` intercept: after a store WIPE the wire-server's cold mint
+  # outlasts the pod's ~10s ping window, so `up`'s back-to-back start races
+  # and the fresh pod dies.
 esac
 
 exec "$SEON_ROOT/bin/seon" "$@"

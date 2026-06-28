@@ -812,11 +812,22 @@ cluster_reset() {
     store_dir="data/clusters/$name/store"
   fi
 
-  # Only the "default" cluster has registered processes today
-  # (wire-server's CLI args target $SEON_CLUSTER_DIR). Other names get
-  # their store wiped but no process bounce.
+  # Bounce processes when the requested cluster is the one THIS supervisor
+  # invocation MANAGES — i.e. its store IS $SEON_CLUSTER_DIR/store and its
+  # pod/wire-server live in $SEON_PROC_DIR. For seon's own usage that's
+  # name=default (unchanged: store_dir was just set to $SEON_CLUSTER_DIR/store
+  # above, so this is trivially true). For an ISOLATED second supervisor
+  # (bin/acme exports SEON_CLUSTER_DIR=data/clusters/acme +
+  # SEON_PROC_DIR=tmp/proc-acme + SEON_REQ_SOCK=tmp/acme-…), `bin/acme cluster
+  # reset acme` now resolves store_dir=data/clusters/acme/store ==
+  # $SEON_CLUSTER_DIR/store, so it bounces ACME's own pod+wire-server in acme's
+  # namespace via the race-safe restart below — NEVER the live default cluster.
+  # A name that is NOT this supervisor's cluster gets its store wiped but no
+  # bounce (we don't manage its processes). Keying off the literal "default"
+  # was the bug: under acme's env it left the wire-server holding a deleted
+  # store and printed "no processes registered for it".
   local bounce=0
-  [ "$name" = "default" ] && bounce=1
+  [ "$store_dir" = "$SEON_CLUSTER_DIR/store" ] && bounce=1
 
   echo "▶ cluster reset: $name"
 
