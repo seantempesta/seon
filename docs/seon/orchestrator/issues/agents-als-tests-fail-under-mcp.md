@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, agent, flow]
 severity: friction
 ---
@@ -43,3 +43,9 @@ offline). Awaiting live REPL run."
 - `test/seon/agents_test.cljs` (~line 155 self-flag)
 - `seon.agents` ALS `*ctx*` / `with-agent` machinery
 - Surfaced while verifying [[eval-memory-safety]] (full suite run).
+
+## Resolution (2026-06-28 audit)
+
+Closed RESOLVED/STALE per `docs/seon/orchestrator/issues-audit-2026-06-28.md`: the
+`seon.agents` namespace + its test were deleted (`248f2193`); ALS now lives in
+`seon.agent.*`, so the two failing `agents_test` cases no longer exist.

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: verified
+status: resolved
 severity: friction
 tags: [issue, agent]
 ---
@@ -85,3 +85,10 @@ bin/acme status  → ● pod pid=76119 … pod port: 7980 → http://127.0.0.1:7
 Note: the stale `7980` that `tmp/seon-port` held at the start of this fix was the
 bug's own damage (acme's pre-fix boot clobbered the default's 7890); it was
 restored to the default pod's genuine bound port without restarting the live pod.
+
+## Resolution (2026-06-28 audit)
+
+Closed RESOLVED per `docs/seon/orchestrator/issues-audit-2026-06-28.md`: `bin/seon`
+now defines + exports a per-cluster `SEON_PORT_FILE` (`bin/seon:118-119`, commit
+`e2ef2f96`) and `bin/acme` overrides it to `tmp/seon-port-acme`; no shared port
+file remains.

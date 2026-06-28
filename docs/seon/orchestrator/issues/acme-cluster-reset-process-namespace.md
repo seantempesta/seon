@@ -1,6 +1,6 @@
 ---
 type: issue
-status: verified
+status: resolved
 severity: friction
 tags: [issue, agent]
 ---
@@ -109,3 +109,9 @@ on its wire-server socket (the readiness check is only confirmation), but it is
 a latent isolation leak. Fix would be a `SEON_PORT_FILE` (or
 `$SEON_RUNTIME_ROOT`-relative path) so each cluster writes its own port file.
 Flagged for a follow-up task.
+
+## Resolution (2026-06-28 audit)
+
+Closed RESOLVED per `docs/seon/orchestrator/issues-audit-2026-06-28.md`: the
+`bin/seon` `cluster_reset` bounce gate now keys off `store_dir` (`bin/seon:837`,
+commit `c6d7c440`) instead of the literal name "default"; live-proven.

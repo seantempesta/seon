@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 milestone: M2
 tags: [issue, database, architecture]
@@ -23,6 +23,13 @@ tags: [issue, database, architecture]
 - All three call sites use the shared version
 - No private duplicates remain
 - Tests pass
+
+## Resolution (2026-06-28 audit)
+
+Closed RESOLVED per `docs/seon/orchestrator/issues-audit-2026-06-28.md` (frontmatter
+was wrongly `open`): `get-conn` was DELETED in M-1; `render.clj:55` and
+`routes.clj` now carry tombstones, so no duplicate `:seon.runtime` `get-conn`
+remains.
 
 ## Related
 

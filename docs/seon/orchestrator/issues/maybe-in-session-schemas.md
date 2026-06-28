@@ -7,11 +7,11 @@ tags: [issue, schema, jvm-track, paused]
 
 ## Problem
 
-`src/seon/orchestrator/session.clj` uses `[:maybe ...]` in 4 schema registrations. Project convention bans `[:maybe X]` — use `{:optional true} X` instead.
+`src/seon/session.clj` uses `[:maybe ...]` in 4 schema registrations. Project convention bans `[:maybe X]` — use `{:optional true} X` instead.
 
 ## File Refs
 
-- `src/seon/orchestrator/session.clj` — grep for `[:maybe`
+- `src/seon/session.clj` — grep for `[:maybe`
 
 ## Acceptance Criteria
 

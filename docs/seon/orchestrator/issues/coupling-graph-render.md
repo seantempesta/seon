@@ -1,6 +1,6 @@
 ---
 type: issue
-status: resolved
+status: open
 severity: friction
 milestone: M3
 tags: [issue, web, schema, architecture]
@@ -24,6 +24,13 @@ The ingest pipeline (which scans code) has a dependency on the rendering system.
 - `graph/ingest.clj` has no dependency on `seon.render`
 - Whatever render-related data ingest was extracting is either moved to render's responsibility or extracted without the dependency
 - Ingest tests pass without render loaded
+
+## Reopened (2026-06-28 audit)
+
+Per `docs/seon/orchestrator/issues-audit-2026-06-28.md`, the frontmatter was wrongly
+`resolved` — the dependency RETURNED: `src/seon/graph/ingest.clj:34` again requires
+`[seon.render :as render]`. JVM-track-paused and low priority, so deferred until the
+JVM track resumes, but the coupling is real again.
 
 ## Related
 

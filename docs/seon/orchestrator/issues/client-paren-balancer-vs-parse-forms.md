@@ -1,6 +1,6 @@
 ---
 type: issue
-status: verified
+status: resolved
 severity: cleanup
 tags: [issue, agent]
 ---
@@ -85,3 +85,10 @@ silently corrupt a captured form.
 
 - [[docs/prds/agent-fsm/research/eval-segmenter-2026-06-28]] (flagged the smell)
 - `seon.repl.internal/parse-forms` (the segmenter; now carries `:span`/`:error-kind` on `:read`)
+
+## Resolution (2026-06-28 audit)
+
+Closed RESOLVED per `docs/seon/orchestrator/issues-audit-2026-06-28.md`: `b5287550`
+replaced the hand-rolled paren/string scanner with rewrite-clj literal-aware
+extraction (`form-source-at`); the depth-counting `extract-form-from-string` is
+deleted.

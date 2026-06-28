@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, web, architecture]
 ---
@@ -19,6 +19,11 @@ tags: [issue, web, architecture]
 - File deleted
 - No remaining references to the namespace
 - No test failures after removal
+
+## Resolution (2026-06-28 audit)
+
+Closed RESOLVED per `docs/seon/orchestrator/issues-audit-2026-06-28.md`:
+`src/seon/render/example.clj` no longer exists.
 
 ## Related
 

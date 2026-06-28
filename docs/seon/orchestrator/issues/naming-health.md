@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, architecture]
 ---
@@ -20,6 +20,12 @@ tags: [issue, architecture]
 - System health and domain health have distinct, unambiguous names
 - No namespace collision between infrastructure and domain concepts
 - All references updated consistently
+
+## Resolution (2026-06-28 audit)
+
+Closed RESOLVED/STALE per `docs/seon/orchestrator/issues-audit-2026-06-28.md`:
+`src/seon/domains/health/` was deleted; only the JVM `health.clj` (system health
+checks) remains, so there is no longer a namespace collision.
 
 ## Related
 

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: resolved
 tags: [issue, agent, context]
 ---
 
@@ -98,3 +98,9 @@ tool — this check was simply the last one not using it.
 - `src/seon/warn.cljs` `identity-attrs` (~433-444) — source of the over-broad attr list.
 - `src/seon/db.cljs` `core-kinds` (~790-808) / `bootstrap-row-ids` (~775-788) — the `:core-seed` provenance helper reused by the fix.
 - Part (b) follow-up: the owning core nses for `:seon.ctx/config-id`, `:seon.handler/key` (mark `:map` schemas `{:seon.db/entity true}` if they are genuine kinds).
+
+## Resolution (2026-06-28 audit)
+
+Closed RESOLVED per `docs/seon/orchestrator/issues-audit-2026-06-28.md`:
+`warn.cljs:514` removes core-kinds from the check and `:dev-only?` warnings drop
+from the prompt, so the misfire on core identity attrs no longer nags agents.

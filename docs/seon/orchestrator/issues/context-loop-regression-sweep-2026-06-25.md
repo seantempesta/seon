@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: resolved
 tags: [issue, agent, flow]
 ---
 
@@ -191,3 +191,10 @@ pure window computation into a cycle-free helper ns both require, or accept
 F2 is the keystone — fixing entity-injection centrally resolves F1
 (your-entity), the in-flight live-tile bug, and makes F3's contract true.
 F4 disappears once F2 lands. F5 is independent cleanup.
+
+## Resolution (2026-06-28 audit)
+
+Closed RESOLVED/SUPERSEDED per `docs/seon/orchestrator/issues-audit-2026-06-28.md`:
+the `your-entity` section was removed (`37c47f27`); there is now a single
+byte-identical `render-context` producer and the effective-cap duplication is
+gone.

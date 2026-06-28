@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 tags: [issue, flow]
 ---
 # Nippy is a transitive dependency only
@@ -26,3 +26,8 @@ If the transitive path changes (version bump, dep swap), the harness TCP protoco
 ## Severity
 
 friction
+
+## Resolution (2026-06-28 audit)
+
+Closed RESOLVED per `docs/seon/orchestrator/issues-audit-2026-06-28.md`:
+`com.taoensso/nippy 3.4.2` is now an explicit dependency in `deps.edn:37`.

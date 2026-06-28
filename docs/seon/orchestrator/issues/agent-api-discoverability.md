@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: resolved
 tags: [issue, agent, flow]
 severity: friction
 ---
@@ -120,3 +120,9 @@ insufficient. The graceful-recovery behavior is the right default.
 - Registered `:seon.fn` entities carry `:seon.fn/arglists` + `:seon.fn/doc` (the
   derivation source).
 - Surfaced while validating [[context-derived-not-stored]] (now resolved).
+
+## Resolution (2026-06-28 audit)
+
+Closed RESOLVED/SUPERSEDED per `docs/seon/orchestrator/issues-audit-2026-06-28.md`:
+the `capabilities-section` shipped, then was rebuilt into the context-block model
+(`seon.agent.ctx/` blocks); no "What you can do" string survives.
