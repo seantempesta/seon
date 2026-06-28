@@ -298,21 +298,24 @@
       done)))
 
 ;;; ───────────────────────────────────────────────────────────────────────
-;;; Inventory — the discovery call lists the kinds we just stored.
+;;; Inventory — the discovery call lists every attribute NAMESPACE we just
+;;; stored data under (NOT entity "types" — datahike entities have none).
+;;; The store-inventory API still keys these rows :seon.db/kinds; we read
+;;; that real shape but treat each row as one attribute-namespace family.
 ;;; ───────────────────────────────────────────────────────────────────────
 
-(deftest inventory-lists-the-source-kinds
+(deftest inventory-lists-the-source-attribute-namespaces
   (async done
     (run-test
       (fn [conn]
         (-> (kb/build-kb-example!)
             (.then (pinned conn
                      (fn [_]
-                       (let [kinds (set (map :seon.db/kind (:seon.db/kinds (kb/inventory))))]
-                         (is (contains? kinds :my.kb.source)
-                             "the source kind shows once its data lands")
-                         (is (contains? kinds :my.kb.author)
-                             "the author kind too")
-                         (is (contains? kinds :my.kb.finding)
-                             "the component finding kind too")))))))
+                       (let [families (set (map :seon.db/kind (:seon.db/kinds (kb/inventory))))]
+                         (is (contains? families :my.kb.source)
+                             "the source attrs show once their data lands")
+                         (is (contains? families :my.kb.author)
+                             "the author attrs too")
+                         (is (contains? families :my.kb.finding)
+                             "the component finding attrs too")))))))
       done)))
