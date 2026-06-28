@@ -151,9 +151,13 @@
     (.existsSync (js/require "fs") (file-path->abs path))
     (catch :default _ false)))
 
-(defn- read-file-text
+(defn read-file-text
   "Live text of file `path` (resolved against cwd), or nil when
-   unreadable (missing file). Never throws."
+   unreadable (missing file). Never throws. The ONE fresh-file read every
+   file-section render routes through ([[file-block-ai]] / the my.skills
+   loaded-body block both re-read here each render)."
+  {:malli/schema [:=> [:catn [:seon.agent.ctx/file-path :seon.agent.ctx/file-path]]
+                  [:maybe :string]]}
   [path]
   (try
     (.readFileSync (js/require "fs") (file-path->abs path) "utf8")
@@ -1650,6 +1654,11 @@
                           :seon.agent.ctx/name :agents :seon.agent.ctx/priority 8})])
    [{:seon.agent.ctx/name :shared-instructions :seon.agent.ctx/priority 10
      :seon.render/ai 'my.kb.shared/instructions-block}
+    ;; The L0 skills catalog — one cheap name+description line per loadable
+    ;; skill (priority 12 ≤ stable-priority-max → cached prefix; a loaded
+    ;; body rides the volatile band so load/unload never busts this slot).
+    {:seon.agent.ctx/name :skills-catalog :seon.agent.ctx/priority 12
+     :seon.render/ai 'my.skills/catalog-block}
     {:seon.agent.ctx/name :namespaces   :seon.agent.ctx/priority 20
      :seon.render/ai 'seon.agent.ctx.namespaces/namespaces-block}
     {:seon.agent.ctx/name :live-tile    :seon.agent.ctx/priority 35

@@ -132,6 +132,11 @@
     ;; register! calls run before the boot install of :my.kb/* attrs.
     [my.kb]
     [my.kb.shared]
+    ;; Loadable skills — the `:my.skills/*` schema + the corpus scanner
+    ;; `boot-seed!` transacts (`my.skills/seed-skills-tx-data`) and the
+    ;; catalog/skill-block render fns `default-seed-blocks` wires by symbol.
+    ;; Required here so its register! calls run and the build includes it.
+    [my.skills]
     ;; Local-machine capability surface — A-9. Required so the agent
     ;; can call (seon.agent.fs/read-file ...) + (seon.platform/host) from
     ;; bootstrap-CLJS eval.
@@ -2100,7 +2105,18 @@
               (check! :core-routes
                       (await (db/transact!
                                {:seon.db/conn conn
-                                :seon.db/tx-data (route/core-routes-tx)})))))))
+                                :seon.db/tx-data (route/core-routes-tx)})))
+              ;; Skills corpus: one `:my.skills` row per SKILL.md under
+              ;; `SEON_SKILLS_DIR` (default `.claude/skills`, the same dir
+              ;; humans edit). Identity upsert on `:my.skills/name`, so an
+              ;; Nth boot re-scans idempotently. Only transact when the scan
+              ;; found files (an empty tx-data is a no-op to skip).
+              (let [skills-tx (my.skills/seed-skills-tx-data)]
+                (when (seq skills-tx)
+                  (check! :core-skills
+                          (await (db/transact!
+                                   {:seon.db/conn conn
+                                    :seon.db/tx-data skills-tx})))))))))
       {::seeded? true}
       (finally
         (set! db/*conn* prev-conn)))))
