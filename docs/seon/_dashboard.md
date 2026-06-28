@@ -7,20 +7,40 @@ status: active
 
 > Infrastructure for AI agents to write reliable software.
 
-## Active focus — agent runtime (2026-05-23)
+## Active focus — the CLJS pod (agent-fsm)
 
-PRD root: [[../prds/agent-runtime/README]].
+Start here: [[architecture/overview]] (how the live system works today) and the
+PRD set under [[../prds/agent-fsm/]].
 
-Seon runs two tracks. The **active** track is the CLJS pod (Node-hosted, port 7890), backed by the `wire-server` central datahike writer (file-backed datahike at `data/clusters/default/store`); the pod does NOT embed datahike — it forwards writes over a Unix socket to `wire-server`, and reads are local lazy db values. The **paused** track is the JVM main-app (`./bin/run`, nREPL 7888 / HTTP 8080, embedded in-process datahike LMDB, core.async flow) — paused but not deleted.
+Seon runs two tracks. The **active** track is the CLJS pod (Node-hosted, port
+7890), backed by the `wire-server` central datahike writer (file-backed datahike
+at `data/clusters/default/store`); the pod does NOT embed datahike — it forwards
+writes over a Unix socket to `wire-server`, and reads are local lazy db values.
+The mental model: the agent's **loop is a function of the DB** and its **context
+is a render of the DB**. The **paused** track is the JVM main-app (`./bin/run`,
+nREPL 7888 / HTTP 8080, embedded in-process datahike LMDB, core.async flow) —
+paused but not deleted, and the convergence target.
 
-- **What runs today:** the V0 CLJS pod (Node-hosted, in `src/seon/*.cljs`). Phase 1 core hardening shipped + Phase 2 test capture as data + Phase A HTTPS allowlist + symbol-lookup refactor (`seon.eval/lookup-value` + render fns renamed `*-render`). See `docs/seon/pod/` and [[../prds/agent-runtime/STATUS]].
-- **MVP track next:** v1 spec implementation — sessions/turns/ctx composition, run-turn!, six default section fns, eval-replay resume. Design: [[../prds/agent-runtime/v1]].
-- **Platform track next:** Phase 2.5 core primitives (D13 dynvar probe, `seon.id`, history flip, tx-meta auto-merge) in flight; Phase 3 WASM-Tauri containment alpha-blocking. Phases 8–10 (Tauri shell, LAN/Tailscale remote, mobile pod-in-webview) designed.
-- **Cross-platform delivery:** [[../prds/agent-runtime/platform]] Phases 8–10 lay out write-once-run-everywhere via Tauri 2 (macOS/Win/Linux/iOS/Android). Mobile path uses pod-in-webview (Apple's WKWebView JIT exception) to sidestep wasmtime's iOS JIT restriction.
-- **WASM containment:** Authoritative design at [[pod/wasm-spike-2026-05-20]]; pod-host workspace at `pod-host/wasm-tauri/`.
-- **Dev loop:** [[../cljs-dev-loop]] (V0 / pre-WASM). WASM dev loop is documented in the spike doc.
+- **What runs today:** the CLJS pod (in `src/seon/*.cljs`) — the agent FSM
+  (run/turn/loop with run-id fencing), block-rendered context, the Datastar SSE
+  inspector UI, schema-first `seon.db` over the wire, and a boot-time
+  program-graph index. Drive it from `http://localhost:7890/agents`.
+- **In flight (agent-fsm):** agent-correctness on the shared default pod —
+  presentation arc (block renderer, markdown/clojure tiles, root dashboard,
+  tokens-not-chars), config-manifest seam (loadouts/routes/skills), and
+  semantic recall behind `SEON_EMBED`. See [[../prds/agent-fsm/roadmap]] for
+  the single "we are here".
+- **Embeddings:** designed + proven against Vertex `gemini-embedding-2`, gated
+  by `SEON_EMBED` (on by default in `bin/seon`, graceful no-op without creds);
+  converging onto the live pipeline. Specs: [[../prds/embeddings/]].
+- **Cross-platform / WASM (later):** Tauri 2 shell + WASM containment remain the
+  designed delivery path; not the current build. Design: [[../prds/agent-runtime/research/wasm-spike-2026-05-20]].
 
-The component tables below describe the **JVM core** (Datahike + Integrant + flow topology). `[JVM track — paused]` That track is paused as the active feature track but not deleted — its files still live under `src/seon/*.clj`. The active development is the CLJS pod + Phase 3 WASM-Tauri work, not the JVM seat.
+The component tables below still describe the **JVM core** (Datahike + Integrant
++ flow topology) — `[JVM track — paused]`. Those `.clj` files live under
+`src/seon/`; the live `.cljs` surfaces are documented in the CLJS-pod component
+notes (web-inspector, agent-system, reply-segmenter, loadable-skills) and in
+[[architecture/overview]].
 
 ## How to Use This Vault
 
@@ -49,9 +69,9 @@ The component tables below describe the **JVM core** (Datahike + Integrant + flo
 | [[vision/m3-convention-uniformity|M3: Convention Uniformity]] | in-progress | 1: Claude Code |
 | [[vision/m4-discoverable-codebase|M4: Discoverable Codebase]] | partial | 1: Claude Code |
 | [[vision/m5-observable-system|M5: Observable System]] | partial | 1: Claude Code |
-| [[vision/m6-eval-pipeline|M6: The Eval Pipeline]] | not-started | 2: REPL Agents |
-| [[vision/m7-namespace-as-process|M7: Namespace as Living Process]] | not-started | 3: Autonomous |
-| [[vision/m8-autonomous-agents|M8: Autonomous Namespace Agents]] | not-started | 3: Autonomous |
+| [[vision/m6-eval-pipeline|M6: The Eval Pipeline]] | prototyped | 2: REPL Agents |
+| [[vision/m7-namespace-as-process|M7: Namespace as Living Process]] | prototyped | 3: Autonomous |
+| [[vision/m8-autonomous-agents|M8: Autonomous Namespace Agents]] | prototyped | 3: Autonomous |
 
 ## Components (What Exists)
 

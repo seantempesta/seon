@@ -79,7 +79,7 @@ These licenses (EPL and MIT) are permissive; where Seon ports their code, the up
 
 | Tool | Version | Why |
 |------|---------|-----|
-| **Java (JDK)** | **22+** | The wire-server (datahike writer) runs on the JVM; its Proximum vector index ships class-file 66.0 and uses the Foreign Memory API, both Java 22+ only. `bin/seon` auto-selects a 22+ JDK (macOS via `java_home`; Linux/WSL via `/usr/lib/jvm`, SDKMAN, or PATH) — or set `JAVA_HOME` yourself. |
+| **Java (JDK)** | **22+ (25 preferred)** | The wire-server (datahike writer) runs on the JVM; its Proximum vector index ships class-file 66.0 and uses the Foreign Memory API, both Java 22+ only — 22 is the hard floor. `bin/_java-home-resolver` *prefers* JDK 25 (newest that runs the fork + suite, ~7% faster, no behavior change) and falls back to any pinned JDK or to `java` on PATH with a warning. `bin/seon` keeps a `>=22` assert as the safety net; a 22-only machine still runs, just unpinned. Set `JAVA_HOME` to override. |
 | **Clojure CLI** | 1.12+ | Builds the CLJS pod and runs the wire-server. |
 | **Babashka** (`bb`) | 1.x | Dev hooks, MCP servers, and datahike's build tasks. |
 | **Node.js** + npm | 22+ (24 recommended) | The agent pod is a long-running Node process. |
@@ -89,8 +89,8 @@ These licenses (EPL and MIT) are permissive; where Seon ports their code, the up
 Optional: **Caddy** 2.x (HTTPS reverse proxy), and the JVM dev seat
 (`bin/run`, nREPL 7888 — for development/orchestration, not needed to run
 agents). Platform: **macOS, Linux, and Windows via WSL** — the stack is all
-cross-platform (JVM, Node, Clojure, Babashka) and `bin/seon` selects a 22+
-JDK on each. The `reference-code/*` git submodules are vendored dependency
+cross-platform (JVM, Node, Clojure, Babashka) and `bin/seon` selects a JDK
+(prefers 25, floor 22) on each. The `reference-code/*` git submodules are vendored dependency
 source for reading when stuck — not needed to run, so a plain `git clone` is
 fine.
 
@@ -102,10 +102,17 @@ Run the core, talk to an agent, watch it work:
 git clone https://github.com/seantempesta/seon && cd seon
 npm install
 bin/seon prep             # one-time: clones + Java-preps the datahike fork (:writer + :cljs)
-export DEEPSEEK_API_KEY=sk-...
+cp .env.example .env      # the config surface — edit it for keys/provider/ports
+export DEEPSEEK_API_KEY=sk-...   # (env vars override .env; either works)
 bin/seon start all        # cljs build → wire-server → agent pod, ready-gated
 open http://localhost:7890/agents
 ```
+
+`.env` (gitignored) is Seon's entire config surface — there is no config
+file, every knob is an env var. `bin/seon` sources `.env` at boot with shell
+env vars taking precedence. `.env.example` documents every setting
+(`SEON_AI_PROVIDER`, `SOUL.md` path, ports, the `SEON_EMBED` flag, …); edit
+`.env`, not `.env.example`.
 
 Mint an agent on that page and talk to it: the left pane is the
 conversation, the right pane is the agent's **live tile** — the thing
@@ -167,7 +174,7 @@ The milestone table above frames the long arc on the original JVM runtime. Since
 
 **Designed and proven against the real API, being wired in.**
 
-- **Semantic search over everything the agent knows.** The embeddings infrastructure — pod search client, JVM write/query sides, the wire path, the Proximum index, and a predictive per-turn retrieval that renders breadcrumb pointers into context — is built and merged, currently behind a single `SEON_EMBED` flag (off by default). The multimodal layer is verified directly against Vertex `gemini-embedding-2`: text, image, audio, video, and PDF land in **one unified vector space** (cross-modal retrieval proven; Matryoshka dimension-truncation exact to the bit), and the model is governed so inputs are **not used to train Google's models**. A **content-addressed cache** (SHA-256 of content, folded with model/dim/task) means duplicate content is never re-embedded and an index rebuild never re-pays the API. What remains is wiring the Vertex routing, the multimodal ingest, and the cache/archive into the live pipeline, plus relevance tuning — designed and empirically proven, not yet on by default. Specs: [`docs/prds/embeddings/`](docs/prds/embeddings/).
+- **Semantic search over everything the agent knows.** The embeddings infrastructure — pod search client, JVM write/query sides, the wire path, the Proximum index, and a predictive per-turn retrieval that renders breadcrumb pointers into context — is built and merged, gated by a single `SEON_EMBED` flag (on by default in `bin/seon`, but a graceful no-op without Vertex/`GEMINI_API_KEY` credentials). The multimodal layer is verified directly against Vertex `gemini-embedding-2`: text, image, audio, video, and PDF land in **one unified vector space** (cross-modal retrieval proven; Matryoshka dimension-truncation exact to the bit), and the model is governed so inputs are **not used to train Google's models**. A **content-addressed cache** (SHA-256 of content, folded with model/dim/task) means duplicate content is never re-embedded and an index rebuild never re-pays the API. What remains is wiring the Vertex routing, the multimodal ingest, and the cache/archive into the live pipeline, plus relevance tuning — designed and empirically proven, not yet wired end-to-end on the live pod. Specs: [`docs/prds/embeddings/`](docs/prds/embeddings/).
 
 The immediate focus is converging the two tracks and activating semantic search on the live pod. The broader [v1 agent REPL specification](docs/prds/agent-runtime/v1.md) — session-survival, observability, program-graph discovery against an LLM (DeepSeek today, others later) — remains the reference target, with status in [`docs/prds/agent-runtime/STATUS.md`](docs/prds/agent-runtime/STATUS.md).
 
