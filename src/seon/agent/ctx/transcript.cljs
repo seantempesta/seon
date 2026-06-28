@@ -53,32 +53,26 @@
       24000))
 
 ;; ------------------------------------------------------------
-;; Masthead — the positive-framing opener. Rendered every turn as the
-;; FIRST lines of the transcript. It teaches the live-and-current REPL by
-;; LEADING WITH WHAT TO DO (never a `don't write ;=>` prohibition — a
-;; negative example primes the very mimicry it forbids, standing owner
-;; rule). The ns slot is the only volatile byte; it rides the masthead so
-;; the agent sees its own session name.
+;; Masthead — the transcript's in-band opener, rendered every turn as the
+;; FIRST lines of the block. Block-specific cues ONLY (the surface label,
+;; the oldest-first ordering, append-below); the live-REPL-session framing
+;; lives ONCE in `seon.agent.ctx/system-text` (no re-teaching here). Never a
+;; `don't write ;=>` prohibition — a negative example primes the mimicry it
+;; forbids (standing owner rule). The ns slot rides the masthead so the
+;; agent sees its own session name.
 ;; ------------------------------------------------------------
 
 (defn masthead
-  "The transcript masthead for namespace label `ns-str` — the
-   positive-framing opener, rendered every turn. Single source: the agent
-   never sees a `;=>` shape it isn't told the RUNTIME writes, so there is
-   nothing in its own output to mimic. LEADS with what to do; reinforces
-   the REPL is LIVE and ALWAYS CURRENT (re-derived from the DB every turn,
-   never a stale replay)."
+  "The transcript's in-band opener for namespace label `ns-str`, rendered
+   every turn as the block's first lines. Block-specific cues only — the
+   surface label and the flat, time-ordered event log (messages + evals,
+   oldest-first, append-below); the live-REPL-session framing lives once in
+   [[seon.agent.ctx/system-text]]."
   {:malli/schema [:=> [:catn [::ns-str :string]] :string]}
   [ns-str]
   (str "; seon · " ns-str " · live REPL\n"
-       "; This is your live REPL — a Clojure session backed by the database.\n"
-       "; The history below is real and ALWAYS current: it re-derives from the\n"
-       "; DB every turn, so it is never stale. It is a flat, time-ordered log of\n"
-       "; events — your messages and your evals, oldest-first. You write Clojure\n"
-       "; forms and ; comments. After each form the runtime evaluates it and\n"
-       "; shows the value on the next line as `;=> …` — that is how your results\n"
-       "; arrive, on the turn after you write the form. So just write the form;\n"
-       "; read its `;=>` next turn. Append below."))
+       "; The flat, time-ordered log below is this REPL's history — your\n"
+       "; messages and evals interleaved, oldest-first. Append below."))
 
 (def resume-marker-line
   "The session-resume boundary: rendered ONCE per resume, between the
@@ -150,9 +144,9 @@
    (outbound) runtime-structure line. The `from`/`to` labels resolve by
    ref kind (`user`/`assistant`/`agent-<id>`). The message's transactable
    handle (`:seon.agent.message/id`) rides the line so the agent can pull
-   it. Content bounded by [[seon.agent.ctx/message-render-cap]]. `new?` marks a
-   message that arrived mid-LLM-call (after the last event of the prior
-   turn) so the agent knows it is acting on it for the first time."
+   it. Content bounded by [[seon.agent.ctx/message-render-cap]]. `new?` marks an
+   UNANSWERED inbound — one that arrived after the agent's last action (a
+   fresh wake or a mid-call arrival) so the agent re-orients to it."
   {:malli/schema [:=> [:cat :map] :string]}
   [{node :seon.render/node}]
   (let [{::keys [at from-label to-labels content id new? outbound?]} node
@@ -162,7 +156,7 @@
                (str "◀ from " from-label))]
     (str ";;; " who " @ " (clock at)
          (when id (str " [" id "]"))
-         (when new? " (NEW — arrived while you were working)")
+         (when new? " (NEW — unanswered; respond to this)")
          " — \"" body "\"")))
 
 (defn eval->renderable
@@ -282,8 +276,8 @@
    live `now` (below the cache breakpoint — busting here is free).
 
    Pressure steering escalates toward the per-loop cap — positive-framing:
-   it tells the agent what to DO (finish, park, message), never just that
-   something is wrong."
+   it tells the agent what to DO (finish, or message the result), never
+   just that something is wrong."
   {:malli/schema [:=> [:catn [::input :map]] :string]}
   [{:seon.agent/keys [id] db :seon.db/db}]
   (let [db      (or db @db/*conn*)
@@ -312,8 +306,8 @@
         (cond
           (>= loop-k (max 1 (- cap 2)))
           (str "; loop " loop-k "/" cap " — you are near the per-loop cap. "
-               "Wrap up: (complete \"…\") to finish, or (wait \"note\") to "
-               "park until the next message.\n")
+               "Wrap up: (complete \"…\") with what you have, or message the "
+               "result to your human.\n")
           (>= loop-k (quot cap 2))
           (str "; loop " loop-k "/" cap " — past halfway through this loop. "
                "If you have what you need, (complete \"…\") or message the result.\n")
@@ -327,8 +321,8 @@
   "The agent's full flat event stream — messages + evals UNIONed, sorted
    by FIXED stored `:at` (byte-stable), with `; in <ns>` markers threaded
    into evals where the ns changes. Ties (same `:at`) sort messages before
-   evals for stable output. `last-event-at` (the newest event's `:at`)
-   lets the caller flag any message that arrived AFTER it as NEW."
+   evals for stable output. The caller flags any inbound newer than the
+   agent's last own action as NEW (unanswered)."
   [db own-id my-eid]
   (let [msgs (or (message-events db my-eid own-id) [])
         evs  (eval-events db own-id)
@@ -350,8 +344,9 @@
    at each session boundary (events from a previous process render with
    `::prior?` true, so their evals carry no `result/<id>` handle).
 
-   A message that landed AFTER the newest event (mid-LLM-call) is flagged
-   NEW so the agent knows it is acting on it for the first time. The
+   An inbound that arrived after the agent's last action (a fresh wake or
+   a mid-call arrival) is flagged NEW — UNANSWERED — so the agent
+   re-orients to it. The
    inbound gate is [[inbound-msg?]] — the SAME conditions as the wake, so a
    `:core` nudge never shows as a fake inbound.
 
@@ -374,16 +369,24 @@
         ;; same code path produces the same String.
         render*  (or render-fn #(render/render :seon.render/ai input %))
         events   (ordered-events db own-id my-eid)
-        last-at  (some-> (last events) ::at)
-        ;; Flag any INBOUND message that arrived after the newest event as
-        ;; NEW (it landed mid-LLM-call, the agent acts on it for the first
-        ;; time this turn).
+        ;; The agent's LAST ACTION = newest :at over its OWN events (evals +
+        ;; outbound messages). Events are already :at-ascending, so the last
+        ;; own-event IS the newest; nil when the agent has not acted yet.
+        last-action-at (some->> events
+                                (filter (fn [ev] (or (= :eval (::kind ev))
+                                                     (::outbound? ev))))
+                                last
+                                ::at)
+        ;; Flag any INBOUND newer than the last action as NEW (UNANSWERED) —
+        ;; a fresh wake or a mid-call arrival the agent re-orients to. With no
+        ;; prior action (nil) every inbound is unanswered. Once the agent acts
+        ;; on it the action's :at moves past it and the flag vanishes.
         events*  (mapv (fn [ev]
                          (if (and (= :message (::kind ev))
                                   (not (::outbound? ev))
-                                  (some? last-at)
-                                  (> (.getTime ^js (::at ev))
-                                     (.getTime ^js last-at)))
+                                  (or (nil? last-action-at)
+                                      (> (.getTime ^js (::at ev))
+                                         (.getTime ^js last-action-at))))
                            (assoc ev ::new? true)
                            ev))
                        events)

@@ -182,12 +182,11 @@
         (third-party-ns? nm))))
 
 (def ^:private namespaces-header
-  (str "; Real loaded code. Shown in FULL: YOUR OWN namespace (your live\n"
-       "; workspace — the most important), the rest of your my.* world, and\n"
-       "; your set-up tools (todo). The rest of the framework is NOT dumped\n"
-       "; here on purpose — it stays indexed and one search away, so you are\n"
-       "; not buried in code you don't need. Full namespaces are ordered by\n"
-       "; recency (most-recently-modified last)."))
+  ;; Block-specific cue ONLY — the FULL-vs-queryable policy (what renders in
+  ;; full, what stays indexed/searchable) lives once in
+  ;; `seon.agent.ctx/system-text` (§"THE NAMESPACES BELOW"); don't re-teach it.
+  (str "; The loaded namespaces below, ordered by recency"
+       " (most-recently-modified last)."))
 
 (defn- cur-ns-workspace-stub
   "The never-omit block for the agent's CURRENT ns when it has no members
