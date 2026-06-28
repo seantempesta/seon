@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# bin/test-parser — FAST parse-forms test loop via babashka (sub-second).
+#
+# seon.repl.internal is pure CLJC (rewrite-clj + clojure.string only), so its
+# test ns runs on babashka's built-in rewrite-clj with NO shadow build and NO
+# pod — the whole point is a tight iterate loop while working the segmenter /
+# read-error classifier. The authoritative gate is still `bin/test-cljs` (it
+# exercises the CLJS pod path); this is the inner loop, not a replacement.
+#
+# Usage: bin/test-parser
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+exec bb --classpath src:test -e '
+(require (quote seon.repl.internal-test))
+(require (quote [clojure.test :as t]))
+(let [{:keys [fail error] :as s} (t/run-tests (quote seon.repl.internal-test))]
+  (println)
+  (println (format "parse-forms: %d tests, %d assertions, %d failures, %d errors"
+                   (:test s) (:pass s) (:fail s) (:error s)))
+  (System/exit (if (pos? (+ fail error)) 1 0)))'
