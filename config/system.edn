@@ -6,11 +6,18 @@
 ;; registered schemas (a loadout's :seon.config/blocks → :seon.agent.ctx/block)
 ;; are those maps verbatim. Add a new concern = add ONE key here + a resolver in
 ;; seon.config (the "add more things to it" contract).
-{;; ── the curated POD skill corpus ──
- ;; ONE physical .claude/skills dir, two consumers: these stay on disk for
- ;; Claude Code; they are just dropped from the seon-agent catalog.
- :seon.config/skills
- {:seon.config/exclude [:browser-automation :clojure-testing]}
+{;; ── TWO SYSTEMS, DIFFERENT JOBS (owner 2026-06-28: "I want both active") ──
+ ;; • The DIRECTORY is the CORPUS: the env-dir scan (`SEON_SKILLS_DIR`, default
+ ;;   `seon-skills/`) loads ALL skills it finds. Dev/Claude-Code skills
+ ;;   (browser-automation, clojure-testing) live PHYSICALLY separate in
+ ;;   `.claude/skills/` — they are not in the agent corpus dir, so nothing here
+ ;;   needs to exclude them (the directory split already does).
+ ;; • This CONFIG is the OVERRIDE: ABSENT → directory loads all (byte-identical
+ ;;   no-config boot). PRESENT → it curates the env-dir scan PER CLUSTER
+ ;;   (`SEON_CONFIG` path, `SEON_PROFILE` #profile, `#env` interpolation). A
+ ;;   `:seon.config/skills` `include`/`exclude` here is for per-cluster corpus
+ ;;   curation (e.g. a test cluster trimming the corpus) — NOT for dropping dev
+ ;;   skills. We ship none by default: the `seon-skills/` dir IS the agent corpus.
 
  ;; ── per-role context loadouts (merged over default-seed-blocks at create) ──
  ;; `:repl`'s body is always-on for EVERY agent — seeded as a :skill/repl block
