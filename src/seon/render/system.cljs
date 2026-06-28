@@ -349,19 +349,28 @@
   [:div {:class "px-3 py-2 border-t border-base-800"}
    [:div {:class "text-xs font-semibold text-text-200 mb-1"} "recent activity"]
    (if (seq events)
-     [:div {:class "flex flex-col"}
+     [:div {:class "flex flex-col divide-y divide-base-800/40 text-[11px] font-mono"}
       (doall
-        (for [[i {::keys [at kind text href label]}] (map-indexed vector events)]
-          [:a {:key   (str i)
-               :href  href
-               :class (str "flex items-baseline gap-2 px-1 py-0.5 rounded "
-                           "hover:bg-base-800/60 text-[11px] font-mono")}
-           [:span {:class "text-text-600 shrink-0"} (short-time at)]
-           [:span {:class (if (= :eval kind) "text-amber-500/80" "text-text-500")
+        (for [[i {::keys [at kind text href label]}] (map-indexed vector events)
+              :let [eval? (= :eval kind)]]
+          [:div {:key   (str i)
+                 :class (str "relative flex items-baseline gap-2.5 px-1 py-1 "
+                             "hover:bg-base-800/50")}
+           ;; time — muted, fixed-width so the columns line up
+           [:span {:class "shrink-0 tabular-nums w-12 text-text-600"} (short-time at)]
+           ;; kind glyph — amber λ for evals, neutral ✉ for messages: sort by eye
+           [:span {:class (str "shrink-0 w-3 text-center "
+                               (if eval? "text-amber-500" "text-text-300"))
                    :title (name kind)}
-            (if (= :eval kind) "λ" "✉")]
-           [:span {:class "text-text-300 shrink-0"} label]
-           [:span {:class "text-text-500 truncate"} text]]))]
+            (if eval? "λ" "✉")]
+           ;; agent — a quiet fixed column you can scan down
+           [:span {:class "shrink-0 w-24 truncate text-text-400"} label]
+           ;; content — dim monospace for eval SOURCE, bright prose for MESSAGES
+           [:span {:class (str "min-w-0 truncate "
+                               (if eval? "text-text-500" "text-text-100"))}
+            text]
+           ;; whole row clickable without underlining the text
+           [:a {:href href :aria-label (str "open " label) :class "absolute inset-0"}]]))]
      [:div {:class "text-[11px] font-mono text-text-600 italic"}
       "nothing has happened yet"])])
 
