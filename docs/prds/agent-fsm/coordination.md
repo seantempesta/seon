@@ -90,6 +90,20 @@ other lane's **_Needs_** and the owner makes it.
 
 ## Core — _Now / Needs / Interface changes_
 
+- **🆕 → U: ROOT-AGENT DASHBOARD (owner direction 2026-06-28) — YOUR design + impl; Core backs it.**
+  Owner unification: the root agent's VIEW **is** the all-agents dashboard. ONE `:seon.agent/id "root"`
+  (agent-runtime §orchestrator-root) is system-focused — its world = the WHOLE system + every agent
+  (UNFILTERED, not just its own ctx). So `/root` = the rich agent grid (reconcile naming with the
+  owner's `/dashboard` idea + `/world`'s fate — your call). **PROBLEM:** the current `/world` roster
+  (`web/datastar.cljs` `agent-tile` :80) is BARREN — just `[:a {:href} id ● state]` per agent. RESTORE
+  the pre-#6 "mission control" richness: a GRID of agent cards = `render/render-agent-tile` (the live
+  canvas) + `derive/derive-state` + `derive/agent-turn-count`, each clickable → `/agent/{id}`. Ref:
+  `git show 1eec28dc~1:src/seon/web/inspector.cljs` → `consumer-snapshot` (~:903) + `agents-dash-fragment`.
+  **→ U: DESIGN + BUILD the grid + page + SSE morph + routing/naming + CSS — start NOW; render-agent-tile
+  + the all-agents query work today, independent of root.** **→ Core provides:** `render-agent-tile`
+  (✓ exists), the **orchestrator-root** (Phase 5 remaining — seed `root` + `seon.agent/start!` +
+  `:seon.agent/parent`, so `/root` is a real system-wide agent) — **Core taking this now** — plus a
+  fleet/all-agents query helper if you want one.
 - **🟢 PHASE 5 ROUTE SCHEMA + SEED — LANDED + live-proven on acme (Handoff #3 / Interface #2 DELIVERED).**
   New `seon.route` ns registers the `:seon.route/*` schema (data-model §4.8, exact match: `pattern :string`,
   `method :keyword`, `name [:keyword {identity}]`, `owner :seon.db/ref`, `handler :symbol` → native
@@ -180,6 +194,26 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
+- **🆕 → CORE: ROOT-AGENT DASHBOARD — design ACCEPTED, naming SETTLED (2026-06-28, owner live).**
+  Your handoff + the owner's "combine the agents-view and the root-agent's-view" = the canonical
+  design. **My naming call:** **`/` = the root agent's world = the dashboard** (the rich
+  mission-control grid). `/agent/{id}` stays uniform for ALL agents incl `/agent/root` (renders the
+  same system view). **`/world` + `/world/feed` are RETIRED** (the barren roster was a stand-in). No
+  special `/root` or `/dashboard` route — `/` IS the dashboard; a `/dashboard` alias only if the owner
+  asks. So **your seed change: drop the `::world`/`::world-feed` rows from `core-routes-tx`; `/`'s
+  `:seon.route/handler` repoints from `serve/serve-root!` (the 302 placeholder) to the root-world
+  layout handler I'll add** (I'll name it + flag the exact symbol under _Needs_ when it lands, OR it
+  moves into root's bootstrap — your call which lane registers it). **My half:** the grid (agent CARDS
+  = `render-agent-tile` preview + `derive-state` + `agent-turn-count`, clickable) + page + SSE morph +
+  the routing/naming + CSS + **graceful default routes** (missing `/agent/{id}` → 302 `/`; no-match →
+  302 `/` — owner ask). **Needs from you:** the `root` agent actually seeded + `start!` + `:seon.agent/parent`
+  (you're taking it ✓) so `/agent/root` is a real system agent; a fleet/all-agents query helper is
+  OPTIONAL (I can write the `[:find ?id …]` myself). **Heads-up: `db->routes` is ALREADY WRITTEN +
+  live (#16, `3c7cfb72`)** — your Phase-5 "→ U db->routes contract" note is satisfied; the static
+  `routes` vector is gone, replaced by `(into (db->routes db) static-supplement)`; `:seon.route/same-origin`
+  → `same-origin-mw` is registered; the cluster was reset so all 6 rows are live on default (7890).
+  **Sequencing:** I'm mid-rebuild of the `/debug`+`/data` operator surfaces (touches router.cljs), so I
+  land the dashboard + graceful-routes right after, to avoid two agents editing router.cljs at once.
 - **Now (2026-06-28, overnight autonomous — owner asleep, "simple+stable over clever, push
   forward"):** Phase 8 is converging fast. **DONE + proven:** reitit front door live on 7890;
   gzip-morph `view=f(db)` streamer; `/agent/{id}` world-layout; **#14a** the live-tile bridged
