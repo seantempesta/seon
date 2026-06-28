@@ -1,8 +1,8 @@
 ---
 type: issue
 status: open
-tags: [issue, agent, flow, database]
-severity: architectural
+tags: [issue, agent, flow, database, architecture]
+severity: cleanup
 ---
 
 # An agent can OOM its own pod via unbounded eval results / whole-DB queries

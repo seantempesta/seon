@@ -1,8 +1,8 @@
 ---
 type: issue
 status: open
-severity: architectural
-tags: [issue, agent, schema]
+severity: cleanup
+tags: [issue, agent, schema, architecture]
 ---
 
 # parse-forms entries: missing :malli/schema + bare keys

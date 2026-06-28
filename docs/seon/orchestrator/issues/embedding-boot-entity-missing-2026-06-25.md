@@ -1,6 +1,7 @@
 ---
 type: issue
-status: active
+status: open
+severity: friction
 tags: [issue, database, agent]
 ---
 

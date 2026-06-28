@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: blocking
+severity: blocker
 milestone: M3
 tags: [issue, schema, jvm-track, paused]
 ---

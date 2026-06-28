@@ -1,6 +1,7 @@
 ---
 type: issue
 status: open
+severity: cleanup
 tags: [issue, schema, jvm-track, paused]
 ---
 # [:maybe] Convention Violation in session.clj

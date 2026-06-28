@@ -1,6 +1,7 @@
 ---
 type: issue
 status: open
+severity: friction
 tags: [issue, agent, ai]
 ---
 # LLM-call retry covers only transport errors, not 429/503/timeout

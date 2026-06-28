@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: open
 tags: [issue, agent, cljs]
 severity: friction
 ---

@@ -1,6 +1,7 @@
 ---
 type: issue
 status: open
+severity: cleanup
 tags: [issue, schema, jvm-track, paused]
 ---
 # render/code.clj uses invented :seon.foo/* keywords as live values
