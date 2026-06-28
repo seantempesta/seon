@@ -142,8 +142,8 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
-;; 5. NEVER-CRASH — a nonexistent agent (the pull throws "Nothing found")
-;; must still render a valid #world, never propagate.
+;; 5. NEVER-CRASH — a nonexistent agent renders a valid #world (the eid
+;; resolves via a non-throwing query → no tiles), never a propagated throw.
 ;; ============================================================
 
 (deftest world-layout-missing-agent-never-crashes

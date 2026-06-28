@@ -42,9 +42,14 @@
     [seon.render :as render]))
 
 ;; ============================================================
-;; The agent's html-rendering block names — priority-sorted.
-;; A pure read of the db value; guarded (a missing agent's pull
-;; throws "Nothing found for entity id"). Only blocks carrying a
+;; The agent's html-rendering block names — priority-sorted. A pure read of
+;; the db value. The agent's eid is resolved via a NON-THROWING query first
+;; (an absent agent yields no eid → no tiles), so a /agent/{id} feed left
+;; bound to a since-deleted agent (a stale tab after a cluster reset) renders
+;; an empty world WITHOUT datahike's entid-strict logging ":error … Nothing
+;; found for entity id" on every tx — a strict lookup-ref pull logs that
+;; (via log/raise) BEFORE any caller catch, so guarding the throw is not
+;; enough; we must not issue the strict lookup at all. Only blocks carrying a
 ;; :seon.render/html become tiles; ai-only blocks are prompt-only.
 ;; ============================================================
 
@@ -53,14 +58,20 @@
    an html render, sorted by `:seon.agent.ctx/priority` with a stable
    by-name tiebreak. Empty when the agent is absent or owns no html block."
   [db agent-id]
-  (->> (try
-         (:seon.agent/ctx
-          (db/pull db
-                   '[{:seon.agent/ctx [:seon.agent.ctx/name
-                                       :seon.agent.ctx/priority
-                                       :seon.render/html]}]
-                   [:seon.agent/id agent-id]))
-         (catch :default _ nil))
+  (->> (when-let [eid (ffirst
+                        (db/query {:seon.db/db    db
+                                   :seon.db/query '[:find ?a
+                                                    :in $ ?id
+                                                    :where [?a :seon.agent/id ?id]]
+                                   :seon.db/args  [agent-id]}))]
+         (try
+           (:seon.agent/ctx
+            (db/pull db
+                     '[{:seon.agent/ctx [:seon.agent.ctx/name
+                                         :seon.agent.ctx/priority
+                                         :seon.render/html]}]
+                     eid))
+           (catch :default _ nil)))
        (filter #(contains? % :seon.render/html))
        (sort-by (juxt #(or (:seon.agent.ctx/priority %) 0)
                       #(str (:seon.agent.ctx/name %))))
