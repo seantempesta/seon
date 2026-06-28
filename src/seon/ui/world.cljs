@@ -148,6 +148,10 @@
        [:header {:id    "world-header"
                  :class "flex items-center justify-between border-b border-base-800 pb-2"}
         [:div {:class "flex items-center gap-2 min-w-0"}
+         ;; Back-nav (P1) — a plain link to the roster so a per-agent world is
+         ;; not a dead-end. Static link, safe inside the morph.
+         [:a {:href "/world" :class "text-text-400 text-xs font-mono shrink-0"}
+          "← all agents"]
          [:span {:class "text-text-500 text-2xs uppercase tracking-wider"} "agent"]
          [:span {:class "text-signal text-sm font-semibold font-mono truncate"} agent-id]]
         (status-chip db agent-id)]

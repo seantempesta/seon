@@ -79,13 +79,17 @@
 ;; ============================================================
 
 (defn- agent-tile
-  "One roster tile for `id` — its id + DERIVED FSM state. `derive-state` is
-   guarded so a single bad agent can never abort the whole-view render."
+  "One roster tile for `id` — a LINK to that agent's world (`/agent/<id>`),
+   showing its id + DERIVED FSM state. `derive-state` is guarded so a single
+   bad agent can never abort the whole-view render. The `<a>` makes the roster
+   navigable (P1) instead of a set of dead `<li>`s; `text-signal` marks it as a
+   link in the Phosphor palette."
   [db id]
   (let [state (try (derive/derive-state db id) (catch :default _ :unknown))]
     [:li {:id (str "world-agent-" id) :class "world-tile"}
-     [:span {:class "world-tile-id"} id]
-     [:span {:class "world-tile-state"} (str " ● " (name state))]]))
+     [:a {:href (str "/agent/" id) :class "world-tile-id text-signal"}
+      id
+      [:span {:class "world-tile-state"} (str " ● " (name state))]]]))
 
 (defn world-view
   "view = f(db): the live agent roster as `[:main#world …tiles…]`.
@@ -216,10 +220,13 @@
    The shim itself: load datastar.js, open the long-lived feed via
    `data-init`, and present an empty `<main id=\"world\">` for the feed's
    first morph to fill. `title-suffix` is the brand-name suffix (\"world\",
-   \"agent <id>\"); `feed-url` the data-init SSE URL. Raw string (not
-   hiccup) so the data-init single quotes stay literal and the doctype
+   \"agent <id>\"); `feed-url` the data-init SSE URL; `extra-body` is a raw
+   HTML string spliced in as a SIBLING of `<main id=\"world\">` (a human
+   input — chat / new-agent — that must live OUTSIDE the morphed `#world` so
+   the feed's whole-element morph never clobbers its focus/value). Raw string
+   (not hiccup) so the data-init single quotes stay literal and the doctype
    leads."
-  [title-suffix body-class feed-url]
+  [title-suffix body-class feed-url extra-body]
   (let [b (brand/info)]
     (str "<!doctype html>\n"
          "<html lang=\"en\" data-theme=\"" (::brand/theme b) "\"><head><meta charset=\"utf-8\">\n"
@@ -239,12 +246,101 @@
          ;; datastar.js RC.7.
          "<main id=\"world\" data-init=\"@get('" feed-url
          "', {retryMaxCount: Infinity, openWhenHidden: false})\">loading…</main>\n"
+         extra-body
          "</body></html>")))
 
-(defn- world-page-html
-  "The /world roster shim page (brand-aware head — see [[shim-html]])."
+;; ============================================================
+;; Human input bars — the surfaces the world page needs so a human can
+;; OPERATE (not just observe). Each lives OUTSIDE `<main id=\"world\">` (a
+;; SIBLING in <body>) so the feed's whole-`#world` morph never clobbers the
+;; input's focus/value. They reuse the already-routed, same-origin-gated
+;; POST endpoints (`/chat`, `/agents/new`) — no Core change. A fixed bottom
+;; bar + an inline-style spacer reserves scroll room so the last tile is never
+;; hidden behind the bar. Only output.css-present utilities are used (the
+;; spacer height is an inline style, not a Tailwind class).
+;; ============================================================
+
+(defn- chat-form-html
+  "P0 — the human→agent chat input for `/agent/{id}`, as a raw HTML string.
+
+   A static `<form>` (outside the morph) that submits a DATASTAR FORM-MODE
+   POST to the existing `/chat?agent=<id>`: `data-on:submit` (datastar
+   auto-prevents the native submit on a `<form>`) runs
+   `@post(url,{contentType:'form'})`, which reads THIS form's named fields and
+   posts them `application/x-www-form-urlencoded` — exactly the `text=` shape
+   the `/chat` handler parses (the same wire contract the legacy chat bar
+   used). `data-bind=\"text\"` keeps the input value in a datastar signal so a
+   trailing `$text=''` clears it after send; `required` blocks a blank send
+   client-side. The agent's reply needs NO handling here: it transacts and the
+   broadcast feed re-renders the `:transcript` tile. A 204 reply closes the
+   datastar stream cleanly (no morph from this POST). `id` is pre-validated by
+   `safe-id?`, so it is injection-safe inside the single-quoted `@post('…')`."
+  [id]
+  (html/->string
+    (list
+      ;; Spacer — reserves scroll room equal to the fixed bar's height so the
+      ;; bar never hides the agent's last tile. Inline style (no Tailwind
+      ;; height class is in the safelisted/built vocabulary).
+      [:div {:style "height:3.25rem"}]
+      [:form {:id                     "world-chat"
+              (keyword "data-on:submit") (str "@post('/chat?agent=" id
+                                              "', {contentType:'form'}); $text=''")
+              :class "fixed bottom-0 left-0 right-0 z-10 flex items-center gap-2 border-t border-base-800 bg-base-900 px-3 py-2"}
+       [:input {:type         "text"
+                :name         "text"
+                :data-bind    "text"
+                :required     true
+                :autocomplete "off"
+                :autofocus    true
+                :placeholder  (str "message agent " id " …")
+                :class "flex-1 bg-base-950 border border-base-800 rounded px-2 py-1 text-text-100 text-xs font-mono"}]
+       [:button {:type  "submit"
+                 :class "bg-base-800 hover:bg-base-700 text-signal border border-base-700 px-3 py-1 rounded text-xs font-mono"}
+        "send"]])))
+
+(defn- new-agent-bar-html
+  "P1c — the `/world` roster's new-agent affordance, as a raw HTML string.
+
+   A fixed bottom bar (outside the morph) whose button INLINE-FETCH POSTs the
+   existing `/agents/new` (optional form-urlencoded `purpose=`) then navigates
+   to the new `/agent/<id>` on the 200 id-body. Inline JS (not datastar
+   `@post`) because the response is the new id as plain text that we must READ
+   and navigate to — copied from the inspector mission-control button. The
+   endpoint is same-origin-gated and serializes creates (409 while one is in
+   flight); errors land in the button's own text, never swallowed."
   []
-  (shim-html "world" "bg-base-900 text-text-200 font-mono p-3" "/world/feed"))
+  (html/->string
+    (list
+      [:div {:style "height:3.25rem"}]
+      [:div {:id    "world-new-agent"
+             :class "fixed bottom-0 left-0 right-0 z-10 flex items-center gap-2 border-t border-base-800 bg-base-900 px-3 py-2"}
+       [:input {:id           "world-new-agent-purpose"
+                :type         "text"
+                :autocomplete "off"
+                :placeholder  "purpose (optional)…"
+                :class "flex-1 bg-base-950 border border-base-800 rounded px-2 py-1 text-text-100 text-xs font-mono"}]
+       [:button {:id      "world-new-agent-btn"
+                 :type    "button"
+                 :class   "bg-base-800 hover:bg-base-700 text-signal border border-base-700 px-3 py-1 rounded text-xs font-mono"
+                 :onclick (str "var b=this;b.disabled=true;b.textContent='booting…';"
+                               "var p=document.getElementById('world-new-agent-purpose');"
+                               "var body=p&&p.value?'purpose='+encodeURIComponent(p.value):'';"
+                               "fetch('/agents/new',{method:'POST',"
+                               "headers:{'Content-Type':'application/x-www-form-urlencoded'},"
+                               "body:body})"
+                               ".then(function(r){if(r.ok){r.text().then(function(id){"
+                               "window.location='/agent/'+id.trim();});}"
+                               "else{r.text().then(function(t){b.disabled=false;"
+                               "b.textContent='\\u2717 '+(t||('HTTP '+r.status));});}})"
+                               ".catch(function(e){b.disabled=false;b.textContent='\\u2717 '+e;});")}
+        "+ new agent"]])))
+
+(defn- world-page-html
+  "The /world roster shim page (brand-aware head — see [[shim-html]]). Carries
+   the new-agent bar (P1c) as its OUTSIDE-the-morph human affordance."
+  []
+  (shim-html "world" "bg-base-900 text-text-200 font-mono p-3" "/world/feed"
+             (new-agent-bar-html)))
 
 (defn- serve-world-page! [^js res]
   (.writeHead res 200 #js {"Content-Type"  "text/html; charset=utf-8"
@@ -299,7 +395,8 @@
   [id]
   (shim-html (str "agent " id)
              "bg-base-950 text-text-200 font-mono p-3"
-             (str "/agent/" id "/feed")))
+             (str "/agent/" id "/feed")
+             (chat-form-html id)))
 
 (defn serve-agent-page!
   "Serve the per-agent world shim page for agent `id`. Public — the router
