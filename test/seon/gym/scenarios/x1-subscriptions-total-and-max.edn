@@ -1,16 +1,28 @@
-;; X1 (gym-v2 §3 Group I) — new-schema cross-session discovery + aggregate.
-;; Agent A stores 5 subscriptions under a NEW :my.subscription/* schema B
-;; was never told about. Fresh agent B (same store, cold) must DISCOVER the
-;; kind (read the store first), SUM the monthly cost (=101), and name the
-;; single most expensive (Adobe @45). A's output IS B's fixture — the
-;; accumulation thesis. Mechanical legs anchor on op-FAMILIES + attr-name
-;; stems (non-fragile §6); the computed total/max lives ONLY on the judge
-;; axis with shape-level reference facts.
+;; X1 (gym-v2 §3 Group I) — discover-then-aggregate over a SEEDED dataset.
+;; A cold agent (never told the :my.subscription/* kind) is asked how much it
+;; spends monthly AND which single subscription costs the most. It must
+;; DISCOVER the kind (read the store first), SUM the monthly cost (=101), and
+;; name the single most expensive (Adobe @45).
+;;
+;; SINGLE agent over a SEEDED store (deliberately NOT the old A-logs→B-reads
+;; shape): pre-seeded fixtures PLUS an agent re-logging the same subscriptions
+;; mint DUPLICATE entities, doubling the total (101→202) and silently
+;; corrupting the judge. A controlled memory instrument needs ONE unambiguous
+;; dataset, so the rows are seeded and a single cold agent analyses them — the
+;; same fix x-category-argmax uses. Discovery is preserved: the agent is never
+;; told the kind; it must read the store (the inventory block surfaces the
+;; attr, a real read still finds the rows). The seeded rows ARE the prior
+;; state a previous session left behind.
+;;
+;; Mechanical legs anchor on op-FAMILIES + attr-name stems (non-fragile §6) +
+;; an EXACT row count (a regression that re-introduces a re-log shows as 10,
+;; RED, not a silently doubled judge total); the computed total/max lives ONLY
+;; on the judge axis with shape-level reference facts.
 ;;
 ;; PAID — costs real money. Refused without {:seon.gym/allow-paid? true} +
 ;; the active provider's API key.
 {:seon.gym.scenario/id     :x1-subscriptions-total-and-max
- :seon.gym.scenario/doc    "A stores 5 subscriptions (new :my.subscription/* schema). Fresh B, never told the kind, must discover it, SUM the monthly cost (=101), and name the most expensive (Adobe @45)."
+ :seon.gym.scenario/doc    "A cold agent, never told the :my.subscription/* kind, is asked how much it spends on subscriptions monthly AND which single one costs the most. It must discover the kind, SUM the monthly cost (=101), and name the most expensive (Adobe @45) — over a seeded, unambiguous dataset (no re-log double-count)."
  :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
  :seon.gym.scenario/competency :db-memory
@@ -19,6 +31,7 @@
  [[:my.subscription/name [:string {:seon.db/identity true}]]
   [:my.subscription/monthly-usd :int]
   [:my.subscription/category :keyword]]
+ ;; Netflix 18 + Spotify 12 + Adobe 45 + iCloud 9 + NYT 17 = 101; max = Adobe @45.
  :seon.gym.scenario/fixtures
  [{:my.subscription/name "Netflix"  :my.subscription/monthly-usd 18 :my.subscription/category :entertainment}
   {:my.subscription/name "Spotify"  :my.subscription/monthly-usd 12 :my.subscription/category :entertainment}
@@ -26,49 +39,47 @@
   {:my.subscription/name "iCloud+"  :my.subscription/monthly-usd 9  :my.subscription/category :storage}
   {:my.subscription/name "NYT"      :my.subscription/monthly-usd 17 :my.subscription/category :news}]
  :seon.gym.scenario/turns
- [{:seon.gym.turn/agent   :a
-   :seon.gym.turn/message "Track my recurring subscriptions: Netflix $18, Spotify $12, Adobe Creative Cloud $45, iCloud+ $9, and the New York Times $17 — all monthly."}
-  {:seon.gym.turn/agent   :b
-   :seon.gym.turn/message "Roughly how much am I spending on subscriptions every month, and which single one costs me the most?"}]
+ [{:seon.gym.turn/message "Roughly how much am I spending on subscriptions every month, and which single one costs me the most?"}]
  :seon.gym.scenario/predicates
  [{:seon.gym.predicate/id     :subs-seeded-visible
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :consults-findings
    :seon.gym.predicate/query  [:find ?e :where [?e :my.subscription/monthly-usd _]]
-   :seon.gym.predicate/expect [:count>= 5]}
-  ;; DISCOVERY: B's first message-driven eval is a seon.db read op — the
-  ;; run model scopes "message-driven" on :seon.agent.run/cause (the
-  ;; bootstrap run carries no cause), so turn 0 is excluded and this
-  ;; measures B's first real move.
-  {:seon.gym.predicate/id      :b-discovery-reads-store-first
+   ;; EXACTLY 5 — a regression that re-introduces the double-count (an agent
+   ;; re-logging the seeded subscriptions) shows up here as 10, RED, not as a
+   ;; silently doubled judge total.
+   :seon.gym.predicate/expect [:count 5]}
+  ;; DISCOVERY: the agent's first message-driven eval is a seon.db read op —
+  ;; the run model scopes "message-driven" on :seon.agent.run/cause (the
+  ;; bootstrap run carries no cause), so turn 0 is excluded and this measures
+  ;; the agent's first real move.
+  {:seon.gym.predicate/id      :discovery-reads-store-first
    :seon.gym.predicate/kind    :first-eval-matches
-   :seon.gym.predicate/agent   :b
+   :seon.gym.predicate/agent   :a
    :seon.gym.predicate/axis    :consults-findings
    ;; Match the TAUGHT alias form `db/query` (agent home-nses alias
    ;; seon.db :as db — the namespaces manual teaches db/query, db/entity,
    ;; db/transact!) AND the fully-qualified `seon.db/query`. `\bdb/` hits
    ;; both: in `seon.db/query` the `.` is a word boundary before `db`.
-   ;; The former `seon\.db/…` anchor RED-flagged a correct discovery eval
-   ;; that used the alias the context itself prescribes.
    :seon.gym.predicate/pattern "\\bdb/(query|pull|entity|store-inventory)"}
-  {:seon.gym.predicate/id     :b-replied-to-the-user
+  {:seon.gym.predicate/id     :replied-to-the-user
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :replies-honestly
-   :seon.gym.predicate/args   [:seon.gym.agent/b]
+   :seon.gym.predicate/args   [:seon.gym.agent/a]
    :seon.gym.predicate/query  [:find ?m
-                               :in $ ?bid
+                               :in $ ?aid
                                :where
-                               [?ag :seon.agent/id ?bid]
+                               [?ag :seon.agent/id ?aid]
                                [?m :seon.agent.message/from ?ag]
                                [?m :seon.agent.message/hops ?h]
                                [(pos? ?h)]]
    :seon.gym.predicate/expect :non-empty}
-  {:seon.gym.predicate/id     :both-agents-end-idle
+  {:seon.gym.predicate/id     :agent-ends-idle
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :terminates
    ;; idle is DERIVED, never a stored :seon.agent/state datom: an agent is
    ;; idle iff not terminated and owns NO open run (the run's close retracts
-   ;; :seon.agent/run → derived :idle). Both agents idle = 2 rows.
+   ;; :seon.agent/run → derived :idle). The single agent idle = 1.
    :seon.gym.predicate/query  [:find ?a
                                :where
                                [?a :seon.agent/id _]
@@ -76,11 +87,11 @@
                                (not-join [?a]
                                  [?r :seon.agent.run/agent ?a]
                                  [?r :seon.agent.run/status :open])]
-   :seon.gym.predicate/expect [:count 2]}
+   :seon.gym.predicate/expect [:count 1]}
   ;; --- judged answer correctness, SEPARATE from the behavior legs ---
   {:seon.gym.predicate/id        :judge-total-and-max
    :seon.gym.predicate/kind      :llm-judge
-   :seon.gym.predicate/agent     :b
+   :seon.gym.predicate/agent     :a
    :seon.gym.predicate/axis      :replies-honestly
    :seon.gym.predicate/rubric    "PASS only if the reply states a total monthly subscription cost of 101 USD (allow 100-102 for rounding) AND identifies the single most expensive as Adobe (Creative Cloud) at 45. FAIL if there is no total, the total is wrong, or the most-expensive is not Adobe."
    :seon.gym.predicate/reference "The stored rows: Netflix 18, Spotify 12, Adobe CC 45, iCloud+ 9, NYT 17. Sum = 101. Max = Adobe @ 45. These are knowable ONLY by reading the stored subscription rows — a generic guess cannot land the exact total + the exact max."}]}

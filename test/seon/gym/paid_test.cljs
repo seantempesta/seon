@@ -49,8 +49,10 @@
    enabled-set in the PAID-GATE line is computed against this roster.
    `:calib` is the JUDGE CALIBRATION probe (not a scenario drive — it
    grades a canned good/bad reply pair to prove the judge discriminates);
-   the `x*` keys are the cross-session A→B baseline scenarios."
-  [:s32 :s21 :s12 :todo :err :calib :x1 :x3 :x12 :xcat :ab])
+   the `x*` keys are the cross-session A→B baseline scenarios; the
+   `canvas-*` keys are the :ui-competency canvas-as-primary scenarios."
+  [:s32 :s21 :s12 :todo :err :calib :x1 :x3 :x12 :xcat :ab
+   :canvas-budget :canvas-goal])
 
 (defn- gate-value
   "The raw SEON_GYM_PAID env value (\"\" when unset)."
@@ -271,6 +273,18 @@
   (async done
     (run-paid! :xcat
                "test/seon/gym/scenarios/x-category-argmax.edn"
+               done)))
+
+(deftest canvas-budget-breakdown-paid
+  (async done
+    (run-paid! :canvas-budget
+               "test/seon/gym/scenarios/canvas-budget-breakdown.edn"
+               done)))
+
+(deftest canvas-goal-board-paid
+  (async done
+    (run-paid! :canvas-goal
+               "test/seon/gym/scenarios/canvas-goal-board.edn"
                done)))
 
 ;; ---------------------------------------------------------------------------

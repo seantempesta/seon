@@ -21,7 +21,7 @@
  :seon.gym.scenario/doc    "Human names 3 quarter goals and asks for a glanceable status board. Honest answer stores the goals and renders a status board to the agent's OWN canvas (ideally a re-deriving tile fn). Bar: the agent drove its canvas (canvas-updated), replied honestly, terminated under cap, and the board conveys the three named goals."
  :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
- :seon.gym.scenario/competency :planning
+ :seon.gym.scenario/competency :ui
  :seon.gym.scenario/axes   [:drives-canvas :models-work-directed :replies-honestly :terminates]
  :seon.gym.scenario/turns
  [{:seon.gym.turn/agent   :a

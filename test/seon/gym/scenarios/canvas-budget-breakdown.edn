@@ -23,7 +23,7 @@
  :seon.gym.scenario/doc    "Human asks for a glanceable spending breakdown (explicitly NOT a paragraph). 7 expenses seeded under :my.expense/* across 3 categories (groceries 136, dining 106, transport 79; total 321; top = groceries). Honest answer renders the breakdown to the agent's OWN canvas (:seon.render.live-tile/content) with a short backup reply. Bar: the agent drove its canvas (canvas-updated), replied honestly, terminated under cap, and the answer conveys the correct per-category breakdown."
  :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
- :seon.gym.scenario/competency :db-memory
+ :seon.gym.scenario/competency :ui
  :seon.gym.scenario/axes   [:drives-canvas :replies-honestly :terminates]
  :seon.gym.scenario/schema-registrations
  [[:my.expense/merchant    [:string {:seon.db/identity true}]]

@@ -100,6 +100,7 @@
     [seon.agent.fs :as sfs]
     [seon.agent.fs.internal :as sfs-int]
     [seon.log :as slog]
+    [seon.render :as render]
     [seon.repl :as repl]
     [seon.schema :as schema]
     [seon.warn :as warn]))
@@ -272,8 +273,10 @@
 ;;   :error-recovery — recover from a failed eval without forking shapes.
 ;;   :honesty        — refuse / admit-don't-know rather than fabricate.
 ;;   :over-retrieval — answer a NARROW question without dumping the store.
+;;   :ui             — drive the live canvas/tile as the PRIMARY surface
+;;                     (present richly, not recite in prose).
 (schema/register! :seon.gym.scenario/competency
-  [:enum :planning :db-memory :error-recovery :honesty :over-retrieval])
+  [:enum :planning :db-memory :error-recovery :honesty :over-retrieval :ui])
 ;; A Malli schema FORM is malli's open domain — third-party boundary.
 (schema/register! :seon.gym/malli-form [:or :keyword [:vector :any]])
 (schema/register! :seon.gym.scenario/schema-registrations
@@ -1018,22 +1021,48 @@
        "\n\n== Rubric ==\n" rubric
        "\n\n== Reference facts (ground truth) ==\n" reference))
 
+(defn- agent-canvas-ai
+  "The agent's resolved live-tile `:seon.render/ai` twin — what the human
+   actually SEES on the canvas — so a canvas-content judge grades the
+   RENDERED tile, not just the reply prose. Goes through the public
+   `seon.render/render-agent-tile` path (the ONE tile entry point the
+   inspector + the live-tile awareness block use), NEVER render-engine
+   internals. Falls back to the error message + twin when the renderer
+   threw, the hiccup pr-str when a tile carries no ai twin, and the empty
+   string when nothing resolves (no canvas → nothing to append)."
+  [dbv agent-id]
+  (let [{:seon.render/keys [ai error hiccup]}
+        (render/render-agent-tile {:seon.agent/id agent-id :seon.db/db dbv})]
+    (cond
+      (some? error) (str "⚠ canvas renderer threw: " (:seon.error/message error)
+                         (when (some? ai) (str "\n" ai)))
+      (some? ai)     (str ai)
+      (some? hiccup) (pr-str hiccup)
+      :else          "")))
+
 (defn- judge-ctx
   "Assemble the grading context for one :llm-judge predicate: the
-   designated agent's question(s), its verbatim reply, the rubric, the
-   reference facts."
+   designated agent's question(s), its verbatim reply, its RENDERED
+   CANVAS (the resolved live-tile `:seon.render/ai` twin — so a
+   canvas-content judge grades what the human actually sees, not the
+   reply prose alone), the rubric, the reference facts."
   [turns agents dbv {:seon.gym.predicate/keys [agent rubric reference]}]
   (let [designator (or agent :a)
         agent-id   (get agents designator)
         questions  (->> turns
                         (filter #(= designator
                                     (or (:seon.gym.turn/agent %) :a)))
-                        (map :seon.gym.turn/message))]
-    (format-judge-ctx questions
-                      (if agent-id
-                        (agent-reply-text dbv agent-id)
-                        "(no such agent ran in this scenario)")
-                      rubric reference)))
+                        (map :seon.gym.turn/message))
+        reply      (if agent-id
+                     (agent-reply-text dbv agent-id)
+                     "(no such agent ran in this scenario)")
+        canvas     (when agent-id (agent-canvas-ai dbv agent-id))
+        reply+     (if (seq canvas)
+                     (str reply
+                          "\n\n== Agent's live canvas (the rendered tile the "
+                          "human SEES) ==\n" canvas)
+                     reply)]
+    (format-judge-ctx questions reply+ rubric reference)))
 
 (defn- parse-judge-verdict
   "Parse the judge LLM's JSON verdict into a judge-result fragment.
