@@ -230,7 +230,15 @@
          "<script type=\"module\" src=\"/js/datastar.js\"></script>\n"
          "</head>\n"
          "<body class=\"" body-class "\">\n"
-         "<main id=\"world\" data-init=\"@get('" feed-url "')\">loading…</main>\n"
+         ;; `retryMaxCount: Infinity` keeps the long-lived stream reconnecting
+         ;; forever (survives a pod/wire-server restart, a network blip, a
+         ;; laptop sleep→wake) with datastar's backoff; `openWhenHidden: false`
+         ;; drops the stream while the tab is hidden and REOPENS on return —
+         ;; cheap, and reopen = a fresh full `view=f(db)` repaint (no since-t
+         ;; replay needed in this model). Both verified-supported in our shipped
+         ;; datastar.js RC.7.
+         "<main id=\"world\" data-init=\"@get('" feed-url
+         "', {retryMaxCount: Infinity, openWhenHidden: false})\">loading…</main>\n"
          "</body></html>")))
 
 (defn- world-page-html
