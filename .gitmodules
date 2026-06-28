@@ -242,3 +242,12 @@
 [submodule "reference-code/bd3lms"]
 	path = reference-code/bd3lms
 	url = https://github.com/kuleshov-group/bd3lms.git
+[submodule "reference-code/flash"]
+	path = reference-code/flash
+	url = https://github.com/runpod/flash.git
+[submodule "reference-code/runpod-python"]
+	path = reference-code/runpod-python
+	url = https://github.com/runpod/runpod-python.git
+[submodule "reference-code/flash-examples"]
+	path = reference-code/flash-examples
+	url = https://github.com/runpod/flash-examples.git
