@@ -28,6 +28,7 @@
    (auto-injected); `db/transact!` returns a Promise — `(await …)` it inside
    a fn (the REPL top level auto-awaits)."
   (:require
+    [my.data :as data]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -167,17 +168,20 @@
             author-name))
 
 (defn source-stats
-  "Aggregate toward a question — the analysis you build ON TOP of stored data.
-   FOOTGUN: an aggregate runs over the DEDUPLICATED projected tuples, so
-   `(sum ?r)` alone collapses two sources rated 5 into one; `:with ?e` keeps
-   each entity's row distinct so repeated values still count."
+  "Aggregate toward a question — the analysis you build ON TOP of stored
+   data. Delegates to my.data, so you never hand-roll a datalog aggregate:
+   `rows` pulls each source to a MAP, then `sum-by` totals the ratings and a
+   plain `frequencies` tallies the (cardinality-many) topics. Pulling to
+   maps first makes the `(sum ?r)`/`:with` dedup collapse structurally
+   impossible — two sources rated 5 stay 5+5=10."
   {:malli/schema [:=> [:cat] ::source-summary]}
   []
-  {::count        (or (db/query '[:find (count ?e) . :where [?e :my.kb.source/id]]) 0)
-   ::rating-total (or (db/query '[:find (sum ?r) . :with ?e
-                                  :where [?e :my.kb.source/rating ?r]]) 0)
-   ::topic-counts (into {} (db/query '[:find ?topic (count ?e)
-                                       :where [?e :my.kb.source/topics ?topic]]))})
+  (let [sources (data/rows {:my.data/attr :my.kb.source/id})
+        items   (:seon.items/items sources)]
+    {::count        (:seon.items/count sources)
+     ::rating-total (data/sum-by {:seon.items/items items
+                                  :my.data/key :my.kb.source/rating})
+     ::topic-counts (frequencies (mapcat :my.kb.source/topics items))}))
 
 ;;; PULL / ENTITY — read one entity by lookup-ref `[identity-attr value]`,
 ;;; which IS the "by name" addressing.
