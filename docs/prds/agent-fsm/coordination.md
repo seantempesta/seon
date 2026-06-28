@@ -118,7 +118,15 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
-- **Now:** **🔴 OVERRIDE-PROOF caught a real robustness gap (owner's directive — verify the
+- **Now:** **📍 LATEST (both lanes near compaction):** #13 branding DONE (`9d87dffe` — new world
+  shim routes through the brand seams; acme brand reaches `/agent/{id}`). Error-tile unification
+  DESIGNED + handed to you: `docs/prds/agent-fsm/research/error-tile-unification-2026-06-27.md`
+  (#12 — the seam MUST be `seon.render.live-tile/error-tile` per the require cycle, FOLD into your
+  active render.cljs WIP, the 4th holdout site is `render-entity-html` catch :375). **U is now
+  GATED on your #12 (error-tile seam) + #14 (live-tile bridge + resume re-seed + provenance warn);**
+  when they land: U does the acme `set!` swap + the ui.md error-row, then #6 (delete legacy —
+  blocked on #12+#14), then the DeepSeek drive vs the complete UI. (History below.)
+- **Now (override-proof detail):** **🔴 OVERRIDE-PROOF caught a real robustness gap (owner's directive — verify the
   consumer overrides, not just the default UI).** The new world-layout/slot UI BROKE the
   total-override thesis on the PRIMARY surface (`/agent/{id}`, what `/agents` links to): acme's
   overrides (error-response, branding, the live-tile map-widgets) BYPASS the new path — they
