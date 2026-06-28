@@ -4,21 +4,26 @@
 
    ## What a world is
 
-   One agent's page: a focal **canvas** (the agent↔human communication
-   block) above a `:seon.agent.ctx/priority`-ordered scroll of the agent's
-   remaining **tiles**. Every tile is one of the agent's OWN
-   `:seon.agent/ctx` blocks that carries a `:seon.render/html` render,
-   placed by the `seon.render/slot` primitive — `(slot ctx name)` looks the
-   block up by `:seon.agent.ctx/name` in the agent's own ctx, renders its
-   html through the guarded engine, and wraps it as
-   `[:div#tile-<name> {:data-slot \"<name>\"} …]`. Blocks with only an ai
-   render (prompt-only) contribute no tile.
+   One agent's page: a focal **canvas** — the agent's LIVE TILE, the one
+   HTML surface it dynamically rewrites — above a
+   `:seon.agent.ctx/priority`-ordered scroll of the agent's **tiles**.
+   Every tile is one of the agent's OWN `:seon.agent/ctx` blocks that
+   carries a `:seon.render/html` render, placed by the `seon.render/slot`
+   primitive — `(slot ctx name)` looks the block up by
+   `:seon.agent.ctx/name` in the agent's own ctx, renders its html through
+   the guarded engine, and wraps it as `[:div#tile-<name> {:data-slot
+   \"<name>\"} …]`. Blocks with only an ai render (prompt-only) contribute
+   no tile.
 
-   ## Canvas selection is data, not a flag
+   ## Canvas is the live tile
 
-   The canvas is the focal comms block — the first of `:canvas` / `:transcript`
-   the agent actually owns. No stored discriminator: a third party that names
-   its comms block `:canvas` gets it; the seon seed names it `:transcript`.
+   The canvas is the agent's live tile — `seon.render/render-agent-tile`
+   resolves `:seon.render.live-tile/content` (or the `welcome` default)
+   against the SAME db value, so a consumer's tile override is the page
+   hero. It never throws: a broken tile is a calm placeholder, a missing
+   agent is nil hiccup → no canvas. Every `:seon.agent/ctx` html block —
+   `:transcript` included — is a supporting tile; there is no second
+   ctx-block \"canvas\" concept fighting the live tile for the hero.
 
    ## Pure + never-crash
 
@@ -118,21 +123,27 @@
 (defn world-layout
   "view = f(db, agent-id): the agent's OWN world as `[:main#world …]`.
 
-   Places the agent's html-rendering `:seon.agent/ctx` blocks as tiles via
-   `seon.render/slot`: the focal comms block (`:canvas` else `:transcript`)
-   as a prominent canvas region, then a `:seon.agent.ctx/priority`-ordered
-   scroll of the rest. Pure of external state (reads only the supplied db
-   value); NEVER throws — per-tile failures are guarded by the slot
-   primitive, a whole-layout failure degrades to a visible `#world-error`."
+   The focal `#world-canvas` is the agent's live tile —
+   `(seon.render/render-agent-tile {…})`'s `:seon.render/hiccup`, resolved
+   against the SAME supplied db value (passed EXPLICITLY, never defaulted)
+   so the layout stays a pure `f(db, agent-id)`. Below it, every
+   html-rendering `:seon.agent/ctx` block (`:seon.agent.ctx/priority`-
+   ordered, `:transcript` included) is a supporting tile via
+   `seon.render/slot`. Pure of external state (reads only the supplied db
+   value); NEVER throws — the live tile and each slot self-guard, a
+   whole-layout failure degrades to a visible `#world-error`. A missing
+   agent (nil live-tile hiccup + no tiles) renders the header +
+   `#world-empty`."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
                              [:seon.agent/id :string]]
                   :any]}
   [db agent-id]
   (try
-    (let [ctx    {:seon.db/db db :seon.agent/id agent-id}
-          names  (agent-html-block-names db agent-id)
-          canvas (some (set names) [:canvas :transcript])
-          tiles  (vec (remove #(= % canvas) names))]
+    (let [ctx        {:seon.db/db db :seon.agent/id agent-id}
+          tile-names (agent-html-block-names db agent-id)
+          live-tile  (:seon.render/hiccup
+                       (render/render-agent-tile {:seon.agent/id agent-id
+                                                  :seon.db/db    db}))]
       [:main {:id "world" :class "flex flex-col gap-3 w-full"}
        [:header {:id    "world-header"
                  :class "flex items-center justify-between border-b border-base-800 pb-2"}
@@ -140,14 +151,14 @@
          [:span {:class "text-text-500 text-2xs uppercase tracking-wider"} "agent"]
          [:span {:class "text-signal text-sm font-semibold font-mono truncate"} agent-id]]
         (status-chip db agent-id)]
-       (when canvas
+       (when (some? live-tile)
          [:section {:id    "world-canvas"
                     :class "border border-base-800 rounded-md bg-base-900 p-3 overflow-auto"}
-          (render/slot ctx canvas)])
+          live-tile])
        [:div {:id "world-tiles" :class "flex flex-col gap-3"}
-        (when (seq tiles)
-          (for [n tiles] (tile-card ctx n)))]
-       (when (and (nil? canvas) (empty? tiles))
+        (when (seq tile-names)
+          (for [n tile-names] (tile-card ctx n)))]
+       (when (and (nil? live-tile) (empty? tile-names))
          [:div {:id    "world-empty"
                 :class "text-text-500 text-xs font-mono"}
           (str "agent " agent-id " has no html tiles yet")])])
