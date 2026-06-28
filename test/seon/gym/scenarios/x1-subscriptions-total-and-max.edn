@@ -13,6 +13,7 @@
  :seon.gym.scenario/doc    "A stores 5 subscriptions (new :my.subscription/* schema). Fresh B, never told the kind, must discover it, SUM the monthly cost (=101), and name the most expensive (Adobe @45)."
  :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
+ :seon.gym.scenario/competency :db-memory
  :seon.gym.scenario/axes   [:consults-findings :replies-honestly :terminates]
  :seon.gym.scenario/schema-registrations
  [[:my.subscription/name [:string {:seon.db/identity true}]]

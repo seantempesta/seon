@@ -12,6 +12,7 @@
  :seon.gym.scenario/doc    "A logs 5 expenses (new :my.expense/* schema; 3 are :dining summing to 106). Fresh B, cold, must discover the kind, filter to dining, SUM (=106), and reply — reusing A's attrs, forking nothing."
  :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
+ :seon.gym.scenario/competency :db-memory
  :seon.gym.scenario/axes   [:consults-findings :reuses-schemas
                             :replies-honestly :terminates]
  :seon.gym.scenario/schema-registrations

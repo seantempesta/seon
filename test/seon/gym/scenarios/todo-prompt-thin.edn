@@ -9,6 +9,7 @@
 ;; The driver refuses :todo scenarios — flip :status to :active once the
 ;; teaching lands and the predicates are sharpened against a live run.
 [{:seon.gym.scenario/id     :writes-tests-for-own-fns
+  :seon.gym.scenario/competency :planning
   :seon.gym.scenario/doc    "TODO: after defining a fn for the user's task, the agent writes + runs a deftest for it without being asked. Predicate sketch: a :seon.test/sym row exists in the agent's ns AND the test passed. Teaching is currently the thinnest section — expect fail until it lands."
   :seon.gym.scenario/tier   :paid
   :seon.gym.scenario/status :todo
@@ -23,6 +24,7 @@
     :seon.gym.predicate/expect :non-empty}]}
 
  {:seon.gym.scenario/id     :reuses-stored-functions
+  :seon.gym.scenario/competency :db-memory
   :seon.gym.scenario/doc    "TODO: a fixture seeds a prior agent's :seon.fn (e.g. meters->miles) and the question needs exactly it. Pass = the agent CALLS the stored fn instead of re-defining a parallel one. Never yet observed live — encode the bar before teaching to it."
   :seon.gym.scenario/tier   :paid
   :seon.gym.scenario/status :todo
@@ -37,6 +39,7 @@
     :seon.gym.predicate/expect :non-empty}]}
 
  {:seon.gym.scenario/id     :stores-findings-unprompted
+  :seon.gym.scenario/competency :db-memory
   :seon.gym.scenario/doc    "TODO: a codebase question WITHOUT 'store what you find' phrasing. Pass = a my.kb row with provenance lands anyway (store-proactively is the default, not a request). §2 gap — storing currently happens only when asked."
   :seon.gym.scenario/tier   :paid
   :seon.gym.scenario/status :todo

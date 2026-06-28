@@ -41,6 +41,7 @@
  :seon.gym.scenario/doc    "Datoms→code resume: agent authors my.workout (schemas + fn redefined 3x + deftest + data row) and an open todo; pod restarts on the same store; replay rebuilds the corpus (one current :seon.fn row per sym, latest source), the fn runs its latest body, the data row and todo query back, and the prompt carries the reconstituted my.workout namespace tag (context-v4 — the catalogs died). Requires driver S-06 (mid-scenario pod restart)."
  :seon.gym.scenario/tier   :stub
  :seon.gym.scenario/status :todo
+ :seon.gym.scenario/competency :planning
  :seon.gym.scenario/llm    :scripted-replay
  :seon.gym.scenario/axes   [:reuses-functions :stores-proactively]
  :seon.gym.scenario/turns

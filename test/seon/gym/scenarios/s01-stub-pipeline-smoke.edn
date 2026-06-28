@@ -15,6 +15,7 @@
  :seon.gym.scenario/doc    "Pipeline smoke: a user 'ping' lands as a fully-formed message (from user, hops 0, non-blank), opens a run, the run's turn closes :done, and the agent parks :idle. Catalog S-01."
  :seon.gym.scenario/tier   :stub
  :seon.gym.scenario/status :active
+ :seon.gym.scenario/competency :planning
  :seon.gym.scenario/llm    :scripted-replay
  :seon.gym.scenario/axes   [:sees-question :terminates]
  :seon.gym.scenario/turns

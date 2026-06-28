@@ -11,6 +11,7 @@
  :seon.gym.scenario/doc    "An agent following the taught my.kb convention must produce a my.kb.<domain> row with FULL provenance (domain claim + the shared :my.kb/source-path|source-line|confidence attrs), in the multi-segment namespace, and confirm to the user only after the store. Pipeline regression (was the run-7 :kb.finding shape)."
  :seon.gym.scenario/tier   :stub
  :seon.gym.scenario/status :active
+ :seon.gym.scenario/competency :db-memory
  :seon.gym.scenario/axes   [:stores-proactively :reuses-schemas
                             :replies-honestly :terminates]
  :seon.gym.scenario/turns

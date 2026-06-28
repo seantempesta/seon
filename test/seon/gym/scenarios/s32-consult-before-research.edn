@@ -17,6 +17,7 @@
  :seon.gym.scenario/doc    "A stored finding answers the question (paraphrased). Pass = no re-derivation: the first eval either READS THE STORE (any seon.db query/pull/entity/store-inventory) or acts WITHOUT a repo search (post-#26 the finding renders in the prompt, so answering directly is optimal); the same axis separately requires the seeded claim to have rendered, and AT MOST ONE repo-search eval may happen run-wide. Judge grades the reply against the seeded envelope facts."
  :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
+ :seon.gym.scenario/competency :db-memory
  :seon.gym.scenario/axes   [:consults-findings :searches-first
                             :replies-honestly :terminates]
  ;; V4 KIND DECISION (post-refactor sweep, 2026-06-11): the consult

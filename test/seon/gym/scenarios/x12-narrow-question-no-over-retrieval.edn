@@ -11,6 +11,7 @@
  :seon.gym.scenario/doc    "Store holds contacts + a reading list. Fresh B, asked only for the dentist's name, must query the contact kind and NOT pull the unrelated book kind. Precision negative: off-kind query count must be 0."
  :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
+ :seon.gym.scenario/competency :over-retrieval
  :seon.gym.scenario/axes   [:consults-findings :replies-honestly :terminates]
  :seon.gym.scenario/schema-registrations
  [[:my.contact/role :keyword]

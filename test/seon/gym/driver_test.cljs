@@ -297,6 +297,7 @@
   (async done
     (let [scenario
           {:seon.gym.scenario/id     :gymtest-attr-fork-any-namespace
+           :seon.gym.scenario/competency :db-memory
            :seon.gym.scenario/doc    "Inline stub: the scripted agent forks the seeded workout shape into a DIFFERENT namespace + unit; the generic :domain-attrs no-fork predicate must fail the scorecard."
            :seon.gym.scenario/tier   :stub
            :seon.gym.scenario/status :active
@@ -357,6 +358,7 @@
 
 (defn- prompt-blob-scenario []
   {:seon.gym.scenario/id     :gymtest-prompt-blob-predicates
+   :seon.gym.scenario/competency :honesty
    :seon.gym.scenario/doc    "Inline stub (gym-upgrade U1 falsification): one scripted turn with a known prompt; :prompt-every-turn on the question text passes, :prompt-includes for absent text fails naming the blob path, :prompt-excludes on absent text passes, :turn index pins/ranges."
    :seon.gym.scenario/tier   :stub
    :seon.gym.scenario/status :active
@@ -496,6 +498,7 @@
   (async done
     (let [scenario
           {:seon.gym.scenario/id     :gymtest-context-telemetry
+           :seon.gym.scenario/competency :planning
            :seon.gym.scenario/doc    "Inline stub: an agent installs a custom context block; turn-profiles record blocks + token estimates as evidence, and the verdict comes ONLY from the scenario's predicates."
            :seon.gym.scenario/tier   :stub
            :seon.gym.scenario/status :active
@@ -611,6 +614,7 @@
         q        "What is the self-bait marker question for the load check?"
         scenario (fn [fixture-q]
                    {:seon.gym.scenario/id     :gymtest-self-bait
+                    :seon.gym.scenario/competency :db-memory
                     :seon.gym.scenario/doc    "Deliberately self-baited (gym-upgrade §3.4 falsification): the fixture's question IS the turn message."
                     :seon.gym.scenario/tier   :stub
                     :seon.gym.scenario/status :active
@@ -665,6 +669,7 @@
 
 (defn- consult-anchor-scenario [first-eval]
   {:seon.gym.scenario/id     :gymtest-consult-anchor
+   :seon.gym.scenario/competency :db-memory
    :seon.gym.scenario/doc    "Inline stub (consult-anchor widening, 2026-06-11 falsification): the anchored consult predicate must track STORE READS (behavior), not attr vocabulary."
    :seon.gym.scenario/tier   :stub
    :seon.gym.scenario/status :active
@@ -765,6 +770,7 @@
 
 (defn- judge-wiring-scenario []
   {:seon.gym.scenario/id     :judge-wiring-mock
+   :seon.gym.scenario/competency :honesty
    :seon.gym.scenario/doc    "Inline stub scenario proving judge verdict→axis wiring with a mocked judge llm. Also pins the datahike namespace/name query built-ins the S-21 fork predicate relies on."
    :seon.gym.scenario/tier   :stub
    :seon.gym.scenario/status :active
@@ -866,6 +872,7 @@
                        {:text "{\"pass\": true, \"score\": 100, \"justification\": \"ok\"}"}))
           scenario
           {:seon.gym.scenario/id     :two-agent-judge-wiring
+           :seon.gym.scenario/competency :honesty
            :seon.gym.scenario/doc    "Two stub agents reply distinctly; per-agent judge ctx + args-substituted datalog are scoped correctly."
            :seon.gym.scenario/tier   :stub
            :seon.gym.scenario/status :active
@@ -1018,6 +1025,124 @@
                                     "SKIPPED"))
                  (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; CURATION AXES (context-curation Phase A) — eval-error-rate + canvas.
+;; Every scorecard carries :seon.gym.scorecard/eval-error-rate (failed
+;; RUN-DRIVEN evals ÷ total) and :seon.gym.scorecard/canvas-updated?
+;; (did the primary agent set its own :seon.render.live-tile/content);
+;; the :eval-error-rate / :canvas-updated predicate kinds assert them.
+;; ---------------------------------------------------------------------------
+
+(deftest curation-axes-eval-error-rate-and-canvas-scored
+  ;; One turn: the agent drives its OWN canvas (sets live-tile content on
+  ;; itself) THEN makes a failing eval — so canvas-updated? is true and
+  ;; eval-error-rate is in (0,1). Both predicate kinds + both scorecard
+  ;; fields exercised.
+  (async done
+    (let [scenario
+          {:seon.gym.scenario/id         :gymtest-curation-axes
+           :seon.gym.scenario/competency :error-recovery
+           :seon.gym.scenario/doc        "Inline stub: drive the canvas, then one failing eval — eval-error-rate in (0,1), canvas-updated? true."
+           :seon.gym.scenario/tier       :stub
+           :seon.gym.scenario/status     :active
+           :seon.gym.scenario/axes       [:drives-canvas :makes-few-errors]
+           :seon.gym.scenario/turns
+           [{:seon.gym.turn/message "drive your canvas, then slip up"
+             :seon.gym.turn/llm-script
+             [(str "(seon.db/transact! {:seon.db/tx-data "
+                   "[{:seon.agent/id (seon.db/current-agent-id) "
+                   ":seon.render.live-tile/content [:div \"hi\"]}]})\n"
+                   "(this-symbol-does-not-exist-xyzzy)\n")]}]
+           :seon.gym.scenario/predicates
+           [{:seon.gym.predicate/id   :drove-its-canvas
+             :seon.gym.predicate/kind :canvas-updated
+             :seon.gym.predicate/axis :drives-canvas}
+            {:seon.gym.predicate/id             :error-rate-under-threshold
+             :seon.gym.predicate/kind           :eval-error-rate
+             :seon.gym.predicate/axis           :makes-few-errors
+             :seon.gym.predicate/max-error-rate 0.9}]}]
+      (-> (gym/run-scenario! {:seon.gym/scenario scenario})
+          (.then (fn [card]
+                   (gym/print-scorecard! card)
+                   (is (m/validate :seon.gym/scorecard card)
+                       "scorecard with curation fields validates")
+                   (let [rate (:seon.gym.scorecard/eval-error-rate card)]
+                     (is (number? rate))
+                     (is (< 0.0 rate 1.0)
+                         (str "one of two run-driven evals failed → "
+                              "rate in (0,1) — " rate)))
+                   (is (true? (:seon.gym.scorecard/canvas-updated? card))
+                       "the agent drove its own canvas")
+                   (is (true? (:seon.gym.result/pass?
+                                (result-by-id card :drove-its-canvas)))
+                       "canvas-updated predicate passes")
+                   (is (true? (:seon.gym.result/pass?
+                                (result-by-id card :error-rate-under-threshold)))
+                       "eval-error-rate predicate passes under a 0.9 threshold")
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest curation-axes-error-value-is-not-a-failed-eval-and-no-canvas
+  ;; envelope-honesty's bogus transact resolves to an error VALUE — the
+  ;; eval itself is :seon.eval/ok? true — so eval-error-rate stays 0.0,
+  ;; and the agent never drove its canvas. Pins error-as-value ≠
+  ;; failed-eval and the absent-canvas default.
+  (async done
+    (-> (gym/run-scenario!
+          {:seon.gym/scenario
+           (load-first "test/seon/gym/scenarios/envelope-honesty.edn")})
+        (.then (fn [card]
+                 (is (zero? (:seon.gym.scorecard/eval-error-rate card))
+                     (str "an error VALUE is not a failed eval — rate "
+                          (:seon.gym.scorecard/eval-error-rate card)))
+                 (is (false? (:seon.gym.scorecard/canvas-updated? card))
+                     "the agent never set its own live-tile content")
+                 (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; COMPETENCY BATTERY — run-competency-battery! runs ONLY the scenarios
+;; tagged with the requested :seon.gym.scenario/competency, in order.
+;; ---------------------------------------------------------------------------
+
+(deftest competency-battery-runs-only-matching-scenarios
+  (async done
+    (let [mk (fn [id comp]
+               {:seon.gym.scenario/id         id
+                :seon.gym.scenario/competency comp
+                :seon.gym.scenario/doc        "battery member"
+                :seon.gym.scenario/tier       :stub
+                :seon.gym.scenario/status     :active
+                :seon.gym.scenario/llm        :scripted-replay
+                :seon.gym.scenario/axes       [:terminates]
+                :seon.gym.scenario/turns
+                [{:seon.gym.turn/message "ping"
+                  :seon.gym.turn/llm-script
+                  ["(message/user \"pong\")\n(wait \"done\")\n"]}]
+                :seon.gym.scenario/predicates
+                [{:seon.gym.predicate/id     :turn-closes-done
+                  :seon.gym.predicate/kind   :datalog
+                  :seon.gym.predicate/axis   :terminates
+                  :seon.gym.predicate/query  '[:find ?t :where
+                                               [?t :seon.agent.turn/status :done]]
+                  :seon.gym.predicate/expect :non-empty}]})
+          scenarios [(mk :batt-honesty-1 :honesty)
+                     (mk :batt-planning-1 :planning)
+                     (mk :batt-honesty-2 :honesty)]]
+      (-> (gym/run-competency-battery!
+            {:seon.gym/scenarios  scenarios
+             :seon.gym/competency :honesty})
+          (.then (fn [cards]
+                   (is (= 2 (count cards))
+                       "only the two :honesty members ran")
+                   (is (= #{:batt-honesty-1 :batt-honesty-2}
+                          (set (map :seon.gym.scorecard/scenario cards)))
+                       "the battery ran exactly the tagged scenarios")
+                   (is (every? :seon.gym.scorecard/pass? cards)
+                       "each battery member passed")
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Budget guards — paid tier and :todo scenarios REFUSE with an

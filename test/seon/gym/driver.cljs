@@ -125,10 +125,18 @@
 ;; tests the agent (mechanical store/outcome checks + LLM judge), never
 ;; the context layout itself (user r2, 2026-06-11: structural gates
 ;; broke the gym on every context change and were ripped out).
+;; The two CURATION axes (context-curation Phase A) extend the §7
+;; behavioral vocabulary: `:makes-few-errors` (eval-error-rate below a
+;; threshold — fewer REPL mistakes) and `:drives-canvas` (the agent set
+;; its OWN `:seon.render.live-tile/content` — it used the live tile as
+;; the primary surface, not just messages). Both are measured every run
+;; and surfaced on the scorecard; a scenario opts into asserting them
+;; via the `:eval-error-rate` / `:canvas-updated` predicate kinds.
 (schema/register! :seon.gym.axis/name
   [:enum :sees-question :searches-first :models-work-directed
    :reuses-schemas :consults-findings :reuses-functions
-   :writes-tests :replies-honestly :terminates :stores-proactively])
+   :writes-tests :replies-honestly :terminates :stores-proactively
+   :makes-few-errors :drives-canvas])
 
 ;; --- turns ------------------------------------------------------------------
 (schema/register! :seon.gym.turn/message :string)
@@ -175,10 +183,23 @@
 ;;   the path/turn — NEVER a silent pass (a referee blind to its own
 ;;   missing eyes would hide the exact regression class this exists
 ;;   to catch).
+;; :eval-error-rate — rows = the (optionally agent-scoped) RUN-DRIVEN
+;;   evals; pass iff the FAILED-eval fraction (:seon.eval/ok? false ÷
+;;   total) is ≤ :seon.gym.predicate/max-error-rate. The instrument for
+;;   the curation goal "agents make few REPL errors" (issue #44: the
+;;   segmenter records orphan-delimiter + empty-span evals as ok? false
+;;   too, so this also catches malformed-form noise). Zero evals = 0.0
+;;   (no errors), passes any threshold.
+;; :canvas-updated — pass iff the (optionally agent-scoped, default :a)
+;;   agent drove its OWN canvas: :seon.render.live-tile/content is
+;;   present on [:seon.agent/id <agent>] in the post-run store. The
+;;   instrument for "agents drive the live tile as the primary surface,
+;;   messages only a backup".
 (schema/register! :seon.gym.predicate/kind
   [:enum :datalog :transcript-includes :transcript-excludes
    :first-eval-matches :eval-count-matching :domain-attrs
-   :prompt-includes :prompt-excludes :prompt-every-turn :llm-judge])
+   :prompt-includes :prompt-excludes :prompt-every-turn :llm-judge
+   :eval-error-rate :canvas-updated])
 (schema/register! :seon.gym.predicate/axis :seon.gym.axis/name)
 ;; Datalog query/args are datahike's domain — third-party boundary,
 ;; :any allowed (same stance as :seon.db/query-request).
@@ -208,6 +229,13 @@
 ;; (0-based, within the predicate's agent scope). Absent = the kind's
 ;; quantifier ranges over every turn in the run.
 (schema/register! :seon.gym.predicate/turn [:int {:min 0}])
+;; Canonical eval-error-rate SHAPE — a fraction in [0,1] (failed evals ÷
+;; total). Registered once, referenced by the predicate threshold field
+;; AND the scorecard slot (shared-shape rule).
+(schema/register! :seon.gym/eval-error-rate [:double {:min 0.0 :max 1.0}])
+;; :eval-error-rate predicate threshold — pass iff the run's
+;; eval-error-rate is ≤ this. References the canonical shape.
+(schema/register! :seon.gym.predicate/max-error-rate :seon.gym/eval-error-rate)
 ;; LLM-judge inputs: the grading rubric and the reference (ground-
 ;; truth) facts the verdict must be checked against.
 (schema/register! :seon.gym.predicate/rubric    :string)
@@ -224,6 +252,8 @@
    [:seon.gym.predicate/expect  {:optional true} :seon.gym.predicate/expect]
    [:seon.gym.predicate/text    {:optional true} :seon.gym.predicate/text]
    [:seon.gym.predicate/pattern {:optional true} :seon.gym.predicate/pattern]
+   [:seon.gym.predicate/max-error-rate {:optional true}
+    :seon.gym.predicate/max-error-rate]
    [:seon.gym.predicate/rubric    {:optional true} :seon.gym.predicate/rubric]
    [:seon.gym.predicate/reference {:optional true} :seon.gym.predicate/reference]])
 
@@ -233,6 +263,16 @@
 (schema/register! :seon.gym.scenario/tier   [:enum :stub :paid])
 (schema/register! :seon.gym.scenario/status [:enum :active :todo])
 (schema/register! :seon.gym.scenario/axes   [:vector :seon.gym.axis/name])
+;; The CAPABILITY this scenario exercises (context-curation Phase A) —
+;; the grouping the curation battery runs by. One competency per
+;; scenario; the rubric `axes` are the fine-grained behaviors WITHIN it.
+;;   :planning       — multi-step work that must survive interruption.
+;;   :db-memory      — store-then-retrieve schema'd facts across turns.
+;;   :error-recovery — recover from a failed eval without forking shapes.
+;;   :honesty        — refuse / admit-don't-know rather than fabricate.
+;;   :over-retrieval — answer a NARROW question without dumping the store.
+(schema/register! :seon.gym.scenario/competency
+  [:enum :planning :db-memory :error-recovery :honesty :over-retrieval])
 ;; A Malli schema FORM is malli's open domain — third-party boundary.
 (schema/register! :seon.gym/malli-form [:or :keyword [:vector :any]])
 (schema/register! :seon.gym.scenario/schema-registrations
@@ -268,6 +308,7 @@
    [:seon.gym.scenario/doc    :seon.gym.scenario/doc]
    [:seon.gym.scenario/tier   :seon.gym.scenario/tier]
    [:seon.gym.scenario/status :seon.gym.scenario/status]
+   [:seon.gym.scenario/competency :seon.gym.scenario/competency]
    [:seon.gym.scenario/axes   :seon.gym.scenario/axes]
    [:seon.gym.scenario/schema-registrations {:optional true}
     :seon.gym.scenario/schema-registrations]
@@ -304,6 +345,16 @@
   [:map-of :seon.gym.axis/name :boolean])
 (schema/register! :seon.gym.scorecard/results
   [:vector :seon.gym/result])
+;; --- curation axes (context-curation Phase A), measured EVERY run -----------
+;; The whole-run eval-error-rate (failed RUN-DRIVEN evals ÷ total; 0.0
+;; when no eval ran) — the "agents make few REPL errors" instrument.
+;; Informational telemetry plus the assertion surface for the
+;; `:eval-error-rate` predicate; references the canonical rate shape.
+(schema/register! :seon.gym.scorecard/eval-error-rate :seon.gym/eval-error-rate)
+;; Did the PRIMARY agent (:a) drive its own canvas this run — i.e. set
+;; :seon.render.live-tile/content on its own entity? The "agents drive
+;; the live tile as the primary surface" instrument.
+(schema/register! :seon.gym.scorecard/canvas-updated? :boolean)
 ;; Per-turn prompt-blob evidence (gym-upgrade PRD §6.6, default-on):
 ;; every persisted prompt-file path for the run, chronological — a
 ;; moved number is diffable to the exact context bytes the agent saw.
@@ -363,6 +414,8 @@
    [:seon.gym.scorecard/at       :seon.gym.scorecard/at]
    [:seon.gym.scorecard/agent-id :seon.gym.scorecard/agent-id]
    [:seon.gym.scorecard/pass?    :seon.gym.scorecard/pass?]
+   [:seon.gym.scorecard/eval-error-rate :seon.gym.scorecard/eval-error-rate]
+   [:seon.gym.scorecard/canvas-updated? :seon.gym.scorecard/canvas-updated?]
    [:seon.gym.scorecard/axes     :seon.gym.scorecard/axes]
    [:seon.gym.scorecard/results  :seon.gym.scorecard/results]
    [:seon.gym.scorecard/prompt-files {:optional true}
@@ -580,6 +633,58 @@
   [dbv agent-id]
   (second (first (eval-at+source dbv agent-id))))
 
+(defn- run-eval-oks
+  "The `:seon.eval/ok?` boolean of every RUN-DRIVEN eval (caused-run
+   scoping, same boundary as [[eval-at+source]] — excludes the bootstrap
+   turn's tutorial evals), optionally scoped to one agent. The raw rows
+   the eval-error-rate is computed from (issue #44: the segmenter records
+   orphan-delimiter + empty-span evals as ok? false, so they count too)."
+  [dbv agent-id]
+  (->> (if agent-id
+         (db/query {:seon.db/query '[:find ?ev ?ok
+                                     :in $ ?aid
+                                     :where
+                                     [?ag :seon.agent/id ?aid]
+                                     [?r :seon.agent.run/agent ?ag]
+                                     [?r :seon.agent.run/cause _]
+                                     [?t :seon.agent.turn/run ?r]
+                                     [?t :seon.agent.turn/evals ?ev]
+                                     [?ev :seon.eval/ok? ?ok]]
+                    :seon.db/args [agent-id]
+                    :seon.db/db   dbv})
+         (db/query {:seon.db/query '[:find ?ev ?ok
+                                     :where
+                                     [?r :seon.agent.run/cause _]
+                                     [?t :seon.agent.turn/run ?r]
+                                     [?t :seon.agent.turn/evals ?ev]
+                                     [?ev :seon.eval/ok? ?ok]]
+                    :seon.db/db dbv}))
+       (mapv second)))
+
+(defn- eval-error-rate*
+  "Fraction of RUN-DRIVEN evals that FAILED (`:seon.eval/ok?` false) ÷
+   total — the curation eval-error-rate (`:seon.gym/eval-error-rate`
+   shape). 0.0 when no eval ran (no errors). agent-id nil = whole store."
+  [dbv agent-id]
+  (let [oks (run-eval-oks dbv agent-id)
+        n   (count oks)]
+    (if (zero? n)
+      0.0
+      (/ (count (remove identity oks)) n))))
+
+(defn- agent-canvas-updated?
+  "Did the agent drive its OWN canvas — i.e. is
+   `:seon.render.live-tile/content` present on `[:seon.agent/id agent-id]`
+   in the post-run store? (Fresh gym agents — designators :a, :b — start
+   with the attr ABSENT; only the live 'root' agent is seeded a default
+   tile, and the gym never boots root.)"
+  [dbv agent-id]
+  (boolean
+    (and agent-id
+         (some? (:seon.render.live-tile/content
+                  (db/entity {:seon.db/ref [:seon.agent/id agent-id]
+                              :seon.db/db  dbv}))))))
+
 (defn- turn-prompt-files
   "Chronological [turn-id prompt-file-or-nil] pairs for every RUN-DRIVEN
    turn (stamped with a `:seon.agent.turn/run` whose run carries a
@@ -708,7 +813,7 @@
    never crash the scorecard."
   [dbv transcript agents
    {:seon.gym.predicate/keys [id kind axis query args expect
-                              text pattern agent turn]}]
+                              text pattern agent turn max-error-rate]}]
   (let [agent-id (when agent (get agents agent))
         [pass? actual]
         (try
@@ -764,6 +869,25 @@
               [(expect-pass? expect (mapv vector attrs))
                (str "domain attrs: " (pr-str attrs)
                     " expect=" (pr-str expect))])
+
+            ;; Curation: eval-error-rate ≤ threshold (issue #44 noise
+            ;; counts as error). nil agent = whole store.
+            :eval-error-rate
+            (let [rate (eval-error-rate* dbv agent-id)]
+              [(<= rate max-error-rate)
+               (str (when agent (str "agent " agent " "))
+                    "eval-error-rate=" rate
+                    " max=" max-error-rate)])
+
+            ;; Curation: did the agent (default :a) drive its own canvas?
+            :canvas-updated
+            (let [aid (or agent-id (get agents :a))]
+              [(agent-canvas-updated? dbv aid)
+               (str "agent " (or agent :a)
+                    " :seon.render.live-tile/content "
+                    (if (agent-canvas-updated? dbv aid)
+                      "PRESENT (canvas driven)"
+                      "ABSENT (canvas not driven)"))])
 
             (:prompt-includes :prompt-excludes :prompt-every-turn)
             (eval-prompt-predicate dbv agent-id kind text turn))
@@ -1580,6 +1704,14 @@
                           :seon.gym.scorecard/agent-id primary
                           :seon.gym.scorecard/pass?
                           (every? :seon.gym.result/pass? results)
+                          ;; curation axes — measured every run (whole
+                          ;; store for the rate; primary agent :a for the
+                          ;; canvas), independent of whether a predicate
+                          ;; asserts them.
+                          :seon.gym.scorecard/eval-error-rate
+                          (eval-error-rate* dbv nil)
+                          :seon.gym.scorecard/canvas-updated?
+                          (agent-canvas-updated? dbv primary)
                           :seon.gym.scorecard/axes
                           (axes-rollup axes results)
                           :seon.gym.scorecard/results  results
@@ -1703,3 +1835,50 @@
   [card]
   (println "SEON-GYM SCORECARD" (pr-str card))
   card)
+
+;; ===========================================================================
+;; Competency battery — run every scenario tagged with one
+;; `:seon.gym.scenario/competency`, in order (run-scenario! swaps the
+;; root *conn*, so the runs MUST be sequential, never parallel). The
+;; curation loop's grouping lever: "how does the planning competency
+;; move when I drop a context block?" Each entry is a scorecard OR a
+;; refusal (errors are values — :paid/:todo scenarios refuse without
+;; spend), so a battery is always safe to run free.
+;; ===========================================================================
+
+(schema/register! :seon.gym/competency :seon.gym.scenario/competency)
+(schema/register! :seon.gym/battery-request
+  [:map
+   [:seon.gym/scenarios   :seon.gym/scenarios]
+   [:seon.gym/competency  :seon.gym/competency]
+   [:seon.gym/config      {:optional true} :seon.gym/config]
+   [:seon.gym/allow-paid? {:optional true} :seon.gym/allow-paid?]
+   [:seon.gym/judge-fn    {:optional true} :seon.gym/judge-fn]])
+(schema/register! :seon.gym/battery-response [:vector :seon.gym/run-response])
+
+(defn ^:async run-competency-battery!
+  "Run every scenario in `:seon.gym/scenarios` tagged with the given
+   `:seon.gym/competency`, strictly in order, under one `:seon.gym/config`
+   loadout, and return the vector of scorecards/refusals. Sequential by
+   construction — run-scenario! swaps the root `seon.db/*conn*`, so two
+   runs must never overlap. `:paid`/`:todo` members refuse (no spend)
+   unless `:seon.gym/allow-paid?` + the active key make them runnable."
+  {:malli/schema [:=> [:cat :seon.gym/battery-request] :seon.gym/battery-response]}
+  [{scenarios   :seon.gym/scenarios
+    competency  :seon.gym/competency
+    config      :seon.gym/config
+    allow-paid? :seon.gym/allow-paid?
+    judge-fn    :seon.gym/judge-fn}]
+  (let [matching (filterv #(= competency (:seon.gym.scenario/competency %))
+                          scenarios)]
+    (loop [ss  matching
+           acc []]
+      (if-let [[s & more] (seq ss)]
+        (let [card (await (run-scenario!
+                            (cond-> {:seon.gym/scenario s}
+                              config      (assoc :seon.gym/config config)
+                              (some? allow-paid?)
+                              (assoc :seon.gym/allow-paid? allow-paid?)
+                              judge-fn    (assoc :seon.gym/judge-fn judge-fn))))]
+          (recur more (conj acc card)))
+        acc))))
