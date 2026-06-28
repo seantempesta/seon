@@ -71,6 +71,8 @@ The component tables below describe the **JVM core** (Datahike + Integrant + flo
 | [[components/web-brand]] | stable | Downstream brand surface — env-synced rows, titles/h1/theme, CSS hook |
 | [[components/web-inspector]] | active | CLJS pod web lane — four page shells, SSE morphing, findings pane, debug overlay |
 | [[components/agent-system]] | stable | AI providers, sessions, observatory |
+| [[components/agent-reply-segmenter]] | active | CLJS pod — LLM reply → form/prose/read entries (`parse-forms`) |
+| [[components/loadable-skills]] | active | CLJS pod — `my.skills`, dial knowledge into agent ctx, drop when done |
 | [[components/dev-tools]] | production | Hook, instrumentation, REPL helpers |
 | [[components/testing]] | production | 70 test files, ~819 tests, REPL-first runner |
 
