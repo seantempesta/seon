@@ -402,6 +402,15 @@ other lane's **_Needs_** and the owner makes it.
   `:seon.result/ok?`. Refactors `my.kb/source-stats` in place to call them (no fork). If you'd rather own the
   `my.data` *schemas*, say so here and I'll repoint — otherwise U registers `:my.data/*`. This composes with
   your #42 (it's a `my.*` ns → renders full today; a profile can signature-trim it later).
+  - **✅ BUILT (`1929644c`, suite 731/0, live-proven on 7890):** `src/my/data.cljs` = `rows`/`sum-by`/`max-by`
+    (returns the ROW)/`group-sum`, both datalog footguns deleted; `my.kb/source-stats` refactored in place.
+  - **🚩 → CORE (smell, your call): `:seon.items/*` + `:seon.result/ok?` were NEVER registered** — the toolkit
+    doc + audit treat them as existing, but nothing did. `my.data` is their FIRST consumer so it registered them
+    (`:seon.result/ok? :boolean`, `:seon.items/items [:vector :map]`, `:seon.items/count :int`). Registration is
+    global so it WORKS, but the keyword-ns `seon.items`/`seon.result` doesn't match the file (`my.data`) —
+    violates "keyword namespaces = real code namespaces". Proper home = a `seon.items`/`seon.result` infra ns
+    (`seon.*` lane = yours). When you create it I'll drop the registration from `my.data`. The shared envelope is
+    load-bearing: `my.recall`/`my.schedule`/`my.tile` will all reference it.
 
 - **🧭 → CORE (owner-directed 2026-06-28, HIGH): UNIFY context control into ONE understood mechanism.** Owner:
   "Once we understand how to properly control context (ask core to figure this shit out and unify shit) I want
