@@ -5,10 +5,19 @@
    (proven by seon.client.extra-core-test). Side effects fire because
    acme.pod requires this ns at preload.
 
-   Here: a 'calm broken-tile card' — while an agent is mid-building a tile
-   (defined-but-unwired, wired-before-the-query-shape-is-right), the human
-   sees a calm 'preparing this view' card instead of a raw error, while
-   the agent-facing :seon.render/ai signal is preserved."
+   Two error seams, both branded calm. Core split the one error contract
+   into two vars:
+   - `error-response` — the live-tile HERO (`render-agent-tile`'s catch):
+     returns the FULL `:seon.render/html-response` map, so we preserve the
+     agent-facing `:seon.render/ai` + `:seon.render/error` and swap only the
+     human-facing hiccup.
+   - `error-tile` — the SLOT / world / entity error surfaces (`render`,
+     `slot`, `render-entity-html` catches): a `(fn [:seon/error] → BARE
+     hiccup)`. No agent-facing envelope to preserve, so we replace outright.
+
+   Both render the same calm 'preparing this view' card — while an agent is
+   mid-building a tile the human sees a calm placeholder instead of a raw
+   error, the agent-facing signal stays intact on the hero."
   (:require [seon.render.live-tile :as live-tile]))
 
 (defonce ^:private orig-error-response live-tile/error-response)
@@ -20,3 +29,14 @@
                [:div {:class "seon-tile"}
                 [:div {:class "seon-tile-compact p-3 text-xs text-text-300 italic"}
                  "Acme is preparing this view…"]])))
+
+;; The slot / world / entity error-tile seam — `(fn [:seon/error] → BARE
+;; hiccup)`. Returns hiccup only (no `:seon.render/ai`/`:seon.render/error`
+;; envelope like the hero), so there is nothing from the default to preserve:
+;; we replace it outright with acme's calm branded card (mirroring the hero
+;; above). One `set!`, every slot/world/entity error tile on the page is acme.
+(set! live-tile/error-tile
+      (fn acme-error-tile [_err]
+        [:div {:class "seon-tile"}
+         [:div {:class "seon-tile-compact p-3 text-xs text-text-300 italic"}
+          "Acme is preparing this view…"]]))

@@ -1,17 +1,23 @@
 (ns acme.world
   "Acme's overrides of the NEW world-layout surface (Lane-U verification).
 
-   The new per-agent page (`/agent/{id}` → `seon.ui.world/world-layout`)
-   renders every `:seon.agent/ctx` block that carries a `:seon.render/html`
-   render, placing it through the `seon.render/slot` primitive: the focal
-   comms block (`:canvas` else `:transcript`) as the canvas, then the rest
-   as a priority-ordered tile scroll.
+   The per-agent page (`/agent/{id}` → `seon.ui.world/world-layout`) has a
+   focal **canvas** that IS the agent's LIVE TILE (`render-agent-tile`
+   resolving `:seon.render.live-tile/content`), above a
+   `:seon.agent.ctx/priority`-ordered scroll of every `:seon.agent/ctx` block
+   that carries a `:seon.render/html` render, each placed through the
+   `seon.render/slot` primitive (decision #19 — the canvas is the live tile,
+   NOT a ctx block; a block named `:canvas` is just another supporting tile).
 
-   So a third party shapes an agent's whole world — canvas + tiles — with
-   ZERO src/seon edits, using the SAME override primitive the core seed
-   uses: `seon.agent.ctx/install!`. Each block's `:seon.render/html` is a
-   qualified SYMBOL pointing at one of the acme tile fns below; a block-html
-   fn returns BARE hiccup (the block-html contract).
+   So a third party shapes an agent's whole world with ZERO src/seon edits,
+   using two override surfaces:
+   - the focal canvas via the live-tile attr `:seon.render.live-tile/content`
+     ([[install-into!]] wires it to `acme.widget/broken-tile` to exercise the
+     calm hero error path through `acme.overrides`' `error-response`);
+   - the supporting tiles via `seon.agent.ctx/install!` — the SAME primitive
+     the core seed uses. Each block's `:seon.render/html` is a qualified
+     SYMBOL pointing at one of the acme tile fns below; a block-html fn
+     returns BARE hiccup (the block-html contract).
 
    `install-all!` (scheduled from acme.pod after the pod's agents boot)
    installs the blocks into every live agent's OWN `:seon.agent/ctx` scope
@@ -20,19 +26,6 @@
     [seon.agent.ctx :as ctx]
     [seon.db :as db]
     [seon.log :as log]))
-
-(defn canvas-tile
-  "Acme's CANVAS override — a block-html fn returning BARE hiccup. The
-   block is named `:canvas`, so `world-layout`'s canvas selection
-   (`(some (set names) [:canvas :transcript])`) picks it as the focal
-   comms block instead of the seon transcript — a third-party override of
-   the world-layout's primary region, by DATA (the block name), no flag."
-  {:malli/schema [:=> [:cat :map] :seon.render.live-tile/hiccup]}
-  [_in]
-  [:div {:class "flex flex-col gap-2 p-3"}
-   [:div {:class "text-lg text-signal"} "Acme canvas"]
-   [:div {:class "text-sm text-text-200"}
-    "This focal canvas is an acme block — a third-party override of the world-layout canvas, installed via seon.agent.ctx/install!."]])
 
 (defn world-tile
   "Acme's custom TILE — bare hiccup, appears in the world-layout tile
@@ -48,41 +41,48 @@
 
 (defn ^:async install-into!
   "Install acme's world blocks into agent `id`'s OWN ctx scope, using the
-   seon override primitive `ctx/install!` (idempotent upsert-by-name). The
-   `:acme-broken` block points at `acme.widget/broken-tile` (a throwing
-   tile) to EXERCISE the new world-layout/slot error path — verifying
-   whether it routes through the overridable `live-tile/error-response`."
+   seon override primitive `ctx/install!` (idempotent upsert-by-name).
+
+   Exercises BOTH error seams with one throwing tile (`acme.widget/broken-tile`):
+   - wired onto `:seon.render.live-tile/content` → the focal canvas
+     (`render-agent-tile`) throws → the CALM HERO seam
+     `live-tile/error-response` (acme.overrides override);
+   - installed as the `:acme-broken` block → the slot path (`render`/`slot`)
+     throws → the `live-tile/error-tile` seam (acme.overrides override)."
   [id]
   (db/with-agent id
     (fn []
       (.then
-        ;; ALSO wire the EXISTING live-tile contract surface
-        ;; (`:seon.render.live-tile/content` → render-agent-tile →
-        ;; error-response) so the legacy console hero + agent context
-        ;; exercise acme.overrides' error-response override (the positive
-        ;; control for the bypass finding).
+        ;; Wire the live-tile contract surface (`:seon.render.live-tile/content`
+        ;; → render-agent-tile → error-response) so the focal canvas hero +
+        ;; agent context exercise acme.overrides' error-response override.
         (db/transact!
           {:seon.db/tx-data
            [{:seon.agent/id id
              :seon.render.live-tile/content 'acme.widget/broken-tile}]})
         (fn [_]
-          (ctx/install!
-            [{:seon.agent.ctx/name     :canvas
-              :seon.agent.ctx/priority 5
-              :seon.render/html        'acme.world/canvas-tile}
-             {:seon.agent.ctx/name     :acme-tile
-              :seon.agent.ctx/priority 50
-              :seon.render/html        'acme.world/world-tile}
-             ;; The EXISTING acme widget tile (returns an html-RESPONSE
-             ;; MAP, the live-tile contract) installed onto the NEW
-             ;; ctx-block/:seon.render/html slot — does the slot path
-             ;; consume the live-tile map contract?
-             {:seon.agent.ctx/name     :acme-widget
-              :seon.agent.ctx/priority 55
-              :seon.render/html        'acme.widget/dash}
-             {:seon.agent.ctx/name     :acme-broken
-              :seon.agent.ctx/priority 60
-              :seon.render/html        'acme.widget/broken-tile}]))))))
+          ;; MIGRATION (#19): drop the pre-#19 `:canvas` block. The canvas is
+          ;; the live tile now (NOT a ctx block), so a persisted `:canvas`
+          ;; block renders as a redundant phantom tile. install! keeps blocks
+          ;; it doesn't name, so the stale one must be retracted explicitly;
+          ;; remove! is a no-op once a store has cycled past the old build.
+          (.then
+            (ctx/remove! :canvas)
+            (fn [_]
+              (ctx/install!
+                [{:seon.agent.ctx/name     :acme-tile
+                  :seon.agent.ctx/priority 50
+                  :seon.render/html        'acme.world/world-tile}
+                 ;; The EXISTING acme widget tile (returns an html-RESPONSE
+                 ;; MAP, the live-tile contract) installed onto the NEW
+                 ;; ctx-block/:seon.render/html slot — does the slot path
+                 ;; consume the live-tile map contract?
+                 {:seon.agent.ctx/name     :acme-widget
+                  :seon.agent.ctx/priority 55
+                  :seon.render/html        'acme.widget/dash}
+                 {:seon.agent.ctx/name     :acme-broken
+                  :seon.agent.ctx/priority 60
+                  :seon.render/html        'acme.widget/broken-tile}]))))))))
 
 (defn ^:async install-all!
   "Install acme's world blocks into every live agent. Scheduled from
