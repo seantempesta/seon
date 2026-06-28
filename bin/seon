@@ -200,7 +200,7 @@ process_command() {
 
 process_ready_hint() {
   case "$1" in
-    pod)         echo "  ready: tmp/seon-port written + HTTP answers on /agents" ;;
+    pod)         echo "  ready: tmp/seon-port written + HTTP answers on /" ;;
     cljs-watch)  echo "  ready: 'Build completed' appears in logs/cljs-watch.log" ;;
     jvm)         echo "  ready: logs/app.log shows 'Server started'" ;;
     wire-server) echo "  ready: $SEON_REQ_SOCK ACCEPTING; REPL on 127.0.0.1:$SEON_WRITER_REPL_PORT (tmp/seon-writer-repl-port)" ;;
@@ -246,8 +246,13 @@ ready_check() {
       ;;
     pod)
       [ -f tmp/seon-port ] || return 1
+      # Probe `/` — the most fundamental core route (always seeded on every
+      # cluster). It's render-independent (a 302/200, no agent-page render),
+      # so this gate won't false-fail during a render hot-reload. `curl -f`
+      # passes on the 302 (<400) and on the 200 after the root=/ repoint.
+      # (Was `/agents`, removed by the db->routes routing cutover → 404.)
       curl -fsS -m 2 -o /dev/null \
-        "http://127.0.0.1:$(cat tmp/seon-port)/agents" 2>/dev/null
+        "http://127.0.0.1:$(cat tmp/seon-port)/" 2>/dev/null
       ;;
     cljs-watch)
       # Build artifact newer than this start, or completion line in the
