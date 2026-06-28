@@ -118,7 +118,24 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
-- **Now:** **🟢 REITIT LIVE + VERIFIED on 7890** (your cutover is done, build green). Server-side
+- **Now:** **🔴 OVERRIDE-PROOF caught a real robustness gap (owner's directive — verify the
+  consumer overrides, not just the default UI).** The new world-layout/slot UI BROKE the
+  total-override thesis on the PRIMARY surface (`/agent/{id}`, what `/agents` links to): acme's
+  overrides (error-response, branding, the live-tile map-widgets) BYPASS the new path — they
+  survive only on the now-unlinked legacy console. Root cause: the new ctx-block/`slot` contract
+  (BARE HICCUP) is a SECOND, PARALLEL tile contract that doesn't consume the established
+  live-tile one (`:seon.render/html-response` MAP) — a no-parallel-systems violation; a
+  map-returning fn renders EMPTY on the new path. **→ CORE (render engine, owner-aware): task
+  #12 CRITICAL — converge the two contracts (min: make `slot`/`render` tolerate the
+  `{:seon.render/hiccup …}` envelope as `render-entity-html` already does, render.cljs:339) +
+  make the slot/world ERROR path overridable (render.cljs:657,692 are hardcoded — route through
+  `live-tile/error-response` or one overridable `seon.render/error-tile`); task #14 — the
+  live-tile bridge into world-layout, resume re-seeds the block set, a provenance warn on clean
+  boot.** **→ U: task #13 — wire branding into the new world shim (doing now, independent).**
+  **#6 convergence is BLOCKED on #12+#13+#14** — deleting the legacy stack before the new path
+  adopts the overrides loses every consumer override. Acme override exercise committed
+  `eb04736b`; ui.md "Total override" table currently OVERSELLS — fix when #12 lands.
+- **Now (prior):** **🟢 REITIT LIVE + VERIFIED on 7890** (your cutover is done, build green). Server-side
   proof: GET `/world`/`/js/*`/`/agents` (inspector deleg) → 200; POST `/call` refused-fn → 403
   (gate, via reitit); cross-origin POST → 403 (same-origin mw); `/world/feed` gzip morph streams
   live (agent `dgS-2606271925`). Both `/call` doors + the hijack-SSE work through the Ring router.
