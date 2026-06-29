@@ -43,6 +43,91 @@
 ;; @schemas-tx for the pure count comparisons.
 (def core-tx (delay (client/index-core!)))
 (def schemas-tx (delay (client/index-schemas)))
+;; index-tests has no other delay; the three builders share ONE realized
+;; snapshot per ns run via these delays (see freeze-builders! below).
+(def tests-tx (delay (client/index-tests)))
+
+;;; -------------------------------------------------------------------------
+;;; HERMETICITY (issue #69 — same env-coupling class as the search_test fix
+;;; b5c3a3a4).
+;;;
+;;; index-core! / index-schemas / index-tests are "pure" only relative to the
+;;; LIVE program graph: they read var-meta + on-disk source lines, the global
+;;; schema registry (schema/registered-schemas), and @!indexed-test-vars. The
+;;; async tests below build `first-tx` from these builders at one instant (T1)
+;;; and then RE-RUN the same builders inside core-index-tx / prune-core-ghosts!
+;;; at a later instant (T2) and assert the two agree (idempotent no-op, exactly
+;;; the seeded ghosts, only the drifted ns re-emits). When the overnight loop
+;;; runs this suite concurrently with the gym scorecard (or another run), a
+;;; mutation of those globals between T1 and T2 reclassifies a stored core-seed
+;;; row as a ghost / re-emits a fn row, flaking the assertions — even though
+;;; each conn here is a fresh per-test :memory store.
+;;;
+;;; Fix (test-only — the index source is Core's): pin the three builder vars to
+;;; ONE realized snapshot (the file-level delays) for the test's duration, so
+;;; T1 and T2 read identical sets regardless of any concurrent process. with-
+;;; redefs can't be used — its `finally` restores before the Promise chain's
+;;; awaits resolve — so we set! up front and restore in the terminal then/catch
+;;; (the `done*` thunk every async test below funnels through).
+;;; -------------------------------------------------------------------------
+(defn- freeze-builders!
+  "Snapshot index-core! / index-schemas / index-tests to the shared ns-level
+   delays and pin each var to it. Returns a 0-arg `restore!` thunk. Realizes
+   the delays via the ORIGINAL vars (the let bindings run before the set!s) so
+   there is no re-entrant deref."
+  []
+  (let [oc      client/index-core!
+        os      client/index-schemas
+        ot      client/index-tests
+        core    @core-tx
+        schemas @schemas-tx
+        tests   @tests-tx]
+    ;; Explicit-arity fns — NOT (constantly …). CLJS statically dispatches the
+    ;; same-ns call sites in core-index-tx / prune-core-ghosts! to
+    ;; `.cljs$core$IFn$_invoke$arity$0()`; a variadic `(constantly …)` lacks
+    ;; that method and the optimized call throws "arity$0 is not a function".
+    ;; index-tests is multi-arity (0 + [vars]) — pin both so a 1-arity call
+    ;; inside the freeze window can't break either.
+    (set! client/index-core!   (fn [] core))
+    (set! client/index-schemas (fn [] schemas))
+    (set! client/index-tests   (fn ([] tests) ([_] tests)))
+    (fn restore! []
+      (set! client/index-core!   oc)
+      (set! client/index-schemas os)
+      (set! client/index-tests   ot))))
+
+;;; -------------------------------------------------------------------------
+;;; ORDER-INDEPENDENCE (issue #75). The three async tests below pin the builder
+;;; vars to frozen `(fn [] snapshot)` thunks for their cross-await window and
+;;; restore in their terminal then/catch. If that restore is skipped or runs
+;;; late (a rejected-Promise path, a concurrent suite run), the frozen snapshot
+;;; LEAKS into a later test — `client/index-tests` left pinned to the empty
+;;; node-test `@tests-tx` makes a direct `(index-tests [#'var])` return [] (so
+;;; index-tests-builds-rows-from-deftest-vars reads no source), and a leaked
+;;; builder skews prune-core-ghosts's absentee set. Both then fail ONLY when run
+;;; after a freezing test.
+;;;
+;;; Fix (test-only — the index source is Core's): a `:each` map fixture
+;;; (map-form so it is async-safe — the wrapping `(fn [f] …)` form aborts on
+;;; async tests) that resets the three vars to their REAL implementations both
+;;; before AND after every test. The before-reset is the load-bearing half: it
+;;; guarantees each test starts from the real builders regardless of any prior
+;;; test's leaked freeze, AND it means each async test's own freeze captures the
+;;; real fns (so its restore can't cascade a frozen state forward).
+(def ^:private og-index-core!   client/index-core!)
+(def ^:private og-index-schemas client/index-schemas)
+(def ^:private og-index-tests   client/index-tests)
+
+(defn- thaw-builders!
+  "Reset the three builder vars to their real (unfrozen) implementations."
+  []
+  (set! client/index-core!   og-index-core!)
+  (set! client/index-schemas og-index-schemas)
+  (set! client/index-tests   og-index-tests))
+
+(t/use-fixtures :each
+  {:before (fn [] (thaw-builders!))
+   :after  (fn [] (thaw-builders!))})
 
 (defn- by-sym [tx sym]
   (first (filter #(= sym (:seon.fn/sym %)) tx)))
@@ -334,8 +419,10 @@
   ;; same agent + tx-meta datahike schema the pod boots against, bound as
   ;; start-agent! binds it so transact lookup-refs resolve.
   (async done
-    (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
-                             (db/tx-meta-datahike-schema)))
+    (let [restore! (freeze-builders!)
+          done*    (fn [] (restore!) (done))]
+     (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
+                              (db/tx-meta-datahike-schema)))
         (.then
           (fn [conn]
             ;; Pass :seon.db/conn explicitly — a `binding` of the dynamic
@@ -373,10 +460,10 @@
                           "partial re-index emits only the missing fn")
                       (is (= [:seon.ns/name :seon.schema] (:seon.fn/ns (first gap-fns)))
                           "the re-emitted ref is a valid [:seon.ns/name kw] tuple"))
-                    (done))))))
+                    (done*))))))
         (.catch (fn [e]
                   (is false (str "idempotency test threw: " (or (.-message e) e)))
-                  (done))))))
+                  (done*)))))))
 
 (deftest prune-core-ghosts-removes-only-core-claimed-absentees
   ;; Boot-index GC (open-issues 2026-06-11 row 5). Pins all four hard
@@ -395,8 +482,10 @@
   ;;   (d) rename semantics — the old ident (absent from the boot set)
   ;;       goes, idents present in the boot set stay.
   (async done
-    (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
-                             (db/tx-meta-datahike-schema)))
+    (let [restore! (freeze-builders!)
+          done*    (fn [] (restore!) (done))]
+     (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
+                              (db/tx-meta-datahike-schema)))
         (.then
           (fn [conn]
             (-> (client/core-index-tx conn)
@@ -458,10 +547,10 @@
                   (fn [{pruned :seon.client/pruned}]
                     (is (= [] pruned)
                         "second boot's prune finds ZERO ghosts (idempotent)")
-                    (done))))))
+                    (done*))))))
         (.catch (fn [e]
                   (is false (str "prune test threw: " (or (.-message e) e)))
-                  (done))))))
+                  (done*)))))))
 
 (deftest core-index-tx-reasserts-drifted-ns-source
   ;; ns rows dedup on name AND source. A store whose :seon.ns/source for a
@@ -471,8 +560,10 @@
   ;; my.* root — its full file text is read at boot; its fn/schema rows are
   ;; already present, so only the drifted ns row re-emits.)
   (async done
-    (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
-                             (db/tx-meta-datahike-schema)))
+    (let [restore! (freeze-builders!)
+          done*    (fn [] (restore!) (done))]
+     (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
+                              (db/tx-meta-datahike-schema)))
         (.then
           (fn [conn]
             (-> (client/core-index-tx conn)
@@ -503,7 +594,7 @@
                           "the re-emitted source is the real file, longer than the stub")
                       (is (empty? (remove :seon.ns/name tx))
                           "only ns rows re-emit — no fn/schema/test rows ride along"))
-                    (done))))))
+                    (done*))))))
         (.catch (fn [e]
                   (is false (str "drift test threw: " (or (.-message e) e)))
-                  (done))))))
+                  (done*)))))))
