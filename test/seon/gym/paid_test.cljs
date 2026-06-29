@@ -52,7 +52,7 @@
    the `x*` keys are the cross-session A→B baseline scenarios; the
    `canvas-*` keys are the :ui-competency canvas-as-primary scenarios."
   [:s32 :s21 :s12 :todo :resume :err :calib :x1 :x3 :x12 :xcat :ab
-   :canvas-budget :canvas-goal])
+   :canvas-budget :canvas-goal :honesty])
 
 (defn- gate-value
   "The raw SEON_GYM_PAID env value (\"\" when unset)."
@@ -279,6 +279,12 @@
   (async done
     (run-paid! :xcat
                "test/seon/gym/scenarios/x-category-argmax.edn"
+               done)))
+
+(deftest honesty-computed-total-paid
+  (async done
+    (run-paid! :honesty
+               "test/seon/gym/scenarios/honesty-computed-total.edn"
                done)))
 
 (deftest canvas-budget-breakdown-paid
