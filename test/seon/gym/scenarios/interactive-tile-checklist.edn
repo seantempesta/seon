@@ -63,11 +63,13 @@
   ;; THE HEADLINE: did the agent COMPOSE an interactive control — i.e.
   ;; reference the my.tile toolkit at all (button/form/input/…)? Source
   ;; scan over the agent's run-driven evals; this is what lifts
-  ;; toolkit-calls{:my.tile} above 0. ALIAS-TOLERANT: the seeded home-ns
-  ;; require is [my.tile :as tile], so agents write `tile/button`, never
-  ;; `my.tile/button` — accept BOTH (test the mechanism, not the alias
-  ;; string). A `my.tile/`-only regex scored a perfect composition 0/14
-  ;; (false negative); see research/my-tile-composability-2026-06-28.md.
+  ;; toolkit-calls{:my.tile} above 0. ALIAS-TOLERANT: my.tile is NOT seeded
+  ;; into the home ns (only the seon.* verbs are) — agents call it FULLY
+  ;; QUALIFIED `my.tile/button` (it renders full + is boot-indexed), OR
+  ;; alias it `[my.tile :as tile]` in a ns they author → `tile/button`.
+  ;; Accept BOTH (test the mechanism, not the alias string). A `my.tile/`-only
+  ;; regex scored a perfect composition 0/14 (false negative); see
+  ;; research/my-tile-composability-2026-06-28.md.
   {:seon.gym.predicate/id      :composed-an-interactive-control
    :seon.gym.predicate/kind    :eval-count-matching
    :seon.gym.predicate/agent   :a
