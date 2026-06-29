@@ -104,22 +104,39 @@
   ;; (agent behaved) — so "context failed" vs "agent ignored context"
   ;; are distinct failure signatures. The text is a fragment unique to
   ;; the seeded #26 envelope claim — verified absent from src/ AND
-  ;; docs/ under WHITESPACE NORMALIZATION (2026-06-11; the old
-  ;; fragment "never the raw tx-report" was contaminated: it lives in
-  ;; message!'s docstring split by a line break, which verbatim
-  ;; matching missed), so it can only reach a prompt via the fixture
-  ;; row rendering. Was EXPECTED-RED while no context rung rendered
-  ;; finding CLAIM TEXT (red-first pinning, gym-upgrade PRD §4);
-  ;; EXPECTED-GREEN since 2026-06-12: the `:findings` block
-  ;; (seon.agent.findings, core-default-ctx priority 48) renders
-  ;; user-domain row CONTENT in full — live-proved (scratch kb row's
-  ;; claim text observed verbatim in a live agent's assembled context;
-  ;; block vanished on retraction). Red here now means the salience
-  ;; rung REGRESSED.
+  ;; docs/ under WHITESPACE NORMALIZATION, so it can only reach a
+  ;; prompt via the fixture row rendering. Was EXPECTED-RED while no
+  ;; context rung rendered finding CLAIM TEXT (red-first pinning,
+  ;; gym-upgrade PRD §4); EXPECTED-GREEN since the `:findings` block
+  ;; (seon.agent.ctx.findings/findings-block, default-seed-blocks
+  ;; priority 97) renders user-domain row CONTENT — live-proved (a
+  ;; scratch kb row's claim text observed verbatim in the assembled
+  ;; findings block; block vanishes on retraction). Red here now means
+  ;; the salience rung REGRESSED.
+  ;;
+  ;; RE-CUT 2026-06-29 (findings-block restore, ee928de7 — live-proved
+  ;; the clip): the restored block bounds each claim to
+  ;; seon.agent.ctx.findings/content-char-cap (220 chars) with a
+  ;; trailing "…" + a pull pointer (the full row stays one
+  ;; (seon.db/pull '[*] <eid>) away). This fixture's message! claim is
+  ;; 331 chars and the OLD tail fragment ("…swallowed at the
+  ;; boundary") sits at index 273 — PAST the clip, so it never renders
+  ;; (live-observed: the rendered line ends "…on success, …"). Per
+  ;; "test behaviour, not exact strings", the mechanism this rung
+  ;; asserts is "the seeded claim's CONTENT (not a count/sample)
+  ;; rendered", so the anchor moves to a DISTINCTIVE EARLY fragment of
+  ;; the SAME claim that survives the 220-clip: "hands the caller a
+  ;; compact result envelope" (live-observed in the rendered line;
+  ;; grep-verified absent from src/ AND docs/, so it still can only
+  ;; reach the prompt via this fixture row — the anti-coincidence
+  ;; invariant holds). The clip does NOT defeat the competency: the
+  ;; agent still reads message! "hands the caller a compact result
+  ;; envelope … on success, …" + the pull pointer, which is sufficient
+  ;; to answer "smaller, not the full report".
   {:seon.gym.predicate/id   :seeded-claim-rendered-in-prompt
    :seon.gym.predicate/kind :prompt-includes
    :seon.gym.predicate/axis :consults-findings
-   :seon.gym.predicate/text "the transaction report itself is swallowed at the boundary"}
+   :seon.gym.predicate/text "hands the caller a compact result envelope"}
   ;; searches-first INVERTED here: the answer is stored, so more than
   ;; one repo search = the run-7 re-derivation signature.
   ;; Toolbelt renamed seon.search/seon.fs → seon.agent.search/seon.agent.fs
