@@ -6,14 +6,21 @@ tags: [architecture, agent, schema, flow]
 
 # The buzzsaw — diffusion dynamic-context architecture
 
-> **Target design** (present tense — the system as it is when built). What is
-> PROVEN today vs. ON TRIAL, and the gated path between, live in [[roadmap]];
-> every load-bearing claim is source-cited in [[grounding]]. Nothing here touches
-> `src/seon`, the worker, or the GPU.
+> **The map** (present tense — the system as it is). The **Seon-side buzzsaw is
+> BUILT + offline-proven** in `src/seon/diffusion/*` + `seon.worker-eval` + the
+> parse-span change (no GPU, no embeddings; full cljs suite green) — the three
+> control legs, the unified `refine` dispatcher, and the `:defn-with-specs`
+> scaffold are real code, source-cited in [[grounding]] and detailed in
+> [[research/unified-control-oracle-2026-06-29]]. What still **AWAITS GPU** (the
+> worker's mid-denoise encoder-KV injection W1–W3 + the end-to-end loop) is marked
+> inline. What is PROVEN on the live A100 vs. ON TRIAL, and the gated path between,
+> live in [[roadmap]]. The **mode engine, op-axis, and multi-pass convergence are
+> designed, not built** — CUT from the MVP until one forced infill beats arm 3
+> ([[roadmap]] "CUT from the MVP"); their sections below are marked not-yet-built.
 
-This is the map. The thesis, the one vocabulary, the worker, the mode abstraction,
-the oracle loop, and the staged convergent build — one orienting pass per piece,
-each with a pointer to its depth.
+This is the map. The thesis, the one vocabulary, the worker, the unified `refine`
+oracle, the scaffold, the mode abstraction, and the staged convergent build — one
+orienting pass per piece, each with a pointer to its depth.
 
 ## Thesis
 
@@ -56,10 +63,25 @@ One vocabulary, each name grounded in an artifact.
   bidirectionally (the move AR cannot make — the hole co-conditions on the
   clamped suffix). PROVEN: both ends held, middle co-conditioned.
   `gpu_worker.py` infill mode.
-- **span-renoise** — on a failed gate, map the parser's `:span` `[start end]` to
+- **span-renoise** — on a failed gate, map a parser/eval `:span` `[start end]` to
   canvas positions (`span_to_positions`/`build_offset_map`,
   `diffgemma_common.py:184-222`) and DROP those from the clamp set so the entropy
-  bound re-decides only them. The buzzsaw's revise-in-place dial.
+  bound re-decides only them. The buzzsaw's revise-in-place dial. BUILT Seon-side:
+  `parse-forms` now emits `:span` on every `:form` (not just `:read`) so good and
+  broken spans share one basis (`seon.repl.internal`).
+- **refine (the unified oracle call)** — `seon.diffusion.oracle/refine`
+  (`src/seon/diffusion/oracle.cljs`): ONE call the worker makes per denoise
+  checkpoint K — `{::canvas-text ::offset-map}` in, `{::clamps ::renoise-spans
+  ::injections ::legs}` out. It runs all three control legs (parse, retrieve,
+  eval-fold) and returns ONE combined control set that PARTITIONS the canvas: a
+  clamp is a good form whose span overlaps NEITHER an injection NOR a renoise span,
+  so no region is double-covered. BUILT + offline-proven. See the oracle-loop
+  section + [[research/unified-control-oracle-2026-06-29]].
+- **the three legs** — the three control signals `refine` folds together: **parse**
+  (`parse-forms`, good-form + broken-syntax spans), **retrieve**
+  (`seon.diffusion.retrieval`, hallucinated-symbol → real-API injection), **eval**
+  (`seon.worker-eval`, a separate node self-host bundle whose verdicts arrive as
+  span-keyed data). BUILT.
 - **the gate (quality ladder)** — the four-rung oracle a generation must clear:
   **parse → eval → instrument → generative-test**. A mode names the prefix it
   must clear; a stage cannot complete until its gate passes. [[grounding]] "oracle".
@@ -68,9 +90,12 @@ One vocabulary, each name grounded in an artifact.
   an allowed-vocab set + an op (`:create`/`:upsert`/`:retract`). Data, not code —
   one engine reads the row and runs the generation. Overridable per cluster via
   the same `install!`/`remove!` seed-copy discipline as context blocks.
-- **scaffold** — the mode's template string: literal text that gets CLAMPED plus
-  `{{slot}}` holes the model fills. The `:malli/schema` frame being clamped is how
-  a spec is FORCED, not requested.
+- **scaffold** — the template the model INFILLS: literal text that gets CLAMPED
+  plus slots the model fills. The `:malli/schema` frame being clamped is how a spec
+  is FORCED, not requested. BUILT: `seon.diffusion.scaffold/build-scaffold`
+  (`src/seon/diffusion/scaffold.cljs`) emits the `:defn-with-specs` frame —
+  `::frame-text` + `::infill-spans` + `::clamp-spans` that TILE the frame exactly
+  (no gap, no overlap); same span vocabulary + `to-wire` shape as the retrieval leg.
 - **slot** — one infill hole: an id, a token budget, an optional per-slot quality
   predicate.
 - **dynamic-context section-fn** — a pure function of the DB at render time that
@@ -134,6 +159,15 @@ the wire. Its modes lower the architecture onto the proven primitives:
   real N-step schedule at step K via an external `StepCountStopping`, hand the
   partial canvas to Seon to parse/eval, clamp the GOOD spans + free the BAD span,
   resume. Built, not yet GPU-tested. See [[grounding]], `eval-renoise-worker-build`.
+- `refine` (the unified op, **AWAITS GPU**) — at each checkpoint K the worker calls
+  Seon's `seon.diffusion.oracle/refine` ONCE with the current `canvas_text` (+ its
+  `offset_map`) and applies the ONE combined control set in a single pass: **clamp**
+  the good-form spans, **steer** each retrieval injection (force its span toward
+  `replacement`, append `spec_text` to the encoder KV), **re-noise** the broken /
+  eval-bad spans, then resume at K+1. The Seon side is built + offline-proven; the
+  worker's encoder-KV injection seam (W1–W3) + the end-to-end loop are the remaining
+  GPU step ([[research/unified-control-oracle-2026-06-29]],
+  [[research/retrieval-denoising-experiment-plan-2026-06-28]]).
 
 **Deployment discipline (load-bearing):** a warm worker keeps serving OLD code
 after a plain `flash deploy` until it scales to zero — so every response carries a
@@ -144,7 +178,107 @@ structural field → server-side worker recreation). The full procedure is
 [[research/flash-deployment-stability-2026-06-28]]; keep-warm + FlashBoot reality
 is [[research/flash-warm-reuse-2026-06-28]].
 
-## The mode abstraction
+## The unified control oracle — `refine` (BUILT, Seon-side)
+
+The three control signals are not three round-trips — they fold into ONE call the
+worker makes per denoise checkpoint: `seon.diffusion.oracle/refine`
+(`src/seon/diffusion/oracle.cljs`). `{::canvas-text ::offset-map}` in, ONE combined
+control set out:
+
+```clojure
+{::clamps        [{::span [s e] ::source "…"}]                    ; HOLD — do not re-noise
+ ::renoise-spans [{::span [s e] ::error-kind :eof ::source "…"}]  ; RE-NOISE these
+ ::injections    [<retrieval/injection {span replacement spec_text}>]  ; clamp-toward-real-API
+ ::legs          [:parse :retrieve]}                              ; (+ :eval when verdicts folded)
+```
+
+**The three legs fold in (each a real Seon mechanism):**
+
+- **PARSE** — `seon.repl.internal/parse-forms` on the no-fence raw basis (the
+  `parse-raw` path, `{:strip-fences? false}`). It now emits a `:span [start end]` on
+  every `:kind :form` entry, not just `:read` entries — the load-bearing change that
+  lets GOOD-form spans (clamp candidates) and BROKEN-syntax spans (renoise) share
+  one authoritative basis (the loop's `offset` + the token `:end`).
+- **RETRIEVE** — `seon.diffusion.retrieval/retrieve-for-canvas` reads
+  `:seon.fn/sym` from the program graph and yields the hallucinated-symbol
+  injections (`{::span ::replacement ::spec-text}`) — a confidently-wrong name
+  (`db/transct!`) → the real API (`db/transact!`, edit-distance 1) + its signature.
+  Pure over a db value; the `SEON_EMBED` semantic enhancement
+  (`retrieve-for-canvas+semantic`) augments candidates from the Proximum/Vertex fn
+  index, fail-soft.
+- **EVAL** — `seon.worker-eval` (`src/seon/worker_eval.cljs`) is a SEPARATE node
+  self-host bundle (cljs.js, NOT SCI, NOT bb — it must compile `^:async`/interop
+  faithfully), so it runs out-of-process and its verdicts arrive as DATA via
+  `::eval-verdicts` (span-keyed `{ok? error{kind:compile|throw|interrupt}}`). The
+  fold: a bad verdict becomes a renoise span UNLESS retrieval already named the real
+  API for that span (the injection supersedes). When no verdicts are supplied,
+  `refine` runs PARSE + RETRIEVE only and says so in `::legs`.
+
+**The partition is the contract.** A CLAMP is a good form whose span overlaps
+NEITHER an injection (it carries a hallucination → steer, don't freeze) NOR a
+renoise span (parse error or eval-bad). The three span sets never double-cover a
+region — proven disjoint offline. `to-wire` flattens the set to the worker's
+`{op:"refine", legs, clamps, renoise_spans, injections}` JS object (each injection
+reuses `retrieval/to-wire`, byte-identical to the standalone emit), and
+`bin/oracle-server` exposes `op:"refine"` — though bb's pure `.cljc` classpath
+covers only the PARSE tier (clamps + renoise, `injections: []`); the full three-leg
+`refine` runs in the pod (or is assembled by the Python `Oracle` shim from the bb
+parse call + the node eval call + a pod retrieve call).
+
+**Offline-proven, no GPU.** `test/seon/diffusion/oracle_test.cljs` feeds one canvas
+carrying BOTH a syntax error AND a `db/transct!` hallucination and asserts the
+combined set: the eof renoise span, the `db/transct! → db/transact!` injection, and
+clamp spans for the clean forms ONLY — plus disjointness and the wire object. Full
+suite green. The remaining end-to-end step is the worker calling `refine`
+mid-denoise on the live A100 (see "The worker", AWAITS GPU above).
+
+**Char-span → token-position is the worker's job, via `offset_map`.** Every span
+Seon emits — clamp, renoise, injection, scaffold infill — is absolute CHAR offsets
+`[start end)`. The worker maps each to canvas TOKEN positions by overlap
+(`diffgemma_common.py span_to_positions`/`build_offset_map`). A boundary that falls
+mid-token would put one token in BOTH the clamp and the infill set, so the two ops
+can't separate cleanly. Measured offline (CPU tokenizer only, no GPU): the
+`:defn-with-specs` scaffold's huddled `]]` closers merged into one BPE token and
+STRADDLED 4 boundaries; the scaffold's `map-close` clamp text was nudged to open on
+a newline so every boundary now lands on a token edge. The span-based control
+primitives survive real BPE tokenization. ([[roadmap]] P2 "BPE token-boundary
+alignment".)
+
+## The scaffold — the `:defn-with-specs` frame (BUILT)
+
+`seon.diffusion.scaffold/build-scaffold` (`src/seon/diffusion/scaffold.cljs`) is the
+Seon-side template generator that CONSTRUCTS the clamp frame a fn is generated INTO,
+before any GPU call (where the retrieval leg CORRECTS a symbol mid-denoise). Given
+`{::fn-name ::ns ::intent}` it emits the roadmap's MVP frame: a `defn` plus its
+map-in/map-out `:malli/schema` contract as a partially-fixed canvas —
+
+- `::frame-text` — valid Clojure with placeholder slots: the two
+  `(schema/register! ::name-request [:map …])` / `::name-response` forms + the
+  `(defn name {:malli/schema [:=> [:cat ::name-request] ::name-response]} …)`,
+  ns-relative so `::` expands in the TARGET ns at eval time.
+- `::clamp-spans` — the fixed structure the worker HOLDS (the `defn`/`register!`
+  heads, the `:=>` wiring, the `::request`/`::response` refs) so the map-in/map-out
+  shape can't drift.
+- `::infill-spans` — the four generated slots (request `:map` body, response `:map`
+  body, arglist destructure, fn body); the spec slots infill FIRST so the body
+  generates against a KNOWN contract — quality by construction.
+
+The two span sets TILE the frame exactly (no gap, no overlap), reusing the same span
+vocabulary + `to-wire` `{op,span,role}` shape as `seon.diffusion.retrieval` (op
+`:clamp` for held structure, op `:infill` for slots) so the worker consumes scaffold
+spans the same way it consumes retrieval injections. Offline-proven
+(`test/seon/diffusion/scaffold_test.cljs`): the frame parses to 3 clean top-level
+forms, every infill span lands on its slot, the clamp text holds every structural
+token, the spans partition `[0, len)`. The GPU round-trip + the E1 kill-gate A/B vs
+arm 3 are the remaining steps ([[roadmap]] P2).
+
+## The mode abstraction (designed, NOT YET BUILT)
+
+> The `:seon.dg.mode` row, the `run-mode!` engine, the op-axis, and the
+> `mode/enter` sentinel are the GENERALIZATION layer above the built scaffold +
+> `refine` oracle. They are CUT from the MVP until one forced-spec infill beats arm
+> 3 ([[roadmap]] "CUT from the MVP"). This section is the target shape, not current
+> code; the built realization of `:defn-with-specs` is the scaffold above.
 
 A **mode is data** — a `:seon.dg.mode` row carrying six things: a clamped
 **scaffold** template, named **slots**, a list of **context-fn** symbols, a
@@ -210,24 +344,25 @@ search finds NEW deps) → **require** (the `:edit-namespace` infill writes them
 the `ns` form) → **understand** (the required-API render explains the ones it now
 has).
 
-## Guided generation — how a mode lowers
+## Guided generation — how a mode lowers (engine NOT YET BUILT; the oracle call IS)
+
+The per-checkpoint oracle call (`refine`) and the frame builder (`build-scaffold`)
+are BUILT; the `run-mode!` ENGINE that orchestrates them across a mode row is the
+generalization layer ([[roadmap]] "CUT"). The target lowering, with the built parts
+named:
 
 ```
-run-mode!(mode, op, target):
-  scaffold, clamp_set, holes = compile(mode.scaffold)        ; split on {{slots}}, tokenize, offset_map
-  ctx   = render(mode.context-fns, db, mode-state)           ; §reactive, re-queried
+run-mode!(mode, op, target):                                 ; ENGINE: not yet built
+  scaffold = build-scaffold(fn-name, ns, intent)             ; BUILT — frame_text + clamp/infill spans
+  ctx      = render(mode.context-fns, db, mode-state)        ; §reactive, re-queried
   for attempt in 0 .. mode.renoise.max-retries:
-    out = control-worker.generate(prompt=ctx,
-            decoder_input_ids = seed-from(clamp_set),
-            logits_processor  = Clamp(clamp_set),            ; the proven primitive
-            max_denoising_steps = N,                         ; KEEP N — stop externally
-            stopping = gate(mode.gate-rungs))                ; parse/eval ABC override
-    canvas = out.sequences[:, -canvas_len:]
-    if ladder-check(canvas, mode.gate-rungs).all-pass:
+    for K in checkpoints:                                    ; AWAITS GPU — worker drives the denoise
+      canvas   = control-worker.denoise_to_step(prompt=ctx, clamp=scaffold, K)
+      ctrl     = refine({canvas_text canvas, offset_map})    ; BUILT — one call, the three legs fold
+      control-worker.apply(ctrl)                             ; clamp / steer injections / renoise spans
+    if ctrl.renoise-spans empty AND ctrl.injections empty:
       persist(canvas); advance(mode.next-mode); return       ; detect-and-tee → program graph
-    span      = parser-span(canvas)                          ; the renoise dial
-    clamp_set = renoise(clamp_set, span, mode.renoise.strategy)
-    ctx       = render(mode.context-fns, db, mode-state')    ; error+span now in view
+    ctx = render(mode.context-fns, db, mode-state')          ; error+span now in view
   flag-unresolved(target)                                    ; honesty > completion
 ```
 
@@ -245,14 +380,23 @@ economics (full table + method in [[grounding]] "oracle",
 
 | Rung | Check | Measured |
 |---|---|---|
-| **parse** | `parse-forms` → no `:read` entries | 92.7% of corruptions detected, no model call |
-| **eval** | `seon.eval/eval` → `{:ok true}` in the SCI cage | 62.5% caught reference-free / 91.5% with a comparator |
+| **parse** | `parse-forms` → no `:read` entries (the `refine` PARSE leg) | 92.7% of corruptions detected, no model call |
+| **eval** | does the form RUN? — `{:ok true}` (the `refine` EVAL leg) | 62.5% caught reference-free / 91.5% with a comparator |
 | **instrument** | `:malli/schema` registers + a probe call doesn't throw | always-on Malli in/out/arity |
 | **generative-test** | `deftest` passes on N `mg/sample` inputs | property-level |
 
+The first two rungs are now the BUILT `refine` legs. Parse is `parse-forms` (the
+measured 92.7%). The eval rung's CO-LOCATED realization is `seon.worker-eval`
+(cljs.js self-host, NOT the pod's SCI `seon.eval` — the worker emits
+`^:async`/interop CLJS that SCI mis-evaluates), returning
+`{ok? error{kind:compile|throw|interrupt}}`; the measured numbers above are the
+pod-SCI oracle's, the co-located bundle answers the same "does it RUN?" question on
+the worker image. The factual/retrieval residual (the AUROC-0.471 wrong-name class)
+is the `refine` RETRIEVE leg's job.
+
 Parse+eval together catch 93.5% of meaning-altering corruptions; the residual is
-dead-data mutation, the factual/retrieval tier's job. A stage cannot advance until
-its gate is green, and the artifact sits in the DB as proof (a `:seon.fn/spec`
+dead-data mutation + wrong-name, the retrieval tier's job. A stage cannot advance
+until its gate is green, and the artifact sits in the DB as proof (a `:seon.fn/spec`
 set, a passing `:seon.deftest`), live-provable by query.
 
 **The honest limit (load-bearing for the roadmap).** The 93.5% number measured
@@ -264,7 +408,11 @@ separate, oracle-blind axis the generative-test rung only indirectly pressures.
 This is why the roadmap's kill-gate scores *faithfulness*, not just
 instrumentability.
 
-## The staged convergent build
+## The staged convergent build (designed, NOT YET BUILT)
+
+> The op-axis, the multi-pass convergence loop, and the monotonicity guard are CUT
+> from the MVP until one forced infill beats arm 3 ([[roadmap]] P4/"CUT"). Target
+> shape below; the built pieces it will compose are the scaffold + `refine`.
 
 A "build" is not one-shot — it is iterative refinement PASSES converging a
 **namespace** toward a goal, and it leans on two settled Seon theses:
@@ -287,7 +435,11 @@ downstream fn whose instrumentation only throws when CALLED), bounded by a
 monotonicity guard and gated by the roadmap's E6. Full frame + the scorecard:
 [[research/mode-driven-guided-generation-2026-06-28]] §1.4, §5.3.
 
-## The Seon interface
+## The Seon interface (designed, NOT YET BUILT — roadmap P3)
+
+> The `:diffusiongemma` provider + the two-endpoint adapter + the gym predicates
+> are designed, not wired — they land after the kill-gate ([[roadmap]] P3). Target
+> shape below.
 
 DiffusionGemma slots into Seon as one provider, `:diffusiongemma`, with two
 backends behind `SEON_DG_BACKEND`: `vllm` (fast demo, no control) reuses the
@@ -327,6 +479,11 @@ consumer drives the gym against THEIR config/provider via `SEON_CONFIG` +
   path (canvas-length probe → three-arm E1 → eval-renoise live → the MVP mode → E2–E6).
 - [[grounding]] — every load-bearing claim → its `reference-code/…:LINE` cite (the
   transformers seams, the parser oracle, the malli→datahike bridge, the flash source).
+- [[research/unified-control-oracle-2026-06-29]] — THE built mechanism: the
+  `refine` dispatcher, the three legs folding into the `{clamps, renoise-spans,
+  injections}` partition, the offline proof, the AWAITS-GPU mid-denoise integration.
+- [[research/retrieval-denoising-experiment-plan-2026-06-28]] — the retrieve leg
+  (built) + the GPU-side encoder-KV injection W1–W3 (the AWAITS-GPU half).
 - [[research/mode-driven-guided-generation-2026-06-28]] — THE design: the mode
   abstraction, the four modes, the convergent-pass frame, the experiment ladder.
 - [[research/mode-design-critique-2026-06-28]] — the adversarial review that shapes

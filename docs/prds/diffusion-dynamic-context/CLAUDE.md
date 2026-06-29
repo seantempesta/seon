@@ -114,6 +114,7 @@ The spine links the depth inline; this table is the full map — one line per fi
 
 | Research file | What it covers |
 |---|---|
+| `unified-control-oracle` | **THE built mechanism** — `seon.diffusion.oracle/refine`: the three legs (parse/retrieve/eval) folding into the `{clamps, renoise-spans, injections}` partition, offline-proven, AWAITS-GPU mid-denoise integration |
 | `mode-driven-guided-generation` | **THE design** — the mode abstraction, the four modes, the convergent-pass frame, E0–E6 |
 | `mode-design-critique` | the adversarial review the roadmap's sequencing is built on (missing arm-3, vacuity, canvas gating, cut-list) |
 | `transformers-diffusion-source-grounding` | the real v5.11.0 mechanism — per-step seam `:1034`, stopping ABC `:466`/`:1207`, temp ramp `:311`, streamer verdict |
