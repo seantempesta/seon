@@ -15,6 +15,14 @@ agent, reproduce in the REPL, read the source), fold back only the signal.
 This file is the morning read: what landed (with live-proof), what's measured, what
 needs your decision, and the Core-routed queue.
 
+## Bottom line (the morning exec summary)
+
+**The night's central deliverable is PROVEN: the `my.*` toolkit went from built-but-invisible to composable-and-honest.** A real DeepSeek agent now builds its tiles with `my.data`/`my.ui`/`my.tile` (composed 15×/23×, 9×/11×, 3×-wired) instead of hand-rolling broken `[:div]`s — and canvas-first moved it onto the *derived* surface, fixing a fabrication (judge fail→PASS). This closed end-to-end through the recursive loop: **build → drive real agents → discover it wasn't reachable → route the root cause → Core fixed it → verify composable.** Three more such cycles closed tonight (the #42 trim regression, the toolkit-reachability P0, the loop's own blind-spot instrument).
+
+**Also shipped & verified:** the gym became a measured fitness function (`bin/gym-scorecard`: pass × per-block-tokens × eval-error-rate × **toolkit-adoption**), the battery grew well-rounded to 23 scenarios across every facet, two facets proved **handled** (error-recovery, planning-resume), an honest green gate was restored (two hermetic test fixes), `:kind` was purged at the root, `:live-tile` trimmed, and the live pod reset to current.
+
+**Awaiting Core (routed, specced, evidence-backed):** the cache-aware transcript (#62, the #1 token lever, ~83% + cache-stable), the fabrication fixes (#63), explicit-listing config (#42), the home-ns alias collision (#73). **Awaiting you:** `:kind` Category-B scope (#66).
+
 ## Decisions awaiting you (read first)
 
 1. **`:kind` Category B — scope.** The recurrence engine (surface A) is purged + gone.
