@@ -23,6 +23,8 @@ tags: [orchestrator, agent]
 - [[grounding]] — every load-bearing claim → its `reference-code/…:LINE` cite (the
   transformers v5.11.0 seams, the parser oracle, the malli→datahike bridge, the
   Flash source).
+- [[owner-gpu-runbook]] — the ordered, `verify_fresh`-gated checklist to execute
+  top-to-bottom on the next A100 redeploy (cheapest decisive probe first).
 
 ## Current state (2026-06-28)
 
