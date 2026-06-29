@@ -147,13 +147,13 @@
                               [seon.agent.ctx cap-result-body]
                               [seon.agent.ctx format-eval-row]
                               [seon.render.default recent-messages]
-                              [seon.db core-kinds]
+                              [seon.db core-attr-namespaces]
                               [seon.ui.components status-dot]]]
       (is (some? (get-in schemas [ns-sym fn-sym]))
           (str ns-sym "/" fn-sym " must be registered for instrumentation"))))
   ;; A wrapped fn rejects bad input with an instrumentation throw.
-  (is (instrument-traps? #(db/core-kinds :not-a-db))
-      "core-kinds must reject a non-db arg under instrumentation"))
+  (is (instrument-traps? #(db/core-attr-namespaces :not-a-db))
+      "core-attr-namespaces must reject a non-db arg under instrumentation"))
 
 (deftest guard-has-teeth-on-the-delegation-trap
   ;; The EXACT shape of the 7b9e771 catastrophe: `sample`'s 2-arity `opts`
@@ -299,7 +299,7 @@
     (check-clean! "db/as-of 2-arity"          #(db/as-of D (js/Date.)))
     (check-clean! "db/since 1-arity"          #(db/since (js/Date. 0)))
     (check-clean! "db/since 2-arity"          #(db/since D (js/Date. 0)))
-    (check-clean! "db/core-kinds 1-arity"     #(db/core-kinds D))
+    (check-clean! "db/core-attr-namespaces 1-arity" #(db/core-attr-namespaces D))
     (check-clean! "db/store-inventory 0-arity" #(db/store-inventory))
     (check-clean! "db/store-inventory 1-arity" #(db/store-inventory {:seon.db/system? true}))
     (check-clean! "db/assert-preconditions! 0" #(db/assert-preconditions!))

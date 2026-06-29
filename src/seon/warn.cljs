@@ -493,7 +493,7 @@
    id-attr, an undeclared kind is a real defect. Derived at render,
    self-heals the moment the kind is marked. Fires GLOBALLY across
    AGENT-authored kinds (:seon.warn/ns is ignored), but EXCLUDES
-   core-provenance kinds ([[seon.db/core-kinds]]) — agents can't and
+   core-provenance namespaces ([[seon.db/core-attr-namespaces]]) — agents can't and
    shouldn't re-register the compiled core's :map schemas, so nagging
    them about an unmarked core kind is a no-op task. (The fix for a
    core kind is to mark its :map schema {:seon.db/entity true} at
@@ -511,7 +511,7 @@
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
   (let [marked (marked-entity-id-attrs)
-        core   (db/core-kinds db)]
+        core   (db/core-attr-namespaces db)]
     {:seon.warn/kind :unmarked-entity-kinds
      :seon.warn/dev-only? true
      :seon.warn/affected

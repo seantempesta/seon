@@ -144,9 +144,8 @@
 
 (defn store-summary
   "The cluster's `seon.db/store-inventory` over db `db` — which attrs hold
-   data RIGHT NOW (the concise map-out: `:seon.db/kinds` rows, kind/attr/
-   datom counts). Consumed DEFENSIVELY by key (a parallel agent may reframe
-   `:seon.db/kinds` naming). Pure read."
+   data RIGHT NOW (the concise map-out: `:seon.db/attr-groups` rows,
+   namespace/attr/datom counts). Consumed DEFENSIVELY by key. Pure read."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] :map]}
   [db]
   (db/store-inventory {:seon.db/db db}))
@@ -323,22 +322,22 @@
           :style "grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));"}
     (doall (map #(agent-card-hiccup db %) agents))]])
 
-(defn- store-hiccup [{:seon.db/keys [kinds kind-count attr-count datom-count]}]
+(defn- store-hiccup [{:seon.db/keys [attr-groups attr-ns-count attr-count datom-count]}]
   [:div {:class "px-3 py-2 border-t border-base-800"}
    [:div {:class "flex items-baseline gap-3 mb-1"}
     [:span {:class "text-xs font-semibold text-text-200"} "store"]
     [:span {:class "text-[11px] font-mono text-text-500"}
-     (str (or kind-count 0) " kinds · " (or attr-count 0) " attrs · "
+     (str (or attr-ns-count 0) " namespaces · " (or attr-count 0) " attrs · "
           (or datom-count 0) " datoms")]
     [:a {:href "/data"
          :class "ml-auto text-[11px] font-mono text-amber-500 hover:text-amber-300"}
      "⛁ data browser →"]]
-   (if (seq kinds)
+   (if (seq attr-groups)
      [:div {:class "flex flex-col gap-0.5"}
       (doall
-        (for [{:seon.db/keys [kind attrs]} (take 8 kinds)]
-          [:div {:key (str kind) :class "text-[11px] font-mono text-text-400"}
-           [:span {:class "text-text-200"} (str kind)] " "
+        (for [{:seon.db/keys [attr-ns attrs]} (take 8 attr-groups)]
+          [:div {:key (str attr-ns) :class "text-[11px] font-mono text-text-400"}
+           [:span {:class "text-text-200"} (str attr-ns)] " "
            [:span {:class "text-text-600"}
             (str/join " "
                       (for [[a c] (take 6 attrs)] (str (name a) "(" c ")")))]]))]
@@ -397,15 +396,15 @@
         (str "; - " (when root? "★ ") id " [" (name state) "] " turns " turns"
              (when purpose (str " — " (truncate purpose 60))))))))
 
-(defn- store-ai [{:seon.db/keys [kinds kind-count attr-count datom-count]}]
+(defn- store-ai [{:seon.db/keys [attr-groups attr-ns-count attr-count datom-count]}]
   (str/join
     "\n"
     (concat
-      ["; STORE — which attrs hold data (curated; see (seon.db/store-inventory))"
-       (str "; " (or kind-count 0) " kinds · " (or attr-count 0)
+      ["; STORE — which attrs hold data, grouped by namespace (see (seon.db/store-inventory))"
+       (str "; " (or attr-ns-count 0) " namespaces · " (or attr-count 0)
             " attrs · " (or datom-count 0) " datoms")]
-      (for [{:seon.db/keys [kind attrs]} (take 8 kinds)]
-        (str "; - " kind ": "
+      (for [{:seon.db/keys [attr-ns attrs]} (take 8 attr-groups)]
+        (str "; - " attr-ns ": "
              (str/join " " (for [[a c] (take 6 attrs)] (str (name a) "(" c ")"))))))))
 
 (defn- activity-ai [events]

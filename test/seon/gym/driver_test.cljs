@@ -171,8 +171,8 @@
                                                        {:seon.db/db db}))
                                       inventory (db/store-inventory
                                                   {:seon.db/db db})
-                                      kinds     (set (map :seon.db/kind
-                                                          (:seon.db/kinds
+                                      kinds     (set (map :seon.db/attr-ns
+                                                          (:seon.db/attr-groups
                                                             inventory)))]
                                   ;; the seeded reuse surface IS domain attrs
                                   ;; (S-21 production-bug pin: agent DATA

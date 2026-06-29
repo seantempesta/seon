@@ -1143,24 +1143,29 @@
 ;; Store inventory — what's in the shared store, one query away.
 ;; ---------------------------------------------------------------------------
 
-(schema/register! ::kind     :keyword)
-(schema/register! ::attrs    [:map-of :keyword :int])
-(schema/register! ::system?  :boolean)
-(schema/register! ::row-ids  [:set :int])
-(schema/register! ::kind-set [:set ::kind])
+;; An entity has NO kind — it is its attributes + connections. This
+;; inventory groups the attributes that hold data BY THEIR NAMESPACE
+;; (`:my.kb`, `:seon.eval`, …); the namespace is the row LABEL, never an
+;; entity-type stamp. To FIND entities you scan one attribute's index
+;; (attribute-presence); these rows just tell you WHICH attrs to scan.
+(schema/register! ::attr-ns      :keyword)
+(schema/register! ::attrs        [:map-of :keyword :int])
+(schema/register! ::system?      :boolean)
+(schema/register! ::row-ids      [:set :int])
+(schema/register! ::attr-ns-set  [:set ::attr-ns])
 (schema/register! ::inventory-row
   [:map
-   [::kind  ::kind]
-   [::attrs ::attrs]])
-(schema/register! ::kind-count  :int)
-(schema/register! ::attr-count  :int)
-(schema/register! ::datom-count :int)
+   [::attr-ns ::attr-ns]
+   [::attrs   ::attrs]])
+(schema/register! ::attr-ns-count :int)
+(schema/register! ::attr-count    :int)
+(schema/register! ::datom-count   :int)
 (schema/register! ::inventory
   [:map
-   [::kinds       [:vector ::inventory-row]]
-   [::kind-count  ::kind-count]
-   [::attr-count  ::attr-count]
-   [::datom-count ::datom-count]])
+   [::attr-groups   [:vector ::inventory-row]]
+   [::attr-ns-count ::attr-ns-count]
+   [::attr-count    ::attr-count]
+   [::datom-count   ::datom-count]])
 
 (defn- row-origin-scan
   "ONE pass over every live datom `[e a tx]` — the provenance facts the
@@ -1203,7 +1208,7 @@
    added AFTER bootstrap. Per-ROW, never per-kind-name: an
    agent-authored `:seon.fn` row is NOT in this set; a boot-indexed
    one is. THE shared provenance derivation — [[store-inventory]]'s
-   user/system split, [[core-kinds]], and the inspector's /data
+   user/system split, [[core-attr-namespaces]], and the inspector's /data
    browser all read this one mechanism."
   {:malli/schema [:=> [:catn [::db ::db-val]] ::row-ids]}
   [db]
@@ -1261,18 +1266,18 @@
                 m))
             {} triples)))
 
-(defn core-kinds
+(defn core-attr-namespaces
   "Attr namespaces (keywords) whose `:seon.schema/key` row is a
-   BOOTSTRAP row ([[bootstrap-row-ids]]) — kinds the compiled
-   core's boot index registered, as opposed to agent-registered
-   kinds. Used by [[store-inventory]] for its user-domain-first
-   ordering. The 2-arity takes a precomputed bootstrap set so one scan
-   can serve multiple consumers."
+   BOOTSTRAP row ([[bootstrap-row-ids]]) — the namespaces the compiled
+   core's boot index registered, as opposed to agent-registered ones.
+   Used by [[store-inventory]] for its user-domain-first ordering. The
+   2-arity takes a precomputed bootstrap set so one scan can serve
+   multiple consumers."
   {:malli/schema
    [:function
-    [:=> [:catn [::db ::db-val]] ::kind-set]
-    [:=> [:catn [::db ::db-val] [::bootstrap-rows ::row-ids]] ::kind-set]]}
-  ([db] (core-kinds db (bootstrap-row-ids db)))
+    [:=> [:catn [::db ::db-val]] ::attr-ns-set]
+    [:=> [:catn [::db ::db-val] [::bootstrap-rows ::row-ids]] ::attr-ns-set]]}
+  ([db] (core-attr-namespaces db (bootstrap-row-ids db)))
   ([db bootstrap-rows]
    (into #{}
          (keep (fn [[s k]]
@@ -1283,23 +1288,26 @@
 
 (defn store-inventory
   "Discovery call: WHICH ATTRIBUTES HOLD DATA in this cluster's store
-   RIGHT NOW, so you know what you can query for. Returns a map:
+   RIGHT NOW, so you know what you can query for. Entities have no kind;
+   this groups the live attributes BY THEIR NAMESPACE. Returns a map:
 
-     {:seon.db/kinds       [{:seon.db/kind  :my.kb           ; the attr namespace
-                             :seon.db/attrs {:my.kb/question 3   ; attr -> row count
-                                             :my.kb/answer   3}}
-                            …
-                            {:seon.db/kind :seon.eval …}]    ; core kinds last
-      :seon.db/kind-count  9     ; distinct kinds (attr namespaces) with data
-      :seon.db/attr-count  53    ; distinct attrs with data
-      :seon.db/datom-count 124}  ; total entity/attr pairs in scope
+     {:seon.db/attr-groups   [{:seon.db/attr-ns :my.kb        ; the attr namespace
+                               :seon.db/attrs {:my.kb/question 3  ; attr -> row count
+                                               :my.kb/answer   3}}
+                              …
+                              {:seon.db/attr-ns :seon.eval …}] ; core namespaces last
+      :seon.db/attr-ns-count 9    ; distinct attr namespaces with data
+      :seon.db/attr-count    53   ; distinct attrs with data
+      :seon.db/datom-count   124} ; total entity/attr pairs in scope
 
-   `:seon.db/kinds` is one row per attr NAMESPACE (the kind), each
-   carrying every attr of that namespace that has ≥1 live row with its
-   entity count. Pure query, not a snapshot — an attr appears the
-   moment its first row lands and vanishes when all its rows retract.
-   Attrs only REGISTERED (no rows yet) don't show; pair with
-   [[installed-schema]] to see every registered attr-namespace.
+   `:seon.db/attr-groups` is one row per attr NAMESPACE, each carrying
+   every attr of that namespace that has ≥1 live row with its entity
+   count. To FIND those entities, scan one attr's index directly
+   (attribute-presence — `[?e :my.kb/question]`); the namespace is a
+   display grouping, not an entity type. Pure query, not a snapshot — an
+   attr appears the moment its first row lands and vanishes when all its
+   rows retract. Attrs only REGISTERED (no rows yet) don't show; pair
+   with [[installed-schema]] to see every registered attr.
 
    DEFAULT scope = data added AFTER bootstrap. Boot-index rows (the
    compiled core's `:seon.fn`/`:seon.schema`/`:seon.ns`/seed, minted
@@ -1307,8 +1315,8 @@
    entities are excluded by per-ROW provenance ([[bootstrap-row-ids]]),
    so agent-authored rows count while the boot index does not. Pass
    `{:seon.db/system? true}` for the FULL inventory including the boot
-   index. Kinds are ordered user-domain-first ([[core-kinds]]),
-   alphabetical within each group.
+   index. Namespaces are ordered user-domain-first
+   ([[core-attr-namespaces]]), alphabetical within each group.
 
    Check this BEFORE researching or registering: a kind that exists
    means data you can query — datalog its listed attrs directly (the
@@ -1317,7 +1325,7 @@
 
    (def inv (seon.db/store-inventory))
    (keys inv)                                ; the section keys
-   (count (:seon.db/kinds inv))              ; how many kinds hold data
+   (count (:seon.db/attr-groups inv))        ; how many namespaces hold data
    (seon.db/query {:seon.db/query            ; then read one
                    '[:find ?q :where [?e :my.kb/question ?q]]})"
   {:malli/schema
@@ -1331,7 +1339,7 @@
   ([{::keys [db conn system?] :or {conn *conn*}}]
    (let [db (or db @(internal/resolve-conn conn))
          {::keys [bootstrap-rows tx-rows pairs]} (row-origin-scan db)
-         sub-kinds (core-kinds db bootstrap-rows)
+         core-nses (core-attr-namespaces db bootstrap-rows)
          counts (reduce (fn [m [e a]]
                           (if (or (system-pull-attr? a) (nil? (namespace a))
                                   ;; default view: post-bootstrap data
@@ -1345,15 +1353,15 @@
                         {} pairs)
          rows   (->> counts
                      (group-by (fn [[a _]] (keyword (namespace a))))
-                     ;; User-domain kinds FIRST (consult-first — see
-                     ;; docstring), core kinds after; alphabetical within.
+                     ;; User-domain namespaces FIRST (consult-first — see
+                     ;; docstring), core namespaces after; alphabetical within.
                      (sort-by (fn [[ns-kw _]]
-                                [(if (contains? sub-kinds ns-kw) 1 0)
+                                [(if (contains? core-nses ns-kw) 1 0)
                                  (str ns-kw)]))
                      (mapv (fn [[ns-kw attr-counts]]
-                             {::kind  ns-kw
-                              ::attrs (into (sorted-map) attr-counts)})))]
-     {::kinds       rows
-      ::kind-count  (count rows)
-      ::attr-count  (count counts)
-      ::datom-count (reduce + 0 (vals counts))})))
+                             {::attr-ns ns-kw
+                              ::attrs   (into (sorted-map) attr-counts)})))]
+     {::attr-groups   rows
+      ::attr-ns-count (count rows)
+      ::attr-count    (count counts)
+      ::datom-count   (reduce + 0 (vals counts))})))

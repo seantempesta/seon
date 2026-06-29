@@ -74,6 +74,36 @@ Applied to datahike, four moves replace every "for each kind":
 If you catch yourself writing a `:type`/`:kind` field or a per-kind loop, stop
 and reframe in attributes + connections + provenance.
 
+**ENUMERATE stored data the right way** — `store-inventory`'s actual job is to
+group the live attributes BY THEIR NAMESPACE (a display grouping, not an entity
+type) and, when you want the entities themselves, scan one identity attr's index.
+REPL-proven against the live store:
+
+```clojure
+;; "what holds data?" — attr namespaces + counts (no entity kind anywhere)
+(seon.db/store-inventory)
+;; => {:seon.db/attr-groups   [{:seon.db/attr-ns :my.kb
+;;                              :seon.db/attrs {:my.kb/question 3 :my.kb/answer 3}} …]
+;;     :seon.db/attr-ns-count 9 :seon.db/attr-count 53 :seon.db/datom-count 124}
+
+;; enumerate entities BY ID-ATTR PRESENCE (scan that attr's index)
+(seon.db/query {:seon.db/query '[:find ?id :where [?e :seon.agent/id ?id]]})
+
+;; group the whole store by which identity attr each entity carries
+(->> (seon.db/query {:seon.db/query '[:find ?a :where [?s :seon.schema/key ?a]]})
+     (map first)
+     (filter seon.schema/identity-attr?)
+     (keep (fn [a]
+             (let [n (count (seon.db/query
+                              {:seon.db/query [:find '?e :where ['?e a]]}))]
+               (when (pos? n) [a n])))))
+;; => ([:seon.fn/sym 614] [:seon.eval/id 317] [:my.kb.runtime/slug 7] …)
+```
+
+The grouping label is always an **attribute** (a namespace or an id-attr), never a
+"kind". `store-inventory` returns `:seon.db/attr-groups` keyed by `:seon.db/attr-ns`
+for exactly this reason.
+
 ## Quick start — register, transact (check the envelope), read back
 
 Inside namespace `my.kb.source` you write `::id` and the reader expands it to

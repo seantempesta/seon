@@ -1,10 +1,13 @@
 (ns seon.agent.ctx.inventory
   "The stored-data inventory context section — a cheap, reactive map of
-   what the shared store holds RIGHT NOW (one line per stored KIND with
-   each attr's live row count), rendered as a single-`;` comment-block
-   (one line per kind). Symbol-wired into the composer layout
-   (`seon.agent.ctx/default-seed-blocks`) as `'seon.agent.ctx.inventory/inventory-block`;
-   loaded at boot so the symbol resolves for `seon.eval/lookup-value`."
+   what the shared store holds RIGHT NOW (one line per attribute
+   NAMESPACE with each attr's live row count), rendered as a single-`;`
+   comment-block. Entities have no kind: this groups the live attributes
+   by their namespace so the agent knows which attr's index to scan
+   (attribute-presence) to FIND data. Symbol-wired into the composer
+   layout (`seon.agent.ctx/default-seed-blocks`) as
+   `'seon.agent.ctx.inventory/inventory-block`; loaded at boot so the
+   symbol resolves for `seon.eval/lookup-value`."
   (:require
     [clojure.string :as str]
     [seon.db :as db]
@@ -41,10 +44,11 @@
 
 (def ^:private inventory-header
   (str "; stored data — what this cluster holds NOW (post-bootstrap rows).\n"
-       "; One line per KIND: each attr NAME, its live count, and «sample\n"
-       "; values» for low-card lookup columns. The «..» are ILLUSTRATIVE\n"
-       "; keys to query by — never quote one as the answer; query for the\n"
-       "; real value. Consult BEFORE researching or registering."))
+       "; One line per attribute NAMESPACE: each attr NAME, its live count,\n"
+       "; and «sample values» for low-card lookup columns. To read a row,\n"
+       "; scan that attr's index — [?e :the/attr ?v]. The «..» are\n"
+       "; ILLUSTRATIVE keys to query by — never quote one as the answer;\n"
+       "; query for the real value. Consult BEFORE researching or registering."))
 
 (defn- lookup-attr?
   "True when `attr`'s registered schema is a LOOKUP/FILTER type whose
@@ -137,19 +141,21 @@
 (defn inventory-block
   "The stored-data discovery surface (always-changing volatile tail): a
    CHEAP map of what the shared store holds RIGHT NOW, derived
-   from [[seon.db/store-inventory]] (user-domain kinds first). ONE line
-   per kind — the kind (attr namespace) is the line label, then
+   from [[seon.db/store-inventory]] (user-domain namespaces first). ONE
+   line per attribute NAMESPACE — the namespace is the line label, then
    space-separated `attr-name count` pairs with the namespace stripped
-   off each attr name (the line label already carries it). LOW-CARDINALITY
-   identity/enum attrs also get an ILLUSTRATIVE SAMPLE of their DISTINCT
-   values inline as `attr count «v v ...»` ([[value-tokens]]) so an honest
-   query lands on real keys instead of a guessed-then-empty ident; the
-   guillemets mark the sample as non-authoritative (query for the actual
-   value, never quote the sample) — enum members come
-   from the schema (no query), identity values from ONE capped distinct
-   query when the count is ≤ [[value-cardinality-threshold]]. Pure fn of
-   the db; stores nothing; recomputed each render so a newly-stored
-   kind appears next turn and a fully-retracted one vanishes (see
+   off each attr name (the line label already carries it). Entities have
+   no kind; the namespace is just a grouping — to read a row, scan that
+   attr's index (`[?e :the/attr ?v]`). LOW-CARDINALITY identity/enum
+   attrs also get an ILLUSTRATIVE SAMPLE of their DISTINCT values inline
+   as `attr count «v v ...»` ([[value-tokens]]) so an honest query lands
+   on real keys instead of a guessed-then-empty ident; the guillemets
+   mark the sample as non-authoritative (query for the actual value,
+   never quote the sample) — enum members come from the schema (no
+   query), identity values from ONE capped distinct query when the count
+   is ≤ [[value-cardinality-threshold]]. Pure fn of the db; stores
+   nothing; recomputed each render so a newly-stored namespace appears
+   next turn and a fully-retracted one vanishes (see
    docs/seon/concepts/reactive-context).
 
    REACTIVE: returns \"\" (composer drops the section) when the store
@@ -159,7 +165,7 @@
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db]}]
   (let [;; Show DOMAIN KNOWLEDGE only — `my.*` and any third-party (acme)
-        ;; kinds the human/agents stored. The framework's own runtime
+        ;; namespaces the human/agents stored. The framework's own runtime
         ;; exhaust (`seon.agent`, `seon.eval`, `seon.ns`, `seon.agent.turn`,
         ;; …) is post-bootstrap too, but it is machinery, not knowledge to
         ;; consult before researching — the transcript already shows the
@@ -168,20 +174,20 @@
         ;; drowning the one `my.kb` line under bookkeeping. Empty after the
         ;; filter → "" → the section reactively vanishes (a fresh cluster
         ;; with no stored knowledge shows no inventory).
-        rows (->> (:seon.db/kinds (db/store-inventory {:seon.db/db db}))
-                  (remove (fn [{kind :seon.db/kind}]
-                            (str/starts-with? (name kind) "seon."))))]
+        rows (->> (:seon.db/attr-groups (db/store-inventory {:seon.db/db db}))
+                  (remove (fn [{ns-kw :seon.db/attr-ns}]
+                            (str/starts-with? (name ns-kw) "seon."))))]
     (if (seq rows)
       (let [;; ONE shared bootstrap-scope scan per render — values must be
             ;; post-bootstrap (matching store-inventory's counts), so a
             ;; low-card identity query excludes boot-index entities.
             boot-ids (db/bootstrap-row-ids db)
-            ;; Each kind row rides as a `;` comment so the whole section
+            ;; Each namespace row rides as a `;` comment so the whole section
             ;; reads as eval'able Clojure (the context IS one live REPL) —
             ;; the agent reads the row, queries the named attrs, never
             ;; evaluates this line.
-            lines (map (fn [{kind :seon.db/kind attrs :seon.db/attrs}]
-                         (str "; " (name kind) ": "
+            lines (map (fn [{ns-kw :seon.db/attr-ns attrs :seon.db/attrs}]
+                         (str "; " (name ns-kw) ": "
                               (str/join " "
                                 (map (fn [[a c]] (attr-token db boot-ids a c))
                                      attrs))))

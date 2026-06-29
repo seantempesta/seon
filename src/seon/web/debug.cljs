@@ -714,19 +714,19 @@
 (defn- data-params
   "The /data browser's view params from the request URL."
   [^js req]
-  (let [kind (some-> (query-param req "kind") not-empty keyword)
+  (let [ns-kw (some-> (query-param req "ns") not-empty keyword)
         page (let [p (js/parseInt (or (query-param req "page") "0") 10)]
                (if (js/Number.isNaN p) 0 (max 0 p)))]
-    {::data-kind    kind
+    {::data-ns      ns-kw
      ::data-page    page
      ::data-system? (= "1" (query-param req "system"))}))
 
 (defn- data-qs
   "Query string (\"\" or \"?…\") for a /data view-params map."
-  [{::keys [data-kind data-page data-system?]}]
+  [{::keys [data-ns data-page data-system?]}]
   (let [qs (cond-> []
-             data-kind        (conj (str "kind=" (js/encodeURIComponent
-                                                   (subs (str data-kind) 1))))
+             data-ns          (conj (str "ns=" (js/encodeURIComponent
+                                                 (subs (str data-ns) 1))))
              (pos? data-page) (conj (str "page=" data-page))
              data-system?     (conj "system=1"))]
     (if (seq qs) (str "?" (str/join "&" qs)) "")))
@@ -740,8 +740,9 @@
     (boolean (and n (not= n "db") (not (str/starts-with? n "db."))))))
 
 (defn- data-scan
-  "One pass powering the whole /data page:
-   `{::kinds {kind → #{eids}} ::attr-counts {kind → {attr → n}}}`.
+  "One pass powering the whole /data page, grouping live attrs BY THEIR
+   NAMESPACE (entities have no kind):
+   `{::ns-groups {ns → #{eids}} ::attr-counts {ns → {attr → n}}}`.
    Rows are post-bootstrap data rows by default (bootstrap rows and tx
    provenance entities excluded — `seon.db/bootstrap-row-ids` is the
    shared derivation); `system?` includes every row."
@@ -760,11 +761,11 @@
                       (contains? bootstrap e)
                       (contains? tx-ids e))
                 acc
-                (let [kind (keyword (namespace a))]
+                (let [ns-kw (keyword (namespace a))]
                   (-> acc
-                      (update-in [::kinds kind] (fnil conj #{}) e)
-                      (update-in [::attr-counts kind a] (fnil inc 0))))))
-            {::kinds {} ::attr-counts {}}
+                      (update-in [::ns-groups ns-kw] (fnil conj #{}) e)
+                      (update-in [::attr-counts ns-kw a] (fnil inc 0))))))
+            {::ns-groups {} ::attr-counts {}}
             pairs)))
 
 (defn- data-toggle-link
@@ -781,23 +782,24 @@
      "● system data shown — hide"
      "○ show system data")])
 
-(defn- data-kind-index
-  "Level 1 — every stored kind with its row count, kind-name order."
-  [kinds params]
-  (if (empty? kinds)
+(defn- data-ns-index
+  "Level 1 — every stored attribute NAMESPACE with its row count,
+   namespace-name order."
+  [ns-groups params]
+  (if (empty? ns-groups)
     [:div {:class "text-text-500 italic text-xs font-mono p-2"}
      "no data rows yet — agents store rows here as they work"]
     (into [:div {:class "flex flex-col"}]
-          (map (fn [[kind eids]]
-                 [:a {:href (data-url (assoc params ::data-kind kind
+          (map (fn [[ns-kw eids]]
+                 [:a {:href (data-url (assoc params ::data-ns ns-kw
                                              ::data-page 0))
                       :class (str "flex items-baseline gap-2 px-2 py-1 "
                                   "border-b border-base-800/60 "
                                   "hover:bg-base-900 text-xs font-mono")}
-                  [:span {:class "text-amber-400"} (str "● " kind)]
+                  [:span {:class "text-amber-400"} (str "● " ns-kw)]
                   [:span {:class "ml-auto text-text-400 tabular-nums"}
                    (str (count eids) (if (= 1 (count eids)) " row" " rows"))]]))
-          (sort-by (comp str key) kinds))))
+          (sort-by (comp str key) ns-groups))))
 
 (defn- data-row-table
   "The page's rows as one table: columns = :db/id + the union of the
@@ -829,11 +831,11 @@
                          cols)))
             rows)]]))
 
-(defn- data-kind-detail
-  "Level 2 — one kind: its attrs with counts + the paginated rows
-   table. Rows ordered by :db/id ascending (insertion order,
-   deterministic for a given db value); explicit prev/next."
-  [db kind eids attr-counts params]
+(defn- data-ns-detail
+  "Level 2 — one attribute namespace: its attrs with counts + the
+   paginated rows table. Rows ordered by :db/id ascending (insertion
+   order, deterministic for a given db value); explicit prev/next."
+  [db ns-kw eids attr-counts params]
   (let [sorted    (vec (sort eids))
         total     (count sorted)
         last-page (max 0 (quot (max 0 (dec total)) data-page-size))
@@ -843,9 +845,9 @@
                           (min (+ start data-page-size) total))]
     [:div {:class "flex flex-col gap-2"}
      [:div {:class "flex items-baseline gap-3 text-xs font-mono"}
-      [:a {:href (data-url (assoc params ::data-kind nil ::data-page 0))
-           :class "text-amber-500 hover:text-amber-300"} "← all kinds"]
-      [:span {:class "text-amber-400"} (str "● " kind)]
+      [:a {:href (data-url (assoc params ::data-ns nil ::data-page 0))
+           :class "text-amber-500 hover:text-amber-300"} "← all namespaces"]
+      [:span {:class "text-amber-400"} (str "● " ns-kw)]
       [:span {:class "text-text-400"}
        (str total (if (= 1 total) " row" " rows"))]]
      (when (seq attr-counts)
@@ -856,7 +858,7 @@
              (sort-by (comp str key) attr-counts)))
      (if (zero? total)
        [:div {:class "text-text-500 italic text-xs font-mono"}
-        (str "no rows under " kind " in this view — retracted, or stored "
+        (str "no rows under " ns-kw " in this view — retracted, or stored "
              "by the bootstrap (toggle system data)")]
        [:div {:class "flex flex-col gap-2"}
         (data-row-table db page-eids)
@@ -876,9 +878,9 @@
 (defn- data-browser-fragment
   "The whole /data surface — ONE morph target (`#data-browser`),
    derived 100% from the DB at render time."
-  [{::keys [data-kind data-system?] :as params}]
+  [{::keys [data-ns data-system?] :as params}]
   (let [db (deref db/*conn*)
-        {::keys [kinds attr-counts]} (data-scan db data-system?)]
+        {::keys [ns-groups attr-counts]} (data-scan db data-system?)]
     [:div {:id "data-browser" :class "flex flex-col gap-3"}
      [:div {:class "flex items-baseline gap-4 flex-wrap"}
       [:h1 {:class "text-sm font-mono font-semibold text-text-100"}
@@ -892,12 +894,12 @@
        [:a {:href "/world"
             :class "text-xs font-mono text-amber-500 hover:text-amber-300"}
         "← all agents"]]]
-     (if data-kind
-       (data-kind-detail db data-kind
-                         (get kinds data-kind #{})
-                         (get attr-counts data-kind {})
-                         params)
-       (data-kind-index kinds params))]))
+     (if data-ns
+       (data-ns-detail db data-ns
+                       (get ns-groups data-ns #{})
+                       (get attr-counts data-ns {})
+                       params)
+       (data-ns-index ns-groups params))]))
 
 (defn- data-page-html
   "Full page for GET /data — the SSE stream carries this view's params so

@@ -183,24 +183,27 @@
     (default/pretty-html input-map)))
 
 ;; ============================================================
-;; Entity-kind resolution (the `:seon.schema`-driven renderer dispatch).
+;; Entity-shape resolution (the `:seon.schema`-driven renderer dispatch).
+;; An entity has no kind — it is its attributes; a renderable SHAPE is a
+;; `:seon.schema` row matched by ATTRIBUTE-PRESENCE.
 ;;
-;; Renderable entity KINDS are `:seon.schema` rows carrying both an
-;; id-attr and a `:seon.schema/render-fn`. `entity-primary-kind` picks
-;; the most-specific kind whose required-attrs are all present on an
+;; Renderable entity SHAPES are `:seon.schema` rows carrying both an
+;; id-attr and a `:seon.schema/render-fn`. `entity-primary-schema` picks
+;; the most-specific schema whose required-attrs are all present on an
 ;; entity; `entity-render` / `render-entity-html` / `render-entity-ai`
-;; resolve a render symbol from that kind (or a per-entity override).
+;; resolve a render symbol from that schema (or a per-entity override).
 ;;
 ;; Shared by the test-capture-as-data rendering (`render-entity-html`
 ;; etc.); the inspector's debug right pane mirrors the left's block set
 ;; via these same converters.
 ;; ============================================================
 
-(defn- renderable-kinds
+(defn- renderable-schemas
   "Datalog-driven enumeration of every RENDERABLE entity-shape
    `:seon.schema` row in the DB — rows carrying BOTH an id-attr and a
-   `:seon.schema/render-fn`. Returns a seq of `{:kind <kw> :id-attr <kw>
-   :ai <sym> :html <sym>}`. Each schema entity is materialized at agent
+   `:seon.schema/render-fn`. Returns a seq of `{:schema <key> :id-attr <kw>
+   :ai <sym> :html <sym>}` (`:schema` is the `:seon.schema/key`). Each
+   schema entity is materialized at agent
    boot from `seon.schema/all-entity-schemas-tx-data` (and on every
    subsequent `register!`), so the renderer reads schemas from
    core state instead of walking the in-memory
@@ -230,31 +233,31 @@
                               [?s :seon.schema/render-html-fn ?html]]
                             db))]
     (map (fn [[k id-attr ai]]
-           {:kind    k
+           {:schema  k
             :id-attr id-attr
             :ai      ai
             :html    (get htmls k)})
          base)))
 
-;; Single-slot cache for the schema-kind lookup tables, keyed by db
-;; value identity. `entity-primary-kind` used to run one datalog query
+;; Single-slot cache for the schema lookup tables, keyed by db value
+;; identity. `entity-primary-schema` used to run one datalog query
 ;; PER ENTITY through the FilteredDB (each datom access re-runs the
 ;; filter pred) — the dominant cost of an inspector render on the
 ;; file-backed store. The tables derive purely from `:seon.schema`
 ;; rows, which are immutable for a given db value, so one slot keyed
 ;; by `identical?` is correct and survives exactly as long as the
 ;; render that's using it.
-(defonce ^:private !kind-cache (atom nil))
+(defonce ^:private !schema-cache (atom nil))
 
-(defn- kind-tables
-  "Return `{:kinds <renderable-kinds seq> :kinds-by-kw {<kw> <info>}
-   :required-by-kind {<kw> #{<attr> …}}}` for `db`, computed once per
+(defn- schema-tables
+  "Return `{:schemas <renderable-schemas seq> :schemas-by-key {<key> <info>}
+   :required-by-schema {<key> #{<attr> …}}}` for `db`, computed once per
    db value (single-slot identity-keyed cache)."
   [db]
-  (let [c @!kind-cache]
+  (let [c @!schema-cache]
     (if (and c (identical? (:db c) db))
       (:tables c)
-      (let [kinds    (renderable-kinds db)
+      (let [schemas  (renderable-schemas db)
             req-rows (d/q '[:find ?key ?req
                             :where
                             [?s :seon.schema/key ?key]
@@ -263,18 +266,19 @@
             required (reduce (fn [m [k req]]
                                (update m k (fnil conj #{}) req))
                              {} req-rows)
-            tables   {:kinds            kinds
-                      :kinds-by-kw      (into {} (map (juxt :kind identity) kinds))
-                      :required-by-kind required}]
-        (reset! !kind-cache {:db db :tables tables})
+            tables   {:schemas            schemas
+                      :schemas-by-key     (into {} (map (juxt :schema identity) schemas))
+                      :required-by-schema required}]
+        (reset! !schema-cache {:db db :tables tables})
         tables))))
 
-(defn- entity-primary-kind
-  "Pick the most-specific `:seon.schema` kind whose required-attrs are
-   ALL present on `entity`. Pure in-memory subset test against the
-   per-db cached `:required-by-kind` table ([[kind-tables]]) — the
-   former per-entity datalog query was the inspector's render
-   bottleneck on the file store.
+(defn- entity-primary-schema
+  "Pick the most-specific `:seon.schema` shape whose required-attrs are
+   ALL present on `entity` (attribute-presence — an entity has no kind).
+   Pure in-memory subset test against the per-db cached
+   `:required-by-schema` table ([[schema-tables]]) — the former
+   per-entity datalog query was the inspector's render bottleneck on the
+   file store.
 
    A schema 'fully matches' when every required attr is present on the
    entity. Among full matches, the schema with the most required attrs
@@ -283,12 +287,12 @@
   [db entity]
   (let [present (set (filter keyword? (keys entity)))]
     (when (seq present)
-      (let [{:keys [required-by-kind]} (kind-tables db)
+      (let [{:keys [required-by-schema]} (schema-tables db)
             full (keep (fn [[k req]]
                          (when (and (seq req)
                                     (every? #(contains? present %) req))
                            [k (count req)]))
-                       required-by-kind)]
+                       required-by-schema)]
         (when (seq full)
           (->> full
                (sort-by (juxt (comp - second) (comp str first)))
@@ -298,18 +302,19 @@
   "Resolve the render value for `entity` in `render` (`:html` or `:ai`)
    — the two-step resolution both renders share: per-entity attr override
    wins (`:seon.render/html` / `:seon.render/ai`, bridge-decoded), else
-   the entity's primary `:seon.schema` kind's default symbol. nil when
+   the entity's primary `:seon.schema` shape's default symbol. nil when
    neither step yields a value."
   [db entity render]
   (let [attr (case render :html :seon.render/html :ai :seon.render/ai)]
     (or (some->> (get entity attr)
                  (db/decode-edn-value attr))
-        (let [{:keys [kinds-by-kw]} (kind-tables db)
-              kind (entity-primary-kind db entity)]
-          ;; NOTE: `(get kinds-by-kw kind)`, NOT `(some-> kinds-by-kw kind …)`
-          ;; — the latter invokes `kind` as a fn and throws a TypeError
-          ;; when entity-primary-kind returns nil (no kind matched).
-          (get (get kinds-by-kw kind) render)))))
+        (let [{:keys [schemas-by-key]} (schema-tables db)
+              schema (entity-primary-schema db entity)]
+          ;; NOTE: `(get schemas-by-key schema)`, NOT
+          ;; `(some-> schemas-by-key schema …)` — the latter invokes
+          ;; `schema` as a fn and throws a TypeError when
+          ;; entity-primary-schema returns nil (no schema matched).
+          (get (get schemas-by-key schema) render)))))
 
 ;; ============================================================
 ;; The ONE envelope-unwrap — every render path consumes the SAME
@@ -347,11 +352,11 @@
 
 (defn render-entity-html
   "Render `entity` to hiccup via its resolved `:seon.render/html` symbol.
-   Per-entity override wins; else falls back to the entity-kind schema's
-   default html symbol. Returns nil when no symbol resolves OR the
-   resolved fn returns nil.
+   Per-entity override wins; else falls back to the entity's primary
+   schema's default html symbol. Returns nil when no symbol resolves OR
+   the resolved fn returns nil.
 
-   The kind's html symbol IS a converter (`seon.handlers.*/render-html`)
+   The schema's html symbol IS a converter (`seon.handlers.*/render-html`)
    that returns BARE hiccup, called with the entity under
    `:seon.render/node`. A renderer that THROWS does NOT vanish (same
    posture as the live tile's `error-response`): the tile becomes a
@@ -593,7 +598,7 @@
 ;; Agent tile (live-tiles U1) — the agent's ONE always-visible HTML
 ;; surface. Resolution (seon.render.live-tile/wired-content):
 ;; per-entity `:seon.render.live-tile/content` → the core
-;; welcome. Neither `:seon.render/html` nor the `:seon.agent` KIND
+;; welcome. Neither `:seon.render/html` nor the `:seon.agent` schema
 ;; default is consulted for the TILE — that key means only the
 ;; generic entity-tile render (one key, one meaning; PRD §8.1).
 ;; ============================================================
@@ -738,10 +743,10 @@
 (defn render-entity-ai
   "Render `entity` to text via its resolved `:seon.render/ai` symbol.
    Per-entity override wins; else schema property for the entity's
-   primary kind. Returns nil if no symbol resolves OR the fn returns
+   primary schema. Returns nil if no symbol resolves OR the fn returns
    nil. Mirror of `render-entity-html` for the AI path.
 
-   The kind's ai symbol IS a converter (`seon.handlers.*/render-ai`)
+   The schema's ai symbol IS a converter (`seon.handlers.*/render-ai`)
    returning a BARE String, called with the entity under
    `:seon.render/node` (`:seon.render/entity` tolerated)."
   {:malli/schema [:=> [:cat :map] [:maybe :string]]}
@@ -827,10 +832,10 @@
        (with-out-str (pprint/pprint (apply dissoc node render-control-attrs)))])))
 
 (defn- schema-default-renderer
-  "resolve-render step 4 — the renderer the node's primary `:seon.schema` kind
-   registers (or a per-entity slot override), via the existing
-   `entity-render` / `entity-primary-kind` dispatch. Calls the resolved
-   converter symbol (bare value); nil when no kind matches."
+  "resolve-render step 4 — the renderer the node's primary `:seon.schema`
+   shape registers (or a per-entity slot override), via the existing
+   `entity-render` / `entity-primary-schema` dispatch. Calls the resolved
+   converter symbol (bare value); nil when no schema matches."
   [view node input]
   (let [db (or (:seon.db/db input) @db/*conn*)
         in (assoc input :seon.db/db db :seon.render/node node)]
@@ -857,7 +862,7 @@
      3. fn-symbol → the fn. An AGENT-authored symbol is invoked SCI-BOUNDED
         (a runaway agent fn must not freeze the single-threaded pod);
         a core symbol calls direct (fast, trusted);
-     4. absent → the schema-default (the node's primary kind's converter);
+     4. absent → the schema-default (the node's primary schema's converter);
      5. none → the GENERIC default (any data → Clojure / a dump)."
   [view node]
   (let [slot-val (get node view)]
@@ -882,8 +887,8 @@
               :else r)))
         (let [f (eval/lookup-value slot-val)]
           (if f f (fn [_] (missing-render view (renderable-id node) slot-val)))))
-      ;; no explicit slot: try the node's schema-kind converter; if no kind
-      ;; matches (nil), fall to the generic any-data default.
+      ;; no explicit slot: try the node's primary-schema converter; if no
+      ;; schema matches (nil), fall to the generic any-data default.
       :else (fn [input]
               (or (schema-default-renderer view node input)
                   ((generic-default-renderer view) input))))))
