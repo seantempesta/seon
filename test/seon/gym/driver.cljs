@@ -602,21 +602,22 @@
 
 (defn- home-ns-toolkit-aliases
   "Map of `my.*` TOOLKIT dotted-ns-name -> its short alias, DERIVED from
-   seon.agent.ctx.namespaces/canonical-full-my-ns (the curated toolkit set
-   the agent composes its canvas/memory from). The alias is the last dotted
-   segment — the CONVENTION every agent writes the toolkit by (`my.tile` →
-   `tile`, `my.ui` → `ui`, `my.data` → `data`, `my.kb` → `kb`), confirmed by
-   the toolkit test nses' `(:require [my.tile :as tile] …)` heads. These are
-   NOT in [[home-ns-seon-aliases]] (a DIFFERENT wiring than the seon.* verbs
-   in home-ns-require-specs), yet the ORIGINAL alias-blind instance was a
+   (seon.agent.ctx.namespaces/always-full-my-nses) (the my.* members of the
+   resolved config `:seon.config/always` policy — the toolkit set the agent
+   composes its canvas/memory from). The alias is the last dotted segment —
+   the CONVENTION every agent writes the toolkit by (`my.tile` → `tile`,
+   `my.ui` → `ui`, `my.data` → `data`, `my.kb` → `kb`), confirmed by the
+   toolkit test nses' `(:require [my.tile :as tile] …)` heads. These are NOT in
+   [[home-ns-seon-aliases]] (a DIFFERENT wiring than the seon.* verbs in
+   home-ns-require-specs), yet the ORIGINAL alias-blind instance was a
    `my.tile/button` predicate — so without them the guard misses the whole
-   toolkit-alias class. Derives from the curated set, never hardcodes."
+   toolkit-alias class. Derives from the policy, never hardcodes."
   []
   (into {}
         (map (fn [k]
                (let [dotted (name k)]
                  [dotted (last (str/split dotted #"\."))])))
-        ctx-ns/canonical-full-my-ns))
+        (ctx-ns/always-full-my-nses)))
 
 (defn- home-ns-aliases
   "Map of every agent-home-ns dotted-ns-name -> its short alias, the UNION

@@ -5,9 +5,9 @@
    suffix IS the filter), not nominal — so these assertions pin the
    MECHANISM that enforces it, not any particular namespace's contents:
 
-     1. `.internal` nses are NOT in the agent-facing
-        `seon.agent.ctx.namespaces/full-source-whitelist` (the curated set rendered
-        to agents in full) — and the predicates over that whitelist agree.
+     1. `.internal` nses are NEVER rendered full to an agent —
+        `seon.agent.ctx.namespaces/full-source-ns?` rejects them no matter the
+        config policy (the `.internal` suffix beats `:seon.config/always`).
      2. The structural selection rule `included-ns?` EXCLUDES every
         `.internal` ns from the agent prompt while INCLUDING its public
         parent — one suffix rule, no per-namespace special-casing.
@@ -28,14 +28,14 @@
    :seon.agent.search.internal
    :seon.agent.fs.internal])
 
-(deftest internal-nses-absent-from-the-full-source-whitelist
+(deftest internal-nses-never-render-full
   (doseq [n internal-nses]
-    (is (not (contains? ns/full-source-whitelist n))
-        (str n " must NOT be in the agent-facing full-source whitelist"))
-    (is (false? (ns/in-full-source-whitelist? n))
-        (str "in-full-source-whitelist? rejects " n))
     (is (false? (ns/full-source-ns? n))
-        (str "full-source-ns? never inlines " n " — .internal is hidden"))))
+        (str "full-source-ns? never inlines " n " — .internal is hidden"))
+    ;; the `.internal` suffix beats the config policy: even if a (mistaken)
+    ;; manifest listed it in `:seon.config/always`, the hidden-ns rule wins.
+    (is (false? (ns/full-source-ns? (str (name n))))
+        (str "full-source-ns? rejects the string form of " n " too"))))
 
 (deftest included-ns-excludes-internal-keeps-the-public-parent
   ;; The structural agent-prompt selection rule: .internal is filtered out by

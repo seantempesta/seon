@@ -263,8 +263,8 @@
 (deftest core-ns-rows-stub-bulk-full-source-whitelist
   ;; Curated render (LEAN whitelist): the seon.* FRAMEWORK BULK keeps the
   ;; minimal `(ns x)` stub (it is DROPPED from render, never shown as a body),
-  ;; while THE curated seon.* whitelist member
-  ;; (seon.agent.ctx.namespaces/full-source-whitelist = #{:seon.agent.todo}) AND
+  ;; while THE seon.* ns the config policy lists in :seon.config/always
+  ;; (seon.agent.todo by default) AND
   ;; every my.* ns (my.kb, the runnable DB manual, full via the my.* rule)
   ;; force-store their REAL FULL FILE TEXT (they render FULL, so the boot
   ;; indexer reads the file — probing .cljs then .cljc — the same

@@ -30,16 +30,32 @@
  ;; Full var docs: .env.example (DIFFUSIONGEMMA block). A live switch is a
  ;; transact: {:seon.ai/id "config" :seon.ai/provider :diffusiongemma}.
 
- ;; ── per-role context loadouts (merged over default-seed-blocks at create) ──
- ;; `:repl`'s body is always-on for EVERY agent — seeded as a :skill/repl block
- ;; at the cached-prefix priority (16), reusing my.skills/skill-block.
- ;;
- ;; PROFILE EXAMPLE — `#profile` selects the variant by SEON_PROFILE (aero falls
- ;; back to `:default` for any unmatched profile, so the no-flag boot is
- ;; byte-identical). `SEON_PROFILE=minimal bin/seon restart pod` boots with NO
- ;; always-on skill body (lean context). This is the per-test/per-cluster seam:
- ;; one manifest, N profiles, zero src edits.
- :seon.config/loadouts
- #profile {:default [{:seon.config/role         :default
-                      :seon.config/default-load [:repl]}]
-           :minimal []}}
+ ;; ── ALWAYS-ON SKILL BODIES — EXPLICIT LISTING (#42, retires the opaque
+ ;; `#profile {:default … :minimal …}` skill SETS the owner rejected). The list
+ ;; IS the policy — you SEE it, no profile name to decode:
+ ;;   :seon.config/load :all        → every corpus skill body always-on
+ ;;   :seon.config/load [:repl …]   → only these (the VISIBLE lean list)
+ ;;   :seon.config/load []          → none
+ ;; `:repl`'s body is always-on for EVERY agent (seeded as a :skill/repl block
+ ;; at the cached-prefix priority 16). To go lean, point SEON_CONFIG at a
+ ;; manifest with a shorter list (e.g. config/lean.edn) — runtime EDN, no
+ ;; rebuild, just restart.
+ :seon.config/skills {:seon.config/load [:repl]}
+
+ ;; ── NAMESPACES render policy — the EXPLICIT list of WHICH nses render in the
+ ;; agent prompt BODY (#42, the context lever; retires the hardcoded
+ ;; full-source-whitelist / verb-signature-whitelist / my.*-always-full rules).
+ ;; SIGNATURES ARE RETIRED: every rendered ns shows its REAL FULL SOURCE — the
+ ;; budget is bound by CURATION (which nses), never compression (how each):
+ ;;   :seon.config/always     → the always-present FULL-source nses
+ ;;   :seon.config/current-ns → :full (default — the agent's own ns) | :off
+ ;; The agent's current ns + the nses it :require's (with stored full source) +
+ ;; third-party (acme) code render full ON TOP of this list; everything else
+ ;; (framework bulk + the non-reachable my.* long tail) is DROPPED (still
+ ;; indexed + grep-able). The toolkit + the core verb nses stay FULL: a
+ ;; composition verb shown only as a name is undiscoverable. Trim `:always` to
+ ;; a short list to go lean. (Mirrors seon.config/default-namespaces-policy.)
+ :seon.config/namespaces
+ {:seon.config/always     [my.kb my.data my.ui my.tile
+                           seon.agent.todo seon.agent.message seon.agent.lifecycle]
+  :seon.config/current-ns :full}}

@@ -115,6 +115,14 @@
    [:seon.render/ai    {:optional true} :seon.render/ai]
    [:seon.render/html  {:optional true} :seon.render/html]])
 
+;; Per-agent LIVE-DB render-set OVERRIDE (cardinality-many ns-name keywords).
+;; The `:namespaces` section UNIONS this onto the config-curated full set at
+;; render time (`seon.agent.ctx.namespaces/db-render-set`): transact a ns
+;; keyword onto an agent's row and that ns renders FULL next turn; retract and
+;; it leaves. Pure reactive — derive-at-render, no stored projection, scoped
+;; per-agent like install!/remove!. `[:vector :keyword]` ⇒ cardinality-many.
+(schema/register! :seon.agent.ctx/render-namespaces [:vector :keyword])
+
 ;; ============================================================
 ;; File-section utility — the ONE mechanism for turning an on-disk
 ;; markdown file into a renderable context section. GENERIC: it takes a
@@ -322,9 +330,9 @@
   (symbol (str "my.agent." agent-id)))
 
 ;; The namespace-display selection rules (hidden-ns-name?,
-;; included-ns?, full-source-whitelist, full-source-ns?, …) live in
-;; their rightful home, [[seon.agent.ctx.namespaces]] — the ns that owns the
-;; namespaces section body and shares the rules with the boot indexer.
+;; included-ns?, full-source-ns?, …) live in their rightful home,
+;; [[seon.agent.ctx.namespaces]] — the ns that owns the namespaces section
+;; body and shares the rules with the boot indexer.
 
 ;; ------------------------------------------------------------
 ;; Pretty-print + truncation helpers.
@@ -999,28 +1007,38 @@
     "; :title).\n"
     ";\n"
     "; THE NAMESPACES BELOW are real loaded code, each delimited by its own\n"
-    "; ;;; ┌─ namespace X ─ / ;;; └─ end namespace X ─ brackets. YOUR OWN\n"
-    "; namespace renders in FULL — your live workspace, the most important\n"
-    "; thing here — as does the rest of your my.* world and your set-up\n"
-    "; tools (todo). The rest of the\n"
-    "; seon framework is deliberately NOT dumped — it stays QUERYABLE and\n"
-    "; SEARCHABLE, one search\n"
+    "; ;;; ┌─ namespace X ─ / ;;; └─ end namespace X ─ brackets, all in FULL\n"
+    "; real source (no signatures, no clipping). What renders is CURATED: YOUR\n"
+    "; CURRENT namespace (your live workspace, the most important thing here)\n"
+    "; and the nses it :requires, the my.* toolkit (my.kb / my.data / my.ui /\n"
+    "; my.tile) and your core verbs (todo / message / lifecycle). Everything\n"
+    "; else — the rest of the seon framework AND your other my.* nses — is\n"
+    "; deliberately NOT dumped; it stays QUERYABLE and SEARCHABLE, one step\n"
     "; away, so you are not buried in code you don't need. Never hallucinate a\n"
     "; fn name — discover it. To find or read any non-shown ns or fn:\n"
     ";   (seon.agent.search/grep {:seon.agent.search/pattern \"defn store-\"})\n"
     ";   (db/store-inventory {:seon.db/system? true})  ; every indexed attribute namespace\n"
-    ";   (seon.agent.ctx/render-namespace {:seon.ns/name :seon.warn})  ; whole-ns view\n"
+    ";   (seon.agent.ctx/render-namespace {:seon.ns/name :seon.warn})  ; whole-ns source\n"
+    "; To PIN a ns into your always-on view, transact its keyword onto your\n"
+    "; agent's :seon.agent.ctx/render-namespaces; retract it to unpin.\n"
     "; Full namespaces are ordered by RECENCY — most-recently-modified LAST,\n"
     "; not dependency order; the runtime loaded them correctly.\n"
     ";\n"
     "; BUILD YOUR ENVIRONMENT. This runtime is yours to shape. When you have\n"
-    "; data worth keeping, CREATE a namespace for it — (ns my.<domain>.<thing>)\n"
+    "; data worth keeping, CREATE a namespace for it — WRITE THE REAL REQUIRES\n"
+    "; in the ns form so the short aliases resolve (no magic — using requires\n"
+    "; is the right thing):\n"
+    ";   (ns my.<domain>.<thing>\n"
+    ";     (:require [seon.db :as db] [seon.agent.todo :as todo]\n"
+    ";               [seon.agent.message :as message] [seon.schema :as schema]))\n"
     "; — design a schema (schema/register!), and COLOCATE the functions that\n"
     "; operate on that data in the same namespace. Your code is my.*, your\n"
     "; knowledge is my.kb.*; the core is seon.* (call it, never redefine it).\n"
-    "; If a tool you need doesn't exist, write it and run it — don't wait to\n"
-    "; be given one. Namespaces are workspaces: (ns my.domain.thing) moves you\n"
-    "; there and your current namespace renders in full.\n"
+    "; The my.* toolkit (my.ui / my.tile / my.data) is FULL-QUALIFIED — call\n"
+    "; my.ui/card etc. directly, no alias needed. If a tool you need doesn't\n"
+    "; exist, write it and run it — don't wait to be given one. Namespaces are\n"
+    "; workspaces: moving to (ns my.domain.thing …) makes it your current ns,\n"
+    "; which renders in full along with the nses it :requires.\n"
     ";\n"
     "; EVERY rendered element shows its id — you can (db/pull '[*] <id>)\n"
     "; it to see the full row, or transact onto it. The context is the\n"
@@ -1156,16 +1174,6 @@
 ;; clip guardrail is a later backstop, not a crutch.
 ;; ============================================================
 
-(def ^:private fn-source-inline-threshold
-  "Fns whose `:seon.fn/source` is at or under this many chars render
-   their full source in the :ai form; larger fns show signature + doc
-   only. Keeps a whole-ns render bounded to a few KB."
-  240)
-
-(def ^:private member-doc-clip
-  "Max chars of a fn docstring surfaced per member in the :ai form."
-  280)
-
 (defn- clip
   "Clip `s` to `n` chars with an ellipsis marker. nil-safe."
   [s n]
@@ -1239,53 +1247,40 @@
         (seq tests) (assoc :seon.test/_ns tests)))))
 
 (defn- fn-block-ai
-  "One fn rendered for the :ai form: `(sym arglists)` header, clipped
-   doc, and (at `:full` detail) full source only when small. Reuses the
-   conventional signature shape via `seon.handlers.fn/render-ai` is
-   overkill here (that fn also runs test-status queries); we render flat
-   + bounded.
-
-   `detail` (default `:full`) selects how much body to show:
-     - `:full`      — header + clipped first-doc-line + full source when
-                      small (the original whole-ns behavior, unchanged).
-     - `:signature` — header + flags + clipped first-doc-line; the body
-                      is NEVER inlined (the API-surface manifest view).
-     - `:full-body` — header + clipped first-doc-line + full source
-                      ALWAYS (no size threshold) — the member-drill view:
-                      the agent asked for THIS one fn, give it all of it."
-  ([f] (fn-block-ai f :full))
-  ([{:seon.fn/keys [sym arglists doc source private? spec schema-error]} detail]
-   (let [sig    (when (and arglists (not (str/blank? arglists)))
-                  (let [a (str/trim arglists)]
-                    (if (and (str/starts-with? a "(") (str/ends-with? a ")"))
-                      (str "(" sym " " (subs a 1 (dec (count a))) ")")
-                      (str "(" sym " " a ")"))))
-         flags  (cond-> []
-                  private?      (conj ":private")
-                  (some? spec)  (conj (str ":spec " (clip spec 80)))
-                  (nil? spec)   (conj ":unspecced")
-                  schema-error  (conj (str ":schema-error " (clip schema-error 80))))
-         ;; The header (incl. the `(sig)` arglist shape) is DOCUMENTATION,
-         ;; not a form to run — rendered as a `;` prose comment so the
-         ;; arglist `(ns/fn [args])` is NEVER a bare callable list. If an
-         ;; agent echoes a rendered signature back into its reply,
-         ;; `seon.repl.internal/parse-forms` skips the comment line instead
-         ;; of EXECUTING it (a `(seon.schema/clear-all! [])` signature once
-         ;; wiped the live registry that way). Render is a pure read; the
-         ;; only re-runnable forms it emits are full `(defn …)` source.
-         header (str "; [fn " sym "]"
-                     (when sig (str "  " sig))
-                     (when (seq flags) (str "  " (str/join " " flags))))
-         body?  (and source
-                     (or (= detail :full-body)
-                         (and (= detail :full)
-                              (<= (count source) fn-source-inline-threshold))))
-         lines  (cond-> [header]
-                  (and doc (not (str/blank? doc)))
-                  (conj (str "; " (clip (first (str/split-lines doc)) member-doc-clip)))
-                  body?
-                  (conj (str/trim source)))]
-     (str/join "\n" lines))))
+  "One fn rendered for the :ai form: `(sym arglists)` header, first-doc-line,
+   and FULL source — no size gate, no clipping (signatures retired; authored
+   code renders whole). Used only for nses with NO stored full file source
+   (runtime-created nses whose members live only in the index rows) and the
+   member-drill ([[render-member]]); a full-source ns renders its whole file
+   directly, not per-member."
+  [{:seon.fn/keys [sym arglists doc source private? spec schema-error]}]
+  (let [sig    (when (and arglists (not (str/blank? arglists)))
+                 (let [a (str/trim arglists)]
+                   (if (and (str/starts-with? a "(") (str/ends-with? a ")"))
+                     (str "(" sym " " (subs a 1 (dec (count a))) ")")
+                     (str "(" sym " " a ")"))))
+        flags  (cond-> []
+                 private?      (conj ":private")
+                 (some? spec)  (conj (str ":spec " spec))
+                 (nil? spec)   (conj ":unspecced")
+                 schema-error  (conj (str ":schema-error " schema-error)))
+        ;; The header (incl. the `(sig)` arglist shape) is DOCUMENTATION,
+        ;; not a form to run — rendered as a `;` prose comment so the
+        ;; arglist `(ns/fn [args])` is NEVER a bare callable list. If an
+        ;; agent echoes a rendered signature back into its reply,
+        ;; `seon.repl.internal/parse-forms` skips the comment line instead
+        ;; of EXECUTING it (a `(seon.schema/clear-all! [])` signature once
+        ;; wiped the live registry that way). Render is a pure read; the
+        ;; only re-runnable forms it emits are full `(defn …)` source.
+        header (str "; [fn " sym "]"
+                    (when sig (str "  " sig))
+                    (when (seq flags) (str "  " (str/join " " flags))))
+        lines  (cond-> [header]
+                 (and doc (not (str/blank? doc)))
+                 (conj (str "; " (first (str/split-lines doc))))
+                 (and source (not (str/blank? source)))
+                 (conj (str/trim source)))]
+    (str/join "\n" lines)))
 
 (defn- schema-block-ai
   "One schema rendered for the :ai form: `[schema :ns/key]  <malli form>`.
@@ -1295,8 +1290,8 @@
   (let [shape (when (keyword? key)
                 (try (schema/schema-definition key) (catch :default _ nil)))
         form  (cond
-                shape                       (clip (pr-str shape) 200)
-                (not (str/blank? source))   (clip (str/trim source) 200)
+                shape                       (pr-str shape)
+                (not (str/blank? source))   (str/trim source)
                 :else                       "<not registered>")]
     (str "[schema " (pr-str key) "]  " form)))
 
@@ -1310,7 +1305,7 @@
   (str "[test " sym "]"
        "\n" (h-test/status-line test)
        (when (and source (not (str/blank? source)))
-         (str "\n" (clip (str/trim source) fn-source-inline-threshold)))))
+         (str "\n" (str/trim source)))))
 
 (defn ns-demarc
   "Wrap a rendered namespace BODY in the per-ns begin/end demarcation
@@ -1320,10 +1315,10 @@
    line below it, so every ns in the `:namespaces` section is clearly
    delimited; a truly-empty ns (begin immediately followed by end) is
    glaring, no longer silent poison. `suffix` (optional) rides the begin
-   line — e.g. \"(signatures)\" for the manifest view. The ONE site
-   ns blocks are bracketed: [[render-one-ns-ai]] (every detail) and the
+   line — e.g. \"(member store-fact)\" for the member-drill view. The sites
+   ns blocks are bracketed: [[render-one-ns-ai]], [[render-member]], and the
    home-ns workspace stub ([[seon.agent.ctx.namespaces/cur-ns-workspace-stub]])
-   both route through it, so the demarcation is uniform."
+   all route through it, so the demarcation is uniform."
   {:malli/schema [:function
                   [:=> [:catn [::ns-kw [:or :keyword :symbol]] [::body :string]] :string]
                   [:=> [:catn [::ns-kw [:or :keyword :symbol]] [::body :string]
@@ -1336,7 +1331,7 @@
         "\n;;; └─ end namespace " (name ns-kw) " ─")))
 
 (defn- render-one-ns-ai
-  "Render a single namespace block to text. `ns-kw` is the namespace
+  "Render a single namespace block to text, FULL — `ns-kw` is the namespace
    keyword; `data` is the `pull-ns-data` result (or nil = not in db).
 
    Every block is delimited by the per-ns `;;; ┌─ namespace X ─` /
@@ -1344,78 +1339,49 @@
    structure convention that makes each ns boundary explicit and an empty
    one glaring.
 
-   `detail` (default `:full`) selects the depth of each fn body and the
-   shape of the bracketed body:
-     - `:full`      — the ns's `(ns …)` SOURCE plus every fn (full source
-                      when small), schema, and test. The whole-ns view —
-                      the agent's own / my.* / acme / current code.
-     - `:signature` — a `(signatures)`-tagged begin line carrying ONLY
-                      each fn's SIGNATURE (header + flags + one-line doc,
-                      bodies elided). No ns source, no schemas, no tests —
-                      the public-API manifest view of a framework ns."
-  ([ns-kw data] (render-one-ns-ai ns-kw data :full nil))
-  ([ns-kw data detail] (render-one-ns-ai ns-kw data detail nil))
-  ([ns-kw data detail members]
-   (if (nil? data)
-     (str "; requires: " (name ns-kw) " (not in db)")
-     (let [src     (:seon.ns/source data)
-           fns     (->> (:seon.fn/_ns data)     (sort-by :seon.fn/sym))
-           schemas (->> (:seon.schema/_ns data) (sort-by (comp str :seon.schema/key)))
-           tests   (->> (:seon.test/_ns data)   (sort-by :seon.test/sym))]
-       (if (= detail :signature)
-         ;; manifest view: public fn signatures only, bodies elided. When
-         ;; `members` is given, the manifest is NARROWED to just those verbs
-         ;; (by trailing name) — surface a FEW fns of a large ns without
-         ;; dumping its whole public API (the spawn-verb surfacing path).
-         (let [pub0 (remove :seon.fn/private? fns)
-               want (when (seq members)
-                      (set (map #(name (symbol (str %))) members)))
-               pub  (if want
-                      (filter #(contains? want (name (symbol (str (:seon.fn/sym %))))) pub0)
-                      pub0)
-               sigs (map #(fn-block-ai % :signature) pub)]
-           (ns-demarc ns-kw
-                      (if (seq sigs)
-                        (str/join "\n\n" sigs)
-                        "; (no public fns indexed yet — query by name)")
-                      "(signatures)"))
-         ;; full view: when the ns carries its REAL full file SOURCE, that
-         ;; source IS the authoritative body — every defn/register! is already
-         ;; in it, so re-emitting per-member [fn …]/[schema …] blocks would be
-         ;; pure duplication (GI-1). We render the source ALONE, surfacing only
-         ;; the member facts NOT visible in the source and worth the agent's
-         ;; attention: a fn whose :malli/schema failed to compile
-         ;; (:seon.fn/schema-error) and a test whose last recorded run FAILED —
-         ;; each a compact one-line ⚠ note. When there is NO stored source
-         ;; (runtime-created nses that hold only schemas/fns) — OR only the
-         ;; indexer's bare `(ns x)` STUB (a non-full-source framework ns: its
-         ;; members live only in the index rows, NOT in that one-line source) —
-         ;; the per-member blocks ARE the content, rendered in full. The stub
-         ;; guard below is load-bearing for the on-demand `render-namespace`
-         ;; capability the system prompt teaches by name: without it, rendering
-         ;; a dropped framework ns (e.g. :seon.warn) would yield just `(ns x)`,
-         ;; erasing its whole API.
-         (if (and src (not (str/blank? src))
-                  (not= (str/trim src) (str "(ns " (name ns-kw) ")")))
-           (let [notes (concat
-                         (for [{:seon.fn/keys [sym schema-error]} fns
-                               :when (and schema-error (not (str/blank? schema-error)))]
-                           (str "; ⚠ " sym ": schema-error " (clip schema-error 120)))
-                         (for [{:seon.test/keys [sym last-failure-summary] :as t} tests
-                               :when (false? (:passing? (h-test/test-status t)))]
-                           (str "; ⚠ test " sym " failing"
-                                (when (and last-failure-summary
-                                           (not (str/blank? last-failure-summary)))
-                                  (str ": " (clip last-failure-summary 120))))))]
-             (ns-demarc ns-kw
-                        (str (str/trim src)
-                             (when (seq notes) (str "\n\n" (str/join "\n" notes))))))
-           (let [body (cond-> []
-                        (seq fns)     (into (map #(fn-block-ai % :full) fns))
-                        (seq schemas) (into (map schema-block-ai schemas))
-                        (seq tests)   (into (map test-block-ai tests)))]
-             (ns-demarc ns-kw
-                        (if (seq body) (str/join "\n\n" body) "; (no recorded source/fns/schemas)")))))))))
+   Signatures are retired: the ns renders its `(ns …)` SOURCE plus every fn
+   (FULL source), schema, and test. When the ns carries its REAL full file
+   SOURCE, that source IS the authoritative body — every defn/register! is
+   already in it, so re-emitting per-member [fn …]/[schema …] blocks would be
+   pure duplication (GI-1). We render the source ALONE, surfacing only the
+   member facts NOT visible in the source and worth the agent's attention: a
+   fn whose :malli/schema failed to compile (:seon.fn/schema-error) and a test
+   whose last recorded run FAILED — each a compact one-line ⚠ note. When there
+   is NO stored source (runtime-created nses that hold only schemas/fns) — OR
+   only the indexer's bare `(ns x)` STUB (a non-full-source framework ns: its
+   members live only in the index rows, NOT in that one-line source) — the
+   per-member blocks ARE the content, rendered in full. The stub guard below
+   is load-bearing for the on-demand `render-namespace` capability the system
+   prompt teaches by name: without it, rendering a dropped framework ns (e.g.
+   :seon.warn) would yield just `(ns x)`, erasing its whole API."
+  [ns-kw data]
+  (if (nil? data)
+    (str "; requires: " (name ns-kw) " (not in db)")
+    (let [src     (:seon.ns/source data)
+          fns     (->> (:seon.fn/_ns data)     (sort-by :seon.fn/sym))
+          schemas (->> (:seon.schema/_ns data) (sort-by (comp str :seon.schema/key)))
+          tests   (->> (:seon.test/_ns data)   (sort-by :seon.test/sym))]
+      (if (and src (not (str/blank? src))
+               (not= (str/trim src) (str "(ns " (name ns-kw) ")")))
+        (let [notes (concat
+                      (for [{:seon.fn/keys [sym schema-error]} fns
+                            :when (and schema-error (not (str/blank? schema-error)))]
+                        (str "; ⚠ " sym ": schema-error " (clip schema-error 120)))
+                      (for [{:seon.test/keys [sym last-failure-summary] :as t} tests
+                            :when (false? (:passing? (h-test/test-status t)))]
+                        (str "; ⚠ test " sym " failing"
+                             (when (and last-failure-summary
+                                        (not (str/blank? last-failure-summary)))
+                               (str ": " (clip last-failure-summary 120))))))]
+          (ns-demarc ns-kw
+                     (str (str/trim src)
+                          (when (seq notes) (str "\n\n" (str/join "\n" notes))))))
+        (let [body (cond-> []
+                     (seq fns)     (into (map fn-block-ai fns))
+                     (seq schemas) (into (map schema-block-ai schemas))
+                     (seq tests)   (into (map test-block-ai tests)))]
+          (ns-demarc ns-kw
+                     (if (seq body) (str/join "\n\n" body) "; (no recorded source/fns/schemas)")))))))
 
 (defn- render-one-ns-html
   "Render a single namespace block to hiccup. Reuses the per-kind
@@ -1478,7 +1444,10 @@
 
 (schema/register! :seon.render/depth :int)
 (schema/register! :seon.render/format [:enum :ai :html])
-(schema/register! :seon.render/detail [:enum :full :signature])
+;; Signatures retired — `:full` is the only detail (every rendered ns renders
+;; whole real source). Kept as a single-value enum so the discoverable
+;; `(render-namespace {… :seon.render/detail :full})` affordance still validates.
+(schema/register! :seon.render/detail [:enum :full])
 
 ;; The member-drill handle: name ONE fn within the rendered ns to pull its
 ;; FULL source (the common case — the agent wants a specific verb, not the
@@ -1487,17 +1456,10 @@
 ;; :seon.fn/sym in [[render-member]].
 (schema/register! :seon.ns/member [:or :symbol :string])
 
-;; The signature-subset handle: name a FEW fns to render JUST their
-;; signatures (not the whole ns API). Surfaces the spawn verbs (start!/create!)
-;; of the large `seon.agent` ns without dumping its framework-internal fns.
-(schema/register! :seon.ns/members
-  [:or [:set :seon.ns/member] [:sequential :seon.ns/member]])
-
 (schema/register! ::render-namespace-request
   [:map
    [:seon.ns/name        :seon.ns/name]
    [:seon.ns/member      {:optional true} :seon.ns/member]
-   [:seon.ns/members     {:optional true} :seon.ns/members]
    [:seon.render/depth   {:optional true} :seon.render/depth]
    [:seon.render/format  {:optional true} :seon.render/format]
    [:seon.render/detail  {:optional true} :seon.render/detail]
@@ -1517,7 +1479,7 @@
                       (when (= (name (symbol (str sym))) want) f))
                     fns)]
     (if match
-      (ns-demarc ns-kw (fn-block-ai match :full-body) (str "(member " want ")"))
+      (ns-demarc ns-kw (fn-block-ai match) (str "(member " want ")"))
       (let [names (->> (remove :seon.fn/private? fns)
                        (map #(name (symbol (str (:seon.fn/sym %)))))
                        sort)]
@@ -1552,37 +1514,31 @@
       :seon.ns/member <name, optional — drill ONE fn's full source>
       :seon.render/depth  <int, default 1>
       :seon.render/format <:ai | :html, default :ai>
-      :seon.render/detail <:full | :signature, default :signature>
+      :seon.render/detail <:full — the only detail; signatures retired>
       :seon.db/db <db value, optional — defaults to @*conn*>}
 
    → {:seon.render/text <string>}     for :ai
    → {:seon.render/hiccup <hiccup>}   for :html
 
-   CONCISE BY DEFAULT — the verb returns the API SURFACE, not a body dump.
-
-   `:seon.render/detail` (`:ai` form only) selects how much of each fn
-   shows: `:signature` (DEFAULT) renders a `(signatures)` block of public
-   fn signatures only (name + arglist + one-line doc, bodies elided) — the
-   manifest view that orients an agent without flooding its transcript;
-   `:full` renders the ns SOURCE + every member with small fn bodies
-   inlined — the whole-ns body dump, only when explicitly asked.
+   FULL by default — signatures are retired: the verb returns the ns's whole
+   real source (plus every member), unclipped. Token budget is bound by
+   CURATION (the always-on `:namespaces` section curates WHICH nses it routes
+   here), never by compression.
 
    `:seon.ns/member` is the DRILL handle — the common case where the agent
    wants ONE specific verb, not the whole ns. Naming a member (bare
    \"store-fact\" or qualified \"my.kb/store-fact\") returns just that fn's
-   FULL source, ignoring depth/detail. An unknown member returns a one-line
-   note listing the public fns (errors-as-values), never a throw.
+   FULL source, ignoring depth. An unknown member returns a one-line note
+   listing the public fns (errors-as-values), never a throw.
 
    This is the foundation of every agent's default context; the section
-   that surfaces the agent's namespaces resolves to it (passing its own
-   detail explicitly, so this default never reaches the always-on block)."
+   that surfaces the agent's namespaces resolves to it."
   {:malli/schema [:=> [:cat ::render-namespace-request] ::render-namespace-response]}
   [{ns-name :seon.ns/name
     member :seon.ns/member
-    members :seon.ns/members
-    :seon.render/keys [depth format detail]
+    :seon.render/keys [depth format]
     :seon.db/keys [db]
-    :or {depth 1 format :ai detail :signature}}]
+    :or {depth 1 format :ai}}]
   (let [db    (or db @db/*conn*)
         ns-kw (if (keyword? ns-name) ns-name (keyword (str ns-name)))]
     (cond
@@ -1590,12 +1546,6 @@
       ;; member-drill short-circuits BEFORE recursion: depth-0 pull of this
       ;; ns only, render the one fn's full source (or the not-found note).
       {:seon.render/text (render-member ns-kw (pull-ns-data db ns-kw) member)}
-
-      (seq members)
-      ;; signature-subset short-circuits like member-drill: depth-0 pull of
-      ;; this ns, render JUST the named members' signatures — a few verbs of a
-      ;; large ns without dumping its whole API (the spawn-verb surfacing path).
-      {:seon.render/text (render-one-ns-ai ns-kw (pull-ns-data db ns-kw) :signature members)}
 
       :else
       (let [[order data-by-kw] (collect-ns-order db ns-kw (max 0 depth))]
@@ -1606,7 +1556,7 @@
                    (render-one-ns-html db k (data-by-kw k))))}
           {:seon.render/text
            (str/join "\n\n" (for [k order]
-                              (render-one-ns-ai k (data-by-kw k) detail)))})))))
+                              (render-one-ns-ai k (data-by-kw k))))})))))
 (defn- latest-live-inbound
   "The latest LIVE inbound message for `my-eid` in db value `db` as
    [at content] — to ∋ me, from ≠ me, hops < `warn/hop-cap` (the same
@@ -2180,10 +2130,12 @@
    `content` = this block's byte-stable rendered text (Seon's analog of the
    block's token ids — the worker tokenizes it deterministically), `salt` =
    the cache_salt extra-key, non-blank ONLY for the head block so the whole
-   chain is scoped to one agent. The NUL separators make the serialization
-   injective (no (a+b,c) vs (a,b+c) collision)."
+   chain is scoped to one agent. The US (\\u001f, unit-separator) separators
+   make the serialization injective (no (a+b,c) vs (a,b+c) collision) — a
+   printable escape, not a raw NUL byte (which made the file look binary to
+   grep, #83)."
   [parent content salt]
-  (sha256-hex (str parent " " content " " salt)))
+  (sha256-hex (str parent "\u001f" content "\u001f" salt)))
 
 (schema/register! ::chain-hash [:string {:min 1}])
 (schema/register! ::chain-hashes [:vector ::chain-hash])

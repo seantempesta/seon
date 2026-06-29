@@ -63,10 +63,44 @@
    ;; corpus dir(s); reserved for multi-dir curation — the boot scan reads
    ;; SEON_SKILLS_DIR today, so this is forward-compat, not yet consumed.
    [:seon.config/dirs    {:optional true} [:vector :string]]
-   ;; allowlist (absent = all scanned skills)
+   ;; which skill BODIES are always-on (seeded as priority-16 :skill/<name>
+   ;; blocks). EXPLICIT LISTING (#42), retiring the opaque named-profile sets:
+   ;;   :all        → every corpus skill body always-on ("load everything")
+   ;;   [:repl …]   → only these (the VISIBLE lean list — this is how you go lean)
+   ;;   []          → none always-on
+   ;; ABSENT → the legacy per-role :seon.config/default-load (migration bridge).
+   [:seon.config/load    {:optional true} [:or [:enum :all]
+                                           [:vector :seon.config/skill-name]]]
+   ;; allowlist (absent = all scanned skills) — CATALOG curation, distinct from
+   ;; :load (which selects the always-on subset of the catalog)
    [:seon.config/include {:optional true} [:vector :seon.config/skill-name]]
    ;; denylist (the first concrete payload: browser-automation, clojure-testing)
    [:seon.config/exclude {:optional true} [:vector :seon.config/skill-name]]])
+
+;;; NAMESPACES render policy (#42 explicit listing) — the single curation lever
+;;; for the agent's prompt BODY. Signatures are RETIRED: every rendered ns
+;;; renders FULL real source, so the only knobs are WHICH nses render (the
+;;; explicit `:always` list, plus the agent's current ns + its requires +
+;;; third-party code, resolved in `seon.agent.ctx.namespaces`) and whether the
+;;; current ns renders at all. Token budget is bound by curation (which nses
+;;; render), never by compression (how each renders).
+
+(schema/register! :seon.config/current-ns [:enum :full :off])
+
+(schema/register! :seon.config/namespaces-spec
+  [:map
+   ;; explicit always-present FULL-source nses
+   [:seon.config/always     {:optional true} [:vector :symbol]]
+   ;; the agent's CURRENT ns: :full (default — rendered) | :off (dropped)
+   [:seon.config/current-ns {:optional true} :seon.config/current-ns]])
+
+;; The RESOLVED policy the renderer + boot indexer read (symbols → ns-name
+;; keywords, defaults applied). Registered once + referenced by
+;; [[resolve-namespaces]].
+(schema/register! :seon.config/namespaces-policy
+  [:map
+   [:seon.config/always     [:set :keyword]]
+   [:seon.config/current-ns :seon.config/current-ns]])
 
 (schema/register! :seon.config/loadout
   [:map
@@ -90,9 +124,10 @@
 ;; validates ⇒ identity everywhere.
 (schema/register! :seon.config/manifest
   [:map
-   [:seon.config/skills   {:optional true} :seon.config/skills-spec]
-   [:seon.config/loadouts {:optional true} [:vector :seon.config/loadout]]
-   [:seon.config/routes   {:optional true} [:vector :seon.config/route-spec]]])
+   [:seon.config/skills     {:optional true} :seon.config/skills-spec]
+   [:seon.config/namespaces {:optional true} :seon.config/namespaces-spec]
+   [:seon.config/loadouts   {:optional true} [:vector :seon.config/loadout]]
+   [:seon.config/routes     {:optional true} [:vector :seon.config/route-spec]]])
 
 ;;; Verb arg/return shapes. The three corpora are leaf `[:vector :map]` here
 ;;; (full shapes validated downstream); registered once + referenced so the
@@ -148,6 +183,65 @@
                         (m/explain :seon.config/manifest raw))
                    {:seon.config/path  path
                     :seon.error/kind   :user-input})))))))
+
+;;; ============================================================
+;;; NAMESPACES POLICY — the explicit-listing resolver (#42). The SHIPPED
+;;; default reproduces the pre-config hardcoded rules BYTE-IDENTICALLY; a lean
+;;; cluster overrides it with a short explicit list. Pure given the manifest;
+;;; the live accessor [[namespaces-policy]] memoizes per env so the boot
+;;; indexer (93 ns rows) and every render share one read.
+;;; ============================================================
+
+(def ^:private default-namespaces-policy
+  "The SHIPPED default namespaces render policy. Everything renders FULL real
+   source; this is just WHICH nses are always present: the `my.*` toolkit
+   exemplars plus the core verb nses the agent calls constantly
+   (`seon.agent.todo`/`seon.agent.message`/`seon.agent.lifecycle`). The agent's
+   CURRENT ns and the nses it `:require`s render full on top of this (resolved
+   in `seon.agent.ctx.namespaces`). `config/system.edn` mirrors this list
+   verbatim for visibility; a lean cluster overrides it with a short explicit
+   list (the curation lever)."
+  {:seon.config/always     '[my.kb my.data my.ui my.tile
+                             seon.agent.todo seon.agent.message seon.agent.lifecycle]
+   :seon.config/current-ns :full})
+
+(defn- ns-sym->kw
+  "An ns-name SYMBOL (config) → its ns-name KEYWORD (the DB `:seon.ns/name`
+   shape the renderer matches): `my.kb` → `:my.kb`."
+  [s]
+  (keyword (str s)))
+
+(defn resolve-namespaces
+  "Resolve the `:seon.config/namespaces` section of `manifest` into the policy
+   the renderer + boot indexer read (`seon.agent.ctx.namespaces`). KEY-LEVEL
+   merge over [[default-namespaces-policy]]: an absent section ⇒ the
+   byte-identical default; a present section overrides ONLY the keys it lists.
+   Symbols become ns-name keywords."
+  {:malli/schema [:=> [:catn [::manifest :seon.config/manifest]]
+                  :seon.config/namespaces-policy]}
+  [manifest]
+  (let [merged (merge default-namespaces-policy (:seon.config/namespaces manifest))]
+    {:seon.config/always     (into #{} (map ns-sym->kw) (:seon.config/always merged))
+     :seon.config/current-ns (:seon.config/current-ns merged)}))
+
+;; `def` (NOT defonce): a hot-reload of `seon.config` ROTATES the cache, so a
+;; dev edit to `config/system.edn` is picked up on the next reload (config is
+;; otherwise a boot-time read). Within a process it memoizes per env key.
+(def ^:private ns-policy-cache (atom {}))
+
+(defn namespaces-policy
+  "The resolved namespaces render policy for the live manifest, memoized per
+   `[SEON_CONFIG SEON_PROFILE]` (config is process-stable; the gym steers those
+   env vars per run, so the key tracks them — a different manifest re-resolves).
+   The ONE policy `seon.agent.ctx.namespaces` (renderer) and `seon.client`
+   (boot indexer's full-source decision) share — see [[resolve-namespaces]]."
+  {:malli/schema [:=> [:cat] :seon.config/namespaces-policy]}
+  []
+  (let [k [(env "SEON_CONFIG") (env "SEON_PROFILE")]]
+    (or (get @ns-policy-cache k)
+        (let [p (resolve-namespaces (load-manifest))]
+          (swap! ns-policy-cache assoc k p)
+          p))))
 
 ;;; ============================================================
 ;;; ENV KNOBS — the ONE typed env surface. `platform/env-val` is the single
@@ -268,19 +362,6 @@
   []
   (env-int "SEON_RENDER_TRANSCRIPT_TOKEN_CAP" 6000))
 
-(defn requires-api-cap
-  "Total CHAR budget for the required-namespace API surface appended to the
-   `:namespaces` section — the public signatures of the framework nses the
-   agent's current ns `:require`s but does not otherwise render in full
-   (`seon.agent.ctx.namespaces/namespaces-block`). Whole required-ns blocks
-   render name-sorted until this budget is spent; the rest are elided with a
-   one-line note (grep / `render-namespace` to see them). Default 12000 chars
-   ≈ 3000 tokens — fits the standard db+schema+agent require set with room for
-   a couple agent-added deps (`SEON_RENDER_REQUIRES_CAP`)."
-  {:malli/schema [:=> [:cat] :int]}
-  []
-  (env-int "SEON_RENDER_REQUIRES_CAP" 12000))
-
 ;;; --- Value-renderer bounds — the `SEON_RENDER_VALUE_*` sub-family
 ;;; (per-node depth/breadth limits of the structural eval-value skeleton).
 
@@ -392,6 +473,23 @@
    :seon.agent.ctx/priority default-load-priority
    :seon.render/ai          'my.skills/skill-block})
 
+(defn- scan-skill-names
+  "The corpus skill names as keywords — the subdirectories of `(skills-dir)`
+   that carry a `SKILL.md`. Expands `:seon.config/skills {:seon.config/load
+   :all}` WITHOUT a DB dependency (the leaf rule: config never requires
+   `my.skills`). Mirrors `my.skills/seed-skills-tx-data`'s scan."
+  []
+  (let [fs  (js/require "fs")
+        dir (skills-dir)]
+    (if-not (try (.existsSync fs dir) (catch :default _ false))
+      []
+      (->> (.readdirSync fs dir #js {:withFileTypes true})
+           (filter (fn [d] (.isDirectory d)))
+           (map (fn [d] (.-name d)))
+           (filter (fn [n] (try (.existsSync fs (str dir "/" n "/SKILL.md"))
+                                (catch :default _ false))))
+           (mapv keyword)))))
+
 (defn- upsert-by-name
   "Merge `additions` over `base` by `:seon.agent.ctx/name` (a re-named block
    replaces in place) — install!'s upsert semantics."
@@ -402,12 +500,16 @@
 
 (defn resolve-loadout
   "Shape `base-blocks` (`default-seed-blocks`) for an agent of `role` against
-   the manifest's `:seon.config/loadouts`. Applies the `:default` loadout then
-   the `role` loadout (in that order): each `default-load` skill-name expands to
-   a priority-16 `:skill/<name>` always-on block, each `:blocks` entry rides as
-   an extra block — both UPSERTED over `base-blocks` by name; `:removes` drop
-   blocks; `:strategy :replace` starts from an empty base. No matching loadouts →
-   `base-blocks` unchanged."
+   the manifest. The ALWAYS-ON skill bodies come from `:seon.config/skills`
+   `:seon.config/load` (#42 explicit listing): `:all` → every corpus skill
+   (`scan-skill-names`); a vector → only those; `[]` → none. When `:load` is
+   ABSENT it falls back to the legacy per-role `:seon.config/default-load`
+   (a migration bridge — retire once acme/test/gym move to `:load`). Each
+   resolved skill-name expands to a priority-16 `:skill/<name>` always-on block.
+   The `role`'s loadout (applied after the `:default` loadout) adds `:blocks`
+   (UPSERTED over `base-blocks` by name), drops `:removes`, and `:strategy
+   :replace` starts from an empty base. No `:load` + no matching loadouts →
+   `base-blocks` unchanged (config-absent identity)."
   {:malli/schema [:=> [:catn [::blocks ::blocks]
                        [::role :seon.config/role]
                        [::manifest :seon.config/manifest]]
@@ -419,8 +521,14 @@
                         (remove nil?)
                         ;; dedup when role IS :default (one loadout, not twice)
                         (distinct))
-        loads      (into [] (comp (mapcat :seon.config/default-load) (distinct))
-                         applicable)
+        load-spec  (get (:seon.config/skills manifest) :seon.config/load ::absent)
+        loads      (cond
+                     (= load-spec :all)     (scan-skill-names)
+                     ;; absent ⇒ legacy per-role :default-load (migration bridge)
+                     (= load-spec ::absent) (into [] (comp (mapcat :seon.config/default-load)
+                                                           (distinct))
+                                                  applicable)
+                     :else                  (vec (distinct load-spec)))  ; explicit vector (incl [])
         extras     (into [] (mapcat :seon.config/blocks) applicable)
         removes    (into #{} (mapcat :seon.config/removes) applicable)
         replace?   (some #(= :replace (:seon.config/strategy %)) applicable)
