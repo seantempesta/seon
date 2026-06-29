@@ -216,7 +216,15 @@ When iterating autonomously (e.g. overnight), each cycle:
   `(req, canvas_len, vocab)`. vLLM physically can't address canvas positions. And on A100 **BF16**
   vLLM = **375 tok/s** vs our compiled **~450** — vLLM's win is **FP8+Hopper, not the engine**.
   vLLM = a SERVING-only second endpoint, gated on 3 triggers (thesis-cleared + serving-scale-bound +
-  Hopper-FP8). Forking the sampler = negative (it already crashes on TP>1, vLLM #45719).
+  Hopper-FP8). Forking the sampler = PARTIAL (pure-Python+compiled, no CUDA → a compile-compatible
+  clamp+tensor-stop is ~1 eng-week → fast CONSTRAINED serving, but the eval-renoise loop CANNOT be
+  forked in; + TP>1 crash #45719).
+- **KV/prefix caching split (source-confirmed):** vLLM's automatic prefix caching IS ENABLED for
+  DiffusionGemma (`diffusion_gemma.py` causal encoder writes KV; APC on) → it gives the shared-skill
+  prefix-cache win FOR FREE, but **serving-only (no control)**. So: **serving-without-control → vLLM APC**
+  (likely nets ahead on our repeated-context workload despite 375<450 raw BF16); **control+caching (the
+  buzzsaw path) → CUSTOM KV caching on transformers** (the `kv-section-caching-design` work) — the only
+  way to get both the caching win AND per-step control.
 - **A100 speed lever = compiled-transformers-with-compatible-control:** `static`-cache `torch.compile`
   + the model's BUILT-IN confidence stop + `entropy_bound` (all tensor ops that survive compile),
   reserving the compile-FORFEITING Python parse/eval stop for the correctness experiments that need it.
@@ -224,9 +232,13 @@ When iterating autonomously (e.g. overnight), each cycle:
   GraalVM = nothing to revive (only a wishlist box), wrong language (oracle is CLJS; polyglot runs JVM
   Clojure → banned parallel reimpl), AND repo-proven crash risk (Substrate-VM signal fights → SIGSEGV
   in-process with PyTorch → ~66s reload). IPC tax (~50-100µs) is noise vs the ~100ms hop killed. Shape:
-  `op`-dispatched (`parse` reuses the validator / `eval` = bare SCI / `retrieve` = stub) on top of
-  `:worker-validator`. **Babashka under evaluation for the fast parse-tier server** (bb runs parse-forms
-  today via `bin/test-parser`); cljs.js reserved for faithful CLJS eval.
+  `op`-dispatched (`parse` / `eval` / `retrieve`-stub), identical JSON-line API across runtimes.
+  **TIER SPLIT (resolved): parse-tier → BABASHKA** — parse-forms is purely STRUCTURAL (rewrite-clj, no
+  semantics) so bb parses CLJS-flavored canvas forms BIT-IDENTICALLY to the pod (zero fidelity loss),
+  simplest deploy (native binary + `.cljc`, no build, ~0.1ms warm); **bb SUPERSEDES the Node
+  `:worker-validator` for the parse-only hot loop**. **eval-tier → Node/cljs.js** self-host (the only
+  true-CLJS eval; bb-SCI/GraalVM eval Clojure → false-negatives on `^:async`/interop). Python `Oracle`
+  unchanged when eval migrates (same API).
 
 ## Pointers
 
