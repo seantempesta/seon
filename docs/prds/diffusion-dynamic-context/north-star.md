@@ -248,9 +248,12 @@ When iterating autonomously (e.g. overnight), each cycle:
   more decisive caching is. Build is gated on the co-location image (Cache can't serialize over JSON) →
   co-location is now a TOP-priority enabler (gates caching AND the per-step renoise loop).
 - **A100 speed = ADOPT in-the-loop features, reinvent NOTHING** (all control-compatible, keep the
-  `:1034` seam): (1) **torchao quantization** — `TorchAoConfig` at `from_pretrained` is transparent to
-  `generate()`, so INT8 on the A100 (FP8 on Hopper) reclaims vLLM's dtype-speed WITH control
-  (verify-on-deploy); (2) `static`-cache **`torch.compile`** + the model's BUILT-IN confidence stop +
+  `:1034` seam): (1) **torchao quantization — RESEARCHED, DEAD END for this model** (`8c4402bf`): it's
+  control-compatible (only swaps `nn.Linear` weights, doesn't touch `:1034`) BUT DiffusionGemma's MoE
+  experts are fused 3D `nn.Parameter`s, and the transformers quantizer converts ONLY `nn.Linear` → the
+  experts (bulk of a 26B-A4B MoE) are SKIPPED → negligible speedup. Not a lever via the simple path
+  (the torchao prototype MoE-3D path is unproven/gated). Test-to-confirm: `vram_alloc` BF16 ~50GB vs
+  int8dq — if it only drops to ~44-46GB the experts were skipped. (2) `static`-cache **`torch.compile`** + the model's BUILT-IN confidence stop +
   `entropy_bound` (tensor ops that survive compile; reserve the compile-FORFEITING Python parse/eval stop
   for the correctness experiments); (3) **`past_key_values` / `QuantizedCache` reuse** (transformers-native
   prefix/skill KV reuse, composes with the per-block `kv-section-caching` design); (4) **Fast-dLLM
