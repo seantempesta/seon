@@ -67,6 +67,15 @@ Canvas gym drive (`2fe1f8f9`, `research/canvas-drive-validation-2026-06-28.md`):
 
 Core signalled `0710336d` (pre-reset batch complete, cold-boot verified, U owns timing) → ran `bin/seon cluster reset default` (wire-server 8s, pod 25s, auto-boot ready, root minted). **Live-pod proof of the toolkit P0 fix:** `(count :seon.fn per my.* ns)` = `{my.kb 13, my.kb.shared 3, my.skills 6, my.data 4, my.ui 7, my.tile 5}` — vs the coherence audit's `{my.data [] my.ui [] my.tile []}`. The toolkit is now indexed + renders full on the LIVE pod. The whole night's work (toolkit, canvas-first-in-system-text, no-kinds, registry-stomp) is now live. Composability proof = the gym re-drive (running).
 
+## 🏆 CAPSTONE PROVEN — toolkit COMPOSABLE + fabrication fixed (`352fcf91`)
+
+Verification re-drive (`research/toolkit-reachable-verification-2026-06-28.md`):
+- **`my.ui` composed 9× / 11× (was 0)** — agent builds tiles with `my.ui/section`+`status-line`+`kv-table`, not hand-rolled `[:div]`. `my.data` 15×/23×. Toolkit renders FULL (was ABSENT).
+- **Budget fabrication FIXED:** judge fail→PASS (100) — canvas-first + full toolkit moved the agent onto the DERIVED surface (correct $136 canvas vs fabricated $155 prose). **Canvas-first has an honesty benefit** beyond Core's cite-card (#63).
+- `my.tile` 0× = EXPECTED (interactive controls, all 3 scenarios are read-only → needs an interactive scenario). `canvas-goal-board` single-sample DeepSeek miss (model variance, pass^k averages).
+
+**Central arc CLOSED end-to-end:** built toolkit → drove agents → found unreachable → routed root cause → Core fixed → verified composable + honest. This is the recursive loop delivering a real capability gain.
+
 **Gate note — the suite noise is TWO things, neither a real regression:**
 1. **Env-coupling FLAKES from my own concurrent runs** (`b5c3a3a4` diagnosis): tests that grep a shared fs dir / touch shared DB state race when the loop runs scorecard + suite at once. `search_test` is now FIXED (pid-scoped hermetic fixtures, 20/20). `index_core_test` is the same class (passes isolated) → #69 to make hermetic. Lesson: aggressive parallelism needs hermetic tests.
 2. **Core's UNCOMMITTED `loop.cljs`/`schedule.cljs` WIP** (`loop-test` 4) — real WIP, theirs to finish.
