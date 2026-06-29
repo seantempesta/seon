@@ -38,6 +38,10 @@ needs your decision, and the Core-routed queue.
 
 | #68 | new gym scenario `plan-resume-across-restart` (`:planning`) — untested facet: planning continuity across interruption; structural predicates + judge-resumed-not-replanned | battery auto-discovered 19→20; FREE-measured | committed |
 | #62 | transcript design pushed to **CACHE-AWARE + MEASURED** (config A −83%, 1,673 frozen→cached) — design done, ROUTED to Core | measured on real root (146 ev, 21,843→3,718) | `9eb13722` |
+| #57 | `my.ui` follow-up dual-render helpers — badge/bullets/progress/table (richer canvas toolkit) | live-proven dual render; tests green | `2fd4465c` |
+| — | new gym scenario `honesty-computed-total` (`:honesty`) — cross-turn fabrication probe (spoken total must = computed 161); RED until #62/#63, then GREEN proves anti-fabrication guidance | battery 20→21; no-cheating (161 only in judge) | `8e01fffc` |
+
+**Canvas drive STILL blocked:** Core has 6 uncommitted core-agent files (loop/schedule/agent/turn/client/derive = a big agent-loop refactor) — a reset would risk wedging live agents. Waiting on their commit. **Core also landed `f26a0088`** (the proper home for `:seon.items`/`:seon.result` I flagged) → cleaning up my.data's first-consumer registration.
 
 **Gate note — the suite noise is TWO things, neither a real regression:**
 1. **Env-coupling FLAKES from my own concurrent runs** (`b5c3a3a4` diagnosis): tests that grep a shared fs dir / touch shared DB state race when the loop runs scorecard + suite at once. `search_test` is now FIXED (pid-scoped hermetic fixtures, 20/20). `index_core_test` is the same class (passes isolated) → #69 to make hermetic. Lesson: aggressive parallelism needs hermetic tests.
