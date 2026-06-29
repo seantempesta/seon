@@ -6,6 +6,13 @@ tags: [agent, context, flow, render]
 
 # Transcript eviction / token-budget policy — the #1 stable-context lever (2026-06-28)
 
+> SUPERSEDED by [[transcript-dynamic-cache-aware-2026-06-28]] (measured + cache-aware).
+> The recency-WEIGHTED budget walk proposed below is cache-HOSTILE (an old event's
+> tier depends on newer events' sizes → cache bust every turn). The successor
+> replaces it with a discrete age-band gradient + frozen clips, and backs the clip
+> values with measurements on the real `root` transcript. Read this for the
+> load-bearing/evictable analysis; take the policy + numbers from the successor.
+
 Read-only design (no live LLM drive) for an eviction / token-budget policy on the
 agent's `:transcript` block — the single biggest token sink in the stable context
 (~20,315 tok for the long-lived `root` agent, **unbounded** today,
