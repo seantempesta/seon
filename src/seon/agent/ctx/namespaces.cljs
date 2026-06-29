@@ -156,20 +156,29 @@
   #{:seon.agent.message :seon.agent.lifecycle})
 
 (def canonical-full-my-ns
-  "The ONE `my.*` namespace kept rendered in FULL under the signature
-   render-trim — the canonical worked `register! → transact! → query`
-   exemplar a cold agent must see END TO END (so it learns the complete
-   how-to-use-the-DB pattern, not just isolated signatures). Every OTHER
+  "The `my.*` namespaces kept rendered in FULL under the signature
+   render-trim — the worked exemplars a cold agent must see END TO END (so it
+   learns the complete patterns, not just isolated signatures). Every OTHER
    `my.*` ns render-trims to its public verb SIGNATURES (name + full arglist
    + one-line doc — rich enough to CALL the toolkit correctly) via
    `:seon.render/detail :signature`; their full bodies stay one
    `(seon.agent.ctx/render-namespace {:seon.ns/name … :seon.render/detail
-   :full})` away. `my.kb` is that exemplar: its runnable RECIPES cover
-   schema-register, write, upsert/retract, datalog query, pull, and an
-   aggregate, with a single end-to-end `build-kb-example!`. The clear
-   EDITABLE def to change which example is kept full (config-wiring is a
-   separate later step)."
-  #{:my.kb})
+   :full})` away. Two are kept full:
+   - `my.kb` — the DB manual: runnable RECIPES covering schema-register,
+     write, upsert/retract, datalog query, pull, and an aggregate, with a
+     single end-to-end `build-kb-example!`.
+   - `my.data` — the aggregation TOOLKIT. Its value is the worked composition
+     chain `(reducer (merge (producer …) {:my.data/key k}))` tying
+     `rows → group-sum → max-by`, which lives in the verb-body + ns
+     docstrings — NOT in the signatures. DRIVE-PROVEN (2026-06-28,
+     `namespaces-trim-validation`): with `my.data` signature-only the agent
+     never called it and hand-rolled `db/query`+`group-by`, re-opening the
+     dedup footgun `my.data` exists to close. Toolkit USABILITY is kept full;
+     only framework BULK is trimmed.
+   The clear EDITABLE def to change which examples are kept full (extend to
+   `my.ui`/`my.tile` if their drives show the same named-but-not-composed
+   regression; config-wiring is a separate later step)."
+  #{:my.kb :my.data})
 
 (defn in-full-source-whitelist?
   "True when `ns-name` (string, keyword, or symbol) is one of the curated
