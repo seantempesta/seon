@@ -84,6 +84,7 @@
     [seon.agent.run :as run]
     [seon.agent.loop :as aloop]
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.namespaces :as ctx-ns]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.debug :as debug]
@@ -571,6 +572,17 @@
   [s]
   (str/join (map #(if (= % ".") "\\." %) s)))
 
+(defn- dotted-prefix-esc
+  "The regex-escaped leading PREFIX of a dotted ns name — everything up to
+   and including the final dot (\"seon.db\" -> \"seon\\.\", \"my.tile\" ->
+   \"my\\.\", \"seon.agent.todo\" -> \"seon\\.agent\\.\"). Used to build the
+   per-ns optional-prefix idiom `(?:<prefix>)?<alias>` an alias-tolerant
+   pattern may use — `(?:seon\\.)?db` for a seon verb, `(?:my\\.)?tile` for
+   a toolkit verb — so the guard accepts the correct prefix for EITHER
+   family rather than a hardcoded `seon\\.`."
+  [dotted]
+  (re-escape-dots (str (str/join "." (butlast (str/split dotted #"\."))) ".")))
+
 (defn- home-ns-seon-aliases
   "Map of `seon.*` dotted-ns-name -> its short `:as` alias, DERIVED from
    seon.eval/home-ns-require-specs (the single source of truth for how
@@ -588,31 +600,77 @@
                   [(name (first spec)) (name (nth spec 2))])))
         seval/home-ns-require-specs))
 
+(defn- home-ns-toolkit-aliases
+  "Map of `my.*` TOOLKIT dotted-ns-name -> its short alias, DERIVED from
+   seon.agent.ctx.namespaces/canonical-full-my-ns (the curated toolkit set
+   the agent composes its canvas/memory from). The alias is the last dotted
+   segment — the CONVENTION every agent writes the toolkit by (`my.tile` →
+   `tile`, `my.ui` → `ui`, `my.data` → `data`, `my.kb` → `kb`), confirmed by
+   the toolkit test nses' `(:require [my.tile :as tile] …)` heads. These are
+   NOT in [[home-ns-seon-aliases]] (a DIFFERENT wiring than the seon.* verbs
+   in home-ns-require-specs), yet the ORIGINAL alias-blind instance was a
+   `my.tile/button` predicate — so without them the guard misses the whole
+   toolkit-alias class. Derives from the curated set, never hardcodes."
+  []
+  (into {}
+        (map (fn [k]
+               (let [dotted (name k)]
+                 [dotted (last (str/split dotted #"\."))])))
+        ctx-ns/canonical-full-my-ns))
+
+(defn- home-ns-aliases
+  "Map of every agent-home-ns dotted-ns-name -> its short alias, the UNION
+   of the seon.* verbs ([[home-ns-seon-aliases]], from `home-ns-require-specs`)
+   and the my.* toolkit ([[home-ns-toolkit-aliases]], from
+   `canonical-full-my-ns`). One map of every dotted/alias pair an agent
+   writes through a SHORT prefix — what [[alias-blind-predicate?]] scans
+   against. Both halves derive from their source vars, so the guard can't
+   drift from the agent's actual aliasing."
+  []
+  (merge (home-ns-seon-aliases) (home-ns-toolkit-aliases)))
+
+(defn- qualified-fn-ref?
+  "True when `pattern` references `dotted` (its regex-escaped form `esc`) as
+   a FN-CALL alias target — `<esc>/` or `<esc>\\b` — at a position that is
+   NOT part of a namespaced KEYWORD (`:<esc>/…`). A namespaced keyword like
+   `:my.tile/action` is an un-aliasable DATA KEY (the tile map's key), never
+   a `tile/action` alias call, so a `:my\\.tile/(action|submit)` data-key
+   predicate must NOT read as an alias-blind `my.tile/button` fn call. We
+   strip the `:<esc>` keyword occurrences first, then test the remainder for
+   the bare fn-call form."
+  [pattern esc]
+  (let [no-kw (str/replace pattern (str ":" esc) "")]
+    (or (str/includes? no-kw (str esc "/"))
+        (str/includes? no-kw (str esc "\\b")))))
+
 (defn- alias-blind-predicate?
   "nil if `pred`'s :pattern is alias-safe, else a violation map naming the
-   aliased seon ns whose FULLY-QUALIFIED `seon.<ns>/` form the pattern
-   regexes WITHOUT also accepting the seeded short alias.
+   aliased ns whose FULLY-QUALIFIED `<long-ns>/` FN-CALL form the pattern
+   regexes WITHOUT also accepting the short alias the agent actually writes.
 
-   For each aliased ns (db, message, schema, agent, todo — from
-   [[home-ns-seon-aliases]]): if the pattern contains the qualified form
-   `seon\\.<ns>/` (or `seon\\.<ns>\\b`) it references the long name
-   directly; that is alias-BLIND unless the pattern ALSO accepts the short
-   alias via one of the two sanctioned idioms — a `(?:seon\\.)?<alias>`
-   optional prefix, or a `\\b<alias>/`/`|<alias>/`/`(<alias>/`/leading
+   For each aliased ns ([[home-ns-aliases]] — the seon.* verbs db/message/
+   schema/agent/todo AND the my.* toolkit tile/ui/data/kb): if the pattern
+   references the qualified FN-CALL form `<long>\\<ns>/` (or `<long>\\b`) —
+   [[qualified-fn-ref?]], which ignores un-aliasable `:<long>/…` keyword
+   data-keys — it points at the long name directly; that is alias-BLIND
+   unless the pattern ALSO accepts the short alias via one of the sanctioned
+   idioms — a `(?:<prefix>)?<alias>` optional prefix (`(?:seon\\.)?db`,
+   `(?:my\\.)?tile`), or a `\\b<alias>/`/`|<alias>/`/`(<alias>/`/leading
    `<alias>/` alternative.
 
    No false positives: a fully-qualified pattern for a ns that is NOT
    aliased (seon.agent.search/grep, seon.agent.fs/read-file — agents write
-   those qualified) is CORRECT. The qualified test demands a `/` or `\\b`
-   right after `<ns>`, so `seon\\.agent\\.search/` never trips the
-   `seon.agent` alias (its `\\.search` is neither)."
+   those qualified) is CORRECT, as is a namespaced-keyword data-key
+   (`:my.tile/action`). The qualified test demands a `/` or `\\b` right
+   after `<ns>` and discounts keyword occurrences, so `seon\\.agent\\.search/`
+   never trips the `seon.agent` alias and `:my\\.tile/action` never trips
+   the `my.tile` alias."
   [{:seon.gym.predicate/keys [id pattern]}]
   (when pattern
     (some (fn [[dotted alias]]
             (let [esc        (re-escape-dots dotted)
-                  qualified? (or (str/includes? pattern (str esc "/"))
-                                 (str/includes? pattern (str esc "\\b")))
-                  alias-ok?  (or (str/includes? pattern (str "(?:seon\\.)?" alias))
+                  qualified? (qualified-fn-ref? pattern esc)
+                  alias-ok?  (or (str/includes? pattern (str "(?:" (dotted-prefix-esc dotted) ")?" alias))
                                  (str/includes? pattern (str "\\b" alias "/"))
                                  (str/includes? pattern (str "|" alias "/"))
                                  (str/includes? pattern (str "(" alias "/"))
@@ -622,15 +680,16 @@
                  :seon.gym/alias-blind-ns    dotted
                  :seon.gym/alias-blind-alias alias
                  :seon.gym.predicate/pattern pattern})))
-          (home-ns-seon-aliases))))
+          (home-ns-aliases))))
 
 (defn- check-alias-blind!
   "Crash the load if any of a scenario's predicates is
-   [[alias-blind-predicate?]] — a qualified `seon.<ns>/` pattern that
-   ignores the seeded short alias the agent actually writes, which would
-   false-negative every correct read and silently suppress the pass-rate.
-   Loud failure naming the scenario, predicate, ns + alias, and the fix
-   (accept the alias: `(?:seon\\.)?<alias>` or `\\b<alias>/`)."
+   [[alias-blind-predicate?]] — a qualified `<long-ns>/` FN-CALL pattern
+   (seon.* verb OR my.* toolkit) that ignores the short alias the agent
+   actually writes, which would false-negative every correct read and
+   silently suppress the pass-rate. Loud failure naming the scenario,
+   predicate, ns + alias, and the fix (accept the alias: the ns's own
+   `(?:<prefix>)?<alias>` optional prefix or `\\b<alias>/`)."
   [path {:seon.gym.scenario/keys [id predicates]}]
   (doseq [pred predicates
           :let [v (alias-blind-predicate? pred)]
@@ -641,7 +700,8 @@
                          (:seon.gym/alias-blind-ns v) "/ but the agent's home "
                          "ns aliases it to " (:seon.gym/alias-blind-alias v)
                          "/ — the pattern false-negatives every correct read. "
-                         "Accept the alias too: (?:seon\\.)?"
+                         "Accept the alias too: (?:"
+                         (dotted-prefix-esc (:seon.gym/alias-blind-ns v)) ")?"
                          (:seon.gym/alias-blind-alias v) " or \\b"
                          (:seon.gym/alias-blind-alias v) "/.")
                     (assoc v :seon.gym/path path :seon.gym.scenario/id id)))))

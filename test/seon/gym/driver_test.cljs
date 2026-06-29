@@ -657,17 +657,20 @@
 
 ;; ---------------------------------------------------------------------------
 ;; ALIAS-BLIND PREDICATE LOAD CHECK — a :pattern that regexes a qualified
-;; `seon.<ns>/` whose home ns aliases it (db/, message/, …) but does NOT
+;; FN-CALL `<long-ns>/` whose home ns aliases it (the seon.* verbs db/,
+;; message/, … AND the my.* toolkit tile/, ui/, data/, kb/) but does NOT
 ;; accept the short alias false-negatives EVERY correct read, silently
 ;; suppressing the pass-rate (bit thrice: my.tile e6aaf9f0, three seon.db/
 ;; reads fc557fbf). It must FAIL TO LOAD with the named error, while
-;; alias-tolerant and legitimately-qualified (non-aliased) patterns load.
+;; alias-tolerant patterns, legitimately-qualified (non-aliased) patterns,
+;; and namespaced-keyword data-keys (`:my.tile/action`) all load.
 ;; ---------------------------------------------------------------------------
 
 (deftest alias-blind-predicate-detects-the-aliased-qualified-without-alias
-  ;; the unit fn: flags an aliased ns's qualified-without-alias pattern,
-  ;; passes the alias-tolerant idioms and the legitimately-qualified
-  ;; (non-aliased) namespaces agents DO write fully-qualified.
+  ;; the unit fn: flags an aliased ns's qualified-without-alias FN-CALL
+  ;; pattern (seon.* verb OR my.* toolkit), passes the alias-tolerant
+  ;; idioms, the legitimately-qualified (non-aliased) namespaces agents DO
+  ;; write fully-qualified, and namespaced-keyword data-keys.
   (let [blind? (fn [p] (#'gym/alias-blind-predicate?
                          {:seon.gym.predicate/id :p :seon.gym.predicate/pattern p}))]
     ;; FLAGGED — qualified seon.<ns>/ with no alias acceptance
@@ -677,18 +680,30 @@
         "qualified seon.agent.message/ without the message alias is alias-blind")
     (is (some? (blind? "seon\\.agent\\.todo/plan!"))
         "qualified seon.agent.todo/ without the todo alias is alias-blind")
-    ;; NOT flagged — the two sanctioned alias-tolerant idioms
+    ;; FLAGGED — the ORIGINAL alias-blind class (e6aaf9f0): a my.* TOOLKIT
+    ;; fn-call `my.tile/button` with no `tile/` alternative.
+    (is (= "my.tile" (:seon.gym/alias-blind-ns (blind? "my\\.tile/(button|form)")))
+        "qualified my.tile/ fn-call without the tile alias is alias-blind")
+    ;; NOT flagged — the sanctioned alias-tolerant idioms (seon. and my.)
     (is (nil? (blind? "(?:seon\\.)?db/(query|pull|entity|store-inventory)"))
         "the (?:seon\\.)? optional-prefix idiom accepts the alias")
     (is (nil? (blind? "\\bdb/(query|pull|entity|store-inventory)"))
         "the \\bdb/ alias alternative accepts the alias")
+    (is (nil? (blind? "(?:my\\.)?tile/(button|form|input)"))
+        "the (?:my\\.)? optional-prefix idiom accepts the toolkit alias")
+    ;; NOT flagged — the CURRENT battery toolkit idiom `\b(my.tile|tile)/`
+    ;; (qualified-or-alias alternation — never a bare `my.tile/` fn call).
+    (is (nil? (blind? "\\b(my\\.tile|tile)/(button|form|input)"))
+        "the \\b(my.tile|tile)/ alternation is alias-tolerant, not blind")
+    ;; NOT flagged — a namespaced-KEYWORD data-key is un-aliasable, never a
+    ;; `tile/action` fn call (the `:wired-to-an-own-fn` battery predicate).
+    (is (nil? (blind? ":my\\.tile/(action|submit)\\s+\\(?\\s*(list\\s+)?'"))
+        "a :my.tile/ namespaced-keyword data-key is not an alias-blind fn call")
     ;; NOT flagged — NON-aliased namespaces agents write fully-qualified
     (is (nil? (blind? "seon\\.agent\\.search/grep|seon\\.agent\\.fs/read-file"))
         "seon.agent.search / seon.agent.fs are NOT aliased — fully-qualified is correct")
     (is (nil? (blind? "deftest"))
-        "a non-seon pattern is never alias-blind")
-    (is (nil? (blind? "\\b(my\\.tile|tile)/(button|form|input)"))
-        "my.tile is not a home-ns alias — out of this guard's scope")))
+        "a non-seon pattern is never alias-blind")))
 
 (deftest alias-blind-scenario-fails-to-load-and-the-fixed-battery-is-clean
   (let [fs       (js/require "node:fs")
