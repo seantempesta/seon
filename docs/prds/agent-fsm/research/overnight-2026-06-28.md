@@ -39,7 +39,13 @@ needs your decision, and the Core-routed queue.
 | #68 | new gym scenario `plan-resume-across-restart` (`:planning`) — untested facet: planning continuity across interruption; structural predicates + judge-resumed-not-replanned | battery auto-discovered 19→20; FREE-measured | committed |
 | #62 | transcript design pushed to **CACHE-AWARE + MEASURED** (config A −83%, 1,673 frozen→cached) — design done, ROUTED to Core | measured on real root (146 ev, 21,843→3,718) | `9eb13722` |
 
-**Gate note (shared-tree, Core active overnight):** the suite is noisy from Core's UNCOMMITTED WIP across multiple lanes — `loop-test` (4, `loop.cljs`/`schedule.cljs`), `search_test` (2, active `search.cljs`), `index_core_test` (3). NONE are mine — my agents' own files are green and the **scorecard battery holds**, which is the honest gate (the suite-wide green is Core's to restore for their files). The **canvas verification drive is blocked** until Core commits `loop.cljs` clean (a reset would pull the broken agent-loop into the pod) — Monitor watching.
+**Gate note — the suite noise is TWO things, neither a real regression:**
+1. **Env-coupling FLAKES from my own concurrent runs** (`b5c3a3a4` diagnosis): tests that grep a shared fs dir / touch shared DB state race when the loop runs scorecard + suite at once. `search_test` is now FIXED (pid-scoped hermetic fixtures, 20/20). `index_core_test` is the same class (passes isolated) → #69 to make hermetic. Lesson: aggressive parallelism needs hermetic tests.
+2. **Core's UNCOMMITTED `loop.cljs`/`schedule.cljs` WIP** (`loop-test` 4) — real WIP, theirs to finish.
+
+**Honest gate = my files green + scorecard battery holds + known-flaky tracked.** The **canvas verification drive** stays blocked until Core commits `loop.cljs` clean (a reset would pull the broken agent-loop into the pod) — Monitor watching.
+
+**Core landed the #42 lever + ns-switch fix** (`55cd5002` my.* → signatures, ~43% off namespaces; `1809e9ad` home-ns aliases). Validation agent driving x-category-argmax to confirm signature-only my.data still composes (the render-prominence risk) + measure the token drop + eval-error-rate.
 
 ## In flight
 
