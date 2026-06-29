@@ -16,7 +16,17 @@
 ;; the maximal loadout. To prove retract-on-drop against a third-party shape,
 ;; point at a different manifest at the shell:
 ;;   SEON_CONFIG=config/test.edn bin/acme restart pod
-{;; ── per-role context loadouts (merged over default-seed-blocks at create) ──
+{;; ── LLM PROVIDER is NOT set in this manifest ──
+ ;; Same as the default cluster: the LLM provider/model is the `seon.ai`
+ ;; env→DB surface (`:seon.ai/config` row), not this loadout manifest. For
+ ;; the acme cluster set it in .env.acme (bin/acme sources it):
+ ;;   SEON_AI_PROVIDER=diffusiongemma            ; deepseek (default) | anthropic
+ ;;   SEON_DG_ENDPOINT=<runpod-endpoint-id>      ;   | openai-compat | diffusiongemma
+ ;;   RUNPOD_API_KEY=<key>
+ ;; Full var docs: .env.example (DIFFUSIONGEMMA block). A live switch is a
+ ;; transact: {:seon.ai/id "config" :seon.ai/provider :diffusiongemma}.
+
+ ;; ── per-role context loadouts (merged over default-seed-blocks at create) ──
  ;; `:default` profile = MAXIMUM features: every agent-corpus skill body is
  ;; always-on, each seeded as a :skill/<name> block at the cached-prefix
  ;; priority (16) via my.skills/skill-block, so the rich context is part of the
@@ -27,6 +37,7 @@
                       :seon.config/default-load [:repl
                                                  :data-oriented-clojure
                                                  :datahike
+                                                 :data-modeling
                                                  :clojurescript
                                                  :ui-live-tiles]}]
            :minimal []}}

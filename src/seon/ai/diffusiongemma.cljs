@@ -25,9 +25,12 @@
    retried, matching the openai adapter's non-retryable-parse stance).
 
    CONFIG (read PER CALL, reactive-context — no cache; the key value is
-   NEVER stored or logged): the endpoint id from `SEON_DG_ENDPOINT`; the
-   bearer key from the env var NAMED by `SEON_DG_API_KEY_ENV` (default
-   `RUNPOD_API_KEY`), read from `process.env` at call time.
+   NEVER stored or logged): the endpoint id from `SEON_DG_ENDPOINT` (falling
+   back to `DIFFGEMMA_EP`, the diffusion experiment driver's var, so one
+   endpoint id serves both); the bearer key from the env var NAMED by
+   `SEON_DG_API_KEY_ENV` (default `RUNPOD_API_KEY`), read from `process.env`
+   at call time. The `:seon.ai/config` row's `:seon.ai/max-tokens` becomes
+   the worker's `max_new_tokens` (honored like every other provider).
 
    One agent-facing fn: [[agent-adapter]] returns `(fn [ctx-string])`
    compatible with `seon.agent`'s `llm-fn` (defaults `mode=generate` +
@@ -132,9 +135,13 @@
     (when (and (string? v) (seq v)) v)))
 
 (defn- endpoint-id
-  "The RunPod endpoint id (SEON_DG_ENDPOINT), or nil when unconfigured."
+  "The RunPod endpoint id — `SEON_DG_ENDPOINT`, falling back to
+   `DIFFGEMMA_EP` (the diffusion experiment driver's var) so ONE endpoint
+   id set in `.env` serves BOTH the Python driver and this provider. nil
+   when neither is set."
   []
-  (config/env-string "SEON_DG_ENDPOINT"))
+  (or (config/env-string "SEON_DG_ENDPOINT")
+      (config/env-string "DIFFGEMMA_EP")))
 
 (defn- base-url
   "The endpoint's RunPod base `…/v2/{EP}`, or nil when no endpoint id."
@@ -352,8 +359,8 @@
     (cond
       (nil? base)
       (config-error
-        (str label " endpoint not configured — set SEON_DG_ENDPOINT to the "
-             "RunPod endpoint id (e.g. \"kzonsp5b18hpq5\")"))
+        (str label " endpoint not configured — set SEON_DG_ENDPOINT (or "
+             "DIFFGEMMA_EP) to the RunPod endpoint id (e.g. \"u50y7khhos5t7o\")"))
 
       (nil? key)
       (config-error
@@ -383,9 +390,17 @@
 (defn ^:async ^:private complete+wrap
   "Call [[complete]] with the FAST gen defaults + `opts`, the ctx as the
    prompt; wrap into the turn-loop shape, lifting `:seon.ai/error` to the
-   top level."
+   top level. Honors the `:seon.ai/config` row's `:seon.ai/max-tokens`
+   (read PER CALL via `seon.ai/current`, reactive-context — no cache) as
+   `::max-new-tokens`, so a downstream deployment retunes the output cap
+   like any other provider; precedence is explicit opt > config row >
+   the worker's gen-config default (no default-gen-opts cap)."
   [opts ctx-text]
-  (let [resp (await (complete (merge default-gen-opts opts {::prompt ctx-text})))]
+  (let [cfg-max (:seon.ai/max-tokens (ai/current))
+        request (cond-> (merge default-gen-opts opts {::prompt ctx-text})
+                  (and cfg-max (not (contains? opts ::max-new-tokens)))
+                  (assoc ::max-new-tokens cfg-max))
+        resp    (await (complete request))]
     (cond-> {:text        (:seon.ai/text resp)
              :seon.ai/raw resp}
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))

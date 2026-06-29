@@ -19,6 +19,17 @@
  ;;   curation (e.g. a test cluster trimming the corpus) — NOT for dropping dev
  ;;   skills. We ship none by default: the `seon-skills/` dir IS the agent corpus.
 
+ ;; ── LLM PROVIDER is NOT set in this manifest ──
+ ;; The agent's LLM provider/model is its OWN env→DB surface (`seon.ai`, the
+ ;; `:seon.ai/config` row), deliberately separate from this loadout manifest
+ ;; (see seon.config — env seeds the row once, then it is DB-owned). Select the
+ ;; provider via env (e.g. in .env), not here:
+ ;;   SEON_AI_PROVIDER=diffusiongemma            ; deepseek (default) | anthropic
+ ;;   SEON_DG_ENDPOINT=<runpod-endpoint-id>      ;   | openai-compat | diffusiongemma
+ ;;   RUNPOD_API_KEY=<key>
+ ;; Full var docs: .env.example (DIFFUSIONGEMMA block). A live switch is a
+ ;; transact: {:seon.ai/id "config" :seon.ai/provider :diffusiongemma}.
+
  ;; ── per-role context loadouts (merged over default-seed-blocks at create) ──
  ;; `:repl`'s body is always-on for EVERY agent — seeded as a :skill/repl block
  ;; at the cached-prefix priority (16), reusing my.skills/skill-block.

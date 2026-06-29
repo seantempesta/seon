@@ -85,6 +85,35 @@ REGISTRY=docker.io/seantempesta TAG=cu128-v1 ./build-image.sh
   ~$1.19/hr — owner's call once iterating). `.flashignore` is DEAD in Flash v1.17 —
   use `.gitignore`.
 
+## Use DiffusionGemma as an AGENT's LLM provider (`:diffusiongemma`)
+
+DiffusionGemma is a first-class, config-selectable seon LLM provider alongside
+deepseek/anthropic — `seon.ai.diffusiongemma` (the `:control` backend: RunPod
+async `/run` + status poll, the per-step LogitsProcessor seam). It conforms to
+the same `llm-fn` contract as the other adapters: `(fn [ctx-string])` →
+`Promise<{:text … :seon.ai/raw …}>`, errors-as-values via `:seon.ai/error`
+(never a throw into the agent loop). `seon.client/current-llm-fn` dispatches to
+it; an undeployed/unreachable endpoint surfaces a graceful `:seon.ai/error`
+value and falls back to the stub when unconfigured.
+
+Select it (env seeds the DB-owned `:seon.ai/config` row once; a runtime transact
+against the row also switches it):
+
+```bash
+# in .env (default cluster) or .env.acme (acme harness):
+SEON_AI_PROVIDER=diffusiongemma
+DIFFGEMMA_EP=u50y7khhos5t7o     # or SEON_DG_ENDPOINT — same value, either var
+RUNPOD_API_KEY=<key>            # or point SEON_DG_API_KEY_ENV at another var
+# optional: SEON_DG_BACKEND=control (default) | vllm ; SEON_AI_MAX_TOKENS=N
+```
+
+`SEON_AI_MAX_TOKENS` (the `:seon.ai/config` row's `::max-tokens`) is honored as
+the worker's `max_new_tokens`. **To go live: deploy the worker, set `DIFFGEMMA_EP`
++ `RUNPOD_API_KEY`, set `SEON_AI_PROVIDER=diffusiongemma`** — then a configured
+agent gets real completions, drop-in (proven wired + graceful-down; real
+completions await an owner-deployed endpoint). The `:vllm` backend reuses
+`seon.ai.openai-compat` (set `SEON_AI_BASE_URL` + key instead).
+
 ## Deployment stability — KNOW what's live (do NOT skip)
 
 A plain `flash deploy` does NOT recycle a WARM worker — it keeps serving OLD code
