@@ -38,3 +38,21 @@
                 (is (= 1 fails)
                     "settle! recorded a loud (is false …) failure on reject")
                 (done))))))))
+
+(deftest settle!-on-never-settling-promise-times-out-loudly
+  ;; #41 — a chain that never settles must FAIL LOUDLY + INDIVIDUALLY,
+  ;; not hang the run. The capture `done` here is reached ONLY via the
+  ;; timeout path (the promise never resolves/rejects); reaching it at
+  ;; all proves the runner was freed, and the recorded :fail proves the
+  ;; failure was loud.
+  (async done
+    (let [saved (t/get-current-env)]
+      (set! t/*current-env* (fresh-capture-env))
+      (settle! (js/Promise. (fn [_ _]))            ; never settles
+               (fn []                              ; only the timeout calls this
+                 (let [fails (get-in (t/get-current-env) [:report-counters :fail])]
+                   (set! t/*current-env* saved)
+                   (is (= 1 fails)
+                       "settle! recorded a loud TIMED OUT failure")
+                   (done)))
+               50))))                              ; 50ms — fast, deterministic
