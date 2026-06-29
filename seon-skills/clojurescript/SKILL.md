@@ -104,6 +104,24 @@ Note: bare `seon.eval/eval` does NOT auto-await; only the
   `!instrumented?` atom (`instrument.cljc:365-376`). **Never run a second
   instrument pass over the program graph in one process.**
 
+## Callable gotchas -- arity-0 thunks and keyword callbacks
+
+Two silent footguns from "what is actually callable" in CLJS:
+
+- **`(fn [])` is a strict zero-arity fn; `constantly` is variadic.** A callback
+  the caller invokes WITH args (a `.then` handler, a tile/render fn, a
+  multimethod/`reduce` step, an event handler) blows up on `(fn [] body)` with
+  an `Invalid arity: 1` -- the fn declares exactly zero params. Use
+  `(constantly v)` (-> `(fn [& _] v)`, swallows any args) for a value-returning
+  callback, or `(fn [_] body)` to take-and-ignore the one arg. Reach for
+  `(fn [])` ONLY for a genuine no-arg thunk you call yourself as `(f)`.
+- **`(.then promise :some-keyword)` SILENTLY no-ops.** A keyword is callable on
+  a CLJS map (`(:k m)`), but it is NOT a JS function, and `Promise.prototype.then`
+  ignores any non-function argument -- the value passes through UNCHANGED, so
+  `(:some-keyword value)` is never applied and there is no error. Wrap it:
+  `(.then promise #(:some-keyword %))` or `(.then promise (fn [v] (:some-keyword v)))`.
+  Same trap for any JS API taking a callback (`.map`, `.forEach`, `setTimeout`).
+
 ## Self-host eval / REPL gotchas (cross-`eval-str`)
 
 These are from the `seon.eval` namespace docstring (`eval.cljs:26-34`) and are

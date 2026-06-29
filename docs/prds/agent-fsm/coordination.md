@@ -762,8 +762,11 @@ other lane's **_Needs_** and the owner makes it.
     several resets.** Every `cluster reset default` (incl the owner's clean-test boots) rebuilds it, so resets
     aren't reproducible and a mid-edit moment could break a boot. **→ Please commit it once it's stable** (looks
     stable per the drive above). Purely so our shared resets are clean + your fix is durable.
-  - **#40 (data integrity):** `:seon.agent.turn/at` + `/status` are registered REQUIRED but ABSENT on live
-    turns (DB-verified by the schema-fingerprint research) — schema-or-writer mismatch.
+  - **#40 (data integrity) — CLOSED (not real, 2026-06-29):** `:seon.agent.turn/at` + `/status` are marked
+    required in the `:seon.agent.turn` `:map` (`turn.cljs:92-93`), but `seon.db` validates per-ATTRIBUTE only
+    (`db/internal.cljs:761-822` walks present `[attr v]` pairs; never checks entity-level required-key presence),
+    so the property is never enforced and `close-turn!` omitting `at` succeeds. Enforcing entity-required keys
+    would be a NEW `seon.db` feature, out of scope.
   - **#41:** `relink-registry!` deregisters leaf attrs mid-session (`:seon.agent/ai` dropped from the `*schemas`
     atom while its durable `:seon.schema` row survived) — the fingerprint must read DB rows, not the atom.
   - **NOT on you:** the `/agent/root` error tiles the owner saw were MY header-agent's messy DeepSeek test-turn

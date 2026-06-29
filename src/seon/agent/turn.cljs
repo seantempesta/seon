@@ -86,6 +86,9 @@
 (schema/register! :seon.agent.turn/llm-meta     :string)
 (schema/register! :seon.agent.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
 
+;; Entity shape. NB: seon.db validates per-ATTRIBUTE, not entity-level, so the
+;; non-:optional entries below are documentation, not an enforced required-key
+;; check — a tx omitting `at`/`status` still writes.
 (schema/register! :seon.agent.turn
   [:map {:seon.db/entity true}
    [:seon.agent.turn/id           :seon.agent.turn/id]
