@@ -18,12 +18,16 @@
    Dev-only checks are not surfaced here. Add a kind via `seon.warn/checks`."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id] :as input}]
-  (let [override (:seon.warn/ns (:seon.agent.ctx/block input))
+  ;; The render engine injects this block's own map as :seon.render/node
+  ;; (seon.render/render) — that is where a per-block :seon.warn/ns override
+  ;; lives. (Reading :seon.agent.ctx/block here was a dead key: the input
+  ;; never carries it, so the override was silently ignored.)
+  (let [override (:seon.warn/ns (:seon.render/node input))
         scope    (cond
                    (= override :seon.warn/all) nil
                    (some? override)            override
                    :else
-                   (let [ns (ctx/current-ns {:seon.agent/id id})]
+                   (let [ns (ctx/current-ns {:seon.agent/id id :seon.db/db db})]
                      (if (keyword? ns) ns (keyword (str ns)))))]
     (warn/render-warnings
       (cond-> {:seon.db/db db}
