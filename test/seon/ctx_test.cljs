@@ -144,17 +144,30 @@
                         :seon.ns/source (str "(ns " nm ")\n" body)}]}))
 
 (deftest namespaces-block-curated-full-only-recency
-  ;; CURATED render (de-stub 2026-06-24): ONLY full nses (my.*, third-party
-  ;; acme.*, the curated seon.* whitelist, the current ns) render — each its
-  ;; WHOLE source as a tag, UNCLIPPED. Every OTHER seon.* framework ns is
-  ;; DROPPED from the rendered section entirely (no block, no body, no
-  ;; signature manifest) — it stays indexed + searchable, just not shown.
+  ;; CURATED render with SIGNATURE TRIM (#42): the agent's current ns,
+  ;; third-party acme.*, the curated seon.* whitelist, and the ONE kept my.*
+  ;; worked example (my.kb) render FULL — WHOLE source, UNCLIPPED. Every
+  ;; OTHER my.* ns render-trims to its public verb SIGNATURES (name + arglist
+  ;; + one-line doc, body elided). Every seon.* framework ns is DROPPED from
+  ;; the rendered section entirely — indexed + searchable, just not shown.
   (async done
     (let [!before (atom nil)]
       (-> (with-conn
             (fn [_conn]
-              ;; my.agent.a1 (my.* → FULL tag) with a real body.
-              (-> (transact-full-ns! "my.agent.a1" "(def helper 1)")
+              ;; my.agent.a1 (my.*, NOT the kept example → SIGNATURE) with a
+              ;; real public defn so the signature has an arglist + doc to show.
+              (-> (transact-full-ns! "my.agent.a1" "(defn helper [a] (inc a))")
+                  (.then
+                    (fn [_]
+                      (db/transact!
+                        {:seon.db/tx-data
+                         [{:seon.fn/sym      "my.agent.a1/helper"
+                           :seon.fn/ns       [:seon.ns/name :my.agent.a1]
+                           :seon.fn/arglists "([a])"
+                           :seon.fn/doc      "Bump a by one.\nMore detail here."
+                           :seon.fn/source   "(defn helper [a] (inc a))"}]})))
+                  ;; my.kb (the kept canonical worked example → FULL body).
+                  (.then (fn [_] (transact-full-ns! "my.kb" "(def k 1)")))
                   ;; a third-party acme ns (non-seon, non-my → FULL tag).
                   (.then (fn [_] (transact-full-ns! "acme.widget" "(def w 2)")))
                   ;; framework nses → DROPPED entirely. seon.client carries a
@@ -185,15 +198,24 @@
                   (.then
                     (fn [_]
                       (let [txt (ctx-namespaces/namespaces-block {:seon.db/db @db/*conn*})]
-                        ;; FULL: my.* + third-party acme render their whole
-                        ;; source. Anchor on the rendered ns-source HEAD
-                        ;; (`(ns X`) — real content in every full block — plus
-                        ;; the body, NOT the decorative per-ns label glyph.
-                        ;; Block ORDERING is NOT asserted (priority is numeric
-                        ;; + movable, ordering is not a contract).
-                        (is (str/includes? txt "(ns my.agent.a1") "a my.* ns block renders")
-                        (is (str/includes? txt "(def helper 1)")
-                            "the my.* ns body is shown FULL (no clipping)")
+                        ;; SIGNATURE-trim: a non-kept my.* ns renders its
+                        ;; public verb signature (name + arglist + one-line
+                        ;; doc) — NOT its full body. Block ORDERING is NOT
+                        ;; asserted (priority is numeric + movable).
+                        (is (str/includes? txt ";;; ┌─ namespace my.agent.a1 (signatures) ─")
+                            "a non-kept my.* ns renders as a (signatures) block")
+                        (is (str/includes? txt "(my.agent.a1/helper [a])")
+                            "the my.* verb signature (name + arglist) is shown")
+                        (is (str/includes? txt "; Bump a by one.")
+                            "the one-line docstring rides the signature")
+                        (is (not (str/includes? txt "(inc a)"))
+                            "the non-kept my.* BODY is elided (signature-trim)")
+                        ;; FULL: the kept my.* worked example renders whole.
+                        (is (str/includes? txt "(ns my.kb")
+                            "the kept my.kb worked example renders")
+                        (is (str/includes? txt "(def k 1)")
+                            "the kept my.kb body is shown FULL (no clipping)")
+                        ;; FULL: third-party acme renders its whole source.
                         (is (str/includes? txt "(ns acme.widget")
                             "a third-party acme ns renders")
                         (is (str/includes? txt "(def w 2)")
@@ -207,9 +229,8 @@
                         (is (not (str/includes? txt "seon.warn"))
                             "another dropped framework ns is absent")
                         ;; DROPPED: a framework ns WITH public fns is STILL
-                        ;; absent — there is no signature manifest anymore.
-                        (is (not (str/includes? txt "(signatures)"))
-                            "there is NO signatures manifest block anywhere")
+                        ;; absent — only my.* gets a signature block, never a
+                        ;; dropped seon.* framework ns.
                         (is (not (str/includes? txt "seon.frob"))
                             "a framework ns with public fns is dropped, not signatured")
                         (is (not (str/includes? txt "Frobnicate a and b."))
