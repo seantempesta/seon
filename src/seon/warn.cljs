@@ -562,8 +562,11 @@
   "Max `:seon.agent.message/hops` before the wake trigger refuses a message
    (agent↔agent ping-pong guard). Lives here (not seon.agent) so both
    the trigger (seon.agent) and `check-hop-exhausted` read ONE value
-   without a require cycle. hops = 0 when from = the user; each
-   agent-originated send carries waking-message-hops + 1."
+   without a require cycle. hops = 0 when from = the user; an
+   agent-originated send carries the SAME {me,peer}-pair's prior depth
+   + 1 (per-peer, reset at each human message — `outbound-hops`), so a
+   genuine A↔B↔A↔B runaway trips at the cap while distinct delegation
+   rounds (parent→A then parent→B) never accumulate."
   4)
 
 (defn- latest-user-at
@@ -748,24 +751,32 @@
         ";;     :seon.agent.fs/read-only?    false}")})
 
 (defn check-hop-exhausted
-  "Messages whose `:seon.agent.message/hops` reached [[hop-cap]] SINCE the
-   latest user message — each one is a wake the trigger REFUSED (an
-   agent↔agent reply chain hit the ping-pong guard and was dropped on
-   the floor). A fresh human message resets the chain (hops 0) and
-   scopes these out of the surface."
+  "DEAD-LETTER surface — messages whose `:seon.agent.message/hops` reached
+   [[hop-cap]] SINCE the latest user message. Each is a wake the trigger
+   REFUSED (a same-pair agent↔agent reply chain hit the ping-pong guard
+   and was dropped on the floor — the recipient NEVER ran, and the sender
+   often went `:idle` thinking it succeeded). Rendering it here, named
+   `from X → Y`, is the dead-letter: the sender, the recipient (when it
+   next renders), and the human all SEE the bounce instead of a silent
+   deadlock. GLOBAL (cross-agent) on purpose. A fresh human message resets
+   the chain and scopes these out — self-healing, nothing to clear."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
   (let [cutoff (latest-user-at db)
         rows   (db/query
                  {:seon.db/db db
                   :seon.db/query
-                  '[:find ?mid ?hops ?at
+                  '[:find ?mid ?hops ?at ?fid ?tid
                     :in $ ?cap
                     :where
                     [?m :seon.agent.message/hops ?hops]
                     [(>= ?hops ?cap)]
                     [?m :seon.agent.message/id ?mid]
-                    [?m :seon.agent.message/at ?at]]
+                    [?m :seon.agent.message/at ?at]
+                    [?m :seon.agent.message/from ?f]
+                    [?m :seon.agent.message/to ?t]
+                    [(get-else $ ?f :seon.agent/id "user") ?fid]
+                    [(get-else $ ?t :seon.agent/id "user") ?tid]]
                   :seon.db/args [hop-cap]})]
     {:seon.warn/kind :hop-exhausted
      :seon.warn/affected
@@ -774,16 +785,19 @@
                     (or (nil? cutoff) (> (.getTime ^js at)
                                          (.getTime ^js cutoff)))))
           (sort-by first)
-          (mapv (fn [[mid hops _]]
+          (mapv (fn [[mid hops _ fid tid]]
                   {:seon.warn/sym   (str mid)
-                   :seon.warn/where (str "hops " hops "/" hop-cap
-                                         " — wake refused")})))
+                   :seon.warn/where (str "from " fid " → " tid
+                                         " — REFUSED at hops " hops "/" hop-cap
+                                         " (recipient never ran)")})))
      :seon.warn/explain
-     (str "An agent↔agent reply chain hit the hop cap (" hop-cap "): the "
-          "wake trigger REFUSED these messages, so their recipients never "
-          "ran. Two agents must not auto-bill an infinite conversation — "
-          "stop replying to replies; involve the human (message the user) "
-          "to continue the thread, which resets hops to 0.")
+     (str "DEAD-LETTER: a same-pair agent↔agent reply chain hit the hop cap ("
+          hop-cap "). The wake trigger REFUSED these messages, so their "
+          "recipients never woke and the senders may have gone idle believing "
+          "they delivered. The cap is a PING-PONG guard (one pair bouncing) — "
+          "distinct delegation rounds do not accumulate. If you are the sender, "
+          "your message did NOT land: stop replying to replies; message the "
+          "HUMAN (resets the chain to hops 0) to continue the thread.")
      :seon.warn/example
      "(seon.agent/message! {:seon.agent.message/content \"summary for you — …\"})  ; to defaults to the user"}))
 

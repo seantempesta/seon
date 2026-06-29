@@ -21,7 +21,8 @@
     [seon.agent :as agent]
     [seon.agent.todo :as todo]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.warn :as warn]))
 
 (def ^:private a-id "msgtest-agent-a")
 (def ^:private b-id "msgtest-agent-b")
@@ -146,6 +147,77 @@
                           "agent-originated, no waking msg ⇒ hops 0+1")
                       (is (= :agent (:seon.agent.message/origin m))
                           "agent-originated ⇒ origin :agent (#43)")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Hop derivation is PER-PAIR (`internal/outbound-hops`): the ping-pong guard
+;; measures back-and-forth depth within ONE {me,peer} pair, reset at each human
+;; message — NOT the length of a delegation tree's wake chain. So a genuine
+;; A↔B↔A↔B runaway still climbs to the cap (bug #79's loop-guard preserved),
+;; while a parent delegating to childA then childB (distinct pairs, distinct
+;; rounds) does NOT accumulate (bug #79's deadlock fixed).
+;; ---------------------------------------------------------------------------
+
+(defn- send-hops
+  "Send agent→agent (from = `from-id` via ALS scope, to = `to-id`); resolve
+   to the stored `:seon.agent.message/hops`."
+  [from-id to-id content]
+  (-> (db/with-agent from-id
+        (fn []
+          (agent/message! {:seon.agent.message/to      [:seon.agent/id to-id]
+                           :seon.agent.message/content content})))
+      (.then (fn [env] (:seon.agent.message/hops env)))))
+
+(deftest runaway-same-pair-loop-still-trips-the-hop-cap
+  (async done
+    (-> (with-conn
+          (fn [_]
+            ;; A↔B bouncing the SAME pair — each reply derives from the pair's
+            ;; prior depth, so hops climb 1→2→3→4 and the 4th HITS the cap
+            ;; (the wake trigger refuses ≥ cap; the loop-guard is intact).
+            (-> (send-hops a-id b-id "ping 1")
+                (.then (fn [h1]
+                         (is (= 1 h1) "fresh pair ⇒ first contact is hops 1")
+                         (send-hops b-id a-id "pong 1")))
+                (.then (fn [h2]
+                         (is (= 2 h2) "reply within the pair ⇒ +1")
+                         (send-hops a-id b-id "ping 2")))
+                (.then (fn [h3]
+                         (is (= 3 h3) "still the same pair ⇒ +1")
+                         (send-hops b-id a-id "pong 2")))
+                (.then (fn [h4]
+                         (is (= 4 h4) "the 4th bounce in one pair reaches the cap")
+                         (is (>= h4 warn/hop-cap)
+                             "a genuine runaway STILL trips the hop-cap (>= cap ⇒ wake refused)"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest multi-round-delegation-does-not-accumulate-hops
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            ;; parent = a-id; children = b-id (round 1) and c-id (round 2).
+            (-> (d/transact! conn {:tx-data [{:seon.agent/id "msgtest-agent-c"}]})
+                (.then (fn [_]
+                         ;; round 1: parent → childB (task), childB → parent (report)
+                         (send-hops a-id b-id "research option 1")))
+                (.then (fn [hpx]
+                         (is (= 1 hpx) "parent→childB is a fresh pair ⇒ hops 1")
+                         (send-hops b-id a-id "option 1 done — stored 6 rows")))
+                (.then (fn [hxp]
+                         (is (= 2 hxp) "childB→parent report ⇒ hops 2")
+                         ;; round 2: parent → childC (a DISTINCT pair)
+                         (send-hops a-id "msgtest-agent-c" "research option 2")))
+                (.then (fn [hpy]
+                         (is (= 1 hpy)
+                             "parent→childC is a DISTINCT pair ⇒ resets to hops 1 (NOT 3)")
+                         (send-hops "msgtest-agent-c" a-id "option 2 done — stored 6 rows")))
+                (.then (fn [hyp]
+                         (is (= 2 hyp)
+                             "childC→parent round-2 report ⇒ hops 2, NOT 4 — wakes the parent (bug #79 fixed)")
+                         (is (< hyp warn/hop-cap)
+                             "the 2nd-round report is UNDER the cap ⇒ no silent deadlock"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

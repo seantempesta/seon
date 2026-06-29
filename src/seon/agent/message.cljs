@@ -5,7 +5,7 @@
      - the `:seon.user` entity schema + `user-ref` (the default `to`
        target — seeded at boot by seon.client)
      - `message!` — fully-formed storage, boundary defaulting, the
-       blank-content refusal, hop derivation (`waking-hops`), the
+       blank-content refusal, hop derivation (`outbound-hops`), the
        concise success envelope
      - the two agent-facing verbs, thin wrappers over `message!` — the
        agent reaches them through the `message/` alias on its home ns
@@ -33,8 +33,10 @@
 (schema/register! :seon.agent.message/from    :seon.db/ref)
 (schema/register! :seon.agent.message/to      [:vector :seon.db/ref])
 (schema/register! :seon.agent.message/at      :inst)
-;; Ping-pong guard: 0 from the user; agent sends carry waking-hops + 1;
-;; the wake trigger refuses past `seon.warn/hop-cap`.
+;; Ping-pong guard: 0 from the user; an agent send carries the SAME
+;; {me,peer}-pair's prior depth + 1 (per-peer, reset at each human
+;; message — see `internal/outbound-hops`); the wake trigger refuses
+;; past `seon.warn/hop-cap`.
 (schema/register! :seon.agent.message/hops    :int)
 ;; Provenance for the wake gate: :human / :agent / :core (a substrate
 ;; nudge that must never wake an idle agent). Derived in message!.
@@ -154,9 +156,12 @@
                           from the ALS turn scope. No scope + no explicit
                           from → error envelope.
      :seon.agent.message/to   — single ref or vector; defaults to the user.
-     hops               — 0 when from = the user; otherwise the waking
-                          message's hops + 1 (ping-pong guard — the wake
-                          trigger refuses past `seon.warn/hop-cap`).
+     hops               — 0 when from = the user; otherwise this
+                          {me,recipient}-pair's prior depth + 1 (per-peer
+                          ping-pong guard, reset at each human message —
+                          `internal/outbound-hops`; distinct delegation
+                          rounds do NOT accumulate). The wake trigger
+                          refuses past `seon.warn/hop-cap`.
 
    Blank content is REJECTED with an error envelope — an empty message
    carries nothing; since every message write routes through here, the
@@ -199,7 +204,7 @@
       (let [from-user? (internal/user-entity? from)
             hops   (if from-user?
                      0
-                     (inc (internal/waking-hops agent-id)))
+                     (inc (internal/outbound-hops agent-id to)))
             ;; Provenance: explicit :origin wins (a :core nudge);
             ;; otherwise derived — a user-ref send is :human, every
             ;; other send is :agent. Never stored as nil.
