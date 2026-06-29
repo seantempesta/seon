@@ -74,6 +74,24 @@ causal). torchao INT8 = dead end (MoE experts skipped).
 11. **Eval-tier `:kind` granularity** (`bb5338b2`) — undeclared-var / def-vs-defn now
     classify `:kind compile` (was `throw`); genuine runtime throw stays `:kind throw` —
     correctly split (rebuild + redeploy the bundle).
+12. **`:defn-with-specs` MVP scaffold** (`61b1d8c8`) — `seon.diffusion.scaffold/build-scaffold`:
+    `{fn-name,ns,intent}` → the clamp FRAME (register! request/response + defn + `:malli/schema`)
+    with `infill-spans` (spec slots, arglist, body) + `clamp-spans` (fixed structure) that
+    tile `[0,len)` exactly. Spec slots infill FIRST so the contract is fixed before the body.
+13. **BPE token-boundary alignment — MEASURED** (`2e1982db`) — a CPU tokenizer ($0, no model)
+    found 4 straddled scaffold boundaries (the `]]` closers merge to one token); fixed with a
+    newline nudge → all 11 scaffold + retrieval spans now land on token edges. The span-based
+    control primitives SURVIVE real BPE tokenization. (GPU note: P0 canvas-length probe still
+    confirms the frame fits one canvas.)
+14. **Generative/property tests at the boundaries** (`7db4fb5f`) — 9 props (100 cases each)
+    over `block-chain-keys` (prefix-share/salt invariants), retrieval (no false-positive,
+    near-miss retrieved, in-bounds injection), and the `parse-forms` strip-fences arm.
+15. **Unified mid-denoise oracle** (`75668147`) — `seon.diffusion.oracle/refine`: ONE call
+    `{canvas-text,offset-map}` → `{clamps, renoise-spans, injections}` partitioning the canvas
+    (parse=good/broken spans, retrieve=hallucinations, eval folds bad verdicts to renoise unless
+    an injection supersedes). `bin/oracle-server op:"refine"` covers the parse tier in one bb
+    call; injections need the pod graph, eval needs the node bundle. Suite 832/3804. THE
+    buzzsaw orchestrator — the worker calls it once per checkpoint K. End-to-end AWAITS-GPU.
 
 **AWAITS OWNER ACTION (the remaining big wins):**
 - **Deploy the co-location image** → unlocks the KV-cache **worker-reuse half** (the 62%
