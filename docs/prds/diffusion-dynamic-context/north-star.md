@@ -73,6 +73,13 @@ modes) are **test-gated and reliable**.
 
 When iterating autonomously (e.g. overnight), each cycle:
 
+0. **On resume from a compaction or a fresh session — DO NOT immediately start working.**
+   First READ (this file, the [[roadmap]] ▸we-are-here, the latest ledger entries, the
+   last few commits, the in-flight agents/batches) and REFLECT: is the plan still right?
+   what did the last results actually teach? is there a sharper next move than what's
+   queued? Improve the plan/queue/docs FIRST, then re-enter the work. A few minutes of
+   reading + reflection beats charging back into the fray with stale assumptions.
+
 1. **Harvest:** read what the last batch/agents produced; COMMIT any durable progress
    (skill edits, namespace code, context sections, doc updates) with explicit pathspecs.
 2. **Assess productivity (the kill-switch):** am I still learning / lifting numbers /
