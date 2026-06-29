@@ -148,6 +148,15 @@
     ;; catalog/skill-block render fns `default-seed-blocks` wires by symbol.
     ;; Required here so its register! calls run and the build includes it.
     [my.skills]
+    ;; The live-tile/canvas TOOLKIT — the aggregation (`my.data`) + static
+    ;; (`my.ui`) + interactive (`my.tile`) verbs the agent composes its
+    ;; canvas from. Required here so they BUILD + INDEX at boot (their
+    ;; `:seon.fn` rows render full in the `:namespaces` block — the worked
+    ;; examples, not `(no public fns indexed yet)`). They reference the
+    ;; `:seon.items/*` envelope required above.
+    [my.data]
+    [my.ui]
+    [my.tile]
     ;; Config-driven context/skill loadout — the OPTIONAL manifest
     ;; (`config/system.edn`) that curates the skill corpus + seeds per-role
     ;; loadouts. Absent → byte-identical to a no-config boot. `boot-seed!`

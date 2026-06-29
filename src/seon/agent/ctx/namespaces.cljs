@@ -9,9 +9,10 @@
          (a) the agent's CURRENT ns    — its complete working code;
          (b) every THIRD-PARTY ns      — non-seon, non-my (the
              `SEON_EXTRA_SRC` `acme` business logic the agent needs whole);
-         (c) the ONE kept `my.*` worked example
-             ([[canonical-full-my-ns]] — `my.kb`, the runnable
-             register→transact→query manual the agent reads end-to-end);
+         (c) the kept `my.*` toolkit exemplars
+             ([[canonical-full-my-ns]] — `my.kb` the runnable
+             register→transact→query manual + the `my.data`/`my.ui`/`my.tile`
+             canvas toolkit, each read end-to-end);
          (d) a small curated whitelist of `seon.*` framework tools
              ([[full-source-whitelist]]).
      - SIGNATURE-trimmed for every OTHER `my.*` ns — public verb signatures
@@ -171,7 +172,7 @@
    + one-line doc — rich enough to CALL the toolkit correctly) via
    `:seon.render/detail :signature`; their full bodies stay one
    `(seon.agent.ctx/render-namespace {:seon.ns/name … :seon.render/detail
-   :full})` away. Two are kept full:
+   :full})` away. The seeded `my.*` toolkit is kept full (worked end-to-end):
    - `my.kb` — the DB manual: runnable RECIPES covering schema-register,
      write, upsert/retract, datalog query, pull, and an aggregate, with a
      single end-to-end `build-kb-example!`.
@@ -181,12 +182,18 @@
      docstrings — NOT in the signatures. DRIVE-PROVEN (2026-06-28,
      `namespaces-trim-validation`): with `my.data` signature-only the agent
      never called it and hand-rolled `db/query`+`group-by`, re-opening the
-     dedup footgun `my.data` exists to close. Toolkit USABILITY is kept full;
-     only framework BULK is trimmed.
-   The clear EDITABLE def to change which examples are kept full (extend to
-   `my.ui`/`my.tile` if their drives show the same named-but-not-composed
-   regression; config-wiring is a separate later step)."
-  #{:my.kb :my.data})
+     dedup footgun `my.data` exists to close.
+   - `my.ui` — the STATIC canvas pieces (status-line / table / section to the
+     dual-render `:seon.render/html-response` envelope); the worked move is
+     COMPOSING pieces into a section, then transacting its hiccup onto the
+     live tile.
+   - `my.tile` — the INTERACTIVE canvas controls (button / input wired to one
+     of the agent's OWN fns via the `/agent/<id>/call` gate); the callback
+     mechanism lives in the verb bodies, not the signatures.
+   Toolkit USABILITY is kept full; only framework BULK is trimmed.
+   The clear EDITABLE def to change which exemplars are kept full
+   (config-wiring is a separate later step)."
+  #{:my.kb :my.data :my.ui :my.tile})
 
 (defn in-full-source-whitelist?
   "True when `ns-name` (string, keyword, or symbol) is one of the curated
@@ -236,7 +243,7 @@
    full-vs-signature-trim decision lives:
      - `:full` — the agent's CURRENT ns (`cur-ns`), every THIRD-PARTY
        (`acme`) ns, the curated [[full-source-whitelist]] seon.* tools, and
-       the ONE kept [[canonical-full-my-ns]] `my.*` worked example. Whole
+       the kept [[canonical-full-my-ns]] `my.*` toolkit exemplars. Whole
        real source, unclipped.
      - `:signature` — every OTHER `my.*` ns: its public verb signatures
        (name + full arglist + one-line doc, bodies elided) — the API-surface
@@ -416,8 +423,8 @@
 
      - FULL (`:seon.render/detail :full`) for every THIRD-PARTY `acme` ns,
        the agent's CURRENT ns, the curated [[full-source-whitelist]] seon.*
-       tools, and the ONE kept [[canonical-full-my-ns]] `my.*` worked
-       example — each a `;;; ┌─ namespace x ─` / `;;; └─ end namespace x ─`
+       tools, and the kept [[canonical-full-my-ns]] `my.*` toolkit
+       exemplars — each a `;;; ┌─ namespace x ─` / `;;; └─ end namespace x ─`
        bracketed block carrying its REAL FULL FILE SOURCE, unclipped.
      - SIGNATURE (`:seon.render/detail :signature`) for every OTHER `my.*`
        ns — its public verb signatures (name + full arglist + one-line doc,
@@ -464,7 +471,7 @@
         ;; Every included ns that renders in the BODY, each tagged with the
         ;; DETAIL it renders at ([[body-detail]]): :full for the current ns,
         ;; third-party (acme) roots, the curated seon.* full-source tools,
-        ;; and the ONE kept my.kb worked example; :signature for every OTHER
+        ;; and the kept my.* toolkit exemplars; :signature for every OTHER
         ;; my.* ns (verb signatures, bodies elided — the render-trim). Every
         ;; seon.* framework ns is nil → DROPPED from the rendered section
         ;; (still indexed + grep-able via seon.agent.search). recency-ordered.
