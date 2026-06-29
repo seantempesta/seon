@@ -26,9 +26,19 @@
 ;; All registered domain schemas. `defonce` survives namespace reloads.
 (defonce ^:private *schemas (atom {}))
 
+;; THE one registry seon installs as malli's process-global default: malli's
+;; built-in schemas + seon's mutable `*schemas` (read live on every lookup, so
+;; this single instance always reflects current registrations). A SINGLE
+;; memoized instance — `defonce` survives reloads — so the stomp-guard watch
+;; below can `identical?`-check it cheaply.
+(defonce ^:private seon-registry
+  (mr/composite-registry
+   (m/default-schemas)
+   (mr/mutable-registry *schemas)))
+
 (defn relink-registry!
-  "(Re)point malli's process-global default registry at the composite of
-   malli's default schemas + seon's mutable `*schemas` atom. Idempotent;
+  "(Re)point malli's process-global default registry at [[seon-registry]]
+   (malli's default schemas + seon's mutable `*schemas`). Idempotent;
    registered schemas live in `*schemas` and survive the relink.
 
    Re-callable, not just load-time init: `malli.core` runs
@@ -38,13 +48,33 @@
    `malli.core$macros.js`), stomping the registry with a default-only
    snapshot and severing every `:seon.*` schema process-wide
    (`:malli.core/invalid-schema`). `seon.eval`'s bootstrap `:load` wrapper
-   calls this after every load to re-assert the invariant."
+   calls this after every load to re-assert the invariant; in CLJS the
+   stomp-guard watch installed here makes the invariant hold even BETWEEN
+   loads — see the watch comment below.
+
+   CLOSE THE STOMP WINDOW (CLJS pod). A foreign `(mr/set-default-registry!
+   …)` — the bootstrap load of `malli.core$macros.js` re-running
+   malli.core's top-level registry init — `(reset! malli.registry/registry*
+   …)`s seon's schemas away. A watch on that atom re-asserts
+   [[seon-registry]] the INSTANT it is replaced: ClojureScript runs
+   `add-watch` fns SYNCHRONOUSLY inside the stomping `reset!`, before any
+   other form observes the severed registry — so there is no window to be
+   resilient to, no severed state to heal. The `identical?` guard makes the
+   re-assert's own `reset!` a no-op (one bounce, no recursion). Installed
+   HERE (not a top-level `defonce`) and keyed by keyword so it is idempotent
+   AND re-attaches to the live `registry*` on every relink — a stale watch
+   can never be orphaned onto a replaced atom. This is the structural form
+   of the per-load relink: the relink covers boot ordering, the watch covers
+   any stomp from a path that never routes through the `:load` wrapper."
   {:malli/schema [:=> [:cat] :boolean]}
   []
-  (mr/set-default-registry!
-   (mr/composite-registry
-    (m/default-schemas)
-    (mr/mutable-registry *schemas)))
+  (mr/set-default-registry! seon-registry)
+  #?(:cljs
+     (add-watch malli.registry/registry* ::seon-stomp-guard
+       (fn [_ _ _ new-registry]
+         (when-not (identical? new-registry seon-registry)
+           (mr/set-default-registry! seon-registry))))
+     :clj nil)
   true)
 
 ;; Initialize the global registry once at load time.
