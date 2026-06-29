@@ -224,7 +224,15 @@ When iterating autonomously (e.g. overnight), each cycle:
   prefix-cache win FOR FREE, but **serving-only (no control)**. So: **serving-without-control → vLLM APC**
   (likely nets ahead on our repeated-context workload despite 375<450 raw BF16); **control+caching (the
   buzzsaw path) → CUSTOM KV caching on transformers** (the `kv-section-caching-design` work) — the only
-  way to get both the caching win AND per-step control.
+  way to get both the caching win AND per-step control. **GREEN LIGHT (source-proven):** the prompt
+  encoder is CAUSAL (incremental KV append, `modeling_diffusion_gemma.py:281`), so **exact full-prefix
+  caching is feasible with ZERO accuracy loss** — the position-dependence worry doesn't apply to the
+  prompt prefix. Seon is near-ideal: `default-seed-blocks` orders ctx static→volatile (head = "the
+  cacheable prefix"); each skill's ~2400-tok KV encoded ONCE, reused across N tasks (vLLM chain-hash,
+  salted per `:seon.agent/id`). Per-block varying-position reuse = NOT needed (fixed order) + not clean
+  (MoE/mixed-RoPE) → deferred. HARD GATE: encoder `Cache` can't ride JSON → needs the CO-LOCATION image
+  (caching + co-location = one build). **Phase 0 (test FIRST): is encoder prefill a meaningful fraction
+  of `generate()` latency? → greenlights or kills it.**
 - **A100 speed = ADOPT in-the-loop features, reinvent NOTHING** (all control-compatible, keep the
   `:1034` seam): (1) **torchao quantization** — `TorchAoConfig` at `from_pretrained` is transparent to
   `generate()`, so INT8 on the A100 (FP8 on Hopper) reclaims vLLM's dtype-speed WITH control
