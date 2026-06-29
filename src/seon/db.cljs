@@ -1160,12 +1160,32 @@
 (schema/register! ::attr-ns-count :int)
 (schema/register! ::attr-count    :int)
 (schema/register! ::datom-count   :int)
+
+;; The agent/run/turn/eval ref chain — how to JOIN across the entities the
+;; inventory lists. Entities have no kind, so the ONLY way across them is a
+;; ref. The trap a fresh agent falls into: guessing a flat
+;; `:seon.agent.turn/agent` (it does NOT exist) — turns reach an agent THROUGH
+;; their run. These are the live registered ref attrs; verbatim so the agent's
+;; next query lands.
+(schema/register! ::topology :string)
+(def ^:private entity-topology
+  (str "JOIN MAP (agent↔run↔turn↔eval — entities have no kind, you cross them by ref): "
+       "agent -:seon.agent/run-> run (current run); "
+       "run -:seon.agent.run/agent-> agent (back-ref — joins ALL of an agent's runs); "
+       "turn -:seon.agent.turn/run-> run (turns reach an agent THROUGH a run; "
+       "there is NO :seon.agent.turn/agent); "
+       "turn -:seon.agent.turn/evals-> eval (component); "
+       "eval -:seon.eval/agent-> agent (direct shortcut). "
+       "messages: :seon.agent.message/from + :seon.agent.message/to (both → agents). "
+       "Count an agent's turns: [?r :seon.agent.run/agent ?a][?t :seon.agent.turn/run ?r]."))
+
 (schema/register! ::inventory
   [:map
    [::attr-groups   [:vector ::inventory-row]]
    [::attr-ns-count ::attr-ns-count]
    [::attr-count    ::attr-count]
-   [::datom-count   ::datom-count]])
+   [::datom-count   ::datom-count]
+   [::topology      ::topology]])
 
 (defn- row-origin-scan
   "ONE pass over every live datom `[e a tx]` — the provenance facts the
@@ -1298,7 +1318,15 @@
                               {:seon.db/attr-ns :seon.eval …}] ; core namespaces last
       :seon.db/attr-ns-count 9    ; distinct attr namespaces with data
       :seon.db/attr-count    53   ; distinct attrs with data
-      :seon.db/datom-count   124} ; total entity/attr pairs in scope
+      :seon.db/datom-count   124  ; total entity/attr pairs in scope
+      :seon.db/topology      \"…JOIN MAP…\"} ; the agent/run/turn/eval ref chain
+
+   `:seon.db/topology` is a one-line JOIN MAP: the live ref attrs that wire
+   agent → run → turn → eval (and messages), so you can join across the listed
+   namespaces without guessing. Entities have no kind — a ref is the ONLY way
+   across them — and the chain is NOT flat: a turn reaches its agent THROUGH a
+   run (there is no `:seon.agent.turn/agent`), evals carry a direct
+   `:seon.eval/agent` shortcut.
 
    `:seon.db/attr-groups` is one row per attr NAMESPACE, each carrying
    every attr of that namespace that has ≥1 live row with its entity
@@ -1364,4 +1392,5 @@
      {::attr-groups   rows
       ::attr-ns-count (count rows)
       ::attr-count    (count counts)
-      ::datom-count   (reduce + 0 (vals counts))})))
+      ::datom-count   (reduce + 0 (vals counts))
+      ::topology      entity-topology})))
