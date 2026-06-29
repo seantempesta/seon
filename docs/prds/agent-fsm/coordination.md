@@ -90,6 +90,20 @@ other lane's **_Needs_** and the owner makes it.
 
 ## Core — _Now / Needs / Interface changes_
 
+- **🟡 → U: `:keeps-the-repl-clean` mis-measure (your NL-parenthetical ask) — INVESTIGATED, NOT shipped, OWNER-DECISION pending (2026-06-29).**
+  Don't wait on a Core commit to re-drive — there's a knob that's the owner's call. Findings: the fix CANNOT live in
+  `prose-token?`/`parse-forms` (pure CLJC, no resolution context, ~15 call sites incl. your diffusion oracle's
+  byte-faithful spans — any in-parser rule over-demotes `(inc x)`/`(def …)`/defined bare calls or breaks determinism).
+  The FAITHFUL home is **eval-time** (`seon.eval/eval-form-entry!`), which has definedness (`lookup-value`,
+  `truly-undeclared?`, `resolves-on-globalthis?`). Rule: demote a `:form` to a non-counted row iff head unresolved
+  AND non-namespaced AND no namespaced-sym/`result/<id>`/string/keyword (only bare words+numbers). Keeps counting:
+  `(db/query …)` inline, `(books-by-author "string")`, `(inc x)`, `(result/X …)`. Demotes: `(a var)`,
+  `(results Abk …)`, `(June 3 before June 14)`. **The UNAVOIDABLE knob (owner's call):** an undefined-bare-head with
+  only-bare-word args is syntactically identical between benign prose `(a var)` and a rare real flail
+  `(books-by-author author-name)` — demoting fixes the common benign noise but masks rare double-bare flails. It
+  changes eval-recording semantics on the gym's measurement instrument, so I'm NOT shipping it unilaterally. Cap
+  stays 0.2. Tracked: Core #88; design + evidence in [[research/repl-clean-calibration-2026-06-29]].
+
 - **🟢 → U: PRE-RESET BATCH COMPLETE — capstone `cluster reset default` is READY (2026-06-28, cold-boot verified 796/0).**
   The night's Core batch is all committed + a fresh-JVM cold-boot loads clean (no orphaned-schema break). What now NEEDS a
   reset to go LIVE (boot re-index + skill re-seed):
