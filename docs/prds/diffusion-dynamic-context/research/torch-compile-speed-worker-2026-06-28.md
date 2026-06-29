@@ -366,3 +366,150 @@ land. Test step 4 (recompile-on-shape-change) is therefore as decisive as step 3
   recompile-per-shape thrash → compile only helps fixed-shape batch serving, and
   KV-cache reuse remains the only broadly-applicable A100 lever — itself a critical
   finding worth recording.
+
+## #8 follow-up — the static-cache-init errors, root-caused (no GPU; source-cited)
+
+The §5 diff was deployed and FAILED with two errors on the live A100
+(transformers 5.11.0), exactly as the §4 #30055 caution warned ("confirm compile
+actually engaged, don't assume"):
+
+- **WARMUP (call 1):** `RuntimeError: upper bound and lower bound inconsistent with
+  step sign` (a `torch.arange(start, end, step)` with a step whose sign disagrees
+  with `end - start`).
+- **STEADY (call 2+):** `AttributeError: 'StaticSlidingWindowLayer' object has no
+  attribute 'max_batch_size'`.
+
+The two are NOT independent — error 2 is a CASCADE of error 1. Root cause below.
+
+### The trigger: the §5 diff passed `max_new_tokens` AND `max_length` together — a self-inconsistent combo on THIS model
+
+The deployed call was `generate(**inp, cache_implementation="static",
+max_length=512, max_new_tokens=128)`. DiffusionGemma does NOT use the standard
+`generate()` length precedence. Its own `_prepare_generated_length`
+(`generation_diffusion_gemma.py:879-886`) is:
+
+```python
+if generation_config.max_length and generation_config.max_new_tokens == 256:   # :880
+    max_length = generation_config.max_length
+    max_new_tokens = max_length - cur_len
+else:
+    max_new_tokens = generation_config.max_new_tokens
+    max_length    = max_new_tokens + cur_len     # :885
+```
+
+`max_length` is honored **only when `max_new_tokens` is left at its default 256**
+(the literal `== 256` gate at `:880`). We passed `max_new_tokens=128` (≠ 256) → the
+`else` branch fires → **`max_length=512` is silently DROPPED** and `max_length`
+becomes `128 + cur_len`. The "PIN max_length to avoid recompile-on-grow" advice in
+§5 is therefore INERT the way the diff used it — and worse, it set up error 1.
+
+### Error 1 (warmup RuntimeError) — the static cache is sized `max_length - canvas_length`, which the dropped `max_length` drives too small
+
+`config.canvas_length = 256` (`configuration_diffusion_gemma.py:196`) and
+`config.sliding_window = 512` (`:102`) — every layer is a `StaticSlidingWindowLayer`.
+The static cache is allocated to **`max_length - canvas_length`** ("the last
+generated canvas won't be cached", `generation_diffusion_gemma.py:664`), i.e.
+`(128 + cur_len) - 256 = cur_len - 128`.
+
+Because `max_new_tokens (128) < canvas_length (256)`, this collapses below
+`canvas_length` and goes **negative for any prompt shorter than 128 tokens** (the
+smoke prompt is short). `StaticCache` then builds `StaticSlidingWindowLayer(
+max_cache_len = cur_len-128 < 0, sliding_window=512)` →
+`effective_max_cache_len = min(512, negative) = negative` (`cache_utils.py:478-480`).
+A negative/degenerate `max_cache_len` flows into the compiled sliding-window
+forward's index math and surfaces as the `torch.arange` step-sign `RuntimeError`
+during the reduce-overhead capture. (The exact internal `arange` site is inside the
+compiled region and is NOT pinned to a single source line from static reading — see
+"honesty" below — but the bad bound is unambiguously the `max_length - canvas_length`
+math at `:664` fed by the dropped `max_length`.) The EAGER (DynamicCache) path never
+hits this: `DynamicLayer` grows on demand and never pre-allocates a `max`, which is
+why today's eager worker runs and the static path does not.
+
+### Error 2 (steady AttributeError) — a pure cascade from error 1
+
+`max_batch_size` is **NOT** a constructor arg of any static layer. `StaticLayer`/
+`StaticSlidingWindowLayer` set `self.max_batch_size` ONLY inside
+`lazy_initialization` (`cache_utils.py:387`), which runs on the FIRST `update()` —
+i.e. the first decoder forward pass. The `Cache.max_batch_size` **property**
+(`cache_utils.py:1352-1358`) reads `layer.max_batch_size` for every layer, with NO
+`is_initialized` guard.
+
+`_prepare_static_cache` assigns `self._cache = StaticCache(...)` (`:1157`) BEFORE the
+forward runs, and on the NEXT call probes the cached instance to decide reuse:
+`cache_to_check.max_batch_size != batch_size` (`:1147`). Sequence:
+
+1. Call 1 builds `self._cache` (layers un-initialized, no `max_batch_size`), then
+   dies in the warmup `arange` (error 1) — **before any `update()`**.
+2. Call 2 finds the stale, never-initialized `self._cache`, hits the reuse probe at
+   `:1147` → the property iterates `layer.max_batch_size` → `AttributeError`.
+
+So error 2 cannot occur unless call 1 aborted pre-forward. Fix error 1 (let call 1
+complete one forward) and `lazy_initialization` sets `max_batch_size`, the reuse
+probe succeeds, and error 2 vanishes. Note this is a LATENT fragility in transformers
+itself, not diffusion-specific: upstream `generation/utils.py:1795` has the identical
+unguarded `cache_to_check.max_batch_size` probe — any failed static-cache warmup
+poisons subsequent calls until `model._cache` is cleared.
+
+### VERDICT — LIKELY a simple input-args fix; confirm with ONE cheap re-run
+
+This is **not** a fundamental sliding-window-static incompatibility. The model is
+purpose-built for `StaticCache` over sliding-window layers (`StaticSlidingWindowLayer`
+exists precisely for compile; §1/§3 above). Both errors trace to ONE mistake: the §5
+diff passed `max_new_tokens=128` alongside `max_length=512`, which (a) drops
+`max_length` via the `==256` gate and (b) drives the cache size negative because
+`max_new_tokens < canvas_length`. Remove that inconsistency and the structural path
+is clean.
+
+**Caveat to the "simple" verdict (be honest):** I could not pin the exact internal
+`arange` that emits the step-sign error to a source line from static reading alone (it
+is inside the compiled sliding-window forward), and a *longer* prompt (`cur_len > 128`)
+would make `max_length - canvas_length` positive yet was still reported failing — so
+there is residual risk that the warmup `arange` has a second contributor in the
+reduce-overhead capture, independent of cache sizing. The corrected call below is
+cheap to try and is the decisive test: if it runs, it was the args trap (simple); if
+it STILL throws the step-sign `RuntimeError` with a clean positive cache, the compiled
+sliding-window-static path has a deeper 5.11.0 issue that becomes an upstream/owner
+call, and KV-cache reuse stays the only broadly-applicable A100 lever.
+
+### The EXACT corrected worker call to test (minimal diff vs §5)
+
+The switch is `cache_implementation="static"` ALONE. To pin a fixed, prompt-INDEPENDENT
+cache, pass **only** a fixed `max_length` and **DO NOT pass `max_new_tokens`** (leave
+it at the config default 256 so the `:880` gate honors `max_length`). With
+`max_length=512`: cache = `512 - 256 = 256`, fixed regardless of prompt length → no
+recompile-on-prompt-length, and `max_new_tokens` derives to `512 - cur_len`.
+
+```python
+# WRONG (the §5 diff as deployed): max_new_tokens=128 trips the :880 gate AND
+# (128 < canvas_length 256) drives cache = (128+cur_len)-256 negative for short prompts.
+# out = model.generate(**inp, cache_implementation="static", max_length=512, max_new_tokens=128)
+
+# RIGHT: pass ONLY a fixed max_length (> canvas_length, and > any prompt you'll send).
+#   - leave max_new_tokens UNSET → stays default 256 → :880 honors max_length
+#   - cache = max_length - canvas_length = 512 - 256 = 256, prompt-INDEPENDENT (no recompile)
+FIXED_MAX = 512   # must satisfy: FIXED_MAX > canvas_length(256) AND FIXED_MAX > max prompt cur_len
+out = model.generate(**inp, cache_implementation="static", max_length=FIXED_MAX)
+
+# Belt-and-suspenders so a FAILED warmup can't poison the next call (error-2 cascade):
+# clear the stale cache on any generate exception before retrying.
+#   try:    out = model.generate(**inp, cache_implementation="static", max_length=FIXED_MAX)
+#   except Exception:
+#       if hasattr(model, "_cache"): del model._cache   # drop un-initialized StaticCache
+#       raise
+```
+
+Constraints baked in (all source-cited above):
+
+- **`FIXED_MAX > canvas_length` (256)** or the cache is ≤ 0 → error 1 returns. With a
+  256-token canvas, `max_length=512` gives a 256-slot cache (one canvas of history);
+  raise it (768/1024 …) if more KV history is wanted — keep it a fixed constant so the
+  compiled graph is captured once.
+- **`FIXED_MAX > max prompt `cur_len`** so `max_new_tokens = max_length - cur_len > 0`
+  (validated at `:182`). If prompts can exceed 256 tokens, raise `FIXED_MAX`
+  accordingly (and re-capture once).
+- **Do NOT pass `max_new_tokens` on the compiled path.** Any value ≠ 256 both drops
+  `max_length` AND re-couples the cache size to `cur_len` (`max_new_tokens + cur_len -
+  canvas_length`) → recompile-per-prompt-length, defeating the whole point.
+- Then run §6 as written: discard call 1 (warmup), measure call 2 steady `tok_per_s`,
+  and assert `type(out.past_key_values).__name__` is the static cache to prove compile
+  engaged.
