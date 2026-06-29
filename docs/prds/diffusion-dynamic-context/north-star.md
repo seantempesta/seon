@@ -106,6 +106,18 @@ the internet hop (~100ms), which CO-LOCATION (the `:worker-validator` CLJS targe
 build) removes. Architecture split: **compiled built-in early-stop for speed +
 co-located validator for correctness (sparse renoise on oracle-flagged spans only).**
 
+**CO-LOCATION VALIDATOR BUILT + measured (`18c600f5`):** a 50KB standalone CLJS bundle
+(`:worker-validator` shadow target, `src/seon/worker_validator.cljs`) runs `parse-forms`
+LOCALLY at **0.065-0.115ms** warm (persistent `--serve` line-server; a fresh subprocess
+is ~100ms so the hot loop MUST reuse one process). Lean deps (rewrite-clj only — no
+datahike/malli/pod). Its `{:error-kind, :span [s e], :source}` output feeds straight into
+the worker's `span_to_positions`. So **on-worker validation adds ~0.1ms/checkpoint
+(negligible vs a ~12ms step)** → the per-step adaptive correctness loop is viable once
+this bundles onto the worker image. The eval-tier (does-it-RUN) is a separate build seam
+(keeps `cljs.js` out of this lean bundle). Remaining speed blocker is unchanged: Python
+control forfeits torch.compile — validation latency is now SOLVED, generation-control
+compatibility is the open one.
+
 ### The deep finding (5/5 skills) — context OVERRIDES confident-wrong priors
 
 In EVERY skill the control fails the SAME way: it hallucinates a confident,
