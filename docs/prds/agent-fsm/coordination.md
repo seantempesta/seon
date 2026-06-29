@@ -1078,6 +1078,41 @@ other lane's **_Needs_** and the owner makes it.
   `file:line` is already storable; don't wait for the whole investigation"). Acceptance: after #0,
   s12-alone k=2 (A stores ≥2 provenance rows) + full battery no-regression. **Top recommendation: #1
   incremental-store reframe (after the #0 registry-wipe fix).** ISOLATED — do not bundle.
+- **Needs (UI → Core): file `grep` surfaces the PAUSED `.clj` lane-sibling and HIDES the active
+  `.cljs` — the s12 "wrong-file" friction is a CAPABILITY BUG, not the agent's free choice
+  (2026-06-29, LIVE-PROVEN against pod 7890).** Tested the hypothesis from the s12 root-cause #2:
+  does the agent-facing CONTEXT point agents at `db.clj` (paused JVM) instead of `db.cljs` (active
+  pod), or did A grep it itself? **Verdict: the program-graph/render context is CLEAN, but the
+  `seon.agent.search/grep` (file content search) capability is the culprit — and in the s12 case it
+  surfaced the paused `.clj` EXCLUSIVELY.** Live proofs:
+  - Program-graph CLEAN: `:seon.ns/name :seon.db` → `:seon.ns/source "(ns seon.db)"` (no path attr
+    at all). `(seon.agent.ctx/render-namespace {:seon.ns/name :seon.db})` renders the ACTIVE CLJS
+    signatures (`(defn ^:async transact!`, `with-agent`, …) — no file path, no `.clj`. `grep-graph`
+    searches only the live graph — CLEAN. So nothing in always-on context points at `.clj`.
+  - File `grep` LEAKS the paused sibling: `grep {::pattern "ns seon.db" ::glob "db.clj*"}` →
+    `by-file` paths `["/Users/sean/src/seon/src/seon/db.clj" ".../src/seon/db.cljs"]` — BOTH
+    siblings, `.clj` first (alpha).
+  - **The trap (worse than "both shown"):** `grep {::pattern "defn transact!" ::paths ["src/seon"]}`
+    → `by-file` = `["src/seon/db.clj"]` **ONLY**. The active pod defines it as `(defn ^:async transact!`
+    (`src/seon/db.cljs:437`) — the `^:async` meta breaks the naive `"defn transact!"` regex, while
+    `src/seon/db.clj:268` `(defn transact!` matches. So file-grep handed agent A the paused `.clj`
+    absolute path and HID `db.cljs`. A read dead JVM source for 4 turns and never reached its store
+    step. This is the real Gap-A research-friction driver, NOT a model free-choice.
+  - **Cause (file:line):** `src/seon/agent/search/internal.cljs` `success-from` (L236) /
+    `grouped-envelope` (L191) — file grep groups raw `rg` hits over `default-roots` (whole repo,
+    `.clj`+`.cljs`) with NO lane filter; the paused `.clj` sibling is never suppressed. (`grep-graph`
+    and `render-namespace` are unaffected — graph-only.)
+  - **Proposed fix (Core, `seon.agent.search`, lane = Core capability surface):** in `success-from`
+    (FILE projection only — NOT `grep-graph`), drop any flat match whose `::search/path` ends `.clj`
+    when a sibling `<base>.cljs` exists at the same path (active-pod canonical wins) — one `remove`
+    over the parsed matches before `grouped-envelope`. Targeted: only co-located lane-sibling pairs
+    are suppressed; standalone `.clj`/`.cljc`/`reference-code/` untouched; an explicit `::paths
+    [".../db.clj"]` still reaches it. Optional UI-lane cue: point source-reads at
+    `render-namespace`/`grep-graph` (graph-only, always lane-correct). **Confound/overfit risk: LOW**
+    — general pod lane-correctness, not s12-shaped. This is the concrete, isolatable version of the
+    root-cause doc's deferred proposal #2; it directly removes the wasted-turns that gate A's store
+    step. ISOLATED — measure alone (re-drive s12 k=2: A should reach `db.cljs`/`db.internal` and its
+    store step).
 - **Interface changes (Core must absorb):**
   1. **Handoff #4 still holds** — UI renders the warnings-block error-TILE; it just streams
      inside the morphed world view (no standalone patch). The `:seon/error` VALUE shape is
