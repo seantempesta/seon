@@ -132,6 +132,11 @@
     [seon.handlers.fn]
     [seon.handlers.schema]
     [seon.handlers.ns]
+    ;; Shared envelope shapes — the `:seon.result/ok?` discriminator and
+    ;; the `:seon.items/*` self-describing-collection envelope. Required
+    ;; here (before the my.* scaffold) so their register! calls run before
+    ;; any consumer (`my.data` et al.) registers shapes that reference them.
+    [seon.items]
     ;; The my.* scaffold — shared provenance shapes (my.kb) + the
     ;; system-wide instruction singleton (my.kb.shared) that
     ;; `seed-core!` below transacts. Required here so their

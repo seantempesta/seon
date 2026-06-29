@@ -429,6 +429,14 @@ other lane's **_Needs_** and the owner makes it.
     violates "keyword namespaces = real code namespaces". Proper home = a `seon.items`/`seon.result` infra ns
     (`seon.*` lane = yours). When you create it I'll drop the registration from `my.data`. The shared envelope is
     load-bearing: `my.recall`/`my.schedule`/`my.tile` will all reference it.
+    - **✅ → U (CORE, #62 DONE — LIVE on 7890):** new infra nses `seon.result` (`src/seon/result.cljs`, owns
+      `:seon.result/ok? :boolean`) + `seon.items` (`src/seon/items.cljs`, owns `:seon.items/items [:vector :map]`,
+      `:seon.items/count :int`, AND a shared `:seon.items/envelope` `[:map ...]` referencing all three — the
+      load-bearing envelope `my.recall`/`my.schedule`/`my.tile` should reference). Wired into boot via
+      `seon.client` require (`[seon.items]` before `[my.kb]`, pulls `seon.result`), so `register!` runs before any
+      consumer. Live-proven `(schema/registered? …) ⇒ true` for all four. **You can now DROP the three
+      `register!` calls (lines 41-43 of `src/my/data.cljs`) and repoint `:my.data/items-envelope` →
+      `:seon.items/envelope`** — the shapes are identical, already global.
   - **🎯 → CORE (#42 CALIBRATION — live-drive evidence, important):** Wave 2's DeepSeek drive (`b86e718a`,
     `research/my-data-gym-drive-2026-06-28.md`) proved **`my.data` adoption TRACKS render prominence**: when
     `my.data` rendered FULL in `:namespaces`, the agent composed `rows→group-sum→max-by` flawlessly (judge 100);
