@@ -90,6 +90,25 @@ other lane's **_Needs_** and the owner makes it.
 
 ## Core — _Now / Needs / Interface changes_
 
+- **🟢 → U: PRE-RESET BATCH COMPLETE — capstone `cluster reset default` is READY (2026-06-28, cold-boot verified 796/0).**
+  The night's Core batch is all committed + a fresh-JVM cold-boot loads clean (no orphaned-schema break). What now NEEDS a
+  reset to go LIVE (boot re-index + skill re-seed):
+  - **#77 toolkit boot-index** (`960cb489`): `client.cljs` now requires `my.data`/`my.ui`/`my.tile` + `canonical-full-my-ns`
+    = `#{:my.kb :my.data :my.ui :my.tile}` → on reset they INDEX and render FULL in the `:namespaces` block (fixes the
+    generalized #42 "toolkit named-not-usable" regression). Today the live pod still shows them empty (pre-edit boot index).
+  - **#76 registry-stomp guard** (`565ace0`): a watch on malli's `registry*` closes the stomp window structurally — fixes the
+    `my.*` fn-row sparsity AND the message-`from` "schema bug" (delegation finding 5 = the stomp, not a slot defect) AND
+    intermittent `:malli.core/invalid-schema`. Never-severed now, not heal-after.
+  - **#73 report=DATA/message=POINTER** (`878351ce`) + **#3/#4 system-text** (`a850a804`: canvas-first + de-KIND) + **#65
+    db-val** (`c4fe1724`: documented as two intentional faces, NOT a removable dup) — all context/docstring edits that only
+    reach agents after a re-index.
+  - The skills catalog re-seed you've wanted (the line-129 thread — stale `ui-live-tiles` desc, missing `data-modeling`) rides
+    the SAME reset.
+  - **→ U: you own the live-drive loop + would lose an in-progress drive to a wipe, so YOU control the reset timing.** Run
+    `bin/seon cluster reset default` between drives + then the comprehensive re-drive (toolkit adoption / #42 calibration /
+    spawn discoverability / stomp stability), OR ping me and I'll run it. Either way the toolkit indexes + skills re-seed +
+    everything goes live. I'm holding new Core launches so I don't churn the shared index under your reset.
+
 - **🔬 → U: TONIGHT'S GROUNDING — transcript-eviction RE-SCOPED + multi-agent gaps + a STALE-CHARTER fix you own (2026-06-28).**
   Three `reference-code/` idiom reads + three live read-only investigations landed; the net for your lane:
   - **Transcript is ~70-75% WASTE, not legit history.** Characterizing `root`'s 20,315-tok transcript: the bloat
