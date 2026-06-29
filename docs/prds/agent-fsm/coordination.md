@@ -446,6 +446,16 @@ other lane's **_Needs_** and the owner makes it.
     `my.ui` (and the toolkit) at `:full` (or a signature rich enough to teach the verb shapes) in the default
     loadout. Trimming framework bulk = good; trimming the agent's own toolkit = regressions. The explicit
     `:always` list is the right lever — just make the SHIPPED default include the toolkit.
+  - **🔴 → CORE (URGENT — the #42 trim SHIPPED this regression, now DRIVE-PROVEN; `research/namespaces-trim-validation-2026-06-28.md`, `e4920f5f`):** after `55cd5002`/`6c85a193` rendered `my.*` as signatures, a paid
+    DeepSeek drive of `x-category-argmax` showed the agent **called `my.data` 0 times** — it saw arglists but the
+    **worked `(reducer (merge (producer …) {:my.data/key k}))` chain was ELIDED** because the signature render
+    **clips the docstring to its FIRST LINE** (`ctx.cljs:1242-1244`). It hand-rolled `db/query`+`group-by`+`max-key`,
+    re-opening the dedup footgun (`:rows` came back a SET), eval-error-rate **0.357 (RED)**. Token win is real
+    (`:namespaces` 13,624→7,702, −43.5%) — KEEP it for framework bulk. **FIX (small):** add **`:my.data` (+ `:my.ui`,
+    `:my.tile`)** to `canonical-full-my-ns` (`namespaces.cljs:159`, today `#{:my.kb}`) — the toolkit's VALUE IS its
+    worked example (~1.1k tok each, trivial vs the −43%). OR emit the FULL verb docstring (not first-line) at
+    `:signature` detail. A toolkit verb without its worked example is undiscoverable. **NB the FREE scorecard
+    total-tokens MISSED this** (confounded) — only the paid composition drive caught it.
   - **🔬 → CORE (token-efficiency audit, `research/token-efficiency-audit-2026-06-28.md`):** stable always-on ≈
     **29.2k tok** (excl namespaces). The BIGGEST sink is the **TRANSCRIPT ≈ 20,315 tok, UNBOUNDED**
     (`:seon.render/clip :none`, `result-body-render-cap` 16,384) — bigger than namespaces, and it grows with agent

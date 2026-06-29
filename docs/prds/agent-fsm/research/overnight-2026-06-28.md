@@ -43,6 +43,12 @@ needs your decision, and the Core-routed queue.
 
 **Canvas drive STILL blocked:** Core has 6 uncommitted core-agent files (loop/schedule/agent/turn/client/derive = a big agent-loop refactor) — a reset would risk wedging live agents. Waiting on their commit. **Core also landed `f26a0088`** (the proper home for `:seon.items`/`:seon.result` I flagged) → cleaning up my.data's first-consumer registration.
 
+## ⭐ THE LOOP CAUGHT A REAL REGRESSION (the recursion working as designed)
+
+**`#42` signature-trim REGRESSED `my.data` adoption — flagged-as-risk → Core-landed → drive-measured → confirmed → precise fix routed** (`e4920f5f`, `research/namespaces-trim-validation-2026-06-28.md`). Paid `x-category-argmax` drive: agent **called my.data 0×** (signature render clips docstring to first line → the worked example elided), hand-rolled the footgun path, eval-error-rate **0.357 RED**. Token win real (namespaces −43.5%) — keep it; **FIX = add `:my.data`/`:my.ui`/`:my.tile` to `canonical-full-my-ns`** (a toolkit verb without its worked example is undiscoverable). Routed URGENT to Core.
+
+**Instrument lesson:** the FREE scorecard `total-tokens` MISSED this (confounded by scenario count + non-namespaces). Only the **paid composition drive** caught it → the scorecard needs a per-block token axis and/or a standing composition-adoption axis. (Loop self-improvement TODO.)
+
 **Gate note — the suite noise is TWO things, neither a real regression:**
 1. **Env-coupling FLAKES from my own concurrent runs** (`b5c3a3a4` diagnosis): tests that grep a shared fs dir / touch shared DB state race when the loop runs scorecard + suite at once. `search_test` is now FIXED (pid-scoped hermetic fixtures, 20/20). `index_core_test` is the same class (passes isolated) → #69 to make hermetic. Lesson: aggressive parallelism needs hermetic tests.
 2. **Core's UNCOMMITTED `loop.cljs`/`schedule.cljs` WIP** (`loop-test` 4) — real WIP, theirs to finish.
