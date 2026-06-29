@@ -549,3 +549,60 @@ These run alongside / after the phases, not as a separate lane.
   and similar grow without bound; add a rolling window (last-N turns / since-T) so
   growth is bounded by VIEW, not a char cap. Not blocking the phases; do after the
   seed-copy + eval-output-bound model is proven live.
+
+## Platform-completeness + context-efficiency milestone (2026-06-28 grounding)
+
+Tonight's grounding — three `reference-code/` idiom reads + three live read-only
+investigations — reframed the Core priorities. The FSM spine (Phases 1/2/5) is
+landed; the live levers are now (a) the agent's CONTEXT earning its tokens and (b)
+the multi-agent coordination primitives that are still half-built. Evidence:
+[[research/grounding-db-schema-2026-06-28]], [[research/grounding-pod-runtime-2026-06-28]],
+[[research/grounding-wire-codeasdata-2026-06-28]],
+[[research/transcript-waste-characterization-2026-06-28]],
+[[research/coordination-primitives-state-2026-06-28]].
+
+### Context efficiency — the lead is DISCOVERABILITY, not clipping
+
+Live characterization of `root`'s 20,315-tok transcript: **~70-75% is WASTE from ONE
+failure mode** — an agent that could not FIND/USE the core verbs (`message`/`wait`/
+`complete`) and flailed (24 near-duplicate greps = 55% of the whole transcript;
+27/118 evals failed). Legitimate working history is ~7-30%. The transcript-eviction
+design is therefore RE-SCOPED: it is a boundedness BACKSTOP (cap an unbounded
+long-task agent), NOT "the #1 stable-context lever". Fix order:
+
+1. Verb discoverability + resolution (largely #55 — render the home-ns require with
+   real aliases). CONFIRM on a fresh reset+drive that the verb-flood is gone. The
+   messaging machinery itself is sound (`message.cljs` is live; `init-message-verbs!`
+   is GONE — the charter's stale P0 is corrected).
+2. Pending-Promise stash self-heal (#39/#40, `eval.cljs:2624-2631`) — REPL-VERIFIED in
+   the fabrication note. In-form `result/<id>` reads operate on an un-awaited Promise
+   → garbage → re-query waste. Attach `.then` to re-stash + re-bind the resolved value.
+3. Cap `search/grep` output at the source (~300-700 tok/call).
+4. Transcript age-tiering — LAST, sized as "cap the prompt", not "preserve history".
+
+Fabrication is THREE bugs (fabrication-root-cause): same-response compose-and-report
+(structural), value burial, and the pending-Promise trap (#2 above). The "cite these
+values" render surface above the readline is the highest-leverage context fix (U lane).
+
+### Multi-agent primitives — solid core, half-built cron + capability layers
+
+State ([[research/coordination-primitives-state-2026-06-28]]): wake (tx-trigger, no
+poll, CAS-fenced), inter-agent messaging (hop-cap 4 at wake), deadlines/bounds,
+spawn/terminate all WORKING. Gaps, ranked:
+
+1. **#66 cron `:fn` never executes** (`schedule.cljs:224-228`) — cron MATCHES + FIRES a
+   run but the scheduled fn is never invoked; cron is wake-only, not action-driving.
+   The #1 missing primitive for autonomous timed workflows. Core (eval/exec routing).
+2. **#31 no `/call` capability gate** — `start!` is ungated; any agent can spawn.
+   Phase-5's open half (roles-as-capability-sets).
+3. **#30 no in-process spawn-and-wake** — `start!` mints an idle child; waking needs a
+   message round-trip.
+4. Dead-letter / hop-cap-ack (a refusal never surfaces to the sender), crash-supervision
+   / restart policy, timezone-aware cron (lower).
+
+### Grounding smells (tracked)
+
+#63 wrong CLJS-async comment (`eval.cljs:2544-2551`), #64 `*print-fn*` set!-across-await
+fiber bleed (route through a `print-als`), #65 db-value predicate duplication (lift to
+one `:seon.db/db-value` shape). All LOW-MED; the malli→datahike bridge
+(`internal.cljs:147-360`) is the brittlest seam — change it carefully.

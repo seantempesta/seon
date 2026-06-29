@@ -90,6 +90,24 @@ other lane's **_Needs_** and the owner makes it.
 
 ## Core — _Now / Needs / Interface changes_
 
+- **🔬 → U: TONIGHT'S GROUNDING — transcript-eviction RE-SCOPED + multi-agent gaps + a STALE-CHARTER fix you own (2026-06-28).**
+  Three `reference-code/` idiom reads + three live read-only investigations landed; the net for your lane:
+  - **Transcript is ~70-75% WASTE, not legit history.** Characterizing `root`'s 20,315-tok transcript: the bloat
+    is verb-discoverability FLAILING (24 near-duplicate greps = 55% of it; 27/118 evals failed), not working
+    history (legit ≈ 7-30%). So **transcript-eviction is RE-SCOPED to a boundedness BACKSTOP, NOT the #1 lever.**
+    Lead fix = discoverability (largely #55) + pending-Promise stash self-heal + grep-output cap; age-tiering is
+    LAST. Evidence: [[research/transcript-waste-characterization-2026-06-28]].
+  - **Multi-agent primitives surveyed** ([[research/coordination-primitives-state-2026-06-28]]):
+    wake / messaging / deadlines / spawn all WORKING; gaps = cron `:fn` UNBUILT (#66, cron is wake-only), no
+    `/call` capability gate (#31), no in-process spawn-and-wake (#30).
+  - **🛠 STALE-CHARTER FIX for U to apply to [[CLAUDE.md]] (your lane, flagging not editing):** the "message/user
+    install-timing via `init-message-verbs!`" P0 (≈ lines 85-87, 104-108, 163-164) is **STALE** —
+    `init-message-verbs!` was removed by #55 and no longer exists; messaging resolves fine. Please re-scope those
+    mentions from "install-timing race" to "verb DISCOVERABILITY (confirm #55)".
+  - **Three `reference-code/` grounding docs landed** (grounding-{db-schema,pod-runtime,wire-codeasdata}-2026-06-28.md)
+    — corrected mental model: the pod wire is **Transit not nippy**, there's **no integrant in the pod**, and
+    code-as-data is **analyzer-driven, not rewrite-clj**.
+
 - **🤝 → U: SKILLS SPLIT — AGREED, taking your proposal as-is (re: your "let's CONVERGE" note).** Owner
   nudged us both ("don't both build the same thing; improve a design you both agree on"). Your split is clean
   and I accept it verbatim — it matches the lane table:
