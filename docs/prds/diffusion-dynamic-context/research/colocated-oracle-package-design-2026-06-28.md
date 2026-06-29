@@ -8,24 +8,44 @@ tags: [research, agent, web, flow]
 
 ## TL;DR
 
-- **Recommendation: persistent Node sidecar (option a). Do NOT revive
-  GraalVM (option b).** There is nothing to revive — no clojure-python /
-  GraalPy polyglot work exists in this repo (only a super-repl *wishlist*
-  checkbox `docs/prds/super-repl/prd.md:602` and the libdatahike
-  native-image spike, a different use). The oracle code is
-  **ClojureScript** (parser is `.cljc`, the eval cage is CLJS+SCI), so the
-  GraalVM path would force a parallel **JVM-Clojure reimplementation** of
-  the same oracle — two code paths for one job, banned by "Slow Is Fast."
-  And the repo's own sidecar-spike flags GraalVM Substrate-VM
-  **signal-handler cohabitation crashes** (SIGSEGV/SIGBUS) when sharing a
-  process with another VM
-  (`docs/prds/agent-runtime/sidecar-spike/prd.md:21,211`) — putting a
-  GraalVM isolate in-process with PyTorch/CPython on the A100 is exactly
-  that failure class, and a worker crash costs a ~66 s model reload. The
-  Node sidecar is **strictly better for our needs**: it reuses the
-  existing shadow-cljs `:node-script` build, the proven SCI eval mechanism,
-  adds only a Node binary to the image, and the ~50–100 µs IPC tax it pays
-  is noise against the ~100 ms internet round-trip we are killing.
+- **Recommendation, split by tier (the runtime is a persistent SIDECAR
+  either way — NOT GraalVM):**
+  - **PARSE tier → persistent BABASHKA (bb) server.** PROVEN feasible:
+    `bin/test-parser` already runs the `parse-forms` test suite under
+    `bb --classpath src:test` on bb's built-in rewrite-clj — NO shadow
+    build, NO Node, NO pod. A persistent bb process is the simplest
+    deployable that does the immediate, hot, per-checkpoint job: a single
+    native binary (~10–30 ms cold, ~0.1 ms warm) + the `.cljc` source on the
+    classpath, NO compile step. And because `parse-forms` is **purely
+    structural** (rewrite-clj read + error-span classification, no
+    semantics), bb parses CLJS-flavored canvas forms **bit-identically to the
+    pod** — zero fidelity loss. bb likely SUPERSEDES a378adfa's Node
+    `:worker-validator` as the parse deployable; the Node bundle stays valid
+    and is the right call only if eval also lives in Node (one artifact).
+  - **EVAL tier → the CLJS path (a378adfa's bundle / cljs.js), reserved for
+    FAITHFUL CLJS.** bb's built-in SCI evals **Clojure** semantics — a good
+    proxy for syntactic + most semantic correctness, but NOT true CLJS: js
+    interop (`(.json x)`), `^:async`/`await`, and pod behavior won't eval
+    faithfully, and the worker emits CLJS-flavored code. So eval fidelity is
+    tiered: an SCI-class proxy for the fast "does it run" check, upgrading to
+    **cljs.js self-host (Node)** when the form needs real CLJS semantics
+    (interop/async). Which tier you need is driven by what the worker
+    generates (§5).
+- **Do NOT revive GraalVM (option b).** There is nothing to revive — no
+  clojure-python / GraalPy polyglot work exists in this repo (only a
+  super-repl *wishlist* checkbox `docs/prds/super-repl/prd.md:602` and the
+  libdatahike native-image spike, a different use). The oracle code is
+  **ClojureScript** (parser is `.cljc`, the faithful eval is CLJS), so the
+  GraalVM path would force a parallel **JVM-Clojure reimplementation** of the
+  same oracle — two code paths for one job, banned by "Slow Is Fast." And the
+  repo's own sidecar-spike flags GraalVM Substrate-VM **signal-handler
+  cohabitation crashes** (SIGSEGV/SIGBUS) when sharing a process with another
+  VM (`docs/prds/agent-runtime/sidecar-spike/prd.md:21,211`) — putting a
+  GraalVM isolate in-process with PyTorch/CPython on the A100 is exactly that
+  failure class, and a worker crash costs a ~66 s model reload. The ~50–100 µs
+  IPC tax a persistent sidecar (bb OR Node) pays is noise against the ~100 ms
+  internet round-trip we are killing — GraalVM's only edge (zero IPC) buys
+  nothing.
 
 - **The package = an `op`-dispatched flexible oracle, layered ON TOP of
   a378adfa's lean `seon.worker-validator` — not a duplicate.** One JSON
@@ -134,43 +154,103 @@ So "revive the GraalVM clojure-python work" = build it **from scratch**,
 against the repo's own evidence that in-process Substrate-VM cohabitation
 crashes.
 
+### Babashka runs `parse-forms` TODAY — `bin/test-parser`
+
+`bin/test-parser` (in the repo) is a bb runner for the parse-forms test ns:
+
+```bash
+exec bb --classpath src:test -e '(require (quote seon.repl.internal-test)) …'
+```
+
+Its own header: *"seon.repl.internal is pure CLJC (rewrite-clj +
+clojure.string only), so its test ns runs on babashka's built-in rewrite-clj
+with NO shadow build and NO pod."* Verified live: `bb` is installed
+(v1.12.212), and `parse-forms` (`seon.repl.internal`) loads under it from the
+`.cljc` source with **no compile step**. So a bb parse-oracle is **proven
+feasible, not speculative.** bb also bundles **SCI**, so one bb process can
+do BOTH parse (rewrite-clj) AND a Clojure-semantics eval.
+
 ---
 
 ## 2. Runtime / deployment mechanism — decision
 
-| Option | Per-call latency | Cold start | New deps on image | Code-path risk | Crash blast radius |
-|---|---|---|---|---|---|
-| **(a) Persistent Node sidecar** *(RECOMMEND)* | ~0.1–0.4 ms (parse 366 µs, SCI eval ~0.2 ms) + ~50–100 µs IPC | ~100 ms bundle load, paid ONCE at worker warm-up | Node binary + one JS bundle | **None** — reuses CLJS oracle verbatim | Sidecar crash ≠ model crash; Python respawns it |
-| (b) GraalVM clojure-python polyglot | ~0 IPC (in-process) | GraalVM JDK + GraalPy startup; native-image build | GraalVM JDK + GraalPy + a from-scratch polyglot bridge | **High** — forces a parallel JVM-Clojure reimpl of CLJS oracle (two code paths) | In-process with PyTorch/CPython → Substrate-VM signal cohabitation SIGSEGV (repo-proven), takes the 66 s model load down with it |
-| (c) Subprocess-per-call | parse + ~100 ms node spawn EVERY call | n/a | Node binary + bundle | None | n/a |
+Four candidates. The axes that matter: cold start, deploy simplicity,
+**parse fidelity** (does it read CLJS-flavored forms like the pod?),
+**eval fidelity** (does it run them with real CLJS semantics?), and crash
+blast radius next to PyTorch on the GPU.
 
-**(c) is disqualified for the hot loop** — its own docstring says a fresh
-node spawn is ~100 ms, "NO win over an internet round-trip"
-(`worker_validator.cljs`). Keep it only as the test/one-shot mode (already
-the default in the bundle).
+| Option | Cold start | Warm per-call | Deploy artifact | Parse fidelity | Eval fidelity | Crash blast radius |
+|---|---|---|---|---|---|---|
+| **bb persistent server** *(RECOMMEND — parse tier)* | ~10–30 ms (native binary) | ~0.1 ms | **single `bb` binary + `.cljc` source on classpath — NO build** | **Exact** (same rewrite-clj; structural, language-agnostic; `bin/test-parser`-proven) | **Clojure** proxy via bb-SCI — NOT true CLJS (no js interop / `^:async`) | bb crash ≠ model crash; Python respawns |
+| **Node sidecar** *(RECOMMEND — faithful eval tier)* | ~100 ms bundle load (once) | ~0.1–0.4 ms | Node binary + `clj -M:cljs compile` bundle | Exact (same `parse-forms`, compiled) | **cljs.js self-host = TRUE CLJS**; or cljs-SCI proxy | Sidecar crash ≠ model crash; Python respawns |
+| (b) GraalVM polyglot | GraalVM JDK + GraalPy; native-image build | ~0 IPC (in-process) | GraalVM JDK + GraalPy + from-scratch bridge | needs JVM reimpl | JVM Clojure (also not CLJS) | **In-process w/ PyTorch/CPython → Substrate-VM signal SIGSEGV (repo-proven); takes the 66 s model load down** |
+| (c) Subprocess-per-call | spawn EVERY call (~10–100 ms) | — | bb or Node | Exact | per chosen runtime | n/a |
+
+**(c) is disqualified for the hot loop** — a per-call spawn ( `worker_validator.cljs`
+notes ~100 ms for the Node bundle; bb is cheaper at ~10–30 ms but still a
+per-call tax) negates the co-location win. Keep it only as a test/one-shot
+mode (already the bundle's default).
 
 **(b) is disqualified on three independent grounds**, any one sufficient:
 
 1. **Nothing to revive + wrong language.** No GraalPy polyglot exists here,
-   and the oracle is CLJS. GraalVM polyglot runs **JVM** Clojure. We would
-   reimplement `validate` + the SCI eval on the JVM and maintain it in
+   and the faithful oracle is CLJS. GraalVM polyglot runs **JVM** Clojure. We
+   would reimplement `validate` + eval on the JVM and maintain it in
    lock-step with the CLJS pod — the exact "v2 / parallel namespace to house
-   a fix" anti-pattern CLAUDE.md bans. `parse-forms` is `.cljc` so it ports,
-   but the whole point of co-location is to run *the same oracle the pod
-   runs*; a JVM fork drifts.
+   a fix" anti-pattern CLAUDE.md bans. (Note: GraalVM's eval would be JVM
+   Clojure, which is *also not CLJS* — it has the same interop/async
+   infidelity as bb-SCI, with none of bb's simplicity.)
 2. **Crash risk, repo-proven.** In-process GraalVM Substrate VM + CPython +
    PyTorch is precisely the signal-handler cohabitation the sidecar-spike
    found fatal (`sidecar-spike/prd.md:21`). On a GPU worker a crash =
-   re-pull the 50 GB model, ~66 s. The whole feature exists to *reduce* loop
-   cost; a crash-prone runtime defeats it.
-3. **The IPC tax it removes is noise.** (a)'s ~50–100 µs UDS/stdio tax is
-   <0.1 % of the ~100 ms internet hop being eliminated, and <50 % of the
-   parse itself. There is no latency budget that (b) unlocks and (a) misses.
+   re-pull the 50 GB model, ~66 s.
+3. **The IPC tax it removes is noise.** A persistent sidecar's ~50–100 µs
+   stdio/UDS tax is <0.1 % of the ~100 ms internet hop being eliminated.
+   There is no latency budget (b) unlocks that a sidecar misses.
 
-**Verdict: persistent Node sidecar. GraalVM is not worth reviving — the
-Node-sidecar Python-API path is strictly better for this workload.** The
-"easier Python API" the owner anticipated is the correct one on the merits,
-not just on effort.
+### The split recommendation — bb for parse, CLJS for faithful eval
+
+The parse tier and the eval tier have **opposite** fidelity requirements, and
+that is what decides the runtime:
+
+- **Parse tier → bb.** Parsing is purely structural — rewrite-clj reads the
+  s-expression shape and classifies read errors; it does NOT interpret
+  semantics, so it reads CLJS-flavored canvas forms **identically** to the
+  pod (and `bin/test-parser` proves the exact test suite passes under bb).
+  There is therefore **zero fidelity cost** to running parse on bb, and bb is
+  the **simplest possible deployable**: one native binary + the `.cljc`
+  source, no shadow build, no Node, ~10–30 ms cold / ~0.1 ms warm persistent.
+  For the immediate, hot, per-checkpoint job (which is parse-only today —
+  spans → renoise positions), **bb wins on simplicity + proven-feasibility**
+  and supersedes the Node `:worker-validator` as the parse deployable.
+
+- **Eval tier → the CLJS path (Node).** The eval tier is a *correctness*
+  oracle for the CLJS the worker emits, so fidelity matters. bb-SCI evals
+  **Clojure**, which mishandles exactly the CLJS-specific surface the worker
+  produces: js interop (`(.json x)`, `(.-foo o)`), `^:async`/`await`,
+  CLJS-only core behavior. Those would throw under bb-SCI as *false
+  negatives* on valid CLJS — poisoning the control signal. **cljs.js
+  self-host (Node) is the only path with true CLJS semantics**, so the
+  faithful eval tier lives in Node. (A cljs-SCI proxy in the Node bundle is a
+  lighter middle option — better interop than bb-SCI, still an interpreter,
+  still no async — usable as a fast pre-filter; §5.)
+
+- **Hybrid, if eval-fidelity proves to bite:** bb as the always-warm front
+  door (parse + a cheap Clojure-proxy eval pre-filter), shelling out to a
+  Node cljs.js process ONLY when a faithful CLJS eval is required. Costs two
+  runtimes on the image — adopt only if the proxy's false-negative rate on
+  real generated forms is measured and unacceptable. Default: don't; pick the
+  one runtime the tier needs.
+
+**Deployment angle (both bundle onto the image's runtime layer):** bb ships
+as one ~80 MB native binary + the tiny `.cljc` source (no build step at all);
+the Node path ships a ~50 MB node binary + a pre-compiled bundle
+(`clj -M:cljs compile` in CI). For **parse-only**, bb is simpler (no compile,
+no node_modules, source is the artifact). For **parse + faithful eval**, Node
+is the single-runtime answer and bb would only add a second runtime — so the
+image-layer choice follows the tier decision above: bb if parse-only is
+enough for the near term; Node (a378adfa's bundle) the moment faithful CLJS
+eval enters the loop.
 
 ---
 
@@ -330,9 +410,36 @@ less overhead and no port management.
 
 ---
 
-## 5. Eval tier — SCI, lean and bounded
+## 5. Eval tier — fidelity ladder, lean and bounded
 
-### Why SCI, not the cage and not `seon.render.sci`
+### Three eval runtimes, ranked by CLJS fidelity (pick by what the worker emits)
+
+The worker emits **CLJS-flavored** code, so the eval-tier runtime is chosen on
+fidelity, not just speed:
+
+1. **bb-SCI (Clojure)** — cheapest, lives in the bb parse server (one process,
+   no extra runtime). Catches unbound vars, arity, throws, non-termination on
+   **pure-Clojure** forms. **Mishandles CLJS-specific surface** — js interop
+   (`(.json x)`, `(.-foo o)`), `^:async`/`await`, CLJS-only core — throwing
+   *false negatives* on valid CLJS. Use only as a cheap pre-filter, and only
+   while the worker's output is pure-Clojure-shaped (the `:defn-with-specs` /
+   data-modeling MVP largely is).
+2. **cljs-SCI (the Node bundle, `sci.core` compiled to JS)** — the lean
+   middle. Better than bb-SCI: CLJS reader features + basic JS interop work,
+   because it's SCI *in a JS host*. Still an interpreter, still **no
+   `^:async`/`await`**, still not bit-identical to compiled CLJS. The
+   `eval-form` shape below.
+3. **cljs.js self-host (Node)** — the only **TRUE CLJS** semantics (real
+   compiler → real JS). Heaviest (the ~MB self-host compiler; this is what the
+   full `seon.eval` cage uses). Reserve for forms whose correctness genuinely
+   depends on interop/async — the faithful tier.
+
+**Recommendation:** the *fast* eval check is cljs-SCI (#2) in the Node bundle
+(the `eval-form` below); escalate to cljs.js (#3) only when a faithful CLJS
+verdict is required. bb-SCI (#1) is the front-door pre-filter ONLY in the
+hybrid (§2) — its CLJS infidelity makes it unsafe as the sole eval oracle.
+
+### Why SCI (#2), not the full cage and not `seon.render.sci`
 
 - `seon.eval/eval` (`src/seon/eval.cljs:970`) is the full pod cage: it pulls
   `cljs.js` (self-host compiler), `cljs.analyzer`, `seon.db`, `seon.schema`,
@@ -418,17 +525,33 @@ docstring). Both tiers stay sub-millisecond — the co-location win holds.
 
 ### Suggested next steps (build order, owned by an impl lane — not done here)
 
-1. Add `seon.worker.eval` (bare SCI, ~30 lines) + a unit test
+**Near term (parse-only loop) — the bb deployable, simplest path:**
+
+1. Write `bin/oracle-serve` (bb): a persistent loop that `(require 'seon.repl.internal)`,
+   reads one `{op,…}` JSON line from stdin (or a UDS socket), calls
+   `internal/parse-forms` → the `validate` shape, writes one JSON line.
+   Mirror `bin/test-parser`'s `bb --classpath src:test` classpath; no build.
+2. Image layer: install `bb` + `COPY src/seon/repl/internal.cljc` (+ deps) onto
+   the worker; Python `Oracle` spawns `bb … bin/oracle-serve` once (§4 shape,
+   swap `node …` → `bb …`). Wire `parse` into the denoise checkpoint.
+
+**When faithful CLJS eval enters the loop — the Node path (a378adfa's bundle):**
+
+3. Add `seon.worker.eval` (cljs-SCI proxy, ~30 lines) + a unit test
    (`eval-form` on a good form → `{:ok true}`; on `(/ 1 0)` /
-   `(undefined-fn)` / `(loop [] (recur))` → the three error kinds).
-2. Add `seon.worker.oracle` (op-dispatch + the generalized `--serve` loop)
-   + the `:worker-oracle` shadow target.
-3. CI: `clj -M:cljs compile worker-oracle`; Dockerfile Node layer + `COPY`.
-4. Python `Oracle` class in `gpu_worker.py` (§4); wire `parse` then `eval`
-   into the denoise checkpoint.
-5. `retrieve` seam stays a stub until the retrieval-denoising experiment
-   needs it — decide then whether the HNSW index is co-located or a remote
-   knn call (the one round-trip we may keep, since retrieval fires rarely).
+   `(undefined-fn)` / `(loop [] (recur))` → the three error kinds); add the
+   cljs.js escalation only when interop/async correctness is needed (§5).
+4. Add `seon.worker.oracle` (op-dispatch + the generalized `--serve` loop) +
+   the `:worker-oracle` shadow target; CI `clj -M:cljs compile worker-oracle`;
+   Dockerfile Node layer + `COPY`. Python `Oracle` switches the sidecar to
+   `node …` (or runs both: bb front door + Node eval — the §2 hybrid).
+5. `retrieve` seam stays a stub until the retrieval-denoising experiment needs
+   it — decide then whether the HNSW index is co-located or a remote knn call
+   (the one round-trip we may keep, since retrieval fires rarely).
+
+The `{op,…}` JSON-line API (§4) is **identical across bb and Node**, so the
+Python `Oracle` class and the renoise wiring do not change when the eval tier
+migrates from bb to Node — only the spawned binary does.
 
 ---
 
@@ -438,7 +561,11 @@ docstring). Both tiers stay sub-millisecond — the co-location win holds.
   realizes; the custom-image layering.
 - `src/seon/worker_validator.cljs` + `shadow-cljs.edn:150-176` — a378adfa's
   lean parse tier this layers on.
-- `src/seon/repl/internal.cljc:561` — `parse-forms` (the parser; cljc, lean).
+- `bin/test-parser` — PROOF that `parse-forms` runs under `bb --classpath
+  src:test` on bb's built-in rewrite-clj, no shadow build (the bb-feasibility
+  ground for the parse-tier recommendation). `bb` verified installed v1.12.212.
+- `src/seon/repl/internal.cljc:561,75-78` — `parse-forms` (pure cljc;
+  rewrite-clj + clojure.string only → why bb runs it faithfully).
 - `src/seon/render/sci.cljs:149-156` — the proven bare-SCI eval+interrupt
   pattern the eval tier copies (DB-free slice of it).
 - `src/seon/eval.cljs:36-58,970` — the full cage, documented here as
