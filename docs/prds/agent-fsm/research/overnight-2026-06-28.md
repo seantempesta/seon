@@ -63,6 +63,10 @@ Canvas gym drive (`2fe1f8f9`, `research/canvas-drive-validation-2026-06-28.md`):
 
 **✅ CORE FIXED THE TOOLKIT P0 (`960cb489`, suite 796/0):** BOTH parts — `client.cljs` now requires my.data/my.ui/my.tile (index at boot) + `canonical-full-my-ns` = `#{:my.kb :my.data :my.ui :my.tile}` (render full). **The toolkit is now reachable by USE.** Another recursive cycle closed (coherence audit → P0 → fix). Also `565ace0b` fixed the registry-stomp (#41), `878351ce` the report=data/message=pointer delegation contract. VERIFICATION QUEUED: re-drive the canvas scenario → confirm `toolkit-calls{:my.ui :my.tile}` rises from 0 (hermetic gym picks up the new boot requires). Fires after the error-recovery scenario lands.
 
+## ✅ CAPSTONE RESET — live pod now current + toolkit-indexing LIVE-PROVEN
+
+Core signalled `0710336d` (pre-reset batch complete, cold-boot verified, U owns timing) → ran `bin/seon cluster reset default` (wire-server 8s, pod 25s, auto-boot ready, root minted). **Live-pod proof of the toolkit P0 fix:** `(count :seon.fn per my.* ns)` = `{my.kb 13, my.kb.shared 3, my.skills 6, my.data 4, my.ui 7, my.tile 5}` — vs the coherence audit's `{my.data [] my.ui [] my.tile []}`. The toolkit is now indexed + renders full on the LIVE pod. The whole night's work (toolkit, canvas-first-in-system-text, no-kinds, registry-stomp) is now live. Composability proof = the gym re-drive (running).
+
 **Gate note — the suite noise is TWO things, neither a real regression:**
 1. **Env-coupling FLAKES from my own concurrent runs** (`b5c3a3a4` diagnosis): tests that grep a shared fs dir / touch shared DB state race when the loop runs scorecard + suite at once. `search_test` is now FIXED (pid-scoped hermetic fixtures, 20/20). `index_core_test` is the same class (passes isolated) → #69 to make hermetic. Lesson: aggressive parallelism needs hermetic tests.
 2. **Core's UNCOMMITTED `loop.cljs`/`schedule.cljs` WIP** (`loop-test` 4) — real WIP, theirs to finish.
