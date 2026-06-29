@@ -209,13 +209,30 @@
       acc
       (recur (ex-cause x) (conj acc x) (inc guard)))))
 
+(defn- analyzer-error?
+  "True if `x` is an ANALYZER/compile-time error (the form does not legally
+   compile) rather than a runtime throw. cljs.js's `ana/error` tags such an
+   ex-info `:cljs/analysis-error`; the syntax-check path (`compile-syntax-error`)
+   instead stamps a `:clojure.error/phase`. A runtime JS Error has neither."
+  [x]
+  (or (ana/analysis-error? x)
+      (contains? (ex-data x) :clojure.error/phase)))
+
 (defn- classify-error
-  "Map a thrown error to `{:kind :throw|:interrupt :message s}`. cljs.js wraps
-   an eval throw in a `:cljs/analysis-error` ex-info whose `:cause` is the REAL
-   error, so we walk the cause chain: the DEEPEST cause carries the actionable
-   message (e.g. the vm watchdog's \"Script execution timed out after Nms\"),
-   and a timeout ANYWHERE in the chain (message match or the Node
-   `ERR_SCRIPT_EXECUTION_TIMEOUT` code) classifies as `:interrupt`."
+  "Map a thrown error to `{:kind :compile|:throw|:interrupt :message s}`. cljs.js
+   wraps BOTH an analyzer error AND a runtime eval throw in an OUTER
+   `:cljs/analysis-error` ex-info whose `:cause` is the real error, so we walk
+   the cause chain:
+
+   - the DEEPEST cause carries the actionable message (e.g. the vm watchdog's
+     \"Script execution timed out after Nms\");
+   - a timeout ANYWHERE in the chain (message match or the Node
+     `ERR_SCRIPT_EXECUTION_TIMEOUT` code) → `:interrupt`;
+   - an analyzer error BELOW the outer wrapper (a compile error like
+     too-many-args-to-def that THREW during analysis rather than warning) →
+     `:compile` — the outer wrapper is always an analysis-error, so we test
+     `(rest chain)`; a genuine runtime throw's cause is a raw JS Error and
+     fails that test → `:throw`."
   [e]
   (let [chain     (cause-chain e)
         timed-out (some (fn [x]
@@ -223,13 +240,16 @@
                               (re-find #"(?i)timed out|execution.*terminated"
                                        (or (some-> x ex-message) (str x)))))
                         chain)
+        compile?  (some analyzer-error? (rest chain))
         ;; deepest non-blank message = the actionable one
         msg       (or (some (fn [x] (let [m (ex-message x)]
                                       (when (and m (seq m) (not= m "ERROR")) m)))
                             (reverse chain))
                       (ex-message e)
                       (str e))]
-    {:kind    (if timed-out :interrupt :throw)
+    {:kind    (cond timed-out :interrupt
+                    compile?  :compile
+                    :else     :throw)
      :message msg}))
 
 (defn eval-form
@@ -274,11 +294,18 @@
                 (fn [{:keys [error value]}]
                   (let [warns @!warnings]
                     (cond
-                      error
-                      (resolve {:ok false :error (classify-error error)})
-
+                      ;; A captured compile-error-class warning (undeclared-var,
+                      ;; bad arity, def-vs-defn) means the form does NOT legally
+                      ;; compile — classify it `:compile` FIRST, even though the
+                      ;; emitted JS then ALSO throws at runtime (e.g. an
+                      ;; undeclared var compiles to a reference that throws a
+                      ;; ReferenceError). Checking `error` first would mask the
+                      ;; analyzer verdict as a coarser `:throw`.
                       (seq warns)
                       (resolve {:ok false :error {:kind :compile :message (str/join "; " warns)}})
+
+                      error
+                      (resolve {:ok false :error (classify-error error)})
 
                       :else
                       (resolve {:ok true
