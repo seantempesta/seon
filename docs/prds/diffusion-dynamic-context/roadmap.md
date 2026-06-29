@@ -119,6 +119,28 @@ of fns whose bodies are given; clamp the `defn` + `:malli/schema` frame, leave
 Every run lands in the gym scorecard (`scenario × git-sha`). Read the numbers
 honestly — they, not the engine, decide whether anything below gets built.
 
+**Status — the three-arm driver is BUILT + OFFLINE-PROVEN, awaiting GPU
+(2026-06-29).** The driver (`tmp/.../scratchpad/e1_kill_gate.py`, gitignored —
+lives under `/private/tmp`, outside the repo) implements all three arms, a single
+faithfulness scorer (parse-raw via the real `bb bin/oracle-server` + a structural
+domain check + the F2 **vacuity** check + best-effort eval), the `scenario ×
+git-sha × arm` scorecard, and the decision rule (arm1 must beat arm3 on
+`faithful_rate` by ≥ 0.10, else say KILL plainly). It REUSES the existing
+`score_ab.py` structural predicates and the `skill_lift.py`/`closed_loop.py`
+RunPod+oracle path — not a fork. The whole pipeline (parse → score → aggregate →
+verdict) is proven with ZERO GPU against a mock endpoint of canned worker
+responses (`e1_mock.py` / `e1_mock_test.py`): a `guided_wins` fixture fires EARNS
+(Δ +0.67) and a `guided_ties` fixture fires KILL (Δ 0.00) + the >30% vacuity
+warning — both verdicts demonstrated on canned data. Arms 1 and 3 share the
+IDENTICAL post-hoc oracle/repair loop so the only variable under test is the
+clamp. The owner runs it once the A100 is back (verify_fresh-gated):
+`cd tmp/flash-diffgemma && set -a; . ./.env; set +a && export DIFFGEMMA_EP=<ep> &&
+python3 <scratchpad>/e1_kill_gate.py celsius 6`. KNOWN GAP: the eval tier
+(`out/worker-oracle-eval/main.js`) is currently broken (throws `single colon` on
+every input incl. `42`); the scorer runs eval as best-effort and rests
+faithfulness on parse + structural + vacuity until the bundle is fixed
+(`EVAL_ENABLED` flag flips it back on).
+
 ### P1 — Eval-renoise live test
 
 Drive the built `denoise_to_step` / `resume_renoise` worker on the GPU. Confirm
