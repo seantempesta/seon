@@ -1,10 +1,34 @@
 ---
 type: research
-status: draft
+status: active
 tags: [research, agent, web, database]
 ---
 
 # Retrieval-augmented denoising experiment plan — Capability #3 (RAG inside the generation loop)
+
+> **STATUS (2026-06-29): the SEON-side RETRIEVAL LEG is BUILT + OFFLINE-PROVEN.**
+> `seon.diffusion.retrieval` (`src/seon/diffusion/retrieval.cljs`, tests
+> `test/seon/diffusion/retrieval_test.cljs`) implements the three steps end to
+> end with NO GPU and NO embeddings: (1) DETECT unresolved/hallucinated symbols
+> in a canvas string (`unresolved-references` — free-reference extraction over
+> `seon.repl.internal/parse-forms`, minus locals/specials/core, then program-
+> graph membership), (2) RETRIEVE the real `:seon.fn` candidates
+> (`retrieve-candidates` — exact + near-name Levenshtein over `:seon.fn/sym`;
+> SEMANTIC `seon.embed/search-pull` as the `SEON_EMBED` enhancement via
+> `retrieve-for-canvas+semantic`), (3) EMIT the injection descriptor
+> (`build-injection` / `to-wire`) in the worker's `{op,…}` clamp shape — the
+> real symbol + signature/spec + char-span. **Offline proof** (6 tests / 37
+> assertions, full cljs suite green 814/3708): a seeded graph + a canvas
+> referencing `transct!` / `db/transct!` →
+> `transct! [94 102]` → `seon.db/transact!` (edit-distance 1, full signature) →
+> `{:op :clamp :span [94 102] :replacement "transact!" :spec_text "…"}`. The
+> AUROC-0.471 split holds: `reduce-kv` (a REAL core fn) is NOT graph-flagged
+> (that residual is eval's job, not retrieval's). **End-to-end AWAITS GPU** —
+> Part 2 (encoder-KV injection, W1–W3) is unchanged confirm-on-deploy; the
+> descriptor's char-span is exactly what the worker maps to renoise token
+> positions via `offset_map`. The `spec-for-span` SKETCH below is SUPERSEDED by
+> the built `seon.diffusion.retrieval/retrieve-for-canvas` (graph-first, with
+> the embed path folded in as the enhancement, not the primary).
 
 > Ready-to-run plan + worker stub so the MOMENT DiffusionGemma deploys we can run
 > the capability that pays for itself precisely where entropy is blind: when the
