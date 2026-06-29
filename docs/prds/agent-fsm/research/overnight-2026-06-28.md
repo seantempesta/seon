@@ -117,6 +117,52 @@ them. Sequence, all measured/committed:
 claim the moment you verify it; a grep hit with `file:line` is already storable") in Core's `my.kb`
 manual — blocked on #78. Re-measure **s12 ALONE** at k=2 + full battery; isolated, do NOT bundle.
 
+## db-memory Gap A — PAYOFF re-measure: blockers cleared + quality lifted, storage behavior RESIDUAL (2026-06-29)
+
+The Gap-A loop ran its payoff measurement and **STOPPED** (deliberate — further s12 tweaks would
+overfit). Three precise fixes landed to clear the root-caused blockers, then a clean k=2 re-measure:
+
+1. **#78 (`52b38daf`)** — inert-comment render: `render-namespace` no longer EXECUTES the form it
+   shows, killing the `(schema/clear-all! [])` registry-wipe footgun that blocked a clean re-measure.
+2. **#86 (`b50899c0`)** — file-grep now suppresses the paused `.clj` lane-sibling, so an agent
+   grepping `db` gets the live `db.cljs`, not the dead JVM-track `db.clj` (the wrong file that ate A's 6 turns).
+3. **#85 (`32b23323`)** — store-proactively guidance reframed **batch-at-end → INCREMENTAL**
+   ("store each claim the moment you verify it; a grep hit with `file:line` is already storable").
+
+**Measured at `b50899c0` (all 3 fixes), PAID k=2 DeepSeek:**
+
+| axis | result | read |
+|---|---|---|
+| `s12-run8-two-agent-consultation` | **0/2 FAIL** (still) | the targeted bar did NOT pass |
+| s12 judge-mean | **0 → 52.5** | substantial quality lift |
+| battery judge | **33 → 68** | broad lift |
+| `:a-stored-at-least-two-findings-with-provenance` | **0/2** | A still does not persist |
+| my.kb references (both runs) | **0** | zero rows written |
+| A live-tile touches | **8×** | A PRESENTS to its canvas instead |
+| A active my.ui | **11** | toolkit used heavily on the present side |
+| `s32-consult` | **2/2 j100 HELD** | no regression |
+| `finding-storage-shape` | **1/1 HELD** | no regression |
+
+**The honest bottom line:** the loop **resolved every upstream BLOCKER** (grep friction #86,
+registry-wipe #78, deferred/batch store guidance #85) and **lifted s12 quality substantially**
+(judge 0→52.5), but s12 **does not pass**. The residual gap is robust: agent A (DeepSeek)
+**PRESENTS findings to its canvas (live-tile 8×) but does not PERSIST them as `my.kb` rows
+(stored 0/2, 0 refs)** under the two-agent "research so your partner can consult" framing. Storage
+behavior survived every intervention — it is the residual, not a missing mechanism (`finding-storage-shape`
+passes). The loop **deliberately stopped tweaking s12** here to avoid overfitting the battery to one bar.
+
+**This is now an OWNER DECISION among three hypotheses (presented, not chosen):**
+
+1. **MODEL CEILING** — DeepSeek won't reliably do the persist step under this framing. Recommend
+   re-testing with a stronger model + tracking s12 as a known-hard `pass^k` bar.
+2. **PRESENT-vs-PERSIST TENSION** — the canvas-first culture competes with store-to-DB; A satisfies
+   "show your work" via the canvas (live-tile 8 / stored 0) instead of persisting. May need
+   guidance/scenario disambiguation, or an accepted tradeoff.
+3. **OVER-SCOPED SCENARIO** — s12 conflates store + consult + handoff across TWO agents; could be
+   split into tighter single-behavior bars.
+
+Root-cause depth: [[research/s12-store-under-framing-rootcause-2026-06-29]].
+
 ## Landings (live-proven, committed)
 
 | # | What | Proof | Commit |
