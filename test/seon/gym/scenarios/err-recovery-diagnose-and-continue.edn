@@ -1,0 +1,164 @@
+;; ERR-RECOVERY — DIAGNOSE-AND-CONTINUE (error-recovery facet #2, distinct
+;; from err-recovery-unregistered-attr). That scenario measures the WRITE-side
+;; recovery arc (transact an unregistered attr → envelope → register! →
+;; re-transact). THIS one measures the READ/COMPUTE-side facet the owner cares
+;; about: "little to no REPL errors AND graceful recovery" — diagnose a REPL
+;; error MID-multi-step-task and self-correct WITHOUT SPIRALING, then CONTINUE
+;; to finish the remaining steps.
+;;
+;; THE SHAPE. A fully-seeded, fully-REGISTERED reading-backlog domain (title /
+;; source / word-count / status — NO registration is needed, which is exactly
+;; what makes this mechanically distinct from the unregistered-attr scenario).
+;; The task is query-heavy and multi-step across two turns: derive a total
+;; reading estimate + the biggest single article (argmax over word-count), flip
+;; the SHORTEST article to read (a status UPDATE on a seeded identity — no new
+;; attr), then in a follow-up turn re-read the agent's OWN write to report the
+;; remaining backlog and pick what to tackle next. The many read surfaces
+;; (argmax, argmin, status filter, status upsert, cross-turn re-query) give the
+;; agent natural OPPORTUNITIES to slip — e.g. a typo'd attribute in a query,
+;; which seon.db throws back as a rich error-as-value envelope ("…attribute(s)
+;; that this database has never seen … Most likely a typo: check spelling
+;; against (installed-schema db)…"). The CORRECT behavior on a slip: READ that
+;; envelope, FIX the cause (spelling / shape), and CONTINUE to finish — NOT
+;; repeat the same failing call, NOT give up, NOT spiral into many failed evals.
+;;
+;; OPPORTUNITY, NOT TRAP (catalog §6, the err-recovery-unregistered model): the
+;; error is a NATURAL consequence of a genuinely query-heavy task, never a
+;; planted bait — the agent picks every attribute/var name itself, and an agent
+;; that queries cleanly the first time passes IDENTICALLY (eval-error-rate 0.0,
+;; task completes). The scenario creates the chance for an error; it never
+;; requires one.
+;;
+;; THE NEW MEASUREMENT (vs the recording-only sibling): an :eval-error-rate
+;; CEILING (≤ 0.34) — one error then a fix among the run's evals stays under it;
+;; a SPIRAL (the same failing call hammered 4-5×) blows past it, RED. Plus a
+;; :llm-judge leg that grades the OUTCOME the human sees (reply + canvas): did
+;; the agent deliver the complete, coherent answer (recovered / clean) or an
+;; apologetic, incomplete, error-narrating reply (spiraled / gave up)?
+;;
+;; NO-CHEATING (catalog §6 + §3.4): the ground-truth answers (biggest =
+;; "Designing Data-Intensive Systems", shortest = "Why Clojure", 4 left after)
+;; live ONLY in the :llm-judge rubric/reference (shown to the JUDGE, never the
+;; agent, never a mechanical predicate, never a fixture). The mechanical legs
+;; anchor on structure (row count unchanged, one status flipped to :read) and
+;; op-families + the word-count attr-stem — never the answer. The turn messages
+;; never appear in the fixtures (§3.4).
+;;
+;; What a FAILURE reveals: if the agent spirals (eval-error-rate RED) or its
+;; reply is a confused error-narration that never finishes (judge RED), the
+;; always-on context is NOT teaching agents to read seon.db's error-as-value
+;; envelopes and self-correct mid-task — the exact "diagnose, fix, continue"
+;; competency this scenario pins.
+;;
+;; PAID — costs real money. Refused without {:seon.gym/allow-paid? true} + the
+;; active provider's API key.
+{:seon.gym.scenario/id     :err-recovery-diagnose-and-continue
+ :seon.gym.scenario/doc    "A fully-seeded, fully-registered reading-backlog domain (no registration needed). The multi-step task — total reading estimate + biggest article, flip the shortest to read, then in a follow-up re-read that write to report the remaining backlog — is query-heavy, so the agent naturally MAY hit a recoverable REPL error (e.g. a typo'd attribute → seon.db's 'never seen this attr … likely a typo' envelope). Bar: the task COMPLETES (one article flipped to :read, rows unchanged, honest reply) AND the eval-error-rate stays under a one-slip-then-fix ceiling — a spiral of repeated failing calls reds. Whether the agent slipped once or ran clean is recorded by the eval log, not required."
+ :seon.gym.scenario/tier   :paid
+ :seon.gym.scenario/status :active
+ :seon.gym.scenario/competency :error-recovery
+ :seon.gym.scenario/axes   [:models-work-directed :consults-findings
+                            :replies-honestly :terminates :makes-few-errors]
+ :seon.gym.scenario/schema-registrations
+ [[:my.articles/title      [:string {:seon.db/identity true}]]
+  [:my.articles/source     :string]
+  [:my.articles/word-count :int]
+  [:my.articles/status     :keyword]]
+ ;; Five articles, all seeded :unread. Distinct word counts so argmax/argmin are
+ ;; unambiguous: biggest = "Designing Data-Intensive Systems" (4200), shortest =
+ ;; "Why Clojure" (950). Total words = 12650 (a reading-TIME estimate is the
+ ;; agent's own wpm derivation, deliberately not a fixed number).
+ :seon.gym.scenario/fixtures
+ [{:my.articles/title "Designing Data-Intensive Systems" :my.articles/source "longreads" :my.articles/word-count 4200 :my.articles/status :unread}
+  {:my.articles/title "The Cost of Microservices"        :my.articles/source "a blog"    :my.articles/word-count 1800 :my.articles/status :unread}
+  {:my.articles/title "Why Clojure"                      :my.articles/source "a blog"    :my.articles/word-count 950  :my.articles/status :unread}
+  {:my.articles/title "LMDB Internals"                   :my.articles/source "a journal" :my.articles/word-count 3100 :my.articles/status :unread}
+  {:my.articles/title "Bitemporal Databases Explained"   :my.articles/source "longreads" :my.articles/word-count 2600 :my.articles/status :unread}]
+ :seon.gym.scenario/turns
+ [{:seon.gym.turn/message "I want to clear my reading backlog this week. Roughly how much total reading am I looking at, and which single article is the biggest commitment? Then go ahead and mark the shortest one as read so I can knock it out first."}
+  {:seon.gym.turn/message "Great, that one's done. So where does that leave me — how many are still on the pile, and which should I tackle next?"}]
+ :seon.gym.scenario/predicates
+ [;; COMPLETION — the rows are intact (no fork / no re-log mint): exactly the
+  ;; five seeded articles, identified by title presence. A regression that
+  ;; mints duplicates on the status update (forgetting the identity attr) shows
+  ;; here as >5, RED — never a silently doubled backlog.
+  {:seon.gym.predicate/id     :exactly-five-articles
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :consults-findings
+   :seon.gym.predicate/query  [:find ?e :where [?e :my.articles/title _]]
+   :seon.gym.predicate/expect [:count 5]}
+  ;; COMPLETION — the task's WRITE landed: at least one article was flipped to
+  ;; :read (the requested "mark the shortest as read"). Structural: counts the
+  ;; :read status, never names WHICH article is shortest (the judge checks it
+  ;; was the right one). An untouched run leaves zero :read here, RED.
+  {:seon.gym.predicate/id     :one-article-marked-read
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :models-work-directed
+   :seon.gym.predicate/query  [:find ?e :where [?e :my.articles/status :read]]
+   :seon.gym.predicate/expect [:count>= 1]}
+  ;; …and the backlog is not emptied wholesale — the agent flipped the ONE it
+  ;; was told to, leaving the rest unread (a mass-mark regression reds here).
+  {:seon.gym.predicate/id     :backlog-still-has-unread
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :models-work-directed
+   :seon.gym.predicate/query  [:find ?e :where [?e :my.articles/status :unread]]
+   :seon.gym.predicate/expect [:count>= 1]}
+  ;; COMPUTE EVIDENCE — the agent actually reduced the stored rows (sorted /
+  ;; max'd / summed over the word-count attr) rather than eyeballing. Op-family
+  ;; + attr-stem, answer-free: a correct hand-roll matches, no answer is coached.
+  {:seon.gym.predicate/id     :computed-over-word-count
+   :seon.gym.predicate/kind   :eval-count-matching
+   :seon.gym.predicate/axis   :consults-findings
+   :seon.gym.predicate/pattern ":my\\.articles/word-count|sort|max|min|reduce|apply \\+|\\(\\+ |data/group-sum"
+   :seon.gym.predicate/expect [:count>= 1]}
+  ;; The agent replied to the user (from-agent + hops>0 — NOT the
+  ;; double-identity-join shape, pinned in driver_test as engine-mis-binding).
+  {:seon.gym.predicate/id     :agent-replied-to-the-user
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :replies-honestly
+   :seon.gym.predicate/query  [:find ?m
+                               :where
+                               [?m :seon.agent.message/from ?a]
+                               [?a :seon.agent/id _]
+                               [?m :seon.agent.message/hops ?h]
+                               [(pos? ?h)]]
+   :seon.gym.predicate/expect :non-empty}
+  ;; Terminates: idle is DERIVED (not terminated, owns no open run), not a
+  ;; stored state datom. The single agent idle = non-empty.
+  {:seon.gym.predicate/id     :agent-ends-idle
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?a
+                               :where
+                               [?a :seon.agent/id _]
+                               (not [?a :seon.agent/terminated-at _])
+                               (not-join [?a]
+                                 [?r :seon.agent.run/agent ?a]
+                                 [?r :seon.agent.run/status :open])]
+   :seon.gym.predicate/expect :non-empty}
+  {:seon.gym.predicate/id     :terminates-under-cap
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?t :where [?t :seon.agent.turn/id _]]
+   :seon.gym.predicate/expect [:count<= 19]}
+  ;; --- THE HEADLINE: NO SPIRAL --------------------------------------------
+  ;; The failed-eval fraction must stay ≤ 0.34. Grounded in "one error + a
+  ;; fix": a slip then a corrected re-run among a handful of evals lands at/
+  ;; under ~0.33; a SPIRAL (the same failing call hammered 4-5×, never reading
+  ;; the envelope) blows past it. A clean run is 0.0 and passes trivially —
+  ;; this gate exists to catch the spiral, not to require an error.
+  {:seon.gym.predicate/id             :no-error-spiral
+   :seon.gym.predicate/kind           :eval-error-rate
+   :seon.gym.predicate/axis           :makes-few-errors
+   :seon.gym.predicate/max-error-rate 0.34}
+  ;; --- THE HEADLINE: DIAGNOSE + SELF-CORRECT (judge) ----------------------
+  ;; The ONLY place the answers live. The judge sees the agent's verbatim
+  ;; reply(s) + rendered canvas (NOT the eval log) — so it grades the OUTCOME:
+  ;; a recovered agent delivers the complete answer; a spiraling / giving-up
+  ;; agent narrates errors and leaves the task unfinished.
+  {:seon.gym.predicate/id        :judge-diagnosed-and-finished
+   :seon.gym.predicate/kind      :llm-judge
+   :seon.gym.predicate/agent     :a
+   :seon.gym.predicate/axis      :replies-honestly
+   :seon.gym.predicate/rubric    "PASS if the agent DELIVERED the requested work to completion and its reply reads as a clean, finished answer: it names the biggest single article and confirms the shortest was marked read in turn 1, and in turn 2 it reports the remaining backlog (4 articles) and recommends a next one. A reply that hit a REPL error along the way still PASSES as long as it recovered and finished — diagnosing and self-correcting is the WIN. FAIL only if the reply shows the agent SPIRALED or GAVE UP: it never gives the biggest article or never confirms the mark-as-read, or it narrates being stuck / repeating a failing step / apologizing for errors WITHOUT delivering the answer, or its numbers are self-contradictory across the two turns. This is a recovery check: blindly retrying, abandoning the task, or an error-narration that never completes are the failures; a clean finish OR a finish-after-a-stumble both pass."
+   :seon.gym.predicate/reference "The five seeded articles and their word counts: Designing Data-Intensive Systems 4200, The Cost of Microservices 1800, Why Clojure 950, LMDB Internals 3100, Bitemporal Databases Explained 2600 (total 12650 words; a reading-time figure is the agent's own wpm estimate, so any reasonable total/time is fine). The biggest single commitment is 'Designing Data-Intensive Systems' (4200, the most words). The shortest — the one to mark read — is 'Why Clojure' (950, the fewest). After it is marked read, exactly 4 articles remain unread. 'Which to tackle next' is the agent's judgment (e.g. the next-shortest, The Cost of Microservices at 1800) — any defensible pick is fine; what matters is the agent finished the task coherently rather than stalling on an error."}]}

@@ -51,7 +51,7 @@
    grades a canned good/bad reply pair to prove the judge discriminates);
    the `x*` keys are the cross-session A→B baseline scenarios; the
    `canvas-*` keys are the :ui-competency canvas-as-primary scenarios."
-  [:s32 :s21 :s12 :todo :resume :err :calib :x1 :x3 :x12 :xcat :ab
+  [:s32 :s21 :s12 :todo :resume :err :err2 :calib :x1 :x3 :x12 :xcat :ab
    :canvas-budget :canvas-goal :honesty])
 
 (defn- gate-value
@@ -255,6 +255,12 @@
   (async done
     (run-paid! :err
                "test/seon/gym/scenarios/err-recovery-unregistered-attr.edn"
+               done)))
+
+(deftest err-recovery-diagnose-and-continue-paid
+  (async done
+    (run-paid! :err2
+               "test/seon/gym/scenarios/err-recovery-diagnose-and-continue.edn"
                done)))
 
 (deftest x1-subscriptions-total-and-max-paid
