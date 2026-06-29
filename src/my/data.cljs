@@ -30,23 +30,13 @@
    collection would silently corrupt a sum."
   (:refer-clojure :exclude [key])
   (:require
+    ;; the shared `:seon.items/*` collection envelope + `:seon.result/ok?`
+    ;; discriminator live in `seon.items` (which pulls `seon.result`) — Core
+    ;; owns them; my.data REFERENCES, never re-registers. Required for load
+    ;; order so those register! calls run before my.data's schemas below.
+    [seon.items]
     [seon.db :as db]
     [seon.schema :as schema]))
-
-;;; SHARED ENVELOPE SHAPES — the self-describing-collection mixin
-;;; (`:seon.items/*`) and the result discriminator (`:seon.result/ok?`),
-;;; registered ONCE here (my.data is their first consumer) and referenced,
-;;; never inlined. The toolkit catalog threads on these exact shapes.
-
-(schema/register! :seon.result/ok? :boolean)        ; the shared ok?/err discriminator
-(schema/register! :seon.items/items [:vector :map]) ; each item a self-describing entity map
-(schema/register! :seon.items/count :int)
-
-(schema/register! ::items-envelope                  ; what every PRODUCER emits
-  [:map
-   [:seon.result/ok? :seon.result/ok?]
-   [:seon.items/items :seon.items/items]
-   [:seon.items/count :seon.items/count]])
 
 ;;; FIELD SHAPES — attr names are keywords; a grouped value is domain data
 ;;; (`:any`); a sum is numeric.
@@ -78,7 +68,7 @@
                                        :my.data/key       :my.expense/amount-usd}))]
      (max-by (merge totals {:my.data/key :my.data/total})))
    ;; => {:my.data/group :dining :my.data/total 106}"
-  {:malli/schema [:=> [:cat ::rows-request] ::items-envelope]}
+  {:malli/schema [:=> [:cat ::rows-request] :seon.items/envelope]}
   [{::keys [attr]}]
   (let [items (vec (db/query '[:find [(pull ?e [*]) ...] :in $ ?a :where [?e ?a]] attr))]
     {:seon.result/ok?  true
@@ -125,7 +115,7 @@
                                      :my.data/key       :my.expense/amount-usd}))
                   {:my.data/key :my.data/total}))
    ;; => {:my.data/group :dining :my.data/total 106}"
-  {:malli/schema [:=> [:cat ::group-request] ::items-envelope]}
+  {:malli/schema [:=> [:cat ::group-request] :seon.items/envelope]}
   [{::keys [group-key key] :seon.items/keys [items]}]
   (let [rows (->> items
                   (reduce (fn [m it] (update m (group-key it) (fnil + 0) (or (key it) 0)))
