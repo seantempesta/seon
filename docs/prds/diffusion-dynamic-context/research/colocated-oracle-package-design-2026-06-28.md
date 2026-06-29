@@ -527,13 +527,31 @@ docstring). Both tiers stay sub-millisecond — the co-location win holds.
 
 **Near term (parse-only loop) — the bb deployable, simplest path:**
 
-1. Write `bin/oracle-serve` (bb): a persistent loop that `(require 'seon.repl.internal)`,
-   reads one `{op,…}` JSON line from stdin (or a UDS socket), calls
-   `internal/parse-forms` → the `validate` shape, writes one JSON line.
-   Mirror `bin/test-parser`'s `bb --classpath src:test` classpath; no build.
-2. Image layer: install `bb` + `COPY src/seon/repl/internal.cljc` (+ deps) onto
-   the worker; Python `Oracle` spawns `bb … bin/oracle-serve` once (§4 shape,
-   swap `node …` → `bb …`). Wire `parse` into the denoise checkpoint.
+1. ✅ **DONE + offline-proven (2026-06-28).** `bin/oracle-server` (bb,
+   committed): a persistent line loop that adds `src/` to the classpath
+   (cwd-independent, via `*file*` — the `bin/test-parser` approach), requires
+   `seon.repl.internal`, reads one `{op,…}` JSON line from stdin, runs
+   `parse-forms` → the **byte-identical-to-Node** `{forms, tier:"parse",
+   errors:[{error-kind, span, source}]}` shape, writes one JSON line. `op`/`id`
+   echoed (design §4); a bare-JSON-string line (the Node `--serve` framing) is
+   also accepted, so the same pipe carries either framing. Pure fn of input —
+   no DB/pod/build. Offline-proven: round-trips match (`(def mean [[v] ...)` →
+   `unmatched-delimiter` span `[0,19]`, identical to the Node validator
+   docstring example; `(foo` → `eof`; multi-form `(+ 1 2)\n(- 3 1)` → `forms:2`),
+   driven over the REAL stdin/stdout pipe from the Python `Oracle` shim
+   (`tmp/flash-diffgemma/oracle_shim.py`, gitignored worker dir). **Measured:
+   spawn→1st-response (cold) ~21 ms; warm per-call ~0.05–0.12 ms over 500
+   calls** — confirming the design's ~10–30 ms cold / ~0.1 ms warm claims. The
+   contract match to the Node `:worker-validator` is by construction (`validate`
+   is the same `parse-forms`→filter→flatten logic; `error-kind`/`tier` flattened
+   to NAME strings exactly as `worker_validator.cljs` `->js` does) → the Python
+   shim is **runtime-agnostic** (swap bb↔Node = change spawn argv only).
+2. Image layer: install `bb` + `COPY src/seon/repl/internal.cljc` (+ deps) +
+   `bin/oracle-server` onto the worker; Python `Oracle` spawns
+   `bb … bin/oracle-server` once (§4 shape, swap `node …` → `bb …`). Wire
+   `parse` into the denoise checkpoint. (The `Oracle` shim is built +
+   offline-proven — `tmp/flash-diffgemma/oracle_shim.py`; only the image
+   bundling + GPU wiring remain, owner-owned.)
 
 **When faithful CLJS eval enters the loop — the Node path (a378adfa's bundle):**
 

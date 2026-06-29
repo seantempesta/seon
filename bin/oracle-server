@@ -1,0 +1,94 @@
+#!/usr/bin/env bb
+;;; bin/oracle-server — PERSISTENT babashka parse-validator server (the
+;;; co-located oracle's PARSE tier).
+;;;
+;;; Design: docs/prds/diffusion-dynamic-context/research/
+;;;         colocated-oracle-package-design-2026-06-28.md (§2 bb-for-parse, §4 wire).
+;;;
+;;; Why bb: parse-forms is PURELY STRUCTURAL (rewrite-clj read + read-error
+;;; span classification — no semantics), so babashka's built-in rewrite-clj
+;;; reads CLJS-flavored canvas forms BIT-IDENTICALLY to the pod — zero
+;;; fidelity loss, NO shadow build, NO Node, NO pod. Same path bin/test-parser
+;;; proves (bb --classpath src on the .cljc source).
+;;;
+;;; Spawn-ONCE, reuse-forever: the diffusion worker's Python `Oracle` shim
+;;; spawns this once at warm-up and writes one request line per denoise
+;;; checkpoint. Cold start (spawn -> ready) ~10-30ms; warm per-call ~0.1ms.
+;;; A pure fn of its input — no DB, no pod, no global state.
+;;;
+;;; WIRE (one JSON object per line, both directions — design §4):
+;;;
+;;;   in :  {"op":"parse","id":42,"code":"(defn mean [v] (/ (reduce + v ..."}
+;;;   out:  {"op":"parse","id":42,"forms":0,"tier":"parse",
+;;;          "errors":[{"error-kind":"eof","span":[0,33],"source":"..."}]}
+;;;
+;;; The `forms`/`tier`/`errors[{error-kind,span,source}]` fields are
+;;; BYTE-IDENTICAL to the Node `:worker-validator` bundle's `validate-json`
+;;; output (src/seon/worker_validator.cljs `validate` + `->js`) — so the
+;;; Python shim is RUNTIME-AGNOSTIC: swap bb<->Node without changing Python.
+;;; `op`/`id` are echoed per design §4; a bare-JSON-string line (the Node
+;;; validator's current --serve framing) is also accepted, defaulting to
+;;; {op:"parse"}, so the same pipe carries either framing.
+;;;
+;;; Run:  bb --classpath src -m … is NOT used (self-contained); just:
+;;;         bin/oracle-server          # reads stdin lines, writes stdout lines
+;;;       or feed one line for a one-shot smoke:
+;;;         echo '{"op":"parse","code":"(+ 1 2)"}' | bin/oracle-server
+
+(require '[babashka.classpath :as cp]
+         '[babashka.fs :as fs])
+
+;;; Put the repo's `src/` on the classpath (relative to THIS script, not cwd)
+;;; so `seon.repl.internal` (the pure .cljc parser) loads from source — the
+;;; bin/test-parser approach, cwd-independent for the deployed image.
+(cp/add-classpath (str (fs/file (fs/parent (fs/parent (fs/absolutize *file*))) "src")))
+
+(require '[seon.repl.internal :as internal]
+         '[cheshire.core :as json])
+
+(defn validate
+  "Pure: code-string -> the Node-validator-IDENTICAL result map
+   {:forms n :tier \"parse\" :errors [{:error-kind name :span [s e] :source s}]}.
+   Mirrors seon.worker-validator/validate + ->js (keywords flattened to NAME
+   strings at this boundary, exactly as the Node bundle does)."
+  [code]
+  (let [entries (internal/parse-forms code)
+        forms   (filterv #(= :form (:kind %)) entries)
+        errors  (->> entries
+                     (filter #(= :read (:kind %)))
+                     (mapv (fn [{:keys [error-kind span source]}]
+                             {:error-kind (name error-kind)
+                              :span       span
+                              :source     source})))]
+    {:forms  (count forms)
+     :tier   "parse"
+     :errors errors}))
+
+(defn handle
+  "Dispatch one parsed request map (string keys, from JSON) to a response
+   map. The op-dispatch seam: `parse`/`validate` run the parse tier; any
+   other op returns an `unimplemented` marker (the eval/retrieve tiers are
+   the Node bundle's job — design §3/§5). `op`/`id` are echoed when present."
+  [req]
+  (let [req (if (string? req) {"code" req} req)   ; bare-string line -> {code}
+        op  (get req "op" "parse")
+        id  (get req "id")
+        base (case op
+               ("parse" "validate") (validate (get req "code" ""))
+               {:error {:kind "unimplemented"}})]
+    (cond-> (assoc base :op op)
+      (some? id) (assoc :id id))))
+
+(defn -main []
+  (loop []
+    (when-some [line (read-line)]
+      (let [resp (try
+                   (handle (json/parse-string line))
+                   (catch Exception e
+                     {:op "parse" :error {:kind "bad-request"
+                                          :message (.getMessage e)}}))]
+        (println (json/generate-string resp))
+        (flush))
+      (recur))))
+
+(-main)
