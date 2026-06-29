@@ -113,6 +113,28 @@ case "${1:-}" in
       exit 0
     fi
     ;;
+  gym-diffusion)
+    # Score a CONSUMER-OWNED diffusion-gym scenario (acme/gym/scenarios/*.edn)
+    # through seon's CO-LOCATED ORACLE (bin/oracle-server parse-raw + the
+    # worker-oracle-eval bundle) and emit a scorecard. HERMETIC + OFFLINE (CPU):
+    # no pod, no wire-server, no GPU — the oracle is a pure fn reached by PATH,
+    # so this is ZERO src/seon edits and never touches a live store. SEON_ROOT is
+    # exported for the driver to locate the oracle binaries. A bare scenario name
+    # resolves under acme/gym/scenarios/; a path passes through.
+    #   bin/acme gym-diffusion celsius-killgate.edn --assert
+    #   bin/acme gym-diffusion pure-mean.edn --eval --assert
+    shift
+    ARGS=()
+    for a in "$@"; do
+      case "$a" in
+        --*) ARGS+=("$a") ;;
+        /*)  ARGS+=("$a") ;;
+        */*) ARGS+=("$SEON_ROOT/$a") ;;
+        *)   ARGS+=("$SEON_ROOT/acme/gym/scenarios/$a") ;;
+      esac
+    done
+    exec env SEON_ROOT="$SEON_ROOT" bb "$SEON_ROOT/acme/gym/diffusion_gym.bb" "${ARGS[@]}"
+    ;;
   # NOTE: `bin/acme cluster reset [name]` needs NO intercept here — it
   # `exec`s straight through to bin/seon's cluster_reset (below), which now
   # bounces the cluster THIS supervisor invocation manages (its store IS

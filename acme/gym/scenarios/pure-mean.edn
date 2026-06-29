@@ -1,0 +1,44 @@
+;; ACME-OWNED diffusion-gym scenario — the EVAL-TIER case.
+;;
+;; Where celsius-killgate.edn exercises the PARSE tier on pod-coupled code, this
+;; one exercises the co-located EVAL tier (the worker-oracle-eval self-host
+;; bundle) on SELF-CONTAINED CLJS: `mean` written with only cljs.core. The eval
+;; tier answers "does it actually RUN" — so a form that parses but throws or
+;; references an undeclared var is caught here, not by parse.
+;;
+;; Run WITH --eval so the :runs gate is applicable:
+;;   bin/acme gym-diffusion pure-mean.edn --eval --assert
+;;
+;; arm1 (guided) responses are correct + self-contained -> eval ok.
+;; arm3 (naked) responses parse but FAIL eval (undeclared var / runtime throw)
+;; -> the eval tier is the discriminator, EARNS.
+{:acme.gym.scenario/id   :pure-mean
+ :acme.gym.scenario/doc  "Self-contained mean fn; the eval tier gates faithful."
+
+ :acme.gym.scenario/predicates
+ [{:acme.gym.predicate/id :parses :acme.gym.predicate/kind :oracle-parse :acme.gym.predicate/expect :clean}
+  {:acme.gym.predicate/id :runs   :acme.gym.predicate/kind :oracle-eval  :acme.gym.predicate/expect :ok}]
+
+ ;; :runs is applicable ONLY under --eval; without it, faithful falls back to
+ ;; the parse gate alone (and the eval-tier verdict is not claimed).
+ :acme.gym.scenario/faithful-when [:parses :runs]
+
+ :acme.gym.scenario/arms
+ {:arm1-guided-infill
+  ["```clojure\n(defn mean [v] (/ (reduce + v) (count v)))\n```"
+   "```clojure\n(defn mean [v] (/ (reduce + v) (count v)))\n```"
+   "```clojure\n(defn mean [v] (/ (reduce + v) (count v)))\n```"
+   "```clojure\n(defn mean [v] (/ (reduce + v) (count v)))\n```"]
+
+  ;; naked: parses fine, but references an UNDECLARED var (avg-helper) or throws
+  ;; -> the eval tier flips ok:false where parse alone would have passed.
+  :arm3-naked-oracle
+  ["```clojure\n(defn mean [v] (avg-helper v))\n```"
+   "```clojure\n(defn mean [v] (avg-helper v))\n```"
+   "```clojure\n(defn mean [v] (avg-helper v))\n```"
+   "```clojure\n(defn mean [v] (/ (reduce + v) (count v)))\n```"]}
+
+ :acme.gym.scenario/compare {:treatment :arm1-guided-infill
+                             :baseline  :arm3-naked-oracle
+                             :margin    0.10}
+ :acme.gym.scenario/expect-verdict :EARNS}

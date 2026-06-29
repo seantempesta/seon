@@ -1,0 +1,40 @@
+;; ACME-OWNED diffusion-gym scenario — the kill-gate, "guided ties" case.
+;;
+;; The OTHER direction of the decision rule: here the clamped frame buys nothing
+;; (the model fills vacuous specs even when guided), so arm1 ~= arm3 and the
+;; verdict fires KILL. Proves the rule genuinely DISCRIMINATES — it is not rigged
+;; to always EARNS. Same predicate set as celsius-killgate; only the arm pools
+;; differ.
+{:acme.gym.scenario/id   :celsius-tie
+ :acme.gym.scenario/doc  "Guided buys nothing — arm1 ~= arm3 -> KILL."
+
+ :acme.gym.scenario/predicates
+ [{:acme.gym.predicate/id :parses      :acme.gym.predicate/kind :oracle-parse :acme.gym.predicate/expect :clean}
+  {:acme.gym.predicate/id :registers   :acme.gym.predicate/kind :contains     :acme.gym.predicate/needle "schema/register!"}
+  {:acme.gym.predicate/id :has-malli   :acme.gym.predicate/kind :contains     :acme.gym.predicate/needle ":malli/schema"}
+  {:acme.gym.predicate/id :no-clj-spec :acme.gym.predicate/kind :absent       :acme.gym.predicate/needle "s/def"}
+  {:acme.gym.predicate/id :not-vacuous :acme.gym.predicate/kind :not-vacuous}]
+
+ :acme.gym.scenario/faithful-when [:parses :registers :has-malli :no-clj-spec :not-vacuous]
+
+ :acme.gym.scenario/arms
+ {:arm1-guided-infill
+  ["```clojure\n(schema/register! ::celsius->fahrenheit-request [:map [::celsius :double]])\n(schema/register! ::celsius->fahrenheit-response [:map [::fahrenheit :double]])\n(defn celsius->fahrenheit\n  {:malli/schema [:=> [:cat ::celsius->fahrenheit-request] ::celsius->fahrenheit-response]}\n  [{::keys [celsius]}]\n  {::fahrenheit (+ 32 (* celsius 1.8))})\n```"
+   "```clojure\n(schema/register! ::celsius->fahrenheit-request [:map [::celsius :double]])\n(schema/register! ::celsius->fahrenheit-response [:map [::fahrenheit :double]])\n(defn celsius->fahrenheit\n  {:malli/schema [:=> [:cat ::celsius->fahrenheit-request] ::celsius->fahrenheit-response]}\n  [{::keys [celsius]}]\n  {::fahrenheit (+ 32 (* celsius 1.8))})\n```"
+   "```clojure\n(schema/register! ::celsius->fahrenheit-request [:map])\n(schema/register! ::celsius->fahrenheit-response [:map])\n(defn celsius->fahrenheit\n  {:malli/schema [:=> [:cat :any] :any]}\n  [{::keys [celsius]}]\n  {::fahrenheit (+ 32 (* celsius 1.8))})\n```"
+   "```clojure\n(schema/register! ::celsius->fahrenheit-request [:map])\n(schema/register! ::celsius->fahrenheit-response [:map])\n(defn celsius->fahrenheit\n  {:malli/schema [:=> [:cat :any] :any]}\n  [{::keys [celsius]}]\n  {::fahrenheit (+ 32 (* celsius 1.8))})\n```"
+   "```clojure\n(s/def ::celsius double?)\n(defn celsius->fahrenheit [c]\n  (+ 32 (* c 1.8)))\n```"
+   "```clojure\n(defn celsius->fahrenheit\n  {:malli/schema [:=> [:cat ::celsius->fahrenheit-request] ::resp]\n  [{::keys [celsius]}]\n  {::fahrenheit (+ 32 (* celsius 1.8\n```"]
+
+  :arm3-naked-oracle
+  ["```clojure\n(schema/register! ::celsius->fahrenheit-request [:map [::celsius :double]])\n(schema/register! ::celsius->fahrenheit-response [:map [::fahrenheit :double]])\n(defn celsius->fahrenheit\n  {:malli/schema [:=> [:cat ::celsius->fahrenheit-request] ::celsius->fahrenheit-response]}\n  [{::keys [celsius]}]\n  {::fahrenheit (+ 32 (* celsius 1.8))})\n```"
+   "```clojure\n(schema/register! ::celsius->fahrenheit-request [:map [::celsius :double]])\n(schema/register! ::celsius->fahrenheit-response [:map [::fahrenheit :double]])\n(defn celsius->fahrenheit\n  {:malli/schema [:=> [:cat ::celsius->fahrenheit-request] ::celsius->fahrenheit-response]}\n  [{::keys [celsius]}]\n  {::fahrenheit (+ 32 (* celsius 1.8))})\n```"
+   "```clojure\n(schema/register! ::celsius->fahrenheit-request [:map])\n(schema/register! ::celsius->fahrenheit-response [:map])\n(defn celsius->fahrenheit\n  {:malli/schema [:=> [:cat :any] :any]}\n  [{::keys [celsius]}]\n  {::fahrenheit (+ 32 (* celsius 1.8))})\n```"
+   "```clojure\n(s/def ::celsius double?)\n(defn celsius->fahrenheit [c]\n  (+ 32 (* c 1.8)))\n```"
+   "```clojure\n(defn celsius->fahrenheit\n  {:malli/schema [:=> [:cat ::celsius->fahrenheit-request] ::resp]\n  [{::keys [celsius]}]\n  {::fahrenheit (+ 32 (* celsius 1.8\n```"
+   "```clojure\n(defn celsius->fahrenheit\n  {:malli/schema [:=> [:cat ::celsius->fahrenheit-request] ::resp]\n  [{::keys [celsius]}]\n  {::fahrenheit (+ 32 (* celsius 1.8\n```"]}
+
+ :acme.gym.scenario/compare {:treatment :arm1-guided-infill
+                             :baseline  :arm3-naked-oracle
+                             :margin    0.10}
+ :acme.gym.scenario/expect-verdict :KILL}

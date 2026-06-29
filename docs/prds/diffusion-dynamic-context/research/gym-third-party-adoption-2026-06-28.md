@@ -363,6 +363,91 @@ boot, `driver.cljs:1428-1447`). Flagging for a focused follow-up; it is outside
 the additive-seam scope and would touch `src/seon/client.cljs`, so it breaks the
 zero-edit invariant by design — which is the finding, not a thing to force.
 
+## 7. Diffusion-gym (oracle scoring) — VERIFIED acme adoption (2026-06-29)
+
+§1–§6 above assess the AGENT gym (full agent turns through a scratch `:memory`
+conn). The DIFFUSION gym is the sibling surface and the one a consumer reaches
+FIRST: a SCENARIO (a task + canned/real model responses) + a PREDICATE set + a
+SCORECARD, scored through the **co-located oracle** (`bin/oracle-server`
+parse-raw + the `worker-oracle-eval` self-host bundle). This section is the
+DELIVERED + LIVE-PROVEN zero-edit adoption path for that surface.
+
+### 7.1 Oracle reach — the coupling map (why zero src/seon edits is possible)
+
+The diffusion-gym scorers in scratchpad (`e1_kill_gate.py`, `skill_lift.py`,
+`score_ab.py`) reach the oracle by SHELLING OUT, and the oracle is a pure,
+cwd-independent function — so an acme-side caller invokes it identically:
+
+| surface | reach | coupling | verdict |
+|---|---|---|---|
+| `bin/oracle-server` (parse-raw) | puts seon's `src/` on the bb classpath RELATIVE TO THE SCRIPT (`fs/parent *file*`), loads `seon.repl.internal` from source. Pure parse, no DB/pod/cluster. | reachable by absolute path from ANY cwd | **ZERO coupling** ✓ |
+| `out/worker-oracle-eval/main.js` (eval) | resolves its bootstrap cache from `SEON_BOOTSTRAP` (we pass `$SEON_ROOT/out/bootstrap`); `--serve` mode batches JSON lines. | needs `SEON_BOOTSTRAP` env when run from a foreign cwd — an ENV knob, not a src edit. Build artifact of the seon checkout (gitignored). | reachable ✓ |
+| scratchpad scorers | hardcode `REPO=/Users/sean/src/seon` + `cwd=REPO` + a baked-in `CELSIUS_TASK`. | NOT seon-src; scratchpad. The scenario/predicate is baked IN, so a consumer can't define their own without editing the scorer. | this is the gap §7.2 closes |
+| live cluster (7890/7891) | — | NONE. The oracle never touches a store; the gym is offline/CPU. | — |
+
+Load-bearing correction to the old `EVAL_ENABLED=False` note in
+`e1_kill_gate.py`: the eval bundle is NOT broken. It reads RAW code on stdin in
+one-shot mode and JSON lines in `--serve` mode — the scratchpad driver fed JSON
+to one-shot, which mis-parses. Driven correctly (`--serve` + JSON lines, or
+one-shot + raw code) it returns clean `{ok, error{kind}}` verdicts
+(`undeclared-var` → `:compile`). It IS pod-decoupled (no `schema/register!`), so
+the eval tier gates SELF-CONTAINED CLJS, not pod-coupled `register!` calls.
+
+### 7.2 What was wired acme-side (the delivered seam, zero src/seon edits)
+
+A consumer-owned, scenario-driven driver + a `bin/acme` verb — the scenario and
+predicates are now DATA the consumer authors, not baked into a scorer:
+
+- `acme/gym/diffusion_gym.bb` — a babashka driver. Reads a scenario EDN, batches
+  every arm's responses through the oracle parse tier (one `bb oracle-server`
+  spawn) and, under `--eval`, the eval tier (one `node … --serve` spawn), scores
+  each predicate, aggregates per arm, and fires the EARNS/KILL/MARGINAL verdict.
+  Predicate kinds are DATA: `:oracle-parse`, `:oracle-eval`, `:contains`,
+  `:absent`, `:not-vacuous`. The oracle is reached purely by `$SEON_ROOT` path.
+- `acme/gym/scenarios/*.edn` — acme-authored scenarios (task + predicates +
+  canned arm responses + `:expect-verdict`). The canned texts are REAL Clojure
+  strings the oracle genuinely parses/evals — so the proof is end-to-end on CPU.
+- `bin/acme gym-diffusion <scenario> [--eval] [--assert]` — the operator verb;
+  exports `SEON_ROOT`, resolves a bare name under `acme/gym/scenarios/`. Hermetic
+  + offline (no pod, no wire-server, no GPU). bin/acme is the consumer harness
+  wrapper (pure env composition); this verb is acme-side, not a src/seon edit.
+
+### 7.3 The verified offline proof (GPU off, CPU only)
+
+```bash
+bin/acme gym-diffusion celsius-killgate.edn --assert         # parse tier  → EARNS
+bin/acme gym-diffusion pure-mean.edn       --eval --assert   # eval  tier  → EARNS
+bin/acme gym-diffusion celsius-tie.edn     --assert          # parse tier  → KILL
+```
+
+Observed (2026-06-29, all `--assert` PASS — the decision rule fires BOTH
+directions, so the predicate genuinely discriminates and is not rigged):
+
+- `celsius-killgate` — arm1(guided)=0.833 vs arm3(naked+oracle)=0.167,
+  Δ=+0.667 ≥ 0.10 → **EARNS**. Parse-raw truly fails the unbalanced arm-1 #6,
+  truly passes the faithful ones.
+- `pure-mean` (`--eval`) — arm1=1.000 vs arm3=0.250, Δ=+0.750 → **EARNS**. The
+  EVAL tier is the discriminator: arm3's `(avg-helper v)` is `undeclared-var`
+  (`ok:false`) where parse alone passes.
+- `celsius-tie` — arm1=0.333 == arm3=0.333, Δ=0.000 → **KILL**.
+
+Each run drops a durable EDN card under `tmp/acme/gym-card-<scenario>-<run>.edn`
+(`#:acme.gym.scorecard{…:verdict {…:decision :EARNS}}`). ZERO `src/seon` edits;
+verified with `git status` (only `acme/gym/**` + `bin/acme` touched).
+
+### 7.4 The one flagged seam gap (NOT forced — a finding)
+
+Same as §6's agent-gym finding, restated for the oracle path: the eval tier
+(`seon.worker-eval`) is pod-DECOUPLED BY DESIGN — it has no `schema/register!`,
+no program-graph fns, no live DB. So a consumer scenario that wants to eval
+POD-COUPLED code (anything calling `schema/register!`, `db/transact!`, an
+`acme.*` fn) cannot be scored by the eval tier as-is; only self-contained CLJS
+runs there. Making the eval tier optionally load the consumer's `SEON_EXTRA_SRC`
+program graph would touch `src/seon/worker_eval.cljs` — a src/seon edit — so it
+is flagged here, not forced. For the parse tier and structural/vacuity
+predicates (the kill-gate's actual discrimination) there is NO such gap; those
+are fully consumer-drivable today.
+
 ## Entry points
 
 - Engine: `test/seon/gym/driver.cljs` (schemas `:116-477`, `run-scenario!`
