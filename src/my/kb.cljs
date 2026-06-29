@@ -41,6 +41,31 @@
 (schema/register! ::verified-at :inst)         ; when last verified
 (schema/register! ::confidence  [:enum :verified :inferred])
 
+;; The CLAIM itself — a shared content attr (the fact, in any domain), and
+;; the natural identity of a single-claim finding so the same claim UPSERTS
+;; (re-grades) instead of duplicating. The [[remember]] one-call fast path
+;; writes it; multi-field domains design their own my.kb.<domain> schema.
+(schema/register! ::claim [:string {:seon.db/identity true}])
+
+;; [[remember]]'s map-in / map-out. `::source` is an ERGONOMIC input only
+;; (a "file:line" / "file" / url string that [[remember]] PARSES into the
+;; shared `::source-path` + `::source-line`) — it is never itself stored.
+;; `::confidence` references the shared enum (no inline fork). The grade is
+;; REQUIRED so a guess can't be persisted as a bare fact.
+(schema/register! ::source :string)
+(schema/register!
+  ::remember-request
+  [:map
+   [::claim      ::claim]
+   [::source     ::source]
+   [::confidence ::confidence]])
+
+;; Returns the live handle to the stored row, or the transact failure
+;; envelope (errors are values) when the write didn't land.
+(schema/register! ::id :int)                    ; the stored finding's eid
+(schema/register! ::remembered [:map [::id ::id]])
+(schema/register! ::remember-response [:or ::remembered :seon.db/transact-response])
+
 ;; The map-out shape [[source-stats]] returns — itself a registered schema,
 ;; so the renderer and instrumentation can see it.
 (schema/register!
@@ -105,6 +130,50 @@
       {:my.kb.source/id "s3" :my.kb.source/title "Purely Functional Data Structures"
        :my.kb.source/rating 5 :my.kb.source/topics [:functional :data-structures]
        :my.kb.source/author "author-okasaki"}]}))
+
+(defn ^:async remember
+  "Store ONE finding as a durable, provenance-stamped knowledge row — the
+   one-call way to persist what you verified, with NO schema design, NO
+   register!, NO hand-written transact. GENERAL: any domain claim, not just
+   code. The grade is REQUIRED, so a guess can't masquerade as a fact.
+
+   Three keys, all required (map-in):
+     ::claim       the fact, one sentence.
+     ::source      where you verified it — \"file:line\", \"file\", or a url.
+     ::confidence  :verified (you saw it) | :inferred (you reasoned it).
+
+   Resolves to `{::id <eid>}` — the live handle: point a message/complete at
+   it (REPORT=DATA, MESSAGE=POINTER) or `(seon.db/pull '[*] <eid>)` it back.
+   IDEMPOTENT — the same claim UPSERTS (re-grades), never a duplicate. The
+   row reuses the shared `::source-path`/`::source-line`/`::confidence`
+   provenance attrs, so it renders in the NEXT agent's stored-findings block
+   and answers their question without a re-research. Store each claim the
+   MOMENT you verify it; don't batch to the end of a task you may not reach.
+
+     (my.kb/remember
+       {::claim \"transact! Malli-validates every entity value before the tx reaches datahike\"
+        ::source \"src/seon/db/internal.cljs:694\"
+        ::confidence :verified})
+     ;=> {:my.kb/id 1234}
+
+   For a multi-field DOMAIN model (linked refs, component children, your own
+   identity key) design a my.kb.<domain> schema instead — see
+   [[remember-sources!]]. `remember` is the fast path for a single claim."
+  {:malli/schema [:=> [:cat ::remember-request] ::remember-response]}
+  [{::keys [claim source confidence]}]
+  (let [[_ path line] (re-matches #"(.+):(\d+)" source)
+        prov          (if path
+                        {::source-path path ::source-line (js/parseInt line 10)}
+                        {::source-path source})
+        row           (merge {:db/id       "finding"
+                              ::claim      claim
+                              ::confidence confidence
+                              ::verified-at (js/Date.)}
+                            prov)
+        {::db/keys [ok? tempids] :as env} (await (db/transact! {::db/tx-data [row]}))]
+    (if ok?
+      {::id (get tempids "finding")}
+      env)))
 
 (defn retitle-source!
   "UPSERT by identity: the same `:my.kb.source/id` updates in place — no

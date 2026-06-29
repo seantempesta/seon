@@ -297,6 +297,53 @@
                            "McCarthy still authors exactly two"))))))
       done)))
 
+(deftest remember-stores-one-finding-with-parsed-provenance
+  ;; The single-claim fast path: ONE call, no schema design / register! /
+  ;; hand-written transact. It parses "file:line" into the shared
+  ;; ::source-path + ::source-line, stamps ::confidence + ::verified-at,
+  ;; returns the live eid handle, and UPSERTS by claim (re-grade, never a
+  ;; duplicate). A url/no-line source stores path-only.
+  (async done
+    (run-test
+      (fn [conn]
+        (-> (kb/remember {:my.kb/claim "transact! Malli-validates every entity value before the tx reaches datahike"
+                          :my.kb/source "src/seon/db/internal.cljs:694"
+                          :my.kb/confidence :verified})
+            (.then (pinned conn
+                     (fn [{eid :my.kb/id}]
+                       (is (int? eid) "resolves to the live eid handle {:my.kb/id <eid>}")
+                       (let [m (db/pull '[*] eid)]
+                         (is (= "src/seon/db/internal.cljs" (:my.kb/source-path m))
+                             "\"file:line\" parsed into the shared ::source-path")
+                         (is (= 694 (:my.kb/source-line m)) "the line is a parsed INT, not a string")
+                         (is (= :verified (:my.kb/confidence m)) "the required grade is stored")
+                         (is (inst? (:my.kb/verified-at m)) "::verified-at stamped automatically")))))
+            ;; UPSERT — same claim, new grade → one entity, re-graded
+            (.then (pinned conn
+                     (fn [_]
+                       (kb/remember {:my.kb/claim "transact! Malli-validates every entity value before the tx reaches datahike"
+                                     :my.kb/source "src/seon/db/internal.cljs:694"
+                                     :my.kb/confidence :inferred}))))
+            (.then (pinned conn
+                     (fn [{eid :my.kb/id}]
+                       (is (= :inferred (:my.kb/confidence (db/pull '[*] eid)))
+                           "same claim UPSERTS in place — re-graded, not duplicated")
+                       (is (= 1 (count (db/query '[:find ?f :where [?f :my.kb/claim _]])))
+                           "still exactly one finding row"))))
+            ;; a url/no-line source stores path-only (still a valid finding)
+            (.then (pinned conn
+                     (fn [_]
+                       (kb/remember {:my.kb/claim "datahike entities have no kind — an entity IS its attributes plus refs"
+                                     :my.kb/source "https://docs.datomic.com/schema"
+                                     :my.kb/confidence :inferred}))))
+            (.then (pinned conn
+                     (fn [{eid :my.kb/id}]
+                       (let [m (db/pull '[*] eid)]
+                         (is (= "https://docs.datomic.com/schema" (:my.kb/source-path m))
+                             "a line-less source stores path-only")
+                         (is (nil? (:my.kb/source-line m)) "no ::source-line for a line-less source")))))))
+      done)))
+
 ;;; ───────────────────────────────────────────────────────────────────────
 ;;; Inventory — the discovery call lists every attribute NAMESPACE we just
 ;;; stored data under (NOT entity "types" — datahike entities have none).
