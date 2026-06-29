@@ -194,6 +194,34 @@ returned by `denoise_to_step` is for the pod/observer; the renoise math re-deriv
    `canvas_text` with `op:"parse-raw"` (NOT the default `parse`) so the returned `:span`
    offsets index the raw `canvas_text` the `offset_map` was built over.
 
+   **DONE (2026-06-28) — the driver is now WIRED + the math proven OFFLINE (no GPU).**
+   `scratchpad/closed_loop.py` (gitignored) was edited in place (no v2): it now reads
+   `o["canvas_text"]` (NOT `partial_text`) and calls `oracle(canvas, op="parse-raw")` on
+   both the initial parse and the post-renoise re-parse; the returned `:span`s feed
+   straight to `resume_renoise` `renoise_spans` (canvas_text basis == offset_map basis,
+   re-derived at the worker end). Offline proof
+   (`scratchpad/span_align_offline_proof.py`, gitignored): a static fenced canvas
+   `` "```clojure\n(def f [x] (inc x)\n```" `` (33 chars, bad form at chars [11,29)) with
+   a hand-built `offset_map`, run through the REAL `bin/oracle-server` both ways →
+   `span_to_positions`:
+
+   ```
+   BEFORE op=parse      span=[1,20]  -> positions [0,1,2,3,4,5]   ; shifted onto the OPEN
+                                      ; FENCE (0,1,2) AND misses the bad-form tail (6,7)
+   AFTER  op=parse-raw  span=[11,33] -> positions [3,4,5,6,7,8,9] ; covers ALL code tokens
+                                      ; (3..7), opening fence untouched (overlap frees the
+                                      ; harmless trailing close-fence 8,9)
+   ```
+
+   The fence-length shift (10-char ` ```clojure ` + `\n`) is exactly what desyncs the
+   default-parse path; parse-raw removes it. Asserts pass. **Ready to run on GPU:** once
+   the A100 endpoint is back, the owner deploys + `verify_fresh`, then from
+   `tmp/flash-diffgemma` (with `.env` sourced and `DIFFGEMMA_EP` exported) runs the
+   span-aligned `closed_loop.py` from the session scratchpad — it is `verify_fresh`-gated
+   and now feeds `canvas_text`/`parse-raw` spans straight into `resume_renoise`. The proof
+   it should reproduce live: `errors_before > 0` at the stop step, span-targeted renoise,
+   `errors_after < errors_before` with the good (non-span) tokens held.
+
 3. **Piecewise fidelity (MUST MEASURE once live).** Because the oracle parses the
    PIECEWISE `canvas_text` (not the human-readable joint `partial_text`), per-token `▁`/
    space artifacts could make the parser flag structure that a joint decode would not (or
@@ -268,5 +296,3 @@ The single load-bearing line — the whole point of this note — is step 2 pars
 - `tmp/flash-diffgemma/oracle_shim.py` + `bin/oracle-server` — the co-located parse tier.
 - `tmp/flash-diffgemma/gpu_worker.oracle.patch` — the co-location wiring (fix its (B)).
 - [[eval-renoise-worker-build-2026-06-28]] §7 — the original flag this note resolves.
-</content>
-</invoke>
