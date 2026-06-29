@@ -80,6 +80,12 @@ Verification re-drive (`research/toolkit-reachable-verification-2026-06-28.md`):
 
 `research/facet-gaps-drive-2026-06-28.md`: **error-recovery PASS** (10/10, judge 100 — reads the error-as-value envelope, fixes, continues, no spiral) and **planning-resume facet PASS** (judge-resumed-not-replanned 100). The drive surfaced a HIGH-value REPL-error source: **home-ns aliases (`db/`/`message/`/`todo/`/lifecycle verbs) break in agent-authored `my.*` nses** — ~60 `"db/transact! is not defined"` per fn-authoring drive (the context says "create a namespace" but the aliases are home-only). Routed to Core (#73, always-on/error-render/auto-refer) + U skill complement landed (`7b006404`: the verified alias→qualified mapping + named-test pattern in data-oriented-clojure + ui-live-tiles). Verifying `my.tile` composability (the last toolkit piece) closes the toolkit-proof.
 
+## 🏆🏆 TOOLKIT FULLY PROVEN (`d666b437`)
+
+`my.tile` composed 3× (toolkit-calls 6), each `(tile/button …)` wired to a handler the agent DEFINED (`toggle-water!`/`vitamins!`/`walk!`, transacting a flip), set as a derive-from-db tile fn. judge 100, eval-error-rate 0, rendered full. **All three pieces compose: my.data 15×/23×, my.ui 9×/11×, my.tile 3× wired.** The toolkit is end-to-end proven.
+- **Gym-integrity bug found:** `:composed-an-interactive-control` regex is ALIAS-BLIND (`my\.tile/` misses `tile/button` from `[my.tile :as tile]`) → scored a perfect composition 0/14. The robust `toolkit-calls` axis caught it. Fix queued (align with toolkit-calls). Plus a click-dependent predicate that can't pass no-click.
+- **#73 nuance:** alias collision did NOT bite here (home ns has the aliases) — it only bites in NEW agent-authored `my.*` nses. Scopes the Core fix.
+
 **Gate note — the suite noise is TWO things, neither a real regression:**
 1. **Env-coupling FLAKES from my own concurrent runs** (`b5c3a3a4` diagnosis): tests that grep a shared fs dir / touch shared DB state race when the loop runs scorecard + suite at once. `search_test` is now FIXED (pid-scoped hermetic fixtures, 20/20). `index_core_test` is the same class (passes isolated) → #69 to make hermetic. Lesson: aggressive parallelism needs hermetic tests.
 2. **Core's UNCOMMITTED `loop.cljs`/`schedule.cljs` WIP** (`loop-test` 4) — real WIP, theirs to finish.
