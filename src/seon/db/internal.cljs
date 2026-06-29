@@ -864,7 +864,15 @@
    `datahike.db.interface/IDB`. The read-path positional arities use this
    to tell an explicit `db` argument apart from a Datalog `:in` input, so
    the db can be auto-injected from `*conn*` when omitted (the read-side
-   sibling of `conn?`)."
+   sibling of `conn?`).
+
+   The STRICT runtime face of the `:seon.db/db-val` schema (db.cljs):
+   that schema is `'map?` (the only clean pure-data form, and enough at a
+   positional :db slot where the arity already guarantees a db); THIS
+   predicate is `satisfies? IDB`, which additionally rejects a plain
+   request/input map (`map?`-true but not a db) — needed where db and
+   input are disambiguated at runtime. `satisfies?` is not expressible as
+   a clean malli form, so the two faces are intentionally distinct."
   [x]
   (satisfies? dbi/IDB x))
 

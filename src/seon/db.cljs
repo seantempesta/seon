@@ -201,15 +201,29 @@
    [::db   {:optional true} :any]
    [::conn {:optional true} ::conn]])
 
-;; The ONE canonical "a datahike db value" shape — referenced by every
-;; positional :db slot below (shared-shape rule; never inline a map
-;; check). `map?` is a malli DEFAULT-REGISTRY predicate schema — its
-;; form is the bare symbol, reconstructed by registry LOOKUP, never
-;; eval — so it satisfies the pure-data platform law (registered forms
-;; must not embed fn objects; see seon.render.live-tile) while staying
-;; honest about the value being a datahike runtime handle, not a
-;; seon-authored map.
-;; QUOTED — unquoted `map?` would pass the fn OBJECT (the exact poison
+;; The ONE canonical "a datahike db value" SHAPE — registered once and
+;; referenced by every positional :db slot below (shared-shape rule;
+;; never inline a map check). This is the BOUNDARY face of the same
+;; concept the runtime predicate `internal/db-value?` names: the schema
+;; slots use this; the runtime dispatch that must tell a db APART from a
+;; Datalog `:in` input (e.g. `query`'s positional path) uses the strict
+;; `db-value?`. They are deliberately TWO faces of one idea, not two
+;; competing predicates:
+;;
+;;   - This schema is `'map?` — the only form that is BOTH clean
+;;     pure-data (re-readable WITHOUT sci, no embedded fn object — the
+;;     pure-data platform law, see seon.render.live-tile + the
+;;     `registered-forms-are-pure-data` test) AND true for every db
+;;     flavor (DB / FilteredDB / HistoricalDB / AsOfDB / SinceDB are all
+;;     `defrecord`s ⇒ `map?`-true). At these slots the arity has ALREADY
+;;     guaranteed the arg is a db, so a coarse presence check is correct.
+;;   - `db-value?` is `satisfies? IDB` — STRICTER (a plain request/input
+;;     map is `map?`-true but NOT a db). The strict logic CANNOT be
+;;     expressed as a clean pure-data malli form (sci can't resolve our
+;;     ns; `satisfies?`/`contains?` aren't safe on temporal dbs), so it
+;;     lives as the runtime predicate, not the schema.
+;;
+;; QUOTED — unquoted `map?` would embed the fn OBJECT (the exact poison
 ;; the law bans); the quoted symbol is what the registry resolves.
 (schema/register! ::db-val 'map?)
 
