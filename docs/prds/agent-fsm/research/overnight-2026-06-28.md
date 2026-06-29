@@ -76,6 +76,10 @@ Verification re-drive (`research/toolkit-reachable-verification-2026-06-28.md`):
 
 **Central arc CLOSED end-to-end:** built toolkit → drove agents → found unreachable → routed root cause → Core fixed → verified composable + honest. This is the recursive loop delivering a real capability gain.
 
+## Facet-gap drive — error-recovery + planning HANDLED, alias-collision gap found
+
+`research/facet-gaps-drive-2026-06-28.md`: **error-recovery PASS** (10/10, judge 100 — reads the error-as-value envelope, fixes, continues, no spiral) and **planning-resume facet PASS** (judge-resumed-not-replanned 100). The drive surfaced a HIGH-value REPL-error source: **home-ns aliases (`db/`/`message/`/`todo/`/lifecycle verbs) break in agent-authored `my.*` nses** — ~60 `"db/transact! is not defined"` per fn-authoring drive (the context says "create a namespace" but the aliases are home-only). Routed to Core (#73, always-on/error-render/auto-refer) + U skill complement landed (`7b006404`: the verified alias→qualified mapping + named-test pattern in data-oriented-clojure + ui-live-tiles). Verifying `my.tile` composability (the last toolkit piece) closes the toolkit-proof.
+
 **Gate note — the suite noise is TWO things, neither a real regression:**
 1. **Env-coupling FLAKES from my own concurrent runs** (`b5c3a3a4` diagnosis): tests that grep a shared fs dir / touch shared DB state race when the loop runs scorecard + suite at once. `search_test` is now FIXED (pid-scoped hermetic fixtures, 20/20). `index_core_test` is the same class (passes isolated) → #69 to make hermetic. Lesson: aggressive parallelism needs hermetic tests.
 2. **Core's UNCOMMITTED `loop.cljs`/`schedule.cljs` WIP** (`loop-test` 4) — real WIP, theirs to finish.
