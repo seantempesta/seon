@@ -39,7 +39,7 @@
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/agent   :b
    :seon.gym.predicate/axis    :consults-findings
-   :seon.gym.predicate/pattern "seon\\.db/(query|pull|entity|store-inventory)"}
+   :seon.gym.predicate/pattern "(?:seon\\.)?db/(query|pull|entity|store-inventory)"}
   ;; PRECISION+: B queried the relevant (contact) kind at least once.
   {:seon.gym.predicate/id      :b-queried-the-relevant-kind
    :seon.gym.predicate/kind    :eval-count-matching

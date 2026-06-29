@@ -81,7 +81,7 @@
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/agent   :b
    :seon.gym.predicate/axis    :consults-findings
-   :seon.gym.predicate/pattern "seon\\.db/(query|pull|entity|store-inventory)"}
+   :seon.gym.predicate/pattern "(?:seon\\.)?db/(query|pull|entity|store-inventory)"}
   ;; "B sent a message onward" — from B with hops>0 (replies to the
   ;; user carry waking-hops+1; the turn-log self-folds carry 0). NOT
   ;; the user-entity join: the datahike-cljs engine mis-binds queries

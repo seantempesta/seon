@@ -97,7 +97,7 @@
  [{:seon.gym.predicate/id      :first-eval-consults-stored-findings
    :seon.gym.predicate/kind    :first-eval-matches
    :seon.gym.predicate/axis    :consults-findings
-   :seon.gym.predicate/pattern "seon\\.db/(query|pull|entity|store-inventory)|^(?![\\s\\S]*(seon\\.agent\\.search/grep|seon\\.agent\\.fs/read-file))"}
+   :seon.gym.predicate/pattern "(?:seon\\.)?db/(query|pull|entity|store-inventory)|^(?![\\s\\S]*(seon\\.agent\\.search/grep|seon\\.agent\\.fs/read-file))"}
   ;; #26 salience axis, split honest (gym-upgrade U1): "the seeded
   ;; claim TEXT rendered in the prompt the agent acted on" (context
   ;; worked) scores SEPARATELY from "the first eval consulted it"
