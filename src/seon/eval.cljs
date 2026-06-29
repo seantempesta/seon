@@ -1286,6 +1286,35 @@
        (str/join "\n            " (map pr-str home-ns-require-specs))
        "))"))
 
+(def authored-ns-require-nses
+  "The [[home-ns-require-specs]] NAMESPACES whose short alias an agent's
+   AUTHORED (non-home) namespace also carries — the data + verb namespaces
+   every authored ns reaches through (`db/`, `todo/`, `message/`, `schema/`).
+   A SELECTION over [[home-ns-require-specs]] (the single source of the
+   alias↔ns mapping) — the alias names are never re-spelled here. Excludes
+   `seon.agent` (the home orchestration alias) and the lifecycle `:refer`
+   verbs (home-ns only). The `my.*` toolkit stays FULL-QUALIFIED (`my.ui/…`),
+   no alias."
+  '#{seon.db seon.agent.todo seon.agent.message seon.schema})
+
+(def authored-ns-require-specs
+  "The `(:require …)` specs merged into an agent-authored `(ns …)` form
+   ([[augment-ns-source]]) so its short aliases resolve because they are
+   GENUINELY required (no magic) — the `:as` specs of [[home-ns-require-specs]]
+   selected by [[authored-ns-require-nses]]. Derived, never a second hardcoded
+   copy."
+  (filterv (fn [spec]
+             (and (vector? spec)
+                  (= :as (second spec))
+                  (contains? authored-ns-require-nses (first spec))))
+           home-ns-require-specs))
+
+(defn- authored-ns-alias-names
+  "Comma-joined `:as` alias names from [[authored-ns-require-specs]]
+   (e.g. \"db, todo, message, schema\") — for the real-require narration note."
+  []
+  (str/join ", " (map (fn [spec] (name (nth spec 2))) authored-ns-require-specs)))
+
 (defn ^:async setup-agent-ns!
   "Create + initialize the agent's home namespace. Returns the agent-ns
    symbol (same as the input). Idempotent.
@@ -2508,6 +2537,82 @@
       {:seon.eval/parity :value
        :seon.eval/value  current-ns})))
 
+(defn- ns-spec-opts
+  "The `{:as alias :refer [names…]}` option map of a `(:require …)` spec.
+   A spec is a bare ns symbol (no opts → nil) or `[ns & opts]` where opts
+   are keyword/value pairs. Returns nil when there are no (or malformed,
+   odd-count) opts."
+  [spec]
+  (when (and (vector? spec) (even? (count (rest spec))))
+    (apply hash-map (rest spec))))
+
+(defn augment-ns-source
+  "Real requires (#73/#56): given an agent-eval'd SOURCE that is a single
+   `(ns NAME …)` form for an agent-authored namespace, return the source
+   rewritten so NAME's `:require` clause carries the canonical short aliases
+   ([[authored-ns-require-specs]]) — `db`→seon.db, `todo`→seon.agent.todo,
+   `message`→seon.agent.message, `schema`→seon.schema. NO magic injection: the
+   aliases resolve because they are REALLY `:require`d, in the source the agent
+   sees, eval'd, and persisted as `:seon.ns/source`. The `my.*` toolkit stays
+   FULL-QUALIFIED (`my.ui/…`) — it is not aliased here.
+
+   The footgun this closes: those aliases are established ONLY in the agent's
+   home ns ([[setup-agent-ns!]]). When the agent authors a NEW `my.*` ns and a
+   fn there reaches for the `db/`/`message/`/`todo/` aliases it SEES in its
+   home-ns workspace, they don't resolve (`db/transact! is not defined`).
+   Writing the real requires into every agent-authored ns makes agent code
+   portable across namespaces — and makes the stored `:seon.ns/source`
+   self-consistent for resume replay (the re-eval'd `(ns …)` form carries the
+   deps its fns need). Full-qualification (`seon.db/query`) is the
+   always-correct floor; this just makes the short alias work too.
+
+   Only canonical specs whose ns/alias the agent did NOT already claim are
+   added (the agent's own requires win; no duplicate-alias analyzer
+   error). Returns the original source UNCHANGED (identical?) when it isn't
+   a single agent `(ns …)` form, when NAME is transient scaffolding, or
+   when nothing needs adding — so a complete home-ns form, or a re-eval, is
+   a no-op and its formatting is preserved."
+  {:malli/schema [:=> [:catn [::source [:maybe :string]]] [:maybe :string]]}
+  [source]
+  (let [forms (read-all-forms source)
+        form  (when (= 1 (count forms)) (first forms))]
+    (if-not (and (seq? form)
+                 (= 'ns (first form))
+                 (symbol? (second form))
+                 (not (contains? transient-ns-syms (second form))))
+      source
+      (let [name-sym (second form)
+            clauses  (drop 2 form)
+            req      (some (fn [c] (when (and (seq? c) (= :require (first c))) c))
+                           clauses)
+            specs    (vec (rest req))
+            req-nses (set (map (fn [s] (if (vector? s) (first s) s)) specs))
+            aliases  (set (keep #(:as (ns-spec-opts %)) specs))
+            refers   (set (mapcat #(:refer (ns-spec-opts %)) specs))
+            added    (reduce
+                       (fn [acc spec]
+                         (let [cns  (first spec)
+                               opts (ns-spec-opts spec)]
+                           (cond
+                             (contains? req-nses cns) acc
+                             (:as opts)    (if (contains? aliases (:as opts))
+                                             acc
+                                             (conj acc spec))
+                             (:refer opts) (let [missing (vec (remove refers
+                                                                     (:refer opts)))]
+                                             (if (seq missing)
+                                               (conj acc [cns :refer missing])
+                                               acc))
+                             :else         acc)))
+                       []
+                       authored-ns-require-specs)]
+        (if (empty? added)
+          source
+          (let [new-req     (apply list :require (concat specs added))
+                other       (remove (fn [c] (= c req)) clauses)
+                new-clauses (concat other [new-req])]
+            (pr-str (apply list 'ns name-sym new-clauses))))))))
+
 (defn- failed-def-syms
   "The symbols a `(def …)`/`(defn …)`/`(defn- …)` form would DEFINE,
    given its source string. Used by the false-confidence guard (A.4):
@@ -2579,7 +2684,20 @@
      :source          — the source string to eval (repaired or original)."
   [{:keys [compile-state eval-id turn-id current-ns n-ok n-fail
            failed-defs outer-test-run? narration source]}]
-  (let [at          (js/Date.)
+  (let [;; Real requires (#73/#56): if this is a NEW agent-authored `(ns …)`
+        ;; form, write the canonical short aliases into its REAL `:require`
+        ;; clause so `db/`/`todo/`/`message/`/`schema/` resolve in the new ns
+        ;; exactly as they do in the agent's home ns — no magic injection. A
+        ;; no-op (identical source) for non-ns forms / a complete home ns.
+        aug-source  (augment-ns-source source)
+        augmented?  (not (identical? aug-source source))
+        source      aug-source
+        narration   (if augmented?
+                      (str (when (seq narration) (str narration "\n"))
+                           "; added (:require …) for " (authored-ns-alias-names)
+                           " so those aliases resolve in this ns")
+                      narration)
+        at          (js/Date.)
         start-ms    (.now js/Date)
         ;; A.4 false-confidence guard: BEFORE eval, if this NON-defining
         ;; form references a symbol whose def failed earlier this batch,

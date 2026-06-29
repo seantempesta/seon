@@ -179,27 +179,33 @@ parallel `foo-v2` leaves two versions, doubles the bug surface, and its
 explanatory comment outlives everyone who knew the reason. Same as "register the
 shape once, reference everywhere": duplication guarantees drift.
 
-### Home-ns aliases are HOME-ONLY — fully-qualify in a `my.*` ns you create
+### In a `my.*` ns you author, `:require` the aliases you use
 
-The bare `db/`, `message/`, `todo/`, `schema/`, `agent/` aliases and the bare
-verbs `wait` `complete` `pause` `resume` `terminate` are refer'd **only in your
-agent's HOME ns**. The moment you author a fn in a `my.<domain>` ns YOU create
-("build your environment"), those short names are **"not defined"** there — you
-must FULLY-QUALIFY:
+The short aliases `db/`, `todo/`, `message/`, `schema/` are wired into your
+agent's HOME ns. When you author a fn in a `my.<domain>` ns you create ("build
+your environment"), give that ns a real `(ns … (:require …))` head carrying the
+same aliases — then `db/query` etc. resolve there because they are genuinely
+required, not by magic:
 
-| Home-ns short name | Fully-qualified (works from ANY ns) |
-|---|---|
-| `db/transact!` `db/query` `db/pull` | `seon.db/…` |
-| `message/user` | `seon.agent.message/…` |
-| `todo/add!` `todo/…` | `seon.agent.todo/…` |
-| `schema/register!` | `seon.schema/…` |
-| `agent/…` | `seon.agent/…` |
-| `wait` `complete` `pause` `resume` `terminate` | `seon.agent.lifecycle/…` |
+```clojure
+(ns my.expense
+  (:require [seon.db :as db]
+            [seon.agent.todo :as todo]
+            [seon.agent.message :as message]
+            [seon.schema :as schema]))
 
-So a tile/data/handler fn in `my.expense` calls `seon.db/transact!`, not
-`db/transact!`. (A live drive hit ~60 `"db/transact! is not defined"` errors from
-exactly this.) The fix is to qualify, not to re-`require` aliases into every
-`my.*` ns.
+(defn total [xs] (reduce + xs))
+(schema/register! ::amount :int)
+```
+
+**Full-qualification is the always-correct floor** — `seon.db/transact!`,
+`seon.agent.message/user`, `my.ui/status-line` work from ANY ns with no require.
+Use it whenever you skip the require, and ALWAYS for the `my.*` toolkit
+(`my.ui/…`, `my.tile/…`, `my.data/…`, `my.kb/…`) — those are not aliased.
+
+The lifecycle verbs `wait` `complete` `pause` `resume` `terminate` are refer'd in
+your HOME ns only; call them from there, or fully-qualify
+`seon.agent.lifecycle/complete`. Do NOT switch namespaces to reach a verb.
 
 ### Write a real test ns — `cljs.test/deftest`, not inline `assert`
 
