@@ -1794,7 +1794,14 @@
       :else
       (let [prev-conn    db/*conn*
             prev-fs      @sfs-int/!config
-            keys-before  (schema/current-keys)
+            ;; FULL registry snapshot — not just the key SET. Restoring the
+            ;; whole map in `finally` reverts both keys the run MINTED *and*
+            ;; pre-existing keys whose VALUE a scenario re-registered (a
+            ;; scenario narrowing :seon.agent.message/to poisoned every later
+            ;; paid scenario at message-land time — the key-diff reap missed
+            ;; the mutated value). Strictly more correct than the diff, and
+            ;; simpler.
+            schemas-before @schema/*schemas
             ;; UNIFIED config seam: steer SEON_PROFILE/SEON_CONFIG before
             ;; the seed + agent boot so boot-seed!'s manifest read and
             ;; create!'s resolve-loadout pick up the run's chosen loadout.
@@ -1969,17 +1976,18 @@
               card))
           (finally
             ;; Restore the root conn + fs capability config + debug-capture
-            ;; knob + drop every schema key minted during the run (scenario
-            ;; registrations AND agent-eval register!s) so one scenario can't
+            ;; knob + the FULL schema registry snapshot so one scenario can't
             ;; leak into the next (or into non-gym tests sharing the process).
+            ;; Resetting to the captured map reverts BOTH keys the run minted
+            ;; (scenario registrations AND agent-eval register!s) AND any
+            ;; pre-existing key whose value a scenario re-registered — the
+            ;; latter is what a key-only diff-reap silently left mutated.
             (set! db/*conn* prev-conn)
             (reset! sfs-int/!config prev-fs)
             (debug/set-override! :env)
             (env-set! "SEON_PROFILE" (first prev-env))
             (env-set! "SEON_CONFIG" (second prev-env))
-            (let [minted (remove keys-before (schema/current-keys))]
-              (when (seq minted)
-                (swap! schema/*schemas #(apply dissoc % minted))))))))))
+            (reset! schema/*schemas schemas-before)))))))
 
 ;; ===========================================================================
 ;; Context-size MEASUREMENT — the context-improvement loop's free probe.
