@@ -297,35 +297,28 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; Default detail is :signature — CONCISE by default (the #42-family trim for
-;; the on-demand verb): the API surface (header + arglist + one-line doc),
-;; NOT the ns source or the fn body.
+;; Default detail is :full — signatures are retired. The verb returns the ns's
+;; WHOLE real source (here test.parent carries its full file source), unclipped.
 ;; ---------------------------------------------------------------------------
 
-(deftest default-detail-is-signature-not-full-body
+(deftest default-detail-is-full
   (async done
     (-> (with-seeded-conn
           (fn [conn]
             (let [db   @conn
                   text (:seon.render/text
-                         ;; NO :seon.render/detail — exercises the default.
+                         ;; NO :seon.render/detail — exercises the default (:full).
                          (agent/render-namespace
                            {:seon.db/db db :seon.ns/name :test.parent
                             :seon.render/depth 0}))]
-              (is (str/includes? text "(signatures)")
-                  "default render is the (signatures) manifest view")
-              (is (str/includes? text "[fn test.parent/greet]")
-                  "the public verb header is shown")
-              (is (str/includes? text "(test.parent/greet [x])")
-                  "the verb arglist (signature) is shown")
-              (is (str/includes? text "Greets x")
-                  "the one-line doc rides the signature")
-              ;; …but NOT the ns source head nor the fn BODY (that's the cost
-              ;; we're cutting — full body is opt-in via :detail :full).
-              (is (not (str/includes? text "(ns test.parent"))
-                  "the ns SOURCE is NOT dumped by default")
-              (is (not (str/includes? text "(str \"hi \""))
-                  "the fn BODY is elided by default"))))
+              (is (not (str/includes? text "(signatures)"))
+                  "signatures are retired — no manifest view")
+              (is (str/includes? text "(ns test.parent")
+                  "the ns SOURCE head is shown by default (full)")
+              (is (str/includes? text "(defn greet")
+                  "the fn definition is shown by default (full)")
+              (is (str/includes? text "(str \"hi \"")
+                  "the fn BODY is shown by default (full, no clipping)"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -384,17 +377,17 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; Render is INERT — a rendered signature must NEVER be a bare callable form.
-;; The signature header `(ns/fn [args])` is DOCUMENTATION; rendered as a `;`
-;; prose comment so that if an agent echoes a rendered namespace back into its
-;; reply, `seon.repl.internal/parse-forms` SKIPS it instead of EXECUTING it.
-;; Regression for #84: rendering `seon.schema` once surfaced
-;; `(seon.schema/clear-all! [])` as a bare form which, when re-read from the
-;; reply, wiped the live schema registry. The guard is GENERAL — no fn name is
-;; special-cased; it asserts the render emits ZERO callable forms.
+;; The fn HEADER is INERT — the `; [fn …]  (ns/fn [args])` documentation line is
+;; a `;` prose comment, so if an agent echoes a rendered block back into its
+;; reply, `seon.repl.internal/parse-forms` SKIPS the bare arglist call instead
+;; of EXECUTING it. Regression for #84: a rendered `(seon.schema/clear-all! [])`
+;; header once wiped the live registry when re-read from the reply. The real
+;; `(defn …)` SOURCE below it IS a form (re-eval just redefines — harmless);
+;; the guard is that the HEADER arglist is never a parsed callable form.
+;; Exercised via the member-drill (the fn-block-ai path that emits the header).
 ;; ---------------------------------------------------------------------------
 
-(deftest signature-render-emits-no-executable-forms
+(deftest rendered-fn-header-is-inert-documentation
   (async done
     (-> (with-seeded-conn
           (fn [conn]
@@ -402,16 +395,18 @@
                   text  (:seon.render/text
                           (agent/render-namespace
                             {:seon.db/db db :seon.ns/name :test.parent
-                             :seon.render/depth 0
-                             :seon.render/detail :signature}))
+                             :seon.ns/member "greet"}))
                   ;; the parser the agent loop runs over its OWN reply — the
                   ;; exact path that re-executed echoed render text in #84.
                   forms (->> (repl-internal/parse-forms text)
                              (filter #(= :form (:kind %))))]
               (is (str/includes? text "(test.parent/greet [x])")
-                  "the signature arglist shape is still SHOWN to the agent")
-              (is (zero? (count forms))
-                  (str "a signature render must yield NO callable forms; got "
-                       (mapv :source forms))))))
+                  "the fn header arglist is still SHOWN to the agent")
+              (is (not-any? #(str/includes? (str (:source %)) "(test.parent/greet [x])")
+                            forms)
+                  "the header arglist is a `;` comment — never a parsed callable form")
+              (is (some #(str/includes? (str (:source %)) "(defn greet")
+                        forms)
+                  "the real (defn) source IS a form — re-eval redefines, harmless"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

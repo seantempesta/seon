@@ -320,34 +320,31 @@
                           "shows seon.db WITH its :as db alias")
                       (is (str/includes? txt ":refer [wait complete pause resume terminate]")
                           "shows the refer'd lifecycle verbs")
-                      ;; and the messaging verb SIGNATURES are surfaced (arglist,
-                      ;; not just the alias) so the verb is discoverable.
+                      ;; and the messaging verb is surfaced FULL (config :always)
+                      ;; — its header arglist shows alongside the alias.
                       (is (str/includes? txt "(seon.agent.message/user [content])")
-                          "surfaces the message/user signature with its arglist")
+                          "surfaces the message/user verb with its arglist")
                       (is (str/includes? txt "nothing defined here yet")
                           "carries the empty-workspace note")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
-(deftest required-my-helper-and-live-db-override-render-full
-  ;; The two net-new selection paths after signatures were retired:
-  ;;   (1) a my.* helper the CURRENT ns `:require`s renders FULL (reachability —
-  ;;       writing a real require pulls the helper into view, self-healing on
-  ;;       the `:seon.ns/requires` edges);
-  ;;   (2) the per-agent LIVE-DB override (`:seon.agent.ctx/render-namespaces`)
-  ;;       PINS any ns into the rendered set; retract → it vanishes (reactive,
-  ;;       derive-at-render). A my.* ns that is neither required nor pinned sits
-  ;;       in the navigable long tail until pinned.
+(deftest required-my-helper-renders-full
+  ;; Reachability after signatures were retired: a my.* helper the CURRENT ns
+  ;; `:require`s renders FULL — writing a real `(:require [my.helper …])` pulls
+  ;; the helper into view, self-healing on the `:seon.ns/requires` edges. A my.*
+  ;; ns that is NOT required (and not in :always / pinned) sits in the navigable
+  ;; long tail — DROPPED. (No agent entity is seeded: current-ns falls back to
+  ;; the home ns `my.agent.ov` for id "ov".)
   (async done
     (-> (with-conn
           (fn [_conn]
             (-> (db/transact!
                   {:seon.db/tx-data
-                   [{:seon.agent/id "ov"}
-                    ;; the current home ns requires a my.* helper
+                   [;; the current home ns requires a my.* helper
                     {:seon.ns/name :my.agent.ov :seon.ns/requires [:my.helper]}
                     {:seon.ns/name :my.helper :seon.ns/source "(ns my.helper)\n(def h 1)"}
-                    ;; a my.* ns NOT reachable (long tail) until pinned
+                    ;; a my.* ns NOT reachable (long tail)
                     {:seon.ns/name :my.stash :seon.ns/source "(ns my.stash)\n(def s 9)"}]})
                 (.then
                   (fn [_]
@@ -355,34 +352,56 @@
                                 {:seon.db/db @db/*conn* :seon.agent/id "ov"})]
                       (is (str/includes? txt "(def h 1)")
                           "a my.* helper REQUIRED by the current ns renders FULL")
-                      (is (not (str/includes? txt "my.stash"))
-                          "a non-reachable my.* ns sits in the long tail (dropped)"))))
-                ;; PIN my.stash via the per-agent live-DB override
+                      (is (not (str/includes? txt "(def s 9)"))
+                          "a non-required my.* ns sits in the long tail (dropped)")))))))
+        (.then (fn [] (done)))
+        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+
+(deftest live-db-override-pins-and-self-heals
+  ;; The per-agent LIVE-DB override (`:seon.agent.ctx/render-namespaces`) PINS
+  ;; a normally-DROPPED ns into the rendered set; retract → it vanishes
+  ;; (reactive, derive-at-render, no stored projection). Uses the root agent
+  ;; (`:seon.agent/id` is a strict id schema — "root" is the one literal id).
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (-> (db/transact!
+                  {:seon.db/tx-data
+                   [{:seon.agent/id "root"}
+                    ;; a framework ns — DROPPED by default (not :always/required)
+                    {:seon.ns/name :seon.frobx :seon.ns/source "(ns seon.frobx)\n(def z 7)"}]})
+                (.then
+                  (fn [_]
+                    (let [txt (ctx-namespaces/namespaces-block
+                                {:seon.db/db @db/*conn* :seon.agent/id "root"})]
+                      (is (not (str/includes? txt "(def z 7)"))
+                          "a framework ns is DROPPED by default (not pinned)"))))
+                ;; PIN seon.frobx via the override
                 (.then
                   (fn [_]
                     (db/transact!
                       {:seon.db/tx-data
-                       [{:seon.agent/id "ov"
-                         :seon.agent.ctx/render-namespaces [:my.stash]}]})))
+                       [{:seon.agent/id "root"
+                         :seon.agent.ctx/render-namespaces [:seon.frobx]}]})))
                 (.then
                   (fn [_]
                     (let [txt (ctx-namespaces/namespaces-block
-                                {:seon.db/db @db/*conn* :seon.agent/id "ov"})]
-                      (is (str/includes? txt "(def s 9)")
-                          "the live-DB override PINS my.stash into the rendered set"))))
-                ;; retract the override datom → my.stash vanishes (self-healing)
+                                {:seon.db/db @db/*conn* :seon.agent/id "root"})]
+                      (is (str/includes? txt "(def z 7)")
+                          "the live-DB override PINS a normally-dropped ns"))))
+                ;; retract the override datom → seon.frobx vanishes (self-healing)
                 (.then
                   (fn [_]
                     (db/transact!
                       {:seon.db/tx-data
-                       [[:db/retract [:seon.agent/id "ov"]
-                         :seon.agent.ctx/render-namespaces :my.stash]]})))
+                       [[:db/retract [:seon.agent/id "root"]
+                         :seon.agent.ctx/render-namespaces :seon.frobx]]})))
                 (.then
                   (fn [_]
                     (let [txt (ctx-namespaces/namespaces-block
-                                {:seon.db/db @db/*conn* :seon.agent/id "ov"})]
-                      (is (not (str/includes? txt "my.stash"))
-                          "retracting the override drops my.stash (reactive, self-healing)")))))))
+                                {:seon.db/db @db/*conn* :seon.agent/id "root"})]
+                      (is (not (str/includes? txt "(def z 7)"))
+                          "retracting the override drops it again (self-healing)")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
@@ -670,10 +689,10 @@
       (-> (with-conn
             (fn [_conn]
               (-> (agent/create! {:seon.agent/id "AGTctxtest00d1"})
-                  ;; a my.* ns → rendered FULL as a `;; ── namespace x ──`
-                  ;; block in the STABLE half (a non-whitelisted framework ns
-                  ;; would be dropped entirely).
-                  (.then (fn [_] (transact-full-ns! "my.client" "(def x 1)")))
+                  ;; an :always my.* ns (my.kb) → rendered FULL as a
+                  ;; `;;; ┌─ namespace x ─` block in the STABLE half (a
+                  ;; non-reachable / framework ns would be dropped entirely).
+                  (.then (fn [_] (transact-full-ns! "my.kb" "(def x 1)")))
                   (.then
                     (fn [_]
                       (let [a1 (assemble "AGTctxtest00d1")
@@ -685,7 +704,7 @@
                         (is (not (str/blank? (:seon.render/stable-text a1)))
                             "stable block is non-blank (system + namespaces)")
                         (is (str/includes? (:seon.render/stable-text a1)
-                                           "my.client")
+                                           "my.kb")
                             "the namespaces body lives in the STABLE half")
                         (is (not (str/includes? (:seon.render/stable-text a1)
                                                 ctx/stable-boundary))
