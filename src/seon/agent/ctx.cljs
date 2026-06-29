@@ -880,9 +880,11 @@
 
 ;; ------------------------------------------------------------
 ;; Section fns (v1.md §5.2). Each takes :seon.render/system-input
-;; {:seon.db/db :seon.agent/id} optionally with :seon.agent.ctx/block
-;; (the :seon.agent.ctx entity that named this section, so the fn can read
-;; per-section overrides like :seon.agent/n). Returns a string;
+;; {:seon.db/db :seon.agent/id}; the render engine ALSO injects this
+;; section's own block map as :seon.render/node (NOT :seon.agent.ctx/block —
+;; reading that key is a dead read, the engine never sets it; see
+;; seon.render/render), so the fn reads per-section overrides like
+;; :seon.warn/ns off :seon.render/node. Returns a string;
 ;; empty string = section suppressed by the composer.
 ;; ------------------------------------------------------------
 
