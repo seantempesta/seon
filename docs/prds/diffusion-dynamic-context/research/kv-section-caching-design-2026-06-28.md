@@ -420,6 +420,45 @@ Phase-3 risk we are deliberately not taking yet.
 > owner asserts it (runbook): request-2 `sequences == ` request-1 full re-encode for a
 > fixed seed, then measures the prefill-time drop.
 
+### 6a. CPU PROXY — the GENERAL mechanism is PROVEN on CPU ($0, no A100, 2026-06-29)
+
+The general transformers-API half of that assumption is testable on ANY tiny CPU
+causal LM — and now is. `tmp/flash-diffgemma/test_kv_reuse_cpu_proxy.py` (gitignored,
+`tmp/`; gpt2 fp32 on CPU, `torch 2.12.1`, `transformers 5.12.1`) builds a 2-segment
+input `[A|B]` and runs the EXACT moves `_kv_reuse_generate` makes — `crop`,
+`past_key_values=` threading, SUFFIX-not-full `input_ids[:, L:]` — importing the
+worker's OWN `longest_prefix_hit` / `KVPrefixCache` (torch-free) so it tests the
+SHIPPED walk against a real cropped `DynamicCache`, not a reimplementation. Measured,
+reproducible (atol=1e-5, rtol=1e-4):
+
+| Claim | Result | max abs diff |
+|---|---|---|
+| **(1) logits parity** — `logits_full[:, LA:]` vs suffix-fed reuse | `allclose=True` | **1.221e-04** |
+| **(2) crop → reuse** vs a full `[A\|B]` encode then crop-to-`LA` | `allclose=True`, **bit-exact** | **0.000e+00** |
+| (2) `crop()` returns `None` (in-place), slices seq_len 32→17, no-op when `max_len ≥ seq_len` | confirmed | — |
+| **(3) greedy token-id parity** (teacher-forced argmax over the B positions) | **15/15 identical** | 0 |
+| **(4) worker walk** — `longest_prefix_hit` 1 / 0 (edited block) / −1 (miss); real cropped-cache reuse vs full | `True`, **bit-exact** | **0.000e+00** |
+
+**Verdict: the general crop + `past_key_values` + suffix-forward mechanism is SOUND**
+— on a uniform full-attention cache (the easy case) it reproduces a from-scratch
+prefill. Note (2): cropping a full `[A|B]` cache to `LA` and re-feeding it is
+**0.000e+00** (literally the same K/V tensors the full forward computed); the 1.221e-04
+on path (1) is only the fp32 reassociation of encoding `A` SEPARATELY vs as a prefix —
+still well inside tolerance. If reuse had diverged even here the worker would be
+fundamentally broken; it does not.
+
+**What this DE-RISKS:** the transformers-API correctness #5 leans on (the cites in §6
+1–3) is no longer "the owner's GPU assertion" — it's proven. **What STILL needs the
+A100:** only the DiffusionGemma-specific **HYBRID (sliding+full) cache** bit-exactness
+— i.e. that the `cache_implementation="dynamic_full"` mitigation (§6 #2) actually
+yields a uniform full cache whose `crop`/`get_seq_length` are bit-exact per layer on
+the real model. gpt2 is uniform-full by construction, so it cannot exercise the
+sliding-window rolling-buffer hazard; that one remains the owner's two-request seed
+assertion (runbook). (ENV note: gpt2 `model.generate()` / long incremental-forward
+loops SIGBUS-crash on this macOS torch-CPU build — unrelated to KV correctness; the
+test runs `torch.set_num_threads(1)` and uses single stable forwards + teacher-forced
+argmax instead.)
+
 The keying half is built (`seon.agent.ctx/block-chain-keys`). It is a PURE fn of
 (`::blocks`, `:seon.agent/id`): given the turn's `:seon.render/text`-bearing context
 blocks in prompt order (static→volatile, the `default-seed-blocks` ordering) it returns
