@@ -16,6 +16,9 @@
   (:require
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
+    [clojure.test.check :as tc]
+    [clojure.test.check.generators :as gen]
+    [clojure.test.check.properties :as prop :include-macros true]
     [datahike.api :as d]
     [seon.agent :as agent]
     [seon.agent.inspect :as inspect]
@@ -1365,6 +1368,96 @@
     ;; same agent again ⇒ back to identical (salt is the only difference)
     (is (= a (chain static-prefix "agent-A"))
         "same agent ⇒ identical (salt is deterministic, not random)")))
+
+;;; ─────────────────────────────────────────────────────────────────────
+;;; Block-chain KV keys — GENERATIVE properties. The three example tests
+;;; above pin specific fixtures; these run the SAME four invariants over
+;;; randomly generated block-text vectors + agent-ids (100 cases each,
+;;; shrinking to the smallest counterexample on failure). PURE fn → no
+;;; conn, no async, plain test.check.
+;;; ─────────────────────────────────────────────────────────────────────
+
+(def ^:private gen-block-text
+  "A byte-stable rendered block text (`;`-prose, may be blank)."
+  (gen/fmap #(str "; " %) gen/string-ascii))
+
+(def ^:private gen-block
+  (gen/fmap (fn [[nm t]] {:seon.agent.ctx/name nm :seon.render/text t})
+            (gen/tuple (gen/elements [:soul :shared-instructions :skills-catalog
+                                      :namespaces :inventory :warnings :transcript])
+                       gen-block-text)))
+
+(def ^:private gen-blocks (gen/vector gen-block 1 8))
+(def ^:private gen-agent-id (gen/fmap #(str "agent-" %) gen/string-alphanumeric))
+
+(defn- check
+  "Run a test.check property `n` times; assert it held, surfacing the shrunk
+   counterexample on failure (a falsification IS a real bug in block-chain-keys
+   — report it, never weaken the property)."
+  [n property]
+  (let [{:keys [result shrunk] :as res} (tc/quick-check n property)]
+    (is (true? result)
+        (str "block-chain-keys property falsified — shrunk: "
+             (pr-str (:smallest shrunk)) " | " (pr-str res)))))
+
+;; Invariant 1: identical (blocks, agent) ⇒ identical key vectors; one
+;; 64-hex key per block.
+(deftest block-chain-keys-prop-deterministic
+  (check 100
+    (prop/for-all [blocks gen-blocks id gen-agent-id]
+      (let [a (chain blocks id)
+            b (chain blocks id)]
+        (and (= a b)
+             (= (count blocks) (count a))
+             (every? #(re-matches #"[0-9a-f]{64}" %) a))))))
+
+;; Invariant 2: two vectors sharing a generated PREFIX share exactly that
+;; prefix of keys and diverge at the first differing block (and, by the
+;; chain property, at every block after it).
+(deftest block-chain-keys-prop-shared-prefix
+  (check 100
+    (prop/for-all [prefix  gen-blocks
+                   nb-text gen-block-text
+                   tail1   (gen/vector gen-block 0 4)
+                   tail2   (gen/vector gen-block 0 4)
+                   id      gen-agent-id]
+      (let [d   (count prefix)
+            nb1 {:seon.agent.ctx/name :divergent :seon.render/text nb-text}
+            nb2 {:seon.agent.ctx/name :divergent :seon.render/text (str nb-text "∆")}
+            v1  (into (conj prefix nb1) tail1)
+            v2  (into (conj prefix nb2) tail2)
+            k1  (chain v1 id)
+            k2  (chain v2 id)]
+        (and (= (subvec k1 0 d) (subvec k2 0 d))         ; shared prefix keys identical
+             (not= (nth k1 d) (nth k2 d))                ; diverge at the first changed block
+             ;; once a parent differs, every downstream key differs too
+             (every? true? (map not= (subvec k1 d) (subvec k2 d))))))))
+
+;; Invariant 3: a different :seon.agent/id ⇒ ALL keys differ (the salt rides
+;; the head block and scopes the whole chain).
+(deftest block-chain-keys-prop-salt-scopes
+  (check 100
+    (prop/for-all [blocks gen-blocks
+                   id1    gen-agent-id
+                   suffix (gen/not-empty gen/string-alphanumeric)]
+      (let [id2 (str id1 suffix)                          ; guaranteed distinct id
+            k1  (chain blocks id1)
+            k2  (chain blocks id2)]
+        (and (= (count k1) (count k2))
+             (every? true? (map not= k1 k2)))))))
+
+;; Invariant 4: a single edit to block i changes keys i..n and leaves
+;; 0..i-1 intact.
+(deftest block-chain-keys-prop-single-edit
+  (check 100
+    (prop/for-all [blocks gen-blocks id gen-agent-id idx gen/nat]
+      (let [i       (mod idx (count blocks))
+            old     (get-in blocks [i :seon.render/text])
+            blocks' (assoc-in blocks [i :seon.render/text] (str old "∆EDIT"))
+            k       (chain blocks id)
+            k'      (chain blocks' id)]
+        (and (= (subvec k 0 i) (subvec k' 0 i))           ; 0..i-1 untouched
+             (every? true? (map not= (subvec k i) (subvec k' i)))))))) ; i..n changed
 
 ;; ── cite-card — the anti-fabrication surface ─────────────────────────────
 ;; A pure derivation over OK eval entity maps: surface the agent's last few

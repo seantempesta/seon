@@ -15,6 +15,10 @@
      (cljs.test/run-tests 'seon.diffusion.retrieval-test)"
   (:require
     [cljs.test :as t :refer [deftest is testing async]]
+    [clojure.string :as str]
+    [clojure.test.check :as tc]
+    [clojure.test.check.generators :as gen]
+    [clojure.test.check.properties :as prop :include-macros true]
     [datahike.api :as d]
     [seon.diffusion.retrieval :as ret]))
 
@@ -47,10 +51,10 @@
     :seon.fn/doc "Persist a note map."
     :seon.fn/source "(defn save-note! [m] …)"}])
 
-(defn- fresh-db
-  "Open a fresh :memory datahike conn, install the fn schema + rows, and
+(defn- fresh-db-rows
+  "Open a fresh :memory datahike conn, install the fn schema + `rows`, and
    resolve to the db VALUE."
-  []
+  [rows]
   (let [cfg {:store {:backend :memory :id (random-uuid)}
              :schema-flexibility :write
              :keep-history? false}]
@@ -58,8 +62,13 @@
         (.then (fn [_] (d/connect cfg {:sync? false})))
         (.then (fn [conn]
                  (-> (d/transact! conn fn-schema)
-                     (.then (fn [_] (d/transact! conn fn-rows)))
+                     (.then (fn [_] (d/transact! conn rows)))
                      (.then (fn [_] @conn))))))))
+
+(defn- fresh-db
+  "The fixed three-fn graph (the example tests' fixture)."
+  []
+  (fresh-db-rows fn-rows))
 
 (defn- with-db [f done]
   (-> (fresh-db)
@@ -198,3 +207,146 @@
                                            ::ret/aliases {"db" "wrong.ns"} ::ret/db db}))
             "a real name under the WRONG ns does not resolve"))
       done)))
+
+;; ===========================================================================
+;; GENERATIVE properties over a RANDOM program graph. Each test generates a
+;; fresh graph (distinct length-8 fn names across two namespaces), seeds ONE
+;; :memory db, then runs a synchronous test.check property (100 cases) that
+;; picks real syms / constructs near-misses from THAT graph — shrinking to the
+;; smallest counterexample on failure. The names use the alphabet a–m and
+;; reserve `z` for the guaranteed-far "no near candidate" name; every
+;; near-miss is built by ±1 char, which (real names all being length 8) makes
+;; it guaranteed-absent from the graph.
+;; ===========================================================================
+
+(def ^:private name-alpha "abcdefghijklm")   ; 'z' is reserved for the far name
+
+(def ^:private gen-namepart
+  (gen/fmap str/join (gen/vector (gen/elements (vec name-alpha)) 8)))
+
+(defn- nm-of [fq] (let [i (.lastIndexOf fq "/")] (if (>= i 0) (subs fq (inc i)) fq)))
+(defn- ns-of [fq] (let [i (.lastIndexOf fq "/")] (when (>= i 0) (subs fq 0 i))))
+
+(defn- gen-graph-rows
+  "A randomly generated program graph: up to 8 DISTINCT length-8 fn names
+   spread over two namespaces, each a self-contained :seon.fn row."
+  []
+  (let [names (->> (gen/sample gen-namepart 80) distinct (take 8) vec)
+        nss   ["gen.a" "gen.b"]]
+    (vec (map-indexed
+           (fn [i nm]
+             {:seon.fn/sym      (str (nth nss (mod i 2)) "/" nm)
+              :seon.fn/arglists "([x])"
+              :seon.fn/doc      "Generated fn."
+              :seon.fn/spec     "[:=> [:cat :any] :any]"
+              :seon.fn/source   (str "(defn " nm " [x] x)")})
+           names))))
+
+(defn- check
+  "Run a test.check property `n` times; assert it held, surfacing the shrunk
+   counterexample (a falsification is a REAL bug in the retrieval fns)."
+  [n property]
+  (let [{:keys [result shrunk] :as res} (tc/quick-check n property)]
+    (is (true? result)
+        (str "retrieval property falsified — shrunk: "
+             (pr-str (:smallest shrunk)) " | " (pr-str res)))))
+
+;; Property 1: a symbol that IS in the graph is NEVER flagged unresolved (no
+;; false-positive correction).
+(deftest retrieve-prop-real-sym-never-flagged
+  (async done
+    (let [rows (gen-graph-rows)
+          syms (mapv :seon.fn/sym rows)]
+      (-> (fresh-db-rows rows)
+          (.then
+            (fn [db]
+              (check 100
+                (prop/for-all [fq (gen/elements syms)]
+                  (let [canvas  (str "(defn use1 [x] (" fq " x))")
+                        flagged (set (map ::ret/symbol
+                                          (ret/unresolved-references
+                                            {::ret/canvas-text canvas ::ret/db db})))]
+                    (and (not (contains? flagged fq))
+                         (ret/symbol-resolves?
+                           {::ret/name (nm-of fq) ::ret/qualifier (ns-of fq)
+                            ::ret/aliases {} ::ret/db db})))))))
+          (.catch (fn [e] (is false (str "threw — " e))))
+          (.then (fn [_] (done)))))))
+
+;; Property 2: a canvas referencing an absent NEAR-name (1 edit from a real
+;; sym) IS flagged AND retrieves that real sym.
+(deftest retrieve-prop-near-miss-flagged-and-retrieved
+  (async done
+    (let [rows (gen-graph-rows)
+          syms (mapv :seon.fn/sym rows)]
+      (-> (fresh-db-rows rows)
+          (.then
+            (fn [db]
+              (check 100
+                (prop/for-all [fq    (gen/elements syms)
+                               drop? gen/boolean
+                               extra (gen/elements (vec name-alpha))]
+                  (let [nm     (nm-of fq)
+                        miss   (if drop? (subs nm 0 (dec (count nm))) (str nm extra))
+                        canvas (str "(defn use1 [x] (" miss " x))")
+                        flagged   (set (map ::ret/symbol
+                                            (ret/unresolved-references
+                                              {::ret/canvas-text canvas ::ret/db db})))
+                        cand-syms (set (map ::ret/sym
+                                            (ret/retrieve-candidates
+                                              {::ret/name miss ::ret/db db})))]
+                    (and (contains? flagged miss)        ; absent near-name flagged
+                         (contains? cand-syms fq)))))))   ; retrieves the real sym
+          (.catch (fn [e] (is false (str "threw — " e))))
+          (.then (fn [_] (done)))))))
+
+;; Property 3: every emitted injection has a span within canvas bounds (whose
+;; substring IS the flagged token) and a replacement whose name EXISTS in the
+;; graph — never a fabricated correction.
+(deftest retrieve-prop-injection-span-and-replacement-valid
+  (async done
+    (let [rows   (gen-graph-rows)
+          syms   (mapv :seon.fn/sym rows)
+          gnames (set (map nm-of syms))]
+      (-> (fresh-db-rows rows)
+          (.then
+            (fn [db]
+              (check 100
+                (prop/for-all [fq    (gen/elements syms)
+                               real  (gen/elements syms)
+                               extra (gen/elements (vec name-alpha))]
+                  (let [miss   (str (nm-of fq) extra)
+                        canvas (str "(defn use1 [x] (" real " x) (" miss " x))")
+                        {::ret/keys [injections]}
+                        (ret/retrieve-for-canvas {::ret/canvas-text canvas ::ret/db db})
+                        clen (count canvas)]
+                    (and (pos? (count injections))       ; the near-miss yields an injection
+                         (every?
+                           (fn [inj]
+                             (let [[s e] (::ret/span inj)]
+                               (and (<= 0 s) (<= s e) (<= e clen)
+                                    (= (::ret/unresolved inj) (subs canvas s e))
+                                    (contains? gnames (nm-of (::ret/replacement inj))))))
+                           injections)))))))
+          (.catch (fn [e] (is false (str "threw — " e))))
+          (.then (fn [_] (done)))))))
+
+;; Property 4 (fail-soft): a dead name with NO near candidate is flagged but
+;; produces NO injection — never a wrong correction.
+(deftest retrieve-prop-failsoft-no-candidate-no-injection
+  (async done
+    (let [rows (gen-graph-rows)]
+      (-> (fresh-db-rows rows)
+          (.then
+            (fn [db]
+              (check 100
+                (prop/for-all [klen (gen/choose 3 6)]
+                  (let [far    (apply str (repeat klen "z"))  ; 'z' ∉ the name alphabet
+                        canvas (str "(defn use1 [x] (" far " x))")
+                        {::ret/keys [unresolved injections]}
+                        (ret/retrieve-for-canvas {::ret/canvas-text canvas ::ret/db db})
+                        flagged (set (map ::ret/symbol unresolved))]
+                    (and (contains? flagged far)         ; the dead name IS flagged
+                         (empty? injections)))))))         ; but NO wrong injection
+          (.catch (fn [e] (is false (str "threw — " e))))
+          (.then (fn [_] (done)))))))

@@ -12,6 +12,10 @@
     #?(:clj  [clojure.test :as t :refer [deftest is testing]]
        :cljs [cljs.test    :as t :refer [deftest is testing]])
     [clojure.string :as str]
+    [clojure.test.check :as tc]
+    [clojure.test.check.generators :as gen]
+    #?(:clj  [clojure.test.check.properties :as prop]
+       :cljs [clojure.test.check.properties :as prop :include-macros true])
     [seon.repl.internal :as parse]))
 
 ;; ============================================================
@@ -63,10 +67,39 @@
                {:kind :comment :narration "afterthought"}]
     :note "trailing comment after a form → its own comment entry, form kept"}])
 
+(defn- strip-form-span
+  "Drop the `:span` key from `:form` entries so the structural corpus
+   compare stays about narration/source/form. The span itself is proven
+   behaviorally in [[form-span-indexes-source]] (no brittle magic numbers)."
+  [entries]
+  (mapv (fn [e] (if (= :form (:kind e)) (dissoc e :span) e)) entries))
+
 (deftest basic-shapes
   (doseq [{:keys [in expected note]} basic-cases]
     (testing (str note " — " (pr-str in))
-      (is (= expected (parse/parse-forms in))))))
+      (is (= expected (strip-form-span (parse/parse-forms in)))))))
+
+;; ============================================================
+;; Form `:span` is canvas-aligned — every `:kind :form` entry carries an
+;; ABSOLUTE `[start end)` char span whose substring IS its byte-faithful
+;; :source. This is the closed-loop oracle's clamp-to-HOLD basis (the same
+;; basis the :read renoise spans already use). Asserted as a MECHANISM
+;; (subs == source), not pinned offsets.
+;; ============================================================
+
+(deftest form-span-indexes-source
+  (doseq [in ["(+ 1 2)"
+              ";; narration\n(+ 1 2)"
+              "(+ 1 2)\n(+ 3 4)"
+              "(seon.db/transact!\n  {:seon.db/tx-data\n   [{:foo/bar 1}]})"
+              "prose (a)\n;; c\n(b)"]]
+    (testing (str "form :span substring == :source — " (pr-str in))
+      (doseq [e (filter #(= :form (:kind %)) (parse/parse-forms in))]
+        (let [[s end] (:span e)]
+          (is (vector? (:span e)))
+          (is (= 2 (count (:span e))))
+          (is (= (:source e) (subs in s end))
+              (str "span " (pr-str (:span e)) " must index :source for " (pr-str in))))))))
 
 ;; ============================================================
 ;; Byte-faithful :source — load-bearing for resume re-eval
@@ -795,3 +828,86 @@
 
   (testing "unbalanced-to-EOF → from-`(` fallback (not nil, not a throw)"
     (is (= "(foo (bar" (parse/form-source-at "(foo (bar" 0)))))
+
+;; ============================================================
+;; Generative property — the `:strip-fences?` span BASIS (renoise loop).
+;;
+;; The closed-loop renoise driver relies on a precise relationship between the
+;; two parse bases. Parsing a `form` UNFENCED with `:strip-fences? false`
+;; gives its raw span [0 L]; parsing the SAME form FENCED with the default
+;; `:strip-fences? true` must give a span shifted by EXACTLY the fence-prefix
+;; length the strip leaves before the form — a uniform shift on BOTH
+;; endpoints, nothing distorted. That is what lets the driver translate a
+;; good-form clamp span between the stripped basis and the raw `canvas_text`
+;; the worker's `offset_map` indexes.
+;;
+;; (Note the asymmetry the strip exists to absorb: a BARE ``` fence with no
+;; language tag is a syntax-quote reader-macro that swallows the form, so a
+;; raw `:strip-fences? false` parse of fenced text only recovers the form when
+;; the fence carries a lang tag — asserted CONDITIONALLY below. The default
+;; strip path always recovers it.) Proven over GENERATED forms × fence shapes,
+;; not a fixture pair — a failure shrinks to the smallest form+fence.
+;; ============================================================
+
+(def ^:private gen-atom
+  "A scalar arg token that reads as a single non-list datum."
+  (gen/one-of
+    [(gen/fmap str gen/nat)
+     (gen/elements ["foo" "bar" "x" "y" "inc" "dec" "+" "do-it" "ns/q"])
+     (gen/fmap #(str ":" %) (gen/elements ["a" "k" "kw" "ns/k"]))
+     (gen/fmap pr-str gen/string-alphanumeric)]))
+
+(def ^:private gen-form-str
+  "A single valid balanced top-level LIST form as text — varied head + atom
+   args + one level of nested list. No `;`, backtick, triple-backtick, or
+   newline, so it round-trips as exactly ONE `:kind :form` entry whose span
+   indexes the whole string."
+  (gen/let [head (gen/elements ["foo" "bar" "do-it" "inc" "+"])
+            args (gen/vector
+                   (gen/one-of
+                     [gen-atom
+                      (gen/fmap (fn [xs] (str "(" (str/join " " (cons "g" xs)) ")"))
+                                (gen/vector gen-atom 0 3))])
+                   0 4)]
+    (str "(" (str/join " " (cons head args)) ")")))
+
+(defn- only-form-span
+  "The `:span` of the SINGLE `:kind :form` entry from parsing `text`, or nil
+   when the parse yields anything other than exactly one form."
+  [text strip?]
+  (let [forms (filter #(= :form (:kind %))
+                      (parse/parse-forms text {:strip-fences? strip?}))]
+    (when (= 1 (count forms)) (:span (first forms)))))
+
+(deftest strip-fences-span-basis-property
+  (let [result
+        (tc/quick-check
+          100
+          (prop/for-all [form  gen-form-str
+                         fence (gen/elements ["```" "~~~"])
+                         lang  (gen/elements ["clojure" "clj" "cljs" "cljc" "edn" ""])]
+            (let [fenced   (str fence lang "\n" form "\n" fence)
+                  stripped (parse/strip-code-fences fenced)
+                  sp-uf    (only-form-span form false)    ; unfenced   (raw == stripped)
+                  sp-ft    (only-form-span fenced true)   ; fenced, STRIPPED basis (default)
+                  sp-ff    (only-form-span fenced false)  ; fenced, RAW basis (lang-tag only)
+                  raw-pre  (str/index-of fenced form)     ; chars before form in raw fenced
+                  str-pre  (str/index-of stripped form)]  ; chars before form after strip
+              (and (= [0 (count form)] sp-uf)
+                   (some? sp-ft) (some? str-pre)
+                   ;; the FORM text is preserved verbatim → equal span LENGTH
+                   (= (count form)
+                      (- (second sp-uf) (first sp-uf))
+                      (- (second sp-ft) (first sp-ft)))
+                   ;; THE invariant: fenced/strip-true differs from
+                   ;; unfenced/strip-false by EXACTLY the fence-prefix length the
+                   ;; strip leaves before the form — uniform on BOTH endpoints.
+                   (= sp-ft (mapv #(+ % str-pre) sp-uf))
+                   ;; CONDITIONAL raw-basis: when a lang-tagged fence lets the raw
+                   ;; (strip-false) parse still recover the form, its span is the
+                   ;; offset_map basis = unfenced shifted by the raw fence-prefix.
+                   (if sp-ff (= sp-ff (mapv #(+ % raw-pre) sp-uf)) true)))))]
+    (is (:result result)
+        (str "strip-fences span-basis property falsified — shrunk: "
+             (pr-str (-> result :shrunk :smallest))
+             " | result: " (pr-str result)))))
