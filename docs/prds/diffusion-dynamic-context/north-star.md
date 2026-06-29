@@ -253,9 +253,14 @@ When iterating autonomously (e.g. overnight), each cycle:
   experts are fused 3D `nn.Parameter`s, and the transformers quantizer converts ONLY `nn.Linear` → the
   experts (bulk of a 26B-A4B MoE) are SKIPPED → negligible speedup. Not a lever via the simple path
   (the torchao prototype MoE-3D path is unproven/gated). Test-to-confirm: `vram_alloc` BF16 ~50GB vs
-  int8dq — if it only drops to ~44-46GB the experts were skipped. (2) `static`-cache **`torch.compile`** + the model's BUILT-IN confidence stop +
-  `entropy_bound` (tensor ops that survive compile; reserve the compile-FORFEITING Python parse/eval stop
-  for the correctness experiments); (3) **`past_key_values` / `QuantizedCache` reuse** (transformers-native
+  int8dq — if it only drops to ~44-46GB the experts were skipped. (2) `static`-cache **`torch.compile`** — **#7 RESEARCH (`5f0297d3`): REAL + the model is ENGINEERED for it**
+  (opposite of torchao): `generate()` compiles encoder/decoder/accept/renoise/built-in-stop (`fullgraph`);
+  the MoE does NOT break it (default `grouped_mm` is the graph-capturable kernel — the fused experts torchao
+  skipped are exactly what it consumes). Switch = `cache_implementation="static"`. **CRITICAL: the live
+  worker loads Dynamic cache = EAGER, so the "~450 tok/s" above is EAGER — the COMPILED path is UNTESTED.**
+  Web band 2.5-3.8× → potentially **~1000 tok/s on the A100 WITH control** (the built-in stop compiles; the
+  Python parse/eval stop stays eager for the correctness experiments). **THE top untested speed lever.**
+  Risk: recompile-on-shape-change thrash with variable-length context (the one number to measure). (3) **`past_key_values` / `QuantizedCache` reuse** (transformers-native
   prefix/skill KV reuse, composes with the per-block `kv-section-caching` design); (4) **Fast-dLLM
   DualCache** (NVIDIA, training-free in-loop suffix-KV, control-compatible) for extra headroom. The control
   worker's speed comes from COMPOSING these, not a custom engine. (`pytorch-vs-vllm-roadmap` §5b.)
