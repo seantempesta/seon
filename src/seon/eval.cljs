@@ -3038,6 +3038,82 @@
           (vswap! n-ok   inc)
           (vswap! n-fail inc))))))
 
+(defn- ^:async dispatch-eval-entry!
+  "Dispatch ONE non-`:read` parsed entry through the per-form mechanism:
+   comment-only → REPL-parity intercept (`in-ns`/`*ns*`) → normal
+   `eval-form-entry!`. The SINGLE per-entry mechanism shared by
+   `eval-batch!`'s main loop AND its parinfer-repair sub-loop, so a
+   REPAIRED form is handled IDENTICALLY to a normal one — same parity
+   teaching, same comment recording, same stash / tee / result-var
+   binding. Before this, the repair sub-loop called `eval-form-entry!`
+   directly, so a repaired `(in-ns 'foo` (a plausible missing-paren the
+   repair fixes) bypassed the parity teaching the main loop gives, and a
+   repaired trailing `:comment` (no `:source`) reached eval with nil.
+
+   `:read` entries never reach here — the main loop OWNS the repair
+   sub-loop (it is the trigger), and a repaired span re-parses to
+   non-`:read` entries (the repair accept-gate requires it). Mutates the
+   caller's fold volatiles in place exactly as `eval-form-entry!` does.
+
+   Map keys: the `eval-form-entry!` set, plus `:entry` (the parsed entry
+   — supplies `:kind`/`:source`) and `:narration` (the final narration,
+   repair note already prepended by the caller for a repaired form)."
+  [{:keys [compile-state eval-id turn-id current-ns n-ok n-fail
+           failed-defs outer-test-run? entry narration]}]
+  (let [source (:source entry)]
+    (cond
+      ;; Comment-only entry — no source to eval. Record a comment-only row
+      ;; (blank source, ok? true) so trailing `;;` thinking renders in the
+      ;; transcript and is never lost. Not counted in n-ok/n-fail.
+      (= :comment (:kind entry))
+      (await (record-eval! {:eval-id     eval-id
+                            :turn-id     turn-id
+                            :at          (js/Date.)
+                            :duration-ms 0
+                            :narration   narration
+                            :source      ""
+                            :ns          @current-ns
+                            :result      {:ok true :value nil}}))
+
+      ;; REPL-parity intercept (fix d) — in-ns / *ns* get a legible
+      ;; translation INSTEAD of an opaque error or a silent nil. No eval
+      ;; runs; the record is the teaching.
+      (some? (parity-intercept source @current-ns))
+      (let [pc     (parity-intercept source @current-ns)
+            result (if (= :error (:seon.eval/parity pc))
+                     {:ok false
+                      :error {:seon.error/kind    :seon.eval/repl-parity
+                              :seon.error/message (:seon.error/message pc)}}
+                     {:ok true :value (:seon.eval/value pc)})]
+        (when (:ok result)
+          (stash-result-raw! eval-id (:value result))
+          (bind-result-var! compile-state eval-id (:value result)))
+        (await (record-eval! {:eval-id     eval-id
+                              :turn-id     turn-id
+                              :at          (js/Date.)
+                              :duration-ms 0
+                              :narration   narration
+                              :source      source
+                              :ns          @current-ns
+                              :result      result}))
+        (if (:ok result)
+          (vswap! n-ok   inc)
+          (vswap! n-fail inc)))
+
+      ;; Normal eval path.
+      :else
+      (await (eval-form-entry!
+               {:compile-state   compile-state
+                :eval-id         eval-id
+                :turn-id         turn-id
+                :current-ns      current-ns
+                :n-ok            n-ok
+                :n-fail          n-fail
+                :failed-defs     failed-defs
+                :outer-test-run? outer-test-run?
+                :narration       narration
+                :source          source})))))
+
 (defn ^:async eval-batch!
   "Execute a sequence of parsed entries as a REPL batch. Partial-
    failure: every entry gets its own try + record + stash; entry
@@ -3188,9 +3264,12 @@
                                {:seon.repair/source (:source entry)
                                 :seon.repair/reads? reads?})]
                   (if (:seon.repair/repaired? rep)
-                    ;; Repaired → re-parse the repaired span and eval each
-                    ;; resulting form through eval-form-entry!, recording the
-                    ;; repair note on the FIRST form so the diff is visible.
+                    ;; Repaired → re-parse the repaired span and run each
+                    ;; resulting entry through `dispatch-eval-entry!` — the
+                    ;; SAME per-entry mechanism the main loop's `:else` uses,
+                    ;; so a repaired form gets identical comment/parity/normal
+                    ;; handling. The repair note rides on the FIRST entry so
+                    ;; the diff is visible.
                     (let [repaired-entries (internal/parse-forms
                                              (:seon.repair/source rep))]
                       (loop [es repaired-entries first? true]
@@ -3216,7 +3295,7 @@
                                  :seon.db/eval-id  eid
                                  :seon.db/origin   :agent}
                                 (fn ^:async run-repaired! []
-                                  (await (eval-form-entry!
+                                  (await (dispatch-eval-entry!
                                            {:compile-state   compile-state
                                             :eval-id         eid
                                             :turn-id         turn-id
@@ -3225,8 +3304,8 @@
                                             :n-fail          n-fail
                                             :failed-defs     failed-defs
                                             :outer-test-run? outer-test-run?
-                                            :narration       narr
-                                            :source          (:source e)})))))
+                                            :entry           e
+                                            :narration       narr})))))
                             (when-not first? (vswap! eids conj eid))
                             (recur (rest es) false)))))
                     ;; Not repairable → sharpened read error (A.3).
@@ -3247,53 +3326,12 @@
                                                         (:source entry))}}}))
                       (vswap! n-fail inc))))
 
-                ;; Comment-only entry (trailing `;;` lines / bare prose with
-                ;; no following form) — no source to eval. Record a
-                ;; comment-only row (blank source, ok? true) so the agent's
-                ;; trailing thinking renders in the transcript and is never
-                ;; lost. Not counted in n-ok/n-fail (nothing was evaluated).
-                (= :comment (:kind entry))
-                (await (record-eval! {:eval-id     eval-id
-                                      :turn-id     turn-id
-                                      :at          (js/Date.)
-                                      :duration-ms 0
-                                      :narration   (:narration entry)
-                                      :source      ""
-                                      :ns          @current-ns
-                                      :result      {:ok true :value nil}}))
-
-                ;; REPL-parity intercept (fix d) — in-ns / *ns* get a
-                ;; legible translation INSTEAD of an opaque error or a
-                ;; silent nil. No eval runs; the record is the teaching.
-                (some? (parity-intercept (:source entry) @current-ns))
-                (let [{:keys [narration source]} entry
-                      pc     (parity-intercept source @current-ns)
-                      result (if (= :error (:seon.eval/parity pc))
-                               {:ok false
-                                :error {:seon.error/kind    :seon.eval/repl-parity
-                                        :seon.error/message (:seon.error/message pc)}}
-                               {:ok true :value (:seon.eval/value pc)})]
-                  (when (:ok result)
-                    (stash-result-raw! eval-id (:value result))
-                    (bind-result-var! compile-state eval-id (:value result)))
-                  (await (record-eval! {:eval-id     eval-id
-                                        :turn-id     turn-id
-                                        :at          (js/Date.)
-                                        :duration-ms 0
-                                        :narration   narration
-                                        :source      source
-                                        :ns          @current-ns
-                                        :result      result}))
-                  (if (:ok result)
-                    (vswap! n-ok   inc)
-                    (vswap! n-fail inc)))
-
-                ;; Normal eval path — delegate to the extracted helper so
-                ;; the parinfer-repaired path (above) shares the exact same
-                ;; eval → await → stash → tee → record → instrument → test
-                ;; pipeline.
+                ;; Every non-`:read` entry — comment / parity-intercept /
+                ;; normal — flows through the ONE per-entry mechanism, the
+                ;; exact same `dispatch-eval-entry!` the repair sub-loop
+                ;; above calls. One mechanism, no parallel path.
                 :else
-                (await (eval-form-entry!
+                (await (dispatch-eval-entry!
                          {:compile-state   compile-state
                           :eval-id         eval-id
                           :turn-id         turn-id
@@ -3302,8 +3340,8 @@
                           :n-fail          n-fail
                           :failed-defs     failed-defs
                           :outer-test-run? outer-test-run?
-                          :narration       (:narration entry)
-                          :source          (:source entry)}))))))
+                          :entry           entry
+                          :narration       (:narration entry)}))))))
         (vswap! eids conj eval-id)))
     (cond-> {:seon.eval/ids    @eids
              :seon.eval/n-ok   @n-ok
