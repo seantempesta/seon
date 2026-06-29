@@ -1138,6 +1138,32 @@ other lane's **_Needs_** and the owner makes it.
     root-cause doc's deferred proposal #2; it directly removes the wasted-turns that gate A's store
     step. ISOLATED — measure alone (re-drive s12 k=2: A should reach `db.cljs`/`db.internal` and its
     store step).
+- **Needs (UI → Core): `:keeps-the-repl-clean` cap (0.2) MIS-MEASURES — fix the NL-parenthetical
+  noise SOURCE, not the threshold (2026-06-29, GROUNDED in the k=3-battery turn logs).** The
+  full-battery triage flagged two scenarios that fail ONLY on eval-error-rate while doing the task
+  correctly (plan-resume 0.222, planning 8/8; honesty-computed-total 0.267, judge 100). I classified
+  every distinct counted error from the actual `;=> ✗` transcript renders
+  (`logs/turns/sxe-2606290807/`, `logs/turns/xzM-2606290803/`). **Verdict: the dominant counted
+  errors are benign, not API-flailing** — (1) **a natural-language parenthetical in the agent's
+  bare prose, read as a `(`-list and evaluated** (`(a var)`, `(results Abk and fvV both return
+  correct data)`, `(June 3 before June 14)` → `… is not defined`), and (2) the **#73 home-ns alias
+  collision** (`(todo/done! …)`/`(message/user …)` after an `(ns my.agent.…)` switch). The genuinely
+  real errors are a minority (honesty's async/def `(vec result/…)` not-ISeqable; plan-resume's
+  cross-ns `books-by-author` call) and SHOULD count. **This is NOT residual #44** (orphan/empty is
+  fixed) — it's an uncovered sibling class.
+  - **Cause (file:line, lane = Core parser):** `src/seon/repl/internal.cljc` `prose-token?`
+    (L175-188) — the cut is `(seq? form)`, so a plain `(…)` list is ALWAYS a runnable form. The
+    refinements demote inline-backtick / tagged literals / bare data-literals (#52) but NOT an
+    English paren-group, so it evaluates, fails "not defined," and is recorded `:seon.eval/ok? false`
+    → counts toward `eval-error-rate*` (`test/seon/gym/driver.cljs:836`).
+  - **Proposed fix (Core):** in `prose-token?`, demote a `(…)`-list whose head is an undefined symbol
+    AND whose tokens are all bare non-namespaced undefined words → prose (like the data-literal
+    demotion: no `result/<id>`, no `ok? false` row). A real broken call keeps a namespaced/core head
+    and still counts; only all-bare-word paren-groups demote. Plus the already-tracked **#73** alias
+    fix removes the rest. **Do NOT relax 0.2** — fix the source, then re-drive plan-resume + honesty
+    at k≥2: if a correct-work agent then sits under 0.2 the cap is validated as honest; if real
+    errors still exceed it, that's a true weak-model-tier signal (#81/#83), not a calibration bug.
+  - Full classified tables + source proofs: [[research/repl-clean-calibration-2026-06-29]].
 - **Interface changes (Core must absorb):**
   1. **Handoff #4 still holds** — UI renders the warnings-block error-TILE; it just streams
      inside the morphed world view (no standalone patch). The `:seon/error` VALUE shape is
