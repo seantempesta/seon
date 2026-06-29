@@ -1199,6 +1199,24 @@ other lane's **_Needs_** and the owner makes it.
      agent (its net layer 503s long-lived `text/event-stream`); verify streamed surfaces
      server-side (a node streaming client showing the payload change on a tx) + human eyeball.
 
+- **Needs (UI → Core): writes-tests gap is GUIDANCE-ABSENCE, not a ceiling (2026-06-29, MEASURED).**
+  Full-battery triage confirmed `plan-resume-across-restart` 0/3 + `todo-multistep-tracking` 0/3 both
+  fail the SAME predicate `:wrote-a-test-for-the-fn` — the weak DeepSeek agent designs a schema + writes
+  the fn but never writes a `deftest` (0/45, 0/24). Root cause (live-checked): **the always-on context
+  contains NO test-writing guidance** — the only `deftest` mention is `namespaces.cljs:89`, which elides
+  deftests from rendered ns source as "noise". The "write a real test ns" guidance lives ONLY in the
+  `data-oriented-clojure` SKILL body, and the established LAW is **agents rarely load skills → hoist
+  high-value skill guidance into the always-on base** (the same one-sentence-always-on pattern that took
+  canvas-drive 1/3→3/3). So the agent gets NEITHER the instruction NOR a worked example (the `:89`
+  elision removes the example; render-prominence law: the worked example IS the teaching).
+  **→ Core (always-on base / my.kb):** hoist a concise cue — *"every fn you define needs a `deftest`; a
+  task isn't done until its fn is tested"* — into the always-on context, AND reconsider the blanket `:89`
+  deftest elision (keep ONE visible `deftest` worked example in rendered ns source, like the toolkit keeps
+  one worked example, so test-writing is taught by example not just told). **→ U measures:** after it lands,
+  re-drive `plan-resume-across-restart` + `todo-multistep-tracking` at k=3 — keep IFF `:wrote-a-test` passes
+  + the scenarios lift + no regression. If the guidance lands but the weak model STILL won't write tests →
+  ceiling (fold into the #81 weak-model-tier theme). Evidence: `research/full-battery-triage-2026-06-29.md`.
+
 ## Launch prompts
 
 The two prompts below launch the lanes. Each is self-contained; both point back to
