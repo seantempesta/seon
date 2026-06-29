@@ -92,6 +92,20 @@ Round-trip test on the live worker (`33d2`, fingerprint-verified):
   build: the Seon-side orchestration** (parse the partial → map error `:span` → decide
   stop/renoise) that turns the two proven primitives into the closed loop.
 
+**MEASURED SPEED REALITY (falsified an estimate — record it):** a custom-stopping
+short-circuit is NOT faster — it's ~4× SLOWER. `mean` fn: full 48-step COMPILED path
+`gen_s 0.57s`; `denoise_to_step` K=24 (custom Python `StepCountStopping`) `gen_s 2.32s`.
+**The custom stopping criterion forfeits `torch.compile`** (critique F1, now measured) →
+eager fallback → eager-at-24 ≫ compiled-at-48. So: **`denoise_to_step`/`resume_renoise`
+are for CORRECTNESS (the buzzsaw fixes errors), NOT speed.** For SPEED, the control must
+be compile-COMPATIBLE: the model's BUILT-IN early-stop (`stability_threshold` +
+`confidence_threshold` in the sampler config) stops near the converged step WITHOUT
+forfeiting compile — that is the real dynamic-step speed lever, untested. Validation
+itself is cheap (parse-forms = **366 µs**, ~30× faster than a ~12ms step) — the cost is
+the internet hop (~100ms), which CO-LOCATION (the `:worker-validator` CLJS target, in
+build) removes. Architecture split: **compiled built-in early-stop for speed +
+co-located validator for correctness (sparse renoise on oracle-flagged spans only).**
+
 ### The deep finding (5/5 skills) — context OVERRIDES confident-wrong priors
 
 In EVERY skill the control fails the SAME way: it hallucinates a confident,
