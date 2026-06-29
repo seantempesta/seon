@@ -82,6 +82,41 @@ store-proactively guidance change in the my.kb manual / always-on context (Core-
 Re-measure `s12-run8-two-agent-consultation` ALONE at k=2 + full battery; isolated change,
 must not be bundled.
 
+## db-memory Gap A — store-guidance KEEP-but-insufficient + s12 root-caused (2026-06-29)
+
+The Gap-A cycle ran to ground. `s12-run8-two-agent-consultation` is db-memory's last red:
+agent A researches → must persist ≥2 `my.kb.*` findings with provenance → agent B consults
+them. Sequence, all measured/committed:
+
+1. **Findings-CONTENT block — confirmed KEEP (real lift).** The restored bounded content
+   block (`ee928de7`, predicate re-cut `d2ca231b`) measured at k=2: **s32-consult 0/2 → 2/2**,
+   **s12 Gap B (consult-first) 0/2 → 1/2**, `finding-storage-shape` held 1/1, no regression.
+   The CONSULT side of db-memory is closed.
+2. **Store-proactively guidance — measured KEEP-but-insufficient.** Core added store-proactively
+   guidance (`60dfe087`) to attack Gap A (A persists 0 findings). PAID k=2 drive: it did NOT
+   close s12 (`s12 rate 0 → 0`, judge `17.5 → 0`) but it **improved s32 quality (judge 50 → 100)**
+   and **lowered battery eval-error (0.129 → 0.087)**, pass-rate flat at 0.667. Net-positive →
+   **KEEP**, but insufficient. (Trend line `26b219f2`.)
+3. **Root cause found — store-DEFERRED × research-friction, NOT framing/salience** (`ac3db866`;
+   deep doc [[research/s12-store-under-framing-rootcause-2026-06-29]], committed `d1d0dc9f`). The
+   guidance IS internalized: A's first eval plans an explicit "store my.kb.* rows" step → the
+   framing and salience theories are **FALSIFIED**. The real cause: A defers storing until after
+   tracing, then **burns all 6 turns stuck researching** — reads the WRONG file (`src/seon/db.clj`,
+   the paused JVM track, instead of `db.cljs`), trusts `println`'s nil, never pivots — so the store
+   step is never REACHED. **0 `transact!`/`register!` across 6 turns.**
+
+**Two follow-ups opened:**
+
+- **#78 (CRITICAL Core footgun)** — `(seon.agent.ctx/render-namespace {:seon.ns/name :seon.schema})`
+  renders AND EXECUTES `(seon.schema/clear-all! [])`, wiping the run's schema registry. Any
+  schema-inspecting agent can destroy it; **blocks a clean s12 re-measure.**
+- **#79** — agents pointed at paused-JVM `.clj` siblings instead of the active `.cljs` (the 6
+  wasted turns above).
+
+**Next isolated Gap-A lever:** reframe the store guidance from batch → **INCREMENTAL** ("store each
+claim the moment you verify it; a grep hit with `file:line` is already storable") in Core's `my.kb`
+manual — blocked on #78. Re-measure **s12 ALONE** at k=2 + full battery; isolated, do NOT bundle.
+
 ## Landings (live-proven, committed)
 
 | # | What | Proof | Commit |
