@@ -979,6 +979,88 @@ other lane's **_Needs_** and the owner makes it.
   CORRECTED route set (Interface #2 below: INCLUDE the `…/feed` GET routes), so my `db->routes`
   can replace the static route vector in `web/router.cljs`. (Phase 1 + 2e `(slot :name)` both
   landed & consumed; no cluster-reset pending on me.)
+- **Needs (UI → Core) — RESTORE findings-content render (2026-06-29, HIGH).** The
+  database-memory drive ([[research/database-memory-drive-2026-06-28]]) found the
+  single highest-value context-correctness lever: a fresh agent **no longer SEES
+  stored `my.kb.*` claim CONTENT** in its prompt — only an inventory COUNT. This is
+  Core-owned (`seon.agent.ctx` seed + a `my.*`/ctx block ns), so routing it here per
+  the lane table. Full diagnosis below; the ask in one line: **add a bounded
+  findings-content block to `default-seed-blocks` that renders the top-N recent
+  user-domain `my.*` rows' CONTENT + provenance, not just counts.**
+  - **Live-proven regression** (scratch `:memory` conn, two seeded `my.kb.codebase/claim`
+    rows + provenance, rendered `seon.agent.ctx.inventory/inventory-block`): output is
+    counts + lookup-samples only — `; my.kb.codebase: claim 2 question 1` and
+    `; my.kb: confidence 2 «:verified» source-line 2 source-path 2 «"src/seon/agent/message.cljs" "src/seon/db.cljs"»`.
+    **Neither claim's TEXT appears** (claim strings are >48 chars → `value-token-char-cap`
+    fallback to count-only by design). Matches the drive's captured prompt verbatim.
+  - **Root cause (git):** the content render was DELETED in a deliberate two-step Jun-18
+    refactor, AFTER `8d0fe954` (Jun 12) added it (#26 "findings rung", priority 48,
+    `seon.agent.findings/findings-block`, content-in-full). `cf77ca11` dropped the raw
+    `pull[*]` dump (rationale: "wall of rows → point at <inventory> + querying"); `d227b792`
+    nuked the whole `seon.agent.findings` ns (rationale: the keyword-overlap relevance
+    pointer was "a lexical guess", relevance deferred to embeddings/Proximum). The trade
+    was wrong for DB-memory: a fresh agent that does NOT query is left blind → under-stores
+    (A) and re-greps instead of consulting (B). `:relevant-source` (priority 48, the
+    SEON_EMBED KNN block) was meant to fill the gap but is **default-OFF**, so in the
+    stock pod there is NO content surface at all.
+  - **Exact change:** `src/seon/agent/ctx.cljs:1705` (`default-seed-blocks`) — add one block
+    map (suggest `:findings` priority ~46, between `:open-todos` 45 and `:relevant-source`
+    48) wired by symbol to a NEW block ns `src/seon/agent/ctx/findings.cljs`
+    (`findings-block`, `{:malli/schema [:=> [:cat :map] :string]}`, pure fn of
+    `{:seon.db/keys [db]}` like `inventory-block`); require it in `src/seon/client.cljs`
+    (~line 191, beside `seon.agent.ctx.inventory`) so the symbol resolves at boot. NOT a
+    revert — do NOT restore the unbounded `pull[*]` dump (that's why it was trimmed) nor
+    the lexical-overlap pointer.
+  - **Token-budget shape (the laws):** bound it — render the **top-N (≈8–12) most-recent
+    user-domain rows** (sort by `:db/id` desc — the same boot-scope exclusion
+    `inventory.cljs` uses via `db/bootstrap-row-ids`), each as `claim/answer text +
+    its own-namespace `:my.kb/source-*` provenance`, one compact `;`-comment line per row,
+    with a loud-truncation footer carrying the read-back query when clipped (the old
+    `cap-kind` pattern). Keep `inventory-block` (counts = discoverability) AS-IS; this is a
+    sibling CONTENT block, not a replacement. **Cache-stability:** it rides the volatile
+    band (priority >`stable-priority-max`, like `:inventory` 97 — OR keep at 46 only if it
+    renders byte-stable for a given db; recommend the volatile tail to avoid busting the
+    cached prefix on every new finding). Reactive: `""` when no user-domain rows → section
+    vanishes (no empty shell). Re-greens s32 `:seeded-claim-rendered-in-prompt` and gives
+    s12-B the answer in-context.
+  - **Lane note:** verified NOT fixable in the UI render lane — the seed-block list and the
+    block ns are `seon.agent.ctx`/`my.*` (Core per the lane table: UI must not edit "core
+    context/schema/seed"). U lane will re-cut the s32 predicate / re-measure after Core lands it.
+- **Needs (UI → Core): db-memory Gap A — store-proactively guidance (2026-06-29, MEASURED).**
+  The findings-content render ask above LANDED and is a **measured KEEP** — Core restored a
+  bounded findings-CONTENT block (`ee928de7`: `src/seon/agent/ctx/findings.cljs`, priority-97
+  volatile band, renders top-N recent `my.kb.*` rows as `claim + path:line + :verified`
+  provenance, reactive empty-when-no-rows), and the UI lane re-cut the gym predicate for the
+  220-char content-clip (`d2ca231b`). A PAID k=2 DeepSeek db-memory drive at SHA `d2ca231b`
+  measured the lift — the CONSULT axis is now closed; one isolated STORE-axis gap remains.
+  - **Measured evidence (k=2 at `d2ca231b`, baseline `da671bcc`; gym schema-restore fix
+    `6ac32983` made the multi-scenario paid battery trustworthy):**
+    - `s32-consult-before-research`: **0/2 → 2/2 PASS** (salience predicate was the only red;
+      agent B's first eval became `(db/query …)` over the store).
+    - `s12-run8-two-agent-consultation`: still 0/2 FAIL, but **Gap B (consult-first) improved
+      0/2 → 1/2**.
+    - `finding-storage-shape`: held green 1/1. No regression. eval-error 0.13 (moderate, not noise).
+    - Scorecard line: `:pass-rate 0.667 :per-competency {:db-memory {:pass 3 :total 5}}
+      :eval-error-rate 0.129`. Dump: `tmp/dbmem-s12-run8-two-agent-consultation.edn`.
+    - **Verdict: KEEP** — lifted the battery; the render-salience/consult side of db-memory is closed.
+  - **Gap A (the isolated next lever):** s12 still fails because agent A grep-researches but
+    persists **ZERO `my.kb` rows** (both runs: `:a-stored-at-least-two-findings-with-provenance`
+    rows=[] x2). This is **NOT a mechanism gap** — `finding-storage-shape` passes, so the agent
+    CAN store when prompted; in s12's "research so the other agent can consult" framing it just
+    doesn't proactively persist. Gap A is UPSTREAM of render (the findings block serves the
+    CONSULT axis, not the STORE axis). The fix is a single guidance change in the my.kb manual /
+    always-on store-proactively teaching — Core-owned `my.*` content.
+  - **Exact proposed wording (paste into the my.kb manual / always-on store-proactively teaching;
+    refine lightly to match the manual's recipe voice — read `src/my/kb.cljs`, do NOT edit it):**
+    *"A research task is not done until each distinct claim is a durable `my.kb.<domain>` row with
+    `:my.kb/source-*` provenance — persist ≥1 row per claim before replying. Storing is not optional
+    follow-up; it IS the deliverable of research."*
+  - **Acceptance test:** re-drive `s12-run8-two-agent-consultation` **ALONE** at k=2 + run the full
+    FREE+paid battery for regression; **keep IFF Gap A closes** (A stores ≥2 rows with provenance)
+    **without dropping any other competency** (notably `finding-storage-shape` green, s32 still 2/2).
+  - **ISOLATION note:** this is the isolated NEXT context change — it MUST NOT be bundled with any
+    other context edit, so the s12-alone re-measure attributes the lift (or its absence) to exactly
+    this guidance and nothing else.
 - **Interface changes (Core must absorb):**
   1. **Handoff #4 still holds** — UI renders the warnings-block error-TILE; it just streams
      inside the morphed world view (no standalone patch). The `:seon/error` VALUE shape is

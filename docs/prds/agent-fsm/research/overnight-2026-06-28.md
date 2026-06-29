@@ -40,6 +40,48 @@ needs your decision, and the Core-routed queue.
 2. **`/data` URL param** `?kind=` → `?ns=` (part of the A purge) — flag in case any
    bookmark/automation depends on the old param.
 
+## db-memory findings-content lever — MEASURED KEEP, Gap A routed (2026-06-29)
+
+The night's #1 context-correctness lever closed a measured cycle. **Regression:** a
+fresh agent saw only an inventory COUNT of stored `my.kb.*` knowledge, never claim
+CONTENT, so it under-stored and re-grepped instead of consulting. **Root cause (git):**
+the content render was deleted in the Jun-18 refactor (`cf77ca11` dropped the unbounded
+`pull[*]` dump, `d227b792` nuked `seon.agent.findings`); the intended `:relevant-source`
+KNN replacement is default-OFF, so the stock pod had NO content surface.
+
+**Core fix (`ee928de7`):** restored a bounded findings-CONTENT block
+(`src/seon/agent/ctx/findings.cljs`) — priority-97 volatile band, renders the top-N
+recent `my.kb.*` rows as `claim + path:line + :verified` provenance, reactive
+empty-when-no-rows (not a revert: no unbounded dump, no lexical-overlap pointer). **U
+predicate re-cut (`d2ca231b`):** gym predicate re-cut for the 220-char content-clip.
+
+**Measured lift (PAID k=2 DeepSeek db-memory drive at SHA `d2ca231b`; baseline
+`da671bcc`):**
+
+| scenario | before → after | note |
+|---|---|---|
+| `s32-consult-before-research` | **0/2 → 2/2 PASS** | salience predicate was the only red; agent B's first eval became `(db/query …)` over the store |
+| `s12-run8-two-agent-consultation` | 0/2 → 0/2 FAIL | but **Gap B (consult-first) improved 0/2 → 1/2** |
+| `finding-storage-shape` | 1/1 → 1/1 green | no regression |
+
+Scorecard line: `:pass-rate 0.667 :per-competency {:db-memory {:pass 3 :total 5}}
+:eval-error-rate 0.129`. eval-error 0.13 = moderate, not noise. Dump:
+`tmp/dbmem-s12-run8-two-agent-consultation.edn`. **Verdict: KEEP** — lifted the battery;
+the render-salience/consult side of db-memory is now closed.
+
+**Harness trust:** the gym schema-restore fix (`6ac32983`) made the multi-scenario paid
+battery trustworthy (prior multi-scenario runs shared schema state across scenarios).
+
+**Isolated next lever (Gap A → Core):** s12 still fails because agent A grep-researches
+but persists ZERO `my.kb` rows (both runs `:a-stored-at-least-two-findings-with-provenance`
+rows=[] x2). NOT a mechanism gap (`finding-storage-shape` passes) — in s12's "research so
+the other agent can consult" framing the agent just doesn't proactively persist. Gap A is
+UPSTREAM of render (the findings block serves CONSULT, not STORE). Fix = a single
+store-proactively guidance change in the my.kb manual / always-on context (Core-owned
+`my.*` content); routed in [[coordination]] under "Needs (UI → Core): db-memory Gap A".
+Re-measure `s12-run8-two-agent-consultation` ALONE at k=2 + full battery; isolated change,
+must not be bundled.
+
 ## Landings (live-proven, committed)
 
 | # | What | Proof | Commit |
