@@ -13,10 +13,12 @@ tags: [vision, diffusion, agent]
 > writes correct, fully-spec'd, map-in/map-out Seon code because its context is not
 > guessed — it is **empirically optimal**.
 
-## ▸ OWNER HANDOFF — overnight loop wound down (read first)
+## ▸ OWNER HANDOFF — overnight loop (read first)
 
-The autonomous loop ran until **provably diminishing returns**: everything buildable
-without a GPU/image deploy is DONE, and every remaining win needs an owner action.
+The autonomous loop runs the no-GPU build/research surface to the floor, then hands
+the GPU/image-deploy wins to the owner. A second no-GPU pass (this cycle) cleared the
+renoise-fence item, built the KV-cache keying half, wired the closed loop, root-caused
+find_spec, and hardened the now-load-bearing parser.
 
 **PROVEN (fingerprint-verified, committed):** context lifts generation **0→100% on
 6/6 skills** (the deep finding: context overrides confident-wrong priors); the buzzsaw
@@ -24,22 +26,41 @@ primitives (clamp, infill, spec-slot, denoise_to_step, resume_renoise); the
 **short-circuit closed loop** (denoise→K → local oracle → stop, ~67% steps saved);
 the **eval gate** catches the def-vs-defn parse misses; **prefill = 62% of latency at
 9k ctx** (KV-caching is essential, exact full-prefix caching is feasible — encoder is
-causal). torchao INT8 = dead end (MoE experts skipped). Compiled path = 2 blockers
-(args [fixed] + a `find_spec` Dynamo graph-break [deep]).
+causal). torchao INT8 = dead end (MoE experts skipped).
 
 **BUILT + deploy-ready (your move):**
 1. **Co-located oracle** — `bin/oracle-server` (bb parse, 0.05ms) + `seon.worker-eval`
-   (cljs.js eval, 2.6ms). Complete + offline-proven.
+   (cljs.js eval, 2.6ms). Complete + offline-proven. Now also exposes a **no-fence
+   `parse-raw` op** (`324fe25f`) so parse `:span`s index the worker's raw `canvas_text`
+   / `offset_map` basis — the renoise-fence item is DONE, not pending.
 2. **Co-location image layer** — Dockerfile layer + spawn-wiring (`co-location-image-build`
    doc) ready to bundle onto the worker image.
+3. **KV-cache keying half** (`14e8acb0`) — `seon.agent.ctx/block-chain-keys`: pure
+   `(blocks, agent-id) → per-block chain-hashes`, mirrors vLLM's chain-hash
+   (`kv_cache_utils.py:577-603/703-728`), constant chain-root (survives restarts),
+   per-agent salt. 3 invariant tests + full cljs suite green (803/3632). The
+   **worker-integration contract** (LRU `{chain_hash → cropped encoder cache}`, walk
+   hashes → longest prefix → `crop(L)` → prefill only `[L:]`) is written into
+   `kv-section-caching-design` §6 — a drop-in once the image is deployed.
+4. **Closed-loop renoise driver** (`44c8d635`) — wired to `parse-raw` + `canvas_text`,
+   offline-proven (the 11-char fence shift removed; renoise now targets the bad-form
+   tokens, not the fence). `verify_fresh`-gated, ready to run on GPU.
 
 **AWAITS OWNER ACTION (the remaining big wins):**
-- **Deploy the co-location image** → unlocks the KV-cache build (the 62% win) + the
-  per-step renoise loop. THE highest-value next step.
-- **Compiled path (~1000 tok/s)** → the `find_spec` graph-break is a deep
-  torch.compile/Dynamo + transformers-5.11.0 compat call — your decision whether to
-  invest (the `#8 follow-up` doc has the root-cause).
-- **Renoise-fence fix** (low priority) — oracle needs a no-fence-strip parse for canvas.
+- **Deploy the co-location image** → unlocks the KV-cache **worker-reuse half** (the 62%
+  win — keying is built, contract documented) + the per-step renoise loop (driver built).
+  THE highest-value next step.
+- **Compiled path (~1000 tok/s)** → root-caused (`5245828c`): the `find_spec` break is
+  structural — torch 2.9.0 lacks `grouped_mm` so the MoE forward hits the version-check
+  branch Dynamo refuses to trace (`moe.py:301`). One owner-gated experiment: bump
+  `torch==2.10.x` + `transformers==5.12.1`, re-test compiled with
+  `TORCH_LOGS="graph_breaks,recompiles"`. Caveat: it likely trades find_spec for a
+  CUDA-graphs break (`grouped_mm` is CUDA-graph-incompatible while the lib hardwires
+  `reduce-overhead`); the clean escape is transformers ≥5.12's grouped→batched_mm
+  decode auto-switch, unverified for DiffusionGemma. If (b), stop — KV-cache reuse is
+  the only broadly-applicable A100 lever.
+- **Live-measure on first GPU run:** residual-#3 (piecewise `canvas_text` vs joint parse
+  fidelity — `▁`/space artifacts) is a characterization item, not a wiring bug.
 
 **Deploy note:** `flash undeploy --all` OSErrors here — use `flash undeploy <name>
 --force` + `flash deploy`; always `python3 verify_fresh.py` → `FRESH ✓` before measuring.
@@ -95,7 +116,6 @@ correctness metric.
 | `repl` skill | EXPLAIN a parser error (prose) | 0/8 real-parser, **8/8 hallucinated JSON/XML** | 7/8 real `parse-forms`/parinfer, 0/8 hallucinated | KEEP — huge lift; works for PROSE/explanation too, not just code-gen |
 | `data-oriented-clojure` skill | design session-history storage (mindset) | 1/8 EAV, 0/8 namespaced, **8/8 hallucinated commercial-Seon SaaS** | 8/8 EAV + namespaced, 1/8 hallucinated | KEEP — huge lift; redirects the commercial-Seon prior to our EAV model |
 | `seon.*` required-API render (feat `844ec448`) | (context section, not a skill) | — | shipped, ~2.9k tok/turn | **LIFT UNMEASURED** — must A/B to justify the token cost or trim the cap |
-
 | `ui-live-tiles` skill | render a live todos tile | 0/8 real-render-ns, 0/8 namespaced, 7/8 hallucinated tile-map | 8/8 `:seon.render` + namespaced + `:malli/schema` | KEEP — huge lift |
 
 **▸ SWEEP COMPLETE — 6/6 skills, ALL ~0→100% structural.** The north-star's
