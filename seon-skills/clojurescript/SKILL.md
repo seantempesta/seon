@@ -136,6 +136,17 @@ self-host-specific -- they do NOT apply to ahead-of-time `.cljs`:
   surface. The stash is process-scoped: it does NOT survive a pod restart
   (`lookup-result` then returns the honest "prior session -- re-run the form"
   miss).
+- **A bare `result/<id>` on its own line is a RE-REFERENCE, not a fresh eval.**
+  It is a SYMBOL, and a bare symbol is otherwise PROSE (dropped by
+  `seon.repl.internal/parse-forms`). The parser special-cases the `result`
+  namespace (`result-ref-symbol?`) so the bare ref survives as a `:kind :form`
+  entry and self-evaluates into its stashed value via `eval.cljs`'s
+  `result-var-ref?` (eval'd in `:expr` context so the value actually returns,
+  and a dead/pruned id reads the graceful-miss string instead of throwing). It
+  is NOT a call -- do NOT wrap it in `(await ...)` (see the `await`-only-in-
+  `^:async` rule above) or `(identity ...)`; the bare symbol IS the surface.
+  A digit-leading id (`result/0xO-...`) is an INVALID token that throws at read
+  time and stays a `:read` failure -- re-run its form.
 
 ## Verifying CLJS behavior live
 

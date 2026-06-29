@@ -308,6 +308,38 @@
         (is (seq? (:form (first entries))))))))
 
 ;; ============================================================
+;; #39 — a bare `result/<id>` symbol is a stash RE-REFERENCE, NOT prose.
+;; A bare symbol is normally dropped as prose, but a `result/<id>` symbol
+;; self-evaluates into its previously-stashed eval value (the documented
+;; value-reuse surface, `seon.eval/result-var-ref?`). Before the fix it
+;; was dropped, so an agent referring back to a prior result got nothing.
+;; A digit-leading id (`result/0xO-…`) is an INVALID token that throws at
+;; read time → stays a `:read` failure (covered by `mined-real-agent-leaks`).
+;; ============================================================
+
+(deftest result-ref-is-a-form
+  (testing "a bare `result/<id>` symbol evaluates (is a :form, not dropped)"
+    (let [entries (parse/parse-forms "result/abc123def456")]
+      (is (= 1 (count entries)))
+      (is (= :form (:kind (first entries))))
+      (is (= 'result/abc123def456 (:form (first entries))))
+      ;; byte-faithful source is what the eval path re-references
+      (is (= "result/abc123def456" (:source (first entries))))))
+  (testing "a leading `;;` comment attaches as narration to the re-reference"
+    (let [entries (parse/parse-forms ";; recall the earlier value\nresult/auC2606")
+          form    (first (filter #(= :form (:kind %)) entries))]
+      (is (= 'result/auC2606 (:form form)))
+      (is (= "recall the earlier value" (:narration form)))))
+  (testing "a result-ref between two real forms — all three evaluate in order"
+    (let [forms (->> (parse/parse-forms "(+ 1 2)\nresult/xyz999\n(inc 4)")
+                     (filter #(= :form (:kind %)))
+                     (mapv :form))]
+      (is (= ['(+ 1 2) 'result/xyz999 '(inc 4)] forms))))
+  (testing "a NON-result bare symbol is still prose (dropped)"
+    (is (= [] (parse/parse-forms "other/abc123")))
+    (is (= [] (parse/parse-forms "plainsym")))))
+
+;; ============================================================
 ;; Inline-backtick prose — `` `(…) ``/`~x`/`~@x` are DROPPED, never
 ;; evaluated. The live "backtick cascade": one inline `` `(form) `` in
 ;; LLM narration ("I'll use `(subs s 0 5)` to format") used to shred into
@@ -740,7 +772,15 @@
   (testing "combined char + regex + string parens — full form, not truncated"
     (is (= "(foo \\) #\"a)b\" \"c)d\" bar)"
            (parse/form-source-at
-             "(foo \\) #\"a)b\" \"c)d\" bar) trailing" 0)))))
+             "(foo \\) #\"a)b\" \"c)d\" bar) trailing" 0))))
+
+  ;; #52: a `)` inside a `;`-to-EOL comment must NOT close the form early
+  ;; (the classic hand-balancer bug — a naive depth counter truncates at
+  ;; the comment's `)`). rewrite-clj's one-node parse is comment-aware.
+  (testing "`)` inside a line comment does not miscount depth"
+    (is (= "(foo ; ) unbalanced comment\n  bar)"
+           (parse/form-source-at
+             "(foo ; ) unbalanced comment\n  bar)\ntrailing" 0)))))
 
 ;; ============================================================
 ;; Mined from the LIVE default store (`:seon.eval/source` rows) — REAL

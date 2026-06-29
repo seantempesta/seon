@@ -51,7 +51,9 @@
 
    A top-level read form is a `:kind :form` entry (EVALUATED) iff it is a
    LIST/SEQ — `(…)` plus the reader-macros that read as seqs (`@x`/`'x`/
-   `#(…)`/`` `(…) ``/`#'x`). EVERYTHING else is prose:
+   `#(…)`/`` `(…) ``/`#'x`) — OR a bare `result/<id>` symbol (a stash
+   RE-REFERENCE that self-evaluates into its prior value, #39).
+   EVERYTHING else is prose:
 
      - real `;`/`;;` comments → kept as narration (the taught reasoning
        channel — these are NOT the trap);
@@ -172,20 +174,38 @@
    comment above)."
   #{:syntax-quote :unquote :unquote-splicing})
 
+(defn- result-ref-symbol?
+  "True if `form` is a bare `result/<id>` symbol — a RE-REFERENCE to a
+   previously-stashed eval value (the documented value-reuse surface,
+   `seon.eval/result-var-ref?`). A bare symbol is normally prose, but a
+   `result/<id>` symbol SELF-EVALUATES into its stashed value, so it is a
+   genuine FORM (evaluated), NOT prose — without this, an agent that
+   refers back to a prior result (`result/abc…` on its own line) gets
+   nothing (#39). The namespace must be EXACTLY `result` (matching the
+   eval-side detector); a digit-leading id (`result/0xO-…`) is an invalid
+   token that THROWS at read time and never reaches here — it stays a
+   `:read` failure, unchanged."
+  [form]
+  (and (symbol? form) (= "result" (namespace form))))
+
 (defn- prose-token?
   "True if a parsed top-level token is PROSE (not evaluated). `form` is
    the read sexpr; `tag` is the rewrite-clj node tag. The form/prose cut
-   is `(seq? form)` — a list/seq evaluates — with TWO refinements: a
+   is `(seq? form)` — a list/seq evaluates — with THREE refinements: a
    `:reader-macro` tagged literal (`#inst`/`#uuid`/`#js`/`#?(…)`) sexprs
    to a seq (`(read-string …)`) but is a DATUM, not a form, so it is
-   prose; and an inline-backtick reader-macro
+   prose; an inline-backtick reader-macro
    ([[inline-backtick-tags]] — `` `(…) ``/`~x`/`~@x`) likewise sexprs to a
-   seq but is inline prose, not code. Everything that is not a seq
-   (scalars, symbols, `{…}`/`[…]`/`#{…}`) is prose."
+   seq but is inline prose, not code; and a bare `result/<id>` symbol
+   ([[result-ref-symbol?]]) is a stash RE-REFERENCE that self-evaluates,
+   so it is a FORM (#39) despite being a bare symbol. Everything else
+   that is not a seq (scalars, other symbols, `{…}`/`[…]`/`#{…}`) is
+   prose."
   [form tag]
-  (or (= tag :reader-macro)
-      (contains? inline-backtick-tags tag)
-      (not (seq? form))))
+  (and (not (result-ref-symbol? form))
+       (or (= tag :reader-macro)
+           (contains? inline-backtick-tags tag)
+           (not (seq? form)))))
 
 (defn- data-literal?
   "True if `form` is a top-level DATA LITERAL — a map, vector, or set.
@@ -583,8 +603,10 @@
 
    FORMS-AND-PROSE-ONLY (#50/#52): a top-level read form is a `:kind
    :form` entry (EVALUATED) iff it is a LIST/SEQ — `(…)` and the
-   reader-macros that read as seqs (`@x`/`'x`/`#(…)`/`` `(…) ``/`#'x`).
-   EVERYTHING else is prose and is DROPPED (NOT echoed back as a `;;`
+   reader-macros that read as seqs (`@x`/`'x`/`#(…)`/`` `(…) ``/`#'x`) —
+   or a bare `result/<id>` stash RE-REFERENCE symbol (#39, which
+   self-evaluates into its prior value). EVERYTHING else is prose and is
+   DROPPED (NOT echoed back as a `;;`
    line — that echo was the `;;`-imitation trap). Prose covers: bare
    atoms (symbols incl. `do`/`if`, numbers, strings, keywords, a bare
    `=>`/`⇒`), TAGGED literals (`#inst`/`#uuid`/`#js`/`#?(…)`), an A.1
