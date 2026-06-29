@@ -179,8 +179,32 @@ infill span lands on its slot, the clamp text holds every structural token, and
 the spans partition `[0, len)`. The worker clamps `::clamp-spans` and infills
 `::infill-spans` (spec slots first so the body generates against a known
 contract) → a complete map-in/map-out fn. Remaining work is the GPU round-trip
-(P0 canvas-length probe must still confirm the frame fits one canvas with clean
-BPE clamp/slot boundaries) + the E1 kill-gate A/B against arm 3.
++ the E1 kill-gate A/B against arm 3.
+
+**BPE token-boundary alignment — MEASURED, $0, CPU tokenizer-only (2026-06-29).**
+The clamp/infill/inject control primitives are CHAR-spans but the worker maps each
+to canvas TOKEN positions by OVERLAP (`diffgemma_common.py span_to_positions`): a
+boundary that falls mid-token puts that one token in BOTH the clamp and the infill
+set, so the two ops can't be cleanly separated. An offline checker
+(`tmp/flash-diffgemma/span_token_align_check.py`, gitignored — loads only the
+tokenizer, ~MBs, no model, no GPU: `AutoTokenizer.from_pretrained(
+"google/diffusiongemma-26B-A4B-it")` gives a `GemmaTokenizer`, vocab 262144)
+tokenizes a real `build-scaffold` frame with `return_offsets_mapping=True,
+add_special_tokens=False` (mirroring the worker's `skip_special_tokens=False`
+canvas basis) and asserts every span boundary lands on a token edge. **Measured: 4
+of the scaffold's boundaries STRADDLED** — at each `:map` body slot's end the slot's
+trailing `]` abutted the clamp's `])`, and BPE merges `]])` into ONE token, so the
+slot end and the `map-close` start shared a token. **Fix (applied to
+`scaffold.cljs`): the `map-close` clamp text now opens with a newline (`"\n  ])\n\n"`)
+so the `])` lands on its own line** — a token boundary falls between the slot and
+the structural close; re-run gives all 11 scaffold boundaries plus the
+retrieval-injection symbol span (`transct!`) aligned cleanly, across multiple
+fn-name/intent variants. The scaffold offline test stays green (27 assertions).
+**Verdict: the span-based control primitives survive real BPE tokenization** — the
+only token-merge hazard was the huddled `]]` closers, now nudged apart. (A live-pod
+re-eval would need a pod restart; the running shared pod is detached from shadow
+hot-reload and still holds pre-nudge `segments` in memory — the disk source, the
+fresh-compile suite, and the offline checker are the proof.)
 
 ### P3 — The Seon interface
 

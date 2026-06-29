@@ -112,11 +112,11 @@
   [[:clamp  :register-request-open
     (str "(schema/register! ::" name "-request\n  [:map\n   ")]
    [:infill :request-body  "[::input :string]"]
-   [:clamp  :map-close      "])\n\n"]
+   [:clamp  :map-close      "\n  ])\n\n"]
    [:clamp  :register-response-open
     (str "(schema/register! ::" name "-response\n  [:map\n   ")]
    [:infill :response-body "[::result :string]"]
-   [:clamp  :map-close      "])\n\n"]
+   [:clamp  :map-close      "\n  ])\n\n"]
    [:clamp  :defn-head
     (str "(defn " name "\n  " (pr-str intent)
          "\n  {:malli/schema [:=> [:cat ::" name "-request] ::" name "-response]}"
