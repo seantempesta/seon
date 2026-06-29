@@ -91,6 +91,14 @@ Round-trip test on the live worker (`33d2`, fingerprint-verified):
   (stop, the common case) → else renoise ONLY the flagged char-spans → resume. **Next
   build: the Seon-side orchestration** (parse the partial → map error `:span` → decide
   stop/renoise) that turns the two proven primitives into the closed loop.
+- **CLOSED LOOP DEMONSTRATED end-to-end (GPU denoise + LOCAL bb-oracle):** denoise_to_step at
+  K → `bin/oracle-server` parses the partial locally → SHORT-CIRCUIT when clean. At K=16 the
+  `mean` fn parsed clean → stop, ~67% steps saved. **KEY insight it surfaced:** K=20/24 produced
+  `(def mean [nums] …)` — PARSES clean but is semantically WRONG (`def` not `defn`). The
+  parse-tier alone CAN'T gate correctness; the **eval-tier (cljs.js, in build) is the needed
+  semantic gate**. (Local oracle ran 25-27ms here = bb subprocess cold-start per call; a
+  persistent server is 0.05ms — the demo spawned fresh each call.) Renoise path not yet exercised
+  (all partials parsed clean — needs a delimiter-error case).
 
 **MEASURED SPEED REALITY (falsified an estimate — record it):** a custom-stopping
 short-circuit is NOT faster — it's ~4× SLOWER. `mean` fn: full 48-step COMPILED path
