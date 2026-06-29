@@ -258,7 +258,11 @@ When iterating autonomously (e.g. overnight), each cycle:
   simplest deploy (native binary + `.cljc`, no build, ~0.1ms warm); **bb SUPERSEDES the Node
   `:worker-validator` for the parse-only hot loop**. **eval-tier → Node/cljs.js** self-host (the only
   true-CLJS eval; bb-SCI/GraalVM eval Clojure → false-negatives on `^:async`/interop). Python `Oracle`
-  unchanged when eval migrates (same API).
+  unchanged when eval migrates (same API). **PARSE-TIER BUILT + offline-proven (`45e801d6`):**
+  `bin/oracle-server` (bb persistent line-server) measured **~0.05ms warm / ~21ms cold-spawn** (p99
+  0.24ms), byte-identical span contract to the Node validator, no shadow build. The worker spawns it once
+  (`Oracle(["bb", "bin/oracle-server"])`) → sub-ms local validation per checkpoint. Remaining for full
+  co-location: bundle bb+oracle-server onto the worker image, wire the Python spawn, the in-process KV cache.
 
 ## Pointers
 
