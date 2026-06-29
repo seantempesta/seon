@@ -164,12 +164,51 @@ seam Seon already uses to turn replies into actions. The system-forced path need
 zero model cooperation and proves the thesis alone; the sentinel is deferred
 (see [[roadmap]]).
 
-**The four worked modes map to the owner's stages:** `:design-schema` (Stage 1 —
+**The worked modes map to the owner's stages:** `:design-schema` (Stage 1 —
 schema → generated-example-data → adapt loop), `:defn-with-specs` (Stage 2 — clamp
 the `defn` + force the `:malli/schema` in/out into infill slots — the kill-gate
 mode), `:generative-test` (Stage 3), `:repl-explore` (Stage 4, a thin/empty
-scaffold = the normal agent loop). Full taxonomy + scaffolds:
+scaffold = the normal agent loop), and `:edit-namespace` (the ns DEFINITION
+itself). Full taxonomy + scaffolds:
 [[research/mode-driven-guided-generation-2026-06-28]] §2.
+
+**`:mode/edit-namespace` — the ns definition is editable too** (design, unbuilt). A
+refinement pass that converges a namespace is not just the fns and schemas inside
+it — the `ns` form and its `:require`s are part of the namespace and are themselves
+a mutation target. This mode shows the EXISTING `ns` form as a BEFORE and lays out
+the WHOLE `ns` form as the infill AFTER: a clamped scaffold of the `ns` skeleton
+with infill slots for the require vector + aliases, so the agent edits its
+dependency set under the same clamp+infill lowering as every other mode. The
+op-axis applies directly — adding a require is `:upsert`, dropping a dead one is
+`:retract`; the persisted edge it writes is the program graph's `:seon.ns/requires`.
+Editing requires is part of converging the namespace, so it composes with the
+convergent-pass frame, not beside it.
+
+### Dynamic context — discover, require, understand
+
+Two reactive section-fns make a namespace edit informed rather than a guess. Both
+are pure functions of the DB at render time (the section-fn pattern, re-queried
+every generation):
+
+- **Embedding-driven discovery** (design, unbuilt). When the agent is editing a
+  namespace, parse its words/identifiers and run an **embedding search** over the
+  existing **Vertex + Proximum/HNSW** program-graph index (gated by `SEON_EMBED`)
+  for (a) relevant EXISTING namespaces and (b) interesting FUNCTIONS within them
+  that might be reusable. Surface the hits as context so the agent DISCOVERS other
+  software it could `:require` and call — the retrieval-as-control-signal thesis
+  applied to dependency discovery, turning "what's already in this core I could
+  reuse?" into a semantic-search-backed section rather than a guess. Grounding: the
+  Vertex/Proximum embedding index over `:seon.fn/source`, the `:seon.ns`/`:seon.fn`
+  program graph. See [[grounding]].
+- **Required-API render** (in flight, agent a88b157). Render the API —
+  signatures + docstrings — of the namespaces the agent ALREADY `:require`s, so it
+  understands its current deps. Read off `:seon.ns/requires` + the `:seon.fn`
+  entities those namespaces own.
+
+Together they are the loop `:edit-namespace` runs on: **discover** (the embedding
+search finds NEW deps) → **require** (the `:edit-namespace` infill writes them into
+the `ns` form) → **understand** (the required-API render explains the ones it now
+has).
 
 ## Guided generation — how a mode lowers
 

@@ -168,6 +168,28 @@ ONLY after the kill-gate is green. The full design exists
   open item without being called? If instrumentation only throws on call, the
   reactive-convergence premise needs explicit dirty-marking. (Critique F5.)
 
+### P5 — `:edit-namespace` + embedding-driven dependency discovery (design, unbuilt)
+
+A capability EXTENSION, not a gate — fold in once the engine + convergence loop
+(P4) exist, since it composes with the refinement-pass model. Design in
+[[architecture]] "discover, require, understand".
+
+- **`:mode/edit-namespace`** — the `ns` form + its `:require`s become a mutation
+  target, not just the fns/schemas inside the ns. Clamp the `ns` skeleton, infill
+  the require vector + aliases; same lowering as every mode, op-axis applies (add =
+  `:upsert`, drop dead = `:retract`); it writes `:seon.ns/requires`.
+- **Embedding-driven discovery section-fn** — parse the namespace's
+  words/identifiers → embedding search over the **Vertex + Proximum/HNSW** index
+  (gated by `SEON_EMBED`) for relevant existing namespaces + reusable fns within
+  them; surface them so the agent DISCOVERS deps to require. Retrieval-as-control
+  applied to dependency discovery.
+- **Composition (in flight, agent a88b157):** pairs with the required-API render
+  (signatures+docstrings of the namespaces an agent already `:require`s).
+  Discovery finds NEW deps; the required-API render explains the ONES IT HAS —
+  discover → require → understand.
+- Grounding: the embeddings infra (Vertex/Proximum over `:seon.fn/source`) + the
+  program graph (`:seon.ns/requires`, `:seon.fn`). See [[grounding]].
+
 ## CUT from the MVP (defer until one forced infill beats arm 3)
 
 These are elegant superstructure on an unproven primitive. Build none of them
