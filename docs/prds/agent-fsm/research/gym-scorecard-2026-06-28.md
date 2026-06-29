@@ -10,7 +10,7 @@ tags: [agent, dashboard, flow]
 
 `bin/gym-scorecard` runs the whole competency battery, collects every
 axis, and appends ONE git-SHA-keyed EDN line to
-`docs/prds/agent-fsm/research/gym-scorecard.log`. That single number-set
+`docs/prds/agent-fsm/research/gym-scorecard-trend.edn`. That single number-set
 is the fitness function: make a context change, re-run, keep it iff it
 lifted the WHOLE battery — otherwise revert. The harness never sees the
 answers (anti-cheat below), so you can't game the number by reading one.

@@ -27,14 +27,16 @@
 # it lifted the WHOLE battery (per-competency pass / tokens / error-rate /
 # canvas / judge), else revert. The log's SHA-keyed lines ARE the trend.
 #
-# Default log: docs/prds/agent-fsm/research/gym-scorecard.log
+# Default log: docs/prds/agent-fsm/research/gym-scorecard-trend.edn
+#   (EDN-lines, git-TRACKED — *.log is gitignored, so the cross-SHA trend
+#    would not survive; a .edn under docs/ survives + is greppable)
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 BUILD=1
 ALLOW_PAID=0
-LOG="docs/prds/agent-fsm/research/gym-scorecard.log"
+LOG="docs/prds/agent-fsm/research/gym-scorecard-trend.edn"
 
 for arg in "$@"; do
   case "$arg" in

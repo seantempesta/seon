@@ -182,7 +182,7 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private default-log
-  "docs/prds/agent-fsm/research/gym-scorecard.log")
+  "docs/prds/agent-fsm/research/gym-scorecard-trend.edn")
 
 (defn- env [k] (aget (.. js/process -env) k))
 
