@@ -233,15 +233,77 @@
        ":seon.agent.search/glob, or pass :seon.agent.search/paths to drill; "
        ":seon.agent.search/full? true returns every line."))
 
+;; ============================================================
+;; Lane-correctness — the active CLJS pod lane is canonical; a paused
+;; `.clj` lane-sibling (foo.clj alongside foo.cljs) is NOISE. File grep
+;; runs rg over the whole repo (.clj + .cljs), so a naive pattern can
+;; surface dead JVM source and HIDE the active pod source (the
+;; `(defn ^:async transact!` in db.cljs fails a `"defn transact!"` regex
+;; while the paused `(defn transact!` in db.clj matches). We drop a `.clj`
+;; match when its co-located `<base>.cljs` exists — UNLESS the request
+;; explicitly targeted the `.clj`. Standalone `.clj` / `.cljc` /
+;; reference-code paths are never touched (no sibling → nothing suppressed).
+;; ============================================================
+
+(defn cljs-sibling-exists?
+  "True when `clj-path` (a path ending `.clj`) has a co-located
+   `<base>.cljs` on disk. The rg search root IS the real filesystem, so a
+   targeted existsSync is the source of truth (the `.cljs` need not be in
+   the match set — that's exactly the trap: its `^:async` defn didn't match
+   the regex)."
+  [clj-path]
+  (try
+    ;; a `.clj` path's `.cljs` sibling is the same path + "s".
+    (.existsSync (js/require "node:fs") (str clj-path "s"))
+    (catch :default _ false)))
+
+(defn explicit-clj?
+  "True when the REQUEST explicitly targeted this `.clj` — so auto-suppression
+   must NOT apply. Explicit means the caller named `.clj` directly:
+   a `:seon.agent.search/glob` ending exactly `.clj` (e.g. `*.clj`,
+   restricting to clj-only — NOT `db.clj*`, which also matches `.cljs`), or a
+   `:seon.agent.search/paths` entry that names a `.clj` file this match
+   sits under."
+  [clj-path paths glob]
+  (or (boolean (and glob (str/ends-with? glob ".clj")))
+      (boolean (some (fn [p] (and (str/ends-with? p ".clj")
+                                  (str/ends-with? clj-path p)))
+                     paths))))
+
+(defn suppress-paused-clj-siblings
+  "Remove file matches for a paused `.clj` lane-sibling whose active
+   `<base>.cljs` exists on disk, unless the request explicitly targeted the
+   `.clj`. Co-located pairs only; standalone `.clj`/`.cljc`/reference-code
+   untouched. `paths`/`glob` are the RAW request values (nil when omitted).
+   existsSync is cached per call (a dense file has many match lines)."
+  [matches paths glob]
+  (let [cache (atom {})
+        sibling? (fn [p]
+                   (if (contains? @cache p)
+                     (@cache p)
+                     (let [v (cljs-sibling-exists? p)]
+                       (swap! cache assoc p v)
+                       v)))]
+    (into []
+          (remove (fn [m]
+                    (let [p (::search/path m)]
+                      (and (str/ends-with? p ".clj")
+                           (not (explicit-clj? p paths glob))
+                           (sibling? p)))))
+          matches)))
+
 (defn success-from
   "Parse rg --json stdout into the ok?-true envelope via [[grouped-envelope]]
-   (grouped by FILE)."
-  [stdout cap full?]
-  (grouped-envelope (into [] (keep parse-match-line) (str/split-lines stdout))
-                    ::search/path file-row
-                    {:rows ::search/by-file :group-count ::search/file-count
-                     :hint file-hint}
-                    cap full?))
+   (grouped by FILE). Paused `.clj` lane-siblings are suppressed before
+   grouping (the active CLJS pod lane is canonical); `paths`/`glob` are the
+   raw request values so an explicitly-targeted `.clj` still reaches the caller."
+  [stdout paths glob cap full?]
+  (-> (into [] (keep parse-match-line) (str/split-lines stdout))
+      (suppress-paused-clj-siblings paths glob)
+      (grouped-envelope ::search/path file-row
+                        {:rows ::search/by-file :group-count ::search/file-count
+                         :hint file-hint}
+                        cap full?)))
 
 ;; ============================================================
 ;; Graph target — text search over the PROGRAM GRAPH (the literal

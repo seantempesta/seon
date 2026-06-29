@@ -260,7 +260,7 @@
 
               ;; Output cap — partial stdout is still parseable.
               (and err (= "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" (.-code err)))
-              (assoc (in/success-from stdout max-results full?)
+              (assoc (in/success-from stdout paths glob max-results full?)
                      :seon.agent.search/truncated? true)
 
               ;; rg exit 1 = searched fine, found nothing. NOT an error.
@@ -278,7 +278,7 @@
                        (if (str/blank? (str stderr)) (.-message err) stderr))
 
               :else
-              (in/success-from stdout max-results full?))))))
+              (in/success-from stdout paths glob max-results full?))))))
     (catch :default e
       (in/fail (str "unexpected error in seon.agent.search/grep: "
                     (or (some-> e .-message) (str e)))))))

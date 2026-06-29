@@ -53,6 +53,14 @@
 (def ^:private beta-path  (.join npath fixture-dir "beta.cljs"))
 (def ^:private many-path  (.join npath fixture-dir "many.txt"))
 
+;; Lane-sibling fixtures: a paused `.clj` + its active `.cljs` (same base,
+;; same dir) reproduce the #86 trap — file grep must surface the canonical
+;; `.cljs` and suppress the dead `.clj`. `solo.clj` has NO `.cljs` sibling
+;; (standalone — must always survive).
+(def ^:private lane-clj-path  (.join npath fixture-dir "lane.clj"))
+(def ^:private lane-cljs-path (.join npath fixture-dir "lane.cljs"))
+(def ^:private solo-clj-path  (.join npath fixture-dir "solo.clj"))
+
 (defonce ^:private !saved-fs-config (atom nil))
 
 (defn- setup! []
@@ -64,6 +72,15 @@
   (.writeFileSync nfs beta-path "(ns beta)\n\n(defn hello [] :needle-beta)\n")
   (.writeFileSync nfs many-path
                   (str/join "\n" (map #(str "dup-needle line " %) (range 20))))
+  ;; Lane-sibling pair: same base+dir. `siblingtoken` is in BOTH; the active
+  ;; cljs defines the fn `^:async` so a `"defn shared-fn"` regex matches ONLY
+  ;; the paused clj (the #86 trap). `solotoken` lives in the standalone clj.
+  (.writeFileSync nfs lane-clj-path
+                  "(ns lane)\n;; siblingtoken\n(defn shared-fn [] :clj)\n")
+  (.writeFileSync nfs lane-cljs-path
+                  "(ns lane)\n;; siblingtoken\n(defn ^:async shared-fn [] :cljs)\n")
+  (.writeFileSync nfs solo-clj-path
+                  "(ns solo)\n;; solotoken\n(defn solo-fn [] :x)\n")
   ;; Save the live config, then scope the allowlist to the fixture dir.
   (reset! !saved-fs-config @fs-int/!config)
   (fs/configure! {:seon.agent.fs/allowed-roots [fixture-dir]
@@ -322,6 +339,82 @@
                    (is (= [beta-path]
                           (mapv :seon.agent.search/path by-file)))))
           (.then done)))))
+
+;; ---------------------------------------------------------------------------
+;; 9. Lane-correctness (#86) — the active CLJS pod lane is canonical; a paused
+;;    `.clj` lane-sibling is suppressed in FILE grep.
+;; ---------------------------------------------------------------------------
+
+(deftest sibling-pair-shows-only-cljs
+  ;; (a) foo.clj + foo.cljs in the same dir, pattern in BOTH → only the
+  ;; canonical .cljs survives; the paused .clj is dropped.
+  (async done
+    (-> (resolves! (search/grep {:seon.agent.search/pattern "siblingtoken"}))
+        (.then (fn [{ok?     :seon.agent.search/ok?
+                     by-file :seon.agent.search/by-file}]
+                 (is (true? ok?))
+                 (let [paths (mapv :seon.agent.search/path by-file)]
+                   (is (some #{lane-cljs-path} paths)
+                       "active .cljs sibling surfaces")
+                   (is (not (some #{lane-clj-path} paths))
+                       "paused .clj sibling is suppressed"))))
+        (.then done))))
+
+(deftest standalone-clj-still-shown
+  ;; (b) a .clj with NO .cljs sibling is untouched.
+  (async done
+    (-> (resolves! (search/grep {:seon.agent.search/pattern "solotoken"}))
+        (.then (fn [{ok?     :seon.agent.search/ok?
+                     by-file :seon.agent.search/by-file}]
+                 (is (true? ok?))
+                 (is (= [solo-clj-path] (mapv :seon.agent.search/path by-file))
+                     "standalone .clj (no .cljs sibling) is never suppressed")))
+        (.then done))))
+
+(deftest explicit-clj-path-reaches-it
+  ;; (c) explicitly naming the .clj via :paths bypasses suppression.
+  (async done
+    (-> (resolves! (search/grep {:seon.agent.search/pattern "siblingtoken"
+                                 :seon.agent.search/paths   [lane-clj-path]}))
+        (.then (fn [{ok?     :seon.agent.search/ok?
+                     by-file :seon.agent.search/by-file}]
+                 (is (true? ok?))
+                 (is (= [lane-clj-path] (mapv :seon.agent.search/path by-file))
+                     "explicitly-targeted .clj reaches the caller")))
+        (.then done))))
+
+(deftest explicit-clj-glob-reaches-it
+  ;; (c') a `*.clj` glob restricts to clj-only → explicit, so not suppressed.
+  (async done
+    (-> (resolves! (search/grep {:seon.agent.search/pattern "siblingtoken"
+                                 :seon.agent.search/glob    "*.clj"}))
+        (.then (fn [{ok?     :seon.agent.search/ok?
+                     by-file :seon.agent.search/by-file}]
+                 (is (true? ok?))
+                 (is (some #{lane-clj-path} (mapv :seon.agent.search/path by-file))
+                     "a `*.clj` glob is explicit clj-targeting — reaches it")))
+        (.then done))))
+
+(deftest trap-defn-async-no-longer-hands-dead-clj
+  ;; (d) THE trap: `"defn shared-fn"` matches ONLY the paused .clj (the active
+  ;; cljs is `defn ^:async shared-fn`). The fix must NOT hand the agent the
+  ;; dead .clj. With a regex matching BOTH, the canonical .cljs surfaces.
+  (async done
+    (-> (resolves! (search/grep {:seon.agent.search/pattern "defn shared-fn"}))
+        (.then (fn [{ok?     :seon.agent.search/ok?
+                     by-file :seon.agent.search/by-file}]
+                 (is (true? ok?))
+                 (is (not (some #{lane-clj-path}
+                                (mapv :seon.agent.search/path by-file)))
+                     "the paused .clj is no longer handed to the agent")
+                 ;; a pattern matching BOTH siblings surfaces the canonical .cljs:
+                 (resolves! (search/grep {:seon.agent.search/pattern "shared-fn"}))))
+        (.then (fn [{by-file :seon.agent.search/by-file}]
+                 (let [paths (mapv :seon.agent.search/path by-file)]
+                   (is (some #{lane-cljs-path} paths)
+                       "active db.cljs-analog surfaces, not the paused .clj")
+                   (is (not (some #{lane-clj-path} paths))))))
+        (.then done))))
 
 ;; ===========================================================================
 ;; grep-graph — the PROGRAM-GRAPH counterpart. Same envelope shape (capped
