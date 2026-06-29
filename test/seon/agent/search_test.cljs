@@ -7,15 +7,18 @@
    1. `grep` NEVER rejects — every outcome RESOLVES to a
       `:seon.agent.search/grep-response` envelope (same contract as
       seon.db/transact!, model: test/seon/db/envelope_test.cljs).
-   2. Matches carry path + line-number + line-text the agent can feed
-      straight into seon.agent.fs/read-file (search → read).
-   3. No matches is SUCCESS (rg exit 1): ok? true, empty matches.
+   2. Hits are GROUPED BY FILE (:by-file) — each file row carries path +
+      count + the first line-number + line-text the agent can feed straight
+      into seon.agent.fs/read-file (search → read).
+   3. No matches is SUCCESS (rg exit 1): ok? true, empty :by-file.
    4. The seon.agent.fs allowlist gates search roots — an out-of-scope path
       resolves to the guiding denied envelope; no roots configured =
       default-deny envelope.
-   5. max-results clips with :seon.agent.search/truncated? true.
+   5. max-results clips FILE ROWS with :seon.agent.search/truncated? true +
+      a narrowing :seon.agent.search/hint; honest totals always reported.
    6. Bad regex (rg exit 2) → guiding message + raw stderr preserved.
    7. :seon.agent.search/glob filters filenames.
+   8. :full? true returns the flat :seon.agent.search/matches list.
 
    Fixtures: a small dir under tmp/search-test/ (gitignored) created
    at runtime; seon.agent.fs config is SAVED before each test, pointed at
@@ -77,16 +80,20 @@
   (async done
     (-> (resolves! (search/grep {:seon.agent.search/pattern "needle-alpha"}))
         (.then (fn [{ok?     :seon.agent.search/ok?
-                     matches :seon.agent.search/matches
+                     by-file :seon.agent.search/by-file
                      n       :seon.agent.search/match-count
+                     fc      :seon.agent.search/file-count
                      trunc?  :seon.agent.search/truncated?}]
                  (is (true? ok?))
-                 (is (= 1 n))
+                 (is (= 1 n) "honest total match count")
+                 (is (= 1 fc) "one file")
                  (is (false? trunc?))
                  (let [{p :seon.agent.search/path
+                        c :seon.agent.search/count
                         l :seon.agent.search/line-number
-                        t :seon.agent.search/line-text} (first matches)]
+                        t :seon.agent.search/line-text} (first by-file)]
                    (is (= alpha-path p) "absolute, allowlisted path")
+                   (is (= 1 c) "per-file hit count")
                    (is (= 3 l) "1-based line number")
                    (is (= "the needle-alpha is here" t)
                        "line text, newline stripped")
@@ -106,12 +113,14 @@
   (async done
     (-> (resolves! (search/grep {:seon.agent.search/pattern "zzz-never-present"}))
         (.then (fn [{ok?     :seon.agent.search/ok?
-                     matches :seon.agent.search/matches
+                     by-file :seon.agent.search/by-file
                      n       :seon.agent.search/match-count
+                     fc      :seon.agent.search/file-count
                      trunc?  :seon.agent.search/truncated?}]
                  (is (true? ok?) "no matches is ok? true")
-                 (is (= [] matches))
+                 (is (= [] by-file))
                  (is (= 0 n))
+                 (is (= 0 fc))
                  (is (false? trunc?))))
         (.then done))))
 
@@ -146,21 +155,71 @@
         (.then done))))
 
 ;; ---------------------------------------------------------------------------
-;; 4. max-results truncation.
+;; 4a. Grouping — 20 hits in ONE file roll up to a single file row, honest
+;;     count, NOT truncated (the concise win: one row, not 20 lines).
 ;; ---------------------------------------------------------------------------
 
-(deftest max-results-clips-and-flags-truncated
+(deftest hits-group-into-one-file-row-with-honest-count
+  (async done
+    (-> (resolves! (search/grep {:seon.agent.search/pattern "dup-needle"}))
+        (.then (fn [{ok?     :seon.agent.search/ok?
+                     by-file :seon.agent.search/by-file
+                     n       :seon.agent.search/match-count
+                     fc      :seon.agent.search/file-count
+                     trunc?  :seon.agent.search/truncated?}]
+                 (is (true? ok?))
+                 (is (= 20 n) "honest total hit count")
+                 (is (= 1 fc) "all 20 in one file")
+                 (is (= 1 (count by-file)) "one file row, not 20 lines")
+                 (is (= 20 (:seon.agent.search/count (first by-file)))
+                     "per-file count is the honest 20")
+                 (is (false? trunc?) "one file, nothing clipped")))
+        (.then done))))
+
+;; ---------------------------------------------------------------------------
+;; 4b. max-results clips FILE ROWS + flags truncated + emits a narrowing hint.
+;; ---------------------------------------------------------------------------
+
+(deftest max-results-clips-file-rows-and-hints
+  (async done
+    ;; needle-(alpha|beta) hits 2 files; cap to 1 file row.
+    (-> (resolves! (search/grep {:seon.agent.search/pattern     "needle-(alpha|beta)"
+                                 :seon.agent.search/max-results 1}))
+        (.then (fn [{ok?      :seon.agent.search/ok?
+                     by-file  :seon.agent.search/by-file
+                     n        :seon.agent.search/match-count
+                     fc       :seon.agent.search/file-count
+                     returned :seon.agent.search/returned
+                     hint     :seon.agent.search/hint
+                     trunc?   :seon.agent.search/truncated?}]
+                 (is (true? ok?))
+                 (is (= 2 n) "honest total across both files")
+                 (is (= 2 fc) "honest file count")
+                 (is (= 1 returned) "only one file row returned")
+                 (is (= 1 (count by-file)))
+                 (is (true? trunc?) "clip is reported")
+                 (is (string? hint) "narrowing hint present when clipped")
+                 (is (re-find #"(?i)narrow" hint))))
+        (.then done))))
+
+;; ---------------------------------------------------------------------------
+;; 4c. :full? true returns the flat per-line matches (drill escape hatch).
+;; ---------------------------------------------------------------------------
+
+(deftest full-returns-flat-matches
   (async done
     (-> (resolves! (search/grep {:seon.agent.search/pattern     "dup-needle"
-                                 :seon.agent.search/max-results 5}))
+                                 :seon.agent.search/full?       true
+                                 :seon.agent.search/max-results 50}))
         (.then (fn [{ok?     :seon.agent.search/ok?
                      matches :seon.agent.search/matches
                      n       :seon.agent.search/match-count
-                     trunc?  :seon.agent.search/truncated?}]
+                     by-file :seon.agent.search/by-file}]
                  (is (true? ok?))
-                 (is (= 5 n))
-                 (is (= 5 (count matches)))
-                 (is (true? trunc?) "clip is reported")))
+                 (is (= 20 n) "honest total")
+                 (is (= 20 (count matches)) "every line, flat")
+                 (is (nil? by-file) ":by-file absent in :full? mode")
+                 (is (every? #(= many-path (:seon.agent.search/path %)) matches))))
         (.then done))))
 
 ;; ---------------------------------------------------------------------------
@@ -194,12 +253,12 @@
                  (resolves! (search/grep {:seon.agent.search/pattern "needle-(alpha|beta)"
                                           :seon.agent.search/glob    "*.md"}))))
         (.then (fn [{ok?     :seon.agent.search/ok?
-                     matches :seon.agent.search/matches
+                     by-file :seon.agent.search/by-file
                      n       :seon.agent.search/match-count}]
                  (is (true? ok?))
                  (is (= 1 n))
                  (is (every? #(str/ends-with? (:seon.agent.search/path %) ".md")
-                             matches))))
+                             by-file))))
         (.then done))))
 
 ;; ---------------------------------------------------------------------------
@@ -244,8 +303,8 @@
     (async done
       (-> (resolves! (search/grep {:seon.agent.search/pattern "needle-beta"}))
           (.then (fn [{ok?     :seon.agent.search/ok?
-                       matches :seon.agent.search/matches}]
+                       by-file :seon.agent.search/by-file}]
                    (is (true? ok?))
                    (is (= [beta-path]
-                          (mapv :seon.agent.search/path matches)))))
+                          (mapv :seon.agent.search/path by-file)))))
           (.then done)))))

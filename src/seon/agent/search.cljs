@@ -40,23 +40,39 @@
 (schema/register! :seon.agent.search/glob :string)
 (schema/register! :seon.agent.search/max-results :int)
 (schema/register! :seon.agent.search/case-insensitive? :boolean)
+(schema/register! :seon.agent.search/full? :boolean)
 
 (schema/register! :seon.agent.search/ok? :boolean)
 (schema/register! :seon.agent.search/error :string)
 (schema/register! :seon.agent.search/raw-error :string)
+(schema/register! :seon.agent.search/hint :string)
 
 (schema/register! :seon.agent.search/path :string)
 (schema/register! :seon.agent.search/line-number :int)
 (schema/register! :seon.agent.search/line-text :string)
+(schema/register! :seon.agent.search/count :int)
 
+;; A flat match — one hit, returned only under :full? true.
 (schema/register! :seon.agent.search/match
   [:map
    [:seon.agent.search/path        :seon.agent.search/path]
    [:seon.agent.search/line-number :seon.agent.search/line-number]
    [:seon.agent.search/line-text   :seon.agent.search/line-text]])
 
+;; A file roll-up — the CONCISE default unit: where the pattern hits, how
+;; many times, and the first matching line (preview-capped) as a sample.
+(schema/register! :seon.agent.search/file-row
+  [:map
+   [:seon.agent.search/path        :seon.agent.search/path]
+   [:seon.agent.search/count       :seon.agent.search/count]
+   [:seon.agent.search/line-number :seon.agent.search/line-number]
+   [:seon.agent.search/line-text   :seon.agent.search/line-text]])
+
 (schema/register! :seon.agent.search/matches [:vector :seon.agent.search/match])
+(schema/register! :seon.agent.search/by-file [:vector :seon.agent.search/file-row])
 (schema/register! :seon.agent.search/match-count :int)
+(schema/register! :seon.agent.search/file-count :int)
+(schema/register! :seon.agent.search/returned :int)
 (schema/register! :seon.agent.search/truncated? :boolean)
 
 (schema/register! :seon.agent.search/grep-request
@@ -65,14 +81,19 @@
    [:seon.agent.search/paths             {:optional true} :seon.agent.search/paths]
    [:seon.agent.search/glob              {:optional true} :seon.agent.search/glob]
    [:seon.agent.search/max-results       {:optional true} :seon.agent.search/max-results]
+   [:seon.agent.search/full?             {:optional true} :seon.agent.search/full?]
    [:seon.agent.search/case-insensitive? {:optional true} :seon.agent.search/case-insensitive?]])
 
 (schema/register! :seon.agent.search/grep-response
   [:map
    [:seon.agent.search/ok?         :seon.agent.search/ok?]
-   [:seon.agent.search/matches     {:optional true} :seon.agent.search/matches]
    [:seon.agent.search/match-count {:optional true} :seon.agent.search/match-count]
+   [:seon.agent.search/file-count  {:optional true} :seon.agent.search/file-count]
+   [:seon.agent.search/returned    {:optional true} :seon.agent.search/returned]
+   [:seon.agent.search/by-file     {:optional true} :seon.agent.search/by-file]
+   [:seon.agent.search/matches     {:optional true} :seon.agent.search/matches]
    [:seon.agent.search/truncated?  {:optional true} :seon.agent.search/truncated?]
+   [:seon.agent.search/hint        {:optional true} :seon.agent.search/hint]
    [:seon.agent.search/error       {:optional true} :seon.agent.search/error]
    [:seon.agent.search/raw-error   {:optional true} :seon.agent.search/raw-error]])
 
@@ -85,40 +106,55 @@
    returns a Promise that ALWAYS resolves to a :seon.agent.search/grep-response
    envelope (never rejects; errors are values).
 
+   CONCISE by default: hits are GROUPED BY FILE, ranked by hit-count, and
+   the top :seon.agent.search/max-results (default 20) file rows are
+   returned under :seon.agent.search/by-file — each a {path, count, the
+   first matching line-number + a preview-capped line-text}. The HONEST
+   totals (:match-count = all hits, :file-count = all files) are always
+   reported; when rows were clipped, :seon.agent.search/hint tells you how
+   to narrow. This keeps a broad pattern from dumping hundreds of lines —
+   you see WHERE the matches cluster, then drill.
+
    Request keys:
      :seon.agent.search/pattern           REQUIRED — a REGEX (rg syntax), not a
                                     literal: escape ( ) [ ] { } . with \\\\
      :seon.agent.search/paths             optional — files/dirs to search;
                                     DEFAULT = the seon.agent.fs allowed roots
      :seon.agent.search/glob              optional — filename filter, e.g. \"*.cljs\"
-     :seon.agent.search/max-results       optional — clip (default 100);
-                                    :seon.agent.search/truncated? true when hit
+     :seon.agent.search/max-results       optional — max FILE ROWS returned
+                                    (default 20); :truncated? true when clipped
+     :seon.agent.search/full?             optional — when true, return the FLAT
+                                    :seon.agent.search/matches list (every line,
+                                    capped at max-results) instead of by-file
      :seon.agent.search/case-insensitive? optional
 
-   No matches is SUCCESS: {:seon.agent.search/ok? true :seon.agent.search/matches []}.
+   No matches is SUCCESS: {:seon.agent.search/ok? true
+                           :seon.agent.search/by-file [] …count 0}.
 
-   Worked example — search → read precisely (top-level call, no await:
-   the REPL resolves the returned Promise for you):
+   Worked example — find then drill (top-level call, no await: the REPL
+   resolves the returned Promise for you):
 
      (seon.agent.search/grep {:seon.agent.search/pattern \"message/user\"})
      ;; => {:seon.agent.search/ok? true
-     ;;     :seon.agent.search/matches
+     ;;     :seon.agent.search/match-count «total hits»
+     ;;     :seon.agent.search/file-count  «total files»
+     ;;     :seon.agent.search/by-file
      ;;     [{:seon.agent.search/path        \"«abs path of the hit»\"
-     ;;       :seon.agent.search/line-number «int»
-     ;;       :seon.agent.search/line-text   \"«the matching line»\"} …]
-     ;;     :seon.agent.search/match-count «int» :seon.agent.search/truncated? false}
-     ;; the hits live under :seon.agent.search/matches (NOT :hits); the
-     ;; count is :seon.agent.search/match-count.
-     ;; pick a hit, then:
-     (seon.agent.fs/read-file {:seon.agent.fs/path \"<:seon.agent.search/path of the hit>\"})
-     ;; jump to its :seon.agent.search/line-number in the content.
+     ;;       :seon.agent.search/count       «hits in this file»
+     ;;       :seon.agent.search/line-number «first hit's line»
+     ;;       :seon.agent.search/line-text   \"«preview of that line»\"} …]
+     ;;     :seon.agent.search/truncated? false}
+     ;; pick a file row, then read it (the path is absolute + allowlisted):
+     (seon.agent.fs/read-file {:seon.agent.fs/path \"<:seon.agent.search/path>\"})
+     ;; jump to its :seon.agent.search/line-number; or re-grep with
+     ;; :seon.agent.search/paths [that-file] to see every hit in it.
 
    NOTE: ^:async means Malli validates the request; the response schema
    documents the RESOLVED value (the raw return is a js/Promise — same
    caveat as seon.db/transact!)."
   {:malli/schema [:=> [:cat :seon.agent.search/grep-request]
                   :seon.agent.search/grep-response]}
-  [{:seon.agent.search/keys [pattern paths glob max-results case-insensitive?]
+  [{:seon.agent.search/keys [pattern paths glob max-results full? case-insensitive?]
     :or {max-results in/default-max-results}}]
   (try
     (let [roots (if (seq paths) (vec paths) (in/default-roots))
@@ -168,7 +204,7 @@
 
               ;; Output cap — partial stdout is still parseable.
               (and err (= "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" (.-code err)))
-              (assoc (in/success-from stdout max-results)
+              (assoc (in/success-from stdout max-results full?)
                      :seon.agent.search/truncated? true)
 
               ;; rg exit 1 = searched fine, found nothing. NOT an error.
@@ -186,7 +222,7 @@
                        (if (str/blank? (str stderr)) (.-message err) stderr))
 
               :else
-              (in/success-from stdout max-results))))))
+              (in/success-from stdout max-results full?))))))
     (catch :default e
       (in/fail (str "unexpected error in seon.agent.search/grep: "
                     (or (some-> e .-message) (str e)))))))
