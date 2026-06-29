@@ -34,7 +34,8 @@
     [seon.agent.fs.internal :as fs-int]
     [seon.agent.search :as search]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.test.async :refer [settle!]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fixture — tmp/search-test/ with known content + scoped fs allowlist.
@@ -134,7 +135,7 @@
                      (is (true? (:seon.agent.fs/ok? r)))
                      (is (str/includes? (:seon.agent.fs/content r)
                                         "needle-alpha"))))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 2. No matches = SUCCESS (rg exit 1 is not an error).
@@ -153,7 +154,7 @@
                  (is (= 0 n))
                  (is (= 0 fc))
                  (is (false? trunc?))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 3. Allowlist gate — out-of-scope path + default-deny.
@@ -171,7 +172,7 @@
                        "guiding message tells the agent what's wrong")
                    (is (re-find #"seon\.agent\.fs/configure!" error)
                        "names the fix")))
-          (.then done)))))
+          (settle! done)))))
 
 (deftest default-deny-when-no-roots
   (async done
@@ -183,7 +184,7 @@
                  (is (false? ok?))
                  (is (re-find #"default-deny" error))
                  (is (re-find #"seon\.agent\.fs/configure!" error))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 4a. Grouping — 20 hits in ONE file roll up to a single file row, honest
@@ -205,7 +206,7 @@
                  (is (= 20 (:seon.agent.search/count (first by-file)))
                      "per-file count is the honest 20")
                  (is (false? trunc?) "one file, nothing clipped")))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 4b. max-results clips FILE ROWS + flags truncated + emits a narrowing hint.
@@ -231,7 +232,7 @@
                  (is (true? trunc?) "clip is reported")
                  (is (string? hint) "narrowing hint present when clipped")
                  (is (re-find #"(?i)narrow" hint))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 4c. :full? true returns the flat per-line matches (drill escape hatch).
@@ -251,7 +252,7 @@
                  (is (= 20 (count matches)) "every line, flat")
                  (is (nil? by-file) ":by-file absent in :full? mode")
                  (is (every? #(= many-path (:seon.agent.search/path %)) matches))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 5. Bad regex → guiding envelope + raw stderr preserved.
@@ -268,7 +269,7 @@
                      "guiding message explains pattern is a regex")
                  (is (some? raw-error) "raw rg stderr preserved")
                  (is (re-find #"regex parse error" raw-error))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 6. Glob filtering.
@@ -290,7 +291,7 @@
                  (is (= 1 n))
                  (is (every? #(str/ends-with? (:seon.agent.search/path %) ".md")
                              by-file))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 7. Case-insensitive flag.
@@ -308,7 +309,7 @@
                      n   :seon.agent.search/match-count}]
                  (is (true? ok?))
                  (is (= 1 n))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 8. Blank pattern → envelope, not a full-tree match-everything.
@@ -321,7 +322,7 @@
                      error :seon.agent.search/error}]
                  (is (false? ok?))
                  (is (re-find #"pattern" error))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; Sanity: defaults documented in the request schema actually apply
@@ -338,7 +339,7 @@
                    (is (true? ok?))
                    (is (= [beta-path]
                           (mapv :seon.agent.search/path by-file)))))
-          (.then done)))))
+          (settle! done)))))
 
 ;; ---------------------------------------------------------------------------
 ;; 9. Lane-correctness (#86) — the active CLJS pod lane is canonical; a paused
@@ -358,7 +359,7 @@
                        "active .cljs sibling surfaces")
                    (is (not (some #{lane-clj-path} paths))
                        "paused .clj sibling is suppressed"))))
-        (.then done))))
+        (settle! done))))
 
 (deftest standalone-clj-still-shown
   ;; (b) a .clj with NO .cljs sibling is untouched.
@@ -369,7 +370,7 @@
                  (is (true? ok?))
                  (is (= [solo-clj-path] (mapv :seon.agent.search/path by-file))
                      "standalone .clj (no .cljs sibling) is never suppressed")))
-        (.then done))))
+        (settle! done))))
 
 (deftest explicit-clj-path-reaches-it
   ;; (c) explicitly naming the .clj via :paths bypasses suppression.
@@ -381,7 +382,7 @@
                  (is (true? ok?))
                  (is (= [lane-clj-path] (mapv :seon.agent.search/path by-file))
                      "explicitly-targeted .clj reaches the caller")))
-        (.then done))))
+        (settle! done))))
 
 (deftest explicit-clj-glob-reaches-it
   ;; (c') a `*.clj` glob restricts to clj-only → explicit, so not suppressed.
@@ -393,7 +394,7 @@
                  (is (true? ok?))
                  (is (some #{lane-clj-path} (mapv :seon.agent.search/path by-file))
                      "a `*.clj` glob is explicit clj-targeting — reaches it")))
-        (.then done))))
+        (settle! done))))
 
 (deftest trap-defn-async-no-longer-hands-dead-clj
   ;; (d) THE trap: `"defn shared-fn"` matches ONLY the paused .clj (the active
@@ -414,7 +415,7 @@
                    (is (some #{lane-cljs-path} paths)
                        "active db.cljs-analog surfaces, not the paused .clj")
                    (is (not (some #{lane-clj-path} paths))))))
-        (.then done))))
+        (settle! done))))
 
 ;; ===========================================================================
 ;; grep-graph — the PROGRAM-GRAPH counterpart. Same envelope shape (capped
@@ -490,7 +491,7 @@
                     "fns sampled first for the row")
                 (is (str/starts-with? (:seon.agent.search/member alpha) "test.alpha/widget")
                     "member is a concrete matching fn")))))
-        (.then done))))
+        (settle! done))))
 
 (deftest graph-no-match-is-ok-and-empty
   (async done
@@ -505,7 +506,7 @@
               (is (= [] by-ns))
               (is (= 0 n))
               (is (= 0 nc)))))
-        (.then done))))
+        (settle! done))))
 
 (deftest graph-max-results-clips-and-hints
   (async done
@@ -526,7 +527,7 @@
               (is (true? trunc?))
               (is (string? hint))
               (is (re-find #"(?i)narrow" hint)))))
-        (.then done))))
+        (settle! done))))
 
 (deftest graph-full-returns-flat-members
   (async done
@@ -543,7 +544,7 @@
               (is (= 4 (count matches)) "every matching member, flat")
               (is (nil? by-ns) ":by-ns absent in :full? mode")
               (is (every? :seon.agent.search/member matches)))))
-        (.then done))))
+        (settle! done))))
 
 (deftest graph-targets-filter
   (async done
@@ -557,7 +558,7 @@
               (is (true? ok?))
               (is (= 1 n) "only the schema matches when targets = [:seon.schema]")
               (is (= :seon.schema (:seon.agent.search/target (first by-ns)))))))
-        (.then done))))
+        (settle! done))))
 
 (deftest graph-bad-regex-envelope
   (async done
@@ -568,7 +569,7 @@
                   (search/grep-graph {:seon.agent.search/pattern "(unclosed"})]
               (is (false? ok?))
               (is (re-find #"REGEX" error)))))
-        (.then done))))
+        (settle! done))))
 
 (deftest graph-case-insensitive-flag
   (async done
@@ -580,7 +581,7 @@
               (is (= 0 (:seon.agent.search/match-count cs)) "case-sensitive by default")
               (is (true? (:seon.agent.search/ok? ci)))
               (is (= 4 (:seon.agent.search/match-count ci))))))
-        (.then done))))
+        (settle! done))))
 
 (deftest graph-blank-pattern-envelope
   (async done
@@ -591,4 +592,4 @@
                   (search/grep-graph {:seon.agent.search/pattern "  "})]
               (is (false? ok?))
               (is (re-find #"pattern" error)))))
-        (.then done))))
+        (settle! done))))

@@ -12,7 +12,8 @@
     [datahike.api :as d]
     [seon.db :as db]
     [seon.eval :as seval]
-    [seon.route :as route]))
+    [seon.route :as route]
+    [seon.test.async :refer [settle!]]))
 
 (def ^:private expected
   "name → [pattern method] — the authoritative seeded core route set. `root = /`
@@ -102,5 +103,5 @@
                            (is (= 4 (count names)) "four entities after a double seed — no duplicates")
                            (is (= (set (keys expected)) (set names)))
                            (is (symbol? h) "handler reads back as a native symbol")
-                           (is (= 'seon.web.datastar/serve-agent-page! h)))))
-                     (.finally (fn [] (done)))))))))
+                           (is (= 'seon.web.datastar/serve-agent-page! h))))))))
+        (settle! done))))
