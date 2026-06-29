@@ -30,6 +30,7 @@
     [seon.agent.ctx.live-tile :as ctx-live-tile]
     [seon.agent.ctx.namespaces :as ctx-namespaces]
     [seon.agent.ctx.relevant :as ctx-relevant]
+    [seon.agent.ctx.transcript :as transcript]
     [seon.db :as db]
     [seon.embed.stash :as embed-stash]
     [seon.render :as render]
@@ -1364,3 +1365,53 @@
     ;; same agent again ⇒ back to identical (salt is the only difference)
     (is (= a (chain static-prefix "agent-A"))
         "same agent ⇒ identical (salt is deterministic, not random)")))
+
+;; ── cite-card — the anti-fabrication surface ─────────────────────────────
+;; A pure derivation over OK eval entity maps: surface the agent's last few
+;; COMPUTED values (with their live result/<id> handle) so honesty is the
+;; nearest-token path. No DB needed — the fn is pure over eval maps.
+
+(defn- ev
+  "A minimal OK eval entity map for cite-card tests."
+  [id src res]
+  {:seon.eval/id id :seon.eval/ok? true
+   :seon.eval/source src :seon.eval/result-edn res})
+
+(deftest cite-card-derives-recent-values
+  (let [card (transcript/cite-card
+               [(ev "yRn" "(db/store-inventory {:seon.db/system? true})"
+                    "{:seon.db/attr-groups [...]}")
+                (ev "Lbv" "(seon.db/query '[:find ?a (count ?e) ...])"
+                    "[{:agent-id \"XeG-2606282241\", :eval-count 69}]")])]
+    (is (str/includes? card "result/Lbv")
+        "the value's live handle is surfaced")
+    (is (str/includes? card "XeG-2606282241")
+        "the real computed figure (the one fabrication invents) is right there")
+    (is (str/includes? card "cite THESE")
+        "the header steers toward citing, not retyping")
+    (is (str/includes? card "(seon.db/query")
+        "the producing form rides the line as a hint")))
+
+(deftest cite-card-empty-when-nothing-citeable
+  ;; nil / echo / verb-ack receipt / opaque fn / failed eval ⇒ nothing to cite
+  (is (= "" (transcript/cite-card []))
+      "no evals ⇒ no card")
+  (is (= "" (transcript/cite-card
+              [(ev "a" "nil" "nil")
+               (ev "b" ":idle" ":idle")
+               (ev "c" "(message/user \"hi\")"
+                   "{:seon.agent.message/ok? true, :seon.agent.message/id \"x\"}")
+               (ev "d" "result/Lbv" "[{:agent-id \"X\", :eval-count 69}]")
+               (ev "e" "(recommendation-tile)" "#‹fn›")
+               (assoc (ev "f" "(/ 1 0)" "boom") :seon.eval/ok? false)]))
+      "trivial / receipt / re-reference / opaque / failed rows all skipped"))
+
+(deftest cite-card-clips-big-value-keeps-handle
+  (let [big  (apply str (repeat 2000 "x"))
+        card (transcript/cite-card [(ev "Big" "(huge)" big)])]
+    (is (str/includes? card "result/Big")
+        "the handle to the whole value survives the clip")
+    (is (str/includes? card "holds it whole")
+        "a clipped preview points back at the live handle")
+    (is (< (count card) (count big))
+        "the card is a bounded preview, never the flood")))
