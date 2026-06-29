@@ -126,11 +126,79 @@ it resumes denoising from K+1. Seon drives, the worker stays stateless, the pod
 stays loopback-only. The whole round-trip is built and offline-proven; running it
 against the live diffusion worker is the remaining end-to-end step.
 
+## The control LOOP — BUILT + offline-proven (2026-06-29)
+
+`refine` is the per-checkpoint CALL; the orchestration AROUND it — refine →
+apply → re-refine → converge — is the one thing every leg's unit tests did NOT
+cover. It is now built + offline-proven in `src/seon/diffusion/loop.cljs`
+(`seon.diffusion.loop`), NO GPU.
+
+- **`checkpoint-policy`** (PURE, specced) — given one `::oracle/control-set`, the
+  iteration index, a K-budget, and the previous control set, returns
+  CONTINUE / CONVERGED / GIVE-UP:
+  - **CONVERGED** — no `::oracle/renoise-spans` AND no `::oracle/injections`.
+  - **GIVE-UP** — `iteration ≥ k-budget` (the HARD termination backstop) OR no
+    progress (the error signature — renoise spans + injection (span,replacement)
+    pairs — is identical to the previous iteration's; the worker can't move the
+    canvas).
+  - **CONTINUE** — errors remain, budget unspent, last step changed something.
+- **`dry-run`** — the CPU loop. From a degraded canvas it `refine`s, consults
+  the policy, and on CONTINUE MOCKS the worker DETERMINISTICALLY via
+  `apply-control-set`: a CLAMP span is held verbatim, an INJECTION span is
+  replaced by its `::retrieval/replacement`, a RENOISE span is replaced by the
+  `::fills` fixture's canned correction for that broken source (a span with NO
+  fill is left unchanged — genuinely unfixable). Regions covered by neither edit
+  (clamps + gaps) are copied verbatim, so the next canvas differs ONLY at
+  injection + renoise spans; the next `refine` recomputes spans in the fresh char
+  basis. Returns the per-iteration `::trace` + the terminal `::verdict`/`::reason`.
+
+### How the real worker substitutes for the mock APPLY
+
+This harness IS the orchestration; the GPU worker only changes HOW spans get
+re-filled. The mock APPLY's three transforms are exactly the worker's
+`good_clamp_for_renoise` + clamp/infill surface (`diffgemma_common.py`): clamp
+positions HELD, injection positions forced toward `replacement` (encoder-KV
+`spec_text` appended), renoise positions left OUT of the clamp set so the entropy
+bound re-decides them — the actual denoise step replacing the fixture fill. The
+control flow, the convergence policy, and the span coordinate system
+(`canvas_text`/`offset_map` basis, per closed-loop-span-alignment) are identical;
+only the span→text function differs (a fixture lookup here, a denoise there).
+
+### The three offline proofs (`test/seon/diffusion/loop_test.cljs`)
+
+- **(a) CONVERGENCE** — a canvas with BOTH a hallucinated call (`db/transct!`)
+  AND a broken trailing form, whose fixture fill reveals a SECOND hallucination
+  (`db/quer`), drives the loop CONVERGED in 3 iterations; the trace SHRINKS
+  renoise `1→0→0` and injections `1→1→0`.
+- **(b) DETECTION** — a clean canvas converges at iteration 0 and STOPS (no
+  apply, canvas returned unchanged).
+- **(c) GIVE-UP / TERMINATION** — an unfixable canvas (no fill) terminates with
+  GIVE-UP `:no-progress`, never exceeding the K-budget; a direct policy check
+  proves the K-budget backstop (`:budget-exhausted`) independently. **No infinite
+  loop.**
+
+Suite green: **837 tests / 3836 assertions, 0 failures** (`bin/test-cljs`; was
+832/3804). **End-to-end on the live diffusion worker AWAITS deploy** — the worker
+swaps its denoise for the mock APPLY; nothing else in the loop changes.
+
+### Bug found + fixed surfacing this harness
+
+`seon.diffusion.retrieval/canvas-aliases` extracted the `(:require [ns :as a])`
+alias via `(.indexOf (to-array spec) :as)` — JS `===`, which NEVER matches a CLJS
+keyword VALUE, so it always returned `{}`. Every canvas-derived alias was lost,
+so a RESOLVABLE qualified symbol (`db/query`) was flagged unresolved and
+"corrected" to itself. Masked because no prior test exercised canvas-derived
+alias resolution of a real qualified symbol (the retrieval/oracle tests only use
+typos, which fail regardless, or explicit `::aliases`). Fixed with a CLJS-safe
+`(some (fn [[i x]] (when (= :as x) i)) (map-indexed vector spec))` scan.
+
 ## Entry points
 
+- `src/seon/diffusion/loop.cljs` — the policy + the dry-run loop + the mock APPLY.
 - `src/seon/diffusion/oracle.cljs` — the dispatcher + `to-wire`.
-- `src/seon/diffusion/retrieval.cljs` — the retrieve leg (injections).
+- `src/seon/diffusion/retrieval.cljs` — the retrieve leg (injections; alias fix).
 - `src/seon/worker_eval.cljs` — the eval tier (separate node bundle).
 - `src/seon/repl/internal.cljc` — `parse-forms` (now emits `:span` on `:form`).
 - `bin/oracle-server` — the bb parse-tier server (`op:"refine"`).
-- `test/seon/diffusion/oracle_test.cljs` — the offline proof.
+- `test/seon/diffusion/loop_test.cljs` — the LOOP's three offline proofs.
+- `test/seon/diffusion/oracle_test.cljs` — the dispatcher's offline proof.

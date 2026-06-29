@@ -319,8 +319,11 @@
               (reduce
                 (fn [m spec]
                   (if (and (vector? spec) (symbol? (first spec)))
-                    (let [as-i (.indexOf (to-array spec) :as)]
-                      (if (and (>= as-i 0) (< (inc as-i) (count spec)))
+                    ;; CLJS-safe `:as` lookup — `(.indexOf (to-array …) :as)`
+                    ;; uses JS `===`, which never matches a CLJS keyword VALUE.
+                    (let [as-i (->> (map-indexed vector spec)
+                                    (some (fn [[i x]] (when (= :as x) i))))]
+                      (if (and as-i (< (inc as-i) (count spec)))
                         (assoc m (str (nth spec (inc as-i))) (str (first spec)))
                         m))
                     m))
