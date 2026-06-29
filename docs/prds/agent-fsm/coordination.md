@@ -387,6 +387,31 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
+- **🟢 FULL-BATTERY k=1 TRIAGE COMPLETE — no Core regression; `my.tile` reachable; the real lever is writes-tests (2026-06-29).**
+  Triaged the first trustworthy full paid battery (k=1 0.63 @ `b50899c0`). Depth +
+  per-predicate cards: [[research/full-battery-triage-2026-06-29]]. Net:
+  - **→ CORE: NOTHING to route.** The `my.tile` 0-calls anomaly is NOT a #72-style
+    reachability regression — `my.tile` is REACHABLE (5 indexed `:seon.fn` rows,
+    `:seon.ns` row present, in `canonical-full-my-ns`, required in `client.cljs`). The
+    battery-wide `{:my.tile 0}` was a k=1 single-sample behavioral miss; at k=3 the
+    agent composed `my.tile` 21× and `interactive-tile-checklist` passed 1/3. No
+    `client.cljs`/`ctx` fix needed.
+  - **k=3 confirmed (`f23262c7`):** interactive-tile 0→**1/3** (noise/partial),
+    plan-resume 0→**0/3**, todo-multistep 0→**0/3**.
+  - **plan-resume is NOT a planning regression** — all 8 planning-continuity
+    predicates PASS (plan minted, **zero open at end**, resumed, schema designed). It
+    fails only on `:wrote-a-test-for-the-fn` (0/45 `deftest`) + `:keeps-the-repl-clean`
+    (0.222 vs 0.2, marginal).
+  - **The #1 real lever is the writes-tests gap (U-lane CONTEXT, not Core):** both
+    confirmed planning fails share `:wrote-a-test-for-the-fn` — the weak agent designs
+    a schema + writes a fn but never writes a `deftest`. Likely a STANDING gap (the
+    `:writes-tests` axis never landed for the weak model), addressable by hoisting
+    "write a `deftest` for every fn" into the always-on base / `my.kb` manual — my
+    lane, no Core change.
+  - **Threshold note (U/owner):** `:keeps-the-repl-clean` max 0.2 is brittle for the
+    weak DeepSeek tier (plan-resume 0.222, honesty-computed-total 0.267 both die just
+    over it while doing the task correctly). Consider 0.25–0.30 or signal-not-gate.
+
 - **🔴 → CORE (owner-directed 2026-06-28, P0 — REVISED; this SUPERSEDES the `#profile {:default … :minimal …}`
   skill-set pattern in `e5bb569b`/`525bd0f0`): config = EXPLICIT LISTING, not opaque named profile sets.**
   Owner, verbatim: *"I don't want hardcoded :default and :minimal sets. I want clear listing of what to include
