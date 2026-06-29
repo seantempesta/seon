@@ -717,3 +717,22 @@ This is a **one-line worker change on the current stack** (transformers 5.11.0, 
    (a) clean compile + real `tok_per_s` jump → forcing `batched_mm` was the whole story (compiled path LANDS on the existing stack); (b) compiles clean but `tok_per_s` ≤ eager grouped_mm, or OOM → `batched_mm`'s param-duplication loses on the large canvas → compiled path is a dead end for THIS model shape, KV-cache reuse stays the only A100 lever (#8). Do NOT fall back to torch 2.10 + 5.12 — Q1–Q3 prove it adds nothing for DiffusionGemma.
 
 **Bottom line for the owner:** the `torch 2.10 + transformers 5.12` redeploy is a **NO-GO** — the 5.12 batched_mm auto-switch is real but structurally cannot fire for DiffusionGemma's override-generate, and it isn't even new in 5.12. The compiled path is **not yet confirmed dead**: the cheaper, correct next probe is **force `experts_implementation="batched_mm"` on the current 5.11.0/torch-2.9 worker** and measure once. That single $0-rebuild drive is decisive either way.
+
+#### BUILT (2026-06-29) — the `experts_impl` knob + probe are in place, awaiting the owner's $0 GPU drive
+
+The §15 change is implemented on the existing 5.11.0 / torch-2.9 worker — **no Dockerfile / dep edit**, so it's a code recycle, not an image rebuild:
+
+- **Worker knob** — `tmp/flash-diffgemma/gpu_worker.py` (gitignored): `_load(tok, experts_impl=None)` now passes the recognized `experts_implementation=` from_pretrained kwarg (modeling_utils.py:1589-1590) when the payload sets `experts_impl`. UNSET => the model's `grouped_mm` default (modeling_utils.py:2049) — **zero behavior change** vs the pre-knob worker. The backend is part of the cache key: flipping it **reloads** (evict-first + `cuda.empty_cache()`) because two 50GB copies OOM the A100-80 and a fresh model drops stale compile graphs. The generate result now carries `experts_impl` read from `model.config._experts_implementation` (PROVES which backend ran). The `find_spec` bypass is source-confirmed: `batched_mm_experts_forward` (moe.py:118-179) is pure `repeat_interleave`→`_batched_linear`(`torch.bmm`, moe.py:84-115) and **never** calls `_grouped_mm`/`_can_use_grouped_mm` — so `moe.py:301`'s find_spec is off the traced graph.
+- **Probe** — `compile_test.py` (scratchpad, gitignored) extended with a `#15 BATCHED_MM` arm (`compile=True, experts_impl="batched_mm"`, warmup+reload then 2 steady calls) and a `#15 VERDICT` block. It captures: did find_spec disappear (`find_spec_break` on the grouped-compiled control c1 vs the batched arms), the live `experts_impl`, steady tok/s, and OOM. Verdict logic → **OOM** / **NO-WIN** (still find_spec, or errored, or batched ≤ 1.1× eager grouped) / **marginal** (1.1-1.8×) / **WIN** (≥1.8× eager grouped).
+- **worker_sha implication:** the worker source changed → `worker_sha` changes (local `c65c68e5cfae`) → `verify_fresh.py` will correctly report STALE on the warm worker until it's recycled. Since worker CODE changed (not just a payload), a plain `flash deploy` keeps serving old code on a warm worker — **force-recycle**.
+
+**Owner runbook (no agent did this — it's the $0 GPU step):**
+
+```bash
+cd tmp/flash-diffgemma && set -a; . ./.env; set +a
+.venv/bin/flash undeploy diffgemma --force && .venv/bin/flash deploy   # worker CODE changed → force-recycle
+python3 verify_fresh.py                                                 # MUST print FRESH ✓ (expects sha c65c68e5cfae)
+python3 compile_test.py                                                 # runs eager / compiled-grouped / compiled-batched + emits #15 VERDICT
+# one-line single drive (skip the full probe): force batched on the compiled path
+python -u client.py '{"mode":"generate","prompt":"Write a Clojure mean over a vector.","compile":true,"max_length":512,"experts_impl":"batched_mm"}'
+```

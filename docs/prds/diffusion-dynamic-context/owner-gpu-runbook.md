@@ -54,15 +54,22 @@ CUDA-graph-clean per the HF compat table (clears the `reduce-overhead` wall, **n
 transformers bump**). One-line change, no image rebuild for deps. May unlock the
 ~1000 tok/s compiled path.
 
+BUILT (2026-06-29): `experts_impl` is now a **payload field**, no source edit, no
+image rebuild — `_load(tok, experts_impl=...)` passes the `experts_implementation=`
+from_pretrained kwarg; flipping the backend reloads (evict-first, single 50GB copy).
+Worker CODE changed → `worker_sha` is `c65c68e5cfae` → **force-recycle** (a plain
+`flash deploy` keeps serving old code on a warm worker).
+
 ```bash
-# 1) gpu_worker.py:55-57 AND the eager fallback :60-62 — add to BOTH from_pretrained:
-#      experts_implementation="batched_mm"     (alongside attn_implementation="sdpa")
-# 2) bump FLASH_GPU_IMAGE tag so the warm worker is recreated, then re-deploy + re-verify:
-export FLASH_GPU_IMAGE=docker.io/seantempesta/diffgemma-worker:cu128-v2
-flash deploy && export DIFFGEMMA_EP=<ep> && python3 verify_fresh.py    # FRESH ✓ first
-# 3) the §8-corrected compiled call (compile knob; max_length pinned; NO max_new_tokens):
+cd tmp/flash-diffgemma && set -a; . ./.env; set +a
+# 1) worker code changed → undeploy --force then deploy (recycles the warm worker):
+.venv/bin/flash undeploy diffgemma --force && .venv/bin/flash deploy
+export DIFFGEMMA_EP=<ep> && python3 verify_fresh.py        # FRESH ✓ (expects sha c65c68e5cfae) first
+# 2a) full A/B probe (eager grouped / compiled grouped / compiled batched + #15 VERDICT):
+python3 compile_test.py
+# 2b) OR the single decisive drive — force batched on the compiled path:
 TORCH_LOGS="graph_breaks,recompiles" python -u client.py \
-  '{"mode":"generate","prompt":"...","compile":true,"max_length":512}'
+  '{"mode":"generate","prompt":"Write a Clojure mean over a vector.","compile":true,"max_length":512,"experts_impl":"batched_mm"}'
 ```
 
 - **Win condition:** clean compile (no find_spec break, no CUDA-graphs error) **AND**
@@ -70,9 +77,9 @@ TORCH_LOGS="graph_breaks,recompiles" python -u client.py \
   the eager baseline. Fail = `tok_per_s ≤ eager` or **OOM** (batched_mm duplicates
   expert params over the whole-canvas forward S = `canvas_length × top_k`) → compiled
   path is dead for this model shape; KV-cache reuse (step 2) is the only A100 speed lever.
-- **Note:** the `compile` payload knob is "being built" — if it hasn't landed when you
-  read this, use the north-star compiled-path bullet (`03e3e024`) for the exact call
-  shape; the command above firms up when the #15/#16 batched_mm knob commits.
+- **Proof fields:** result carries `experts_impl` (read from `model.config`, want
+  `batched_mm`) + `compiled` + `gen_error` (find_spec gone => None); the probe's
+  `#15 VERDICT` block emits WIN/marginal/NO-WIN/OOM directly.
 - **Cost:** one drive (~$0.05 warm), $0 rebuild. Decisive in a single call.
 - **Depth:** [[research/torch-compile-speed-worker-2026-06-28]] §15 (+ §8 corrected
   call, §9 find_spec root-cause).
