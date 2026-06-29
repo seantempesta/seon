@@ -23,7 +23,7 @@ needs your decision, and the Core-routed queue.
 
 **Loop-in-action (the recursion delivering a measured gain):** pass^k (built this cycle) revealed agents drive their canvas reliably for DATA asks but only **~33%** for PLANNING/goal asks → a one-sentence general guidance fix (plans/goals/status are canvas content; render the board first) → re-measured: **canvas-drive 1/3→3/3, judge 33→100, no regression → KEPT** (`01457ba9`). Build-instrument → instrument-finds-gap → fix → re-measure → keep, all in one cycle.
 
-**Awaiting Core (routed, specced, evidence-backed):** the cache-aware transcript (#62, the #1 token lever, ~83% + cache-stable), the fabrication fixes (#63), explicit-listing config (#42), the home-ns alias collision (#73). **Awaiting you:** `:kind` Category-B scope (#66).
+**Landed + VALIDATED by Core (measured GREEN):** transcript eviction (#62, ~20k→~1.4k, the #1 token lever DONE) and the **cite-card → fabrication FIXED** (#63/#80: honesty scenario designed-RED → **3/3 GREEN**, agent cites the computed 161 instead of fabricating). **Still awaiting Core:** explicit-listing config (#42 — now the #1 token lever, since `:namespaces` is 18k/turn = the full toolkit; lean clusters trim it, default keeps the toolkit per the render-prominence law), the home-ns alias collision (#73). **Awaiting you:** `:kind` Category-B scope (#66).
 
 ## Decisions awaiting you (read first)
 
