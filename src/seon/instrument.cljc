@@ -331,8 +331,15 @@
       [[enabled?]] is false. Returns a stats map.
 
       `:no-var` counts rows whose var isn't live (a prior session's fn);
-      `:bad-spec` counts unreadable spec strings — both are skipped, not
-      fatal."
+      `:bad-spec` counts unreadable spec strings; `:unresolvable-schema`
+      counts rows whose spec READS but references a schema name that no
+      longer resolves in the registry (a renamed/pruned schema ghost) —
+      ALL THREE are skipped, never fatal. The last is the boot-resilience
+      invariant: a single stale persisted fn row must DEGRADE (left
+      uninstrumented) rather than crash the whole pod boot. We surface
+      the dangling ref as a value HERE — building the schema before
+      registering it — so it never reaches `mi/instrument!`, which would
+      otherwise throw `:malli.core/invalid-schema` and abort boot."
      {:malli/schema [:=> [:cat :any] :map]}
      [db]
      (if-not (enabled?)
@@ -342,7 +349,8 @@
                                :where [?e :seon.fn/sym ?sym]
                                       [?e :seon.fn/spec ?spec]]
                              db)
-             stats (volatile! {:registered 0 :skipped 0 :no-var 0 :bad-spec 0})]
+             stats (volatile! {:registered 0 :skipped 0 :no-var 0
+                               :bad-spec 0 :unresolvable-schema 0})]
          (doseq [[sym-str spec-str] rows
                  :let [slash (str/index-of (str sym-str) "/")]
                  :when slash]
@@ -350,10 +358,25 @@
                  fn-sym (symbol (subs sym-str (inc slash)))
                  the-fn (-find-js-var ns-sym fn-sym)
                  schema (try (reader/read-string spec-str)
-                             (catch :default _ ::bad))]
+                             (catch :default _ ::bad))
+                 ;; Resolve-check (errors-as-values): build the schema
+                 ;; against the live registry NOW. A spec that references
+                 ;; a renamed/pruned schema throws `:malli.core/invalid-schema`
+                 ;; here, caught and turned into `false`, so the row is
+                 ;; degraded below instead of crashing `mi/instrument!`.
+                 ok?    (when-not (= ::bad schema)
+                          (try (m/schema schema) true
+                               (catch :default _ false)))]
              (cond
                (nil? the-fn)    (vswap! stats update :no-var inc)
                (= ::bad schema) (vswap! stats update :bad-spec inc)
+               (not ok?)        (do (js/console.warn
+                                      (str "seon.instrument/instrument-from-db!: "
+                                           sym-str " has a persisted :malli/schema that "
+                                           "no longer resolves (renamed/pruned schema) — "
+                                           "leaving it UNINSTRUMENTED so boot proceeds: "
+                                           spec-str))
+                                     (vswap! stats update :unresolvable-schema inc))
                (skip? ns-sym fn-sym) (vswap! stats update :skipped inc)
                :else (do (register-target! ns-sym fn-sym schema (async-fn? the-fn))
                          (vswap! stats update :registered inc)))))
