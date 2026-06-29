@@ -26,16 +26,20 @@ tags: [orchestrator, agent]
 - [[owner-gpu-runbook]] — the ordered, `verify_fresh`-gated checklist to execute
   top-to-bottom on the next A100 redeploy (cheapest decisive probe first).
 
-## Current state (2026-06-28)
+## Current state (2026-06-29)
 
-The model is **PROVEN running** (A100, endpoint `kzonsp5b18hpq5`, ~66 s load) and
-the **control primitives are PROVEN**: clamp holds, infill holds both ends, the
-`:malli/schema` spec-slot infills, and the dynamic-context half is validated
-(data-modeling A/B **0→100%**). The mechanism is **source-corrected** — NOT an
-absorbing-mask diffuser; commit is emergent low-entropy persistence and clamp is a
-custom `LogitsProcessor` (see [[grounding]]). The eval-renoise worker
-(`denoise_to_step`/`resume_renoise`) is BUILT but UNTESTED on GPU. **NEXT** is the
-canvas-length probe + the three-arm kill-gate ([[roadmap]] P0–P1).
+**A100 is UNDEPLOYED ($0)** — the no-GPU build/research/fix surface is exhausted; every
+remaining win is owner-gated. **START at [[owner-gpu-runbook]]** next session (ordered,
+verify_fresh-gated, cheapest decisive probe first). The model is **PROVEN running** when
+deployed (A100, ~66 s load) and the **control primitives are PROVEN**: clamp holds,
+infill holds both ends, the `:malli/schema` spec-slot infills, the dynamic-context half
+is validated (data-modeling A/B **0→100%**, 6/6 skills). The mechanism is
+**source-corrected** — NOT an absorbing-mask diffuser; commit is emergent low-entropy
+persistence and clamp is a custom `LogitsProcessor` (see [[grounding]]). BUILT +
+deploy-ready this loop: no-fence `parse-raw` oracle, KV-cache keying half, closed-loop
+renoise driver, three-arm kill-gate E1, the batched_mm compiled-path knob+probe, the
+revived eval tier — full breakdown in [[north-star]] "▸ OWNER HANDOFF". **NEXT** (owner):
+the batched_mm $0 probe → KV-cache image → the kill-gates ([[owner-gpu-runbook]]).
 
 ## How to run it
 

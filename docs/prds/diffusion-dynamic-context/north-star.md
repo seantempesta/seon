@@ -45,6 +45,21 @@ causal). torchao INT8 = dead end (MoE experts skipped).
 4. **Closed-loop renoise driver** (`44c8d635`) — wired to `parse-raw` + `canvas_text`,
    offline-proven (the 11-char fence shift removed; renoise now targets the bad-form
    tokens, not the fence). `verify_fresh`-gated, ready to run on GPU.
+5. **Three-arm kill-gate E1 driver** (`801211ee`) — guided-infill vs naked vs
+   naked+post-hoc-oracle, scored on faithfulness (parse-raw + structural + vacuity +
+   eval); offline-mock-proven (both verdicts fire: arm1>arm3+0.10 → EARNS, tie → KILL).
+   One-liner: `e1_kill_gate.py celsius 6`.
+6. **batched_mm compiled-path knob + probe** (`08734908`, worker_sha `c65c68e5cfae`) —
+   `experts_impl` payload knob; `batched_mm_experts_forward` (`moe.py:118-179`) never
+   calls `_can_use_grouped_mm`, so it clears find_spec AND the CUDA-graphs wall with no
+   rebuild/dep-bump. The $0 one-drive compiled-path probe — **run it FIRST** next session.
+7. **Eval tier** (`2ef4eb8c`) — the `seon.worker-eval` cljs.js self-host eval is ALIVE
+   (the earlier "dead" symptom was a STALE deployed bundle, not a source bug); fixed a
+   latent empty/garbage false-pass. 4 proofs green incl. **def-vs-defn caught** + budget
+   interrupt. Needs rebuild (`clj -M:cljs compile worker-oracle-eval`) + redeploy; then
+   flip the kill-gate's `EVAL_ENABLED` on.
+8. **Owner GPU-session runbook** (`3efa5980`) — [[owner-gpu-runbook]]: the ordered,
+   verify_fresh-gated checklist (cheapest decisive probe first). START HERE next session.
 
 **AWAITS OWNER ACTION (the remaining big wins):**
 - **Deploy the co-location image** → unlocks the KV-cache **worker-reuse half** (the 62%
