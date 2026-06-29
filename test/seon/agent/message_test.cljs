@@ -17,6 +17,7 @@
   (:require
     [cljs.test :refer [deftest is testing async]]
     [datahike.api :as d]
+    [malli.core :as m]
     [seon.agent :as agent]
     [seon.agent.todo :as todo]
     [seon.client :as client]
@@ -173,6 +174,65 @@
                     (is (false? ok?))
                     (is (re-find #"with-agent" (:seon.error/message error)))
                     (is (empty? (pulled-msgs conn))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; `from` accepts EVERY datahike ref form — a lookup-ref `[:seon.agent/id id]`,
+;; a resolved eid (int), and the ALS default (which derives a lookup-ref). The
+;; slot schema is `:seon.db/ref`, which admits all three by design
+;; (`[:or :int :string [:tuple :keyword …]]`); this locks that invariant at the
+;; boundary (the request schema) AND end-to-end (each form transacts + resolves
+;; back to the same sender). Regression for delegation-drive finding #5, whose
+;; `:malli.core/invalid-schema` was the registry-stomp (#41), NOT a from-slot
+;; defect — the slot already admits the lookup-ref, as these asserts prove.
+;; ---------------------------------------------------------------------------
+
+(deftest from-slot-admits-lookup-ref-resolved-ref-and-default
+  (testing "the request schema admits all three from-ref forms at the boundary"
+    (let [req (fn [from] {:seon.agent.message/from    from
+                          :seon.agent.message/to      [:seon.agent/id a-id]
+                          :seon.agent.message/content "hi"})]
+      (is (m/validate :seon.agent.message/message-request
+                      (req [:seon.agent/id a-id]))
+          "lookup-ref from validates")
+      (is (m/validate :seon.agent.message/message-request (req 42))
+          "resolved eid (int) from validates")
+      (is (m/validate :seon.agent.message/message-request
+                      (dissoc (req nil) :seon.agent.message/from))
+          "absent from validates (defaults to the ALS agent)")))
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (let [a-eid (d/q '[:find ?e . :where [?e :seon.agent/id "msgtest-agent-a"]]
+                             @conn)
+                  from-resolves-to-a?
+                  (fn [{mid :seon.agent.message/id ok? :seon.agent.message/ok?} label]
+                    (is (true? ok?) (str label " → ok? envelope"))
+                    (let [m (first (filter #(= mid (:seon.agent.message/id %))
+                                           (pulled-msgs conn)))]
+                      (is (= a-id (:seon.agent/id (:seon.agent.message/from m)))
+                          (str label " → stored from resolves to agent A"))))]
+              (is (int? a-eid) "agent A has a resolved eid to send as")
+              ;; (1) explicit lookup-ref from
+              (-> (agent/message! {:seon.agent.message/from    [:seon.agent/id a-id]
+                                   :seon.agent.message/to      [:seon.agent/id b-id]
+                                   :seon.agent.message/content "from lookup-ref"})
+                  (.then #(from-resolves-to-a? % "lookup-ref"))
+                  ;; (2) resolved eid (int) from
+                  (.then (fn [_]
+                           (agent/message! {:seon.agent.message/from    a-eid
+                                            :seon.agent.message/to      [:seon.agent/id b-id]
+                                            :seon.agent.message/content "from resolved eid"})))
+                  (.then #(from-resolves-to-a? % "resolved-eid"))
+                  ;; (3) default from = the ALS agent (a derived lookup-ref)
+                  (.then (fn [_]
+                           (db/with-agent a-id
+                             (fn []
+                               (agent/message!
+                                 {:seon.agent.message/to      [:seon.agent/id b-id]
+                                  :seon.agent.message/content "from als default"})))))
+                  (.then #(from-resolves-to-a? % "als-default"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
