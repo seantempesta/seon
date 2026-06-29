@@ -269,8 +269,14 @@ When iterating autonomously (e.g. overnight), each cycle:
   unchanged when eval migrates (same API). **PARSE-TIER BUILT + offline-proven (`45e801d6`):**
   `bin/oracle-server` (bb persistent line-server) measured **~0.05ms warm / ~21ms cold-spawn** (p99
   0.24ms), byte-identical span contract to the Node validator, no shadow build. The worker spawns it once
-  (`Oracle(["bb", "bin/oracle-server"])`) → sub-ms local validation per checkpoint. Remaining for full
-  co-location: bundle bb+oracle-server onto the worker image, wire the Python spawn, the in-process KV cache.
+  (`Oracle(["bb", "bin/oracle-server"])`) → sub-ms local validation per checkpoint. **EVAL-TIER BUILT +
+  offline-proven (`310f8652`):** `seon.worker-eval` (cljs.js self-host, `:worker-oracle-eval` target) =
+  the CORRECTNESS gate ("does it RUN?") — compiles the form so it CATCHES `(def mean [nums] …)` /
+  undeclared-var (the def-vs-defn parse missed); `^:async`/interop compile clean (why cljs.js not bb-SCI);
+  non-termination fenced by V8 `vm` timeout. Warm **~2.6ms/call**, cold ~276ms (one-time). Same `{op,…}`
+  contract → split confirmed: **parse-per-step (bb 0.05ms), eval-at-checkpoint (cljs.js 2.6ms)**. The
+  co-located oracle is now COMPLETE. Remaining for full co-location: image bundling + worker spawn wiring
+  (the `co-location-image-build` doc) + the in-process KV cache.
 
 ## Pointers
 
