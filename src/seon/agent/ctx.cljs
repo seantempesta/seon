@@ -1312,8 +1312,9 @@
                       each fn's SIGNATURE (header + flags + one-line doc,
                       bodies elided). No ns source, no schemas, no tests —
                       the public-API manifest view of a framework ns."
-  ([ns-kw data] (render-one-ns-ai ns-kw data :full))
-  ([ns-kw data detail]
+  ([ns-kw data] (render-one-ns-ai ns-kw data :full nil))
+  ([ns-kw data detail] (render-one-ns-ai ns-kw data detail nil))
+  ([ns-kw data detail members]
    (if (nil? data)
      (str "; requires: " (name ns-kw) " (not in db)")
      (let [src     (:seon.ns/source data)
@@ -1321,8 +1322,16 @@
            schemas (->> (:seon.schema/_ns data) (sort-by (comp str :seon.schema/key)))
            tests   (->> (:seon.test/_ns data)   (sort-by :seon.test/sym))]
        (if (= detail :signature)
-         ;; manifest view: public fn signatures only, bodies elided.
-         (let [pub  (remove :seon.fn/private? fns)
+         ;; manifest view: public fn signatures only, bodies elided. When
+         ;; `members` is given, the manifest is NARROWED to just those verbs
+         ;; (by trailing name) — surface a FEW fns of a large ns without
+         ;; dumping its whole public API (the spawn-verb surfacing path).
+         (let [pub0 (remove :seon.fn/private? fns)
+               want (when (seq members)
+                      (set (map #(name (symbol (str %))) members)))
+               pub  (if want
+                      (filter #(contains? want (name (symbol (str (:seon.fn/sym %))))) pub0)
+                      pub0)
                sigs (map #(fn-block-ai % :signature) pub)]
            (ns-demarc ns-kw
                       (if (seq sigs)
@@ -1437,10 +1446,17 @@
 ;; :seon.fn/sym in [[render-member]].
 (schema/register! :seon.ns/member [:or :symbol :string])
 
+;; The signature-subset handle: name a FEW fns to render JUST their
+;; signatures (not the whole ns API). Surfaces the spawn verbs (start!/create!)
+;; of the large `seon.agent` ns without dumping its framework-internal fns.
+(schema/register! :seon.ns/members
+  [:or [:set :seon.ns/member] [:sequential :seon.ns/member]])
+
 (schema/register! ::render-namespace-request
   [:map
    [:seon.ns/name        :seon.ns/name]
    [:seon.ns/member      {:optional true} :seon.ns/member]
+   [:seon.ns/members     {:optional true} :seon.ns/members]
    [:seon.render/depth   {:optional true} :seon.render/depth]
    [:seon.render/format  {:optional true} :seon.render/format]
    [:seon.render/detail  {:optional true} :seon.render/detail]
@@ -1522,15 +1538,25 @@
   {:malli/schema [:=> [:cat ::render-namespace-request] ::render-namespace-response]}
   [{ns-name :seon.ns/name
     member :seon.ns/member
+    members :seon.ns/members
     :seon.render/keys [depth format detail]
     :seon.db/keys [db]
     :or {depth 1 format :ai detail :signature}}]
   (let [db    (or db @db/*conn*)
         ns-kw (if (keyword? ns-name) ns-name (keyword (str ns-name)))]
-    (if (some? member)
+    (cond
+      (some? member)
       ;; member-drill short-circuits BEFORE recursion: depth-0 pull of this
       ;; ns only, render the one fn's full source (or the not-found note).
       {:seon.render/text (render-member ns-kw (pull-ns-data db ns-kw) member)}
+
+      (seq members)
+      ;; signature-subset short-circuits like member-drill: depth-0 pull of
+      ;; this ns, render JUST the named members' signatures — a few verbs of a
+      ;; large ns without dumping its whole API (the spawn-verb surfacing path).
+      {:seon.render/text (render-one-ns-ai ns-kw (pull-ns-data db ns-kw) :signature members)}
+
+      :else
       (let [[order data-by-kw] (collect-ns-order db ns-kw (max 0 depth))]
         (if (= format :html)
           {:seon.render/hiccup

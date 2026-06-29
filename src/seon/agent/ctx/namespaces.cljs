@@ -142,18 +142,26 @@
   #{:seon.agent.todo})
 
 (def verb-signature-whitelist
-  "The seon.* VERB namespaces aliased/refer'd into every agent's home ns by
-   [[seon.eval/setup-agent-ns!]] whose PUBLIC SIGNATURES (arglists + doc line,
+  "The seon.* VERB namespaces whose PUBLIC SIGNATURES (arglists + doc line,
    bodies elided — `:seon.render/detail :signature`) render in every agent
-   prompt. The home-ns require form names `message`/`wait`/`complete`/… but a
-   bare alias is undiscoverable — the agent must SEE the arglist to call
-   `(message/user content)` or `(complete result)`. These are NOT in
-   [[full-source-whitelist]] (no full-body dump — just the API surface) and
-   kept matched to [[seon.eval/home-ns-require-specs]]. `seon.db` /
-   `seon.schema` / `seon.agent.todo` self-document elsewhere (todo is full
-   source; db/schema via grep + the system prose), so only the messaging +
-   lifecycle verbs — the ones with no other surface — live here."
-  #{:seon.agent.message :seon.agent.lifecycle})
+   prompt so the verb is DISCOVERABLE — a bare home-ns alias is not enough; the
+   agent must SEE the arglist to call `(message/user content)`, `(complete
+   result)`, or `(agent/start! {…})`. A MAP `ns → selector`:
+     - `:all` — surface the WHOLE public API of that ns (the dedicated verb
+       nses `seon.agent.message` / `seon.agent.lifecycle`, aliased/refer'd into
+       the home ns by [[seon.eval/setup-agent-ns!]], matched to
+       [[seon.eval/home-ns-require-specs]]).
+     - `#{\"fn\" …}` — surface ONLY those fns' signatures. `seon.agent` is a
+       large framework ns (boot!, the wake predicates, …) so dumping it whole
+       is noise; we surface JUST the spawn verbs `start!`/`create!` — the
+       discovery gap that left an agent able to `terminate` a child (rendered)
+       but not SPAWN one (hidden). `agent/` is already aliased into the home ns.
+   These are NOT in [[full-source-whitelist]] (no full-body dump — just the API
+   surface). `seon.db` / `seon.schema` / `seon.agent.todo` self-document
+   elsewhere (todo is full source; db/schema via grep + the system prose)."
+  {:seon.agent.message   :all
+   :seon.agent.lifecycle :all
+   :seon.agent           #{"start!" "create!"}})
 
 (def canonical-full-my-ns
   "The `my.*` namespaces kept rendered in FULL under the signature
@@ -286,30 +294,36 @@
    empty current ns becomes a [[cur-ns-workspace-stub]] (GI-2) so the
    prompt's 'YOUR OWN namespace renders in full' promise holds. Every OTHER
    full ns with nothing real to show is omitted (nil) — the empty-store
-   edge; the boot indexer guarantees real text for every other full row."
-  [db nm detail cur-ns]
-  (let [txt    (-> (ctx/render-namespace
-                     {:seon.ns/name      nm
-                      :seon.render/depth 0
-                      :seon.render/detail detail
-                      :seon.db/db        db})
-                   :seon.render/text
-                   str/trim)
-        ;; render-namespace brackets even an empty ns, whose body is then
-        ;; `; (no recorded source/fns/schemas)` (entity present, no
-        ;; source/members) or `; requires: x (not in db)` (the home ns —
-        ;; a :seon.ns/name row whose sparse pull returns nil). Both mean
-        ;; "nothing real to show."
-        empty? (or (str/blank? txt)
-                   (and (= detail :full)
-                        (or (str/includes? txt "(no recorded source/fns/schemas)")
-                            (str/includes? txt "(not in db)"))))]
-    (cond
-      (= nm cur-ns) (if (and (= detail :full) empty?)
-                      (cur-ns-workspace-stub db nm)
-                      txt)
-      empty?        nil
-      :else         txt)))
+   edge; the boot indexer guarantees real text for every other full row.
+
+   `members` (optional) narrows a `:signature` render to JUST those fn names —
+   how a large ns surfaces a FEW verbs (the spawn verbs of `seon.agent`)
+   without dumping its whole public API."
+  ([db nm detail cur-ns] (render-one db nm detail cur-ns nil))
+  ([db nm detail cur-ns members]
+   (let [txt    (-> (ctx/render-namespace
+                      (cond-> {:seon.ns/name      nm
+                               :seon.render/depth 0
+                               :seon.render/detail detail
+                               :seon.db/db        db}
+                        (seq members) (assoc :seon.ns/members (vec members))))
+                    :seon.render/text
+                    str/trim)
+         ;; render-namespace brackets even an empty ns, whose body is then
+         ;; `; (no recorded source/fns/schemas)` (entity present, no
+         ;; source/members) or `; requires: x (not in db)` (the home ns —
+         ;; a :seon.ns/name row whose sparse pull returns nil). Both mean
+         ;; "nothing real to show."
+         empty? (or (str/blank? txt)
+                    (and (= detail :full)
+                         (or (str/includes? txt "(no recorded source/fns/schemas)")
+                             (str/includes? txt "(not in db)"))))]
+     (cond
+       (= nm cur-ns) (if (and (= detail :full) empty?)
+                       (cur-ns-workspace-stub db nm)
+                       txt)
+       empty?        nil
+       :else         txt))))
 
 (def ^:private required-api-header
   ;; Sub-cue for the required-dep API surface — the agent's OWN code renders
@@ -466,7 +480,14 @@
         sig-rows  (->> rows
                        (filter (fn [[nm _tx]] (contains? verb-signature-whitelist nm)))
                        (sort-by (fn [[nm _tx]] (name nm))))
-        sig-blocks  (keep (fn [[nm _tx]] (render-one db nm :signature cur-ns)) sig-rows)
+        ;; each whitelisted ns renders its signatures; a `#{names}` selector
+        ;; narrows to JUST those verbs (seon.agent → start!/create!), `:all`
+        ;; surfaces the whole public API (message + lifecycle).
+        sig-blocks  (keep (fn [[nm _tx]]
+                            (let [sel     (get verb-signature-whitelist nm)
+                                  members (when (set? sel) sel)]
+                              (render-one db nm :signature cur-ns members)))
+                          sig-rows)
         body-blocks (keep (fn [[nm d]] (render-one db nm d cur-ns)) body-rows)
         ;; The PUBLIC API (signatures) of the framework deps the agent's
         ;; current ns :requires but does NOT render full/verb-sig elsewhere —

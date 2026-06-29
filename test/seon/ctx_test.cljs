@@ -364,6 +364,56 @@
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
+(deftest spawn-verbs-discoverable-without-dumping-seon-agent
+  ;; The spawn verbs (seon.agent/start! + create!) must be DISCOVERABLE — their
+  ;; SIGNATURES render in the always-on :namespaces block, mirroring how the
+  ;; message/lifecycle verbs are surfaced — so an agent can find HOW to spawn a
+  ;; child (it already could discover `terminate`). But seon.agent is a large
+  ;; framework ns: the `#{names}` selector in verb-signature-whitelist narrows
+  ;; to JUST the spawn verbs — boot! and the wake predicates stay DROPPED.
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (-> (db/transact!
+                  {:seon.db/tx-data
+                   [{:seon.ns/name :my.agent.sp}
+                    {:seon.ns/name :seon.agent}
+                    {:seon.fn/sym      "seon.agent/start!"
+                     :seon.fn/ns       [:seon.ns/name :seon.agent]
+                     :seon.fn/arglists "([{:seon.agent/keys [id purpose default-turn-limit]}])"
+                     :seon.fn/doc      "Spawn a child agent; RETURNS {:seon.agent/id <child-id>} — THAT id is the one you message to reach the child you just spawned this turn (never invent one).\n   More prose below the first line."
+                     :seon.fn/source   "(defn start! [m] m)"}
+                    {:seon.fn/sym      "seon.agent/create!"
+                     :seon.fn/ns       [:seon.ns/name :seon.agent]
+                     :seon.fn/arglists "([{:seon.agent/keys [id purpose]}])"
+                     :seon.fn/doc      "Allocate an agent entity."
+                     :seon.fn/source   "(defn create! [m] m)"}
+                    ;; framework-internal — must NOT be surfaced by the narrowed
+                    ;; selector even though it is public.
+                    {:seon.fn/sym      "seon.agent/boot!"
+                     :seon.fn/ns       [:seon.ns/name :seon.agent]
+                     :seon.fn/arglists "([m])"
+                     :seon.fn/doc      "Boot one agent (system entry)."
+                     :seon.fn/source   "(defn boot! [m] m)"}]})
+                (.then
+                  (fn [_]
+                    (let [txt (ctx-namespaces/namespaces-block
+                                {:seon.db/db @db/*conn* :seon.agent/id "sp"})]
+                      (is (str/includes? txt ";;; ┌─ namespace seon.agent (signatures) ─")
+                          "seon.agent renders a (signatures) block")
+                      (is (str/includes? txt "(seon.agent/start!")
+                          "the spawn verb start! signature is surfaced")
+                      (is (str/includes? txt "(seon.agent/create!")
+                          "the spawn verb create! signature is surfaced")
+                      (is (str/includes? txt "RETURNS {:seon.agent/id")
+                          "start!'s first-line doc teaches the return-id contract")
+                      (is (not (str/includes? txt "boot!"))
+                          "the framework-internal boot! is NOT dumped (narrowed selector)")
+                      (is (not (str/includes? txt "(defn start!"))
+                          "bodies are elided — signatures only")))))))
+        (.then (fn [] (done)))
+        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+
 (deftest required-namespace-api-surfaces-and-self-heals
   ;; The agent's CURRENT ns renders FULL; the framework deps it `:require`s
   ;; render their PUBLIC API (signatures) so adding a require teaches the dep.

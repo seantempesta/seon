@@ -493,7 +493,8 @@
 (defonce !arm-child-fn (atom nil))
 
 (defn ^:async start!
-  "Spawn a child agent — the capability-gated lifecycle verb (the spawn
+  "Spawn a child agent; RETURNS {:seon.agent/id <child-id>} — THAT id is the one you message to reach the child you just spawned this turn (let-bind it or read it back; never invent/guess one).
+   The capability-gated lifecycle verb (the spawn
    counterpart of `seon.agent.lifecycle/terminate`). An alias of `create!`
    that ALSO writes `:seon.agent/parent` = the CALLING agent (read from the
    ALS scope via `db/current-agent-id`). That parent write IS the activation
