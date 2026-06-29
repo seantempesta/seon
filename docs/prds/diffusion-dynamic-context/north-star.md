@@ -225,9 +225,15 @@ When iterating autonomously (e.g. overnight), each cycle:
   (likely nets ahead on our repeated-context workload despite 375<450 raw BF16); **control+caching (the
   buzzsaw path) → CUSTOM KV caching on transformers** (the `kv-section-caching-design` work) — the only
   way to get both the caching win AND per-step control.
-- **A100 speed lever = compiled-transformers-with-compatible-control:** `static`-cache `torch.compile`
-  + the model's BUILT-IN confidence stop + `entropy_bound` (all tensor ops that survive compile),
-  reserving the compile-FORFEITING Python parse/eval stop for the correctness experiments that need it.
+- **A100 speed = ADOPT in-the-loop features, reinvent NOTHING** (all control-compatible, keep the
+  `:1034` seam): (1) **torchao quantization** — `TorchAoConfig` at `from_pretrained` is transparent to
+  `generate()`, so INT8 on the A100 (FP8 on Hopper) reclaims vLLM's dtype-speed WITH control
+  (verify-on-deploy); (2) `static`-cache **`torch.compile`** + the model's BUILT-IN confidence stop +
+  `entropy_bound` (tensor ops that survive compile; reserve the compile-FORFEITING Python parse/eval stop
+  for the correctness experiments); (3) **`past_key_values` / `QuantizedCache` reuse** (transformers-native
+  prefix/skill KV reuse, composes with the per-block `kv-section-caching` design); (4) **Fast-dLLM
+  DualCache** (NVIDIA, training-free in-loop suffix-KV, control-compatible) for extra headroom. The control
+  worker's speed comes from COMPOSING these, not a custom engine. (`pytorch-vs-vllm-roadmap` §5b.)
 - **Co-located oracle runtime = persistent Node sidecar, NOT GraalVM** (`colocated-oracle-package-design`).
   GraalVM = nothing to revive (only a wishlist box), wrong language (oracle is CLJS; polyglot runs JVM
   Clojure → banned parallel reimpl), AND repo-proven crash risk (Substrate-VM signal fights → SIGSEGV
