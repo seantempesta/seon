@@ -59,13 +59,23 @@ correctness metric.
 |---|---|---|---|---|
 | `data-modeling` skill | write a spec'd fn (map-in/map-out) | 0/8 correct, 62% hallucinated | **8/8** correct | KEEP — huge lift; lock as gate |
 | `datahike` skill | write a Datalog query | 0/8 real-API, 62% hallucinated | **8/8** real Datalog | KEEP — huge lift; lock as gate |
+| `clojurescript` skill | write a pod `^:async`/`await` fn | 0/8 `^:async`, 0/8 real-API, 7/8 hallucinated | **8/8** `^:async` + real `transact!` + interop | KEEP — huge lift; the model gets `await` unaided but NOT the `^:async` wrapper/real-API |
 
-**Read of the data so far:** without context the model knows ~none of Seon's API (it
-hallucinates a plausible DSL); a good skill takes it to 100% STRUCTURAL correctness.
-So the structural lift is near-maxed by any skill that teaches the real API — the next
-discriminator is **semantic/eval correctness** (does the query/fn actually RUN and
+**Read of the data so far (3/3 skills, all ~0→100%):** without context the model knows
+~none of Seon's API (it hallucinates a plausible DSL); a good skill takes it to 100%
+STRUCTURAL correctness. The `clojurescript` row is the most informative: the skill's
+value is the NON-OBVIOUS parts (the `^:async` meta that makes `await` valid, the real
+`transact!`, correct interop) — the model already reaches for the obvious token
+(`await`). So structural lift is near-maxed by any skill that teaches the real API —
+the next discriminator is **semantic/eval correctness** (does it actually RUN and
 return the right answer), which needs the eval-tier oracle, not just `parse-forms`.
-That is where skill-refinement will start to separate good from great.
+That is where skill-refinement will start to separate good from great → **next sharper
+move: pivot the sweep from structural to eval-tier** once the 6-skill structural
+baseline is complete.
+
+**Scoring method note (cycle 2 lesson):** prefer SUBSTRING checks over clever regex for
+API-presence (a `\b` after `transact!`'s `!` false-zeroed a real 8/8). Verify any
+surprising metric against the raw sample before recording it — falsify, don't confirm.
 
 ## How cheap can the tests be? (the economics that make this work)
 
