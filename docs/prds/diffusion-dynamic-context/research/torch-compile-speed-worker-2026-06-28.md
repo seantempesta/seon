@@ -513,3 +513,126 @@ Constraints baked in (all source-cited above):
 - Then run §6 as written: discard call 1 (warmup), measure call 2 steady `tok_per_s`,
   and assert `type(out.past_key_values).__name__` is the static cache to prove compile
   engaged.
+
+## #9 — the `find_spec` graph-break, root-caused
+
+> The §8 static-cache fix (`1a475ce9`) cleared the FIRST blocker; running the
+> corrected compiled call then surfaced a SECOND, deeper one under `fullgraph=True`:
+> `Unsupported: Attempted to call function marked as skipped: find_spec in <frozen
+> importlib.util>`. This section pins the exact call site from source and gives the
+> honest cheap-vs-deep verdict. No GPU; every claim is `file:LINE` in vendored
+> `transformers@5.11.0` (the deployed pin) + cited web.
+
+### (1) The exact `find_spec` call site — it is the grouped_mm version-check, torch-2.9-only
+
+The deployed worker pins **`torch==2.9.0` + `transformers==5.11.0`**
+(`gpu_worker.py:193`, `flash-worker/Dockerfile:24,30`). DiffusionGemma "always
+assumes the MoE code path" ([HF DiffusionGemma docs](https://huggingface.co/docs/transformers/model_doc/diffusion_gemma)),
+its `DiffusionGemmaTextExperts` carries `@use_experts_implementation`
+(`modeling_diffusion_gemma.py:529`), and the default backend is `grouped_mm`
+(`modeling_utils.py:2049`). The compiled decoder forward (`self.forward`, wrapped
+`torch.compile(..., fullgraph=True)` at `generation_diffusion_gemma.py:1245`) therefore
+runs `grouped_mm_experts_forward → _grouped_linear → _grouped_mm → _can_use_grouped_mm`
+(`integrations/moe.py:380→347→311→266`).
+
+Inside `_can_use_grouped_mm`, on **A100 (SM80) + bf16 + torch 2.9.0** the dispatch
+walks to exactly ONE version check:
+
+```python
+# integrations/moe.py:296-304
+if weight.device.type == "cuda":
+    if hasattr(torch.nn.functional, "grouped_mm"):   # :297 — FALSE on torch 2.9.0 (it lands in 2.10)
+        return torch.cuda.get_device_capability(weight.device) >= (8, 0)   # :298 — early return, NOT taken on 2.9
+    if hasattr(torch, "_grouped_mm"):                 # :300 — TRUE on torch 2.9.0
+        if is_torch_greater_or_equal("2.9", accept_dev=True):   # :301 ← the find_spec fires HERE
+```
+
+`is_torch_greater_or_equal` → `get_torch_version` → `_is_package_available("torch", return_version=True)`
+→ `spec = importlib.util.find_spec(pkg_name)` (`utils/import_utils.py:166→162→50→52`).
+`find_spec` lives in `<frozen importlib.util>`, which Dynamo carries in its skip list
+and refuses to trace — hence "marked as skipped" ([pytorch#155426](https://github.com/pytorch/pytorch/issues/155426),
+[Dynamo core concepts](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.dynamo_core_concepts.html)).
+
+The two CPU-only checks (`is_torch_less_or_equal("2.10.0", …)` at `:283`) are NOT
+reached on CUDA — `weight.device.type == "cpu"` short-circuits the `and` chain first.
+So `:301` is the sole reachable site, and it is reachable **only because torch is 2.9.x**:
+in torch ≥2.10 `torch.nn.functional.grouped_mm` exists, so `:297` is True and the
+function returns at `:298` BEFORE any version check — the find_spec call site is never
+entered. The HF compatibility table confirms grouped_mm is `fullgraph=True`-clean on a
+supported torch ([Experts backends](https://huggingface.co/docs/transformers/en/experts_interface)).
+
+**Why the existing patch doesn't save it:** `moe.py:37-38` wraps both helpers in
+`torch._dynamo.assume_constant_result` precisely to make Dynamo evaluate-once-at-trace
+and inline the bool (comment at `:34-36`). That patch is present and byte-identical in
+5.11.0 and 5.12.1 — yet the break is observed, so on this **torch 2.9.0** Dynamo the
+wrapper is not suppressing the trace of the kwarg call `is_torch_greater_or_equal("2.9",
+accept_dev=True)`. (The maintainers' CI runs newer torch, where `:301` is never reached,
+so the wrapper's torch-2.9 behavior is effectively untested by them.)
+
+### (2) VERDICT — NOT a cheap pre-import; it's a torch-2.9 artifact gating a genuinely-deep wall
+
+**The "eager-import once before compile" idea does NOT work — answered decisively.**
+The break is a **trace-time** event (graph capture), not a runtime call. `is_torch_*`
+is already `@lru_cache`, and prefill (uncompiled) calls `_can_use_grouped_mm` first, so
+the runtime value is *already cached* before the compiled decode forward runs — and it
+makes no difference, because Dynamo **re-traces the function body at capture** regardless
+of Python-level memoization. There is nothing to pre-trigger: the find_spec is never the
+runtime bottleneck, it is a symbol Dynamo refuses to trace. So this is the
+**per-(re)compile / structural** case, not the cacheable one.
+
+The decisive, infra-only dodge is a **torch bump, not a warmup**:
+
+- **Bump `torch==2.9.0` → `torch==2.10.x`** in `flash-worker/Dockerfile:24` (+ matching
+  `torchvision`/`torchaudio`), rebuild the image, redeploy. On torch ≥2.10
+  `torch.nn.functional.grouped_mm` exists → `_can_use_grouped_mm` returns at `moe.py:298`
+  and `:301`'s find_spec is structurally unreachable in the compiled forward. (Residual
+  risk: `:298` then evaluates `torch.cuda.get_device_capability(...) >= (8,0)` under
+  Dynamo — normally constant-folded, but verify on redeploy.)
+
+**But clearing find_spec only exposes the real, deep blocker — and it is owner/upstream.**
+The HF docs state it flatly: *"the `grouped_mm` experts backend … is not compatible with
+CUDA graphs, so you must use `mode=None` or `mode="max-autotune-no-cudagraphs"` when
+compiling"* ([Experts backends](https://huggingface.co/docs/transformers/en/experts_interface)).
+DiffusionGemma's `_compile_functions` **hardwires `mode="reduce-overhead"` (CUDA graphs)**
+for every compiled region (`generation_diffusion_gemma.py:1241,1245,1249,1253,1260`), with
+no knob to change it. So the model's own author-built compiled path is, on this stack,
+mode-incompatible with its own default MoE backend: bumping torch turns the find_spec break
+into a CUDA-graphs break next. The only clean escape is the **transformers 5.12.0
+decode-stage auto-switch** — *"when using `experts_implementation="grouped_mm"` on GPU, the
+model automatically switches to `"batched_mm"` during the decode stage"* (same doc), and
+`batched_mm` IS compatible with all modes incl. CUDA graphs (compat table). The compiled
+region here IS the decode forward, so a **torch≥2.10 + transformers≥5.12.0** pair *might*
+land the compiled path (decode runs batched_mm → CUDA-graph-clean → reduce-overhead holds).
+That is unverified for DiffusionGemma specifically (5.11.0's diffusion_gemma has no such
+switch; 5.12.x's wiring not confirmed here) and is a model/library question, not a worker
+one.
+
+Canonical non-bump workarounds were checked and rejected: `@torch._dynamo.dont_skip_tracing`
+forces Dynamo INTO frozen `importlib` → strictly more breaks, not fewer
+([pytorch#155426](https://github.com/pytorch/pytorch/issues/155426)); `torch._dynamo.config.suppress_errors=True`
+converts the break into an **eager fallback** (no speedup) and in any case fights the
+library-hardwired `fullgraph=True`. Monkeypatching the two helpers to plain lambdas before
+compile would work but is brittle/answer-shaped and still hits the CUDA-graphs wall.
+
+**Bottom line:** the find_spec break is a *shallow, torch-2.9-pin artifact* (a one-line
+Dockerfile bump removes it), but it sits on top of a *deep* incompatibility between
+DiffusionGemma's hardwired `reduce-overhead` compile and the grouped_mm MoE backend.
+Net for the A100: the compiled ~1000 tok/s path is **not** unblockable by a cheap worker
+change alone — it needs a torch+transformers stack bump AND validation that the 5.12.0
+decode→batched_mm switch covers the compiled region; absent that it is an owner/upstream
+call. This re-confirms §8: **KV-cache reuse remains the only broadly-applicable A100 speed
+lever.**
+
+### (3) Redeploy + re-test flag for the owner/loop
+
+Cheap to TRY, decisive either way — worth one redeploy:
+
+1. Edit `flash-worker/Dockerfile:24,30`: `torch==2.10.x torchvision==… torchaudio==2.10.x`
+   and `transformers==5.12.1` (5.12.x for the decode→batched_mm switch). Rebuild + redeploy.
+2. Re-run the §-corrected compiled call (`compile=true`, `max_length=512`, no
+   `max_new_tokens`).
+3. Falsify-don't-confirm: capture `TORCH_LOGS="graph_breaks,recompiles"`. Expected outcomes —
+   (a) clean compile + a real `tok_per_s` jump → the torch pin was the whole story; (b) the
+   find_spec is gone but a **CUDA-graphs / `reduce-overhead`** error replaces it → it's the
+   deep wall → stop, it's upstream, KV-cache is the lever. Do NOT chase (b) with
+   `suppress_errors` (that just silently de-compiles).
