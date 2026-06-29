@@ -159,6 +159,29 @@ one gym predicate (`:spec-infill-instruments`). NO sentinel, NO op-axis, NO
 convergence loop. Keep the dynamic-context section-fns regardless — they are the
 safe half and they help arm 3 too.
 
+**Status — the Seon-side scaffold is BUILT + OFFLINE-PROVEN, end-to-end
+AWAITS-GPU (2026-06-29).** `seon.diffusion.scaffold/build-scaffold`
+(`src/seon/diffusion/scaffold.cljs`) is the template generator: given
+`{::fn-name ::ns ::intent}` it emits the `:defn-with-specs` clamp frame —
+`::frame-text` (the two `schema/register!` `:map`s + the `defn` with its
+`[:=> [:cat ::name-request] ::name-response]` wiring, valid Clojure with
+placeholder slots), `::infill-spans` (the four slots the worker generates: the
+request `:map` body, the response `:map` body, the arglist destructure, the fn
+body), and `::clamp-spans` (the fixed structure the worker HOLDS: the
+`defn`/`schema/register!` forms, the `:malli/schema` `:=>` wiring, the
+`::request`/`::response` refs). The span sets TILE the frame exactly (no gap, no
+overlap) by construction. Span vocabulary + `to-wire`'s `{op,span,role}`
+flattening REUSE `seon.diffusion.retrieval` so the worker consumes scaffold
+spans the same way it consumes retrieval injections. Offline-proven (NO GPU) in
+`test/seon/diffusion/scaffold_test.cljs` — 27 assertions, 0 fail: the frame
+parses via `seon.repl.internal/parse-forms` (3 clean top-level forms), every
+infill span lands on its slot, the clamp text holds every structural token, and
+the spans partition `[0, len)`. The worker clamps `::clamp-spans` and infills
+`::infill-spans` (spec slots first so the body generates against a known
+contract) → a complete map-in/map-out fn. Remaining work is the GPU round-trip
+(P0 canvas-length probe must still confirm the frame fits one canvas with clean
+BPE clamp/slot boundaries) + the E1 kill-gate A/B against arm 3.
+
 ### P3 — The Seon interface
 
 Wire the `:diffusiongemma` provider (two backends behind `SEON_DG_BACKEND`),
