@@ -64,6 +64,16 @@ correctness metric.
 | `data-oriented-clojure` skill | design session-history storage (mindset) | 1/8 EAV, 0/8 namespaced, **8/8 hallucinated commercial-Seon SaaS** | 8/8 EAV + namespaced, 1/8 hallucinated | KEEP — huge lift; redirects the commercial-Seon prior to our EAV model |
 | `seon.*` required-API render (feat `844ec448`) | (context section, not a skill) | — | shipped, ~2.9k tok/turn | **LIFT UNMEASURED** — must A/B to justify the token cost or trim the cap |
 
+| `ui-live-tiles` skill | render a live todos tile | 0/8 real-render-ns, 0/8 namespaced, 7/8 hallucinated tile-map | 8/8 `:seon.render` + namespaced + `:malli/schema` | KEEP — huge lift |
+
+**▸ SWEEP COMPLETE — 6/6 skills, ALL ~0→100% structural.** The north-star's
+structural thesis is proven: context takes this model from ~0% correct (confidently
+hallucinating) to ~100% structural correctness, in every domain (schema, queries,
+async, parser-explanation, data-mindset, UI). **Next: the structural ceiling is hit —
+pivot to (1) the EVAL-TIER oracle (does the generated code RUN / give the right
+answer?), (2) closing the eval-renoise buzzsaw loop, (3) measuring the required-API
+feature's lift to justify its 2.9k tok.**
+
 ### The deep finding (5/5 skills) — context OVERRIDES confident-wrong priors
 
 In EVERY skill the control fails the SAME way: it hallucinates a confident,
