@@ -18,7 +18,8 @@
     [clojure.string :as str]
     [seon.agent.fs :as fs]
     [seon.agent.search :as-alias search]
-    [seon.ai.tokens :as tokens]))
+    [seon.ai.tokens :as tokens]
+    [seon.db :as db]))
 
 ;; ============================================================
 ;; Hard caps.
@@ -156,55 +157,212 @@
                ::search/line-text   (preview-line line-text)}))))
       (catch :default _ nil))))
 
-(defn- group-by-file
-  "matches → vector of file rows, each {::path ::count ::line-number
-   ::line-text}, where line-number/line-text sample the FIRST hit in the
-   file. Ranked by descending match count (the densest files first), so the
-   `cap` that follows keeps the most relevant rows."
-  [matches]
-  (->> matches
-       (group-by ::search/path)
-       (mapv (fn [[path ms]]
-               (let [{ln ::search/line-number lt ::search/line-text} (first ms)]
-                 {::search/path        path
-                  ::search/count       (count ms)
-                  ::search/line-number ln
-                  ::search/line-text   lt})))
-       (sort-by (comp - ::search/count))
-       vec))
+;; ============================================================
+;; Generic grouped envelope — the SHARED concise formatter.
+;;
+;; Both grep (file content) and grep-graph (program graph) produce the
+;; SAME shape: a flat list of hits, GROUPED by a container (file path /
+;; namespace), each group a row with a hit-count + a sample preview,
+;; capped + ranked by density, with honest totals + a narrowing hint
+;; when clipped. This fn IS that shape; the two verbs only differ in the
+;; container key, the per-group row projection, the response field names,
+;; and the hint text — all passed in. Do NOT fork a second formatter.
+;; ============================================================
 
-(defn success-from
-  "Parse rg --json stdout into the ok?-true envelope.
+(defn grouped-envelope
+  "Build the ok?-true concise/full envelope from a flat `matches` vector.
 
-   DEFAULT (concise) — group by file, rank by hit count, return the top
-   `cap` file rows under ::by-file with the honest ::match-count /
-   ::file-count and, when rows were clipped, a narrowing ::hint.
+   - `group-key` — extracts a hit's CONTAINER (e.g. ::search/path for
+     files, ::search/ns for the graph). Hits sharing a container roll up
+     to one row.
+   - `row-fn`    — (container, hits-in-that-container) → a group ROW map.
+     The row MUST carry ::search/count (used to rank densest-first); the
+     rest of the row shape is the caller's (a sample line / member).
+   - `fields`    — {:rows <vector key, e.g. ::search/by-file>
+                    :group-count <int key, e.g. ::search/file-count>
+                    :hint <(total group-count shown) → narrowing string>}.
 
-   `full?` true — return the flat ::matches list (capped at `cap` matches)
-   for the rare case the agent wants every line, not the per-file roll-up."
-  [stdout cap full?]
-  (let [matches (into [] (keep parse-match-line) (str/split-lines stdout))
-        total   (count matches)]
+   DEFAULT (full? false): rank rows by ::count desc, keep the top `cap`,
+   report honest ::match-count (all hits) + the group-count + a ::hint
+   when rows were clipped.
+
+   full? true: skip grouping, return the flat ::matches list capped at
+   `cap` — the drill escape hatch (every hit, not the roll-up)."
+  [matches group-key row-fn {:keys [rows group-count hint]} cap full?]
+  (let [total (count matches)]
     (if full?
-      (let [shown (subvec matches 0 (min cap total))]
+      (let [shown (subvec (vec matches) 0 (min cap total))]
         {::search/ok?         true
          ::search/match-count total
          ::search/returned    (count shown)
          ::search/matches     shown
          ::search/truncated?  (> total (count shown))})
-      (let [rows       (group-by-file matches)
-            file-count (count rows)
-            shown      (subvec rows 0 (min cap file-count))
-            clipped    (> file-count (count shown))]
-        (cond-> {::search/ok?         true
+      (let [grouped (->> matches
+                         (group-by group-key)
+                         (mapv (fn [[k ms]] (row-fn k ms)))
+                         (sort-by (comp - ::search/count))
+                         vec)
+            gcount  (count grouped)
+            shown   (subvec grouped 0 (min cap gcount))
+            clipped (> gcount (count shown))]
+        (cond-> {::search/ok?      true
                  ::search/match-count total
-                 ::search/file-count  file-count
-                 ::search/returned    (count shown)
-                 ::search/by-file     shown
-                 ::search/truncated?  clipped}
-          clipped
-          (assoc ::search/hint
-                 (str total " matches in " file-count " files — showing the "
-                      (count shown) " densest. Narrow :seon.agent.search/pattern, "
-                      "add a :seon.agent.search/glob, or pass :seon.agent.search/paths "
-                      "to drill; :seon.agent.search/full? true returns every line.")))))))
+                 group-count       gcount
+                 ::search/returned (count shown)
+                 rows              shown
+                 ::search/truncated? clipped}
+          clipped (assoc ::search/hint (hint total gcount (count shown))))))))
+
+;; ============================================================
+;; File target — the rg projection of the generic envelope.
+;; ============================================================
+
+(defn- file-row
+  "One file group → {::path ::count ::line-number ::line-text}, sampling the
+   FIRST hit in the file for the line-number + preview line."
+  [path ms]
+  (let [{ln ::search/line-number lt ::search/line-text} (first ms)]
+    {::search/path        path
+     ::search/count       (count ms)
+     ::search/line-number ln
+     ::search/line-text   lt}))
+
+(defn- file-hint [total file-count shown]
+  (str total " matches in " file-count " files — showing the " shown
+       " densest. Narrow :seon.agent.search/pattern, add a "
+       ":seon.agent.search/glob, or pass :seon.agent.search/paths to drill; "
+       ":seon.agent.search/full? true returns every line."))
+
+(defn success-from
+  "Parse rg --json stdout into the ok?-true envelope via [[grouped-envelope]]
+   (grouped by FILE)."
+  [stdout cap full?]
+  (grouped-envelope (into [] (keep parse-match-line) (str/split-lines stdout))
+                    ::search/path file-row
+                    {:rows ::search/by-file :group-count ::search/file-count
+                     :hint file-hint}
+                    cap full?))
+
+;; ============================================================
+;; Graph target — text search over the PROGRAM GRAPH (the literal
+;; counterpart to SEON_EMBED semantic recall). Same envelope shape as the
+;; file grep, but the corpus is :seon.fn / :seon.schema / :seon.ns rows in
+;; seon.db — code that may live in NO source file (agent-authored + seeded
+;; code-as-data), which rg can't reach. Grouped BY NAMESPACE.
+;; ============================================================
+
+(def default-graph-targets
+  "Graph targets searched when :seon.agent.search/targets is omitted — the
+   CODE corpus (fns, schemas, namespaces). :seon.eval (the eval LOG) is
+   opt-in: high-volume and not the core target."
+  [:seon.fn :seon.schema :seon.ns])
+
+(defn compile-pattern
+  "Compile `pattern` to a STATELESS (no global flag — `.test` is reused per
+   line) js/RegExp under ::search/re, or an ok?-false envelope when the
+   regex is invalid. `ci?` adds the case-insensitive flag."
+  [pattern ci?]
+  (try
+    {::search/re (js/RegExp. pattern (if ci? "i" ""))}
+    (catch :default e
+      (fail (str "invalid :seon.agent.search/pattern — it is a REGEX (JS "
+                 "syntax): escape ( ) [ ] { } . with \\\\. Detail: "
+                 (or (some-> e .-message) (str e)))))))
+
+(defn first-matching-line
+  "First line of `src` matching `re`, preview-capped; falls back to the first
+   non-blank line, then \"\". The graph analog of rg's matched line — keeps
+   the per-member sample to a single trimmed line, not a whole defn."
+  [re src]
+  (let [lines (str/split-lines (str src))]
+    (preview-line
+      (or (some (fn [l] (when (.test re l) l)) lines)
+          (first (remove str/blank? lines))
+          ""))))
+
+(defn- hit
+  "One matching graph entity → a flat hit map (the graph analog of a file
+   match line): which target matched, the owning namespace (container), the
+   member identifier, and a preview of the matching source line."
+  [target ns-str member src re]
+  {::search/target    target
+   ::search/ns        ns-str
+   ::search/member    member
+   ::search/line-text (first-matching-line re src)})
+
+(defn- fn-hits [re]
+  (->> (db/query '[:find ?sym ?src ?doc
+                   :where [?e :seon.fn/sym ?sym] [?e :seon.fn/source ?src]
+                          [(get-else $ ?e :seon.fn/doc "") ?doc]])
+       (keep (fn [[sym src doc]]
+               (when (.test re (str sym "\n" doc "\n" src))
+                 (hit :seon.fn (or (namespace (symbol sym)) sym) sym src re))))))
+
+(defn- schema-hits [re]
+  (->> (db/query '[:find ?k ?src
+                   :where [?e :seon.schema/key ?k] [?e :seon.schema/source ?src]])
+       (keep (fn [[k src]]
+               (when (.test re (str k "\n" src))
+                 (hit :seon.schema (or (namespace k) (name k)) (str k) src re))))))
+
+(defn- ns-hits [re]
+  (->> (db/query '[:find ?nm ?src
+                   :where [?e :seon.ns/name ?nm] [?e :seon.ns/source ?src]])
+       (keep (fn [[nm src]]
+               (when (.test re (str (name nm) "\n" src))
+                 (hit :seon.ns (name nm) (str nm) src re))))))
+
+(defn- eval-hits [re]
+  (->> (db/query '[:find ?id ?src ?ns
+                   :where [?e :seon.eval/id ?id] [?e :seon.eval/source ?src]
+                          [(get-else $ ?e :seon.eval/ns :seon.eval/unknown) ?ns]])
+       (keep (fn [[id src ns]]
+               (when (.test re (str src))
+                 (hit :seon.eval (name ns) (str id) src re))))))
+
+(defn graph-hits
+  "Flat hits across the requested graph `targets`, in TARGET ORDER (fns
+   first) so a namespace group samples a concrete fn for its preview. `re`
+   is the compiled stateless pattern."
+  [targets re]
+  (vec (mapcat (fn [t] (case t
+                         :seon.fn     (fn-hits re)
+                         :seon.schema (schema-hits re)
+                         :seon.ns     (ns-hits re)
+                         :seon.eval   (eval-hits re)
+                         nil))
+               targets)))
+
+(defn- ns-row
+  "One namespace group → {::ns ::count ::member ::target ::line-text}, sampling
+   the FIRST hit (a fn, by target order) for member/target/preview."
+  [ns-str ms]
+  (let [{m ::search/member t ::search/target lt ::search/line-text} (first ms)]
+    {::search/ns        ns-str
+     ::search/count     (count ms)
+     ::search/member    m
+     ::search/target    t
+     ::search/line-text lt}))
+
+(defn- graph-hint [total ns-count shown]
+  (str total " graph matches in " ns-count " namespaces — showing the " shown
+       " densest. Narrow :seon.agent.search/pattern, restrict "
+       ":seon.agent.search/targets, or pass :seon.agent.search/full? true for "
+       "every member."))
+
+(defn graph-search
+  "Backend for seon.agent.search/grep-graph: text-search the program graph,
+   grouped BY NAMESPACE, via the SAME [[grouped-envelope]] as the file grep.
+   Errors as values (invalid regex / unexpected → ok?-false envelope)."
+  [pattern targets cap full? ci?]
+  (try
+    (let [compiled (compile-pattern pattern ci?)]
+      (if-let [re (::search/re compiled)]
+        (grouped-envelope (graph-hits targets re) ::search/ns ns-row
+                          {:rows ::search/by-ns :group-count ::search/ns-count
+                           :hint graph-hint}
+                          cap full?)
+        compiled))
+    (catch :default e
+      (fail (str "unexpected error in seon.agent.search/grep-graph: "
+                 (or (some-> e .-message) (str e)))))))

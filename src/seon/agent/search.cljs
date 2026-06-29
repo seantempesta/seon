@@ -75,6 +75,62 @@
 (schema/register! :seon.agent.search/returned :int)
 (schema/register! :seon.agent.search/truncated? :boolean)
 
+;; --- grep-graph: the program-graph counterpart of grep. Same envelope
+;; shape (capped rows grouped by a container, honest totals + hint +
+;; :full?), but the CONTAINER is the NAMESPACE and a row's sample is a
+;; matching MEMBER (fn/schema/ns), not a file line. Shared scalars above
+;; (::match-count, ::returned, ::truncated?, ::hint, ::count, ::line-text,
+;; ::ok?, ::pattern, ::full?, ::case-insensitive?) are REFERENCED here, not
+;; re-registered — the "register shared shapes once" rule.
+(schema/register! :seon.agent.search/ns       :string)      ; container — owning namespace
+(schema/register! :seon.agent.search/member   :string)      ; the matched fn sym / schema key / ns name (printed)
+(schema/register! :seon.agent.search/target   :keyword)     ; which graph attr matched: :seon.fn/:seon.schema/:seon.ns/:seon.eval
+(schema/register! :seon.agent.search/ns-count :int)
+(schema/register! :seon.agent.search/targets
+  [:vector [:enum :seon.fn :seon.schema :seon.ns :seon.eval]])
+
+;; A flat graph match — one matching member, returned only under :full? true.
+(schema/register! :seon.agent.search/graph-match
+  [:map
+   [:seon.agent.search/ns        :seon.agent.search/ns]
+   [:seon.agent.search/member    :seon.agent.search/member]
+   [:seon.agent.search/target    :seon.agent.search/target]
+   [:seon.agent.search/line-text :seon.agent.search/line-text]])
+
+;; A namespace roll-up — the CONCISE default unit: which namespace, how many
+;; members matched, and the first matching member (+ a preview line) as a sample.
+(schema/register! :seon.agent.search/ns-row
+  [:map
+   [:seon.agent.search/ns        :seon.agent.search/ns]
+   [:seon.agent.search/count     :seon.agent.search/count]
+   [:seon.agent.search/member    :seon.agent.search/member]
+   [:seon.agent.search/target    :seon.agent.search/target]
+   [:seon.agent.search/line-text :seon.agent.search/line-text]])
+
+(schema/register! :seon.agent.search/graph-matches [:vector :seon.agent.search/graph-match])
+(schema/register! :seon.agent.search/by-ns [:vector :seon.agent.search/ns-row])
+
+(schema/register! :seon.agent.search/grep-graph-request
+  [:map
+   [:seon.agent.search/pattern           :seon.agent.search/pattern]
+   [:seon.agent.search/targets           {:optional true} :seon.agent.search/targets]
+   [:seon.agent.search/max-results       {:optional true} :seon.agent.search/max-results]
+   [:seon.agent.search/full?             {:optional true} :seon.agent.search/full?]
+   [:seon.agent.search/case-insensitive? {:optional true} :seon.agent.search/case-insensitive?]])
+
+(schema/register! :seon.agent.search/grep-graph-response
+  [:map
+   [:seon.agent.search/ok?         :seon.agent.search/ok?]
+   [:seon.agent.search/match-count {:optional true} :seon.agent.search/match-count]
+   [:seon.agent.search/ns-count    {:optional true} :seon.agent.search/ns-count]
+   [:seon.agent.search/returned    {:optional true} :seon.agent.search/returned]
+   [:seon.agent.search/by-ns       {:optional true} :seon.agent.search/by-ns]
+   [:seon.agent.search/matches     {:optional true} :seon.agent.search/graph-matches]
+   [:seon.agent.search/truncated?  {:optional true} :seon.agent.search/truncated?]
+   [:seon.agent.search/hint        {:optional true} :seon.agent.search/hint]
+   [:seon.agent.search/error       {:optional true} :seon.agent.search/error]
+   [:seon.agent.search/raw-error   {:optional true} :seon.agent.search/raw-error]])
+
 (schema/register! :seon.agent.search/grep-request
   [:map
    [:seon.agent.search/pattern           :seon.agent.search/pattern]
@@ -226,3 +282,64 @@
     (catch :default e
       (in/fail (str "unexpected error in seon.agent.search/grep: "
                     (or (some-> e .-message) (str e)))))))
+
+(defn grep-graph
+  "Text-search the LIVE PROGRAM GRAPH — the literal counterpart of `grep`,
+   and the literal sibling of SEON_EMBED semantic recall. Where `grep`
+   searches file CONTENTS, this searches the CODE stored in seon.db:
+   :seon.fn (source + name + docstring), :seon.schema (source), and
+   :seon.ns (source) — fns/schemas/namespaces that may exist in NO source
+   file (agent-authored + seeded code-as-data), which file-grep can't reach.
+   Synchronous (graph reads are local): returns the
+   :seon.agent.search/grep-graph-response envelope directly. Errors are
+   values — never throws.
+
+   This is NOT for arbitrary entity data (todos, kb rows, agent state) —
+   that is Datalog (`seon.db/query`) / `my.kb`. grep-graph is literal text
+   search over CODE only.
+
+   SAME concise contract as `grep`: matching members are GROUPED BY
+   NAMESPACE, ranked by hit-count, top :seon.agent.search/max-results
+   (default 12) namespace rows under :seon.agent.search/by-ns — each a {ns,
+   count, the first matching member + its target + a preview line}. Honest
+   totals (:match-count = matching members, :ns-count = namespaces) always
+   reported; :seon.agent.search/hint when rows were clipped.
+
+   Request keys:
+     :seon.agent.search/pattern           REQUIRED — a REGEX (JS syntax),
+                                    not a literal: escape ( ) [ ] { } . with \\\\
+     :seon.agent.search/targets           optional — which graph kinds to
+                                    search; DEFAULT [:seon.fn :seon.schema
+                                    :seon.ns]. Add :seon.eval to include the
+                                    high-volume eval LOG (off by default).
+     :seon.agent.search/max-results       optional — max NS ROWS (default 12)
+     :seon.agent.search/full?             optional — when true, return the FLAT
+                                    :seon.agent.search/matches list (every
+                                    matching member, capped) instead of by-ns
+     :seon.agent.search/case-insensitive? optional
+
+   No matches is SUCCESS: {:seon.agent.search/ok? true
+                           :seon.agent.search/by-ns [] …count 0}.
+
+   Worked example:
+
+     (seon.agent.search/grep-graph {:seon.agent.search/pattern \"transact\"})
+     ;; => {:seon.agent.search/ok? true
+     ;;     :seon.agent.search/match-count «matching members»
+     ;;     :seon.agent.search/ns-count    «namespaces»
+     ;;     :seon.agent.search/by-ns
+     ;;     [{:seon.agent.search/ns        \"seon.db\"
+     ;;       :seon.agent.search/count     «hits in this ns»
+     ;;       :seon.agent.search/member    \"seon.db/transact!\"
+     ;;       :seon.agent.search/target    :seon.fn
+     ;;       :seon.agent.search/line-text \"«preview of the matching line»\"} …]
+     ;;     :seon.agent.search/truncated? false}"
+  {:malli/schema [:=> [:cat :seon.agent.search/grep-graph-request]
+                  :seon.agent.search/grep-graph-response]}
+  [{:seon.agent.search/keys [pattern targets max-results full? case-insensitive?]
+    :or {max-results in/default-max-results
+         targets     in/default-graph-targets}}]
+  (if (or (nil? pattern) (str/blank? pattern))
+    (in/fail (str ":seon.agent.search/pattern is required and must be non-blank "
+                  "— it is a regex over the program graph (fn/schema/ns code)."))
+    (in/graph-search pattern targets max-results full? case-insensitive?)))
