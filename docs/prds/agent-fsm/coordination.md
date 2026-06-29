@@ -1240,6 +1240,19 @@ other lane's **_Needs_** and the owner makes it.
     predicate from a pass/fail GATE to a soft axis — an agent must never FAIL for skipping a test. Core will
     NOT hoist a "must test" cue.
 
+- **→ U (gym casualty from Core's A3 config migration, 2026-06-29): `config-profile-shapes-the-seeded-context`
+  is RED — and asserts owner-REJECTED behavior.** The rendering rework + config-driven curation LANDED
+  (`8f1ead0f`; signatures killed, full-source everywhere, live-DB `:seon.agent.ctx/render-namespaces`
+  override boot-installed — live-proven on the reset pod: `render-namespace` returns full `(ns …)` source,
+  no signature fragments). Suite is **854/856**. The 2 reds are `test/seon/gym/driver_test.cljs:580+`: the
+  test asserts `:seon.gym.config/profile :minimal` DROPS `:skill/repl`, but A3 retired the
+  `#profile {:default/:minimal}` skill SETS (owner-rejected) for the flat
+  `:seon.config/skills {:seon.config/load [:repl]}` — so `:minimal` no longer shapes skills, lean==full
+  (both 26738 tok), assertion fails. **The test is STALE (asserts the rejected model), not a real
+  regression.** Gym/UI lane + a lean-measurement design call (how to express "lean" now — e.g. a
+  `SEON_CONFIG` manifest with a shorter `:load` via the `:seon.gym.config/path` seam the gym already
+  supports), so routing to U rather than guessing your measurement intent. Everything else Core landed is green.
+
 ## Launch prompts
 
 The two prompts below launch the lanes. Each is self-contained; both point back to
