@@ -29,6 +29,7 @@
     [seon.analyzer-info :as ai]
     [seon.client :as client]
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.findings :as ctx-findings]
     [seon.agent.ctx.inventory :as ctx-inventory]
     [seon.agent.ctx.live-tile :as ctx-live-tile]
     [seon.agent.ctx.namespaces :as ctx-namespaces]
@@ -955,6 +956,86 @@
                       (is (= 1 (count (filter #(str/includes? % "my.workout: ")
                                               lines)))
                           "exactly one line per kind")))))))
+        (.then (fn [] (done)))
+        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+
+;; ------------------------------------------------------------
+;; findings-block — the stored-findings CONTENT surface (sibling of
+;; inventory's COUNTS). Renders claim TEXT + provenance; "" when empty;
+;; loud-truncation footer + read-back query when clipped.
+;; ------------------------------------------------------------
+
+(deftest findings-block-renders-content-and-provenance
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            ;; REACTIVE: a fresh conn holds no user-domain rows → "".
+            (is (= "" (ctx-findings/findings-block {:seon.db/db @db/*conn*}))
+                "no user-domain findings → \"\" (reactive suppression)")
+            (schema/register! :my.kb.codebase/claim :string)
+            (-> (db/transact!
+                  {:seon.db/tx-data
+                   [{:my.kb.codebase/claim
+                     "transact! Malli-validates every entity before the tx reaches datahike"
+                     :my.kb/source-path "src/seon/db.cljs"
+                     :my.kb/source-line 630
+                     :my.kb/confidence  :verified}
+                    {:my.kb.codebase/claim
+                     "the transaction report itself is swallowed at the boundary"
+                     :my.kb/source-path "src/seon/agent/message.cljs"
+                     :my.kb/source-line 42
+                     :my.kb/confidence  :inferred}]})
+                (.then
+                  (fn [_]
+                    (let [txt (ctx-findings/findings-block {:seon.db/db @db/*conn*})]
+                      ;; The CLAIM TEXT itself renders (the regression fix) —
+                      ;; not just a count, not just a low-card sample.
+                      (is (str/includes?
+                            txt "transact! Malli-validates every entity")
+                          "the first claim's TEXT renders in full")
+                      (is (str/includes?
+                            txt "the transaction report itself is swallowed")
+                          "the second claim's TEXT renders in full")
+                      ;; provenance (path:line + confidence) rides each row.
+                      (is (str/includes? txt "src/seon/db.cljs:630")
+                          "source path:line provenance renders")
+                      (is (str/includes? txt ":verified")
+                          "confidence provenance renders")
+                      ;; domain namespace labels the row.
+                      (is (str/includes? txt "my.kb.codebase")
+                          "the domain namespace labels the row")
+                      ;; NO footer when nothing is clipped (2 rows < cap).
+                      (is (not (str/includes? txt "older finding"))
+                          "no truncation footer when all rows shown")))))))
+        (.then (fn [] (done)))
+        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+
+(deftest findings-block-truncation-footer-and-read-back
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            ;; 12 user-domain rows > max-rows (10) → loud footer + read-back.
+            (schema/register! :my.kb.codebase/claim :string)
+            (-> (db/transact!
+                  {:seon.db/tx-data
+                   (mapv (fn [i]
+                           {:my.kb.codebase/claim (str "claim number " i)
+                            :my.kb/source-path "src/seon/x.cljs"
+                            :my.kb/source-line (inc i)
+                            :my.kb/confidence :inferred})
+                         (range 12))})
+                (.then
+                  (fn [_]
+                    (let [txt   (ctx-findings/findings-block {:seon.db/db @db/*conn*})
+                          lines (str/split-lines txt)]
+                      ;; exactly max-rows content lines (the "#<eid>: claim" rows).
+                      (is (= 10 (count (filter #(str/includes? % "claim number ")
+                                               lines)))
+                          "exactly max-rows (10) finding rows rendered")
+                      (is (str/includes? txt "older finding")
+                          "loud-truncation footer present when clipped")
+                      (is (str/includes? txt ":my.kb/source-path")
+                          "footer carries the read-back query")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 

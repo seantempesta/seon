@@ -1767,6 +1767,15 @@
      :seon.render/ai 'seon.agent.todo.internal/open-todos-block}
     {:seon.agent.ctx/name :relevant-source :seon.agent.ctx/priority 48
      :seon.render/ai 'seon.agent.ctx.relevant/relevant-source-block}
+    ;; The stored-findings CONTENT surface — the claim/answer TEXT +
+    ;; provenance of the most-recent user-domain rows (the sibling of
+    ;; :inventory's COUNTS). Rides the volatile band (97, > stable-priority-max,
+    ;; beside :inventory) so a newly-stored finding never busts the cached
+    ;; stable prefix; recomputed each render, vanishes when the store holds
+    ;; no user-domain rows. Restores the DB-memory salience a fresh agent
+    ;; needs to consult-before-researching.
+    {:seon.agent.ctx/name :findings     :seon.agent.ctx/priority 97
+     :seon.render/ai 'seon.agent.ctx.findings/findings-block}
     {:seon.agent.ctx/name :inventory    :seon.agent.ctx/priority 97
      :seon.render/ai 'seon.agent.ctx.inventory/inventory-block}
     ;; The transcript is the WHOLE bottom of the context (priority 100,
