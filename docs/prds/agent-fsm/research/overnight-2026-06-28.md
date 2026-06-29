@@ -53,6 +53,10 @@ needs your decision, and the Core-routed queue.
 
 **Canvas drive UNBLOCKED via the gym (no reset needed):** it runs hermetically (scratch conns) like the #42 validation — sidesteps the clean-tree blocker. Sequenced right after the scorecard-axes agent lands (its toolkit-adoption axis measures my.ui composition directly). Double duty: validate canvas-first + the my.ui/my.tile prominence evidence.
 
+## 🔴 BIGGEST FINDING — the toolkit isn't REACHABLE (coherence audit, P0 → Core)
+
+`research/context-coherence-2026-06-28.md`: the LIVE context renders `my.data`/`my.ui`/`my.tile` with **ZERO indexed fns** (`{my.data [] my.ui [] my.tile [] my.kb [13]}`) — the toolkit I built all night is discoverable by NAME only, not by USE. Root cause is deeper than the #42 signature-trim: **`client.cljs` requires only `my.kb`/`shared`/`skills` → the toolkit nses are never indexed at boot**, and `canonical-full-my-ns` then signature-trims `my.ui`/`my.tile` on top. So ALL the toolkit work is inert until Core: (1) requires the toolkit in `client.cljs`, (2) adds `:my.ui`/`:my.tile` to `canonical-full-my-ns`, (3) a `cluster reset` re-indexes + re-seeds (live pod is STALE — catalog still says "no interactive buttons yet"). P1: canvas-primacy is NOT in the byte-stable `system-text` (which teaches `message/user` as THE channel). Routed P0 (supersedes #70). The no-kinds purge is otherwise clean (only "KIND" in 2 system-text lines remains, P2).
+
 **Gate note — the suite noise is TWO things, neither a real regression:**
 1. **Env-coupling FLAKES from my own concurrent runs** (`b5c3a3a4` diagnosis): tests that grep a shared fs dir / touch shared DB state race when the loop runs scorecard + suite at once. `search_test` is now FIXED (pid-scoped hermetic fixtures, 20/20). `index_core_test` is the same class (passes isolated) → #69 to make hermetic. Lesson: aggressive parallelism needs hermetic tests.
 2. **Core's UNCOMMITTED `loop.cljs`/`schedule.cljs` WIP** (`loop-test` 4) — real WIP, theirs to finish.

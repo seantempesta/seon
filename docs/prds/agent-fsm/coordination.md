@@ -456,6 +456,19 @@ other lane's **_Needs_** and the owner makes it.
     worked example (~1.1k tok each, trivial vs the −43%). OR emit the FULL verb docstring (not first-line) at
     `:signature` detail. A toolkit verb without its worked example is undiscoverable. **NB the FREE scorecard
     total-tokens MISSED this** (confounded) — only the paid composition drive caught it.
+  - **🔴 P0 → CORE (BIGGER root cause; coherence audit `research/context-coherence-2026-06-28.md`):** the toolkit is
+    discoverable by NAME ONLY, not by USE. Rendering the LIVE context, `my.data`/`my.ui`/`my.tile` all show **ZERO
+    indexed fns** (`{my.data [] my.ui [] my.tile [] my.kb [13]}`) — the composition chains / dual-render contract /
+    interactive signatures are NOT in the always-on context at all. TWO Core-lane causes: (1) **`src/seon/client.cljs`
+    requires only `[my.kb][my.kb.shared][my.skills]` — NOT the toolkit nses** → they never enter the build/index;
+    (2) `canonical-full-my-ns` = `#{:my.kb :my.data}` → `my.ui`/`my.tile` signature-trim even once indexed. **FIX:**
+    require `my.data`/`my.ui`/`my.tile` in `client.cljs` + add `:my.ui`/`:my.tile` to `canonical-full-my-ns`. Then a
+    `cluster reset default` re-indexes + re-seeds (the live pod is STALE — the seeded skills-catalog still says
+    ui-live-tiles "no interactive buttons yet" + omits data-modeling; the U-lane SKILL.md files are already correct,
+    pure seed-lag). **P1:** canvas-primacy lives only in the volatile live-tile block + the off-by-default
+    `ui-live-tiles` skill — promote it into the byte-stable `system-text` (which today teaches `(message/user …)` as
+    THE channel). **P2:** the word "KIND" still in 2 `system-text` lines (no-kinds residual; inventory + seon.db are
+    already clean). This supersedes the #70 fix (my.data-only) — it's the generalized "toolkit not reachable" root.
   - **🔬 → CORE (token-efficiency audit, `research/token-efficiency-audit-2026-06-28.md`):** stable always-on ≈
     **29.2k tok** (excl namespaces). The BIGGEST sink is the **TRANSCRIPT ≈ 20,315 tok, UNBOUNDED**
     (`:seon.render/clip :none`, `result-body-render-cap` 16,384) — bigger than namespaces, and it grows with agent
