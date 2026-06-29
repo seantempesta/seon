@@ -113,7 +113,7 @@ and the `to-wire` object. Two more tests prove the eval fold (a clean form
 retrieval can't fix is a clamp until a `:compile` verdict demotes it to renoise)
 and that an injection supersedes an eval-renoise on the same span.
 
-## Worker mid-denoise integration (AWAITS GPU)
+## Worker mid-denoise integration — injection-apply BUILT (awaits GPU)
 
 At each denoise checkpoint K the worker calls `refine` ONCE with the current
 `canvas_text` (+ its `offset_map`). It then APPLIES the combined set in one pass:
@@ -123,8 +123,50 @@ not get re-noised), **steer** each `injection` (force its span toward
 cross-attends the real signature), and **re-noise** the `renoise_spans` (the
 broken-syntax forms, plus any eval-bad form) back to a higher noise level. Then
 it resumes denoising from K+1. Seon drives, the worker stays stateless, the pod
-stays loopback-only. The whole round-trip is built and offline-proven; running it
-against the live diffusion worker is the remaining end-to-end step.
+stays loopback-only.
+
+**The worker `::injections` half is now BUILT** (code, `py_compile`-clean,
+pure-unit-proven off-GPU; gitignored `tmp/flash-diffgemma/`):
+
+- `diffgemma_common.injection_clamps(injections, offset_map, encode)` — PURE: maps
+  each injection's CHAR `span` → canvas TOKEN positions (`span_to_positions` over
+  the worker's `offset_map`), tokenizes `replacement`, and zips positions↔tokens
+  into a `{position → token_id}` clamp set (steering the span via the EXISTING
+  `ClampLogitsProcessor`), plus the de-duplicated `spec_text`s to extend the
+  encoder KV with. Span longer than the replacement → trailing positions FREE;
+  replacement longer than the span → overflow tokens dropped (fixed-width canvas
+  slot) — honest, reported in `detail`.
+- `diffgemma_common.choose_kv_route(...)` — the **W1/W2/W3** route selector:
+  **W1** incremental (append `spec_text` to a HELD extensible encoder DynamicCache
+  via a suffix-forward — `generate(past_key_values=held, input_ids=spec_ids)`,
+  grounded `generation_diffusion_gemma.py:635-636,720-734,941`; the append is
+  `DynamicLayer.update` `torch.cat(dim=-2)`, `cache_utils.py:126-150`); **W2**
+  re-prefill (`input_ids = prompt ++ spec_text`) — **the realistic Phase-1
+  default** (the JSON worker holds no encoder cache across calls, so it lands
+  here); **W3** clamp-only (no `spec_text` in the KV — the guaranteed fallback).
+  The decoder cross-attends ALL non-pad encoder positions
+  (`modeling_diffusion_gemma.py:1294-1340`), so spec_text appended to the encoder
+  KV is visible.
+- `gpu_worker.py` — `mode="inject"` (standalone apply + the decisive
+  `injections_held` assertion) and `injections` folded into `mode="resume_renoise"`
+  (clamp-good + steer-injections + re-noise-bad in one pass). `_cache_extensible`
+  capability-detects a uniform-full DynamicCache (every layer non-sliding —
+  `DynamicSlidingWindowLayer.is_sliding`, `cache_utils.py:196`); `_held_inject_cache`
+  is the co-location seam (default None → W2; composes with `kv_reuse` by taking the
+  kv_reuse-produced prefix cache as the W1 base via `inject_kv_chain_hash`).
+- Worker CODE changed → `worker_sha` shifts (to ≈`63c09bebadad`) → `verify_fresh`
+  flags it (correct). Default (no `injections`) = the stock paths unchanged.
+
+**Composes with `kv_reuse`:** the two are siblings that both produce the encoder
+cache — `kv_reuse` (mode `generate`) reuses a STATIC-PREFIX cache to skip prefill;
+`inject` EXTENDS the cache with `spec_text`. When co-located they compose (the
+kv_reuse prefix cache becomes the W1 base); the JSON path holds no cache, so both
+default safely (kv_reuse → cold encode; inject → W2 re-prefill).
+
+The pure span→position→clamp + route selection is unit-proven
+(`test_inject_apply.py`, 13 units, no torch). **The remaining end-to-end step is a
+live GPU drive** (a seeded hallucination + an injection → assert the canvas commits
+`replacement`, not the hallucinated symbol) — see [[owner-gpu-runbook]] step 3.
 
 ## The control LOOP — BUILT + offline-proven (2026-06-29)
 

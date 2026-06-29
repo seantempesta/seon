@@ -137,24 +137,52 @@ python -u client.py '{"mode":"generate","kv_reuse":true,
   the two source corrections), §5 (Phase 0 measure `X` first), §1 (causal-encoder
   grounding).
 
-## 3. Closed-loop renoise live drive — span-aligned eval-renoise (#13)
+## 3. Closed-loop renoise + INJECTION-apply live drive — span-aligned (#13)
 
 The wired driver (`scratchpad/closed_loop.py`, `44c8d635`) is offline-proven: it reads
 `canvas_text` (NOT `partial_text`) and parses with `op:"parse-raw"` so the returned
 `:span`s index the same basis the worker's `offset_map` was built over (the 11-char
 fence shift removed). `verify_fresh`-gated, ready to run on GPU.
 
+**NEW (built this loop): the worker INJECTION-apply half** — the worker now consumes
+the unified oracle's `::injections` ({span, replacement, spec_text}). `mode="inject"`
+(standalone) clamps each span toward the real `replacement` (reusing
+`ClampLogitsProcessor`) AND extends the encoder KV with `spec_text` via the W1/W2/W3
+routes; `mode="resume_renoise"` now also accepts `injections` (clamp-good +
+steer-injections + re-noise-bad in one pass). Worker CODE changed → `worker_sha`
+≈`63c09bebadad` → **force-recycle + verify_fresh first**. Default (no `injections`) =
+the renoise path unchanged. `py_compile`-clean; the span→position→replacement-clamp +
+route selection are pure-unit-proven (`python3 test_inject_apply.py`, 13 green, no torch).
+
 ```bash
 # from tmp/flash-diffgemma, .env sourced + DIFFGEMMA_EP exported, after verify_fresh → FRESH ✓
+# 0) off-GPU sanity (no deploy): py_compile + the pure inject unit
+python3 -m py_compile gpu_worker.py diffgemma_common.py && python3 test_inject_apply.py
+
+# A) span-aligned renoise closed loop (unchanged):
 python3 <session-scratchpad>/closed_loop.py
+
+# B) injection-apply smoke — seeded hallucination → real symbol (W3 default,
+#    no held cache over JSON; force W1/W2 with "kv_route"):
+python -u gpu_worker.py inject
+#    OR drive directly: denoise_to_step → take offset_map+argmax_per_position →
+#    mode:"inject" with injections:[{span,replacement,spec_text}] → assert
+#    injections_held:true (the canvas committed `replacement`, not the hallucination).
 ```
 
-- **Win condition:** `errors_before > 0` at the stop step → span-targeted renoise →
-  `errors_after < errors_before` with the good (non-span) tokens **held**
+- **Win condition (renoise):** `errors_before > 0` at the stop step → span-targeted
+  renoise → `errors_after < errors_before` with the good (non-span) tokens **held**
   (`good_held: true`). Renoise must be ORACLE-DRIVEN — only re-noise spans
   `parse-forms` flags, never a correct span.
+- **Win condition (injection):** a seeded hallucinated symbol (e.g. `db/transct!`) +
+  its `refine` injection (`replacement` `db/transact!` + `spec_text`) → the resumed
+  canvas commits `replacement` over the hallucination (`injections_held: true`), the
+  good tokens held. Result carries `route` (W1/W2/W3), `route_reason`, `n_injections`,
+  `injections_held`, the per-span `got_text`.
 - **Depth:** [[research/closed-loop-span-alignment-2026-06-28]] (the basis + corrected
-  orchestration); [[research/eval-renoise-worker-build-2026-06-28]] (the worker).
+  orchestration); [[research/eval-renoise-worker-build-2026-06-28]] (the worker);
+  [[research/unified-control-oracle-2026-06-29]] "Worker mid-denoise integration"
+  (the built injection-apply + the W1/W2/W3 routes).
 
 ## 4. Three-arm kill-gate E1 — does guided-gen beat prompt+fix? (#14)
 
