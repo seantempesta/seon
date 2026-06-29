@@ -44,18 +44,29 @@ the truth; tests and inference are not. Concretely:
   actual diff; don't write big directive notes at work they're already doing. A
   one-line pointer + the evidence in your commit message is plenty.
 
-## Current state (2026-06-28)
+## Current state (2026-06-29)
 
-Shipped + live-proven on the shared default pod (7890): the **skills system**
-(`my.skills` catalog/load/unload + the dedicated **`seon-skills/`** agent corpus +
-the `seon.config` loader, all env-driven), the **presentation/canvas** (typed
-`seon.render/block`, the live-tile, the root dashboard at `/`), and the **gym** is
-now a **config-aware** context-improvement engine. Core unified the boot through
-**ONE `reconcile!` + the `seon.config` seam**. The big open lever is **#42** (below).
+The night's central deliverable is **PROVEN**: the **`my.*` toolkit**
+(`my.data`/`my.ui`/`my.tile`) went from built-but-invisible to
+**composable-and-honest**. A real DeepSeek agent now builds its tiles with the
+toolkit (drive-measured `my.data` 15×/23×, `my.ui` 9×/11×, `my.tile` 3× wired to
+agent-defined handlers) instead of hand-rolling broken `[:div]`s. **Canvas-first
+is reliable** — agents wire a re-deriving tile as their PRIMARY surface unprompted,
+now including **planning/goal** asks (a one-sentence guidance fix took canvas-drive
+1/3→3/3). **Fabrication is FIXED** (cite-card #63 + canvas-first: the agent cites
+the computed value off its derived tile instead of lying in prose). The
+**transcript is bounded** (#62 eviction, ~20k→~1.4k/turn — the #1 token lever).
+**`:kind` is purged** at the root (attribute-presence everywhere). The **gym is now
+a measured, self-defending fitness function** (`bin/gym-scorecard`) over a
+well-rounded 23-scenario battery; two facets proved **handled** (error-recovery,
+planning-resume). Live pod reset to current; toolkit indexing live-proven. Depth:
+[[research/overnight-2026-06-28]].
 
 ## Runbook (copy-pasteable)
 
 ```bash
+bin/gym-scorecard                     # THE fitness function — FREE every iter: SHA-keyed battery × axes line
+bin/gym-scorecard --paid --k=N        # add live paid drives (N samples → pass^k noise-robustness)
 bin/seon status                       # pods/pids/port (7890 default)
 bin/seon restart pod                  # bad pod state (wait for "auto-boot ready" in logs/pod.log — "ready 0s" is PREMATURE)
 bin/seon cluster reset default        # fresh world — WIPES the store; re-sources .env; re-seeds. Coordinate (shared pod!)
@@ -63,49 +74,64 @@ bin/seon tail pod
 bin/acme build && bin/acme restart pod   # acme = isolated consumer harness (7980); its OWN config/acme.edn + .env.acme
 ```
 
+**The loop = measure → drive the weakest facet → fix the GENERAL root → re-measure →
+keep IFF it lifts the whole battery (accretive-or-revert, no overfit).** The scorecard
+is the honest judge: pass × per-block-tokens × eval-error-rate × **toolkit-adoption**
+× **pass^k** noise-robustness. Run it FREE every iteration; the `--paid` drives are
+for the weakest facet that the FREE axes can't fully see.
+
 - **Drive a DeepSeek agent:** `(seon.db/with-agent "root" (fn [] (seon.agent/start! {:seon.agent/purpose "…"})))` mints a child; observe via `mcp__seon_cljs__eval` (session "default" or `agent_id`), the transcript, and store queries. NB minted agents need `rearm-wake-triggers!` before a message wakes them.
-- **Gym:** `test/seon/gym/driver.cljs` (`run-scenario!`, `measure-context!`), `paid_test.cljs` (live), 14 scenarios in `test/seon/gym/scenarios/`. A run takes `:seon.gym/config {:seon.gym.config/profile :minimal | :seon.gym.config/path "config/x.edn"}` → it steers `SEON_PROFILE`/`SEON_CONFIG` through the REAL `seon.config` seam. `bin/test-cljs` runs the suite (~160s, fresh JVM).
+- **Gym:** `test/seon/gym/driver.cljs` (`run-scenario!`, `measure-context!`), `paid_test.cljs` (live), **23 scenarios** in `test/seon/gym/scenarios/` (every facet). A run takes `:seon.gym/config {:seon.gym.config/profile :minimal | :seon.gym.config/path "config/x.edn"}` → it steers `SEON_PROFILE`/`SEON_CONFIG` through the REAL `seon.config` seam. `bin/test-cljs` runs the suite (~160s, fresh JVM). **Gym scenarios run hermetically (scratch conns)** — A/B a context change without a pod reset.
 - **Config override (incl. downstream consumers):** `SEON_CONFIG=path` picks the manifest (default `config/system.edn`; acme defaults `config/acme.edn`); `SEON_PROFILE=minimal` selects a `#profile` variant. **Config is runtime EDN → NO rebuild; just restart.** Only `.cljs`/`src` changes need `bin/acme build`.
 - **Coordination Monitor:** a background `git rev-list` watcher that filters out my own commits (by `Claude-Session` id) + the diffusion track, batched ~10-min sweeps. Re-arm it if the session restarts.
 
-## Load-bearing findings + gotchas (cost cycles to learn)
+## Load-bearing findings + laws (hard-won this session — these cost cycles)
 
-- **The `:namespaces` block is ~64% of the prompt (~13k tok) AND load-bearing** —
-  it renders every `my.*` ns in FULL; removing it makes agents hallucinate the
-  schema API (memory-write dies). It already HAS signature-render machinery
-  (`seon.agent.ctx.namespaces/verb-signature-whitelist`, `:seon.render/detail
-  :signature`) but the whitelists are **hardcoded defs** + a hardcoded
-  "all `my.*` renders full" rule. → **Render-TRIM, not remove** (signatures by
-  default, keep the ONE worked `register!→transact→query` example, full on demand)
-  + wire it to `seon.config`. This is **#42** and the #1 minimal-context lever.
-- **Agents succeed from the ALWAYS-ON context; they rarely load skills.** Both the
-  repl-skill A/B and the ui-live-tiles drive showed this → the lean always-on base
-  is what matters; loadable skills are on-demand depth. (So hoist the highest-value
-  skill guidance into the always-on block.)
-- **`message/user` is intermittently "not defined" (install-timing via
-  `init-message-verbs!`) AND undiscoverable** — one drive burned ~100 evals finding
-  it. Biggest single agent-experience waste. (Core.)
-- **The config seam adds/removes WHOLE blocks** — it can't render-trim WITHIN a
-  block; whole-block removal only moves ~5%. The 64% win needs #42.
-- **Honesty smell:** agents have delivered hallucinated numbers in their MESSAGE
-  while their STORED facts were correct — message-text decoupled from observed data.
-- **CSS:** `input.css` uses `@import "tailwindcss" source(none)` (else Tailwind
-  scans all 61k `reference-code/` files → 42s/boot; now 0.5s). The agent utility
-  **safelist is small + curated** — agents guess non-safelisted classes (invisible
-  status dots); keep the safelist + the `seon.render.live-tile` docstring in sync.
-- **Canvas mechanism:** an agent sets its view by transacting hiccup OR a qualified
-  fn symbol onto **`:seon.render.live-tile/content`** on its own entity. Tile
-  interactivity (buttons/inputs that call back) is **UNBUILT**.
-- **Parser:** Core fixed the orphan-delimiter wall, backtick-markdown-as-prose, and
-  recovery-never-executes-an-inner-form — eval noise is way down (was ~43%).
-
-## Open — the full Core request list (owner relayed 2026-06-28)
-
-P0: **#42** (namespaces render-trim + config-driven — the 64% win) · **message-verb**
-install-timing + discoverability. P1: drop `:live-tile` from the always-on base
-(confirmed no-regression, ~630 tok) · hoist tile-safelist guidance into the always-on
-context · honesty (message↔stored). P2 (tracked): #43 clip-escape · #45 inventory-block ·
-#40 turn at/status · #41 relink-registry stomp · #22 `my.tile` interactivity.
+- **The render-prominence LAW: a toolkit verb's value IS its worked example.** A
+  COMPOSITION verb (`my.data`/`my.ui`/`my.tile`) rendered as a bare signature is
+  **undiscoverable** — the #42 signature-trim DROVE `my.data` adoption to 0× (agent
+  hand-rolled the footgun path, eval-error-rate 0.357 RED). So **keep the `my.*`
+  toolkit FULL** in `seon.agent.ctx.namespaces/canonical-full-my-ns`
+  (`#{:my.kb :my.data :my.ui :my.tile}`) AND **required in `client.cljs`** (so it's
+  indexed at boot — otherwise it renders with ZERO fns, name-only). The law applies
+  to COMPOSITION verbs, NOT simple-call ones: `seon.agent.todo` is a plain call, its
+  worked-example role is redundant now that 4 full `my.*` examples exist → trim it to
+  signatures (#74, ~3.3k save). So the realistic namespaces lever is ~3.3k, not 18k —
+  the toolkit is *earning* its tokens.
+- **Canvas-first MITIGATES fabrication.** The derived tile is computed-from-data;
+  prose is where agents lie. A budget agent's PROSE fabricated ($155) while its
+  `my.data`-derived CANVAS was correct ($136) → moving the agent onto the canvas
+  fixed the judge (fail→PASS). This is an honesty benefit on TOP of the cite-card.
+- **Cache-stability: freeze aged transcript clips BYTE-IDENTICAL.** The transcript
+  eviction bands by **AGE, not recency-weight** — an aged clip must render the same
+  bytes every turn so the LLM prompt cache holds. Recency-weighting would re-flow
+  old text and bust the cache.
+- **Measure the RIGHT thing.** The FREE scorecard `total-tokens` MISSED the #42
+  adoption regression (confounded by scenario count + non-namespaces blocks). Only a
+  **paid composition drive** + a standing **toolkit-adoption axis** caught it. FREE
+  axes for cheap iteration; paid drives + the right axis for what FREE can't see.
+- **`pass^k` — single-sample drives are NOISE.** Weak-model variance flips a scenario
+  run-to-run (`canvas-goal-board` single-sample miss was model variance). Average over
+  k samples before believing a pass or a regression.
+- **Hermetic test fixtures.** Concurrent loop runs (scorecard + suite at once) FLAKE
+  on shared fs/DB state. `search_test` fixed with pid-scoped hermetic fixtures (20/20);
+  `index_core_test` is the same class (#69). Aggressive parallelism needs hermetic tests.
+- **The toolkit is reached by FULL-qualification, not home-ns aliases.** Home-ns
+  aliases (`db/`/`message/`/`todo/`) are home-ONLY — they break in agent-authored
+  `my.*` nses (~60 `"db/transact! is not defined"` per fn-authoring drive). Agents must
+  fully-qualify in new nses (#73, Core: always-on/error-render/auto-refer).
+- **The gym's guards must be ALIAS-TOLERANT.** A predicate matching only `my\.tile/`
+  false-negatives `tile/button` from `[my.tile :as tile]` — it scored a perfect
+  composition 0/14. The robust `toolkit-calls` axis caught it; guards now alias-tolerant.
+- **Agents succeed from the ALWAYS-ON context; they rarely load skills** → the lean
+  always-on base is what matters; hoist the highest-value skill guidance into it.
+- **CSS:** `input.css` uses `@import "tailwindcss" source(none)` (else Tailwind scans
+  61k `reference-code/` files → 42s/boot; now 0.5s). The agent utility **safelist is
+  small + curated** — agents guess non-safelisted classes (invisible status dots); keep
+  the safelist + the `seon.render.live-tile` docstring in sync.
+- **Canvas mechanism:** an agent sets its view by transacting hiccup OR a qualified fn
+  symbol onto **`:seon.render.live-tile/content`** on its own entity. `my.tile`
+  interactivity (agent-defined handler wired to a button) is now PROVEN composable.
 
 ## Core lane — how to be the best Core agent
 
@@ -177,18 +203,37 @@ full list with severities.
 
 ## Plans / next steps
 
-1. **Core ships #42** (the unlock). Everything else is incremental by comparison.
-2. **Gym green baseline (#51)** → then A/B the minimal config across the 14 scenarios (the
-   regression loop: "does lean context still pass?").
-3. Apply the **`:live-tile` drop** (small confirmed win) once Core wires the config removal.
-4. Keep the **skills corpus** current (#47); fold high-value skill guidance into the always-on base.
+**VALIDATED (live-proven, committed):** toolkit composable + honest; canvas-first
+(incl. planning); transcript eviction (#62); `:kind` root purge; `:live-tile` trim;
+the scorecard fitness function + 23-scenario battery; error-recovery + planning-resume
+facets handled.
+
+**Core-gated (verified findings waiting on Core):**
+
+1. **#42 explicit-listing config** — the `my.*` FULL vs signature decision wired to
+   `seon.config` profiles (the trim landed; the per-profile control is the remainder).
+2. **#73 home-ns alias collision** — agents can't use `db/`/`message/`/`todo/` aliases
+   in new `my.*` nses (always-on/error-render/auto-refer fix).
+3. **#74 todo signature-trim** — drop `seon.agent.todo` to signatures (~3.3k); verify
+   todo usage holds after (it's a simple-call verb, render-prominence law doesn't apply).
+
+**Owner decision:** **#66 `:kind` Category B** — the recurrence engine (A) is purged;
+B is value-classification (`:seon.error/kind`, `:seon.warn/kind`, render/predicate
+classes). Purge the WORD everywhere (rename→`class`/`shape`, a real multi-file refactor)
+vs stop at entity-kinds (this pass)? Read = B is taste/consistency, not correctness.
+
+**Then:** keep the loop running — measure → drive the weakest facet → fix general →
+re-measure → keep-iff-lifts-battery. Build the interactive gym scenario that exercises
+`my.tile` controls directly. Keep the skills corpus current (#47).
 
 ## Entry points (depth)
 
+- **[[research/overnight-2026-06-28]]** — the night's running report: exec summary +
+  every validated landing with live-proof. The depth behind this file.
 - [[coordination]] — Core↔U channel, lane table, the live handoffs.
 - [[ui]] — the holistic routing + render + UI/UX doc.
-- `research/minimal-context-experiment-2026-06-28.md` · `research/gym-config-loop-2026-06-28.md` ·
-  `research/context-usage-drive-2026-06-28.md` · `research/ui-live-tiles-drive-2026-06-28.md` ·
-  `research/my-skills-design-2026-06-28.md` — the live-test evidence + designs.
+- `research/toolkit-reachable-verification-2026-06-28.md` · `research/canvas-drive-validation-2026-06-28.md` ·
+  `research/namespaces-trim-validation-2026-06-28.md` · `research/facet-gaps-drive-2026-06-28.md` —
+  the live-drive evidence behind the laws above.
 - `seon-skills/*/SKILL.md` (agent skills) + `.claude/skills/*` (dev skills); the `data-oriented-clojure`
   + `ui-live-tiles` skills are the agent-facing mindset/how-to.
