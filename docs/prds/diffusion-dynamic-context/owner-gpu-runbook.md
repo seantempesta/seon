@@ -89,24 +89,53 @@ TORCH_LOGS="graph_breaks,recompiles" python -u client.py \
 The largest measured win: prefill = **62% of latency at 9k ctx**, exact full-prefix
 caching is feasible (encoder is causal, zero accuracy loss). The keying half is BUILT
 (`seon.agent.ctx/block-chain-keys`, `14e8acb0`) — a pure `(blocks, agent-id) →
-per-block chain-hashes`. The worker-reuse half is the §6 drop-in contract, gated on
-the co-location image (the `Cache` can't ride a JSON payload).
+per-block chain-hashes`. **The worker-reuse half is now BUILT too** (code,
+`py_compile`-clean, walk/LRU unit-proven off-GPU) — `kv_reuse` payload path in
+`tmp/flash-diffgemma/gpu_worker.py` (`_kv_reuse_generate`) over `KVPrefixCache` +
+`longest_prefix_hit` in `diffgemma_common.py`. It still needs the co-location image
+(the `Cache` can't ride a JSON payload) + this GPU measurement to GREENLIGHT.
 
 ```bash
+cd tmp/flash-diffgemma; set -a; . ./.env; set +a
+# 0) sanity off-GPU (no deploy): the walk + LRU + py_compile
+python3 -m py_compile gpu_worker.py diffgemma_common.py && python3 test_kv_walk.py
+
 # 1) deploy the co-location image (Dockerfile layer + spawn-wiring, co-location-image-build doc)
-#    bump FLASH_GPU_IMAGE tag, flash deploy, verify_fresh → FRESH ✓
-# 2) wire the worker-reuse half per the §6 contract: worker holds an LRU
-#    {chain_hash → (encoder DynamicCache cropped to boundary, token_len)};
-#    walk the ::chain-hashes top→down → longest hit = prefix boundary L →
-#    crop(L) → generate(past_key_values=cached, ...) prefills only tokens [L:].
+export FLASH_GPU_IMAGE=docker.io/seantempesta/diffgemma-worker:cu128-vNEXT  # bump tag => recreate
+.venv/bin/flash deploy && python3 verify_fresh.py            # MUST print FRESH ✓ (worker_sha shifted — kv_reuse code is new)
+
+# 2) WORKER-REUSE half is wired — drive it. Payload: kv_reuse + blocks (prompt-order
+#    ctx block texts) + chain_hashes (parallel, from block-chain-keys). The worker
+#    tokenizes, walks ::chain-hashes top→down → longest hit = boundary L, crops a
+#    CLONE of the cached cache, feeds generate the SUFFIX full_ids[:, L:] so the
+#    encoder prefills ONLY [L:], then writes back every block boundary.
+export DIFFGEMMA_EP=<from deploy>
+#  request 1 (COLD — fills the LRU, kv_hit_block=null, kv_reused_tokens=0):
+python -u client.py '{"mode":"generate","kv_reuse":true,
+  "blocks":["<soul…namespaces static head>","<volatile tail A>"],
+  "chain_hashes":["<h0>","<h1>"],"max_new_tokens":64}'
+#  request 2 (WARM — same static head, new tail; expect kv_hit_block=0,
+#  kv_reused_tokens≈len(head), kv_reuse_frac high, kv_suffix_tokens small):
+python -u client.py '{"mode":"generate","kv_reuse":true,
+  "blocks":["<same static head>","<volatile tail B>"],
+  "chain_hashes":["<h0>","<h2>"],"max_new_tokens":64}'
 ```
 
-- **Win condition:** a cache-hit turn re-encodes ONLY the divergent suffix and produces
-  output **bit-identical** to a full re-encode (assert `sequences` match for a fixed
-  seed) at materially lower latency. Salt scopes by `:seon.agent/id`; a block edit
-  auto-misses and re-encodes from the last hit (no stored invalidation).
-- **Depth:** [[research/kv-section-caching-design-2026-06-28]] §6 (the contract), §5
-  (Phase 0 measure `X` first), §1 (causal-encoder grounding).
+- **Win condition (the two assertions):**
+  1. **Bit-exact** (§5 risk #2, GPU-only): for a FIXED seed, request-2's `sequences`
+     (cache-hit suffix path) == the same prompt run with `kv_reuse:false` (full
+     re-encode). If they diverge, it's the sliding layers — switch the store to
+     full-attention-layers-only + recompute sliding (the deferred §1.4 refinement).
+  2. **Prefill drop:** request-2 `gen_s` materially < request-1 `gen_s` (request-2
+     prefills only `kv_suffix_tokens`, not the full `prompt_tokens`). Report the
+     fields: `kv_hit_block`, `kv_reused_tokens`, `kv_reuse_frac`, `kv_suffix_tokens`,
+     `kv_blocks_written`, `kv_cache_size`.
+- **Result fields added:** `kv_reuse`, `kv_hit_block`, `kv_reused_tokens`,
+  `kv_reuse_frac`, `kv_suffix_tokens`, `kv_blocks_written`, `kv_blocks_evicted`,
+  `kv_cache_size`, `block_ends`. Default (`kv_reuse` unset) = stock generate, unchanged.
+- **Depth:** [[research/kv-section-caching-design-2026-06-28]] §6 (the BUILT contract +
+  the two source corrections), §5 (Phase 0 measure `X` first), §1 (causal-encoder
+  grounding).
 
 ## 3. Closed-loop renoise live drive — span-aligned eval-renoise (#13)
 

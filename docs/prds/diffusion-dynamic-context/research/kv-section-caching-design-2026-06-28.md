@@ -25,10 +25,22 @@ tags: [research, diffusion, agent, flow]
   `:703-728`, cache_salt `:560-561`). Three invariant tests green in the cljs suite
   (`test/seon/ctx_test.cljs`: identical-seq→identical-keys, shared-prefix-diverges-at-
   first-change, salt-scopes-by-agent). See "Worker integration contract" at the end.
-- **Worker-reuse half — AWAITS-IMAGE.** The encoder `Cache` lookup/crop/reuse keyed on
-  these hashes lands in the co-located worker (§5 precondition) once the co-location
-  image is deployed. The keys are a drop-in: the worker maps chain-hash → cropped
-  encoder KV and longest-prefix-matches against them.
+- **Worker-reuse half — BUILT (code), AWAITS-GPU-MEASUREMENT.** The encoder `Cache`
+  lookup/crop/reuse keyed on these hashes is written in the worker (gitignored
+  `tmp/flash-diffgemma/`): the `kv_reuse` payload path in `gpu_worker.py`
+  (`_kv_reuse_generate` + the `mode="generate"` branch) over the LRU + walk in
+  `diffgemma_common.py` (`KVPrefixCache`, `longest_prefix_hit`). `py_compile`-clean;
+  the pure walk/LRU logic is unit-proven off-GPU (`test_kv_walk.py`, 13 units green,
+  no torch). Default (`kv_reuse` unset) = stock generate, zero change. Writing the
+  worker shifts `worker_sha`, so `verify_fresh` flags it (correct). Still needs the
+  co-location image (§5 precondition) + the owner's two-request bit-exact + prefill-
+  drop measurement to GREENLIGHT. **Two source-grounded corrections to the contract
+  below (read §6):** (1) generate is fed the SUFFIX `input_ids[:, L:]`, not the full
+  prompt (`generation_…:635-636` adds the cache length to `cur_len`); (2) the reuse
+  path forces `cache_implementation="dynamic_full"` (a uniform full `DynamicCache`)
+  so `crop()`/`get_seq_length()` are bit-exact for every layer — sidestepping the
+  hybrid sliding-window rolling-buffer hazard. The worker also OWNS tokenization +
+  offsets (the pod's char/4 estimate can't produce token offsets).
 
 ## TL;DR
 
@@ -369,7 +381,44 @@ Phase-3 risk we are deliberately not taking yet.
 
 ---
 
-## 6. Worker integration contract (the drop-in once co-location lands)
+## 6. Worker integration contract — BUILT (code), awaits GPU measurement
+
+> **STATUS (2026-06-29): the worker half is WRITTEN** — `kv_reuse` path in
+> `tmp/flash-diffgemma/gpu_worker.py` (`_kv_reuse_generate`) over `KVPrefixCache` +
+> `longest_prefix_hit` in `diffgemma_common.py`. `py_compile`-clean; the walk + LRU
+> are unit-proven off-GPU (`test_kv_walk.py`, 13 green, no torch). Two corrections
+> to the original wording below, both grounded in transformers v5.11.0 source —
+> apply them, the prose under them is the intent:
+>
+> 1. **Feed generate the SUFFIX, not the full prompt.** `generate(input_ids,
+>    past_key_values=pkv)` adds the cache length to `cur_len`
+>    (`generation_diffusion_gemma.py:635-636`) and the prefill encoder encodes the
+>    PASSED `input_ids` (`_prepare_encoder_inputs:941`). So with a length-`L` cache
+>    we pass `full_prompt_ids[:, L:]` — `encoder_position_ids = arange(L, P)`,
+>    `attention_mask = ones(1,P)` covers prefix+suffix, the encoder prefills ONLY
+>    `[L:]` and APPENDS to the reused prefix (the per-canvas append at `:734,:784`).
+>    Passing the full prompt would double-count positions.
+> 2. **Force `cache_implementation="dynamic_full"`.** The default encoder cache is a
+>    HYBRID `DynamicCache(config=...)` (`:925` → `cache_utils.py:1437`): sliding +
+>    full layers, sliding layers holding only the last `sliding_window=512`
+>    positions in a rolling buffer. `crop(L)`/`get_seq_length()` on such a layer are
+>    ill-defined for a prefix boundary. A uniform full cache (`:923-925`) makes both
+>    bit-exact for every layer. Cost: sliding layers store full length (masking
+>    still bounds what they ATTEND to); the §1.4 "store full-attention layers only"
+>    memory optimization is deferred (it needs the sliding layers to re-encode,
+>    which the single-forward `generate` can't do per-layer — an EPIC-style refinement).
+> 3. **The worker OWNS tokenization + offsets.** The pod's `chars/4` estimate cannot
+>    produce real token offsets, so the worker tokenizes the assembled prompt and
+>    derives each block's token END offset by cumulative tokenization
+>    (`_block_token_offsets`), snapping a boundary to a token boundary (only ever
+>    SHORTENS the reused prefix — conservative, still bit-exact). Seon sends the
+>    block TEXTS + `::chain-hashes`; the worker treats the hashes as OPAQUE keys
+>    (never recomputes the SHA), so a match is exact string equality.
+>
+> **The riskiest assumption (§5 #2) is still GPU-only:** that `crop()` + a re-fed
+> `past_key_values` reproduces a from-scratch prefill BIT-FOR-BIT on the encoder. The
+> owner asserts it (runbook): request-2 `sequences == ` request-1 full re-encode for a
+> fixed seed, then measures the prefill-time drop.
 
 The keying half is built (`seon.agent.ctx/block-chain-keys`). It is a PURE fn of
 (`::blocks`, `:seon.agent/id`): given the turn's `:seon.render/text`-bearing context
