@@ -279,17 +279,18 @@
          (sort-by #(.getTime ^js (:seon.agent.todo/created-at %)))
          vec)))
 
-(defn age-str
-  "Compact age of `at`: \"7m\" / \"3h\" / \"2d\"."
+(defn stamp
+  "Compact ABSOLUTE creation time of `at` — UTC `YYYY-MM-DD HH:MM`, derived
+   only from the datom (NOT `now`), so a row renders byte-identical every turn
+   while the agent still reads recency (it compares against the turn clock).
+   A relative \"3m ago\" string would change on every render and bust the
+   stable-prefix cache for an unchanged block."
   [at]
-  (let [m (max 0 (quot (- (js/Date.now) (.getTime ^js at)) 60000))]
-    (cond (< m 60)   (str m "m")
-          (< m 1440) (str (quot m 60) "h")
-          :else      (str (quot m 1440) "d"))))
+  (-> (.toISOString ^js at) (subs 0 16) (str/replace "T" " ")))
 
 (defn open-todos-body
   "Context-section text for `owner`'s open todos in db value `db` — single-`;`
-   prose guidance + one `; <id> [<age>] <title>` line per item, oldest first;
+   prose guidance + one `; <id> [<created-at>] <title>` line per item, oldest first;
    a `✉` marker leads items auto-minted from one of your human's messages (a
    memory aid, not an obligation — `done!` it once you've addressed them).
    \"\" when none (the section vanishes when the work is done — nothing stored,
@@ -305,7 +306,7 @@
            "; once addressed. A ✉ item tracks a message from your human.\n"
            (str/join "\n"
                      (map (fn [{:seon.agent.todo/keys [id title created-at message]}]
-                            (str "; " (when message "✉ ") id " [" (age-str created-at) "] " title))
+                            (str "; " (when message "✉ ") id " [" (stamp created-at) "] " title))
                           todos))))))
 
 (defn open-todos-block
