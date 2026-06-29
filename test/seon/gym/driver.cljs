@@ -553,12 +553,106 @@
                        :seon.gym.run/fixture-source-index i
                        :seon.gym.turn/message             msg})))))
 
+;; --- ALIAS-BLIND PREDICATE GUARD --------------------------------------------
+;; This bug class has bitten three times (my.tile e6aaf9f0; three seon.db/
+;; store-read predicates fc557fbf): a predicate :pattern regexes a
+;; FULLY-QUALIFIED `seon.<ns>/` name, but the agent's home ns aliases that
+;; ns to a SHORT prefix (seon.db -> db, seon.agent.message -> message, …),
+;; so the agent writes `(db/query …)` and the qualified-only pattern
+;; false-negatives EVERY correct read — silently suppressing the true
+;; pass-rate. A judge that can't see a correct answer isn't honest, so an
+;; alias-blind pattern is a gym-integrity violation: it CRASHES the load,
+;; exactly like the §3.4 self-bait guard, never scores silently.
+
+(defn- re-escape-dots
+  "A dotted ns name (\"seon.db\") as it literally appears regex-escaped
+   inside a :pattern string (\"seon\\.db\") — each `.` becomes `\\.`. Built
+   char-wise to avoid str/replace replacement-string ambiguity."
+  [s]
+  (str/join (map #(if (= % ".") "\\." %) s)))
+
+(defn- home-ns-seon-aliases
+  "Map of `seon.*` dotted-ns-name -> its short `:as` alias, DERIVED from
+   seon.eval/home-ns-require-specs (the single source of truth for how
+   every agent's home ns is wired). Only the `:as`-aliased `seon.*`
+   namespaces — these are the ones an agent writes by the seeded SHORT
+   alias (db/, message/, schema/, agent/, todo/) yet a predicate may regex
+   by the long seon.<ns>/ form. `:refer`'d lifecycle verbs (wait, complete,
+   …) carry no alias and aren't a qualified/alias split, so they're out of
+   scope. Derives, never hardcodes — it can't drift from the agent's prompt."
+  []
+  (into {}
+        (keep (fn [spec]
+                (when (and (= :as (second spec))
+                           (str/starts-with? (name (first spec)) "seon."))
+                  [(name (first spec)) (name (nth spec 2))])))
+        seval/home-ns-require-specs))
+
+(defn- alias-blind-predicate?
+  "nil if `pred`'s :pattern is alias-safe, else a violation map naming the
+   aliased seon ns whose FULLY-QUALIFIED `seon.<ns>/` form the pattern
+   regexes WITHOUT also accepting the seeded short alias.
+
+   For each aliased ns (db, message, schema, agent, todo — from
+   [[home-ns-seon-aliases]]): if the pattern contains the qualified form
+   `seon\\.<ns>/` (or `seon\\.<ns>\\b`) it references the long name
+   directly; that is alias-BLIND unless the pattern ALSO accepts the short
+   alias via one of the two sanctioned idioms — a `(?:seon\\.)?<alias>`
+   optional prefix, or a `\\b<alias>/`/`|<alias>/`/`(<alias>/`/leading
+   `<alias>/` alternative.
+
+   No false positives: a fully-qualified pattern for a ns that is NOT
+   aliased (seon.agent.search/grep, seon.agent.fs/read-file — agents write
+   those qualified) is CORRECT. The qualified test demands a `/` or `\\b`
+   right after `<ns>`, so `seon\\.agent\\.search/` never trips the
+   `seon.agent` alias (its `\\.search` is neither)."
+  [{:seon.gym.predicate/keys [id pattern]}]
+  (when pattern
+    (some (fn [[dotted alias]]
+            (let [esc        (re-escape-dots dotted)
+                  qualified? (or (str/includes? pattern (str esc "/"))
+                                 (str/includes? pattern (str esc "\\b")))
+                  alias-ok?  (or (str/includes? pattern (str "(?:seon\\.)?" alias))
+                                 (str/includes? pattern (str "\\b" alias "/"))
+                                 (str/includes? pattern (str "|" alias "/"))
+                                 (str/includes? pattern (str "(" alias "/"))
+                                 (str/starts-with? pattern (str alias "/")))]
+              (when (and qualified? (not alias-ok?))
+                {:seon.gym.predicate/id      id
+                 :seon.gym/alias-blind-ns    dotted
+                 :seon.gym/alias-blind-alias alias
+                 :seon.gym.predicate/pattern pattern})))
+          (home-ns-seon-aliases))))
+
+(defn- check-alias-blind!
+  "Crash the load if any of a scenario's predicates is
+   [[alias-blind-predicate?]] — a qualified `seon.<ns>/` pattern that
+   ignores the seeded short alias the agent actually writes, which would
+   false-negative every correct read and silently suppress the pass-rate.
+   Loud failure naming the scenario, predicate, ns + alias, and the fix
+   (accept the alias: `(?:seon\\.)?<alias>` or `\\b<alias>/`)."
+  [path {:seon.gym.scenario/keys [id predicates]}]
+  (doseq [pred predicates
+          :let [v (alias-blind-predicate? pred)]
+          :when v]
+    (throw (ex-info (str "gym: ALIAS-BLIND PREDICATE — scenario " id
+                         " in " path ": predicate "
+                         (:seon.gym.predicate/id v) " regexes the qualified "
+                         (:seon.gym/alias-blind-ns v) "/ but the agent's home "
+                         "ns aliases it to " (:seon.gym/alias-blind-alias v)
+                         "/ — the pattern false-negatives every correct read. "
+                         "Accept the alias too: (?:seon\\.)?"
+                         (:seon.gym/alias-blind-alias v) " or \\b"
+                         (:seon.gym/alias-blind-alias v) "/.")
+                    (assoc v :seon.gym/path path :seon.gym.scenario/id id)))))
+
 (defn load-scenarios!
   "Read one scenario EDN file (a single scenario map OR a vector of
    them) and validate every scenario against `:seon.gym/scenario`.
    Invalid EDN fails LOUD with the Malli explain — a scenario that
    doesn't parse must never silently score. Also enforces the §3.4
-   self-bait rule ([[check-self-bait!]]) at load time."
+   self-bait rule ([[check-self-bait!]]) and the alias-blind-predicate
+   rule ([[check-alias-blind!]]) at load time."
   {:malli/schema [:=> [:cat :seon.gym/load-request] :seon.gym/load-response]}
   [{path :seon.gym/path}]
   (let [fs        (js/require "node:fs")
@@ -569,7 +663,8 @@
         (throw (ex-info (str "gym: invalid scenario EDN — " path)
                         {:seon.gym/path    path
                          :seon.gym/explain (pr-str (m/explain :seon.gym/scenario s))})))
-      (check-self-bait! path s))
+      (check-self-bait! path s)
+      (check-alias-blind! path s))
     {:seon.gym/scenarios scenarios}))
 
 ;; ===========================================================================

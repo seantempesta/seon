@@ -22,6 +22,7 @@
     [seon.agent.ctx.namespaces :as ctx-namespaces]
     [seon.db :as db]
     [seon.gym.driver :as gym]
+    [seon.gym.scorecard :as scard]
     [seon.schema :as schema]
     [seon.warn :as warn]))
 
@@ -653,6 +654,80 @@
     (is (seq (:seon.gym/scenarios (gym/load-scenarios! {:seon.gym/path path})))
         "the paraphrased variant loads")
     (.rmSync fs path)))
+
+;; ---------------------------------------------------------------------------
+;; ALIAS-BLIND PREDICATE LOAD CHECK — a :pattern that regexes a qualified
+;; `seon.<ns>/` whose home ns aliases it (db/, message/, …) but does NOT
+;; accept the short alias false-negatives EVERY correct read, silently
+;; suppressing the pass-rate (bit thrice: my.tile e6aaf9f0, three seon.db/
+;; reads fc557fbf). It must FAIL TO LOAD with the named error, while
+;; alias-tolerant and legitimately-qualified (non-aliased) patterns load.
+;; ---------------------------------------------------------------------------
+
+(deftest alias-blind-predicate-detects-the-aliased-qualified-without-alias
+  ;; the unit fn: flags an aliased ns's qualified-without-alias pattern,
+  ;; passes the alias-tolerant idioms and the legitimately-qualified
+  ;; (non-aliased) namespaces agents DO write fully-qualified.
+  (let [blind? (fn [p] (#'gym/alias-blind-predicate?
+                         {:seon.gym.predicate/id :p :seon.gym.predicate/pattern p}))]
+    ;; FLAGGED — qualified seon.<ns>/ with no alias acceptance
+    (is (= "seon.db" (:seon.gym/alias-blind-ns (blind? "seon\\.db/query")))
+        "qualified seon.db/ without the db alias is alias-blind")
+    (is (some? (blind? "seon\\.agent\\.message/user"))
+        "qualified seon.agent.message/ without the message alias is alias-blind")
+    (is (some? (blind? "seon\\.agent\\.todo/plan!"))
+        "qualified seon.agent.todo/ without the todo alias is alias-blind")
+    ;; NOT flagged — the two sanctioned alias-tolerant idioms
+    (is (nil? (blind? "(?:seon\\.)?db/(query|pull|entity|store-inventory)"))
+        "the (?:seon\\.)? optional-prefix idiom accepts the alias")
+    (is (nil? (blind? "\\bdb/(query|pull|entity|store-inventory)"))
+        "the \\bdb/ alias alternative accepts the alias")
+    ;; NOT flagged — NON-aliased namespaces agents write fully-qualified
+    (is (nil? (blind? "seon\\.agent\\.search/grep|seon\\.agent\\.fs/read-file"))
+        "seon.agent.search / seon.agent.fs are NOT aliased — fully-qualified is correct")
+    (is (nil? (blind? "deftest"))
+        "a non-seon pattern is never alias-blind")
+    (is (nil? (blind? "\\b(my\\.tile|tile)/(button|form|input)"))
+        "my.tile is not a home-ns alias — out of this guard's scope")))
+
+(deftest alias-blind-scenario-fails-to-load-and-the-fixed-battery-is-clean
+  (let [fs       (js/require "node:fs")
+        path     "tmp/gymtest-alias-blind.edn"
+        scenario {:seon.gym.scenario/id     :gymtest-alias-blind
+                  :seon.gym.scenario/competency :db-memory
+                  :seon.gym.scenario/doc    "Deliberately alias-blind: predicate regexes seon.db/ but the agent writes db/."
+                  :seon.gym.scenario/tier   :stub
+                  :seon.gym.scenario/status :active
+                  :seon.gym.scenario/axes   [:consults-findings]
+                  :seon.gym.scenario/turns
+                  [{:seon.gym.turn/message "anything"}]
+                  :seon.gym.scenario/predicates
+                  [{:seon.gym.predicate/id   :reads-store
+                    :seon.gym.predicate/kind :first-eval-matches
+                    :seon.gym.predicate/axis :consults-findings
+                    :seon.gym.predicate/expect :non-empty
+                    :seon.gym.predicate/pattern "seon\\.db/(query|pull|entity|store-inventory)"}]}]
+    (.mkdirSync fs "tmp" #js {:recursive true})
+    (.writeFileSync fs path (pr-str scenario))
+    (let [err (try (gym/load-scenarios! {:seon.gym/path path})
+                   nil
+                   (catch :default e e))]
+      (is (some? err) "the alias-blind scenario must not load")
+      (is (str/includes? (str (ex-message err)) "ALIAS-BLIND")
+          (str "the load failure names the rule — " (ex-message err)))
+      (is (= "seon.db" (:seon.gym/alias-blind-ns (ex-data err)))
+          "the load failure names the offending qualified ns"))
+    (.rmSync fs path))
+  ;; the WHOLE shipped battery loads clean — 0 alias-blind flags.
+  (let [{:seon.gym/keys [scenarios]}
+        (scard/load-battery-scenarios! {:seon.gym.battery/dir "test/seon/gym/scenarios"})
+        flags (for [s scenarios
+                    p (:seon.gym.scenario/predicates s)
+                    :let [v (#'gym/alias-blind-predicate? p)]
+                    :when v]
+                v)]
+    (is (empty? flags)
+        (str "every shipped scenario predicate is alias-safe — " (pr-str (vec flags))))))
 
 ;; ---------------------------------------------------------------------------
 ;; CONSULT-PREDICATE ANCHORING — WIDENED (user decision 2026-06-11,
