@@ -49,6 +49,24 @@ Repeat across all components → a context where **every section is there becaus
 measurably improves generation**, and capabilities (clamp / infill / eval-renoise /
 modes) are **test-gated and reliable**.
 
+## Ledger — measured lifts (live, growing each cycle)
+
+Each row: an A/B of a context artifact, control vs treatment, N=8/arm, scored through
+`parse-forms` + a domain-structural check. "Lift" = treatment − control on the headline
+correctness metric.
+
+| Artifact | Task domain | Control | Treatment | Verdict |
+|---|---|---|---|---|
+| `data-modeling` skill | write a spec'd fn (map-in/map-out) | 0/8 correct, 62% hallucinated | **8/8** correct | KEEP — huge lift; lock as gate |
+| `datahike` skill | write a Datalog query | 0/8 real-API, 62% hallucinated | **8/8** real Datalog | KEEP — huge lift; lock as gate |
+
+**Read of the data so far:** without context the model knows ~none of Seon's API (it
+hallucinates a plausible DSL); a good skill takes it to 100% STRUCTURAL correctness.
+So the structural lift is near-maxed by any skill that teaches the real API — the next
+discriminator is **semantic/eval correctness** (does the query/fn actually RUN and
+return the right answer), which needs the eval-tier oracle, not just `parse-forms`.
+That is where skill-refinement will start to separate good from great.
+
 ## How cheap can the tests be? (the economics that make this work)
 
 - One skill A/B: ~16 gens, ~80s warm, ~$0.03. The whole 6-skill suite: ~$0.20, ~10 min.
