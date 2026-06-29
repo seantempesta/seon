@@ -257,3 +257,6 @@
 [submodule "reference-code/transformers"]
 	path = reference-code/transformers
 	url = https://github.com/huggingface/transformers
+[submodule "reference-code/vllm"]
+	path = reference-code/vllm
+	url = https://github.com/vllm-project/vllm
