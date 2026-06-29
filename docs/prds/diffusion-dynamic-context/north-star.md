@@ -208,6 +208,26 @@ When iterating autonomously (e.g. overnight), each cycle:
   each shipped with its A/B gate.
 - **Keep the docs** (architecture/roadmap/grounding/this ledger) current each cycle.
 
+## Architecture decisions (settled tonight, source-grounded)
+
+- **Engine: stay on raw transformers INDEFINITELY as the control backend** (`pytorch-vs-vllm-roadmap`).
+  vLLM's diffusion sampler is sealed, AND its custom-logits-processor API has the WRONG SHAPE —
+  `apply(logits: (num_requests, vocab_size))`, **no canvas/position axis**; the buzzsaw needs
+  `(req, canvas_len, vocab)`. vLLM physically can't address canvas positions. And on A100 **BF16**
+  vLLM = **375 tok/s** vs our compiled **~450** — vLLM's win is **FP8+Hopper, not the engine**.
+  vLLM = a SERVING-only second endpoint, gated on 3 triggers (thesis-cleared + serving-scale-bound +
+  Hopper-FP8). Forking the sampler = negative (it already crashes on TP>1, vLLM #45719).
+- **A100 speed lever = compiled-transformers-with-compatible-control:** `static`-cache `torch.compile`
+  + the model's BUILT-IN confidence stop + `entropy_bound` (all tensor ops that survive compile),
+  reserving the compile-FORFEITING Python parse/eval stop for the correctness experiments that need it.
+- **Co-located oracle runtime = persistent Node sidecar, NOT GraalVM** (`colocated-oracle-package-design`).
+  GraalVM = nothing to revive (only a wishlist box), wrong language (oracle is CLJS; polyglot runs JVM
+  Clojure → banned parallel reimpl), AND repo-proven crash risk (Substrate-VM signal fights → SIGSEGV
+  in-process with PyTorch → ~66s reload). IPC tax (~50-100µs) is noise vs the ~100ms hop killed. Shape:
+  `op`-dispatched (`parse` reuses the validator / `eval` = bare SCI / `retrieve` = stub) on top of
+  `:worker-validator`. **Babashka under evaluation for the fast parse-tier server** (bb runs parse-forms
+  today via `bin/test-parser`); cljs.js reserved for faithful CLJS eval.
+
 ## Pointers
 
 - [[architecture]] — the buzzsaw system + the modes this serves.
