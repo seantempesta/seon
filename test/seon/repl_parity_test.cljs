@@ -21,6 +21,12 @@
   (:require
     [clojure.string :as str]
     [cljs.test :refer [deftest is testing]]
+    ;; Required so their JS ns objects exist on globalThis — `home-ns-alias-hint`
+    ;; reads back their publics via `ns-fn-members`; without these loaded the
+    ;; `:as`-alias cases would resolve nil.
+    [seon.agent.message]
+    [seon.agent.todo]
+    [seon.db]
     [seon.eval :as seval]))
 
 (deftest in-ns-translates-to-a-teaching-error
@@ -33,6 +39,41 @@
     (let [r (seval/parity-intercept "  (in-ns  my.ns)" 'my.agent.x)]
       (is (= :error (:seon.eval/parity r)))
       (is (str/includes? (:seon.error/message r) "(ns my.ns)")))))
+
+(deftest in-ns-steers-to-the-alias-not-a-destructive-switch
+  ;; The load-bearing fix (#70): an agent reaching `(in-ns 'seon.agent.todo)`
+  ;; to CALL a verb must be steered to `todo/<verb>`, NOT advised to switch
+  ;; namespace (which strips its home-ns message/wait/complete aliases).
+  (let [msg (:seon.error/message
+              (seval/parity-intercept "(in-ns 'seon.agent.todo)" 'my.agent.x))]
+    (testing "names the home-ns alias for the target ns"
+      (is (str/includes? msg "todo/")))
+    (testing "tells the agent NOT to switch namespace to call a verb"
+      (is (str/includes? msg "do NOT need to switch namespace")))
+    (testing "still names (ns …)-switch as the DEFINE-only path"
+      (is (str/includes? msg "(ns seon.agent.todo)"))
+      (is (str/includes? msg "DEFINE")))
+    (testing "warns the switch replaces home aliases"
+      (is (str/includes? msg "REPLACES your home aliases"))))
+  (testing "an un-aliased target falls back to generic alias guidance"
+    (let [msg (:seon.error/message
+                (seval/parity-intercept "(in-ns 'foo.bar)" 'my.agent.x))]
+      (is (str/includes? msg "home-ns alias"))
+      (is (str/includes? msg "(ns foo.bar)")))))
+
+(deftest home-ns-alias-hint-resolves-the-correct-aliased-form
+  ;; The missing hint (#70 finding 2): a bare verb that failed to resolve maps
+  ;; back to the home-ns alias/refer form — derived from home-ns-require-specs,
+  ;; never a hardcoded list.
+  (testing "an :as-aliased library verb resolves to alias/<verb>"
+    (is (= "todo/plan!" (seval/home-ns-alias-hint "plan!")))
+    (is (= "message/user" (seval/home-ns-alias-hint "user")))
+    (is (= "db/transact!" (seval/home-ns-alias-hint "transact!"))))
+  (testing "a :refer'd lifecycle verb resolves to its fully-qualified form"
+    (is (= "seon.agent.lifecycle/complete" (seval/home-ns-alias-hint "complete")))
+    (is (= "seon.agent.lifecycle/wait" (seval/home-ns-alias-hint "wait"))))
+  (testing "an unknown name yields no hint"
+    (is (nil? (seval/home-ns-alias-hint "totally-made-up-xyz")))))
 
 (deftest bare-star-ns-returns-the-current-ns-as-a-value
   ;; The honest intercept: *ns* IS the ns the form runs in — returning it

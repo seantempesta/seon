@@ -873,6 +873,11 @@
        result-vars-cap " results) — re-run its form to recompute it. "
        "Only recent results stay referenceable as `result/<id>` vars."))
 
+;; Defined after `home-ns-require-specs` (the single source of home-ns
+;; aliases it derives from); declared here so `raw-eval`'s not-defined
+;; branch can append the "did you mean `todo/plan!`?" hint.
+(declare home-ns-alias-hint)
+
 (defn ^:async ^:private raw-eval
   "Internal — returns a Promise that resolves with {:value v :ns ns}
    or rejects with the error. The public `eval` catches both.
@@ -945,15 +950,29 @@
                         ;; Crystal-clear: name the EXACT symbol + the EXACT
                         ;; next action. A FRESH, confused LLM must know this
                         ;; ran NOTHING and what to do about it.
+                        ;; Alias hint: a bare verb that failed to resolve may
+                        ;; be a library verb the agent should reach through a
+                        ;; home-ns alias (`plan!` → `todo/plan!`). Steer it
+                        ;; back to the alias instead of toward defining/typo —
+                        ;; this is the missing hint that, absent, sent a live
+                        ;; agent on a destructive ns-switch detour.
+                        hint (when (= kind :undeclared-var)
+                               (home-ns-alias-hint (str suffix)))
                         msg  (if (= kind :undeclared-ns)
                                (str "`" sym "` — that NAMESPACE is not loaded "
                                     "(typo, or you haven't required it). This "
                                     "form ran NOTHING. Require it, or fix the "
                                     "name, then re-eval.")
-                               (str "`" sym "` is not defined — you have not "
-                                    "defined it (or its defn failed earlier, "
-                                    "or it's a typo). This form ran NOTHING. "
-                                    "Define it first, then this runs."))]
+                               (str "`" sym "` is not defined. This form ran "
+                                    "NOTHING. "
+                                    (if hint
+                                      (str "Did you mean `" hint "`? — that "
+                                           "home-ns verb; use that form, do "
+                                           "NOT switch namespace.")
+                                      (str "You have not defined it (or its "
+                                           "defn failed earlier, or it's a "
+                                           "typo). Define it first, then this "
+                                           "runs."))))]
                     (reject
                       (ex-info msg
                                {:seon.error/kind :compile
@@ -1200,6 +1219,59 @@
     [seon.schema :as schema]
     [seon.db :as db]
     [seon.agent.todo :as todo]])
+
+(defn- home-ns-alias-names
+  "Comma-joined `:as` alias names from [[home-ns-require-specs]]
+   (e.g. \"message, agent, schema, db, todo\") — the short prefixes an
+   agent calls library verbs through from its home ns."
+  []
+  (str/join ", " (keep (fn [spec] (when (= :as (second spec)) (name (nth spec 2))))
+                       home-ns-require-specs)))
+
+(defn- home-ns-refer-names
+  "Comma-joined `:refer`'d verb names from [[home-ns-require-specs]]
+   (e.g. \"wait, complete, pause, resume, terminate\") — the bare verbs that
+   resolve ONLY while the agent sits in its home ns."
+  []
+  (str/join ", " (mapcat (fn [spec] (when (= :refer (second spec))
+                                       (map name (nth spec 2))))
+                         home-ns-require-specs)))
+
+(defn- home-ns-alias-for-ns
+  "The `:as` alias a home ns gives `ns-name` (a dotted string), or nil if
+   `ns-name` isn't aliased there. Derived from [[home-ns-require-specs]]."
+  [ns-name]
+  (some (fn [spec]
+          (when (and (= :as (second spec)) (= (name (first spec)) ns-name))
+            (name (nth spec 2))))
+        home-ns-require-specs))
+
+(defn home-ns-alias-hint
+  "Given a bare verb NAME that failed to resolve (e.g. \"plan!\", \"user\",
+   \"complete\"), the correctly-aliased home-ns form the agent SHOULD have
+   written — a string like \"todo/plan!\" — or nil if no home-ns alias/refer
+   exposes that name. Derived from [[home-ns-require-specs]] (the single
+   source of which aliases/refers every agent's home ns carries) so it can
+   never drift from what the agent's prompt teaches:
+
+     - `[ns :as alias]` — if `ns`'s live publics ([[ns-fn-members]]) include
+       the name, suggest `alias/<name>` (the verb lives behind the alias).
+     - `[ns :refer [verbs…]]` — if `name` is a refer'd verb, suggest the
+       fully-qualified `ns/<name>` (works from ANY ns; the bare refer only
+       resolves inside the home ns)."
+  {:malli/schema [:=> [:catn [::short-name :string]] [:maybe :string]]}
+  [short-name]
+  (let [nm (symbol short-name)]
+    (some (fn [spec]
+            (let [ns-sym (first spec)]
+              (cond
+                (and (= :refer (second spec)) (some #(= % nm) (nth spec 2)))
+                (str (name ns-sym) "/" short-name)
+
+                (and (= :as (second spec))
+                     (contains? (ns-fn-members (name ns-sym)) nm))
+                (str (name (nth spec 2)) "/" short-name))))
+          home-ns-require-specs)))
 
 (defn home-ns-form
   "The exact `(ns <home> (:require …))` SOURCE wired into every agent's home
@@ -2404,12 +2476,21 @@
   (let [s (str/trim (or source ""))]
     (cond
       (re-find #"^\(in-ns[\s)]" s)
-      (let [target (second (re-find #"^\(in-ns\s+'?([^\s\)]+)" s))]
+      (let [target (second (re-find #"^\(in-ns\s+'?([^\s\)]+)" s))
+            alias  (when target (home-ns-alias-for-ns target))]
         {:seon.eval/parity :error
          :seon.error/message
-         (str "in-ns is not available in this runtime — use (ns "
-              (or target "the.target.ns") "), same effect: it switches "
-              "your namespace and your prompt follows.")})
+         (str "in-ns is not available — and to CALL a verb you do NOT need to "
+              "switch namespace. "
+              (if alias
+                (str "Verbs in " target " are reachable from your home ns as `"
+                     alias "/<verb>` (e.g. `" alias "/plan!`) — use that. ")
+                "Reach another ns's verbs through their home-ns alias (e.g. `todo/plan!`, `message/user`). ")
+              "Stay in your home ns so your aliases (" (home-ns-alias-names)
+              ") and refers (" (home-ns-refer-names) ") keep resolving. "
+              "Only `(ns " (or target "the.target.ns") ")`-switch to DEFINE a "
+              "fn IN that ns — and that switch REPLACES your home aliases until "
+              "you switch back.")})
 
       (= s "*ns*")
       {:seon.eval/parity :value
