@@ -175,6 +175,43 @@
                       :optimizations      :simple
                       :externs            ["externs/node_fs.js"]}}
 
+  ;; EVAL/CORRECTNESS oracle — the EVAL-TIER sibling of :worker-validator,
+  ;; CO-LOCATED on the diffusion GPU worker (diffusion-dynamic-context).
+  ;; Parse asks \"is it well-formed?\"; this asks \"does it actually RUN?\"
+  ;; (compile + bounded eval → ok?/error) — the verdict that gates the
+  ;; denoise loop's short-circuit (stop-when-correct) vs renoise.
+  ;;
+  ;; SEPARATE bundle ON PURPOSE: it pulls cljs.js (the self-host CLJS
+  ;; compiler) so it can faithfully compile the CLJS the worker emits
+  ;; (^:async/await, js interop) — bb-SCI/cljs-SCI throw false negatives on
+  ;; that surface. cljs.js is HEAVY (loads the ~15MB out/bootstrap analysis
+  ;; cache at init), so it must NOT bloat the lean parse bundle. NO seon.db /
+  ;; seon.eval / pod state — leaf bundle (cljs.js + shadow bootstrap loader +
+  ;; cljs.analyzer only).
+  ;;
+  ;; Non-termination is BOUNDED via Node's vm.runInThisContext timeout (the
+  ;; compiled JS is native, so SCI's interpreter interrupt cannot fence it).
+  ;;
+  ;; :simple (not :advanced) — keeps require(\"fs\"/\"vm\"/\"readline\")
+  ;; names + the cljs.js/shadow-bootstrap runtime intact; :advanced would
+  ;; munge the self-host machinery. :devtools off — run-to-exit subprocess.
+  ;;
+  ;; Needs out/bootstrap present (clj -M:cljs compile bootstrap).
+  ;; Build:  clj -M:cljs compile worker-oracle-eval
+  ;; Run:    node out/worker-oracle-eval/main.js --serve   (or one-shot via stdin)
+  ;; Output: out/worker-oracle-eval/main.js
+  ;;
+  ;; The running :client watcher IGNORES unwatched builds, so adding this
+  ;; block is safe for the live cluster.
+  :worker-oracle-eval
+  {:target           :node-script
+   :output-to        "out/worker-oracle-eval/main.js"
+   :main             seon.worker-eval/-main
+   :devtools         {:enabled false}
+   :compiler-options {:warnings-as-errors false
+                      :optimizations      :simple
+                      :externs            ["externs/node_fs.js"]}}
+
   ;; 2.2c DIS-replica probe — Node READER side. Opens a JVM-written :file
   ;; store with a stub non-streaming writer (deref-conn follow-the-store
   ;; mode) and reports max-tx / query results / timings / counted blob

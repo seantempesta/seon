@@ -553,16 +553,48 @@ docstring). Both tiers stay sub-millisecond — the co-location win holds.
    offline-proven — `tmp/flash-diffgemma/oracle_shim.py`; only the image
    bundling + GPU wiring remain, owner-owned.)
 
-**When faithful CLJS eval enters the loop — the Node path (a378adfa's bundle):**
+**The faithful CLJS eval tier — the Node path (cljs.js self-host):**
 
-3. Add `seon.worker.eval` (cljs-SCI proxy, ~30 lines) + a unit test
-   (`eval-form` on a good form → `{:ok true}`; on `(/ 1 0)` /
-   `(undefined-fn)` / `(loop [] (recur))` → the three error kinds); add the
-   cljs.js escalation only when interop/async correctness is needed (§5).
-4. Add `seon.worker.oracle` (op-dispatch + the generalized `--serve` loop) +
-   the `:worker-oracle` shadow target; CI `clj -M:cljs compile worker-oracle`;
-   Dockerfile Node layer + `COPY`. Python `Oracle` switches the sidecar to
-   `node …` (or runs both: bb front door + Node eval — the §2 hybrid).
+3. ✅ **DONE + offline-proven (2026-06-28).** `seon.worker-eval`
+   (`src/seon/worker_eval.cljs`) + the `:worker-oracle-eval` shadow target
+   (`shadow-cljs.edn`). Built straight to the **faithful cljs.js self-host
+   tier** (NOT the cljs-SCI proxy step 3 originally hedged) — because the
+   worker emits `^:async`/`await` + js interop, and only real ClojureScript
+   compilation reads those without false negatives. `eval-form` = compile +
+   bounded-eval of a self-contained form under the warm self-host state →
+   `{:ok true :value <pr-str>}` | `{:ok false :error {:kind
+   :compile|:throw|:interrupt :message}}`. Non-termination is fenced by
+   **Node `vm.runInThisContext` timeout** (cljs.js compiles to NATIVE JS, so
+   SCI's interpreter interrupt cannot bound it; the V8 watchdog terminates a
+   sync loop). DB-free leaf (cljs.js + `shadow.cljs.bootstrap.node` +
+   `cljs.analyzer` only — no `seon.db`/`seon.eval`). Kept as a SEPARATE
+   spawnable binary with the identical `{op,…}` API (per owner: parse=bb,
+   eval=node, two binaries, one contract — NOT a combined dispatcher), so the
+   Python `Oracle` picks the binary per op. **Offline-proven** over the real
+   stdin/stdout pipe (Node + Python `Oracle` drivers): valid
+   `(defn mean [v] (/ (reduce + v) (count v)))` → `ok:true`;
+   `(defn f [x] (undefined-var x))` → `ok:false` `kind:compile`
+   *"Use of undeclared Var …"*; `(loop [] (recur))` →
+   `ok:false` `kind:interrupt` *"Script execution timed out after Nms"*
+   (terminated, not hung); `^:async`/`await`/`(await (js/fetch u))` + `(.json
+   resp)` all **compile → ok:true** (the reason cljs.js beats bb-SCI).
+   **Measured (honest — cljs.js IS heavier than parse): cold-start spawn→ready
+   ~276 ms** (one-time, loads the ~15MB `out/bootstrap` analysis cache;
+   negligible against the 66 s model load) **; warm per-call ~2.6 ms mean /
+   p99 ~6–8 ms** for a real defn form (vs parse's ~21 ms cold / ~0.1 ms warm).
+   So eval is ~25× the warm cost of parse → the natural split is
+   **parse-per-step, eval-at-checkpoint**; eval is NOT too heavy to use (the
+   one-time init amortizes; 2.6 ms is far inside any per-checkpoint budget and
+   vs a ~100 ms internet hop is still a huge co-location win), just sparser
+   than parse. Needs `out/bootstrap` present (`clj -M:cljs compile
+   bootstrap`). Build: `clj -M:cljs compile worker-oracle-eval`.
+4. **Owner-owned (image + GPU wiring).** Image layer: install Node + `COPY
+   out/worker-oracle-eval/main.js` + `out/bootstrap/` onto the worker; Python
+   `Oracle` spawns `node … --serve` once for the eval op (swap argv only — the
+   shim is runtime-agnostic by construction). Wire `eval` into the denoise
+   CHECKPOINT (parse stays per-step). A combined op-dispatcher / `:worker-oracle`
+   superset bundle is NOT needed — two binaries + one `{op,…}` contract is the
+   settled shape.
 5. `retrieve` seam stays a stub until the retrieval-denoising experiment needs
    it — decide then whether the HNSW index is co-located or a remote knn call
    (the one round-trip we may keep, since retrieval fires rarely).
