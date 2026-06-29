@@ -291,3 +291,27 @@
                              (str (:error row))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ===========================================================================
+;; read-error-message — the truncation (output-cap) symptom (#73). A pure
+;; sync fn: an "Unexpected EOF" read error is the signature of a form that
+;; ran past the output budget (a giant inline report message), so its
+;; guidance must steer to REPORT=DATA, MESSAGE=POINTER — not "fix the
+;; delimiter" (which is right only for an actual unmatched closer).
+;; ===========================================================================
+
+(deftest read-error-eof-teaches-store-then-point
+  (let [eof (seval/read-error-message
+              "Unexpected EOF while reading string. [at line 2, column 26]"
+              "(message/agent \"abc\" (str \"# Report\nlots cut off mid")
+        del (seval/read-error-message
+              "Unmatched delimiter: ] [at line 1, column 8]"
+              "(foo bar])")]
+    (testing "the EOF/truncation case steers to store-data + send-pointer"
+      (is (re-find #"(?i)truncat"  eof))
+      (is (re-find #"(?i)pointer"  eof))
+      (is (re-find #"my\.kb|:seon\.items" eof))
+      (is (not (re-find #"(?i)fix the delimiter" eof))))
+    (testing "a genuine unmatched-delimiter error keeps the delimiter guidance"
+      (is (re-find #"(?i)fix the delimiter" del))
+      (is (not (re-find #"(?i)pointer" del))))))

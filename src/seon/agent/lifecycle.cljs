@@ -72,7 +72,11 @@
    `:idle` (a new message opens a fresh run). If `:seon.agent/parent` is set,
    send the result to the parent (which wakes it via the normal inbound gate);
    no parent → the result is for the human (already said via message/user).
-   The result is a MESSAGE, not a state. Returns `:idle` on success, the error
+   The result is a MESSAGE, not a state — so it is REPORT=DATA, MESSAGE=POINTER:
+   `result` is a SHORT pointer (the stored entity id + a one-line summary), not
+   a long report inline (a multi-line result truncates mid-string and never
+   sends). Store the findings as data first, then complete with the pointer;
+   the parent QUERIES the stored data. Returns `:idle` on success, the error
    envelope on a failed transact, no agent in scope, or no open run."
   {:malli/schema [:=> [:catn [::result :string]]
                   [:or :seon.derive/state :seon.db/transact-response]]}

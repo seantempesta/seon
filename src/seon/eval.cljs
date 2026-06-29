@@ -1656,10 +1656,23 @@
   {:malli/schema [:=> [:cat :string :string] :string]}
   [raw source]
   (let [m (re-find #"\[at line (\d+),?\s*column (\d+)\]" (str raw))
+        ;; An "Unexpected EOF" read error is the OUTPUT-CAP TRUNCATION
+        ;; signature: a form (often a giant inline (str "…report…")) ran
+        ;; past the LLM output budget, so the literal/list ends with no
+        ;; closer. The fix is NOT a delimiter — it is to STORE the large
+        ;; content as data and SEND A POINTER, so the message fits.
+        eof?    (re-find #"(?i)\bEOF\b" (str raw))
         instruction
-        (str "This form did not parse, so it DEFINED NOTHING — do not "
-             "call or wire anything that depended on it; it does not "
-             "exist. Fix the delimiter and re-eval the whole form.")]
+        (if eof?
+          (str "This form was likely TRUNCATED because it was too large to "
+               "emit — it ran past your output budget and ended mid-form, so "
+               "it DEFINED NOTHING and sent NOTHING. Don't try to re-emit the "
+               "whole thing: STORE the long content as data (a my.kb.* entity "
+               "or a :seon.items envelope), then send a SHORT pointer — the id "
+               "+ a one-line summary. Report = data, message = pointer.")
+          (str "This form did not parse, so it DEFINED NOTHING — do not "
+               "call or wire anything that depended on it; it does not "
+               "exist. Fix the delimiter and re-eval the whole form."))]
     (if-not m
       (str "READ ERROR — " raw "\n" instruction)
       (let [line-no (js/parseInt (nth m 1) 10)
@@ -1678,8 +1691,7 @@
              headline " at line " line-no ", col " col-no ":\n"
              (when src-ln (str "    " src-ln "\n"))
              (when caret  (str "    " caret "\n"))
-             "Do NOT call or wire anything that depended on this form — it "
-             "does not exist. Fix the delimiter and re-eval the whole form.")))))
+             instruction)))))
 
 (defn- build-tee-entities
   "Return a vector of program-graph entity maps for everything `source`
