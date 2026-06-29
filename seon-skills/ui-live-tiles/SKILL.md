@@ -1,6 +1,6 @@
 ---
 name: ui-live-tiles
-description: "Show your human a live VIEW, don't just message them. Use this BEFORE you reply to your human with a wall of text — when you have data, a query result, a table, a plan, a status, a recommendation, or progress to convey; when you want to build a tile / dashboard / canvas / chart / view for your human to SEE; when you're about to dump a result map or a list as prose; when you catch yourself narrating numbers you could render. Your human watches your CANVAS (the focal tile on your /agent/{id} page), not a chat log — render to it. Covers wiring :seon.render.live-tile/content (literal hiccup OR a tile fn returning {:seon.render/hiccup … :seon.render/ai …}), semantic-hiccup styling, the safelisted utility vocabulary, compact/expanded faces, seon.render/block for typed data, and the honest read-only scope (no interactive buttons yet). Cross-links data-oriented-clojure (derive-don't-store) + datahike (the data you'd show)."
+description: "Show your human a live VIEW, don't just message them. Use this BEFORE you reply to your human with a wall of text — when you have data, a query result, a table, a plan, a status, a recommendation, or progress to convey; when you want to build a tile / dashboard / canvas / chart / view for your human to SEE; when you're about to dump a result map or a list as prose; when you catch yourself narrating numbers you could render; when you want a button / form / input the human can click or type into. Your human watches your CANVAS (the focal tile on your /agent/{id} page), not a chat log — render to it. Covers wiring :seon.render.live-tile/content (literal hiccup OR a tile fn returning {:seon.render/hiccup … :seon.render/ai …}), the my.ui (static) / my.tile (INTERACTIVE controls) / my.data (aggregation) toolkit, semantic-hiccup styling, the safelisted utility vocabulary, compact/expanded faces, and seon.render/block for typed data. Cross-links data-oriented-clojure (derive-don't-store) + datahike (the data you'd show)."
 ---
 
 # Live tiles — show your human, don't just tell them
@@ -110,6 +110,97 @@ For a LIVE tile, wrap a `my.ui/section` call in a home-ns fn and wire its symbol
 it re-derives every render. Read the `my.ui` source (it renders in full in your
 namespaces context) for the current helper set; every helper emits only safelisted
 classes. This is the "compose smaller pieces" doctrine applied to your canvas.
+
+## Interactive controls — `my.tile` buttons/forms call YOUR fns back
+
+A tile is NOT read-only. `my.tile` is the sibling of `my.ui`: where `my.ui` gives
+you static status lines and tables, `my.tile` gives you **controls the human can
+click or type into that invoke one of YOUR OWN fns**. Same dual-render contract —
+DATA in, `{:seon.render/hiccup … :seon.render/ai …}` out — so the human gets a real
+button and YOU see the compact `[button: "…" → my.fn]` line describing which fn it's
+wired to. Grounded in `src/my/tile.cljs` (the ns docstring is the contract) and
+proven end-to-end (#58: the control-action gate + render are live).
+
+The whole mechanism: a control's action is a fn YOU defined in your home ns —
+nothing else is invocable (the `/agent/<id>/call` gate authorizes only your own
+`:seon.fn` set). You never write a URL or a Datastar string; you pass a **fn-CALL**
+or a **fn-REF** and the render rewrites it:
+
+- **fn-CALL** — `(list 'approve! order-id)` — args captured NOW, at render time, and
+  arrive as positional args (use for a row's id).
+- **fn-REF** — `'save-note!` (a bare symbol) — no render-time args; the human's
+  typed/picked field signals POST and land as ONE map argument `{:field val …}`
+  (use for forms/inputs).
+
+The helpers: `my.tile/button` `my.tile/input` `my.tile/select` `my.tile/toggle`
+`my.tile/form` (composes fields + a submit). A worked counter button:
+
+```clojure
+;; 1. eval your handler fn ONCE (it becomes a granted :seon.fn row). Register
+;;    any new attr first, else db/transact! refuses it.
+(seon.schema/register! :my.agent.me/counter :int)
+(defn ^:async bump! [_]
+  (let [id (seon.db/current-agent-id)
+        n  (or (some-> (seon.db/pull {:seon.db/db @seon.db/*conn*
+                                      :seon.db/pull-pattern '[:my.agent.me/counter]
+                                      :seon.db/ref [:seon.agent/id id]})
+                       :my.agent.me/counter) 0)]
+    (seon.db/transact! {:seon.db/tx-data
+                        [{:seon.agent/id id :my.agent.me/counter (inc n)}]})))
+
+;; 2. wire a LIVE tile fn — it re-derives every render, so the click's effect
+;;    shows up with no extra wiring (the feed re-renders on the tx).
+(defn my-tile [{:keys [seon.db/db]}]
+  (let [n (or (:my.agent.me/counter
+               (seon.db/pull {:seon.db/db db
+                              :seon.db/pull-pattern '[:my.agent.me/counter]
+                              :seon.db/ref [:seon.agent/id (seon.db/current-agent-id)]})) 0)]
+    (my.ui/section
+      {:my.ui/title "Counter"
+       :my.ui/blocks
+       [(my.ui/status-line {:my.ui/label "count" :my.ui/value (str n)})
+        (my.tile/button {:my.tile/label "+1" :my.tile/action 'bump!})]})))
+(seon.db/transact! {:seon.db/tx-data
+                    [{:seon.agent/id (seon.db/current-agent-id)
+                      :seon.render.live-tile/content 'my.agent.me/my-tile}]})
+```
+
+A note FORM that posts typed input as one map arg to your handler:
+
+```clojure
+(defn ^:async save-note! [{:keys [note]}]   ; bound signals → one map arg
+  (seon.db/transact! {:seon.db/tx-data [{:my.note/text note}]}))
+(my.tile/form
+  {:my.tile/submit 'save-note!
+   :my.tile/label  "Save"
+   :my.tile/fields [(my.tile/input {:my.tile/field "note" :my.tile/label "Note"})]})
+```
+
+`my.tile` helpers are SYNC pure data; the action MUST be a fn-symbol or fn-call
+(never a raw string — the gate refuses it). Compose them inside a `my.ui/section`
+exactly like the static helpers.
+
+## Aggregate before you show — `my.data`
+
+Showing a number ("biggest category: $106") usually means aggregating stored rows
+first. `my.data` does SUM / argMAX / group-then-sum WITHOUT a hand-rolled datalog
+aggregate (and so without the `(sum ?x)` `:with`-dedup trap). The pipeline: a
+PRODUCER (`my.data/rows` by attribute presence, or `my.data/group-sum`) emits a
+`:seon.items/*` envelope; a REDUCER (`my.data/sum-by` → a number, `my.data/max-by`
+→ the winning ROW) consumes it. The universal arrow is
+`(reducer (merge (producer …) {:my.data/key k}))`:
+
+```clojure
+;; "biggest spending category, and how much?"
+(let [exp (my.data/rows {:my.data/attr :my.expense/amount-usd})
+      totals (my.data/group-sum (merge exp {:my.data/group-key :my.expense/category
+                                            :my.data/key       :my.expense/amount-usd}))]
+  (my.data/max-by (merge totals {:my.data/key :my.data/total})))
+;; => {:my.data/group :dining :my.data/total 106}  → feed into a my.ui/kv-table
+```
+
+Read `src/my/data.cljs` for the full verb set. The flow is: `my.data` computes the
+numbers → `my.ui`/`my.tile` render them → wire the result onto your canvas.
 
 ## You already SEE the state of your canvas every turn
 
@@ -266,21 +357,20 @@ Rule of thumb: if you're about to recite numbers, a list, a table, or progress i
 a message — that belongs on the tile. The message can be one line pointing at it
 ("updated the sources tile").
 
-## Honest scope — what's renderable today
+## What's renderable today
 
-- **Renderable now:** any static or live VIEW — text, tables, lists, headings,
-  code blocks, data drill-downs, compact+expanded faces, the full safelisted
-  utility palette, re-derived-every-render tile fns. This is a lot; most "show my
-  human X" asks are fully met.
-- **NOT yet:** **interactivity.** A live tile is a read-only rendered view. There
-  is no built-in way to put a working button or input on the tile that calls back
-  into you (the action-registration API isn't public yet, confirmed in a live
-  drive that burned ~25 evals discovering this dead end). Likewise the designed
-  `my.tile/show!` wrapper is not in the live system — use the raw transact above.
-  If your human asks for something they can interact with (e.g. "a tile that lets
-  me add a todo"), render the view AND tell them how to drive it through chat
-  ("message me `add todo: <title>`"). Don't spend evals hunting for an onClick;
-  it isn't there.
+- **Static + live VIEWS:** text, tables, lists, headings, code blocks, data
+  drill-downs, compact+expanded faces, the full safelisted utility palette,
+  re-derived-every-render tile fns. Compose them with `my.ui`.
+- **INTERACTIVITY (now live):** real buttons, inputs, selects, toggles, and forms
+  via `my.tile` — a control invokes one of your own home-ns fns through the
+  `/agent/<id>/call` gate (fn-CALL = render-time args, fn-REF = posted signals as
+  one map). So "a tile that lets me add a todo" is a `my.tile/form` whose submit is
+  your `add-todo!` handler — render the control, don't punt to chat. (The older
+  "no interactive buttons yet / use chat instead" guidance is OBSOLETE — #58
+  shipped the control gate + render.)
+- **Aggregation:** `my.data` (sum/argMAX/group-sum over stored rows) computes the
+  numbers a tile shows, dodging the datalog `:with`-dedup trap.
 
 ## Key files
 
@@ -288,6 +378,8 @@ a message — that belongs on the tile. The message can be one line pointing at 
 |------|-----------------|
 | `src/seon/render/live_tile.cljs` | THE contract — ns docstring = the tile vocabulary, faces, styling, welcome example |
 | `src/seon/render.cljs` | `:seon.render/html-response`, `seon.render/block`, `render-agent-tile` |
-| `src/seon/agent/ctx/live_tile.cljs` | the per-turn "what your human sees" context section (copy-paste examples) |
-| `src/seon/ui/world.cljs` | how `/agent/{id}` assembles the canvas (live tile) + supporting tiles |
+| `src/my/ui.cljs` | static dual-render helpers — `status-line` / `kv-table` / `section` |
+| `src/my/tile.cljs` | INTERACTIVE controls — `button` / `input` / `select` / `toggle` / `form` |
+| `src/my/data.cljs` | aggregation — `rows` / `sum-by` / `max-by` / `group-sum` |
+| `src/seon/agent/ctx/live_tile.cljs` | the per-turn "what your human sees" context section |
 | `resources/public/css/input.css` | the safelisted utility list + the semantic base-content styling |

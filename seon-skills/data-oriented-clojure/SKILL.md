@@ -41,28 +41,13 @@ grounding doc has the file:line for every claim.
 
 ### Entity = attributes + connections. There are NO kinds.
 
-This is the OO reflex the system most wants you to drop. Datahike entities have
-no type, class, or kind — schema attaches to *attributes*, never to entities,
-and an entity is open (it can carry attributes from many domains at once).
-
-```clojure
-;; WRONG — a "Route object" with a :type, and dispatch on it
-{:type :route :pattern "/world"}
-(filter #(= :route (:type %)) ents)
-
-;; RIGHT — it's a route because it asserts route attributes
-{:seon.route/pattern "/world" :seon.route/method :get}
-(db/query {::db/query '[:find ?e :where [?e :seon.route/pattern]]})  ; find by attr presence
-```
-
-- **FIND** by attribute presence (scan the attr's index).
-- **IDENTIFY** by a `:db.unique/identity` attr (that's also how upsert resolves).
-- **RELATE / REMOVE** by refs (`:db/isComponent` cascades).
-- **SCOPE** by `:seon.db/origin`.
-
-If you catch yourself writing "for each kind", a kind taxonomy, or a `:type`/
-`:kind` field — stop and reframe in attributes + connections + provenance. The
-namespaced keyword IS the discriminator. (See the `datahike` skill + primer §0.)
+The OO reflex the system most wants you to drop: a datahike entity has no
+type/class/kind — schema attaches to *attributes*, and the namespaced keyword IS
+the discriminator. If you catch yourself writing a `:type`/`:kind` field, a kind
+taxonomy, or "for each kind", stop and reframe in attributes + connections +
+provenance. The full four-moves (FIND by attribute presence / IDENTIFY by a
+`:db.unique/identity` attr / RELATE-REMOVE by refs / SCOPE by `:seon.db/origin`)
+are taught with worked queries in the **`datahike`** skill — read it there.
 
 ### Don't think in tables/rows — think in EAV bags of namespaced attrs
 
