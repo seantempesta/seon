@@ -231,8 +231,11 @@ When iterating autonomously (e.g. overnight), each cycle:
   cacheable prefix"); each skill's ~2400-tok KV encoded ONCE, reused across N tasks (vLLM chain-hash,
   salted per `:seon.agent/id`). Per-block varying-position reuse = NOT needed (fixed order) + not clean
   (MoE/mixed-RoPE) → deferred. HARD GATE: encoder `Cache` can't ride JSON → needs the CO-LOCATION image
-  (caching + co-location = one build). **Phase 0 (test FIRST): is encoder prefill a meaningful fraction
-  of `generate()` latency? → greenlights or kills it.**
+  (caching + co-location = one build). **Phase 0 MEASURED → STRONG GREEN:** a single skill prefix
+  (4531 tok) prefill = **0.945s = 40.7% of generate() latency** (short 36-tok prompt gen_s 1.38s vs
+  skill-laden 2.32s, fingerprint-verified). Caching the stable prefix saves ~40%/gen when reused. And
+  since the thesis ADDS context (skill+required-API+namespaces), prefill DOMINATES as context grows → KV
+  caching is ESSENTIAL, not optional. Build is gated on the co-location image (Cache can't serialize).
 - **A100 speed = ADOPT in-the-loop features, reinvent NOTHING** (all control-compatible, keep the
   `:1034` seam): (1) **torchao quantization** — `TorchAoConfig` at `from_pretrained` is transparent to
   `generate()`, so INT8 on the A100 (FP8 on Hopper) reclaims vLLM's dtype-speed WITH control
