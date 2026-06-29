@@ -22,6 +22,14 @@
 #                                    # real drives). COSTS REAL MONEY — needs
 #                                    # the active provider's API key set.
 #   bin/gym-scorecard --log=PATH     # override the scorecard log path
+#   bin/gym-scorecard --paid --k=3   # pass^k: drive each PAID scenario k
+#                                    # times and report the pass-RATE (a
+#                                    # single sample is a noisy judge —
+#                                    # variance can't masquerade as a
+#                                    # regression). k=1 = today, unchanged.
+#   bin/gym-scorecard --paid --k=3 --only=canvas-goal-board
+#                                    # FOCUS on named scenario ids (a cheap
+#                                    # targeted paid run, not the whole battery)
 #
 # Loop usage: run → make a context change → re-run → keep the change iff
 # it lifted the WHOLE battery (per-competency pass / tokens / error-rate /
@@ -36,14 +44,18 @@ cd "$(dirname "$0")/.."
 
 BUILD=1
 ALLOW_PAID=0
+K=1
+ONLY=""
 LOG="docs/prds/agent-fsm/research/gym-scorecard-trend.edn"
 
 for arg in "$@"; do
   case "$arg" in
     --no-build) BUILD=0 ;;
     --paid)     ALLOW_PAID=1 ;;
+    --k=*)      K="${arg#--k=}" ;;
+    --only=*)   ONLY="${arg#--only=}" ;;
     --log=*)    LOG="${arg#--log=}" ;;
-    --help|-h)  sed -n '2,30p' "$0"; exit 0 ;;
+    --help|-h)  sed -n '2,38p' "$0"; exit 0 ;;
     *) echo "Unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
@@ -73,7 +85,7 @@ if [ ! -f "out/test/test.js" ]; then
 fi
 
 echo ""
-echo "== Running gym battery (FREE${ALLOW_PAID:+/PAID}) — sha ${SHA} =="
+echo "== Running gym battery (FREE${ALLOW_PAID:+/PAID}) — sha ${SHA} k=${K}${ONLY:+ only=$ONLY} =="
 # Focus the run on the gated battery ns only (the :node-test runner's
 # --test filter). The gate vars steer seon.gym.scorecard-test's runner;
 # unset, that ns is a no-op (the normal suite never runs the battery).
@@ -81,6 +93,8 @@ SEON_GYM_SCORECARD=1 \
 SEON_GYM_SHA="$SHA" \
 SEON_GYM_AT="$AT" \
 SEON_GYM_ALLOW_PAID="$ALLOW_PAID" \
+SEON_GYM_K="$K" \
+SEON_GYM_ONLY="$ONLY" \
 SEON_GYM_LOG="$LOG" \
   env -u SEON_EXTRA_SRC -u SEON_EXTRA_PRELOAD -u SEON_EXTRA_NPM \
   node out/test/test.js --test=seon.gym.scorecard-test 2>&1 | tee -a "$RUNLOG"

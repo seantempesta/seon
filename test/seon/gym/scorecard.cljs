@@ -89,11 +89,59 @@
 ;; the refusal guards) — the FREE/PAID coverage denominator.
 (schema/register! :seon.gym.battery/scenario-count [:int {:min 0}])
 (schema/register! :seon.gym.battery/scored-count   [:int {:min 0}])
+
+;; --- pass^k (noise-robust scoring) ------------------------------------------
+;; A single paid sample is a NOISY judge: model variance makes a scenario
+;; that mostly-passes randomly score 0 on one draw (the canvas-goal-board
+;; flake — single-sample-FAILED in a build where two siblings passed). So a
+;; paid run drives each scenario k times and reports the pass-RATE, so
+;; variance can't masquerade as a regression (the pass^k pattern —
+;; single-run noise is the documented problem). FREE/stub tiers are
+;; deterministic, so k there is a no-op (rate 1.0 or 0.0).
+;;
+;; Canonical pass-RATE shape — a fraction in [0,1], reused by the
+;; per-scenario pass^k summary AND the battery aggregate (shared-shape rule).
+(schema/register! :seon.gym/pass-rate [:double {:min 0.0 :max 1.0}])
+;; Requested k for a battery run (≥1; default 1 = today's single-sample).
+(schema/register! :seon.gym/k [:int {:min 1}])
+;; Per-scenario pass^k summary axes — the scored-run count, how many of
+;; them passed, the rate, plus the per-axis DISTRIBUTION across the k runs
+;; (so variance is VISIBLE, not collapsed to a boolean).
+(schema/register! :seon.gym.pass-k/k       [:int {:min 1}])
+(schema/register! :seon.gym.pass-k/passes  [:int {:min 0}])
+(schema/register! :seon.gym.pass-k/rate    :seon.gym/pass-rate)
+(schema/register! :seon.gym.pass-k/canvas-updated-count [:int {:min 0}])
+(schema/register! :seon.gym.pass-k/toolkit-calls-min    [:int {:min 0}])
+(schema/register! :seon.gym.pass-k/toolkit-calls-max    [:int {:min 0}])
+(schema/register! :seon.gym.pass-k/eval-error-rate-mean :seon.gym/eval-error-rate)
+(schema/register! :seon.gym.pass-k/judge-mean [:double {:min 0.0 :max 100.0}])
+;; ONE per-scenario pass^k summary (the scenario id keys it; reuses the
+;; per-scenario scenario shape so the keys join).
+(schema/register! :seon.gym.scorecard/pass-k
+  [:map
+   [:seon.gym.scorecard/scenario          :seon.gym.scorecard/scenario]
+   [:seon.gym.pass-k/k                     :seon.gym.pass-k/k]
+   [:seon.gym.pass-k/passes                :seon.gym.pass-k/passes]
+   [:seon.gym.pass-k/rate                  :seon.gym.pass-k/rate]
+   [:seon.gym.pass-k/canvas-updated-count  :seon.gym.pass-k/canvas-updated-count]
+   [:seon.gym.pass-k/toolkit-calls-min     :seon.gym.pass-k/toolkit-calls-min]
+   [:seon.gym.pass-k/toolkit-calls-max     :seon.gym.pass-k/toolkit-calls-max]
+   [:seon.gym.pass-k/eval-error-rate-mean  :seon.gym.pass-k/eval-error-rate-mean]
+   [:seon.gym.pass-k/judge-mean {:optional true} :seon.gym.pass-k/judge-mean]])
+;; The battery's k, one pass^k summary per SCORED scenario, and the mean
+;; pass-rate across them (the headline noise-robust number).
+(schema/register! :seon.gym.battery/k         :seon.gym/k)
+(schema/register! :seon.gym.battery/pass-k    [:vector :seon.gym.scorecard/pass-k])
+(schema/register! :seon.gym.battery/pass-rate :seon.gym/pass-rate)
+
 (schema/register! :seon.gym/battery-scorecard
   [:map
    [:seon.gym.battery/sha                  :seon.gym.battery/sha]
    [:seon.gym.battery/at                   :seon.gym.battery/at]
+   [:seon.gym.battery/k                    :seon.gym.battery/k]
    [:seon.gym.battery/per-competency       :seon.gym.battery/per-competency]
+   [:seon.gym.battery/pass-k               :seon.gym.battery/pass-k]
+   [:seon.gym.battery/pass-rate            :seon.gym.battery/pass-rate]
    [:seon.gym.battery/total-tokens         :seon.gym.battery/total-tokens]
    [:seon.gym.battery/block-tokens         :seon.gym.battery/block-tokens]
    [:seon.gym.battery/toolkit-calls        :seon.gym.battery/toolkit-calls]
@@ -106,20 +154,25 @@
 ;; --- request/response shapes ------------------------------------------------
 (schema/register! :seon.gym.battery/measures [:vector :seon.gym/measure-response])
 ;; A card is a per-scenario scorecard OR a refusal (errors-are-values).
-(schema/register! :seon.gym.battery/cards [:vector :seon.gym/run-response])
+;; pass^k: each scenario carries a VECTOR of its k run-cards (length 1 for
+;; the default single-sample / FREE / stub case — byte-identical to k=1).
+(schema/register! :seon.gym.battery/card-runs
+  [:vector [:vector :seon.gym/run-response]])
 (schema/register! :seon.gym.battery/aggregate-request
   [:map
-   [:seon.gym/scenarios        :seon.gym/scenarios]
-   [:seon.gym.battery/measures  :seon.gym.battery/measures]
-   [:seon.gym.battery/cards     :seon.gym.battery/cards]
-   [:seon.gym.battery/sha       :seon.gym.battery/sha]
-   [:seon.gym.battery/at        :seon.gym.battery/at]])
+   [:seon.gym/scenarios         :seon.gym/scenarios]
+   [:seon.gym.battery/measures   :seon.gym.battery/measures]
+   [:seon.gym.battery/card-runs  :seon.gym.battery/card-runs]
+   [:seon.gym.battery/sha        :seon.gym.battery/sha]
+   [:seon.gym.battery/at         :seon.gym.battery/at]
+   [:seon.gym.battery/k {:optional true} :seon.gym.battery/k]])
 (schema/register! :seon.gym.battery/request
   [:map
    [:seon.gym/scenarios   :seon.gym/scenarios]
    [:seon.gym.battery/sha :seon.gym.battery/sha]
    [:seon.gym.battery/at  :seon.gym.battery/at]
    [:seon.gym/allow-paid? {:optional true} :seon.gym/allow-paid?]
+   [:seon.gym/k           {:optional true} :seon.gym/k]
    [:seon.gym/config      {:optional true} :seon.gym/config]
    [:seon.gym/judge-fn    {:optional true} :seon.gym/judge-fn]])
 (schema/register! :seon.gym.battery/dir :string)
@@ -166,26 +219,79 @@
 (defn- mean [xs]
   (if (seq xs) (/ (reduce + 0.0 xs) (count xs)) 0.0))
 
+(defn- real-judge-scores
+  "The REAL (non-SKIPPED) LLM-judge scores on one card — the SKIPPED
+   sentinel (score 0, justification 'judge SKIPPED …') must never drag a
+   mean."
+  [card]
+  (->> (:seon.gym.scorecard/judge-results card)
+       (remove #(str/starts-with?
+                  (str (:seon.gym.judge/justification %)) "judge SKIPPED"))
+       (map :seon.gym.judge/score)))
+
+(defn- pass-k
+  "PURE pass^k rollup for ONE scenario's k run-cards — the noise-robust
+   fitness signal (a single paid sample is a noisy judge; report the
+   RATE). `cards` are the run-responses for this scenario; REFUSALS are
+   dropped (a refused scenario isn't scored). Returns nil when nothing
+   scored. Reads ONLY axes (anti-cheat): pass?/canvas/toolkit/eval-error/
+   judge-score — never an answer. The per-axis distribution (canvas count,
+   toolkit-call range, eval-error + judge means) makes the variance VISIBLE
+   instead of collapsing it to a boolean."
+  [scenario-id cards]
+  (let [scored (filterv scorecard? cards)]
+    (when (seq scored)
+      (let [k        (count scored)
+            passes   (count (filter :seon.gym.scorecard/pass? scored))
+            tk-tot   (map (fn [c] (reduce + 0 (vals (:seon.gym.scorecard/toolkit-calls c))))
+                          scored)
+            judges   (mapcat real-judge-scores scored)]
+        (cond-> {:seon.gym.scorecard/scenario          scenario-id
+                 :seon.gym.pass-k/k                     k
+                 :seon.gym.pass-k/passes                passes
+                 :seon.gym.pass-k/rate                  (double (/ passes k))
+                 :seon.gym.pass-k/canvas-updated-count
+                 (count (filter :seon.gym.scorecard/canvas-updated? scored))
+                 :seon.gym.pass-k/toolkit-calls-min     (reduce min tk-tot)
+                 :seon.gym.pass-k/toolkit-calls-max     (reduce max tk-tot)
+                 :seon.gym.pass-k/eval-error-rate-mean
+                 (mean (map :seon.gym.scorecard/eval-error-rate scored))}
+          (seq judges)
+          (assoc :seon.gym.pass-k/judge-mean (double (mean judges))))))))
+
 (defn aggregate
   "Roll the per-scenario measures + cards into ONE git-SHA-keyed
    `:seon.gym/battery-scorecard`. PURE (unit-testable with injected
    cards). Reads ONLY axes — pass?, total-tokens, per-block token
    estimates, toolkit-call COUNTS (eval-source scan), eval-error-rate,
    canvas-updated?, judge SCORE — never `:results` actuals or any
-   reference answer (the anti-cheat invariant: the new per-block and
-   toolkit axes read block token estimates + eval SOURCE, never an answer).
+   reference answer (the anti-cheat invariant: the per-block, toolkit, and
+   pass^k axes read block token estimates + eval SOURCE + boolean/score
+   axes, never an answer).
 
-   `scenarios` and `cards` are PARALLEL (run-battery! conj's them in
-   lock-step), so a card's competency comes from its scenario by
-   position — the card itself carries no competency."
+   `scenarios` and `card-runs` are PARALLEL (run-battery! conj's them in
+   lock-step), so a scenario's competency comes from its position — the
+   card itself carries no competency. Each `card-runs` entry is the VECTOR
+   of that scenario's k run-cards (pass^k); length 1 for the default
+   single-sample / FREE / stub case. The non-pass^k axes (per-competency,
+   toolkit, canvas count, eval-error, judge mean) aggregate over ALL k
+   run-cards — byte-identical to the old flat shape at k=1 (flattening
+   single-element run-vectors is the identity) and INTERNALLY CONSISTENT at
+   k>1 (the battery judge-mean equals the pass^k judge-mean, never a
+   misleading representative-first sample). The per-scenario pass^k summary
+   + the battery pass-RATE carry the across-k variance, so model noise
+   can't masquerade as a regression."
   {:malli/schema [:=> [:cat :seon.gym.battery/aggregate-request] :seon.gym/battery-scorecard]}
   [{scenarios :seon.gym/scenarios
     measures  :seon.gym.battery/measures
-    cards     :seon.gym.battery/cards
+    card-runs :seon.gym.battery/card-runs
     sha       :seon.gym.battery/sha
-    at        :seon.gym.battery/at}]
-  (let [scored       (filterv scorecard? cards)
-        per-comp     (->> (map vector scenarios cards)
+    at        :seon.gym.battery/at
+    k         :seon.gym.battery/k}]
+  (let [cards        (into [] cat card-runs)   ; every run-card, k runs flattened
+        scored       (filterv scorecard? cards)
+        per-comp     (->> (map vector scenarios card-runs)
+                          (mapcat (fn [[s runs]] (map (fn [c] [s c]) runs)))
                           (filter (fn [[_ c]] (scorecard? c)))
                           (reduce (fn [m [s c]]
                                     (let [comp  (:seon.gym.scenario/competency s)
@@ -218,15 +324,21 @@
                                    {:my.data 0 :my.ui 0 :my.tile 0}))
         eval-err     (mean (map :seon.gym.scorecard/eval-error-rate scored))
         canvas-cnt   (count (filter :seon.gym.scorecard/canvas-updated? scored))
-        judge-scores (->> scored
-                          (mapcat :seon.gym.scorecard/judge-results)
-                          (remove #(str/starts-with?
-                                     (str (:seon.gym.judge/justification %))
-                                     "judge SKIPPED"))
-                          (map :seon.gym.judge/score))
+        judge-scores (mapcat real-judge-scores scored)
+        ;; pass^k — ONE summary per SCORED scenario (across its k run-cards),
+        ;; plus the headline mean pass-RATE across scenarios. A scenario
+        ;; whose runs all refused (FREE-mode paid) contributes no pass^k.
+        pass-ks      (->> (map vector scenarios card-runs)
+                          (keep (fn [[s runs]]
+                                  (pass-k (:seon.gym.scenario/id s) runs)))
+                          vec)
+        pass-rate    (mean (map :seon.gym.pass-k/rate pass-ks))
         base {:seon.gym.battery/sha                  sha
               :seon.gym.battery/at                   at
+              :seon.gym.battery/k                    (or k 1)
               :seon.gym.battery/per-competency       per-comp
+              :seon.gym.battery/pass-k               pass-ks
+              :seon.gym.battery/pass-rate            pass-rate
               :seon.gym.battery/total-tokens         total-tokens
               :seon.gym.battery/block-tokens         block-tokens
               :seon.gym.battery/toolkit-calls        toolkit-calls
@@ -243,6 +355,21 @@
 ;; and run-scenario! swap the root seon.db/*conn*, so two can NEVER overlap).
 ;; ===========================================================================
 
+(defn ^:async ^:private drive-n!
+  "Drive ONE scenario `n` times, strictly sequentially (run-scenario! swaps
+   the root `seon.db/*conn*`, so two runs can NEVER overlap), and return a
+   Promise of the vector of the n run-responses (scorecards/refusals)."
+  [scenario n config allow-paid? judge-fn]
+  (loop [i n acc []]
+    (if (pos? i)
+      (let [card (await (driver/run-scenario!
+                          (cond-> {:seon.gym/scenario scenario}
+                            config              (assoc :seon.gym/config config)
+                            (some? allow-paid?) (assoc :seon.gym/allow-paid? allow-paid?)
+                            judge-fn            (assoc :seon.gym/judge-fn judge-fn))))]
+        (recur (dec i) (conj acc card)))
+      acc)))
+
 (defn ^:async run-battery!
   "Run the WHOLE battery for `:seon.gym/scenarios`, strictly in order, and
    return a Promise of the aggregate `:seon.gym/battery-scorecard` keyed by
@@ -250,32 +377,42 @@
    context size (FREE, every scenario) then drive it (run-scenario! —
    paid/todo members refuse without spend unless `:seon.gym/allow-paid?` +
    the active key make them runnable). `:seon.gym/config` (a named loadout)
-   and `:seon.gym/judge-fn` (a mock judge for tests) thread through both."
+   and `:seon.gym/judge-fn` (a mock judge for tests) thread through both.
+
+   pass^k (`:seon.gym/k`, default 1): each REAL paid drive runs k times so
+   the aggregate can report a pass-RATE instead of a single noisy sample.
+   k only multiplies a drive that ACTUALLY spends — a FREE-mode or stub
+   scenario is deterministic, so it runs once (k a no-op there); pass^k
+   only matters for `--paid` LLM drives."
   {:malli/schema [:=> [:cat :seon.gym.battery/request] :seon.gym/battery-scorecard]}
   [{scenarios   :seon.gym/scenarios
     sha         :seon.gym.battery/sha
     at          :seon.gym.battery/at
     allow-paid? :seon.gym/allow-paid?
     config      :seon.gym/config
-    judge-fn    :seon.gym/judge-fn}]
-  (loop [ss       scenarios
-         measures []
-         cards    []]
-    (if-let [[s & more] (seq ss)]
-      (let [measure (await (driver/measure-context!
-                             (cond-> {:seon.gym/scenario s}
-                               config (assoc :seon.gym/config config))))
-            card    (await (driver/run-scenario!
-                             (cond-> {:seon.gym/scenario s}
-                               config              (assoc :seon.gym/config config)
-                               (some? allow-paid?) (assoc :seon.gym/allow-paid? allow-paid?)
-                               judge-fn            (assoc :seon.gym/judge-fn judge-fn))))]
-        (recur more (conj measures measure) (conj cards card)))
-      (aggregate {:seon.gym/scenarios       scenarios
-                  :seon.gym.battery/measures measures
-                  :seon.gym.battery/cards    cards
-                  :seon.gym.battery/sha      sha
-                  :seon.gym.battery/at       at}))))
+    judge-fn    :seon.gym/judge-fn
+    k           :seon.gym/k}]
+  (let [k (or k 1)]
+    (loop [ss        scenarios
+           measures  []
+           card-runs []]
+      (if-let [[s & more] (seq ss)]
+        (let [measure (await (driver/measure-context!
+                               (cond-> {:seon.gym/scenario s}
+                                 config (assoc :seon.gym/config config))))
+              ;; k only multiplies a REAL paid drive; FREE-mode + stub tiers
+              ;; are deterministic, so they run once (k a no-op there).
+              n       (if (and allow-paid?
+                               (= :paid (:seon.gym.scenario/tier s)))
+                        k 1)
+              cards   (await (drive-n! s n config allow-paid? judge-fn))]
+          (recur more (conj measures measure) (conj card-runs cards)))
+        (aggregate {:seon.gym/scenarios        scenarios
+                    :seon.gym.battery/measures measures
+                    :seon.gym.battery/card-runs card-runs
+                    :seon.gym.battery/sha      sha
+                    :seon.gym.battery/at       at
+                    :seon.gym.battery/k        k})))))
 
 ;; ===========================================================================
 ;; Reporting — one greppable line + the append-to-log trend record.

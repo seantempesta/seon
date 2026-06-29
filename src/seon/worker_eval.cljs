@@ -251,8 +251,18 @@
   (js/Promise.
     (fn [resolve _reject]
       (let [state @!state]
-        (if (nil? state)
+        (cond
+          (nil? state)
           (resolve {:ok false :error {:kind :throw :message "eval state not initialized"}})
+
+          ;; Empty/blank code is a malformed request, NOT a passing eval. A
+          ;; non-JSON or empty line otherwise reads as the empty form and
+          ;; evals to nil → a SILENT ok:true FALSE PASS, which would let the
+          ;; kill-gate wave garbage through. Reject it as a compile error.
+          (str/blank? code)
+          (resolve {:ok false :error {:kind :compile :message "empty or unparseable code"}})
+
+          :else
           (do
             (vreset! !warnings [])
             (try
