@@ -47,7 +47,11 @@ needs your decision, and the Core-routed queue.
 
 **`#42` signature-trim REGRESSED `my.data` adoption — flagged-as-risk → Core-landed → drive-measured → confirmed → precise fix routed** (`e4920f5f`, `research/namespaces-trim-validation-2026-06-28.md`). Paid `x-category-argmax` drive: agent **called my.data 0×** (signature render clips docstring to first line → the worked example elided), hand-rolled the footgun path, eval-error-rate **0.357 RED**. Token win real (namespaces −43.5%) — keep it; **FIX = add `:my.data`/`:my.ui`/`:my.tile` to `canonical-full-my-ns`** (a toolkit verb without its worked example is undiscoverable). Routed URGENT to Core.
 
-**Instrument lesson:** the FREE scorecard `total-tokens` MISSED this (confounded by scenario count + non-namespaces). Only the **paid composition drive** caught it → the scorecard needs a per-block token axis and/or a standing composition-adoption axis. (Loop self-improvement TODO.)
+**Instrument lesson:** the FREE scorecard `total-tokens` MISSED this (confounded by scenario count + non-namespaces). Only the **paid composition drive** caught it → the scorecard needs a per-block token axis and/or a standing composition-adoption axis. (Loop self-improvement: scorecard-axes agent building it.)
+
+**✅ FULL CYCLE CLOSED (`c8f064e6`):** Core implemented the fix — `canonical-full-my-ns` = `#{:my.kb :my.data}`, keeping `my.data` full, citing the drive-proven regression. So in one night: **flagged-risk → Core-landed #42 → drive-measured → routed fix → Core-implemented.** That is the recursion. `my.ui`/`my.tile` still signature-trimmed — Core wants drive-evidence first (same class) → the canvas gym drive provides it.
+
+**Canvas drive UNBLOCKED via the gym (no reset needed):** it runs hermetically (scratch conns) like the #42 validation — sidesteps the clean-tree blocker. Sequenced right after the scorecard-axes agent lands (its toolkit-adoption axis measures my.ui composition directly). Double duty: validate canvas-first + the my.ui/my.tile prominence evidence.
 
 **Gate note — the suite noise is TWO things, neither a real regression:**
 1. **Env-coupling FLAKES from my own concurrent runs** (`b5c3a3a4` diagnosis): tests that grep a shared fs dir / touch shared DB state race when the loop runs scorecard + suite at once. `search_test` is now FIXED (pid-scoped hermetic fixtures, 20/20). `index_core_test` is the same class (passes isolated) → #69 to make hermetic. Lesson: aggressive parallelism needs hermetic tests.
