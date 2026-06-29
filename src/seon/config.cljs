@@ -268,6 +268,19 @@
   []
   (env-int "SEON_RENDER_TRANSCRIPT_TOKEN_CAP" 6000))
 
+(defn requires-api-cap
+  "Total CHAR budget for the required-namespace API surface appended to the
+   `:namespaces` section — the public signatures of the framework nses the
+   agent's current ns `:require`s but does not otherwise render in full
+   (`seon.agent.ctx.namespaces/namespaces-block`). Whole required-ns blocks
+   render name-sorted until this budget is spent; the rest are elided with a
+   one-line note (grep / `render-namespace` to see them). Default 12000 chars
+   ≈ 3000 tokens — fits the standard db+schema+agent require set with room for
+   a couple agent-added deps (`SEON_RENDER_REQUIRES_CAP`)."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (env-int "SEON_RENDER_REQUIRES_CAP" 12000))
+
 ;;; --- Value-renderer bounds — the `SEON_RENDER_VALUE_*` sub-family
 ;;; (per-node depth/breadth limits of the structural eval-value skeleton).
 

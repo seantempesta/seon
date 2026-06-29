@@ -343,6 +343,108 @@
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
+(deftest required-namespace-api-surfaces-and-self-heals
+  ;; The agent's CURRENT ns renders FULL; the framework deps it `:require`s
+  ;; render their PUBLIC API (signatures) so adding a require teaches the dep.
+  ;; Excluded: core libs (clojure.* — never indexed / non-seon third-party
+  ;; filter), and anything already shown full/verb-sig. Drop the require and
+  ;; the API block VANISHES (pure fn of `:seon.ns/requires`).
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (-> (db/transact!
+                  {:seon.db/tx-data
+                   [;; the agent's home ns requires a framework dep + a core lib
+                    {:seon.ns/name :my.agent.req :seon.ns/requires [:seon.frobx :clojure.set]}
+                    ;; the framework dep, indexed with one public + one private fn
+                    {:seon.ns/name :seon.frobx}
+                    {:seon.fn/sym      "seon.frobx/doit"
+                     :seon.fn/ns       [:seon.ns/name :seon.frobx]
+                     :seon.fn/arglists "([x])"
+                     :seon.fn/doc      "Frob the x."
+                     :seon.fn/source   "(defn doit [x] (inc x))"}
+                    {:seon.fn/sym      "seon.frobx/secret"
+                     :seon.fn/ns       [:seon.ns/name :seon.frobx]
+                     :seon.fn/arglists "([y])"
+                     :seon.fn/private? true
+                     :seon.fn/source   "(defn- secret [y] y)"}]})
+                (.then
+                  (fn [_]
+                    (let [txt (ctx-namespaces/namespaces-block
+                                {:seon.db/db @db/*conn* :seon.agent/id "req"})]
+                      (is (str/includes? txt "API of the namespaces your current ns :requires")
+                          "the required-API sub-header renders")
+                      (is (str/includes? txt ";;; ┌─ namespace seon.frobx (signatures) ─")
+                          "the required framework dep renders its (signatures) block")
+                      (is (str/includes? txt "(seon.frobx/doit [x])")
+                          "the public fn signature (name + arglist) is shown")
+                      (is (str/includes? txt "; Frob the x.")
+                          "the one-line docstring rides the signature")
+                      (is (not (str/includes? txt "(inc x)"))
+                          "the BODY is elided — signatures only, not full source")
+                      (is (not (str/includes? txt "secret"))
+                          "a private fn is not surfaced in the public API")
+                      (is (not (str/includes? txt "clojure.set"))
+                          "a core lib require is never dumped (not indexed / third-party)"))))
+                ;; drop the seon.frobx require → its API block self-heals away
+                (.then
+                  (fn [_]
+                    (db/transact!
+                      {:seon.db/tx-data
+                       [[:db/retract [:seon.ns/name :my.agent.req]
+                         :seon.ns/requires :seon.frobx]]})))
+                (.then
+                  (fn [_]
+                    (let [txt (ctx-namespaces/namespaces-block
+                                {:seon.db/db @db/*conn* :seon.agent/id "req"})]
+                      (is (not (str/includes? txt "seon.frobx"))
+                          "dropping the require removes the dep's API block (self-healing)")))))))
+        (.then (fn [] (done)))
+        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+
+(deftest required-namespace-api-respects-cap
+  ;; The required-API section is char-capped (`SEON_RENDER_REQUIRES_CAP`):
+  ;; blocks accrue until the budget is spent, the tail is ELIDED with a
+  ;; one-line note that NAMES the dropped nses — never silent truncation.
+  ;; Driven directly through the private helper with a fully-built scenario so
+  ;; the elision branch is exercised regardless of the live env cap value.
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+            (-> (db/transact!
+                  {:seon.db/tx-data
+                   [{:seon.ns/name :my.agent.cap
+                     :seon.ns/requires [:seon.aaa :seon.bbb :seon.ccc]}
+                    {:seon.ns/name :seon.aaa}
+                    {:seon.fn/sym "seon.aaa/fa" :seon.fn/ns [:seon.ns/name :seon.aaa]
+                     :seon.fn/arglists "([x])" :seon.fn/doc "Aaa." :seon.fn/source "(defn fa [x] x)"}
+                    {:seon.ns/name :seon.bbb}
+                    {:seon.fn/sym "seon.bbb/fb" :seon.fn/ns [:seon.ns/name :seon.bbb]
+                     :seon.fn/arglists "([x])" :seon.fn/doc "Bbb." :seon.fn/source "(defn fb [x] x)"}
+                    {:seon.ns/name :seon.ccc}
+                    {:seon.fn/sym "seon.ccc/fc" :seon.fn/ns [:seon.ns/name :seon.ccc]
+                     :seon.fn/arglists "([x])" :seon.fn/doc "Ccc." :seon.fn/source "(defn fc [x] x)"}]})
+                (.then
+                  (fn [_]
+                    ;; Cap small enough that only the FIRST name-sorted block
+                    ;; fits — the other two must be elided + named.
+                    (with-redefs [seon.config/requires-api-cap (constantly 80)]
+                      (let [blocks (#'ctx-namespaces/required-api-blocks
+                                     @db/*conn* :my.agent.cap #{:my.agent.cap})
+                            txt    (str/join "\n\n" blocks)]
+                        (is (str/includes? txt "seon.aaa")
+                            "the first (name-sorted) required dep still renders")
+                        (is (str/includes? txt "more required-ns API")
+                            "an elision note appears when the budget is exceeded")
+                        (is (and (str/includes? txt "seon.bbb")
+                                 (str/includes? txt "seon.ccc"))
+                            "the elided nses are NAMED in the note (not silently dropped)")
+                        (is (not (str/includes? txt "(seon.bbb/fb"))
+                            "the elided dep's signatures are NOT rendered")))))))
+          )
+        (.then (fn [] (done)))
+        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+
 (deftest defs-since-skips-result-vars
   ;; INDEX-SIDE pin (the load-bearing leak guard): the allow-list was the
   ;; only thing hiding the synthetic `result/<id>` vars that

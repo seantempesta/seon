@@ -20,8 +20,15 @@
        `:seon.ns/name` + `:seon.fn` / `:seon.schema` / `:seon.test` rows)
        and SEARCHABLE — discoverable via `seon.agent.search` (ripgrep) or
        readable on demand via [[seon.agent.ctx/render-namespace]]. There is no
-       signature manifest: passive name-listing is replaced by active
+       blanket signature manifest: passive name-listing is replaced by active
        grep/query, taught in the `<system>` prose.
+     - EXCEPTION — the framework nses the agent's CURRENT ns actually
+       `:require`s render their PUBLIC API (fn signatures + one-line doc,
+       bodies elided) so adding a require teaches the dep
+       ([[required-api-blocks]]). The targeted opposite of the blanket dump:
+       only the deps the agent reached for, capped
+       ([[seon.config/requires-api-cap]]) + elided-with-note, self-healing on
+       the `:seon.ns/requires` edges (drop the require → the API vanishes).
 
    Symbol-wired into the composer layout (`seon.agent.ctx/default-seed-blocks`) as
    `'seon.agent.ctx.namespaces/namespaces-block`; loaded at boot so the
@@ -38,6 +45,7 @@
   (:require
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.eval :as seval]))
 
@@ -260,6 +268,89 @@
       empty?        nil
       :else         txt)))
 
+(def ^:private required-api-header
+  ;; Sub-cue for the required-dep API surface — the agent's OWN code renders
+  ;; full above; THIS is how the deps it `:require`s actually work (public
+  ;; signatures only, bodies elided). Add a require → its API appears here.
+  (str "; ── API of the namespaces your current ns :requires"
+       " (public signatures — add a require to learn a dep) ──"))
+
+(defn- required-api-rows
+  "The ns-name keywords whose PUBLIC API (signatures) should render because
+   the agent's CURRENT ns `:require`s them, EXCLUDING everything already
+   surfaced elsewhere: the `already-shown` set (full blocks + verb-sig blocks
+   + the current ns), every full-source ns (`my.*` / whitelist — shown full),
+   and every third-party (`acme`) root (shown full). What remains is exactly
+   the `seon.*` FRAMEWORK deps the agent pulled in — `seon.db`, `seon.schema`,
+   `seon.agent`, or anything it adds — that would otherwise be DROPPED. A
+   required ns with no indexed `:seon.ns` row (e.g. `clojure.string` — never
+   first-party-indexed) is skipped: we surface seon-authored APIs, never
+   core-lib internals. Name-sorted for a stable cache prefix.
+
+   Pure fn of the DB: drop a require → its row leaves `:seon.ns/requires` →
+   this returns one fewer ns → the API section self-heals."
+  [db cur-ns already-shown]
+  (when cur-ns
+    (->> (db/query
+           {:seon.db/db db
+            :seon.db/query
+            '[:find ?r
+              :in $ ?ns
+              :where
+              [?e :seon.ns/name ?ns]
+              [?e :seon.ns/requires ?r]]
+            :seon.db/args [cur-ns]})
+         (map first)
+         (filter keyword?)
+         (remove already-shown)
+         (filter included-ns?)
+         (remove full-source-ns?)
+         (remove third-party-ns?)
+         distinct
+         sort
+         vec)))
+
+(defn- required-api-blocks
+  "Render the [[required-api-rows]] at `:signature` detail, each a bracketed
+   `(signatures)` block, applying the [[seon.config/requires-api-cap]] total
+   CHAR budget: name-sorted blocks accrue until the budget is spent, then the
+   tail is ELIDED with a one-line note naming the dropped nses + how to read
+   them (grep / `render-namespace`). No silent truncation. Returns a (possibly
+   empty) vector of block strings; an empty result yields no section."
+  [db cur-ns already-shown]
+  (let [rows   (required-api-rows db cur-ns already-shown)
+        ;; Render each candidate; skip ones with no real public API to show
+        ;; (a row with no public fns, or a require not in the index).
+        blocks (->> rows
+                    (keep (fn [nm]
+                            (when-let [txt (render-one db nm :signature cur-ns)]
+                              (when-not (or (str/includes? txt "(not in db)")
+                                            (str/includes? txt "no public fns indexed"))
+                                [nm txt])))))
+        cap    (config/requires-api-cap)]
+    (if (empty? blocks)
+      []
+      (let [{:keys [kept used elided]}
+            (reduce (fn [{:keys [kept used elided] :as acc} [nm txt]]
+                      (let [n (count txt)]
+                        (if (and (seq kept) (> (+ used n) cap))
+                          (update acc :elided conj nm)
+                          (-> acc
+                              (update :kept conj txt)
+                              (assoc :used (+ used n))))))
+                    {:kept [] :used 0 :elided []}
+                    blocks)
+            elided-note (when (seq elided)
+                          (str "; (+" (count elided) " more required-ns API"
+                               (when (> (count elided) 1) "s")
+                               " elided for space: "
+                               (str/join ", " (map name elided))
+                               " — grep them or (seon.agent.ctx/render-namespace"
+                               " {:seon.ns/name " (pr-str (first elided))
+                               " :seon.render/detail :signature}))"))]
+        (cond-> (into [required-api-header] kept)
+          elided-note (conj elided-note))))))
+
 (defn namespaces-block
   "CURATED namespaces body. Routes EVERY included ns through the SINGLE
    renderer [[seon.agent.ctx/render-namespace]] — no parallel hand-rolled paths.
@@ -326,7 +417,16 @@
                        (sort-by (fn [[nm _tx]] (name nm))))
         sig-blocks  (keep (fn [[nm _tx]] (render-one db nm :signature cur-ns)) sig-rows)
         full-blocks (keep (fn [[nm _tx]] (render-one db nm :full cur-ns)) full-rows)
-        blocks      (concat sig-blocks full-blocks)]
+        ;; The PUBLIC API (signatures) of the framework deps the agent's
+        ;; current ns :requires but does NOT render full/verb-sig elsewhere —
+        ;; so adding a require surfaces how that dep works. Everything already
+        ;; surfaced (full + verb-sig + cur-ns) is excluded; capped + elided.
+        ;; Rendered as a STABLE reference prefix ahead of the churning full
+        ;; blocks (same cache rationale as sig-blocks).
+        already-shown (into (conj (set (map first full-rows)) cur-ns)
+                            (map first sig-rows))
+        req-blocks  (required-api-blocks db cur-ns already-shown)
+        blocks      (concat sig-blocks req-blocks full-blocks)]
     (if (seq blocks)
       (str namespaces-header "\n\n" (str/join "\n\n" blocks))
       "")))
