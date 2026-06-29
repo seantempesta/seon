@@ -291,6 +291,72 @@
                         (assoc extra :seon.eval/warning-type type)))))])
     (reset! !warning-dispatcher-version init-version)))
 
+;; ============================================================
+;; Per-fiber print capture via AsyncLocalStorage
+;;
+;; Same hazard as the warning dispatcher above, one tier deeper: a
+;; REPL shows println/prn output next to the result, but `*print-fn*`
+;; (and `*print-err-fn*`) are PROCESS-GLOBAL. The prior eval-form-entry!
+;; capture did `(set! *print-fn* cap)` BEFORE the eval+auto-await and
+;; restored it AFTER — a `set!` straddling an `await`. When the captured
+;; form yields (any `^:async`/awaiting verb), ANOTHER fiber (a concurrent
+;; agent's eval, a heartbeat) ran with THIS eval's `cap` still installed,
+;; so its prints bled into this eval's bucket (and the restore clobbered
+;; the concurrent capture). Live-confirmed cross-fiber bleed (#64).
+;;
+;; Mechanism (identical to warnings-als):
+;;   - `print-als` is a Node AsyncLocalStorage, defonce'd to survive
+;;     hot-reload.
+;;   - `install-print-dispatcher!` installs ONE global `*print-fn*` /
+;;     `*print-err-fn*` that routes to the active per-eval bucket via
+;;     `.getStore`. Outside an `(.run print-als …)` scope getStore returns
+;;     nil and the print falls through to the ORIGINAL fn (pod stdout /
+;;     logs/pod.log) — boot/inspector prints land in the log exactly as
+;;     before. The originals are captured ONCE (defonce atom) so a
+;;     hot-reload reinstall never wraps the dispatcher around itself.
+;;   - `eval-form-entry!` wraps its eval+auto-await span in
+;;     `(.run print-als <bucket> …)` with its OWN bucket atom. ALS carries
+;;     the bucket across the form's awaits, so concurrent evals get fully
+;;     isolated output — no global `set!`, no straddled restore.
+;; ============================================================
+
+;; NOT private: the eval-form-entry! `.run` capture site reads it here, and
+;; the #64 regression test installs its own dispatcher over THIS instance to
+;; prove per-fiber isolation in a test harness that owns `*print-fn*` itself.
+(defonce print-als
+  (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
+    (AsyncLocalStorage.)))
+
+;; The ORIGINAL print fns (route to pod stdout). Captured ONCE on first
+;; install; reused on every hot-reload reinstall so the dispatcher always
+;; wraps the real sink, never a prior dispatcher (which would recurse).
+(defonce ^:private !orig-print-fns (atom nil))
+(defonce ^:private !print-dispatcher-version (atom nil))
+
+(defn- print-dispatch
+  "A `*print-fn*`-shaped fn that appends to the active `print-als` bucket
+   when one is in scope, else delegates to `orig` (pod stdout)."
+  [orig]
+  (fn [& xs]
+    (if-let [bucket (.getStore print-als)]
+      (swap! bucket str (apply str xs))
+      (apply orig xs))))
+
+(defn install-print-dispatcher!
+  "Idempotent: installs the per-fiber print dispatcher on `*print-fn*` /
+   `*print-err-fn*` once per init-version. Called from `init-bootstrap!`.
+   Captures the originals on first call only (so reinstall after a
+   hot-reload reuses the real sink, not a wrapped dispatcher)."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (when (not= @!print-dispatcher-version init-version)
+    (when (nil? @!orig-print-fns)
+      (reset! !orig-print-fns {:out *print-fn* :err *print-err-fn*}))
+    (let [{:keys [out err]} @!orig-print-fns]
+      (set! *print-fn* (print-dispatch out))
+      (set! *print-err-fn* (print-dispatch err)))
+    (reset! !print-dispatcher-version init-version)))
+
 ;; Defined after `ns-fn-members` (it reads the live ns members); declared here
 ;; so `init-bootstrap!` can call it.
 (declare seed-toolkit-refers!)
@@ -333,6 +399,10 @@
     ;; Idempotent + version-stamped against init-version so hot-reload
     ;; reinstalls the closure.
     (install-warning-dispatcher!)
+    ;; Install the per-fiber print dispatcher (#64). Same idempotent,
+    ;; version-stamped contract — gives each eval's println/prn output its
+    ;; own ALS bucket instead of a process-global `set!` straddling awaits.
+    (install-print-dispatcher!)
     ;; Seed the home-ns refer toolkit defs (see `seed-toolkit-refers!`) so
     ;; `setup-agent-ns!`'s `(ns … (:refer [wait complete …]))` analyzes CLEANLY.
     ;; init-bootstrap! is the ONE birthplace of a compile-state, so every
@@ -2726,25 +2796,33 @@
             ;; can diff after. Cheap reads — keyset extraction.
             defs-before    (analyzer-info/snapshot-defs compile-state)
             schemas-before (schema/current-keys)
-            ;; (fix f) println/prn capture — a REPL shows print
-            ;; output next to the result; *print-fn* routes to the
-            ;; pod's stdout (logs/pod.log), invisible to the agent.
-            ;; Capture for the span of eval + auto-await, persist
-            ;; as :seon.eval/output. KNOWN LIMIT: prints from other
-            ;; interleaved async work during this form's awaits land
-            ;; here too (single-agent: non-issue; multi-agent needs
-            ;; per-agent ALS print routing).
-            !out               (volatile! "")
-            prev-print-fn      *print-fn*
-            prev-print-err-fn  *print-err-fn*
-            _ (let [cap (fn [& xs] (vswap! !out str (apply str xs)))]
-                (set! *print-fn* cap)
-                (set! *print-err-fn* cap))
-            raw-result  (await (eval compile-state source
-                                     {:ns @current-ns
-                                      :analyze-deps? false}))
-            awaited     (when (:ok raw-result)
-                          (await (maybe-await-value (:value raw-result))))
+            ;; (fix f) println/prn capture — a REPL shows print output next
+            ;; to the result; `*print-fn*` otherwise routes to the pod's
+            ;; stdout (logs/pod.log), invisible to the agent. Capture the
+            ;; span of eval + auto-await, persist as :seon.eval/output.
+            ;;
+            ;; #64: this MUST be per-fiber. `*print-fn*` is process-global,
+            ;; so the old `set! cap` … await … `set! prev` straddled an
+            ;; await and bled a concurrent eval's prints into this bucket.
+            ;; Now the global dispatcher (install-print-dispatcher!) routes
+            ;; to whatever bucket is active in `print-als`, and we open our
+            ;; OWN bucket here via `.run`. ALS carries the bucket across
+            ;; this form's awaits; concurrent evals stay isolated. The
+            ;; `.run` callback is an `^:async` iife so the store propagates
+            ;; through eval + maybe-await-value; we await its result.
+            out-bucket  (atom "")
+            captured    (await
+                          (.run print-als out-bucket
+                            (fn ^:async run-with-capture! []
+                              (let [raw (await (eval compile-state source
+                                                     {:ns @current-ns
+                                                      :analyze-deps? false}))]
+                                {:raw raw
+                                 :awaited (when (:ok raw)
+                                            (await (maybe-await-value
+                                                     (:value raw))))}))))
+            raw-result  (:raw captured)
+            awaited     (:awaited captured)
             ;; A still-running Promise — auto-await timeout OR an explicit
             ;; `(defer …)`. The form records a clean PLACEHOLDER value and
             ;; the live Promise is stashed at result/<id> (see stash site
@@ -2770,13 +2848,11 @@
                                       :value (:value awaited)
                                       :ns    (:ns raw-result)}
               :else                  awaited)
-            ;; Restore BEFORE any further awaits — record/tee/
-            ;; auto-test prints belong to the pod log, not this
-            ;; eval's record. (`eval`/`maybe-await-value` never
-            ;; throw — A4 envelope — so this line always runs.)
-            _ (do (set! *print-fn* prev-print-fn)
-                  (set! *print-err-fn* prev-print-err-fn))
-            output      @!out
+            ;; No restore needed — capture was scoped to the `.run print-als`
+            ;; span above. Record/tee/auto-test prints below run OUTSIDE that
+            ;; scope, so the global dispatcher routes them to the pod log, not
+            ;; this eval's record.
+            output      @out-bucket
             duration-ms (- (.now js/Date) start-ms)]
         ;; A FAILED eval leaves a PHANTOM analyzer def: under
         ;; `:def-emits-var true`, `parse 'def` registers the var-map into
