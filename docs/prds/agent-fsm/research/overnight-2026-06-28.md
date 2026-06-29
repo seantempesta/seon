@@ -41,7 +41,7 @@ needs your decision, and the Core-routed queue.
 | #57 | `my.ui` follow-up dual-render helpers — badge/bullets/progress/table (richer canvas toolkit) | live-proven dual render; tests green | `2fd4465c` |
 | — | new gym scenario `honesty-computed-total` (`:honesty`) — cross-turn fabrication probe (spoken total must = computed 161); RED until #62/#63, then GREEN proves anti-fabrication guidance | battery 20→21; no-cheating (161 only in judge) | `8e01fffc` |
 
-**Canvas drive STILL blocked:** Core has 6 uncommitted core-agent files (loop/schedule/agent/turn/client/derive = a big agent-loop refactor) — a reset would risk wedging live agents. Waiting on their commit. **Core also landed `f26a0088`** (the proper home for `:seon.items`/`:seon.result` I flagged) → cleaning up my.data's first-consumer registration.
+**Canvas drive — blocker shifted (good):** Core COMMITTED the agent-loop refactor (`67d55aa1`/`79a533f1`) — the wedge risk is gone. Only `namespaces.cljs` stays uncommitted = Core's active #42 work, likely the **#70 fix** (add my.data/my.ui/my.tile to `canonical-full-my-ns`). HOLD the canvas drive until that lands: driving now (my.ui still signature-trimmed) would confound canvas-updated with the toolkit-discovery regression. When #70 lands → the **measurement wave**: reset + canvas drive + a broad battery drive on a clean, discoverable toolkit. **Core also landed `f26a0088`** (the `:seon.items`/`:seon.result` home I flagged) → my.data cleanup done (`bf938a6d`).
 
 ## ⭐ THE LOOP CAUGHT A REAL REGRESSION (the recursion working as designed)
 
