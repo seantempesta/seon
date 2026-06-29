@@ -34,6 +34,10 @@
 (schema/register! :seon.agent.schedule/id       [:and {:seon.db/identity true} :seon.db/id])
 (schema/register! :seon.agent.schedule/cron     :string)   ; 5-field cron expression
 (schema/register! :seon.agent.schedule/fn       :symbol)   ; qualified fn invoked when due
+;; The DUE schedule fn symbols handed to the injected executor at fire time
+;; (the qualified fns whose schedules matched `now`), so the fired run RUNS
+;; them rather than waking with zero context.
+(schema/register! :seon.agent.schedule/fns      [:vector :symbol])
 (schema/register! :seon.agent.schedule/timezone :string)   ; IANA tz; default host tz
 (schema/register! :seon.agent.schedule/concurrency-policy
                   [:enum :forbid :allow])  ; :forbid = don't open a 2nd run
@@ -221,11 +225,17 @@
 ;; `:schedule`-triggered run and drive it. "Firing" = the wake-on-schedule
 ;; semantics (open + drive a `:schedule` run).
 ;;
-;; SCOPE — fn-exec DEFERRED: each schedule carries `:seon.agent.schedule/fn`
-;; (code-as-data, "run THIS fn when due"). Running it IN THE AGENT SANDBOX
-;; depends on the one-exec-service routing (a later task). For THIS pass we do
-;; NOT record the fn on the run (that needs a new run attr) nor invoke it — we
-;; only open+drive a `:schedule` run. No bespoke fn-runner.
+;; fn-exec: each schedule carries `:seon.agent.schedule/fn` (code-as-data,
+;; "run THIS fn when due"). On a fire, the DUE schedules' fns are handed to the
+;; injected `:seon.agent.schedule/exec-fn!` (seon.agent.loop/exec-scheduled-fns!,
+;; injected to avoid a require cycle — same pattern as `drive!`): it eval-batches
+;; `(the-fn)` as a SCHEDULE-FIRE turn on the just-opened run, in the agent's
+;; scope, so the agent's first driven turn re-reads "the schedule fired and ran
+;; THIS" instead of waking blind. That turn is stamped
+;; `:seon.agent.turn/scheduled? true` — it renders in the transcript but does
+;; NOT count toward turn-limit ([[seon.derive/run-turn-count]] excludes it, #66).
+;; A broken scheduled fn records a failed eval (errors are values) and never
+;; crashes the ticker. Absent exec-fn! (tests) ⇒ open-only.
 ;;
 ;; concurrency-policy: the default :forbid ("don't open a 2nd run on a
 ;; :running agent") is satisfied because we fire ONLY when the agent is :idle
@@ -256,6 +266,13 @@
 (schema/register! ::fire-due-request
   [:map
    [:seon.agent/now             :inst]
+   ;; The scheduled-fn executor (seon.agent.loop/exec-scheduled-fns!), injected
+   ;; by the ticker to avoid a require cycle. Given {:seon.agent/id _
+   ;; :seon.agent.schedule/fns [syms]}, it eval-batches the due fns as a
+   ;; schedule-fire turn (`:seon.agent.turn/scheduled? true` — doesn't count
+   ;; toward turn-limit) on the just-opened run. AWAITED (so the fire's effect
+   ;; lands before the LLM drive). Absent (tests) ⇒ open-only, no fn-exec.
+   [:seon.agent.schedule/exec-fn! {:optional true} fn?]
    ;; The run driver (seon.agent.loop/drive-run!), injected by the ticker to
    ;; avoid a require cycle. Absent (tests) ⇒ open-only, no drive.
    [:seon.agent.schedule/drive! {:optional true} fn?]])
@@ -284,29 +301,35 @@
                          [?r :seon.agent.run/started-at ?started]]
                        :seon.db/args [agent-eid]})))))
 
-(defn- agent-crons
-  "Every schedule cron string agent `id` owns (cron is required on a
-   schedule, so this misses none)."
+(defn- agent-schedule-pairs
+  "Every `[cron fn]` pair agent `id` owns (cron + fn are both required on a
+   schedule, so this misses none). The fire path filters these by `due?` to get
+   the fns to run."
   [id]
   (db/query {:seon.db/query
-             '[:find [?cron ...]
+             '[:find ?cron ?fn
                :in $ ?id
                :where
                [?a :seon.agent/id ?id]
                [?a :seon.agent/schedules ?s]
-               [?s :seon.agent.schedule/cron ?cron]]
+               [?s :seon.agent.schedule/cron ?cron]
+               [?s :seon.agent.schedule/fn ?fn]]
              :seon.db/args [id]}))
 
 (defn ^:async fire-due-schedules!
   "Open a `:schedule` run for every :idle agent that has a schedule `due?` at
-   `now` (respecting the double-fire guard), driving each opened run via the
-   injected `:seon.agent.schedule/drive!` (the ticker passes
-   [[seon.agent.loop/drive-run!]]; absent ⇒ open-only). Map-in / map-out:
-   returns `{:seon.agent.schedule/fired [{:seon.agent/id _ :seon.agent.run/id
-   _} …]}` for the runs it opened. A pure function of the DB otherwise (no
-   stored firing state). `^:async`."
+   `now` (respecting the double-fire guard), RUN the due schedules' fns on the
+   opened run via the injected `:seon.agent.schedule/exec-fn!` (the ticker passes
+   [[seon.agent.loop/exec-scheduled-fns!]] — eval-batched as a schedule-fire turn
+   in the agent's scope, not counted toward turn-limit), then drive each run via the injected
+   `:seon.agent.schedule/drive!` ([[seon.agent.loop/drive-run!]]). Both injections
+   absent (tests) ⇒ open-only. Map-in / map-out: returns
+   `{:seon.agent.schedule/fired [{:seon.agent/id _ :seon.agent.run/id _} …]}` for
+   the runs it opened. A pure function of the DB otherwise (no stored firing
+   state). `^:async`."
   {:malli/schema [:=> [:cat ::fire-due-request] ::fire-due-response]}
-  [{now :seon.agent/now drive! :seon.agent.schedule/drive!}]
+  [{now :seon.agent/now exec-fn! :seon.agent.schedule/exec-fn!
+    drive! :seon.agent.schedule/drive!}]
   (let [ids (db/query {:seon.db/query
                        '[:find [?id ...]
                          :where
@@ -317,14 +340,19 @@
       (if (nil? id)
         {:seon.agent.schedule/fired fired}
         (let [a-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))
-              fire? (and a-eid
-                         (derive/agent-idle? @db/*conn* id)
-                         (not (fired-this-minute? a-eid now))
-                         (boolean
-                           (some #(due? {:seon.agent.schedule/cron %
-                                         :seon.agent.schedule/now  now})
-                                 (agent-crons id))))]
-          (if-not fire?
+              ;; The DUE schedules' fns at `now` (idle + double-fire gated). A
+              ;; non-empty vector both decides `fire?` AND is what exec-fn! runs;
+              ;; an agent with two schedules due this minute runs BOTH on the one
+              ;; per-minute run.
+              due-fns (when (and a-eid
+                                 (derive/agent-idle? @db/*conn* id)
+                                 (not (fired-this-minute? a-eid now)))
+                        (->> (agent-schedule-pairs id)
+                             (filter (fn [[cron _]]
+                                       (due? {:seon.agent.schedule/cron cron
+                                              :seon.agent.schedule/now  now})))
+                             (mapv second)))]
+          (if-not (seq due-fns)
             (recur more fired)
             (let [snap (await (run/open-run!
                                 {:seon.agent/id          id
@@ -343,9 +371,12 @@
                            (:seon.error/message (:seon.db/error snap)))))
                   (recur more fired))
                 (do
-                  ;; Inject-driven kick (same as a wake). FLAG: running the
-                  ;; schedule's :seon.agent.schedule/fn in the agent sandbox
-                  ;; wires in with the one-exec-service pass.
+                  ;; RUN the due fns on the just-opened run FIRST (awaited, so
+                  ;; the result is in the transcript before the LLM drive renders
+                  ;; its prompt), THEN kick the loop (same as a wake).
+                  (when exec-fn!
+                    (await (exec-fn! {:seon.agent/id           id
+                                      :seon.agent.schedule/fns due-fns})))
                   (when (fn? drive!) (drive! {:seon.agent/id id}))
                   (recur more
                          (conj fired {:seon.agent/id     id

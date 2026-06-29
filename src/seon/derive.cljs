@@ -101,10 +101,14 @@
                                                (:seon.agent.run/paused-at run))))))
 
 (defn run-turn-count
-  "How many turns are stamped with the run identified by `run-id` (the run's
-   derived current-turn). Counts `:seon.agent.turn/run` datoms over the
-   explicit db value — no installed-schema gate (the loop is the active
-   model; `:seon.agent.turn/run` is always registered by boot)."
+  "How many WORK turns are stamped with the run identified by `run-id` (the
+   run's derived current-turn — the WORK budget the loop checks against
+   turn-limit). Counts `:seon.agent.turn/run` datoms over the explicit db value
+   but EXCLUDES schedule-fire turns (`:seon.agent.turn/scheduled? true`): a cron
+   fire opens a turn so its eval RENDERS in the transcript, yet it is not an LLM
+   drive and must never burn a turn from the work budget. No installed-schema
+   gate (the loop is the active model; `:seon.agent.turn/run` is always
+   registered by boot)."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
                              [:seon.agent.run/id :seon.agent.run/id]]
                   :int]}
@@ -114,7 +118,8 @@
                  '[:find (count ?t) . :in $ ?rid
                    :where
                    [?r :seon.agent.run/id ?rid]
-                   [?t :seon.agent.turn/run ?r]]
+                   [?t :seon.agent.turn/run ?r]
+                   (not [?t :seon.agent.turn/scheduled? true])]
                  :seon.db/args [run-id]})
       0))
 

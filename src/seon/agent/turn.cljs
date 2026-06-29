@@ -63,6 +63,13 @@
 ;; links a turn back to its run → agent. References the canonical ref shape;
 ;; never inline.
 (schema/register! :seon.agent.turn/run          :seon.db/ref)
+;; PRESENCE marker: this turn is a SCHEDULE FIRE (a cron fn ran on the run),
+;; NOT an LLM drive. It still stamps `:seon.agent.turn/run` so the transcript's
+;; agent→runs→turns walk RENDERS its evals (the agent must SEE the schedule
+;; fired and ran THIS) — but [[seon.derive/run-turn-count]] EXCLUDES it, so a
+;; cron fire never burns a turn from the run's WORK budget (turn-limit). Absent
+;; on every ordinary LLM turn (optional = absent); set `true` only on fires.
+(schema/register! :seon.agent.turn/scheduled?   :boolean)
 ;; Three-tier storage: the datom carries the prompt's char count + a file
 ;; pointer (blob tier); the full prompt is never a datom.
 (schema/register! :seon.agent.turn/prompt-chars :int)
@@ -85,6 +92,7 @@
    [:seon.agent.turn/at           :seon.agent.turn/at]
    [:seon.agent.turn/status       :seon.agent.turn/status]
    [:seon.agent.turn/run          {:optional true} :seon.agent.turn/run]
+   [:seon.agent.turn/scheduled?   {:optional true} :seon.agent.turn/scheduled?]
    [:seon.agent.turn/prompt-chars {:optional true} :seon.agent.turn/prompt-chars]
    [:seon.agent.turn/prompt-file  {:optional true} :seon.agent.turn/prompt-file]
    [:seon.agent.turn/debug-dir    {:optional true} :seon.agent.turn/debug-dir]
@@ -194,6 +202,11 @@
    returned, so the caller can read `:seon.agent/eval-count`. Touches NO agent
    state — the run lifecycle is the loop's / the verbs' concern.
 
+   When `scheduled?` is true, the turn is stamped `:seon.agent.turn/scheduled?
+   true` (a cron-fire turn): it still carries the run stamp so its evals RENDER
+   in the transcript, but [[seon.derive/run-turn-count]] EXCLUDES it from the
+   run's work budget — a schedule fire never burns a turn from turn-limit.
+
    When `id-of-run` is present the open-tx LEADS with the WORK FENCE
    ([[seon.db/cas-assert]] on `:seon.agent/id`'s `:seon.agent/run`): a
    turn-open for a superseded/watchdog-closed run (the pointer moved or was
@@ -204,7 +217,7 @@
   {:malli/schema [:=> [:catn [:turn-input :map] [:body-fn :any]] :any]}
   [{:seon.agent/keys [id]
     :seon.agent.run/keys [id-of-run]
-    :seon.agent.turn/keys [id-of-turn prompt-text prompt-file]}
+    :seon.agent.turn/keys [id-of-turn prompt-text prompt-file scheduled?]}
    body-fn]
   (let [turn-row
         (cond->
@@ -213,6 +226,7 @@
            :seon.agent.turn/status       :running
            :seon.agent.turn/prompt-chars (count (str prompt-text))}
           prompt-file (assoc :seon.agent.turn/prompt-file prompt-file)
+          scheduled?  (assoc :seon.agent.turn/scheduled? true)
           id-of-run  (assoc :seon.agent.turn/run [:seon.agent.run/id id-of-run]))
         open-result
         (await

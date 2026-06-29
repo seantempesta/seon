@@ -42,14 +42,18 @@
    lifecycle), `seon.agent.turn` (`run-turn!`). The boot path (`seon.client`)
    requires THIS ns to `install-wake-trigger!`."
   (:require
+    [clojure.string :as str]
     [seon.agent :as agent]
+    [seon.agent.ctx :as ctx]
     [seon.agent.run :as run]
     [seon.agent.schedule :as schedule]
     [seon.agent.turn :as turn]
     [seon.config :as config]
     [seon.db :as db]
     [seon.derive :as derive]
+    [seon.eval :as seval]
     [seon.log :as seon-log]
+    [seon.repl :as repl]
     [seon.schema :as schema]
     [seon.warn :as warn]))
 
@@ -440,6 +444,77 @@
            "re-drive the resumed run. A hot-reload re-arm or boot installs "
            "it."))))
 
+;; ============================================================
+;; Scheduled-fn execution — the action half of cron. Injected into
+;; [[seon.agent.schedule/fire-due-schedules!]] (which can't require this ns —
+;; it's a leaf the ticker calls). When a schedule fires, the DUE schedules' fns
+;; run HERE as a SCHEDULE-FIRE turn on the just-opened :schedule run: each
+;; `(the-fn)` is eval-batched in the agent's scope (the SAME path
+;; bootstrap-turn-0 and every LLM turn use), recorded as a `:seon.eval` the
+;; agent re-reads next turn — so the fired agent sees "the schedule fired and
+;; ran THIS", not a blind wake.
+;;
+;; The turn is stamped `:seon.agent.turn/scheduled? true`: it KEEPS the run
+;; stamp (so the transcript's agent→runs→turns walk renders its evals — the
+;; agent must SEE the result) but [[seon.derive/run-turn-count]] EXCLUDES it, so
+;; a fire never burns a turn from the run's work budget (turn-limit). Without
+;; that marker every cron tick stole an LLM turn — at turn-limit fires the run
+;; would close `:turn-limit` having done zero LLM work (#66).
+;;
+;; A broken scheduled fn records a failed eval (errors are values), never
+;; crashing the ticker. compile-state comes from the one pod-global bootstrap
+;; ([[seon.repl/ensure-bootstrap!]]), so this needs no per-agent loop-input.
+;; ============================================================
+
+(schema/register! ::exec-request
+  [:map
+   [:seon.agent/id           :seon.agent/id]
+   [:seon.agent.schedule/fns :seon.agent.schedule/fns]])
+
+(defn ^:async exec-scheduled-fns!
+  "Run the due schedule `fns` for `id` as ONE schedule-fire turn on the agent's
+   currently-open run — each fn invocation eval-batched in the agent's scope and
+   recorded as a `:seon.eval` (with a `;` narration noting the schedule fired).
+   The turn is stamped `:seon.agent.turn/scheduled? true` so it RENDERS in the
+   transcript (run-stamped) yet does NOT count toward turn-limit
+   ([[seon.derive/run-turn-count]] excludes it — #66). A no-op when the agent
+   has no open run (a supersede/close raced the fire). Errors are values
+   (eval-batch! records a failed eval per form). Injected into
+   [[seon.agent.schedule/fire-due-schedules!]] as `:seon.agent.schedule/exec-fn!`.
+   `^:async`."
+  {:malli/schema [:=> [:cat ::exec-request] :any]}
+  [{:seon.agent/keys [id] fns :seon.agent.schedule/fns}]
+  (let [compile-state (await (repl/ensure-bootstrap!))]
+    (await
+      (db/with-agent id
+        (fn ^:async run-scheduled! []
+          (when-let [cur (run/current-run {:seon.agent/id id})]
+            (let [run-id  (:seon.agent.run/id cur)
+                  turn-id (db/new-id!)
+                  source  (str/join "\n"
+                            (map (fn [s]
+                                   (str ";; schedule fired — running " s "\n(" s ")"))
+                                 fns))]
+              (await
+                (db/with-tx-context
+                  {:seon.db/agent-id id
+                   :seon.db/turn-id  turn-id
+                   :seon.db/origin   :system}
+                  (fn ^:async open-scheduled-turn! []
+                    (await
+                      (turn/open-turn!
+                        {:seon.agent/id               id
+                         :seon.agent.run/id-of-run    run-id
+                         :seon.agent.turn/id-of-turn  turn-id
+                         :seon.agent.turn/scheduled?  true
+                         :seon.agent.turn/prompt-text ""}
+                        (fn ^:async eval-scheduled! []
+                          (await (seval/eval-batch!
+                                   compile-state
+                                   (repl/parse-forms source)
+                                   (ctx/home-ns id)
+                                   id turn-id run-id)))))))))))))))
+
 (defn install-wake-trigger!
   "Register the inbound-message trigger for this agent — wakes a run via
    [[wake-handler]] when a message lands with to ∋ me AND from ≠ me AND a
@@ -472,8 +547,9 @@
 ;; fires until something CHECKS. This single `setInterval` is that check —
 ;; each tick (1) closes overdue runs ([[seon.agent.run/close-overdue-runs!]],
 ;; the deadline watchdog) then (2) fires due schedules
-;; ([[seon.agent.schedule/fire-due-schedules!]]), DRIVING each opened run via
-;; [[drive-run!]] (injected so seon.agent.schedule need not require this ns).
+;; ([[seon.agent.schedule/fire-due-schedules!]]), RUNNING each due schedule's fn
+;; via [[exec-scheduled-fns!]] and DRIVING each opened run via [[drive-run!]]
+;; (both injected so seon.agent.schedule need not require this ns).
 ;; Idempotent + single-instance (the `!ticker` atom holds the interval id;
 ;; re-install clears the prior). A throw in one tick is logged, never fatal —
 ;; the timer keeps running. Wired at client boot beside `install-wake-trigger!`
@@ -497,8 +573,9 @@
         (run/close-overdue-runs! {:seon.agent/now now}))
       (.then (fn [_]
                (schedule/fire-due-schedules!
-                 {:seon.agent/now             now
-                  :seon.agent.schedule/drive! drive-run!})))
+                 {:seon.agent/now               now
+                  :seon.agent.schedule/exec-fn! exec-scheduled-fns!
+                  :seon.agent.schedule/drive!   drive-run!})))
       (.catch (fn [e]
                 (seon-log/error-console!
                   "seon.agent.loop/run-tick!"

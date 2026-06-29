@@ -16,13 +16,16 @@
    Tests open a FRESH `:memory` conn (via `seon.client/open-agent-conn!`) —
    nothing here touches the live agents."
   (:require
+    [clojure.string :as str]
     [cljs.test :refer [deftest is testing async]]
     [seon.agent :as agent]
     [seon.agent.loop :as loop]
     [seon.agent.run :as run]
+    [seon.agent.schedule :as schedule]
     [seon.client :as client]
     [seon.agent.ctx :as ctx]
     [seon.db :as db]
+    [seon.derive :as derive]
     [seon.eval :as seval]
     [seon.repl :as repl]
     [seon.warn :as warn]))
@@ -437,6 +440,57 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+;; ============================================================
+;; SPAWN ARM (#72/#30) — `agent/start!` must (1) RETURN the minted child id so
+;; the parent can address the child it just spawned SAME-TURN, and (2) ARM that
+;; child's wake trigger IN-PROCESS via the injected `agent/!arm-child-fn` hook,
+;; so a message sent right after spawn actually wakes it (no out-of-band re-arm).
+;; This drives both end to end: register a test arm hook (the same seam the
+;; client registers `arm-agent!` into), spawn, read the returned id, message it.
+;; ============================================================
+
+(deftest start!-returns-child-id-and-arms-it-so-a-message-wakes-it
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [cs   (await (repl/ensure-bootstrap!))
+                  prev @agent/!arm-child-fn]
+              (await (db/transact! {:seon.db/tx-data [{:seon.user/id "user"}]}))
+              ;; The injection seam: register an arm hook that wires the child's
+              ;; home ns + installs its wake trigger (a scripted llm so the wake
+              ;; is deterministic) — the SAME shape as seon.client/arm-agent!.
+              (reset! agent/!arm-child-fn
+                (fn ^:async arm! [cid]
+                  (await (db/with-agent cid
+                           (fn ^:async setup []
+                             (await (seval/setup-agent-ns! cs (ctx/home-ns cid) cid)))))
+                  (loop/install-wake-trigger!
+                    {:seon.agent/id            cid
+                     :seon.agent/llm-fn        (scripted-llm "(complete \"ok\")")
+                     :seon.agent/compile-state cs})
+                  cid))
+              ;; Spawn with NO id — start! MINTS one and must return it. (No
+              ;; agent scope ⇒ parentless child; the arm path is identical.)
+              (let [res      (await (agent/start! {:seon.agent/purpose "spawn-arm test"}))
+                    child-id (:seon.agent/id res)]
+                (testing "start! returns the minted child id (addressable same-turn)"
+                  (is (string? child-id) "response carries :seon.agent/id")
+                  (is (some? (db/entity {:seon.db/ref [:seon.agent/id child-id]}))
+                      "the returned id names a real entity — not a ghost"))
+                (testing "the minted child is ARMED in-process: a message wakes it"
+                  (is (= [] (runs-for child-id)) "idle, no run before any message")
+                  (await (send-inbound! [:seon.user/id "user"] child-id "wake up" 0 :human))
+                  (let [woke? (await (wait-until
+                                       (fn [] (seq (runs-for child-id)))
+                                       8000 25))]
+                    (is woke?
+                        (str "a message sent immediately after start! opened a run "
+                             "on the freshly-spawned child — start! armed it, no "
+                             "out-of-band re-arm"))))
+                (reset! agent/!arm-child-fn prev)))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest wake-running-renews-without-opening-a-second-run
   (async done
     (-> (with-conn
@@ -521,3 +575,74 @@
   (is (= :paused     (loop/transition :paused :turn-ok)) "turn-ok isn't valid in paused")
   (is (= :terminated (loop/transition :terminated :trigger)) "terminal absorbs everything")
   (is (= :terminated (loop/transition :terminated :resume))))
+
+;; ── Cron ACTION — a due schedule's fn actually RUNS when it fires, and the
+;;    fire does NOT burn a turn (#66) ────────────────────────────────────────
+;;    fire-due-schedules! hands the due fns to exec-scheduled-fns!, which
+;;    eval-batches them as a SCHEDULE-FIRE turn on the opened run. Two things
+;;    are pinned:
+;;      1. EXECUTION — the fn's invocation lands as an OK :seon.eval the agent
+;;         re-reads (real path, not a stub), AND a turn was created on the run
+;;         (so the eval RENDERS in the transcript via the run→turn→evals walk).
+;;      2. NO TURN BURNED (#66) — the schedule-fire turn is stamped
+;;         `:seon.agent.turn/scheduled? true`, so `derive/run-turn-count` (the
+;;         WORK budget the loop checks vs turn-limit) is 0 even though a raw
+;;         turn DID land. Before the fix run-turn-count counted it → every cron
+;;         tick stole an LLM turn and the run hit turn-limit having done no work.
+;;    DETERMINISTIC: an explicit fixed `now` (the cron is `* * * * *`, due at any
+;;    instant), so the test never races a wall-clock minute boundary.
+
+(deftest schedule-fire-executes-the-scheduled-fn
+  (async done
+    (let [now (js/Date. "2026-06-28T12:00:00.000Z")]
+      (-> (with-conn
+            (fn []
+              (-> (boot-agent!)
+                  ;; A due-every-minute schedule whose fn is a resolvable 0-arg
+                  ;; fn (host-timezone) — eval'ing `(…)` returns a value iff RAN.
+                  (.then (fn [_]
+                           (db/transact!
+                             {:seon.db/tx-data
+                              [{:seon.agent/id agent-id
+                                :seon.agent/schedules
+                                [{:seon.agent.schedule/id  "sched-fire0001"   ; exactly 14 chars
+                                  :seon.agent.schedule/cron "* * * * *"
+                                  :seon.agent.schedule/fn   'seon.agent.schedule/host-timezone}]}]})))
+                  (.then (fn [res]
+                           (is (not (false? (:seon.db/ok? res))) "schedule attached")))
+                  (.then (fn [_]
+                           ;; Real executor injected (no LLM drive): exec-only.
+                           (schedule/fire-due-schedules!
+                             {:seon.agent/now               now
+                              :seon.agent.schedule/exec-fn! loop/exec-scheduled-fns!})))
+                  (.then (fn [res]
+                           (is (= 1 (count (:seon.agent.schedule/fired res)))
+                               "fired one :schedule run for the idle agent")
+                           (let [cur    (run/current-run {:seon.agent/id agent-id})
+                                 run-id (:seon.agent.run/id cur)]
+                             (is (= :schedule (:seon.agent.run/trigger cur))
+                                 "the open run is :schedule-triggered")
+                             (is (pos? (count (turns-for agent-id)))
+                                 "exec opened a turn on the run (so its eval renders)")
+                             ;; #66 — the schedule-fire turn must NOT count toward
+                             ;; turn-limit. A raw count sees 1 turn; run-turn-count
+                             ;; (the WORK budget) EXCLUDES the scheduled? turn → 0.
+                             (is (= 1 (turn-count run-id))
+                                 "a turn DID land on the run (raw count)")
+                             (is (= 0 (derive/run-turn-count @db/*conn* run-id))
+                                 "but run-turn-count EXCLUDES it — the fire burns no work turn (#66)")
+                             (let [rows (or (db/query {:seon.db/query
+                                                       '[:find ?src ?ok
+                                                         :where
+                                                         [?e :seon.eval/source ?src]
+                                                         [?e :seon.eval/ok? ?ok]]})
+                                            [])
+                                   hit  (some (fn [[src ok]]
+                                                (when (str/includes?
+                                                        src "seon.agent.schedule/host-timezone")
+                                                  ok))
+                                              rows)]
+                               (is (true? hit)
+                                   "the scheduled fn RAN — its invocation recorded as an OK :seon.eval"))))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "schedule-fire test threw — " e)) (done)))))))
