@@ -31,27 +31,41 @@ tags: [research, agent, web]
 
 ## 2. Serve (run on the box)
 
-NVFP4 quant is read from the checkpoint config automatically; if vLLM doesn't
-auto-detect, add `--quantization modelopt_fp4`. Text/code only — multimodal flags
-dropped; context cut to 8192 (we generate small forms, saves KV).
+NVFP4 quant is **built into the checkpoint** — no `--quantization` flag. Canonical
+flags from the NVFP4 model card (Blackwell/5090-native):
 
 ```bash
 docker run -itd --name diffgemma \
   --ipc=host --gpus all -p 8000:8000 \
   -v /workspace/hf:/root/.cache/huggingface \
-  -e HF_TOKEN=$HF_TOKEN \
+  -e HF_TOKEN=$HF_TOKEN -e VLLM_USE_V2_MODEL_RUNNER=1 \
   vllm/vllm-openai:gemma \
-    --model nvidia/diffusiongemma-26B-A4B-it-NVFP4 \
-    --max-model-len 8192 \
-    --max-num-seqs 4 \
-    --gpu-memory-utilization 0.90 \
-    --hf-overrides '{"diffusion_sampler":"entropy_bound","diffusion_entropy_bound":0.1}' \
-    --diffusion-config '{"canvas_length": 256}' \
-    --host 0.0.0.0 --port 8000
+    vllm serve nvidia/diffusiongemma-26B-A4B-it-NVFP4 \   # verify exact case at pull time
+      --trust-remote-code \
+      --attention-backend TRITON_ATTN \
+      --max-num-seqs 4 \
+      --max-model-len 8192 \
+      --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4 \
+      --host 0.0.0.0 --port 8000
 ```
 
-`--max-num-seqs 4` is required-low (diffusion state buffers). Watch
-`docker logs -f diffgemma` for "Application startup complete".
+`--max-num-seqs 4` is required-low (diffusion state buffers); `--max-model-len
+8192` keeps KV small (we generate small forms). Watch `docker logs -f diffgemma`
+for "Application startup complete".
+
+**RISK — the vLLM diffusion image may be preview.** The card notes the commands are
+"tentative until the supporting vLLM image is publicly released." So step 0 on the
+box: confirm an image that supports `model_type: diffusion_gemma` (the recipe's
+`vllm/vllm-openai:gemma` tag, or the current release per build.nvidia.com/rtx/vllm).
+If no vLLM image serves it yet, **fall back to transformers** —
+`DiffusionGemmaForBlockDiffusion` + `AutoProcessor` (what the interp. paper used) —
+and wrap a 20-line FastAPI `/v1/chat/completions` shim, OR skip the server and use
+transformers directly (that IS the path for step 3's `accept_canvas` override anyway).
+
+**Caching bonus:** vLLM has **automatic prefix caching** — unlike the OpenRouter
+route (no caching, every turn full-price), the agent's stable prompt prefix is
+cached across turns here for free. Confirm with two identical calls: 2nd shows
+`prompt_tokens` cached / faster TTFT.
 
 ## 3. Smoke test (from anywhere)
 

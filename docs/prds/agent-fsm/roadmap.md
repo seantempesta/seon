@@ -590,9 +590,12 @@ State ([[research/coordination-primitives-state-2026-06-28]]): wake (tx-trigger,
 poll, CAS-fenced), inter-agent messaging (hop-cap 4 at wake), deadlines/bounds,
 spawn/terminate all WORKING. Gaps, ranked:
 
-1. **#66 cron `:fn` never executes** (`schedule.cljs:224-228`) — cron MATCHES + FIRES a
-   run but the scheduled fn is never invoked; cron is wake-only, not action-driving.
-   The #1 missing primitive for autonomous timed workflows. Core (eval/exec routing).
+1. **#66 cron `:fn` execution — DONE.** On a fire, `fire-due-schedules!` hands the due
+   schedules' fns to the injected `seon.agent.loop/exec-scheduled-fns!`, which eval-batches
+   each `(the-fn)` as a QUIET turn on the just-opened run (the agent's scope, recorded as a
+   `:seon.eval` it re-reads), then drives. Errors are values; a broken scheduled fn records a
+   failed eval, never crashing the ticker. Cron is now action-driving. (Timezone still
+   host-tz — `schedule.cljs:16-17`, separate low item below.)
 2. **#31 no `/call` capability gate** — `start!` is ungated; any agent can spawn.
    Phase-5's open half (roles-as-capability-sets).
 3. **#30 no in-process spawn-and-wake** — `start!` mints an idle child; waking needs a

@@ -21,14 +21,22 @@ that reveals we must build. Part 4 is the handful of decisions I need from you.
 Writing the ideal system message surfaces the ideal environment: every sentence we want
 to tell the agent is a capability the environment must actually provide. Two facts frame it:
 
-- The current system message (`seon.agent.ctx/system-text`) is **~38 000 chars ≈ 9 500
-  tokens** — the single largest fixed cost in every prompt, sent byte-identical every turn.
-- It mixes two things that should split: **core environment mechanics** (the REPL, the
-  context, eval, results, errors — every agent needs these) and **database how-to** (register
-  before transact, store-inventory walkthroughs, provenance attrs, the `:test` convention).
-  The owner's instinct is right: the how-to belongs in **worked examples** (`my.kb`), reached
-  by example, not recited in the system block. Splitting them roughly **halves** the system
-  message AND makes it capability-first.
+- The current system message (`seon.agent.ctx/system-text`) is **3,115 tok** (MEASURED live
+  2026-06-28 on root, `count/4` — my earlier "~9,500" was an `awk` overcount; the real value is
+  ~3.1k). It is byte-identical every turn, so it caches — but it still mixes two things that should
+  split: **core environment mechanics** (the REPL, context, eval, results, errors — every agent
+  needs these) and **database how-to** (register before transact, store-inventory walkthroughs,
+  provenance attrs, the `:test` convention). The how-to belongs in **worked examples** (`my.kb`),
+  reached by example, not recited. Splitting it roughly halves the system message and makes it
+  capability-first.
+- **BUT the system message is NOT the bloat lever — `:namespaces` is.** Live audit of root's
+  17,649-tok prompt (2026-06-28): **`:namespaces` = 9,566 tok (54%)** — the full source dump of the
+  agent's `my.*` world (my.kb.shared + seon.agent.todo + my.agent.root + my.kb); system message 3,115
+  (18%); `:transcript` 2,131 (12%); `:soul` 1,934 (11%, disable pending a pod restart); `:live-tile`
+  693; `:warnings` 111. So the **dynamic-context load/unload verb (D2, building it) + curating what
+  the namespaces block dumps** is the real economy, far more than the system-message or SOUL trims.
+  (Also surfaced: root sees the GENERIC worker context — no supervisor block — confirming root needs
+  its own ROOT MESSAGE.)
 
 ## Part 1 — How an ideal system performs (the agent's experience)
 
