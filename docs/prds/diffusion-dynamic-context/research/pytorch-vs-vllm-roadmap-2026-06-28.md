@@ -14,23 +14,40 @@ tags: [research, diffusion, agent]
 >
 > Grounds in: [[serving-optimization-survey-2026-06-28]] (the prior two-endpoint
 > finding), [[transformers-diffusion-source-grounding-2026-06-28]] (the per-step
-> seam `:1034`, the compile/stop tension), and live web evidence (cited inline).
+> seam `:1034`, the compile/stop tension), live web evidence (cited inline), and
+> — NEW — the **vendored vLLM source** `reference-code/vllm` @ `311ad689a`
+> (v0.13.0rc1+), the real `vllm/model_executor/models/diffusion_gemma.py` (§1b).
+> Every vLLM-internal claim now cites `file:line` in that tree, not just the blog.
 
 ## TL;DR
 
-- **vLLM's sampler is STILL sealed for our buzzsaw, re-verified today — and the
-  reason is now sharper than "no hook": it's a SHAPE mismatch, not just a missing
-  callback.** vLLM DOES have a first-class custom-logits-processor API (register via
-  `--logits-processors` / FQCN / entry-point; `apply()` runs "in every engine
-  step"). But (a) the DiffusionGemma blog's own description of `DiffusionSampler`
-  shows the entropy-bound accept/renoise happening INSIDE one `@torch.compile`d
-  `_compiled_sample_step`, and does NOT route user logits processors through it; and
-  (b) the public LP interface is `apply(logits: torch.Tensor) # (num_requests) ×
-  (vocab_size)` — **there is no canvas/position axis.** Our clamp/infill need
-  per-POSITION control across the 256-token canvas (`(req, canvas_len, vocab)`).
-  Even if `apply()` *were* called per denoise step, it cannot see or address canvas
-  positions. **The seam vLLM exposes is the wrong shape for the buzzsaw. Confirmed
-  sealed.**
+- **vLLM's diffusion sampler is STILL sealed for our buzzsaw — now CONFIRMED FROM
+  THE VENDORED SOURCE, not just the blog.** `DiffusionGemma.custom_sampler()`
+  RETURNS a `DiffusionSampler` that *replaces* vLLM's standard `(Sampler,
+  RejectionSampler)` pair (`diffusion_gemma.py:827,844`). That standard sampler is
+  the ONLY thing that runs user logits processors (`vllm/v1/sample/sampler.py:98`
+  `apply_logits_processors`, `:404` iterating `logitsprocs.non_argmax_invariant`) —
+  and `DiffusionSampler` NEVER calls it. The entire denoise step is ONE
+  `@torch.compile(dynamic=True)` function `_compiled_sample_step`
+  (`diffusion_gemma.py:469`), called once at `:1285`, with temperature, Gumbel-max,
+  **entropy-bound acceptance mask** (`:555-561`) and **renoise** (`:577`) all baked
+  inside it. The `LogitsProcessor` that DOES appear in the file (`:252,:334`) is
+  only the lm_head GEMM (`:248` comment "LogitsProcessor only handles the lm_head
+  GEMM") — a vocab projection, NOT a control seam. **There is no per-step Python
+  hook, no canvas-position callback, no LP route into the diffusion path. Sealed,
+  source-proven.**
+
+- **The PREFIX-CACHING win is REAL and source-confirmed — and it's a free
+  accelerator for the dynamic-context pattern, orthogonal to control.** DiffusionGemma's
+  encoder pass is ordinary CAUSAL attention that WRITES the KV cache
+  (`diffusion_gemma.py:5-7`); its config does NOT disable automatic prefix caching
+  (the only model that does is Unlimited-OCR, `config.py:150-163` — DiffusionGemma's
+  config class `:241` leaves APC ON). So a shared ~2400-token SKILL prefix is encoded
+  ONCE and its KV reused across every generation that shares it. Raw transformers
+  re-encodes that prefix on EVERY call. For the buzzsaw's "prepend a big skill, then
+  refine many blocks" pattern, vLLM's APC is a genuine per-call prefill saving the
+  control worker cannot match — a real reason vLLM serving is attractive ONCE control
+  is no longer needed per-call.
 
 - **The A100 economics are now DECISIVE against switching for speed: vLLM's win is
   FP8-on-Hopper, NOT BF16.** The vLLM recipe's own SPEED-Bench lists the **BF16**
@@ -148,6 +165,131 @@ entire "use vLLM because it's supported and fast" rationale.
 callback it has is the wrong shape (no canvas axis) and the sampler that would host
 it is a single compiled op that doesn't route user LPs. Re-confirmed 2026-06-28.**
 
+## 1b. Source-grounded answers (reference-code/vllm @ 311ad689a)
+
+The owner vendored the vLLM source mid-task and asked four sharpened questions.
+Answered from `vllm/model_executor/models/diffusion_gemma.py` (the real
+implementation), not the blog. Every claim is `file:line`.
+
+### Q1 — Can we run our CLJS validator via a vLLM hook and act per-step? NO seam exists in the diffusion path.
+
+- **`custom_sampler()` REPLACES the standard sampler.**
+  `DiffusionGemmaModelState.custom_sampler(self, sampler)` (`:827`) returns
+  `DiffusionSampler(...), None` (`:844-859`). The model-runner installs THIS as the
+  sampler for diffusion requests. The blog's "takes the place of vLLM's usual
+  (Sampler, RejectionSampler) pair" is literal: the returned tuple is `(custom_sampler,
+  custom_rejection_sampler=None)`.
+- **The standard sampler is the ONLY place user logits processors run, and the
+  diffusion path bypasses it.** `vllm/v1/sample/sampler.py:98` calls
+  `self.apply_logits_processors(...)`; `:371` defines it; `:404` iterates
+  `sampling_metadata.logitsprocs.non_argmax_invariant` (the registered custom LPs).
+  `DiffusionSampler` (`diffusion_gemma.py:1038`) NEVER calls `apply_logits_processors`
+  and holds no `logitsprocs` — it goes straight from raw model logits (`:1286`) into
+  `_compiled_sample_step` (`:1285`). So the AR logits-processor plugin API, the
+  guided/structured-output backends, none of them are on the diffusion code path.
+- **The only `LogitsProcessor` in the diffusion file is a red herring.** `:252`
+  constructs `self.logits_processor = LogitsProcessor(...)` and `:334` calls it —
+  but the `:248` comment states "LogitsProcessor only handles the lm_head GEMM." It
+  is the hidden-state→vocab projection, not a sampling intervention. Do not mistake
+  the name for a hook.
+- **What IS configurable is behavior only, not code injection:** `entropy_bound`,
+  `t_min`/`t_max`, `confidence_threshold`, `canvas_length`, `max_denoising_steps`
+  are read from `generation_config.json` / `--diffusion-config` at sampler-build
+  time (`:828-852`, `config.py:244-249`). Knobs, not callbacks.
+
+> **Q1 verdict:** there is NO per-step logits processor, custom-op plugin, or
+> sampler callback exposed on vLLM's DiffusionGemma decode path. The accept/stop/
+> renoise the buzzsaw needs all live INSIDE one compiled op with no Python entry
+> point. A 0.1 ms CLJS validator has nowhere to attach per-step. **Sealed —
+> source-proven, not inferred.**
+
+### Q2 — Even if a hook existed, would per-step Python intervention forfeit vLLM's fast path? YES, harder than transformers.
+
+The DiffusionSampler docstring is explicit about the design constraint
+(`:1041-1043`): "all GPU state in pre-allocated buffers, **no GPU→CPU syncs on the
+hot path**." The whole decode is `@torch.compile(dynamic=True)` (`:469`) over
+continuous-batching: one `_compiled_sample_step` call processes ALL in-flight
+decode requests at once (`:516` `num_decode = decode_slots.shape[0]`).
+
+- A per-step Python callback that decodes the canvas to text and runs our validator
+  REQUIRES a GPU→CPU sync of `argmax_canvas` every step — exactly the sync the hot
+  path is engineered to avoid — AND a **graph break** in the compiled region.
+- This is the SAME failure we MEASURED in transformers (a Python stopping criterion
+  forfeits `torch.compile`, ≈4× slower), but **strictly worse in vLLM** because the
+  compiled op is batched: a sync/break stalls the WHOLE batch of concurrent
+  requests, not one. vLLM's throughput edge IS the batched compiled op; a per-step
+  Python intervention dismantles the very thing you came to vLLM for.
+- **Conclusion:** per-step Python control and vLLM's compiled continuous-batching
+  decode are fundamentally at odds. There is no "hook it cheaply" — any external
+  per-step intervention collapses vLLM to (worse-than-)transformers speed. The
+  compile-forfeit tension is not a transformers quirk; it is intrinsic to compiled
+  diffusion decode, and vLLM amplifies it.
+
+### Q3 — Custom vLLM sampler baking control INTO the compiled op: feasible, but buys only TENSOR-expressible control, and the eval-loop is the part you can't get.
+
+The sampler is **pure Python + compiled PyTorch ops, NOT Triton/CUDA.**
+`_compiled_sample_step` (`:469-...`) is plain `torch` (sort/cumsum/scatter/randint
+— e.g. the entropy-bound mask `:555-561`, renoise `:577`) under
+`@torch.compile`. So control logic that can be written as VECTORIZED TENSOR OPS can
+be added inside it and stay compile-compatible:
+
+- **Clamp / structured-constraint / a tensor-expressible stop (entropy/stability/
+  token-pattern): FEASIBLE.** Add a clamp-mask tensor (pin good canvas positions to
+  ~0 entropy so the accept mask always keeps them) and a custom renoise override —
+  all torch ops, all inside the compiled region, no sync. Effort: fork ONE ~1300-line
+  file (`diffusion_gemma.py`), add a few tensor ops + a per-request mask buffer +
+  wire a config field. A competent engineer-week for a first cut; the clamp itself is
+  small.
+- **Eval-driven control (run the CLJS parser/eval on the partial canvas, stop/renoise
+  on the RESULT): NOT feasible in the compiled op.** Our validator is external
+  Python/Clojure — it cannot be expressed as a tensor op, so it cannot live inside
+  `_compiled_sample_step` without a sync+graph-break (back to Q2). A custom sampler
+  gets you compile-compatible CLAMP and tensor-predicate stops; it does NOT get you
+  the buzzsaw's parse-and-eval feedback loop. That loop is precisely the thesis.
+- **Plus the maintenance tax:** the fork inherits vLLM's TP>1/PP>1 crash inside
+  `_compiled_sample_step` (issue #45719, vocab-parallel sharding) and re-breaks on
+  every vLLM bump (this file is rc-stage, churning).
+
+> **Q3 verdict (price it out):** ~1 engineer-week for a compile-compatible CLAMP
+> sampler fork; ongoing maintenance against a churning rc file + the TP crash. It
+> buys clamp + tensor-predicate stops at vLLM speed — genuinely useful for a
+> *constrained-but-fast* serving mode. It does NOT buy the eval-renoise loop (the
+> differentiated capability). So the "custom adapter win" is real but PARTIAL:
+> it's a speed-up for the control we can express as tensors, never a home for the
+> eval feedback. Don't fund it until the eval loop has proven its worth on
+> transformers AND a fast constrained-serving mode is actually demanded.
+
+### Q4 — Prefix caching: confirmed from source; quantify the skill-prefix win.
+
+- **DiffusionGemma's encoder mode is causal and writes KV** (`diffusion_gemma.py:5-7`
+  module docstring: "encoder mode: causal attention, writes KV cache; decoder mode:
+  bidirectional attention, reads encoder KV, doesn't write"). A causal-prefix KV is
+  reusable across requests — the precondition for automatic prefix caching (APC).
+- **APC is NOT disabled for DiffusionGemma.** The only model whose config turns APC
+  off is Unlimited-OCR (`config.py:150-163`, "Disable it for this model" — R-SWA
+  decode KV isn't cacheable). DiffusionGemma's config class
+  (`DiffusionGemmaModelForBlockDiffusionConfig:241`) inherits Gemma4 and leaves
+  `enable_prefix_caching` untouched → APC ON by default.
+- **Quantify the win for the buzzsaw pattern.** The thesis prepends a shared
+  ~2400-token SKILL to many generations. With APC, that prefix is prefilled ONCE; the
+  KV is reused for every subsequent request sharing it → the per-call prefill of the
+  skill drops to a cache hit. Raw transformers re-encodes all ~2400 tokens on EVERY
+  call (no cross-call KV reuse in the `generate()` path). For N generations sharing
+  the skill, vLLM does ~1 skill-prefill; transformers does N. At a 2400-token prefix
+  and the buzzsaw's "one skill, many block-refinements" shape, that is the dominant
+  prefill cost eliminated for all but the first call — a large, control-independent
+  accelerator.
+- **Caveat (memory, from source):** the diffusion sampler materializes `[num_seqs,
+  canvas_length, vocab]` fp32 transients, so concurrency is memory-bound — vLLM
+  defaults `max_num_seqs` to 8 and notes ">8 OOMs a single H200" (`config.py:282-292`).
+  APC helps prefill reuse; it does not lift the canvas-buffer concurrency ceiling.
+
+> **Q4 verdict:** prefix caching is real, enabled, and a genuine win for the
+> shared-skill pattern — the skill KV is encoded once and reused, where transformers
+> re-encodes every call. This is an accelerator the vLLM serving endpoint gives FREE,
+> independent of the control question, and it strengthens the case for vLLM as the
+> SERVING backend once per-call control is no longer required.
+
 ## 2. What does vLLM actually buy on the A100? (Nothing — the win is FP8/Hopper)
 
 This is the number that changes the decision. The prior survey said "A100 can't
@@ -228,14 +370,16 @@ version of vLLM on the public roadmap that exposes canvas-position control, and 
 compiled, vocab-parallel-fragile sampler (§1d) makes a fork a losing trade.
 
 **Could buzzsaw control ever live in a vLLM custom sampler (fork the sampler)?**
-Technically yes — subclass/replace `DiffusionSampler`, add a canvas-position clamp
-inside a custom `_compiled_sample_step`. Cost/benefit: **strongly negative.** You'd
-maintain a compiled Triton-adjacent sampler against a sampler that already crashes on
-TP>1 (§1d), re-break on every vLLM release, and lose the "supported/fast" reason to
-be on vLLM in the first place — all to recover speed you can ALSO get by putting FP8
-weights on the transformers path. Only revisit if (a) transformers' generation loop
-becomes a proven throughput wall AND (b) vLLM ships a stable canvas-aware sampler
-extension API. Neither is true; don't fork.
+Priced from source in §1b/Q3: the sampler is pure Python + compiled torch (NOT
+Triton/CUDA), so a compile-compatible CLAMP + tensor-predicate stop CAN be baked
+into `_compiled_sample_step` for ~1 engineer-week. **But the eval-renoise loop — the
+differentiated capability — CANNOT** (external CLJS parse/eval is not a tensor op;
+inside the compiled op it forces a sync+graph-break, §1b/Q2). And the fork inherits
+the TP>1 crash (#45719) + per-release churn. Cost/benefit: **negative for the
+thesis, marginal for serving.** It would give a fast *constrained* serving mode, never
+a home for the feedback loop. Only revisit if (a) a fast constrained-serving mode is
+actually demanded AND (b) the eval loop has already proven its worth on transformers.
+Until then, don't fork.
 
 **The real best-of-both = compiled-transformers-WITH-compatible-control (chase
 this, on the A100, now-ish — it's the untested speed lever).** From the source
@@ -295,11 +439,18 @@ grounding ([[transformers-diffusion-source-grounding-2026-06-28]] §5 items 9 + 
 - **vLLM gets stood up as a second serving endpoint ONLY when thesis-cleared AND
   serving-scale-bound AND Hopper-FP8-in-hand — all three at once.** Until then it is
   cost without benefit.
+- **When it IS stood up, prefix caching is its free bonus:** the shared ~2400-token
+  skill prefix is KV-cached once and reused across generations (`config.py:241`
+  leaves APC on; encoder writes KV `diffusion_gemma.py:5-7`), where the transformers
+  control worker re-encodes it every call. That accelerates the dynamic-context
+  pattern independent of control — a real, source-confirmed reason vLLM serving wins
+  once per-call control is no longer needed.
 
 ---
 
 ## Sources (verbatim quotes preserved inline above)
 
+- **vLLM SOURCE `reference-code/vllm` @ `311ad689a`** — `diffusion_gemma.py`: `_compiled_sample_step` `@torch.compile` `:469` (entropy-mask `:555-561`, renoise `:577`, single call `:1285`); `custom_sampler` replaces standard sampler `:827,844`; `DiffusionSampler` "no GPU→CPU syncs on hot path" `:1041-1043`; lm_head-only LogitsProcessor `:248,252,334`; encoder writes KV `:5-7`. `vllm/v1/sample/sampler.py` — `apply_logits_processors` `:98,371`, custom-LP iteration `:404` (the AR-only path DiffusionSampler bypasses). `config.py` — APC disabled ONLY for Unlimited-OCR `:150-163`; DiffusionGemma config `:241` leaves APC on; canvas-buffer memory ceiling `:282-292`.
 - vLLM blog — DiffusionSampler `_compiled_sample_step`, FP8 1,288/1,008 numbers, no per-step LP in denoise: <https://vllm.ai/blog/2026-06-10-diffusion-gemma>
 - vLLM custom logits processors — `apply(logits) # (num_requests)×(vocab_size)`, "every engine step", no canvas axis, no diffusion mention: <https://docs.vllm.ai/en/latest/features/custom_logitsprocs/>
 - vLLM recipe (DiffusionGemma) — **BF16 375 tok/s (1.9×)** row, entropy_bound/canvas_length only, no `--logits-processors`: <https://recipes.vllm.ai/Google/diffusiongemma-26B-A4B-it>
