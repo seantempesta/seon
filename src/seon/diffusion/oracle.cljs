@@ -1,0 +1,190 @@
+(ns seon.diffusion.oracle
+  "UNIFIED control-signal oracle — the buzzsaw the diffusion worker calls ONCE
+   between denoise steps. The three control signals exist as separate Seon-side
+   legs; this ns dispatches all three and returns ONE combined control set.
+
+   ## The three legs
+
+   - PARSE — `seon.repl.internal/parse-forms` (no-fence basis, spans index the
+     raw `canvas_text`, the `offset_map` basis). Yields the GOOD form spans (to
+     HOLD) and the BROKEN-syntax spans (to RE-NOISE).
+   - RETRIEVE — `seon.diffusion.retrieval/retrieve-for-canvas`. Yields the
+     hallucinated-symbol corrections (`{span,replacement,spec_text}`) — each a
+     clamp-toward-the-real-API.
+   - EVAL — `seon.worker-eval` (a SEPARATE node self-host bundle; NOT pod- or
+     bb-loadable). Where a form is syntactically clean but semantically wrong
+     (undeclared var, def-vs-defn, arity, throw, non-termination), its verdict
+     folds into either a renoise-span or (when retrieval already named the real
+     API) is left to the injection. The eval bundle runs out-of-process, so its
+     verdicts arrive as DATA via `::eval-verdicts` (span-keyed); when absent,
+     `refine` runs PARSE + RETRIEVE only and says so in `::legs`.
+
+   ## The combined control set (`::control-set`)
+
+       {::clamps        [{::span ::source}]            ; HOLD — do NOT re-noise
+        ::renoise-spans [{::span ::error-kind ::source}] ; RE-NOISE these
+        ::injections    [<retrieval injection>]        ; clamp-toward-real-API
+        ::legs          [:parse :retrieve (:eval)]}    ; which legs actually ran
+
+   Partition rule: a CLAMP is a good form whose span overlaps NEITHER an
+   injection (it carries a hallucination → steer it, don't freeze it) NOR a
+   renoise span (parse error or an eval-bad form). So the three sets never
+   double-cover a region.
+
+   PURE reader over a db value (the retrieve leg reads `:seon.fn/sym` from the
+   program graph; default `seon.db/*conn*`). No writes, no GPU."
+  (:require
+    [seon.embed]                                    ; :seon.embed/db schema (referenced below)
+    [seon.repl.internal :as internal]
+    [seon.diffusion.retrieval :as retrieval]
+    [seon.schema :as schema]))
+
+;; ============================================================
+;; Schemas — reuse the retrieval leg's shapes (register-once-reference)
+;; ============================================================
+
+;; The worker's `offset_map`: token-index → canvas char offset. It is the
+;; WORKER's artifact (it maps our char spans back to token positions); the
+;; Seon side emits char spans directly, so it is carried through but not
+;; required here.
+(schema/register! ::offset-map [:vector :int])
+
+;; A good form to HOLD across the next denoise steps.
+(schema/register!
+  ::clamp
+  [:map
+   [::span :seon.diffusion.retrieval/span]
+   [::source :string]])
+
+;; A span to RE-NOISE (broken syntax, or an eval-bad form).
+(schema/register!
+  ::renoise-span
+  [:map
+   [::span :seon.diffusion.retrieval/span]
+   [::error-kind :keyword]                          ; parse: :eof/:invalid-token/…
+   [::source :string]])
+
+;; The out-of-process EVAL leg's verdict for one form, span-keyed so it folds
+;; back onto the parse tier's forms.
+(schema/register! ::eval-error-kind [:enum :compile :throw :interrupt])
+(schema/register!
+  ::eval-verdict
+  [:map
+   [::span :seon.diffusion.retrieval/span]
+   [::ok? :boolean]
+   [::error-kind {:optional true} ::eval-error-kind]
+   [::message {:optional true} :string]])
+
+(schema/register! ::legs [:vector [:enum :parse :retrieve :eval]])
+
+(schema/register!
+  ::checkpoint
+  [:map
+   [::canvas-text :seon.diffusion.retrieval/canvas-text]
+   [::offset-map {:optional true} ::offset-map]
+   [::aliases {:optional true} :seon.diffusion.retrieval/aliases]
+   [::k {:optional true} :seon.diffusion.retrieval/k]
+   [::eval-verdicts {:optional true} [:vector ::eval-verdict]]
+   [::db {:optional true} :seon.embed/db]])
+
+(schema/register!
+  ::control-set
+  [:map
+   [::clamps [:vector ::clamp]]
+   [::renoise-spans [:vector ::renoise-span]]
+   [::injections [:vector :seon.diffusion.retrieval/injection]]
+   [::legs ::legs]])
+
+;; ============================================================
+;; Span overlap
+;; ============================================================
+
+(defn- overlaps?
+  "Half-open `[s e)` interval overlap."
+  [[s1 e1] [s2 e2]]
+  (and (< s1 e2) (< s2 e1)))
+
+;; ============================================================
+;; The unified dispatcher
+;; ============================================================
+
+(defn refine
+  "Run the unified oracle on one mid-denoise checkpoint and return the combined
+   `::control-set`. Runs PARSE (always) + RETRIEVE (always, reads the program
+   graph) + EVAL FOLD (only when `::eval-verdicts` are supplied — the eval
+   bundle is a separate node spawn).
+
+   - `::clamps` = good form spans NOT overlapping an injection or a renoise span.
+   - `::renoise-spans` = parse-error spans + any eval-bad form NOT already
+     covered by an injection (retrieval's correction supersedes a re-noise).
+   - `::injections` = retrieval's hallucinated-symbol corrections.
+   - `::legs` = `[:parse :retrieve]`, plus `:eval` when verdicts were folded."
+  {:malli/schema [:=> [:cat ::checkpoint] ::control-set]}
+  [{::keys [canvas-text aliases k eval-verdicts db]}]
+  (let [entries  (internal/parse-forms canvas-text {:strip-fences? false})
+        forms    (filter #(= :form (:kind %)) entries)
+        reads    (filter #(= :read (:kind %)) entries)
+        ;; RETRIEVE leg — hallucinated-symbol injections (reads the graph).
+        {::retrieval/keys [injections]}
+        (retrieval/retrieve-for-canvas
+          (cond-> {:seon.diffusion.retrieval/canvas-text canvas-text}
+            aliases (assoc :seon.diffusion.retrieval/aliases aliases)
+            k       (assoc :seon.diffusion.retrieval/k k)
+            db      (assoc :seon.diffusion.retrieval/db db)))
+        inj-spans     (mapv :seon.diffusion.retrieval/span injections)
+        ;; PARSE-tier renoise spans (broken syntax).
+        parse-renoise (mapv (fn [{:keys [span error-kind source]}]
+                              {::span span ::error-kind error-kind ::source source})
+                            reads)
+        ;; EVAL fold — a bad verdict becomes a renoise span UNLESS retrieval
+        ;; already named the real API for that span (injection supersedes).
+        eval-renoise  (->> eval-verdicts
+                           (remove ::ok?)
+                           (remove (fn [{::keys [span]}]
+                                     (some #(overlaps? span %) inj-spans)))
+                           (mapv (fn [{::keys [span error-kind]}]
+                                   {::span span
+                                    ::error-kind (or error-kind :throw)
+                                    ::source (subs canvas-text (first span) (second span))})))
+        renoise-spans (into parse-renoise eval-renoise)
+        bad-spans     (into inj-spans (map ::span renoise-spans))
+        ;; CLAMPS — good forms that carry no hallucination and are not broken.
+        clamps        (->> forms
+                           (keep (fn [{:keys [span source]}]
+                                   (when (and span
+                                              (not (some #(overlaps? span %) bad-spans)))
+                                     {::span span ::source source})))
+                           vec)]
+    {::clamps        clamps
+     ::renoise-spans renoise-spans
+     ::injections    (vec injections)
+     ::legs          (cond-> [:parse :retrieve]
+                       (seq eval-verdicts) (conj :eval))}))
+
+;; ============================================================
+;; Wire boundary — the combined set → the worker's {op:"refine", …} object
+;; ============================================================
+
+(defn to-wire
+  "Flatten a `::control-set` to the worker's JSON-ready `{op:\"refine\", …}`
+   object: parallel `clamps` / `renoise_spans` / `injections` arrays (each
+   `span` a JS `[start end]` array the worker maps via its offset_map) plus the
+   `legs` that ran. Each injection reuses [[retrieval/to-wire]] so its
+   `{op:\"clamp\", span, replacement, spec_text}` shape is byte-identical to the
+   standalone retrieval emit."
+  {:malli/schema [:=> [:cat [:map [::control-set ::control-set]]] :any]}
+  [{::keys [control-set]}]
+  (let [{::keys [clamps renoise-spans injections legs]} control-set]
+    #js {:op            "refine"
+         :legs          (clj->js (mapv name legs))
+         :clamps        (clj->js (mapv (fn [c] {:span (::span c) :source (::source c)})
+                                       clamps))
+         :renoise_spans (clj->js (mapv (fn [r] {:span       (::span r)
+                                                :error_kind (name (::error-kind r))
+                                                :source     (::source r)})
+                                       renoise-spans))
+         :injections    (let [arr (array)]
+                          (doseq [inj injections]
+                            (.push arr (retrieval/to-wire
+                                         {:seon.diffusion.retrieval/injection inj})))
+                          arr)}))

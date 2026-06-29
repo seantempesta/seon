@@ -19,7 +19,11 @@
                               ; it is DROPPED (see below).
         :source string        ; BYTE-FAITHFUL — what the agent typed, char-
                               ; for-char (load-bearing for resume re-eval)
-        :form any}            ; the read sexpr value (always a list/seq)
+        :form any             ; the read sexpr value (always a list/seq)
+        :span [start end]}    ; ABSOLUTE char offsets of the form in `text`
+                              ; (same basis as the `:read` :span) — the
+                              ; closed-loop oracle's clamp-to-HOLD spans for
+                              ; good forms
 
        {:kind :read
         :ok? false
@@ -646,7 +650,16 @@
                      (conj out {:kind      :form
                                 :narration (join-narration pending)
                                 :source    (:source token)
-                                :form      (:form token)}))
+                                :form      (:form token)
+                                ;; ABSOLUTE `[start end)` char span of this
+                                ;; form in `text` — the SAME basis the `:read`
+                                ;; entry carries, so the closed-loop renoise /
+                                ;; oracle layer has canvas-aligned spans for
+                                ;; the GOOD forms (clamp-to-HOLD) as well as
+                                ;; the broken ones (renoise). `offset` points
+                                ;; exactly at the form start (leading
+                                ;; whitespace was consumed as prior tokens).
+                                :span      [offset (:end token)]}))
 
               ;; A demoted DATA LITERAL (`{…}`/`[…]`/`#{…}`) — DROP the
               ;; eval, but emit ONE warning so the agent learns to wrap a

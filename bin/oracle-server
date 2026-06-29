@@ -70,16 +70,47 @@
      :tier   "parse"
      :errors errors})))
 
+(defn refine-parse
+  "The PARSE HALF of the unified `seon.diffusion.oracle/refine` control set,
+   computed on the CANVAS basis (no fence strip — spans share the worker's
+   `offset_map`). One bb call covers EXACTLY the parse tier:
+
+     - `clamps`        — good, syntactically-complete form spans to HOLD;
+     - `renoise_spans` — broken-syntax spans to RE-NOISE.
+
+   It CANNOT produce `injections` (the retrieve leg reads the program graph —
+   `:seon.fn/sym` — which is not on bb's classpath; that runs in the CLJS pod
+   oracle) nor fold eval verdicts (the node self-host bundle). So `injections`
+   is empty and `legs` is `[\"parse\"]`, with a `note` stating the boundary.
+   The form `:span` (canvas-aligned) comes straight from `parse-forms`."
+  [code]
+  (let [entries (internal/parse-forms code {:strip-fences? false})
+        forms   (filter #(= :form (:kind %)) entries)
+        reads   (filter #(= :read (:kind %)) entries)]
+    {:tier          "refine"
+     :legs          ["parse"]
+     :note          (str "bb covers the PARSE tier only — clamps + renoise_spans. "
+                         "injections (retrieve) need the program graph (CLJS pod "
+                         "oracle); eval verdicts need the node self-host bundle.")
+     :clamps        (mapv (fn [f] {:span (:span f) :source (:source f)}) forms)
+     :renoise_spans (mapv (fn [r] {:span       (:span r)
+                                   :error-kind (name (:error-kind r))
+                                   :source     (:source r)})
+                          reads)
+     :injections    []}))
+
 (defn handle
   "Dispatch one parsed request map (string keys, from JSON) to a response
    map. The op-dispatch seam: `parse`/`validate` run the parse tier (fence
    STRIPPING, the chat/LLM-reply basis); `parse-raw` runs the SAME tier
    with NO fence strip, so spans index the EXACT input — the canvas_text
    basis the diffusion worker's `offset_map` shares (closed-loop renoise).
+   `refine` returns the PARSE HALF of the unified oracle control set
+   (clamps + renoise_spans; see [[refine-parse]] for the bb-vs-pod boundary).
    The `strip-fences` flag (default true) is the per-request override on
    any parse op. Any other op returns an `unimplemented` marker (the
-   eval/retrieve tiers are the Node bundle's job — design §3/§5). `op`/`id`
-   are echoed when present."
+   eval/retrieve tiers are the Node/pod bundle's job — design §3/§5).
+   `op`/`id` are echoed when present."
   [req]
   (let [req (if (string? req) {"code" req} req)   ; bare-string line -> {code}
         op  (get req "op" "parse")
@@ -87,6 +118,7 @@
         strip-fences? (get req "strip-fences" (not= op "parse-raw"))
         base (case op
                ("parse" "validate" "parse-raw") (validate (get req "code" "") strip-fences?)
+               "refine"                          (refine-parse (get req "code" ""))
                {:error {:kind "unimplemented"}})]
     (cond-> (assoc base :op op)
       (some? id) (assoc :id id))))
