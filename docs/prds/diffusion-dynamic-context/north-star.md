@@ -259,8 +259,13 @@ When iterating autonomously (e.g. overnight), each cycle:
   skipped are exactly what it consumes). Switch = `cache_implementation="static"`. **CRITICAL: the live
   worker loads Dynamic cache = EAGER, so the "~450 tok/s" above is EAGER — the COMPILED path is UNTESTED.**
   Web band 2.5-3.8× → potentially **~1000 tok/s on the A100 WITH control** (the built-in stop compiles; the
-  Python parse/eval stop stays eager for the correctness experiments). **THE top untested speed lever.**
-  Risk: recompile-on-shape-change thrash with variable-length context (the one number to measure). (3) **`past_key_values` / `QuantizedCache` reuse** (transformers-native
+  Python parse/eval stop stays eager for the correctness experiments). **#8 TESTED → naive wiring ERRORS:**
+  `cache_implementation="static"` alone → `RuntimeError: upper/lower bound inconsistent with step sign`
+  (warmup) + `AttributeError: StaticSlidingWindowLayer has no max_batch_size` (steady). So "the switch is
+  just the cache" was too simple — DiffusionGemma's SLIDING-WINDOW static cache needs explicit init + a
+  compiled-loop range bug. Eager baseline this run ~154 tok/s. **The ~1000 tok/s path is feasible-per-source
+  but BLOCKED on a non-trivial static-cache setup fix** (research-first dig in progress) — feasibility now
+  uncertain, NOT the simple flip #7 projected. (3) **`past_key_values` / `QuantizedCache` reuse** (transformers-native
   prefix/skill KV reuse, composes with the per-block `kv-section-caching` design); (4) **Fast-dLLM
   DualCache** (NVIDIA, training-free in-loop suffix-KV, control-compatible) for extra headroom. The control
   worker's speed comes from COMPOSING these, not a custom engine. (`pytorch-vs-vllm-roadmap` §5b.)
