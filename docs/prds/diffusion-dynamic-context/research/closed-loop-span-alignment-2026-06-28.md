@@ -168,6 +168,32 @@ returned by `denoise_to_step` is for the pod/observer; the renoise math re-deriv
      already owns byte-for-byte). Do NOT instead rebuild `offset_map` over the stripped
      text — that splits the basis derivation between the two ends and reintroduces drift.
 
+   **DONE (2026-06-28) — option (b) is BUILT + locally proven (no GPU).** The ONE fn was
+   extended, not forked: `parse-forms` now takes `{:strip-fences? bool}` (default true), and
+   the oracles expose a no-strip path:
+
+   - `seon.repl.internal/parse-forms` (`internal.cljc:594`) — `[text & [{:keys
+     [strip-fences?] :or {strip-fences? true}}]]`; `false` skips `strip-code-fences` so spans
+     stay absolute into the EXACT input.
+   - `bin/oracle-server` — new `op:"parse-raw"` (and a per-request `"strip-fences":false`
+     override on any parse op) → `validate code false`.
+   - `seon.worker_validator.cljs` — mirrored: `validate`/`validate-json` take `strip-fences?`;
+     `serve!` accepts the object framing (`{op:"parse-raw"}` / `{strip-fences:false}`) AND the
+     historical bare-string line. Byte-identical to the bb output.
+
+   **Local proof** (same fenced input ` ```clojure\n(def mean [[v] ...)\n``` `, both runtimes):
+
+   ```
+   default parse  → span [1,21]    ; relative to the STRIPPED string (fence line removed)
+   parse-raw      → span [11,34]   ; ABSOLUTE into the raw fenced string (form @ char 11,
+                                   ;   right after "```clojure\n") == canvas_text/offset_map basis
+   strip-fences:false → span [11,34]
+   ```
+
+   `bin/test-parser` green (19 tests / 238 assertions). **Closed-loop driver:** parse
+   `canvas_text` with `op:"parse-raw"` (NOT the default `parse`) so the returned `:span`
+   offsets index the raw `canvas_text` the `offset_map` was built over.
+
 3. **Piecewise fidelity (MUST MEASURE once live).** Because the oracle parses the
    PIECEWISE `canvas_text` (not the human-readable joint `partial_text`), per-token `▁`/
    space artifacts could make the parser flag structure that a joint decode would not (or

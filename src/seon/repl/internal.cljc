@@ -590,9 +590,17 @@
    entry and parsing continues; a prose-token throw (`80s`) is dropped.
 
    Markdown code-fence lines (` ``` `, ` ```clojure `, ` ~~~ `, …)
-   are stripped before reading — see `strip-code-fences`."
-  [text]
-  (let [text (strip-code-fences text)]
+   are stripped before reading — see `strip-code-fences`.
+
+   `:strip-fences?` (opts, default true) controls that strip. Pass
+   `false` to keep every `:span [s e]` an ABSOLUTE char offset into the
+   EXACT input string (no fence-line removal shifting later spans). The
+   closed-loop renoise path needs this: the diffusion worker's
+   `offset_map` indexes the RAW `canvas_text`, so its parser spans must
+   share that basis — see
+   `docs/prds/diffusion-dynamic-context/research/closed-loop-span-alignment-2026-06-28.md`."
+  [text & [{:keys [strip-fences?] :or {strip-fences? true}}]]
+  (let [text (if strip-fences? (strip-code-fences text) text)]
     ;; `pending` accumulates REAL `;;` comment lines (`;` stripped) — the
     ;; taught reasoning preamble. Bare prose is DROPPED, not accumulated,
     ;; so there is no prose-run to track; `pending` carries THROUGH

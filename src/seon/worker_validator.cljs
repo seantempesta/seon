@@ -54,6 +54,7 @@
    span."
   (:require
     [clojure.string :as str]
+    [goog.object :as gobj]
     [seon.repl.internal :as internal]
     ["fs" :as fs]
     ["readline" :as readline]))
@@ -79,9 +80,15 @@
    `:tier` arg dispatch) that, AFTER a clean parse, compiles/evals the
    forms and appends eval-level errors. Keep that tier in its OWN fn so
    the heavy program-graph / cljs.js stack never loads into THIS lean
-   bundle — the parse tier must stay sub-millisecond and dependency-light."
-  [code]
-  (let [entries (internal/parse-forms code)
+   bundle — the parse tier must stay sub-millisecond and dependency-light.
+
+   `strip-fences?` (default true) controls markdown fence stripping. Pass
+   false for the CANVAS-TEXT basis: spans then index the EXACT input
+   string, aligning with the diffusion worker's `offset_map`. Mirrors the
+   bb `bin/oracle-server` `parse-raw` op (closed-loop renoise). See
+   `closed-loop-span-alignment-2026-06-28.md`."
+  [code & [strip-fences?]]
+  (let [entries (internal/parse-forms code {:strip-fences? (not (false? strip-fences?))})
         forms   (filterv #(= :form (:kind %)) entries)
         errors  (->> entries
                      (filter #(= :read (:kind %)))
@@ -115,27 +122,54 @@
 (defn validate-json
   "Pure string→string: `code` in, one line of JSON out. The exact
    transform the subprocess performs. Exposed (and instrument-free) so a
-   test / the REPL can exercise the whole wire path without a subprocess."
-  [code]
-  (.stringify js/JSON (->js (validate code))))
+   test / the REPL can exercise the whole wire path without a subprocess.
+   `strip-fences?` (default true) is threaded to [[validate]] — pass false
+   for the canvas_text (no-fence-strip) basis."
+  [code & [strip-fences?]]
+  (.stringify js/JSON (->js (validate code (not (false? strip-fences?))))))
 
 ;; ============================================================
 ;; Subprocess entry — read ALL of stdin, emit one JSON line.
 ;; ============================================================
 
 (defn- serve!
-  "Persistent line server (the `--serve` hot path). Reads ONE JSON-encoded
-   string per stdin line (so embedded newlines in the code survive as \\n),
-   validates it, and writes ONE JSON result line per request. The worker
-   spawns this ONCE and reuses it for every checkpoint — that reuse is what
-   turns the ~100ms cold spawn into a ~0.1ms warm parse."
+  "Persistent line server (the `--serve` hot path). Reads ONE JSON value
+   per stdin line, validates it, and writes ONE JSON result line per
+   request. The worker spawns this ONCE and reuses it for every checkpoint
+   — that reuse is what turns the ~100ms cold spawn into a ~0.1ms warm
+   parse.
+
+   Two line framings, mirroring the bb `bin/oracle-server` wire:
+
+   - a bare JSON STRING (`\"(def x [)\"`) → parse WITH fence stripping (the
+     historical framing);
+   - a JSON OBJECT (`{\"code\":\"…\",\"op\":\"parse-raw\"}` /
+     `{\"code\":\"…\",\"strip-fences\":false}`) → `op` `parse-raw` OR an
+     explicit `strip-fences:false` selects the no-fence-strip canvas_text
+     basis. `op`/`id` are NOT echoed here (the lean bundle's result shape
+     stays `{forms,tier,errors}`); the bb server echoes them.
+
+   A parse-forms throw is caught per line so one bad input never crashes
+   the persistent process."
   []
   (let [rl (.createInterface readline #js {:input (.-stdin js/process)})]
     (.on rl "line"
          (fn [line]
-           (let [code (try (.parse js/JSON line)
-                           (catch :default _ ""))]
-             (println (validate-json code)))))))
+           (let [out (try
+                       (let [parsed (.parse js/JSON line)]
+                         (if (string? parsed)
+                           (validate-json parsed)
+                           (let [code (or (gobj/get parsed "code") "")
+                                 op   (gobj/get parsed "op")
+                                 sf   (gobj/get parsed "strip-fences")
+                                 strip? (if (some? sf) sf (not= op "parse-raw"))]
+                             (validate-json code strip?))))
+                       (catch :default e
+                         (.stringify js/JSON
+                           #js {:forms 0 :tier "parse" :errors #js []
+                                :error #js {:kind "bad-request"
+                                            :message (str (.-message e))}})))]
+             (println out))))))
 
 (defn -main
   "Bundle entry. Two modes:

@@ -50,9 +50,15 @@
   "Pure: code-string -> the Node-validator-IDENTICAL result map
    {:forms n :tier \"parse\" :errors [{:error-kind name :span [s e] :source s}]}.
    Mirrors seon.worker-validator/validate + ->js (keywords flattened to NAME
-   strings at this boundary, exactly as the Node bundle does)."
-  [code]
-  (let [entries (internal/parse-forms code)
+   strings at this boundary, exactly as the Node bundle does).
+
+   `strip-fences?` (default true) controls markdown fence stripping. Pass
+   false for the CANVAS-TEXT basis: spans then index the EXACT input
+   string, aligning with the diffusion worker's `offset_map` (see the
+   `parse-raw` op below + closed-loop-span-alignment-2026-06-28.md)."
+  ([code] (validate code true))
+  ([code strip-fences?]
+  (let [entries (internal/parse-forms code {:strip-fences? strip-fences?})
         forms   (filterv #(= :form (:kind %)) entries)
         errors  (->> entries
                      (filter #(= :read (:kind %)))
@@ -62,19 +68,25 @@
                               :source     source})))]
     {:forms  (count forms)
      :tier   "parse"
-     :errors errors}))
+     :errors errors})))
 
 (defn handle
   "Dispatch one parsed request map (string keys, from JSON) to a response
-   map. The op-dispatch seam: `parse`/`validate` run the parse tier; any
-   other op returns an `unimplemented` marker (the eval/retrieve tiers are
-   the Node bundle's job — design §3/§5). `op`/`id` are echoed when present."
+   map. The op-dispatch seam: `parse`/`validate` run the parse tier (fence
+   STRIPPING, the chat/LLM-reply basis); `parse-raw` runs the SAME tier
+   with NO fence strip, so spans index the EXACT input — the canvas_text
+   basis the diffusion worker's `offset_map` shares (closed-loop renoise).
+   The `strip-fences` flag (default true) is the per-request override on
+   any parse op. Any other op returns an `unimplemented` marker (the
+   eval/retrieve tiers are the Node bundle's job — design §3/§5). `op`/`id`
+   are echoed when present."
   [req]
   (let [req (if (string? req) {"code" req} req)   ; bare-string line -> {code}
         op  (get req "op" "parse")
         id  (get req "id")
+        strip-fences? (get req "strip-fences" (not= op "parse-raw"))
         base (case op
-               ("parse" "validate") (validate (get req "code" ""))
+               ("parse" "validate" "parse-raw") (validate (get req "code" "") strip-fences?)
                {:error {:kind "unimplemented"}})]
     (cond-> (assoc base :op op)
       (some? id) (assoc :id id))))
