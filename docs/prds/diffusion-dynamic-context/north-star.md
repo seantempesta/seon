@@ -61,7 +61,20 @@ correctness metric.
 | `datahike` skill | write a Datalog query | 0/8 real-API, 62% hallucinated | **8/8** real Datalog | KEEP — huge lift; lock as gate |
 | `clojurescript` skill | write a pod `^:async`/`await` fn | 0/8 `^:async`, 0/8 real-API, 7/8 hallucinated | **8/8** `^:async` + real `transact!` + interop | KEEP — huge lift; the model gets `await` unaided but NOT the `^:async` wrapper/real-API |
 | `repl` skill | EXPLAIN a parser error (prose) | 0/8 real-parser, **8/8 hallucinated JSON/XML** | 7/8 real `parse-forms`/parinfer, 0/8 hallucinated | KEEP — huge lift; works for PROSE/explanation too, not just code-gen |
+| `data-oriented-clojure` skill | design session-history storage (mindset) | 1/8 EAV, 0/8 namespaced, **8/8 hallucinated commercial-Seon SaaS** | 8/8 EAV + namespaced, 1/8 hallucinated | KEEP — huge lift; redirects the commercial-Seon prior to our EAV model |
 | `seon.*` required-API render (feat `844ec448`) | (context section, not a skill) | — | shipped, ~2.9k tok/turn | **LIFT UNMEASURED** — must A/B to justify the token cost or trim the cap |
+
+### The deep finding (5/5 skills) — context OVERRIDES confident-wrong priors
+
+In EVERY skill the control fails the SAME way: it hallucinates a confident,
+plausible-but-wrong answer the model already "knows" — JSON/XML for "parser," the
+*commercial* Seon fraud-detection SaaS for data-modeling, a fake query DSL, an
+`async` binding form. The skill's job is **not adding facts — it's overriding the
+model's strong wrong priors** and redirecting them to Seon's actual reality. This is
+*why* dynamic context is load-bearing for THIS model: a small, capable model has
+confident defaults, and the right context is what reroutes them. (Implication for
+the buzzsaw: the per-step parse/eval/renoise control signal is doing the same job
+*during* generation that the skill does *before* it — overriding a wrong commit.)
 
 **Read of the data so far (3/3 skills, all ~0→100%):** without context the model knows
 ~none of Seon's API (it hallucinates a plausible DSL); a good skill takes it to 100%
