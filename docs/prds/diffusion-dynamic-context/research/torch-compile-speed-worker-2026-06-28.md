@@ -636,3 +636,84 @@ Cheap to TRY, decisive either way — worth one redeploy:
    find_spec is gone but a **CUDA-graphs / `reduce-overhead`** error replaces it → it's the
    deep wall → stop, it's upstream, KV-cache is the lever. Do NOT chase (b) with
    `suppress_errors` (that just silently de-compiles).
+
+## #15 — does transformers 5.12 batched_mm rescue the compiled path?
+
+> #9 left a live hope: *"the only clean escape is the transformers 5.12.0 decode-stage
+> auto-switch (grouped_mm → batched_mm), unverified for DiffusionGemma."* The owner asked
+> for a go/no-go on a `torch 2.10 + transformers 5.12` redeploy built on that hope. This
+> section RESOLVES it from source. Grounds: vendored `reference-code/transformers` is at
+> **v5.11.0** (`git describe` → `v5.11.0`; `__init__.py:__version__ = "5.11.0"`) — the SAME
+> pin the worker bakes — cross-checked against transformers `main` (raw GitHub) for 5.12.x.
+> No GPU.
+
+### VERDICT — the 5.12 auto-switch is CONFIRMED DEAD for DiffusionGemma; redeploy-for-the-switch is a NO-GO. But a cheaper lever the #9 dig MISSED is live: force `batched_mm` on the EXISTING worker (no torch/transformers bump).
+
+Three independent nails kill the auto-switch hope, then one finding reopens the path more cheaply than #9's torch-bump.
+
+#### Q1 — the auto-switch is NOT a num_tokens branch in `moe.py`; it's a whole-decode context-manager swap, and it's already in 5.11.0
+
+There is **no decode-stage / `num_tokens==1` branch inside `moe.py`** — not in v5.11.0, not on `main`. `moe.py` dispatch is a pure config-string lookup in BOTH: `experts_forward = experts_interface.get_interface(self.config._experts_implementation, original_forward)` (`integrations/moe.py:572`), resolving a FIXED per-model string (`grouped_mm` / `batched_mm`), set once at load (`modeling_utils.py:2048-2049`, default `grouped_mm`). Fetching `main`'s `moe.py` confirms the same — no `cache_position` / `num_tokens` / `is_decoding` condition selecting between the two `*_experts_forward` fns.
+
+The actual switch is a **context manager that swaps the config wholesale for the entire decode phase**, in the generation layer, not the MoE layer:
+
+```python
+# generation/utils.py:2098-2114  (PRESENT IN v5.11.0 — not new in 5.12)
+@contextmanager
+def _optimize_model_for_decode(self):
+    original_experts_implementation = self.config._experts_implementation
+    if original_experts_implementation == "grouped_mm" and self.device.type != "cpu":
+        ...  # "switching to 'batched_mm' for the decoding stage ... more performant ... on smaller inputs"
+        self.set_experts_implementation("batched_mm")
+    try:
+        yield
+    finally:
+        if original_experts_implementation == "grouped_mm" and self.device.type != "cpu":
+            self.set_experts_implementation(original_experts_implementation)
+```
+
+So the trigger is **not token count at all** — it is "are we inside the standard generate() decode loop." That already settles the #9 framing: bumping transformers 5.11→5.12 changes **nothing** about this mechanism, because the mechanism is byte-present in 5.11.0 (the deployed pin) already.
+
+#### Q2 — it does NOT fire for DiffusionGemma's forward, because DiffusionGemma's custom `generate` never enters that context manager (THE CRUX)
+
+`_optimize_model_for_decode` is invoked from exactly two sites — both the *standard* autoregressive decode loop — and **neither is DiffusionGemma**:
+
+```
+$ grep -rn "_optimize_model_for_decode" src/transformers/
+generation/utils.py:2099                          # def (the context manager)
+generation/utils.py:2795                          # standard GenerationMixin._sample decode loop
+models/higgs_audio_v2/generation_higgs_audio_v2.py:312
+```
+
+DiffusionGemma ships a **full override** generate — `DiffusionGemmaGenerationMixin.generate` (`generation_diffusion_gemma.py:543`), explicitly self-described as replacing GenerationMixin logic ("Overriding GenerationMixin-related functions that are not relevant to DiffusionGemma", `:231-232`; "refactor GenerationMixin and this to reuse logic without requiring inheritance", `:857,878`). Its denoise loop is **never wrapped** in `_optimize_model_for_decode`. Therefore the compiled decoder forward — `self._compiled_decoder_forward = torch.compile(self.forward, mode="reduce-overhead", fullgraph=True)` (`generation_diffusion_gemma.py:1245`; `cudagraph_mark_step_begin()` at `:1019` confirms CUDA graphs are live) — runs with `_experts_implementation` still `= "grouped_mm"` for the WHOLE block-diffusion run. And the HF compat table is explicit: `grouped_mm` is *"not compatible with CUDA graphs … use `mode=None` or `mode="max-autotune-no-cudagraphs"`"* ([Experts backends](https://huggingface.co/docs/transformers/main/en/experts_interface)), while DiffusionGemma hardwires `reduce-overhead` (CUDA graphs) with no knob (`generation_diffusion_gemma.py:1241,1245,1249,1253,1260`). The auto-switch that would have dodged this is simply not on DiffusionGemma's code path. (It looks like an upstream gap — DiffusionGemma's custom generate forgot the wrap — but as-shipped it does not fire, and that is what matters.)
+
+#### Q3 — 5.12 alone does NOT clear the find_spec; and clearing it (torch 2.10) only re-exposes the CUDA-graphs wall
+
+The `find_spec` at `moe.py:301` is reachable **only on torch < 2.10** (on ≥2.10 `torch.nn.functional.grouped_mm` exists → `_can_use_grouped_mm` returns at `:298` before the version check — #9 §1). transformers 5.12 does **not** change this: `moe.py`'s `_can_use_grouped_mm` logic and the `assume_constant_result` wrapper (`moe.py:37-38`, already in 5.11.0) are the same on `main`. So **5.12 on torch 2.9 still breaks at find_spec**; only a **torch 2.10** bump removes it — and per Q2 that bump just turns the find_spec break into the grouped_mm-⊥-CUDA-graphs break, with no batched_mm rescue for DiffusionGemma. Net: `torch 2.10 + transformers 5.12` for DiffusionGemma's *grouped_mm* path = **no win**. NO-GO on that redeploy.
+
+#### The lever #9 missed — force `batched_mm` explicitly, on the EXISTING 5.11.0 / torch-2.9 worker
+
+The auto-switch is unreachable, but the BACKEND it selects is a first-class, documented load kwarg — and selecting it by hand sidesteps BOTH blockers at once, with zero stack bump:
+
+- **Clears find_spec (no torch bump):** `batched_mm_experts_forward` (`moe.py:118-179`) is pure `repeat_interleave` → gather → `torch.bmm` (`_batched_linear`). It **never calls `_grouped_mm` / `_can_use_grouped_mm`**, so the `find_spec` version-check at `:301` is never on the traced graph. (verified: `grep` of `moe.py:118-179` for `_grouped`/`_can_use`/`find_spec` → none.)
+- **Clears the CUDA-graphs wall (no transformers bump):** the compat table rates `batched_mm` as **all modes, `fullgraph=True` Yes** — explicitly CUDA-graph / `reduce-overhead` clean ([Experts backends](https://huggingface.co/docs/transformers/main/en/experts_interface)). It is exactly the backend the auto-switch would have chosen — not a brittle monkeypatch, the legitimate API (`set_experts_implementation` / `experts_implementation=`).
+
+This is a **one-line worker change on the current stack** (transformers 5.11.0, torch 2.9.0 — no image rebuild for the deps, no `Dockerfile` edit). It strictly dominates #9's `torch 2.10 + 5.12` redeploy as the next probe.
+
+**The one thing only a GPU run resolves (→ STILL UNCERTAIN, but a $0-rebuild probe):** `batched_mm` **duplicates** the selected expert params per token and "has no offset to skip" the wasted GEMM (`moe.py:130,136`; doc: *"Uses more memory due to parameter duplication … Fastest for small inputs"*). DiffusionGemma's forward processes the **whole canvas** each pass (S = `canvas_length × num_top_k` — large), precisely the regime where `grouped_mm` wins on raw GEMM and `batched_mm` balloons memory. So whether **CUDA-graph-captured `batched_mm` net-beats eager `grouped_mm`** (or OOMs the A100-80) for the canvas shape is genuinely GPU-only — but it costs one drive, not a torch/transformers/Docker redeploy.
+
+#### The exact change + re-test (supersedes #9 §(3) as the next probe)
+
+1. `tmp/flash-diffgemma/gpu_worker.py:55-57` and the eager fallback `:60-62` — add `experts_implementation="batched_mm"` to BOTH `DiffusionGemmaForBlockDiffusion.from_pretrained(...)` calls:
+
+   ```python
+   _CACHE["model"] = DiffusionGemmaForBlockDiffusion.from_pretrained(
+       MID, dtype="auto", device_map="auto", token=tok,
+       attn_implementation="sdpa", experts_implementation="batched_mm")
+   ```
+
+   No `Dockerfile` / torch / transformers edit. Bump `FLASH_GPU_IMAGE` tag so the warm worker is recreated (per CLAUDE.md "Deployment stability"); `verify_fresh.py` → `FRESH ✓` first.
+2. Re-run the §8-corrected compiled call (`compile=true`, `max_length=512`, no `max_new_tokens`), `TORCH_LOGS="graph_breaks,recompiles"`. Outcomes —
+   (a) clean compile + real `tok_per_s` jump → forcing `batched_mm` was the whole story (compiled path LANDS on the existing stack); (b) compiles clean but `tok_per_s` ≤ eager grouped_mm, or OOM → `batched_mm`'s param-duplication loses on the large canvas → compiled path is a dead end for THIS model shape, KV-cache reuse stays the only A100 lever (#8). Do NOT fall back to torch 2.10 + 5.12 — Q1–Q3 prove it adds nothing for DiffusionGemma.
+
+**Bottom line for the owner:** the `torch 2.10 + transformers 5.12` redeploy is a **NO-GO** — the 5.12 batched_mm auto-switch is real but structurally cannot fire for DiffusionGemma's override-generate, and it isn't even new in 5.12. The compiled path is **not yet confirmed dead**: the cheaper, correct next probe is **force `experts_implementation="batched_mm"` on the current 5.11.0/torch-2.9 worker** and measure once. That single $0-rebuild drive is decisive either way.
