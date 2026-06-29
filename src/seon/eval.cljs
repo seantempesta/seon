@@ -2634,13 +2634,13 @@
             ;; The raw Promise NEVER becomes the displayed value — the value
             ;; renderer must not `seq` a Promise.
             pending-promise (:pending awaited)
-            ;; `(some? pending-promise)`, NOT a bare `pending-promise` test:
-            ;; in a CLJS `^:async` fn, a Promise in an `if`/`or`/`cond` TEST
-            ;; position is AUTO-AWAITED (the compiler emits `await` for the
-            ;; condition). A bare `pending-promise` test would block on the
-            ;; handle and resolve it — exactly what we must NOT do. A boolean
-            ;; test never awaits; the Promise stays a live handle, only ever
-            ;; referenced in branch/arg positions (which do not await).
+            ;; `pending-promise` is a Promise-or-nil, so `(some? …)` is
+            ;; behaviorally identical to a bare test (only nil is falsey) — it
+            ;; just states the present-or-absent intent. CLJS has NO
+            ;; implicit-await pass: a Promise in an `if`/`or`/`cond` TEST is a
+            ;; plain truthy object, NEVER awaited (the only await-emitting sites
+            ;; are the `await` macro and the iife-open). So neither form would
+            ;; resolve the handle; the Promise stays live for the later stash.
             pending?        (some? pending-promise)
             result
             (cond
