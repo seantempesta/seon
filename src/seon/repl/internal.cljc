@@ -299,15 +299,29 @@
    non-evaluated prose anyway and the agent's real signal is \"fix the
    broken form above\" (simple-core-over-edge-cases)."
   [text offset error-kind]
-  (let [tail (subs text offset)]
-    (if (= error-kind :eof)
-      (if-let [m (re-find #"\n\(" tail)]
-        (backup-over-comment-block
-          text offset (+ offset (str/index-of tail m) 1))  ; +1 lands on the `(`
-        (count text))
-      (if-let [m (re-find #"\n[;\(]" tail)]
-        (+ offset (str/index-of tail m) 1)  ; +1 to land on the anchor
-        (count text)))))
+  (let [tail      (subs text offset)
+        candidate (if (= error-kind :eof)
+                    (if-let [m (re-find #"\n\(" tail)]
+                      (backup-over-comment-block
+                        text offset (+ offset (str/index-of tail m) 1))  ; +1 lands on the `(`
+                      (count text))
+                    (if-let [m (re-find #"\n[;\(]" tail)]
+                      (+ offset (str/index-of tail m) 1)  ; +1 to land on the anchor
+                      (count text)))]
+    ;; STRICT-ADVANCE GUARD — a recovery hop MUST move past `offset` or the
+    ;; outer parse-forms loop recurs on the same span forever. The only branch
+    ;; that can fail to advance is the :eof `backup-over-comment-block` path:
+    ;; when the anchor's contiguous `;`-comment block backs all the way down to
+    ;; `offset` itself, backup returns the floor (== offset). Today that needs
+    ;; `offset` to start with `;`, which parse-forms never feeds here (a `;`
+    ;; line reads as a clean comment token, not an error) — but the parser is
+    ;; load-bearing for the diffusion oracle, so we enforce the invariant at the
+    ;; source rather than rely on that argument holding as the recovery anchors
+    ;; evolve. A non-advancing candidate bails recovery to EOF: the remaining
+    ;; tail becomes ONE honest :read span and the loop terminates.
+    (if (<= candidate offset)
+      (count text)
+      candidate)))
 
 (defn- next-newline-recovery
   "Recovery point for a PROSE-classified failing span (A.1): the offset

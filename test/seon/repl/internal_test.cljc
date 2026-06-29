@@ -522,6 +522,41 @@
       (is (str/includes? (:source read-entry) "(bar)")))))
 
 ;; ============================================================
+;; Recovery STRICTLY advances — a recovery hop must move PAST the failing
+;; `offset`, or parse-forms recurs on the same span forever (the diffusion
+;; oracle + worker-validator both drive this parser, so a non-terminating
+;; recovery is a real hang). The latent edge: in the :eof branch
+;; `backup-over-comment-block` can back the recovery anchor all the way down
+;; to the failing offset (== floor) when that offset begins a `;`-comment
+;; block — find-recovery-point then returned `offset` itself, a no-advance.
+;; The strict-advance guard bails such a candidate to EOF.
+;; ============================================================
+
+(def ^:private find-recovery-point #'parse/find-recovery-point)
+
+(deftest recovery-strictly-advances
+  (testing "the no-advance edge: :eof offset on a `;`-comment line backs to floor"
+    ;; backup-over-comment-block walks the contiguous `;` block down to floor
+    ;; (offset 0) — pre-guard this returned 0 (== offset), an infinite loop.
+    (let [text ";; a\n;; b\n(c)"]
+      (is (> (find-recovery-point text 0 :eof) 0)
+          "recovery must advance past the failing offset, never equal it")
+      ;; bailed to EOF: the whole tail becomes ONE :read span, loop terminates
+      (is (= (count text) (find-recovery-point text 0 :eof)))))
+
+  (testing "normal advancing branches are unaffected"
+    (is (= 8 (find-recovery-point "(foo \"x\n;;c\n(g)" 0 :eof)))
+    (is (= 9 (find-recovery-point "(+ 1 3x)\n(ok)" 0 :read))))
+
+  (testing "parse-forms TERMINATES on a comment-heavy unclosed form (no hang)"
+    ;; full-loop proof: an unclosed form whose only ahead-anchor sits under a
+    ;; `;`-comment block must still return a finite, clean result.
+    (let [entries (parse/parse-forms ";; lead\n(open \"unclosed\n;; mid\n(inner)")]
+      (is (vector? entries))
+      (is (some #(= :read (:kind %)) entries)
+          (str "expected a :read failure, got " (pr-str (mapv :kind entries)))))))
+
+;; ============================================================
 ;; A.1 — prose-vs-code classification. A reader THROW on a prose token
 ;; (`80s`, `to:`, `detail:`, `v1.0`) must be DROPPED, NOT recorded as a
 ;; `:read` failure — UNLESS the failing span has a LIST opener `(` at its
