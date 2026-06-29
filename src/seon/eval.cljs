@@ -3119,7 +3119,7 @@
    failure: every entry gets its own try + record + stash; entry
    N+1 always runs even if N failed.
 
-   Per entry, two kinds:
+   Per entry, three kinds (`:form` / `:read` / `:comment`, below):
 
    The per-form loop is a fold over `parsed`, carrying `current-ns`
    as the accumulator. Each successful eval that switches ns (via

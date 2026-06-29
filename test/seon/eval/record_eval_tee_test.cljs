@@ -35,6 +35,7 @@
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.repl :as repl]
+    [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]
     [seon.warn :as warn]))
 
@@ -944,3 +945,42 @@
       (is (some? (some vector? out))))
     (testing "empty blocked set is a no-op identity"
       (is (= tee (seval/reject-core-overrides tee #{}))))))
+
+;; ---------------------------------------------------------------------------
+;; #26 half (b) — the eval-reader multi-form behavior is CORRECT, not buggy.
+;;
+;; A multi-form SOURCE STRING is two distinct concerns:
+;;   1. EVAL: `cljs.js/eval-str` runs EVERY top-level form in the string and
+;;      returns the LAST form's value — nothing is silently dropped, the
+;;      return value is well-defined (live-proven: "(def aaa 1)(def bbb 2)(+
+;;      aaa bbb)" => 3 with aaa+bbb both bound).
+;;   2. PERSISTENCE: the strict-head tee gate `defn-form?` is TRUE only for a
+;;      lone single `(defn …)`; a multi-form source is FALSE → it RUNS as
+;;      scratch but is never teed/replayed. Correct: re-evaling on boot can
+;;      never re-fire a multi-form's side effects (#29 class).
+;;
+;; These don't conflict because the AGENT path never feeds a multi-form
+;; string to one tee gate: `seon.repl.internal/parse-forms` SPLITS the
+;; submission into one `:kind :form` entry PER top-level form, and
+;; eval-batch! classifies EACH entry's single-form source — so every
+;; individual `(defn …)` in a multi-defn submission DOES persist.
+;; ---------------------------------------------------------------------------
+
+(deftest multi-form-source-reader-behavior-is-correct
+  (testing "read-all-forms returns ALL top-level forms (nothing dropped)"
+    (is (= 3 (count (#'seval/read-all-forms
+                      "(def a 1) (def b 2) (+ a b)")))))
+  (testing "defn-form? tee gate: TRUE for a lone defn, FALSE for multi-form"
+    (is (true?  (seval/defn-form? "(defn f [] 1)")))
+    (is (false? (seval/defn-form? "(defn f [] 1) (defn g [] 2)")))
+    (is (false? (seval/defn-form? "(def x 1) (def y 2)"))))
+  (testing "the AGENT path splits multi-form so each defn tees individually:
+            parse-forms yields one single-form entry per top-level form, and
+            each lone (defn …) entry passes the same defn-form? tee gate"
+    (let [entries (repl-internal/parse-forms
+                    "(defn f1 [] 1)\n(defn f2 [] 2)\n(+ 1 2)")]
+      (is (= 3 (count entries)))
+      (is (= [:form :form :form] (mapv :kind entries)))
+      (is (= [true true false]
+             (mapv #(seval/defn-form? (:source %)) entries))
+          "both defns tee; the trailing expr does not — single-lane resume"))))
