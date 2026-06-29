@@ -50,15 +50,19 @@ causal). torchao INT8 = dead end (MoE experts skipped).
 - **Deploy the co-location image** → unlocks the KV-cache **worker-reuse half** (the 62%
   win — keying is built, contract documented) + the per-step renoise loop (driver built).
   THE highest-value next step.
-- **Compiled path (~1000 tok/s)** → root-caused (`5245828c`): the `find_spec` break is
-  structural — torch 2.9.0 lacks `grouped_mm` so the MoE forward hits the version-check
-  branch Dynamo refuses to trace (`moe.py:301`). One owner-gated experiment: bump
-  `torch==2.10.x` + `transformers==5.12.1`, re-test compiled with
-  `TORCH_LOGS="graph_breaks,recompiles"`. Caveat: it likely trades find_spec for a
-  CUDA-graphs break (`grouped_mm` is CUDA-graph-incompatible while the lib hardwires
-  `reduce-overhead`); the clean escape is transformers ≥5.12's grouped→batched_mm
-  decode auto-switch, unverified for DiffusionGemma. If (b), stop — KV-cache reuse is
-  the only broadly-applicable A100 lever.
+- **Compiled path (~1000 tok/s)** → the redeploy plan changed. The torch-2.10 +
+  transformers-5.12 bump is **NO-GO** (`957f0a7b`): the `grouped_mm→batched_mm` decode
+  auto-switch (`_optimize_model_for_decode`, already in 5.11.0, not a 5.12 feature)
+  never fires for DiffusionGemma's override-generate, so the bump only trades find_spec
+  for the standing CUDA-graphs wall. **The cheap lever the find_spec dig missed:** force
+  `experts_implementation="batched_mm"` on the EXISTING 5.11.0/torch-2.9 worker
+  (`gpu_worker.py:55-62`) — `batched_mm` never calls `_can_use_grouped_mm` (clears
+  find_spec, no torch bump) and is CUDA-graph-clean per the HF compat table (clears the
+  `reduce-overhead` wall, no transformers bump). One-line, no image rebuild. **Being
+  built as a payload knob** so the owner can A/B grouped vs batched on the live EP. The
+  one GPU-only unknown: does CUDA-graph `batched_mm` net-beat eager `grouped_mm` (or OOM)
+  on the whole-canvas forward (S = canvas_length × top_k) — a $0-rebuild single-drive
+  probe. If batched_mm doesn't win, KV-cache reuse stays the only A100 lever.
 - **Live-measure on first GPU run:** residual-#3 (piecewise `canvas_text` vs joint parse
   fidelity — `▁`/space artifacts) is a characterization item, not a wiring bug.
 
