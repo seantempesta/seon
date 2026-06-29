@@ -90,13 +90,26 @@ causal). torchao INT8 = dead end (MoE experts skipped).
     `{canvas-text,offset-map}` → `{clamps, renoise-spans, injections}` partitioning the canvas
     (parse=good/broken spans, retrieve=hallucinations, eval folds bad verdicts to renoise unless
     an injection supersedes). `bin/oracle-server op:"refine"` covers the parse tier in one bb
-    call; injections need the pod graph, eval needs the node bundle. Suite 832/3804. THE
-    buzzsaw orchestrator — the worker calls it once per checkpoint K. End-to-end AWAITS-GPU.
+    call; injections need the pod graph, eval needs the node bundle. THE buzzsaw orchestrator
+    — the worker calls it once per checkpoint K.
+16. **End-to-end control LOOP** (`2bcf42b4`) — `seon.diffusion.loop`: `checkpoint-policy`
+    (CONVERGED / GIVE-UP[budget+no-progress] / CONTINUE) + the `dry-run` loop +
+    `apply-control-set` mock worker. Offline-proven: convergence (renoise 1→0→0, inj 1→1→0),
+    clean-canvas detection, and guaranteed TERMINATION on an unfixable canvas. Caught + fixed a
+    real retrieval bug (`canvas-aliases` JS-`===` keyword mismatch dropped every `:as` alias).
+    Suite 837/3836. The orchestration is built; only the span→text fn differs on GPU.
+17. **Worker-side python — KV reuse + injection-apply BUILT** (docs `b8f1cad0`/`fd20a750`;
+    worker gitignored, sha→`63c09beb`). KV reuse: LRU `{chain-hash→cropped cache}` + longest-prefix
+    walk + crop + **suffix-forward** (corrected the §6 contract: feed `full_ids[:,L:]`, not the
+    full prompt) — 13 pure units. Injection-apply: span→replacement clamp + W1/W2/W3 KV-extend
+    (W2 re-prefill = safe Phase-1 default) — 13 pure units. Both source-grounded to transformers
+    `cache_utils`/`generation_diffusion_gemma`, py_compile-clean, compose with each other.
 
 **AWAITS OWNER ACTION (the remaining big wins):**
-- **Deploy the co-location image** → unlocks the KV-cache **worker-reuse half** (the 62%
-  win — keying is built, contract documented) + the per-step renoise loop (driver built).
-  THE highest-value next step.
+- **Deploy the co-location image** → unlocks the KV-cache 62% win + the per-step renoise/inject
+  loop. The keying (`14e8acb0`) AND the worker reuse+inject python (`b8f1cad0`/`fd20a750`) are
+  now BUILT — deploy is what lets the worker hold a `Cache` across the checkpoint (it can't ride
+  the JSON payload). THE highest-value next step; runbook steps 2-3 carry the live commands.
 - **Compiled path (~1000 tok/s)** → the redeploy plan changed. The torch-2.10 +
   transformers-5.12 bump is **NO-GO** (`957f0a7b`): the `grouped_mm→batched_mm` decode
   auto-switch (`_optimize_model_for_decode`, already in 5.11.0, not a 5.12 feature)
