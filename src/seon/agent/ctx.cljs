@@ -2113,6 +2113,113 @@
                                                   (:seon.agent.ctx/name child :unnamed))}
                         h]))))))
 
+;; ============================================================
+;; Block-chain KV cache keys — the Seon half of the prefix-KV reuse win.
+;; A PURE derivation: given a turn's ordered (static→volatile) ctx blocks +
+;; the agent id, produce the per-block chain-hash vector the co-located
+;; diffusion worker keys its encoder-KV snapshots on. Mirrors vLLM's
+;; automatic-prefix-cache chain hash VERBATIM (vendored
+;; reference-code/vllm/vllm/v1/core/kv_cache_utils.py):
+;;   hash_block_tokens (:577-603): H((parent_block_hash, block_token_ids, extra_keys))
+;;   the chain (get_request_block_hasher :703-728): prev = this, fold forward
+;;   NONE_HASH seeds the root (:95-114); cache_salt rides ONLY the first
+;;   block's extra_keys (generate_block_hash_extra_keys :560-561) → per-scope
+;;   isolation. We salt by :seon.agent/id so one agent's cached prefix is not
+;;   reused for another. Prefix-reuse semantics: blocks 0..i share a hash iff
+;;   their content (and salt) are byte-identical; the FIRST changed block
+;;   breaks the chain and every hash from there on diverges — exactly vLLM's
+;;   longest-prefix match. Derived at render, NEVER persisted (reactive-ctx).
+;; The worker-reuse half awaits the co-location image (kv-section-caching
+;; design §5); THIS half is pure Seon code, buildable + testable with no GPU.
+;; ============================================================
+
+(def ^:private node-crypto (js/require "crypto"))
+
+(def ^:private chain-root-hash
+  "The chain's root parent hash — the analog of vLLM's NONE_HASH
+   (kv_cache_utils.py:95-114), a fixed constant prepended before the first
+   block so a single-block chain still folds in a stable root. Constant (NOT
+   `os.urandom`) on purpose: the keys must line up turn-over-turn AND
+   across pod/worker restarts, so the seed cannot be process-random."
+  "seon.agent.ctx/kv-chain-root")
+
+(defn- sha256-hex
+  "Hex SHA-256 of a UTF-8 string (Node crypto). The chain hash function —
+   our stand-in for vLLM's `caching_hash_fn` over the tuple."
+  [s]
+  (-> (.createHash node-crypto "sha256")
+      (.update (js/Buffer.from s "utf8"))
+      (.digest "hex")))
+
+(defn- block-chain-hash
+  "ONE block's chain hash, mirroring vLLM `hash_block_tokens`
+   (kv_cache_utils.py:577-603) `H((parent_block_hash, block_tokens, extra_keys))`.
+   `parent` = the previous block's hash (or [[chain-root-hash]] at the head),
+   `content` = this block's byte-stable rendered text (Seon's analog of the
+   block's token ids — the worker tokenizes it deterministically), `salt` =
+   the cache_salt extra-key, non-blank ONLY for the head block so the whole
+   chain is scoped to one agent. The NUL separators make the serialization
+   injective (no (a+b,c) vs (a,b+c) collision)."
+  [parent content salt]
+  (sha256-hex (str parent " " content " " salt)))
+
+(schema/register! ::chain-hash [:string {:min 1}])
+(schema/register! ::chain-hashes [:vector ::chain-hash])
+
+;; A block as the keying fn sees it: its byte-stable rendered text in prompt
+;; (priority) order. name/priority are carried only so a caller can correlate
+;; a key back to a section — the HASH keys on `:seon.render/text` alone.
+(schema/register! ::keyable-block
+  [:map
+   [:seon.render/text :string]
+   [:seon.agent.ctx/name     {:optional true} :seon.agent.ctx/name]
+   [:seon.agent.ctx/priority {:optional true} :seon.agent.ctx/priority]])
+
+(schema/register! ::block-chain-keys-request
+  [:map
+   [::blocks       [:vector ::keyable-block]]
+   ;; agent id value-schema = :string (NOT the :seon.agent/id ref): this ns
+   ;; loads BEFORE seon.agent registers that attr, so a ref would be an
+   ;; unregistered schema at cold boot — same reason ::render-context-request
+   ;; spells it :string.
+   [:seon.agent/id :string]])
+
+(schema/register! ::block-chain-keys-response
+  [:map [::chain-hashes ::chain-hashes]])
+
+(defn block-chain-keys
+  "Compute the per-block KV cache-key vector for a turn's ordered context
+   blocks — the Seon side of the prefix-KV-reuse contract (the worker reuses
+   cached encoder KV for any shared static prefix). PURE: a function of
+   (`::blocks`, `:seon.agent/id`) only — no I/O, no GPU.
+
+   `::blocks` is the turn's `:seon.render/text`-bearing blocks in prompt order
+   (static→volatile, the [[default-seed-blocks]] ordering — soul…:namespaces
+   then the volatile tail), as produced by [[rendered-block-texts]]. The
+   output `::chain-hashes` is parallel to `::blocks`: hash i fingerprints the
+   exact block prefix 0..i, salted at the root by `:seon.agent/id`.
+
+   Invariants (mirror vLLM APC, see the ns block above):
+   - identical block sequences + same agent ⇒ identical key vectors;
+   - two turns sharing a static prefix but differing in the tail share the
+     prefix keys and diverge at exactly the first changed block;
+   - different `:seon.agent/id` ⇒ different keys even for identical blocks.
+
+   The worker maps each chain-hash → the encoder KV snapshot after encoding
+   the prompt prefix ending at that block, and on a new turn reuses the
+   longest matching prefix (see the worker-integration contract in
+   research/kv-section-caching-design)."
+  {:malli/schema [:=> [:cat ::block-chain-keys-request] ::block-chain-keys-response]}
+  [{::keys [blocks] :seon.agent/keys [id]}]
+  {::chain-hashes
+   (reduce (fn [acc [idx block]]
+             (let [parent (or (peek acc) chain-root-hash)
+                   ;; cache_salt rides the HEAD block only (vLLM :560-561).
+                   salt   (if (zero? idx) id "")]
+               (conj acc (block-chain-hash parent (:seon.render/text block) salt))))
+           []
+           (map-indexed vector blocks))})
+
 (defn ctx-sections
   "Structured per-section breakdown for the INSPECTOR — one entry per
    non-blank section, each carrying its name + the exact ai text it

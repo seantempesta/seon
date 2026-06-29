@@ -1292,3 +1292,75 @@
                   "an explicit :seon.ai/system-prompt still wins"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;;; ─────────────────────────────────────────────────────────────────────
+;;; Block-chain KV cache keys — the Seon half of the prefix-KV-reuse win.
+;;; PURE fn (blocks, agent-id) → per-block chain-hash vector. Mirrors vLLM
+;;; APC (kv_cache_utils.py hash_block_tokens :577-603 + the chain :703-728,
+;;; cache_salt :560-561). No conn, no GPU.
+;;; ─────────────────────────────────────────────────────────────────────
+
+(defn- blk
+  "A keyable block carrying byte-stable rendered text (name optional)."
+  [nm text]
+  {:seon.agent.ctx/name nm :seon.render/text text})
+
+(def ^:private static-prefix
+  "A shared static head: soul → :namespaces (the cacheable prefix)."
+  [(blk :soul "; serve the human")
+   (blk :shared-instructions "; the shared manual")
+   (blk :skills-catalog "; data-modeling — design a schema")
+   (blk :namespaces ";;; ┌─ my.kb ─ … ─ end ─")])
+
+(defn- chain
+  [blocks agent-id]
+  (-> (ctx/block-chain-keys {:seon.agent.ctx/blocks blocks
+                             :seon.agent/id agent-id})
+      :seon.agent.ctx/chain-hashes))
+
+(deftest block-chain-keys-identical-sequences-identical-keys
+  ;; Invariant 1: identical block sequences + same agent ⇒ identical keys.
+  (let [blocks (conj static-prefix (blk :transcript "; turn 1"))
+        a      (chain blocks "agent-7")
+        b      (chain blocks "agent-7")]
+    (is (= a b) "identical (blocks, agent) ⇒ identical key vector")
+    (is (= (count blocks) (count a)) "one key per block")
+    (is (every? #(re-matches #"[0-9a-f]{64}" %) a)
+        "each key is a sha256 hex digest")))
+
+(deftest block-chain-keys-shared-prefix-diverges-at-first-change
+  ;; Invariant 2: a shared static prefix shares keys; the chain breaks at
+  ;; EXACTLY the first changed block and every key after it differs.
+  (let [t1 (chain (into static-prefix [(blk :inventory "; 3 ledgers")
+                                       (blk :transcript "; turn 1")]) "agent-7")
+        t2 (chain (into static-prefix [(blk :inventory "; 3 ledgers")
+                                       (blk :transcript "; turn 2 DIFFERENT")]) "agent-7")
+        n  (count static-prefix)]
+    ;; the 4 static blocks + the unchanged :inventory (index n) share keys
+    (is (= (subvec t1 0 (inc n)) (subvec t2 0 (inc n)))
+        "every block up to and including the last unchanged one shares its key")
+    ;; the changed :transcript (index n+1) and beyond diverge
+    (is (not= (nth t1 (inc n)) (nth t2 (inc n)))
+        "the first changed block's key differs — chain breaks here")
+    ;; and the shared static head is byte-identical key-for-key
+    (is (= (subvec t1 0 n) (subvec t2 0 n))
+        "the whole static prefix's keys are reused across turns"))
+  ;; A change to the HEAD block busts every downstream key (chain property).
+  (let [base   (chain static-prefix "agent-7")
+        head'  (chain (assoc static-prefix 0 (blk :soul "; serve DIFFERENT human"))
+                      "agent-7")]
+    (is (not= (first base) (first head')) "head key changes when head changes")
+    (is (every? false? (map = base head'))
+        "a head edit cascades — NO downstream key survives")))
+
+(deftest block-chain-keys-salt-scopes-by-agent
+  ;; Invariant 3: different :seon.agent/id ⇒ different keys for identical
+  ;; blocks (cache_salt rides the head block, scoping the whole chain).
+  (let [a (chain static-prefix "agent-A")
+        b (chain static-prefix "agent-B")]
+    (is (= (count a) (count b)) "same shape")
+    (is (every? false? (map = a b))
+        "every key differs across agents — salt scopes the whole chain")
+    ;; same agent again ⇒ back to identical (salt is the only difference)
+    (is (= a (chain static-prefix "agent-A"))
+        "same agent ⇒ identical (salt is deterministic, not random)")))

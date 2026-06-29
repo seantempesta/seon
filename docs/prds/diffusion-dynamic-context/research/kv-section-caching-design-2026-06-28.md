@@ -16,6 +16,20 @@ tags: [research, diffusion, agent, flow]
 > `:seon.agent.ctx/block` structure. Every model claim cites
 > `reference-code/transformers/…:LINE` (pinned v5.11.0, the deployed worker version).
 
+## Status (2026-06-28)
+
+- **Key-derivation half — DONE (pure Seon, no GPU).** `seon.agent.ctx/block-chain-keys`
+  (`src/seon/agent/ctx.cljs`) computes the per-block chain-hash vector from a turn's
+  ordered ctx blocks + `:seon.agent/id`, mirroring vLLM's APC chain hash
+  (`reference-code/vllm/vllm/v1/core/kv_cache_utils.py:577-603` + the chain
+  `:703-728`, cache_salt `:560-561`). Three invariant tests green in the cljs suite
+  (`test/seon/ctx_test.cljs`: identical-seq→identical-keys, shared-prefix-diverges-at-
+  first-change, salt-scopes-by-agent). See "Worker integration contract" at the end.
+- **Worker-reuse half — AWAITS-IMAGE.** The encoder `Cache` lookup/crop/reuse keyed on
+  these hashes lands in the co-located worker (§5 precondition) once the co-location
+  image is deployed. The keys are a drop-in: the worker maps chain-hash → cropped
+  encoder KV and longest-prefix-matches against them.
+
 ## TL;DR
 
 1. **DiffusionGemma is an encoder–decoder diffuser, and the prompt encoder is
@@ -352,6 +366,45 @@ This is a gate, not a step.
 block-AR loop already appends incrementally, so this is very likely — but assert it); (3)
 co-location lands (without it, KV reuse is impossible over JSON). Per-block PIC accuracy is a
 Phase-3 risk we are deliberately not taking yet.
+
+---
+
+## 6. Worker integration contract (the drop-in once co-location lands)
+
+The keying half is built (`seon.agent.ctx/block-chain-keys`). It is a PURE fn of
+(`::blocks`, `:seon.agent/id`): given the turn's `:seon.render/text`-bearing context
+blocks in prompt order (static→volatile, the `default-seed-blocks` ordering) it returns
+`::chain-hashes` — one hex-sha256 per block, where hash `i` fingerprints the byte-exact
+block prefix `0..i`, salted at the root by the agent id. Identical block prefixes (same
+agent) yield identical hashes; the first changed block breaks the chain and every hash
+from there on diverges — vLLM's longest-prefix-match, mirrored from
+`kv_cache_utils.py:577-603,703-728`. The hashes are derived at render, never persisted
+(reactive-context rule): a block edit just changes its token ids → its hash → a miss.
+
+**What the worker must do** once Seon co-locates and calls `generate` in-process
+(§5 precondition):
+
+1. Seon sends, alongside the assembled prompt, the `::chain-hashes` vector AND each
+   block's token offset `[start,end)` in the prompt (the worker already tracks canvas
+   spans the same way; the Seon block text is the byte-stable contribution, the worker
+   tokenizes it deterministically so block boundaries land on token boundaries).
+2. Worker holds an LRU `{chain_hash → (encoder DynamicCache cropped to that boundary,
+   token_len)}` (full-attention layers only — §1.4). On a new turn it walks the hashes
+   top→down and takes the LONGEST hash that hits = reusable prefix boundary `b`
+   (token length `L`).
+3. Worker `crop(L)`s that cached `Cache` and calls `generate(input_ids=full_prompt_ids,
+   past_key_values=cached_cache, ...)` so the encoder prefills ONLY tokens `[L:]` (the
+   divergent suffix), appending to the reused prefix exactly as the block-AR loop already
+   appends per canvas (§1.2). Then it writes back the new boundaries' cropped caches under
+   their hashes for next time.
+4. Invalidation is automatic: a missed hash simply re-encodes from the last hit; no
+   "mark dirty", no stored invalidation state. The salt means agent A's cached prefix is
+   never served to agent B unless we deliberately key cross-agent.
+
+The keys are deterministic across pod/worker restarts (the chain root is a fixed
+constant, NOT `os.urandom` — unlike vLLM's per-process `NONE_HASH`), so a warm worker's
+cache survives a Seon restart and vice-versa. Nothing else in this doc changes; the
+worker side is a pure consumer of `::chain-hashes`.
 
 ---
 
