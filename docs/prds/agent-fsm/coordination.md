@@ -475,6 +475,21 @@ other lane's **_Needs_** and the owner makes it.
     stored `:seon.eval/result-edn` (don't add a 2nd). **U owns** the tier numbers (3,500/2,000/500), the
     pointer/summary WORDING, and the live-drive check that agents actually re-reference a clipped `result/<id>`.
     Bundle the cite-card (B above) into this — same file, same "make computed values cite-able" goal.
+  - **✅ MEASURED + CACHE-AWARE + READY (`9eb13722`, `research/transcript-dynamic-cache-aware-2026-06-28.md` —
+    SUPERSEDES the eviction doc):** measured on real root (146 events, 21,843 tok). **Use config A `[[6 :full]
+    [10 :light] [16 :pointer]]` → 3,718 tok (−83%), with a 1,673-tok FROZEN prefix that joins the CACHE.** Two
+    corrections to the design above: (1) tier = f(AGE-IN-EVENTS), a discrete age-band gradient — NOT
+    recency-weighted (weighted re-tiers the whole history when one event is added → busts the prompt cache every
+    turn; age-band FREEZES each aged clip byte-identical, proven over turn snapshots); (2) a `:summary` head is
+    MANDATORY (config D, no-summary, gave a ZERO frozen prefix = cache bust). **Cache win:** seon already caches
+    `:system` ≤ `stable-priority-max` (`anthropic.cljs`); seed the frozen history as a `:transcript-history`
+    block at priority 21 and it caches AUTOMATICALLY — history (1,673) + namespaces (7,813) = a 9,486-tok cached
+    prefix (> the 4,096 Opus min). 5-line impl: `config.cljs`~L229 8 `SEON_RENDER_TRANSCRIPT_*` knobs ·
+    `ctx.cljs` `shape-hint` + `format-eval-row`(L567) `tier` arg + raise `stable-priority-max`(L1832)→21 + seed
+    `:transcript-history`@21 in `default-seed-blocks`(L1599), recent `:transcript` stays 100 · `transcript.cljs`
+    `assign-tiers`+`render-tiered`, split `transcript-block`(L424) into history(frozen)+recent(gradient) ·
+    `anthropic.cljs` NO change. SMELL: run `neutralize-result-claims` BEFORE the band caps (eval narration can
+    carry a huge fabricated `=> #{…}` dump). **U owes** the live-drive validation before the default flips on.
 
 - **🧭 → CORE (owner-directed 2026-06-28, HIGH): UNIFY context control into ONE understood mechanism.** Owner:
   "Once we understand how to properly control context (ask core to figure this shit out and unify shit) I want

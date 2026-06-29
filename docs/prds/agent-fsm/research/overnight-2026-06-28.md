@@ -33,11 +33,32 @@ needs your decision, and the Core-routed queue.
 | # | What | Proof | Commit |
 |---|---|---|---|
 | #64 | `:kind` recurrence engine purged — store-inventory/inventory/dashboard/`/data`/render-dispatch now speak attribute-presence, not "kind" | live read-back: `inventory-has-kind? false`, `dashboard-has-kinds? false`, `/data` renders + `has-kind? false`; suite 756/0 | `44bab907` |
+| #65 | `bin/gym-scorecard` fitness function (SHA-keyed battery+axes line) | baseline `0ae13072`; immediately caught 2 search_test fails | `49676103` |
+| #61 | `:live-tile` static teaching trimmed (~1,300→336 tok/turn, moved to skill); `ui-live-tiles` refreshed (my.tile/my.data, staleness killed); `data-oriented-clojure` deduped | measured trim; **scorecard battery HELD** (no pass/error regression) | `fe83c76c` |
+
+| #68 | new gym scenario `plan-resume-across-restart` (`:planning`) — untested facet: planning continuity across interruption; structural predicates + judge-resumed-not-replanned | battery auto-discovered 19→20; FREE-measured | committed |
+| #62 | transcript design pushed to **CACHE-AWARE + MEASURED** (config A −83%, 1,673 frozen→cached) — design done, ROUTED to Core | measured on real root (146 ev, 21,843→3,718) | `9eb13722` |
+
+**Gate note (shared-tree, Core active overnight):** the suite is noisy from Core's UNCOMMITTED WIP across multiple lanes — `loop-test` (4, `loop.cljs`/`schedule.cljs`), `search_test` (2, active `search.cljs`), `index_core_test` (3). NONE are mine — my agents' own files are green and the **scorecard battery holds**, which is the honest gate (the suite-wide green is Core's to restore for their files). The **canvas verification drive is blocked** until Core commits `loop.cljs` clean (a reset would pull the broken agent-loop into the pod) — Monitor watching.
 
 ## In flight
 
 - **`bin/gym-scorecard`** (the fitness function) — battery + axes → one SHA-keyed line,
   so every later change is judged accretive-or-revert against the whole battery, cheaply.
+
+## Core landings — MEASURE their effect when the scorecard is up
+
+- ✅ **`8f2f8c50` fabrication (C) — `eval.cljs` pending-Promise self-heal LANDED** (the
+  `result/<id>` nil-on-first-ref trap). Expect: eval-error-rate ↓, honesty failures ↓.
+  Consequence: the `clojurescript` skill's "pending Promise dropped on timeout" note is now
+  STALE (the behavior is fixed) → update (Core content lane).
+- 🔄 **`844ec448` #42 — namespaces now renders the PUBLIC API of an agent's `:require`d deps.**
+  Measure the namespaces-block token delta + whether agents still discover the my.* toolkit
+  (the render-prominence finding: don't let signature-trim hide the utility nses).
+- 🔄 **`a24c2fbe` — store-inventory now carries an agent/run/turn/eval JOIN MAP** (built on the
+  purged attr-groups shape). Changes the inventory block again → measure token cost vs usefulness.
+- 🧪 **`53550b0e` perf(search) concise grouped grep (5.8x token cut)** = the likely cause of the 2
+  search_test failures the scorecard caught (format change vs pinned assertions) — diagnosis agent on it.
 
 ## Core-routed queue (their lane; verified findings waiting)
 
