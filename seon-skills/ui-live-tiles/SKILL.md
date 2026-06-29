@@ -363,6 +363,12 @@ Rule of thumb: if you're about to recite numbers, a list, a table, or progress i
 a message — that belongs on the tile. The message can be one line pointing at it
 ("updated the sources tile").
 
+**A plan, goals, a checklist, a status, a recommendation are canvas content too —
+not just data tables.** A PLANNING / GOAL / STATUS ask answered only in prose (or
+only as todos you message about) leaves the canvas blank. Render the plan/goals as
+a board/view your human can WATCH FIRST, then narrate — the board is the answer,
+the message is the pointer.
+
 ## What's renderable today
 
 - **Static + live VIEWS:** text, tables, lists, headings, code blocks, data
