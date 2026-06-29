@@ -74,6 +74,24 @@ pivot to (1) the EVAL-TIER oracle (does the generated code RUN / give the right
 answer?), (2) closing the eval-renoise buzzsaw loop, (3) measuring the required-API
 feature's lift to justify its 2.9k tok.**
 
+### Capability — the buzzsaw eval-renoise loop (PRIMITIVES PROVEN, GPU-verified)
+
+Round-trip test on the live worker (`33d2`, fingerprint-verified):
+- **`denoise_to_step` fires PRECISELY at K** (`denoise_steps_fired: 24`). The
+  `StepCountStopping` ABC override works — stops at K with the temp schedule intact.
+- **At K=24 the `mean` fn is ALREADY CORRECT** (`(defn mean [v] (/ (reduce + v)
+  (count v)))`) — the model converges in ~half the step budget. So the **short-circuit
+  is the dominant win**: parse/eval at K, see it's clean, STOP → ~2× faster AND verified.
+  (K=8 was still noise — confirms "wait for later steps"; K~24 is the sweet spot here.)
+- **`resume_renoise` mechanism works** (`good_held: true` — the clamp holds the good
+  positions while the span re-denoises). BUT the test re-noised an already-correct span
+  and REGRESSED it (`defn`→`def`). **LESSON: renoise must be ORACLE-DRIVEN — only
+  re-noise spans `parse-forms`/eval flags as wrong; never a correct span.**
+- **The loop's real shape:** denoise→K → parse/eval the partial → if clean SHORT-CIRCUIT
+  (stop, the common case) → else renoise ONLY the flagged char-spans → resume. **Next
+  build: the Seon-side orchestration** (parse the partial → map error `:span` → decide
+  stop/renoise) that turns the two proven primitives into the closed loop.
+
 ### The deep finding (5/5 skills) — context OVERRIDES confident-wrong priors
 
 In EVERY skill the control fails the SAME way: it hallucinates a confident,
