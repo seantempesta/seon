@@ -479,6 +479,19 @@
    [:seon.agent/purpose             {:optional true} :any]
    [:seon.agent/default-turn-limit  {:optional true} :any]])
 
+;; Boot-registered ARM hook (#30). A freshly-spawned child is created IDLE with
+;; NO wake trigger; a message to it strands silently until something installs
+;; one. The arming machinery (llm-fn + bootstrap compile-state +
+;; `seon.agent.loop/install-wake-trigger!`) lives in `seon.client`, which
+;; REQUIRES `seon.agent` — so `seon.agent` cannot require it back. The client
+;; registers a `(fn [child-id] -> Promise)` into this atom at boot;
+;; `start!` invokes it BEFORE returning, so a message the parent sends right
+;; after spawn actually wakes the child. INJECTION breaks the cycle (same
+;; pattern `seon.agent.schedule` uses for its drive!/exec-fn!). nil before the
+;; client registers it (gym/tests that don't need a live wake) ⇒ start! is a
+;; no-op on arming and just returns the id.
+(defonce !arm-child-fn (atom nil))
+
 (defn ^:async start!
   "Spawn a child agent — the capability-gated lifecycle verb (the spawn
    counterpart of `seon.agent.lifecycle/terminate`). An alias of `create!`
@@ -487,11 +500,20 @@
    of `:seon.agent/parent` — no separate writer. Mints a fresh 14-char child
    id when `:seon.agent/id` is absent (a child is never \"root\"). The child
    is created IDLE: it does no work until it receives a message (which opens
-   its run #1). Like `boot!`, this does NOT arm the child's wake trigger —
-   the loop layer owns that. Returns `{:seon.agent/id child-id}` on success;
-   the db error envelope as-is on a failed transact (errors are values).
-   Called outside an agent scope (no caller) → the child is created
-   PARENTLESS (a host-initiated create), matching `create!`."
+   its run #1).
+
+   The minted child's wake trigger is ARMED IN-PROCESS before this returns
+   (via the boot-registered `!arm-child-fn` hook — `seon.client/arm-agent!`),
+   so a message the parent sends RIGHT AFTER spawn actually wakes the child
+   (arming is reactive-only: a message sent before arming never wakes it, even
+   later — so arming must precede any inbound). Before the client registers the
+   hook (gym/tests with no live loop) arming is a no-op.
+
+   Returns `{:seon.agent/id child-id}` on success — the SAME id you must
+   address to message the child you just spawned (let-bind it or read it back;
+   don't fabricate one). On a failed transact the db error envelope comes back
+   as-is (errors are values). Called outside an agent scope (no caller) → the
+   child is created PARENTLESS (a host-initiated create), matching `create!`."
   {:malli/schema [:=> [:cat ::start-request] ::create-response]}
   [{:seon.agent/keys [id purpose default-turn-limit]}]
   (let [child-id  (or id (db/new-id!))
@@ -501,19 +523,24 @@
                                    :seon.agent/default-turn-limit default-turn-limit}))]
     (if (false? (:seon.db/ok? res))
       res
-      (if parent-id
-        (let [penv (await (db/transact!
+      (let [penv (when parent-id
+                   (await (db/transact!
                             {:seon.db/tx-data
                              [{:seon.agent/id     child-id
-                               :seon.agent/parent [:seon.agent/id parent-id]}]}))]
-          (if (false? (:seon.db/ok? penv))
-            (do (js/console.error
-                  (str "seon.agent/start! parent-write FAILED for " child-id
-                       " (parent " parent-id "): "
-                       (:seon.error/message (:seon.db/error penv))))
-                penv)
-            {:seon.agent/id child-id}))
-        {:seon.agent/id child-id}))))
+                               :seon.agent/parent [:seon.agent/id parent-id]}]})))]
+        (if (and penv (false? (:seon.db/ok? penv)))
+          (do (js/console.error
+                (str "seon.agent/start! parent-write FAILED for " child-id
+                     " (parent " parent-id "): "
+                     (:seon.error/message (:seon.db/error penv))))
+              penv)
+          ;; ARM the minted child IN-PROCESS (#30) so a message sent right
+          ;; after spawn wakes it. Injected hook (no require cycle); a nil hook
+          ;; (no live loop) leaves the child unarmed — the same shape as the
+          ;; pre-arm world, never an error.
+          (do (when-let [arm @!arm-child-fn]
+                (await (arm child-id)))
+              {:seon.agent/id child-id}))))))
 
 ;; ============================================================
 ;; Boot. The single entry point seon.client calls at startup. Agent

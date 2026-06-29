@@ -235,6 +235,7 @@
   (stop-heartbeat!))
 
 (declare rearm-wake-triggers!)
+(declare register-arm-hook!)
 
 (defn ^:dev/after-load after-reload
   {:malli/schema [:=> [:cat] :any]}
@@ -249,6 +250,10 @@
   ;; (seon.web.debug re-arms its own ::debug listener via its
   ;; own ^:dev/after-load — not duplicated here.)
   (rearm-wake-triggers!)
+  ;; Re-point the spawn ARM hook (#30) at the just-reloaded arm-agent! so a
+  ;; live pod arms freshly-spawned children with current code (boot registers
+  ;; it once; a hot reload doesn't re-run boot).
+  (register-arm-hook!)
   ;; Re-arm the ONE ticker so a hot reload doesn't stack timers and the tick
   ;; body runs just-reloaded code (idempotent — clears the prior interval).
   (agent-loop/install-ticker!)
@@ -1938,6 +1943,50 @@
 ;; `seon.agent/armable-agent-ids` (state ≠ :terminated) is the single
 ;; source of truth for "this agent can still be woken".
 
+(schema/register! ::arm-agent-request
+  [:map
+   [:seon.agent/id            :seon.agent/id]
+   [:seon.agent/compile-state {:optional true} :any]])
+
+(defn- ^:async arm-agent!
+  "Arm ONE agent's wake trigger IN-PROCESS so an inbound message lands and
+   wakes it: host the id for MCP, replay its home-ns wiring, then install the
+   `seon.agent.loop` wake trigger (refreshed llm-fn + compile-state). The
+   single-id primitive shared by `rearm-wake-triggers!` (hot-reload, passes its
+   already-bootstrapped `:seon.agent/compile-state` so it isn't re-derived per
+   id) AND the `seon.agent/!arm-child-fn` spawn hook (`start!` arms the minted
+   child via this — task #30; it omits compile-state, so this re-derives via
+   the idempotent `ensure-bootstrap!`). One arming mechanism, two callers —
+   never a parallel one. Returns the id.
+
+   llm-fn is re-derived fresh (`current-llm-fn`) so arming never wires a stale
+   adapter, matching the hot-reload re-arm. Same order as the re-arm loop:
+   host → setup-ns → install-trigger (install MUST be last)."
+  {:malli/schema [:=> [:cat ::arm-agent-request] :any]}
+  [{:seon.agent/keys [id compile-state]}]
+  (let [cs     (or compile-state (await (repl/ensure-bootstrap!)))
+        llm-fn (current-llm-fn)]
+    (runtime-id/host! id)
+    (await (seval/setup-agent-ns! cs (agent/home-ns id) id))
+    (agent-loop/install-wake-trigger!
+      {:seon.agent/id            id
+       :seon.agent/llm-fn        llm-fn
+       :seon.agent/compile-state cs})
+    id))
+
+(defn- register-arm-hook!
+  "Point `seon.agent/start!`'s spawn ARM injection (`!arm-child-fn`) at
+   `arm-agent!` (#30). Called at boot AND on every hot reload, so the running
+   pod arms each freshly-spawned child IN-PROCESS with live code — without it,
+   `start!` mints an UNARMED child and a message to it strands. Idempotent
+   (resets the defonce'd atom). The closure resolves `arm-agent!` at call time,
+   so it always runs the latest code."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (reset! agent/!arm-child-fn
+          (fn ^:async arm-child! [child-id]
+            (arm-agent! {:seon.agent/id child-id}))))
+
 (defn- rearm-wake-triggers!
   "Hot-reload hygiene: re-install the per-agent wake trigger for every
    armable agent so handler fixes take effect on hot reload. Without
@@ -1965,30 +2014,16 @@
       (-> (repl/ensure-bootstrap!)
           (.then
             (fn ^:async rearm! [compile-state]
-              (let [ids    (agent/armable-agent-ids {:seon.db/db @conn})
-                    llm-fn (current-llm-fn)]
+              (let [ids (agent/armable-agent-ids {:seon.db/db @conn})]
                 (doseq [id ids]
-                  ;; Re-host so a hot-reloaded pod stays MCP-addressable
-                  ;; for every agent it re-arms (runtime-id is defonce'd,
-                  ;; but re-hosting is idempotent and keeps the two
-                  ;; rosters trivially in sync).
-                  (runtime-id/host! id)
-                  ;; Replay the canonical home-ns wiring into the
-                  ;; compile-state BEFORE arming the trigger. The state may
-                  ;; be freshly rebuilt (a `seon.eval` hot-reload rotates
-                  ;; `init-version`, so `ensure-bootstrap!` returns a NEW
-                  ;; compile-state with no home-ns wiring), and a minted
-                  ;; agent's home ns was never set up on this path at all.
-                  ;; `setup-agent-ns!` is idempotent + cheap; awaiting it
-                  ;; here (before `install-wake-trigger!`) guarantees the
-                  ;; agent's FIRST eval resolves message/user, wait,
-                  ;; complete, … — killing the install-timing race. Same
-                  ;; wiring source as `boot-one-agent!` (one `home-ns-form`).
-                  (await (seval/setup-agent-ns! compile-state (agent/home-ns id) id))
-                  (agent-loop/install-wake-trigger!
-                    {:seon.agent/id            id
-                     :seon.agent/llm-fn        llm-fn
-                     :seon.agent/compile-state compile-state}))
+                  ;; One arming mechanism: `arm-agent!` re-hosts the id (MCP),
+                  ;; replays the home-ns wiring into the (possibly freshly
+                  ;; rebuilt) compile-state BEFORE installing the trigger —
+                  ;; killing the install-timing race — and re-derives llm-fn.
+                  ;; Pass the already-bootstrapped state so it isn't re-derived
+                  ;; per id.
+                  (await (arm-agent! {:seon.agent/id            id
+                                      :seon.agent/compile-state compile-state})))
                 (log/info-console! "seon.client"
                                    "reload: wake triggers re-armed"
                                    {:seon.client/reinstalled ids})
@@ -2440,7 +2475,14 @@
                 ;; The ONE ticker — the only active machinery (deadline
                 ;; watchdog + schedule firing). Single instance + idempotent;
                 ;; re-armed on hot reload (after-reload above).
-                _ (agent-loop/install-ticker!)]
+                _ (agent-loop/install-ticker!)
+                ;; Register the spawn ARM hook (#30): `seon.agent/start!` arms
+                ;; the child it mints by invoking this (injection — seon.agent
+                ;; can't require seon.client). So a parent that spawns then
+                ;; messages a child IN ONE TURN actually wakes it, no
+                ;; out-of-band re-arm sweep. Re-registered on hot reload via
+                ;; `after-reload`.
+                _ (register-arm-hook!)]
             (log/info-console! "seon.client" "agents started"
                                {:resumed resumed-ids :minted minted-ids
                                 :port port :port-file port-file})
