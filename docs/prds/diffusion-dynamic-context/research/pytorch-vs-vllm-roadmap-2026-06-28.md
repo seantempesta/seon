@@ -73,6 +73,21 @@ tags: [research, diffusion, agent]
   `torch.compile` (≈4× slower) — so it is a deliberate per-experiment toggle, not
   the serving default.
 
+- **Don't reinvent the wheel — the control worker's speed is ADOPTED in-the-loop
+  features, not a custom engine (§5b).** The FP8-with-control answer already exists:
+  **torchao quantization** (`TorchAoConfig` + `Float8DynamicActivationFloat8WeightConfig`
+  on Hopper, `Int8DynamicActivationInt8WeightConfig` on the A100) is applied at
+  `from_pretrained`, is TRANSPARENT to `generate()`, and so composes with
+  DiffusionGemma's custom denoise loop WHILE keeping the `:1034` control seam —
+  vendored in transformers (`quantizer_torchao.py`), `cache_implementation="static"`
+  auto-compiles, `disable_compile=True` for the parse-stop experiments. Plus
+  `static`-cache `torch.compile`, `past_key_values`/`QuantizedCache` reuse, and —
+  for more headroom — **Fast-dLLM** (NVlabs, training-free block/Dual KV cache +
+  confidence-parallel decoding, all in-the-loop ⇒ control-compatible). transformers'
+  OWN continuous-batching/`transformers serve` is real but AR-only (the diffusion
+  `generate()` bypasses it). We compose existing PyTorch-ecosystem features; we
+  hand-roll nothing; the serving endpoint is vLLM adopted whole.
+
 - **vLLM enters ONLY as a SEPARATE serving endpoint, and only when ALL THREE
   triggers fire at once:** (1) the buzzsaw thesis has cleared its kill-gate on
   transformers (control proven worth serving); (2) we need many-user / batched
@@ -408,6 +423,123 @@ grounding ([[transformers-diffusion-source-grounding-2026-06-28]] §5 items 9 + 
 > compiled-transformers speed WITH full clamp/renoise control — the best of both,
 > on hardware we already have, with zero new infra.
 
+## 5b. Proper serving — ADOPT existing features, don't reinvent (the owner's directive)
+
+The directive: don't hand-roll serving; mine PyTorch/transformers/vLLM + other
+repos for features we can lift. Surveyed the vendored source + the ecosystem. The
+load-bearing reframe: **for the CONTROL path, the accelerators that matter all live
+IN the decode loop (quantization, compile, KV-cache tricks) and are therefore
+control-compatible — we adopt them; for the no-control SERVING path, we adopt vLLM
+whole.** Concretely:
+
+### 5b.1 torchao quantization — FP8 (Hopper) / INT8 (A100), TRANSPARENT to the custom generate loop
+
+This is the biggest "don't reinvent" win, and it's already vendored in transformers
+(`src/transformers/quantizers/quantizer_torchao.py`, `quantizer_fbgemm_fp8.py`,
+`quantizer_finegrained_fp8.py`). `TorchAoConfig` is applied at `from_pretrained` and
+quantizes the LINEAR layers — it is **transparent to `generate()`**, so it composes
+with DiffusionGemma's custom denoise loop AND keeps the per-step `:1034` control
+seam. Verbatim from the HF torchao doc
+(<https://huggingface.co/docs/transformers/main/en/quantization/torchao>):
+
+- **Hopper/Ada FP8:** `from torchao.quantization import
+  Float8DynamicActivationFloat8WeightConfig` →
+  `TorchAoConfig(quant_type=Float8DynamicActivationFloat8WeightConfig())` (listed
+  under "H100 GPU"). FP8 dynamic quant needs compute capability ≥ 8.9 (Hopper/Ada).
+- **A100 (Ampere, no FP8):** the doc's "A100 GPU" recipe uses
+  `Int8DynamicActivationInt8WeightConfig` (A8W8 INT8) — the right quant for our
+  current hardware.
+- **Compile + quant together:** "Set the `cache_implementation` to `"static"` to
+  automatically `torch.compile` the forward method." And the escape hatch we need
+  for the parse/eval-stop experiments: "**Pass `disable_compile=True` in
+  `generate()` to quantize without compilation.**"
+
+> **This is the FP8-with-control answer that does NOT require vLLM.** On a Hopper box,
+> load DiffusionGemma with `Float8DynamicActivationFloat8WeightConfig` +
+> `cache_implementation="static"` → FP8 speed THROUGH the transformers diffusion
+> generate loop, with the clamp/renoise/`:1034` seam intact. On the A100, the INT8
+> variant is the analog. **Must verify** the quantized linears behave under
+> DiffusionGemma's two-mode (causal/bidirectional) forward — the mechanism is
+> generic (it swaps `nn.Linear` weights), but the model is 18 days old; measure
+> quality + speed before trusting it. This single feature reclaims most of the
+> reason people reach for vLLM (dtype speed) while keeping everything that makes
+> the transformers path the buzzsaw's home.
+
+### 5b.2 transformers' OWN continuous batching / paged attention / `transformers serve` — real, but AR-ONLY
+
+transformers v5 ships a full serving stack we should NOT rebuild: `transformers
+serve` (OpenAI-compatible server, `src/transformers/cli/serve.py`), continuous
+batching with PagedAttention (`src/transformers/generation/continuous_batching/`),
+CUDA-graph decode-fast-path (`continuous_api.py:375,529`), AND a logits-processor
+adapter for the CB path (`cb_logits_processors.py`, `ContinuousBatchingLogitsProcessor`).
+
+**BUT it does not drive the diffusion decode.** `generate_batch`
+(`continuous_api.py:1153`) is the standard AR one-token-per-step loop
+(`use_decode_fast_path`, CUDA graphs over single-token decode);
+DiffusionGemma defines its OWN `DiffusionGemmaGenerationMixin.generate`
+(`generation_diffusion_gemma.py:537,543`) — the canvas denoise loop — which BYPASSES
+the CB manager entirely. Same structural reason vLLM's diffusion sampler bypasses
+the AR sampler. **Do not try to force the diffusion model through transformers CB.**
+For the control worker, batching = drive B prompts (or B renoise variants) in ONE
+diffusion `generate()` call (the loop is already batched — grounding #8); that's the
+free amortization we DO get.
+
+### 5b.3 Fast-dLLM (NVIDIA Labs) — the published menu of diffusion-decode accelerations, control-compatible
+
+The owner said "look through other repos." The relevant one is **Fast-dLLM**
+(<https://github.com/NVlabs/Fast-dLLM>, arXiv 2505.22618,
+<https://nvlabs.github.io/Fast-dLLM/>): **training-free** acceleration of diffusion
+LLMs, applied at inference IN the decode loop. Three techniques, verbatim:
+
+- **Block-wise KV Cache** — "By reusing attention Key-Value activations across
+  multiple steps within each block… avoids redundant computation."
+- **DualCache** — "also caches masked suffix tokens, enabling even greater speedup
+  with negligible accuracy loss."
+- **Confidence-aware parallel decoding** — "only tokens with confidence over a
+  threshold are unmasked in parallel, while uncertain ones remain masked."
+- Numbers: "up to 11× (GSM8K, length 512)… up to **27.6× throughput improvement**"
+  on LLaDA / Dream.
+
+**Honest read for DiffusionGemma:** Fast-dLLM targets MASK-based diffusers (LLaDA,
+Dream); DiffusionGemma is NOT mask-based (random-init renoise — grounding). So it's
+not a drop-in. The value is that **two of its three ideas are the published, formal
+versions of things DiffusionGemma ALREADY does** (its entropy-bound acceptance ≈
+confidence-aware parallel decoding; its encoder-writes-KV / decoder-reads-KV design ≈
+block-wise KV reuse). The genuinely ADDITIVE idea is **DualCache (caching the suffix
+KV, not just the prefix)** — a candidate accelerator for our control worker. The
+decisive property: **all Fast-dLLM techniques live in the decode loop, are
+training-free, and intervene per-step — exactly where OUR clamp/eval-renoise control
+also lives — so they are control-COMPATIBLE.** This is the opposite of vLLM's sealed
+sampler. If the control worker needs more speed than torchao+compile gives, the
+Fast-dLLM repo is where to shop, not a custom kernel.
+
+### 5b.4 KV-cache features we already get free in transformers
+
+- **`QuantizedCache`** is a supported cache type IN the diffusion generate path
+  (`generation_diffusion_gemma.py:98`) — lower-memory long-context KV.
+- **`past_key_values` reuse across calls** (grounding #6, `:826`) — the
+  transformers-side prefix reuse: feed the committed prefix's KV back into the next
+  `generate()` so the shared skill isn't re-encoded per outer-loop call. It is NOT
+  vLLM's automatic cross-REQUEST prefix cache (§1b/Q4), but for a single control
+  worker running an outer eval-renoise loop it gives the same "encode the skill once"
+  benefit within a session.
+
+### 5b.5 What we DON'T reinvent — the serving endpoint is vLLM, as-is
+
+For the no-control serving path, vLLM already IS the proper-serving implementation:
+continuous batching, PagedAttention, automatic prefix caching (§1b/Q4), FP8/NVFP4,
+OpenAI-compatible server. We adopt it whole (a thin OpenAI-style adapter), we do not
+rebuild any of it. The ONLY thing we never get from it is per-step control — which is
+why the control worker exists in parallel, accelerated by 5b.1–5b.4 instead.
+
+> **Net for the directive:** the control worker's speed comes from ADOPTED,
+> in-the-loop features — torchao INT8/FP8 quant (transparent to generate),
+> `static`-cache `torch.compile`, `past_key_values`/`QuantizedCache` reuse, and (if
+> needed) Fast-dLLM's DualCache — NONE of which forfeit the `:1034` control seam, and
+> none of which we hand-roll. The serving endpoint is vLLM, adopted whole. We reinvent
+> nothing; we compose existing PyTorch-ecosystem features around the one thing only we
+> have — the eval-driven per-step control loop.
+
 ## 6. Alternatives (one line each)
 
 - **SGLang / TGI / TensorRT-LLM:** no public DiffusionGemma block-diffusion support
@@ -458,6 +590,9 @@ grounding ([[transformers-diffusion-source-grounding-2026-06-28]] §5 items 9 + 
 - GB10 NVFP4 notes (Blackwell-only quant path): <https://github.com/miter37/diffusiongemma-vllm-gb10-notes>
 - HF model card (entropy_bound 0.1, 15-20 tok/forward, FP8 Hopper headline): <https://huggingface.co/google/diffusiongemma-26B-A4B-it>
 - Transformers source grounding (the `:1034` seam, compile/stop tension, static-cache fast path): [[transformers-diffusion-source-grounding-2026-06-28]]
+- **torchao quantization (transformers)** — FP8 `Float8DynamicActivationFloat8WeightConfig` (Hopper), INT8 `Int8DynamicActivationInt8WeightConfig` (A100), `cache_implementation="static"` auto-compile, `disable_compile=True`: <https://huggingface.co/docs/transformers/main/en/quantization/torchao>; vendored quantizers `reference-code/transformers/src/transformers/quantizers/quantizer_torchao.py`
+- **Fast-dLLM (NVIDIA Labs)** — training-free block-wise KV cache + DualCache + confidence-parallel decoding, up to 27.6×, in-the-loop (control-compatible): <https://github.com/NVlabs/Fast-dLLM>, <https://nvlabs.github.io/Fast-dLLM/>, arXiv <https://arxiv.org/abs/2505.22618>
+- **transformers serving (AR-only)** — `transformers serve` `reference-code/transformers/src/transformers/cli/serve.py`; continuous batching + PagedAttention `.../generation/continuous_batching/continuous_api.py:1153`; CB logits-processor adapter `.../cb_logits_processors.py`; diffusion's own generate `.../models/diffusion_gemma/generation_diffusion_gemma.py:537,543` (bypasses CB)
 - Prior serving survey (two-endpoint split, ModelState/DiffusionSampler, A100 no-FP8): [[serving-optimization-survey-2026-06-28]]
 </content>
 </invoke>
