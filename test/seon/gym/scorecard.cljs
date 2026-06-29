@@ -58,6 +58,25 @@
 ;; Summed turn-1 context size across EVERY scenario (free measure) —
 ;; tokens, never chars. References the canonical total-tokens shape.
 (schema/register! :seon.gym.battery/total-tokens :seon.gym/total-tokens)
+;; PER-BLOCK token axis: summed turn-1 context tokens across EVERY
+;; scenario's free measure, keyed by context-block NAME (the block name IS
+;; the discriminator — no per-block named slot). So a BLOCK-level change
+;; (e.g. the #42 namespaces signature-trim, −43.5%) is VISIBLE on its own
+;; key, not buried in `total-tokens` (which is confounded by scenario count
+;; and dominated by non-namespaces context). Carries :namespaces /
+;; :transcript / :live-tile and every other rendered block. Tokens, never
+;; chars (the per-block estimates come straight off
+;; :seon.gym.profile/block-tokens).
+(schema/register! :seon.gym.battery/block-tokens
+  [:map-of :seon.agent.ctx/name :int])
+;; TOOLKIT-ADOPTION axis: summed `my.*` toolkit references across the
+;; SCORED cards (did the battery's agents CALL the taught toolkit, or
+;; hand-roll the footgun path?). A context change that drops these toward 0
+;; is the render-prominence regression #42 — caught ONLY on a paid drive,
+;; missed by the confounded total-tokens. A SIGNAL, never a gate. References
+;; the per-scenario shape (shared-shape rule); FREE-mode-blind (stubs don't
+;; call tools), fills on --paid.
+(schema/register! :seon.gym.battery/toolkit-calls :seon.gym.scorecard/toolkit-calls)
 ;; Mean whole-run eval-error-rate over the SCORED scenarios (0.0 when
 ;; none scored). References the canonical rate shape.
 (schema/register! :seon.gym.battery/eval-error-rate :seon.gym/eval-error-rate)
@@ -76,6 +95,8 @@
    [:seon.gym.battery/at                   :seon.gym.battery/at]
    [:seon.gym.battery/per-competency       :seon.gym.battery/per-competency]
    [:seon.gym.battery/total-tokens         :seon.gym.battery/total-tokens]
+   [:seon.gym.battery/block-tokens         :seon.gym.battery/block-tokens]
+   [:seon.gym.battery/toolkit-calls        :seon.gym.battery/toolkit-calls]
    [:seon.gym.battery/eval-error-rate      :seon.gym.battery/eval-error-rate]
    [:seon.gym.battery/canvas-updated-count :seon.gym.battery/canvas-updated-count]
    [:seon.gym.battery/scenario-count       :seon.gym.battery/scenario-count]
@@ -148,9 +169,11 @@
 (defn aggregate
   "Roll the per-scenario measures + cards into ONE git-SHA-keyed
    `:seon.gym/battery-scorecard`. PURE (unit-testable with injected
-   cards). Reads ONLY axes — pass?, total-tokens, eval-error-rate,
+   cards). Reads ONLY axes — pass?, total-tokens, per-block token
+   estimates, toolkit-call COUNTS (eval-source scan), eval-error-rate,
    canvas-updated?, judge SCORE — never `:results` actuals or any
-   reference answer (the anti-cheat invariant).
+   reference answer (the anti-cheat invariant: the new per-block and
+   toolkit axes read block token estimates + eval SOURCE, never an answer).
 
    `scenarios` and `cards` are PARALLEL (run-battery! conj's them in
    lock-step), so a card's competency comes from its scenario by
@@ -176,6 +199,23 @@
                                               (inc (:seon.gym.battery/total tally))})))
                                   {}))
         total-tokens (reduce + 0 (map :seon.gym/total-tokens measures))
+        ;; PER-BLOCK token axis — sum each block's tokens across every
+        ;; measure's turn-profile, so a block-level trim shows on its own
+        ;; key (the block name IS the key).
+        block-tokens (->> measures
+                          (mapcat (comp :seon.gym.profile/block-tokens
+                                        :seon.gym/turn-profile))
+                          (reduce (fn [m [nm t]] (update m nm (fnil + 0) t)) {}))
+        ;; TOOLKIT-ADOPTION axis — sum the per-card toolkit reference counts
+        ;; across the SCORED cards. Seeded with all three keys so an empty /
+        ;; all-stub battery is an honest {:my.data 0 …}, never a misleading
+        ;; absent map.
+        toolkit-calls (->> (keep :seon.gym.scorecard/toolkit-calls scored)
+                           (reduce (fn [m tc]
+                                     (reduce-kv (fn [m k v]
+                                                  (update m k (fnil + 0) v))
+                                                m tc))
+                                   {:my.data 0 :my.ui 0 :my.tile 0}))
         eval-err     (mean (map :seon.gym.scorecard/eval-error-rate scored))
         canvas-cnt   (count (filter :seon.gym.scorecard/canvas-updated? scored))
         judge-scores (->> scored
@@ -188,6 +228,8 @@
               :seon.gym.battery/at                   at
               :seon.gym.battery/per-competency       per-comp
               :seon.gym.battery/total-tokens         total-tokens
+              :seon.gym.battery/block-tokens         block-tokens
+              :seon.gym.battery/toolkit-calls        toolkit-calls
               :seon.gym.battery/eval-error-rate      eval-err
               :seon.gym.battery/canvas-updated-count canvas-cnt
               :seon.gym.battery/scenario-count       (count scenarios)

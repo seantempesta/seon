@@ -35,16 +35,21 @@
    :seon.gym.scenario/turns       []
    :seon.gym.scenario/predicates  []})
 
-(defn- measure [id tokens]
+(defn- measure
+  "A measure fixture. `:blocks` is an optional [[block-name tokens] …]
+   vector that feeds the per-block token axis (and `total-tokens` when
+   given — else `tokens` is the flat total with no per-block breakdown)."
+  [id tokens & {:keys [blocks] :or {blocks []}}]
   {:seon.gym.scorecard/scenario id
    :seon.gym/total-tokens       tokens
    :seon.gym/turn-profile       {:seon.gym.profile/agent        :a
-                                 :seon.gym.profile/blocks       []
-                                 :seon.gym.profile/block-tokens []}})
+                                 :seon.gym.profile/blocks       (mapv first blocks)
+                                 :seon.gym.profile/block-tokens (mapv vec blocks)}})
 
 (defn- card
-  [id pass? & {:keys [err canvas judge-results]
-               :or   {err 0.0 canvas false}}]
+  [id pass? & {:keys [err canvas judge-results toolkit]
+               :or   {err 0.0 canvas false
+                      toolkit {:my.data 0 :my.ui 0 :my.tile 0}}}]
   (cond-> {:seon.gym.scorecard/scenario       id
            :seon.gym.scorecard/git-sha        "deadbee"
            :seon.gym.scorecard/run-id         (random-uuid)
@@ -54,6 +59,7 @@
            :seon.gym.scorecard/pass?          pass?
            :seon.gym.scorecard/eval-error-rate err
            :seon.gym.scorecard/canvas-updated? canvas
+           :seon.gym.scorecard/toolkit-calls  toolkit
            :seon.gym.scorecard/axes           {}
            :seon.gym.scorecard/results        []
            :seon.gym.scorecard/turn-profiles  []}
@@ -104,6 +110,38 @@
     (is (not (contains? agg :seon.gym.battery/judge-mean))
         "no judge ran (free mode) → judge-mean absent, never a misleading 0")))
 
+(deftest aggregate-surfaces-per-block-tokens-and-toolkit-adoption
+  (let [scenarios [(scen :s-ui :ui) (scen :s-mem :db-memory)]
+        ;; two measures, each with a per-block breakdown — the per-block
+        ;; axis must SUM each block by name (so a block-level trim is
+        ;; visible, not buried in total-tokens).
+        measures  [(measure :s-ui 300
+                            :blocks [[:namespaces 200] [:transcript 50]
+                                     [:live-tile 50]])
+                   (measure :s-mem 220
+                            :blocks [[:namespaces 120] [:transcript 100]])]
+        ;; s-ui's agent CALLED the toolkit; s-mem hand-rolled (0×) — the
+        ;; exact #42 signature: a render-prominence drop reads as 0 calls.
+        cards     [(card :s-ui  true  :toolkit {:my.data 3 :my.ui 2 :my.tile 1})
+                   (card :s-mem true  :toolkit {:my.data 0 :my.ui 0 :my.tile 0})]
+        agg (sc/aggregate {:seon.gym/scenarios       scenarios
+                           :seon.gym.battery/measures measures
+                           :seon.gym.battery/cards    cards
+                           :seon.gym.battery/sha      "abc1234"
+                           :seon.gym.battery/at       now})]
+    (is (m/validate :seon.gym/battery-scorecard agg)
+        "the aggregate (with the new axes) still validates")
+    (is (= {:namespaces 320 :transcript 150 :live-tile 50}
+           (:seon.gym.battery/block-tokens agg))
+        "per-block tokens SUM each block by name across measures — the
+         :namespaces trim would move ON ITS OWN KEY")
+    (is (= 520 (:seon.gym.battery/total-tokens agg))
+        "total-tokens still sums (300 + 220), kept alongside per-block")
+    (is (= {:my.data 3 :my.ui 2 :my.tile 1}
+           (:seon.gym.battery/toolkit-calls agg))
+        "toolkit-calls sums across scored cards — a context change that
+         drops these toward 0 is the #42 render-prominence regression")))
+
 (deftest aggregate-judge-mean-excludes-skipped-verdicts
   (let [scenarios [(scen :s-a :db-memory) (scen :s-b :db-memory)]
         measures  [(measure :s-a 10) (measure :s-b 10)]
@@ -139,6 +177,11 @@
                            :seon.gym.battery/at       now})]
     (is (m/validate :seon.gym/battery-scorecard agg))
     (is (= 0 (:seon.gym.battery/total-tokens agg)))
+    (is (= {} (:seon.gym.battery/block-tokens agg))
+        "no measures → no per-block tokens")
+    (is (= {:my.data 0 :my.ui 0 :my.tile 0}
+           (:seon.gym.battery/toolkit-calls agg))
+        "empty battery → honest all-zero toolkit-calls, never an absent map")
     (is (= 0.0 (:seon.gym.battery/eval-error-rate agg)))
     (is (= {} (:seon.gym.battery/per-competency agg)))))
 

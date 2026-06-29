@@ -359,6 +359,18 @@
 ;; :seon.render.live-tile/content on its own entity? The "agents drive
 ;; the live tile as the primary surface" instrument.
 (schema/register! :seon.gym.scorecard/canvas-updated? :boolean)
+;; Toolkit-ADOPTION signal (the axis that would've caught #42): per `my.*`
+;; toolkit namespace, how many times the run-driven evals REFERENCE it
+;; (`my.data/`, `my.ui/`, `my.tile/`) — did the agent CALL the taught
+;; toolkit, or hand-roll the equivalent footgun path? A SIGNAL, never a
+;; gate: a context change that drops these toward 0 is a render-prominence
+;; regression (the #42 namespaces signature-trim regressed my.data adoption
+;; to 0×, which the confounded total-tokens axis missed). Reads eval SOURCE
+;; only (anti-cheat: never an answer). FREE-mode-blind — stub scripts don't
+;; call tools, so it fills on --paid drives.
+(schema/register! :seon.gym/toolkit-ns [:enum :my.data :my.ui :my.tile])
+(schema/register! :seon.gym.scorecard/toolkit-calls
+  [:map-of :seon.gym/toolkit-ns [:int {:min 0}]])
 ;; Per-turn prompt-blob evidence (gym-upgrade PRD §6.6, default-on):
 ;; every persisted prompt-file path for the run, chronological — a
 ;; moved number is diffable to the exact context bytes the agent saw.
@@ -420,6 +432,7 @@
    [:seon.gym.scorecard/pass?    :seon.gym.scorecard/pass?]
    [:seon.gym.scorecard/eval-error-rate :seon.gym.scorecard/eval-error-rate]
    [:seon.gym.scorecard/canvas-updated? :seon.gym.scorecard/canvas-updated?]
+   [:seon.gym.scorecard/toolkit-calls   :seon.gym.scorecard/toolkit-calls]
    [:seon.gym.scorecard/axes     :seon.gym.scorecard/axes]
    [:seon.gym.scorecard/results  :seon.gym.scorecard/results]
    [:seon.gym.scorecard/prompt-files {:optional true}
@@ -675,6 +688,31 @@
     (if (zero? n)
       0.0
       (/ (count (remove identity oks)) n))))
+
+(def ^:private toolkit-nses
+  "The `my.*` toolkit namespaces the toolkit-adoption signal watches."
+  [:my.data :my.ui :my.tile])
+
+(defn- count-substring
+  "How many (non-overlapping) times `sub` occurs in `s`."
+  [s sub]
+  (loop [from 0 n 0]
+    (if-let [i (str/index-of s sub from)]
+      (recur (+ i (count sub)) (inc n))
+      n)))
+
+(defn- toolkit-calls*
+  "Per `my.*` toolkit namespace, how many times the RUN-DRIVEN evals
+   REFERENCE it (`my.data/`, `my.ui/`, `my.tile/`) — the toolkit-ADOPTION
+   signal (did the agent CALL the taught toolkit, or hand-roll it?). Reads
+   eval SOURCE only (same caused-run scoping as [[eval-at+source]];
+   anti-cheat: never an answer). Always returns all three keys (0 when the
+   ns is unreferenced — e.g. every stub run, since scripts don't call
+   tools). agent-id nil = whole store."
+  [dbv agent-id]
+  (let [joined (str/join "\n" (mapv second (eval-at+source dbv agent-id)))]
+    (into {} (map (fn [tk] [tk (count-substring joined (str (name tk) "/"))]))
+          toolkit-nses)))
 
 (defn- agent-canvas-updated?
   "Did the agent drive its OWN canvas — i.e. is
@@ -1745,6 +1783,11 @@
                           (eval-error-rate* dbv nil)
                           :seon.gym.scorecard/canvas-updated?
                           (agent-canvas-updated? dbv primary)
+                          ;; toolkit-adoption signal — whole-store eval
+                          ;; source scan (the axis that would've caught
+                          ;; #42). FREE-mode-blind; fills on --paid.
+                          :seon.gym.scorecard/toolkit-calls
+                          (toolkit-calls* dbv nil)
                           :seon.gym.scorecard/axes
                           (axes-rollup axes results)
                           :seon.gym.scorecard/results  results
