@@ -1061,6 +1061,23 @@ other lane's **_Needs_** and the owner makes it.
   - **ISOLATION note:** this is the isolated NEXT context change — it MUST NOT be bundled with any
     other context edit, so the s12-alone re-measure attributes the lift (or its absence) to exactly
     this guidance and nothing else.
+- **Needs (UI → Core): db-memory Gap A ROOT-CAUSED — the store guidance was NOT the lever
+  (2026-06-29, LIVE-PROVEN).** The `60dfe087` store-proactively line did NOT close s12 (measured:
+  rate 0→0). A fresh instrumented k=2 drive at HEAD (`26b219f2`) root-caused WHY, with the live
+  per-turn trace: depth = [[research/s12-store-under-framing-rootcause-2026-06-29]]. **The guidance
+  IS in agent A's prompt and A internalizes it** — A's first eval mints a plan WITH an explicit
+  "store findings as my.kb.* rows" step. The real gap is **store-gated-on-research-completion ×
+  research friction**: A's plan defers storing `:after` the trace, then A burns all its turns stuck
+  reading the WRONG file (`src/seon/db.clj` — the paused JVM track — not `db.cljs`/`db/internal.cljs`),
+  trusting `(println …)`'s `nil`, never pivoting to `render-namespace` — so the store step is NEVER
+  REACHED (not judged optional). **Two Core asks, in order:** (#0, BLOCKER) inspecting `seon.schema`
+  via `render-namespace` WIPES the run's schema registry (the signature example `(seon.schema/clear-all! [])`
+  executes → every later persist fails, my drive died before a scorecard) — fix before ANY s12
+  re-measure; (#1, TOP) reframe the store bullet from batch-at-the-end ("persist a row per claim
+  BEFORE you reply") to **incremental** ("store each claim the moment you verify it — a grep hit with a
+  `file:line` is already storable; don't wait for the whole investigation"). Acceptance: after #0,
+  s12-alone k=2 (A stores ≥2 provenance rows) + full battery no-regression. **Top recommendation: #1
+  incremental-store reframe (after the #0 registry-wipe fix).** ISOLATED — do not bundle.
 - **Interface changes (Core must absorb):**
   1. **Handoff #4 still holds** — UI renders the warnings-block error-TILE; it just streams
      inside the morphed world view (no standalone patch). The `:seon/error` VALUE shape is
