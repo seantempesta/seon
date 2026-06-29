@@ -238,6 +238,41 @@ the cacheable unit.** We give each block a stable token span and a chain hash.
    reactive-context doctrine wants. This matches the existing comment ("a save busts only this
    block and below").
 
+### 3.2b Don't reinvent — the chain-hash + extra-keys is verbatim vLLM (vendored)
+
+The Phase-2 store is not a new algorithm; it is vLLM's automatic-prefix-cache, which is
+vendored at `reference-code/vllm/`. Its block hash (`vllm/v1/core/kv_cache_utils.py:577-603`)
+is exactly the chain hash of §3.2:
+
+```python
+hash_function((parent_block_hash, curr_block_token_ids_tuple, extra_keys))   # :603
+```
+
+with `NONE_HASH` seeding the root (`:95-114`). Two features to lift straight from there:
+
+- **`extra_keys` / `cache_salt`** (`:539-574`, `:560-561`; design doc
+  `vllm/docs/design/prefix_caching.md:87`): a salt folded into the FIRST block's hash so
+  caches are only shared within a chosen scope. **Use it to scope by `:seon.agent/id` (or
+  cluster)** so one agent's cached prefix can't be reused by another unless we explicitly
+  want cross-agent sharing — clean fit with Seon's per-agent context and the cross-agent
+  publish gate.
+- **The chain-hash radix store + LRU eviction** (`hash_request_tokens`,
+  `vllm/v1/core/kv_cache_manager.py`) — we copy the bookkeeping, not the paged-GPU-block
+  allocator (we hold whole `DynamicCache`s, not vLLM's 16-token paged blocks).
+
+Further serving features worth a later look, all vendored (`reference-code/vllm/`), NONE
+needed for Phase 1 — flagged so we adopt rather than invent if/when memory pressure shows up:
+
+- **KV offload connectors** (`vllm/distributed/kv_transfer/kv_connector/v1/`:
+  `simple_cpu_offload_connector.py`, `offloading_connector.py`, `lmcache_connector.py`) —
+  spill cold prefix caches to CPU/LMCache instead of evicting. Matches our LRU-cap +
+  offload note (§1.4); the full-attn-only prefix is small enough that CPU offload is cheap.
+- **Chunked prefill** — encode a long stable prefix in fixed chunks (bounds the prefill
+  step's peak memory; the cache append is already chunk-friendly per §1.2).
+
+These are the "proper serving" levers; the discipline is to pull them from the vendored
+vLLM/SGLang source (block hash, salt, offload connector), not hand-roll equivalents.
+
 ### 3.3 Block-ordering tweak that maximizes hits (the skill case)
 
 Today a *loaded* skill body sits in the volatile band so load/unload doesn't bust the
@@ -335,6 +370,11 @@ Phase-3 risk we are deliberately not taking yet.
 - Worker KV-reuse gap: `research/eval-renoise-worker-build-2026-06-28.md` §nuance-4. Source
   grounding: `research/transformers-diffusion-source-grounding-2026-06-28.md`. Co-location:
   `research/custom-image-and-seon-colocation-2026-06-28.md`.
+- Vendored serving source (adopt, don't reinvent): vLLM block hash + chain hash + salt/extra-keys
+  `reference-code/vllm/vllm/v1/core/kv_cache_utils.py:95-114,539-603`; radix/LRU
+  `vllm/v1/core/kv_cache_manager.py`; KV offload connectors
+  `vllm/distributed/kv_transfer/kv_connector/v1/{simple_cpu_offload,offloading,lmcache}_connector.py`;
+  prefix-cache design `vllm/docs/design/prefix_caching.md`.
 - Web SOTA: PromptCache [2311.04934](https://arxiv.org/abs/2311.04934); Block-Attention
   [2409.15355](https://arxiv.org/html/2409.15355); EPIC/LegoLink
   [2410.15332](https://arxiv.org/abs/2410.15332); KVLink
