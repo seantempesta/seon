@@ -205,7 +205,8 @@
                     (let [text (:seon.render/text
                                  (agent/render-namespace
                                    {:seon.db/db @conn :seon.ns/name :demo.ns
-                                    :seon.render/depth 0 :seon.render/format :ai}))]
+                                    :seon.render/depth 0 :seon.render/format :ai
+                                    :seon.render/detail :full}))]
                       (is (str/includes? text "(ns demo.ns")
                           "the ns source is the authoritative body")
                       ;; the FAILING test surfaces as a compact ⚠ note …

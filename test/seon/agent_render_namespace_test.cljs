@@ -99,7 +99,8 @@
             (let [db   @conn
                   res  (agent/render-namespace
                          {:seon.db/db db :seon.ns/name :test.parent
-                          :seon.render/depth 0 :seon.render/format :ai})
+                          :seon.render/depth 0 :seon.render/format :ai
+                          :seon.render/detail :full})
                   text (:seon.render/text res)]
               (is (string? text) ":ai form is a string")
               (is (pos? (count text)) "non-blank")
@@ -141,7 +142,8 @@
                       (let [text (:seon.render/text
                                    (agent/render-namespace
                                      {:seon.db/db @conn :seon.ns/name :test.runtime
-                                      :seon.render/depth 0 :seon.render/format :ai}))]
+                                      :seon.render/depth 0 :seon.render/format :ai
+                                      :seon.render/detail :full}))]
                         (is (str/includes? text "[fn test.runtime/go]")
                             "a sourceless ns lists its fn members")
                         (is (str/includes? text "[schema :test.runtime/id]")
@@ -182,7 +184,8 @@
                   text (:seon.render/text
                          (agent/render-namespace
                            {:seon.db/db db :seon.ns/name :test.child
-                            :seon.render/depth 1 :seon.render/format :ai}))]
+                            :seon.render/depth 1 :seon.render/format :ai
+                            :seon.render/detail :full}))]
               ;; Anchor on the rendered ns-source HEAD `(ns X` to mean "this
               ;; ns block rendered" — distinct from a bare require mention
               ;; (`[test.parent :as p]` contains the NAME but not `(ns `).
@@ -209,7 +212,8 @@
                   text (:seon.render/text
                          (agent/render-namespace
                            {:seon.db/db db :seon.ns/name :test.child
-                            :seon.render/depth 0 :seon.render/format :ai}))]
+                            :seon.render/depth 0 :seon.render/format :ai
+                            :seon.render/detail :full}))]
               (is (str/includes? text "(ns test.child") "the ns itself renders")
               (is (not (str/includes? text "(ns test.parent"))
                   "depth 0 does NOT render the required parent BLOCK")
@@ -230,7 +234,8 @@
                   text (:seon.render/text
                          (agent/render-namespace
                            {:seon.db/db db :seon.ns/name :test.child
-                            :seon.render/depth 1 :seon.render/format :ai}))]
+                            :seon.render/depth 1 :seon.render/format :ai
+                            :seon.render/detail :full}))]
               (is (str/includes? text "test.missing (not in db)")
                   "a required ns with no :seon.ns entity is NOTED, not errored")
               (is (str/includes? text "(ns test.child")
@@ -250,7 +255,8 @@
                   text  (:seon.render/text
                           (agent/render-namespace
                             {:seon.db/db db :seon.ns/name :cyc.a
-                             :seon.render/depth 10 :seon.render/format :ai}))
+                             :seon.render/depth 10 :seon.render/format :ai
+                             :seon.render/detail :full}))
                   ;; count whole-ns BLOCK HEADS (the rendered `(ns X` source
                   ;; head) — the block marker, not a bare name mention in a
                   ;; require (`[cyc.a]` has the name but not `(ns `). Literal
@@ -280,10 +286,98 @@
             (let [db   @conn
                   text (:seon.render/text
                          (agent/render-namespace
-                           {:seon.db/db db :seon.ns/name :test.child}))]
+                           {:seon.db/db db :seon.ns/name :test.child
+                            :seon.render/detail :full}))]
               (is (str/includes? text "(ns test.parent")
                   "default depth 1 follows requires one level")
               (is (str/includes? text "(defn greet")
                   "the required ns's fns are in view by default (in its source)"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Default detail is :signature — CONCISE by default (the #42-family trim for
+;; the on-demand verb): the API surface (header + arglist + one-line doc),
+;; NOT the ns source or the fn body.
+;; ---------------------------------------------------------------------------
+
+(deftest default-detail-is-signature-not-full-body
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         ;; NO :seon.render/detail — exercises the default.
+                         (agent/render-namespace
+                           {:seon.db/db db :seon.ns/name :test.parent
+                            :seon.render/depth 0}))]
+              (is (str/includes? text "(signatures)")
+                  "default render is the (signatures) manifest view")
+              (is (str/includes? text "[fn test.parent/greet]")
+                  "the public verb header is shown")
+              (is (str/includes? text "(test.parent/greet [x])")
+                  "the verb arglist (signature) is shown")
+              (is (str/includes? text "Greets x")
+                  "the one-line doc rides the signature")
+              ;; …but NOT the ns source head nor the fn BODY (that's the cost
+              ;; we're cutting — full body is opt-in via :detail :full).
+              (is (not (str/includes? text "(ns test.parent"))
+                  "the ns SOURCE is NOT dumped by default")
+              (is (not (str/includes? text "(str \"hi \""))
+                  "the fn BODY is elided by default"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Member drill — :seon.ns/member names ONE fn → its FULL source, nothing
+;; else (the common case the agent re-issued render-namespace 4× to get).
+;; ---------------------------------------------------------------------------
+
+(deftest member-drill-returns-one-fns-full-source
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         (agent/render-namespace
+                           {:seon.db/db db :seon.ns/name :test.parent
+                            :seon.ns/member "greet"}))]
+              (is (str/includes? text "(member greet)")
+                  "the member-drill block is tagged with the member name")
+              (is (str/includes? text "[fn test.parent/greet]")
+                  "the drilled fn's header is shown")
+              (is (str/includes? text "(defn greet [x] (str \"hi \" x))")
+                  "the drilled fn's FULL source is inlined (always, no threshold)"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest member-drill-accepts-qualified-name
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         (agent/render-namespace
+                           {:seon.db/db db :seon.ns/name :test.parent
+                            ;; qualified form resolves by trailing name.
+                            :seon.ns/member "test.parent/greet"}))]
+              (is (str/includes? text "(defn greet [x] (str \"hi \" x))")
+                  "a qualified member name resolves to the same fn"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest member-drill-unknown-member-is-noted-not-errored
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         (agent/render-namespace
+                           {:seon.db/db db :seon.ns/name :test.parent
+                            :seon.ns/member "nope"}))]
+              (is (str/includes? text "not found")
+                  "an unknown member returns a note, not a throw")
+              (is (str/includes? text "greet")
+                  "the note lists the public fns so the agent can re-issue"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

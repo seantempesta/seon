@@ -1216,7 +1216,10 @@
      - `:full`      — header + clipped first-doc-line + full source when
                       small (the original whole-ns behavior, unchanged).
      - `:signature` — header + flags + clipped first-doc-line; the body
-                      is NEVER inlined (the API-surface manifest view)."
+                      is NEVER inlined (the API-surface manifest view).
+     - `:full-body` — header + clipped first-doc-line + full source
+                      ALWAYS (no size threshold) — the member-drill view:
+                      the agent asked for THIS one fn, give it all of it."
   ([f] (fn-block-ai f :full))
   ([{:seon.fn/keys [sym arglists doc source private? spec schema-error]} detail]
    (let [sig    (when (and arglists (not (str/blank? arglists)))
@@ -1232,12 +1235,14 @@
          header (str "[fn " sym "]"
                      (when sig (str "  " sig))
                      (when (seq flags) (str "  " (str/join " " flags))))
-         small? (and (= detail :full)
-                     source (<= (count source) fn-source-inline-threshold))
+         body?  (and source
+                     (or (= detail :full-body)
+                         (and (= detail :full)
+                              (<= (count source) fn-source-inline-threshold))))
          lines  (cond-> [header]
                   (and doc (not (str/blank? doc)))
                   (conj (str "; " (clip (first (str/split-lines doc)) member-doc-clip)))
-                  small?
+                  body?
                   (conj (str/trim source)))]
      (str/join "\n" lines))))
 
@@ -1425,13 +1430,44 @@
 (schema/register! :seon.render/format [:enum :ai :html])
 (schema/register! :seon.render/detail [:enum :full :signature])
 
+;; The member-drill handle: name ONE fn within the rendered ns to pull its
+;; FULL source (the common case — the agent wants a specific verb, not the
+;; whole namespace). Accepts a bare name ("store-fact"), a qualified name
+;; ("my.kb/store-fact"), or a symbol — normalized + matched against
+;; :seon.fn/sym in [[render-member]].
+(schema/register! :seon.ns/member [:or :symbol :string])
+
 (schema/register! ::render-namespace-request
   [:map
    [:seon.ns/name        :seon.ns/name]
+   [:seon.ns/member      {:optional true} :seon.ns/member]
    [:seon.render/depth   {:optional true} :seon.render/depth]
    [:seon.render/format  {:optional true} :seon.render/format]
    [:seon.render/detail  {:optional true} :seon.render/detail]
    [:seon.db/db          {:optional true} :seon.db/db]])
+
+(defn- render-member
+  "Member-drill: render ONE fn's FULL source. `data` is the `pull-ns-data`
+   result for `ns-kw`; `member` is a bare or qualified fn name (or symbol).
+   Matches against `:seon.fn/sym` by the trailing name (so both
+   \"store-fact\" and \"my.kb/store-fact\" resolve). Errors-as-values: when
+   the member isn't found, returns a one-line note listing the public fns
+   so the agent can re-issue with a real name — never a throw."
+  [ns-kw data member]
+  (let [want  (let [m (name (symbol (str member)))] m)
+        fns   (->> (:seon.fn/_ns data) (sort-by :seon.fn/sym))
+        match (some (fn [{:seon.fn/keys [sym] :as f}]
+                      (when (= (name (symbol (str sym))) want) f))
+                    fns)]
+    (if match
+      (ns-demarc ns-kw (fn-block-ai match :full-body) (str "(member " want ")"))
+      (let [names (->> (remove :seon.fn/private? fns)
+                       (map #(name (symbol (str (:seon.fn/sym %)))))
+                       sort)]
+        (str "; member " want " not found in " (name ns-kw)
+             (if (seq names)
+               (str " — public fns: " (str/join ", " names))
+               " — no public fns indexed"))))))
 
 (schema/register! ::render-namespace-response
   [:map
@@ -1456,38 +1492,54 @@
    Map-in / map-out:
 
      {:seon.ns/name <keyword>
+      :seon.ns/member <name, optional — drill ONE fn's full source>
       :seon.render/depth  <int, default 1>
       :seon.render/format <:ai | :html, default :ai>
-      :seon.render/detail <:full | :signature, default :full>
+      :seon.render/detail <:full | :signature, default :signature>
       :seon.db/db <db value, optional — defaults to @*conn*>}
 
    → {:seon.render/text <string>}     for :ai
    → {:seon.render/hiccup <hiccup>}   for :html
 
+   CONCISE BY DEFAULT — the verb returns the API SURFACE, not a body dump.
+
    `:seon.render/detail` (`:ai` form only) selects how much of each fn
-   shows: `:full` (default) renders the ns SOURCE + every member with
-   small fn bodies inlined — the whole-ns view; `:signature` renders a
-   `;; ── namespace x (signatures) ──` block of public fn signatures only
-   (bodies elided) — the API-surface manifest view.
+   shows: `:signature` (DEFAULT) renders a `(signatures)` block of public
+   fn signatures only (name + arglist + one-line doc, bodies elided) — the
+   manifest view that orients an agent without flooding its transcript;
+   `:full` renders the ns SOURCE + every member with small fn bodies
+   inlined — the whole-ns body dump, only when explicitly asked.
+
+   `:seon.ns/member` is the DRILL handle — the common case where the agent
+   wants ONE specific verb, not the whole ns. Naming a member (bare
+   \"store-fact\" or qualified \"my.kb/store-fact\") returns just that fn's
+   FULL source, ignoring depth/detail. An unknown member returns a one-line
+   note listing the public fns (errors-as-values), never a throw.
 
    This is the foundation of every agent's default context; the section
-   that surfaces the agent's namespaces resolves to it."
+   that surfaces the agent's namespaces resolves to it (passing its own
+   detail explicitly, so this default never reaches the always-on block)."
   {:malli/schema [:=> [:cat ::render-namespace-request] ::render-namespace-response]}
   [{ns-name :seon.ns/name
+    member :seon.ns/member
     :seon.render/keys [depth format detail]
     :seon.db/keys [db]
-    :or {depth 1 format :ai detail :full}}]
+    :or {depth 1 format :ai detail :signature}}]
   (let [db    (or db @db/*conn*)
-        ns-kw (if (keyword? ns-name) ns-name (keyword (str ns-name)))
-        [order data-by-kw] (collect-ns-order db ns-kw (max 0 depth))]
-    (if (= format :html)
-      {:seon.render/hiccup
-       (into [:div {:class "flex flex-col gap-2"}]
-             (for [k order]
-               (render-one-ns-html db k (data-by-kw k))))}
-      {:seon.render/text
-       (str/join "\n\n" (for [k order]
-                          (render-one-ns-ai k (data-by-kw k) detail)))})))
+        ns-kw (if (keyword? ns-name) ns-name (keyword (str ns-name)))]
+    (if (some? member)
+      ;; member-drill short-circuits BEFORE recursion: depth-0 pull of this
+      ;; ns only, render the one fn's full source (or the not-found note).
+      {:seon.render/text (render-member ns-kw (pull-ns-data db ns-kw) member)}
+      (let [[order data-by-kw] (collect-ns-order db ns-kw (max 0 depth))]
+        (if (= format :html)
+          {:seon.render/hiccup
+           (into [:div {:class "flex flex-col gap-2"}]
+                 (for [k order]
+                   (render-one-ns-html db k (data-by-kw k))))}
+          {:seon.render/text
+           (str/join "\n\n" (for [k order]
+                              (render-one-ns-ai k (data-by-kw k) detail)))})))))
 (defn- latest-live-inbound
   "The latest LIVE inbound message for `my-eid` in db value `db` as
    [at content] — to ∋ me, from ≠ me, hops < `warn/hop-cap` (the same
