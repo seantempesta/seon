@@ -51,7 +51,7 @@
    grades a canned good/bad reply pair to prove the judge discriminates);
    the `x*` keys are the cross-session A→B baseline scenarios; the
    `canvas-*` keys are the :ui-competency canvas-as-primary scenarios."
-  [:s32 :s21 :s12 :todo :err :calib :x1 :x3 :x12 :xcat :ab
+  [:s32 :s21 :s12 :todo :resume :err :calib :x1 :x3 :x12 :xcat :ab
    :canvas-budget :canvas-goal])
 
 (defn- gate-value
@@ -243,6 +243,12 @@
   (async done
     (run-paid! :todo
                "test/seon/gym/scenarios/todo-multistep-tracking.edn"
+               done)))
+
+(deftest plan-resume-across-restart-paid
+  (async done
+    (run-paid! :resume
+               "test/seon/gym/scenarios/plan-resume-across-restart.edn"
                done)))
 
 (deftest err-recovery-unregistered-attr-paid

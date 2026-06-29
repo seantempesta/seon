@@ -1,0 +1,173 @@
+;; PLAN-RESUME-ACROSS-RESTART (:planning competency) — the CLAUDE.md
+;; "Exercising agents" win condition that NO other scenario probes:
+;; long-term PLANNING CONTINUITY across an interruption. The agent must
+;; break a multi-step task into DURABLE plan items UP FRONT, do the one
+;; step it can do now, and then — when a later turn arrives with the
+;; task NOT re-explained — RESUME from its own open plan items instead of
+;; re-planning from scratch or redoing the step it already finished.
+;;
+;; THE FORCED INTERRUPTION (why two turns, not one): step 1 (design the
+;; schema) is doable immediately, but step 2 (load the books) needs data
+;; the human only sends in the SECOND message. So a single-turn blitz is
+;; impossible — the agent MUST stop after step 1 with steps 2-3 still
+;; open, then pick them back up on the next turn. Turn 2 supplies ONLY
+;; the book list (the data for step 2); it deliberately never mentions
+;; the query-fn-with-test (step 3). The only way the agent knows step 3
+;; is still owed is by reading its own open plan items — that read IS the
+;; resume behavior under test. Each turn's context is derived fresh from
+;; the DB (reactive context), so the turn boundary faithfully simulates a
+;; restart / fresh wake even without driver mid-scenario pod restart
+;; (which is still S-06-unsupported — see todo-resume.edn).
+;;
+;; GYM INTEGRITY: predicates are STRUCTURAL/behavioral — the plan was
+;; minted (≥3 owner-scoped todos), at least one item was actually closed
+;; (a real completion happened, not a delete), the loop is closed at end
+;; (no open todos), the plan did NOT balloon (≤5 — a from-scratch re-plan
+;; of a 3-step task doubles to 6, RED here), the schema landed (≥2 domain
+;; attrs), a real test was written, the human got a reply, the agent went
+;; idle under the turn cap, and the live drive kept the REPL clean. NOTHING
+;; checks a title, a book, or any planted answer; the book list is plain
+;; input data with no hidden answer to read (self-bait-free). The single
+;; judgment that can't be made structurally — "did turn 2 RESUME from the
+;; open plan vs re-plan / redo step 1" — rides the :llm-judge axis, whose
+;; rubric/reference are shown only to the post-run judge, never to the
+;; agent.
+;;
+;; The verbs to mint/close plan items are NOT named in the message — the
+;; agent discovers them from its own always-on context (the standing
+;; "2+ steps → track it" teaching + the seon.agent.todo docstrings). If
+;; this scenario goes RED on the plan/resume predicates, that is the
+;; SIGNAL: the always-on instructions don't yet make durable up-front
+;; planning + read-your-open-items-on-resume the obvious path — a gap to
+;; close in the instructions, not in this file.
+;;
+;; PAID — costs real money. Refused without {:seon.gym/allow-paid? true} +
+;; the active provider's API key.
+{:seon.gym.scenario/id     :plan-resume-across-restart
+ :seon.gym.scenario/doc    "Planning continuity across an interruption: a 3-step task (design a books schema → load a list sent LATER → write+test a books-by-author fn) where step 2's data arrives only in turn 2, forcing the agent to stop after step 1 with steps 2-3 open. Turn 2 supplies just the list and never re-states step 3, so resuming requires reading the agent's own open plan items. Bar: ≥3 owner-scoped plan items minted up front, ≥1 actually closed, zero still open at end, the plan never balloons to a from-scratch re-plan (≤5), schema + test land, one honest reply, idle under cap, REPL clean."
+ :seon.gym.scenario/tier   :paid
+ :seon.gym.scenario/status :active
+ :seon.gym.scenario/competency :planning
+ :seon.gym.scenario/axes   [:stores-proactively :models-work-directed
+                            :writes-tests :replies-honestly :terminates
+                            :makes-few-errors]
+ :seon.gym.scenario/turns
+ [{:seon.gym.turn/message "I want to start a reading log. Here's the plan, in order: FIRST, design a schema to record books I've finished — title, author, and the date I finished each. SECOND, load the books I finished this month — I'll paste the list in my next message. THIRD, write me a function that lists every book by a given author, with a test proving it works. Do the first step now. I have to step away before I can send the list — when I'm back, just pick up where you left off without me re-explaining."}
+  ;; ---- INTERRUPTION BOUNDARY: a fresh turn, context re-derived from the
+  ;; ---- DB. The message supplies ONLY step 2's data; step 3 (the fn +
+  ;; ---- test) is never re-mentioned — the agent must recall it from its
+  ;; ---- own open plan items to finish the job.
+  {:seon.gym.turn/message "Back. Here are the books I finished this month:\n- \"The Left Hand of Darkness\" — Ursula K. Le Guin — finished 2026-06-03\n- \"A Wizard of Earthsea\" — Ursula K. Le Guin — finished 2026-06-14\n- \"Project Hail Mary\" — Andy Weir — finished 2026-06-22"}]
+ :seon.gym.scenario/predicates
+ [;; (a) Broke the task into DURABLE items UP FRONT — ≥3 owner-scoped plan
+  ;; rows (one per step), owner = an agent entity. Structural: count +
+  ;; ownership, never a title.
+  {:seon.gym.predicate/id     :minted-a-plan-up-front
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :stores-proactively
+   :seon.gym.predicate/query  [:find ?t
+                               :where
+                               [?t :seon.agent.todo/owner ?a]
+                               [?a :seon.agent/id ?aid]]
+   :seon.gym.predicate/expect [:count>= 3]}
+  ;; (b) The plan did NOT balloon. A from-scratch re-plan of a 3-step task
+  ;; on turn 2 doubles the item count to ~6; resuming keeps it at ~3 (an
+  ;; umbrella item or one extra is fine, hence ≤5). This is the core
+  ;; "resumed, didn't re-plan" STRUCTURAL guard; the semantic judgment is
+  ;; on the judge axis below.
+  {:seon.gym.predicate/id     :no-from-scratch-replan
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :models-work-directed
+   :seon.gym.predicate/query  [:find ?t
+                               :where
+                               [?t :seon.agent.todo/owner ?a]
+                               [?a :seon.agent/id ?aid]]
+   :seon.gym.predicate/expect [:count<= 5]}
+  ;; (c) A real completion happened — ≥1 item flipped to :done with a
+  ;; ::completed-at stamp. Pairs with minted-a-plan (vacuity guard for
+  ;; closed-the-loop's :empty) and evidences that step 1's item was
+  ;; actually CLOSED, not dropped. (The strict "closed BEFORE turn 2"
+  ;; ordering is a judge concern — see :judge-resumed-not-replanned.)
+  {:seon.gym.predicate/id     :closed-at-least-one-item
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :stores-proactively
+   :seon.gym.predicate/query  [:find ?t
+                               :where
+                               [?t :seon.agent.todo/owner ?a]
+                               [?a :seon.agent/id ?aid]
+                               [?t :seon.agent.todo/status :done]
+                               [?t :seon.agent.todo/completed-at _]]
+   :seon.gym.predicate/expect :non-empty}
+  ;; (d) Closed the loop — by run end NO owner-scoped item is still :open.
+  ;; Staying on track across the interruption means finishing what was
+  ;; planned. (An empty open-todos block is the agent's own done-signal.)
+  {:seon.gym.predicate/id     :closed-the-loop-no-open-items
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :stores-proactively
+   :seon.gym.predicate/query  [:find ?t
+                               :where
+                               [?t :seon.agent.todo/status :open]
+                               [?t :seon.agent.todo/owner ?a]
+                               [?a :seon.agent/id ?aid]]
+   :seon.gym.predicate/expect :empty}
+  ;; The work landed: the agent designed a schema — agent-provenance
+  ;; domain attrs (title/author/date, whatever keyword ns it picked;
+  ;; structural, not nominal) are visible on the post-run store.
+  {:seon.gym.predicate/id     :designed-the-books-schema
+   :seon.gym.predicate/kind   :domain-attrs
+   :seon.gym.predicate/axis   :models-work-directed
+   :seon.gym.predicate/expect [:count>= 2]}
+  ;; …and step 3's fn got a real test (resumed all the way to the end —
+  ;; turn 2 never mentioned the test, so this firing means the agent
+  ;; carried step 3 forward from its open plan).
+  {:seon.gym.predicate/id      :wrote-a-test-for-the-fn
+   :seon.gym.predicate/kind    :eval-count-matching
+   :seon.gym.predicate/axis    :writes-tests
+   :seon.gym.predicate/pattern "deftest"
+   :seon.gym.predicate/expect  [:count>= 1]}
+  ;; The human got a reply (from-agent + hops>0, not the user-entity join —
+  ;; datahike-cljs double-identity-join mis-binding, pinned in driver_test).
+  {:seon.gym.predicate/id     :replied-to-the-user
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :replies-honestly
+   :seon.gym.predicate/query  [:find ?m
+                               :where
+                               [?m :seon.agent.message/from ?a]
+                               [?a :seon.agent/id ?aid]
+                               [?m :seon.agent.message/hops ?h]
+                               [(pos? ?h)]]
+   :seon.gym.predicate/expect :non-empty}
+  ;; Terminated cleanly — idle is DERIVED (not terminated AND owns no open
+  ;; run), never a stored state datom.
+  {:seon.gym.predicate/id     :agent-ends-idle
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?a
+                               :where
+                               [?a :seon.agent/id _]
+                               (not [?a :seon.agent/terminated-at _])
+                               (not-join [?a]
+                                 [?r :seon.agent.run/agent ?a]
+                                 [?r :seon.agent.run/status :open])]
+   :seon.gym.predicate/expect :non-empty}
+  ;; …under a turn cap (two message-driven runs; generous bound guards
+  ;; only runaway).
+  {:seon.gym.predicate/id     :terminates-under-cap
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   :seon.gym.predicate/query  [:find ?t
+                               :where
+                               [?t :seon.agent.turn/id ?tid]]
+   :seon.gym.predicate/expect [:count<= 30]}
+  ;; REPL cleanliness on the live drive (curation #44): the failed-eval
+  ;; fraction must stay ≤ 0.2 — a resume that fights the API reds here.
+  {:seon.gym.predicate/id             :keeps-the-repl-clean
+   :seon.gym.predicate/kind           :eval-error-rate
+   :seon.gym.predicate/axis           :makes-few-errors
+   :seon.gym.predicate/max-error-rate 0.2}
+  ;; --- the resume-vs-replan judgment, the ONLY non-structural leg ---
+  {:seon.gym.predicate/id        :judge-resumed-not-replanned
+   :seon.gym.predicate/kind      :llm-judge
+   :seon.gym.predicate/axis      :models-work-directed
+   :seon.gym.predicate/rubric    "PASS only if, on the SECOND turn, the agent RESUMED its existing plan — it picked up the still-open steps (load the supplied books, then write+test the books-by-author fn) by consulting its own prior plan items, and it did NOT re-plan the task from scratch and did NOT redo the schema-design step it had already finished on turn 1. The schema must have been done in turn 1 and the remaining two steps completed in turn 2. FAIL if the agent re-planned the whole task on turn 2, re-designed/re-created the already-finished schema, skipped step 3 (the fn + test) because turn 2 didn't mention it, or finished none of the remaining work."
+   :seon.gym.predicate/reference "Correct shape: turn 1 — break the task into durable plan items for all three steps, complete ONLY step 1 (design the books schema: title, author, finished-date) because the data for step 2 hasn't arrived, close that item, and reply asking for the list. Turn 2 — the human sends only the book list (and never mentions the test), so the agent must read its OWN open items to know that loading the books AND writing+testing the books-by-author fn are what remain; it does both and closes the loop. Re-planning from scratch on turn 2, or re-doing the schema, is the failure this probes — a faithful resume touches the open items and leaves the closed one alone."}]}
