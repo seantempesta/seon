@@ -216,6 +216,48 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+(deftest recently-completed-band-recalls-closed-work
+  ;; #71: open-only render makes closed setup invisible, so an agent re-does
+  ;; it. The block now carries a bounded "Recently completed" recall band
+  ;; (derived from ::completed-at, nothing stored) — verify it renders the
+  ;; closed title (with the do-NOT-redo cue) while the section still vanishes
+  ;; for a truly-idle agent.
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (todo/add! {:seon.agent.todo/title "set up KB schema"
+                            :seon.agent.todo/owner a-ref})
+                (.then (fn [{id :seon.agent.todo/id}]
+                         (-> (todo/add! {:seon.agent.todo/title "write the plan"
+                                         :seon.agent.todo/owner a-ref})
+                             (.then (fn [_] (todo/done! {:seon.agent.todo/id id}))))))
+                (.then
+                  (fn [_]
+                    (let [block (todo-int/open-todos-body @conn a-ref)]
+                      (is (str/includes? block "write the plan")
+                          "the still-open item renders")
+                      (is (str/includes? block "Recently completed")
+                          "a recall band appears once something is done")
+                      (is (str/includes? block "set up KB schema")
+                          "the CLOSED setup title is visible — the agent's memory it was done")
+                      (is (str/includes? block "✓")
+                          "done lines carry a ✓ marker, distinct from open lines"))
+                    ;; close everything — band persists, section does NOT vanish
+                    (let [open-id (-> (todo/list-open {:seon.agent.todo/owner a-ref})
+                                      :seon.agent.todo/todos first :seon.agent.todo/id)]
+                      (-> (todo/done! {:seon.agent.todo/id open-id})
+                          (.then (fn [_]
+                                   (let [block (todo-int/open-todos-body @conn a-ref)]
+                                     (is (str/includes? block "Recently completed")
+                                         "done-only still renders the recall band")
+                                     (is (not (str/includes? block "open work items"))
+                                         "no open items → the open section is gone")
+                                     (is (= "" (todo-int/open-todos-body
+                                                 @conn [:seon.agent/id "ghost"]))
+                                         "truly-idle agent (no open, no done) → still vanishes")))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest section-tolerates-absent-db
   ;; The composer-input contract: `:seon.db/db` is the render snapshot
   ;; when present, and ABSENT db defaults to the current conn — the

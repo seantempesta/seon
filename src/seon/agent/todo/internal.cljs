@@ -279,6 +279,37 @@
          (sort-by #(.getTime ^js (:seon.agent.todo/created-at %)))
          vec)))
 
+(def recent-done-limit
+  "How many just-finished items the resume view recalls — the bounded
+   anti-redo band. COUNT-bounded (not a wall-clock window) so the rendered line
+   set is byte-identical until the agent actually closes another todo, keeping
+   the block cache-stable across renders."
+  5)
+
+(defn recent-done
+  "The `owner-eid`'s most-recently-completed todos (newest first), capped at
+   [[recent-done-limit]] — a derived memory of what was just accomplished so the
+   agent doesn't re-do closed setup. Only done items carry ::completed-at, so
+   that attr doubles as the done filter; [] when nothing's been finished."
+  [db owner-eid]
+  (->> (db/query {:seon.db/db db
+                  :seon.db/query
+                  '[:find ?id ?title ?at
+                    :in $ ?o
+                    :where
+                    [?t :seon.agent.todo/owner ?o]
+                    [?t :seon.agent.todo/status :done]
+                    [?t :seon.agent.todo/id ?id]
+                    [?t :seon.agent.todo/title ?title]
+                    [?t :seon.agent.todo/completed-at ?at]]
+                  :seon.db/args [owner-eid]})
+       (sort-by #(.getTime ^js (nth % 2)) >)
+       (take recent-done-limit)
+       (mapv (fn [[id title at]]
+               {:seon.agent.todo/id           id
+                :seon.agent.todo/title        title
+                :seon.agent.todo/completed-at at}))))
+
 (defn stamp
   "Compact ABSOLUTE creation time of `at` — UTC `YYYY-MM-DD HH:MM`, derived
    only from the datom (NOT `now`), so a row renders byte-identical every turn
@@ -288,26 +319,47 @@
   [at]
   (-> (.toISOString ^js at) (subs 0 16) (str/replace "T" " ")))
 
+(defn open-section
+  "The `; <id> [<created-at>] <title>` lines for `todos` (oldest first), a `✉`
+   leading items auto-minted from your human's messages — or \"\" when none."
+  [todos]
+  (if (empty? todos)
+    ""
+    (str "; Your open work items — a memory aid, not an obligation. Close one with\n"
+         ";   (seon.agent.todo/done! {:seon.agent.todo/id \"<id>\"})\n"
+         "; once addressed. A ✉ item tracks a message from your human.\n"
+         (str/join "\n"
+                   (map (fn [{:seon.agent.todo/keys [id title created-at message]}]
+                          (str "; " (when message "✉ ") id " [" (stamp created-at) "] " title))
+                        todos)))))
+
+(defn done-section
+  "The `; ✓ [<completed-at>] <title>` lines for already-finished `dones`
+   (newest first) — a recall band so you don't re-do setup you've already
+   completed. \"\" when nothing's been finished."
+  [dones]
+  (if (empty? dones)
+    ""
+    (str "; Recently completed — already done, do NOT redo:\n"
+         (str/join "\n"
+                   (map (fn [{:seon.agent.todo/keys [title completed-at]}]
+                          (str "; ✓ [" (stamp completed-at) "] " title))
+                        dones)))))
+
 (defn open-todos-body
-  "Context-section text for `owner`'s open todos in db value `db` — single-`;`
-   prose guidance + one `; <id> [<created-at>] <title>` line per item, oldest first;
-   a `✉` marker leads items auto-minted from one of your human's messages (a
-   memory aid, not an obligation — `done!` it once you've addressed them).
-   \"\" when none (the section vanishes when the work is done — nothing stored,
-   nothing to acknowledge). Rides as `;` comments so the whole context reads
-   as eval'able Clojure."
+  "Context-section text for `owner` in db value `db`: the open work items
+   (oldest first) PLUS a bounded `Recently completed` recall band (newest
+   first) so the agent sees what it already finished and doesn't re-do closed
+   setup — both DERIVED from the leaf facts, nothing stored. \"\" when the
+   agent has neither open nor recently-done items (the section vanishes — a
+   truly-idle agent shows nothing to acknowledge). Rides as `;` comments so
+   the whole context reads as eval'able Clojure."
   [db owner]
-  (let [todos (when-let [oe (:db/id (db/entity db owner))]
-                (open-todos db oe))]
-    (if (empty? todos)
-      ""
-      (str "; Your open work items — a memory aid, not an obligation. Close one with\n"
-           ";   (seon.agent.todo/done! {:seon.agent.todo/id \"<id>\"})\n"
-           "; once addressed. A ✉ item tracks a message from your human.\n"
-           (str/join "\n"
-                     (map (fn [{:seon.agent.todo/keys [id title created-at message]}]
-                            (str "; " (when message "✉ ") id " [" (stamp created-at) "] " title))
-                          todos))))))
+  (if-let [oe (:db/id (db/entity db owner))]
+    (let [open (open-section (open-todos db oe))
+          done (done-section (recent-done db oe))]
+      (str/join "\n" (remove str/blank? [open done])))
+    ""))
 
 (defn open-todos-block
   "Context-section fn (`:open-todos`, default-seed-blocks priority 45):
