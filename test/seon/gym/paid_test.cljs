@@ -50,9 +50,11 @@
    `:calib` is the JUDGE CALIBRATION probe (not a scenario drive — it
    grades a canned good/bad reply pair to prove the judge discriminates);
    the `x*` keys are the cross-session A→B baseline scenarios; the
-   `canvas-*` keys are the :ui-competency canvas-as-primary scenarios."
+   `canvas-*` keys are the :ui-competency canvas-as-primary (read-only
+   DISPLAY) scenarios; `:tile` is the :ui-competency INTERACTIVE-control
+   scenario (my.tile button/form wired to the agent's own fn)."
   [:s32 :s21 :s12 :todo :resume :err :err2 :calib :x1 :x3 :x12 :xcat :ab
-   :canvas-budget :canvas-goal :honesty])
+   :canvas-budget :canvas-goal :tile :honesty])
 
 (defn- gate-value
   "The raw SEON_GYM_PAID env value (\"\" when unset)."
@@ -285,6 +287,12 @@
   (async done
     (run-paid! :xcat
                "test/seon/gym/scenarios/x-category-argmax.edn"
+               done)))
+
+(deftest interactive-tile-checklist-paid
+  (async done
+    (run-paid! :tile
+               "test/seon/gym/scenarios/interactive-tile-checklist.edn"
                done)))
 
 (deftest honesty-computed-total-paid
