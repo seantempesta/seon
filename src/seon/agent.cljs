@@ -493,8 +493,7 @@
 (defonce !arm-child-fn (atom nil))
 
 (defn ^:async start!
-  "Spawn a child agent; RETURNS {:seon.agent/id <child-id>} — THAT id is the one you message to reach the child you just spawned this turn (let-bind it or read it back; never invent/guess one).
-   The capability-gated lifecycle verb (the spawn
+  "Spawn a child agent. The capability-gated lifecycle verb (the spawn
    counterpart of `seon.agent.lifecycle/terminate`). An alias of `create!`
    that ALSO writes `:seon.agent/parent` = the CALLING agent (read from the
    ALS scope via `db/current-agent-id`). That parent write IS the activation
@@ -510,11 +509,23 @@
    later — so arming must precede any inbound). Before the client registers the
    hook (gym/tests with no live loop) arming is a no-op.
 
-   Returns `{:seon.agent/id child-id}` on success — the SAME id you must
-   address to message the child you just spawned (let-bind it or read it back;
-   don't fabricate one). On a failed transact the db error envelope comes back
-   as-is (errors are values). Called outside an agent scope (no caller) → the
-   child is created PARENTLESS (a host-initiated create), matching `create!`."
+   RESOLVES to `{:seon.agent/id child-id}` — that id is the one you message to
+   reach the child. On a failed transact the db error envelope comes back as-is
+   (errors are values). Called outside an agent scope (no caller) → the child
+   is created PARENTLESS (a host-initiated create), matching `create!`.
+
+   ASYNC — read the id back, never inline it. `start!` is `^:async`: evaled
+   ALONE its returned id is auto-awaited and you SEE the real
+   `{:seon.agent/id \"…\"}`, but `(:seon.agent/id (start! …))` IN THE SAME FORM
+   is `nil` (the Promise hasn't resolved — same re-reference rule as
+   `result/<id>`). So NEVER `(let [c (start! …)] (message/agent (:seon.agent/id c) …))`
+   — it spawns an ORPHAN and messages nil. Two safe paths:
+     1. ONE COMBINATOR (preferred): `(delegate! {:seon.agent/purpose \"…\"
+        :seon.agent.message/content \"<the task>\"})` spawns AND hands the
+        child its task in one call (awaits internally; returns the real id).
+     2. TWO FORMS: eval `(start! {…})` alone, COPY the rendered literal id,
+        then `(message/agent \"<that-id>\" \"<the task>\")` in the NEXT form.
+   Never invent/guess a child id — read it back."
   {:malli/schema [:=> [:cat ::start-request] ::create-response]}
   [{:seon.agent/keys [id purpose default-turn-limit]}]
   (let [child-id  (or id (db/new-id!))
@@ -542,6 +553,64 @@
           (do (when-let [arm @!arm-child-fn]
                 (await (arm child-id)))
               {:seon.agent/id child-id}))))))
+
+;; ============================================================
+;; delegate! — the one-form spawn→message combinator. `start!` is `^:async`,
+;; so the broken `(let [c (start! …)] (message/agent (:seon.agent/id c) …))`
+;; recipe reads `nil` (the Promise hasn't resolved). delegate! awaits start!
+;; INTERNALLY, so the child id is REAL, then messages the child its task —
+;; the ergonomic path agents reach for when delegating a task to a worker.
+;; ============================================================
+
+(schema/register! ::delegate-request
+  [:map
+   [:seon.agent.message/content     :string]
+   [:seon.agent/id                  {:optional true} :seon.agent/id]
+   [:seon.agent/purpose             {:optional true} :any]
+   [:seon.agent/default-turn-limit  {:optional true} :any]])
+
+(defn ^:async delegate!
+  "Spawn a child AND hand it its task in ONE call — the ergonomic spawn→message
+   combinator. Because `start!` is `^:async`, the inline
+   `(let [c (start! …)] (message/agent (:seon.agent/id c) …))` recipe reads a
+   `nil` id (the Promise hasn't resolved) and spawns an ORPHAN. delegate!
+   awaits `start!` internally so the child id is REAL, then sends the child
+   `:seon.agent.message/content` FROM you — the child is armed before the
+   message lands, so it wakes on your task.
+
+     (delegate! {:seon.agent/purpose \"research DuckDB for embedded analytics\"
+                 :seon.agent.message/content
+                 \"Research DuckDB for an embedded analytics app. Store findings
+                  as my.kb.* data, then (complete \\\"<pointer>\\\") to report back.\"})
+
+   `:seon.agent/purpose` is the child's stated reason-for-being (shown to your
+   human verbatim); `:seon.agent.message/content` is the actual task you hand
+   it. `:seon.agent/id` (optional) pins a specific child id instead of minting
+   one; `:seon.agent/default-turn-limit` (optional) seeds the child's work
+   bound. RESOLVES to `{:seon.agent/id child-id}` on success — the id you
+   address for any follow-up. On a failed SPAWN the start! error envelope comes
+   back as-is; on a spawn-ok-but-message-failed the message error envelope plus
+   `:seon.agent/id child-id` (the child exists — retry the message). Errors are
+   values; branch on `:seon.db/ok?`."
+  {:malli/schema [:=> [:cat ::delegate-request] ::create-response]}
+  [{:seon.agent/keys [id purpose default-turn-limit]
+    content :seon.agent.message/content}]
+  (let [spawn-args (cond-> {}
+                     (some? id)                 (assoc :seon.agent/id id)
+                     (some? purpose)            (assoc :seon.agent/purpose purpose)
+                     (some? default-turn-limit) (assoc :seon.agent/default-turn-limit default-turn-limit))
+        res        (await (start! spawn-args))]
+    (if (false? (:seon.db/ok? res))
+      res
+      (let [child-id (:seon.agent/id res)
+            menv     (await (msg/agent child-id content))]
+        (if (false? (:seon.db/ok? menv))
+          (do (js/console.error
+                (str "seon.agent/delegate! spawned " child-id
+                     " but the task message FAILED: "
+                     (:seon.error/message (:seon.db/error menv))))
+              (assoc menv :seon.agent/id child-id))
+          {:seon.agent/id child-id})))))
 
 ;; ============================================================
 ;; Boot. The single entry point seon.client calls at startup. Agent

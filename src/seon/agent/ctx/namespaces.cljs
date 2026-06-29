@@ -154,15 +154,16 @@
        [[seon.eval/home-ns-require-specs]]).
      - `#{\"fn\" …}` — surface ONLY those fns' signatures. `seon.agent` is a
        large framework ns (boot!, the wake predicates, …) so dumping it whole
-       is noise; we surface JUST the spawn verbs `start!`/`create!` — the
-       discovery gap that left an agent able to `terminate` a child (rendered)
-       but not SPAWN one (hidden). `agent/` is already aliased into the home ns.
+       is noise; we surface JUST the spawn verbs `start!`/`create!`/`delegate!`
+       — the discovery gap that left an agent able to `terminate` a child
+       (rendered) but not SPAWN one (hidden). `agent/` is already aliased into
+       the home ns.
    These are NOT in [[full-source-whitelist]] (no full-body dump — just the API
    surface). `seon.db` / `seon.schema` / `seon.agent.todo` self-document
    elsewhere (todo is full source; db/schema via grep + the system prose)."
   {:seon.agent.message   :all
    :seon.agent.lifecycle :all
-   :seon.agent           #{"start!" "create!"}})
+   :seon.agent           #{"start!" "create!" "delegate!"}})
 
 (def canonical-full-my-ns
   "The `my.*` namespaces kept rendered in FULL under the signature
