@@ -33,9 +33,14 @@ Evidence: [[research/core-queue-verification-2026-06-29]] (commit `eb955006`).
 
 ### A1 — [P0] Rendering policy: kill signatures → full-source + curation
 
-**Owner decision (made 2026-06-29):** signature-rendering confuses agents — even as
-inert comments. Retire it. Every namespace that renders, renders in **FULL source**.
-Bound tokens by **curation** (which nses render), not compression (how each renders).
+**Owner decision (UPDATED 2026-06-29):** signatures are acceptable **IF rendered as
+comments** — Core is already trying this; this is now an **EXPERIMENT to measure**, NOT
+a kill. **U will measure** whether signature-as-comment hurts toolkit adoption / agent
+comprehension vs full source (drive + gym scorecard: toolkit-calls, eval-error, judge).
+**Full-source + curation (below) is the FALLBACK** if signatures lose the measurement.
+The render-prominence law still holds for COMPOSITION verbs (`my.*` toolkit) — keep those
+FULL regardless; the signature experiment is for the long tail (`seon.agent`, simple-call
+verbs). Curation (which nses render) remains the real token lever either way.
 
 **Why (evidence):**
 - The `:signature` form is a wall of commented-out fn headers — name + destructured
