@@ -1264,7 +1264,15 @@
                   (some? spec)  (conj (str ":spec " (clip spec 80)))
                   (nil? spec)   (conj ":unspecced")
                   schema-error  (conj (str ":schema-error " (clip schema-error 80))))
-         header (str "[fn " sym "]"
+         ;; The header (incl. the `(sig)` arglist shape) is DOCUMENTATION,
+         ;; not a form to run — rendered as a `;` prose comment so the
+         ;; arglist `(ns/fn [args])` is NEVER a bare callable list. If an
+         ;; agent echoes a rendered signature back into its reply,
+         ;; `seon.repl.internal/parse-forms` skips the comment line instead
+         ;; of EXECUTING it (a `(seon.schema/clear-all! [])` signature once
+         ;; wiped the live registry that way). Render is a pure read; the
+         ;; only re-runnable forms it emits are full `(defn …)` source.
+         header (str "; [fn " sym "]"
                      (when sig (str "  " sig))
                      (when (seq flags) (str "  " (str/join " " flags))))
          body?  (and source

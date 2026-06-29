@@ -30,7 +30,8 @@
     [seon.agent :as agent]
     [seon.client :as client]
     [seon.db :as db]
-    [seon.render.live-tile :as tile]))
+    [seon.render.live-tile :as tile]
+    [seon.repl.internal :as repl-internal]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fixture — fresh conn seeded with a small ns graph:
@@ -379,5 +380,38 @@
                   "an unknown member returns a note, not a throw")
               (is (str/includes? text "greet")
                   "the note lists the public fns so the agent can re-issue"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Render is INERT — a rendered signature must NEVER be a bare callable form.
+;; The signature header `(ns/fn [args])` is DOCUMENTATION; rendered as a `;`
+;; prose comment so that if an agent echoes a rendered namespace back into its
+;; reply, `seon.repl.internal/parse-forms` SKIPS it instead of EXECUTING it.
+;; Regression for #84: rendering `seon.schema` once surfaced
+;; `(seon.schema/clear-all! [])` as a bare form which, when re-read from the
+;; reply, wiped the live schema registry. The guard is GENERAL — no fn name is
+;; special-cased; it asserts the render emits ZERO callable forms.
+;; ---------------------------------------------------------------------------
+
+(deftest signature-render-emits-no-executable-forms
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db    @conn
+                  text  (:seon.render/text
+                          (agent/render-namespace
+                            {:seon.db/db db :seon.ns/name :test.parent
+                             :seon.render/depth 0
+                             :seon.render/detail :signature}))
+                  ;; the parser the agent loop runs over its OWN reply — the
+                  ;; exact path that re-executed echoed render text in #84.
+                  forms (->> (repl-internal/parse-forms text)
+                             (filter #(= :form (:kind %))))]
+              (is (str/includes? text "(test.parent/greet [x])")
+                  "the signature arglist shape is still SHOWN to the agent")
+              (is (zero? (count forms))
+                  (str "a signature render must yield NO callable forms; got "
+                       (mapv :source forms))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
