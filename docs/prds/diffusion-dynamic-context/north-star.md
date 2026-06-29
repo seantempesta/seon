@@ -13,6 +13,38 @@ tags: [vision, diffusion, agent]
 > writes correct, fully-spec'd, map-in/map-out Seon code because its context is not
 > guessed — it is **empirically optimal**.
 
+## ▸ OWNER HANDOFF — overnight loop wound down (read first)
+
+The autonomous loop ran until **provably diminishing returns**: everything buildable
+without a GPU/image deploy is DONE, and every remaining win needs an owner action.
+
+**PROVEN (fingerprint-verified, committed):** context lifts generation **0→100% on
+6/6 skills** (the deep finding: context overrides confident-wrong priors); the buzzsaw
+primitives (clamp, infill, spec-slot, denoise_to_step, resume_renoise); the
+**short-circuit closed loop** (denoise→K → local oracle → stop, ~67% steps saved);
+the **eval gate** catches the def-vs-defn parse misses; **prefill = 62% of latency at
+9k ctx** (KV-caching is essential, exact full-prefix caching is feasible — encoder is
+causal). torchao INT8 = dead end (MoE experts skipped). Compiled path = 2 blockers
+(args [fixed] + a `find_spec` Dynamo graph-break [deep]).
+
+**BUILT + deploy-ready (your move):**
+1. **Co-located oracle** — `bin/oracle-server` (bb parse, 0.05ms) + `seon.worker-eval`
+   (cljs.js eval, 2.6ms). Complete + offline-proven.
+2. **Co-location image layer** — Dockerfile layer + spawn-wiring (`co-location-image-build`
+   doc) ready to bundle onto the worker image.
+
+**AWAITS OWNER ACTION (the remaining big wins):**
+- **Deploy the co-location image** → unlocks the KV-cache build (the 62% win) + the
+  per-step renoise loop. THE highest-value next step.
+- **Compiled path (~1000 tok/s)** → the `find_spec` graph-break is a deep
+  torch.compile/Dynamo + transformers-5.11.0 compat call — your decision whether to
+  invest (the `#8 follow-up` doc has the root-cause).
+- **Renoise-fence fix** (low priority) — oracle needs a no-fence-strip parse for canvas.
+
+**Deploy note:** `flash undeploy --all` OSErrors here — use `flash undeploy <name>
+--force` + `flash deploy`; always `python3 verify_fresh.py` → `FRESH ✓` before measuring.
+The A100 endpoint was UNDEPLOYED at wind-down ($0); redeploy when you pick this up.
+
 ## Why this is now possible (the unlock)
 
 The diffusion model (DiffusionGemma, ~250-500 tok/s warm on the A100) is a **cheap,
@@ -263,9 +295,14 @@ When iterating autonomously (e.g. overnight), each cycle:
   `cache_implementation="static"` alone → `RuntimeError: upper/lower bound inconsistent with step sign`
   (warmup) + `AttributeError: StaticSlidingWindowLayer has no max_batch_size` (steady). So "the switch is
   just the cache" was too simple — DiffusionGemma's SLIDING-WINDOW static cache needs explicit init + a
-  compiled-loop range bug. Eager baseline this run ~154 tok/s. **The ~1000 tok/s path is feasible-per-source
-  but BLOCKED on a non-trivial static-cache setup fix** (research-first dig in progress) — feasibility now
-  uncertain, NOT the simple flip #7 projected. (3) **`past_key_values` / `QuantizedCache` reuse** (transformers-native
+  compiled-loop range bug. **ROOT-CAUSED + FIX TESTED (1a475ce9):** the static-cache errors were MY args
+  bug — passing `max_new_tokens` WITH `max_length` drops max_length (`:880` gate honors it only at
+  `max_new_tokens==256`) → negative cache. Fix (omit `max_new_tokens`, only `max_length`) CLEARED those.
+  **BUT a DEEPER 2nd blocker then surfaced: a Dynamo graph-break** — `Unsupported: find_spec in
+  <frozen importlib.util>` under `fullgraph=True` (a lazy importlib lookup in the compiled region
+  torch.compile won't trace). So the ~1000 tok/s compiled path has TWO blockers (args [fixed] + the
+  find_spec graph-break [deep, uncertain]) → **NOT a quick win → owner/upstream torch.compile-compat
+  territory.** KV-cache (62%) is the primary remaining A100 speed lever. (3) **`past_key_values` / `QuantizedCache` reuse** (transformers-native
   prefix/skill KV reuse, composes with the per-block `kv-section-caching` design); (4) **Fast-dLLM
   DualCache** (NVIDIA, training-free in-loop suffix-KV, control-compatible) for extra headroom. The control
   worker's speed comes from COMPOSING these, not a custom engine. (`pytorch-vs-vllm-roadmap` §5b.)
