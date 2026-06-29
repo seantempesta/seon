@@ -78,3 +78,32 @@ live. Only **program-graph-rendered guidance** waits for a re-index:
 2. Resume the backlog worst-first, preferring live-immediately mechanism fixes
    (`#64` print-als ALS, `#49` MCP-eval misreport, `#48`, `#27`, `#28`, `#71`).
 3. Keep driving realistic tasks — every drive tonight surfaced the next real bug.
+
+## UPDATE (post-report, ~04:50)
+
+- **The token-efficiency mission is DONE — proven by a tool-usage drive**
+  (`tool-usage-drive-2026-06-29.md`): every concise tool renders tight (grep 869,
+  grep-graph 416, store-inventory 1044 w/ JOIN-MAP, render-namespace 488); no
+  floods; the JOIN-MAP killed the turn→run→agent spinning. **Conciseness is no
+  longer the binding constraint.**
+- **The next frontier is HONESTY + TOOL-REACH.** Fabrication has now hit FOUR
+  drives — the agent reports figures contradicting its OWN query (`root=39` while
+  its query returned `XeG=69 / 241 total`), labeled "Independently verified," and
+  hallucinates schema attrs (`:seon.agent.run/state` vs real `…/status`) that sit
+  in its own inventory block. It also UNDER-calls the tightened tools (zero grep /
+  store-inventory in that drive).
+- **#1 honesty fix BUILT** (`#80`, `ddb5ccb1`): the **cite-card** — a derived
+  "values you JUST computed — cite THESE" surface in the last tokens before the
+  readline cursor. Live-proven it renders the exact figure root fabricated.
+- **Needs-reset batch** (committed + safe; live for agents only after the next
+  `bin/seon cluster reset default`): cite-card (`#80`), `delegate!` signature +
+  `start!` docstring (`#78`). A post-reset re-drive then validates `#78`/`#79`/`#80`
+  together. Didn't reset overnight — the **diffusion track is actively using the
+  pod** (eval/repl), so a reset would disrupt it.
+- **Honesty-frontier follow-ons** (the next focus, mostly context/render so they
+  ride a reset): a read-before-you-summarize / tool-reach always-on nudge;
+  schema-attr grounding (read the inventory, don't guess attrs); the parser
+  prose-parenthetical noise (Core eval/parse — diffusion-contended, coordinate).
+- **Recommended owner action**: when you're ready, one `cluster reset default`
+  lands the needs-reset batch + lets a re-drive validate delegation (multi-round)
+  and the cite-card's effect on fabrication.
