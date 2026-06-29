@@ -60,6 +60,20 @@ causal). torchao INT8 = dead end (MoE experts skipped).
    flip the kill-gate's `EVAL_ENABLED` on.
 8. **Owner GPU-session runbook** (`3efa5980`) — [[owner-gpu-runbook]]: the ordered,
    verify_fresh-gated checklist (cheapest decisive probe first). START HERE next session.
+9. **Retrieval leg — the buzzsaw's THIRD control signal** (`76544f58`) —
+   `seon.diffusion.retrieval`: detect an unresolved/hallucinated symbol in the canvas
+   (reusing the parse tier) → retrieve the real candidate (Levenshtein over `:seon.fn/sym`
+   + semantic KNN when `SEON_EMBED`) → emit the clamp injection descriptor
+   `{op,span,replacement,spec_text}` mapped to the worker contract. Offline-proven
+   (`transct!`→`seon.db/transact!`); 6/37 tests, suite 814/3708. parse+eval+retrieval
+   now ALL built Seon-side; only the worker's encoder-KV injection (W1–W3) awaits GPU.
+10. **acme diffusion-gym adoption** (`37e5ac5b`) — `bin/acme gym-diffusion <scenario>` +
+    acme-authored `.edn` scenarios, scored through the oracle with ZERO `src/seon` edits;
+    offline-proven both verdicts. (Flagged seam: eval tier is pod-decoupled → consumer
+    pod-coupled code is parse-scorable not eval-scorable — design call, task #23.)
+11. **Eval-tier `:kind` granularity** (`bb5338b2`) — undeclared-var / def-vs-defn now
+    classify `:kind compile` (was `throw`); genuine runtime throw stays `:kind throw` —
+    correctly split (rebuild + redeploy the bundle).
 
 **AWAITS OWNER ACTION (the remaining big wins):**
 - **Deploy the co-location image** → unlocks the KV-cache **worker-reuse half** (the 62%
