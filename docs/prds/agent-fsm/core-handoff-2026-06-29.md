@@ -67,24 +67,29 @@ current ns in full + the other required non-third-party namespaces too.* So:
 - **Third-party nses:** keep whatever they render today (they currently fall through to
   `:full`); they're external, out of the curation set.
 
-**Change (Core):**
-1. `src/seon/agent/ctx/namespaces.cljs` — `body-detail` (L240-263): remove the
-   `:signature` branch; every selected ns → `:full`. Retire `verb-signature-whitelist`
-   (L145) and the `:seon.render/detail :signature` path (and the inert-comment
-   signature renderer from `52b38daf`, now dead).
-2. Replace the **selection** logic (currently hardcoded `canonical-full-my-ns` /
-   `full-source-whitelist` / `verb-signature-whitelist`, L121/145/168) with the curation
-   set above: `cur-ns ∪ toolkit ∪ required-non-third-party ∪ <config always-list>`.
-   Wire the always-list to `seon.config` (this is the A3 / #42 work — do them together).
-3. Keep `render-namespace … :detail :full` as the navigation verb; make sure it's
-   surfaced to the agent (the "change to a namespace" affordance).
+**Change (Core) — experiment-aware (do NOT abort the experiment):**
+1. **KEEP the signature-as-comment path** — Core is testing it; do NOT remove the
+   `:signature` branch (`body-detail` L240-263) or `verb-signature-whitelist` (L145) yet.
+   **Exception:** the `my.*` COMPOSITION toolkit stays `:full` regardless (render-prominence
+   law — signature-trimming it drove `my.data` adoption to 0×). **U measures** signature-as-
+   comment vs full (toolkit-adoption, eval-error, judge). **Only if signatures measurably
+   hurt** → THEN retire the `:signature` branch + whitelist and fall back to full-only.
+2. **The token lever is CURATION either way** (signatures or full): replace the hardcoded
+   selection (`canonical-full-my-ns` / `full-source-whitelist` / `verb-signature-whitelist`,
+   L121/145/168) with `cur-ns ∪ toolkit ∪ required-non-third-party ∪ <config always-list>` —
+   render *fewer* nses, not (only) compress bodies. Wire the always-list to `seon.config`
+   (this IS the A3 / #42 work — do them together).
+3. Keep `render-namespace … :detail :full` as the navigation verb; surface it to the agent
+   (the "change to a namespace" affordance).
 
-**Acceptance:** no ns ever renders `:signature`; current-ns + toolkit + required nses
-render full; a non-required ns is absent until navigated to; namespaces block tokens
-drop via *fewer nses*, not trimmed bodies. **U re-measures** the namespaces block-tokens
-+ a fn-authoring drive (does the agent still reach the right verbs with full source?).
+**Acceptance:** current-ns + toolkit + required nses render (toolkit always full); a
+non-required ns is absent until navigated to; namespaces block tokens drop via *fewer nses*.
+**U re-measures**: (a) the signature-as-comment-vs-full experiment, (b) namespaces block-tokens
+under lean-vs-full curation configs, (c) a fn-authoring drive (does the agent still reach the
+right verbs?).
 
-**Supersedes / closes:** #74 (no more signature-trim of `todo`), the signature half of #42.
+**Reframes #74:** `todo` is NOT a signature-trim now — it's just one more ns governed by the
+curation set. The signature *form* is the measured experiment, not a decided kill.
 
 ### A2 — Agent authoring ergonomics (bundle with A1 — same "navigate + author" UX)
 
@@ -97,23 +102,34 @@ then writes code against it.
   gets none. **OWNER CONSTRAINT (2026-06-29): NO magic always-present aliases.** Do NOT make
   `db` invisibly resolvable everywhere. Instead — consistent with the navigation model (A1)
   and "code-as-data, the runtime IS the database" — **when the agent switches to / authors a
-  namespace, OVERWRITE that ns's real `(ns … (:require …))` form to carry the actual requires**
-  (`[seon.db :as db]`, `[seon.agent.todo :as todo]`, …) so the source is genuinely real,
+  namespace, MERGE the standard `:require` aliases the code uses INTO that ns's real
+  `(ns … (:require …))` form — additively, never clobbering the agent's own requires** (add
+  `[seon.db :as db]`, `[seon.agent.todo :as todo]`, … only for aliases actually used and not
+  already present) so the source is genuinely real,
   correct, persisted, and inspectable — the alias resolves because it's *actually required in
   that ns*, not because of an invisible injection. This is the same "no-magic home-ns require"
   direction as commit `98aff9ab`. Keep the existing error-hint ("Did you mean db/query?")
   as the nudge, but the root fix is the real-require rewrite on ns-switch. Evidence:
   [[research/core-queue-verification-2026-06-29]] (#73 repro), [[CLAUDE]] (the alias law).
-- **#56 — toolkit reachability (RECONSIDER per the no-magic principle).** REAL today (live:
-  `(status-line …)` → "not defined"; only `seon.agent.lifecycle` is refer'd at
-  `src/seon/eval.cljs:441`). But given the owner's "real and correct, no magic" stance, the
-  preferred answer may be **full qualification** — `my.ui/status-line` already works, is
-  explicit about where the verb comes from, and needs zero magic. An unqualified `:refer` is
-  only "real" if it's written into the ns's actual `(ns … (:refer …))` form (the same
-  ns-rewrite mechanism as #73). **OWNER QUESTION:** do you want the `my.*` toolkit callable
-  unqualified at all (refer written into the real ns form), or should agents always fully-
-  qualify `my.ui/…`? If unqualified is wanted, it rides the #73 ns-rewrite (real refer in the
-  form), not a magic always-refer list.
+- **#56 / NAMING POLICY — OWNER DECISION (2026-06-29): full paths in EXAMPLES, real-required
+  short aliases in CODE.** One rule, two contexts, no magic — everything real and inspectable:
+  1. **REPL examples + ALL rendered context** (toolkit worked examples, `my.kb` manual, skills,
+     rendered docstrings, any code we show the agent): **ALWAYS full namespace paths** —
+     `seon.db/transact!`, `my.ui/status-line`, `seon.agent.todo/add!`. Never a bare
+     `(status-line …)` or an unexplained alias in an example; the full path teaches which ns it
+     lives in.
+  2. **Authored namespace code**: when a fn uses another ns, that ns is **properly `:require`d in
+     the real `(ns …)` form**, and a **short `:as` alias is available** — so in-code `db/transact!`
+     / `ui/status-line` work because `[seon.db :as db]` / `[my.ui :as ui]` are genuinely IN the
+     form (the #73 ns-rewrite provides them). The abbreviations are real, not magic.
+  So **#56 as filed (magic unqualified `:refer`) is REJECTED.** Instead the standard short-alias
+  set (`db`, `message`, `todo`, `ui`, `data`, `tile`, …) is made available as **REAL requires**
+  when the agent authors/navigates a ns (rides #73). **Core actions:** (a) make every rendered
+  example use the full namespace path; (b) provide the standard `:as` alias set as real requires
+  in the #73 ns-rewrite so short forms work in authored code without magic. **Open micro-question
+  (flagged, separate):** the lifecycle verbs `wait`/`complete`/… are currently `:refer`d
+  unqualified — keep them, or move to a required alias (`lifecycle/wait`) for uniformity? Default
+  = leave as-is unless the owner wants it uniform.
 
 **Acceptance (A2):** a drive that authors a `my.*` ns can use `db/`/`todo/` aliases AND
 unqualified `my.ui/*` without "not defined". **U re-measures** the fn-authoring drive
