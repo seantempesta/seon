@@ -2628,7 +2628,21 @@
             ;; var `result/<id>` (globalThis + analyzer def) so the agent
             ;; references it directly — the SOLE value-reuse surface. Failed
             ;; evals bind nothing — no value to retrieve.
-            (bind-result-var! compile-state eval-id stash-val)))
+            (bind-result-var! compile-state eval-id stash-val)
+            ;; PENDING self-heal: the stash above holds a RAW js/Promise, and
+            ;; only a BARE `result/<id>` reference auto-awaits it — any IN-FORM
+            ;; use ((first result/<id>), (group-by k result/<id>), (let [xs
+            ;; result/<id>] …)) operates on the un-awaited Promise and returns
+            ;; garbage. Re-stash + re-bind the RESOLVED value the instant the
+            ;; Promise settles, so EVERY reference (bare or in-form) reads real
+            ;; data. errors-as-values: a rejected Promise no-ops (the placeholder
+            ;; stays honest) — never throws into the eval loop.
+            (when pending?
+              (-> pending-promise
+                  (.then (fn [v]
+                           (stash-result-raw! eval-id v)
+                           (bind-result-var! compile-state eval-id v)))
+                  (.catch (fn [_] nil))))))
         ;; Detect-and-tee — only on success. Failed evals roll
         ;; back analyzer defs and never touch the schema registry,
         ;; so diff would be empty anyway; we still skip
