@@ -41,7 +41,13 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private fixture-dir
-  (.resolve npath "tmp/search-test"))
+  ;; Per-PROCESS unique dir (pid-scoped). grep searches a REAL fs dir, so the
+  ;; fixture must be hermetic: a SHARED tmp/search-test lets a concurrent
+  ;; process (the overnight loop runs this suite + the gym scorecard, or two
+  ;; test runs, at once) write/teardown the same files mid-grep — skewing the
+  ;; honest count/path assertions intermittently. A pid-scoped dir, wiped on
+  ;; :before and removed on :after, makes every count deterministic.
+  (.resolve npath (str "tmp/search-test-" (.-pid js/process))))
 
 (def ^:private alpha-path (.join npath fixture-dir "alpha.md"))
 (def ^:private beta-path  (.join npath fixture-dir "beta.cljs"))
@@ -50,6 +56,9 @@
 (defonce ^:private !saved-fs-config (atom nil))
 
 (defn- setup! []
+  ;; Wipe any residue first so ONLY the three known files are searchable —
+  ;; no stray file (from a crashed prior run) can pollute the grep counts.
+  (.rmSync nfs fixture-dir #js {:recursive true :force true})
   (.mkdirSync nfs fixture-dir #js {:recursive true})
   (.writeFileSync nfs alpha-path "# Title\n\nthe needle-alpha is here\n")
   (.writeFileSync nfs beta-path "(ns beta)\n\n(defn hello [] :needle-beta)\n")
@@ -62,7 +71,9 @@
 
 (defn- teardown! []
   ;; Restore the exact saved config (configure! merges both keys).
-  (fs/configure! @!saved-fs-config))
+  (fs/configure! @!saved-fs-config)
+  ;; Remove the pid-scoped fixture dir — don't litter tmp/ across runs.
+  (.rmSync nfs fixture-dir #js {:recursive true :force true}))
 
 (use-fixtures :each {:before setup! :after teardown!})
 
