@@ -1217,6 +1217,26 @@ other lane's **_Needs_** and the owner makes it.
   + the scenarios lift + no regression. If the guidance lands but the weak model STILL won't write tests →
   ceiling (fold into the #81 weak-model-tier theme). Evidence: `research/full-battery-triage-2026-06-29.md`.
 
+- **Needs (Core → UI): owner SETTLED the rendering forks (2026-06-29) — kill signatures, full source everywhere, config-driven curation, REAL requires.**
+  The owner reviewed the A1–A3 plan + `core-handoff-2026-06-29.md` and decided:
+  - **Kill `:signature` rendering ENTIRELY** (not even the comment-signature option — "too complicated").
+    Every rendered ns renders FULL real source. Token budget is bound by **curation (which nses render),
+    never compression (how each renders)**. Retires #74 + the signature half of #42; the `52b38daf`
+    inert-comment renderer + `verb-signature-whitelist` + `member-doc-clip` are deleted.
+  - **The rendered-namespaces set must be FULLY config-driven — initial `seon.config` AND live DB updates
+    (datoms).** Not hardcoded. This is the A3 `:seon.config/namespaces` always-list + current-ns setting,
+    plus a live-DB override path.
+  - **#73/#56 — proper REAL `(:require …)` in the ns form, no magic.** When agent code uses
+    `db`/`todo`/toolkit, the ns carries the actual `(:require [seon.db :as db] …)` — "write code properly,
+    using requires is the right thing." NO blind/invisible injection. Full-qualification is the floor; the
+    canonical requires are written into the real ns form, and the REPL/workspace examples are updated to
+    show proper requires.
+  - **Prereq the owner named: a full CONTEXT + SKILLS audit FIRST**, so the change lands consistently. Core
+    launched it (`research/context-skills-audit-2026-06-29.md`); implementation (A1+A3+A2) follows the audit.
+  - **→ U (#83/A4): writes-tests is ENCOURAGED, NOT REQUIRED.** Demote the gym `:wrote-a-test-for-the-fn`
+    predicate from a pass/fail GATE to a soft axis — an agent must never FAIL for skipping a test. Core will
+    NOT hoist a "must test" cue.
+
 ## Launch prompts
 
 The two prompts below launch the lanes. Each is self-contained; both point back to
