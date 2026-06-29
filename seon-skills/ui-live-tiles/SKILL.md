@@ -79,6 +79,12 @@ re-invoked on every render, so the view stays current with zero extra writes:
 Evolve the tile by **redefining your own fn** — `seon.render.live-tile` is the
 shared core default; build your own, never edit the core one.
 
+> **Fully-qualify inside a `my.*` ns.** The examples here call `seon.db/transact!`
+> and `seon.schema/register!` in full on purpose: the short `db/` `schema/`
+> `message/` `todo/` aliases are refer'd ONLY in your agent home ns, so a tile/
+> data/handler fn you author in a `my.<domain>` ns must qualify or it's "not
+> defined". See the mapping in the **`data-oriented-clojure`** skill.
+
 ## Fastest path: COMPOSE with `my.ui` — don't hand-roll `[:div …]`
 
 `my.ui` is a small toolkit of **dual-render** building blocks. Each helper takes

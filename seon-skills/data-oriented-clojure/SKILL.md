@@ -179,6 +179,44 @@ parallel `foo-v2` leaves two versions, doubles the bug surface, and its
 explanatory comment outlives everyone who knew the reason. Same as "register the
 shape once, reference everywhere": duplication guarantees drift.
 
+### Home-ns aliases are HOME-ONLY — fully-qualify in a `my.*` ns you create
+
+The bare `db/`, `message/`, `todo/`, `schema/`, `agent/` aliases and the bare
+verbs `wait` `complete` `pause` `resume` `terminate` are refer'd **only in your
+agent's HOME ns**. The moment you author a fn in a `my.<domain>` ns YOU create
+("build your environment"), those short names are **"not defined"** there — you
+must FULLY-QUALIFY:
+
+| Home-ns short name | Fully-qualified (works from ANY ns) |
+|---|---|
+| `db/transact!` `db/query` `db/pull` | `seon.db/…` |
+| `message/user` | `seon.agent.message/…` |
+| `todo/add!` `todo/…` | `seon.agent.todo/…` |
+| `schema/register!` | `seon.schema/…` |
+| `agent/…` | `seon.agent/…` |
+| `wait` `complete` `pause` `resume` `terminate` | `seon.agent.lifecycle/…` |
+
+So a tile/data/handler fn in `my.expense` calls `seon.db/transact!`, not
+`db/transact!`. (A live drive hit ~60 `"db/transact! is not defined"` errors from
+exactly this.) The fix is to qualify, not to re-`require` aliases into every
+`my.*` ns.
+
+### Write a real test ns — `cljs.test/deftest`, not inline `assert`
+
+When you "write a test", put it in a `my.<domain>-test` ns using
+`cljs.test/deftest` + `is` — NOT a pile of inline `(assert …)` calls (one drive
+produced 494 inline asserts for one "write a test" request). A deftest is
+discoverable, re-runnable, and reports pass/fail as data:
+
+```clojure
+(ns my.expense-test (:require [cljs.test :refer [deftest is]]))
+(deftest totals-sum
+  (is (= 101 (my.expense/total [45 18 38]))))
+```
+
+Test patterns (async, fresh in-memory conn, awaiting capability verbs) live in
+the **`clojure-testing`** skill.
+
 ## When to read which reference
 
 | You're about to... | Read first |
