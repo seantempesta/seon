@@ -40,9 +40,20 @@ Full live state + plans = the auto-loaded memory `project-diffusion-overnight-lo
   the value. Free-gen = correct MATH + only hygiene errors (def-vs-defn, `9/5` ratio). Owner:
   scaffold-infill was NOT fairly tested → PHASED-constraint direction (schemas-only → functions-only
   phase; reject `def` when data-modeling; `;; PLAN:` tokens; best-of-N renoise; context-as-target+embed-search).
-- **★ NEW IDEA (owner): VALIDATION-AS-EARLY-STOP** — "as soon as it parses + evals clean, STOP; the
-  model's probability is irrelevant if it RUNS." Make oracle-validates the loop TERMINATION (not
-  entropy/step-count). Small change to the built `refine_loop`; pairs with the free oracle + JAX `_early_stopping.py`. HIGH PRIORITY.
+- **★ VALIDATION-AS-EARLY-STOP — BUILT + offline-proven (2026-06-30).** "As soon as it parses +
+  runs, STOP; the model's probability is irrelevant once it's proven to RUN." `refine_loop` gate is
+  now **parse-clean AND eval-clean** (`eval_gate` payload flag, dflt on; `gpu_worker.py`). Proven with
+  the REAL bb parse + node cljs.js eval over the persistent shim — `eval_gate_earlystop_proof.py`
+  (4 cases): def-not-defn & undeclared-var PARSE clean but FAIL eval → loop refuses to stop; eval_gate
+  OFF stops (wrong); correct defn → validated → stop at iter 0. Pairs with §3 over-commit + JAX `_early_stopping.py`.
+- **★ VALIDATION LADDER (owner refinement — push errors DOWN to the cheap tier):** owner noted
+  def-vs-defn is structurally catchable ("detect `def` forms + scramble those tokens") — so eval is
+  the WRONG motivator for it. The honest tiering, cheapest-decisive-first:
+  **T0 parse** (0.05ms, well-formed) · **T1 structural lint** (~free, AST shape: def-vs-defn, missing
+  `:malli/schema`, bare/un-namespaced keys → renoise the span) · **T2 eval** (2.6ms, won't-RUN:
+  undeclared var, arity — eval's UNIQUE job, no AST can resolve symbols) · **T3 behavioral test**
+  (runs-but-WRONG: off-by-one — the real correctness proof). NEXT BUILD: the T1 structural def-detector
+  in the parse oracle (`seon.diffusion.oracle/refine`) — cheap, the owner's idea, catches shape before paying eval.
 - **Speed levers ranked:** (1) **exp D entropy_bound/tokens-per-forward — FREE on A100, prepped, UNRUN,
   ~2-3×, DO FIRST.** (2) TPU v5e via the existing JAX DiffusionGemma (port-light; de-risk = one ~$5 v5e-4 spike).
   (3) Triton MoE kernel to unblock compile (#49). Co-location prep tasks #44-#47 DONE + offline-proven.
