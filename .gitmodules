@@ -260,3 +260,27 @@
 [submodule "reference-code/vllm"]
 	path = reference-code/vllm
 	url = https://github.com/vllm-project/vllm
+[submodule "reference-code/Voyager"]
+	path = reference-code/Voyager
+	url = https://github.com/MineDojo/Voyager.git
+[submodule "reference-code/funsearch"]
+	path = reference-code/funsearch
+	url = https://github.com/google-deepmind/funsearch.git
+[submodule "reference-code/openevolve"]
+	path = reference-code/openevolve
+	url = https://github.com/algorithmicsuperintelligence/openevolve.git
+[submodule "reference-code/ADAS"]
+	path = reference-code/ADAS
+	url = https://github.com/ShengranHu/ADAS.git
+[submodule "reference-code/mem0"]
+	path = reference-code/mem0
+	url = https://github.com/mem0ai/mem0.git
+[submodule "reference-code/letta"]
+	path = reference-code/letta
+	url = https://github.com/letta-ai/letta.git
+[submodule "reference-code/generative_agents"]
+	path = reference-code/generative_agents
+	url = https://github.com/joonspk-research/generative_agents.git
+[submodule "reference-code/SimpleMem"]
+	path = reference-code/SimpleMem
+	url = https://github.com/aiming-lab/SimpleMem.git
