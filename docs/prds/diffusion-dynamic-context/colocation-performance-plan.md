@@ -336,9 +336,9 @@ driver pays).
 - **OFFLINE PREP checklist:**
   - [ ] O1 co-location image built + pushed (bb layer + node-eval layer + the
         minimal `.cljc` + `oracle_shim.py`), per `co-location-image-build §3,6`.
-  - [ ] O2 `_oracle(kind)` wired into `gpu_worker.py` warm-up (both servers cached,
+  - [x] O2 `_oracle(kind)` wired into `gpu_worker.py` warm-up (both servers cached,
         eval ready-wait, liveness respawn, V8 warmup) — §3 items 2-3.
-  - [ ] O5 the worker returns `oracle_ms` (per-checkpoint timing) in the result map.
+  - [x] O5 the worker returns `oracle_ms` (per-checkpoint timing) in the result map.
   - [ ] verify_fresh local sha bumped to the new image tag.
 
 ### B. End-to-end refine-loop tok/s — co-located vs network
@@ -353,7 +353,7 @@ driver pays).
   network driver (`closed_loop.py`) for the before-number.
 - **OFFLINE PREP checklist:**
   - [ ] O1 image (as A).
-  - [ ] O3 the in-worker closed-loop driver — the refine loop running INSIDE
+  - [x] O3 the in-worker closed-loop driver — the refine loop running INSIDE
         `gpu_worker.py` using the persistent `_oracle()` (NOT `closed_loop.py`'s
         `subprocess.run`). This is the §3-item-1 fix: a `mode:"refine_loop"` that
         does denoise_to_step → local parse → resume_renoise → local re-parse in a
@@ -447,10 +447,10 @@ harness.
 | # | Task | Files | Done-when (offline proof) | Blocks |
 |---|---|---|---|---|
 | **O1** | Build + push the **co-location image** (bb parse layer + node eval layer + minimal `.cljc` + `oracle_shim.py`). Stage the 3 files into the build context (§6 step 1), append the §3 Dockerfile layer for bb AND a sibling layer for node + `out/worker-oracle-eval/main.js` + `out/bootstrap/`. | `tmp/flash-diffgemma/{Dockerfile,build-image.sh}`, `bin/oracle-server`, `src/seon/repl/internal.cljc`, `out/worker-oracle-eval/main.js`, `out/bootstrap/` | build-time oracle gate passes (`… \| grep -q '"forms":1'`); `docker run` drives BOTH `bb …oracle-server` (parse) and `node …oracle-eval.js --serve` (eval) inside the image (image-build §4b) | A, B, C |
-| **O2** | Harden `_oracle(kind)` in the worker warm-up: cache BOTH servers; eval **ready-wait** on the `"ready\n"` stderr sentinel (`worker_eval.cljs:381`); `p.poll()` **liveness respawn**; node **V8 warmup eval** at boot. Update `oracle_shim.py` with `ready_after()` + a liveness flag. | `tmp/flash-diffgemma/gpu_worker.py` (`_oracle`), `oracle_shim.py` | offline: spawn both via the shim, assert eval blocks until ready then runs ~2.6 ms warm; kill the child, assert lazy respawn; assert the warmup eval primed the hot path | A, B |
-| **O3** | **In-worker refine loop** — a `mode:"refine_loop"` in `gpu_worker.py`: denoise_to_step → local `_oracle("parse")` → resume_renoise → local re-parse, tight Python loop, persistent shim (NOT `subprocess.run`). Return per-iteration `errors_before/after`, `tok_per_s`, `oracle_ms`. This is the §3-item-1 fix. | `tmp/flash-diffgemma/gpu_worker.py` | `py_compile`-clean; an off-GPU dry-run (mock the GPU forward, real bb oracle over the persistent pipe) drives the loop and proves it uses ONE persistent server (0.05 ms calls), not respawns | B |
+| **O2 ✅** | Harden `_oracle(kind)` in the worker warm-up: cache BOTH servers; eval **ready-wait** on the `"ready\n"` stderr sentinel (`worker_eval.cljs:381`); `p.poll()` **liveness respawn**; node **V8 warmup eval** at boot. Update `oracle_shim.py` with `ready_after()` + a liveness flag. | `tmp/flash-diffgemma/gpu_worker.py` (`_oracle`), `oracle_shim.py` | DONE — `_oracle(kind)` caches BOTH (`oracle_parse`/`oracle_eval`); eval `ready_after()` blocks on the stderr sentinel; `warmup()` primes the hot path; dead-child lazy respawn in `Oracle._ensure`. `refine_loop_dryrun.py`: ready-wait blocked 191 ms then warm eval 0.06 ms; kill→respawn (new pid); shim self-test still green | A, B |
+| **O3 ✅** | **In-worker refine loop** — a `mode:"refine_loop"` in `gpu_worker.py`: denoise_to_step → local `_oracle("parse")` → resume_renoise → local re-parse, tight Python loop, persistent shim (NOT `subprocess.run`). Return per-iteration `errors_before/after`, `tok_per_s`, `oracle_ms`. This is the §3-item-1 fix. | `tmp/flash-diffgemma/gpu_worker.py` | DONE — `mode:"refine_loop"` + `_denoise_canvas` helper, bounded by `max_iters`, short-circuits on a clean checkpoint. `refine_loop_dryrun.py` (mock GPU forward, REAL bb oracle over the persistent pipe): ONE persistent server (same pid) every iteration, **0.045 ms** warm vs **25.9 ms** spawn-per-call (~572×) | B |
 | **O4 ✅** | Keep `closed_loop.py` (network driver) as the **baseline arm** for B's before-number — unchanged, just confirm it still runs as the contrast. | `tmp/flash-diffgemma/closed_loop.py` | DONE — runs offline against a mocked endpoint (denoise→parse→renoise→re-parse, real bb oracle), import-safe; docstring marks it "NETWORK BASELINE — the slow spawn-per-call contrast, not the production path (see O3)" | B |
-| **O5** | Worker returns **`oracle_ms`** (per-checkpoint oracle timing) in every refine/denoise result, so A measures the in-worker round-trip directly. | `tmp/flash-diffgemma/gpu_worker.py` | the result map carries `oracle_ms`; offline dry-run shows ~0.05 ms parse timings | A |
+| **O5 ✅** | Worker returns **`oracle_ms`** (per-checkpoint oracle timing) in every refine/denoise result, so A measures the in-worker round-trip directly. | `tmp/flash-diffgemma/gpu_worker.py` | DONE — every `refine_loop` iteration carries `oracle_ms` (per-checkpoint pipe round-trip), plus a top-level `oracle_ms_mean`; dry-run shows warm parse ~0.05–0.18 ms (the first call folds the bb classpath load) | A |
 | **O6 ✅** | **entropy_bound sweep** experiment in `battery.py` (grid loop, score each through the local oracle, scorecard line per setting). | `tmp/flash-diffgemma/battery.py` | DONE — `exp9`/alias `D`: sweeps `entropy_bound` (dflt grid 0.05/0.1/0.2/0.3/0.5) × optional `max_denoising_steps`, captures `tok_per_s` + `tokens_per_forward` (list→mean) + `faithful_rate` per point, one scorecard line each, finds the knee. `battery.py D --dry-run` prints the grid plan; `--param entropy_bound=… steps=…` tunable; `--selfcheck` green | D |
 | O7 *(later)* | **Async pipeline** the eval/retrieve checkpoint (fire async after step N's forward, consume before step N+1 completes). Design-only until A/B prove the co-located loop is forward-bound. | `tmp/flash-diffgemma/gpu_worker.py` | deferred — a ~1 % refinement; structure the O3 loop fire-and-consume so it's a small later change | — |
 
