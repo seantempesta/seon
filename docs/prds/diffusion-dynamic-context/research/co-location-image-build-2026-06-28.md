@@ -6,6 +6,49 @@ tags: [research, agent, web, flow]
 
 # Co-location image layer — bundle the Seon oracle onto the GPU worker (2026-06-28)
 
+## UPDATE 2026-06-30 — O1 image context BUILT + both tiers' gates PROVEN offline
+
+The image now bakes **BOTH** oracle tiers (this doc's original scope was parse-only;
+the colocation-performance-plan O1 requires the eval tier too). The committed source
+of truth for the build is now the **unified `tmp/flash-diffgemma/Dockerfile`** (parse
+layer + eval layer appended after the torch smoke gate) + `build-image.sh`
+(`stage_oracle`) + a `.dockerignore`. State:
+
+- **Parse tier** — `bb /opt/seon/bin/oracle-server` (unchanged, §2-§4 below). Gate:
+  `echo '{"op":"parse","code":"(+ 1 2)"}' | bb …oracle-server | grep -q '"forms":1'`.
+- **Eval tier** — `node /opt/seon/oracle-eval/main.js [--serve]` (cljs.js self-host,
+  faithful CLJS). Gate: `echo '(+ 1 2)' | node …oracle-eval/main.js | grep -q
+  '"value":"3"'`. Both gates PASS against the `/opt/seon` layout from a foreign cwd,
+  and both tiers drive end-to-end through `oracle_shim.py` (parse 0.05 ms warm; eval
+  ~293 ms cold init / ~5 ms warm) — verified offline 2026-06-30.
+- **Load-bearing GOTCHA (cost a cycle):** the `:node-script :simple` eval bundle is
+  **NOT a single self-contained file**. `out/worker-oracle-eval/main.js` is a thin
+  loader that `SHADOW_IMPORT`s **~192 `.js` chunks** from a sibling `cljs-runtime/`
+  dir (`~7.5 MB`), via a hardcoded `SHADOW_IMPORT_PATH = __dirname +
+  '/../../.shadow-cljs/builds/worker-oracle-eval/dev/out/cljs-runtime'` (with a
+  `__dirname == '.'` absolute fallback). So the eval tier needs THREE things, not the
+  two the plan assumed: `main.js` + `cljs-runtime/` + the `out/bootstrap/` analysis
+  cache (`~15 MB`, via `SEON_BOOTSTRAP`). `stage_oracle` copies `cljs-runtime/` beside
+  `main.js` and rewrites that line to `SHADOW_IMPORT_PATH = __dirname + '/cljs-runtime'`
+  so the bundle is **cwd-independent** in the container. (Rebuild the bundle first:
+  `clj -M:cljs compile worker-oracle-eval` — the chunk dir is gitignored build output.)
+- **Image eval layout:** `/opt/seon/oracle-eval/{main.js, cljs-runtime/}` +
+  `/opt/seon/bootstrap/` + `ENV SEON_BOOTSTRAP=/opt/seon/bootstrap`.
+- **`.dockerignore`** narrows the context to ~23 MB (the staged `oracle-build/` +
+  `oracle_shim.py`) instead of the ~900 MB worker dir (`.venv`); the bb binary is
+  `curl`ed at build time.
+- **OWNER step remaining (gated on `docker login`):** the flash base
+  (`runpod/flash:py3.12-latest`) is **amd64-only** (no arm64 manifest), so the local
+  Apple-silicon build is an emulated linux/amd64 build of the multi-GB torch base —
+  impractical to run here. Run on the owner box:
+  `docker login docker.io/seantempesta && REGISTRY=docker.io/seantempesta
+  TAG=cu128-v2-oracle ./build-image.sh`. Deploy tag (`FLASH_GPU_IMAGE`):
+  `docker.io/seantempesta/diffgemma-worker:cu128-v2-oracle`.
+
+The original parse-only spec below stays as the grounding for the parse layer.
+
+---
+
 ## TL;DR
 
 - **What this is:** the concrete, owner-buildable image LAYER that bakes the

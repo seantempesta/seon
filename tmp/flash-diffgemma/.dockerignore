@@ -1,0 +1,8 @@
+# Keep the docker build context lean. The Dockerfile only COPYs ./oracle-build/*
+# (staged by build-image.sh) and ./oracle_shim.py — everything else here (.venv,
+# logs, pycache, the gpu_worker/diffgemma_common bundled SEPARATELY by `flash
+# deploy`, scorecards, build logs) is irrelevant to the image and bloats the
+# context (the dir is ~900 MB, mostly .venv).
+*
+!oracle-build/
+!oracle_shim.py

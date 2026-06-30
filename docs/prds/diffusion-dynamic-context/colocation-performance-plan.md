@@ -334,8 +334,21 @@ driver pays).
   (image), have the worker time each oracle call and return `oracle_ms` per
   checkpoint in the result; compare against a network-driver run on the same prompt.
 - **OFFLINE PREP checklist:**
-  - [ ] O1 co-location image built + pushed (bb layer + node-eval layer + the
-        minimal `.cljc` + `oracle_shim.py`), per `co-location-image-build §3,6`.
+  - [~] O1 co-location image CONTEXT ready + both build-time gates PROVEN offline
+        (bb parse layer + node cljs.js eval layer + the minimal `.cljc` +
+        `oracle_shim.py`), per `co-location-image-build §3,6`. The `Dockerfile` +
+        `build-image.sh` (`stage_oracle`) + `.dockerignore` are committed; both gates
+        (`bb …oracle-server | grep '"forms":1'` and `node …oracle-eval/main.js | grep
+        '"value":"3"'`) pass against the `/opt/seon` layout from a foreign cwd, and
+        both tiers drive end-to-end through `oracle_shim.py`. **OWNER step remaining:**
+        `docker login docker.io/seantempesta` then `REGISTRY=docker.io/seantempesta
+        TAG=cu128-v2-oracle ./build-image.sh` (emulated linux/amd64 build of the
+        amd64-only flash base → push). Deploy tag:
+        `docker.io/seantempesta/diffgemma-worker:cu128-v2-oracle`.
+        GOTCHA found+fixed: the `:node-script` eval bundle is NOT one self-contained
+        file — it SHADOW_IMPORTs ~192 chunks from a `cljs-runtime/` dir; `stage_oracle`
+        ships that dir beside `main.js` and rewrites `SHADOW_IMPORT_PATH` to
+        `__dirname + '/cljs-runtime'` so the bundle is cwd-independent.
   - [x] O2 `_oracle(kind)` wired into `gpu_worker.py` warm-up (both servers cached,
         eval ready-wait, liveness respawn, V8 warmup) — §3 items 2-3.
   - [x] O5 the worker returns `oracle_ms` (per-checkpoint timing) in the result map.
