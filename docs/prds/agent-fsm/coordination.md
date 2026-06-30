@@ -1253,6 +1253,16 @@ other lane's **_Needs_** and the owner makes it.
   `SEON_CONFIG` manifest with a shorter `:load` via the `:seon.gym.config/path` seam the gym already
   supports), so routing to U rather than guessing your measurement intent. Everything else Core landed is green.
 
+- **→ U (owner decision, 2026-06-29): SPLIT the s12 store/consult scenario (#81).** The owner reviewed the
+  s12 residual gap (weak DeepSeek agent researches but persists ZERO `my.kb` rows even though the store
+  mechanism works + the guidance is present) and chose: **split the bundled scenario** rather than keep
+  tuning the store guidance. The current `s12-run8-two-agent-consultation` bundles research + store +
+  handoff, so the store-axis failure is masked among the other steps. Action (gym = your lane): split into
+  (A) a pure **"find X and store it with provenance"** scenario measuring ONLY the store axis, and (B) a
+  pure **"answer Y from the already-stored rows"** scenario measuring the consult axis. Then the store
+  failure is isolated and you can tell whether it's a real gap or a weak-model ceiling (a stronger-model
+  drive on scenario A settles it). Core did NOT touch the gym.
+
 ## Launch prompts
 
 The two prompts below launch the lanes. Each is self-contained; both point back to
