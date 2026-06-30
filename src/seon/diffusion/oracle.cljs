@@ -105,6 +105,30 @@
   (and (< s1 e2) (< s2 e1)))
 
 ;; ============================================================
+;; Structural lint — the CHEAP tier (T1): a well-formed form whose SHAPE is
+;; wrong. Catches the class of mistakes the eval tier need never be paid for —
+;; the AST already proves them. Currently: def-vs-defn.
+;; ============================================================
+
+(defn- malformed-def?
+  "A top-level `(def …)` that is NOT a valid `def` — i.e. a `defn` typo such as
+   `(def mean [v] (/ (reduce + v) (count v)))`. `def` READS clean (the parse
+   tier is blind to it) but its only valid arities are `(def name)`,
+   `(def name init)`, and `(def name \"docstring\" init)` (the middle arg a
+   STRING). MORE than name+init — or a 3-arg `def` whose middle isn't a string —
+   is structurally malformed: almost certainly a dropped `n`. No semantics, no
+   eval — the AST alone decides, so it renoises at the ~free structural tier
+   instead of paying the 2.6ms eval. `(def xs [1 2 3])` (a real vector binding)
+   stays valid (name+init = 2 args)."
+  [form]
+  (and (seq? form)
+       (= 'def (first form))
+       (let [args (rest form)                         ; name + the init forms
+             n    (count args)]
+         (or (> n 3)
+             (and (= n 3) (not (string? (second args))))))))
+
+;; ============================================================
 ;; The unified dispatcher
 ;; ============================================================
 
@@ -115,8 +139,11 @@
    bundle is a separate node spawn).
 
    - `::clamps` = good form spans NOT overlapping an injection or a renoise span.
-   - `::renoise-spans` = parse-error spans + any eval-bad form NOT already
-     covered by an injection (retrieval's correction supersedes a re-noise).
+   - `::renoise-spans` = parse-error spans + STRUCTURAL-lint spans (a form that
+     reads clean but has a wrong shape the AST proves, e.g. def-vs-defn) + any
+     eval-bad form NOT already covered by an injection (retrieval's correction
+     supersedes a re-noise). The structural tier is ~free — it catches shape
+     mistakes WITHOUT paying the out-of-process eval bundle.
    - `::injections` = retrieval's hallucinated-symbol corrections.
    - `::legs` = `[:parse :retrieve]`, plus `:eval` when verdicts were folded."
   {:malli/schema [:=> [:cat ::checkpoint] ::control-set]}
@@ -136,6 +163,15 @@
         parse-renoise (mapv (fn [{:keys [span error-kind source]}]
                               {::span span ::error-kind error-kind ::source source})
                             reads)
+        ;; STRUCTURAL-tier (T1) renoise spans — a form that READS clean but has a
+        ;; wrong SHAPE the AST alone proves (def-vs-defn). Renoises the offending
+        ;; form WITHOUT paying the eval tier.
+        struct-renoise (->> forms
+                            (keep (fn [{:keys [span source form]}]
+                                    (when (and span (malformed-def? form))
+                                      {::span span ::error-kind :def-vs-defn
+                                       ::source source})))
+                            vec)
         ;; EVAL fold — a bad verdict becomes a renoise span UNLESS retrieval
         ;; already named the real API for that span (injection supersedes).
         eval-renoise  (->> eval-verdicts
@@ -146,7 +182,7 @@
                                    {::span span
                                     ::error-kind (or error-kind :throw)
                                     ::source (subs canvas-text (first span) (second span))})))
-        renoise-spans (into parse-renoise eval-renoise)
+        renoise-spans (into (into parse-renoise struct-renoise) eval-renoise)
         bad-spans     (into inj-spans (map ::span renoise-spans))
         ;; CLAMPS — good forms that carry no hallucination and are not broken.
         clamps        (->> forms

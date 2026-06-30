@@ -145,6 +145,45 @@
       done)))
 
 ;; ---------------------------------------------------------------------------
+;; STRUCTURAL tier (T1) — a form that READS clean but has a wrong SHAPE the AST
+;; proves (def-vs-defn) renoises at the ~free structural tier, NO eval. A real
+;; vector-binding def and a docstring def stay valid CLAMPS.
+;; ---------------------------------------------------------------------------
+
+(def ^:private struct-canvas
+  (str "(def mean [v] (/ (reduce + v) (count v)))\n"  ; 0 — def-vs-defn → RENOISE
+       "(def xs [1 2 3])\n"                            ; 1 — real vector binding → clamp
+       "(def cfg \"the config\" 42)\n"                 ; 2 — docstring def → clamp
+       "(defn ok [v] (count v))"))                     ; 3 — clean defn → clamp
+
+(deftest structural-def-vs-defn
+  (async done
+    (with-db
+      (fn [db]
+        (let [{::oracle/keys [clamps renoise-spans legs]}
+              (oracle/refine {::oracle/canvas-text struct-canvas ::oracle/db db})
+              clamp-srcs (set (map ::oracle/source clamps))]
+
+          (testing "no eval verdicts supplied → structural tier rides the PARSE leg"
+            (is (= [:parse :retrieve] legs)))
+
+          (testing "the def-vs-defn form is the ONLY renoise span, kind :def-vs-defn"
+            (is (= 1 (count renoise-spans)))
+            (let [r (first renoise-spans)]
+              (is (= :def-vs-defn (::oracle/error-kind r)))
+              (is (str/includes? (::oracle/source r) "(def mean [v]"))
+              (is (= (::oracle/source r) (span-source struct-canvas (::oracle/span r))))))
+
+          (testing "valid defs (vector binding, docstring) and the clean defn are CLAMPED"
+            (is (contains? clamp-srcs "(def xs [1 2 3])"))
+            (is (contains? clamp-srcs "(def cfg \"the config\" 42)"))
+            (is (contains? clamp-srcs "(defn ok [v] (count v))")))
+
+          (testing "the malformed def is NOT clamped"
+            (is (not-any? #(str/includes? % "(def mean") clamp-srcs)))))
+      done)))
+
+;; ---------------------------------------------------------------------------
 ;; EVAL FOLD — a syntactically-clean form retrieval cannot fix (the symbol has
 ;; no near candidate in the graph) is a CLAMP, until an eval verdict (`:compile`
 ;; — undeclared var) demotes it to a renoise span. The verdict is span-keyed, so
