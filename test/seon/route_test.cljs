@@ -68,38 +68,38 @@
       (is (= :db.cardinality/many (:db/cardinality mw))))))
 
 (defn- fresh-conn
-  "Promise of a fresh :memory conn declaring the route attrs' datahike schema
-   (the same facets `transact!` would bridge), so a raw `d/transact!` of route
-   rows under `:schema-flexibility :write` is accepted."
+  "Promise of a fresh :memory conn. `d/create-database`/`d/connect` is the
+   scratch-store creation (no seon.db equivalent — same idiom as state_test);
+   all data ops route through `seon.db`. No manual schema install needed:
+   `db/transact!` auto-bridges + installs the route attrs (registered in
+   `seon.route`) at first transact."
   []
   (let [cfg {:store              {:backend :memory :id (random-uuid)}
              :schema-flexibility :write
              :keep-history?      true}]
     (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact! conn {:tx-data (db/malli->datahike-schema
-                                                   [:seon.route/pattern :seon.route/method
-                                                    :seon.route/name :seon.route/handler
-                                                    :seon.route/middleware])})
-                     (.then (fn [_] conn))))))))
+        (.then (fn [_] (d/connect cfg {:sync? false}))))))
 
 (deftest rows-round-trip-and-upsert-idempotently
   (async done
     (-> (fresh-conn)
         (.then (fn [conn]
-                 (-> (d/transact! conn {:tx-data (route/core-routes-tx)})
+                 (-> (db/transact! {:seon.db/tx-data (route/core-routes-tx)
+                                    :seon.db/conn    conn})
                      ;; seed a SECOND time — identity upsert on :seon.route/name
                      ;; must merge, never duplicate.
-                     (.then (fn [_] (d/transact! conn {:tx-data (route/core-routes-tx)})))
+                     (.then (fn [_] (db/transact! {:seon.db/tx-data (route/core-routes-tx)
+                                                   :seon.db/conn    conn})))
                      (.then
                        (fn [_]
-                         (let [db    @conn
-                               names (d/q '[:find [?n ...] :where [?e :seon.route/name ?n]] db)
-                               h     (ffirst (d/q '[:find ?h :where
-                                                    [?e :seon.route/name :seon.route/agent]
-                                                    [?e :seon.route/handler ?h]]
-                                                  db))]
+                         (let [names (db/query {:seon.db/query '[:find [?n ...]
+                                                                 :where [?e :seon.route/name ?n]]
+                                                :seon.db/conn  conn})
+                               h     (ffirst (db/query {:seon.db/query
+                                                        '[:find ?h :where
+                                                          [?e :seon.route/name :seon.route/agent]
+                                                          [?e :seon.route/handler ?h]]
+                                                        :seon.db/conn conn}))]
                            (is (= 4 (count names)) "four entities after a double seed — no duplicates")
                            (is (= (set (keys expected)) (set names)))
                            (is (symbol? h) "handler reads back as a native symbol")
