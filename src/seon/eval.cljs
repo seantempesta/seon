@@ -1693,6 +1693,119 @@
                   (seq? (first forms))
                   (contains? '#{defn defn-} (first (first forms)))))))
 
+;; ============================================================
+;; Prose-in-parens demotion (#88). When an agent writes English prose
+;; wrapped in parens — `(June 3 before June 14)`, `(results look fine)` —
+;; the reader hands it to eval, the head throws "not defined", the live
+;; agent errors, and the eval-error rate inflates with non-errors. These
+;; forms are DEMOTED to prose: recorded ok?, never eval'd, counted as
+;; neither ok nor fail (like a `;` comment). The gate is deliberately
+;; tight (it errs toward KEEP) — a wrongly-demoted real call is a SILENT
+;; bug, a missed prose demotion is only mild noise.
+;; ============================================================
+
+(def ^:private code-head-syms
+  "Head symbols that ALWAYS signal real code — cljs special forms plus the
+   common cljs.core macros. A `(…)` whose HEAD is one of these is NEVER
+   demoted to prose: `(when x …)`, `(let [a 1] …)`, `(-> x f)`, `(and a b)`
+   are code even when their operands don't resolve. Macros are NOT runtime
+   vars (absent from globalThis), so they need this explicit set; resolvable
+   VARS are caught by the globalThis/analyzer probe in
+   [[symbol-resolves-as-var?]]. Consulted ONLY for the HEAD — a macro name
+   sitting in ARGUMENT position (the `and` in `(Abk and fvV …)`) is a naked
+   operator word, i.e. prose, and must NOT block demotion."
+  '#{;; special forms
+     if do let* loop* recur throw try catch finally def fn* letfn* quote var
+     set! ns ns* deftype* defrecord* & case* js* . this-as
+     ;; control-flow / binding / def macros
+     fn let letfn loop when when-not when-let when-some when-first if-let
+     if-not if-some cond condp case and or -> ->> as-> some-> some->>
+     cond-> cond->> doto .. for doseq dotimes while binding with-redefs
+     with-open with-out-str with-local-vars locking lazy-seq delay assert
+     comment declare definline defmulti defmethod defprotocol defrecord
+     deftype definterface reify extend-type extend-protocol extend defn
+     defn- defmacro time dosync})
+
+(defn- symbol-resolves-as-var?
+  "True when UNQUALIFIED `sym` resolves to a runtime VAR visible in
+   `ns-sym`'s scope: an analyzer `:def` in ns-sym, a `cljs.core` var, or a
+   var on ns-sym's own globalThis object. Mirrors the globalThis/analyzer
+   probing `truly-undeclared?` uses, so the prose gate agrees with what would
+   actually error. Macros (absent from globalThis) and special forms are NOT
+   covered here — they live in [[code-head-syms]]. Qualified symbols never
+   reach this fn (the caller treats namespaced as a code signal outright).
+   Never throws."
+  [compile-state ns-sym sym]
+  (let [m (cljs.core/munge (str sym))]
+    (boolean
+      (or (get-in @compile-state
+                  [:cljs.analyzer/namespaces (symbol (str ns-sym)) :defs sym])
+          (resolves-on-globalthis? (str "cljs.core." m))
+          (resolves-on-globalthis? (str (cljs.core/munge (str ns-sym)) "." m))))))
+
+(defn- collect-symbols
+  "Every symbol appearing anywhere in `x` (recursively through lists,
+   vectors, maps, sets), as a vector in encounter order."
+  [x]
+  (let [acc  (volatile! [])
+        walk (fn walk [y]
+               (cond
+                 (symbol? y) (vswap! acc conj y)
+                 (coll? y)   (doseq [z y] (walk z))))]
+    (walk x)
+    @acc))
+
+(defn- prose-paren?
+  "TRUE when `source` is a single `(…)` list that is English PROSE wrapped in
+   parens (`(June 3 before June 14)`, `(results look fine)`), NOT code.
+   Eval'ing such a form throws \"not defined\" and inflates the eval-error
+   rate; the batch DEMOTES it to a prose row (recorded ok?, never evaluated,
+   counted as neither ok nor fail) so commentary survives in the transcript
+   without registering as an error (#88).
+
+   DEMOTE iff ALL hold — else KEEP (treat as real code, eval + count):
+
+     1. `source` reads as exactly ONE non-empty list whose HEAD is a symbol.
+     2. HEAD is unqualified, NOT in [[code-head-syms]] (special form / core
+        macro), and does NOT resolve to a var.
+     3. NO symbol ANYWHERE in the form is qualified, AND none resolves to a
+        var — the instant one does (head or arg) it is real code.
+     4. There are AT LEAST TWO symbols in ARGUMENT position. A lone undefined
+        head with literal-only args (`(undefined-fn 1 2)`) or a single
+        undefined arg (`(parse-it x)`) is KEPT as a plausible typo'd call: we
+        err toward KEEP, since a wrongly-demoted real call is a SILENT bug
+        while a missed prose demotion is only mild noise.
+
+   Macros/special forms in ARGUMENT position do NOT count as code signals (a
+   naked `and`/`look` is a prose word); only a qualified or var-resolving
+   symbol does. Number/string/keyword literals are allowed in a prose group.
+
+   KNOWN over-demotion edge: a real call whose head AND ≥2 args are ALL
+   undefined bare symbols (`(merge-maps a b)`) is structurally identical to
+   prose and WILL be demoted. This is the accepted cost of the gate; the
+   ≥2-arg-symbol threshold is the maximal err-toward-keep that still demotes
+   every prose case. Never throws — any read error or exception ⇒ not prose ⇒
+   KEEP (fail-closed)."
+  [compile-state ns-sym source]
+  (boolean
+    (try
+      (let [forms (read-all-forms source)
+            form  (first forms)]
+        (and (= 1 (count forms))
+             (seq? form)
+             (seq form)
+             (symbol? (first form))
+             (let [head     (first form)
+                   arg-syms (collect-symbols (rest form))
+                   all-syms (cons head arg-syms)
+                   code-signal?
+                   (fn [s] (or (qualified-symbol? s)
+                               (symbol-resolves-as-var? compile-state ns-sym s)))]
+               (and (not (contains? code-head-syms head))
+                    (>= (count arg-syms) 2)
+                    (not-any? code-signal? all-syms)))))
+      (catch :default _ false))))
+
 (defn scratch-def-note
   "Reactive 'won't persist' note (#7), DERIVED from an eval's source —
    pure, no stored attr, re-computed every render so it FOLLOWS the
@@ -3099,6 +3212,28 @@
         (if (:ok result)
           (vswap! n-ok   inc)
           (vswap! n-fail inc)))
+
+      ;; Prose-in-parens demotion (#88) — a `(…)` that is English prose, not
+      ;; code (undefined bare head + ≥2 undefined bare words, no qualified or
+      ;; var-resolving symbol anywhere). Eval'ing it throws "not defined" and
+      ;; inflates the eval-error rate; DEMOTE to a prose row instead: record
+      ;; ok? with the text preserved + a note, never eval, count as NEITHER
+      ;; n-ok nor n-fail (exactly like a `;` comment — it ran nothing).
+      (prose-paren? compile-state @current-ns source)
+      (await (record-eval!
+               {:eval-id     eval-id
+                :turn-id     turn-id
+                :at          (js/Date.)
+                :duration-ms 0
+                :narration   (str (when (seq narration) (str narration "\n"))
+                                  "; read as PROSE, not code — every word is an "
+                                  "undefined bare symbol, so this was NOT "
+                                  "evaluated (it would only have thrown 'not "
+                                  "defined'). For real code, make the head or an "
+                                  "argument resolve; keep prose in `;` comments.")
+                :source      source
+                :ns          @current-ns
+                :result      {:ok true :value nil}}))
 
       ;; Normal eval path.
       :else
