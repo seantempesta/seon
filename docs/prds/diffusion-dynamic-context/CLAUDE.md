@@ -52,8 +52,18 @@ Full live state + plans = the auto-loaded memory `project-diffusion-overnight-lo
   **T0 parse** (0.05ms, well-formed) · **T1 structural lint** (~free, AST shape: def-vs-defn, missing
   `:malli/schema`, bare/un-namespaced keys → renoise the span) · **T2 eval** (2.6ms, won't-RUN:
   undeclared var, arity — eval's UNIQUE job, no AST can resolve symbols) · **T3 behavioral test**
-  (runs-but-WRONG: off-by-one — the real correctness proof). NEXT BUILD: the T1 structural def-detector
-  in the parse oracle (`seon.diffusion.oracle/refine`) — cheap, the owner's idea, catches shape before paying eval.
+  (runs-but-WRONG: off-by-one — the real correctness proof).
+  **STATUS: the WHOLE ladder is BUILT + proven (2026-06-30):**
+  - **T1** — `seon.diffusion.oracle/malformed-def?` wired into `refine` as a third renoise source
+    (commit `d5d80fad`; `def` valid only name+init/name+"doc"+init, so `(def mean [v] body)` is
+    unambiguously a defn typo; `(def xs [1 2 3])` stays a valid clamp). Live-proven vs the parser
+    (5/5) + regression test `structural-def-vs-defn` (suite green).
+  - **T2+T3** — `refine_loop` gate is parse→eval→behavioral (`behavioral` payload = `[{call,expect}]`,
+    `eval_gate` flag), stopping at the cheapest decisive tier (`gpu_worker.py`). `eval_gate_earlystop_proof.py`
+    (6 cases, REAL bb+node oracles): def-not-defn/undeclared FAIL eval→no-stop; off-by-one mean RUNS but
+    behav FAILS→no-stop; correct mean → validated → STOP iter 0. (Proof self-caught a CLJS no-Ratio
+    expectation bug — `(/ 10 4)`=2.5 not 5/2.) **T3 is the literal "who cares about probability" gate.**
+  - Found+filed: #50 — the #42 `:minimal` config-profile is a no-op (lean==full tokens), pre-existing, separate lane.
 - **Speed levers ranked:** (1) **exp D entropy_bound/tokens-per-forward — FREE on A100, prepped, UNRUN,
   ~2-3×, DO FIRST.** (2) TPU v5e via the existing JAX DiffusionGemma (port-light; de-risk = one ~$5 v5e-4 spike).
   (3) Triton MoE kernel to unblock compile (#49). Co-location prep tasks #44-#47 DONE + offline-proven.
