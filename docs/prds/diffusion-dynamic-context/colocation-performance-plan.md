@@ -405,11 +405,13 @@ tok/forward").
   (e.g. 0.1, 0.2, 0.3, 0.5), `trace:"entropy"`, recording `tokens_per_forward`,
   `tok_per_s`, and the local-oracle `faithful_rate` per setting.
 - **OFFLINE PREP checklist:**
-  - [ ] O6 the sweep harness — a `battery.py` experiment (it already supports
-        `--param entropy_bound=0.1,0.2,0.3,0.5`, `gpu-session-run-order §4`) that
-        loops the grid, scores each through the local oracle, emits a scorecard line
-        per setting (`{entropy_bound, tokens_per_forward, tok_per_s, faithful_rate,
-        worker_sha}`).
+  - [x] O6 the sweep harness — `battery.py` experiment `9_entropy_sweep` (alias
+        `D`): `--param entropy_bound=0.05,0.1,0.2,0.3,0.5` (and optional
+        `steps=<max_denoising_steps>`) loops the grid, scores each through the local
+        oracle (`_skill_good`), emits a scorecard line per setting
+        (`{entropy_bound, max_denoising_steps, tokens_per_forward, tok_per_s,
+        faithful_rate, worker_sha}`) + the knee. `battery.py D --dry-run` prints the
+        plan; `--selfcheck` green.
   - [ ] the param grid decided offline (start coarse: 0.1/0.2/0.3/0.5).
   - [ ] D does NOT need the co-location image (it's a stock-worker knob) — runnable
         in the same warm session as A/B if the image is already up, or on the stock
@@ -423,8 +425,8 @@ export FLASH_GPU_IMAGE=docker.io/seantempesta/diffgemma-worker:<NEW-oracle-tag>
 .venv/bin/flash deploy
 export DIFFGEMMA_EP=<ep>
 python3 verify_fresh.py                 # MUST print FRESH ✓ (sha == local)
-# D first if on stock image (cheapest, no image dep):
-python3 battery.py D --param entropy_bound=0.1,0.2,0.3,0.5
+# D first if on stock image (cheapest, no image dep) — exp 9_entropy_sweep:
+python3 battery.py D --param entropy_bound=0.05,0.1,0.2,0.3,0.5
 # Then the co-location image tests:
 python3 <A: oracle-latency drive>       # co-located persistent vs network
 python3 <B: refine_loop mode>           # tok/s before(network)/after(co-located)
@@ -447,9 +449,9 @@ harness.
 | **O1** | Build + push the **co-location image** (bb parse layer + node eval layer + minimal `.cljc` + `oracle_shim.py`). Stage the 3 files into the build context (§6 step 1), append the §3 Dockerfile layer for bb AND a sibling layer for node + `out/worker-oracle-eval/main.js` + `out/bootstrap/`. | `tmp/flash-diffgemma/{Dockerfile,build-image.sh}`, `bin/oracle-server`, `src/seon/repl/internal.cljc`, `out/worker-oracle-eval/main.js`, `out/bootstrap/` | build-time oracle gate passes (`… \| grep -q '"forms":1'`); `docker run` drives BOTH `bb …oracle-server` (parse) and `node …oracle-eval.js --serve` (eval) inside the image (image-build §4b) | A, B, C |
 | **O2** | Harden `_oracle(kind)` in the worker warm-up: cache BOTH servers; eval **ready-wait** on the `"ready\n"` stderr sentinel (`worker_eval.cljs:381`); `p.poll()` **liveness respawn**; node **V8 warmup eval** at boot. Update `oracle_shim.py` with `ready_after()` + a liveness flag. | `tmp/flash-diffgemma/gpu_worker.py` (`_oracle`), `oracle_shim.py` | offline: spawn both via the shim, assert eval blocks until ready then runs ~2.6 ms warm; kill the child, assert lazy respawn; assert the warmup eval primed the hot path | A, B |
 | **O3** | **In-worker refine loop** — a `mode:"refine_loop"` in `gpu_worker.py`: denoise_to_step → local `_oracle("parse")` → resume_renoise → local re-parse, tight Python loop, persistent shim (NOT `subprocess.run`). Return per-iteration `errors_before/after`, `tok_per_s`, `oracle_ms`. This is the §3-item-1 fix. | `tmp/flash-diffgemma/gpu_worker.py` | `py_compile`-clean; an off-GPU dry-run (mock the GPU forward, real bb oracle over the persistent pipe) drives the loop and proves it uses ONE persistent server (0.05 ms calls), not respawns | B |
-| **O4** | Keep `closed_loop.py` (network driver) as the **baseline arm** for B's before-number — unchanged, just confirm it still runs as the contrast. | `tmp/flash-diffgemma/closed_loop.py` | runs offline against a stub; documented as the "network baseline", not the production path | B |
+| **O4 ✅** | Keep `closed_loop.py` (network driver) as the **baseline arm** for B's before-number — unchanged, just confirm it still runs as the contrast. | `tmp/flash-diffgemma/closed_loop.py` | DONE — runs offline against a mocked endpoint (denoise→parse→renoise→re-parse, real bb oracle), import-safe; docstring marks it "NETWORK BASELINE — the slow spawn-per-call contrast, not the production path (see O3)" | B |
 | **O5** | Worker returns **`oracle_ms`** (per-checkpoint oracle timing) in every refine/denoise result, so A measures the in-worker round-trip directly. | `tmp/flash-diffgemma/gpu_worker.py` | the result map carries `oracle_ms`; offline dry-run shows ~0.05 ms parse timings | A |
-| **O6** | **entropy_bound sweep** experiment in `battery.py` (grid loop, score each through the local oracle, scorecard line per setting). | `tmp/flash-diffgemma/battery.py` | `battery.py D --dry-run` prints the grid payload plan (no GPU); `--selfcheck` green | D |
+| **O6 ✅** | **entropy_bound sweep** experiment in `battery.py` (grid loop, score each through the local oracle, scorecard line per setting). | `tmp/flash-diffgemma/battery.py` | DONE — `exp9`/alias `D`: sweeps `entropy_bound` (dflt grid 0.05/0.1/0.2/0.3/0.5) × optional `max_denoising_steps`, captures `tok_per_s` + `tokens_per_forward` (list→mean) + `faithful_rate` per point, one scorecard line each, finds the knee. `battery.py D --dry-run` prints the grid plan; `--param entropy_bound=… steps=…` tunable; `--selfcheck` green | D |
 | O7 *(later)* | **Async pipeline** the eval/retrieve checkpoint (fire async after step N's forward, consume before step N+1 completes). Design-only until A/B prove the co-located loop is forward-bound. | `tmp/flash-diffgemma/gpu_worker.py` | deferred — a ~1 % refinement; structure the O3 loop fire-and-consume so it's a small later change | — |
 
 Bundle-size reminder: the bb layer is +0.5 % of the image; the node eval layer adds
