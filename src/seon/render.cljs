@@ -99,6 +99,12 @@
              [:seon.render/html {:optional true} :int]]
        [:enum :none]])
 (schema/register! :seon.render/hidden? :boolean)        ;; self-prune: drop from render, keep the row
+;; NO-CLIP opt-out — a block / value / eval-row carrying `true` renders
+;; WHOLE past the authored-content char/token cap (the single
+;; `seon.agent.ctx/clip-or-full` gate honors it). Default is to clip, with a
+;; loud marker, so the safety cap still fires for UNFLAGGED huge dumps; the
+;; flag only bypasses it. A shared shape referenced by every clip site.
+(schema/register! :seon.render/full? :boolean)
 (schema/register! :seon.render/children
   [:vector {:seon.db/component true} :seon.db/ref])      ;; OPTIONAL authored nesting; derived sections query instead
 
@@ -784,7 +790,8 @@
   "The OPTIONAL render-control attrs ANY renderable may carry — stripped by
    the generic default so a data dump shows only domain attrs."
   [:seon.render/ai :seon.render/html :seon.render/clip
-   :seon.render/hidden? :seon.render/children :seon.agent.ctx/priority])
+   :seon.render/hidden? :seon.render/full? :seon.render/children
+   :seon.agent.ctx/priority])
 
 (defn renderable-id
   "A node's stable HANDLE — its own identity attr (dispatch by presence), or a

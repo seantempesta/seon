@@ -1473,3 +1473,43 @@
         "a clipped preview points back at the live handle")
     (is (< (count card) (count big))
         "the card is a bounded preview, never the flood")))
+
+;; ------------------------------------------------------------
+;; :seon.render/full? — the no-clip opt-out (#43). A flagged
+;; value/block/eval-row renders WHOLE past the cap; unflagged still
+;; clips with the loud marker. ONE full?-aware clip gate (clip-or-full)
+;; behind every authored-content clip site.
+;; ------------------------------------------------------------
+
+(deftest full-flag-bypasses-authored-content-clip
+  (let [big (apply str (repeat 6000 "x"))]
+    ;; cap-result-body — the citable eval RESULT body
+    (let [clipped (ctx/cap-result-body big 2048 "Big")]
+      (is (< (count clipped) (count big)) "unflagged → clipped to the cap")
+      (is (str/includes? clipped "TRUNCATED") "loud clip marker present")
+      (is (str/includes? clipped "result/Big") "the dig handle survives the clip"))
+    (let [whole (ctx/cap-result-body big 2048 "Big" true)]
+      (is (= big whole) ":seon.render/full? renders the body WHOLE past the cap")
+      (is (not (str/includes? whole "TRUNCATED")) "no clip marker when full?"))
+    ;; cap-result — echoed source / stdout
+    (is (str/includes? (ctx/cap-result big 2048) "TRUNCATED") "unflagged source clips")
+    (is (= big (ctx/cap-result big 2048 true)) "full? source renders whole")
+    ;; truncate-edn — pr-str'd display
+    (is (str/includes? (ctx/truncate-edn big 2048) "TRUNCATED") "unflagged edn clips")
+    (is (= (pr-str big) (ctx/truncate-edn big 2048 true)) "full? edn renders whole")))
+
+(deftest eval-row-full-flag-renders-result-whole
+  ;; The flag pinned on an eval ROW flows through format-eval-row to the
+  ;; result-body clip — the whole value lands in the transcript.
+  (let [big     (apply str (repeat 20000 "y"))     ; > result-body-render-cap (16384)
+        row     {:seon.eval/id "Ev1" :seon.eval/ok? true
+                 :seon.eval/source "(huge)"
+                 :seon.eval/result-edn (pr-str big)}
+        clipped (ctx/format-eval-row row)
+        whole   (ctx/format-eval-row (assoc row :seon.render/full? true))]
+    (is (str/includes? clipped "TRUNCATED")
+        "a big eval result clips by default")
+    (is (not (str/includes? whole "TRUNCATED"))
+        ":seon.render/full? on the eval row renders the result WHOLE")
+    (is (str/includes? whole big)
+        "the full value is present uncut in the row")))

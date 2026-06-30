@@ -346,22 +346,41 @@
     (or (some-> (js/Intl.DateTimeFormat.) .resolvedOptions .-timeZone) "UTC")
     (catch :default _ "UTC")))
 
+(defn- clip-or-full
+  "THE authored-content clip gate — the SINGLE place a display cap is
+   applied, so the `:seon.render/full?` no-clip opt-out lives in ONE spot.
+   Returns `s` UNCUT when `full?` (a block / value / eval-row pinned
+   `:seon.render/full? true` to keep its content whole past the cap) OR
+   when `s` already fits `limit`. Otherwise truncates to `limit` chars and
+   appends `(marker limit total-chars)` — the call site's LOUD marker, so a
+   clipped display can never pass for complete content. The safety cap thus
+   still fires for UNFLAGGED, genuinely-huge dumps; the flag only bypasses
+   it. Nil-safe."
+  {:malli/schema [:=> [:catn [::s :any] [::limit :int]
+                       [::full? :boolean] [::marker [:fn fn?]]] :string]}
+  [s limit full? marker]
+  (let [s (str s)
+        n (count s)]
+    (if (or full? (<= n limit))
+      s
+      (str (subs s 0 limit) (marker limit n)))))
+
 (defn truncate-edn
   "pr-str a value, truncate to ~2 KB for display in the eval log
    (v1.md §1's three-tier storage rule: DB datoms hold projections,
-   not full content)."
+   not full content). A `full?` (`:seon.render/full? true` pinned on the
+   block/value) renders the value WHOLE past the cap."
   {:malli/schema [:function
                   [:=> [:catn [::v :any]] :string]
-                  [:=> [:catn [::v :any] [::limit :int]] :string]]}
-  ([v] (truncate-edn v 2048))
-  ([v limit]
-   (let [s (pr-str v)
-         n (count s)]
-     (if (> n limit)
-       (str (subs s 0 limit)
-            " …⟨⚠ TRUNCATED at " limit " of " n " chars — display clip, "
-            "the underlying value is complete⟩")
-       s))))
+                  [:=> [:catn [::v :any] [::limit :int]] :string]
+                  [:=> [:catn [::v :any] [::limit :int] [::full? :boolean]] :string]]}
+  ([v] (truncate-edn v 2048 false))
+  ([v limit] (truncate-edn v limit false))
+  ([v limit full?]
+   (clip-or-full (pr-str v) limit full?
+     (fn [limit n]
+       (str " …⟨⚠ TRUNCATED at " limit " of " n " chars — display clip, "
+            "the underlying value is complete⟩")))))
 
 (defn message-label
   "Transcript label for a message's `:seon.agent.message/from` ref (a pulled
@@ -425,17 +444,16 @@
    Nil-safe."
   {:malli/schema [:function
                   [:=> [:catn [::s :any]] :string]
-                  [:=> [:catn [::s :any] [::limit :int]] :string]]}
-  ([s] (cap-result s eval-render-cap))
-  ([s limit]
-   (let [s (str s)
-         n (count s)]
-     (if (> n limit)
-       (str (subs s 0 limit)
-            " …⟨⚠ TRUNCATED at " limit " of " n " chars — the DISPLAY is "
+                  [:=> [:catn [::s :any] [::limit :int]] :string]
+                  [:=> [:catn [::s :any] [::limit :int] [::full? :boolean]] :string]]}
+  ([s] (cap-result s eval-render-cap false))
+  ([s limit] (cap-result s limit false))
+  ([s limit full?]
+   (clip-or-full s limit full?
+     (fn [limit n]
+       (str " …⟨⚠ TRUNCATED at " limit " of " n " chars — the DISPLAY is "
             "clipped, the underlying data is complete; do not summarize "
-            "or quote beyond what is shown⟩")
-       s))))
+            "or quote beyond what is shown⟩")))))
 
 (def message-render-cap
   "Per-message rendered-content char cap for a `;;; ◀ from X` inbound line
@@ -471,23 +489,22 @@
   {:malli/schema [:function
                   [:=> [:catn [::s :any]] :string]
                   [:=> [:catn [::s :any] [::limit :int]] :string]
-                  [:=> [:catn [::s :any] [::limit :int] [::eid :any]] :string]]}
-  ([s] (cap-result-body s result-body-render-cap nil))
-  ([s limit] (cap-result-body s limit nil))
-  ([s limit eid]
-   (let [s (str s)
-         n (count s)]
-     (if (> n limit)
+                  [:=> [:catn [::s :any] [::limit :int] [::eid :any]] :string]
+                  [:=> [:catn [::s :any] [::limit :int] [::eid :any] [::full? :boolean]] :string]]}
+  ([s] (cap-result-body s result-body-render-cap nil false))
+  ([s limit] (cap-result-body s limit nil false))
+  ([s limit eid] (cap-result-body s limit eid false))
+  ([s limit eid full?]
+   (clip-or-full s limit full?
+     (fn [limit n]
        (let [ref (if eid (str "result/" eid) "result/<id>")]
-         (str (subs s 0 limit)
-              " …⟨⚠ TRUNCATED at " limit " of " n " chars — the DISPLAY "
+         (str " …⟨⚠ TRUNCATED at " limit " of " n " chars — the DISPLAY "
               "is clipped, the live value is COMPLETE⟩"
               "\n; Never summarize or quote beyond the shown " limit
               " chars — bind and process the value with code: " ref
               " holds it whole; (count " ref "), subs, get-in/filter, or "
               "paged take/drop. To get less next time: a :find aggregate, "
-              "a tighter :where, or pull fewer attrs."))
-       s))))
+              "a tighter :where, or pull fewer attrs."))))))
 
 (def unverified-narration-marker
   "What a model-authored result-claim comment is rewritten to in the
@@ -632,9 +649,14 @@
      err        :seon.eval/error
      err-data   :seon.eval/error-data
      eid        :seon.eval/id
-     narr       :seon.eval/narration}
+     narr       :seon.eval/narration
+     full?      :seon.render/full?}
     prior?]
    (let [envelope    (read-error-envelope err-data)
+         ;; `:seon.render/full?` (the no-clip opt-out, pinned on this eval
+         ;; row) renders every authored component WHOLE past its cap. Absent
+         ;; → false → byte-identical to today's clipped render.
+         full?       (boolean full?)
          ;; Echoed source + stdout + error/guidance bodies cap at the
          ;; smaller `eval-render-cap` (1500); only the citable result
          ;; body below gets `result-body-render-cap` (16384).
@@ -648,11 +670,11 @@
          ;; The form, verbatim (or repaired) — neutralized for any inline
          ;; result-claim, capped. Omitted for a comment-only row.
          form-ln     (when-not comment-only?
-                       (cap-result (neutralize-result-claims src) limit))
+                       (cap-result (neutralize-result-claims src) limit full?))
          ;; Captured println/prn output — shown above the value like a
          ;; real REPL prints before returning. Bounded by the same cap.
          out-ln      (when (and (string? out) (not (str/blank? out)))
-                       (cap-result (str/trimr out) limit))
+                       (cap-result (str/trimr out) limit full?))
          ;; The result / error body, rendered as REPL output.
          result-ln
          (cond
@@ -672,11 +694,13 @@
            (let [body-cap result-body-render-cap
                  raw     (str (seval/sanitize-result-edn (or res "nil")))
                  full    (count raw)
-                 clipped? (> full body-cap)
+                 ;; `full?` (the no-clip opt-out) renders the body WHOLE, so
+                 ;; the `(N of M)` partial-handle marker must NOT fire.
+                 clipped? (and (> full body-cap) (not full?))
                  ;; The value body — clipped (with the size guide) when
-                 ;; huge. The guide carries its own `\n;` lines (a
-                 ;; result/<id> dig hint), shown below the `=>` line.
-                 v       (cap-result-body raw body-cap eid)
+                 ;; huge, unless `full?` pins it whole. The guide carries its
+                 ;; own `\n;` lines (a result/<id> dig hint), below the `=>` line.
+                 v       (cap-result-body raw body-cap eid full?)
                  ;; The live VAR HANDLE rides the `=>` line as a trailing
                  ;; `; result/<id>`: the agent references `result/<id>`
                  ;; directly. Prior-session rows carry NO handle (their
@@ -696,7 +720,7 @@
 
            (einstrument/instrument-error? envelope)
            (cap-result-body
-             (error-lines (einstrument/render-malli-error envelope)) limit eid)
+             (error-lines (einstrument/render-malli-error envelope)) limit eid full?)
 
            (and (string? err) (not (str/blank? err)))
            ;; `:seon.eval/error` is stored pre-rendered + crystal-clear
@@ -1696,10 +1720,11 @@
                        embedding KNN, PREFETCHED in run-turn! + read from
                        the per-turn stash. VOLATILE half; blank when off
                        or no hits (dropped)
-     9. :inventory   — the cheap stored-data map: one line per stored
-                       KIND with each attr's live row count (user-domain
-                       first); vanishes when the store holds no
-                       post-bootstrap data
+     9. :findings    — the stored-finding CONTENT surface (claim/answer
+                       text + provenance of recent user-domain rows). The
+                       full one-line-per-namespace :inventory overview is
+                       DISABLED from the seed (returns with the #38 rework);
+                       its fn stays callable via (db/store-inventory)
     10. :transcript  — the comment-block REPL: the masthead, PAST turns,
                        and the folded live readline — the whole bottom of
                        the context (absorbs the old prompt/turns/status
@@ -1747,8 +1772,11 @@
     ;; needs to consult-before-researching.
     {:seon.agent.ctx/name :findings     :seon.agent.ctx/priority 97
      :seon.render/ai 'seon.agent.ctx.findings/findings-block}
-    {:seon.agent.ctx/name :inventory    :seon.agent.ctx/priority 97
-     :seon.render/ai 'seon.agent.ctx.inventory/inventory-block}
+    ;; :inventory (the full one-line-per-namespace stored-data overview,
+    ;; seon.agent.ctx.inventory/inventory-block) is DISABLED from the seed —
+    ;; the :findings block already surfaces recent stored rows. The fn stays
+    ;; callable on demand (db/store-inventory); the always-on overview
+    ;; returns with the #38 inventory rework.
     ;; The transcript is the WHOLE bottom of the context (priority 100,
     ;; LAST): the comment-block REPL with the masthead at its head and the
     ;; folded live readline at its very end — it ABSORBS the prompt + turns
