@@ -40,9 +40,9 @@ the implementation body and the deep prose drop away.
 
 The hard constraint this design answers: **bare signatures drove 0× toolkit
 adoption** (the render-prominence law, [[toolkit]]). Cards are NOT bare
-signatures — they carry the full data model, the typed contract, and (where real
-usage exists) a runnable example. The hypothesis is that THAT is enough where
-signatures starved. It is validated by a live drive, not by inspection (see
+signatures — they carry the full `register!` data model and the typed
+`:malli/schema` contract for every verb. The hypothesis is that THAT is enough
+where signatures starved. It is validated by a live drive, not by inspection (see
 "Validation").
 
 ## What the audit found
@@ -119,13 +119,11 @@ Per namespace, inside the standard `;;; ┌─ / └─` demarcation:
   `:malli/schema` metadata IS the I/O contract (input → output schema names,
   resolvable in the `register!` block above), so no separate `in → out` summary
   and no fake call-shaped `(request-name)`.
-- **Worked example — OPTIONAL, runnable only.** For a verb with real successful
-  usage, one harvested call + its real response from the eval log
-  (`:seon.eval/source` + `:seon.eval/result-edn`, `:seon.eval/ok? true`). NEVER a
-  Malli-generated value: `mg/generate` produces structurally-valid,
-  semantically-poison examples (`:from 3`, `ok? false` as the sample) that teach
-  the agent wrong. No example is better than a fake one. Fallback: a
-  hand-authored `:seon.fn/example` if present; otherwise omit.
+- **No examples.** Considered and DROPPED (owner, 2026-07-01): real eval examples
+  already live in the transcript, and harvesting them into the CACHED namespace
+  block re-flows every turn → busts the prompt cache (cache-stability law). No
+  eval-log harvest, no Malli-generated samples (they're semantically poison —
+  `:from 3`, `ok? false`). The card is static: `register!` block + condensed heads.
 
 Worked card (`my.kb`, ~664 tokens vs 3719 full):
 
@@ -142,27 +140,27 @@ Worked card (`my.kb`, ~664 tokens vs 3719 full):
 (defn remember "Store one verified claim as a durable, provenance-stamped fact." {:malli/schema [:=> [:cat ::remember-request] ::remember-response]} [{::keys [claim source confidence]}] …)
 (defn source-stats "Aggregate the KB toward a question — counts, ratings, topics." {:malli/schema [:=> :cat ::source-summary]} [] …)
 ;; … (12 more)
-
-; example (real, from usage):
-(my.kb/remember {:my.kb/claim "Project Zephyr launched in March 2021."
-                 :my.kb/source "user message khE-2607011220"
-                 :my.kb/confidence :verified})
-;=> {:my.kb/id 2083}
 ;;; └─ end my.kb ─
 ```
 
 ## The rendering functions (code workstream)
 
-The compact/full split is expressed in the **config-driven-agent-init** model as a
-per-namespace render ASPECT, not a standalone detail enum — see decision 14 +
-[[config-driven-agent-init-namespaces-additions-2026-07-01]]. No parallel
-renderer, no new mechanism.
+The compact/full split is expressed in the **config-driven-agent-init** model as
+datahike-native **attribute-presence sets** on the namespaces block entity — NOT a
+map-of value and NOT a density enum (datahike has no map value type; a `{ns → set}`
+would only serialize, killing per-ns reactivity). See decision 13/16 +
+[[config-driven-agent-init-namespaces-additions-2026-07-01]]. This extends the
+existing `:seon.agent.ctx/render-namespaces` (`[:vector :keyword]`) pattern.
 
-- **`:seon.agent.ctx.namespaces/aspect`** gains `:compact` (a DENSITY aspect
-  alongside `:source`/`:signatures`) and `:example` (an ADDITIVE aspect). A ns
-  renders as a card when its aspect-set in `::render` contains `:compact`;
-  `#{:compact :example}` adds the harvested example. (The on-demand
-  `render-namespace` drill keeps its own `:seon.render/detail` for a full pull.)
+- **Two cardinality-many attrs on the namespaces block** (colocated in
+  `seon.agent.ctx.namespaces`): `::full-source` (`[:vector :seon.ns/name]`,
+  default `[]`) and `::with-tests` (same). **Presence = config; compact = absence.**
+  A ns in `::full-source` renders full; in neither → the card; in `::with-tests` →
+  its tests append (composes with either density). No `:compact` token exists, so
+  the `#{:full :compact}` conflict is unrepresentable. Current ns = two scalar
+  bools (`::current-full?`/`::current-tests?`, default true). Reify to
+  component-ref'd entry entities ONLY when a per-ns facet carries a VALUE (token
+  cap, weight) — not for booleans.
 - **`render-one-ns-compact`** (`seon.agent.ctx`) builds the card from indexed rows
   (`:seon.schema/_ns`, `:seon.fn/_ns` with `:seon.fn/spec`/`:seon.fn/doc`/
   `:seon.fn/arglists`) — NEVER a file read (code-as-data: the boot indexer is the
@@ -171,18 +169,14 @@ renderer, no new mechanism.
     convention; the doc-lint enforces it. No clip is needed once the corpus
     complies (interim: soft-clip at 78 with `…`).
   - `::` abbreviation for keys whose namespace is the rendered ns.
-  - Example harvest is a bounded query for the most-recent `:seon.eval/ok? true`
-    row whose `:seon.eval/source` calls the verb; skipped when none (see Open
-    questions on churn/leakage).
-- **The namespaces section** (`seon.agent.ctx.namespaces/namespaces-block`)
-  chooses the detail per ns: exemplars + current ns + third-party render `:full`;
-  the broadened curated set renders `:compact`. Selection stays config-driven
-  (`seon.config/namespaces-policy`, #42) — the new policy axis is
-  full-vs-compact per ns, not a new selection mechanism.
+- **The namespaces section** (`seon.agent.ctx.namespaces/namespaces-block`) reads
+  the two presence-sets (`db/pull` → membership check per ns): in `::full-source`
+  → full; else → card; `::with-tests` appends tests. Selection of WHICH nses render
+  stays config-driven (#42); this adds the full-vs-compact axis as presence sets.
 - **On-demand expansion.** `render-namespace` / `render-member` already give the
-  agent a `:full` drill of any compact ns or one of its fns. A compact card is
-  never a dead end — the full source (with all the multiline prose) is one call
-  away. This is the "expand to see tips/tricks/fix-comments" affordance.
+  agent a full drill of any compact ns or one of its fns. A compact card is never
+  a dead end — the full source (with all the multiline prose) is one call away.
+  This is the "expand to see tips/tricks/fix-comments" affordance.
 
 ## Enforcement
 
@@ -216,21 +210,28 @@ cleaned.
 
 - KEEP `register!` calls in the card (the ~5% buys pattern reinforcement + a real
   data model). [[data-model]].
-- Examples are HARVESTED (real, runnable) or omitted — never Malli-generated.
+- **NO examples** (owner, 2026-07-01) — eval examples live in the transcript;
+  harvesting into the cached block busts the prompt cache. No harvest, no
+  Malli-generated samples.
 - Schemas are global; the card groups a schema under the ns of its KEYWORD
   (`(namespace k)`), which is already how `:seon.schema/ns` is derived — display
   is decoupled from registration site, so the agent may `register!` anywhere.
-- Compact vs full is ONE enum value on `:seon.render/detail`, not a new renderer.
+- Compact vs full is **attribute-presence** (a ns in `::full-source` or not), NOT
+  a map-of value or a density enum — datahike has no map type, so the presence-set
+  is the native + reactive shape (extends `:seon.agent.ctx/render-namespaces`).
+- `:full-source` (not `:source`) is the name for the verbose density; `:with-tests`
+  the additive one. No `:compact`/`:aspect`/`:example`/`:signatures` tokens.
 
 ## Open questions
 
-- **Example churn.** Harvested examples change as agents work → cache-busts the
-  card. Pin a stable canonical (oldest-good / hand-blessed) vs accept churn on
-  the current agent's own ns only.
-- **Cross-cluster leakage.** A harvested example carries real user data. Keep
-  harvested examples strictly within the owning cluster; hand-author examples for
-  anything promoted to a shared exemplar.
+- **Include-set axis.** Presence in `::full-source` sets DETAIL, not inclusion.
+  Whether "compact-everywhere for the long tail" broadens the include set to all
+  indexed nses (true coverage) or stays a curated set — an owner-gated flip AFTER
+  the live A/B drive, decided with the config lane.
 - **`register!` map noise.** `[::k ::k]` entries could collapse to `{::k ::k? …}`
   (bare keys, `?` = optional) to shrink the block ~40% — but then it is no longer
   literal runnable `register!`. Default: keep verbatim; revisit if the block
   dominates a card.
+- **Reify-when-value-carrying.** Presence-sets are right for boolean facets; the
+  day a per-ns facet carries a VALUE (token cap, weight), promote to
+  component-ref'd entry entities. Tracked so the shape isn't locked in.
