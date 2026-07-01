@@ -200,7 +200,24 @@
           result (md/format-violations
                   {::md/violations many-violations
                    ::md/max-length 200})]
-      (is (<= (count (::md/formatted result)) 215))))) ; some slack for truncation marker
+      (is (<= (count (::md/formatted result)) 200)))) ; must never exceed max-length
+
+  (testing "truncation never exceeds max-length at the boundary (off-by-one regression)"
+    ; The elision suffix "\n... (truncated)" is 16 chars. The old code
+    ; subtracted a hardcoded 15, so truncated output overshot max-length by 1.
+    ; Sweep a range of max-lengths around the boundary; every one must hold.
+    (let [many-violations (mapv (fn [i]
+                                  {::md/rule :trailing-whitespace
+                                   ::md/severity :warning
+                                   ::md/line i
+                                   ::md/message (str "Violation on line " i)})
+                                (range 1 200))]
+      (doseq [max-len (range 20 300)]
+        (let [out (::md/formatted (md/format-violations
+                                   {::md/violations many-violations
+                                    ::md/max-length max-len}))]
+          (is (<= (count out) max-len)
+              (str "output length " (count out) " exceeded max-length " max-len)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fix Tests

@@ -284,3 +284,6 @@
 [submodule "reference-code/SimpleMem"]
 	path = reference-code/SimpleMem
 	url = https://github.com/aiming-lab/SimpleMem.git
+[submodule "reference-code/aero"]
+	path = reference-code/aero
+	url = https://github.com/juxt/aero.git

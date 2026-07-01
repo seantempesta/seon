@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: verified
 tags: [issue, cleanup]
 severity: cleanup
 ---
