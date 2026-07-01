@@ -41,7 +41,8 @@
     [seon.config :as config]
     [seon.db :as db]
     [seon.derive :as derive]
-    [seon.render :as render]))
+    [seon.render :as render]
+    [seon.schema :as schema]))
 
 (def transcript-token-cap
   "Total token cap for the transcript section (~6k tokens). RETAINED as the
@@ -50,6 +51,48 @@
    context; the sliding window lands later). Measured in TOKENS, not chars.
    The knob lives in `seon.config` (SEON_RENDER_TRANSCRIPT_TOKEN_CAP)."
   (config/transcript-token-cap))
+
+;; ============================================================
+;; Config-driven agent-init CP-1 — transcript block config attrs. Tiers
+;; and decay levels carry a VALUE per element → REIFIED component entities
+;; (decision 22b), NOT `[:vector [:map …]]` blobs. Each tier/level becomes
+;; its own entity, `:db/isComponent`-ref'd off the transcript block
+;; (cascade-delete), queryable per-element. Nothing reads these yet
+;; (purely additive).
+;; ============================================================
+
+;; The reified per-element leaf value shapes (register-once, decision 5).
+;; MUST precede the ::tiers / ::result-decay refs (leaf-rule).
+(schema/register! ::from-turn        :int)
+(schema/register! ::to-turn          :int)
+(schema/register! ::token-cap        [:int {:min 0}])
+(schema/register! ::from-turn-offset [:int {:min 0}])
+
+(schema/register! ::tier             ; ONE eviction tier entity
+  [:map
+   [::from-turn                :int]
+   [::to-turn   {:optional true} :int]
+   [::token-cap [:int {:min 0}]]])
+(schema/register! ::decay-level      ; ONE eval-result decay level entity
+  [:map
+   [::from-turn-offset [:int {:min 0}]]
+   [::token-cap        [:int {:min 0}]]])
+
+;; Component refs off the transcript block → each tier/level is its own
+;; entity, queryable per-element, cascade-deleted with the block.
+(schema/register! ::tiers        [:vector {:seon.db/component true :default []} :seon.db/ref]) ; of ::tier entities
+;; OWNER REFINEMENT: v1 default = a SINGLE parity-preserving level at
+;; today's fixed 16384 (NOT the 3-level [0→16384,2→1500,5→200] schedule —
+;; that multi-level schedule is registered-as-valid but turned on later as
+;; a separate A/B; v1 default = parity).
+(schema/register! ::result-decay [:vector {:seon.db/component true
+                                           :default [{::from-turn-offset 0 ::token-cap 16384}]}
+                                  :seon.db/ref]) ; of ::decay-level entities
+
+;; scalars on the transcript block
+(schema/register! ::turns-retained [:int {:default 8 :min 0}])
+(schema/register! ::summary-head?  [:boolean {:default true}])
+(schema/register! ::cite-card?     [:boolean {:default true}]) ; the fabrication guard (#63)
 
 ;; ------------------------------------------------------------
 ;; Masthead — the transcript's in-band opener, rendered every turn as the

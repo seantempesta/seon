@@ -1290,6 +1290,42 @@
     [seon.db :as db]
     [seon.agent.todo :as todo]])
 
+;; ============================================================
+;; Config-driven agent-init CP-1 — home-ns wiring + toolkit (agent-level
+;; attrs on the agent entity). Nothing reads these yet (purely additive).
+;; ============================================================
+
+;; SHARED shape, register-once (decision 5): one `(require …)`-style spec —
+;; `[ns :as alias]` or `[ns :refer [verbs…]]`.
+(schema/register! ::require-spec
+  [:cat :symbol [:enum :as :refer] [:or :symbol [:vector :symbol]]])
+
+;; home-requires: set-once, read WHOLE by setup-agent-ns!, never queried
+;; per-element → the ONE decision-22(c) serialized-blob case. The spec's
+;; `[:vector ::require-spec]` does NOT bridge — the seon.db bridge maps a
+;; `:vector`'s CHILD to a datahike column, and `::require-spec` (a `:cat`)
+;; has no column type, so it hard-rejects (`:seon.db/unbridgeable-attrs`).
+;; The EDN-blob path the spec names ("stored as a pr-str'd EDN string") is
+;; the bridge's MIXED-`:or` branch (db/internal `form->datahike-value-type`
+;; `:or`) — the SAME mechanism `:seon.render.live-tile/content` /
+;; `:seon.render/ai` use. So this is a mixed `:or` (the require-spec vector
+;; arm + a scalar `:symbol` arm) → `:db.type/string` EDN, decoded on read
+;; via `seon.db/decode-edn-value`. Default = the live [[home-ns-require-specs]]
+;; list (verbatim).
+(schema/register! ::home-requires
+  [:or {:default '[[seon.agent.message :as message]
+                   [seon.agent :as agent]
+                   [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
+                   [seon.schema :as schema]
+                   [seon.db :as db]
+                   [seon.agent.todo :as todo]]}
+   [:vector ::require-spec]
+   :symbol])
+
+;; toolkit: a flat keyword SET → cardinality-many presence attr (decision 22a).
+(schema/register! ::toolkit
+  [:vector {:default [:my.ui :my.data :my.tile :my.kb]} :keyword])
+
 (defn- home-ns-alias-names
   "Comma-joined `:as` alias names from [[home-ns-require-specs]]
    (e.g. \"message, agent, schema, db, todo\") — the short prefixes an

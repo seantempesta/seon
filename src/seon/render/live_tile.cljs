@@ -312,7 +312,12 @@
 ;; via `seon.db/decode-edn-value`. `:seon.render/html` references
 ;; this shape (deliberate uniformity — agents already know that
 ;; vocabulary).
-(schema/register! ::content [:or :symbol ::hiccup])
+;; Widened (config-driven agent-init CP-1): add `:none` (no canvas) + a
+;; `:default :none` so an unconfigured block carries no tile. The existing
+;; qualified-fn-`:symbol` and literal-`::hiccup` arms are PRESERVED. This
+;; REPLACES the hardcoded root branch (client.cljs) — root's block carries
+;; `::content 'seon.render.system/system-view` via root-context.
+(schema/register! ::content [:or {:default :none} [:enum :none] :symbol ::hiccup])
 
 ;; Where the wired value came from — the tile's provenance. Rendered
 ;; into the agent's awareness section header so the agent always sees

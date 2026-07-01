@@ -124,6 +124,20 @@
 (schema/register! :seon.agent.ctx/render-namespaces [:vector :keyword])
 
 ;; ============================================================
+;; Config-driven agent-init CP-1 — agent-level composer attrs. The
+;; capability gate spans search/fs/http (no single provider ns owns it,
+;; so it lives here in the composer). `::escape-clipping?` (#43) and
+;; `::cache-breakpoint` (replaces the stable-priority-max const) are
+;; agent-level for v1. Flat keyword set → cardinality-many presence attr.
+;; Nothing reads these yet (purely additive).
+;; ============================================================
+
+(schema/register! ::capability   [:enum :grep :exec :http])          ; register-once enum
+(schema/register! ::capabilities [:vector {:default [:grep]} ::capability])
+(schema/register! ::escape-clipping? [:boolean {:default true}])     ; #43 — blocks render FULL
+(schema/register! ::cache-breakpoint [:int {:default 20 :min 0}])    ; priority ≤ this = cached prefix
+
+;; ============================================================
 ;; File-section utility — the ONE mechanism for turning an on-disk
 ;; markdown file into a renderable context section. GENERIC: it takes a
 ;; file PATH (not soul, not agents — any `.md`), returns a section when

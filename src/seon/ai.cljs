@@ -228,6 +228,26 @@
    [::env ::row]])
 (schema/register! ::sync-response [:map [::synced? ::synced?]])
 
+;; ============================================================
+;; PER-AGENT LLM overrides (config-driven-agent-init CP-1). Each is an
+;; agent-entity attr overriding the global :seon.ai/config row for that
+;; ONE agent; `:inherit` (the default) resolves to the global row. The
+;; value arm REUSES the existing global-row value shape by keyword (the
+;; register-once rule) — `::provider`/`::model`/`::temperature`/
+;; `::max-tokens`/`::thinking`. `::agent-max-retries` replaces the
+;; SEON_AI_MAX_RETRIES env read (seon.agent.turn). Nothing reads these
+;; yet (CP-1 is purely additive).
+;; ============================================================
+
+(schema/register! ::agent-provider    [:or {:default :inherit} [:enum :inherit] ::provider])
+(schema/register! ::agent-model       [:or {:default :inherit} [:enum :inherit] ::model])
+(schema/register! ::agent-temperature [:or {:default :inherit} [:enum :inherit] ::temperature])
+(schema/register! ::agent-max-tokens  [:or {:default :inherit} [:enum :inherit] ::max-tokens])  ; OUTPUT cap
+(schema/register! ::agent-thinking    [:or {:default :inherit} [:enum :inherit] ::thinking])
+(schema/register! ::agent-max-retries [:or {:default :inherit} [:enum :inherit] [:int {:min 0}]])
+;; PARKED (decision 21): ::agent-context-window — a NEW input budget,
+;; nothing enforces it today. Deferred to phase 2.
+
 ;; The attr order is the sync + row-read iteration order.
 (def ^:private config-attrs
   [::provider ::model ::temperature ::max-tokens ::thinking ::timeout-ms

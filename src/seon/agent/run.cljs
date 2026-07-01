@@ -101,6 +101,16 @@
   (* 10 60 1000))
 
 ;; ============================================================
+;; Config-driven agent-init CP-1 — run-bound SEED attrs (agent-level).
+;; These seed a run's own live bumpable bounds; nothing reads them yet
+;; (purely additive). ::default-deadline-ms default = the live
+;; [[default-deadline-ms]] const (600000 = 10 min).
+;; ============================================================
+
+(schema/register! ::default-turn-limit  [:int {:default 20 :min 1}])
+(schema/register! ::default-deadline-ms [:int {:default 600000 :min 1}])
+
+;; ============================================================
 ;; Process-run set — the run-ids THIS pod process opened. `defonce` so a
 ;; hot reload (same process) keeps it; empty on a fresh Node boot. The
 ;; transcript marks evals from runs NOT in this set as `::prior?` (their

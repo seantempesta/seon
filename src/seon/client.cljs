@@ -1959,6 +1959,9 @@
 (schema/register! ::mint?         :boolean)
 (schema/register! ::llm-fn        fn?)
 (schema/register! ::compile-state :any)
+;; Config-driven agent-init CP-1 — arm the message wake trigger at init
+;; (agent-level). Nothing reads it yet (purely additive).
+(schema/register! ::wake? [:boolean {:default true}])
 (schema/register! ::init-agent-request
   [:map
    [:seon.agent/id      :seon.agent/id]

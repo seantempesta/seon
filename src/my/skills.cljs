@@ -51,6 +51,12 @@
 (schema/register! :my.skills/description [:string {:min 1}])   ; the catalog line; "Use when…" trigger
 (schema/register! :my.skills/body        [:string {:min 1}])   ; inline body, ONLY for agent-authored skills
 
+;; Config-driven agent-init CP-1 — WHICH skill bodies are always-on
+;; (agent-level presence-set, decision 22a). The boot loader will transact
+;; a :skill/<name> block per named skill; nothing reads this yet (purely
+;; additive). Value type = the existing `:my.skills/name` handle.
+(schema/register! ::load [:vector {:default [:repl]} :my.skills/name])
+
 ;; Verb/render value shapes — map-out results + the derived catalog entry.
 (schema/register! ::loaded? :boolean)
 (schema/register! ::ok?     :boolean)
