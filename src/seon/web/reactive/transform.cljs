@@ -57,8 +57,10 @@
 ;; ============================================================
 
 (defn encode-args
-  "Transit-JSON encode the render-time `args` (a sequence) to a string for
-   the `/call` URL. The caller URL-encodes the result."
+  "Transit-JSON encode the render-time `args` to a URL string.
+
+   The `args` sequence encodes for the `/call` URL. The caller URL-encodes
+   the result."
   {:malli/schema [:=> [:catn [::args [:sequential :any]]] :string]}
   [args]
   (t/write (t/writer :json) (vec args)))
@@ -88,8 +90,10 @@
     :else        false))                       ; symbol, seq/list, TaggedValue, fn, obj
 
 (defn decode-args
-  "Inverse of [[encode-args]] — read a transit-JSON `s` (the already-URL-decoded
-   query value, third-party input) back to the args vector. DATA-ONLY: the
+  "Inverse of [[encode-args]] — decode a transit-JSON string to args.
+
+   Reads the already-URL-decoded `s` (third-party input) back to the args
+   vector. DATA-ONLY: the
    decoded value must be a VECTOR whose elements are pure data
    ([[data-value?]]). A non-vector, a symbol, a list/seq, or a tagged value is
    REFUSED with an `ex-info` (`:seon.error/kind :user-input`) BEFORE it can
@@ -201,7 +205,9 @@
        (map? (second form))))
 
 (defn transform-hiccup
-  "Postwalk `hiccup`, rewriting agent fn-call / fn-ref handler slots into
+  "Rewrite agent handler slots in `hiccup` into Datastar attrs.
+
+   Postwalks `hiccup`, rewriting agent fn-call / fn-ref handler slots into
    standard Datastar `@post('/call?…')` attributes. Bare handler symbols are
    qualified to `ns-sym` (the authoring namespace). Elements without an attr
    map, and attrs that aren't fn-call/fn-ref handler slots, are untouched —

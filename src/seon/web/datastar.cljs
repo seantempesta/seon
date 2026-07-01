@@ -194,17 +194,23 @@
   (db/listen! {:seon.db/key ::world :seon.db/handler on-tx})
   (reset! !installed? true))
 
-(defn uninstall! []
+(defn uninstall!
+  "Remove the world tx-listener."
+  []
   (db/unlisten! {:seon.db/key ::world})
   (reset! !installed? false))
 
 (defn- ensure-installed! []
   (when-not @!installed? (install!)))
 
-(defn ^:dev/before-load before-reload []
+(defn ^:dev/before-load before-reload
+  "Uninstall the world tx-listener before a hot reload."
+  []
   (try (uninstall!) (catch :default _ nil)))
 
-(defn ^:dev/after-load after-reload []
+(defn ^:dev/after-load after-reload
+  "Reinstall the world tx-listener after a hot reload."
+  []
   (try (install!) (catch :default _ nil)))
 
 ;; ============================================================
@@ -529,7 +535,9 @@
           (.end res (agent-page-html id))))))
 
 (defn serve-root!
-  "Serve `/` — root's world (= the all-agents dashboard). `root = /`
+  "Serve `/` — root's world (the all-agents dashboard).
+
+   `root = /`
    (root-os-vision): `/` is the root agent's world, so it reuses the per-agent
    shim page bound to the literal id \"root\". The page's feed effect opens
    `/agent/root/feed` (already seeded), whose `world-layout` renders root's
@@ -541,10 +549,12 @@
   (serve-agent-page! (assoc-in r [:path-params :id] "root")))
 
 (defn open-agent-feed!
-  "Open the per-agent world gzip feed (the seeded :seon.route/agent-feed
-   handler). A Ring handler: takes the Ring request `r`, self-extracts
-   node-req/node-res + the `{id}` path-param. Lazily installs the tx-listener
-   (idempotent). Invalid ids 404. Public — db->routes resolves its symbol.
+  "Open the per-agent world gzip feed.
+
+   The seeded :seon.route/agent-feed handler. A Ring handler: takes the
+   Ring request `r`, self-extracts node-req/node-res + the `{id}` path-param.
+   Lazily installs the tx-listener (idempotent). Invalid ids 404. Public —
+   db->routes resolves its symbol.
 
    #18 — historical time-travel: an optional `?t=<tx-id>` binds the view to
    `db-as-of-t` instead of the live db. With `t`, the feed is the SAME
@@ -567,7 +577,9 @@
           (.end res "invalid agent id")))))
 
 (defn handle!
-  "Dispatch a /world route — the seeded :seon.route/world (shim page) +
+  "Dispatch a /world route (shim page or gzip SSE feed).
+
+   The seeded :seon.route/world (shim page) +
    :seon.route/world-feed (gzip SSE feed) BOTH resolve here, routing on the
    path internally. A Ring handler: takes the Ring request `r`, self-extracts
    node-req/node-res/path. Lazily installs the tx-listener on first hit

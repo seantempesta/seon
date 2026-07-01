@@ -1055,10 +1055,11 @@
       (schedule-push! aid))))
 
 (defn install!
-  "Install the debug tx-listener. Idempotent — re-installing replaces the
-   prior handler. Also kicks off the brand env sync: the SEON_BRAND_* env
-   vars own the `:seon.web.brand` row, and install! is the web surface's
-   boot hook (called after boot-seed! with the root conn bound).
+  "Install the debug tx-listener and kick off the brand env sync.
+
+   Idempotent — re-installing replaces the prior handler. The SEON_BRAND_*
+   env vars own the `:seon.web.brand` row, and install! is the web
+   surface's boot hook (called after boot-seed! with the root conn bound).
    Fire-and-forget — sync! never rejects and logs its own failures."
   []
   (brand/sync!)
@@ -1066,13 +1067,18 @@
                :seon.db/handler on-tx}))
 
 (defn uninstall!
+  "Remove the debug tx-listener."
   []
   (db/unlisten! {:seon.db/key ::debug}))
 
-(defn ^:dev/before-load before-reload []
+(defn ^:dev/before-load before-reload
+  "Uninstall the debug tx-listener before a hot reload."
+  []
   (try (uninstall!) (catch :default _ nil)))
 
-(defn ^:dev/after-load after-reload []
+(defn ^:dev/after-load after-reload
+  "Reinstall the debug tx-listener after a hot reload."
+  []
   (try (install!) (catch :default _ nil)))
 
 ;; ============================================================
@@ -1127,9 +1133,10 @@
         (log/error-console! "seon.web.debug" "data initial render failed" e)))))
 
 (defn debug-page!
-  "GET /agent/<id>/debug — the two-pane debug inspector. Guards a stale
-   `<id>` (no entity in this store) with a clean 404 page rather than a
-   500 out of `snapshot`'s lookup-ref pull."
+  "GET /agent/<id>/debug — render the two-pane debug inspector.
+
+   Guards a stale `<id>` (no entity in this store) with a clean 404 page
+   rather than a 500 out of `snapshot`'s lookup-ref pull."
   [^js _req ^js res agent-id]
   (if (str/blank? agent-id)
     (write-status! res 404 "text/plain; charset=utf-8" "missing agent id")
@@ -1139,9 +1146,10 @@
                      (debug-shell agent-id (snapshot agent-id))))))
 
 (defn debug-sse!
-  "GET /agent/<id>/debug/sse — the debug view's SSE stream. A stale `<id>`
-   404s cleanly (never registers a connection for a nonexistent agent —
-   every later tx would re-render it and throw)."
+  "GET /agent/<id>/debug/sse — open the debug view's SSE stream.
+
+   A stale `<id>` 404s cleanly (never registers a connection for a
+   nonexistent agent — every later tx would re-render it and throw)."
   [^js req ^js res agent-id]
   (if (or (str/blank? agent-id) (not (agent-exists? agent-id)))
     (write-status! res 404 "text/plain; charset=utf-8"

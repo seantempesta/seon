@@ -61,8 +61,9 @@
 ;; ============================================================
 
 (defn resolve-owning-agent
-  "The agent id that OWNS `fn-sym`, via namespace-as-route, or nil. The
-   namespace must be `my.agent.<id>` (the canonical `seon.agent.ctx/home-ns`
+  "The agent id that OWNS `fn-sym`, via namespace-as-route, or nil.
+
+   The namespace must be `my.agent.<id>` (the canonical `seon.agent.ctx/home-ns`
    mapping) AND a live agent `<id>` must exist (`:seon.agent/id` row). Any
    other namespace — `fs`, `seon.*`, a domain ns, a dead/absent agent —
    resolves to nil, and the caller refuses the call."
@@ -80,11 +81,12 @@
           id)))))
 
 (defn granted-fn?
-  "True when `fn-sym` is a registered `:seon.fn` whose owning ns is
-   `agent-id`'s home ns — a fn the agent itself defined. This is the granted
-   surface for `/call`: an interactive handler must be one of the agent's own
-   fns. Refuses `fs`/core/cross-agent symbols (no matching `:seon.fn` row in
-   the home ns)."
+  "Whether `fn-sym` is a `:seon.fn` the agent itself defined.
+
+   True when `fn-sym` is a registered `:seon.fn` whose owning ns is
+   `agent-id`'s home ns. This is the granted surface for `/call`: an
+   interactive handler must be one of the agent's own fns. Refuses
+   `fs`/core/cross-agent symbols (no matching `:seon.fn` row in the home ns)."
   {:malli/schema [:=> [:catn [::db :seon.db/db] [::agent-id :string] [::fn-sym :symbol]]
                   :boolean]}
   [db agent-id fn-sym]
@@ -96,8 +98,9 @@
                    db (str fn-sym) (keyword (str (ctx/home-ns agent-id)))))))
 
 (defn capability-check
-  "Resolve + gate `fn-sym` against `db`. Returns
-   `{::agent-id <id>}` when the fn is granted to its owning
+  "Resolve and gate `fn-sym` against `db`.
+
+   Returns `{::agent-id <id>}` when the fn is granted to its owning
    agent, else `{::refused <reason>}`. Never invokes anything —
    the refusal is the security boundary, evaluated before any execution."
   {:malli/schema [:=> [:catn [::db :seon.db/db] [::fn-sym :symbol]] :map]}
@@ -124,8 +127,10 @@
   (or (ex-message e) (str e)))
 
 (defn ^:async invoke!
-  "Invoke the (already capability-checked) granted `fn-sym` for `agent-id`
-   with `args` by RESOLVE-AND-APPLY: resolve the symbol to its compiled runtime
+  "Invoke the granted `fn-sym` for `agent-id` via resolve-and-apply.
+
+   Called with `args` (already capability-checked). RESOLVE-AND-APPLY:
+   resolve the symbol to its compiled runtime
    value (`seon.eval/lookup-value`) and `(apply f args)` with the args passed
    as VALUES — never printed into source, never re-read as code, so a
    list/symbol arg is inert. Runs inside the agent's `with-agent` +
@@ -201,8 +206,10 @@
     (catch :default _ {})))
 
 (defn ^:async handle!
-  "POST /call — parse the call descriptor, capability-check, and (only if
-   granted) invoke. The fn symbol rides `?fn=`; the fn-CALL case carries its
+  "POST /call — capability-check a call descriptor and invoke if granted.
+
+   Parses the call descriptor, capability-checks, and (only if
+   granted) invokes. The fn symbol rides `?fn=`; the fn-CALL case carries its
    render-time args in `?args=` (transit, decoded DATA-ONLY), the fn-REF case
    takes the POST body's Datastar signals as a single map argument. Responses:
    200 `{ok? true}` on success; 403 with the refusal reason when the capability

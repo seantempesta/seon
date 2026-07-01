@@ -68,8 +68,9 @@
   !sse-connections (atom []))
 
 (defn open-sse-connections
-  "Public accessor — returns the current vector of open SSE
-   connections. A-6 will close over this via `seon.db/listen!`."
+  "The current vector of open SSE connections.
+
+   A-6 will close over this via `seon.db/listen!`."
   []
   @!sse-connections)
 
@@ -93,10 +94,11 @@
 (defonce ^:private !create-in-flight (atom false))
 
 (defn set-create-agent-fn!
-  "Inject the agent-creation closure (seon.client/start-agent! with the
-   pod's current llm-fn). Called at namespace-load time from
-   seon.client — re-runs on hot reload so the closure tracks reloaded
-   code."
+  "Inject the agent-creation closure from seon.client.
+
+   The injected fn is seon.client/start-agent! with the pod's current
+   llm-fn. Called at namespace-load time from seon.client — re-runs on hot
+   reload so the closure tracks reloaded code."
   {:malli/schema [:=> [:cat fn?] :nil]}
   [f]
   (reset! !create-agent-fn f)
@@ -161,10 +163,12 @@
 ;; ============================================================
 
 (defn serve-root!
-  "GET / — 302 to the world roster (/world). A Ring handler: takes the Ring
-   request `r`, self-extracts the node res. Resolved LATE by the router
-   (db->routes) from the seeded :seon.route/root datom, so it is PUBLIC — its
-   symbol must resolve via eval/lookup-value at request time."
+  "GET / — 302 redirect to the world roster (/world).
+
+   A Ring handler: takes the Ring request `r`, self-extracts the node res.
+   Resolved LATE by the router (db->routes) from the seeded :seon.route/root
+   datom, so it is PUBLIC — its symbol must resolve via eval/lookup-value at
+   request time."
   [r]
   ;; `/world` (seon.web.datastar) is the converged human surface — the live
   ;; agent roster + per-agent canvas/tiles/chat. The root just lands the user
@@ -693,7 +697,9 @@
   #{"127.0.0.1" "localhost" "[::1]" "::1"})
 
 (defn same-origin?
-  "True (ALLOW) when no `Origin` header is present (curl / the agent / any
+  "Whether the request passes the same-origin (CSRF) check.
+
+   True (ALLOW) when no `Origin` header is present (curl / the agent / any
    non-browser caller) OR the request is genuinely same-origin; false (REFUSE)
    when an Origin IS present and is cross-site — the CSRF case.
 
@@ -774,8 +780,9 @@
         (if (js/Number.isNaN n) 7890 n)))))
 
 (defn start!
-  "Start the HTTP+SSE server on a loopback port. Returns a Promise
-   resolving to:
+  "Start the HTTP+SSE server on a loopback port.
+
+   Returns a Promise resolving to:
      {:seon.web/port <int> :seon.web/port-file <abs-path>}
 
    Default port is 7890 (override via $SEON_PORT; set to 0 for

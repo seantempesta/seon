@@ -87,8 +87,9 @@
    ::theme   "SEON_BRAND_THEME"})
 
 (defn env-row
-  "The brand attrs present in the environment — `::row`-shaped, only
-   the keys whose SEON_BRAND_* var is set and non-blank (read through
+  "The brand attrs set in the environment, as a `::row` map.
+
+   Only the keys whose SEON_BRAND_* var is set and non-blank (read through
    `seon.config`, the ONE typed env surface)."
   {:malli/schema [:=> [:cat] ::row]}
   []
@@ -114,10 +115,12 @@
             [::name ::tagline ::theme]))))
 
 (defn info
-  "The effective brand — [[defaults]] overridden by whatever the brand
-   row in the store carries. Every key present. 0-arity reads the
-   ambient `seon.db/*conn*`; 1-arity takes an explicit db value.
-   Render fns call this at render time (reactive-context — no cache)."
+  "The effective brand — [[defaults]] overridden by the stored row.
+
+   The `:seon.web.brand` row in the store overrides [[defaults]]; every
+   key present. 0-arity reads the ambient `seon.db/*conn*`; 1-arity takes
+   an explicit db value. Render fns call this at render time
+   (reactive-context — no cache)."
   {:malli/schema [:function
                   [:=> [:cat] ::info]
                   [:=> [:catn [::db :seon.db/db-val]] ::info]]}
@@ -140,11 +143,12 @@
 (schema/register! ::css-path [:string {:min 1}])
 
 (defn css-text
-  "The downstream brand stylesheet's text, or nil. 0-arity reads the
-   path from SEON_BRAND_CSS (nil when unset); 1-arity takes an
-   explicit path (nil-safe). Read FRESH per call — a css edit shows on
-   the next page load. An unreadable file logs LOUDLY and returns nil:
-   the page renders unbranded rather than breaking."
+  "The downstream brand stylesheet's text, or nil when unset.
+
+   0-arity reads the path from SEON_BRAND_CSS (nil when unset); 1-arity
+   takes an explicit path (nil-safe). Read FRESH per call — a css edit
+   shows on the next page load. An unreadable file logs LOUDLY and returns
+   nil: the page renders unbranded rather than breaking."
   {:malli/schema [:function
                   [:=> [:cat] [:or :nil :string]]
                   [:=> [:catn [::css-path [:or :nil ::css-path]]]
@@ -163,8 +167,9 @@
          nil)))))
 
 (defn css-style-tag
-  "The downstream brand stylesheet as a raw `<style>…</style>` HTML
-   string, or \"\" when SEON_BRAND_CSS is unset/unreadable. The
+  "The brand stylesheet as a raw `<style>…</style>` HTML string.
+
+   Returns \"\" when SEON_BRAND_CSS is unset/unreadable. The
    raw-string sibling of the inspector's hiccup `brand-css-style` — both
    delegate to [[css-text]] — for surfaces (the datastar world shim) that
    build their <head> as a string rather than hiccup. Inlined AFTER
@@ -179,8 +184,9 @@
 ;; --- Boot sync — env owns the row.
 
 (defn sync-tx-data
-  "Tx-data syncing the brand row to the environment (pure — both
-   inputs are passed in). For each brand attr:
+  "Tx-data syncing the brand row to the environment (pure).
+
+   Both inputs are passed in. For each brand attr:
      - env has a value ≠ the row's        → assert (identity upsert);
      - env lacks it but the row has it    → retract;
      - equal, or absent on both           → nothing.
@@ -204,12 +210,12 @@
       (seq asserts) (conj (assoc asserts ::id "brand")))))
 
 (defn ^:async sync!
-  "Sync the brand row on the ambient `seon.db/*conn*` to the
-   SEON_BRAND_* env vars (see ns doc: env OWNS the row across boots).
-   Called from the inspector's `install!` at boot; idempotent — a
-   second call with the same env transacts nothing. Failures log
-   LOUDLY and resolve `{::synced? false}` — branding must never take
-   the boot down."
+  "Sync the brand row on the ambient conn to the SEON_BRAND_* env vars.
+
+   See ns doc: env OWNS the row across boots. Called from the inspector's
+   `install!` at boot; idempotent — a second call with the same env
+   transacts nothing. Failures log LOUDLY and resolve `{::synced? false}`
+   — branding must never take the boot down."
   {:malli/schema [:=> [:cat] ::sync-response]}
   []
   (try

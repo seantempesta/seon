@@ -198,12 +198,14 @@
           hijacked))))
 
 (defn db->routes
-  "Project the `:seon.route/*` datoms in `db` into a reitit route vector: GROUP
-   the route entities by `:seon.route/pattern`, nest per `:seon.route/method`,
-   wrap `:seon.route/handler` (the late-bound symbol) via [[route-handler]],
-   pass `:seon.route/middleware` keywords through to [[mw-registry]]. A pure
-   value of the route datoms — a nil/route-less `db` yields `[]` (the static
-   supplement keeps the pod serving until the seed lands)."
+  "Project the `:seon.route/*` datoms in `db` into a reitit route vector.
+
+   GROUP the route entities by `:seon.route/pattern`, nest per
+   `:seon.route/method`, wrap `:seon.route/handler` (the late-bound symbol)
+   via [[route-handler]], pass `:seon.route/middleware` keywords through to
+   [[mw-registry]]. A pure value of the route datoms — a nil/route-less `db`
+   yields `[]` (the static supplement keeps the pod serving until the seed
+   lands)."
   {:malli/schema [:=> [:catn [::db [:maybe :seon.db/db-val]]] [:vector :any]]}
   [db]
   (if-not db
@@ -311,19 +313,22 @@
       not-found)))
 
 (defn rebuild!
-  "Re-derive + cache the reitit ring-handler from the CURRENT route datoms (a
-   pure value of `:seon.route/*` in `@*conn*`) + the stored serve config.
-   Idempotent. Called post-seed by `seon.web.serve/start!` (the seeded routes
-   land AFTER the top-level install!, when *conn* was still nil) and, when Core
-   wires a route tx-listener, on every route tx."
+  "Re-derive and cache the reitit ring-handler from current route datoms.
+
+   A pure value of `:seon.route/*` in `@*conn*` plus the stored serve
+   config. Idempotent. Called post-seed by `seon.web.serve/start!` (the
+   seeded routes land AFTER the top-level install!, when *conn* was still
+   nil) and, when Core wires a route tx-listener, on every route tx."
   {:malli/schema [:=> [:cat] :nil]}
   []
   (reset! !ring-handler (build-ring-handler (some-> db/*conn* deref)))
   nil)
 
 (defn install!
-  "Inject serve's handler set + same-origin predicate, then (re)build the
-   cached reitit ring-handler from the current route datoms. serve calls this
+  "Inject serve's handlers and rebuild the cached reitit ring-handler.
+
+   Injects serve's handler set + same-origin predicate, then (re)builds the
+   cached router from the current route datoms. serve calls this
    at load (re-runs on hot-reload, so the cached router tracks reloaded
    handlers + the latest route datoms). `config` keys:
    `:seon.web.router/{sse static chat stop resume clear log create-agent
@@ -340,11 +345,13 @@
   nil)
 
 (defn handle-request
-  "The single node `(req, res)` entry point — `seon.web.serve`'s createServer
-   wrapper calls this. Builds a Ring request, runs the cached reitit
-   ring-handler, and either lets the handler keep the socket (the hijack
-   sentinel → write nothing) or writes the returned Ring response map. A
-   throw anywhere degrades to a 500 (never crash the single pod thread)."
+  "The single node `(req, res)` HTTP entry point.
+
+   `seon.web.serve`'s createServer wrapper calls this. Builds a Ring
+   request, runs the cached reitit ring-handler, and either lets the
+   handler keep the socket (the hijack sentinel → write nothing) or writes
+   the returned Ring response map. A throw anywhere degrades to a 500
+   (never crash the single pod thread)."
   [^js req ^js res]
   (try
     (let [rh (or @!ring-handler (build-ring-handler (some-> db/*conn* deref)))
