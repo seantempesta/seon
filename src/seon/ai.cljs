@@ -348,17 +348,11 @@
                     (when-some [v (get ent attr)] [attr v])))
             config-attrs))))
 
-(defn current
-  "The config row's set attrs — `::row`-shaped, possibly {}.
-
-   Adapters call this PER CALL (reactive-context — no cache) and apply their
-   own defaults for absent keys: explicit request opt > config row >
-   adapter default. 0-arity reads the ambient `seon.db/*conn*` and
-   NEVER throws ({} on the conn-not-up boot edge); 1-arity takes an
-   explicit db value."
-  {:malli/schema [:function
-                  [:=> [:cat] ::row]
-                  [:=> [:catn [::db :seon.db/db-val]] ::row]]}
+(defn- global-config
+  "The GLOBAL `::config` row's set attrs — `::row`-shaped, possibly {}. The
+   pure global read (no per-agent overlay); NEVER throws ({} on the conn-not-up
+   boot edge). 0-arity reads the ambient `seon.db/*conn*`, 1-arity an explicit
+   db value."
   ([] (or (try (some-> db/*conn* deref row)
                (catch :default _ nil))
           {}))
@@ -378,37 +372,55 @@
 (schema/register! ::agent-id [:string {:min 1}])
 (schema/register! ::effective-config-request [:map [::agent-id ::agent-id]])
 
-(defn effective-config-for
-  "The EFFECTIVE LLM config for agent `id` — global row + its overrides.
+(defn- overlay-agent-overrides
+  "Lay agent `id`'s `::agent-*` override datoms over `global` (a `::row`),
+   `:inherit`/absent → keep the global value. Per-attr install-gated (querying a
+   never-installed attr THROWS on datahike-cljs). Nil id / no agent → `global`
+   unchanged."
+  [global id]
+  (let [db        (some-> db/*conn* deref)
+        installed (when db (db/installed-schema db))
+        agent     (when (and db id)
+                    (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))]
+    (if-not agent
+      global
+      (reduce-kv
+        (fn [m agent-attr global-attr]
+          ;; `::agent-*` overrides are MIXED-`:or` schemas → stored pr-str'd by
+          ;; the bridge; decode on read. Gate each attr by the installed schema.
+          (let [v (when (contains? installed agent-attr)
+                    (some->> (get agent agent-attr)
+                             (db/decode-edn-value agent-attr)))]
+            (if (or (nil? v) (= :inherit v))
+              m
+              (assoc m global-attr v))))
+        global
+        agent-override-attrs))))
 
-   The global `::config` row ([[current]]) with the agent's own `::agent-*`
-   override datoms laid over it, `:inherit` (the default) meaning \"use the
-   global value\" (move 10).
-   So a no-override agent resolves EXACTLY the global row = byte-parity;
-   an agent that transacts e.g. `::agent-model \"x\"` overrides just that key.
-   `::agent-max-retries` rides through untouched (`:inherit` → the env
-   default at the retry site). Reactive: read per call, no cache. Never
-   throws — `{}`-safe on the conn-not-up boot edge."
+(defn current
+  "The EFFECTIVE LLM config the adapters read PER CALL (reactive-context — no
+   cache): the GLOBAL `::config` row with the CURRENT agent's `::agent-*`
+   overrides laid over it (config-driven agent-init — per-agent LLM). The agent
+   is the ambient `seon.db/current-agent-id` (fiber-local across the adapter's
+   awaits); OUTSIDE an agent scope (boot, gym render) it is just the global row.
+   `:inherit` (the default) ⇒ the global value = byte-parity for a no-override
+   agent. NEVER throws ({} on the conn-not-up boot edge). 1-arity takes an
+   explicit db value (global-only — a render read, not an agent call)."
+  {:malli/schema [:function
+                  [:=> [:cat] ::row]
+                  [:=> [:catn [::db :seon.db/db-val]] ::row]]}
+  ([] (overlay-agent-overrides (global-config) (db/current-agent-id)))
+  ([db] (global-config db)))
+
+(defn effective-config-for
+  "The EFFECTIVE LLM config for a SPECIFIC agent `id` (the explicit-id path) —
+   the global `::config` row with the agent's `::agent-*` overrides laid over it
+   (`:inherit`/absent → the global value). Same overlay [[current]] applies for
+   the AMBIENT agent; this arity is for a caller naming an id out of scope.
+   A no-override agent resolves EXACTLY the global row = byte-parity."
   {:malli/schema [:=> [:cat ::effective-config-request] ::row]}
   [{::keys [agent-id]}]
-  (let [global    (current)
-        db        (some-> db/*conn* deref)
-        installed (when db (db/installed-schema db))
-        agent     (when (and db agent-id) ; per-attr install gate below
-                    (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]}))]
-    (reduce-kv
-      (fn [m agent-attr global-attr]
-        ;; The `::agent-*` overrides are MIXED-`:or` schemas → stored pr-str'd
-        ;; by the bridge; decode on read. Querying a never-installed attr
-        ;; THROWS on datahike-cljs, so gate each attr by the installed schema.
-        (let [v (when (and agent (contains? installed agent-attr))
-                  (some->> (get agent agent-attr)
-                           (db/decode-edn-value agent-attr)))]
-          (if (or (nil? v) (= :inherit v))
-            m
-            (assoc m global-attr v))))
-      global
-      agent-override-attrs)))
+  (overlay-agent-overrides (global-config) agent-id))
 
 (defn agent-max-retries
   "The per-agent LLM retry COUNT for agent `id`.

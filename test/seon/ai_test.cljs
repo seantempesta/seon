@@ -219,3 +219,45 @@
                                  "the persisted max-tokens survives a no-op reboot seed")))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ============================================================
+;; Per-agent LLM overlay (config-driven agent-init) — effective-config-for /
+;; current lay an agent's ::agent-* overrides over the global row; :inherit /
+;; no-override → the global value (byte-parity).
+;; ============================================================
+
+(deftest per-agent-overrides-overlay-the-global-row
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            ;; fresh-conn installs only the ai config attrs — add the agent-id
+            ;; identity + the ::agent-model override attr this test overlays.
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data (db/malli->datahike-schema
+                                      [:seon.agent/id ::ai/agent-model])})
+                (.then (fn [_]
+                  ;; agent ids are :seon.db/id-shaped (14 chars) or "root".
+                  (db/transact!
+                    {:seon.db/tx-data
+                     [;; global row
+                      {::ai/id "config" ::ai/model "global-model" ::ai/max-tokens 100}
+                      ;; an agent that OVERRIDES the model, inherits the rest
+                      {:seon.agent/id "ovr-2607011800" :seon.ai/agent-model "agent-model"}
+                      ;; an agent with NO override (byte-parity → the global row)
+                      {:seon.agent/id "pln-2607011800"}]})))
+                (.then (fn [r]
+                         (is (true? (:seon.db/ok? r)) "seed transact lands")
+                         (let [ov    (ai/effective-config-for {::ai/agent-id "ovr-2607011800"})
+                               plain (ai/effective-config-for {::ai/agent-id "pln-2607011800"})
+                               none  (ai/effective-config-for {::ai/agent-id "abs-2607011800"})]
+                           (is (= "agent-model" (::ai/model ov))
+                               "the agent's ::agent-model overrides the global model")
+                           (is (= 100 (::ai/max-tokens ov))
+                               "an un-overridden attr inherits the global value")
+                           (is (= "global-model" (::ai/model plain))
+                               "a no-override agent = EXACTLY the global row (byte-parity)")
+                           (is (= "global-model" (::ai/model none))
+                               "an absent agent = the global row")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
