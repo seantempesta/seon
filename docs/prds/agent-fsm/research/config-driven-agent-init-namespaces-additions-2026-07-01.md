@@ -52,9 +52,86 @@ namespaces section (§2.2).
 
 ## Additions from the namespace-display agent
 
-<!-- Add your config keys here. For EACH: the fully-namespaced key
-(:seon.agent.ctx.namespaces/…), its malli spec + :default, one-line doc, and what
-current behavior/hardcode it replaces or enables. New aspects go in the ::aspect
-enum. Note whether each is wire-existing or needs a new render mechanism. -->
+**Full design:** [[compact-namespace-cards-spec]]. TL;DR: most nses render as a
+CARD — the `register!` schema block + every public fn condensed to a one-line
+head `(defn name "<docstring line 1>" {:malli/schema …} [args] …)`, body elided.
+3–5× smaller than full source (`my.kb` 3719→664 tok, `todo` 3696→1179), so the
+agent can see its WHOLE verb surface instead of ~11 full nses. This is NOT the
+dead `:signatures` view (bare signatures drove 0× adoption, render-prominence
+law) — the card carries the full data model + typed contract + a runnable
+example, which is the hypothesis for why it works where signatures starved.
 
-(to be filled by the namespace-display agent)
+**It fits your model with ZERO new top-level keys — two new aspect values on the
+`::render` map's aspect-set.** Everything I need is per-ns aspects, so it's pure
+extension of decision 14.
+
+### New aspects (extend `::aspect`)
+
+Register in `seon.agent.ctx.namespaces` (colocation):
+
+```clojure
+(schema/register! ::aspect [:enum {:default :source}
+                            :source :compact :signatures :tests :example])
+```
+
+- **`:compact`** — render the ns as a CARD: its owned `register!` block
+  (reconstructed from the registry, `::`-abbreviated) + one-line `(defn …)` heads
+  (docstring line 1 + `:malli/schema` + arglist + `…`). NEW render mechanism —
+  `render-one-ns-compact` in `seon.agent.ctx`, built from indexed rows
+  (`:seon.schema/_ns`, `:seon.fn/_ns` spec/doc/arglists), NEVER a file read.
+  ENABLES the coverage play: many nses as `#{:compact}` for the budget of a few
+  `#{:source}`.
+- **`:example`** — append a RUNNABLE worked example per verb: the most-recent
+  `:seon.eval/ok? true` call + real `:seon.eval/result-edn`, harvested from the
+  eval log. NEW mechanism (bounded query). Additive — composes with `:compact` OR
+  `:source`. NEVER Malli-generated (mg/generate yields semantically-poison
+  samples — `:from 3`, `ok? false`); omit when no real usage exists.
+
+### Shape rule this forces — DENSITY vs ADDITIVE aspects
+
+`:compact` makes an ambiguity in the current aspect-set explicit and worth nailing
+in §2.2: the set mixes two kinds of aspect.
+
+- **Density (mutually exclusive — pick ONE):** `:source` (full bodies) |
+  `:compact` (card) | `:signatures` (bare head). A set with two of these is
+  contradictory. Rule: exactly one density aspect per entry; validator picks the
+  richest if >1, or reject at spec time.
+- **Additive (compose freely):** `:tests`, `:example`. Layer onto whichever
+  density is chosen — `#{:compact :example}`, `#{:source :tests}`,
+  `#{:compact :tests :example}` all valid.
+
+Recommend encoding this so the `::render` value is `[:set ::aspect]` with a
+registered predicate/`:and` guard "≤1 density member", rather than a free `:set`.
+
+### Defaults — byte-parity preserved (decision 12)
+
+I change NO defaults. A no-override boot stays all-`#{:source}`, byte-identical to
+today. `:compact`/`:example` are OPT-IN per ns until the live A/B drive proves
+cards match-or-beat full-source verb adoption (the 0× guardrail — validate, don't
+assume). The eventual default render map (broaden to `#{:compact}` for the long
+tail, keep `#{:source}` for the `my.*` exemplars + `:current`) is a SEPARATE
+owner-gated flip AFTER that drive — not part of the atomic v1 parity build.
+
+### `:signatures` — flag for the spec
+
+Bare `:signatures` IS the render-prominence-law footgun (0× adoption). Options for
+§2.2: (a) drop it entirely — `:compact` supersedes it; or (b) keep it but document
+it as known-weak "bare head, no schemas/example — prefer `:compact`". I lean (a):
+one non-full density aspect (`:compact`), no way to accidentally ship the view that
+failed. Your call as spec owner.
+
+### Cross-lane dependency (not a config key, but you should know)
+
+The card's quality depends on a docstring convention — line 1 = complete ≤72-char
+sentence — enforced by a doc-lint (sibling to `seon.dev.markdown`, via the dev
+hook). Corpus audit: 111/671 already comply, ~560 need cleanup. The renderer ships
+against today's docstrings (soft-clip 78, a hardcoded constant — NOT a config key)
+and improves as the sweep lands. So no coupling to your build: `:compact` can land
+independently; it just looks better as docstrings clean up.
+
+### Deferred (phase-2, not v1 keys — parked per decision 21)
+
+- `::example-source` — pin a stable canonical example vs harvest-latest (the
+  card-churn / prompt-cache tradeoff), and cross-cluster leakage policy (harvested
+  examples carry real user data → owning-cluster only). Documented so it's not
+  lost; not a v1 dial.
