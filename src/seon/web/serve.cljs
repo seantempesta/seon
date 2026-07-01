@@ -431,13 +431,15 @@
 ;; ============================================================
 
 (defn- latest-run-start-ms
-  "Wall-clock ms of the agent's MOST-RECENTLY-STARTED run (open or closed), or 0
-   when none. The /solve poll uses this to skip the agent's transient BOOT idle:
-   a freshly-minted agent auto-runs a greeting turn that parks `:idle` BEFORE our
-   injected message wakes a task run, so `:idle` alone is ambiguous — we only
-   accept an idle whose latest run started at/after the injection."
-  [aid]
-  (->> (db/query {:seon.db/query '[:find ?started :in $ ?aid :where
+  "Wall-clock ms of the agent's MOST-RECENTLY-STARTED run (open or closed) over
+   the db value `db`, or 0 when none. The /solve poll uses this to reject the
+   agent's PRE-INJECTION state: `:idle` alone is ambiguous (a just-minted agent
+   is idle with zero runs BEFORE our message wakes it), so we only accept an
+   idle whose latest run started at/after the injection — i.e. the run our
+   message woke has opened and closed."
+  [db aid]
+  (->> (db/query {:seon.db/db db
+                  :seon.db/query '[:find ?started :in $ ?aid :where
                                    [?a :seon.agent/id ?aid]
                                    [?r :seon.agent.run/agent ?a]
                                    [?r :seon.agent.run/started-at ?started]]
@@ -449,10 +451,15 @@
   "Mint a fresh scratch agent via the injected boot path `create` (the same
    closure /agents/new uses; call `(create nil)` — no purpose), inject `input`
    via the REAL wake path (message!, from = user-ref), poll the DERIVED state to
-   :idle OF THE RUN OUR MESSAGE WOKE (see [[latest-run-start-ms]] — the boot
-   greeting run parks :idle first) or `timeout-ms`, then read back the final
-   reply + turn/eval/closed-reason metadata. The pod's OWN FSM manages turns —
-   the harness never does. Returns a Promise of the result map."
+   :idle OF THE RUN OUR MESSAGE WOKE (see [[latest-run-start-ms]]) or
+   `timeout-ms`, then read back the final reply + turn/eval/closed-reason
+   metadata. The pod's OWN FSM manages turns — the harness never does. Returns a
+   Promise of the result map.
+
+   Timeout honesty: on a timeout exit the result carries `:closed_reason
+   \"timeout\"` + `:timed_out true` (NEVER the stale derived last-closed-reason),
+   AND the orphaned run our message woke is CLOSED (`:superseded`) so it stops
+   burning LLM tokens after we've given up on it."
   [create input timeout-ms]
   (let [start   (js/Date.now)
         started (await (create nil))
@@ -464,36 +471,56 @@
               :seon.agent.message/to      [[:seon.agent/id aid]]
               :seon.agent.message/content input}))
     ;; `injected-at` = the instant our message landed. The run that PROCESSES it
-    ;; starts at/after this; the boot greeting run started before. Accept idle
-    ;; only once the latest run began after injection (the task run is reached).
+    ;; starts at/after this; accept idle only once the latest run began after
+    ;; injection (the task run has run to completion).
     (loop [injected-at (js/Date.now)]
       (await (js/Promise. (fn [r] (js/setTimeout r 1500))))
-      (let [st      (derive/derive-state @db/*conn* aid)
-            elapsed (- (js/Date.now) start)]
-        (if (or (and (= :idle st) (>= (latest-run-start-ms aid) injected-at))
-                (> elapsed timeout-ms))
-          (let [agent-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id aid]}))
-                user-eid  (:db/id (db/entity {:seon.db/ref [:seon.user/id "user"]}))
-                turns (->> (db/query {:seon.db/query '[:find ?t :in $ ?ag :where
-                                                       [?r :seon.agent.run/agent ?ag]
-                                                       [?t :seon.agent.turn/run ?r]]
-                                      :seon.db/args [agent-eid]}) count)
-                evals (->> (db/query {:seon.db/query '[:find ?e :in $ ?ag :where
-                                                       [?r :seon.agent.run/agent ?ag]
-                                                       [?t :seon.agent.turn/run ?r]
-                                                       [?t :seon.agent.turn/evals ?e]]
-                                      :seon.db/args [agent-eid]}) count)
-                reply (->> (db/query {:seon.db/query '[:find ?f ?to ?at ?c :where
-                                                       [?m :seon.agent.message/from ?f]
-                                                       [?m :seon.agent.message/to ?to]
-                                                       [?m :seon.agent.message/at ?at]
-                                                       [?m :seon.agent.message/content ?c]]})
-                           (filter (fn [[from to _ _]] (and (= from agent-eid) (= to user-eid))))
-                           (sort-by (fn [[_ _ at _]] (.getTime ^js at)))
-                           (map (fn [[_ _ _ c]] c)) last)]
-            {:agent_id aid :turns turns :evals evals
-             :closed_reason (str (derive/last-closed-reason @db/*conn* aid))
-             :reply (or reply "") :elapsed_ms elapsed})
+      ;; ONE db snapshot per poll, passed to every read below (a mid-poll
+      ;; write must not split state vs run-start vs reply reads).
+      (let [db       @db/*conn*
+            st       (derive/derive-state db aid)
+            elapsed  (- (js/Date.now) start)
+            done?    (and (= :idle st) (>= (latest-run-start-ms db aid) injected-at))
+            timeout? (> elapsed timeout-ms)]
+        (if (or done? timeout?)
+          (do
+            ;; TIMEOUT HONESTY: close the run we woke (if still open) so it
+            ;; stops driving turns + burning tokens after we've given up.
+            (when timeout?
+              (when-let [run (derive/current-run db aid)]
+                (await (run/close-run!
+                         {:seon.agent.run/id            (:seon.agent.run/id run)
+                          :seon.agent.run/closed-reason :superseded}))))
+            (let [agent-eid (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id aid]}))
+                  user-eid  (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.user/id "user"]}))
+                  turns (->> (db/query {:seon.db/db db
+                                        :seon.db/query '[:find ?t :in $ ?ag :where
+                                                         [?r :seon.agent.run/agent ?ag]
+                                                         [?t :seon.agent.turn/run ?r]]
+                                        :seon.db/args [agent-eid]}) count)
+                  evals (->> (db/query {:seon.db/db db
+                                        :seon.db/query '[:find ?e :in $ ?ag :where
+                                                         [?r :seon.agent.run/agent ?ag]
+                                                         [?t :seon.agent.turn/run ?r]
+                                                         [?t :seon.agent.turn/evals ?e]]
+                                        :seon.db/args [agent-eid]}) count)
+                  reply (->> (db/query {:seon.db/db db
+                                        :seon.db/query '[:find ?f ?to ?at ?c :where
+                                                         [?m :seon.agent.message/from ?f]
+                                                         [?m :seon.agent.message/to ?to]
+                                                         [?m :seon.agent.message/at ?at]
+                                                         [?m :seon.agent.message/content ?c]]})
+                             (filter (fn [[from to _ _]] (and (= from agent-eid) (= to user-eid))))
+                             (sort-by (fn [[_ _ at _]] (.getTime ^js at)))
+                             (map (fn [[_ _ _ c]] c)) last)]
+              ;; On timeout report the HONEST reason — never a stale derived
+              ;; last-closed-reason from an unrelated earlier close.
+              (cond-> {:agent_id aid :turns turns :evals evals
+                       :reply (or reply "") :elapsed_ms elapsed
+                       :closed_reason (if timeout?
+                                        "timeout"
+                                        (str (derive/last-closed-reason db aid)))}
+                timeout? (assoc :timed_out true))))
           (recur injected-at))))))
 
 (defn- handle-solve! [req res]

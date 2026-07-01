@@ -764,13 +764,13 @@
    agent's evals via agent ← run ← turn ← evals; nil = the whole scratch
    store (single-agent scenarios).
 
-   The cause clause excludes the BOOTSTRAP turn's tutorial evals (turn 0
-   hello + park — boot parity): `seon.client/bootstrap-turn!` opens its run
-   with NO cause, while every message-driven run the gym opens carries the
-   waking message as its `:seon.agent.run/cause`. Eval-shaped predicates
-   measure the agent's behavior IN RESPONSE TO MESSAGES; the boot tutorial
-   is core-scripted, not behavior, and would otherwise be every scenario's
-   'first eval'."
+   The cause clause scopes to message-driven runs: every message-driven run
+   the gym opens carries the waking message as its `:seon.agent.run/cause`.
+   Eval-shaped predicates measure the agent's behavior IN RESPONSE TO
+   MESSAGES. (Historically this also excluded a boot greeting turn's evals;
+   that turn no longer exists — a minted agent has ZERO runs until its first
+   message — so the cause clause is now vacuous-but-correct: every run is
+   message-caused.)"
   [dbv agent-id]
   (->> (if agent-id
          (db/query {:seon.db/query '[:find ?at ?src ?ev
@@ -1157,12 +1157,11 @@
 (defn- agent-reply-text
   "The messages the designated agent sent TO the user IN RESPONSE TO the
    scenario's question(s), chronological, joined — the judge's 'verbatim
-   reply'. EXCLUDES the bootstrap greeting: turn 0 (`bootstrap-turn!`,
-   boot parity) sends `(message/user \"Hi — I'm up …\")` BEFORE any
-   question lands, so a reply is one whose `:seon.agent.message/at` is at
-   or after the earliest user→agent question — anything earlier is the
-   pre-question hello, not an answer (it would otherwise pollute the
-   judge's view of what the agent actually answered).
+   reply'. A reply is one whose `:seon.agent.message/at` is at or after the
+   earliest user→agent question. (Historically this also excluded a boot
+   greeting the minted agent sent before any question landed; that turn no
+   longer exists — a minted agent is silent until its first message — so the
+   at-or-after guard is now vacuous-but-correct.)
 
    Deliberately fetch-then-filter in CLJS rather than one datalog join:
    the datahike-cljs engine MIS-BINDS queries that join TWO
@@ -1615,12 +1614,10 @@
    order and every drive awaits idle, so 'boot A → await idle → boot
    B on the same store' falls out of the sequential doseq.
 
-   Boot parity: after create!, the agent runs the SAME
-   `seon.client/bootstrap-turn!` (turn 0) a live minted agent runs — the
-   hello + park — so its transcript carries the bootstrap-turn evidence
-   exactly like a live agent's. (Turn 0's run is opened with NO
-   `:seon.agent.run/cause`; eval- and prompt-shaped predicates scope on
-   caused runs and so exclude it — see [[eval-at+source]].)
+   Boot parity: a minted agent is `:idle` with ZERO runs the moment its
+   entity + home ns exist — no turn 0 (the boot greeting turn was removed;
+   `seon.client/init-agent!` is the ONE deterministic init, no ceremony).
+   It wakes on the first message like a live minted agent.
 
    `pre-id` (optional) pins the minted agent's id — run-scenario!
    mints :a's id BEFORE seeding so the seed txs can carry it, then
@@ -1630,8 +1627,11 @@
   (if-let [existing (get @!agents designator)]
     existing
     (let [agent-id (or pre-id (db/new-id!))]
-      ;; with-agent scope mirrors seon.client/boot-one-agent! — on a
-      ;; live boot the agent's own create! tx carries its agent-id.
+      ;; with-agent scope mirrors seon.client/init-agent! — on a
+      ;; live boot the agent's own create! tx carries its agent-id. The gym
+      ;; wires the home ns itself (setup-agent-ns!) + creates the entity; no
+      ;; turn 0 (the boot greeting turn was removed — a minted agent is
+      ;; :idle with zero runs the instant its entity + ns exist).
       (await
         (db/with-agent agent-id
           (fn ^:async boot-gym-agent! []
@@ -1639,9 +1639,6 @@
                                           (agent/home-ns agent-id)
                                           agent-id))
             (await (agent/create! {:seon.agent/id agent-id})))))
-      (await (client/bootstrap-turn!
-               {:seon.agent/id            agent-id
-                :seon.agent/compile-state compile-state}))
       (swap! !agents assoc designator agent-id)
       agent-id)))
 

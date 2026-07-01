@@ -446,7 +446,7 @@
 ;; child's wake trigger IN-PROCESS via the injected `agent/!arm-child-fn` hook,
 ;; so a message sent right after spawn actually wakes it (no out-of-band re-arm).
 ;; This drives both end to end: register a test arm hook (the same seam the
-;; client registers `arm-agent!` into), spawn, read the returned id, message it.
+;; client registers `init-agent!` into), spawn, read the returned id, message it.
 ;; ============================================================
 
 (deftest start!-returns-child-id-and-arms-it-so-a-message-wakes-it
@@ -458,7 +458,7 @@
               (await (db/transact! {:seon.db/tx-data [{:seon.user/id "user"}]}))
               ;; The injection seam: register an arm hook that wires the child's
               ;; home ns + installs its wake trigger (a scripted llm so the wake
-              ;; is deterministic) — the SAME shape as seon.client/arm-agent!.
+              ;; is deterministic) — the SAME shape as seon.client/init-agent!.
               (reset! agent/!arm-child-fn
                 (fn ^:async arm! [cid]
                   (await (db/with-agent cid

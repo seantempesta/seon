@@ -503,7 +503,7 @@
    its run #1).
 
    The minted child's wake trigger is ARMED IN-PROCESS before this returns
-   (via the boot-registered `!arm-child-fn` hook — `seon.client/arm-agent!`),
+   (via the boot-registered `!arm-child-fn` hook — `seon.client/init-agent!`),
    so a message the parent sends RIGHT AFTER spawn actually wakes the child
    (arming is reactive-only: a message sent before arming never wakes it, even
    later — so arming must precede any inbound). Before the client registers the

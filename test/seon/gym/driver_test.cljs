@@ -984,12 +984,15 @@
            ;; return the inverse-direction (user→agent) rows. This is
            ;; the ORIGINAL double-identity-join query, restored as the
            ;; live regression pin for that fix: it must count b's
-           ;; messages TO the user. Under the carved FSM that is TWO:
-           ;; the bootstrap-turn 0 greeting (message/user "Hi — I'm up…")
-           ;; PLUS the BETA-ANSWER reply. The buggy inverse direction
-           ;; (user→b) is the single beta question — so [:count 2] still
-           ;; distinguishes the correct binding (2) from the engine bug (1).
-           [{:seon.gym.predicate/id     :b-sent-greeting-and-reply-to-user
+           ;; messages TO the user. With the boot greeting turn removed,
+           ;; b sends exactly ONE message to the user — the BETA-ANSWER
+           ;; reply. The buggy inverse direction (user→b) is the single
+           ;; beta question, ALSO 1 — but the engine bug returns the
+           ;; WRONG rows (user→b, not b→user), so the join-direction is
+           ;; still what this pins: the correct binding yields b's reply,
+           ;; the bug yields the question. [:count 1] holds for the
+           ;; correct direction.
+           [{:seon.gym.predicate/id     :b-sent-reply-to-user
              :seon.gym.predicate/kind   :datalog
              :seon.gym.predicate/axis   :replies-honestly
              :seon.gym.predicate/args   [:seon.gym.agent/b]
@@ -1001,7 +1004,7 @@
                                           [?m :seon.agent.message/to ?u]
                                           [?u :seon.user/id "user"]
                                           [?m :seon.agent.message/content ?c]]
-             :seon.gym.predicate/expect [:count 2]}
+             :seon.gym.predicate/expect [:count 1]}
             {:seon.gym.predicate/id        :judge-a
              :seon.gym.predicate/kind      :llm-judge
              :seon.gym.predicate/agent     :a
@@ -1019,11 +1022,11 @@
           (.then (fn [card]
                    (gym/print-scorecard! card)
                    (let [r (->> (:seon.gym.scorecard/results card)
-                                (filter #(= :b-sent-greeting-and-reply-to-user
+                                (filter #(= :b-sent-reply-to-user
                                             (:seon.gym.predicate/id %)))
                                 first)]
                      (is (true? (:seon.gym.result/pass? r))
-                         (str "b-scoped datalog counts b's greeting + reply — "
+                         (str "b-scoped datalog counts b's reply to the user — "
                               (:seon.gym.result/actual r))))
                    (let [[ctx-a ctx-b] @!ctxs]
                      (is (str/includes? ctx-a "alpha question"))
