@@ -205,6 +205,48 @@ should work. Refined:
     net-new mechanisms STAY IN v1: per-agent LLM (provider/model/temp/etc.),
     namespace views + the tests aspect, and the configurable eval-result decay.
 
+## v4 correction (cross-lane, namespace-display agent + verified in source)
+
+22. **NO `:map-of` / vector-of-map CONFIG values — datahike serializes them to
+    opaque blobs.** VERIFIED in source: the `seon.db` bridge stores any complex
+    value as a `pr-str`'d EDN string (`db/internal.cljs:243,364` — "datahike's
+    typed schema cannot hold" complex shapes), which kills per-element
+    queryability + reactivity (the decision-2 keystone). So model config as:
+    - **(a) cardinality-many presence/value attrs** for flat sets + booleans —
+      e.g. the namespaces block's `:seon.agent.ctx.namespaces/full-source` +
+      `::with-tests` as `[:vector :seon.ns/name]`, **presence = config, absence =
+      compact** (matches the EXISTING `:seon.agent.ctx/render-namespaces`
+      `[:vector :keyword]`). This REPLACES decision 14's `::render :map-of`.
+    - **(b) reified component entities** (`:db/isComponent`-ref'd off the parent)
+      the moment a per-element facet carries a VALUE — **transcript tiers** and
+      **result-decay levels** each become a tier/level ENTITY (with `from-turn` /
+      `token-cap` attrs), NOT a `[:vector [:map …]]` blob.
+    - **(c) a serialized EDN blob ONLY** where you deliberately never query
+      per-element (a set-once config value like maybe `home-requires`).
+    - `block-priorities` (`:map-of`) DISSOLVES → a per-block `:seon.agent.ctx/priority`
+      attr (blocks are already entities). `skills/load`, `toolkit`, `capabilities`
+      are already flat keyword SETS → cardinality-many, fine.
+    Rule of thumb: **presence-set for booleans/flat-sets; reify-with-component the
+    moment a value attaches; blob only for never-queried set-once config.**
+
+23. **Namespace-display specifics** (from the additions note + card spec):
+    - Most nses render as a **compact CARD** (schema block + one-line fn heads,
+      bodies elided; 3–5× smaller) — NOT the dead `:signatures` view. `:signatures`
+      DROPPED (0× adoption footgun; the card supersedes it).
+    - **Examples DROPPED** — real evals are in the transcript; harvesting into the
+      cached block busts the prompt cache.
+    - ns value type = `:seon.ns/name` **keyword** (tolerates dynamic/unindexed
+      `my.agent.*` nses) + a **DERIVED warning** for a configured-but-unmatched ns
+      (fail-visible, no silent typo — the reactive-warning pattern).
+    - Current ns = two scalar bools (`::current-full?` / `::current-tests?`), NOT a
+      magic `:current` map key.
+    - Byte-parity: v1 defaults keep today's full set full; the compact-everywhere
+      flip is a SEPARATE owner-gated A/B step (render-prominence 0× guardrail),
+      after the atomic parity build.
+    - Depth: [[config-driven-agent-init-namespaces-additions-2026-07-01]] +
+      [[compact-namespace-cards-spec]]. Card renderer sequences BEHIND the config
+      foundation (block-entity + these attrs) landing.
+
 ## Open (agent to resolve in the spec, owner reviews)
 
 - The ~8 colocation homes flagged in decision 3.
