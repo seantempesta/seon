@@ -121,8 +121,9 @@
 ;; ============================================================
 
 (defn request-params
-  "Build the Anthropic Messages API request PARAMS as a CLJ map. The
-   bare keys (:model, :messages, :system, …) are the API's wire format
+  "Build the Anthropic Messages API request PARAMS as a CLJ map.
+
+   The bare keys (:model, :messages, :system, …) are the API's wire format
    — a third-party boundary, deliberately un-namespaced. NOTE: the
    `:seon.ai/extra-body` map is NOT inlined here — [[complete]] merges
    it into these params (the SDK's 2nd-arg `:body` would REPLACE the
@@ -209,8 +210,10 @@
     :parsed_output})
 
 (defn parse-completion
-  "Map the assembled Anthropic Message OBJECT (post `.finalMessage`) to
-   a `:seon.ai.anthropic/complete-response`. `stop_reason` \"refusal\"
+  "Map an assembled Anthropic Message OBJECT to a complete-response.
+
+   Post-`.finalMessage` → a `:seon.ai.anthropic/complete-response`.
+   `stop_reason` \"refusal\"
    (Fable safety classifiers; empty content array) becomes a legible
    `:seon.ai/error` envelope — callers must never read content as a
    reply when the model declined. `:content` is an ARRAY of typed
@@ -299,8 +302,9 @@
          *fetch* (doto (aset "fetch" *fetch*)))))
 
 (defn ^:async complete
-  "Send a completion request to Anthropic via the official
-   `@anthropic-ai/sdk` (streamed + buffered). Returns a Promise of a
+  "Send a completion request to Anthropic via the official SDK.
+
+   The `@anthropic-ai/sdk` (streamed + buffered). Returns a Promise of a
    `:seon.ai.anthropic/complete-response` map.
 
    Request opts (only :seon.ai/ctx required):
@@ -363,8 +367,9 @@
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))
 
 (defn agent-adapter
-  "Returns a fn-of-ctx-string suitable for
-   `seon.agent/run-turn-once!`'s `llm-fn`. Optional `opts` override
+  "A fn-of-ctx-string suitable for `seon.agent/run-turn-once!`'s `llm-fn`.
+
+   Optional `opts` override
    request defaults (e.g. `{:seon.ai/max-tokens 2048}`). The returned
    fn calls `complete` ^:async-internally and returns a Promise of
    `{:text \"…\" :seon.ai/raw <full response>}` — plus a top-level

@@ -112,9 +112,10 @@
    [::rows  ::rows]])
 
 (defn kv-table
-  "A two-column key/value table from `rows` (`[[k v] …]`), with an optional
-   `title`. The dual render of a small breakdown — a styled table for the
-   human, aligned `k: v` lines for you.
+  "A two-column key/value table from `rows`, with an optional `title`.
+
+   `rows` is `[[k v] …]`. The dual render of a small breakdown — a styled
+   table for the human, aligned `k: v` lines for you.
 
      (kv-table {:my.ui/title \"Costs\"
                 :my.ui/rows [[\"Adobe\" \"$45\"] [\"Netflix\" \"$18\"]]})"
@@ -141,9 +142,10 @@
    [::tone {:optional true} ::tone]])
 
 (defn badge
-  "A small status pill — `label` tinted by `tone` (default :info). The dual
-   render of one labelled state: a bordered pill for the human, `[tone] label`
-   for you.
+  "A small status pill — `label` tinted by `tone` (default :info).
+
+   The dual render of one labelled state: a bordered pill for the human,
+   `[tone] label` for you.
 
      (badge {:my.ui/label \"passing\" :my.ui/tone :success})
      ;; human: a green-text pill  ·  ai: \"[success] passing\""
@@ -164,8 +166,10 @@
    [::items ::items]])
 
 (defn bullets
-  "A bulleted list from `items`, with an optional `title`. The dual render of
-   a simple list — a semantic `[:ul]` for the human, `- item` lines for you.
+  "A bulleted list from `items`, with an optional `title`.
+
+   The dual render of a simple list — a semantic `[:ul]` for the human,
+   `- item` lines for you.
 
      (bullets {:my.ui/title \"Next\" :my.ui/items [\"deploy\" \"verify\"]})"
   {:malli/schema [:=> [:cat ::bullets-request] :seon.render/html-response]}
@@ -189,9 +193,10 @@
    [::tone {:optional true} ::tone]])
 
 (defn progress
-  "A labelled progress bar — `current` of `total`, the fill tinted by `tone`
-   (default :signal). The dual render of a ratio: a filled bar for the human,
-   `label: current/total (pct%)` for you.
+  "A labelled progress bar — `current` of `total`.
+
+   The fill is tinted by `tone` (default :signal). The dual render of a
+   ratio: a filled bar for the human, `label: current/total (pct%)` for you.
 
      (progress {:my.ui/label \"Steps\" :my.ui/current 7 :my.ui/total 10})
      ;; human: a 70%-filled bar  ·  ai: \"Steps: 7/10 (70%)\""
@@ -220,10 +225,12 @@
    [::table-data ::table-data]])
 
 (defn table
-  "A multi-column table — `columns` is `[[row-key header] …]`, `table-data` a
-   seq of maps keyed by those row-keys (cells already strings, like `kv-table`).
-   Generalises `kv-table` to N columns. The dual render of a grid: a styled
-   table for the human, monospace-aligned text rows for you.
+  "A multi-column table — generalises `kv-table` to N columns.
+
+   `columns` is `[[row-key header] …]`, `table-data` a seq of maps keyed by
+   those row-keys (cells already strings, like `kv-table`). The dual render
+   of a grid: a styled table for the human, monospace-aligned text rows for
+   you.
 
      (table {:my.ui/columns [[:name \"Name\"] [:cost \"Cost\"]]
              :my.ui/table-data [{:name \"Adobe\" :cost \"$45\"}
@@ -269,8 +276,10 @@
    [::blocks ::blocks]])
 
 (defn section
-  "COMPOSE child envelopes under one titled container — the combinator that
-   keeps the dual render mirrored through nesting. Stacks every block's
+  "COMPOSE child envelopes under one titled container.
+
+   The combinator that keeps the dual render mirrored through nesting.
+   Stacks every block's
    `:seon.render/hiccup` and joins every block's `:seon.render/ai`, so the
    composed result is itself a faithful `:seon.render/html-response` you can
    transact onto your canvas (or return from a tile fn).

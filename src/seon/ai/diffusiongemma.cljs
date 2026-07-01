@@ -157,9 +157,10 @@
   (env* (or (config/env-string "SEON_DG_API_KEY_ENV") default-key-env)))
 
 (defn api-configured?
-  "Whether BOTH the endpoint id and a bearer key resolve for the control
-   backend. `seon.client/current-llm-fn` uses this to fall back to the
-   stub llm-fn when the worker isn't configured."
+  "Whether BOTH the endpoint id and a bearer key resolve.
+
+   For the control backend. `seon.client/current-llm-fn` uses this to fall
+   back to the stub llm-fn when the worker isn't configured."
   {:malli/schema [:=> [:cat] :boolean]}
   []
   (boolean (and (endpoint-id) (resolved-api-key))))
@@ -198,8 +199,9 @@
     v))
 
 (defn request->payload
-  "The `::request` map as the worker's string-keyed snake_case payload —
-   only the present fields; mode/trace keywords → their snake_case name
+  "The `::request` map as the worker's snake_case payload.
+
+   Only the present fields; mode/trace keywords → their snake_case name
    (`:clamp-smoke` → \"clamp_smoke\"). Public for tests + live debugging."
   {:malli/schema [:=> [:cat ::request] :map]}
   [request]
@@ -224,10 +226,11 @@
 (def ^:private mode-error-keys [:gen_error :clamp_smoke_error :infill_error])
 
 (defn normalize-output
-  "Map a COMPLETED worker `output` map to a `::response`. An in-band
-   per-mode `*_error` → a processing `:seon.ai/error` (NOT transport —
-   not retried). Otherwise `:seon.ai/text` from the mode's text field
-   (\"\" on non-text modes), the whole output under `::worker-output`.
+  "Map a COMPLETED worker `output` map to a `::response`.
+
+   An in-band per-mode `*_error` → a processing `:seon.ai/error` (NOT
+   transport — not retried). Otherwise `:seon.ai/text` from the mode's text
+   field (\"\" on non-text modes), the whole output under `::worker-output`.
    Public for tests."
   {:malli/schema [:=> [:catn [::mode ::mode]
                        [::worker-output [:maybe ::worker-output]]] ::response]}
@@ -342,8 +345,9 @@
                 (recur (inc polls)))))))))
 
 (defn ^:async complete
-  "Submit a control-worker job and poll it to completion. Returns a
-   Promise of a `::response`: `:seon.ai/text` normalized from the mode's
+  "Submit a control-worker job and poll it to completion.
+
+   Returns a Promise of a `::response`: `:seon.ai/text` normalized from the mode's
    output field, the RAW worker `output` under `::worker-output`, or the
    errors-as-values `:seon.ai/error` envelope (config gap / transport /
    HTTP status / failed job) — never a throw to the agent loop.
@@ -406,8 +410,9 @@
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))
 
 (defn agent-adapter
-  "Returns a fn-of-ctx-string suitable for `seon.agent`'s `llm-fn`. The
-   returned fn submits a `generate` job (ctx as the prompt) with the
+  "A fn-of-ctx-string suitable for `seon.agent`'s `llm-fn`.
+
+   The returned fn submits a `generate` job (ctx as the prompt) with the
    A100-proven fast knobs (entropy_bound 0.5, temp 0.8→0.4, 48-step cap)
    and returns a Promise of `{:text … :seon.ai/raw <response>}` — plus a
    top-level `:seon.ai/error` when the call failed. Optional `opts`

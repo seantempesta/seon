@@ -51,18 +51,20 @@
 ;; --- runtime appends, which the seed never clobbers.
 
 (defn seed-tx-data
-  "Tx-data for the EMPTY shared-instructions singleton. Identity
-   upsert on `::id`, no `::instructions` value — idempotent (re-seeding
-   asserts zero new datoms) and append-safe (rows transacted at runtime
-   are never touched by a re-seed)."
+  "Tx-data for the EMPTY shared-instructions singleton.
+
+   Identity upsert on `::id`, no `::instructions` value — idempotent
+   (re-seeding asserts zero new datoms) and append-safe (rows transacted at
+   runtime are never touched by a re-seed)."
   {:malli/schema [:=> [:cat] [:vector ::shared]]}
   []
   [{::id "shared"}])
 
 (defn instructions
-  "The current cluster-wide instructions — standing guidance for ALL
-   agents in this cluster — as a vector of text strings, oldest append
-   first. Anyone (your human, another agent, you) can append a row (see
+  "The current cluster-wide instructions, oldest append first.
+
+   Standing guidance for ALL agents in this cluster, as a vector of text
+   strings. Anyone (your human, another agent, you) can append a row (see
    the ns doc for the one-transact append shape); re-run this whenever
    you want the current set. Returns [] when none exist yet.
 
@@ -85,8 +87,10 @@
         (mapv second))))
 
 (defn instructions-block
-  "The single-`;` `SHARED INSTRUCTIONS` context block — cluster-wide
-   standing guidance shown to EVERY agent, every turn. This is the SHARED
+  "The single-`;` `SHARED INSTRUCTIONS` context block.
+
+   Cluster-wide standing guidance shown to EVERY agent, every turn. This is
+   the SHARED
    knowledge-base surface, NOT the hardcoded system prompt
    (`seon.agent.ctx/system-text`) — it never overrides those mechanics, it adds
    durable human/agent guidance alongside them. Rendered FRESH from the db

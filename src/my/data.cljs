@@ -56,9 +56,10 @@
   [:map [:seon.items/items :seon.items/items] [::group-key ::group-key] [::key ::key]])
 
 (defn rows
-  "Every entity carrying ATTR, pulled to a vector of self-describing maps —
-   attribute-presence as DATA (there are no kinds; you find a set by the
-   attr it asserts). The root of every analysis pipeline: once rows are
+  "Every entity carrying `attr`, pulled to self-describing maps.
+
+   Attribute-presence as DATA — there are no kinds; you find a set by the
+   attr it asserts. The root of every analysis pipeline: once rows are
    MAPS you reduce with plain Clojure, so the datalog `:with` dedup trap
    can't happen.
 
@@ -76,8 +77,10 @@
      :seon.items/count (count items)}))
 
 (defn sum-by
-  "Total of KEY across the given item maps. Reduces over MAPS, so the
-   datalog `(sum ?x)`/`:with` dedup collapse cannot happen — two rows of 5
+  "Total of `key` across the given item maps.
+
+   Reduces over MAPS, so the datalog `(sum ?x)`/`:with` dedup collapse
+   cannot happen — two rows of 5
    stay 5+5=10. Rows missing KEY are skipped (matching `(sum ?x)` over only
    the entities that assert the attr).
 
@@ -89,8 +92,9 @@
   (reduce + 0 (keep key items)))
 
 (defn max-by
-  "The item MAP whose KEY is largest — returns the ENTITY, not the value,
-   so 'which one is biggest' is one call, not a `(max ?x)`+rejoin. Ties:
+  "The item MAP whose `key` is largest — returns the ENTITY, not the value.
+
+   So 'which one is biggest' is one call, not a `(max ?x)`+rejoin. Ties:
    the FIRST row at the max wins (strict `>`); nil when no items.
 
    ;; the priciest subscription ENTITY (read its name off the row):
@@ -104,8 +108,9 @@
             (first items) (rest items))))
 
 (defn group-sum
-  "Sum KEY within each distinct value of GROUP-KEY → a `:seon.items/*`
-   envelope of `{:my.data/group <value> :my.data/total <sum>}` rows. The
+  "Sum `key` per distinct `group-key` value → a `:seon.items/*` envelope.
+
+   Each row is `{:my.data/group <value> :my.data/total <sum>}`. The
    reusable generalization of x3's filter-then-sum and source-stats'
    per-topic tallies. Emits an envelope (not a bare map) so it threads
    straight into [[max-by]] — group, THEN argmax over the groups:

@@ -101,7 +101,7 @@
 ;;; ALWAYS read it: an eval can succeed yet `:seon.db/ok? false`.
 
 (defn remember-sources!
-  "ADD source entities, linking two refs the idiomatic way:
+  "Add source entities, linking two refs the idiomatic way.
 
    - SAME-TX link (author not committed yet): give the author a `:db/id`
      TEMPID and put that SAME tempid in the source's `:my.kb.source/author`
@@ -132,8 +132,9 @@
        :my.kb.source/author "author-okasaki"}]}))
 
 (defn ^:async remember
-  "Store ONE finding as a durable, provenance-stamped knowledge row — the
-   one-call way to persist what you verified, with NO schema design, NO
+  "Store ONE finding as a durable, provenance-stamped knowledge row.
+
+   The one-call way to persist what you verified, with NO schema design, NO
    register!, NO hand-written transact. GENERAL: any domain claim, not just
    code. The grade is REQUIRED, so a guess can't masquerade as a fact.
 
@@ -176,23 +177,28 @@
       env)))
 
 (defn retitle-source!
-  "UPSERT by identity: the same `:my.kb.source/id` updates in place — no
-   duplicate. Omitted keys are left unchanged (absent ≠ retract)."
+  "UPSERT by identity — the same `:my.kb.source/id` updates in place.
+
+   No duplicate. Omitted keys are left unchanged (absent ≠ retract)."
   {:malli/schema [:=> [:catn [::id :string] [::new-title :string]] :any]}
   [id new-title]
   (db/transact! {::db/tx-data [{:my.kb.source/id id :my.kb.source/title new-title}]}))
 
 (defn clear-rating!
-  "Clear ONE attr — retraction is EXPLICIT. `[:db/retract ref attr]` (no
-   value) removes the current value (omitting a key only leaves it unchanged)."
+  "Clear ONE attr — retraction is EXPLICIT.
+
+   `[:db/retract ref attr]` (no value) removes the current value (omitting
+   a key only leaves it unchanged)."
   {:malli/schema [:=> [:catn [::id :string]] :any]}
   [id]
   (db/transact! {::db/tx-data [[:db/retract [:my.kb.source/id id] :my.kb.source/rating]]}))
 
 (defn replace-topics!
-  "Replace a cardinality-many attr. Transacting topics only ADDS to the set;
-   to REPLACE, retract every current value first — `[:db/retract ref attr]`
-   (no value) — bundled BEFORE the add-map in ONE ordered tx."
+  "Replace a cardinality-many attr.
+
+   Transacting topics only ADDS to the set; to REPLACE, retract every
+   current value first — `[:db/retract ref attr]` (no value) — bundled
+   BEFORE the add-map in ONE ordered tx."
   {:malli/schema [:=> [:catn [::id :string] [::topics [:vector :keyword]]] :any]}
   [id topics]
   (db/transact!
@@ -217,17 +223,19 @@
   (db/query '[:find [?t ...] :where [?e :my.kb.source/title ?t]]))
 
 (defn title+rating
-  "Relation find — a SET of `[title rating]` tuples, JOINING two attrs on one
-   entity (`?e` binds both clauses)."
+  "Relation find — a SET of `[title rating]` tuples.
+
+   JOINING two attrs on one entity (`?e` binds both clauses)."
   {:malli/schema [:=> [:cat] [:set [:tuple :string :int]]]}
   []
   (db/query '[:find ?title ?rating
               :where [?e :my.kb.source/title ?title] [?e :my.kb.source/rating ?rating]]))
 
 (defn titles-by-author
-  "`:in`-bound input + REF-JOIN. A ref stores an EID — match the author by
-   NAME by JOINING through `:my.kb.source/author`, never by putting the name
-   in the ref slot."
+  "`:in`-bound input + REF-JOIN.
+
+   A ref stores an EID — match the author by NAME by JOINING through
+   `:my.kb.source/author`, never by putting the name in the ref slot."
   {:malli/schema [:=> [:catn [::author-name :string]] [:vector :string]]}
   [author-name]
   (db/query '[:find [?title ...] :in $ ?name
@@ -237,8 +245,9 @@
             author-name))
 
 (defn source-stats
-  "Aggregate toward a question — the analysis you build ON TOP of stored
-   data. Delegates to my.data, so you never hand-roll a datalog aggregate:
+  "Aggregate toward a question — the analysis built ON TOP of stored data.
+
+   Delegates to my.data, so you never hand-roll a datalog aggregate:
    `rows` pulls each source to a MAP, then `sum-by` totals the ratings and a
    plain `frequencies` tallies the (cardinality-many) topics. Pulling to
    maps first makes the `(sum ?r)`/`:with` dedup collapse structurally
@@ -256,18 +265,21 @@
 ;;; which IS the "by name" addressing.
 
 (defn source-detail
-  "Pull by LOOKUP-REF. `[*]` inlines every attr; a COMPONENT child comes back
-   as a nested map, a PLAIN ref as `{:db/id N}` until you NAME it with a
-   sub-pattern to pull its fields."
+  "Pull by LOOKUP-REF.
+
+   `[*]` inlines every attr; a COMPONENT child comes back as a nested map,
+   a PLAIN ref as `{:db/id N}` until you NAME it with a sub-pattern to pull
+   its fields."
   {:malli/schema [:=> [:catn [::id :string]] :any]}
   [id]
   (db/pull '[* {:my.kb.source/author [:my.kb.author/name]}]
            [:my.kb.source/id id]))
 
 (defn source-entity
-  "Look up an entity by lookup-ref — a touched map (`:db/id` + every attr),
-   nil if unresolved. A ref reads back as `{:db/id N}`; drill in with a
-   follow-up `entity`/`pull`."
+  "Look up an entity by lookup-ref — a touched map, nil if unresolved.
+
+   The touched map is `:db/id` + every attr. A ref reads back as
+   `{:db/id N}`; drill in with a follow-up `entity`/`pull`."
   {:malli/schema [:=> [:catn [::id :string]] :any]}
   [id]
   (db/entity [:my.kb.source/id id]))
@@ -277,8 +289,9 @@
 ;;; instead of re-registering one).
 
 (defn inventory
-  "Discovery call: which attribute namespaces hold data, with per-attr counts
-   — NOT a list of entity 'types' (there are none). Returns the
+  "Which attribute namespaces hold data, with per-attr counts.
+
+   NOT a list of entity 'types' (there are none). Returns the
    `db/store-inventory` map."
   {:malli/schema [:=> [:cat] :map]}
   []

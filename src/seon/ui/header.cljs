@@ -69,8 +69,10 @@
     0))
 
 (defn throughput
-  "Derive the fleet's token throughput from db `db`: every turn's start
-   instant + usage, reduced to the all-time total, the rolling-window total,
+  "Derive the fleet's token throughput from db `db`.
+
+   Every turn's start instant + usage, reduced to the all-time total, the
+   rolling-window total,
    the honest rolling tokens/sec (window total ÷ 60 s), and the last turn's
    cost. Pure read — `:seon.agent.turn/at` + `:seon.agent.turn/llm-usage` are
    the only inputs."

@@ -148,8 +148,9 @@
             (.readdirSync fs dir)))))
 
 (defn seed-skills-tx-data
-  "Tx-data seeding one `:my.skills` row per `SKILL.md` found by scanning
-   [[seon.config/skills-dir]] (default arg) — each row carries `:my.skills/name` (the
+  "Tx-data seeding one `:my.skills` row per `SKILL.md` found.
+
+   Scans [[seon.config/skills-dir]] (default arg) — each row carries `:my.skills/name` (the
    frontmatter name as a keyword), `:my.skills/description` (verbatim), and
    `:seon.agent.ctx/file-path` (the body stays in the file, read fresh at
    render). Identity-upsert on `:my.skills/name`, so a re-scan at every boot
@@ -218,8 +219,9 @@
 ;;; agent gets DATA (the eval path auto-awaits the ^:async ones).
 
 (defn ^:async load
-  "Load skill `skill-name`'s body INTO your context — install ONE
-   `:skill/<name>` context block whose body is the skill's SKILL.md, rendered
+  "Load skill `skill-name`'s body INTO your context.
+
+   Install ONE `:skill/<name>` context block whose body is the skill's SKILL.md, rendered
    with its token cost. Idempotent (re-loading replaces in place). Returns
    {::ok? true :my.skills/name …} on success, {::ok? false ::message …} when
    no such skill exists or the install fails (errors are values).
@@ -245,8 +247,10 @@
            ::message (str "load failed: " (:seon.agent.ctx/error res))})))))
 
 (defn ^:async unload
-  "Unload skill `skill-name` — remove its `:skill/<name>` block, so its body
-   (and token cost) is gone next render. No-op success if it wasn't loaded.
+  "Unload skill `skill-name` — remove its `:skill/<name>` block.
+
+   Its body (and token cost) is gone next render. No-op success if it
+   wasn't loaded.
 
      (my.skills/unload :datahike)"
   {:malli/schema [:=> [:catn [::skill-name :my.skills/name]] ::result]}
@@ -259,9 +263,10 @@
        ::message (str "unload failed: " (:seon.agent.ctx/error res))})))
 
 (defn list
-  "The skill catalog — every available skill with its description and whether
-   YOU currently have it loaded (`::loaded?`, derived from your own
-   `:skill/*` blocks). Read it to discover what you can `(load …)`.
+  "The skill catalog — every available skill and whether YOU loaded it.
+
+   Each entry carries its description and `::loaded?` — derived from your
+   own `:skill/*` blocks. Read it to discover what you can `(load …)`.
 
      (my.skills/list)
      ;; => [{:my.skills/name :datahike :my.skills/description \"…\" :my.skills/loaded? false} …]"
@@ -285,10 +290,12 @@
   (str "; - :" (name nm) "  " (if loaded? "● loaded" "○") " — " desc))
 
 (defn catalog-block
-  "The L0 `:skills-catalog` context block — one cheap `;`-line per skill
-   (name + description + a DERIVED ●/○ loaded marker). A symbol-slot section
-   wired into `seon.agent.ctx/default-seed-blocks` at priority 12 (cached
-   prefix). REACTIVE: \"\" when no skill rows exist, so the section drops."
+  "The L0 `:skills-catalog` context block — one `;`-line per skill.
+
+   Each line is cheap: name + description + a DERIVED ●/○ loaded marker.
+   A symbol-slot section wired into `seon.agent.ctx/default-seed-blocks` at
+   priority 12 (cached prefix). REACTIVE: \"\" when no skill rows exist, so
+   the section drops."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (let [entries (catalog-entries db id)]
@@ -336,11 +343,12 @@
          "\n;    done? (my.skills/unload :" (name skill-name) ") ──")))
 
 (defn skill-block
-  "The L2 loaded-body block — the skill's full SKILL.md body, `;`-commented
-   (eval-safe via [[seon.agent.ctx/quote-lines]]) with a DERIVED token-cost
-   footer. The skill name comes from the block's own `:skill/<name>` name; the
-   row is pulled FRESH each render (REACTIVE: if the row is retracted, or the
-   file vanished, the body resolves blank → \"\" → the block drops)."
+  "The L2 loaded-body block — the skill's full SKILL.md, `;`-commented.
+
+   Eval-safe via [[seon.agent.ctx/quote-lines]], with a DERIVED token-cost
+   footer. The skill name comes from the block's own `:skill/<name>` name;
+   the row is pulled FRESH each render (REACTIVE: if the row is retracted,
+   or the file vanished, the body resolves blank → \"\" → the block drops)."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] node :seon.render/node}]
   (let [skill-name (keyword (name (:seon.agent.ctx/name node)))

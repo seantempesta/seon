@@ -126,9 +126,11 @@
    [::action ::action]])
 
 (defn button
-  "A clickable button wired to one of YOUR fns. `action` is a fn-REF
-   (`'submit!` — click-time signals become its one map arg) or a fn-CALL
-   (`(list 'approve! id)` — render-time args become positional args).
+  "A clickable button wired to one of YOUR fns.
+
+   `action` is a fn-REF (`'submit!` — click-time signals become its one map
+   arg) or a fn-CALL (`(list 'approve! id)` — render-time args become
+   positional args).
 
      (button {:my.tile/label \"Approve\" :my.tile/action (list 'approve! \"o-7\")})
      ;; human: a styled clickable button (data-on:click @post → /call)
@@ -149,8 +151,10 @@
    [::placeholder {:optional true} ::placeholder]])
 
 (defn input
-  "A labelled text field BOUND to a signal (`data-bind`). Its value posts
-   with the form submit (or any fn-REF button) as `{:<field> value}`.
+  "A labelled text field BOUND to a signal (`data-bind`).
+
+   Its value posts with the form submit (or any fn-REF button) as
+   `{:<field> value}`.
 
      (input {:my.tile/field \"note\" :my.tile/label \"Note\" :my.tile/placeholder \"…\"})"
   {:malli/schema [:=> [:cat ::input-request] :seon.render/html-response]}
@@ -214,10 +218,12 @@
    [::fields ::fields]])
 
 (defn form
-  "COMPOSE fields into a submitting form. On submit, every field's bound
-   signal POSTs to your `submit` fn as ONE map argument `{:<field> val …}`
-   (a fn-REF). Stacks the child field envelopes (dual render holds through
-   nesting), then appends the submit button.
+  "COMPOSE fields into a submitting form.
+
+   On submit, every field's bound signal POSTs to your `submit` fn as ONE
+   map argument `{:<field> val …}` (a fn-REF). Stacks the child field
+   envelopes (dual render holds through nesting), then appends the submit
+   button.
 
      (form {:my.tile/submit 'save-note!
             :my.tile/label  \"Save\"

@@ -32,8 +32,10 @@
     (AsyncLocalStorage.)))
 
 (defn current-hits
-  "The hits vector stashed by the active `with-hits` scope, or nil outside any
-   scope (the default-OFF path — no prefetch ran, nothing called `with-hits`).
+  "The hits vector stashed by the active `with-hits` scope, or nil.
+
+   It is nil outside any scope (the default-OFF path — no prefetch ran,
+   nothing called `with-hits`).
    `seon.agent.ctx.relevant/relevant-source-block` reads this synchronously."
   {:malli/schema [:=> [:cat] :any]}
   []
@@ -43,10 +45,12 @@
     (when (some? store) store)))
 
 (defn with-hits
-  "Run `f` (a 0-arg thunk, may return a Promise) inside a `.run` scope that
-   stashes `hits` (the `:seon.embed/hits` vector from `embed/search-pull`, or
-   nil on a fail-soft prefetch) so `(current-hits)` returns it across every
-   await inside `f`. Returns whatever `f` returns."
+  "Run `f` inside a `.run` scope that stashes `hits`.
+
+   `f` is a 0-arg thunk (may return a Promise). `hits` is the
+   `:seon.embed/hits` vector from `embed/search-pull` (or nil on a fail-soft
+   prefetch), so `(current-hits)` returns it across every await inside `f`.
+   Returns whatever `f` returns."
   {:malli/schema [:=> [:cat :any :any] :any]}
   [hits f]
   (.run retrieval-als hits f))
