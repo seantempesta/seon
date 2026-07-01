@@ -11,8 +11,7 @@
    metadata uses only BUILT-IN malli types, inert to bb, read by the pod's
    instrumentation; same pattern as `seon.repl.internal`). A `form` is an
    arbitrary read sexpr from `seon.repl.internal/parse-forms`, hence the `:any`
-   input type."
-  #?(:clj (:refer-clojure :exclude [])))
+   input type.")
 
 (defn malformed-def?
   "A top-level `(def …)` that is NOT a valid `def` — a `defn` typo.
