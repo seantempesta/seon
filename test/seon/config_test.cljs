@@ -36,6 +36,35 @@
   (testing "the {} manifest leaves the route seed untouched"
     (is (= routes (config/resolve-routes routes {})))))
 
+;;; :my.skills/load — the always-on skill-body presence-set expands into
+;;; :skill/<name> blocks on :seon.agent/ctx (live-proof the dial is consumed:
+;;; a non-default value observably changes the seeded block set).
+
+(defn- ctx-block-names [id override]
+  (into #{} (map :seon.agent.ctx/name)
+        (:seon.agent/ctx (config/resolve-agent-context id override))))
+
+(deftest skills-load-expands-to-skill-blocks
+  (with-redefs [config/load-manifest (fn [] {})]
+    (testing "default :my.skills/load [:repl] seeds exactly the :skill/repl body"
+      (let [names (ctx-block-names "worker-x" nil)]
+        (is (contains? names :skill/repl))
+        (is (not (contains? names :skill/datahike)))))
+    (testing "a NON-default :my.skills/load seeds a body block per member"
+      (let [names (ctx-block-names "worker-x" {:my.skills/load [:repl :datahike]})]
+        (is (contains? names :skill/repl))
+        (is (contains? names :skill/datahike))))
+    (testing "an explicit empty :my.skills/load seeds NO skill body"
+      (let [names (ctx-block-names "worker-x" {:my.skills/load []})]
+        (is (not (some #(= "skill" (namespace %)) names))
+            "no :skill/<name> block when load is empty")))
+    (testing "the expanded body block carries the shipped render symbol + priority 16"
+      (let [ctx (config/resolve-agent-context "worker-x" {:my.skills/load [:datahike]})
+            blk (first (filter #(= :skill/datahike (:seon.agent.ctx/name %))
+                               (:seon.agent/ctx ctx)))]
+        (is (= 'my.skills/skill-block (:seon.render/ai blk)))
+        (is (= 16 (:seon.agent.ctx/priority blk)))))))
+
 (deftest route-removes
   (testing "a route spec drops the named seeded routes"
     (let [m {:seon.config/routes [{:seon.config/removes [:seon.route/world]}]}]
