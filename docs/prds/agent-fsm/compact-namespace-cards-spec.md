@@ -206,6 +206,19 @@ Do NOT gate the code workstream on the full sweep — the renderer can ship agai
 today's docstrings (soft-clip at 78) and improve automatically as the corpus is
 cleaned.
 
+**Pilot outcome (`seon.warn`, 2026-07-01, doc-lint 13→0):** the convention
+applied cleanly — all 13 were `:no-terminal-punctuation` mid-sentence wraps, and
+in every case the good sentence already existed on line 1 (matches the "harvest
+the sentence already present" prediction; zero genuine rewrites). ≤72 was never a
+squeeze (rewrites landed 53–68 chars). **Load-bearing gotcha for the sweep: it is
+NOT a pure line-1 prepend.** Promoting a new first line leaves the old body's
+continuation dangling as a lowercase fragment ("…— the db's datahike schema
+attrs…"), so each fn needs a small BODY re-anchor (re-capitalize/re-open the
+continuation word). Trivial per fn, but it means the sweep needs per-fn LLM
+judgment, not a mechanical script. Sweep ordering: knock out
+`:no-terminal-punctuation` first (dominant + cheapest class), then the 28
+`:missing-docstring` (actual authoring) and 12 `:first-line-too-long` (trimming).
+
 ## Settled — do not re-litigate
 
 - KEEP `register!` calls in the card (the ~5% buys pattern reinforcement + a real
