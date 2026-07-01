@@ -15,8 +15,9 @@
   #?(:clj (:refer-clojure :exclude [])))
 
 (defn malformed-def?
-  "A top-level `(def …)` that is NOT a valid `def` — i.e. a `defn` typo such as
-   `(def mean [v] (/ (reduce + v) (count v)))`. `def` READS clean (the parse
+  "A top-level `(def …)` that is NOT a valid `def` — a `defn` typo.
+
+   Such as `(def mean [v] (/ (reduce + v) (count v)))`. `def` READS clean (the parse
    tier is blind to it) but its only valid arities are `(def name)`,
    `(def name init)`, and `(def name \"docstring\" init)` (the middle arg a
    STRING). MORE than name+init — or a 3-arg `def` whose middle isn't a string —
@@ -44,8 +45,9 @@
                :intent "functions only — defn with specs; the schema contract is locked"}})
 
 (defn head-name
-  "The NAME of a form's head symbol (namespace stripped), or nil if the form is
-   not a `(head …)` list led by a symbol. Namespace-agnostic, so
+  "The NAME of a form's head symbol (namespace stripped), or nil.
+
+   Nil when the form is not a `(head …)` list led by a symbol. Namespace-agnostic, so
    `schema/register!`, `seon.schema/register!`, and a bare `register!` all read
    as \"register!\"."
   {:malli/schema [:=> [:catn [::form :any]] [:maybe :string]]}

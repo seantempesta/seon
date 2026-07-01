@@ -120,8 +120,9 @@
 ;; ============================================================
 
 (defn refine
-  "Run the unified oracle on one mid-denoise checkpoint and return the combined
-   `::control-set`. Runs PARSE (always) + RETRIEVE (always, reads the program
+  "Run the unified oracle on one checkpoint, return the `::control-set`.
+
+   Runs on one mid-denoise checkpoint: PARSE (always) + RETRIEVE (always, reads the program
    graph) + EVAL FOLD (only when `::eval-verdicts` are supplied — the eval
    bundle is a separate node spawn).
 
@@ -206,8 +207,9 @@
 ;; ============================================================
 
 (defn to-wire
-  "Flatten a `::control-set` to the worker's JSON-ready `{op:\"refine\", …}`
-   object: parallel `clamps` / `renoise_spans` / `injections` arrays (each
+  "Flatten a `::control-set` to the worker's JSON-ready refine object.
+
+   The `{op:\"refine\", …}` object: parallel `clamps` / `renoise_spans` / `injections` arrays (each
    `span` a JS `[start end]` array the worker maps via its offset_map) plus the
    `legs` that ran. Each injection reuses [[retrieval/to-wire]] so its
    `{op:\"clamp\", span, replacement, spec_text}` shape is byte-identical to the

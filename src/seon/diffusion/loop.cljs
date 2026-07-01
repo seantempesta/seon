@@ -135,8 +135,9 @@
                       (::oracle/injections control-set))})
 
 (defn checkpoint-policy
-  "Decide CONTINUE / CONVERGED / GIVE-UP for one checkpoint. CONVERGED iff the
-   control set has neither renoise spans nor injections. Otherwise GIVE-UP when
+  "Decide CONTINUE / CONVERGED / GIVE-UP for one checkpoint.
+
+   CONVERGED iff the control set has neither renoise spans nor injections. Otherwise GIVE-UP when
    the K-budget is spent (`::iteration ≥ ::k-budget` — the hard termination
    backstop) or no progress was made since `::prev-control-set` (identical error
    signature); else CONTINUE."
@@ -190,7 +191,9 @@
       (str/join (conj out (subs canvas pos))))))
 
 (defn apply-control-set
-  "MOCK the diffusion worker for ONE checkpoint: produce the next canvas from the
+  "MOCK the diffusion worker for ONE checkpoint: produce the next canvas.
+
+   Produces the next canvas from the
    current one by holding clamp spans + gaps verbatim, replacing each injection
    span with the real symbol, and replacing each renoise span with its fixture
    fill. The next refine recomputes spans/specials in the fresh char basis — this
@@ -205,8 +208,9 @@
 ;; ============================================================
 
 (defn dry-run
-  "Run the FULL buzzsaw control loop on CPU from a degraded `::canvas-text`. Each
-   iteration: `refine` the current canvas, consult `checkpoint-policy`, and on
+  "Run the FULL buzzsaw control loop on CPU from a degraded `::canvas-text`.
+
+   Each iteration: `refine` the current canvas, consult `checkpoint-policy`, and on
    CONTINUE `apply-control-set` (the mock worker, driven by `::fills`) to produce
    the next canvas. Terminates at CONVERGED or GIVE-UP — bounded HARD by
    `::k-budget` iterations regardless of `::fills`, so it can never spin forever.

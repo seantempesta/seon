@@ -374,7 +374,9 @@
               (contains? core-namespaces expanded)))))))
 
 (defn free-references
-  "PURE structural pass: every FREE symbol reference in the canvas — call
+  "Every FREE symbol reference in the canvas — a PURE structural pass.
+
+   Call
    position and value position — minus locals, special forms, core, and
    interop. These are the symbols that MUST resolve to an external var; the
    ones that do not exist in the program graph are the retrieval targets
@@ -446,8 +448,9 @@
             (recur (inc i) cur)))))))
 
 (defn symbol-resolves?
-  "True iff `::name` (with optional alias-expanded `::qualifier`) names a real
-   program-graph fn. A FALSE on a committed symbol is the retrieval signal —
+  "True iff `::name` names a real program-graph fn.
+
+   Accepts an optional alias-expanded `::qualifier`. A FALSE on a committed symbol is the retrieval signal —
    the confidently-wrong-name class entropy cannot see."
   {:malli/schema [:=> [:cat [:map [::name :string]
                                   [::qualifier {:optional true} :string]
@@ -485,7 +488,9 @@
       (seq spec)     (assoc ::spec spec))))
 
 (defn retrieve-candidates
-  "GRAPH-path retrieval for one unresolved name: exact name match + near-name
+  "GRAPH-path retrieval of candidate fns for one unresolved name.
+
+   Exact name match + near-name
    (Levenshtein ≤ threshold) over `:seon.fn/sym`, ranked. When `::qualifier`
    resolves (via `::aliases`) to a real ns, same-ns candidates sort first.
    Returns up to `::k` (default 5) candidate maps."
@@ -520,8 +525,9 @@
 ;; ============================================================
 
 (defn unresolved-references
-  "DETECT step: the `free-references` that do NOT resolve in the program
-   graph — the hallucinated / dead-name symbols. Each is a retrieval target."
+  "DETECT step: the `free-references` that do NOT resolve in the graph.
+
+   The program-graph misses — the hallucinated / dead-name symbols. Each is a retrieval target."
   {:malli/schema [:=> [:cat ::detect-request] [:vector ::symbol-ref]]}
   [{::keys [canvas-text aliases db]}]
   (let [db      (the-db db)
@@ -535,7 +541,9 @@
                  refs))))
 
 (defn build-injection
-  "EMIT step: turn one unresolved `::ref` + its ranked `::candidates` into the
+  "EMIT step: turn one unresolved `::ref` into an injection descriptor.
+
+   Combines `::ref` with its ranked `::candidates` into the
    worker's `{op,…}` injection descriptor. The best candidate drives
    `::replacement` (qualifier preserved when present) and `::spec-text` (the
    encoder-KV content). Returns nil when there is no candidate to steer toward."
@@ -553,8 +561,10 @@
        ::candidates  candidates})))
 
 (defn retrieve-for-canvas
-  "THE graph-path entry: detect unresolved symbols in `::canvas-text`, retrieve
-   real candidates for each, and emit injection descriptors. PURE reader over
+  "THE graph-path entry: detect, retrieve, and emit injections for a canvas.
+
+   Detects unresolved symbols in `::canvas-text`, retrieves
+   real candidates for each, and emits injection descriptors. PURE reader over
    the db — no GPU, no embeddings. Returns `{::unresolved [...] ::injections
    [...]}`."
   {:malli/schema [:=> [:cat ::retrieve-request] ::retrieval-result]}
@@ -607,7 +617,9 @@
       (seq (:seon.fn/spec e))     (assoc ::spec (:seon.fn/spec e)))))
 
 (defn ^:async retrieve-for-canvas+semantic
-  "ENHANCEMENT over [[retrieve-for-canvas]]: when `SEON_EMBED` is on, augment
+  "ENHANCEMENT over [[retrieve-for-canvas]] with semantic neighbours.
+
+   When `SEON_EMBED` is on, augments
    each injection's `::candidates` with semantic neighbours from the Proximum
    fn index (`seon.embed/search-pull`, span-context query, fn-scope). Fail-soft
    — embed off or any wire error returns the graph-only result unchanged."
@@ -640,7 +652,9 @@
         (catch :default _ base)))))
 
 (defn to-wire
-  "Flatten an `::injection` to the worker's JSON-ready `{op,…}` object: `op`,
+  "Flatten an `::injection` to the worker's JSON-ready `{op,…}` object.
+
+   Fields: `op`,
    `span` (a JS array of char offsets the worker maps to token positions via
    its offset_map), `replacement`, and `spec_text` (encoder-KV content)."
   {:malli/schema [:=> [:cat [:map [::injection ::injection]]] :any]}

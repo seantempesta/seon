@@ -127,7 +127,9 @@
    [:clamp  :defn-close     ")\n"]])
 
 (defn build-scaffold
-  "Emit the `:defn-with-specs` clamp FRAME for the fn described by
+  "Emit the `:defn-with-specs` clamp FRAME for the requested fn.
+
+   Builds the frame for the fn described by
    `::scaffold-request`. Returns `::frame-text` (valid Clojure with placeholder
    slots), `::infill-spans` (the slots the worker generates), and `::clamp-spans`
    (the fixed structure the worker holds). The two span sets tile the frame."
@@ -166,8 +168,9 @@
        :span (clj->js span)})
 
 (defn to-wire
-  "Flatten a `::scaffold-response` to the worker's JSON-ready frame object:
-   `frame_text`, `clamp_spans` (op \"clamp\"), and `infill_spans` (op
+  "Flatten a `::scaffold-response` to the worker's JSON-ready frame object.
+
+   Fields: `frame_text`, `clamp_spans` (op \"clamp\"), and `infill_spans` (op
    \"infill\"). The worker clamps every `clamp_spans` position and infills every
    `infill_spans` position; spec slots are listed before the body so generation
    order favours the contract."
