@@ -108,6 +108,8 @@ genuinely ADDITIVE (a second independent set).
   unindexed ns — owner leaned keyword.
 - **Current ns = two scalar bools**, NOT a magic `:current` entry in a map. No
   pseudo-namespace key.
+
+> **INTERFACE LIVE (registered 2026-07-01):** `::full-source` `::with-tests` `::current-full?` `::current-tests?` — registered + bridge/validation-proven in `seon.agent.ctx.namespaces`; the config lane's generic loader can now transact these onto the namespaces block entity. Set attrs use element type `:seon.ns/name` (bridge derives `:db.type/keyword` cardinality-many, identity-property does NOT leak — identical to a bare `:keyword`); bools default `true`. NOTE: `malli.transform` is NOT compiled into the pod build, so the `default-value-transformer` (decision 4 default-fill) can't run in the pod yet — the config lane must add that require if it relies on `m/decode` to fill defaults.
 - **Likely a rename/extend of `:seon.agent.ctx/render-namespaces`**, not a new
   mechanism — that attr already means "which nses render." Post compact/full split
   it becomes `::full-source` (or the two coexist: one = include, one = pin-full).

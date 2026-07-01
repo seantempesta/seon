@@ -48,7 +48,32 @@
     [seon.agent.ctx :as ctx]
     [seon.config :as config]
     [seon.db :as db]
-    [seon.eval :as seval]))
+    [seon.eval :as seval]
+    [seon.schema :as schema]))
+
+;; ============================================================
+;; Config interface — the namespaces-block render dials, as reactive
+;; datoms on the namespaces block entity (config-driven-agent-init lane's
+;; two-level model: a block ref off the agent record). The config loader
+;; transacts these onto the block; `db/transact!` refuses unregistered
+;; attrs, so they live HERE, colocated with the render fn that reads them.
+;;
+;; Attribute-PRESENCE is the config (decision 22/23): a ns present in a set
+;; IS its config; compact is the ABSENCE. The two set attrs mirror the
+;; proven cardinality-many pattern of `:seon.agent.ctx/render-namespaces`;
+;; the element type is `:seon.ns/name` (a keyword, matching the identity
+;; attr's shape) — the bridge derives the SAME cardinality-many keyword
+;; column as a bare `:keyword` would, but names the shape. A keyword (not a
+;; `:db.type/ref`) tolerates configuring a not-yet-indexed ns (a fresh
+;; `my.agent.*` home ns): an unmatched name simply no-ops in the render.
+;; Defaults ride each spec (malli-native, decision 4) — a fresh block is
+;; compact-everywhere + full-current-ns purely from these defaults.
+;; ============================================================
+
+(schema/register! ::full-source   [:vector {:default []} :seon.ns/name]) ; ns present → render FULL (absent → compact)
+(schema/register! ::with-tests    [:vector {:default []} :seon.ns/name]) ; ns present → also show its tests
+(schema/register! ::current-full?  [:boolean {:default true}])           ; the agent's current ns renders full
+(schema/register! ::current-tests? [:boolean {:default true}])           ; …and its current ns shows its tests
 
 ;; ============================================================
 ;; The namespace-display selection rules — the ONE home for which
