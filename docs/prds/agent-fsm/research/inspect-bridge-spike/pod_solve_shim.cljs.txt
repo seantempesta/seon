@@ -1,0 +1,77 @@
+;; THROWAWAY /solve shim — the Phase-0 bridge boundary door, stood up LIVE in the
+;; running default pod (:7890) via the shadow MCP eval, listening on :7899. This is
+;; the VERBATIM record of the smoke's pod-side handler. It reuses ONLY existing,
+;; unmodified pod functions (start!/message!/derive-state/db query) — the same
+;; start-and-await-read recipe as test/seon/gym/driver.cljs drive-loop!. NO agent
+;; loop / context / eval / FSM code was touched. Productionizing = mounting this
+;; identical handler in seon.web.serve with a Malli request/response schema.
+
+;; --- the /solve contract fn ---
+(defn ^:async solve-once!
+  "Mint scratch child → inject input via the REAL wake path (message!) → poll to
+   idle → read final reply + turn/eval metadata. Inspect never manages turns; the
+   pod's own FSM does."
+  [input timeout-ms]
+  (let [start   (js/Date.now)
+        started (await (db/with-agent "root"
+                         (fn [] (agent/start! {:seon.agent/purpose "inspect /solve scratch child"}))))
+        aid     (or (:seon.agent/id started)
+                    (->> (db/query {:seon.db/query '[:find ?id :where [?a :seon.agent/id ?id]]})
+                         (map first) (remove #(= "root" %)) sort last))]
+    (await (agent/message! {:seon.agent.message/from    agent/user-ref
+                            :seon.agent.message/to      [[:seon.agent/id aid]]
+                            :seon.agent.message/content input}))
+    (loop []
+      (await (js/Promise. (fn [r] (js/setTimeout r 1500))))
+      (let [st      (derive/derive-state @db/*conn* aid)
+            elapsed (- (js/Date.now) start)]
+        (if (or (= :idle st) (> elapsed timeout-ms))
+          (let [agent-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id aid]}))
+                user-eid  (:db/id (db/entity {:seon.db/ref [:seon.user/id "user"]}))
+                turns (->> (db/query {:seon.db/query '[:find ?t :in $ ?ag :where
+                                                       [?r :seon.agent.run/agent ?ag]
+                                                       [?t :seon.agent.turn/run ?r]]
+                                      :seon.db/args [agent-eid]}) count)
+                evals (->> (db/query {:seon.db/query '[:find ?e :in $ ?ag :where
+                                                       [?r :seon.agent.run/agent ?ag]
+                                                       [?t :seon.agent.turn/run ?r]
+                                                       [?t :seon.agent.turn/evals ?e]]
+                                      :seon.db/args [agent-eid]}) count)
+                reply (->> (db/query {:seon.db/query '[:find ?f ?to ?at ?c :where
+                                                       [?m :seon.agent.message/from ?f]
+                                                       [?m :seon.agent.message/to ?to]
+                                                       [?m :seon.agent.message/at ?at]
+                                                       [?m :seon.agent.message/content ?c]]})
+                           (filter (fn [[f to _ _]] (and (= f agent-eid) (= to user-eid))))
+                           (sort-by (fn [[_ _ at _]] (.getTime at)))
+                           (map (fn [[_ _ _ c]] c)) last)]
+            {:agent_id aid :turns turns :evals evals
+             :closed_reason (str (derive/last-closed-reason @db/*conn* aid))
+             :reply (or reply "") :elapsed_ms elapsed})
+          (recur))))))
+
+;; --- the HTTP shim (:7899) ---
+(def http (js/require "http"))
+(defn read-body [req cb]
+  (let [chunks (atom "")]
+    (.on req "data" (fn [c] (swap! chunks str c)))
+    (.on req "end"  (fn [] (cb @chunks)))))
+
+(def solve-server
+  (.createServer http
+    (fn [req res]
+      (if (and (= "POST" (.-method req)) (str/starts-with? (.-url req) "/solve"))
+        (read-body req
+          (fn [body]
+            (let [{:strs [input timeout_ms]} (js->clj (js/JSON.parse body))]
+              (-> (solve-once! input (or timeout_ms 300000))
+                  (.then (fn [result]
+                           (.writeHead res 200 #js {"Content-Type" "application/json"})
+                           (.end res (js/JSON.stringify (clj->js result)))))
+                  (.catch (fn [e]
+                            (.writeHead res 500 #js {"Content-Type" "application/json"})
+                            (.end res (js/JSON.stringify (clj->js {:error (str e)})))))))))
+        (do (.writeHead res 404) (.end res "not found"))))))
+
+(.listen solve-server 7899 "127.0.0.1"
+  (fn [] (js/console.log "SEON /solve smoke shim listening on 127.0.0.1:7899")))
