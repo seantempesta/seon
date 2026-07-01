@@ -44,6 +44,7 @@
 (cp/add-classpath (str (fs/file (fs/parent (fs/parent (fs/absolutize *file*))) "src")))
 
 (require '[seon.repl.internal :as internal]
+         '[seon.diffusion.grammar :as grammar]        ; shared T1/phase predicates (bb + pod)
          '[cheshire.core :as json])
 
 (defn validate
@@ -71,33 +72,55 @@
      :errors errors})))
 
 (defn refine-parse
-  "The PARSE HALF of the unified `seon.diffusion.oracle/refine` control set,
+  "The CHEAP TIERS of the unified `seon.diffusion.oracle/refine` control set,
    computed on the CANVAS basis (no fence strip — spans share the worker's
-   `offset_map`). One bb call covers EXACTLY the parse tier:
+   `offset_map`). One bb call covers the tiers that need NO out-of-process help:
 
-     - `clamps`        — good, syntactically-complete form spans to HOLD;
-     - `renoise_spans` — broken-syntax spans to RE-NOISE.
+     - `renoise_spans` — broken-syntax spans (PARSE) + def-vs-defn spans
+       (STRUCTURAL, `grammar/malformed-def?`) + phase-grammar violations
+       (when `phase` is supplied, `grammar/phase-violation?`);
+     - `clamps`        — good form spans that are NONE of the above, to HOLD.
 
-   It CANNOT produce `injections` (the retrieve leg reads the program graph —
-   `:seon.fn/sym` — which is not on bb's classpath; that runs in the CLJS pod
-   oracle) nor fold eval verdicts (the node self-host bundle). So `injections`
-   is empty and `legs` is `[\"parse\"]`, with a `note` stating the boundary.
-   The form `:span` (canvas-aligned) comes straight from `parse-forms`."
-  [code]
-  (let [entries (internal/parse-forms code {:strip-fences? false})
-        forms   (filter #(= :form (:kind %)) entries)
-        reads   (filter #(= :read (:kind %)) entries)]
-    {:tier          "refine"
-     :legs          ["parse"]
-     :note          (str "bb covers the PARSE tier only — clamps + renoise_spans. "
-                         "injections (retrieve) need the program graph (CLJS pod "
-                         "oracle); eval verdicts need the node self-host bundle.")
-     :clamps        (mapv (fn [f] {:span (:span f) :source (:source f)}) forms)
-     :renoise_spans (mapv (fn [r] {:span       (:span r)
-                                   :error-kind (name (:error-kind r))
-                                   :source     (:source r)})
-                          reads)
-     :injections    []}))
+   The structural + phase predicates are the SHARED `seon.diffusion.grammar`
+   ns (identical to the pod oracle — no drift). bb still CANNOT produce
+   `injections` (the retrieve leg reads the program graph — `:seon.fn/sym` —
+   not on bb's classpath; CLJS pod oracle) nor fold eval verdicts (the node
+   self-host bundle). So `injections` is empty and `legs` is `[\"parse\"]` (plus
+   `\"phase\"` when a phase gate ran). Form `:span`s come from `parse-forms`."
+  ([code] (refine-parse code nil))
+  ([code phase]
+   (let [entries (internal/parse-forms code {:strip-fences? false})
+         forms   (filter #(= :form (:kind %)) entries)
+         reads   (filter #(= :read (:kind %)) entries)
+         ;; broken-syntax spans (PARSE tier)
+         parse-r (mapv (fn [r] {:span       (:span r)
+                                :error-kind (name (:error-kind r))
+                                :source     (:source r)})
+                       reads)
+         ;; def-vs-defn (STRUCTURAL tier) + phase violations (PHASE tier), both
+         ;; over the GOOD forms via the SHARED grammar predicates.
+         struct-r (keep (fn [f]
+                          (when (grammar/malformed-def? (:form f))
+                            {:span (:span f) :error-kind "def-vs-defn" :source (:source f)}))
+                        forms)
+         phase-r  (when phase
+                    (keep (fn [f]
+                            (when (grammar/phase-violation? phase (:form f))
+                              {:span (:span f) :error-kind "phase-violation" :source (:source f)}))
+                          forms))
+         renoise  (vec (concat parse-r struct-r phase-r))
+         bad      (set (map :span renoise))
+         clamps   (->> forms
+                       (remove #(contains? bad (:span %)))
+                       (mapv (fn [f] {:span (:span f) :source (:source f)})))]
+     {:tier          "refine"
+      :legs          (if phase ["parse" "phase"] ["parse"])
+      :note          (str "bb covers the CHEAP tiers — parse + structural (def-vs-defn) + "
+                          "phase. injections (retrieve) need the program graph (CLJS pod "
+                          "oracle); eval verdicts need the node self-host bundle.")
+      :clamps        clamps
+      :renoise_spans renoise
+      :injections    []})))
 
 (defn handle
   "Dispatch one parsed request map (string keys, from JSON) to a response
@@ -118,7 +141,8 @@
         strip-fences? (get req "strip-fences" (not= op "parse-raw"))
         base (case op
                ("parse" "validate" "parse-raw") (validate (get req "code" "") strip-fences?)
-               "refine"                          (refine-parse (get req "code" ""))
+               "refine"                          (refine-parse (get req "code" "")
+                                                               (some-> (get req "phase") keyword))
                {:error {:kind "unimplemented"}})]
     (cond-> (assoc base :op op)
       (some? id) (assoc :id id))))

@@ -36,6 +36,7 @@
   (:require
     [seon.embed]                                    ; :seon.embed/db schema (referenced below)
     [seon.repl.internal :as internal]
+    [seon.diffusion.grammar :as grammar]            ; shared T1/phase predicates (bb + pod)
     [seon.diffusion.retrieval :as retrieval]
     [seon.schema :as schema]))
 
@@ -109,60 +110,10 @@
   [[s1 e1] [s2 e2]]
   (and (< s1 e2) (< s2 e1)))
 
-;; ============================================================
-;; Structural lint — the CHEAP tier (T1): a well-formed form whose SHAPE is
-;; wrong. Catches the class of mistakes the eval tier need never be paid for —
-;; the AST already proves them. Currently: def-vs-defn.
-;; ============================================================
-
-(defn- malformed-def?
-  "A top-level `(def …)` that is NOT a valid `def` — i.e. a `defn` typo such as
-   `(def mean [v] (/ (reduce + v) (count v)))`. `def` READS clean (the parse
-   tier is blind to it) but its only valid arities are `(def name)`,
-   `(def name init)`, and `(def name \"docstring\" init)` (the middle arg a
-   STRING). MORE than name+init — or a 3-arg `def` whose middle isn't a string —
-   is structurally malformed: almost certainly a dropped `n`. No semantics, no
-   eval — the AST alone decides, so it renoises at the ~free structural tier
-   instead of paying the 2.6ms eval. `(def xs [1 2 3])` (a real vector binding)
-   stays valid (name+init = 2 args)."
-  [form]
-  (and (seq? form)
-       (= 'def (first form))
-       (let [args (rest form)                         ; name + the init forms
-             n    (count args)]
-         (or (> n 3)
-             (and (= n 3) (not (string? (second args))))))))
-
-;; ============================================================
-;; Phased grammar gate — the generalization of the structural tier. Generation
-;; runs in ORDERED phases; each phase ALLOWS a set of top-level form heads and
-;; renoises everything else. Lock data-modeling to schemas FIRST (no premature
-;; `defn` body), then unlock functions once the contract is fixed. Matching is
-;; by the head symbol's NAME (namespace-agnostic), so `schema/register!`,
-;; `seon.schema/register!`, and a bare `register!` all read as "register!".
-;; ============================================================
-
-(def ^:private phase-grammars
-  {:schemas   {:allow #{"ns" "register!" "comment"}
-               :intent "schemas only — register! the data shape before any fn body"}
-   :functions {:allow #{"ns" "defn" "comment"}
-               :intent "functions only — defn with specs; the schema contract is locked"}})
-
-(defn- head-name
-  "The NAME of a form's head symbol (namespace stripped), or nil if the form is
-   not a `(head …)` list led by a symbol."
-  [form]
-  (let [h (and (seq? form) (first form))]
-    (when (symbol? h) (name h))))
-
-(defn- phase-violation?
-  "True when `form` is a top-level call whose head is NOT allowed in `phase`.
-   A non-call form (a bare literal/vector) has no head → not a violation here
-   (the parse/structural tiers own those)."
-  [phase form]
-  (when-let [allow (get-in phase-grammars [phase :allow])]
-    (when-let [h (head-name form)]
-      (not (contains? allow h)))))
+;; The structural-lint (T1 def-vs-defn) + phase-grammar predicates live in the
+;; dependency-free `seon.diffusion.grammar` (.cljc) so the co-located babashka
+;; parse server shares the SAME definitions — see [[grammar/malformed-def?]] /
+;; [[grammar/phase-violation?]]. No copy here; drift is impossible.
 
 ;; ============================================================
 ;; The unified dispatcher
@@ -206,7 +157,7 @@
         ;; form WITHOUT paying the eval tier.
         struct-renoise (->> forms
                             (keep (fn [{:keys [span source form]}]
-                                    (when (and span (malformed-def? form))
+                                    (when (and span (grammar/malformed-def? form))
                                       {::span span ::error-kind :def-vs-defn
                                        ::source source})))
                             vec)
@@ -217,7 +168,7 @@
         phase-renoise (if phase
                         (->> forms
                              (keep (fn [{:keys [span source form]}]
-                                     (when (and span (phase-violation? phase form))
+                                     (when (and span (grammar/phase-violation? phase form))
                                        {::span span ::error-kind :phase-violation
                                         ::source source})))
                              vec)
