@@ -200,6 +200,11 @@ full list with severities.
   overrides per-cluster (`SEON_CONFIG`/`SEON_PROFILE`/`#env`); absent = byte-identical.
 - **Canvas = the live tile** (`:seon.render.live-tile/content`); root's view IS the dashboard at `/`;
   `/world` retired. Tokens never chars. No `:kind` (attributes + connections).
+- **Docstring convention** — public fn line 1 = complete ≤72-char sentence (78 cap) ending in
+  terminal punctuation; it's the compact-card summary + renders everywhere. Enforced by
+  `seon.dev.docstring` (warn). Full rule: `docs/conventions.md` "Function Docstrings" +
+  [[compact-namespace-cards-spec]]. Compact-card render = presence-sets on the namespaces block
+  (`::full-source`/`::with-tests`), NOT a `:map-of` — see [[config-driven-agent-init-namespaces-additions-2026-07-01]].
 
 ## Plans / next steps
 

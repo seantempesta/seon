@@ -773,6 +773,47 @@ args; don't re-explain them in prose. See
 
 ---
 
+## Function Docstrings
+
+Every public fn's docstring **first line is a complete, standalone sentence** —
+it is the summary shown wherever the fn renders compactly (most importantly the
+compact namespace card, which shows ONLY line 1) and the first thing every reader
+sees. The rules:
+
+- **One complete sentence, ≤ 72 chars (78 hard cap), ending in terminal
+  punctuation** (`.` / `?` / `!`) — never a mid-sentence hard-wrap.
+- **States the action + its data effect, not the mechanism.** Mechanism, gotchas,
+  and worked notes go in the BODY (after a blank line) — the body renders only in
+  the full-source view.
+- **Imperative for side-effecting verbs** (`Store…`, `Mint…`, `Retract…`);
+  **noun-phrase for pure queries** (`Agent ids whose…`, `Snapshot of…`) — the mood
+  signals purity at a glance.
+- **Backtick-quote identifiers** (`` `::owner` ``, `` `:idle` ``).
+
+```clojure
+;; BAD — line 1 hard-wraps mid-sentence (renders broken in a card)
+(defn armable-agent-ids
+  "Agent ids whose DERIVED state is `:idle` — not `:terminated` AND with no
+   OPEN run. ..."
+  ...)
+
+;; GOOD — line 1 is a complete ≤72-char sentence; detail moves to the body
+(defn armable-agent-ids
+  "Agent ids whose derived state is `:idle` — the ones a trigger can WAKE.
+
+   <mechanism / caveats continue here, rendered in the full view only>"
+  ...)
+```
+
+Promoting a clean line 1 often leaves the old continuation dangling as a
+lowercase fragment — re-open the body sentence so the full docstring still reads
+(it is a small body edit, not a pure prepend). Enforced by `seon.dev.docstring`
+(warn-only, via the dev hook): it flags a public fn whose line 1 is missing,
+> 78 chars, or lacks terminal punctuation. Namespace docstrings follow the same
+current-state discipline — see [Namespace Docstrings](#namespace-docstrings).
+
+---
+
 ## Context, Render, and the System Message
 
 How agent-facing context is assembled — sections as functions of the DB at

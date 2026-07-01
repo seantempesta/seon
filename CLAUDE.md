@@ -610,6 +610,12 @@ Instrumentation is managed by Integrant (`:seon.dev/instrumentation`), survives 
 
 ---
 
+## Docstrings (they render into agent context)
+
+A public fn's docstring **first line is a complete, standalone sentence, ≤72 chars (78 hard cap), ending in terminal punctuation** (`.`/`?`/`!`) — it is the summary shown wherever the fn renders compactly (the compact namespace card shows ONLY line 1). State the **action + data effect, not the mechanism** (mechanism → the body, after a blank line, which renders in the full view). Imperative for side-effecting verbs, noun-phrase for pure queries; backtick-quote identifiers. Enforced by `seon.dev.docstring` (warn-only, dev hook). Full rule + examples: `docs/conventions.md` "Function Docstrings".
+
+---
+
 ## File Locations
 
 **Never use `/tmp` or system temp directories.** Use project-local directories:
