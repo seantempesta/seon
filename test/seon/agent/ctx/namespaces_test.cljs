@@ -92,6 +92,76 @@
                  (-> (db/transact! {:seon.db/tx-data (seed-tx)})
                      (.then (fn [_] (body @conn)))))))))
 
+;; ---------------------------------------------------------------------------
+;; namespaces-block FULL-vs-COMPACT dispatch (the compact-card wiring).
+;;
+;; Two seeded nses with a distinctive fn BODY token so full (body shown) is
+;; unambiguously distinguishable from compact (body elided `…`):
+;;   - :seon.agent.demo-verb  — agent-facing (compact-worthy) → compact card
+;;                              by default; `(+ x 100)` only in a FULL render.
+;;   - :seon.web.demo-plumbing — deep framework (NOT compact-worthy) → DROPPED
+;;                              by default; `(* x 7)` only when promoted full.
+;; ---------------------------------------------------------------------------
+
+(defn- seed-dispatch-tx []
+  [{:seon.ns/name :seon.agent.demo-verb :seon.ns/source "(ns seon.agent.demo-verb)"}
+   {:seon.fn/sym      "seon.agent.demo-verb/do-verb"
+    :seon.fn/ns       [:seon.ns/name :seon.agent.demo-verb]
+    :seon.fn/source   "(defn do-verb [x] (+ x 100))"
+    :seon.fn/fn-var?  true :seon.fn/private? false
+    :seon.fn/doc      "Do the verb."
+    :seon.fn/arglists "([x])"
+    :seon.fn/spec     "[:=> [:cat :int] :int]"}
+   {:seon.ns/name :seon.web.demo-plumbing :seon.ns/source "(ns seon.web.demo-plumbing)"}
+   {:seon.fn/sym      "seon.web.demo-plumbing/plumb"
+    :seon.fn/ns       [:seon.ns/name :seon.web.demo-plumbing]
+    :seon.fn/source   "(defn plumb [x] (* x 7))"
+    :seon.fn/fn-var?  true :seon.fn/private? false
+    :seon.fn/arglists "([x])"
+    :seon.fn/spec     "[:=> [:cat :int] :int]"}
+   {:seon.agent/id "tst-2606260000"}])
+
+(defn- with-dispatch-db [body]
+  (-> (client/open-agent-conn!)
+      (.then (fn [conn]
+               (binding [db/*conn* conn]
+                 (-> (db/transact! {:seon.db/tx-data (seed-dispatch-tx)})
+                     (.then (fn [_] (body conn)))))))))
+
+(deftest namespaces-block-default-compact-and-drop
+  (async done
+    (-> (with-dispatch-db
+          (fn [conn]
+            (let [out (nss/namespaces-block {:seon.db/db @conn :seon.agent/id "tst-2606260000"})]
+              (testing "agent-facing (seon.agent.*) verb ns → COMPACT card, body elided"
+                (is (str/includes? out ";;; ┌─ namespace seon.agent.demo-verb ─"))
+                (is (str/includes? out "(defn do-verb"))
+                (is (str/includes? out "…"))
+                (is (not (str/includes? out "(+ x 100)"))
+                    "compact card must NOT contain the fn body"))
+              (testing "deep-framework (seon.web.*) ns → DROPPED, searchable-only"
+                (is (not (str/includes? out "demo-plumbing")))))))
+        (.then (fn [_] (done)) (fn [e] (is false (str "threw: " (.-message e))) (done))))))
+
+(deftest namespaces-block-full-source-override
+  (async done
+    (-> (with-dispatch-db
+          (fn [conn]
+            (binding [db/*conn* conn]
+              (-> (db/transact!
+                    {:seon.db/tx-data
+                     [{:seon.agent/id "tst-2606260000"
+                       :seon.agent.ctx.namespaces/full-source
+                       [:seon.agent.demo-verb :seon.web.demo-plumbing]}]})
+                  (.then (fn [_]
+                           (let [out (nss/namespaces-block
+                                       {:seon.db/db @conn :seon.agent/id "tst-2606260000"})]
+                             (testing "::full-source promotes a compact ns to FULL (body shown)"
+                               (is (str/includes? out "(+ x 100)")))
+                             (testing "::full-source promotes a dropped framework ns to FULL"
+                               (is (str/includes? out "(* x 7)"))))))))))
+        (.then (fn [_] (done)) (fn [e] (is false (str "threw: " (.-message e))) (done))))))
+
 (deftest render-one-ns-compact-shape
   (async done
     (-> (with-seeded-db
