@@ -499,7 +499,7 @@
 ;; environment orientation + REPL doctrine + common DB ops + standing
 ;; teachings hardcoded in `seon.agent.ctx/system-text`. SOUL.md / AGENTS.md are
 ;; FILE-LOADED CONTEXT sections (`seon.agent.ctx/file-block`), wired into
-;; `seon.agent.ctx/default-seed-blocks` — they ride the user-message context, not
+;; `seon.config/default-ctx-blocks` — they ride the user-message context, not
 ;; here. There is NO file read and NO fallback in this path.
 ;; ============================================================
 

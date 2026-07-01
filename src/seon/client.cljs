@@ -143,7 +143,7 @@
     [my.kb.shared]
     ;; Loadable skills — the `:my.skills/*` schema + the corpus scanner
     ;; `boot-seed!` transacts (`my.skills/seed-skills-tx-data`) and the
-    ;; catalog/skill-block render fns `default-seed-blocks` wires by symbol.
+    ;; catalog/skill-block render fns `seon.config/default-ctx-blocks` wires by symbol.
     ;; Required here so its register! calls run and the build includes it.
     [my.skills]
     ;; The live-tile/canvas TOOLKIT — the aggregation (`my.data`) + static
@@ -177,7 +177,7 @@
     ;; its register! calls run before the boot install of :seon.agent.todo/*.
     [seon.agent.todo]
     ;; The per-block ctx namespaces (ctx-sections-split-2026-06-18):
-    ;; each owns one block fn (+ html twin) that default-seed-blocks
+    ;; each owns one block fn (+ html twin) that seon.config/default-ctx-blocks
     ;; wires by SYMBOL — required here so the build includes them and
     ;; their munged symbols resolve via seon.eval/lookup-value at
     ;; render time (no require cycle: the section nses require seon.agent.ctx

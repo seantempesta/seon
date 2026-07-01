@@ -14,7 +14,7 @@
    embeddings/Proximum — see `seon.agent.ctx.relevant`).
 
    Symbol-wired into the composer layout
-   (`seon.agent.ctx/default-seed-blocks`) as
+   (`seon.config/default-ctx-blocks`) as
    `'seon.agent.ctx.findings/findings-block`; loaded at boot so the
    symbol resolves for `seon.eval/lookup-value`. Rides the VOLATILE band
    (priority > cache-breakpoint) so a newly-stored finding never busts

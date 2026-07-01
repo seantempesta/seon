@@ -131,13 +131,13 @@
 
 (def ^:private default-ctx-blocks
   "The default `:seon.agent/ctx` block TREE the schema carries as its `:default`
-   — a SPARSE manifest fills it. Reproduces the CP-0 parity oracle byte-for-byte:
-   the [[seon.agent.ctx/default-seed-blocks]] list (soul/agents OMITTED — those
-   files are absent in the default cluster, matching the oracle). The always-on
-   skill BODIES are NOT here — they are EXPANDED from the agent-context's
-   `:my.skills/load` presence-set (default `[:repl]`) into `:skill/<name>` blocks
-   by [[expand-skill-blocks]], so a cluster's `:my.skills/load` set actually
-   drives which bodies seed. `:seon.render/ai` values are literal quoted symbols
+   — a SPARSE manifest fills it. Reproduces the CP-0 parity oracle. Two block
+   groups are NOT hardcoded here, they are computed by
+   [[resolve-agent-context]]: the always-on skill BODIES (from `:my.skills/load`
+   via [[expand-skill-blocks]], default `[:repl]`) and the soul/agents identity
+   file-blocks (from [[identity-file-blocks]] — present only when the file exists
+   and SEON_SOUL is not off; the default cluster runs SEON_SOUL=false, matching
+   the soul-off oracle). `:seon.render/ai` values are literal quoted symbols
    (LEAF rule — no var ref). Sorted top→bottom = static→volatile (the
    provider-cache contract)."
   [{:seon.agent.ctx/name :shared-instructions :seon.agent.ctx/priority 10
@@ -159,7 +159,7 @@
    {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
     :seon.render/ai 'seon.agent.ctx.transcript/transcript-block
     ;; the transcript carries BOTH render slots (ai + html) — the html slot
-    ;; drives the datastar UI tile. Matches default-seed-blocks (ctx.cljs) +
+    ;; drives the datastar UI tile. Matches default-ctx-blocks +
     ;; the CP-0 oracle inventory (:seon.render html(1)).
     :seon.render/html 'seon.agent.ctx.transcript/transcript-block-html}])
 
@@ -567,6 +567,40 @@
    :seon.agent.ctx/priority skill-body-priority
    :seon.render/ai          'my.skills/skill-block})
 
+(defn- soul-file-path
+  "The primary identity file: `nil` when `SEON_SOUL` is explicitly disabled
+   (`false`/`0`/`off`/`no`), else `SEON_SOUL_FILE` override, else `SOUL.md`.
+   Mirrors the retired `seon.agent.ctx/soul-file-path` const — now the config
+   path owns identity-file seeding (LEAF rule: config computes the path + does
+   the fs existence check, emitting a pure-data block with a literal render
+   symbol; no `seon.agent.ctx` var ref)."
+  []
+  (let [flag (some-> (env "SEON_SOUL") clojure.string/lower-case clojure.string/trim)]
+    (when-not (contains? #{"false" "0" "off" "no"} flag)
+      (or (env "SEON_SOUL_FILE") "SOUL.md"))))
+
+(defn- file-exists? [path]
+  (and (string? path)
+       (try (.existsSync (js/require "fs") path) (catch :default _ false))))
+
+(defn- identity-file-blocks
+  "The soul/agents file-blocks PREPENDED onto the seed when their file is
+   PRESENT (reactive, NO fallback — absent file → no block, as the retired
+   `seon.agent.ctx/default-seed-blocks` fn did). SOUL.md at priority 5 (gated by SEON_SOUL),
+   AGENTS.md at priority 8. Each is a pure-data block carrying the shipped
+   `seon.agent.ctx/file-block-ai|html` render symbols (the slot fns re-read the
+   file fresh each render). Only files that EXIST yield a block, so a soul-OFF /
+   file-absent cluster gets none = byte-parity."
+  []
+  (->> [(when-let [p (soul-file-path)]
+          {:seon.agent.ctx/name :soul :seon.agent.ctx/priority 5
+           :seon.agent.ctx/file-path p})
+        {:seon.agent.ctx/name :agents :seon.agent.ctx/priority 8
+         :seon.agent.ctx/file-path "AGENTS.md"}]
+       (filterv (fn [b] (and b (file-exists? (:seon.agent.ctx/file-path b)))))
+       (mapv (fn [b] (assoc b :seon.render/ai   'seon.agent.ctx/file-block-ai
+                              :seon.render/html 'seon.agent.ctx/file-block-html)))))
+
 (defn- expand-skill-blocks
   "Expand the agent-context's `:my.skills/load` presence-set into `:skill/<name>`
    body blocks upserted onto `:seon.agent/ctx`, so the always-on skill BODIES a
@@ -637,14 +671,17 @@
    [[context-config-for]], by identity, already defaulted) ← per-mint `override`
    — then a final recursive `m/decode` fills any key the override left absent.
    Returns `{… agent scalars … :seon.agent/ctx [block …]}`; the caller transacts
-   it as ONE nested component-ref tx. The one non-generic step is
-   [[expand-skill-blocks]]: the `:my.skills/load` presence-set expands into the
-   `:skill/<name>` body blocks (default `[:repl]` = byte-parity). A sparse/absent
-   manifest + nil override ⇒ the byte-parity default tree."
+   it as ONE nested component-ref tx. Two non-generic block steps run last:
+   [[expand-skill-blocks]] (the `:my.skills/load` presence-set → `:skill/<name>`
+   bodies, default `[:repl]`) and the identity file-blocks ([[identity-file-blocks]]
+   — SOUL.md/AGENTS.md when present, gated by SEON_SOUL). Both upsert by name, so
+   a manifest that names those blocks wins. A sparse/absent manifest + nil
+   override ⇒ the byte-parity default tree."
   {:malli/schema [:=> [:catn [::agent-id ::agent-id]
                        [::override [:maybe :map]]]
                   :seon.config/agent-context]}
   [id override]
   (let [merged (merge (context-config-for id (load-manifest)) override)]
     (-> (m/decode :seon.config/agent-context merged ctx-default-transformer)
-        (expand-skill-blocks))))
+        (expand-skill-blocks)
+        (update :seon.agent/ctx #(upsert-by-name (vec (identity-file-blocks)) %)))))

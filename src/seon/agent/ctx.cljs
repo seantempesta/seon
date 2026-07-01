@@ -15,7 +15,7 @@
        optional debug-view twin.
      - `install!` / `remove!` — the ONE scope-aware override + seed verb
        over the agent's own `:seon.agent/ctx` block set; `seed-default-ctx!`
-       SEED-COPIES `default-seed-blocks` into a fresh agent at creation.
+       SEED-COPIES `seon.config/default-ctx-blocks` into a fresh agent at creation.
        `context-root` reads the agent's COMPLETE `:seon.agent/ctx`, decoded
        + priority-sorted — NO render-time merge, NO separate default set, NO
        char budget. The render guard (a broken block renders an inline error
@@ -41,7 +41,7 @@
        `seon.agent.ctx.warnings`,
        :inventory → `seon.agent.ctx.inventory`, :relevant-source →
        `seon.agent.ctx.relevant`, :transcript → `seon.agent.ctx.transcript`;
-       `default-seed-blocks` wires them by SYMBOL (late lookup-value
+       `seon.config/default-ctx-blocks` wires them by SYMBOL (late lookup-value
        resolution), so this ns does NOT require them — they require this
        ns for the shared read API.
      - `render-namespace` — the standalone whole-namespace render
@@ -143,7 +143,7 @@
 ;; file PATH (not soul, not agents — any `.md`), returns a section when
 ;; the file currently exists, else nil (REACTIVE: an absent file is no
 ;; section, NO fallback). SOUL.md and AGENTS.md are two `file-block`s
-;; wired in `default-seed-blocks`; a third party adds another the same way.
+;; wired in `seon.config/default-ctx-blocks`; a third party adds another the same way.
 ;;
 ;; The file is read FRESH on every render (the path lives on the section
 ;; node; the slot fns re-read it), so a user's edit lands next render
@@ -253,7 +253,7 @@
    slot fns ([[file-block-ai]] / [[file-block-html]]) re-read the file
    fresh on every render so a user's edit lands next turn with no
    seed/restart. GENERIC: any markdown file is a section — SOUL.md and
-   AGENTS.md are two `file-block`s wired in [[default-seed-blocks]],
+   AGENTS.md are two `file-block`s prepended by `seon.config/identity-file-blocks`,
    nothing file-name-specific lives here."
   {:malli/schema [:=> [:cat [:map
                              [:seon.agent.ctx/file-path :seon.agent.ctx/file-path]
@@ -274,7 +274,7 @@
      :seon.render/html   'seon.agent.ctx/file-block-html}))
 
 ;; The repo-relative identity files surfaced to every agent as
-;; file-blocks in [[default-seed-blocks]]. The primary file is
+;; file-blocks prepended by `seon.config/identity-file-blocks`. The primary file is
 ;; `SEON_SOUL_FILE` (override) else `SOUL.md`; AGENTS.md is the cross-tool
 ;; standard repo/work-instructions file, read alongside it. They are
 ;; CONTEXT, NOT the LLM system message — that is the hardcoded mechanics
@@ -1772,93 +1772,14 @@
        :seon.render/volatile-text text}
       {:seon.render/stable-text   (subs text 0 i)
        :seon.render/volatile-text (subs text (+ i (count stable-boundary-delim)))})))
-(defn- default-seed-blocks
-  "The default `:seon.agent.ctx/block` layout SEED-COPIED into every fresh
-   agent's own `:seon.agent/ctx` at creation (PRIVATE — consumed only by the
-   boot seed path, never read at render). Ordered top→bottom =
-   static→volatile (the provider-cache contract): everything through
-   :namespaces is the cacheable prefix.
 
-     1. :soul/:agents — SOUL.md + AGENTS.md as generic file-blocks
-                       (present file → its own block, absent → none).
-                       These are CONTEXT, not the system message — the
-                       hardcoded system-specific mechanics ride the
-                       system role (`seon.ai/effective-system-prompt`).
-     2. :namespaces  — THE BODY: one `;;; ┌─ namespace x ─ … ─ end ─`
-                       bracketed block per included ns, recency-ordered
-                       (most-recently-modified LAST), curated full per ns
-     3. :live-tile   — what your human currently sees
-     4. :warnings    — current problems; reactive, vanishes when fixed
-     5. :open-todos  — the agent's open work items; derived, vanishes
-     5b. :relevant-source — env-gated (SEON_EMBED, default-OFF): the
-                       top-k entities nearest this turn's query by
-                       embedding KNN, PREFETCHED in run-turn! + read from
-                       the per-turn stash. VOLATILE half; blank when off
-                       or no hits (dropped)
-     9. :findings    — the stored-finding CONTENT surface (claim/answer
-                       text + provenance of recent user-domain rows). The
-                       full one-line-per-namespace :inventory overview is
-                       DISABLED from the seed (returns with the #38 rework);
-                       its fn stays callable via (db/store-inventory)
-    10. :transcript  — the comment-block REPL: the masthead, PAST turns,
-                       and the folded live readline — the whole bottom of
-                       the context (absorbs the old prompt/turns/status
-                       blocks)
-
-   Smallest priority renders first."
-  []
-  (into
-   ;; SOUL.md + AGENTS.md as generic file-blocks — a present file → its
-   ;; own context block, absent → nothing (NO fallback). These are
-   ;; CONTEXT blocks (user message), NOT the LLM system message: the
-   ;; system role carries the hardcoded system-specific mechanics
-   ;; ([[system-text]] via `seon.ai/effective-system-prompt`), kept
-   ;; strictly separate from these files. `:soul` (5) / `:agents` (8) sit
-   ;; at the top of the cacheable prefix; an edit busts only their block.
-   (filterv some?
-            [(when soul-file-path
-               (file-block {:seon.agent.ctx/file-path soul-file-path
-                            :seon.agent.ctx/name :soul :seon.agent.ctx/priority 5}))
-             (file-block {:seon.agent.ctx/file-path agents-file-path
-                          :seon.agent.ctx/name :agents :seon.agent.ctx/priority 8})])
-   [{:seon.agent.ctx/name :shared-instructions :seon.agent.ctx/priority 10
-     :seon.render/ai 'my.kb.shared/instructions-block}
-    ;; The L0 skills catalog — one cheap name+description line per loadable
-    ;; skill (priority 12 ≤ cache-breakpoint → cached prefix; a loaded
-    ;; body rides the volatile band so load/unload never busts this slot).
-    {:seon.agent.ctx/name :skills-catalog :seon.agent.ctx/priority 12
-     :seon.render/ai 'my.skills/catalog-block}
-    {:seon.agent.ctx/name :namespaces   :seon.agent.ctx/priority 20
-     :seon.render/ai 'seon.agent.ctx.namespaces/namespaces-block}
-    {:seon.agent.ctx/name :live-tile    :seon.agent.ctx/priority 35
-     :seon.render/ai 'seon.agent.ctx.live-tile/live-tile-block}
-    {:seon.agent.ctx/name :warnings     :seon.agent.ctx/priority 40
-     :seon.render/ai 'seon.agent.ctx.warnings/warnings-block}
-    {:seon.agent.ctx/name :open-todos   :seon.agent.ctx/priority 45
-     :seon.render/ai 'seon.agent.todo.internal/open-todos-block}
-    {:seon.agent.ctx/name :relevant-source :seon.agent.ctx/priority 48
-     :seon.render/ai 'seon.agent.ctx.relevant/relevant-source-block}
-    ;; The stored-findings CONTENT surface — the claim/answer TEXT +
-    ;; provenance of the most-recent user-domain rows (the sibling of
-    ;; :inventory's COUNTS). Rides the volatile band (97, > cache-breakpoint,
-    ;; beside :inventory) so a newly-stored finding never busts the cached
-    ;; stable prefix; recomputed each render, vanishes when the store holds
-    ;; no user-domain rows. Restores the DB-memory salience a fresh agent
-    ;; needs to consult-before-researching.
-    {:seon.agent.ctx/name :findings     :seon.agent.ctx/priority 97
-     :seon.render/ai 'seon.agent.ctx.findings/findings-block}
-    ;; :inventory (the full one-line-per-namespace stored-data overview,
-    ;; seon.agent.ctx.inventory/inventory-block) is DISABLED from the seed —
-    ;; the :findings block already surfaces recent stored rows. The fn stays
-    ;; callable on demand (db/store-inventory); the always-on overview
-    ;; returns with the #38 inventory rework.
-    ;; The transcript is the WHOLE bottom of the context (priority 100,
-    ;; LAST): the comment-block REPL with the masthead at its head and the
-    ;; folded live readline at its very end — it ABSORBS the prompt + turns
-    ;; + status into ONE steering surface (no separate blocks).
-    {:seon.agent.ctx/name :transcript   :seon.agent.ctx/priority 100
-     :seon.render/ai 'seon.agent.ctx.transcript/transcript-block
-     :seon.render/html 'seon.agent.ctx.transcript/transcript-block-html}]))
+;; The default block layout lives in `seon.config/default-ctx-blocks` (the seed
+;; source `seon.config/resolve-agent-context` fills); the soul/agents identity
+;; file-blocks are prepended by `seon.config/identity-file-blocks`. This ns owns
+;; the file-block RENDER fns ([[file-block-ai]]/[[file-block-html]]) + the
+;; identity-file PATH consts ([[soul-file-path]]/[[agents-file-path]], read by
+;; [[identity-files-text]]) — config emits the block DATA (literal render
+;; symbols) and this ns renders it.
 
 ;; ============================================================
 ;; install! / remove! — the ONE scope-aware override + seed verb over the
@@ -2042,7 +1963,7 @@
 ;; ── the root's children = the agent's OWN complete block set ─────────────
 ;; The ROOT renderable's children are exactly the agent's `:seon.agent/ctx`
 ;; blocks, one priority sort. There is no render-time merge over a separate
-;; default catalog — `default-seed-blocks` was copied into the agent at
+;; default catalog — `seon.config/default-ctx-blocks` was copied into the agent at
 ;; creation, so render reads one collection and stops.
 
 
@@ -2302,7 +2223,7 @@
    (`::blocks`, `:seon.agent/id`) only — no I/O, no GPU.
 
    `::blocks` is the turn's `:seon.render/text`-bearing blocks in prompt order
-   (static→volatile, the [[default-seed-blocks]] ordering — soul…:namespaces
+   (static→volatile, the `seon.config/default-ctx-blocks` ordering — soul…:namespaces
    then the volatile tail), as produced by [[rendered-block-texts]]. The
    output `::chain-hashes` is parallel to `::blocks`: hash i fingerprints the
    exact block prefix 0..i, salted at the root by `:seon.agent/id`.

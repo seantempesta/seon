@@ -362,7 +362,7 @@
     ""))
 
 (defn open-todos-block
-  "Context-section fn (`:open-todos`, default-seed-blocks priority 45):
+  "Context-section fn (`:open-todos`, seon.config/default-ctx-blocks priority 45):
    [[open-todos-body]] for the CALLING agent — the `:seon.agent/id` in the
    render input, resolved as a `[:seon.agent/id id]` ref against the render's
    db value — absent `:seon.db/db` defaults to the current conn, the same

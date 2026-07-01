@@ -1,7 +1,7 @@
 (ns seon.agent.ctx.warnings
   "The `:warnings` context section — current problems rendered as a
    single-`;` `WARNINGS` comment-block via the `seon.warn` check registry.
-   Symbol-wired into the composer (`seon.agent.ctx/default-seed-blocks`) as
+   Symbol-wired into the composer (`seon.config/default-ctx-blocks`) as
    `'seon.agent.ctx.warnings/warnings-block`."
   (:require
     [seon.agent.ctx :as ctx]

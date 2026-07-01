@@ -84,6 +84,34 @@
         (is (false? (:seon.client/wake? ctx)))
         (is (= '[[seon.db :as db]] (:seon.eval/home-requires ctx)))))))
 
+;;; Soul/agents identity file-blocks — migrated from the retired
+;;; `seon.agent.ctx/default-seed-blocks` into the config path
+;;; (`identity-file-blocks`). Present only when the file EXISTS and SEON_SOUL is
+;;; not off — so a soul-off (or file-absent) cluster gets none = byte-parity.
+
+(defn- with-env
+  "Set process.env[k]=v, run f, restore — so the env-reading accessors/config
+   get a known value without touching the ambient pod env."
+  [k v f]
+  (let [env (.. js/globalThis -process -env) old (aget env k)]
+    (try (if (nil? v) (js-delete env k) (aset env k v)) (f)
+         (finally (if (nil? old) (js-delete env k) (aset env k old))))))
+
+(deftest soul-block-gated-by-env-and-file-presence
+  (with-redefs [config/load-manifest (fn [] {})]
+    (testing "SEON_SOUL=false → NO :soul block (byte-parity with the soul-off default cluster)"
+      (with-env "SEON_SOUL" "false"
+        #(let [names (ctx-block-names "x" nil)]
+           (is (not (contains? names :soul))))))
+    (testing "SEON_SOUL on + SOUL.md present → the :soul block at priority 5, file-block render"
+      ;; SOUL.md exists in the repo; the default cluster just runs SEON_SOUL=false.
+      (with-env "SEON_SOUL" "true"
+        #(let [blocks (:seon.agent/ctx (config/resolve-agent-context "x" nil))
+               soul   (first (filter (fn [b] (= :soul (:seon.agent.ctx/name b))) blocks))]
+           (is (some? soul) "soul block present when SEON_SOUL on + SOUL.md exists")
+           (is (= 5 (:seon.agent.ctx/priority soul)))
+           (is (= 'seon.agent.ctx/file-block-ai (:seon.render/ai soul))))))))
+
 (deftest route-removes
   (testing "a route spec drops the named seeded routes"
     (let [m {:seon.config/routes [{:seon.config/removes [:seon.route/world]}]}]
@@ -117,16 +145,7 @@
 
 ;;; ENV KNOBS — the few knobs that stay env-only (launch/process). These tests
 ;;; pin the COERCION + the :seon.config/dirs precedence, not live env values.
-
-(defn- with-env
-  "Set process.env[k]=v, run f, restore — so the env-reading accessors get a
-   known value without touching the ambient pod env."
-  [k v f]
-  (let [env (.. js/globalThis -process -env)
-        old (aget env k)]
-    (try (if (nil? v) (js-delete env k) (aset env k v))
-         (f)
-         (finally (if (nil? old) (js-delete env k) (aset env k old))))))
+;;; ([[with-env]] is defined above with the soul-block tests.)
 
 (deftest env-int-coerces-positive-or-default
   (testing "positive int parses; blank/non-numeric/non-positive fall to default"

@@ -49,7 +49,7 @@
    (`seon.agent.ctx/context-root`): `seon.agent.turn/render-prompt` calls
    `(seon.render/render :seon.render/ai ctx (seon.agent.ctx/context-root ctx))`,
    shared byte-for-byte with the inspector (`seon.agent.inspect/ctx-preview`).
-   The default block set (`seon.agent.ctx/default-seed-blocks`) is SEED-COPIED
+   The default block set (`seon.config/default-ctx-blocks`) is SEED-COPIED
    into a new agent's own `:seon.agent/ctx` at creation; render reads that one
    complete collection priority-sorted — no merge, no separate default set.
    Each block's `:seon.render/ai` slot is a verbatim string or a fn symbol
