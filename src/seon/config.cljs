@@ -161,7 +161,18 @@
     ;; the transcript carries BOTH render slots (ai + html) — the html slot
     ;; drives the datastar UI tile. Matches default-ctx-blocks +
     ;; the CP-0 oracle inventory (:seon.render html(1)).
-    :seon.render/html 'seon.agent.ctx.transcript/transcript-block-html}])
+    :seon.render/html 'seon.agent.ctx.transcript/transcript-block-html
+    ;; CP-5 — the eval-result age-decay schedule (owner: evals "start larger
+    ;; and shrink over time"). Nested maps → datahike reifies each into a
+    ;; `::decay-level` entity (component ref). Near-full this turn + next
+    ;; (0→16384), partial at offset 2 (→1500), stub at offset 5 (→200, keeps
+    ;; the result/<id> handle). Seeded HERE (the loose block-vector default
+    ;; does not run the per-block schema decode, so the ::result-decay schema
+    ;; default is not auto-filled — the schedule rides the seed explicitly).
+    :seon.agent.ctx.transcript/result-decay
+    [{:seon.agent.ctx.transcript/from-turn-offset 0 :seon.agent.ctx.transcript/token-cap 16384}
+     {:seon.agent.ctx.transcript/from-turn-offset 2 :seon.agent.ctx.transcript/token-cap 1500}
+     {:seon.agent.ctx.transcript/from-turn-offset 5 :seon.agent.ctx.transcript/token-cap 200}]}])
 
 ;; The agent-context map — agent-level config keys (all `{:optional true}`,
 ;; carrying their `:default`) + the `:seon.agent/ctx` block vector (its

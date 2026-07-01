@@ -72,12 +72,16 @@
 ;; Component refs off the transcript block → each tier/level is its own
 ;; entity, queryable per-element, cascade-deleted with the block.
 (schema/register! ::tiers        [:vector {:seon.db/component true :default []} :seon.db/ref]) ; of ::tier entities
-;; OWNER REFINEMENT: v1 default = a SINGLE parity-preserving level at
-;; today's fixed 16384 (NOT the 3-level [0→16384,2→1500,5→200] schedule —
-;; that multi-level schedule is registered-as-valid but turned on later as
-;; a separate A/B; v1 default = parity).
+;; CP-5 (owner intent — evals "start larger and shrink over time"): the v1
+;; default is the REAL 3-level decay schedule — near-full THIS turn + next
+;; (offset 0→16384), partial at offset 2 (→1500), clipped to a stub at offset 5
+;; (→200, keeping the `result/<id>` handle). This is the safety net that lets
+;; blocks render FULL (escape-clipping) without unbounded transcript growth: an
+;; old eval body shrinks as it ages out of the working set.
 (schema/register! ::result-decay [:vector {:seon.db/component true
-                                           :default [{::from-turn-offset 0 ::token-cap 16384}]}
+                                           :default [{::from-turn-offset 0 ::token-cap 16384}
+                                                     {::from-turn-offset 2 ::token-cap 1500}
+                                                     {::from-turn-offset 5 ::token-cap 200}]}
                                   :seon.db/ref]) ; of ::decay-level entities
 
 ;; scalars on the transcript block. `::turns-retained` is wired in CP-5 (the
@@ -748,21 +752,25 @@
         tiers    (::tiers tblock)
         retained (or (::turns-retained tblock) 8)
         events*t (clip-events-by-tiers (or tiers []) retained events*c)
-        ;; move 4 — the per-eval RESULT-BODY cap off `::result-decay` × the
-        ;; eval's AGE (turn-offset). v1 default = a SINGLE level 0→16384, so
-        ;; the selected cap is ALWAYS 16384 (byte-identical to today's fixed
-        ;; `result-body-render-cap`). Turn-offset is not cleanly derivable per
-        ;; eval here, so offset 0 is used (documented — with the single-level
-        ;; default the offset is irrelevant; parity is the gate). Injected as
+        ;; move 4 / CP-5 — the per-eval RESULT-BODY cap off `::result-decay` ×
+        ;; the eval's AGE (turn-offset = newest turn − the eval's `::turn-idx`).
+        ;; The v1 default is the 3-level shrink schedule [0→16384, 2→1500,
+        ;; 5→200]: a fresh eval renders near-full, an older one clips to a stub
+        ;; (keeping its `result/<id>` handle) — the "start larger, shrink over
+        ;; time" safety net for full block rendering. Byte-STABLE within a band
+        ;; (the cap changes only at a level boundary). Injected as
         ;; `:seon.render/result-body-cap` onto each eval event's `::entity`,
         ;; which `eval->renderable` forwards to `format-eval-row`.
         levels   (::result-decay tblock)
-        body-cap (decay-cap-for-offset (or levels []) 0
-                                       ctx/result-body-render-cap)
+        max-turn (transduce (keep ::turn-idx) max -1 events*t)
         events** (mapv (fn [ev]
                          (if (= :eval (::kind ev))
-                           (update ev ::entity assoc
-                                   :seon.render/result-body-cap body-cap)
+                           (let [offset (if (neg? max-turn) 0
+                                            (- max-turn (or (::turn-idx ev) max-turn)))
+                                 cap    (decay-cap-for-offset (or levels []) offset
+                                                              ctx/result-body-render-cap)]
+                             (update ev ::entity assoc
+                                     :seon.render/result-body-cap cap))
                            ev))
                        events*t)
         ;; Render each event, interleaving the resume marker ONCE at the
