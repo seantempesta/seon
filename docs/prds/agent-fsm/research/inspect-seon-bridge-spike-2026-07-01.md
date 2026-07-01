@@ -329,6 +329,19 @@ fn contracts so case-1 (pod-on-host, fns hit the DB) and case-2 (pod-in-containe
 fns hit local shell) share one library and differ only in the adapter/boot. Design
 the fn contracts now; defer the case-2 container work until a case-1 benchmark lands.
 
+**Don't reinvent — `seon.agent.fs` is already the template.** Seon ALREADY has a
+capability-fn library: `src/seon/agent/fs.cljs` (`read-file`, `write-file`,
+`list-dir`, `stat`, `file-exists?`, `walk-dir`) — map-in/map-out, errors-as-values
+(`:seon.agent.fs/ok?` discriminator, never throws), and an explicit allowlist gate
+(`configure!`/`grants`, `SEON_FS_ROOT`, default-deny, read-only flag). This is
+EXACTLY the "functions as tools" surface. Case-2 = **extend this pattern** with the
+missing capabilities (an `exec`/shell fn, an `http`/fetch fn) using the SAME house
+rules, and point its `configure!` roots at the sandbox FS. The bridge for case-2 is
+then trivial: boot the pod in the container, `configure!` fs+exec to the container's
+own root — the agent's fns act locally, natively, isolated. No new tool-calling
+concept, no per-harness catalog — one gated fn library, the harness supplies the
+box. Design the `exec`/`http` fns as `seon.agent.*` siblings of `seon.agent.fs`.
+
 ## 6. Blockers / caveats
 
 - **No blockers to case-1.** The one honest caveat: the smoke's `/solve` door was a
