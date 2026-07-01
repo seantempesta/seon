@@ -43,6 +43,7 @@
   (:require
     [aero.core :as aero]
     [malli.core :as m]
+    [malli.transform :as mt]
     [seon.platform :as platform]
     [seon.schema :as schema]))
 
@@ -122,12 +123,79 @@
 ;; THE manifest — the registry of known sections. A future section = ONE more
 ;; optional key here + a resolver fn. Every key optional ⇒ `{}` (config absent)
 ;; validates ⇒ identity everywhere.
+;;; ============================================================
+;;; AGENT-CONTEXT — the v3 two-level context config (decisions 13/16/4). ONE
+;;; nested map: agent-level scalars/presence-sets + a `:seon.agent/ctx` vector
+;;; of BLOCK maps (component-ref'd onto the agent at transact). The whole point
+;;; of the schema is to CARRY the `:default`s that the recursive
+;;; `default-value-transformer` fills — a SPARSE manifest (`{}`) decodes into
+;;; the FULL byte-parity tree. LEAF rule holds: the block vector is a loose
+;;; `[:vector :map]` (block/attr shapes register + validate downstream at
+;;; install!/transact!), so `seon.config` never requires `seon.agent.ctx` /
+;;; `my.skills` — the `:seon.render/ai` values are literal quoted symbols
+;;; (VERIFIED to survive `m/decode` as `cljs.core/Symbol`), not var refs.
+;;; ============================================================
+
+(def ^:private default-ctx-blocks
+  "The default `:seon.agent/ctx` block TREE the schema carries as its `:default`
+   — a SPARSE manifest fills it. Reproduces the CP-0 parity oracle byte-for-byte:
+   the [[seon.agent.ctx/default-seed-blocks]] list (soul/agents OMITTED — those
+   files are absent in the default cluster, matching the oracle) PLUS the
+   always-on `:skill/repl` body block (priority 16) the old `resolve-loadout`
+   minted from `:seon.config/skills {:load [:repl]}`. `:seon.render/ai` values
+   are literal quoted symbols (LEAF rule — no var ref). Sorted top→bottom =
+   static→volatile (the provider-cache contract)."
+  [{:seon.agent.ctx/name :shared-instructions :seon.agent.ctx/priority 10
+    :seon.render/ai 'my.kb.shared/instructions-block}
+   {:seon.agent.ctx/name :skills-catalog :seon.agent.ctx/priority 12
+    :seon.render/ai 'my.skills/catalog-block}
+   {:seon.agent.ctx/name :skill/repl :seon.agent.ctx/priority 16
+    :seon.render/ai 'my.skills/skill-block}
+   {:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
+    :seon.render/ai 'seon.agent.ctx.namespaces/namespaces-block}
+   {:seon.agent.ctx/name :live-tile :seon.agent.ctx/priority 35
+    :seon.render/ai 'seon.agent.ctx.live-tile/live-tile-block}
+   {:seon.agent.ctx/name :warnings :seon.agent.ctx/priority 40
+    :seon.render/ai 'seon.agent.ctx.warnings/warnings-block}
+   {:seon.agent.ctx/name :open-todos :seon.agent.ctx/priority 45
+    :seon.render/ai 'seon.agent.todo.internal/open-todos-block}
+   {:seon.agent.ctx/name :relevant-source :seon.agent.ctx/priority 48
+    :seon.render/ai 'seon.agent.ctx.relevant/relevant-source-block}
+   {:seon.agent.ctx/name :findings :seon.agent.ctx/priority 97
+    :seon.render/ai 'seon.agent.ctx.findings/findings-block}
+   {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
+    :seon.render/ai 'seon.agent.ctx.transcript/transcript-block
+    ;; the transcript carries BOTH render slots (ai + html) — the html slot
+    ;; drives the datastar UI tile. Matches default-seed-blocks (ctx.cljs) +
+    ;; the CP-0 oracle inventory (:seon.render html(1)).
+    :seon.render/html 'seon.agent.ctx.transcript/transcript-block-html}])
+
+;; The agent-context map — agent-level config keys (all `{:optional true}` with
+;; a `:default`) + the `:seon.agent/ctx` block vector (its `:default` = the full
+;; tree). Every key optional ⇒ `{}` validates ⇒ the transformer fills the whole
+;; thing. Agent-level scalars are carried for CP-3 (nothing reads them yet); the
+;; CP-2 byte-parity gate is the BLOCK TREE.
+(schema/register! :seon.config/agent-context
+  [:map
+   [:seon.agent/ctx {:optional true :default default-ctx-blocks} [:vector :map]]])
+
+;; The ROOT override — a SPARSE agent-context merged over `:seon.config/agent-context`
+;; by [[context-config-for]] (block upsert-by-name). Its `:live-tile` block sets
+;; root's canvas = `system-view`, REPLACING the hardcoded client.cljs root branch.
+;; NOT decoded through the transformer directly (it's a partial override layer);
+;; only the MERGED result is decoded. Same loose `[:vector :map]` leaf shape.
+(schema/register! :seon.config/root-context
+  [:map
+   [:seon.agent/ctx {:optional true} [:vector :map]]])
+
 (schema/register! :seon.config/manifest
   [:map
-   [:seon.config/skills     {:optional true} :seon.config/skills-spec]
-   [:seon.config/namespaces {:optional true} :seon.config/namespaces-spec]
-   [:seon.config/loadouts   {:optional true} [:vector :seon.config/loadout]]
-   [:seon.config/routes     {:optional true} [:vector :seon.config/route-spec]]])
+   [:seon.config/skills        {:optional true} :seon.config/skills-spec]
+   [:seon.config/namespaces    {:optional true} :seon.config/namespaces-spec]
+   [:seon.config/loadouts      {:optional true} [:vector :seon.config/loadout]]
+   [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
+   [:seon.config/agent-context {:optional true} :seon.config/agent-context]
+   [:seon.config/root-context  {:optional true} :seon.config/root-context]])
 
 ;;; Verb arg/return shapes. The three corpora are leaf `[:vector :map]` here
 ;;; (full shapes validated downstream); registered once + referenced so the
@@ -550,3 +618,58 @@
       routes
       (let [removes (into #{} (mapcat :seon.config/removes) specs)]
         (filterv #(not (removes (:seon.route/name %))) routes)))))
+
+;;; ============================================================
+;;; AGENT-CONTEXT RESOLVER (decisions 11/16) — the GENERIC loader. Selects the
+;;; agent-context by IDENTITY (root gets the root-context override, NOT a
+;;; `:kind`), merges the per-mint override, then RECURSIVELY fills every
+;;; unspecified key from the schema `:default`s (agent-level AND per-block). It
+;;; hardcodes NO block-specific knowledge — it just decodes+returns whatever the
+;;; schema + manifest specify, so a `SEON_CONFIG` cluster configures its whole
+;;; context from its own file with zero `src/seon` edits.
+;;; ============================================================
+
+(def ^:private ctx-default-transformer
+  "The recursive default-fill: `default-value-transformer` with
+   `add-optional-keys` (REQUIRED — our agent-context keys are `{:optional true}`,
+   so without it the transformer skips absent keys instead of filling their
+   `:default`). Fills agent-level keys AND recurses into any supplied partial
+   block map to fill its per-block defaults."
+  (mt/default-value-transformer {:malli.transform/add-optional-keys true}))
+
+(defn- context-config-for
+  "Select the FULLY-DEFAULTED agent-context map for `id` from `manifest`
+   (decision 11) — by IDENTITY, not a `:kind`. Decodes `:seon.config/agent-context`
+   through the default transformer FIRST (so the block tree is present), then for
+   `\"root\"` upserts the sparse `:seon.config/root-context` blocks over it by
+   `:seon.agent.ctx/name` (root's `:live-tile` upserts to set `system-view`). Any
+   other id gets the defaulted agent-context unchanged. Both manifest keys default
+   `{}` when absent ⇒ the schema fills the full byte-parity tree. Decoding the base
+   BEFORE the root upsert is load-bearing: a sparse `{}` base only carries its
+   blocks after decode, so upserting first would drop the default tree."
+  [id manifest]
+  (let [base (m/decode :seon.config/agent-context
+                       (get manifest :seon.config/agent-context {})
+                       ctx-default-transformer)]
+    (if (= id "root")
+      (let [override (get manifest :seon.config/root-context {})]
+        (assoc base :seon.agent/ctx
+               (upsert-by-name (:seon.agent/ctx base)
+                               (:seon.agent/ctx override))))
+      base)))
+
+(defn resolve-agent-context
+  "Resolve the FULLY-DEFAULTED nested agent-context map for `id` (§3.1). Two
+   explicit key-level merge layers — `agent-context ← root-context` (in
+   [[context-config-for]], by identity, already defaulted) ← per-mint `override`
+   — then a final recursive `m/decode` fills any key the override left absent.
+   Returns `{… agent scalars … :seon.agent/ctx [block …]}`; the caller transacts
+   it as ONE nested component-ref tx. GENERIC — no block-specific knowledge; it
+   decodes whatever the schema + manifest specify. A sparse/absent manifest +
+   nil override ⇒ the byte-parity default tree."
+  {:malli/schema [:=> [:catn [::agent-id ::agent-id]
+                       [::override [:maybe :map]]]
+                  :seon.config/agent-context]}
+  [id override]
+  (let [merged (merge (context-config-for id (load-manifest)) override)]
+    (m/decode :seon.config/agent-context merged ctx-default-transformer)))

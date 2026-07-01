@@ -28,8 +28,20 @@
    [:findings            97 seon.agent.ctx.findings/findings-block]
    [:transcript         100 seon.agent.ctx.transcript/transcript-block]]
 
+  ;; the transcript block ALSO carries :seon.render/html
+  ;; 'seon.agent.ctx.transcript/transcript-block-html (the datastar UI slot),
+  ;; visible in the rendered inventory as ":seon.render … html(1)". The :blocks
+  ;; list above tracks only name/priority/:seon.render/ai; this records the html
+  ;; slot so the loader's default-ctx-blocks must reproduce it (caught by the
+  ;; .txt byte-parity gate at CP-2).
+  :transcript-html seon.agent.ctx.transcript/transcript-block-html
+
   ;; root's canvas — the hardcoded (when (= "root" aid) …) branch
   ;; (client.cljs 2367-2379), to be replaced by root-context's :live-tile block.
+  ;; At CP-2 root's content is written BOTH by this hardcoded branch (agent
+  ;; entity) AND by root-context's :live-tile block → the rendered inventory
+  ;; transiently shows content(2)/+1 datom; CP-4 removes the hardcoded branch,
+  ;; restoring content(1). This +1 datom is the ONLY CP-2 rendered-prefix diff.
   :root-canvas seon.render.system/system-view
 
   ;; the no-override namespaces render policy (seon.config/namespaces-policy).

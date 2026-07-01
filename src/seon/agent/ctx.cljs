@@ -1897,16 +1897,15 @@
    install!'s upsert-by-name; `seon.agent/create!` calls it ONLY for a
    genuinely new entity (a resumed agent keeps its own edited/removed blocks).
 
-   The seed is shaped by the OPTIONAL config loadout
-   ([[seon.config/resolve-loadout]]) for the scoped agent's role — config
-   absent → `default-seed-blocks` verbatim (byte-identical to today); present →
-   default-load skill bodies + per-role extra blocks merged in."
+   The seed is shaped by the OPTIONAL config manifest via the GENERIC loader
+   ([[seon.config/resolve-agent-context]]) selected by the scoped agent's IDENTITY
+   (root gets the root-context canvas override) — config absent → the schema's
+   default block tree (byte-identical to today); present → whatever the manifest
+   specifies. `install!` does the component-ref upsert-by-name transact."
   {:malli/schema [:=> [:cat] ::result]}
   []
   (let [id (db/current-agent-id)]
-    (install! (config/resolve-loadout (default-seed-blocks)
-                                      (config/agent-role id)
-                                      (config/load-manifest)))))
+    (install! (:seon.agent/ctx (config/resolve-agent-context id nil)))))
 
 ;; ============================================================
 ;; Render pipeline — the agent's OWN block set, decoded + priority-sorted,

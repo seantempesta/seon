@@ -58,4 +58,23 @@
  :seon.config/namespaces
  {:seon.config/always     [my.kb my.data my.ui my.tile
                            seon.agent.todo seon.agent.message seon.agent.lifecycle]
-  :seon.config/current-ns :full}}
+  :seon.config/current-ns :full}
+
+ ;; ── AGENT-CONTEXT (v3, config-driven-agent-init) — the two-level context
+ ;; config the GENERIC loader (seon.config/resolve-agent-context) consumes. A
+ ;; sparse map: every unspecified key (incl. the whole :seon.agent/ctx block
+ ;; tree) is filled from its schema :default by the recursive
+ ;; default-value-transformer, so `{}` reproduces the byte-parity default. Add a
+ ;; key here only to DIFFER from the default (e.g. a lean block set, a per-agent
+ ;; scalar). Empty = byte-identical to the no-config default tree.
+ :seon.config/agent-context {}
+
+ ;; ── ROOT-CONTEXT — a SPARSE override merged over :seon.config/agent-context
+ ;; by IDENTITY (id "root"), block upsert-by-:seon.agent.ctx/name. The :live-tile
+ ;; block sets root's canvas = the system/fleet dashboard, the config-driven
+ ;; replacement for the hardcoded client.cljs root branch.
+ :seon.config/root-context
+ {:seon.agent/ctx
+  [{:seon.agent.ctx/name :live-tile :seon.agent.ctx/priority 35
+    :seon.render/ai seon.agent.ctx.live-tile/live-tile-block
+    :seon.render.live-tile/content seon.render.system/system-view}]}}
