@@ -342,6 +342,109 @@ own root — the agent's fns act locally, natively, isolated. No new tool-callin
 concept, no per-harness catalog — one gated fn library, the harness supplies the
 box. Design the `exec`/`http` fns as `seon.agent.*` siblings of `seon.agent.fs`.
 
+## 5e. Isolation, throughput, and the Python passthrough (owner follow-ups)
+
+### TWO kinds of state — a fresh conn isolates the DB, NOT the JS runtime
+
+Owner's sharp question: a fresh conn hides sample-1's data, but "the runtime will
+still have other previously defined symbols/functions" — is that fine? The honest
+answer: there are TWO state layers, and a fresh conn clears only one.
+
+- **DB state** (datoms — the KB, the agent's defined `:seon.fn`/`:seon.schema`
+  entities, messages, turns): swapping to a fresh `:memory` conn makes ALL of it
+  vanish for the next sample. Clean.
+- **JS-runtime state** (the *compiled* vars): when an agent `def`s a fn, the
+  self-host compiler ALSO installs the compiled var into the **process-shared
+  compile-state** (`seon.eval` docstring, `eval.cljs:18`: *"Vars defined in one
+  eval persist for the next — compile-state is process-shared, defonce'd at
+  boot"*) and `goog.globalEval`s the JS into the **shared host runtime**
+  (`eval.cljs:745`). A fresh conn does NOT clear this.
+
+**Why it's fine in practice (the owner's intuition is right):**
+
+1. **The agent's context is DERIVED FROM THE DB, not the runtime.** Sample 2's
+   agent is *told* (in its prompt) only what its fresh conn contains — it has no
+   knowledge that sample 1's fns exist, so it won't call them. "Reset the DB → it
+   seems like it's not there" is exactly correct: what the agent can SEE and
+   reason about is DB-derived, and that's clean.
+2. **Namespaces are per-agent-id.** Each agent's home ns is `my.agent.<its-id>`;
+   every scratch sample mints a NEW child with a NEW id, so sample 2's fns land in
+   a different ns than sample 1's — no collision, no overwrite. Old symbols sit
+   inert in a namespace nobody references.
+
+**Where the sharp edge actually is (name it, don't over-worry it):** a leaked
+MUTABLE value (an `atom`, a `globalThis` stash) from sample 1 persists in the
+runtime; sample 2 could reach it ONLY by guessing the exact symbol — which it has
+no reason to (nothing in its context points there). Soft leak, not hard
+contamination. Plus slow memory growth over thousands of samples (RSS, not
+correctness — a periodic POD restart, not per-sample, handles it).
+
+**The rule:** a fresh `:memory` conn per sample gives **DB + context isolation**
+(the isolation that determines what the agent DOES), cheaply, no reset. It does
+NOT give **runtime isolation** (leftover compiled vars). For memory/QA that's fine
+— behavior is a function of the (clean) context. If you ever need TRUE runtime
+isolation (adversarial samples probing leaked state, or bounding memory), that's
+**process-per-sample / pod-in-container** — which is exactly where the case-2
+Docker path already goes. **It converges: the case-2 isolation IS the runtime-
+isolation answer, for free.**
+
+### Contamination → the in-memory scratch conn, NOT a pod reset
+
+A pod reset between samples is the WRONG mechanism — seconds (restart + re-seed),
+global (kills every other agent), wipes the whole store. The gym already has the
+right, cheap tool: **`seon.client/open-agent-conn!` (`src/seon/client.cljs:596`)**
+opens a fresh **in-process `:memory` datahike conn** — no process boot, no disk,
+sub-second. `run-scenario!` swaps the root `seon.db/*conn*` to it and restores in a
+`finally`, removing minted schema keys (`driver.cljs` isolation docstring). Per
+sample: open scratch conn → mint child → drive → read answer → drop conn. "Speed
+up the reset" is moot — we sidestep it.
+
+### The real throughput lever: `*conn*` is a single dynamic root (not fiber-local)
+
+`seon.db/*conn*` is ONE `defonce ^:dynamic` root per pod runtime
+(`src/seon/db.cljs:337`). `with-agent` / tx-context ARE fiber-local
+(AsyncLocalStorage, safe under concurrent agents — `db.cljs:356`), but the CONN is
+not. inspect runs samples in parallel; two solves swapping `*conn*` globally would
+race. Two answers:
+
+- **v1 (baseline): `inspect eval --max-samples 1`** — serial, each sample
+  opens/swaps/drops its own `:memory` conn. Correct, contamination-free, fast
+  enough for a baseline. **Do this first.**
+- **v2 (throughput): make `*conn*` fiber-local** — bind it in the SAME
+  AsyncLocalStorage scope `with-agent` already uses, so concurrent solves each see
+  their own conn. Bounded follow-up; NOT needed for the first baseline. This — not
+  pod-reset speed — is the parallelism lever.
+
+### The `my.*` tool library the bridge adapts (owner's frame)
+
+The agent's native tool surface is already `my.*` fns (`my.kb` memory;
+`my.ui`/`my.tile`/`my.data` UI toolkit) + `seon.agent.fs` (files). The case-2 tool
+library = **`my.*` siblings in the SAME house style** (map-in/out,
+errors-as-values, capability-gated), and the bridge ADAPTS them per harness (local
+backend vs sandbox exec). One documented fn corpus the agent already understands;
+the adapter swaps the backend. Design the contracts against the existing
+`seon.agent.fs` template.
+
+### Python passthrough — a `my.py/run` capability fn (source stays DATA)
+
+Trivial and safe. Clojure strings take literal newlines inside `"..."` (only `"`
+and `\` need escaping), so multi-line Python "just works" as a string literal:
+
+```clojure
+(my.py/run {:my.py/source "import sys\nprint(sys.version)"})
+;=> {:my.py/stdout "3.12.11\n" :my.py/stderr "" :my.py/exit 0}
+```
+
+The load-bearing rule (same as `seon.web.reactive.call`'s "args stay DATA, never
+recompiled"): **the fn ships the source to the interpreter as an ARGUMENT/stdin,
+never by string-concatenating it into a shell line** (the injection trap). So
+`my.py/run` pipes the source to `python -` (or writes a temp file and runs it),
+captures stdout/stderr/exit into a map. The agent never builds a shell command;
+the fn does, with the source as stdin. Under inspect+Docker it pipes to the
+sandbox's `python`; standalone, to local `python`. Same contract, adapter swaps
+the backend — the `my.*`-fn-plus-adapter pattern above. (Bitter-Lesson: pass the
+LANGUAGE through, don't hand-craft a tool schema per interpreter.)
+
 ## 6. Blockers / caveats
 
 - **No blockers to case-1.** The one honest caveat: the smoke's `/solve` door was a
