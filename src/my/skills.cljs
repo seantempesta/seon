@@ -82,12 +82,12 @@
 
 (def ^:private load-priority
   "Loaded skill bodies sit in the VOLATILE band (> seon.agent.ctx
-   `stable-priority-max` = 20), so load/unload never busts the cacheable
+   `cache-breakpoint` = 20), so load/unload never busts the cacheable
    static prefix (soul → :namespaces) — only the volatile tail re-renders."
   30)
 
 (def ^:private catalog-priority
-  "The always-on catalog sits in the CACHED prefix (≤ stable-priority-max =
+  "The always-on catalog sits in the CACHED prefix (≤ cache-breakpoint =
    20): the same name+description text every render, so loading/unloading a
    body (a volatile-band change) never busts the catalog's cache slot."
   12)

@@ -2,13 +2,11 @@
 ;;   SEON_CONFIG=config/test.edn bin/test-cljs
 ;;   SEON_CONFIG=config/test.edn bin/acme restart pod   ; verify on the isolated cluster
 ;;
-;; Read by seon.config via the same aero reader as system.edn. It exercises the
-;; three manifest seams at once:
-;;   - skills curation  : drop the Claude-Code-only dev skills from the agent catalog
-;;   - loadout          : a lean default-load (no always-on skill body)
-;;   - routes           : DROP the POST action route — boot-seed!'s reconcile RETRACTS
-;;                        it (proving stale rows can't persist across a config change),
-;;                        not merely skips it.
-{:seon.config/skills   {:seon.config/exclude [:browser-automation :clojure-testing]}
- :seon.config/loadouts [{:seon.config/role :default}]
- :seon.config/routes   [{:seon.config/removes [:seon.route/agent-call]}]}
+;; Read by seon.config via the same aero reader as system.edn. It exercises two
+;; manifest seams at once:
+;;   - agent-context : a lean :my.skills/load set (the always-on skill bodies)
+;;   - routes        : DROP the POST action route — boot-seed!'s reconcile RETRACTS
+;;                     it (proving stale rows can't persist across a config change),
+;;                     not merely skips it.
+{:seon.config/agent-context {:my.skills/load [:repl]}
+ :seon.config/routes        [{:seon.config/removes [:seon.route/agent-call]}]}

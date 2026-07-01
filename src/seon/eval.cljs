@@ -2423,8 +2423,9 @@
    the clip applied to the projected/pr-str'd value string before it is
    persisted. Any value (a giant scalar, a wide map, a long string)
    clips here to a well-formed string that names `result/<id>` for the
-   full live value. Override with SEON_RENDER_RESULT_CAP."
-  (config/result-body-render-cap))
+   full live value. The FALLBACK cap (16384); the transcript's age-keyed
+   `:seon.agent.ctx.transcript/result-decay` schedule bands it per result age."
+  16384)
 
 (defn clip-result-body
   "Clip a rendered result-body STRING to `result-body-render-cap`,

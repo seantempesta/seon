@@ -38,19 +38,10 @@
     [seon.agent.run :as run]
     [seon.agent.ctx :as ctx]
     [seon.ai.tokens :as tokens]
-    [seon.config :as config]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.render :as render]
     [seon.schema :as schema]))
-
-(def transcript-token-cap
-  "Total token cap for the transcript section (~6k tokens). RETAINED as the
-   eviction knob but currently OFF for the transcript (`:seon.render/clip
-   :none` — the transcript renders ALL events until the agent manages its own
-   context; the sliding window lands later). Measured in TOKENS, not chars.
-   The knob lives in `seon.config` (SEON_RENDER_TRANSCRIPT_TOKEN_CAP)."
-  (config/transcript-token-cap))
 
 ;; ============================================================
 ;; Config-driven agent-init CP-1 — transcript block config attrs. Tiers

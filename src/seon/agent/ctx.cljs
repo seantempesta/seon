@@ -385,6 +385,33 @@
          (if (boolean? v) v true))
        true))))
 
+(def ^:private default-cache-breakpoint
+  "The cache-breakpoint priority when no agent datom is present (byte-parity =
+   the old `stable-priority-max` const): blocks with priority ≤ this are the
+   byte-stable cacheable PREFIX (soul → :namespaces, priority 20); the provider
+   cache line falls at the transition to the volatile tail."
+  20)
+
+(defn cache-breakpoint
+  "The agent's cache-breakpoint priority — blocks with `:seon.agent.ctx/priority`
+   ≤ this are the byte-stable cacheable PREFIX (the reactive config-on-record
+   source `:seon.agent.ctx/cache-breakpoint`, default 20). REPLACES the
+   `stable-priority-max` const: the renderer reads the datom off the agent it
+   renders, falling back to [[default-cache-breakpoint]] (= today's 20) when the
+   agent/schema is absent, so a no-config agent renders byte-identically."
+  {:malli/schema [:function
+                  [:=> [:cat] :int]
+                  [:=> [:catn [::agent-id :string]] :int]]}
+  ([] (cache-breakpoint (db/current-agent-id)))
+  ([agent-id]
+   (let [db (some-> db/*conn* deref)]
+     (if (and db agent-id
+              (contains? (db/installed-schema db) ::cache-breakpoint))
+       (let [v (:seon.agent.ctx/cache-breakpoint
+                 (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]}))]
+         (if (int? v) v default-cache-breakpoint))
+       default-cache-breakpoint))))
+
 (defn- clip-or-full
   "THE authored-content clip gate — the SINGLE place a display cap is
    applied, so the `:seon.render/full?` no-clip opt-out lives in ONE spot.
@@ -468,10 +495,13 @@
    16384 currently EQUALS `seon.eval/store-edn-cap`, so a stored result
    renders WHOLE — but this is a CROSS-REFERENCE, NOT an alias. The render
    cap (an LLM-facing read-time projection) and `store-edn-cap` (the
-   write-time per-datom anti-OOM RAM ceiling) are different tiers: this
-   one is independently tunable down for token economy WITHOUT moving the
-   RAM ceiling. The knob lives in `seon.config` (SEON_RENDER_RESULT_CAP)."
-  (config/result-body-render-cap))
+   write-time per-datom anti-OOM RAM ceiling) are different tiers.
+
+   This is the FALLBACK cap (the decay default-cap): the transcript's
+   `:seon.agent.ctx.transcript/result-decay` schedule caps a result body by AGE
+   (CP-3), and this const is the near-full / no-decay default level (offset 0 =
+   16384). Config a decay schedule on the transcript block to age-band it."
+  16384)
 
 (defn cap-result
   "Truncate a rendered eval-result string to `eval-render-cap`,
@@ -1794,7 +1824,7 @@
    [{:seon.agent.ctx/name :shared-instructions :seon.agent.ctx/priority 10
      :seon.render/ai 'my.kb.shared/instructions-block}
     ;; The L0 skills catalog — one cheap name+description line per loadable
-    ;; skill (priority 12 ≤ stable-priority-max → cached prefix; a loaded
+    ;; skill (priority 12 ≤ cache-breakpoint → cached prefix; a loaded
     ;; body rides the volatile band so load/unload never busts this slot).
     {:seon.agent.ctx/name :skills-catalog :seon.agent.ctx/priority 12
      :seon.render/ai 'my.skills/catalog-block}
@@ -1810,7 +1840,7 @@
      :seon.render/ai 'seon.agent.ctx.relevant/relevant-source-block}
     ;; The stored-findings CONTENT surface — the claim/answer TEXT +
     ;; provenance of the most-recent user-domain rows (the sibling of
-    ;; :inventory's COUNTS). Rides the volatile band (97, > stable-priority-max,
+    ;; :inventory's COUNTS). Rides the volatile band (97, > cache-breakpoint,
     ;; beside :inventory) so a newly-stored finding never busts the cached
     ;; stable prefix; recomputed each render, vanishes when the store holds
     ;; no user-domain rows. Restores the DB-memory salience a fresh agent
@@ -1987,11 +2017,6 @@
 ;; default catalog — `default-seed-blocks` was copied into the agent at
 ;; creation, so render reads one collection and stops.
 
-(def stable-priority-max
-  "Blocks with priority ≤ this are the byte-stable cacheable PREFIX (soul
-   → :namespaces); the cache breakpoint falls at the transition to the
-   volatile tail. :namespaces has priority 20."
-  20)
 
 (defn- block-bracket-ai
   "The ai-view bracket the ROOT section renderer wraps each child in — the
@@ -2125,12 +2150,13 @@
    via the injected `:seon.render/render` handle, drops blanks, brackets each
    block (self-demarcating — replaces the old `;; ── x ──` headers), and joins
    with the in-band [[stable-boundary]] inserted at the static stable→volatile
-   `:seon.agent.ctx/priority` transition (priority ≤ [[stable-priority-max]] =
+   `:seon.agent.ctx/priority` transition (priority ≤ [[cache-breakpoint]] =
    the cacheable prefix). [[split-context]] recovers the two halves on the
    provider side."
   {:malli/schema [:=> [:catn [::input :map]] :string]}
   [{:seon.render/keys [node render]}]
-  (let [rendered  (rendered-block-texts render (:seon.agent.ctx/children node))
+  (let [breakpoint (cache-breakpoint)
+        rendered  (rendered-block-texts render (:seon.agent.ctx/children node))
         bracketed (mapv (fn [s]
                           (assoc s :seon.render/bracketed
                                  (block-bracket-ai (:seon.agent.ctx/name s)
@@ -2138,12 +2164,12 @@
                         rendered)
         stable   (->> bracketed
                       (filter #(<= (or (:seon.agent.ctx/priority %) 999)
-                                   stable-priority-max))
+                                   breakpoint))
                       (map :seon.render/bracketed)
                       (str/join "\n\n"))
         volatile (->> bracketed
                       (remove #(<= (or (:seon.agent.ctx/priority %) 999)
-                                   stable-priority-max))
+                                   breakpoint))
                       (map :seon.render/bracketed)
                       (str/join "\n\n"))]
     (cond

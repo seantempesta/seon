@@ -559,13 +559,14 @@
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
 ;; ---------------------------------------------------------------------------
-;; CONFIG-AWARE LOADOUT — a run names a seon.config profile/manifest; the
-;; driver steers SEON_PROFILE/SEON_CONFIG so the REAL seed paths
-;; (boot-seed! + create! → seed-default-ctx! → resolve-loadout) seed the
-;; gym agents' :seon.agent/ctx from THAT loadout. The resulting context
-;; SIZE lands in the turn-profile block-tokens (the A/B lever). Here:
-;; :minimal drops the always-on :skill/repl body → a smaller, observably
-;; different seeded context, with zero gym-local seeding logic.
+;; CONFIG-AWARE CONTEXT — a run names a seon.config MANIFEST FILE (`:path`);
+;; the driver steers SEON_CONFIG so the REAL seed path
+;; (create! → seed-default-ctx! → resolve-agent-context) seeds the gym
+;; agents' :seon.agent/ctx from THAT manifest. The resulting context SIZE
+;; lands in the turn-profile block-tokens (the A/B lever). Here the lean
+;; manifest (config/lean-no-live-tile.edn) drops the always-on-but-unused
+;; :live-tile block → a smaller, observably different seeded context, with
+;; zero gym-local seeding logic.
 ;; ---------------------------------------------------------------------------
 
 (defn- first-profile-blocks [card]
@@ -577,7 +578,7 @@
                    (:seon.gym.profile/block-tokens
                     (first (:seon.gym.scorecard/turn-profiles card))))))
 
-(deftest config-profile-shapes-the-seeded-context
+(deftest config-manifest-shapes-the-seeded-context
   (async done
     (let [s (load-first "test/seon/gym/scenarios/s01-stub-pipeline-smoke.edn")]
       (-> (.then (gym/run-scenario! {:seon.gym/scenario s})
@@ -585,15 +586,18 @@
                    (.then (gym/run-scenario!
                             {:seon.gym/scenario s
                              :seon.gym/config
-                             {:seon.gym.config/profile :minimal}})
+                             {:seon.gym.config/path
+                              "test/seon/gym/configs/lean-no-live-tile.edn"}})
                           (fn [lean] [full lean]))))
           (.then (fn [[full lean]]
-                   (is (contains? (first-profile-blocks full) :skill/repl)
-                       "default loadout seeds the always-on :skill/repl body")
-                   (is (not (contains? (first-profile-blocks lean) :skill/repl))
-                       ":minimal profile drops :skill/repl from the seeded ctx")
+                   (is (contains? (first-profile-blocks full) :live-tile)
+                       "the default context seeds the :live-tile block")
+                   (is (not (contains? (first-profile-blocks lean) :live-tile))
+                       "the lean manifest drops :live-tile from the seeded ctx")
                    (is (contains? (first-profile-blocks lean) :namespaces)
-                       ":minimal keeps the load-bearing :namespaces block")
+                       "the lean manifest keeps the load-bearing :namespaces block")
+                   (is (contains? (first-profile-blocks lean) :skill/repl)
+                       "the lean manifest keeps the always-on :skill/repl body")
                    (is (< (first-profile-tokens lean)
                           (first-profile-tokens full))
                        (str "lean context is smaller in tokens — full="

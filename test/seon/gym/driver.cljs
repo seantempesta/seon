@@ -462,23 +462,18 @@
 ;; the driver builds the DeepSeek judge — but ONLY under allow-paid?.
 (schema/register! :seon.gym/judge-fn fn?)
 ;; CONTEXT CONFIG the run boots agents under — the unified `seon.config`
-;; seam, NOT a gym-local profile mechanism. A run names a `#profile` of
-;; the default `config/system.edn` (`:profile`, sets SEON_PROFILE) and/or
-;; a whole manifest file (`:path`, sets SEON_CONFIG). The driver steers
-;; those two env vars around the run; the REAL seed paths already read
-;; them — `seon.client/boot-seed!` (skills/routes via
-;; `config/resolve-skill-rows`/`resolve-routes`) and `agent/create!` →
-;; `ctx/seed-default-ctx!` → `config/resolve-loadout` (the per-role block
-;; loadout). So the gym agents' `:seon.agent/ctx` is seeded FROM the
-;; named loadout with zero duplicated resolution. Absent = today's full
+;; seam. A run names a whole manifest FILE (`:path`, sets SEON_CONFIG); the
+;; driver steers that env var around the run and the REAL seed paths already
+;; read it — `seon.client/boot-seed!` (routes/skills) and `agent/create!` →
+;; `ctx/seed-default-ctx!` → `config/resolve-agent-context` (the two-level
+;; context loader). So the gym agents' `:seon.agent/ctx` is seeded FROM the
+;; named manifest with zero duplicated resolution. Absent = today's full
 ;; default context (byte-identical no-config boot). The resulting context
 ;; SIZE lands in each turn-profile's `:seon.gym.profile/block-tokens`.
-(schema/register! :seon.gym.config/profile :keyword)
-(schema/register! :seon.gym.config/path    :string)
+(schema/register! :seon.gym.config/path :string)
 (schema/register! :seon.gym/config
   [:map
-   [:seon.gym.config/profile {:optional true} :seon.gym.config/profile]
-   [:seon.gym.config/path    {:optional true} :seon.gym.config/path]])
+   [:seon.gym.config/path {:optional true} :seon.gym.config/path]])
 (schema/register! :seon.gym/run-request
   [:map
    [:seon.gym/scenario :seon.gym/scenario]
@@ -1730,7 +1725,7 @@
 
 (defn- env-set!
   "Set (or, on nil, delete) a `process.env` key — the seam the gym uses to
-   steer `seon.config`'s `SEON_PROFILE`/`SEON_CONFIG` reads for a run."
+   steer `seon.config`'s `SEON_CONFIG` read for a run."
   [k v]
   (if (nil? v)
     (js-delete (.-env js/process) k)
@@ -1738,13 +1733,11 @@
 
 (defn- apply-run-config!
   "Steer the `seon.config` env for the run from a `:seon.gym/config` map
-   (`:profile` → SEON_PROFILE, `:path` → SEON_CONFIG). Returns the prior
-   [profile path] env values so `finally` can restore them. nil config →
-   no-op (today's full default context)."
+   (`:path` → SEON_CONFIG — a whole manifest file). Returns the prior
+   SEON_CONFIG value so `finally` can restore it. nil config → no-op (today's
+   full default context)."
   [config]
-  (let [prev [(env-get "SEON_PROFILE") (env-get "SEON_CONFIG")]]
-    (when-let [p (:seon.gym.config/profile config)]
-      (env-set! "SEON_PROFILE" (name p)))
+  (let [prev (env-get "SEON_CONFIG")]
     (when-let [path (:seon.gym.config/path config)]
       (env-set! "SEON_CONFIG" path))
     prev))
@@ -1800,9 +1793,9 @@
             ;; the mutated value). Strictly more correct than the diff, and
             ;; simpler.
             schemas-before @schema/*schemas
-            ;; UNIFIED config seam: steer SEON_PROFILE/SEON_CONFIG before
-            ;; the seed + agent boot so boot-seed!'s manifest read and
-            ;; create!'s resolve-loadout pick up the run's chosen loadout.
+            ;; UNIFIED config seam: steer SEON_CONFIG before the seed + agent
+            ;; boot so boot-seed!'s manifest read and create!'s
+            ;; resolve-agent-context pick up the run's chosen manifest.
             ;; nil config → no-op. Restored in finally.
             prev-env     (apply-run-config! config)]
         ;; The gym's prompt-blob evidence (§6.6) IS debug capture — it
@@ -1983,8 +1976,7 @@
             (set! db/*conn* prev-conn)
             (reset! sfs-int/!config prev-fs)
             (debug/set-override! :env)
-            (env-set! "SEON_PROFILE" (first prev-env))
-            (env-set! "SEON_CONFIG" (second prev-env))
+            (env-set! "SEON_CONFIG" prev-env)
             (reset! schema/*schemas schemas-before)))))))
 
 ;; ===========================================================================
@@ -1994,7 +1986,7 @@
 ;; profile WITHOUT driving the LLM. Free for ANY tier (paid/todo
 ;; included): it never calls a provider — it measures the context an agent
 ;; WOULD see for turn 1, through the SAME seed + `seed-default-ctx!` →
-;; `resolve-loadout` path a real run uses, so the token numbers are real.
+;; `resolve-agent-context` path a real run uses, so the token numbers are real.
 ;; This is what makes pass-rate-vs-context systematic: the SIZE axis is
 ;; measurable for every scenario for free; pass/fail needs the paid drive.
 ;; ===========================================================================
@@ -2015,7 +2007,7 @@
    given `:seon.gym/config` (nil = today's full default), WITHOUT spending
    on the LLM. Same isolation + seed path as [[run-scenario!]] (scratch
    `:memory` conn, root `*conn*` swap restored in finally, schema keys
-   reaped, SEON_PROFILE/SEON_CONFIG steered + restored). Returns
+   reaped, SEON_CONFIG steered + restored). Returns
    Promise<:seon.gym/measure-response> — the scenario id, the per-block
    token estimates (`:seon.gym/turn-profile`), and the summed
    `:seon.gym/total-tokens`."
@@ -2059,8 +2051,7 @@
       (finally
         (set! db/*conn* prev-conn)
         (reset! sfs-int/!config prev-fs)
-        (env-set! "SEON_PROFILE" (first prev-env))
-        (env-set! "SEON_CONFIG" (second prev-env))
+        (env-set! "SEON_CONFIG" prev-env)
         (let [minted (remove keys-before (schema/current-keys))]
           (when (seq minted)
             (swap! schema/*schemas #(apply dissoc % minted))))))))

@@ -1,29 +1,28 @@
 (ns seon.config
   "The pod's config-read layer — ONE consolidated manifest (`config/system.edn`,
-   `SEON_CONFIG` override) that primes an agent's context + skill loadout WITHOUT
-   a code change. The manifest is a pure OPTIONAL OVERRIDE: absent → the system
-   behaves byte-identically to a no-config boot (the env-dir skill scan +
-   `default-seed-blocks` seed unchanged). Present → it shapes three things the
-   code would otherwise hardcode:
+   `SEON_CONFIG` override) that primes an agent's context + the global render
+   bounds WITHOUT a code change. The manifest is a pure OPTIONAL OVERRIDE: absent
+   → the system behaves byte-identically to a no-config boot (the env-dir skill
+   scan + the default context tree unchanged). Present → it shapes what the code
+   would otherwise hardcode:
 
-     1. the curated POD skill corpus — `include`/`exclude` over the scanned
-        `.claude/skills` dir, so Claude-Code-only skills (browser-automation,
-        clojure-testing) drop from the seon-agent catalog while staying on disk
-        for Claude Code (ONE physical corpus, two consumers, curated by name);
-     2. per-role context loadouts — `:default`/`:root`/`:worker` get extra
-        blocks + a `default-load` set whose skill BODIES are always-on (seeded
-        as `:skill/<name>` blocks at the cached-prefix priority 16), merged over
-        `default-seed-blocks` by upsert-on-name;
-     3. routes — drop seeded `:seon.route/*` rows per cluster.
+     1. the agent CONTEXT — the two-level `:seon.config/agent-context`
+        (agent-level scalars + a `:seon.agent/ctx` block tree) the GENERIC loader
+        ([[resolve-agent-context]]) decodes + transacts; `:seon.config/root-context`
+        is the sparse root override (its `:live-tile` block = the system canvas);
+     2. routes — drop seeded `:seon.route/*` rows per cluster ([[resolve-routes]]);
+     3. the global RENDER bounds — `:seon.config/render` (value/eval/message
+        display caps), read by the [[store-edn-cap]] etc. accessors.
 
    READER — aero (`aero.core/read-config`), the SAME library the JVM track's
    `seon.config` (`config.clj`) uses, so the two tracks are coherent siblings on
    ONE `system.edn` mental model. aero's CLJS branch reads via `cljs.tools.reader`
-   (already bundled by `seon.eval`) + Node `fs`; `#env` interpolates
-   `process.env`, `#profile` selects the per-cluster variant (`SEON_PROFILE`).
-   `seon.config` is shadow-COMPILED (not self-host), so `:require-macros` resolves
-   at build time. If aero ever fails to compile/run the swap is one private fn
-   ([[read-config-file]]) — the manifest SHAPE is reader-independent.
+   (already bundled by `seon.eval`) + Node `fs`. The render section uses aero's
+   own `#long`/`#or`/`#env` tags (env OVERRIDES a manifest default) — no custom
+   data-readers. `seon.config` is shadow-COMPILED (not self-host), so
+   `:require-macros` resolves at build time. If aero ever fails to compile/run the
+   swap is one private fn ([[read-config-file]]) — the manifest SHAPE is
+   reader-independent.
 
    EXTENSIBILITY (the 'add more things to it' contract) — a new config concern is
    FOUR mechanical steps, no reshape: (1) `schema/register!` a
@@ -32,8 +31,8 @@
    point. The manifest map IS the open registry; an UNKNOWN key fails LOUD at
    validation (a config typo is a crash, never a silent ignore).
 
-   LEAF — `seon.config` produces block/route/skill MAPS (data carrying literal
-   quoted render symbols like `'my.skills/skill-block`), so it requires NEITHER
+   LEAF — `seon.config` produces block/route MAPS (data carrying literal quoted
+   render symbols like `'my.skills/skill-block`), so it requires NEITHER
    `seon.agent.ctx` NOR `my.skills` (no var refs) — the seed-point call edges
    (`ctx → config`, `client → config`) stay one-way, no cycle. Its registered
    schemas therefore use LEAF shapes (`:keyword`, `[:vector :map]`): the full
@@ -53,30 +52,15 @@
 ;;; shapes are validated as leaf `:keyword` / `:map` here and fully validated
 ;;; downstream (the LEAF rule above), so this ns stays cycle-free.
 
-(schema/register! :seon.config/strategy   [:enum :override :replace])
-(schema/register! :seon.config/role       [:enum :default :root :worker])
-;; A skill handle — a plain keyword here (the `:seon.db/identity` property on
-;; `:my.skills/name` is a storage concern irrelevant to a config selector list).
-(schema/register! :seon.config/skill-name :keyword)
-
+;; The skills section carries ONLY the corpus dir override now — the always-on
+;; skill BODIES are the agent-context's `:my.skills/load` presence-set, and the
+;; corpus is the env-dir scan verbatim (no include/exclude curation). Roots
+;; identify by id "root", never a stored `:seon.agent/kind` / config `:role`.
 (schema/register! :seon.config/skills-spec
   [:map
-   ;; corpus dir(s); reserved for multi-dir curation — the boot scan reads
-   ;; SEON_SKILLS_DIR today, so this is forward-compat, not yet consumed.
-   [:seon.config/dirs    {:optional true} [:vector :string]]
-   ;; which skill BODIES are always-on (seeded as priority-16 :skill/<name>
-   ;; blocks). EXPLICIT LISTING (#42), retiring the opaque named-profile sets:
-   ;;   :all        → every corpus skill body always-on ("load everything")
-   ;;   [:repl …]   → only these (the VISIBLE lean list — this is how you go lean)
-   ;;   []          → none always-on
-   ;; ABSENT → the legacy per-role :seon.config/default-load (migration bridge).
-   [:seon.config/load    {:optional true} [:or [:enum :all]
-                                           [:vector :seon.config/skill-name]]]
-   ;; allowlist (absent = all scanned skills) — CATALOG curation, distinct from
-   ;; :load (which selects the always-on subset of the catalog)
-   [:seon.config/include {:optional true} [:vector :seon.config/skill-name]]
-   ;; denylist (the first concrete payload: browser-automation, clojure-testing)
-   [:seon.config/exclude {:optional true} [:vector :seon.config/skill-name]]])
+   ;; corpus dir(s); `skills-dir` reads the first entry, else SEON_SKILLS_DIR,
+   ;; else `.claude/skills`.
+   [:seon.config/dirs {:optional true} [:vector :string]]])
 
 ;;; NAMESPACES render policy (#42 explicit listing) — the single curation lever
 ;;; for the agent's prompt BODY. Signatures are RETIRED: every rendered ns
@@ -103,22 +87,31 @@
    [:seon.config/always     [:set :keyword]]
    [:seon.config/current-ns :seon.config/current-ns]])
 
-(schema/register! :seon.config/loadout
-  [:map
-   [:seon.config/role         :seon.config/role]
-   ;; skills whose BODY is always-on (expanded to priority-16 :skill/<name> blocks)
-   [:seon.config/default-load {:optional true} [:vector :seon.config/skill-name]]
-   ;; extra ctx blocks (ordinary :seon.agent.ctx/block maps; full shape validated
-   ;; downstream at install!)
-   [:seon.config/blocks       {:optional true} [:vector :map]]
-   ;; block names to drop from the default seed
-   [:seon.config/removes      {:optional true} [:vector :keyword]]
-   [:seon.config/strategy     {:optional true} :seon.config/strategy]])
-
 (schema/register! :seon.config/route-spec
   [:map
-   [:seon.config/strategy {:optional true} :seon.config/strategy]
-   [:seon.config/removes  {:optional true} [:vector :keyword]]])
+   [:seon.config/removes {:optional true} [:vector :keyword]]])
+
+;;; RENDER BOUNDS — the GLOBAL, process-wide render/value display caps (#46).
+;;; These are NOT per-agent datoms: they bound the value/eval/message renderers
+;;; for the whole process, so they live in the manifest as a section (not on an
+;;; agent entity). Env OVERRIDES config (owner model): the manifest declares
+;;; each knob as `#long #or [#env SEON_RENDER_* default]` in `config/system.edn`
+;;; — env set → the coerced env value, env unset → the manifest default. The
+;;; keys here are `{:optional true}` WITHOUT a `:default` (decision: default in
+;;; ONE place — the manifest `#or`); the accessors below apply the SAME literal
+;;; as their own fallback when the whole section is absent (a no-manifest boot).
+(schema/register! :seon.config/render
+  [:map
+   [:seon.config.render/store-edn-cap     {:optional true} [:int {:min 1}]]
+   [:seon.config.render/eval-cap          {:optional true} [:int {:min 1}]]
+   [:seon.config.render/message-cap       {:optional true} [:int {:min 1}]]
+   [:seon.config.render/value-max-depth   {:optional true} [:int {:min 1}]]
+   [:seon.config.render/value-max-keys    {:optional true} [:int {:min 1}]]
+   [:seon.config.render/value-max-items   {:optional true} [:int {:min 1}]]
+   [:seon.config.render/value-max-string  {:optional true} [:int {:min 1}]]
+   [:seon.config.render/value-shape-sample {:optional true} [:int {:min 1}]]
+   [:seon.config.render/value-verbatim-cap {:optional true} [:int {:min 1}]]
+   [:seon.config.render/value-width       {:optional true} [:int {:min 1}]]])
 
 ;; THE manifest — the registry of known sections. A future section = ONE more
 ;; optional key here + a resolver fn. Every key optional ⇒ `{}` (config absent)
@@ -141,8 +134,7 @@
    — a SPARSE manifest fills it. Reproduces the CP-0 parity oracle byte-for-byte:
    the [[seon.agent.ctx/default-seed-blocks]] list (soul/agents OMITTED — those
    files are absent in the default cluster, matching the oracle) PLUS the
-   always-on `:skill/repl` body block (priority 16) the old `resolve-loadout`
-   minted from `:seon.config/skills {:load [:repl]}`. `:seon.render/ai` values
+   always-on `:skill/repl` body block (priority 16). `:seon.render/ai` values
    are literal quoted symbols (LEAF rule — no var ref). Sorted top→bottom =
    static→volatile (the provider-cache contract)."
   [{:seon.agent.ctx/name :shared-instructions :seon.agent.ctx/priority 10
@@ -192,30 +184,21 @@
   [:map
    [:seon.config/skills        {:optional true} :seon.config/skills-spec]
    [:seon.config/namespaces    {:optional true} :seon.config/namespaces-spec]
-   [:seon.config/loadouts      {:optional true} [:vector :seon.config/loadout]]
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
+   [:seon.config/render        {:optional true} :seon.config/render]
    [:seon.config/agent-context {:optional true} :seon.config/agent-context]
    [:seon.config/root-context  {:optional true} :seon.config/root-context]])
 
-;;; Verb arg/return shapes. The three corpora are leaf `[:vector :map]` here
-;;; (full shapes validated downstream); registered once + referenced so the
-;;; resolver specs don't re-inline the shape.
+;;; Verb arg/return shapes — leaf `[:vector :map]` (full shapes validated
+;;; downstream); registered once + referenced so the resolver specs don't
+;;; re-inline the shape.
 (schema/register! ::agent-id :string)
-(schema/register! ::rows   [:vector :map])
-(schema/register! ::blocks [:vector :map])
 (schema/register! ::routes [:vector :map])
 
 (def ^:private default-config-path
   "The consolidated manifest, CWD-relative (the pod's cwd is the repo root) —
    `SEON_CONFIG` overrides the path (the SOUL.md / SEON_SKILLS_DIR precedent)."
   "config/system.edn")
-
-(def ^:private default-load-priority
-  "A default-loaded skill body sits in the CACHED prefix between the L0 catalog
-   (`:skills-catalog`, 12) and `:namespaces` (20), inside `stable-priority-max`
-   = 20, so an always-on body never busts the provider cache. (A RUNTIME
-   `(my.skills/load …)` uses priority 30 — the volatile band — instead.)"
-  16)
 
 (defn- env
   "A `process.env` value, nil when unset/blank — `seon.platform/env-val`, the
@@ -224,12 +207,13 @@
   (platform/env-val var-name))
 
 (defn- read-config-file
-  "Read + resolve `path` via aero (the §g.0 decision). The ONE reader seam —
-   the manifest shape is reader-independent, so a fallback to
-   `cljs.reader/read-string` would swap only this body. `#profile` selects the
-   per-cluster variant from `SEON_PROFILE` (default `:default`)."
+  "Read + resolve `path` via aero. The ONE reader seam — the manifest shape is
+   reader-independent, so a fallback to `cljs.reader/read-string` would swap only
+   this body. A per-cluster variant is a SEPARATE file pointed at by
+   `SEON_CONFIG` (no `#profile` — one file, one shape). The render section's
+   `#long`/`#or`/`#env` tags resolve through aero's own readers here."
   [path]
-  (aero/read-config path {:profile (keyword (or (env "SEON_PROFILE") "default"))}))
+  (aero/read-config path {}))
 
 (defn load-manifest
   "Read the consolidated manifest (`config/system.edn`, `SEON_CONFIG` override).
@@ -299,32 +283,34 @@
 
 (defn namespaces-policy
   "The resolved namespaces render policy for the live manifest, memoized per
-   `[SEON_CONFIG SEON_PROFILE]` (config is process-stable; the gym steers those
-   env vars per run, so the key tracks them — a different manifest re-resolves).
-   The ONE policy `seon.agent.ctx.namespaces` (renderer) and `seon.client`
-   (boot indexer's full-source decision) share — see [[resolve-namespaces]]."
+   `SEON_CONFIG` (config is process-stable; the gym steers SEON_CONFIG per run,
+   so the key tracks it — a different manifest re-resolves). The ONE policy
+   `seon.agent.ctx.namespaces` (renderer) and `seon.client` (boot indexer's
+   full-source decision) share — see [[resolve-namespaces]]."
   {:malli/schema [:=> [:cat] :seon.config/namespaces-policy]}
   []
-  (let [k [(env "SEON_CONFIG") (env "SEON_PROFILE")]]
+  (let [k (env "SEON_CONFIG")]
     (or (get @ns-policy-cache k)
         (let [p (resolve-namespaces (load-manifest))]
           (swap! ns-policy-cache assoc k p)
           p))))
 
 ;;; ============================================================
-;;; ENV KNOBS — the ONE typed env surface. `platform/env-val` is the single
-;;; low-level reader (a raw `process.env` lookup); `seon.config` is the single
-;;; TYPED layer on top — `env-string` / `env-int` plus the named accessors
-;;; below. Every `SEON_*` TUNING knob (render/output caps, agent bounds, fs
-;;; grants, brand, instrument, tile bounding, identity-file selection) flows
-;;; through these readers; nothing else calls `js/process.env` directly for a
-;;; knob. A consumer that needs a one-off flag calls `env-string`/`env-int`
-;;; here with its var name (e.g. `agent/turn` reads SEON_AI_MAX_RETRIES via
-;;; `env-int`; `agent/fs` reads SEON_FS_* via `env-string`).
+;;; ENV KNOBS — the ONE typed env surface for the FEW knobs that stay env-only
+;;; (launch-wiring + process-level flags). `platform/env-val` is the single
+;;; low-level reader (a raw `process.env` lookup); `seon.config` is the typed
+;;; layer on top — `env-string` / `env-int` plus the named accessors below.
+;;; The render/value DISPLAY caps live in the manifest's `:seon.config/render`
+;;; section (a proper config, not scattered env reads — #46); an env override on
+;;; a specific cap is still available per-knob via aero's `#long #or [#env …]`
+;;; tag IN the manifest, but is not pre-wired. A consumer that needs a one-off
+;;; process flag calls `env-string`/`env-int` here with its var name (e.g.
+;;; `agent/fs` reads SEON_FS_* via `env-string`).
 ;;;
 ;;; THREE surfaces legitimately read env OUTSIDE this layer, none a tuning knob:
 ;;;   1. the LLM-provider config seam `seon.ai` (SEON_AI_* → the DB-owned
-;;;      `:seon.ai/config` row — its own consolidated env→DB surface);
+;;;      `:seon.ai/config` row — its own consolidated env→DB surface; per-agent
+;;;      overrides + retries are agent-entity datoms, not env);
 ;;;   2. process-launch / infra wiring read at its point of use (SEON_PORT[_FILE],
 ;;;      SEON_CLUSTER_DIR, SEON_REQ_SOCK/SEON_PUB_SOCK, SEON_AGENT_ID, and the
 ;;;      SEON_EMBED feature gate) — launch wiring, not agent-tunable knobs;
@@ -388,92 +374,116 @@
   []
   (env-int "SEON_EVAL_RESULT_VARS_CAP" 200))
 
-;;; --- Render/output caps — the coherent `SEON_RENDER_*_CAP` family. Each is
-;;; a read-time, LLM-facing display truncation; all live here so the family is
-;;; discoverable + tunable in ONE place.
+;;; --- Render/output caps — the coherent `SEON_RENDER_*` family (#46). These
+;;; are read-time, LLM-facing display truncations. Env OVERRIDES config (owner
+;;; model): the manifest's `:seon.config/render` section declares each knob as
+;;; `#long #or [#env SEON_RENDER_* default]` in `config/system.edn`, so an env
+;;; var wins when set, else the manifest default applies. Each accessor reads
+;;; the RESOLVED section via [[render-config]] (memoized per SEON_CONFIG, like
+;;; [[namespaces-policy]]); the literal fallback in the accessor equals the
+;;; manifest default, so a no-manifest boot is byte-identical to today. Callers
+;;; (render/value.cljs, ctx.cljs, eval.cljs) are UNTOUCHED — they still call
+;;; `store-edn-cap` etc.; only the accessor body moved from `env-int` to a
+;;; manifest read.
+
+;; `def` (NOT defonce): a hot-reload rotates the cache so a dev edit to the
+;; manifest is picked up on next reload. Memoized per SEON_CONFIG within a
+;; process (config is boot-stable; the gym steers SEON_CONFIG per run).
+(def ^:private render-config-cache (atom {}))
+
+(defn- render-config
+  "The resolved `:seon.config/render` section of the live manifest (env
+   overrides config via the section's `#or [#env … default]` tags), memoized
+   per `SEON_CONFIG`. `{}` when the section is absent — each accessor then uses
+   its own literal fallback (= the manifest default)."
+  []
+  (let [k (env "SEON_CONFIG")]
+    (or (get @render-config-cache k)
+        (let [m (get (load-manifest) :seon.config/render {})]
+          (swap! render-config-cache assoc k m)
+          m))))
+
+(defn reset-render-cache!
+  "Clear the memoized [[render-config]] read — for tests that `with-redefs`
+   `load-manifest` and need the next accessor read to re-resolve."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (reset! render-config-cache {})
+  nil)
 
 (defn store-edn-cap
-  "Per-value pr-str truncation cap for stored EDN display
-   (`SEON_RENDER_STORE_EDN_CAP`, default 16384)."
+  "Per-value pr-str truncation cap for stored EDN display (manifest
+   `:seon.config.render/store-edn-cap`; env `SEON_RENDER_STORE_EDN_CAP`; 16384)."
   {:malli/schema [:=> [:cat] :int]}
   []
-  (env-int "SEON_RENDER_STORE_EDN_CAP" 16384))
-
-(defn result-body-render-cap
-  "Per-value render-body truncation cap — the citable `;;=> <value>` line
-   (`SEON_RENDER_RESULT_CAP`, default 16384)."
-  {:malli/schema [:=> [:cat] :int]}
-  []
-  (env-int "SEON_RENDER_RESULT_CAP" 16384))
+  (get (render-config) :seon.config.render/store-edn-cap 16384))
 
 (defn eval-render-cap
   "Char cap for the echoed SOURCE + captured STDOUT of one eval row — neither
    is dereferenceable via `result/<id>`, so a large one is context-wasting
-   noise (`SEON_RENDER_EVAL_CAP`, default 1500)."
+   noise (manifest `:seon.config.render/eval-cap`; env `SEON_RENDER_EVAL_CAP`;
+   1500)."
   {:malli/schema [:=> [:cat] :int]}
   []
-  (env-int "SEON_RENDER_EVAL_CAP" 1500))
+  (get (render-config) :seon.config.render/eval-cap 1500))
 
 (defn message-render-cap
   "Per-message rendered-content char cap for one inbound transcript line — a
-   single pasted blob must not blow the context (`SEON_RENDER_MESSAGE_CAP`,
-   default 4000 ≈ 1k tokens)."
+   single pasted blob must not blow the context (manifest
+   `:seon.config.render/message-cap`; env `SEON_RENDER_MESSAGE_CAP`; 4000)."
   {:malli/schema [:=> [:cat] :int]}
   []
-  (env-int "SEON_RENDER_MESSAGE_CAP" 4000))
-
-(defn transcript-token-cap
-  "Total token cap for the transcript section eviction knob (RETAINED but
-   currently OFF — `:seon.render/clip :none`). Measured in TOKENS, not chars
-   (`SEON_RENDER_TRANSCRIPT_TOKEN_CAP`, default 6000)."
-  {:malli/schema [:=> [:cat] :int]}
-  []
-  (env-int "SEON_RENDER_TRANSCRIPT_TOKEN_CAP" 6000))
+  (get (render-config) :seon.config.render/message-cap 4000))
 
 ;;; --- Value-renderer bounds — the `SEON_RENDER_VALUE_*` sub-family
 ;;; (per-node depth/breadth limits of the structural eval-value skeleton).
 
 (defn value-max-depth
-  "Max nesting depth of the value skeleton (`SEON_RENDER_VALUE_MAX_DEPTH`, 3)."
-  {:malli/schema [:=> [:cat] :int]} [] (env-int "SEON_RENDER_VALUE_MAX_DEPTH" 3))
+  "Max nesting depth of the value skeleton (manifest
+   `:seon.config.render/value-max-depth`; env `SEON_RENDER_VALUE_MAX_DEPTH`; 3)."
+  {:malli/schema [:=> [:cat] :int]} []
+  (get (render-config) :seon.config.render/value-max-depth 3))
 
 (defn value-max-keys
-  "Max map keys shown per node (`SEON_RENDER_VALUE_MAX_KEYS`, 8)."
-  {:malli/schema [:=> [:cat] :int]} [] (env-int "SEON_RENDER_VALUE_MAX_KEYS" 8))
+  "Max map keys shown per node (manifest `:seon.config.render/value-max-keys`;
+   env `SEON_RENDER_VALUE_MAX_KEYS`; 8)."
+  {:malli/schema [:=> [:cat] :int]} []
+  (get (render-config) :seon.config.render/value-max-keys 8))
 
 (defn value-max-items
-  "Max collection items shown per node (`SEON_RENDER_VALUE_MAX_ITEMS`, 8)."
-  {:malli/schema [:=> [:cat] :int]} [] (env-int "SEON_RENDER_VALUE_MAX_ITEMS" 8))
+  "Max collection items shown per node (manifest
+   `:seon.config.render/value-max-items`; env `SEON_RENDER_VALUE_MAX_ITEMS`; 8)."
+  {:malli/schema [:=> [:cat] :int]} []
+  (get (render-config) :seon.config.render/value-max-items 8))
 
 (defn value-max-string
-  "Max chars of a string leaf before it is clipped to a length marker
-   (`SEON_RENDER_VALUE_MAX_STRING`, 80)."
-  {:malli/schema [:=> [:cat] :int]} [] (env-int "SEON_RENDER_VALUE_MAX_STRING" 80))
+  "Max chars of a string leaf before it is clipped to a length marker (manifest
+   `:seon.config.render/value-max-string`; env `SEON_RENDER_VALUE_MAX_STRING`;
+   80)."
+  {:malli/schema [:=> [:cat] :int]} []
+  (get (render-config) :seon.config.render/value-max-string 80))
 
 (defn value-shape-sample
   "How many homogeneous-map elements to probe for a shared key-set shape
-   (`SEON_RENDER_VALUE_SHAPE_SAMPLE`, 8)."
-  {:malli/schema [:=> [:cat] :int]} [] (env-int "SEON_RENDER_VALUE_SHAPE_SAMPLE" 8))
+   (manifest `:seon.config.render/value-shape-sample`; env
+   `SEON_RENDER_VALUE_SHAPE_SAMPLE`; 8)."
+  {:malli/schema [:=> [:cat] :int]} []
+  (get (render-config) :seon.config.render/value-shape-sample 8))
 
 (defn value-verbatim-cap
   "Char budget under which an eval value prints WHOLE (REPL-style) instead of
-   being skeletonized (`SEON_RENDER_VALUE_VERBATIM_CAP`, 1500)."
-  {:malli/schema [:=> [:cat] :int]} [] (env-int "SEON_RENDER_VALUE_VERBATIM_CAP" 1500))
+   being skeletonized (manifest `:seon.config.render/value-verbatim-cap`; env
+   `SEON_RENDER_VALUE_VERBATIM_CAP`; 1500)."
+  {:malli/schema [:=> [:cat] :int]} []
+  (get (render-config) :seon.config.render/value-verbatim-cap 1500))
 
 (defn value-width
-  "Inline-vs-break width budget for the skeleton emitter
-   (`SEON_RENDER_VALUE_WIDTH`, 72)."
-  {:malli/schema [:=> [:cat] :int]} [] (env-int "SEON_RENDER_VALUE_WIDTH" 72))
+  "Inline-vs-break width budget for the skeleton emitter (manifest
+   `:seon.config.render/value-width`; env `SEON_RENDER_VALUE_WIDTH`; 72)."
+  {:malli/schema [:=> [:cat] :int]} []
+  (get (render-config) :seon.config.render/value-width 72))
 
 ;;; --- Agent + test bounds (not render caps — kept on their own prefixes).
-
-(defn default-turn-limit
-  "The `SEON_DEFAULT_TURN_LIMIT` work-bound override (parsed int), or nil when
-   unset / unparseable (the caller then applies its own default)."
-  {:malli/schema [:=> [:cat] [:maybe :int]]}
-  []
-  (let [v (some-> (env "SEON_DEFAULT_TURN_LIMIT") js/parseInt)]
-    (when (and (number? v) (not (js/isNaN v))) v)))
 
 (defn tick-ms
   "The `SEON_TICK_MS` ticker-cadence override (parsed POSITIVE int), or nil
@@ -504,106 +514,14 @@
   []
   (or (env "SEON_DEBUG_CAPTURE_DIR") "logs/turns"))
 
-(defn agent-role
-  "The loadout SELECTOR for `agent-id` — `:root` for the root agent (id
-   \"root\"), `:worker` otherwise. A pure config-composition key, NOT a stored
-   attr (there is no `:seon.agent/role`/`:kind` datom)."
-  {:malli/schema [:=> [:catn [::agent-id ::agent-id]] :seon.config/role]}
-  [agent-id]
-  (if (= agent-id "root") :root :worker))
-
-(defn resolve-skill-rows
-  "Curate the scanned skill `rows` (`:my.skills/*` maps) by the manifest's
-   `:seon.config/skills` spec: keep `include` (when given), drop `exclude`. No
-   spec → `rows` unchanged (the identity = today's full-corpus scan)."
-  {:malli/schema [:=> [:catn [::rows ::rows]
-                       [::manifest :seon.config/manifest]]
-                  ::rows]}
-  [rows manifest]
-  (let [spec (:seon.config/skills manifest)]
-    (if (nil? spec)
-      rows
-      (let [incl (some-> (:seon.config/include spec) set)
-            excl (some-> (:seon.config/exclude spec) set)]
-        (->> rows
-             (filterv (fn [r]
-                        (let [nm (:my.skills/name r)]
-                          (and (or (nil? incl) (incl nm))
-                               (not (and excl (excl nm))))))))))))
-
-(defn- skill-block
-  "The always-on block a `default-load` skill-name expands to — the SAME
-   `:skill/<name>` handle a runtime load uses, reusing the shipped
-   `my.skills/skill-block` render fn (a literal quoted symbol; no var ref), but
-   seeded at the cached-prefix priority so the body is always-on AND cacheable."
-  [skill-name]
-  {:seon.agent.ctx/name     (keyword "skill" (name skill-name))
-   :seon.agent.ctx/priority default-load-priority
-   :seon.render/ai          'my.skills/skill-block})
-
-(defn- scan-skill-names
-  "The corpus skill names as keywords — the subdirectories of `(skills-dir)`
-   that carry a `SKILL.md`. Expands `:seon.config/skills {:seon.config/load
-   :all}` WITHOUT a DB dependency (the leaf rule: config never requires
-   `my.skills`). Mirrors `my.skills/seed-skills-tx-data`'s scan."
-  []
-  (let [fs  (js/require "fs")
-        dir (skills-dir)]
-    (if-not (try (.existsSync fs dir) (catch :default _ false))
-      []
-      (->> (.readdirSync fs dir #js {:withFileTypes true})
-           (filter (fn [d] (.isDirectory d)))
-           (map (fn [d] (.-name d)))
-           (filter (fn [n] (try (.existsSync fs (str dir "/" n "/SKILL.md"))
-                                (catch :default _ false))))
-           (mapv keyword)))))
-
 (defn- upsert-by-name
   "Merge `additions` over `base` by `:seon.agent.ctx/name` (a re-named block
-   replaces in place) — install!'s upsert semantics."
+   replaces in place) — install!'s upsert semantics. Used by
+   [[context-config-for]] to layer the root-context override over the base."
   [base additions]
   (let [names (into #{} (map :seon.agent.ctx/name) additions)]
     (into (filterv #(not (names (:seon.agent.ctx/name %))) base)
           additions)))
-
-(defn resolve-loadout
-  "Shape `base-blocks` (`default-seed-blocks`) for an agent of `role` against
-   the manifest. The ALWAYS-ON skill bodies come from `:seon.config/skills`
-   `:seon.config/load` (#42 explicit listing): `:all` → every corpus skill
-   (`scan-skill-names`); a vector → only those; `[]` → none. When `:load` is
-   ABSENT it falls back to the legacy per-role `:seon.config/default-load`
-   (a migration bridge — retire once acme/test/gym move to `:load`). Each
-   resolved skill-name expands to a priority-16 `:skill/<name>` always-on block.
-   The `role`'s loadout (applied after the `:default` loadout) adds `:blocks`
-   (UPSERTED over `base-blocks` by name), drops `:removes`, and `:strategy
-   :replace` starts from an empty base. No `:load` + no matching loadouts →
-   `base-blocks` unchanged (config-absent identity)."
-  {:malli/schema [:=> [:catn [::blocks ::blocks]
-                       [::role :seon.config/role]
-                       [::manifest :seon.config/manifest]]
-                  ::blocks]}
-  [base-blocks role manifest]
-  (let [by-role    (into {} (map (juxt :seon.config/role identity))
-                         (:seon.config/loadouts manifest))
-        applicable (->> [(:default by-role) (get by-role role)]
-                        (remove nil?)
-                        ;; dedup when role IS :default (one loadout, not twice)
-                        (distinct))
-        load-spec  (get (:seon.config/skills manifest) :seon.config/load ::absent)
-        loads      (cond
-                     (= load-spec :all)     (scan-skill-names)
-                     ;; absent ⇒ legacy per-role :default-load (migration bridge)
-                     (= load-spec ::absent) (into [] (comp (mapcat :seon.config/default-load)
-                                                           (distinct))
-                                                  applicable)
-                     :else                  (vec (distinct load-spec)))  ; explicit vector (incl [])
-        extras     (into [] (mapcat :seon.config/blocks) applicable)
-        removes    (into #{} (mapcat :seon.config/removes) applicable)
-        replace?   (some #(= :replace (:seon.config/strategy %)) applicable)
-        additions  (into (mapv skill-block loads) extras)
-        start      (if replace? [] base-blocks)]
-    (->> (upsert-by-name start additions)
-         (filterv #(not (removes (:seon.agent.ctx/name %)))))))
 
 (defn resolve-routes
   "Curate the seeded `routes` (`:seon.route/*` maps) by the manifest's

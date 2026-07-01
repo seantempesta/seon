@@ -155,10 +155,10 @@
     [my.data]
     [my.ui]
     [my.tile]
-    ;; Config-driven context/skill loadout — the OPTIONAL manifest
-    ;; (`config/system.edn`) that curates the skill corpus + seeds per-role
-    ;; loadouts. Absent → byte-identical to a no-config boot. `boot-seed!`
-    ;; loads it ONCE and threads it to the skill + route seed steps.
+    ;; Config-driven context — the OPTIONAL manifest (`config/system.edn`)
+    ;; that shapes the agent-context, routes, and global render bounds.
+    ;; Absent → byte-identical to a no-config boot. `boot-seed!` loads it
+    ;; ONCE and threads it to the route + skill-corpus seed steps.
     [seon.config :as config]
     ;; Holistic declarative-state reconcile — `boot-seed!` routes its
     ;; desired-set steps (routes + skills) through `seon.state/reconcile!`
@@ -387,8 +387,8 @@
    :seon.agent/id
    ;; Derived-state primitives: the CURRENT run pointer (fencing token +
    ;; spine of derived state) and the terminate marker. Plus the run-bound
-   ;; seeds (env SEON_DEFAULT_TURN_LIMIT overrides default-turn-limit) and the
-   ;; self-managed cron vector. The agent's section overrides.
+   ;; seeds (the :seon.agent.run/default-turn-limit config datom, default 20)
+   ;; and the self-managed cron vector. The agent's section overrides.
    :seon.agent/run
    :seon.agent/terminated-at
    :seon.agent/default-turn-limit
@@ -2187,9 +2187,11 @@
         ;; error-value is checked + thrown (surface-errors-loudly).
         (let [desired (into (vec (config/resolve-routes (route/core-routes-tx)
                                                         manifest))
-                            (config/resolve-skill-rows
-                              (my.skills/seed-skills-tx-data)
-                              manifest))
+                            ;; the scanned skill corpus is the desired set as-is
+                            ;; (no include/exclude curation — the env-dir scan IS
+                            ;; the corpus; always-on bodies are the agent-context's
+                            ;; :my.skills/load presence-set).
+                            (my.skills/seed-skills-tx-data))
               recon   (await
                         (db/with-tx-context
                           {:seon.db/origin :config}
@@ -2366,20 +2368,7 @@
                                                      ;; (create! never re-seeds
                                                      ;; an existing entity).
                                                      (some #{aid} minted-ids)
-                                                     (assoc :seon.agent/purpose purpose)))))
-                                  ;; this will be removed when Core finishes the config + data loader
-                                  ;; Root's canvas = the SYSTEM VIEW. Seed root's
-                                  ;; live-tile content to seon.render.system/system-view
-                                  ;; so `/` (= root's world) renders the fleet/system
-                                  ;; dashboard via the SAME render-agent-tile seam every
-                                  ;; agent uses. Idempotent upsert on :seon.agent/id —
-                                  ;; re-asserted every boot so a resumed root gets it too.
-                                  (when (= "root" aid)
-                                    (await (db/transact!
-                                             {:seon.db/tx-data
-                                              [{:seon.agent/id aid
-                                                :seon.render.live-tile/content
-                                                'seon.render.system/system-view}]}))))
+                                                     (assoc :seon.agent/purpose purpose))))))
                                 @!acc)
                 ;; Task #21: an init-agent! that came back as an
                 ;; error envelope means an agent with NO entity —

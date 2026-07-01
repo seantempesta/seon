@@ -109,7 +109,7 @@
 
 (def ^:private stable-section-names
   "Section names that form the byte-stable cacheable PREFIX (the composer
-   caches sections with `:seon.agent.ctx/priority` ≤ `seon.agent.ctx/stable-priority-max`
+   caches sections with `:seon.agent.ctx/priority` ≤ `seon.agent.ctx/cache-breakpoint`
    = soul → :system → :namespaces). The structural cache-line falls right
    after the LAST of these in render order. Mirrors `core-default-ctx`."
   #{:soul-system :system :namespaces})
@@ -241,9 +241,9 @@
      :html-cards cards
      :turn-durs  turn-durs
      ;; No render-cap elision on the right pane — the section twins ARE the
-     ;; prompt sections (the transcript twin self-bounds via the composer's
-     ;; transcript-token-cap). Kept at 0 so the pane's existing
-     ;; elided-note branch is a no-op.
+     ;; prompt sections (the transcript twin self-bounds via the transcript
+     ;; block's :seon.agent.ctx.transcript/tiers). Kept at 0 so the pane's
+     ;; existing elided-note branch is a no-op.
      :elided    0
      :agent-tile tile
      :agent      agent}))

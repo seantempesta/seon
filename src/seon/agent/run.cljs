@@ -28,7 +28,6 @@
    `current-run` is a thin `*conn*` adapter over the one derivation; seon.agent
    requires THIS ns, so the edge runs agent → run → derive, never the reverse."
   (:require
-    [seon.config :as config]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.schema :as schema]))
@@ -253,7 +252,7 @@
             turn-limit (or tl
                            (:seon.agent.run/default-turn-limit a)
                            (:seon.agent/default-turn-limit a)
-                           (config/default-turn-limit) default-turn-limit)
+                           default-turn-limit)
             deadline   (or dl (js/Date. (+ (.getTime now)
                                            (or (::default-deadline-ms a)
                                                (:seon.agent/default-deadline-ms a)

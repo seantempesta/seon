@@ -17,7 +17,7 @@
    (`seon.agent.ctx/default-seed-blocks`) as
    `'seon.agent.ctx.findings/findings-block`; loaded at boot so the
    symbol resolves for `seon.eval/lookup-value`. Rides the VOLATILE band
-   (priority > stable-priority-max) so a newly-stored finding never busts
+   (priority > cache-breakpoint) so a newly-stored finding never busts
    the cached stable prefix.
 
    REACTIVE: returns \"\" when the store holds no user-domain rows → the
