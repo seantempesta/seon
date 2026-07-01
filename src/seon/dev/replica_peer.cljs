@@ -294,8 +294,9 @@
     :where [?e :seon.peer/id ?id] [?e :seon.peer/name ?name]])
 
 (defn ^:async run-rw!
-  "Oracle (a): transact through the :seon-wire writer; read locally via lazy
-   deref. Reports rows from BOTH the synthesized report's :db-after and a
+  "Oracle (a): transact through the `:seon-wire` writer, read locally.
+
+   Reads locally via lazy deref. Reports rows from BOTH the synthesized report's :db-after and a
    fresh deref, RYOW evidence, own-listener firing, and io counts."
   [cfg sock-path]
   (let [t0         (js/performance.now)
@@ -335,8 +336,10 @@
       (.exit js/process 0))))
 
 (defn ^:async run-listen!
-  "Oracle (b)/(d): own tx (must be SKIPPED by the adapter), then wait for a
-   foreign tx carrying PEER_EXPECT_ID — handler must receive a db VALUE
+  "Oracle (b)/(d): own tx is skipped, then wait for a foreign tx.
+
+   Own tx must be SKIPPED by the adapter; the foreign tx carrying
+   PEER_EXPECT_ID — handler must receive a db VALUE
    containing the datom, with consecutive db/db-before."
   [cfg sock-path ^js env]
   (let [conn       (await (d/connect cfg))
@@ -379,8 +382,9 @@
                    20000)))
 
 (defn ^:async run-poke!
-  "Oracle helper: a RAW wire transact (its own wire client, NOT through any
-   conn) — 'another writer' from every peer's point of view."
+  "Oracle helper: a RAW wire transact via its own wire client.
+
+   NOT through any conn — 'another writer' from every peer's point of view."
   [sock-path ^js env]
   (let [id   (js/parseInt (.-PEER_POKE_ID env) 10)
         nm   (or (.-PEER_POKE_NAME env) (str "poke-" id))
@@ -392,7 +396,9 @@
             :seon.peer/resp-ok (some? bt)})
     (.exit js/process (if bt 0 1))))
 
-(defn ^:async -main [& _]
+(defn ^:async -main
+  "Node entry point: dispatch on `PEER_MODE` to run one replica-peer oracle."
+  [& _]
   (install-read-counter!)
   (try
     (let [^js env    (.-env js/process)

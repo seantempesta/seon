@@ -56,8 +56,10 @@
       (let [a (first ids)] [a (get m a)]))))
 
 (defn ^:async reconcile!
-  "Make the MANAGED datoms match `:seon.state/desired` (a vector of
-   entity-maps). THREE attribute / connection moves — no entity 'kind' loop:
+  "Make the MANAGED datoms match `:seon.state/desired`.
+
+   `:seon.state/desired` is a vector of
+   entity-maps. THREE attribute / connection moves — no entity 'kind' loop:
 
      1. UPSERT each desired map by its OWN `:db.unique/identity` attr —
         datahike's `upsert-eid` finds-or-creates by `[attr value]` (the same

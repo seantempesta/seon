@@ -143,9 +143,11 @@
          content (provenance-str m))))
 
 (defn findings-block
-  "The stored-findings content surface (volatile tail): the TOP-N
-   most-recent user-domain rows' actual claim/answer TEXT + their
-   `:my.kb/source-*` provenance, one `;`-comment line each. The CONTENT
+  "The stored-findings content surface: recent claims + `:my.kb` provenance.
+
+   Volatile tail — the TOP-N most-recent user-domain rows' actual
+   claim/answer TEXT + their `:my.kb/source-*` provenance, one
+   `;`-comment line each. The CONTENT
    sibling of [[seon.agent.ctx.inventory/inventory-block]] (counts for
    discoverability) — restores the salience render a fresh agent needs to
    consult-before-researching. Pure fn of the db; stores nothing; recomputed

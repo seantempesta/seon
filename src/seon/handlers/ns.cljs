@@ -64,7 +64,9 @@
       s)))
 
 (defn render-ai
-  "Compact one-line summary with counts and short names:
+  "Compact one-line summary with counts and short names.
+
+   Example:
 
      [ns my.agent.XAR-...]  fns: add, sub  schemas: :answer, :id"
   {:malli/schema [:=> [:cat :map] [:maybe :string]]}
@@ -91,7 +93,9 @@
                             (str/replace #"[^A-Za-z0-9_-]" "_"))))
 
 (defn render-html
-  "Interactive card. Header line + collapsible `<details>` per group
+  "Interactive card.
+
+   Header line + collapsible `<details>` per group
    (fns / schemas). Each name is an in-page anchor link — clicking
    `add` jumps to the `:seon.fn` entity card further down the pane."
   {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}

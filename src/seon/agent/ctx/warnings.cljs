@@ -8,9 +8,10 @@
     [seon.warn :as warn]))
 
 (defn warnings-block
-  "Current problems as a single-`;` `WARNINGS` comment-block (one
-   explanation + fix example per kind, then affected locations), or empty
-   when clean — derived from live state, never stored, so a warning
+  "Current problems as a `WARNINGS` comment-block, or empty when clean.
+
+   A single-`;` block: one explanation + fix example per kind, then
+   affected locations — derived from live state, never stored, so a warning
    vanishes the moment its cause does. Corpus (spec-hygiene) checks scope
    to the agent's current ns by default; `:seon.warn/ns <ns-kw>` (or
    `:seon.warn/all`) on the `:seon.agent.ctx` entity overrides. Runtime checks

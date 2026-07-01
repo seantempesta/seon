@@ -91,7 +91,9 @@
 ;; ---------------------------------------------------------------------------
 
 (defn core-routes-tx
-  "Tx-data for the seeded core route set. Identity upsert on `:seon.route/name`
+  "Tx-data for the seeded core route set.
+
+   Identity upsert on `:seon.route/name`
    — idempotent (re-seeding re-asserts the same datoms, no duplicate entities).
    Pure builder; the caller reconciles it (origin `:config`, the managed
    declarative set) so a route dropped from the manifest retracts."

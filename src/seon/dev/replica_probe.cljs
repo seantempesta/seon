@@ -137,7 +137,9 @@
       (println "DEBUG :max-tx =" (pr-str (:max-tx stored)))
       (println "DEBUG :meta   =" (pr-str (:meta stored))))))
 
-(defn ^:async -main [& _]
+(defn ^:async -main
+  "Node entry point: run the DIS-replica reader probe per `REPLICA_MODE` env."
+  [& _]
   (install-read-counter!)
   (try
     (let [env        (.-env js/process)

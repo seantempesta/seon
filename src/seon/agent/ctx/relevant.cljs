@@ -97,7 +97,9 @@
     (block title (when (not= title body) body))))
 
 (defn relevant-source-block
-  "The `:relevant-source` section. PURE reader of the per-turn retrieval
+  "The `:relevant-source` section — top retrieval-stash hits for this turn.
+
+   PURE reader of the per-turn retrieval
    stash ([[seon.embed.stash/current-hits]]) — renders the top-`top-k` hits,
    each rendered GENERICALLY by [[render-hit]] (the entity's identity + its
    longest string attr; any indexable kind, no hard-coded attr names) under a

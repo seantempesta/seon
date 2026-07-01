@@ -19,7 +19,9 @@
 (def ^:private source-inline-threshold 200)
 
 (defn test-status
-  "Returns `{:ran? bool, :passing? (bool|nil), :failure-summary str|nil}`
+  "The recorded test run's `{:ran? :passing? :failure-summary}` triple.
+
+   Returns `{:ran? bool, :passing? (bool|nil), :failure-summary str|nil}`
    from the recorded `:seon.test/last-*` fields. `:ran?` false ⇒ no run
    has been recorded for this test (passing? nil = no signal).
 
@@ -42,7 +44,9 @@
     {:ran? true :passing? false :failure-summary last-failure-summary}))
 
 (defn status-glyph
-  "The single-char status glyph for a `:seon.test` entity — the ONLY
+  "The single-char status glyph for a `:seon.test` entity.
+
+   The ONLY
    place the ✓/✗/• literals are defined. `✓` last run passed, `✗` last
    run failed, `•` no run recorded. Used by this ns's renderers and by
    `seon.agent`'s whole-namespace render so the two never diverge."

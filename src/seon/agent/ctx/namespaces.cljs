@@ -86,9 +86,10 @@
 ;; ============================================================
 
 (defn hidden-ns-name?
-  "Rule 1: a `*.internal` namespace (or any of its children) is
-   indexed but NEVER rendered — the naming convention IS the filter.
-   String/keyword/symbol tolerant."
+  "Rule 1: a `*.internal` namespace is indexed but never rendered.
+
+   Applies to the ns or any of its children — the naming convention IS
+   the filter. String/keyword/symbol tolerant."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
   [ns-name]
   (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
@@ -96,17 +97,19 @@
                  (str/includes? s ".internal.")))))
 
 (defn my-ns-name?
-  "Rule 2: `my.*` is the human's world — always shown, provenance not
-   consulted (one name rule, no special cases)."
+  "Rule 2: `my.*` is the human's world — always shown.
+
+   Provenance is not consulted (one name rule, no special cases)."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
   [ns-name]
   (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
     (boolean (or (= s "my") (str/starts-with? s "my.")))))
 
 (defn test-ns-name?
-  "Rule 1b: a `*-test` namespace is indexed but NEVER rendered into the
-   agent prompt — its `deftest`s are noise to the working agent, and the
-   per-fn `:test` usage example already rides the regular fn's attr-map in
+  "Rule 1b: a `*-test` namespace is indexed but never rendered.
+
+   Never enters the agent prompt — its `deftest`s are noise to the working
+   agent, and the per-fn `:test` usage example already rides the fn's attr-map in
    the compact head. Full tests stay reachable on demand via
    [[seon.agent.ctx/render-namespace]]. STRUCTURAL, like [[hidden-ns-name?]]: the
    suffix IS the filter. String/keyword/symbol tolerant."
@@ -116,8 +119,9 @@
     (str/ends-with? s "-test")))
 
 (defn included-ns?
-  "The ONE selection rule for the namespace sections: EVERY indexed
-   :seon.ns row renders EXCEPT *.internal (hidden-ns-name?) and *-test
+  "The ONE selection rule for the namespace sections.
+
+   EVERY indexed :seon.ns row renders EXCEPT *.internal (hidden-ns-name?) and *-test
    (test-ns-name?) ones — both STRUCTURAL naming conventions that apply
    to seon, my.*, and downstream code alike. No prefix allow-list: the
    library gate lives on the INDEX side (only first-party + SEON_EXTRA_SRC
@@ -149,8 +153,9 @@
              (if (keyword? ns-name) ns-name (keyword (str ns-name)))))
 
 (defn always-full-my-nses
-  "The `my.*` namespaces the resolved config policy renders FULL — the toolkit
-   exemplars (`my.kb`/`my.data`/`my.ui`/`my.tile` by default): the `my.*`
+  "The `my.*` namespaces the resolved config policy renders FULL.
+
+   The toolkit exemplars (`my.kb`/`my.data`/`my.ui`/`my.tile` by default): the `my.*`
    members of [[seon.config/namespaces-policy]]'s `:seon.config/always` set.
    DERIVED from config, never hardcoded — replaces the retired
    `canonical-full-my-ns` const for the gym's toolkit-alias derivation."
@@ -159,8 +164,9 @@
   (into #{} (filter my-ns-name?) (:seon.config/always (config/namespaces-policy))))
 
 (defn full-source-ns?
-  "True when `ns-name` (string, symbol, or ns-name keyword) carries its
-   REAL FULL FILE TEXT as `:seon.ns/source`: every `my.*` ns (the
+  "True when `ns-name` carries its REAL FULL FILE TEXT as `:seon.ns/source`.
+
+   Accepts a string, symbol, or ns-name keyword. Every `my.*` ns (the
    human's world — always inlined), including `-test` siblings (the
    `-test` suffix is stripped to the subject ns first), AND every seon.* ns
    the config policy lists in `:seon.config/always` ([[always-full?]] — e.g.
@@ -320,7 +326,9 @@
       :else         txt)))
 
 (defn namespaces-block
-  "CURATED namespaces body. Routes EVERY selected ns through the SINGLE
+  "CURATED namespaces body — every selected ns rendered FULL.
+
+   Routes EVERY selected ns through the SINGLE
    renderer [[seon.agent.ctx/render-namespace]] at `:full` detail — no
    parallel hand-rolled paths, no signature/compression path. The ONE choice
    the section makes is WHICH nses render ([[render?]] / [[render-set]]),
@@ -505,9 +513,10 @@
    [:seon.db/db   :seon.db/db]])
 
 (defn render-one-ns-compact
-  "Render ONE namespace as a COMPACT CARD string — the ns's `register!`
-   schema block (KEPT verbatim) plus every PUBLIC fn condensed to a
-   one-line `defn` head with the body elided (`…`), inside the standard
+  "Render ONE namespace as a COMPACT CARD string.
+
+   The ns's `register!` schema block (KEPT verbatim) plus every PUBLIC fn
+   condensed to a one-line `defn` head with the body elided (`…`), inside the standard
    `;;; ┌─/└─` demarcation ([[seon.agent.ctx/ns-demarc]]).
 
    Reads INDEXED ROWS ONLY (`:seon.schema/_ns` / `:seon.fn/_ns` off the

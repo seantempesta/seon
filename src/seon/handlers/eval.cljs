@@ -71,7 +71,9 @@
       (truncate line error-summary-truncate))))
 
 (defn render-ai
-  "One eval row for the LLM ctx. Source first (what the agent typed),
+  "One eval row for the LLM ctx.
+
+   Source first (what the agent typed),
    result/error as a short tagged summary. See ns docstring for the
    display contract."
   {:malli/schema [:=> [:cat :map] [:maybe :string]]}
@@ -113,7 +115,9 @@
     (or msg s)))
 
 (defn render-html
-  "Hiccup card for the transcript / canvas — every part routes through the
+  "Hiccup card for the transcript / canvas.
+
+   Every part routes through the
    typed `seon.render/block` renderer so each kind gets first-class TLC.
 
    - Narration → a markdown card (`{:seon.render/markdown …}`).

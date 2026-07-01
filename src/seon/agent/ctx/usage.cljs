@@ -48,8 +48,9 @@
       (catch :default _ nil))))
 
 (defn extract
-  "Given the persisted `:seon.agent.turn/llm-usage` EDN string, return the
-   normalized `{::total ::cached ::output ::provider-shape}` triple, or
+  "Normalize the persisted `:seon.agent.turn/llm-usage` EDN into a triple.
+
+   Returns the normalized `{::total ::cached ::output ::provider-shape}` triple, or
    nil when usage is absent/unparseable. `::total` = the TRUE total input
    tokens (DeepSeek: `prompt_tokens` as-is; Anthropic: `input_tokens` +
    cache read + cache creation). `::cached` = tokens served from cache

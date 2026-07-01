@@ -490,8 +490,9 @@
         (resolve nil)))))
 
 (defn ^:async run-vars
-  "Run the given fully-qualified test-var symbols, return events +
-   summary as data.
+  "Run the given fully-qualified test-var symbols, return data.
+
+   Returns events + summary as data.
 
    Reporter slot is bound to `::capture`; the volatile builder
    lives in the env under `::!builder` so the per-event defmethods
@@ -715,8 +716,7 @@
 ;; ============================================================
 
 (defn vars-in-ns
-  "Return the vector of fully-qualified test-var symbols defined in
-   `ns-sym`.
+  "The fully-qualified test-var symbols defined in `ns-sym`.
 
    IMPLEMENTATION NOTE (per phase-1-probe-results-2026-05-25.md probe 1):
    the analyzer's `ns-interns` projection strips `:test` meta under
@@ -765,7 +765,9 @@
                     {:type ::no-selector :request req}))))
 
 (defn ^:async run!
-  "Universal entrypoint. Resolves the selector to a vector of FQ test
+  "Universal entrypoint.
+
+   Resolves the selector to a vector of FQ test
    symbols, runs them via `run-vars`, optionally records the projection
    to the DB.
 
@@ -847,8 +849,9 @@
         (first pick)))))
 
 (defn last-result
-  "Return `{::run-id ::run-result}` for the most recently recorded run
-   on this pod, or nil. Pulls the run-id from the DB projection, then
+  "The `{::run-id ::run-result}` for the most recently recorded run, or nil.
+
+   Scoped to this pod. Pulls the run-id from the DB projection, then
    fetches the full event sequence from the globalThis stash that
    `stash-run!` wrote.
 
@@ -876,8 +879,9 @@
 ;; ============================================================
 
 (defn tests-referring-to
-  "Return the vector of fully-qualified test syms whose
-   `:seon.test/source` mentions `fn-sym` (string or symbol). Pure DB
+  "The fully-qualified test syms whose `:seon.test/source` mentions `fn-sym`.
+
+   Accepts `fn-sym` as string or symbol. Pure DB
    read — safe to call inside an eval-batch! tx scope."
   {:malli/schema [:=> [:catn [::fn-sym [:or :string :symbol]]] [:vector :symbol]]}
   [fn-sym]

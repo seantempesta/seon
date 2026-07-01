@@ -64,7 +64,7 @@
 ;; ============================================================
 
 (defn validate
-  "Parse `code` and return a plain (JS-serializable) clj map:
+  "Parse `code` and return a plain (JS-serializable) clj map.
 
        {:forms  <int>            ; count of evaluable top-level forms
         :tier   :parse           ; which oracle tier ran (seam for :eval)
@@ -105,8 +105,9 @@
 ;; ============================================================
 
 (defn ->js
-  "Flatten a [[validate]] result to a `JSON.stringify`-able JS value:
-   keywords → their NAME strings (`:unmatched-delimiter` → \"unmatched-delimiter\"),
+  "Flatten a [[validate]] result to a `JSON.stringify`-able JS value.
+
+   Keywords → their NAME strings (`:unmatched-delimiter` → \"unmatched-delimiter\"),
    the span vector → a JS array. Done explicitly (not `clj->js`) so the
    exact wire shape the Python worker parses is visible and stable."
   [{:keys [forms tier errors]}]
@@ -120,7 +121,9 @@
                        errors))})
 
 (defn validate-json
-  "Pure string→string: `code` in, one line of JSON out. The exact
+  "Pure string→string: `code` in, one line of JSON out.
+
+   The exact
    transform the subprocess performs. Exposed (and instrument-free) so a
    test / the REPL can exercise the whole wire path without a subprocess.
    `strip-fences?` (default true) is threaded to [[validate]] — pass false
@@ -172,7 +175,9 @@
              (println out))))))
 
 (defn -main
-  "Bundle entry. Two modes:
+  "Bundle entry — `--serve` line server, or one-shot stdin validate.
+
+   Two modes:
 
    - `--serve` → [[serve!]] (persistent line server, the co-location hot
      path);

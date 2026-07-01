@@ -139,9 +139,11 @@
       (str (name a) " " c))))
 
 (defn inventory-block
-  "The stored-data discovery surface (always-changing volatile tail): a
-   CHEAP map of what the shared store holds RIGHT NOW, derived
-   from [[seon.db/store-inventory]] (user-domain namespaces first). ONE
+  "The stored-data discovery surface: what the shared store holds right now.
+
+   An always-changing volatile tail — a CHEAP map of the store's current
+   contents, derived from [[seon.db/store-inventory]] (user-domain
+   namespaces first). ONE
    line per attribute NAMESPACE — the namespace is the line label, then
    space-separated `attr-name count` pairs with the namespace stripped
    off each attr name (the line label already carries it). Entities have

@@ -164,8 +164,9 @@
               (str (name warning-type) (when msg (str ": " msg)))))))
 
 (defn init-state!
-  "Build + warm the self-host compile-state ONCE (loads the bootstrap analysis
-   cache), install the warning sink, and stash it in `!state`. Returns a
+  "Build + warm the self-host compile-state ONCE, install the warning sink.
+
+   Loads the bootstrap analysis cache and stashes it in `!state`. Returns a
    Promise resolving to the ready state. This is the heavy, one-time cost."
   [bootstrap-path]
   (js/Promise.
@@ -253,7 +254,9 @@
      :message msg}))
 
 (defn eval-form
-  "Compile + eval `code` under the warm self-host state, bounded by
+  "Compile + eval `code` under the warm self-host state.
+
+   Bounded by
    `budget-ms`. Returns a Promise of a plain clj map:
 
        {:ok true  :value <pr-str of the value>}
@@ -396,7 +399,9 @@
                 (.exit js/process 1)))))
 
 (defn -main
-  "Bundle entry. Two modes:
+  "Bundle entry — `--serve` line server, or one-shot stdin eval.
+
+   Two modes:
 
    - `--serve` → [[serve!]] (persistent line server, the co-location hot
      path);

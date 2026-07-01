@@ -60,8 +60,9 @@
 ;; ============================================================
 
 (defn page-header
-  "Consistent page header — title (`text-lg`) + optional subtitle
-   (`text-xs`)."
+  "Consistent page header — title plus optional subtitle.
+
+   Title is `text-lg`, subtitle `text-xs`."
   {:malli/schema [:=> [:cat :any :any] :any]}
   [title subtitle]
   [:div {:class "mb-4"}
@@ -70,8 +71,9 @@
      [:p {:class "text-text-400 text-xs mt-0.5"} subtitle])])
 
 (defn section-header
-  "Uppercase section label used in dashboard cards. `text-xs`,
-   uppercase, wider letter-spacing."
+  "Uppercase section label used in dashboard cards.
+
+   `text-xs`, uppercase, wider letter-spacing."
   {:malli/schema [:=> [:cat :any] :any]}
   [text]
   [:h2 {:class "text-xs font-semibold text-text-400 uppercase tracking-wider mb-2"}
@@ -88,7 +90,9 @@
 ;; ============================================================
 
 (defn status-dot
-  "Status indicator — 6px colored dot + text label. Active states
+  "Status indicator — 6px colored dot + text label.
+
+   Active states
    pulse. Falls back to `:unknown` styling for unrecognized statuses.
 
    status — keyword from `status-styles`
@@ -150,7 +154,9 @@
   120)
 
 (defn log-line
-  "Single log line — timestamp, type, content. Type drives the color
+  "Single log line — timestamp, type, content.
+
+   Type drives the color
    via `type-colors`. Long content (>120 chars) uses native
    `<details>` for expand/collapse; the `data-preserve-attr=\"open\"`
    tells Datastar to preserve the open-state across SSE morphs.
@@ -183,8 +189,9 @@
        [:span {:class "text-text-400"} raw])]))
 
 (defn log-container
-  "Container for log lines — terminal styling, flex-col-reverse for
-   auto-scroll-to-bottom.
+  "Container for log lines — terminal styling, auto-scroll to bottom.
+
+   Uses flex-col-reverse for auto-scroll-to-bottom.
 
    lines      — seq of log entry maps
    max-height — CSS max-height (default \"70vh\")"

@@ -41,7 +41,9 @@
         (recur (ex-cause e) (inc depth) acc')))))
 
 (defn ->map
-  "Convert a CLJS error to an agent-inspectable map. Recursion on
+  "Convert a CLJS error to an agent-inspectable map.
+
+   Recursion on
    :cause is bounded to depth 5 to defend against cycles.
 
    The top-level `:seon.error/data` flattens the entire cause chain's

@@ -85,7 +85,8 @@
     "data/clusters/default/store"))
 
 (defn store-id
-  "The cluster store's konserve `:id`, replicated from the JVM side:
+  "The cluster store's konserve `:id`, replicated from the JVM side.
+
    `seon.server.store/name->uuid` = `UUID/nameUUIDFromBytes` (md5
    name-based v3 UUID) of the db-name keyword's `str`, where the
    wire-server derives the db-name as `:seon.server/<req-sock basename>`
@@ -106,8 +107,9 @@
                  "-" (subs hex 16 20) "-" (subs hex 20 32))))))
 
 (defn cluster-config
-  "datahike config for the pod's DIS-peer connection to the default
-   cluster store. Reads are local konserve; writes route through the
+  "datahike config for the pod's DIS-peer connection to the default store.
+
+   The default cluster store. Reads are local konserve; writes route through the
    `:seon-wire` writer (the JVM wire-server is the sole writer).
 
    `:lock-blob? false` is REQUIRED for readers: konserve's sync read
@@ -158,8 +160,9 @@
     resp))
 
 (defn ^:async ping!
-  "Ping the wire-server, retrying up to `ping-attempts` times (~10s
-   worst case: 5 × 2s rpc timeout, 500ms backoff between attempts).
+  "Ping the wire-server, retrying up to `ping-attempts` times.
+
+   Up to ~10s worst case: 5 × 2s rpc timeout, 500ms backoff between attempts.
    Resolves to the reply map on success; throws a clear, actionable
    error once the budget is exhausted."
   ;; Resolves to the wire-server reply map (a wire/rpc return — third-party
@@ -327,7 +330,8 @@
   (atom {:started? false}))
 
 (defn adapter-status
-  "Live adapter state for diagnostics:
+  "Live adapter state for diagnostics.
+
    `{::started? ::handle ::own-skips ::last-applied-t}`. `::last-applied-t` is
    the basis-t watermark the reconnect path replays from (DE-2)."
   {:malli/schema [:=> [:cat] [:map [::started? :boolean]]]}
@@ -408,7 +412,9 @@
     (:seon.store.wire/handle sub)))
 
 (defn ^:async start-listen-adapter!
-  "Subscribe to the wire tx feed and pump FOREIGN tx events into the
+  "Subscribe to the wire tx feed and pump FOREIGN tx into the conn.
+
+   Pumps events into the
    conn's native listeners. Idempotent (defonce-guarded) — a second
    call is a no-op. Resilient: any pump failure (wire-server restart,
    stale handle, transport error) logs LOUDLY, waits 2s, and

@@ -105,7 +105,9 @@
 ;; ============================================================
 
 (defn repair-source
-  "Best-effort delimiter repair via parinferish indent-mode. Pure,
+  "Best-effort delimiter repair via parinferish indent-mode.
+
+   Pure,
    never throws.
 
    Request keys:
@@ -147,8 +149,9 @@
        :seon.repair/changes   []})))
 
 (defn repair-note
-  "Compose the transparency breadcrumb line that rides on a repaired eval,
-   derived from `:seon.repair/changes`. Names the count + kind of
+  "Compose the transparency breadcrumb line for a repaired eval.
+
+   Derived from `:seon.repair/changes`. Names the count + kind of
    delimiter edits and that the repaired form WAS auto-evaled, so the
    agent always sees the diff and can reject a wrong-but-valid repair.
 

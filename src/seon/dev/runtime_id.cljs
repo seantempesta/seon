@@ -24,8 +24,9 @@
 (defonce ^:private !hosted (atom #{}))
 
 (defn host!
-  "Register `id` (a core `:seon.agent/id` string, or `proc:<name>`
-   for infra runtimes) as hosted by THIS process. Idempotent."
+  "Register `id` as hosted by THIS process; idempotent.
+
+   `id` is a core `:seon.agent/id` string, or `proc:<name>` for infra runtimes."
   {:malli/schema [:=> [:catn [:seon.dev.runtime-id/id :string]] :string]}
   [id]
   (when-not (str/blank? id)
@@ -40,8 +41,9 @@
   id)
 
 (defn hosted
-  "The ids this runtime answers to — sorted vector. THE probe form
-   `bin/mcp-server-cljs` evals into each shadow runtime to resolve
+  "The ids this runtime answers to — sorted vector.
+
+   THE probe form `bin/mcp-server-cljs` evals into each shadow runtime to resolve
    `agent_id` → client-id by membership."
   {:malli/schema [:=> [:cat] [:vector :string]]}
   []

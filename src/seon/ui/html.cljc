@@ -72,7 +72,9 @@
 (defrecord ^:no-doc Raw [s])
 
 (defn raw
-  "Wrap a string so the renderer emits it without escaping. Use for
+  "Wrap a string so the renderer emits it without escaping.
+
+   Use for
    pre-serialized HTML, inline `<script>` bodies, inline `<style>`,
    etc. ANY caller-supplied content wrapped in `raw` becomes an XSS
    surface — the wrapping signals 'I have escaped this myself'."
@@ -288,7 +290,9 @@
 (declare render-element)
 
 (defn ^:no-doc render-content
-  "Render a single child node OR seq-of-children. Returns the
+  "Render a single child node OR seq-of-children.
+
+   Returns the
    HTML-string fragment."
   {:malli/schema [:=> [:cat :any] :string]}
   [x]

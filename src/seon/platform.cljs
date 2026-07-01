@@ -59,8 +59,9 @@
 ;; ============================================================
 
 (defn env-val
-  "The `process.env` value for `var-name`, or nil when unset/blank (or
-   when there is no Node process env at all). The ONE low-level env
+  "The `process.env` value for `var-name`, or nil when unset/blank.
+
+   Also nil when there is no Node process env at all. The ONE low-level env
    reader — `seon.config`'s typed knob accessors sit on top of this, and
    `runtime-root` below reads through it. (`platform` is a leaf, so it
    cannot route through `seon.config` — config requires platform — which
@@ -80,8 +81,10 @@
       v)))
 
 (defn artifact-path
-  "Resolve a BUILD/SOURCE artifact path (e.g. `\"out/bootstrap\"`,
-   `\"src\"`, `\"resources/public/css/\"`): joined under
+  "Resolve a BUILD/SOURCE artifact path under SEON_RUNTIME_ROOT.
+
+   E.g. `\"out/bootstrap\"`,
+   `\"src\"`, `\"resources/public/css/\"`: joined under
    SEON_RUNTIME_ROOT when that env var is set, else returned unchanged
    (CWD-relative — seon's own usage is byte-identical). DATA paths
    (store, logs, tmp, sockets) must NOT route through here — see the

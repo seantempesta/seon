@@ -48,8 +48,9 @@
     (str "[schema " (pr-str k) "]  :shape " shape-text)))
 
 (defn render-html
-  "Card showing the schema key, its head-type pill, and the
-   pretty-printed shape. Shape is syntax-highlighted so highlight.js
+  "Card showing the schema key, its head-type pill, and pretty-printed shape.
+
+   Shape is syntax-highlighted so highlight.js
    colorizes it like the eval cards."
   {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
   [{:seon.render/keys [node entity]}]
