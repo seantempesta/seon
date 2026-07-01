@@ -123,25 +123,84 @@
                  last)]
     (or (::token-cap hit) default-cap)))
 
+(defn tier-cap-for-turn
+  "The token-cap a `::tier` schedule assigns an eval at `turn-offset` (current
+   turn − the eval's turn), or nil when NO tier covers it (→ evict). Each tier
+   is `{::from-turn ::to-turn? ::token-cap}` over an OFFSET range (`::from-turn`
+   inclusive, `::to-turn` inclusive when present, else open-ended); the tier
+   whose range contains `offset` wins (the SMALLEST `::from-turn` that still
+   covers it — tiers are age-bands, oldest last). nil when none covers it."
+  {:malli/schema [:=> [:catn [::tiers [:sequential :map]] [::offset :int]]
+                  [:maybe :int]]}
+  [tiers offset]
+  (some (fn [{:keys [] :as tier}]
+          (let [from (::from-turn tier)
+                to   (::to-turn tier)]
+            (when (and (>= offset from) (or (nil? to) (<= offset to)))
+              (::token-cap tier))))
+        (sort-by ::from-turn tiers)))
+
 (defn clip-events-by-tiers
-  "Apply the transcript block's `::tiers` age-banded eviction to the ordered
-   `events` (each an event map). The clip POLICY is read off the block's
-   `::tiers` datom: EMPTY tiers (the v1 default) → `:none` — every event
-   renders (today's behavior, byte-parity). NON-EMPTY tiers activate the
-   age-banded window (the actual banding lands as CP-5's #62 flip). Reactive:
-   change the block's `::tiers` datom and the next render re-bands, no apply
-   step."
-  {:malli/schema [:=> [:catn [::tiers [:sequential :map]] [::events [:sequential :map]]]
+  "Age-band the ordered `events` by the transcript block's `::tiers` +
+   `::turns-retained` window (config-on-record, read per render). EMPTY tiers
+   (the v1 default) → render ALL events (today's `:none`, byte-parity — the
+   window is tier-DRIVEN, nothing to evict without a tier). NON-EMPTY tiers
+   activate the window (#62):
+
+     - the last `retained` TURNS of events render verbatim (the volatile
+       working set);
+     - OLDER eval events are kept only while their tier (by turn-offset =
+       max-turn − the eval's `::turn-idx`) still has token budget — each tier's
+       `::token-cap` is a running budget spent NEWEST-first; an eval past its
+       tier's budget (or covered by NO tier) is EVICTED;
+     - MESSAGE events always render (the human conversation is never evicted).
+
+   Byte-STABLE within a band: an eval's fate changes only when it crosses a
+   turn-offset boundary, not every turn (the #62 age-band discipline). Reactive:
+   change `::tiers`/`::turns-retained` and the next render re-bands, no apply."
+  {:malli/schema [:=> [:catn [::tiers [:sequential :map]]
+                             [::retained :int]
+                             [::events [:sequential :map]]]
                   [:sequential :map]]}
-  [tiers events]
+  [tiers retained events]
   (if (empty? tiers)
-    ;; `:none` — the transcript renders ALL events (the sliding window is
-    ;; tier-driven; with no tiers there is nothing to evict).
     events
-    ;; Non-empty tiers: age-banded clip. Stub for CP-3 — returns events
-    ;; unchanged so wiring the read cannot move bytes before the CP-5 flip;
-    ;; the banding mechanism activates against these tiers at CP-5 (#62).
-    events))
+    (let [max-turn (transduce (keep ::turn-idx) max -1 events)]
+      (if (neg? max-turn)
+        events
+        (let [budgets (volatile! {})]        ; tier from-turn → remaining tokens
+          (->> events
+               ;; NEWEST-first so each tier spends its budget on recent evals.
+               reverse
+               (reduce
+                 (fn [kept ev]
+                   (cond
+                     ;; messages + non-eval events: always keep
+                     (not= :eval (::kind ev)) (conj kept ev)
+                     :else
+                     (let [offset (- max-turn (or (::turn-idx ev) max-turn))]
+                       (if (< offset retained)
+                         ;; inside the retained window — verbatim
+                         (conj kept ev)
+                         ;; older — spend the covering tier's budget
+                         (if-let [cap (tier-cap-for-turn tiers offset)]
+                           (let [tier-key (->> tiers
+                                               (filter #(and (>= offset (::from-turn %))
+                                                             (or (nil? (::to-turn %))
+                                                                 (<= offset (::to-turn %)))))
+                                               (sort-by ::from-turn) first ::from-turn)
+                                 spent    (get @budgets tier-key 0)
+                                 cost     (tokens/estimate
+                                            (str (:seon.eval/result-edn (::entity ev))))]
+                             (if (<= (+ spent cost) cap)
+                               (do (vswap! budgets assoc tier-key (+ spent cost))
+                                   (conj kept ev))
+                               kept))                    ; over budget → evict
+                           kept))))) ; no covering tier → evict
+                 [])
+               ;; reduce built it newest-first; restore oldest-first order
+               reverse
+               vec))))))
 
 ;; ------------------------------------------------------------
 ;; Masthead — the transcript's in-band opener, rendered every turn as the
@@ -408,23 +467,27 @@
 
 (defn- eval-events
   "ALL of the agent's evals as transcript events across ALL its turns,
-   oldest-first, each `{::at ::kind :eval ::entity ::run-id ::prior?
+   oldest-first, each `{::at ::kind :eval ::entity ::run-id ::prior? ::turn-idx
    :seon.render/ai 'eval->renderable}`. Walks agent → runs → turns → evals
    (via [[seon.agent.ctx/agent-turns]]). `::run-id` tags each so the section can
    interleave the resume marker at the process boundary; `::prior?` marks
    evals from a run opened by a PREVIOUS pod process — its `result/<id>`
-   vars died ([[seon.agent.run/this-process-run?]])."
+   vars died ([[seon.agent.run/this-process-run?]]). `::turn-idx` is the
+   0-based enumeration index of the eval's TURN (oldest turn = 0), the handle
+   the `::turns-retained` window + `::tiers` age-banding key on."
   [db id]
-  (vec
-    (for [t (ctx/agent-turns id db)
-          e (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
-      (let [rid (:seon.agent.run/id (:seon.agent.turn/run t))]
-        {::at      (:seon.eval/at e)
-         ::kind    :eval
-         ::entity  (into {} e)
-         ::run-id  rid
-         ::prior?  (and (some? rid) (not (run/this-process-run? rid)))
-         :seon.render/ai 'seon.agent.ctx.transcript/eval->renderable}))))
+  (let [turns (ctx/agent-turns id db)]
+    (vec
+      (for [[ti t] (map-indexed vector turns)
+            e      (sort-by :seon.eval/at (:seon.agent.turn/evals t))]
+        (let [rid (:seon.agent.run/id (:seon.agent.turn/run t))]
+          {::at       (:seon.eval/at e)
+           ::kind     :eval
+           ::entity   (into {} e)
+           ::run-id   rid
+           ::turn-idx ti
+           ::prior?   (and (some? rid) (not (run/this-process-run? rid)))
+           :seon.render/ai 'seon.agent.ctx.transcript/eval->renderable})))))
 
 (defn- agent-rec
   "The agent entity (lazy) for `id` against `db`."
@@ -678,10 +741,13 @@
         events*c (coalesce-events events*)
         ;; CP-3 moves 4+5: read the transcript block's reactive config once.
         tblock   (block-ent db my-eid :transcript)
-        ;; move 5 — the clip POLICY off `::tiers`: empty (v1 default) →
-        ;; `:none`, render-all (byte-parity); non-empty → age-banded (CP-5).
+        ;; move 5 / CP-5 — the clip POLICY off `::tiers` + `::turns-retained`:
+        ;; empty tiers (v1 default) → render-all (byte-parity); non-empty →
+        ;; the age-banded window (last `retained` turns verbatim, older evals
+        ;; kept within each tier's token budget).
         tiers    (::tiers tblock)
-        events*t (clip-events-by-tiers (or tiers []) events*c)
+        retained (or (::turns-retained tblock) 8)
+        events*t (clip-events-by-tiers (or tiers []) retained events*c)
         ;; move 4 — the per-eval RESULT-BODY cap off `::result-decay` × the
         ;; eval's AGE (turn-offset). v1 default = a SINGLE level 0→16384, so
         ;; the selected cap is ALWAYS 16384 (byte-identical to today's fixed
