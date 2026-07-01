@@ -124,18 +124,24 @@
 (schema/register! :seon.agent.ctx/render-namespaces [:vector :keyword])
 
 ;; ============================================================
-;; Config-driven agent-init CP-1 — agent-level composer attrs. The
-;; capability gate spans search/fs/http (no single provider ns owns it,
-;; so it lives here in the composer). `::escape-clipping?` (#43) and
-;; `::cache-breakpoint` (replaces the stable-priority-max const) are
-;; agent-level for v1. Flat keyword set → cardinality-many presence attr.
-;; Nothing reads these yet (purely additive).
+;; Config-driven agent-init — agent-level composer attrs.
+;;   ::escape-clipping? (#43) — read-wired; the clip EFFECT lands in CP-5.
+;;   ::cache-breakpoint — WIRED (render-context-ai reads it; replaces the
+;;                        stable-priority-max const).
+;;
+;; PARKED (config-init CP-4.5, owner three-fates = PARK — deferred, NOT inert):
+;;   ::capability / ::capabilities — the per-agent capability gate over
+;;   search[grep]/fs/http. Registered + kept so the shape is stable, but there
+;;   is deliberately NO consumer YET: grep/fs are unconditionally available
+;;   today, and per-agent capability ENFORCEMENT is a phase-2 mechanism (a
+;;   check at each provider verb). Tracked here as the single park note; wire the
+;;   enforcement when the owner greenlights per-agent capability scoping.
 ;; ============================================================
 
-(schema/register! ::capability   [:enum :grep :exec :http])          ; register-once enum
-(schema/register! ::capabilities [:vector {:default [:grep]} ::capability])
-(schema/register! ::escape-clipping? [:boolean {:default true}])     ; #43 — blocks render FULL
-(schema/register! ::cache-breakpoint [:int {:default 20 :min 0}])    ; priority ≤ this = cached prefix
+(schema/register! ::capability   [:enum :grep :exec :http])          ; PARKED — register-once enum
+(schema/register! ::capabilities [:vector {:default [:grep]} ::capability]) ; PARKED (phase-2 enforcement)
+(schema/register! ::escape-clipping? [:boolean {:default true}])     ; #43 — read-wired; effect CP-5
+(schema/register! ::cache-breakpoint [:int {:default 20 :min 0}])    ; WIRED — priority ≤ this = cached prefix
 
 ;; ============================================================
 ;; File-section utility — the ONE mechanism for turning an on-disk

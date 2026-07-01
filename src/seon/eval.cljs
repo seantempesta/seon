@@ -1322,9 +1322,10 @@
    [:vector ::require-spec]
    :symbol])
 
-;; toolkit: a flat keyword SET → cardinality-many presence attr (decision 22a).
-(schema/register! ::toolkit
-  [:vector {:default [:my.ui :my.data :my.tile :my.kb]} :keyword])
+;; NOTE (config-init CP-4.5): a per-agent `::toolkit` key was registered but had
+;; NO consumer — the toolkit is `home-ns-refer-toolkit-nses` (a process-level
+;; const seeded at bootstrap, no per-agent seam). REMOVED as inert per the "no
+;; dangling code" rule; re-introduce with a real per-agent design if wanted.
 
 (defn- home-ns-alias-names
   "Comma-joined `:as` alias names from [[home-ns-require-specs]]
